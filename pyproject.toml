@@ -1,0 +1,12 @@
+[tool.black]
+line-length = 120
+skip-string-normalization = true
+target-version = ['py39']
+
+[tool.isort]
+profile = "black"
+line_length = 120
+multi_line_output = 3
+include_trailing_comma = true
+skip_gitignore = true
+

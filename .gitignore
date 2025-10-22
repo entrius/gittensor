@@ -1,0 +1,23 @@
+venv/
+gittensor-venv/
+.env
+*.env
+
+__pycache__
+
+github_token.json
+github_token.pkl
+
+*.egg-info
+
+# for vali testing
+wandb
+
+# for mergetool
+*.orig
+
+*.log
+
+CLAUDE.md
+.claude/
+.vscode/

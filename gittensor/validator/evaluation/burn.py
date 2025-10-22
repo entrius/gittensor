@@ -41,24 +41,29 @@ def scale_rewards_with_network_burn(
 
     # Apply network scalar to all rewards
     scaled_rewards = {}
+    total_original_rewards = 0.0
     total_burned = 0.0
     burn_uid = BURN_UID
 
-    for uid, reward in normalized_rewards.items():
-        scaled_reward = reward * final_network_scalar
+    for uid, original_reward in normalized_rewards.items():
+        scaled_reward = original_reward * final_network_scalar
         scaled_rewards[uid] = scaled_reward
-        total_burned += reward - scaled_reward
+
+        total_original_rewards += original_reward
+        total_burned += original_reward - scaled_reward
 
     # Allocate all burned emissions to the burn UID
     if burn_uid not in scaled_rewards:
         scaled_rewards[burn_uid] = 0.0
-    scaled_rewards[burn_uid] += total_burned
+
+    scaled_rewards[burn_uid] += total_burned if total_burned > 0 else 1
+    percent_rewards_burned = total_burned / total_original_rewards if total_original_rewards > 0 else 1.0
 
     bt.logging.info(f"Network burn applied:")
     bt.logging.info(f"  - Lines changed scalar: {lines_scalar:.6f}")
     bt.logging.info(f"  - Unique repos scalar: {unique_repo_scalar:.6f}")
     bt.logging.info(f"  - Final network scalar: {final_network_scalar:.6f}")
-    bt.logging.info(f"  - Total emissions burned: {total_burned:.6f} ({total_burned*100:.2f}%)")
+    bt.logging.info(f"  - Total emissions burned: {total_burned:.6f} ({percent_rewards_burned*100:.2f}%)")
     bt.logging.info(f"  - Burned emissions allocated to UID {burn_uid}: {total_burned:.6f}")
     bt.logging.info(f"  - Final reward sum: {sum(scaled_rewards.values()):.6f}")
     bt.logging.info(f"  - Network unlock percentage: {final_network_scalar*100:.2f}%")

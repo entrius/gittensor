@@ -2,7 +2,7 @@
 
 Validators
 
-- Authenticate users via github PAT
+- Authenticate users via miner provided github PAT
 - Retrieve github PR data
 - Verify successful and meaningful merged PRs
 - Calculate miner score based on incentive mechanism

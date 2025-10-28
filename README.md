@@ -75,11 +75,8 @@ where:
 - $\beta_{\text{issue}}$ — Issue resolution bonus multiplier (applied if the PR resolves an issue)
 - $w_{\text{lang}}(f)$ — Programming language weight for file $f$ based on file type/extension
 - $c_f$ — Total changes (additions + deletions) in file $f$
-- $r_f$ — Normalized file PR changes:
-
-  $r_f = \frac{c_f}{\sum_{f' \in \text{Files}_p} c_{f'}}$
-
-- $c_f^{0.75}$ — scaling factor to mitigate disproportionate rewards for large changes
+- $r_f$ — Normalized file PR changes
+- $c_f^{0.75}$ — Scaling factor to mitigate disproportionate rewards for large changes
 
 And a single file's score can be calculated as:
 

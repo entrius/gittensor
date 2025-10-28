@@ -23,6 +23,9 @@ LINES_CONTRIBUTED_BURN_DECAY_RATE = 0.00001
 UNIQUE_PRS_MAX_BURN = 0.9
 UNIQUE_PRS_BURN_DECAY_RATE = 0.005
 
+# file types for which we want to mitigate rewards b/c of exploiting/gameability
+MITIGATED_EXTENSIONS = ["md", "txt", "json"]
+MAX_LINES_SCORED_CHANGES = 300
 
 # PR spam mitigation constants - basically for every open pr above threshold, linearly decrease weight multiplier to final score (before pareto and normalization)
 # Only applies to open prs to supported repositories.

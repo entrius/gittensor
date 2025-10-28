@@ -30,28 +30,30 @@ See full guide **[here](gittensor/validator/README.md)**
 ### Important Structures
 
 - Master Repositories & Weights
-  A list of repositories pulled from github that have been deemed valid for scoring. They each have an associated weight based on factors like: forks, commits, contributors, stars, etc.
+
+A list of repositories pulled from github that have been deemed valid for scoring. They each have an associated weight based on factors like: forks, commits, contributors, stars, etc.
 
 _NOTE: this list will be dynamic. It will see various audits, additions, deletions, weight changes, and shuffles as the subnet matures._
 
 _NOTE: don’t be afraid to provide recommendations for your favorite open source repositories and the team will review it as a possible addition. A repo is more likely to be included if: they provide contributing guidelines, are active/community driven, provide value/have users_
 
 - Programming Language Weights
-  A list of major file types/extensions, mostly related to programming languages, but also plenty of markdown, documentation, and other common files are included. Each extension has a weight as well for scoring.
+
+A list of major file types/extensions, mostly related to programming languages, but also plenty of markdown, documentation, and other common files are included. Each extension has a weight as well for scoring.
 
 _NOTE: this list will also be dynamic. Additions, and weight changes will occur as the subnet matures._
 
 ### Scoring
 
 Valid PR filtering
-There are multiple checks that are a PR must pass to be considered valid for scoring
+There are multiple checks that a PR must pass to be considered valid for scoring
 
 - PR is in a `Merged` state
 - PR is made to a repository in the master repository list
 - PR is within the lookback window, `MERGED_PR_LOOKBACK_DAYS`
 - PR is NOT merged by the person who created it (self-merged)
-- PR is merged to the dafault branch of the repository (depending on specific repository setup this may be a production or a dev branch)
-- PR is made to a repository BEFORE it was considered ‘inactivated’ in the master repository list
+- PR is merged to the dafault branch of the repository (depending on specific repository setup this may be a production or dev branch)
+- PR is merged to a repository BEFORE it was considered ‘inactive’ in the master repository list
 
 ### Calculating Score
 
@@ -67,13 +69,16 @@ $$
 S_p = w_{\text{repo}} \cdot \beta_{\text{issue}} \cdot \sum_{f \in \text{Files}_p} w_{\text{lang}}(f) \cdot r_f \cdot c_f^{0.75}
 $$
 
-_where:_
+where:
 
 - $w_{\text{repo}}$ — Repository weight from master repository list (incentivized repos have higher weights)
 - $\beta_{\text{issue}}$ — Issue resolution bonus multiplier (applied if the PR resolves an issue)
 - $w_{\text{lang}}(f)$ — Programming language weight for file $f$ based on file type/extension
 - $c_f$ — Total changes (additions + deletions) in file $f$
-- $r_f$ — Normalized file PR changes: $r_f = \frac{c_f}{\sum_{f' \in \text{Files}_p} c_{f'}}$
+- $r_f$ — Normalized file PR changes:
+
+  $r_f = \frac{c_f}{\sum_{f' \in \text{Files}_p} c_{f'}}$
+
 - $c_f^{0.75}$ — scaling factor to mitigate disproportionate rewards for large changes
 
 And a single file's score can be calculated as:
@@ -110,7 +115,7 @@ Miners who open PRs excessively will see their score reduced by a penalty multip
 
 ### Collaborative emissions scaling
 
-Adopted from bitcast, subnet 93, collaborative emissions scaling has the network ‘unlock’ emissions as more miners join and earn a score. Miners will benefit by experiencing individual and cummulative network growth. Two major values affecting the total emissions unlocked rate are:
+Adopted from bitcast, subnet 93, collaborative emissions scaling has the network ‘unlock’ emissions as more miners join and earn a score. Miners will benefit by experiencing individual and cumulative network growth. Two major values affecting the total emissions unlocked rate are:
 
 - Total lines changed within the last 90 days (`MERGED_PR_LOOKBACK_DAYS`)
 - Total unique repositories contributed to within the last 90 days

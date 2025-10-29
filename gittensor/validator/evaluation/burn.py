@@ -98,7 +98,7 @@ def calculate_network_lines_changed_emissions_scalar(miner_evaluations: Dict[int
     )
     scalar = min(scalar, 1.0)  # Cap at 1.0
 
-    bt.logging.info(f"Network emission scalar: {scalar:.6f} (unlocked: {scalar*100:.2f}%)")
+    bt.logging.info(f"Lines changed emission scalar: {scalar:.6f} (unlocked: {scalar*100:.2f}%)")
 
     # We can implement time-based campaigns
     # - Weekly/monthly targets with bonus multipliers
@@ -139,4 +139,3 @@ def calculate_network_unique_repos_emissions_scalar(miner_evaluations: Dict[int,
     bt.logging.info(f"Unique repositories emission scalar: {scalar:.6f} (unlocked: {scalar*100:.2f}%)")
 
     return scalar
-

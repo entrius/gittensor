@@ -302,7 +302,7 @@ def get_user_merged_prs_graphql(
                     continue
 
                 repo_metadata = master_repositories[repository_full_name]
-                inactive_at = repo_metadata.get("inactiveAt")
+                inactive_at = repo_metadata.get("inactiveAt", None)
                 # if repo is inactive
                 if inactive_at is not None:
                     inactive_dt = datetime.fromisoformat(inactive_at.rstrip("Z")).replace(tzinfo=timezone.utc)

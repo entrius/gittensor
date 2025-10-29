@@ -16,4 +16,4 @@ CREATE TABLE IF NOT EXISTS repositories (
 
 -- Indexes for faster lookups and filtering
 CREATE INDEX IF NOT EXISTS idx_repositories_name ON repositories (name);
-CREATE INDEX idx_repositories_inactive_at ON repositories (inactive_at);
+CREATE INDEX IF NOT EXISTS idx_repositories_inactive_at ON repositories (inactive_at);

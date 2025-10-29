@@ -25,16 +25,28 @@ DO NOTHING
 """
 
 # Pull Request Queries
+# NOTE: changed this to update so that PRs will reflect the current uid/hotkey/score
 SET_PULL_REQUEST = """
-INSERT INTO pull_requests (
-    number, repository_full_name, uid, hotkey, github_id, earned_score,
-    title, merged_at, pr_created_at, additions, deletions, commits,
-    author_login, merged_by_login
-) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-ON CONFLICT (number, repository_full_name)
-DO NOTHING
-"""
-
+  INSERT INTO pull_requests (
+      number, repository_full_name, uid, hotkey, github_id, earned_score,
+      title, merged_at, pr_created_at, additions, deletions, commits,
+      author_login, merged_by_login
+  ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+  ON CONFLICT (number, repository_full_name)
+  DO UPDATE SET
+      uid = EXCLUDED.uid,
+      hotkey = EXCLUDED.hotkey,
+      github_id = EXCLUDED.github_id,
+      earned_score = EXCLUDED.earned_score,
+      title = EXCLUDED.title,
+      merged_at = EXCLUDED.merged_at,
+      additions = EXCLUDED.additions,
+      deletions = EXCLUDED.deletions,
+      commits = EXCLUDED.commits,
+      author_login = EXCLUDED.author_login,
+      merged_by_login = EXCLUDED.merged_by_login,
+      updated_at = CURRENT_TIMESTAMP AT TIME ZONE 'America/Chicago'
+  """
 # File Change Queries
 SET_FILE_CHANGES_FOR_PR = """
 INSERT INTO file_changes (

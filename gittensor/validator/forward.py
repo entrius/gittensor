@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any, Dict
 
 import bittensor as bt
 
-from gittensor.validator.utils.query_api import query_master_programming_language_list, query_master_repo_list
+from gittensor.validator.utils.load_weights import load_master_repo_weights, load_programming_language_weights
 
 # ADD THIS for proper type hinting to navigate code easier.
 if TYPE_CHECKING:
@@ -33,12 +33,12 @@ async def forward(self: "BaseValidatorNeuron") -> None:
 
         miner_uids = get_all_uids(self)
 
-        master_repositories: Dict[str, Dict[str, Any]] = query_master_repo_list()
-        programming_languages: Dict[str, float] = query_master_programming_language_list()
+        master_repositories = load_master_repo_weights()
+        programming_languages = load_programming_language_weights()
 
         bt.logging.info("***** Starting scoring round *****")
-        bt.logging.info(f"Total Repositories fetched from Gittensor API: {len(master_repositories)}")
-        bt.logging.info(f"Total Languages fetched from Gittensor API: {len(programming_languages)}")
+        bt.logging.info(f"Total Repositories loaded from master_repositories.json: {len(master_repositories)}")
+        bt.logging.info(f"Total Languages loaded from programming_languages.json: {len(programming_languages)}")
         bt.logging.info(f"Number of neurons to evaluate: {len(miner_uids)}")
 
         # Get rewards for the responses - queries miners individually

@@ -53,7 +53,7 @@ import numpy as np
 import uvicorn
 from fastapi import Body, Depends, FastAPI, Header, HTTPException
 
-from gittensor.validator.utils.query_api import query_master_repo_list
+from gittensor.validator.utils.load_weights import load_master_repo_weights, load_programming_language_weights
 
 if TYPE_CHECKING:
     from neurons.base.validator import BaseValidatorNeuron
@@ -138,7 +138,8 @@ def create_debug_api(validator: "BaseValidatorNeuron", port: int = 8099):
             bt.logging.info(f"Testnet check passed: {chain_endpoint}")
 
             # get the master repo list
-            master_repositories: Dict[str, Dict[str, Any]] = query_master_repo_list()
+            master_repositories: Dict[str, Dict[str, Any]] = load_master_repo_weights()
+            programming_languages = load_programming_language_weights()
 
             # Get UIDs to score
             if uids is not None:
@@ -161,7 +162,7 @@ def create_debug_api(validator: "BaseValidatorNeuron", port: int = 8099):
 
             # Trigger scoring - THIS IS WHERE YOUR BREAKPOINTS WILL HIT
             bt.logging.info("***** Starting manual scoring round *****")
-            rewards = await get_rewards(validator, miner_uids, master_repositories)
+            rewards = await get_rewards(validator, miner_uids, master_repositories, programming_languages)
 
             # Format results - ensure all values are JSON serializable
             result = {

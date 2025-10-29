@@ -5,9 +5,6 @@ gittensor-venv/
 
 __pycache__
 
-github_token.json
-github_token.pkl
-
 *.egg-info
 
 # for vali testing

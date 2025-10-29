@@ -215,15 +215,16 @@ def calculate_issue_multiplier(issues: List[Issue]) -> float:
     Calculate score multiplier based on age and number of resolved issues.
 
     - Base multiplier: 1.0 (no bonus)
-    - Each issue adds 0.0-0.4 to multiplier based on age
-    - Maximum 3 issues counted (max multiplier: 2.2)
+    - Each issue adds 0.09-0.90 to multiplier based on age
+    - Maximum 3 issues counted (max multiplier: 3.7)
     - Older issues worth more, with gradual scaling
+    - 100% of issue bonus earned when issue has been open for 45+ days
 
     Args:
         issues (List[Issue]): List of resolved issues
 
     Returns:
-        float: Multiplier between 1.0 and 2.2
+        float: Multiplier between 1.0 and 3.7
     """
     base_multiplier = 1.0
     num_issues = min(len(issues), MAX_ISSUES_SCORED_IN_SINGLE_PR)
@@ -253,18 +254,19 @@ def calculate_issue_multiplier_score(issue: Issue, index: int) -> float:
     Calculate score for a single issue based on its age.
 
     Uses square root scaling for generous early rewards:
-    - 2 days:  ~28% of max bonus
-    - 5 days:  ~39% of max bonus
-    - 10 days: ~50% of max bonus
-    - 30 days: ~81% of max bonus
-    - 60 days: 100% of max bonus
+    - 2 days:  ~19% of max bonus (0.17)
+    - 5 days:  ~26% of max bonus (0.24)
+    - 10 days: ~38% of max bonus (0.34)
+    - 20 days: ~57% of max bonus (0.51)
+    - 30 days: ~72% of max bonus (0.65)
+    - 45 days: 100% of max bonus (0.90)
 
     Args:
         issue (Issue): Issue to score
         index (int): Issue index for logging
 
     Returns:
-        float: Score between 0 and 0.4
+        float: Score between 0.09 and 0.90
     """
 
     # Default score for issues without date info
@@ -277,8 +279,8 @@ def calculate_issue_multiplier_score(issue: Issue, index: int) -> float:
 
     try:
         days_open = (issue.closed_at - issue.created_at).days
-        normalized_score = 0.1 + math.sqrt(min(days_open, 90)) / math.sqrt(90)
-        issue_score = 0.4 * min(normalized_score, 1.0)
+        normalized_score = 0.1 + math.sqrt(min(days_open, 45)) / math.sqrt(45)
+        issue_score = 0.9 * min(normalized_score, 1.0)
 
         bt.logging.info(
             f"Issue #{getattr(issue, 'number', index+1)}: open for {days_open} days, score: {issue_score:.3f}"

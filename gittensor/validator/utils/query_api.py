@@ -4,7 +4,7 @@ from typing import Any, Dict, Optional
 import bittensor as bt
 import requests
 
-from gittensor.validator.utils.config import SERVICE_URL
+SERVICE_URL = "https://api.gittensor.io"
 
 
 def _make_service_request(endpoint: str, max_retries: int = 3) -> Optional[list]:

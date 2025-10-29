@@ -139,8 +139,8 @@ fi
 if pm2 list | grep -q "$VALIDATOR_PROCESS_NAME"; then
   echo "Process '$VALIDATOR_PROCESS_NAME' is already running. Killing and rerunning..."
   pm2 delete "$VALIDATOR_PROCESS_NAME"
-  SERVICE_URL="$SERVICE_URL" pm2 start python --name "$VALIDATOR_PROCESS_NAME" $PM2_EXTRA_FLAGS -- $DEBUGPY_PREFIX neurons/validator.py --netuid $NETUID --subtensor.network $SUBTENSOR_NETWORK --wallet.name $WALLET_NAME --wallet.hotkey $HOTKEY_NAME --axon.port $PORT $OPTIONAL_FLAGS $LOGGING
+  pm2 start python --name "$VALIDATOR_PROCESS_NAME" $PM2_EXTRA_FLAGS -- $DEBUGPY_PREFIX neurons/validator.py --netuid $NETUID --subtensor.network $SUBTENSOR_NETWORK --wallet.name $WALLET_NAME --wallet.hotkey $HOTKEY_NAME --axon.port $PORT $OPTIONAL_FLAGS $LOGGING
 else
   echo "Process '$VALIDATOR_PROCESS_NAME' is not running. Starting it for the first time..."
-  SERVICE_URL="$SERVICE_URL" pm2 start python --name "$VALIDATOR_PROCESS_NAME" $PM2_EXTRA_FLAGS -- $DEBUGPY_PREFIX neurons/validator.py --netuid $NETUID --subtensor.network $SUBTENSOR_NETWORK --wallet.name $WALLET_NAME --wallet.hotkey $HOTKEY_NAME --axon.port $PORT $OPTIONAL_FLAGS $LOGGING
+  pm2 start python --name "$VALIDATOR_PROCESS_NAME" $PM2_EXTRA_FLAGS -- $DEBUGPY_PREFIX neurons/validator.py --netuid $NETUID --subtensor.network $SUBTENSOR_NETWORK --wallet.name $WALLET_NAME --wallet.hotkey $HOTKEY_NAME --axon.port $PORT $OPTIONAL_FLAGS $LOGGING
 fi

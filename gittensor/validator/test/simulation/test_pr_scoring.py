@@ -21,9 +21,12 @@ Usage:
     3. Set breakpoints in calculate_score_from_file_changes() to debug scoring logic
 """
 
-import sys
 import os
+import sys
+
 import bittensor as bt
+
+from gittensor.validator.utils.load_weights import load_programming_language_weights
 
 # Add the project root to the path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../..')))
@@ -48,6 +51,8 @@ def test_pr_scoring():
     4. Displays results and validates against expected values
     """
 
+    programming_languages = load_programming_language_weights()
+
     bt.logging.info("=" * 70)
     bt.logging.info("PR SCORING SIMULATION TEST")
     bt.logging.info("=" * 70)
@@ -62,8 +67,7 @@ def test_pr_scoring():
 
         # Create a fresh MinerEvaluation for this test case
         miner_eval = MinerEvaluation(
-            uid=test_case.get('uid', 0),  # Default to 0 if not specified
-            hotkey=test_case['hotkey']
+            uid=test_case.get('uid', 0), hotkey=test_case['hotkey']  # Default to 0 if not specified
         )
         miner_eval.github_id = test_case['github_id']
 
@@ -79,7 +83,7 @@ def test_pr_scoring():
             bt.logging.info(f"    File changes: {len(file_changes)}")
 
             # SET BREAKPOINT ON THE NEXT LINE to step into calculate_score_from_file_changes()
-            base_score = calculate_score_from_file_changes(file_changes)
+            base_score = calculate_score_from_file_changes(file_changes, programming_languages)
 
             bt.logging.info(f"    Base score: {base_score:.5f}")
 
@@ -133,5 +137,6 @@ if __name__ == "__main__":
     except Exception as e:
         bt.logging.error(f"Test failed with error: {e}")
         import traceback
+
         traceback.print_exc()
         sys.exit(1)

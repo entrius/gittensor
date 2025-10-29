@@ -20,8 +20,8 @@ import threading
 import time
 
 import bittensor as bt
-
 import wandb
+
 from gittensor.classes import MinerEvaluation
 from gittensor.validator import forward
 from gittensor.validator.utils.config import WANDB_PROJECT, __version__
@@ -92,10 +92,9 @@ class Validator(BaseValidatorNeuron):
                     bt.logging.warning(f"Storage partially failed for UID {uid}:")
                     for error in storage_result.errors:
                         bt.logging.warning(f"  - {error}")
-            
+
             except Exception as e:
                 bt.logging.error(f"Error when attemping to store miners evaluation for uid {uid}: {e}")
-
 
     async def forward(self):
         """

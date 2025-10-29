@@ -8,7 +8,11 @@ import bittensor as bt
 import numpy as np
 
 from gittensor.classes import FileChange, GitPatSynapse, MinerEvaluation, PullRequest
-from gittensor.constants import DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT
+from gittensor.constants import (
+    DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT,
+    MAX_LINES_SCORED_CHANGES,
+    MITIGATED_EXTENSIONS,
+)
 from gittensor.utils.github_api_tools import get_pull_request_file_changes, get_user_merged_prs_graphql
 from gittensor.validator.evaluation.burn import scale_rewards_with_network_burn
 from gittensor.validator.evaluation.inspections import (
@@ -48,9 +52,16 @@ def calculate_score_from_file_changes(file_changes: List[FileChange], programmin
     for file in file_changes:
         language_weight = programming_languages.get(file.file_extension, DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT)
 
+        actual_changes = file.changes
+
+        # Cap scored changes for extensions that are exploitable
+        scored_changes = actual_changes
+        if file.file_extension in MITIGATED_EXTENSIONS:
+            scored_changes = min(actual_changes, MAX_LINES_SCORED_CHANGES)
+
         # Normalized by total changes in the PR
-        weight_ratio = file.changes / total_file_changes if total_file_changes > 0 else 0
-        pr_score += language_weight * weight_ratio * (file.changes**0.75)
+        weight_ratio = actual_changes / total_file_changes if total_file_changes > 0 else 0
+        pr_score += language_weight * weight_ratio * (scored_changes**0.75)
 
     return pr_score
 

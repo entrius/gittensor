@@ -214,7 +214,7 @@ def get_user_merged_prs_graphql(
 
     # Build list of active repositories (those without an inactiveAt timestamp)
     active_repositories = [
-        repo_full_name for repo_full_name, metadata in master_repositories.items() if metadata["inactiveAt"] is None
+        repo_full_name for repo_full_name, metadata in master_repositories.items() if metadata.get("inactiveAt") is None
     ]
 
     try:

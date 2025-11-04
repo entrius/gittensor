@@ -210,7 +210,6 @@ async def get_rewards(
     bt.logging.info(f"UIDs: {uids}")
 
     responses: Dict[int, GitPatSynapse] = {}
-    rewards: Dict[int, float] = {}
     miner_evaluations: Dict[int, MinerEvaluation] = {}
 
     # Query miners and calculate score.
@@ -222,17 +221,16 @@ async def get_rewards(
 
         # Calculate score
         miner_evaluation = await reward(self, uid, miner_response, master_repositories, programming_languages)
-        rewards[uid] = miner_evaluation.total_score
         miner_evaluations[uid] = miner_evaluation
 
     # Adjust scores for duplicate accounts
-    detect_and_penalize_duplicates(responses, rewards, miner_evaluations)
+    detect_and_penalize_duplicates(responses, miner_evaluations)
 
     # Boost miners who contribute to more unique repos relative to other miners.
-    apply_repository_uniqueness_boost(rewards, miner_evaluations)
+    apply_repository_uniqueness_boost(miner_evaluations)
 
     # Normalize the rewards between [0,1] with a pareto boost for higher performing miners.
-    normalized_rewards = normalize_rewards_with_pareto(rewards)
+    normalized_rewards = normalize_rewards_with_pareto(miner_evaluations)
 
     # Scale rewards according to burn emission curve based off of miners total contributions.
     final_rewards = scale_rewards_with_network_burn(normalized_rewards, miner_evaluations)

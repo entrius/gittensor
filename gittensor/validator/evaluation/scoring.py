@@ -11,7 +11,7 @@ from gittensor.constants import MAX_ISSUES_SCORED_IN_SINGLE_PR, PARETO_DISTRIBUT
 from gittensor.utils.utils import mask_secret
 
 
-def normalize_rewards_with_pareto(rewards: Dict[int, float]) -> Dict[int, float]:
+def normalize_rewards_with_pareto(miner_evaluations: Dict[int, MinerEvaluation]) -> Dict[int, float]:
     """
     Pareto normalization: Apply Pareto curve to raw scores, then use linear normalization
 
@@ -21,10 +21,10 @@ def normalize_rewards_with_pareto(rewards: Dict[int, float]) -> Dict[int, float]
     - alpha = 1.0: No change (linear)
 
     Args:
-        normalized_scores (Dict[int, float]): Dict of min-max normalized scores (sum = 1.0)
+        miner_evaluations (Dict[int, MinerEvaluation]): Dict of uid -> MinerEvaluation
 
     Returns:
-        Dict[int, float]: Pareto-curved scores that sum to 1.0
+        Dict[int, float]: Pareto-curved scores that sum to 1.0, Dict of uid ->  score.
 
     Notes:
         PARETO_DISTRIBUTION_ALPHA_VALUE: Pareto curve parameter
@@ -33,6 +33,12 @@ def normalize_rewards_with_pareto(rewards: Dict[int, float]) -> Dict[int, float]
             1.0 = no change
             1.5 = flatter (2x becomes ~1.7x)
     """
+
+    rewards: Dict[int, float] = {}
+    for uid, evaluation in miner_evaluations.items():
+        evaluation.calculate_total_score_and_total_contributions()
+        rewards[uid] = evaluation.total_score
+        bt.logging.info(f"Final reward for uid {uid}: {rewards[uid]:.4f}")
 
     if not rewards:
         bt.logging.warning("No rewards provided for Pareto normalization")
@@ -125,21 +131,20 @@ def count_repository_contributors(miner_evaluations: Dict[int, MinerEvaluation])
 
 
 def apply_repository_uniqueness_boost(
-    rewards: Dict[int, float], miner_evaluations: Dict[int, MinerEvaluation]
+    miner_evaluations: Dict[int, MinerEvaluation]
 ) -> Dict[int, float]:
     """
     Boost miners who contribute to repositories that fewer other miners work on.
     More unique/rare repository contributions get higher boosts.
 
     Args:
-        rewards (Dict[int, float]): Current reward scores for each miner
         miner_evaluations (Dict[int, MinerEvaluation]): Evaluation data containing repository contribution info
 
     Note:
-        This function modifies the `rewards` dictionary in-place to apply the score boost.
+        This function modifies the `miner_evaluations` dictionary in-place to apply the score boost per PR.
     """
 
-    # Count unique contributors per repository
+    # Create repository_name -> contributor count dictionary
     repo_contributor_counts = count_repository_contributors(miner_evaluations)
 
     # Skip boost if no repository contributions found
@@ -150,37 +155,28 @@ def apply_repository_uniqueness_boost(
     # Calculate total number of miners for normalization
     total_miners = len([uid for uid, eval in miner_evaluations.items() if eval.get_unique_repositories()])
 
-    for uid in rewards.keys():
-        evaluation = miner_evaluations.get(uid)
+    for uid, evaluation in miner_evaluations.items():
         if not evaluation or not evaluation.get_unique_repositories():
             continue
 
-        # Calculate uniqueness score based on repository rarity
-        uniqueness_scores = []
-        repo_details = []
-
+        bt.logging.info("Applying repository uniqueness boost for uid {uid}")
         for repo in evaluation.get_unique_repositories():
             contributors_count = repo_contributor_counts[repo]
 
             # Uniqueness score that approaches 0 as contribution count increases
             uniqueness_score = (total_miners - contributors_count + 1) / total_miners
-            uniqueness_scores.append(uniqueness_score)
-            repo_details.append(f"{repo}({contributors_count})")
+            boost_multiplier = 1.0 + (uniqueness_score * UNIQUE_PR_BOOST)
 
-        # Average uniqueness across all repos the miner contributed to
-        avg_uniqueness = sum(uniqueness_scores) / len(uniqueness_scores)
-
-        # Apply boost based on average uniqueness
-        boost_multiplier = 1.0 + (avg_uniqueness * UNIQUE_PR_BOOST)
-        original_reward = rewards[uid]
-        rewards[uid] = original_reward * boost_multiplier
-
-        bt.logging.info(
-            f"UNIQUENESS BOOST: uid {uid} repos: {', '.join(repo_details)}, "
-            f"avg uniqueness: {avg_uniqueness:.3f}, "
-            f"boost factor: {boost_multiplier:.3f}, "
-            f"reward: {original_reward:.4f} -> {rewards[uid]:.4f}"
-        )
+            repo_prs: List[PullRequest] = [pr for pr in evaluation.pull_requests if pr.repository_full_name == repo]
+            
+            for pr in repo_prs:
+                original_score = pr.earned_score
+                pr.earned_score = pr.earned_score * boost_multiplier
+                
+                bt.logging.info(
+                    f"Applying unique repo boost to PR's earned score for uid {uid}'s contribution to {pr.repository_full_name}: "
+                    f"{original_score:.4f} -> {pr.earned_score:.4f}"
+                )
 
 
 def apply_issue_resolvement_bonus(pr: PullRequest, base_pr_score: float) -> float:

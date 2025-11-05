@@ -124,8 +124,6 @@ def score_pull_requests(
 
         miner_eval.add_pull_request(pr)
 
-    miner_eval.calculate_total_score_and_total_contributions()
-
     return miner_eval
 
 

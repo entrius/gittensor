@@ -5,26 +5,26 @@ import numpy as np
 
 from gittensor.classes import MinerEvaluation
 from gittensor.constants import (
-    BURN_UID,
-    LINES_CONTRIBUTED_BURN_DECAY_RATE,
-    LINES_CONTRIBUTED_MAX_BURN,
-    UNIQUE_PRS_BURN_DECAY_RATE,
-    UNIQUE_PRS_MAX_BURN,
+    RECYCLE_UID,
+    LINES_CONTRIBUTED_RECYCLE_DECAY_RATE,
+    LINES_CONTRIBUTED_MAX_RECYCLE,
+    UNIQUE_PRS_RECYCLE_DECAY_RATE,
+    UNIQUE_PRS_MAX_RECYCLE,
 )
 
 
-def scale_rewards_with_network_burn(
+def apply_dynamic_emissions_using_network_contributions(
     normalized_rewards: Dict[int, float], miner_evaluations: Dict[int, MinerEvaluation]
 ) -> Dict[int, float]:
     """
-    Scale normalized rewards based on network-wide burn mechanism.
+    Scale normalized rewards based on network-wide contributions.
 
     Args:
         normalized_rewards (Dict[int, float]): Normalized rewards that sum to 1.0
         miner_evaluations (Dict[int, MinerEvaluation]): Dict mapping miner UIDs to their evaluations
 
     Returns:
-        Dict[int, float]: Scaled rewards after applying network burn mechanism
+        Dict[int, float]: Scaled rewards after applying network dynamic emissions mechanism
     """
     if not normalized_rewards:
         bt.logging.warning("No normalized rewards provided for scaling")
@@ -42,29 +42,28 @@ def scale_rewards_with_network_burn(
     # Apply network scalar to all rewards
     scaled_rewards = {}
     total_original_rewards = 0.0
-    total_burned = 0.0
-    burn_uid = BURN_UID
+    total_recycled = 0.0
 
     for uid, original_reward in normalized_rewards.items():
         scaled_reward = original_reward * final_network_scalar
         scaled_rewards[uid] = scaled_reward
 
         total_original_rewards += original_reward
-        total_burned += original_reward - scaled_reward
+        total_recycled += original_reward - scaled_reward
 
-    # Allocate all burned emissions to the burn UID
-    if burn_uid not in scaled_rewards:
-        scaled_rewards[burn_uid] = 0.0
+    # Allocate all recycled emissions to the recycled UID
+    if RECYCLE_UID not in scaled_rewards:
+        scaled_rewards[RECYCLE_UID] = 0.0
 
-    scaled_rewards[burn_uid] += total_burned if total_burned > 0 else 1
-    percent_rewards_burned = total_burned / total_original_rewards if total_original_rewards > 0 else 1.0
+    scaled_rewards[RECYCLE_UID] += total_recycled if total_recycled > 0 else 1
+    percent_rewards_recycled = total_recycled / total_original_rewards if total_original_rewards > 0 else 1.0
 
-    bt.logging.info(f"Network burn applied:")
+    bt.logging.info(f"Dynamic emissions based on network wide contributions applied:")
     bt.logging.info(f"  - Lines changed scalar: {lines_scalar:.6f}")
     bt.logging.info(f"  - Unique repos scalar: {unique_repo_scalar:.6f}")
     bt.logging.info(f"  - Final network scalar: {final_network_scalar:.6f}")
-    bt.logging.info(f"  - Total emissions burned: {total_burned:.6f} ({percent_rewards_burned*100:.2f}%)")
-    bt.logging.info(f"  - Burned emissions allocated to UID {burn_uid}: {total_burned:.6f}")
+    bt.logging.info(f"  - Total emissions recycled: {total_recycled:.6f} ({percent_rewards_recycled*100:.2f}%)")
+    bt.logging.info(f"  - Recycled emissions allocated to UID {RECYCLE_UID}: {total_recycled:.6f}")
     bt.logging.info(f"  - Final reward sum: {sum(scaled_rewards.values()):.6f}")
     bt.logging.info(f"  - Network unlock percentage: {final_network_scalar*100:.2f}%")
 
@@ -73,7 +72,7 @@ def scale_rewards_with_network_burn(
 
 def calculate_network_lines_changed_emissions_scalar(miner_evaluations: Dict[int, MinerEvaluation]) -> float:
     """
-    Calculate the emissions scalar based on total network lines changed and burn parameters.
+    Calculate the emissions scalar based on total network lines changed and dynamic emission parameters.
 
     Args:
         miner_evaluations (Dict[int, MinerEvaluation]): Dict mapping miner UIDs to their evaluations
@@ -93,24 +92,19 @@ def calculate_network_lines_changed_emissions_scalar(miner_evaluations: Dict[int
     bt.logging.info(f"Total lines changed across all miners (disregarding penalized miners): {total_network_lines}")
 
     # Calculate scalar using exponential unlock curve
-    scalar = (1 - LINES_CONTRIBUTED_MAX_BURN) + LINES_CONTRIBUTED_MAX_BURN * (
-        1 - np.exp(-LINES_CONTRIBUTED_BURN_DECAY_RATE * total_network_lines)
+    scalar = (1 - LINES_CONTRIBUTED_MAX_RECYCLE) + LINES_CONTRIBUTED_MAX_RECYCLE * (
+        1 - np.exp(-LINES_CONTRIBUTED_RECYCLE_DECAY_RATE * total_network_lines)
     )
     scalar = min(scalar, 1.0)  # Cap at 1.0
 
     bt.logging.info(f"Lines changed emission scalar: {scalar:.6f} (unlocked: {scalar*100:.2f}%)")
-
-    # We can implement time-based campaigns
-    # - Weekly/monthly targets with bonus multipliers
-    # - "Sprint weeks" with higher burn decay for rapid unlock
-    # - Seasonal campaigns targeting specific ecosystem needs
 
     return scalar
 
 
 def calculate_network_unique_repos_emissions_scalar(miner_evaluations: Dict[int, MinerEvaluation]) -> float:
     """
-    Calculate the emissions scalar based on total network unique repositories and burn parameters.
+    Calculate the emissions scalar based on total network unique repositories and dynamic emission parameters.
 
     Args:
         miner_evaluations (Dict[int, MinerEvaluation]): Dict mapping miner UIDs to their evaluations
@@ -131,8 +125,8 @@ def calculate_network_unique_repos_emissions_scalar(miner_evaluations: Dict[int,
     )
 
     # Calculate scalar using exponential unlock curve
-    scalar = (1 - UNIQUE_PRS_MAX_BURN) + UNIQUE_PRS_MAX_BURN * (
-        1 - np.exp(-UNIQUE_PRS_BURN_DECAY_RATE * total_unique_repos)
+    scalar = (1 - UNIQUE_PRS_MAX_RECYCLE) + UNIQUE_PRS_MAX_RECYCLE * (
+        1 - np.exp(-UNIQUE_PRS_RECYCLE_DECAY_RATE * total_unique_repos)
     )
     scalar = min(scalar, 1.0)  # Cap at 1.0
 

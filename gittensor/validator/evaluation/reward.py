@@ -234,7 +234,7 @@ async def get_rewards(
     # Normalize the rewards between [0,1] with a pareto boost for higher performing miners.
     normalized_rewards = normalize_rewards_with_pareto(rewards)
 
-    # Scale rewards according to burn emission curve based off of miners total contributions.
+    # Scale rewards according to dynamic emission curve based off of miners total contributions.
     final_rewards = scale_rewards_with_network_burn(normalized_rewards, miner_evaluations)
 
     return np.array([final_rewards.get(uid, 0.0) for uid in sorted(uids)])

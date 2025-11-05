@@ -198,6 +198,9 @@ def get_user_merged_prs_graphql(
                   state
                   createdAt
                   closedAt
+                  author {
+                    login
+                  }
                 }
               }
             }

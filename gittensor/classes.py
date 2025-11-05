@@ -80,6 +80,8 @@ class Issue:
     title: str
     created_at: Optional[datetime] = None
     closed_at: Optional[datetime] = None
+    author_login: Optional[str] = None
+    state: Optional[str] = None  # "OPEN" or "CLOSED"
 
 
 @dataclass
@@ -128,7 +130,8 @@ class PullRequest:
         raw_issues = pr_data['closingIssuesReferences']['nodes']
         issues = []
         for issue in raw_issues:
-            if issue['closedAt']:
+            # Only include issues that are actually closed (both closedAt timestamp and CLOSED state)
+            if issue['closedAt'] and issue.get('state') == 'CLOSED':
                 issues.append(
                     Issue(
                         number=issue['number'],
@@ -137,6 +140,8 @@ class PullRequest:
                         title=issue['title'],
                         created_at=parse_github_timestamp(issue['createdAt']),
                         closed_at=parse_github_timestamp(issue['closedAt']),
+                        author_login=issue.get('author', {}).get('login') if issue.get('author') else None,
+                        state=issue.get('state'),
                     )
                 )
 

@@ -242,6 +242,12 @@ def apply_issue_resolvement_bonus(pr: PullRequest, base_pr_score: float) -> floa
     """
     Applies a bonus to pull request scores for pull requests which solve issues.
 
+    Validates that:
+    - Issues are actually closed (state == 'CLOSED')
+    - Issue author is not the same as PR author
+    - Issue was closed within reasonable time window of PR merge
+    - Issue was created before the PR was created
+
     Args:
         pr (PullRequest): The Pull Request that contains the potential issues
 
@@ -255,11 +261,62 @@ def apply_issue_resolvement_bonus(pr: PullRequest, base_pr_score: float) -> floa
         )
         return base_pr_score
 
-    issue_multiplier = calculate_issue_multiplier(pr.issues)
+    # Filter out invalid issues
+    valid_issues = []
+    for issue in pr.issues:
+        # Skip issues that are not closed
+        if issue.state and issue.state != 'CLOSED':
+            bt.logging.warning(
+                f"Skipping issue #{issue.number} - not in CLOSED state (state: {issue.state})"
+            )
+            continue
+
+        # Skip issues where the author is the same as the PR author (self-created issue gaming)
+        if issue.author_login and issue.author_login == pr.author_login:
+            bt.logging.warning(
+                f"Skipping issue #{issue.number} - issue author ({issue.author_login}) is the same as PR author (preventing self-created issue gaming)"
+            )
+            continue
+
+        # Skip issues without author info (safety check)
+        if not issue.author_login:
+            bt.logging.warning(
+                f"Skipping issue #{issue.number} - missing author information"
+            )
+            continue
+
+        # Skip issues created after the PR was created (retroactive issue creation)
+        if issue.created_at and pr.created_at and issue.created_at > pr.created_at:
+            bt.logging.warning(
+                f"Skipping issue #{issue.number} - issue created ({issue.created_at.isoformat()}) after PR created ({pr.created_at.isoformat()})"
+            )
+            continue
+
+        # Skip issues closed too far from PR merge time
+        # Allow up to 5 day difference between issue close and PR merge
+        if issue.closed_at and pr.merged_at:
+            time_diff_seconds = abs((issue.closed_at - pr.merged_at).total_seconds())
+            max_allowed_seconds = 5 * 24 * 60 * 60  # 5 days
+
+            if time_diff_seconds > max_allowed_seconds:
+                bt.logging.warning(
+                    f"Skipping issue #{issue.number} - closed too far from PR merge ({time_diff_seconds/86400:.1f} days difference, max allowed: 5 days)"
+                )
+                continue
+
+        valid_issues.append(issue)
+
+    if not valid_issues:
+        bt.logging.info(
+            f"PR #{mask_secret(pr.number)} in {mask_secret(pr.repository_full_name)} earned score: {base_pr_score:.5f} × issue multiplier: 1.0 = {base_pr_score:.5f} (no valid issues after filtering)"
+        )
+        return base_pr_score
+
+    issue_multiplier = calculate_issue_multiplier(valid_issues)
     new_pr_score = round(issue_multiplier * base_pr_score, 2)
 
     bt.logging.info(
-        f"PR #{mask_secret(pr.number)} in {mask_secret(pr.repository_full_name)} earned score: {base_pr_score:.5f} × issue multiplier: {issue_multiplier:.3f} = {new_pr_score:.5f}"
+        f"PR #{mask_secret(pr.number)} in {mask_secret(pr.repository_full_name)} earned score: {base_pr_score:.5f} × issue multiplier: {issue_multiplier:.3f} = {new_pr_score:.5f} ({len(valid_issues)}/{len(pr.issues)} valid issues)"
     )
 
     return new_pr_score

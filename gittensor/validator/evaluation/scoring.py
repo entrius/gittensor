@@ -2,13 +2,15 @@
 # Copyright © 2025 Entrius
 
 import math
+from datetime import datetime, timezone
 from typing import Dict, List
 
 import bittensor as bt
 
 from gittensor.classes import Issue, MinerEvaluation, PullRequest
-from gittensor.constants import MAX_ISSUES_SCORED_IN_SINGLE_PR, PARETO_DISTRIBUTION_ALPHA_VALUE, UNIQUE_PR_BOOST
+from gittensor.constants import MAX_ISSUES_SCORED_IN_SINGLE_PR, PARETO_DISTRIBUTION_ALPHA_VALUE, TIME_DECAY_MIN_MULTIPLIER, UNIQUE_PR_BOOST
 from gittensor.utils.utils import mask_secret
+from gittensor.validator.utils.config import MERGED_PR_LOOKBACK_DAYS
 
 
 def normalize_rewards_with_pareto(miner_evaluations: Dict[int, MinerEvaluation]) -> Dict[int, float]:
@@ -177,6 +179,63 @@ def apply_repository_uniqueness_boost(
                     f"Applying unique repo boost to PR's earned score for uid {uid}'s contribution to {pr.repository_full_name}: "
                     f"{original_score:.4f} -> {pr.earned_score:.4f}"
                 )
+    
+    bt.logging.info(f"Completed applying repository uniqueness boost for {total_miners} total contributing miners.")
+
+
+def apply_time_decay_for_repository_contributions(miner_evaluations: Dict[int, MinerEvaluation]):
+    """
+    Apply time decay to PR scores based on merge date.
+    Older contributions within the lookback window receive reduced scores.
+
+    Linear decay formula:
+    - PRs merged today: multiplier = 1.0 (full score)
+    - PRs merged at lookback window edge (90 days): multiplier = TIME_DECAY_MIN_MULTIPLIER
+    - PRs in between: linear interpolation
+
+    Args:
+        miner_evaluations (Dict[int, MinerEvaluation]): Evaluation data containing PR merge dates
+
+    Note:
+        This function modifies the `miner_evaluations` dictionary in-place to apply time decay per PR.
+    """
+
+    bt.logging.info(f"Applying time decay to PRs")
+    current_time = datetime.now(timezone.utc)
+
+    # Count total PRs and miners for logging
+    total_prs_modified = 0
+    miners_with_prs = 0
+
+    for uid, evaluation in miner_evaluations.items():
+        if not evaluation or not evaluation.pull_requests:
+            continue
+
+        miners_with_prs += 1
+
+        for pr in evaluation.pull_requests:
+            # Calculate days since PR was merged
+            days_since_merge = (current_time - pr.merged_at).total_seconds() / 86400  # 86400 seconds in a day
+
+            # Linear decay: newest PRs get 1.0, oldest get TIME_DECAY_MIN_MULTIPLIER
+            decay_factor = days_since_merge / MERGED_PR_LOOKBACK_DAYS
+            decay_multiplier = 1.0 - (decay_factor * (1.0 - TIME_DECAY_MIN_MULTIPLIER))
+
+            # Clamp to valid range [TIME_DECAY_MIN_MULTIPLIER, 1.0]
+            decay_multiplier = max(TIME_DECAY_MIN_MULTIPLIER, min(1.0, decay_multiplier))
+
+            original_score = pr.earned_score
+            pr.earned_score = pr.earned_score * decay_multiplier
+            total_prs_modified += 1
+
+            bt.logging.info(
+                f"Applying time decay multiplier on uid {uid}'s PR merged {days_since_merge:.1f} days ago, decay multiplier: {decay_multiplier:.4f}, "
+                f"Score: {original_score:.4f} -> {pr.earned_score:.4f}"
+            )
+
+    bt.logging.info(
+        f"Completed applying time decay for {miners_with_prs} miners, {total_prs_modified} total PRs modified."
+    )
 
 
 def apply_issue_resolvement_bonus(pr: PullRequest, base_pr_score: float) -> float:

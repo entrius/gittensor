@@ -13,6 +13,9 @@ MIN_GITHUB_ACCOUNT_AGE = 180
 MAX_ISSUES_SCORED_IN_SINGLE_PR = 3
 UNIQUE_PR_BOOST = 0.6
 
+# Time decay constants
+TIME_DECAY_MIN_MULTIPLIER = 0.1  # Oldest PRs (at lookback window edge) get 10% of their score
+
 # Rewards & Burning constants
 PARETO_DISTRIBUTION_ALPHA_VALUE = 0.85
 BURN_UID = 0

@@ -22,6 +22,7 @@ from gittensor.validator.evaluation.inspections import (
 from gittensor.validator.evaluation.scoring import (
     apply_issue_resolvement_bonus,
     apply_repository_uniqueness_boost,
+    apply_time_decay_for_repository_contributions,
     normalize_rewards_with_pareto,
 )
 
@@ -228,6 +229,9 @@ async def get_rewards(
 
     # Boost miners who contribute to more unique repos relative to other miners.
     apply_repository_uniqueness_boost(miner_evaluations)
+
+    # Older contributions within the lookback window will get less score.
+    apply_time_decay_for_repository_contributions(miner_evaluations)
 
     # Normalize the rewards between [0,1] with a pareto boost for higher performing miners.
     normalized_rewards = normalize_rewards_with_pareto(miner_evaluations)

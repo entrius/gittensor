@@ -1,10 +1,17 @@
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import DefaultDict, List, Optional, Set
+from typing import DefaultDict, List, Optional, Set, Dict
 
 import bittensor as bt
 
-from gittensor.constants import EXCESSIVE_PR_MIN_WEIGHT, EXCESSIVE_PR_PENALTY_SLOPE, EXCESSIVE_PR_PENALTY_THRESHOLD
+from gittensor.constants import (
+    EXCESSIVE_PR_MIN_WEIGHT,
+    EXCESSIVE_PR_PENALTY_SLOPE,
+    EXCESSIVE_PR_PENALTY_THRESHOLD,
+    DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT,
+    MITIGATED_EXTENSIONS,
+    MAX_LINES_SCORED_CHANGES,
+)
 
 GITHUB_DOMAIN = 'https://github.com/'
 
@@ -107,6 +114,7 @@ class PullRequest:
     description: Optional[str] = None
     last_edited_at: Optional[datetime] = None
     gittensor_tagged: bool = False
+    total_lines_scored: int = 0
 
     @property
     def total_changes(self) -> int:
@@ -120,6 +128,40 @@ class PullRequest:
     def set_file_changes(self, file_changes: List[FileChange]) -> None:
         """Set the file changes for this pull request"""
         self.file_changes = file_changes
+
+    def calculate_score_from_file_changes(self, programming_languages: Dict[str, float]):
+        """
+        Calculate the score for a single PR based on its file changes.
+
+        Args:
+            programming_languages (Dict[str, float]): List of programming language weights
+        """
+
+        if not self.file_changes:
+            self.earned_score = 0.0
+
+        total_file_changes = sum(file_change.changes for file_change in self.file_changes)
+        total_lines_scored = 0
+        pr_score = 0.0
+
+        for file in self.file_changes:
+            language_weight = programming_languages.get(file.file_extension, DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT)
+
+            actual_changes = file.changes
+
+            # Cap scored changes for extensions that are exploitable
+            scored_changes = actual_changes
+            if file.file_extension in MITIGATED_EXTENSIONS:
+                scored_changes = min(actual_changes, MAX_LINES_SCORED_CHANGES)
+
+            total_lines_scored += scored_changes
+
+            # Normalized by total changes in the PR
+            weight_ratio = actual_changes / total_file_changes if total_file_changes > 0 else 0
+            pr_score += language_weight * weight_ratio * (scored_changes**0.75)
+
+        self.total_lines_scored = total_lines_scored
+        return pr_score
 
     @classmethod
     def from_graphql_response(cls, pr_data: dict, uid: int, hotkey: str, github_id: str) -> 'PullRequest':
@@ -221,7 +263,7 @@ class MinerEvaluation:
         self.total_score = sum(pr.earned_score for pr in self.pull_requests)
         self.apply_open_pr_spam_penalty_to_score()
 
-        self.total_lines_changed = sum(pr.total_changes for pr in self.pull_requests)
+        self.total_lines_changed = sum(pr.total_lines_scored for pr in self.pull_requests)
         self.unique_repos_contributed_to = set(pr.repository_full_name for pr in self.pull_requests)
         self.unique_repos_count = len(self.unique_repos_contributed_to)
 
@@ -229,7 +271,7 @@ class MinerEvaluation:
         bt.logging.info(f"  - Total Score: {self.total_score:.5f}")
         bt.logging.info(f"  - Total Valid PRs: {self.total_prs}")
         bt.logging.info(f"  - Total open PRs: {self.total_open_prs}")
-        bt.logging.info(f"  - Total Lines Changed: {self.total_lines_changed}")
+        bt.logging.info(f"  - Total Lines Changed (& Scored): {self.total_lines_changed}")
         bt.logging.info(f"  - Unique Repositories Contibuted To: {self.get_unique_repositories()}")
 
     def apply_open_pr_spam_penalty_to_score(self):

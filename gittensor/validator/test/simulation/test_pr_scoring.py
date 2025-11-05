@@ -25,14 +25,13 @@ import os
 import sys
 
 import bittensor as bt
-
+from gittensor.classes import PullRequest
 from gittensor.validator.utils.load_weights import load_programming_language_weights
 
 # Add the project root to the path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../..')))
 
 from gittensor.classes import MinerEvaluation
-from gittensor.validator.evaluation.reward import calculate_score_from_file_changes
 from gittensor.validator.evaluation.scoring import apply_issue_resolvement_bonus
 from gittensor.validator.test.simulation.mock_prs import get_mock_test_cases
 
@@ -76,25 +75,25 @@ def test_pr_scoring():
 
         # Process each PR
         for pr_data in test_case['prs']:
-            pr = pr_data['pr']
+            pr: PullRequest = pr_data['pr']
             file_changes = pr_data['file_changes']
 
             bt.logging.info(f"\n  Processing PR #{pr.number} ({pr.repository_full_name}):")
             bt.logging.info(f"    File changes: {len(file_changes)}")
 
             # SET BREAKPOINT ON THE NEXT LINE to step into calculate_score_from_file_changes()
-            base_score = calculate_score_from_file_changes(file_changes, programming_languages)
+            pr.calculate_score_from_file_changes(programming_languages)
 
-            bt.logging.info(f"    Base score: {base_score:.5f}")
+            bt.logging.info(f"    Base score: {pr.earned_score:.5f}")
 
             # Apply issue bonus
-            final_score = apply_issue_resolvement_bonus(pr, base_score)
+            apply_issue_resolvement_bonus(pr)
 
-            bt.logging.info(f"    Final score (after issue bonus): {final_score:.5f}")
+            bt.logging.info(f"    Final score (after issue bonus): {pr.earned_score:.5f}")
 
             # Set file changes and score on PR
             pr.set_file_changes(file_changes)
-            pr.set_earned_score(final_score)
+            pr.set_earned_score(pr.earned_score)
 
             # Add to evaluation
             miner_eval.add_pull_request(pr)

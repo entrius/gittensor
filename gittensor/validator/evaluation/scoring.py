@@ -282,7 +282,7 @@ def apply_boost_for_gittensor_tag_in_pr_description(miner_evaluations: Dict[int,
     )
 
 
-def apply_issue_resolvement_bonus(pr: PullRequest, base_pr_score: float) -> float:
+def apply_issue_resolvement_bonus(pr: PullRequest):
     """
     Applies a bonus to pull request scores for pull requests which solve issues.
 
@@ -294,16 +294,13 @@ def apply_issue_resolvement_bonus(pr: PullRequest, base_pr_score: float) -> floa
 
     Args:
         pr (PullRequest): The Pull Request that contains the potential issues
-
-    Returns:
-        float: The newly calculated PR score with the issue bonus applied.
     """
 
     if not pr.issues:
         bt.logging.info(
-            f"PR #{mask_secret(pr.number)} in {mask_secret(pr.repository_full_name)} earned score: {base_pr_score:.5f} × issue multiplier: 1.0 = {base_pr_score:.5f}"
+            f"PR #{mask_secret(pr.number)} in {mask_secret(pr.repository_full_name)} earned score: {pr.earned_score:.5f} × issue multiplier: 1.0 = {pr.earned_score:.5f}"
         )
-        return base_pr_score
+        return
 
     # Filter out invalid issues
     valid_issues = []
@@ -352,18 +349,19 @@ def apply_issue_resolvement_bonus(pr: PullRequest, base_pr_score: float) -> floa
 
     if not valid_issues:
         bt.logging.info(
-            f"PR #{mask_secret(pr.number)} in {mask_secret(pr.repository_full_name)} earned score: {base_pr_score:.5f} × issue multiplier: 1.0 = {base_pr_score:.5f} (no valid issues after filtering)"
+            f"PR #{mask_secret(pr.number)} in {mask_secret(pr.repository_full_name)} earned score: {pr.earned_score:.5f} × issue multiplier: 1.0 = {pr.earned_score:.5f} (no valid issues after filtering)"
         )
-        return base_pr_score
+        return
 
     issue_multiplier = calculate_issue_multiplier(valid_issues)
-    new_pr_score = round(issue_multiplier * base_pr_score, 2)
+    new_pr_score = round(issue_multiplier * pr.earned_score, 2)
 
     bt.logging.info(
-        f"PR #{mask_secret(pr.number)} in {mask_secret(pr.repository_full_name)} earned score: {base_pr_score:.5f} × issue multiplier: {issue_multiplier:.3f} = {new_pr_score:.5f} ({len(valid_issues)}/{len(pr.issues)} valid issues)"
+        f"PR #{mask_secret(pr.number)} in {mask_secret(pr.repository_full_name)} earned score: {pr.earned_score:.5f} × issue multiplier: {issue_multiplier:.3f} = {new_pr_score:.5f} ({len(valid_issues)}/{len(pr.issues)} valid issues)"
     )
 
-    return new_pr_score
+    pr.earned_score = new_pr_score
+    return
 
 
 def calculate_issue_multiplier(issues: List[Issue]) -> float:

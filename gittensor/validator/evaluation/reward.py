@@ -32,42 +32,6 @@ if TYPE_CHECKING:
     from neurons.validator import Validator
 
 
-def calculate_score_from_file_changes(file_changes: List[FileChange], programming_languages: Dict[str, float]) -> float:
-    """
-    Calculate the score for a single PR based on its file changes.
-
-    This is the core scoring logic extracted for testability.
-
-    Args:
-        file_changes (List[FileChange]): List of FileChange objects
-
-    Returns:
-        float: Calculated score from file changes
-    """
-
-    if not file_changes:
-        return 0.0
-
-    total_file_changes = sum(file_change.changes for file_change in file_changes)
-    pr_score = 0.0
-
-    for file in file_changes:
-        language_weight = programming_languages.get(file.file_extension, DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT)
-
-        actual_changes = file.changes
-
-        # Cap scored changes for extensions that are exploitable
-        scored_changes = actual_changes
-        if file.file_extension in MITIGATED_EXTENSIONS:
-            scored_changes = min(actual_changes, MAX_LINES_SCORED_CHANGES)
-
-        # Normalized by total changes in the PR
-        weight_ratio = actual_changes / total_file_changes if total_file_changes > 0 else 0
-        pr_score += language_weight * weight_ratio * (scored_changes**0.75)
-
-    return pr_score
-
-
 def score_pull_requests(
     uid: int,
     miner_eval: MinerEvaluation,
@@ -118,10 +82,10 @@ def score_pull_requests(
             continue
 
         pr.set_file_changes(file_changes)
-        base_pr_score = calculate_score_from_file_changes(file_changes, programming_languages)
-        base_pr_score = float(repo_weight) * base_pr_score
-        final_pr_score = apply_issue_resolvement_bonus(pr, base_pr_score)
-        pr.set_earned_score(final_pr_score)
+        pr.calculate_score_from_file_changes(programming_languages)
+        apply_issue_resolvement_bonus(pr)
+        final_score = pr.earned_score * float(repo_weight)
+        pr.set_earned_score(final_score)
 
         miner_eval.add_pull_request(pr)
 

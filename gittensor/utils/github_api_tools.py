@@ -166,6 +166,8 @@ def get_user_merged_prs_graphql(
               deletions
               mergedAt
               createdAt
+              lastEditedAt
+              bodyText
               state
               commits(first: 100) {
                 totalCount

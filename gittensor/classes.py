@@ -104,6 +104,9 @@ class PullRequest:
     merged_by_login: Optional[str] = None
     file_changes: Optional[List[FileChange]] = None
     issues: Optional[List[Issue]] = None
+    description: Optional[str] = None
+    last_edited_at: Optional[datetime] = None
+    gittensor_tagged: bool = False
 
     @property
     def total_changes(self) -> int:
@@ -123,6 +126,7 @@ class PullRequest:
         """Create PullRequest from GraphQL API response"""
         # Import here to avoid circular dependency
         from gittensor.validator.utils.datetime_utils import parse_github_timestamp
+        from gittensor.constants import PR_TAGLINE
 
         repo_data = pr_data['repository']
         repository_full_name = f"{repo_data['owner']['login']}/{repo_data['name']}"
@@ -145,6 +149,29 @@ class PullRequest:
                     )
                 )
 
+        # Extract description and check for Gittensor tagline
+        description = pr_data.get('bodyText', '')
+        last_edited_at = parse_github_timestamp(pr_data.get('lastEditedAt')) if pr_data.get('lastEditedAt') else None
+        merged_at = parse_github_timestamp(pr_data['mergedAt'])
+
+        # Check if PR has Gittensor tagline and wasn't edited after merge
+        gittensor_tagged = False
+        if description:
+            # Get the last 100 characters (with cushion) and trim whitespace
+            description_end = description[-100:].strip()
+            # Check if it ends with the tagline (case-insensitive, lenient with trailing punctuation)
+            description_end_cleaned = description_end.rstrip('.,!?;: \t\n')
+            if description_end_cleaned.lower().endswith(PR_TAGLINE.lower()):
+                # Only set tagged to True if PR was NOT edited after being merged
+                # (to prevent miners from editing after merge to add the tagline)
+                if last_edited_at is None or last_edited_at <= merged_at:
+                    gittensor_tagged = True
+                else:
+                    bt.logging.warning(
+                        f"PR #{pr_data['number']} in {repository_full_name} has Gittensor tagline but was edited after merge "
+                        f"(merged: {merged_at.isoformat()}, last edited: {last_edited_at.isoformat()})"
+                    )
+
         return cls(
             number=pr_data['number'],
             repository_full_name=repository_full_name,
@@ -153,13 +180,16 @@ class PullRequest:
             github_id=github_id,
             title=pr_data['title'],
             author_login=pr_data['author']['login'],
-            merged_at=parse_github_timestamp(pr_data['mergedAt']),
+            merged_at=merged_at,
             created_at=parse_github_timestamp(pr_data['createdAt']),
             additions=pr_data['additions'],
             deletions=pr_data['deletions'],
             commits=pr_data.get('commits', {}).get('totalCount', 0),
             merged_by_login=pr_data['mergedBy']['login'] if pr_data.get('mergedBy') else None,
             issues=issues,
+            description=description,
+            last_edited_at=last_edited_at,
+            gittensor_tagged=gittensor_tagged,
         )
 
 

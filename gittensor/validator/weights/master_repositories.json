@@ -784,6 +784,9 @@
   "MrXujiang/h5-Dooring": {
     "weight": 1.05
   },
+  "MudBlazor/MudBlazor": {
+    "weight": 1.0
+  },
   "MultiMC/Launcher": {
     "weight": 1.08
   },

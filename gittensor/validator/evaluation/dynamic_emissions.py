@@ -82,14 +82,13 @@ def calculate_network_lines_changed_emissions_scalar(miner_evaluations: Dict[int
     """
 
     # Calculate total lines changed across all miners (excluding penalized miners)
-    # TODO: We'll want to get this function to evaluate all time lines changed, not just those within lookback window.
     total_network_lines = sum(
         evaluation.total_lines_changed
         for evaluation in miner_evaluations.values()
         if evaluation.total_score > 0  # Exclude penalized miners
     )
 
-    bt.logging.info(f"Total lines changed across all miners (disregarding penalized miners): {total_network_lines}")
+    bt.logging.info(f"Total lines scored across all miners (disregarding penalized miners): {total_network_lines}")
 
     # Calculate scalar using exponential unlock curve
     scalar = (1 - LINES_CONTRIBUTED_MAX_RECYCLE) + LINES_CONTRIBUTED_MAX_RECYCLE * (

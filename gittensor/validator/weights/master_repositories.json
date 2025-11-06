@@ -1933,10 +1933,6 @@
   "anc95/ChatGPT-CodeReview": {
     "weight": 1.01
   },
-  "anderdc/filler": {
-    "inactiveAt": "2025-10-31T04:38:04.765Z",
-    "weight": 0.01
-  },
   "anders94/blockchain-demo": {
     "weight": 1.2
   },
@@ -9481,3 +9477,4 @@
     "weight": 1.13
   }
 }
+

@@ -2,17 +2,12 @@
 # Copyright © 2025 Entrius
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Dict, List
+from typing import TYPE_CHECKING, Dict
 
 import bittensor as bt
 import numpy as np
 
-from gittensor.classes import FileChange, GitPatSynapse, MinerEvaluation, PullRequest
-from gittensor.constants import (
-    DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT,
-    MAX_LINES_SCORED_CHANGES,
-    MITIGATED_EXTENSIONS,
-)
+from gittensor.classes import GitPatSynapse, MinerEvaluation, PullRequest
 from gittensor.utils.github_api_tools import get_pull_request_file_changes, get_user_merged_prs_graphql
 from gittensor.validator.evaluation.burn import scale_rewards_with_network_burn
 from gittensor.validator.evaluation.inspections import (
@@ -20,50 +15,16 @@ from gittensor.validator.evaluation.inspections import (
     validate_response_and_initialize_miner_evaluation,
 )
 from gittensor.validator.evaluation.scoring import (
+    apply_boost_for_gittensor_tag_in_pr_description,
     apply_issue_resolvement_bonus,
     apply_repository_uniqueness_boost,
+    apply_time_decay_for_repository_contributions,
     normalize_rewards_with_pareto,
 )
 
 # NOTE: there was a circular import error, needed this if to resolve it
 if TYPE_CHECKING:
     from neurons.validator import Validator
-
-
-def calculate_score_from_file_changes(file_changes: List[FileChange], programming_languages: Dict[str, float]) -> float:
-    """
-    Calculate the score for a single PR based on its file changes.
-
-    This is the core scoring logic extracted for testability.
-
-    Args:
-        file_changes (List[FileChange]): List of FileChange objects
-
-    Returns:
-        float: Calculated score from file changes
-    """
-
-    if not file_changes:
-        return 0.0
-
-    total_file_changes = sum(file_change.changes for file_change in file_changes)
-    pr_score = 0.0
-
-    for file in file_changes:
-        language_weight = programming_languages.get(file.file_extension, DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT)
-
-        actual_changes = file.changes
-
-        # Cap scored changes for extensions that are exploitable
-        scored_changes = actual_changes
-        if file.file_extension in MITIGATED_EXTENSIONS:
-            scored_changes = min(actual_changes, MAX_LINES_SCORED_CHANGES)
-
-        # Normalized by total changes in the PR
-        weight_ratio = actual_changes / total_file_changes if total_file_changes > 0 else 0
-        pr_score += language_weight * weight_ratio * (scored_changes**0.75)
-
-    return pr_score
 
 
 def score_pull_requests(
@@ -116,14 +77,12 @@ def score_pull_requests(
             continue
 
         pr.set_file_changes(file_changes)
-        base_pr_score = calculate_score_from_file_changes(file_changes, programming_languages)
-        base_pr_score = float(repo_weight) * base_pr_score
-        final_pr_score = apply_issue_resolvement_bonus(pr, base_pr_score)
-        pr.set_earned_score(final_pr_score)
+        pr.set_earned_score(pr.calculate_score_from_file_changes(programming_languages))
+        apply_issue_resolvement_bonus(pr)
+        final_score = pr.earned_score * float(repo_weight)
+        pr.set_earned_score(final_score)
 
         miner_eval.add_pull_request(pr)
-
-    miner_eval.calculate_total_score_and_total_contributions()
 
     return miner_eval
 
@@ -210,7 +169,6 @@ async def get_rewards(
     bt.logging.info(f"UIDs: {uids}")
 
     responses: Dict[int, GitPatSynapse] = {}
-    rewards: Dict[int, float] = {}
     miner_evaluations: Dict[int, MinerEvaluation] = {}
 
     # Query miners and calculate score.
@@ -222,17 +180,22 @@ async def get_rewards(
 
         # Calculate score
         miner_evaluation = await reward(self, uid, miner_response, master_repositories, programming_languages)
-        rewards[uid] = miner_evaluation.total_score
         miner_evaluations[uid] = miner_evaluation
 
     # Adjust scores for duplicate accounts
-    detect_and_penalize_duplicates(responses, rewards, miner_evaluations)
+    detect_and_penalize_duplicates(responses, miner_evaluations)
 
     # Boost miners who contribute to more unique repos relative to other miners.
-    apply_repository_uniqueness_boost(rewards, miner_evaluations)
+    apply_repository_uniqueness_boost(miner_evaluations)
+
+    # Older contributions within the lookback window will get less score.
+    apply_time_decay_for_repository_contributions(miner_evaluations)
+
+    # Boost PRs that include the Gittensor tagline (and were not edited after merge).
+    apply_boost_for_gittensor_tag_in_pr_description(miner_evaluations)
 
     # Normalize the rewards between [0,1] with a pareto boost for higher performing miners.
-    normalized_rewards = normalize_rewards_with_pareto(rewards)
+    normalized_rewards = normalize_rewards_with_pareto(miner_evaluations)
 
     # Scale rewards according to burn emission curve based off of miners total contributions.
     final_rewards = scale_rewards_with_network_burn(normalized_rewards, miner_evaluations)

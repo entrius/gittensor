@@ -7,7 +7,7 @@ from typing import Dict, List
 import bittensor as bt
 
 from gittensor.classes import GitPatSynapse, MinerEvaluation
-from gittensor.constants import BURN_UID, MIN_GITHUB_ACCOUNT_AGE
+from gittensor.constants import RECYCLE_UID, MIN_GITHUB_ACCOUNT_AGE
 from gittensor.utils.github_api_tools import (
     get_github_account_age_days,
     get_github_id,
@@ -80,7 +80,7 @@ def validate_response_and_initialize_miner_evaluation(uid: int, response: GitPat
     )  # uid is type np.int64, convert to int for less issues down the line
 
     # UID 0 is special case
-    if uid == BURN_UID:
+    if uid == RECYCLE_UID:
         miner_eval.set_invalid_response_reason(f"SPECIAL CASE UID 0")
         return miner_eval
 

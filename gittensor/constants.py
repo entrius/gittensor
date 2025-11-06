@@ -20,15 +20,15 @@ GITTENSOR_PR_TAG_MULTIPLIER = 1.50
 # Time decay constants
 TIME_DECAY_MIN_MULTIPLIER = 0.1  # Oldest PRs (at lookback window edge) get 10% of their score
 
-# Rewards & Burning constants
+# Rewards & Recycle constants
 PARETO_DISTRIBUTION_ALPHA_VALUE = 0.85
-BURN_UID = 0
+RECYCLE_UID = 0
 
-LINES_CONTRIBUTED_MAX_BURN = 0.9
-LINES_CONTRIBUTED_BURN_DECAY_RATE = 0.000025
+LINES_CONTRIBUTED_MAX_RECYCLE = 0.9
+LINES_CONTRIBUTED_RECYCLE_DECAY_RATE = 0.00001
 
-UNIQUE_PRS_MAX_BURN = 0.9
-UNIQUE_PRS_BURN_DECAY_RATE = 0.008
+UNIQUE_PRS_MAX_RECYCLE = 0.9
+UNIQUE_PRS_RECYCLE_DECAY_RATE = 0.005
 
 # file types for which we want to mitigate rewards b/c of exploiting/gameability
 MITIGATED_EXTENSIONS = ["md", "txt", "json"]

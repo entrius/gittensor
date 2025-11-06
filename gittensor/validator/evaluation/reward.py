@@ -78,9 +78,13 @@ def score_pull_requests(
 
         pr.set_file_changes(file_changes)
         pr.set_earned_score(pr.calculate_score_from_file_changes(programming_languages))
+        bt.logging.info(f"Calculated a base PR score from the file changes of {pr.earned_score}")
+
         apply_issue_resolvement_bonus(pr)
-        final_score = pr.earned_score * float(repo_weight)
-        pr.set_earned_score(final_score)
+
+        pr_score_before_repo_weight = pr.earned_score
+        bt.logging.info(f"Applying repo weight to earned PR score: {pr_score_before_repo_weight} x {float(repo_weight)} -> {pr_score_before_repo_weight * float(repo_weight)}")
+        pr.set_earned_score(pr_score_before_repo_weight * float(repo_weight))
 
         miner_eval.add_pull_request(pr)
 

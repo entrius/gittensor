@@ -133,7 +133,7 @@ def count_repository_contributors(miner_evaluations: Dict[int, MinerEvaluation])
         # Log each repository with its contributor count
         sorted_repos = sorted(repo_contributor_counts.items(), key=lambda x: x[1], reverse=True)
         for repo, count in sorted_repos:
-            bt.logging.info(f"{repo}: {count}")
+            bt.logging.info(f"{mask_secret(repo)}: {count}")
 
     return repo_contributor_counts
 
@@ -165,7 +165,7 @@ def apply_repository_uniqueness_boost(miner_evaluations: Dict[int, MinerEvaluati
         if not evaluation or not evaluation.get_unique_repositories():
             continue
 
-        bt.logging.info("Applying repository uniqueness boost for uid {uid}")
+        bt.logging.info(f"Applying repository uniqueness boost for uid {uid}")
         for repo in evaluation.get_unique_repositories():
             contributors_count = repo_contributor_counts[repo]
 
@@ -177,10 +177,10 @@ def apply_repository_uniqueness_boost(miner_evaluations: Dict[int, MinerEvaluati
 
             for pr in repo_prs:
                 original_score = pr.earned_score
-                pr.earned_score = pr.earned_score * boost_multiplier
+                pr.set_earned_score(original_score * boost_multiplier)
 
                 bt.logging.info(
-                    f"Applying unique repo boost to PR's earned score for uid {uid}'s contribution to {pr.repository_full_name}: "
+                    f"Applying unique repo boost to PR's earned score for uid {uid}'s contribution to {mask_secret(pr.repository_full_name)}: "
                     f"{original_score:.4f} -> {pr.earned_score:.4f}"
                 )
 
@@ -229,7 +229,7 @@ def apply_time_decay_for_repository_contributions(miner_evaluations: Dict[int, M
             decay_multiplier = max(TIME_DECAY_MIN_MULTIPLIER, min(1.0, decay_multiplier))
 
             original_score = pr.earned_score
-            pr.earned_score = pr.earned_score * decay_multiplier
+            pr.set_earned_score(original_score * decay_multiplier)
             total_prs_modified += 1
 
             bt.logging.info(
@@ -269,7 +269,7 @@ def apply_boost_for_gittensor_tag_in_pr_description(miner_evaluations: Dict[int,
         for pr in evaluation.pull_requests:
             if pr.gittensor_tagged:
                 original_score = pr.earned_score
-                pr.earned_score = pr.earned_score * GITTENSOR_PR_TAG_MULTIPLIER
+                pr.set_earned_score(original_score * GITTENSOR_PR_TAG_MULTIPLIER)
                 total_prs_boosted += 1
                 miner_has_tagged_prs = True
 
@@ -362,7 +362,7 @@ def apply_issue_resolvement_bonus(pr: PullRequest):
         f"PR #{mask_secret(pr.number)} in {mask_secret(pr.repository_full_name)} earned score: {pr.earned_score:.5f} × issue multiplier: {issue_multiplier:.3f} = {new_pr_score:.5f} ({len(valid_issues)}/{len(pr.issues)} valid issues)"
     )
 
-    pr.earned_score = new_pr_score
+    pr.set_earned_score(new_pr_score)
     return
 
 

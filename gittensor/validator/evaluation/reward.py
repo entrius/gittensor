@@ -198,6 +198,6 @@ async def get_rewards(
     normalized_rewards = normalize_rewards_with_pareto(miner_evaluations)
 
     # Scale rewards according to dynamic emission curve based off of miners total contributions.
-    final_rewards = apply_dynamic_emissions_using_network_contributions((normalized_rewards, miner_evaluations)
+    final_rewards = apply_dynamic_emissions_using_network_contributions(normalized_rewards, miner_evaluations)
 
     return np.array([final_rewards.get(uid, 0.0) for uid in sorted(uids)])

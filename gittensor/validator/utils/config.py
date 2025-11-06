@@ -3,12 +3,12 @@ import os
 import bittensor as bt
 
 # NOTE: bump this number when we make new updates
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 
 VALIDATOR_WAIT = 60  # 60 seconds
 VALIDATOR_STEPS_INTERVAL = 240  # 4 hours, every time a scoring round happens
-MERGED_PR_LOOKBACK_DAYS = 90  # how many days a merged pr will count for scoring
+MERGED_PR_LOOKBACK_DAYS = 50  # how many days a merged pr will count for scoring
 
 # required env vars
 WANDB_API_KEY = os.getenv('WANDB_API_KEY')

@@ -164,7 +164,9 @@ def get_mock_test_cases():
                                 repository_full_name='owner/repo',
                                 title='Critical bug',
                                 created_at=datetime(2024, 12, 1),
-                                closed_at=datetime(2025, 1, 5)
+                                closed_at=datetime(2025, 1, 5),
+                                author_login='other_user',  # Different from PR author to pass validation
+                                state='CLOSED'
                             )
                         ]
                     ),

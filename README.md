@@ -117,6 +117,6 @@ Adopted from bitcast, subnet 93, collaborative emissions scaling has the network
 - Total lines changed within the last 90 days (`MERGED_PR_LOOKBACK_DAYS`)
 - Total unique repositories contributed to within the last 90 days
 
-As total lines changed and total unique repositories increases, the percentage of total available emissions increases. Whatever is not released is burnt.
+As total lines changed and total unique repositories increases, the percentage of total available emissions increases. Whatever is not released is recycled.
 
 The rate of emissions unlocked will be monitored and adjusted as the subnet matures to ensure fair distribution of alpha.

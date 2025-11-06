@@ -2,16 +2,24 @@
 # Copyright © 2025 Entrius
 
 import math
+from datetime import datetime, timezone
 from typing import Dict, List
 
 import bittensor as bt
 
 from gittensor.classes import Issue, MinerEvaluation, PullRequest
-from gittensor.constants import MAX_ISSUES_SCORED_IN_SINGLE_PR, PARETO_DISTRIBUTION_ALPHA_VALUE, UNIQUE_PR_BOOST
+from gittensor.constants import (
+    GITTENSOR_PR_TAG_MULTIPLIER,
+    MAX_ISSUES_SCORED_IN_SINGLE_PR,
+    PARETO_DISTRIBUTION_ALPHA_VALUE,
+    TIME_DECAY_MIN_MULTIPLIER,
+    UNIQUE_PR_BOOST,
+)
 from gittensor.utils.utils import mask_secret
+from gittensor.validator.utils.config import MERGED_PR_LOOKBACK_DAYS
 
 
-def normalize_rewards_with_pareto(rewards: Dict[int, float]) -> Dict[int, float]:
+def normalize_rewards_with_pareto(miner_evaluations: Dict[int, MinerEvaluation]) -> Dict[int, float]:
     """
     Pareto normalization: Apply Pareto curve to raw scores, then use linear normalization
 
@@ -21,10 +29,10 @@ def normalize_rewards_with_pareto(rewards: Dict[int, float]) -> Dict[int, float]
     - alpha = 1.0: No change (linear)
 
     Args:
-        normalized_scores (Dict[int, float]): Dict of min-max normalized scores (sum = 1.0)
+        miner_evaluations (Dict[int, MinerEvaluation]): Dict of uid -> MinerEvaluation
 
     Returns:
-        Dict[int, float]: Pareto-curved scores that sum to 1.0
+        Dict[int, float]: Pareto-curved scores that sum to 1.0, Dict of uid ->  score.
 
     Notes:
         PARETO_DISTRIBUTION_ALPHA_VALUE: Pareto curve parameter
@@ -33,6 +41,12 @@ def normalize_rewards_with_pareto(rewards: Dict[int, float]) -> Dict[int, float]
             1.0 = no change
             1.5 = flatter (2x becomes ~1.7x)
     """
+
+    rewards: Dict[int, float] = {}
+    for uid, evaluation in miner_evaluations.items():
+        evaluation.calculate_total_score_and_total_contributions()
+        rewards[uid] = evaluation.total_score
+        bt.logging.info(f"Final reward for uid {uid}: {rewards[uid]:.4f}")
 
     if not rewards:
         bt.logging.warning("No rewards provided for Pareto normalization")
@@ -119,27 +133,24 @@ def count_repository_contributors(miner_evaluations: Dict[int, MinerEvaluation])
         # Log each repository with its contributor count
         sorted_repos = sorted(repo_contributor_counts.items(), key=lambda x: x[1], reverse=True)
         for repo, count in sorted_repos:
-            bt.logging.info(f"{repo}: {count}")
+            bt.logging.info(f"{mask_secret(repo)}: {count}")
 
     return repo_contributor_counts
 
 
-def apply_repository_uniqueness_boost(
-    rewards: Dict[int, float], miner_evaluations: Dict[int, MinerEvaluation]
-) -> Dict[int, float]:
+def apply_repository_uniqueness_boost(miner_evaluations: Dict[int, MinerEvaluation]) -> Dict[int, float]:
     """
     Boost miners who contribute to repositories that fewer other miners work on.
     More unique/rare repository contributions get higher boosts.
 
     Args:
-        rewards (Dict[int, float]): Current reward scores for each miner
         miner_evaluations (Dict[int, MinerEvaluation]): Evaluation data containing repository contribution info
 
     Note:
-        This function modifies the `rewards` dictionary in-place to apply the score boost.
+        This function modifies the `miner_evaluations` dictionary in-place to apply the score boost per PR.
     """
 
-    # Count unique contributors per repository
+    # Create repository_name -> contributor count dictionary
     repo_contributor_counts = count_repository_contributors(miner_evaluations)
 
     # Skip boost if no repository contributions found
@@ -150,64 +161,209 @@ def apply_repository_uniqueness_boost(
     # Calculate total number of miners for normalization
     total_miners = len([uid for uid, eval in miner_evaluations.items() if eval.get_unique_repositories()])
 
-    for uid in rewards.keys():
-        evaluation = miner_evaluations.get(uid)
+    for uid, evaluation in miner_evaluations.items():
         if not evaluation or not evaluation.get_unique_repositories():
             continue
 
-        # Calculate uniqueness score based on repository rarity
-        uniqueness_scores = []
-        repo_details = []
-
+        bt.logging.info(f"Applying repository uniqueness boost for uid {uid}")
         for repo in evaluation.get_unique_repositories():
             contributors_count = repo_contributor_counts[repo]
 
             # Uniqueness score that approaches 0 as contribution count increases
             uniqueness_score = (total_miners - contributors_count + 1) / total_miners
-            uniqueness_scores.append(uniqueness_score)
-            repo_details.append(f"{repo}({contributors_count})")
+            boost_multiplier = 1.0 + (uniqueness_score * UNIQUE_PR_BOOST)
 
-        # Average uniqueness across all repos the miner contributed to
-        avg_uniqueness = sum(uniqueness_scores) / len(uniqueness_scores)
+            repo_prs: List[PullRequest] = [pr for pr in evaluation.pull_requests if pr.repository_full_name == repo]
 
-        # Apply boost based on average uniqueness
-        boost_multiplier = 1.0 + (avg_uniqueness * UNIQUE_PR_BOOST)
-        original_reward = rewards[uid]
-        rewards[uid] = original_reward * boost_multiplier
+            for pr in repo_prs:
+                original_score = pr.earned_score
+                pr.set_earned_score(original_score * boost_multiplier)
 
-        bt.logging.info(
-            f"UNIQUENESS BOOST: uid {uid} repos: {', '.join(repo_details)}, "
-            f"avg uniqueness: {avg_uniqueness:.3f}, "
-            f"boost factor: {boost_multiplier:.3f}, "
-            f"reward: {original_reward:.4f} -> {rewards[uid]:.4f}"
-        )
+                bt.logging.info(
+                    f"Applying unique repo boost to PR's earned score for uid {uid}'s contribution to {mask_secret(pr.repository_full_name)}: "
+                    f"{original_score:.4f} -> {pr.earned_score:.4f}"
+                )
+
+    bt.logging.info(f"Completed applying repository uniqueness boost for {total_miners} total contributing miners.")
 
 
-def apply_issue_resolvement_bonus(pr: PullRequest, base_pr_score: float) -> float:
+def apply_time_decay_for_repository_contributions(miner_evaluations: Dict[int, MinerEvaluation]):
+    """
+    Apply time decay to PR scores based on merge date.
+    Older contributions within the lookback window receive reduced scores.
+
+    Linear decay formula:
+    - PRs merged today: multiplier = 1.0 (full score)
+    - PRs merged at lookback window edge (90 days): multiplier = TIME_DECAY_MIN_MULTIPLIER
+    - PRs in between: linear interpolation
+
+    Args:
+        miner_evaluations (Dict[int, MinerEvaluation]): Evaluation data containing PR merge dates
+
+    Note:
+        This function modifies the `miner_evaluations` dictionary in-place to apply time decay per PR.
+    """
+
+    bt.logging.info(f"Applying time decay to PRs")
+    current_time = datetime.now(timezone.utc)
+
+    # Count total PRs and miners for logging
+    total_prs_modified = 0
+    miners_with_prs = 0
+
+    for uid, evaluation in miner_evaluations.items():
+        if not evaluation or not evaluation.pull_requests:
+            continue
+
+        miners_with_prs += 1
+
+        for pr in evaluation.pull_requests:
+            # Calculate days since PR was merged
+            days_since_merge = (current_time - pr.merged_at).total_seconds() / 86400  # 86400 seconds in a day
+
+            # Linear decay: newest PRs get 1.0, oldest get TIME_DECAY_MIN_MULTIPLIER
+            decay_factor = days_since_merge / MERGED_PR_LOOKBACK_DAYS
+            decay_multiplier = 1.0 - (decay_factor * (1.0 - TIME_DECAY_MIN_MULTIPLIER))
+
+            # Clamp to valid range [TIME_DECAY_MIN_MULTIPLIER, 1.0]
+            decay_multiplier = max(TIME_DECAY_MIN_MULTIPLIER, min(1.0, decay_multiplier))
+
+            original_score = pr.earned_score
+            pr.set_earned_score(original_score * decay_multiplier)
+            total_prs_modified += 1
+
+            bt.logging.info(
+                f"Applying time decay multiplier on uid {uid}'s PR merged {days_since_merge:.1f} days ago, decay multiplier: {decay_multiplier:.4f}, "
+                f"Score: {original_score:.4f} -> {pr.earned_score:.4f}"
+            )
+
+    bt.logging.info(
+        f"Completed applying time decay for {miners_with_prs} miners, {total_prs_modified} total PRs modified."
+    )
+
+
+def apply_boost_for_gittensor_tag_in_pr_description(miner_evaluations: Dict[int, MinerEvaluation]):
+    """
+    Apply score boost to PRs that include the Gittensor tagline in their description
+    and were not edited after being merged.
+
+    Args:
+        miner_evaluations (Dict[int, MinerEvaluation]): Evaluation data containing PRs
+
+    Note:
+        This function modifies the `miner_evaluations` dictionary in-place to apply the boost per PR.
+    """
+
+    bt.logging.info(f"Applying Gittensor tag boost to PRs")
+
+    # Count total PRs boosted and miners for logging
+    total_prs_boosted = 0
+    miners_with_tagged_prs = 0
+
+    for uid, evaluation in miner_evaluations.items():
+        if not evaluation or not evaluation.pull_requests:
+            continue
+
+        miner_has_tagged_prs = False
+
+        for pr in evaluation.pull_requests:
+            if pr.gittensor_tagged:
+                original_score = pr.earned_score
+                pr.set_earned_score(original_score * GITTENSOR_PR_TAG_MULTIPLIER)
+                total_prs_boosted += 1
+                miner_has_tagged_prs = True
+
+                bt.logging.info(
+                    f"Applying Gittensor tag boost to uid {uid}'s PR in {mask_secret(pr.repository_full_name)}, multiplier: {GITTENSOR_PR_TAG_MULTIPLIER:.2f}, "
+                    f"Score: {original_score:.4f} -> {pr.earned_score:.4f}"
+                )
+
+        if miner_has_tagged_prs:
+            miners_with_tagged_prs += 1
+
+    bt.logging.info(
+        f"Completed applying Gittensor tag boost for {miners_with_tagged_prs} miners, {total_prs_boosted} total PRs boosted."
+    )
+
+
+def apply_issue_resolvement_bonus(pr: PullRequest):
     """
     Applies a bonus to pull request scores for pull requests which solve issues.
 
+    Validates that:
+    - Issues are actually closed (state == 'CLOSED')
+    - Issue author is not the same as PR author
+    - Issue was closed within reasonable time window of PR merge
+    - Issue was created before the PR was created
+
     Args:
         pr (PullRequest): The Pull Request that contains the potential issues
-
-    Returns:
-        float: The newly calculated PR score with the issue bonus applied.
     """
 
     if not pr.issues:
         bt.logging.info(
-            f"PR #{mask_secret(pr.number)} in {mask_secret(pr.repository_full_name)} earned score: {base_pr_score:.5f} × issue multiplier: 1.0 = {base_pr_score:.5f}"
+            f"PR #{mask_secret(pr.number)} in {mask_secret(pr.repository_full_name)} earned score: {pr.earned_score:.5f} × issue multiplier: 1.0 = {pr.earned_score:.5f}"
         )
-        return base_pr_score
+        return
 
-    issue_multiplier = calculate_issue_multiplier(pr.issues)
-    new_pr_score = round(issue_multiplier * base_pr_score, 2)
+    # Filter out invalid issues
+    valid_issues = []
+    for issue in pr.issues:
+        # Skip issues that are not closed
+        if issue.state and issue.state != 'CLOSED':
+            bt.logging.warning(
+                f"Skipping issue #{mask_secret(issue.number)} - not in CLOSED state (state: {issue.state})"
+            )
+            continue
+
+        # Skip issues where the author is the same as the PR author (self-created issue gaming)
+        if issue.author_login and issue.author_login == pr.author_login:
+            bt.logging.warning(
+                f"Skipping issue #{mask_secret(issue.number)} - issue author ({mask_secret(issue.author_login)}) is the same as PR author (preventing self-created issue gaming)"
+            )
+            continue
+
+        # Skip issues without author info (safety check)
+        if not issue.author_login:
+            bt.logging.warning(f"Skipping issue #{mask_secret(issue.number)} - missing author information")
+            continue
+
+        # Skip issues created after the PR was created (retroactive issue creation)
+        if issue.created_at and pr.created_at and issue.created_at > pr.created_at:
+            bt.logging.warning(
+                f"Skipping issue #{mask_secret(issue.number)} - issue created ({issue.created_at.isoformat()}) after PR created ({pr.created_at.isoformat()})"
+            )
+            continue
+
+        # Skip issues closed too far from PR merge time
+        # Allow up to 5 day difference between issue close and PR merge
+        if issue.closed_at and pr.merged_at:
+            time_diff_seconds = abs((issue.closed_at - pr.merged_at).total_seconds())
+            max_allowed_seconds = 5 * 24 * 60 * 60  # 5 days
+
+            if time_diff_seconds > max_allowed_seconds:
+                bt.logging.warning(
+                    f"Skipping issue #{mask_secret(issue.number)} - closed too far from PR merge ({time_diff_seconds/86400:.1f} days difference, max allowed: 5 days)"
+                )
+                continue
+
+        valid_issues.append(issue)
+
+    if not valid_issues:
+        bt.logging.info(
+            f"PR #{mask_secret(pr.number)} in {mask_secret(pr.repository_full_name)} earned score: {pr.earned_score:.5f} × issue multiplier: 1.0 = {pr.earned_score:.5f} (no valid issues after filtering)"
+        )
+        return
+
+    issue_multiplier = calculate_issue_multiplier(valid_issues)
+    new_pr_score = round(issue_multiplier * pr.earned_score, 2)
 
     bt.logging.info(
-        f"PR #{mask_secret(pr.number)} in {mask_secret(pr.repository_full_name)} earned score: {base_pr_score:.5f} × issue multiplier: {issue_multiplier:.3f} = {new_pr_score:.5f}"
+        f"PR #{mask_secret(pr.number)} in {mask_secret(pr.repository_full_name)} earned score: {pr.earned_score:.5f} × issue multiplier: {issue_multiplier:.3f} = {new_pr_score:.5f} ({len(valid_issues)}/{len(pr.issues)} valid issues)"
     )
 
-    return new_pr_score
+    pr.set_earned_score(new_pr_score)
+    return
 
 
 def calculate_issue_multiplier(issues: List[Issue]) -> float:

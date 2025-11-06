@@ -7,7 +7,7 @@ from typing import Dict, List
 import bittensor as bt
 
 from gittensor.classes import GitPatSynapse, MinerEvaluation
-from gittensor.constants import BURN_UID, MIN_GITHUB_ACCOUNT_AGE
+from gittensor.constants import RECYCLE_UID, MIN_GITHUB_ACCOUNT_AGE
 from gittensor.utils.github_api_tools import (
     get_github_account_age_days,
     get_github_id,
@@ -15,7 +15,7 @@ from gittensor.utils.github_api_tools import (
 
 
 def detect_and_penalize_duplicates(
-    miner_responses: Dict[int, GitPatSynapse], rewards: Dict[int, float], miner_evaluations: Dict[int, MinerEvaluation]
+    miner_responses: Dict[int, GitPatSynapse], miner_evaluations: Dict[int, MinerEvaluation]
 ):
     """
     Detects miners that used the same github, duplicated across multiple uids.
@@ -23,12 +23,11 @@ def detect_and_penalize_duplicates(
 
     Args:
         miner_responses (Dict[int, GitPatSynapse]): Mapping of miner uid to their GitPatSynapse response.
-        rewards (Dict[int, float]): Mapping of miner UID to their current score.
         miner_evaluations (Dict[int, MinerEvaluation]): Mapping of miner UID to their MinerEvaluation.
 
     Note:
-        This function modifies the `rewards` and `miner_evaluations` dictionaries
-        in-place. All miners sharing a GitHub account will be penalized equally.
+        This function modifies the `miner_evaluations` dictionary in-place.
+        All miners sharing a GitHub account will be penalized equally.
     """
 
     bt.logging.info("Now checking for duplicate users across miners...")
@@ -59,20 +58,19 @@ def detect_and_penalize_duplicates(
         if len(uids) > 1:
             bt.logging.info(f"Detected UIDs {uids} sharing GitHub account")
             for uid in uids:
-                _penalize_miner(uid, rewards, miner_evaluations)
+                _penalize_miner(uid, miner_evaluations)
                 duplicate_count += 1
 
     bt.logging.info(f"Total duplicate miners penalized: {duplicate_count}")
 
 
-def _penalize_miner(uid: int, rewards: Dict[int, float], miner_evaluations: Dict[int, MinerEvaluation]):
+def _penalize_miner(uid: int, miner_evaluations: Dict[int, MinerEvaluation]):
     """Reset a miner's evaluation and set reward to 0."""
 
     bt.logging.info(f"PENALTY: Duplicate detected, zeroing score for uid {uid}")
 
     # We reset the miner evaluation here so it's not counted towards metrics.
     miner_evaluations[uid] = MinerEvaluation(uid=uid, hotkey=miner_evaluations[uid].hotkey)
-    rewards[uid] = 0.0
 
 
 def validate_response_and_initialize_miner_evaluation(uid: int, response: GitPatSynapse) -> MinerEvaluation:
@@ -82,7 +80,7 @@ def validate_response_and_initialize_miner_evaluation(uid: int, response: GitPat
     )  # uid is type np.int64, convert to int for less issues down the line
 
     # UID 0 is special case
-    if uid == BURN_UID:
+    if uid == RECYCLE_UID:
         miner_eval.set_invalid_response_reason(f"SPECIAL CASE UID 0")
         return miner_eval
 

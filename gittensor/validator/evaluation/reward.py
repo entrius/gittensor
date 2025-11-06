@@ -2,17 +2,12 @@
 # Copyright © 2025 Entrius
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Dict, List
+from typing import TYPE_CHECKING, Dict
 
 import bittensor as bt
 import numpy as np
 
-from gittensor.classes import FileChange, GitPatSynapse, MinerEvaluation, PullRequest
-from gittensor.constants import (
-    DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT,
-    MAX_LINES_SCORED_CHANGES,
-    MITIGATED_EXTENSIONS,
-)
+from gittensor.classes import GitPatSynapse, MinerEvaluation, PullRequest
 from gittensor.utils.github_api_tools import get_pull_request_file_changes, get_user_merged_prs_graphql
 from gittensor.validator.evaluation.burn import scale_rewards_with_network_burn
 from gittensor.validator.evaluation.inspections import (
@@ -82,7 +77,7 @@ def score_pull_requests(
             continue
 
         pr.set_file_changes(file_changes)
-        pr.calculate_score_from_file_changes(programming_languages)
+        pr.set_earned_score(pr.calculate_score_from_file_changes(programming_languages))
         apply_issue_resolvement_bonus(pr)
         final_score = pr.earned_score * float(repo_weight)
         pr.set_earned_score(final_score)

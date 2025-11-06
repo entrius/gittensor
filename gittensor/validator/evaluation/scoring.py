@@ -8,7 +8,13 @@ from typing import Dict, List
 import bittensor as bt
 
 from gittensor.classes import Issue, MinerEvaluation, PullRequest
-from gittensor.constants import MAX_ISSUES_SCORED_IN_SINGLE_PR, PARETO_DISTRIBUTION_ALPHA_VALUE, TIME_DECAY_MIN_MULTIPLIER, UNIQUE_PR_BOOST, GITTENSOR_PR_TAG_MULTIPLIER
+from gittensor.constants import (
+    GITTENSOR_PR_TAG_MULTIPLIER,
+    MAX_ISSUES_SCORED_IN_SINGLE_PR,
+    PARETO_DISTRIBUTION_ALPHA_VALUE,
+    TIME_DECAY_MIN_MULTIPLIER,
+    UNIQUE_PR_BOOST,
+)
 from gittensor.utils.utils import mask_secret
 from gittensor.validator.utils.config import MERGED_PR_LOOKBACK_DAYS
 
@@ -132,9 +138,7 @@ def count_repository_contributors(miner_evaluations: Dict[int, MinerEvaluation])
     return repo_contributor_counts
 
 
-def apply_repository_uniqueness_boost(
-    miner_evaluations: Dict[int, MinerEvaluation]
-) -> Dict[int, float]:
+def apply_repository_uniqueness_boost(miner_evaluations: Dict[int, MinerEvaluation]) -> Dict[int, float]:
     """
     Boost miners who contribute to repositories that fewer other miners work on.
     More unique/rare repository contributions get higher boosts.
@@ -170,16 +174,16 @@ def apply_repository_uniqueness_boost(
             boost_multiplier = 1.0 + (uniqueness_score * UNIQUE_PR_BOOST)
 
             repo_prs: List[PullRequest] = [pr for pr in evaluation.pull_requests if pr.repository_full_name == repo]
-            
+
             for pr in repo_prs:
                 original_score = pr.earned_score
                 pr.earned_score = pr.earned_score * boost_multiplier
-                
+
                 bt.logging.info(
                     f"Applying unique repo boost to PR's earned score for uid {uid}'s contribution to {pr.repository_full_name}: "
                     f"{original_score:.4f} -> {pr.earned_score:.4f}"
                 )
-    
+
     bt.logging.info(f"Completed applying repository uniqueness boost for {total_miners} total contributing miners.")
 
 
@@ -308,28 +312,26 @@ def apply_issue_resolvement_bonus(pr: PullRequest):
         # Skip issues that are not closed
         if issue.state and issue.state != 'CLOSED':
             bt.logging.warning(
-                f"Skipping issue #{issue.number} - not in CLOSED state (state: {issue.state})"
+                f"Skipping issue #{mask_secret(issue.number)} - not in CLOSED state (state: {issue.state})"
             )
             continue
 
         # Skip issues where the author is the same as the PR author (self-created issue gaming)
         if issue.author_login and issue.author_login == pr.author_login:
             bt.logging.warning(
-                f"Skipping issue #{issue.number} - issue author ({issue.author_login}) is the same as PR author (preventing self-created issue gaming)"
+                f"Skipping issue #{mask_secret(issue.number)} - issue author ({mask_secret(issue.author_login)}) is the same as PR author (preventing self-created issue gaming)"
             )
             continue
 
         # Skip issues without author info (safety check)
         if not issue.author_login:
-            bt.logging.warning(
-                f"Skipping issue #{issue.number} - missing author information"
-            )
+            bt.logging.warning(f"Skipping issue #{mask_secret(issue.number)} - missing author information")
             continue
 
         # Skip issues created after the PR was created (retroactive issue creation)
         if issue.created_at and pr.created_at and issue.created_at > pr.created_at:
             bt.logging.warning(
-                f"Skipping issue #{issue.number} - issue created ({issue.created_at.isoformat()}) after PR created ({pr.created_at.isoformat()})"
+                f"Skipping issue #{mask_secret(issue.number)} - issue created ({issue.created_at.isoformat()}) after PR created ({pr.created_at.isoformat()})"
             )
             continue
 
@@ -341,7 +343,7 @@ def apply_issue_resolvement_bonus(pr: PullRequest):
 
             if time_diff_seconds > max_allowed_seconds:
                 bt.logging.warning(
-                    f"Skipping issue #{issue.number} - closed too far from PR merge ({time_diff_seconds/86400:.1f} days difference, max allowed: 5 days)"
+                    f"Skipping issue #{mask_secret(issue.number)} - closed too far from PR merge ({time_diff_seconds/86400:.1f} days difference, max allowed: 5 days)"
                 )
                 continue
 

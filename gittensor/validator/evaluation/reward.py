@@ -9,7 +9,7 @@ import numpy as np
 
 from gittensor.classes import GitPatSynapse, MinerEvaluation, PullRequest
 from gittensor.utils.github_api_tools import get_pull_request_file_changes, get_user_merged_prs_graphql
-from gittensor.validator.evaluation.burn import scale_rewards_with_network_burn
+from gittensor.validator.evaluation.dynamic_emissions import scale_rewards_with_network_burn
 from gittensor.validator.evaluation.inspections import (
     detect_and_penalize_duplicates,
     validate_response_and_initialize_miner_evaluation,

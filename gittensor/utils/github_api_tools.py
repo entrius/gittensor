@@ -248,9 +248,9 @@ def get_user_merged_prs_graphql(
                     # Retryable error - log and retry
                     if attempt < 2:
                         bt.logging.warning(
-                            f"GraphQL request failed with status {response.status_code} (attempt {attempt + 1}/3), retrying in {wait_time}s..."
+                            f"GraphQL request failed with status {response.status_code} (attempt {attempt + 1}/3), retrying in 15s..."
                         )
-                        time.sleep(15)  # wait 15 seconds before another attempt
+                        time.sleep(15)
                     else:
                         bt.logging.error(
                             f"GraphQL request failed with status {response.status_code} after 3 attempts: {response.text}"
@@ -258,14 +258,13 @@ def get_user_merged_prs_graphql(
 
                 except requests.exceptions.RequestException as e:
                     if attempt < 2:
-                        wait_time = 2**attempt  # Exponential backoff: 1s, 2s
                         bt.logging.warning(
-                            f"GraphQL request connection error (attempt {attempt + 1}/3): {e}, retrying in {wait_time}s..."
+                            f"GraphQL request connection error (attempt {attempt + 1}/3): {e}, retrying in 15s..."
                         )
-                        time.sleep(wait_time)
+                        time.sleep(15)
                     else:
                         bt.logging.error(f"GraphQL request failed after 3 attempts: {e}")
-                        return (all_valid_prs, open_pr_count)
+                        return (all_valid_prs, open_pr_count)  # retries failed, return default response
 
             if not response or response.status_code != 200:
                 bt.logging.error(

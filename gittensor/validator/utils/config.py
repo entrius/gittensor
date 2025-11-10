@@ -7,7 +7,7 @@ __version__ = "1.2.0"
 
 
 VALIDATOR_WAIT = 60  # 60 seconds
-VALIDATOR_STEPS_INTERVAL = 240  # 4 hours, every time a scoring round happens
+VALIDATOR_STEPS_INTERVAL = 120  # 2 hours, every time a scoring round happens
 MERGED_PR_LOOKBACK_DAYS = 50  # how many days a merged pr will count for scoring
 
 # required env vars

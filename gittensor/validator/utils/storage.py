@@ -31,7 +31,7 @@ class DatabaseStorage:
         self.db_migrator = DatabaseMigrator(self.db_connection)
         self.db_migrator.create_tables()
 
-        # Intitialize repositories
+        # Initialize repositories
         self.miners_repo = MinersRepository(self.db_connection) if self.db_connection else None
         self.evaluations_repo = MinerEvaluationsRepository(self.db_connection) if self.db_connection else None
         self.pr_repo = PullRequestsRepository(self.db_connection) if self.db_connection else None

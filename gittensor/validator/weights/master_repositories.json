@@ -6998,6 +6998,12 @@
   "openstreetmap/iD": {
     "weight": 1.36
   },
+  "opentensor/bittensor": {
+    "weight": 3.94
+  },
+  "opentensor/btcli": {
+    "weight": 3.94
+  },
   "opentensor/subtensor": {
     "weight": 3.94
   },

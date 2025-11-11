@@ -273,7 +273,7 @@ class MinerEvaluation:
         bt.logging.info(f"  - Total Valid PRs: {self.total_prs}")
         bt.logging.info(f"  - Total open PRs: {self.total_open_prs}")
         bt.logging.info(f"  - Total Lines Changed (& Scored): {self.total_lines_changed}")
-        bt.logging.info(f"  - Unique Repositories Contibuted To: {self.get_unique_repositories()}")
+        bt.logging.info(f"  - Unique Repositories Contributed To: {self.get_unique_repositories()}")
 
     def apply_open_pr_spam_penalty_to_score(self):
         """

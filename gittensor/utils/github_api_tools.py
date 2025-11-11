@@ -230,15 +230,46 @@ def get_user_merged_prs_graphql(
                 "cursor": cursor,
             }
 
-            response = requests.post(
-                f'{BASE_GITHUB_API_URL}/graphql',
-                headers=headers,
-                json={"query": query, "variables": variables},
-                timeout=15,
-            )
+            # Retry logic for transient failures (502, 503, 504, connection errors)
+            response = None
+            for attempt in range(3):
+                try:
+                    response = requests.post(
+                        f'{BASE_GITHUB_API_URL}/graphql',
+                        headers=headers,
+                        json={"query": query, "variables": variables},
+                        timeout=15,
+                    )
 
-            if response.status_code != 200:
-                bt.logging.error(f"GraphQL request failed with status {response.status_code}: {response.text}")
+                    # Success or non-retryable error
+                    if response.status_code == 200 or response.status_code not in [502, 503, 504]:
+                        break
+
+                    # Retryable error - log and retry
+                    if attempt < 2:
+                        bt.logging.warning(
+                            f"GraphQL request failed with status {response.status_code} (attempt {attempt + 1}/3), retrying in 15s..."
+                        )
+                        time.sleep(15)
+                    else:
+                        bt.logging.error(
+                            f"GraphQL request failed with status {response.status_code} after 3 attempts: {response.text}"
+                        )
+
+                except requests.exceptions.RequestException as e:
+                    if attempt < 2:
+                        bt.logging.warning(
+                            f"GraphQL request connection error (attempt {attempt + 1}/3): {e}, retrying in 15s..."
+                        )
+                        time.sleep(15)
+                    else:
+                        bt.logging.error(f"GraphQL request failed after 3 attempts: {e}")
+                        return (all_valid_prs, open_pr_count)  # retries failed, return default response
+
+            if not response or response.status_code != 200:
+                bt.logging.error(
+                    f"GraphQL request failed with status {response.status_code if response else 'N/A'}: {response.text if response else 'No response'}"
+                )
                 break
 
             data = response.json()

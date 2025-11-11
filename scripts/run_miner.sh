@@ -39,10 +39,9 @@ SUBTENSOR_NETWORK=${SUBTENSOR_NETWORK:-"finney"}
 PORT=${PORT:-8098}
 LOGGING=${LOGGING:-"--logging.info"}
 
-
-if pm2 list | grep -q "$MINER_PROCESS_NAME"; then
+if pm2 describe "$MINER_PROCESS_NAME" >/dev/null 2>&1; then
     echo "Process '$MINER_PROCESS_NAME' is already running. Killing and rerunning..."
-    pm2 delete "$MINER_PROCESS_NAME"
+    pm2 delete "$MINER_PROCESS_NAME" || pm2 delete "$MINER_PROCESS_NAME" --silent || true	
     GITTENSOR_MINER_PAT="$GITTENSOR_MINER_PAT" pm2 start python --name "$MINER_PROCESS_NAME" \
         -- neurons/miner.py \
         --netuid "$NETUID" \

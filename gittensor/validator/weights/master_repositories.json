@@ -11,7 +11,7 @@
   "Activiti/Activiti": {
     "weight": 1.41
   },
-  "AffineLabs/affine-subnet": {
+  "AffineFoundation/affine": {
     "weight": 3.5
   },
   "Aider-AI/aider": {
@@ -118,7 +118,7 @@
   },
   "BoltzmannEntropy/interviews.ai": {
     "inactiveAt": "2025-11-04T02:18:33.094Z",
-    "weight": 0.01
+    "weight": 1.0
   },
   "BretFisher/udemy-docker-mastery": {
     "weight": 1.43
@@ -231,6 +231,9 @@
   "Datalux/Osintgram": {
     "weight": 1.17
   },
+  "Datura-ai/lium-io": {
+    "weight": 3.5
+  },
   "DaveGamble/cJSON": {
     "weight": 1.11
   },
@@ -278,12 +281,12 @@
   },
   "Ebazhanov/linkedin-skill-assessments-quizzes": {
     "inactiveAt": "2025-11-04T02:18:33.094Z",
-    "weight": 0.01
+    "weight": 1.0
   },
   "EduardoPires/EquinoxProject": {
     "weight": 1.12
   },
-  "EfficientFrontier/efficient-subnet": {
+  "EfficientFrontier-SignalPlus/EfficientFrontier": {
     "weight": 3.5
   },
   "EleutherAI/gpt-neox": {
@@ -435,9 +438,6 @@
   },
   "GoogleContainerTools/jib": {
     "weight": 1.02
-  },
-  "Gradients-Labs/gradients": {
-    "weight": 3.5
   },
   "GrapesJS/grapesjs": {
     "weight": 1.04
@@ -651,9 +651,6 @@
   },
   "LineageOS/android": {
     "weight": 1.18
-  },
-  "LiumTech/lium-subnet": {
-    "weight": 3.5
   },
   "LmeSzinc/AzurLaneAutoScript": {
     "weight": 1.02
@@ -1117,9 +1114,6 @@
   "QuantConnect/Lean": {
     "weight": 1.15
   },
-  "QuantumInnovate/quantum-innovate": {
-    "weight": 3.5
-  },
   "QuantumNous/new-api": {
     "weight": 1.05
   },
@@ -1152,9 +1146,6 @@
   },
   "ReactiveX/RxJava": {
     "weight": 1.28
-  },
-  "ReadyAI/readyai-subnet": {
-    "weight": 3.5
   },
   "RedSiege/EyeWitness": {
     "weight": 1.02
@@ -1240,6 +1231,9 @@
   "SeleniumHQ/selenium": {
     "weight": 1.2
   },
+  "SentiVerse-AI/soulx": {
+    "weight": 3.5
+  },
   "ServiceStack/ServiceStack": {
     "weight": 1.12
   },
@@ -1299,9 +1293,6 @@
   },
   "SortableJS/Sortable": {
     "weight": 1.07
-  },
-  "SoulX-ai/soulx": {
-    "weight": 3.5
   },
   "Soundnode/soundnode-app": {
     "weight": 1.02
@@ -1430,19 +1421,24 @@
     "weight": 1.03
   },
   "TheAlgorithms/C-Plus-Plus": {
-    "weight": 1.15
+    "inactiveAt": "2025-11-10T16:39:22.045Z",
+    "weight": 1.0
   },
   "TheAlgorithms/C-Sharp": {
-    "weight": 1.12
+    "inactiveAt": "2025-11-10T16:39:22.045Z",
+    "weight": 1.0
   },
   "TheAlgorithms/Java": {
-    "weight": 1.47
+    "inactiveAt": "2025-11-10T16:39:22.045Z",
+    "weight": 1.0
   },
   "TheAlgorithms/JavaScript": {
-    "weight": 1.08
+    "inactiveAt": "2025-11-10T16:39:22.045Z",
+    "weight": 1.0
   },
   "TheAlgorithms/Python": {
-    "weight": 1.28
+    "inactiveAt": "2025-11-10T16:39:22.045Z",
+    "weight": 1.0
   },
   "TheLastBen/fast-stable-diffusion": {
     "weight": 1.03
@@ -1537,9 +1533,6 @@
   "ValveSoftware/source-sdk-2013": {
     "weight": 1.11
   },
-  "VectorChat/chunking_subnet": {
-    "weight": 3.5
-  },
   "Vedenin/useful-java-links": {
     "weight": 1.01
   },
@@ -1576,9 +1569,6 @@
   "WhiskeySockets/Baileys": {
     "weight": 1.39
   },
-  "WinterChenS/my-site": {
-    "weight": 1.33
-  },
   "WireGuard/wireguard-go": {
     "weight": 1.27
   },
@@ -1608,7 +1598,7 @@
   },
   "YauhenKavalchuk/interview-questions": {
     "inactiveAt": "2025-11-04T02:18:33.094Z",
-    "weight": 0.01
+    "weight": 1.0
   },
   "Yorko/mlcourse.ai": {
     "weight": 1.42
@@ -1822,7 +1812,7 @@
   },
   "alexeygrigorev/data-science-interviews": {
     "inactiveAt": "2025-11-04T02:18:33.094Z",
-    "weight": 0.01
+    "weight": 1.0
   },
   "alexlenail/NN-SVG": {
     "weight": 1.02
@@ -1916,7 +1906,7 @@
   },
   "amitshekhariitbhu/android-interview-questions": {
     "inactiveAt": "2025-11-04T02:18:33.094Z",
-    "weight": 0.01
+    "weight": 1.0
   },
   "ampproject/amphtml": {
     "weight": 1.2
@@ -2446,6 +2436,9 @@
   "base/node": {
     "weight": 1.1
   },
+  "basecamp/omarchy": {
+    "weight": 1.95
+  },
   "bayesian-optimization/BayesianOptimization": {
     "weight": 1.03
   },
@@ -2967,7 +2960,7 @@
   },
   "coffe1891/frontend-hard-mode-interview": {
     "inactiveAt": "2025-11-04T02:18:33.094Z",
-    "weight": 0.01
+    "weight": 1.0
   },
   "coldint/coldint_validator": {
     "weight": 3.5
@@ -3669,7 +3662,8 @@
     "weight": 1.36
   },
   "egonSchiele/grokking_algorithms": {
-    "weight": 1.41
+    "inactiveAt": "2025-11-08T04:21:05.319Z",
+    "weight": 0.1
   },
   "eirslett/frontend-maven-plugin": {
     "weight": 1.12
@@ -3763,7 +3757,7 @@
   },
   "enhorse/java-interview": {
     "inactiveAt": "2025-11-04T02:18:33.094Z",
-    "weight": 0.01
+    "weight": 1.0
   },
   "enricoros/big-AGI": {
     "weight": 1.13
@@ -4007,7 +4001,7 @@
   },
   "febobo/web-interview": {
     "inactiveAt": "2025-11-04T02:18:33.094Z",
-    "weight": 0.01
+    "weight": 1.0
   },
   "feder-cr/Jobs_Applier_AI_Agent_AIHawk": {
     "weight": 1.06
@@ -4169,7 +4163,8 @@
     "weight": 1.07
   },
   "fragglet/c-algorithms": {
-    "weight": 1.06
+    "inactiveAt": "2025-11-08T04:21:05.319Z",
+    "weight": 1.0
   },
   "framework7io/framework7": {
     "weight": 1.07
@@ -4587,11 +4582,11 @@
   },
   "greatfrontend/top-javascript-interview-questions": {
     "inactiveAt": "2025-11-04T02:18:33.094Z",
-    "weight": 0.01
+    "weight": 1.0
   },
   "greatfrontend/top-reactjs-interview-questions": {
     "inactiveAt": "2025-11-04T02:18:33.094Z",
-    "weight": 0.01
+    "weight": 1.0
   },
   "greatscottgadgets/hackrf": {
     "weight": 1.08
@@ -4643,7 +4638,7 @@
   },
   "gyoogle/tech-interview-for-developer": {
     "inactiveAt": "2025-11-04T02:18:33.094Z",
-    "weight": 0.01
+    "weight": 1.0
   },
   "gz-yami/mall4cloud": {
     "weight": 1.16
@@ -4683,7 +4678,7 @@
   },
   "haizlin/fe-interview": {
     "inactiveAt": "2025-11-04T02:18:33.094Z",
-    "weight": 0.01
+    "weight": 1.0
   },
   "hak5/usbrubberducky-payloads": {
     "weight": 1.18
@@ -4882,7 +4877,7 @@
   },
   "huihut/interview": {
     "inactiveAt": "2025-11-04T02:18:33.094Z",
-    "weight": 0.01
+    "weight": 1.0
   },
   "huiyadanli/RevokeMsgPatcher": {
     "weight": 1.02
@@ -4946,7 +4941,7 @@
   },
   "ibttf/interview-coder": {
     "inactiveAt": "2025-11-04T02:18:33.094Z",
-    "weight": 0.01
+    "weight": 1.0
   },
   "icsharpcode/ILSpy": {
     "weight": 1.02
@@ -5397,7 +5392,7 @@
   },
   "jwasham/coding-interview-university": {
     "inactiveAt": "2025-11-04T02:18:33.094Z",
-    "weight": 0.01
+    "weight": 1.0
   },
   "jwtk/jjwt": {
     "weight": 1.02
@@ -5455,7 +5450,8 @@
     "weight": 1.23
   },
   "keon/algorithms": {
-    "weight": 1.06
+    "inactiveAt": "2025-11-08T04:21:05.319Z",
+    "weight": 1.0
   },
   "keplergl/kepler.gl": {
     "weight": 1.01
@@ -5531,7 +5527,7 @@
   },
   "ksundong/backend-interview-question": {
     "inactiveAt": "2025-11-04T02:18:33.094Z",
-    "weight": 0.01
+    "weight": 1.0
   },
   "ktbyers/netmiko": {
     "weight": 1.35
@@ -5882,7 +5878,8 @@
     "weight": 1.02
   },
   "loiane/javascript-datastructures-algorithms": {
-    "weight": 1.16
+    "inactiveAt": "2025-11-08T04:21:05.319Z",
+    "weight": 1.0
   },
   "longitachi/ZLPhotoBrowser": {
     "weight": 1.02
@@ -6562,9 +6559,6 @@
   "n8n-io/n8n": {
     "weight": 1.7
   },
-  "namoray/nineteen": {
-    "weight": 3.5
-  },
   "nanocurrency/nano-node": {
     "weight": 1.07
   },
@@ -6734,7 +6728,8 @@
     "weight": 1.23
   },
   "nonstriater/Learn-Algorithms": {
-    "weight": 1.1
+    "inactiveAt": "2025-11-10T16:39:22.045Z",
+    "weight": 1.0
   },
   "nopSolutions/nopCommerce": {
     "weight": 1.38
@@ -7003,6 +6998,12 @@
   "openstreetmap/iD": {
     "weight": 1.36
   },
+  "opentensor/bittensor": {
+    "weight": 3.94
+  },
+  "opentensor/btcli": {
+    "weight": 3.94
+  },
   "opentensor/subtensor": {
     "weight": 3.94
   },
@@ -7134,6 +7135,9 @@
   },
   "parcel-bundler/parcel": {
     "weight": 1.19
+  },
+  "paritytech/polkadot-sdk": {
+    "weight": 2.99
   },
   "parse-community/parse-dashboard": {
     "weight": 1.36
@@ -7642,6 +7646,9 @@
   "raycast/extensions": {
     "weight": 1.38
   },
+  "rayonlabs/G.O.D": {
+    "weight": 3.5
+  },
   "rclone/rclone": {
     "weight": 1.11
   },
@@ -7877,7 +7884,8 @@
     "weight": 1.4
   },
   "rushter/MLAlgorithms": {
-    "weight": 1.04
+    "inactiveAt": "2025-11-10T16:39:22.045Z",
+    "weight": 1.0
   },
   "rust-lang/book": {
     "weight": 1.09
@@ -8790,7 +8798,7 @@
   },
   "tssovi/grokking-the-object-oriented-design-interview": {
     "inactiveAt": "2025-11-04T02:18:33.094Z",
-    "weight": 0.01
+    "weight": 0.1
   },
   "tumobi/nideshop": {
     "weight": 1.38
@@ -8817,7 +8825,8 @@
     "weight": 1.15
   },
   "twitter/the-algorithm": {
-    "weight": 1.16
+    "inactiveAt": "2025-11-08T04:21:05.319Z",
+    "weight": 1.0
   },
   "twostraws/HackingWithSwift": {
     "weight": 1.27
@@ -9091,7 +9100,7 @@
   },
   "wdndev/llm_interview_note": {
     "inactiveAt": "2025-11-04T02:18:33.094Z",
-    "weight": 0.01
+    "weight": 1.0
   },
   "weaviate/Verba": {
     "weight": 1.01
@@ -9287,11 +9296,11 @@
   },
   "yangshun/front-end-interview-handbook": {
     "inactiveAt": "2025-11-04T02:18:33.094Z",
-    "weight": 0.01
+    "weight": 1.0
   },
   "yangshun/tech-interview-handbook": {
     "inactiveAt": "2025-11-04T02:18:33.094Z",
-    "weight": 0.01
+    "weight": 1.0
   },
   "yangzongzhuan/RuoYi": {
     "weight": 1.01

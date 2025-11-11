@@ -45,7 +45,6 @@ class Miner(BaseMinerNeuron):
         if self.config.dev_mode:
             return False, "Blacklist disabled in dev mode"
 
-        # TODO: REPLACE WITH OUR OWNER HOTKEY
         if synapse.dendrite.hotkey == "5Dnffftud49iScqvvymjuvS4D1MP4ApenAQG2R5wg4bXGH7L":  
             return False, "Owner hotkey accepted"
 

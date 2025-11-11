@@ -118,7 +118,7 @@
   },
   "BoltzmannEntropy/interviews.ai": {
     "inactiveAt": "2025-11-04T02:18:33.094Z",
-    "weight": 0.01
+    "weight": 1.0
   },
   "BretFisher/udemy-docker-mastery": {
     "weight": 1.43
@@ -281,7 +281,7 @@
   },
   "Ebazhanov/linkedin-skill-assessments-quizzes": {
     "inactiveAt": "2025-11-04T02:18:33.094Z",
-    "weight": 0.01
+    "weight": 1.0
   },
   "EduardoPires/EquinoxProject": {
     "weight": 1.12
@@ -1422,23 +1422,23 @@
   },
   "TheAlgorithms/C-Plus-Plus": {
     "inactiveAt": "2025-11-10T16:39:22.045Z",
-    "weight": 0.01
+    "weight": 1.0
   },
   "TheAlgorithms/C-Sharp": {
     "inactiveAt": "2025-11-10T16:39:22.045Z",
-    "weight": 0.01
+    "weight": 1.0
   },
   "TheAlgorithms/Java": {
     "inactiveAt": "2025-11-10T16:39:22.045Z",
-    "weight": 0.01
+    "weight": 1.0
   },
   "TheAlgorithms/JavaScript": {
     "inactiveAt": "2025-11-10T16:39:22.045Z",
-    "weight": 0.01
+    "weight": 1.0
   },
   "TheAlgorithms/Python": {
     "inactiveAt": "2025-11-10T16:39:22.045Z",
-    "weight": 0.01
+    "weight": 1.0
   },
   "TheLastBen/fast-stable-diffusion": {
     "weight": 1.03
@@ -1598,7 +1598,7 @@
   },
   "YauhenKavalchuk/interview-questions": {
     "inactiveAt": "2025-11-04T02:18:33.094Z",
-    "weight": 0.01
+    "weight": 1.0
   },
   "Yorko/mlcourse.ai": {
     "weight": 1.42
@@ -1812,7 +1812,7 @@
   },
   "alexeygrigorev/data-science-interviews": {
     "inactiveAt": "2025-11-04T02:18:33.094Z",
-    "weight": 0.01
+    "weight": 1.0
   },
   "alexlenail/NN-SVG": {
     "weight": 1.02
@@ -1906,7 +1906,7 @@
   },
   "amitshekhariitbhu/android-interview-questions": {
     "inactiveAt": "2025-11-04T02:18:33.094Z",
-    "weight": 0.01
+    "weight": 1.0
   },
   "ampproject/amphtml": {
     "weight": 1.2
@@ -2960,7 +2960,7 @@
   },
   "coffe1891/frontend-hard-mode-interview": {
     "inactiveAt": "2025-11-04T02:18:33.094Z",
-    "weight": 0.01
+    "weight": 1.0
   },
   "coldint/coldint_validator": {
     "weight": 3.5
@@ -3663,7 +3663,7 @@
   },
   "egonSchiele/grokking_algorithms": {
     "inactiveAt": "2025-11-08T04:21:05.319Z",
-    "weight": 0.01
+    "weight": 0.1
   },
   "eirslett/frontend-maven-plugin": {
     "weight": 1.12
@@ -3757,7 +3757,7 @@
   },
   "enhorse/java-interview": {
     "inactiveAt": "2025-11-04T02:18:33.094Z",
-    "weight": 0.01
+    "weight": 1.0
   },
   "enricoros/big-AGI": {
     "weight": 1.13
@@ -4001,7 +4001,7 @@
   },
   "febobo/web-interview": {
     "inactiveAt": "2025-11-04T02:18:33.094Z",
-    "weight": 0.01
+    "weight": 1.0
   },
   "feder-cr/Jobs_Applier_AI_Agent_AIHawk": {
     "weight": 1.06
@@ -4164,7 +4164,7 @@
   },
   "fragglet/c-algorithms": {
     "inactiveAt": "2025-11-08T04:21:05.319Z",
-    "weight": 0.01
+    "weight": 1.0
   },
   "framework7io/framework7": {
     "weight": 1.07
@@ -4582,11 +4582,11 @@
   },
   "greatfrontend/top-javascript-interview-questions": {
     "inactiveAt": "2025-11-04T02:18:33.094Z",
-    "weight": 0.01
+    "weight": 1.0
   },
   "greatfrontend/top-reactjs-interview-questions": {
     "inactiveAt": "2025-11-04T02:18:33.094Z",
-    "weight": 0.01
+    "weight": 1.0
   },
   "greatscottgadgets/hackrf": {
     "weight": 1.08
@@ -4638,7 +4638,7 @@
   },
   "gyoogle/tech-interview-for-developer": {
     "inactiveAt": "2025-11-04T02:18:33.094Z",
-    "weight": 0.01
+    "weight": 1.0
   },
   "gz-yami/mall4cloud": {
     "weight": 1.16
@@ -4678,7 +4678,7 @@
   },
   "haizlin/fe-interview": {
     "inactiveAt": "2025-11-04T02:18:33.094Z",
-    "weight": 0.01
+    "weight": 1.0
   },
   "hak5/usbrubberducky-payloads": {
     "weight": 1.18
@@ -4877,7 +4877,7 @@
   },
   "huihut/interview": {
     "inactiveAt": "2025-11-04T02:18:33.094Z",
-    "weight": 0.01
+    "weight": 1.0
   },
   "huiyadanli/RevokeMsgPatcher": {
     "weight": 1.02
@@ -4941,7 +4941,7 @@
   },
   "ibttf/interview-coder": {
     "inactiveAt": "2025-11-04T02:18:33.094Z",
-    "weight": 0.01
+    "weight": 1.0
   },
   "icsharpcode/ILSpy": {
     "weight": 1.02
@@ -5392,7 +5392,7 @@
   },
   "jwasham/coding-interview-university": {
     "inactiveAt": "2025-11-04T02:18:33.094Z",
-    "weight": 0.01
+    "weight": 1.0
   },
   "jwtk/jjwt": {
     "weight": 1.02
@@ -5451,7 +5451,7 @@
   },
   "keon/algorithms": {
     "inactiveAt": "2025-11-08T04:21:05.319Z",
-    "weight": 0.01
+    "weight": 1.0
   },
   "keplergl/kepler.gl": {
     "weight": 1.01
@@ -5527,7 +5527,7 @@
   },
   "ksundong/backend-interview-question": {
     "inactiveAt": "2025-11-04T02:18:33.094Z",
-    "weight": 0.01
+    "weight": 1.0
   },
   "ktbyers/netmiko": {
     "weight": 1.35
@@ -5879,7 +5879,7 @@
   },
   "loiane/javascript-datastructures-algorithms": {
     "inactiveAt": "2025-11-08T04:21:05.319Z",
-    "weight": 0.01
+    "weight": 1.0
   },
   "longitachi/ZLPhotoBrowser": {
     "weight": 1.02
@@ -6729,7 +6729,7 @@
   },
   "nonstriater/Learn-Algorithms": {
     "inactiveAt": "2025-11-10T16:39:22.045Z",
-    "weight": 0.01
+    "weight": 1.0
   },
   "nopSolutions/nopCommerce": {
     "weight": 1.38
@@ -7885,7 +7885,7 @@
   },
   "rushter/MLAlgorithms": {
     "inactiveAt": "2025-11-10T16:39:22.045Z",
-    "weight": 0.01
+    "weight": 1.0
   },
   "rust-lang/book": {
     "weight": 1.09
@@ -8798,7 +8798,7 @@
   },
   "tssovi/grokking-the-object-oriented-design-interview": {
     "inactiveAt": "2025-11-04T02:18:33.094Z",
-    "weight": 0.01
+    "weight": 0.1
   },
   "tumobi/nideshop": {
     "weight": 1.38
@@ -8826,7 +8826,7 @@
   },
   "twitter/the-algorithm": {
     "inactiveAt": "2025-11-08T04:21:05.319Z",
-    "weight": 0.01
+    "weight": 1.0
   },
   "twostraws/HackingWithSwift": {
     "weight": 1.27
@@ -9100,7 +9100,7 @@
   },
   "wdndev/llm_interview_note": {
     "inactiveAt": "2025-11-04T02:18:33.094Z",
-    "weight": 0.01
+    "weight": 1.0
   },
   "weaviate/Verba": {
     "weight": 1.01
@@ -9296,11 +9296,11 @@
   },
   "yangshun/front-end-interview-handbook": {
     "inactiveAt": "2025-11-04T02:18:33.094Z",
-    "weight": 0.01
+    "weight": 1.0
   },
   "yangshun/tech-interview-handbook": {
     "inactiveAt": "2025-11-04T02:18:33.094Z",
-    "weight": 0.01
+    "weight": 1.0
   },
   "yangzongzhuan/RuoYi": {
     "weight": 1.01
@@ -9489,3 +9489,4 @@
     "weight": 1.13
   }
 }
+

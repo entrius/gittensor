@@ -136,9 +136,9 @@ if ! wandb login $WANDB_API_KEY; then
 fi
 
 # STOP VALIDATOR PROCESS
-if pm2 list | grep -q "$VALIDATOR_PROCESS_NAME"; then
+if pm2 describe "$VALIDATOR_PROCESS_NAME" >/dev/null 2>&1; then
   echo "Process '$VALIDATOR_PROCESS_NAME' is already running. Killing and rerunning..."
-  pm2 delete "$VALIDATOR_PROCESS_NAME"
+  pm2 delete "$VALIDATOR_PROCESS_NAME" || pm2 delete "$VALIDATOR_PROCESS_NAME" --silent || true	
   pm2 start python --name "$VALIDATOR_PROCESS_NAME" $PM2_EXTRA_FLAGS -- $DEBUGPY_PREFIX neurons/validator.py --netuid $NETUID --subtensor.network $SUBTENSOR_NETWORK --wallet.name $WALLET_NAME --wallet.hotkey $HOTKEY_NAME --axon.port $PORT $OPTIONAL_FLAGS $LOGGING
 else
   echo "Process '$VALIDATOR_PROCESS_NAME' is not running. Starting it for the first time..."

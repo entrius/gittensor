@@ -94,7 +94,7 @@ class Validator(BaseValidatorNeuron):
                         bt.logging.warning(f"  - {error}")
 
             except Exception as e:
-                bt.logging.error(f"Error when attemping to store miners evaluation for uid {uid}: {e}")
+                bt.logging.error(f"Error when attempting to store miners evaluation for uid {uid}: {e}")
 
     async def forward(self):
         """

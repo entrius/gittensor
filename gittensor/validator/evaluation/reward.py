@@ -71,7 +71,7 @@ def score_pull_requests(
 
     for pr in valid_prs:
         # if repo not in master list, default to .01 (shouldn't happen bc already filtered in github graphql method)
-        repo_weight = master_repositories.get(pr.repository_full_name).get("weight", 0.01)
+        repo_weight = master_repositories.get(pr.repository_full_name, {}).get("weight", 0.01)
         file_changes = get_pull_request_file_changes(pr.repository_full_name, pr.number, github_pat)
         if not file_changes:
             continue

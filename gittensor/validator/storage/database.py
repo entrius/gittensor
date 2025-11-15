@@ -47,21 +47,3 @@ def create_database_connection() -> Optional[object]:
     except Exception as e:
         bt.logging.error(f"Unexpected error connecting to database: {e}")
         return None
-
-
-def test_database_connection() -> bool:
-    """
-    Test if database connection is working.
-
-    Returns:
-        True if connection successful, False otherwise
-    """
-    connection = create_database_connection()
-    if connection:
-        try:
-            connection.close()
-            return True
-        except Exception as e:
-            bt.logging.error(f"Error closing test connection: {e}")
-            return False
-    return False

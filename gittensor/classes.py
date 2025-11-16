@@ -163,6 +163,49 @@ class PullRequest:
 
         self.total_lines_scored = total_lines_scored
         return pr_score
+    
+    def get_dominant_file_type(self) -> Optional[str]:
+        """
+        Determine the dominant file type category in this PR.
+        
+        Returns:
+            str: The dominant file type ('test', 'doc', 'translation')
+                 or None if no clear dominant type
+        """
+        from gittensor.constants import SPAM_FILE_TYPE_PATTERNS
+        
+        if not self.file_changes:
+            return None
+        
+        # Count changes per file type category
+        type_changes = {file_type: 0 for file_type in SPAM_FILE_TYPE_PATTERNS.keys()}
+        type_changes['other'] = 0
+        total_changes = 0
+        
+        for file_change in self.file_changes:
+            filename_lower = file_change.filename.lower()
+            total_changes += file_change.changes
+            
+            # Check which category this file belongs to
+            categorized = False
+            for file_type, patterns in SPAM_FILE_TYPE_PATTERNS.items():
+                if any(pattern in filename_lower for pattern in patterns):
+                    type_changes[file_type] += file_change.changes
+                    categorized = True
+                    break
+            
+            if not categorized:
+                type_changes['other'] += file_change.changes
+        
+        if total_changes == 0:
+            return None
+        
+        # Find dominant type (must be >60% of changes)
+        for file_type, changes in type_changes.items():
+            if file_type != 'other' and changes / total_changes > 0.6:
+                return file_type
+        
+        return None
 
     @classmethod
     def from_graphql_response(cls, pr_data: dict, uid: int, hotkey: str, github_id: str) -> 'PullRequest':
@@ -335,6 +378,68 @@ class MinerEvaluation:
     def add_pull_request(self, pull_request: PullRequest):
         """Helper method to add a pull request and maintain collections."""
         self.pull_requests.append(pull_request)
+        
+    def analyze_repetitive_spam_per_repository(self) -> Dict[str, Dict[str, any]]:
+        """
+        Analyze if miner is submitting repetitive spam PRs to specific repositories.
+        
+        Groups PRs by repository and checks if they're all the same type
+        (e.g., all tests, all docs, all config files).
+        
+        Returns:
+            Dict mapping repository -> {
+                'total_prs': int,
+                'dominant_type': str,
+                'type_ratio': float,
+                'is_spam': bool
+            }
+        """
+        from collections import defaultdict
+        from gittensor.constants import (
+            REPETITIVE_SPAM_MIN_PRS,
+            REPETITIVE_SPAM_THRESHOLD
+        )
+        
+        # Group PRs by repository
+        repo_prs = defaultdict(list)
+        for pr in self.pull_requests:
+            repo_prs[pr.repository_full_name].append(pr)
+        
+        analysis = {}
+        
+        for repo, prs in repo_prs.items():
+            # Need minimum PRs to detect pattern
+            if len(prs) < REPETITIVE_SPAM_MIN_PRS:
+                continue
+            
+            # Count file types across all PRs in this repo
+            type_counts = defaultdict(int)
+            
+            for pr in prs:
+                dominant_type = pr.get_dominant_file_type()
+                if dominant_type:
+                    type_counts[dominant_type] += 1
+            
+            if not type_counts:
+                continue
+            
+            # Find most common type
+            most_common_type = max(type_counts.items(), key=lambda x: x[1])
+            dominant_type = most_common_type[0]
+            dominant_count = most_common_type[1]
+            
+            type_ratio = dominant_count / len(prs)
+            is_spam = type_ratio >= REPETITIVE_SPAM_THRESHOLD
+            
+            analysis[repo] = {
+                'total_prs': len(prs),
+                'dominant_type': dominant_type,
+                'type_ratio': type_ratio,
+                'is_spam': is_spam,
+                'pr_numbers': [pr.number for pr in prs]
+            }
+        
+        return analysis
 
 
 class GitPatSynapse(bt.Synapse):

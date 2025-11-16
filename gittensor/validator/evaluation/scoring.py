@@ -447,3 +447,66 @@ def calculate_issue_multiplier_score(issue: Issue, index: int) -> float:
         issue_score = 0.1
 
     return issue_score
+
+
+def apply_repetitive_spam_penalty(miner_evaluations: Dict[int, MinerEvaluation]):
+    """
+    Detect and penalize miners who submit repetitive spam PRs to the same repository.
+    
+    Checks if a miner is submitting multiple PRs of the same type (tests, docs, config)
+    to the same repository, which indicates spam behavior.
+    
+    Args:
+        miner_evaluations (Dict[int, MinerEvaluation]): Evaluation data
+        
+    Note:
+        This function modifies the `miner_evaluations` dictionary in-place.
+    """
+    from gittensor.constants import REPETITIVE_SPAM_PENALTY
+    
+    bt.logging.info("Detecting repetitive spam patterns per user per repository...")
+    
+    total_spam_repos_detected = 0
+    total_miners_penalized = 0
+    
+    for uid, evaluation in miner_evaluations.items():
+        if not evaluation or not evaluation.pull_requests:
+            continue
+        
+        # Analyze spam patterns for this miner
+        spam_analysis = evaluation.analyze_repetitive_spam_per_repository()
+        
+        if not spam_analysis:
+            continue
+        
+        miner_has_spam = False
+        
+        for repo, analysis in spam_analysis.items():
+            if analysis['is_spam']:
+                miner_has_spam = True
+                total_spam_repos_detected += 1
+                
+                bt.logging.warning(
+                    f"REPETITIVE SPAM DETECTED: UID {uid} submitted {analysis['total_prs']} PRs "
+                    f"to {mask_secret(repo)}, {analysis['type_ratio']:.0%} are '{analysis['dominant_type']}' files. "
+                    f"PR numbers: {analysis['pr_numbers']}"
+                )
+                
+                # Apply penalty to all PRs in this repository
+                for pr in evaluation.pull_requests:
+                    if pr.repository_full_name == repo:
+                        original_score = pr.earned_score
+                        pr.set_earned_score(original_score * REPETITIVE_SPAM_PENALTY)
+                        
+                        bt.logging.info(
+                            f"  Penalizing PR #{pr.number}: {original_score:.5f} -> {pr.earned_score:.5f} "
+                            f"(penalty: {REPETITIVE_SPAM_PENALTY}x)"
+                        )
+        
+        if miner_has_spam:
+            total_miners_penalized += 1
+    
+    bt.logging.info(
+        f"Repetitive spam detection complete: {total_miners_penalized} miners penalized, "
+        f"{total_spam_repos_detected} spam repository patterns detected"
+    )

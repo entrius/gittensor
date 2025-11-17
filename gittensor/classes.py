@@ -116,6 +116,7 @@ class PullRequest:
     last_edited_at: Optional[datetime] = None
     gittensor_tagged: bool = False
     total_lines_scored: int = 0
+    penalty_list = []
 
     @property
     def total_changes(self) -> int:
@@ -129,6 +130,10 @@ class PullRequest:
     def set_file_changes(self, file_changes: List[FileChange]) -> None:
         """Set the file changes for this pull request"""
         self.file_changes = file_changes
+        
+    def set_applied_penalties(self, penalties) -> None:
+        """Set the penalties applied for this pull request"""
+        self.penalty_list = penalties
 
     def calculate_score_from_file_changes(self, programming_languages: Dict[str, float]):
         """

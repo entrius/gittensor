@@ -314,7 +314,7 @@ def detect_comment_ratio_in_pr(pr: PullRequest) -> bool:
     return comment_ratio
 
 
-def comment_penalty_multiplier(comment_ratio, threshold=0.05, k=2.0):
+def comment_penalty_multiplier(comment_ratio, threshold=0.15, k=2.0):
     if comment_ratio <= threshold:
         return 1.0
 
@@ -384,6 +384,13 @@ def apply_spam_detection_penalties(pr: PullRequest) -> None:
             f"Score penalized: {original_score:.5f} -> {pr.earned_score:.5f} "
             f"(penalty: {WHITESPACE_ONLY_PR_PENALTY}x)"
         )
+        
+        pr.set_applied_penalties([{
+            "reason": "WHITESPACE",
+            "description": f"Penalty(x{WHITESPACE_ONLY_PR_PENALTY}) applied({original_score:.2f} -> {pr.earned_score:.2f}) because changes in PR is only whitespaces.",
+            "scores": [original_score, pr.earned_score]
+        }])
+        
         original_score = pr.earned_score
         # Early return as score is reduced 0.05x, no need to reduce more
         return
@@ -398,6 +405,13 @@ def apply_spam_detection_penalties(pr: PullRequest) -> None:
             f"Score penalized: {original_score:.5f} -> {pr.earned_score:.5f} "
             f"(penalty: {TYPO_ONLY_PR_PENALTY}x)"
         )
+        
+        pr.set_applied_penalties([{
+            "reason": "TYPO",
+            "description": f"Penalty(x{TYPO_ONLY_PR_PENALTY}) applied({original_score:.2f} -> {pr.earned_score:.2f}) because {typo_ratio:.2f} of the code changes in this PR are typo changes.",
+            "scores": [original_score, pr.earned_score]
+        }])
+        
         original_score = pr.earned_score
         # Early return as score is reduced 0.1x, no need to reduce more
         return
@@ -415,8 +429,14 @@ def apply_spam_detection_penalties(pr: PullRequest) -> None:
                 f"Score penalized: {original_score:.5f} -> {pr.earned_score:.5f} "
                 f"(penalty: {comment_penalty:.2f}x)"
             )
+        
+        pr.set_applied_penalties(pr.penalty_list + [{
+            "reason": "COMMENTS",
+            "description": f"Penalty(x{comment_penalty:.2f}) applied({original_score:.2f} -> {pr.earned_score:.2f}) because {comment_ratio:.2f} of the code changes in this PR are comments.",
+            "scores": [original_score, pr.earned_score]
+        }])
+            
         original_score = pr.earned_score
-        return
     
     # Check for translation-only PR
     is_translation, translation_ratio = detect_translation_only_pr(pr)
@@ -429,8 +449,14 @@ def apply_spam_detection_penalties(pr: PullRequest) -> None:
             f"Score penalized: {original_score:.5f} -> {pr.earned_score:.5f} "
             f"(penalty: {penalty_factor}x)"
         )
+        
+        pr.set_applied_penalties(pr.penalty_list + [{
+            "reason": "TRANSLATION",
+            "description": f"Penalty(x{penalty_factor:.2f}) applied({original_score:.2f} -> {pr.earned_score:.2f}) because {translation_ratio:.2f} of the code changes in this PR are translations.",
+            "scores": [original_score, pr.earned_score]
+        }])
+        
         original_score = pr.earned_score
-    
     
     # Check for formatting/linting-only PR
     is_formatting_only = detect_formatting_only_pr(pr)
@@ -442,6 +468,13 @@ def apply_spam_detection_penalties(pr: PullRequest) -> None:
             f"Score penalized: {original_score:.5f} -> {pr.earned_score:.5f} "
             f"(penalty: {FORMATTING_ONLY_PR_PENALTY}x)"
         )
+        
+        pr.set_applied_penalties(pr.penalty_list + [{
+            "reason": "FORMATTING",
+            "description": f"Penalty(x{FORMATTING_ONLY_PR_PENALTY:.2f}) applied({original_score:.2f} -> {pr.earned_score:.2f}) because the code changes in this PR are by formatting.",
+            "scores": [original_score, pr.earned_score]
+        }])
+        
         original_score = pr.earned_score
         # Early return as score is reduced 0.15x, no need to reduce more
         return
@@ -451,3 +484,4 @@ def apply_spam_detection_penalties(pr: PullRequest) -> None:
         f"PR #{mask_secret(str(pr.number))} passed spam detection checks "
         f"(typo_ratio: {typo_ratio:.2f}, translation_ratio: {translation_ratio:.2f})"
     )
+    pr.set_applied_penalties = []

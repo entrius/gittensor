@@ -302,6 +302,154 @@ def get_mock_test_cases():
             'total_open_prs': 0,
             'expected_score': 0.0
         },
+
+        # Test Case 7: First-mover advantage - First contributor to repo
+        {
+            'name': 'First-mover to Repository (UID 1)',
+            'uid': 1,
+            'github_id': 'first_mover_user',
+            'hotkey': '5FakeHotkeyFirst...',
+            'prs': [
+                {
+                    'pr': PullRequest(
+                        number=700,
+                        repository_full_name='owner/new_repo',
+                        uid=1,
+                        hotkey='5FakeHotkeyFirst...',
+                        github_id='first_mover_user',
+                        title='Pioneer PR to new repo',
+                        author_login='first_mover_user',
+                        merged_at=datetime(2025, 1, 1),
+                        created_at=datetime(2024, 12, 25),
+                        additions=200,
+                        deletions=100,
+                        commits=5,
+                        issues=[]
+                    ),
+                    'file_changes': [
+                        FileChange(
+                            pr_number=700,
+                            repository_full_name='owner/new_repo',
+                            filename='new_feature.py',
+                            changes=300,
+                            additions=200,
+                            deletions=100,
+                            status='added'
+                        )
+                    ]
+                }
+            ],
+            'total_open_prs': 0,
+            'expected_score': None  # Will receive 1.0x multiplier (first mover)
+        },
+
+        # Test Case 8: First-mover advantage - Follower contributor
+        {
+            'name': 'Follower to Repository (UID 2)',
+            'uid': 2,
+            'github_id': 'follower_user',
+            'hotkey': '5FakeHotkeyFollow...',
+            'prs': [
+                {
+                    'pr': PullRequest(
+                        number=701,
+                        repository_full_name='owner/new_repo',  # Same repo as UID 1
+                        uid=2,
+                        hotkey='5FakeHotkeyFollow...',
+                        github_id='follower_user',
+                        title='Follow-up PR to existing repo',
+                        author_login='follower_user',
+                        merged_at=datetime(2025, 1, 10),  # 9 days after UID 1
+                        created_at=datetime(2025, 1, 5),
+                        additions=150,
+                        deletions=75,
+                        commits=3,
+                        issues=[]
+                    ),
+                    'file_changes': [
+                        FileChange(
+                            pr_number=701,
+                            repository_full_name='owner/new_repo',
+                            filename='enhancement.py',
+                            changes=225,
+                            additions=150,
+                            deletions=75,
+                            status='added'
+                        )
+                    ]
+                }
+            ],
+            'total_open_prs': 0,
+            'expected_score': None  # Will receive 0.1x multiplier (follower)
+        },
+
+        # Test Case 9: First-mover advantage - Multiple repos, mixed status
+        {
+            'name': 'First to Repo A, Follower to Repo B (UID 3)',
+            'uid': 3,
+            'github_id': 'mixed_status_user',
+            'hotkey': '5FakeHotkeyMixed...',
+            'prs': [
+                {
+                    'pr': PullRequest(
+                        number=702,
+                        repository_full_name='owner/repo_a',
+                        uid=3,
+                        hotkey='5FakeHotkeyMixed...',
+                        github_id='mixed_status_user',
+                        title='First PR to Repo A',
+                        author_login='mixed_status_user',
+                        merged_at=datetime(2025, 1, 1),
+                        created_at=datetime(2024, 12, 28),
+                        additions=100,
+                        deletions=50,
+                        commits=2,
+                        issues=[]
+                    ),
+                    'file_changes': [
+                        FileChange(
+                            pr_number=702,
+                            repository_full_name='owner/repo_a',
+                            filename='feature.py',
+                            changes=150,
+                            additions=100,
+                            deletions=50,
+                            status='added'
+                        )
+                    ]
+                },
+                {
+                    'pr': PullRequest(
+                        number=703,
+                        repository_full_name='owner/repo_b',
+                        uid=3,
+                        hotkey='5FakeHotkeyMixed...',
+                        github_id='mixed_status_user',
+                        title='Follow-up PR to Repo B',
+                        author_login='mixed_status_user',
+                        merged_at=datetime(2025, 1, 15),  # Later than someone else
+                        created_at=datetime(2025, 1, 10),
+                        additions=80,
+                        deletions=40,
+                        commits=2,
+                        issues=[]
+                    ),
+                    'file_changes': [
+                        FileChange(
+                            pr_number=703,
+                            repository_full_name='owner/repo_b',
+                            filename='update.py',
+                            changes=120,
+                            additions=80,
+                            deletions=40,
+                            status='modified'
+                        )
+                    ]
+                }
+            ],
+            'total_open_prs': 0,
+            'expected_score': None  # Mixed: 1.0x for repo_a, 0.1x for repo_b
+        },
     ]
 
     return test_cases

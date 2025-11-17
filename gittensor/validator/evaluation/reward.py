@@ -16,8 +16,8 @@ from gittensor.validator.evaluation.inspections import (
 )
 from gittensor.validator.evaluation.scoring import (
     apply_boost_for_gittensor_tag_in_pr_description,
+    apply_first_mover_advantage,
     apply_issue_resolvement_bonus,
-    apply_repository_uniqueness_boost,
     apply_time_decay_for_repository_contributions,
     normalize_rewards_with_pareto,
 )
@@ -189,8 +189,8 @@ async def get_rewards(
     # Adjust scores for duplicate accounts
     detect_and_penalize_duplicates(responses, miner_evaluations)
 
-    # Boost miners who contribute to more unique repos relative to other miners.
-    apply_repository_uniqueness_boost(miner_evaluations)
+    # Apply first-mover advantage: first contributor to each repo gets 1.0x, followers get 0.1x
+    apply_first_mover_advantage(miner_evaluations)
 
     # Older contributions within the lookback window will get less score.
     apply_time_decay_for_repository_contributions(miner_evaluations)

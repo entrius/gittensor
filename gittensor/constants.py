@@ -11,7 +11,10 @@ MIN_GITHUB_ACCOUNT_AGE = 180
 
 # Scoring constants
 MAX_ISSUES_SCORED_IN_SINGLE_PR = 3
-UNIQUE_PR_BOOST = 0.6
+UNIQUE_PR_BOOST = 0.6  # DEPRECATED: Replaced by FIRST_MOVER mechanism
+
+# First-mover scoring: first contributor to a repo gets 1.0x, followers get reduced multiplier
+FIRST_MOVER_FOLLOWER_MULTIPLIER = 0.1
 
 # Gittensor PR tagging
 PR_TAGLINE = "Contribution by Gittensor, learn more at https://gittensor.io/"

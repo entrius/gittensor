@@ -9,11 +9,11 @@ import bittensor as bt
 
 from gittensor.classes import Issue, MinerEvaluation, PullRequest
 from gittensor.constants import (
+    FIRST_MOVER_FOLLOWER_MULTIPLIER,
     GITTENSOR_PR_TAG_MULTIPLIER,
     MAX_ISSUES_SCORED_IN_SINGLE_PR,
     PARETO_DISTRIBUTION_ALPHA_VALUE,
     TIME_DECAY_MIN_MULTIPLIER,
-    UNIQUE_PR_BOOST,
 )
 from gittensor.utils.utils import mask_secret
 from gittensor.validator.utils.config import MERGED_PR_LOOKBACK_DAYS
@@ -138,53 +138,99 @@ def count_repository_contributors(miner_evaluations: Dict[int, MinerEvaluation])
     return repo_contributor_counts
 
 
-def apply_repository_uniqueness_boost(miner_evaluations: Dict[int, MinerEvaluation]) -> Dict[int, float]:
+def apply_first_mover_advantage(miner_evaluations: Dict[int, MinerEvaluation]):
     """
-    Boost miners who contribute to repositories that fewer other miners work on.
-    More unique/rare repository contributions get higher boosts.
+    Apply first-mover advantage: first contributor to a repository gets full points (1.0x),
+    all subsequent contributors get reduced multiplier (0.1x).
+
+    Determination is based on earliest PR merge timestamp within the evaluation window.
+    If multiple miners have the same earliest timestamp, UID is used as tiebreaker (lower UID wins).
 
     Args:
         miner_evaluations (Dict[int, MinerEvaluation]): Evaluation data containing repository contribution info
 
     Note:
-        This function modifies the `miner_evaluations` dictionary in-place to apply the score boost per PR.
+        This function modifies the `miner_evaluations` dictionary in-place to apply the multiplier per PR.
     """
 
-    # Create repository_name -> contributor count dictionary
-    repo_contributor_counts = count_repository_contributors(miner_evaluations)
+    bt.logging.info("Applying first-mover advantage to repository contributions")
 
-    # Skip boost if no repository contributions found
-    if not repo_contributor_counts:
-        bt.logging.info("No repository contributions found, skipping uniqueness boost")
-        return
+    # Build a map of repository -> (first_miner_uid, earliest_merge_timestamp)
+    repo_first_mover: Dict[str, tuple[int, datetime]] = {}
 
-    # Calculate total number of miners for normalization
-    total_miners = len([uid for uid, eval in miner_evaluations.items() if eval.get_unique_repositories()])
-
+    # First pass: determine who was first to each repository
     for uid, evaluation in miner_evaluations.items():
-        if not evaluation or not evaluation.get_unique_repositories():
+        if not evaluation or not evaluation.pull_requests:
             continue
 
-        bt.logging.info(f"Applying repository uniqueness boost for uid {uid}")
-        for repo in evaluation.get_unique_repositories():
-            contributors_count = repo_contributor_counts[repo]
+        for pr in evaluation.pull_requests:
+            repo = pr.repository_full_name
 
-            # Uniqueness score that approaches 0 as contribution count increases
-            uniqueness_score = (total_miners - contributors_count + 1) / total_miners
-            boost_multiplier = 1.0 + (uniqueness_score * UNIQUE_PR_BOOST)
+            if repo not in repo_first_mover:
+                # This is the first time we've seen this repo
+                repo_first_mover[repo] = (uid, pr.merged_at)
+            else:
+                # Compare with existing first mover
+                current_first_uid, current_earliest_time = repo_first_mover[repo]
 
-            repo_prs: List[PullRequest] = [pr for pr in evaluation.pull_requests if pr.repository_full_name == repo]
+                # Check if this PR is earlier
+                if pr.merged_at < current_earliest_time:
+                    repo_first_mover[repo] = (uid, pr.merged_at)
+                elif pr.merged_at == current_earliest_time and uid < current_first_uid:
+                    # Tiebreaker: lower UID wins
+                    repo_first_mover[repo] = (uid, pr.merged_at)
 
-            for pr in repo_prs:
+    # Log first movers
+    bt.logging.info(f"Identified first movers for {len(repo_first_mover)} repositories:")
+    for repo, (first_uid, merge_time) in sorted(repo_first_mover.items()):
+        bt.logging.info(f"  {mask_secret(repo)}: UID {first_uid} (merged at {merge_time.isoformat()})")
+
+    # Second pass: apply multipliers
+    total_first_mover_prs = 0
+    total_follower_prs = 0
+    first_mover_count = 0
+    follower_count = 0
+
+    for uid, evaluation in miner_evaluations.items():
+        if not evaluation or not evaluation.pull_requests:
+            continue
+
+        is_first_mover_to_any_repo = False
+        is_follower_to_any_repo = False
+
+        for pr in evaluation.pull_requests:
+            repo = pr.repository_full_name
+            first_mover_uid, _ = repo_first_mover.get(repo, (None, None))
+
+            if first_mover_uid == uid:
+                # This miner is the first mover to this repo - keep 1.0x (no change)
+                multiplier = 1.0
+                total_first_mover_prs += 1
+                is_first_mover_to_any_repo = True
+                bt.logging.debug(
+                    f"UID {uid} is FIRST MOVER to {mask_secret(repo)}: PR score unchanged at {pr.earned_score:.4f}"
+                )
+            else:
+                # This miner is a follower - apply reduced multiplier
+                multiplier = FIRST_MOVER_FOLLOWER_MULTIPLIER
                 original_score = pr.earned_score
-                pr.set_earned_score(original_score * boost_multiplier)
-
+                pr.set_earned_score(original_score * multiplier)
+                total_follower_prs += 1
+                is_follower_to_any_repo = True
                 bt.logging.info(
-                    f"Applying unique repo boost to PR's earned score for uid {uid}'s contribution to {mask_secret(pr.repository_full_name)}: "
-                    f"{original_score:.4f} -> {pr.earned_score:.4f}"
+                    f"UID {uid} is FOLLOWER to {mask_secret(repo)} (first: UID {first_mover_uid}): "
+                    f"PR score {original_score:.4f} -> {pr.earned_score:.4f} (×{multiplier})"
                 )
 
-    bt.logging.info(f"Completed applying repository uniqueness boost for {total_miners} total contributing miners.")
+        if is_first_mover_to_any_repo:
+            first_mover_count += 1
+        if is_follower_to_any_repo:
+            follower_count += 1
+
+    bt.logging.info(
+        f"First-mover advantage applied: {first_mover_count} first movers ({total_first_mover_prs} PRs), "
+        f"{follower_count} followers ({total_follower_prs} PRs)"
+    )
 
 
 def apply_time_decay_for_repository_contributions(miner_evaluations: Dict[int, MinerEvaluation]):

@@ -92,9 +92,27 @@ Remarks:
 4. **Diminishing returns**: The $0.75$ exponent hinders gaming by inflating line counts but still gives score for bigger PRs
 5. **Issue solve boost**: PRs that solve issues receive a boost multiplier, giving them more value/score
 
-Finally, not captured in the equations above, there is also a uniqueness boost multiplier that can further increase score for miners who consistently make PRs across a wider variety of repositories.
+### First-Mover Advantage
 
-For more details read through our various **[scoring](gittensor/validator/evaluation/scoring.py)** and **[rewards](gittensor/validator/evaluation/reward.py)** functions.
+To incentivize miners to discover and contribute to new repositories, we implement a **first-mover advantage** mechanism:
+
+- **First contributor** to a repository (within the evaluation window) receives **full score (1.0x multiplier)**
+- **All subsequent contributors** to that same repository receive **reduced score (0.1x multiplier)**
+
+Determination rules:
+- First-mover status is determined by the **earliest PR merge timestamp** within the 90-day evaluation window
+- If multiple miners have identical merge timestamps, the **lower UID wins** (deterministic tiebreaker)
+- If a miner is the first to contribute to a repository, **all their PRs** to that repository receive the 1.0x multiplier
+- First-mover status is **per-repository** - a miner can be first to some repos and a follower to others
+
+This mechanism encourages miners to:
+- Seek out untapped repositories rather than all targeting the same popular ones
+- Be pioneers in contributing to new open-source projects
+- Diversify their contributions across the ecosystem
+
+For implementation details, see the `apply_first_mover_advantage()` function in **[scoring.py](gittensor/validator/evaluation/scoring.py)**.
+
+For more details about other scoring mechanisms, read through our various **[scoring](gittensor/validator/evaluation/scoring.py)** and **[rewards](gittensor/validator/evaluation/reward.py)** functions.
 
 ### Errors/Penalties
 

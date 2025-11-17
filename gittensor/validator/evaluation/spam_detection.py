@@ -24,26 +24,17 @@ from gittensor.constants import (
     WHITESPACE_ONLY_PR_PENALTY,
     ACCEPTED_COMMENT_RATIO,
     FORMATTING_ONLY_PR_PENALTY,
-    MIN_TYPO_RATIO_THRESHOLD,
     TYPO_KEYWORDS,
     FORMATTING_KEYWORDS,
-    TRANSLATION_ONLY_PR_PENALTY,
     MIN_TRANSLATION_RATIO_THRESHOLD,
-    TRANSLATION_FILE_PATTERNS,
     TRANSLATION_KEYWORDS,
-    TRANSLATION_CONTENT_PATTERNS,
     NON_ENGLISH_UNICODE_RANGES
 )
 from gittensor.validator.utils.spam_detection import (
     is_typo_change,
     is_translation_file,
     is_translation_content,
-    extract_word_changes_from_patch,
-    find_word_differences,
-    is_similar_word,
-    levenshtein_distance,
-    is_formatting_change,
-    looks_like_whitespace_formatting
+    extract_word_changes_from_patch
 )
 from gittensor.utils.utils import mask_secret
 
@@ -225,9 +216,7 @@ def detect_translation_only_pr(pr: PullRequest) -> Tuple[bool, float]:
 
     # Determine if PR is translation-only
     is_translation_only = (
-        has_translation_keyword and translation_ratio >= MIN_TRANSLATION_RATIO_THRESHOLD
-    ) or (
-        translation_ratio >= 0.95  # Very strong signal
+        has_translation_keyword or translation_ratio >= MIN_TRANSLATION_RATIO_THRESHOLD
     )
     
     return is_translation_only, translation_ratio

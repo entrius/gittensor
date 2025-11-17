@@ -46,7 +46,6 @@ TYPO_ONLY_PR_PENALTY = 0.1  # PRs with only typos get 10% of their score
 WHITESPACE_ONLY_PR_PENALTY = 0.05  # PRs with only spaces get 5% of their score
 ACCEPTED_COMMENT_RATIO = 0.15 # Acceptable comments ratio threshold in a pr 
 FORMATTING_ONLY_PR_PENALTY = 0.15 # PRs with formatting only changes get 15% of their score
-MIN_TYPO_RATIO_THRESHOLD = 0.7  # If 70%+ of changes are typos, apply penalty
 TYPO_KEYWORDS = [
     'typo', 'spelling', 'grammar', 'punctuation', 'whitespace',
     'formatting', 'indentation', 'space', 'tab', 'newline'
@@ -59,7 +58,7 @@ FORMATTING_KEYWORDS = [
 
 # Translation detection
 TRANSLATION_ONLY_PR_PENALTY = 0.15  # PRs with only translations get 15% of their score
-MIN_TRANSLATION_RATIO_THRESHOLD = 0.8  # If 80%+ of changes are translations, apply penalty
+MIN_TRANSLATION_RATIO_THRESHOLD = 0.5  # If 80%+ of changes are translations, apply penalty
 TRANSLATION_FILE_PATTERNS = [
     '/locale/', '/locales/', '/i18n/', '/translations/', '/lang/', '/languages/',
     '.po', '.pot', '.mo', '.xliff', '.xlf', '.resx', '.properties',

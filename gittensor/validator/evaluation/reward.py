@@ -2,7 +2,7 @@
 # Copyright © 2025 Entrius
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Dict
+from typing import TYPE_CHECKING, Dict, Tuple, List
 
 import bittensor as bt
 import numpy as np
@@ -35,7 +35,7 @@ def score_pull_requests(
     valid_raw_prs: list,
     master_repositories: Dict[str, Dict],
     programming_languages: Dict[str, float],
-) -> MinerEvaluation:
+) -> Tuple[MinerEvaluation, List[PullRequest]]:
     """
     Helper function to score pull requests and populate MinerEvaluation object.
 
@@ -83,7 +83,7 @@ def score_pull_requests(
         bt.logging.info(f"Calculated a base PR score from the file changes of {pr.earned_score}")
 
         apply_issue_resolvement_bonus(pr)
-        # Apply spam detection penalties (typo-only, translation-only)
+        # Apply spam detection penalties (typo-only, translation-only, etc)
         apply_spam_detection_penalties(pr)
 
         pr_score_before_repo_weight = pr.earned_score
@@ -92,7 +92,7 @@ def score_pull_requests(
 
         miner_eval.add_pull_request(pr)
 
-    return miner_eval
+    return miner_eval, valid_prs
 
 
 # query miner for synapse

@@ -44,7 +44,7 @@ EXCESSIVE_PR_MIN_WEIGHT = 0.01
 # Typo detection
 TYPO_ONLY_PR_PENALTY = 0.1  # PRs with only typos get 10% of their score
 WHITESPACE_ONLY_PR_PENALTY = 0.05  # PRs with only spaces get 5% of their score
-COMMENT_ONLY_PR_PENALTY = 0.2 # PRs with only comments get 20% of their score
+ACCEPTED_COMMENT_RATIO = 0.05 # Acceptable comments ratio threshold in a pr 
 FORMATTING_ONLY_PR_PENALTY = 0.15 # PRs with formatting only changes get 15% of their score
 MIN_TYPO_RATIO_THRESHOLD = 0.7  # If 70%+ of changes are typos, apply penalty
 TYPO_KEYWORDS = [

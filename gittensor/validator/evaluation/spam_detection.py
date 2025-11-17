@@ -22,7 +22,7 @@ from gittensor.classes import PullRequest, FileChange
 from gittensor.constants import (
     TYPO_ONLY_PR_PENALTY,
     WHITESPACE_ONLY_PR_PENALTY,
-    COMMENT_ONLY_PR_PENALTY,
+    ACCEPTED_COMMENT_RATIO,
     FORMATTING_ONLY_PR_PENALTY,
     MIN_TYPO_RATIO_THRESHOLD,
     TYPO_KEYWORDS,
@@ -273,15 +273,20 @@ def detect_whitespace_only_pr(pr: PullRequest) -> bool:
     return whitespace_files / len(pr.file_changes) > 0.8  # 80%+ whitespace-only
 
 
-def detect_comment_only_pr(pr: PullRequest) -> bool:
+def detect_comment_ratio_in_pr(pr: PullRequest) -> bool:
     """Detect PRs with only comment additions."""
     comment_patterns = [
-        r'^\s*#',           # Python comments
-        r'^\s*//',          # JS/C++ comments
-        r'^\s*/\*',         # Multi-line comment start
-        r'^\s*\*',          # Multi-line comment middle
-        r'^\s*"""',         # Python docstring
-        r'^\s*<!--',        # HTML comment
+        r'^\s*#',             # Python, Bash, Ruby, YAML, Perl, Shell
+        r'^\s*//',            # C#, Java, JavaScript, C++, Go, Rust, Swift, Kotlin
+        r'^\s*/\*',           # Start of block comment (C, C++, Java, C#, Go, Rust, PHP)
+        r'^\s*\*/',           # End of block comment
+        r'^\s*\*',            # Inside block comment (common style)
+        r'^\s*"""',           # Python triple-quote docstring
+        r"^\s*'''",           # Python single-quote docstring
+        r'^\s*<!--',          # HTML / XML / JSX comment
+        r'^\s*--',            # SQL / Haskell comments
+        r'^\s*%',             # LaTeX / MATLAB comments
+        r'^\s*;',             # Lisp / Assembly (some dialects)
     ]
     
     comment_lines = 0
@@ -304,8 +309,18 @@ def detect_comment_only_pr(pr: PullRequest) -> bool:
     if total_lines == 0:
         return False
     
-    return comment_lines / total_lines > 0.9  # 90%+ comments
+    comment_ratio = comment_lines / total_lines
+    
+    return comment_ratio
 
+
+def comment_penalty_multiplier(comment_ratio, threshold=0.05, k=2.0):
+    if comment_ratio <= threshold:
+        return 1.0
+
+    excess = comment_ratio - threshold
+    multiplier = 1.0 / (1.0 + k * excess)
+    return multiplier
 
 def detect_formatting_only_pr(pr: PullRequest) -> bool:
     """Detect PRs with only formatting changes."""
@@ -387,18 +402,20 @@ def apply_spam_detection_penalties(pr: PullRequest) -> None:
         # Early return as score is reduced 0.1x, no need to reduce more
         return
     
-    # Check for comment-only PR
-    is_comment_only = detect_comment_only_pr(pr)
-    if is_comment_only:
-        pr.set_earned_score(original_score * COMMENT_ONLY_PR_PENALTY)
-        bt.logging.warning(
-            f"SPAM DETECTION: PR #{mask_secret(str(pr.number))} in {mask_secret(pr.repository_full_name)} "
-            f"detected as Comment-ONLY. "
-            f"Score penalized: {original_score:.5f} -> {pr.earned_score:.5f} "
-            f"(penalty: {COMMENT_ONLY_PR_PENALTY}x)"
-        )
+    # Check for comment-heavy PR
+    comment_ratio = detect_comment_ratio_in_pr(pr)
+    comment_penalty = comment_penalty_multiplier(comment_ratio, ACCEPTED_COMMENT_RATIO)
+    
+    if comment_penalty < 1.0:
+        pr.set_earned_score(original_score * comment_penalty)
+        if comment_penalty < 0.8:
+            bt.logging.warning(
+                f"PR #{mask_secret(str(pr.number))} in {mask_secret(pr.repository_full_name)} "
+                f"score has been affected. Reason: Comment-HEAVY. "
+                f"Score penalized: {original_score:.5f} -> {pr.earned_score:.5f} "
+                f"(penalty: {comment_penalty:.2f}x)"
+            )
         original_score = pr.earned_score
-        # Early return as score is reduced 0.2x, no need to reduce more
         return
     
     # Check for translation-only PR

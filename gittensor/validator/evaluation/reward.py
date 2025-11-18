@@ -21,6 +21,8 @@ from gittensor.validator.evaluation.scoring import (
     apply_time_decay_for_repository_contributions,
     normalize_rewards_with_pareto,
 )
+from gittensor.validator.evaluation.typo_detection import is_typo_only_pr
+from gittensor.constants import TYPO_ONLY_PR_SCORE
 
 # NOTE: there was a circular import error, needed this if to resolve it
 if TYPE_CHECKING:
@@ -79,6 +81,10 @@ def score_pull_requests(
         pr.set_file_changes(file_changes)
         pr.set_earned_score(pr.calculate_score_from_file_changes(programming_languages))
         bt.logging.info(f"Calculated a base PR score from the file changes of {pr.earned_score}")
+
+        if is_typo_only_pr(pr):
+            pr.set_earned_score(TYPO_ONLY_PR_SCORE)
+            bt.logging.debug(f"PR #{pr.number} in {pr.repository_full_name} for miner UID {uid} determined to be typo-only fix, score set to {TYPO_ONLY_PR_SCORE}")
 
         apply_issue_resolvement_bonus(pr)
 

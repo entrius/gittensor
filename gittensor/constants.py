@@ -42,8 +42,3 @@ EXCESSIVE_PR_MIN_WEIGHT = 0.01
 
 TYPO_RATIO_THRESHOLD = 0.85
 TYPO_ONLY_PENALTY = 0.01
-
-TYPO_KEYWORDS = [
-    'typo', 'spelling', 'grammar', 'punctuation', 'whitespace',
-    'formatting', 'indentation', 'space', 'tab', 'newline'
-]

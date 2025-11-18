@@ -1,10 +1,9 @@
 import difflib
 import re
 from typing import List, Tuple
-from gittensor.validator.constants import TYPO_RATIO_THRESHOLD
+from gittensor.constants import TYPO_RATIO_THRESHOLD
 
 def levenshtein(a: str, b: str) -> int:
-    """Compute Levenshtein distance."""
     if a == b:
         return 0
     if not a:
@@ -28,15 +27,12 @@ def similarity(a: str, b: str) -> float:
     return difflib.SequenceMatcher(None, a, b).ratio()
 
 def tokenize(text: str) -> List[str]:
-    """Split text by alphanumeric boundaries."""
     return re.findall(r"[A-Za-z0-9_'-]+", text)
 
 def introduces_code_symbols(text: str) -> bool:
-    """Detect if a line introduces new code structures."""
     return bool(re.search(r"[{}\[\]()<>=+\-/*&|^%#!?:]", text))
 
 def contains_keywords(text: str) -> bool:
-    """Detect if a line contains programming keywords."""
     keywords = (
         r"\b(return|if|else|for|while|switch|case|break|continue|do|"
         r"class|def|const|let|var|function|fn|try|catch|throw|lambda)\b"
@@ -44,14 +40,9 @@ def contains_keywords(text: str) -> bool:
     return bool(re.search(keywords, text))
 
 def is_comment_line(line: str) -> bool:
-    """Detect comments for languages: C#, Java, JS, TS, C++, Rust, Go, Python, HTML."""
     stripped = line.strip()
     return stripped.startswith(("//", "///", "/*", "*", "#", "<!--", "'''", '"""'))
 
-
-# ---------------------------------------------------------
-# Comment-aware typo detection
-# ---------------------------------------------------------
 def is_comment_typo(old: str, new: str) -> bool:
     """Detect typo-like changes inside comments."""
     if not (is_comment_line(old) and is_comment_line(new)):
@@ -89,29 +80,11 @@ def is_comment_typo(old: str, new: str) -> bool:
 
     return all_ok
 
-# ---------------------------------------------------------
-# Core line classification
-# ---------------------------------------------------------
-
 def classify_change(old: str, new: str) -> str:
-    """
-    Classifications:
-        - formatting
-        - punctuation
-        - comment_typo
-        - typo
-        - safe_small_edit
-        - danger
-        - unknown
-    """
-
-    # SPECIAL HANDLING FOR COMMENT LINES
     if is_comment_line(old) and is_comment_line(new):
-        # 1. Comment-aware typo detection
         if is_comment_typo(old, new):
             return "comment_typo"
 
-        # 2. Try normal typo detection inside comments
         old_tokens = tokenize(old)
         new_tokens = tokenize(new)
         if len(old_tokens) == len(new_tokens):
@@ -130,21 +103,16 @@ def classify_change(old: str, new: str) -> str:
             if ok:
                 return "typo"
 
-        # 3. Comments cannot ever be "danger"
-        # A large change in a comment is still harmless → safe_small_edit
         return "safe_small_edit"
 
-    # Formatting-only change
     if old.strip() == new.strip():
         return "formatting"
 
-    # Punctuation-only change
     old_alpha = re.sub(r"[A-Za-z0-9]+", "", old)
     new_alpha = re.sub(r"[A-Za-z0-9]+", "", new)
     if old_alpha == new_alpha:
         return "punctuation"
 
-    # Word-level typo detection
     old_tokens = tokenize(old)
     new_tokens = tokenize(new)
 
@@ -165,7 +133,6 @@ def classify_change(old: str, new: str) -> str:
         if ok:
             return "typo"
 
-    # Small safe edit (line-level)
     line_dist = levenshtein(old, new)
     line_sim = similarity(old, new)
 
@@ -173,15 +140,11 @@ def classify_change(old: str, new: str) -> str:
         if not introduces_code_symbols(new) and not contains_keywords(new):
             return "safe_small_edit"
         
-    # If line is a string literal assignment, treat like comment
     if '"' in old or '"' in new:
-        # attempt typo classification
         if is_comment_typo(old, new):
             return "comment_typo"
 
-    # Dangerous change (code logic change)
     if not is_comment_line(old) and not is_comment_line(new):
-        # ignore code symbols if inside a string
         in_string = ('"' in old or "'" in old or '"' in new or "'" in new)
 
         if not in_string:
@@ -189,8 +152,6 @@ def classify_change(old: str, new: str) -> str:
                 return "danger"
 
     return "unknown"
-
-# Patch parsing + PR evaluation
 
 def extract_line_pairs_from_patch(patch: str) -> List[Tuple[str, str]]:
     lines = patch.split("\n")
@@ -216,15 +177,12 @@ def is_typo_only_patch(patch: str) -> bool:
         has_added = any(l.startswith("+") and not l.startswith("++") for l in lines)
         has_removed = any(l.startswith("-") and not l.startswith("--") for l in lines)
 
-        # Added-only patch
         if has_added and not has_removed:
             return False
 
-        # Removed-only patch
         if has_removed and not has_added:
             return False
 
-        # If neither added nor removed (empty patch), harmless
         return True
 
     typo_like = 0

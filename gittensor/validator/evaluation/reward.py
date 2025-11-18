@@ -21,6 +21,7 @@ from gittensor.validator.evaluation.scoring import (
     apply_time_decay_for_repository_contributions,
     normalize_rewards_with_pareto,
 )
+from gittensor.validator.evaluation.spam_detection import apply_typo_detection_penalties
 
 # NOTE: there was a circular import error, needed this if to resolve it
 if TYPE_CHECKING:
@@ -81,6 +82,9 @@ def score_pull_requests(
         bt.logging.info(f"Calculated a base PR score from the file changes of {pr.earned_score}")
 
         apply_issue_resolvement_bonus(pr)
+        
+        # Apply typo detection penalties
+        apply_typo_detection_penalties(pr, uid)
 
         pr_score_before_repo_weight = pr.earned_score
         bt.logging.info(f"Applying repo weight to earned PR score: {pr_score_before_repo_weight} x {float(repo_weight)} -> {pr_score_before_repo_weight * float(repo_weight)}")

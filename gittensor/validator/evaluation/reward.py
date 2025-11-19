@@ -83,7 +83,9 @@ def score_pull_requests(
         apply_issue_resolvement_bonus(pr)
 
         pr_score_before_repo_weight = pr.earned_score
-        bt.logging.info(f"Applying repo weight to earned PR score: {pr_score_before_repo_weight} x {float(repo_weight)} -> {pr_score_before_repo_weight * float(repo_weight)}")
+        bt.logging.info(
+            f"Applying repo weight to earned PR score: {pr_score_before_repo_weight} x {float(repo_weight)} -> {pr_score_before_repo_weight * float(repo_weight)}"
+        )
         pr.set_earned_score(pr_score_before_repo_weight * float(repo_weight))
 
         miner_eval.add_pull_request(pr)
@@ -151,8 +153,6 @@ async def reward(
 
     miner_eval = score_pull_requests(uid, miner_eval, valid_raw_prs, master_repositories, programming_languages)
 
-    await self.store_evaluation(uid, miner_eval)
-
     bt.logging.info("*" * 50)
     return miner_eval
 
@@ -197,6 +197,9 @@ async def get_rewards(
 
     # Boost PRs that include the Gittensor tagline (and were not edited after merge).
     apply_boost_for_gittensor_tag_in_pr_description(miner_evaluations)
+
+    # store all miner evaluations after adjusting score
+    await self.bulk_store_evaluation(miner_evaluations)
 
     # Normalize the rewards between [0,1] with a pareto boost for higher performing miners.
     normalized_rewards = normalize_rewards_with_pareto(miner_evaluations)

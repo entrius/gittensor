@@ -4,14 +4,13 @@ from typing import Tuple
 from gittensor.classes import PullRequest
 from gittensor.constants import (
     TYPO_ONLY_PENALTY,
-    TYPO_RATIO_THRESHOLD
 )
 from gittensor.validator.utils.spam_detection import (
     is_typo_only_pr,
 )
 from gittensor.utils.utils import mask_secret
 
-def detect_typo_only_pr(pr: PullRequest) -> Tuple[bool, float]:
+def detect_typo_only_pr(pr: PullRequest) -> bool:
     if not pr.file_changes:
         return False, 0.0
     

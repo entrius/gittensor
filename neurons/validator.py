@@ -18,10 +18,11 @@
 
 import threading
 import time
+from typing import List
 
 import bittensor as bt
-import wandb
 
+import wandb
 from gittensor.classes import MinerEvaluation
 from gittensor.validator import forward
 from gittensor.validator.utils.config import WANDB_PROJECT, __version__
@@ -77,7 +78,16 @@ class Validator(BaseValidatorNeuron):
         bt.logging.info("load_state()")
         self.load_state()
 
-    async def store_evaluation(self, uid: int, miner_eval: MinerEvaluation):
+    async def bulk_store_evaluation(self, miner_evals: List[MinerEvaluation]):
+        """
+        Wrapper function to store all miner evaluations at once.
+        """
+
+        if self.db_storage is not None:
+            for miner_eval in miner_evals:
+                await self.store_evaluation(miner_eval)
+
+    async def store_evaluation(self, miner_eval: MinerEvaluation):
         """
         Stores the miner eval if DB storage is enabled by validator via --database.store_validation_results flag.
         """
@@ -87,14 +97,14 @@ class Validator(BaseValidatorNeuron):
                 storage_result = self.db_storage.store_evaluation(miner_eval)
 
                 if storage_result.success:
-                    bt.logging.info(f"Successfully stored validation results for UID {uid} to DB.")
+                    bt.logging.info(f"Successfully stored validation results for UID {miner_eval.uid} to DB.")
                 else:
-                    bt.logging.warning(f"Storage partially failed for UID {uid}:")
+                    bt.logging.warning(f"Storage partially failed for UID {miner_eval.uid}:")
                     for error in storage_result.errors:
                         bt.logging.warning(f"  - {error}")
 
             except Exception as e:
-                bt.logging.error(f"Error when attempting to store miners evaluation for uid {uid}: {e}")
+                bt.logging.error(f"Error when attempting to store miners evaluation for uid {miner_eval.uid}: {e}")
 
     async def forward(self):
         """

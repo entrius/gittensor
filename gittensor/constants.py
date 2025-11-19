@@ -11,7 +11,7 @@ MIN_GITHUB_ACCOUNT_AGE = 180
 
 # Scoring constants
 MAX_ISSUES_SCORED_IN_SINGLE_PR = 3
-UNIQUE_PR_BOOST = 0.6
+UNIQUE_PR_BOOST = 0.25
 
 # Gittensor PR tagging
 PR_TAGLINE = "Contribution by Gittensor, learn more at https://gittensor.io/"

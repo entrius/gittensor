@@ -1,30 +1,8 @@
 import difflib
 import re
 from typing import List, Tuple
-from gittensor.constants import TYPO_RATIO_THRESHOLD
-
-def levenshtein(a: str, b: str) -> int:
-    if a == b:
-        return 0
-    if not a:
-        return len(b)
-    if not b:
-        return len(a)
-
-    prev = list(range(len(b) + 1))
-    for i, ca in enumerate(a, start=1):
-        curr = [i]
-        for j, cb in enumerate(b, start=1):
-            insert = curr[j-1] + 1
-            delete = prev[j] + 1
-            replace = prev[j-1] + (ca != cb)
-            curr.append(min(insert, delete, replace))
-        prev = curr
-
-    return prev[-1]
-
-def similarity(a: str, b: str) -> float:
-    return difflib.SequenceMatcher(None, a, b).ratio()
+from gittensor.constants import TYPO_RATIO_THRESHOLD, MAX_TYPO_FILE_PATCH_LINES
+from Levenshtein import distance, ratio 
 
 def tokenize(text: str) -> List[str]:
     return re.findall(r"[A-Za-z0-9_'-]+", text)
@@ -69,8 +47,8 @@ def is_comment_typo(old: str, new: str) -> bool:
 
             # Compare replaced words pairwise
             for o, n in zip(old_segment, new_segment):
-                dist = levenshtein(o, n)
-                sim = similarity(o, n)
+                dist = distance(o, n)
+                sim = ratio(o, n)
 
                 # Allow up to 3-character spelling change
                 if dist <= 3 or sim >= 0.7:
@@ -81,27 +59,32 @@ def is_comment_typo(old: str, new: str) -> bool:
     return all_ok
 
 def classify_change(old: str, new: str) -> str:
+    def is_token_typo(old: str, new: str, max_dist=2, min_sim=0.75) -> bool:
+        old_tokens = tokenize(old)
+        new_tokens = tokenize(new)
+
+        if len(old_tokens) != len(new_tokens):
+            return False
+
+        for o, n in zip(old_tokens, new_tokens):
+            if o == n:
+                continue
+
+            dist = distance(o, n)
+            sim = ratio(o, n)
+
+            if dist > max_dist and sim < min_sim:
+                return False
+
+        return True
+    
     if is_comment_line(old) and is_comment_line(new):
+
         if is_comment_typo(old, new):
             return "comment_typo"
 
-        old_tokens = tokenize(old)
-        new_tokens = tokenize(new)
-        if len(old_tokens) == len(new_tokens):
-            ok = True
-            for o, n in zip(old_tokens, new_tokens):
-                if o == n:
-                    continue
-
-                dist = levenshtein(o, n)
-                sim = similarity(o, n)
-
-                if dist <= 2 or sim >= 0.75:
-                    continue
-
-                ok = False
-            if ok:
-                return "typo"
+        if is_token_typo(old, new):
+            return "typo"
 
         return "safe_small_edit"
 
@@ -113,28 +96,11 @@ def classify_change(old: str, new: str) -> str:
     if old_alpha == new_alpha:
         return "punctuation"
 
-    old_tokens = tokenize(old)
-    new_tokens = tokenize(new)
-
-    if len(old_tokens) == len(new_tokens):
-        ok = True
-        for o, n in zip(old_tokens, new_tokens):
-            if o == n:
-                continue
-
-            dist = levenshtein(o, n)
-            sim = similarity(o, n)
-
-            if dist <= 2 or sim >= 0.75:
-                continue
-
-            ok = False
-
-        if ok:
-            return "typo"
-
-    line_dist = levenshtein(old, new)
-    line_sim = similarity(old, new)
+    if is_token_typo(old, new):
+        return "typo"
+    
+    line_dist = distance(old, new)
+    line_sim = ratio(old, new)
 
     if line_dist <= 3 and line_sim >= 0.85:
         if not introduces_code_symbols(new) and not contains_keywords(new):
@@ -177,13 +143,12 @@ def is_typo_only_patch(patch: str) -> bool:
         has_added = any(l.startswith("+") and not l.startswith("++") for l in lines)
         has_removed = any(l.startswith("-") and not l.startswith("--") for l in lines)
 
-        if has_added and not has_removed:
-            return False
+        # No added/removed = no content changes → typo-like
+        if not has_added and not has_removed:
+            return True
 
-        if has_removed and not has_added:
-            return False
-
-        return True
+        # Any actual content addition/deletion without pairing → not a typo
+        return False
 
     typo_like = 0
     total = len(pairs)
@@ -203,6 +168,12 @@ def is_typo_only_pr(file_patches: List[str]) -> bool:
         return False
 
     for patch in file_patches:
+        patch_line_count = patch.count("\n")
+        
+        # ❗ Performance & correctness cutoff
+        if patch_line_count > MAX_TYPO_FILE_PATCH_LINES:
+            return False
+        
         if not is_typo_only_patch(patch):
             return False
 

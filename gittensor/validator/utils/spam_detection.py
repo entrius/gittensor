@@ -21,6 +21,11 @@ def is_comment_line(line: str) -> bool:
     stripped = line.strip()
     return stripped.startswith(("//", "///", "/*", "*", "#", "<!--", "'''", '"""'))
 
+def token_pair_typo(o: str, n: str, max_dist: int, min_sim: float) -> bool:
+    dist = distance(o, n)
+    sim = ratio(o, n)
+    return dist <= max_dist or sim >= min_sim
+
 def is_comment_typo(old: str, new: str) -> bool:
     """Detect typo-like changes inside comments."""
     if not (is_comment_line(old) and is_comment_line(new)):
@@ -30,7 +35,6 @@ def is_comment_typo(old: str, new: str) -> bool:
     new_words = tokenize(new)
 
     sm = difflib.SequenceMatcher(None, old_words, new_words)
-    all_ok = True
 
     for tag, i1, i2, j1, j2 in sm.get_opcodes():
 
@@ -45,18 +49,12 @@ def is_comment_typo(old: str, new: str) -> bool:
             old_segment = old_words[i1:i2]
             new_segment = new_words[j1:j2]
 
-            # Compare replaced words pairwise
             for o, n in zip(old_segment, new_segment):
-                dist = distance(o, n)
-                sim = ratio(o, n)
+                # Comment typo thresholds are slightly more lenient:
+                if not token_pair_typo(o, n, max_dist=3, min_sim=0.7):
+                    return False
 
-                # Allow up to 3-character spelling change
-                if dist <= 3 or sim >= 0.7:
-                    continue
-
-                all_ok = False
-
-    return all_ok
+    return True
 
 def classify_change(old: str, new: str) -> str:
     def is_token_typo(old: str, new: str, max_dist=2, min_sim=0.75) -> bool:
@@ -66,17 +64,8 @@ def classify_change(old: str, new: str) -> str:
         if len(old_tokens) != len(new_tokens):
             return False
 
-        for o, n in zip(old_tokens, new_tokens):
-            if o == n:
-                continue
-
-            dist = distance(o, n)
-            sim = ratio(o, n)
-
-            if dist > max_dist and sim < min_sim:
-                return False
-
-        return True
+        return all(token_pair_typo(o, n, max_dist, min_sim)
+               for o, n in zip(old_tokens, new_tokens))
     
     if is_comment_line(old) and is_comment_line(new):
 

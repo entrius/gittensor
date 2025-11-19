@@ -1,5 +1,4 @@
 import bittensor as bt
-from typing import Tuple
 
 from gittensor.classes import PullRequest
 from gittensor.constants import (
@@ -12,7 +11,7 @@ from gittensor.utils.utils import mask_secret
 
 def detect_typo_only_pr(pr: PullRequest) -> bool:
     if not pr.file_changes:
-        return False, 0.0
+        return False
     
     file_patches = [
         fc.patch for fc in pr.file_changes
@@ -20,7 +19,7 @@ def detect_typo_only_pr(pr: PullRequest) -> bool:
     ]
 
     if not file_patches:
-        return False, 0.0
+        return False
     
     is_typo_only = is_typo_only_pr(file_patches)
     return is_typo_only

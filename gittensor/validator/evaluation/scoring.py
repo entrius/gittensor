@@ -204,7 +204,7 @@ def apply_time_decay_for_repository_contributions(miner_evaluations: Dict[int, M
         This function modifies the `miner_evaluations` dictionary in-place to apply time decay per PR.
     """
 
-    bt.logging.info(f"Applying time decay to PRs")
+    bt.logging.info("Applying time decay to PRs")
     current_time = datetime.now(timezone.utc)
 
     # Count total PRs and miners for logging
@@ -254,7 +254,7 @@ def apply_boost_for_gittensor_tag_in_pr_description(miner_evaluations: Dict[int,
         This function modifies the `miner_evaluations` dictionary in-place to apply the boost per PR.
     """
 
-    bt.logging.info(f"Applying Gittensor tag boost to PRs")
+    bt.logging.info("Applying Gittensor tag boost to PRs")
 
     # Count total PRs boosted and miners for logging
     total_prs_boosted = 0

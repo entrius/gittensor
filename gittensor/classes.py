@@ -159,9 +159,9 @@ class PullRequest:
                 scored_changes = min(scored_changes, MAX_LINES_SCORED_CHANGES)
 
             total_lines_scored += scored_changes
-            test_file_weight = TEST_FILE_CONTRIBUTION_WEIGHT if file.is_test_file() else 1.0
+            file_weight = TEST_FILE_CONTRIBUTION_WEIGHT if file.is_test_file() else 1.0
 
-            file_score = language_weight * test_file_weight * scored_changes
+            file_score = language_weight * file_weight * scored_changes
             
             bt.logging.info(
                 f"[{n}/{total_files_changed}] - {file.filename} | "

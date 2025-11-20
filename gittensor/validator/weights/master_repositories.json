@@ -724,9 +724,6 @@
   "MassTransit/MassTransit": {
     "weight": 1.13
   },
-  "MaterialDesignInXAML/MaterialDesignInXamlToolkit": {
-    "weight": 1.15
-  },
   "MatrixTM/MHDDoS": {
     "weight": 1.18
   },

@@ -12,6 +12,7 @@ from gittensor.constants import (
     DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT,
     MITIGATED_EXTENSIONS,
     MAX_LINES_SCORED_CHANGES,
+    TEST_FILE_CONTRIBUTION_WEIGHT,
 )
 
 GITHUB_DOMAIN = 'https://github.com/'
@@ -62,6 +63,9 @@ class FileChange:
 
     def _calculate_file_extension(self) -> str:
         return self.filename.split(".")[-1].lower() if "." in self.filename else ""
+
+    def is_test_file(self) -> bool:
+        return "test" in self.filename.lower()
 
     @classmethod
     def from_github_response(cls, pr_number: int, repository_full_name: str, file_diff: DefaultDict) -> 'FileChange':
@@ -157,9 +161,11 @@ class PullRequest:
 
             total_lines_scored += scored_changes
 
+            test_file_weight = TEST_FILE_CONTRIBUTION_WEIGHT if file.is_test_file() else 1.0
+
             # Normalized by total changes in the PR
             weight_ratio = actual_changes / total_file_changes if total_file_changes > 0 else 0
-            pr_score += language_weight * weight_ratio * (scored_changes**0.75)
+            pr_score += language_weight * weight_ratio * test_file_weight * (scored_changes**0.75)
 
         self.total_lines_scored = total_lines_scored
         return pr_score

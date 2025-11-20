@@ -93,7 +93,7 @@ def score_pull_requests(
 
         pr_score_before_repo_weight = pr.earned_score
         bt.logging.info(
-            f"Applying repo weight to earned PR score: {pr_score_before_repo_weight} x {float(repo_weight)} -> {pr_score_before_repo_weight * float(repo_weight)}"
+            f"Applying repo weight to earned PR score: {round(pr_score_before_repo_weight, 2)} x {float(repo_weight)} -> {round(pr_score_before_repo_weight * float(repo_weight), 2)}"
         )
         pr.set_earned_score(pr_score_before_repo_weight * float(repo_weight))
 

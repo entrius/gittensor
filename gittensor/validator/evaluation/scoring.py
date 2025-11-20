@@ -217,7 +217,7 @@ def apply_time_decay_for_repository_contributions(miner_evaluations: Dict[int, M
 
             bt.logging.info(
                 f"UID {uid} PR (merged {days_since_merge:.1f}d ago): "
-                f"decay={decay_multiplier:.4f}, score {original_score:.4f}→{pr.earned_score:.4f}"
+                f"decay={decay_multiplier:.4f}, score {original_score:.4f} -> {pr.earned_score:.4f}"
             )
 
     bt.logging.info(f"Applied time decay to {total_prs_modified} PRs across {miners_with_prs} miners")

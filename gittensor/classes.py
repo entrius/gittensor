@@ -145,27 +145,21 @@ class PullRequest:
         if not self.file_changes:
             self.earned_score = 0.0
 
-        total_file_changes = sum(file_change.changes for file_change in self.file_changes)
         total_lines_scored = 0
         pr_score = 0.0
 
         for file in self.file_changes:
             language_weight = programming_languages.get(file.file_extension, DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT)
 
-            actual_changes = file.changes
-
             # Cap scored changes for extensions that are exploitable
-            scored_changes = actual_changes
+            scored_changes = file.changes
             if file.file_extension in MITIGATED_EXTENSIONS:
-                scored_changes = min(actual_changes, MAX_LINES_SCORED_CHANGES)
+                scored_changes = min(scored_changes, MAX_LINES_SCORED_CHANGES)
 
             total_lines_scored += scored_changes
-
             test_file_weight = TEST_FILE_CONTRIBUTION_WEIGHT if file.is_test_file() else 1.0
 
-            # Normalized by total changes in the PR
-            weight_ratio = actual_changes / total_file_changes if total_file_changes > 0 else 0
-            pr_score += language_weight * weight_ratio * test_file_weight * (scored_changes**0.75)
+            pr_score += language_weight * test_file_weight * scored_changes
 
         self.total_lines_scored = total_lines_scored
         return pr_score

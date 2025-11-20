@@ -163,10 +163,7 @@ class PullRequest:
 
             file_score = language_weight * file_weight * scored_changes
             
-            bt.logging.info(
-                f"[{n}/{total_files_changed}] - {file.filename} | "
-                f"test changes: {file.is_test_file()}, scored line changes: {scored_changes}, score: {file_score:.2f}"
-            )
+            bt.logging.info(f"[{n}/{total_files_changed}] - {file.filename} | score: {file_score:.2f}")
 
             pr_score += file_score
 

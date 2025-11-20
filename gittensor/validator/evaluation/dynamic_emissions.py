@@ -88,7 +88,7 @@ def calculate_network_lines_changed_emissions_scalar(miner_evaluations: Dict[int
         if evaluation.total_score > 0  # Exclude penalized miners
     )
 
-    bt.logging.info(f"Total lines scored across all miners (disregarding penalized miners): {total_network_lines}")
+    bt.logging.info(f"Total lines scored across all miners: {total_network_lines}")
 
     # Calculate scalar using exponential unlock curve
     scalar = (1 - LINES_CONTRIBUTED_MAX_RECYCLE) + LINES_CONTRIBUTED_MAX_RECYCLE * (
@@ -120,7 +120,7 @@ def calculate_network_unique_repos_emissions_scalar(miner_evaluations: Dict[int,
     total_unique_repos = len(all_unique_repositories)
 
     bt.logging.info(
-        f"Total unique repositories across all miners (disregarding penalized miners): {total_unique_repos}"
+        f"Total unique repositories across all miners: {total_unique_repos}"
     )
 
     # Calculate scalar using exponential unlock curve

@@ -17,7 +17,6 @@ from gittensor.constants import (
     TIME_DECAY_SIGMOID_STEEPNESS_SCALAR,
     TIME_DECAY_SIGMOID_MIDPOINT
 )
-from gittensor.utils.utils import mask_secret
 
 
 def normalize_rewards_with_pareto(miner_evaluations: Dict[int, MinerEvaluation]) -> Dict[int, float]:
@@ -134,7 +133,7 @@ def count_repository_contributors(miner_evaluations: Dict[int, MinerEvaluation])
         # Log each repository with its contributor count
         sorted_repos = sorted(repo_contributor_counts.items(), key=lambda x: x[1], reverse=True)
         for repo, count in sorted_repos:
-            bt.logging.info(f"{mask_secret(repo)}: {count}")
+            bt.logging.info(f"{repo}: {count}")
 
     return repo_contributor_counts
 
@@ -181,7 +180,7 @@ def apply_repository_uniqueness_boost(miner_evaluations: Dict[int, MinerEvaluati
                 pr.set_earned_score(original_score * boost_multiplier)
 
                 bt.logging.info(
-                    f"Applying unique repo boost to PR's earned score for uid {uid}'s contribution to {mask_secret(pr.repository_full_name)}: "
+                    f"Applying unique repo boost to PR's earned score for uid {uid}'s contribution to {pr.repository_full_name}: "
                     f"{original_score:.4f} -> {pr.earned_score:.4f}"
                 )
 
@@ -255,7 +254,7 @@ def apply_boost_for_gittensor_tag_in_pr_description(miner_evaluations: Dict[int,
                 miner_has_tagged_prs = True
 
                 bt.logging.info(
-                    f"Applying Gittensor tag boost to uid {uid}'s PR in {mask_secret(pr.repository_full_name)}, multiplier: {GITTENSOR_PR_TAG_MULTIPLIER:.2f}, "
+                    f"Applying Gittensor tag boost to uid {uid}'s PR in {pr.repository_full_name}, multiplier: {GITTENSOR_PR_TAG_MULTIPLIER:.2f}, "
                     f"Score: {original_score:.4f} -> {pr.earned_score:.4f}"
                 )
 
@@ -283,7 +282,7 @@ def apply_issue_resolvement_bonus(pr: PullRequest):
 
     if not pr.issues:
         bt.logging.info(
-            f"PR #{mask_secret(pr.number)} in {mask_secret(pr.repository_full_name)} earned score: {pr.earned_score:.5f} × issue multiplier: 1.0 = {pr.earned_score:.5f}"
+            f"PR #{pr.number} in {pr.repository_full_name} earned score: {pr.earned_score:.5f} × issue multiplier: 1.0 = {pr.earned_score:.5f}"
         )
         return
 
@@ -293,26 +292,26 @@ def apply_issue_resolvement_bonus(pr: PullRequest):
         # Skip issues that are not closed
         if issue.state and issue.state != 'CLOSED':
             bt.logging.warning(
-                f"Skipping issue #{mask_secret(issue.number)} - not in CLOSED state (state: {issue.state})"
+                f"Skipping issue #{issue.number} - not in CLOSED state (state: {issue.state})"
             )
             continue
 
         # Skip issues where the author is the same as the PR author (self-created issue gaming)
         if issue.author_login and issue.author_login == pr.author_login:
             bt.logging.warning(
-                f"Skipping issue #{mask_secret(issue.number)} - issue author ({mask_secret(issue.author_login)}) is the same as PR author (preventing self-created issue gaming)"
+                f"Skipping issue #{issue.number} - issue author ({issue.author_login}) is the same as PR author (preventing self-created issue gaming)"
             )
             continue
 
         # Skip issues without author info (safety check)
         if not issue.author_login:
-            bt.logging.warning(f"Skipping issue #{mask_secret(issue.number)} - missing author information")
+            bt.logging.warning(f"Skipping issue #{issue.number} - missing author information")
             continue
 
         # Skip issues created after the PR was created (retroactive issue creation)
         if issue.created_at and pr.created_at and issue.created_at > pr.created_at:
             bt.logging.warning(
-                f"Skipping issue #{mask_secret(issue.number)} - issue created ({issue.created_at.isoformat()}) after PR created ({pr.created_at.isoformat()})"
+                f"Skipping issue #{issue.number} - issue created ({issue.created_at.isoformat()}) after PR created ({pr.created_at.isoformat()})"
             )
             continue
 
@@ -324,7 +323,7 @@ def apply_issue_resolvement_bonus(pr: PullRequest):
 
             if time_diff_seconds > max_allowed_seconds:
                 bt.logging.warning(
-                    f"Skipping issue #{mask_secret(issue.number)} - closed too far from PR merge ({time_diff_seconds/86400:.1f} days difference, max allowed: 5 days)"
+                    f"Skipping issue #{issue.number} - closed too far from PR merge ({time_diff_seconds/86400:.1f} days difference, max allowed: 5 days)"
                 )
                 continue
 
@@ -332,7 +331,7 @@ def apply_issue_resolvement_bonus(pr: PullRequest):
 
     if not valid_issues:
         bt.logging.info(
-            f"PR #{mask_secret(pr.number)} in {mask_secret(pr.repository_full_name)} earned score: {pr.earned_score:.5f} × issue multiplier: 1.0 = {pr.earned_score:.5f} (no valid issues after filtering)"
+            f"PR #{pr.number} in {pr.repository_full_name} earned score: {pr.earned_score:.5f} × issue multiplier: 1.0 = {pr.earned_score:.5f} (no valid issues after filtering)"
         )
         return
 
@@ -340,7 +339,7 @@ def apply_issue_resolvement_bonus(pr: PullRequest):
     new_pr_score = round(issue_multiplier * pr.earned_score, 2)
 
     bt.logging.info(
-        f"PR #{mask_secret(pr.number)} in {mask_secret(pr.repository_full_name)} earned score: {pr.earned_score:.5f} × issue multiplier: {issue_multiplier:.3f} = {new_pr_score:.5f} ({len(valid_issues)}/{len(pr.issues)} valid issues)"
+        f"PR #{pr.number} in {pr.repository_full_name} earned score: {pr.earned_score:.5f} × issue multiplier: {issue_multiplier:.3f} = {new_pr_score:.5f} ({len(valid_issues)}/{len(pr.issues)} valid issues)"
     )
 
     pr.set_earned_score(new_pr_score)

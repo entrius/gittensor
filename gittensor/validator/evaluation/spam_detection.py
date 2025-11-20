@@ -7,7 +7,6 @@ from gittensor.constants import (
 from gittensor.validator.utils.spam_detection import (
     is_typo_only_pr,
 )
-from gittensor.utils.utils import mask_secret
 
 def detect_typo_only_pr(pr: PullRequest) -> bool:
     file_patches = [
@@ -26,6 +25,6 @@ def apply_typo_detection_penalties(pr: PullRequest, uid: int) -> None:
         pr.set_earned_score(TYPO_ONLY_PENALTY)
         bt.logging.debug(
             f"Miner UID: {uid} "
-            f"TYPO DETECTION: PR #{mask_secret(str(pr.number))} in {mask_secret(pr.repository_full_name)} "
+            f"TYPO DETECTION: PR #{pr.number} in {pr.repository_full_name} "
             f"Score penalized: {original_score:.5f} -> {pr.earned_score:.5f} "
         )

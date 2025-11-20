@@ -18,11 +18,11 @@
 
 import threading
 import time
-from typing import List
+from typing import Dict
 
 import bittensor as bt
-
 import wandb
+
 from gittensor.classes import MinerEvaluation
 from gittensor.validator import forward
 from gittensor.validator.utils.config import WANDB_PROJECT, __version__
@@ -78,16 +78,16 @@ class Validator(BaseValidatorNeuron):
         bt.logging.info("load_state()")
         self.load_state()
 
-    async def bulk_store_evaluation(self, miner_evals: List[MinerEvaluation]):
+    async def bulk_store_evaluation(self, miner_evals: Dict[int, MinerEvaluation]):
         """
         Wrapper function to store all miner evaluations at once.
         """
 
         if self.db_storage is not None:
-            for miner_eval in miner_evals:
-                await self.store_evaluation(miner_eval)
+            for uid, evaluation in miner_evals.items():
+                await self.store_evaluation(uid, evaluation)
 
-    async def store_evaluation(self, miner_eval: MinerEvaluation):
+    async def store_evaluation(self, uid: int, miner_eval: MinerEvaluation):
         """
         Stores the miner eval if DB storage is enabled by validator via --database.store_validation_results flag.
         """
@@ -97,14 +97,14 @@ class Validator(BaseValidatorNeuron):
                 storage_result = self.db_storage.store_evaluation(miner_eval)
 
                 if storage_result.success:
-                    bt.logging.info(f"Successfully stored validation results for UID {miner_eval.uid} to DB.")
+                    bt.logging.info(f"Successfully stored validation results for UID {uid} to DB.")
                 else:
-                    bt.logging.warning(f"Storage partially failed for UID {miner_eval.uid}:")
+                    bt.logging.warning(f"Storage partially failed for UID {uid}:")
                     for error in storage_result.errors:
                         bt.logging.warning(f"  - {error}")
 
             except Exception as e:
-                bt.logging.error(f"Error when attempting to store miners evaluation for uid {miner_eval.uid}: {e}")
+                bt.logging.error(f"Error when attempting to store miners evaluation for uid {uid}: {e}")
 
     async def forward(self):
         """

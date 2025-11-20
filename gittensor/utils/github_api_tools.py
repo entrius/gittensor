@@ -358,7 +358,7 @@ def get_user_merged_prs_graphql(
 
             cursor = page_info.get('endCursor')
 
-        bt.logging.info(f"Found {len(all_valid_prs)} valid merged PRs and {open_pr_count} open PRs for user")
+        bt.logging.info(f"Found {len(all_valid_prs)} valid merged PRs and {open_pr_count} open PRs.")
         return (all_valid_prs, open_pr_count)
 
     except Exception as e:

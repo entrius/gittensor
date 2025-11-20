@@ -134,7 +134,7 @@ class PullRequest:
         """Set the file changes for this pull request"""
         self.file_changes = file_changes
 
-    def calculate_score_from_file_changes(self, programming_languages: Dict[str, float]):
+    def calculate_score_from_file_changes(self, programming_languages: Dict[str, float]) -> float:
         """
         Calculate the score for a single PR based on its file changes.
 
@@ -148,7 +148,10 @@ class PullRequest:
         total_lines_scored = 0
         pr_score = 0.0
 
-        for file in self.file_changes:
+        total_files_changed = len(self.file_changes)
+        bt.logging.info(f"Scoring {total_files_changed} file changes for PR #{self.number}")
+
+        for n, file in enumerate(self.file_changes, start=1):
             language_weight = programming_languages.get(file.file_extension, DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT)
 
             # Cap scored changes for extensions that are exploitable
@@ -159,9 +162,20 @@ class PullRequest:
             total_lines_scored += scored_changes
             test_file_weight = TEST_FILE_CONTRIBUTION_WEIGHT if file.is_test_file() else 1.0
 
-            pr_score += language_weight * test_file_weight * scored_changes
+            file_score = language_weight * test_file_weight * scored_changes
+            
+            bt.logging.info(
+                f"[{n}/{total_files_changed}] - {file.filename} | "
+                f"test changes: {file.is_test_file()}, scored line changes: {scored_changes}, score: {file_score:.2f}"
+            )
+
+            pr_score += file_score
 
         self.total_lines_scored = total_lines_scored
+        bt.logging.info(
+            f"{total_lines_scored} total lines scored across {total_files_changed} files for PR #{self.number} into {self.repository_full_name}"
+            f"Base score from file changes: {pr_score}"
+            )
         return pr_score
 
     @classmethod

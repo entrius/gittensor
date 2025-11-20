@@ -235,7 +235,7 @@ def apply_boost_for_gittensor_tag_in_pr_description(miner_evaluations: Dict[int,
         This function modifies the `miner_evaluations` dictionary in-place to apply the boost per PR.
     """
 
-    bt.logging.info(f"Applying Gittensor tag boost to PRs")
+    bt.logging.info("Applying Gittensor tag score boost to PRs")
 
     # Count total PRs boosted and miners for logging
     total_prs_boosted = 0

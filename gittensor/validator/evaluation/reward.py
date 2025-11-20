@@ -68,22 +68,27 @@ def score_pull_requests(
         bt.logging.info(f"No valid PRs found for miner {uid}: setting default score of 0.")
         return miner_eval
 
-    bt.logging.info(f"Valid PRs to score: {len(valid_prs)}")
+    total_prs = len(valid_prs)
+    bt.logging.info(f"Scoring {total_prs} PRs for miner {uid}")
 
-    for pr in valid_prs:
+    for n, pr in enumerate(valid_prs, start=1):
         # if repo not in master list, default to .01 (shouldn't happen bc already filtered in github graphql method)
         repo_weight = master_repositories.get(pr.repository_full_name, {}).get("weight", 0.01)
+        
+        bt.logging.info(
+            f"[{n}/{total_prs}] - Scoring PR #{pr.number} in {pr.repository_full_name} (weight: {repo_weight})"
+        )
+
         file_changes = get_pull_request_file_changes(pr.repository_full_name, pr.number, github_pat)
         if not file_changes:
+            bt.logging.warning("No file changes found for this PR.")
             continue
 
         pr.set_file_changes(file_changes)
         pr.set_earned_score(pr.calculate_score_from_file_changes(programming_languages))
-        bt.logging.info(f"Calculated a base PR score from the file changes of {pr.earned_score}")
 
         apply_issue_resolvement_bonus(pr)
         
-        # Apply typo detection penalties
         apply_typo_detection_penalties(pr, uid)
 
         pr_score_before_repo_weight = pr.earned_score

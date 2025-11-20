@@ -1,7 +1,6 @@
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import DefaultDict, List, Optional, Set, Dict
-from gittensor.utils.utils import mask_secret
 
 import bittensor as bt
 
@@ -12,6 +11,7 @@ from gittensor.constants import (
     DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT,
     MITIGATED_EXTENSIONS,
     MAX_LINES_SCORED_CHANGES,
+    TEST_FILE_CONTRIBUTION_WEIGHT,
 )
 
 GITHUB_DOMAIN = 'https://github.com/'
@@ -62,6 +62,9 @@ class FileChange:
 
     def _calculate_file_extension(self) -> str:
         return self.filename.split(".")[-1].lower() if "." in self.filename else ""
+
+    def is_test_file(self) -> bool:
+        return "test" in self.filename.lower()
 
     @classmethod
     def from_github_response(cls, pr_number: int, repository_full_name: str, file_diff: DefaultDict) -> 'FileChange':
@@ -130,7 +133,7 @@ class PullRequest:
         """Set the file changes for this pull request"""
         self.file_changes = file_changes
 
-    def calculate_score_from_file_changes(self, programming_languages: Dict[str, float]):
+    def calculate_score_from_file_changes(self, programming_languages: Dict[str, float]) -> float:
         """
         Calculate the score for a single PR based on its file changes.
 
@@ -141,27 +144,37 @@ class PullRequest:
         if not self.file_changes:
             self.earned_score = 0.0
 
-        total_file_changes = sum(file_change.changes for file_change in self.file_changes)
         total_lines_scored = 0
         pr_score = 0.0
 
-        for file in self.file_changes:
+        total_files_changed = len(self.file_changes)
+        bt.logging.info(f"Scoring {total_files_changed} file changes for PR #{self.number}")
+
+        for n, file in enumerate(self.file_changes, start=1):
             language_weight = programming_languages.get(file.file_extension, DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT)
 
-            actual_changes = file.changes
-
             # Cap scored changes for extensions that are exploitable
-            scored_changes = actual_changes
+            scored_changes = file.changes
             if file.file_extension in MITIGATED_EXTENSIONS:
-                scored_changes = min(actual_changes, MAX_LINES_SCORED_CHANGES)
+                scored_changes = min(scored_changes, MAX_LINES_SCORED_CHANGES)
 
             total_lines_scored += scored_changes
+            file_weight = TEST_FILE_CONTRIBUTION_WEIGHT if file.is_test_file() else 1.0
 
-            # Normalized by total changes in the PR
-            weight_ratio = actual_changes / total_file_changes if total_file_changes > 0 else 0
-            pr_score += language_weight * weight_ratio * (scored_changes**0.75)
+            file_score = language_weight * file_weight * scored_changes
+            
+            bt.logging.info(
+                f"[{n}/{total_files_changed}] - {file.filename} | "
+                f"test changes: {file.is_test_file()}, scored line changes: {scored_changes}, score: {file_score:.2f}"
+            )
+
+            pr_score += file_score
 
         self.total_lines_scored = total_lines_scored
+        bt.logging.info(
+            f"{total_lines_scored} total lines scored across {total_files_changed} files for PR #{self.number} into {self.repository_full_name}"
+            f"Base score from file changes: {pr_score}"
+            )
         return pr_score
 
     @classmethod
@@ -211,7 +224,7 @@ class PullRequest:
                     gittensor_tagged = True
                 else:
                     bt.logging.warning(
-                        f"PR #{mask_secret(str(pr_data['number']))} in {mask_secret(repository_full_name)} has Gittensor tagline but was edited after merge "
+                        f"PR #{pr_data['number']} in {repository_full_name} has Gittensor tagline but was edited after merge "
                         f"(merged: {merged_at.isoformat()}, last edited: {last_edited_at.isoformat()})"
                     )
 

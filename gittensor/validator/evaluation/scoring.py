@@ -14,9 +14,9 @@ from gittensor.constants import (
     PARETO_DISTRIBUTION_ALPHA_VALUE,
     TIME_DECAY_MIN_MULTIPLIER,
     UNIQUE_PR_BOOST,
+    TIME_DECAY_SIGMOID_STEEPNESS_SCALAR,
+    TIME_DECAY_SIGMOID_MIDPOINT
 )
-from gittensor.utils.utils import mask_secret
-from gittensor.validator.utils.config import MERGED_PR_LOOKBACK_DAYS
 
 
 def normalize_rewards_with_pareto(miner_evaluations: Dict[int, MinerEvaluation]) -> Dict[int, float]:
@@ -133,7 +133,7 @@ def count_repository_contributors(miner_evaluations: Dict[int, MinerEvaluation])
         # Log each repository with its contributor count
         sorted_repos = sorted(repo_contributor_counts.items(), key=lambda x: x[1], reverse=True)
         for repo, count in sorted_repos:
-            bt.logging.info(f"{mask_secret(repo)}: {count}")
+            bt.logging.info(f"{repo}: {count}")
 
     return repo_contributor_counts
 
@@ -180,7 +180,7 @@ def apply_repository_uniqueness_boost(miner_evaluations: Dict[int, MinerEvaluati
                 pr.set_earned_score(original_score * boost_multiplier)
 
                 bt.logging.info(
-                    f"Applying unique repo boost to PR's earned score for uid {uid}'s contribution to {mask_secret(pr.repository_full_name)}: "
+                    f"Applying unique repo boost to PR's earned score for uid {uid}'s contribution to {pr.repository_full_name}: "
                     f"{original_score:.4f} -> {pr.earned_score:.4f}"
                 )
 
@@ -189,58 +189,38 @@ def apply_repository_uniqueness_boost(miner_evaluations: Dict[int, MinerEvaluati
 
 def apply_time_decay_for_repository_contributions(miner_evaluations: Dict[int, MinerEvaluation]):
     """
-    Apply time decay to PR scores based on merge date.
-    Older contributions within the lookback window receive reduced scores.
-
-    Linear decay formula:
-    - PRs merged today: multiplier = 1.0 (full score)
-    - PRs merged at lookback window edge (90 days): multiplier = TIME_DECAY_MIN_MULTIPLIER
-    - PRs in between: linear interpolation
+    Apply sigmoid curve time decay to PR scores based on merge date.
 
     Args:
-        miner_evaluations (Dict[int, MinerEvaluation]): Evaluation data containing PR merge dates
-
-    Note:
-        This function modifies the `miner_evaluations` dictionary in-place to apply time decay per PR.
+        miner_evaluations: Evaluation data containing PR merge dates
     """
-
-    bt.logging.info("Applying time decay to PRs")
+    bt.logging.info("Applying sigmoid curve time decay to PRs")
     current_time = datetime.now(timezone.utc)
-
-    # Count total PRs and miners for logging
+    
     total_prs_modified = 0
-    miners_with_prs = 0
+    miners_with_prs = sum(1 for ev in miner_evaluations.values() if ev and ev.pull_requests)
 
     for uid, evaluation in miner_evaluations.items():
         if not evaluation or not evaluation.pull_requests:
             continue
 
-        miners_with_prs += 1
-
         for pr in evaluation.pull_requests:
-            # Calculate days since PR was merged
-            days_since_merge = (current_time - pr.merged_at).total_seconds() / 86400  # 86400 seconds in a day
-
-            # Linear decay: newest PRs get 1.0, oldest get TIME_DECAY_MIN_MULTIPLIER
-            decay_factor = days_since_merge / MERGED_PR_LOOKBACK_DAYS
-            decay_multiplier = 1.0 - (decay_factor * (1.0 - TIME_DECAY_MIN_MULTIPLIER))
-
-            # Clamp to valid range [TIME_DECAY_MIN_MULTIPLIER, 1.0]
-            decay_multiplier = max(TIME_DECAY_MIN_MULTIPLIER, min(1.0, decay_multiplier))
+            days_since_merge = (current_time - pr.merged_at).total_seconds() / 86400
+            
+            # Produces a scalar between 0 and 1
+            age_decay_sigmoid_scalar = 1 / (1 + math.exp(TIME_DECAY_SIGMOID_STEEPNESS_SCALAR * (days_since_merge - TIME_DECAY_SIGMOID_MIDPOINT)))
+            decay_multiplier = max(age_decay_sigmoid_scalar, TIME_DECAY_MIN_MULTIPLIER)
 
             original_score = pr.earned_score
             pr.set_earned_score(original_score * decay_multiplier)
             total_prs_modified += 1
 
             bt.logging.info(
-                f"Applying time decay multiplier on uid {uid}'s PR merged {days_since_merge:.1f} days ago, decay multiplier: {decay_multiplier:.4f}, "
-                f"Score: {original_score:.4f} -> {pr.earned_score:.4f}"
+                f"UID {uid} PR (merged {days_since_merge:.1f}d ago): "
+                f"decay={decay_multiplier:.4f}, score {original_score:.4f}→{pr.earned_score:.4f}"
             )
 
-    bt.logging.info(
-        f"Completed applying time decay for {miners_with_prs} miners, {total_prs_modified} total PRs modified."
-    )
-
+    bt.logging.info(f"Applied time decay to {total_prs_modified} PRs across {miners_with_prs} miners")
 
 def apply_boost_for_gittensor_tag_in_pr_description(miner_evaluations: Dict[int, MinerEvaluation]):
     """
@@ -254,7 +234,7 @@ def apply_boost_for_gittensor_tag_in_pr_description(miner_evaluations: Dict[int,
         This function modifies the `miner_evaluations` dictionary in-place to apply the boost per PR.
     """
 
-    bt.logging.info("Applying Gittensor tag boost to PRs")
+    bt.logging.info("Applying Gittensor tag score boost to PRs")
 
     # Count total PRs boosted and miners for logging
     total_prs_boosted = 0
@@ -274,7 +254,7 @@ def apply_boost_for_gittensor_tag_in_pr_description(miner_evaluations: Dict[int,
                 miner_has_tagged_prs = True
 
                 bt.logging.info(
-                    f"Applying Gittensor tag boost to uid {uid}'s PR in {mask_secret(pr.repository_full_name)}, multiplier: {GITTENSOR_PR_TAG_MULTIPLIER:.2f}, "
+                    f"Applying Gittensor tag boost to uid {uid}'s PR in {pr.repository_full_name}, multiplier: {GITTENSOR_PR_TAG_MULTIPLIER:.2f}, "
                     f"Score: {original_score:.4f} -> {pr.earned_score:.4f}"
                 )
 
@@ -302,7 +282,7 @@ def apply_issue_resolvement_bonus(pr: PullRequest):
 
     if not pr.issues:
         bt.logging.info(
-            f"PR #{mask_secret(pr.number)} in {mask_secret(pr.repository_full_name)} earned score: {pr.earned_score:.5f} × issue multiplier: 1.0 = {pr.earned_score:.5f}"
+            f"PR #{pr.number} in {pr.repository_full_name} earned score: {pr.earned_score:.5f} × issue multiplier: 1.0 = {pr.earned_score:.5f}"
         )
         return
 
@@ -312,26 +292,26 @@ def apply_issue_resolvement_bonus(pr: PullRequest):
         # Skip issues that are not closed
         if issue.state and issue.state != 'CLOSED':
             bt.logging.warning(
-                f"Skipping issue #{mask_secret(issue.number)} - not in CLOSED state (state: {issue.state})"
+                f"Skipping issue #{issue.number} - not in CLOSED state (state: {issue.state})"
             )
             continue
 
         # Skip issues where the author is the same as the PR author (self-created issue gaming)
         if issue.author_login and issue.author_login == pr.author_login:
             bt.logging.warning(
-                f"Skipping issue #{mask_secret(issue.number)} - issue author ({mask_secret(issue.author_login)}) is the same as PR author (preventing self-created issue gaming)"
+                f"Skipping issue #{issue.number} - issue author ({issue.author_login}) is the same as PR author (preventing self-created issue gaming)"
             )
             continue
 
         # Skip issues without author info (safety check)
         if not issue.author_login:
-            bt.logging.warning(f"Skipping issue #{mask_secret(issue.number)} - missing author information")
+            bt.logging.warning(f"Skipping issue #{issue.number} - missing author information")
             continue
 
         # Skip issues created after the PR was created (retroactive issue creation)
         if issue.created_at and pr.created_at and issue.created_at > pr.created_at:
             bt.logging.warning(
-                f"Skipping issue #{mask_secret(issue.number)} - issue created ({issue.created_at.isoformat()}) after PR created ({pr.created_at.isoformat()})"
+                f"Skipping issue #{issue.number} - issue created ({issue.created_at.isoformat()}) after PR created ({pr.created_at.isoformat()})"
             )
             continue
 
@@ -343,7 +323,7 @@ def apply_issue_resolvement_bonus(pr: PullRequest):
 
             if time_diff_seconds > max_allowed_seconds:
                 bt.logging.warning(
-                    f"Skipping issue #{mask_secret(issue.number)} - closed too far from PR merge ({time_diff_seconds/86400:.1f} days difference, max allowed: 5 days)"
+                    f"Skipping issue #{issue.number} - closed too far from PR merge ({time_diff_seconds/86400:.1f} days difference, max allowed: 5 days)"
                 )
                 continue
 
@@ -351,7 +331,7 @@ def apply_issue_resolvement_bonus(pr: PullRequest):
 
     if not valid_issues:
         bt.logging.info(
-            f"PR #{mask_secret(pr.number)} in {mask_secret(pr.repository_full_name)} earned score: {pr.earned_score:.5f} × issue multiplier: 1.0 = {pr.earned_score:.5f} (no valid issues after filtering)"
+            f"PR #{pr.number} in {pr.repository_full_name} earned score: {pr.earned_score:.5f} × issue multiplier: 1.0 = {pr.earned_score:.5f} (no valid issues after filtering)"
         )
         return
 
@@ -359,7 +339,7 @@ def apply_issue_resolvement_bonus(pr: PullRequest):
     new_pr_score = round(issue_multiplier * pr.earned_score, 2)
 
     bt.logging.info(
-        f"PR #{mask_secret(pr.number)} in {mask_secret(pr.repository_full_name)} earned score: {pr.earned_score:.5f} × issue multiplier: {issue_multiplier:.3f} = {new_pr_score:.5f} ({len(valid_issues)}/{len(pr.issues)} valid issues)"
+        f"PR #{pr.number} in {pr.repository_full_name} earned score: {pr.earned_score:.5f} × issue multiplier: {issue_multiplier:.3f} = {new_pr_score:.5f} ({len(valid_issues)}/{len(pr.issues)} valid issues)"
     )
 
     pr.set_earned_score(new_pr_score)

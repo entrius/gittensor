@@ -9,7 +9,6 @@ import requests
 
 from gittensor.classes import FileChange
 from gittensor.constants import BASE_GITHUB_API_URL
-from gittensor.utils.utils import mask_secret
 from gittensor.validator.utils.config import MERGED_PR_LOOKBACK_DAYS
 
 
@@ -116,7 +115,7 @@ def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -
 
     except Exception as e:
         bt.logging.error(
-            f"Error getting file changes for PR #{mask_secret(str(pr_number))} in {mask_secret(repository)}: {e}"
+            f"Error getting file changes for PR #{pr_number} in {repository}: {e}"
         )
         return []
 
@@ -306,7 +305,7 @@ def get_user_merged_prs_graphql(
                 # Filter by master_repositories
                 if repository_full_name not in master_repositories.keys():
                     bt.logging.debug(
-                        f"Skipping PR #{mask_secret(pr_raw['number'])} in {mask_secret(repository_full_name)} - not in master_repositories"
+                        f"Skipping PR #{pr_raw['number']} in {repository_full_name} - not in master_repositories"
                     )
                     continue
 
@@ -320,7 +319,7 @@ def get_user_merged_prs_graphql(
                 # Skip if PR was merged by the same person who created it (self-merge)
                 if pr_raw['mergedBy'] and pr_raw['author']['login'] == pr_raw['mergedBy']['login']:
                     bt.logging.debug(
-                        f"Skipping PR #{mask_secret(pr_raw['number'])} in {mask_secret(repository_full_name)} - self-merged PR"
+                        f"Skipping PR #{pr_raw['number']} in {repository_full_name} - self-merged PR"
                     )
                     continue
 
@@ -333,7 +332,7 @@ def get_user_merged_prs_graphql(
                 base_ref = pr_raw['baseRefName']
                 if base_ref != default_branch:
                     bt.logging.debug(
-                        f"Skipping PR #{mask_secret(pr_raw['number'])} in {mask_secret(repository_full_name)} - not merged to the default (prod) branch"
+                        f"Skipping PR #{pr_raw['number']} in {repository_full_name} - not merged to the default (prod) branch"
                     )
                     continue
 
@@ -345,7 +344,7 @@ def get_user_merged_prs_graphql(
                     # Skip PR if it was merged at or after the repo became inactive
                     if merged_dt >= inactive_dt:
                         bt.logging.debug(
-                            f"Skipping PR #{mask_secret(pr_raw['number'])} in {mask_secret(repository_full_name)} - PR was merged at/after repo became inactive (merged: {merged_dt.isoformat()}, inactive: {inactive_dt.isoformat()})"
+                            f"Skipping PR #{pr_raw['number']} in {repository_full_name} - PR was merged at/after repo became inactive (merged: {merged_dt.isoformat()}, inactive: {inactive_dt.isoformat()})"
                         )
                         continue
 
@@ -358,7 +357,7 @@ def get_user_merged_prs_graphql(
 
             cursor = page_info.get('endCursor')
 
-        bt.logging.info(f"Found {len(all_valid_prs)} valid merged PRs and {open_pr_count} open PRs for user")
+        bt.logging.info(f"Found {len(all_valid_prs)} valid merged PRs and {open_pr_count} open PRs.")
         return (all_valid_prs, open_pr_count)
 
     except Exception as e:

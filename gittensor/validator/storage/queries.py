@@ -16,7 +16,11 @@ INSERT INTO pull_requests (
     author_login, merged_by_login
 ) VALUES %s
 ON CONFLICT (number, repository_full_name)
-DO NOTHING
+DO UPDATE SET
+    uid = EXCLUDED.uid,
+    hotkey = EXCLUDED.hotkey,
+    earned_score = EXCLUDED.earned_score,
+    updated_at = NOW()
 """
 
 # Issue Queries

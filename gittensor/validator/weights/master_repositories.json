@@ -1592,6 +1592,7 @@
   },
   "WhiskeySockets/Baileys": {
     "weight": 1.39
+  },
   "WireGuard/wireguard-go": {
     "weight": 1.27
   },

@@ -8662,7 +8662,7 @@
   "tensorflow/tpu": {
     "weight": 1.2
   },
-  "tensorplex-labs": {
+  "tensorplex-labs/dojo": {
     "weight": 3.33
   },
   "termux/termux-app": {

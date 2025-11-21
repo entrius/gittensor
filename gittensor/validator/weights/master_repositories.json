@@ -1161,6 +1161,7 @@
   },
   "ReactiveX/RxJava": {
     "weight": 1.28
+  },
   "RedSiege/EyeWitness": {
     "weight": 1.02
   },
@@ -1310,6 +1311,7 @@
   },
   "SortableJS/Sortable": {
     "weight": 1.07
+  },
   "Soundnode/soundnode-app": {
     "weight": 1.02
   },

@@ -6,11 +6,7 @@ import bittensor as bt
 from gittensor.classes import Miner, MinerEvaluation
 from gittensor.validator.storage.database import create_database_connection
 from gittensor.validator.storage.migrator import DatabaseMigrator
-from gittensor.validator.storage.repositories.file_changes_repository import FileChangesRepository
-from gittensor.validator.storage.repositories.issues_repository import IssuesRepository
-from gittensor.validator.storage.repositories.miner_evaluations_repository import MinerEvaluationsRepository
-from gittensor.validator.storage.repositories.miners_repository import MinersRepository
-from gittensor.validator.storage.repositories.pull_requests_repository import PullRequestsRepository
+from gittensor.validator.storage.repository import Repository
 
 
 @dataclass
@@ -31,12 +27,8 @@ class DatabaseStorage:
         self.db_migrator = DatabaseMigrator(self.db_connection)
         self.db_migrator.create_tables()
 
-        # Intitialize repositories
-        self.miners_repo = MinersRepository(self.db_connection) if self.db_connection else None
-        self.evaluations_repo = MinerEvaluationsRepository(self.db_connection) if self.db_connection else None
-        self.pr_repo = PullRequestsRepository(self.db_connection) if self.db_connection else None
-        self.issues_repo = IssuesRepository(self.db_connection) if self.db_connection else None
-        self.file_changes_repo = FileChangesRepository(self.db_connection) if self.db_connection else None
+        # Initialize repository
+        self.repo = Repository(self.db_connection) if self.db_connection else None
         self.logger = bt.logging
 
     def is_enabled(self) -> bool:
@@ -67,11 +59,11 @@ class DatabaseStorage:
             all_issues = miner_eval.get_all_issues()
             all_file_changes = miner_eval.get_all_file_changes()
 
-            result.stored_counts['miners'] = self.miners_repo.set_miner(miner)
-            result.stored_counts['pull_requests'] = self.pr_repo.store_pull_requests_bulk(pull_requests)
-            result.stored_counts['issues'] = self.issues_repo.store_issues_bulk(all_issues)
-            result.stored_counts['file_changes'] = self.file_changes_repo.store_file_changes_bulk(all_file_changes)
-            result.stored_counts['evaluations'] = 1 if self.evaluations_repo.set_miner_evaluation(miner_eval) else 0
+            result.stored_counts['miners'] = self.repo.set_miner(miner)
+            result.stored_counts['pull_requests'] = self.repo.store_pull_requests_bulk(pull_requests)
+            result.stored_counts['issues'] = self.repo.store_issues_bulk(all_issues)
+            result.stored_counts['file_changes'] = self.repo.store_file_changes_bulk(all_file_changes)
+            result.stored_counts['evaluations'] = 1 if self.repo.set_miner_evaluation(miner_eval) else 0
 
             # Commit transaction
             self.db_connection.commit()

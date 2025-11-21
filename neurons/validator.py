@@ -18,6 +18,7 @@
 
 import threading
 import time
+from typing import Dict
 
 import bittensor as bt
 import wandb
@@ -77,6 +78,15 @@ class Validator(BaseValidatorNeuron):
         bt.logging.info("load_state()")
         self.load_state()
 
+    async def bulk_store_evaluation(self, miner_evals: Dict[int, MinerEvaluation]):
+        """
+        Wrapper function to store all miner evaluations at once.
+        """
+
+        if self.db_storage is not None:
+            for uid, evaluation in miner_evals.items():
+                await self.store_evaluation(uid, evaluation)
+
     async def store_evaluation(self, uid: int, miner_eval: MinerEvaluation):
         """
         Stores the miner eval if DB storage is enabled by validator via --database.store_validation_results flag.
@@ -94,7 +104,7 @@ class Validator(BaseValidatorNeuron):
                         bt.logging.warning(f"  - {error}")
 
             except Exception as e:
-                bt.logging.error(f"Error when attemping to store miners evaluation for uid {uid}: {e}")
+                bt.logging.error(f"Error when attempting to store miners evaluation for uid {uid}: {e}")
 
     async def forward(self):
         """

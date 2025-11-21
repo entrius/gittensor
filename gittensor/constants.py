@@ -11,14 +11,16 @@ MIN_GITHUB_ACCOUNT_AGE = 180
 
 # Scoring constants
 MAX_ISSUES_SCORED_IN_SINGLE_PR = 3
-UNIQUE_PR_BOOST = 0.6
+UNIQUE_PR_BOOST = 0.25
 
 # Gittensor PR tagging
 PR_TAGLINE = "Contribution by Gittensor, learn more at https://gittensor.io/"
 GITTENSOR_PR_TAG_MULTIPLIER = 1.50
 
 # Time decay constants
-TIME_DECAY_MIN_MULTIPLIER = 0.1  # Oldest PRs (at lookback window edge) get 10% of their score
+TIME_DECAY_MIN_MULTIPLIER = 0.08
+TIME_DECAY_SIGMOID_STEEPNESS_SCALAR = 0.35
+TIME_DECAY_SIGMOID_MIDPOINT = 10.5 # At 10.5 days old, the PR has lost 50% of score.
 
 # Rewards & Recycle constants
 PARETO_DISTRIBUTION_ALPHA_VALUE = 0.85
@@ -39,3 +41,12 @@ MAX_LINES_SCORED_CHANGES = 300
 EXCESSIVE_PR_PENALTY_THRESHOLD = 12
 EXCESSIVE_PR_PENALTY_SLOPE = 0.08333
 EXCESSIVE_PR_MIN_WEIGHT = 0.01
+
+TYPO_RATIO_THRESHOLD = 0.85
+TYPO_ONLY_PENALTY = 0.01
+TYPO_MAX_DIST = 2
+TYPO_MIN_SIM = 0.75
+MAX_TYPO_FILE_PATCH_LINES = 50
+
+# Weight multiplier for test file contributions (0.5 = 50% of normal score)
+TEST_FILE_CONTRIBUTION_WEIGHT = 0.5

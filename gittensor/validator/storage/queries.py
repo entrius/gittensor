@@ -11,7 +11,7 @@ DO NOTHING
 # Pull Request Queries
 BULK_UPSERT_PULL_REQUESTS = """
 INSERT INTO pull_requests (
-    number, repository_full_name, uid, hotkey, github_id, earned_score,
+    number, repository_full_name, uid, hotkey, github_id, base_score, earned_score,
     title, merged_at, pr_created_at, additions, deletions, commits,
     author_login, merged_by_login
 ) VALUES %s
@@ -19,6 +19,7 @@ ON CONFLICT (number, repository_full_name)
 DO UPDATE SET
     uid = EXCLUDED.uid,
     hotkey = EXCLUDED.hotkey,
+    base_score = EXCLUDED.base_score,
     earned_score = EXCLUDED.earned_score,
     updated_at = NOW()
 """
@@ -42,9 +43,16 @@ DO NOTHING
 """
 
 # Miner Evaluation Queries
-SET_MINER_EVALUATION = """
+BBULK_UPSERT_MINER_EVALUATION = """
 INSERT INTO miner_evaluations (
-    uid, hotkey, github_id, failed_reason, total_score,
+    uid, hotkey, github_id, failed_reason, base_total_score, total_score,
     total_lines_changed, total_open_prs, total_prs, unique_repos_count
 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+ON CONFLICT (number, repository_full_name)
+DO UPDATE SET
+    uid = EXCLUDED.uid,
+    hotkey = EXCLUDED.hotkey,
+    base_total_score = EXCLUDED.base_total_score,
+    total_score = EXCLUDED.total_score,
+    updated_at = NOW()
 """

@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS miner_evaluations (
     hotkey               VARCHAR(255)     NOT NULL,
     github_id            VARCHAR(255)     NOT NULL,
     failed_reason        TEXT,
+    base_total_score     DECIMAL(15,6)    DEFAULT 0.0,
     total_score          DECIMAL(15,6)    DEFAULT 0.0,
     total_lines_changed  INTEGER          DEFAULT 0,
     total_open_prs       INTEGER          DEFAULT 0,

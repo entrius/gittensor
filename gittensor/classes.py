@@ -1,19 +1,19 @@
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import DefaultDict, List, Optional, Set, Dict
-from gittensor.utils.utils import mask_secret
+from typing import DefaultDict, Dict, List, Optional, Set
 
 import bittensor as bt
 
 from gittensor.constants import (
+    DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT,
     EXCESSIVE_PR_MIN_WEIGHT,
     EXCESSIVE_PR_PENALTY_SLOPE,
     EXCESSIVE_PR_PENALTY_THRESHOLD,
-    DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT,
-    MITIGATED_EXTENSIONS,
     MAX_LINES_SCORED_CHANGES,
+    MITIGATED_EXTENSIONS,
     TEST_FILE_CONTRIBUTION_WEIGHT,
 )
+from gittensor.utils.utils import mask_secret
 
 GITHUB_DOMAIN = 'https://github.com/'
 
@@ -109,6 +109,7 @@ class PullRequest:
     author_login: str
     merged_at: datetime
     created_at: datetime
+    base_score: float = 0.0
     earned_score: float = 0.0
     additions: int = 0
     deletions: int = 0
@@ -126,8 +127,12 @@ class PullRequest:
         """Total lines changed (additions + deletions)"""
         return self.additions + self.deletions
 
+    def set_base_score(self, score: float) -> None:
+        """Set the base score for this pull request. NOTE the base score is purely the calculation from the file changes"""
+        self.base_score = score
+
     def set_earned_score(self, score: float) -> None:
-        """Set the earned score for this pull request"""
+        """Set the earned score for this pull request, for weight setting, score after uniquness multipliers, penalties, etc"""
         self.earned_score = score
 
     def set_file_changes(self, file_changes: List[FileChange]) -> None:
@@ -143,7 +148,7 @@ class PullRequest:
         """
 
         if not self.file_changes:
-            self.earned_score = 0.0
+            return 0.0
 
         total_lines_scored = 0
         pr_score = 0.0
@@ -163,7 +168,7 @@ class PullRequest:
             file_weight = TEST_FILE_CONTRIBUTION_WEIGHT if file.is_test_file() else 1.0
 
             file_score = language_weight * file_weight * scored_changes
-            
+
             bt.logging.info(f"[{n}/{total_files_changed}] - {file.filename} | score: {file_score:.2f}")
 
             pr_score += file_score
@@ -172,15 +177,15 @@ class PullRequest:
         bt.logging.info(
             f"{total_lines_scored} total lines scored across {total_files_changed} files for PR #{self.number} into {self.repository_full_name}"
             f"Base score from file changes: {pr_score}"
-            )
+        )
         return pr_score
 
     @classmethod
     def from_graphql_response(cls, pr_data: dict, uid: int, hotkey: str, github_id: str) -> 'PullRequest':
         """Create PullRequest from GraphQL API response"""
         # Import here to avoid circular dependency
-        from gittensor.validator.utils.datetime_utils import parse_github_timestamp
         from gittensor.constants import PR_TAGLINE
+        from gittensor.validator.utils.datetime_utils import parse_github_timestamp
 
         repo_data = pr_data['repository']
         repository_full_name = f"{repo_data['owner']['login']}/{repo_data['name']}"
@@ -253,6 +258,7 @@ class MinerEvaluation:
     hotkey: str
     github_id: Optional[str] = '0'  # will be 0 if miner failed
     github_pat: Optional[str] = None
+    base_total_score: float = 0.0
     total_score: float = 0.0
     total_lines_changed: int = 0
     total_open_prs: int = 0
@@ -272,6 +278,7 @@ class MinerEvaluation:
         if not self.pull_requests:
             return
 
+        self.base_total_score = sum(pr.base_score for pr in self.pull_requests)
         self.total_score = sum(pr.earned_score for pr in self.pull_requests)
         self.apply_open_pr_spam_penalty_to_score()
 

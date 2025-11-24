@@ -15,7 +15,6 @@ from gittensor.validator.evaluation.inspections import (
     validate_response_and_initialize_miner_evaluation,
 )
 from gittensor.validator.evaluation.scoring import (
-    apply_boost_for_gittensor_tag_in_pr_description,
     apply_issue_resolvement_bonus,
     apply_repository_uniqueness_boost,
     apply_time_decay_for_repository_contributions,
@@ -204,9 +203,6 @@ async def get_rewards(
 
     # Older contributions within the lookback window will get less score.
     apply_time_decay_for_repository_contributions(miner_evaluations)
-
-    # Boost PRs that include the Gittensor tagline (and were not edited after merge).
-    apply_boost_for_gittensor_tag_in_pr_description(miner_evaluations)
 
     # Normalize the rewards between [0,1] with a pareto boost for higher performing miners.
     normalized_rewards = normalize_rewards_with_pareto(miner_evaluations)

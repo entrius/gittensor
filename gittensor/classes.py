@@ -149,6 +149,10 @@ class PullRequest:
         if not self.file_changes:
             return 0.0
 
+        if not self.gittensor_tagged:
+            bt.logging.info(f"PR #{self.number} into {self.repository_full_name} was not gittensor tagged in the description, skipping...")
+            return 0.0
+
         total_lines_scored = 0
         pr_score = 0.0
 

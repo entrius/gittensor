@@ -9,7 +9,6 @@ import bittensor as bt
 
 from gittensor.classes import Issue, MinerEvaluation, PullRequest
 from gittensor.constants import (
-    GITTENSOR_PR_TAG_MULTIPLIER,
     MAX_ISSUES_SCORED_IN_SINGLE_PR,
     PARETO_DISTRIBUTION_ALPHA_VALUE,
     TIME_DECAY_MIN_MULTIPLIER,
@@ -223,50 +222,6 @@ def apply_time_decay_for_repository_contributions(miner_evaluations: Dict[int, M
             )
 
     bt.logging.info(f"Applied time decay to {total_prs_modified} PRs across {miners_with_prs} miners")
-
-
-def apply_boost_for_gittensor_tag_in_pr_description(miner_evaluations: Dict[int, MinerEvaluation]):
-    """
-    Apply score boost to PRs that include the Gittensor tagline in their description
-    and were not edited after being merged.
-
-    Args:
-        miner_evaluations (Dict[int, MinerEvaluation]): Evaluation data containing PRs
-
-    Note:
-        This function modifies the `miner_evaluations` dictionary in-place to apply the boost per PR.
-    """
-
-    bt.logging.info("Applying Gittensor tag score boost to PRs")
-
-    # Count total PRs boosted and miners for logging
-    total_prs_boosted = 0
-    miners_with_tagged_prs = 0
-
-    for uid, evaluation in miner_evaluations.items():
-        if not evaluation or not evaluation.pull_requests:
-            continue
-
-        miner_has_tagged_prs = False
-
-        for pr in evaluation.pull_requests:
-            if pr.gittensor_tagged:
-                original_score = pr.earned_score
-                pr.set_earned_score(original_score * GITTENSOR_PR_TAG_MULTIPLIER)
-                total_prs_boosted += 1
-                miner_has_tagged_prs = True
-
-                bt.logging.info(
-                    f"Applying Gittensor tag boost to uid {uid}'s PR in {pr.repository_full_name}, multiplier: {GITTENSOR_PR_TAG_MULTIPLIER:.2f}, "
-                    f"Score: {original_score:.4f} -> {pr.earned_score:.4f}"
-                )
-
-        if miner_has_tagged_prs:
-            miners_with_tagged_prs += 1
-
-    bt.logging.info(
-        f"Completed applying Gittensor tag boost for {miners_with_tagged_prs} miners, {total_prs_boosted} total PRs boosted."
-    )
 
 
 def apply_issue_resolvement_bonus(pr: PullRequest):

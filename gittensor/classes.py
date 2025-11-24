@@ -13,7 +13,6 @@ from gittensor.constants import (
     MITIGATED_EXTENSIONS,
     TEST_FILE_CONTRIBUTION_WEIGHT,
 )
-from gittensor.utils.utils import mask_secret
 
 GITHUB_DOMAIN = 'https://github.com/'
 
@@ -227,7 +226,7 @@ class PullRequest:
                     gittensor_tagged = True
                 else:
                     bt.logging.warning(
-                        f"PR #{mask_secret(str(pr_data['number']))} in {mask_secret(repository_full_name)} has Gittensor tagline but was edited after merge "
+                        f"PR #{str(pr_data['number'])} in {repository_full_name} has Gittensor tagline but was edited after merge "
                         f"(merged: {merged_at.isoformat()}, last edited: {last_edited_at.isoformat()})"
                     )
 

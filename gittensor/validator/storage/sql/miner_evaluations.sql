@@ -24,9 +24,9 @@ CREATE TABLE IF NOT EXISTS miner_evaluations (
         REFERENCES miners(uid, hotkey, github_id)
             ON DELETE CASCADE,
 
-    -- Unique constraint to prevent duplicate evaluations
-    CONSTRAINT unique_evaluation
-        UNIQUE (uid, hotkey, evaluation_timestamp)
+    -- Unique constraint to ensure one evaluation per miner (updates on subsequent rounds)
+    CONSTRAINT unique_miner_evaluation
+        UNIQUE (uid, hotkey, github_id)
 );
 
 -- Indexes for performance

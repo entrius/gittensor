@@ -175,7 +175,7 @@ class PullRequest:
 
         self.total_lines_scored = total_lines_scored
         bt.logging.info(
-            f"{total_lines_scored} total lines scored across {total_files_changed} files for PR #{self.number} into {self.repository_full_name}"
+            f"{total_lines_scored} total lines scored across {total_files_changed} files for PR #{self.number} into {self.repository_full_name}. "
             f"Base score from file changes: {pr_score}"
         )
         return pr_score
@@ -305,6 +305,9 @@ class MinerEvaluation:
         if self.total_open_prs > EXCESSIVE_PR_PENALTY_THRESHOLD:
             excess_pr_count = self.total_open_prs - EXCESSIVE_PR_PENALTY_THRESHOLD
             weight = max(EXCESSIVE_PR_MIN_WEIGHT, 1.0 - excess_pr_count * EXCESSIVE_PR_PENALTY_SLOPE)
+            bt.logging.info(
+                f"PENALTY - applying excessive open PR penalty weight {weight:.2f} to total score {self.total_score:.5f}."
+            )
             self.total_score = weight * self.total_score
 
     def set_invalid_response_reason(self, reason: str):

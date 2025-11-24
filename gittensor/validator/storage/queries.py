@@ -43,16 +43,19 @@ DO NOTHING
 """
 
 # Miner Evaluation Queries
-BBULK_UPSERT_MINER_EVALUATION = """
+BULK_UPSERT_MINER_EVALUATION = """
 INSERT INTO miner_evaluations (
     uid, hotkey, github_id, failed_reason, base_total_score, total_score,
     total_lines_changed, total_open_prs, total_prs, unique_repos_count
-) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-ON CONFLICT (number, repository_full_name)
+) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+ON CONFLICT (uid, hotkey, github_id)
 DO UPDATE SET
-    uid = EXCLUDED.uid,
-    hotkey = EXCLUDED.hotkey,
+    failed_reason = EXCLUDED.failed_reason,
     base_total_score = EXCLUDED.base_total_score,
     total_score = EXCLUDED.total_score,
+    total_lines_changed = EXCLUDED.total_lines_changed,
+    total_open_prs = EXCLUDED.total_open_prs,
+    total_prs = EXCLUDED.total_prs,
+    unique_repos_count = EXCLUDED.unique_repos_count,
     updated_at = NOW()
 """

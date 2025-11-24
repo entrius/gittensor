@@ -208,13 +208,13 @@ async def get_rewards(
     # Boost PRs that include the Gittensor tagline (and were not edited after merge).
     apply_boost_for_gittensor_tag_in_pr_description(miner_evaluations)
 
-    # store all miner evaluations after adjusting score
-    await self.bulk_store_evaluation(miner_evaluations)
-
     # Normalize the rewards between [0,1] with a pareto boost for higher performing miners.
     normalized_rewards = normalize_rewards_with_pareto(miner_evaluations)
 
     # Scale rewards according to dynamic emission curve based off of miners total contributions.
     final_rewards = apply_dynamic_emissions_using_network_contributions(normalized_rewards, miner_evaluations)
+
+    # Store miner evaluations after calculating all scores
+    await self.bulk_store_evaluation(miner_evaluations)
 
     return np.array([final_rewards.get(uid, 0.0) for uid in sorted(uids)])

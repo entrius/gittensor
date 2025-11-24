@@ -97,7 +97,7 @@ class Validator(BaseValidatorNeuron):
                 storage_result = self.db_storage.store_evaluation(miner_eval)
 
                 if storage_result.success:
-                    bt.logging.info(f"Successfully stored validation results for UID {uid} to DB.")
+                    bt.logging.success(f"Successfully stored validation results for UID {uid} to DB.")
                 else:
                     bt.logging.warning(f"Storage partially failed for UID {uid}:")
                     for error in storage_result.errors:

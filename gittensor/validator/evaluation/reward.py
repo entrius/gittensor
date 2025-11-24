@@ -74,7 +74,7 @@ def score_pull_requests(
     for n, pr in enumerate(valid_prs, start=1):
         # if repo not in master list, default to .01 (shouldn't happen bc already filtered in github graphql method)
         repo_weight = master_repositories.get(pr.repository_full_name, {}).get("weight", 0.01)
-        
+
         bt.logging.info(
             f"[{n}/{total_prs}] - Scoring PR #{pr.number} in {pr.repository_full_name} (weight: {repo_weight})"
         )
@@ -85,17 +85,18 @@ def score_pull_requests(
             continue
 
         pr.set_file_changes(file_changes)
-        pr.set_earned_score(pr.calculate_score_from_file_changes(programming_languages))
+        pr.set_base_score(pr.calculate_score_from_file_changes(programming_languages))
 
         apply_issue_resolvement_bonus(pr)
-        
+
         apply_typo_detection_penalties(pr, uid)
 
-        pr_score_before_repo_weight = pr.earned_score
+        pr_score_before_repo_weight = pr.base_score
         bt.logging.info(
             f"Applying repo weight to earned PR score: {round(pr_score_before_repo_weight, 2)} x {float(repo_weight)} -> {round(pr_score_before_repo_weight * float(repo_weight), 2)}"
         )
-        pr.set_earned_score(pr_score_before_repo_weight * float(repo_weight))
+        pr.set_base_score(pr_score_before_repo_weight * float(repo_weight))
+        pr.set_earned_score(pr.base_score)
 
         miner_eval.add_pull_request(pr)
 
@@ -207,13 +208,13 @@ async def get_rewards(
     # Boost PRs that include the Gittensor tagline (and were not edited after merge).
     apply_boost_for_gittensor_tag_in_pr_description(miner_evaluations)
 
-    # store all miner evaluations after adjusting score
-    await self.bulk_store_evaluation(miner_evaluations)
-
     # Normalize the rewards between [0,1] with a pareto boost for higher performing miners.
     normalized_rewards = normalize_rewards_with_pareto(miner_evaluations)
 
     # Scale rewards according to dynamic emission curve based off of miners total contributions.
     final_rewards = apply_dynamic_emissions_using_network_contributions(normalized_rewards, miner_evaluations)
+
+    # Store miner evaluations after calculating all scores
+    await self.bulk_store_evaluation(miner_evaluations)
 
     return np.array([final_rewards.get(uid, 0.0) for uid in sorted(uids)])

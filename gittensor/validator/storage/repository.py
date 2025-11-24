@@ -6,19 +6,20 @@ providing clean methods for storing miners, pull requests, issues, file changes,
 and miner evaluations.
 """
 
-from typing import List, TypeVar
-from contextlib import contextmanager
 import logging
+from contextlib import contextmanager
+from typing import List, TypeVar
 
 import numpy as np
 
-from gittensor.classes import Miner, MinerEvaluation, PullRequest, Issue, FileChange
+from gittensor.classes import FileChange, Issue, Miner, MinerEvaluation, PullRequest
+
 from .queries import (
-    SET_MINER,
-    BULK_UPSERT_PULL_REQUESTS,
-    BULK_UPSERT_ISSUES,
     BULK_UPSERT_FILE_CHANGES,
-    SET_MINER_EVALUATION
+    BULK_UPSERT_ISSUES,
+    BULK_UPSERT_MINER_EVALUATION,
+    BULK_UPSERT_PULL_REQUESTS,
+    SET_MINER,
 )
 
 T = TypeVar('T')
@@ -100,11 +101,7 @@ class Repository(BaseRepository):
         Returns:
             True if successful, False otherwise
         """
-        params = (
-            miner.uid,
-            miner.hotkey,
-            miner.github_id
-        )
+        params = (miner.uid, miner.hotkey, miner.github_id)
         return self.set_entity(SET_MINER, params)
 
     def store_pull_requests_bulk(self, pull_requests: List[PullRequest]) -> int:
@@ -128,33 +125,37 @@ class Repository(BaseRepository):
             if isinstance(pr.uid, np.integer):
                 pr.uid = pr.uid.item()
 
-            values.append((
-                pr.number,
-                pr.repository_full_name,
-                pr.uid,
-                pr.hotkey,
-                pr.github_id,
-                pr.earned_score,
-                pr.title,
-                pr.merged_at,
-                pr.created_at,
-                pr.additions,
-                pr.deletions,
-                pr.commits,
-                pr.author_login,
-                pr.merged_by_login
-            ))
+            values.append(
+                (
+                    pr.number,
+                    pr.repository_full_name,
+                    pr.uid,
+                    pr.hotkey,
+                    pr.github_id,
+                    pr.base_score,
+                    pr.earned_score,
+                    pr.title,
+                    pr.merged_at,
+                    pr.created_at,
+                    pr.additions,
+                    pr.deletions,
+                    pr.commits,
+                    pr.author_login,
+                    pr.merged_by_login,
+                )
+            )
 
         try:
             with self.get_cursor() as cursor:
                 # Use psycopg2's execute_values for efficient bulk insert
                 from psycopg2.extras import execute_values
+
                 execute_values(
                     cursor,
                     BULK_UPSERT_PULL_REQUESTS.replace('VALUES %s', 'VALUES %s'),
                     values,
                     template=None,
-                    page_size=100
+                    page_size=100,
                 )
                 self.db.commit()
                 return len(values)
@@ -179,25 +180,24 @@ class Repository(BaseRepository):
         # Prepare data for bulk insert
         values = []
         for issue in issues:
-            values.append((
-                issue.number,
-                issue.pr_number,
-                issue.repository_full_name,
-                issue.title,
-                issue.created_at,
-                issue.closed_at
-            ))
+            values.append(
+                (
+                    issue.number,
+                    issue.pr_number,
+                    issue.repository_full_name,
+                    issue.title,
+                    issue.created_at,
+                    issue.closed_at,
+                )
+            )
 
         try:
             with self.get_cursor() as cursor:
                 # Use psycopg2's execute_values for efficient bulk insert
                 from psycopg2.extras import execute_values
+
                 execute_values(
-                    cursor,
-                    BULK_UPSERT_ISSUES.replace('VALUES %s', 'VALUES %s'),
-                    values,
-                    template=None,
-                    page_size=100
+                    cursor, BULK_UPSERT_ISSUES.replace('VALUES %s', 'VALUES %s'), values, template=None, page_size=100
                 )
                 self.db.commit()
                 return len(values)
@@ -222,28 +222,31 @@ class Repository(BaseRepository):
         # Prepare data for bulk insert
         values = []
         for file_change in file_changes:
-            values.append((
-                file_change.pr_number,
-                file_change.repository_full_name,
-                file_change.filename,
-                file_change.changes,
-                file_change.additions,
-                file_change.deletions,
-                file_change.status,
-                file_change.patch,
-                file_change.file_extension or file_change._calculate_file_extension()
-            ))
+            values.append(
+                (
+                    file_change.pr_number,
+                    file_change.repository_full_name,
+                    file_change.filename,
+                    file_change.changes,
+                    file_change.additions,
+                    file_change.deletions,
+                    file_change.status,
+                    file_change.patch,
+                    file_change.file_extension or file_change._calculate_file_extension(),
+                )
+            )
 
         try:
             with self.get_cursor() as cursor:
                 # Use psycopg2's execute_values for efficient bulk insert
                 from psycopg2.extras import execute_values
+
                 execute_values(
                     cursor,
                     BULK_UPSERT_FILE_CHANGES.replace('VALUES %s', 'VALUES %s'),
                     values,
                     template=None,
-                    page_size=100
+                    page_size=100,
                 )
                 self.db.commit()
                 return len(values)
@@ -262,16 +265,17 @@ class Repository(BaseRepository):
         Returns:
             True if successful, False otherwise
         """
-        query = SET_MINER_EVALUATION
+        query = BULK_UPSERT_MINER_EVALUATION
         params = (
             evaluation.uid,
             evaluation.hotkey,
             evaluation.github_id,
             evaluation.failed_reason,
+            evaluation.base_total_score,
             evaluation.total_score,
             evaluation.total_lines_changed,
             evaluation.total_open_prs,
             evaluation.total_prs,
-            evaluation.unique_repos_count
+            evaluation.unique_repos_count,
         )
         return self.set_entity(query, params)

@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS miner_evaluations (
     hotkey               VARCHAR(255)     NOT NULL,
     github_id            VARCHAR(255)     NOT NULL,
     failed_reason        TEXT,
+    base_total_score     DECIMAL(15,6)    DEFAULT 0.0,
     total_score          DECIMAL(15,6)    DEFAULT 0.0,
     total_lines_changed  INTEGER          DEFAULT 0,
     total_open_prs       INTEGER          DEFAULT 0,
@@ -23,9 +24,9 @@ CREATE TABLE IF NOT EXISTS miner_evaluations (
         REFERENCES miners(uid, hotkey, github_id)
             ON DELETE CASCADE,
 
-    -- Unique constraint to prevent duplicate evaluations
-    CONSTRAINT unique_evaluation
-        UNIQUE (uid, hotkey, evaluation_timestamp)
+    -- Unique constraint to ensure one evaluation per miner (updates on subsequent rounds)
+    CONSTRAINT unique_miner_evaluation
+        UNIQUE (uid, hotkey, github_id)
 );
 
 -- Indexes for performance

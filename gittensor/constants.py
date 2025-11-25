@@ -47,5 +47,5 @@ TYPO_MAX_DIST = 2
 TYPO_MIN_SIM = 0.75
 MAX_TYPO_FILE_PATCH_LINES = 50
 
-# Weight multiplier for test file contributions (0.5 = 50% of normal score)
-TEST_FILE_CONTRIBUTION_WEIGHT = 0.5
+# Weight multiplier for test file contributions (0.25 = 25% of normal score)
+TEST_FILE_CONTRIBUTION_WEIGHT = 0.25

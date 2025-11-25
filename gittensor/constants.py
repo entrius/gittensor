@@ -15,12 +15,11 @@ UNIQUE_PR_BOOST = 0.25
 
 # Gittensor PR tagging
 PR_TAGLINE = "Contribution by Gittensor, learn more at https://gittensor.io/"
-GITTENSOR_PR_TAG_MULTIPLIER = 1.50
 
 # Time decay constants
-TIME_DECAY_MIN_MULTIPLIER = 0.08
-TIME_DECAY_SIGMOID_STEEPNESS_SCALAR = 0.35
-TIME_DECAY_SIGMOID_MIDPOINT = 10.5 # At 10.5 days old, the PR has lost 50% of score.
+TIME_DECAY_MIN_MULTIPLIER = 0.005
+TIME_DECAY_SIGMOID_STEEPNESS_SCALAR = 0.9
+TIME_DECAY_SIGMOID_MIDPOINT = 4 # At 4 days old, the PR has lost 50% of score.
 
 # Rewards & Recycle constants
 PARETO_DISTRIBUTION_ALPHA_VALUE = 0.85

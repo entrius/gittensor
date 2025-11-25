@@ -29,7 +29,7 @@ LINES_CONTRIBUTED_MAX_RECYCLE = 0.9
 LINES_CONTRIBUTED_RECYCLE_DECAY_RATE = 0.00001
 
 UNIQUE_PRS_MAX_RECYCLE = 0.9
-UNIQUE_PRS_RECYCLE_DECAY_RATE = 0.005
+UNIQUE_PRS_RECYCLE_DECAY_RATE = 0.02
 
 # file types for which we want to mitigate rewards b/c of exploiting/gameability
 MITIGATED_EXTENSIONS = ["md", "txt", "json"]

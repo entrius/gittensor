@@ -58,7 +58,7 @@ def apply_dynamic_emissions_using_network_contributions(
     scaled_rewards[RECYCLE_UID] += total_recycled if total_recycled > 0 else 1
     percent_rewards_recycled = total_recycled / total_original_rewards if total_original_rewards > 0 else 1.0
 
-    bt.logging.info(f"Dynamic emissions based on network wide contributions applied:")
+    bt.logging.info("Dynamic emissions based on network wide contributions applied:")
     bt.logging.info(f"  - Lines changed scalar: {lines_scalar:.6f}")
     bt.logging.info(f"  - Unique repos scalar: {unique_repo_scalar:.6f}")
     bt.logging.info(f"  - Final network scalar: {final_network_scalar:.6f}")

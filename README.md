@@ -114,8 +114,8 @@ Miners who open PRs excessively will see their score reduced by a penalty multip
 
 Adopted from bitcast, subnet 93, collaborative emissions scaling has the network ‘unlock’ emissions as more miners join and earn a score. Miners will benefit by experiencing individual and cumulative network growth. Two major values affecting the total emissions unlocked rate are:
 
-- Total lines changed within the last 90 days (`MERGED_PR_LOOKBACK_DAYS`)
-- Total unique repositories contributed to within the last 90 days
+- Total lines changed within the last 30 days (`MERGED_PR_LOOKBACK_DAYS`)
+- Total unique repositories contributed to within the last 30 days
 
 As total lines changed and total unique repositories increases, the percentage of total available emissions increases. Whatever is not released is recycled.
 

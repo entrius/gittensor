@@ -84,12 +84,12 @@ def test_pr_scoring():
             # SET BREAKPOINT ON THE NEXT LINE to step into calculate_score_from_file_changes()
             pr.calculate_score_from_file_changes(programming_languages)
 
-            bt.logging.info(f"    Base score: {pr.earned_score:.5f}")
+            bt.logging.info(f"    Base score: {pr.earned_score:.2f}")
 
             # Apply issue bonus
             apply_issue_resolvement_bonus(pr)
 
-            bt.logging.info(f"    Final score (after issue bonus): {pr.earned_score:.5f}")
+            bt.logging.info(f"    Final score (after issue bonus): {pr.earned_score:.2f}")
 
             # Set file changes and score on PR
             pr.set_file_changes(file_changes)
@@ -108,9 +108,9 @@ def test_pr_scoring():
             actual = miner_eval.total_score
             diff = abs(expected - actual)
             status = "✓ PASS" if diff < 0.01 else "✗ FAIL"
-            bt.logging.info(f"\n  Expected Score: {expected:.5f}")
-            bt.logging.info(f"  Actual Score:   {actual:.5f}")
-            bt.logging.info(f"  Difference:     {diff:.5f}")
+            bt.logging.info(f"\n  Expected Score: {expected:.2f}")
+            bt.logging.info(f"  Actual Score:   {actual:.2f}")
+            bt.logging.info(f"  Difference:     {diff:.2f}")
             bt.logging.info(f"  Status: {status}")
 
     bt.logging.info("\n" + "=" * 70)

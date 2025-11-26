@@ -1,4 +1,4 @@
-from typing import Dict
+from typing import Dict, Set
 
 import bittensor as bt
 import numpy as np
@@ -13,122 +13,55 @@ from gittensor.constants import (
 )
 
 
+def _exponential_unlock_scalar(value: float, max_recycle: float, decay_rate: float) -> float:
+    """Calculate scalar using exponential unlock curve, capped at 1.0."""
+    return min(1.0, (1 - max_recycle) + max_recycle * (1 - np.exp(-decay_rate * value)))
+
+
+def _get_network_totals(miner_evaluations: Dict[int, MinerEvaluation]) -> tuple[int, int]:
+    """Extract total lines changed and unique repos from evaluations."""
+    total_lines = 0
+    unique_repos: Set[str] = set()
+    
+    for evaluation in miner_evaluations.values():
+        if evaluation.total_score > 0:  # Exclude penalized miners
+            total_lines += evaluation.total_lines_changed
+        if repos := evaluation.get_unique_repositories():
+            unique_repos.update(repos)
+    
+    return total_lines, len(unique_repos)
+
+
 def apply_dynamic_emissions_using_network_contributions(
     normalized_rewards: Dict[int, float], miner_evaluations: Dict[int, MinerEvaluation]
 ) -> Dict[int, float]:
-    """
-    Scale normalized rewards based on network-wide contributions.
-
-    Args:
-        normalized_rewards (Dict[int, float]): Normalized rewards that sum to 1.0
-        miner_evaluations (Dict[int, MinerEvaluation]): Dict mapping miner UIDs to their evaluations
-
-    Returns:
-        Dict[int, float]: Scaled rewards after applying network dynamic emissions mechanism
-    """
+    """Scale normalized rewards based on network-wide contributions."""
     if not normalized_rewards:
         bt.logging.warning("No normalized rewards provided for scaling")
         return {}
 
-    # Calculate network emission scalar for lines changed total
-    lines_scalar = calculate_network_lines_changed_emissions_scalar(miner_evaluations)
-
-    # Calculate network emission scalar for unique repositories
-    unique_repo_scalar = calculate_network_unique_repos_emissions_scalar(miner_evaluations)
-
-    # Take the average of the 2 scalars to have the final network_scalar
-    final_network_scalar = (lines_scalar + unique_repo_scalar) / 2.0
-
-    # Apply network scalar to all rewards
-    scaled_rewards = {}
-    total_original_rewards = 0.0
-    total_recycled = 0.0
-
-    for uid, original_reward in normalized_rewards.items():
-        scaled_reward = original_reward * final_network_scalar
-        scaled_rewards[uid] = scaled_reward
-
-        total_original_rewards += original_reward
-        total_recycled += original_reward - scaled_reward
-
-    # Allocate all recycled emissions to the recycled UID
-    if RECYCLE_UID not in scaled_rewards:
-        scaled_rewards[RECYCLE_UID] = 0.0
-
-    scaled_rewards[RECYCLE_UID] += total_recycled if total_recycled > 0 else 1
-    percent_rewards_recycled = total_recycled / total_original_rewards if total_original_rewards > 0 else 1.0
-
-    bt.logging.info("Dynamic emissions based on network wide contributions applied:")
-    bt.logging.info(f"  - Lines changed scalar: {lines_scalar:.6f}")
-    bt.logging.info(f"  - Unique repos scalar: {unique_repo_scalar:.6f}")
-    bt.logging.info(f"  - Final network scalar: {final_network_scalar:.6f}")
-    bt.logging.info(f"  - Total emissions recycled: {total_recycled:.6f} ({percent_rewards_recycled*100:.2f}%)")
-    bt.logging.info(f"  - Recycled emissions allocated to UID {RECYCLE_UID}: {total_recycled:.6f}")
-    bt.logging.info(f"  - Final reward sum: {sum(scaled_rewards.values()):.6f}")
-    bt.logging.info(f"  - Network unlock percentage: {final_network_scalar*100:.2f}%")
-
-    return scaled_rewards
-
-
-def calculate_network_lines_changed_emissions_scalar(miner_evaluations: Dict[int, MinerEvaluation]) -> float:
-    """
-    Calculate the emissions scalar based on total network lines changed and dynamic emission parameters.
-
-    Args:
-        miner_evaluations (Dict[int, MinerEvaluation]): Dict mapping miner UIDs to their evaluations
-
-    Returns:
-        float: Network emission scalar (0-1) based on collective contribution
-    """
-
-    # Calculate total lines changed across all miners (excluding penalized miners)
-    total_network_lines = sum(
-        evaluation.total_lines_changed
-        for evaluation in miner_evaluations.values()
-        if evaluation.total_score > 0  # Exclude penalized miners
+    # Calculate network metrics and scalars
+    total_lines, total_unique_repos = _get_network_totals(miner_evaluations)
+    
+    lines_scalar = _exponential_unlock_scalar(
+        total_lines, LINES_CONTRIBUTED_MAX_RECYCLE, LINES_CONTRIBUTED_RECYCLE_DECAY_RATE
     )
-
-    bt.logging.info(f"Total lines scored across all miners: {total_network_lines}")
-
-    # Calculate scalar using exponential unlock curve
-    scalar = (1 - LINES_CONTRIBUTED_MAX_RECYCLE) + LINES_CONTRIBUTED_MAX_RECYCLE * (
-        1 - np.exp(-LINES_CONTRIBUTED_RECYCLE_DECAY_RATE * total_network_lines)
+    repo_scalar = _exponential_unlock_scalar(
+        total_unique_repos, UNIQUE_PRS_MAX_RECYCLE, UNIQUE_PRS_RECYCLE_DECAY_RATE
     )
-    scalar = min(scalar, 1.0)  # Cap at 1.0
+    final_scalar = (lines_scalar + repo_scalar) / 2.0
 
-    bt.logging.info(f"Lines changed emission scalar: {scalar:.6f} (unlocked: {scalar*100:.2f}%)")
+    # Apply scaling and calculate recycled amount
+    total_original = sum(normalized_rewards.values())
+    scaled_rewards = {uid: reward * final_scalar for uid, reward in normalized_rewards.items()}
+    total_recycled = total_original * (1 - final_scalar)
 
-    return scalar
-
-
-def calculate_network_unique_repos_emissions_scalar(miner_evaluations: Dict[int, MinerEvaluation]) -> float:
-    """
-    Calculate the emissions scalar based on total network unique repositories and dynamic emission parameters.
-
-    Args:
-        miner_evaluations (Dict[int, MinerEvaluation]): Dict mapping miner UIDs to their evaluations
-
-    Returns:
-        float: Network emission scalar (0-1) based on collective repository diversity
-    """
-
-    all_unique_repositories = set()
-    for evaluation in miner_evaluations.values():
-        if evaluation.get_unique_repositories():
-            all_unique_repositories.update(evaluation.get_unique_repositories())
-
-    total_unique_repos = len(all_unique_repositories)
+    # Allocate recycled emissions
+    scaled_rewards[RECYCLE_UID] = scaled_rewards.get(RECYCLE_UID, 0.0) + max(total_recycled, 1 if total_recycled <= 0 else 0)
 
     bt.logging.info(
-        f"Total unique repositories across all miners: {total_unique_repos}"
+        f"Dynamic emissions: lines_scalar={lines_scalar:.3f}, repo_scalar={repo_scalar:.3f}, "
+        f"final={final_scalar:.2f}, recycled={total_recycled:.2f} ({total_recycled/total_original*100:.2f}%)"
     )
 
-    # Calculate scalar using exponential unlock curve
-    scalar = (1 - UNIQUE_PRS_MAX_RECYCLE) + UNIQUE_PRS_MAX_RECYCLE * (
-        1 - np.exp(-UNIQUE_PRS_RECYCLE_DECAY_RATE * total_unique_repos)
-    )
-    scalar = min(scalar, 1.0)  # Cap at 1.0
-
-    bt.logging.info(f"Unique repositories emission scalar: {scalar:.6f} (unlocked: {scalar*100:.2f}%)")
-
-    return scalar
+    return scaled_rewards

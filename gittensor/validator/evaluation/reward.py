@@ -7,102 +7,27 @@ from typing import TYPE_CHECKING, Dict
 import bittensor as bt
 import numpy as np
 
-from gittensor.classes import GitPatSynapse, MinerEvaluation, PullRequest
-from gittensor.utils.github_api_tools import get_pull_request_file_changes, get_user_merged_prs_graphql
+from gittensor.classes import GitPatSynapse, MinerEvaluation
+from gittensor.utils.github_api_tools import get_user_merged_prs_graphql
 from gittensor.validator.evaluation.dynamic_emissions import apply_dynamic_emissions_using_network_contributions
 from gittensor.validator.evaluation.inspections import (
     detect_and_penalize_duplicates,
     validate_response_and_initialize_miner_evaluation,
 )
 from gittensor.validator.evaluation.scoring import (
-    apply_issue_resolvement_bonus,
+    score_pull_requests,
     apply_repository_uniqueness_boost,
     apply_time_decay_for_repository_contributions,
+)
+from gittensor.validator.evaluation.normalize import (
     normalize_rewards_with_pareto,
 )
-from gittensor.validator.evaluation.spam_detection import apply_typo_detection_penalties
 
 # NOTE: there was a circular import error, needed this if to resolve it
 if TYPE_CHECKING:
     from neurons.validator import Validator
 
 
-def score_pull_requests(
-    uid: int,
-    miner_eval: MinerEvaluation,
-    valid_raw_prs: list,
-    master_repositories: Dict[str, Dict],
-    programming_languages: Dict[str, float],
-) -> MinerEvaluation:
-    """
-    Helper function to score pull requests and populate MinerEvaluation object.
-
-    This function takes raw PR data and:
-    1. Converts to PullRequest objects
-    2. Fetches file changes for each PR
-    3. Calculates scores based on language weights and changes
-    4. Applies repository weight
-    5. Applies issue bonuses
-    6. Calculates totals and penalties
-
-    Args:
-        uid (int): Miner UID for logging
-        miner_eval (MinerEvaluation): MinerEvaluation object to populate
-        valid_raw_prs (list): List of raw PR data from GraphQL API
-        master_repositories (Dict[str, Dict]): The incentivized repositories and their metadata (weight, inactiveAt)
-        programming_languages (Dict[str, float]): The programming languages and their weights
-
-    Returns:
-        MinerEvaluation: The populated evaluation object
-    """
-
-    github_pat = miner_eval.github_pat
-
-    valid_prs = [
-        PullRequest.from_graphql_response(raw_pr, uid, miner_eval.hotkey, miner_eval.github_id)
-        for raw_pr in valid_raw_prs
-    ]
-
-    if not valid_prs or not len(valid_prs):
-        bt.logging.info(f"No valid PRs found for miner {uid}: setting default score of 0.")
-        return miner_eval
-
-    total_prs = len(valid_prs)
-    bt.logging.info(f"Scoring {total_prs} PRs for miner {uid}")
-
-    for n, pr in enumerate(valid_prs, start=1):
-        # if repo not in master list, default to .01 (shouldn't happen bc already filtered in github graphql method)
-        repo_weight = master_repositories.get(pr.repository_full_name, {}).get("weight", 0.01)
-
-        bt.logging.info(
-            f"[{n}/{total_prs}] - Scoring PR #{pr.number} in {pr.repository_full_name} (weight: {repo_weight})"
-        )
-
-        file_changes = get_pull_request_file_changes(pr.repository_full_name, pr.number, github_pat)
-        if not file_changes:
-            bt.logging.warning("No file changes found for this PR.")
-            continue
-
-        pr.set_file_changes(file_changes)
-        pr.set_base_score(pr.calculate_score_from_file_changes(programming_languages))
-
-        apply_issue_resolvement_bonus(pr)
-
-        apply_typo_detection_penalties(pr, uid)
-
-        pr_score_before_repo_weight = pr.base_score
-        bt.logging.info(
-            f"Applying repo weight to earned PR score: {round(pr_score_before_repo_weight, 2)} x {float(repo_weight)} -> {round(pr_score_before_repo_weight * float(repo_weight), 2)}"
-        )
-        pr.set_base_score(pr_score_before_repo_weight * float(repo_weight))
-        pr.set_earned_score(pr.base_score)
-
-        miner_eval.add_pull_request(pr)
-
-    return miner_eval
-
-
-# query miner for synapse
 async def query_miner(self, uid: int) -> GitPatSynapse:
     """
     Returns:
@@ -128,7 +53,6 @@ async def query_miner(self, uid: int) -> GitPatSynapse:
         return None
 
 
-# calculate score for a given miner
 async def reward(
     self: Validator,
     uid: int,
@@ -166,7 +90,6 @@ async def reward(
     return miner_eval
 
 
-# process scores for all miners
 async def get_rewards(
     self: Validator, uids: set[int], master_repositories: dict[str, dict], programming_languages: dict[str, float]
 ) -> np.ndarray:

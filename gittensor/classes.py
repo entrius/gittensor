@@ -9,7 +9,7 @@ from gittensor.constants import (
     EXCESSIVE_PR_MIN_WEIGHT,
     EXCESSIVE_PR_PENALTY_SLOPE,
     EXCESSIVE_PR_PENALTY_THRESHOLD,
-    MAX_LINES_SCORED_CHANGES,
+    MAX_LINES_SCORED_FOR_MITIGATED_EXT,
     MITIGATED_EXTENSIONS,
     TEST_FILE_CONTRIBUTION_WEIGHT,
 )
@@ -139,13 +139,7 @@ class PullRequest:
         self.file_changes = file_changes
 
     def calculate_score_from_file_changes(self, programming_languages: Dict[str, float]) -> float:
-        """
-        Calculate the score for a single PR based on its file changes.
-
-        Args:
-            programming_languages (Dict[str, float]): List of programming language weights
-        """
-
+        """Calculate the score for a single PR based on its file changes."""
         if not self.file_changes:
             return 0.0
 
@@ -165,7 +159,7 @@ class PullRequest:
             # Cap scored changes for extensions that are exploitable
             scored_changes = file.changes
             if file.file_extension in MITIGATED_EXTENSIONS:
-                scored_changes = min(scored_changes, MAX_LINES_SCORED_CHANGES)
+                scored_changes = min(scored_changes, MAX_LINES_SCORED_FOR_MITIGATED_EXT)
 
             total_lines_scored += scored_changes
             file_weight = TEST_FILE_CONTRIBUTION_WEIGHT if file.is_test_file() else 1.0
@@ -173,7 +167,6 @@ class PullRequest:
             file_score = language_weight * file_weight * scored_changes
 
             bt.logging.info(f"[{n}/{total_files_changed}] - {file.filename} | score: {file_score:.2f}")
-
             pr_score += file_score
 
         self.total_lines_scored = total_lines_scored
@@ -290,7 +283,7 @@ class MinerEvaluation:
         self.unique_repos_count = len(self.unique_repos_contributed_to)
 
         bt.logging.info(f"Final evaluation for UID {self.uid}:")
-        bt.logging.info(f"  - Total Score: {self.total_score:.5f}")
+        bt.logging.info(f"  - Total Score: {self.total_score:.2f}")
         bt.logging.info(f"  - Total Valid PRs: {self.total_prs}")
         bt.logging.info(f"  - Total open PRs: {self.total_open_prs}")
         bt.logging.info(f"  - Total Lines Changed (& Scored): {self.total_lines_changed}")
@@ -309,7 +302,7 @@ class MinerEvaluation:
             excess_pr_count = self.total_open_prs - EXCESSIVE_PR_PENALTY_THRESHOLD
             weight = max(EXCESSIVE_PR_MIN_WEIGHT, 1.0 - excess_pr_count * EXCESSIVE_PR_PENALTY_SLOPE)
             bt.logging.info(
-                f"PENALTY - applying excessive open PR penalty weight {weight:.2f} to total score {self.total_score:.5f}."
+                f"PENALTY - applying excessive open PR penalty weight {weight:.2f} to total score {self.total_score:2f}."
             )
             self.total_score = weight * self.total_score
 

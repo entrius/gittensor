@@ -174,7 +174,7 @@ def create_debug_api(validator: "BaseValidatorNeuron", port: int = 8099):
                 "rewards": {str(int(uid)): float(reward) for uid, reward in zip(miner_uids, rewards)},
             }
 
-            bt.logging.info(f"Scoring complete! Total rewards: {result['total_reward_sum']:.6f}")
+            bt.logging.info(f"Scoring complete! Total rewards: {result['total_reward_sum']:.2f}")
             return result
 
         except Exception as e:

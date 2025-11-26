@@ -41,7 +41,7 @@ from gittensor.classes import FileChange, PullRequest
 from gittensor.constants import (
     BASE_GITHUB_API_URL,
     DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT,
-    MAX_LINES_SCORED_CHANGES,
+    MAX_LINES_SCORED_FOR_MITIGATED_EXT,
     MITIGATED_EXTENSIONS,
 )
 
@@ -147,8 +147,8 @@ def calculate_file_score_breakdown(file_changes: list[FileChange], programming_l
         scored_changes = actual_changes
         is_capped = False
         if file.file_extension in MITIGATED_EXTENSIONS:
-            scored_changes = min(actual_changes, MAX_LINES_SCORED_CHANGES)
-            is_capped = actual_changes > MAX_LINES_SCORED_CHANGES
+            scored_changes = min(actual_changes, MAX_LINES_SCORED_FOR_MITIGATED_EXT)
+            is_capped = actual_changes > MAX_LINES_SCORED_FOR_MITIGATED_EXT
 
         # Normalized by total changes in the PR
         weight_ratio = actual_changes / total_file_changes if total_file_changes > 0 else 0
@@ -269,7 +269,7 @@ def print_report(pr_details: dict, file_changes: list[FileChange], programming_l
         print(f"Capped files ({len(capped_files)}):")
         for fb in capped_files:
             print(
-                f"  - {fb['filename']}: {fb['changes']} changes -> {fb['scored_changes']} scored (cap: {MAX_LINES_SCORED_CHANGES})"
+                f"  - {fb['filename']}: {fb['changes']} changes -> {fb['scored_changes']} scored (cap: {MAX_LINES_SCORED_FOR_MITIGATED_EXT})"
             )
 
     # Language distribution

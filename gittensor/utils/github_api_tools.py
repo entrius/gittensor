@@ -186,6 +186,7 @@ def get_user_merged_prs_graphql(
                 }
               }
               baseRefName
+              headRefName
               author {
                 login
               }
@@ -345,13 +346,25 @@ def get_user_merged_prs_graphql(
                     else 'main'
                 )
                 base_ref = pr_raw['baseRefName']
+                head_ref = pr_raw.get('headRefName', '')  # Source branch (where PR is coming FROM)
+                repo_metadata = master_repositories.get(repository_full_name, {})
+                additional_branches = repo_metadata.get('additional_acceptable_branches', [])
+
+                # Build list of all acceptable branches (default + additional)
+                acceptable_branches = [default_branch] + additional_branches
+
+                # Skip if the source branch (headRef) is also an acceptable branch
+                # This prevents PRs like "staging -> main" or "develop -> staging" where both are acceptable branches
+                if head_ref in acceptable_branches:
+                    bt.logging.debug(
+                        f"Skipping PR #{pr_raw['number']} in {repository_full_name} - "
+                        f"source branch '{head_ref}' is an acceptable branch (merging between acceptable branches not allowed)"
+                    )
+                    continue
 
                 # Check if merged to default branch
                 if base_ref != default_branch:
                     # If not default, check if repository has additional acceptable branches
-                    repo_metadata = master_repositories.get(repository_full_name, {})
-                    additional_branches = repo_metadata.get('additional_acceptable_branches', [])
-
                     if base_ref not in additional_branches:
                         bt.logging.debug(
                             f"Skipping PR #{pr_raw['number']} in {repository_full_name} - "

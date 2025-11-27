@@ -11,16 +11,30 @@ DO NOTHING
 # Pull Request Queries
 BULK_UPSERT_PULL_REQUESTS = """
 INSERT INTO pull_requests (
-    number, repository_full_name, uid, hotkey, github_id, base_score, earned_score,
-    title, merged_at, pr_created_at, additions, deletions, commits,
-    author_login, merged_by_login
+    number, repository_full_name, uid, hotkey, github_id, title, author_login,
+    merged_at, pr_created_at,
+    repo_weight_multiplier, base_score, issue_multiplier, typo_penalty_multiplier,
+    open_pr_spam_multiplier, repository_uniqueness_multiplier, time_decay_multiplier,
+    earned_score,
+    additions, deletions, commits, total_lines_scored, gittensor_tagged,
+    merged_by_login, description, last_edited_at
 ) VALUES %s
 ON CONFLICT (number, repository_full_name)
 DO UPDATE SET
     uid = EXCLUDED.uid,
     hotkey = EXCLUDED.hotkey,
+    repo_weight_multiplier = EXCLUDED.repo_weight_multiplier,
     base_score = EXCLUDED.base_score,
+    issue_multiplier = EXCLUDED.issue_multiplier,
+    typo_penalty_multiplier = EXCLUDED.typo_penalty_multiplier,
+    open_pr_spam_multiplier = EXCLUDED.open_pr_spam_multiplier,
+    repository_uniqueness_multiplier = EXCLUDED.repository_uniqueness_multiplier,
+    time_decay_multiplier = EXCLUDED.time_decay_multiplier,
     earned_score = EXCLUDED.earned_score,
+    total_lines_scored = EXCLUDED.total_lines_scored,
+    gittensor_tagged = EXCLUDED.gittensor_tagged,
+    description = EXCLUDED.description,
+    last_edited_at = EXCLUDED.last_edited_at,
     updated_at = NOW()
 """
 

@@ -338,18 +338,31 @@ def get_user_merged_prs_graphql(
                         )
                         continue
 
-                # Skip if PR was not merged to the default branch
+                # Skip if PR was not merged to an acceptable branch (default or additional)
                 default_branch = (
                     pr_raw['repository']['defaultBranchRef']['name']
                     if pr_raw['repository']['defaultBranchRef']
                     else 'main'
                 )
                 base_ref = pr_raw['baseRefName']
+
+                # Check if merged to default branch
                 if base_ref != default_branch:
-                    bt.logging.debug(
-                        f"Skipping PR #{pr_raw['number']} in {repository_full_name} - not merged to the default (prod) branch"
-                    )
-                    continue
+                    # If not default, check if repository has additional acceptable branches
+                    repo_metadata = master_repositories.get(repository_full_name, {})
+                    additional_branches = repo_metadata.get('additional_acceptable_branches', [])
+
+                    if base_ref not in additional_branches:
+                        bt.logging.debug(
+                            f"Skipping PR #{pr_raw['number']} in {repository_full_name} - "
+                            f"merged to '{base_ref}' (not default branch '{default_branch}' or additional acceptable branches)"
+                        )
+                        continue
+                    else:
+                        bt.logging.debug(
+                            f"Accepting PR #{pr_raw['number']} in {repository_full_name} - "
+                            f"merged to '{base_ref}' (additional acceptable branch)"
+                        )
 
                 repo_metadata = master_repositories[repository_full_name]
                 inactive_at = repo_metadata.get("inactiveAt")

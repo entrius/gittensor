@@ -204,6 +204,13 @@ def get_user_merged_prs_graphql(
                   }
                 }
               }
+              reviews(first: 50, states: APPROVED) {
+                nodes {
+                  author {
+                    login
+                  }
+                }
+              }
             }
           }
         }
@@ -316,12 +323,20 @@ def get_user_merged_prs_graphql(
                     bt.logging.debug(f"Reached PRs older than {MERGED_PR_LOOKBACK_DAYS} days, stopping pagination")
                     return (all_valid_prs, open_pr_count)
 
-                # Skip if PR was merged by the same person who created it (self-merge)
+                # Skip if PR was merged by the same person who created it (self-merge) AND there's no approvals from a differing party
                 if pr_raw['mergedBy'] and pr_raw['author']['login'] == pr_raw['mergedBy']['login']:
-                    bt.logging.debug(
-                        f"Skipping PR #{pr_raw['number']} in {repository_full_name} - self-merged PR"
+                    # Check if there are any approvals from users other than the author
+                    reviews = pr_raw.get('reviews', {}).get('nodes', [])
+                    has_external_approval = any(
+                        review.get('author') and review['author']['login'] != pr_raw['author']['login']
+                        for review in reviews
                     )
-                    continue
+
+                    if not has_external_approval:
+                        bt.logging.debug(
+                            f"Skipping PR #{pr_raw['number']} in {repository_full_name} - self-merged PR without external approval"
+                        )
+                        continue
 
                 # Skip if PR was not merged to the default branch
                 default_branch = (

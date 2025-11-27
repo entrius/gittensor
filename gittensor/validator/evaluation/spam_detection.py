@@ -8,23 +8,22 @@ from gittensor.validator.utils.spam_detection import (
     is_typo_only_pr,
 )
 
+
 def detect_typo_only_pr(pr: PullRequest) -> bool:
-    file_patches = [
-        fc.patch for fc in pr.file_changes
-        if fc.patch and isinstance(fc.patch, str)
-    ]
-    
+    file_patches = [fc.patch for fc in pr.file_changes if fc.patch and isinstance(fc.patch, str)]
+
     is_typo_only = is_typo_only_pr(file_patches)
     return is_typo_only
 
+
 def apply_typo_detection_penalties(pr: PullRequest, uid: int) -> None:
-    original_score = pr.earned_score
+    original_score = pr.base_score
 
     is_typo = detect_typo_only_pr(pr)
     if is_typo:
-        pr.set_earned_score(TYPO_ONLY_PENALTY)
+        pr.set_base_score(TYPO_ONLY_PENALTY)
         bt.logging.debug(
             f"Miner UID: {uid} "
             f"TYPO DETECTION: PR #{pr.number} in {pr.repository_full_name} "
-            f"Score penalized: {original_score:.5f} -> {pr.earned_score:.5f} "
+            f"Score penalized: {original_score:.5f} -> {pr.base_score:.5f} "
         )

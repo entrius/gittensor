@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS pull_requests (
     uid                  INTEGER          NOT NULL,
     hotkey               VARCHAR(255)     NOT NULL,
     github_id            VARCHAR(255)     NOT NULL,
+    base_score           DECIMAL(15,6)    DEFAULT 0.0,
     earned_score         DECIMAL(15,6)    DEFAULT 0.0,
     title                TEXT             NOT NULL,
     merged_at            TIMESTAMP,        -- Nullable for draft PRs
@@ -32,6 +33,7 @@ CREATE TABLE IF NOT EXISTS pull_requests (
     CONSTRAINT chk_pull_requests_additions     CHECK    (additions >= 0),
     CONSTRAINT chk_pull_requests_deletions     CHECK    (deletions >= 0),
     CONSTRAINT chk_pull_requests_commits       CHECK    (commits   >= 0),
+    CONSTRAINT chk_pull_requests_base_score    CHECK    (base_score >= 0),
     CONSTRAINT chk_pull_requests_earned_score  CHECK    (earned_score >= 0)
 );
 

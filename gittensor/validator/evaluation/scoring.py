@@ -13,9 +13,9 @@ from gittensor.constants import (
     MAX_ISSUES_SCORED_IN_SINGLE_PR,
     PARETO_DISTRIBUTION_ALPHA_VALUE,
     TIME_DECAY_MIN_MULTIPLIER,
-    UNIQUE_PR_BOOST,
+    TIME_DECAY_SIGMOID_MIDPOINT,
     TIME_DECAY_SIGMOID_STEEPNESS_SCALAR,
-    TIME_DECAY_SIGMOID_MIDPOINT
+    UNIQUE_PR_BOOST,
 )
 
 
@@ -206,9 +206,11 @@ def apply_time_decay_for_repository_contributions(miner_evaluations: Dict[int, M
 
         for pr in evaluation.pull_requests:
             days_since_merge = (current_time - pr.merged_at).total_seconds() / 86400
-            
+
             # Produces a scalar between 0 and 1
-            age_decay_sigmoid_scalar = 1 / (1 + math.exp(TIME_DECAY_SIGMOID_STEEPNESS_SCALAR * (days_since_merge - TIME_DECAY_SIGMOID_MIDPOINT)))
+            age_decay_sigmoid_scalar = 1 / (
+                1 + math.exp(TIME_DECAY_SIGMOID_STEEPNESS_SCALAR * (days_since_merge - TIME_DECAY_SIGMOID_MIDPOINT))
+            )
             decay_multiplier = max(age_decay_sigmoid_scalar, TIME_DECAY_MIN_MULTIPLIER)
 
             original_score = pr.earned_score
@@ -282,7 +284,7 @@ def apply_issue_resolvement_bonus(pr: PullRequest):
 
     if not pr.issues:
         bt.logging.info(
-            f"PR #{pr.number} in {pr.repository_full_name} earned score: {pr.earned_score:.5f} × issue multiplier: 1.0 = {pr.earned_score:.5f}"
+            f"PR #{pr.number} in {pr.repository_full_name} earned score: {pr.base_score:.5f} × issue multiplier: 1.0 = {pr.base_score:.5f}"
         )
         return
 
@@ -291,9 +293,7 @@ def apply_issue_resolvement_bonus(pr: PullRequest):
     for issue in pr.issues:
         # Skip issues that are not closed
         if issue.state and issue.state != 'CLOSED':
-            bt.logging.warning(
-                f"Skipping issue #{issue.number} - not in CLOSED state (state: {issue.state})"
-            )
+            bt.logging.warning(f"Skipping issue #{issue.number} - not in CLOSED state (state: {issue.state})")
             continue
 
         # Skip issues where the author is the same as the PR author (self-created issue gaming)
@@ -331,18 +331,18 @@ def apply_issue_resolvement_bonus(pr: PullRequest):
 
     if not valid_issues:
         bt.logging.info(
-            f"PR #{pr.number} in {pr.repository_full_name} earned score: {pr.earned_score:.5f} × issue multiplier: 1.0 = {pr.earned_score:.5f} (no valid issues after filtering)"
+            f"PR #{pr.number} in {pr.repository_full_name} earned score: {pr.base_score:.5f} × issue multiplier: 1.0 = {pr.base_score:.5f} (no valid issues after filtering)"
         )
         return
 
     issue_multiplier = calculate_issue_multiplier(valid_issues)
-    new_pr_score = round(issue_multiplier * pr.earned_score, 2)
+    new_pr_score = round(issue_multiplier * pr.base_score, 2)
 
     bt.logging.info(
-        f"PR #{pr.number} in {pr.repository_full_name} earned score: {pr.earned_score:.5f} × issue multiplier: {issue_multiplier:.3f} = {new_pr_score:.5f} ({len(valid_issues)}/{len(pr.issues)} valid issues)"
+        f"PR #{pr.number} in {pr.repository_full_name} earned score: {pr.base_score:.5f} × issue multiplier: {issue_multiplier:.3f} = {new_pr_score:.5f} ({len(valid_issues)}/{len(pr.issues)} valid issues)"
     )
 
-    pr.set_earned_score(new_pr_score)
+    pr.set_base_score(new_pr_score)
     return
 
 

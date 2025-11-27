@@ -69,8 +69,6 @@ class DatabaseStorage:
             self.db_connection.commit()
             self.db_connection.autocommit = True
 
-            self.logger.success(f"Successfully stored evaluation data for UID {miner_eval.uid}")
-
         except Exception as ex:
             # Rollback transaction
             self.db_connection.rollback()

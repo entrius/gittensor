@@ -200,7 +200,13 @@ def print_report(pr_details: dict, file_changes: list[FileChange], programming_l
     )
 
     # Calculate score using the actual function
-    total_score = pr.calculate_score_from_file_changes(programming_languages)
+    base_score = pr.calculate_score_from_file_changes(programming_languages)
+    pr.set_base_score(base_score)
+
+    # For this calculator, earned_score equals base_score (no penalties/multipliers applied)
+    # In the actual validator, earned_score would be modified by uniqueness multipliers, penalties, etc.
+    earned_score = base_score
+    pr.set_earned_score(earned_score)
 
     # Get detailed breakdown
     file_breakdowns = calculate_file_score_breakdown(file_changes, programming_languages)
@@ -225,6 +231,13 @@ def print_report(pr_details: dict, file_changes: list[FileChange], programming_l
     print(f"Total Changes: {pr_details['additions'] + pr_details['deletions']}")
     print(f"Number of Commits: {pr_details['commits']}")
     print(f"Number of Files Changed: {len(file_changes)}")
+    print(f"\nBase Score: {pr.base_score:.6f}")
+    print(f"Earned Score: {pr.earned_score:.6f}")
+    score_difference = pr.earned_score - pr.base_score
+    if abs(score_difference) > 0.000001:  # Check if there's a meaningful difference
+        print(f"Score Difference: {score_difference:+.6f} ({(score_difference/pr.base_score)*100:+.2f}%)")
+    else:
+        print("Score Difference: None (no penalties or multipliers applied)")
 
     print("\n" + "-" * 100)
     print("FILE-BY-FILE SCORE BREAKDOWN")
@@ -241,7 +254,11 @@ def print_report(pr_details: dict, file_changes: list[FileChange], programming_l
         )
 
     print("-" * 100)
-    print(f"\n{'TOTAL PR SCORE:':<80} {total_score:.6f}")
+    print(f"\n{'BASE SCORE (from file changes):':<80} {pr.base_score:.6f}")
+    print(f"{'EARNED SCORE (after penalties/multipliers):':<80} {pr.earned_score:.6f}")
+    score_diff = pr.earned_score - pr.base_score
+    if abs(score_diff) > 0.000001:
+        print(f"{'SCORE ADJUSTMENT:':<80} {score_diff:+.6f} ({(score_diff/pr.base_score)*100:+.2f}%)")
     print(f"{'TOTAL LINES SCORED (after capping):':<80} {pr.total_lines_scored}")
     print("=" * 100 + "\n")
 

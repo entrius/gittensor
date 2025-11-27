@@ -196,7 +196,7 @@ def apply_time_decay_for_repository_contributions(miner_evaluations: Dict[int, M
     """
     bt.logging.info("Applying sigmoid curve time decay to PRs")
     current_time = datetime.now(timezone.utc)
-
+    
     total_prs_modified = 0
     miners_with_prs = sum(1 for ev in miner_evaluations.values() if ev and ev.pull_requests)
 
@@ -223,7 +223,6 @@ def apply_time_decay_for_repository_contributions(miner_evaluations: Dict[int, M
             )
 
     bt.logging.info(f"Applied time decay to {total_prs_modified} PRs across {miners_with_prs} miners")
-
 
 def apply_boost_for_gittensor_tag_in_pr_description(miner_evaluations: Dict[int, MinerEvaluation]):
     """

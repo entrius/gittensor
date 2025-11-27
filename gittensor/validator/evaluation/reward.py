@@ -208,6 +208,9 @@ async def get_rewards(
     # Boost PRs that include the Gittensor tagline (and were not edited after merge).
     apply_boost_for_gittensor_tag_in_pr_description(miner_evaluations)
 
+    # store all miner evaluations after adjusting score
+    await self.bulk_store_evaluation(miner_evaluations)
+
     # Normalize the rewards between [0,1] with a pareto boost for higher performing miners.
     normalized_rewards = normalize_rewards_with_pareto(miner_evaluations)
 

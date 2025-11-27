@@ -84,9 +84,15 @@ def test_pr_scoring():
             base_score = pr.calculate_score_from_file_changes(programming_languages)
             bt.logging.info(f"Base score: {base_score:.2f}")
 
-            issue_multiplier = calculate_issue_multiplier(pr)
-            pr.earned_score = issue_multiplier * base_score
-            bt.logging.info(f"Final score (after issue bonus): {pr.earned_score:.2f}")
+            # Set all multipliers before calculating final earned score
+            pr.base_score = base_score
+            pr.issue_multiplier = calculate_issue_multiplier(pr)
+            pr.open_pr_spam_multiplier = 1.0  # No spam penalty in test
+            pr.time_decay_multiplier = 1.0  # No time decay in test
+
+            # Calculate final earned score using all multipliers
+            pr.calculate_final_earned_score()
+            bt.logging.info(f"Final score (after multipliers): {pr.earned_score:.2f}")
 
             # Set file changes and score on PR
 

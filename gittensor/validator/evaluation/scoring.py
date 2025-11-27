@@ -64,11 +64,13 @@ def score_pull_requests(
         file_change_score = pr.calculate_score_from_file_changes(programming_languages)
         issue_multiplier = calculate_issue_multiplier(pr)
         open_pr_spam_multiplier = calculate_pr_spam_penalty_multiplier(miner_eval.total_open_prs)
+        time_decay_multiplier = calculate_time_decay_multiplier(pr)
 
         pr.repo_weight_multiplier = round(repo_weight, 2)
         pr.base_score = round(file_change_score, 2)
         pr.issue_multiplier = round(issue_multiplier, 2)
         pr.open_pr_spam_multiplier = round(open_pr_spam_multiplier, 2)
+        pr.time_decay_multiplier = round(time_decay_multiplier, 2)
 
         if is_typo_only_pr(file_patches):
             bt.logging.info(f"Typo only change detected for PR #{pr.number} - typo penalty multiplier: {TYPO_ONLY_PENALTY_MULTIPLIER}")
@@ -83,11 +85,10 @@ def count_repository_contributors(miner_evaluations: Dict[int, MinerEvaluation])
         Dict[str, int]: Dictionary mapping repository names to contributor counts
     """
     repo_counts: Dict[str, int] = {}
-    
-    for evaluation in miner_evaluations.values():
-        for repo in evaluation.get_unique_repositories() or []:
-            repo_counts[repo] = repo_counts.get(repo, 0) + 1
 
+    for evaluation in miner_evaluations.values():
+        for repo in evaluation.unique_repos_contributed_to:
+            repo_counts[repo] = repo_counts.get(repo, 0) + 1
 
     if repo_counts:
         bt.logging.info(f"Repository contribution counts: {len(repo_counts)} total repositories")
@@ -101,58 +102,74 @@ def calculate_pr_spam_penalty_multiplier(total_open_prs: int) -> float:
     """Apply penalty for excessive open PRs"""
     if total_open_prs <= EXCESSIVE_PR_PENALTY_THRESHOLD:
         return 1.0
-    
+
     excess_pr_count = total_open_prs - EXCESSIVE_PR_PENALTY_THRESHOLD
     return max(EXCESSIVE_PR_MIN_WEIGHT, 1.0 - excess_pr_count * EXCESSIVE_PR_PENALTY_SLOPE)
 
 
-def calculate_repository_uniqueness_multiplier(miner_evaluations: Dict[int, MinerEvaluation]) -> Dict[int, float]:
-    """Boost miners who contribute to repositories that fewer other miners work on."""
-    bt.logging.info("**Calculating repository uniqueness multipliers**")
+def calculate_time_decay_multiplier(pr: PullRequest, now: datetime = None) -> float:
+    """
+    Calculate time decay multiplier for a single PR based on merge date.
+    Uses sigmoid curve to gradually reduce score for older contributions.
+
+    Args:
+        pr: PullRequest object with merged_at timestamp
+        now: Current time (defaults to now if not provided)
+
+    Returns:
+        float: Decay multiplier between TIME_DECAY_MIN_MULTIPLIER and 1.0
+    """
+    if now is None:
+        now = datetime.now(timezone.utc)
+
+    days_since_merge = (now - pr.merged_at).total_seconds() / SECONDS_PER_DAY
+    sigmoid = 1 / (1 + math.exp(TIME_DECAY_SIGMOID_STEEPNESS_SCALAR * (days_since_merge - TIME_DECAY_SIGMOID_MIDPOINT)))
+    return max(sigmoid, TIME_DECAY_MIN_MULTIPLIER)
+
+
+def apply_cross_miner_multipliers_and_finalize(miner_evaluations: Dict[int, MinerEvaluation]) -> None:
+    """Apply repository uniqueness multipliers and calculate final scores in a single pass."""
+    bt.logging.info("**Applying uniqueness multipliers and finalizing scores**")
+
     repo_counts = count_repository_contributors(miner_evaluations)
 
     if not repo_counts:
-        bt.logging.info("No repository contributions found, skipping uniqueness boost")
+        bt.logging.info("No repository contributions found, skipping uniqueness multipliers")
         return
 
-    total_contributing_miners = sum(1 for ev in miner_evaluations.values() if ev.get_unique_repositories())
-
-    for uid, evaluation in miner_evaluations.items():
-        prs = evaluation.pull_requests
- 
-        for pr in prs:
-            uniqueness_score = (total_contributing_miners - repo_counts[pr.repository_full_name] + 1) / total_contributing_miners
-            uniqueness_multiplier = 1.0 + (uniqueness_score * UNIQUE_PR_BOOST)
-            pr.repository_uniqueness_multiplier = uniqueness_multiplier
-
-            bt.logging.info(f"UID {uid} | PR #{pr.number} -> {pr.repository_full_name} | multiplier: {uniqueness_multiplier}")
-
-    bt.logging.info(f"Completed repository uniqueness multiplier calculation for {total_contributing_miners} total contributing miners.")
-
-
-def calculate_time_decay_multiplier(miner_evaluations: Dict[int, MinerEvaluation]) -> None:
-    """Apply sigmoid curve time decay to PR scores based on merge date."""
-    
-    bt.logging.info("**Calculating sigmoid curve time decay for contributed PRs**")
-    now = datetime.now(timezone.utc)
+    total_contributing_miners = sum(1 for ev in miner_evaluations.values() if ev.unique_repos_contributed_to)
     total_prs = 0
-    
+
     for uid, evaluation in miner_evaluations.items():
         if not evaluation or not evaluation.pull_requests:
             continue
 
         total_prs += len(evaluation.pull_requests)
+
         for pr in evaluation.pull_requests:
-            days_since_merge = (now - pr.merged_at).total_seconds() / SECONDS_PER_DAY
+            # Apply uniqueness multiplier (cross-miner dependent)
+            uniqueness_score = (total_contributing_miners - repo_counts[pr.repository_full_name] + 1) / total_contributing_miners
+            uniqueness_multiplier = 1.0 + (uniqueness_score * UNIQUE_PR_BOOST)
+            pr.repository_uniqueness_multiplier = uniqueness_multiplier
 
-            # Produces a scalar between 0 and 1
-            sigmoid = 1 / (1 + math.exp(TIME_DECAY_SIGMOID_STEEPNESS_SCALAR * (days_since_merge - TIME_DECAY_SIGMOID_MIDPOINT)))
-            decay_multiplier = max(sigmoid, TIME_DECAY_MIN_MULTIPLIER)
-            pr.time_decay_multiplier = decay_multiplier
+            # Calculate final earned score now that all multipliers are set
+            pr.calculate_final_earned_score()
 
-            bt.logging.info(f"UID {uid} | PR #{pr.number} -> {pr.repository_full_name} | age: {days_since_merge:.1f}d | multiplier: {decay_multiplier}")
+            evaluation.base_total_score += pr.base_score
+            evaluation.total_score += pr.earned_score
+            evaluation.total_lines_changed += pr.total_lines_scored
+            evaluation.unique_repos_contributed_to.add(pr.repository_full_name)
 
-    bt.logging.info(f"Completed time decay calculation on {total_prs} PRs.")
+        evaluation.unique_repos_count = len(evaluation.unique_repos_contributed_to)
+
+        bt.logging.info(f"Final evaluation for UID {uid}:")
+        bt.logging.info(f"  - Total Score: {evaluation.total_score:.2f}")
+        bt.logging.info(f"  - Total Valid PRs: {evaluation.total_prs}")
+        bt.logging.info(f"  - Total open PRs: {evaluation.total_open_prs}")
+        bt.logging.info(f"  - Total Lines Changed (& Scored): {evaluation.total_lines_changed}")
+        bt.logging.info(f"  - Unique Repositories Contributed To: {evaluation.get_unique_repositories()}")
+
+    bt.logging.info(f"Completed uniqueness multipliers and score finalization for {total_contributing_miners} miners across {total_prs} PRs.")
 
 
 def calculate_issue_multiplier(pr: PullRequest) -> float:

@@ -308,6 +308,7 @@ class MinerEvaluation:
         bt.logging.info(f"  - Total open PRs: {self.total_open_prs}")
         bt.logging.info(f"  - Total Lines Changed (& Scored): {self.total_lines_changed}")
         bt.logging.info(f"  - Unique Repositories Contributed To: {self.get_unique_repositories()}")
+        bt.logging.info("*" * 50)
 
     def set_invalid_response_reason(self, reason: str):
         """

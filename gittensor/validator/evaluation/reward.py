@@ -16,8 +16,7 @@ from gittensor.validator.evaluation.inspections import (
 )
 from gittensor.validator.evaluation.scoring import (
     score_pull_requests,
-    calculate_repository_uniqueness_multiplier,
-    calculate_time_decay_multiplier,
+    apply_cross_miner_multipliers_and_finalize,
 )
 from gittensor.validator.evaluation.normalize import (
     normalize_rewards_with_pareto,
@@ -122,11 +121,8 @@ async def get_rewards(
     # Adjust scores for duplicate accounts
     detect_and_penalize_duplicates(responses, miner_evaluations)
 
-    # Boost miners who contribute to more unique repos relative to other miners.
-    calculate_repository_uniqueness_multiplier(miner_evaluations)
-
-    # Older contributions within the lookback window will get less score.
-    calculate_time_decay_multiplier(miner_evaluations)
+    # Apply all multipliers and calculate final scores
+    apply_cross_miner_multipliers_and_finalize(miner_evaluations)
 
     # Normalize the rewards between [0,1] with a pareto boost for higher performing miners.
     normalized_rewards = normalize_rewards_with_pareto(miner_evaluations)

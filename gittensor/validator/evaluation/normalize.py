@@ -25,7 +25,6 @@ def normalize_rewards_with_pareto(miner_evaluations: Dict[int, MinerEvaluation])
 
     rewards: Dict[int, float] = {}
     for uid, evaluation in miner_evaluations.items():
-        evaluation.calculate_total_score_and_total_contributions()
         rewards[uid] = evaluation.total_score
         bt.logging.info(f"Final reward for uid {uid}: {rewards[uid]:.2f}")
 
@@ -35,7 +34,7 @@ def normalize_rewards_with_pareto(miner_evaluations: Dict[int, MinerEvaluation])
 
     alpha = PARETO_DISTRIBUTION_ALPHA_VALUE
     bt.logging.info(f"Applying Pareto transformation with α={alpha}")
-    
+
     pareto_scores = {
         uid: (score ** (1.0 / alpha) if score > 0 else 0.0)
         for uid, score in rewards.items()

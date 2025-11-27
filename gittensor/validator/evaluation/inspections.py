@@ -6,18 +6,14 @@ from typing import Dict, List, Optional, Tuple
 
 import bittensor as bt
 
-from gittensor.classes import GitPatSynapse, MinerEvaluation, PullRequest
+from gittensor.classes import GitPatSynapse, MinerEvaluation
 from gittensor.constants import (
     RECYCLE_UID,
     MIN_GITHUB_ACCOUNT_AGE,
-    TYPO_ONLY_PENALTY,
 )
 from gittensor.utils.github_api_tools import (
     get_github_account_age_days,
     get_github_id,
-)
-from gittensor.validator.utils.spam_detection import (
-    is_typo_only_pr,
 )
 
 
@@ -80,21 +76,6 @@ def validate_response_and_initialize_miner_evaluation(uid: int, response: GitPat
     miner_eval.github_id = github_id
     miner_eval.github_pat = response.github_access_token
     return miner_eval
-
-
-def apply_typo_detection_penalties(pr: PullRequest, uid: int) -> None:
-    """Apply penalty if PR contains only typo fixes."""
-    patches = [fc.patch for fc in pr.file_changes if fc.patch and isinstance(fc.patch, str)]
-    
-    if not is_typo_only_pr(patches):
-        return
-        
-    original_score = pr.base_score
-    pr.set_base_score(TYPO_ONLY_PENALTY)
-    bt.logging.debug(
-        f"Miner UID: {uid} TYPO DETECTION: PR #{pr.number} in {pr.repository_full_name} "
-        f"Score penalized: {original_score:.2f} -> {pr.base_score:.2f}"
-    )
 
 
 def _validate_github_credentials(uid: int, pat: Optional[str]) -> Tuple[Optional[str], Optional[str]]:

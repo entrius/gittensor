@@ -19,16 +19,15 @@ def normalize_rewards_with_pareto(miner_evaluations: Dict[int, MinerEvaluation])
     Returns:
         Dict[int, float]: Pareto-curved scores that sum to 1.0, Dict of uid ->  score.
     """
+    if not miner_evaluations:
+        bt.logging.warning("No miner evaluations provided for Pareto normalization")
+        return {}
 
     rewards: Dict[int, float] = {}
     for uid, evaluation in miner_evaluations.items():
         evaluation.calculate_total_score_and_total_contributions()
         rewards[uid] = evaluation.total_score
         bt.logging.info(f"Final reward for uid {uid}: {rewards[uid]:.2f}")
-
-    if not rewards:
-        bt.logging.warning("No rewards provided for Pareto normalization")
-        return {}
 
     if all(score <= 0 for score in rewards.values()):
         bt.logging.info("All scores are zero, skipping Pareto transformation")

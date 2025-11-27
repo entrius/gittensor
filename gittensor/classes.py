@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import DefaultDict, Dict, List, Optional, Set
+from math import prod
 
 import bittensor as bt
 
@@ -108,31 +109,28 @@ class PullRequest:
     author_login: str
     merged_at: datetime
     created_at: datetime
+    
+    # Score fields
+    repo_weight_multiplier: float = 1.0
     base_score: float = 0.0
+    issue_multiplier: float = 1.0
+    typo_penalty_multiplier: float = 1.0
+    open_pr_spam_multiplier: float = 1.0
+    repository_uniqueness_multiplier: float = 1.0
+    time_decay_multiplier: float = 1.0
     earned_score: float = 0.0
+
+    # Contribution details
     additions: int = 0
     deletions: int = 0
     commits: int = 0
+    total_lines_scored: int = 0    
+    gittensor_tagged: bool = False
     merged_by_login: Optional[str] = None
     file_changes: Optional[List[FileChange]] = None
     issues: Optional[List[Issue]] = None
     description: Optional[str] = None
     last_edited_at: Optional[datetime] = None
-    gittensor_tagged: bool = False
-    total_lines_scored: int = 0
-
-    @property
-    def total_changes(self) -> int:
-        """Total lines changed (additions + deletions)"""
-        return self.additions + self.deletions
-
-    def set_base_score(self, score: float) -> None:
-        """Set the base score for this pull request. NOTE the base score is purely the calculation from the file changes"""
-        self.base_score = score
-
-    def set_earned_score(self, score: float) -> None:
-        """Set the earned score for this pull request, for weight setting, score after uniquness multipliers, penalties, etc"""
-        self.earned_score = score
 
     def set_file_changes(self, file_changes: List[FileChange]) -> None:
         """Set the file changes for this pull request"""
@@ -170,11 +168,32 @@ class PullRequest:
             pr_score += file_score
 
         self.total_lines_scored = total_lines_scored
-        bt.logging.info(
-            f"{total_lines_scored} total lines scored across {total_files_changed} files for PR #{self.number} into {self.repository_full_name}. "
-            f"Base score from file changes: {pr_score}"
-        )
+        bt.logging.info(f"{total_lines_scored} lines scored across {total_files_changed} files for PR #{self.number} into {self.repository_full_name}.")
+        bt.logging.info(f"Base score from file changes: {pr_score:.2f}")
         return pr_score
+    
+    def calculate_final_earned_score(self) -> float:
+        """Combine base score with all multipliers."""        
+        multipliers = {
+            "repo_weight": self.repo_weight_multiplier,
+            "issue": self.issue_multiplier,
+            "typo_penalty": self.typo_penalty_multiplier,
+            "open_pr_spam_multiplier": self.open_pr_spam_multiplier,
+            "repo_uniqueness": self.repository_uniqueness_multiplier,
+            "time_decay": self.time_decay_multiplier,
+        }
+        
+        self.earned_score = self.base_score * prod(multipliers.values())
+        mult_lines = [f"     {k}: {v:.3f}" for k, v in multipliers.items()]
+        
+        bt.logging.info(
+            f"PR #{self.number} -> {self.repository_full_name}\n"
+            f"     base: {self.base_score:.2f}\n"
+            + "\n".join(mult_lines) + "\n"
+            f"     final: {self.earned_score:.2f}"
+        )
+        
+        return self.earned_score
 
     @classmethod
     def from_graphql_response(cls, pr_data: dict, uid: int, hotkey: str, github_id: str) -> 'PullRequest':
@@ -274,12 +293,13 @@ class MinerEvaluation:
         if not self.pull_requests:
             return
 
-        self.base_total_score = sum(pr.base_score for pr in self.pull_requests)
-        self.total_score = sum(pr.earned_score for pr in self.pull_requests)
-        self.apply_open_pr_spam_penalty_to_score()
+        for pr in self.pull_requests:
+            pr.calculate_final_earned_score()
+            self.base_total_score += pr.base_score
+            self.total_score += pr.earned_score
+            self.total_lines_changed += pr.total_lines_scored
+            self.unique_repos_contributed_to.add(pr.repository_full_name)
 
-        self.total_lines_changed = sum(pr.total_lines_scored for pr in self.pull_requests)
-        self.unique_repos_contributed_to = set(pr.repository_full_name for pr in self.pull_requests)
         self.unique_repos_count = len(self.unique_repos_contributed_to)
 
         bt.logging.info(f"Final evaluation for UID {self.uid}:")
@@ -288,23 +308,6 @@ class MinerEvaluation:
         bt.logging.info(f"  - Total open PRs: {self.total_open_prs}")
         bt.logging.info(f"  - Total Lines Changed (& Scored): {self.total_lines_changed}")
         bt.logging.info(f"  - Unique Repositories Contributed To: {self.get_unique_repositories()}")
-
-    def apply_open_pr_spam_penalty_to_score(self):
-        """
-        Apply penalty for excessive open PRs with configurable parameters.
-
-        Args:
-            threshold: Number of open PRs before penalty kicks in
-            min_weight: Minimum weight (maximum penalty)
-            penalty_slope: How steep the penalty curve is
-        """
-        if self.total_open_prs > EXCESSIVE_PR_PENALTY_THRESHOLD:
-            excess_pr_count = self.total_open_prs - EXCESSIVE_PR_PENALTY_THRESHOLD
-            weight = max(EXCESSIVE_PR_MIN_WEIGHT, 1.0 - excess_pr_count * EXCESSIVE_PR_PENALTY_SLOPE)
-            bt.logging.info(
-                f"PENALTY - applying excessive open PR penalty weight {weight:.2f} to total score {self.total_score:2f}."
-            )
-            self.total_score = weight * self.total_score
 
     def set_invalid_response_reason(self, reason: str):
         """

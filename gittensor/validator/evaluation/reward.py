@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Dict
 import bittensor as bt
 import numpy as np
 
-from gittensor.classes import GitPatSynapse, MinerEvaluation
+from gittensor.classes import GitPatSynapse, MinerEvaluation, PullRequest
 from gittensor.utils.github_api_tools import get_user_merged_prs_graphql
 from gittensor.validator.evaluation.dynamic_emissions import apply_dynamic_emissions_using_network_contributions
 from gittensor.validator.evaluation.inspections import (
@@ -16,8 +16,8 @@ from gittensor.validator.evaluation.inspections import (
 )
 from gittensor.validator.evaluation.scoring import (
     score_pull_requests,
-    apply_repository_uniqueness_boost,
-    apply_time_decay_for_repository_contributions,
+    calculate_repository_uniqueness_multiplier,
+    calculate_time_decay_multiplier,
 )
 from gittensor.validator.evaluation.normalize import (
     normalize_rewards_with_pareto,
@@ -54,13 +54,14 @@ async def query_miner(self, uid: int) -> GitPatSynapse:
 
 
 async def reward(
-    self: Validator,
     uid: int,
     response: GitPatSynapse,
     master_repositories: Dict[str, Dict],
     programming_languages: Dict[str, float],
 ) -> MinerEvaluation:
     """
+    Entry point from taking a miners response -> Get PRs -> Score PR Diff
+
     Args:
         uid (int): The uid of the miner being evaluated
         response (GitPatSynapse): The GitPatSynapse (github access token) returned by the miner
@@ -78,14 +79,14 @@ async def reward(
         bt.logging.info(f"UID {uid} not being evaluated: {miner_eval.failed_reason}")
         return miner_eval
 
-    valid_raw_prs, open_pr_count = get_user_merged_prs_graphql(
-        miner_eval.github_id, miner_eval.github_pat, master_repositories
-    )
-
+    valid_raw_prs, open_pr_count = get_user_merged_prs_graphql(miner_eval.github_id, miner_eval.github_pat, master_repositories)
     miner_eval.total_open_prs = open_pr_count
+    
+    for raw_pr in valid_raw_prs:
+        miner_eval.add_pull_request(PullRequest.from_graphql_response(raw_pr, uid, miner_eval.hotkey, miner_eval.github_id))
 
-    miner_eval = score_pull_requests(uid, miner_eval, valid_raw_prs, master_repositories, programming_languages)
-
+    score_pull_requests(miner_eval, master_repositories, programming_languages)
+    
     bt.logging.info("*" * 50)
     return miner_eval
 
@@ -122,10 +123,10 @@ async def get_rewards(
     detect_and_penalize_duplicates(responses, miner_evaluations)
 
     # Boost miners who contribute to more unique repos relative to other miners.
-    apply_repository_uniqueness_boost(miner_evaluations)
+    calculate_repository_uniqueness_multiplier(miner_evaluations)
 
     # Older contributions within the lookback window will get less score.
-    apply_time_decay_for_repository_contributions(miner_evaluations)
+    calculate_time_decay_multiplier(miner_evaluations)
 
     # Normalize the rewards between [0,1] with a pareto boost for higher performing miners.
     normalized_rewards = normalize_rewards_with_pareto(miner_evaluations)

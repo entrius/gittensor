@@ -201,12 +201,12 @@ def print_report(pr_details: dict, file_changes: list[FileChange], programming_l
 
     # Calculate score using the actual function
     base_score = pr.calculate_score_from_file_changes(programming_languages)
-    pr.set_base_score(base_score)
+    pr.base_score = base_score
 
     # For this calculator, earned_score equals base_score (no penalties/multipliers applied)
     # In the actual validator, earned_score would be modified by uniqueness multipliers, penalties, etc.
     earned_score = base_score
-    pr.set_earned_score(earned_score)
+    pr.earned_score = earned_score
 
     # Get detailed breakdown
     file_breakdowns = calculate_file_score_breakdown(file_changes, programming_languages)

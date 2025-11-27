@@ -56,15 +56,16 @@ def is_typo_only_patch(patch: str) -> bool:
 def is_typo_only_pr(file_patches: List[str]) -> bool:
     if not file_patches:
         return False
+    
+    typo_only_detected_patches = 0
 
     for patch in file_patches:
         patch_line_count = patch.count("\n")
         
-        # Performance & correctness cutoff
         if patch_line_count > MAX_TYPO_FILE_PATCH_LINES:
             return False
         
-        if not is_typo_only_patch(patch):
-            return False
+        if is_typo_only_patch(patch):
+            typo_only_detected_patches += 1
 
-    return True
+    return (typo_only_detected_patches / len(file_patches)) >= TYPO_RATIO_THRESHOLD

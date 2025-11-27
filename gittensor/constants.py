@@ -45,11 +45,11 @@ TIME_DECAY_MIN_MULTIPLIER = 0.005
 # Spam & Gaming Mitigation
 # =============================================================================
 # Typo detection
-TYPO_RATIO_THRESHOLD = 0.85
-TYPO_ONLY_PENALTY = 0.01
+TYPO_RATIO_THRESHOLD = 0.8
+TYPO_ONLY_PENALTY_MULTIPLIER = 0.01
 TYPO_MAX_DIST = 2
 TYPO_MIN_SIM = 0.75
-MAX_TYPO_FILE_PATCH_LINES = 50
+MAX_TYPO_FILE_PATCH_LINES = 20
 
 # Excessive open PRs penalty
 EXCESSIVE_PR_PENALTY_THRESHOLD = 12

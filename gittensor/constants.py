@@ -15,6 +15,7 @@ MIN_GITHUB_ACCOUNT_AGE = 180  # days
 # Gittensor Branding
 # =============================================================================
 PR_TAGLINE = "Contribution by Gittensor, learn more at https://gittensor.io/"
+GITTENSOR_TAGLINE_BOOST = 2.0 # PRs with the Gittensor Tagline will receive 2x the score
 
 # =============================================================================
 # Language & File Scoring

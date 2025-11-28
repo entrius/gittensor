@@ -15,7 +15,7 @@ INSERT INTO pull_requests (
     merged_at, pr_created_at,
     repo_weight_multiplier, base_score, issue_multiplier,
     open_pr_spam_multiplier, repository_uniqueness_multiplier, time_decay_multiplier,
-    earned_score,
+    gittensor_tag_multiplier, earned_score,
     additions, deletions, commits, total_lines_scored, gittensor_tagged,
     merged_by_login, description, last_edited_at
 ) VALUES %s
@@ -29,6 +29,7 @@ DO UPDATE SET
     open_pr_spam_multiplier = EXCLUDED.open_pr_spam_multiplier,
     repository_uniqueness_multiplier = EXCLUDED.repository_uniqueness_multiplier,
     time_decay_multiplier = EXCLUDED.time_decay_multiplier,
+    gittensor_tag_multiplier = EXCLUDED.gittensor_tag_multiplier,
     earned_score = EXCLUDED.earned_score,
     total_lines_scored = EXCLUDED.total_lines_scored,
     gittensor_tagged = EXCLUDED.gittensor_tagged,

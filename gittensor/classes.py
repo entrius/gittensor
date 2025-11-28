@@ -120,6 +120,7 @@ class PullRequest:
     open_pr_spam_multiplier: float = 1.0
     repository_uniqueness_multiplier: float = 1.0
     time_decay_multiplier: float = 1.0
+    gittensor_tag_multiplier: float = 1.0
     earned_score: float = 0.0
 
     # Contribution details
@@ -141,10 +142,6 @@ class PullRequest:
     def calculate_score_from_file_changes(self, programming_languages: Dict[str, float]) -> float:
         """Calculate the score for a single PR based on its file changes."""
         if not self.file_changes:
-            return 0.0
-
-        if not self.gittensor_tagged:
-            bt.logging.info(f"PR #{self.number} into {self.repository_full_name} was not gittensor tagged in the description, skipping...")
             return 0.0
 
         pr_score = 0.0
@@ -182,6 +179,7 @@ class PullRequest:
             "open_pr_spam_multiplier": self.open_pr_spam_multiplier,
             "repo_uniqueness": self.repository_uniqueness_multiplier,
             "time_decay": self.time_decay_multiplier,
+            "gittensor_tag_multiplier": self.gittensor_tag_multiplier,
         }
         
         self.earned_score = self.base_score * prod(multipliers.values())

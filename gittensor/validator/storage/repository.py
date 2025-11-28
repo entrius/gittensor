@@ -142,6 +142,7 @@ class Repository(BaseRepository):
                     pr.open_pr_spam_multiplier,
                     pr.repository_uniqueness_multiplier,
                     pr.time_decay_multiplier,
+                    pr.gittensor_tag_multiplier,
                     pr.earned_score,
                     pr.additions,
                     pr.deletions,

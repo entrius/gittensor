@@ -7,13 +7,11 @@ import bittensor as bt
 
 from gittensor.constants import (
     DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT,
-    EXCESSIVE_PR_MIN_WEIGHT,
-    EXCESSIVE_PR_PENALTY_SLOPE,
-    EXCESSIVE_PR_PENALTY_THRESHOLD,
     MAX_LINES_SCORED_FOR_MITIGATED_EXT,
     MITIGATED_EXTENSIONS,
     TEST_FILE_CONTRIBUTION_WEIGHT,
 )
+from gittensor.validator.utils.spam_detection import count_non_scoreable_lines
 
 GITHUB_DOMAIN = 'https://github.com/'
 
@@ -56,6 +54,11 @@ class FileChange:
     status: str  # "added", "modified", "removed", etc.
     patch: Optional[str] = None  # The actual diff content
     file_extension: Optional[str] = None
+
+    @property
+    def short_name(self) -> str:
+        """Return only the base filename (strip directories)."""
+        return self.filename.split("/")[-1]
 
     def __post_init__(self):
         if self.file_extension is None:
@@ -114,7 +117,6 @@ class PullRequest:
     repo_weight_multiplier: float = 1.0
     base_score: float = 0.0
     issue_multiplier: float = 1.0
-    typo_penalty_multiplier: float = 1.0
     open_pr_spam_multiplier: float = 1.0
     repository_uniqueness_multiplier: float = 1.0
     time_decay_multiplier: float = 1.0
@@ -145,7 +147,6 @@ class PullRequest:
             bt.logging.info(f"PR #{self.number} into {self.repository_full_name} was not gittensor tagged in the description, skipping...")
             return 0.0
 
-        total_lines_scored = 0
         pr_score = 0.0
 
         total_files_changed = len(self.file_changes)
@@ -154,30 +155,30 @@ class PullRequest:
         for n, file in enumerate(self.file_changes, start=1):
             language_weight = programming_languages.get(file.file_extension, DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT)
 
-            # Cap scored changes for extensions that are exploitable
-            scored_changes = file.changes
+            total_changes_to_score = file.changes
             if file.file_extension in MITIGATED_EXTENSIONS:
-                scored_changes = min(scored_changes, MAX_LINES_SCORED_FOR_MITIGATED_EXT)
+                total_changes_to_score = min(file.changes, MAX_LINES_SCORED_FOR_MITIGATED_EXT)
 
-            total_lines_scored += scored_changes
+            non_scoreable_lines = count_non_scoreable_lines(file.patch, total_changes_to_score)
+            scored_changes = max(0, total_changes_to_score - non_scoreable_lines)
+
+            self.total_lines_scored += scored_changes
             file_weight = TEST_FILE_CONTRIBUTION_WEIGHT if file.is_test_file() else 1.0
 
             file_score = language_weight * file_weight * scored_changes
 
-            bt.logging.info(f"[{n}/{total_files_changed}] - {file.filename} | score: {file_score:.2f}")
+            bt.logging.info(f"[{n}/{total_files_changed}] - {file.short_name} | scored {scored_changes} / {file.changes} lines | score: {file_score:.2f}")
             pr_score += file_score
 
-        self.total_lines_scored = total_lines_scored
-        bt.logging.info(f"{total_lines_scored} lines scored across {total_files_changed} files for PR #{self.number} into {self.repository_full_name}.")
-        bt.logging.info(f"Base score from file changes: {pr_score:.2f}")
+        bt.logging.info(f"{self.total_lines_scored} lines scored across {total_files_changed} files for PR #{self.number} into {self.repository_full_name}.")
+        bt.logging.info(f"Base PR score from file changes: {pr_score:.2f}")
         return pr_score
     
     def calculate_final_earned_score(self) -> float:
-        """Combine base score with all multipliers."""        
+        """Combine base score with all multipliers."""
         multipliers = {
             "repo_weight": self.repo_weight_multiplier,
             "issue": self.issue_multiplier,
-            "typo_penalty": self.typo_penalty_multiplier,
             "open_pr_spam_multiplier": self.open_pr_spam_multiplier,
             "repo_uniqueness": self.repository_uniqueness_multiplier,
             "time_decay": self.time_decay_multiplier,

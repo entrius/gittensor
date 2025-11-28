@@ -13,7 +13,7 @@ BULK_UPSERT_PULL_REQUESTS = """
 INSERT INTO pull_requests (
     number, repository_full_name, uid, hotkey, github_id, title, author_login,
     merged_at, pr_created_at,
-    repo_weight_multiplier, base_score, issue_multiplier, typo_penalty_multiplier,
+    repo_weight_multiplier, base_score, issue_multiplier,
     open_pr_spam_multiplier, repository_uniqueness_multiplier, time_decay_multiplier,
     earned_score,
     additions, deletions, commits, total_lines_scored, gittensor_tagged,
@@ -26,7 +26,6 @@ DO UPDATE SET
     repo_weight_multiplier = EXCLUDED.repo_weight_multiplier,
     base_score = EXCLUDED.base_score,
     issue_multiplier = EXCLUDED.issue_multiplier,
-    typo_penalty_multiplier = EXCLUDED.typo_penalty_multiplier,
     open_pr_spam_multiplier = EXCLUDED.open_pr_spam_multiplier,
     repository_uniqueness_multiplier = EXCLUDED.repository_uniqueness_multiplier,
     time_decay_multiplier = EXCLUDED.time_decay_multiplier,

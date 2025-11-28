@@ -139,7 +139,6 @@ class Repository(BaseRepository):
                     pr.repo_weight_multiplier,
                     pr.base_score,
                     pr.issue_multiplier,
-                    pr.typo_penalty_multiplier,
                     pr.open_pr_spam_multiplier,
                     pr.repository_uniqueness_multiplier,
                     pr.time_decay_multiplier,

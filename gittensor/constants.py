@@ -34,7 +34,7 @@ MAX_ISSUE_AGE_FOR_MAX_SCORE = 45  # days
 # =============================================================================
 # Repository & PR Scoring
 # =============================================================================
-UNIQUE_PR_BOOST = 0.25
+UNIQUE_PR_BOOST = 0.4
 
 # Time decay (sigmoid curve)
 TIME_DECAY_SIGMOID_MIDPOINT = 4  # days until 50% score loss
@@ -44,17 +44,28 @@ TIME_DECAY_MIN_MULTIPLIER = 0.005
 # =============================================================================
 # Spam & Gaming Mitigation
 # =============================================================================
-# Typo detection
-TYPO_RATIO_THRESHOLD = 0.8
-TYPO_ONLY_PENALTY_MULTIPLIER = 0.01
+# Typo detection (for filtering non-scoreable lines)
 TYPO_MAX_DIST = 2
 TYPO_MIN_SIM = 0.75
-MAX_TYPO_FILE_PATCH_LINES = 20
 
 # Excessive open PRs penalty
 EXCESSIVE_PR_PENALTY_THRESHOLD = 12
 EXCESSIVE_PR_PENALTY_SLOPE = 0.08333
 EXCESSIVE_PR_MIN_WEIGHT = 0.01
+
+COMMENT_PATTERNS = [
+    r'^\s*#',           # Python, Ruby, Shell, etc.
+    r'^\s*//',          # C, C++, Java, JavaScript, Go, Rust, etc.
+    r'^\s*/\*',         # C-style multi-line start
+    r'^\s*\*',          # C-style multi-line continuation
+    r'^\s*\*/',         # C-style multi-line end
+    r'^\s*--',          # SQL, Lua, Haskell
+    r'^\s*<!--',        # HTML, XML
+    r'^\s*%',           # LaTeX, MATLAB
+    r'^\s*;',           # Lisp, Assembly
+    r'^\s*"""',         # Python docstring
+    r"^\s*'''",         # Python docstring
+]
 
 # =============================================================================
 # Rewards & Emissions

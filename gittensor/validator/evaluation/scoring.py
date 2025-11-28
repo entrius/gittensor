@@ -17,15 +17,11 @@ from gittensor.constants import (
     TIME_DECAY_SIGMOID_STEEPNESS_SCALAR,
     UNIQUE_PR_BOOST,
     MAX_ISSUE_AGE_FOR_MAX_SCORE,
-    TYPO_ONLY_PENALTY_MULTIPLIER,
     EXCESSIVE_PR_PENALTY_THRESHOLD,
     EXCESSIVE_PR_PENALTY_SLOPE,
     EXCESSIVE_PR_MIN_WEIGHT,
 )
 from gittensor.utils.github_api_tools import get_pull_request_file_changes
-from gittensor.validator.utils.spam_detection import (
-    is_typo_only_pr,
-)
 
 def score_pull_requests(
     miner_eval: MinerEvaluation,
@@ -52,9 +48,8 @@ def score_pull_requests(
         bt.logging.info(f"[{n}/{total_prs}] - Scoring PR #{pr.number} in {pr.repository_full_name}")
 
         file_changes = get_pull_request_file_changes(pr.repository_full_name, pr.number, miner_eval.github_pat)
-        file_patches = (fc.patch for fc in pr.file_changes if fc.patch and isinstance(fc.patch, str))
-        
-        if not file_changes or not file_patches:
+
+        if not file_changes:
             bt.logging.warning("No file changes found for this PR.")
             continue
 
@@ -71,10 +66,6 @@ def score_pull_requests(
         pr.issue_multiplier = round(issue_multiplier, 2)
         pr.open_pr_spam_multiplier = round(open_pr_spam_multiplier, 2)
         pr.time_decay_multiplier = round(time_decay_multiplier, 2)
-
-        if is_typo_only_pr(file_patches):
-            bt.logging.info(f"Typo only change detected for PR #{pr.number} - typo penalty multiplier: {TYPO_ONLY_PENALTY_MULTIPLIER}")
-            pr.typo_penalty_multiplier = TYPO_ONLY_PENALTY_MULTIPLIER
 
 
 def count_repository_contributors(miner_evaluations: Dict[int, MinerEvaluation]) -> Dict[str, int]:

@@ -10,11 +10,13 @@ import bittensor as bt
 from gittensor.classes import Issue, MinerEvaluation, PullRequest
 from gittensor.constants import (
     SECONDS_PER_DAY,
+    SECONDS_PER_HOUR,
     MAX_ISSUE_CLOSE_WINDOW_DAYS,
     MAX_ISSUES_SCORED_IN_SINGLE_PR,
     TIME_DECAY_MIN_MULTIPLIER,
     TIME_DECAY_SIGMOID_MIDPOINT,
     TIME_DECAY_SIGMOID_STEEPNESS_SCALAR,
+    TIME_DECAY_GRACE_PERIOD_HOURS,
     UNIQUE_PR_BOOST,
     MAX_ISSUE_AGE_FOR_MAX_SCORE,
     EXCESSIVE_PR_PENALTY_THRESHOLD,
@@ -101,22 +103,17 @@ def calculate_pr_spam_penalty_multiplier(total_open_prs: int) -> float:
     return max(EXCESSIVE_PR_MIN_WEIGHT, 1.0 - excess_pr_count * EXCESSIVE_PR_PENALTY_SLOPE)
 
 
-def calculate_time_decay_multiplier(pr: PullRequest, now: datetime = None) -> float:
-    """
-    Calculate time decay multiplier for a single PR based on merge date.
-    Uses sigmoid curve to gradually reduce score for older contributions.
+def calculate_time_decay_multiplier(pr: PullRequest) -> float:
+    """Calculate time decay multiplier for a single PR based on merge date."""
 
-    Args:
-        pr: PullRequest object with merged_at timestamp
-        now: Current time (defaults to now if not provided)
+    now = datetime.now(timezone.utc)
+    hours_since_merge = (now - pr.merged_at).total_seconds() / SECONDS_PER_HOUR
 
-    Returns:
-        float: Decay multiplier between TIME_DECAY_MIN_MULTIPLIER and 1.0
-    """
-    if now is None:
-        now = datetime.now(timezone.utc)
+    # No decay for PRs merged within the grace period
+    if hours_since_merge < TIME_DECAY_GRACE_PERIOD_HOURS:
+        return 1.0
 
-    days_since_merge = (now - pr.merged_at).total_seconds() / SECONDS_PER_DAY
+    days_since_merge = hours_since_merge / 24
     sigmoid = 1 / (1 + math.exp(TIME_DECAY_SIGMOID_STEEPNESS_SCALAR * (days_since_merge - TIME_DECAY_SIGMOID_MIDPOINT)))
     return max(sigmoid, TIME_DECAY_MIN_MULTIPLIER)
 

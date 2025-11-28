@@ -4,6 +4,7 @@
 # General
 # =============================================================================
 SECONDS_PER_DAY = 86400
+SECONDS_PER_HOUR = 3600
 
 # =============================================================================
 # GitHub API
@@ -38,9 +39,10 @@ MAX_ISSUE_AGE_FOR_MAX_SCORE = 45  # days
 UNIQUE_PR_BOOST = 0.4
 
 # Time decay (sigmoid curve)
+TIME_DECAY_GRACE_PERIOD_HOURS = 4  # hours before time decay begins
 TIME_DECAY_SIGMOID_MIDPOINT = 4  # days until 50% score loss
 TIME_DECAY_SIGMOID_STEEPNESS_SCALAR = 0.9
-TIME_DECAY_MIN_MULTIPLIER = 0.005
+TIME_DECAY_MIN_MULTIPLIER = 0.01
 
 # =============================================================================
 # Spam & Gaming Mitigation

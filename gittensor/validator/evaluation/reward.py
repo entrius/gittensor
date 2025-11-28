@@ -124,6 +124,9 @@ async def get_rewards(
     # Apply all multipliers and calculate final scores
     apply_cross_miner_multipliers_and_finalize(miner_evaluations)
 
+    # store all miner evaluations after adjusting score
+    await self.bulk_store_evaluation(miner_evaluations)
+
     # Normalize the rewards between [0,1] with a pareto boost for higher performing miners.
     normalized_rewards = normalize_rewards_with_pareto(miner_evaluations)
 

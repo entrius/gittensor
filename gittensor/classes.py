@@ -11,7 +11,6 @@ from gittensor.constants import (
     MITIGATED_EXTENSIONS,
     TEST_FILE_CONTRIBUTION_WEIGHT,
 )
-from gittensor.validator.utils.spam_detection import count_non_scoreable_lines
 
 GITHUB_DOMAIN = 'https://github.com/'
 
@@ -141,13 +140,16 @@ class PullRequest:
 
     def calculate_score_from_file_changes(self, programming_languages: Dict[str, float]) -> float:
         """Calculate the score for a single PR based on its file changes."""
+        # Import here to avoid circular import
+        from gittensor.validator.utils.spam_detection import count_non_scoreable_lines
+
         if not self.file_changes:
             return 0.0
 
         pr_score = 0.0
 
         total_files_changed = len(self.file_changes)
-        bt.logging.info(f"Scoring {total_files_changed} file changes for PR #{self.number}")
+        bt.logging.info(f"\nScoring {total_files_changed} file changes for PR #{self.number}")
 
         for n, file in enumerate(self.file_changes, start=1):
             language_weight = programming_languages.get(file.file_extension, DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT)
@@ -164,10 +166,9 @@ class PullRequest:
 
             file_score = language_weight * file_weight * scored_changes
 
-            bt.logging.info(f"[{n}/{total_files_changed}] - {file.short_name} | scored {scored_changes} / {file.changes} lines | score: {file_score:.2f}")
+            bt.logging.info(f"    [{n}/{total_files_changed}] - {file.short_name} | scored {scored_changes} / {file.changes} lines | score: {file_score:.2f}")
             pr_score += file_score
 
-        bt.logging.info(f"{self.total_lines_scored} lines scored across {total_files_changed} files for PR #{self.number} into {self.repository_full_name}.")
         bt.logging.info(f"Base PR score from file changes: {pr_score:.2f}")
         return pr_score
     
@@ -287,28 +288,6 @@ class MinerEvaluation:
         """Total number of valid PRs - uses stored DB value if available, otherwise computes from pull_requests"""
         return len(self.pull_requests)
 
-    def calculate_total_score_and_total_contributions(self):
-        """Calculate total lines changed and unique repositories from PRs"""
-        if not self.pull_requests:
-            return
-
-        for pr in self.pull_requests:
-            pr.calculate_final_earned_score()
-            self.base_total_score += pr.base_score
-            self.total_score += pr.earned_score
-            self.total_lines_changed += pr.total_lines_scored
-            self.unique_repos_contributed_to.add(pr.repository_full_name)
-
-        self.unique_repos_count = len(self.unique_repos_contributed_to)
-
-        bt.logging.info(f"Final evaluation for UID {self.uid}:")
-        bt.logging.info(f"  - Total Score: {self.total_score:.2f}")
-        bt.logging.info(f"  - Total Valid PRs: {self.total_prs}")
-        bt.logging.info(f"  - Total open PRs: {self.total_open_prs}")
-        bt.logging.info(f"  - Total Lines Changed (& Scored): {self.total_lines_changed}")
-        bt.logging.info(f"  - Unique Repositories Contributed To: {self.get_unique_repositories()}")
-        bt.logging.info("*" * 50)
-
     def set_invalid_response_reason(self, reason: str):
         """
         Sets the reason for why a miners evaluation may have failed.
@@ -328,19 +307,6 @@ class MinerEvaluation:
             if pr.issues:
                 all_issues.extend(pr.issues)
         return all_issues
-
-    def get_unique_repositories(self) -> Set[str]:
-        """
-        Get unique repository full names from all pull requests.
-        Returns set of strings (e.g., "owner/repo") as expected by scoring functions.
-        """
-        repositories = set()
-
-        # From pull requests (primary source)
-        for pr in self.pull_requests:
-            repositories.add(pr.repository_full_name)
-
-        return repositories
 
     def get_all_file_changes(self) -> List[FileChange]:
         """

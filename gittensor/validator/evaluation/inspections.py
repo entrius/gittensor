@@ -36,7 +36,6 @@ def detect_and_penalize_duplicates(
 
     for uid, synapse in miner_responses.items():
         if not synapse or not synapse.github_access_token:
-            bt.logging.info(f"Synapse or PAT not found for uid {uid} when attempting to detect duplicates")
             continue
 
         if github_id := get_github_id(synapse.github_access_token):

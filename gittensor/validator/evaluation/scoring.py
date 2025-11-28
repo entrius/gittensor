@@ -72,6 +72,8 @@ def score_pull_requests(
         pr.time_decay_multiplier = round(time_decay_multiplier, 2)
         pr.gittensor_tag_multiplier = round(gittensor_tag_multiplier, 2)
 
+        miner_eval.unique_repos_contributed_to.add(pr.repository_full_name)
+
 
 def count_repository_contributors(miner_evaluations: Dict[int, MinerEvaluation]) -> Dict[str, int]:
     """
@@ -149,7 +151,6 @@ def apply_cross_miner_multipliers_and_finalize(miner_evaluations: Dict[int, Mine
             evaluation.base_total_score += pr.base_score
             evaluation.total_score += pr.earned_score
             evaluation.total_lines_changed += pr.total_lines_scored
-            evaluation.unique_repos_contributed_to.add(pr.repository_full_name)
 
         evaluation.unique_repos_count = len(evaluation.unique_repos_contributed_to)
 
@@ -158,7 +159,7 @@ def apply_cross_miner_multipliers_and_finalize(miner_evaluations: Dict[int, Mine
         bt.logging.info(f"  - Total Valid PRs: {evaluation.total_prs}")
         bt.logging.info(f"  - Total open PRs: {evaluation.total_open_prs}")
         bt.logging.info(f"  - Total Lines Changed (& Scored): {evaluation.total_lines_changed}")
-        bt.logging.info(f"  - Unique Repositories Contributed To: {evaluation.get_unique_repositories()}")
+        bt.logging.info(f"  - Unique Repositories Contributed To: {evaluation.unique_repos_contributed_to}")
 
     bt.logging.info(f"Completed uniqueness multipliers and score finalization for {total_contributing_miners} miners across {total_prs} PRs.")
 
@@ -177,13 +178,13 @@ def calculate_issue_multiplier(pr: PullRequest) -> float:
     """
     if not pr.issues:
         bt.logging.info(f"PR #{pr.number} - resolved no issues.")
-        return
+        return 1.0
 
     valid_issues = [issue for issue in pr.issues if _is_valid_issue(issue, pr)]
 
     if not valid_issues:
         bt.logging.info(f"PR #{pr.number} - found no valid issues")
-        return
+        return 1.0
 
     num_issues = min(len(pr.issues), MAX_ISSUES_SCORED_IN_SINGLE_PR)
     bt.logging.info(f"Calculating issue multiplier for PR #{pr.number} with {num_issues} issues")

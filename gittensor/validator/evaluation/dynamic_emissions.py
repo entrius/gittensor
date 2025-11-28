@@ -26,7 +26,7 @@ def _get_network_totals(miner_evaluations: Dict[int, MinerEvaluation]) -> tuple[
     for evaluation in miner_evaluations.values():
         if evaluation.total_score > 0:  # Exclude penalized miners
             total_lines += evaluation.total_lines_changed
-        if repos := evaluation.get_unique_repositories():
+        if repos := evaluation.unique_repos_contributed_to:
             unique_repos.update(repos)
     
     return total_lines, len(unique_repos)
@@ -59,9 +59,10 @@ def apply_dynamic_emissions_using_network_contributions(
     # Allocate recycled emissions
     scaled_rewards[RECYCLE_UID] = scaled_rewards.get(RECYCLE_UID, 0.0) + max(total_recycled, 1 if total_recycled <= 0 else 0)
 
+    recycle_percentage = (total_recycled / total_original * 100) if total_original > 0 else 0.0
     bt.logging.info(
         f"Dynamic emissions: lines_scalar={lines_scalar:.3f}, repo_scalar={repo_scalar:.3f}, "
-        f"final={final_scalar:.2f}, recycled={total_recycled:.2f} ({total_recycled/total_original*100:.2f}%)"
+        f"final={final_scalar:.2f}, recycled={total_recycled:.2f} ({recycle_percentage:.2f}%)"
     )
 
     return scaled_rewards

@@ -33,7 +33,7 @@ async def query_miner(self, uid: int) -> GitPatSynapse:
         GitPatSynapse: A gittensor protocol object with a miner github pat
     """
 
-    bt.logging.debug(f"Querying UID {uid}")
+    bt.logging.debug(f"\nQuerying UID {uid}")
 
     try:
         response = await self.dendrite(
@@ -115,7 +115,7 @@ async def get_rewards(
         responses[uid] = miner_response
 
         # Calculate score
-        miner_evaluation = await reward(self, uid, miner_response, master_repositories, programming_languages)
+        miner_evaluation = await reward(uid, miner_response, master_repositories, programming_languages)
         miner_evaluations[uid] = miner_evaluation
 
     # Adjust scores for duplicate accounts

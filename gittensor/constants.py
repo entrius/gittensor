@@ -1,52 +1,85 @@
 # Entrius 2025
 
-# if a language/file extension isn't covered in our mapping, default to this.
-# intuition is if we haven't covered it, it's more probable to be an unimportant language
-DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT = 0.12
+# =============================================================================
+# General
+# =============================================================================
+SECONDS_PER_DAY = 86400
+SECONDS_PER_HOUR = 3600
 
-BASE_GITHUB_API_URL = 'https://api.github.com'
+# =============================================================================
+# GitHub API
+# =============================================================================
+BASE_GITHUB_API_URL = "https://api.github.com"
+MIN_GITHUB_ACCOUNT_AGE = 180  # days
 
-# Github requirements
-MIN_GITHUB_ACCOUNT_AGE = 180
-
-# Scoring constants
-MAX_ISSUES_SCORED_IN_SINGLE_PR = 3
-UNIQUE_PR_BOOST = 0.25
-
-# Gittensor PR tagging
+# =============================================================================
+# Gittensor Branding
+# =============================================================================
 PR_TAGLINE = "Contribution by Gittensor, learn more at https://gittensor.io/"
-GITTENSOR_PR_TAG_MULTIPLIER = 1.50
+GITTENSOR_TAGLINE_BOOST = 2.0 # PRs with the Gittensor Tagline will receive 2x the score
 
-# Time decay constants
-TIME_DECAY_MIN_MULTIPLIER = 0.08
-TIME_DECAY_SIGMOID_STEEPNESS_SCALAR = 0.35
-TIME_DECAY_SIGMOID_MIDPOINT = 10.5 # At 10.5 days old, the PR has lost 50% of score.
-
-# Rewards & Recycle constants
-PARETO_DISTRIBUTION_ALPHA_VALUE = 0.85
-RECYCLE_UID = 0
-
-LINES_CONTRIBUTED_MAX_RECYCLE = 0.9
-LINES_CONTRIBUTED_RECYCLE_DECAY_RATE = 0.00001
-
-UNIQUE_PRS_MAX_RECYCLE = 0.9
-UNIQUE_PRS_RECYCLE_DECAY_RATE = 0.005
-
-# file types for which we want to mitigate rewards b/c of exploiting/gameability
+# =============================================================================
+# Language & File Scoring
+# =============================================================================
+DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT = 0.12
+TEST_FILE_CONTRIBUTION_WEIGHT = 0.25
 MITIGATED_EXTENSIONS = ["md", "txt", "json"]
-MAX_LINES_SCORED_CHANGES = 300
+MAX_LINES_SCORED_FOR_MITIGATED_EXT = 300
 
-# PR spam mitigation constants - basically for every open pr above threshold, linearly decrease weight multiplier to final score (before pareto and normalization)
-# Only applies to open prs to supported repositories.
+# =============================================================================
+# Issue Scoring
+# =============================================================================
+MAX_ISSUES_SCORED_IN_SINGLE_PR = 3
+MAX_ISSUE_CLOSE_WINDOW_DAYS = 5
+MAX_ISSUE_AGE_FOR_MAX_SCORE = 45  # days
+
+# =============================================================================
+# Repository & PR Scoring
+# =============================================================================
+UNIQUE_PR_BOOST = 0.4
+
+# Time decay (sigmoid curve)
+TIME_DECAY_GRACE_PERIOD_HOURS = 4  # hours before time decay begins
+TIME_DECAY_SIGMOID_MIDPOINT = 4  # days until 50% score loss
+TIME_DECAY_SIGMOID_STEEPNESS_SCALAR = 0.9
+TIME_DECAY_MIN_MULTIPLIER = 0.01
+
+# =============================================================================
+# Spam & Gaming Mitigation
+# =============================================================================
+# Typo detection (for filtering non-scoreable lines)
+TYPO_MAX_DIST = 2
+TYPO_MIN_SIM = 0.75
+
+# Excessive open PRs penalty
 EXCESSIVE_PR_PENALTY_THRESHOLD = 12
 EXCESSIVE_PR_PENALTY_SLOPE = 0.08333
 EXCESSIVE_PR_MIN_WEIGHT = 0.01
 
-TYPO_RATIO_THRESHOLD = 0.85
-TYPO_ONLY_PENALTY = 0.01
-TYPO_MAX_DIST = 2
-TYPO_MIN_SIM = 0.75
-MAX_TYPO_FILE_PATCH_LINES = 50
+COMMENT_PATTERNS = [
+    r'^\s*#',           # Python, Ruby, Shell, etc.
+    r'^\s*//',          # C, C++, Java, JavaScript, Go, Rust, etc.
+    r'^\s*/\*',         # C-style multi-line start
+    r'^\s*\*',          # C-style multi-line continuation
+    r'^\s*\*/',         # C-style multi-line end
+    r'^\s*--',          # SQL, Lua, Haskell
+    r'^\s*<!--',        # HTML, XML
+    r'^\s*%',           # LaTeX, MATLAB
+    r'^\s*;',           # Lisp, Assembly
+    r'^\s*"""',         # Python docstring
+    r"^\s*'''",         # Python docstring
+]
 
-# Weight multiplier for test file contributions (0.5 = 50% of normal score)
-TEST_FILE_CONTRIBUTION_WEIGHT = 0.5
+# =============================================================================
+# Rewards & Emissions
+# =============================================================================
+RECYCLE_UID = 0
+PARETO_DISTRIBUTION_ALPHA_VALUE = 0.85
+
+# Network emission scaling (lines contributed)
+LINES_CONTRIBUTED_MAX_RECYCLE = 0.9
+LINES_CONTRIBUTED_RECYCLE_DECAY_RATE = 0.00001
+
+# Network emission scaling (unique PRs)
+UNIQUE_PRS_MAX_RECYCLE = 0.9
+UNIQUE_PRS_RECYCLE_DECAY_RATE = 0.02

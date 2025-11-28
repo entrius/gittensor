@@ -186,6 +186,7 @@ def get_user_merged_prs_graphql(
                 }
               }
               baseRefName
+              headRefName
               author {
                 login
               }
@@ -199,6 +200,13 @@ def get_user_merged_prs_graphql(
                   state
                   createdAt
                   closedAt
+                  author {
+                    login
+                  }
+                }
+              }
+              reviews(first: 50, states: APPROVED) {
+                nodes {
                   author {
                     login
                   }
@@ -316,25 +324,58 @@ def get_user_merged_prs_graphql(
                     bt.logging.debug(f"Reached PRs older than {MERGED_PR_LOOKBACK_DAYS} days, stopping pagination")
                     return (all_valid_prs, open_pr_count)
 
-                # Skip if PR was merged by the same person who created it (self-merge)
+                # Skip if PR was merged by the same person who created it (self-merge) AND there's no approvals from a differing party
                 if pr_raw['mergedBy'] and pr_raw['author']['login'] == pr_raw['mergedBy']['login']:
-                    bt.logging.debug(
-                        f"Skipping PR #{pr_raw['number']} in {repository_full_name} - self-merged PR"
+                    # Check if there are any approvals from users other than the author
+                    reviews = pr_raw.get('reviews', {}).get('nodes', [])
+                    has_external_approval = any(
+                        review.get('author') and review['author']['login'] != pr_raw['author']['login']
+                        for review in reviews
                     )
-                    continue
 
-                # Skip if PR was not merged to the default branch
+                    if not has_external_approval:
+                        bt.logging.debug(
+                            f"Skipping PR #{pr_raw['number']} in {repository_full_name} - self-merged PR without external approval"
+                        )
+                        continue
+
+                # Skip if PR was not merged to an acceptable branch (default or additional)
                 default_branch = (
                     pr_raw['repository']['defaultBranchRef']['name']
                     if pr_raw['repository']['defaultBranchRef']
                     else 'main'
                 )
                 base_ref = pr_raw['baseRefName']
-                if base_ref != default_branch:
+                head_ref = pr_raw.get('headRefName', '')  # Source branch (where PR is coming FROM)
+                repo_metadata = master_repositories.get(repository_full_name, {})
+                additional_branches = repo_metadata.get('additional_acceptable_branches', [])
+
+                # Build list of all acceptable branches (default + additional)
+                acceptable_branches = [default_branch] + additional_branches
+
+                # Skip if the source branch (headRef) is also an acceptable branch
+                # This prevents PRs like "staging -> main" or "develop -> staging" where both are acceptable branches
+                if head_ref in acceptable_branches:
                     bt.logging.debug(
-                        f"Skipping PR #{pr_raw['number']} in {repository_full_name} - not merged to the default (prod) branch"
+                        f"Skipping PR #{pr_raw['number']} in {repository_full_name} - "
+                        f"source branch '{head_ref}' is an acceptable branch (merging between acceptable branches not allowed)"
                     )
                     continue
+
+                # Check if merged to default branch
+                if base_ref != default_branch:
+                    # If not default, check if repository has additional acceptable branches
+                    if base_ref not in additional_branches:
+                        bt.logging.debug(
+                            f"Skipping PR #{pr_raw['number']} in {repository_full_name} - "
+                            f"merged to '{base_ref}' (not default branch '{default_branch}' or additional acceptable branches)"
+                        )
+                        continue
+                    else:
+                        bt.logging.debug(
+                            f"Accepting PR #{pr_raw['number']} in {repository_full_name} - "
+                            f"merged to '{base_ref}' (additional acceptable branch)"
+                        )
 
                 repo_metadata = master_repositories[repository_full_name]
                 inactive_at = repo_metadata.get("inactiveAt")

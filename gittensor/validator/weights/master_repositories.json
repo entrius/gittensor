@@ -7057,7 +7057,8 @@
     "weight": 3.5
   },
   "opentensor/btcli": {
-    "weight": 3.5
+    "weight": 3.5,
+    "additional_acceptable_branches": ["staging"]
   },
   "opentensor/subtensor": {
     "weight": 3.5

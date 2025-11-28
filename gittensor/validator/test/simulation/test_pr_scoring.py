@@ -32,9 +32,8 @@ from gittensor.validator.utils.load_weights import load_programming_language_wei
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../..')))
 
 from gittensor.classes import MinerEvaluation
-from gittensor.validator.evaluation.scoring import apply_issue_resolvement_bonus
 from gittensor.validator.test.simulation.mock_prs import get_mock_test_cases
-
+from gittensor.validator.evaluation.scoring import calculate_issue_multiplier
 
 def test_pr_scoring():
     """
@@ -77,23 +76,25 @@ def test_pr_scoring():
         for pr_data in test_case['prs']:
             pr: PullRequest = pr_data['pr']
             file_changes = pr_data['file_changes']
+            pr.set_file_changes(file_changes)
 
             bt.logging.info(f"\n  Processing PR #{pr.number} ({pr.repository_full_name}):")
             bt.logging.info(f"    File changes: {len(file_changes)}")
 
-            # SET BREAKPOINT ON THE NEXT LINE to step into calculate_score_from_file_changes()
-            pr.calculate_score_from_file_changes(programming_languages)
+            base_score = pr.calculate_score_from_file_changes(programming_languages)
+            bt.logging.info(f"Base score: {base_score:.2f}")
 
-            bt.logging.info(f"    Base score: {pr.earned_score:.5f}")
+            # Set all multipliers before calculating final earned score
+            pr.base_score = base_score
+            pr.issue_multiplier = calculate_issue_multiplier(pr)
+            pr.open_pr_spam_multiplier = 1.0  # No spam penalty in test
+            pr.time_decay_multiplier = 1.0  # No time decay in test
 
-            # Apply issue bonus
-            apply_issue_resolvement_bonus(pr)
-
-            bt.logging.info(f"    Final score (after issue bonus): {pr.earned_score:.5f}")
+            # Calculate final earned score using all multipliers
+            pr.calculate_final_earned_score()
+            bt.logging.info(f"Final score (after multipliers): {pr.earned_score:.2f}")
 
             # Set file changes and score on PR
-            pr.set_file_changes(file_changes)
-            pr.set_earned_score(pr.earned_score)
 
             # Add to evaluation
             miner_eval.add_pull_request(pr)
@@ -108,9 +109,9 @@ def test_pr_scoring():
             actual = miner_eval.total_score
             diff = abs(expected - actual)
             status = "✓ PASS" if diff < 0.01 else "✗ FAIL"
-            bt.logging.info(f"\n  Expected Score: {expected:.5f}")
-            bt.logging.info(f"  Actual Score:   {actual:.5f}")
-            bt.logging.info(f"  Difference:     {diff:.5f}")
+            bt.logging.info(f"\n  Expected Score: {expected:.2f}")
+            bt.logging.info(f"  Actual Score:   {actual:.2f}")
+            bt.logging.info(f"  Difference:     {diff:.2f}")
             bt.logging.info(f"  Status: {status}")
 
     bt.logging.info("\n" + "=" * 70)

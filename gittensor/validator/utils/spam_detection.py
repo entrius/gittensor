@@ -1,11 +1,10 @@
 import re
-from typing import List, Tuple
-from Levenshtein import distance, ratio 
+from typing import List, Optional
+from Levenshtein import distance, ratio
 from gittensor.constants import (
-    TYPO_RATIO_THRESHOLD,
-    MAX_TYPO_FILE_PATCH_LINES,
     TYPO_MAX_DIST,
-    TYPO_MIN_SIM
+    TYPO_MIN_SIM,
+    COMMENT_PATTERNS,
 )
 
 def tokenize(text: str) -> List[str]:
@@ -17,6 +16,7 @@ def token_pair_typo(o: str, n: str, max_dist: int, min_sim: float) -> bool:
     return dist <= max_dist or sim >= min_sim
 
 def is_token_typo(old: str, new: str, max_dist=TYPO_MAX_DIST, min_sim=TYPO_MIN_SIM) -> bool:
+    """Check if two lines are likely typo corrections of each other."""
     old_tokens = tokenize(old)
     new_tokens = tokenize(new)
 
@@ -26,45 +26,48 @@ def is_token_typo(old: str, new: str, max_dist=TYPO_MAX_DIST, min_sim=TYPO_MIN_S
     return all(token_pair_typo(o, n, max_dist, min_sim)
             for o, n in zip(old_tokens, new_tokens))
 
-def extract_line_pairs_from_patch(patch: str) -> List[Tuple[str, str]]:
-    removed = []
-    added = []
+def is_comment_line(content: str) -> bool:
+    """Check if line content (without diff prefix) matches a comment pattern."""
+    return any(re.match(pattern, content) for pattern in COMMENT_PATTERNS)
+
+def count_non_scoreable_lines(patch: str, max_scoreable_lines: Optional[int] = None) -> int:
+    """Count lines that shouldn't contribute to the score (blank, comment, etc)."""
+    if not patch:
+        return 0
     
-    for line in patch.split("\n"):
-        if line.startswith("-") and not line.startswith(("--", "---")):
-            removed.append(line[1:])
-        elif line.startswith("+") and not line.startswith(("++", "+++")):
-            added.append(line[1:])
+    non_scoreable = 0
+    lines = patch.split("\n")
+    scoreable_count = 0
     
-    return list(zip(removed, added))
-
-def is_typo_only_patch(patch: str) -> bool:
-    pairs = extract_line_pairs_from_patch(patch)
-
-    if not pairs:
-        # Pairs are our only indicator of typos
-        return False
-
-    typo_like = 0
-
-    for old, new in pairs:
-        if is_token_typo(old,new):
-             typo_like +=1
-
-    return (typo_like / len(pairs)) >= TYPO_RATIO_THRESHOLD
-
-def is_typo_only_pr(file_patches: List[str]) -> bool:
-    if not file_patches:
-        return False
-
-    for patch in file_patches:
-        patch_line_count = patch.count("\n")
+    for i, line in enumerate(lines):
+        if not is_single_diff_line(line):
+            continue
         
-        # Performance & correctness cutoff
-        if patch_line_count > MAX_TYPO_FILE_PATCH_LINES:
-            return False
+        content = line[1:]
         
-        if not is_typo_only_patch(patch):
-            return False
+        # Blank lines and comments
+        if content.strip() == "" or is_comment_line(content):
+            non_scoreable += 1
+            continue
+        
+        # Typo corrections: deletion followed by similar addition
+        if line.startswith("-") and i + 1 < len(lines):
+            next_line = lines[i + 1]
+            if is_single_diff_line(next_line) and next_line.startswith("+"):
+                if is_token_typo(content, next_line[1:]):
+                    non_scoreable += 2
+                    continue
+        
+        # This line is scoreable
+        scoreable_count += 1
+        if max_scoreable_lines is not None and scoreable_count >= max_scoreable_lines:
+            break
 
-    return True
+    return non_scoreable
+
+def is_single_diff_line(line: str) -> bool:
+    """True for +foo or -bar but False for ++foo, --bar, etc."""
+    if not line:
+        return False
+    char = line[0]
+    return char in "+-" and (len(line) == 1 or line[1] != char)

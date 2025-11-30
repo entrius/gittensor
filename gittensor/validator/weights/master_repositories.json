@@ -8412,11 +8412,11 @@
     "weight": 0.29
   },
   "opentensor/bittensor": {
-    "weight": 77.04,
-    "additional_acceptable_branches": []
+    "weight": 77.04
   },
   "opentensor/btcli": {
-    "weight": 36.77
+    "weight": 36.77,
+    "additional_acceptable_branches": ["staging"]
   },
   "opentensor/subtensor": {
     "weight": 36.77

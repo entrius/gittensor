@@ -101,7 +101,6 @@ def test_pr_scoring():
 
         # Calculate totals and apply penalties
         miner_eval.total_open_prs = test_case.get('total_open_prs', 0)
-        miner_eval.calculate_total_score_and_total_contributions()
 
         # Display expected vs actual if provided
         if 'expected_score' in test_case and test_case['expected_score'] is not None:

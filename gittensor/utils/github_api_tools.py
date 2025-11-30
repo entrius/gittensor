@@ -137,6 +137,8 @@ def get_user_merged_prs_graphql(
         int: Count of total open PRs for a miner
     """
 
+    bt.logging.info("*****Fetching merged PRs*****")
+
     if not user_id or user_id == "None":
         bt.logging.error("Invalid user_id provided to get_user_merged_prs_graphql")
         return ([], 0)
@@ -335,7 +337,7 @@ def get_user_merged_prs_graphql(
 
                     if not has_external_approval:
                         bt.logging.debug(
-                            f"Skipping PR #{pr_raw['number']} in {repository_full_name} - self-merged PR without external approval"
+                            f"Skipping PR #{pr_raw['number']} in {repository_full_name} - self-merged, no approval."
                         )
                         continue
 

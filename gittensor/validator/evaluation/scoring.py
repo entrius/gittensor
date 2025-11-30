@@ -138,6 +138,7 @@ def apply_cross_miner_multipliers_and_finalize(miner_evaluations: Dict[int, Mine
             continue
 
         total_prs += len(evaluation.pull_requests)
+        bt.logging.info(f"***\nTotaling scores for uid {uid}***")
 
         for pr in evaluation.pull_requests:
             # Apply uniqueness multiplier (cross-miner dependent)
@@ -157,7 +158,7 @@ def apply_cross_miner_multipliers_and_finalize(miner_evaluations: Dict[int, Mine
         bt.logging.info(f"Final evaluation for UID {uid}:")
         bt.logging.info(f"  - Total Score: {evaluation.total_score:.2f}")
         bt.logging.info(f"  - Total Valid PRs: {evaluation.total_prs}")
-        bt.logging.info(f"  - Total open PRs: {evaluation.total_open_prs}")
+        bt.logging.info(f"  - Total Open PRs: {evaluation.total_open_prs}")
         bt.logging.info(f"  - Total Lines Changed (& Scored): {evaluation.total_lines_changed}")
         bt.logging.info(f"  - Unique Repositories Contributed To: {evaluation.unique_repos_contributed_to}")
 

@@ -315,7 +315,7 @@ def get_user_merged_prs_graphql(
                 # Filter by master_repositories
                 if repository_full_name not in master_repositories.keys():
                     bt.logging.debug(
-                        f"Skipping PR #{pr_raw['number']} in {repository_full_name} - not in master_repositories"
+                        f"Skipping PR #{pr_raw['number']} in {repository_full_name} - ineligible repo"
                     )
                     continue
 
@@ -337,7 +337,7 @@ def get_user_merged_prs_graphql(
 
                     if not has_external_approval:
                         bt.logging.debug(
-                            f"Skipping PR #{pr_raw['number']} in {repository_full_name} - self-merged, no approval."
+                            f"Skipping PR #{pr_raw['number']} in {repository_full_name} - self-merged, no approval"
                         )
                         continue
 
@@ -373,11 +373,6 @@ def get_user_merged_prs_graphql(
                             f"merged to '{base_ref}' (not default branch '{default_branch}' or additional acceptable branches)"
                         )
                         continue
-                    else:
-                        bt.logging.debug(
-                            f"Accepting PR #{pr_raw['number']} in {repository_full_name} - "
-                            f"merged to '{base_ref}' (additional acceptable branch)"
-                        )
 
                 repo_metadata = master_repositories[repository_full_name]
                 inactive_at = repo_metadata.get("inactiveAt")
@@ -391,6 +386,7 @@ def get_user_merged_prs_graphql(
                         )
                         continue
 
+                bt.logging.info(f"Accepting PR #{pr_raw['number']} in {repository_full_name} - merged to '{base_ref}'")
                 # consider PR valid if all checks passed
                 all_valid_prs.append(pr_raw)
 

@@ -86,7 +86,7 @@ async def reward(
 
     score_pull_requests(miner_eval, master_repositories, programming_languages)
     
-    bt.logging.info("*" * 50)
+    bt.logging.info("*" * 50 + "\n")
     return miner_eval
 
 

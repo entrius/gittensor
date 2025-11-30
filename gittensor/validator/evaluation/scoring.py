@@ -48,7 +48,7 @@ def score_pull_requests(
     bt.logging.info(f"Scoring {total_prs} PRs for uid {miner_eval.uid}")
 
     for n, pr in enumerate(miner_eval.pull_requests, start=1):
-        bt.logging.info(f"[{n}/{total_prs}] - Scoring PR #{pr.number} in {pr.repository_full_name}")
+        bt.logging.info(f"\n[{n}/{total_prs}] - Scoring PR #{pr.number} in {pr.repository_full_name}")
 
         file_changes = get_pull_request_file_changes(pr.repository_full_name, pr.number, miner_eval.github_pat)
 

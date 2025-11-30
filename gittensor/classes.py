@@ -166,7 +166,7 @@ class PullRequest:
 
             file_score = language_weight * file_weight * scored_changes
 
-            bt.logging.info(f"    [{n}/{total_files_changed}] - {file.short_name} | scored {scored_changes} / {file.changes} lines | score: {file_score:.2f}")
+            bt.logging.info(f"   -  [{n}/{total_files_changed}] - {file.short_name} | scored {scored_changes} / {file.changes} lines | score: {file_score:.2f}")
             pr_score += file_score
 
         bt.logging.info(f"Base PR score from file changes: {pr_score:.2f}")
@@ -182,17 +182,14 @@ class PullRequest:
             "time_decay": self.time_decay_multiplier,
             "gittensor_tag_multiplier": self.gittensor_tag_multiplier,
         }
-        
+
         self.earned_score = self.base_score * prod(multipliers.values())
-        mult_lines = [f"     {k}: {v:.3f}" for k, v in multipliers.items()]
-        
+        mult_str = " | ".join([f"{k}: {v:.3f}" for k, v in multipliers.items()])
+
         bt.logging.info(
-            f"PR #{self.number} -> {self.repository_full_name}\n"
-            f"     base: {self.base_score:.2f}\n"
-            + "\n".join(mult_lines) + "\n"
-            f"     final: {self.earned_score:.2f}"
+            f"PR #{self.number} -> {self.repository_full_name} | base: {self.base_score:.2f} | {mult_str} | final: {self.earned_score:.2f}"
         )
-        
+
         return self.earned_score
 
     @classmethod

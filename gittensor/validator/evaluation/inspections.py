@@ -64,12 +64,12 @@ def validate_response_and_initialize_miner_evaluation(uid: int, response: GitPat
         return miner_eval
 
     if not response:
-        miner_eval.set_invalid_response_reason(f"No response provided by miner {uid}: setting default score of 0.")
+        miner_eval.set_invalid_response_reason(f"No response provided by miner {uid}")
         return miner_eval
 
     github_id, error = _validate_github_credentials(uid, response.github_access_token)
     if error:
-        miner_eval.set_invalid_response_reason(f"{error}: setting default score of 0.")
+        miner_eval.set_invalid_response_reason(error)
         return miner_eval
 
     miner_eval.github_id = github_id

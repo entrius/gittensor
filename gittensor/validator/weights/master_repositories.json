@@ -360,8 +360,7 @@
   },
   "Eonasdan/tempus-dominus": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
-    "weight": 0.01,
-    "additional_acceptable_branches": ["development"]
+    "weight": 0.01
   },
   "EsotericSoftware/spine-runtimes": {
     "weight": 0.27
@@ -790,7 +789,7 @@
   },
   "LimeSurvey/LimeSurvey": {
     "weight": 0.28,
-    "additional_acceptable_branches": ["develop"]
+    "additional_acceptable_branches": ["develop-minor", "develop-major"]
   },
   "LineageOS/android": {
     "weight": 0.18
@@ -1740,7 +1739,7 @@
   "TencentBlueKing/bk-cmdb": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
     "weight": 0.01,
-    "additional_acceptable_branches": ["dev"]
+    "additional_acceptable_branches": ["v.*"]
   },
   "Tenexium/tenex-subnet": {
     "weight": 6.52
@@ -4065,8 +4064,7 @@
   },
   "didi/KnowStreaming": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
-    "weight": 0.01,
-    "additional_acceptable_branches": ["dev"]
+    "weight": 0.01
   },
   "didi/cube-ui": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
@@ -5916,8 +5914,7 @@
     "weight": 0.01
   },
   "hybridauth/hybridauth": {
-    "weight": 0.24, 
-    "additional_acceptable_branches": ["dev"]
+    "weight": 0.24
   },
   "hydralauncher/hydra": {
     "weight": 0.17
@@ -10889,8 +10886,7 @@
   },
   "visjs/vis-network": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
-    "weight": 0.01,
-    "additional_acceptable_branches": ["develop"]
+    "weight": 0.01
   },
   "vispy/vispy": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",

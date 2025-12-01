@@ -1,5 +1,6 @@
 # Entrius 2025
 import base64
+import fnmatch
 import time
 from datetime import datetime, timedelta, timezone
 from typing import DefaultDict, List, Optional, Tuple
@@ -10,6 +11,24 @@ import requests
 from gittensor.classes import FileChange
 from gittensor.constants import BASE_GITHUB_API_URL
 from gittensor.validator.utils.config import MERGED_PR_LOOKBACK_DAYS
+
+
+def branch_matches_pattern(branch_name: str, patterns: List[str]) -> bool:
+    """
+    Check if a branch name matches any pattern in the list.
+    Supports wildcard patterns (e.g., '*-dev' matches '3.0-dev', '3.1-dev', etc.).
+    
+    Args:
+        branch_name: The branch name to check
+        patterns: List of branch patterns (can include wildcards like '*-dev')
+    
+    Returns:
+        True if branch_name matches any pattern, False otherwise
+    """
+    for pattern in patterns:
+        if fnmatch.fnmatch(branch_name, pattern):
+            return True
+    return False
 
 
 def make_headers(token: str):
@@ -357,7 +376,8 @@ def get_user_merged_prs_graphql(
 
                 # Skip if the source branch (headRef) is also an acceptable branch
                 # This prevents PRs like "staging -> main" or "develop -> staging" where both are acceptable branches
-                if head_ref in acceptable_branches:
+                # Supports wildcard patterns (e.g., '*-dev' matches '3.0-dev', '3.1-dev', etc.)
+                if branch_matches_pattern(head_ref, acceptable_branches):
                     bt.logging.debug(
                         f"Skipping PR #{pr_raw['number']} in {repository_full_name} - "
                         f"source branch '{head_ref}' is an acceptable branch (merging between acceptable branches not allowed)"
@@ -367,7 +387,8 @@ def get_user_merged_prs_graphql(
                 # Check if merged to default branch
                 if base_ref != default_branch:
                     # If not default, check if repository has additional acceptable branches
-                    if base_ref not in additional_branches:
+                    # Supports wildcard patterns (e.g., '*-dev' matches '3.0-dev', '3.1-dev', etc.)
+                    if not branch_matches_pattern(base_ref, additional_branches):
                         bt.logging.debug(
                             f"Skipping PR #{pr_raw['number']} in {repository_full_name} - "
                             f"merged to '{base_ref}' (not default branch '{default_branch}' or additional acceptable branches)"

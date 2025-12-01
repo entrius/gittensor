@@ -15,15 +15,7 @@ from gittensor.validator.utils.config import MERGED_PR_LOOKBACK_DAYS
 
 def branch_matches_pattern(branch_name: str, patterns: List[str]) -> bool:
     """
-    Check if a branch name matches any pattern in the list.
-    Supports wildcard patterns (e.g., '*-dev' matches '3.0-dev', '3.1-dev', etc.).
-    
-    Args:
-        branch_name: The branch name to check
-        patterns: List of branch patterns (can include wildcards like '*-dev')
-    
-    Returns:
-        True if branch_name matches any pattern, False otherwise
+    Check if a branch name matches any pattern in the list. (e.g., '*-dev' matches '3.0-dev', '3.1-dev', etc.)
     """
     for pattern in patterns:
         if fnmatch.fnmatch(branch_name, pattern):

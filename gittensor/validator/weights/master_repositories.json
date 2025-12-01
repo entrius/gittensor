@@ -5701,7 +5701,8 @@
     "weight": 0.01
   },
   "hect0x7/JMComic-Crawler-Python": {
-    "weight": 0.35
+    "weight": 0.35,
+    "additional_acceptable_branches": ["dev"]
   },
   "hectorqin/reader": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",

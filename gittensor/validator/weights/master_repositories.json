@@ -2340,8 +2340,7 @@
   },
   "amitshekhariitbhu/RxJava2-Android-Samples": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
-    "weight": 0.01,
-    "additional_acceptable_branches": ["development"]
+    "weight": 0.01
   },
   "amitshekhariitbhu/android-interview-questions": {
     "inactiveAt": "2025-11-04T02:18:33.094Z",
@@ -3391,8 +3390,7 @@
   },
   "chartist-js/chartist": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
-    "weight": 0.01,
-    "additional_acceptable_branches": ["develop"]
+    "weight": 0.01
   },
   "chartjs/Chart.js": {
     "weight": 0.25
@@ -4954,8 +4952,7 @@
   },
   "flipped-aurora/gin-vue-admin": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
-    "weight": 0.01,
-    "additional_acceptable_branches": ["develop"]
+    "weight": 0.01
   },
   "flipperdevices/flipperzero-firmware": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",

@@ -534,10 +534,7 @@
     "weight": 0.01
   },
   "GraphiteAI/Graphite-Subnet": {
-    "weight": 6.52,
-    "additional_acceptable_branches": [
-      "staging"
-    ]
+    "weight": 6.52
   },
   "Grasscutters/Grasscutter": {
     "weight": 0.18
@@ -8429,9 +8426,7 @@
   "opentensor/subtensor": {
     "weight": 36.77,
     "additional_acceptable_branches": [
-      "devnet-ready",
-      "devnet",
-      "testnet"
+      "devnet-ready"
     ]
   },
   "openthread/openthread": {

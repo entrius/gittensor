@@ -283,11 +283,13 @@
   },
   "DaveGamble/cJSON": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
-    "weight": 0.01
+    "weight": 0.01,
+    "additional_acceptable_branches": ["develop"]
   },
   "DavidAnson/markdownlint": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
-    "weight": 0.01
+    "weight": 0.01,
+    "additional_acceptable_branches": ["next"]
   },
   "DeepLabCut/DeepLabCut": {
     "weight": 0.29
@@ -321,7 +323,8 @@
   },
   "Drakkar-Software/OctoBot": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
-    "weight": 0.01
+    "weight": 0.01,
+    "additional_acceptable_branches": ["dev"]
   },
   "EFForg/privacybadger": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
@@ -357,7 +360,8 @@
   },
   "Eonasdan/tempus-dominus": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
-    "weight": 0.01
+    "weight": 0.01,
+    "additional_acceptable_branches": ["development"]
   },
   "EsotericSoftware/spine-runtimes": {
     "weight": 0.27
@@ -403,7 +407,8 @@
   },
   "FedML-AI/FedML": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
-    "weight": 0.01
+    "weight": 0.01,
+    "additional_acceptable_branches": ["dev/v0.7.0"]
   },
   "FilipePS/Traduzir-paginas-web": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
@@ -643,7 +648,8 @@
     "weight": 0.01
   },
   "JeffreySu/WeiXinMPSDK": {
-    "weight": 0.29
+    "weight": 0.29,
+    "additional_acceptable_branches": ["Developer"]
   },
   "JerBouma/FinanceDatabase": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
@@ -710,7 +716,8 @@
   },
   "Koenkk/zigbee2mqtt": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
-    "weight": 0.01
+    "weight": 0.01,
+    "additional_acceptable_branches": ["dev"]
   },
   "Kong/insomnia": {
     "weight": 0.53
@@ -782,7 +789,8 @@
     "weight": 0.01
   },
   "LimeSurvey/LimeSurvey": {
-    "weight": 0.28
+    "weight": 0.28,
+    "additional_acceptable_branches": ["develop"]
   },
   "LineageOS/android": {
     "weight": 0.18
@@ -1527,7 +1535,8 @@
   },
   "SignalR/SignalR": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
-    "weight": 0.01
+    "weight": 0.01,
+    "additional_acceptable_branches": ["dev"]
   },
   "Significant-Gravitas/AutoGPT": {
     "weight": 0.39
@@ -1537,7 +1546,8 @@
     "weight": 0.01
   },
   "SillyTavern/SillyTavern": {
-    "weight": 0.19
+    "weight": 0.19,
+    "additional_acceptable_branches": ["staging"]
   },
   "SimonAKing/scrcpy-gui": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
@@ -1641,7 +1651,8 @@
   },
   "Sygil-Dev/sygil-webui": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
-    "weight": 0.01
+    "weight": 0.01,
+    "additional_acceptable_branches": ["dev"]
   },
   "Sylius/Sylius": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
@@ -1691,7 +1702,8 @@
   },
   "TelegramBots/Telegram.Bot": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
-    "weight": 0.01
+    "weight": 0.01,
+    "additional_acceptable_branches": ["develop"]
   },
   "TelegramMessenger/Telegram-iOS": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
@@ -1707,7 +1719,8 @@
   },
   "Tencent/mars": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
-    "weight": 0.01
+    "weight": 0.01,
+    "additional_acceptable_branches": ["develop"]
   },
   "Tencent/tinker": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
@@ -1726,7 +1739,8 @@
   },
   "TencentBlueKing/bk-cmdb": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
-    "weight": 0.01
+    "weight": 0.01,
+    "additional_acceptable_branches": ["dev"]
   },
   "Tenexium/tenex-subnet": {
     "weight": 6.52
@@ -2128,7 +2142,8 @@
   },
   "agiresearch/AIOS": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
-    "weight": 0.01
+    "weight": 0.01,
+    "additional_acceptable_branches": ["dev"]
   },
   "agno-agi/agno": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
@@ -2221,7 +2236,8 @@
     "weight": 0.01
   },
   "alextselegidis/easyappointments": {
-    "weight": 0.25
+    "weight": 0.25,
+    "additional_acceptable_branches": ["develop"]
   },
   "alexwolfe/Buttons": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
@@ -2306,7 +2322,8 @@
   },
   "alvarotrigo/fullPage.js": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
-    "weight": 0.01
+    "weight": 0.01,
+    "additional_acceptable_branches": ["dev"]
   },
   "amhndu/SimpleNES": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
@@ -2314,19 +2331,23 @@
   },
   "amitshekhariitbhu/Android-Debug-Database": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
-    "weight": 0.01
+    "weight": 0.01,
+    "additional_acceptable_branches": ["development"]
   },
   "amitshekhariitbhu/Fast-Android-Networking": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
-    "weight": 0.01
+    "weight": 0.01,
+    "additional_acceptable_branches": ["development"]
   },
   "amitshekhariitbhu/RxJava2-Android-Samples": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
-    "weight": 0.01
+    "weight": 0.01,
+    "additional_acceptable_branches": ["development"]
   },
   "amitshekhariitbhu/android-interview-questions": {
     "inactiveAt": "2025-11-04T02:18:33.094Z",
-    "weight": 0.01
+    "weight": 0.01,
+    "additional_acceptable_branches": ["development"]
   },
   "ampproject/amphtml": {
     "weight": 0.19
@@ -3010,7 +3031,8 @@
     "weight": 0.35
   },
   "bigskysoftware/htmx": {
-    "weight": 0.18
+    "weight": 0.18,
+    "additional_acceptable_branches": ["dev"]
   },
   "binance/binance-spot-api-docs": {
     "weight": 0.17
@@ -3370,7 +3392,8 @@
   },
   "chartist-js/chartist": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
-    "weight": 0.01
+    "weight": 0.01,
+    "additional_acceptable_branches": ["develop"]
   },
   "chartjs/Chart.js": {
     "weight": 0.25
@@ -3674,7 +3697,8 @@
   },
   "coollabsio/coolify": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
-    "weight": 0.01
+    "weight": 0.01,
+    "additional_acceptable_branches": ["next"]
   },
   "coolsnowwolf/lede": {
     "weight": 0.32
@@ -4041,7 +4065,8 @@
   },
   "didi/KnowStreaming": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
-    "weight": 0.01
+    "weight": 0.01,
+    "additional_acceptable_branches": ["dev"]
   },
   "didi/cube-ui": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
@@ -4266,7 +4291,8 @@
     "weight": 0.21
   },
   "dotnet/dotnet-docker": {
-    "weight": 4.34
+    "weight": 4.34,
+    "additional_acceptable_branches": ["nightly"]
   },
   "dotnet/eShop": {
     "weight": 0.28
@@ -4402,7 +4428,8 @@
   },
   "eclipse-mosquitto/mosquitto": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
-    "weight": 0.01
+    "weight": 0.01,
+    "additional_acceptable_branches": ["develop", "fixes"]
   },
   "eclipse-openj9/openj9": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
@@ -4477,7 +4504,8 @@
     "weight": 0.01
   },
   "elebumm/RedditVideoMakerBot": {
-    "weight": 0.17
+    "weight": 0.17,
+    "additional_acceptable_branches": ["develop"]
   },
   "electron-react-boilerplate/electron-react-boilerplate": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
@@ -4826,7 +4854,8 @@
   },
   "feder-cr/Jobs_Applier_AI_Agent_AIHawk": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
-    "weight": 0.01
+    "weight": 0.01,
+    "additional_acceptable_branches": ["develop"]
   },
   "feeluown/FeelUOwn": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
@@ -4927,7 +4956,8 @@
   },
   "flipped-aurora/gin-vue-admin": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
-    "weight": 0.01
+    "weight": 0.01,
+    "additional_acceptable_branches": ["develop"]
   },
   "flipperdevices/flipperzero-firmware": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
@@ -5615,7 +5645,8 @@
     "weight": 0.01
   },
   "hacksider/Deep-Live-Cam": {
-    "weight": 0.25
+    "weight": 0.25,
+    "additional_acceptable_branches": ["premain"]
   },
   "hacs/integration": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
@@ -5873,7 +5904,8 @@
     "weight": 0.01
   },
   "hummingbot/hummingbot": {
-    "weight": 0.18
+    "weight": 0.18,
+    "additional_acceptable_branches": ["development"]
   },
   "hustcc/canvas-nest.js": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
@@ -5884,7 +5916,8 @@
     "weight": 0.01
   },
   "hybridauth/hybridauth": {
-    "weight": 0.24
+    "weight": 0.24, 
+    "additional_acceptable_branches": ["dev"]
   },
   "hydralauncher/hydra": {
     "weight": 0.17
@@ -5947,7 +5980,8 @@
     "weight": 0.01
   },
   "idurar/idurar-erp-crm": {
-    "weight": 0.32
+    "weight": 0.32,
+    "additional_acceptable_branches": ["dev"]
   },
   "igrigorik/videospeed": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
@@ -6344,7 +6378,8 @@
     "weight": 0.01
   },
   "joomla/joomla-cms": {
-    "weight": 0.28
+    "weight": 0.28,
+    "additional_acceptable_branches": ["*-dev"]
   },
   "josdejong/jsoneditor": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
@@ -6404,7 +6439,8 @@
   },
   "jspreadsheet/ce": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
-    "weight": 0.01
+    "weight": 0.01,
+    "additional_acceptable_branches": ["dev"]
   },
   "jsx-eslint/eslint-plugin-jsx-a11y": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
@@ -6416,16 +6452,19 @@
   },
   "juce-framework/JUCE": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
-    "weight": 0.01
+    "weight": 0.01,
+    "additional_acceptable_branches": ["develop"]
   },
   "judasn/IntelliJ-IDEA-Tutorial": {
     "weight": 0.21
   },
   "juice-shop/juice-shop": {
-    "weight": 0.35
+    "weight": 0.35,
+    "additional_acceptable_branches": ["develop"]
   },
   "juliangarnier/anime": {
-    "weight": 1.52
+    "weight": 1.52,
+    "additional_acceptable_branches": ["dev"]
   },
   "juliocesarfort/public-pentesting-reports": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
@@ -6522,7 +6561,8 @@
   },
   "karatelabs/karate": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
-    "weight": 0.01
+    "weight": 0.01,
+    "additional_acceptable_branches": ["develop"]
   },
   "karma-runner/karma": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
@@ -6909,7 +6949,8 @@
   },
   "libjpeg-turbo/libjpeg-turbo": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
-    "weight": 0.01
+    "weight": 0.01,
+    "additional_acceptable_branches": ["dev"]
   },
   "libnoname/noname": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
@@ -7186,7 +7227,8 @@
   },
   "mailcow/mailcow-dockerized": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
-    "weight": 0.01
+    "weight": 0.01,
+    "additional_acceptable_branches": ["staging"]
   },
   "makeplane/plane": {
     "weight": 0.53
@@ -7251,7 +7293,8 @@
   },
   "mathjax/MathJax": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
-    "weight": 0.01
+    "weight": 0.01,
+    "additional_acceptable_branches": ["develop"]
   },
   "matplotlib/matplotlib": {
     "weight": 0.35
@@ -7473,7 +7516,8 @@
   },
   "microsoft/UFO": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
-    "weight": 0.01
+    "weight": 0.01,
+    "additional_acceptable_branches": ["pre-release"]
   },
   "microsoft/WPF-Samples": {
     "weight": 0.28
@@ -7595,7 +7639,8 @@
   },
   "middyjs/middy": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
-    "weight": 0.01
+    "weight": 0.01,
+    "additional_acceptable_branches": ["develop"]
   },
   "midoks/mdserver-web": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
@@ -7904,7 +7949,8 @@
   },
   "nccgroup/ScoutSuite": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
-    "weight": 0.01
+    "weight": 0.01,
+    "additional_acceptable_branches": ["develop"]
   },
   "neetcode-gh/leetcode": {
     "weight": 6.94
@@ -8083,7 +8129,8 @@
     "weight": 0.32
   },
   "nodemcu/nodemcu-firmware": {
-    "weight": 0.26
+    "weight": 0.26,
+    "additional_acceptable_branches": ["dev"]
   },
   "nodesource/distributions": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
@@ -8667,7 +8714,8 @@
     "weight": 6.55
   },
   "pi-hole/web": {
-    "weight": 36.77
+    "weight": 36.77,
+    "additional_acceptable_branches": ["development"]
   },
   "pickle-com/glass": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
@@ -8753,7 +8801,8 @@
   },
   "pocoproject/poco": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
-    "weight": 0.01
+    "weight": 0.01,
+    "additional_acceptable_branches": ["devel"]
   },
   "pola-rs/polars": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
@@ -9151,7 +9200,8 @@
   },
   "ranaroussi/yfinance": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
-    "weight": 0.01
+    "weight": 0.01,
+    "additional_acceptable_branches": ["dev"]
   },
   "rapid7/metasploit-framework": {
     "weight": 0.47
@@ -9174,7 +9224,8 @@
     "weight": 6.61
   },
   "raspberrypi/pico-sdk": {
-    "weight": 6.57
+    "weight": 6.57,
+    "additional_acceptable_branches": ["develop"]
   },
   "ravendb/ravendb": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
@@ -9223,7 +9274,8 @@
   },
   "react-native-maps/react-native-maps": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
-    "weight": 0.01
+    "weight": 0.01,
+    "additional_acceptable_branches": ["beta"]
   },
   "react-native-share/react-native-share": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
@@ -9278,7 +9330,8 @@
   },
   "recommenders-team/recommenders": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
-    "weight": 0.01
+    "weight": 0.01,
+    "additional_acceptable_branches": ["staging"]
   },
   "redcanaryco/atomic-red-team": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
@@ -9537,7 +9590,8 @@
   },
   "sampotts/plyr": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
-    "weight": 0.01
+    "weight": 0.01,
+    "additional_acceptable_branches": ["develop"]
   },
   "samyk/evercookie": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
@@ -9627,7 +9681,8 @@
   },
   "serversideup/amplitudejs": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
-    "weight": 0.01
+    "weight": 0.01,
+    "additional_acceptable_branches": ["dev"]
   },
   "session-replay-tools/tcpcopy": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
@@ -9734,7 +9789,8 @@
   },
   "sigp/lighthouse": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
-    "weight": 0.01
+    "weight": 0.01,
+    "additional_acceptable_branches": ["unstable"]
   },
   "siimon/prom-client": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
@@ -9758,7 +9814,8 @@
   },
   "simstudioai/sim": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
-    "weight": 0.01
+    "weight": 0.01,
+    "additional_acceptable_branches": ["staging"]
   },
   "simular-ai/Agent-S": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
@@ -9942,7 +9999,8 @@
   },
   "spotipy-dev/spotipy": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
-    "weight": 0.01
+    "weight": 0.01,
+    "additional_acceptable_branches": ["v3"]
   },
   "spree/spree": {
     "weight": 0.25
@@ -10026,7 +10084,8 @@
   },
   "stanfordnlp/CoreNLP": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
-    "weight": 0.01
+    "weight": 0.01,
+    "additional_acceptable_branches": ["dev"]
   },
   "stanfordnlp/GloVe": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
@@ -10034,7 +10093,8 @@
   },
   "stanfordnlp/stanza": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
-    "weight": 0.01
+    "weight": 0.01,
+    "additional_acceptable_branches": ["dev"]
   },
   "star7th/showdoc": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
@@ -10254,7 +10314,8 @@
   },
   "taosdata/TDengine": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
-    "weight": 0.01
+    "weight": 0.01,
+    "additional_acceptable_branches": ["3.0"]
   },
   "taoshidev/proprietary-trading-network": {
     "weight": 6.52
@@ -10600,7 +10661,8 @@
     "weight": 0.01
   },
   "tw93/Pake": {
-    "weight": 0.18
+    "weight": 0.18,
+    "additional_acceptable_branches": ["dev"]
   },
   "twbs/bootstrap": {
     "weight": 0.48
@@ -10827,7 +10889,8 @@
   },
   "visjs/vis-network": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
-    "weight": 0.01
+    "weight": 0.01,
+    "additional_acceptable_branches": ["develop"]
   },
   "vispy/vispy": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
@@ -10961,7 +11024,8 @@
   },
   "weaviate/Verba": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
-    "weight": 0.01
+    "weight": 0.01,
+    "additional_acceptable_branches": ["dev"]
   },
   "web-platform-tests/wpt": {
     "weight": 0.21

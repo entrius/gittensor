@@ -534,7 +534,10 @@
     "weight": 0.01
   },
   "GraphiteAI/Graphite-Subnet": {
-    "weight": 6.52
+    "weight": 6.52,
+    "additional_acceptable_branches": [
+      "staging"
+    ]
   },
   "Grasscutters/Grasscutter": {
     "weight": 0.18
@@ -8412,14 +8415,24 @@
     "weight": 0.29
   },
   "opentensor/bittensor": {
-    "weight": 77.04
+    "weight": 77.04,
+    "additional_acceptable_branches": [
+      "staging"
+    ]
   },
   "opentensor/btcli": {
     "weight": 36.77,
-    "additional_acceptable_branches": ["staging"]
+    "additional_acceptable_branches": [
+      "staging"
+    ]
   },
   "opentensor/subtensor": {
-    "weight": 36.77
+    "weight": 36.77,
+    "additional_acceptable_branches": [
+      "devnet-ready",
+      "devnet",
+      "testnet"
+    ]
   },
   "openthread/openthread": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
@@ -9684,7 +9697,10 @@
     "weight": 0.31
   },
   "shiftlayer-llc/brainplay-subnet": {
-    "weight": 6.52
+    "weight": 6.52,
+    "additional_acceptable_branches": [
+      "dev"
+    ]
   },
   "shimat/opencvsharp": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
@@ -11433,4 +11449,3 @@
     "weight": 0.01
   }
 }
-

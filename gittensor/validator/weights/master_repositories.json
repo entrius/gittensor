@@ -9684,7 +9684,8 @@
     "weight": 0.31
   },
   "shiftlayer-llc/brainplay-subnet": {
-    "weight": 6.52
+    "weight": 6.52,
+    "additional_acceptable_branches": ["dev"]
   },
   "shimat/opencvsharp": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",

@@ -22,6 +22,9 @@
     "inactiveAt": "2025-11-29T17:45:38.525Z",
     "weight": 0.01
   },
+  "AlphaCoreBittensor/alphacore": {
+    "weight": 6.52
+  },
   "AntennaPod/AntennaPod": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
     "weight": 0.01
@@ -125,9 +128,6 @@
   },
   "BigBrotherTrade/trader": {
     "weight": 0.17
-  },
-  "BitKoopLabs/BitKoop": {
-    "weight": 6.52
   },
   "BitMind-AI/bitmind-subnet": {
     "weight": 44.58
@@ -1090,9 +1090,6 @@
   "OAI/OpenAPI-Specification": {
     "weight": 6.05
   },
-  "Oceans-Subnet/oceans_subnet": {
-    "weight": 6.52
-  },
   "OctoPrint/OctoPrint": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
     "weight": 0.01
@@ -1501,9 +1498,6 @@
   },
   "SeleniumHQ/selenium": {
     "weight": 3.37
-  },
-  "SentiVerse-AI/soulx": {
-    "weight": 6.52
   },
   "ServiceStack/ServiceStack": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
@@ -7180,9 +7174,6 @@
   "macrocosm-os/iota": {
     "weight": 59.34
   },
-  "macrocosm-os/mainframe": {
-    "weight": 6.52
-  },
   "macrozheng/mall": {
     "weight": 0.61
   },
@@ -8059,9 +8050,6 @@
     "inactiveAt": "2025-11-29T17:45:38.525Z",
     "weight": 0.01
   },
-  "niels-ma/infinite_games": {
-    "weight": 6.52
-  },
   "nightwatchjs/nightwatch": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
     "weight": 0.01
@@ -8184,6 +8172,9 @@
   "numba/numba": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
     "weight": 0.01
+  },
+  "numinouslabs/numinous": {
+    "weight": 6.52
   },
   "numpy/numpy": {
     "weight": 14.6
@@ -10320,7 +10311,7 @@
     "weight": 0.01,
     "additional_acceptable_branches": ["3.0"]
   },
-  "taoshidev/proprietary-trading-network": {
+  "taoshidev/vanta-network": {
     "weight": 6.52
   },
   "tastejs/todomvc": {

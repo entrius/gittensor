@@ -8446,7 +8446,8 @@
   "opentensor/bittensor": {
     "weight": 77.04,
     "additional_acceptable_branches": [
-      "staging"
+      "staging",
+      "SDKv10"
     ]
   },
   "opentensor/btcli": {

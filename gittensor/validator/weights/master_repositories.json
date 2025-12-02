@@ -10256,7 +10256,7 @@
     "inactiveAt": "2025-11-29T17:45:38.525Z",
     "weight": 0.01
   },
-  "taoshidev/proprietary-trading-network": {
+  "taoshidev/vanta-network": {
     "weight": 6.52
   },
   "tastejs/todomvc": {
@@ -11433,4 +11433,3 @@
     "weight": 0.01
   }
 }
-

@@ -130,7 +130,7 @@ class WeightsManager:
     
     def update_repo(self, name: str, weight: Optional[float] = None, 
                     mark_inactive: bool = False, mark_active: bool = False,
-                    add_branches: Optional[list] = None, remove_branches: bool = False) -> None:
+                    add_branches: Optional[list] = None, remove_branches: Optional[list] = None) -> None:
         """Update an existing repository."""
         repos = self.load_repos()
         
@@ -166,12 +166,38 @@ class WeightsManager:
             print(f"✓ Added branches to '{actual_name}': {add_branches}")
             print(f"  Current branches: {existing_branches}")
         
-        if remove_branches:
-            if 'additional_acceptable_branches' in repos[actual_name]:
-                del repos[actual_name]['additional_acceptable_branches']
-                print(f"✓ Removed additional_acceptable_branches from '{actual_name}'")
-            else:
+        if remove_branches is not None:
+            if 'additional_acceptable_branches' not in repos[actual_name]:
                 print(f"ℹ Repository '{actual_name}' has no additional_acceptable_branches")
+            elif len(remove_branches) == 0:
+                # No branches specified, remove all
+                del repos[actual_name]['additional_acceptable_branches']
+                print(f"✓ Removed all additional_acceptable_branches from '{actual_name}'")
+            else:
+                # Remove specific branches
+                existing_branches = repos[actual_name]['additional_acceptable_branches']
+                removed = []
+                not_found = []
+                for branch in remove_branches:
+                    if branch in existing_branches:
+                        existing_branches.remove(branch)
+                        removed.append(branch)
+                    else:
+                        not_found.append(branch)
+                
+                if removed:
+                    if existing_branches:
+                        repos[actual_name]['additional_acceptable_branches'] = existing_branches
+                        print(f"✓ Removed branches from '{actual_name}': {removed}")
+                        print(f"  Current branches: {existing_branches}")
+                    else:
+                        # All branches removed, delete the key
+                        del repos[actual_name]['additional_acceptable_branches']
+                        print(f"✓ Removed branches from '{actual_name}': {removed}")
+                        print(f"  No branches remaining")
+                
+                if not_found:
+                    print(f"ℹ Branches not found: {not_found}")
         
         self.save_repos(repos)
     
@@ -391,6 +417,7 @@ Examples:
   %(prog)s repo update owner/repo --mark-inactive
   %(prog)s repo update owner/repo --mark-active
   %(prog)s repo update owner/repo --add-branches dev/v0.7.0 main
+  %(prog)s repo update owner/repo --remove-branches dev
   %(prog)s repo update owner/repo --remove-branches
   %(prog)s repo remove owner/repo
   %(prog)s repo get owner/repo
@@ -434,7 +461,7 @@ Examples:
     repo_update.add_argument('--mark-inactive', action='store_true', help='Mark as inactive')
     repo_update.add_argument('--mark-active', action='store_true', help='Mark as active')
     repo_update.add_argument('--add-branches', nargs='+', help='Add acceptable branches (e.g., dev/v0.7.0)')
-    repo_update.add_argument('--remove-branches', action='store_true', help='Remove all additional_acceptable_branches')
+    repo_update.add_argument('--remove-branches', nargs='*', help='Remove specific branches, or all if no branches specified')
     
     # repo remove
     repo_remove = repo_subparsers.add_parser('remove', help='Remove a repository')

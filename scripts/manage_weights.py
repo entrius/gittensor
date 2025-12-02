@@ -156,8 +156,15 @@ class WeightsManager:
                 print(f"ℹ Repository '{actual_name}' is already active")
         
         if add_branches:
-            repos[actual_name]['additional_acceptable_branches'] = add_branches
-            print(f"✓ Set additional_acceptable_branches for '{actual_name}' to {add_branches}")
+            # Get existing branches or create empty list
+            existing_branches = repos[actual_name].get('additional_acceptable_branches', [])
+            # Add new branches, avoiding duplicates
+            for branch in add_branches:
+                if branch not in existing_branches:
+                    existing_branches.append(branch)
+            repos[actual_name]['additional_acceptable_branches'] = existing_branches
+            print(f"✓ Added branches to '{actual_name}': {add_branches}")
+            print(f"  Current branches: {existing_branches}")
         
         if remove_branches:
             if 'additional_acceptable_branches' in repos[actual_name]:

@@ -43,12 +43,10 @@ Before contributing, please:
 
 Apply appropriate labels to help categorize and track your contribution:
 
-| Label           | Purpose                                        |
-| --------------- | ---------------------------------------------- |
-| `feature`       | New feature additions or enhancements          |
-| `bug`           | Bug fixes                                      |
-| `refactor`      | Code refactoring without functionality changes |
-| `documentation` | Documentation improvements                     |
+- `feature` - New feature additions or enhancements
+- `bug` - Bug fixes
+- `refactor` - Code refactoring without functionality changes
+- `documentation` - Documentation improvements
 
 ## Code Standards
 

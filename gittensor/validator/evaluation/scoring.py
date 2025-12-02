@@ -222,7 +222,7 @@ def _is_valid_issue(issue: Issue, pr: PullRequest) -> bool:
 
     # Only set valid to True if PR was NOT edited after being merged
     # (to prevent miners from editing after merge to add irrelevant closed issues)
-    if pr.last_edited_at > pr.merged_at:
+    if pr.last_edited_at and pr.last_edited_at > pr.merged_at:
         bt.logging.warning(f"Skipping issue #{issue.number} - edited after PR merge")
         return False
 

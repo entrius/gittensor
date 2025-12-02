@@ -220,6 +220,11 @@ def calculate_issue_multiplier(pr: PullRequest) -> float:
 def _is_valid_issue(issue: Issue, pr: PullRequest) -> bool:
     """Check if issue is valid for bonus calculation."""
 
+    # prevents gaming by linking already closed irrelevant issues after PR merge
+    if pr.last_edited_at > pr.merged_at:
+        bt.logging.warning(f"Skipping issue #{issue.number} - edited after PR merge")
+        return False
+
     if issue.state and issue.state != 'CLOSED':
         bt.logging.warning(f"Skipping issue #{issue.number} - not CLOSED (state: {issue.state})")
         return False

@@ -10,3 +10,13 @@ multi_line_output = 3
 include_trailing_comma = true
 skip_gitignore = true
 
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+exclude = ["tests/", "docs/"]
+
+[tool.bandit]
+exclude_dirs = ["tests", "docs", ".venv", "venv"]
+skips = ["B101", "B601"]

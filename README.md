@@ -25,6 +25,63 @@ See full guide **[here](gittensor/miner/README.md)**
 
 See full guide **[here](gittensor/validator/README.md)**
 
+---
+
+## Development
+
+### Setting Up Pre-commit Hooks
+
+This project uses pre-commit hooks to maintain code quality and consistency. The hooks automatically run checks before each commit.
+
+#### Installation
+
+1. **Install development dependencies:**
+   ```bash
+   pip install -r requirements-dev.txt
+   ```
+
+2. **Install pre-commit hooks:**
+   ```bash
+   pre-commit install
+   ```
+
+#### What Gets Checked
+
+The pre-commit hooks include:
+
+- **black** - Automatic code formatting (120 char line length)
+- **isort** - Import statement sorting and organization
+- **flake8** - Code linting and style checking
+- **mypy** - Static type checking
+- **bandit** - Security vulnerability scanning
+- **File fixes** - Trailing whitespace removal, end-of-file fixing, YAML/TOML validation
+
+#### Running Manually
+
+To run all hooks on all files manually:
+```bash
+pre-commit run --all-files
+```
+
+To run hooks on specific files:
+```bash
+pre-commit run --files path/to/file.py
+```
+
+#### Skipping Hooks (Not Recommended)
+
+If you need to commit without running hooks (not recommended):
+```bash
+git commit --no-verify -m "your message"
+```
+
+#### Updating Hooks
+
+To update hook versions to the latest:
+```bash
+pre-commit autoupdate
+```
+
 ## Scoring & Rewards
 
 ### Important Structures

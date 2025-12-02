@@ -142,7 +142,8 @@ def apply_cross_miner_multipliers_and_finalize(miner_evaluations: Dict[int, Mine
 
         for pr in evaluation.pull_requests:
             # Apply uniqueness multiplier (cross-miner dependent)
-            uniqueness_score = (total_contributing_miners - repo_counts[pr.repository_full_name] + 1) / total_contributing_miners
+            repo_count = repo_counts.get(pr.repository_full_name, 1)  # Default to 1 if repo not in counts
+            uniqueness_score = (total_contributing_miners - repo_count + 1) / total_contributing_miners
             uniqueness_multiplier = 1.0 + (uniqueness_score * UNIQUE_PR_BOOST)
             pr.repository_uniqueness_multiplier = uniqueness_multiplier
 

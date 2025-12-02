@@ -70,6 +70,22 @@ COMMENT_PATTERNS = [
     r"^\s*'''",         # Python docstring
 ]
 
+PREPROCESSOR_LANGUAGES = {
+    'c', 'h',           # C
+    'cpp', 'cxx', 'cc', 'hpp', 'hxx', 'hh', 'h++',  # C++
+    'm', 'mm',          # Objective-C
+    'cs',               # C#
+    'rs',               # Rust
+    'java',             # Java
+    'js', 'jsx',        # JavaScript
+    'ts', 'tsx',        # TypeScript
+    'go',               # Go
+    'kt', 'kts',        # Kotlin
+    'swift',            # Swift
+    'hs',               # Haskell
+    'scala',            # Scala
+}
+
 # =============================================================================
 # Rewards & Emissions
 # =============================================================================

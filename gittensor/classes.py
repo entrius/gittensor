@@ -158,7 +158,7 @@ class PullRequest:
             if file.file_extension in MITIGATED_EXTENSIONS:
                 total_changes_to_score = min(file.changes, MAX_LINES_SCORED_FOR_MITIGATED_EXT)
 
-            non_scoreable_lines = count_non_scoreable_lines(file.patch, total_changes_to_score)
+            non_scoreable_lines = count_non_scoreable_lines(file.patch, total_changes_to_score, file.file_extension)
             scored_changes = max(0, total_changes_to_score - non_scoreable_lines)
 
             self.total_lines_scored += scored_changes

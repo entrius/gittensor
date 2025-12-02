@@ -7732,6 +7732,9 @@
   "mmistakes/minimal-mistakes": {
     "weight": 0.27
   },
+  "mobiusfund/etf": {
+    "weight": 6.52
+  },
   "moby/moby": {
     "weight": 0.29
   },

@@ -29,7 +29,6 @@ def is_token_typo(old: str, new: str, max_dist=TYPO_MAX_DIST, min_sim=TYPO_MIN_S
 
 def is_comment_line(content: str, file_extension: Optional[str] = None) -> bool:
     """Check if line content matches a comment pattern. Skips '#' pattern for preprocessor languages (C, C++, Rust, etc.) to avoid false positives."""
-    # Filter patterns: skip '#' pattern for preprocessor languages
     patterns_to_check = COMMENT_PATTERNS
     if file_extension and file_extension in PREPROCESSOR_LANGUAGES:
         # Skip the '#' pattern (index 0) for languages where # is preprocessor directive

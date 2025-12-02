@@ -187,12 +187,12 @@ def calculate_issue_multiplier(pr: PullRequest) -> float:
         bt.logging.info(f"PR #{pr.number} - found no valid issues")
         return 1.0
 
-    num_issues = min(len(pr.issues), MAX_ISSUES_SCORED_IN_SINGLE_PR)
+    num_issues = min(len(valid_issues), MAX_ISSUES_SCORED_IN_SINGLE_PR)
     bt.logging.info(f"Calculating issue multiplier for PR #{pr.number} with {num_issues} issues")
 
     total_issue_multiplier = 0.0
     for i in range(num_issues):
-        issue = pr.issues[i]
+        issue = valid_issues[i]
         issue_num = getattr(issue, 'number', i + 1)
 
         if not (issue.created_at and issue.closed_at):

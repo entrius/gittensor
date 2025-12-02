@@ -38,8 +38,13 @@ def count_non_scoreable_lines(patch: str, max_scoreable_lines: Optional[int] = N
     non_scoreable = 0
     lines = patch.split("\n")
     scoreable_count = 0
+    skip_next = False  # Track if next line should be skipped
     
     for i, line in enumerate(lines):
+        if skip_next:
+            skip_next = False
+            continue
+            
         if not is_single_diff_line(line):
             continue
         
@@ -56,6 +61,7 @@ def count_non_scoreable_lines(patch: str, max_scoreable_lines: Optional[int] = N
             if is_single_diff_line(next_line) and next_line.startswith("+"):
                 if is_token_typo(content, next_line[1:]):
                     non_scoreable += 2
+                    skip_next = True  # Skip the + line in next iteration
                     continue
         
         # This line is scoreable

@@ -120,7 +120,7 @@ class PullRequest:
     repository_uniqueness_multiplier: float = 1.0
     time_decay_multiplier: float = 1.0
     gittensor_tag_multiplier: float = 1.0
-    pr_merge_success_multiplier: float = 1.0
+    merge_success_multiplier: float = 1.0
     earned_score: float = 0.0
 
     # Contribution details
@@ -181,8 +181,8 @@ class PullRequest:
             "open_pr_spam_multiplier": self.open_pr_spam_multiplier,
             "repo_uniqueness_multiplier": self.repository_uniqueness_multiplier,
             "time_decay_multiplier": self.time_decay_multiplier,
-            "pr_merge_success_multiplier": self.pr_merge_success_multiplier,
             "gittensor_tag_multiplier": self.gittensor_tag_multiplier,
+            "merge_success_multiplier": self.merge_success_multiplier,
         }
 
         self.earned_score = self.base_score * prod(multipliers.values())

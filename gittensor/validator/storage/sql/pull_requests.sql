@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS pull_requests (
     repository_uniqueness_multiplier  DECIMAL(15,6)    DEFAULT 1.0,
     time_decay_multiplier             DECIMAL(15,6)    DEFAULT 1.0,
     gittensor_tag_multiplier          DECIMAL(15,6)    DEFAULT 1.0,
+    merge_success_multiplier          DECIMAL(15,6)    DEFAULT 1.0,
     earned_score                      DECIMAL(15,6)    DEFAULT 0.0,
 
     -- Contribution details
@@ -55,6 +56,7 @@ CREATE TABLE IF NOT EXISTS pull_requests (
     CONSTRAINT chk_pull_requests_repository_uniqueness_multiplier CHECK    (repository_uniqueness_multiplier >= 1),
     CONSTRAINT chk_pull_requests_time_decay_multiplier            CHECK    (time_decay_multiplier <= 1),
     CONSTRAINT chk_pull_requests_gittensor_tag_multiplier         CHECK    (gittensor_tag_multiplier >= 1),
+    CONSTRAINT chk_pull_requests_merge_success_multiplier         CHECK    (merge_success_multiplier <= 1),
     CONSTRAINT chk_pull_requests_earned_score                     CHECK    (earned_score >= 0)
 );
 

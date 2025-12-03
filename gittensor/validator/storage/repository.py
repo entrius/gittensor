@@ -143,6 +143,7 @@ class Repository(BaseRepository):
                     pr.repository_uniqueness_multiplier,
                     pr.time_decay_multiplier,
                     pr.gittensor_tag_multiplier,
+                    pr.merge_success_multiplier,
                     pr.earned_score,
                     pr.additions,
                     pr.deletions,
@@ -285,6 +286,8 @@ class Repository(BaseRepository):
             evaluation.total_score,
             evaluation.total_lines_changed,
             evaluation.total_open_prs,
+            evaluation.total_closed_prs,
+            evaluation.total_merged_prs,
             evaluation.total_prs,
             evaluation.unique_repos_count,
         )

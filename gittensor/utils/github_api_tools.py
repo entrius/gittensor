@@ -9,7 +9,10 @@ import bittensor as bt
 import requests
 
 from gittensor.classes import FileChange
-from gittensor.constants import BASE_GITHUB_API_URL
+from gittensor.constants import (
+    BASE_GITHUB_API_URL,
+    MERGE_SUCCESS_APPLICATION_DATE,
+)
 from gittensor.validator.utils.config import MERGED_PR_LOOKBACK_DAYS
 
 
@@ -329,7 +332,7 @@ def get_user_merged_prs_graphql(
                 if pr_state == 'CLOSED' and not pr_raw['mergedAt']:
                     if pr_raw.get('closedAt'):
                         closed_dt = datetime.fromisoformat(pr_raw['closedAt'].rstrip("Z")).replace(tzinfo=timezone.utc)
-                        if closed_dt >= date_filter and repository_full_name in active_repositories:
+                        if closed_dt >= date_filter and closed_dt >= MERGE_SUCCESS_APPLICATION_DATE and repository_full_name in active_repositories:
                             closed_pr_count += 1
                     continue  # Skip further processing for closed PRs
 

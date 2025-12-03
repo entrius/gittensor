@@ -130,7 +130,8 @@
     "weight": 0.17
   },
   "BitMind-AI/bitmind-subnet": {
-    "weight": 44.58
+    "weight": 44.58,
+    "additional_acceptable_branches": ["testnet"]
   },
   "Bitsec-AI/subnet": {
     "weight": 6.52

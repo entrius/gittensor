@@ -120,6 +120,7 @@ class PullRequest:
     repository_uniqueness_multiplier: float = 1.0
     time_decay_multiplier: float = 1.0
     gittensor_tag_multiplier: float = 1.0
+    pr_merge_success_multiplier: float = 1.0
     earned_score: float = 0.0
 
     # Contribution details
@@ -175,11 +176,12 @@ class PullRequest:
     def calculate_final_earned_score(self) -> float:
         """Combine base score with all multipliers."""
         multipliers = {
-            "repo_weight": self.repo_weight_multiplier,
-            "issue": self.issue_multiplier,
+            "repo_weight_multiplier": self.repo_weight_multiplier,
+            "issue_multiplier": self.issue_multiplier,
             "open_pr_spam_multiplier": self.open_pr_spam_multiplier,
-            "repo_uniqueness": self.repository_uniqueness_multiplier,
-            "time_decay": self.time_decay_multiplier,
+            "repo_uniqueness_multiplier": self.repository_uniqueness_multiplier,
+            "time_decay_multiplier": self.time_decay_multiplier,
+            "pr_merge_success_multiplier": self.pr_merge_success_multiplier,
             "gittensor_tag_multiplier": self.gittensor_tag_multiplier,
         }
 
@@ -274,6 +276,8 @@ class MinerEvaluation:
     total_score: float = 0.0
     total_lines_changed: int = 0
     total_open_prs: int = 0
+    total_closed_prs: int = 0  # Total PRs closed within MERGED_PR_LOOKBACK_DAYS
+    total_merged_prs: int = 0  # Total PRs merged within MERGED_PR_LOOKBACK_DAYS (len of valid_prs)
     unique_repos_count: int = 0
     failed_reason: Optional[str] = None
     evaluation_timestamp: Optional[datetime] = None

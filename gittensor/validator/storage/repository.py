@@ -276,19 +276,31 @@ class Repository(BaseRepository):
         Returns:
             True if successful, False otherwise
         """
-        query = BULK_UPSERT_MINER_EVALUATION
-        params = (
-            evaluation.uid,
-            evaluation.hotkey,
-            evaluation.github_id,
-            evaluation.failed_reason,
-            evaluation.base_total_score,
-            evaluation.total_score,
-            evaluation.total_lines_changed,
-            evaluation.total_open_prs,
-            evaluation.total_closed_prs,
-            evaluation.total_merged_prs,
-            evaluation.total_prs,
-            evaluation.unique_repos_count,
-        )
-        return self.set_entity(query, params)
+        values = [
+            (
+                evaluation.uid,
+                evaluation.hotkey,
+                evaluation.github_id,
+                evaluation.failed_reason,
+                evaluation.base_total_score,
+                evaluation.total_score,
+                evaluation.total_lines_changed,
+                evaluation.total_open_prs,
+                evaluation.total_closed_prs,
+                evaluation.total_merged_prs,
+                evaluation.total_prs,
+                evaluation.unique_repos_count,
+            )
+        ]
+
+        try:
+            with self.get_cursor() as cursor:
+                from psycopg2.extras import execute_values
+
+                execute_values(cursor, BULK_UPSERT_MINER_EVALUATION, values)
+                self.db.commit()
+                return True
+        except Exception as e:
+            self.db.rollback()
+            self.logger.error(f"Error in miner evaluation storage: {e}")
+            return False

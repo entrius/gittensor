@@ -62,7 +62,7 @@ BULK_UPSERT_MINER_EVALUATION = """
 INSERT INTO miner_evaluations (
     uid, hotkey, github_id, failed_reason, base_total_score, total_score,
     total_lines_changed, total_open_prs, total_closed_prs, total_merged_prs, total_prs, unique_repos_count
-) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+) VALUES %s
 ON CONFLICT (uid, hotkey, github_id)
 DO UPDATE SET
     failed_reason = EXCLUDED.failed_reason,

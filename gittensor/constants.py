@@ -75,9 +75,6 @@ PREPROCESSOR_LANGUAGES = {
     'cpp', 'cxx', 'cc', 'hpp', 'hxx', 'hh', 'h++',  # C++
     'cs',               # C#
     'rs',               # Rust
-    'js', 'jsx',        # JavaScript
-    'ts', 'tsx',        # TypeScript
-    'go',               # Go
     'swift',            # Swift
 }
 

@@ -10622,6 +10622,9 @@
   "trinodb/trino": {
     "weight": 0.17
   },
+  "trishoolai/trishool-subnet": {
+    "weight": 6.52
+  },
   "triton-inference-server/server": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
     "weight": 0.01

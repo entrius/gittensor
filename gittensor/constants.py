@@ -22,7 +22,7 @@ GITTENSOR_TAGLINE_BOOST = 2.0 # PRs with the Gittensor Tagline will receive 2x t
 # Language & File Scoring
 # =============================================================================
 DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT = 0.12
-TEST_FILE_CONTRIBUTION_WEIGHT = 0.25
+TEST_FILE_CONTRIBUTION_WEIGHT = 0.10
 MITIGATED_EXTENSIONS = ["md", "txt", "json"]
 MAX_LINES_SCORED_FOR_MITIGATED_EXT = 300
 

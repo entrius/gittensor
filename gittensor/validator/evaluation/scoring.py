@@ -23,6 +23,7 @@ from gittensor.constants import (
     EXCESSIVE_PR_PENALTY_SLOPE,
     EXCESSIVE_PR_MIN_WEIGHT,
     GITTENSOR_TAGLINE_BOOST,
+    GITTENSOR_REPOSITORY,
 )
 from gittensor.utils.github_api_tools import get_pull_request_file_changes
 
@@ -63,7 +64,7 @@ def score_pull_requests(
         issue_multiplier = calculate_issue_multiplier(pr)
         open_pr_spam_multiplier = calculate_pr_spam_penalty_multiplier(miner_eval.total_open_prs)
         time_decay_multiplier = calculate_time_decay_multiplier(pr)
-        gittensor_tag_multiplier = GITTENSOR_TAGLINE_BOOST if pr.gittensor_tagged else 1.0
+        gittensor_tag_multiplier = GITTENSOR_TAGLINE_BOOST if (pr.gittensor_tagged and pr.repository_full_name.lower() != GITTENSOR_REPOSITORY.lower()) else 1.0
 
         pr.repo_weight_multiplier = round(repo_weight, 2)
         pr.base_score = round(file_change_score, 2)

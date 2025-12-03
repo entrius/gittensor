@@ -110,6 +110,9 @@ def calculate_pr_spam_penalty_multiplier(total_open_prs: int) -> float:
 
 def calculate_merge_success_multiplier(miner_eval: MinerEvaluation) -> float:
     """Calculate multiplier based on PR merge success ratio."""
+    if (miner_eval.total_merged_prs == 0 and miner_eval.total_closed_prs == 0):
+        return 1.0
+        
     total_prs = miner_eval.total_merged_prs + miner_eval.total_closed_prs
     merge_ratio = miner_eval.total_merged_prs / total_prs
     return merge_ratio

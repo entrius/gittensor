@@ -7175,7 +7175,8 @@
     "weight": 6.52
   },
   "macrocosm-os/data-universe": {
-    "weight": 7.05
+    "weight": 7.05,
+    "additional_acceptable_branches": ["dev"]
   },
   "macrocosm-os/iota": {
     "weight": 59.34

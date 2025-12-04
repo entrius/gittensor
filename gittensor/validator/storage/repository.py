@@ -136,6 +136,7 @@ class Repository(BaseRepository):
                     pr.author_login,
                     pr.merged_at,
                     pr.created_at,
+                    pr.closed_at,
                     pr.repo_weight_multiplier,
                     pr.base_score,
                     pr.issue_multiplier,

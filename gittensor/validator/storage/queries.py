@@ -12,7 +12,7 @@ DO NOTHING
 BULK_UPSERT_PULL_REQUESTS = """
 INSERT INTO pull_requests (
     number, repository_full_name, uid, hotkey, github_id, title, author_login,
-    merged_at, pr_created_at,
+    merged_at, pr_created_at, closed_at,
     repo_weight_multiplier, base_score, issue_multiplier,
     open_pr_spam_multiplier, repository_uniqueness_multiplier, time_decay_multiplier,
     gittensor_tag_multiplier, merge_success_multiplier, earned_score,

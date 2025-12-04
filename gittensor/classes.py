@@ -121,6 +121,7 @@ class PullRequest:
     author_login: str
     merged_at: datetime
     created_at: datetime
+    closed_at: datetime
     
     # Score fields
     repo_weight_multiplier: float = 1.0
@@ -265,6 +266,7 @@ class PullRequest:
             author_login=pr_data['author']['login'],
             merged_at=merged_at,
             created_at=parse_github_timestamp(pr_data['createdAt']),
+            closed_at=parse_github_timestamp(pr_data['closedAt']),
             additions=pr_data['additions'],
             deletions=pr_data['deletions'],
             commits=pr_data.get('commits', {}).get('totalCount', 0),

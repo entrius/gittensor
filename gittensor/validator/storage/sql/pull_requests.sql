@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS pull_requests (
     author_login                      VARCHAR(255)     NOT NULL,
     merged_at                         TIMESTAMP,        -- Nullable for draft PRs
     pr_created_at                     TIMESTAMP        NOT NULL,
+    closed_at                         TIMESTAMP         -- Nullable for open PRs
 
     -- Score fields
     repo_weight_multiplier            DECIMAL(15,6)    DEFAULT 1.0,

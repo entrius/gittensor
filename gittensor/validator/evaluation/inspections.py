@@ -11,10 +11,7 @@ from gittensor.constants import (
     RECYCLE_UID,
     MIN_GITHUB_ACCOUNT_AGE,
 )
-from gittensor.utils.github_api_tools import (
-    get_github_account_age_days,
-    get_github_id,
-)
+from gittensor.utils.github_api_tools import get_github_account_age_days
 
 
 def detect_and_penalize_duplicates(
@@ -34,12 +31,12 @@ def detect_and_penalize_duplicates(
 
     github_id_to_uids: Dict[str, List[int]] = defaultdict(list)
 
-    for uid, synapse in miner_responses.items():
-        if not synapse or not synapse.github_access_token:
-            continue
-
-        if github_id := get_github_id(synapse.github_access_token):
-            github_id_to_uids[github_id].append(uid)
+    # Use already-fetched github_id from miner_evaluations instead of making
+    # redundant API calls. The github_id was already fetched during validation
+    # in _validate_github_credentials() and stored in miner_eval.github_id
+    for uid, evaluation in miner_evaluations.items():
+        if evaluation.github_id and evaluation.github_id != '0':
+            github_id_to_uids[evaluation.github_id].append(uid)
 
     duplicate_count = 0
     for github_id, uids in github_id_to_uids.items():
@@ -82,6 +79,7 @@ def _validate_github_credentials(uid: int, pat: Optional[str]) -> Tuple[Optional
     if not pat:
         return None, f"No Github PAT provided by miner {uid}"
     
+    from gittensor.utils.github_api_tools import get_github_id
     github_id = get_github_id(pat)
     if not github_id:
         return None, f"No Github id found for miner {uid}'s PAT"

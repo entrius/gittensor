@@ -8,6 +8,12 @@
 
 Gittensor aims to accelerate the development of open source software (OSS) and enable OSS developers to be rewarded for meaningful work. We incentivize open source contributions.
 
+## Socials
+
+- **Website:** [gittensor.io](https://gittensor.io)
+- **X (Twitter):** [@gittensor_io](https://x.com/gittensor_io)
+- **Discord:** [Join our channel, 74, in the Bittensor discord](https://discord.gg/aK2ZNUQfRt)
+
 ---
 
 ## At a Glance

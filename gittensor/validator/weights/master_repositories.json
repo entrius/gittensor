@@ -5,6 +5,9 @@
   "404-Repo/three-gen-subnet": {
     "weight": 44.58
   },
+  "404-Repo/404-base-miner": {
+    "weight": 44.58
+  },
   "Acode-Foundation/Acode": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
     "weight": 0.01

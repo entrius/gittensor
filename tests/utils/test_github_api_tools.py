@@ -65,13 +65,13 @@ class TestGraphQLRetryLogic(unittest.TestCase):
         mock_post.side_effect = [mock_response_502, mock_response_502, mock_response_200]
 
         # Execute
-        result, open_count, closed_count = get_user_merged_prs_graphql(self.test_user_id, self.test_token, self.master_repositories)
+        result = get_user_merged_prs_graphql(self.test_user_id, self.test_token, self.master_repositories)
 
         # Verify
         self.assertEqual(mock_post.call_count, 3, "Should retry 3 times total")
         self.assertEqual(mock_sleep.call_count, 2, "Should sleep twice between retries")
-        self.assertEqual(result, [])
-        self.assertEqual(open_count, 0)
+        self.assertEqual(result.valid_prs, [])
+        self.assertEqual(result.open_pr_count, 0)
 
         # Verify 15 second wait between retries
         sleep_calls = [call(15), call(15)]
@@ -90,13 +90,13 @@ class TestGraphQLRetryLogic(unittest.TestCase):
         mock_post.return_value = mock_response_502
 
         # Execute
-        result, open_count, closed_count = get_user_merged_prs_graphql(self.test_user_id, self.test_token, self.master_repositories)
+        result = get_user_merged_prs_graphql(self.test_user_id, self.test_token, self.master_repositories)
 
         # Verify
         self.assertEqual(mock_post.call_count, 3, "Should try exactly 3 times")
         self.assertEqual(mock_sleep.call_count, 2, "Should sleep twice")
-        self.assertEqual(result, [])
-        self.assertEqual(open_count, 0)
+        self.assertEqual(result.valid_prs, [])
+        self.assertEqual(result.open_pr_count, 0)
 
         # Verify error was logged
         mock_logging.error.assert_called()
@@ -127,7 +127,7 @@ class TestGraphQLRetryLogic(unittest.TestCase):
         mock_post.side_effect = [mock_response_503, mock_response_200]
 
         # Execute
-        result, open_count, closed_count = get_user_merged_prs_graphql(self.test_user_id, self.test_token, self.master_repositories)
+        result = get_user_merged_prs_graphql(self.test_user_id, self.test_token, self.master_repositories)
 
         # Verify
         self.assertEqual(mock_post.call_count, 2, "Should retry once after 503")
@@ -159,7 +159,7 @@ class TestGraphQLRetryLogic(unittest.TestCase):
         mock_post.side_effect = [mock_response_504, mock_response_200]
 
         # Execute
-        result, open_count, closed_count = get_user_merged_prs_graphql(self.test_user_id, self.test_token, self.master_repositories)
+        result = get_user_merged_prs_graphql(self.test_user_id, self.test_token, self.master_repositories)
 
         # Verify
         self.assertEqual(mock_post.call_count, 2, "Should retry once after 504")
@@ -177,12 +177,12 @@ class TestGraphQLRetryLogic(unittest.TestCase):
         mock_post.return_value = mock_response_401
 
         # Execute
-        result, open_count, closed_count = get_user_merged_prs_graphql(self.test_user_id, self.test_token, self.master_repositories)
+        result = get_user_merged_prs_graphql(self.test_user_id, self.test_token, self.master_repositories)
 
         # Verify - should only try once, not retry
         self.assertEqual(mock_post.call_count, 1, "Should NOT retry on 401")
         self.assertEqual(mock_sleep.call_count, 0, "Should not sleep")
-        self.assertEqual(result, [])
+        self.assertEqual(result.valid_prs, [])
 
     @patch('gittensor.utils.github_api_tools.requests.post')
     @patch('gittensor.utils.github_api_tools.time.sleep')
@@ -197,7 +197,7 @@ class TestGraphQLRetryLogic(unittest.TestCase):
         mock_post.return_value = mock_response_404
 
         # Execute
-        result, open_count, closed_count = get_user_merged_prs_graphql(self.test_user_id, self.test_token, self.master_repositories)
+        result = get_user_merged_prs_graphql(self.test_user_id, self.test_token, self.master_repositories)
 
         # Verify
         self.assertEqual(mock_post.call_count, 1, "Should NOT retry on 404")
@@ -231,7 +231,7 @@ class TestGraphQLRetryLogic(unittest.TestCase):
         ]
 
         # Execute
-        result, open_count, closed_count = get_user_merged_prs_graphql(self.test_user_id, self.test_token, self.master_repositories)
+        result = get_user_merged_prs_graphql(self.test_user_id, self.test_token, self.master_repositories)
 
         # Verify
         self.assertEqual(mock_post.call_count, 3, "Should retry after connection errors")
@@ -251,12 +251,12 @@ class TestGraphQLRetryLogic(unittest.TestCase):
         mock_post.side_effect = requests.exceptions.ConnectionError("Connection refused")
 
         # Execute
-        result, open_count, closed_count = get_user_merged_prs_graphql(self.test_user_id, self.test_token, self.master_repositories)
+        result = get_user_merged_prs_graphql(self.test_user_id, self.test_token, self.master_repositories)
 
         # Verify
         self.assertEqual(mock_post.call_count, 3, "Should try 3 times before giving up")
-        self.assertEqual(result, [])
-        self.assertEqual(open_count, 0)
+        self.assertEqual(result.valid_prs, [])
+        self.assertEqual(result.open_pr_count, 0)
 
     @patch('gittensor.utils.github_api_tools.requests.post')
     @patch('gittensor.utils.github_api_tools.bt.logging')
@@ -279,12 +279,12 @@ class TestGraphQLRetryLogic(unittest.TestCase):
         mock_post.return_value = mock_response_200
 
         # Execute
-        result, open_count, closed_count = get_user_merged_prs_graphql(self.test_user_id, self.test_token, self.master_repositories)
+        result = get_user_merged_prs_graphql(self.test_user_id, self.test_token, self.master_repositories)
 
         # Verify
         self.assertEqual(mock_post.call_count, 1, "Should only call once on success")
-        self.assertEqual(result, [])
-        self.assertEqual(open_count, 0)
+        self.assertEqual(result.valid_prs, [])
+        self.assertEqual(result.open_pr_count, 0)
 
 
 class TestOtherGitHubAPIFunctions(unittest.TestCase):

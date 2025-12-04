@@ -16,6 +16,16 @@ GITHUB_DOMAIN = 'https://github.com/'
 
 
 @dataclass
+class PRCountResult:
+    """Result from get_user_merged_prs_graphql containing valid PRs and counts"""
+
+    valid_prs: List[DefaultDict]
+    open_pr_count: int
+    merged_pr_count: int  # Count of merged PRs after MERGE_SUCCESS_RATIO_APPLICATION_DATE
+    closed_pr_count: int  # Count of closed (not merged) PRs after MERGE_SUCCESS_RATIO_APPLICATION_DATE
+
+
+@dataclass
 class Miner:
     """Miner identity"""
 

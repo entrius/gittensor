@@ -37,8 +37,8 @@ MAX_LINES_SCORED_FOR_MITIGATED_EXT = 300
 # =============================================================================
 # Issue Scoring
 # =============================================================================
-MAX_ISSUES_SCORED_IN_SINGLE_PR = 3
-MAX_ISSUE_CLOSE_WINDOW_DAYS = 5
+MAX_ISSUES_SCORED_IN_SINGLE_PR = 2
+MAX_ISSUE_CLOSE_WINDOW_DAYS = 1
 MAX_ISSUE_AGE_FOR_MAX_SCORE = 45  # days
 
 # =============================================================================

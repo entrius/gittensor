@@ -167,13 +167,13 @@ def apply_cross_miner_multipliers_and_finalize(miner_evaluations: Dict[int, Mine
             evaluation.total_lines_changed += pr.total_lines_scored
 
         evaluation.unique_repos_count = len(evaluation.unique_repos_contributed_to)
-        merge_success_rate = calculate_merge_success_multiplier(evaluation)
+        merge_success_percent = calculate_merge_success_multiplier(evaluation) * 100
 
         bt.logging.info(f"Final evaluation for UID {uid}:")
         bt.logging.info(f"  - Total Score: {evaluation.total_score:.2f}")
         bt.logging.info(f"  - Total Valid PRs: {evaluation.total_prs}")
         bt.logging.info(f"  - Total Open PRs: {evaluation.total_open_prs}")
-        bt.logging.info(f"  - PR Merge Success Rate: {evaluation.total_merged_prs}/{evaluation.total_merged_prs + evaluation.total_closed_prs} ({merge_success_rate:.2f}")
+        bt.logging.info(f"  - PR Merge Success Rate: {evaluation.total_merged_prs}/{evaluation.total_merged_prs + evaluation.total_closed_prs} ({merge_success_percent:.2f}%)")
         bt.logging.info(f"  - Total Lines Changed (& Scored): {evaluation.total_lines_changed}")
         bt.logging.info(f"  - Unique Repositories Contributed To: {evaluation.unique_repos_contributed_to}")
 

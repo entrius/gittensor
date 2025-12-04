@@ -196,7 +196,7 @@ class PullRequest:
         }
 
         self.earned_score = self.base_score * prod(multipliers.values())
-        mult_str = " | ".join([f"{k}: {v:.3f}" for k, v in multipliers.items()])
+        mult_str = " | ".join([f"{k}: {v:.2f}" for k, v in multipliers.items()])
 
         bt.logging.info(
             f"PR #{self.number} -> {self.repository_full_name} | base: {self.base_score:.2f} | {mult_str} | final: {self.earned_score:.2f}"

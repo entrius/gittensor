@@ -1,3 +1,4 @@
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import DefaultDict, Dict, List, Optional, Set
@@ -67,7 +68,29 @@ class FileChange:
         return self.filename.split(".")[-1].lower() if "." in self.filename else ""
 
     def is_test_file(self) -> bool:
-        return "test" in self.filename.lower()
+        """Check if file is a test file using common naming conventions.
+        
+        Uses pattern matching instead of simple substring to avoid false positives
+        like 'contest/', 'latest_version.py', 'attest/', 'protest/', etc.
+        """
+        filename_lower = self.filename.lower()
+        basename = filename_lower.split('/')[-1]
+        
+        # Check for test directories
+        if '/test/' in filename_lower or '/tests/' in filename_lower or '/__tests__/' in filename_lower:
+            return True
+        
+        # Check for common test file naming patterns
+        test_patterns = [
+            r'^test_',           # test_main.py (Python)
+            r'_test\.',          # main_test.py, main_test.go
+            r'\.test\.',         # main.test.js, main.test.ts (JavaScript/TypeScript)
+            r'_spec\.',          # main_spec.rb (Ruby RSpec)
+            r'^spec_',           # spec_main.rb
+            r'\.spec\.',         # main.spec.ts (Angular)
+        ]
+        
+        return any(re.search(pattern, basename) for pattern in test_patterns)
 
     @classmethod
     def from_github_response(cls, pr_number: int, repository_full_name: str, file_diff: DefaultDict) -> 'FileChange':

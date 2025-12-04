@@ -11,6 +11,7 @@ SECONDS_PER_HOUR = 3600
 # Temp Vars
 # =============================================================================
 MERGE_SUCCESS_RATIO_APPLICATION_DATE = datetime(2025, 12, 4, 18, 0, 0, tzinfo=timezone.utc)
+MERGE_SUCCESS_RATIO_ATTEMPTS_THRESHOLD = 5
 
 # =============================================================================
 # GitHub API

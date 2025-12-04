@@ -21,9 +21,10 @@ from gittensor.constants import (
     MAX_ISSUE_AGE_FOR_MAX_SCORE,
     EXCESSIVE_PR_PENALTY_THRESHOLD,
     EXCESSIVE_PR_PENALTY_SLOPE,
-    EXCESSIVE_PR_MIN_WEIGHT,
+    EXCESSIVE_PR_MIN_MULTIPLIER,
     GITTENSOR_TAGLINE_BOOST,
     GITTENSOR_REPOSITORY,
+    MERGE_SUCCESS_RATIO_ATTEMPTS_THRESHOLD,
 )
 from gittensor.utils.github_api_tools import get_pull_request_file_changes
 
@@ -65,6 +66,7 @@ def score_pull_requests(
         open_pr_spam_multiplier = calculate_pr_spam_penalty_multiplier(miner_eval.total_open_prs)
         time_decay_multiplier = calculate_time_decay_multiplier(pr)
         gittensor_tag_multiplier = GITTENSOR_TAGLINE_BOOST if (pr.gittensor_tagged and pr.repository_full_name.lower() != GITTENSOR_REPOSITORY.lower()) else 1.0
+        merge_success_multiplier = calculate_merge_success_multiplier(miner_eval)
 
         pr.repo_weight_multiplier = round(repo_weight, 2)
         pr.base_score = round(file_change_score, 2)
@@ -72,6 +74,7 @@ def score_pull_requests(
         pr.open_pr_spam_multiplier = round(open_pr_spam_multiplier, 2)
         pr.time_decay_multiplier = round(time_decay_multiplier, 2)
         pr.gittensor_tag_multiplier = round(gittensor_tag_multiplier, 2)
+        pr.merge_success_multiplier = round(merge_success_multiplier, 2)
 
         miner_eval.unique_repos_contributed_to.add(pr.repository_full_name)
 
@@ -103,7 +106,19 @@ def calculate_pr_spam_penalty_multiplier(total_open_prs: int) -> float:
         return 1.0
 
     excess_pr_count = total_open_prs - EXCESSIVE_PR_PENALTY_THRESHOLD
-    return max(EXCESSIVE_PR_MIN_WEIGHT, 1.0 - excess_pr_count * EXCESSIVE_PR_PENALTY_SLOPE)
+    calculated_multiplier = 1.0 - (excess_pr_count * EXCESSIVE_PR_PENALTY_SLOPE)
+    return max(EXCESSIVE_PR_MIN_MULTIPLIER, calculated_multiplier)
+
+
+def calculate_merge_success_multiplier(miner_eval: MinerEvaluation) -> float:
+    """Calculate multiplier based on PR merge success ratio."""
+    total_prs = miner_eval.total_merged_prs + miner_eval.total_closed_prs
+
+    if (total_prs < MERGE_SUCCESS_RATIO_ATTEMPTS_THRESHOLD):
+        return 1.0
+    
+    merge_ratio = miner_eval.total_merged_prs / total_prs
+    return merge_ratio
 
 
 def calculate_time_decay_multiplier(pr: PullRequest) -> float:
@@ -155,11 +170,13 @@ def apply_cross_miner_multipliers_and_finalize(miner_evaluations: Dict[int, Mine
             evaluation.total_lines_changed += pr.total_lines_scored
 
         evaluation.unique_repos_count = len(evaluation.unique_repos_contributed_to)
+        merge_success_percent = calculate_merge_success_multiplier(evaluation) * 100
 
         bt.logging.info(f"Final evaluation for UID {uid}:")
         bt.logging.info(f"  - Total Score: {evaluation.total_score:.2f}")
         bt.logging.info(f"  - Total Valid PRs: {evaluation.total_prs}")
         bt.logging.info(f"  - Total Open PRs: {evaluation.total_open_prs}")
+        bt.logging.info(f"  - PR Merge Success Rate: {evaluation.total_merged_prs}/{evaluation.total_merged_prs + evaluation.total_closed_prs} ({merge_success_percent:.2f}%)")
         bt.logging.info(f"  - Total Lines Changed (& Scored): {evaluation.total_lines_changed}")
         bt.logging.info(f"  - Unique Repositories Contributed To: {evaluation.unique_repos_contributed_to}")
 
@@ -188,12 +205,12 @@ def calculate_issue_multiplier(pr: PullRequest) -> float:
         bt.logging.info(f"PR #{pr.number} - found no valid issues")
         return 1.0
 
-    num_issues = min(len(pr.issues), MAX_ISSUES_SCORED_IN_SINGLE_PR)
+    num_issues = min(len(valid_issues), MAX_ISSUES_SCORED_IN_SINGLE_PR)
     bt.logging.info(f"Calculating issue multiplier for PR #{pr.number} with {num_issues} issues")
 
     total_issue_multiplier = 0.0
     for i in range(num_issues):
-        issue = pr.issues[i]
+        issue = valid_issues[i]
         issue_num = getattr(issue, 'number', i + 1)
 
         if not (issue.created_at and issue.closed_at):
@@ -220,6 +237,12 @@ def calculate_issue_multiplier(pr: PullRequest) -> float:
 
 def _is_valid_issue(issue: Issue, pr: PullRequest) -> bool:
     """Check if issue is valid for bonus calculation."""
+
+    # Only set valid to True if PR was NOT edited after being merged
+    # (to prevent miners from editing after merge to add irrelevant closed issues)
+    if pr.last_edited_at and pr.last_edited_at > pr.merged_at:
+        bt.logging.warning(f"Skipping issue #{issue.number} - edited after PR merge")
+        return False
 
     if issue.state and issue.state != 'CLOSED':
         bt.logging.warning(f"Skipping issue #{issue.number} - not CLOSED (state: {issue.state})")

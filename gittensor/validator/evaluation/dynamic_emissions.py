@@ -55,11 +55,14 @@ def apply_dynamic_emissions_using_network_contributions(
     total_original = sum(normalized_rewards.values())
     scaled_rewards = {uid: reward * final_scalar for uid, reward in normalized_rewards.items()}
     total_recycled = total_original * (1 - final_scalar)
+    
+    # Dynamic bound: full recycle (1.0) if no earned scores, otherwise 0
+    dynamic_recycle_bound = 1 if total_original <= 0 else 0
 
     # Allocate recycled emissions
-    scaled_rewards[RECYCLE_UID] = scaled_rewards.get(RECYCLE_UID, 0.0) + max(total_recycled, 1 if total_recycled <= 0 else 0)
+    scaled_rewards[RECYCLE_UID] = scaled_rewards.get(RECYCLE_UID, 0.0) + max(total_recycled, dynamic_recycle_bound)
 
-    recycle_percentage = (total_recycled / total_original * 100) if total_original > 0 else 0.0
+    recycle_percentage = (total_recycled / total_original * 100) if total_original > 0 else 100.0
     bt.logging.info(
         f"Dynamic emissions: lines_scalar={lines_scalar:.3f}, repo_scalar={repo_scalar:.3f}, "
         f"final={final_scalar:.2f}, recycled={total_recycled:.2f} ({recycle_percentage:.2f}%)"

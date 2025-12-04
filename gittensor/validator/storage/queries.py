@@ -15,7 +15,7 @@ INSERT INTO pull_requests (
     merged_at, pr_created_at,
     repo_weight_multiplier, base_score, issue_multiplier,
     open_pr_spam_multiplier, repository_uniqueness_multiplier, time_decay_multiplier,
-    gittensor_tag_multiplier, earned_score,
+    gittensor_tag_multiplier, merge_success_multiplier, earned_score,
     additions, deletions, commits, total_lines_scored, gittensor_tagged,
     merged_by_login, description, last_edited_at
 ) VALUES %s
@@ -30,6 +30,7 @@ DO UPDATE SET
     repository_uniqueness_multiplier = EXCLUDED.repository_uniqueness_multiplier,
     time_decay_multiplier = EXCLUDED.time_decay_multiplier,
     gittensor_tag_multiplier = EXCLUDED.gittensor_tag_multiplier,
+    merge_success_multiplier = EXCLUDED.merge_success_multiplier,
     earned_score = EXCLUDED.earned_score,
     total_lines_scored = EXCLUDED.total_lines_scored,
     gittensor_tagged = EXCLUDED.gittensor_tagged,
@@ -60,8 +61,8 @@ DO NOTHING
 BULK_UPSERT_MINER_EVALUATION = """
 INSERT INTO miner_evaluations (
     uid, hotkey, github_id, failed_reason, base_total_score, total_score,
-    total_lines_changed, total_open_prs, total_prs, unique_repos_count
-) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+    total_lines_changed, total_open_prs, total_closed_prs, total_merged_prs, total_prs, unique_repos_count
+) VALUES %s
 ON CONFLICT (uid, hotkey, github_id)
 DO UPDATE SET
     failed_reason = EXCLUDED.failed_reason,
@@ -69,6 +70,8 @@ DO UPDATE SET
     total_score = EXCLUDED.total_score,
     total_lines_changed = EXCLUDED.total_lines_changed,
     total_open_prs = EXCLUDED.total_open_prs,
+    total_closed_prs = EXCLUDED.total_closed_prs,
+    total_merged_prs = EXCLUDED.total_merged_prs,
     total_prs = EXCLUDED.total_prs,
     unique_repos_count = EXCLUDED.unique_repos_count,
     updated_at = NOW()

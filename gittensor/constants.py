@@ -1,10 +1,17 @@
 # Entrius 2025
+from datetime import datetime, timezone
 
 # =============================================================================
 # General
 # =============================================================================
 SECONDS_PER_DAY = 86400
 SECONDS_PER_HOUR = 3600
+
+# =============================================================================
+# Temp Vars
+# =============================================================================
+MERGE_SUCCESS_RATIO_APPLICATION_DATE = datetime(2025, 12, 4, 18, 0, 0, tzinfo=timezone.utc)
+MERGE_SUCCESS_RATIO_ATTEMPTS_THRESHOLD = 5
 
 # =============================================================================
 # GitHub API
@@ -23,7 +30,7 @@ GITTENSOR_TAGLINE_BOOST = 2.0 # PRs with the Gittensor Tagline will receive 2x t
 # Language & File Scoring
 # =============================================================================
 DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT = 0.12
-TEST_FILE_CONTRIBUTION_WEIGHT = 0.25
+TEST_FILE_CONTRIBUTION_WEIGHT = 0.10
 MITIGATED_EXTENSIONS = ["md", "txt", "json"]
 MAX_LINES_SCORED_FOR_MITIGATED_EXT = 300
 
@@ -53,9 +60,9 @@ TYPO_MAX_DIST = 2
 TYPO_MIN_SIM = 0.75
 
 # Excessive open PRs penalty
-EXCESSIVE_PR_PENALTY_THRESHOLD = 12
-EXCESSIVE_PR_PENALTY_SLOPE = 0.08333
-EXCESSIVE_PR_MIN_WEIGHT = 0.01
+EXCESSIVE_PR_PENALTY_THRESHOLD = 10
+EXCESSIVE_PR_PENALTY_SLOPE = 0.50
+EXCESSIVE_PR_MIN_MULTIPLIER = 0.00
 
 COMMENT_PATTERNS = [
     r'^\s*#',           # Python, Ruby, Shell, etc.
@@ -70,6 +77,14 @@ COMMENT_PATTERNS = [
     r'^\s*"""',         # Python docstring
     r"^\s*'''",         # Python docstring
 ]
+
+PREPROCESSOR_LANGUAGES = {
+    'c', 'h',           # C
+    'cpp', 'cxx', 'cc', 'hpp', 'hxx', 'hh', 'h++',  # C++
+    'cs',               # C#
+    'rs',               # Rust
+    'swift',            # Swift
+}
 
 # =============================================================================
 # Rewards & Emissions

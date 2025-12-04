@@ -3,13 +3,16 @@ import base64
 import fnmatch
 import time
 from datetime import datetime, timedelta, timezone
-from typing import DefaultDict, List, Optional, Tuple
+from typing import List, Optional
 
 import bittensor as bt
 import requests
 
-from gittensor.classes import FileChange
-from gittensor.constants import BASE_GITHUB_API_URL
+from gittensor.classes import FileChange, PRCountResult
+from gittensor.constants import (
+    BASE_GITHUB_API_URL,
+    MERGE_SUCCESS_RATIO_APPLICATION_DATE,
+)
 from gittensor.validator.utils.config import MERGED_PR_LOOKBACK_DAYS
 
 
@@ -133,7 +136,7 @@ def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -
 
 def get_user_merged_prs_graphql(
     user_id: str, token: str, master_repositories: dict[str, dict], max_prs: int = 1000
-) -> Tuple[List[DefaultDict], int]:
+) -> PRCountResult:
     """
     Get all merged PRs for a user across all repositories using GraphQL API with pagination.
 
@@ -144,15 +147,18 @@ def get_user_merged_prs_graphql(
         max_prs (int): Maximum number of PRs to fetch across all pages
 
     Returns:
-        List[PullRequest]: List of PullRequest objects
-        int: Count of total open PRs for a miner
+        PRCountResult containing:
+            - valid_prs: List of valid merged PRs (passed all filters)
+            - open_pr_count: Count of open PRs in active repos
+            - merged_pr_count: Count of merged PRs after MERGE_SUCCESS_RATIO_APPLICATION_DATE
+            - closed_pr_count: Count of closed (not merged) PRs within lookback period
     """
 
     bt.logging.info("*****Fetching merged PRs*****")
 
     if not user_id or user_id == "None":
         bt.logging.error("Invalid user_id provided to get_user_merged_prs_graphql")
-        return ([], 0)
+        return PRCountResult(valid_prs=[], open_pr_count=0, merged_pr_count=0, closed_pr_count=0)
 
     headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
 
@@ -166,7 +172,7 @@ def get_user_merged_prs_graphql(
     query($userId: ID!, $limit: Int!, $cursor: String) {
       node(id: $userId) {
         ... on User {
-          pullRequests(first: $limit, states: [MERGED, OPEN], orderBy: {field: UPDATED_AT, direction: DESC}, after: $cursor) {
+          pullRequests(first: $limit, states: [MERGED, OPEN, CLOSED], orderBy: {field: UPDATED_AT, direction: DESC}, after: $cursor) {
             pageInfo {
               hasNextPage
               endCursor
@@ -178,6 +184,7 @@ def get_user_merged_prs_graphql(
               deletions
               mergedAt
               createdAt
+              closedAt
               lastEditedAt
               bodyText
               state
@@ -234,6 +241,8 @@ def get_user_merged_prs_graphql(
 
     all_valid_prs = []
     open_pr_count = 0
+    merged_pr_count = 0  # Merged PRs after MERGE_SUCCESS_RATIO_APPLICATION_DATE
+    closed_pr_count = 0  # Closed (not merged) within lookback period
     cursor = None
     page_size = min(100, max_prs)  # GitHub GraphQL max is 100 per page
 
@@ -284,7 +293,12 @@ def get_user_merged_prs_graphql(
                         time.sleep(15)
                     else:
                         bt.logging.error(f"GraphQL request failed after 3 attempts: {e}")
-                        return (all_valid_prs, open_pr_count)  # retries failed, return default response
+                        return PRCountResult(
+                            valid_prs=all_valid_prs,
+                            open_pr_count=open_pr_count,
+                            merged_pr_count=merged_pr_count,
+                            closed_pr_count=closed_pr_count,
+                        )
 
             if not response or response.status_code != 200:
                 bt.logging.error(
@@ -312,12 +326,22 @@ def get_user_merged_prs_graphql(
             # Process PRs from this page
             for pr_raw in prs:
                 repository_full_name = f"{pr_raw['repository']['owner']['login']}/{pr_raw['repository']['name']}"
+                pr_state = pr_raw['state']
+
                 # Check if it's an open PR and count it
-                if pr_raw['state'] == 'OPEN':
+                if pr_state == 'OPEN':
                     # Check if in tracked repositories
                     if repository_full_name in active_repositories:
                         open_pr_count += 1
                     continue  # Skip further processing for open PRs
+
+                # Handle CLOSED (not merged) PRs - count if within lookback period
+                if pr_state == 'CLOSED' and not pr_raw['mergedAt']:
+                    if pr_raw.get('closedAt'):
+                        closed_dt = datetime.fromisoformat(pr_raw['closedAt'].rstrip("Z")).replace(tzinfo=timezone.utc)
+                        if closed_dt >= date_filter and closed_dt > MERGE_SUCCESS_RATIO_APPLICATION_DATE and repository_full_name in active_repositories:
+                            closed_pr_count += 1
+                    continue  # Skip further processing for closed PRs
 
                 # Skip if not a merged pr
                 if not pr_raw['mergedAt']:
@@ -335,7 +359,12 @@ def get_user_merged_prs_graphql(
                 if merged_dt < date_filter:
                     # stop once we hit a pr before lookback window
                     bt.logging.debug(f"Reached PRs older than {MERGED_PR_LOOKBACK_DAYS} days, stopping pagination")
-                    return (all_valid_prs, open_pr_count)
+                    return PRCountResult(
+                        valid_prs=all_valid_prs,
+                        open_pr_count=open_pr_count,
+                        merged_pr_count=merged_pr_count,
+                        closed_pr_count=closed_pr_count,
+                    )
 
                 # Skip if PR was merged by the same person who created it (self-merge) AND there's no approvals from a differing party
                 if pr_raw['mergedBy'] and pr_raw['author']['login'] == pr_raw['mergedBy']['login']:
@@ -400,6 +429,9 @@ def get_user_merged_prs_graphql(
                         continue
 
                 bt.logging.info(f"Accepting PR #{pr_raw['number']} in {repository_full_name} - merged to '{base_ref}'")
+                # Increment merged_pr_count if merged after MERGE_SUCCESS_RATIO_APPLICATION_DATE
+                if merged_dt > MERGE_SUCCESS_RATIO_APPLICATION_DATE:
+                    merged_pr_count += 1
                 # consider PR valid if all checks passed
                 all_valid_prs.append(pr_raw)
 
@@ -409,9 +441,17 @@ def get_user_merged_prs_graphql(
 
             cursor = page_info.get('endCursor')
 
-        bt.logging.info(f"Found {len(all_valid_prs)} valid merged PRs and {open_pr_count} open PRs.")
-        return (all_valid_prs, open_pr_count)
+        bt.logging.info(
+            f"Found {len(all_valid_prs)} valid merged PRs, {open_pr_count} open PRs, "
+            f"{merged_pr_count} merged PRs, {closed_pr_count} closed PRs."
+        )
+        return PRCountResult(
+            valid_prs=all_valid_prs,
+            open_pr_count=open_pr_count,
+            merged_pr_count=merged_pr_count,
+            closed_pr_count=closed_pr_count,
+        )
 
     except Exception as e:
         bt.logging.error(f"Error fetching PRs via GraphQL for user: {e}")
-        return ([], 0)
+        return PRCountResult(valid_prs=[], open_pr_count=0, merged_pr_count=0, closed_pr_count=0)

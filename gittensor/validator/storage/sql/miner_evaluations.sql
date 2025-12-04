@@ -11,6 +11,8 @@ CREATE TABLE IF NOT EXISTS miner_evaluations (
     total_score          DECIMAL(15,6)    DEFAULT 0.0,
     total_lines_changed  INTEGER          DEFAULT 0,
     total_open_prs       INTEGER          DEFAULT 0,
+    total_closed_prs     INTEGER          DEFAULT 0,
+    total_merged_prs     INTEGER          DEFAULT 0,
     total_prs            INTEGER          DEFAULT 0,
     unique_repos_count   INTEGER          DEFAULT 0,
 

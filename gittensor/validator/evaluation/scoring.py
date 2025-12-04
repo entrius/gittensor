@@ -52,6 +52,9 @@ def score_pull_requests(
     for n, pr in enumerate(miner_eval.pull_requests, start=1):
         bt.logging.info(f"\n[{n}/{total_prs}] - Scoring PR #{pr.number} in {pr.repository_full_name}")
 
+        # Add repository to unique repos for all valid PRs (including those with no file changes)
+        miner_eval.unique_repos_contributed_to.add(pr.repository_full_name)
+
         file_changes = get_pull_request_file_changes(pr.repository_full_name, pr.number, miner_eval.github_pat)
 
         if not file_changes:
@@ -75,8 +78,6 @@ def score_pull_requests(
         pr.time_decay_multiplier = round(time_decay_multiplier, 2)
         pr.gittensor_tag_multiplier = round(gittensor_tag_multiplier, 2)
         pr.merge_success_multiplier = round(merge_success_multiplier, 2)
-
-        miner_eval.unique_repos_contributed_to.add(pr.repository_full_name)
 
 
 def count_repository_contributors(miner_evaluations: Dict[int, MinerEvaluation]) -> Dict[str, int]:

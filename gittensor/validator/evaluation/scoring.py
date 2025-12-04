@@ -25,6 +25,7 @@ from gittensor.constants import (
     GITTENSOR_TAGLINE_BOOST,
     GITTENSOR_REPOSITORY,
     MERGE_SUCCESS_RATIO_ATTEMPTS_THRESHOLD,
+    MERGE_SUCCESS_RATIO_APPLICATION_DATE,
 )
 from gittensor.utils.github_api_tools import get_pull_request_file_changes
 
@@ -66,7 +67,12 @@ def score_pull_requests(
         open_pr_spam_multiplier = calculate_pr_spam_penalty_multiplier(miner_eval.total_open_prs)
         time_decay_multiplier = calculate_time_decay_multiplier(pr)
         gittensor_tag_multiplier = GITTENSOR_TAGLINE_BOOST if (pr.gittensor_tagged and pr.repository_full_name.lower() != GITTENSOR_REPOSITORY.lower()) else 1.0
-        merge_success_multiplier = calculate_merge_success_multiplier(miner_eval)
+        
+        # Only apply merge success penalty to PRs merged after the cutoff date
+        if pr.merged_at > MERGE_SUCCESS_RATIO_APPLICATION_DATE:
+            merge_success_multiplier = calculate_merge_success_multiplier(miner_eval)
+        else:
+            merge_success_multiplier = 1.0  # No penalty for PRs merged before cutoff
 
         pr.repo_weight_multiplier = round(repo_weight, 2)
         pr.base_score = round(file_change_score, 2)
@@ -111,7 +117,18 @@ def calculate_pr_spam_penalty_multiplier(total_open_prs: int) -> float:
 
 
 def calculate_merge_success_multiplier(miner_eval: MinerEvaluation) -> float:
-    """Calculate multiplier based on PR merge success ratio."""
+    """
+    Calculate multiplier based on PR merge success ratio.
+    
+    Only counts PRs merged/closed after MERGE_SUCCESS_RATIO_APPLICATION_DATE.
+    This multiplier should only be applied to PRs merged after the cutoff date.
+    
+    Args:
+        miner_eval: MinerEvaluation containing PR counts
+    
+    Returns:
+        float: Merge success ratio (0.0 to 1.0), or 1.0 if below threshold
+    """
     total_prs = miner_eval.total_merged_prs + miner_eval.total_closed_prs
 
     if (total_prs < MERGE_SUCCESS_RATIO_ATTEMPTS_THRESHOLD):

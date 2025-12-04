@@ -1,11 +1,13 @@
 import re
 from typing import List, Optional
 from Levenshtein import distance, ratio
+from pygments import lex
+from pygments.lexers import get_lexer_for_filename, TextLexer
+from pygments.token import Comment, String
+from pygments.util import ClassNotFound
 from gittensor.constants import (
     TYPO_MAX_DIST,
     TYPO_MIN_SIM,
-    COMMENT_PATTERNS,
-    PREPROCESSOR_LANGUAGES,
 )
 
 def tokenize(text: str) -> List[str]:
@@ -28,13 +30,28 @@ def is_token_typo(old: str, new: str, max_dist=TYPO_MAX_DIST, min_sim=TYPO_MIN_S
             for o, n in zip(old_tokens, new_tokens))
 
 def is_comment_line(content: str, file_extension: Optional[str] = None) -> bool:
-    """Check if line content matches a comment pattern. Skips '#' pattern for preprocessor languages (C, C++, Rust, etc.) to avoid false positives."""
-    patterns_to_check = COMMENT_PATTERNS
-    if file_extension and file_extension in PREPROCESSOR_LANGUAGES:
-        # Skip the '#' pattern (index 0) for languages where # is preprocessor directive
-        patterns_to_check = [p for p in COMMENT_PATTERNS if not p.startswith(r'^\s*#')]
-    
-    return any(re.match(pattern, content) for pattern in patterns_to_check)
+    """Check if line content is a comment using Pygments."""
+    try:
+        filename = f"dummy{file_extension}" if file_extension else "dummy.txt"
+        lexer = get_lexer_for_filename(filename)
+    except ClassNotFound:
+        lexer = TextLexer()
+
+    try:
+        tokens = list(lex(content, lexer))
+        
+        has_content = False
+        for token_type, value in tokens:
+            if not value.strip():
+                continue
+            
+            has_content = True
+            if token_type not in Comment and token_type not in String.Doc:
+                return False
+                
+        return has_content  # True if only comments/docstrings, False if empty
+    except Exception:
+        return False
 
 def count_non_scoreable_lines(patch: str, max_scoreable_lines: Optional[int] = None, file_extension: Optional[str] = None) -> int:
     """Count lines that shouldn't contribute to the score (blank, comment, etc)."""

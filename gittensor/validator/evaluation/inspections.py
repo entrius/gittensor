@@ -11,7 +11,10 @@ from gittensor.constants import (
     RECYCLE_UID,
     MIN_GITHUB_ACCOUNT_AGE,
 )
-from gittensor.utils.github_api_tools import get_github_account_age_days
+from gittensor.utils.github_api_tools import (
+    get_github_account_age_days,
+    get_github_id,
+)
 
 
 def detect_and_penalize_duplicates(
@@ -79,7 +82,6 @@ def _validate_github_credentials(uid: int, pat: Optional[str]) -> Tuple[Optional
     if not pat:
         return None, f"No Github PAT provided by miner {uid}"
     
-    from gittensor.utils.github_api_tools import get_github_id
     github_id = get_github_id(pat)
     if not github_id:
         return None, f"No Github id found for miner {uid}'s PAT"

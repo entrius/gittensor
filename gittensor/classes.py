@@ -68,11 +68,6 @@ class FileChange:
         return self.filename.split(".")[-1].lower() if "." in self.filename else ""
 
     def is_test_file(self) -> bool:
-        """Check if file is a test file using common naming conventions.
-        
-        Uses pattern matching instead of simple substring to avoid false positives
-        like 'contest/', 'latest_version.py', 'attest/', 'protest/', etc.
-        """
         filename_lower = self.filename.lower()
         basename = filename_lower.split('/')[-1]
         

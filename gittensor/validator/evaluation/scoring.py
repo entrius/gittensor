@@ -25,6 +25,7 @@ from gittensor.constants import (
     GITTENSOR_TAGLINE_BOOST,
     GITTENSOR_REPOSITORY,
     MERGE_SUCCESS_RATIO_ATTEMPTS_THRESHOLD,
+    MERGE_SUCCESS_RATIO_APPLICATION_DATE,
 )
 from gittensor.utils.github_api_tools import get_pull_request_file_changes
 

@@ -172,7 +172,7 @@ def get_user_merged_prs_graphql(
     query($userId: ID!, $limit: Int!, $cursor: String) {
       node(id: $userId) {
         ... on User {
-          pullRequests(first: $limit, states: [MERGED, OPEN, CLOSED], orderBy: {field: UPDATED_AT, direction: DESC}, after: $cursor) {
+          pullRequests(first: $limit, states: [MERGED, OPEN, CLOSED], orderBy: {field: CREATED_AT, direction: DESC}, after: $cursor) {
             pageInfo {
               hasNextPage
               endCursor
@@ -357,14 +357,9 @@ def get_user_merged_prs_graphql(
                 # Parse merge date and filter by time window
                 merged_dt = datetime.fromisoformat(pr_raw['mergedAt'].rstrip("Z")).replace(tzinfo=timezone.utc)
                 if merged_dt < date_filter:
-                    # stop once we hit a pr before lookback window
-                    bt.logging.debug(f"Reached PRs older than {MERGED_PR_LOOKBACK_DAYS} days, stopping pagination")
-                    return PRCountResult(
-                        valid_prs=all_valid_prs,
-                        open_pr_count=open_pr_count,
-                        merged_pr_count=merged_pr_count,
-                        closed_pr_count=closed_pr_count,
-                    )
+                    # Skip PRs merged before lookback window
+                    bt.logging.debug(f"Skipping PR #{pr_raw['number']} in {repository_full_name} - merged before {MERGED_PR_LOOKBACK_DAYS} day lookback window")
+                    continue
 
                 # Skip if PR was merged by the same person who created it (self-merge) AND there's no approvals from a differing party
                 if pr_raw['mergedBy'] and pr_raw['author']['login'] == pr_raw['mergedBy']['login']:

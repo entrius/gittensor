@@ -327,9 +327,6 @@ def get_user_merged_prs_graphql(
             for pr_raw in prs:
                 repository_full_name = f"{pr_raw['repository']['owner']['login']}/{pr_raw['repository']['name']}"
                 pr_state = pr_raw['state']
-                created_at = datetime.fromisoformat(pr_raw['createdAt'].rstrip("Z")).replace(tzinfo=timezone.utc)
-                if created_at < date_filter:
-                    break
 
                 # Check if it's an open PR and count it
                 if pr_state == 'OPEN':

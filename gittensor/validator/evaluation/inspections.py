@@ -34,9 +34,6 @@ def detect_and_penalize_duplicates(
 
     github_id_to_uids: Dict[str, List[int]] = defaultdict(list)
 
-    # Use already-fetched github_id from miner_evaluations instead of making
-    # redundant API calls. The github_id was already fetched during validation
-    # in _validate_github_credentials() and stored in miner_eval.github_id
     for uid, evaluation in miner_evaluations.items():
         if evaluation.github_id and evaluation.github_id != '0':
             github_id_to_uids[evaluation.github_id].append(uid)

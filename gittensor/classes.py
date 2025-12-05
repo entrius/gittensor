@@ -71,18 +71,22 @@ class FileChange:
         filename_lower = self.filename.lower()
         basename = filename_lower.split('/')[-1]
         
-        # Check for test directories
-        if '/test/' in filename_lower or '/tests/' in filename_lower or '/__tests__/' in filename_lower:
+        test_dir_patterns = [
+            r'(^|/)tests?/',
+            r'(^|/)__tests?__/',
+        ]
+        if any(re.search(pattern, filename_lower) for pattern in test_dir_patterns):
             return True
         
-        # Check for common test file naming patterns
         test_patterns = [
-            r'^test_',           # test_main.py (Python)
-            r'_test\.',          # main_test.py, main_test.go
-            r'\.test\.',         # main.test.js, main.test.ts (JavaScript/TypeScript)
-            r'_spec\.',          # main_spec.rb (Ruby RSpec)
-            r'^spec_',           # spec_main.rb
-            r'\.spec\.',         # main.spec.ts (Angular)
+            r'^test_',
+            r'_tests?\.',
+            r'\.tests?\.',
+            r'_spec\.',
+            r'^spec_',
+            r'\.spec\.',
+            r'test\.[^.]+$',
+            r'tests\.[^.]+$',
         ]
         
         return any(re.search(pattern, basename) for pattern in test_patterns)

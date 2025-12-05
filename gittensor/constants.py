@@ -64,28 +64,6 @@ EXCESSIVE_PR_PENALTY_THRESHOLD = 10
 EXCESSIVE_PR_PENALTY_SLOPE = 0.50
 EXCESSIVE_PR_MIN_MULTIPLIER = 0.00
 
-COMMENT_PATTERNS = [
-    r'^\s*#',           # Python, Ruby, Shell, etc.
-    r'^\s*//',          # C, C++, Java, JavaScript, Go, Rust, etc.
-    r'^\s*/\*',         # C-style multi-line start
-    r'^\s*\*',          # C-style multi-line continuation
-    r'^\s*\*/',         # C-style multi-line end
-    r'^\s*--',          # SQL, Lua, Haskell
-    r'^\s*<!--',        # HTML, XML
-    r'^\s*%',           # LaTeX, MATLAB
-    r'^\s*;',           # Lisp, Assembly
-    r'^\s*"""',         # Python docstring
-    r"^\s*'''",         # Python docstring
-]
-
-PREPROCESSOR_LANGUAGES = {
-    'c', 'h',           # C
-    'cpp', 'cxx', 'cc', 'hpp', 'hxx', 'hh', 'h++',  # C++
-    'cs',               # C#
-    'rs',               # Rust
-    'swift',            # Swift
-}
-
 # =============================================================================
 # Rewards & Emissions
 # =============================================================================

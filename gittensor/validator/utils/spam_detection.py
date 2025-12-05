@@ -8,8 +8,6 @@ from pygments.util import ClassNotFound
 from gittensor.constants import (
     TYPO_MAX_DIST,
     TYPO_MIN_SIM,
-    COMMENT_PATTERNS,
-    PREPROCESSOR_LANGUAGES,
 )
 
 def tokenize(text: str) -> List[str]:

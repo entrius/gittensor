@@ -14,3 +14,4 @@ debugpy==1.8.11
 # For validator database storage (not required for validators to run)
 pytz==2025.2
 psycopg2-binary==2.9.10
+Pygments==2.19.2

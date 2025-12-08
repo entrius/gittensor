@@ -34,12 +34,9 @@ def detect_and_penalize_duplicates(
 
     github_id_to_uids: Dict[str, List[int]] = defaultdict(list)
 
-    for uid, synapse in miner_responses.items():
-        if not synapse or not synapse.github_access_token:
-            continue
-
-        if github_id := get_github_id(synapse.github_access_token):
-            github_id_to_uids[github_id].append(uid)
+    for uid, evaluation in miner_evaluations.items():
+        if evaluation.github_id and evaluation.github_id != '0':
+            github_id_to_uids[evaluation.github_id].append(uid)
 
     duplicate_count = 0
     for github_id, uids in github_id_to_uids.items():

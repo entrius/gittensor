@@ -90,6 +90,9 @@ async def reward(
         miner_eval.add_pull_request(PullRequest.from_graphql_response(raw_pr, uid, miner_eval.hotkey, miner_eval.github_id))
 
     score_pull_requests(miner_eval, master_repositories, programming_languages)
+
+    # Clear PAT after scoring to avoid storing sensitive data
+    miner_eval.github_pat = None
     
     bt.logging.info("*" * 50 + "\n")
     return miner_eval

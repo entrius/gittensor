@@ -77,7 +77,26 @@ class FileChange:
         return self.filename.split(".")[-1].lower() if "." in self.filename else ""
 
     def is_test_file(self) -> bool:
-        return "test" in self.filename.lower()
+        """Check if file is a test file using common test file patterns."""
+        path = self.filename.lower()
+        name = path.split('/')[-1]
+        return (
+            name.startswith('test_') or
+            name.startswith('test.') or
+            name.endswith('_test.py') or
+            name.endswith('_test.go') or
+            name.endswith('.test.js') or
+            name.endswith('.test.ts') or
+            name.endswith('.test.jsx') or
+            name.endswith('.test.tsx') or
+            name.endswith('.spec.js') or
+            name.endswith('.spec.ts') or
+            name.endswith('.spec.jsx') or
+            name.endswith('.spec.tsx') or
+            '/tests/' in path or
+            '/test/' in path or
+            '/__tests__/' in path
+        )
 
     @classmethod
     def from_github_response(cls, pr_number: int, repository_full_name: str, file_diff: DefaultDict) -> 'FileChange':

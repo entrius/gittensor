@@ -78,10 +78,15 @@ async def reward(
         bt.logging.info(f"UID {uid} not being evaluated: {miner_eval.failed_reason}")
         return miner_eval
 
-    valid_raw_prs, open_pr_count = get_user_merged_prs_graphql(miner_eval.github_id, miner_eval.github_pat, master_repositories)
-    miner_eval.total_open_prs = open_pr_count
-    
-    for raw_pr in valid_raw_prs:
+    pr_result = get_user_merged_prs_graphql(
+        miner_eval.github_id, miner_eval.github_pat, master_repositories
+    )
+
+    miner_eval.total_merged_prs = pr_result.merged_pr_count
+    miner_eval.total_open_prs = pr_result.open_pr_count
+    miner_eval.total_closed_prs = pr_result.closed_pr_count
+
+    for raw_pr in pr_result.valid_prs:
         miner_eval.add_pull_request(PullRequest.from_graphql_response(raw_pr, uid, miner_eval.hotkey, miner_eval.github_id))
 
     score_pull_requests(miner_eval, master_repositories, programming_languages)

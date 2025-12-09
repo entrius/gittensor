@@ -5,6 +5,7 @@ from gittensor.constants import (
     TYPO_MAX_DIST,
     TYPO_MIN_SIM,
     COMMENT_PATTERNS,
+    PREPROCESSOR_LANGUAGES,
 )
 
 def tokenize(text: str) -> List[str]:
@@ -26,11 +27,16 @@ def is_token_typo(old: str, new: str, max_dist=TYPO_MAX_DIST, min_sim=TYPO_MIN_S
     return all(token_pair_typo(o, n, max_dist, min_sim)
             for o, n in zip(old_tokens, new_tokens))
 
-def is_comment_line(content: str) -> bool:
-    """Check if line content (without diff prefix) matches a comment pattern."""
-    return any(re.match(pattern, content) for pattern in COMMENT_PATTERNS)
+def is_comment_line(content: str, file_extension: Optional[str] = None) -> bool:
+    """Check if line content matches a comment pattern. Skips '#' pattern for preprocessor languages (C, C++, Rust, etc.) to avoid false positives."""
+    patterns_to_check = COMMENT_PATTERNS
+    if file_extension and file_extension in PREPROCESSOR_LANGUAGES:
+        # Skip the '#' pattern (index 0) for languages where # is preprocessor directive
+        patterns_to_check = [p for p in COMMENT_PATTERNS if not p.startswith(r'^\s*#')]
+    
+    return any(re.match(pattern, content) for pattern in patterns_to_check)
 
-def count_non_scoreable_lines(patch: str, max_scoreable_lines: Optional[int] = None) -> int:
+def count_non_scoreable_lines(patch: str, max_scoreable_lines: Optional[int] = None, file_extension: Optional[str] = None) -> int:
     """Count lines that shouldn't contribute to the score (blank, comment, etc)."""
     if not patch:
         return 0
@@ -38,15 +44,20 @@ def count_non_scoreable_lines(patch: str, max_scoreable_lines: Optional[int] = N
     non_scoreable = 0
     lines = patch.split("\n")
     scoreable_count = 0
+    skip_next = False  # Track if next line should be skipped
     
     for i, line in enumerate(lines):
+        if skip_next:
+            skip_next = False
+            continue
+            
         if not is_single_diff_line(line):
             continue
         
         content = line[1:]
         
         # Blank lines and comments
-        if content.strip() == "" or is_comment_line(content):
+        if content.strip() == "" or is_comment_line(content, file_extension):
             non_scoreable += 1
             continue
         
@@ -56,6 +67,7 @@ def count_non_scoreable_lines(patch: str, max_scoreable_lines: Optional[int] = N
             if is_single_diff_line(next_line) and next_line.startswith("+"):
                 if is_token_typo(content, next_line[1:]):
                     non_scoreable += 2
+                    skip_next = True  # Skip the + line in next iteration
                     continue
         
         # This line is scoreable

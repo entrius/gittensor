@@ -17,6 +17,16 @@ GITHUB_DOMAIN = 'https://github.com/'
 
 
 @dataclass
+class PRCountResult:
+    """Result from get_user_merged_prs_graphql containing valid PRs and counts"""
+
+    valid_prs: List[DefaultDict]
+    open_pr_count: int
+    merged_pr_count: int  # Count of merged PRs after MERGE_SUCCESS_RATIO_APPLICATION_DATE
+    closed_pr_count: int  # Count of closed (not merged) PRs after MERGE_SUCCESS_RATIO_APPLICATION_DATE
+
+
+@dataclass
 class Miner:
     """Miner identity"""
 
@@ -143,6 +153,7 @@ class PullRequest:
     repository_uniqueness_multiplier: float = 1.0
     time_decay_multiplier: float = 1.0
     gittensor_tag_multiplier: float = 1.0
+    merge_success_multiplier: float = 1.0
     earned_score: float = 0.0
 
     # Contribution details
@@ -181,7 +192,7 @@ class PullRequest:
             if file.file_extension in MITIGATED_EXTENSIONS:
                 total_changes_to_score = min(file.changes, MAX_LINES_SCORED_FOR_MITIGATED_EXT)
 
-            non_scoreable_lines = count_non_scoreable_lines(file.patch, total_changes_to_score)
+            non_scoreable_lines = count_non_scoreable_lines(file.patch, total_changes_to_score, file.file_extension)
             scored_changes = max(0, total_changes_to_score - non_scoreable_lines)
 
             self.total_lines_scored += scored_changes
@@ -198,16 +209,17 @@ class PullRequest:
     def calculate_final_earned_score(self) -> float:
         """Combine base score with all multipliers."""
         multipliers = {
-            "repo_weight": self.repo_weight_multiplier,
-            "issue": self.issue_multiplier,
+            "repo_weight_multiplier": self.repo_weight_multiplier,
+            "issue_multiplier": self.issue_multiplier,
             "open_pr_spam_multiplier": self.open_pr_spam_multiplier,
-            "repo_uniqueness": self.repository_uniqueness_multiplier,
-            "time_decay": self.time_decay_multiplier,
+            "repo_uniqueness_multiplier": self.repository_uniqueness_multiplier,
+            "time_decay_multiplier": self.time_decay_multiplier,
             "gittensor_tag_multiplier": self.gittensor_tag_multiplier,
+            "merge_success_multiplier": self.merge_success_multiplier,
         }
 
         self.earned_score = self.base_score * prod(multipliers.values())
-        mult_str = " | ".join([f"{k}: {v:.3f}" for k, v in multipliers.items()])
+        mult_str = " | ".join([f"{k}: {v:.2f}" for k, v in multipliers.items()])
 
         bt.logging.info(
             f"PR #{self.number} -> {self.repository_full_name} | base: {self.base_score:.2f} | {mult_str} | final: {self.earned_score:.2f}"
@@ -297,6 +309,8 @@ class MinerEvaluation:
     total_score: float = 0.0
     total_lines_changed: int = 0
     total_open_prs: int = 0
+    total_closed_prs: int = 0  # Total PRs closed within MERGED_PR_LOOKBACK_DAYS
+    total_merged_prs: int = 0  # Total PRs merged within MERGED_PR_LOOKBACK_DAYS (len of valid_prs)
     unique_repos_count: int = 0
     failed_reason: Optional[str] = None
     evaluation_timestamp: Optional[datetime] = None

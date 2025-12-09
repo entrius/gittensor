@@ -1,3 +1,4 @@
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import DefaultDict, Dict, List, Optional, Set
@@ -77,7 +78,29 @@ class FileChange:
         return self.filename.split(".")[-1].lower() if "." in self.filename else ""
 
     def is_test_file(self) -> bool:
-        return "test" in self.filename.lower()
+        filename_lower = self.filename.lower()
+        basename = filename_lower.split('/')[-1]
+        
+        test_dir_patterns = [
+            r'(^|/)tests?/',
+            r'(^|/)__tests?__/',
+        ]
+        if any(re.search(pattern, filename_lower) for pattern in test_dir_patterns):
+            return True
+        
+        test_patterns = [
+            r'^test_',
+            r'^spec_',
+            r'_test\.[^.]+$',
+            r'_tests\.[^.]+$',
+            r'\.test\.[^.]+$',
+            r'\.tests\.[^.]+$',
+            r'\.spec\.[^.]+$',
+            r'^test\.[^.]+$',
+            r'^tests\.[^.]+$',
+        ]
+        
+        return any(re.search(pattern, basename) for pattern in test_patterns)
 
     @classmethod
     def from_github_response(cls, pr_number: int, repository_full_name: str, file_diff: DefaultDict) -> 'FileChange':

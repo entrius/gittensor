@@ -80,13 +80,14 @@ class FileChange:
         
         test_patterns = [
             r'^test_',
-            r'_tests?\.',
-            r'\.tests?\.',
-            r'_spec\.',
             r'^spec_',
-            r'\.spec\.',
-            r'test\.[^.]+$',
-            r'tests\.[^.]+$',
+            r'_test\.[^.]+$',
+            r'_tests\.[^.]+$',
+            r'\.test\.[^.]+$',
+            r'\.tests\.[^.]+$',
+            r'\.spec\.[^.]+$',
+            r'^test\.[^.]+$',
+            r'^tests\.[^.]+$',
         ]
         
         return any(re.search(pattern, basename) for pattern in test_patterns)

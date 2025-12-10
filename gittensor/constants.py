@@ -80,24 +80,23 @@ COMMENT_PATTERNS = [
 
 PREPROCESSOR_LANGUAGES = {
     'c',
-    'h',  # C
+    'h',
     'cpp',
     'cxx',
     'cc',
     'hpp',
     'hxx',
     'hh',
-    'h++',  # C++
-    'cs',  # C#
-    'rs',  # Rust
-    'swift',  # Swift
+    'h++',
+    'cs',
+    'rs',
+    'swift',
 }
 
 # =============================================================================
 # Rewards & Emissions
 # =============================================================================
 RECYCLE_UID = 0
-PARETO_DISTRIBUTION_ALPHA_VALUE = 1.0
 
 # Network emission scaling (lines contributed)
 LINES_CONTRIBUTED_MAX_RECYCLE = 0.9

@@ -25,14 +25,26 @@ def check_uid_availability(metagraph: "bt.metagraph.Metagraph", uid: int, vpermi
 
 
 def get_all_uids(self, exclude: List[int] = []) -> set[int]:
-    """Returns all uids from the metagraph, excluding specified ones.
-    Args:
-        exclude (List[int]): List of uids to exclude from the result.
-    Returns:
-        uids (set[int]): All uids excluding specified ones. UID 0 is always included at the beginning.
+    """Return all *eligible* miner UIDs for scoring.
+
+    This helper filters UIDs using :func:`check_uid_availability`, so only
+    serving miners within the validator-permit TAO limit are included.
+
+    Notes:
+        - ``exclude`` may be used to skip specific UIDs.
+        - UID ``0`` is always included (subnet requirement), even if it
+          would otherwise be filtered out.
     """
-    # Get all available miner UIDs, excluding specified ones
-    available_miner_uids = {uid for uid in range(self.metagraph.n.item()) if uid not in exclude}
+    metagraph: "bt.metagraph.Metagraph" = self.metagraph
+    vpermit_tao_limit: int = getattr(self.config.neuron, "vpermit_tao_limit", 4096)
+
+    # Get all available miner UIDs, excluding specified ones and applying
+    # serving / vpermit filters.
+    available_miner_uids = {
+        uid
+        for uid in range(metagraph.n.item())
+        if uid not in exclude and check_uid_availability(metagraph, uid, vpermit_tao_limit)
+    }
 
     # Ensure miner UID 0 is always included (subnet requirement)
     available_miner_uids.add(0)

@@ -15,6 +15,79 @@ from gittensor.constants import (
 )
 from gittensor.validator.utils.config import MERGED_PR_LOOKBACK_DAYS
 
+# core github graphql query
+QUERY = """
+    query($userId: ID!, $limit: Int!, $cursor: String) {
+      node(id: $userId) {
+        ... on User {
+          pullRequests(first: $limit, states: [MERGED, OPEN, CLOSED], orderBy: {field: CREATED_AT, direction: DESC}, after: $cursor) {
+            pageInfo {
+              hasNextPage
+              endCursor
+            }
+            nodes {
+              title
+              number
+              additions
+              deletions
+              mergedAt
+              createdAt
+              closedAt
+              lastEditedAt
+              bodyText
+              state
+              commits(first: 100) {
+                totalCount
+                nodes {
+                  commit {
+                    message
+                  }
+                }
+              }
+              repository {
+                name
+                owner {
+                  login
+                }
+                defaultBranchRef {
+                  name
+                }
+              }
+              baseRefName
+              headRefName
+              author {
+                login
+              }
+              authorAssociation
+              mergedBy {
+                login
+              }
+              closingIssuesReferences(first: 50) {
+                nodes {
+                  number
+                  title
+                  state
+                  createdAt
+                  closedAt
+                  author {
+                    login
+                  }
+                }
+              }
+              reviews(first: 50, states: APPROVED) {
+                nodes {
+                  author {
+                    login
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    """
+
 
 def branch_matches_pattern(branch_name: str, patterns: List[str]) -> bool:
     """
@@ -128,11 +201,65 @@ def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -
         return []
 
     except Exception as e:
-        bt.logging.error(
-            f"Error getting file changes for PR #{pr_number} in {repository}: {e}"
-        )
+        bt.logging.error(f"Error getting file changes for PR #{pr_number} in {repository}: {e}")
         return []
 
+
+def get_github_graphql_query(token: str, global_user_id, all_valid_prs: List[Dict], max_prs: int, cursor):
+ """
+    Get all merged PRs for a user across all repositories using GraphQL API with pagination.
+
+    Args:
+        token (str): GitHub PAT
+        global_user_id (str): Converted numeric user ID to GraphQL global node ID
+        all_valid_prs: list of raw currently validated PRs
+        max_prs (int): Maximum number of PRs to fetch across all pages
+        cursor: where query left off last for pagination
+
+    Returns:
+        response: json response of the graphql query or None if errors occurred
+ """
+
+    headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
+    variables = {
+        "userId": global_user_id,
+        "limit": min(100, max_prs - len(all_valid_prs)),
+        "cursor": cursor,
+    }
+
+    for attempt in range(3):
+        try:
+            response = requests.post(
+                f'{BASE_GITHUB_API_URL}/graphql',
+                headers=headers,
+                json={"query": QUERY, "variables": variables},
+                timeout=15,
+            )
+
+            if response.status_code == 200:
+                return response
+            # error - log and retry
+            elif attempt < 2:
+                bt.logging.warning(
+                    f"GraphQL request failed with status {response.status_code} (attempt {attempt + 1}/3), retrying in 15s..."
+                )
+                time.sleep(15)
+            else:
+                bt.logging.error(
+                    f"GraphQL request failed with status {response.status_code} after 3 attempts: {response.text}"
+                )
+
+        except requests.exceptions.RequestException as e:
+            if attempt < 2:
+                bt.logging.warning(
+                    f"GraphQL request connection error (attempt {attempt + 1}/3): {e}, retrying in 15s..."
+                )
+                time.sleep(15)
+            else:
+                bt.logging.error(f"GraphQL request failed after 3 attempts: {e}")
+                return None
+
+    return None
 
 def get_user_merged_prs_graphql(
     user_id: str, token: str, master_repositories: dict[str, dict], max_prs: int = 1000
@@ -160,91 +287,17 @@ def get_user_merged_prs_graphql(
         bt.logging.error("Invalid user_id provided to get_user_merged_prs_graphql")
         return PRCountResult(valid_prs=[], open_pr_count=0, merged_pr_count=0, closed_pr_count=0)
 
-    headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
-
     # Calculate date filter
     date_filter = datetime.now(timezone.utc) - timedelta(days=MERGED_PR_LOOKBACK_DAYS)
 
     # Convert numeric user ID to GraphQL global node ID
     global_user_id = base64.b64encode(f"04:User{user_id}".encode()).decode()
 
-    query = """
-    query($userId: ID!, $limit: Int!, $cursor: String) {
-      node(id: $userId) {
-        ... on User {
-          pullRequests(first: $limit, states: [MERGED, OPEN, CLOSED], orderBy: {field: CREATED_AT, direction: DESC}, after: $cursor) {
-            pageInfo {
-              hasNextPage
-              endCursor
-            }
-            nodes {
-              title
-              number
-              additions
-              deletions
-              mergedAt
-              createdAt
-              closedAt
-              lastEditedAt
-              bodyText
-              state
-              commits(first: 100) {
-                totalCount
-                nodes {
-                  commit {
-                    message
-                  }
-                }
-              }
-              repository {
-                name
-                owner {
-                  login
-                }
-                defaultBranchRef {
-                  name
-                }
-              }
-              baseRefName
-              headRefName
-              author {
-                login
-              }
-              mergedBy {
-                login
-              }
-              closingIssuesReferences(first: 50) {
-                nodes {
-                  number
-                  title
-                  state
-                  createdAt
-                  closedAt
-                  author {
-                    login
-                  }
-                }
-              }
-              reviews(first: 50, states: APPROVED) {
-                nodes {
-                  author {
-                    login
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-    """
-
     all_valid_prs = []
     open_pr_count = 0
     merged_pr_count = 0  # Merged PRs after MERGE_SUCCESS_RATIO_APPLICATION_DATE
     closed_pr_count = 0  # Closed (not merged) within lookback period
     cursor = None
-    page_size = min(100, max_prs)  # GitHub GraphQL max is 100 per page
 
     # Build list of active repositories (those without an inactiveAt timestamp)
     active_repositories = [
@@ -253,58 +306,15 @@ def get_user_merged_prs_graphql(
 
     try:
         while len(all_valid_prs) < max_prs:
-            variables = {
-                "userId": global_user_id,
-                "limit": min(page_size, max_prs - len(all_valid_prs)),
-                "cursor": cursor,
-            }
 
-            # Retry logic for transient failures (502, 503, 504, connection errors)
-            response = None
-            for attempt in range(3):
-                try:
-                    response = requests.post(
-                        f'{BASE_GITHUB_API_URL}/graphql',
-                        headers=headers,
-                        json={"query": query, "variables": variables},
-                        timeout=15,
-                    )
-
-                    # Success or non-retryable error
-                    if response.status_code == 200 or response.status_code not in [502, 503, 504]:
-                        break
-
-                    # Retryable error - log and retry
-                    if attempt < 2:
-                        bt.logging.warning(
-                            f"GraphQL request failed with status {response.status_code} (attempt {attempt + 1}/3), retrying in 15s..."
-                        )
-                        time.sleep(15)
-                    else:
-                        bt.logging.error(
-                            f"GraphQL request failed with status {response.status_code} after 3 attempts: {response.text}"
-                        )
-
-                except requests.exceptions.RequestException as e:
-                    if attempt < 2:
-                        bt.logging.warning(
-                            f"GraphQL request connection error (attempt {attempt + 1}/3): {e}, retrying in 15s..."
-                        )
-                        time.sleep(15)
-                    else:
-                        bt.logging.error(f"GraphQL request failed after 3 attempts: {e}")
-                        return PRCountResult(
-                            valid_prs=all_valid_prs,
-                            open_pr_count=open_pr_count,
-                            merged_pr_count=merged_pr_count,
-                            closed_pr_count=closed_pr_count,
-                        )
-
-            if not response or response.status_code != 200:
-                bt.logging.error(
-                    f"GraphQL request failed with status {response.status_code if response else 'N/A'}: {response.text if response else 'No response'}"
+            response = get_github_graphql_query(token, global_user_id, all_valid_prs, max_prs, cursor)
+            if not reponse:
+                return PRCountResult(
+                    valid_prs=all_valid_prs,
+                    open_pr_count=open_pr_count,
+                    merged_pr_count=merged_pr_count,
+                    closed_pr_count=closed_pr_count,
                 )
-                break
 
             data = response.json()
 
@@ -339,7 +349,11 @@ def get_user_merged_prs_graphql(
                 if pr_state == 'CLOSED' and not pr_raw['mergedAt']:
                     if pr_raw.get('closedAt'):
                         closed_dt = datetime.fromisoformat(pr_raw['closedAt'].rstrip("Z")).replace(tzinfo=timezone.utc)
-                        if closed_dt >= date_filter and closed_dt > MERGE_SUCCESS_RATIO_APPLICATION_DATE and repository_full_name in active_repositories:
+                        if (
+                            closed_dt >= date_filter
+                            and closed_dt > MERGE_SUCCESS_RATIO_APPLICATION_DATE
+                            and repository_full_name in active_repositories
+                        ):
                             closed_pr_count += 1
                     continue  # Skip further processing for closed PRs
 
@@ -349,16 +363,24 @@ def get_user_merged_prs_graphql(
 
                 # Filter by master_repositories
                 if repository_full_name not in master_repositories.keys():
-                    bt.logging.debug(
-                        f"Skipping PR #{pr_raw['number']} in {repository_full_name} - ineligible repo"
-                    )
+                    bt.logging.debug(f"Skipping PR #{pr_raw['number']} in {repository_full_name} - ineligible repo")
                     continue
 
                 # Parse merge date and filter by time window
                 merged_dt = datetime.fromisoformat(pr_raw['mergedAt'].rstrip("Z")).replace(tzinfo=timezone.utc)
                 if merged_dt < date_filter:
                     # Skip PRs merged before lookback window
-                    bt.logging.debug(f"Skipping PR #{pr_raw['number']} in {repository_full_name} - merged before {MERGED_PR_LOOKBACK_DAYS} day lookback window")
+                    bt.logging.debug(
+                        f"Skipping PR #{pr_raw['number']} in {repository_full_name} - merged before {MERGED_PR_LOOKBACK_DAYS} day lookback window"
+                    )
+                    continue
+
+                # Skip if PR author is a maintainer (has direct merge capabilities)
+                author_association = pr_raw.get('authorAssociation')
+                if author_association in ['OWNER', 'MEMBER', 'COLLABORATOR']:
+                    bt.logging.debug(
+                        f"Skipping PR #{pr_raw['number']} in {repository_full_name} - author is {author_association} (has direct merge capabilities)"
+                    )
                     continue
 
                 # Skip if PR was merged by the same person who created it (self-merge) AND there's no approvals from a differing party

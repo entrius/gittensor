@@ -17,10 +17,6 @@ from gittensor.validator.utils.config import MERGED_PR_LOOKBACK_DAYS
 
 
 # In-process cache for GitHub /user responses, keyed by PAT.
-# The GitHub user id and created_at are immutable for an account, so it is
-# safe to cache these for the lifetime of the process. This significantly
-# reduces duplicate /user calls when the same PAT is used multiple times
-# during scoring rounds.
 _GITHUB_USER_CACHE: Dict[str, Dict[str, Any]] = {}
 
 
@@ -81,9 +77,7 @@ def get_github_user(token: str) -> Optional[Dict[str, Any]]:
             break
 
         except Exception as e:
-            bt.logging.warning(
-                f"Could not fetch GitHub user (attempt {attempt + 1}/3): {e}"
-            )
+            bt.logging.warning(f"Could not fetch GitHub user (attempt {attempt + 1}/3): {e}")
             if attempt < 2:  # Don't sleep on last attempt
                 time.sleep(2)
 
@@ -164,9 +158,7 @@ def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -
         return []
 
     except Exception as e:
-        bt.logging.error(
-            f"Error getting file changes for PR #{pr_number} in {repository}: {e}"
-        )
+        bt.logging.error(f"Error getting file changes for PR #{pr_number} in {repository}: {e}")
         return []
 
 
@@ -375,7 +367,11 @@ def get_user_merged_prs_graphql(
                 if pr_state == 'CLOSED' and not pr_raw['mergedAt']:
                     if pr_raw.get('closedAt'):
                         closed_dt = datetime.fromisoformat(pr_raw['closedAt'].rstrip("Z")).replace(tzinfo=timezone.utc)
-                        if closed_dt >= date_filter and closed_dt > MERGE_SUCCESS_RATIO_APPLICATION_DATE and repository_full_name in active_repositories:
+                        if (
+                            closed_dt >= date_filter
+                            and closed_dt > MERGE_SUCCESS_RATIO_APPLICATION_DATE
+                            and repository_full_name in active_repositories
+                        ):
                             closed_pr_count += 1
                     continue  # Skip further processing for closed PRs
 
@@ -385,16 +381,16 @@ def get_user_merged_prs_graphql(
 
                 # Filter by master_repositories
                 if repository_full_name not in master_repositories.keys():
-                    bt.logging.debug(
-                        f"Skipping PR #{pr_raw['number']} in {repository_full_name} - ineligible repo"
-                    )
+                    bt.logging.debug(f"Skipping PR #{pr_raw['number']} in {repository_full_name} - ineligible repo")
                     continue
 
                 # Parse merge date and filter by time window
                 merged_dt = datetime.fromisoformat(pr_raw['mergedAt'].rstrip("Z")).replace(tzinfo=timezone.utc)
                 if merged_dt < date_filter:
                     # Skip PRs merged before lookback window
-                    bt.logging.debug(f"Skipping PR #{pr_raw['number']} in {repository_full_name} - merged before {MERGED_PR_LOOKBACK_DAYS} day lookback window")
+                    bt.logging.debug(
+                        f"Skipping PR #{pr_raw['number']} in {repository_full_name} - merged before {MERGED_PR_LOOKBACK_DAYS} day lookback window"
+                    )
                     continue
 
                 # Skip if PR was merged by the same person who created it (self-merge) AND there's no approvals from a differing party

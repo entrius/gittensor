@@ -8,7 +8,7 @@ import bittensor as bt
 import numpy as np
 
 from gittensor.classes import GitPatSynapse, MinerEvaluation, PullRequest
-from gittensor.utils.github_api_tools import get_user_merged_prs_graphql
+from gittensor.utils.github_api_tools import get_user_merged_prs_graphql, get_multiple_user_prs_graphql
 from gittensor.validator.evaluation.dynamic_emissions import apply_dynamic_emissions_using_network_contributions
 from gittensor.validator.evaluation.inspections import (
     detect_and_penalize_duplicates,
@@ -112,16 +112,75 @@ async def get_rewards(
     responses: Dict[int, GitPatSynapse] = {}
     miner_evaluations: Dict[int, MinerEvaluation] = {}
 
-    # Query miners and calculate score.
+    # First phase: Query all miners to get their PATs
+    bt.logging.info("Phase 1: Querying miners for PATs")
     for uid in uids:
-
-        # retrieve PAT
         miner_response = await query_miner(self, uid)
         responses[uid] = miner_response
 
-        # Calculate score
-        miner_evaluation = await reward(uid, miner_response, master_repositories, programming_languages)
-        miner_evaluations[uid] = miner_evaluation
+    # Second phase: Fetch PRs in parallel for valid miners
+    bt.logging.info("Phase 2: Fetching PRs in parallel")
+
+    # Prepare requests for parallel processing
+    valid_requests = []
+    uid_to_index = {}
+
+    for i, uid in enumerate(uids):
+        miner_response = responses[uid]
+        miner_eval = validate_response_and_initialize_miner_evaluation(uid, miner_response)
+
+        if miner_eval.failed_reason is not None:
+            bt.logging.info(f"UID {uid} not being evaluated: {miner_eval.failed_reason}")
+            miner_evaluations[uid] = miner_eval
+        else:
+            # Store mapping for later result processing
+            uid_to_index[uid] = len(valid_requests)
+            valid_requests.append((
+                miner_eval.github_id,
+                miner_eval.github_pat,
+                master_repositories,
+                1000  # max_prs
+            ))
+
+    # Execute parallel GraphQL requests if we have valid requests
+    pr_results = []
+    if valid_requests:
+        max_concurrent = min(5, len(valid_requests))  # Limit concurrent requests
+        # Use batching for larger groups to reduce API calls
+        use_batching = len(valid_requests) >= 3
+        pr_results = await get_multiple_user_prs_graphql(valid_requests, max_concurrent, use_batching)
+
+    # Third phase: Process PR results and calculate scores
+    bt.logging.info("Phase 3: Processing PR results and calculating scores")
+
+    for uid in uids:
+        if uid in miner_evaluations:
+            # Already processed (failed validation)
+            continue
+
+        miner_response = responses[uid]
+        miner_eval = validate_response_and_initialize_miner_evaluation(uid, miner_response)
+
+        # Get PR result from parallel processing
+        if uid in uid_to_index:
+            pr_result = pr_results[uid_to_index[uid]]
+        else:
+            # Fallback for edge cases
+            pr_result = get_user_merged_prs_graphql(
+                miner_eval.github_id, miner_eval.github_pat, master_repositories
+            )
+
+        miner_eval.total_merged_prs = pr_result.merged_pr_count
+        miner_eval.total_open_prs = pr_result.open_pr_count
+        miner_eval.total_closed_prs = pr_result.closed_pr_count
+
+        for raw_pr in pr_result.valid_prs:
+            miner_eval.add_pull_request(PullRequest.from_graphql_response(raw_pr, uid, miner_eval.hotkey, miner_eval.github_id))
+
+        score_pull_requests(miner_eval, master_repositories, programming_languages)
+        miner_evaluations[uid] = miner_eval
+
+        bt.logging.info("*" * 50 + "\n")
 
     # Adjust scores for duplicate accounts
     detect_and_penalize_duplicates(responses, miner_evaluations)

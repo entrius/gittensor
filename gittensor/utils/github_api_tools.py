@@ -31,7 +31,9 @@ def branch_matches_pattern(branch_name: str, patterns: List[str]) -> bool:
 
 
 def make_headers(token: str) -> Dict[str, str]:
-    """helper function for formatting headers for requests."""
+    '''
+    helper function for formatting headers for requests
+    '''
     return {'Authorization': f'token {token}', 'Accept': 'application/vnd.github.v3+json'}
 
 

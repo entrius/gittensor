@@ -3,7 +3,7 @@ import base64
 import fnmatch
 import time
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import bittensor as bt
 import requests
@@ -160,7 +160,7 @@ def get_github_account_age_days(token: str) -> Optional[int]:
     headers = make_headers(token)
 
     # Retry logic for timeout issues
-    for attempt in range(3):
+    for attempt in range(6):
         try:
             response = requests.get(f'{BASE_GITHUB_API_URL}/user', headers=headers, timeout=30)
             if response.status_code == 200:
@@ -172,8 +172,8 @@ def get_github_account_age_days(token: str) -> Optional[int]:
                     age_days = (now_dt - created_dt).days
                     return age_days
         except Exception as e:
-            bt.logging.warning(f"Could not fetch GitHub account age (attempt {attempt + 1}/3): {e}")
-            if attempt < 2:  # Don't sleep on last attempt
+            bt.logging.warning(f"Could not fetch GitHub account age (attempt {attempt + 1}/6): {e}")
+            if attempt < 5:  # Don't sleep on last attempt
                 time.sleep(2)
     return None
 
@@ -205,21 +205,24 @@ def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -
         return []
 
 
-def get_github_graphql_query(token: str, global_user_id, all_valid_prs: List[Dict], max_prs: int, cursor):
- """
+def get_github_graphql_query(
+    token: str, global_user_id: str, all_valid_prs: List[Dict], max_prs: int, cursor: Optional[str]
+) -> Optional[requests.Response]:
+    """
     Get all merged PRs for a user across all repositories using GraphQL API with pagination.
 
     Args:
         token (str): GitHub PAT
         global_user_id (str): Converted numeric user ID to GraphQL global node ID
-        all_valid_prs: list of raw currently validated PRs
+        all_valid_prs (List[Dict]): List of raw currently validated PRs
         max_prs (int): Maximum number of PRs to fetch across all pages
-        cursor: where query left off last for pagination
+        cursor (Optional[str]): Pagination cursor (where query left off last), None for first page
 
     Returns:
-        response: json response of the graphql query or None if errors occurred
- """
+        Optional[requests.Response]: Response object from the GraphQL query or None if errors occurred
+    """
 
+    attempts = 6
     headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
     variables = {
         "userId": global_user_id,
@@ -227,39 +230,183 @@ def get_github_graphql_query(token: str, global_user_id, all_valid_prs: List[Dic
         "cursor": cursor,
     }
 
-    for attempt in range(3):
+    for attempt in range(attempts):
         try:
             response = requests.post(
                 f'{BASE_GITHUB_API_URL}/graphql',
                 headers=headers,
                 json={"query": QUERY, "variables": variables},
-                timeout=15,
+                timeout=30,
             )
 
             if response.status_code == 200:
                 return response
             # error - log and retry
-            elif attempt < 2:
+            elif attempt < (attempts - 1):
+                # Exponential backoff: 5s, 10s, 20s, 40s, 80s
+                backoff_delay = 5 * (2**attempt)
                 bt.logging.warning(
-                    f"GraphQL request failed with status {response.status_code} (attempt {attempt + 1}/3), retrying in 15s..."
+                    f"GraphQL request failed with status {response.status_code} (attempt {attempt + 1}/{attempts}), retrying in {backoff_delay}s..."
                 )
-                time.sleep(15)
+                time.sleep(backoff_delay)
             else:
                 bt.logging.error(
-                    f"GraphQL request failed with status {response.status_code} after 3 attempts: {response.text}"
+                    f"GraphQL request failed with status {response.status_code} after {attempts} attempts: {response.text}"
                 )
 
         except requests.exceptions.RequestException as e:
-            if attempt < 2:
+            if attempt < (attempts - 1):
+                # Exponential backoff: 5s, 10s, 20s, 40s, 80s
+                backoff_delay = 5 * (2**attempt)
                 bt.logging.warning(
-                    f"GraphQL request connection error (attempt {attempt + 1}/3): {e}, retrying in 15s..."
+                    f"GraphQL request connection error (attempt {attempt + 1}/{attempts}): {e}, retrying in {backoff_delay}s..."
                 )
-                time.sleep(15)
+                time.sleep(backoff_delay)
             else:
-                bt.logging.error(f"GraphQL request failed after 3 attempts: {e}")
+                bt.logging.error(f"GraphQL request failed after {attempts} attempts: {e}")
                 return None
 
     return None
+
+
+def _process_non_merged_pr(
+    pr_raw: Dict, repository_full_name: str, pr_state: str, date_filter: datetime, active_repositories: List[str]
+) -> tuple[int, int]:
+    """
+    Process open and closed (not merged) PRs and return counts.
+
+    Args:
+        pr_raw (Dict): Raw PR data from GraphQL
+        repository_full_name (str): Full repository name (owner/repo)
+        pr_state (str): PR state (OPEN, CLOSED, MERGED)
+        date_filter (datetime): Date filter for lookback period
+        active_repositories (List[str]): List of active repository names
+
+    Returns:
+        tuple[int, int]: (open_pr_delta, closed_pr_delta) - increment counts for open/closed PRs
+    """
+    open_pr_delta = 0
+    closed_pr_delta = 0
+
+    # Check if it's an open PR. We are counting ALL open PRs to active repositories
+    if pr_state == 'OPEN':
+        if repository_full_name in active_repositories:
+            open_pr_delta = 1
+        return (open_pr_delta, closed_pr_delta)
+
+    # Handle CLOSED (not merged) PRs - count if within lookback period
+    if pr_state == 'CLOSED' and not pr_raw['mergedAt']:
+        if pr_raw.get('closedAt'):
+            closed_dt = datetime.fromisoformat(pr_raw['closedAt'].rstrip("Z")).replace(tzinfo=timezone.utc)
+            if (
+                repository_full_name in active_repositories
+                and closed_dt >= date_filter
+                and closed_dt > MERGE_SUCCESS_RATIO_APPLICATION_DATE
+            ):
+                closed_pr_delta = 1
+        return (open_pr_delta, closed_pr_delta)
+
+    return (open_pr_delta, closed_pr_delta)
+
+
+def _should_skip_merged_pr(
+    pr_raw: Dict,
+    repository_full_name: str,
+    master_repositories: dict[str, dict],
+    date_filter: datetime,
+    merged_dt: datetime,
+) -> tuple[bool, Optional[str]]:
+    """
+    Validate a merged PR against all eligibility criteria.
+
+    Args:
+        pr_raw (Dict): Raw PR data from GraphQL
+        repository_full_name (str): Full repository name (owner/repo)
+        master_repositories (dict[str, dict]): Repository metadata
+        date_filter (datetime): Date filter for lookback period
+        merged_dt (datetime): Parsed merge datetime
+
+    Returns:
+        tuple[bool, Optional[str]]: (should_skip, skip_reason) - True if PR should be skipped with reason
+    """
+    # Filter by master_repositories
+    if repository_full_name not in master_repositories.keys():
+        return (True, f"Skipping PR #{pr_raw['number']} in {repository_full_name} - ineligible repo")
+
+    # Filter by lookback window
+    if merged_dt < date_filter:
+        return (
+            True,
+            f"Skipping PR #{pr_raw['number']} in {repository_full_name} - merged before {MERGED_PR_LOOKBACK_DAYS} day lookback window",
+        )
+
+    # Skip if PR author is a maintainer
+    author_association = pr_raw.get('authorAssociation')
+    if author_association in ['OWNER', 'MEMBER', 'COLLABORATOR']:
+        return (
+            True,
+            f"Skipping PR #{pr_raw['number']} in {repository_full_name} - author is {author_association} (has direct merge capabilities)",
+        )
+
+    # Skip if PR was merged by the same person who created it (self-merge) AND there's no approvals from a differing party
+    if pr_raw['mergedBy'] and pr_raw['author']['login'] == pr_raw['mergedBy']['login']:
+        # Check if there are any approvals from users other than the author
+        reviews = pr_raw.get('reviews', {}).get('nodes', [])
+        has_external_approval = any(
+            review.get('author') and review['author']['login'] != pr_raw['author']['login'] for review in reviews
+        )
+
+        if not has_external_approval:
+            return (True, f"Skipping PR #{pr_raw['number']} in {repository_full_name} - self-merged, no approval")
+
+    # Skip if PR was not merged to an acceptable branch (default or additional)
+    default_branch = (
+        pr_raw['repository']['defaultBranchRef']['name'] if pr_raw['repository']['defaultBranchRef'] else 'main'
+    )
+    base_ref = pr_raw['baseRefName']
+    head_ref = pr_raw.get('headRefName', '')  # Source branch (where PR is coming FROM)
+    repo_metadata = master_repositories.get(repository_full_name, {})
+    additional_branches = repo_metadata.get('additional_acceptable_branches', [])
+
+    # Build list of all acceptable branches (default + additional)
+    acceptable_branches = [default_branch] + additional_branches
+
+    # Skip if the source branch (headRef) is also an acceptable branch
+    # This prevents PRs like "staging -> main" or "develop -> staging" where both are acceptable branches
+    # Supports wildcard patterns (e.g., '*-dev' matches '3.0-dev', '3.1-dev', etc.)
+    if branch_matches_pattern(head_ref, acceptable_branches):
+        return (
+            True,
+            f"Skipping PR #{pr_raw['number']} in {repository_full_name} - "
+            f"source branch '{head_ref}' is an acceptable branch (merging between acceptable branches not allowed)",
+        )
+
+    # Check if merged to default branch
+    if base_ref != default_branch:
+        # If not default, check if repository has additional acceptable branches
+        # Supports wildcard patterns (e.g., '*-dev' matches '3.0-dev', '3.1-dev', etc.)
+        if not branch_matches_pattern(base_ref, additional_branches):
+            return (
+                True,
+                f"Skipping PR #{pr_raw['number']} in {repository_full_name} - "
+                f"merged to '{base_ref}' (not default branch '{default_branch}' or additional acceptable branches)",
+            )
+
+    # Check if repo is inactive
+    repo_metadata = master_repositories[repository_full_name]
+    inactive_at = repo_metadata.get("inactiveAt")
+    if inactive_at is not None:
+        inactive_dt = datetime.fromisoformat(inactive_at.rstrip("Z")).replace(tzinfo=timezone.utc)
+        # Skip PR if it was merged at or after the repo became inactive
+        if merged_dt >= inactive_dt:
+            return (
+                True,
+                f"Skipping PR #{pr_raw['number']} in {repository_full_name} - PR was merged at/after repo became inactive (merged: {merged_dt.isoformat()}, inactive: {inactive_dt.isoformat()})",
+            )
+
+    # All checks passed
+    return (False, None)
+
 
 def get_user_merged_prs_graphql(
     user_id: str, token: str, master_repositories: dict[str, dict], max_prs: int = 1000
@@ -306,16 +453,15 @@ def get_user_merged_prs_graphql(
 
     try:
         while len(all_valid_prs) < max_prs:
-
+            # graphql query
             response = get_github_graphql_query(token, global_user_id, all_valid_prs, max_prs, cursor)
-            if not reponse:
+            if not response:
                 return PRCountResult(
                     valid_prs=all_valid_prs,
                     open_pr_count=open_pr_count,
                     merged_pr_count=merged_pr_count,
                     closed_pr_count=closed_pr_count,
                 )
-
             data = response.json()
 
             if 'errors' in data:
@@ -338,118 +484,38 @@ def get_user_merged_prs_graphql(
                 repository_full_name = f"{pr_raw['repository']['owner']['login']}/{pr_raw['repository']['name']}"
                 pr_state = pr_raw['state']
 
-                # Check if it's an open PR and count it
-                if pr_state == 'OPEN':
-                    # Check if in tracked repositories
-                    if repository_full_name in active_repositories:
-                        open_pr_count += 1
-                    continue  # Skip further processing for open PRs
+                # Process non-merged PRs (OPEN or CLOSED without merge)
+                open_delta, closed_delta = _process_non_merged_pr(
+                    pr_raw, repository_full_name, pr_state, date_filter, active_repositories
+                )
+                open_pr_count += open_delta
+                closed_pr_count += closed_delta
 
-                # Handle CLOSED (not merged) PRs - count if within lookback period
-                if pr_state == 'CLOSED' and not pr_raw['mergedAt']:
-                    if pr_raw.get('closedAt'):
-                        closed_dt = datetime.fromisoformat(pr_raw['closedAt'].rstrip("Z")).replace(tzinfo=timezone.utc)
-                        if (
-                            closed_dt >= date_filter
-                            and closed_dt > MERGE_SUCCESS_RATIO_APPLICATION_DATE
-                            and repository_full_name in active_repositories
-                        ):
-                            closed_pr_count += 1
-                    continue  # Skip further processing for closed PRs
-
-                # Skip if not a merged pr
+                # Skip if not a merged PR
                 if not pr_raw['mergedAt']:
                     continue
 
-                # Filter by master_repositories
-                if repository_full_name not in master_repositories.keys():
-                    bt.logging.debug(f"Skipping PR #{pr_raw['number']} in {repository_full_name} - ineligible repo")
-                    continue
-
-                # Parse merge date and filter by time window
+                # Parse merge date
                 merged_dt = datetime.fromisoformat(pr_raw['mergedAt'].rstrip("Z")).replace(tzinfo=timezone.utc)
-                if merged_dt < date_filter:
-                    # Skip PRs merged before lookback window
-                    bt.logging.debug(
-                        f"Skipping PR #{pr_raw['number']} in {repository_full_name} - merged before {MERGED_PR_LOOKBACK_DAYS} day lookback window"
-                    )
-                    continue
 
-                # Skip if PR author is a maintainer (has direct merge capabilities)
-                author_association = pr_raw.get('authorAssociation')
-                if author_association in ['OWNER', 'MEMBER', 'COLLABORATOR']:
-                    bt.logging.debug(
-                        f"Skipping PR #{pr_raw['number']} in {repository_full_name} - author is {author_association} (has direct merge capabilities)"
-                    )
-                    continue
-
-                # Skip if PR was merged by the same person who created it (self-merge) AND there's no approvals from a differing party
-                if pr_raw['mergedBy'] and pr_raw['author']['login'] == pr_raw['mergedBy']['login']:
-                    # Check if there are any approvals from users other than the author
-                    reviews = pr_raw.get('reviews', {}).get('nodes', [])
-                    has_external_approval = any(
-                        review.get('author') and review['author']['login'] != pr_raw['author']['login']
-                        for review in reviews
-                    )
-
-                    if not has_external_approval:
-                        bt.logging.debug(
-                            f"Skipping PR #{pr_raw['number']} in {repository_full_name} - self-merged, no approval"
-                        )
-                        continue
-
-                # Skip if PR was not merged to an acceptable branch (default or additional)
-                default_branch = (
-                    pr_raw['repository']['defaultBranchRef']['name']
-                    if pr_raw['repository']['defaultBranchRef']
-                    else 'main'
+                # Validate merged PR against all criteria
+                should_skip, skip_reason = _should_skip_merged_pr(
+                    pr_raw, repository_full_name, master_repositories, date_filter, merged_dt
                 )
-                base_ref = pr_raw['baseRefName']
-                head_ref = pr_raw.get('headRefName', '')  # Source branch (where PR is coming FROM)
-                repo_metadata = master_repositories.get(repository_full_name, {})
-                additional_branches = repo_metadata.get('additional_acceptable_branches', [])
 
-                # Build list of all acceptable branches (default + additional)
-                acceptable_branches = [default_branch] + additional_branches
-
-                # Skip if the source branch (headRef) is also an acceptable branch
-                # This prevents PRs like "staging -> main" or "develop -> staging" where both are acceptable branches
-                # Supports wildcard patterns (e.g., '*-dev' matches '3.0-dev', '3.1-dev', etc.)
-                if branch_matches_pattern(head_ref, acceptable_branches):
-                    bt.logging.debug(
-                        f"Skipping PR #{pr_raw['number']} in {repository_full_name} - "
-                        f"source branch '{head_ref}' is an acceptable branch (merging between acceptable branches not allowed)"
-                    )
+                if should_skip:
+                    bt.logging.debug(skip_reason)
                     continue
 
-                # Check if merged to default branch
-                if base_ref != default_branch:
-                    # If not default, check if repository has additional acceptable branches
-                    # Supports wildcard patterns (e.g., '*-dev' matches '3.0-dev', '3.1-dev', etc.)
-                    if not branch_matches_pattern(base_ref, additional_branches):
-                        bt.logging.debug(
-                            f"Skipping PR #{pr_raw['number']} in {repository_full_name} - "
-                            f"merged to '{base_ref}' (not default branch '{default_branch}' or additional acceptable branches)"
-                        )
-                        continue
-
-                repo_metadata = master_repositories[repository_full_name]
-                inactive_at = repo_metadata.get("inactiveAt")
-                # if repo is inactive
-                if inactive_at is not None:
-                    inactive_dt = datetime.fromisoformat(inactive_at.rstrip("Z")).replace(tzinfo=timezone.utc)
-                    # Skip PR if it was merged at or after the repo became inactive
-                    if merged_dt >= inactive_dt:
-                        bt.logging.debug(
-                            f"Skipping PR #{pr_raw['number']} in {repository_full_name} - PR was merged at/after repo became inactive (merged: {merged_dt.isoformat()}, inactive: {inactive_dt.isoformat()})"
-                        )
-                        continue
-
+                # PR passed all validation checks
+                base_ref = pr_raw['baseRefName']
                 bt.logging.info(f"Accepting PR #{pr_raw['number']} in {repository_full_name} - merged to '{base_ref}'")
+
                 # Increment merged_pr_count if merged after MERGE_SUCCESS_RATIO_APPLICATION_DATE
                 if merged_dt > MERGE_SUCCESS_RATIO_APPLICATION_DATE:
                     merged_pr_count += 1
-                # consider PR valid if all checks passed
+
+                # Consider PR valid if all checks passed
                 all_valid_prs.append(pr_raw)
 
             # Check if we should continue pagination
@@ -471,4 +537,9 @@ def get_user_merged_prs_graphql(
 
     except Exception as e:
         bt.logging.error(f"Error fetching PRs via GraphQL for user: {e}")
-        return PRCountResult(valid_prs=[], open_pr_count=0, merged_pr_count=0, closed_pr_count=0)
+        return PRCountResult(
+            valid_prs=all_valid_prs,
+            open_pr_count=open_pr_count,
+            merged_pr_count=merged_pr_count,
+            closed_pr_count=closed_pr_count,
+        )

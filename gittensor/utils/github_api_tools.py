@@ -21,9 +21,8 @@ _GITHUB_USER_CACHE: Dict[str, Dict[str, Any]] = {}
 
 
 def branch_matches_pattern(branch_name: str, patterns: List[str]) -> bool:
-    """Check if a branch name matches any pattern in the list.
-
-    For example, '*-dev' matches '3.0-dev', '3.1-dev', etc.
+    """
+    Check if a branch name matches any pattern in the list. (e.g., '*-dev' matches '3.0-dev', '3.1-dev', etc.)
     """
     for pattern in patterns:
         if fnmatch.fnmatch(branch_name, pattern):
@@ -32,11 +31,8 @@ def branch_matches_pattern(branch_name: str, patterns: List[str]) -> bool:
 
 
 def make_headers(token: str) -> Dict[str, str]:
-    """Helper function for formatting headers for requests."""
-    return {
-        "Authorization": f"token {token}",
-        "Accept": "application/vnd.github.v3+json",
-    }
+    """helper function for formatting headers for requests."""
+    return {'Authorization': f'token {token}', 'Accept': 'application/vnd.github.v3+json'}
 
 
 def get_github_user(token: str) -> Optional[Dict[str, Any]]:
@@ -54,8 +50,7 @@ def get_github_user(token: str) -> Optional[Dict[str, Any]]:
 
     headers = make_headers(token)
 
-    # Retry logic for timeout/connection issues, but do not aggressively retry
-    # on non-200 responses (e.g., invalid PAT).
+    # Retry logic for timeout/connection issues.
     for attempt in range(3):
         try:
             response = requests.get(f"{BASE_GITHUB_API_URL}/user", headers=headers, timeout=30)
@@ -69,8 +64,7 @@ def get_github_user(token: str) -> Optional[Dict[str, Any]]:
                 _GITHUB_USER_CACHE[token] = user_data
                 return user_data
 
-            # Non-200 responses are treated as non-retryable here; callers will
-            # typically surface this as an invalid PAT or unknown user.
+            # Non-200 responses are treated as non-retryable here.
             bt.logging.warning(
                 f"GitHub /user request failed with status {response.status_code} (attempt {attempt + 1}/3)"
             )
@@ -158,7 +152,9 @@ def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -
         return []
 
     except Exception as e:
-        bt.logging.error(f"Error getting file changes for PR #{pr_number} in {repository}: {e}")
+        bt.logging.error(
+            f"Error getting file changes for PR #{pr_number} in {repository}: {e}"
+        )
         return []
 
 
@@ -381,16 +377,16 @@ def get_user_merged_prs_graphql(
 
                 # Filter by master_repositories
                 if repository_full_name not in master_repositories.keys():
-                    bt.logging.debug(f"Skipping PR #{pr_raw['number']} in {repository_full_name} - ineligible repo")
+                    bt.logging.debug(
+                        f"Skipping PR #{pr_raw['number']} in {repository_full_name} - ineligible repo"
+                    )
                     continue
 
                 # Parse merge date and filter by time window
                 merged_dt = datetime.fromisoformat(pr_raw['mergedAt'].rstrip("Z")).replace(tzinfo=timezone.utc)
                 if merged_dt < date_filter:
                     # Skip PRs merged before lookback window
-                    bt.logging.debug(
-                        f"Skipping PR #{pr_raw['number']} in {repository_full_name} - merged before {MERGED_PR_LOOKBACK_DAYS} day lookback window"
-                    )
+                    bt.logging.debug(f"Skipping PR #{pr_raw['number']} in {repository_full_name} - merged before {MERGED_PR_LOOKBACK_DAYS} day lookback window")
                     continue
 
                 # Skip if PR was merged by the same person who created it (self-merge) AND there's no approvals from a differing party

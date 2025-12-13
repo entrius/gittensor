@@ -30,7 +30,7 @@ GITTENSOR_TAGLINE_BOOST = 2.0  # PRs with the Gittensor Tagline will receive 2x 
 # Language & File Scoring
 # =============================================================================
 DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT = 0.12
-TEST_FILE_CONTRIBUTION_WEIGHT = 0.0
+TEST_FILE_CONTRIBUTION_WEIGHT = 0.05
 MITIGATED_EXTENSIONS = ["md", "txt", "json"]
 MAX_LINES_SCORED_FOR_MITIGATED_EXT = 300
 
@@ -80,24 +80,23 @@ COMMENT_PATTERNS = [
 
 PREPROCESSOR_LANGUAGES = {
     'c',
-    'h',  # C
+    'h',
     'cpp',
     'cxx',
     'cc',
     'hpp',
     'hxx',
     'hh',
-    'h++',  # C++
-    'cs',  # C#
-    'rs',  # Rust
-    'swift',  # Swift
+    'h++',
+    'cs',
+    'rs',
+    'swift',
 }
 
 # =============================================================================
 # Rewards & Emissions
 # =============================================================================
 RECYCLE_UID = 0
-PARETO_DISTRIBUTION_ALPHA_VALUE = 0.85
 
 # Network emission scaling (lines contributed)
 LINES_CONTRIBUTED_MAX_RECYCLE = 0.9

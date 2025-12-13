@@ -5147,6 +5147,12 @@
     "inactiveAt": "2025-11-29T17:45:38.525Z",
     "weight": 0.01
   },
+  "General-Tao-Ventures/cartha-cli": {
+    "weight": 6.52
+  },
+  "General-Tao-Ventures/cartha-validator": {
+    "weight": 6.52
+  },
   "geopandas/geopandas": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
     "weight": 0.01
@@ -9993,7 +9999,7 @@
     "inactiveAt": "2025-11-29T17:45:38.525Z",
     "weight": 0.01
   },
-  "sportstensor/sportstensor": {
+  "sportstensor/sn41": {
     "weight": 10.05
   },
   "spotify/luigi": {
@@ -10326,6 +10332,9 @@
   "tastejs/todomvc": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
     "weight": 0.01
+  },
+  "tatsuproject/chipforge_sn84": {
+    "weight": 6.52
   },
   "taubyte/tau": {
     "weight": 0.4

@@ -14,12 +14,10 @@ from gittensor.validator.evaluation.inspections import (
     detect_and_penalize_duplicates,
     validate_response_and_initialize_miner_evaluation,
 )
+from gittensor.validator.evaluation.normalize import normalize_rewards_linear
 from gittensor.validator.evaluation.scoring import (
-    score_pull_requests,
     apply_cross_miner_multipliers_and_finalize,
-)
-from gittensor.validator.evaluation.normalize import (
-    normalize_rewards_with_pareto,
+    score_pull_requests,
 )
 
 # NOTE: there was a circular import error, needed this if to resolve it
@@ -78,19 +76,19 @@ async def reward(
         bt.logging.info(f"UID {uid} not being evaluated: {miner_eval.failed_reason}")
         return miner_eval
 
-    pr_result = get_user_merged_prs_graphql(
-        miner_eval.github_id, miner_eval.github_pat, master_repositories
-    )
+    pr_result = get_user_merged_prs_graphql(miner_eval.github_id, miner_eval.github_pat, master_repositories)
 
     miner_eval.total_merged_prs = pr_result.merged_pr_count
     miner_eval.total_open_prs = pr_result.open_pr_count
     miner_eval.total_closed_prs = pr_result.closed_pr_count
 
     for raw_pr in pr_result.valid_prs:
-        miner_eval.add_pull_request(PullRequest.from_graphql_response(raw_pr, uid, miner_eval.hotkey, miner_eval.github_id))
+        miner_eval.add_pull_request(
+            PullRequest.from_graphql_response(raw_pr, uid, miner_eval.hotkey, miner_eval.github_id)
+        )
 
     score_pull_requests(miner_eval, master_repositories, programming_languages)
-    
+
     bt.logging.info("*" * 50 + "\n")
     return miner_eval
 
@@ -132,8 +130,8 @@ async def get_rewards(
     # store all miner evaluations after adjusting score
     await self.bulk_store_evaluation(miner_evaluations)
 
-    # Normalize the rewards between [0,1] with a pareto boost for higher performing miners.
-    normalized_rewards = normalize_rewards_with_pareto(miner_evaluations)
+    # Normalize the rewards between [0,1]
+    normalized_rewards = normalize_rewards_linear(miner_evaluations)
 
     # Scale rewards according to dynamic emission curve based off of miners total contributions.
     final_rewards = apply_dynamic_emissions_using_network_contributions(normalized_rewards, miner_evaluations)

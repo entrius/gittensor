@@ -1,5 +1,4 @@
 # Copyright © 2025 Entrius
-
 import os
 import sys
 import time
@@ -39,9 +38,9 @@ def load_token():
     if is_token_valid(access_token):
         bt.logging.info("GitHub token loaded successfully and is valid.")
         return access_token
-    else:
-        bt.logging.error("GitHub token is invalid or expired.")
-        return None
+
+    bt.logging.error("GitHub token is invalid or expired.")
+    return None
 
 
 def is_token_valid(token) -> bool:

@@ -5147,6 +5147,12 @@
     "inactiveAt": "2025-11-29T17:45:38.525Z",
     "weight": 0.01
   },
+  "General-Tao-Ventures/cartha-cli": {
+    "weight": 6.52
+  },
+  "General-Tao-Ventures/cartha-validator": {
+    "weight": 6.52
+  },
   "geopandas/geopandas": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
     "weight": 0.01

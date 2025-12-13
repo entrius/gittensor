@@ -3,7 +3,7 @@ import base64
 import fnmatch
 import time
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 import bittensor as bt
 import requests
@@ -16,6 +16,10 @@ from gittensor.constants import (
 from gittensor.validator.utils.config import MERGED_PR_LOOKBACK_DAYS
 
 
+# In-process cache for GitHub /user responses, keyed by PAT.
+_GITHUB_USER_CACHE: Dict[str, Dict[str, Any]] = {}
+
+
 def branch_matches_pattern(branch_name: str, patterns: List[str]) -> bool:
     """
     Check if a branch name matches any pattern in the list. (e.g., '*-dev' matches '3.0-dev', '3.1-dev', etc.)
@@ -26,83 +30,105 @@ def branch_matches_pattern(branch_name: str, patterns: List[str]) -> bool:
     return False
 
 
-def make_headers(token: str):
+def make_headers(token: str) -> Dict[str, str]:
     '''
     helper function for formatting headers for requests
     '''
     return {'Authorization': f'token {token}', 'Accept': 'application/vnd.github.v3+json'}
 
 
-def get_github_username(token: str) -> Optional[str]:
-    '''
-    Get username using token
-    Args:
-        token (str): Github pat
-    Returns:
-        username: Str or None if PAT is invalid or something went wrong
-    '''
+def get_github_user(token: str) -> Optional[Dict[str, Any]]:
+    """Fetch GitHub user data for a PAT, with basic retry + in-process cache.
+
+    Returns the parsed JSON user object on success, or ``None`` on failure.
+    """
+    if not token:
+        return None
+
+    # Check cache first to avoid duplicate /user calls for the same PAT.
+    cached = _GITHUB_USER_CACHE.get(token)
+    if cached is not None:
+        return cached
+
     headers = make_headers(token)
-    try:
-        response = requests.get(f'{BASE_GITHUB_API_URL}/user', headers=headers, timeout=10)
-        if response.status_code == 200:
-            return response.json().get('login', None)
-    except Exception as e:
-        bt.logging.warning(f"Could not fetch GitHub username: {e}")
+
+    # Retry logic for timeout/connection issues.
+    for attempt in range(3):
+        try:
+            response = requests.get(f"{BASE_GITHUB_API_URL}/user", headers=headers, timeout=30)
+            if response.status_code == 200:
+                try:
+                    user_data: Dict[str, Any] = response.json()
+                except Exception as e:  # pragma: no cover - extremely rare
+                    bt.logging.warning(f"Failed to parse GitHub /user JSON response: {e}")
+                    return None
+
+                _GITHUB_USER_CACHE[token] = user_data
+                return user_data
+
+            # Non-200 responses are treated as non-retryable here.
+            bt.logging.warning(
+                f"GitHub /user request failed with status {response.status_code} (attempt {attempt + 1}/3)"
+            )
+            break
+
+        except Exception as e:
+            bt.logging.warning(f"Could not fetch GitHub user (attempt {attempt + 1}/3): {e}")
+            if attempt < 2:  # Don't sleep on last attempt
+                time.sleep(2)
+
     return None
+
+
+def get_github_username(token: str) -> Optional[str]:
+    """Get GitHub username (login) using a PAT.
+
+    Returns the login string or ``None`` if the PAT is invalid or an error
+    occurred.
+    """
+    user_data = get_github_user(token)
+    if not user_data:
+        return None
+    return user_data.get("login")
 
 
 def get_github_id(token: str) -> Optional[str]:
-    '''
-    Get id using token
-    Args:
-        token (str): Github pat
-    Returns:
-        user_id: Str or None if PAT is invalid or something went wrong
-    '''
-    headers = make_headers(token)
+    """Get GitHub numeric user id (as string) using a PAT.
 
-    # Retry logic for timeout issues
-    for attempt in range(3):
-        try:
-            response = requests.get(f'{BASE_GITHUB_API_URL}/user', headers=headers, timeout=30)
-            if response.status_code == 200:
-                user_id = response.json().get('id', None)
-                if user_id:
-                    return str(user_id)  # Ensure it's returned as string
-        except Exception as e:
-            bt.logging.warning(f"Could not fetch GitHub id (attempt {attempt + 1}/3): {e}")
-            if attempt < 2:  # Don't sleep on last attempt
-                time.sleep(2)
-    return None
+    Returns ``None`` if the PAT is invalid or the id cannot be determined.
+    """
+    user_data = get_github_user(token)
+    if not user_data:
+        return None
+
+    user_id = user_data.get("id")
+    if user_id is None:
+        return None
+
+    return str(user_id)
 
 
 def get_github_account_age_days(token: str) -> Optional[int]:
-    '''
-    Get GitHub account age in days
-    Args:
-        token (str): Github pat
-    Returns:
-        age_days: Int, number of days since account creation, or None if PAT is invalid or something went wrong
-    '''
-    headers = make_headers(token)
+    """Get GitHub account age in days for a PAT.
 
-    # Retry logic for timeout issues
-    for attempt in range(3):
-        try:
-            response = requests.get(f'{BASE_GITHUB_API_URL}/user', headers=headers, timeout=30)
-            if response.status_code == 200:
-                user_data = response.json()
-                created_at = user_data.get('created_at')
-                if created_at:
-                    created_dt = datetime.fromisoformat(created_at.rstrip("Z")).replace(tzinfo=timezone.utc)
-                    now_dt = datetime.now(timezone.utc)
-                    age_days = (now_dt - created_dt).days
-                    return age_days
-        except Exception as e:
-            bt.logging.warning(f"Could not fetch GitHub account age (attempt {attempt + 1}/3): {e}")
-            if attempt < 2:  # Don't sleep on last attempt
-                time.sleep(2)
-    return None
+    Returns the number of days since account creation, or ``None`` if the
+    PAT is invalid or the creation date cannot be determined.
+    """
+    user_data = get_github_user(token)
+    if not user_data:
+        return None
+
+    created_at = user_data.get("created_at")
+    if not created_at:
+        return None
+
+    try:
+        created_dt = datetime.fromisoformat(created_at.rstrip("Z")).replace(tzinfo=timezone.utc)
+        now_dt = datetime.now(timezone.utc)
+        return (now_dt - created_dt).days
+    except Exception as e:
+        bt.logging.warning(f"Could not parse GitHub account creation date: {e}")
+        return None
 
 
 def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -> Optional[List[FileChange]]:
@@ -339,7 +365,11 @@ def get_user_merged_prs_graphql(
                 if pr_state == 'CLOSED' and not pr_raw['mergedAt']:
                     if pr_raw.get('closedAt'):
                         closed_dt = datetime.fromisoformat(pr_raw['closedAt'].rstrip("Z")).replace(tzinfo=timezone.utc)
-                        if closed_dt >= date_filter and closed_dt > MERGE_SUCCESS_RATIO_APPLICATION_DATE and repository_full_name in active_repositories:
+                        if (
+                            closed_dt >= date_filter
+                            and closed_dt > MERGE_SUCCESS_RATIO_APPLICATION_DATE
+                            and repository_full_name in active_repositories
+                        ):
                             closed_pr_count += 1
                     continue  # Skip further processing for closed PRs
 

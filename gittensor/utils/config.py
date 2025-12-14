@@ -16,18 +16,18 @@
 # OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 # DEALINGS IN THE SOFTWARE.
 
+import argparse
 import os
 import subprocess
-import argparse
+
 import bittensor as bt
+
 from gittensor.utils.logging import setup_events_logger
 
 
 def is_cuda_available():
     try:
-        output = subprocess.check_output(
-            ["nvidia-smi", "-L"], stderr=subprocess.STDOUT
-        )
+        output = subprocess.check_output(["nvidia-smi", "-L"], stderr=subprocess.STDOUT)
         if "NVIDIA" in output.decode("utf-8"):
             return "cuda"
     except Exception:
@@ -61,9 +61,7 @@ def check_config(cls, config: "bt.Config"):
 
     if not config.neuron.dont_save_events:
         # Add custom event logger for the events.
-        events_logger = setup_events_logger(
-            config.neuron.full_path, config.neuron.events_retention_size
-        )
+        events_logger = setup_events_logger(config.neuron.full_path, config.neuron.events_retention_size)
         bt.logging.register_primary_logger(events_logger.name)
 
 
@@ -145,7 +143,7 @@ def add_miner_args(cls, parser):
         "--blacklist.min_stake",
         type=int,
         help="Minimum stake required for a validator to query this miner.",
-        default=30000,
+        default=15000,
     )
 
     parser.add_argument(
@@ -245,6 +243,7 @@ def add_validator_args(cls, parser):
         help="FOR DEVELOPMENT: Port for remote debugging API endpoint. If set, enables debug API on this port and debugpy on port+1.",
         default=None,
     )
+
 
 def config(cls):
     """

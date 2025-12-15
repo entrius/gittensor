@@ -2,6 +2,7 @@
 # Copyright © 2025 Entrius
 
 import math
+import aiohttp
 from datetime import datetime, timezone
 from typing import Dict
 
@@ -29,7 +30,7 @@ from gittensor.constants import (
 )
 from gittensor.utils.github_api_tools import get_pull_request_file_changes
 
-def score_pull_requests(
+async def score_pull_requests(
     miner_eval: MinerEvaluation,
     master_repositories: Dict[str, Dict],
     programming_languages: Dict[str, float],
@@ -50,39 +51,43 @@ def score_pull_requests(
     total_prs = len(miner_eval.pull_requests)
     bt.logging.info(f"Scoring {total_prs} PRs for uid {miner_eval.uid}")
 
-    for n, pr in enumerate(miner_eval.pull_requests, start=1):
-        bt.logging.info(f"\n[{n}/{total_prs}] - Scoring PR #{pr.number} in {pr.repository_full_name}")
+    # Use a single session for all PRs for this miner to improve performance
+    async with aiohttp.ClientSession() as session:
+        for n, pr in enumerate(miner_eval.pull_requests, start=1):
+            bt.logging.info(f"\n[{n}/{total_prs}] - Scoring PR #{pr.number} in {pr.repository_full_name}")
 
-        file_changes = get_pull_request_file_changes(pr.repository_full_name, pr.number, miner_eval.github_pat)
+            file_changes = await get_pull_request_file_changes(
+                pr.repository_full_name, pr.number, miner_eval.github_pat, session=session
+            )
 
-        if not file_changes:
-            bt.logging.warning("No file changes found for this PR.")
-            continue
+            if not file_changes:
+                bt.logging.warning("No file changes found for this PR.")
+                continue
 
-        pr.set_file_changes(file_changes)
+            pr.set_file_changes(file_changes)
 
-        repo_weight = master_repositories.get(pr.repository_full_name, {}).get("weight", 0.01)
-        file_change_score = pr.calculate_score_from_file_changes(programming_languages)
-        issue_multiplier = calculate_issue_multiplier(pr)
-        open_pr_spam_multiplier = calculate_pr_spam_penalty_multiplier(miner_eval.total_open_prs)
-        time_decay_multiplier = calculate_time_decay_multiplier(pr)
-        gittensor_tag_multiplier = GITTENSOR_TAGLINE_BOOST if (pr.gittensor_tagged and pr.repository_full_name.lower() != GITTENSOR_REPOSITORY.lower()) else 1.0
-        
-        # Only apply merge success penalty to PRs merged after the cutoff date
-        if pr.merged_at > MERGE_SUCCESS_RATIO_APPLICATION_DATE:
-            merge_success_multiplier = calculate_merge_success_multiplier(miner_eval)
-        else:
-            merge_success_multiplier = 1.0  # No penalty for PRs merged before cutoff
+            repo_weight = master_repositories.get(pr.repository_full_name, {}).get("weight", 0.01)
+            file_change_score = pr.calculate_score_from_file_changes(programming_languages)
+            issue_multiplier = calculate_issue_multiplier(pr)
+            open_pr_spam_multiplier = calculate_pr_spam_penalty_multiplier(miner_eval.total_open_prs)
+            time_decay_multiplier = calculate_time_decay_multiplier(pr)
+            gittensor_tag_multiplier = GITTENSOR_TAGLINE_BOOST if (pr.gittensor_tagged and pr.repository_full_name.lower() != GITTENSOR_REPOSITORY.lower()) else 1.0
+            
+            # Only apply merge success penalty to PRs merged after the cutoff date
+            if pr.merged_at > MERGE_SUCCESS_RATIO_APPLICATION_DATE:
+                merge_success_multiplier = calculate_merge_success_multiplier(miner_eval)
+            else:
+                merge_success_multiplier = 1.0  # No penalty for PRs merged before cutoff
 
-        pr.repo_weight_multiplier = round(repo_weight, 2)
-        pr.base_score = round(file_change_score, 2)
-        pr.issue_multiplier = round(issue_multiplier, 2)
-        pr.open_pr_spam_multiplier = round(open_pr_spam_multiplier, 2)
-        pr.time_decay_multiplier = round(time_decay_multiplier, 2)
-        pr.gittensor_tag_multiplier = round(gittensor_tag_multiplier, 2)
-        pr.merge_success_multiplier = round(merge_success_multiplier, 2)
+            pr.repo_weight_multiplier = round(repo_weight, 2)
+            pr.base_score = round(file_change_score, 2)
+            pr.issue_multiplier = round(issue_multiplier, 2)
+            pr.open_pr_spam_multiplier = round(open_pr_spam_multiplier, 2)
+            pr.time_decay_multiplier = round(time_decay_multiplier, 2)
+            pr.gittensor_tag_multiplier = round(gittensor_tag_multiplier, 2)
+            pr.merge_success_multiplier = round(merge_success_multiplier, 2)
 
-        miner_eval.unique_repos_contributed_to.add(pr.repository_full_name)
+            miner_eval.unique_repos_contributed_to.add(pr.repository_full_name)
 
 
 def count_repository_contributors(miner_evaluations: Dict[int, MinerEvaluation]) -> Dict[str, int]:

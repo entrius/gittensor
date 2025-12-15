@@ -52,7 +52,7 @@ def detect_and_penalize_duplicates(
     bt.logging.info(f"Total duplicate miners penalized: {duplicate_count}")
 
 
-def validate_response_and_initialize_miner_evaluation(uid: int, response: GitPatSynapse) -> MinerEvaluation:
+async def validate_response_and_initialize_miner_evaluation(uid: int, response: GitPatSynapse) -> MinerEvaluation:
 
     miner_eval = MinerEvaluation(uid=uid, hotkey=response.axon.hotkey)
 
@@ -64,7 +64,7 @@ def validate_response_and_initialize_miner_evaluation(uid: int, response: GitPat
         miner_eval.set_invalid_response_reason(f"No response provided by miner {uid}")
         return miner_eval
 
-    github_id, error = _validate_github_credentials(uid, response.github_access_token)
+    github_id, error = await _validate_github_credentials(uid, response.github_access_token)
     if error:
         miner_eval.set_invalid_response_reason(error)
         return miner_eval
@@ -74,16 +74,16 @@ def validate_response_and_initialize_miner_evaluation(uid: int, response: GitPat
     return miner_eval
 
 
-def _validate_github_credentials(uid: int, pat: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
+async def _validate_github_credentials(uid: int, pat: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
     """Validate PAT and return (github_id, error_reason) tuple."""
     if not pat:
         return None, f"No Github PAT provided by miner {uid}"
     
-    github_id = get_github_id(pat)
+    github_id = await get_github_id(pat)
     if not github_id:
         return None, f"No Github id found for miner {uid}'s PAT"
     
-    account_age = get_github_account_age_days(pat)
+    account_age = await get_github_account_age_days(pat)
     if not account_age:
         return None, f"Could not determine Github account age for miner {uid}"
     if account_age < MIN_GITHUB_ACCOUNT_AGE:

@@ -120,7 +120,7 @@ def calculate_merge_success_multiplier(miner_eval: MinerEvaluation) -> float:
     """Calculate multiplier based on PR merge success ratio."""
     total_prs = miner_eval.total_merged_prs + miner_eval.total_closed_prs
 
-    if (total_prs < MERGE_SUCCESS_RATIO_ATTEMPTS_THRESHOLD):
+    if total_prs <= 0 or total_prs < MERGE_SUCCESS_RATIO_ATTEMPTS_THRESHOLD:
         return 1.0
     
     merge_ratio = miner_eval.total_merged_prs / total_prs

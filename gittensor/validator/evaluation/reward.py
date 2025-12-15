@@ -89,6 +89,9 @@ async def reward(
 
     score_pull_requests(miner_eval, master_repositories, programming_languages)
 
+    # Clear PAT after scoring to avoid storing sensitive data
+    miner_eval.github_pat = None
+
     bt.logging.info("*" * 50 + "\n")
     return miner_eval
 

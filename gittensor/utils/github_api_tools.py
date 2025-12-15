@@ -329,8 +329,9 @@ def _should_skip_merged_pr(
     Returns:
         tuple[bool, Optional[str]]: (should_skip, skip_reason) - True if PR should be skipped with reason
     """
-    # Filter by master_repositories
-    if repository_full_name not in master_repositories.keys():
+    # Filter by master_repositories - find matching key case-insensitively
+    repo_key = next((key for key in master_repositories.keys() if key.lower() == repository_full_name.lower()), None)
+    if repo_key is None:
         return (True, f"Skipping PR #{pr_raw['number']} in {repository_full_name} - ineligible repo")
 
     # Filter by lookback window
@@ -365,7 +366,7 @@ def _should_skip_merged_pr(
     )
     base_ref = pr_raw['baseRefName']
     head_ref = pr_raw.get('headRefName', '')  # Source branch (where PR is coming FROM)
-    repo_metadata = master_repositories.get(repository_full_name, {})
+    repo_metadata = master_repositories[repo_key]
     additional_branches = repo_metadata.get('additional_acceptable_branches', [])
 
     # Build list of all acceptable branches (default + additional)
@@ -393,7 +394,7 @@ def _should_skip_merged_pr(
             )
 
     # Check if repo is inactive
-    repo_metadata = master_repositories[repository_full_name]
+    repo_metadata = master_repositories[repo_key]
     inactive_at = repo_metadata.get("inactiveAt")
     if inactive_at is not None:
         inactive_dt = datetime.fromisoformat(inactive_at.rstrip("Z")).replace(tzinfo=timezone.utc)

@@ -5,13 +5,15 @@ import numpy as np
 
 
 def check_uid_availability(metagraph: "bt.metagraph.Metagraph", uid: int, vpermit_tao_limit: int) -> bool:
-    """Check if uid is available. The UID should be available if it is serving and has less than vpermit_tao_limit stake
+    """Return whether a UID is eligible for querying.
+
     Args:
-        metagraph (:obj: bt.metagraph.Metagraph): Metagraph object
-        uid (int): uid to be checked
-        vpermit_tao_limit (int): Validator permit tao limit
+        metagraph: Metagraph containing axon and stake state.
+        uid: UID to check.
+        vpermit_tao_limit: Maximum allowed stake for validator-permit UIDs.
+
     Returns:
-        bool: True if uid is available, False otherwise
+        True if the UID is serving and within the validator-permit stake limit.
     """
     # Filter non serving axons.
     if not metagraph.axons[uid].is_serving:
@@ -25,15 +27,14 @@ def check_uid_availability(metagraph: "bt.metagraph.Metagraph", uid: int, vpermi
 
 
 def get_all_uids(self, exclude: List[int] = []) -> set[int]:
-    """Return all *eligible* miner UIDs for scoring.
+    """Return all eligible miner UIDs for scoring.
 
-    This helper filters UIDs using :func:`check_uid_availability`, so only
-    serving miners within the validator-permit TAO limit are included.
+    Args:
+        exclude: UIDs to omit from the returned set.
 
-    Notes:
-        - ``exclude`` may be used to skip specific UIDs.
-        - UID ``0`` is always included (subnet requirement), even if it
-          would otherwise be filtered out.
+    Returns:
+        Set of miner UIDs that are serving and within the validator-permit TAO limit.
+        UID ``0`` is always included.
     """
     metagraph: "bt.metagraph.Metagraph" = self.metagraph
     vpermit_tao_limit: int = getattr(self.config.neuron, "vpermit_tao_limit", 4096)

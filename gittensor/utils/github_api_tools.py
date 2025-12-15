@@ -496,14 +496,7 @@ def get_user_merged_prs_graphql(
                 if not pr_raw['mergedAt']:
                     continue
 
-                # Filter by master_repositories
-                if repository_full_name.lower() not in [repo_full_name.lower() for repo_full_name in master_repositories.keys()]:
-                    bt.logging.debug(
-                        f"Skipping PR #{pr_raw['number']} in {repository_full_name} - ineligible repo"
-                    )
-                    continue
-
-                # Parse merge date and filter by time window
+                # Parse merge date
                 merged_dt = datetime.fromisoformat(pr_raw['mergedAt'].rstrip("Z")).replace(tzinfo=timezone.utc)
 
                 # Validate merged PR against all criteria

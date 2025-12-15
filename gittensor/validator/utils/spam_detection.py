@@ -36,7 +36,7 @@ def is_single_diff_line(line: str) -> bool:
     char = line[0]
     return char in "+-" and (len(line) == 1 or line[1] != char)
 
-def get_comment_line_indices(lines: List[str], file_extension: Optional[str] = None) -> Set[int]:
+def get_comment_line_indices(lines: List[str], file_name: Optional[str] = None) -> Set[int]:
     """
     Analyzes all lines together to detect comments (including multi-line comments).
     
@@ -59,8 +59,7 @@ def get_comment_line_indices(lines: List[str], file_extension: Optional[str] = N
 
     # 2. Determine the appropriate lexer
     try:
-        filename = f"dummy{file_extension}" if file_extension else "dummy.txt"
-        lexer = get_lexer_for_filename(filename)
+        lexer = get_lexer_for_filename(file_name) if file_name else TextLexer()
     except ClassNotFound:
         lexer = TextLexer()
 
@@ -106,7 +105,7 @@ def get_comment_line_indices(lines: List[str], file_extension: Optional[str] = N
             
     return comment_indices
 
-def count_non_scoreable_lines(patch: str, max_scoreable_lines: Optional[int] = None, file_extension: Optional[str] = None) -> int:
+def count_non_scoreable_lines(patch: str, max_scoreable_lines: Optional[int] = None, file_name: Optional[str] = None) -> int:
     """Count lines that shouldn't contribute to the score (blank, comment, etc)."""
     if not patch:
         return 0
@@ -115,7 +114,7 @@ def count_non_scoreable_lines(patch: str, max_scoreable_lines: Optional[int] = N
     lines = patch.split("\n")
     
     # Pre-calculate comment lines using context-aware lexing
-    comment_line_indices = get_comment_line_indices(lines, file_extension)
+    comment_line_indices = get_comment_line_indices(lines, file_name)
 
     scoreable_count = 0
     skip_next = False  # Track if next line should be skipped

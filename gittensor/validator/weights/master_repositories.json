@@ -1640,7 +1640,7 @@
     "weight": 0.01
   },
   "Swap-Subnet/swap-subnet": {
-    "weight": 6.52
+    "weight": 5.00
   },
   "SwiftGGTeam/the-swift-programming-language-in-chinese": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
@@ -5147,6 +5147,12 @@
     "inactiveAt": "2025-11-29T17:45:38.525Z",
     "weight": 0.01
   },
+  "General-Tao-Ventures/cartha-cli": {
+    "weight": 6.52
+  },
+  "General-Tao-Ventures/cartha-validator": {
+    "weight": 6.52
+  },
   "geopandas/geopandas": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
     "weight": 0.01
@@ -7177,7 +7183,7 @@
     "additional_acceptable_branches": ["dev"]
   },
   "macrocosm-os/iota": {
-    "weight": 59.34
+    "weight": 5.00
   },
   "macrozheng/mall": {
     "weight": 0.61
@@ -7756,7 +7762,7 @@
     "weight": 0.01
   },
   "mode-network/synth-subnet": {
-    "weight": 44.58
+    "weight": 5.0
   },
   "modelcontextprotocol/python-sdk": {
     "weight": 3.34
@@ -8291,7 +8297,7 @@
     "weight": 6.52
   },
   "one-covenant/grail": {
-    "weight": 17.05
+    "weight": 5.00
   },
   "onionshare/onionshare": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
@@ -9993,7 +9999,7 @@
     "inactiveAt": "2025-11-29T17:45:38.525Z",
     "weight": 0.01
   },
-  "sportstensor/sportstensor": {
+  "sportstensor/sn41": {
     "weight": 10.05
   },
   "spotify/luigi": {
@@ -10327,6 +10333,9 @@
     "inactiveAt": "2025-11-29T17:45:38.525Z",
     "weight": 0.01
   },
+  "tatsuproject/chipforge_sn84": {
+    "weight": 6.52
+  },
   "taubyte/tau": {
     "weight": 0.4
   },
@@ -10493,7 +10502,7 @@
     "weight": 0.01
   },
   "threetau/kinitro": {
-    "weight": 6.52
+    "weight": 5.00
   },
   "thu-ml/tianshou": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
@@ -10594,10 +10603,10 @@
     "weight": 36.77
   },
   "tplr-ai/basilica": {
-    "weight": 17.05
+    "weight": 5.00
   },
   "tplr-ai/templar": {
-    "weight": 59.34
+    "weight": 5.00
   },
   "traccar/traccar": {
     "weight": 0.29

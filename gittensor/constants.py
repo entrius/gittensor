@@ -24,13 +24,13 @@ MIN_GITHUB_ACCOUNT_AGE = 180  # days
 # =============================================================================
 GITTENSOR_REPOSITORY = "entrius/gittensor"
 PR_TAGLINE = "Contribution by Gittensor, learn more at https://gittensor.io/"
-GITTENSOR_TAGLINE_BOOST = 2.0 # PRs with the Gittensor Tagline will receive 2x the score
+GITTENSOR_TAGLINE_BOOST = 2.0  # PRs with the Gittensor Tagline will receive 2x the score
 
 # =============================================================================
 # Language & File Scoring
 # =============================================================================
 DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT = 0.12
-TEST_FILE_CONTRIBUTION_WEIGHT = 0.10
+TEST_FILE_CONTRIBUTION_WEIGHT = 0.05
 MITIGATED_EXTENSIONS = ["md", "txt", "json"]
 MAX_LINES_SCORED_FOR_MITIGATED_EXT = 300
 
@@ -64,11 +64,39 @@ EXCESSIVE_PR_PENALTY_THRESHOLD = 10
 EXCESSIVE_PR_PENALTY_SLOPE = 0.50
 EXCESSIVE_PR_MIN_MULTIPLIER = 0.00
 
+COMMENT_PATTERNS = [
+    r'^\s*#',  # Python, Ruby, Shell, etc.
+    r'^\s*//',  # C, C++, Java, JavaScript, Go, Rust, etc.
+    r'^\s*/\*',  # C-style multi-line start
+    r'^\s*\*',  # C-style multi-line continuation
+    r'^\s*\*/',  # C-style multi-line end
+    r'^\s*--',  # SQL, Lua, Haskell
+    r'^\s*<!--',  # HTML, XML
+    r'^\s*%',  # LaTeX, MATLAB
+    r'^\s*;',  # Lisp, Assembly
+    r'^\s*"""',  # Python docstring
+    r"^\s*'''",  # Python docstring
+]
+
+PREPROCESSOR_LANGUAGES = {
+    'c',
+    'h',
+    'cpp',
+    'cxx',
+    'cc',
+    'hpp',
+    'hxx',
+    'hh',
+    'h++',
+    'cs',
+    'rs',
+    'swift',
+}
+
 # =============================================================================
 # Rewards & Emissions
 # =============================================================================
 RECYCLE_UID = 0
-PARETO_DISTRIBUTION_ALPHA_VALUE = 0.85
 
 # Network emission scaling (lines contributed)
 LINES_CONTRIBUTED_MAX_RECYCLE = 0.9

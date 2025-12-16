@@ -20,7 +20,7 @@ sys.modules["gittensor.validator.utils"] = Mock()
 sys.modules["gittensor.validator.utils.config"] = Mock()
 sys.modules["gittensor.validator.utils.config"].MERGED_PR_LOOKBACK_DAYS = 30
 sys.modules["gittensor.validator.utils.config"].WANDB_PROJECT = "gittensor-validators"
-sys.modules["gittensor.validator.utils.config"].__version__ = "2.0.4"
+sys.modules["gittensor.validator.utils.config"].__version__ = "2.0.5"
 sys.modules["gittensor.validator.utils.storage"] = Mock()
 
 from gittensor.mock import MockMetagraph

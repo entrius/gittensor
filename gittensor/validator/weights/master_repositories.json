@@ -15,7 +15,7 @@
   "Activiti/Activiti": {
     "weight": 0.32
   },
-  "AffineFoundation/affine": {
+  "AffineFoundation/affine-cortex": {
     "weight": 59.34
   },
   "Aider-AI/aider": {
@@ -8471,7 +8471,7 @@
     ]
   },
   "opentensor/subtensor": {
-    "weight": 36.77,
+    "weight": 200.00,
     "additional_acceptable_branches": [
       "devnet-ready"
     ]

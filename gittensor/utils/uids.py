@@ -5,13 +5,15 @@ import numpy as np
 
 
 def check_uid_availability(metagraph: "bt.metagraph.Metagraph", uid: int, vpermit_tao_limit: int) -> bool:
-    """Check if uid is available. The UID should be available if it is serving and has less than vpermit_tao_limit stake
+    """Return whether a UID is eligible for querying.
+
     Args:
-        metagraph (:obj: bt.metagraph.Metagraph): Metagraph object
-        uid (int): uid to be checked
-        vpermit_tao_limit (int): Validator permit tao limit
+        metagraph: Metagraph containing axon and stake state.
+        uid: UID to check.
+        vpermit_tao_limit: Maximum allowed stake for validator-permit UIDs.
+
     Returns:
-        bool: True if uid is available, False otherwise
+        True if the UID is serving and within the validator-permit stake limit.
     """
     # Filter non serving axons.
     if not metagraph.axons[uid].is_serving:
@@ -25,14 +27,25 @@ def check_uid_availability(metagraph: "bt.metagraph.Metagraph", uid: int, vpermi
 
 
 def get_all_uids(self, exclude: List[int] = []) -> set[int]:
-    """Returns all uids from the metagraph, excluding specified ones.
+    """Return all eligible miner UIDs for scoring.
+
     Args:
-        exclude (List[int]): List of uids to exclude from the result.
+        exclude: UIDs to omit from the returned set.
+
     Returns:
-        uids (set[int]): All uids excluding specified ones. UID 0 is always included at the beginning.
+        Set of miner UIDs that are serving and within the validator-permit TAO limit.
+        UID ``0`` is always included.
     """
-    # Get all available miner UIDs, excluding specified ones
-    available_miner_uids = {uid for uid in range(self.metagraph.n.item()) if uid not in exclude}
+    metagraph: "bt.metagraph.Metagraph" = self.metagraph
+    vpermit_tao_limit: int = getattr(self.config.neuron, "vpermit_tao_limit", 4096)
+
+    # Get all available miner UIDs, excluding specified ones and applying
+    # serving / vpermit filters.
+    available_miner_uids = {
+        uid
+        for uid in range(metagraph.n.item())
+        if uid not in exclude and check_uid_availability(metagraph, uid, vpermit_tao_limit)
+    }
 
     # Ensure miner UID 0 is always included (subnet requirement)
     available_miner_uids.add(0)

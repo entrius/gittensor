@@ -54,7 +54,11 @@ def detect_and_penalize_duplicates(
 
 def validate_response_and_initialize_miner_evaluation(uid: int, response: GitPatSynapse) -> MinerEvaluation:
 
-    miner_eval = MinerEvaluation(uid=uid, hotkey=response.axon.hotkey)
+    hotkey = ""
+    if response is not None and getattr(response, "axon", None) is not None:
+        hotkey = response.axon.hotkey
+
+    miner_eval = MinerEvaluation(uid=uid, hotkey=hotkey)
 
     if uid == RECYCLE_UID:
         miner_eval.set_invalid_response_reason("SPECIAL CASE UID 0 - RECYCLE UID")

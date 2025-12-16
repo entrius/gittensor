@@ -1,6 +1,7 @@
 # The MIT License (MIT)
 # Copyright © 2025 Entrius
 
+import asyncio
 import math
 from datetime import datetime, timezone
 from typing import Dict
@@ -29,19 +30,20 @@ from gittensor.constants import (
 )
 from gittensor.utils.github_api_tools import get_pull_request_file_changes
 
-def score_pull_requests(
+async def score_pull_requests(
     miner_eval: MinerEvaluation,
     master_repositories: Dict[str, Dict],
     programming_languages: Dict[str, float],
 ) -> None:
     """
+    Async wrapper around PR scoring that avoids blocking the event loop.
     Score pull requests and populate MinerEvaluation object.
     Fetches file changes, calculates scores, applies repo weights and issue bonuses.
 
     Args:
         miner_eval (MinerEvaluation): MinerEvaluation object to populate
         master_repositories (Dict[str, Dict]): The incentivized repositories and their metadata (weight, inactiveAt)
-        programming_languages (Dict[str, float]): The programming languages and their weights
+        programming_languages (Dict[str, float]): The programming languages and their weights, file extension -> weight
     """
     if not miner_eval.pull_requests:
         bt.logging.info(f"No valid PRs found for uid {miner_eval.uid}")
@@ -53,7 +55,12 @@ def score_pull_requests(
     for n, pr in enumerate(miner_eval.pull_requests, start=1):
         bt.logging.info(f"\n[{n}/{total_prs}] - Scoring PR #{pr.number} in {pr.repository_full_name}")
 
-        file_changes = get_pull_request_file_changes(pr.repository_full_name, pr.number, miner_eval.github_pat)
+        file_changes = await asyncio.to_thread(
+            get_pull_request_file_changes,
+            pr.repository_full_name,
+            pr.number,
+            miner_eval.github_pat,
+        )
 
         if not file_changes:
             bt.logging.warning("No file changes found for this PR.")

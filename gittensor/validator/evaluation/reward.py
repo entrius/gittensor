@@ -2,6 +2,7 @@
 # Copyright © 2025 Entrius
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Dict
 
 import bittensor as bt
@@ -71,12 +72,18 @@ async def reward(
 
     bt.logging.info(f"******* Reward function called for UID: {uid} *******")
 
-    miner_eval = validate_response_and_initialize_miner_evaluation(uid, response)
+    miner_eval = await asyncio.to_thread(validate_response_and_initialize_miner_evaluation, uid, response)
     if miner_eval.failed_reason is not None:
         bt.logging.info(f"UID {uid} not being evaluated: {miner_eval.failed_reason}")
         return miner_eval
 
-    pr_result = get_user_merged_prs_graphql(miner_eval.github_id, miner_eval.github_pat, master_repositories)
+
+    pr_result = await asyncio.to_thread(
+        get_user_merged_prs_graphql,
+        miner_eval.github_id,
+        miner_eval.github_pat,
+        master_repositories,
+    )
 
     miner_eval.total_merged_prs = pr_result.merged_pr_count
     miner_eval.total_open_prs = pr_result.open_pr_count
@@ -87,8 +94,8 @@ async def reward(
             PullRequest.from_graphql_response(raw_pr, uid, miner_eval.hotkey, miner_eval.github_id)
         )
 
-    score_pull_requests(miner_eval, master_repositories, programming_languages)
 
+    await score_pull_requests(miner_eval, master_repositories, programming_languages)
     # Clear PAT after scoring to avoid storing sensitive data
     miner_eval.github_pat = None
 

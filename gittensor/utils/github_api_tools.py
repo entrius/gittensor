@@ -392,6 +392,99 @@ GRAPHQL_FRAGMENTS = {
     """
 }
 
+
+# GraphQL Query Templates
+GRAPHQL_FRAGMENTS = {
+    "pr_basic": """
+        fragment PRBasic on PullRequest {
+            number
+            title
+            state
+            createdAt
+            mergedAt
+            closedAt
+            additions
+            deletions
+            baseRefName
+            headRefName
+        }
+    """,
+
+    "pr_author": """
+        fragment PRAuthor on PullRequest {
+            author {
+                login
+            }
+            mergedBy {
+                login
+            }
+        }
+    """,
+
+    "pr_repository": """
+        fragment PRRepository on PullRequest {
+            repository {
+                name
+                owner {
+                    login
+                }
+                defaultBranchRef {
+                    name
+                }
+            }
+        }
+    """,
+
+    "pr_commits": """
+        fragment PRCommits on PullRequest {
+            commits(first: 100) {
+                totalCount
+                nodes {
+                    commit {
+                        message
+                    }
+                }
+            }
+        }
+    """,
+
+    "pr_issues": """
+        fragment PRIssues on PullRequest {
+            closingIssuesReferences(first: 50) {
+                nodes {
+                    number
+                    title
+                    state
+                    createdAt
+                    closedAt
+                    author {
+                        login
+                    }
+                }
+            }
+        }
+    """,
+
+    "pr_reviews": """
+        fragment PRReviews on PullRequest {
+            reviews(first: 50, states: APPROVED) {
+                nodes {
+                    author {
+                        login
+                    }
+                }
+            }
+        }
+    """,
+
+    "pr_content": """
+        fragment PRContent on PullRequest {
+            bodyText
+            lastEditedAt
+        }
+    """
+}
+
 def build_optimized_graphql_query(
     user_id: str,
     include_commits: bool = True,

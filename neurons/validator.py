@@ -118,10 +118,16 @@ class Validator(BaseValidatorNeuron):
         return await forward(self)
 
 
-if __name__ == "__main__":
-
+def main():
     with Validator() as validator:
-
         while True:
             bt.logging.info(f"Validator running | uid {validator.uid} | {time.time()}")
             time.sleep(30)
+            # Check after initial sleep in-case there's startup delay
+            if not validator.thread.is_alive():
+                bt.logging.error(f"Validator thread is not alive. Exiting...")
+                break  # exit, trigger restart
+
+
+if __name__ == "__main__":
+    main()

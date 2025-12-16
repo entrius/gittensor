@@ -152,7 +152,9 @@ def get_github_user(token: str) -> Optional[Dict[str, Any]]:
                     bt.logging.warning(f"Failed to parse GitHub /user JSON response: {e}")
                     return None
 
-                _GITHUB_USER_CACHE[token] = user_data
+                if isinstance(user_data, dict) and user_data.get("id") is not None and user_data.get("created_at"):
+                    _GITHUB_USER_CACHE[token] = user_data
+
                 return user_data
 
             bt.logging.warning(

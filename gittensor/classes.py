@@ -353,8 +353,14 @@ class MinerEvaluation:
         return all_file_changes
 
     def add_pull_request(self, pull_request: PullRequest):
-        """Helper method to add a pull request and maintain collections."""
+        """Helper method to add a pull request and maintain collections.
+        
+        Automatically tracks the repository in unique_repos_contributed_to
+        to prevent KeyError in apply_cross_miner_multipliers_and_finalize
+        when calculating uniqueness multipliers.
+        """
         self.pull_requests.append(pull_request)
+        self.unique_repos_contributed_to.add(pull_request.repository_full_name)
 
 
 class GitPatSynapse(bt.Synapse):

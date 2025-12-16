@@ -7,7 +7,7 @@ import json
 import random
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Any, Dict, List, Optional, Tuple
 
 import bittensor as bt
 import requests
@@ -256,6 +256,50 @@ def get_graphql_cache_stats() -> Dict[str, Any]:
     }
 
 
+def create_github_session(token: str = None) -> Tuple[requests.Session, None]:
+    """
+    Create an optimized requests session for GitHub API calls with connection pooling and retry logic.
+
+    Args:
+        token (str, optional): GitHub PAT for authenticated requests
+
+    Returns:
+        Tuple[requests.Session, None]: Configured session
+    """
+    session = requests.Session()
+
+    # Configure retry strategy (reduced since we handle retries in rate limiter)
+    retry_strategy = Retry(
+        total=0,  # Disable urllib3 retries, we handle them in rate limiter
+        status_forcelist=[],
+        method_whitelist=["HEAD", "GET", "OPTIONS", "POST"]
+    )
+
+    # Create HTTP adapter with connection pooling
+    adapter = HTTPAdapter(
+        max_retries=retry_strategy,
+        pool_connections=10,  # Number of connection pools
+        pool_maxsize=20,      # Max connections per pool
+        pool_block=False      # Don't block when pool is full
+    )
+
+    # Mount adapters for both HTTP and HTTPS
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+
+    # Set default headers
+    session.headers.update({
+        'Accept': 'application/vnd.github.v3+json',
+        'User-Agent': 'Gittensor-Validator/1.0'
+    })
+
+    # Add authorization if token provided
+    if token:
+        session.headers.update({'Authorization': f'token {token}'})
+
+    return session, None
+
+
 # GraphQL Query Templates
 GRAPHQL_FRAGMENTS = {
     "pr_basic": """
@@ -392,12 +436,7 @@ def build_optimized_graphql_query(
     query($userId: ID!, $limit: Int!, $cursor: String) {{
       node(id: $userId) {{
         ... on User {{
-          pullRequests(
-            first: $limit,
-            states: [MERGED, OPEN, CLOSED],
-            orderBy: {{field: CREATED_AT, direction: DESC}},
-            after: $cursor
-          ) {{
+          pullRequests(first: $limit, states: [MERGED, OPEN, CLOSED], orderBy: {{field: CREATED_AT, direction: DESC}}, after: $cursor) {{
             pageInfo {{
               hasNextPage
               endCursor
@@ -448,18 +487,89 @@ def get_optimized_query_config(master_repositories: dict[str, dict]) -> dict:
     return config
 
 
-# Global cache instance
-_graphql_cache = GraphQLResponseCache()
-
-
-def get_graphql_cache() -> GraphQLResponseCache:
-    """Get the global GraphQL response cache instance."""
-    return _graphql_cache
+# core github graphql query
+QUERY = """
+    query($userId: ID!, $limit: Int!, $cursor: String) {
+      node(id: $userId) {
+        ... on User {
+          pullRequests(first: $limit, states: [MERGED, OPEN, CLOSED], orderBy: {field: CREATED_AT, direction: DESC}, after: $cursor) {
+            pageInfo {
+              hasNextPage
+              endCursor
+            }
+            nodes {
+              title
+              number
+              additions
+              deletions
+              mergedAt
+              createdAt
+              closedAt
+              lastEditedAt
+              bodyText
+              state
+              commits(first: 100) {
+                totalCount
+                nodes {
+                  commit {
+                    message
+                  }
+                }
+              }
+              repository {
+                name
+                owner {
+                  login
+                }
+                defaultBranchRef {
+                  name
+                }
+              }
+              baseRefName
+              headRefName
+              author {
+                login
+              }
+              authorAssociation
+              mergedBy {
+                login
+              }
+              closingIssuesReferences(first: 50) {
+                nodes {
+                  number
+                  title
+                  state
+                  createdAt
+                  closedAt
+                  author {
+                    login
+                  }
+                }
+              }
+              reviews(first: 50, states: APPROVED) {
+                nodes {
+                  author {
+                    login
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    """
 
 
 def branch_matches_pattern(branch_name: str, patterns: List[str]) -> bool:
-    """
-    Check if a branch name matches any pattern in the list. (e.g., '*-dev' matches '3.0-dev', '3.1-dev', etc.)
+    """Check if a branch name matches any pattern in the list.
+
+    Args:
+        branch_name (str): Branch name to check.
+        patterns (List[str]): Wildcard patterns to match (for example, "*-dev").
+
+    Returns:
+        bool: True if the branch name matches any of the patterns, otherwise False.
     """
     for pattern in patterns:
         if fnmatch.fnmatch(branch_name, pattern):
@@ -467,143 +577,131 @@ def branch_matches_pattern(branch_name: str, patterns: List[str]) -> bool:
     return False
 
 
-def create_github_session(token: str = None, rate_limiter: GitHubRateLimiter = None) -> Tuple[requests.Session, GitHubRateLimiter]:
-    """
-    Create an optimized requests session for GitHub API calls with connection pooling and intelligent rate limiting.
+def make_headers(token: str) -> Dict[str, str]:
+    """Build standard GitHub HTTP headers for a PAT.
 
     Args:
-        token (str, optional): GitHub PAT for authenticated requests
-        rate_limiter (GitHubRateLimiter, optional): Custom rate limiter instance
-
+        token (str): Github pat
     Returns:
-        Tuple[requests.Session, GitHubRateLimiter]: Configured session and rate limiter
+        Dict[str, str]: Mapping of HTTP header names to values.
     """
-    session = requests.Session()
-
-    # Create rate limiter if not provided
-    if rate_limiter is None:
-        rate_limiter = GitHubRateLimiter()
-
-    # Configure retry strategy (reduced since we handle retries in rate limiter)
-    retry_strategy = Retry(
-        total=0,  # Disable urllib3 retries, we handle them in rate limiter
-        status_forcelist=[],
-        method_whitelist=["HEAD", "GET", "OPTIONS", "POST"]
-    )
-
-    # Create HTTP adapter with connection pooling
-    adapter = HTTPAdapter(
-        max_retries=retry_strategy,
-        pool_connections=10,  # Number of connection pools
-        pool_maxsize=20,      # Max connections per pool
-        pool_block=False      # Don't block when pool is full
-    )
-
-    # Mount adapters for both HTTP and HTTPS
-    session.mount("http://", adapter)
-    session.mount("https://", adapter)
-
-    # Set default headers
-    session.headers.update({
-        'Accept': 'application/vnd.github.v3+json',
-        'User-Agent': 'Gittensor-Validator/1.0'
-    })
-
-    # Add authorization if token provided
-    if token:
-        session.headers.update({'Authorization': f'token {token}'})
-
-    return session, rate_limiter
+    return {
+        "Authorization": f"token {token}",
+        "Accept": "application/vnd.github.v3+json",
+    }
 
 
-def make_headers(token: str):
-    '''
-    helper function for formatting headers for requests
-    '''
-    return {'Authorization': f'token {token}', 'Accept': 'application/vnd.github.v3+json'}
+# In-process cache for GitHub /user responses, keyed by PAT.
+_GITHUB_USER_CACHE: Dict[str, Dict[str, Any]] = {}
+
+
+def get_github_user(token: str) -> Optional[Dict[str, Any]]:
+    """Fetch GitHub user data for a PAT with retry and in-process cache.
+
+    Args:
+        token (str): Github pat
+    Returns:
+        Optional[Dict[str, Any]]: Parsed JSON user object on success, or None on failure.
+    """
+    if not token:
+        return None
+
+    # Check cache first to avoid duplicate /user calls for the same PAT.
+    cached = _GITHUB_USER_CACHE.get(token)
+    if cached is not None:
+        return cached
+
+    headers = make_headers(token)
+
+    # Retry logic for timeout issues
+    for attempt in range(6):
+        try:
+            response = requests.get(f"{BASE_GITHUB_API_URL}/user", headers=headers, timeout=30)
+            if response.status_code == 200:
+                try:
+                    user_data: Dict[str, Any] = response.json()
+                except Exception as e:  # pragma: no cover
+                    bt.logging.warning(f"Failed to parse GitHub /user JSON response: {e}")
+                    return None
+
+                _GITHUB_USER_CACHE[token] = user_data
+                return user_data
+
+            bt.logging.warning(
+                f"GitHub /user request failed with status {response.status_code} (attempt {attempt + 1}/6)"
+            )
+            if attempt < 5:
+                time.sleep(2)
+
+        except Exception as e:
+            bt.logging.warning(
+                f"Could not fetch GitHub user (attempt {attempt + 1}/6): {e}"
+            )
+            if attempt < 5:  # Don't sleep on last attempt
+                time.sleep(2)
+
+    return None
 
 
 def get_github_username(token: str) -> Optional[str]:
-    '''
-    Get username using token
+    """Get GitHub username (login) using a PAT.
+
     Args:
-        token (str): Github pat
+        token (str): GitHub pat
+
     Returns:
-        username: Str or None if PAT is invalid or something went wrong
-    '''
-    session, rate_limiter = create_github_session(token)
-
-    try:
-        def make_request():
-            return session.get(f'{BASE_GITHUB_API_URL}/user', timeout=10)
-
-        response = rate_limiter.execute_with_retry(make_request)
-        if response.status_code == 200:
-            return response.json().get('login', None)
-    except Exception as e:
-        bt.logging.warning(f"Could not fetch GitHub username: {e}")
-    finally:
-        session.close()
-
-    return None
+        Optional[str]: Username (login) string, or None if the PAT is invalid or an error occurred.
+    """
+    user_data = get_github_user(token)
+    if not user_data:
+        return None
+    return user_data.get("login")
 
 
 def get_github_id(token: str) -> Optional[str]:
-    '''
-    Get id using token
+    """Get GitHub numeric user id (as string) using a PAT.
+
     Args:
-        token (str): Github pat
+        token (str): GitHub personal access token.
+
     Returns:
-        user_id: Str or None if PAT is invalid or something went wrong
-    '''
-    session, rate_limiter = create_github_session(token)
+        Optional[str]: Numeric user id as a string, or None if it cannot be determined.
+    """
+    user_data = get_github_user(token)
+    if not user_data:
+        return None
 
-    try:
-        def make_request():
-            return session.get(f'{BASE_GITHUB_API_URL}/user', timeout=30)
+    user_id = user_data.get("id")
+    if user_id is None:
+        return None
 
-        response = rate_limiter.execute_with_retry(make_request)
-        if response.status_code == 200:
-            user_id = response.json().get('id', None)
-            if user_id:
-                return str(user_id)  # Ensure it's returned as string
-    except Exception as e:
-        bt.logging.warning(f"Could not fetch GitHub id: {e}")
-    finally:
-        session.close()
-
-    return None
+    return str(user_id)
 
 
 def get_github_account_age_days(token: str) -> Optional[int]:
-    '''
-    Get GitHub account age in days
+    """Get GitHub account age in days for a PAT.
+
     Args:
-        token (str): Github pat
+        token (str): GitHub personal access token.
+
     Returns:
-        age_days: Int, number of days since account creation, or None if PAT is invalid or something went wrong
-    '''
-    session, rate_limiter = create_github_session(token)
+        Optional[int]: Number of days since account creation, or None if it cannot be determined.
+    """
+    user_data = get_github_user(token)
+    if not user_data:
+        return None
+
+    created_at = user_data.get("created_at")
+    if not created_at:
+        return None
 
     try:
-        def make_request():
-            return session.get(f'{BASE_GITHUB_API_URL}/user', timeout=30)
-
-        response = rate_limiter.execute_with_retry(make_request)
-        if response.status_code == 200:
-            user_data = response.json()
-            created_at = user_data.get('created_at')
-            if created_at:
-                created_dt = datetime.fromisoformat(created_at.rstrip("Z")).replace(tzinfo=timezone.utc)
-                now_dt = datetime.now(timezone.utc)
-                age_days = (now_dt - created_dt).days
-                return age_days
+        created_dt = datetime.fromisoformat(created_at.rstrip("Z")).replace(tzinfo=timezone.utc)
+        now_dt = datetime.now(timezone.utc)
+        return (now_dt - created_dt).days
     except Exception as e:
-        bt.logging.warning(f"Could not fetch GitHub account age: {e}")
-    finally:
-        session.close()
-
-    return None
+        bt.logging.warning(f"Could not parse GitHub account creation date: {e}")
+        return None
 
 
 def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -> Optional[List[FileChange]]:
@@ -616,15 +714,12 @@ def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -
     Returns:
         List[FileChanges]: List object with file changes or None if error
     '''
-    session, rate_limiter = create_github_session(token)
+    headers = make_headers(token)
 
     try:
-        def make_request():
-            return session.get(
-                f'{BASE_GITHUB_API_URL}/repos/{repository}/pulls/{pr_number}/files', timeout=15
-            )
-
-        response = rate_limiter.execute_with_retry(make_request)
+        response = requests.get(
+            f'{BASE_GITHUB_API_URL}/repos/{repository}/pulls/{pr_number}/files', headers=headers, timeout=15
+        )
         if response.status_code == 200:
             file_diffs = response.json()
             return [FileChange.from_github_response(pr_number, repository, file_diff) for file_diff in file_diffs]
@@ -632,12 +727,204 @@ def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -
         return []
 
     except Exception as e:
-        bt.logging.error(
-            f"Error getting file changes for PR #{pr_number} in {repository}: {e}"
-        )
+        bt.logging.error(f"Error getting file changes for PR #{pr_number} in {repository}: {e}")
         return []
+
+
+def get_github_graphql_query(
+    token: str, global_user_id: str, all_valid_prs: List[Dict], max_prs: int, cursor: Optional[str]
+) -> Optional[requests.Response]:
+    """
+    Get all merged PRs for a user across all repositories using GraphQL API with pagination.
+
+    Args:
+        token (str): GitHub PAT
+        global_user_id (str): Converted numeric user ID to GraphQL global node ID
+        all_valid_prs (List[Dict]): List of raw currently validated PRs
+        max_prs (int): Maximum number of PRs to fetch across all pages
+        cursor (Optional[str]): Pagination cursor (where query left off last), None for first page
+
+    Returns:
+        Optional[requests.Response]: Response object from the GraphQL query or None if errors occurred
+    """
+
+    # Create optimized session for GraphQL API calls
+    session, _ = create_github_session(token)
+    session.headers.update({'Content-Type': 'application/json'})
+
+    variables = {
+        "userId": global_user_id,
+        "limit": min(100, max_prs - len(all_valid_prs)),
+        "cursor": cursor,
+    }
+
+    # Make GraphQL request using rate limiter for intelligent retry handling
+    try:
+        def make_request():
+            return session.post(
+                f'{BASE_GITHUB_API_URL}/graphql',
+                json={"query": QUERY, "variables": variables},
+                timeout=30,  # Increased timeout for GraphQL complexity
+            )
+
+        response = execute_github_request_with_retry(make_request)
+
+        # Success
+        if response.status_code == 200:
+            return response
+
+        # Non-retryable error
+        bt.logging.error(
+            f"GraphQL request failed with status {response.status_code}: {response.text}"
+        )
+        return None
+
+    except requests.RequestException as e:
+        bt.logging.error(f"GraphQL request failed after all retries: {e}")
+        return None
+
     finally:
         session.close()
+
+
+def _process_non_merged_pr(
+    pr_raw: Dict, repository_full_name: str, pr_state: str, date_filter: datetime, active_repositories: List[str]
+) -> tuple[int, int]:
+    """
+    Process open and closed (not merged) PRs and return counts.
+
+    Args:
+        pr_raw (Dict): Raw PR data from GraphQL
+        repository_full_name (str): Full repository name (owner/repo)
+        pr_state (str): PR state (OPEN, CLOSED, MERGED)
+        date_filter (datetime): Date filter for lookback period
+        active_repositories (List[str]): List of active repository names
+
+    Returns:
+        tuple[int, int]: (open_pr_delta, closed_pr_delta) - increment counts for open/closed PRs
+    """
+    open_pr_delta = 0
+    closed_pr_delta = 0
+
+    # Check if it's an open PR. We are counting ALL open PRs to active repositories
+    if pr_state == 'OPEN':
+        if repository_full_name in active_repositories:
+            open_pr_delta = 1
+        return (open_pr_delta, closed_pr_delta)
+
+    # Handle CLOSED (not merged) PRs - count if within lookback period
+    if pr_state == 'CLOSED' and not pr_raw['mergedAt']:
+        if pr_raw.get('closedAt'):
+            closed_dt = datetime.fromisoformat(pr_raw['closedAt'].rstrip("Z")).replace(tzinfo=timezone.utc)
+            if (
+                repository_full_name in active_repositories
+                and closed_dt >= date_filter
+                and closed_dt > MERGE_SUCCESS_RATIO_APPLICATION_DATE
+            ):
+                closed_pr_delta = 1
+        return (open_pr_delta, closed_pr_delta)
+
+    return (open_pr_delta, closed_pr_delta)
+
+
+def _should_skip_merged_pr(
+    pr_raw: Dict,
+    repository_full_name: str,
+    master_repositories: dict[str, dict],
+    date_filter: datetime,
+    merged_dt: datetime,
+) -> tuple[bool, Optional[str]]:
+    """
+    Validate a merged PR against all eligibility criteria.
+
+    Args:
+        pr_raw (Dict): Raw PR data from GraphQL
+        repository_full_name (str): Full repository name (owner/repo)
+        master_repositories (dict[str, dict]): Repository metadata
+        date_filter (datetime): Date filter for lookback period
+        merged_dt (datetime): Parsed merge datetime
+
+    Returns:
+        tuple[bool, Optional[str]]: (should_skip, skip_reason) - True if PR should be skipped with reason
+    """
+    # Filter by master_repositories - find matching key case-insensitively
+    repo_key = next((key for key in master_repositories.keys() if key.lower() == repository_full_name.lower()), None)
+    if repo_key is None:
+        return (True, f"Skipping PR #{pr_raw['number']} in {repository_full_name} - ineligible repo")
+
+    # Filter by lookback window
+    if merged_dt < date_filter:
+        return (
+            True,
+            f"Skipping PR #{pr_raw['number']} in {repository_full_name} - merged before {MERGED_PR_LOOKBACK_DAYS} day lookback window",
+        )
+
+    # Skip if PR author is a maintainer
+    author_association = pr_raw.get('authorAssociation')
+    if author_association in ['OWNER', 'MEMBER', 'COLLABORATOR']:
+        return (
+            True,
+            f"Skipping PR #{pr_raw['number']} in {repository_full_name} - author is {author_association} (has direct merge capabilities)",
+        )
+
+    # Skip if PR was merged by the same person who created it (self-merge) AND there's no approvals from a differing party
+    if pr_raw['mergedBy'] and pr_raw['author']['login'] == pr_raw['mergedBy']['login']:
+        # Check if there are any approvals from users other than the author
+        reviews = pr_raw.get('reviews', {}).get('nodes', [])
+        has_external_approval = any(
+            review.get('author') and review['author']['login'] != pr_raw['author']['login'] for review in reviews
+        )
+
+        if not has_external_approval:
+            return (True, f"Skipping PR #{pr_raw['number']} in {repository_full_name} - self-merged, no approval")
+
+    # Skip if PR was not merged to an acceptable branch (default or additional)
+    default_branch = (
+        pr_raw['repository']['defaultBranchRef']['name'] if pr_raw['repository']['defaultBranchRef'] else 'main'
+    )
+    base_ref = pr_raw['baseRefName']
+    head_ref = pr_raw.get('headRefName', '')  # Source branch (where PR is coming FROM)
+    repo_metadata = master_repositories[repo_key]
+    additional_branches = repo_metadata.get('additional_acceptable_branches', [])
+
+    # Build list of all acceptable branches (default + additional)
+    acceptable_branches = [default_branch] + additional_branches
+
+    # Skip if the source branch (headRef) is also an acceptable branch
+    # This prevents PRs like "staging -> main" or "develop -> staging" where both are acceptable branches
+    # Supports wildcard patterns (e.g., '*-dev' matches '3.0-dev', '3.1-dev', etc.)
+    if branch_matches_pattern(head_ref, acceptable_branches):
+        return (
+            True,
+            f"Skipping PR #{pr_raw['number']} in {repository_full_name} - "
+            f"source branch '{head_ref}' is an acceptable branch (merging between acceptable branches not allowed)",
+        )
+
+    # Check if merged to default branch
+    if base_ref != default_branch:
+        # If not default, check if repository has additional acceptable branches
+        # Supports wildcard patterns (e.g., '*-dev' matches '3.0-dev', '3.1-dev', etc.)
+        if not branch_matches_pattern(base_ref, additional_branches):
+            return (
+                True,
+                f"Skipping PR #{pr_raw['number']} in {repository_full_name} - "
+                f"merged to '{base_ref}' (not default branch '{default_branch}' or additional acceptable branches)",
+            )
+
+    # Check if repo is inactive
+    repo_metadata = master_repositories[repo_key]
+    inactive_at = repo_metadata.get("inactiveAt")
+    if inactive_at is not None:
+        inactive_dt = datetime.fromisoformat(inactive_at.rstrip("Z")).replace(tzinfo=timezone.utc)
+        # Skip PR if it was merged at or after the repo became inactive
+        if merged_dt >= inactive_dt:
+            return (
+                True,
+                f"Skipping PR #{pr_raw['number']} in {repository_full_name} - PR was merged at/after repo became inactive (merged: {merged_dt.isoformat()}, inactive: {inactive_dt.isoformat()})",
+            )
+
+    # All checks passed
+    return (False, None)
 
 
 def get_user_merged_prs_graphql(
@@ -672,115 +959,22 @@ def get_user_merged_prs_graphql(
     master_repos_hash = hashlib.sha256(master_repos_str.encode()).hexdigest()
 
     # Check cache first
-    cache = get_graphql_cache()
-    cached_result = cache.get(user_id, token_hash, master_repos_hash, max_prs)
-    if cached_result:
+    cache = get_graphql_cache_result(user_id, token_hash, master_repos_hash, max_prs)
+    if cache:
         bt.logging.info(f"Using cached GraphQL result for user {user_id}")
-        return cached_result
-
-    # Create optimized session for GraphQL API calls
-    session, rate_limiter = create_github_session(token)
-    session.headers.update({'Content-Type': 'application/json'})
+        return cache
 
     # Calculate date filter
     date_filter = datetime.now(timezone.utc) - timedelta(days=MERGED_PR_LOOKBACK_DAYS)
 
-    # Get optimized query configuration
-    query_config = get_optimized_query_config(master_repositories)
-
     # Convert numeric user ID to GraphQL global node ID
     global_user_id = base64.b64encode(f"04:User{user_id}".encode()).decode()
-
-    # Build optimized query with selective field inclusion
-    commits_field = """
-              commits(first: 100) {
-                totalCount
-                nodes {
-                  commit {
-                    message
-                  }
-                }
-              }""" if query_config["include_commits"] else ""
-
-    issues_field = """
-              closingIssuesReferences(first: 50) {
-                nodes {
-                  number
-                  title
-                  state
-                  createdAt
-                  closedAt
-                  author {
-                    login
-                  }
-                }
-              }""" if query_config["include_issues"] else ""
-
-    reviews_field = """
-              reviews(first: 50, states: APPROVED) {
-                nodes {
-                  author {
-                    login
-                  }
-                }
-              }""" if query_config["include_reviews"] else ""
-
-    content_field = """
-              bodyText
-              lastEditedAt""" if query_config["include_content"] else ""
-
-    query = f"""
-    query($userId: ID!, $limit: Int!, $cursor: String) {{
-      node(id: $userId) {{
-        ... on User {{
-          pullRequests(first: $limit, states: [MERGED, OPEN, CLOSED], orderBy: {{field: CREATED_AT, direction: DESC}}, after: $cursor) {{
-            pageInfo {{
-              hasNextPage
-              endCursor
-            }}
-            nodes {{
-              title
-              number
-              additions
-              deletions
-              mergedAt
-              createdAt
-              closedAt
-              state
-              {f"lastEditedAt{chr(10)}              bodyText" if query_config["include_content"] else ""}
-              repository {{
-                name
-                owner {{
-                  login
-                }}
-                defaultBranchRef {{
-                  name
-                }}
-              }}
-              baseRefName
-              headRefName
-              author {{
-                login
-              }}
-              mergedBy {{
-                login
-              }}
-              {commits_field}
-              {issues_field}
-              {reviews_field}
-            }}
-          }}
-        }}
-      }}
-    }}
-    """
 
     all_valid_prs = []
     open_pr_count = 0
     merged_pr_count = 0  # Merged PRs after MERGE_SUCCESS_RATIO_APPLICATION_DATE
     closed_pr_count = 0  # Closed (not merged) within lookback period
     cursor = None
-    page_size = min(100, max_prs)  # GitHub GraphQL max is 100 per page
 
     # Build list of active repositories (those without an inactiveAt timestamp)
     active_repositories = [
@@ -789,49 +983,15 @@ def get_user_merged_prs_graphql(
 
     try:
         while len(all_valid_prs) < max_prs:
-            variables = {
-                "userId": global_user_id,
-                "limit": min(page_size, max_prs - len(all_valid_prs)),
-                "cursor": cursor,
-            }
-
-            # Make GraphQL request using rate limiter for intelligent retry handling
-            try:
-                def make_request():
-                    return session.post(
-                        f'{BASE_GITHUB_API_URL}/graphql',
-                        json={"query": query, "variables": variables},
-                        timeout=30,  # Increased timeout for GraphQL complexity
-                    )
-
-                response = rate_limiter.execute_with_retry(make_request)
-
-                # Success
-                if response.status_code == 200:
-                    break
-
-                # Non-retryable error
-                bt.logging.error(
-                    f"GraphQL request failed with status {response.status_code}: {response.text}"
-                )
-                break
-
-            except requests.exceptions.RequestException as e:
-                bt.logging.error(f"GraphQL request failed after all retries: {e}")
-                session.close()
+            # graphql query
+            response = get_github_graphql_query(token, global_user_id, all_valid_prs, max_prs, cursor)
+            if not response:
                 return PRCountResult(
                     valid_prs=all_valid_prs,
                     open_pr_count=open_pr_count,
                     merged_pr_count=merged_pr_count,
                     closed_pr_count=closed_pr_count,
                 )
-
-            if not response or response.status_code != 200:
-                bt.logging.error(
-                    f"GraphQL request failed with status {response.status_code if response else 'N/A'}: {response.text if response else 'No response'}"
-                )
-                break
-
             data = response.json()
 
             if 'errors' in data:
@@ -854,106 +1014,38 @@ def get_user_merged_prs_graphql(
                 repository_full_name = f"{pr_raw['repository']['owner']['login']}/{pr_raw['repository']['name']}"
                 pr_state = pr_raw['state']
 
-                # Check if it's an open PR and count it
-                if pr_state == 'OPEN':
-                    # Check if in tracked repositories
-                    if repository_full_name in active_repositories:
-                        open_pr_count += 1
-                    continue  # Skip further processing for open PRs
+                # Process non-merged PRs (OPEN or CLOSED without merge)
+                open_delta, closed_delta = _process_non_merged_pr(
+                    pr_raw, repository_full_name, pr_state, date_filter, active_repositories
+                )
+                open_pr_count += open_delta
+                closed_pr_count += closed_delta
 
-                # Handle CLOSED (not merged) PRs - count if within lookback period
-                if pr_state == 'CLOSED' and not pr_raw['mergedAt']:
-                    if pr_raw.get('closedAt'):
-                        closed_dt = datetime.fromisoformat(pr_raw['closedAt'].rstrip("Z")).replace(tzinfo=timezone.utc)
-                        if closed_dt >= date_filter and closed_dt > MERGE_SUCCESS_RATIO_APPLICATION_DATE and repository_full_name in active_repositories:
-                            closed_pr_count += 1
-                    continue  # Skip further processing for closed PRs
-
-                # Skip if not a merged pr
+                # Skip if not a merged PR
                 if not pr_raw['mergedAt']:
                     continue
 
-                # Filter by master_repositories
-                if repository_full_name not in master_repositories.keys():
-                    bt.logging.debug(
-                        f"Skipping PR #{pr_raw['number']} in {repository_full_name} - ineligible repo"
-                    )
-                    continue
-
-                # Parse merge date and filter by time window
+                # Parse merge date
                 merged_dt = datetime.fromisoformat(pr_raw['mergedAt'].rstrip("Z")).replace(tzinfo=timezone.utc)
-                if merged_dt < date_filter:
-                    # Skip PRs merged before lookback window
-                    bt.logging.debug(f"Skipping PR #{pr_raw['number']} in {repository_full_name} - merged before {MERGED_PR_LOOKBACK_DAYS} day lookback window")
-                    continue
 
-                # Skip if PR was merged by the same person who created it (self-merge) AND there's no approvals from a differing party
-                if pr_raw['mergedBy'] and pr_raw['author']['login'] == pr_raw['mergedBy']['login']:
-                    # Check if there are any approvals from users other than the author
-                    reviews = pr_raw.get('reviews', {}).get('nodes', [])
-                    has_external_approval = any(
-                        review.get('author') and review['author']['login'] != pr_raw['author']['login']
-                        for review in reviews
-                    )
-
-                    if not has_external_approval:
-                        bt.logging.debug(
-                            f"Skipping PR #{pr_raw['number']} in {repository_full_name} - self-merged, no approval"
-                        )
-                        continue
-
-                # Skip if PR was not merged to an acceptable branch (default or additional)
-                default_branch = (
-                    pr_raw['repository']['defaultBranchRef']['name']
-                    if pr_raw['repository']['defaultBranchRef']
-                    else 'main'
+                # Validate merged PR against all criteria
+                should_skip, skip_reason = _should_skip_merged_pr(
+                    pr_raw, repository_full_name, master_repositories, date_filter, merged_dt
                 )
-                base_ref = pr_raw['baseRefName']
-                head_ref = pr_raw.get('headRefName', '')  # Source branch (where PR is coming FROM)
-                repo_metadata = master_repositories.get(repository_full_name, {})
-                additional_branches = repo_metadata.get('additional_acceptable_branches', [])
 
-                # Build list of all acceptable branches (default + additional)
-                acceptable_branches = [default_branch] + additional_branches
-
-                # Skip if the source branch (headRef) is also an acceptable branch
-                # This prevents PRs like "staging -> main" or "develop -> staging" where both are acceptable branches
-                # Supports wildcard patterns (e.g., '*-dev' matches '3.0-dev', '3.1-dev', etc.)
-                if branch_matches_pattern(head_ref, acceptable_branches):
-                    bt.logging.debug(
-                        f"Skipping PR #{pr_raw['number']} in {repository_full_name} - "
-                        f"source branch '{head_ref}' is an acceptable branch (merging between acceptable branches not allowed)"
-                    )
+                if should_skip:
+                    bt.logging.debug(skip_reason)
                     continue
 
-                # Check if merged to default branch
-                if base_ref != default_branch:
-                    # If not default, check if repository has additional acceptable branches
-                    # Supports wildcard patterns (e.g., '*-dev' matches '3.0-dev', '3.1-dev', etc.)
-                    if not branch_matches_pattern(base_ref, additional_branches):
-                        bt.logging.debug(
-                            f"Skipping PR #{pr_raw['number']} in {repository_full_name} - "
-                            f"merged to '{base_ref}' (not default branch '{default_branch}' or additional acceptable branches)"
-                        )
-                        continue
-
-                repo_metadata = master_repositories[repository_full_name]
-                inactive_at = repo_metadata.get("inactiveAt")
-                # if repo is inactive
-                if inactive_at is not None:
-                    inactive_dt = datetime.fromisoformat(inactive_at.rstrip("Z")).replace(tzinfo=timezone.utc)
-                    # Skip PR if it was merged at or after the repo became inactive
-                    if merged_dt >= inactive_dt:
-                        bt.logging.debug(
-                            f"Skipping PR #{pr_raw['number']} in {repository_full_name} - PR was merged at/after repo became inactive (merged: {merged_dt.isoformat()}, inactive: {inactive_dt.isoformat()})"
-                        )
-                        continue
-
+                # PR passed all validation checks
+                base_ref = pr_raw['baseRefName']
                 bt.logging.info(f"Accepting PR #{pr_raw['number']} in {repository_full_name} - merged to '{base_ref}'")
+
                 # Increment merged_pr_count if merged after MERGE_SUCCESS_RATIO_APPLICATION_DATE
                 if merged_dt > MERGE_SUCCESS_RATIO_APPLICATION_DATE:
                     merged_pr_count += 1
-                # consider PR valid if all checks passed
+
+                # Consider PR valid if all checks passed
                 all_valid_prs.append(pr_raw)
 
             # Check if we should continue pagination
@@ -974,13 +1066,11 @@ def get_user_merged_prs_graphql(
             merged_pr_count=merged_pr_count,
             closed_pr_count=closed_pr_count,
         )
-        cache.put(user_id, token_hash, master_repos_hash, max_prs, result)
-        session.close()
+        put_graphql_cache_result(user_id, token_hash, master_repos_hash, max_prs, result)
         return result
 
     except Exception as e:
         bt.logging.error(f"Error fetching PRs via GraphQL for user: {e}")
-        session.close()
         return PRCountResult(valid_prs=[], open_pr_count=0, merged_pr_count=0, closed_pr_count=0)
 
 
@@ -1033,25 +1123,25 @@ async def get_multiple_user_prs_graphql(
     Returns:
         List of PRCountResult objects in the same order as user_requests
     """
-    semaphore = asyncio.Semaphore(max_concurrent)
-
-    async def fetch_with_semaphore(request):
-        async with semaphore:
-            user_id, token, master_repos, max_prs = request
-            return await get_user_merged_prs_graphql_async(
-                user_id, token, master_repos, max_prs
-            )
-
-    # Create tasks for all requests
-    tasks = [fetch_with_semaphore(request) for request in user_requests]
-
-    # Execute all tasks concurrently and maintain order
     if use_batching and len(user_requests) > 1:
         # Use batching for multiple users
         bt.logging.info(f"Using GraphQL batching for {len(user_requests)} users")
         return await get_user_prs_batch_graphql(user_requests, max_batch_size=3)
     else:
         # Use parallel individual requests
+        semaphore = asyncio.Semaphore(max_concurrent)
+
+        async def fetch_with_semaphore(request):
+            async with semaphore:
+                user_id, token, master_repos, max_prs = request
+                return await get_user_merged_prs_graphql_async(
+                    user_id, token, master_repos, max_prs
+                )
+
+        # Create tasks for all requests
+        tasks = [fetch_with_semaphore(request) for request in user_requests]
+
+        # Execute all tasks concurrently and maintain order
         bt.logging.info(f"Starting concurrent GraphQL requests for {len(user_requests)} users (max_concurrent={max_concurrent})")
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -1086,48 +1176,6 @@ def create_batch_graphql_query(user_requests: List[Tuple[str, str, dict[str, dic
     variables = {}
     user_count = len(user_requests)
 
-    # Get optimization config from first request (assume similar for batch)
-    if user_requests:
-        query_config = get_optimized_query_config(user_requests[0][2])  # master_repositories from first request
-
-        # Build conditional fields for batch query
-        batch_commits_field = """
-                commits(first: 100) {
-                  totalCount
-                  nodes {
-                    commit {
-                      message
-                    }
-                  }
-                }""" if query_config["include_commits"] else ""
-
-        batch_issues_field = """
-                closingIssuesReferences(first: 50) {
-                  nodes {
-                    number
-                    title
-                    state
-                    createdAt
-                    closedAt
-                    author {
-                      login
-                    }
-                  }
-                }""" if query_config["include_issues"] else ""
-
-        batch_reviews_field = """
-                reviews(first: 50, states: APPROVED) {
-                  nodes {
-                    author {
-                      login
-                    }
-                  }
-                }""" if query_config["include_reviews"] else ""
-
-        batch_content_field = """
-                lastEditedAt
-                bodyText""" if query_config["include_content"] else ""
-
     for i, (user_id, _, master_repositories, max_prs) in enumerate(user_requests):
         alias = f"user{i}"
 
@@ -1154,8 +1202,17 @@ def create_batch_graphql_query(user_requests: List[Tuple[str, str, dict[str, dic
                 mergedAt
                 createdAt
                 closedAt
+                lastEditedAt
+                bodyText
                 state
-                {batch_content_field}
+                commits(first: 100) {{
+                  totalCount
+                  nodes {{
+                    commit {{
+                      message
+                    }}
+                  }}
+                }}
                 repository {{
                   name
                   owner {{
@@ -1173,9 +1230,25 @@ def create_batch_graphql_query(user_requests: List[Tuple[str, str, dict[str, dic
                 mergedBy {{
                   login
                 }}
-                {batch_commits_field}
-                {batch_issues_field}
-                {batch_reviews_field}
+                closingIssuesReferences(first: 50) {{
+                  nodes {{
+                    number
+                    title
+                    state
+                    createdAt
+                    closedAt
+                    author {{
+                      login
+                    }}
+                  }}
+                }}
+                reviews(first: 50, states: APPROVED) {{
+                  nodes {{
+                    author {{
+                      login
+                    }}
+                  }}
+                }}
               }}
             }}
           }}
@@ -1234,7 +1307,7 @@ async def get_user_prs_batch_graphql(
         token = batch[0][1]
 
         # Execute batch query
-        session, rate_limiter = create_github_session(token)
+        session, _ = create_github_session(token)
         session.headers.update({'Content-Type': 'application/json'})
 
         try:
@@ -1245,7 +1318,7 @@ async def get_user_prs_batch_graphql(
                     timeout=60,  # Longer timeout for batch queries
                 )
 
-            response = rate_limiter.execute_with_retry(make_batch_request)
+            response = execute_github_request_with_retry(make_batch_request)
 
             if response.status_code == 200:
                 data = response.json()

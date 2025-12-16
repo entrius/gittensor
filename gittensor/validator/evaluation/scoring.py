@@ -81,8 +81,7 @@ def score_pull_requests(
         pr.time_decay_multiplier = round(time_decay_multiplier, 2)
         pr.gittensor_tag_multiplier = round(gittensor_tag_multiplier, 2)
         pr.merge_success_multiplier = round(merge_success_multiplier, 2)
-
-        miner_eval.unique_repos_contributed_to.add(pr.repository_full_name)
+        # Note: unique_repos_contributed_to is now tracked in MinerEvaluation.add_pull_request()
 
 
 def count_repository_contributors(miner_evaluations: Dict[int, MinerEvaluation]) -> Dict[str, int]:

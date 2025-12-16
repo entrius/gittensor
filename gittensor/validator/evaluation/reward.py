@@ -2,6 +2,7 @@
 # Copyright © 2025 Entrius
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Dict
 
 import bittensor as bt
@@ -71,12 +72,12 @@ async def reward(
 
     bt.logging.info(f"******* Reward function called for UID: {uid} *******")
 
-    miner_eval = validate_response_and_initialize_miner_evaluation(uid, response)
+    miner_eval = await validate_response_and_initialize_miner_evaluation(uid, response)
     if miner_eval.failed_reason is not None:
         bt.logging.info(f"UID {uid} not being evaluated: {miner_eval.failed_reason}")
         return miner_eval
 
-    pr_result = get_user_merged_prs_graphql(miner_eval.github_id, miner_eval.github_pat, master_repositories)
+    pr_result = await get_user_merged_prs_graphql(miner_eval.github_id, miner_eval.github_pat, master_repositories)
 
     miner_eval.total_merged_prs = pr_result.merged_pr_count
     miner_eval.total_open_prs = pr_result.open_pr_count
@@ -87,7 +88,7 @@ async def reward(
             PullRequest.from_graphql_response(raw_pr, uid, miner_eval.hotkey, miner_eval.github_id)
         )
 
-    score_pull_requests(miner_eval, master_repositories, programming_languages)
+    await score_pull_requests(miner_eval, master_repositories, programming_languages)
 
     # Clear PAT after scoring to avoid storing sensitive data
     miner_eval.github_pat = None
@@ -110,19 +111,24 @@ async def get_rewards(
 
     bt.logging.info(f"UIDs: {uids}")
 
-    responses: Dict[int, GitPatSynapse] = {}
-    miner_evaluations: Dict[int, MinerEvaluation] = {}
+    # Query all miners in parallel
+    query_tasks = [query_miner(self, uid) for uid in uids]
+    miner_responses_list = await asyncio.gather(*query_tasks)
+    
+    responses: Dict[int, GitPatSynapse] = {
+        uid: resp for uid, resp in zip(uids, miner_responses_list)
+    }
 
-    # Query miners and calculate score.
-    for uid in uids:
-
-        # retrieve PAT
-        miner_response = await query_miner(self, uid)
-        responses[uid] = miner_response
-
-        # Calculate score
-        miner_evaluation = await reward(uid, miner_response, master_repositories, programming_languages)
-        miner_evaluations[uid] = miner_evaluation
+    # Evaluate all miners in parallel
+    eval_tasks = [
+        reward(uid, responses[uid], master_repositories, programming_languages)
+        for uid in uids
+    ]
+    miner_evaluations_list = await asyncio.gather(*eval_tasks)
+    
+    miner_evaluations: Dict[int, MinerEvaluation] = {
+        ev.uid: ev for ev in miner_evaluations_list
+    }
 
     # Adjust scores for duplicate accounts
     detect_and_penalize_duplicates(responses, miner_evaluations)

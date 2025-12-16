@@ -1,12 +1,12 @@
 # Entrius 2025
 import base64
 import fnmatch
-import time
+import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 import bittensor as bt
-import requests
+import aiohttp
 
 from gittensor.classes import FileChange, PRCountResult
 from gittensor.constants import (
@@ -123,7 +123,7 @@ def make_headers(token: str) -> Dict[str, str]:
 _GITHUB_USER_CACHE: Dict[str, Dict[str, Any]] = {}
 
 
-def get_github_user(token: str) -> Optional[Dict[str, Any]]:
+async def get_github_user(token: str) -> Optional[Dict[str, Any]]:
     """Fetch GitHub user data for a PAT with retry and in-process cache.
 
     Args:
@@ -142,36 +142,37 @@ def get_github_user(token: str) -> Optional[Dict[str, Any]]:
     headers = make_headers(token)
 
     # Retry logic for timeout issues
-    for attempt in range(6):
-        try:
-            response = requests.get(f"{BASE_GITHUB_API_URL}/user", headers=headers, timeout=30)
-            if response.status_code == 200:
-                try:
-                    user_data: Dict[str, Any] = response.json()
-                except Exception as e:  # pragma: no cover
-                    bt.logging.warning(f"Failed to parse GitHub /user JSON response: {e}")
-                    return None
+    async with aiohttp.ClientSession() as session:
+        for attempt in range(6):
+            try:
+                async with session.get(f"{BASE_GITHUB_API_URL}/user", headers=headers, timeout=30) as response:
+                    if response.status == 200:
+                        try:
+                            user_data: Dict[str, Any] = await response.json()
+                        except Exception as e:
+                            bt.logging.warning(f"Failed to parse GitHub /user JSON response: {e}")
+                            return None
 
-                _GITHUB_USER_CACHE[token] = user_data
-                return user_data
+                        _GITHUB_USER_CACHE[token] = user_data
+                        return user_data
 
-            bt.logging.warning(
-                f"GitHub /user request failed with status {response.status_code} (attempt {attempt + 1}/6)"
-            )
-            if attempt < 5:
-                time.sleep(2)
+                    bt.logging.warning(
+                        f"GitHub /user request failed with status {response.status} (attempt {attempt + 1}/6)"
+                    )
+                    if attempt < 5:
+                        await asyncio.sleep(2)
 
-        except Exception as e:
-            bt.logging.warning(
-                f"Could not fetch GitHub user (attempt {attempt + 1}/6): {e}"
-            )
-            if attempt < 5:  # Don't sleep on last attempt
-                time.sleep(2)
+            except Exception as e:
+                bt.logging.warning(
+                    f"Could not fetch GitHub user (attempt {attempt + 1}/6): {e}"
+                )
+                if attempt < 5:  # Don't sleep on last attempt
+                    await asyncio.sleep(2)
 
     return None
 
 
-def get_github_username(token: str) -> Optional[str]:
+async def get_github_username(token: str) -> Optional[str]:
     """Get GitHub username (login) using a PAT.
 
     Args:
@@ -180,13 +181,13 @@ def get_github_username(token: str) -> Optional[str]:
     Returns:
         Optional[str]: Username (login) string, or None if the PAT is invalid or an error occurred.
     """
-    user_data = get_github_user(token)
+    user_data = await get_github_user(token)
     if not user_data:
         return None
     return user_data.get("login")
 
 
-def get_github_id(token: str) -> Optional[str]:
+async def get_github_id(token: str) -> Optional[str]:
     """Get GitHub numeric user id (as string) using a PAT.
 
     Args:
@@ -195,7 +196,7 @@ def get_github_id(token: str) -> Optional[str]:
     Returns:
         Optional[str]: Numeric user id as a string, or None if it cannot be determined.
     """
-    user_data = get_github_user(token)
+    user_data = await get_github_user(token)
     if not user_data:
         return None
 
@@ -206,7 +207,7 @@ def get_github_id(token: str) -> Optional[str]:
     return str(user_id)
 
 
-def get_github_account_age_days(token: str) -> Optional[int]:
+async def get_github_account_age_days(token: str) -> Optional[int]:
     """Get GitHub account age in days for a PAT.
 
     Args:
@@ -215,7 +216,7 @@ def get_github_account_age_days(token: str) -> Optional[int]:
     Returns:
         Optional[int]: Number of days since account creation, or None if it cannot be determined.
     """
-    user_data = get_github_user(token)
+    user_data = await get_github_user(token)
     if not user_data:
         return None
 
@@ -232,40 +233,84 @@ def get_github_account_age_days(token: str) -> Optional[int]:
         return None
 
 
-def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -> Optional[List[FileChange]]:
+async def get_pull_request_file_changes(
+    repository: str, pr_number: int, token: str, session: Optional[aiohttp.ClientSession] = None
+) -> Optional[List[FileChange]]:
     '''
     Get the diff for a specific PR by repository name and PR number
     Args:
         repository (str): Repository in format 'owner/repo'
         pr_number (int): PR number
         token (str): Github pat
+        session (Optional[aiohttp.ClientSession]): Existing aiohttp session to reuse
     Returns:
         List[FileChanges]: List object with file changes or None if error
     '''
     headers = make_headers(token)
+    
+    # Use provided session or create a new one
+    if session:
+        client = session
+        should_close = False
+    else:
+        client = aiohttp.ClientSession()
+        should_close = True
+
+    attempts = 6
 
     try:
-        response = requests.get(
-            f'{BASE_GITHUB_API_URL}/repos/{repository}/pulls/{pr_number}/files', headers=headers, timeout=15
-        )
-        if response.status_code == 200:
-            file_diffs = response.json()
-            return [FileChange.from_github_response(pr_number, repository, file_diff) for file_diff in file_diffs]
+        for attempt in range(attempts):
+            try:
+                async with client.get(
+                    f'{BASE_GITHUB_API_URL}/repos/{repository}/pulls/{pr_number}/files', headers=headers, timeout=15
+                ) as response:
+                    if response.status == 200:
+                        file_diffs = await response.json()
+                        return [FileChange.from_github_response(pr_number, repository, file_diff) for file_diff in file_diffs]
+                    
+                    # Handle rate limits or temporary failures
+                    elif attempt < (attempts - 1):
+                         # Exponential backoff: 5s, 10s, 20s, 40s, 80s
+                        backoff_delay = 5 * (2**attempt)
+                        bt.logging.warning(
+                            f"File changes request failed for {repository}#{pr_number} with status {response.status} (attempt {attempt + 1}/{attempts}), retrying in {backoff_delay}s..."
+                        )
+                        await asyncio.sleep(backoff_delay)
+                    else:
+                        bt.logging.error(f"Failed to get file changes after {attempts} attempts. Status: {response.status}")
+                        return []
 
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                if attempt < (attempts - 1):
+                    backoff_delay = 5 * (2**attempt)
+                    bt.logging.warning(
+                        f"Connection error getting file changes for {repository}#{pr_number} (attempt {attempt + 1}/{attempts}): {e}, retrying in {backoff_delay}s..."
+                    )
+                    await asyncio.sleep(backoff_delay)
+                else:
+                    bt.logging.error(f"Connection error getting file changes after {attempts} attempts: {e}")
+                    return []
+        
         return []
 
-    except Exception as e:
-        bt.logging.error(f"Error getting file changes for PR #{pr_number} in {repository}: {e}")
-        return []
+    finally:
+        if should_close:
+            await client.close()
 
 
-def get_github_graphql_query(
-    token: str, global_user_id: str, all_valid_prs: List[Dict], max_prs: int, cursor: Optional[str]
-) -> Optional[requests.Response]:
+async def get_github_graphql_query(
+    session: aiohttp.ClientSession,
+    token: str,
+    global_user_id: str,
+    all_valid_prs: List[Dict],
+    max_prs: int,
+    cursor: Optional[str]
+) -> Optional[Dict]:
     """
     Get all merged PRs for a user across all repositories using GraphQL API with pagination.
 
     Args:
+        session (aiohttp.ClientSession): The active client session
         token (str): GitHub PAT
         global_user_id (str): Converted numeric user ID to GraphQL global node ID
         all_valid_prs (List[Dict]): List of raw currently validated PRs
@@ -273,7 +318,7 @@ def get_github_graphql_query(
         cursor (Optional[str]): Pagination cursor (where query left off last), None for first page
 
     Returns:
-        Optional[requests.Response]: Response object from the GraphQL query or None if errors occurred
+        Optional[Dict]: Parsed JSON response from the GraphQL query or None if errors occurred
     """
 
     attempts = 6
@@ -286,36 +331,37 @@ def get_github_graphql_query(
 
     for attempt in range(attempts):
         try:
-            response = requests.post(
+            async with session.post(
                 f'{BASE_GITHUB_API_URL}/graphql',
                 headers=headers,
                 json={"query": QUERY, "variables": variables},
                 timeout=30,
-            )
+            ) as response:
 
-            if response.status_code == 200:
-                return response
-            # error - log and retry
-            elif attempt < (attempts - 1):
-                # Exponential backoff: 5s, 10s, 20s, 40s, 80s
-                backoff_delay = 5 * (2**attempt)
-                bt.logging.warning(
-                    f"GraphQL request failed with status {response.status_code} (attempt {attempt + 1}/{attempts}), retrying in {backoff_delay}s..."
-                )
-                time.sleep(backoff_delay)
-            else:
-                bt.logging.error(
-                    f"GraphQL request failed with status {response.status_code} after {attempts} attempts: {response.text}"
-                )
+                if response.status == 200:
+                    return await response.json()
+                # error - log and retry
+                elif attempt < (attempts - 1):
+                    # Exponential backoff: 5s, 10s, 20s, 40s, 80s
+                    backoff_delay = 5 * (2**attempt)
+                    bt.logging.warning(
+                        f"GraphQL request failed with status {response.status} (attempt {attempt + 1}/{attempts}), retrying in {backoff_delay}s..."
+                    )
+                    await asyncio.sleep(backoff_delay)
+                else:
+                    text = await response.text()
+                    bt.logging.error(
+                        f"GraphQL request failed with status {response.status} after {attempts} attempts: {text}"
+                    )
 
-        except requests.exceptions.RequestException as e:
+        except aiohttp.ClientError as e:
             if attempt < (attempts - 1):
                 # Exponential backoff: 5s, 10s, 20s, 40s, 80s
                 backoff_delay = 5 * (2**attempt)
                 bt.logging.warning(
                     f"GraphQL request connection error (attempt {attempt + 1}/{attempts}): {e}, retrying in {backoff_delay}s..."
                 )
-                time.sleep(backoff_delay)
+                await asyncio.sleep(backoff_delay)
             else:
                 bt.logging.error(f"GraphQL request failed after {attempts} attempts: {e}")
                 return None
@@ -463,7 +509,7 @@ def _should_skip_merged_pr(
     return (False, None)
 
 
-def get_user_merged_prs_graphql(
+async def get_user_merged_prs_graphql(
     user_id: str, token: str, master_repositories: dict[str, dict], max_prs: int = 1000
 ) -> PRCountResult:
     """
@@ -507,88 +553,88 @@ def get_user_merged_prs_graphql(
     ]
 
     try:
-        while len(all_valid_prs) < max_prs:
-            # graphql query
-            response = get_github_graphql_query(token, global_user_id, all_valid_prs, max_prs, cursor)
-            if not response:
-                return PRCountResult(
-                    valid_prs=all_valid_prs,
-                    open_pr_count=open_pr_count,
-                    merged_pr_count=merged_pr_count,
-                    closed_pr_count=closed_pr_count,
-                )
-            data = response.json()
+        async with aiohttp.ClientSession() as session:
+            while len(all_valid_prs) < max_prs:
+                # graphql query
+                data = await get_github_graphql_query(session, token, global_user_id, all_valid_prs, max_prs, cursor)
+                if not data:
+                    return PRCountResult(
+                        valid_prs=all_valid_prs,
+                        open_pr_count=open_pr_count,
+                        merged_pr_count=merged_pr_count,
+                        closed_pr_count=closed_pr_count,
+                    )
 
-            if 'errors' in data:
-                bt.logging.error(f"GraphQL errors: {data['errors']}")
-                break
+                if 'errors' in data:
+                    bt.logging.error(f"GraphQL errors: {data['errors']}")
+                    break
 
-            # Extract user data from node query
-            user_data = data.get('data', {}).get('node')
+                # Extract user data from node query
+                user_data = data.get('data', {}).get('node')
 
-            if not user_data:
-                bt.logging.warning("User not found or no pull requests")
-                break
+                if not user_data:
+                    bt.logging.warning("User not found or no pull requests")
+                    break
 
-            pr_data = user_data.get('pullRequests', {})
-            prs = pr_data.get('nodes', [])
-            page_info = pr_data.get('pageInfo', {})
+                pr_data = user_data.get('pullRequests', {})
+                prs = pr_data.get('nodes', [])
+                page_info = pr_data.get('pageInfo', {})
 
-            # Process PRs from this page
-            for pr_raw in prs:
-                repository_full_name = f"{pr_raw['repository']['owner']['login']}/{pr_raw['repository']['name']}"
-                pr_state = pr_raw['state']
+                # Process PRs from this page
+                for pr_raw in prs:
+                    repository_full_name = f"{pr_raw['repository']['owner']['login']}/{pr_raw['repository']['name']}"
+                    pr_state = pr_raw['state']
 
-                # Process non-merged PRs (OPEN or CLOSED without merge)
-                open_delta, closed_delta = _process_non_merged_pr(
-                    pr_raw, repository_full_name, pr_state, date_filter, active_repositories
-                )
-                open_pr_count += open_delta
-                closed_pr_count += closed_delta
+                    # Process non-merged PRs (OPEN or CLOSED without merge)
+                    open_delta, closed_delta = _process_non_merged_pr(
+                        pr_raw, repository_full_name, pr_state, date_filter, active_repositories
+                    )
+                    open_pr_count += open_delta
+                    closed_pr_count += closed_delta
 
-                # Skip if not a merged PR
-                if not pr_raw['mergedAt']:
-                    continue
+                    # Skip if not a merged PR
+                    if not pr_raw['mergedAt']:
+                        continue
 
-                # Parse merge date
-                merged_dt = datetime.fromisoformat(pr_raw['mergedAt'].rstrip("Z")).replace(tzinfo=timezone.utc)
+                    # Parse merge date
+                    merged_dt = datetime.fromisoformat(pr_raw['mergedAt'].rstrip("Z")).replace(tzinfo=timezone.utc)
 
-                # Validate merged PR against all criteria
-                should_skip, skip_reason = _should_skip_merged_pr(
-                    pr_raw, repository_full_name, master_repositories, date_filter, merged_dt
-                )
+                    # Validate merged PR against all criteria
+                    should_skip, skip_reason = _should_skip_merged_pr(
+                        pr_raw, repository_full_name, master_repositories, date_filter, merged_dt
+                    )
 
-                if should_skip:
-                    bt.logging.debug(skip_reason)
-                    continue
+                    if should_skip:
+                        bt.logging.debug(skip_reason)
+                        continue
 
-                # PR passed all validation checks
-                base_ref = pr_raw['baseRefName']
-                bt.logging.info(f"Accepting PR #{pr_raw['number']} in {repository_full_name} - merged to '{base_ref}'")
+                    # PR passed all validation checks
+                    base_ref = pr_raw['baseRefName']
+                    bt.logging.info(f"Accepting PR #{pr_raw['number']} in {repository_full_name} - merged to '{base_ref}'")
 
-                # Increment merged_pr_count if merged after MERGE_SUCCESS_RATIO_APPLICATION_DATE
-                if merged_dt > MERGE_SUCCESS_RATIO_APPLICATION_DATE:
-                    merged_pr_count += 1
+                    # Increment merged_pr_count if merged after MERGE_SUCCESS_RATIO_APPLICATION_DATE
+                    if merged_dt > MERGE_SUCCESS_RATIO_APPLICATION_DATE:
+                        merged_pr_count += 1
 
-                # Consider PR valid if all checks passed
-                all_valid_prs.append(pr_raw)
+                    # Consider PR valid if all checks passed
+                    all_valid_prs.append(pr_raw)
 
-            # Check if we should continue pagination
-            if not page_info.get('hasNextPage') or len(prs) == 0:
-                break
+                # Check if we should continue pagination
+                if not page_info.get('hasNextPage') or len(prs) == 0:
+                    break
 
-            cursor = page_info.get('endCursor')
+                cursor = page_info.get('endCursor')
 
-        bt.logging.info(
-            f"Found {len(all_valid_prs)} valid merged PRs, {open_pr_count} open PRs, "
-            f"{merged_pr_count} merged PRs, {closed_pr_count} closed PRs."
-        )
-        return PRCountResult(
-            valid_prs=all_valid_prs,
-            open_pr_count=open_pr_count,
-            merged_pr_count=merged_pr_count,
-            closed_pr_count=closed_pr_count,
-        )
+            bt.logging.info(
+                f"Found {len(all_valid_prs)} valid merged PRs, {open_pr_count} open PRs, "
+                f"{merged_pr_count} merged PRs, {closed_pr_count} closed PRs."
+            )
+            return PRCountResult(
+                valid_prs=all_valid_prs,
+                open_pr_count=open_pr_count,
+                merged_pr_count=merged_pr_count,
+                closed_pr_count=closed_pr_count,
+            )
 
     except Exception as e:
         bt.logging.error(f"Error fetching PRs via GraphQL for user: {e}")

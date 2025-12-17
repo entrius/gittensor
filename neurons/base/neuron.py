@@ -16,11 +16,13 @@
 # DEALINGS IN THE SOFTWARE.
 
 import copy
+import time
 import typing
 
 import bittensor as bt
 
 from abc import ABC, abstractmethod
+from websockets.exceptions import ConnectionClosedError
 
 # Sync calls set weights and also resyncs the metagraph.
 from gittensor.utils.config import check_config, add_args, config
@@ -108,6 +110,13 @@ class BaseNeuron(ABC):
         )
         self.step = 0
 
+    def _reconnect_subtensor(self):
+        """Recreate subtensor connection when WebSocket goes stale."""
+        if self.config.mock:
+            return  # Don't reconnect in mock mode
+        bt.logging.info("Reconnecting subtensor...")
+        self.subtensor = bt.subtensor(config=self.config)
+
     @abstractmethod
     async def forward(self, synapse: bt.Synapse) -> bt.Synapse:
         ...
@@ -132,17 +141,27 @@ class BaseNeuron(ABC):
         # Always save state.
         self.save_state()
 
-    def check_registered(self):
-        # --- Check for registration.
-        if not self.subtensor.is_hotkey_registered(
-            netuid=self.config.netuid,
-            hotkey_ss58=self.wallet.hotkey.ss58_address,
-        ):
-            bt.logging.error(
-                f"Wallet: {self.wallet} is not registered on netuid {self.config.netuid}."
-                f" Please register the hotkey using `btcli subnets register` before trying again"
-            )
-            exit()
+    def check_registered(self, max_retries: int = 3):
+        """Check if hotkey is registered, with retry logic for connection failures."""
+        for attempt in range(max_retries):
+            try:
+                if not self.subtensor.is_hotkey_registered(
+                    netuid=self.config.netuid,
+                    hotkey_ss58=self.wallet.hotkey.ss58_address,
+                ):
+                    bt.logging.error(
+                        f"Wallet: {self.wallet} is not registered on netuid {self.config.netuid}."
+                        f" Please register the hotkey using `btcli subnets register` before trying again"
+                    )
+                    exit()
+                return  # Success
+            except ConnectionClosedError as e:
+                bt.logging.warning(f"WebSocket connection closed during check_registered (attempt {attempt + 1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    self._reconnect_subtensor()
+                    time.sleep(2 ** attempt)  # Exponential backoff: 1s, 2s, 4s
+                else:
+                    raise
 
     def should_sync_metagraph(self):
         """

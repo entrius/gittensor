@@ -50,4 +50,4 @@ def get_all_uids(self, exclude: List[int] = []) -> set[int]:
     # Ensure miner UID 0 is always included (subnet requirement)
     available_miner_uids.add(0)
 
-    return available_miner_uids
+    return sorted(available_miner_uids)

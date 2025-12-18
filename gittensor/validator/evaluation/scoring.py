@@ -175,7 +175,7 @@ def apply_cross_miner_multipliers_and_finalize(miner_evaluations: Dict[int, Mine
             evaluation.total_lines_changed += pr.total_lines_scored
 
         evaluation.unique_repos_count = len(evaluation.unique_repos_contributed_to)
-        bt.logging.info(f"UID {uid} total: {evaluation.total_score:.2f} ({evaluation.total_prs} PRs)")
+        bt.logging.info(f"UID {uid} total score: {evaluation.total_score:.2f} ({len(evaluation.merged_pull_requests)} PRs)")
 
     bt.logging.info(f"Finalized {total_prs} merged PRs across {total_contributing_miners} miners")
 

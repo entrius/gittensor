@@ -56,20 +56,12 @@ class DatabaseStorage:
 
             # Store all entities using bulk methods
             miner = Miner(miner_eval.uid, miner_eval.hotkey, miner_eval.github_id)
-            pull_requests = miner_eval.pull_requests
-            # Only store open PRs created after COLLATERAL_EFFECTIVE_DATE
-            eligible_open_prs = [
-                pr for pr in miner_eval.open_pull_requests
-                if pr.created_at > COLLATERAL_EFFECTIVE_DATE
-            ]
-            all_issues = miner_eval.get_all_issues()
-            all_file_changes = miner_eval.get_all_file_changes()
 
             result.stored_counts['miners'] = self.repo.set_miner(miner)
-            result.stored_counts['pull_requests'] = self.repo.store_pull_requests_bulk(pull_requests)
-            result.stored_counts['open_pull_requests'] = self.repo.store_pull_requests_bulk(eligible_open_prs)
-            result.stored_counts['issues'] = self.repo.store_issues_bulk(all_issues)
-            result.stored_counts['file_changes'] = self.repo.store_file_changes_bulk(all_file_changes)
+            result.stored_counts['pull_requests'] = self.repo.store_pull_requests_bulk(miner_eval.merged_pull_requests)
+            result.stored_counts['open_pull_requests'] = self.repo.store_pull_requests_bulk(miner_eval.open_pull_requests)
+            result.stored_counts['issues'] = self.repo.store_issues_bulk(miner_eval.get_all_issues())
+            result.stored_counts['file_changes'] = self.repo.store_file_changes_bulk(miner_eval.get_all_file_changes())
             result.stored_counts['evaluations'] = 1 if self.repo.set_miner_evaluation(miner_eval) else 0
 
             # Commit transaction

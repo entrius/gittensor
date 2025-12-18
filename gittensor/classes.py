@@ -33,20 +33,6 @@ class PRFetchResult:
     merged_pr_count: int  # Merged PRs after MERGE_SUCCESS_RATIO_APPLICATION_DATE
     closed_pr_count: int  # Closed (not merged) PRs after MERGE_SUCCESS_RATIO_APPLICATION_DATE
 
-    # Backwards compatibility properties
-    @property
-    def valid_prs(self) -> List[DefaultDict]:
-        return self.merged_prs
-
-    @property
-    def valid_open_prs(self) -> List[DefaultDict]:
-        return self.open_prs
-
-
-# Backwards compatibility alias
-PRCountResult = PRFetchResult
-
-
 @dataclass
 class Miner:
     """Miner identity"""

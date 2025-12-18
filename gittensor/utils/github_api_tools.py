@@ -607,7 +607,7 @@ def get_user_prs_graphql(
                     continue
 
                 base_ref = pr_raw['baseRefName']
-                bt.logging.info(f"MERGED PR #{pr_raw['number']} in {repository_full_name} -> '{base_ref}'")
+                bt.logging.info(f"Accepting MERGED PR #{pr_raw['number']} in {repository_full_name} -> '{base_ref}'")
 
                 if merged_dt > MERGE_SUCCESS_RATIO_APPLICATION_DATE:
                     merged_pr_count += 1

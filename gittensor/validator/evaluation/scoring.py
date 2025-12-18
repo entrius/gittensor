@@ -7,7 +7,7 @@ from typing import Dict
 
 import bittensor as bt
 
-from gittensor.classes import Issue, MinerEvaluation, PRState, PullRequest
+from gittensor.classes import Issue, MinerEvaluation, PullRequest
 from gittensor.constants import (
     SECONDS_PER_DAY,
     SECONDS_PER_HOUR,
@@ -27,8 +27,6 @@ from gittensor.constants import (
     MERGE_SUCCESS_RATIO_ATTEMPTS_THRESHOLD,
     MERGE_SUCCESS_RATIO_APPLICATION_DATE,
     POTENTIAL_SCORE_COLLATERAL_PERCENT,
-    COLLATERAL_EFFECTIVE_DATE,  # Used in apply_cross_miner_multipliers_and_finalize for reinflation
-    COLLATERAL_REINFLATION_MULTIPLIER,
 )
 from gittensor.utils.github_api_tools import get_pull_request_file_changes, normalize_repo_name
 
@@ -127,10 +125,7 @@ def calculate_time_decay_multiplier(pr: PullRequest) -> float:
 
 
 def apply_cross_miner_multipliers_and_finalize(miner_evaluations: Dict[int, MinerEvaluation]) -> None:
-    """Apply uniqueness multipliers and finalize scores for merged PRs.
-
-    Merged PRs created after COLLATERAL_EFFECTIVE_DATE receive reinflation boost.
-    """
+    """Apply uniqueness multipliers and finalize scores for merged PRs."""
     bt.logging.info("**Finalizing merged PR scores**")
 
     repo_counts = count_repository_contributors(miner_evaluations)
@@ -159,12 +154,6 @@ def apply_cross_miner_multipliers_and_finalize(miner_evaluations: Dict[int, Mine
 
             # Calculate final earned score now that all multipliers are set
             pr.calculate_final_earned_score()
-
-            # Reinflation boost for PRs created after collateral effective date
-            if pr.created_at > COLLATERAL_EFFECTIVE_DATE:
-                original = pr.earned_score
-                pr.earned_score *= COLLATERAL_REINFLATION_MULTIPLIER
-                bt.logging.info(f"  PR #{pr.number} reinflation: {original:.2f} -> {pr.earned_score:.2f}")
 
             evaluation.base_total_score += pr.base_score
             evaluation.total_score += pr.earned_score

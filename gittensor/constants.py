@@ -97,7 +97,7 @@ PREPROCESSOR_LANGUAGES = {
 # Collateral System
 # =============================================================================
 # Date when collateral system becomes effective (PRs created after this date are subject to collateral)
-COLLATERAL_EFFECTIVE_DATE = datetime(2025, 12, 20, 0, 0, 0, tzinfo=timezone.utc)
+COLLATERAL_EFFECTIVE_DATE = datetime(2025, 12, 19, 17, 0, 0, tzinfo=timezone.utc)
 # Percentage of potential score used as collateral for open PRs
 POTENTIAL_SCORE_COLLATERAL_PERCENT = 0.20
 # Reinflation multiplier for merged PRs that were subject to collateral while open

@@ -27,7 +27,7 @@ from gittensor.constants import (
     MERGE_SUCCESS_RATIO_ATTEMPTS_THRESHOLD,
     MERGE_SUCCESS_RATIO_APPLICATION_DATE,
 )
-from gittensor.utils.github_api_tools import get_pull_request_file_changes
+from gittensor.utils.github_api_tools import get_pull_request_file_changes, normalize_repo_name
 
 def score_pull_requests(
     miner_eval: MinerEvaluation,
@@ -61,12 +61,15 @@ def score_pull_requests(
 
         pr.set_file_changes(file_changes)
 
-        repo_weight = master_repositories.get(pr.repository_full_name, {}).get("weight", 0.01)
+        # Master repositories keys are normalized to lowercase, so normalize repo name for lookup
+        normalized_repo = normalize_repo_name(pr.repository_full_name)
+        repo_weight = master_repositories.get(normalized_repo, {}).get("weight", 0.01)
         file_change_score = pr.calculate_score_from_file_changes(programming_languages)
         issue_multiplier = calculate_issue_multiplier(pr)
         open_pr_spam_multiplier = calculate_pr_spam_penalty_multiplier(miner_eval.total_open_prs)
         time_decay_multiplier = calculate_time_decay_multiplier(pr)
-        gittensor_tag_multiplier = GITTENSOR_TAGLINE_BOOST if (pr.gittensor_tagged and pr.repository_full_name.lower() != GITTENSOR_REPOSITORY.lower()) else 1.0
+        # Use case-insensitive comparison for Gittensor repository check
+        gittensor_tag_multiplier = GITTENSOR_TAGLINE_BOOST if (pr.gittensor_tagged and normalize_repo_name(pr.repository_full_name) != normalize_repo_name(GITTENSOR_REPOSITORY)) else 1.0
         
         # Only apply merge success penalty to PRs merged after the cutoff date
         if pr.merged_at > MERGE_SUCCESS_RATIO_APPLICATION_DATE:
@@ -82,20 +85,24 @@ def score_pull_requests(
         pr.gittensor_tag_multiplier = round(gittensor_tag_multiplier, 2)
         pr.merge_success_multiplier = round(merge_success_multiplier, 2)
 
-        miner_eval.unique_repos_contributed_to.add(pr.repository_full_name)
+        # Normalize repository name for case-insensitive tracking
+        normalized_repo = normalize_repo_name(pr.repository_full_name)
+        miner_eval.unique_repos_contributed_to.add(normalized_repo)
 
 
 def count_repository_contributors(miner_evaluations: Dict[int, MinerEvaluation]) -> Dict[str, int]:
     """
     Count how many miners contribute to each repository and log statistics.
+    Uses normalized (lowercase) repository names for case-insensitive counting.
 
     Returns:
-        Dict[str, int]: Dictionary mapping repository names to contributor counts
+        Dict[str, int]: Dictionary mapping normalized repository names to contributor counts
     """
     repo_counts: Dict[str, int] = {}
 
     for evaluation in miner_evaluations.values():
         for repo in evaluation.unique_repos_contributed_to:
+            # Repository names are already normalized when added to unique_repos_contributed_to
             repo_counts[repo] = repo_counts.get(repo, 0) + 1
 
     if repo_counts:
@@ -164,7 +171,10 @@ def apply_cross_miner_multipliers_and_finalize(miner_evaluations: Dict[int, Mine
 
         for pr in evaluation.pull_requests:
             # Apply uniqueness multiplier (cross-miner dependent)
-            uniqueness_score = (total_contributing_miners - repo_counts[pr.repository_full_name] + 1) / total_contributing_miners
+            # Use normalized repository name for case-insensitive lookup
+            normalized_repo = normalize_repo_name(pr.repository_full_name)
+            repo_count = repo_counts.get(normalized_repo, 0)
+            uniqueness_score = (total_contributing_miners - repo_count + 1) / total_contributing_miners
             uniqueness_multiplier = 1.0 + (uniqueness_score * UNIQUE_PR_BOOST)
             pr.repository_uniqueness_multiplier = uniqueness_multiplier
 

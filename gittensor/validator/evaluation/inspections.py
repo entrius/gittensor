@@ -53,15 +53,14 @@ def detect_and_penalize_duplicates(
 
 
 def validate_response_and_initialize_miner_evaluation(uid: int, response: GitPatSynapse) -> MinerEvaluation:
-    if not response:
-        miner_eval = MinerEvaluation(uid=uid, hotkey="")
-        miner_eval.set_invalid_response_reason(f"No response provided by miner {uid}")
-        return miner_eval
-
     miner_eval = MinerEvaluation(uid=uid, hotkey=response.axon.hotkey)
 
     if uid == RECYCLE_UID:
         miner_eval.set_invalid_response_reason("SPECIAL CASE UID 0 - RECYCLE UID")
+        return miner_eval
+
+    if not response:
+        miner_eval.set_invalid_response_reason(f"No response provided by miner {uid}")
         return miner_eval
 
     github_id, error = _validate_github_credentials(uid, response.github_access_token)

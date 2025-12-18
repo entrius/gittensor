@@ -53,6 +53,12 @@ QUERY = """
                   name
                 }
               }
+              headRepository {
+                name
+                owner {
+                  login
+                }
+              }
               baseRefName
               headRefName
               author {
@@ -87,6 +93,18 @@ QUERY = """
       }
     }
     """
+
+
+def normalize_repo_name(repo_name: str) -> str:
+    """Normalize repository name to lowercase for case-insensitive comparison.
+    
+    Args:
+        repo_name (str): Repository name in format 'owner/repo'
+    
+    Returns:
+        str: Lowercase repository name
+    """
+    return repo_name.lower()
 
 
 def branch_matches_pattern(branch_name: str, patterns: List[str]) -> bool:
@@ -334,7 +352,7 @@ def _process_non_merged_pr(
         repository_full_name (str): Full repository name (owner/repo)
         pr_state (str): PR state (OPEN, CLOSED, MERGED)
         date_filter (datetime): Date filter for lookback period
-        active_repositories (List[str]): List of active repository names
+        active_repositories (List[str]): List of active repository names (already normalized to lowercase)
 
     Returns:
         tuple[int, int]: (open_pr_delta, closed_pr_delta) - increment counts for open/closed PRs
@@ -342,9 +360,12 @@ def _process_non_merged_pr(
     open_pr_delta = 0
     closed_pr_delta = 0
 
+    # Normalize repository name for comparison (active_repositories keys are already lowercase)
+    normalized_repo = normalize_repo_name(repository_full_name)
+
     # Check if it's an open PR. We are counting ALL open PRs to active repositories
     if pr_state == 'OPEN':
-        if repository_full_name in active_repositories:
+        if normalized_repo in active_repositories:
             open_pr_delta = 1
         return (open_pr_delta, closed_pr_delta)
 
@@ -353,7 +374,7 @@ def _process_non_merged_pr(
         if pr_raw.get('closedAt'):
             closed_dt = datetime.fromisoformat(pr_raw['closedAt'].rstrip("Z")).replace(tzinfo=timezone.utc)
             if (
-                repository_full_name in active_repositories
+                normalized_repo in active_repositories
                 and closed_dt >= date_filter
                 and closed_dt > MERGE_SUCCESS_RATIO_APPLICATION_DATE
             ):
@@ -376,17 +397,19 @@ def _should_skip_merged_pr(
     Args:
         pr_raw (Dict): Raw PR data from GraphQL
         repository_full_name (str): Full repository name (owner/repo)
-        master_repositories (dict[str, dict]): Repository metadata
+        master_repositories (dict[str, dict]): Repository metadata (keys are normalized to lowercase)
         date_filter (datetime): Date filter for lookback period
         merged_dt (datetime): Parsed merge datetime
 
     Returns:
         tuple[bool, Optional[str]]: (should_skip, skip_reason) - True if PR should be skipped with reason
     """
-    # Filter by master_repositories - find matching key case-insensitively
-    repo_key = next((key for key in master_repositories.keys() if key.lower() == repository_full_name.lower()), None)
-    if repo_key is None:
+    # Filter by master_repositories - keys are already normalized to lowercase
+    normalized_repo = normalize_repo_name(repository_full_name)
+    if normalized_repo not in master_repositories:
         return (True, f"Skipping PR #{pr_raw['number']} in {repository_full_name} - ineligible repo")
+    
+    repo_key = normalized_repo
 
     # Filter by lookback window
     if merged_dt < date_filter:
@@ -428,8 +451,16 @@ def _should_skip_merged_pr(
 
     # Skip if the source branch (headRef) is also an acceptable branch
     # This prevents PRs like "staging -> main" or "develop -> staging" where both are acceptable branches
+    # This check ONLY applies to internal PRs (same repository), as fork branch names are arbitrary.
     # Supports wildcard patterns (e.g., '*-dev' matches '3.0-dev', '3.1-dev', etc.)
-    if branch_matches_pattern(head_ref, acceptable_branches):
+    head_repo = pr_raw.get('headRepository')
+    is_internal_pr = False
+    if head_repo:
+        head_repo_full_name = f"{head_repo['owner']['login']}/{head_repo['name']}"
+        if head_repo_full_name.lower() == repository_full_name.lower():
+            is_internal_pr = True
+
+    if is_internal_pr and branch_matches_pattern(head_ref, acceptable_branches):
         return (
             True,
             f"Skipping PR #{pr_raw['number']} in {repository_full_name} - "
@@ -502,6 +533,7 @@ def get_user_merged_prs_graphql(
     cursor = None
 
     # Build list of active repositories (those without an inactiveAt timestamp)
+    # Keys are already normalized to lowercase
     active_repositories = [
         repo_full_name for repo_full_name, metadata in master_repositories.items() if metadata.get("inactiveAt") is None
     ]

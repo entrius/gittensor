@@ -8,10 +8,11 @@ import bittensor as bt
 def load_master_repo_weights() -> Dict[str, Dict[str, Any]]:
     """
     Load repository weights from the local JSON file.
+    Normalizes repository names to lowercase for case-insensitive matching.
 
     Returns:
-        Dictionary mapping fullName (str) to repository data dict containing:
-            - weight (float): Repository weight
+        Dictionary mapping normalized (lowercase) fullName (str) to repository data dict containing:
+        - weight (float): Repository weight
         Returns empty dict on error.
     """
     weights_file = Path(__file__).parent.parent / "weights" / "master_repositories.json"
@@ -24,8 +25,11 @@ def load_master_repo_weights() -> Dict[str, Dict[str, Any]]:
             bt.logging.error(f"Expected dict from {weights_file}, got {type(data)}")
             return {}
 
-        bt.logging.debug(f"Successfully loaded {len(data)} repository entries from {weights_file}")
-        return data
+        # Normalize all keys to lowercase for case-insensitive matching
+        normalized_data = {repo_name.lower(): metadata for repo_name, metadata in data.items()}
+
+        bt.logging.debug(f"Successfully loaded {len(normalized_data)} repository entries from {weights_file}")
+        return normalized_data
 
     except FileNotFoundError:
         bt.logging.error(f"Weights file not found: {weights_file}")

@@ -67,10 +67,6 @@ def score_merged_pull_requests(
         miner_eval.unique_repos_contributed_to.add(pr.repository_full_name)
 
 
-# Backwards compatibility alias
-score_pull_requests = score_merged_pull_requests
-
-
 def count_repository_contributors(miner_evaluations: Dict[int, MinerEvaluation]) -> Dict[str, int]:
     """
     Count how many miners contribute to each repository and log statistics.

@@ -395,12 +395,7 @@ class MinerEvaluation:
 
     @property
     def total_prs(self) -> int:
-        return len(self.merged_pull_requests)
-
-    @property
-    def pull_requests(self) -> List[PullRequest]:
-        """Backwards compatibility alias for merged_pull_requests."""
-        return self.merged_pull_requests
+        return len(self.merged_pull_requests) + len(self.total_closed_prs) + len(self.total_merged_prs)
 
     def set_invalid_response_reason(self, reason: str):
         """

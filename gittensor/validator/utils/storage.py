@@ -4,7 +4,6 @@ from typing import Dict, List
 import bittensor as bt
 
 from gittensor.classes import Miner, MinerEvaluation
-from gittensor.constants import COLLATERAL_EFFECTIVE_DATE
 from gittensor.validator.storage.database import create_database_connection
 from gittensor.validator.storage.migrator import DatabaseMigrator
 from gittensor.validator.storage.repository import Repository

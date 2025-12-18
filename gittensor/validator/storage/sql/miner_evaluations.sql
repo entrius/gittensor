@@ -2,19 +2,20 @@
 -- Stores complete validator assessment results from classes.py MinerEvaluation dataclass
 
 CREATE TABLE IF NOT EXISTS miner_evaluations (
-    id                   BIGSERIAL        PRIMARY KEY,
-    uid                  INTEGER          NOT NULL,
-    hotkey               VARCHAR(255)     NOT NULL,
-    github_id            VARCHAR(255)     NOT NULL,
-    failed_reason        TEXT,
-    base_total_score     DECIMAL(15,6)    DEFAULT 0.0,
-    total_score          DECIMAL(15,6)    DEFAULT 0.0,
-    total_lines_changed  INTEGER          DEFAULT 0,
-    total_open_prs       INTEGER          DEFAULT 0,
-    total_closed_prs     INTEGER          DEFAULT 0,
-    total_merged_prs     INTEGER          DEFAULT 0,
-    total_prs            INTEGER          DEFAULT 0,
-    unique_repos_count   INTEGER          DEFAULT 0,
+    id                    BIGSERIAL        PRIMARY KEY,
+    uid                   INTEGER          NOT NULL,
+    hotkey                VARCHAR(255)     NOT NULL,
+    github_id             VARCHAR(255)     NOT NULL,
+    failed_reason         TEXT,
+    base_total_score      DECIMAL(15,6)    DEFAULT 0.0,
+    total_score           DECIMAL(15,6)    DEFAULT 0.0,
+    total_collateral_score DECIMAL(15,6)   DEFAULT 0.0,  -- Collateral from open PRs
+    total_lines_changed   INTEGER          DEFAULT 0,
+    total_open_prs        INTEGER          DEFAULT 0,
+    total_closed_prs      INTEGER          DEFAULT 0,
+    total_merged_prs      INTEGER          DEFAULT 0,
+    total_prs             INTEGER          DEFAULT 0,
+    unique_repos_count    INTEGER          DEFAULT 0,
 
     -- Metadata with automatic timestamps
     evaluation_timestamp TIMESTAMP        DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'America/Chicago'),

@@ -94,6 +94,17 @@ PREPROCESSOR_LANGUAGES = {
 }
 
 # =============================================================================
+# Collateral System
+# =============================================================================
+# Date when collateral system becomes effective (PRs created after this date are subject to collateral)
+COLLATERAL_EFFECTIVE_DATE = datetime(2025, 12, 20, 0, 0, 0, tzinfo=timezone.utc)
+# Percentage of potential score used as collateral for open PRs
+POTENTIAL_SCORE_COLLATERAL_PERCENT = 0.20
+# Reinflation multiplier for merged PRs that were subject to collateral while open
+# This compensates for the collateral deduction they suffered while pending
+COLLATERAL_REINFLATION_MULTIPLIER = 1.0 + POTENTIAL_SCORE_COLLATERAL_PERCENT
+
+# =============================================================================
 # Rewards & Emissions
 # =============================================================================
 RECYCLE_UID = 0

@@ -1,6 +1,7 @@
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
+from enum import Enum
 from typing import DefaultDict, Dict, List, Optional, Set
 from math import prod
 
@@ -16,14 +17,34 @@ from gittensor.constants import (
 GITHUB_DOMAIN = 'https://github.com/'
 
 
-@dataclass
-class PRCountResult:
-    """Result from get_user_merged_prs_graphql containing valid PRs and counts"""
+class PRState(Enum):
+    """PR state for scoring: MERGED (earned) or OPEN (collateral)."""
+    MERGED = "MERGED"
+    OPEN = "OPEN"
 
-    valid_prs: List[DefaultDict]
-    open_pr_count: int
-    merged_pr_count: int  # Count of merged PRs after MERGE_SUCCESS_RATIO_APPLICATION_DATE
-    closed_pr_count: int  # Count of closed (not merged) PRs after MERGE_SUCCESS_RATIO_APPLICATION_DATE
+
+@dataclass
+class PRFetchResult:
+    """Result from fetching user PRs via GraphQL API."""
+
+    merged_prs: List[DefaultDict]  # PRs with state MERGED (eligible for scoring)
+    open_prs: List[DefaultDict]  # PRs with state OPEN (for collateral scoring)
+    open_pr_count: int  # Total open PRs in active repos
+    merged_pr_count: int  # Merged PRs after MERGE_SUCCESS_RATIO_APPLICATION_DATE
+    closed_pr_count: int  # Closed (not merged) PRs after MERGE_SUCCESS_RATIO_APPLICATION_DATE
+
+    # Backwards compatibility properties
+    @property
+    def valid_prs(self) -> List[DefaultDict]:
+        return self.merged_prs
+
+    @property
+    def valid_open_prs(self) -> List[DefaultDict]:
+        return self.open_prs
+
+
+# Backwards compatibility alias
+PRCountResult = PRFetchResult
 
 
 @dataclass
@@ -133,7 +154,10 @@ class Issue:
 
 @dataclass
 class PullRequest:
-    """Represents a merged pull request with relevant metadata"""
+    """Represents a pull request with relevant metadata for scoring.
+
+    Supports both MERGED PRs (earned scores) and OPEN PRs (collateral scores).
+    """
 
     number: int
     repository_full_name: str
@@ -142,9 +166,12 @@ class PullRequest:
     github_id: str
     title: str
     author_login: str
-    merged_at: datetime
+    merged_at: Optional[datetime]  # None for OPEN PRs
     created_at: datetime
-    
+
+    # PR state for collateral system
+    pr_state: PRState = PRState.MERGED
+
     # Score fields
     repo_weight_multiplier: float = 1.0
     base_score: float = 0.0
@@ -155,6 +182,7 @@ class PullRequest:
     gittensor_tag_multiplier: float = 1.0
     merge_success_multiplier: float = 1.0
     earned_score: float = 0.0
+    collateral_score: float = 0.0  # For OPEN PRs: potential_score * collateral_percent
 
     # Contribution details
     additions: int = 0
@@ -288,11 +316,71 @@ class PullRequest:
             author_login=pr_data['author']['login'],
             merged_at=merged_at,
             created_at=parse_github_timestamp(pr_data['createdAt']),
+            pr_state=PRState.MERGED,
             additions=pr_data['additions'],
             deletions=pr_data['deletions'],
             commits=pr_data.get('commits', {}).get('totalCount', 0),
             merged_by_login=pr_data['mergedBy']['login'] if pr_data.get('mergedBy') else None,
             issues=issues,
+            description=description,
+            last_edited_at=last_edited_at,
+            gittensor_tagged=gittensor_tagged,
+        )
+
+    @classmethod
+    def from_open_pr_graphql_response(cls, pr_data: dict, uid: int, hotkey: str, github_id: str) -> 'PullRequest':
+        """Create PullRequest from GraphQL API response for an OPEN PR (collateral system).
+
+        Extracts linked issues for collateral issue_multiplier calculation.
+        """
+        from gittensor.constants import PR_TAGLINE
+        from gittensor.validator.utils.datetime_utils import parse_github_timestamp
+
+        repo_data = pr_data['repository']
+        repository_full_name = f"{repo_data['owner']['login']}/{repo_data['name']}"
+
+        # Extract linked issues for collateral calculation (may be open or closed)
+        raw_issues = pr_data.get('closingIssuesReferences', {}).get('nodes', [])
+        issues = []
+        for issue in raw_issues:
+            issues.append(
+                Issue(
+                    number=issue['number'],
+                    pr_number=pr_data['number'],
+                    repository_full_name=repository_full_name,
+                    title=issue['title'],
+                    created_at=parse_github_timestamp(issue['createdAt']) if issue.get('createdAt') else None,
+                    closed_at=parse_github_timestamp(issue['closedAt']) if issue.get('closedAt') else None,
+                    author_login=issue.get('author', {}).get('login') if issue.get('author') else None,
+                    state=issue.get('state'),
+                )
+            )
+
+        description = pr_data.get('bodyText', '')
+        last_edited_at = parse_github_timestamp(pr_data.get('lastEditedAt')) if pr_data.get('lastEditedAt') else None
+
+        # Detect Gittensor tagline for collateral calculation
+        gittensor_tagged = False
+        if description:
+            description_end = description[-100:].strip().rstrip('.,!?;: \t\n')
+            gittensor_tagged = description_end.lower().endswith(PR_TAGLINE.lower())
+
+        return cls(
+            number=pr_data['number'],
+            repository_full_name=repository_full_name,
+            uid=uid,
+            hotkey=hotkey,
+            github_id=github_id,
+            title=pr_data['title'],
+            author_login=pr_data['author']['login'],
+            merged_at=None,
+            created_at=parse_github_timestamp(pr_data['createdAt']),
+            pr_state=PRState.OPEN,
+            additions=pr_data['additions'],
+            deletions=pr_data['deletions'],
+            commits=pr_data.get('commits', {}).get('totalCount', 0),
+            merged_by_login=None,
+            issues=issues if issues else None,
             description=description,
             last_edited_at=last_edited_at,
             gittensor_tagged=gittensor_tagged,
@@ -307,6 +395,7 @@ class MinerEvaluation:
     github_pat: Optional[str] = None
     base_total_score: float = 0.0
     total_score: float = 0.0
+    total_collateral_score: float = 0.0  # Collateral from open PRs
     total_lines_changed: int = 0
     total_open_prs: int = 0
     total_closed_prs: int = 0  # Total PRs closed within MERGED_PR_LOOKBACK_DAYS
@@ -314,13 +403,18 @@ class MinerEvaluation:
     unique_repos_count: int = 0
     failed_reason: Optional[str] = None
     evaluation_timestamp: Optional[datetime] = None
-    pull_requests: List[PullRequest] = field(default_factory=list)
+    merged_pull_requests: List[PullRequest] = field(default_factory=list)
+    open_pull_requests: List[PullRequest] = field(default_factory=list)
     unique_repos_contributed_to: Set[str] = field(default_factory=set)
 
     @property
     def total_prs(self) -> int:
-        """Total number of valid PRs - uses stored DB value if available, otherwise computes from pull_requests"""
-        return len(self.pull_requests)
+        return len(self.merged_pull_requests)
+
+    @property
+    def pull_requests(self) -> List[PullRequest]:
+        """Backwards compatibility alias for merged_pull_requests."""
+        return self.merged_pull_requests
 
     def set_invalid_response_reason(self, reason: str):
         """
@@ -332,29 +426,28 @@ class MinerEvaluation:
         self.failed_reason = reason
 
     def get_all_issues(self) -> List[Issue]:
-        """
-        Aggregate all issues from all pull requests.
-        Respects the natural object hierarchy: PullRequest -> Issues
-        """
+        """Aggregate all issues from all merged pull requests."""
         all_issues = []
-        for pr in self.pull_requests:
+        for pr in self.merged_pull_requests:
             if pr.issues:
                 all_issues.extend(pr.issues)
         return all_issues
 
     def get_all_file_changes(self) -> List[FileChange]:
-        """
-        Aggregate all file changes from all PR diffs.
-        """
+        """Aggregate all file changes from all merged PR diffs."""
         all_file_changes = []
-        for pr in self.pull_requests:
+        for pr in self.merged_pull_requests:
             if pr.file_changes:
                 all_file_changes.extend(pr.file_changes)
         return all_file_changes
 
-    def add_pull_request(self, pull_request: PullRequest):
-        """Helper method to add a pull request and maintain collections."""
-        self.pull_requests.append(pull_request)
+    def add_merged_pull_request(self, pull_request: PullRequest):
+        """Add a merged pull request."""
+        self.merged_pull_requests.append(pull_request)
+
+    def add_open_pull_request(self, pull_request: PullRequest):
+        """Add an open pull request for collateral scoring."""
+        self.open_pull_requests.append(pull_request)
 
 
 class GitPatSynapse(bt.Synapse):

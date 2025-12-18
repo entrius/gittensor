@@ -136,6 +136,7 @@ class Repository(BaseRepository):
                     pr.author_login,
                     pr.merged_at,
                     pr.created_at,
+                    pr.pr_state.value,  # Convert PRState enum to string
                     pr.repo_weight_multiplier,
                     pr.base_score,
                     pr.issue_multiplier,
@@ -145,6 +146,7 @@ class Repository(BaseRepository):
                     pr.gittensor_tag_multiplier,
                     pr.merge_success_multiplier,
                     pr.earned_score,
+                    pr.collateral_score,
                     pr.additions,
                     pr.deletions,
                     pr.commits,
@@ -284,6 +286,7 @@ class Repository(BaseRepository):
                 evaluation.failed_reason,
                 evaluation.base_total_score,
                 evaluation.total_score,
+                evaluation.total_collateral_score,
                 evaluation.total_lines_changed,
                 evaluation.total_open_prs,
                 evaluation.total_closed_prs,

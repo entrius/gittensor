@@ -53,15 +53,26 @@ def detect_and_penalize_duplicates(
 
 
 def validate_response_and_initialize_miner_evaluation(uid: int, response: GitPatSynapse) -> MinerEvaluation:
-    miner_eval = MinerEvaluation(uid=uid, hotkey=response.axon.hotkey)
+    """
+    Validate a miner's response and initialize their evaluation object.
 
+    Args:
+        uid: The miner's unique identifier
+        response: The GitPatSynapse response from the miner (may be None if miner didn't respond)
+
+    Returns:
+        MinerEvaluation: Initialized evaluation object with failure reason if validation failed
+    """
+    # Handle special recycle UID case first
     if uid == RECYCLE_UID:
-        miner_eval.set_invalid_response_reason("SPECIAL CASE UID 0 - RECYCLE UID")
-        return miner_eval
+        return MinerEvaluation(uid=uid, hotkey="", failed_reason="SPECIAL CASE UID 0 - RECYCLE UID")
 
-    if not response:
-        miner_eval.set_invalid_response_reason(f"No response provided by miner {uid}")
-        return miner_eval
+    # Check for null response before accessing any attributes to prevent crashes
+    if not response or not response.axon:
+        return MinerEvaluation(uid=uid, hotkey="", failed_reason=f"No response provided by miner {uid}")
+
+    # Now safe to access response.axon.hotkey
+    miner_eval = MinerEvaluation(uid=uid, hotkey=response.axon.hotkey)
 
     github_id, error = _validate_github_credentials(uid, response.github_access_token)
     if error:

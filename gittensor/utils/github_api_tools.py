@@ -53,6 +53,12 @@ QUERY = """
                   name
                 }
               }
+              headRepository {
+                name
+                owner {
+                  login
+                }
+              }
               baseRefName
               headRefName
               author {
@@ -445,8 +451,16 @@ def _should_skip_merged_pr(
 
     # Skip if the source branch (headRef) is also an acceptable branch
     # This prevents PRs like "staging -> main" or "develop -> staging" where both are acceptable branches
+    # This check ONLY applies to internal PRs (same repository), as fork branch names are arbitrary.
     # Supports wildcard patterns (e.g., '*-dev' matches '3.0-dev', '3.1-dev', etc.)
-    if branch_matches_pattern(head_ref, acceptable_branches):
+    head_repo = pr_raw.get('headRepository')
+    is_internal_pr = False
+    if head_repo:
+        head_repo_full_name = f"{head_repo['owner']['login']}/{head_repo['name']}"
+        if head_repo_full_name.lower() == repository_full_name.lower():
+            is_internal_pr = True
+
+    if is_internal_pr and branch_matches_pattern(head_ref, acceptable_branches):
         return (
             True,
             f"Skipping PR #{pr_raw['number']} in {repository_full_name} - "

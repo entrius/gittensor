@@ -9,8 +9,11 @@ CREATE TABLE IF NOT EXISTS pull_requests (
     github_id                         VARCHAR(255)     NOT NULL,
     title                             TEXT             NOT NULL,
     author_login                      VARCHAR(255)     NOT NULL,
-    merged_at                         TIMESTAMP,        -- Nullable for draft PRs
+    merged_at                         TIMESTAMP,        -- Nullable for OPEN PRs
     pr_created_at                     TIMESTAMP        NOT NULL,
+
+    -- PR state for collateral system (MERGED or OPEN)
+    pr_state                          VARCHAR(10)      DEFAULT 'MERGED',
 
     -- Score fields
     repo_weight_multiplier            DECIMAL(15,6)    DEFAULT 1.0,
@@ -22,6 +25,7 @@ CREATE TABLE IF NOT EXISTS pull_requests (
     gittensor_tag_multiplier          DECIMAL(15,6)    DEFAULT 1.0,
     merge_success_multiplier          DECIMAL(15,6)    DEFAULT 1.0,
     earned_score                      DECIMAL(15,6)    DEFAULT 0.0,
+    collateral_score                  DECIMAL(15,6)    DEFAULT 0.0,  -- For OPEN PRs: potential_score * collateral_percent
 
     -- Contribution details
     additions                         INTEGER          DEFAULT 0,
@@ -57,7 +61,9 @@ CREATE TABLE IF NOT EXISTS pull_requests (
     CONSTRAINT chk_pull_requests_time_decay_multiplier            CHECK    (time_decay_multiplier <= 1),
     CONSTRAINT chk_pull_requests_gittensor_tag_multiplier         CHECK    (gittensor_tag_multiplier >= 1),
     CONSTRAINT chk_pull_requests_merge_success_multiplier         CHECK    (merge_success_multiplier <= 1),
-    CONSTRAINT chk_pull_requests_earned_score                     CHECK    (earned_score >= 0)
+    CONSTRAINT chk_pull_requests_earned_score                     CHECK    (earned_score >= 0),
+    CONSTRAINT chk_pull_requests_collateral_score                 CHECK    (collateral_score >= 0),
+    CONSTRAINT chk_pull_requests_pr_state                         CHECK    (pr_state IN ('MERGED', 'OPEN'))
 );
 
 -- Indexes for performance
@@ -68,3 +74,4 @@ CREATE INDEX IF NOT EXISTS idx_pull_requests_uid           ON pull_requests (uid
 CREATE INDEX IF NOT EXISTS idx_pull_requests_hotkey        ON pull_requests (hotkey);
 CREATE INDEX IF NOT EXISTS idx_pull_requests_github_id     ON pull_requests (github_id);
 CREATE INDEX IF NOT EXISTS idx_pull_requests_earned_score  ON pull_requests (earned_score);
+CREATE INDEX IF NOT EXISTS idx_pull_requests_pr_state      ON pull_requests (pr_state);

@@ -1264,6 +1264,9 @@
   "Platane/snk": {
     "weight": 0.28
   },
+  "PlatformNetwork/platform": {
+    "weight": 6.52
+  },  
   "PointCloudLibrary/pcl": {
     "weight": 0.28
   },

@@ -97,7 +97,7 @@ def test_pr_scoring():
             # Set file changes and score on PR
 
             # Add to evaluation
-            miner_eval.add_pull_request(pr)
+            miner_eval.add_merged_pull_request(pr)
 
         # Calculate totals and apply penalties
         miner_eval.total_open_prs = test_case.get('total_open_prs', 0)

@@ -12,8 +12,8 @@ from gittensor.classes import FileChange, PRCountResult
 from gittensor.constants import (
     BASE_GITHUB_API_URL,
     MERGE_SUCCESS_RATIO_APPLICATION_DATE,
+    MERGED_PR_LOOKBACK_DAYS,
 )
-from gittensor.validator.utils.config import MERGED_PR_LOOKBACK_DAYS
 from gittensor.validator.utils.datetime_utils import CHICAGO_TZ
 
 # core github graphql query

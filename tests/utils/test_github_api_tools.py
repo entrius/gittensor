@@ -20,7 +20,6 @@ from unittest.mock import Mock, call, patch
 sys.modules['gittensor.validator'] = Mock()
 sys.modules['gittensor.validator.utils'] = Mock()
 sys.modules['gittensor.validator.utils.config'] = Mock()
-sys.modules['gittensor.validator.utils.config'].MERGED_PR_LOOKBACK_DAYS = 30
 
 from gittensor.utils.github_api_tools import (
     get_user_merged_prs_graphql,

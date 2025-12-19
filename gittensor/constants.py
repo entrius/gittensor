@@ -8,6 +8,11 @@ SECONDS_PER_DAY = 86400
 SECONDS_PER_HOUR = 3600
 
 # =============================================================================
+# PR Scoring & Lookback Windows
+# =============================================================================
+MERGED_PR_LOOKBACK_DAYS = 30  # how many days a merged pr will count for scoring
+
+# =============================================================================
 # Temp Vars
 # =============================================================================
 MERGE_SUCCESS_RATIO_APPLICATION_DATE = datetime(2025, 12, 4, 18, 0, 0, tzinfo=timezone.utc)

@@ -8483,7 +8483,7 @@
     ]
   },
   "opentensor/subtensor": {
-    "weight": 200.00,
+    "weight": 78.01,
     "additional_acceptable_branches": [
       "devnet-ready"
     ]

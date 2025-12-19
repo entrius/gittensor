@@ -14,6 +14,7 @@ from gittensor.constants import (
     MERGE_SUCCESS_RATIO_APPLICATION_DATE,
 )
 from gittensor.validator.utils.config import MERGED_PR_LOOKBACK_DAYS
+from gittensor.validator.utils.datetime_utils import CHICAGO_TZ
 
 # core github graphql query
 QUERY = """
@@ -97,10 +98,10 @@ QUERY = """
 
 def normalize_repo_name(repo_name: str) -> str:
     """Normalize repository name to lowercase for case-insensitive comparison.
-    
+
     Args:
         repo_name (str): Repository name in format 'owner/repo'
-    
+
     Returns:
         str: Lowercase repository name
     """
@@ -180,9 +181,7 @@ def get_github_user(token: str) -> Optional[Dict[str, Any]]:
                 time.sleep(2)
 
         except Exception as e:
-            bt.logging.warning(
-                f"Could not fetch GitHub user (attempt {attempt + 1}/6): {e}"
-            )
+            bt.logging.warning(f"Could not fetch GitHub user (attempt {attempt + 1}/6): {e}")
             if attempt < 5:  # Don't sleep on last attempt
                 time.sleep(2)
 
@@ -242,8 +241,8 @@ def get_github_account_age_days(token: str) -> Optional[int]:
         return None
 
     try:
-        created_dt = datetime.fromisoformat(created_at.rstrip("Z")).replace(tzinfo=timezone.utc)
-        now_dt = datetime.now(timezone.utc)
+        created_dt = datetime.fromisoformat(created_at.rstrip("Z")).replace(tzinfo=timezone.utc).astimezone(CHICAGO_TZ)
+        now_dt = datetime.now(CHICAGO_TZ)
         return (now_dt - created_dt).days
     except Exception as e:
         bt.logging.warning(f"Could not parse GitHub account creation date: {e}")
@@ -372,7 +371,13 @@ def _process_non_merged_pr(
     # Handle CLOSED (not merged) PRs - count if within lookback period
     if pr_state == 'CLOSED' and not pr_raw['mergedAt']:
         if pr_raw.get('closedAt'):
-            closed_dt = datetime.fromisoformat(pr_raw['closedAt'].rstrip("Z")).replace(tzinfo=timezone.utc)
+            from gittensor.validator.utils.datetime_utils import CHICAGO_TZ
+
+            closed_dt = (
+                datetime.fromisoformat(pr_raw['closedAt'].rstrip("Z"))
+                .replace(tzinfo=timezone.utc)
+                .astimezone(CHICAGO_TZ)
+            )
             if (
                 normalized_repo in active_repositories
                 and closed_dt >= date_filter
@@ -408,7 +413,7 @@ def _should_skip_merged_pr(
     normalized_repo = normalize_repo_name(repository_full_name)
     if normalized_repo not in master_repositories:
         return (True, f"Skipping PR #{pr_raw['number']} in {repository_full_name} - ineligible repo")
-    
+
     repo_key = normalized_repo
 
     # Filter by lookback window
@@ -482,7 +487,11 @@ def _should_skip_merged_pr(
     repo_metadata = master_repositories[repo_key]
     inactive_at = repo_metadata.get("inactiveAt")
     if inactive_at is not None:
-        inactive_dt = datetime.fromisoformat(inactive_at.rstrip("Z")).replace(tzinfo=timezone.utc)
+        from gittensor.validator.utils.datetime_utils import CHICAGO_TZ
+
+        inactive_dt = (
+            datetime.fromisoformat(inactive_at.rstrip("Z")).replace(tzinfo=timezone.utc).astimezone(CHICAGO_TZ)
+        )
         # Skip PR if it was merged at or after the repo became inactive
         if merged_dt >= inactive_dt:
             return (
@@ -521,7 +530,7 @@ def get_user_merged_prs_graphql(
         return PRCountResult(valid_prs=[], open_pr_count=0, merged_pr_count=0, closed_pr_count=0)
 
     # Calculate date filter
-    date_filter = datetime.now(timezone.utc) - timedelta(days=MERGED_PR_LOOKBACK_DAYS)
+    date_filter = datetime.now(CHICAGO_TZ) - timedelta(days=MERGED_PR_LOOKBACK_DAYS)
 
     # Convert numeric user ID to GraphQL global node ID
     global_user_id = base64.b64encode(f"04:User{user_id}".encode()).decode()

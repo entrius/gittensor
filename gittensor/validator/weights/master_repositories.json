@@ -69,7 +69,8 @@
     "weight": 0.17
   },
   "BitMind-AI/bitmind-subnet": {
-    "weight": 44.58
+    "weight": 44.58,
+    "additional_acceptable_branches": ["testnet"]
   },
   "Bitsec-AI/subnet": {
     "weight": 6.52
@@ -268,7 +269,8 @@
     "weight": 0.29
   },
   "JeffreySu/WeiXinMPSDK": {
-    "weight": 0.29
+    "weight": 0.29,
+    "additional_acceptable_branches": ["Developer"]
   },
   "JetBrains/intellij-community": {
     "weight": 0.18
@@ -311,7 +313,8 @@
     "weight": 0.24
   },
   "LimeSurvey/LimeSurvey": {
-    "weight": 0.28
+    "weight": 0.28,
+    "additional_acceptable_branches": ["develop-minor", "develop-major"]
   },
   "LineageOS/android": {
     "weight": 0.18
@@ -555,7 +558,8 @@
     "weight": 0.39
   },
   "SillyTavern/SillyTavern": {
-    "weight": 0.19
+    "weight": 0.19,
+    "additional_acceptable_branches": ["staging"]
   },
   "Sjj1024/PakePlus": {
     "weight": 0.21
@@ -735,7 +739,8 @@
     "weight": 0.18
   },
   "alextselegidis/easyappointments": {
-    "weight": 0.25
+    "weight": 0.25,
+    "additional_acceptable_branches": ["develop"]
   },
   "alibaba/COLA": {
     "weight": 0.17
@@ -1092,7 +1097,8 @@
     "weight": 0.35
   },
   "bigskysoftware/htmx": {
-    "weight": 0.18
+    "weight": 0.18,
+    "additional_acceptable_branches": ["dev"]
   },
   "binance/binance-spot-api-docs": {
     "weight": 0.17
@@ -1518,7 +1524,8 @@
     "weight": 0.21
   },
   "dotnet/dotnet-docker": {
-    "weight": 4.34
+    "weight": 4.34,
+    "additional_acceptable_branches": ["nightly"]
   },
   "dotnet/eShop": {
     "weight": 0.28
@@ -1581,7 +1588,8 @@
     "weight": 0.17
   },
   "elebumm/RedditVideoMakerBot": {
-    "weight": 0.17
+    "weight": 0.17,
+    "additional_acceptable_branches": ["develop"]
   },
   "electron/electron": {
     "weight": 0.21
@@ -2035,7 +2043,8 @@
     "weight": 0.21
   },
   "hacksider/Deep-Live-Cam": {
-    "weight": 0.25
+    "weight": 0.25,
+    "additional_acceptable_branches": ["premain"]
   },
   "hadley/r4ds": {
     "weight": 0.19
@@ -2141,7 +2150,8 @@
     "weight": 36.77
   },
   "hummingbot/hummingbot": {
-    "weight": 0.18
+    "weight": 0.18,
+    "additional_acceptable_branches": ["development"]
   },
   "hybridauth/hybridauth": {
     "weight": 0.24
@@ -2175,7 +2185,8 @@
     "weight": 0.19
   },
   "idurar/idurar-erp-crm": {
-    "weight": 0.32
+    "weight": 0.32,
+    "additional_acceptable_branches": ["dev"]
   },
   "illuspas/Node-Media-Server": {
     "weight": 0.17
@@ -2296,7 +2307,8 @@
     "weight": 0.18
   },
   "joomla/joomla-cms": {
-    "weight": 0.28
+    "weight": 0.28,
+    "additional_acceptable_branches": ["*-dev"]
   },
   "jpetazzo/container.training": {
     "weight": 0.18
@@ -2326,10 +2338,12 @@
     "weight": 0.21
   },
   "juice-shop/juice-shop": {
-    "weight": 0.35
+    "weight": 0.35,
+    "additional_acceptable_branches": ["develop"]
   },
   "juliangarnier/anime": {
-    "weight": 1.52
+    "weight": 1.52,
+    "additional_acceptable_branches": ["dev"]
   },
   "junegunn/fzf": {
     "weight": 0.58
@@ -2576,7 +2590,8 @@
     "weight": 6.52
   },
   "macrocosm-os/data-universe": {
-    "weight": 7.05
+    "weight": 7.05,
+    "additional_acceptable_branches": ["dev"]
   },
   "macrocosm-os/iota": {
     "weight": 5.0
@@ -2898,7 +2913,8 @@
     "weight": 0.32
   },
   "nodemcu/nodemcu-firmware": {
-    "weight": 0.26
+    "weight": 0.26,
+    "additional_acceptable_branches": ["dev"]
   },
   "nolimits4web/swiper": {
     "weight": 0.35
@@ -3057,13 +3073,23 @@
     "weight": 0.29
   },
   "opentensor/bittensor": {
-    "weight": 77.04
+    "weight": 77.04,
+    "additional_acceptable_branches": [
+      "staging",
+      "SDKv10"
+    ]
   },
   "opentensor/btcli": {
-    "weight": 36.77
+    "weight": 36.77,
+    "additional_acceptable_branches": [
+      "staging"
+    ]
   },
   "opentensor/subtensor": {
-    "weight": 78.01
+    "weight": 78.01,
+    "additional_acceptable_branches": [
+      "devnet-ready"
+    ]
   },
   "openvinotoolkit/open_model_zoo": {
     "weight": 0.28
@@ -3186,7 +3212,8 @@
     "weight": 6.55
   },
   "pi-hole/web": {
-    "weight": 36.77
+    "weight": 36.77,
+    "additional_acceptable_branches": ["development"]
   },
   "pimcore/pimcore": {
     "weight": 0.25
@@ -3519,7 +3546,8 @@
     "weight": 0.31
   },
   "shiftlayer-llc/brainplay-subnet": {
-    "weight": 6.52
+    "weight": 6.52,
+    "additional_acceptable_branches": ["dev"]
   },
   "signalapp/Signal-Server": {
     "weight": 0.17
@@ -3852,7 +3880,8 @@
     "weight": 0.01
   },
   "tw93/Pake": {
-    "weight": 0.18
+    "weight": 0.18,
+    "additional_acceptable_branches": ["dev"]
   },
   "twbs/bootstrap": {
     "weight": 0.48

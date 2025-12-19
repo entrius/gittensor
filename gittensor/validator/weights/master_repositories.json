@@ -441,7 +441,7 @@
     "weight": 0.32
   },
   "PX4/PX4-Autopilot": {
-    "weight": 0.32
+    "weight": 24.11
   },
   "PaddlePaddle/PaddleDetection": {
     "weight": 0.18
@@ -555,7 +555,7 @@
     "weight": 0.17
   },
   "Significant-Gravitas/AutoGPT": {
-    "weight": 0.39
+    "weight": 25.61
   },
   "SillyTavern/SillyTavern": {
     "weight": 0.19,
@@ -631,7 +631,8 @@
     "weight": 0.17
   },
   "ToolJet/ToolJet": {
-    "weight": 0.24
+    "weight": 22.71,
+    "additional_acceptable_branches": ["develop"]
   },
   "Trinea/android-open-project": {
     "weight": 0.22
@@ -986,7 +987,7 @@
     "weight": 0.21
   },
   "appwrite/appwrite": {
-    "weight": 0.17
+    "weight": 20.89
   },
   "aptos-labs/aptos-core": {
     "weight": 0.25
@@ -1137,10 +1138,10 @@
     "weight": 6.52
   },
   "bitwarden/clients": {
-    "weight": 0.91
+    "weight": 24.13
   },
   "bitwarden/server": {
-    "weight": 0.47
+    "weight": 37.18
   },
   "blockscout/blockscout": {
     "weight": 0.19
@@ -1317,7 +1318,7 @@
     "weight": 0.25
   },
   "commaai/openpilot": {
-    "weight": 0.25
+    "weight": 41.39
   },
   "community/community": {
     "weight": 0.23
@@ -1347,7 +1348,7 @@
     "weight": 0.25
   },
   "crewAIInc/crewAI": {
-    "weight": 0.23
+    "weight": 6.91
   },
   "crossoverJie/cim": {
     "weight": 0.29
@@ -1691,7 +1692,7 @@
     "weight": 10.66
   },
   "excalidraw/excalidraw": {
-    "weight": 0.23
+    "weight": 22.71
   },
   "expo/expo": {
     "weight": 0.32
@@ -1920,7 +1921,7 @@
     "weight": 0.18
   },
   "godotengine/godot": {
-    "weight": 0.32
+    "weight": 23.81
   },
   "godotengine/godot-docs": {
     "weight": 0.19
@@ -2105,10 +2106,11 @@
     "weight": 0.24
   },
   "home-assistant/core": {
-    "weight": 0.64
+    "weight": 48.92,
+    "additional_acceptable_branches": ["dev"]
   },
   "home-assistant/frontend": {
-    "weight": 0.29
+    "weight": 5.85
   },
   "home-assistant/home-assistant.io": {
     "weight": 0.22
@@ -2120,7 +2122,7 @@
     "weight": 0.17
   },
   "hoppscotch/hoppscotch": {
-    "weight": 0.17
+    "weight": 49.86
   },
   "hpcaitech/ColossalAI": {
     "weight": 0.23
@@ -2141,7 +2143,7 @@
     "weight": 0.19
   },
   "huggingface/lerobot": {
-    "weight": 0.56
+    "weight": 31.72
   },
   "huggingface/pytorch-image-models": {
     "weight": 6.19
@@ -2195,7 +2197,7 @@
     "weight": 0.21
   },
   "immich-app/immich": {
-    "weight": 0.17
+    "weight": 21.92
   },
   "immortalwrt/immortalwrt": {
     "weight": 0.25
@@ -2237,7 +2239,7 @@
     "weight": 0.38
   },
   "isaac-sim/IsaacLab": {
-    "weight": 0.3
+    "weight": 18.62
   },
   "istio/istio": {
     "weight": 4.6
@@ -2261,7 +2263,7 @@
     "weight": 0.19
   },
   "jellyfin/jellyfin": {
-    "weight": 0.62
+    "weight": 23.29
   },
   "jenkinsci/docker": {
     "weight": 0.2
@@ -2487,7 +2489,7 @@
     "weight": 32.4
   },
   "langchain-ai/langchain": {
-    "weight": 0.62
+    "weight": 29.38
   },
   "langflow-ai/langflow": {
     "weight": 0.19
@@ -2627,7 +2629,7 @@
     "weight": 3.44
   },
   "mastodon/mastodon": {
-    "weight": 0.18
+    "weight": 19.49
   },
   "matplotlib/matplotlib": {
     "weight": 0.35
@@ -2826,7 +2828,7 @@
     "weight": 0.66
   },
   "mudler/LocalAI": {
-    "weight": 0.58
+    "weight": 13.81
   },
   "mui/material-ui": {
     "weight": 6.1
@@ -2904,7 +2906,8 @@
     "weight": 2.43
   },
   "nocodb/nocodb": {
-    "weight": 0.17
+    "weight": 32.44,
+    "additional_acceptable_branches": ["develop"]
   },
   "nodejs/node": {
     "weight": 8.6
@@ -2977,7 +2980,7 @@
     "weight": 0.19
   },
   "ollama/ollama": {
-    "weight": 8.89
+    "weight": 23.18
   },
   "olton/metroui": {
     "weight": 0.17
@@ -3043,7 +3046,7 @@
     "weight": 0.27
   },
   "openinterpreter/open-interpreter": {
-    "weight": 0.18
+    "weight": 31.73
   },
   "openjdk/jdk": {
     "weight": 4.6
@@ -3074,22 +3077,15 @@
   },
   "opentensor/bittensor": {
     "weight": 77.04,
-    "additional_acceptable_branches": [
-      "staging",
-      "SDKv10"
-    ]
+    "additional_acceptable_branches": ["staging", "SDKv10"]
   },
   "opentensor/btcli": {
     "weight": 36.77,
-    "additional_acceptable_branches": [
-      "staging"
-    ]
+    "additional_acceptable_branches": ["staging"]
   },
   "opentensor/subtensor": {
     "weight": 78.01,
-    "additional_acceptable_branches": [
-      "devnet-ready"
-    ]
+    "additional_acceptable_branches": ["devnet-ready"]
   },
   "openvinotoolkit/open_model_zoo": {
     "weight": 0.28
@@ -3194,7 +3190,7 @@
     "weight": 0.31
   },
   "penpot/penpot": {
-    "weight": 0.54
+    "weight": 20.62
   },
   "pentaho/pentaho-kettle": {
     "weight": 0.3
@@ -3387,7 +3383,7 @@
     "weight": 6.57
   },
   "ray-project/ray": {
-    "weight": 0.24
+    "weight": 51.11
   },
   "raycast/extensions": {
     "weight": 0.3
@@ -3471,7 +3467,7 @@
     "weight": 0.22
   },
   "run-llama/llama_index": {
-    "weight": 0.24
+    "weight": 29.89
   },
   "runelite/runelite": {
     "weight": 0.32
@@ -3679,7 +3675,7 @@
     "weight": 0.17
   },
   "streamlit/streamlit": {
-    "weight": 4.83
+    "weight": 11.99
   },
   "sudheerj/javascript-interview-questions": {
     "inactiveAt": "2025-11-04T02:18:33.094Z",
@@ -3690,7 +3686,7 @@
     "weight": 0.01
   },
   "supabase/supabase": {
-    "weight": 3.45
+    "weight": 52.22
   },
   "sveltejs/svelte": {
     "weight": 0.19
@@ -4128,6 +4124,68 @@
   },
   "zxlie/FeHelper": {
     "weight": 0.17
+  },
+  "brave/brave-browser": {
+    "weight": 54.12
+  },
+  "SWE-agent/SWE-agent": {
+    "weight": 34.88
+  },
+  "All-Hands-AI/OpenHands": {
+    "weight": 31.76
+  },
+  "zed-industries/zed": {
+    "weight": 32.29
+  },
+  "astral-sh/ruff": {
+    "weight": 49.15
+  },
+  "oven-sh/bun": {
+    "weight": 31.66
+  },
+  "helix-editor/helix": {
+    "weight": 19.21
+  },
+  "medusajs/medusa": {
+    "weight": 23.29,
+    "additional_acceptable_branches": ["develop"]
+  },
+  "ros2/ros2": {
+    "weight": 13.77
+  },
+  "NVIDIA-Omniverse/IsaacSim": {
+    "weight": 15.45
+  },
+  "signalapp/Signal-Android": {
+    "weight": 13.64
+  },
+  "tauri-apps/tauri": {
+    "weight": 21.30,
+    "additional_acceptable_branches": ["dev"]
+  },
+  "pola-rs/polars": {
+    "weight": 16.82
+  },
+  "pocketbase/pocketbase": {
+    "weight": 16.91
+  },
+  "bevyengine/bevy": {
+    "weight": 20.48
+  },
+  "deepset-ai/haystack": {
+    "weight": 20.06
+  },
+  "Unstructured-IO/unstructured": {
+    "weight": 8.87
+  },
+  "qdrant/qdrant": {
+    "weight": 7.54,
+    "additional_acceptable_branches": ["dev"]
+  },
+  "AppFlowy-IO/AppFlowy": {
+    "weight": 10.83
+  },
+  "photoprism/photoprism": {
+    "weight": 17.11
   }
 }
-

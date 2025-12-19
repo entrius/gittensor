@@ -12,6 +12,7 @@ from gittensor.classes import FileChange, PRFetchResult
 from gittensor.constants import (
     BASE_GITHUB_API_URL,
     MERGE_SUCCESS_RATIO_APPLICATION_DATE,
+    IGNORED_AUTHOR_ASSOCIATIONS,
 )
 from gittensor.validator.utils.config import MERGED_PR_LOOKBACK_DAYS
 
@@ -93,19 +94,6 @@ QUERY = """
       }
     }
     """
-
-
-def normalize_repo_name(repo_name: str) -> str:
-    """Normalize repository name to lowercase for case-insensitive comparison.
-    
-    Args:
-        repo_name (str): Repository name in format 'owner/repo'
-    
-    Returns:
-        str: Lowercase repository name
-    """
-    return repo_name.lower()
-
 
 def branch_matches_pattern(branch_name: str, patterns: List[str]) -> bool:
     """Check if a branch name matches any pattern in the list.
@@ -346,8 +334,7 @@ def _categorize_open_or_closed_pr(
     repository_full_name: str,
     pr_state: str,
     date_filter: datetime,
-    active_repositories: List[str],
-    master_repositories: dict[str, dict],
+    active_repositories: List[str]
 ) -> tuple[int, int, bool]:
     """
     Categorize an OPEN or CLOSED PR and determine if it's eligible for collateral scoring.
@@ -358,7 +345,6 @@ def _categorize_open_or_closed_pr(
         pr_state: GitHub PR state (OPEN, CLOSED, MERGED)
         date_filter: Date filter for lookback period
         active_repositories: List of active repository names
-        master_repositories: Repository metadata for validation
 
     Returns:
         (open_pr_delta, closed_pr_delta, is_eligible_for_collateral)
@@ -367,20 +353,15 @@ def _categorize_open_or_closed_pr(
     closed_pr_delta = 0
     is_eligible_for_collateral = False
 
-    # Normalize repository name for comparison (active_repositories keys are already lowercase)
-    normalized_repo = normalize_repo_name(repository_full_name)
-
     # Check if it's an open PR. We are counting ALL open PRs to active repositories
     if pr_state == 'OPEN':
-        if normalized_repo in active_repositories:
+        if repository_full_name in active_repositories:
             open_pr_delta = 1
 
-            repo_key = next((key for key in master_repositories.keys() if key.lower() == repository_full_name.lower()), None)
-            if repo_key is not None:
-                # Skip if author is maintainer
-                author_association = pr_raw.get('authorAssociation')
-                if author_association not in ['OWNER', 'MEMBER', 'COLLABORATOR']:
-                    is_eligible_for_collateral = True
+            # Skip if author is maintainer
+            author_association = pr_raw.get('authorAssociation')
+            if author_association not in IGNORED_AUTHOR_ASSOCIATIONS:
+                is_eligible_for_collateral = True
 
         return (open_pr_delta, closed_pr_delta, is_eligible_for_collateral)
 
@@ -389,7 +370,7 @@ def _categorize_open_or_closed_pr(
         if pr_raw.get('closedAt'):
             closed_dt = datetime.fromisoformat(pr_raw['closedAt'].rstrip("Z")).replace(tzinfo=timezone.utc)
             if (
-                normalized_repo in active_repositories
+                repository_full_name in active_repositories
                 and closed_dt >= date_filter
                 and closed_dt > MERGE_SUCCESS_RATIO_APPLICATION_DATE
             ):
@@ -419,12 +400,10 @@ def _should_skip_merged_pr(
     Returns:
         tuple[bool, Optional[str]]: (should_skip, skip_reason) - True if PR should be skipped with reason
     """
+
     # Filter by master_repositories - keys are already normalized to lowercase
-    normalized_repo = normalize_repo_name(repository_full_name)
-    if normalized_repo not in master_repositories:
+    if repository_full_name not in master_repositories:
         return (True, f"Skipping PR #{pr_raw['number']} in {repository_full_name} - ineligible repo")
-    
-    repo_key = normalized_repo
 
     # Filter by lookback window
     if merged_dt < date_filter:
@@ -435,7 +414,7 @@ def _should_skip_merged_pr(
 
     # Skip if PR author is a maintainer
     author_association = pr_raw.get('authorAssociation')
-    if author_association in ['OWNER', 'MEMBER', 'COLLABORATOR']:
+    if author_association in IGNORED_AUTHOR_ASSOCIATIONS:
         return (
             True,
             f"Skipping PR #{pr_raw['number']} in {repository_full_name} - author is {author_association} (has direct merge capabilities)",
@@ -458,7 +437,7 @@ def _should_skip_merged_pr(
     )
     base_ref = pr_raw['baseRefName']
     head_ref = pr_raw.get('headRefName', '')  # Source branch (where PR is coming FROM)
-    repo_metadata = master_repositories[repo_key]
+    repo_metadata = master_repositories[repository_full_name]
     additional_branches = repo_metadata.get('additional_acceptable_branches', [])
 
     # Build list of all acceptable branches (default + additional)
@@ -471,8 +450,8 @@ def _should_skip_merged_pr(
     head_repo = pr_raw.get('headRepository')
     is_internal_pr = False
     if head_repo:
-        head_repo_full_name = f"{head_repo['owner']['login']}/{head_repo['name']}"
-        if head_repo_full_name.lower() == repository_full_name.lower():
+        head_repo_full_name = f"{head_repo['owner']['login']}/{head_repo['name']}".lower()
+        if head_repo_full_name == repository_full_name:
             is_internal_pr = True
 
     if is_internal_pr and branch_matches_pattern(head_ref, acceptable_branches):
@@ -494,7 +473,6 @@ def _should_skip_merged_pr(
             )
 
     # Check if repo is inactive
-    repo_metadata = master_repositories[repo_key]
     inactive_at = repo_metadata.get("inactiveAt")
     if inactive_at is not None:
         inactive_dt = datetime.fromisoformat(inactive_at.rstrip("Z")).replace(tzinfo=timezone.utc)
@@ -578,12 +556,12 @@ def get_user_prs_graphql(
             page_info = pr_data.get('pageInfo', {})
 
             for pr_raw in prs:
-                repository_full_name = f"{pr_raw['repository']['owner']['login']}/{pr_raw['repository']['name']}"
+                repository_full_name = f"{pr_raw['repository']['owner']['login']}/{pr_raw['repository']['name']}".lower()
                 pr_state = pr_raw['state']
 
                 # Categorize OPEN/CLOSED PRs
                 open_delta, closed_delta, is_eligible_for_collateral = _categorize_open_or_closed_pr(
-                    pr_raw, repository_full_name, pr_state, date_filter, active_repositories, master_repositories
+                    pr_raw, repository_full_name, pr_state, date_filter, active_repositories
                 )
                 open_pr_count += open_delta
                 closed_pr_count += closed_delta

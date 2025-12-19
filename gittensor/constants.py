@@ -55,6 +55,8 @@ TIME_DECAY_MIN_MULTIPLIER = 0.01
 # =============================================================================
 # Spam & Gaming Mitigation
 # =============================================================================
+IGNORED_AUTHOR_ASSOCIATIONS = ['OWNER', 'MEMBER', 'COLLABORATOR']
+
 # Typo detection (for filtering non-scoreable lines)
 TYPO_MAX_DIST = 2
 TYPO_MIN_SIM = 0.75
@@ -100,9 +102,6 @@ PREPROCESSOR_LANGUAGES = {
 COLLATERAL_EFFECTIVE_DATE = datetime(2025, 12, 19, 17, 0, 0, tzinfo=timezone.utc)
 # Percentage of potential score used as collateral for open PRs
 POTENTIAL_SCORE_COLLATERAL_PERCENT = 0.20
-# Reinflation multiplier for merged PRs that were subject to collateral while open
-# This compensates for the collateral deduction they suffered while pending
-COLLATERAL_REINFLATION_MULTIPLIER = 1.0 + POTENTIAL_SCORE_COLLATERAL_PERCENT
 
 # =============================================================================
 # Rewards & Emissions

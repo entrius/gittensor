@@ -28,7 +28,7 @@ from gittensor.constants import (
     MERGE_SUCCESS_RATIO_APPLICATION_DATE,
     POTENTIAL_SCORE_COLLATERAL_PERCENT,
 )
-from gittensor.utils.github_api_tools import get_pull_request_file_changes, normalize_repo_name
+from gittensor.utils.github_api_tools import get_pull_request_file_changes
 
 def score_merged_pull_requests(
     miner_eval: MinerEvaluation,
@@ -53,13 +53,12 @@ def score_merged_pull_requests(
 
         pr.set_file_changes(file_changes)
 
-        normalized_repo = normalize_repo_name(pr.repository_full_name)
         pr.repo_weight_multiplier = round(master_repositories.get(pr.repository_full_name, {}).get("weight", 0.01), 2)
         pr.base_score = round(pr.calculate_score_from_file_changes(programming_languages), 2)
         pr.issue_multiplier = round(calculate_issue_multiplier(pr), 2)
         pr.open_pr_spam_multiplier = round(calculate_pr_spam_penalty_multiplier(miner_eval.total_open_prs), 2)
         pr.time_decay_multiplier = round(calculate_time_decay_multiplier(pr), 2)
-        pr.gittensor_tag_multiplier = round(GITTENSOR_TAGLINE_BOOST if (pr.gittensor_tagged and pr.repository_full_name.lower() != GITTENSOR_REPOSITORY.lower()) else 1.0, 2)
+        pr.gittensor_tag_multiplier = round(GITTENSOR_TAGLINE_BOOST if (pr.gittensor_tagged and pr.repository_full_name != GITTENSOR_REPOSITORY) else 1.0, 2)
         pr.merge_success_multiplier = round(calculate_merge_success_multiplier(miner_eval) if pr.merged_at > MERGE_SUCCESS_RATIO_APPLICATION_DATE else 1.0, 2)
 
         miner_eval.unique_repos_contributed_to.add(pr.repository_full_name)
@@ -68,16 +67,14 @@ def score_merged_pull_requests(
 def count_repository_contributors(miner_evaluations: Dict[int, MinerEvaluation]) -> Dict[str, int]:
     """
     Count how many miners contribute to each repository and log statistics.
-    Uses normalized (lowercase) repository names for case-insensitive counting.
 
     Returns:
-        Dict[str, int]: Dictionary mapping normalized repository names to contributor counts
+        Dict[str, int]: Dictionary mapping repository names to contributor counts
     """
     repo_counts: Dict[str, int] = {}
 
     for evaluation in miner_evaluations.values():
         for repo in evaluation.unique_repos_contributed_to:
-            # Repository names are already normalized when added to unique_repos_contributed_to
             repo_counts[repo] = repo_counts.get(repo, 0) + 1
 
     if repo_counts:
@@ -145,9 +142,7 @@ def apply_cross_miner_multipliers_and_finalize(miner_evaluations: Dict[int, Mine
 
         for pr in evaluation.merged_pull_requests:
             # Apply uniqueness multiplier (cross-miner dependent)
-            # Use normalized repository name for case-insensitive lookup
-            normalized_repo = normalize_repo_name(pr.repository_full_name)
-            repo_count = repo_counts.get(normalized_repo, 0)
+            repo_count = repo_counts.get(pr.repository_full_name, 0)
             uniqueness_score = (total_contributing_miners - repo_count + 1) / total_contributing_miners
             uniqueness_multiplier = 1.0 + (uniqueness_score * UNIQUE_PR_BOOST)
             pr.repository_uniqueness_multiplier = uniqueness_multiplier
@@ -377,7 +372,7 @@ def score_open_prs_for_collateral(
 
         repo_weight = master_repositories.get(pr.repository_full_name, {}).get("weight", 0.01)
         file_change_score = pr.calculate_score_from_file_changes(programming_languages)
-        gittensor_tag_multiplier = GITTENSOR_TAGLINE_BOOST if (pr.gittensor_tagged and pr.repository_full_name.lower() != GITTENSOR_REPOSITORY.lower()) else 1.0
+        gittensor_tag_multiplier = GITTENSOR_TAGLINE_BOOST if (pr.gittensor_tagged and pr.repository_full_name != GITTENSOR_REPOSITORY) else 1.0
 
         pr.repo_weight_multiplier = round(repo_weight, 2)
         pr.base_score = round(file_change_score, 2)

@@ -249,7 +249,7 @@ class PullRequest:
         from gittensor.validator.utils.datetime_utils import parse_github_timestamp
 
         repo_data = pr_data['repository']
-        repository_full_name = f"{repo_data['owner']['login']}/{repo_data['name']}"
+        repository_full_name = f"{repo_data['owner']['login']}/{repo_data['name']}".lower()
 
         raw_issues = pr_data['closingIssuesReferences']['nodes']
         issues = []
@@ -270,7 +270,7 @@ class PullRequest:
                 )
 
         # Extract description and check for Gittensor tagline
-        description = pr_data.get('bodyText', '')
+        description: str = pr_data.get('bodyText', '')
         last_edited_at = parse_github_timestamp(pr_data.get('lastEditedAt')) if pr_data.get('lastEditedAt') else None
         merged_at = parse_github_timestamp(pr_data['mergedAt'])
 
@@ -323,7 +323,7 @@ class PullRequest:
         from gittensor.validator.utils.datetime_utils import parse_github_timestamp
 
         repo_data = pr_data['repository']
-        repository_full_name = f"{repo_data['owner']['login']}/{repo_data['name']}"
+        repository_full_name = f"{repo_data['owner']['login']}/{repo_data['name']}".lower()
 
         # Extract linked issues for collateral calculation (may be open or closed)
         raw_issues = pr_data.get('closingIssuesReferences', {}).get('nodes', [])
@@ -342,7 +342,7 @@ class PullRequest:
                 )
             )
 
-        description = pr_data.get('bodyText', '')
+        description: str = pr_data.get('bodyText', '')
         last_edited_at = parse_github_timestamp(pr_data.get('lastEditedAt')) if pr_data.get('lastEditedAt') else None
 
         # Detect Gittensor tagline for collateral calculation

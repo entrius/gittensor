@@ -93,7 +93,9 @@ def query_master_repo_list(max_retries: int = 3) -> Dict[str, Dict[str, Any]]:
 
         try:
             weight_float = float(weight)
-            result[full_name] = {'weight': weight_float, 'inactiveAt': inactive_at}  # Can be None or timestamp string
+            # Normalize repository name to lowercase for case-insensitive matching
+            normalized_name = full_name.lower()
+            result[normalized_name] = {'weight': weight_float, 'inactiveAt': inactive_at}  # Can be None or timestamp string
         except (ValueError, TypeError) as e:
             bt.logging.warning(f"Could not convert weight to float for {full_name}: {weight} - {e}")
             continue

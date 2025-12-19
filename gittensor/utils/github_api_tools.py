@@ -152,6 +152,15 @@ def get_github_user(token: str) -> Optional[Dict[str, Any]]:
                     bt.logging.warning(f"Failed to parse GitHub /user JSON response: {e}")
                     return None
 
+                # Validate that user_data contains required fields before caching
+                # to prevent crashes when trying to access missing fields later
+                if not user_data.get('id') or not user_data.get('created_at'):
+                    bt.logging.warning(
+                        f"GitHub /user response missing required fields (id: {user_data.get('id')}, "
+                        f"created_at: {user_data.get('created_at')}). Not caching incomplete data."
+                    )
+                    return user_data  # Return but don't cache incomplete data
+
                 _GITHUB_USER_CACHE[token] = user_data
                 return user_data
 

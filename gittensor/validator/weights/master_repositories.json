@@ -17,11 +17,17 @@
   "Aider-AI/aider": {
     "weight": 0.18
   },
+  "All-Hands-AI/OpenHands": {
+    "weight": 31.76
+  },
   "AlphaCoreBittensor/alphacore": {
     "weight": 6.52
   },
   "ApolloAuto/apollo": {
     "weight": 0.3
+  },
+  "AppFlowy-IO/AppFlowy": {
+    "weight": 10.83
   },
   "ArduPilot/ardupilot": {
     "weight": 0.32
@@ -341,7 +347,7 @@
     "weight": 0.25
   },
   "MetaMask/metamask-extension": {
-    "weight": 16.94
+    "weight": 63.13
   },
   "MicrosoftDocs/azure-docs": {
     "weight": 0.25
@@ -363,10 +369,13 @@
     "weight": 0.25
   },
   "MystenLabs/sui": {
-    "weight": 18.96
+    "weight": 62.82
   },
   "NG-ZORRO/ng-zorro-antd": {
     "weight": 0.3
+  },
+  "NVIDIA-Omniverse/IsaacSim": {
+    "weight": 15.45
   },
   "NVIDIA/Megatron-LM": {
     "weight": 0.18
@@ -542,6 +551,9 @@
   "SVG-Edit/svgedit": {
     "weight": 0.17
   },
+  "SWE-agent/SWE-agent": {
+    "weight": 34.88
+  },
   "SchemaStore/schemastore": {
     "weight": 0.3
   },
@@ -587,7 +599,7 @@
     "weight": 0.27
   },
   "Swap-Subnet/swap-subnet": {
-    "weight": 5.0
+    "weight": 5
   },
   "TanStack/query": {
     "weight": 0.17
@@ -653,10 +665,13 @@
     "weight": 0.31
   },
   "Unitech/pm2": {
-    "weight": 59.35
+    "weight": 60.05
   },
   "Unity-Technologies/ml-agents": {
     "weight": 0.17
+  },
+  "Unstructured-IO/unstructured": {
+    "weight": 8.87
   },
   "VickScarlet/lifeRestart": {
     "weight": 0.18
@@ -1004,6 +1019,9 @@
   "aspnetboilerplate/aspnetboilerplate": {
     "weight": 0.29
   },
+  "astral-sh/ruff": {
+    "weight": 49.15
+  },
   "astropy/astropy": {
     "weight": 0.29
   },
@@ -1091,6 +1109,9 @@
   "betaflight/betaflight": {
     "weight": 0.26
   },
+  "bevyengine/bevy": {
+    "weight": 20.48
+  },
   "bia-pain-bache/BPB-Worker-Panel": {
     "weight": 0.4
   },
@@ -1117,22 +1138,22 @@
     "weight": 7.05
   },
   "bitcoin/bips": {
-    "weight": 32.21
+    "weight": 62.53
   },
   "bitcoin/bitcoin": {
     "weight": 78.01
   },
   "bitcoinj/bitcoinj": {
-    "weight": 33.44
+    "weight": 62.25
   },
   "bitcoinjs/bitcoinjs-lib": {
-    "weight": 51.07
+    "weight": 61.99
   },
   "bitnami/charts": {
     "weight": 0.22
   },
   "bitpay/bitcore": {
-    "weight": 33.22
+    "weight": 61.74
   },
   "bitrecs/bitrecs-subnet": {
     "weight": 6.52
@@ -1154,6 +1175,9 @@
   },
   "boto/boto3": {
     "weight": 2.69
+  },
+  "brave/brave-browser": {
+    "weight": 54.12
   },
   "brianfrankcooper/YCSB": {
     "weight": 0.29
@@ -1339,7 +1363,7 @@
     "weight": 0.32
   },
   "cosmos/cosmos-sdk": {
-    "weight": 16.46
+    "weight": 61.5
   },
   "cotes2020/jekyll-theme-chirpy": {
     "weight": 0.22
@@ -1422,6 +1446,9 @@
   "deepseek-ai/DeepSeek-V3": {
     "weight": 0.25
   },
+  "deepset-ai/haystack": {
+    "weight": 20.06
+  },
   "deepspeedai/DeepSpeed": {
     "weight": 0.23
   },
@@ -1501,7 +1528,7 @@
     "weight": 0.25
   },
   "dogecoin/dogecoin": {
-    "weight": 23.71
+    "weight": 61.26
   },
   "doggy8088/Learn-Git-in-30-days": {
     "weight": 0.18
@@ -1671,10 +1698,10 @@
     "weight": 0.25
   },
   "ethereum-optimism/optimism": {
-    "weight": 16.41
+    "weight": 61.04
   },
   "ethereum/EIPs": {
-    "weight": 49.6
+    "weight": 60.83
   },
   "ethereum/consensus-specs": {
     "weight": 0.27
@@ -1683,13 +1710,13 @@
     "weight": 0.2
   },
   "ethereum/go-ethereum": {
-    "weight": 51.72
+    "weight": 76.17
   },
   "ethereum/web3.py": {
     "weight": 2.01
   },
   "ethers-io/ethers.js": {
-    "weight": 10.66
+    "weight": 60.62
   },
   "excalidraw/excalidraw": {
     "weight": 22.71
@@ -2005,7 +2032,7 @@
     "weight": 6.52
   },
   "gorhill/uBlock": {
-    "weight": 7.0
+    "weight": 7
   },
   "gradio-app/gradio": {
     "weight": 0.18
@@ -2080,6 +2107,9 @@
   },
   "hect0x7/JMComic-Crawler-Python": {
     "weight": 0.35
+  },
+  "helix-editor/helix": {
+    "weight": 19.21
   },
   "helm/helm": {
     "weight": 4.6
@@ -2530,6 +2560,9 @@
   "letscontrolit/ESPEasy": {
     "weight": 0.25
   },
+  "letta-ai/letta": {
+    "weight": 64.83
+  },
   "liangliangyy/DjangoBlog": {
     "weight": 0.31
   },
@@ -2596,7 +2629,7 @@
     "additional_acceptable_branches": ["dev"]
   },
   "macrocosm-os/iota": {
-    "weight": 5.0
+    "weight": 5
   },
   "macrozheng/mall": {
     "weight": 0.61
@@ -2648,6 +2681,10 @@
   },
   "mdn/content": {
     "weight": 0.25
+  },
+  "medusajs/medusa": {
+    "weight": 23.29,
+    "additional_acceptable_branches": ["develop"]
   },
   "meilisearch/meilisearch": {
     "weight": 2.08
@@ -2795,7 +2832,7 @@
     "weight": 0.29
   },
   "mode-network/synth-subnet": {
-    "weight": 5.0
+    "weight": 5
   },
   "modelcontextprotocol/python-sdk": {
     "weight": 3.34
@@ -2804,7 +2841,7 @@
     "weight": 0.22
   },
   "monero-project/monero": {
-    "weight": 16.52
+    "weight": 63.8
   },
   "mongodb/mongo": {
     "weight": 0.62
@@ -2888,7 +2925,7 @@
     "weight": 0.23
   },
   "nginx/nginx": {
-    "weight": 69.0
+    "weight": 69
   },
   "nimbusdotstorage/Nimbus": {
     "weight": 0.15
@@ -2992,7 +3029,7 @@
     "weight": 6.52
   },
   "one-covenant/grail": {
-    "weight": 5.0
+    "weight": 5
   },
   "oneoneone-io/subnet-111": {
     "weight": 6.52
@@ -3126,6 +3163,9 @@
   "ourongxing/newsnow": {
     "weight": 0.3
   },
+  "oven-sh/bun": {
+    "weight": 31.66
+  },
   "owncast/owncast": {
     "weight": 0.35
   },
@@ -3181,7 +3221,7 @@
     "weight": 14.58
   },
   "pebble-dev/pebble-firmware": {
-    "weight": 10.0
+    "weight": 10
   },
   "pedroslopez/whatsapp-web.js": {
     "weight": 0.19
@@ -3197,6 +3237,9 @@
   },
   "phaserjs/phaser": {
     "weight": 0.25
+  },
+  "photoprism/photoprism": {
+    "weight": 17.11
   },
   "php/php-src": {
     "weight": 4.6
@@ -3240,6 +3283,12 @@
   },
   "pnpm/pnpm": {
     "weight": 1.22
+  },
+  "pocketbase/pocketbase": {
+    "weight": 16.91
+  },
+  "pola-rs/polars": {
+    "weight": 16.82
   },
   "postgres/postgres": {
     "weight": 14.6
@@ -3342,6 +3391,10 @@
   },
   "qbittensor-labs/quantum": {
     "weight": 44.58
+  },
+  "qdrant/qdrant": {
+    "weight": 7.54,
+    "additional_acceptable_branches": ["dev"]
   },
   "qemu/qemu": {
     "weight": 0.28
@@ -3451,6 +3504,9 @@
   "ros-navigation/navigation2": {
     "weight": 0.25
   },
+  "ros2/ros2": {
+    "weight": 13.77
+  },
   "rstudio/bookdown": {
     "weight": 0.29
   },
@@ -3545,6 +3601,9 @@
     "weight": 6.52,
     "additional_acceptable_branches": ["dev"]
   },
+  "signalapp/Signal-Android": {
+    "weight": 13.64
+  },
   "signalapp/Signal-Server": {
     "weight": 0.17
   },
@@ -3573,7 +3632,7 @@
     "weight": 0.39
   },
   "smartcontractkit/chainlink": {
-    "weight": 23.65
+    "weight": 60.42
   },
   "smogon/pokemon-showdown": {
     "weight": 0.29
@@ -3591,7 +3650,7 @@
     "weight": 0.25
   },
   "solana-foundation/anchor": {
-    "weight": 32.45
+    "weight": 72.46
   },
   "sorin-ionescu/prezto": {
     "weight": 0.21
@@ -3751,6 +3810,10 @@
   "taubyte/tau": {
     "weight": 0.4
   },
+  "tauri-apps/tauri": {
+    "weight": 21.3,
+    "additional_acceptable_branches": ["dev"]
+  },
   "teddysun/across": {
     "weight": 0.19
   },
@@ -3806,7 +3869,7 @@
     "weight": 0.22
   },
   "threetau/kinitro": {
-    "weight": 5.0
+    "weight": 5
   },
   "tianocore/edk2": {
     "weight": 0.25
@@ -3836,13 +3899,13 @@
     "weight": 0.19
   },
   "torvalds/linux": {
-    "weight": 76.0
+    "weight": 76.1
   },
   "tplr-ai/basilica": {
-    "weight": 5.0
+    "weight": 5
   },
   "tplr-ai/templar": {
-    "weight": 5.0
+    "weight": 5
   },
   "traccar/traccar": {
     "weight": 0.29
@@ -4096,7 +4159,10 @@
     "weight": 0.31
   },
   "zcash/zcash": {
-    "weight": 33.71
+    "weight": 60.23
+  },
+  "zed-industries/zed": {
+    "weight": 32.29
   },
   "zellij-org/zellij": {
     "weight": 0.66
@@ -4124,68 +4190,5 @@
   },
   "zxlie/FeHelper": {
     "weight": 0.17
-  },
-  "brave/brave-browser": {
-    "weight": 54.12
-  },
-  "SWE-agent/SWE-agent": {
-    "weight": 34.88
-  },
-  "All-Hands-AI/OpenHands": {
-    "weight": 31.76
-  },
-  "zed-industries/zed": {
-    "weight": 32.29
-  },
-  "astral-sh/ruff": {
-    "weight": 49.15
-  },
-  "oven-sh/bun": {
-    "weight": 31.66
-  },
-  "helix-editor/helix": {
-    "weight": 19.21
-  },
-  "medusajs/medusa": {
-    "weight": 23.29,
-    "additional_acceptable_branches": ["develop"]
-  },
-  "ros2/ros2": {
-    "weight": 13.77
-  },
-  "NVIDIA-Omniverse/IsaacSim": {
-    "weight": 15.45
-  },
-  "signalapp/Signal-Android": {
-    "weight": 13.64
-  },
-  "tauri-apps/tauri": {
-    "weight": 21.30,
-    "additional_acceptable_branches": ["dev"]
-  },
-  "pola-rs/polars": {
-    "weight": 16.82
-  },
-  "pocketbase/pocketbase": {
-    "weight": 16.91
-  },
-  "bevyengine/bevy": {
-    "weight": 20.48
-  },
-  "deepset-ai/haystack": {
-    "weight": 20.06
-  },
-  "Unstructured-IO/unstructured": {
-    "weight": 8.87
-  },
-  "qdrant/qdrant": {
-    "weight": 7.54,
-    "additional_acceptable_branches": ["dev"]
-  },
-  "AppFlowy-IO/AppFlowy": {
-    "weight": 10.83
-  },
-  "photoprism/photoprism": {
-    "weight": 17.11
   }
 }

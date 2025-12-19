@@ -1264,6 +1264,9 @@
   "Platane/snk": {
     "weight": 0.28
   },
+  "PlatformNetwork/platform": {
+    "weight": 6.52
+  },  
   "PointCloudLibrary/pcl": {
     "weight": 0.28
   },
@@ -3071,6 +3074,9 @@
   "bitpay/bitcore": {
     "weight": 33.22
   },
+  "bitrecs/bitrecs-subnet": {
+    "weight": 6.52
+  },
   "bitsadmin/wesng": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
     "weight": 0.01
@@ -3251,6 +3257,9 @@
   "bytedeco/javacv": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
     "weight": 0.01
+  },
+  "byteleapai/byteleap-Miner": {
+    "weight": 6.52
   },
   "c3js/c3": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
@@ -8299,6 +8308,9 @@
   "one-covenant/grail": {
     "weight": 5.00
   },
+  "oneoneone-io/subnet-111": {
+    "weight": 6.52
+  },
   "onionshare/onionshare": {
     "inactiveAt": "2025-11-29T17:45:38.525Z",
     "weight": 0.01
@@ -10240,6 +10252,9 @@
   },
   "swagger-api/swagger-ui": {
     "weight": 2.72
+  },
+  "swarm-subnet/swarm": {
+    "weight": 6.52
   },
   "swiftlang/swift": {
     "weight": 1.64

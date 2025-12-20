@@ -7,10 +7,8 @@ from typing import TYPE_CHECKING, Dict
 import bittensor as bt
 import numpy as np
 
-from gittensor.classes import GitPatSynapse, MinerEvaluation, PullRequest
-from gittensor.constants import TIERS_AND_COLLATERAL_EFFECTIVE_DATE
+from gittensor.classes import GitPatSynapse, MinerEvaluation
 from gittensor.utils.github_api_tools import get_user_prs_graphql
-from gittensor.validator.utils.datetime_utils import parse_github_timestamp
 from gittensor.validator.evaluation.dynamic_emissions import apply_dynamic_emissions_using_network_contributions
 from gittensor.validator.evaluation.inspections import (
     detect_and_penalize_duplicates,
@@ -54,20 +52,20 @@ async def query_miner(self, uid: int) -> GitPatSynapse:
         return None
 
 
-async def reward(
+async def evaluate_miners_pull_requests(
     uid: int,
     response: GitPatSynapse,
     master_repositories: Dict[str, Dict],
     programming_languages: Dict[str, float],
 ) -> MinerEvaluation:
     """
-    Entry point from taking a miners response -> Get PRs -> Score PR Diff
+    Entry point from taking a miners response -> Get PRs -> Score PRs by tier
 
     Args:
-        uid (int): The uid of the miner being evaluated
-        response (GitPatSynapse): The GitPatSynapse (github access token) returned by the miner
-        master_repositories (Dict[str, Dict]): The incentivized repositories and their metadata (weight, inactiveAt)
-        programming_languages (Dict[str, float]): The programming languages and their weights
+        uid: The uid of the miner being evaluated
+        response: The GitPatSynapse (github access token) returned by the miner
+        master_repositories: The incentivized repositories and their metadata (weight, inactiveAt)
+        programming_languages: The programming languages and their weights
 
     Returns:
         MinerEvaluation: The object containing scores, valid_prs, etc.
@@ -81,24 +79,7 @@ async def reward(
         return miner_eval
 
     pr_result = get_user_prs_graphql(miner_eval.github_id, miner_eval.github_pat, master_repositories)
-
-    miner_eval.total_merged_prs = pr_result.merged_pr_count
-    miner_eval.total_open_prs = pr_result.open_pr_count
-    miner_eval.total_closed_prs = pr_result.closed_pr_count
-
-    # Add merged PRs
-    for raw_pr in pr_result.merged_prs:
-        miner_eval.add_merged_pull_request(
-            PullRequest.from_graphql_response(raw_pr, uid, miner_eval.hotkey, miner_eval.github_id)
-        )
-
-    # Add open PRs (only those created after TIERS_AND_COLLATERAL_EFFECTIVE_DATE)
-    for raw_pr in pr_result.open_prs:
-        created_at = parse_github_timestamp(raw_pr['createdAt'])
-        if created_at > TIERS_AND_COLLATERAL_EFFECTIVE_DATE:
-            miner_eval.add_open_pull_request(
-                PullRequest.from_open_pr_graphql_response(raw_pr, uid, miner_eval.hotkey, miner_eval.github_id)
-            )
+    miner_eval.handle_pr_results(pr_result)
 
     score_merged_pull_requests(miner_eval, master_repositories, programming_languages)
     score_open_prs_for_collateral(miner_eval, master_repositories, programming_languages)
@@ -135,7 +116,7 @@ async def get_rewards(
         responses[uid] = miner_response
 
         # Calculate score
-        miner_evaluation = await reward(uid, miner_response, master_repositories, programming_languages)
+        miner_evaluation = await evaluate_miners_pull_requests(uid, miner_response, master_repositories, programming_languages)
         miner_evaluations[uid] = miner_evaluation
 
     # Adjust scores for duplicate accounts

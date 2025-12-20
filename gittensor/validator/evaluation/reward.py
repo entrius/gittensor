@@ -8,7 +8,7 @@ import bittensor as bt
 import numpy as np
 
 from gittensor.classes import GitPatSynapse, MinerEvaluation, PullRequest
-from gittensor.constants import COLLATERAL_EFFECTIVE_DATE
+from gittensor.constants import TIERS_AND_COLLATERAL_EFFECTIVE_DATE
 from gittensor.utils.github_api_tools import get_user_prs_graphql
 from gittensor.validator.utils.datetime_utils import parse_github_timestamp
 from gittensor.validator.evaluation.dynamic_emissions import apply_dynamic_emissions_using_network_contributions
@@ -92,10 +92,10 @@ async def reward(
             PullRequest.from_graphql_response(raw_pr, uid, miner_eval.hotkey, miner_eval.github_id)
         )
 
-    # Add open PRs (only those created after COLLATERAL_EFFECTIVE_DATE)
+    # Add open PRs (only those created after TIERS_AND_COLLATERAL_EFFECTIVE_DATE)
     for raw_pr in pr_result.open_prs:
         created_at = parse_github_timestamp(raw_pr['createdAt'])
-        if created_at > COLLATERAL_EFFECTIVE_DATE:
+        if created_at > TIERS_AND_COLLATERAL_EFFECTIVE_DATE:
             miner_eval.add_open_pull_request(
                 PullRequest.from_open_pr_graphql_response(raw_pr, uid, miner_eval.hotkey, miner_eval.github_id)
             )

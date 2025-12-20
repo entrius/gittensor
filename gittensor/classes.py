@@ -430,6 +430,33 @@ class MinerEvaluation:
         """Add an open pull request for collateral scoring."""
         self.open_pull_requests.append(pull_request)
 
+    def handle_pr_results(self, pr_result: PRFetchResult) -> None:
+        """Process PR fetch results: set counts and add PRs to evaluation.
+
+        Args:
+            pr_result: The result from fetching user PRs via GraphQL API
+        """
+        from gittensor.constants import TIERS_AND_COLLATERAL_EFFECTIVE_DATE
+        from gittensor.validator.utils.datetime_utils import parse_github_timestamp
+
+        self.total_merged_prs = pr_result.merged_pr_count
+        self.total_open_prs = pr_result.open_pr_count
+        self.total_closed_prs = pr_result.closed_pr_count
+
+        # Add merged PRs
+        for raw_pr in pr_result.merged_prs:
+            self.add_merged_pull_request(
+                PullRequest.from_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id)
+            )
+
+        # Add open PRs (only those created after TIERS_AND_COLLATERAL_EFFECTIVE_DATE)
+        for raw_pr in pr_result.open_prs:
+            created_at = parse_github_timestamp(raw_pr['createdAt'])
+            if created_at > TIERS_AND_COLLATERAL_EFFECTIVE_DATE:
+                self.add_open_pull_request(
+                    PullRequest.from_open_pr_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id)
+                )
+
 
 class GitPatSynapse(bt.Synapse):
     """

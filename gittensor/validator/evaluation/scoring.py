@@ -333,7 +333,7 @@ def score_open_prs_for_collateral(
     """
     Score open pull requests for collateral calculation.
 
-    Only PRs created after COLLATERAL_EFFECTIVE_DATE are eligible (filtered at add time in reward.py).
+    Only PRs created after TIERS_AND_COLLATERAL_EFFECTIVE_DATE are eligible (filtered at add time in reward.py).
 
     Collateral multipliers applied:
     - repo_weight_multiplier: Applied (incentivized repos)

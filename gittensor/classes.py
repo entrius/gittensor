@@ -237,7 +237,7 @@ class PullRequest:
     def from_graphql_response(cls, pr_data: dict, uid: int, hotkey: str, github_id: str) -> 'PullRequest':
         """Create PullRequest from GraphQL API response for any PR state."""
         from gittensor.constants import PR_TAGLINE
-        from gittensor.validator.utils.datetime_utils import parse_github_timestamp
+        from gittensor.validator.utils.datetime_utils import parse_github_timestamp_to_cst
 
         repository_full_name = parse_repo_name(pr_data['repository'])
         pr_state = PRState(pr_data['state'])
@@ -254,15 +254,15 @@ class PullRequest:
                 pr_number=pr_data['number'],
                 repository_full_name=repository_full_name,
                 title=issue['title'],
-                created_at=parse_github_timestamp(issue['createdAt']) if issue.get('createdAt') else None,
-                closed_at=parse_github_timestamp(issue['closedAt']) if issue.get('closedAt') else None,
+                created_at=parse_github_timestamp_to_cst(issue['createdAt']) if issue.get('createdAt') else None,
+                closed_at=parse_github_timestamp_to_cst(issue['closedAt']) if issue.get('closedAt') else None,
                 author_login=issue.get('author', {}).get('login') if issue.get('author') else None,
                 state=issue.get('state'),
             ))
 
         description: str = pr_data.get('bodyText', '')
-        last_edited_at = parse_github_timestamp(pr_data.get('lastEditedAt')) if pr_data.get('lastEditedAt') else None
-        merged_at = parse_github_timestamp(pr_data['mergedAt']) if is_merged else None
+        last_edited_at = parse_github_timestamp_to_cst(pr_data.get('lastEditedAt')) if pr_data.get('lastEditedAt') else None
+        merged_at = parse_github_timestamp_to_cst(pr_data['mergedAt']) if is_merged else None
 
         # Gittensor tag detection - merged PRs have extra post-merge edit check
         gittensor_tagged = False
@@ -288,7 +288,7 @@ class PullRequest:
             title=pr_data['title'],
             author_login=pr_data['author']['login'],
             merged_at=merged_at,
-            created_at=parse_github_timestamp(pr_data['createdAt']),
+            created_at=parse_github_timestamp_to_cst(pr_data['createdAt']),
             pr_state=pr_state,
             additions=pr_data['additions'],
             deletions=pr_data['deletions'],

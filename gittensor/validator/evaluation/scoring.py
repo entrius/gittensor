@@ -24,8 +24,8 @@ from gittensor.constants import (
     EXCESSIVE_PR_MIN_MULTIPLIER,
     GITTENSOR_TAGLINE_BOOST,
     GITTENSOR_REPOSITORY,
-    MERGE_SUCCESS_RATIO_ATTEMPTS_THRESHOLD,
-    MERGE_SUCCESS_RATIO_APPLICATION_DATE,
+    CREDIBILITY_THRESHOLD,
+    CREDIBILITY_APPLICATION_DATE,
     POTENTIAL_SCORE_COLLATERAL_PERCENT,
 )
 from gittensor.utils.github_api_tools import get_pull_request_file_changes
@@ -59,7 +59,7 @@ def score_merged_pull_requests(
         pr.open_pr_spam_multiplier = round(calculate_pr_spam_penalty_multiplier(miner_eval.total_open_prs), 2)
         pr.time_decay_multiplier = round(calculate_time_decay_multiplier(pr), 2)
         pr.gittensor_tag_multiplier = round(GITTENSOR_TAGLINE_BOOST if (pr.gittensor_tagged and pr.repository_full_name != GITTENSOR_REPOSITORY) else 1.0, 2)
-        pr.merge_success_multiplier = round(calculate_merge_success_multiplier(miner_eval) if pr.merged_at > MERGE_SUCCESS_RATIO_APPLICATION_DATE else 1.0, 2)
+        pr.merge_success_multiplier = round(calculate_merge_success_multiplier(miner_eval) if pr.merged_at > CREDIBILITY_APPLICATION_DATE else 1.0, 2)
 
         miner_eval.unique_repos_contributed_to.add(pr.repository_full_name)
 
@@ -99,7 +99,7 @@ def calculate_merge_success_multiplier(miner_eval: MinerEvaluation) -> float:
     """Calculate multiplier based on PR merge success ratio."""
     total_prs = miner_eval.total_merged_prs + miner_eval.total_closed_prs
 
-    if total_prs <= 0 or total_prs < MERGE_SUCCESS_RATIO_ATTEMPTS_THRESHOLD:
+    if total_prs <= 0 or total_prs < CREDIBILITY_THRESHOLD:
         return 1.0
     
     merge_ratio = miner_eval.total_merged_prs / total_prs

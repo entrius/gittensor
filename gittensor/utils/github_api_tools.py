@@ -8,7 +8,11 @@ from typing import Any, Dict, List, Optional
 import bittensor as bt
 import requests
 
-from gittensor.classes import FileChange, PRFetchResult
+from gittensor.classes import (
+    PRState,
+    FileChange,
+    MinerEvaluation,
+)
 from gittensor.constants import (
     BASE_GITHUB_API_URL,
     MERGE_SUCCESS_RATIO_APPLICATION_DATE,
@@ -266,7 +270,7 @@ def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -
 
 
 def get_github_graphql_query(
-    token: str, global_user_id: str, all_valid_prs: List[Dict], max_prs: int, cursor: Optional[str]
+    token: str, global_user_id: str, merged_pr_count: int, max_prs: int, cursor: Optional[str]
 ) -> Optional[requests.Response]:
     """
     Get all merged PRs for a user across all repositories using GraphQL API with pagination.
@@ -274,7 +278,7 @@ def get_github_graphql_query(
     Args:
         token (str): GitHub PAT
         global_user_id (str): Converted numeric user ID to GraphQL global node ID
-        all_valid_prs (List[Dict]): List of raw currently validated PRs
+        merged_pr_count (int): Count of all validated and merged PRs
         max_prs (int): Maximum number of PRs to fetch across all pages
         cursor (Optional[str]): Pagination cursor (where query left off last), None for first page
 
@@ -286,7 +290,7 @@ def get_github_graphql_query(
     headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
     variables = {
         "userId": global_user_id,
-        "limit": min(100, max_prs - len(all_valid_prs)),
+        "limit": min(100, max_prs - merged_pr_count),
         "cursor": cursor,
     }
 
@@ -329,63 +333,49 @@ def get_github_graphql_query(
     return None
 
 
-def _categorize_open_or_closed_pr(
+def should_open_or_closed_pr_be_scored(
     pr_raw: Dict,
     repository_full_name: str,
     pr_state: str,
     date_filter: datetime,
     active_repositories: List[str]
-) -> tuple[int, int, bool]:
+) -> bool:
     """
-    Categorize an OPEN or CLOSED PR and determine if it's eligible for collateral scoring.
+    Determines if an OPEN or CLOSED PR is eligible for scoring.
 
     Args:
         pr_raw: Raw PR data from GraphQL
-        repository_full_name: Full repository name (owner/repo)
+        repository_full_name: Full repository name (owner/repo), lowercase
         pr_state: GitHub PR state (OPEN, CLOSED, MERGED)
         date_filter: Date filter for lookback period
-        active_repositories: List of active repository names
+        active_repositories: List of active repository names (lowercase)
 
     Returns:
-        (open_pr_delta, closed_pr_delta, is_eligible_for_collateral)
+        True if PR should be scored, False otherwise.
     """
-    open_pr_delta = 0
-    closed_pr_delta = 0
-    is_eligible_for_collateral = False
+    if repository_full_name not in active_repositories:
+        return False
 
-    # Check if it's an open PR. We are counting ALL open PRs to active repositories
-    if pr_state == 'OPEN':
-        if repository_full_name in active_repositories:
-            open_pr_delta = 1
+    if pr_state == PRState.OPEN.value:
+        # Internal maintainer PRs don't count for score
+        return pr_raw.get('authorAssociation') not in IGNORED_AUTHOR_ASSOCIATIONS
 
-            # Skip if author is maintainer
-            author_association = pr_raw.get('authorAssociation')
-            if author_association not in IGNORED_AUTHOR_ASSOCIATIONS:
-                is_eligible_for_collateral = True
+    if pr_state == PRState.CLOSED.value:
+        closed_at = pr_raw.get('closedAt')
+        if not closed_at:
+            bt.logging.warning(f"PR #{pr_raw['number']} is CLOSED but missing closedAt timestamp.")
+            return False
 
-        return (open_pr_delta, closed_pr_delta, is_eligible_for_collateral)
+        closed_dt = datetime.fromisoformat(closed_at.rstrip("Z")).replace(tzinfo=timezone.utc)
+        return closed_dt >= date_filter and closed_dt > MERGE_SUCCESS_RATIO_APPLICATION_DATE
 
-    # CLOSED (not merged) PRs - count if within lookback period
-    if pr_state == 'CLOSED' and not pr_raw['mergedAt']:
-        if pr_raw.get('closedAt'):
-            closed_dt = datetime.fromisoformat(pr_raw['closedAt'].rstrip("Z")).replace(tzinfo=timezone.utc)
-            if (
-                repository_full_name in active_repositories
-                and closed_dt >= date_filter
-                and closed_dt > MERGE_SUCCESS_RATIO_APPLICATION_DATE
-            ):
-                closed_pr_delta = 1
-        return (open_pr_delta, closed_pr_delta, is_eligible_for_collateral)
-
-    return (open_pr_delta, closed_pr_delta, is_eligible_for_collateral)
-
+    return False
 
 def _should_skip_merged_pr(
     pr_raw: Dict,
     repository_full_name: str,
     master_repositories: dict[str, dict],
-    date_filter: datetime,
-    merged_dt: datetime,
+    date_filter: datetime
 ) -> tuple[bool, Optional[str]]:
     """
     Validate a merged PR against all eligibility criteria.
@@ -395,12 +385,16 @@ def _should_skip_merged_pr(
         repository_full_name (str): Full repository name (owner/repo)
         master_repositories (dict[str, dict]): Repository metadata (keys are normalized to lowercase)
         date_filter (datetime): Date filter for lookback period
-        merged_dt (datetime): Parsed merge datetime
 
     Returns:
         tuple[bool, Optional[str]]: (should_skip, skip_reason) - True if PR should be skipped with reason
     """
 
+    if not pr_raw['mergedAt']:
+        return (True, f"PR #{pr_raw['number']} is MERGED, but missing a mergedAt timestamp. Skipping...")
+
+    merged_dt = datetime.fromisoformat(pr_raw['mergedAt'].rstrip("Z")).replace(tzinfo=timezone.utc)
+    
     # Filter by master_repositories - keys are already normalized to lowercase
     if repository_full_name not in master_repositories:
         return (True, f"Skipping PR #{pr_raw['number']} in {repository_full_name} - ineligible repo")
@@ -487,40 +481,23 @@ def _should_skip_merged_pr(
     return (False, None)
 
 
-def get_user_prs_graphql(
-    user_id: str, token: str, master_repositories: dict[str, dict], max_prs: int = 1000
-) -> PRFetchResult:
+def load_miners_prs(
+    miner_eval: MinerEvaluation, master_repositories: dict[str, dict], max_prs: int = 1000
+) -> None:
     """
-    Fetch user PRs via GraphQL API and categorize them by state.
+    Fetches user PRs via GraphQL API and categorize them by state.
+    Populates the provided miner_eval instance with fetched PR data.
 
     Args:
-        user_id: GitHub user ID (numeric)
-        token: GitHub PAT
+        miner_eval: The MinerEvaluation object containing github details + more
         master_repositories: Repository metadata (name -> {weight, inactiveAt})
         max_prs: Maximum merged PRs to fetch
-
-    Returns:
-        PRFetchResult with:
-            - merged_prs: Eligible merged PRs for scoring
-            - open_prs: Eligible open PRs for collateral scoring
-            - open_pr_count: Total open PRs in active repos
-            - merged_pr_count: Merged PRs after MERGE_SUCCESS_RATIO_APPLICATION_DATE
-            - closed_pr_count: Closed (not merged) PRs within lookback period
     """
     bt.logging.info("*****Fetching PRs*****")
 
-    if not user_id or user_id == "None":
-        bt.logging.error("Invalid user_id provided to get_user_prs_graphql")
-        return PRFetchResult(merged_prs=[], open_prs=[], open_pr_count=0, merged_pr_count=0, closed_pr_count=0)
-
     date_filter = datetime.now(timezone.utc) - timedelta(days=MERGED_PR_LOOKBACK_DAYS)
-    global_user_id = base64.b64encode(f"04:User{user_id}".encode()).decode()
+    global_user_id = base64.b64encode(f"04:User{miner_eval.github_id}".encode()).decode()
 
-    merged_prs = []
-    open_prs = []
-    open_pr_count = 0
-    merged_pr_count = 0
-    closed_pr_count = 0
     cursor = None
     
     # Build list of active repositories (those without an inactiveAt timestamp)
@@ -530,16 +507,12 @@ def get_user_prs_graphql(
     ]
 
     try:
-        while len(merged_prs) < max_prs:
-            response = get_github_graphql_query(token, global_user_id, merged_prs, max_prs, cursor)
+        while len(miner_eval.merged_pull_requests) < max_prs:
+            response = get_github_graphql_query(miner_eval.github_pat, global_user_id, len(miner_eval.merged_pull_requests), max_prs, cursor)
             if not response:
-                return PRFetchResult(
-                    merged_prs=merged_prs,
-                    open_prs=open_prs,
-                    open_pr_count=open_pr_count,
-                    merged_pr_count=merged_pr_count,
-                    closed_pr_count=closed_pr_count,
-                )
+                bt.logging.warning("No response from github, breaking fetch loop...")
+                break
+            
             data = response.json()
 
             if 'errors' in data:
@@ -559,38 +532,27 @@ def get_user_prs_graphql(
                 repository_full_name = f"{pr_raw['repository']['owner']['login']}/{pr_raw['repository']['name']}".lower()
                 pr_state = pr_raw['state']
 
-                # Categorize OPEN/CLOSED PRs
-                open_delta, closed_delta, is_eligible_for_collateral = _categorize_open_or_closed_pr(
-                    pr_raw, repository_full_name, pr_state, date_filter, active_repositories
-                )
-                open_pr_count += open_delta
-                closed_pr_count += closed_delta
+                if pr_state in (PRState.OPEN.value, PRState.CLOSED.value) and \
+                    should_open_or_closed_pr_be_scored(
+                        pr_raw, repository_full_name, pr_state, date_filter, active_repositories
+                    ):
 
-                if is_eligible_for_collateral:
-                    bt.logging.info(f"OPEN PR #{pr_raw['number']} in {repository_full_name} eligible for collateral")
-                    open_prs.append(pr_raw)
-
-                # Process MERGED PRs
-                if not pr_raw['mergedAt']:
-                    continue
-
-                merged_dt = datetime.fromisoformat(pr_raw['mergedAt'].rstrip("Z")).replace(tzinfo=timezone.utc)
+                    if pr_state == PRState.OPEN.value:
+                        miner_eval.add_open_pull_request(pr_raw)
+                        continue
+                    else:
+                        miner_eval.add_closed_pull_request(pr_raw)
+                        continue
 
                 should_skip, skip_reason = _should_skip_merged_pr(
-                    pr_raw, repository_full_name, master_repositories, date_filter, merged_dt
+                    pr_raw, repository_full_name, master_repositories, date_filter
                 )
 
                 if should_skip:
                     bt.logging.debug(skip_reason)
                     continue
 
-                base_ref = pr_raw['baseRefName']
-                bt.logging.info(f"Accepting MERGED PR #{pr_raw['number']} in {repository_full_name} -> '{base_ref}'")
-
-                if merged_dt > MERGE_SUCCESS_RATIO_APPLICATION_DATE:
-                    merged_pr_count += 1
-
-                merged_prs.append(pr_raw)
+                miner_eval.add_merged_pull_request(pr_raw)
 
             if not page_info.get('hasNextPage') or len(prs) == 0:
                 break
@@ -598,23 +560,9 @@ def get_user_prs_graphql(
             cursor = page_info.get('endCursor')
 
         bt.logging.info(
-            f"Fetched {len(merged_prs)} merged PRs, {len(open_prs)} open PRs for collateral, "
-            f"{open_pr_count} total open, {merged_pr_count} merged (post-cutoff), {closed_pr_count} closed"
-        )
-        return PRFetchResult(
-            merged_prs=merged_prs,
-            open_prs=open_prs,
-            open_pr_count=open_pr_count,
-            merged_pr_count=merged_pr_count,
-            closed_pr_count=closed_pr_count,
+            f"Fetched {len(miner_eval.merged_pull_requests)} merged PRs, {len(miner_eval.open_pull_requests)} open PRs, "
+            f"{len(miner_eval.closed_pull_requests)} closed"
         )
 
     except Exception as e:
         bt.logging.error(f"Error fetching PRs via GraphQL: {e}")
-        return PRFetchResult(
-            merged_prs=merged_prs,
-            open_prs=open_prs,
-            open_pr_count=open_pr_count,
-            merged_pr_count=merged_pr_count,
-            closed_pr_count=closed_pr_count,
-        )

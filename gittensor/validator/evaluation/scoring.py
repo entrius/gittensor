@@ -26,7 +26,7 @@ from gittensor.constants import (
     GITTENSOR_REPOSITORY,
     CREDIBILITY_THRESHOLD,
     CREDIBILITY_APPLICATION_DATE,
-    POTENTIAL_SCORE_COLLATERAL_PERCENT,
+    DEFAULT_COLLATERAL_PERCENT,
 )
 from gittensor.utils.github_api_tools import get_pull_request_file_changes
 
@@ -388,7 +388,7 @@ def calculate_open_pr_collateral_score(pr: PullRequest) -> float:
     """
     Calculate collateral score for an open PR.
 
-    Collateral = base_score * applicable_multipliers * POTENTIAL_SCORE_COLLATERAL_PERCENT
+    Collateral = base_score * applicable_multipliers * DEFAULT_COLLATERAL_PERCENT
 
     Applicable multipliers: repo_weight, issue, gittensor_tag
     NOT applicable: time_decay (merge-based), merge_success (merge-based),
@@ -403,12 +403,12 @@ def calculate_open_pr_collateral_score(pr: PullRequest) -> float:
     }
 
     potential_score = pr.base_score * prod(multipliers.values())
-    collateral_score = potential_score * POTENTIAL_SCORE_COLLATERAL_PERCENT
+    collateral_score = potential_score * DEFAULT_COLLATERAL_PERCENT
 
     mult_str = " | ".join([f"{k}: {v:.2f}" for k, v in multipliers.items()])
     bt.logging.info(
         f"OPEN PR #{pr.number} | base: {pr.base_score:.2f} | {mult_str} | "
-        f"potential: {potential_score:.2f} | collateral ({POTENTIAL_SCORE_COLLATERAL_PERCENT*100:.0f}%): {collateral_score:.2f}"
+        f"potential: {potential_score:.2f} | collateral ({DEFAULT_COLLATERAL_PERCENT*100:.0f}%): {collateral_score:.2f}"
     )
 
     return collateral_score

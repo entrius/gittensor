@@ -55,6 +55,8 @@ TIME_DECAY_MIN_MULTIPLIER = 0.01
 # =============================================================================
 # Spam & Gaming Mitigation
 # =============================================================================
+IGNORED_AUTHOR_ASSOCIATIONS = ['OWNER', 'MEMBER', 'COLLABORATOR']
+
 # Typo detection (for filtering non-scoreable lines)
 TYPO_MAX_DIST = 2
 TYPO_MIN_SIM = 0.75
@@ -92,6 +94,14 @@ PREPROCESSOR_LANGUAGES = {
     'rs',
     'swift',
 }
+
+# =============================================================================
+# Collateral System
+# =============================================================================
+# Date when collateral system becomes effective (PRs created after this date are subject to collateral)
+COLLATERAL_EFFECTIVE_DATE = datetime(2025, 12, 20, 22, 0, 0, tzinfo=timezone.utc)
+# Percentage of potential score used as collateral for open PRs
+POTENTIAL_SCORE_COLLATERAL_PERCENT = 0.20
 
 # =============================================================================
 # Rewards & Emissions

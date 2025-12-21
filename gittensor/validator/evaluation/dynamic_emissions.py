@@ -24,7 +24,7 @@ def _get_network_totals(miner_evaluations: Dict[int, MinerEvaluation]) -> tuple[
     unique_repos: Set[str] = set()
     
     for evaluation in miner_evaluations.values():
-        if evaluation.total_score > 0:  # Exclude penalized miners
+        if evaluation.total_merged_prs > 0:  # Exclude penalized miners
             total_lines += evaluation.total_lines_changed
         if repos := evaluation.unique_repos_contributed_to:
             unique_repos.update(repos)

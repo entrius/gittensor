@@ -23,7 +23,7 @@ sys.modules['gittensor.validator.utils.config'] = Mock()
 sys.modules['gittensor.validator.utils.config'].MERGED_PR_LOOKBACK_DAYS = 30
 
 from gittensor.utils.github_api_tools import (
-    get_user_merged_prs_graphql,
+    get_user_prs_graphql,
     get_github_id,
     get_github_account_age_days,
 )
@@ -65,7 +65,7 @@ class TestGraphQLRetryLogic(unittest.TestCase):
         mock_post.side_effect = [mock_response_502, mock_response_502, mock_response_200]
 
         # Execute
-        result = get_user_merged_prs_graphql(self.test_user_id, self.test_token, self.master_repositories)
+        result = get_user_prs_graphql(self.test_user_id, self.test_token, self.master_repositories)
 
         # Verify
         self.assertEqual(mock_post.call_count, 3, "Should retry 3 times total")
@@ -90,7 +90,7 @@ class TestGraphQLRetryLogic(unittest.TestCase):
         mock_post.return_value = mock_response_502
 
         # Execute
-        result = get_user_merged_prs_graphql(self.test_user_id, self.test_token, self.master_repositories)
+        result = get_user_prs_graphql(self.test_user_id, self.test_token, self.master_repositories)
 
         # Verify
         self.assertEqual(mock_post.call_count, 3, "Should try exactly 3 times")
@@ -127,7 +127,7 @@ class TestGraphQLRetryLogic(unittest.TestCase):
         mock_post.side_effect = [mock_response_503, mock_response_200]
 
         # Execute
-        result = get_user_merged_prs_graphql(self.test_user_id, self.test_token, self.master_repositories)
+        result = get_user_prs_graphql(self.test_user_id, self.test_token, self.master_repositories)
 
         # Verify
         self.assertEqual(mock_post.call_count, 2, "Should retry once after 503")
@@ -159,7 +159,7 @@ class TestGraphQLRetryLogic(unittest.TestCase):
         mock_post.side_effect = [mock_response_504, mock_response_200]
 
         # Execute
-        result = get_user_merged_prs_graphql(self.test_user_id, self.test_token, self.master_repositories)
+        result = get_user_prs_graphql(self.test_user_id, self.test_token, self.master_repositories)
 
         # Verify
         self.assertEqual(mock_post.call_count, 2, "Should retry once after 504")
@@ -177,7 +177,7 @@ class TestGraphQLRetryLogic(unittest.TestCase):
         mock_post.return_value = mock_response_401
 
         # Execute
-        result = get_user_merged_prs_graphql(self.test_user_id, self.test_token, self.master_repositories)
+        result = get_user_prs_graphql(self.test_user_id, self.test_token, self.master_repositories)
 
         # Verify - should only try once, not retry
         self.assertEqual(mock_post.call_count, 1, "Should NOT retry on 401")
@@ -197,7 +197,7 @@ class TestGraphQLRetryLogic(unittest.TestCase):
         mock_post.return_value = mock_response_404
 
         # Execute
-        result = get_user_merged_prs_graphql(self.test_user_id, self.test_token, self.master_repositories)
+        result = get_user_prs_graphql(self.test_user_id, self.test_token, self.master_repositories)
 
         # Verify
         self.assertEqual(mock_post.call_count, 1, "Should NOT retry on 404")
@@ -231,7 +231,7 @@ class TestGraphQLRetryLogic(unittest.TestCase):
         ]
 
         # Execute
-        result = get_user_merged_prs_graphql(self.test_user_id, self.test_token, self.master_repositories)
+        result = get_user_prs_graphql(self.test_user_id, self.test_token, self.master_repositories)
 
         # Verify
         self.assertEqual(mock_post.call_count, 3, "Should retry after connection errors")
@@ -251,7 +251,7 @@ class TestGraphQLRetryLogic(unittest.TestCase):
         mock_post.side_effect = requests.exceptions.ConnectionError("Connection refused")
 
         # Execute
-        result = get_user_merged_prs_graphql(self.test_user_id, self.test_token, self.master_repositories)
+        result = get_user_prs_graphql(self.test_user_id, self.test_token, self.master_repositories)
 
         # Verify
         self.assertEqual(mock_post.call_count, 3, "Should try 3 times before giving up")
@@ -279,7 +279,7 @@ class TestGraphQLRetryLogic(unittest.TestCase):
         mock_post.return_value = mock_response_200
 
         # Execute
-        result = get_user_merged_prs_graphql(self.test_user_id, self.test_token, self.master_repositories)
+        result = get_user_prs_graphql(self.test_user_id, self.test_token, self.master_repositories)
 
         # Verify
         self.assertEqual(mock_post.call_count, 1, "Should only call once on success")

@@ -8,7 +8,9 @@ import bittensor as bt
 import numpy as np
 
 from gittensor.classes import GitPatSynapse, MinerEvaluation, PullRequest
-from gittensor.utils.github_api_tools import get_user_merged_prs_graphql
+from gittensor.constants import COLLATERAL_EFFECTIVE_DATE
+from gittensor.utils.github_api_tools import get_user_prs_graphql
+from gittensor.validator.utils.datetime_utils import parse_github_timestamp
 from gittensor.validator.evaluation.dynamic_emissions import apply_dynamic_emissions_using_network_contributions
 from gittensor.validator.evaluation.inspections import (
     detect_and_penalize_duplicates,
@@ -16,8 +18,10 @@ from gittensor.validator.evaluation.inspections import (
 )
 from gittensor.validator.evaluation.normalize import normalize_rewards_linear
 from gittensor.validator.evaluation.scoring import (
+    apply_collateral_deduction,
     apply_cross_miner_multipliers_and_finalize,
-    score_pull_requests,
+    score_merged_pull_requests,
+    score_open_prs_for_collateral,
 )
 
 # NOTE: there was a circular import error, needed this if to resolve it
@@ -76,18 +80,28 @@ async def reward(
         bt.logging.info(f"UID {uid} not being evaluated: {miner_eval.failed_reason}")
         return miner_eval
 
-    pr_result = get_user_merged_prs_graphql(miner_eval.github_id, miner_eval.github_pat, master_repositories)
+    pr_result = get_user_prs_graphql(miner_eval.github_id, miner_eval.github_pat, master_repositories)
 
     miner_eval.total_merged_prs = pr_result.merged_pr_count
     miner_eval.total_open_prs = pr_result.open_pr_count
     miner_eval.total_closed_prs = pr_result.closed_pr_count
 
-    for raw_pr in pr_result.valid_prs:
-        miner_eval.add_pull_request(
+    # Add merged PRs
+    for raw_pr in pr_result.merged_prs:
+        miner_eval.add_merged_pull_request(
             PullRequest.from_graphql_response(raw_pr, uid, miner_eval.hotkey, miner_eval.github_id)
         )
 
-    score_pull_requests(miner_eval, master_repositories, programming_languages)
+    # Add open PRs (only those created after COLLATERAL_EFFECTIVE_DATE)
+    for raw_pr in pr_result.open_prs:
+        created_at = parse_github_timestamp(raw_pr['createdAt'])
+        if created_at > COLLATERAL_EFFECTIVE_DATE:
+            miner_eval.add_open_pull_request(
+                PullRequest.from_open_pr_graphql_response(raw_pr, uid, miner_eval.hotkey, miner_eval.github_id)
+            )
+
+    score_merged_pull_requests(miner_eval, master_repositories, programming_languages)
+    score_open_prs_for_collateral(miner_eval, master_repositories, programming_languages)
 
     # Clear PAT after scoring to avoid storing sensitive data
     miner_eval.github_pat = None
@@ -129,6 +143,9 @@ async def get_rewards(
 
     # Apply all multipliers and calculate final scores
     apply_cross_miner_multipliers_and_finalize(miner_evaluations)
+
+    # Apply collateral deduction from open PRs (collateral system)
+    apply_collateral_deduction(miner_evaluations)
 
     # store all miner evaluations after adjusting score
     await self.bulk_store_evaluation(miner_evaluations)

@@ -333,45 +333,44 @@ def get_github_graphql_query(
     return None
 
 
-def should_open_or_closed_pr_be_scored(
+def try_add_open_or_closed_pr(
+    miner_eval: MinerEvaluation,
     pr_raw: Dict,
     repository_full_name: str,
     pr_state: str,
     date_filter: datetime,
     active_repositories: List[str]
-) -> bool:
+) -> None:
     """
-    Determines if an OPEN or CLOSED PR is eligible for scoring.
+    Attempts to add an OPEN or CLOSED PR to miner_eval if eligible.
 
     Args:
+        miner_eval: The MinerEvaluation to add the PR to
         pr_raw: Raw PR data from GraphQL
         repository_full_name: Full repository name (owner/repo), lowercase
         pr_state: GitHub PR state (OPEN, CLOSED, MERGED)
         date_filter: Date filter for lookback period
         active_repositories: List of active repository names (lowercase)
-
-    Returns:
-        True if PR should be scored, False otherwise.
     """
     if repository_full_name not in active_repositories:
-        return False
+        return
 
     if pr_state == PRState.OPEN.value:
-        # Internal maintainer PRs don't count for score
-        return pr_raw.get('authorAssociation') not in IGNORED_AUTHOR_ASSOCIATIONS
+        if pr_raw.get('authorAssociation') not in IGNORED_AUTHOR_ASSOCIATIONS:
+            miner_eval.add_open_pull_request(pr_raw)
+        return
 
     if pr_state == PRState.CLOSED.value:
         closed_at = pr_raw.get('closedAt')
         if not closed_at:
             bt.logging.warning(f"PR #{pr_raw['number']} is CLOSED but missing closedAt timestamp.")
-            return False
+            return
 
         closed_dt = datetime.fromisoformat(closed_at.rstrip("Z")).replace(tzinfo=timezone.utc)
-        return closed_dt >= date_filter and closed_dt > MERGE_SUCCESS_RATIO_APPLICATION_DATE
+        if closed_dt >= date_filter and closed_dt > MERGE_SUCCESS_RATIO_APPLICATION_DATE:
+            miner_eval.add_closed_pull_request(pr_raw)
 
-    return False
-
-def _should_skip_merged_pr(
+def should_skip_merged_pr(
     pr_raw: Dict,
     repository_full_name: str,
     master_repositories: dict[str, dict],
@@ -532,19 +531,11 @@ def load_miners_prs(
                 repository_full_name = f"{pr_raw['repository']['owner']['login']}/{pr_raw['repository']['name']}".lower()
                 pr_state = pr_raw['state']
 
-                if pr_state in (PRState.OPEN.value, PRState.CLOSED.value) and \
-                    should_open_or_closed_pr_be_scored(
-                        pr_raw, repository_full_name, pr_state, date_filter, active_repositories
-                    ):
+                if pr_state in (PRState.OPEN.value, PRState.CLOSED.value):
+                    try_add_open_or_closed_pr(miner_eval, pr_raw, repository_full_name, pr_state, date_filter, active_repositories)
+                    continue
 
-                    if pr_state == PRState.OPEN.value:
-                        miner_eval.add_open_pull_request(pr_raw)
-                        continue
-                    else:
-                        miner_eval.add_closed_pull_request(pr_raw)
-                        continue
-
-                should_skip, skip_reason = _should_skip_merged_pr(
+                should_skip, skip_reason = should_skip_merged_pr(
                     pr_raw, repository_full_name, master_repositories, date_filter
                 )
 

@@ -18,20 +18,11 @@ GITHUB_DOMAIN = 'https://github.com/'
 
 
 class PRState(Enum):
-    """PR state for scoring: MERGED (earned) or OPEN (collateral)."""
+    """PR state for scoring"""
     MERGED = "MERGED"
     OPEN = "OPEN"
+    CLOSED = "CLOSED"
 
-
-@dataclass
-class PRFetchResult:
-    """Result from fetching user PRs via GraphQL API."""
-
-    merged_prs: List[DefaultDict]  # PRs with state MERGED (eligible for scoring)
-    open_prs: List[DefaultDict]  # PRs with state OPEN (for collateral scoring)
-    open_pr_count: int  # Total open PRs in active repos
-    merged_pr_count: int  # Merged PRs after MERGE_SUCCESS_RATIO_APPLICATION_DATE
-    closed_pr_count: int  # Closed (not merged) PRs after MERGE_SUCCESS_RATIO_APPLICATION_DATE
 
 @dataclass
 class Miner:
@@ -242,7 +233,7 @@ class PullRequest:
         return self.earned_score
 
     @classmethod
-    def from_graphql_response(cls, pr_data: dict, uid: int, hotkey: str, github_id: str) -> 'PullRequest':
+    def from_merged_pr_graphql_response(cls, pr_data: dict, uid: int, hotkey: str, github_id: str) -> 'PullRequest':
         """Create PullRequest from GraphQL API response"""
         # Import here to avoid circular dependency
         from gittensor.constants import PR_TAGLINE
@@ -315,7 +306,7 @@ class PullRequest:
 
     @classmethod
     def from_open_pr_graphql_response(cls, pr_data: dict, uid: int, hotkey: str, github_id: str) -> 'PullRequest':
-        """Create PullRequest from GraphQL API response for an OPEN PR (collateral system).
+        """Create PullRequest from GraphQL API response for an OPEN PR
 
         Extracts linked issues for collateral issue_multiplier calculation.
         """
@@ -371,6 +362,62 @@ class PullRequest:
             last_edited_at=last_edited_at,
             gittensor_tagged=gittensor_tagged,
         )
+    
+    @classmethod
+    def from_closed_pr_graphql_response(cls, pr_data: dict, uid: int, hotkey: str, github_id: str) -> 'PullRequest':
+        """Create PullRequest from GraphQL API response for a CLOSED PR"""
+        from gittensor.constants import PR_TAGLINE
+        from gittensor.validator.utils.datetime_utils import parse_github_timestamp
+
+        repo_data = pr_data['repository']
+        repository_full_name = f"{repo_data['owner']['login']}/{repo_data['name']}".lower()
+
+        # Extract linked issues for collateral calculation (may be open or closed)
+        raw_issues = pr_data.get('closingIssuesReferences', {}).get('nodes', [])
+        issues = []
+        for issue in raw_issues:
+            issues.append(
+                Issue(
+                    number=issue['number'],
+                    pr_number=pr_data['number'],
+                    repository_full_name=repository_full_name,
+                    title=issue['title'],
+                    created_at=parse_github_timestamp(issue['createdAt']) if issue.get('createdAt') else None,
+                    closed_at=parse_github_timestamp(issue['closedAt']) if issue.get('closedAt') else None,
+                    author_login=issue.get('author', {}).get('login') if issue.get('author') else None,
+                    state=issue.get('state'),
+                )
+            )
+
+        description: str = pr_data.get('bodyText', '')
+        last_edited_at = parse_github_timestamp(pr_data.get('lastEditedAt')) if pr_data.get('lastEditedAt') else None
+
+        # Detect Gittensor tagline for collateral calculation
+        gittensor_tagged = False
+        if description:
+            description_end = description[-100:].strip().rstrip('.,!?;: \t\n')
+            gittensor_tagged = description_end.lower().endswith(PR_TAGLINE.lower())
+
+        return cls(
+            number=pr_data['number'],
+            repository_full_name=repository_full_name,
+            uid=uid,
+            hotkey=hotkey,
+            github_id=github_id,
+            title=pr_data['title'],
+            author_login=pr_data['author']['login'],
+            merged_at=None,
+            created_at=parse_github_timestamp(pr_data['createdAt']),
+            pr_state=PRState.CLOSED,
+            additions=pr_data['additions'],
+            deletions=pr_data['deletions'],
+            commits=pr_data.get('commits', {}).get('totalCount', 0),
+            merged_by_login=None,
+            issues=issues if issues else None,
+            description=description,
+            last_edited_at=last_edited_at,
+            gittensor_tagged=gittensor_tagged,
+        )
 
 
 @dataclass
@@ -391,6 +438,7 @@ class MinerEvaluation:
     evaluation_timestamp: Optional[datetime] = None
     merged_pull_requests: List[PullRequest] = field(default_factory=list)
     open_pull_requests: List[PullRequest] = field(default_factory=list)
+    closed_pull_requests: List[PullRequest] = field(default_factory=list)
     unique_repos_contributed_to: Set[str] = field(default_factory=set)
 
     @property
@@ -422,40 +470,23 @@ class MinerEvaluation:
                 all_file_changes.extend(pr.file_changes)
         return all_file_changes
 
-    def add_merged_pull_request(self, pull_request: PullRequest):
-        """Add a merged pull request."""
-        self.merged_pull_requests.append(pull_request)
+    def add_merged_pull_request(self, raw_pr: Dict):
+        """Add a merged pull request that will be factored into scoring."""
+        bt.logging.info(f"Accepting MERGED PR #{raw_pr['number']} in {f"{raw_pr['repository']['owner']['login']}/{raw_pr['repository']['name']}".lower()} -> '{raw_pr['baseRefName']}'")
+        serialized_pr = PullRequest.from_merged_pr_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id)
+        self.merged_pull_requests.append(serialized_pr)
 
-    def add_open_pull_request(self, pull_request: PullRequest):
-        """Add an open pull request for collateral scoring."""
-        self.open_pull_requests.append(pull_request)
+    def add_open_pull_request(self, raw_pr: Dict):
+        """Add an open pull request that will be factored into scoring."""
+        bt.logging.info(f"Counting OPEN PR #{raw_pr['number']} in {f"{raw_pr['repository']['owner']['login']}/{raw_pr['repository']['name']}".lower()}")
+        serialized_pr = PullRequest.from_open_pr_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id)
+        self.open_pull_requests.append(serialized_pr)
 
-    def handle_pr_results(self, pr_result: PRFetchResult) -> None:
-        """Process PR fetch results: set counts and add PRs to evaluation.
-
-        Args:
-            pr_result: The result from fetching user PRs via GraphQL API
-        """
-        from gittensor.constants import TIERS_AND_COLLATERAL_EFFECTIVE_DATE
-        from gittensor.validator.utils.datetime_utils import parse_github_timestamp
-
-        self.total_merged_prs = pr_result.merged_pr_count
-        self.total_open_prs = pr_result.open_pr_count
-        self.total_closed_prs = pr_result.closed_pr_count
-
-        # Add merged PRs
-        for raw_pr in pr_result.merged_prs:
-            self.add_merged_pull_request(
-                PullRequest.from_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id)
-            )
-
-        # Add open PRs (only those created after TIERS_AND_COLLATERAL_EFFECTIVE_DATE)
-        for raw_pr in pr_result.open_prs:
-            created_at = parse_github_timestamp(raw_pr['createdAt'])
-            if created_at > TIERS_AND_COLLATERAL_EFFECTIVE_DATE:
-                self.add_open_pull_request(
-                    PullRequest.from_open_pr_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id)
-                )
+    def add_closed_pull_request(self, raw_pr: Dict):
+        """Add a closed pull request that will be factored into scoring."""
+        bt.logging.info(f"CLOSED PR #{raw_pr['number']} in {f"{raw_pr['repository']['owner']['login']}/{raw_pr['repository']['name']}".lower()} counting towards credibility")
+        serialized_pr = PullRequest.from_closed_pr_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id)
+        self.closed_pull_requests.append(serialized_pr)
 
 
 class GitPatSynapse(bt.Synapse):

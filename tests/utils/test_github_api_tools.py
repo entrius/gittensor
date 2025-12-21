@@ -23,7 +23,7 @@ sys.modules['gittensor.validator.utils.config'] = Mock()
 sys.modules['gittensor.validator.utils.config'].MERGED_PR_LOOKBACK_DAYS = 30
 
 from gittensor.utils.github_api_tools import (
-    get_user_prs_graphql,
+    load_miners_prs,
     get_github_id,
     get_github_account_age_days,
 )

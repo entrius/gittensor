@@ -63,7 +63,7 @@ CREATE TABLE IF NOT EXISTS pull_requests (
     CONSTRAINT chk_pull_requests_merge_success_multiplier         CHECK    (merge_success_multiplier <= 1),
     CONSTRAINT chk_pull_requests_earned_score                     CHECK    (earned_score >= 0),
     CONSTRAINT chk_pull_requests_collateral_score                 CHECK    (collateral_score >= 0),
-    CONSTRAINT chk_pull_requests_pr_state                         CHECK    (pr_state IN ('MERGED', 'OPEN'))
+    CONSTRAINT chk_pull_requests_pr_state                         CHECK    (pr_state IN ('MERGED', 'OPEN', 'CLOSED'))
 );
 
 -- Indexes for performance

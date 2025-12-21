@@ -360,6 +360,7 @@ def score_open_prs_for_collateral(
     bt.logging.info(f"Scoring {total_prs} open PRs for collateral for uid {miner_eval.uid}")
 
     for n, pr in enumerate(miner_eval.open_pull_requests, start=1):
+        # NOTE: This is wher we should check the open pull request date to see if it counts for collateral.
         bt.logging.info(f"\n[{n}/{total_prs}] - Scoring OPEN PR #{pr.number} in {pr.repository_full_name} for collateral")
 
         file_changes = get_pull_request_file_changes(pr.repository_full_name, pr.number, miner_eval.github_pat)

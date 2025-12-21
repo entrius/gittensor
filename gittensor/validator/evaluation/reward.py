@@ -8,7 +8,7 @@ import bittensor as bt
 import numpy as np
 
 from gittensor.classes import GitPatSynapse, MinerEvaluation
-from gittensor.utils.github_api_tools import get_user_prs_graphql
+from gittensor.utils.github_api_tools import load_miners_prs
 from gittensor.validator.evaluation.dynamic_emissions import apply_dynamic_emissions_using_network_contributions
 from gittensor.validator.evaluation.inspections import (
     detect_and_penalize_duplicates,
@@ -78,8 +78,8 @@ async def evaluate_miners_pull_requests(
         bt.logging.info(f"UID {uid} not being evaluated: {miner_eval.failed_reason}")
         return miner_eval
 
-    pr_result = get_user_prs_graphql(miner_eval.github_id, miner_eval.github_pat, master_repositories)
-    miner_eval.handle_pr_results(pr_result)
+    # Loads the miner_eval object with eligible PRs
+    load_miners_prs(miner_eval, master_repositories)
 
     score_merged_pull_requests(miner_eval, master_repositories, programming_languages)
     score_open_prs_for_collateral(miner_eval, master_repositories, programming_languages)

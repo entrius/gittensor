@@ -13,6 +13,7 @@ from gittensor.constants import (
     MITIGATED_EXTENSIONS,
     TEST_FILE_CONTRIBUTION_WEIGHT,
 )
+from gittensor.utils.github_api_tools import parse_repo_name
 
 GITHUB_DOMAIN = 'https://github.com/'
 
@@ -239,8 +240,7 @@ class PullRequest:
         from gittensor.constants import PR_TAGLINE
         from gittensor.validator.utils.datetime_utils import parse_github_timestamp
 
-        repo_data = pr_data['repository']
-        repository_full_name = f"{repo_data['owner']['login']}/{repo_data['name']}".lower()
+        repository_full_name = parse_repo_name(pr_data['repository'])
 
         raw_issues = pr_data['closingIssuesReferences']['nodes']
         issues = []
@@ -313,8 +313,7 @@ class PullRequest:
         from gittensor.constants import PR_TAGLINE
         from gittensor.validator.utils.datetime_utils import parse_github_timestamp
 
-        repo_data = pr_data['repository']
-        repository_full_name = f"{repo_data['owner']['login']}/{repo_data['name']}".lower()
+        repository_full_name = parse_repo_name(pr_data['repository'])
 
         # Extract linked issues for collateral calculation (may be open or closed)
         raw_issues = pr_data.get('closingIssuesReferences', {}).get('nodes', [])
@@ -369,8 +368,7 @@ class PullRequest:
         from gittensor.constants import PR_TAGLINE
         from gittensor.validator.utils.datetime_utils import parse_github_timestamp
 
-        repo_data = pr_data['repository']
-        repository_full_name = f"{repo_data['owner']['login']}/{repo_data['name']}".lower()
+        repository_full_name = parse_repo_name(pr_data['repository'])
 
         # Extract linked issues for collateral calculation (may be open or closed)
         raw_issues = pr_data.get('closingIssuesReferences', {}).get('nodes', [])
@@ -472,19 +470,19 @@ class MinerEvaluation:
 
     def add_merged_pull_request(self, raw_pr: Dict):
         """Add a merged pull request that will be factored into scoring."""
-        bt.logging.info(f"Accepting MERGED PR #{raw_pr['number']} in {f"{raw_pr['repository']['owner']['login']}/{raw_pr['repository']['name']}".lower()} -> '{raw_pr['baseRefName']}'")
+        bt.logging.info(f"Accepting MERGED PR #{raw_pr['number']} in {parse_repo_name(raw_pr['repository'])} -> '{raw_pr['baseRefName']}'")
         serialized_pr = PullRequest.from_merged_pr_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id)
         self.merged_pull_requests.append(serialized_pr)
 
     def add_open_pull_request(self, raw_pr: Dict):
         """Add an open pull request that will be factored into scoring."""
-        bt.logging.info(f"Counting OPEN PR #{raw_pr['number']} in {f"{raw_pr['repository']['owner']['login']}/{raw_pr['repository']['name']}".lower()}")
+        bt.logging.info(f"Counting OPEN PR #{raw_pr['number']} in {parse_repo_name(raw_pr['repository'])}")
         serialized_pr = PullRequest.from_open_pr_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id)
         self.open_pull_requests.append(serialized_pr)
 
     def add_closed_pull_request(self, raw_pr: Dict):
         """Add a closed pull request that will be factored into scoring."""
-        bt.logging.info(f"CLOSED PR #{raw_pr['number']} in {f"{raw_pr['repository']['owner']['login']}/{raw_pr['repository']['name']}".lower()} counting towards credibility")
+        bt.logging.info(f"CLOSED PR #{raw_pr['number']} in {parse_repo_name(raw_pr['repository'])} counting towards credibility")
         serialized_pr = PullRequest.from_closed_pr_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id)
         self.closed_pull_requests.append(serialized_pr)
 

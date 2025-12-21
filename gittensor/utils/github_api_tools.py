@@ -115,6 +115,11 @@ def branch_matches_pattern(branch_name: str, patterns: List[str]) -> bool:
     return False
 
 
+def parse_repo_name(repo_data: Dict):
+    """Normalizes and converts repository name from dict"""
+    return f"{repo_data['owner']['login']}/{repo_data['name']}".lower()
+
+
 def make_headers(token: str) -> Dict[str, str]:
     """Build standard GitHub HTTP headers for a PAT.
 
@@ -443,7 +448,7 @@ def should_skip_merged_pr(
     head_repo = pr_raw.get('headRepository')
     is_internal_pr = False
     if head_repo:
-        head_repo_full_name = f"{head_repo['owner']['login']}/{head_repo['name']}".lower()
+        head_repo_full_name = parse_repo_name(head_repo)
         if head_repo_full_name == repository_full_name:
             is_internal_pr = True
 
@@ -528,7 +533,7 @@ def load_miners_prs(
             page_info = pr_data.get('pageInfo', {})
 
             for pr_raw in prs:
-                repository_full_name = f"{pr_raw['repository']['owner']['login']}/{pr_raw['repository']['name']}".lower()
+                repository_full_name = parse_repo_name(pr_raw['repository'])
                 pr_state = pr_raw['state']
 
                 if pr_state in (PRState.OPEN.value, PRState.CLOSED.value):

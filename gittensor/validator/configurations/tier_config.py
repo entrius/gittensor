@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import Optional
 from gittensor.constants import (
     EXCESSIVE_PR_PENALTY_THRESHOLD,
-    POTENTIAL_SCORE_COLLATERAL_PERCENT
+    DEFAULT_COLLATERAL_PERCENT
 )
 
 
@@ -33,7 +33,7 @@ TIERS = {
             required_credibility=0.40
         ),
         credibility_scalar=1,
-        open_pr_collateral_percentage=POTENTIAL_SCORE_COLLATERAL_PERCENT,
+        open_pr_collateral_percentage=DEFAULT_COLLATERAL_PERCENT,
         open_prs_allowed=EXCESSIVE_PR_PENALTY_THRESHOLD
     ),
     "Lower-Mid": TierConfig(
@@ -42,7 +42,7 @@ TIERS = {
             required_credibility=0.50
         ),
         credibility_scalar=2,
-        open_pr_collateral_percentage=POTENTIAL_SCORE_COLLATERAL_PERCENT,
+        open_pr_collateral_percentage=DEFAULT_COLLATERAL_PERCENT,
         open_prs_allowed=EXCESSIVE_PR_PENALTY_THRESHOLD
     ),
     "Middle": TierConfig(
@@ -51,7 +51,7 @@ TIERS = {
             required_credibility=0.60
         ),
         credibility_scalar=3,
-        open_pr_collateral_percentage=POTENTIAL_SCORE_COLLATERAL_PERCENT,
+        open_pr_collateral_percentage=DEFAULT_COLLATERAL_PERCENT,
         open_prs_allowed=EXCESSIVE_PR_PENALTY_THRESHOLD
     ),
     "Upper-Mid": TierConfig(
@@ -60,13 +60,13 @@ TIERS = {
             required_credibility=0.70
         ),
         credibility_scalar=4,
-        open_pr_collateral_percentage=POTENTIAL_SCORE_COLLATERAL_PERCENT,
+        open_pr_collateral_percentage=DEFAULT_COLLATERAL_PERCENT,
         open_prs_allowed=EXCESSIVE_PR_PENALTY_THRESHOLD
     ),
     "High": TierConfig(
         unlock_next_tier=None,  # top tier: no next tier to unlock
         credibility_scalar=5,
-        open_pr_collateral_percentage=POTENTIAL_SCORE_COLLATERAL_PERCENT,
+        open_pr_collateral_percentage=DEFAULT_COLLATERAL_PERCENT,
         open_prs_allowed=EXCESSIVE_PR_PENALTY_THRESHOLD
     ),
 }

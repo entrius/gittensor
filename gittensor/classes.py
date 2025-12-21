@@ -234,54 +234,50 @@ class PullRequest:
         return self.earned_score
 
     @classmethod
-    def from_merged_pr_graphql_response(cls, pr_data: dict, uid: int, hotkey: str, github_id: str) -> 'PullRequest':
-        """Create PullRequest from GraphQL API response"""
-        # Import here to avoid circular dependency
+    def from_graphql_response(cls, pr_data: dict, uid: int, hotkey: str, github_id: str) -> 'PullRequest':
+        """Create PullRequest from GraphQL API response for any PR state."""
         from gittensor.constants import PR_TAGLINE
         from gittensor.validator.utils.datetime_utils import parse_github_timestamp
 
         repository_full_name = parse_repo_name(pr_data['repository'])
+        pr_state = PRState(pr_data['state'])
+        is_merged = pr_state == PRState.MERGED
 
-        raw_issues = pr_data['closingIssuesReferences']['nodes']
+        # Issue extraction - merged PRs only count closed issues
+        raw_issues = pr_data.get('closingIssuesReferences', {}).get('nodes', [])
         issues = []
         for issue in raw_issues:
-            # Only include issues that are actually closed (both closedAt timestamp and CLOSED state)
-            if issue['closedAt'] and issue.get('state') == 'CLOSED':
-                issues.append(
-                    Issue(
-                        number=issue['number'],
-                        pr_number=pr_data['number'],
-                        repository_full_name=repository_full_name,
-                        title=issue['title'],
-                        created_at=parse_github_timestamp(issue['createdAt']),
-                        closed_at=parse_github_timestamp(issue['closedAt']),
-                        author_login=issue.get('author', {}).get('login') if issue.get('author') else None,
-                        state=issue.get('state'),
-                    )
-                )
+            if is_merged and not (issue.get('closedAt') and issue.get('state') == 'CLOSED'):
+                continue
+            issues.append(Issue(
+                number=issue['number'],
+                pr_number=pr_data['number'],
+                repository_full_name=repository_full_name,
+                title=issue['title'],
+                created_at=parse_github_timestamp(issue['createdAt']) if issue.get('createdAt') else None,
+                closed_at=parse_github_timestamp(issue['closedAt']) if issue.get('closedAt') else None,
+                author_login=issue.get('author', {}).get('login') if issue.get('author') else None,
+                state=issue.get('state'),
+            ))
 
-        # Extract description and check for Gittensor tagline
         description: str = pr_data.get('bodyText', '')
         last_edited_at = parse_github_timestamp(pr_data.get('lastEditedAt')) if pr_data.get('lastEditedAt') else None
-        merged_at = parse_github_timestamp(pr_data['mergedAt'])
+        merged_at = parse_github_timestamp(pr_data['mergedAt']) if is_merged else None
 
-        # Check if PR has Gittensor tagline and wasn't edited after merge
+        # Gittensor tag detection - merged PRs have extra post-merge edit check
         gittensor_tagged = False
         if description:
-            # Get the last 100 characters (with cushion) and trim whitespace
-            description_end = description[-100:].strip()
-            # Check if it ends with the tagline (case-insensitive, lenient with trailing punctuation)
-            description_end_cleaned = description_end.rstrip('.,!?;: \t\n')
-            if description_end_cleaned.lower().endswith(PR_TAGLINE.lower()):
-                # Only set tagged to True if PR was NOT edited after being merged
-                # (to prevent miners from editing after merge to add the tagline)
-                if last_edited_at is None or last_edited_at <= merged_at:
-                    gittensor_tagged = True
+            description_end = description[-100:].strip().rstrip('.,!?;: \t\n')
+            if description_end.lower().endswith(PR_TAGLINE.lower()):
+                if is_merged:
+                    gittensor_tagged = last_edited_at is None or last_edited_at <= merged_at
+                    if not gittensor_tagged:
+                        bt.logging.warning(
+                            f"PR #{pr_data['number']} in {repository_full_name} has Gittensor tagline but was edited after merge "
+                            f"(merged: {merged_at.isoformat()}, last edited: {last_edited_at.isoformat()})"
+                        )
                 else:
-                    bt.logging.warning(
-                        f"PR #{str(pr_data['number'])} in {repository_full_name} has Gittensor tagline but was edited after merge "
-                        f"(merged: {merged_at.isoformat()}, last edited: {last_edited_at.isoformat()})"
-                    )
+                    gittensor_tagged = True
 
         return cls(
             number=pr_data['number'],
@@ -293,124 +289,11 @@ class PullRequest:
             author_login=pr_data['author']['login'],
             merged_at=merged_at,
             created_at=parse_github_timestamp(pr_data['createdAt']),
-            pr_state=PRState.MERGED,
+            pr_state=pr_state,
             additions=pr_data['additions'],
             deletions=pr_data['deletions'],
             commits=pr_data.get('commits', {}).get('totalCount', 0),
-            merged_by_login=pr_data['mergedBy']['login'] if pr_data.get('mergedBy') else None,
-            issues=issues,
-            description=description,
-            last_edited_at=last_edited_at,
-            gittensor_tagged=gittensor_tagged,
-        )
-
-    @classmethod
-    def from_open_pr_graphql_response(cls, pr_data: dict, uid: int, hotkey: str, github_id: str) -> 'PullRequest':
-        """Create PullRequest from GraphQL API response for an OPEN PR
-
-        Extracts linked issues for collateral issue_multiplier calculation.
-        """
-        from gittensor.constants import PR_TAGLINE
-        from gittensor.validator.utils.datetime_utils import parse_github_timestamp
-
-        repository_full_name = parse_repo_name(pr_data['repository'])
-
-        # Extract linked issues for collateral calculation (may be open or closed)
-        raw_issues = pr_data.get('closingIssuesReferences', {}).get('nodes', [])
-        issues = []
-        for issue in raw_issues:
-            issues.append(
-                Issue(
-                    number=issue['number'],
-                    pr_number=pr_data['number'],
-                    repository_full_name=repository_full_name,
-                    title=issue['title'],
-                    created_at=parse_github_timestamp(issue['createdAt']) if issue.get('createdAt') else None,
-                    closed_at=parse_github_timestamp(issue['closedAt']) if issue.get('closedAt') else None,
-                    author_login=issue.get('author', {}).get('login') if issue.get('author') else None,
-                    state=issue.get('state'),
-                )
-            )
-
-        description: str = pr_data.get('bodyText', '')
-        last_edited_at = parse_github_timestamp(pr_data.get('lastEditedAt')) if pr_data.get('lastEditedAt') else None
-
-        # Detect Gittensor tagline for collateral calculation
-        gittensor_tagged = False
-        if description:
-            description_end = description[-100:].strip().rstrip('.,!?;: \t\n')
-            gittensor_tagged = description_end.lower().endswith(PR_TAGLINE.lower())
-
-        return cls(
-            number=pr_data['number'],
-            repository_full_name=repository_full_name,
-            uid=uid,
-            hotkey=hotkey,
-            github_id=github_id,
-            title=pr_data['title'],
-            author_login=pr_data['author']['login'],
-            merged_at=None,
-            created_at=parse_github_timestamp(pr_data['createdAt']),
-            pr_state=PRState.OPEN,
-            additions=pr_data['additions'],
-            deletions=pr_data['deletions'],
-            commits=pr_data.get('commits', {}).get('totalCount', 0),
-            merged_by_login=None,
-            issues=issues if issues else None,
-            description=description,
-            last_edited_at=last_edited_at,
-            gittensor_tagged=gittensor_tagged,
-        )
-    
-    @classmethod
-    def from_closed_pr_graphql_response(cls, pr_data: dict, uid: int, hotkey: str, github_id: str) -> 'PullRequest':
-        """Create PullRequest from GraphQL API response for a CLOSED PR"""
-        from gittensor.constants import PR_TAGLINE
-        from gittensor.validator.utils.datetime_utils import parse_github_timestamp
-
-        repository_full_name = parse_repo_name(pr_data['repository'])
-
-        # Extract linked issues for collateral calculation (may be open or closed)
-        raw_issues = pr_data.get('closingIssuesReferences', {}).get('nodes', [])
-        issues = []
-        for issue in raw_issues:
-            issues.append(
-                Issue(
-                    number=issue['number'],
-                    pr_number=pr_data['number'],
-                    repository_full_name=repository_full_name,
-                    title=issue['title'],
-                    created_at=parse_github_timestamp(issue['createdAt']) if issue.get('createdAt') else None,
-                    closed_at=parse_github_timestamp(issue['closedAt']) if issue.get('closedAt') else None,
-                    author_login=issue.get('author', {}).get('login') if issue.get('author') else None,
-                    state=issue.get('state'),
-                )
-            )
-
-        description: str = pr_data.get('bodyText', '')
-        last_edited_at = parse_github_timestamp(pr_data.get('lastEditedAt')) if pr_data.get('lastEditedAt') else None
-
-        # Detect Gittensor tagline for collateral calculation
-        gittensor_tagged = False
-        if description:
-            description_end = description[-100:].strip().rstrip('.,!?;: \t\n')
-            gittensor_tagged = description_end.lower().endswith(PR_TAGLINE.lower())
-
-        return cls(
-            number=pr_data['number'],
-            repository_full_name=repository_full_name,
-            uid=uid,
-            hotkey=hotkey,
-            github_id=github_id,
-            title=pr_data['title'],
-            author_login=pr_data['author']['login'],
-            merged_at=None,
-            created_at=parse_github_timestamp(pr_data['createdAt']),
-            pr_state=PRState.CLOSED,
-            additions=pr_data['additions'],
-            deletions=pr_data['deletions'],
-            commits=pr_data.get('commits', {}).get('totalCount', 0),
-            merged_by_login=None,
+            merged_by_login=pr_data.get('mergedBy', {}).get('login') if is_merged else None,
             issues=issues if issues else None,
             description=description,
             last_edited_at=last_edited_at,
@@ -471,20 +354,17 @@ class MinerEvaluation:
     def add_merged_pull_request(self, raw_pr: Dict):
         """Add a merged pull request that will be factored into scoring."""
         bt.logging.info(f"Accepting MERGED PR #{raw_pr['number']} in {parse_repo_name(raw_pr['repository'])} -> '{raw_pr['baseRefName']}'")
-        serialized_pr = PullRequest.from_merged_pr_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id)
-        self.merged_pull_requests.append(serialized_pr)
+        self.merged_pull_requests.append(PullRequest.from_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id))
 
     def add_open_pull_request(self, raw_pr: Dict):
         """Add an open pull request that will be factored into scoring."""
         bt.logging.info(f"Counting OPEN PR #{raw_pr['number']} in {parse_repo_name(raw_pr['repository'])}")
-        serialized_pr = PullRequest.from_open_pr_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id)
-        self.open_pull_requests.append(serialized_pr)
+        self.open_pull_requests.append(PullRequest.from_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id))
 
     def add_closed_pull_request(self, raw_pr: Dict):
         """Add a closed pull request that will be factored into scoring."""
         bt.logging.info(f"CLOSED PR #{raw_pr['number']} in {parse_repo_name(raw_pr['repository'])} counting towards credibility")
-        serialized_pr = PullRequest.from_closed_pr_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id)
-        self.closed_pull_requests.append(serialized_pr)
+        self.closed_pull_requests.append(PullRequest.from_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id))
 
 
 class GitPatSynapse(bt.Synapse):

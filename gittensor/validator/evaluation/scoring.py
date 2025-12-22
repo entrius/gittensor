@@ -21,9 +21,6 @@ from gittensor.constants import (
     EXCESSIVE_PR_PENALTY_THRESHOLD,
     EXCESSIVE_PR_PENALTY_SLOPE,
     EXCESSIVE_PR_MIN_MULTIPLIER,
-    CREDIBILITY_THRESHOLD,
-    CREDIBILITY_APPLICATION_DATE,
-    DEFAULT_COLLATERAL_PERCENT,
     TIERS_AND_COLLATERAL_EFFECTIVE_DATE,
 )
 from gittensor.utils.github_api_tools import get_pull_request_file_changes
@@ -99,7 +96,7 @@ def calculate_base_score(pr: PullRequest, programming_languages: Dict[str, float
     """Calculate base score from tier base + contribution bonus."""
     contribution_score = pr.calculate_score_from_file_changes(programming_languages)
 
-    tier_config = pr.repository_tier_configuration
+    tier_config: TierConfig = pr.repository_tier_configuration
 
     bonus_percent = min(1.0, contribution_score / tier_config.contribution_score_for_full_bonus)
     contribution_bonus = round(bonus_percent * tier_config.contribution_score_max_bonus, 2)
@@ -126,9 +123,7 @@ def calculate_pr_multipliers(pr: PullRequest, miner_eval: MinerEvaluation, maste
     if is_merged:
         pr.open_pr_spam_multiplier = round(calculate_pr_spam_penalty_multiplier(miner_eval.total_open_prs), 2)
         pr.time_decay_multiplier = round(calculate_time_decay_multiplier(pr), 2)
-        pr.credibility_multiplier = round(
-            calculate_credibility_multiplier(miner_eval) if pr.merged_at > CREDIBILITY_APPLICATION_DATE else 1.0, 2
-        )
+
     else:
         pr.open_pr_spam_multiplier = 1.0
         pr.time_decay_multiplier = 1.0
@@ -166,17 +161,6 @@ def calculate_pr_spam_penalty_multiplier(total_open_prs: int) -> float:
     return max(EXCESSIVE_PR_MIN_MULTIPLIER, calculated_multiplier)
 
 
-def calculate_credibility_multiplier(miner_eval: MinerEvaluation) -> float:
-    """Calculate multiplier based on PR merge success ratio."""
-    total_prs = miner_eval.total_merged_prs + miner_eval.total_closed_prs
-
-    if total_prs <= 0 or total_prs < CREDIBILITY_THRESHOLD:
-        return 1.0
-    
-    credibility = miner_eval.total_merged_prs / total_prs
-    return credibility
-
-
 def calculate_time_decay_multiplier(pr: PullRequest) -> float:
     """Calculate time decay multiplier for a single PR based on merge date."""
 
@@ -205,11 +189,19 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
 
         bt.logging.info(f"\n***Finalizing scores for UID {uid}***")
 
+        evaluation.calculate_tier_credibility()
+
         # Process merged PRs
         for pr in evaluation.merged_pull_requests:
             pr.repository_uniqueness_multiplier = calculate_uniqueness_multiplier(
                 pr.repository_full_name, repo_counts, total_contributing_miners
             )
+
+            tier_config = pr.repository_tier_configuration
+            tier = evaluation._get_tier_from_config(tier_config)
+            credibility = evaluation.tier_credibility.get(tier, 1.0) if tier else 1.0
+            pr.credibility_multiplier = round(credibility ** tier_config.credibility_scalar, 2)
+
             pr.calculate_final_earned_score()
             evaluation.base_total_score += pr.base_score
             evaluation.total_score += pr.earned_score
@@ -342,13 +334,13 @@ def calculate_open_pr_collateral_score(pr: PullRequest) -> float:
     }
 
     potential_score = pr.base_score * prod(multipliers.values())
-    # TODO: Do we need to make default collateral percent tier configured or tier agnostic
-    collateral_score = potential_score * DEFAULT_COLLATERAL_PERCENT
+    collateral_percent = pr.repository_tier_configuration.open_pr_collateral_percentage
+    collateral_score = potential_score * collateral_percent
 
     mult_str = " | ".join([f"{k}: {v:.2f}" for k, v in multipliers.items()])
     bt.logging.info(
         f"OPEN PR #{pr.number} | base: {pr.base_score:.2f} | {mult_str} | "
-        f"potential: {potential_score:.2f} | collateral ({DEFAULT_COLLATERAL_PERCENT*100:.0f}%): {collateral_score:.2f}"
+        f"potential: {potential_score:.2f} | collateral ({collateral_percent*100:.0f}%): {collateral_score:.2f}"
     )
 
     return collateral_score

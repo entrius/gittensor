@@ -24,7 +24,16 @@ from gittensor.constants import (
     TIERS_AND_COLLATERAL_EFFECTIVE_DATE,
 )
 from gittensor.utils.github_api_tools import get_pull_request_file_changes
-from gittensor.validator.configurations.tier_config import TierConfig, Tier, TIERS
+from gittensor.validator.configurations.tier_config import (
+    TierConfig,
+    Tier, 
+    TIERS,
+)
+from gittensor.validator.credibility import (
+    get_tier_from_config,
+    calculate_credibility_per_tier,
+)
+
 
 def score_miner_prs(
     miner_eval: MinerEvaluation,
@@ -189,7 +198,7 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
 
         bt.logging.info(f"\n***Finalizing scores for UID {uid}***")
 
-        evaluation.calculate_credibility_for_each_tier()
+        evaluation.tier_credibility = calculate_credibility_per_tier(evaluation.merged_pull_requests, evaluation.closed_pull_requests)
 
         # Process merged PRs
         for pr in evaluation.merged_pull_requests:
@@ -198,7 +207,7 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
             )
 
             tier_config = pr.repository_tier_configuration
-            tier = evaluation._get_tier_from_config(tier_config)
+            tier = get_tier_from_config(tier_config)
             credibility = evaluation.tier_credibility.get(tier, 1.0) if tier else 1.0
             pr.credibility_multiplier = round(credibility ** tier_config.credibility_scalar, 2)
 

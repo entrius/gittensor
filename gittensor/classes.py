@@ -14,7 +14,7 @@ from gittensor.constants import (
     TEST_FILE_CONTRIBUTION_WEIGHT,
 )
 from gittensor.utils.github_api_tools import parse_repo_name
-from gittensor.validator.configurations.tier_config import TierConfig
+from gittensor.validator.configurations.tier_config import Tier, TierConfig
 
 GITHUB_DOMAIN = 'https://github.com/'
 
@@ -321,6 +321,7 @@ class MinerEvaluation:
     open_pull_requests: List[PullRequest] = field(default_factory=list)
     closed_pull_requests: List[PullRequest] = field(default_factory=list)
     unique_repos_contributed_to: Set[str] = field(default_factory=set)
+    tier_credibility: Dict[Tier, float] = field(default_factory=dict)
 
     @property
     def total_prs(self) -> int:
@@ -337,6 +338,40 @@ class MinerEvaluation:
     @property
     def total_closed_prs(self) -> int:
         return len(self.closed_pull_requests)
+
+    def calculate_tier_credibility(self) -> None:
+        """Calculate credibility (merge success ratio) per tier and store in tier_credibility."""
+        tier_merged: Dict[Tier, int] = {}
+        tier_closed: Dict[Tier, int] = {}
+
+        for pr in self.merged_pull_requests:
+            if pr.repository_tier_configuration:
+                tier = self._get_tier_from_config(pr.repository_tier_configuration)
+                if tier:
+                    tier_merged[tier] = tier_merged.get(tier, 0) + 1
+
+        for pr in self.closed_pull_requests:
+            if pr.repository_tier_configuration:
+                tier = self._get_tier_from_config(pr.repository_tier_configuration)
+                if tier:
+                    tier_closed[tier] = tier_closed.get(tier, 0) + 1
+
+        all_tiers = set(tier_merged.keys()) | set(tier_closed.keys())
+        for tier in all_tiers:
+            merged = tier_merged.get(tier, 0)
+            closed = tier_closed.get(tier, 0)
+            total = merged + closed
+            credibility = merged / total if total > 0 else 1.0
+            self.tier_credibility[tier] = credibility
+            bt.logging.info(f"Tier {tier.value} credibility: {merged}/{total} = {credibility:.2f}")
+
+    def _get_tier_from_config(self, tier_config: TierConfig) -> Optional[Tier]:
+        """Reverse lookup tier from TierConfig."""
+        from gittensor.validator.configurations.tier_config import TIERS
+        for tier, config in TIERS.items():
+            if config == tier_config:
+                return tier
+        return None
 
     def set_invalid_response_reason(self, reason: str):
         """

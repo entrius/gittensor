@@ -3,7 +3,6 @@ from enum import Enum
 from typing import Optional
 
 from gittensor.constants import (
-    EXCESSIVE_PR_PENALTY_THRESHOLD,
     DEFAULT_COLLATERAL_PERCENT,
     CREDIBILITY_THRESHOLD,
     DEFAULT_MERGED_PR_BASE_SCORE,

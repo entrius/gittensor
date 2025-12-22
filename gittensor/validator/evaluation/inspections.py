@@ -18,7 +18,7 @@ from gittensor.utils.github_api_tools import (
 
 
 def detect_and_penalize_duplicates(
-    miner_responses: Dict[int, GitPatSynapse], miner_evaluations: Dict[int, MinerEvaluation]
+    miner_evaluations: Dict[int, MinerEvaluation]
 ):
     """
     Detects miners that used the same github, duplicated across multiple uids.
@@ -26,7 +26,6 @@ def detect_and_penalize_duplicates(
     All miners sharing a GitHub account will be penalized equally.
 
     Args:
-        miner_responses (Dict[int, GitPatSynapse]): Mapping of miner uid to their GitPatSynapse response.
         miner_evaluations (Dict[int, MinerEvaluation]): Mapping of miner UID to their MinerEvaluation.
     """
 

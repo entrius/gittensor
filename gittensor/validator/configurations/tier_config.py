@@ -5,7 +5,9 @@ from typing import Optional
 from gittensor.constants import (
     EXCESSIVE_PR_PENALTY_THRESHOLD,
     DEFAULT_COLLATERAL_PERCENT,
-    CREDIBILITY_THRESHOLD
+    CREDIBILITY_THRESHOLD,
+    DEFAULT_MERGED_PR_BASE_SCORE,
+    MAX_LINES_CONTRIBUTED_BASE_SCORE,
 )
 
 
@@ -18,6 +20,8 @@ class Tier(str, Enum):
 
 
 TIER_DEFAULTS = {
+    "merged_pr_base_score": DEFAULT_MERGED_PR_BASE_SCORE,
+    "contribution_score_cap": MAX_LINES_CONTRIBUTED_BASE_SCORE,
     "credibility_activation_attempts": CREDIBILITY_THRESHOLD,
     "open_pr_collateral_percentage": DEFAULT_COLLATERAL_PERCENT,
     "open_prs_allowed": EXCESSIVE_PR_PENALTY_THRESHOLD,
@@ -34,6 +38,8 @@ class TierConfig:
     credibility_scalar: int
     
     # Defaults (can override per-tier if needed)
+    merged_pr_base_score: int = TIER_DEFAULTS["merged_pr_base_score"]
+    contribution_score_cap: int = TIER_DEFAULTS["contribution_score_cap"]
     credibility_activation_attempts: int = TIER_DEFAULTS["credibility_activation_attempts"]
     open_pr_collateral_percentage: int = TIER_DEFAULTS["open_pr_collateral_percentage"]
     open_prs_allowed: int = TIER_DEFAULTS["open_prs_allowed"]

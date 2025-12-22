@@ -78,9 +78,10 @@ async def evaluate_miners_pull_requests(
         bt.logging.info(f"UID {uid} not being evaluated: {miner_eval.failed_reason}")
         return miner_eval
 
-    # Loads the miner_eval object with eligible PRs
     load_miners_prs(miner_eval, master_repositories)
 
+    # TODO: Do this
+    # score_pull_requests_by_tier(miner_eval, master_repositories, programming_languages)
     score_merged_pull_requests(miner_eval, master_repositories, programming_languages)
     score_open_prs_for_collateral(miner_eval, master_repositories, programming_languages)
 
@@ -111,7 +112,7 @@ async def get_rewards(
     # Query miners and calculate score.
     for uid in uids:
 
-        # retrieve PAT
+        # Retrieve PAT
         miner_response = await query_miner(self, uid)
         responses[uid] = miner_response
 
@@ -128,7 +129,7 @@ async def get_rewards(
     # Apply collateral deduction from open PRs (collateral system)
     apply_collateral_deduction(miner_evaluations)
 
-    # store all miner evaluations after adjusting score
+    # Store all miner evaluations after adjusting score
     await self.bulk_store_evaluation(miner_evaluations)
 
     # Normalize the rewards between [0,1]

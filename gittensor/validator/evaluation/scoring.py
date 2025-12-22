@@ -189,7 +189,7 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
 
         bt.logging.info(f"\n***Finalizing scores for UID {uid}***")
 
-        evaluation.calculate_tier_credibility()
+        evaluation.calculate_credibility_for_each_tier()
 
         # Process merged PRs
         for pr in evaluation.merged_pull_requests:

@@ -31,7 +31,7 @@ from gittensor.constants import (
 from gittensor.utils.github_api_tools import get_pull_request_file_changes
 from gittensor.validator.configurations.tier_config import TierConfig, Tier, TIERS
 
-def score_pull_requests(
+def score_miner_prs(
     miner_eval: MinerEvaluation,
     master_repositories: Dict[str, Dict],
     programming_languages: Dict[str, float],
@@ -91,14 +91,14 @@ def score_pull_request(
     if is_merged:
         pr.open_pr_spam_multiplier = round(calculate_pr_spam_penalty_multiplier(miner_eval.total_open_prs), 2)
         pr.time_decay_multiplier = round(calculate_time_decay_multiplier(pr), 2)
-        pr.merge_success_multiplier = round(
-            calculate_merge_success_multiplier(miner_eval) if pr.merged_at > CREDIBILITY_APPLICATION_DATE else 1.0, 2
+        pr.credibility_multiplier = round(
+            calculate_credibility_multiplier(miner_eval) if pr.merged_at > CREDIBILITY_APPLICATION_DATE else 1.0, 2
         )
         miner_eval.unique_repos_contributed_to.add(pr.repository_full_name)
     else:
         pr.open_pr_spam_multiplier = 1.0
         pr.time_decay_multiplier = 1.0
-        pr.merge_success_multiplier = 1.0
+        pr.credibility_multiplier = 1.0
 
     return True
 
@@ -134,7 +134,7 @@ def calculate_pr_spam_penalty_multiplier(total_open_prs: int) -> float:
     return max(EXCESSIVE_PR_MIN_MULTIPLIER, calculated_multiplier)
 
 
-def calculate_merge_success_multiplier(miner_eval: MinerEvaluation) -> float:
+def calculate_credibility_multiplier(miner_eval: MinerEvaluation) -> float:
     """Calculate multiplier based on PR merge success ratio."""
     total_prs = miner_eval.total_merged_prs + miner_eval.total_closed_prs
 
@@ -304,7 +304,7 @@ def calculate_open_pr_collateral_score(pr: PullRequest) -> float:
     Collateral = base_score * applicable_multipliers * DEFAULT_COLLATERAL_PERCENT
 
     Applicable multipliers: repo_weight, issue, gittensor_tag
-    NOT applicable: time_decay (merge-based), merge_success (merge-based),
+    NOT applicable: time_decay (merge-based), credibility_multiplier (merge-based),
                     uniqueness (cross-miner), open_pr_spam (not for collateral)
     """
     from math import prod

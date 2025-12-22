@@ -158,7 +158,7 @@ class PullRequest:
     repository_uniqueness_multiplier: float = 1.0
     time_decay_multiplier: float = 1.0
     gittensor_tag_multiplier: float = 1.0
-    merge_success_multiplier: float = 1.0
+    credibility_multiplier: float = 1.0
     earned_score: float = 0.0
     collateral_score: float = 0.0  # For OPEN PRs: potential_score * collateral_percent
 
@@ -221,7 +221,7 @@ class PullRequest:
             "repo_uniqueness_multiplier": self.repository_uniqueness_multiplier,
             "time_decay_multiplier": self.time_decay_multiplier,
             "gittensor_tag_multiplier": self.gittensor_tag_multiplier,
-            "merge_success_multiplier": self.merge_success_multiplier,
+            "credibility_multiplier": self.credibility_multiplier,
         }
 
         self.earned_score = self.base_score * prod(multipliers.values())

@@ -7,7 +7,8 @@ from gittensor.constants import (
     DEFAULT_COLLATERAL_PERCENT,
     CREDIBILITY_THRESHOLD,
     DEFAULT_MERGED_PR_BASE_SCORE,
-    MAX_LINES_CONTRIBUTED_BASE_SCORE,
+    MAX_CONTRIBUTION_BONUS_SCORE,
+    DEFAULT_MAX_CONTRIBUTION_SCORE_FOR_FULL_BONUS,
 )
 
 
@@ -21,7 +22,8 @@ class Tier(str, Enum):
 
 TIER_DEFAULTS = {
     "merged_pr_base_score": DEFAULT_MERGED_PR_BASE_SCORE,
-    "contribution_score_cap": MAX_LINES_CONTRIBUTED_BASE_SCORE,
+    "max_contribution_for_full_bonus": DEFAULT_MAX_CONTRIBUTION_SCORE_FOR_FULL_BONUS,
+    "contribution_score_max_bonus": MAX_CONTRIBUTION_BONUS_SCORE,
     "credibility_activation_attempts": CREDIBILITY_THRESHOLD,
     "open_pr_collateral_percentage": DEFAULT_COLLATERAL_PERCENT,
     "open_prs_allowed": EXCESSIVE_PR_PENALTY_THRESHOLD,
@@ -39,7 +41,8 @@ class TierConfig:
     
     # Defaults (can override per-tier if needed)
     merged_pr_base_score: int = TIER_DEFAULTS["merged_pr_base_score"]
-    contribution_score_cap: int = TIER_DEFAULTS["contribution_score_cap"]
+    max_contribution_for_full_bonus: int = TIER_DEFAULTS["max_contribution_for_full_bonus"]
+    contribution_score_max_bonus: int = TIER_DEFAULTS["contribution_score_max_bonus"]
     credibility_activation_attempts: int = TIER_DEFAULTS["credibility_activation_attempts"]
     open_pr_collateral_percentage: int = TIER_DEFAULTS["open_pr_collateral_percentage"]
     open_prs_allowed: int = TIER_DEFAULTS["open_prs_allowed"]

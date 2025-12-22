@@ -312,9 +312,6 @@ class MinerEvaluation:
     total_score: float = 0.0
     total_collateral_score: float = 0.0  # Collateral from open PRs
     total_lines_changed: int = 0
-    total_open_prs: int = 0
-    total_closed_prs: int = 0  # Total PRs closed within MERGED_PR_LOOKBACK_DAYS
-    total_merged_prs: int = 0  # Total PRs merged within MERGED_PR_LOOKBACK_DAYS (len of valid_prs)
     unique_repos_count: int = 0
     failed_reason: Optional[str] = None
     evaluation_timestamp: Optional[datetime] = None
@@ -326,6 +323,18 @@ class MinerEvaluation:
     @property
     def total_prs(self) -> int:
         return len(self.merged_pull_requests) + len(self.total_closed_prs) + len(self.total_merged_prs)
+
+    @property
+    def total_merged_prs(self) -> int:
+        return len(self.merged_pull_requests)
+    
+    @property
+    def total_open_prs(self) -> int:
+        return len(self.open_pull_requests)
+    
+    @property
+    def total_closed_prs(self) -> int:
+        return len(self.closed_pull_requests)
 
     def set_invalid_response_reason(self, reason: str):
         """

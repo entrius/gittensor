@@ -16,7 +16,7 @@ from gittensor.validator.evaluation.inspections import (
 )
 from gittensor.validator.evaluation.normalize import normalize_rewards_linear
 from gittensor.validator.evaluation.scoring import (
-    apply_collateral_deduction,
+    deduct_collateral_for_open_prs,
     apply_cross_miner_multipliers_and_finalize,
     score_miner_prs,
 )
@@ -123,7 +123,7 @@ async def get_rewards(
     apply_cross_miner_multipliers_and_finalize(miner_evaluations)
 
     # Apply collateral deduction from open PRs (collateral system)
-    apply_collateral_deduction(miner_evaluations)
+    deduct_collateral_for_open_prs(miner_evaluations)
 
     # Store all miner evaluations after adjusting score
     await self.bulk_store_evaluation(miner_evaluations)

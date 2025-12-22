@@ -47,10 +47,18 @@ def score_miner_prs(
 
         bt.logging.info(f"Scoring {len(pr_list)} {list_name} PRs for uid {miner_eval.uid}")
 
+        scored_prs = []
         for n, pr in enumerate(pr_list, start=1):
             bt.logging.info(f"\n[{n}/{len(pr_list)}] - {label} PR #{pr.number} in {pr.repository_full_name}")
-            score_pull_request(pr, miner_eval, master_repositories, programming_languages)
+            if score_pull_request(pr, miner_eval, master_repositories, programming_languages):
+                scored_prs.append(pr)
+            else:
+                bt.logging.warning(f"Skipping PR #{pr.number} - failed to score (missing tier config or file changes)")
 
+        if list_name == "merged":
+            miner_eval.merged_pull_requests = scored_prs
+        else:
+            miner_eval.open_pull_requests = scored_prs
 
 def score_pull_request(
     pr: PullRequest,
@@ -59,8 +67,8 @@ def score_pull_request(
     programming_languages: Dict[str, float],
 ) -> bool:
     """Score a single PR (merged or open). Returns True if scored, False if skipped."""
-    tier_config = get_tier_config(pr.repository_full_name, master_repositories)
-    if not tier_config:
+    pr.repository_tier_configuration = get_tier_config(pr.repository_full_name, master_repositories)
+    if not pr.repository_tier_configuration:
         return False
 
     file_changes = get_pull_request_file_changes(pr.repository_full_name, pr.number, miner_eval.github_pat)
@@ -69,7 +77,7 @@ def score_pull_request(
         return False
 
     pr.set_file_changes(file_changes)
-    pr.base_score = calculate_base_score(pr, tier_config, programming_languages)
+    pr.base_score = calculate_base_score(pr, programming_languages)
     calculate_pr_multipliers(pr, miner_eval, master_repositories)
 
     if pr.pr_state == PRState.MERGED:
@@ -87,13 +95,23 @@ def get_tier_config(repo_full_name: str, master_repositories: Dict[str, Dict]) -
     return tier_config
 
 
-def calculate_base_score(pr: PullRequest, tier_config: TierConfig, programming_languages: Dict[str, float]) -> float:
+def calculate_base_score(pr: PullRequest, programming_languages: Dict[str, float]) -> float:
     """Calculate base score from tier base + contribution bonus."""
     contribution_score = pr.calculate_score_from_file_changes(programming_languages)
-    bonus_percent = min(1.0, contribution_score / tier_config.max_contribution_for_full_bonus)
-    contribution_bonus = bonus_percent * tier_config.contribution_score_max_bonus
+
+    tier_config = pr.repository_tier_configuration
+
+    bonus_percent = min(1.0, contribution_score / tier_config.contribution_score_for_full_bonus)
+    contribution_bonus = round(bonus_percent * tier_config.contribution_score_max_bonus, 2)
+    base_score = tier_config.merged_pr_base_score + contribution_bonus
+
+    bt.logging.info(
+        f"Base score: {tier_config.merged_pr_base_score} + {contribution_bonus} bonus "
+        f"({bonus_percent*100:.0f}% of max {tier_config.contribution_score_max_bonus}) = {base_score:.2f}"
+    )
+
     # TODO: Somehow ensure that this base score can't be earned from a Test only PR, comment only PR, typo fix PR, etc.
-    return tier_config.merged_pr_base_score + contribution_bonus
+    return base_score
 
 
 def calculate_pr_multipliers(pr: PullRequest, miner_eval: MinerEvaluation, master_repositories: Dict[str, Dict]) -> None:

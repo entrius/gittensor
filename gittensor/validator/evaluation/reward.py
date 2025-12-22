@@ -121,9 +121,6 @@ async def get_rewards(
     # Finalize scores: apply unique contribution multiplier, sum totals, deduct collateral
     finalize_miner_scores(miner_evaluations)
 
-    # Store all miner evaluations after adjusting score
-    await self.bulk_store_evaluation(miner_evaluations)
-
     # Normalize the rewards between [0,1]
     normalized_rewards = normalize_rewards_linear(miner_evaluations)
 

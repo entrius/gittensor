@@ -22,7 +22,6 @@ MIN_GITHUB_ACCOUNT_AGE = 180  # days
 # =============================================================================
 # Gittensor Branding
 # =============================================================================
-GITTENSOR_REPOSITORY = "entrius/gittensor"
 PR_TAGLINE_PREFIX = "Contribution by Gittensor, see my contribution statistics at "
 GITTENSOR_MINER_DETAILS_URL = "https://gittensor.io/miners/details?githubId="
 

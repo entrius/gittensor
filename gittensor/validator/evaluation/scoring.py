@@ -26,13 +26,11 @@ from gittensor.constants import (
 from gittensor.utils.github_api_tools import get_pull_request_file_changes
 from gittensor.validator.configurations.tier_config import (
     TierConfig,
-    Tier, 
+    Tier,
     TIERS,
-)
-from gittensor.validator.credibility import (
     get_tier_from_config,
-    calculate_credibility_per_tier,
 )
+from gittensor.validator.evaluation.credibility import calculate_credibility_per_tier
 
 
 def score_miner_prs(

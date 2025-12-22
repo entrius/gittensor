@@ -67,3 +67,11 @@ def get_next_tier(current: Tier) -> Optional[Tier]:
     if idx + 1 < len(TIERS_ORDER):
         return TIERS_ORDER[idx + 1]
     return None
+
+
+def get_tier_from_config(tier_config: TierConfig) -> Optional[Tier]:
+    """Reverse lookup tier from TierConfig."""
+    for tier, config in TIERS.items():
+        if config == tier_config:
+            return tier
+    return None

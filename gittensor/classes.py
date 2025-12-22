@@ -14,6 +14,7 @@ from gittensor.constants import (
     TEST_FILE_CONTRIBUTION_WEIGHT,
 )
 from gittensor.utils.github_api_tools import parse_repo_name
+from gittensor.validator.configurations.tier_config import TierConfig
 
 GITHUB_DOMAIN = 'https://github.com/'
 
@@ -148,7 +149,8 @@ class PullRequest:
     created_at: datetime
 
     # PR state for collateral system
-    pr_state: PRState = PRState.MERGED
+    pr_state: PRState
+    repository_tier_configuration: TierConfig
 
     # Score fields
     repo_weight_multiplier: float = 1.0

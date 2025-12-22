@@ -6,7 +6,12 @@ from typing import Dict, List, TYPE_CHECKING
 
 import bittensor as bt
 
-from gittensor.validator.configurations.tier_config import Tier, TierConfig, TIERS, TIERS_ORDER
+from gittensor.validator.configurations.tier_config import (
+    Tier,
+    TIERS,
+    TIERS_ORDER,
+    get_tier_from_config,
+)
 
 if TYPE_CHECKING:
     from gittensor.classes import PullRequest
@@ -25,14 +30,6 @@ class TierStats:
     @property
     def credibility(self) -> float:
         return self.merged / self.total if self.total > 0 else 0.0
-
-
-def get_tier_from_config(tier_config: TierConfig) -> Tier | None:
-    """Reverse lookup tier from TierConfig."""
-    for tier, config in TIERS.items():
-        if config == tier_config:
-            return tier
-    return None
 
 
 def calculate_tier_stats(

@@ -11,7 +11,7 @@ from gittensor.classes import GitPatSynapse, MinerEvaluation
 from gittensor.utils.github_api_tools import load_miners_prs
 from gittensor.validator.evaluation.dynamic_emissions import apply_dynamic_emissions_using_network_contributions
 from gittensor.validator.evaluation.inspections import (
-    detect_and_penalize_duplicates,
+    detect_and_penalize_miners_sharing_github,
     validate_response_and_initialize_miner_evaluation,
 )
 from gittensor.validator.evaluation.normalize import normalize_rewards_linear
@@ -116,7 +116,7 @@ async def get_rewards(
         miner_evaluations[uid] = miner_evaluation
 
     # Adjust scores for duplicate accounts
-    detect_and_penalize_duplicates(responses, miner_evaluations)
+    detect_and_penalize_miners_sharing_github(responses, miner_evaluations)
 
     # Finalize scores: apply unique contribution multiplier, sum totals, deduct collateral
     finalize_miner_scores(miner_evaluations)

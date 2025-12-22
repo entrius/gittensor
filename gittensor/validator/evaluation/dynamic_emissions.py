@@ -18,7 +18,7 @@ def _exponential_unlock_scalar(value: float, max_recycle: float, decay_rate: flo
     return min(1.0, (1 - max_recycle) + max_recycle * (1 - np.exp(-decay_rate * value)))
 
 
-def _get_network_totals(miner_evaluations: Dict[int, MinerEvaluation]) -> tuple[int, int]:
+def get_network_totals(miner_evaluations: Dict[int, MinerEvaluation]) -> tuple[int, int]:
     """Extract total lines changed and unique repos from evaluations."""
     total_lines = 0
     unique_repos: Set[str] = set()
@@ -41,7 +41,7 @@ def apply_dynamic_emissions_using_network_contributions(
         return {}
 
     # Calculate network metrics and scalars
-    total_lines, total_unique_repos = _get_network_totals(miner_evaluations)
+    total_lines, total_unique_repos = get_network_totals(miner_evaluations)
     
     lines_scalar = _exponential_unlock_scalar(
         total_lines, LINES_CONTRIBUTED_MAX_RECYCLE, LINES_CONTRIBUTED_RECYCLE_DECAY_RATE

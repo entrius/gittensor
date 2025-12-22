@@ -17,7 +17,7 @@ from gittensor.utils.github_api_tools import (
 )
 
 
-def detect_and_penalize_duplicates(
+def detect_and_penalize_miners_sharing_github(
     miner_evaluations: Dict[int, MinerEvaluation]
 ):
     """
@@ -73,7 +73,7 @@ def validate_response_and_initialize_miner_evaluation(uid: int, response: GitPat
     # Now safe to access response.axon.hotkey
     miner_eval = MinerEvaluation(uid=uid, hotkey=response.axon.hotkey)
 
-    github_id, error = _validate_github_credentials(uid, response.github_access_token)
+    github_id, error = validate_github_credentials(uid, response.github_access_token)
     if error:
         miner_eval.set_invalid_response_reason(error)
         return miner_eval
@@ -83,7 +83,7 @@ def validate_response_and_initialize_miner_evaluation(uid: int, response: GitPat
     return miner_eval
 
 
-def _validate_github_credentials(uid: int, pat: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
+def validate_github_credentials(uid: int, pat: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
     """Validate PAT and return (github_id, error_reason) tuple."""
     if not pat:
         return None, f"No Github PAT provided by miner {uid}"

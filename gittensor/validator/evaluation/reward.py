@@ -16,8 +16,7 @@ from gittensor.validator.evaluation.inspections import (
 )
 from gittensor.validator.evaluation.normalize import normalize_rewards_linear
 from gittensor.validator.evaluation.scoring import (
-    deduct_collateral_for_open_prs,
-    apply_cross_miner_multipliers_and_finalize,
+    finalize_miner_scores,
     score_miner_prs,
 )
 
@@ -119,11 +118,8 @@ async def get_rewards(
     # Adjust scores for duplicate accounts
     detect_and_penalize_duplicates(responses, miner_evaluations)
 
-    # Apply all multipliers and calculate final scores
-    apply_cross_miner_multipliers_and_finalize(miner_evaluations)
-
-    # Apply collateral deduction from open PRs (collateral system)
-    deduct_collateral_for_open_prs(miner_evaluations)
+    # Finalize scores: apply unique contribution multiplier, sum totals, deduct collateral
+    finalize_miner_scores(miner_evaluations)
 
     # Store all miner evaluations after adjusting score
     await self.bulk_store_evaluation(miner_evaluations)

@@ -155,8 +155,8 @@ def calculate_credibility_multiplier(miner_eval: MinerEvaluation) -> float:
     if total_prs <= 0 or total_prs < CREDIBILITY_THRESHOLD:
         return 1.0
     
-    merge_ratio = miner_eval.total_merged_prs / total_prs
-    return merge_ratio
+    credibility = miner_eval.total_merged_prs / total_prs
+    return credibility
 
 
 def calculate_time_decay_multiplier(pr: PullRequest) -> float:
@@ -324,7 +324,7 @@ def calculate_open_pr_collateral_score(pr: PullRequest) -> float:
     return collateral_score
 
 
-def apply_collateral_deduction(miner_evaluations: Dict[int, MinerEvaluation]) -> None:
+def deduct_collateral_for_open_prs(miner_evaluations: Dict[int, MinerEvaluation]) -> None:
     """
     Apply collateral deduction to miner total scores.
 

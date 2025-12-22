@@ -21,7 +21,6 @@ from gittensor.constants import (
     EXCESSIVE_PR_PENALTY_THRESHOLD,
     EXCESSIVE_PR_PENALTY_SLOPE,
     EXCESSIVE_PR_MIN_MULTIPLIER,
-    GITTENSOR_REPOSITORY,
     CREDIBILITY_THRESHOLD,
     CREDIBILITY_APPLICATION_DATE,
     DEFAULT_COLLATERAL_PERCENT,
@@ -104,7 +103,7 @@ def calculate_pr_multipliers(pr: PullRequest, miner_eval: MinerEvaluation, maste
 
     pr.repo_weight_multiplier = round(repo_meta.get("weight", 0.01), 2)
     pr.issue_multiplier = round(calculate_issue_multiplier(pr), 2)
-    pr.gittensor_tag_multiplier = 1.0 if (pr.gittensor_tagged and pr.repository_full_name != GITTENSOR_REPOSITORY) else 0.0
+    pr.gittensor_tag_multiplier = 1.0 if pr.gittensor_tagged else 0.0
 
     if is_merged:
         pr.open_pr_spam_multiplier = round(calculate_pr_spam_penalty_multiplier(miner_eval.total_open_prs), 2)

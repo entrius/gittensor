@@ -18,8 +18,7 @@ from gittensor.validator.evaluation.normalize import normalize_rewards_linear
 from gittensor.validator.evaluation.scoring import (
     apply_collateral_deduction,
     apply_cross_miner_multipliers_and_finalize,
-    score_merged_pull_requests,
-    score_open_prs_for_collateral,
+    score_miner_prs,
 )
 
 # NOTE: there was a circular import error, needed this if to resolve it
@@ -80,10 +79,7 @@ async def evaluate_miners_pull_requests(
 
     load_miners_prs(miner_eval, master_repositories)
 
-    # TODO: Do this
-    # score_pull_requests_by_tier(miner_eval, master_repositories, programming_languages)
-    score_merged_pull_requests(miner_eval, master_repositories, programming_languages)
-    score_open_prs_for_collateral(miner_eval, master_repositories, programming_languages)
+    score_miner_prs(miner_eval, master_repositories, programming_languages)
 
     # Clear PAT after scoring to avoid storing sensitive data
     miner_eval.github_pat = None

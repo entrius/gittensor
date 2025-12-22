@@ -12,7 +12,6 @@ from gittensor.constants import (
     SECONDS_PER_DAY,
     SECONDS_PER_HOUR,
     MAX_ISSUE_CLOSE_WINDOW_DAYS,
-    MAX_ISSUES_SCORED_IN_SINGLE_PR,
     TIME_DECAY_MIN_MULTIPLIER,
     TIME_DECAY_SIGMOID_MIDPOINT,
     TIME_DECAY_SIGMOID_STEEPNESS_SCALAR,
@@ -220,60 +219,40 @@ def apply_cross_miner_multipliers_and_finalize(miner_evaluations: Dict[int, Mine
 
 def calculate_issue_multiplier(pr: PullRequest) -> float:
     """
-    Calculate PR score multiplier based on age and number of resolved/linked issues.
+    Calculate PR score multiplier based on the first valid linked issue's age.
 
     Works for both merged PRs (uses issue.closed_at) and open PRs (uses current time).
-
-    - Base multiplier: 1.0 (no bonus)
-    - Each issue adds 0.09-0.90 to multiplier based on age (sqrt scaling)
-    - Maximum 3 issues counted (max multiplier: 3.7)
-    - 100% of issue bonus earned when issue has been open for MAX_ISSUE_AGE_FOR_MAX_SCORE+ days
+    Only the first valid issue is scored.
 
     Returns:
-        float: Multiplier between 1.0 and 3.7
+        float: Multiplier between 1.0 and 1.9
     """
     if not pr.issues:
         bt.logging.info(f"PR #{pr.number} - no linked issues")
         return 1.0
 
     valid_issues = [issue for issue in pr.issues if is_valid_issue(issue, pr)]
-
     if not valid_issues:
         bt.logging.info(f"PR #{pr.number} - no valid issues")
         return 1.0
 
+    issue = valid_issues[0]
     is_merged = pr.pr_state == PRState.MERGED
-    now = datetime.now(timezone.utc)
-    num_issues = min(len(valid_issues), MAX_ISSUES_SCORED_IN_SINGLE_PR)
-    bt.logging.info(f"Calculating issue multiplier for PR #{pr.number} with {num_issues} issues")
 
-    total_issue_multiplier = 0.0
-    for i in range(num_issues):
-        issue = valid_issues[i]
-        issue_num = getattr(issue, 'number', i + 1)
+    if not issue.created_at:
+        bt.logging.info(f"Issue #{issue.number} - No creation date, using default: 0.10")
+        return 1.1
 
-        if not issue.created_at:
-            bt.logging.info(f"Issue #{issue_num} - No creation date, using default: 0.10")
-            total_issue_multiplier += 0.1
-            continue
-
-        try:
-            # Merged PRs: use closed_at, Open PRs: use now
-            end_date = issue.closed_at if (is_merged and issue.closed_at) else now
-            days_open = (end_date - issue.created_at).days
-            normalized = 0.1 + math.sqrt(min(days_open, MAX_ISSUE_AGE_FOR_MAX_SCORE)) / math.sqrt(MAX_ISSUE_AGE_FOR_MAX_SCORE)
-            multiplier = 0.9 * min(normalized, 1.0)
-            bt.logging.info(f"Issue #{issue_num} - Open for {days_open} days | multiplier: {multiplier:.2f}")
-            total_issue_multiplier += multiplier
-
-        except (ValueError, AttributeError) as e:
-            bt.logging.warning(f"Issue #{issue_num} - Could not calculate age. Using default: 0.10. Exception: {e}")
-            total_issue_multiplier += 0.1
-
-    final_multiplier = 1.0 + total_issue_multiplier
-    bt.logging.info(f"Issue multiplier for PR #{pr.number}: {final_multiplier:.2f}")
-
-    return final_multiplier
+    try:
+        end_date = issue.closed_at if (is_merged and issue.closed_at) else datetime.now(timezone.utc)
+        days_open = (end_date - issue.created_at).days
+        normalized = 0.1 + math.sqrt(min(days_open, MAX_ISSUE_AGE_FOR_MAX_SCORE)) / math.sqrt(MAX_ISSUE_AGE_FOR_MAX_SCORE)
+        issue_bonus = 0.9 * min(normalized, 1.0)
+        bt.logging.info(f"Issue #{issue.number} - Open for {days_open} days | bonus: {issue_bonus:.2f}")
+        return 1.0 + issue_bonus
+    except (ValueError, AttributeError) as e:
+        bt.logging.warning(f"Issue #{issue.number} - Could not calculate age. Using default: 0.10. Exception: {e}")
+        return 1.1
 
 
 def is_valid_issue(issue: Issue, pr: PullRequest) -> bool:

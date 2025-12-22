@@ -56,30 +56,23 @@ def calculate_tier_stats(
 
 def is_tier_unlocked(tier: Tier, tier_stats: Dict[Tier, TierStats]) -> bool:
     """
-    Check if a tier is unlocked based on meeting all previous tier requirements.
+    Check if a tier is unlocked by verifying this tier and all below meet their own requirements.
 
-    - Low tier is always unlocked
-    - Higher tiers require meeting the previous tier's required_merges and required_credibility
+    Each tier's required_merges/required_credibility defines what's needed to maintain THAT tier.
     """
     tier_idx = TIERS_ORDER.index(tier)
 
-    # Low tier (index 0) is always unlocked
-    if tier_idx == 0:
-        return True
+    for i in range(tier_idx + 1):  # include current tier
+        check_tier = TIERS_ORDER[i]
+        config = TIERS[check_tier]
+        stats = tier_stats[check_tier]
 
-    # Check all previous tiers are unlocked and requirements met
-    for i in range(tier_idx):
-        prev_tier = TIERS_ORDER[i]
-        prev_config = TIERS[prev_tier]
-        prev_stats = tier_stats[prev_tier]
-
-        # Must meet the previous tier's requirements to unlock the next
-        if prev_config.required_merges is not None:
-            if prev_stats.merged < prev_config.required_merges:
+        if config.required_merges is not None:
+            if stats.merged < config.required_merges:
                 return False
 
-        if prev_config.required_credibility is not None:
-            if prev_stats.credibility < prev_config.required_credibility:
+        if config.required_credibility is not None:
+            if stats.credibility < config.required_credibility:
                 return False
 
     return True
@@ -110,7 +103,7 @@ def calculate_credibility_per_tier(
             tier_credibility[tier] = 0.0
             bt.logging.warning(
                 f"Tier {tier.value}: NOT UNLOCKED - credibility = 0.0 "
-                f"(has {stats.merged} merged, {stats.closed} closed but previous tier requirements not met)"
+                f"(has {stats.merged} merged, {stats.closed} closed but tier requirements not met)"
             )
             continue
 

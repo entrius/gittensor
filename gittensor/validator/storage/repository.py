@@ -144,7 +144,7 @@ class Repository(BaseRepository):
                     pr.repository_uniqueness_multiplier,
                     pr.time_decay_multiplier,
                     pr.gittensor_tag_multiplier,
-                    pr.merge_success_multiplier,
+                    pr.credibility_multiplier,
                     pr.earned_score,
                     pr.collateral_score,
                     pr.additions,

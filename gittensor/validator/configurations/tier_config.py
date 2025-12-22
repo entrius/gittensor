@@ -44,18 +44,14 @@ class TierConfig:
     credibility_activation_attempts: int = TIER_DEFAULTS["credibility_activation_attempts"]
     open_pr_collateral_percentage: int = TIER_DEFAULTS["open_pr_collateral_percentage"]
 
-    @property
-    def has_next_tier(self) -> bool:
-        return self.required_merges is not None
-
 
 TIERS: dict[Tier, TierConfig] = {
-    #                              merges  credibility  scalar
-    Tier.LOW:       TierConfig(    3,      0.40,        1      ),
-    Tier.LOWER_MID: TierConfig(    3,      0.50,        2      ),
-    Tier.MIDDLE:    TierConfig(    3,      0.60,        3      ),
-    Tier.UPPER_MID: TierConfig(    5,      0.70,        4      ),
-    Tier.HIGH:      TierConfig(    None,   None,        5      ),
+    #                              merges  credibility  scalar  (requirements to MAINTAIN this tier)
+    Tier.LOW:       TierConfig(    None,   None,        1      ),  # always unlocked
+    Tier.LOWER_MID: TierConfig(    3,      0.40,        2      ),
+    Tier.MIDDLE:    TierConfig(    3,      0.50,        3      ),
+    Tier.UPPER_MID: TierConfig(    3,      0.60,        4      ),
+    Tier.HIGH:      TierConfig(    5,      0.70,        5      ),
 }
 
 TIERS_ORDER: list[Tier] = list(TIERS.keys())

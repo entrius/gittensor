@@ -2,8 +2,9 @@
 import base64
 import fnmatch
 import time
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import bittensor as bt
 import requests
@@ -14,6 +15,165 @@ from gittensor.constants import (
     MERGE_SUCCESS_RATIO_APPLICATION_DATE,
 )
 from gittensor.validator.utils.config import MERGED_PR_LOOKBACK_DAYS
+
+# =============================================================================
+# Rate Limit Configuration
+# =============================================================================
+RATE_LIMIT_BUFFER_SECONDS = 5  # Extra buffer time when waiting for rate limit reset
+RATE_LIMIT_MIN_REMAINING = 10  # Minimum remaining requests before preemptive wait
+RATE_LIMIT_MAX_WAIT_SECONDS = 900  # Maximum time to wait for rate limit reset (15 min)
+
+
+@dataclass
+class RateLimitInfo:
+    """Represents GitHub API rate limit information extracted from response headers."""
+    
+    limit: int  # Maximum requests allowed per hour
+    remaining: int  # Requests remaining in current window
+    reset_timestamp: int  # Unix timestamp when the rate limit resets
+    used: int  # Requests used in current window
+    
+    @property
+    def is_exceeded(self) -> bool:
+        """Check if rate limit has been exceeded."""
+        return self.remaining == 0
+    
+    @property
+    def seconds_until_reset(self) -> int:
+        """Calculate seconds until rate limit resets."""
+        current_time = int(time.time())
+        return max(0, self.reset_timestamp - current_time)
+    
+    def __str__(self) -> str:
+        return f"RateLimit(remaining={self.remaining}/{self.limit}, resets_in={self.seconds_until_reset}s)"
+
+
+def parse_rate_limit_headers(response: requests.Response) -> Optional[RateLimitInfo]:
+    """
+    Parse GitHub API rate limit information from response headers.
+    
+    Args:
+        response: The HTTP response from GitHub API
+        
+    Returns:
+        RateLimitInfo object if headers are present, None otherwise
+    """
+    headers = response.headers
+    
+    try:
+        limit = int(headers.get('X-RateLimit-Limit', 0))
+        remaining = int(headers.get('X-RateLimit-Remaining', 0))
+        reset_timestamp = int(headers.get('X-RateLimit-Reset', 0))
+        used = int(headers.get('X-RateLimit-Used', 0))
+        
+        if limit == 0 and reset_timestamp == 0:
+            return None
+            
+        return RateLimitInfo(
+            limit=limit,
+            remaining=remaining,
+            reset_timestamp=reset_timestamp,
+            used=used
+        )
+    except (ValueError, TypeError) as e:
+        bt.logging.debug(f"Could not parse rate limit headers: {e}")
+        return None
+
+
+def is_rate_limited(response: requests.Response) -> Tuple[bool, Optional[int]]:
+    """
+    Check if a response indicates rate limiting and calculate wait time.
+    
+    Args:
+        response: The HTTP response from GitHub API
+        
+    Returns:
+        Tuple of (is_rate_limited, seconds_to_wait)
+        - is_rate_limited: True if the request was rate limited
+        - seconds_to_wait: Number of seconds to wait before retrying, or None if not rate limited
+    """
+    if response.status_code not in (403, 429):
+        return (False, None)
+    
+    rate_limit_info = parse_rate_limit_headers(response)
+    
+    if rate_limit_info and rate_limit_info.is_exceeded:
+        wait_seconds = min(
+            rate_limit_info.seconds_until_reset + RATE_LIMIT_BUFFER_SECONDS,
+            RATE_LIMIT_MAX_WAIT_SECONDS
+        )
+        return (True, wait_seconds)
+    
+    response_text = response.text.lower()
+    if 'rate limit' in response_text or 'api rate limit exceeded' in response_text:
+        reset_header = response.headers.get('X-RateLimit-Reset')
+        if reset_header:
+            try:
+                reset_time = int(reset_header)
+                current_time = int(time.time())
+                wait_seconds = min(
+                    max(0, reset_time - current_time) + RATE_LIMIT_BUFFER_SECONDS,
+                    RATE_LIMIT_MAX_WAIT_SECONDS
+                )
+                return (True, wait_seconds)
+            except ValueError:
+                pass
+        return (True, 60)
+    
+    return (False, None)
+
+
+def check_preemptive_rate_limit(response: requests.Response) -> None:
+    """
+    Check if we're approaching rate limit and log a warning.
+    This helps with monitoring and debugging rate limit issues.
+    
+    Args:
+        response: The HTTP response from GitHub API
+    """
+    rate_limit_info = parse_rate_limit_headers(response)
+    
+    if rate_limit_info:
+        if rate_limit_info.remaining <= RATE_LIMIT_MIN_REMAINING:
+            bt.logging.warning(
+                f"Approaching GitHub API rate limit: {rate_limit_info.remaining} requests remaining, "
+                f"resets in {rate_limit_info.seconds_until_reset}s"
+            )
+        elif rate_limit_info.remaining <= rate_limit_info.limit * 0.1:
+            bt.logging.info(
+                f"GitHub API rate limit status: {rate_limit_info.remaining}/{rate_limit_info.limit} remaining"
+            )
+
+
+def wait_for_rate_limit_reset(wait_seconds: int, context: str = "") -> None:
+    """
+    Wait for rate limit to reset with progress logging.
+    
+    Args:
+        wait_seconds: Number of seconds to wait
+        context: Optional context string for logging (e.g., "GraphQL query")
+    """
+    context_str = f" for {context}" if context else ""
+    bt.logging.warning(
+        f"GitHub API rate limit exceeded{context_str}. Waiting {wait_seconds}s for reset..."
+    )
+    
+    if wait_seconds <= 60:
+        time.sleep(wait_seconds)
+    else:
+        intervals = wait_seconds // 60
+        remaining = wait_seconds % 60
+        
+        for i in range(intervals):
+            time.sleep(60)
+            elapsed = (i + 1) * 60
+            bt.logging.info(f"Rate limit wait: {elapsed}s elapsed, {wait_seconds - elapsed}s remaining")
+        
+        if remaining > 0:
+            time.sleep(remaining)
+    
+    bt.logging.info("Rate limit wait complete, resuming API requests")
+
 
 # core github graphql query
 QUERY = """
@@ -142,7 +302,7 @@ _GITHUB_USER_CACHE: Dict[str, Dict[str, Any]] = {}
 
 
 def get_github_user(token: str) -> Optional[Dict[str, Any]]:
-    """Fetch GitHub user data for a PAT with retry and in-process cache.
+    """Fetch GitHub user data for a PAT with retry, rate limit handling, and in-process cache.
 
     Args:
         token (str): Github pat
@@ -159,11 +319,25 @@ def get_github_user(token: str) -> Optional[Dict[str, Any]]:
 
     headers = make_headers(token)
 
-    # Retry logic for timeout issues
+    # Retry logic for timeout issues and rate limits
     for attempt in range(6):
         try:
             response = requests.get(f"{BASE_GITHUB_API_URL}/user", headers=headers, timeout=30)
+            
+            # Check for rate limiting
+            rate_limited, wait_seconds = is_rate_limited(response)
+            if rate_limited and wait_seconds:
+                if attempt < 5:
+                    wait_for_rate_limit_reset(wait_seconds, context="/user endpoint")
+                    continue
+                else:
+                    bt.logging.error("Rate limit exceeded on final attempt for /user endpoint")
+                    return None
+            
             if response.status_code == 200:
+                # Check if approaching rate limit
+                check_preemptive_rate_limit(response)
+                
                 try:
                     user_data: Dict[str, Any] = response.json()
                 except Exception as e:  # pragma: no cover
@@ -252,7 +426,9 @@ def get_github_account_age_days(token: str) -> Optional[int]:
 
 def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -> Optional[List[FileChange]]:
     '''
-    Get the diff for a specific PR by repository name and PR number
+    Get the diff for a specific PR by repository name and PR number.
+    Includes rate limit handling for reliability.
+    
     Args:
         repository (str): Repository in format 'owner/repo'
         pr_number (int): PR number
@@ -261,20 +437,42 @@ def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -
         List[FileChanges]: List object with file changes or None if error
     '''
     headers = make_headers(token)
+    max_attempts = 3
 
-    try:
-        response = requests.get(
-            f'{BASE_GITHUB_API_URL}/repos/{repository}/pulls/{pr_number}/files', headers=headers, timeout=15
-        )
-        if response.status_code == 200:
-            file_diffs = response.json()
-            return [FileChange.from_github_response(pr_number, repository, file_diff) for file_diff in file_diffs]
+    for attempt in range(max_attempts):
+        try:
+            response = requests.get(
+                f'{BASE_GITHUB_API_URL}/repos/{repository}/pulls/{pr_number}/files', 
+                headers=headers, 
+                timeout=15
+            )
+            
+            # Check for rate limiting
+            rate_limited, wait_seconds = is_rate_limited(response)
+            if rate_limited and wait_seconds:
+                if attempt < max_attempts - 1:
+                    wait_for_rate_limit_reset(wait_seconds, context=f"PR #{pr_number} files")
+                    continue
+                else:
+                    bt.logging.error(f"Rate limit exceeded on final attempt for PR #{pr_number} files")
+                    return []
+            
+            if response.status_code == 200:
+                check_preemptive_rate_limit(response)
+                file_diffs = response.json()
+                return [FileChange.from_github_response(pr_number, repository, file_diff) for file_diff in file_diffs]
 
-        return []
+            bt.logging.warning(
+                f"Failed to get file changes for PR #{pr_number} in {repository}: status {response.status_code}"
+            )
+            return []
 
-    except Exception as e:
-        bt.logging.error(f"Error getting file changes for PR #{pr_number} in {repository}: {e}")
-        return []
+        except Exception as e:
+            bt.logging.error(f"Error getting file changes for PR #{pr_number} in {repository}: {e}")
+            if attempt < max_attempts - 1:
+                time.sleep(2)
+    
+    return []
 
 
 def get_github_graphql_query(
@@ -282,6 +480,7 @@ def get_github_graphql_query(
 ) -> Optional[requests.Response]:
     """
     Get all merged PRs for a user across all repositories using GraphQL API with pagination.
+    Includes comprehensive rate limit handling.
 
     Args:
         token (str): GitHub PAT
@@ -311,7 +510,18 @@ def get_github_graphql_query(
                 timeout=30,
             )
 
+            # Check for rate limiting (GraphQL uses different rate limiting)
+            rate_limited, wait_seconds = is_rate_limited(response)
+            if rate_limited and wait_seconds:
+                if attempt < (attempts - 1):
+                    wait_for_rate_limit_reset(wait_seconds, context="GraphQL query")
+                    continue
+                else:
+                    bt.logging.error("Rate limit exceeded on final attempt for GraphQL query")
+                    return None
+
             if response.status_code == 200:
+                check_preemptive_rate_limit(response)
                 return response
             # error - log and retry
             elif attempt < (attempts - 1):
@@ -630,3 +840,4 @@ def get_user_merged_prs_graphql(
             merged_pr_count=merged_pr_count,
             closed_pr_count=closed_pr_count,
         )
+

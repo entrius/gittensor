@@ -3,7 +3,7 @@
 
 import math
 from datetime import datetime, timezone
-from typing import Dict
+from typing import Dict, Optional
 
 import bittensor as bt
 
@@ -27,6 +27,7 @@ from gittensor.constants import (
     CREDIBILITY_THRESHOLD,
     CREDIBILITY_APPLICATION_DATE,
     DEFAULT_COLLATERAL_PERCENT,
+    TIERS_AND_COLLATERAL_EFFECTIVE_DATE,
 )
 from gittensor.utils.github_api_tools import get_pull_request_file_changes
 from gittensor.validator.configurations.tier_config import TierConfig, Tier, TIERS
@@ -61,46 +62,64 @@ def score_pull_request(
     programming_languages: Dict[str, float],
 ) -> bool:
     """Score a single PR (merged or open). Returns True if scored, False if skipped."""
-    is_merged = pr.pr_state == PRState.MERGED
-
-    # Tier check
-    tier_str = master_repositories.get(pr.repository_full_name, {}).get("tier")
-    tier_configuration: TierConfig = TIERS.get(Tier(tier_str)) if tier_str else None
-    if not tier_configuration:
-        bt.logging.warning(f"{pr.repository_full_name} is not configured to a tier. Skipping...")
+    tier_config = get_tier_config(pr.repository_full_name, master_repositories)
+    if not tier_config:
         return False
 
-    # File changes
     file_changes = get_pull_request_file_changes(pr.repository_full_name, pr.number, miner_eval.github_pat)
     if not file_changes:
         bt.logging.warning("No file changes found.")
         return False
 
     pr.set_file_changes(file_changes)
+    pr.base_score = calculate_base_score(pr, tier_config, programming_languages)
+    calculate_pr_multipliers(pr, miner_eval, master_repositories)
 
-    # Common multipliers
+    if pr.pr_state == PRState.MERGED:
+        miner_eval.unique_repos_contributed_to.add(pr.repository_full_name)
+
+    return True
+
+
+def get_tier_config(repo_full_name: str, master_repositories: Dict[str, Dict]) -> Optional[TierConfig]:
+    """Get tier configuration for a repository."""
+    tier_str = master_repositories.get(repo_full_name, {}).get("tier")
+    tier_config = TIERS.get(Tier(tier_str)) if tier_str else None
+    if not tier_config:
+        bt.logging.warning(f"{repo_full_name} is not configured to a tier. Skipping...")
+    return tier_config
+
+
+def calculate_base_score(pr: PullRequest, tier_config: TierConfig, programming_languages: Dict[str, float]) -> float:
+    """Calculate base score from tier base + contribution bonus."""
+    contribution_score = pr.calculate_score_from_file_changes(programming_languages)
+    bonus_percent = min(1.0, contribution_score / tier_config.max_contribution_for_full_bonus)
+    contribution_bonus = bonus_percent * tier_config.contribution_score_max_bonus
+    # TODO: Somehow ensure that this base score can't be earned from a Test only PR, comment only PR, typo fix PR, etc.
+    return tier_config.merged_pr_base_score + contribution_bonus
+
+
+def calculate_pr_multipliers(pr: PullRequest, miner_eval: MinerEvaluation, master_repositories: Dict[str, Dict]) -> None:
+    """Calculate all multipliers for a PR."""
+    is_merged = pr.pr_state == PRState.MERGED
     repo_meta = master_repositories.get(pr.repository_full_name, {})
+
     pr.repo_weight_multiplier = round(repo_meta.get("weight", 0.01), 2)
-    pr.base_score = round(pr.calculate_score_from_file_changes(programming_languages), 2)
     pr.issue_multiplier = round(calculate_issue_multiplier(pr), 2)
     pr.gittensor_tag_multiplier = round(
         GITTENSOR_TAGLINE_BOOST if (pr.gittensor_tagged and pr.repository_full_name != GITTENSOR_REPOSITORY) else 1.0, 2
     )
 
-    # Merged-only multipliers
     if is_merged:
         pr.open_pr_spam_multiplier = round(calculate_pr_spam_penalty_multiplier(miner_eval.total_open_prs), 2)
         pr.time_decay_multiplier = round(calculate_time_decay_multiplier(pr), 2)
         pr.credibility_multiplier = round(
             calculate_credibility_multiplier(miner_eval) if pr.merged_at > CREDIBILITY_APPLICATION_DATE else 1.0, 2
         )
-        miner_eval.unique_repos_contributed_to.add(pr.repository_full_name)
     else:
         pr.open_pr_spam_multiplier = 1.0
         pr.time_decay_multiplier = 1.0
         pr.credibility_multiplier = 1.0
-
-    return True
 
 
 def count_repository_contributors(miner_evaluations: Dict[int, MinerEvaluation]) -> Dict[str, int]:
@@ -308,6 +327,9 @@ def calculate_open_pr_collateral_score(pr: PullRequest) -> float:
                     uniqueness (cross-miner), open_pr_spam (not for collateral)
     """
     from math import prod
+
+    if pr.created_at <= TIERS_AND_COLLATERAL_EFFECTIVE_DATE:
+        return 0.0
 
     multipliers = {
         "repo_weight": pr.repo_weight_multiplier,

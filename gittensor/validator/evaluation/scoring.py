@@ -174,43 +174,54 @@ def calculate_time_decay_multiplier(pr: PullRequest) -> float:
     return max(sigmoid, TIME_DECAY_MIN_MULTIPLIER)
 
 
-def apply_cross_miner_multipliers_and_finalize(miner_evaluations: Dict[int, MinerEvaluation]) -> None:
-    """Apply uniqueness multipliers and finalize scores for merged PRs."""
-    bt.logging.info("**Finalizing merged PR scores**")
+def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None:
+    """Finalize all miner scores: apply uniqueness multipliers, calculate totals, and deduct collateral."""
+    bt.logging.info("**Finalizing miner scores**")
 
     repo_counts = count_repository_contributors(miner_evaluations)
-    if not repo_counts:
-        bt.logging.info("No repository contributions found")
-        return
-
     total_contributing_miners = sum(1 for ev in miner_evaluations.values() if ev.unique_repos_contributed_to)
-    total_prs = 0
 
     for uid, evaluation in miner_evaluations.items():
-        if not evaluation or not evaluation.merged_pull_requests:
+        if not evaluation:
             continue
 
-        total_prs += len(evaluation.merged_pull_requests)
-        bt.logging.info(f"\n***Finalizing scores for uid {uid}***")
+        bt.logging.info(f"\n***Finalizing scores for UID {uid}***")
 
+        # Process merged PRs
         for pr in evaluation.merged_pull_requests:
-            # Apply uniqueness multiplier (cross-miner dependent)
-            repo_count = repo_counts.get(pr.repository_full_name, 0)
-            uniqueness_score = (total_contributing_miners - repo_count + 1) / total_contributing_miners
-            uniqueness_multiplier = 1.0 + (uniqueness_score * UNIQUE_PR_BOOST)
-            pr.repository_uniqueness_multiplier = uniqueness_multiplier
-
-            # Calculate final earned score now that all multipliers are set
+            pr.repository_uniqueness_multiplier = calculate_uniqueness_multiplier(
+                pr.repository_full_name, repo_counts, total_contributing_miners
+            )
             pr.calculate_final_earned_score()
-
             evaluation.base_total_score += pr.base_score
             evaluation.total_score += pr.earned_score
             evaluation.total_lines_changed += pr.total_lines_scored
 
-        evaluation.unique_repos_count = len(evaluation.unique_repos_contributed_to)
-        bt.logging.info(f"UID {uid} total score: {evaluation.total_score:.2f} ({len(evaluation.merged_pull_requests)} PRs)")
+        # Process open PRs for collateral
+        for pr in evaluation.open_pull_requests:
+            pr.collateral_score = calculate_open_pr_collateral_score(pr)
+            evaluation.total_collateral_score += pr.collateral_score
 
-    bt.logging.info(f"Finalized {total_prs} merged PRs across {total_contributing_miners} miners")
+        # Apply collateral deduction
+        earned_score = evaluation.total_score
+        evaluation.total_score = max(0.0, earned_score - evaluation.total_collateral_score)
+        evaluation.unique_repos_count = len(evaluation.unique_repos_contributed_to)
+
+        bt.logging.info(
+            f"UID {uid}: earned={earned_score:.2f} - collateral={evaluation.total_collateral_score:.2f} = "
+            f"final={evaluation.total_score:.2f} ({evaluation.total_merged_prs} merged, {evaluation.total_open_prs} open)"
+        )
+
+    bt.logging.info("Finalization complete.")
+
+
+def calculate_uniqueness_multiplier(repo_full_name: str, repo_counts: Dict[str, int], total_contributing_miners: int) -> float:
+    """Calculate repository uniqueness multiplier based on how many miners contribute to a repo."""
+    if total_contributing_miners == 0:
+        return 1.0
+    repo_count = repo_counts.get(repo_full_name, 0)
+    uniqueness_score = (total_contributing_miners - repo_count + 1) / total_contributing_miners
+    return 1.0 + (uniqueness_score * UNIQUE_PR_BOOST)
 
 
 def calculate_issue_multiplier(pr: PullRequest) -> float:
@@ -313,6 +324,7 @@ def calculate_open_pr_collateral_score(pr: PullRequest) -> float:
     }
 
     potential_score = pr.base_score * prod(multipliers.values())
+    # TODO: Do we need to make default collateral percent tier configured or tier agnostic
     collateral_score = potential_score * DEFAULT_COLLATERAL_PERCENT
 
     mult_str = " | ".join([f"{k}: {v:.2f}" for k, v in multipliers.items()])
@@ -324,37 +336,3 @@ def calculate_open_pr_collateral_score(pr: PullRequest) -> float:
     return collateral_score
 
 
-def deduct_collateral_for_open_prs(miner_evaluations: Dict[int, MinerEvaluation]) -> None:
-    """
-    Apply collateral deduction to miner total scores.
-
-    Date eligibility is checked at add time in reward.py - all open_pull_requests are eligible.
-    Collateral is calculated per-PR and summed, then deducted from total_score (never below 0).
-    """
-    bt.logging.info("**Applying collateral deduction**")
-
-    for uid, evaluation in miner_evaluations.items():
-        # Only process PRs that were scored (have base_score > 0)
-        scored_open_prs = [pr for pr in evaluation.open_pull_requests if pr.base_score > 0.0]
-
-        if not scored_open_prs:
-            evaluation.total_collateral_score = 0.0
-            continue
-
-        bt.logging.info(f"\n***Collateral for UID {uid} ({len(scored_open_prs)} scored open PRs)***")
-
-        total_collateral = 0.0
-        for pr in scored_open_prs:
-            collateral = calculate_open_pr_collateral_score(pr)
-            pr.collateral_score = collateral
-            total_collateral += collateral
-
-        evaluation.total_collateral_score = round(total_collateral, 2)
-        original_score = evaluation.total_score
-        evaluation.total_score = max(0.0, evaluation.total_score - total_collateral)
-
-        bt.logging.info(
-            f"UID {uid}: earned={original_score:.2f} - collateral={total_collateral:.2f} = final={evaluation.total_score:.2f}"
-        )
-
-    bt.logging.info("Collateral deduction complete.")

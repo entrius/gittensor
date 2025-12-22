@@ -236,7 +236,7 @@ class PullRequest:
     @classmethod
     def from_graphql_response(cls, pr_data: dict, uid: int, hotkey: str, github_id: str) -> 'PullRequest':
         """Create PullRequest from GraphQL API response for any PR state."""
-        from gittensor.constants import PR_TAGLINE
+        from gittensor.constants import PR_TAGLINE_PREFIX, GITTENSOR_MINER_DETAILS_URL
         from gittensor.validator.utils.datetime_utils import parse_github_timestamp_to_cst
 
         repository_full_name = parse_repo_name(pr_data['repository'])
@@ -264,11 +264,12 @@ class PullRequest:
         last_edited_at = parse_github_timestamp_to_cst(pr_data.get('lastEditedAt')) if pr_data.get('lastEditedAt') else None
         merged_at = parse_github_timestamp_to_cst(pr_data['mergedAt']) if is_merged else None
 
-        # Gittensor tag detection - merged PRs have extra post-merge edit check
+        # Gittensor tag detection - validates tagline contains correct miner URL
         gittensor_tagged = False
         if description:
-            description_end = description[-100:].strip().rstrip('.,!?;: \t\n')
-            if description_end.lower().endswith(PR_TAGLINE.lower()):
+            expected_tagline = f"{PR_TAGLINE_PREFIX}{GITTENSOR_MINER_DETAILS_URL}{github_id}"
+            description_end = description[-150:].strip().rstrip('.,!?;: \t\n')
+            if description_end.lower().endswith(expected_tagline.lower()):
                 if is_merged:
                     gittensor_tagged = last_edited_at is None or last_edited_at <= merged_at
                     if not gittensor_tagged:

@@ -102,6 +102,8 @@ PREPROCESSOR_LANGUAGES = {
 TIERS_AND_COLLATERAL_EFFECTIVE_DATE = datetime(2025, 12, 25, 22, 0, 0, tzinfo=timezone.utc)
 # Percentage of potential score used as collateral for open PRs
 DEFAULT_COLLATERAL_PERCENT = 0.20
+DEFAULT_MERGED_PR_BASE_SCORE = 50
+MAX_LINES_CONTRIBUTED_BASE_SCORE = 20
 
 # =============================================================================
 # Rewards & Emissions

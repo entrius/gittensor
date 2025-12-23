@@ -1,4194 +1,5634 @@
 {
   "2factorauth/twofactorauth": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "404-Repo/404-base-miner": {
+    "tier": "Silver",
     "weight": 6.52
   },
   "404-Repo/three-gen-subnet": {
+    "tier": "Gold",
     "weight": 44.58
   },
   "Activiti/Activiti": {
+    "tier": "Bronze",
     "weight": 0.32
   },
   "AffineFoundation/affine-cortex": {
+    "tier": "Gold",
     "weight": 59.34
   },
   "Aider-AI/aider": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "All-Hands-AI/OpenHands": {
+    "tier": "Gold",
     "weight": 31.76
   },
   "AlphaCoreBittensor/alphacore": {
+    "tier": "Silver",
     "weight": 6.52
   },
   "ApolloAuto/apollo": {
+    "tier": "Bronze",
     "weight": 0.3
   },
   "AppFlowy-IO/AppFlowy": {
+    "tier": "Gold",
     "weight": 10.83
   },
   "ArduPilot/ardupilot": {
+    "tier": "Bronze",
     "weight": 0.32
   },
   "Arduino-IRremote/Arduino-IRremote": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "AtsushiSakai/PythonRobotics": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "Aurelius-Protocol/aurelius-whitepaper": {
+    "tier": "Silver",
     "weight": 6.52
   },
   "AykutSarac/jsoncrack.com": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "Azure-Samples/azure-search-openai-demo": {
+    "tier": "Bronze",
     "weight": 0.32
   },
   "Azure-Samples/cognitive-services-speech-sdk": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "Azure/Azure-Sentinel": {
+    "tier": "Bronze",
     "weight": 0.31
   },
   "Azure/azure-cli": {
+    "tier": "Bronze",
     "weight": 0.31
   },
   "Azure/azure-powershell": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "Azure/azure-sdk-for-net": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "Azure/azure-sdk-for-python": {
+    "tier": "Bronze",
     "weight": 0.31
   },
   "AzureAD/microsoft-authentication-library-for-js": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "Barbariandev/MANTIS": {
+    "tier": "Silver",
     "weight": 7.05
   },
   "BigBrotherTrade/trader": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "BitMind-AI/bitmind-subnet": {
-    "weight": 44.58,
-    "additional_acceptable_branches": ["testnet"]
+    "additional_acceptable_branches": [
+      "testnet"
+    ],
+    "tier": "Gold",
+    "weight": 44.58
   },
   "Bitsec-AI/subnet": {
+    "tier": "Silver",
     "weight": 6.52
   },
   "BretFisher/udemy-docker-mastery": {
+    "tier": "Bronze",
     "weight": 0.35
   },
   "CaiJimmy/hugo-theme-stack": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "CandlesTAO/candles": {
+    "tier": "Silver",
     "weight": 6.52
   },
   "CarGuo/GSYVideoPlayer": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "CareyWang/sub-web": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "CesiumGS/cesium": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "Chainlit/chainlit": {
     "inactive_at": "2025-11-29T17:45:38.525Z",
+    "tier": "Bronze",
     "weight": 0.01
   },
   "ChatGPTNextWeb/NextChat": {
+    "tier": "Bronze",
     "weight": 0.64
   },
   "ChutesAI/chutes": {
+    "tier": "Gold",
     "weight": 59.34
   },
   "CleverRaven/Cataclysm-DDA": {
+    "tier": "Bronze",
     "weight": 0.28
   },
   "ClickHouse/ClickHouse": {
+    "tier": "Silver",
     "weight": 4.6
   },
   "CocoaPods/Specs": {
+    "tier": "Bronze",
     "weight": 0.22
   },
   "ColorlibHQ/AdminLTE": {
+    "tier": "Bronze",
     "weight": 0.43
   },
   "CreativeBuilds/sn77": {
+    "tier": "Silver",
     "weight": 7.05
   },
   "CreditTone/hooker": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "Dash-Industry-Forum/dash.js": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "DataLinkDC/dinky": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "Datalux/Osintgram": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "Datura-ai/lium-io": {
+    "tier": "Gold",
     "weight": 59.34
   },
   "DeepLabCut/DeepLabCut": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "DefectDojo/django-DefectDojo": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "DefinitelyTyped/DefinitelyTyped": {
+    "tier": "Bronze",
     "weight": 0.6
   },
   "Desearch-ai/subnet-22": {
+    "tier": "Silver",
     "weight": 7.05
   },
   "Dolibarr/dolibarr": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "DotNetNext/SqlSugar": {
     "inactive_at": "2025-11-29T17:45:38.525Z",
+    "tier": "Bronze",
     "weight": 0.01
   },
   "DrKLO/Telegram": {
+    "tier": "Bronze",
     "weight": 0.35
   },
   "EastWorld/wechat-app-mall": {
+    "tier": "Bronze",
     "weight": 0.35
   },
   "EasyDarwin/EasyDarwin": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "Ebazhanov/linkedin-skill-assessments-quizzes": {
     "inactive_at": "2025-11-04T02:18:33.094Z",
+    "tier": "Bronze",
     "weight": 0.01
   },
   "EfficientFrontier-SignalPlus/EfficientFrontier": {
+    "tier": "Silver",
     "weight": 6.52
   },
   "EleutherAI/lm-evaluation-harness": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "EsotericSoftware/spine-runtimes": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "Eugeny/tabby": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "EvolutionAPI/evolution-api": {
+    "tier": "Bronze",
     "weight": 0.3
   },
   "Expensify/App": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "FRRouting/frr": {
+    "tier": "Bronze",
     "weight": 0.23
   },
   "FaridSafi/react-native-gifted-chat": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "FlowiseAI/Flowise": {
+    "tier": "Bronze",
     "weight": 0.59
   },
   "FoundationAgents/MetaGPT": {
+    "tier": "Bronze",
     "weight": 0.24
   },
   "FoundationAgents/OpenManus": {
+    "tier": "Bronze",
     "weight": 0.24
   },
   "FreeRDP/FreeRDP": {
+    "tier": "Bronze",
     "weight": 0.31
   },
   "FreeRTOS/FreeRTOS-Kernel": {
+    "tier": "Bronze",
     "weight": 0.23
   },
   "FunkinCrew/Funkin": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "Fyrd/caniuse": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "General-Tao-Ventures/cartha-cli": {
+    "tier": "Silver",
     "weight": 6.52
   },
   "General-Tao-Ventures/cartha-validator": {
+    "tier": "Silver",
     "weight": 6.52
   },
   "GoogleChrome/lighthouse": {
+    "tier": "Bronze",
     "weight": 0.37
   },
   "GoogleChrome/samples": {
+    "tier": "Bronze",
     "weight": 0.31
   },
   "GoogleCloudPlatform/golang-samples": {
+    "tier": "Bronze",
     "weight": 0.23
   },
   "GoogleCloudPlatform/python-docs-samples": {
+    "tier": "Bronze",
     "weight": 0.21
   },
   "GoogleCloudPlatform/training-data-analyst": {
+    "tier": "Bronze",
     "weight": 0.21
   },
   "GraphiteAI/Graphite-Subnet": {
+    "tier": "Silver",
     "weight": 6.52
   },
   "Grasscutters/Grasscutter": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "Guovin/iptv-api": {
+    "tier": "Bronze",
     "weight": 0.33
   },
   "HabitRPG/habitica": {
+    "tier": "Bronze",
     "weight": 0.33
   },
   "HackTricks-wiki/hacktricks": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "Hacker0x01/react-datepicker": {
     "inactive_at": "2025-11-29T17:45:38.525Z",
+    "tier": "Bronze",
     "weight": 0.01
   },
   "Homebrew/brew": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "Homebrew/homebrew-cask": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "Homebrew/homebrew-core": {
+    "tier": "Silver",
     "weight": 6.67
   },
   "HugoBlox/hugo-blox-builder": {
+    "tier": "Bronze",
     "weight": 0.2
   },
   "It-s-AI/llm-detection": {
+    "tier": "Silver",
     "weight": 6.52
   },
   "JabRef/jabref": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "JeffreySu/WeiXinMPSDK": {
-    "weight": 0.29,
-    "additional_acceptable_branches": ["Developer"]
+    "additional_acceptable_branches": [
+      "Developer"
+    ],
+    "tier": "Bronze",
+    "weight": 0.29
   },
   "JetBrains/intellij-community": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "JetBrains/kotlin": {
+    "tier": "Bronze",
     "weight": 0.62
   },
   "KMFODA/DistributedTraining": {
+    "tier": "Silver",
     "weight": 6.52
   },
   "KartikTalwar/gmail.js": {
     "inactive_at": "2025-11-29T17:45:38.525Z",
+    "tier": "Bronze",
     "weight": 0.01
   },
   "Kitware/CMake": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "Klipper3d/klipper": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "Kong/insomnia": {
+    "tier": "Bronze",
     "weight": 0.53
   },
   "Kong/kong": {
+    "tier": "Silver",
     "weight": 4.14
   },
   "LFDT-web3j/web3j": {
+    "tier": "Bronze",
     "weight": 0.28
   },
   "LSPosed/MagiskOnWSALocal": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "Laravel-Lang/lang": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "Leaflet/Leaflet": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "Lienol/openwrt": {
+    "tier": "Bronze",
     "weight": 0.24
   },
   "LimeSurvey/LimeSurvey": {
-    "weight": 0.28,
-    "additional_acceptable_branches": ["develop-minor", "develop-major"]
+    "additional_acceptable_branches": [
+      "develop-minor",
+      "develop-major"
+    ],
+    "tier": "Bronze",
+    "weight": 0.28
   },
   "LineageOS/android": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "Lucaslhm/Flipper-IRDB": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "MAZHARMIK/Interview_DS_Algo": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "MIC-DKFZ/nnUNet": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "MagicMirrorOrg/MagicMirror": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "MarlinFirmware/Marlin": {
+    "tier": "Bronze",
     "weight": 0.32
   },
   "MatrixTM/MHDDoS": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "Mbed-TLS/mbedtls": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "MetaMask/metamask-extension": {
+    "tier": "Gold",
     "weight": 63.13
   },
   "MicrosoftDocs/azure-docs": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "MicrosoftLearning/AZ-104-MicrosoftAzureAdministrator": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "MinecraftForge/MinecraftForge": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "Mintplex-Labs/anything-llm": {
+    "tier": "Silver",
     "weight": 1.77
   },
   "MudBlazor/MudBlazor": {
     "inactive_at": "2025-11-29T17:45:38.525Z",
+    "tier": "Bronze",
     "weight": 0.01
   },
   "MvvmCross/MvvmCross": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "MystenLabs/sui": {
+    "tier": "Gold",
     "weight": 62.82
   },
   "NG-ZORRO/ng-zorro-antd": {
+    "tier": "Bronze",
     "weight": 0.3
   },
   "NVIDIA-Omniverse/IsaacSim": {
+    "tier": "Gold",
     "weight": 15.45
   },
   "NVIDIA/Megatron-LM": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "NVIDIA/apex": {
+    "tier": "Bronze",
     "weight": 0.54
   },
   "NaiboWang/EasySpider": {
+    "tier": "Bronze",
     "weight": 0.24
   },
   "NanmiCoder/MediaCrawler": {
+    "tier": "Bronze",
     "weight": 0.35
   },
   "NationalSecurityAgency/ghidra": {
+    "tier": "Bronze",
     "weight": 0.23
   },
   "NervJS/taro": {
+    "tier": "Bronze",
     "weight": 0.21
   },
   "Netflix/zuul": {
+    "tier": "Bronze",
     "weight": 0.54
   },
   "NginxProxyManager/nginx-proxy-manager": {
+    "tier": "Bronze",
     "weight": 0.57
   },
   "Nickel5-Inc/Gaia": {
+    "tier": "Silver",
     "weight": 7.05
   },
   "Nickel5-Inc/bettensor": {
+    "tier": "Silver",
     "weight": 7.05
   },
   "NixOS/nixpkgs": {
+    "tier": "Bronze",
     "weight": 0.24
   },
   "NobyDa/Script": {
+    "tier": "Bronze",
     "weight": 0.32
   },
   "OAI/OpenAPI-Specification": {
+    "tier": "Silver",
     "weight": 6.05
   },
   "OffchainLabs/prysm": {
+    "tier": "Bronze",
     "weight": 0.22
   },
   "OpenAPITools/openapi-generator": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "OpenBB-finance/OpenBB": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "OpenDroneMap/WebODM": {
+    "tier": "Bronze",
     "weight": 0.28
   },
   "OpenGradient/BitQuant-Subnet": {
+    "tier": "Silver",
     "weight": 6.52
   },
   "OpenMined/PySyft": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "OpenVPN/openvpn": {
+    "tier": "Bronze",
     "weight": 0.6
   },
   "OpenZeppelin/openzeppelin-contracts": {
+    "tier": "Bronze",
     "weight": 0.22
   },
   "OrchardCMS/OrchardCore": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "Orpheus-AI/Zeus": {
+    "tier": "Silver",
     "weight": 7.05
   },
   "PHPMailer/PHPMailer": {
+    "tier": "Bronze",
     "weight": 0.32
   },
   "PX4/PX4-Autopilot": {
+    "tier": "Gold",
     "weight": 24.11
   },
   "PaddlePaddle/PaddleDetection": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "PaddlePaddle/PaddleNLP": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "PaperMC/Paper": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "PathOfBuildingCommunity/PathOfBuilding": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "PipedreamHQ/pipedream": {
+    "tier": "Bronze",
     "weight": 0.35
   },
   "Platane/snk": {
+    "tier": "Bronze",
     "weight": 0.28
   },
   "PlatformNetwork/platform": {
+    "tier": "Silver",
     "weight": 6.52
   },
   "PointCloudLibrary/pcl": {
+    "tier": "Bronze",
     "weight": 0.28
   },
   "PowerShell/PowerShell": {
+    "tier": "Silver",
     "weight": 2.02
   },
   "PrestaShop/PrestaShop": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "Project-OSRM/osrm-backend": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "ProvableHQ/snarkOS": {
+    "tier": "Bronze",
     "weight": 0.24
   },
   "PyGithub/PyGithub": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "PyQt5/PyQt": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "Qiskit/qiskit": {
+    "tier": "Bronze",
     "weight": 0.3
   },
   "QuivrHQ/quivr": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "RIOT-OS/RIOT": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "RT-Thread/rt-thread": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "RVC-Boss/GPT-SoVITS": {
+    "tier": "Bronze",
     "weight": 0.23
   },
   "RainerKuemmerle/g2o": {
+    "tier": "Bronze",
     "weight": 0.23
   },
   "Raphire/Win11Debloat": {
+    "tier": "Bronze",
     "weight": 0.34
   },
   "Rapptz/discord.py": {
+    "tier": "Silver",
     "weight": 1.96
   },
   "RasaHQ/rasa": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "ReactiveX/RxJava": {
+    "tier": "Bronze",
     "weight": 0.23
   },
   "RedTeamSubnet/RedTeam": {
+    "tier": "Silver",
     "weight": 6.52
   },
   "RichardLitt/standard-readme": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "RobinHerbots/Inputmask": {
+    "tier": "Bronze",
     "weight": 0.3
   },
   "RobotLocomotion/drake": {
+    "tier": "Bronze",
     "weight": 0.24
   },
   "RocketChat/Rocket.Chat": {
+    "tier": "Bronze",
     "weight": 0.32
   },
   "RogueTensor/bitagent_subnet": {
+    "tier": "Silver",
     "weight": 6.52
   },
   "Rudrabha/Wav2Lip": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "RyanFitzgerald/devportfolio": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "SVG-Edit/svgedit": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "SWE-agent/SWE-agent": {
+    "tier": "Gold",
     "weight": 34.88
   },
   "SchemaStore/schemastore": {
+    "tier": "Bronze",
     "weight": 0.3
   },
   "SeleniumHQ/docker-selenium": {
+    "tier": "Silver",
     "weight": 3.37
   },
   "SeleniumHQ/selenium": {
+    "tier": "Silver",
     "weight": 3.37
   },
   "SigmaHQ/sigma": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "Significant-Gravitas/AutoGPT": {
+    "tier": "Gold",
     "weight": 25.61
   },
   "SillyTavern/SillyTavern": {
-    "weight": 0.19,
-    "additional_acceptable_branches": ["staging"]
+    "additional_acceptable_branches": [
+      "staging"
+    ],
+    "tier": "Bronze",
+    "weight": 0.19
   },
   "Sjj1024/PakePlus": {
+    "tier": "Bronze",
     "weight": 0.21
   },
   "Skyvern-AI/skyvern": {
+    "tier": "Bronze",
     "weight": 0.54
   },
   "Snailclimb/JavaGuide": {
     "inactive_at": "2025-11-29T17:45:38.525Z",
+    "tier": "Bronze",
     "weight": 0.01
   },
   "SonarSource/sonarqube": {
+    "tier": "Bronze",
     "weight": 0.62
   },
   "Stability-AI/stablediffusion": {
+    "tier": "Bronze",
     "weight": 0.23
   },
   "Stirling-Tools/Stirling-PDF": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "Studio-42/elFinder": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "SuiteCRM/SuiteCRM": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "Swap-Subnet/swap-subnet": {
-    "weight": 5
+    "tier": "Silver",
+    "weight": 5.0
   },
   "TanStack/query": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "Team-Rizzo/talisman-ai": {
+    "tier": "Gold",
     "weight": 19.41
   },
   "Tencent/weui-wxss": {
+    "tier": "Bronze",
     "weight": 0.2
   },
   "Tenexium/tenex-subnet": {
+    "tier": "Silver",
     "weight": 6.52
   },
   "Textualize/rich": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "TheAlgorithms/C-Sharp": {
     "inactive_at": "2025-11-10T16:39:22.045Z",
+    "tier": "Bronze",
     "weight": 0.01
   },
   "TheOdinProject/curriculum": {
+    "tier": "Bronze",
     "weight": 0.38
   },
   "TheOdinProject/theodinproject": {
+    "tier": "Bronze",
     "weight": 0.22
   },
   "TheWidlarzGroup/react-native-video": {
+    "tier": "Bronze",
     "weight": 0.22
   },
   "TiddlyWiki/TiddlyWiki5": {
     "inactive_at": "2025-11-29T17:45:38.525Z",
+    "tier": "Bronze",
     "weight": 0.01
   },
   "TideDra/zotero-arxiv-daily": {
+    "tier": "Bronze",
     "weight": 0.31
   },
   "TonyChen56/WeChatRobot": {
+    "tier": "Bronze",
     "weight": 0.26
   },
   "TooTallNate/Java-WebSocket": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "ToolJet/ToolJet": {
-    "weight": 22.71,
-    "additional_acceptable_branches": ["develop"]
+    "additional_acceptable_branches": [
+      "develop"
+    ],
+    "tier": "Gold",
+    "weight": 22.71
   },
   "Trinea/android-open-project": {
+    "tier": "Bronze",
     "weight": 0.22
   },
   "TrinityCore/TrinityCore": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "TryGhost/Ghost": {
+    "tier": "Bronze",
     "weight": 0.36
   },
   "Uberi/speech_recognition": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "Ultimaker/Cura": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "Uniswap/interface": {
+    "tier": "Bronze",
     "weight": 0.31
   },
   "Unitech/pm2": {
+    "tier": "Gold",
     "weight": 60.05
   },
   "Unity-Technologies/ml-agents": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "Unstructured-IO/unstructured": {
+    "tier": "Silver",
     "weight": 8.87
   },
   "VickScarlet/lifeRestart": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "Vonng/ddia": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "WebGoat/WebGoat": {
+    "tier": "Bronze",
     "weight": 0.35
   },
   "WhiskeySockets/Baileys": {
+    "tier": "Bronze",
     "weight": 0.31
   },
   "WordPress/WordPress": {
+    "tier": "Silver",
     "weight": 6.77
   },
   "WordPress/gutenberg": {
+    "tier": "Bronze",
     "weight": 0.33
   },
   "XRPLF/rippled": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "XX-net/XX-Net": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "Yorko/mlcourse.ai": {
+    "tier": "Bronze",
     "weight": 0.33
   },
   "YunaiV/ruoyi-vue-pro": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "YunaiV/yudao-cloud": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "abi/screenshot-to-code": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "abraham/twitteroauth": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "actions/checkout": {
+    "tier": "Bronze",
     "weight": 0.28
   },
   "actions/setup-node": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "actions/starter-workflows": {
+    "tier": "Bronze",
     "weight": 0.32
   },
   "activeadmin/activeadmin": {
+    "tier": "Bronze",
     "weight": 0.24
   },
   "activemerchant/active_merchant": {
+    "tier": "Bronze",
     "weight": 0.22
   },
   "aframevr/aframe": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "afterpartyai/bittensor-conversation-genome-project": {
+    "tier": "Silver",
     "weight": 7.05
   },
   "ageron/handson-ml3": {
+    "tier": "Bronze",
     "weight": 0.21
   },
   "ai/size-limit": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "airbnb/javascript": {
+    "tier": "Bronze",
     "weight": 0.61
   },
   "airbnb/lottie-android": {
+    "tier": "Bronze",
     "weight": 0.22
   },
   "airbytehq/airbyte": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "alacritty/alacritty": {
+    "tier": "Bronze",
     "weight": 0.58
   },
   "alex-shpak/hugo-book": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "alextselegidis/easyappointments": {
-    "weight": 0.25,
-    "additional_acceptable_branches": ["develop"]
+    "additional_acceptable_branches": [
+      "develop"
+    ],
+    "tier": "Bronze",
+    "weight": 0.25
   },
   "alibaba/COLA": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "alibaba/DataX": {
+    "tier": "Bronze",
     "weight": 0.32
   },
   "alibaba/Sentinel": {
+    "tier": "Silver",
     "weight": 1.8
   },
   "alibaba/arthas": {
+    "tier": "Bronze",
     "weight": 0.32
   },
   "alibaba/canal": {
+    "tier": "Silver",
     "weight": 3.66
   },
   "alibaba/druid": {
+    "tier": "Bronze",
     "weight": 0.35
   },
   "alibaba/formily": {
+    "tier": "Bronze",
     "weight": 0.53
   },
   "alibaba/hooks": {
+    "tier": "Bronze",
     "weight": 0.54
   },
   "alibaba/nacos": {
+    "tier": "Silver",
     "weight": 7.03
   },
   "alibaba/spring-cloud-alibaba": {
+    "tier": "Silver",
     "weight": 2.95
   },
   "alshedivat/al-folio": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "ampproject/amphtml": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "amueller/word_cloud": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "anasty17/mirror-leech-telegram-bot": {
+    "tier": "Bronze",
     "weight": 0.32
   },
   "android/camera-samples": {
+    "tier": "Bronze",
     "weight": 0.21
   },
   "android/ndk-samples": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "angular/angular": {
+    "tier": "Silver",
     "weight": 2.21
   },
   "angular/angular-cli": {
+    "tier": "Bronze",
     "weight": 0.35
   },
   "angular/components": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "ansible/ansible": {
+    "tier": "Silver",
     "weight": 4.6
   },
   "ansible/awx": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "ant-design/ant-design": {
+    "tier": "Bronze",
     "weight": 0.64
   },
   "ant-design/ant-design-pro": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "ant-design/pro-components": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "anthropics/claude-code-action": {
+    "tier": "Silver",
     "weight": 6.46
   },
   "antlr/grammars-v4": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "antoniorodr/cronboard": {
+    "tier": "Bronze",
     "weight": 0.48
   },
   "antonmedv/fx": {
+    "tier": "Bronze",
     "weight": 0.26
   },
   "apache/airflow": {
+    "tier": "Gold",
     "weight": 24.6
   },
   "apache/arrow": {
+    "tier": "Bronze",
     "weight": 0.61
   },
   "apache/beam": {
+    "tier": "Bronze",
     "weight": 0.31
   },
   "apache/calcite": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "apache/camel": {
+    "tier": "Bronze",
     "weight": 0.32
   },
   "apache/cassandra": {
+    "tier": "Bronze",
     "weight": 0.31
   },
   "apache/cordova-android": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "apache/dolphinscheduler": {
+    "tier": "Bronze",
     "weight": 0.32
   },
   "apache/doris": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "apache/druid": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "apache/dubbo": {
+    "tier": "Bronze",
     "weight": 0.61
   },
   "apache/dubbo-admin": {
+    "tier": "Bronze",
     "weight": 0.24
   },
   "apache/echarts": {
+    "tier": "Silver",
     "weight": 2.14
   },
   "apache/flink": {
+    "tier": "Bronze",
     "weight": 0.36
   },
   "apache/flink-cdc": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "apache/groovy": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "apache/hadoop": {
+    "tier": "Bronze",
     "weight": 0.35
   },
   "apache/hbase": {
+    "tier": "Bronze",
     "weight": 0.3
   },
   "apache/hive": {
+    "tier": "Bronze",
     "weight": 0.32
   },
   "apache/httpd": {
+    "tier": "Silver",
     "weight": 4.6
   },
   "apache/hudi": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "apache/iceberg": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "apache/ignite": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "apache/incubator-kie-drools": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "apache/incubator-seata": {
+    "tier": "Bronze",
     "weight": 0.35
   },
   "apache/kafka": {
+    "tier": "Silver",
     "weight": 4.6
   },
   "apache/kylin": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "apache/linkis": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "apache/logging-log4j2": {
+    "tier": "Bronze",
     "weight": 0.28
   },
   "apache/maven": {
+    "tier": "Silver",
     "weight": 2.98
   },
   "apache/nifi": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "apache/nuttx": {
+    "tier": "Bronze",
     "weight": 0.23
   },
   "apache/pulsar": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "apache/rocketmq": {
+    "tier": "Bronze",
     "weight": 0.35
   },
   "apache/shardingsphere": {
+    "tier": "Bronze",
     "weight": 0.33
   },
   "apache/shardingsphere-elasticjob": {
+    "tier": "Bronze",
     "weight": 0.3
   },
   "apache/shenyu": {
+    "tier": "Bronze",
     "weight": 0.3
   },
   "apache/shiro": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "apache/skywalking": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "apache/spark": {
+    "tier": "Silver",
     "weight": 6.05
   },
   "apache/storm": {
+    "tier": "Bronze",
     "weight": 0.31
   },
   "apache/superset": {
+    "tier": "Bronze",
     "weight": 0.33
   },
   "apache/thrift": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "apache/tomcat": {
+    "tier": "Bronze",
     "weight": 0.32
   },
   "apache/tvm": {
+    "tier": "Gold",
     "weight": 36.77
   },
   "apache/zeppelin": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "apache/zookeeper": {
+    "tier": "Bronze",
     "weight": 0.33
   },
   "apereo/cas": {
+    "tier": "Bronze",
     "weight": 0.31
   },
   "apolloconfig/apollo": {
+    "tier": "Bronze",
     "weight": 0.35
   },
   "appium/appium": {
+    "tier": "Bronze",
     "weight": 0.35
   },
   "apple/container": {
+    "tier": "Silver",
     "weight": 1.02
   },
   "apple/coremltools": {
+    "tier": "Bronze",
     "weight": 0.53
   },
   "appsmithorg/appsmith": {
+    "tier": "Bronze",
     "weight": 0.21
   },
   "appwrite/appwrite": {
+    "tier": "Gold",
     "weight": 20.89
   },
   "aptos-labs/aptos-core": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "argoproj/argo-cd": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "armbian/build": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "asLody/VirtualApp": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "aspnetboilerplate/aspnetboilerplate": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "astral-sh/ruff": {
+    "tier": "Gold",
     "weight": 49.15
   },
   "astropy/astropy": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "audreyfeldroy/cookiecutter-pypackage": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "autoppia/autoppia_web_agents_subnet": {
+    "tier": "Silver",
     "weight": 7.05
   },
   "autorope/donkeycar": {
+    "tier": "Bronze",
     "weight": 0.28
   },
   "autowarefoundation/autoware": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "aws/aws-cdk": {
+    "tier": "Silver",
     "weight": 6.9
   },
   "aws/aws-cli": {
+    "tier": "Gold",
     "weight": 36.77
   },
   "aws/aws-sdk-java": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "aws/aws-sdk-js": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "aws/aws-sdk-ruby": {
+    "tier": "Bronze",
     "weight": 0.21
   },
   "aws/serverless-application-model": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "axios/axios": {
+    "tier": "Bronze",
     "weight": 0.91
   },
   "ayn2op/discordo": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "azat-io/you-dont-know-js-ru": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "azerothcore/azerothcore-wotlk": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "babaohuang/GeminiProChat": {
+    "tier": "Bronze",
     "weight": 0.33
   },
   "babel/babel": {
+    "tier": "Bronze",
     "weight": 0.22
   },
   "backend-developers-ltd/ComputeHorde": {
+    "tier": "Silver",
     "weight": 7.05
   },
   "backend-developers-ltd/InfiniteHash": {
+    "tier": "Silver",
     "weight": 6.52
   },
   "backstage/backstage": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "badges/shields": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "bagisto/bagisto": {
+    "tier": "Bronze",
     "weight": 0.47
   },
   "baomidou/mybatis-plus": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "base/node": {
+    "tier": "Bronze",
     "weight": 0.59
   },
   "basecamp/omarchy": {
+    "tier": "Gold",
     "weight": 62.23
   },
   "bazelbuild/bazel": {
+    "tier": "Silver",
     "weight": 2.28
   },
   "beefproject/beef": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "benoitc/gunicorn": {
+    "tier": "Bronze",
     "weight": 0.55
   },
   "betaflight/betaflight": {
+    "tier": "Bronze",
     "weight": 0.26
   },
   "bevyengine/bevy": {
+    "tier": "Gold",
     "weight": 20.48
   },
   "bia-pain-bache/BPB-Worker-Panel": {
+    "tier": "Bronze",
     "weight": 0.4
   },
   "bigbluebutton/bigbluebutton": {
+    "tier": "Bronze",
     "weight": 0.35
   },
   "bigskysoftware/htmx": {
-    "weight": 0.18,
-    "additional_acceptable_branches": ["dev"]
+    "additional_acceptable_branches": [
+      "dev"
+    ],
+    "tier": "Bronze",
+    "weight": 0.18
   },
   "binance/binance-spot-api-docs": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "binary-husky/gpt_academic": {
+    "tier": "Bronze",
     "weight": 0.24
   },
   "binarywang/WxJava": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "biopython/biopython": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "bitcast-network/bitcast": {
+    "tier": "Silver",
     "weight": 7.05
   },
   "bitcoin/bips": {
+    "tier": "Gold",
     "weight": 62.53
   },
   "bitcoin/bitcoin": {
+    "tier": "Gold",
     "weight": 78.01
   },
   "bitcoinj/bitcoinj": {
+    "tier": "Gold",
     "weight": 62.25
   },
   "bitcoinjs/bitcoinjs-lib": {
+    "tier": "Gold",
     "weight": 61.99
   },
   "bitnami/charts": {
+    "tier": "Bronze",
     "weight": 0.22
   },
   "bitpay/bitcore": {
+    "tier": "Gold",
     "weight": 61.74
   },
   "bitrecs/bitrecs-subnet": {
+    "tier": "Silver",
     "weight": 6.52
   },
   "bitwarden/clients": {
+    "tier": "Gold",
     "weight": 24.13
   },
   "bitwarden/server": {
+    "tier": "Gold",
     "weight": 37.18
   },
   "blockscout/blockscout": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "bnsreenu/python_for_microscopists": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "bokeh/bokeh": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "boto/boto3": {
+    "tier": "Silver",
     "weight": 2.69
   },
   "brave/brave-browser": {
+    "tier": "Gold",
     "weight": 54.12
   },
   "brianfrankcooper/YCSB": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "brokespace/code": {
+    "tier": "Silver",
     "weight": 6.52
   },
   "browser-use/browser-use": {
+    "tier": "Bronze",
     "weight": 0.24
   },
   "btcsuite/btcd": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "bytedance/trae-agent": {
+    "tier": "Bronze",
     "weight": 0.54
   },
   "byteleapai/byteleap-Miner": {
+    "tier": "Silver",
     "weight": 6.52
   },
   "caddyserver/caddy": {
+    "tier": "Silver",
     "weight": 3.44
   },
   "cakephp/cakephp": {
+    "tier": "Bronze",
     "weight": 0.28
   },
   "calcom/cal.com": {
+    "tier": "Bronze",
     "weight": 0.32
   },
   "carla-simulator/carla": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "catboost/catboost": {
+    "tier": "Silver",
     "weight": 4.6
   },
   "ccbikai/Sink": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "ccxt/ccxt": {
+    "tier": "Bronze",
     "weight": 0.33
   },
   "cdnjs/cdnjs": {
+    "tier": "Bronze",
     "weight": 0.2
   },
   "ceph/ceph": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "cert-manager/cert-manager": {
+    "tier": "Silver",
     "weight": 3.44
   },
   "cf-pages/Telegraph-Image": {
+    "tier": "Bronze",
     "weight": 0.22
   },
   "chakra-ui/chakra-ui": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "charmbracelet/crush": {
+    "tier": "Silver",
     "weight": 3.18
   },
   "charmbracelet/glow": {
+    "tier": "Bronze",
     "weight": 0.26
   },
   "chartjs/Chart.js": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "chatboxai/chatbox": {
+    "tier": "Bronze",
     "weight": 0.21
   },
   "chatchat-space/Langchain-Chatchat": {
+    "tier": "Bronze",
     "weight": 0.22
   },
   "chavyleung/scripts": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "checkstyle/checkstyle": {
+    "tier": "Bronze",
     "weight": 0.31
   },
   "chef/chef": {
+    "tier": "Bronze",
     "weight": 0.22
   },
   "chinabugotech/hutool": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "chipsalliance/rocket-chip": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "chriskacerguis/codeigniter-restserver": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "chromium/chromium": {
+    "tier": "Silver",
     "weight": 6.84
   },
   "chubin/cheat.sh": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "citation-style-language/styles": {
+    "tier": "Bronze",
     "weight": 0.24
   },
   "citizenfx/fivem": {
+    "tier": "Bronze",
     "weight": 0.26
   },
   "ckan/ckan": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "ckeditor/ckeditor5": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "clash-verge-rev/clash-verge-rev": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "cli/cli": {
+    "tier": "Gold",
     "weight": 37.95
   },
   "cline/cline": {
+    "tier": "Bronze",
     "weight": 0.22
   },
   "cloudflare/cloudflare-docs": {
+    "tier": "Bronze",
     "weight": 0.21
   },
   "cloudwu/skynet": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "cmliu/CF-Workers-SUB": {
+    "tier": "Bronze",
     "weight": 0.35
   },
   "cmliu/WorkerVless2sub": {
+    "tier": "Bronze",
     "weight": 0.35
   },
   "cmu-db/bustub": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "cncf/curriculum": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "code4craft/webmagic": {
+    "tier": "Bronze",
     "weight": 0.31
   },
   "codecentric/spring-boot-admin": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "codecombat/codecombat": {
+    "tier": "Bronze",
     "weight": 0.32
   },
   "codeguy/php-the-right-way": {
+    "tier": "Bronze",
     "weight": 0.21
   },
   "codeigniter4/CodeIgniter4": {
+    "tier": "Bronze",
     "weight": 0.26
   },
   "coder/code-server": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "coleam00/context-engineering-intro": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "coleam00/ottomator-agents": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "collectd/collectd": {
+    "tier": "Bronze",
     "weight": 0.23
   },
   "comfyanonymous/ComfyUI": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "commaai/openpilot": {
+    "tier": "Gold",
     "weight": 41.39
   },
   "community/community": {
+    "tier": "Bronze",
     "weight": 0.23
   },
   "conda/conda": {
+    "tier": "Silver",
     "weight": 2.01
   },
   "conduktor/kafka-stack-docker-compose": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "containerd/containerd": {
+    "tier": "Silver",
     "weight": 4.6
   },
   "cookiecutter/cookiecutter-django": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "coolsnowwolf/lede": {
+    "tier": "Bronze",
     "weight": 0.32
   },
   "cosmos/cosmos-sdk": {
+    "tier": "Gold",
     "weight": 61.5
   },
   "cotes2020/jekyll-theme-chirpy": {
+    "tier": "Bronze",
     "weight": 0.22
   },
   "cq-panda/Vue.NetCore": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "crewAIInc/crewAI": {
+    "tier": "Silver",
     "weight": 6.91
   },
   "crossoverJie/cim": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "crossplane/crossplane": {
+    "tier": "Silver",
     "weight": 3.18
   },
   "cs231n/cs231n.github.io": {
+    "tier": "Bronze",
     "weight": 0.21
   },
   "curl/curl": {
+    "tier": "Silver",
     "weight": 4.6
   },
   "cvat-ai/cvat": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "cyberbotics/webots": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "cypress-io/cypress": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "cypress-io/cypress-realworld-app": {
+    "tier": "Bronze",
     "weight": 0.28
   },
   "cython/cython": {
+    "tier": "Bronze",
     "weight": 0.54
   },
   "d3/d3": {
+    "tier": "Bronze",
     "weight": 0.24
   },
   "danielmiessler/SecLists": {
+    "tier": "Bronze",
     "weight": 0.35
   },
   "daniulive/SmarterStreaming": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "dankogai/js-base64": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "dariusk/corpora": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "dataabc/weiboSpider": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "datahub-project/datahub": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "dbeaver/dbeaver": {
+    "tier": "Gold",
     "weight": 72.34
   },
   "dcloudio/mui": {
+    "tier": "Bronze",
     "weight": 0.35
   },
   "dcloudio/uni-app": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "debezium/debezium": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "deepchem/deepchem": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "deepfakes/faceswap": {
+    "tier": "Silver",
     "weight": 1.04
   },
   "deepinsight/insightface": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "deepseek-ai/DeepSeek-V3": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "deepset-ai/haystack": {
+    "tier": "Gold",
     "weight": 20.06
   },
   "deepspeedai/DeepSpeed": {
+    "tier": "Bronze",
     "weight": 0.23
   },
   "denoland/deno": {
+    "tier": "Silver",
     "weight": 2.41
   },
   "deskflow/deskflow": {
+    "tier": "Bronze",
     "weight": 0.61
   },
   "desktop/desktop": {
+    "tier": "Bronze",
     "weight": 0.33
   },
   "devbridge/jQuery-Autocomplete": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "deviantony/docker-elk": {
+    "tier": "Bronze",
     "weight": 0.22
   },
   "dgkanatsios/CKAD-exercises": {
+    "tier": "Bronze",
     "weight": 0.21
   },
   "dgtlmoon/changedetection.io": {
+    "tier": "Bronze",
     "weight": 0.6
   },
   "digitalinnovationone/dio-lab-open-source": {
+    "tier": "Bronze",
     "weight": 0.28
   },
   "dillonzq/LoveIt": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "discourse/discourse": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "django-cms/django-cms": {
+    "tier": "Bronze",
     "weight": 0.31
   },
   "django-haystack/django-haystack": {
+    "tier": "Bronze",
     "weight": 0.28
   },
   "django-oscar/django-oscar": {
+    "tier": "Bronze",
     "weight": 0.3
   },
   "django/django": {
+    "tier": "Silver",
     "weight": 4.07
   },
   "dmlc/dgl": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "dmlc/xgboost": {
+    "tier": "Gold",
     "weight": 19.24
   },
   "docker-library/docs": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "docker-library/official-images": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "docker-library/php": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "docker/cli": {
+    "tier": "Silver",
     "weight": 1.77
   },
   "docker/compose": {
+    "tier": "Gold",
     "weight": 36.77
   },
   "docker/docker-py": {
+    "tier": "Silver",
     "weight": 4.12
   },
   "docker/docs": {
+    "tier": "Bronze",
     "weight": 0.21
   },
   "docling-project/docling": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "doctrine-extensions/DoctrineExtensions": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "dogecoin/dogecoin": {
+    "tier": "Gold",
     "weight": 61.26
   },
   "doggy8088/Learn-Git-in-30-days": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "domoticz/domoticz": {
+    "tier": "Bronze",
     "weight": 0.23
   },
   "doocs/advanced-java": {
+    "tier": "Bronze",
     "weight": 0.2
   },
   "doocs/jvm": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "doocs/leetcode": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "dotnet/aspnetcore": {
+    "tier": "Bronze",
     "weight": 0.32
   },
   "dotnet/docs": {
+    "tier": "Bronze",
     "weight": 0.21
   },
   "dotnet/dotnet-docker": {
-    "weight": 4.34,
-    "additional_acceptable_branches": ["nightly"]
+    "additional_acceptable_branches": [
+      "nightly"
+    ],
+    "tier": "Silver",
+    "weight": 4.34
   },
   "dotnet/eShop": {
+    "tier": "Bronze",
     "weight": 0.28
   },
   "dotnet/efcore": {
+    "tier": "Bronze",
     "weight": 0.62
   },
   "dotnet/roslyn": {
+    "tier": "Bronze",
     "weight": 0.62
   },
   "dotnet/runtime": {
+    "tier": "Bronze",
     "weight": 0.3
   },
   "dotnet/samples": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "doublesymmetry/react-native-track-player": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "dreamhunter2333/cloudflare_temp_email": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "dromara/lamp-cloud": {
+    "tier": "Bronze",
     "weight": 0.28
   },
   "dropwizard/dropwizard": {
+    "tier": "Bronze",
     "weight": 0.3
   },
   "drupal/drupal": {
+    "tier": "Bronze",
     "weight": 0.26
   },
   "eKoopmans/html2pdf.js": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "easzlab/kubeasz": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "eclipse-sumo/sumo": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "ed-donner/llm_engineering": {
+    "tier": "Silver",
     "weight": 1.59
   },
   "egametang/ET": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "elastic/beats": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "elastic/elasticsearch": {
+    "tier": "Silver",
     "weight": 4.6
   },
   "elastic/elasticsearch-net": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "elastic/kibana": {
+    "tier": "Bronze",
     "weight": 0.32
   },
   "elastic/logstash": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "elebumm/RedditVideoMakerBot": {
-    "weight": 0.17,
-    "additional_acceptable_branches": ["develop"]
+    "additional_acceptable_branches": [
+      "develop"
+    ],
+    "tier": "Bronze",
+    "weight": 0.17
   },
   "electron/electron": {
+    "tier": "Bronze",
     "weight": 0.21
   },
   "electron/minimal-repro": {
+    "tier": "Bronze",
     "weight": 0.33
   },
   "element-plus/element-plus": {
+    "tier": "Bronze",
     "weight": 0.36
   },
   "elizaOS/eliza": {
+    "tier": "Bronze",
     "weight": 0.31
   },
   "elunez/eladmin": {
+    "tier": "Bronze",
     "weight": 0.33
   },
   "elunez/eladmin-web": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "emacs-mirror/emacs": {
+    "tier": "Silver",
     "weight": 2.71
   },
   "emilybache/GildedRose-Refactoring-Kata": {
+    "tier": "Bronze",
     "weight": 0.2
   },
   "encode/django-rest-framework": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "entrius/gittensor": {
+    "tier": "Gold",
     "weight": 76.88
   },
   "envoyproxy/envoy": {
+    "tier": "Silver",
     "weight": 4.6
   },
   "eooce/Sing-box": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "epicweb-dev/react-fundamentals": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "erguotou520/bye": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "erigontech/erigon": {
+    "tier": "Bronze",
     "weight": 0.22
   },
   "erxes/erxes": {
+    "tier": "Bronze",
     "weight": 0.26
   },
   "eslint/eslint": {
+    "tier": "Bronze",
     "weight": 0.58
   },
   "esp8266/Arduino": {
+    "tier": "Bronze",
     "weight": 0.32
   },
   "esphome/esphome": {
+    "tier": "Bronze",
     "weight": 0.28
   },
   "espnet/espnet": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "espressif/arduino-esp32": {
+    "tier": "Gold",
     "weight": 14.6
   },
   "espressif/esp-idf": {
+    "tier": "Gold",
     "weight": 14.6
   },
   "etcd-io/etcd": {
+    "tier": "Silver",
     "weight": 4.6
   },
   "eternnoir/pyTelegramBotAPI": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "ether/etherpad-lite": {
+    "tier": "Bronze",
     "weight": 0.54
   },
   "ethereum-lists/chains": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "ethereum-optimism/optimism": {
+    "tier": "Gold",
     "weight": 61.04
   },
   "ethereum/EIPs": {
+    "tier": "Gold",
     "weight": 60.83
   },
   "ethereum/consensus-specs": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "ethereum/ethereum-org-website": {
+    "tier": "Bronze",
     "weight": 0.2
   },
   "ethereum/go-ethereum": {
+    "tier": "Gold",
     "weight": 76.17
   },
   "ethereum/web3.py": {
+    "tier": "Silver",
     "weight": 2.01
   },
   "ethers-io/ethers.js": {
+    "tier": "Gold",
     "weight": 60.62
   },
   "excalidraw/excalidraw": {
+    "tier": "Gold",
     "weight": 22.71
   },
   "expo/expo": {
+    "tier": "Bronze",
     "weight": 0.32
   },
   "expressjs/express": {
+    "tier": "Bronze",
     "weight": 0.63
   },
   "expressjs/expressjs.com": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "fabric8io/kubernetes-client": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "facebook/docusaurus": {
+    "tier": "Bronze",
     "weight": 0.22
   },
   "facebook/facebook-android-sdk": {
+    "tier": "Bronze",
     "weight": 0.22
   },
   "facebook/facebook-ios-sdk": {
+    "tier": "Silver",
     "weight": 1.74
   },
   "facebook/fresco": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "facebook/prophet": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "facebook/react": {
+    "tier": "Silver",
     "weight": 6.52
   },
   "facebook/react-native": {
+    "tier": "Bronze",
     "weight": 0.32
   },
   "facebook/rocksdb": {
+    "tier": "Bronze",
     "weight": 0.62
   },
   "facebookincubator/velox": {
+    "tier": "Bronze",
     "weight": 0.24
   },
   "facebookresearch/detectron2": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "facebookresearch/fairseq": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "facebookresearch/faiss": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "faif/python-patterns": {
     "inactive_at": "2025-11-29T17:45:38.525Z",
+    "tier": "Bronze",
     "weight": 0.01
   },
   "faridrashidi/kaggle-solutions": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "fastapi/fastapi": {
+    "tier": "Silver",
     "weight": 1.48
   },
   "fastlane/fastlane": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "fatedier/frp": {
+    "tier": "Bronze",
     "weight": 0.2
   },
   "fatfreecrm/fat_free_crm": {
+    "tier": "Bronze",
     "weight": 0.21
   },
   "felixrieseberg/windows95": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "fengyuhetao/shell": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "firebase/FirebaseUI-Android": {
+    "tier": "Bronze",
     "weight": 0.28
   },
   "firebase/flutterfire": {
+    "tier": "Bronze",
     "weight": 0.21
   },
   "firebase/functions-samples": {
+    "tier": "Bronze",
     "weight": 0.32
   },
   "firebase/quickstart-android": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "firebase/quickstart-js": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "firecrawl/firecrawl": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "fish-shell/fish-shell": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "fishercoder1534/Leetcode": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "flannel-io/flannel": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "flow-typed/flow-typed": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "flowable/flowable-engine": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "flutter/flutter": {
+    "tier": "Silver",
     "weight": 1.48
   },
   "flutter/packages": {
+    "tier": "Bronze",
     "weight": 0.21
   },
   "flutter/samples": {
+    "tier": "Bronze",
     "weight": 0.23
   },
   "folke/flash.nvim": {
+    "tier": "Silver",
     "weight": 2.36
   },
   "folke/lazy.nvim": {
+    "tier": "Silver",
     "weight": 2.58
   },
   "folke/snacks.nvim": {
+    "tier": "Silver",
     "weight": 2.36
   },
   "folke/tokyonight.nvim": {
+    "tier": "Silver",
     "weight": 2.36
   },
   "folke/trouble.nvim": {
+    "tier": "Silver",
     "weight": 2.36
   },
   "folke/which-key.nvim": {
+    "tier": "Silver",
     "weight": 2.36
   },
   "fortra/impacket": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "frappe/erpnext": {
+    "tier": "Bronze",
     "weight": 0.35
   },
   "frappe/frappe": {
+    "tier": "Bronze",
     "weight": 0.32
   },
   "frappe/gantt": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "frappe/hrms": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "freebsd/freebsd-src": {
+    "tier": "Bronze",
     "weight": 0.26
   },
   "freqtrade/freqtrade": {
+    "tier": "Bronze",
     "weight": 0.35
   },
   "fullstackhero/dotnet-starter-kit": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "fuzhengwei/CodeGuide": {
+    "tier": "Bronze",
     "weight": 0.2
   },
   "fx-integral/metahash": {
+    "tier": "Silver",
     "weight": 6.52
   },
   "garylab/dnmp": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "gatsbyjs/gatsby": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "gatsbyjs/gatsby-starter-blog": {
+    "tier": "Bronze",
     "weight": 0.31
   },
   "gcc-mirror/gcc": {
+    "tier": "Bronze",
     "weight": 0.28
   },
   "geoserver/geoserver": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "getmoto/moto": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "getsentry/sentry": {
+    "tier": "Bronze",
     "weight": 0.23
   },
   "ggml-org/llama.cpp": {
+    "tier": "Bronze",
     "weight": 0.21
   },
   "ggml-org/whisper.cpp": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "gin-gonic/gin": {
+    "tier": "Silver",
     "weight": 1.18
   },
   "git/git": {
+    "tier": "Gold",
     "weight": 36.77
   },
   "github-linguist/linguist": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "github/choosealicense.com": {
+    "tier": "Bronze",
     "weight": 0.21
   },
   "github/docs": {
+    "tier": "Bronze",
     "weight": 0.4
   },
   "github/explore": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "github/markup": {
+    "tier": "Bronze",
     "weight": 0.23
   },
   "givanz/VvvebJs": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "glfw/glfw": {
+    "tier": "Bronze",
     "weight": 0.28
   },
   "gnuradio/gnuradio": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "go-gitea/gitea": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "go-gorm/gorm": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "godotengine/godot": {
+    "tier": "Gold",
     "weight": 23.81
   },
   "godotengine/godot-docs": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "gofiber/fiber": {
+    "tier": "Bronze",
     "weight": 0.58
   },
   "gogs/gogs": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "golang/go": {
+    "tier": "Gold",
     "weight": 36.77
   },
   "google-gemini/gemini-cli": {
+    "tier": "Silver",
     "weight": 1.72
   },
   "google-research/football": {
+    "tier": "Bronze",
     "weight": 0.28
   },
   "google/adk-python": {
+    "tier": "Bronze",
     "weight": 0.55
   },
   "google/adk-samples": {
+    "tier": "Bronze",
     "weight": 0.62
   },
   "google/auto": {
+    "tier": "Bronze",
     "weight": 0.53
   },
   "google/benchmark": {
+    "tier": "Silver",
     "weight": 1.09
   },
   "google/blockly": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "google/closure-compiler": {
+    "tier": "Bronze",
     "weight": 0.55
   },
   "google/clusterfuzz": {
+    "tier": "Bronze",
     "weight": 0.53
   },
   "google/flatbuffers": {
+    "tier": "Silver",
     "weight": 2.12
   },
   "google/googletest": {
+    "tier": "Silver",
     "weight": 2.01
   },
   "google/gson": {
+    "tier": "Bronze",
     "weight": 0.56
   },
   "google/guava": {
+    "tier": "Bronze",
     "weight": 0.33
   },
   "google/recaptcha": {
+    "tier": "Bronze",
     "weight": 0.58
   },
   "google/zx": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "googleapis/google-api-php-client": {
+    "tier": "Bronze",
     "weight": 0.28
   },
   "googleapis/google-api-python-client": {
+    "tier": "Silver",
     "weight": 2.43
   },
   "googleapis/google-cloud-go": {
+    "tier": "Silver",
     "weight": 1.72
   },
   "googleapis/google-cloud-python": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "googleapis/googleapis": {
+    "tier": "Silver",
     "weight": 7.35
   },
   "googlemaps/android-maps-utils": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "googlesamples/mlkit": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "gopher-lab/subnet-42": {
+    "tier": "Silver",
     "weight": 6.52
   },
   "gorhill/uBlock": {
-    "weight": 7
+    "tier": "Silver",
+    "weight": 7.0
   },
   "gradio-app/gradio": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "gradle/gradle": {
+    "tier": "Silver",
     "weight": 1.61
   },
   "grafana/grafana": {
+    "tier": "Silver",
     "weight": 4.6
   },
   "graphite-project/graphite-web": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "graphql/graphql-js": {
+    "tier": "Bronze",
     "weight": 0.54
   },
   "grpc/grpc": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "grpc/grpc-java": {
+    "tier": "Bronze",
     "weight": 0.31
   },
   "gunthercox/ChatterBot": {
+    "tier": "Bronze",
     "weight": 0.32
   },
   "guodongxiaren/README": {
+    "tier": "Bronze",
     "weight": 0.21
   },
   "gz-yami/mall4cloud": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "gz-yami/mall4j": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "h5bp/html5-boilerplate": {
+    "tier": "Bronze",
     "weight": 0.21
   },
   "hacksider/Deep-Live-Cam": {
-    "weight": 0.25,
-    "additional_acceptable_branches": ["premain"]
+    "additional_acceptable_branches": [
+      "premain"
+    ],
+    "tier": "Bronze",
+    "weight": 0.25
   },
   "hadley/r4ds": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "hak5/usbrubberducky-payloads": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "hakimel/reveal.js": {
+    "tier": "Bronze",
     "weight": 0.37
   },
   "halo-dev/halo": {
+    "tier": "Bronze",
     "weight": 0.33
   },
   "hankcs/HanLP": {
+    "tier": "Bronze",
     "weight": 0.58
   },
   "happyfish100/fastdfs": {
     "inactive_at": "2025-11-29T17:45:38.525Z",
+    "tier": "Bronze",
     "weight": 0.01
   },
   "hashicorp/terraform": {
+    "tier": "Silver",
     "weight": 4.6
   },
   "hashicorp/terraform-provider-aws": {
+    "tier": "Bronze",
     "weight": 0.56
   },
   "hashicorp/terraform-provider-azurerm": {
+    "tier": "Bronze",
     "weight": 0.26
   },
   "hashicorp/vault": {
+    "tier": "Silver",
     "weight": 2.73
   },
   "hect0x7/JMComic-Crawler-Python": {
+    "tier": "Bronze",
     "weight": 0.35
   },
   "helix-editor/helix": {
+    "tier": "Gold",
     "weight": 19.21
   },
   "helm/helm": {
+    "tier": "Silver",
     "weight": 4.6
   },
   "hexojs/hexo": {
+    "tier": "Bronze",
     "weight": 0.21
   },
   "hhyo/Archery": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "hibernate/hibernate-orm": {
+    "tier": "Bronze",
     "weight": 0.3
   },
   "highcharts/highcharts": {
+    "tier": "Bronze",
     "weight": 0.3
   },
   "hiifeng/V2ray-for-Doprax": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "hiroi-sora/Umi-OCR": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "hiyouga/LLaMA-Factory": {
+    "tier": "Bronze",
     "weight": 0.24
   },
   "home-assistant/core": {
-    "weight": 48.92,
-    "additional_acceptable_branches": ["dev"]
+    "additional_acceptable_branches": [
+      "dev"
+    ],
+    "tier": "Gold",
+    "weight": 48.92
   },
   "home-assistant/frontend": {
+    "tier": "Silver",
     "weight": 5.85
   },
   "home-assistant/home-assistant.io": {
+    "tier": "Bronze",
     "weight": 0.22
   },
   "honza/vim-snippets": {
+    "tier": "Silver",
     "weight": 3.37
   },
   "hoochanlon/hamulete": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "hoppscotch/hoppscotch": {
+    "tier": "Gold",
     "weight": 49.86
   },
   "hpcaitech/ColossalAI": {
+    "tier": "Bronze",
     "weight": 0.23
   },
   "hs-web/hsweb-framework": {
+    "tier": "Bronze",
     "weight": 0.3
   },
   "hsliuping/TradingAgents-CN": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "httprunner/httprunner": {
+    "tier": "Bronze",
     "weight": 0.22
   },
   "hubotio/hubot": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "huggingface/diffusers": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "huggingface/lerobot": {
+    "tier": "Gold",
     "weight": 31.72
   },
   "huggingface/pytorch-image-models": {
+    "tier": "Silver",
     "weight": 6.19
   },
   "huggingface/transformers": {
+    "tier": "Gold",
     "weight": 36.77
   },
   "hummingbot/hummingbot": {
-    "weight": 0.18,
-    "additional_acceptable_branches": ["development"]
+    "additional_acceptable_branches": [
+      "development"
+    ],
+    "tier": "Bronze",
+    "weight": 0.18
   },
   "hybridauth/hybridauth": {
+    "tier": "Bronze",
     "weight": 0.24
   },
   "hydralauncher/hydra": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "hyperledger/fabric": {
+    "tier": "Bronze",
     "weight": 0.28
   },
   "hzeller/rpi-rgb-led-matrix": {
+    "tier": "Bronze",
     "weight": 0.24
   },
   "i18next/react-i18next": {
     "inactive_at": "2025-11-29T17:45:38.525Z",
+    "tier": "Bronze",
     "weight": 0.01
   },
   "iGaoWei/BigDataView": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "iNavFlight/inav": {
+    "tier": "Bronze",
     "weight": 0.24
   },
   "iam-veeramalla/terraform-zero-to-hero": {
+    "tier": "Bronze",
     "weight": 0.23
   },
   "iamkun/dayjs": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "iamseancheney/python_for_data_analysis_2nd_chinese_version": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "idurar/idurar-erp-crm": {
-    "weight": 0.32,
-    "additional_acceptable_branches": ["dev"]
+    "additional_acceptable_branches": [
+      "dev"
+    ],
+    "tier": "Bronze",
+    "weight": 0.32
   },
   "illuspas/Node-Media-Server": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "iluwatar/java-design-patterns": {
+    "tier": "Bronze",
     "weight": 0.21
   },
   "immich-app/immich": {
+    "tier": "Gold",
     "weight": 21.92
   },
   "immortalwrt/immortalwrt": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "impel-intelligence/dippy-studio-bittensor": {
+    "tier": "Silver",
     "weight": 6.52
   },
   "impress/impress.js": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "inference-labs-inc/subnet-2": {
+    "tier": "Silver",
     "weight": 6.52
   },
   "infiniflow/ragflow": {
+    "tier": "Silver",
     "weight": 6.05
   },
   "influxdata/telegraf": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "instructure/canvas-lms": {
+    "tier": "Bronze",
     "weight": 0.23
   },
   "internetarchive/openlibrary": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "ionic-team/ionic-conference-app": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "ionic-team/ionic-framework": {
+    "tier": "Bronze",
     "weight": 0.33
   },
   "ipython/ipython": {
+    "tier": "Gold",
     "weight": 36.77
   },
   "ireader/media-server": {
+    "tier": "Bronze",
     "weight": 0.22
   },
   "is-a-dev/register": {
+    "tier": "Bronze",
     "weight": 0.38
   },
   "isaac-sim/IsaacLab": {
+    "tier": "Gold",
     "weight": 18.62
   },
   "istio/istio": {
+    "tier": "Silver",
     "weight": 4.6
   },
   "ivy-llc/ivy": {
+    "tier": "Bronze",
     "weight": 0.33
   },
   "jackyzha0/quartz": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "jbeder/yaml-cpp": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "jeecgboot/JeecgBoot": {
+    "tier": "Bronze",
     "weight": 0.58
   },
   "jekyll/jekyll": {
+    "tier": "Bronze",
     "weight": 0.26
   },
   "jekyll/minima": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "jellyfin/jellyfin": {
+    "tier": "Gold",
     "weight": 23.29
   },
   "jenkinsci/docker": {
+    "tier": "Bronze",
     "weight": 0.2
   },
   "jenkinsci/jenkins": {
+    "tier": "Bronze",
     "weight": 0.35
   },
   "jeroennoten/Laravel-AdminLTE": {
     "inactive_at": "2025-11-29T17:45:38.525Z",
+    "tier": "Bronze",
     "weight": 0.01
   },
   "jesseduffield/lazydocker": {
+    "tier": "Silver",
     "weight": 4.61
   },
   "jesseduffield/lazygit": {
+    "tier": "Silver",
     "weight": 3.02
   },
   "jestjs/jest": {
+    "tier": "Bronze",
     "weight": 0.22
   },
   "jetty/jetty.project": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "jgamblin/Mirai-Source-Code": {
+    "tier": "Bronze",
     "weight": 0.26
   },
   "jgm/pandoc": {
+    "tier": "Bronze",
     "weight": 0.55
   },
   "jgraph/drawio-desktop": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "jhy/jsoup": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "jishenghua/jshERP": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "jitsi/docker-jitsi-meet": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "jitsi/jitsi-meet": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "joomla/joomla-cms": {
-    "weight": 0.28,
-    "additional_acceptable_branches": ["*-dev"]
+    "additional_acceptable_branches": [
+      "*-dev"
+    ],
+    "tier": "Bronze",
+    "weight": 0.28
   },
   "jpetazzo/container.training": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "jqlang/jq": {
+    "tier": "Silver",
     "weight": 1.05
   },
   "jquery-validation/jquery-validation": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "jquery/jquery": {
+    "tier": "Bronze",
     "weight": 0.63
   },
   "jquery/jquery-mousewheel": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "jquery/jquery-ui": {
+    "tier": "Bronze",
     "weight": 0.35
   },
   "jrowberg/i2cdevlib": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "js-org/js.org": {
+    "tier": "Bronze",
     "weight": 0.32
   },
   "judasn/IntelliJ-IDEA-Tutorial": {
+    "tier": "Bronze",
     "weight": 0.21
   },
   "juice-shop/juice-shop": {
-    "weight": 0.35,
-    "additional_acceptable_branches": ["develop"]
+    "additional_acceptable_branches": [
+      "develop"
+    ],
+    "tier": "Bronze",
+    "weight": 0.35
   },
   "juliangarnier/anime": {
-    "weight": 1.52,
-    "additional_acceptable_branches": ["dev"]
+    "additional_acceptable_branches": [
+      "dev"
+    ],
+    "tier": "Silver",
+    "weight": 1.52
   },
   "junegunn/fzf": {
+    "tier": "Bronze",
     "weight": 0.58
   },
   "junyanz/pytorch-CycleGAN-and-pix2pix": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "jupyter/docker-stacks": {
+    "tier": "Bronze",
     "weight": 0.31
   },
   "jupyter/jupyter": {
+    "tier": "Gold",
     "weight": 39.5
   },
   "jupyter/notebook": {
+    "tier": "Bronze",
     "weight": 0.21
   },
   "jupyterhub/jupyterhub": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "jupyterlab/jupyterlab": {
+    "tier": "Gold",
     "weight": 73.31
   },
   "just-the-docs/just-the-docs": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "kaldi-asr/kaldi": {
+    "tier": "Bronze",
     "weight": 0.21
   },
   "kamyu104/LeetCode-Solutions": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "kananinirav/AWS-Certified-Cloud-Practitioner-Notes": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "kavishdevar/librepods": {
+    "tier": "Bronze",
     "weight": 0.32
   },
   "kekingcn/kkFileView": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "kenwheeler/slick": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "kenzok8/openwrt-packages": {
+    "tier": "Bronze",
     "weight": 0.2
   },
   "keras-team/keras": {
+    "tier": "Silver",
     "weight": 2.18
   },
   "kevin-wayne/algs4": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "keycloak/keycloak": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "kiddin9/Kwrt": {
+    "tier": "Bronze",
     "weight": 0.2
   },
   "kivy/python-for-android": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "knowm/XChange": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "koajs/koa": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "krishnaik06/Roadmap-To-Learn-Generative-AI-In-2025": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "ktbyers/netmiko": {
+    "tier": "Bronze",
     "weight": 0.28
   },
   "kubeflow/kubeflow": {
+    "tier": "Bronze",
     "weight": 0.54
   },
   "kubeflow/pipelines": {
+    "tier": "Silver",
     "weight": 6.75
   },
   "kubernetes-client/java": {
+    "tier": "Gold",
     "weight": 32.4
   },
   "kubernetes-client/python": {
+    "tier": "Gold",
     "weight": 32.4
   },
   "kubernetes-sigs/aws-load-balancer-controller": {
+    "tier": "Gold",
     "weight": 32.4
   },
   "kubernetes-sigs/cluster-api": {
+    "tier": "Gold",
     "weight": 32.4
   },
   "kubernetes-sigs/external-dns": {
+    "tier": "Gold",
     "weight": 32.4
   },
   "kubernetes-sigs/kubespray": {
+    "tier": "Gold",
     "weight": 32.4
   },
   "kubernetes-sigs/kustomize": {
+    "tier": "Gold",
     "weight": 32.4
   },
   "kubernetes-sigs/metrics-server": {
+    "tier": "Gold",
     "weight": 32.4
   },
   "kubernetes/autoscaler": {
+    "tier": "Gold",
     "weight": 32.4
   },
   "kubernetes/client-go": {
+    "tier": "Gold",
     "weight": 32.4
   },
   "kubernetes/community": {
+    "tier": "Gold",
     "weight": 32.4
   },
   "kubernetes/dashboard": {
+    "tier": "Gold",
     "weight": 32.4
   },
   "kubernetes/enhancements": {
+    "tier": "Gold",
     "weight": 32.4
   },
   "kubernetes/ingress-nginx": {
+    "tier": "Gold",
     "weight": 32.4
   },
   "kubernetes/kops": {
+    "tier": "Gold",
     "weight": 32.4
   },
   "kubernetes/kube-state-metrics": {
+    "tier": "Gold",
     "weight": 32.4
   },
   "kubernetes/kubernetes": {
+    "tier": "Gold",
     "weight": 74.1
   },
   "kubernetes/sample-controller": {
+    "tier": "Gold",
     "weight": 32.4
   },
   "kubernetes/test-infra": {
+    "tier": "Gold",
     "weight": 32.4
   },
   "kubernetes/website": {
+    "tier": "Gold",
     "weight": 32.4
   },
   "labring/FastGPT": {
+    "tier": "Gold",
     "weight": 32.4
   },
   "langchain-ai/langchain": {
+    "tier": "Gold",
     "weight": 29.38
   },
   "langflow-ai/langflow": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "langgenius/dify": {
+    "tier": "Bronze",
     "weight": 0.07
   },
   "laradock/laradock": {
+    "tier": "Bronze",
     "weight": 0.2
   },
   "laravel/framework": {
+    "tier": "Bronze",
     "weight": 0.32
   },
   "laravel/laravel": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "laruence/yaf": {
+    "tier": "Bronze",
     "weight": 0.23
   },
   "latent-to/taohash": {
+    "tier": "Gold",
     "weight": 20.59
   },
   "laurent22/joplin": {
+    "tier": "Bronze",
     "weight": 0.22
   },
   "layui/layui": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "lballabio/QuantLib": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "leadpoet/leadpoet": {
+    "tier": "Silver",
     "weight": 7.05
   },
   "leethomason/tinyxml2": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "letscontrolit/ESPEasy": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "letta-ai/letta": {
+    "tier": "Gold",
     "weight": 64.83
   },
   "liangliangyy/DjangoBlog": {
+    "tier": "Bronze",
     "weight": 0.31
   },
   "libgdx/libgdx": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "libgit2/libgit2": {
+    "tier": "Silver",
     "weight": 3.18
   },
   "libopencm3/libopencm3": {
+    "tier": "Bronze",
     "weight": 0.22
   },
   "librenms/librenms": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "libusb/libusb": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "lichess-org/chessground": {
+    "tier": "Silver",
     "weight": 2.29
   },
   "lichess-org/lila": {
+    "tier": "Silver",
     "weight": 2.33
   },
   "liquibase/liquibase": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "lllyasviel/Fooocus": {
+    "tier": "Bronze",
     "weight": 0.24
   },
   "llmware-ai/llmware": {
+    "tier": "Silver",
     "weight": 1.5
   },
   "llvm/llvm-project": {
+    "tier": "Silver",
     "weight": 2.01
   },
   "lobehub/lobe-chat": {
+    "tier": "Bronze",
     "weight": 0.33
   },
   "localstack/localstack": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "loiane/javascript-datastructures-algorithms": {
     "inactive_at": "2025-11-08T04:21:05.319Z",
+    "tier": "Bronze",
     "weight": 0.01
   },
   "louislam/uptime-kuma": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "ly525/luban-h5": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "lynndylanhurley/devise_token_auth": {
+    "tier": "Bronze",
     "weight": 0.21
   },
   "lyswhut/lx-music-desktop": {
+    "tier": "Bronze",
     "weight": 0.22
   },
   "macrocosm-os/apex": {
+    "tier": "Silver",
     "weight": 6.52
   },
   "macrocosm-os/data-universe": {
-    "weight": 7.05,
-    "additional_acceptable_branches": ["dev"]
+    "additional_acceptable_branches": [
+      "dev"
+    ],
+    "tier": "Silver",
+    "weight": 7.05
   },
   "macrocosm-os/iota": {
-    "weight": 5
+    "tier": "Silver",
+    "weight": 5.0
   },
   "macrozheng/mall": {
+    "tier": "Bronze",
     "weight": 0.61
   },
   "macrozheng/mall-admin-web": {
+    "tier": "Bronze",
     "weight": 0.21
   },
   "macrozheng/mall-swarm": {
+    "tier": "Bronze",
     "weight": 0.32
   },
   "magento/magento2": {
+    "tier": "Bronze",
     "weight": 0.31
   },
   "makeplane/plane": {
+    "tier": "Bronze",
     "weight": 0.53
   },
   "manifold-inc/hone": {
+    "tier": "Gold",
     "weight": 44.58
   },
   "manifold-inc/targon": {
+    "tier": "Gold",
     "weight": 59.34
   },
   "markedjs/marked": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "marmelab/react-admin": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "mason-org/mason.nvim": {
+    "tier": "Silver",
     "weight": 3.44
   },
   "mastodon/mastodon": {
+    "tier": "Gold",
     "weight": 19.49
   },
   "matplotlib/matplotlib": {
+    "tier": "Bronze",
     "weight": 0.35
   },
   "mattermost/mattermost": {
+    "tier": "Silver",
     "weight": 3.37
   },
   "mautic/mautic": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "mavlink/qgroundcontrol": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "mdn/browser-compat-data": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "mdn/content": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "medusajs/medusa": {
-    "weight": 23.29,
-    "additional_acceptable_branches": ["develop"]
+    "additional_acceptable_branches": [
+      "develop"
+    ],
+    "tier": "Gold",
+    "weight": 23.29
   },
   "meilisearch/meilisearch": {
+    "tier": "Silver",
     "weight": 2.08
   },
   "mem0ai/mem0": {
+    "tier": "Bronze",
     "weight": 0.22
   },
   "menloresearch/jan": {
+    "tier": "Bronze",
     "weight": 0.53
   },
   "mermaid-js/mermaid": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "meshery/meshery": {
+    "tier": "Bronze",
     "weight": 0.31
   },
   "mesonbuild/meson": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "metabase/metabase": {
+    "tier": "Bronze",
     "weight": 0.62
   },
   "metanova-labs/nova": {
+    "tier": "Gold",
     "weight": 44.58
   },
   "meteor/meteor": {
+    "tier": "Bronze",
     "weight": 0.24
   },
   "metersphere/metersphere": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "microfeed/microfeed": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "micropython/micropython": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "microsoft/DirectX-Graphics-Samples": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "microsoft/LightGBM": {
+    "tier": "Bronze",
     "weight": 0.61
   },
   "microsoft/PowerToys": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "microsoft/TypeScript": {
+    "tier": "Silver",
     "weight": 3.06
   },
   "microsoft/WPF-Samples": {
+    "tier": "Bronze",
     "weight": 0.28
   },
   "microsoft/WinAppDriver": {
+    "tier": "Bronze",
     "weight": 0.26
   },
   "microsoft/Windows-driver-samples": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "microsoft/autogen": {
+    "tier": "Bronze",
     "weight": 0.24
   },
   "microsoft/azure-pipelines-tasks": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "microsoft/dotnet": {
+    "tier": "Silver",
     "weight": 4.03
   },
   "microsoft/fluentui": {
+    "tier": "Bronze",
     "weight": 0.54
   },
   "microsoft/generative-ai-for-beginners": {
+    "tier": "Bronze",
     "weight": 0.28
   },
   "microsoft/markitdown": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "microsoft/monaco-editor": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "microsoft/playwright": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "microsoft/qlib": {
+    "tier": "Bronze",
     "weight": 0.57
   },
   "microsoft/referencesource": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "microsoft/sql-server-samples": {
+    "tier": "Bronze",
     "weight": 0.22
   },
   "microsoft/terminal": {
+    "tier": "Silver",
     "weight": 1.92
   },
   "microsoft/vscode": {
+    "tier": "Gold",
     "weight": 71.1
   },
   "microsoft/vscode-docs": {
+    "tier": "Bronze",
     "weight": 0.2
   },
   "microsoft/winget-pkgs": {
+    "tier": "Bronze",
     "weight": 0.2
   },
   "miguelgrinberg/python-socketio": {
     "inactive_at": "2025-11-29T17:45:38.525Z",
+    "tier": "Bronze",
     "weight": 0.01
   },
   "mikefarah/yq": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "mikel-brostrom/boxmot": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "milvus-io/milvus": {
+    "tier": "Silver",
     "weight": 2.15
   },
   "mindsdb/mindsdb": {
+    "tier": "Bronze",
     "weight": 0.23
   },
   "mingrammer/diagrams": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "minio/minio": {
+    "tier": "Silver",
     "weight": 6.52
   },
   "mit-pdos/xv6-riscv": {
+    "tier": "Bronze",
     "weight": 0.26
   },
   "mitmproxy/mitmproxy": {
+    "tier": "Bronze",
     "weight": 0.22
   },
   "mlflow/mlflow": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "mlpack/mlpack": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "mmistakes/minimal-mistakes": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "mobiusfund/etf": {
+    "tier": "Silver",
     "weight": 6.52
   },
   "moby/moby": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "mode-network/synth-subnet": {
-    "weight": 5
+    "tier": "Silver",
+    "weight": 5.0
   },
   "modelcontextprotocol/python-sdk": {
+    "tier": "Silver",
     "weight": 3.34
   },
   "modelcontextprotocol/servers": {
+    "tier": "Bronze",
     "weight": 0.22
   },
   "monero-project/monero": {
+    "tier": "Gold",
     "weight": 63.8
   },
   "mongodb/mongo": {
+    "tier": "Bronze",
     "weight": 0.62
   },
   "mongodb/mongoid": {
+    "tier": "Bronze",
     "weight": 0.21
   },
   "mongodb/node-mongodb-native": {
+    "tier": "Bronze",
     "weight": 0.53
   },
   "moodle/moodle": {
+    "tier": "Bronze",
     "weight": 0.3
   },
   "mozilla-mobile/firefox-ios": {
+    "tier": "Bronze",
     "weight": 0.56
   },
   "mozilla/pdf.js": {
+    "tier": "Bronze",
     "weight": 0.36
   },
   "mrdoob/three.js": {
+    "tier": "Bronze",
     "weight": 0.66
   },
   "mudler/LocalAI": {
+    "tier": "Gold",
     "weight": 13.81
   },
   "mui/material-ui": {
+    "tier": "Silver",
     "weight": 6.1
   },
   "mybatis/generator": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "mybatis/mybatis-3": {
+    "tier": "Bronze",
     "weight": 0.35
   },
   "mybatis/spring-boot-starter": {
+    "tier": "Bronze",
     "weight": 0.28
   },
   "mysql/mysql-server": {
+    "tier": "Gold",
     "weight": 14.6
   },
   "n8n-io/n8n": {
+    "tier": "Silver",
     "weight": 3.11
   },
   "naptha/tesseract.js": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "neetcode-gh/leetcode": {
+    "tier": "Silver",
     "weight": 6.94
   },
   "neovim/neovim": {
+    "tier": "Gold",
     "weight": 69.9
   },
   "nestjs/nest": {
+    "tier": "Bronze",
     "weight": 0.22
   },
   "netty/netty": {
+    "tier": "Bronze",
     "weight": 0.36
   },
   "networkx/networkx": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "neuralinternet/compute-subnet": {
+    "tier": "Silver",
     "weight": 7.05
   },
   "nextcloud/android": {
+    "tier": "Gold",
     "weight": 63.85
   },
   "nextcloud/desktop": {
+    "tier": "Gold",
     "weight": 63.85
   },
   "nextcloud/news": {
+    "tier": "Gold",
     "weight": 63.85
   },
   "nextcloud/server": {
+    "tier": "Gold",
     "weight": 63.85
   },
   "nginx/docker-nginx": {
+    "tier": "Silver",
     "weight": 3.24
   },
   "nginx/kubernetes-ingress": {
+    "tier": "Bronze",
     "weight": 0.23
   },
   "nginx/nginx": {
-    "weight": 69
+    "tier": "Gold",
+    "weight": 69.0
   },
   "nimbusdotstorage/Nimbus": {
+    "tier": "Bronze",
     "weight": 0.15
   },
   "nl8590687/ASRT_SpeechRecognition": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "nlohmann/json": {
+    "tier": "Bronze",
     "weight": 0.2
   },
   "nltk/nltk": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "nmap/nmap": {
+    "tier": "Silver",
     "weight": 2.43
   },
   "nocodb/nocodb": {
-    "weight": 32.44,
-    "additional_acceptable_branches": ["develop"]
+    "additional_acceptable_branches": [
+      "develop"
+    ],
+    "tier": "Gold",
+    "weight": 32.44
   },
   "nodejs/node": {
+    "tier": "Silver",
     "weight": 8.6
   },
   "nodejs/nodejs.org": {
+    "tier": "Bronze",
     "weight": 0.32
   },
   "nodemcu/nodemcu-firmware": {
-    "weight": 0.26,
-    "additional_acceptable_branches": ["dev"]
+    "additional_acceptable_branches": [
+      "dev"
+    ],
+    "tier": "Bronze",
+    "weight": 0.26
   },
   "nolimits4web/swiper": {
+    "tier": "Bronze",
     "weight": 0.35
   },
   "nopSolutions/nopCommerce": {
+    "tier": "Bronze",
     "weight": 0.3
   },
   "novicezk/midjourney-proxy": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "novuhq/novu": {
+    "tier": "Bronze",
     "weight": 0.21
   },
   "npm/cli": {
+    "tier": "Silver",
     "weight": 3.66
   },
   "numinouslabs/numinous": {
+    "tier": "Silver",
     "weight": 6.52
   },
   "numpy/numpy": {
+    "tier": "Gold",
     "weight": 14.6
   },
   "nushell/nushell": {
+    "tier": "Bronze",
     "weight": 0.54
   },
   "nuxt/nuxt": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "nvim-lua/kickstart.nvim": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "nvim-mini/mini.nvim": {
+    "tier": "Silver",
     "weight": 2.78
   },
   "nwjs/nw.js": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "obsidianmd/obsidian-releases": {
+    "tier": "Bronze",
     "weight": 0.83
   },
   "obsidianmd/obsidian-sample-plugin": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "obsproject/obs-studio": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "oceanbase/miniob": {
+    "tier": "Bronze",
     "weight": 0.24
   },
   "ocornut/imgui": {
+    "tier": "Bronze",
     "weight": 0.21
   },
   "odoo/odoo": {
+    "tier": "Bronze",
     "weight": 0.63
   },
   "ohmyzsh/ohmyzsh": {
+    "tier": "Bronze",
     "weight": 0.65
   },
   "oldratlee/useful-scripts": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "ollama/ollama": {
+    "tier": "Gold",
     "weight": 23.18
   },
   "olton/metroui": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "omegalabsinc/omegalabs-anytoany-bittensor": {
+    "tier": "Silver",
     "weight": 6.52
   },
   "omegalabsinc/omegalabs-bittensor-subnet": {
+    "tier": "Silver",
     "weight": 6.52
   },
   "one-covenant/grail": {
-    "weight": 5
+    "tier": "Silver",
+    "weight": 5.0
   },
   "oneoneone-io/subnet-111": {
+    "tier": "Silver",
     "weight": 6.52
   },
   "oobabooga/text-generation-webui": {
+    "tier": "Bronze",
     "weight": 0.23
   },
   "opa334/Dopamine": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "open-telemetry/opentelemetry-collector": {
+    "tier": "Silver",
     "weight": 3.39
   },
   "open-telemetry/opentelemetry-collector-contrib": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "open-telemetry/opentelemetry-go": {
+    "tier": "Silver",
     "weight": 3.03
   },
   "open-webui/open-webui": {
+    "tier": "Bronze",
     "weight": 0.26
   },
   "openai/codex": {
+    "tier": "Silver",
     "weight": 2.36
   },
   "openai/openai-agents-python": {
+    "tier": "Bronze",
     "weight": 0.56
   },
   "openai/openai-python": {
+    "tier": "Bronze",
     "weight": 0.56
   },
   "openai/openai-realtime-console": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "opencart/opencart": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "opencv/opencv": {
+    "tier": "Silver",
     "weight": 4.47
   },
   "opencv/opencv_contrib": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "opendatalab/MinerU": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "openedx/edx-platform": {
+    "tier": "Bronze",
     "weight": 0.32
   },
   "openemr/openemr": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "openinterpreter/open-interpreter": {
+    "tier": "Gold",
     "weight": 31.73
   },
   "openjdk/jdk": {
+    "tier": "Silver",
     "weight": 4.6
   },
   "openlayers/openlayers": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "opensearch-project/OpenSearch": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "openshift/origin": {
+    "tier": "Bronze",
     "weight": 0.26
   },
   "opensourcepos/opensourcepos": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "openspug/spug": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "openssh/openssh-portable": {
+    "tier": "Bronze",
     "weight": 0.24
   },
   "openssl/openssl": {
+    "tier": "Silver",
     "weight": 4.6
   },
   "openstreetmap/iD": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "opentensor/bittensor": {
-    "weight": 77.04,
-    "additional_acceptable_branches": ["staging", "SDKv10"]
+    "additional_acceptable_branches": [
+      "staging",
+      "SDKv10"
+    ],
+    "tier": "Gold",
+    "weight": 77.04
   },
   "opentensor/btcli": {
-    "weight": 74.01,
-    "additional_acceptable_branches": ["staging"]
+    "additional_acceptable_branches": [
+      "staging"
+    ],
+    "tier": "Gold",
+    "weight": 74.01
   },
   "opentensor/subtensor": {
-    "weight": 78.01,
-    "additional_acceptable_branches": ["devnet-ready"]
+    "additional_acceptable_branches": [
+      "devnet-ready"
+    ],
+    "tier": "Gold",
+    "weight": 78.01
   },
   "openvinotoolkit/open_model_zoo": {
+    "tier": "Bronze",
     "weight": 0.28
   },
   "openvinotoolkit/openvino": {
+    "tier": "Bronze",
     "weight": 0.26
   },
   "openvswitch/ovs": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "openwrt/luci": {
+    "tier": "Bronze",
     "weight": 0.32
   },
   "openwrt/openwrt": {
+    "tier": "Bronze",
     "weight": 0.3
   },
   "ophub/amlogic-s9xxx-armbian": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "oppia/oppia": {
+    "tier": "Bronze",
     "weight": 0.32
   },
   "oracle/docker-images": {
+    "tier": "Bronze",
     "weight": 0.21
   },
   "ordinals/ord": {
+    "tier": "Bronze",
     "weight": 0.22
   },
   "orion-lib/OrionTV": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "otavioschwanck/github-pr-reviewer.nvim": {
+    "tier": "Gold",
     "weight": 31.66
   },
   "othneildrew/Best-README-Template": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "ourongxing/newsnow": {
+    "tier": "Bronze",
     "weight": 0.3
   },
   "oven-sh/bun": {
+    "tier": "Gold",
     "weight": 31.66
   },
   "owncast/owncast": {
+    "tier": "Bronze",
     "weight": 0.35
   },
   "owncloud/android": {
+    "tier": "Bronze",
     "weight": 0.21
   },
   "pagefaultgames/pokerogue": {
+    "tier": "Bronze",
     "weight": 0.28
   },
   "pagehelper/Mybatis-PageHelper": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "pallets-eco/flask-admin": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "pallets/flask": {
+    "tier": "Bronze",
     "weight": 0.36
   },
   "pandas-dev/pandas": {
+    "tier": "Silver",
     "weight": 4.6
   },
   "pantsbuild/pants": {
+    "tier": "Silver",
     "weight": 1.4
   },
   "paradigmxyz/reth": {
+    "tier": "Bronze",
     "weight": 0.22
   },
   "paramiko/paramiko": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "parcel-bundler/parcel": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "paritytech/polkadot-sdk": {
+    "tier": "Gold",
     "weight": 44.61
   },
   "parse-community/parse-dashboard": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "parse-community/parse-server": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "pathwaycom/pathway": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "paulirish/dotfiles": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "payloadcms/payload": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "pebble-dev/mobile-app": {
+    "tier": "Gold",
     "weight": 14.58
   },
   "pebble-dev/pebble-firmware": {
-    "weight": 10
+    "tier": "Gold",
+    "weight": 10.0
   },
   "pedroslopez/whatsapp-web.js": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "pennersr/django-allauth": {
+    "tier": "Bronze",
     "weight": 0.31
   },
   "penpot/penpot": {
+    "tier": "Gold",
     "weight": 20.62
   },
   "pentaho/pentaho-kettle": {
+    "tier": "Bronze",
     "weight": 0.3
   },
   "phaserjs/phaser": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "photoprism/photoprism": {
+    "tier": "Gold",
     "weight": 17.11
   },
   "php/php-src": {
+    "tier": "Silver",
     "weight": 4.6
   },
   "phpmyadmin/phpmyadmin": {
+    "tier": "Bronze",
     "weight": 0.28
   },
   "pi-hole/pi-hole": {
+    "tier": "Silver",
     "weight": 6.55
   },
   "pi-hole/web": {
-    "weight": 36.77,
-    "additional_acceptable_branches": ["development"]
+    "additional_acceptable_branches": [
+      "development"
+    ],
+    "tier": "Gold",
+    "weight": 36.77
   },
   "pimcore/pimcore": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "pingcap/tidb": {
+    "tier": "Silver",
     "weight": 4.6
   },
   "pinpoint-apm/pinpoint": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "piskvorky/gensim": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "pixijs/pixijs": {
+    "tier": "Bronze",
     "weight": 0.21
   },
   "pjialin/py12306": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "pk910/PoWFaucet": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "playframework/playframework": {
+    "tier": "Bronze",
     "weight": 0.22
   },
   "pmmp/PocketMine-MP": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "pnpm/pnpm": {
+    "tier": "Silver",
     "weight": 1.22
   },
   "pocketbase/pocketbase": {
+    "tier": "Gold",
     "weight": 16.91
   },
   "pola-rs/polars": {
+    "tier": "Gold",
     "weight": 16.82
   },
   "postgres/postgres": {
+    "tier": "Gold",
     "weight": 14.6
   },
   "poteto/hiring-without-whiteboards": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "pr3y/Bruce": {
+    "tier": "Silver",
     "weight": 1.02
   },
   "prakhar1989/docker-curriculum": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "prasathmani/tinyfilemanager": {
+    "tier": "Bronze",
     "weight": 0.26
   },
   "preactjs/preact": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "prestodb/presto": {
+    "tier": "Bronze",
     "weight": 0.32
   },
   "prettier/prettier": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "primefaces/primeng": {
+    "tier": "Bronze",
     "weight": 0.31
   },
   "progit/progit2": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "prometheus-community/helm-charts": {
+    "tier": "Bronze",
     "weight": 0.2
   },
   "prometheus-operator/prometheus-operator": {
+    "tier": "Bronze",
     "weight": 0.26
   },
   "prometheus/alertmanager": {
+    "tier": "Bronze",
     "weight": 0.24
   },
   "prometheus/prometheus": {
+    "tier": "Silver",
     "weight": 4.6
   },
   "protocolbuffers/protobuf": {
+    "tier": "Bronze",
     "weight": 0.31
   },
   "psf/black": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "psf/requests": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "puikinsh/Adminator-admin-dashboard": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "pulumi/pulumi": {
+    "tier": "Silver",
     "weight": 3.57
   },
   "puppeteer/puppeteer": {
+    "tier": "Bronze",
     "weight": 0.22
   },
   "pyca/cryptography": {
+    "tier": "Silver",
     "weight": 6.28
   },
   "pymc-devs/pymc": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "pypa/pip": {
+    "tier": "Silver",
     "weight": 3.57
   },
   "pytest-dev/pytest": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "python-pillow/Pillow": {
+    "tier": "Bronze",
     "weight": 0.55
   },
   "python-telegram-bot/python-telegram-bot": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "python-visualization/folium": {
+    "tier": "Bronze",
     "weight": 0.3
   },
   "python/cpython": {
+    "tier": "Gold",
     "weight": 43.8
   },
   "python/mypy": {
+    "tier": "Bronze",
     "weight": 0.56
   },
   "python/peps": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "python/typeshed": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "pytorch/pytorch": {
+    "tier": "Gold",
     "weight": 36.77
   },
   "pytorch/vision": {
+    "tier": "Silver",
     "weight": 3.64
   },
   "qbittensor-labs/quantum": {
+    "tier": "Gold",
     "weight": 44.58
   },
   "qdrant/qdrant": {
-    "weight": 7.54,
-    "additional_acceptable_branches": ["dev"]
+    "additional_acceptable_branches": [
+      "dev"
+    ],
+    "tier": "Silver",
+    "weight": 7.54
   },
   "qemu/qemu": {
+    "tier": "Bronze",
     "weight": 0.28
   },
   "qist/tvbox": {
+    "tier": "Bronze",
     "weight": 0.31
   },
   "qkqpttgf/OneManager-php": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "qmk/qmk_firmware": {
+    "tier": "Bronze",
     "weight": 0.35
   },
   "rabbitmq/rabbitmq-server": {
+    "tier": "Silver",
     "weight": 3.6
   },
   "rack/rack": {
+    "tier": "Bronze",
     "weight": 0.21
   },
   "raga-ai-hub/RagaAI-Catalyst": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "rails/rails": {
+    "tier": "Silver",
     "weight": 2.69
   },
   "rapid7/metasploit-framework": {
+    "tier": "Bronze",
     "weight": 0.47
   },
   "raspberrypi/documentation": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "raspberrypi/firmware": {
+    "tier": "Gold",
     "weight": 47.3
   },
   "raspberrypi/linux": {
+    "tier": "Silver",
     "weight": 6.61
   },
   "raspberrypi/pico-sdk": {
+    "tier": "Silver",
     "weight": 6.57
   },
   "ray-project/ray": {
+    "tier": "Gold",
     "weight": 51.11
   },
   "raycast/extensions": {
+    "tier": "Bronze",
     "weight": 0.3
   },
   "rayonlabs/G.O.D": {
+    "tier": "Gold",
     "weight": 59.34
   },
   "react-navigation/react-navigation": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "reactchartjs/react-chartjs-2": {
+    "tier": "Bronze",
     "weight": 0.28
   },
   "reactjs/react.dev": {
+    "tier": "Gold",
     "weight": 36.77
   },
   "realpython/materials": {
+    "tier": "Bronze",
     "weight": 0.22
   },
   "reboot-org/reboot-subnet": {
+    "tier": "Silver",
     "weight": 6.52
   },
   "redis/jedis": {
+    "tier": "Bronze",
     "weight": 0.31
   },
   "redis/redis": {
+    "tier": "Silver",
     "weight": 4.6
   },
   "redisson/redisson": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "redmine/redmine": {
+    "tier": "Bronze",
     "weight": 0.22
   },
   "reduxjs/redux": {
+    "tier": "Bronze",
     "weight": 0.33
   },
   "remix-run/react-router": {
+    "tier": "Bronze",
     "weight": 0.23
   },
   "resi-labs-ai/resi": {
+    "tier": "Silver",
     "weight": 6.52
   },
   "rfordatascience/tidytuesday": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "ricequant/rqalpha": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "ridgesai/ridges": {
+    "tier": "Gold",
     "weight": 59.34
   },
   "riscv-collab/riscv-gnu-toolchain": {
+    "tier": "Bronze",
     "weight": 0.23
   },
   "robotframework/robotframework": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "rolling-scopes-school/tasks": {
+    "tier": "Bronze",
     "weight": 0.33
   },
   "romkatv/powerlevel10k": {
+    "tier": "Bronze",
     "weight": 0.53
   },
   "ros-navigation/navigation2": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "ros2/ros2": {
+    "tier": "Gold",
     "weight": 13.77
   },
   "rstudio/bookdown": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "rstudio/shiny": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "ruby-china/homeland": {
+    "tier": "Bronze",
     "weight": 0.21
   },
   "ruby/ruby": {
+    "tier": "Gold",
     "weight": 36.77
   },
   "rubygems/rubygems": {
+    "tier": "Bronze",
     "weight": 0.22
   },
   "run-llama/llama_index": {
+    "tier": "Gold",
     "weight": 29.89
   },
   "runelite/runelite": {
+    "tier": "Bronze",
     "weight": 0.32
   },
   "rust-lang/rust": {
+    "tier": "Gold",
     "weight": 36.77
   },
   "rustdesk/rustdesk": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "sahat/hackathon-starter": {
+    "tier": "Bronze",
     "weight": 0.2
   },
   "saleor/saleor": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "saltstack/salt": {
+    "tier": "Bronze",
     "weight": 0.33
   },
   "samdutton/simpl": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "sammchardy/python-binance": {
+    "tier": "Silver",
     "weight": 3.87
   },
   "sansan0/TrendRadar": {
+    "tier": "Bronze",
     "weight": 0.3
   },
   "sbt/sbt": {
+    "tier": "Bronze",
     "weight": 0.89
   },
   "scala/scala": {
+    "tier": "Bronze",
     "weight": 0.55
   },
   "schwabe/ics-openvpn": {
+    "tier": "Bronze",
     "weight": 0.23
   },
   "scikit-image/scikit-image": {
+    "tier": "Bronze",
     "weight": 0.3
   },
   "scipy/scipy": {
+    "tier": "Gold",
     "weight": 36.77
   },
   "score-technologies/score-vision": {
+    "tier": "Gold",
     "weight": 44.58
   },
   "scrapy/scrapy": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "scratchfoundation/scratch-gui": {
+    "tier": "Bronze",
     "weight": 0.32
   },
   "serverless/serverless": {
+    "tier": "Bronze",
     "weight": 0.24
   },
   "shadcn-ui/ui": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "shadowsocks/shadowsocks-android": {
+    "tier": "Bronze",
     "weight": 0.43
   },
   "sharkdp/fd": {
+    "tier": "Bronze",
     "weight": 0.54
   },
   "sharu725/online-cv": {
+    "tier": "Bronze",
     "weight": 0.35
   },
   "sherlock-project/sherlock": {
+    "tier": "Bronze",
     "weight": 0.24
   },
   "shidenggui/easytrader": {
+    "tier": "Bronze",
     "weight": 0.31
   },
   "shiftlayer-llc/brainplay-subnet": {
-    "weight": 6.52,
-    "additional_acceptable_branches": ["dev"]
+    "additional_acceptable_branches": [
+      "dev"
+    ],
+    "tier": "Silver",
+    "weight": 6.52
   },
   "signalapp/Signal-Android": {
+    "tier": "Gold",
     "weight": 13.64
   },
   "signalapp/Signal-Server": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "signalwire/freeswitch": {
+    "tier": "Bronze",
     "weight": 0.24
   },
   "singgel/JAVA": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "siteserver/cms": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "siyuan-note/siyuan": {
+    "tier": "Bronze",
     "weight": 0.53
   },
   "skylot/jadx": {
+    "tier": "Bronze",
     "weight": 0.22
   },
   "slack-go/slack": {
+    "tier": "Bronze",
     "weight": 0.14
   },
   "slackapi/node-slack-sdk": {
+    "tier": "Bronze",
     "weight": 0.42
   },
   "slackapi/python-slack-sdk": {
+    "tier": "Bronze",
     "weight": 0.39
   },
   "smartcontractkit/chainlink": {
+    "tier": "Gold",
     "weight": 60.42
   },
   "smogon/pokemon-showdown": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "socketio/socket.io": {
+    "tier": "Bronze",
     "weight": 0.22
   },
   "sofastack/sofa-jraft": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "sofastack/sofa-rpc": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "soimort/you-get": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "solana-foundation/anchor": {
+    "tier": "Gold",
     "weight": 72.46
   },
   "sorin-ionescu/prezto": {
+    "tier": "Bronze",
     "weight": 0.21
   },
   "spack/spack": {
+    "tier": "Bronze",
     "weight": 0.3
   },
   "spdk/spdk": {
+    "tier": "Bronze",
     "weight": 0.23
   },
   "spesmilo/electrum": {
+    "tier": "Bronze",
     "weight": 0.31
   },
   "sphinx-doc/sphinx": {
+    "tier": "Bronze",
     "weight": 0.3
   },
   "sportstensor/sn41": {
+    "tier": "Gold",
     "weight": 10.05
   },
   "spree/spree": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "spring-cloud/spring-cloud-gateway": {
+    "tier": "Bronze",
     "weight": 0.3
   },
   "spring-cloud/spring-cloud-kubernetes": {
+    "tier": "Bronze",
     "weight": 0.61
   },
   "spring-cloud/spring-cloud-netflix": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "spring-io/initializr": {
+    "tier": "Bronze",
     "weight": 0.28
   },
   "spring-projects/spring-boot": {
+    "tier": "Silver",
     "weight": 4.07
   },
   "spring-projects/spring-framework": {
+    "tier": "Silver",
     "weight": 5.08
   },
   "spring-projects/spring-petclinic": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "spring-projects/spring-security": {
+    "tier": "Bronze",
     "weight": 0.32
   },
   "sqlite/sqlite": {
+    "tier": "Silver",
     "weight": 4.6
   },
   "sqlmapproject/sqlmap": {
+    "tier": "Bronze",
     "weight": 0.23
   },
   "square/okhttp": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "starship/starship": {
+    "tier": "Silver",
     "weight": 1.28
   },
   "statsmodels/statsmodels": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "stefanprodan/podinfo": {
+    "tier": "Bronze",
     "weight": 0.23
   },
   "stevenjoezhang/live2d-widget": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "steveseguin/vdo.ninja": {
+    "tier": "Bronze",
     "weight": 0.28
   },
   "stleary/JSON-java": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "storybookjs/storybook": {
+    "tier": "Bronze",
     "weight": 0.22
   },
   "strapi/strapi": {
+    "tier": "Bronze",
     "weight": 0.22
   },
   "streamich/react-use": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "streamlit/streamlit": {
+    "tier": "Gold",
     "weight": 11.99
   },
   "sudheerj/javascript-interview-questions": {
     "inactive_at": "2025-11-04T02:18:33.094Z",
+    "tier": "Bronze",
     "weight": 0.01
   },
   "sudheerj/reactjs-interview-questions": {
     "inactive_at": "2025-11-04T02:18:33.094Z",
+    "tier": "Bronze",
     "weight": 0.01
   },
   "supabase/supabase": {
+    "tier": "Gold",
     "weight": 52.22
   },
   "sveltejs/svelte": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "svenfuchs/rails-i18n": {
+    "tier": "Bronze",
     "weight": 0.22
   },
   "swagger-api/swagger-codegen": {
+    "tier": "Bronze",
     "weight": 0.21
   },
   "swagger-api/swagger-editor": {
+    "tier": "Silver",
     "weight": 7.33
   },
   "swagger-api/swagger-ui": {
+    "tier": "Silver",
     "weight": 2.72
   },
   "swarm-subnet/swarm": {
+    "tier": "Silver",
     "weight": 6.52
   },
   "swiftlang/swift": {
+    "tier": "Silver",
     "weight": 1.64
   },
   "swimlane/ngx-datatable": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "swisskyrepo/PayloadsAllTheThings": {
+    "tier": "Bronze",
     "weight": 0.21
   },
   "symfony/symfony": {
+    "tier": "Bronze",
     "weight": 0.32
   },
   "sympy/sympy": {
+    "tier": "Bronze",
     "weight": 0.32
   },
   "systemd/systemd": {
+    "tier": "Silver",
     "weight": 4.6
   },
   "tModLoader/tModLoader": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "taikoxyz/taiko-mono": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "tailwindlabs/tailwindcss": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "tailwindlabs/tailwindcss.com": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "tangly1024/NotionNext": {
+    "tier": "Bronze",
     "weight": 0.38
   },
   "taofu-labs/tpn-subnet": {
+    "tier": "Silver",
     "weight": 6.52
   },
   "taoshidev/vanta-network": {
+    "tier": "Silver",
     "weight": 6.52
   },
   "tatsuproject/chipforge_sn84": {
+    "tier": "Silver",
     "weight": 6.52
   },
   "taubyte/tau": {
+    "tier": "Bronze",
     "weight": 0.4
   },
   "tauri-apps/tauri": {
-    "weight": 21.3,
-    "additional_acceptable_branches": ["dev"]
+    "additional_acceptable_branches": [
+      "dev"
+    ],
+    "tier": "Gold",
+    "weight": 21.3
   },
   "teddysun/across": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "tensorflow/datasets": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "tensorflow/docs": {
+    "tier": "Bronze",
     "weight": 0.21
   },
   "tensorflow/models": {
+    "tier": "Bronze",
     "weight": 0.65
   },
   "tensorflow/serving": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "tensorflow/tensorboard": {
+    "tier": "Bronze",
     "weight": 0.61
   },
   "tensorflow/tensorflow": {
+    "tier": "Gold",
     "weight": 37.49
   },
   "tensorplex-labs/dojo": {
+    "tier": "Silver",
     "weight": 6.52
   },
   "termux/termux-app": {
+    "tier": "Bronze",
     "weight": 0.22
   },
   "terraform-aws-modules/terraform-aws-eks": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "tesseract-ocr/tesseract": {
+    "tier": "Bronze",
     "weight": 0.21
   },
   "thedevs-network/kutt": {
+    "tier": "Bronze",
     "weight": 0.55
   },
   "thenervelab/thebrain": {
+    "tier": "Silver",
     "weight": 6.52
   },
   "thingsboard/thingsboard": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "thinkgem/jeesite": {
+    "tier": "Bronze",
     "weight": 0.21
   },
   "thomaspark/bootswatch": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "thonny/thonny": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "thoughtbot/factory_bot": {
+    "tier": "Bronze",
     "weight": 0.22
   },
   "threetau/kinitro": {
-    "weight": 5
+    "tier": "Silver",
+    "weight": 5.0
   },
   "tianocore/edk2": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "tidyverse/dplyr": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "tidyverse/ggplot2": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "tmk/tmk_keyboard": {
+    "tier": "Bronze",
     "weight": 0.24
   },
   "tmux/tmux": {
+    "tier": "Gold",
     "weight": 36.77
   },
   "toeverything/AFFiNE": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "ton-blockchain/ton": {
+    "tier": "Bronze",
     "weight": 0.24
   },
   "topjohnwu/Magisk": {
+    "tier": "Bronze",
     "weight": 0.28
   },
   "tornadoweb/tornado": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "torvalds/linux": {
+    "tier": "Gold",
     "weight": 76.1
   },
   "tplr-ai/basilica": {
-    "weight": 5
+    "tier": "Silver",
+    "weight": 5.0
   },
   "tplr-ai/templar": {
-    "weight": 5
+    "tier": "Silver",
+    "weight": 5.0
   },
   "traccar/traccar": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "traefik/traefik": {
+    "tier": "Silver",
     "weight": 3.48
   },
   "transitive-bullshit/nextjs-notion-starter-kit": {
+    "tier": "Bronze",
     "weight": 0.31
   },
   "travist/jsencrypt": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "trinodb/trino": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "trishoolai/trishool-subnet": {
+    "tier": "Silver",
     "weight": 6.52
   },
   "trpc/trpc": {
+    "tier": "Bronze",
     "weight": 0.62
   },
   "truenas/middleware": {
+    "tier": "Silver",
     "weight": 5.23
   },
   "trustwallet/assets": {
+    "tier": "Bronze",
     "weight": 0.32
   },
   "tssovi/grokking-the-object-oriented-design-interview": {
     "inactive_at": "2025-11-04T02:18:33.094Z",
+    "tier": "Bronze",
     "weight": 0.01
   },
   "tw93/Pake": {
-    "weight": 0.18,
-    "additional_acceptable_branches": ["dev"]
+    "additional_acceptable_branches": [
+      "dev"
+    ],
+    "tier": "Bronze",
+    "weight": 0.18
   },
   "twbs/bootstrap": {
+    "tier": "Bronze",
     "weight": 0.48
   },
   "tweepy/tweepy": {
+    "tier": "Bronze",
     "weight": 0.32
   },
   "twentyhq/twenty": {
+    "tier": "Bronze",
     "weight": 0.21
   },
   "typeorm/typeorm": {
+    "tier": "Silver",
     "weight": 3.61
   },
   "typescript-cheatsheets/react": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "typicode/json-server": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "typst/typst": {
+    "tier": "Bronze",
     "weight": 0.57
   },
   "u-boot/u-boot": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "ubicloud/ubicloud": {
+    "tier": "Bronze",
     "weight": 0.39
   },
   "ultralytics/ultralytics": {
+    "tier": "Bronze",
     "weight": 0.24
   },
   "ultralytics/yolov3": {
+    "tier": "Bronze",
     "weight": 0.32
   },
   "ultralytics/yolov5": {
+    "tier": "Bronze",
     "weight": 0.6
   },
   "umbraco/Umbraco-CMS": {
+    "tier": "Bronze",
     "weight": 0.28
   },
   "unclecode/crawl4ai": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "unslothai/unsloth": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "up-for-grabs/up-for-grabs.net": {
+    "tier": "Bronze",
     "weight": 0.31
   },
   "urllib3/urllib3": {
+    "tier": "Bronze",
     "weight": 0.28
   },
   "usebruno/bruno": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "v0idai/SN106": {
+    "tier": "Silver",
     "weight": 6.52
   },
   "valor-software/ngx-bootstrap": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "vercel/ai": {
+    "tier": "Bronze",
     "weight": 0.54
   },
   "vercel/ai-chatbot": {
+    "tier": "Bronze",
     "weight": 0.31
   },
   "vercel/next.js": {
+    "tier": "Gold",
     "weight": 36.77
   },
   "vercel/vercel": {
+    "tier": "Bronze",
     "weight": 0.62
   },
   "vidaio-subnet/vidaio-subnet": {
+    "tier": "Silver",
     "weight": 6.52
   },
   "videojs/video.js": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "videolan/vlc": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "vim/vim": {
+    "tier": "Silver",
     "weight": 1.34
   },
   "virattt/ai-hedge-fund": {
+    "tier": "Bronze",
     "weight": 0.24
   },
   "vitejs/vite": {
+    "tier": "Gold",
     "weight": 38.95
   },
   "vllm-project/vllm": {
+    "tier": "Silver",
     "weight": 6.34
   },
   "vnpy/vnpy": {
+    "tier": "Bronze",
     "weight": 0.36
   },
   "vuejs/core": {
+    "tier": "Bronze",
     "weight": 0.22
   },
   "vuejs/vue-cli": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "vuetifyjs/vuetify": {
+    "tier": "Bronze",
     "weight": 0.22
   },
   "waditu/czsc": {
+    "tier": "Bronze",
     "weight": 0.28
   },
   "wagtail/wagtail": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "wang-bin/QtAV": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "warmcat/libwebsockets": {
+    "tier": "Bronze",
     "weight": 0.24
   },
   "web-platform-tests/wpt": {
+    "tier": "Bronze",
     "weight": 0.21
   },
   "webpack/webpack": {
+    "tier": "Bronze",
     "weight": 0.25
   },
   "webrtc/samples": {
+    "tier": "Bronze",
     "weight": 0.35
   },
   "wenzhixin/bootstrap-table": {
+    "tier": "Bronze",
     "weight": 0.33
   },
   "whatwg/html": {
+    "tier": "Bronze",
     "weight": 0.2
   },
   "wine-mirror/wine": {
+    "tier": "Bronze",
     "weight": 0.22
   },
   "wireshark/wireshark": {
+    "tier": "Silver",
     "weight": 4.79
   },
   "withastro/astro": {
+    "tier": "Silver",
     "weight": 1.73
   },
   "withfig/autocomplete": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "wkentaro/labelme": {
+    "tier": "Bronze",
     "weight": 0.18
   },
   "woocommerce/woocommerce": {
+    "tier": "Bronze",
     "weight": 0.32
   },
   "wordpress-mobile/WordPress-iOS": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "wzdnzd/aggregator": {
+    "tier": "Bronze",
     "weight": 0.32
   },
   "xbmc/xbmc": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "xiaolai/regular-investing-in-box": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "xiaorouji/openwrt-passwall": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "xinnan-tech/xiaozhi-esp32-server": {
+    "tier": "Bronze",
     "weight": 0.3
   },
   "xtekky/gpt4free": {
+    "tier": "Bronze",
     "weight": 0.35
   },
   "xuxueli/xxl-job": {
+    "tier": "Bronze",
     "weight": 0.35
   },
   "yanez-compliance/MIID-subnet": {
+    "tier": "Silver",
     "weight": 6.52
   },
   "yangzongzhuan/RuoYi-Vue3": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "yeongpin/cursor-free-vip": {
+    "tier": "Silver",
     "weight": 1.72
   },
   "ygs-code/vue": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "yihong0618/running_page": {
+    "tier": "Bronze",
     "weight": 0.28
   },
   "yiisoft/yii": {
+    "tier": "Bronze",
     "weight": 0.27
   },
   "yiisoft/yii2": {
+    "tier": "Bronze",
     "weight": 0.3
   },
   "yonggekkk/Cloudflare-vless-trojan": {
+    "tier": "Bronze",
     "weight": 0.36
   },
   "yonggekkk/sing-box-yg": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "youzan/vant": {
+    "tier": "Bronze",
     "weight": 0.33
   },
   "yt-dlp/yt-dlp": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "ytdl-org/youtube-dl": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "ytisf/theZoo": {
+    "tier": "Bronze",
     "weight": 0.17
   },
   "yutiansut/QUANTAXIS": {
+    "tier": "Bronze",
     "weight": 0.31
   },
   "zcash/zcash": {
+    "tier": "Gold",
     "weight": 60.23
   },
   "zed-industries/zed": {
+    "tier": "Gold",
     "weight": 32.29
   },
   "zellij-org/zellij": {
+    "tier": "Bronze",
     "weight": 0.66
   },
   "zephyrproject-rtos/zephyr": {
+    "tier": "Bronze",
     "weight": 0.29
   },
   "zhayujie/chatgpt-on-wechat": {
+    "tier": "Bronze",
     "weight": 0.35
   },
   "zio/zio": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "zmkfirmware/zmk": {
+    "tier": "Bronze",
     "weight": 0.26
   },
   "zsh-users/zsh": {
+    "tier": "Bronze",
     "weight": 0.32
   },
   "zulip/zulip": {
+    "tier": "Bronze",
     "weight": 0.35
   },
   "zxing/zxing": {
+    "tier": "Bronze",
     "weight": 0.19
   },
   "zxlie/FeHelper": {
+    "tier": "Bronze",
     "weight": 0.17
   }
 }

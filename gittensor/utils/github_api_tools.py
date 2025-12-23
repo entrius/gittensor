@@ -18,7 +18,7 @@ from gittensor.constants import (
     CREDIBILITY_APPLICATION_DATE,
     IGNORED_AUTHOR_ASSOCIATIONS,
 )
-from gittensor.validator.utils.config import MERGED_PR_LOOKBACK_DAYS
+from gittensor.validator.utils.config import PR_LOOKBACK_DAYS
 
 # core github graphql query
 QUERY = """
@@ -407,7 +407,7 @@ def should_skip_merged_pr(
     if merged_dt < date_filter:
         return (
             True,
-            f"Skipping PR #{pr_raw['number']} in {repository_full_name} - merged before {MERGED_PR_LOOKBACK_DAYS} day lookback window",
+            f"Skipping PR #{pr_raw['number']} in {repository_full_name} - merged before {PR_LOOKBACK_DAYS} day lookback window",
         )
 
     # Skip if PR author is a maintainer
@@ -499,7 +499,7 @@ def load_miners_prs(
     """
     bt.logging.info("*****Fetching PRs*****")
 
-    date_filter = datetime.now(timezone.utc) - timedelta(days=MERGED_PR_LOOKBACK_DAYS)
+    date_filter = datetime.now(timezone.utc) - timedelta(days=PR_LOOKBACK_DAYS)
     global_user_id = base64.b64encode(f"04:User{miner_eval.github_id}".encode()).decode()
 
     cursor = None

@@ -20,7 +20,7 @@ from unittest.mock import Mock, call, patch
 sys.modules['gittensor.validator'] = Mock()
 sys.modules['gittensor.validator.utils'] = Mock()
 sys.modules['gittensor.validator.utils.config'] = Mock()
-sys.modules['gittensor.validator.utils.config'].MERGED_PR_LOOKBACK_DAYS = 30
+sys.modules['gittensor.validator.utils.config'].PR_LOOKBACK_DAYS = 30
 
 # Mock gittensor.classes to break circular import
 mock_classes = Mock()

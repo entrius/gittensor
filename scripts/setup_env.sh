@@ -15,7 +15,16 @@ sudo apt update -y
 sudo apt install -y \
     python3-pip \
     python3-venv \
-    npm
+    curl \
+    ca-certificates
+
+# Node.js / npm setup
+# NOTE: Installing `npm` via apt can fail on Ubuntu 24.04 due to dependency conflicts.
+# NodeSource Node.js packages include npm, so we install Node.js instead (only if needed).
+if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
+    curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+    sudo apt install -y nodejs
+fi
 
 # Install process manager if not already installed
 if ! command -v pm2 &> /dev/null; then

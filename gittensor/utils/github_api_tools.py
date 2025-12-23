@@ -16,6 +16,7 @@ from gittensor.classes import (
 from gittensor.constants import (
     BASE_GITHUB_API_URL,
     IGNORED_AUTHOR_ASSOCIATIONS,
+    TIER_BASED_INCENTIVE_MECHANISM_START_DATE,
 )
 from gittensor.validator.utils.config import PR_LOOKBACK_DAYS
 from gittensor.validator.utils.load_weights import RepositoryConfig
@@ -342,7 +343,7 @@ def try_add_open_or_closed_pr(
     pr_raw: Dict,
     repository_full_name: str,
     pr_state: str,
-    date_filter: datetime,
+    lookback_date_filter: datetime,
     active_repositories: List[str],
 ) -> None:
     """
@@ -353,7 +354,7 @@ def try_add_open_or_closed_pr(
         pr_raw: Raw PR data from GraphQL
         repository_full_name: Full repository name (owner/repo), lowercase
         pr_state: GitHub PR state (OPEN, CLOSED, MERGED)
-        date_filter: Date filter for lookback period
+        lookback_date_filter: Date filter for lookback period
         active_repositories: List of active repository names (lowercase)
     """
     if repository_full_name not in active_repositories:
@@ -371,12 +372,12 @@ def try_add_open_or_closed_pr(
             return
 
         closed_dt = datetime.fromisoformat(closed_at.rstrip("Z")).replace(tzinfo=timezone.utc)
-        if closed_dt >= date_filter:
+        if closed_dt >= lookback_date_filter:
             miner_eval.add_closed_pull_request(pr_raw)
 
 
 def should_skip_merged_pr(
-    pr_raw: Dict, repository_full_name: str, master_repositories: Dict[str, RepositoryConfig], date_filter: datetime
+    pr_raw: Dict, repository_full_name: str, master_repositories: Dict[str, RepositoryConfig], lookback_date_filter: datetime
 ) -> tuple[bool, Optional[str]]:
     """
     Validate a merged PR against all eligibility criteria.
@@ -385,7 +386,7 @@ def should_skip_merged_pr(
         pr_raw (Dict): Raw PR data from GraphQL
         repository_full_name (str): Full repository name (owner/repo)
         master_repositories (Dict[str, RepositoryConfig]): Repository metadata (keys are normalized to lowercase)
-        date_filter (datetime): Date filter for lookback period
+        lookback_date_filter (datetime): Date filter for lookback period
 
     Returns:
         tuple[bool, Optional[str]]: (should_skip, skip_reason) - True if PR should be skipped with reason
@@ -401,10 +402,10 @@ def should_skip_merged_pr(
         return (True, f"Skipping PR #{pr_raw['number']} in {repository_full_name} - ineligible repo")
 
     # Filter by lookback window
-    if merged_dt < date_filter:
+    if merged_dt < lookback_date_filter:
         return (
             True,
-            f"Skipping PR #{pr_raw['number']} in {repository_full_name} - merged before {PR_LOOKBACK_DAYS} day lookback window",
+            f"Skipping PR #{pr_raw['number']} in {repository_full_name} - merged within {PR_LOOKBACK_DAYS} day lookback window",
         )
 
     # Skip if PR author is a maintainer
@@ -493,7 +494,7 @@ def load_miners_prs(miner_eval: MinerEvaluation, master_repositories: Dict[str, 
     """
     bt.logging.info("*****Fetching PRs*****")
 
-    date_filter = datetime.now(timezone.utc) - timedelta(days=PR_LOOKBACK_DAYS)
+    lookback_date_filter = datetime.now(timezone.utc) - timedelta(days=PR_LOOKBACK_DAYS)
     global_user_id = base64.b64encode(f"04:User{miner_eval.github_id}".encode()).decode()
 
     cursor = None
@@ -515,33 +516,44 @@ def load_miners_prs(miner_eval: MinerEvaluation, master_repositories: Dict[str, 
                 bt.logging.warning("No response from github, breaking fetch loop...")
                 break
 
-            data = response.json()
+            data: Dict = response.json()
 
             if 'errors' in data:
                 bt.logging.error(f"GraphQL errors: {data['errors']}")
                 break
 
-            user_data = data.get('data', {}).get('node')
+            user_data: Dict = data.get('data', {}).get('node')
             if not user_data:
                 bt.logging.warning("User not found or no pull requests")
                 break
 
-            pr_data = user_data.get('pullRequests', {})
-            prs = pr_data.get('nodes', [])
-            page_info = pr_data.get('pageInfo', {})
+            pr_data: Dict = user_data.get('pullRequests', {})
+            prs: Dict = pr_data.get('nodes', [])
+            page_info: Dict = pr_data.get('pageInfo', {})
 
             for pr_raw in prs:
                 repository_full_name = parse_repo_name(pr_raw['repository'])
                 pr_state = pr_raw['state']
 
+                # Stop querying once we hit PRs older than the tier incentive start date
+                pr_creation_time = datetime.fromisoformat(pr_raw["createdAt"].rstrip("Z")).replace(tzinfo=timezone.utc)
+
+                if pr_creation_time < TIER_BASED_INCENTIVE_MECHANISM_START_DATE:
+                    bt.logging.info(
+                        f"Reached PR #{pr_raw['number']} in {repository_full_name} created at {pr_creation_time}, "
+                        f"before tier incentive start date ({TIER_BASED_INCENTIVE_MECHANISM_START_DATE}). "
+                        f"Stopping PR fetch."
+                    )
+                    return
+
                 if pr_state in (PRState.OPEN.value, PRState.CLOSED.value):
                     try_add_open_or_closed_pr(
-                        miner_eval, pr_raw, repository_full_name, pr_state, date_filter, active_repositories
+                        miner_eval, pr_raw, repository_full_name, pr_state, lookback_date_filter, active_repositories
                     )
                     continue
 
                 should_skip, skip_reason = should_skip_merged_pr(
-                    pr_raw, repository_full_name, master_repositories, date_filter
+                    pr_raw, repository_full_name, master_repositories, lookback_date_filter
                 )
 
                 if should_skip:

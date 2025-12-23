@@ -406,7 +406,9 @@ class MinerEvaluation:
     def add_open_pull_request(self, raw_pr: Dict):
         """Add an open pull request that will be factored into scoring."""
         bt.logging.info(f"Counting OPEN PR #{raw_pr['number']} in {parse_repo_name(raw_pr['repository'])}")
-        self.open_pull_requests.append(PullRequest.from_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id))
+        self.open_pull_requests.append(
+            PullRequest.from_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id)
+        )
 
     def add_closed_pull_request(self, raw_pr: Dict):
         """Add a closed pull request that will be factored into scoring."""

@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 # Entrius 2025
 # =============================================================================
 # General
@@ -46,6 +48,7 @@ TIME_DECAY_MIN_MULTIPLIER = 0.05 # 5% of score will retain through lookback days
 # =============================================================================
 # Tiers & Collateral System
 # =============================================================================
+TIER_BASED_INCENTIVE_MECHANISM_START_DATE = datetime(2025, 12, 27, 17, 00, 00, tzinfo=timezone.utc)
 DEFAULT_COLLATERAL_PERCENT = 0.20
 
 DEFAULT_CREDIBILITY_THRESHOLD = 2 # Credibility is effective after 2 attempts.

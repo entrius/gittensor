@@ -12,9 +12,9 @@ from gittensor.constants import (
 
 
 class Tier(str, Enum):
+    BRONZE = "Bronze"
     SILVER = "Silver"
     GOLD = "Gold"
-    PLATINUM = "Platinum"
 
 
 TIER_DEFAULTS = {
@@ -45,9 +45,9 @@ class TierConfig:
 
 TIERS: dict[Tier, TierConfig] = {
     #                                 merges  credibility  scalar  (requirements to MAINTAIN this tier)
-    Tier.SILVER:   TierConfig(        None,   None,        1      ),  # always unlocked
-    Tier.GOLD:     TierConfig(        3,      0.50,        2      ),
-    Tier.PLATINUM: TierConfig(        5,      0.70,        3      ),
+    Tier.BRONZE:   TierConfig(        None,   None,        1      ),  # always unlocked
+    Tier.SILVER:   TierConfig(        3,      0.50,        2      ),
+    Tier.GOLD:     TierConfig(        5,      0.70,        3      ),
 }
 
 TIERS_ORDER: list[Tier] = list(TIERS.keys())

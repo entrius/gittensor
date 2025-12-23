@@ -5,7 +5,7 @@ import bittensor as bt
 # from gittensor.constants import MERGED_PR_LOOKBACK_DAYS
 
 # NOTE: bump this number when we make new updates
-__version__ = "2.0.5"
+__version__ = "2.0.7"
 
 
 VALIDATOR_WAIT = 60  # 60 seconds

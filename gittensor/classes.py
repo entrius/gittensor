@@ -180,15 +180,21 @@ class PullRequest:
         """Set the file changes for this pull request"""
         self.file_changes = file_changes
 
-    def calculate_score_from_file_changes(self, programming_languages: Dict[str, float]) -> float:
-        """Calculate the score for a single PR based on its file changes."""
-        # Import here to avoid circular import
+    def calculate_score_from_file_changes(self, programming_languages: Dict[str, float]) -> tuple[float, bool]:
+        """Calculate the score for a single PR based on its file changes.
+
+        Returns:
+            tuple[float, bool]: (score, is_low_value_pr) where is_low_value_pr is True
+            if >90% of changes are test files or non-scoreable lines (comments/typos).
+        """
         from gittensor.validator.utils.spam_detection import count_non_scoreable_lines
 
         if not self.file_changes:
-            return 0.0
+            return 0.0, True
 
         pr_score = 0.0
+        total_raw_changes = 0
+        substantive_changes = 0
 
         total_files_changed = len(self.file_changes)
         bt.logging.info(f"\nScoring {total_files_changed} file changes for PR #{self.number}")
@@ -200,19 +206,28 @@ class PullRequest:
             if file.file_extension in MITIGATED_EXTENSIONS:
                 total_changes_to_score = min(file.changes, MAX_LINES_SCORED_FOR_MITIGATED_EXT)
 
+            total_raw_changes += total_changes_to_score
+
             non_scoreable_lines = count_non_scoreable_lines(file.patch, total_changes_to_score, file.file_extension)
             scored_changes = max(0, total_changes_to_score - non_scoreable_lines)
 
             self.total_lines_scored += scored_changes
-            file_weight = TEST_FILE_CONTRIBUTION_WEIGHT if file.is_test_file() else 1.0
+            is_test_file = file.is_test_file()
+            file_weight = TEST_FILE_CONTRIBUTION_WEIGHT if is_test_file else 1.0
+
+            if not is_test_file:
+                substantive_changes += scored_changes
 
             file_score = language_weight * file_weight * scored_changes
 
             bt.logging.info(f"   -  [{n}/{total_files_changed}] - {file.short_name} | scored {scored_changes} / {file.changes} lines | score: {file_score:.2f}")
             pr_score += file_score
 
-        bt.logging.info(f"Base PR score from file changes: {pr_score:.2f}")
-        return pr_score
+        substantive_ratio = substantive_changes / total_raw_changes if total_raw_changes > 0 else 0
+        is_low_value_pr = substantive_ratio < 0.1 # 10% or more of contribution needs to be substantial (not tests, comments, etc)
+
+        bt.logging.info(f"Base PR score from file changes: {pr_score:.2f} | substantive: {substantive_changes}/{total_raw_changes} ({substantive_ratio*100:.0f}%)")
+        return pr_score, is_low_value_pr
     
     def calculate_final_earned_score(self) -> float:
         """Combine base score with all multipliers."""

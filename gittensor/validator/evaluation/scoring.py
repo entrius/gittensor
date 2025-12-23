@@ -101,7 +101,11 @@ def get_tier_config(repo_full_name: str, master_repositories: Dict[str, Dict]) -
 
 def calculate_base_score(pr: PullRequest, programming_languages: Dict[str, float]) -> float:
     """Calculate base score from tier base + contribution bonus."""
-    contribution_score = pr.calculate_score_from_file_changes(programming_languages)
+    contribution_score, is_low_value_pr = pr.calculate_score_from_file_changes(programming_languages)
+
+    if is_low_value_pr:
+        bt.logging.warning(f"PR #{pr.number} is low-value (>90% test/comment/typo changes) - base score = 0")
+        return 0.0
 
     tier_config: TierConfig = pr.repository_tier_configuration
 
@@ -114,7 +118,6 @@ def calculate_base_score(pr: PullRequest, programming_languages: Dict[str, float
         f"({bonus_percent*100:.0f}% of max {tier_config.contribution_score_max_bonus}) = {base_score:.2f}"
     )
 
-    # TODO: Somehow ensure that this base score can't be earned from a Test only PR, comment only PR, typo fix PR, etc.
     return base_score
 
 

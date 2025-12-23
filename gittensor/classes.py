@@ -369,15 +369,6 @@ class MinerEvaluation:
     def total_closed_prs(self) -> int:
         return len(self.closed_pull_requests)
 
-    def set_invalid_response_reason(self, reason: str):
-        """
-        Sets the reason for why a miners evaluation may have failed.
-
-        Args:
-            reason: The failure reason
-        """
-        self.failed_reason = reason
-
     def get_all_issues(self) -> List[Issue]:
         """Aggregate all issues from all merged pull requests."""
         all_issues = []

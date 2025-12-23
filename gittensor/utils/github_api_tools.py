@@ -401,6 +401,8 @@ def should_skip_merged_pr(
     if repository_full_name not in master_repositories:
         return (True, f"Skipping PR #{pr_raw['number']} in {repository_full_name} - ineligible repo")
 
+    repo_config = master_repositories[repository_full_name]
+
     # Filter by lookback window
     if merged_dt < lookback_date_filter:
         return (
@@ -433,10 +435,7 @@ def should_skip_merged_pr(
     )
     base_ref = pr_raw['baseRefName']
     head_ref = pr_raw.get('headRefName', '')  # Source branch (where PR is coming FROM)
-    repo_config = master_repositories[repository_full_name]
     additional_branches = repo_config.additional_acceptable_branches or []
-
-    # Build list of all acceptable branches (default + additional)
     acceptable_branches = [default_branch] + additional_branches
 
     # Skip if the source branch (headRef) is also an acceptable branch
@@ -444,29 +443,22 @@ def should_skip_merged_pr(
     # This check ONLY applies to internal PRs (same repository), as fork branch names are arbitrary.
     # Supports wildcard patterns (e.g., '*-dev' matches '3.0-dev', '3.1-dev', etc.)
     head_repo = pr_raw.get('headRepository')
-    is_internal_pr = False
-    if head_repo:
-        head_repo_full_name = parse_repo_name(head_repo)
-        if head_repo_full_name == repository_full_name:
-            is_internal_pr = True
-
-    if is_internal_pr and branch_matches_pattern(head_ref, acceptable_branches):
-        return (
-            True,
-            f"Skipping PR #{pr_raw['number']} in {repository_full_name} - "
-            f"source branch '{head_ref}' is an acceptable branch (merging between acceptable branches not allowed)",
-        )
-
-    # Check if merged to default branch
-    if base_ref != default_branch:
-        # If not default, check if repository has additional acceptable branches
-        # Supports wildcard patterns (e.g., '*-dev' matches '3.0-dev', '3.1-dev', etc.)
-        if not branch_matches_pattern(base_ref, additional_branches):
+    if head_repo and parse_repo_name(head_repo) == repository_full_name:
+        if branch_matches_pattern(head_ref, acceptable_branches):
             return (
                 True,
                 f"Skipping PR #{pr_raw['number']} in {repository_full_name} - "
-                f"merged to '{base_ref}' (not default branch '{default_branch}' or additional acceptable branches)",
+                f"source branch '{head_ref}' is an acceptable branch (merging between acceptable branches not allowed)",
             )
+
+    # Check if merged to an acceptable branch (default or additional)
+    # Supports wildcard patterns (e.g., '*-dev' matches '3.0-dev', '3.1-dev', etc.)
+    if not branch_matches_pattern(base_ref, acceptable_branches):
+        return (
+            True,
+            f"Skipping PR #{pr_raw['number']} in {repository_full_name} - "
+            f"merged to '{base_ref}' (not default branch '{default_branch}' or additional acceptable branches)",
+        )
 
     # Check if repo is inactive
     if repo_config.inactive_at is not None:

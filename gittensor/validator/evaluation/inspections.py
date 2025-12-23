@@ -73,7 +73,7 @@ def validate_response_and_initialize_miner_evaluation(uid: int, response: GitPat
 
     github_id, error = validate_github_credentials(uid, response.github_access_token)
     if error:
-        miner_eval.set_invalid_response_reason(error)
+        miner_eval.failed_reason = error
         return miner_eval
 
     miner_eval.github_id = github_id

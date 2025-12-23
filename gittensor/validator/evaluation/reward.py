@@ -124,7 +124,7 @@ async def get_rewards(
     # Adjust scores for duplicate accounts
     detect_and_penalize_miners_sharing_github(miner_evaluations)
 
-    # Finalize scores: apply unique contribution multiplier, sum totals, deduct collateral
+    # Finalize scores: apply unique contribution multiplier, credibility, sum totals, deduct collateral
     finalize_miner_scores(miner_evaluations)
 
     # Normalize the rewards between [0,1]

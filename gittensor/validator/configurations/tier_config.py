@@ -12,11 +12,9 @@ from gittensor.constants import (
 
 
 class Tier(str, Enum):
-    LOW = "Low"
-    LOWER_MID = "Lower-Mid"
-    MIDDLE = "Middle"
-    UPPER_MID = "Upper-Mid"
-    HIGH = "High"
+    SILVER = "Silver"
+    GOLD = "Gold"
+    PLATINUM = "Platinum"
 
 
 TIER_DEFAULTS = {
@@ -46,12 +44,10 @@ class TierConfig:
 
 
 TIERS: dict[Tier, TierConfig] = {
-    #                              merges  credibility  scalar  (requirements to MAINTAIN this tier)
-    Tier.LOW:       TierConfig(    None,   None,        1      ),  # always unlocked
-    Tier.LOWER_MID: TierConfig(    3,      0.40,        2      ),
-    Tier.MIDDLE:    TierConfig(    3,      0.50,        3      ),
-    Tier.UPPER_MID: TierConfig(    3,      0.60,        4      ),
-    Tier.HIGH:      TierConfig(    5,      0.70,        5      ),
+    #                                 merges  credibility  scalar  (requirements to MAINTAIN this tier)
+    Tier.SILVER:   TierConfig(        None,   None,        1      ),  # always unlocked
+    Tier.GOLD:     TierConfig(        3,      0.50,        2      ),
+    Tier.PLATINUM: TierConfig(        5,      0.70,        3      ),
 }
 
 TIERS_ORDER: list[Tier] = list(TIERS.keys())

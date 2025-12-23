@@ -293,6 +293,19 @@ class Repository(BaseRepository):
                 evaluation.total_merged_prs,
                 evaluation.total_prs,
                 evaluation.unique_repos_count,
+                evaluation.current_tier.value,
+                evaluation.bronze_merged_prs,
+                evaluation.bronze_total_prs,
+                evaluation.bronze_collateral_score,
+                evaluation.bronze_score,
+                evaluation.silver_merged_prs,
+                evaluation.silver_total_prs,
+                evaluation.silver_collateral_score,
+                evaluation.silver_score,
+                evaluation.gold_merged_prs,
+                evaluation.gold_total_prs,
+                evaluation.gold_collateral_score,
+                evaluation.gold_score,
             )
         ]
 

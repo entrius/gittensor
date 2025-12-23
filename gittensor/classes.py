@@ -2,8 +2,8 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import DefaultDict, Dict, List, Optional, Set
 from math import prod
+from typing import DefaultDict, Dict, List, Optional, Set
 
 import bittensor as bt
 
@@ -21,6 +21,7 @@ GITHUB_DOMAIN = 'https://github.com/'
 
 class PRState(Enum):
     """PR state for scoring"""
+
     MERGED = "MERGED"
     OPEN = "OPEN"
     CLOSED = "CLOSED"
@@ -80,14 +81,14 @@ class FileChange:
     def is_test_file(self) -> bool:
         filename_lower = self.filename.lower()
         basename = filename_lower.split('/')[-1]
-        
+
         test_dir_patterns = [
             r'(^|/)tests?/',
             r'(^|/)__tests?__/',
         ]
         if any(re.search(pattern, filename_lower) for pattern in test_dir_patterns):
             return True
-        
+
         test_patterns = [
             r'^test_',
             r'^spec_',
@@ -99,7 +100,7 @@ class FileChange:
             r'^test\.[^.]+$',
             r'^tests\.[^.]+$',
         ]
-        
+
         return any(re.search(pattern, basename) for pattern in test_patterns)
 
     @classmethod
@@ -150,7 +151,7 @@ class PullRequest:
 
     # PR state for collateral system
     pr_state: PRState
-    repository_tier_configuration: TierConfig
+    repository_tier_configuration: Optional[TierConfig] = None  # assigned when scoring PR
 
     # Score fields
     repo_weight_multiplier: float = 1.0
@@ -168,7 +169,7 @@ class PullRequest:
     additions: int = 0
     deletions: int = 0
     commits: int = 0
-    total_lines_scored: int = 0    
+    total_lines_scored: int = 0
     gittensor_tagged: bool = False
     merged_by_login: Optional[str] = None
     file_changes: Optional[List[FileChange]] = None
@@ -220,15 +221,21 @@ class PullRequest:
 
             file_score = language_weight * file_weight * scored_changes
 
-            bt.logging.info(f"   -  [{n}/{total_files_changed}] - {file.short_name} | scored {scored_changes} / {file.changes} lines | score: {file_score:.2f}")
+            bt.logging.info(
+                f"   -  [{n}/{total_files_changed}] - {file.short_name} | scored {scored_changes} / {file.changes} lines | score: {file_score:.2f}"
+            )
             pr_score += file_score
 
         substantive_ratio = substantive_changes / total_raw_changes if total_raw_changes > 0 else 0
-        is_low_value_pr = substantive_ratio < 0.1 # 10% or more of contribution needs to be substantial (not tests, comments, etc)
+        is_low_value_pr = (
+            substantive_ratio < 0.1
+        )  # 10% or more of contribution needs to be substantial (not tests, comments, etc)
 
-        bt.logging.info(f"Base PR score from file changes: {pr_score:.2f} | substantive: {substantive_changes}/{total_raw_changes} ({substantive_ratio*100:.0f}%)")
+        bt.logging.info(
+            f"Base PR score from file changes: {pr_score:.2f} | substantive: {substantive_changes}/{total_raw_changes} ({substantive_ratio*100:.0f}%)"
+        )
         return pr_score, is_low_value_pr
-    
+
     def calculate_final_earned_score(self) -> float:
         """Combine base score with all multipliers."""
         multipliers = {
@@ -253,7 +260,7 @@ class PullRequest:
     @classmethod
     def from_graphql_response(cls, pr_data: dict, uid: int, hotkey: str, github_id: str) -> 'PullRequest':
         """Create PullRequest from GraphQL API response for any PR state."""
-        from gittensor.constants import PR_TAGLINE_PREFIX, GITTENSOR_MINER_DETAILS_URL
+        from gittensor.constants import GITTENSOR_MINER_DETAILS_URL, PR_TAGLINE_PREFIX
         from gittensor.validator.utils.datetime_utils import parse_github_timestamp_to_cst
 
         repository_full_name = parse_repo_name(pr_data['repository'])
@@ -266,19 +273,23 @@ class PullRequest:
         for issue in raw_issues:
             if is_merged and not (issue.get('closedAt') and issue.get('state') == 'CLOSED'):
                 continue
-            issues.append(Issue(
-                number=issue['number'],
-                pr_number=pr_data['number'],
-                repository_full_name=repository_full_name,
-                title=issue['title'],
-                created_at=parse_github_timestamp_to_cst(issue['createdAt']) if issue.get('createdAt') else None,
-                closed_at=parse_github_timestamp_to_cst(issue['closedAt']) if issue.get('closedAt') else None,
-                author_login=issue.get('author', {}).get('login') if issue.get('author') else None,
-                state=issue.get('state'),
-            ))
+            issues.append(
+                Issue(
+                    number=issue['number'],
+                    pr_number=pr_data['number'],
+                    repository_full_name=repository_full_name,
+                    title=issue['title'],
+                    created_at=parse_github_timestamp_to_cst(issue['createdAt']) if issue.get('createdAt') else None,
+                    closed_at=parse_github_timestamp_to_cst(issue['closedAt']) if issue.get('closedAt') else None,
+                    author_login=issue.get('author', {}).get('login') if issue.get('author') else None,
+                    state=issue.get('state'),
+                )
+            )
 
         description: str = pr_data.get('bodyText', '')
-        last_edited_at = parse_github_timestamp_to_cst(pr_data.get('lastEditedAt')) if pr_data.get('lastEditedAt') else None
+        last_edited_at = (
+            parse_github_timestamp_to_cst(pr_data.get('lastEditedAt')) if pr_data.get('lastEditedAt') else None
+        )
         merged_at = parse_github_timestamp_to_cst(pr_data['mergedAt']) if is_merged else None
 
         # Gittensor tag detection - validates tagline contains correct miner URL
@@ -337,6 +348,23 @@ class MinerEvaluation:
     closed_pull_requests: List[PullRequest] = field(default_factory=list)
     unique_repos_contributed_to: Set[str] = field(default_factory=set)
     tier_credibility: Dict[Tier, float] = field(default_factory=dict)
+    current_tier: Tier = Tier.BRONZE
+
+    # Per-tier metrics for Bronze, Silver, Gold repositories
+    bronze_merged_prs: int = 0
+    bronze_total_prs: int = 0
+    bronze_collateral_score: float = 0.0
+    bronze_score: float = 0.0
+
+    silver_merged_prs: int = 0
+    silver_total_prs: int = 0
+    silver_collateral_score: float = 0.0
+    silver_score: float = 0.0
+
+    gold_merged_prs: int = 0
+    gold_total_prs: int = 0
+    gold_collateral_score: float = 0.0
+    gold_score: float = 0.0
 
     @property
     def total_prs(self) -> int:
@@ -345,11 +373,11 @@ class MinerEvaluation:
     @property
     def total_merged_prs(self) -> int:
         return len(self.merged_pull_requests)
-    
+
     @property
     def total_open_prs(self) -> int:
         return len(self.open_pull_requests)
-    
+
     @property
     def total_closed_prs(self) -> int:
         return len(self.closed_pull_requests)
@@ -381,8 +409,12 @@ class MinerEvaluation:
 
     def add_merged_pull_request(self, raw_pr: Dict):
         """Add a merged pull request that will be factored into scoring."""
-        bt.logging.info(f"Accepting MERGED PR #{raw_pr['number']} in {parse_repo_name(raw_pr['repository'])} -> '{raw_pr['baseRefName']}'")
-        self.merged_pull_requests.append(PullRequest.from_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id))
+        bt.logging.info(
+            f"Accepting MERGED PR #{raw_pr['number']} in {parse_repo_name(raw_pr['repository'])} -> '{raw_pr['baseRefName']}'"
+        )
+        self.merged_pull_requests.append(
+            PullRequest.from_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id)
+        )
 
     def add_open_pull_request(self, raw_pr: Dict):
         """Add an open pull request that will be factored into scoring."""
@@ -391,8 +423,12 @@ class MinerEvaluation:
 
     def add_closed_pull_request(self, raw_pr: Dict):
         """Add a closed pull request that will be factored into scoring."""
-        bt.logging.info(f"CLOSED PR #{raw_pr['number']} in {parse_repo_name(raw_pr['repository'])} counting towards credibility")
-        self.closed_pull_requests.append(PullRequest.from_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id))
+        bt.logging.info(
+            f"CLOSED PR #{raw_pr['number']} in {parse_repo_name(raw_pr['repository'])} counting towards credibility"
+        )
+        self.closed_pull_requests.append(
+            PullRequest.from_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id)
+        )
 
 
 class GitPatSynapse(bt.Synapse):

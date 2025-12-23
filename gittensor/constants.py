@@ -61,6 +61,9 @@ DEFAULT_MAX_CONTRIBUTION_SCORE_FOR_FULL_BONUS = 2000 # For reference: 2000 score
 # =============================================================================
 RECYCLE_UID = 0
 
+DEFAULT_FIXED_RECYCLE_RATE = 0.50
+DYNAMIC_EMISSIONS_BUFFER_DAYS = 45 # After 45 days of launching tier based IM, we will restore dynamic emissions
+
 # Network emission scaling (lines contributed)
 LINES_CONTRIBUTED_MAX_RECYCLE = 0.9
 LINES_CONTRIBUTED_RECYCLE_DECAY_RATE = 0.000005

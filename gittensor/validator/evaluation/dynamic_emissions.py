@@ -3,9 +3,13 @@ from typing import Dict, Set
 import bittensor as bt
 import numpy as np
 
+from datetime import datetime, timedelta, UTC
 from gittensor.classes import MinerEvaluation
 from gittensor.constants import (
+    TIER_BASED_INCENTIVE_MECHANISM_START_DATE,
     RECYCLE_UID,
+    DEFAULT_FIXED_RECYCLE_RATE,
+    DYNAMIC_EMISSIONS_BUFFER_DAYS,
     LINES_CONTRIBUTED_RECYCLE_DECAY_RATE,
     LINES_CONTRIBUTED_MAX_RECYCLE,
     UNIQUE_PRS_RECYCLE_DECAY_RATE,
@@ -43,37 +47,42 @@ def apply_dynamic_emissions_using_network_contributions(
         bt.logging.warning("No normalized rewards provided for scaling")
         return {}
 
-    # Calculate network metrics and scalars
-    total_lines, total_merged_prs, total_unique_repos = get_network_totals(miner_evaluations)
-    
-    lines_scalar = _exponential_unlock_scalar(
-        total_lines, LINES_CONTRIBUTED_MAX_RECYCLE, LINES_CONTRIBUTED_RECYCLE_DECAY_RATE
-    )
-    merged_prs_scalar = _exponential_unlock_scalar(
-        total_merged_prs, MERGED_PRS_MAX_RECYCLE, MERGED_PRS_RECYCLE_DECAY_RATE
-    )
-    unique_repo_scalar = _exponential_unlock_scalar(
-        total_unique_repos, UNIQUE_PRS_MAX_RECYCLE, UNIQUE_PRS_RECYCLE_DECAY_RATE
-    )
+    dynamic_emissions_start = TIER_BASED_INCENTIVE_MECHANISM_START_DATE + timedelta(days=DYNAMIC_EMISSIONS_BUFFER_DAYS)
+    use_dynamic_emissions = datetime.now(UTC) > dynamic_emissions_start
 
-
-    final_scalar = (lines_scalar + merged_prs_scalar + unique_repo_scalar) / 3.0
+    if use_dynamic_emissions:
+        total_lines, total_merged_prs, total_unique_repos = get_network_totals(miner_evaluations)
+        
+        lines_scalar = _exponential_unlock_scalar(
+            total_lines, LINES_CONTRIBUTED_MAX_RECYCLE, LINES_CONTRIBUTED_RECYCLE_DECAY_RATE
+        )
+        merged_prs_scalar = _exponential_unlock_scalar(
+            total_merged_prs, MERGED_PRS_MAX_RECYCLE, MERGED_PRS_RECYCLE_DECAY_RATE
+        )
+        unique_repo_scalar = _exponential_unlock_scalar(
+            total_unique_repos, UNIQUE_PRS_MAX_RECYCLE, UNIQUE_PRS_RECYCLE_DECAY_RATE
+        )
+        final_scalar = (lines_scalar + merged_prs_scalar + unique_repo_scalar) / 3.0
+    else:
+        lines_scalar = merged_prs_scalar = unique_repo_scalar = None
+        final_scalar = DEFAULT_FIXED_RECYCLE_RATE
 
     # Apply scaling and calculate recycled amount
     total_original = sum(normalized_rewards.values())
-    scaled_rewards = {uid: reward * final_scalar for uid, reward in normalized_rewards.items()}
     total_recycled = total_original * (1 - final_scalar)
     
-    # Dynamic bound: full recycle (1.0) if no earned scores, otherwise 0
-    dynamic_recycle_bound = 1 if total_original <= 0 else 0
-
-    # Allocate recycled emissions
-    scaled_rewards[RECYCLE_UID] = scaled_rewards.get(RECYCLE_UID, 0.0) + max(total_recycled, dynamic_recycle_bound)
+    scaled_rewards = {uid: reward * final_scalar for uid, reward in normalized_rewards.items()}
+    scaled_rewards[RECYCLE_UID] = scaled_rewards.get(RECYCLE_UID, 0.0) + max(total_recycled, 1.0 if total_original <= 0 else 0.0)
 
     recycle_percentage = (total_recycled / total_original * 100) if total_original > 0 else 100.0
-    bt.logging.info(
-        f"Dynamic emissions: lines_scalar={lines_scalar:.2f}, merged_prs_scalar={merged_prs_scalar:.2f}, unique_repo_scalar={unique_repo_scalar:.2f}, "
-        f"final={final_scalar:.2f}, recycled={total_recycled:.2f} ({recycle_percentage:.2f}%)"
-    )
+    
+    if use_dynamic_emissions:
+        bt.logging.info(
+            f"Dynamic emissions: lines={lines_scalar:.2f}, merged_prs={merged_prs_scalar:.2f}, "
+            f"unique_repos={unique_repo_scalar:.2f}, recycle_scalar={final_scalar:.2f}, "
+            f"recycled={total_recycled:.2f} ({recycle_percentage:.2f}%)"
+        )
+    else:
+        bt.logging.info(f"Fixed emissions until {dynamic_emissions_start}: recycle_scalar={final_scalar:.2f}, recycled={total_recycled:.2f} ({recycle_percentage:.2f}%)")
 
     return scaled_rewards

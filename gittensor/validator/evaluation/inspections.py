@@ -8,8 +8,8 @@ import bittensor as bt
 
 from gittensor.classes import GitPatSynapse, MinerEvaluation
 from gittensor.constants import (
-    RECYCLE_UID,
     MIN_GITHUB_ACCOUNT_AGE,
+    RECYCLE_UID,
 )
 from gittensor.utils.github_api_tools import (
     get_github_account_age_days,
@@ -17,9 +17,7 @@ from gittensor.utils.github_api_tools import (
 )
 
 
-def detect_and_penalize_miners_sharing_github(
-    miner_evaluations: Dict[int, MinerEvaluation]
-):
+def detect_and_penalize_miners_sharing_github(miner_evaluations: Dict[int, MinerEvaluation]):
     """
     Detects miners that used the same github, duplicated across multiple uids.
     Will then penalize detected 'duplicate miners' with a score of 0.0.
@@ -38,7 +36,7 @@ def detect_and_penalize_miners_sharing_github(
             github_id_to_uids[evaluation.github_id].append(uid)
 
     duplicate_count = 0
-    for github_id, uids in github_id_to_uids.items():
+    for _, uids in github_id_to_uids.items():
         if len(uids) <= 1:
             continue
 
@@ -87,15 +85,16 @@ def validate_github_credentials(uid: int, pat: Optional[str]) -> Tuple[Optional[
     """Validate PAT and return (github_id, error_reason) tuple."""
     if not pat:
         return None, f"No Github PAT provided by miner {uid}"
-    
+
     github_id = get_github_id(pat)
     if not github_id:
         return None, f"No Github id found for miner {uid}'s PAT"
-    
+
     account_age = get_github_account_age_days(pat)
     if not account_age:
         return None, f"Could not determine Github account age for miner {uid}"
     if account_age < MIN_GITHUB_ACCOUNT_AGE:
         return None, f"Miner {uid}'s Github account too young ({account_age} < {MIN_GITHUB_ACCOUNT_AGE} days)"
-    
+
     return github_id, None
+

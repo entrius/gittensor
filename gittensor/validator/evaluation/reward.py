@@ -19,6 +19,7 @@ from gittensor.validator.evaluation.scoring import (
     finalize_miner_scores,
     score_miner_prs,
 )
+from gittensor.validator.utils.load_weights import RepositoryConfig
 
 # NOTE: there was a circular import error, needed this if to resolve it
 if TYPE_CHECKING:
@@ -53,7 +54,7 @@ async def query_miner(self, uid: int) -> GitPatSynapse:
 async def evaluate_miners_pull_requests(
     uid: int,
     response: GitPatSynapse,
-    master_repositories: Dict[str, Dict],
+    master_repositories: Dict[str, RepositoryConfig],
     programming_languages: Dict[str, float],
 ) -> MinerEvaluation:
     """
@@ -62,7 +63,7 @@ async def evaluate_miners_pull_requests(
     Args:
         uid: The uid of the miner being evaluated
         response: The GitPatSynapse (github access token) returned by the miner
-        master_repositories: The incentivized repositories and their metadata (weight, inactiveAt)
+        master_repositories: The incentivized repositories and their RepositoryConfig objects
         programming_languages: The programming languages and their weights
 
     Returns:
@@ -88,13 +89,16 @@ async def evaluate_miners_pull_requests(
 
 
 async def get_rewards(
-    self: Validator, uids: set[int], master_repositories: dict[str, dict], programming_languages: dict[str, float]
+    self: Validator,
+    uids: set[int],
+    master_repositories: Dict[str, RepositoryConfig],
+    programming_languages: Dict[str, float],
 ) -> np.ndarray:
     """
     Args:
         uids (set[int]): All valid miner uids in the subnet
-        master_repositories (dict[str, dict]): The dict of repositories (name -> {weight, inactiveAt})
-        programming_languages (dict[str, float]): The dict of languages (extension, weight)
+        master_repositories (Dict[str, RepositoryConfig]): The dict of repositories (name -> RepositoryConfig)
+        programming_languages (Dict[str, float]): The dict of languages (extension, weight)
     Returns:
         rewards (array[int]): An array of scores for all miners in sorted fashion, miner n score = index[n]
     """
@@ -112,11 +116,13 @@ async def get_rewards(
         responses[uid] = miner_response
 
         # Calculate score
-        miner_evaluation = await evaluate_miners_pull_requests(uid, miner_response, master_repositories, programming_languages)
+        miner_evaluation = await evaluate_miners_pull_requests(
+            uid, miner_response, master_repositories, programming_languages
+        )
         miner_evaluations[uid] = miner_evaluation
 
     # Adjust scores for duplicate accounts
-    detect_and_penalize_miners_sharing_github(responses, miner_evaluations)
+    detect_and_penalize_miners_sharing_github(miner_evaluations)
 
     # Finalize scores: apply unique contribution multiplier, sum totals, deduct collateral
     finalize_miner_scores(miner_evaluations)

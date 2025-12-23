@@ -2,7 +2,7 @@
 # Copyright © 2025 Entrius
 
 import asyncio
-from typing import TYPE_CHECKING, Any, Dict
+from typing import TYPE_CHECKING
 
 import bittensor as bt
 

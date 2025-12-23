@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS repositories (
 
     -- Repository tier and additional branches
     tier                       VARCHAR(10)    NOT NULL DEFAULT 'Bronze' CHECK (tier IN ('Bronze', 'Silver', 'Gold')),
-    additional_allowed_branches TEXT[]        DEFAULT NULL,
+    additional_acceptable_branches TEXT[]        DEFAULT NULL,
 
     -- Activity status (NULL = active, timestamp = inactive)
     inactive_at                TIMESTAMPTZ    DEFAULT NULL,

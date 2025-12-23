@@ -9,9 +9,9 @@ import bittensor as bt
 import requests
 
 from gittensor.classes import (
-    PRState,
     FileChange,
     MinerEvaluation,
+    PRState,
 )
 from gittensor.constants import (
     BASE_GITHUB_API_URL,
@@ -19,6 +19,7 @@ from gittensor.constants import (
     IGNORED_AUTHOR_ASSOCIATIONS,
 )
 from gittensor.validator.utils.config import PR_LOOKBACK_DAYS
+from gittensor.validator.utils.load_weights import RepositoryConfig
 
 # core github graphql query
 QUERY = """
@@ -99,6 +100,7 @@ QUERY = """
     }
     """
 
+
 def branch_matches_pattern(branch_name: str, patterns: List[str]) -> bool:
     """Check if a branch name matches any pattern in the list.
 
@@ -177,9 +179,7 @@ def get_github_user(token: str) -> Optional[Dict[str, Any]]:
                 time.sleep(2)
 
         except Exception as e:
-            bt.logging.warning(
-                f"Could not fetch GitHub user (attempt {attempt + 1}/6): {e}"
-            )
+            bt.logging.warning(f"Could not fetch GitHub user (attempt {attempt + 1}/6): {e}")
             if attempt < 5:  # Don't sleep on last attempt
                 time.sleep(2)
 
@@ -344,7 +344,7 @@ def try_add_open_or_closed_pr(
     repository_full_name: str,
     pr_state: str,
     date_filter: datetime,
-    active_repositories: List[str]
+    active_repositories: List[str],
 ) -> None:
     """
     Attempts to add an OPEN or CLOSED PR to miner_eval if eligible.
@@ -375,11 +375,9 @@ def try_add_open_or_closed_pr(
         if closed_dt >= date_filter and closed_dt > CREDIBILITY_APPLICATION_DATE:
             miner_eval.add_closed_pull_request(pr_raw)
 
+
 def should_skip_merged_pr(
-    pr_raw: Dict,
-    repository_full_name: str,
-    master_repositories: dict[str, dict],
-    date_filter: datetime
+    pr_raw: Dict, repository_full_name: str, master_repositories: Dict[str, RepositoryConfig], date_filter: datetime
 ) -> tuple[bool, Optional[str]]:
     """
     Validate a merged PR against all eligibility criteria.
@@ -387,7 +385,7 @@ def should_skip_merged_pr(
     Args:
         pr_raw (Dict): Raw PR data from GraphQL
         repository_full_name (str): Full repository name (owner/repo)
-        master_repositories (dict[str, dict]): Repository metadata (keys are normalized to lowercase)
+        master_repositories (Dict[str, RepositoryConfig]): Repository metadata (keys are normalized to lowercase)
         date_filter (datetime): Date filter for lookback period
 
     Returns:
@@ -398,7 +396,7 @@ def should_skip_merged_pr(
         return (True, f"PR #{pr_raw['number']} is MERGED, but missing a mergedAt timestamp. Skipping...")
 
     merged_dt = datetime.fromisoformat(pr_raw['mergedAt'].rstrip("Z")).replace(tzinfo=timezone.utc)
-    
+
     # Filter by master_repositories - keys are already normalized to lowercase
     if repository_full_name not in master_repositories:
         return (True, f"Skipping PR #{pr_raw['number']} in {repository_full_name} - ineligible repo")
@@ -435,8 +433,8 @@ def should_skip_merged_pr(
     )
     base_ref = pr_raw['baseRefName']
     head_ref = pr_raw.get('headRefName', '')  # Source branch (where PR is coming FROM)
-    repo_metadata = master_repositories[repository_full_name]
-    additional_branches = repo_metadata.get('additional_acceptable_branches', [])
+    repo_config = master_repositories[repository_full_name]
+    additional_branches = repo_config.additional_acceptable_branches or []
 
     # Build list of all acceptable branches (default + additional)
     acceptable_branches = [default_branch] + additional_branches
@@ -471,9 +469,8 @@ def should_skip_merged_pr(
             )
 
     # Check if repo is inactive
-    inactive_at = repo_metadata.get("inactiveAt")
-    if inactive_at is not None:
-        inactive_dt = datetime.fromisoformat(inactive_at.rstrip("Z")).replace(tzinfo=timezone.utc)
+    if repo_config.inactive_at is not None:
+        inactive_dt = datetime.fromisoformat(repo_config.inactive_at.rstrip("Z")).replace(tzinfo=timezone.utc)
         # Skip PR if it was merged at or after the repo became inactive
         if merged_dt >= inactive_dt:
             return (
@@ -485,16 +482,14 @@ def should_skip_merged_pr(
     return (False, None)
 
 
-def load_miners_prs(
-    miner_eval: MinerEvaluation, master_repositories: dict[str, dict], max_prs: int = 1000
-) -> None:
+def load_miners_prs(miner_eval: MinerEvaluation, master_repositories: Dict[str, RepositoryConfig], max_prs: int = 1000) -> None:
     """
     Fetches user PRs via GraphQL API and categorize them by state.
     Populates the provided miner_eval instance with fetched PR data.
 
     Args:
         miner_eval: The MinerEvaluation object containing github details + more
-        master_repositories: Repository metadata (name -> {weight, inactiveAt})
+        master_repositories: Repository metadata (name -> RepositoryConfig)
         max_prs: Maximum merged PRs to fetch
     """
     bt.logging.info("*****Fetching PRs*****")
@@ -503,20 +498,24 @@ def load_miners_prs(
     global_user_id = base64.b64encode(f"04:User{miner_eval.github_id}".encode()).decode()
 
     cursor = None
-    
-    # Build list of active repositories (those without an inactiveAt timestamp)
+
+    # Build list of active repositories (those without an inactive_at timestamp)
     # Keys are already normalized to lowercase
     active_repositories = [
-        repo_full_name for repo_full_name, metadata in master_repositories.items() if metadata.get("inactiveAt") is None
+        repo_full_name
+        for repo_full_name, config in master_repositories.items()
+        if config.inactive_at is None
     ]
 
     try:
         while len(miner_eval.merged_pull_requests) < max_prs:
-            response = get_github_graphql_query(miner_eval.github_pat, global_user_id, len(miner_eval.merged_pull_requests), max_prs, cursor)
+            response = get_github_graphql_query(
+                miner_eval.github_pat, global_user_id, len(miner_eval.merged_pull_requests), max_prs, cursor
+            )
             if not response:
                 bt.logging.warning("No response from github, breaking fetch loop...")
                 break
-            
+
             data = response.json()
 
             if 'errors' in data:
@@ -537,7 +536,9 @@ def load_miners_prs(
                 pr_state = pr_raw['state']
 
                 if pr_state in (PRState.OPEN.value, PRState.CLOSED.value):
-                    try_add_open_or_closed_pr(miner_eval, pr_raw, repository_full_name, pr_state, date_filter, active_repositories)
+                    try_add_open_or_closed_pr(
+                        miner_eval, pr_raw, repository_full_name, pr_state, date_filter, active_repositories
+                    )
                     continue
 
                 should_skip, skip_reason = should_skip_merged_pr(

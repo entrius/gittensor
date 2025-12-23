@@ -9,33 +9,38 @@ import bittensor as bt
 
 from gittensor.classes import Issue, MinerEvaluation, PRState, PullRequest
 from gittensor.constants import (
+    EXCESSIVE_PR_MIN_MULTIPLIER,
+    EXCESSIVE_PR_PENALTY_SLOPE,
+    EXCESSIVE_PR_PENALTY_THRESHOLD,
+    MAX_ISSUE_AGE_FOR_MAX_SCORE,
+    MAX_ISSUE_CLOSE_WINDOW_DAYS,
     SECONDS_PER_DAY,
     SECONDS_PER_HOUR,
-    MAX_ISSUE_CLOSE_WINDOW_DAYS,
+    TIERS_AND_COLLATERAL_EFFECTIVE_DATE,
+    TIME_DECAY_GRACE_PERIOD_HOURS,
     TIME_DECAY_MIN_MULTIPLIER,
     TIME_DECAY_SIGMOID_MIDPOINT,
     TIME_DECAY_SIGMOID_STEEPNESS_SCALAR,
-    TIME_DECAY_GRACE_PERIOD_HOURS,
     UNIQUE_PR_BOOST,
-    MAX_ISSUE_AGE_FOR_MAX_SCORE,
-    EXCESSIVE_PR_PENALTY_THRESHOLD,
-    EXCESSIVE_PR_PENALTY_SLOPE,
-    EXCESSIVE_PR_MIN_MULTIPLIER,
-    TIERS_AND_COLLATERAL_EFFECTIVE_DATE,
 )
 from gittensor.utils.github_api_tools import get_pull_request_file_changes
 from gittensor.validator.configurations.tier_config import (
-    TierConfig,
-    Tier,
     TIERS,
+    Tier,
+    TierConfig,
     get_tier_from_config,
 )
-from gittensor.validator.evaluation.credibility import calculate_credibility_per_tier, calculate_tier_stats, is_tier_unlocked
+from gittensor.validator.evaluation.credibility import (
+    calculate_credibility_per_tier,
+    calculate_tier_stats,
+    is_tier_unlocked,
+)
+from gittensor.validator.utils.load_weights import RepositoryConfig
 
 
 def score_miner_prs(
     miner_eval: MinerEvaluation,
-    master_repositories: Dict[str, Dict],
+    master_repositories: Dict[str, RepositoryConfig],
     programming_languages: Dict[str, float],
 ) -> None:
     """Score all pull requests (merged and open) for a miner."""
@@ -64,10 +69,11 @@ def score_miner_prs(
         else:
             miner_eval.open_pull_requests = scored_prs
 
+
 def score_pull_request(
     pr: PullRequest,
     miner_eval: MinerEvaluation,
-    master_repositories: Dict[str, Dict],
+    master_repositories: Dict[str, RepositoryConfig],
     programming_languages: Dict[str, float],
 ) -> bool:
     """Score a single PR (merged or open). Returns True if scored, False if skipped."""
@@ -90,10 +96,13 @@ def score_pull_request(
     return True
 
 
-def get_tier_config(repo_full_name: str, master_repositories: Dict[str, Dict]) -> Optional[TierConfig]:
+def get_tier_config(repo_full_name: str, master_repositories: Dict[str, RepositoryConfig]) -> Optional[TierConfig]:
     """Get tier configuration for a repository."""
-    tier_str = master_repositories.get(repo_full_name, {}).get("tier")
-    tier_config = TIERS.get(Tier(tier_str)) if tier_str else None
+    repo_config = master_repositories.get(repo_full_name)
+    if not repo_config:
+        return None
+
+    tier_config = TIERS.get(repo_config.tier) if repo_config.tier else None
     if not tier_config:
         bt.logging.warning(f"{repo_full_name} is not configured to a tier. Skipping...")
     return tier_config
@@ -121,12 +130,14 @@ def calculate_base_score(pr: PullRequest, programming_languages: Dict[str, float
     return base_score
 
 
-def calculate_pr_multipliers(pr: PullRequest, miner_eval: MinerEvaluation, master_repositories: Dict[str, Dict]) -> None:
+def calculate_pr_multipliers(
+    pr: PullRequest, miner_eval: MinerEvaluation, master_repositories: Dict[str, RepositoryConfig]
+) -> None:
     """Calculate all multipliers for a PR."""
     is_merged = pr.pr_state == PRState.MERGED
-    repo_meta = master_repositories.get(pr.repository_full_name, {})
+    repo_config = master_repositories.get(pr.repository_full_name)
 
-    pr.repo_weight_multiplier = round(repo_meta.get("weight", 0.01), 2)
+    pr.repo_weight_multiplier = round(repo_config.weight if repo_config else 0.01, 2)
     pr.issue_multiplier = round(calculate_issue_multiplier(pr), 2)
     pr.gittensor_tag_multiplier = 1.0 if pr.gittensor_tagged else 0.0
 
@@ -199,7 +210,9 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
 
         bt.logging.info(f"\n***Finalizing scores for UID {uid}***")
 
-        evaluation.tier_credibility = calculate_credibility_per_tier(evaluation.merged_pull_requests, evaluation.closed_pull_requests)
+        evaluation.tier_credibility = calculate_credibility_per_tier(
+            evaluation.merged_pull_requests, evaluation.closed_pull_requests
+        )
 
         # Calculate tier stats for determining current_tier
         tier_stats = calculate_tier_stats(evaluation.merged_pull_requests, evaluation.closed_pull_requests)
@@ -213,7 +226,7 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
             tier_config = pr.repository_tier_configuration
             tier = get_tier_from_config(tier_config)
             credibility = evaluation.tier_credibility.get(tier, 1.0) if tier else 1.0
-            pr.credibility_multiplier = round(credibility ** tier_config.credibility_scalar, 2)
+            pr.credibility_multiplier = round(credibility**tier_config.credibility_scalar, 2)
 
             pr.calculate_final_earned_score()
             evaluation.base_total_score += pr.base_score
@@ -286,7 +299,9 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
     bt.logging.info("Finalization complete.")
 
 
-def calculate_uniqueness_multiplier(repo_full_name: str, repo_counts: Dict[str, int], total_contributing_miners: int) -> float:
+def calculate_uniqueness_multiplier(
+    repo_full_name: str, repo_counts: Dict[str, int], total_contributing_miners: int
+) -> float:
     """Calculate repository uniqueness multiplier based on how many miners contribute to a repo."""
     if total_contributing_miners == 0:
         return 1.0
@@ -324,7 +339,9 @@ def calculate_issue_multiplier(pr: PullRequest) -> float:
     try:
         end_date = issue.closed_at if (is_merged and issue.closed_at) else datetime.now(timezone.utc)
         days_open = (end_date - issue.created_at).days
-        normalized = 0.1 + math.sqrt(min(days_open, MAX_ISSUE_AGE_FOR_MAX_SCORE)) / math.sqrt(MAX_ISSUE_AGE_FOR_MAX_SCORE)
+        normalized = 0.1 + math.sqrt(min(days_open, MAX_ISSUE_AGE_FOR_MAX_SCORE)) / math.sqrt(
+            MAX_ISSUE_AGE_FOR_MAX_SCORE
+        )
         issue_bonus = 0.9 * min(normalized, 1.0)
         bt.logging.info(f"Issue #{issue.number} - Open for {days_open} days | bonus: {issue_bonus:.2f}")
         return 1.0 + issue_bonus
@@ -363,7 +380,9 @@ def is_valid_issue(issue: Issue, pr: PullRequest) -> bool:
         if issue.closed_at and pr.merged_at:
             days_diff = abs((issue.closed_at - pr.merged_at).total_seconds()) / SECONDS_PER_DAY
             if days_diff > MAX_ISSUE_CLOSE_WINDOW_DAYS:
-                bt.logging.warning(f"Skipping issue #{issue.number} - closed {days_diff:.1f}d from merge (max: {MAX_ISSUE_CLOSE_WINDOW_DAYS})")
+                bt.logging.warning(
+                    f"Skipping issue #{issue.number} - closed {days_diff:.1f}d from merge (max: {MAX_ISSUE_CLOSE_WINDOW_DAYS})"
+                )
                 return False
 
     return True
@@ -372,6 +391,7 @@ def is_valid_issue(issue: Issue, pr: PullRequest) -> bool:
 # =============================================================================
 # Collateral System Functions
 # =============================================================================
+
 
 def calculate_open_pr_collateral_score(pr: PullRequest) -> float:
     """
@@ -405,5 +425,3 @@ def calculate_open_pr_collateral_score(pr: PullRequest) -> float:
     )
 
     return collateral_score
-
-

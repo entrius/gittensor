@@ -10,6 +10,8 @@ from gittensor.constants import (
     LINES_CONTRIBUTED_MAX_RECYCLE,
     UNIQUE_PRS_RECYCLE_DECAY_RATE,
     UNIQUE_PRS_MAX_RECYCLE,
+    MERGED_PRS_RECYCLE_DECAY_RATE,
+    MERGED_PRS_MAX_RECYCLE,
 )
 
 
@@ -18,19 +20,20 @@ def _exponential_unlock_scalar(value: float, max_recycle: float, decay_rate: flo
     return min(1.0, (1 - max_recycle) + max_recycle * (1 - np.exp(-decay_rate * value)))
 
 
-def get_network_totals(miner_evaluations: Dict[int, MinerEvaluation]) -> tuple[int, int]:
-    """Extract total lines changed and unique repos from evaluations."""
+def get_network_totals(miner_evaluations: Dict[int, MinerEvaluation]) -> tuple[int, int, int]:
+    """Extract total lines changed, unique repos, and total merged PR count from evaluations."""
     total_lines = 0
     unique_repos: Set[str] = set()
+    total_merged_prs = 0
     
     for evaluation in miner_evaluations.values():
-        if evaluation.total_merged_prs > 0:  # Exclude penalized miners
-            total_lines += evaluation.total_lines_changed
+        total_lines += evaluation.total_lines_changed
+        total_merged_prs += evaluation.total_merged_prs
+        
         if repos := evaluation.unique_repos_contributed_to:
             unique_repos.update(repos)
     
-    return total_lines, len(unique_repos)
-
+    return total_lines, total_merged_prs, len(unique_repos)
 
 def apply_dynamic_emissions_using_network_contributions(
     normalized_rewards: Dict[int, float], miner_evaluations: Dict[int, MinerEvaluation]
@@ -41,15 +44,20 @@ def apply_dynamic_emissions_using_network_contributions(
         return {}
 
     # Calculate network metrics and scalars
-    total_lines, total_unique_repos = get_network_totals(miner_evaluations)
+    total_lines, total_merged_prs, total_unique_repos = get_network_totals(miner_evaluations)
     
     lines_scalar = _exponential_unlock_scalar(
         total_lines, LINES_CONTRIBUTED_MAX_RECYCLE, LINES_CONTRIBUTED_RECYCLE_DECAY_RATE
     )
-    repo_scalar = _exponential_unlock_scalar(
+    merged_prs_scalar = _exponential_unlock_scalar(
+        total_merged_prs, MERGED_PRS_MAX_RECYCLE, MERGED_PRS_RECYCLE_DECAY_RATE
+    )
+    unique_repo_scalar = _exponential_unlock_scalar(
         total_unique_repos, UNIQUE_PRS_MAX_RECYCLE, UNIQUE_PRS_RECYCLE_DECAY_RATE
     )
-    final_scalar = (lines_scalar + repo_scalar) / 2.0
+
+
+    final_scalar = (lines_scalar + merged_prs_scalar + unique_repo_scalar) / 3.0
 
     # Apply scaling and calculate recycled amount
     total_original = sum(normalized_rewards.values())
@@ -64,7 +72,7 @@ def apply_dynamic_emissions_using_network_contributions(
 
     recycle_percentage = (total_recycled / total_original * 100) if total_original > 0 else 100.0
     bt.logging.info(
-        f"Dynamic emissions: lines_scalar={lines_scalar:.3f}, repo_scalar={repo_scalar:.3f}, "
+        f"Dynamic emissions: lines_scalar={lines_scalar:.2f}, merged_prs_scalar={merged_prs_scalar:.2f}, unique_repo_scalar={unique_repo_scalar:.2f}, "
         f"final={final_scalar:.2f}, recycled={total_recycled:.2f} ({recycle_percentage:.2f}%)"
     )
 

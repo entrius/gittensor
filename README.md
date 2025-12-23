@@ -56,7 +56,7 @@ There are multiple checks that a PR must pass to be considered valid for scoring
 
 - PR is in a `Merged` state
 - PR is made to a repository in the master repository list
-- PR is within the lookback window, `MERGED_PR_LOOKBACK_DAYS`
+- PR is within the lookback window, `PR_LOOKBACK_DAYS`
 - PR is NOT merged by the person who created it (self-merged)
 - PR is merged to the dafault branch of the repository (depending on specific repository setup this may be a production or dev branch)
 - PR is merged to a repository BEFORE it was considered ‘inactive’ in the master repository list
@@ -120,8 +120,9 @@ Miners who open PRs excessively will see their score reduced by a penalty multip
 
 Adopted from bitcast, subnet 93, collaborative emissions scaling has the network ‘unlock’ emissions as more miners join and earn a score. Miners will benefit by experiencing individual and cumulative network growth. Two major values affecting the total emissions unlocked rate are:
 
-- Total lines changed within the last 30 days (`MERGED_PR_LOOKBACK_DAYS`)
-- Total unique repositories contributed to within the last 30 days
+- Total lines changed within the last 90 days (`PR_LOOKBACK_DAYS`)
+- Total merged pull requests within the last 90 days
+- Total unique repositories contributed to within the last 90 days
 
 As total lines changed and total unique repositories increases, the percentage of total available emissions increases. Whatever is not released is recycled.
 

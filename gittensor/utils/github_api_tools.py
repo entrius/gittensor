@@ -15,7 +15,6 @@ from gittensor.classes import (
 )
 from gittensor.constants import (
     BASE_GITHUB_API_URL,
-    CREDIBILITY_APPLICATION_DATE,
     IGNORED_AUTHOR_ASSOCIATIONS,
 )
 from gittensor.validator.utils.config import PR_LOOKBACK_DAYS
@@ -372,7 +371,7 @@ def try_add_open_or_closed_pr(
             return
 
         closed_dt = datetime.fromisoformat(closed_at.rstrip("Z")).replace(tzinfo=timezone.utc)
-        if closed_dt >= date_filter and closed_dt > CREDIBILITY_APPLICATION_DATE:
+        if closed_dt >= date_filter:
             miner_eval.add_closed_pull_request(pr_raw)
 
 

@@ -17,6 +17,25 @@ CREATE TABLE IF NOT EXISTS miner_evaluations (
     total_prs             INTEGER          DEFAULT 0,
     unique_repos_count    INTEGER          DEFAULT 0,
 
+    -- Current tier the miner has achieved
+    current_tier          VARCHAR(10)      NOT NULL DEFAULT 'Bronze' CHECK (current_tier IN ('Bronze', 'Silver', 'Gold')),
+
+    -- Per-tier metrics for Bronze, Silver, Gold repositories
+    bronze_merged_prs       INTEGER          DEFAULT 0,
+    bronze_total_prs        INTEGER          DEFAULT 0,
+    bronze_collateral_score DECIMAL(15,6)    DEFAULT 0.0,
+    bronze_score            DECIMAL(15,6)    DEFAULT 0.0,
+
+    silver_merged_prs       INTEGER          DEFAULT 0,
+    silver_total_prs        INTEGER          DEFAULT 0,
+    silver_collateral_score DECIMAL(15,6)    DEFAULT 0.0,
+    silver_score            DECIMAL(15,6)    DEFAULT 0.0,
+
+    gold_merged_prs         INTEGER          DEFAULT 0,
+    gold_total_prs          INTEGER          DEFAULT 0,
+    gold_collateral_score   DECIMAL(15,6)    DEFAULT 0.0,
+    gold_score              DECIMAL(15,6)    DEFAULT 0.0,
+
     -- Metadata with automatic timestamps
     evaluation_timestamp TIMESTAMP        DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'America/Chicago'),
     created_at           TIMESTAMP        DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'America/Chicago'),

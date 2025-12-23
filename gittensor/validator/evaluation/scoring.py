@@ -30,7 +30,7 @@ from gittensor.validator.configurations.tier_config import (
     TIERS,
     get_tier_from_config,
 )
-from gittensor.validator.evaluation.credibility import calculate_credibility_per_tier
+from gittensor.validator.evaluation.credibility import calculate_credibility_per_tier, calculate_tier_stats, is_tier_unlocked
 
 
 def score_miner_prs(
@@ -201,6 +201,9 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
 
         evaluation.tier_credibility = calculate_credibility_per_tier(evaluation.merged_pull_requests, evaluation.closed_pull_requests)
 
+        # Calculate tier stats for determining current_tier
+        tier_stats = calculate_tier_stats(evaluation.merged_pull_requests, evaluation.closed_pull_requests)
+
         # Process merged PRs
         for pr in evaluation.merged_pull_requests:
             pr.repository_uniqueness_multiplier = calculate_uniqueness_multiplier(
@@ -217,10 +220,54 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
             evaluation.total_score += pr.earned_score
             evaluation.total_lines_changed += pr.total_lines_scored
 
+            # Accumulate per-tier metrics for merged PRs
+            if tier == Tier.BRONZE:
+                evaluation.bronze_merged_prs += 1
+                evaluation.bronze_score += pr.earned_score
+            elif tier == Tier.SILVER:
+                evaluation.silver_merged_prs += 1
+                evaluation.silver_score += pr.earned_score
+            elif tier == Tier.GOLD:
+                evaluation.gold_merged_prs += 1
+                evaluation.gold_score += pr.earned_score
+
+        # Count closed PRs per tier for total_prs calculation
+        for pr in evaluation.closed_pull_requests:
+            tier_config = pr.repository_tier_configuration
+            tier = get_tier_from_config(tier_config)
+            if tier == Tier.BRONZE:
+                evaluation.bronze_total_prs += 1
+            elif tier == Tier.SILVER:
+                evaluation.silver_total_prs += 1
+            elif tier == Tier.GOLD:
+                evaluation.gold_total_prs += 1
+
+        # Add merged counts to total_prs per tier
+        evaluation.bronze_total_prs += evaluation.bronze_merged_prs
+        evaluation.silver_total_prs += evaluation.silver_merged_prs
+        evaluation.gold_total_prs += evaluation.gold_merged_prs
+
         # Process open PRs for collateral
         for pr in evaluation.open_pull_requests:
             pr.collateral_score = calculate_open_pr_collateral_score(pr)
             evaluation.total_collateral_score += pr.collateral_score
+
+            # Accumulate per-tier collateral scores
+            tier_config = pr.repository_tier_configuration
+            tier = get_tier_from_config(tier_config)
+            if tier == Tier.BRONZE:
+                evaluation.bronze_collateral_score += pr.collateral_score
+            elif tier == Tier.SILVER:
+                evaluation.silver_collateral_score += pr.collateral_score
+            elif tier == Tier.GOLD:
+                evaluation.gold_collateral_score += pr.collateral_score
+
+        # Determine miner's current tier based on what tiers they've unlocked
+        evaluation.current_tier = Tier.BRONZE  # Default
+        for tier in [Tier.GOLD, Tier.SILVER, Tier.BRONZE]:  # Check from highest to lowest
+            if is_tier_unlocked(tier, tier_stats):
+                evaluation.current_tier = tier
+                break
 
         # Apply collateral deduction
         earned_score = evaluation.total_score
@@ -229,7 +276,11 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
 
         bt.logging.info(
             f"UID {uid}: earned={earned_score:.2f} - collateral={evaluation.total_collateral_score:.2f} = "
-            f"final={evaluation.total_score:.2f} ({evaluation.total_merged_prs} merged, {evaluation.total_open_prs} open)"
+            f"final={evaluation.total_score:.2f} ({evaluation.total_merged_prs} merged, {evaluation.total_open_prs} open) "
+            f"| Current Tier: {evaluation.current_tier.value} "
+            f"| Per-Tier: Bronze({evaluation.bronze_merged_prs}/{evaluation.bronze_total_prs}), "
+            f"Silver({evaluation.silver_merged_prs}/{evaluation.silver_total_prs}), "
+            f"Gold({evaluation.gold_merged_prs}/{evaluation.gold_total_prs})"
         )
 
     bt.logging.info("Finalization complete.")

@@ -38,10 +38,10 @@ MAX_ISSUE_CLOSE_WINDOW_DAYS = 1
 MAX_ISSUE_AGE_FOR_MAX_SCORE = 45  # days
 
 # Time decay (sigmoid curve)
-TIME_DECAY_GRACE_PERIOD_HOURS = 4  # hours before time decay begins
-TIME_DECAY_SIGMOID_MIDPOINT = 4  # days until 50% score loss
-TIME_DECAY_SIGMOID_STEEPNESS_SCALAR = 0.9
-TIME_DECAY_MIN_MULTIPLIER = 0.01
+TIME_DECAY_GRACE_PERIOD_HOURS = 12  # hours before time decay begins
+TIME_DECAY_SIGMOID_MIDPOINT = 10  # days until 50% score loss
+TIME_DECAY_SIGMOID_STEEPNESS_SCALAR = 0.4
+TIME_DECAY_MIN_MULTIPLIER = 0.05 # 5% of score will retain through lookback days (90D)
 
 # =============================================================================
 # Tiers & Collateral System

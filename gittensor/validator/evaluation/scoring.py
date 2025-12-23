@@ -16,7 +16,6 @@ from gittensor.constants import (
     MAX_ISSUE_CLOSE_WINDOW_DAYS,
     SECONDS_PER_DAY,
     SECONDS_PER_HOUR,
-    TIERS_AND_COLLATERAL_EFFECTIVE_DATE,
     TIME_DECAY_GRACE_PERIOD_HOURS,
     TIME_DECAY_MIN_MULTIPLIER,
     TIME_DECAY_SIGMOID_MIDPOINT,
@@ -373,9 +372,6 @@ def calculate_open_pr_collateral_score(pr: PullRequest) -> float:
                     uniqueness (cross-miner), open_pr_spam (not for collateral)
     """
     from math import prod
-
-    if pr.created_at <= TIERS_AND_COLLATERAL_EFFECTIVE_DATE:
-        return 0.0
 
     multipliers = {
         "repo_weight": pr.repo_weight_multiplier,

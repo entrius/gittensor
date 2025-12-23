@@ -10,6 +10,25 @@ from gittensor.constants import (
     DEFAULT_MAX_CONTRIBUTION_SCORE_FOR_FULL_BONUS,
 )
 
+@dataclass
+class TierStats:
+    """Statistics for a single tier."""
+    merged_count: int = 0
+    closed_count: int = 0
+    open_count: int = 0
+
+    # Included as scoring details at the tier level
+    earned_score: float = 0.0
+    collateral_score: float = 0.0
+
+    @property
+    def total_attempts(self) -> int:
+        return self.merged_count + self.closed_count
+
+    @property
+    def credibility(self) -> float:
+        return self.merged_count / self.total_attempts if self.total_attempts > 0 else 0.0
+
 
 class Tier(str, Enum):
     BRONZE = "Bronze"

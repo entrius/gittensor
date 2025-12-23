@@ -8,6 +8,7 @@ import bittensor as bt
 
 from gittensor.validator.configurations.tier_config import (
     Tier,
+    TierStats,
     TIERS,
     TIERS_ORDER,
     get_tier_from_config,
@@ -17,24 +18,11 @@ if TYPE_CHECKING:
     from gittensor.classes import PullRequest
 
 
-@dataclass
-class TierStats:
-    """Statistics for a single tier."""
-    merged: int = 0
-    closed: int = 0
-
-    @property
-    def total(self) -> int:
-        return self.merged + self.closed
-
-    @property
-    def credibility(self) -> float:
-        return self.merged / self.total if self.total > 0 else 0.0
-
-
 def calculate_tier_stats(
     merged_prs: List["PullRequest"],
     closed_prs: List["PullRequest"],
+    open_prs: List["PullRequest"] = [],
+    include_scoring_details: bool = False,
 ) -> Dict[Tier, TierStats]:
     """Calculate merged/closed counts per tier."""
     stats: Dict[Tier, TierStats] = {tier: TierStats() for tier in Tier}
@@ -43,13 +31,23 @@ def calculate_tier_stats(
         if pr.repository_tier_configuration:
             tier = get_tier_from_config(pr.repository_tier_configuration)
             if tier:
-                stats[tier].merged += 1
+                stats[tier].merged_count += 1
+                if include_scoring_details:
+                    stats[tier].earned_score += pr.earned_score
 
     for pr in closed_prs:
         if pr.repository_tier_configuration:
             tier = get_tier_from_config(pr.repository_tier_configuration)
             if tier:
-                stats[tier].closed += 1
+                stats[tier].closed_count += 1
+
+    for pr in open_prs:
+        if pr.repository_tier_configuration:
+            tier = get_tier_from_config(pr.repository_tier_configuration)
+            if tier:
+                stats[tier].open_count += 1
+            if include_scoring_details:
+                    stats[tier].collateral_score += pr.collateral_score
 
     return stats
 
@@ -68,7 +66,7 @@ def is_tier_unlocked(tier: Tier, tier_stats: Dict[Tier, TierStats]) -> bool:
         stats = tier_stats[check_tier]
 
         if config.required_merges is not None:
-            if stats.merged < config.required_merges:
+            if stats.merged_count < config.required_merges:
                 return False
 
         if config.required_credibility is not None:
@@ -95,7 +93,7 @@ def calculate_credibility_per_tier(
         config = TIERS[tier]
 
         # Skip tiers with no activity
-        if stats.total == 0:
+        if stats.total_attempts == 0:
             continue
 
         # Check if tier is unlocked
@@ -103,15 +101,15 @@ def calculate_credibility_per_tier(
             tier_credibility[tier] = 0.0
             bt.logging.warning(
                 f"Tier {tier.value}: NOT UNLOCKED - credibility = 0.0 "
-                f"(has {stats.merged} merged, {stats.closed} closed but tier requirements not met)"
+                f"(has {stats.merged_count} merged, {stats.closed_count} closed but tier requirements not met)"
             )
             continue
 
         # Check if enough attempts to activate credibility scoring
-        if stats.total < config.credibility_activation_attempts:
+        if stats.total_attempts < config.credibility_activation_attempts:
             tier_credibility[tier] = 1.0
             bt.logging.info(
-                f"Tier {tier.value}: {stats.merged}/{stats.total} attempts "
+                f"Tier {tier.value}: {stats.merged_count}/{stats.total_attempts} attempts "
                 f"(below {config.credibility_activation_attempts} activation threshold) - credibility = 1.0"
             )
             continue
@@ -119,6 +117,6 @@ def calculate_credibility_per_tier(
         # Calculate actual credibility
         credibility = stats.credibility
         tier_credibility[tier] = credibility
-        bt.logging.info(f"Tier {tier.value}: {stats.merged}/{stats.total} = {credibility:.2f} credibility")
+        bt.logging.info(f"Tier {tier.value}: {stats.merged_count}/{stats.total_attempts} = {credibility:.2f} credibility")
 
     return tier_credibility

@@ -13,7 +13,7 @@ from typing import List, TypeVar
 import numpy as np
 
 from gittensor.classes import FileChange, Issue, Miner, MinerEvaluation, PullRequest
-
+from gittensor.validator.configurations.tier_config import Tier
 from .queries import (
     BULK_UPSERT_FILE_CHANGES,
     BULK_UPSERT_ISSUES,
@@ -294,18 +294,21 @@ class Repository(BaseRepository):
                 evaluation.total_prs,
                 evaluation.unique_repos_count,
                 evaluation.current_tier.value,
-                evaluation.bronze_merged_prs,
-                evaluation.bronze_total_prs,
-                evaluation.bronze_collateral_score,
-                evaluation.bronze_score,
-                evaluation.silver_merged_prs,
-                evaluation.silver_total_prs,
-                evaluation.silver_collateral_score,
-                evaluation.silver_score,
-                evaluation.gold_merged_prs,
-                evaluation.gold_total_prs,
-                evaluation.gold_collateral_score,
-                evaluation.gold_score,
+
+                evaluation.stats_by_tier[Tier.BRONZE].merged_count,
+                evaluation.stats_by_tier[Tier.BRONZE].total_attempts,
+                evaluation.stats_by_tier[Tier.BRONZE].collateral_score,
+                evaluation.stats_by_tier[Tier.BRONZE].earned_score,
+
+                evaluation.stats_by_tier[Tier.SILVER].merged_count,
+                evaluation.stats_by_tier[Tier.SILVER].total_attempts,
+                evaluation.stats_by_tier[Tier.SILVER].collateral_score,
+                evaluation.stats_by_tier[Tier.SILVER].earned_score,
+
+                evaluation.stats_by_tier[Tier.GOLD].merged_count,
+                evaluation.stats_by_tier[Tier.GOLD].total_attempts,
+                evaluation.stats_by_tier[Tier.GOLD].collateral_score,
+                evaluation.stats_by_tier[Tier.GOLD].earned_score,
             )
         ]
 

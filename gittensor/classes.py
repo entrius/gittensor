@@ -14,7 +14,7 @@ from gittensor.constants import (
     TEST_FILE_CONTRIBUTION_WEIGHT,
 )
 from gittensor.utils.github_api_tools import parse_repo_name
-from gittensor.validator.configurations.tier_config import Tier, TierConfig
+from gittensor.validator.configurations.tier_config import Tier, TierConfig, TierStats
 
 GITHUB_DOMAIN = 'https://github.com/'
 
@@ -347,24 +347,11 @@ class MinerEvaluation:
     open_pull_requests: List[PullRequest] = field(default_factory=list)
     closed_pull_requests: List[PullRequest] = field(default_factory=list)
     unique_repos_contributed_to: Set[str] = field(default_factory=set)
-    tier_credibility: Dict[Tier, float] = field(default_factory=dict)
+    
+    # Tier level details
     current_tier: Tier = Tier.BRONZE
-
-    # Per-tier metrics for Bronze, Silver, Gold repositories
-    bronze_merged_prs: int = 0
-    bronze_total_prs: int = 0
-    bronze_collateral_score: float = 0.0
-    bronze_score: float = 0.0
-
-    silver_merged_prs: int = 0
-    silver_total_prs: int = 0
-    silver_collateral_score: float = 0.0
-    silver_score: float = 0.0
-
-    gold_merged_prs: int = 0
-    gold_total_prs: int = 0
-    gold_collateral_score: float = 0.0
-    gold_score: float = 0.0
+    credibility_by_tier: Dict[Tier, float] = field(default_factory=dict)
+    stats_by_tier: Dict[Tier, TierStats] = field(default_factory=dict)
 
     @property
     def total_prs(self) -> int:

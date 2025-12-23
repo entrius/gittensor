@@ -4,9 +4,9 @@ from typing import Optional
 
 from gittensor.constants import (
     DEFAULT_COLLATERAL_PERCENT,
-    CREDIBILITY_THRESHOLD,
+    DEFAULT_CREDIBILITY_THRESHOLD,
     DEFAULT_MERGED_PR_BASE_SCORE,
-    MAX_CONTRIBUTION_BONUS_SCORE,
+    MAX_LINE_CONTRIBUTION_BONUS,
     DEFAULT_MAX_CONTRIBUTION_SCORE_FOR_FULL_BONUS,
 )
 
@@ -20,8 +20,8 @@ class Tier(str, Enum):
 TIER_DEFAULTS = {
     "merged_pr_base_score": DEFAULT_MERGED_PR_BASE_SCORE,
     "contribution_score_for_full_bonus": DEFAULT_MAX_CONTRIBUTION_SCORE_FOR_FULL_BONUS,
-    "contribution_score_max_bonus": MAX_CONTRIBUTION_BONUS_SCORE,
-    "credibility_activation_attempts": CREDIBILITY_THRESHOLD,
+    "contribution_score_max_bonus": MAX_LINE_CONTRIBUTION_BONUS,
+    "credibility_activation_attempts": DEFAULT_CREDIBILITY_THRESHOLD,
     "open_pr_collateral_percentage": DEFAULT_COLLATERAL_PERCENT,
 }
 

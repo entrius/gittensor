@@ -26,6 +26,10 @@ class TierStats:
         return self.merged_count + self.closed_count
 
     @property
+    def total_prs(self) -> int:
+        return self.merged_count + self.closed_count + self.open_count
+
+    @property
     def credibility(self) -> float:
         return self.merged_count / self.total_attempts if self.total_attempts > 0 else 0.0
 

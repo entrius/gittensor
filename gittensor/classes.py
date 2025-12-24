@@ -13,7 +13,7 @@ from gittensor.constants import (
     MITIGATED_EXTENSIONS,
     TEST_FILE_CONTRIBUTION_WEIGHT,
 )
-from gittensor.utils.github_api_tools import parse_repo_name
+from gittensor.utils.utils import parse_repo_name
 from gittensor.validator.configurations.tier_config import Tier, TierConfig, TierStats
 
 GITHUB_DOMAIN = 'https://github.com/'
@@ -347,7 +347,7 @@ class MinerEvaluation:
     open_pull_requests: List[PullRequest] = field(default_factory=list)
     closed_pull_requests: List[PullRequest] = field(default_factory=list)
     unique_repos_contributed_to: Set[str] = field(default_factory=set)
-    
+
     # Tier level details
     current_tier: Tier = Tier.BRONZE
     credibility_by_tier: Dict[Tier, float] = field(default_factory=dict)
@@ -355,7 +355,7 @@ class MinerEvaluation:
 
     @property
     def total_prs(self) -> int:
-        return len(self.merged_pull_requests) + len(self.total_closed_prs) + len(self.total_merged_prs)
+        return self.total_merged_prs + self.total_closed_prs + self.total_open_prs
 
     @property
     def total_merged_prs(self) -> int:
@@ -397,9 +397,7 @@ class MinerEvaluation:
     def add_open_pull_request(self, raw_pr: Dict):
         """Add an open pull request that will be factored into scoring."""
         bt.logging.info(f"Counting OPEN PR #{raw_pr['number']} in {parse_repo_name(raw_pr['repository'])}")
-        self.open_pull_requests.append(
-            PullRequest.from_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id)
-        )
+        self.open_pull_requests.append(PullRequest.from_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id))
 
     def add_closed_pull_request(self, raw_pr: Dict):
         """Add a closed pull request that will be factored into scoring."""

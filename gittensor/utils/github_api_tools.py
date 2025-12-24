@@ -18,6 +18,7 @@ from gittensor.constants import (
     IGNORED_AUTHOR_ASSOCIATIONS,
     TIER_BASED_INCENTIVE_MECHANISM_START_DATE,
 )
+from gittensor.utils.utils import parse_repo_name
 from gittensor.validator.utils.config import PR_LOOKBACK_DAYS
 from gittensor.validator.utils.load_weights import RepositoryConfig
 
@@ -115,11 +116,6 @@ def branch_matches_pattern(branch_name: str, patterns: List[str]) -> bool:
         if fnmatch.fnmatch(branch_name, pattern):
             return True
     return False
-
-
-def parse_repo_name(repo_data: Dict):
-    """Normalizes and converts repository name from dict"""
-    return f"{repo_data['owner']['login']}/{repo_data['name']}".lower()
 
 
 def make_headers(token: str) -> Dict[str, str]:
@@ -377,7 +373,10 @@ def try_add_open_or_closed_pr(
 
 
 def should_skip_merged_pr(
-    pr_raw: Dict, repository_full_name: str, master_repositories: Dict[str, RepositoryConfig], lookback_date_filter: datetime
+    pr_raw: Dict,
+    repository_full_name: str,
+    master_repositories: Dict[str, RepositoryConfig],
+    lookback_date_filter: datetime,
 ) -> tuple[bool, Optional[str]]:
     """
     Validate a merged PR against all eligibility criteria.
@@ -474,7 +473,9 @@ def should_skip_merged_pr(
     return (False, None)
 
 
-def load_miners_prs(miner_eval: MinerEvaluation, master_repositories: Dict[str, RepositoryConfig], max_prs: int = 1000) -> None:
+def load_miners_prs(
+    miner_eval: MinerEvaluation, master_repositories: Dict[str, RepositoryConfig], max_prs: int = 1000
+) -> None:
     """
     Fetches user PRs via GraphQL API and categorize them by state.
     Populates the provided miner_eval instance with fetched PR data.
@@ -494,9 +495,7 @@ def load_miners_prs(miner_eval: MinerEvaluation, master_repositories: Dict[str, 
     # Build list of active repositories (those without an inactive_at timestamp)
     # Keys are already normalized to lowercase
     active_repositories = [
-        repo_full_name
-        for repo_full_name, config in master_repositories.items()
-        if config.inactive_at is None
+        repo_full_name for repo_full_name, config in master_repositories.items() if config.inactive_at is None
     ]
 
     try:

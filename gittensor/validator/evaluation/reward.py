@@ -7,7 +7,8 @@ from typing import TYPE_CHECKING, Dict
 import bittensor as bt
 import numpy as np
 
-from gittensor.classes import GitPatSynapse, MinerEvaluation
+from gittensor.classes import MinerEvaluation
+from gittensor.synapses import GitPatSynapse
 from gittensor.utils.github_api_tools import load_miners_prs
 from gittensor.validator.evaluation.dynamic_emissions import apply_dynamic_emissions_using_network_contributions
 from gittensor.validator.evaluation.inspections import (

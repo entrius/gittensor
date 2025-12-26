@@ -5,8 +5,6 @@ from enum import Enum
 from math import prod
 from typing import DefaultDict, Dict, List, Optional, Set
 
-import bittensor as bt
-
 from gittensor.constants import (
     DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT,
     MAX_LINES_SCORED_FOR_MITIGATED_EXT,
@@ -407,15 +405,3 @@ class MinerEvaluation:
         self.closed_pull_requests.append(
             PullRequest.from_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id)
         )
-
-
-class GitPatSynapse(bt.Synapse):
-    """
-    This synapse is used to request GitHub access tokens from a miner and receive the response.
-
-    Attributes:
-    - github_access_token: A string value representing the GitHub access token.
-      Initially None for requests, and set to the actual token for responses.
-    """
-
-    github_access_token: Optional[str] = None

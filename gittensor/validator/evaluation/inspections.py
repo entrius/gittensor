@@ -6,11 +6,12 @@ from typing import Dict, List, Optional, Tuple
 
 import bittensor as bt
 
-from gittensor.classes import GitPatSynapse, MinerEvaluation
+from gittensor.classes import MinerEvaluation
 from gittensor.constants import (
     MIN_GITHUB_ACCOUNT_AGE,
     RECYCLE_UID,
 )
+from gittensor.synapses import GitPatSynapse
 from gittensor.utils.github_api_tools import (
     get_github_account_age_days,
     get_github_id,
@@ -97,4 +98,3 @@ def validate_github_credentials(uid: int, pat: Optional[str]) -> Tuple[Optional[
         return None, f"Miner {uid}'s Github account too young ({account_age} < {MIN_GITHUB_ACCOUNT_AGE} days)"
 
     return github_id, None
-

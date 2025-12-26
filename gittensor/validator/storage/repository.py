@@ -296,16 +296,19 @@ class Repository(BaseRepository):
                 evaluation.current_tier.value,
 
                 evaluation.stats_by_tier[Tier.BRONZE].merged_count,
+                evaluation.stats_by_tier[Tier.BRONZE].closed_count,
                 evaluation.stats_by_tier[Tier.BRONZE].total_prs,
                 evaluation.stats_by_tier[Tier.BRONZE].collateral_score,
                 evaluation.stats_by_tier[Tier.BRONZE].earned_score,
 
                 evaluation.stats_by_tier[Tier.SILVER].merged_count,
+                evaluation.stats_by_tier[Tier.SILVER].closed_count,
                 evaluation.stats_by_tier[Tier.SILVER].total_prs,
                 evaluation.stats_by_tier[Tier.SILVER].collateral_score,
                 evaluation.stats_by_tier[Tier.SILVER].earned_score,
 
                 evaluation.stats_by_tier[Tier.GOLD].merged_count,
+                evaluation.stats_by_tier[Tier.GOLD].closed_count,
                 evaluation.stats_by_tier[Tier.GOLD].total_prs,
                 evaluation.stats_by_tier[Tier.GOLD].collateral_score,
                 evaluation.stats_by_tier[Tier.GOLD].earned_score,

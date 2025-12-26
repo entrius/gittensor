@@ -22,16 +22,19 @@ CREATE TABLE IF NOT EXISTS miner_evaluations (
 
     -- Per-tier metrics for Bronze, Silver, Gold repositories
     bronze_merged_prs       INTEGER          DEFAULT 0,
+    bronze_closed_prs       INTEGER          DEFAULT 0,
     bronze_total_prs        INTEGER          DEFAULT 0,
     bronze_collateral_score DECIMAL(15,6)    DEFAULT 0.0,
     bronze_score            DECIMAL(15,6)    DEFAULT 0.0,
 
     silver_merged_prs       INTEGER          DEFAULT 0,
+    silver_closed_prs       INTEGER          DEFAULT 0,
     silver_total_prs        INTEGER          DEFAULT 0,
     silver_collateral_score DECIMAL(15,6)    DEFAULT 0.0,
     silver_score            DECIMAL(15,6)    DEFAULT 0.0,
 
     gold_merged_prs         INTEGER          DEFAULT 0,
+    gold_closed_prs         INTEGER          DEFAULT 0,
     gold_total_prs          INTEGER          DEFAULT 0,
     gold_collateral_score   DECIMAL(15,6)    DEFAULT 0.0,
     gold_score              DECIMAL(15,6)    DEFAULT 0.0,

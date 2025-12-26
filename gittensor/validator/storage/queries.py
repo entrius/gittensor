@@ -65,9 +65,9 @@ INSERT INTO miner_evaluations (
     uid, hotkey, github_id, failed_reason, base_total_score, total_score, total_collateral_score,
     total_lines_changed, total_open_prs, total_closed_prs, total_merged_prs, total_prs, unique_repos_count,
     current_tier,
-    bronze_merged_prs, bronze_total_prs, bronze_collateral_score, bronze_score,
-    silver_merged_prs, silver_total_prs, silver_collateral_score, silver_score,
-    gold_merged_prs, gold_total_prs, gold_collateral_score, gold_score
+    bronze_merged_prs, bronze_closed_prs, bronze_total_prs, bronze_collateral_score, bronze_score,
+    silver_merged_prs, silver_closed_prs, silver_total_prs, silver_collateral_score, silver_score,
+    gold_merged_prs, gold_closed_prs, gold_total_prs, gold_collateral_score, gold_score
 ) VALUES %s
 ON CONFLICT (uid, hotkey, github_id)
 DO UPDATE SET
@@ -83,14 +83,17 @@ DO UPDATE SET
     unique_repos_count = EXCLUDED.unique_repos_count,
     current_tier = EXCLUDED.current_tier,
     bronze_merged_prs = EXCLUDED.bronze_merged_prs,
+    bronze_closed_prs = EXCLUDED.bronze_closed_prs,
     bronze_total_prs = EXCLUDED.bronze_total_prs,
     bronze_collateral_score = EXCLUDED.bronze_collateral_score,
     bronze_score = EXCLUDED.bronze_score,
     silver_merged_prs = EXCLUDED.silver_merged_prs,
+    silver_closed_prs = EXCLUDED.silver_closed_prs,
     silver_total_prs = EXCLUDED.silver_total_prs,
     silver_collateral_score = EXCLUDED.silver_collateral_score,
     silver_score = EXCLUDED.silver_score,
     gold_merged_prs = EXCLUDED.gold_merged_prs,
+    gold_closed_prs = EXCLUDED.gold_closed_prs,
     gold_total_prs = EXCLUDED.gold_total_prs,
     gold_collateral_score = EXCLUDED.gold_collateral_score,
     gold_score = EXCLUDED.gold_score,

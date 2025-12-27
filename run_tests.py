@@ -3,32 +3,51 @@
 # Copyright © 2025 Entrius
 
 """
-Test runner for Gittensor unit tests
+Test runner for Gittensor unit tests.
 
 Usage:
-    python run_tests.py                    # Run all tests
-    python run_tests.py -v                 # Run with verbose output
-    python run_tests.py tests.utils        # Run specific test module
-    python run_tests.py tests.utils.test_github_api_tools.TestGraphQLRetryLogic  # Run specific test class
+    python run_tests.py                     # Run all tests
+    python run_tests.py -v                  # Run with verbose output
+    python run_tests.py -vv                 # Run with extra verbose output
+    python run_tests.py tests/validator     # Run tests in a directory
+    python run_tests.py tests/validator/test_tier_credibility.py  # Run specific file
+    python run_tests.py tests/validator/test_tier_credibility.py::TestTierDemotion  # Run specific class
+    python run_tests.py tests/validator/test_tier_credibility.py::TestTierDemotion::test_gold_demoted_when_credibility_drops  # Run specific test
+    python run_tests.py -k "demotion"       # Run tests matching pattern
+    python run_tests.py --lf                # Run last failed tests
+    python run_tests.py --tb=short          # Short tracebacks
+    python run_tests.py -x                  # Stop on first failure
 """
 
 import sys
-import unittest
+import subprocess
 
-if __name__ == '__main__':
-    # Discover and run tests
-    if len(sys.argv) > 1 and not sys.argv[1].startswith('-'):
-        # Run specific test module or class
-        suite = unittest.TestLoader().loadTestsFromName(sys.argv[1])
-    else:
-        # Discover all tests in the tests directory
-        loader = unittest.TestLoader()
-        suite = loader.discover('tests', pattern='test_*.py')
 
-    # Run tests with appropriate verbosity
-    verbosity = 2 if '-v' in sys.argv or '--verbose' in sys.argv else 1
-    runner = unittest.TextTestRunner(verbosity=verbosity)
-    result = runner.run(suite)
+def main():
+    # Base pytest command
+    cmd = [sys.executable, "-m", "pytest"]
 
-    # Exit with appropriate code
-    sys.exit(0 if result.wasSuccessful() else 1)
+    # Default to tests directory if no path specified
+    args = sys.argv[1:]
+
+    # Check if any positional args (test paths) were provided
+    has_test_path = any(
+        arg.startswith("tests") or arg.endswith(".py")
+        for arg in args
+        if not arg.startswith("-")
+    )
+
+    if not has_test_path:
+        # Run all tests in tests/ directory
+        cmd.append("tests/")
+
+    # Add all command line arguments
+    cmd.extend(args)
+
+    # Run pytest
+    result = subprocess.run(cmd)
+    sys.exit(result.returncode)
+
+
+if __name__ == "__main__":
+    main()

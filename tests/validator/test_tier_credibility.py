@@ -1,165 +1,117 @@
-#!/usr/bin/env python3
 # The MIT License (MIT)
 # Copyright © 2025 Entrius
 
 """
 Unit tests for tier credibility and unlocking logic.
 
-Tests cover:
-- TierStats properties (total_attempts, credibility, total_prs)
-- calculate_tier_stats() with various PR combinations
-- is_tier_unlocked() for all tiers and edge cases
-- calculate_credibility_per_tier() with complex scenarios
+Uses pytest fixtures from conftest.py for clean, reusable test data.
+
+Run tests:
+    pytest tests/validator/test_tier_credibility.py -v
+
+Run specific test class:
+    pytest tests/validator/test_tier_credibility.py::TestTierUnlocking -v
 """
 
 import pytest
-from datetime import datetime, timezone
-from typing import List
 
-from gittensor.classes import PullRequest, PRState
-from gittensor.validator.configurations.tier_config import (
-    Tier,
-    TierStats,
-    TierConfig,
-    TIERS,
-)
+from gittensor.classes import PRState
+from gittensor.validator.configurations.tier_config import TIERS, Tier, TierStats
 from gittensor.validator.evaluation.credibility import (
+    calculate_credibility_per_tier,
     calculate_tier_stats,
     is_tier_unlocked,
-    calculate_credibility_per_tier,
 )
-
-
-# ============================================================================
-# Test Fixtures
-# ============================================================================
-
-def create_mock_pr(
-    number: int,
-    state: PRState,
-    tier_config: TierConfig,
-    earned_score: float = 100.0,
-    collateral_score: float = 20.0,
-) -> PullRequest:
-    """Create a mock PullRequest for testing."""
-    return PullRequest(
-        number=number,
-        repository_full_name="test/repo",
-        uid=0,
-        hotkey="test_hotkey",
-        github_id="12345",
-        title="Test PR",
-        author_login="testuser",
-        merged_at=datetime.now(timezone.utc) if state == PRState.MERGED else None,
-        created_at=datetime.now(timezone.utc),
-        pr_state=state,
-        repository_tier_configuration=tier_config,
-        earned_score=earned_score,
-        collateral_score=collateral_score,
-    )
-
 
 # ============================================================================
 # TierStats Tests
 # ============================================================================
 
+
 class TestTierStats:
     """Test TierStats dataclass properties."""
 
     def test_total_attempts_calculation(self):
-        """Test that total_attempts = merged_count + closed_count."""
         stats = TierStats(merged_count=5, closed_count=3)
         assert stats.total_attempts == 8
 
     def test_total_attempts_zero(self):
-        """Test total_attempts with no PRs."""
         stats = TierStats()
         assert stats.total_attempts == 0
 
-    def test_total_prs_calculation(self):
-        """Test that total_prs = merged + closed + open."""
+    def test_total_prs_includes_open(self):
         stats = TierStats(merged_count=5, closed_count=3, open_count=2)
         assert stats.total_prs == 10
 
-    def test_credibility_calculation(self):
-        """Test credibility = merged / (merged + closed)."""
+    def test_credibility_formula(self):
         stats = TierStats(merged_count=7, closed_count=3)
         assert stats.credibility == 0.7
 
-    def test_credibility_all_merged(self):
-        """Test credibility = 1.0 when all PRs are merged."""
+    def test_credibility_100_percent(self):
         stats = TierStats(merged_count=10, closed_count=0)
         assert stats.credibility == 1.0
 
-    def test_credibility_all_closed(self):
-        """Test credibility = 0.0 when all PRs are closed."""
+    def test_credibility_0_percent(self):
         stats = TierStats(merged_count=0, closed_count=10)
         assert stats.credibility == 0.0
 
-    def test_credibility_no_attempts(self):
-        """Test credibility = 0.0 when there are no attempts."""
+    def test_credibility_no_attempts_is_zero(self):
         stats = TierStats()
         assert stats.credibility == 0.0
 
-    def test_credibility_with_open_prs(self):
-        """Test that open PRs don't affect credibility calculation."""
-        stats = TierStats(merged_count=5, closed_count=5, open_count=10)
+    def test_open_prs_dont_affect_credibility(self):
+        stats = TierStats(merged_count=5, closed_count=5, open_count=100)
         assert stats.credibility == 0.5
-        assert stats.total_attempts == 10  # open PRs not included
+        assert stats.total_attempts == 10  # Excludes open
 
 
 # ============================================================================
 # calculate_tier_stats Tests
 # ============================================================================
 
+
 class TestCalculateTierStats:
     """Test calculate_tier_stats function."""
 
-    def test_empty_pr_lists(self):
-        """Test with no PRs."""
+    def test_empty_lists(self):
         stats = calculate_tier_stats([], [], [])
-
-        # All tiers should have zero counts
         for tier in Tier:
             assert stats[tier].merged_count == 0
             assert stats[tier].closed_count == 0
             assert stats[tier].open_count == 0
 
-    def test_count_merged_prs_per_tier(self):
-        """Test counting merged PRs per tier."""
-        merged_prs = [
-            create_mock_pr(1, PRState.MERGED, TIERS[Tier.BRONZE]),
-            create_mock_pr(2, PRState.MERGED, TIERS[Tier.BRONZE]),
-            create_mock_pr(3, PRState.MERGED, TIERS[Tier.SILVER]),
-            create_mock_pr(4, PRState.MERGED, TIERS[Tier.GOLD]),
+    def test_counts_merged_per_tier(self, pr_factory, bronze_config, silver_config, gold_config):
+        merged = [
+            pr_factory.merged(bronze_config),
+            pr_factory.merged(bronze_config),
+            pr_factory.merged(silver_config),
+            pr_factory.merged(gold_config),
         ]
 
-        stats = calculate_tier_stats(merged_prs, [], [])
+        stats = calculate_tier_stats(merged, [], [])
 
         assert stats[Tier.BRONZE].merged_count == 2
         assert stats[Tier.SILVER].merged_count == 1
         assert stats[Tier.GOLD].merged_count == 1
 
-    def test_count_closed_prs_per_tier(self):
-        """Test counting closed PRs per tier."""
-        closed_prs = [
-            create_mock_pr(1, PRState.CLOSED, TIERS[Tier.BRONZE]),
-            create_mock_pr(2, PRState.CLOSED, TIERS[Tier.SILVER]),
-            create_mock_pr(3, PRState.CLOSED, TIERS[Tier.SILVER]),
+    def test_counts_closed_per_tier(self, pr_factory, bronze_config, silver_config):
+        closed = [
+            pr_factory.closed(bronze_config),
+            pr_factory.closed(silver_config),
+            pr_factory.closed(silver_config),
         ]
 
-        stats = calculate_tier_stats([], closed_prs, [])
+        stats = calculate_tier_stats([], closed, [])
 
         assert stats[Tier.BRONZE].closed_count == 1
         assert stats[Tier.SILVER].closed_count == 2
         assert stats[Tier.GOLD].closed_count == 0
 
-    def test_count_open_prs_per_tier(self):
-        """Test counting open PRs per tier."""
+    def test_counts_open_per_tier(self, pr_factory, bronze_config, gold_config):
         open_prs = [
-            create_mock_pr(1, PRState.OPEN, TIERS[Tier.BRONZE]),
-            create_mock_pr(2, PRState.OPEN, TIERS[Tier.BRONZE]),
-            create_mock_pr(3, PRState.OPEN, TIERS[Tier.GOLD]),
+            pr_factory.open(bronze_config),
+            pr_factory.open(bronze_config),
+            pr_factory.open(gold_config),
         ]
 
         stats = calculate_tier_stats([], [], open_prs)
@@ -168,75 +120,44 @@ class TestCalculateTierStats:
         assert stats[Tier.SILVER].open_count == 0
         assert stats[Tier.GOLD].open_count == 1
 
-    def test_scoring_details_not_included_by_default(self):
-        """Test that scoring details are not included by default."""
-        merged_prs = [
-            create_mock_pr(1, PRState.MERGED, TIERS[Tier.BRONZE], earned_score=100.0),
-        ]
-
-        stats = calculate_tier_stats(merged_prs, [], [])
-
+    def test_scoring_details_off_by_default(self, pr_factory, bronze_config):
+        merged = [pr_factory.merged(bronze_config, earned_score=999.0)]
+        stats = calculate_tier_stats(merged, [], [])
         assert stats[Tier.BRONZE].earned_score == 0.0
 
-    def test_scoring_details_included_when_requested(self):
-        """Test that scoring details are included when requested."""
-        merged_prs = [
-            create_mock_pr(1, PRState.MERGED, TIERS[Tier.BRONZE], earned_score=100.0),
-            create_mock_pr(2, PRState.MERGED, TIERS[Tier.BRONZE], earned_score=150.0),
+    def test_scoring_details_included_when_requested(self, pr_factory, bronze_config):
+        merged = [
+            pr_factory.merged(bronze_config, earned_score=100.0),
+            pr_factory.merged(bronze_config, earned_score=150.0),
         ]
-        open_prs = [
-            create_mock_pr(3, PRState.OPEN, TIERS[Tier.BRONZE], collateral_score=20.0),
-        ]
+        open_prs = [pr_factory.open(bronze_config, collateral_score=25.0)]
 
-        stats = calculate_tier_stats(merged_prs, [], open_prs, include_scoring_details=True)
+        stats = calculate_tier_stats(merged, [], open_prs, include_scoring_details=True)
 
         assert stats[Tier.BRONZE].earned_score == 250.0
-        assert stats[Tier.BRONZE].collateral_score == 20.0
+        assert stats[Tier.BRONZE].collateral_score == 25.0
 
-    def test_mixed_pr_states_and_tiers(self):
-        """Test with mixed PR states across multiple tiers."""
-        merged_prs = [
-            create_mock_pr(1, PRState.MERGED, TIERS[Tier.BRONZE]),
-            create_mock_pr(2, PRState.MERGED, TIERS[Tier.SILVER]),
-        ]
-        closed_prs = [
-            create_mock_pr(3, PRState.CLOSED, TIERS[Tier.BRONZE]),
-        ]
-        open_prs = [
-            create_mock_pr(4, PRState.OPEN, TIERS[Tier.GOLD]),
-        ]
+    def test_ignores_prs_without_tier_config(self, pr_factory, bronze_config):
+        from datetime import datetime, timezone
 
-        stats = calculate_tier_stats(merged_prs, closed_prs, open_prs)
+        from gittensor.classes import PullRequest
 
-        assert stats[Tier.BRONZE].merged_count == 1
-        assert stats[Tier.BRONZE].closed_count == 1
-        assert stats[Tier.BRONZE].open_count == 0
-        assert stats[Tier.BRONZE].total_attempts == 2
-
-        assert stats[Tier.SILVER].merged_count == 1
-        assert stats[Tier.SILVER].closed_count == 0
-
-        assert stats[Tier.GOLD].open_count == 1
-
-    def test_pr_without_tier_configuration_ignored(self):
-        """Test that PRs without tier configuration are ignored."""
-        pr_without_tier = PullRequest(
+        pr_no_tier = PullRequest(
             number=1,
             repository_full_name="test/repo",
             uid=0,
-            hotkey="test_hotkey",
-            github_id="12345",
-            title="Test",
-            author_login="testuser",
+            hotkey="test",
+            github_id="123",
+            title="No tier",
+            author_login="test",
             merged_at=datetime.now(timezone.utc),
             created_at=datetime.now(timezone.utc),
             pr_state=PRState.MERGED,
             repository_tier_configuration=None,
         )
 
-        stats = calculate_tier_stats([pr_without_tier], [], [])
+        stats = calculate_tier_stats([pr_no_tier], [], [])
 
-        # All counts should be zero since PR has no tier config
         for tier in Tier:
             assert stats[tier].merged_count == 0
 
@@ -245,416 +166,429 @@ class TestCalculateTierStats:
 # is_tier_unlocked Tests
 # ============================================================================
 
-class TestIsTierUnlocked:
+
+class TestTierUnlocking:
     """Test is_tier_unlocked function."""
 
-    def test_bronze_always_unlocked(self):
-        """Test that Bronze tier is always unlocked."""
-        stats = {
-            Tier.BRONZE: TierStats(merged_count=0, closed_count=0),
-            Tier.SILVER: TierStats(merged_count=0, closed_count=0),
-            Tier.GOLD: TierStats(merged_count=0, closed_count=0),
-        }
-
-        assert is_tier_unlocked(Tier.BRONZE, stats) is True
+    def test_bronze_always_unlocked(self, empty_tier_stats):
+        assert is_tier_unlocked(Tier.BRONZE, empty_tier_stats) is True
 
     def test_silver_requires_3_merges(self):
-        """Test that Silver requires 3 merged PRs."""
-        # Just below threshold (2 merges)
+        # 2 merges - not enough
         stats = {
-            Tier.BRONZE: TierStats(merged_count=0, closed_count=0),
+            Tier.BRONZE: TierStats(),
             Tier.SILVER: TierStats(merged_count=2, closed_count=0),
-            Tier.GOLD: TierStats(merged_count=0, closed_count=0),
+            Tier.GOLD: TierStats(),
         }
         assert is_tier_unlocked(Tier.SILVER, stats) is False
 
-        # Exactly at threshold (3 merges)
+        # 3 merges - exactly enough
         stats[Tier.SILVER] = TierStats(merged_count=3, closed_count=0)
-        assert is_tier_unlocked(Tier.SILVER, stats) is True
-
-        # Above threshold (4 merges)
-        stats[Tier.SILVER] = TierStats(merged_count=4, closed_count=0)
         assert is_tier_unlocked(Tier.SILVER, stats) is True
 
     def test_silver_requires_50_percent_credibility(self):
-        """Test that Silver requires 0.50 credibility."""
-        # Just below threshold (49% credibility)
+        # 49% - not enough
         stats = {
-            Tier.BRONZE: TierStats(merged_count=0, closed_count=0),
-            Tier.SILVER: TierStats(merged_count=49, closed_count=51),  # 49% credibility
-            Tier.GOLD: TierStats(merged_count=0, closed_count=0),
+            Tier.BRONZE: TierStats(),
+            Tier.SILVER: TierStats(merged_count=49, closed_count=51),
+            Tier.GOLD: TierStats(),
         }
         assert is_tier_unlocked(Tier.SILVER, stats) is False
 
-        # Exactly at threshold (50% credibility)
-        stats[Tier.SILVER] = TierStats(merged_count=3, closed_count=3)  # 50% credibility
+        # 50% - exactly enough
+        stats[Tier.SILVER] = TierStats(merged_count=3, closed_count=3)
         assert is_tier_unlocked(Tier.SILVER, stats) is True
 
-        # Above threshold (60% credibility)
-        stats[Tier.SILVER] = TierStats(merged_count=6, closed_count=4)  # 60% credibility
-        assert is_tier_unlocked(Tier.SILVER, stats) is True
-
-    def test_silver_requires_both_merges_and_credibility(self):
-        """Test that Silver requires BOTH merge count AND credibility."""
+    def test_silver_requires_both_conditions(self):
+        stats = {
+            Tier.BRONZE: TierStats(),
+            Tier.SILVER: TierStats(merged_count=3, closed_count=7),  # 30%
+            Tier.GOLD: TierStats(),
+        }
         # Has merges but low credibility
-        stats = {
-            Tier.BRONZE: TierStats(merged_count=0, closed_count=0),
-            Tier.SILVER: TierStats(merged_count=3, closed_count=7),  # 30% credibility
-            Tier.GOLD: TierStats(merged_count=0, closed_count=0),
-        }
         assert is_tier_unlocked(Tier.SILVER, stats) is False
 
-        # Has credibility but not enough merges
-        stats[Tier.SILVER] = TierStats(merged_count=2, closed_count=1)  # 67% credibility but only 2 merges
+        # Has credibility but not merges
+        stats[Tier.SILVER] = TierStats(merged_count=2, closed_count=1)
         assert is_tier_unlocked(Tier.SILVER, stats) is False
 
         # Has both
-        stats[Tier.SILVER] = TierStats(merged_count=3, closed_count=2)  # 60% credibility and 3 merges
+        stats[Tier.SILVER] = TierStats(merged_count=3, closed_count=2)
         assert is_tier_unlocked(Tier.SILVER, stats) is True
 
-    def test_gold_requires_5_merges(self):
-        """Test that Gold requires 5 merged PRs."""
-        # Silver is unlocked, Gold just below threshold (4 merges)
-        stats = {
-            Tier.BRONZE: TierStats(merged_count=0, closed_count=0),
-            Tier.SILVER: TierStats(merged_count=3, closed_count=0),  # Silver unlocked
-            Tier.GOLD: TierStats(merged_count=4, closed_count=0),     # 4 merges (need 5)
-        }
-        assert is_tier_unlocked(Tier.GOLD, stats) is False
+    def test_gold_requires_5_merges(self, silver_unlocked_stats):
+        # 4 merges - not enough
+        silver_unlocked_stats[Tier.GOLD] = TierStats(merged_count=4, closed_count=0)
+        assert is_tier_unlocked(Tier.GOLD, silver_unlocked_stats) is False
 
-        # Exactly at threshold (5 merges)
-        stats[Tier.GOLD] = TierStats(merged_count=5, closed_count=0)
-        assert is_tier_unlocked(Tier.GOLD, stats) is True
+        # 5 merges - exactly enough
+        silver_unlocked_stats[Tier.GOLD] = TierStats(merged_count=5, closed_count=0)
+        assert is_tier_unlocked(Tier.GOLD, silver_unlocked_stats) is True
 
-    def test_gold_requires_70_percent_credibility(self):
-        """Test that Gold requires 0.70 credibility."""
-        # Silver unlocked, Gold just below 70% (69%)
-        stats = {
-            Tier.BRONZE: TierStats(merged_count=0, closed_count=0),
-            Tier.SILVER: TierStats(merged_count=3, closed_count=0),
-            Tier.GOLD: TierStats(merged_count=69, closed_count=31),  # 69% credibility
-        }
-        assert is_tier_unlocked(Tier.GOLD, stats) is False
+    def test_gold_requires_70_percent_credibility(self, silver_unlocked_stats):
+        # 69% - not enough
+        silver_unlocked_stats[Tier.GOLD] = TierStats(merged_count=69, closed_count=31)
+        assert is_tier_unlocked(Tier.GOLD, silver_unlocked_stats) is False
 
-        # Exactly at threshold (70%)
-        stats[Tier.GOLD] = TierStats(merged_count=7, closed_count=3)  # 70% credibility
-        assert is_tier_unlocked(Tier.GOLD, stats) is True
-
-        # Above threshold (80%)
-        stats[Tier.GOLD] = TierStats(merged_count=8, closed_count=2)  # 80% credibility
-        assert is_tier_unlocked(Tier.GOLD, stats) is True
+        # 70% - exactly enough
+        silver_unlocked_stats[Tier.GOLD] = TierStats(merged_count=7, closed_count=3)
+        assert is_tier_unlocked(Tier.GOLD, silver_unlocked_stats) is True
 
     def test_gold_requires_silver_unlocked(self):
-        """Test that Gold cannot be unlocked if Silver requirements aren't met."""
-        # Gold meets its own requirements but Silver doesn't
+        # Gold has perfect stats, but Silver is locked
         stats = {
-            Tier.BRONZE: TierStats(merged_count=0, closed_count=0),
-            Tier.SILVER: TierStats(merged_count=2, closed_count=0),  # Only 2 merges (need 3)
-            Tier.GOLD: TierStats(merged_count=5, closed_count=0),     # Has 5 merges
+            Tier.BRONZE: TierStats(),
+            Tier.SILVER: TierStats(merged_count=2, closed_count=0),  # Only 2 merges
+            Tier.GOLD: TierStats(merged_count=10, closed_count=0),  # Perfect
         }
         assert is_tier_unlocked(Tier.GOLD, stats) is False
 
-        # Now unlock Silver
+        # Unlock Silver
         stats[Tier.SILVER] = TierStats(merged_count=3, closed_count=0)
         assert is_tier_unlocked(Tier.GOLD, stats) is True
 
-    def test_gold_cascading_requirements(self):
-        """Test full cascading unlock: Bronze -> Silver -> Gold."""
-        # All requirements met
-        stats = {
-            Tier.BRONZE: TierStats(merged_count=0, closed_count=0),        # Always unlocked
-            Tier.SILVER: TierStats(merged_count=3, closed_count=3),        # 50% credibility, 3 merges
-            Tier.GOLD: TierStats(merged_count=7, closed_count=3),          # 70% credibility, 7 merges
-        }
-
-        assert is_tier_unlocked(Tier.BRONZE, stats) is True
-        assert is_tier_unlocked(Tier.SILVER, stats) is True
-        assert is_tier_unlocked(Tier.GOLD, stats) is True
+    def test_cascading_unlock(self, gold_unlocked_stats):
+        assert is_tier_unlocked(Tier.BRONZE, gold_unlocked_stats) is True
+        assert is_tier_unlocked(Tier.SILVER, gold_unlocked_stats) is True
+        assert is_tier_unlocked(Tier.GOLD, gold_unlocked_stats) is True
 
 
 # ============================================================================
 # calculate_credibility_per_tier Tests
 # ============================================================================
 
-class TestCalculateCredibilityPerTier:
+
+class TestCredibilityCalculation:
     """Test calculate_credibility_per_tier function."""
 
-    def test_no_activity_returns_empty_dict(self):
-        """Test that tiers with no PRs are not in the result."""
+    def test_no_activity_returns_empty(self):
         result = calculate_credibility_per_tier([], [])
-
-        # Should be empty dict since no PRs
         assert result == {}
 
-    def test_single_tier_with_activity(self):
-        """Test credibility calculation for a single tier."""
-        merged_prs = [
-            create_mock_pr(1, PRState.MERGED, TIERS[Tier.BRONZE]),
-            create_mock_pr(2, PRState.MERGED, TIERS[Tier.BRONZE]),
-            create_mock_pr(3, PRState.MERGED, TIERS[Tier.BRONZE]),
-        ]
-        closed_prs = [
-            create_mock_pr(4, PRState.CLOSED, TIERS[Tier.BRONZE]),
-        ]
+    def test_single_tier_credibility(self, pr_factory, bronze_config):
+        merged = pr_factory.merged_batch(bronze_config, count=3)
+        closed = pr_factory.closed_batch(bronze_config, count=1)
 
-        result = calculate_credibility_per_tier(merged_prs, closed_prs)
+        result = calculate_credibility_per_tier(merged, closed)
 
-        # 3 merged / (3 merged + 1 closed) = 0.75
         assert result[Tier.BRONZE] == 0.75
 
-    def test_below_activation_threshold_returns_1_0(self):
-        """Test that credibility = 1.0 when below activation threshold (2 attempts)."""
-        # Only 1 attempt (below threshold of 2)
-        merged_prs = [
-            create_mock_pr(1, PRState.MERGED, TIERS[Tier.BRONZE]),
-        ]
-
-        result = calculate_credibility_per_tier(merged_prs, [])
-
-        # Should return 1.0 because below 2 activation attempts
+    def test_below_activation_threshold_returns_1(self, pr_factory, bronze_config):
+        # Only 1 attempt (threshold is 2)
+        merged = [pr_factory.merged(bronze_config)]
+        result = calculate_credibility_per_tier(merged, [])
         assert result[Tier.BRONZE] == 1.0
 
-    def test_at_activation_threshold_calculates_credibility(self):
-        """Test that credibility is calculated when at/above threshold (2 attempts)."""
+    def test_at_activation_threshold_calculates(self, pr_factory, bronze_config):
         # Exactly 2 attempts
-        merged_prs = [
-            create_mock_pr(1, PRState.MERGED, TIERS[Tier.BRONZE]),
-        ]
-        closed_prs = [
-            create_mock_pr(2, PRState.CLOSED, TIERS[Tier.BRONZE]),
-        ]
+        merged = [pr_factory.merged(bronze_config)]
+        closed = [pr_factory.closed(bronze_config)]
 
-        result = calculate_credibility_per_tier(merged_prs, closed_prs)
+        result = calculate_credibility_per_tier(merged, closed)
 
-        # 1 merged / 2 attempts = 0.5
         assert result[Tier.BRONZE] == 0.5
 
-    def test_tier_not_unlocked_returns_0_0(self):
-        """Test that credibility = 0.0 for locked tiers."""
-        # Silver has PRs but doesn't meet requirements (need 3 merges + 50% credibility)
-        merged_prs = [
-            create_mock_pr(1, PRState.MERGED, TIERS[Tier.SILVER]),
-            create_mock_pr(2, PRState.MERGED, TIERS[Tier.SILVER]),  # Only 2 merges
-        ]
-        closed_prs = [
-            create_mock_pr(3, PRState.CLOSED, TIERS[Tier.SILVER]),
-        ]
+    def test_locked_tier_returns_zero(self, pr_factory, silver_config):
+        # Silver has PRs but doesn't meet requirements
+        merged = pr_factory.merged_batch(silver_config, count=2)  # Need 3
+        closed = [pr_factory.closed(silver_config)]
 
-        result = calculate_credibility_per_tier(merged_prs, closed_prs)
+        result = calculate_credibility_per_tier(merged, closed)
 
-        # Silver not unlocked (need 3 merges), should return 0.0
         assert result[Tier.SILVER] == 0.0
 
-    def test_multiple_tiers_with_different_credibilities(self):
-        """Test credibility calculation across multiple tiers."""
-        merged_prs = [
-            # Bronze: 4 merged
-            create_mock_pr(1, PRState.MERGED, TIERS[Tier.BRONZE]),
-            create_mock_pr(2, PRState.MERGED, TIERS[Tier.BRONZE]),
-            create_mock_pr(3, PRState.MERGED, TIERS[Tier.BRONZE]),
-            create_mock_pr(4, PRState.MERGED, TIERS[Tier.BRONZE]),
-            # Silver: 3 merged (unlocks Silver)
-            create_mock_pr(5, PRState.MERGED, TIERS[Tier.SILVER]),
-            create_mock_pr(6, PRState.MERGED, TIERS[Tier.SILVER]),
-            create_mock_pr(7, PRState.MERGED, TIERS[Tier.SILVER]),
-            # Gold: 5 merged (unlocks Gold)
-            create_mock_pr(8, PRState.MERGED, TIERS[Tier.GOLD]),
-            create_mock_pr(9, PRState.MERGED, TIERS[Tier.GOLD]),
-            create_mock_pr(10, PRState.MERGED, TIERS[Tier.GOLD]),
-            create_mock_pr(11, PRState.MERGED, TIERS[Tier.GOLD]),
-            create_mock_pr(12, PRState.MERGED, TIERS[Tier.GOLD]),
-        ]
-        closed_prs = [
-            # Bronze: 1 closed -> 4/(4+1) = 0.8
-            create_mock_pr(13, PRState.CLOSED, TIERS[Tier.BRONZE]),
-            # Silver: 3 closed -> 3/(3+3) = 0.5
-            create_mock_pr(14, PRState.CLOSED, TIERS[Tier.SILVER]),
-            create_mock_pr(15, PRState.CLOSED, TIERS[Tier.SILVER]),
-            create_mock_pr(16, PRState.CLOSED, TIERS[Tier.SILVER]),
-            # Gold: 2 closed -> 5/(5+2) = 0.714
-            create_mock_pr(17, PRState.CLOSED, TIERS[Tier.GOLD]),
-            create_mock_pr(18, PRState.CLOSED, TIERS[Tier.GOLD]),
-        ]
-
-        result = calculate_credibility_per_tier(merged_prs, closed_prs)
-
-        assert result[Tier.BRONZE] == pytest.approx(0.8, abs=0.01)
-        assert result[Tier.SILVER] == pytest.approx(0.5, abs=0.01)
-        assert result[Tier.GOLD] == pytest.approx(0.714, abs=0.01)
-
-    def test_tier_progression_scenario(self):
-        """Test realistic tier progression scenario."""
-        # Scenario: Miner starts in Bronze, unlocks Silver, then Gold
-
-        # Bronze: 5 merged, 2 closed = 71% credibility
-        # Silver: 4 merged, 1 closed = 80% credibility (unlocks - has 3+ merges, 50%+ credibility)
-        # Gold: 6 merged, 1 closed = 86% credibility (unlocks - has 5+ merges, 70%+ credibility)
-
-        merged_prs = [
-            *[create_mock_pr(i, PRState.MERGED, TIERS[Tier.BRONZE]) for i in range(1, 6)],      # 5 Bronze
-            *[create_mock_pr(i, PRState.MERGED, TIERS[Tier.SILVER]) for i in range(10, 14)],    # 4 Silver
-            *[create_mock_pr(i, PRState.MERGED, TIERS[Tier.GOLD]) for i in range(20, 26)],      # 6 Gold
-        ]
-        closed_prs = [
-            *[create_mock_pr(i, PRState.CLOSED, TIERS[Tier.BRONZE]) for i in range(6, 8)],      # 2 Bronze
-            create_mock_pr(14, PRState.CLOSED, TIERS[Tier.SILVER]),                             # 1 Silver
-            create_mock_pr(26, PRState.CLOSED, TIERS[Tier.GOLD]),                               # 1 Gold
-        ]
-
-        result = calculate_credibility_per_tier(merged_prs, closed_prs)
-
-        # Bronze: 5/(5+2) = 0.714
-        assert result[Tier.BRONZE] == pytest.approx(5/7, abs=0.01)
-
-        # Silver: 4/(4+1) = 0.8 (unlocked)
-        assert result[Tier.SILVER] == pytest.approx(0.8, abs=0.01)
-
-        # Gold: 6/(6+1) = 0.857 (unlocked)
-        assert result[Tier.GOLD] == pytest.approx(6/7, abs=0.01)
-
-    def test_all_merged_prs(self):
-        """Test credibility = 1.0 when all PRs are merged."""
-        merged_prs = [
-            create_mock_pr(1, PRState.MERGED, TIERS[Tier.BRONZE]),
-            create_mock_pr(2, PRState.MERGED, TIERS[Tier.BRONZE]),
-            create_mock_pr(3, PRState.MERGED, TIERS[Tier.BRONZE]),
-        ]
-
-        result = calculate_credibility_per_tier(merged_prs, [])
-
+    def test_100_percent_credibility(self, pr_factory, bronze_config):
+        merged = pr_factory.merged_batch(bronze_config, count=5)
+        result = calculate_credibility_per_tier(merged, [])
         assert result[Tier.BRONZE] == 1.0
 
-    def test_all_closed_prs(self):
-        """Test credibility = 0.0 when all PRs are closed."""
-        closed_prs = [
-            create_mock_pr(1, PRState.CLOSED, TIERS[Tier.BRONZE]),
-            create_mock_pr(2, PRState.CLOSED, TIERS[Tier.BRONZE]),
-            create_mock_pr(3, PRState.CLOSED, TIERS[Tier.BRONZE]),
-        ]
-
-        result = calculate_credibility_per_tier([], closed_prs)
-
-        # All closed = 0.0 credibility
+    def test_0_percent_credibility(self, pr_factory, bronze_config):
+        closed = pr_factory.closed_batch(bronze_config, count=5)
+        result = calculate_credibility_per_tier([], closed)
         assert result[Tier.BRONZE] == 0.0
 
-    def test_edge_case_exactly_at_silver_threshold(self):
-        """Test Silver unlock at exact threshold: 3 merges, 50% credibility."""
-        merged_prs = [
-            create_mock_pr(1, PRState.MERGED, TIERS[Tier.SILVER]),
-            create_mock_pr(2, PRState.MERGED, TIERS[Tier.SILVER]),
-            create_mock_pr(3, PRState.MERGED, TIERS[Tier.SILVER]),
-        ]
-        closed_prs = [
-            create_mock_pr(4, PRState.CLOSED, TIERS[Tier.SILVER]),
-            create_mock_pr(5, PRState.CLOSED, TIERS[Tier.SILVER]),
-            create_mock_pr(6, PRState.CLOSED, TIERS[Tier.SILVER]),
-        ]
-
-        result = calculate_credibility_per_tier(merged_prs, closed_prs)
-
-        # 3 merged / 6 attempts = 0.5 (exactly at threshold)
-        assert result[Tier.SILVER] == 0.5
-
-    def test_edge_case_exactly_at_gold_threshold(self):
-        """Test Gold unlock at exact threshold: 5 merges, 70% credibility."""
-        # Need Silver unlocked first
-        merged_prs = [
-            # Silver: 3 merged
-            create_mock_pr(1, PRState.MERGED, TIERS[Tier.SILVER]),
-            create_mock_pr(2, PRState.MERGED, TIERS[Tier.SILVER]),
-            create_mock_pr(3, PRState.MERGED, TIERS[Tier.SILVER]),
-            # Gold: 7 merged (to get exactly 70% with 3 closed)
-            *[create_mock_pr(i, PRState.MERGED, TIERS[Tier.GOLD]) for i in range(10, 17)],
-        ]
-        closed_prs = [
-            # Gold: 3 closed -> 7/(7+3) = 0.7
-            *[create_mock_pr(i, PRState.CLOSED, TIERS[Tier.GOLD]) for i in range(20, 23)],
-        ]
-
-        result = calculate_credibility_per_tier(merged_prs, closed_prs)
-
-        # 7 merged / 10 attempts = 0.7 (exactly at threshold)
-        assert result[Tier.GOLD] == 0.7
-
 
 # ============================================================================
-# Integration Tests (Cross-function)
+# Tier Demotion Tests
 # ============================================================================
 
-class TestTierCredibilityIntegration:
-    """Integration tests combining multiple functions."""
 
-    def test_full_pipeline_bronze_only(self):
-        """Test full pipeline with only Bronze tier activity."""
-        merged_prs = [
-            create_mock_pr(1, PRState.MERGED, TIERS[Tier.BRONZE], earned_score=100.0),
-            create_mock_pr(2, PRState.MERGED, TIERS[Tier.BRONZE], earned_score=150.0),
-        ]
-        closed_prs = [
-            create_mock_pr(3, PRState.CLOSED, TIERS[Tier.BRONZE]),
-        ]
+class TestTierDemotion:
+    """Test tier demotion scenarios."""
 
-        # Calculate stats
-        stats = calculate_tier_stats(merged_prs, closed_prs, include_scoring_details=True)
-        assert stats[Tier.BRONZE].merged_count == 2
-        assert stats[Tier.BRONZE].closed_count == 1
-        assert stats[Tier.BRONZE].earned_score == 250.0
+    def test_gold_demoted_when_credibility_drops(self, demoted_from_gold_miner):
+        """Gold locks when credibility drops below 70%."""
+        stats = calculate_tier_stats(demoted_from_gold_miner.merged, demoted_from_gold_miner.closed)
+        credibility = calculate_credibility_per_tier(demoted_from_gold_miner.merged, demoted_from_gold_miner.closed)
 
-        # Check unlock
+        # Silver still OK
+        assert is_tier_unlocked(Tier.SILVER, stats) is True
+        assert credibility[Tier.SILVER] == 1.0
+
+        # Gold LOCKED
+        assert is_tier_unlocked(Tier.GOLD, stats) is False
+        assert credibility[Tier.GOLD] == 0.0
+
+    def test_gold_demoted_not_enough_merges(self, pr_factory, silver_config, gold_config):
+        """Gold locks when merge count drops below 5."""
+        merged = pr_factory.merged_batch(silver_config, count=3) + pr_factory.merged_batch(
+            gold_config, count=4
+        )  # Need 5
+
+        stats = calculate_tier_stats(merged, [])
+        credibility = calculate_credibility_per_tier(merged, [])
+
+        assert is_tier_unlocked(Tier.SILVER, stats) is True
+        assert is_tier_unlocked(Tier.GOLD, stats) is False
+        assert credibility[Tier.GOLD] == 0.0
+
+    def test_silver_demotion_cascades_to_gold(self, cascade_demoted_miner):
+        """When Silver locks, Gold also locks (even with perfect Gold stats)."""
+        stats = calculate_tier_stats(cascade_demoted_miner.merged, cascade_demoted_miner.closed)
+        credibility = calculate_credibility_per_tier(cascade_demoted_miner.merged, cascade_demoted_miner.closed)
+
         assert is_tier_unlocked(Tier.BRONZE, stats) is True
         assert is_tier_unlocked(Tier.SILVER, stats) is False
+        assert is_tier_unlocked(Tier.GOLD, stats) is False
+        assert credibility[Tier.SILVER] == 0.0
+        assert credibility[Tier.GOLD] == 0.0
 
-        # Calculate credibility
-        credibility = calculate_credibility_per_tier(merged_prs, closed_prs)
-        assert credibility[Tier.BRONZE] == pytest.approx(2/3, abs=0.01)
+    def test_silver_demoted_when_credibility_drops(self, demoted_from_silver_miner):
+        """Silver locks when credibility drops below 50%."""
+        stats = calculate_tier_stats(demoted_from_silver_miner.merged, demoted_from_silver_miner.closed)
 
-    def test_full_pipeline_unlock_silver(self):
-        """Test full pipeline unlocking Silver tier."""
-        merged_prs = [
-            *[create_mock_pr(i, PRState.MERGED, TIERS[Tier.SILVER]) for i in range(1, 7)],  # 6 merged
-        ]
-        closed_prs = [
-            *[create_mock_pr(i, PRState.CLOSED, TIERS[Tier.SILVER]) for i in range(10, 14)],  # 4 closed
-        ]
+        assert is_tier_unlocked(Tier.SILVER, stats) is False
 
-        # Calculate stats
-        stats = calculate_tier_stats(merged_prs, closed_prs)
-        assert stats[Tier.SILVER].merged_count == 6
-        assert stats[Tier.SILVER].closed_count == 4
-        assert stats[Tier.SILVER].credibility == 0.6  # 6/10
+    def test_recovery_from_demotion(self, pr_factory, silver_config, gold_config):
+        """Miner can recover from demotion by getting more merges."""
+        # Initially demoted: 5/8 = 62.5%
+        merged = pr_factory.merged_batch(silver_config, count=3) + pr_factory.merged_batch(gold_config, count=5)
+        closed = pr_factory.closed_batch(gold_config, count=3)
 
-        # Check unlock (should be unlocked: 6 merges > 3, 60% credibility > 50%)
-        assert is_tier_unlocked(Tier.SILVER, stats) is True
+        stats = calculate_tier_stats(merged, closed)
+        assert is_tier_unlocked(Tier.GOLD, stats) is False
 
-        # Calculate credibility
-        credibility = calculate_credibility_per_tier(merged_prs, closed_prs)
-        assert credibility[Tier.SILVER] == 0.6
+        # Recovery: add 2 more merges -> 7/10 = 70%
+        merged.extend(pr_factory.merged_batch(gold_config, count=2))
 
-    def test_full_pipeline_unlock_gold(self):
-        """Test full pipeline unlocking Gold tier."""
-        merged_prs = [
-            # Silver: 3 merged (unlocks Silver)
-            *[create_mock_pr(i, PRState.MERGED, TIERS[Tier.SILVER]) for i in range(1, 4)],
-            # Gold: 7 merged
-            *[create_mock_pr(i, PRState.MERGED, TIERS[Tier.GOLD]) for i in range(10, 17)],
-        ]
-        closed_prs = [
-            # Gold: 3 closed -> 7/(7+3) = 0.7
-            *[create_mock_pr(i, PRState.CLOSED, TIERS[Tier.GOLD]) for i in range(20, 23)],
-        ]
+        stats = calculate_tier_stats(merged, closed)
+        credibility = calculate_credibility_per_tier(merged, closed)
 
-        # Calculate stats
-        stats = calculate_tier_stats(merged_prs, closed_prs)
+        assert is_tier_unlocked(Tier.GOLD, stats) is True
+        assert credibility[Tier.GOLD] == 0.7
 
-        # Check unlocks
+    def test_spam_destroys_all_tiers(self, spammer_miner):
+        """Massive closed PRs tanks credibility everywhere."""
+        stats = calculate_tier_stats(spammer_miner.merged, spammer_miner.closed)
+        credibility = calculate_credibility_per_tier(spammer_miner.merged, spammer_miner.closed)
+
+        # Bronze: still unlocked but terrible credibility
         assert is_tier_unlocked(Tier.BRONZE, stats) is True
-        assert is_tier_unlocked(Tier.SILVER, stats) is True
+        assert credibility[Tier.BRONZE] == pytest.approx(0.2, abs=0.01)
+
+        # Silver & Gold: LOCKED
+        assert is_tier_unlocked(Tier.SILVER, stats) is False
+        assert is_tier_unlocked(Tier.GOLD, stats) is False
+
+    def test_gradual_decline(self, pr_factory, silver_config, gold_config):
+        """Miner starts strong then declines."""
+        # Phase 1: Strong start
+        merged = pr_factory.merged_batch(silver_config, count=5) + pr_factory.merged_batch(gold_config, count=8)
+
+        stats = calculate_tier_stats(merged, [])
         assert is_tier_unlocked(Tier.GOLD, stats) is True
 
-        # Calculate credibility
-        credibility = calculate_credibility_per_tier(merged_prs, closed_prs)
-        assert credibility[Tier.SILVER] == 1.0  # All merged
+        # Phase 2: Decline
+        closed = pr_factory.closed_batch(gold_config, count=5)
+
+        stats = calculate_tier_stats(merged, closed)
+        credibility = calculate_credibility_per_tier(merged, closed)
+
+        # Gold now LOCKED (8/13 = 61.5%)
+        assert is_tier_unlocked(Tier.GOLD, stats) is False
+        assert credibility[Tier.GOLD] == 0.0
+
+        # Silver still OK
+        assert is_tier_unlocked(Tier.SILVER, stats) is True
+        assert credibility[Tier.SILVER] == 1.0
+
+
+# ============================================================================
+# Mixed Performance Tests
+# ============================================================================
+
+
+class TestMixedPerformance:
+    """Test miners with varying performance across tiers."""
+
+    def test_mixed_tier_performance(self, mixed_performance_miner):
+        """Different credibility at each tier."""
+        stats = calculate_tier_stats(mixed_performance_miner.merged, mixed_performance_miner.closed)
+        credibility = calculate_credibility_per_tier(mixed_performance_miner.merged, mixed_performance_miner.closed)
+
+        # Bronze: 90%
+        assert is_tier_unlocked(Tier.BRONZE, stats) is True
+        assert credibility[Tier.BRONZE] == pytest.approx(0.9, abs=0.01)
+
+        # Silver: 55% (above 50% threshold)
+        assert is_tier_unlocked(Tier.SILVER, stats) is True
+        assert credibility[Tier.SILVER] == pytest.approx(0.55, abs=0.01)
+
+        # Gold: 60% (below 70% threshold) - LOCKED
+        assert is_tier_unlocked(Tier.GOLD, stats) is False
+        assert credibility[Tier.GOLD] == 0.0
+
+    def test_perfect_miner(self, perfect_miner):
+        """100% credibility everywhere."""
+        stats = calculate_tier_stats(perfect_miner.merged, [])
+        credibility = calculate_credibility_per_tier(perfect_miner.merged, [])
+
+        for tier in Tier:
+            if tier in credibility:
+                assert credibility[tier] == 1.0
+
+
+# ============================================================================
+# Edge Cases & Boundary Tests
+# ============================================================================
+
+
+class TestEdgeCases:
+    """Test edge cases and boundary conditions."""
+
+    def test_exactly_at_silver_threshold(self, silver_threshold_miner):
+        """Test exactly 50% at Silver."""
+        stats = calculate_tier_stats(silver_threshold_miner.merged, silver_threshold_miner.closed)
+        credibility = calculate_credibility_per_tier(silver_threshold_miner.merged, silver_threshold_miner.closed)
+
+        assert is_tier_unlocked(Tier.SILVER, stats) is True
+        assert credibility[Tier.SILVER] == 0.5
+
+    def test_exactly_at_gold_threshold(self, gold_threshold_miner):
+        """Test exactly 70% at Gold."""
+        stats = calculate_tier_stats(gold_threshold_miner.merged, gold_threshold_miner.closed)
+        credibility = calculate_credibility_per_tier(gold_threshold_miner.merged, gold_threshold_miner.closed)
+
+        assert is_tier_unlocked(Tier.GOLD, stats) is True
         assert credibility[Tier.GOLD] == 0.7
+
+    def test_one_below_merge_threshold(self, pr_factory, silver_config, gold_config):
+        """Just one merge short at each tier."""
+        merged = [
+            *pr_factory.merged_batch(silver_config, count=2),  # Need 3
+            *pr_factory.merged_batch(gold_config, count=4),  # Need 5
+        ]
+
+        stats = calculate_tier_stats(merged, [])
+
+        assert is_tier_unlocked(Tier.SILVER, stats) is False
+        assert is_tier_unlocked(Tier.GOLD, stats) is False
+
+    def test_credibility_just_below_threshold(self, pr_factory, silver_config):
+        """49.9% credibility (just below 50%)."""
+        merged = pr_factory.merged_batch(silver_config, count=499)
+        closed = pr_factory.closed_batch(silver_config, count=501)
+
+        stats = calculate_tier_stats(merged, closed)
+
+        assert stats[Tier.SILVER].credibility == pytest.approx(0.499, abs=0.001)
+        assert is_tier_unlocked(Tier.SILVER, stats) is False
+
+    def test_single_pr_at_each_tier(self, pr_factory, bronze_config, silver_config, gold_config):
+        """Single PR behavior depends on tier unlock status."""
+        # Bronze: always unlocked, 1 PR = 1.0 (below activation threshold)
+        merged = [pr_factory.merged(bronze_config)]
+        credibility = calculate_credibility_per_tier(merged, [])
+        assert credibility[Tier.BRONZE] == 1.0
+
+        # Silver: NOT unlocked (need 3 bronze merges + 50% cred), so 0.0
+        merged = [pr_factory.merged(silver_config)]
+        credibility = calculate_credibility_per_tier(merged, [])
+        assert credibility[Tier.SILVER] == 0.0
+
+        # Gold: NOT unlocked (need silver unlocked + 5 merges + 70% cred), so 0.0
+        merged = [pr_factory.merged(gold_config)]
+        credibility = calculate_credibility_per_tier(merged, [])
+        assert credibility[Tier.GOLD] == 0.0
+
+    def test_activation_threshold_boundary(self, pr_factory, bronze_config):
+        """Test 1 attempt vs 2 attempts."""
+        # 1 attempt: below threshold
+        merged = [pr_factory.merged(bronze_config)]
+        cred = calculate_credibility_per_tier(merged, [])
+        assert cred[Tier.BRONZE] == 1.0
+
+        # 2 attempts: at threshold, calculates actual
+        closed = [pr_factory.closed(bronze_config)]
+        cred = calculate_credibility_per_tier(merged, closed)
+        assert cred[Tier.BRONZE] == 0.5
+
+    def test_large_numbers(self, pr_factory, silver_config, gold_config):
+        """Large PR counts for precision testing."""
+        merged = pr_factory.merged_batch(silver_config, count=100) + pr_factory.merged_batch(gold_config, count=1000)
+        closed = pr_factory.closed_batch(gold_config, count=429)
+
+        stats = calculate_tier_stats(merged, closed)
+
+        assert stats[Tier.GOLD].merged_count == 1000
+        assert stats[Tier.GOLD].closed_count == 429
+        # 1000/1429 = 69.98% - just below 70%
+        assert stats[Tier.GOLD].credibility == pytest.approx(0.6998, abs=0.001)
+
+
+# ============================================================================
+# Integration Tests
+# ============================================================================
+
+
+class TestIntegration:
+    """Integration tests using pre-built miner scenarios."""
+
+    def test_new_miner_only_bronze(self, new_miner):
+        """New miner has no tiers unlocked except Bronze."""
+        stats = calculate_tier_stats(new_miner.merged, new_miner.closed)
+
+        assert is_tier_unlocked(Tier.BRONZE, stats) is True
+        assert is_tier_unlocked(Tier.SILVER, stats) is False
+        assert is_tier_unlocked(Tier.GOLD, stats) is False
+
+    def test_bronze_miner_scenario(self, bronze_miner):
+        """Bronze-only miner."""
+        stats = calculate_tier_stats(bronze_miner.merged, bronze_miner.closed)
+        cred = calculate_credibility_per_tier(bronze_miner.merged, bronze_miner.closed)
+
+        assert is_tier_unlocked(Tier.BRONZE, stats) is True
+        assert is_tier_unlocked(Tier.SILVER, stats) is False
+        assert cred[Tier.BRONZE] == 0.75
+
+    def test_silver_miner_scenario(self, silver_unlocked_miner):
+        """Silver miner."""
+        stats = calculate_tier_stats(silver_unlocked_miner.merged, silver_unlocked_miner.closed)
+        cred = calculate_credibility_per_tier(silver_unlocked_miner.merged, silver_unlocked_miner.closed)
+
+        assert is_tier_unlocked(Tier.SILVER, stats) is True
+        assert is_tier_unlocked(Tier.GOLD, stats) is False
+        assert cred[Tier.SILVER] == pytest.approx(0.67, abs=0.01)
+
+    def test_gold_miner_scenario(self, gold_unlocked_miner):
+        """Gold miner."""
+        stats = calculate_tier_stats(gold_unlocked_miner.merged, gold_unlocked_miner.closed)
+        cred = calculate_credibility_per_tier(gold_unlocked_miner.merged, gold_unlocked_miner.closed)
+
+        assert is_tier_unlocked(Tier.GOLD, stats) is True
+        assert cred[Tier.GOLD] == 0.7
+
+    def test_open_prs_tracked_separately(self, miner_with_open_prs):
+        """Open PRs are counted but don't affect credibility."""
+        stats = calculate_tier_stats(miner_with_open_prs.merged, miner_with_open_prs.closed, miner_with_open_prs.open)
+
+        # Open PRs are counted
+        assert stats[Tier.BRONZE].open_count == 2
+        assert stats[Tier.SILVER].open_count == 3
+
+        # But don't affect credibility calculation
+        cred = calculate_credibility_per_tier(miner_with_open_prs.merged, miner_with_open_prs.closed)
+        assert cred[Tier.BRONZE] == 0.75  # 3/(3+1)
 
 
 if __name__ == "__main__":

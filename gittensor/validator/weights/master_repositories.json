@@ -15,6 +15,10 @@
     "tier": "Bronze",
     "weight": 0.32
   },
+  "AffineFoundation/affinetes": {
+    "tier": "Gold",
+    "weight": 55.59
+  },
   "AffineFoundation/affine-cortex": {
     "tier": "Gold",
     "weight": 59.34
@@ -100,9 +104,7 @@
     "weight": 0.17
   },
   "BitMind-AI/bitmind-subnet": {
-    "additional_acceptable_branches": [
-      "testnet"
-    ],
+    "additional_acceptable_branches": ["testnet"],
     "tier": "Gold",
     "weight": 44.58
   },
@@ -367,9 +369,7 @@
     "weight": 0.29
   },
   "JeffreySu/WeiXinMPSDK": {
-    "additional_acceptable_branches": [
-      "Developer"
-    ],
+    "additional_acceptable_branches": ["Developer"],
     "tier": "Bronze",
     "weight": 0.29
   },
@@ -427,10 +427,7 @@
     "weight": 0.24
   },
   "LimeSurvey/LimeSurvey": {
-    "additional_acceptable_branches": [
-      "develop-minor",
-      "develop-major"
-    ],
+    "additional_acceptable_branches": ["develop-minor", "develop-major"],
     "tier": "Bronze",
     "weight": 0.28
   },
@@ -764,9 +761,7 @@
     "weight": 25.61
   },
   "SillyTavern/SillyTavern": {
-    "additional_acceptable_branches": [
-      "staging"
-    ],
+    "additional_acceptable_branches": ["staging"],
     "tier": "Bronze",
     "weight": 0.19
   },
@@ -862,9 +857,7 @@
     "weight": 0.17
   },
   "ToolJet/ToolJet": {
-    "additional_acceptable_branches": [
-      "develop"
-    ],
+    "additional_acceptable_branches": ["develop"],
     "tier": "Gold",
     "weight": 22.71
   },
@@ -1013,9 +1006,7 @@
     "weight": 0.18
   },
   "alextselegidis/easyappointments": {
-    "additional_acceptable_branches": [
-      "develop"
-    ],
+    "additional_acceptable_branches": ["develop"],
     "tier": "Bronze",
     "weight": 0.25
   },
@@ -1500,9 +1491,7 @@
     "weight": 0.35
   },
   "bigskysoftware/htmx": {
-    "additional_acceptable_branches": [
-      "dev"
-    ],
+    "additional_acceptable_branches": ["dev"],
     "tier": "Bronze",
     "weight": 0.18
   },
@@ -2079,9 +2068,7 @@
     "weight": 0.21
   },
   "dotnet/dotnet-docker": {
-    "additional_acceptable_branches": [
-      "nightly"
-    ],
+    "additional_acceptable_branches": ["nightly"],
     "tier": "Silver",
     "weight": 4.34
   },
@@ -2166,9 +2153,7 @@
     "weight": 0.17
   },
   "elebumm/RedditVideoMakerBot": {
-    "additional_acceptable_branches": [
-      "develop"
-    ],
+    "additional_acceptable_branches": ["develop"],
     "tier": "Bronze",
     "weight": 0.17
   },
@@ -2774,9 +2759,7 @@
     "weight": 0.21
   },
   "hacksider/Deep-Live-Cam": {
-    "additional_acceptable_branches": [
-      "premain"
-    ],
+    "additional_acceptable_branches": ["premain"],
     "tier": "Bronze",
     "weight": 0.25
   },
@@ -2862,9 +2845,7 @@
     "weight": 0.24
   },
   "home-assistant/core": {
-    "additional_acceptable_branches": [
-      "dev"
-    ],
+    "additional_acceptable_branches": ["dev"],
     "tier": "Gold",
     "weight": 48.92
   },
@@ -2925,9 +2906,7 @@
     "weight": 36.77
   },
   "hummingbot/hummingbot": {
-    "additional_acceptable_branches": [
-      "development"
-    ],
+    "additional_acceptable_branches": ["development"],
     "tier": "Bronze",
     "weight": 0.18
   },
@@ -2973,9 +2952,7 @@
     "weight": 0.19
   },
   "idurar/idurar-erp-crm": {
-    "additional_acceptable_branches": [
-      "dev"
-    ],
+    "additional_acceptable_branches": ["dev"],
     "tier": "Bronze",
     "weight": 0.32
   },
@@ -3137,9 +3114,7 @@
     "weight": 0.18
   },
   "joomla/joomla-cms": {
-    "additional_acceptable_branches": [
-      "*-dev"
-    ],
+    "additional_acceptable_branches": ["*-dev"],
     "tier": "Bronze",
     "weight": 0.28
   },
@@ -3180,16 +3155,12 @@
     "weight": 0.21
   },
   "juice-shop/juice-shop": {
-    "additional_acceptable_branches": [
-      "develop"
-    ],
+    "additional_acceptable_branches": ["develop"],
     "tier": "Bronze",
     "weight": 0.35
   },
   "juliangarnier/anime": {
-    "additional_acceptable_branches": [
-      "dev"
-    ],
+    "additional_acceptable_branches": ["dev"],
     "tier": "Silver",
     "weight": 1.52
   },
@@ -3523,9 +3494,7 @@
     "weight": 6.52
   },
   "macrocosm-os/data-universe": {
-    "additional_acceptable_branches": [
-      "dev"
-    ],
+    "additional_acceptable_branches": ["dev"],
     "tier": "Silver",
     "weight": 7.05
   },
@@ -3602,9 +3571,7 @@
     "weight": 0.25
   },
   "medusajs/medusa": {
-    "additional_acceptable_branches": [
-      "develop"
-    ],
+    "additional_acceptable_branches": ["develop"],
     "tier": "Gold",
     "weight": 23.29
   },
@@ -3950,9 +3917,7 @@
     "weight": 2.43
   },
   "nocodb/nocodb": {
-    "additional_acceptable_branches": [
-      "develop"
-    ],
+    "additional_acceptable_branches": ["develop"],
     "tier": "Gold",
     "weight": 32.44
   },
@@ -3965,9 +3930,7 @@
     "weight": 0.32
   },
   "nodemcu/nodemcu-firmware": {
-    "additional_acceptable_branches": [
-      "dev"
-    ],
+    "additional_acceptable_branches": ["dev"],
     "tier": "Bronze",
     "weight": 0.26
   },
@@ -4180,24 +4143,17 @@
     "weight": 0.29
   },
   "opentensor/bittensor": {
-    "additional_acceptable_branches": [
-      "staging",
-      "SDKv10"
-    ],
+    "additional_acceptable_branches": ["staging", "SDKv10"],
     "tier": "Gold",
     "weight": 77.04
   },
   "opentensor/btcli": {
-    "additional_acceptable_branches": [
-      "staging"
-    ],
+    "additional_acceptable_branches": ["staging"],
     "tier": "Gold",
     "weight": 74.01
   },
   "opentensor/subtensor": {
-    "additional_acceptable_branches": [
-      "devnet-ready"
-    ],
+    "additional_acceptable_branches": ["devnet-ready"],
     "tier": "Gold",
     "weight": 78.01
   },
@@ -4370,9 +4326,7 @@
     "weight": 6.55
   },
   "pi-hole/web": {
-    "additional_acceptable_branches": [
-      "development"
-    ],
+    "additional_acceptable_branches": ["development"],
     "tier": "Gold",
     "weight": 36.77
   },
@@ -4561,9 +4515,7 @@
     "weight": 44.58
   },
   "qdrant/qdrant": {
-    "additional_acceptable_branches": [
-      "dev"
-    ],
+    "additional_acceptable_branches": ["dev"],
     "tier": "Silver",
     "weight": 7.54
   },
@@ -4836,9 +4788,7 @@
     "weight": 0.31
   },
   "shiftlayer-llc/brainplay-subnet": {
-    "additional_acceptable_branches": [
-      "dev"
-    ],
+    "additional_acceptable_branches": ["dev"],
     "tier": "Silver",
     "weight": 6.52
   },
@@ -5121,9 +5071,7 @@
     "weight": 0.4
   },
   "tauri-apps/tauri": {
-    "additional_acceptable_branches": [
-      "dev"
-    ],
+    "additional_acceptable_branches": ["dev"],
     "tier": "Gold",
     "weight": 21.3
   },
@@ -5293,9 +5241,7 @@
     "weight": 0.01
   },
   "tw93/Pake": {
-    "additional_acceptable_branches": [
-      "dev"
-    ],
+    "additional_acceptable_branches": ["dev"],
     "tier": "Bronze",
     "weight": 0.18
   },

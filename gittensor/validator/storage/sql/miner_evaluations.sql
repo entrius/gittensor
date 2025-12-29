@@ -17,8 +17,8 @@ CREATE TABLE IF NOT EXISTS miner_evaluations (
     total_prs             INTEGER          DEFAULT 0,
     unique_repos_count    INTEGER          DEFAULT 0,
 
-    -- Current tier the miner has achieved
-    current_tier          VARCHAR(10)      NOT NULL DEFAULT 'Bronze' CHECK (current_tier IN ('Bronze', 'Silver', 'Gold')),
+    -- Current tier the miner has achieved (NULL = no tier unlocked yet)
+    current_tier          VARCHAR(10)      DEFAULT NULL CHECK (current_tier IS NULL OR current_tier IN ('Bronze', 'Silver', 'Gold')),
 
     -- Per-tier metrics for Bronze, Silver, Gold repositories
     bronze_merged_prs       INTEGER          DEFAULT 0,

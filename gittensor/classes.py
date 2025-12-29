@@ -346,8 +346,8 @@ class MinerEvaluation:
     closed_pull_requests: List[PullRequest] = field(default_factory=list)
     unique_repos_contributed_to: Set[str] = field(default_factory=set)
 
-    # Tier level details
-    current_tier: Tier = Tier.BRONZE
+    # Tier level details (None = no tier unlocked yet)
+    current_tier: Optional[Tier] = None
     credibility_by_tier: Dict[Tier, float] = field(default_factory=dict)
     stats_by_tier: Dict[Tier, TierStats] = field(default_factory=dict)
 

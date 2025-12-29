@@ -181,73 +181,105 @@ class MinerScenario:
 
 @pytest.fixture
 def new_miner(pr_factory, bronze_config) -> MinerScenario:
-    """Brand new miner with no PRs."""
+    """Brand new miner with no PRs (no tiers unlocked)."""
     pr_factory.reset()
     return MinerScenario(merged=[], closed=[], open=[], description="New miner with no history")
 
 
 @pytest.fixture
 def bronze_miner(pr_factory, bronze_config) -> MinerScenario:
-    """Miner with only Bronze tier activity (3 merged, 1 closed = 75%)."""
+    """Miner with Bronze unlocked (meets requirements with 100% credibility)."""
     pr_factory.reset()
+    bronze_tier_config = TIERS[Tier.BRONZE]
     return MinerScenario(
-        merged=pr_factory.merged_batch(tier=bronze_config, count=3),
-        closed=pr_factory.closed_batch(tier=bronze_config, count=1),
+        merged=pr_factory.merged_batch(tier=bronze_config, count=bronze_tier_config.required_merges),
+        closed=[],
         open=[],
-        description="Bronze miner: 3 merged, 1 closed = 75% credibility",
+        description=f"Bronze miner: {bronze_tier_config.required_merges} merged = 100% credibility",
     )
 
 
 @pytest.fixture
-def silver_unlocked_miner(pr_factory, silver_config) -> MinerScenario:
-    """Miner who has unlocked Silver (4 merged, 2 closed = 67%)."""
+def silver_unlocked_miner(pr_factory, bronze_config, silver_config) -> MinerScenario:
+    """Miner who has unlocked Silver (Bronze and Silver requirements met)."""
     pr_factory.reset()
-    return MinerScenario(
-        merged=pr_factory.merged_batch(tier=silver_config, count=4),
-        closed=pr_factory.closed_batch(tier=silver_config, count=2),
-        open=[],
-        description="Silver miner: 4 merged, 2 closed = 67% credibility",
-    )
-
-
-@pytest.fixture
-def silver_threshold_miner(pr_factory, silver_config) -> MinerScenario:
-    """Miner exactly at Silver threshold (3 merged, 3 closed = 50%)."""
-    pr_factory.reset()
-    return MinerScenario(
-        merged=pr_factory.merged_batch(tier=silver_config, count=3),
-        closed=pr_factory.closed_batch(tier=silver_config, count=3),
-        open=[],
-        description="Silver threshold: 3 merged, 3 closed = exactly 50%",
-    )
-
-
-@pytest.fixture
-def gold_unlocked_miner(pr_factory, silver_config, gold_config) -> MinerScenario:
-    """Miner who has unlocked Gold tier."""
-    pr_factory.reset()
+    bronze_tier_config = TIERS[Tier.BRONZE]
+    silver_tier_config = TIERS[Tier.SILVER]
     return MinerScenario(
         merged=(
-            pr_factory.merged_batch(tier=silver_config, count=3)  # Unlock Silver
-            + pr_factory.merged_batch(tier=gold_config, count=7)  # 7 merged Gold
+            pr_factory.merged_batch(tier=bronze_config, count=bronze_tier_config.required_merges)
+            + pr_factory.merged_batch(tier=silver_config, count=silver_tier_config.required_merges)
         ),
-        closed=pr_factory.closed_batch(tier=gold_config, count=3),  # 7/10 = 70%
+        closed=[],
         open=[],
-        description="Gold miner: Silver unlocked + Gold 7/10 = 70%",
+        description="Silver miner: Bronze + Silver unlocked with 100% credibility",
     )
 
 
 @pytest.fixture
-def gold_threshold_miner(pr_factory, silver_config, gold_config) -> MinerScenario:
-    """Miner exactly at Gold threshold (70%)."""
+def silver_threshold_miner(pr_factory, bronze_config, silver_config) -> MinerScenario:
+    """Miner exactly at Silver credibility threshold."""
     pr_factory.reset()
+    bronze_tier_config = TIERS[Tier.BRONZE]
+    silver_tier_config = TIERS[Tier.SILVER]
+    required_merges = silver_tier_config.required_merges
+    required_credibility = silver_tier_config.required_credibility
+
+    # Calculate closed to be exactly at threshold
+    closed_count = int(required_merges * (1 - required_credibility) / required_credibility)
+
     return MinerScenario(
         merged=(
-            pr_factory.merged_batch(tier=silver_config, count=3) + pr_factory.merged_batch(tier=gold_config, count=7)
+            pr_factory.merged_batch(tier=bronze_config, count=bronze_tier_config.required_merges)
+            + pr_factory.merged_batch(tier=silver_config, count=required_merges)
         ),
-        closed=pr_factory.closed_batch(tier=gold_config, count=3),
+        closed=pr_factory.closed_batch(tier=silver_config, count=closed_count),
         open=[],
-        description="Gold threshold: 7 merged, 3 closed = exactly 70%",
+        description=f"Silver threshold: {required_merges} merged, {closed_count} closed = ~{required_credibility*100}%",
+    )
+
+
+@pytest.fixture
+def gold_unlocked_miner(pr_factory, bronze_config, silver_config, gold_config) -> MinerScenario:
+    """Miner who has unlocked Gold tier (all tiers unlocked)."""
+    pr_factory.reset()
+    bronze_tier_config = TIERS[Tier.BRONZE]
+    silver_tier_config = TIERS[Tier.SILVER]
+    gold_tier_config = TIERS[Tier.GOLD]
+    return MinerScenario(
+        merged=(
+            pr_factory.merged_batch(tier=bronze_config, count=bronze_tier_config.required_merges)
+            + pr_factory.merged_batch(tier=silver_config, count=silver_tier_config.required_merges)
+            + pr_factory.merged_batch(tier=gold_config, count=gold_tier_config.required_merges)
+        ),
+        closed=[],
+        open=[],
+        description="Gold miner: All tiers unlocked with 100% credibility",
+    )
+
+
+@pytest.fixture
+def gold_threshold_miner(pr_factory, bronze_config, silver_config, gold_config) -> MinerScenario:
+    """Miner exactly at Gold credibility threshold."""
+    pr_factory.reset()
+    bronze_tier_config = TIERS[Tier.BRONZE]
+    silver_tier_config = TIERS[Tier.SILVER]
+    gold_tier_config = TIERS[Tier.GOLD]
+    required_merges = gold_tier_config.required_merges
+    required_credibility = gold_tier_config.required_credibility
+
+    # Calculate closed to be exactly at threshold
+    closed_count = int(required_merges * (1 - required_credibility) / required_credibility)
+
+    return MinerScenario(
+        merged=(
+            pr_factory.merged_batch(tier=bronze_config, count=bronze_tier_config.required_merges)
+            + pr_factory.merged_batch(tier=silver_config, count=silver_tier_config.required_merges)
+            + pr_factory.merged_batch(tier=gold_config, count=required_merges)
+        ),
+        closed=pr_factory.closed_batch(tier=gold_config, count=closed_count),
+        open=[],
+        description=f"Gold threshold: {required_merges} merged, {closed_count} closed = ~{required_credibility*100}%",
     )
 
 
@@ -257,44 +289,70 @@ def gold_threshold_miner(pr_factory, silver_config, gold_config) -> MinerScenari
 
 
 @pytest.fixture
-def demoted_from_gold_miner(pr_factory, silver_config, gold_config) -> MinerScenario:
-    """Miner who was at Gold but got demoted (credibility dropped below 70%)."""
+def demoted_from_gold_miner(pr_factory, bronze_config, silver_config, gold_config) -> MinerScenario:
+    """Miner who was at Gold but got demoted (credibility dropped below requirement)."""
     pr_factory.reset()
+    bronze_tier_config = TIERS[Tier.BRONZE]
+    silver_tier_config = TIERS[Tier.SILVER]
+    gold_tier_config = TIERS[Tier.GOLD]
+    gold_required = gold_tier_config.required_merges
+    gold_cred_required = gold_tier_config.required_credibility
+
+    # Calculate closed to drop below Gold credibility requirement
+    closed_count = int(gold_required * (1 - gold_cred_required) / gold_cred_required) + 2
+
     return MinerScenario(
         merged=(
-            pr_factory.merged_batch(tier=silver_config, count=3)  # Silver still OK
-            + pr_factory.merged_batch(tier=gold_config, count=5)  # 5 merged Gold
+            pr_factory.merged_batch(tier=bronze_config, count=bronze_tier_config.required_merges)
+            + pr_factory.merged_batch(tier=silver_config, count=silver_tier_config.required_merges)
+            + pr_factory.merged_batch(tier=gold_config, count=gold_required)
         ),
-        closed=pr_factory.closed_batch(tier=gold_config, count=3),  # 5/8 = 62.5% < 70%
+        closed=pr_factory.closed_batch(tier=gold_config, count=closed_count),
         open=[],
-        description="Demoted from Gold: 5/8 = 62.5% (below 70% threshold)",
+        description=f"Demoted from Gold: {gold_required}/{gold_required + closed_count} (below {gold_cred_required*100}% threshold)",
     )
 
 
 @pytest.fixture
-def demoted_from_silver_miner(pr_factory, silver_config) -> MinerScenario:
-    """Miner who was at Silver but got demoted."""
+def demoted_from_silver_miner(pr_factory, bronze_config, silver_config) -> MinerScenario:
+    """Miner who was at Silver but got demoted (credibility dropped below requirement)."""
     pr_factory.reset()
+    bronze_tier_config = TIERS[Tier.BRONZE]
+    silver_tier_config = TIERS[Tier.SILVER]
+    silver_required = silver_tier_config.required_merges
+    silver_cred_required = silver_tier_config.required_credibility
+
+    # Calculate closed to drop below Silver credibility requirement
+    closed_count = int(silver_required * (1 - silver_cred_required) / silver_cred_required) + 2
+
     return MinerScenario(
-        merged=pr_factory.merged_batch(tier=silver_config, count=3),
-        closed=pr_factory.closed_batch(tier=silver_config, count=4),  # 3/7 = 42.8% < 50%
+        merged=(
+            pr_factory.merged_batch(tier=bronze_config, count=bronze_tier_config.required_merges)
+            + pr_factory.merged_batch(tier=silver_config, count=silver_required)
+        ),
+        closed=pr_factory.closed_batch(tier=silver_config, count=closed_count),
         open=[],
-        description="Demoted from Silver: 3/7 = 42.8% (below 50% threshold)",
+        description=f"Demoted from Silver: {silver_required}/{silver_required + closed_count} (below {silver_cred_required*100}% threshold)",
     )
 
 
 @pytest.fixture
-def cascade_demoted_miner(pr_factory, silver_config, gold_config) -> MinerScenario:
+def cascade_demoted_miner(pr_factory, bronze_config, silver_config, gold_config) -> MinerScenario:
     """Miner with perfect Gold stats but Silver is locked (cascade demotion)."""
     pr_factory.reset()
+    bronze_tier_config = TIERS[Tier.BRONZE]
+    silver_tier_config = TIERS[Tier.SILVER]
+    gold_tier_config = TIERS[Tier.GOLD]
+
     return MinerScenario(
         merged=(
-            pr_factory.merged_batch(tier=silver_config, count=2)  # Only 2 Silver (need 3)
-            + pr_factory.merged_batch(tier=gold_config, count=10)  # Perfect Gold stats
+            pr_factory.merged_batch(tier=bronze_config, count=bronze_tier_config.required_merges)
+            + pr_factory.merged_batch(tier=silver_config, count=silver_tier_config.required_merges - 1)  # One short
+            + pr_factory.merged_batch(tier=gold_config, count=gold_tier_config.required_merges + 5)  # Perfect Gold
         ),
         closed=[],
         open=[],
-        description="Cascade demotion: Silver locked (2 merges) -> Gold locked despite 100%",
+        description="Cascade demotion: Silver locked (1 merge short) -> Gold locked despite 100%",
     )
 
 
@@ -382,31 +440,56 @@ def empty_tier_stats() -> dict:
     return {tier: TierStats() for tier in Tier}
 
 
+def _unlocked_bronze_stats() -> TierStats:
+    """Helper to create Bronze stats that meet unlock requirements."""
+    bronze_config = TIERS[Tier.BRONZE]
+    return TierStats(merged_count=bronze_config.required_merges, closed_count=0)
+
+
+def _unlocked_silver_stats() -> TierStats:
+    """Helper to create Silver stats that meet unlock requirements."""
+    silver_config = TIERS[Tier.SILVER]
+    return TierStats(merged_count=silver_config.required_merges, closed_count=0)
+
+
+def _unlocked_gold_stats() -> TierStats:
+    """Helper to create Gold stats that meet unlock requirements."""
+    gold_config = TIERS[Tier.GOLD]
+    return TierStats(merged_count=gold_config.required_merges, closed_count=0)
+
+
 @pytest.fixture
 def silver_unlocked_stats() -> dict:
-    """TierStats where Silver is unlocked."""
+    """TierStats where Silver is unlocked (Bronze must also be unlocked)."""
     return {
-        Tier.BRONZE: TierStats(),
-        Tier.SILVER: TierStats(merged_count=4, closed_count=2),  # 67%
+        Tier.BRONZE: _unlocked_bronze_stats(),
+        Tier.SILVER: _unlocked_silver_stats(),
         Tier.GOLD: TierStats(),
     }
 
 
 @pytest.fixture
 def gold_unlocked_stats() -> dict:
-    """TierStats where Gold is unlocked."""
+    """TierStats where Gold is unlocked (Bronze and Silver must also be unlocked)."""
     return {
-        Tier.BRONZE: TierStats(),
-        Tier.SILVER: TierStats(merged_count=3, closed_count=0),  # 100%
-        Tier.GOLD: TierStats(merged_count=7, closed_count=3),  # 70%
+        Tier.BRONZE: _unlocked_bronze_stats(),
+        Tier.SILVER: _unlocked_silver_stats(),
+        Tier.GOLD: _unlocked_gold_stats(),
     }
 
 
 @pytest.fixture
 def gold_locked_stats() -> dict:
-    """TierStats where Gold is locked (below 70%)."""
+    """TierStats where Gold is locked (below credibility requirement)."""
+    gold_config = TIERS[Tier.GOLD]
+    required_merges = gold_config.required_merges
+    required_credibility = gold_config.required_credibility
+
+    # Calculate closed count to be just below credibility threshold
+    closed_count = int(required_merges * (1 - required_credibility) / required_credibility) + 1
+
     return {
-        Tier.BRONZE: TierStats(),
-        Tier.SILVER: TierStats(merged_count=3, closed_count=0),
-        Tier.GOLD: TierStats(merged_count=5, closed_count=3),  # 62.5%
+        Tier.BRONZE: _unlocked_bronze_stats(),
+        Tier.SILVER: _unlocked_silver_stats(),
+        Tier.GOLD: TierStats(merged_count=required_merges, closed_count=closed_count),
     }

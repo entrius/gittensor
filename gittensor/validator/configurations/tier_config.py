@@ -5,14 +5,16 @@ from typing import Optional
 from gittensor.constants import (
     DEFAULT_COLLATERAL_PERCENT,
     DEFAULT_CREDIBILITY_THRESHOLD,
+    DEFAULT_MAX_CONTRIBUTION_SCORE_FOR_FULL_BONUS,
     DEFAULT_MERGED_PR_BASE_SCORE,
     MAX_LINE_CONTRIBUTION_BONUS,
-    DEFAULT_MAX_CONTRIBUTION_SCORE_FOR_FULL_BONUS,
 )
+
 
 @dataclass
 class TierStats:
     """Statistics for a single tier."""
+
     merged_count: int = 0
     closed_count: int = 0
     open_count: int = 0
@@ -54,10 +56,10 @@ class TierConfig:
     # Next tier unlock requirements (None for top tier)
     required_merges: Optional[int]
     required_credibility: Optional[float]
-    
+
     # Tier-specific scaling
     credibility_scalar: int
-    
+
     # Defaults (can override per-tier if needed)
     merged_pr_base_score: int = TIER_DEFAULTS["merged_pr_base_score"]
     contribution_score_for_full_bonus: int = TIER_DEFAULTS["contribution_score_for_full_bonus"]
@@ -67,10 +69,10 @@ class TierConfig:
 
 
 TIERS: dict[Tier, TierConfig] = {
-    #                                 merges  credibility  scalar  (requirements to MAINTAIN this tier)
-    Tier.BRONZE:   TierConfig(        None,   None,        1      ),  # always unlocked
-    Tier.SILVER:   TierConfig(        3,      0.50,        2      ),
-    Tier.GOLD:     TierConfig(        5,      0.70,        3      ),
+    #             merges  credibility  scalar  (requirements to MAINTAIN this tier)
+    Tier.BRONZE: TierConfig(3, 0.80, 1),  # entry level tier
+    Tier.SILVER: TierConfig(4, 0.75, 2),
+    Tier.GOLD: TierConfig(5, 0.70, 3),
 }
 
 TIERS_ORDER: list[Tier] = list(TIERS.keys())
@@ -90,3 +92,4 @@ def get_tier_from_config(tier_config: TierConfig) -> Optional[Tier]:
         if config == tier_config:
             return tier
     return None
+

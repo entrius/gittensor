@@ -5,36 +5,34 @@
 Run all tests:
 
 ```bash
-python run_tests.py
+pytest tests/
 ```
 
 Run with verbose output:
 
 ```bash
-python run_tests.py -v
+pytest tests/ -v
 ```
 
-Run specific test module:
+Run specific test file:
 
 ```bash
-python run_tests.py tests.utils.test_github_api_tools
+pytest tests/utils/test_github_api_tools.py
 ```
 
 Run specific test class:
 
 ```bash
-python run_tests.py tests.utils.test_github_api_tools.TestGraphQLRetryLogic
+pytest tests/utils/test_github_api_tools.py::TestGraphQLRetryLogic
 ```
 
-### Using pytest
-
-If you prefer pytest:
+Run tests matching a pattern:
 
 ```bash
-pytest tests/ -v
+pytest tests/ -k "demotion"
 ```
 
-### Adding New Tests
+## Adding New Tests
 
 Create test files following the pattern `test_<module_name>.py` in the appropriate directory. Tests are automatically discovered by the test runner.
 

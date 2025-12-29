@@ -254,10 +254,11 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
             if is_tier_unlocked(tier, tier_stats):
                 evaluation.current_tier = tier
 
+        current_tier_str = evaluation.current_tier.value if evaluation.current_tier else "None"
         bt.logging.info(
             f"UID {uid}: earned={earned_score:.2f} - collateral={evaluation.total_collateral_score:.2f} = "
             f"final={evaluation.total_score:.2f} ({evaluation.total_merged_prs} merged, {evaluation.total_open_prs} open) "
-            f"| Current Tier: {evaluation.current_tier.value} "
+            f"| Current Tier: {current_tier_str} "
             f"| Per-Tier Stats:"
             f"Bronze({evaluation.stats_by_tier[Tier.BRONZE].merged_count}/{evaluation.stats_by_tier[Tier.BRONZE].total_attempts}), "
             f"Silver({evaluation.stats_by_tier[Tier.SILVER].merged_count}/{evaluation.stats_by_tier[Tier.SILVER].total_attempts}), "

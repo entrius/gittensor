@@ -1,6 +1,6 @@
 <p align="center">
   <a href="https://gittensor.io/">
-    <img src="assets/gt-w-name.jpg" alt="Gittensor Logo" width="800" />
+    <img src="assets/gt-logo.png" alt="Gittensor Logo" width="800" />
   </a>
 </p>
 

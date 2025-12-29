@@ -293,7 +293,7 @@ class Repository(BaseRepository):
                 evaluation.total_merged_prs,
                 evaluation.total_prs,
                 evaluation.unique_repos_count,
-                evaluation.current_tier.value,
+                evaluation.current_tier.value if evaluation.current_tier else None,
 
                 evaluation.stats_by_tier[Tier.BRONZE].merged_count,
                 evaluation.stats_by_tier[Tier.BRONZE].closed_count,

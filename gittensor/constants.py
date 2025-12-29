@@ -43,7 +43,7 @@ MAX_ISSUE_AGE_FOR_MAX_SCORE = 45  # days
 TIME_DECAY_GRACE_PERIOD_HOURS = 12  # hours before time decay begins
 TIME_DECAY_SIGMOID_MIDPOINT = 10  # days until 50% score loss
 TIME_DECAY_SIGMOID_STEEPNESS_SCALAR = 0.4
-TIME_DECAY_MIN_MULTIPLIER = 0.05 # 5% of score will retain through lookback days (90D)
+TIME_DECAY_MIN_MULTIPLIER = 0.05  # 5% of score will retain through lookback days (90D)
 
 # =============================================================================
 # Tiers & Collateral System
@@ -51,10 +51,10 @@ TIME_DECAY_MIN_MULTIPLIER = 0.05 # 5% of score will retain through lookback days
 TIER_BASED_INCENTIVE_MECHANISM_START_DATE = datetime(2025, 12, 27, 17, 00, 00, tzinfo=timezone.utc)
 DEFAULT_COLLATERAL_PERCENT = 0.20
 
-DEFAULT_CREDIBILITY_THRESHOLD = 2 # Credibility is effective after 2 attempts.
+DEFAULT_CREDIBILITY_THRESHOLD = 1  # Credibility is effective after x attempts
 
 MAX_LINE_CONTRIBUTION_BONUS = 30
-DEFAULT_MAX_CONTRIBUTION_SCORE_FOR_FULL_BONUS = 2000 # For reference: 2000 score = 1,000 python lines
+DEFAULT_MAX_CONTRIBUTION_SCORE_FOR_FULL_BONUS = 2000  # For reference: 2000 score = 1,000 python lines
 
 # =============================================================================
 # Rewards & Emissions
@@ -62,7 +62,7 @@ DEFAULT_MAX_CONTRIBUTION_SCORE_FOR_FULL_BONUS = 2000 # For reference: 2000 score
 RECYCLE_UID = 0
 
 DEFAULT_FIXED_RECYCLE_RATE = 0.50
-DYNAMIC_EMISSIONS_BUFFER_DAYS = 45 # After 45 days of launching tier based IM, we will restore dynamic emissions
+DYNAMIC_EMISSIONS_BUFFER_DAYS = 45  # After 45 days of launching tier based IM, we will restore dynamic emissions
 
 # Network emission scaling (lines contributed)
 LINES_CONTRIBUTED_MAX_RECYCLE = 0.9

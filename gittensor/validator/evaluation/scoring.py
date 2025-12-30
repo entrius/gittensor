@@ -233,7 +233,9 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
             tier_config = pr.repository_tier_configuration
             tier = get_tier_from_config(tier_config)
             credibility = evaluation.credibility_by_tier.get(tier, 1.0) if tier else 1.0
-            pr.credibility_multiplier = round(credibility**tier_config.credibility_scalar, 2)
+            pr.raw_credibility = credibility
+            pr.credibility_scalar = tier_config.credibility_scalar
+            pr.credibility_multiplier = round(credibility ** tier_config.credibility_scalar, 2)
 
             pr.calculate_final_earned_score()
             evaluation.base_total_score += pr.base_score

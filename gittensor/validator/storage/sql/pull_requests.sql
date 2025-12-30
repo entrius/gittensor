@@ -24,6 +24,8 @@ CREATE TABLE IF NOT EXISTS pull_requests (
     time_decay_multiplier             DECIMAL(15,6)    DEFAULT 1.0,
     gittensor_tag_multiplier          DECIMAL(15,6)    DEFAULT 1.0,
     credibility_multiplier            DECIMAL(15,6)    DEFAULT 1.0,
+    raw_credibility                   DECIMAL(15,6)    DEFAULT 1.0,
+    credibility_scalar                INTEGER          DEFAULT 1,
     earned_score                      DECIMAL(15,6)    DEFAULT 0.0,
     collateral_score                  DECIMAL(15,6)    DEFAULT 0.0,  -- For OPEN PRs: potential_score * collateral_percent
 
@@ -61,6 +63,8 @@ CREATE TABLE IF NOT EXISTS pull_requests (
     CONSTRAINT chk_pull_requests_time_decay_multiplier            CHECK    (time_decay_multiplier <= 1),
     CONSTRAINT chk_pull_requests_gittensor_tag_multiplier         CHECK    (gittensor_tag_multiplier >= 1),
     CONSTRAINT chk_pull_requests_credibility_multiplier           CHECK    (credibility_multiplier <= 1),
+    CONSTRAINT chk_pull_requests_raw_credibility                  CHECK    (raw_credibility <= 1),
+    CONSTRAINT chk_pull_requests_credibility_scalar               CHECK    (credibility_scalar >= 1),
     CONSTRAINT chk_pull_requests_earned_score                     CHECK    (earned_score >= 0),
     CONSTRAINT chk_pull_requests_collateral_score                 CHECK    (collateral_score >= 0),
     CONSTRAINT chk_pull_requests_pr_state                         CHECK    (pr_state IN ('MERGED', 'OPEN', 'CLOSED'))

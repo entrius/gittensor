@@ -162,6 +162,8 @@ class PullRequest:
     time_decay_multiplier: float = 1.0
     gittensor_tag_multiplier: float = 1.0
     credibility_multiplier: float = 1.0
+    raw_credibility: float = 1.0  # Before applying ^k scalar
+    credibility_scalar: int = 1  # The k value from tier config
     earned_score: float = 0.0
     collateral_score: float = 0.0  # For OPEN PRs: potential_score * collateral_percent
 
@@ -193,7 +195,7 @@ class PullRequest:
         if not self.file_changes:
             return 0.0, True
 
-        pr_score = 0.0
+        pr_contribution_score = 0.0
         total_raw_changes = 0
         substantive_changes = 0
         file_details = []
@@ -218,7 +220,7 @@ class PullRequest:
                 substantive_changes += scored_changes
 
             file_score = language_weight * file_weight * scored_changes
-            pr_score += file_score
+            pr_contribution_score += file_score
 
             file_details.append((file.short_name, scored_changes, file.changes, file_score, is_test_file))
 
@@ -231,9 +233,9 @@ class PullRequest:
         for name, scored, total, score, is_test in file_details:
             test_mark = " [test]" if is_test else ""
             bt.logging.debug(f"  │   {name:<{max_name_len}}  {scored:>3}/{total:<3} lines  {score:>6.2f}{test_mark}")
-        bt.logging.info(f"  ├─ Contribution: {pr_score:.2f} | Substantive: {substantive_changes}/{total_raw_changes} ({substantive_ratio*100:.0f}%)")
+        bt.logging.info(f"  ├─ Contribution: {pr_contribution_score:.2f} | Substantive: {substantive_changes}/{total_raw_changes} ({substantive_ratio*100:.0f}%)")
 
-        return pr_score, is_low_value_pr
+        return pr_contribution_score, is_low_value_pr
 
     def calculate_final_earned_score(self) -> float:
         """Combine base score with all multipliers."""
@@ -249,11 +251,13 @@ class PullRequest:
 
         self.earned_score = self.base_score * prod(multipliers.values())
 
-        # Log & Only shows non-1.0 multipliers
-        active_mults = [f"{k}={v:.2f}" for k, v in multipliers.items() if v != 1.0]
-        mult_str = " × ".join(active_mults) if active_mults else "none"
-        bt.logging.info(f"├─ {self.pr_state.value} PR #{self.number} ({self.repository_full_name})")
-        bt.logging.info(f"│  └─ base={self.base_score:.2f} × [{mult_str}] → {self.earned_score:.2f}")
+        # Log all multipliers (credibility shows ^k format)
+        mult_str = " × ".join(
+            f"cred={self.raw_credibility:.2f}^{self.credibility_scalar}" if k == "cred" else f"{k}={v:.2f}"
+            for k, v in multipliers.items()
+        )
+        bt.logging.info(f"├─ {self.pr_state.value} PR #{self.number} ({self.repository_full_name}) → {self.earned_score:.2f}")
+        bt.logging.info(f"│  └─ {self.base_score:.2f} × {mult_str}")
 
         return self.earned_score
 

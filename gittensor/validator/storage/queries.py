@@ -15,7 +15,8 @@ INSERT INTO pull_requests (
     merged_at, pr_created_at, pr_state,
     repo_weight_multiplier, base_score, issue_multiplier,
     open_pr_spam_multiplier, repository_uniqueness_multiplier, time_decay_multiplier,
-    gittensor_tag_multiplier, credibility_multiplier, earned_score, collateral_score,
+    gittensor_tag_multiplier, credibility_multiplier, raw_credibility, credibility_scalar,
+    earned_score, collateral_score,
     additions, deletions, commits, total_lines_scored, gittensor_tagged,
     merged_by_login, description, last_edited_at
 ) VALUES %s
@@ -32,6 +33,8 @@ DO UPDATE SET
     time_decay_multiplier = EXCLUDED.time_decay_multiplier,
     gittensor_tag_multiplier = EXCLUDED.gittensor_tag_multiplier,
     credibility_multiplier = EXCLUDED.credibility_multiplier,
+    raw_credibility = EXCLUDED.raw_credibility,
+    credibility_scalar = EXCLUDED.credibility_scalar,
     earned_score = EXCLUDED.earned_score,
     collateral_score = EXCLUDED.collateral_score,
     total_lines_scored = EXCLUDED.total_lines_scored,

@@ -145,6 +145,8 @@ class Repository(BaseRepository):
                     pr.time_decay_multiplier,
                     pr.gittensor_tag_multiplier,
                     pr.credibility_multiplier,
+                    pr.raw_credibility,
+                    pr.credibility_scalar,
                     pr.earned_score,
                     pr.collateral_score,
                     pr.additions,

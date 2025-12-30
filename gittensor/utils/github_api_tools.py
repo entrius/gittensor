@@ -15,7 +15,7 @@ from gittensor.classes import (
 )
 from gittensor.constants import (
     BASE_GITHUB_API_URL,
-    IGNORED_AUTHOR_ASSOCIATIONS,
+    MAINTAINER_ASSOCIATIONS,
     TIER_BASED_INCENTIVE_MECHANISM_START_DATE,
 )
 from gittensor.utils.utils import parse_repo_name
@@ -85,6 +85,7 @@ QUERY = """
                   author {
                     login
                   }
+                  authorAssociation
                 }
               }
               reviews(first: 50, states: APPROVED) {
@@ -357,7 +358,7 @@ def try_add_open_or_closed_pr(
         return
 
     if pr_state == PRState.OPEN.value:
-        if pr_raw.get('authorAssociation') not in IGNORED_AUTHOR_ASSOCIATIONS:
+        if pr_raw.get('authorAssociation') not in MAINTAINER_ASSOCIATIONS:
             miner_eval.add_open_pull_request(pr_raw)
         return
 
@@ -411,7 +412,7 @@ def should_skip_merged_pr(
 
     # Skip if PR author is a maintainer
     author_association = pr_raw.get('authorAssociation')
-    if author_association in IGNORED_AUTHOR_ASSOCIATIONS:
+    if author_association in MAINTAINER_ASSOCIATIONS:
         return (
             True,
             f"Skipping PR #{pr_raw['number']} in {repository_full_name} - author is {author_association} (has direct merge capabilities)",

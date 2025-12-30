@@ -130,6 +130,7 @@ class Issue:
     closed_at: Optional[datetime] = None
     author_login: Optional[str] = None
     state: Optional[str] = None  # "OPEN" or "CLOSED"
+    author_association: Optional[str] = None  # e.g., "OWNER", "MEMBER", "COLLABORATOR", "CONTRIBUTOR", "NONE"
 
 
 @dataclass
@@ -272,7 +273,7 @@ class PullRequest:
         is_merged = pr_state == PRState.MERGED
 
         # Issue extraction - merged PRs only count closed issues
-        raw_issues = pr_data.get('closingIssuesReferences', {}).get('nodes', [])
+        raw_issues: List[Dict] = pr_data.get('closingIssuesReferences', {}).get('nodes', [])
         issues = []
         for issue in raw_issues:
             if is_merged and not (issue.get('closedAt') and issue.get('state') == 'CLOSED'):
@@ -287,6 +288,7 @@ class PullRequest:
                     closed_at=parse_github_timestamp_to_cst(issue['closedAt']) if issue.get('closedAt') else None,
                     author_login=issue.get('author', {}).get('login') if issue.get('author') else None,
                     state=issue.get('state'),
+                    author_association=issue.get('authorAssociation'),
                 )
             )
 

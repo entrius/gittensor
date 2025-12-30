@@ -12,6 +12,9 @@ from gittensor.constants import (
     EXCESSIVE_PR_MIN_MULTIPLIER,
     EXCESSIVE_PR_PENALTY_SLOPE,
     EXCESSIVE_PR_PENALTY_THRESHOLD,
+    MAINTAINER_ASSOCIATIONS,
+    MAINTAINER_ISSUE_BONUS,
+    MAX_ISSUE_AGE_BONUS,
     MAX_ISSUE_AGE_FOR_MAX_SCORE,
     MAX_ISSUE_CLOSE_WINDOW_DAYS,
     SECONDS_PER_DAY,
@@ -306,10 +309,10 @@ def calculate_issue_multiplier(pr: PullRequest) -> float:
     Calculate PR score multiplier based on the first valid linked issue's age.
 
     Works for both merged PRs (uses issue.closed_at) and open PRs (uses current time).
-    Only the first valid issue is scored.
+    Only the first valid issue is scored. Adds bonus if issue was created by a maintainer.
 
     Returns:
-        float: Multiplier between 1.0 and 1.9
+        float: Multiplier between 1.0 and 2.0
     """
     if not pr.issues:
         bt.logging.info(f"PR #{pr.number} - Contains no linked issues")
@@ -323,22 +326,28 @@ def calculate_issue_multiplier(pr: PullRequest) -> float:
     issue = valid_issues[0]
     is_merged = pr.pr_state == PRState.MERGED
 
+    # Check if issue was created by a maintainer (extra bonus)
+    is_maintainer_issue = issue.author_association in MAINTAINER_ASSOCIATIONS if issue.author_association else False
+    maintainer_bonus = MAINTAINER_ISSUE_BONUS if is_maintainer_issue else 0.0
+    maintainer_str = " (maintainer)" if is_maintainer_issue else ""
+
     if not issue.created_at:
-        bt.logging.info(f"Issue #{issue.number} - No creation date, using default: 0.10")
-        return 1.1
+        bonus = maintainer_bonus
+        bt.logging.info(f"Issue #{issue.number} - No creation date | bonus: {bonus:.2f}{maintainer_str}")
+        return 1.0 + bonus
 
     try:
         end_date = issue.closed_at if (is_merged and issue.closed_at) else datetime.now(timezone.utc)
         days_open = (end_date - issue.created_at).days
-        normalized = 0.1 + math.sqrt(min(days_open, MAX_ISSUE_AGE_FOR_MAX_SCORE)) / math.sqrt(
-            MAX_ISSUE_AGE_FOR_MAX_SCORE
-        )
-        issue_bonus = 0.9 * min(normalized, 1.0)
-        bt.logging.info(f"Issue #{issue.number} - Open for {days_open} days | bonus: {issue_bonus:.2f}")
-        return 1.0 + issue_bonus
+        # Scale age bonus from 0 to MAX_ISSUE_AGE_BONUS based on sqrt of days open
+        age_ratio = math.sqrt(min(days_open, MAX_ISSUE_AGE_FOR_MAX_SCORE)) / math.sqrt(MAX_ISSUE_AGE_FOR_MAX_SCORE)
+        age_bonus = MAX_ISSUE_AGE_BONUS * age_ratio
+        total_bonus = age_bonus + maintainer_bonus
+        bt.logging.info(f"Issue #{issue.number} - Open for {days_open} days | bonus: {total_bonus:.2f}{maintainer_str}")
+        return 1.0 + total_bonus
     except (ValueError, AttributeError) as e:
-        bt.logging.warning(f"Issue #{issue.number} - Could not calculate age. Using default: 0.10. Exception: {e}")
-        return 1.1
+        bt.logging.warning(f"Issue #{issue.number} - Could not calculate age. Using maintainer bonus only: {maintainer_bonus:.2f}. Exception: {e}")
+        return 1.0 + maintainer_bonus
 
 
 def is_valid_issue(issue: Issue, pr: PullRequest) -> bool:

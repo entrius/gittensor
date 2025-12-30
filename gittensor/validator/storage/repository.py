@@ -203,6 +203,9 @@ class Repository(BaseRepository):
                     issue.title,
                     issue.created_at,
                     issue.closed_at,
+                    issue.author_login,
+                    issue.state,
+                    issue.author_association,
                 )
             )
 

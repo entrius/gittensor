@@ -47,10 +47,16 @@ DO UPDATE SET
 # Issue Queries
 BULK_UPSERT_ISSUES = """
 INSERT INTO issues (
-    number, pr_number, repository_full_name, title, created_at, closed_at
+    number, pr_number, repository_full_name, title, created_at, closed_at,
+    author_login, state, author_association
 ) VALUES %s
 ON CONFLICT (number, repository_full_name)
-DO NOTHING
+DO UPDATE SET
+    title = EXCLUDED.title,
+    closed_at = EXCLUDED.closed_at,
+    author_login = EXCLUDED.author_login,
+    state = EXCLUDED.state,
+    author_association = EXCLUDED.author_association
 """
 
 # File Change Queries

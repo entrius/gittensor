@@ -78,7 +78,11 @@ UNIQUE_PRS_RECYCLE_DECAY_RATE = 0.006
 # =============================================================================
 # Spam & Gaming Mitigation
 # =============================================================================
-IGNORED_AUTHOR_ASSOCIATIONS = ['OWNER', 'MEMBER', 'COLLABORATOR']
+MAINTAINER_ASSOCIATIONS = ['OWNER', 'MEMBER', 'COLLABORATOR']
+
+# Issue multiplier bonuses
+MAX_ISSUE_AGE_BONUS = 0.75  # Max bonus for issue age (scales with sqrt of days open)
+MAINTAINER_ISSUE_BONUS = 0.25  # Extra bonus when issue was created by a maintainer
 
 # Typo detection (for filtering non-scoreable lines)
 TYPO_MAX_DIST = 2

@@ -5,6 +5,8 @@ from enum import Enum
 from math import prod
 from typing import DefaultDict, Dict, List, Optional, Set
 
+import bittensor as bt
+
 from gittensor.constants import (
     DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT,
     MAX_LINES_SCORED_FOR_MITIGATED_EXT,

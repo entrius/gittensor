@@ -80,12 +80,14 @@ def score_pull_request(
     if not pr.repository_tier_configuration:
         return False
 
-    file_changes = get_pull_request_file_changes(pr.repository_full_name, pr.number, miner_eval.github_pat)
-    if not file_changes:
-        bt.logging.warning("No file changes found.")
-        return False
+    # Only fetch file changes from GitHub if not already loaded (they are preloaded for testing only)
+    if not pr.file_changes:
+        file_changes = get_pull_request_file_changes(pr.repository_full_name, pr.number, miner_eval.github_pat)
+        if not file_changes:
+            bt.logging.warning("No file changes found.")
+            return False
+        pr.set_file_changes(file_changes)
 
-    pr.set_file_changes(file_changes)
     pr.base_score = calculate_base_score(pr, programming_languages)
     calculate_pr_multipliers(pr, miner_eval, master_repositories)
 

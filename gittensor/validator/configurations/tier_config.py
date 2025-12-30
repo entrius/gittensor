@@ -66,12 +66,11 @@ class TierConfig:
 
 
 TIERS: dict[Tier, TierConfig] = {
-    #             merges  credibility  scalar  (requirements to MAINTAIN this tier)
-    Tier.BRONZE: TierConfig(3, 0.80, 1),  # entry level tier
-    Tier.SILVER: TierConfig(4, 0.75, 2),
-    Tier.GOLD: TierConfig(5, 0.70, 3),
+    #                        merges  credibility   scalar  (requirements to unlock & maintain each tier)
+    Tier.BRONZE:  TierConfig(  3,        0.80,     1.0),
+    Tier.SILVER:  TierConfig(  4,        0.75,     1.5),
+    Tier.GOLD:    TierConfig(  5,        0.70,     2.0),
 }
-
 TIERS_ORDER: list[Tier] = list(TIERS.keys())
 
 

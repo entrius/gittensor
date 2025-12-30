@@ -48,7 +48,7 @@ TIME_DECAY_MIN_MULTIPLIER = 0.05  # 5% of score will retain through lookback day
 # =============================================================================
 # Tiers & Collateral System
 # =============================================================================
-TIER_BASED_INCENTIVE_MECHANISM_START_DATE = datetime(2025, 12, 27, 17, 00, 00, tzinfo=timezone.utc)
+TIER_BASED_INCENTIVE_MECHANISM_START_DATE = datetime(2025, 12, 31, 00, 00, 00, tzinfo=timezone.utc)
 DEFAULT_COLLATERAL_PERCENT = 0.20
 
 MAX_LINE_CONTRIBUTION_BONUS = 30

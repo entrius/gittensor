@@ -18,6 +18,7 @@ Configuration:
 
 import os
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Tuple
@@ -144,8 +145,10 @@ def load_issues(conn, pr_number: int, repo: str, pr_author: str) -> List[Issue]:
 
 def load_pr_from_row(conn, row: tuple) -> PullRequest:
     """Convert DB row to PullRequest with file_changes and issues pre-loaded."""
+    # Lowercase repo name to match master_repositories keys
+    repo_full_name = row[1].lower() if row[1] else row[1]
     pr = PullRequest(
-        number=row[0], repository_full_name=row[1], uid=row[2], hotkey=row[3],
+        number=row[0], repository_full_name=repo_full_name, uid=row[2], hotkey=row[3],
         github_id=row[4], title=row[5], author_login=row[6],
         merged_at=make_aware(row[7]), created_at=make_aware(row[8]),
         pr_state=PRState(row[9]), additions=row[10] or 0,
@@ -153,12 +156,12 @@ def load_pr_from_row(conn, row: tuple) -> PullRequest:
         gittensor_tagged=row[14] or False, merged_by_login=row[15],
         description=row[16], last_edited_at=make_aware(row[17]),
     )
-    # Pre-load file changes so score_miner_prs skips GitHub API call
-    file_changes = load_file_changes(conn, pr.number, pr.repository_full_name)
+    # Pre-load file changes so score_miner_prs skips GitHub API call (use original row[1] for DB query)
+    file_changes = load_file_changes(conn, pr.number, row[1])
     if file_changes:
         pr.set_file_changes(file_changes)
     # Pre-load issues
-    issues = load_issues(conn, pr.number, pr.repository_full_name, pr.author_login)
+    issues = load_issues(conn, pr.number, row[1], pr.author_login)
     if issues:
         pr.issues = issues
     return pr
@@ -214,21 +217,26 @@ def run_scoring_simulation(include_custom: bool = True) -> Tuple[Dict[int, Miner
     print("=" * 70)
     print("SCORING SIMULATION START")
     print("=" * 70)
+    sys.stdout.flush(); time.sleep(0.1)
 
     # 1. Connect to DB
     print("\n[1/8] Connecting to DB...")
+    sys.stdout.flush(); time.sleep(0.1)
     conn = create_db_connection()
     if not conn:
         return {}, {}, {}
 
     # 2. Load weights
     print("\n[2/8] Loading weights...")
+    sys.stdout.flush(); time.sleep(0.1)
     master_repos = load_master_repo_weights()
     prog_langs = load_programming_language_weights()
     print(f"  {len(master_repos)} repos, {len(prog_langs)} languages")
+    sys.stdout.flush(); time.sleep(0.1)
 
     # 3. Load evaluations from DB
     print("\n[3/8] Loading evaluations from DB...")
+    sys.stdout.flush(); time.sleep(0.1)
     evals = load_all_evaluations(conn)
 
     # 4. Add custom evaluations
@@ -239,9 +247,11 @@ def run_scoring_simulation(include_custom: bool = True) -> Tuple[Dict[int, Miner
             print(f"  Added custom uid={uid}")
     else:
         print("\n[4/8] No custom evaluations.")
+    sys.stdout.flush(); time.sleep(0.1)
 
     # 5. Score PRs (uses original score_miner_prs - skips GitHub call since file_changes pre-loaded)
     print("\n[5/8] Scoring PRs...")
+    sys.stdout.flush(); time.sleep(0.1)
     for uid, ev in evals.items():
         if ev.failed_reason:
             continue
@@ -249,14 +259,17 @@ def run_scoring_simulation(include_custom: bool = True) -> Tuple[Dict[int, Miner
 
     # 6. Detect duplicate GitHub accounts
     print("\n[6/8] Checking for duplicate GitHub accounts...")
+    sys.stdout.flush(); time.sleep(0.1)
     detect_and_penalize_miners_sharing_github(evals)
 
     # 7. Finalize scores
     print("\n[7/8] Finalizing scores...")
+    sys.stdout.flush(); time.sleep(0.1)
     finalize_miner_scores(evals)
 
     # 8. Normalize & apply dynamic emissions
     print("\n[8/8] Normalizing & applying dynamic emissions...")
+    sys.stdout.flush(); time.sleep(0.1)
     normalized = normalize_rewards_linear(evals)
     scaled = apply_dynamic_emissions_using_network_contributions(normalized, evals)
 

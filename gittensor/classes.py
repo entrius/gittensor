@@ -196,11 +196,9 @@ class PullRequest:
         pr_score = 0.0
         total_raw_changes = 0
         substantive_changes = 0
+        file_details = []
 
-        total_files_changed = len(self.file_changes)
-        bt.logging.info(f"\nScoring {total_files_changed} file changes for PR #{self.number}")
-
-        for n, file in enumerate(self.file_changes, start=1):
+        for file in self.file_changes:
             language_weight = programming_languages.get(file.file_extension, DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT)
 
             total_changes_to_score = file.changes
@@ -220,40 +218,42 @@ class PullRequest:
                 substantive_changes += scored_changes
 
             file_score = language_weight * file_weight * scored_changes
-
-            bt.logging.info(
-                f"   -  [{n}/{total_files_changed}] - {file.short_name} | scored {scored_changes} / {file.changes} lines | score: {file_score:.2f}"
-            )
             pr_score += file_score
 
-        substantive_ratio = substantive_changes / total_raw_changes if total_raw_changes > 0 else 0
-        is_low_value_pr = (
-            substantive_ratio < 0.1
-        )  # 10% or more of contribution needs to be substantial (not tests, comments, etc)
+            file_details.append((file.short_name, scored_changes, file.changes, file_score, is_test_file))
 
-        bt.logging.info(
-            f"Base PR score from file changes: {pr_score:.2f} | substantive: {substantive_changes}/{total_raw_changes} ({substantive_ratio*100:.0f}%)"
-        )
+        substantive_ratio = substantive_changes / total_raw_changes if total_raw_changes > 0 else 0
+        is_low_value_pr = substantive_ratio < 0.1
+
+        # Log & return
+        bt.logging.debug(f"  ├─ Files ({len(self.file_changes)} changes):")
+        max_name_len = max(len(f[0]) for f in file_details) if file_details else 0
+        for name, scored, total, score, is_test in file_details:
+            test_mark = " [test]" if is_test else ""
+            bt.logging.debug(f"  │   {name:<{max_name_len}}  {scored:>3}/{total:<3} lines  {score:>6.2f}{test_mark}")
+        bt.logging.info(f"  ├─ Contribution: {pr_score:.2f} | Substantive: {substantive_changes}/{total_raw_changes} ({substantive_ratio*100:.0f}%)")
+
         return pr_score, is_low_value_pr
 
     def calculate_final_earned_score(self) -> float:
         """Combine base score with all multipliers."""
         multipliers = {
-            "repo_weight_multiplier": self.repo_weight_multiplier,
-            "issue_multiplier": self.issue_multiplier,
-            "open_pr_spam_multiplier": self.open_pr_spam_multiplier,
-            "repo_uniqueness_multiplier": self.repository_uniqueness_multiplier,
-            "time_decay_multiplier": self.time_decay_multiplier,
-            "gittensor_tag_multiplier": self.gittensor_tag_multiplier,
-            "credibility_multiplier": self.credibility_multiplier,
+            "repo": self.repo_weight_multiplier,
+            "issue": self.issue_multiplier,
+            "spam": self.open_pr_spam_multiplier,
+            "unique": self.repository_uniqueness_multiplier,
+            "decay": self.time_decay_multiplier,
+            "tag": self.gittensor_tag_multiplier,
+            "cred": self.credibility_multiplier,
         }
 
         self.earned_score = self.base_score * prod(multipliers.values())
-        mult_str = " | ".join([f"{k}: {v:.2f}" for k, v in multipliers.items()])
 
-        bt.logging.info(
-            f"PR #{self.number} -> {self.repository_full_name} | base: {self.base_score:.2f} | {mult_str} | final: {self.earned_score:.2f}"
-        )
+        # Log & Only shows non-1.0 multipliers
+        active_mults = [f"{k}={v:.2f}" for k, v in multipliers.items() if v != 1.0]
+        mult_str = " × ".join(active_mults) if active_mults else "none"
+        bt.logging.info(f"├─ {self.pr_state.value} PR #{self.number} ({self.repository_full_name})")
+        bt.logging.info(f"│  └─ base={self.base_score:.2f} × [{mult_str}] → {self.earned_score:.2f}")
 
         return self.earned_score
 

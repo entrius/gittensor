@@ -83,6 +83,6 @@ def apply_dynamic_emissions_using_network_contributions(
             f"recycled={total_recycled:.2f} ({recycle_percentage:.2f}%)"
         )
     else:
-        bt.logging.info(f"Fixed emissions until {dynamic_emissions_start}: recycle_scalar={final_scalar:.2f}, recycled={total_recycled:.2f} ({recycle_percentage:.2f}%)")
+        bt.logging.info(f"Fixed emissions until {dynamic_emissions_start.strftime('%Y-%m-%d')}: recycle_scalar={final_scalar:.2f}, recycled={total_recycled:.2f} ({recycle_percentage:.2f}%)")
 
     return scaled_rewards

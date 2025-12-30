@@ -25,6 +25,7 @@ from gittensor.constants import (
 from gittensor.utils.github_api_tools import get_pull_request_file_changes
 from gittensor.validator.configurations.tier_config import (
     TIERS,
+    TIERS_ORDER,
     Tier,
     TierConfig,
     get_tier_from_config,
@@ -43,6 +44,12 @@ def score_miner_prs(
     programming_languages: Dict[str, float],
 ) -> None:
     """Score all pull requests (merged and open) for a miner."""
+
+    bt.logging.info("")
+    bt.logging.info("-" * 50)
+    bt.logging.info(f"Scoring UID {miner_eval.uid}: {len(miner_eval.merged_pull_requests)} merged | {len(miner_eval.open_pull_requests)} open")
+    bt.logging.info("-" * 50)
+
     pr_lists = [
         (miner_eval.merged_pull_requests, "merged", "MERGED"),
         (miner_eval.open_pull_requests, "open", "OPEN"),
@@ -50,18 +57,15 @@ def score_miner_prs(
 
     for pr_list, list_name, label in pr_lists:
         if not pr_list:
-            bt.logging.info(f"No {list_name} PRs for uid {miner_eval.uid}")
             continue
-
-        bt.logging.info(f"Scoring {len(pr_list)} {list_name} PRs for uid {miner_eval.uid}")
 
         scored_prs = []
         for n, pr in enumerate(pr_list, start=1):
-            bt.logging.info(f"\n[{n}/{len(pr_list)}] - {label} PR #{pr.number} in {pr.repository_full_name}")
+            bt.logging.info(f"\n[{n}/{len(pr_list)}] {label} PR #{pr.number} in {pr.repository_full_name}")
             if score_pull_request(pr, miner_eval, master_repositories, programming_languages):
                 scored_prs.append(pr)
             else:
-                bt.logging.warning(f"Skipping PR #{pr.number} - failed to score (missing tier config or file changes)")
+                bt.logging.warning(f"Skipping PR #{pr.number} in {pr.repository_full_name} - No tier config or file changes")
 
         if list_name == "merged":
             miner_eval.merged_pull_requests = scored_prs
@@ -78,6 +82,7 @@ def score_pull_request(
     """Score a single PR (merged or open). Returns True if scored, False if skipped."""
     pr.repository_tier_configuration = get_tier_config(pr.repository_full_name, master_repositories)
     if not pr.repository_tier_configuration:
+        bt.logging.warning("No repository configuration found.")
         return False
 
     # Only fetch file changes from GitHub if not already loaded (they are preloaded for testing only)
@@ -209,7 +214,10 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
         if not evaluation:
             continue
 
-        bt.logging.info(f"\n***Finalizing scores for UID {uid}***")
+        bt.logging.info("")
+        bt.logging.info("=" * 50)
+        bt.logging.info(f"UID {uid}")
+        bt.logging.info("=" * 50)
 
         evaluation.credibility_by_tier = calculate_credibility_per_tier(
             evaluation.merged_pull_requests, evaluation.closed_pull_requests
@@ -256,16 +264,26 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
             if is_tier_unlocked(tier, tier_stats):
                 evaluation.current_tier = tier
 
+        # Determine next tier for display
         current_tier_str = evaluation.current_tier.value if evaluation.current_tier else "None"
-        bt.logging.info(
-            f"UID {uid}: earned={earned_score:.2f} - collateral={evaluation.total_collateral_score:.2f} = "
-            f"final={evaluation.total_score:.2f} ({evaluation.total_merged_prs} merged, {evaluation.total_open_prs} open) "
-            f"| Current Tier: {current_tier_str} "
-            f"| Per-Tier Stats:"
-            f"Bronze({evaluation.stats_by_tier[Tier.BRONZE].merged_count}/{evaluation.stats_by_tier[Tier.BRONZE].total_attempts}), "
-            f"Silver({evaluation.stats_by_tier[Tier.SILVER].merged_count}/{evaluation.stats_by_tier[Tier.SILVER].total_attempts}), "
-            f"Gold({evaluation.stats_by_tier[Tier.GOLD].merged_count}/{evaluation.stats_by_tier[Tier.GOLD].total_attempts})"
-        )
+        if evaluation.current_tier is None:
+            next_tier_str = f" (Next: {TIERS_ORDER[0].value})"
+        elif evaluation.current_tier == TIERS_ORDER[-1]:
+            next_tier_str = " (Max)"
+        else:
+            next_idx = TIERS_ORDER.index(evaluation.current_tier) + 1
+            next_tier_str = f" (Next: {TIERS_ORDER[next_idx].value})"
+
+        # UID summary
+        bt.logging.info("")
+        bt.logging.info(f"Summary:")
+        bt.logging.info(f"├─ Score: {earned_score:.2f} - {evaluation.total_collateral_score:.2f} collateral = {evaluation.total_score:.2f}")
+        bt.logging.info(f"├─ PRs: {evaluation.total_merged_prs} merged | {evaluation.total_open_prs} open | {evaluation.total_closed_prs} closed")
+        bt.logging.info(f"├─ Tier: {current_tier_str}{next_tier_str}")
+        bronze = evaluation.stats_by_tier[Tier.BRONZE]
+        silver = evaluation.stats_by_tier[Tier.SILVER]
+        gold = evaluation.stats_by_tier[Tier.GOLD]
+        bt.logging.info(f"└─ Per-Tier: Bronze({bronze.merged_count}/{bronze.total_attempts}) | Silver({silver.merged_count}/{silver.total_attempts}) | Gold({gold.merged_count}/{gold.total_attempts})")
 
     bt.logging.info("Finalization complete.")
 
@@ -292,12 +310,12 @@ def calculate_issue_multiplier(pr: PullRequest) -> float:
         float: Multiplier between 1.0 and 1.9
     """
     if not pr.issues:
-        bt.logging.info(f"PR #{pr.number} - no linked issues")
+        bt.logging.info(f"PR #{pr.number} - Contains no linked issues")
         return 1.0
 
     valid_issues = [issue for issue in pr.issues if is_valid_issue(issue, pr)]
     if not valid_issues:
-        bt.logging.info(f"PR #{pr.number} - no valid issues")
+        bt.logging.info(f"PR #{pr.number} - Solved no valid issues")
         return 1.0
 
     issue = valid_issues[0]
@@ -327,32 +345,32 @@ def is_valid_issue(issue: Issue, pr: PullRequest) -> bool:
 
     # Common checks (both merged and open)
     if not issue.author_login:
-        bt.logging.warning(f"Skipping issue #{issue.number} - missing author information")
+        bt.logging.warning(f"Skipping issue #{issue.number} - Issue is missing author information")
         return False
 
     if issue.author_login == pr.author_login:
-        bt.logging.warning(f"Skipping issue #{issue.number} - same author as PR (self-created issue)")
+        bt.logging.warning(f"Skipping issue #{issue.number} - Issue has same author as PR (self-created issue)")
         return False
 
     if issue.created_at and pr.created_at and issue.created_at > pr.created_at:
-        bt.logging.warning(f"Skipping issue #{issue.number} - created after PR")
+        bt.logging.warning(f"Skipping issue #{issue.number} - Issue was created after PR was created")
         return False
 
     # Merged-only checks
     if is_merged:
         if pr.last_edited_at and pr.last_edited_at > pr.merged_at:
-            bt.logging.warning(f"Skipping issue #{issue.number} - PR edited after merge")
+            bt.logging.warning(f"Skipping issue #{issue.number} - PR was edited after merge")
             return False
 
         if issue.state and issue.state != 'CLOSED':
-            bt.logging.warning(f"Skipping issue #{issue.number} - not CLOSED (state: {issue.state})")
+            bt.logging.warning(f"Skipping issue #{issue.number} - Issue state not CLOSED (state: {issue.state})")
             return False
 
         if issue.closed_at and pr.merged_at:
             days_diff = abs((issue.closed_at - pr.merged_at).total_seconds()) / SECONDS_PER_DAY
             if days_diff > MAX_ISSUE_CLOSE_WINDOW_DAYS:
                 bt.logging.warning(
-                    f"Skipping issue #{issue.number} - closed {days_diff:.1f}d from merge (max: {MAX_ISSUE_CLOSE_WINDOW_DAYS})"
+                    f"Skipping issue #{issue.number} - Issue closed {days_diff:.1f}d from merge (max: {MAX_ISSUE_CLOSE_WINDOW_DAYS})"
                 )
                 return False
 

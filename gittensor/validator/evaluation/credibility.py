@@ -96,8 +96,7 @@ def calculate_credibility_per_tier(
     tier_display_parts = []
 
     for tier in Tier:
-        stats = tier_stats[tier]
-        config = TIERS[tier]
+        stats: TierStats = tier_stats[tier]
 
         # Check if tier is unlocked (includes checking lower tiers)
         tier_unlocked = is_tier_unlocked(tier, tier_stats)
@@ -111,12 +110,6 @@ def calculate_credibility_per_tier(
         if not tier_unlocked:
             tier_credibility[tier] = 0.0
             tier_display_parts.append(f"{tier.value}: LOCKED")
-            continue
-
-        # Check if enough attempts to activate credibility scoring
-        if stats.total_attempts < config.credibility_activation_attempts:
-            tier_credibility[tier] = 1.0
-            tier_display_parts.append(f"{tier.value}: {stats.merged_count}/{stats.total_attempts} (1.00)")
             continue
 
         # Calculate actual credibility

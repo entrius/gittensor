@@ -1255,35 +1255,6 @@ class TestCredibilityThresholdBehavior:
     - Tier unlock requires both merge count AND credibility threshold
     """
 
-    def test_below_activation_threshold_returns_full_credibility(self, pr_factory, bronze_config):
-        """
-        Before reaching activation threshold, credibility is 1.0 (if tier is unlocked).
-
-        Even with lower actual success rate, miner gets benefit of the doubt
-        until they have enough attempts to be evaluated.
-        """
-        bronze_tier_config = TIERS[Tier.BRONZE]
-        required_merges = bronze_tier_config.required_merges
-        activation_threshold = bronze_tier_config.credibility_activation_attempts
-
-        # Create Bronze PRs that unlock Bronze but stay below activation threshold
-        # Need: merged >= required_merges AND total_attempts < activation_threshold
-        # This is only possible if required_merges < activation_threshold
-        if required_merges < activation_threshold:
-            merged = pr_factory.merged_batch(bronze_config, count=required_merges)
-            # Total attempts = required_merges, which is < activation_threshold
-            credibility = calculate_credibility_per_tier(merged, [])
-            # Should get 1.0 because below activation threshold
-            assert credibility[Tier.BRONZE] == 1.0
-        else:
-            # If required_merges >= activation_threshold, we can't be below threshold
-            # when tier is unlocked, so this test scenario doesn't apply
-            # Just verify the tier unlocks with required merges
-            merged = pr_factory.merged_batch(bronze_config, count=required_merges)
-            credibility = calculate_credibility_per_tier(merged, [])
-            # Credibility should be 1.0 (100% merged)
-            assert credibility[Tier.BRONZE] == 1.0
-
     def test_at_activation_threshold_calculates_actual_credibility(self, pr_factory, bronze_config):
         """
         When tier is unlocked and at/above activation threshold, actual credibility is calculated.

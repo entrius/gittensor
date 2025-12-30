@@ -104,7 +104,6 @@ def calculate_credibility_per_tier(
 
         # No activity in this tier
         if stats.total_attempts == 0:
-            tier_credibility[tier] = 0.0
             tier_display_parts.append(f"{tier.value}: LOCKED")
             continue
 

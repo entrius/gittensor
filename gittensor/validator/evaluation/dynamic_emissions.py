@@ -3,7 +3,7 @@ from typing import Dict, Set
 import bittensor as bt
 import numpy as np
 
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, timedelta, timezone
 from gittensor.classes import MinerEvaluation
 from gittensor.constants import (
     TIER_BASED_INCENTIVE_MECHANISM_START_DATE,
@@ -48,7 +48,7 @@ def apply_dynamic_emissions_using_network_contributions(
         return {}
 
     dynamic_emissions_start = TIER_BASED_INCENTIVE_MECHANISM_START_DATE + timedelta(days=DYNAMIC_EMISSIONS_BUFFER_DAYS)
-    use_dynamic_emissions = datetime.now(UTC) > dynamic_emissions_start
+    use_dynamic_emissions = datetime.now(timezone.utc) > dynamic_emissions_start
 
     if use_dynamic_emissions:
         total_lines, total_merged_prs, total_unique_repos = get_network_totals(miner_evaluations)

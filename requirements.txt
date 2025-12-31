@@ -3,7 +3,7 @@ bittensor-cli==9.10.1
 bittensor-commit-reveal==0.4.0
 bittensor-wallet==4.0.0
 levenshtein==0.27.3
-
+pytest==9.0.0
 wandb==0.21.3
 
 # For remote debugging API
@@ -14,3 +14,4 @@ debugpy==1.8.11
 # For validator database storage (not required for validators to run)
 pytz==2025.2
 psycopg2-binary==2.9.10
+python-dotenv==1.2.1

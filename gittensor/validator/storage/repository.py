@@ -13,7 +13,7 @@ from typing import List, TypeVar
 import numpy as np
 
 from gittensor.classes import FileChange, Issue, Miner, MinerEvaluation, PullRequest
-
+from gittensor.validator.configurations.tier_config import Tier
 from .queries import (
     BULK_UPSERT_FILE_CHANGES,
     BULK_UPSERT_ISSUES,
@@ -136,6 +136,7 @@ class Repository(BaseRepository):
                     pr.author_login,
                     pr.merged_at,
                     pr.created_at,
+                    pr.pr_state.value,  # Convert PRState enum to string
                     pr.repo_weight_multiplier,
                     pr.base_score,
                     pr.issue_multiplier,
@@ -143,8 +144,11 @@ class Repository(BaseRepository):
                     pr.repository_uniqueness_multiplier,
                     pr.time_decay_multiplier,
                     pr.gittensor_tag_multiplier,
-                    pr.merge_success_multiplier,
+                    pr.credibility_multiplier,
+                    pr.raw_credibility,
+                    pr.credibility_scalar,
                     pr.earned_score,
+                    pr.collateral_score,
                     pr.additions,
                     pr.deletions,
                     pr.commits,
@@ -199,6 +203,9 @@ class Repository(BaseRepository):
                     issue.title,
                     issue.created_at,
                     issue.closed_at,
+                    issue.author_login,
+                    issue.state,
+                    issue.author_association,
                 )
             )
 
@@ -284,12 +291,32 @@ class Repository(BaseRepository):
                 evaluation.failed_reason,
                 evaluation.base_total_score,
                 evaluation.total_score,
+                evaluation.total_collateral_score,
                 evaluation.total_lines_changed,
                 evaluation.total_open_prs,
                 evaluation.total_closed_prs,
                 evaluation.total_merged_prs,
                 evaluation.total_prs,
                 evaluation.unique_repos_count,
+                evaluation.current_tier.value if evaluation.current_tier else None,
+
+                evaluation.stats_by_tier[Tier.BRONZE].merged_count,
+                evaluation.stats_by_tier[Tier.BRONZE].closed_count,
+                evaluation.stats_by_tier[Tier.BRONZE].total_prs,
+                evaluation.stats_by_tier[Tier.BRONZE].collateral_score,
+                evaluation.stats_by_tier[Tier.BRONZE].earned_score,
+
+                evaluation.stats_by_tier[Tier.SILVER].merged_count,
+                evaluation.stats_by_tier[Tier.SILVER].closed_count,
+                evaluation.stats_by_tier[Tier.SILVER].total_prs,
+                evaluation.stats_by_tier[Tier.SILVER].collateral_score,
+                evaluation.stats_by_tier[Tier.SILVER].earned_score,
+
+                evaluation.stats_by_tier[Tier.GOLD].merged_count,
+                evaluation.stats_by_tier[Tier.GOLD].closed_count,
+                evaluation.stats_by_tier[Tier.GOLD].total_prs,
+                evaluation.stats_by_tier[Tier.GOLD].collateral_score,
+                evaluation.stats_by_tier[Tier.GOLD].earned_score,
             )
         ]
 

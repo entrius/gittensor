@@ -2,12 +2,15 @@
 # Copyright © 2025 Entrius
 # GitTensor Miner
 
-import typing
-import bittensor as bt
 import time
-from neurons.base.miner import BaseMinerNeuron
-from gittensor.classes import GitPatSynapse
+import typing
+
+import bittensor as bt
+
 from gittensor.miner import token_mgmt
+from gittensor.synapses import GitPatSynapse
+from neurons.base.miner import BaseMinerNeuron
+
 
 class Miner(BaseMinerNeuron):
 
@@ -21,10 +24,10 @@ class Miner(BaseMinerNeuron):
     async def forward(self, synapse: GitPatSynapse) -> GitPatSynapse:
         """
         Processes the incoming GitPatSynapse by loading GitHub access token.
-        
+
         Args:
             synapse (GitPatSynapse): The synapse object representing the token request.
-        
+
         Returns:
             GitPatSynapse: The same synapse object with the GitHub access token set.
         """
@@ -34,10 +37,8 @@ class Miner(BaseMinerNeuron):
         bt.logging.debug(f"synapse received from hotkey: {synapse.axon.hotkey}")
 
         return synapse
-    
-    async def blacklist(
-        self, synapse: GitPatSynapse
-    ) -> typing.Tuple[bool, str]:
+
+    async def blacklist(self, synapse: GitPatSynapse) -> typing.Tuple[bool, str]:
         """
         Determines whether an incoming request should be blacklisted.
         """
@@ -45,7 +46,7 @@ class Miner(BaseMinerNeuron):
         if self.config.dev_mode:
             return False, "Blacklist disabled in dev mode"
 
-        if synapse.dendrite.hotkey == "5Dnffftud49iScqvvymjuvS4D1MP4ApenAQG2R5wg4bXGH7L":  
+        if synapse.dendrite.hotkey == "5Dnffftud49iScqvvymjuvS4D1MP4ApenAQG2R5wg4bXGH7L":
             return False, "Owner hotkey accepted"
 
         bt.logging.info(f"Received synapse from {synapse.dendrite.hotkey}")
@@ -54,28 +55,21 @@ class Miner(BaseMinerNeuron):
             return True, "Missing dendrite or hotkey"
 
         uid = self.metagraph.hotkeys.index(synapse.dendrite.hotkey)
-        if (
-            not self.config.blacklist.allow_non_registered
-            and synapse.dendrite.hotkey not in self.metagraph.hotkeys
-        ):
+        if not self.config.blacklist.allow_non_registered and synapse.dendrite.hotkey not in self.metagraph.hotkeys:
             # Ignore requests from un-registered entities.
-            bt.logging.trace(
-                f"Blacklisting un-registered hotkey {synapse.dendrite.hotkey}"
-            )
+            bt.logging.trace(f"Blacklisting un-registered hotkey {synapse.dendrite.hotkey}")
             return True, "Unrecognized hotkey"
 
         if self.config.blacklist.force_validator_permit:
             # If the config is set to force validator permit, then we should only allow requests from validators.
-            bt.logging.debug(f"Validator permit: {self.metagraph.validator_permit[uid]}, Stake: {self.metagraph.S[uid]}")
+            bt.logging.debug(
+                f"Validator permit: {self.metagraph.validator_permit[uid]}, Stake: {self.metagraph.S[uid]}"
+            )
             if not self.metagraph.validator_permit[uid] or self.metagraph.S[uid] < self.config.blacklist.min_stake:
-                bt.logging.warning(
-                    f"Blacklisting a request from non-validator hotkey {synapse.dendrite.hotkey}"
-                )
+                bt.logging.warning(f"Blacklisting a request from non-validator hotkey {synapse.dendrite.hotkey}")
                 return True, "Non-validator hotkey"
 
-        bt.logging.trace(
-            f"Not Blacklisting recognized hotkey {synapse.dendrite.hotkey}"
-        )
+        bt.logging.trace(f"Not Blacklisting recognized hotkey {synapse.dendrite.hotkey}")
         return False, "Hotkey recognized!"
 
     async def priority(self, synapse: GitPatSynapse) -> float:
@@ -84,25 +78,20 @@ class Miner(BaseMinerNeuron):
         This function is unchanged.
         """
         if synapse.dendrite is None or synapse.dendrite.hotkey is None:
-            bt.logging.warning(
-                "Received a request without a dendrite or hotkey."
-            )
+            bt.logging.warning("Received a request without a dendrite or hotkey.")
             return 0.0
 
-        caller_uid = self.metagraph.hotkeys.index(
-            synapse.dendrite.hotkey
-        )  # Get the caller index.
-        priority = float(
-            self.metagraph.S[caller_uid]
-        )  # Return the stake as the priority.
-        bt.logging.trace(
-            f"Prioritizing {synapse.dendrite.hotkey} with value: {priority}"
-        )
+        caller_uid = self.metagraph.hotkeys.index(synapse.dendrite.hotkey)  # Get the caller index.
+        priority = float(self.metagraph.S[caller_uid])  # Return the stake as the priority.
+        bt.logging.trace(f"Prioritizing {synapse.dendrite.hotkey} with value: {priority}")
         return priority
+
 
 if __name__ == "__main__":
     with Miner() as miner:
-        bt.logging.info("Repeating an action makes a habit. Your habits create your character. And your character is your destiny.")
+        bt.logging.info(
+            "Repeating an action makes a habit. Your habits create your character. And your character is your destiny."
+        )
         while True:
             bt.logging.info(f"GitTensor miner running...")
             time.sleep(30)

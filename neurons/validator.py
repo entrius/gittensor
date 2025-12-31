@@ -24,7 +24,7 @@ import bittensor as bt
 import wandb
 
 from gittensor.classes import MinerEvaluation
-from gittensor.validator import forward
+from gittensor.validator.forward import forward
 from gittensor.validator.utils.config import WANDB_PROJECT, __version__
 from gittensor.validator.utils.storage import DatabaseStorage
 from neurons.base.validator import BaseValidatorNeuron

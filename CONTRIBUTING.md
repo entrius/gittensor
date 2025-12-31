@@ -20,9 +20,14 @@ Before contributing, please:
 - Write clean, well-documented code
 - Follow existing code patterns and architecture
 - Update documentation if applicable
+- Update tests and create new tests if there are new functions or older testing is outdated
+
+  _NOTE: We do NOT accept PRs that are only testing changes/additions, they will need to be backed up with a good reason_
+
 - Do NOT add comments that are over-explanatory, redundant, or extraneous to inflate line count.
-- We will NOT accept PRs that are purely testing changes, documentation changes, or typo fixes
+- We will NOT accept PRs that are pure documentation changes, or typo fixes
 - When making your changes, ask yourself: will this raise the value of the repository?
+- Ensure ALL tests pass, the PR will not be accepted if there are failing tests
 
 ### 3. Submit Pull Request
 
@@ -46,7 +51,6 @@ Apply appropriate labels to help categorize and track your contribution:
 - `feature` - New feature additions or enhancements
 - `bug` - Bug fixes
 - `refactor` - Code refactoring without functionality changes
-- `documentation` - Documentation improvements
 
 ## Code Standards
 
@@ -58,6 +62,7 @@ Apply appropriate labels to help categorize and track your contribution:
 - Write clean, readable, maintainable code
 - Avoid modifying unrelated files
 - Avoid adding unnecessary dependencies
+- Ensure all tests pass
 
 ## Branches
 
@@ -68,6 +73,8 @@ Apply appropriate labels to help categorize and track your contribution:
 **Restrictions**:
 
 - Requires pull request
+- Requires tests to pass
+- Requires one approval from either `@landyndev` or `@anderdc`
 
 ### `main`
 
@@ -75,7 +82,6 @@ Apply appropriate labels to help categorize and track your contribution:
 
 **Restrictions**:
 
-- Requires pull request
 - Only maintainers can update
 
 ## License

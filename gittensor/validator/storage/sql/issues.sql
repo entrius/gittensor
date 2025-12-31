@@ -8,6 +8,9 @@ CREATE TABLE IF NOT EXISTS issues (
     title                TEXT             NOT NULL,
     created_at           TIMESTAMP,        -- Nullable for API compatibility
     closed_at            TIMESTAMP,        -- Nullable for API compatibility
+    author_login         VARCHAR(255),     -- Issue author's GitHub login
+    state                VARCHAR(10),      -- "OPEN" or "CLOSED"
+    author_association   VARCHAR(20),      -- e.g., "OWNER", "MEMBER", "COLLABORATOR", "CONTRIBUTOR", "NONE"
 
     PRIMARY KEY (number, repository_full_name),
 

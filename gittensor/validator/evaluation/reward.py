@@ -7,18 +7,20 @@ from typing import TYPE_CHECKING, Dict
 import bittensor as bt
 import numpy as np
 
-from gittensor.classes import GitPatSynapse, MinerEvaluation, PullRequest
-from gittensor.utils.github_api_tools import get_user_merged_prs_graphql
+from gittensor.classes import MinerEvaluation
+from gittensor.synapses import GitPatSynapse
+from gittensor.utils.github_api_tools import load_miners_prs
 from gittensor.validator.evaluation.dynamic_emissions import apply_dynamic_emissions_using_network_contributions
 from gittensor.validator.evaluation.inspections import (
-    detect_and_penalize_duplicates,
+    detect_and_penalize_miners_sharing_github,
     validate_response_and_initialize_miner_evaluation,
 )
 from gittensor.validator.evaluation.normalize import normalize_rewards_linear
 from gittensor.validator.evaluation.scoring import (
-    apply_cross_miner_multipliers_and_finalize,
-    score_pull_requests,
+    finalize_miner_scores,
+    score_miner_prs,
 )
+from gittensor.validator.utils.load_weights import RepositoryConfig
 
 # NOTE: there was a circular import error, needed this if to resolve it
 if TYPE_CHECKING:
@@ -50,20 +52,20 @@ async def query_miner(self, uid: int) -> GitPatSynapse:
         return None
 
 
-async def reward(
+async def evaluate_miners_pull_requests(
     uid: int,
     response: GitPatSynapse,
-    master_repositories: Dict[str, Dict],
+    master_repositories: Dict[str, RepositoryConfig],
     programming_languages: Dict[str, float],
 ) -> MinerEvaluation:
     """
-    Entry point from taking a miners response -> Get PRs -> Score PR Diff
+    Entry point from taking a miners response -> Get PRs -> Score PRs by tier
 
     Args:
-        uid (int): The uid of the miner being evaluated
-        response (GitPatSynapse): The GitPatSynapse (github access token) returned by the miner
-        master_repositories (Dict[str, Dict]): The incentivized repositories and their metadata (weight, inactiveAt)
-        programming_languages (Dict[str, float]): The programming languages and their weights
+        uid: The uid of the miner being evaluated
+        response: The GitPatSynapse (github access token) returned by the miner
+        master_repositories: The incentivized repositories and their RepositoryConfig objects
+        programming_languages: The programming languages and their weights
 
     Returns:
         MinerEvaluation: The object containing scores, valid_prs, etc.
@@ -76,18 +78,9 @@ async def reward(
         bt.logging.info(f"UID {uid} not being evaluated: {miner_eval.failed_reason}")
         return miner_eval
 
-    pr_result = get_user_merged_prs_graphql(miner_eval.github_id, miner_eval.github_pat, master_repositories)
+    load_miners_prs(miner_eval, master_repositories)
 
-    miner_eval.total_merged_prs = pr_result.merged_pr_count
-    miner_eval.total_open_prs = pr_result.open_pr_count
-    miner_eval.total_closed_prs = pr_result.closed_pr_count
-
-    for raw_pr in pr_result.valid_prs:
-        miner_eval.add_pull_request(
-            PullRequest.from_graphql_response(raw_pr, uid, miner_eval.hotkey, miner_eval.github_id)
-        )
-
-    score_pull_requests(miner_eval, master_repositories, programming_languages)
+    score_miner_prs(miner_eval, master_repositories, programming_languages)
 
     # Clear PAT after scoring to avoid storing sensitive data
     miner_eval.github_pat = None
@@ -97,13 +90,16 @@ async def reward(
 
 
 async def get_rewards(
-    self: Validator, uids: set[int], master_repositories: dict[str, dict], programming_languages: dict[str, float]
+    self: Validator,
+    uids: set[int],
+    master_repositories: Dict[str, RepositoryConfig],
+    programming_languages: Dict[str, float],
 ) -> np.ndarray:
     """
     Args:
         uids (set[int]): All valid miner uids in the subnet
-        master_repositories (dict[str, dict]): The dict of repositories (name -> {weight, inactiveAt})
-        programming_languages (dict[str, float]): The dict of languages (extension, weight)
+        master_repositories (Dict[str, RepositoryConfig]): The dict of repositories (name -> RepositoryConfig)
+        programming_languages (Dict[str, float]): The dict of languages (extension, weight)
     Returns:
         rewards (array[int]): An array of scores for all miners in sorted fashion, miner n score = index[n]
     """
@@ -116,22 +112,21 @@ async def get_rewards(
     # Query miners and calculate score.
     for uid in uids:
 
-        # retrieve PAT
+        # Retrieve PAT
         miner_response = await query_miner(self, uid)
         responses[uid] = miner_response
 
         # Calculate score
-        miner_evaluation = await reward(uid, miner_response, master_repositories, programming_languages)
+        miner_evaluation = await evaluate_miners_pull_requests(
+            uid, miner_response, master_repositories, programming_languages
+        )
         miner_evaluations[uid] = miner_evaluation
 
     # Adjust scores for duplicate accounts
-    detect_and_penalize_duplicates(responses, miner_evaluations)
+    detect_and_penalize_miners_sharing_github(miner_evaluations)
 
-    # Apply all multipliers and calculate final scores
-    apply_cross_miner_multipliers_and_finalize(miner_evaluations)
-
-    # store all miner evaluations after adjusting score
-    await self.bulk_store_evaluation(miner_evaluations)
+    # Finalize scores: apply unique contribution multiplier, credibility, sum totals, deduct collateral
+    finalize_miner_scores(miner_evaluations)
 
     # Normalize the rewards between [0,1]
     normalized_rewards = normalize_rewards_linear(miner_evaluations)

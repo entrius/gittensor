@@ -3,106 +3,174 @@
 
 import math
 from datetime import datetime, timezone
-from typing import Dict
+from typing import Dict, Optional
 
 import bittensor as bt
 
-from gittensor.classes import Issue, MinerEvaluation, PullRequest
+from gittensor.classes import Issue, MinerEvaluation, PRState, PullRequest
 from gittensor.constants import (
+    EXCESSIVE_PR_MIN_MULTIPLIER,
+    EXCESSIVE_PR_PENALTY_SLOPE,
+    EXCESSIVE_PR_PENALTY_THRESHOLD,
+    MAINTAINER_ASSOCIATIONS,
+    MAINTAINER_ISSUE_BONUS,
+    MAX_ISSUE_AGE_BONUS,
+    MAX_ISSUE_AGE_FOR_MAX_SCORE,
+    MAX_ISSUE_CLOSE_WINDOW_DAYS,
     SECONDS_PER_DAY,
     SECONDS_PER_HOUR,
-    MAX_ISSUE_CLOSE_WINDOW_DAYS,
-    MAX_ISSUES_SCORED_IN_SINGLE_PR,
+    TIME_DECAY_GRACE_PERIOD_HOURS,
     TIME_DECAY_MIN_MULTIPLIER,
     TIME_DECAY_SIGMOID_MIDPOINT,
     TIME_DECAY_SIGMOID_STEEPNESS_SCALAR,
-    TIME_DECAY_GRACE_PERIOD_HOURS,
     UNIQUE_PR_BOOST,
-    MAX_ISSUE_AGE_FOR_MAX_SCORE,
-    EXCESSIVE_PR_PENALTY_THRESHOLD,
-    EXCESSIVE_PR_PENALTY_SLOPE,
-    EXCESSIVE_PR_MIN_MULTIPLIER,
-    GITTENSOR_TAGLINE_BOOST,
-    GITTENSOR_REPOSITORY,
-    MERGE_SUCCESS_RATIO_ATTEMPTS_THRESHOLD,
-    MERGE_SUCCESS_RATIO_APPLICATION_DATE,
 )
-from gittensor.utils.github_api_tools import get_pull_request_file_changes, normalize_repo_name
+from gittensor.utils.github_api_tools import get_pull_request_file_changes
+from gittensor.validator.configurations.tier_config import (
+    TIERS,
+    TIERS_ORDER,
+    Tier,
+    TierConfig,
+    get_tier_from_config,
+)
+from gittensor.validator.evaluation.credibility import (
+    calculate_credibility_per_tier,
+    calculate_tier_stats,
+    is_tier_unlocked,
+)
+from gittensor.validator.utils.load_weights import RepositoryConfig
 
-def score_pull_requests(
+
+def score_miner_prs(
     miner_eval: MinerEvaluation,
-    master_repositories: Dict[str, Dict],
+    master_repositories: Dict[str, RepositoryConfig],
     programming_languages: Dict[str, float],
 ) -> None:
-    """
-    Score pull requests and populate MinerEvaluation object.
-    Fetches file changes, calculates scores, applies repo weights and issue bonuses.
+    """Score all pull requests (merged and open) for a miner."""
 
-    Args:
-        miner_eval (MinerEvaluation): MinerEvaluation object to populate
-        master_repositories (Dict[str, Dict]): The incentivized repositories and their metadata (weight, inactiveAt)
-        programming_languages (Dict[str, float]): The programming languages and their weights
-    """
-    if not miner_eval.pull_requests:
-        bt.logging.info(f"No valid PRs found for uid {miner_eval.uid}")
-        return
+    bt.logging.info("")
+    bt.logging.info("-" * 50)
+    bt.logging.info(f"Scoring UID {miner_eval.uid}: {len(miner_eval.merged_pull_requests)} merged | {len(miner_eval.open_pull_requests)} open")
+    bt.logging.info("-" * 50)
 
-    total_prs = len(miner_eval.pull_requests)
-    bt.logging.info(f"Scoring {total_prs} PRs for uid {miner_eval.uid}")
+    pr_lists = [
+        (miner_eval.merged_pull_requests, "merged", "MERGED"),
+        (miner_eval.open_pull_requests, "open", "OPEN"),
+    ]
 
-    for n, pr in enumerate(miner_eval.pull_requests, start=1):
-        bt.logging.info(f"\n[{n}/{total_prs}] - Scoring PR #{pr.number} in {pr.repository_full_name}")
-
-        file_changes = get_pull_request_file_changes(pr.repository_full_name, pr.number, miner_eval.github_pat)
-
-        if not file_changes:
-            bt.logging.warning("No file changes found for this PR.")
+    for pr_list, list_name, label in pr_lists:
+        if not pr_list:
             continue
 
+        scored_prs = []
+        for n, pr in enumerate(pr_list, start=1):
+            bt.logging.info(f"\n[{n}/{len(pr_list)}] {label} PR #{pr.number} in {pr.repository_full_name}")
+            if score_pull_request(pr, miner_eval, master_repositories, programming_languages):
+                scored_prs.append(pr)
+            else:
+                bt.logging.warning(f"Skipping PR #{pr.number} in {pr.repository_full_name} - No tier config or file changes")
+
+        if list_name == "merged":
+            miner_eval.merged_pull_requests = scored_prs
+        else:
+            miner_eval.open_pull_requests = scored_prs
+
+
+def score_pull_request(
+    pr: PullRequest,
+    miner_eval: MinerEvaluation,
+    master_repositories: Dict[str, RepositoryConfig],
+    programming_languages: Dict[str, float],
+) -> bool:
+    """Score a single PR (merged or open). Returns True if scored, False if skipped."""
+    pr.repository_tier_configuration = get_tier_config(pr.repository_full_name, master_repositories)
+    if not pr.repository_tier_configuration:
+        bt.logging.warning("No repository configuration found.")
+        return False
+
+    # Only fetch file changes from GitHub if not already loaded (they are preloaded for testing only)
+    if not pr.file_changes:
+        file_changes = get_pull_request_file_changes(pr.repository_full_name, pr.number, miner_eval.github_pat)
+        if not file_changes:
+            bt.logging.warning("No file changes found.")
+            return False
         pr.set_file_changes(file_changes)
 
-        # Master repositories keys are normalized to lowercase, so normalize repo name for lookup
-        normalized_repo = normalize_repo_name(pr.repository_full_name)
-        repo_weight = master_repositories.get(normalized_repo, {}).get("weight", 0.01)
-        file_change_score = pr.calculate_score_from_file_changes(programming_languages)
-        issue_multiplier = calculate_issue_multiplier(pr)
-        open_pr_spam_multiplier = calculate_pr_spam_penalty_multiplier(miner_eval.total_open_prs)
-        time_decay_multiplier = calculate_time_decay_multiplier(pr)
-        # Use case-insensitive comparison for Gittensor repository check
-        gittensor_tag_multiplier = GITTENSOR_TAGLINE_BOOST if (pr.gittensor_tagged and normalize_repo_name(pr.repository_full_name) != normalize_repo_name(GITTENSOR_REPOSITORY)) else 1.0
-        
-        # Only apply merge success penalty to PRs merged after the cutoff date
-        if pr.merged_at > MERGE_SUCCESS_RATIO_APPLICATION_DATE:
-            merge_success_multiplier = calculate_merge_success_multiplier(miner_eval)
-        else:
-            merge_success_multiplier = 1.0  # No penalty for PRs merged before cutoff
+    pr.base_score = calculate_base_score(pr, programming_languages)
+    calculate_pr_multipliers(pr, miner_eval, master_repositories)
 
-        pr.repo_weight_multiplier = round(repo_weight, 2)
-        pr.base_score = round(file_change_score, 2)
-        pr.issue_multiplier = round(issue_multiplier, 2)
-        pr.open_pr_spam_multiplier = round(open_pr_spam_multiplier, 2)
-        pr.time_decay_multiplier = round(time_decay_multiplier, 2)
-        pr.gittensor_tag_multiplier = round(gittensor_tag_multiplier, 2)
-        pr.merge_success_multiplier = round(merge_success_multiplier, 2)
+    if pr.pr_state == PRState.MERGED:
+        miner_eval.unique_repos_contributed_to.add(pr.repository_full_name)
 
-        # Normalize repository name for case-insensitive tracking
-        normalized_repo = normalize_repo_name(pr.repository_full_name)
-        miner_eval.unique_repos_contributed_to.add(normalized_repo)
+    return True
+
+
+def get_tier_config(repo_full_name: str, master_repositories: Dict[str, RepositoryConfig]) -> Optional[TierConfig]:
+    """Get tier configuration for a repository."""
+    repo_config = master_repositories.get(repo_full_name)
+    if not repo_config:
+        return None
+
+    tier_config = TIERS.get(repo_config.tier) if repo_config.tier else None
+    if not tier_config:
+        bt.logging.warning(f"{repo_full_name} is not configured to a tier. Skipping...")
+    return tier_config
+
+
+def calculate_base_score(pr: PullRequest, programming_languages: Dict[str, float]) -> float:
+    """Calculate base score from tier base + contribution bonus."""
+    contribution_score, is_low_value_pr = pr.calculate_score_from_file_changes(programming_languages)
+
+    if is_low_value_pr:
+        bt.logging.warning(f"PR #{pr.number} is low-value (>90% test/comment/typo changes) - base score = 0")
+        return 0.0
+
+    tier_config: TierConfig = pr.repository_tier_configuration
+
+    bonus_percent = min(1.0, contribution_score / tier_config.contribution_score_for_full_bonus)
+    contribution_bonus = round(bonus_percent * tier_config.contribution_score_max_bonus, 2)
+    base_score = tier_config.merged_pr_base_score + contribution_bonus
+
+    bt.logging.info(
+        f"Base score: {tier_config.merged_pr_base_score} + {contribution_bonus} bonus "
+        f"({bonus_percent*100:.0f}% of max {tier_config.contribution_score_max_bonus}) = {base_score:.2f}"
+    )
+
+    return base_score
+
+
+def calculate_pr_multipliers(
+    pr: PullRequest, miner_eval: MinerEvaluation, master_repositories: Dict[str, RepositoryConfig]
+) -> None:
+    """Calculate all multipliers for a PR."""
+    is_merged = pr.pr_state == PRState.MERGED
+    repo_config = master_repositories.get(pr.repository_full_name)
+
+    pr.repo_weight_multiplier = round(repo_config.weight if repo_config else 0.01, 2)
+    pr.issue_multiplier = round(calculate_issue_multiplier(pr), 2)
+    pr.gittensor_tag_multiplier = 1.0 if pr.gittensor_tagged else 0.0
+
+    if is_merged:
+        pr.open_pr_spam_multiplier = round(calculate_pr_spam_penalty_multiplier(miner_eval.total_open_prs), 2)
+        pr.time_decay_multiplier = round(calculate_time_decay_multiplier(pr), 2)
+
+    else:
+        pr.open_pr_spam_multiplier = 1.0
+        pr.time_decay_multiplier = 1.0
+        pr.credibility_multiplier = 1.0
 
 
 def count_repository_contributors(miner_evaluations: Dict[int, MinerEvaluation]) -> Dict[str, int]:
     """
     Count how many miners contribute to each repository and log statistics.
-    Uses normalized (lowercase) repository names for case-insensitive counting.
 
     Returns:
-        Dict[str, int]: Dictionary mapping normalized repository names to contributor counts
+        Dict[str, int]: Dictionary mapping repository names to contributor counts
     """
     repo_counts: Dict[str, int] = {}
 
     for evaluation in miner_evaluations.values():
         for repo in evaluation.unique_repos_contributed_to:
-            # Repository names are already normalized when added to unique_repos_contributed_to
             repo_counts[repo] = repo_counts.get(repo, 0) + 1
 
     if repo_counts:
@@ -123,17 +191,6 @@ def calculate_pr_spam_penalty_multiplier(total_open_prs: int) -> float:
     return max(EXCESSIVE_PR_MIN_MULTIPLIER, calculated_multiplier)
 
 
-def calculate_merge_success_multiplier(miner_eval: MinerEvaluation) -> float:
-    """Calculate multiplier based on PR merge success ratio."""
-    total_prs = miner_eval.total_merged_prs + miner_eval.total_closed_prs
-
-    if total_prs <= 0 or total_prs < MERGE_SUCCESS_RATIO_ATTEMPTS_THRESHOLD:
-        return 1.0
-    
-    merge_ratio = miner_eval.total_merged_prs / total_prs
-    return merge_ratio
-
-
 def calculate_time_decay_multiplier(pr: PullRequest) -> float:
     """Calculate time decay multiplier for a single PR based on merge date."""
 
@@ -149,137 +206,219 @@ def calculate_time_decay_multiplier(pr: PullRequest) -> float:
     return max(sigmoid, TIME_DECAY_MIN_MULTIPLIER)
 
 
-def apply_cross_miner_multipliers_and_finalize(miner_evaluations: Dict[int, MinerEvaluation]) -> None:
-    """Apply repository uniqueness multipliers and calculate final scores in a single pass."""
-    bt.logging.info("**Applying uniqueness multipliers and finalizing scores**")
+def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None:
+    """Finalize all miner scores: apply uniqueness multipliers, calculate totals, and deduct collateral."""
+    bt.logging.info("**Finalizing miner scores**")
 
     repo_counts = count_repository_contributors(miner_evaluations)
-
-    if not repo_counts:
-        bt.logging.info("No repository contributions found, skipping uniqueness multipliers")
-        return
-
     total_contributing_miners = sum(1 for ev in miner_evaluations.values() if ev.unique_repos_contributed_to)
-    total_prs = 0
 
     for uid, evaluation in miner_evaluations.items():
-        if not evaluation or not evaluation.pull_requests:
+        if not evaluation:
             continue
 
-        total_prs += len(evaluation.pull_requests)
-        bt.logging.info(f"\n***Totaling scores for uid {uid}***")
+        bt.logging.info("")
+        bt.logging.info("=" * 50)
+        bt.logging.info(f"UID {uid}")
+        bt.logging.info("=" * 50)
 
-        for pr in evaluation.pull_requests:
-            # Apply uniqueness multiplier (cross-miner dependent)
-            # Use normalized repository name for case-insensitive lookup
-            normalized_repo = normalize_repo_name(pr.repository_full_name)
-            repo_count = repo_counts.get(normalized_repo, 0)
-            uniqueness_score = (total_contributing_miners - repo_count + 1) / total_contributing_miners
-            uniqueness_multiplier = 1.0 + (uniqueness_score * UNIQUE_PR_BOOST)
-            pr.repository_uniqueness_multiplier = uniqueness_multiplier
+        evaluation.credibility_by_tier = calculate_credibility_per_tier(
+            evaluation.merged_pull_requests, evaluation.closed_pull_requests
+        )
 
-            # Calculate final earned score now that all multipliers are set
+        # Process merged PRs
+        for pr in evaluation.merged_pull_requests:
+            pr.repository_uniqueness_multiplier = calculate_uniqueness_multiplier(
+                pr.repository_full_name, repo_counts, total_contributing_miners
+            )
+
+            # Apply tier level credibility^k to each PRs score
+            tier_config = pr.repository_tier_configuration
+            tier = get_tier_from_config(tier_config)
+            credibility = evaluation.credibility_by_tier.get(tier, 1.0) if tier else 1.0
+            pr.raw_credibility = credibility
+            pr.credibility_scalar = tier_config.credibility_scalar
+            pr.credibility_multiplier = round(credibility ** tier_config.credibility_scalar, 2)
+
             pr.calculate_final_earned_score()
-
             evaluation.base_total_score += pr.base_score
             evaluation.total_score += pr.earned_score
             evaluation.total_lines_changed += pr.total_lines_scored
 
+        # Process open PRs for collateral
+        for pr in evaluation.open_pull_requests:
+            pr.collateral_score = calculate_open_pr_collateral_score(pr)
+            evaluation.total_collateral_score += pr.collateral_score
+
+        # Apply collateral deduction
+        earned_score = evaluation.total_score
+        evaluation.total_score = max(0.0, earned_score - evaluation.total_collateral_score)
         evaluation.unique_repos_count = len(evaluation.unique_repos_contributed_to)
-        merge_success_percent = calculate_merge_success_multiplier(evaluation) * 100
 
-        bt.logging.info(f"Final evaluation for UID {uid}:")
-        bt.logging.info(f"  - Total Score: {evaluation.total_score:.2f}")
-        bt.logging.info(f"  - Total Valid PRs: {evaluation.total_prs}")
-        bt.logging.info(f"  - Total Open PRs: {evaluation.total_open_prs}")
-        bt.logging.info(f"  - PR Merge Success Rate: {evaluation.total_merged_prs}/{evaluation.total_merged_prs + evaluation.total_closed_prs} ({merge_success_percent:.2f}%)")
-        bt.logging.info(f"  - Total Lines Changed (& Scored): {evaluation.total_lines_changed}")
-        bt.logging.info(f"  - Unique Repositories Contributed To: {evaluation.unique_repos_contributed_to}")
+        # Calculate tier stats one more time now that scoring is fully applied (for logging + dashboard).
+        tier_stats = calculate_tier_stats(
+            merged_prs=evaluation.merged_pull_requests,
+            closed_prs=evaluation.closed_pull_requests,
+            open_prs=evaluation.open_pull_requests,
+            include_scoring_details=True
+        )
 
-    bt.logging.info(f"Completed uniqueness multipliers and score finalization for {total_contributing_miners} miners across {total_prs} PRs.")
+        # Determine miner's current tier based on what tiers they've unlocked
+        for tier in TIERS.keys():
+            evaluation.stats_by_tier[tier] = tier_stats[tier]
+            if is_tier_unlocked(tier, tier_stats):
+                evaluation.current_tier = tier
+
+        # Determine next tier for display
+        current_tier_str = evaluation.current_tier.value if evaluation.current_tier else "None"
+        if evaluation.current_tier is None:
+            next_tier_str = f" (Next: {TIERS_ORDER[0].value})"
+        elif evaluation.current_tier == TIERS_ORDER[-1]:
+            next_tier_str = " (Max)"
+        else:
+            next_idx = TIERS_ORDER.index(evaluation.current_tier) + 1
+            next_tier_str = f" (Next: {TIERS_ORDER[next_idx].value})"
+
+        # UID summary
+        bt.logging.info("")
+        bt.logging.info(f"Summary:")
+        bt.logging.info(f"├─ Score: {earned_score:.2f} - {evaluation.total_collateral_score:.2f} collateral = {evaluation.total_score:.2f}")
+        bt.logging.info(f"├─ PRs: {evaluation.total_merged_prs} merged | {evaluation.total_open_prs} open | {evaluation.total_closed_prs} closed")
+        bt.logging.info(f"├─ Tier: {current_tier_str}{next_tier_str}")
+        bronze = evaluation.stats_by_tier[Tier.BRONZE]
+        silver = evaluation.stats_by_tier[Tier.SILVER]
+        gold = evaluation.stats_by_tier[Tier.GOLD]
+        bt.logging.info(f"└─ Per-Tier: Bronze({bronze.merged_count}/{bronze.total_attempts}) | Silver({silver.merged_count}/{silver.total_attempts}) | Gold({gold.merged_count}/{gold.total_attempts})")
+
+    bt.logging.info("Finalization complete.")
+
+
+def calculate_uniqueness_multiplier(
+    repo_full_name: str, repo_counts: Dict[str, int], total_contributing_miners: int
+) -> float:
+    """Calculate repository uniqueness multiplier based on how many miners contribute to a repo."""
+    if total_contributing_miners == 0:
+        return 1.0
+    repo_count = repo_counts.get(repo_full_name, 0)
+    uniqueness_score = (total_contributing_miners - repo_count + 1) / total_contributing_miners
+    return 1.0 + (uniqueness_score * UNIQUE_PR_BOOST)
 
 
 def calculate_issue_multiplier(pr: PullRequest) -> float:
     """
-    Calculate pr score multiplier based on age and number of resolved issues.
+    Calculate PR score multiplier based on the first valid linked issue's age.
 
-    - Base multiplier: 1.0 (no bonus)
-    - Each issue adds 0.09-0.90 to multiplier based on age (sqrt scaling)
-    - Maximum 3 issues counted (max multiplier: 3.7)
-    - 100% of issue bonus earned when issue has been open for MAX_ISSUE_AGE_FOR_MAX_SCORE+ days
+    Works for both merged PRs (uses issue.closed_at) and open PRs (uses current time).
+    Only the first valid issue is scored. Adds bonus if issue was created by a maintainer.
 
     Returns:
-        float: Multiplier between 1.0 and 3.7
+        float: Multiplier between 1.0 and 2.0
     """
     if not pr.issues:
-        bt.logging.info(f"PR #{pr.number} - resolved no issues.")
+        bt.logging.info(f"PR #{pr.number} - Contains no linked issues")
         return 1.0
 
-    valid_issues = [issue for issue in pr.issues if _is_valid_issue(issue, pr)]
-
+    valid_issues = [issue for issue in pr.issues if is_valid_issue(issue, pr)]
     if not valid_issues:
-        bt.logging.info(f"PR #{pr.number} - found no valid issues")
+        bt.logging.info(f"PR #{pr.number} - Solved no valid issues")
         return 1.0
 
-    num_issues = min(len(valid_issues), MAX_ISSUES_SCORED_IN_SINGLE_PR)
-    bt.logging.info(f"Calculating issue multiplier for PR #{pr.number} with {num_issues} issues")
+    issue = valid_issues[0]
+    is_merged = pr.pr_state == PRState.MERGED
 
-    total_issue_multiplier = 0.0
-    for i in range(num_issues):
-        issue = valid_issues[i]
-        issue_num = getattr(issue, 'number', i + 1)
+    # Check if issue was created by a maintainer (extra bonus)
+    is_maintainer_issue = issue.author_association in MAINTAINER_ASSOCIATIONS if issue.author_association else False
+    maintainer_bonus = MAINTAINER_ISSUE_BONUS if is_maintainer_issue else 0.0
+    maintainer_str = " (maintainer)" if is_maintainer_issue else ""
 
-        if not (issue.created_at and issue.closed_at):
-            bt.logging.info(f"Issue #{issue_num} - No date info, using default score: 0.10")
-            total_issue_multiplier += 0.1
-            continue
+    if not issue.created_at:
+        bonus = maintainer_bonus
+        bt.logging.info(f"Issue #{issue.number} - No creation date | bonus: {bonus:.2f}{maintainer_str}")
+        return 1.0 + bonus
 
-        try:
-            days_open = (issue.closed_at - issue.created_at).days
-            normalized = 0.1 + math.sqrt(min(days_open, MAX_ISSUE_AGE_FOR_MAX_SCORE)) / math.sqrt(MAX_ISSUE_AGE_FOR_MAX_SCORE)
-            multiplier = 0.9 * min(normalized, 1.0)
-            bt.logging.info(f"Issue #{issue_num} - Open for {days_open} days | multiplier: {multiplier:.2f}")
-            total_issue_multiplier += multiplier
-            
-        except (ValueError, AttributeError) as e:
-            bt.logging.warning(f"Issue #{issue_num} - Could not parse issue dates. Using default score: 0.10. Exception: {e}")
-            total_issue_multiplier += 0.1
-
-    final_multiplier = 1.0 + total_issue_multiplier
-    bt.logging.info(f"Issue multiplier for pr #{pr.number} | multiplier: {final_multiplier:.2f}")
-
-    return final_multiplier
+    try:
+        end_date = issue.closed_at if (is_merged and issue.closed_at) else datetime.now(timezone.utc)
+        days_open = (end_date - issue.created_at).days
+        # Scale age bonus from 0 to MAX_ISSUE_AGE_BONUS based on sqrt of days open
+        age_ratio = math.sqrt(min(days_open, MAX_ISSUE_AGE_FOR_MAX_SCORE)) / math.sqrt(MAX_ISSUE_AGE_FOR_MAX_SCORE)
+        age_bonus = MAX_ISSUE_AGE_BONUS * age_ratio
+        total_bonus = age_bonus + maintainer_bonus
+        bt.logging.info(f"Issue #{issue.number} - Open for {days_open} days | bonus: {total_bonus:.2f}{maintainer_str}")
+        return 1.0 + total_bonus
+    except (ValueError, AttributeError) as e:
+        bt.logging.warning(f"Issue #{issue.number} - Could not calculate age. Using maintainer bonus only: {maintainer_bonus:.2f}. Exception: {e}")
+        return 1.0 + maintainer_bonus
 
 
-def _is_valid_issue(issue: Issue, pr: PullRequest) -> bool:
-    """Check if issue is valid for bonus calculation."""
+def is_valid_issue(issue: Issue, pr: PullRequest) -> bool:
+    """Check if issue is valid for bonus calculation (works for both merged and open PRs)."""
+    is_merged = pr.pr_state == PRState.MERGED
 
-    # Only set valid to True if PR was NOT edited after being merged
-    # (to prevent miners from editing after merge to add irrelevant closed issues)
-    if pr.last_edited_at and pr.last_edited_at > pr.merged_at:
-        bt.logging.warning(f"Skipping issue #{issue.number} - edited after PR merge")
-        return False
-
-    if issue.state and issue.state != 'CLOSED':
-        bt.logging.warning(f"Skipping issue #{issue.number} - not CLOSED (state: {issue.state})")
-        return False
-
+    # Common checks (both merged and open)
     if not issue.author_login:
-        bt.logging.warning(f"Skipping issue #{issue.number} - missing author information")
+        bt.logging.warning(f"Skipping issue #{issue.number} - Issue is missing author information")
         return False
 
     if issue.author_login == pr.author_login:
-        bt.logging.warning(f"Skipping issue #{issue.number} - same author as PR (self-created issue gaming)")
+        bt.logging.warning(f"Skipping issue #{issue.number} - Issue has same author as PR (self-created issue)")
         return False
 
     if issue.created_at and pr.created_at and issue.created_at > pr.created_at:
-        bt.logging.warning(f"Skipping issue #{issue.number} - created after PR")
+        bt.logging.warning(f"Skipping issue #{issue.number} - Issue was created after PR was created")
         return False
 
-    if issue.closed_at and pr.merged_at:
-        days_diff = abs((issue.closed_at - pr.merged_at).total_seconds()) / SECONDS_PER_DAY
-        if days_diff > MAX_ISSUE_CLOSE_WINDOW_DAYS:
-            bt.logging.warning(f"Skipping issue #{issue.number} - closed {days_diff:.1f}d from PR merge (max: {MAX_ISSUE_CLOSE_WINDOW_DAYS})")
+    # Merged-only checks
+    if is_merged:
+        if pr.last_edited_at and pr.last_edited_at > pr.merged_at:
+            bt.logging.warning(f"Skipping issue #{issue.number} - PR was edited after merge")
             return False
 
+        if issue.state and issue.state != 'CLOSED':
+            bt.logging.warning(f"Skipping issue #{issue.number} - Issue state not CLOSED (state: {issue.state})")
+            return False
+
+        if issue.closed_at and pr.merged_at:
+            days_diff = abs((issue.closed_at - pr.merged_at).total_seconds()) / SECONDS_PER_DAY
+            if days_diff > MAX_ISSUE_CLOSE_WINDOW_DAYS:
+                bt.logging.warning(
+                    f"Skipping issue #{issue.number} - Issue closed {days_diff:.1f}d from merge (max: {MAX_ISSUE_CLOSE_WINDOW_DAYS})"
+                )
+                return False
+
     return True
+
+
+# =============================================================================
+# Collateral System Functions
+# =============================================================================
+
+
+def calculate_open_pr_collateral_score(pr: PullRequest) -> float:
+    """
+    Calculate collateral score for an open PR.
+
+    Collateral = base_score * applicable_multipliers * DEFAULT_COLLATERAL_PERCENT
+
+    Applicable multipliers: repo_weight, issue, gittensor_tag
+    NOT applicable: time_decay (merge-based), credibility_multiplier (merge-based),
+                    uniqueness (cross-miner), open_pr_spam (not for collateral)
+    """
+    from math import prod
+
+    multipliers = {
+        "repo_weight": pr.repo_weight_multiplier,
+        "issue": pr.issue_multiplier,
+        "gittensor_tag": pr.gittensor_tag_multiplier,
+    }
+
+    potential_score = pr.base_score * prod(multipliers.values())
+    collateral_percent = pr.repository_tier_configuration.open_pr_collateral_percentage
+    collateral_score = potential_score * collateral_percent
+
+    mult_str = " | ".join([f"{k}: {v:.2f}" for k, v in multipliers.items()])
+    bt.logging.info(
+        f"OPEN PR #{pr.number} | base: {pr.base_score:.2f} | {mult_str} | "
+        f"potential: {potential_score:.2f} | collateral ({collateral_percent*100:.0f}%): {collateral_score:.2f}"
+    )
+
+    return collateral_score

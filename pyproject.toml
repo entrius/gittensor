@@ -10,3 +10,13 @@ multi_line_output = 3
 include_trailing_comma = true
 skip_gitignore = true
 
+[tool.ruff]
+line-length = 120
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]  # E=pycodestyle errors, F=pyflakes, I=isort
+
+[tool.ruff.format]
+quote-style = "single"  # matches your skip-string-normalization setting
+

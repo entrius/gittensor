@@ -234,7 +234,9 @@ class PullRequest:
         for name, scored, total, score, is_test in file_details:
             test_mark = " [test]" if is_test else ""
             bt.logging.debug(f"  │   {name:<{max_name_len}}  {scored:>3}/{total:<3} lines  {score:>6.2f}{test_mark}")
-        bt.logging.info(f"  ├─ Contribution: {pr_contribution_score:.2f} | Substantive: {substantive_changes}/{total_raw_changes} ({substantive_ratio*100:.0f}%)")
+        bt.logging.info(
+            f"  ├─ Contribution: {pr_contribution_score:.2f} | Substantive: {substantive_changes}/{total_raw_changes} ({substantive_ratio*100:.0f}%)"
+        )
 
         return pr_contribution_score, is_low_value_pr
 
@@ -257,7 +259,9 @@ class PullRequest:
             f"cred={self.raw_credibility:.2f}^{self.credibility_scalar}" if k == "cred" else f"{k}={v:.2f}"
             for k, v in multipliers.items()
         )
-        bt.logging.info(f"├─ {self.pr_state.value} PR #{self.number} ({self.repository_full_name}) → {self.earned_score:.2f}")
+        bt.logging.info(
+            f"├─ {self.pr_state.value} PR #{self.number} ({self.repository_full_name}) → {self.earned_score:.2f}"
+        )
         bt.logging.info(f"│  └─ {self.base_score:.2f} × {mult_str}")
 
         return self.earned_score
@@ -305,10 +309,10 @@ class PullRequest:
             description_end = description[-150:].strip().rstrip('.,!?;: \t\n')
             if description_end.lower().endswith(expected_tagline.lower()):
                 if is_merged:
-                    gittensor_tagged = last_edited_at is None or last_edited_at <= merged_at
+                    gittensor_tagged = last_edited_at is None
                     if not gittensor_tagged:
                         bt.logging.warning(
-                            f"PR #{pr_data['number']} in {repository_full_name} has Gittensor tagline but was edited after merge "
+                            f"PR #{pr_data['number']} in {repository_full_name} has Gittensor tagline but was edited after PR was created "
                             f"(merged: {merged_at.isoformat()}, last edited: {last_edited_at.isoformat()})"
                         )
                 else:

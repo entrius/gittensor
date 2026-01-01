@@ -36,16 +36,16 @@ class TierStats:
 
 
 class Tier(str, Enum):
-    BRONZE = "Bronze"
-    SILVER = "Silver"
-    GOLD = "Gold"
+    BRONZE = 'Bronze'
+    SILVER = 'Silver'
+    GOLD = 'Gold'
 
 
 TIER_DEFAULTS = {
-    "merged_pr_base_score": DEFAULT_MERGED_PR_BASE_SCORE,
-    "contribution_score_for_full_bonus": DEFAULT_MAX_CONTRIBUTION_SCORE_FOR_FULL_BONUS,
-    "contribution_score_max_bonus": MAX_LINE_CONTRIBUTION_BONUS,
-    "open_pr_collateral_percentage": DEFAULT_COLLATERAL_PERCENT,
+    'merged_pr_base_score': DEFAULT_MERGED_PR_BASE_SCORE,
+    'contribution_score_for_full_bonus': DEFAULT_MAX_CONTRIBUTION_SCORE_FOR_FULL_BONUS,
+    'contribution_score_max_bonus': MAX_LINE_CONTRIBUTION_BONUS,
+    'open_pr_collateral_percentage': DEFAULT_COLLATERAL_PERCENT,
 }
 
 
@@ -59,17 +59,17 @@ class TierConfig:
     credibility_scalar: int
 
     # Defaults (can override per-tier if needed)
-    merged_pr_base_score: int = TIER_DEFAULTS["merged_pr_base_score"]
-    contribution_score_for_full_bonus: int = TIER_DEFAULTS["contribution_score_for_full_bonus"]
-    contribution_score_max_bonus: int = TIER_DEFAULTS["contribution_score_max_bonus"]
-    open_pr_collateral_percentage: int = TIER_DEFAULTS["open_pr_collateral_percentage"]
+    merged_pr_base_score: int = TIER_DEFAULTS['merged_pr_base_score']
+    contribution_score_for_full_bonus: int = TIER_DEFAULTS['contribution_score_for_full_bonus']
+    contribution_score_max_bonus: int = TIER_DEFAULTS['contribution_score_max_bonus']
+    open_pr_collateral_percentage: int = TIER_DEFAULTS['open_pr_collateral_percentage']
 
 
 TIERS: dict[Tier, TierConfig] = {
     #                        merges  credibility   scalar  (requirements to unlock & maintain each tier)
-    Tier.BRONZE:  TierConfig(  3,        0.80,     1.0),
-    Tier.SILVER:  TierConfig(  4,        0.75,     1.5),
-    Tier.GOLD:    TierConfig(  5,        0.70,     2.0),
+    Tier.BRONZE: TierConfig(3, 0.80, 1.0),
+    Tier.SILVER: TierConfig(4, 0.75, 1.5),
+    Tier.GOLD: TierConfig(5, 0.70, 2.0),
 }
 TIERS_ORDER: list[Tier] = list(TIERS.keys())
 
@@ -88,4 +88,3 @@ def get_tier_from_config(tier_config: TierConfig) -> Optional[Tier]:
         if config == tier_config:
             return tier
     return None
-

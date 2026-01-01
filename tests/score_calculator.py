@@ -75,7 +75,7 @@ def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -
         return []
 
     except Exception as e:
-        bt.logging.error(f"Error getting file changes for PR #{pr_number} in {repository}: {e}")
+        bt.logging.error(f'Error getting file changes for PR #{pr_number} in {repository}: {e}')
         return []
 
 
@@ -91,7 +91,7 @@ def load_programming_language_weights():
         with open(weights_path, 'r') as f:
             return json.load(f)
     except Exception as e:
-        bt.logging.error(f"Error loading programming language weights: {e}")
+        bt.logging.error(f'Error loading programming language weights: {e}')
         return {}
 
 
@@ -117,11 +117,11 @@ def get_pr_details(repository: str, pr_number: int, token: str) -> dict:
         if response.status_code == 200:
             return response.json()
         else:
-            bt.logging.error(f"Failed to fetch PR details: {response.status_code} - {response.text}")
+            bt.logging.error(f'Failed to fetch PR details: {response.status_code} - {response.text}')
             return None
 
     except Exception as e:
-        bt.logging.error(f"Error fetching PR details: {e}")
+        bt.logging.error(f'Error fetching PR details: {e}')
         return None
 
 
@@ -187,8 +187,8 @@ def print_report(pr_details: dict, file_changes: list[FileChange], programming_l
         number=pr_details['number'],
         repository_full_name=pr_details['base']['repo']['full_name'],
         uid=0,  # Mock UID
-        hotkey="test",  # Mock hotkey
-        github_id="test",  # Mock github_id
+        hotkey='test',  # Mock hotkey
+        github_id='test',  # Mock github_id
         title=pr_details['title'],
         author_login=pr_details['user']['login'],
         merged_at=datetime.now(timezone.utc),  # Mock timestamp
@@ -215,65 +215,65 @@ def print_report(pr_details: dict, file_changes: list[FileChange], programming_l
     file_breakdowns.sort(key=lambda x: x['file_score'], reverse=True)
 
     # Print report
-    print("\n" + "=" * 100)
-    print("PR SCORE CALCULATION REPORT")
-    print("=" * 100)
+    print('\n' + '=' * 100)
+    print('PR SCORE CALCULATION REPORT')
+    print('=' * 100)
 
-    print(f"\nRepository: {pr_details['base']['repo']['full_name']}")
-    print(f"PR Number: #{pr_details['number']}")
-    print(f"Title: {pr_details['title']}")
-    print(f"Author: {pr_details['user']['login']}")
-    print(f"State: {pr_details['state']}")
+    print(f'\nRepository: {pr_details["base"]["repo"]["full_name"]}')
+    print(f'PR Number: #{pr_details["number"]}')
+    print(f'Title: {pr_details["title"]}')
+    print(f'Author: {pr_details["user"]["login"]}')
+    print(f'State: {pr_details["state"]}')
     if pr_details.get('merged_at'):
-        print(f"Merged At: {pr_details['merged_at']}")
-    print(f"\nTotal Additions: {pr_details['additions']}")
-    print(f"Total Deletions: {pr_details['deletions']}")
-    print(f"Total Changes: {pr_details['additions'] + pr_details['deletions']}")
-    print(f"Number of Commits: {pr_details['commits']}")
-    print(f"Number of Files Changed: {len(file_changes)}")
-    print(f"\nBase Score: {pr.base_score:.6f}")
-    print(f"Earned Score: {pr.earned_score:.6f}")
+        print(f'Merged At: {pr_details["merged_at"]}')
+    print(f'\nTotal Additions: {pr_details["additions"]}')
+    print(f'Total Deletions: {pr_details["deletions"]}')
+    print(f'Total Changes: {pr_details["additions"] + pr_details["deletions"]}')
+    print(f'Number of Commits: {pr_details["commits"]}')
+    print(f'Number of Files Changed: {len(file_changes)}')
+    print(f'\nBase Score: {pr.base_score:.6f}')
+    print(f'Earned Score: {pr.earned_score:.6f}')
     score_difference = pr.earned_score - pr.base_score
     if abs(score_difference) > 0.000001:  # Check if there's a meaningful difference
-        print(f"Score Difference: {score_difference:+.6f} ({(score_difference/pr.base_score)*100:+.2f}%)")
+        print(f'Score Difference: {score_difference:+.6f} ({(score_difference / pr.base_score) * 100:+.2f}%)')
     else:
-        print("Score Difference: None (no penalties or multipliers applied)")
+        print('Score Difference: None (no penalties or multipliers applied)')
 
-    print("\n" + "-" * 100)
-    print("FILE-BY-FILE SCORE BREAKDOWN")
-    print("-" * 100)
-    print(f"{'Filename':<50} {'Ext':<8} {'Changes':<10} {'Lang Wt':<10} {'Contrib %':<12} {'Score':<12} {'Status':<10}")
-    print("-" * 100)
+    print('\n' + '-' * 100)
+    print('FILE-BY-FILE SCORE BREAKDOWN')
+    print('-' * 100)
+    print(f'{"Filename":<50} {"Ext":<8} {"Changes":<10} {"Lang Wt":<10} {"Contrib %":<12} {"Score":<12} {"Status":<10}')
+    print('-' * 100)
 
     for fb in file_breakdowns:
-        capped_indicator = " (CAPPED)" if fb['is_capped'] else ""
+        capped_indicator = ' (CAPPED)' if fb['is_capped'] else ''
         print(
-            f"{fb['filename']:<50} {fb['extension']:<8} {fb['changes']:<10} "
-            f"{fb['language_weight']:<10.4f} {fb['weight_ratio']*100:<12.2f} "
-            f"{fb['file_score']:<12.6f} {fb['status']:<10}{capped_indicator}"
+            f'{fb["filename"]:<50} {fb["extension"]:<8} {fb["changes"]:<10} '
+            f'{fb["language_weight"]:<10.4f} {fb["weight_ratio"] * 100:<12.2f} '
+            f'{fb["file_score"]:<12.6f} {fb["status"]:<10}{capped_indicator}'
         )
 
-    print("-" * 100)
-    print(f"\n{'BASE SCORE (from file changes):':<80} {pr.base_score:.6f}")
-    print(f"{'EARNED SCORE (after penalties/multipliers):':<80} {pr.earned_score:.6f}")
+    print('-' * 100)
+    print(f'\n{"BASE SCORE (from file changes):":<80} {pr.base_score:.6f}')
+    print(f'{"EARNED SCORE (after penalties/multipliers):":<80} {pr.earned_score:.6f}')
     score_diff = pr.earned_score - pr.base_score
     if abs(score_diff) > 0.000001:
-        print(f"{'SCORE ADJUSTMENT:':<80} {score_diff:+.6f} ({(score_diff/pr.base_score)*100:+.2f}%)")
-    print(f"{'TOTAL LINES SCORED (after capping):':<80} {pr.total_lines_scored}")
-    print("=" * 100 + "\n")
+        print(f'{"SCORE ADJUSTMENT:":<80} {score_diff:+.6f} ({(score_diff / pr.base_score) * 100:+.2f}%)')
+    print(f'{"TOTAL LINES SCORED (after capping):":<80} {pr.total_lines_scored}')
+    print('=' * 100 + '\n')
 
     # Additional insights
     if any(fb['is_capped'] for fb in file_breakdowns):
-        print("\nNOTE: Some files have been capped at max scored changes due to exploit mitigation.")
+        print('\nNOTE: Some files have been capped at max scored changes due to exploit mitigation.')
         capped_files = [fb for fb in file_breakdowns if fb['is_capped']]
-        print(f"Capped files ({len(capped_files)}):")
+        print(f'Capped files ({len(capped_files)}):')
         for fb in capped_files:
             print(
-                f"  - {fb['filename']}: {fb['changes']} changes -> {fb['scored_changes']} scored (cap: {MAX_LINES_SCORED_FOR_MITIGATED_EXT})"
+                f'  - {fb["filename"]}: {fb["changes"]} changes -> {fb["scored_changes"]} scored (cap: {MAX_LINES_SCORED_FOR_MITIGATED_EXT})'
             )
 
     # Language distribution
-    print("\nLANGUAGE DISTRIBUTION:")
+    print('\nLANGUAGE DISTRIBUTION:')
     lang_stats = {}
     for fb in file_breakdowns:
         ext = fb['extension']
@@ -284,7 +284,7 @@ def print_report(pr_details: dict, file_changes: list[FileChange], programming_l
         lang_stats[ext]['score'] += fb['file_score']
 
     for ext, stats in sorted(lang_stats.items(), key=lambda x: x[1]['score'], reverse=True):
-        print(f"  {ext:<15} Files: {stats['count']:<3} Changes: {stats['changes']:<8} Score: {stats['score']:.6f}")
+        print(f'  {ext:<15} Files: {stats["count"]:<3} Changes: {stats["changes"]:<8} Score: {stats["score"]:.6f}')
 
 
 def main():
@@ -312,36 +312,36 @@ Environment Variables:
     # Get GitHub PAT from environment
     github_pat = os.environ.get('GITHUB_PAT')
     if not github_pat:
-        bt.logging.error("GITHUB_PAT environment variable not set!")
-        bt.logging.error("Please set it with: export GITHUB_PAT=your_token")
+        bt.logging.error('GITHUB_PAT environment variable not set!')
+        bt.logging.error('Please set it with: export GITHUB_PAT=your_token')
         sys.exit(1)
 
-    bt.logging.info(f"Fetching PR #{args.pr_number} from {args.repository}...")
+    bt.logging.info(f'Fetching PR #{args.pr_number} from {args.repository}...')
 
     # Fetch PR details
     pr_details = get_pr_details(args.repository, args.pr_number, github_pat)
     if not pr_details:
-        bt.logging.error("Failed to fetch PR details. Please check the repository and PR number.")
+        bt.logging.error('Failed to fetch PR details. Please check the repository and PR number.')
         sys.exit(1)
 
     # Fetch file changes
-    bt.logging.info("Fetching file changes...")
+    bt.logging.info('Fetching file changes...')
     file_changes = get_pull_request_file_changes(args.repository, args.pr_number, github_pat)
     if not file_changes:
-        bt.logging.error("Failed to fetch file changes or PR has no file changes.")
+        bt.logging.error('Failed to fetch file changes or PR has no file changes.')
         sys.exit(1)
 
-    bt.logging.info(f"Found {len(file_changes)} file changes")
+    bt.logging.info(f'Found {len(file_changes)} file changes')
 
     # Load programming language weights
-    bt.logging.info("Loading programming language weights...")
+    bt.logging.info('Loading programming language weights...')
     programming_languages = load_programming_language_weights()
 
     # Generate and print report
     print_report(pr_details, file_changes, programming_languages)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     """
     Run the PR score calculator.
 
@@ -352,10 +352,10 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        bt.logging.info("\nInterrupted by user")
+        bt.logging.info('\nInterrupted by user')
         sys.exit(0)
     except Exception as e:
-        bt.logging.error(f"Error: {e}")
+        bt.logging.error(f'Error: {e}')
         import traceback
 
         traceback.print_exc()

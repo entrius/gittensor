@@ -22,9 +22,9 @@ GITHUB_DOMAIN = 'https://github.com/'
 class PRState(Enum):
     """PR state for scoring"""
 
-    MERGED = "MERGED"
-    OPEN = "OPEN"
-    CLOSED = "CLOSED"
+    MERGED = 'MERGED'
+    OPEN = 'OPEN'
+    CLOSED = 'CLOSED'
 
 
 @dataclass
@@ -36,7 +36,7 @@ class Miner:
     github_id: str
 
     def __str__(self) -> str:
-        return f"Miner(uid={self.uid}, hotkey={self.hotkey[:8]}..., github_id={self.github_id})"
+        return f'Miner(uid={self.uid}, hotkey={self.hotkey[:8]}..., github_id={self.github_id})'
 
 
 @dataclass
@@ -49,7 +49,7 @@ class Repository:
 
     @property
     def full_name(self) -> str:
-        return f"{self.owner}/{self.name}"
+        return f'{self.owner}/{self.name}'
 
 
 @dataclass
@@ -69,14 +69,14 @@ class FileChange:
     @property
     def short_name(self) -> str:
         """Return only the base filename (strip directories)."""
-        return self.filename.split("/")[-1]
+        return self.filename.split('/')[-1]
 
     def __post_init__(self):
         if self.file_extension is None:
             self.file_extension = self._calculate_file_extension()
 
     def _calculate_file_extension(self) -> str:
-        return self.filename.split(".")[-1].lower() if "." in self.filename else ""
+        return self.filename.split('.')[-1].lower() if '.' in self.filename else ''
 
     def is_test_file(self) -> bool:
         filename_lower = self.filename.lower()
@@ -229,13 +229,13 @@ class PullRequest:
         is_low_value_pr = substantive_ratio < 0.1
 
         # Log & return
-        bt.logging.debug(f"  ├─ Files ({len(self.file_changes)} changes):")
+        bt.logging.debug(f'  ├─ Files ({len(self.file_changes)} changes):')
         max_name_len = max(len(f[0]) for f in file_details) if file_details else 0
         for name, scored, total, score, is_test in file_details:
-            test_mark = " [test]" if is_test else ""
-            bt.logging.debug(f"  │   {name:<{max_name_len}}  {scored:>3}/{total:<3} lines  {score:>6.2f}{test_mark}")
+            test_mark = ' [test]' if is_test else ''
+            bt.logging.debug(f'  │   {name:<{max_name_len}}  {scored:>3}/{total:<3} lines  {score:>6.2f}{test_mark}')
         bt.logging.info(
-            f"  ├─ Contribution: {pr_contribution_score:.2f} | Substantive: {substantive_changes}/{total_raw_changes} ({substantive_ratio*100:.0f}%)"
+            f'  ├─ Contribution: {pr_contribution_score:.2f} | Substantive: {substantive_changes}/{total_raw_changes} ({substantive_ratio * 100:.0f}%)'
         )
 
         return pr_contribution_score, is_low_value_pr
@@ -243,26 +243,26 @@ class PullRequest:
     def calculate_final_earned_score(self) -> float:
         """Combine base score with all multipliers."""
         multipliers = {
-            "repo": self.repo_weight_multiplier,
-            "issue": self.issue_multiplier,
-            "spam": self.open_pr_spam_multiplier,
-            "unique": self.repository_uniqueness_multiplier,
-            "decay": self.time_decay_multiplier,
-            "tag": self.gittensor_tag_multiplier,
-            "cred": self.credibility_multiplier,
+            'repo': self.repo_weight_multiplier,
+            'issue': self.issue_multiplier,
+            'spam': self.open_pr_spam_multiplier,
+            'unique': self.repository_uniqueness_multiplier,
+            'decay': self.time_decay_multiplier,
+            'tag': self.gittensor_tag_multiplier,
+            'cred': self.credibility_multiplier,
         }
 
         self.earned_score = self.base_score * prod(multipliers.values())
 
         # Log all multipliers (credibility shows ^k format)
-        mult_str = " × ".join(
-            f"cred={self.raw_credibility:.2f}^{self.credibility_scalar}" if k == "cred" else f"{k}={v:.2f}"
+        mult_str = ' × '.join(
+            f'cred={self.raw_credibility:.2f}^{self.credibility_scalar}' if k == 'cred' else f'{k}={v:.2f}'
             for k, v in multipliers.items()
         )
         bt.logging.info(
-            f"├─ {self.pr_state.value} PR #{self.number} ({self.repository_full_name}) → {self.earned_score:.2f}"
+            f'├─ {self.pr_state.value} PR #{self.number} ({self.repository_full_name}) → {self.earned_score:.2f}'
         )
-        bt.logging.info(f"│  └─ {self.base_score:.2f} × {mult_str}")
+        bt.logging.info(f'│  └─ {self.base_score:.2f} × {mult_str}')
 
         return self.earned_score
 
@@ -305,15 +305,15 @@ class PullRequest:
         # Gittensor tag detection - validates tagline contains correct miner URL
         gittensor_tagged = False
         if description:
-            expected_tagline = f"{PR_TAGLINE_PREFIX}{GITTENSOR_MINER_DETAILS_URL}{github_id}"
+            expected_tagline = f'{PR_TAGLINE_PREFIX}{GITTENSOR_MINER_DETAILS_URL}{github_id}'
             description_end = description[-150:].strip().rstrip('.,!?;: \t\n')
             if description_end.lower().endswith(expected_tagline.lower()):
                 if is_merged:
                     gittensor_tagged = last_edited_at is None
                     if not gittensor_tagged:
                         bt.logging.warning(
-                            f"PR #{pr_data['number']} in {repository_full_name} has Gittensor tagline but was edited after PR was created "
-                            f"(merged: {merged_at.isoformat()}, last edited: {last_edited_at.isoformat()})"
+                            f'PR #{pr_data["number"]} in {repository_full_name} has Gittensor tagline but was edited after PR was created '
+                            f'(merged: {merged_at.isoformat()}, last edited: {last_edited_at.isoformat()})'
                         )
                 else:
                     gittensor_tagged = True
@@ -406,13 +406,13 @@ class MinerEvaluation:
 
     def add_open_pull_request(self, raw_pr: Dict):
         """Add an open pull request that will be factored into scoring."""
-        bt.logging.info(f"Counting OPEN PR #{raw_pr['number']} in {parse_repo_name(raw_pr['repository'])}")
+        bt.logging.info(f'Counting OPEN PR #{raw_pr["number"]} in {parse_repo_name(raw_pr["repository"])}')
         self.open_pull_requests.append(PullRequest.from_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id))
 
     def add_closed_pull_request(self, raw_pr: Dict):
         """Add a closed pull request that will be factored into scoring."""
         bt.logging.info(
-            f"CLOSED PR #{raw_pr['number']} in {parse_repo_name(raw_pr['repository'])} counting towards credibility"
+            f'CLOSED PR #{raw_pr["number"]} in {parse_repo_name(raw_pr["repository"])} counting towards credibility'
         )
         self.closed_pull_requests.append(
             PullRequest.from_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id)

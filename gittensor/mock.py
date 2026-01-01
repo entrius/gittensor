@@ -7,7 +7,7 @@ import bittensor as bt
 
 
 class MockSubtensor(bt.MockSubtensor):
-    def __init__(self, netuid, n=16, wallet=None, network="mock"):
+    def __init__(self, netuid, n=16, wallet=None, network='mock'):
         super().__init__(network=network)
 
         if not self.subnet_exists(netuid):
@@ -27,15 +27,15 @@ class MockSubtensor(bt.MockSubtensor):
         for i in range(1, n + 1):
             self.force_register_neuron(
                 netuid=netuid,
-                hotkey=f"miner-hotkey-{i}",
-                coldkey="mock-coldkey",
+                hotkey=f'miner-hotkey-{i}',
+                coldkey='mock-coldkey',
                 balance=100000,
                 stake=100000,
             )
 
 
 class MockMetagraph(bt.Metagraph):
-    def __init__(self, netuid=1, network="mock", subtensor=None):
+    def __init__(self, netuid=1, network='mock', subtensor=None):
         super().__init__(netuid=netuid, network=network, sync=False)
 
         if subtensor is not None:
@@ -43,11 +43,11 @@ class MockMetagraph(bt.Metagraph):
         self.sync(subtensor=subtensor)
 
         for axon in self.axons:
-            axon.ip = "127.0.0.0"
+            axon.ip = '127.0.0.0'
             axon.port = 8091
 
-        bt.logging.info(f"Metagraph: {self}")
-        bt.logging.info(f"Axons: {self.axons}")
+        bt.logging.info(f'Metagraph: {self}')
+        bt.logging.info(f'Axons: {self.axons}')
 
 
 class MockDendrite(bt.Dendrite):
@@ -68,7 +68,7 @@ class MockDendrite(bt.Dendrite):
         streaming: bool = False,
     ):
         if streaming:
-            raise NotImplementedError("Streaming not implemented yet.")
+            raise NotImplementedError('Streaming not implemented yet.')
 
         async def query_all_axons(streaming: bool):
             """Queries all axons for responses."""
@@ -87,12 +87,12 @@ class MockDendrite(bt.Dendrite):
                     # Update the status code and status message of the dendrite to match the axon
                     s.dummy_output = s.dummy_input * 2
                     s.dendrite.status_code = 200
-                    s.dendrite.status_message = "OK"
+                    s.dendrite.status_message = 'OK'
                     synapse.dendrite.process_time = str(process_time)
                 else:
                     s.dummy_output = 0
                     s.dendrite.status_code = 408
-                    s.dendrite.status_message = "Timeout"
+                    s.dendrite.status_message = 'Timeout'
                     synapse.dendrite.process_time = str(timeout)
 
                 # Return the updated synapse object after deserializing if requested
@@ -112,4 +112,4 @@ class MockDendrite(bt.Dendrite):
         Returns:
             str: The string representation of the Dendrite object in the format "dendrite(<user_wallet_address>)".
         """
-        return "MockDendrite({})".format(self.keypair.ss58_address)
+        return 'MockDendrite({})'.format(self.keypair.ss58_address)

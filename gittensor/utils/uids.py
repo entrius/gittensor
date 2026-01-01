@@ -1,10 +1,9 @@
 from typing import List
 
 import bittensor as bt
-import numpy as np
 
 
-def check_uid_availability(metagraph: "bt.metagraph.Metagraph", uid: int, vpermit_tao_limit: int) -> bool:
+def check_uid_availability(metagraph: 'bt.metagraph.Metagraph', uid: int, vpermit_tao_limit: int) -> bool:
     """Return whether a UID is eligible for querying.
 
     Args:

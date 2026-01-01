@@ -1,5 +1,5 @@
-import os
 import logging
+import os
 from logging.handlers import RotatingFileHandler
 
 EVENTS_LEVEL_NUM = 38
@@ -7,9 +7,9 @@ DEFAULT_LOG_BACKUP_COUNT = 10
 
 
 def setup_events_logger(full_path, events_retention_size):
-    logging.addLevelName(EVENTS_LEVEL_NUM, "EVENT")
+    logging.addLevelName(EVENTS_LEVEL_NUM, 'EVENT')
 
-    logger = logging.getLogger("event")
+    logger = logging.getLogger('event')
     logger.setLevel(EVENTS_LEVEL_NUM)
 
     def event(self, message, *args, **kws):
@@ -19,12 +19,12 @@ def setup_events_logger(full_path, events_retention_size):
     logging.Logger.event = event
 
     formatter = logging.Formatter(
-        "%(asctime)s | %(levelname)s | %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
+        '%(asctime)s | %(levelname)s | %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S',
     )
 
     file_handler = RotatingFileHandler(
-        os.path.join(full_path, "events.log"),
+        os.path.join(full_path, 'events.log'),
         maxBytes=events_retention_size,
         backupCount=DEFAULT_LOG_BACKUP_COUNT,
     )

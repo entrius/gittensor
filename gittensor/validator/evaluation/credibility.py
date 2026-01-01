@@ -1,16 +1,15 @@
 # The MIT License (MIT)
 # Copyright © 2025 Entrius
 
-from dataclasses import dataclass
-from typing import Dict, List, TYPE_CHECKING
+from typing import TYPE_CHECKING, Dict, List
 
 import bittensor as bt
 
 from gittensor.validator.configurations.tier_config import (
-    Tier,
-    TierStats,
     TIERS,
     TIERS_ORDER,
+    Tier,
+    TierStats,
     get_tier_from_config,
 )
 
@@ -19,9 +18,9 @@ if TYPE_CHECKING:
 
 
 def calculate_tier_stats(
-    merged_prs: List["PullRequest"],
-    closed_prs: List["PullRequest"],
-    open_prs: List["PullRequest"] = [],
+    merged_prs: List['PullRequest'],
+    closed_prs: List['PullRequest'],
+    open_prs: List['PullRequest'] = [],
     include_scoring_details: bool = False,
 ) -> Dict[Tier, TierStats]:
     """Calculate merged/closed counts per tier."""
@@ -47,7 +46,7 @@ def calculate_tier_stats(
             if tier:
                 stats[tier].open_count += 1
             if include_scoring_details:
-                    stats[tier].collateral_score += pr.collateral_score
+                stats[tier].collateral_score += pr.collateral_score
 
     return stats
 
@@ -68,14 +67,14 @@ def is_tier_unlocked(tier: Tier, tier_stats: Dict[Tier, TierStats]) -> bool:
         if config.required_merges is not None:
             if stats.merged_count < config.required_merges:
                 bt.logging.info(
-                    f"{tier.value} locked: {check_tier.value} needs {config.required_merges} merges, has {stats.merged_count}"
+                    f'{tier.value} locked: {check_tier.value} needs {config.required_merges} merges, has {stats.merged_count}'
                 )
                 return False
 
         if config.required_credibility is not None:
             if stats.credibility < config.required_credibility:
                 bt.logging.info(
-                    f"{tier.value} locked: {check_tier.value} needs {config.required_credibility:.2f} credibility, has {stats.credibility:.2f}"
+                    f'{tier.value} locked: {check_tier.value} needs {config.required_credibility:.2f} credibility, has {stats.credibility:.2f}'
                 )
                 return False
 
@@ -83,8 +82,8 @@ def is_tier_unlocked(tier: Tier, tier_stats: Dict[Tier, TierStats]) -> bool:
 
 
 def calculate_credibility_per_tier(
-    merged_prs: List["PullRequest"],
-    closed_prs: List["PullRequest"],
+    merged_prs: List['PullRequest'],
+    closed_prs: List['PullRequest'],
 ) -> Dict[Tier, float]:
     """
     Calculate credibility for each tier, enforcing tier progression.
@@ -103,20 +102,20 @@ def calculate_credibility_per_tier(
 
         # No activity in this tier
         if stats.total_attempts == 0:
-            tier_display_parts.append(f"{tier.value}: LOCKED")
+            tier_display_parts.append(f'{tier.value}: LOCKED')
             continue
 
         # Has activity but tier not unlocked
         if not tier_unlocked:
             tier_credibility[tier] = 0.0
-            tier_display_parts.append(f"{tier.value}: LOCKED")
+            tier_display_parts.append(f'{tier.value}: LOCKED')
             continue
 
         # Calculate actual credibility
         credibility = stats.credibility
         tier_credibility[tier] = credibility
-        tier_display_parts.append(f"{tier.value}: {stats.merged_count}/{stats.total_attempts} ({credibility:.2f})")
+        tier_display_parts.append(f'{tier.value}: {stats.merged_count}/{stats.total_attempts} ({credibility:.2f})')
 
-    bt.logging.info(f"Credibility: {' | '.join(tier_display_parts)}")
+    bt.logging.info(f'Credibility: {" | ".join(tier_display_parts)}')
 
     return tier_credibility

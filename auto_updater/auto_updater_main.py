@@ -23,7 +23,7 @@ from auto_update import AutoUpdateConfig, AutoUpdateManager, ManagedProcess
 manager: Optional[AutoUpdateManager] = None
 
 
-def setup_logging(log_level: str = "INFO") -> None:
+def setup_logging(log_level: str = 'INFO') -> None:
     """Setup logging configuration."""
     logging.basicConfig(
         level=getattr(logging, log_level.upper()),
@@ -41,7 +41,7 @@ def load_config(config_path: Optional[str] = None) -> AutoUpdateConfig:
             with open(config_path, 'r') as f:
                 config_data = json.load(f)
 
-            logger.info(f"Loaded configuration from {config_path}")
+            logger.info(f'Loaded configuration from {config_path}')
 
             # Parse processes from config
             processes = []
@@ -64,8 +64,8 @@ def load_config(config_path: Optional[str] = None) -> AutoUpdateConfig:
             )
 
         except Exception as e:
-            logger.error(f"Failed to load config from {config_path}: {e}")
-            logger.info("Using default configuration")
+            logger.error(f'Failed to load config from {config_path}: {e}')
+            logger.info('Using default configuration')
 
     # Default configuration
     return AutoUpdateConfig()
@@ -81,13 +81,15 @@ def create_processes_from_args(process_names: str) -> list[ManagedProcess]:
         if name == 'validator':
             processes.append(
                 ManagedProcess(
-                    name='gt-vali', neuron_type='validator', pm2_process_name='gt-vali'  # From run_validator.sh
+                    name='gt-vali',
+                    neuron_type='validator',
+                    pm2_process_name='gt-vali',  # From run_validator.sh
                 )
             )
         elif name == 'miner':
             processes.append(ManagedProcess(name='gt-miner', neuron_type='miner', pm2_process_name='gt-miner'))
         else:
-            logging.getLogger(__name__).warning(f"Unknown process type: {name}")
+            logging.getLogger(__name__).warning(f'Unknown process type: {name}')
 
     return processes
 
@@ -95,7 +97,7 @@ def create_processes_from_args(process_names: str) -> list[ManagedProcess]:
 def signal_handler(signum: int, frame) -> None:
     """Handle shutdown signals."""
     logger = logging.getLogger(__name__)
-    logger.info(f"Received signal {signum}, shutting down...")
+    logger.info(f'Received signal {signum}, shutting down...')
 
     global manager
     if manager:
@@ -109,16 +111,16 @@ def setup_update_callbacks(manager: AutoUpdateManager) -> None:
     logger = logging.getLogger(__name__)
 
     def on_update_started(process_name: str):
-        logger.info(f"🔄 Update started for {process_name}")
+        logger.info(f'🔄 Update started for {process_name}')
 
     def on_update_completed(process_name: str, success: bool):
         if success:
-            logger.info(f"✅ Update completed successfully for {process_name}")
+            logger.info(f'✅ Update completed successfully for {process_name}')
         else:
-            logger.error(f"❌ Update failed for {process_name}")
+            logger.error(f'❌ Update failed for {process_name}')
 
     def on_update_failed(process_name: str, error: str):
-        logger.error(f"💥 Update failed for {process_name}: {error}")
+        logger.error(f'💥 Update failed for {process_name}: {error}')
 
     manager.on_update_started = on_update_started
     manager.on_update_completed = on_update_completed
@@ -149,7 +151,7 @@ def main():
     setup_logging(args.log_level)
     logger = logging.getLogger(__name__)
 
-    logger.info("🚀 Starting GitTensor Auto-Update Service")
+    logger.info('🚀 Starting GitTensor Auto-Update Service')
 
     # Load configuration
     config = load_config(args.config)
@@ -160,14 +162,14 @@ def main():
 
     if args.disable:
         config.enabled = False
-        logger.info("Auto-update disabled via command line")
+        logger.info('Auto-update disabled via command line')
 
     # Add processes from command line if no config file processes
     if not config.processes and args.processes:
         config.processes = create_processes_from_args(args.processes)
 
     if not config.processes:
-        logger.error("No processes configured for auto-update")
+        logger.error('No processes configured for auto-update')
         sys.exit(1)
 
     # Create manager
@@ -183,17 +185,17 @@ def main():
 
     # Log configuration
     status = manager.get_status()
-    logger.info(f"Configuration:")
-    logger.info(f"  - Enabled: {status['enabled']}")
-    logger.info(f"  - Check interval: {status['check_interval']}s")
-    logger.info(f"  - Managed processes: {status['managed_processes']}")
+    logger.info('Configuration:')
+    logger.info(f'  - Enabled: {status["enabled"]}')
+    logger.info(f'  - Check interval: {status["check_interval"]}s')
+    logger.info(f'  - Managed processes: {status["managed_processes"]}')
 
     for proc in status['processes']:
-        logger.info(f"    - {proc['name']} ({proc['neuron_type']}) -> {proc['pm2_process_name']}")
+        logger.info(f'    - {proc["name"]} ({proc["neuron_type"]}) -> {proc["pm2_process_name"]}')
 
     # Start the manager
     if not manager.start():
-        logger.error("Failed to start auto-update manager")
+        logger.error('Failed to start auto-update manager')
         sys.exit(1)
 
     # Keep the main thread alive
@@ -205,17 +207,16 @@ def main():
             if int(time.time()) % 3600 == 0:  # Every hour
                 status = manager.get_status()
                 logger.info(
-                    f"Status: Running={status['running']}, "
-                    f"Failures={status['consecutive_failures']}, "
-                    f"Cooldown={status['in_cooldown']}"
+                    f'Status: Running={status["running"]}, '
+                    f'Failures={status["consecutive_failures"]}, '
+                    f'Cooldown={status["in_cooldown"]}'
                 )
 
     except KeyboardInterrupt:
-        logger.info("Keyboard interrupt received")
+        logger.info('Keyboard interrupt received')
     finally:
         signal_handler(signal.SIGTERM, None)
 
 
 if __name__ == '__main__':
     main()
-

@@ -9,15 +9,13 @@ Provides a template for custom MinerEvaluation objects to test alongside DB data
 Uncomment and modify the EXAMPLE_MINER template below.
 """
 
-import sys
 import os
-from datetime import datetime, timezone, timedelta
+import sys
 from typing import Dict
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../..')))
 
-from gittensor.classes import FileChange, Issue, MinerEvaluation, PRState, PullRequest
-from gittensor.validator.configurations.tier_config import TIERS, TierStats
+from gittensor.classes import MinerEvaluation
 
 
 def get_custom_evaluations() -> Dict[int, MinerEvaluation]:

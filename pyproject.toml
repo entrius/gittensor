@@ -15,8 +15,9 @@ line-length = 120
 target-version = "py39"
 
 [tool.ruff.lint]
-select = ["E", "F", "I"]  # E=pycodestyle errors, F=pyflakes, I=isort
+select = ["E", "F", "I"]
+ignore = ["E501"]
 
 [tool.ruff.format]
-quote-style = "single"  # matches your skip-string-normalization setting
+quote-style = "single"
 

@@ -13,7 +13,7 @@ try:
     POSTGRES_AVAILABLE = True
 except ImportError:
     POSTGRES_AVAILABLE = False
-    bt.logging.warning("psycopg2 not installed. Database storage features will be disabled.")
+    bt.logging.warning('psycopg2 not installed. Database storage features will be disabled.')
 
 
 def create_database_connection() -> Optional[object]:
@@ -24,7 +24,7 @@ def create_database_connection() -> Optional[object]:
         Database connection if successful, None otherwise
     """
     if not POSTGRES_AVAILABLE:
-        bt.logging.error("Cannot create database connection: psycopg2 not installed")
+        bt.logging.error('Cannot create database connection: psycopg2 not installed')
         return None
 
     try:
@@ -38,12 +38,12 @@ def create_database_connection() -> Optional[object]:
 
         connection = psycopg2.connect(**db_config)
         connection.autocommit = False
-        bt.logging.success("Successfully connected to PostgreSQL database for validation result storage")
+        bt.logging.success('Successfully connected to PostgreSQL database for validation result storage')
         return connection
 
     except psycopg2.Error as e:
-        bt.logging.error(f"Failed to connect to database: {e}")
+        bt.logging.error(f'Failed to connect to database: {e}')
         return None
     except Exception as e:
-        bt.logging.error(f"Unexpected error connecting to database: {e}")
+        bt.logging.error(f'Unexpected error connecting to database: {e}')
         return None

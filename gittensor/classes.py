@@ -218,7 +218,9 @@ class PullRequest:
             is_test_file = file.is_test_file()
             file_weight = TEST_FILE_CONTRIBUTION_WEIGHT if is_test_file else 1.0
 
-            if not is_test_file:
+            is_substantive_file = not is_test_file and file.file_extension not in MITIGATED_EXTENSIONS
+
+            if is_substantive_file:
                 substantive_changes += scored_changes
 
             file_score = language_weight * file_weight * scored_changes
@@ -382,17 +384,17 @@ class MinerEvaluation:
         return len(self.closed_pull_requests)
 
     def get_all_issues(self) -> List[Issue]:
-        """Aggregate all issues from all merged pull requests."""
+        """Aggregate all issues from all pull requests (merged, open, closed)."""
         all_issues = []
-        for pr in self.merged_pull_requests:
+        for pr in self.merged_pull_requests + self.open_pull_requests + self.closed_pull_requests:
             if pr.issues:
                 all_issues.extend(pr.issues)
         return all_issues
 
     def get_all_file_changes(self) -> List[FileChange]:
-        """Aggregate all file changes from all merged PR diffs."""
+        """Aggregate all file changes from all PR diffs (merged, open, closed)."""
         all_file_changes = []
-        for pr in self.merged_pull_requests:
+        for pr in self.merged_pull_requests + self.open_pull_requests + self.closed_pull_requests:
             if pr.file_changes:
                 all_file_changes.extend(pr.file_changes)
         return all_file_changes

@@ -309,10 +309,10 @@ class PullRequest:
             description_end = description[-150:].strip().rstrip('.,!?;: \t\n')
             if description_end.lower().endswith(expected_tagline.lower()):
                 if is_merged:
-                    gittensor_tagged = last_edited_at is None
+                    gittensor_tagged = last_edited_at is None or last_edited_at <= merged_at
                     if not gittensor_tagged:
                         bt.logging.warning(
-                            f'PR #{pr_data["number"]} in {repository_full_name} has Gittensor tagline but was edited after PR was created '
+                            f'PR #{pr_data["number"]} in {repository_full_name} has Gittensor tagline but was edited after merge '
                             f'(merged: {merged_at.isoformat()}, last edited: {last_edited_at.isoformat()})'
                         )
                 else:

@@ -411,16 +411,15 @@ def calculate_open_pr_collateral_score(pr: PullRequest) -> float:
 
     Collateral = base_score * applicable_multipliers * DEFAULT_COLLATERAL_PERCENT
 
-    Applicable multipliers: repo_weight, issue, gittensor_tag
+    Applicable multipliers: repo_weight, issue
     NOT applicable: time_decay (merge-based), credibility_multiplier (merge-based),
-                    uniqueness (cross-miner), open_pr_spam (not for collateral)
+                    uniqueness (cross-miner), open_pr_spam (not for collateral), gittensor_tag (exploitable)
     """
     from math import prod
 
     multipliers = {
         'repo_weight': pr.repo_weight_multiplier,
         'issue': pr.issue_multiplier,
-        'gittensor_tag': pr.gittensor_tag_multiplier,
     }
 
     potential_score = pr.base_score * prod(multipliers.values())

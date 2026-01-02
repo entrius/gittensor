@@ -1,10 +1,13 @@
+# The MIT License (MIT)
+# Copyright © 2025 Entrius
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 import bittensor as bt
 
+from gittensor.constants import MITIGATED_EXTENSIONS
 from gittensor.validator.configurations.tier_config import Tier
 
 
@@ -25,6 +28,40 @@ class RepositoryConfig:
     tier: Optional[Tier] = None
 
 
+@dataclass
+class TokenWeights:
+    """Configuration for token-based scoring weights."""
+
+    structural_bonus: Dict[str, float] = field(default_factory=dict)
+    leaf_tokens: Dict[str, float] = field(default_factory=dict)
+    extension_to_language: Dict[str, str] = field(default_factory=dict)
+    documentation_extensions: Set[str] = field(default_factory=set)
+
+    def get_structural_weight(self, node_type: str) -> float:
+        return self.structural_bonus.get(node_type, 0.0)
+
+    def get_leaf_weight(self, node_type: str) -> float:
+        return self.leaf_tokens.get(node_type, 0.0)
+
+    def get_language(self, extension: str) -> Optional[str]:
+        """Get the tree-sitter language name for a file extension."""
+        ext = extension.lstrip('.').lower()
+        return self.extension_to_language.get(ext)
+
+    def is_documentation_file(self, extension: str) -> bool:
+        ext = extension.lstrip('.').lower()
+        return ext in self.documentation_extensions
+
+    def supports_tree_sitter(self, extension: str) -> bool:
+        """Check if a file extension is supported by tree-sitter."""
+        ext = extension.lstrip('.').lower()
+        return ext in self.extension_to_language and ext not in self.documentation_extensions
+
+
+def _get_weights_dir() -> Path:
+    return Path(__file__).parent.parent / 'weights'
+
+
 def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
     """
     Load repository weights from the local JSON file.
@@ -34,7 +71,7 @@ def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
         Dictionary mapping normalized (lowercase) fullName (str) to RepositoryConfig object.
         Returns empty dict on error.
     """
-    weights_file = Path(__file__).parent.parent / 'weights' / 'master_repositories.json'
+    weights_file = _get_weights_dir() / 'master_repositories.json'
 
     try:
         with open(weights_file, 'r') as f:
@@ -87,7 +124,7 @@ def load_programming_language_weights() -> Dict[str, float]:
         Dictionary mapping extension (str) to weight (float).
         Returns empty dict on error.
     """
-    weights_file = Path(__file__).parent.parent / 'weights' / 'programming_languages.json'
+    weights_file = _get_weights_dir() / 'programming_languages.json'
 
     try:
         with open(weights_file, 'r') as f:
@@ -118,3 +155,69 @@ def load_programming_language_weights() -> Dict[str, float]:
     except Exception as e:
         bt.logging.error(f'Unexpected error loading language weights: {e}')
         return {}
+
+
+def load_extension_to_language() -> Dict[str, str]:
+    """Load extension to tree-sitter language mapping."""
+    path = _get_weights_dir() / 'extension_to_language.json'
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        bt.logging.error(f'Failed to load extension_to_language.json: {e}')
+        return {}
+
+
+def load_token_weights() -> TokenWeights:
+    """Load token weights from JSON configuration files."""
+    weights_file = _get_weights_dir() / 'token_weights.json'
+
+    try:
+        with open(weights_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        bt.logging.error(f'Token weights file not found: {weights_file}')
+        raise
+    except json.JSONDecodeError as e:
+        bt.logging.error(f'Invalid JSON in token weights file: {e}')
+        raise
+
+    structural_bonus = dict(data.get('structural_bonus', {}))
+    leaf_tokens = dict(data.get('leaf_tokens', {}))
+    extension_to_language = load_extension_to_language()
+
+    weights = TokenWeights(
+        structural_bonus=structural_bonus,
+        leaf_tokens=leaf_tokens,
+        extension_to_language=extension_to_language,
+        documentation_extensions=set(MITIGATED_EXTENSIONS),
+    )
+
+    bt.logging.info(
+        f'Loaded token weights: {len(structural_bonus)} structural, '
+        f'{len(leaf_tokens)} leaf, {len(extension_to_language)} languages'
+    )
+
+    return weights
+
+
+def get_supported_extensions() -> List[str]:
+    """
+    Get a list of file extensions supported by tree-sitter scoring.
+
+    Returns:
+        List[str]: List of supported file extensions (without dots).
+    """
+    weights = load_token_weights()
+    return [ext for ext in weights.extension_to_language.keys() if ext not in weights.documentation_extensions]
+
+
+def get_documentation_extensions() -> List[str]:
+    """
+    Get a list of file extensions that use regex-based scoring.
+
+    Returns:
+        List[str]: List of documentation file extensions (without dots).
+    """
+    weights = load_token_weights()
+    return list(weights.documentation_extensions)

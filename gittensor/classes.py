@@ -179,6 +179,7 @@ class PullRequest:
     issues: Optional[List[Issue]] = None
     description: Optional[str] = None
     last_edited_at: Optional[datetime] = None
+    head_ref_oid: Optional[str] = None
 
     def set_file_changes(self, file_changes: List[FileChange]) -> None:
         """Set the file changes for this pull request"""
@@ -337,6 +338,7 @@ class PullRequest:
             description=description,
             last_edited_at=last_edited_at,
             gittensor_tagged=gittensor_tagged,
+            head_ref_oid=pr_data.get('headRefOid'),
         )
 
 

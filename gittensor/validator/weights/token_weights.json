@@ -1,0 +1,108 @@
+{
+  "structural_bonus": {
+    "function_definition": 1.5,
+    "function_declaration": 1.5,
+    "method_definition": 1.5,
+    "method_declaration": 1.5,
+    "class_definition": 2.0,
+    "class_declaration": 2.0,
+    "interface_declaration": 1.5,
+    "struct_definition": 1.5,
+    "enum_definition": 1.0,
+    "trait_definition": 1.5,
+    "impl_item": 1.0,
+
+    "if_statement": 0.3,
+    "else_clause": 0.2,
+    "elif_clause": 0.2,
+    "switch_statement": 0.4,
+    "match_expression": 0.4,
+    "case_clause": 0.2,
+
+    "for_statement": 0.3,
+    "for_in_statement": 0.3,
+    "foreach_statement": 0.3,
+    "while_statement": 0.3,
+    "do_statement": 0.3,
+    "loop_expression": 0.3,
+
+    "try_statement": 0.4,
+    "catch_clause": 0.3,
+    "finally_clause": 0.2,
+    "except_clause": 0.3,
+    "raise_statement": 0.3,
+    "throw_statement": 0.3,
+
+    "with_statement": 0.3,
+    "async_function_definition": 1.5,
+    "await_expression": 0.3,
+
+    "return_statement": 0.3,
+    "yield_statement": 0.3,
+    "yield_expression": 0.3,
+
+    "lambda_expression": 0.5,
+    "arrow_function": 0.5,
+    "anonymous_function": 0.5,
+
+    "call_expression": 0.4,
+    "call": 0.4,
+    "new_expression": 0.4,
+
+    "assignment": 0.2,
+    "assignment_expression": 0.2,
+    "augmented_assignment": 0.2,
+    "variable_declaration": 0.2,
+    "lexical_declaration": 0.2,
+    "const_declaration": 0.2,
+    "let_declaration": 0.2,
+
+    "assert_statement": 0.2,
+    "decorator": 0.3,
+    "attribute": 0.2
+  },
+
+  "leaf_tokens": {
+    "identifier": 0.5,
+    "type_identifier": 0.5,
+    "field_identifier": 0.5,
+    "property_identifier": 0.5,
+    "shorthand_property_identifier": 0.4,
+    "shorthand_property_identifier_pattern": 0.4,
+
+    "operator": 0.2,
+    "binary_operator": 0.2,
+    "unary_operator": 0.2,
+    "comparison_operator": 0.2,
+    "assignment_operator": 0.2,
+
+    "integer": 0.1,
+    "integer_literal": 0.1,
+    "float": 0.1,
+    "float_literal": 0.1,
+    "number": 0.1,
+
+    "string": 0.1,
+    "string_literal": 0.1,
+    "string_content": 0.05,
+    "template_string": 0.1,
+    "raw_string_literal": 0.1,
+
+    "true": 0.1,
+    "false": 0.1,
+    "boolean": 0.1,
+    "none": 0.1,
+    "null": 0.1,
+    "nil": 0.1,
+
+    "self": 0.2,
+    "this": 0.2,
+    "super": 0.2,
+
+    "comment": 0.0,
+    "line_comment": 0.0,
+    "block_comment": 0.0,
+    "documentation_comment": 0.0,
+    "doc_comment": 0.0
+  }
+}

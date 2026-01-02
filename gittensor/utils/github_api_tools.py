@@ -68,6 +68,7 @@ QUERY = """
               }
               baseRefName
               headRefName
+              headRefOid
               author {
                 login
               }
@@ -566,3 +567,86 @@ def load_miners_prs(
 
     except Exception as e:
         bt.logging.error(f'Error fetching PRs via GraphQL: {e}')
+
+
+# 1MB max file size for tree-sitter parsing. Files exceeding this get a fixed score.
+MAX_FILE_SIZE_BYTES = 1_000_000
+
+
+def fetch_file_contents_batch(
+    repo_owner: str,
+    repo_name: str,
+    head_sha: str,
+    file_paths: List[str],
+    token: str,
+) -> Dict[str, Optional[str]]:
+    """
+    Fetch multiple file contents from a repository in a single GraphQL request.
+
+    Args:
+        repo_owner: Repository owner (e.g., 'anthropics')
+        repo_name: Repository name (e.g., 'claude-code')
+        head_sha: The commit SHA to fetch files at (from PR's headRefOid)
+        file_paths: List of file paths to fetch (e.g., ['src/main.py', 'lib/utils.js'])
+        token: GitHub PAT for authentication
+
+    Returns:
+        Dict mapping file paths to their contents (None if file is binary, deleted, or too large)
+    """
+    if not file_paths:
+        return {}
+
+    file_fields = []
+    for i, path in enumerate(file_paths):
+        expression = f'{head_sha}:{path}'
+        file_fields.append(
+            f'file{i}: object(expression: "{expression}") {{ ... on Blob {{ text byteSize isBinary }} }}'
+        )
+
+    query = f'''
+        query($owner: String!, $name: String!) {{
+            repository(owner: $owner, name: $name) {{
+                {" ".join(file_fields)}
+            }}
+        }}
+    '''
+
+    variables = {'owner': repo_owner, 'name': repo_name}
+    headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
+
+    try:
+        response = requests.post(
+            f'{BASE_GITHUB_API_URL}/graphql',
+            headers=headers,
+            json={'query': query, 'variables': variables},
+            timeout=30,
+        )
+
+        if response.status_code != 200:
+            bt.logging.warning(f'Failed to fetch file contents: {response.status_code}')
+            return {path: None for path in file_paths}
+
+        data = response.json()
+        if 'errors' in data:
+            bt.logging.warning(f'GraphQL errors fetching files: {data["errors"]}')
+
+        repo_data = data.get('data', {}).get('repository', {})
+        results = {}
+
+        for i, path in enumerate(file_paths):
+            file_data = repo_data.get(f'file{i}')
+
+            if file_data is None:
+                results[path] = None
+            elif file_data.get('isBinary'):
+                results[path] = None
+            elif file_data.get('byteSize', 0) > MAX_FILE_SIZE_BYTES:
+                results[path] = None
+            else:
+                results[path] = file_data.get('text')
+
+        return results
+
+    except requests.exceptions.RequestException as e:
+        bt.logging.error(f'Error fetching file contents: {e}')
+        return {path: None for path in file_paths}

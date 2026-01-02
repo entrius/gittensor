@@ -6,14 +6,6 @@ Pytest fixtures for validator tests.
 
 This module provides reusable fixtures for testing tier credibility,
 scoring, and other validator functionality.
-
-Usage:
-    Fixtures are automatically available in all test files under tests/validator/
-
-    # In your test file:
-    def test_something(pr_factory, bronze_config):
-        pr = pr_factory(state=PRState.MERGED, tier=bronze_config)
-        ...
 """
 
 from dataclasses import dataclass

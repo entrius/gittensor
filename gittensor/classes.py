@@ -217,7 +217,9 @@ class PullRequest:
             is_test_file = file.is_test_file()
             file_weight = TEST_FILE_CONTRIBUTION_WEIGHT if is_test_file else 1.0
 
-            if not is_test_file:
+            is_substantive_file = not is_test_file and file.file_extension not in MITIGATED_EXTENSIONS
+
+            if is_substantive_file:
                 substantive_changes += scored_changes
 
             file_score = language_weight * file_weight * scored_changes

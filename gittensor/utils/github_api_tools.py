@@ -128,8 +128,8 @@ def make_headers(token: str) -> Dict[str, str]:
         Dict[str, str]: Mapping of HTTP header names to values.
     """
     return {
-        "Authorization": f"token {token}",
-        "Accept": "application/vnd.github.v3+json",
+        'Authorization': f'token {token}',
+        'Accept': 'application/vnd.github.v3+json',
     }
 
 
@@ -158,25 +158,25 @@ def get_github_user(token: str) -> Optional[Dict[str, Any]]:
     # Retry logic for timeout issues
     for attempt in range(6):
         try:
-            response = requests.get(f"{BASE_GITHUB_API_URL}/user", headers=headers, timeout=30)
+            response = requests.get(f'{BASE_GITHUB_API_URL}/user', headers=headers, timeout=30)
             if response.status_code == 200:
                 try:
                     user_data: Dict[str, Any] = response.json()
                 except Exception as e:  # pragma: no cover
-                    bt.logging.warning(f"Failed to parse GitHub /user JSON response: {e}")
+                    bt.logging.warning(f'Failed to parse GitHub /user JSON response: {e}')
                     return None
 
                 _GITHUB_USER_CACHE[token] = user_data
                 return user_data
 
             bt.logging.warning(
-                f"GitHub /user request failed with status {response.status_code} (attempt {attempt + 1}/6)"
+                f'GitHub /user request failed with status {response.status_code} (attempt {attempt + 1}/6)'
             )
             if attempt < 5:
                 time.sleep(2)
 
         except Exception as e:
-            bt.logging.warning(f"Could not fetch GitHub user (attempt {attempt + 1}/6): {e}")
+            bt.logging.warning(f'Could not fetch GitHub user (attempt {attempt + 1}/6): {e}')
             if attempt < 5:  # Don't sleep on last attempt
                 time.sleep(2)
 
@@ -195,7 +195,7 @@ def get_github_username(token: str) -> Optional[str]:
     user_data = get_github_user(token)
     if not user_data:
         return None
-    return user_data.get("login")
+    return user_data.get('login')
 
 
 def get_github_id(token: str) -> Optional[str]:
@@ -211,7 +211,7 @@ def get_github_id(token: str) -> Optional[str]:
     if not user_data:
         return None
 
-    user_id = user_data.get("id")
+    user_id = user_data.get('id')
     if user_id is None:
         return None
 
@@ -231,21 +231,21 @@ def get_github_account_age_days(token: str) -> Optional[int]:
     if not user_data:
         return None
 
-    created_at = user_data.get("created_at")
+    created_at = user_data.get('created_at')
     if not created_at:
         return None
 
     try:
-        created_dt = datetime.fromisoformat(created_at.rstrip("Z")).replace(tzinfo=timezone.utc)
+        created_dt = datetime.fromisoformat(created_at.rstrip('Z')).replace(tzinfo=timezone.utc)
         now_dt = datetime.now(timezone.utc)
         return (now_dt - created_dt).days
     except Exception as e:
-        bt.logging.warning(f"Could not parse GitHub account creation date: {e}")
+        bt.logging.warning(f'Could not parse GitHub account creation date: {e}')
         return None
 
 
 def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -> Optional[List[FileChange]]:
-    '''
+    """
     Get the diff for a specific PR by repository name and PR number
     Args:
         repository (str): Repository in format 'owner/repo'
@@ -253,7 +253,7 @@ def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -
         token (str): Github pat
     Returns:
         List[FileChanges]: List object with file changes or None if error
-    '''
+    """
     headers = make_headers(token)
 
     try:
@@ -267,7 +267,7 @@ def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -
         return []
 
     except Exception as e:
-        bt.logging.error(f"Error getting file changes for PR #{pr_number} in {repository}: {e}")
+        bt.logging.error(f'Error getting file changes for PR #{pr_number} in {repository}: {e}')
         return []
 
 
@@ -291,9 +291,9 @@ def get_github_graphql_query(
     attempts = 6
     headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
     variables = {
-        "userId": global_user_id,
-        "limit": min(100, max_prs - merged_pr_count),
-        "cursor": cursor,
+        'userId': global_user_id,
+        'limit': min(100, max_prs - merged_pr_count),
+        'cursor': cursor,
     }
 
     for attempt in range(attempts):
@@ -301,7 +301,7 @@ def get_github_graphql_query(
             response = requests.post(
                 f'{BASE_GITHUB_API_URL}/graphql',
                 headers=headers,
-                json={"query": QUERY, "variables": variables},
+                json={'query': QUERY, 'variables': variables},
                 timeout=30,
             )
 
@@ -312,12 +312,12 @@ def get_github_graphql_query(
                 # Exponential backoff: 5s, 10s, 20s, 40s, 80s
                 backoff_delay = 5 * (2**attempt)
                 bt.logging.warning(
-                    f"GraphQL request failed with status {response.status_code} (attempt {attempt + 1}/{attempts}), retrying in {backoff_delay}s..."
+                    f'GraphQL request failed with status {response.status_code} (attempt {attempt + 1}/{attempts}), retrying in {backoff_delay}s...'
                 )
                 time.sleep(backoff_delay)
             else:
                 bt.logging.error(
-                    f"GraphQL request failed with status {response.status_code} after {attempts} attempts: {response.text}"
+                    f'GraphQL request failed with status {response.status_code} after {attempts} attempts: {response.text}'
                 )
 
         except requests.exceptions.RequestException as e:
@@ -325,11 +325,11 @@ def get_github_graphql_query(
                 # Exponential backoff: 5s, 10s, 20s, 40s, 80s
                 backoff_delay = 5 * (2**attempt)
                 bt.logging.warning(
-                    f"GraphQL request connection error (attempt {attempt + 1}/{attempts}): {e}, retrying in {backoff_delay}s..."
+                    f'GraphQL request connection error (attempt {attempt + 1}/{attempts}): {e}, retrying in {backoff_delay}s...'
                 )
                 time.sleep(backoff_delay)
             else:
-                bt.logging.error(f"GraphQL request failed after {attempts} attempts: {e}")
+                bt.logging.error(f'GraphQL request failed after {attempts} attempts: {e}')
                 return None
 
     return None
@@ -365,10 +365,10 @@ def try_add_open_or_closed_pr(
     if pr_state == PRState.CLOSED.value:
         closed_at = pr_raw.get('closedAt')
         if not closed_at:
-            bt.logging.warning(f"PR #{pr_raw['number']} is CLOSED but missing closedAt timestamp.")
+            bt.logging.warning(f'PR #{pr_raw["number"]} is CLOSED but missing closedAt timestamp.')
             return
 
-        closed_dt = datetime.fromisoformat(closed_at.rstrip("Z")).replace(tzinfo=timezone.utc)
+        closed_dt = datetime.fromisoformat(closed_at.rstrip('Z')).replace(tzinfo=timezone.utc)
         if closed_dt >= lookback_date_filter:
             miner_eval.add_closed_pull_request(pr_raw)
 
@@ -393,13 +393,13 @@ def should_skip_merged_pr(
     """
 
     if not pr_raw['mergedAt']:
-        return (True, f"PR #{pr_raw['number']} is MERGED, but missing a mergedAt timestamp. Skipping...")
+        return (True, f'PR #{pr_raw["number"]} is MERGED, but missing a mergedAt timestamp. Skipping...')
 
-    merged_dt = datetime.fromisoformat(pr_raw['mergedAt'].rstrip("Z")).replace(tzinfo=timezone.utc)
+    merged_dt = datetime.fromisoformat(pr_raw['mergedAt'].rstrip('Z')).replace(tzinfo=timezone.utc)
 
     # Filter by master_repositories - keys are already normalized to lowercase
     if repository_full_name not in master_repositories:
-        return (True, f"Skipping PR #{pr_raw['number']} in {repository_full_name} - ineligible repo")
+        return (True, f'Skipping PR #{pr_raw["number"]} in {repository_full_name} - ineligible repo')
 
     repo_config = master_repositories[repository_full_name]
 
@@ -407,7 +407,7 @@ def should_skip_merged_pr(
     if merged_dt < lookback_date_filter:
         return (
             True,
-            f"Skipping PR #{pr_raw['number']} in {repository_full_name} - merged within {PR_LOOKBACK_DAYS} day lookback window",
+            f'Skipping PR #{pr_raw["number"]} in {repository_full_name} - merged within {PR_LOOKBACK_DAYS} day lookback window',
         )
 
     # Skip if PR author is a maintainer
@@ -415,7 +415,7 @@ def should_skip_merged_pr(
     if author_association in MAINTAINER_ASSOCIATIONS:
         return (
             True,
-            f"Skipping PR #{pr_raw['number']} in {repository_full_name} - author is {author_association} (has direct merge capabilities)",
+            f'Skipping PR #{pr_raw["number"]} in {repository_full_name} - author is {author_association} (has direct merge capabilities)',
         )
 
     # Skip if PR was merged by the same person who created it (self-merge) AND there's no approvals from a differing party
@@ -427,7 +427,7 @@ def should_skip_merged_pr(
         )
 
         if not has_external_approval:
-            return (True, f"Skipping PR #{pr_raw['number']} in {repository_full_name} - self-merged, no approval")
+            return (True, f'Skipping PR #{pr_raw["number"]} in {repository_full_name} - self-merged, no approval')
 
     # Skip if PR was not merged to an acceptable branch (default or additional)
     default_branch = (
@@ -447,7 +447,7 @@ def should_skip_merged_pr(
         if branch_matches_pattern(head_ref, acceptable_branches):
             return (
                 True,
-                f"Skipping PR #{pr_raw['number']} in {repository_full_name} - "
+                f'Skipping PR #{pr_raw["number"]} in {repository_full_name} - '
                 f"source branch '{head_ref}' is an acceptable branch (merging between acceptable branches not allowed)",
             )
 
@@ -456,18 +456,18 @@ def should_skip_merged_pr(
     if not branch_matches_pattern(base_ref, acceptable_branches):
         return (
             True,
-            f"Skipping PR #{pr_raw['number']} in {repository_full_name} - "
+            f'Skipping PR #{pr_raw["number"]} in {repository_full_name} - '
             f"merged to '{base_ref}' (not default branch '{default_branch}' or additional acceptable branches)",
         )
 
     # Check if repo is inactive
     if repo_config.inactive_at is not None:
-        inactive_dt = datetime.fromisoformat(repo_config.inactive_at.rstrip("Z")).replace(tzinfo=timezone.utc)
+        inactive_dt = datetime.fromisoformat(repo_config.inactive_at.rstrip('Z')).replace(tzinfo=timezone.utc)
         # Skip PR if it was merged at or after the repo became inactive
         if merged_dt >= inactive_dt:
             return (
                 True,
-                f"Skipping PR #{pr_raw['number']} in {repository_full_name} - PR was merged at/after repo became inactive (merged: {merged_dt.isoformat()}, inactive: {inactive_dt.isoformat()})",
+                f'Skipping PR #{pr_raw["number"]} in {repository_full_name} - PR was merged at/after repo became inactive (merged: {merged_dt.isoformat()}, inactive: {inactive_dt.isoformat()})',
             )
 
     # All checks passed
@@ -486,10 +486,10 @@ def load_miners_prs(
         master_repositories: Repository metadata (name -> RepositoryConfig)
         max_prs: Maximum merged PRs to fetch
     """
-    bt.logging.info("*****Fetching PRs*****")
+    bt.logging.info('*****Fetching PRs*****')
 
     lookback_date_filter = datetime.now(timezone.utc) - timedelta(days=PR_LOOKBACK_DAYS)
-    global_user_id = base64.b64encode(f"04:User{miner_eval.github_id}".encode()).decode()
+    global_user_id = base64.b64encode(f'04:User{miner_eval.github_id}'.encode()).decode()
 
     cursor = None
 
@@ -505,18 +505,18 @@ def load_miners_prs(
                 miner_eval.github_pat, global_user_id, len(miner_eval.merged_pull_requests), max_prs, cursor
             )
             if not response:
-                bt.logging.warning("No response from github, breaking fetch loop...")
+                bt.logging.warning('No response from github, breaking fetch loop...')
                 break
 
             data: Dict = response.json()
 
             if 'errors' in data:
-                bt.logging.error(f"GraphQL errors: {data['errors']}")
+                bt.logging.error(f'GraphQL errors: {data["errors"]}')
                 break
 
             user_data: Dict = data.get('data', {}).get('node')
             if not user_data:
-                bt.logging.warning("User not found or no pull requests")
+                bt.logging.warning('User not found or no pull requests')
                 break
 
             pr_data: Dict = user_data.get('pullRequests', {})
@@ -528,13 +528,13 @@ def load_miners_prs(
                 pr_state = pr_raw['state']
 
                 # Stop querying once we hit PRs older than the tier incentive start date
-                pr_creation_time = datetime.fromisoformat(pr_raw["createdAt"].rstrip("Z")).replace(tzinfo=timezone.utc)
+                pr_creation_time = datetime.fromisoformat(pr_raw['createdAt'].rstrip('Z')).replace(tzinfo=timezone.utc)
 
                 if pr_creation_time < TIER_BASED_INCENTIVE_MECHANISM_START_DATE:
                     bt.logging.info(
-                        f"Reached PR #{pr_raw['number']} in {repository_full_name} created at {pr_creation_time}, "
-                        f"before tier incentive start date ({TIER_BASED_INCENTIVE_MECHANISM_START_DATE}). "
-                        f"Stopping PR fetch."
+                        f'Reached PR #{pr_raw["number"]} in {repository_full_name} created at {pr_creation_time}, '
+                        f'before tier incentive start date ({TIER_BASED_INCENTIVE_MECHANISM_START_DATE}). '
+                        f'Stopping PR fetch.'
                     )
                     return
 
@@ -560,9 +560,9 @@ def load_miners_prs(
             cursor = page_info.get('endCursor')
 
         bt.logging.info(
-            f"Fetched {len(miner_eval.merged_pull_requests)} merged PRs, {len(miner_eval.open_pull_requests)} open PRs, "
-            f"{len(miner_eval.closed_pull_requests)} closed"
+            f'Fetched {len(miner_eval.merged_pull_requests)} merged PRs, {len(miner_eval.open_pull_requests)} open PRs, '
+            f'{len(miner_eval.closed_pull_requests)} closed'
         )
 
     except Exception as e:
-        bt.logging.error(f"Error fetching PRs via GraphQL: {e}")
+        bt.logging.error(f'Error fetching PRs via GraphQL: {e}')

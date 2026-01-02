@@ -17,7 +17,7 @@ from gittensor.validator.evaluation.reward import get_rewards
 from gittensor.validator.utils.config import VALIDATOR_STEPS_INTERVAL, VALIDATOR_WAIT
 
 
-async def forward(self: "BaseValidatorNeuron") -> None:
+async def forward(self: 'BaseValidatorNeuron') -> None:
     """Execute the validator's forward pass.
 
     Performs the core validation cycle every VALIDATOR_STEPS_INTERVAL steps:
@@ -30,16 +30,15 @@ async def forward(self: "BaseValidatorNeuron") -> None:
     """
 
     if self.step % VALIDATOR_STEPS_INTERVAL == 0:
-
         miner_uids = get_all_uids(self)
 
         master_repositories = load_master_repo_weights()
         programming_languages = load_programming_language_weights()
 
-        bt.logging.info("***** Starting scoring round *****")
-        bt.logging.info(f"Total Repositories loaded from master_repositories.json: {len(master_repositories)}")
-        bt.logging.info(f"Total Languages loaded from programming_languages.json: {len(programming_languages)}")
-        bt.logging.info(f"Number of neurons to evaluate: {len(miner_uids)}")
+        bt.logging.info('***** Starting scoring round *****')
+        bt.logging.info(f'Total Repositories loaded from master_repositories.json: {len(master_repositories)}')
+        bt.logging.info(f'Total Languages loaded from programming_languages.json: {len(programming_languages)}')
+        bt.logging.info(f'Number of neurons to evaluate: {len(miner_uids)}')
 
         # Get rewards for the responses - queries miners individually
         rewards = await get_rewards(self, miner_uids, master_repositories, programming_languages)

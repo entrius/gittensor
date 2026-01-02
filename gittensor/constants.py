@@ -10,21 +10,21 @@ SECONDS_PER_HOUR = 3600
 # =============================================================================
 # GitHub API
 # =============================================================================
-BASE_GITHUB_API_URL = "https://api.github.com"
+BASE_GITHUB_API_URL = 'https://api.github.com'
 MIN_GITHUB_ACCOUNT_AGE = 180  # days
 
 # =============================================================================
 # Gittensor Branding
 # =============================================================================
-PR_TAGLINE_PREFIX = "Contribution by Gittensor, see my contribution statistics at "
-GITTENSOR_MINER_DETAILS_URL = "https://gittensor.io/miners/details?githubId="
+PR_TAGLINE_PREFIX = 'Contribution by Gittensor, see my contribution statistics at '
+GITTENSOR_MINER_DETAILS_URL = 'https://gittensor.io/miners/details?githubId='
 
 # =============================================================================
 # Language & File Scoring
 # =============================================================================
 DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT = 0.12
 TEST_FILE_CONTRIBUTION_WEIGHT = 0.05
-MITIGATED_EXTENSIONS = ["md", "txt", "json"]
+MITIGATED_EXTENSIONS = ['md', 'txt', 'json']
 MAX_LINES_SCORED_FOR_MITIGATED_EXT = 300
 
 # =============================================================================

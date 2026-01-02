@@ -27,26 +27,26 @@ from gittensor.utils.logging import setup_events_logger
 
 def is_cuda_available():
     try:
-        output = subprocess.check_output(["nvidia-smi", "-L"], stderr=subprocess.STDOUT)
-        if "NVIDIA" in output.decode("utf-8"):
-            return "cuda"
+        output = subprocess.check_output(['nvidia-smi', '-L'], stderr=subprocess.STDOUT)
+        if 'NVIDIA' in output.decode('utf-8'):
+            return 'cuda'
     except Exception:
         pass
     try:
-        output = subprocess.check_output(["nvcc", "--version"]).decode("utf-8")
-        if "release" in output:
-            return "cuda"
+        output = subprocess.check_output(['nvcc', '--version']).decode('utf-8')
+        if 'release' in output:
+            return 'cuda'
     except Exception:
         pass
-    return "cpu"
+    return 'cpu'
 
 
-def check_config(cls, config: "bt.Config"):
+def check_config(cls, config: 'bt.Config'):
     r"""Checks/validates the config namespace object."""
     bt.logging.check_config(config)
 
     full_path = os.path.expanduser(
-        "{}/{}/{}/netuid{}/{}".format(
+        '{}/{}/{}/netuid{}/{}'.format(
             config.logging.logging_dir,
             config.wallet.name,
             config.wallet.hotkey,
@@ -54,7 +54,7 @@ def check_config(cls, config: "bt.Config"):
             config.neuron.name,
         )
     )
-    print("full path:", full_path)
+    print('full path:', full_path)
     config.neuron.full_path = os.path.expanduser(full_path)
     if not os.path.exists(config.neuron.full_path):
         os.makedirs(config.neuron.full_path, exist_ok=True)
@@ -70,48 +70,48 @@ def add_args(cls, parser):
     Adds relevant arguments to the parser for operation.
     """
 
-    parser.add_argument("--netuid", type=int, help="Subnet netuid", default=1)
+    parser.add_argument('--netuid', type=int, help='Subnet netuid', default=1)
 
     parser.add_argument(
-        "--neuron.device",
+        '--neuron.device',
         type=str,
-        help="Device to run on.",
+        help='Device to run on.',
         default=is_cuda_available(),
     )
 
     parser.add_argument(
-        "--neuron.epoch_length",
+        '--neuron.epoch_length',
         type=int,
-        help="The default epoch length (how often we set weights, measured in 12 second blocks).",
+        help='The default epoch length (how often we set weights, measured in 12 second blocks).',
         default=100,
     )
 
     parser.add_argument(
-        "--mock",
-        action="store_true",
-        help="Mock neuron and all network components.",
+        '--mock',
+        action='store_true',
+        help='Mock neuron and all network components.',
         default=False,
     )
 
     parser.add_argument(
-        "--neuron.events_retention_size",
+        '--neuron.events_retention_size',
         type=str,
-        help="Events retention size.",
+        help='Events retention size.',
         default=2 * 1024 * 1024 * 1024,  # 2 GB
     )
 
     parser.add_argument(
-        "--neuron.dont_save_events",
-        action="store_true",
-        help="If set, we dont save events to a log file.",
+        '--neuron.dont_save_events',
+        action='store_true',
+        help='If set, we dont save events to a log file.',
         default=False,
     )
 
     parser.add_argument(
-        "--wandb.project",
+        '--wandb.project',
         type=str,
-        default="gittensor-validators",
-        help="Wandb project to log to.",
+        default='gittensor-validators',
+        help='Wandb project to log to.',
     )
 
 
@@ -119,37 +119,37 @@ def add_miner_args(cls, parser):
     """Add miner specific arguments to the parser."""
 
     parser.add_argument(
-        "--neuron.name",
+        '--neuron.name',
         type=str,
-        help="Trials for this neuron go in neuron.root / (wallet_cold - wallet_hot) / neuron.name. ",
-        default="miner",
+        help='Trials for this neuron go in neuron.root / (wallet_cold - wallet_hot) / neuron.name. ',
+        default='miner',
     )
 
     parser.add_argument(
-        "--blacklist.force_validator_permit",
-        action="store_true",
-        help="If set, we will force incoming requests to have a permit.",
+        '--blacklist.force_validator_permit',
+        action='store_true',
+        help='If set, we will force incoming requests to have a permit.',
         default=True,
     )
 
     parser.add_argument(
-        "--blacklist.allow_non_registered",
-        action="store_true",
-        help="If set, miners will accept queries from non registered entities. (Dangerous!)",
+        '--blacklist.allow_non_registered',
+        action='store_true',
+        help='If set, miners will accept queries from non registered entities. (Dangerous!)',
         default=False,
     )
 
     parser.add_argument(
-        "--blacklist.min_stake",
+        '--blacklist.min_stake',
         type=int,
-        help="Minimum stake required for a validator to query this miner.",
+        help='Minimum stake required for a validator to query this miner.',
         default=12500,
     )
 
     parser.add_argument(
-        "--dev_mode",
-        action="store_true",
-        help="Enable development mode with additional logging and features.",
+        '--dev_mode',
+        action='store_true',
+        help='Enable development mode with additional logging and features.',
         default=False,
     )
 
@@ -158,89 +158,89 @@ def add_validator_args(cls, parser):
     """Add validator specific arguments to the parser."""
 
     parser.add_argument(
-        "--neuron.name",
+        '--neuron.name',
         type=str,
-        help="Trials for this neuron go in neuron.root / (wallet_cold - wallet_hot) / neuron.name. ",
-        default="validator",
+        help='Trials for this neuron go in neuron.root / (wallet_cold - wallet_hot) / neuron.name. ',
+        default='validator',
     )
 
     parser.add_argument(
-        "--neuron.timeout",
+        '--neuron.timeout',
         type=float,
-        help="The timeout for each forward call in seconds.",
+        help='The timeout for each forward call in seconds.',
         default=10,
     )
 
     parser.add_argument(
-        "--neuron.num_concurrent_forwards",
+        '--neuron.num_concurrent_forwards',
         type=int,
-        help="The number of concurrent forwards running at any time.",
+        help='The number of concurrent forwards running at any time.',
         default=1,
     )
 
     parser.add_argument(
-        "--neuron.sample_size",
+        '--neuron.sample_size',
         type=int,
-        help="The number of miners to query in a single step.",
+        help='The number of miners to query in a single step.',
         default=50,
     )
 
     parser.add_argument(
-        "--neuron.disable_set_weights",
-        action="store_true",
-        help="Disables setting weights.",
+        '--neuron.disable_set_weights',
+        action='store_true',
+        help='Disables setting weights.',
         default=False,
     )
 
     parser.add_argument(
-        "--neuron.moving_average_alpha",
+        '--neuron.moving_average_alpha',
         type=float,
-        help="Moving average alpha parameter, how much to add of the new observation.",
+        help='Moving average alpha parameter, how much to add of the new observation.',
         default=0.70,
     )
 
     parser.add_argument(
-        "--neuron.axon_off",
-        "--axon_off",
-        action="store_true",
+        '--neuron.axon_off',
+        '--axon_off',
+        action='store_true',
         # Note: the validator needs to serve an Axon with their IP or they may
         #   be blacklisted by the firewall of serving peers on the network.
-        help="Set this flag to not attempt to serve an Axon.",
+        help='Set this flag to not attempt to serve an Axon.',
         default=False,
     )
 
     parser.add_argument(
-        "--neuron.vpermit_tao_limit",
+        '--neuron.vpermit_tao_limit',
         type=int,
-        help="The maximum number of TAO allowed to query a validator with a vpermit.",
+        help='The maximum number of TAO allowed to query a validator with a vpermit.',
         default=4096,
     )
 
     parser.add_argument(
-        "--wandb.project_name",
+        '--wandb.project_name',
         type=str,
-        help="The name of the project where you are sending the new run.",
-        default="template-validators",
+        help='The name of the project where you are sending the new run.',
+        default='template-validators',
     )
 
     parser.add_argument(
-        "--wandb.entity",
+        '--wandb.entity',
         type=str,
-        help="The name of the project where you are sending the new run.",
-        default="opentensor-dev",
+        help='The name of the project where you are sending the new run.',
+        default='opentensor-dev',
     )
 
     parser.add_argument(
-        "--database.store_validation_results",
-        action="store_true",
-        help="If set, the validator will attempt to store validation results in a database (NOT RECOMMENDED).",
+        '--database.store_validation_results',
+        action='store_true',
+        help='If set, the validator will attempt to store validation results in a database (NOT RECOMMENDED).',
         default=False,
     )
 
     parser.add_argument(
-        "--neuron.remote_debug_port",
+        '--neuron.remote_debug_port',
         type=int,
-        help="FOR DEVELOPMENT: Port for remote debugging API endpoint. If set, enables debug API on this port and debugpy on port+1.",
+        help='FOR DEVELOPMENT: Port for remote debugging API endpoint. If set, enables debug API on this port and debugpy on port+1.',
         default=None,
     )
 

@@ -33,7 +33,7 @@ async def query_miner(self, uid: int) -> GitPatSynapse:
         GitPatSynapse: A gittensor protocol object with a miner github pat
     """
 
-    bt.logging.debug(f"\nQuerying UID {uid}")
+    bt.logging.debug(f'\nQuerying UID {uid}')
 
     try:
         response = await self.dendrite(
@@ -48,7 +48,7 @@ async def query_miner(self, uid: int) -> GitPatSynapse:
         return miner_response
 
     except Exception as e:
-        bt.logging.error(f"Error querying miner UID {uid}: {e}")
+        bt.logging.error(f'Error querying miner UID {uid}: {e}')
         return None
 
 
@@ -71,11 +71,11 @@ async def evaluate_miners_pull_requests(
         MinerEvaluation: The object containing scores, valid_prs, etc.
     """
 
-    bt.logging.info(f"******* Reward function called for UID: {uid} *******")
+    bt.logging.info(f'******* Reward function called for UID: {uid} *******')
 
     miner_eval = validate_response_and_initialize_miner_evaluation(uid, response)
     if miner_eval.failed_reason is not None:
-        bt.logging.info(f"UID {uid} not being evaluated: {miner_eval.failed_reason}")
+        bt.logging.info(f'UID {uid} not being evaluated: {miner_eval.failed_reason}')
         return miner_eval
 
     load_miners_prs(miner_eval, master_repositories)
@@ -85,7 +85,7 @@ async def evaluate_miners_pull_requests(
     # Clear PAT after scoring to avoid storing sensitive data
     miner_eval.github_pat = None
 
-    bt.logging.info("*" * 50 + "\n")
+    bt.logging.info('*' * 50 + '\n')
     return miner_eval
 
 
@@ -104,14 +104,13 @@ async def get_rewards(
         rewards (array[int]): An array of scores for all miners in sorted fashion, miner n score = index[n]
     """
 
-    bt.logging.info(f"UIDs: {uids}")
+    bt.logging.info(f'UIDs: {uids}')
 
     responses: Dict[int, GitPatSynapse] = {}
     miner_evaluations: Dict[int, MinerEvaluation] = {}
 
     # Query miners and calculate score.
     for uid in uids:
-
         # Retrieve PAT
         miner_response = await query_miner(self, uid)
         responses[uid] = miner_response

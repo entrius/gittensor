@@ -18,7 +18,7 @@ Usage:
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Callable, List, Optional
+from typing import List, Optional
 
 import pytest
 
@@ -85,7 +85,7 @@ class PRBuilder:
         number: Optional[int] = None,
         earned_score: float = 100.0,
         collateral_score: float = 20.0,
-        repo: str = "test/repo",
+        repo: str = 'test/repo',
     ) -> PullRequest:
         """Create a mock PullRequest with the given parameters."""
         if number is None:
@@ -95,10 +95,10 @@ class PRBuilder:
             number=number,
             repository_full_name=repo,
             uid=0,
-            hotkey="test_hotkey",
-            github_id="12345",
-            title=f"Test PR #{number}",
-            author_login="testuser",
+            hotkey='test_hotkey',
+            github_id='12345',
+            title=f'Test PR #{number}',
+            author_login='testuser',
             merged_at=datetime.now(timezone.utc) if state == PRState.MERGED else None,
             created_at=datetime.now(timezone.utc),
             pr_state=state,
@@ -172,7 +172,7 @@ class MinerScenario:
     merged: List[PullRequest]
     closed: List[PullRequest]
     open: List[PullRequest]
-    description: str = ""
+    description: str = ''
 
     @property
     def all_prs(self) -> List[PullRequest]:
@@ -183,7 +183,7 @@ class MinerScenario:
 def new_miner(pr_factory, bronze_config) -> MinerScenario:
     """Brand new miner with no PRs (no tiers unlocked)."""
     pr_factory.reset()
-    return MinerScenario(merged=[], closed=[], open=[], description="New miner with no history")
+    return MinerScenario(merged=[], closed=[], open=[], description='New miner with no history')
 
 
 @pytest.fixture
@@ -195,7 +195,7 @@ def bronze_miner(pr_factory, bronze_config) -> MinerScenario:
         merged=pr_factory.merged_batch(tier=bronze_config, count=bronze_tier_config.required_merges),
         closed=[],
         open=[],
-        description=f"Bronze miner: {bronze_tier_config.required_merges} merged = 100% credibility",
+        description=f'Bronze miner: {bronze_tier_config.required_merges} merged = 100% credibility',
     )
 
 
@@ -212,7 +212,7 @@ def silver_unlocked_miner(pr_factory, bronze_config, silver_config) -> MinerScen
         ),
         closed=[],
         open=[],
-        description="Silver miner: Bronze + Silver unlocked with 100% credibility",
+        description='Silver miner: Bronze + Silver unlocked with 100% credibility',
     )
 
 
@@ -235,7 +235,7 @@ def silver_threshold_miner(pr_factory, bronze_config, silver_config) -> MinerSce
         ),
         closed=pr_factory.closed_batch(tier=silver_config, count=closed_count),
         open=[],
-        description=f"Silver threshold: {required_merges} merged, {closed_count} closed = ~{required_credibility*100}%",
+        description=f'Silver threshold: {required_merges} merged, {closed_count} closed = ~{required_credibility * 100}%',
     )
 
 
@@ -254,7 +254,7 @@ def gold_unlocked_miner(pr_factory, bronze_config, silver_config, gold_config) -
         ),
         closed=[],
         open=[],
-        description="Gold miner: All tiers unlocked with 100% credibility",
+        description='Gold miner: All tiers unlocked with 100% credibility',
     )
 
 
@@ -279,7 +279,7 @@ def gold_threshold_miner(pr_factory, bronze_config, silver_config, gold_config) 
         ),
         closed=pr_factory.closed_batch(tier=gold_config, count=closed_count),
         open=[],
-        description=f"Gold threshold: {required_merges} merged, {closed_count} closed = ~{required_credibility*100}%",
+        description=f'Gold threshold: {required_merges} merged, {closed_count} closed = ~{required_credibility * 100}%',
     )
 
 
@@ -309,7 +309,7 @@ def demoted_from_gold_miner(pr_factory, bronze_config, silver_config, gold_confi
         ),
         closed=pr_factory.closed_batch(tier=gold_config, count=closed_count),
         open=[],
-        description=f"Demoted from Gold: {gold_required}/{gold_required + closed_count} (below {gold_cred_required*100}% threshold)",
+        description=f'Demoted from Gold: {gold_required}/{gold_required + closed_count} (below {gold_cred_required * 100}% threshold)',
     )
 
 
@@ -332,7 +332,7 @@ def demoted_from_silver_miner(pr_factory, bronze_config, silver_config) -> Miner
         ),
         closed=pr_factory.closed_batch(tier=silver_config, count=closed_count),
         open=[],
-        description=f"Demoted from Silver: {silver_required}/{silver_required + closed_count} (below {silver_cred_required*100}% threshold)",
+        description=f'Demoted from Silver: {silver_required}/{silver_required + closed_count} (below {silver_cred_required * 100}% threshold)',
     )
 
 
@@ -352,7 +352,7 @@ def cascade_demoted_miner(pr_factory, bronze_config, silver_config, gold_config)
         ),
         closed=[],
         open=[],
-        description="Cascade demotion: Silver locked (1 merge short) -> Gold locked despite 100%",
+        description='Cascade demotion: Silver locked (1 merge short) -> Gold locked despite 100%',
     )
 
 
@@ -377,7 +377,7 @@ def spammer_miner(pr_factory, bronze_config, silver_config, gold_config) -> Mine
             + pr_factory.closed_batch(tier=gold_config, count=20)
         ),
         open=[],
-        description="Spammer: lots of closed PRs destroying credibility",
+        description='Spammer: lots of closed PRs destroying credibility',
     )
 
 
@@ -393,7 +393,7 @@ def perfect_miner(pr_factory, bronze_config, silver_config, gold_config) -> Mine
         ),
         closed=[],
         open=[],
-        description="Perfect miner: 100% credibility everywhere",
+        description='Perfect miner: 100% credibility everywhere',
     )
 
 
@@ -413,7 +413,7 @@ def mixed_performance_miner(pr_factory, bronze_config, silver_config, gold_confi
             + pr_factory.closed_batch(tier=gold_config, count=4)
         ),
         open=[],
-        description="Mixed: Bronze 90%, Silver 55%, Gold 60% (locked)",
+        description='Mixed: Bronze 90%, Silver 55%, Gold 60% (locked)',
     )
 
 
@@ -425,7 +425,7 @@ def miner_with_open_prs(pr_factory, bronze_config, silver_config) -> MinerScenar
         merged=pr_factory.merged_batch(tier=bronze_config, count=3),
         closed=pr_factory.closed_batch(tier=bronze_config, count=1),
         open=(pr_factory.open_batch(tier=bronze_config, count=2) + pr_factory.open_batch(tier=silver_config, count=3)),
-        description="Miner with 5 open PRs (for collateral testing)",
+        description='Miner with 5 open PRs (for collateral testing)',
     )
 
 

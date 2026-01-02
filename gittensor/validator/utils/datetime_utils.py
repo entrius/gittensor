@@ -11,7 +11,7 @@ def parse_github_timestamp_to_cst(timestamp_str: str) -> datetime:
     GitHub returns timestamps like: 2024-01-15T10:30:00Z
     """
     # Parse the UTC timestamp
-    utc_dt = datetime.fromisoformat(timestamp_str.rstrip("Z"))
+    utc_dt = datetime.fromisoformat(timestamp_str.rstrip('Z'))
 
     # Add UTC timezone info
     utc_dt = pytz.utc.localize(utc_dt)

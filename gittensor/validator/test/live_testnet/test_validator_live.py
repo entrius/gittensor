@@ -62,7 +62,7 @@ from gittensor.utils.uids import get_all_uids
 from gittensor.validator.evaluation.reward import get_rewards
 
 
-def create_debug_api(validator: "BaseValidatorNeuron", port: int = 8099):
+def create_debug_api(validator: 'BaseValidatorNeuron', port: int = 8099):
     """
     Create a FastAPI application for triggering validator scoring on-demand.
 
@@ -73,24 +73,24 @@ def create_debug_api(validator: "BaseValidatorNeuron", port: int = 8099):
     Returns:
         FastAPI app instance
     """
-    app = FastAPI(title="Gittensor Validator Debug API")
+    app = FastAPI(title='Gittensor Validator Debug API')
 
     # Load API key from environment
-    REQUIRED_API_KEY = os.getenv("VALIDATOR_DEBUG_API_KEY")
+    REQUIRED_API_KEY = os.getenv('VALIDATOR_DEBUG_API_KEY')
 
     def verify_api_key(x_api_key: Optional[str] = Header(None)):
         """Verify the API key provided in the X-API-Key header."""
         if not REQUIRED_API_KEY:
-            bt.logging.error("VALIDATOR_DEBUG_API_KEY not set in environment!")
-            raise HTTPException(status_code=500, detail="API key not configured on server")
+            bt.logging.error('VALIDATOR_DEBUG_API_KEY not set in environment!')
+            raise HTTPException(status_code=500, detail='API key not configured on server')
 
         if not x_api_key:
-            bt.logging.warning("API request rejected: No API key provided")
-            raise HTTPException(status_code=401, detail="Missing API key. Provide X-API-Key header.")
+            bt.logging.warning('API request rejected: No API key provided')
+            raise HTTPException(status_code=401, detail='Missing API key. Provide X-API-Key header.')
 
         if x_api_key != REQUIRED_API_KEY:
-            bt.logging.warning("API request rejected: Invalid API key")
-            raise HTTPException(status_code=403, detail="Invalid API key")
+            bt.logging.warning('API request rejected: Invalid API key')
+            raise HTTPException(status_code=403, detail='Invalid API key')
 
         return True
 
@@ -98,17 +98,17 @@ def create_debug_api(validator: "BaseValidatorNeuron", port: int = 8099):
     async def health(authorized: bool = Depends(verify_api_key)):
         """Health check endpoint (requires API key)."""
         return {
-            "status": "healthy",
-            "validator_uid": int(validator.uid) if validator.uid is not None else None,
-            "network": (
-                str(validator.config.subtensor.chain_endpoint) if hasattr(validator.config, 'subtensor') else "unknown"
+            'status': 'healthy',
+            'validator_uid': int(validator.uid) if validator.uid is not None else None,
+            'network': (
+                str(validator.config.subtensor.chain_endpoint) if hasattr(validator.config, 'subtensor') else 'unknown'
             ),
-            "netuid": int(validator.config.netuid) if hasattr(validator.config, 'netuid') else None,
+            'netuid': int(validator.config.netuid) if hasattr(validator.config, 'netuid') else None,
         }
 
     @app.post('/trigger_scoring')
     async def trigger_scoring(
-        uids: Optional[List[int]] = Body(None, description="Optional list of UIDs to score"),
+        uids: Optional[List[int]] = Body(None, description='Optional list of UIDs to score'),
         authorized: bool = Depends(verify_api_key),
     ):
         """
@@ -128,14 +128,14 @@ def create_debug_api(validator: "BaseValidatorNeuron", port: int = 8099):
             is_testnet = True
 
             if not is_testnet:
-                bt.logging.error(f"Remote debugging endpoint blocked: Not running on testnet (chain: {chain_endpoint})")
+                bt.logging.error(f'Remote debugging endpoint blocked: Not running on testnet (chain: {chain_endpoint})')
                 return {
-                    "error": "Not allowed on mainnet",
-                    "message": "This endpoint is only available when validator is running on testnet",
-                    "current_chain": str(chain_endpoint),
+                    'error': 'Not allowed on mainnet',
+                    'message': 'This endpoint is only available when validator is running on testnet',
+                    'current_chain': str(chain_endpoint),
                 }
 
-            bt.logging.info(f"Testnet check passed: {chain_endpoint}")
+            bt.logging.info(f'Testnet check passed: {chain_endpoint}')
 
             # get the master repo list
             master_repositories: Dict[str, Dict[str, Any]] = load_master_repo_weights()
@@ -144,49 +144,49 @@ def create_debug_api(validator: "BaseValidatorNeuron", port: int = 8099):
             # Get UIDs to score
             if uids is not None:
                 miner_uids = list(uids)
-                bt.logging.info(f"Scoring specific UIDs: {miner_uids}")
+                bt.logging.info(f'Scoring specific UIDs: {miner_uids}')
             else:
                 miner_uids = get_all_uids(validator)
-                bt.logging.info(f"Scoring all UIDs: {len(miner_uids)} miners")
+                bt.logging.info(f'Scoring all UIDs: {len(miner_uids)} miners')
 
             # Check if debugpy is attached
             try:
                 import debugpy
 
                 if debugpy.is_client_connected():
-                    bt.logging.info("Debugger is attached - breakpoints will be hit!")
+                    bt.logging.info('Debugger is attached - breakpoints will be hit!')
                 else:
-                    bt.logging.info("No debugger attached - running normally")
+                    bt.logging.info('No debugger attached - running normally')
             except ImportError:
-                bt.logging.info("debugpy not installed - running normally")
+                bt.logging.info('debugpy not installed - running normally')
 
             # Trigger scoring - THIS IS WHERE YOUR BREAKPOINTS WILL HIT
-            bt.logging.info("***** Starting manual scoring round *****")
+            bt.logging.info('***** Starting manual scoring round *****')
             rewards = await get_rewards(validator, miner_uids, master_repositories, programming_languages)
 
             # Format results - ensure all values are JSON serializable
             result = {
-                "status": "success",
-                "uids_scored": [int(uid) for uid in miner_uids],
-                "total_uids": len(miner_uids),
-                "total_reward_sum": float(np.sum(rewards)) if len(rewards) > 0 else 0.0,
-                "non_zero_rewards": int(np.count_nonzero(rewards)) if len(rewards) > 0 else 0,
-                "rewards": {str(int(uid)): float(reward) for uid, reward in zip(miner_uids, rewards)},
+                'status': 'success',
+                'uids_scored': [int(uid) for uid in miner_uids],
+                'total_uids': len(miner_uids),
+                'total_reward_sum': float(np.sum(rewards)) if len(rewards) > 0 else 0.0,
+                'non_zero_rewards': int(np.count_nonzero(rewards)) if len(rewards) > 0 else 0,
+                'rewards': {str(int(uid)): float(reward) for uid, reward in zip(miner_uids, rewards)},
             }
 
-            bt.logging.info(f"Scoring complete! Total rewards: {result['total_reward_sum']:.2f}")
+            bt.logging.info(f'Scoring complete! Total rewards: {result["total_reward_sum"]:.2f}')
             return result
 
         except Exception as e:
-            bt.logging.error(f"Scoring failed: {e}")
+            bt.logging.error(f'Scoring failed: {e}')
             import traceback
 
-            return {"error": str(e), "traceback": traceback.format_exc()}
+            return {'error': str(e), 'traceback': traceback.format_exc()}
 
     return app
 
 
-def start_debug_api(validator: "BaseValidatorNeuron", port: int = 8099):
+def start_debug_api(validator: 'BaseValidatorNeuron', port: int = 8099):
     """
     Start the debug API server for on-demand scoring.
 
@@ -198,14 +198,14 @@ def start_debug_api(validator: "BaseValidatorNeuron", port: int = 8099):
     """
     app = create_debug_api(validator, port)
 
-    bt.logging.info("=" * 70)
-    bt.logging.info("REMOTE DEBUGGING API ENABLED (FOR DEVELOPMENT ONLY)")
-    bt.logging.info("=" * 70)
-    bt.logging.info(f"API endpoint: http://0.0.0.0:{port}")
-    bt.logging.info(f"Health check: curl http://localhost:{port}/health")
-    bt.logging.info(f"Trigger scoring: curl -X POST http://localhost:{port}/trigger_scoring")
-    bt.logging.info(f"API docs: http://localhost:{port}/docs")
-    bt.logging.info("=" * 70)
+    bt.logging.info('=' * 70)
+    bt.logging.info('REMOTE DEBUGGING API ENABLED (FOR DEVELOPMENT ONLY)')
+    bt.logging.info('=' * 70)
+    bt.logging.info(f'API endpoint: http://0.0.0.0:{port}')
+    bt.logging.info(f'Health check: curl http://localhost:{port}/health')
+    bt.logging.info(f'Trigger scoring: curl -X POST http://localhost:{port}/trigger_scoring')
+    bt.logging.info(f'API docs: http://localhost:{port}/docs')
+    bt.logging.info('=' * 70)
 
     # Run FastAPI app with uvicorn (blocking)
-    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
+    uvicorn.run(app, host='0.0.0.0', port=port, log_level='info')

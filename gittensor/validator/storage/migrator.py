@@ -48,12 +48,12 @@ class DatabaseMigrator:
                         cursor.execute(statement)
 
                 self.db.commit()
-                self.logger.info(f"Successfully ran migration: {filename}")
+                self.logger.info(f'Successfully ran migration: {filename}')
                 return True
 
         except Exception as e:
             self.db.rollback()
-            self.logger.error(f"Failed to run migration {filename}: {e}")
+            self.logger.error(f'Failed to run migration {filename}: {e}')
             return False
 
     def migrate(self) -> bool:
@@ -62,10 +62,10 @@ class DatabaseMigrator:
 
         for filename in migration_files:
             if not self.run_migration(filename):
-                self.logger.error(f"Migration failed at {filename}")
+                self.logger.error(f'Migration failed at {filename}')
                 return False
 
-        self.logger.info("All migrations completed successfully")
+        self.logger.info('All migrations completed successfully')
         return True
 
     def create_tables(self) -> bool:

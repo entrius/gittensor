@@ -15,6 +15,7 @@ def clear_github_cache():
     # Import here to avoid issues during collection
     try:
         import gittensor.utils.github_api_tools as api_tools
+
         api_tools._GITHUB_USER_CACHE.clear()
         yield
         api_tools._GITHUB_USER_CACHE.clear()

@@ -23,25 +23,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Tuple
 
-
-def make_aware(dt: datetime) -> datetime:
-    """Convert naive datetime to UTC-aware. Returns None if input is None."""
-    if dt is None:
-        return None
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
-    return dt
-
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../..')))
-
-from dotenv import load_dotenv
-validator_env = Path(__file__).parent.parent.parent / '.env'
-load_dotenv(validator_env)
-
 import bittensor as bt
-
-# Enable bittensor logging to console
-bt.logging.set_debug(True)
+from dotenv import load_dotenv
 
 from gittensor.classes import FileChange, Issue, MinerEvaluation, PRState, PullRequest
 from gittensor.validator.configurations.tier_config import TIERS, TierStats
@@ -51,8 +34,29 @@ from gittensor.validator.evaluation.normalize import normalize_rewards_linear
 from gittensor.validator.evaluation.scoring import finalize_miner_scores, score_miner_prs
 from gittensor.validator.utils.load_weights import load_master_repo_weights, load_programming_language_weights
 
+
+def make_aware(dt: datetime) -> datetime:
+    """Convert naive datetime to UTC-aware. Returns None if input is None."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../..')))
+
+
+validator_env = Path(__file__).parent.parent.parent / '.env'
+load_dotenv(validator_env)
+
+
+# Enable bittensor logging to console
+bt.logging.set_debug(True)
+
 try:
     from gittensor.validator.test.simulation.mock_evaluations import get_custom_evaluations
+
     CUSTOM_EVALUATIONS_AVAILABLE = True
 except ImportError:
     CUSTOM_EVALUATIONS_AVAILABLE = False
@@ -94,7 +98,7 @@ def create_db_connection():
     try:
         import psycopg2
     except ImportError:
-        print("ERROR: psycopg2 not installed")
+        print('ERROR: psycopg2 not installed')
         return None
 
     try:
@@ -106,10 +110,10 @@ def create_db_connection():
             database=os.getenv('DB_NAME', 'gittensor_validator'),
         )
         conn.autocommit = False
-        print(f"Connected to {os.getenv('DB_NAME', 'gittensor_validator')}")
+        print(f'Connected to {os.getenv("DB_NAME", "gittensor_validator")}')
         return conn
     except Exception as e:
-        print(f"ERROR: DB connection failed: {e}")
+        print(f'ERROR: DB connection failed: {e}')
         return None
 
 
@@ -117,16 +121,27 @@ def create_db_connection():
 # Data Loading & Serialization
 # =============================================================================
 
+
 def load_file_changes(conn, pr_number: int, repo: str) -> List[FileChange]:
     """Load file changes for a PR from database."""
     cur = conn.cursor()
     cur.execute(LOAD_FILE_CHANGES_FOR_PR, (pr_number, repo))
     rows = cur.fetchall()
     cur.close()
-    return [FileChange(
-        pr_number=r[0], repository_full_name=r[1], filename=r[2], changes=r[3],
-        additions=r[4], deletions=r[5], status=r[6], patch=r[7], file_extension=r[8]
-    ) for r in rows]
+    return [
+        FileChange(
+            pr_number=r[0],
+            repository_full_name=r[1],
+            filename=r[2],
+            changes=r[3],
+            additions=r[4],
+            deletions=r[5],
+            status=r[6],
+            patch=r[7],
+            file_extension=r[8],
+        )
+        for r in rows
+    ]
 
 
 def load_issues(conn, pr_number: int, repo: str, pr_author: str) -> List[Issue]:
@@ -135,12 +150,20 @@ def load_issues(conn, pr_number: int, repo: str, pr_author: str) -> List[Issue]:
     cur.execute(LOAD_ISSUES_FOR_PR, (pr_number, repo))
     rows = cur.fetchall()
     cur.close()
-    issue_author = "external_user" if pr_author != "external_user" else "other_user"
-    return [Issue(
-        number=r[0], pr_number=r[1], repository_full_name=r[2], title=r[3],
-        created_at=make_aware(r[4]), closed_at=make_aware(r[5]),
-        author_login=issue_author, state='CLOSED'
-    ) for r in rows]
+    issue_author = 'external_user' if pr_author != 'external_user' else 'other_user'
+    return [
+        Issue(
+            number=r[0],
+            pr_number=r[1],
+            repository_full_name=r[2],
+            title=r[3],
+            created_at=make_aware(r[4]),
+            closed_at=make_aware(r[5]),
+            author_login=issue_author,
+            state='CLOSED',
+        )
+        for r in rows
+    ]
 
 
 def load_pr_from_row(conn, row: tuple) -> PullRequest:
@@ -148,13 +171,24 @@ def load_pr_from_row(conn, row: tuple) -> PullRequest:
     # Lowercase repo name to match master_repositories keys
     repo_full_name = row[1].lower() if row[1] else row[1]
     pr = PullRequest(
-        number=row[0], repository_full_name=repo_full_name, uid=row[2], hotkey=row[3],
-        github_id=row[4], title=row[5], author_login=row[6],
-        merged_at=make_aware(row[7]), created_at=make_aware(row[8]),
-        pr_state=PRState(row[9]), additions=row[10] or 0,
-        deletions=row[11] or 0, commits=row[12] or 0, total_lines_scored=row[13] or 0,
-        gittensor_tagged=row[14] or False, merged_by_login=row[15],
-        description=row[16], last_edited_at=make_aware(row[17]),
+        number=row[0],
+        repository_full_name=repo_full_name,
+        uid=row[2],
+        hotkey=row[3],
+        github_id=row[4],
+        title=row[5],
+        author_login=row[6],
+        merged_at=make_aware(row[7]),
+        created_at=make_aware(row[8]),
+        pr_state=PRState(row[9]),
+        additions=row[10] or 0,
+        deletions=row[11] or 0,
+        commits=row[12] or 0,
+        total_lines_scored=row[13] or 0,
+        gittensor_tagged=row[14] or False,
+        merged_by_login=row[15],
+        description=row[16],
+        last_edited_at=make_aware(row[17]),
     )
     # Pre-load file changes so score_miner_prs skips GitHub API call (use original row[1] for DB query)
     file_changes = load_file_changes(conn, pr.number, row[1])
@@ -202,9 +236,11 @@ def load_all_evaluations(conn) -> Dict[int, MinerEvaluation]:
     for uid, hotkey, github_id in miners:
         evaluations[uid] = load_miner_evaluation(conn, uid, hotkey, github_id)
         e = evaluations[uid]
-        print(f"  uid={uid} ({github_id}): {e.total_merged_prs} merged, {e.total_open_prs} open, {e.total_closed_prs} closed")
+        print(
+            f'  uid={uid} ({github_id}): {e.total_merged_prs} merged, {e.total_open_prs} open, {e.total_closed_prs} closed'
+        )
 
-    print(f"Loaded {len(evaluations)} miners with PRs")
+    print(f'Loaded {len(evaluations)} miners with PRs')
     return evaluations
 
 
@@ -212,64 +248,77 @@ def load_all_evaluations(conn) -> Dict[int, MinerEvaluation]:
 # Main Simulation
 # =============================================================================
 
-def run_scoring_simulation(include_custom: bool = True) -> Tuple[Dict[int, MinerEvaluation], Dict[int, float], Dict[int, float]]:
+
+def run_scoring_simulation(
+    include_custom: bool = True,
+) -> Tuple[Dict[int, MinerEvaluation], Dict[int, float], Dict[int, float]]:
     """Run full scoring pipeline on DB data."""
-    print("=" * 70)
-    print("SCORING SIMULATION START")
-    print("=" * 70)
-    sys.stdout.flush(); time.sleep(0.1)
+    print('=' * 70)
+    print('SCORING SIMULATION START')
+    print('=' * 70)
+    sys.stdout.flush()
+    time.sleep(0.1)
 
     # 1. Connect to DB
-    print("\n[1/8] Connecting to DB...")
-    sys.stdout.flush(); time.sleep(0.1)
+    print('\n[1/8] Connecting to DB...')
+    sys.stdout.flush()
+    time.sleep(0.1)
     conn = create_db_connection()
     if not conn:
         return {}, {}, {}
 
     # 2. Load weights
-    print("\n[2/8] Loading weights...")
-    sys.stdout.flush(); time.sleep(0.1)
+    print('\n[2/8] Loading weights...')
+    sys.stdout.flush()
+    time.sleep(0.1)
     master_repos = load_master_repo_weights()
     prog_langs = load_programming_language_weights()
-    print(f"  {len(master_repos)} repos, {len(prog_langs)} languages")
-    sys.stdout.flush(); time.sleep(0.1)
+    print(f'  {len(master_repos)} repos, {len(prog_langs)} languages')
+    sys.stdout.flush()
+    time.sleep(0.1)
 
     # 3. Load evaluations from DB
-    print("\n[3/8] Loading evaluations from DB...")
-    sys.stdout.flush(); time.sleep(0.1)
+    print('\n[3/8] Loading evaluations from DB...')
+    sys.stdout.flush()
+    time.sleep(0.1)
     evals = load_all_evaluations(conn)
 
     # 4. Add custom evaluations
     if include_custom and CUSTOM_EVALUATIONS_AVAILABLE:
-        print("\n[4/8] Adding custom evaluations...")
+        print('\n[4/8] Adding custom evaluations...')
         for uid, ev in get_custom_evaluations().items():
             evals[uid] = ev
-            print(f"  Added custom uid={uid}")
+            print(f'  Added custom uid={uid}')
     else:
-        print("\n[4/8] No custom evaluations.")
-    sys.stdout.flush(); time.sleep(0.1)
+        print('\n[4/8] No custom evaluations.')
+    sys.stdout.flush()
+    time.sleep(0.1)
 
     # 5. Score PRs (uses original score_miner_prs - skips GitHub call since file_changes pre-loaded)
-    print("\n[5/8] Scoring PRs...")
-    sys.stdout.flush(); time.sleep(0.1)
+    print('\n[5/8] Scoring PRs...')
+    sys.stdout.flush()
+    time.sleep(0.1)
     for uid, ev in evals.items():
         if ev.failed_reason:
             continue
         score_miner_prs(ev, master_repos, prog_langs)
 
     # 6. Detect duplicate GitHub accounts
-    print("\n[6/8] Checking for duplicate GitHub accounts...")
-    sys.stdout.flush(); time.sleep(0.1)
+    print('\n[6/8] Checking for duplicate GitHub accounts...')
+    sys.stdout.flush()
+    time.sleep(0.1)
     detect_and_penalize_miners_sharing_github(evals)
 
     # 7. Finalize scores
-    print("\n[7/8] Finalizing scores...")
-    sys.stdout.flush(); time.sleep(0.1)
+    print('\n[7/8] Finalizing scores...')
+    sys.stdout.flush()
+    time.sleep(0.1)
     finalize_miner_scores(evals)
 
     # 8. Normalize & apply dynamic emissions
-    print("\n[8/8] Normalizing & applying dynamic emissions...")
-    sys.stdout.flush(); time.sleep(0.1)
+    print('\n[8/8] Normalizing & applying dynamic emissions...')
+    sys.stdout.flush()
+    time.sleep(0.1)
     normalized = normalize_rewards_linear(evals)
     scaled = apply_dynamic_emissions_using_network_contributions(normalized, evals)
 
@@ -278,43 +327,44 @@ def run_scoring_simulation(include_custom: bool = True) -> Tuple[Dict[int, Miner
     # Print summary
     _print_summary(evals, normalized, scaled)
 
-    print("\n" + "=" * 70)
-    print("SCORING SIMULATION COMPLETE")
-    print("=" * 70)
+    print('\n' + '=' * 70)
+    print('SCORING SIMULATION COMPLETE')
+    print('=' * 70)
 
     return evals, normalized, scaled
 
 
 def _print_summary(evals: Dict[int, MinerEvaluation], normalized: Dict[int, float], scaled: Dict[int, float]):
     """Print results summary."""
-    print("\n" + "=" * 70)
-    print("RESULTS SUMMARY")
-    print("=" * 70)
+    print('\n' + '=' * 70)
+    print('RESULTS SUMMARY')
+    print('=' * 70)
 
     sorted_uids = sorted(scaled.keys(), key=lambda u: scaled.get(u, 0), reverse=True)
 
-    print(f"\n{'UID':<6} {'GitHub':<18} {'Tier':<7} {'Merged':<7} {'Score':<10} {'Normalized':<12} {'Scaled':<10}")
-    print("-" * 82)
+    print(f'\n{"UID":<6} {"GitHub":<18} {"Tier":<7} {"Merged":<7} {"Score":<10} {"Normalized":<12} {"Scaled":<10}')
+    print('-' * 82)
 
     for uid in sorted_uids:
         ev = evals.get(uid)
         if not ev:
             continue
-        tier = ev.current_tier.value if ev.current_tier else "None"
+        tier = ev.current_tier.value if ev.current_tier else 'None'
         print(
-            f"{uid:<6} {(ev.github_id or 'N/A'):<18} {tier:<7} {ev.total_merged_prs:<7} "
-            f"{ev.total_score:<10.2f} {normalized.get(uid, 0):<12.6f} {scaled.get(uid, 0):<10.6f}"
+            f'{uid:<6} {(ev.github_id or "N/A"):<18} {tier:<7} {ev.total_merged_prs:<7} '
+            f'{ev.total_score:<10.2f} {normalized.get(uid, 0):<12.6f} {scaled.get(uid, 0):<10.6f}'
         )
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     try:
         run_scoring_simulation()
     except KeyboardInterrupt:
-        print("\nInterrupted")
+        print('\nInterrupted')
         sys.exit(0)
     except Exception as e:
-        print(f"ERROR: {e}")
+        print(f'ERROR: {e}')
         import traceback
+
         traceback.print_exc()
         sys.exit(1)

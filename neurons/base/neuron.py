@@ -17,18 +17,17 @@
 
 import copy
 import time
-import typing
+from abc import ABC, abstractmethod
 
 import bittensor as bt
-
-from abc import ABC, abstractmethod
 from websockets.exceptions import ConnectionClosedError
 
-# Sync calls set weights and also resyncs the metagraph.
-from gittensor.utils.config import check_config, add_args, config
-from gittensor.utils.misc import ttl_get_block
 from gittensor import __spec_version__ as spec_version
-from gittensor.mock import MockSubtensor, MockMetagraph
+from gittensor.mock import MockMetagraph, MockSubtensor
+
+# Sync calls set weights and also resyncs the metagraph.
+from gittensor.utils.config import add_args, check_config, config
+from gittensor.utils.misc import ttl_get_block
 
 
 class BaseNeuron(ABC):
@@ -38,10 +37,10 @@ class BaseNeuron(ABC):
     In addition to creating a wallet, subtensor, and metagraph, this class also handles the synchronization of the network state via a basic checkpointing mechanism based on epoch length.
     """
 
-    neuron_type: str = "BaseNeuron"
+    neuron_type: str = 'BaseNeuron'
 
     @classmethod
-    def check_config(cls, config: "bt.Config"):
+    def check_config(cls, config: 'bt.Config'):
         check_config(cls, config)
 
     @classmethod
@@ -52,9 +51,9 @@ class BaseNeuron(ABC):
     def config(cls):
         return config(cls)
 
-    subtensor: "bt.subtensor"
-    wallet: "bt.wallet"
-    metagraph: "bt.metagraph"
+    subtensor: 'bt.subtensor'
+    wallet: 'bt.wallet'
+    metagraph: 'bt.metagraph'
     spec_version: int = spec_version
 
     @property
@@ -78,35 +77,29 @@ class BaseNeuron(ABC):
 
         # Build Bittensor objects
         # These are core Bittensor classes to interact with the network.
-        bt.logging.info("Setting up bittensor objects.")
+        bt.logging.info('Setting up bittensor objects.')
 
         # The wallet holds the cryptographic key pairs for the miner.
         if self.config.mock:
             self.wallet = bt.MockWallet(config=self.config)
-            self.subtensor = MockSubtensor(
-                self.config.netuid, wallet=self.wallet
-            )
-            self.metagraph = MockMetagraph(
-                self.config.netuid, subtensor=self.subtensor
-            )
+            self.subtensor = MockSubtensor(self.config.netuid, wallet=self.wallet)
+            self.metagraph = MockMetagraph(self.config.netuid, subtensor=self.subtensor)
         else:
             self.wallet = bt.wallet(config=self.config)
             self.subtensor = bt.subtensor(config=self.config)
             self.metagraph = self.subtensor.metagraph(self.config.netuid)
 
-        bt.logging.info(f"Wallet: {self.wallet}")
-        bt.logging.info(f"Subtensor: {self.subtensor}")
-        bt.logging.info(f"Metagraph: {self.metagraph}")
+        bt.logging.info(f'Wallet: {self.wallet}')
+        bt.logging.info(f'Subtensor: {self.subtensor}')
+        bt.logging.info(f'Metagraph: {self.metagraph}')
 
         # Check if the miner is registered on the Bittensor network before proceeding further.
         self.check_registered()
 
         # Each miner gets a unique identity (UID) in the network for differentiation.
-        self.uid = self.metagraph.hotkeys.index(
-            self.wallet.hotkey.ss58_address
-        )
+        self.uid = self.metagraph.hotkeys.index(self.wallet.hotkey.ss58_address)
         bt.logging.info(
-            f"Running neuron on subnet: {self.config.netuid} with uid {self.uid} using network: {self.subtensor.chain_endpoint}"
+            f'Running neuron on subnet: {self.config.netuid} with uid {self.uid} using network: {self.subtensor.chain_endpoint}'
         )
         self.step = 0
 
@@ -114,16 +107,14 @@ class BaseNeuron(ABC):
         """Recreate subtensor connection when WebSocket goes stale."""
         if self.config.mock:
             return  # Don't reconnect in mock mode
-        bt.logging.info("Reconnecting subtensor...")
+        bt.logging.info('Reconnecting subtensor...')
         self.subtensor = bt.subtensor(config=self.config)
 
     @abstractmethod
-    async def forward(self, synapse: bt.Synapse) -> bt.Synapse:
-        ...
+    async def forward(self, synapse: bt.Synapse) -> bt.Synapse: ...
 
     @abstractmethod
-    def run(self):
-        ...
+    def run(self): ...
 
     def sync(self):
         """
@@ -150,16 +141,18 @@ class BaseNeuron(ABC):
                     hotkey_ss58=self.wallet.hotkey.ss58_address,
                 ):
                     bt.logging.error(
-                        f"Wallet: {self.wallet} is not registered on netuid {self.config.netuid}."
-                        f" Please register the hotkey using `btcli subnets register` before trying again"
+                        f'Wallet: {self.wallet} is not registered on netuid {self.config.netuid}.'
+                        f' Please register the hotkey using `btcli subnets register` before trying again'
                     )
                     exit()
                 return  # Success
             except ConnectionClosedError as e:
-                bt.logging.warning(f"WebSocket connection closed during check_registered (attempt {attempt + 1}/{max_retries}): {e}")
+                bt.logging.warning(
+                    f'WebSocket connection closed during check_registered (attempt {attempt + 1}/{max_retries}): {e}'
+                )
                 if attempt < max_retries - 1:
                     self._reconnect_subtensor()
-                    time.sleep(2 ** attempt)  # Exponential backoff: 1s, 2s, 4s
+                    time.sleep(2**attempt)  # Exponential backoff: 1s, 2s, 4s
                 else:
                     raise
 
@@ -167,9 +160,7 @@ class BaseNeuron(ABC):
         """
         Check if enough epoch blocks have elapsed since the last checkpoint to sync.
         """
-        return (
-            self.block - self.metagraph.last_update[self.uid]
-        ) > self.config.neuron.epoch_length
+        return (self.block - self.metagraph.last_update[self.uid]) > self.config.neuron.epoch_length
 
     def should_set_weights(self) -> bool:
         # Don't set weights on initialization.
@@ -182,17 +173,15 @@ class BaseNeuron(ABC):
 
         # Define appropriate logic for when set weights.
         return (
-            (self.block - self.metagraph.last_update[self.uid])
-            > self.config.neuron.epoch_length
-            and self.neuron_type != "MinerNeuron"
-        )  # don't set weights if you're a miner
+            self.block - self.metagraph.last_update[self.uid]
+        ) > self.config.neuron.epoch_length and self.neuron_type != 'MinerNeuron'  # don't set weights if you're a miner
 
     def save_state(self):
         bt.logging.trace(
-            "save_state() not implemented for this neuron. You can implement this function to save model checkpoints or other useful data."
+            'save_state() not implemented for this neuron. You can implement this function to save model checkpoints or other useful data.'
         )
 
     def load_state(self):
         bt.logging.trace(
-            "load_state() not implemented for this neuron. You can implement this function to load model checkpoints or other useful data."
+            'load_state() not implemented for this neuron. You can implement this function to load model checkpoints or other useful data.'
         )

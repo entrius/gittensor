@@ -44,21 +44,21 @@ class Validator(BaseValidatorNeuron):
 
         # Init DB for validation result storage. Requires STORE_DB_RESULTS in .env
         if self.config.database.store_validation_results:
-            bt.logging.warning("Validation result storage enabled.")
+            bt.logging.warning('Validation result storage enabled.')
             self.db_storage = DatabaseStorage()
 
         # Init remote debugging API (FOR DEVELOPMENT ONLY). Requires DEBUGPY_PORT in .env
         if self.config.neuron.remote_debug_port is not None:
             from gittensor.validator.test.live_testnet.test_validator_live import start_debug_api
 
-            bt.logging.warning("Remote debugging api enabled.")
+            bt.logging.warning('Remote debugging api enabled.')
 
             # Start debug API in background thread
             debug_thread = threading.Thread(
                 target=start_debug_api,
                 args=(self, self.config.neuron.remote_debug_port),
                 daemon=True,
-                name="RemoteDebugAPI",
+                name='RemoteDebugAPI',
             )
             debug_thread.start()
 
@@ -66,16 +66,16 @@ class Validator(BaseValidatorNeuron):
         if not self.config.neuron.disable_set_weights:
             try:
                 wandb.init(
-                    entity="entrius-gittensor",
+                    entity='entrius-gittensor',
                     project=WANDB_PROJECT,
-                    name=f"vali-{self.uid}-{__version__}",
+                    name=f'vali-{self.uid}-{__version__}',
                     config=self.config,
                     reinit=True,
                 )
             except Exception as e:
-                bt.logging.error(f"Failed to initialize wandb run: {e}")
+                bt.logging.error(f'Failed to initialize wandb run: {e}')
 
-        bt.logging.info("load_state()")
+        bt.logging.info('load_state()')
         self.load_state()
 
     async def bulk_store_evaluation(self, miner_evals: Dict[int, MinerEvaluation]):
@@ -97,14 +97,14 @@ class Validator(BaseValidatorNeuron):
                 storage_result = self.db_storage.store_evaluation(miner_eval)
 
                 if storage_result.success:
-                    bt.logging.success(f"Successfully stored validation results for UID {uid} to DB.")
+                    bt.logging.success(f'Successfully stored validation results for UID {uid} to DB.')
                 else:
-                    bt.logging.warning(f"Storage partially failed for UID {uid}:")
+                    bt.logging.warning(f'Storage partially failed for UID {uid}:')
                     for error in storage_result.errors:
-                        bt.logging.warning(f"  - {error}")
+                        bt.logging.warning(f'  - {error}')
 
             except Exception as e:
-                bt.logging.error(f"Error when attempting to store miners evaluation for uid {uid}: {e}")
+                bt.logging.error(f'Error when attempting to store miners evaluation for uid {uid}: {e}')
 
     async def forward(self):
         """
@@ -121,13 +121,13 @@ class Validator(BaseValidatorNeuron):
 def main():
     with Validator() as validator:
         while True:
-            bt.logging.info(f"Validator running | uid {validator.uid} | {time.time()}")
+            bt.logging.info(f'Validator running | uid {validator.uid} | {time.time()}')
             time.sleep(30)
             # Check after initial sleep in-case there's startup delay
             if not validator.thread.is_alive():
-                bt.logging.error(f"Validator thread is not alive. Exiting...")
+                bt.logging.error('Validator thread is not alive. Exiting...')
                 break  # exit, trigger restart
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

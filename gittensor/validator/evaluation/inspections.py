@@ -28,7 +28,7 @@ def detect_and_penalize_miners_sharing_github(miner_evaluations: Dict[int, Miner
         miner_evaluations (Dict[int, MinerEvaluation]): Mapping of miner UID to their MinerEvaluation.
     """
 
-    bt.logging.info("Now checking for duplicate users across miners...")
+    bt.logging.info('Now checking for duplicate users across miners...')
 
     github_id_to_uids: Dict[str, List[int]] = defaultdict(list)
 
@@ -41,13 +41,13 @@ def detect_and_penalize_miners_sharing_github(miner_evaluations: Dict[int, Miner
         if len(uids) <= 1:
             continue
 
-        bt.logging.info(f"Detected UIDs {uids} sharing GitHub account")
+        bt.logging.info(f'Detected UIDs {uids} sharing GitHub account')
         for uid in uids:
-            bt.logging.info(f"PENALTY: Zeroing score for duplicate uid {uid}")
+            bt.logging.info(f'PENALTY: Zeroing score for duplicate uid {uid}')
             miner_evaluations[uid] = MinerEvaluation(uid=uid, hotkey=miner_evaluations[uid].hotkey)
             duplicate_count += 1
 
-    bt.logging.info(f"Total duplicate miners penalized: {duplicate_count}")
+    bt.logging.info(f'Total duplicate miners penalized: {duplicate_count}')
 
 
 def validate_response_and_initialize_miner_evaluation(uid: int, response: GitPatSynapse) -> MinerEvaluation:
@@ -63,11 +63,11 @@ def validate_response_and_initialize_miner_evaluation(uid: int, response: GitPat
     """
     # Handle special recycle UID case first
     if uid == RECYCLE_UID:
-        return MinerEvaluation(uid=uid, hotkey="", failed_reason="SPECIAL CASE UID 0 - RECYCLE UID")
+        return MinerEvaluation(uid=uid, hotkey='', failed_reason='SPECIAL CASE UID 0 - RECYCLE UID')
 
     # Check for null response before accessing any attributes to prevent crashes
     if not response or not response.axon:
-        return MinerEvaluation(uid=uid, hotkey="", failed_reason=f"No response provided by miner {uid}")
+        return MinerEvaluation(uid=uid, hotkey='', failed_reason=f'No response provided by miner {uid}')
 
     # Now safe to access response.axon.hotkey
     miner_eval = MinerEvaluation(uid=uid, hotkey=response.axon.hotkey)
@@ -85,7 +85,7 @@ def validate_response_and_initialize_miner_evaluation(uid: int, response: GitPat
 def validate_github_credentials(uid: int, pat: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
     """Validate PAT and return (github_id, error_reason) tuple."""
     if not pat:
-        return None, f"No Github PAT provided by miner {uid}"
+        return None, f'No Github PAT provided by miner {uid}'
 
     github_id = get_github_id(pat)
     if not github_id:
@@ -93,7 +93,7 @@ def validate_github_credentials(uid: int, pat: Optional[str]) -> Tuple[Optional[
 
     account_age = get_github_account_age_days(pat)
     if not account_age:
-        return None, f"Could not determine Github account age for miner {uid}"
+        return None, f'Could not determine Github account age for miner {uid}'
     if account_age < MIN_GITHUB_ACCOUNT_AGE:
         return None, f"Miner {uid}'s Github account too young ({account_age} < {MIN_GITHUB_ACCOUNT_AGE} days)"
 

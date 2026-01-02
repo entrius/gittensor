@@ -382,17 +382,17 @@ class MinerEvaluation:
         return len(self.closed_pull_requests)
 
     def get_all_issues(self) -> List[Issue]:
-        """Aggregate all issues from all merged pull requests."""
+        """Aggregate all issues from all pull requests (merged, open, closed)."""
         all_issues = []
-        for pr in self.merged_pull_requests:
+        for pr in self.merged_pull_requests + self.open_pull_requests + self.closed_pull_requests:
             if pr.issues:
                 all_issues.extend(pr.issues)
         return all_issues
 
     def get_all_file_changes(self) -> List[FileChange]:
-        """Aggregate all file changes from all merged PR diffs."""
+        """Aggregate all file changes from all PR diffs (merged, open, closed)."""
         all_file_changes = []
-        for pr in self.merged_pull_requests:
+        for pr in self.merged_pull_requests + self.open_pull_requests + self.closed_pull_requests:
             if pr.file_changes:
                 all_file_changes.extend(pr.file_changes)
         return all_file_changes

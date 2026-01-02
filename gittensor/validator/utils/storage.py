@@ -57,10 +57,9 @@ class DatabaseStorage:
             miner = Miner(miner_eval.uid, miner_eval.hotkey, miner_eval.github_id)
 
             result.stored_counts['miners'] = self.repo.set_miner(miner)
-            result.stored_counts['pull_requests'] = self.repo.store_pull_requests_bulk(miner_eval.merged_pull_requests)
-            result.stored_counts['open_pull_requests'] = self.repo.store_pull_requests_bulk(
-                miner_eval.open_pull_requests
-            )
+            result.stored_counts['merged_pull_requests'] = self.repo.store_pull_requests_bulk(miner_eval.merged_pull_requests)
+            result.stored_counts['open_pull_requests'] = self.repo.store_pull_requests_bulk(miner_eval.open_pull_requests)
+            result.stored_counts['closed_pull_requests'] = self.repo.store_pull_requests_bulk(miner_eval.closed_pull_requests)
             result.stored_counts['issues'] = self.repo.store_issues_bulk(miner_eval.get_all_issues())
             result.stored_counts['file_changes'] = self.repo.store_file_changes_bulk(miner_eval.get_all_file_changes())
             result.stored_counts['evaluations'] = 1 if self.repo.set_miner_evaluation(miner_eval) else 0

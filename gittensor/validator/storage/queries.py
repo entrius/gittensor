@@ -24,6 +24,9 @@ ON CONFLICT (number, repository_full_name)
 DO UPDATE SET
     uid = EXCLUDED.uid,
     hotkey = EXCLUDED.hotkey,
+    title = EXCLUDED.title,
+    author_login = EXCLUDED.author_login,
+    merged_at = EXCLUDED.merged_at,
     pr_state = EXCLUDED.pr_state,
     repo_weight_multiplier = EXCLUDED.repo_weight_multiplier,
     base_score = EXCLUDED.base_score,
@@ -37,8 +40,12 @@ DO UPDATE SET
     credibility_scalar = EXCLUDED.credibility_scalar,
     earned_score = EXCLUDED.earned_score,
     collateral_score = EXCLUDED.collateral_score,
+    additions = EXCLUDED.additions,
+    deletions = EXCLUDED.deletions,
+    commits = EXCLUDED.commits,
     total_lines_scored = EXCLUDED.total_lines_scored,
     gittensor_tagged = EXCLUDED.gittensor_tagged,
+    merged_by_login = EXCLUDED.merged_by_login,
     description = EXCLUDED.description,
     last_edited_at = EXCLUDED.last_edited_at,
     updated_at = NOW()
@@ -65,7 +72,13 @@ INSERT INTO file_changes (
     pr_number, repository_full_name, filename, changes, additions, deletions, status, patch, file_extension
 ) VALUES %s
 ON CONFLICT (pr_number, repository_full_name, filename)
-DO NOTHING
+DO UPDATE SET
+    changes = EXCLUDED.changes,
+    additions = EXCLUDED.additions,
+    deletions = EXCLUDED.deletions,
+    status = EXCLUDED.status,
+    patch = EXCLUDED.patch,
+    file_extension = EXCLUDED.file_extension
 """
 
 # Miner Evaluation Queries

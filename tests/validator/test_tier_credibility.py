@@ -1232,8 +1232,8 @@ class TestIntegration:
         # miner_with_open_prs fixture: 3 merged, 1 closed at Bronze
         cred = calculate_credibility_per_tier(miner_with_open_prs.merged, miner_with_open_prs.closed)
         # Bronze: 3 merged, 1 closed = 75% credibility
-        # But Bronze requires 80% credibility, so Bronze is locked
-        assert cred.get(Tier.BRONZE, 0.0) == 0.0  # Locked due to low credibility
+        # Bronze requires 70% credibility, so Bronze is unlocked
+        assert cred.get(Tier.BRONZE, 0.0) == 0.75  # Unlocked with 75% credibility
 
 
 # ============================================================================
@@ -1711,9 +1711,11 @@ class TestLookbackExpiry:
         gold_required = gold_tier_config.required_merges
         gold_cred_required = gold_tier_config.required_credibility
 
-        # Calculate counts for exactly at gold credibility threshold
-        gold_merged_count = gold_required + 2
-        gold_closed_count = int(gold_merged_count * (1 - gold_cred_required) / gold_cred_required)
+        # Calculate counts so losing 1 merged PR drops credibility below threshold
+        # Use +3 instead of +2 to ensure enough margin for the math to work
+        gold_merged_count = gold_required + 3
+        # Calculate closed count based on (merged-1) to ensure "after" is below threshold
+        gold_closed_count = int((gold_merged_count - 1) * (1 - gold_cred_required) / gold_cred_required) + 1
 
         # Before: at or above threshold (all tiers unlocked)
         merged_before = (

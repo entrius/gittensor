@@ -421,3 +421,53 @@ class MinerEvaluation:
         self.closed_pull_requests.append(
             PullRequest.from_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id)
         )
+
+
+# =============================================================================
+# Token Scoring Classes
+# =============================================================================
+
+
+@dataclass
+class ScoreBreakdown:
+    """Breakdown of scores by type (structural vs leaf tokens)."""
+
+    total_score: float = 0.0
+    structural_count: int = 0  # Number of structural bonuses applied
+    structural_score: float = 0.0  # Total from structural bonuses
+    leaf_count: int = 0  # Number of leaf tokens scored
+    leaf_score: float = 0.0  # Total from leaf tokens
+
+
+@dataclass
+class FileScoreResult:
+    """Result of scoring a single file."""
+
+    filename: str
+    score: float
+    lines_scored: int
+    total_lines: int
+    is_test_file: bool
+    scoring_method: str  # 'tree-sitter', 'line-count', 'skipped-*'
+
+    # Structural vs leaf breakdown (only populated for tree-sitter scoring)
+    structural_count: int = 0  # Number of structural nodes (function/class definitions)
+    structural_score: float = 0.0  # Total score from structural bonuses
+    leaf_count: int = 0  # Number of leaf tokens scored
+    leaf_score: float = 0.0  # Total score from leaf tokens
+
+
+@dataclass
+class TokenScoringResult:
+    """Result of token-based scoring for a PR."""
+
+    total_score: float
+    is_low_value_pr: bool
+    total_lines_scored: int
+    file_results: List[FileScoreResult]
+
+    # Aggregated structural vs leaf breakdown
+    total_structural_count: int = 0
+    total_structural_score: float = 0.0
+    total_leaf_count: int = 0
+    total_leaf_score: float = 0.0

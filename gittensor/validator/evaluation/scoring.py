@@ -7,7 +7,7 @@ from typing import Dict, Optional
 
 import bittensor as bt
 
-from gittensor.classes import Issue, MinerEvaluation, PRState, PullRequest
+from gittensor.classes import Issue, MinerEvaluation, PRState, PullRequest, TokenScoringResult
 from gittensor.constants import (
     EXCESSIVE_PR_MIN_MULTIPLIER,
     EXCESSIVE_PR_PENALTY_SLOPE,
@@ -25,7 +25,7 @@ from gittensor.constants import (
     TIME_DECAY_SIGMOID_STEEPNESS_SCALAR,
     UNIQUE_PR_BOOST,
 )
-from gittensor.utils.github_api_tools import get_pull_request_file_changes
+from gittensor.utils.github_api_tools import fetch_file_contents_batch, get_pull_request_file_changes
 from gittensor.validator.configurations.tier_config import (
     TIERS,
     TIERS_ORDER,
@@ -38,13 +38,15 @@ from gittensor.validator.evaluation.credibility import (
     calculate_tier_stats,
     is_tier_unlocked,
 )
-from gittensor.validator.utils.load_weights import RepositoryConfig
+from gittensor.validator.utils.load_weights import RepositoryConfig, TokenWeights
+from gittensor.validator.utils.tree_sitter_scoring import calculate_token_score_from_file_changes
 
 
 def score_miner_prs(
     miner_eval: MinerEvaluation,
     master_repositories: Dict[str, RepositoryConfig],
     programming_languages: Dict[str, float],
+    token_weights: TokenWeights,
 ) -> None:
     """Score all pull requests (merged and open) for a miner."""
 
@@ -67,7 +69,7 @@ def score_miner_prs(
         scored_prs = []
         for n, pr in enumerate(pr_list, start=1):
             bt.logging.info(f'\n[{n}/{len(pr_list)}] {label} PR #{pr.number} in {pr.repository_full_name}')
-            if score_pull_request(pr, miner_eval, master_repositories, programming_languages):
+            if score_pull_request(pr, miner_eval, master_repositories, programming_languages, token_weights):
                 scored_prs.append(pr)
             else:
                 bt.logging.warning(
@@ -85,6 +87,7 @@ def score_pull_request(
     miner_eval: MinerEvaluation,
     master_repositories: Dict[str, RepositoryConfig],
     programming_languages: Dict[str, float],
+    token_weights: TokenWeights,
 ) -> bool:
     """Score a single PR (merged or open). Returns True if scored, False if skipped."""
     pr.repository_tier_configuration = get_tier_config(pr.repository_full_name, master_repositories)
@@ -100,13 +103,36 @@ def score_pull_request(
             return False
         pr.set_file_changes(file_changes)
 
-    pr.base_score = calculate_base_score(pr, programming_languages)
+    # Fetch full file contents for token-based scoring
+    file_contents = _fetch_file_contents_for_pr(pr, miner_eval.github_pat)
+
+    pr.base_score = calculate_base_score(pr, programming_languages, token_weights, file_contents)
     calculate_pr_multipliers(pr, miner_eval, master_repositories)
 
     if pr.pr_state == PRState.MERGED:
         miner_eval.unique_repos_contributed_to.add(pr.repository_full_name)
 
     return True
+
+
+def _fetch_file_contents_for_pr(pr: PullRequest, github_pat: str) -> Dict[str, Optional[str]]:
+    """Fetch full file contents for all files in a PR using GraphQL batch fetch."""
+    if not pr.file_changes or not pr.head_ref_oid:
+        return {}
+
+    # Extract owner and repo name
+    parts = pr.repository_full_name.split('/')
+    if len(parts) != 2:
+        bt.logging.warning(f'Invalid repository name format: {pr.repository_full_name}')
+        return {}
+
+    owner, repo_name = parts
+    file_paths = [f.filename for f in pr.file_changes if f.status != 'removed']
+
+    if not file_paths:
+        return {}
+
+    return fetch_file_contents_batch(owner, repo_name, pr.head_ref_oid, file_paths, github_pat)
 
 
 def get_tier_config(repo_full_name: str, master_repositories: Dict[str, RepositoryConfig]) -> Optional[TierConfig]:
@@ -121,9 +147,24 @@ def get_tier_config(repo_full_name: str, master_repositories: Dict[str, Reposito
     return tier_config
 
 
-def calculate_base_score(pr: PullRequest, programming_languages: Dict[str, float]) -> float:
-    """Calculate base score from tier base + contribution bonus."""
-    contribution_score, is_low_value_pr = pr.calculate_score_from_file_changes(programming_languages)
+def calculate_base_score(
+    pr: PullRequest,
+    programming_languages: Dict[str, float],
+    token_weights: TokenWeights,
+    file_contents: Dict[str, Optional[str]],
+) -> float:
+    """Calculate base score from tier base + contribution bonus using token-based scoring."""
+    # Use token-based scoring
+    scoring_result: TokenScoringResult = calculate_token_score_from_file_changes(
+        pr.file_changes,
+        file_contents,
+        token_weights,
+        programming_languages,
+    )
+
+    contribution_score = scoring_result.total_score
+    is_low_value_pr = scoring_result.is_low_value_pr
+    pr.total_lines_scored = scoring_result.total_lines_scored
 
     if is_low_value_pr:
         bt.logging.warning(f'PR #{pr.number} is low-value (>90% test/comment/typo changes) - base score = 0')
@@ -138,6 +179,10 @@ def calculate_base_score(pr: PullRequest, programming_languages: Dict[str, float
     bt.logging.info(
         f'Base score: {tier_config.merged_pr_base_score} + {contribution_bonus} bonus '
         f'({bonus_percent * 100:.0f}% of max {tier_config.contribution_score_max_bonus}) = {base_score:.2f}'
+    )
+    bt.logging.debug(
+        f'  Token breakdown: {scoring_result.total_structural_count} structural ({scoring_result.total_structural_score:.2f}) + '
+        f'{scoring_result.total_leaf_count} leaf ({scoring_result.total_leaf_score:.2f})'
     )
 
     return base_score

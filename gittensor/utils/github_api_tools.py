@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 
 import bittensor as bt
 import requests
+from gittensor.constants import MAX_FILE_SIZE_BYTES
 
 from gittensor.classes import (
     FileChange,
@@ -270,6 +271,68 @@ def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -
     except Exception as e:
         bt.logging.error(f'Error getting file changes for PR #{pr_number} in {repository}: {e}')
         return []
+
+
+def execute_graphql_query(
+    query: str,
+    variables: Dict[str, Any],
+    token: str,
+    max_attempts: int = 6,
+    timeout: int = 30,
+) -> Optional[Dict[str, Any]]:
+    """
+    Execute a GraphQL query with retry logic and exponential backoff.
+
+    Args:
+        query: The GraphQL query string
+        variables: Query variables
+        token: GitHub PAT for authentication
+        max_attempts: Maximum retry attempts (default 6)
+        timeout: Request timeout in seconds (default 30)
+
+    Returns:
+        Parsed JSON response data, or None if all attempts failed
+    """
+    headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
+
+    for attempt in range(max_attempts):
+        try:
+            response = requests.post(
+                f'{BASE_GITHUB_API_URL}/graphql',
+                headers=headers,
+                json={'query': query, 'variables': variables},
+                timeout=timeout,
+            )
+
+            if response.status_code == 200:
+                return response.json()
+
+            # Retry on failure
+            if attempt < (max_attempts - 1):
+                backoff_delay = 5 * (2**attempt)  # 5s, 10s, 20s, 40s, 80s
+                bt.logging.warning(
+                    f'GraphQL request failed with status {response.status_code} '
+                    f'(attempt {attempt + 1}/{max_attempts}), retrying in {backoff_delay}s...'
+                )
+                time.sleep(backoff_delay)
+            else:
+                bt.logging.error(
+                    f'GraphQL request failed with status {response.status_code} '
+                    f'after {max_attempts} attempts: {response.text}'
+                )
+
+        except requests.exceptions.RequestException as e:
+            if attempt < (max_attempts - 1):
+                backoff_delay = 5 * (2**attempt)
+                bt.logging.warning(
+                    f'GraphQL request exception (attempt {attempt + 1}/{max_attempts}), '
+                    f'retrying in {backoff_delay}s: {e}'
+                )
+                time.sleep(backoff_delay)
+            else:
+                bt.logging.error(f'GraphQL request failed after {max_attempts} attempts: {e}')
+
+    return None
 
 
 def get_github_graphql_query(
@@ -569,10 +632,6 @@ def load_miners_prs(
         bt.logging.error(f'Error fetching PRs via GraphQL: {e}')
 
 
-# 1MB max file size for tree-sitter parsing. Files exceeding this get a fixed score.
-MAX_FILE_SIZE_BYTES = 1_000_000
-
-
 def fetch_file_contents_batch(
     repo_owner: str,
     repo_name: str,
@@ -583,11 +642,13 @@ def fetch_file_contents_batch(
     """
     Fetch multiple file contents from a repository in a single GraphQL request.
 
+    Uses retry logic with exponential backoff for reliability.
+
     Args:
-        repo_owner: Repository owner (e.g., 'anthropics')
-        repo_name: Repository name (e.g., 'claude-code')
-        head_sha: The commit SHA to fetch files at (from PR's headRefOid)
-        file_paths: List of file paths to fetch (e.g., ['src/main.py', 'lib/utils.js'])
+        repo_owner: Repository owner
+        repo_name: Repository name
+        head_sha: The commit SHA to fetch files at
+        file_paths: List of file paths to fetch
         token: GitHub PAT for authentication
 
     Returns:
@@ -596,6 +657,7 @@ def fetch_file_contents_batch(
     if not file_paths:
         return {}
 
+    # Build GraphQL query with aliased file fields
     file_fields = []
     for i, path in enumerate(file_paths):
         expression = f'{head_sha}:{path}'
@@ -612,41 +674,29 @@ def fetch_file_contents_batch(
     '''
 
     variables = {'owner': repo_owner, 'name': repo_name}
-    headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
 
-    try:
-        response = requests.post(
-            f'{BASE_GITHUB_API_URL}/graphql',
-            headers=headers,
-            json={'query': query, 'variables': variables},
-            timeout=30,
-        )
-
-        if response.status_code != 200:
-            bt.logging.warning(f'Failed to fetch file contents: {response.status_code}')
-            return {path: None for path in file_paths}
-
-        data = response.json()
-        if 'errors' in data:
-            bt.logging.warning(f'GraphQL errors fetching files: {data["errors"]}')
-
-        repo_data = data.get('data', {}).get('repository', {})
-        results = {}
-
-        for i, path in enumerate(file_paths):
-            file_data = repo_data.get(f'file{i}')
-
-            if file_data is None:
-                results[path] = None
-            elif file_data.get('isBinary'):
-                results[path] = None
-            elif file_data.get('byteSize', 0) > MAX_FILE_SIZE_BYTES:
-                results[path] = None
-            else:
-                results[path] = file_data.get('text')
-
-        return results
-
-    except requests.exceptions.RequestException as e:
-        bt.logging.error(f'Error fetching file contents: {e}')
+    # Execute with retry logic
+    data = execute_graphql_query(query, variables, token)
+    if data is None:
+        bt.logging.warning(f'Failed to fetch file contents for {repo_owner}/{repo_name}')
         return {path: None for path in file_paths}
+
+    if 'errors' in data:
+        bt.logging.warning(f'GraphQL errors fetching files: {data["errors"]}')
+
+    repo_data = data.get('data', {}).get('repository', {})
+    results = {}
+
+    for i, path in enumerate(file_paths):
+        file_data = repo_data.get(f'file{i}')
+
+        if file_data is None:
+            results[path] = None
+        elif file_data.get('isBinary'):
+            results[path] = None
+        elif file_data.get('byteSize', 0) > MAX_FILE_SIZE_BYTES:
+            results[path] = None
+        else:
+            results[path] = file_data.get('text')
+
+    return results

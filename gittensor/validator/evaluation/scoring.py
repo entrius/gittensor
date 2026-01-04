@@ -70,9 +70,7 @@ def score_miner_prs(
             if score_pull_request(pr, miner_eval, master_repositories, programming_languages):
                 scored_prs.append(pr)
             else:
-                bt.logging.warning(
-                    f'Skipping PR #{pr.number} in {pr.repository_full_name} - No tier config or file changes'
-                )
+                bt.logging.warning(f'Skipping PR #{pr.number} in {pr.repository_full_name}')
 
         if list_name == 'merged':
             miner_eval.merged_pull_requests = scored_prs
@@ -100,7 +98,11 @@ def score_pull_request(
             return False
         pr.set_file_changes(file_changes)
 
-    pr.base_score = calculate_base_score(pr, programming_languages)
+    base_score = calculate_base_score(pr, programming_languages)
+    if base_score == 0:
+        return False
+    
+    pr.base_score = base_score
     calculate_pr_multipliers(pr, miner_eval, master_repositories)
 
     if pr.pr_state == PRState.MERGED:

@@ -101,7 +101,7 @@ def score_pull_request(
     base_score = calculate_base_score(pr, programming_languages)
     if base_score == 0:
         return False
-    
+
     pr.base_score = base_score
     calculate_pr_multipliers(pr, miner_eval, master_repositories)
 

@@ -10,12 +10,12 @@ Run tests:
 
 import pytest
 
+from gittensor.classes import LineChangeInfo
 from gittensor.validator.utils.load_weights import (
     TokenWeights,
     load_token_weights,
 )
 from gittensor.validator.utils.tree_sitter_scoring import (
-    LineChangeInfo,
     calculate_line_scores,
     calculate_line_scores_with_changes,
     calculate_total_score_with_changes,
@@ -170,11 +170,11 @@ class TestExtractPatchChanges:
         changes = extract_patch_changes(patch)
 
         # Line 2 is modification
-        assert changes[2].is_pure_addition is False
-        assert 'new' in changes[2].changed_tokens
+        assert changes.additions[2].is_pure_addition is False
+        assert 'new' in changes.additions[2].changed_tokens
 
         # Line 3 is pure addition
-        assert changes[3].is_pure_addition is True
+        assert changes.additions[3].is_pure_addition is True
 
     def test_multiple_deletions_pair_with_additions(self):
         """Multiple deletions pair with additions in order."""
@@ -186,8 +186,29 @@ class TestExtractPatchChanges:
 +new b
  line 4'''
         changes = extract_patch_changes(patch)
-        assert changes[2].is_pure_addition is False
-        assert changes[3].is_pure_addition is False
+        assert changes.additions[2].is_pure_addition is False
+        assert changes.additions[3].is_pure_addition is False
+
+    def test_pure_deletions_are_captured(self):
+        """Pure deletions (- without +) are recorded in deletions dict."""
+        patch = '''@@ -1,4 +1,2 @@
+ keep this
+-delete me
+-also delete
+ keep this too'''
+        changes = extract_patch_changes(patch)
+
+        # No additions
+        assert len(changes.additions) == 0
+
+        # Two pure deletions at old file lines 2 and 3
+        assert len(changes.deletions) == 2
+        assert 2 in changes.deletions
+        assert 3 in changes.deletions
+        assert changes.deletions[2].is_pure_deletion is True
+        assert changes.deletions[3].is_pure_deletion is True
+        assert 'delete me' in changes.deletions[2].content
+        assert 'also delete' in changes.deletions[3].content
 
 
 class TestGetChangedTokens:
@@ -231,14 +252,14 @@ class TestChangeAwareScoringBasics:
     def test_pure_addition_gets_full_score(self, weights):
         """Pure additions get full structural + leaf scores."""
         code = 'def foo():\n    x = 1'
-        change_info = {1: LineChangeInfo(line_num=1, is_pure_addition=True, changed_tokens=set())}
+        change_info = {1: LineChangeInfo(line_num=1, is_pure_addition=True, is_pure_deletion=False, changed_tokens=set())}
         scores = calculate_line_scores_with_changes(code, 'py', weights, change_info)
         assert scores.get(1, 0) >= weights.get_structural_weight('function_definition')
 
     def test_modification_only_scores_changed_tokens(self, weights):
         """Modifications only score the changed tokens."""
         code = 'x = 2'
-        change_info = {1: LineChangeInfo(line_num=1, is_pure_addition=False, changed_tokens={'2'})}
+        change_info = {1: LineChangeInfo(line_num=1, is_pure_addition=False, is_pure_deletion=False, changed_tokens={'2'})}
         scores = calculate_line_scores_with_changes(code, 'py', weights, change_info)
         # Should only get integer weight, not identifier or assignment
         assert 0 < scores.get(1, 0) < 0.5
@@ -246,14 +267,14 @@ class TestChangeAwareScoringBasics:
     def test_unmatched_tokens_score_zero(self, weights):
         """Modification with non-matching tokens scores zero."""
         code = 'x = 1'
-        change_info = {1: LineChangeInfo(line_num=1, is_pure_addition=False, changed_tokens={'nonexistent'})}
+        change_info = {1: LineChangeInfo(line_num=1, is_pure_addition=False, is_pure_deletion=False, changed_tokens={'nonexistent'})}
         scores = calculate_line_scores_with_changes(code, 'py', weights, change_info)
         assert scores.get(1, 0) == 0.0
 
     def test_comment_addition_scores_zero(self, weights):
         """Adding a comment still scores zero."""
         code = '# this is a comment'
-        change_info = {1: LineChangeInfo(line_num=1, is_pure_addition=True, changed_tokens=set())}
+        change_info = {1: LineChangeInfo(line_num=1, is_pure_addition=True, is_pure_deletion=False, changed_tokens=set())}
         scores = calculate_line_scores_with_changes(code, 'py', weights, change_info)
         assert scores.get(1, 0) == 0.0
 
@@ -495,7 +516,7 @@ class TestEdgeCasesTokenMatching:
         """Short tokens (<=2 chars) require exact match."""
         code = 'abc = 1'
         # 'c' is short token - should NOT match 'abc'
-        change_info = {1: LineChangeInfo(line_num=1, is_pure_addition=False, changed_tokens={'c'})}
+        change_info = {1: LineChangeInfo(line_num=1, is_pure_addition=False, is_pure_deletion=False, changed_tokens={'c'})}
         scores = calculate_line_scores_with_changes(code, 'py', weights, change_info)
         # 'c' shouldn't match 'abc', so score should be just for '1' if it matches, or 0
         assert scores.get(1, 0) < weights.get_leaf_weight('identifier')
@@ -504,7 +525,7 @@ class TestEdgeCasesTokenMatching:
         """Long tokens (>2 chars) allow substring match."""
         code = 'message = "hello world"'
         # 'world' should match the string containing it
-        change_info = {1: LineChangeInfo(line_num=1, is_pure_addition=False, changed_tokens={'world'})}
+        change_info = {1: LineChangeInfo(line_num=1, is_pure_addition=False, is_pure_deletion=False, changed_tokens={'world'})}
         scores = calculate_line_scores_with_changes(code, 'py', weights, change_info)
         assert scores.get(1, 0) > 0
 
@@ -576,6 +597,272 @@ class TestRealWorldPatches:
         assert score > 0
         # But it's just identifier changes, not structural
         assert score < 2.0
+
+
+class TestRealWorldPatchExtraction:
+    """Test patch extraction with real patches from production database."""
+
+    def test_discord_js_multiple_hunks(self):
+        """Discord.js patch with 3 hunks: additions, modifications, and structural changes."""
+        patch = '''@@ -46,6 +46,7 @@ class Discord extends NotificationProvider {
+             }
+
+             // If heartbeatJSON is not null, we go into the normal alerting loop.
++            let addess = this.extractAddress(monitorJSON);
+             if (heartbeatJSON["status"] === DOWN) {
+                 let discorddowndata = {
+                     username: discordDisplayName,
+@@ -58,9 +59,9 @@ class Discord extends NotificationProvider {
+                             name: "Service Name",
+                             value: monitorJSON["name"],
+                         },
+-                            ...(!notification.disableUrl ? [{
++                            ...((!notification.disableUrl && addess) ? [{
+                             name: monitorJSON["type"] === "push" ? "Service Type" : "Service URL",
+-                                value: this.extractAddress(monitorJSON),
++                                value: addess,
+                         }] : []),
+                         {
+                             name: `Time (${heartbeatJSON["timezone"]})`,
+@@ -98,18 +99,18 @@ class Discord extends NotificationProvider {
+                             name: "Service Name",
+                             value: monitorJSON["name"],
+                         },
+-                            ...(!notification.disableUrl ? [{
++                            ...((!notification.disableUrl && addess) ? [{
+                             name: monitorJSON["type"] === "push" ? "Service Type" : "Service URL",
+-                                value: this.extractAddress(monitorJSON),
++                                value: addess,
+                         }] : []),
+                         {
+                             name: `Time (${heartbeatJSON["timezone"]})`,
+                             value: heartbeatJSON["localDateTime"],
+                         },
+-                            {
++                            ...(heartbeatJSON["ping"] != null ? [{
+                             name: "Ping",
+-                                value: heartbeatJSON["ping"] == null ? "N/A" : heartbeatJSON["ping"] + " ms",
+-                            },
++                                value: heartbeatJSON["ping"] + " ms",
++                            }] : []),
+                     ],
+                 }],
+             };'''
+
+        changes = extract_patch_changes(patch)
+
+        # First hunk: 1 pure addition at line 48 (after 2 context lines starting at 46)
+        assert 48 in changes.additions
+        assert changes.additions[48].is_pure_addition is True
+        assert 'addess' in changes.additions[48].content
+
+        # Second hunk: modifications at lines 62, 64
+        assert 62 in changes.additions
+        assert changes.additions[62].is_pure_addition is False
+        assert 'addess' in changes.additions[62].changed_tokens
+
+        # Third hunk: has both modifications and structural changes
+        assert len(changes.additions) == 8  # 1 pure addition + 7 modifications
+
+        # Should have no pure deletions (all - lines are paired with + lines)
+        assert len(changes.deletions) == 0
+
+    def test_rust_multiple_identical_hunks(self):
+        """Rust patch with 3 hunks making similar changes in different test functions."""
+        patch = '''@@ -246,7 +246,7 @@ fn test_burn_success() {
+         ));
+
+         assert!(TotalHotkeyAlpha::<Test>::get(hotkey, netuid) < initial_alpha);
+-        assert!(SubnetAlphaOut::<Test>::get(netuid) == initial_net_alpha);
++        assert!(SubnetAlphaOut::<Test>::get(netuid) < initial_net_alpha); // Expect decrease
+         assert!(
+             SubtensorModule::get_stake_for_hotkey_and_coldkey_on_subnet(&hotkey, &coldkey, netuid)
+                 < stake.into()
+@@ -307,7 +307,7 @@ fn test_burn_staker_is_nominator() {
+         ));
+
+         assert!(TotalHotkeyAlpha::<Test>::get(hotkey, netuid) < initial_alpha);
+-        assert!(SubnetAlphaOut::<Test>::get(netuid) == initial_net_alpha);
++        assert!(SubnetAlphaOut::<Test>::get(netuid) < initial_net_alpha); // Expect decrease
+         assert!(
+             SubtensorModule::get_stake_for_hotkey_and_coldkey_on_subnet(
+                 &hotkey,
+@@ -376,7 +376,7 @@ fn test_burn_two_stakers() {
+         ));
+
+         assert!(TotalHotkeyAlpha::<Test>::get(hotkey, netuid) < initial_alpha);
+-        assert!(SubnetAlphaOut::<Test>::get(netuid) == initial_net_alpha);
++        assert!(SubnetAlphaOut::<Test>::get(netuid) < initial_net_alpha); // Expect decrease
+         assert!(
+             SubtensorModule::get_stake_for_hotkey_and_coldkey_on_subnet(&hotkey, &coldkey, netuid)
+                 < stake.into()'''
+
+        changes = extract_patch_changes(patch)
+
+        # 3 modifications, one per hunk (line numbers based on hunk headers)
+        assert len(changes.additions) == 3
+        assert 248 in changes.additions  # First hunk: starts at 246, +2 context, modification at 248
+        assert 309 in changes.additions  # Second hunk
+        assert 378 in changes.additions  # Third hunk
+
+        # All are modifications (- followed by +)
+        for line_num in [248, 309, 378]:
+            assert changes.additions[line_num].is_pure_addition is False
+            # The changed token is the operator and comment
+            assert 'Expect' in changes.additions[line_num].changed_tokens or \
+                   'decrease' in changes.additions[line_num].changed_tokens
+
+        # No pure deletions
+        assert len(changes.deletions) == 0
+
+    def test_rust_lib_mixed_additions_and_modifications(self):
+        """Rust lib.rs with pure additions mixed with modifications."""
+        patch = '''@@ -2633,14 +2633,16 @@ impl<T: Config + pallet_balances::Config<Balance = u64>>
+             Error::<T>::HotKeyAccountNotExists
+         );
+
++        let actual_alpha = Self::decrease_stake_for_hotkey_and_coldkey_on_subnet(
++            hotkey, coldkey, netuid, alpha,
++        );
++
+         // Decrese alpha out counter
+         SubnetAlphaOut::<T>::mutate(netuid, |total| {
+-            *total = total.saturating_sub(alpha);
++            *total = total.saturating_sub(actual_alpha);
+         });
+
+-        Ok(Self::decrease_stake_for_hotkey_and_coldkey_on_subnet(
+-            hotkey, coldkey, netuid, alpha,
+-        ))
++        Ok(actual_alpha)
+     }
+ }'''
+
+        changes = extract_patch_changes(patch)
+
+        # 4 pure additions (lines 2636-2639)
+        pure_additions = [c for c in changes.additions.values() if c.is_pure_addition]
+        assert len(pure_additions) == 4
+
+        # 2 modifications
+        modifications = [c for c in changes.additions.values() if not c.is_pure_addition]
+        assert len(modifications) == 2
+
+        # Total 6 additions
+        assert len(changes.additions) == 6
+
+        # 2 pure deletions (the old Ok(...) block that wasn't replaced line-by-line)
+        assert len(changes.deletions) == 2
+
+    def test_python_new_file_all_additions(self):
+        """Python file with all pure additions (new file)."""
+        patch = '''@@ -0,0 +1,25 @@
++import weakref
++from async_substrate_interface.utils import cache
++
++
++class WeakMethodCallable:
++    \"\"\"
++    A callable that holds a weak reference to a bound method.
++    Used to break reference cycles in CachedFetcher.
++    \"\"\"
++
++    def __init__(self, bound_method):
++        self._weak_method = weakref.WeakMethod(bound_method)
++
++    async def __call__(self, *args, **kwargs):
++        method = self._weak_method()
++        if method is None:
++            # The underlying method/instance has been garbage collected.
++            # Return None gracefully instead of raising, so callers of
++            # CachedFetcher do not see a low-level ReferenceError.
++            return None
++        return await method(*args, **kwargs)
++
++
++def _new_get(self, instance, owner):
++    pass'''
+
+        changes = extract_patch_changes(patch)
+
+        # All 25 lines are pure additions
+        assert len(changes.additions) == 25
+        for info in changes.additions.values():
+            assert info.is_pure_addition is True
+
+        # No deletions
+        assert len(changes.deletions) == 0
+
+        # Check line numbers start at 1 (new file)
+        assert 1 in changes.additions
+        assert 25 in changes.additions
+
+    def test_python_init_pure_additions_with_comments(self):
+        """Python __init__.py with pure additions including multi-line comment."""
+        patch = '''@@ -1,3 +1,10 @@
+ from .core.settings import __version__, DEFAULTS, DEFAULT_NETWORK
+ from .utils.btlogging import logging
++from .utils.async_substrate_interface_patch import apply_patch
++# Apply the memory leak patch for AsyncSubstrateInterface *before* importing anything
++# that may create AsyncSubstrateInterface instances. In particular, easy_imports
++# pulls in AsyncSubtensor, which uses AsyncSubstrateInterface, so it must be
++# imported only after apply_patch() has been called. Do not reorder these imports.
++apply_patch()
++
+ from .utils.easy_imports import *'''
+
+        changes = extract_patch_changes(patch)
+
+        # 7 pure additions (lines 3-9)
+        assert len(changes.additions) == 7
+        for info in changes.additions.values():
+            assert info.is_pure_addition is True
+
+        # Line 3 is the import
+        assert 3 in changes.additions
+        assert 'apply_patch' in changes.additions[3].content
+
+        # Lines 4-7 are comments
+        assert 4 in changes.additions
+        assert '#' in changes.additions[4].content
+
+        # No deletions
+        assert len(changes.deletions) == 0
+
+    def test_telegram_docstring_modifications(self):
+        """Telegram bot.py with modifications inside docstrings (URL changes)."""
+        patch = '''@@ -7200,12 +7200,12 @@ async def set_sticker_set_thumbnail(
+                 **.TGS** animation with the thumbnail up to
+                 :tg-const:`telegram.constants.StickerSetLimit.MAX_ANIMATED_THUMBNAIL_SIZE`
+                 kilobytes in size; see
+-                `the docs <https://core.telegram.org/stickers#animation-requirements>`_ for
++                `the docs <https://core.telegram.org/stickers#animated-stickers-and-emoji>`_ for
+                 animated sticker technical requirements, or a ``.WEBM`` video with the thumbnail up
+                 to :tg-const:`telegram.constants.StickerSetLimit.MAX_ANIMATED_THUMBNAIL_SIZE`
+                 kilobytes in size; see
+-                `this <https://core.telegram.org/stickers#video-requirements>`_ for video sticker
+-                technical requirements.
++                `this <https://core.telegram.org/stickers#video-stickers-and-emoji>`_ for video
++                sticker technical requirements.
+
+                 |fileinput|'''
+
+        changes = extract_patch_changes(patch)
+
+        # 3 modifications
+        assert len(changes.additions) == 3
+        for info in changes.additions.values():
+            assert info.is_pure_addition is False
+
+        # Changed tokens should include new URL fragments
+        all_changed = set()
+        for info in changes.additions.values():
+            all_changed.update(info.changed_tokens)
+
+        assert 'animated' in all_changed or 'emoji' in all_changed or 'stickers' in all_changed
+
+        # No pure deletions
+        assert len(changes.deletions) == 0
 
 
 if __name__ == '__main__':

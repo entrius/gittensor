@@ -7,12 +7,6 @@ from typing import DefaultDict, Dict, List, Optional, Set
 
 import bittensor as bt
 
-from gittensor.constants import (
-    DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT,
-    MAX_LINES_SCORED_FOR_MITIGATED_EXT,
-    MITIGATED_EXTENSIONS,
-    TEST_FILE_CONTRIBUTION_WEIGHT,
-)
 from gittensor.utils.utils import parse_repo_name
 from gittensor.validator.configurations.tier_config import Tier, TierConfig, TierStats
 
@@ -184,64 +178,6 @@ class PullRequest:
     def set_file_changes(self, file_changes: List[FileChange]) -> None:
         """Set the file changes for this pull request"""
         self.file_changes = file_changes
-
-    def calculate_score_from_file_changes(self, programming_languages: Dict[str, float]) -> tuple[float, bool]:
-        """Calculate the score for a single PR based on its file changes.
-
-        Returns:
-            tuple[float, bool]: (score, is_low_value_pr) where is_low_value_pr is True
-            if >90% of changes are test files or non-scoreable lines (comments/typos).
-        """
-        from gittensor.validator.utils.spam_detection import count_non_scoreable_lines
-
-        if not self.file_changes:
-            return 0.0, True
-
-        pr_contribution_score = 0.0
-        total_raw_changes = 0
-        substantive_changes = 0
-        file_details = []
-
-        for file in self.file_changes:
-            language_weight = programming_languages.get(file.file_extension, DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT)
-
-            total_changes_to_score = file.changes
-            if file.file_extension in MITIGATED_EXTENSIONS:
-                total_changes_to_score = min(file.changes, MAX_LINES_SCORED_FOR_MITIGATED_EXT)
-
-            total_raw_changes += total_changes_to_score
-
-            non_scoreable_lines = count_non_scoreable_lines(file.patch, total_changes_to_score, file.file_extension)
-            scored_changes = max(0, total_changes_to_score - non_scoreable_lines)
-
-            self.total_lines_scored += scored_changes
-            is_test_file = file.is_test_file()
-            file_weight = TEST_FILE_CONTRIBUTION_WEIGHT if is_test_file else 1.0
-
-            is_substantive_file = not is_test_file and file.file_extension not in MITIGATED_EXTENSIONS
-
-            if is_substantive_file:
-                substantive_changes += scored_changes
-
-            file_score = language_weight * file_weight * scored_changes
-            pr_contribution_score += file_score
-
-            file_details.append((file.short_name, scored_changes, file.changes, file_score, is_test_file))
-
-        substantive_ratio = substantive_changes / total_raw_changes if total_raw_changes > 0 else 0
-        is_low_value_pr = substantive_ratio < 0.1
-
-        # Log & return
-        bt.logging.debug(f'  ├─ Files ({len(self.file_changes)} changes):')
-        max_name_len = max(len(f[0]) for f in file_details) if file_details else 0
-        for name, scored, total, score, is_test in file_details:
-            test_mark = ' [test]' if is_test else ''
-            bt.logging.debug(f'  │   {name:<{max_name_len}}  {scored:>3}/{total:<3} lines  {score:>6.2f}{test_mark}')
-        bt.logging.info(
-            f'  ├─ Contribution: {pr_contribution_score:.2f} | Substantive: {substantive_changes}/{total_raw_changes} ({substantive_ratio * 100:.0f}%)'
-        )
-
-        return pr_contribution_score, is_low_value_pr
 
     def calculate_final_earned_score(self) -> float:
         """Combine base score with all multipliers."""
@@ -437,6 +373,7 @@ class ScoreBreakdown:
     structural_score: float = 0.0  # Total from structural bonuses
     leaf_count: int = 0  # Number of leaf tokens scored
     leaf_score: float = 0.0  # Total from leaf tokens
+    lines_with_score: int = 0  # Number of lines that contributed (excludes comments)
 
 
 @dataclass
@@ -449,12 +386,7 @@ class FileScoreResult:
     total_lines: int
     is_test_file: bool
     scoring_method: str  # 'tree-sitter', 'line-count', 'skipped-*'
-
-    # Structural vs leaf breakdown (only populated for tree-sitter scoring)
-    structural_count: int = 0  # Number of structural nodes (function/class definitions)
-    structural_score: float = 0.0  # Total score from structural bonuses
-    leaf_count: int = 0  # Number of leaf tokens scored
-    leaf_score: float = 0.0  # Total score from leaf tokens
+    breakdown: Optional[ScoreBreakdown] = None  # Only populated for tree-sitter scoring
 
 
 @dataclass
@@ -465,9 +397,40 @@ class TokenScoringResult:
     is_low_value_pr: bool
     total_lines_scored: int
     file_results: List[FileScoreResult]
+    breakdown: Optional[ScoreBreakdown] = None  # Aggregated breakdown across all files
 
-    # Aggregated structural vs leaf breakdown
-    total_structural_count: int = 0
-    total_structural_score: float = 0.0
-    total_leaf_count: int = 0
-    total_leaf_score: float = 0.0
+
+@dataclass
+class LineChangeInfo:
+    """Info about what changed on a specific line in a patch."""
+
+    line_num: int  # new file for additions, old file for deletions
+    is_pure_addition: bool  # New line with no corresponding deletion
+    is_pure_deletion: bool  # Deleted line with no corresponding addition
+    changed_tokens: Set[str]  # empty for pure additions/deletions
+    content: str = ''  # The line content (useful for deletions)
+
+
+@dataclass
+class PatchChanges:
+    """Parsed changes from a unified diff patch."""
+
+    # Additions and modifications, keyed by NEW file line number
+    additions: Dict[int, LineChangeInfo]
+    # Pure deletions, keyed by OLD file line number
+    deletions: Dict[int, LineChangeInfo]
+
+    @property
+    def total_additions(self) -> int:
+        """Count of pure additions."""
+        return sum(1 for c in self.additions.values() if c.is_pure_addition)
+
+    @property
+    def total_modifications(self) -> int:
+        """Count of modifications (changed lines)."""
+        return sum(1 for c in self.additions.values() if not c.is_pure_addition)
+
+    @property
+    def total_deletions(self) -> int:
+        """Count of pure deletions."""
+        return len(self.deletions)

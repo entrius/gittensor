@@ -180,10 +180,11 @@ def calculate_base_score(
         f'Base score: {tier_config.merged_pr_base_score} + {contribution_bonus} bonus '
         f'({bonus_percent * 100:.0f}% of max {tier_config.contribution_score_max_bonus}) = {base_score:.2f}'
     )
-    bt.logging.debug(
-        f'  Token breakdown: {scoring_result.total_structural_count} structural ({scoring_result.total_structural_score:.2f}) + '
-        f'{scoring_result.total_leaf_count} leaf ({scoring_result.total_leaf_score:.2f})'
-    )
+    if scoring_result.breakdown:
+        bt.logging.debug(
+            f'  Token breakdown: {scoring_result.breakdown.structural_count} structural ({scoring_result.breakdown.structural_score:.2f}) + '
+            f'{scoring_result.breakdown.leaf_count} leaf ({scoring_result.breakdown.leaf_score:.2f})'
+        )
 
     return base_score
 

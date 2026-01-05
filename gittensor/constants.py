@@ -26,7 +26,7 @@ GITTENSOR_MINER_DETAILS_URL = 'https://gittensor.io/miners/details?githubId='
 # =============================================================================
 DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT = 0.12
 TEST_FILE_CONTRIBUTION_WEIGHT = 0.05
-MITIGATED_EXTENSIONS = ['md', 'markdown', 'txt', 'text', 'json', 'jsonc', 'rst', 'adoc', 'asciidoc']
+MITIGATED_EXTENSIONS = ['md', 'markdown', 'txt', 'text', 'json', 'jsonc', 'rst', 'adoc', 'asciidoc', 'toml']
 MAX_LINES_SCORED_FOR_MITIGATED_EXT = 300
 
 # =============================================================================

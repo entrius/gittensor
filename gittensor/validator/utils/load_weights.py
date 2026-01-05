@@ -52,8 +52,10 @@ class TokenWeights:
         ext = extension.lstrip('.').lower()
         return ext in self.documentation_extensions
 
-    def supports_tree_sitter(self, extension: str) -> bool:
+    def supports_tree_sitter(self, extension: Optional[str]) -> bool:
         """Check if a file extension is supported by tree-sitter."""
+        if not extension:
+            return False
         ext = extension.lstrip('.').lower()
         return ext in self.extension_to_language and ext not in self.documentation_extensions
 

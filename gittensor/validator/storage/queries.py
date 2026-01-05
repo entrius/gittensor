@@ -17,7 +17,7 @@ INSERT INTO pull_requests (
     open_pr_spam_multiplier, repository_uniqueness_multiplier, time_decay_multiplier,
     gittensor_tag_multiplier, credibility_multiplier, raw_credibility, credibility_scalar,
     earned_score, collateral_score,
-    additions, deletions, commits, total_lines_scored, gittensor_tagged,
+    additions, deletions, commits, total_lines_scored, gittensor_tagged, low_value_pr,
     merged_by_login, description, last_edited_at
 ) VALUES %s
 ON CONFLICT (number, repository_full_name)
@@ -45,6 +45,7 @@ DO UPDATE SET
     commits = EXCLUDED.commits,
     total_lines_scored = EXCLUDED.total_lines_scored,
     gittensor_tagged = EXCLUDED.gittensor_tagged,
+    low_value_pr = EXCLUDED.low_value_pr,
     merged_by_login = EXCLUDED.merged_by_login,
     description = EXCLUDED.description,
     last_edited_at = EXCLUDED.last_edited_at,

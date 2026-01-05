@@ -26,25 +26,24 @@ def calculate_tier_stats(
     """Calculate merged/closed counts per tier."""
     stats: Dict[Tier, TierStats] = {tier: TierStats() for tier in Tier}
 
-    for pr in merged_prs:
+    def get_tier(pr: 'PullRequest') -> Tier | None:
         if pr.repository_tier_configuration:
-            tier = get_tier_from_config(pr.repository_tier_configuration)
-            if tier:
-                stats[tier].merged_count += 1
-                if include_scoring_details:
-                    stats[tier].earned_score += pr.earned_score
+            return get_tier_from_config(pr.repository_tier_configuration)
+        return None
+
+    for pr in merged_prs:
+        if (tier := get_tier(pr)) and not pr.low_value_pr:
+            stats[tier].merged_count += 1
+            if include_scoring_details:
+                stats[tier].earned_score += pr.earned_score
 
     for pr in closed_prs:
-        if pr.repository_tier_configuration:
-            tier = get_tier_from_config(pr.repository_tier_configuration)
-            if tier:
-                stats[tier].closed_count += 1
+        if tier := get_tier(pr):
+            stats[tier].closed_count += 1
 
     for pr in open_prs:
-        if pr.repository_tier_configuration:
-            tier = get_tier_from_config(pr.repository_tier_configuration)
-            if tier:
-                stats[tier].open_count += 1
+        if tier := get_tier(pr):
+            stats[tier].open_count += 1
             if include_scoring_details:
                 stats[tier].collateral_score += pr.collateral_score
 

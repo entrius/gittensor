@@ -154,6 +154,7 @@ class Repository(BaseRepository):
                     pr.commits,
                     pr.total_lines_scored,
                     pr.gittensor_tagged,
+                    pr.low_value_pr,
                     pr.merged_by_login,
                     pr.description,
                     pr.last_edited_at,

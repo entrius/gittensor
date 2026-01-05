@@ -70,14 +70,16 @@ def score_miner_prs(
             if score_pull_request(pr, miner_eval, master_repositories, programming_languages):
                 scored_prs.append(pr)
             else:
-                bt.logging.warning(
-                    f'Skipping PR #{pr.number} in {pr.repository_full_name} - No tier config or file changes'
-                )
+                bt.logging.warning(f'Skipping PR #{pr.number} in {pr.repository_full_name}')
 
         if list_name == 'merged':
             miner_eval.merged_pull_requests = scored_prs
         else:
             miner_eval.open_pull_requests = scored_prs
+
+    # Assign tier config to closed PRs for credibility calculation (they don't go through scoring)
+    for pr in miner_eval.closed_pull_requests:
+        pr.repository_tier_configuration = get_tier_config(pr.repository_full_name, master_repositories)
 
 
 def score_pull_request(
@@ -101,6 +103,9 @@ def score_pull_request(
         pr.set_file_changes(file_changes)
 
     pr.base_score = calculate_base_score(pr, programming_languages)
+    if pr.low_value_pr:
+        return False
+
     calculate_pr_multipliers(pr, miner_eval, master_repositories)
 
     if pr.pr_state == PRState.MERGED:
@@ -126,7 +131,8 @@ def calculate_base_score(pr: PullRequest, programming_languages: Dict[str, float
     contribution_score, is_low_value_pr = pr.calculate_score_from_file_changes(programming_languages)
 
     if is_low_value_pr:
-        bt.logging.warning(f'PR #{pr.number} is low-value (>90% test/comment/typo changes) - base score = 0')
+        bt.logging.warning(f'PR #{pr.number} is low-value (>90% test/comment/typo changes), base score = 0')
+        pr.low_value_pr = is_low_value_pr
         return 0.0
 
     tier_config: TierConfig = pr.repository_tier_configuration

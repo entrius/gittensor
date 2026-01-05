@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS pull_requests (
     commits                           INTEGER          DEFAULT 0,
     total_lines_scored                INTEGER          DEFAULT 0,
     gittensor_tagged                  BOOLEAN          DEFAULT FALSE,
+    low_value_pr                      BOOLEAN          DEFAULT FALSE,
     merged_by_login                   VARCHAR(255),
     description                       TEXT,
     last_edited_at                    TIMESTAMP,

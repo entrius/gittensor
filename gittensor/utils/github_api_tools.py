@@ -7,7 +7,6 @@ from typing import Any, Dict, List, Optional
 
 import bittensor as bt
 import requests
-from gittensor.constants import MAX_FILE_SIZE_BYTES
 
 from gittensor.classes import (
     FileChange,
@@ -17,6 +16,7 @@ from gittensor.classes import (
 from gittensor.constants import (
     BASE_GITHUB_API_URL,
     MAINTAINER_ASSOCIATIONS,
+    MAX_FILE_SIZE_BYTES,
     TIER_BASED_INCENTIVE_MECHANISM_START_DATE,
 )
 from gittensor.utils.utils import parse_repo_name
@@ -665,13 +665,13 @@ def fetch_file_contents_batch(
             f'file{i}: object(expression: "{expression}") {{ ... on Blob {{ text byteSize isBinary }} }}'
         )
 
-    query = f'''
+    query = f"""
         query($owner: String!, $name: String!) {{
             repository(owner: $owner, name: $name) {{
-                {" ".join(file_fields)}
+                {' '.join(file_fields)}
             }}
         }}
-    '''
+    """
 
     variables = {'owner': repo_owner, 'name': repo_name}
 

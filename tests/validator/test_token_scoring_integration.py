@@ -40,7 +40,7 @@ class TestFullScoringPipeline:
         Note: Line numbers in patch adjusted to match file content for testing.
         """
         # Patch with line numbers matching our test file content
-        patch = '''@@ -1,14 +1,16 @@ impl<T: Config>
+        patch = """@@ -1,14 +1,16 @@ impl<T: Config>
  impl<T: Config + pallet_balances::Config<Balance = u64>> SomeTrait for Module<T> {
      fn burn_alpha(hotkey: &T::AccountId, coldkey: &T::AccountId, netuid: u16, alpha: u64) -> Result<u64, Error> {
          ensure!(
@@ -63,10 +63,10 @@ class TestFullScoringPipeline:
 -        ))
 +        Ok(actual_alpha)
      }
- }'''
+ }"""
 
         # File content (the NEW version after the patch)
-        file_content = '''impl<T: Config + pallet_balances::Config<Balance = u64>> SomeTrait for Module<T> {
+        file_content = """impl<T: Config + pallet_balances::Config<Balance = u64>> SomeTrait for Module<T> {
     fn burn_alpha(hotkey: &T::AccountId, coldkey: &T::AccountId, netuid: u16, alpha: u64) -> Result<u64, Error> {
         ensure!(
             Self::hotkey_account_exists(hotkey),
@@ -84,7 +84,7 @@ class TestFullScoringPipeline:
 
         Ok(actual_alpha)
     }
-}'''
+}"""
 
         # Run scoring
         breakdown = calculate_score_with_breakdown(file_content, 'rs', weights, patch)
@@ -95,16 +95,16 @@ class TestFullScoringPipeline:
         assert len(patch_changes.deletions) == 2  # 2 pure deletions
 
         # Verify scoring results
-        assert breakdown.total_score > 0, "Should have positive score"
-        assert breakdown.lines_with_score > 0, "Should have lines that scored"
+        assert breakdown.total_score > 0, 'Should have positive score'
+        assert breakdown.lines_with_score > 0, 'Should have lines that scored'
 
         # Pure additions should get structural bonuses (let binding)
-        assert breakdown.structural_count > 0, "Should have structural elements (let binding)"
-        assert breakdown.structural_score > 0, "Should have structural score"
+        assert breakdown.structural_count > 0, 'Should have structural elements (let binding)'
+        assert breakdown.structural_score > 0, 'Should have structural score'
 
         # Should have leaf tokens scored
-        assert breakdown.leaf_count > 0, "Should have leaf tokens"
-        assert breakdown.leaf_score > 0, "Should have leaf score"
+        assert breakdown.leaf_count > 0, 'Should have leaf tokens'
+        assert breakdown.leaf_score > 0, 'Should have leaf score'
 
         # The comment line should NOT contribute to lines_with_score
         # (line with "// Decrese alpha out counter" is context, not added)
@@ -115,13 +115,13 @@ class TestFullScoringPipeline:
         assert abs(breakdown.total_score - (breakdown.structural_score + breakdown.leaf_score)) < 0.01
 
         # Print breakdown for debugging
-        print(f"\nRust mixed changes scoring breakdown:")
-        print(f"  Patch additions: {len(patch_changes.additions)}")
-        print(f"  Patch deletions: {len(patch_changes.deletions)}")
-        print(f"  Lines with score: {breakdown.lines_with_score}")
-        print(f"  Structural: {breakdown.structural_count} nodes = {breakdown.structural_score:.2f}")
-        print(f"  Leaf: {breakdown.leaf_count} tokens = {breakdown.leaf_score:.2f}")
-        print(f"  Total score: {breakdown.total_score:.2f}")
+        print('\nRust mixed changes scoring breakdown:')
+        print(f'  Patch additions: {len(patch_changes.additions)}')
+        print(f'  Patch deletions: {len(patch_changes.deletions)}')
+        print(f'  Lines with score: {breakdown.lines_with_score}')
+        print(f'  Structural: {breakdown.structural_count} nodes = {breakdown.structural_score:.2f}')
+        print(f'  Leaf: {breakdown.leaf_count} tokens = {breakdown.leaf_score:.2f}')
+        print(f'  Total score: {breakdown.total_score:.2f}')
 
     def test_python_new_file_with_docstrings_and_comments(self, weights):
         """
@@ -199,15 +199,18 @@ def helper_function(x, y):
         assert total_additions == 26  # 28 lines but 2 are blank (still counted as additions)
 
         # Structural elements: class definition, 2 function definitions (def __init__, async def, def helper)
-        assert breakdown.structural_count >= 3, f"Expected at least 3 structural elements, got {breakdown.structural_count}"
+        assert breakdown.structural_count >= 3, (
+            f'Expected at least 3 structural elements, got {breakdown.structural_count}'
+        )
 
         # lines_with_score should exclude:
         # - Docstring lines (lines 5-8, line 23)
         # - Comment lines (lines 11, 17, 24)
         # - Blank lines
         # So lines_with_score should be significantly less than total_additions
-        assert breakdown.lines_with_score < total_additions, \
-            f"lines_with_score ({breakdown.lines_with_score}) should be less than total additions ({total_additions}) due to comments/docstrings"
+        assert breakdown.lines_with_score < total_additions, (
+            f'lines_with_score ({breakdown.lines_with_score}) should be less than total additions ({total_additions}) due to comments/docstrings'
+        )
 
         # But we should still have meaningful score
         assert breakdown.total_score > 0
@@ -217,12 +220,12 @@ def helper_function(x, y):
         assert breakdown.leaf_count > 0
 
         # Print breakdown for debugging
-        print(f"\nPython new file scoring breakdown:")
-        print(f"  Total additions: {total_additions}")
-        print(f"  Lines with score: {breakdown.lines_with_score}")
-        print(f"  Structural: {breakdown.structural_count} nodes = {breakdown.structural_score:.2f}")
-        print(f"  Leaf: {breakdown.leaf_count} tokens = {breakdown.leaf_score:.2f}")
-        print(f"  Total score: {breakdown.total_score:.2f}")
+        print('\nPython new file scoring breakdown:')
+        print(f'  Total additions: {total_additions}')
+        print(f'  Lines with score: {breakdown.lines_with_score}')
+        print(f'  Structural: {breakdown.structural_count} nodes = {breakdown.structural_score:.2f}')
+        print(f'  Leaf: {breakdown.leaf_count} tokens = {breakdown.leaf_score:.2f}')
+        print(f'  Total score: {breakdown.total_score:.2f}')
 
 
 if __name__ == '__main__':

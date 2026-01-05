@@ -26,7 +26,6 @@ from gittensor.validator.utils.tree_sitter_scoring import (
     parse_code,
 )
 
-
 # =============================================================================
 # Core Functionality Tests
 # =============================================================================
@@ -115,17 +114,17 @@ class TestExtractAddedLines:
 
     def test_additions_and_deletions(self):
         """Correctly handles mix of additions and deletions."""
-        patch = '''@@ -1,4 +1,3 @@
+        patch = """@@ -1,4 +1,3 @@
  line 1
 -deleted line
 +added line
- line 3'''
+ line 3"""
         result = extract_added_lines(patch)
         assert result == {2}
 
     def test_multiple_hunks(self):
         """Lines from multiple hunks are combined."""
-        patch = '''@@ -1,3 +1,4 @@
+        patch = """@@ -1,3 +1,4 @@
  line 1
 +added at 2
  line 2
@@ -133,16 +132,16 @@ class TestExtractAddedLines:
 @@ -10,3 +11,4 @@
  line 10
 +added at 12
- line 11'''
+ line 11"""
         result = extract_added_lines(patch)
         assert result == {2, 12}
 
     def test_new_file(self):
         """New file starting at line 1."""
-        patch = '''@@ -0,0 +1,3 @@
+        patch = """@@ -0,0 +1,3 @@
 +line 1
 +line 2
-+line 3'''
++line 3"""
         result = extract_added_lines(patch)
         assert result == {1, 2, 3}
 
@@ -150,10 +149,10 @@ class TestExtractAddedLines:
         """Empty patch and deletion-only patches return empty set."""
         assert extract_added_lines('') == set()
         assert extract_added_lines(None) == set()
-        patch = '''@@ -1,3 +1,1 @@
+        patch = """@@ -1,3 +1,1 @@
  line 1
 -deleted 1
--deleted 2'''
+-deleted 2"""
         assert extract_added_lines(patch) == set()
 
 
@@ -162,11 +161,11 @@ class TestExtractPatchChanges:
 
     def test_pure_addition_vs_modification(self):
         """Correctly distinguishes pure additions from modifications."""
-        patch = '''@@ -1,2 +1,3 @@
+        patch = """@@ -1,2 +1,3 @@
  existing
 -old value
 +new value
-+brand new line'''
++brand new line"""
         changes = extract_patch_changes(patch)
 
         # Line 2 is modification
@@ -178,24 +177,24 @@ class TestExtractPatchChanges:
 
     def test_multiple_deletions_pair_with_additions(self):
         """Multiple deletions pair with additions in order."""
-        patch = '''@@ -1,4 +1,4 @@
+        patch = """@@ -1,4 +1,4 @@
  line 1
 -old a
 -old b
 +new a
 +new b
- line 4'''
+ line 4"""
         changes = extract_patch_changes(patch)
         assert changes.additions[2].is_pure_addition is False
         assert changes.additions[3].is_pure_addition is False
 
     def test_pure_deletions_are_captured(self):
         """Pure deletions (- without +) are recorded in deletions dict."""
-        patch = '''@@ -1,4 +1,2 @@
+        patch = """@@ -1,4 +1,2 @@
  keep this
 -delete me
 -also delete
- keep this too'''
+ keep this too"""
         changes = extract_patch_changes(patch)
 
         # No additions
@@ -252,14 +251,18 @@ class TestChangeAwareScoringBasics:
     def test_pure_addition_gets_full_score(self, weights):
         """Pure additions get full structural + leaf scores."""
         code = 'def foo():\n    x = 1'
-        change_info = {1: LineChangeInfo(line_num=1, is_pure_addition=True, is_pure_deletion=False, changed_tokens=set())}
+        change_info = {
+            1: LineChangeInfo(line_num=1, is_pure_addition=True, is_pure_deletion=False, changed_tokens=set())
+        }
         scores = calculate_line_scores_with_changes(code, 'py', weights, change_info)
         assert scores.get(1, 0) >= weights.get_structural_weight('function_definition')
 
     def test_modification_only_scores_changed_tokens(self, weights):
         """Modifications only score the changed tokens."""
         code = 'x = 2'
-        change_info = {1: LineChangeInfo(line_num=1, is_pure_addition=False, is_pure_deletion=False, changed_tokens={'2'})}
+        change_info = {
+            1: LineChangeInfo(line_num=1, is_pure_addition=False, is_pure_deletion=False, changed_tokens={'2'})
+        }
         scores = calculate_line_scores_with_changes(code, 'py', weights, change_info)
         # Should only get integer weight, not identifier or assignment
         assert 0 < scores.get(1, 0) < 0.5
@@ -267,14 +270,20 @@ class TestChangeAwareScoringBasics:
     def test_unmatched_tokens_score_zero(self, weights):
         """Modification with non-matching tokens scores zero."""
         code = 'x = 1'
-        change_info = {1: LineChangeInfo(line_num=1, is_pure_addition=False, is_pure_deletion=False, changed_tokens={'nonexistent'})}
+        change_info = {
+            1: LineChangeInfo(
+                line_num=1, is_pure_addition=False, is_pure_deletion=False, changed_tokens={'nonexistent'}
+            )
+        }
         scores = calculate_line_scores_with_changes(code, 'py', weights, change_info)
         assert scores.get(1, 0) == 0.0
 
     def test_comment_addition_scores_zero(self, weights):
         """Adding a comment still scores zero."""
         code = '# this is a comment'
-        change_info = {1: LineChangeInfo(line_num=1, is_pure_addition=True, is_pure_deletion=False, changed_tokens=set())}
+        change_info = {
+            1: LineChangeInfo(line_num=1, is_pure_addition=True, is_pure_deletion=False, changed_tokens=set())
+        }
         scores = calculate_line_scores_with_changes(code, 'py', weights, change_info)
         assert scores.get(1, 0) == 0.0
 
@@ -361,12 +370,12 @@ class TestSubstantiveChangesProperScore:
     def test_adding_new_method_to_class(self, weights):
         """Adding a method to existing class gets method score."""
         code = 'class Foo:\n    def bar(self):\n        pass\n    def new_method(self):\n        return self.value'
-        patch = '''@@ -1,3 +1,5 @@
+        patch = """@@ -1,3 +1,5 @@
  class Foo:
      def bar(self):
          pass
 +    def new_method(self):
-+        return self.value'''
++        return self.value"""
         score = calculate_total_score_with_changes(code, 'py', weights, patch)
         # Should get function_definition + return + identifiers
         assert score >= weights.get_structural_weight('function_definition')
@@ -383,10 +392,10 @@ class TestSubstantiveChangesProperScore:
     def test_adding_decorator(self, weights):
         """Adding a decorator to function is a pure addition."""
         code = '@property\ndef value(self):\n    return self._value'
-        patch = '''@@ -1,2 +1,3 @@
+        patch = """@@ -1,2 +1,3 @@
 +@property
  def value(self):
-     return self._value'''
+     return self._value"""
         score = calculate_total_score_with_changes(code, 'py', weights, patch)
         # Should get decorator bonus + identifier
         assert score > 0.5
@@ -394,11 +403,11 @@ class TestSubstantiveChangesProperScore:
     def test_adding_error_handling(self, weights):
         """Adding try/except block gets structural bonuses."""
         code = 'try:\n    result = risky()\nexcept Exception:\n    result = None'
-        patch = '''@@ -0,0 +1,4 @@
+        patch = """@@ -0,0 +1,4 @@
 +try:
 +    result = risky()
 +except Exception:
-+    result = None'''
++    result = None"""
         score = calculate_total_score_with_changes(code, 'py', weights, patch)
         # Should get try + except structural bonuses
         assert score >= weights.get_structural_weight('try_statement')
@@ -406,11 +415,11 @@ class TestSubstantiveChangesProperScore:
     def test_adding_conditional_logic(self, weights):
         """Adding if/else logic gets structural bonuses."""
         code = 'if condition:\n    do_something()\nelse:\n    do_other()'
-        patch = '''@@ -0,0 +1,4 @@
+        patch = """@@ -0,0 +1,4 @@
 +if condition:
 +    do_something()
 +else:
-+    do_other()'''
++    do_other()"""
         score = calculate_total_score_with_changes(code, 'py', weights, patch)
         assert score >= weights.get_structural_weight('if_statement')
 
@@ -425,10 +434,10 @@ class TestComplexModificationScenarios:
     def test_function_signature_change_add_param(self, weights):
         """Adding parameter to function signature."""
         code = 'def process(data, validate=True):\n    pass'
-        patch = '''@@ -1,2 +1,2 @@
+        patch = """@@ -1,2 +1,2 @@
 -def process(data):
 +def process(data, validate=True):
-     pass'''
+     pass"""
         score = calculate_total_score_with_changes(code, 'py', weights, patch)
         # Should score 'validate' and 'True' tokens
         assert score > 0
@@ -462,9 +471,9 @@ class TestComplexModificationScenarios:
     def test_changing_import_statement(self, weights):
         """Modifying import to add new module."""
         code = 'from typing import Dict, List, Optional'
-        patch = '''@@ -1,1 +1,1 @@
+        patch = """@@ -1,1 +1,1 @@
 -from typing import Dict, List
-+from typing import Dict, List, Optional'''
++from typing import Dict, List, Optional"""
         score = calculate_total_score_with_changes(code, 'py', weights, patch)
         # Should get identifier weight for 'Optional'
         assert score >= weights.get_leaf_weight('identifier')
@@ -472,9 +481,9 @@ class TestComplexModificationScenarios:
     def test_chained_method_call_addition(self, weights):
         """Adding method to chain."""
         code = 'result = data.filter().sort().limit(10)'
-        patch = '''@@ -1,1 +1,1 @@
+        patch = """@@ -1,1 +1,1 @@
 -result = data.filter().sort()
-+result = data.filter().sort().limit(10)'''
++result = data.filter().sort().limit(10)"""
         score = calculate_total_score_with_changes(code, 'py', weights, patch)
         # Should get 'limit' identifier and maybe '10'
         assert score > 0
@@ -482,11 +491,11 @@ class TestComplexModificationScenarios:
     def test_multi_line_modification_with_pure_addition(self, weights):
         """Mix of modifications and pure additions in one patch."""
         code = 'x = 2\ny = 3\nz = x + y'
-        patch = '''@@ -1,2 +1,3 @@
+        patch = """@@ -1,2 +1,3 @@
 -x = 1
 +x = 2
 +y = 3
- z = x + y'''
+ z = x + y"""
         # Note: z line is context, x is modification, y is pure addition
         score = calculate_total_score_with_changes(code, 'py', weights, patch)
         # y=3 is pure addition (full score), x=2 is modification (just '2')
@@ -496,10 +505,10 @@ class TestComplexModificationScenarios:
     def test_adding_type_annotations(self, weights):
         """Adding type annotations to function."""
         code = 'def process(data: List[int]) -> Dict[str, int]:\n    pass'
-        patch = '''@@ -1,2 +1,2 @@
+        patch = """@@ -1,2 +1,2 @@
 -def process(data):
 +def process(data: List[int]) -> Dict[str, int]:
-     pass'''
+     pass"""
         score = calculate_total_score_with_changes(code, 'py', weights, patch)
         # Should get type identifiers
         assert score > 0
@@ -516,7 +525,9 @@ class TestEdgeCasesTokenMatching:
         """Short tokens (<=2 chars) require exact match."""
         code = 'abc = 1'
         # 'c' is short token - should NOT match 'abc'
-        change_info = {1: LineChangeInfo(line_num=1, is_pure_addition=False, is_pure_deletion=False, changed_tokens={'c'})}
+        change_info = {
+            1: LineChangeInfo(line_num=1, is_pure_addition=False, is_pure_deletion=False, changed_tokens={'c'})
+        }
         scores = calculate_line_scores_with_changes(code, 'py', weights, change_info)
         # 'c' shouldn't match 'abc', so score should be just for '1' if it matches, or 0
         assert scores.get(1, 0) < weights.get_leaf_weight('identifier')
@@ -525,7 +536,9 @@ class TestEdgeCasesTokenMatching:
         """Long tokens (>2 chars) allow substring match."""
         code = 'message = "hello world"'
         # 'world' should match the string containing it
-        change_info = {1: LineChangeInfo(line_num=1, is_pure_addition=False, is_pure_deletion=False, changed_tokens={'world'})}
+        change_info = {
+            1: LineChangeInfo(line_num=1, is_pure_addition=False, is_pure_deletion=False, changed_tokens={'world'})
+        }
         scores = calculate_line_scores_with_changes(code, 'py', weights, change_info)
         assert scores.get(1, 0) > 0
 
@@ -533,9 +546,9 @@ class TestEdgeCasesTokenMatching:
         """Similar identifiers shouldn't cross-match incorrectly."""
         code = 'calculate_total = calculate_sum + calculate_avg'
         # Only 'calculate_total' is new
-        patch = '''@@ -1,1 +1,1 @@
+        patch = """@@ -1,1 +1,1 @@
 -result = calculate_sum + calculate_avg
-+calculate_total = calculate_sum + calculate_avg'''
++calculate_total = calculate_sum + calculate_avg"""
         score = calculate_total_score_with_changes(code, 'py', weights, patch)
         # Should match calculate_total but not others (they exist in old line)
         # Actually 'calculate_total' substring matches all three...
@@ -561,25 +574,25 @@ class TestRealWorldPatches:
     def test_bug_fix_single_line(self, weights):
         """Simple bug fix changing one value."""
         code = 'if count >= 0:\n    process()'
-        patch = '''@@ -1,2 +1,2 @@
+        patch = """@@ -1,2 +1,2 @@
 -if count > 0:
 +if count >= 0:
-     process()'''
+     process()"""
         score = calculate_total_score_with_changes(code, 'py', weights, patch)
         # Just adding '=' to operator - should be very low
         assert score < 0.5
 
     def test_feature_addition_multiple_lines(self, weights):
         """Adding a new feature with multiple lines."""
-        code = '''def validate(self):
+        code = """def validate(self):
     if not self.data:
         raise ValueError("No data")
-    return True'''
-        patch = '''@@ -0,0 +1,4 @@
+    return True"""
+        patch = """@@ -0,0 +1,4 @@
 +def validate(self):
 +    if not self.data:
 +        raise ValueError("No data")
-+    return True'''
++    return True"""
         score = calculate_total_score_with_changes(code, 'py', weights, patch)
         # Should get substantial score for new function
         assert score > 3.0
@@ -587,11 +600,11 @@ class TestRealWorldPatches:
     def test_refactor_rename_variable(self, weights):
         """Renaming a variable (multiple occurrences counted separately per line)."""
         code = 'user_count = get_count()\nprint(user_count)'
-        patch = '''@@ -1,2 +1,2 @@
+        patch = """@@ -1,2 +1,2 @@
 -count = get_count()
 -print(count)
 +user_count = get_count()
-+print(user_count)'''
++print(user_count)"""
         score = calculate_total_score_with_changes(code, 'py', weights, patch)
         # Each line modification should score the new identifier
         assert score > 0
@@ -604,7 +617,7 @@ class TestRealWorldPatchExtraction:
 
     def test_discord_js_multiple_hunks(self):
         """Discord.js patch with 3 hunks: additions, modifications, and structural changes."""
-        patch = '''@@ -46,6 +46,7 @@ class Discord extends NotificationProvider {
+        patch = """@@ -46,6 +46,7 @@ class Discord extends NotificationProvider {
              }
 
              // If heartbeatJSON is not null, we go into the normal alerting loop.
@@ -647,7 +660,7 @@ class TestRealWorldPatchExtraction:
 +                            }] : []),
                      ],
                  }],
-             };'''
+             };"""
 
         changes = extract_patch_changes(patch)
 
@@ -669,7 +682,7 @@ class TestRealWorldPatchExtraction:
 
     def test_rust_multiple_identical_hunks(self):
         """Rust patch with 3 hunks making similar changes in different test functions."""
-        patch = '''@@ -246,7 +246,7 @@ fn test_burn_success() {
+        patch = """@@ -246,7 +246,7 @@ fn test_burn_success() {
          ));
 
          assert!(TotalHotkeyAlpha::<Test>::get(hotkey, netuid) < initial_alpha);
@@ -695,7 +708,7 @@ class TestRealWorldPatchExtraction:
 +        assert!(SubnetAlphaOut::<Test>::get(netuid) < initial_net_alpha); // Expect decrease
          assert!(
              SubtensorModule::get_stake_for_hotkey_and_coldkey_on_subnet(&hotkey, &coldkey, netuid)
-                 < stake.into()'''
+                 < stake.into()"""
 
         changes = extract_patch_changes(patch)
 
@@ -709,15 +722,17 @@ class TestRealWorldPatchExtraction:
         for line_num in [248, 309, 378]:
             assert changes.additions[line_num].is_pure_addition is False
             # The changed token is the operator and comment
-            assert 'Expect' in changes.additions[line_num].changed_tokens or \
-                   'decrease' in changes.additions[line_num].changed_tokens
+            assert (
+                'Expect' in changes.additions[line_num].changed_tokens
+                or 'decrease' in changes.additions[line_num].changed_tokens
+            )
 
         # No pure deletions
         assert len(changes.deletions) == 0
 
     def test_rust_lib_mixed_additions_and_modifications(self):
         """Rust lib.rs with pure additions mixed with modifications."""
-        patch = '''@@ -2633,14 +2633,16 @@ impl<T: Config + pallet_balances::Config<Balance = u64>>
+        patch = """@@ -2633,14 +2633,16 @@ impl<T: Config + pallet_balances::Config<Balance = u64>>
              Error::<T>::HotKeyAccountNotExists
          );
 
@@ -736,7 +751,7 @@ class TestRealWorldPatchExtraction:
 -        ))
 +        Ok(actual_alpha)
      }
- }'''
+ }"""
 
         changes = extract_patch_changes(patch)
 
@@ -756,7 +771,7 @@ class TestRealWorldPatchExtraction:
 
     def test_python_new_file_all_additions(self):
         """Python file with all pure additions (new file)."""
-        patch = '''@@ -0,0 +1,25 @@
+        patch = """@@ -0,0 +1,25 @@
 +import weakref
 +from async_substrate_interface.utils import cache
 +
@@ -781,7 +796,7 @@ class TestRealWorldPatchExtraction:
 +
 +
 +def _new_get(self, instance, owner):
-+    pass'''
++    pass"""
 
         changes = extract_patch_changes(patch)
 
@@ -799,7 +814,7 @@ class TestRealWorldPatchExtraction:
 
     def test_python_init_pure_additions_with_comments(self):
         """Python __init__.py with pure additions including multi-line comment."""
-        patch = '''@@ -1,3 +1,10 @@
+        patch = """@@ -1,3 +1,10 @@
  from .core.settings import __version__, DEFAULTS, DEFAULT_NETWORK
  from .utils.btlogging import logging
 +from .utils.async_substrate_interface_patch import apply_patch
@@ -809,7 +824,7 @@ class TestRealWorldPatchExtraction:
 +# imported only after apply_patch() has been called. Do not reorder these imports.
 +apply_patch()
 +
- from .utils.easy_imports import *'''
+ from .utils.easy_imports import *"""
 
         changes = extract_patch_changes(patch)
 
@@ -831,7 +846,7 @@ class TestRealWorldPatchExtraction:
 
     def test_telegram_docstring_modifications(self):
         """Telegram bot.py with modifications inside docstrings (URL changes)."""
-        patch = '''@@ -7200,12 +7200,12 @@ async def set_sticker_set_thumbnail(
+        patch = """@@ -7200,12 +7200,12 @@ async def set_sticker_set_thumbnail(
                  **.TGS** animation with the thumbnail up to
                  :tg-const:`telegram.constants.StickerSetLimit.MAX_ANIMATED_THUMBNAIL_SIZE`
                  kilobytes in size; see
@@ -845,7 +860,7 @@ class TestRealWorldPatchExtraction:
 +                `this <https://core.telegram.org/stickers#video-stickers-and-emoji>`_ for video
 +                sticker technical requirements.
 
-                 |fileinput|'''
+                 |fileinput|"""
 
         changes = extract_patch_changes(patch)
 

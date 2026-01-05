@@ -42,7 +42,6 @@ from gittensor.validator.utils.load_weights import (
     load_token_weights,
 )
 
-
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../..')))
 
 
@@ -145,7 +144,7 @@ def run_scoring_simulation(
     if not github_pat:
         print('  ERROR: No GitHub PAT set - cannot fetch PRs from GitHub')
         return {}, {}, {}
-    print(f'  GitHub PAT: Available')
+    print('  GitHub PAT: Available')
     sys.stdout.flush()
     time.sleep(0.1)
 
@@ -169,9 +168,7 @@ def run_scoring_simulation(
         ev = create_miner_evaluation(uid, hotkey, github_id, github_pat)
         load_miners_prs(ev, master_repos, max_prs=100)
         evals[uid] = ev
-        print(
-            f'    -> {ev.total_merged_prs} merged, {ev.total_open_prs} open, {ev.total_closed_prs} closed'
-        )
+        print(f'    -> {ev.total_merged_prs} merged, {ev.total_open_prs} open, {ev.total_closed_prs} closed')
 
     # 4. Add custom evaluations
     if include_custom and CUSTOM_EVALUATIONS_AVAILABLE:

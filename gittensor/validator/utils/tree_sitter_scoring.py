@@ -912,7 +912,9 @@ def _log_scoring_results(
     # Add line-count info if there were line-count scored files
     if line_count_files:
         line_count_lines = sum(f.lines_scored for f in line_count_files)
-        breakdown_parts.append(f'Line-count: {len(line_count_files)} files, {line_count_lines} lines = {line_count_score:.2f}')
+        breakdown_parts.append(
+            f'Line-count: {len(line_count_files)} files, {line_count_lines} lines = {line_count_score:.2f}'
+        )
 
     breakdown_str = ' | '.join(breakdown_parts) if breakdown_parts else ''
 

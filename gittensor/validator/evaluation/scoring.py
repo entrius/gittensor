@@ -77,6 +77,10 @@ def score_miner_prs(
         else:
             miner_eval.open_pull_requests = scored_prs
 
+    # Assign tier config to closed PRs for credibility calculation (they don't go through scoring)
+    for pr in miner_eval.closed_pull_requests:
+        pr.repository_tier_configuration = get_tier_config(pr.repository_full_name, master_repositories)
+
 
 def score_pull_request(
     pr: PullRequest,

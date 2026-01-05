@@ -102,11 +102,10 @@ def score_pull_request(
             return False
         pr.set_file_changes(file_changes)
 
-    base_score = calculate_base_score(pr, programming_languages)
-    if base_score == 0:
+    pr.base_score = calculate_base_score(pr, programming_languages)
+    if pr.low_value_pr:
         return False
 
-    pr.base_score = base_score
     calculate_pr_multipliers(pr, miner_eval, master_repositories)
 
     if pr.pr_state == PRState.MERGED:
@@ -132,7 +131,8 @@ def calculate_base_score(pr: PullRequest, programming_languages: Dict[str, float
     contribution_score, is_low_value_pr = pr.calculate_score_from_file_changes(programming_languages)
 
     if is_low_value_pr:
-        bt.logging.warning(f'PR #{pr.number} is low-value (>90% test/comment/typo changes) - base score = 0')
+        bt.logging.warning(f'PR #{pr.number} is low-value (>90% test/comment/typo changes), base score = 0')
+        pr.low_value_pr = is_low_value_pr
         return 0.0
 
     tier_config: TierConfig = pr.repository_tier_configuration

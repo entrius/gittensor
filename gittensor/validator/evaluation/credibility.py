@@ -32,7 +32,7 @@ def calculate_tier_stats(
         return None
 
     for pr in merged_prs:
-        if (tier := get_tier(pr)) and pr.earned_score > 0:
+        if (tier := get_tier(pr)) and not pr.low_value_pr:
             stats[tier].merged_count += 1
             if include_scoring_details:
                 stats[tier].earned_score += pr.earned_score

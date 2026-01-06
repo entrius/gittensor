@@ -9,7 +9,7 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # load env files from miner/.env, if not exists then quit
 if [ -f "$PROJECT_ROOT/gittensor/miner/.env" ]; then
     echo "Loading environment variables from .env file..."
-    export $(cat "$PROJECT_ROOT/gittensor/miner/.env" | grep -v '^#' | xargs)
+    export $(cat "$PROJECT_ROOT/gittensor/miner/.env" | grep -v '^#' | sed 's/#.*//' | xargs)
 else
     echo "Error: .env file not found at $PROJECT_ROOT/gittensor/miner/.env"
     exit 1

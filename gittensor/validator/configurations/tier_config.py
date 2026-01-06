@@ -53,7 +53,7 @@ TIER_DEFAULTS = {
 
 @dataclass(frozen=True)
 class TierConfig:
-    # Next tier unlock requirements (None for top tier)
+    # Tier unlock requirements
     required_merges: Optional[int]
     required_unique_repos_merged_to: Optional[int]
     required_credibility: Optional[float]
@@ -69,10 +69,24 @@ class TierConfig:
 
 
 TIERS: dict[Tier, TierConfig] = {
-    #                        merges  credibility   scalar  (requirements to unlock & maintain each tier)
-    Tier.BRONZE: TierConfig(3, 0.70, 1.0),
-    Tier.SILVER: TierConfig(4, 0.65, 1.5),
-    Tier.GOLD: TierConfig(5, 0.60, 2.0),
+    Tier.BRONZE: TierConfig(
+        required_merges=3,
+        required_unique_repos_merged_to=3,
+        required_credibility=0.70,
+        credibility_scalar=1.0,
+    ),
+    Tier.SILVER: TierConfig(
+        required_merges=4,
+        required_unique_repos_merged_to=3,
+        required_credibility=0.65,
+        credibility_scalar=1.5,
+    ),
+    Tier.GOLD: TierConfig(
+        required_merges=5,
+        required_unique_repos_merged_to=3,
+        required_credibility=0.60,
+        credibility_scalar=2.0,
+    ),
 }
 TIERS_ORDER: list[Tier] = list(TIERS.keys())
 

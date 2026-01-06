@@ -95,12 +95,15 @@ class PRBuilder:
         collateral_score: float = 20.0,
         repo: Optional[str] = None,
         unique_repo: bool = False,
+        low_value_pr: bool = False,
     ) -> PullRequest:
         """Create a mock PullRequest with the given parameters.
 
         Args:
             unique_repo: If True, generates a unique repo name for this PR.
                          If False and repo is None, uses 'test/repo'.
+            low_value_pr: If True, marks the PR as low-value (won't count toward
+                          merge counts or unique repos for merged PRs).
         """
         if number is None:
             number = self._next_number()
@@ -122,6 +125,7 @@ class PRBuilder:
             repository_tier_configuration=tier,
             earned_score=earned_score,
             collateral_score=collateral_score,
+            low_value_pr=low_value_pr,
         )
 
     def merged(self, tier: TierConfig, **kwargs) -> PullRequest:
@@ -170,6 +174,33 @@ class PRBuilder:
         """Reset the counters (useful between tests)."""
         self._counter = 0
         self._repo_counter = 0
+
+    def create_without_tier(
+        self,
+        state: PRState,
+        number: Optional[int] = None,
+        repo: str = 'untracked/repo',
+    ) -> PullRequest:
+        """Create a PR without tier configuration (simulates untracked repo).
+
+        These PRs should be completely ignored by tier calculations.
+        """
+        if number is None:
+            number = self._next_number()
+
+        return PullRequest(
+            number=number,
+            repository_full_name=repo,
+            uid=0,
+            hotkey='test_hotkey',
+            github_id='12345',
+            title=f'Untracked PR #{number}',
+            author_login='testuser',
+            merged_at=datetime.now(timezone.utc) if state == PRState.MERGED else None,
+            created_at=datetime.now(timezone.utc),
+            pr_state=state,
+            repository_tier_configuration=None,  # No tier config!
+        )
 
 
 @pytest.fixture

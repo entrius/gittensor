@@ -2306,5 +2306,427 @@ class TestUniqueRepoEdgeCases:
         assert is_tier_unlocked(Tier.BRONZE, stats) is True
 
 
+# ============================================================================
+# Low-Value PR Tests
+# ============================================================================
+
+
+class TestLowValuePRHandling:
+    """
+    Test low_value_pr flag behavior in tier calculations.
+
+    Low-value PRs (substantive_ratio < 0.1) are filtered differently:
+    - Merged low-value PRs: NOT counted for merges OR unique repos
+    - Closed low-value PRs: STILL count against credibility
+    """
+
+    def test_low_value_merged_pr_not_counted_for_merges(self, pr_factory, bronze_config):
+        """
+        Merged PRs with low_value_pr=True should not count toward merge count.
+        """
+        bronze_tier_config = TIERS[Tier.BRONZE]
+        required_merges = bronze_tier_config.required_merges
+
+        # Create normal merged PRs (unique repos)
+        normal_prs = pr_factory.merged_batch(bronze_config, count=required_merges - 1, unique_repos=True)
+
+        # Create low-value merged PRs
+        low_value_prs = [
+            pr_factory.merged(bronze_config, unique_repo=True, low_value_pr=True)
+            for _ in range(5)
+        ]
+
+        stats = calculate_tier_stats(normal_prs + low_value_prs, [])
+
+        # Only normal PRs counted
+        assert stats[Tier.BRONZE].merged_count == required_merges - 1
+        # Tier locked because we're 1 short of required merges
+        assert is_tier_unlocked(Tier.BRONZE, stats) is False
+
+    def test_low_value_merged_pr_not_counted_for_unique_repos(self, pr_factory, bronze_config):
+        """
+        Merged PRs with low_value_pr=True should not count toward unique repo count.
+        """
+        bronze_tier_config = TIERS[Tier.BRONZE]
+        required_unique_repos = bronze_tier_config.required_unique_repos_merged_to
+
+        # Create normal PRs to unique repos (2 repos)
+        normal_prs = [
+            pr_factory.merged(bronze_config, repo='owner/repo-1'),
+            pr_factory.merged(bronze_config, repo='owner/repo-2'),
+        ]
+
+        # Create low-value PRs to different unique repos (3 more repos)
+        low_value_prs = [
+            pr_factory.merged(bronze_config, repo='owner/repo-3', low_value_pr=True),
+            pr_factory.merged(bronze_config, repo='owner/repo-4', low_value_pr=True),
+            pr_factory.merged(bronze_config, repo='owner/repo-5', low_value_pr=True),
+        ]
+
+        stats = calculate_tier_stats(normal_prs + low_value_prs, [])
+
+        # Only 2 unique repos from normal PRs (low-value repos not counted)
+        assert stats[Tier.BRONZE].unique_repo_contribution_count == 2
+        # Tier locked because unique repo count < 3
+        assert is_tier_unlocked(Tier.BRONZE, stats) is False
+
+    def test_low_value_closed_pr_still_hurts_credibility(self, pr_factory, bronze_config):
+        """
+        Closed PRs with low_value_pr=True STILL count against credibility.
+
+        This is the asymmetry: low-value filter only applies to merged PRs.
+        """
+        bronze_tier_config = TIERS[Tier.BRONZE]
+        required_merges = bronze_tier_config.required_merges
+        required_credibility = bronze_tier_config.required_credibility
+
+        # Create enough normal merged PRs (unique repos)
+        merged = pr_factory.merged_batch(bronze_config, count=required_merges, unique_repos=True)
+
+        # Create low-value closed PRs to tank credibility
+        # Calculate how many closed PRs to drop below credibility threshold
+        closed_count = int(required_merges * (1 - required_credibility) / required_credibility) + 2
+        closed = [
+            pr_factory.closed(bronze_config, unique_repo=True, low_value_pr=True)
+            for _ in range(closed_count)
+        ]
+
+        stats = calculate_tier_stats(merged, closed)
+
+        # Closed PRs still counted
+        assert stats[Tier.BRONZE].closed_count == closed_count
+        # Credibility dropped below threshold
+        assert stats[Tier.BRONZE].credibility < required_credibility
+        # Tier locked due to low credibility
+        assert is_tier_unlocked(Tier.BRONZE, stats) is False
+
+    def test_mixed_low_value_and_normal_prs(self, pr_factory, bronze_config):
+        """
+        Mix of low-value and normal PRs are handled correctly.
+        """
+        bronze_tier_config = TIERS[Tier.BRONZE]
+
+        # 3 normal merged PRs to unique repos (meets requirements)
+        normal_merged = [
+            pr_factory.merged(bronze_config, repo=f'owner/repo-{i}')
+            for i in range(3)
+        ]
+
+        # 5 low-value merged PRs (should be ignored)
+        low_value_merged = [
+            pr_factory.merged(bronze_config, repo=f'owner/lowvalue-{i}', low_value_pr=True)
+            for i in range(5)
+        ]
+
+        # 1 normal closed PR
+        normal_closed = [pr_factory.closed(bronze_config, repo='owner/closed-1')]
+
+        # 2 low-value closed PRs (still count!)
+        low_value_closed = [
+            pr_factory.closed(bronze_config, repo=f'owner/lv-closed-{i}', low_value_pr=True)
+            for i in range(2)
+        ]
+
+        stats = calculate_tier_stats(
+            normal_merged + low_value_merged,
+            normal_closed + low_value_closed
+        )
+
+        # Only normal merged PRs counted
+        assert stats[Tier.BRONZE].merged_count == 3
+        # All closed PRs counted (including low-value)
+        assert stats[Tier.BRONZE].closed_count == 3
+        # Only normal merged repos counted for unique
+        assert stats[Tier.BRONZE].unique_repo_contribution_count == 3
+        # Credibility: 3 / (3 + 3) = 50%
+        assert stats[Tier.BRONZE].credibility == pytest.approx(0.5, abs=0.01)
+
+    def test_all_low_value_merged_prs_means_zero_merges(self, pr_factory, bronze_config):
+        """
+        If all merged PRs are low-value, merge count is zero.
+        """
+        # Create only low-value merged PRs
+        low_value_prs = [
+            pr_factory.merged(bronze_config, unique_repo=True, low_value_pr=True)
+            for _ in range(10)
+        ]
+
+        stats = calculate_tier_stats(low_value_prs, [])
+
+        assert stats[Tier.BRONZE].merged_count == 0
+        assert stats[Tier.BRONZE].unique_repo_contribution_count == 0
+        assert is_tier_unlocked(Tier.BRONZE, stats) is False
+
+    def test_low_value_flag_per_tier(self, pr_factory, bronze_config, silver_config):
+        """
+        Low-value filtering is applied per-PR regardless of tier.
+        """
+        bronze_tier_config = TIERS[Tier.BRONZE]
+        silver_tier_config = TIERS[Tier.SILVER]
+
+        # Normal Bronze PRs (meets Bronze requirements)
+        bronze_prs = pr_factory.merged_batch(
+            bronze_config, count=bronze_tier_config.required_merges, unique_repos=True
+        )
+
+        # Mix of normal and low-value Silver PRs
+        silver_normal = [
+            pr_factory.merged(silver_config, repo=f'owner/silver-{i}')
+            for i in range(2)
+        ]
+        silver_low_value = [
+            pr_factory.merged(silver_config, repo=f'owner/silver-lv-{i}', low_value_pr=True)
+            for i in range(5)
+        ]
+
+        stats = calculate_tier_stats(bronze_prs + silver_normal + silver_low_value, [])
+
+        # Bronze meets requirements
+        assert stats[Tier.BRONZE].merged_count >= bronze_tier_config.required_merges
+        assert is_tier_unlocked(Tier.BRONZE, stats) is True
+
+        # Silver only has 2 normal merges (low-value not counted)
+        assert stats[Tier.SILVER].merged_count == 2
+        assert stats[Tier.SILVER].unique_repo_contribution_count == 2
+        assert is_tier_unlocked(Tier.SILVER, stats) is False
+
+
+# ============================================================================
+# PRs Without Tier Configuration Tests
+# ============================================================================
+
+
+class TestPRsWithoutTierConfig:
+    """
+    Test behavior of PRs that have no tier configuration.
+
+    These represent PRs from repositories not enrolled in gittensor.
+    They should be completely ignored in all tier calculations.
+    """
+
+    def test_merged_pr_without_tier_not_counted(self, pr_factory, bronze_config):
+        """
+        Merged PRs without tier config are completely ignored.
+        """
+        from gittensor.classes import PRState
+
+        bronze_tier_config = TIERS[Tier.BRONZE]
+
+        # Normal PRs that meet requirements
+        normal_prs = pr_factory.merged_batch(
+            bronze_config, count=bronze_tier_config.required_merges, unique_repos=True
+        )
+
+        # PRs without tier config (should be ignored)
+        untracked_prs = [
+            pr_factory.create_without_tier(state=PRState.MERGED, repo=f'untracked/repo-{i}')
+            for i in range(10)
+        ]
+
+        stats = calculate_tier_stats(normal_prs + untracked_prs, [])
+
+        # Only normal PRs counted
+        assert stats[Tier.BRONZE].merged_count == bronze_tier_config.required_merges
+        # Untracked repos don't add to unique count
+        assert stats[Tier.BRONZE].unique_repo_contribution_count == bronze_tier_config.required_merges
+
+    def test_closed_pr_without_tier_not_counted(self, pr_factory, bronze_config):
+        """
+        Closed PRs without tier config don't affect credibility.
+        """
+        from gittensor.classes import PRState
+
+        bronze_tier_config = TIERS[Tier.BRONZE]
+
+        # Normal merged PRs
+        merged = pr_factory.merged_batch(
+            bronze_config, count=bronze_tier_config.required_merges, unique_repos=True
+        )
+
+        # Lots of closed PRs without tier config (should be ignored)
+        untracked_closed = [
+            pr_factory.create_without_tier(state=PRState.CLOSED, repo=f'untracked/repo-{i}')
+            for i in range(50)
+        ]
+
+        stats = calculate_tier_stats(merged, untracked_closed)
+
+        # No closed PRs counted
+        assert stats[Tier.BRONZE].closed_count == 0
+        # 100% credibility
+        assert stats[Tier.BRONZE].credibility == 1.0
+        # Tier unlocked
+        assert is_tier_unlocked(Tier.BRONZE, stats) is True
+
+    def test_open_pr_without_tier_not_counted(self, pr_factory, bronze_config):
+        """
+        Open PRs without tier config are ignored.
+        """
+        from gittensor.classes import PRState
+
+        bronze_tier_config = TIERS[Tier.BRONZE]
+
+        merged = pr_factory.merged_batch(
+            bronze_config, count=bronze_tier_config.required_merges, unique_repos=True
+        )
+
+        # Open PRs without tier config
+        untracked_open = [
+            pr_factory.create_without_tier(state=PRState.OPEN, repo=f'untracked/repo-{i}')
+            for i in range(10)
+        ]
+
+        stats = calculate_tier_stats(merged, [], untracked_open)
+
+        # No open PRs counted
+        assert stats[Tier.BRONZE].open_count == 0
+        assert stats[Tier.SILVER].open_count == 0
+        assert stats[Tier.GOLD].open_count == 0
+
+
+# ============================================================================
+# Open PRs and Unique Repos Tests
+# ============================================================================
+
+
+class TestOpenPRsAndUniqueRepos:
+    """
+    Test that open PRs don't affect unique repo calculations.
+
+    Only merged PRs contribute to unique_repo_contribution_count.
+    """
+
+    def test_open_prs_dont_count_for_unique_repos(self, pr_factory, bronze_config):
+        """
+        Open PRs should not count toward unique repo requirement.
+        """
+        bronze_tier_config = TIERS[Tier.BRONZE]
+
+        # Create merged PRs to 2 unique repos
+        merged = [
+            pr_factory.merged(bronze_config, repo='owner/repo-1'),
+            pr_factory.merged(bronze_config, repo='owner/repo-2'),
+        ]
+
+        # Create open PRs to 5 different unique repos
+        open_prs = [
+            pr_factory.open(bronze_config, repo=f'owner/open-repo-{i}')
+            for i in range(5)
+        ]
+
+        stats = calculate_tier_stats(merged, [], open_prs)
+
+        # Only merged repos counted for unique
+        assert stats[Tier.BRONZE].unique_repo_contribution_count == 2
+        # Open PRs tracked separately
+        assert stats[Tier.BRONZE].open_count == 5
+        # Tier locked due to insufficient unique repos (need 3)
+        assert is_tier_unlocked(Tier.BRONZE, stats) is False
+
+    def test_open_prs_dont_affect_credibility(self, pr_factory, bronze_config):
+        """
+        Open PRs don't affect credibility calculation (only merged and closed).
+        """
+        bronze_tier_config = TIERS[Tier.BRONZE]
+
+        # 3 merged PRs (unique repos)
+        merged = pr_factory.merged_batch(bronze_config, count=3, unique_repos=True)
+
+        # 1 closed PR
+        closed = [pr_factory.closed(bronze_config)]
+
+        # 100 open PRs (should not affect credibility)
+        open_prs = pr_factory.open_batch(bronze_config, count=100, unique_repos=True)
+
+        stats = calculate_tier_stats(merged, closed, open_prs)
+
+        # Credibility is 3 / (3 + 1) = 75% (open PRs ignored)
+        assert stats[Tier.BRONZE].credibility == pytest.approx(0.75, abs=0.01)
+        # Open PRs tracked
+        assert stats[Tier.BRONZE].open_count == 100
+
+
+# ============================================================================
+# Scoring Details Tests
+# ============================================================================
+
+
+class TestScoringDetails:
+    """
+    Test include_scoring_details=True behavior.
+
+    When enabled, earned_score and collateral_score are accumulated.
+    """
+
+    def test_earned_score_accumulated_for_merged_prs(self, pr_factory, bronze_config):
+        """
+        Earned scores from merged PRs are summed when include_scoring_details=True.
+        """
+        # Create merged PRs with different earned scores
+        merged = [
+            pr_factory.merged(bronze_config, repo='owner/repo-1', earned_score=100.0),
+            pr_factory.merged(bronze_config, repo='owner/repo-2', earned_score=150.0),
+            pr_factory.merged(bronze_config, repo='owner/repo-3', earned_score=75.0),
+        ]
+
+        stats = calculate_tier_stats(merged, [], [], include_scoring_details=True)
+
+        # Total earned score should be 100 + 150 + 75 = 325
+        assert stats[Tier.BRONZE].earned_score == pytest.approx(325.0, abs=0.01)
+
+    def test_earned_score_not_accumulated_without_flag(self, pr_factory, bronze_config):
+        """
+        Earned scores are NOT accumulated when include_scoring_details=False (default).
+        """
+        merged = [
+            pr_factory.merged(bronze_config, repo='owner/repo-1', earned_score=100.0),
+            pr_factory.merged(bronze_config, repo='owner/repo-2', earned_score=150.0),
+        ]
+
+        stats = calculate_tier_stats(merged, [])  # Default: include_scoring_details=False
+
+        # Earned score stays at default (0.0)
+        assert stats[Tier.BRONZE].earned_score == 0.0
+
+    def test_collateral_score_accumulated_for_open_prs(self, pr_factory, bronze_config):
+        """
+        Collateral scores from open PRs are summed when include_scoring_details=True.
+        """
+        merged = pr_factory.merged_batch(bronze_config, count=3, unique_repos=True)
+
+        # Create open PRs with different collateral scores
+        open_prs = [
+            pr_factory.open(bronze_config, repo='owner/open-1', collateral_score=20.0),
+            pr_factory.open(bronze_config, repo='owner/open-2', collateral_score=35.0),
+            pr_factory.open(bronze_config, repo='owner/open-3', collateral_score=15.0),
+        ]
+
+        stats = calculate_tier_stats(merged, [], open_prs, include_scoring_details=True)
+
+        # Total collateral score should be 20 + 35 + 15 = 70
+        assert stats[Tier.BRONZE].collateral_score == pytest.approx(70.0, abs=0.01)
+
+    def test_low_value_prs_earned_score_not_counted(self, pr_factory, bronze_config):
+        """
+        Low-value merged PRs don't contribute to earned_score (since they're filtered out).
+        """
+        # Normal merged PR
+        normal_merged = [
+            pr_factory.merged(bronze_config, repo='owner/repo-1', earned_score=100.0),
+        ]
+
+        # Low-value merged PR (should be ignored entirely)
+        low_value_merged = [
+            pr_factory.merged(bronze_config, repo='owner/repo-2', earned_score=500.0, low_value_pr=True),
+        ]
+
+        stats = calculate_tier_stats(
+            normal_merged + low_value_merged, [], [], include_scoring_details=True
+        )
+
+        # Only normal PR's earned score counted
+        assert stats[Tier.BRONZE].earned_score == pytest.approx(100.0, abs=0.01)
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

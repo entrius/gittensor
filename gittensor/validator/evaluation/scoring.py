@@ -63,9 +63,7 @@ def score_miner_prs(
 
     for label, prs in pr_groups:
         for i, pr in enumerate(prs, start=1):
-            bt.logging.info(
-                f"\n[{i}/{len(prs)}] {label} PR #{pr.number} in {pr.repository_full_name}"
-            )
+            bt.logging.info(f'\n[{i}/{len(prs)}] {label} PR #{pr.number} in {pr.repository_full_name}')
             score_pull_request(
                 pr,
                 miner_eval,

@@ -16,10 +16,12 @@ from gittensor.validator.configurations.tier_config import (
 if TYPE_CHECKING:
     from gittensor.classes import PullRequest
 
+
 def get_tier(pr: 'PullRequest') -> Tier | None:
     if pr.repository_tier_configuration:
         return get_tier_from_config(pr.repository_tier_configuration)
     return None
+
 
 def calculate_tier_stats(
     merged_prs: List['PullRequest'],
@@ -47,7 +49,7 @@ def calculate_tier_stats(
             stats[tier].open_count += 1
             if include_scoring_details:
                 stats[tier].collateral_score += pr.collateral_score
-    
+
     for tier in TIERS_ORDER:
         stats[tier].unique_repo_contribution_count = len(repos_per_tier[tier])
 
@@ -73,7 +75,7 @@ def is_tier_unlocked(tier: Tier, tier_stats: Dict[Tier, TierStats]) -> bool:
                     f'{tier.value} locked: {check_tier.value} needs {config.required_merges} merges, has {stats.merged_count}'
                 )
                 return False
-            
+
         if config.required_unique_repos_merged_to is not None:
             if stats.unique_repo_contribution_count < config.required_unique_repos_merged_to:
                 bt.logging.info(

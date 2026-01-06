@@ -140,9 +140,7 @@ class PRBuilder:
         """Create an open PR."""
         return self.create(state=PRState.OPEN, tier=tier, **kwargs)
 
-    def merged_batch(
-        self, tier: TierConfig, count: int, unique_repos: bool = False, **kwargs
-    ) -> List[PullRequest]:
+    def merged_batch(self, tier: TierConfig, count: int, unique_repos: bool = False, **kwargs) -> List[PullRequest]:
         """Create multiple merged PRs.
 
         Args:
@@ -150,9 +148,7 @@ class PRBuilder:
         """
         return [self.merged(tier=tier, unique_repo=unique_repos, **kwargs) for _ in range(count)]
 
-    def closed_batch(
-        self, tier: TierConfig, count: int, unique_repos: bool = False, **kwargs
-    ) -> List[PullRequest]:
+    def closed_batch(self, tier: TierConfig, count: int, unique_repos: bool = False, **kwargs) -> List[PullRequest]:
         """Create multiple closed PRs.
 
         Args:
@@ -160,9 +156,7 @@ class PRBuilder:
         """
         return [self.closed(tier=tier, unique_repo=unique_repos, **kwargs) for _ in range(count)]
 
-    def open_batch(
-        self, tier: TierConfig, count: int, unique_repos: bool = False, **kwargs
-    ) -> List[PullRequest]:
+    def open_batch(self, tier: TierConfig, count: int, unique_repos: bool = False, **kwargs) -> List[PullRequest]:
         """Create multiple open PRs.
 
         Args:
@@ -414,8 +408,12 @@ def cascade_demoted_miner(pr_factory, bronze_config, silver_config, gold_config)
     return MinerScenario(
         merged=(
             pr_factory.merged_batch(tier=bronze_config, count=bronze_tier_config.required_merges, unique_repos=True)
-            + pr_factory.merged_batch(tier=silver_config, count=silver_tier_config.required_merges - 1, unique_repos=True)  # One short
-            + pr_factory.merged_batch(tier=gold_config, count=gold_tier_config.required_merges + 5, unique_repos=True)  # Perfect Gold
+            + pr_factory.merged_batch(
+                tier=silver_config, count=silver_tier_config.required_merges - 1, unique_repos=True
+            )  # One short
+            + pr_factory.merged_batch(
+                tier=gold_config, count=gold_tier_config.required_merges + 5, unique_repos=True
+            )  # Perfect Gold
         ),
         closed=[],
         open=[],

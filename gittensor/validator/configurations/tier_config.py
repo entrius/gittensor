@@ -18,6 +18,8 @@ class TierStats:
     closed_count: int = 0
     open_count: int = 0
 
+    unique_repo_contribution_count: int = 0
+
     # Included as scoring details at the tier level
     earned_score: float = 0.0
     collateral_score: float = 0.0
@@ -53,6 +55,7 @@ TIER_DEFAULTS = {
 class TierConfig:
     # Next tier unlock requirements (None for top tier)
     required_merges: Optional[int]
+    required_unique_repos_merged_to: Optional[int]
     required_credibility: Optional[float]
 
     # Tier-specific scaling

@@ -32,7 +32,9 @@ def get_network_totals(miner_evaluations: Dict[int, MinerEvaluation]) -> tuple[i
 
     for evaluation in miner_evaluations.values():
         total_lines += evaluation.total_lines_changed
-        total_merged_prs += evaluation.total_merged_prs
+        for pr in evaluation.merged_pull_requests:
+            if not pr.low_value_pr:
+                total_merged_prs += 1
 
         if repos := evaluation.unique_repos_contributed_to:
             unique_repos.update(repos)

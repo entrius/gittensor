@@ -70,13 +70,21 @@ class PRBuilder:
 
         # Or use the generic create method:
         pr = pr_factory.create(state=PRState.MERGED, tier=bronze_config)
+
+        # Create PRs with unique repos (for unique repo requirement testing):
+        prs = pr_factory.merged_batch(tier=bronze_config, count=3, unique_repos=True)
     """
 
     _counter: int = 0
+    _repo_counter: int = 0
 
     def _next_number(self) -> int:
         self._counter += 1
         return self._counter
+
+    def _next_repo(self) -> str:
+        self._repo_counter += 1
+        return f'test/repo-{self._repo_counter}'
 
     def create(
         self,
@@ -85,11 +93,20 @@ class PRBuilder:
         number: Optional[int] = None,
         earned_score: float = 100.0,
         collateral_score: float = 20.0,
-        repo: str = 'test/repo',
+        repo: Optional[str] = None,
+        unique_repo: bool = False,
     ) -> PullRequest:
-        """Create a mock PullRequest with the given parameters."""
+        """Create a mock PullRequest with the given parameters.
+
+        Args:
+            unique_repo: If True, generates a unique repo name for this PR.
+                         If False and repo is None, uses 'test/repo'.
+        """
         if number is None:
             number = self._next_number()
+
+        if repo is None:
+            repo = self._next_repo() if unique_repo else 'test/repo'
 
         return PullRequest(
             number=number,
@@ -119,21 +136,40 @@ class PRBuilder:
         """Create an open PR."""
         return self.create(state=PRState.OPEN, tier=tier, **kwargs)
 
-    def merged_batch(self, tier: TierConfig, count: int, **kwargs) -> List[PullRequest]:
-        """Create multiple merged PRs."""
-        return [self.merged(tier=tier, **kwargs) for _ in range(count)]
+    def merged_batch(
+        self, tier: TierConfig, count: int, unique_repos: bool = False, **kwargs
+    ) -> List[PullRequest]:
+        """Create multiple merged PRs.
 
-    def closed_batch(self, tier: TierConfig, count: int, **kwargs) -> List[PullRequest]:
-        """Create multiple closed PRs."""
-        return [self.closed(tier=tier, **kwargs) for _ in range(count)]
+        Args:
+            unique_repos: If True, each PR gets a unique repo name.
+        """
+        return [self.merged(tier=tier, unique_repo=unique_repos, **kwargs) for _ in range(count)]
 
-    def open_batch(self, tier: TierConfig, count: int, **kwargs) -> List[PullRequest]:
-        """Create multiple open PRs."""
-        return [self.open(tier=tier, **kwargs) for _ in range(count)]
+    def closed_batch(
+        self, tier: TierConfig, count: int, unique_repos: bool = False, **kwargs
+    ) -> List[PullRequest]:
+        """Create multiple closed PRs.
+
+        Args:
+            unique_repos: If True, each PR gets a unique repo name.
+        """
+        return [self.closed(tier=tier, unique_repo=unique_repos, **kwargs) for _ in range(count)]
+
+    def open_batch(
+        self, tier: TierConfig, count: int, unique_repos: bool = False, **kwargs
+    ) -> List[PullRequest]:
+        """Create multiple open PRs.
+
+        Args:
+            unique_repos: If True, each PR gets a unique repo name.
+        """
+        return [self.open(tier=tier, unique_repo=unique_repos, **kwargs) for _ in range(count)]
 
     def reset(self):
-        """Reset the counter (useful between tests)."""
+        """Reset the counters (useful between tests)."""
         self._counter = 0
+        self._repo_counter = 0
 
 
 @pytest.fixture
@@ -188,37 +224,37 @@ def new_miner(pr_factory, bronze_config) -> MinerScenario:
 
 @pytest.fixture
 def bronze_miner(pr_factory, bronze_config) -> MinerScenario:
-    """Miner with Bronze unlocked (meets requirements with 100% credibility)."""
+    """Miner with Bronze unlocked (meets requirements with 100% credibility and unique repos)."""
     pr_factory.reset()
     bronze_tier_config = TIERS[Tier.BRONZE]
     return MinerScenario(
-        merged=pr_factory.merged_batch(tier=bronze_config, count=bronze_tier_config.required_merges),
+        merged=pr_factory.merged_batch(tier=bronze_config, count=bronze_tier_config.required_merges, unique_repos=True),
         closed=[],
         open=[],
-        description=f'Bronze miner: {bronze_tier_config.required_merges} merged = 100% credibility',
+        description=f'Bronze miner: {bronze_tier_config.required_merges} merged to unique repos = 100% credibility',
     )
 
 
 @pytest.fixture
 def silver_unlocked_miner(pr_factory, bronze_config, silver_config) -> MinerScenario:
-    """Miner who has unlocked Silver (Bronze and Silver requirements met)."""
+    """Miner who has unlocked Silver (Bronze and Silver requirements met with unique repos)."""
     pr_factory.reset()
     bronze_tier_config = TIERS[Tier.BRONZE]
     silver_tier_config = TIERS[Tier.SILVER]
     return MinerScenario(
         merged=(
-            pr_factory.merged_batch(tier=bronze_config, count=bronze_tier_config.required_merges)
-            + pr_factory.merged_batch(tier=silver_config, count=silver_tier_config.required_merges)
+            pr_factory.merged_batch(tier=bronze_config, count=bronze_tier_config.required_merges, unique_repos=True)
+            + pr_factory.merged_batch(tier=silver_config, count=silver_tier_config.required_merges, unique_repos=True)
         ),
         closed=[],
         open=[],
-        description='Silver miner: Bronze + Silver unlocked with 100% credibility',
+        description='Silver miner: Bronze + Silver unlocked with 100% credibility and unique repos',
     )
 
 
 @pytest.fixture
 def silver_threshold_miner(pr_factory, bronze_config, silver_config) -> MinerScenario:
-    """Miner exactly at Silver credibility threshold."""
+    """Miner exactly at Silver credibility threshold with unique repos."""
     pr_factory.reset()
     bronze_tier_config = TIERS[Tier.BRONZE]
     silver_tier_config = TIERS[Tier.SILVER]
@@ -230,10 +266,10 @@ def silver_threshold_miner(pr_factory, bronze_config, silver_config) -> MinerSce
 
     return MinerScenario(
         merged=(
-            pr_factory.merged_batch(tier=bronze_config, count=bronze_tier_config.required_merges)
-            + pr_factory.merged_batch(tier=silver_config, count=required_merges)
+            pr_factory.merged_batch(tier=bronze_config, count=bronze_tier_config.required_merges, unique_repos=True)
+            + pr_factory.merged_batch(tier=silver_config, count=required_merges, unique_repos=True)
         ),
-        closed=pr_factory.closed_batch(tier=silver_config, count=closed_count),
+        closed=pr_factory.closed_batch(tier=silver_config, count=closed_count, unique_repos=True),
         open=[],
         description=f'Silver threshold: {required_merges} merged, {closed_count} closed = ~{required_credibility * 100}%',
     )
@@ -241,26 +277,26 @@ def silver_threshold_miner(pr_factory, bronze_config, silver_config) -> MinerSce
 
 @pytest.fixture
 def gold_unlocked_miner(pr_factory, bronze_config, silver_config, gold_config) -> MinerScenario:
-    """Miner who has unlocked Gold tier (all tiers unlocked)."""
+    """Miner who has unlocked Gold tier (all tiers unlocked with unique repos)."""
     pr_factory.reset()
     bronze_tier_config = TIERS[Tier.BRONZE]
     silver_tier_config = TIERS[Tier.SILVER]
     gold_tier_config = TIERS[Tier.GOLD]
     return MinerScenario(
         merged=(
-            pr_factory.merged_batch(tier=bronze_config, count=bronze_tier_config.required_merges)
-            + pr_factory.merged_batch(tier=silver_config, count=silver_tier_config.required_merges)
-            + pr_factory.merged_batch(tier=gold_config, count=gold_tier_config.required_merges)
+            pr_factory.merged_batch(tier=bronze_config, count=bronze_tier_config.required_merges, unique_repos=True)
+            + pr_factory.merged_batch(tier=silver_config, count=silver_tier_config.required_merges, unique_repos=True)
+            + pr_factory.merged_batch(tier=gold_config, count=gold_tier_config.required_merges, unique_repos=True)
         ),
         closed=[],
         open=[],
-        description='Gold miner: All tiers unlocked with 100% credibility',
+        description='Gold miner: All tiers unlocked with 100% credibility and unique repos',
     )
 
 
 @pytest.fixture
 def gold_threshold_miner(pr_factory, bronze_config, silver_config, gold_config) -> MinerScenario:
-    """Miner exactly at Gold credibility threshold."""
+    """Miner exactly at Gold credibility threshold with unique repos."""
     pr_factory.reset()
     bronze_tier_config = TIERS[Tier.BRONZE]
     silver_tier_config = TIERS[Tier.SILVER]
@@ -273,11 +309,11 @@ def gold_threshold_miner(pr_factory, bronze_config, silver_config, gold_config) 
 
     return MinerScenario(
         merged=(
-            pr_factory.merged_batch(tier=bronze_config, count=bronze_tier_config.required_merges)
-            + pr_factory.merged_batch(tier=silver_config, count=silver_tier_config.required_merges)
-            + pr_factory.merged_batch(tier=gold_config, count=required_merges)
+            pr_factory.merged_batch(tier=bronze_config, count=bronze_tier_config.required_merges, unique_repos=True)
+            + pr_factory.merged_batch(tier=silver_config, count=silver_tier_config.required_merges, unique_repos=True)
+            + pr_factory.merged_batch(tier=gold_config, count=required_merges, unique_repos=True)
         ),
-        closed=pr_factory.closed_batch(tier=gold_config, count=closed_count),
+        closed=pr_factory.closed_batch(tier=gold_config, count=closed_count, unique_repos=True),
         open=[],
         description=f'Gold threshold: {required_merges} merged, {closed_count} closed = ~{required_credibility * 100}%',
     )
@@ -303,11 +339,11 @@ def demoted_from_gold_miner(pr_factory, bronze_config, silver_config, gold_confi
 
     return MinerScenario(
         merged=(
-            pr_factory.merged_batch(tier=bronze_config, count=bronze_tier_config.required_merges)
-            + pr_factory.merged_batch(tier=silver_config, count=silver_tier_config.required_merges)
-            + pr_factory.merged_batch(tier=gold_config, count=gold_required)
+            pr_factory.merged_batch(tier=bronze_config, count=bronze_tier_config.required_merges, unique_repos=True)
+            + pr_factory.merged_batch(tier=silver_config, count=silver_tier_config.required_merges, unique_repos=True)
+            + pr_factory.merged_batch(tier=gold_config, count=gold_required, unique_repos=True)
         ),
-        closed=pr_factory.closed_batch(tier=gold_config, count=closed_count),
+        closed=pr_factory.closed_batch(tier=gold_config, count=closed_count, unique_repos=True),
         open=[],
         description=f'Demoted from Gold: {gold_required}/{gold_required + closed_count} (below {gold_cred_required * 100}% threshold)',
     )
@@ -327,10 +363,10 @@ def demoted_from_silver_miner(pr_factory, bronze_config, silver_config) -> Miner
 
     return MinerScenario(
         merged=(
-            pr_factory.merged_batch(tier=bronze_config, count=bronze_tier_config.required_merges)
-            + pr_factory.merged_batch(tier=silver_config, count=silver_required)
+            pr_factory.merged_batch(tier=bronze_config, count=bronze_tier_config.required_merges, unique_repos=True)
+            + pr_factory.merged_batch(tier=silver_config, count=silver_required, unique_repos=True)
         ),
-        closed=pr_factory.closed_batch(tier=silver_config, count=closed_count),
+        closed=pr_factory.closed_batch(tier=silver_config, count=closed_count, unique_repos=True),
         open=[],
         description=f'Demoted from Silver: {silver_required}/{silver_required + closed_count} (below {silver_cred_required * 100}% threshold)',
     )
@@ -338,7 +374,7 @@ def demoted_from_silver_miner(pr_factory, bronze_config, silver_config) -> Miner
 
 @pytest.fixture
 def cascade_demoted_miner(pr_factory, bronze_config, silver_config, gold_config) -> MinerScenario:
-    """Miner with perfect Gold stats but Silver is locked (cascade demotion)."""
+    """Miner with perfect Gold stats but Silver is locked (cascade demotion due to not enough merges)."""
     pr_factory.reset()
     bronze_tier_config = TIERS[Tier.BRONZE]
     silver_tier_config = TIERS[Tier.SILVER]
@@ -346,9 +382,9 @@ def cascade_demoted_miner(pr_factory, bronze_config, silver_config, gold_config)
 
     return MinerScenario(
         merged=(
-            pr_factory.merged_batch(tier=bronze_config, count=bronze_tier_config.required_merges)
-            + pr_factory.merged_batch(tier=silver_config, count=silver_tier_config.required_merges - 1)  # One short
-            + pr_factory.merged_batch(tier=gold_config, count=gold_tier_config.required_merges + 5)  # Perfect Gold
+            pr_factory.merged_batch(tier=bronze_config, count=bronze_tier_config.required_merges, unique_repos=True)
+            + pr_factory.merged_batch(tier=silver_config, count=silver_tier_config.required_merges - 1, unique_repos=True)  # One short
+            + pr_factory.merged_batch(tier=gold_config, count=gold_tier_config.required_merges + 5, unique_repos=True)  # Perfect Gold
         ),
         closed=[],
         open=[],
@@ -367,14 +403,14 @@ def spammer_miner(pr_factory, bronze_config, silver_config, gold_config) -> Mine
     pr_factory.reset()
     return MinerScenario(
         merged=(
-            pr_factory.merged_batch(tier=bronze_config, count=5)
-            + pr_factory.merged_batch(tier=silver_config, count=5)
-            + pr_factory.merged_batch(tier=gold_config, count=6)
+            pr_factory.merged_batch(tier=bronze_config, count=5, unique_repos=True)
+            + pr_factory.merged_batch(tier=silver_config, count=5, unique_repos=True)
+            + pr_factory.merged_batch(tier=gold_config, count=6, unique_repos=True)
         ),
         closed=(
-            pr_factory.closed_batch(tier=bronze_config, count=20)
-            + pr_factory.closed_batch(tier=silver_config, count=20)
-            + pr_factory.closed_batch(tier=gold_config, count=20)
+            pr_factory.closed_batch(tier=bronze_config, count=20, unique_repos=True)
+            + pr_factory.closed_batch(tier=silver_config, count=20, unique_repos=True)
+            + pr_factory.closed_batch(tier=gold_config, count=20, unique_repos=True)
         ),
         open=[],
         description='Spammer: lots of closed PRs destroying credibility',
@@ -383,17 +419,17 @@ def spammer_miner(pr_factory, bronze_config, silver_config, gold_config) -> Mine
 
 @pytest.fixture
 def perfect_miner(pr_factory, bronze_config, silver_config, gold_config) -> MinerScenario:
-    """Miner with 100% credibility across all tiers."""
+    """Miner with 100% credibility across all tiers and unique repos."""
     pr_factory.reset()
     return MinerScenario(
         merged=(
-            pr_factory.merged_batch(tier=bronze_config, count=5)
-            + pr_factory.merged_batch(tier=silver_config, count=5)
-            + pr_factory.merged_batch(tier=gold_config, count=10)
+            pr_factory.merged_batch(tier=bronze_config, count=5, unique_repos=True)
+            + pr_factory.merged_batch(tier=silver_config, count=5, unique_repos=True)
+            + pr_factory.merged_batch(tier=gold_config, count=10, unique_repos=True)
         ),
         closed=[],
         open=[],
-        description='Perfect miner: 100% credibility everywhere',
+        description='Perfect miner: 100% credibility everywhere with unique repos',
     )
 
 
@@ -403,14 +439,14 @@ def mixed_performance_miner(pr_factory, bronze_config, silver_config, gold_confi
     pr_factory.reset()
     return MinerScenario(
         merged=(
-            pr_factory.merged_batch(tier=bronze_config, count=9)  # 90%
-            + pr_factory.merged_batch(tier=silver_config, count=11)  # 55%
-            + pr_factory.merged_batch(tier=gold_config, count=6)  # 60%
+            pr_factory.merged_batch(tier=bronze_config, count=9, unique_repos=True)  # 90%
+            + pr_factory.merged_batch(tier=silver_config, count=11, unique_repos=True)  # 55%
+            + pr_factory.merged_batch(tier=gold_config, count=6, unique_repos=True)  # 60%
         ),
         closed=(
-            pr_factory.closed_batch(tier=bronze_config, count=1)
-            + pr_factory.closed_batch(tier=silver_config, count=9)
-            + pr_factory.closed_batch(tier=gold_config, count=4)
+            pr_factory.closed_batch(tier=bronze_config, count=1, unique_repos=True)
+            + pr_factory.closed_batch(tier=silver_config, count=9, unique_repos=True)
+            + pr_factory.closed_batch(tier=gold_config, count=4, unique_repos=True)
         ),
         open=[],
         description='Mixed: Bronze 90%, Silver 55%, Gold 60% (locked)',
@@ -419,13 +455,16 @@ def mixed_performance_miner(pr_factory, bronze_config, silver_config, gold_confi
 
 @pytest.fixture
 def miner_with_open_prs(pr_factory, bronze_config, silver_config) -> MinerScenario:
-    """Miner with some open PRs (for collateral testing)."""
+    """Miner with some open PRs (for collateral testing) with unique repos."""
     pr_factory.reset()
     return MinerScenario(
-        merged=pr_factory.merged_batch(tier=bronze_config, count=3),
-        closed=pr_factory.closed_batch(tier=bronze_config, count=1),
-        open=(pr_factory.open_batch(tier=bronze_config, count=2) + pr_factory.open_batch(tier=silver_config, count=3)),
-        description='Miner with 5 open PRs (for collateral testing)',
+        merged=pr_factory.merged_batch(tier=bronze_config, count=3, unique_repos=True),
+        closed=pr_factory.closed_batch(tier=bronze_config, count=1, unique_repos=True),
+        open=(
+            pr_factory.open_batch(tier=bronze_config, count=2, unique_repos=True)
+            + pr_factory.open_batch(tier=silver_config, count=3, unique_repos=True)
+        ),
+        description='Miner with 5 open PRs (for collateral testing) with unique repos',
     )
 
 
@@ -441,21 +480,33 @@ def empty_tier_stats() -> dict:
 
 
 def _unlocked_bronze_stats() -> TierStats:
-    """Helper to create Bronze stats that meet unlock requirements."""
+    """Helper to create Bronze stats that meet unlock requirements (including unique repos)."""
     bronze_config = TIERS[Tier.BRONZE]
-    return TierStats(merged_count=bronze_config.required_merges, closed_count=0)
+    return TierStats(
+        merged_count=bronze_config.required_merges,
+        closed_count=0,
+        unique_repo_contribution_count=bronze_config.required_unique_repos_merged_to,
+    )
 
 
 def _unlocked_silver_stats() -> TierStats:
-    """Helper to create Silver stats that meet unlock requirements."""
+    """Helper to create Silver stats that meet unlock requirements (including unique repos)."""
     silver_config = TIERS[Tier.SILVER]
-    return TierStats(merged_count=silver_config.required_merges, closed_count=0)
+    return TierStats(
+        merged_count=silver_config.required_merges,
+        closed_count=0,
+        unique_repo_contribution_count=silver_config.required_unique_repos_merged_to,
+    )
 
 
 def _unlocked_gold_stats() -> TierStats:
-    """Helper to create Gold stats that meet unlock requirements."""
+    """Helper to create Gold stats that meet unlock requirements (including unique repos)."""
     gold_config = TIERS[Tier.GOLD]
-    return TierStats(merged_count=gold_config.required_merges, closed_count=0)
+    return TierStats(
+        merged_count=gold_config.required_merges,
+        closed_count=0,
+        unique_repo_contribution_count=gold_config.required_unique_repos_merged_to,
+    )
 
 
 @pytest.fixture

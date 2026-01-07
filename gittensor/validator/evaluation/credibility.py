@@ -17,6 +17,12 @@ if TYPE_CHECKING:
     from gittensor.classes import PullRequest
 
 
+def get_tier(pr: 'PullRequest') -> Tier | None:
+    if pr.repository_tier_configuration:
+        return get_tier_from_config(pr.repository_tier_configuration)
+    return None
+
+
 def calculate_tier_stats(
     merged_prs: List['PullRequest'],
     closed_prs: List['PullRequest'],
@@ -25,15 +31,12 @@ def calculate_tier_stats(
 ) -> Dict[Tier, TierStats]:
     """Calculate merged/closed counts per tier."""
     stats: Dict[Tier, TierStats] = {tier: TierStats() for tier in Tier}
-
-    def get_tier(pr: 'PullRequest') -> Tier | None:
-        if pr.repository_tier_configuration:
-            return get_tier_from_config(pr.repository_tier_configuration)
-        return None
+    repos_per_tier: Dict[Tier, set] = {tier: set() for tier in Tier}
 
     for pr in merged_prs:
         if (tier := get_tier(pr)) and not pr.low_value_pr:
             stats[tier].merged_count += 1
+            repos_per_tier[tier].add(pr.repository_full_name)
             if include_scoring_details:
                 stats[tier].earned_score += pr.earned_score
 
@@ -46,6 +49,9 @@ def calculate_tier_stats(
             stats[tier].open_count += 1
             if include_scoring_details:
                 stats[tier].collateral_score += pr.collateral_score
+
+    for tier in TIERS_ORDER:
+        stats[tier].unique_repo_contribution_count = len(repos_per_tier[tier])
 
     return stats
 
@@ -67,6 +73,13 @@ def is_tier_unlocked(tier: Tier, tier_stats: Dict[Tier, TierStats]) -> bool:
             if stats.merged_count < config.required_merges:
                 bt.logging.info(
                     f'{tier.value} locked: {check_tier.value} needs {config.required_merges} merges, has {stats.merged_count}'
+                )
+                return False
+
+        if config.required_unique_repos_merged_to is not None:
+            if stats.unique_repo_contribution_count < config.required_unique_repos_merged_to:
+                bt.logging.info(
+                    f'{tier.value} locked: {check_tier.value} needs {config.required_unique_repos_merged_to} unique repos merged to, has {stats.unique_repo_contribution_count}'
                 )
                 return False
 

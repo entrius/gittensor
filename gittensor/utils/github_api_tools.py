@@ -356,11 +356,13 @@ def try_add_open_or_closed_pr(
     """
     if repository_full_name not in active_repositories:
         return
+    
+    # Ignore all maintainer contributions
+    if pr_raw.get('authorAssociation') in MAINTAINER_ASSOCIATIONS:
+        return
 
     if pr_state == PRState.OPEN.value:
-        if pr_raw.get('authorAssociation') not in MAINTAINER_ASSOCIATIONS:
-            miner_eval.add_open_pull_request(pr_raw)
-        return
+        miner_eval.add_open_pull_request(pr_raw)
 
     if pr_state == PRState.CLOSED.value:
         closed_at = pr_raw.get('closedAt')

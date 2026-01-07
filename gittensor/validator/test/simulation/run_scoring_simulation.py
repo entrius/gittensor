@@ -33,6 +33,7 @@ from gittensor.validator.evaluation.inspections import detect_and_penalize_miner
 from gittensor.validator.evaluation.normalize import normalize_rewards_linear
 from gittensor.validator.evaluation.scoring import finalize_miner_scores, score_miner_prs
 from gittensor.validator.utils.load_weights import load_master_repo_weights, load_programming_language_weights
+from gittensor.validator.utils.storage import DatabaseStorage
 
 
 def make_aware(dt: datetime) -> datetime:
@@ -251,8 +252,14 @@ def load_all_evaluations(conn) -> Dict[int, MinerEvaluation]:
 
 def run_scoring_simulation(
     include_custom: bool = True,
+    store_evaluations: bool = False,
 ) -> Tuple[Dict[int, MinerEvaluation], Dict[int, float], Dict[int, float]]:
-    """Run full scoring pipeline on DB data."""
+    """Run full scoring pipeline on DB data.
+
+    Args:
+        include_custom: Include custom evaluations from mock_evaluations.py
+        store_evaluations: If True, store evaluations to database via DatabaseStorage
+    """
     print('=' * 70)
     print('SCORING SIMULATION START')
     print('=' * 70)
@@ -260,7 +267,7 @@ def run_scoring_simulation(
     time.sleep(0.1)
 
     # 1. Connect to DB
-    print('\n[1/8] Connecting to DB...')
+    print('\n[1/9] Connecting to DB...')
     sys.stdout.flush()
     time.sleep(0.1)
     conn = create_db_connection()
@@ -268,7 +275,7 @@ def run_scoring_simulation(
         return {}, {}, {}
 
     # 2. Load weights
-    print('\n[2/8] Loading weights...')
+    print('\n[2/9] Loading weights...')
     sys.stdout.flush()
     time.sleep(0.1)
     master_repos = load_master_repo_weights()
@@ -278,24 +285,24 @@ def run_scoring_simulation(
     time.sleep(0.1)
 
     # 3. Load evaluations from DB
-    print('\n[3/8] Loading evaluations from DB...')
+    print('\n[3/9] Loading evaluations from DB...')
     sys.stdout.flush()
     time.sleep(0.1)
     evals = load_all_evaluations(conn)
 
     # 4. Add custom evaluations
     if include_custom and CUSTOM_EVALUATIONS_AVAILABLE:
-        print('\n[4/8] Adding custom evaluations...')
+        print('\n[4/9] Adding custom evaluations...')
         for uid, ev in get_custom_evaluations().items():
             evals[uid] = ev
             print(f'  Added custom uid={uid}')
     else:
-        print('\n[4/8] No custom evaluations.')
+        print('\n[4/9] No custom evaluations.')
     sys.stdout.flush()
     time.sleep(0.1)
 
     # 5. Score PRs (uses original score_miner_prs - skips GitHub call since file_changes pre-loaded)
-    print('\n[5/8] Scoring PRs...')
+    print('\n[5/9] Scoring PRs...')
     sys.stdout.flush()
     time.sleep(0.1)
     for uid, ev in evals.items():
@@ -304,23 +311,42 @@ def run_scoring_simulation(
         score_miner_prs(ev, master_repos, prog_langs)
 
     # 6. Detect duplicate GitHub accounts
-    print('\n[6/8] Checking for duplicate GitHub accounts...')
+    print('\n[6/9] Checking for duplicate GitHub accounts...')
     sys.stdout.flush()
     time.sleep(0.1)
     detect_and_penalize_miners_sharing_github(evals)
 
     # 7. Finalize scores
-    print('\n[7/8] Finalizing scores...')
+    print('\n[7/9] Finalizing scores...')
     sys.stdout.flush()
     time.sleep(0.1)
     finalize_miner_scores(evals)
 
     # 8. Normalize & apply dynamic emissions
-    print('\n[8/8] Normalizing & applying dynamic emissions...')
+    print('\n[8/9] Normalizing & applying dynamic emissions...')
     sys.stdout.flush()
     time.sleep(0.1)
     normalized = normalize_rewards_linear(evals)
     scaled = apply_dynamic_emissions_using_network_contributions(normalized, evals)
+
+    # 9. Store evaluations (optional)
+    if store_evaluations:
+        print('\n[9/9] Storing evaluations to database...')
+        sys.stdout.flush()
+        time.sleep(0.1)
+        db_storage = DatabaseStorage()
+        if db_storage.is_enabled():
+            for uid, miner_eval in evals.items():
+                result = db_storage.store_evaluation(miner_eval)
+                if result.success:
+                    print(f'  Stored UID {uid}')
+                else:
+                    print(f'  Failed UID {uid}: {result.errors}')
+            db_storage.close()
+        else:
+            print('  WARNING: Database storage not enabled. Check DB env vars.')
+    else:
+        print('\n[9/9] Skipping evaluation storage (store_evaluations=False)')
 
     conn.close()
 
@@ -357,8 +383,18 @@ def _print_summary(evals: Dict[int, MinerEvaluation], normalized: Dict[int, floa
 
 
 if __name__ == '__main__':
+    import argparse
+
+    parser = argparse.ArgumentParser(description='Run scoring simulation')
+    parser.add_argument('--store', action='store_true', help='Store evaluations to database')
+    parser.add_argument('--no-custom', action='store_true', help='Exclude custom evaluations')
+    args = parser.parse_args()
+
     try:
-        run_scoring_simulation()
+        run_scoring_simulation(
+            include_custom=not args.no_custom,
+            store_evaluations=args.store,
+        )
     except KeyboardInterrupt:
         print('\nInterrupted')
         sys.exit(0)

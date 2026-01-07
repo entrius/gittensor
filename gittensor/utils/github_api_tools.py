@@ -356,7 +356,7 @@ def try_add_open_or_closed_pr(
     """
     if repository_full_name not in active_repositories:
         return
-    
+
     # Ignore all maintainer contributions
     if pr_raw.get('authorAssociation') in MAINTAINER_ASSOCIATIONS:
         return

@@ -144,9 +144,10 @@ class PullRequest:
     merged_at: Optional[datetime]  # None for OPEN PRs
     created_at: datetime
 
-    # PR state for collateral system
+    # PR state based fields
     pr_state: PRState
     repository_tier_configuration: Optional[TierConfig] = None  # assigned when scoring PR
+    low_value_pr: bool = False
 
     # Score fields
     repo_weight_multiplier: float = 1.0

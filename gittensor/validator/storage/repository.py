@@ -154,6 +154,7 @@ class Repository(BaseRepository):
                     pr.commits,
                     pr.total_lines_scored,
                     pr.gittensor_tagged,
+                    pr.low_value_pr,
                     pr.merged_by_login,
                     pr.description,
                     pr.last_edited_at,
@@ -304,16 +305,19 @@ class Repository(BaseRepository):
                 evaluation.stats_by_tier[Tier.BRONZE].total_prs,
                 evaluation.stats_by_tier[Tier.BRONZE].collateral_score,
                 evaluation.stats_by_tier[Tier.BRONZE].earned_score,
+                evaluation.stats_by_tier[Tier.BRONZE].unique_repo_contribution_count,
                 evaluation.stats_by_tier[Tier.SILVER].merged_count,
                 evaluation.stats_by_tier[Tier.SILVER].closed_count,
                 evaluation.stats_by_tier[Tier.SILVER].total_prs,
                 evaluation.stats_by_tier[Tier.SILVER].collateral_score,
                 evaluation.stats_by_tier[Tier.SILVER].earned_score,
+                evaluation.stats_by_tier[Tier.SILVER].unique_repo_contribution_count,
                 evaluation.stats_by_tier[Tier.GOLD].merged_count,
                 evaluation.stats_by_tier[Tier.GOLD].closed_count,
                 evaluation.stats_by_tier[Tier.GOLD].total_prs,
                 evaluation.stats_by_tier[Tier.GOLD].collateral_score,
                 evaluation.stats_by_tier[Tier.GOLD].earned_score,
+                evaluation.stats_by_tier[Tier.GOLD].unique_repo_contribution_count,
             )
         ]
 

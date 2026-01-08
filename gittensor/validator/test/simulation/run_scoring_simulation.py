@@ -36,11 +36,18 @@ from gittensor.validator.evaluation.dynamic_emissions import apply_dynamic_emiss
 from gittensor.validator.evaluation.inspections import detect_and_penalize_miners_sharing_github
 from gittensor.validator.evaluation.normalize import normalize_rewards_linear
 from gittensor.validator.evaluation.scoring import finalize_miner_scores, score_miner_prs
-from gittensor.validator.utils.load_weights import (
-    load_master_repo_weights,
-    load_programming_language_weights,
-    load_token_weights,
-)
+from gittensor.validator.utils.load_weights import load_master_repo_weights, load_programming_language_weights, load_token_weights
+from gittensor.validator.utils.storage import DatabaseStorage
+
+
+def make_aware(dt: datetime) -> datetime:
+    """Convert naive datetime to UTC-aware. Returns None if input is None."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../..')))
 
@@ -121,8 +128,14 @@ def create_miner_evaluation(uid: int, hotkey: str, github_id: str, github_pat: s
 
 def run_scoring_simulation(
     include_custom: bool = True,
+    store_evaluations: bool = False,
 ) -> Tuple[Dict[int, MinerEvaluation], Dict[int, float], Dict[int, float]]:
-    """Run full scoring pipeline fetching PRs from GitHub in real-time."""
+    """Run full scoring pipeline on DB data.
+
+    Args:
+        include_custom: Include custom evaluations from mock_evaluations.py
+        store_evaluations: If True, store evaluations to database via DatabaseStorage
+    """
     print('=' * 70)
     print('SCORING SIMULATION START')
     print('=' * 70)
@@ -178,7 +191,7 @@ def run_scoring_simulation(
             evals[uid] = ev
             print(f'  Added custom uid={uid}')
     else:
-        print('\n[4/8] No custom evaluations.')
+        print('\n[4/9] No custom evaluations.')
     sys.stdout.flush()
     time.sleep(0.1)
 
@@ -192,23 +205,44 @@ def run_scoring_simulation(
         score_miner_prs(ev, master_repos, prog_langs, token_weights)
 
     # 6. Detect duplicate GitHub accounts
-    print('\n[6/8] Checking for duplicate GitHub accounts...')
+    print('\n[6/9] Checking for duplicate GitHub accounts...')
     sys.stdout.flush()
     time.sleep(0.1)
     detect_and_penalize_miners_sharing_github(evals)
 
     # 7. Finalize scores
-    print('\n[7/8] Finalizing scores...')
+    print('\n[7/9] Finalizing scores...')
     sys.stdout.flush()
     time.sleep(0.1)
     finalize_miner_scores(evals)
 
     # 8. Normalize & apply dynamic emissions
-    print('\n[8/8] Normalizing & applying dynamic emissions...')
+    print('\n[8/9] Normalizing & applying dynamic emissions...')
     sys.stdout.flush()
     time.sleep(0.1)
     normalized = normalize_rewards_linear(evals)
     scaled = apply_dynamic_emissions_using_network_contributions(normalized, evals)
+
+    # 9. Store evaluations (optional)
+    if store_evaluations:
+        print('\n[9/9] Storing evaluations to database...')
+        sys.stdout.flush()
+        time.sleep(0.1)
+        db_storage = DatabaseStorage()
+        if db_storage.is_enabled():
+            for uid, miner_eval in evals.items():
+                result = db_storage.store_evaluation(miner_eval)
+                if result.success:
+                    print(f'  Stored UID {uid}')
+                else:
+                    print(f'  Failed UID {uid}: {result.errors}')
+            db_storage.close()
+        else:
+            print('  WARNING: Database storage not enabled. Check DB env vars.')
+    else:
+        print('\n[9/9] Skipping evaluation storage (store_evaluations=False)')
+
+    conn.close()
 
     # Print summary
     _print_summary(evals, normalized, scaled)
@@ -243,8 +277,18 @@ def _print_summary(evals: Dict[int, MinerEvaluation], normalized: Dict[int, floa
 
 
 if __name__ == '__main__':
+    import argparse
+
+    parser = argparse.ArgumentParser(description='Run scoring simulation')
+    parser.add_argument('--store', action='store_true', help='Store evaluations to database')
+    parser.add_argument('--no-custom', action='store_true', help='Exclude custom evaluations')
+    args = parser.parse_args()
+
     try:
-        run_scoring_simulation()
+        run_scoring_simulation(
+            include_custom=not args.no_custom,
+            store_evaluations=args.store,
+        )
     except KeyboardInterrupt:
         print('\nInterrupted')
         sys.exit(0)

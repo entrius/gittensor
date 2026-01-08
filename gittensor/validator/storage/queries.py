@@ -17,7 +17,7 @@ INSERT INTO pull_requests (
     open_pr_spam_multiplier, repository_uniqueness_multiplier, time_decay_multiplier,
     gittensor_tag_multiplier, credibility_multiplier, raw_credibility, credibility_scalar,
     earned_score, collateral_score,
-    additions, deletions, commits, total_lines_scored, gittensor_tagged,
+    additions, deletions, commits, total_lines_scored, gittensor_tagged, low_value_pr,
     merged_by_login, description, last_edited_at
 ) VALUES %s
 ON CONFLICT (number, repository_full_name)
@@ -45,6 +45,7 @@ DO UPDATE SET
     commits = EXCLUDED.commits,
     total_lines_scored = EXCLUDED.total_lines_scored,
     gittensor_tagged = EXCLUDED.gittensor_tagged,
+    low_value_pr = EXCLUDED.low_value_pr,
     merged_by_login = EXCLUDED.merged_by_login,
     description = EXCLUDED.description,
     last_edited_at = EXCLUDED.last_edited_at,
@@ -87,9 +88,9 @@ INSERT INTO miner_evaluations (
     uid, hotkey, github_id, failed_reason, base_total_score, total_score, total_collateral_score,
     total_lines_changed, total_open_prs, total_closed_prs, total_merged_prs, total_prs, unique_repos_count,
     current_tier,
-    bronze_merged_prs, bronze_closed_prs, bronze_total_prs, bronze_collateral_score, bronze_score,
-    silver_merged_prs, silver_closed_prs, silver_total_prs, silver_collateral_score, silver_score,
-    gold_merged_prs, gold_closed_prs, gold_total_prs, gold_collateral_score, gold_score
+    bronze_merged_prs, bronze_closed_prs, bronze_total_prs, bronze_collateral_score, bronze_score, bronze_unique_repos,
+    silver_merged_prs, silver_closed_prs, silver_total_prs, silver_collateral_score, silver_score, silver_unique_repos,
+    gold_merged_prs, gold_closed_prs, gold_total_prs, gold_collateral_score, gold_score, gold_unique_repos
 ) VALUES %s
 ON CONFLICT (uid, hotkey, github_id)
 DO UPDATE SET
@@ -109,15 +110,18 @@ DO UPDATE SET
     bronze_total_prs = EXCLUDED.bronze_total_prs,
     bronze_collateral_score = EXCLUDED.bronze_collateral_score,
     bronze_score = EXCLUDED.bronze_score,
+    bronze_unique_repos = EXCLUDED.bronze_unique_repos,
     silver_merged_prs = EXCLUDED.silver_merged_prs,
     silver_closed_prs = EXCLUDED.silver_closed_prs,
     silver_total_prs = EXCLUDED.silver_total_prs,
     silver_collateral_score = EXCLUDED.silver_collateral_score,
     silver_score = EXCLUDED.silver_score,
+    silver_unique_repos = EXCLUDED.silver_unique_repos,
     gold_merged_prs = EXCLUDED.gold_merged_prs,
     gold_closed_prs = EXCLUDED.gold_closed_prs,
     gold_total_prs = EXCLUDED.gold_total_prs,
     gold_collateral_score = EXCLUDED.gold_collateral_score,
     gold_score = EXCLUDED.gold_score,
+    gold_unique_repos = EXCLUDED.gold_unique_repos,
     updated_at = NOW()
 """

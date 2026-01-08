@@ -26,18 +26,21 @@ CREATE TABLE IF NOT EXISTS miner_evaluations (
     bronze_total_prs        INTEGER          DEFAULT 0,
     bronze_collateral_score DECIMAL(15,6)    DEFAULT 0.0,
     bronze_score            DECIMAL(15,6)    DEFAULT 0.0,
+    bronze_unique_repos     INTEGER          DEFAULT 0,
 
     silver_merged_prs       INTEGER          DEFAULT 0,
     silver_closed_prs       INTEGER          DEFAULT 0,
     silver_total_prs        INTEGER          DEFAULT 0,
     silver_collateral_score DECIMAL(15,6)    DEFAULT 0.0,
     silver_score            DECIMAL(15,6)    DEFAULT 0.0,
+    silver_unique_repos     INTEGER          DEFAULT 0,
 
     gold_merged_prs         INTEGER          DEFAULT 0,
     gold_closed_prs         INTEGER          DEFAULT 0,
     gold_total_prs          INTEGER          DEFAULT 0,
     gold_collateral_score   DECIMAL(15,6)    DEFAULT 0.0,
     gold_score              DECIMAL(15,6)    DEFAULT 0.0,
+    gold_unique_repos       INTEGER          DEFAULT 0,
 
     -- Metadata with automatic timestamps
     evaluation_timestamp TIMESTAMP        DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'America/Chicago'),

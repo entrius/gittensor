@@ -48,38 +48,31 @@ def score_miner_prs(
     programming_languages: Dict[str, float],
     token_weights: TokenWeights,
 ) -> None:
-    """Score all pull requests (merged and open) for a miner."""
+    """Score all pull requests for a miner."""
 
     bt.logging.info('')
     bt.logging.info('-' * 50)
     bt.logging.info(
-        f'Scoring UID {miner_eval.uid}: {len(miner_eval.merged_pull_requests)} merged | {len(miner_eval.open_pull_requests)} open'
+        f'Scoring UID {miner_eval.uid}: {len(miner_eval.merged_pull_requests)} merged | {len(miner_eval.open_pull_requests)} open | {len(miner_eval.closed_pull_requests)} closed'
     )
     bt.logging.info('-' * 50)
 
-    pr_lists = [
-        (miner_eval.merged_pull_requests, 'merged', 'MERGED'),
-        (miner_eval.open_pull_requests, 'open', 'OPEN'),
+    pr_groups = [
+        ('MERGED', miner_eval.merged_pull_requests),
+        ('OPEN', miner_eval.open_pull_requests),
+        ('CLOSED', miner_eval.closed_pull_requests),
     ]
 
-    for pr_list, list_name, label in pr_lists:
-        if not pr_list:
-            continue
-
-        scored_prs = []
-        for n, pr in enumerate(pr_list, start=1):
-            bt.logging.info(f'\n[{n}/{len(pr_list)}] {label} PR #{pr.number} in {pr.repository_full_name}')
-            if score_pull_request(pr, miner_eval, master_repositories, programming_languages, token_weights):
-                scored_prs.append(pr)
-            else:
-                bt.logging.warning(
-                    f'Skipping PR #{pr.number} in {pr.repository_full_name} - No tier config or file changes'
-                )
-
-        if list_name == 'merged':
-            miner_eval.merged_pull_requests = scored_prs
-        else:
-            miner_eval.open_pull_requests = scored_prs
+    for label, prs in pr_groups:
+        for i, pr in enumerate(prs, start=1):
+            bt.logging.info(f'\n[{i}/{len(prs)}] {label} PR #{pr.number} in {pr.repository_full_name}')
+            score_pull_request(
+                pr,
+                miner_eval,
+                master_repositories,
+                programming_languages,
+				token_weights
+            )
 
 
 def score_pull_request(
@@ -88,19 +81,20 @@ def score_pull_request(
     master_repositories: Dict[str, RepositoryConfig],
     programming_languages: Dict[str, float],
     token_weights: TokenWeights,
-) -> bool:
-    """Score a single PR (merged or open). Returns True if scored, False if skipped."""
+) -> None:
+    """Scores a single PR and assigns the PullRequest object tier config & other fields (low value, etc)."""
+
     pr.repository_tier_configuration = get_tier_config(pr.repository_full_name, master_repositories)
     if not pr.repository_tier_configuration:
         bt.logging.warning('No repository configuration found.')
-        return False
+        return
 
     # Only fetch file changes from GitHub if not already loaded (they are preloaded for testing only)
     if not pr.file_changes:
         file_changes = get_pull_request_file_changes(pr.repository_full_name, pr.number, miner_eval.github_pat)
         if not file_changes:
             bt.logging.warning('No file changes found.')
-            return False
+            return
         pr.set_file_changes(file_changes)
 
     # Fetch full file contents for token-based scoring
@@ -109,10 +103,8 @@ def score_pull_request(
     pr.base_score = calculate_base_score(pr, programming_languages, token_weights, file_contents)
     calculate_pr_multipliers(pr, miner_eval, master_repositories)
 
-    if pr.pr_state == PRState.MERGED:
+    if pr.pr_state == PRState.MERGED and not pr.low_value_pr:
         miner_eval.unique_repos_contributed_to.add(pr.repository_full_name)
-
-    return True
 
 
 def _fetch_file_contents_for_pr(pr: PullRequest, github_pat: str) -> Dict[str, Optional[str]]:
@@ -163,11 +155,11 @@ def calculate_base_score(
     )
 
     contribution_score = scoring_result.total_score
-    is_low_value_pr = scoring_result.is_low_value_pr
     pr.total_lines_scored = scoring_result.total_lines_scored
 
-    if is_low_value_pr:
-        bt.logging.warning(f'PR #{pr.number} is low-value (>90% test/comment/typo changes) - base score = 0')
+    if scoring_result.is_low_value_pr:
+        bt.logging.warning(f'PR #{pr.number} is low-value (>90% test/comment/typo changes), base score = 0')
+        pr.low_value_pr = scoring_result.is_low_value_pr
         return 0.0
 
     tier_config: TierConfig = pr.repository_tier_configuration
@@ -278,6 +270,10 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
 
         # Process merged PRs
         for pr in evaluation.merged_pull_requests:
+            # Skip over low value PRs
+            if pr.low_value_pr:
+                continue
+
             pr.repository_uniqueness_multiplier = calculate_uniqueness_multiplier(
                 pr.repository_full_name, repo_counts, total_contributing_miners
             )

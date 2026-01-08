@@ -1,6 +1,6 @@
+# Entrius 2025
 from datetime import datetime, timezone
 
-# Entrius 2025
 # =============================================================================
 # General
 # =============================================================================
@@ -26,8 +26,8 @@ GITTENSOR_MINER_DETAILS_URL = 'https://gittensor.io/miners/details?githubId='
 # =============================================================================
 DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT = 0.12
 TEST_FILE_CONTRIBUTION_WEIGHT = 0.05
-MITIGATED_EXTENSIONS = ['md', 'mdx', 'markdown', 'txt', 'text', 'json', 'jsonc', 'rst', 'adoc', 'asciidoc', 'toml']
-MAX_LINES_SCORED_FOR_MITIGATED_EXT = 300
+NON_CODE_EXTENSIONS = ['md', 'mdx', 'markdown', 'txt', 'text', 'json', 'jsonc', 'rst', 'adoc', 'asciidoc', 'toml']
+MAX_LINES_SCORED_FOR_NON_CODE_EXT = 300
 
 # =============================================================================
 # Repository & PR Scoring
@@ -86,40 +86,18 @@ MAINTAINER_ASSOCIATIONS = ['OWNER', 'MEMBER', 'COLLABORATOR']
 MAX_ISSUE_AGE_BONUS = 0.75  # Max bonus for issue age (scales with sqrt of days open)
 MAINTAINER_ISSUE_BONUS = 0.25  # Extra bonus when issue was created by a maintainer
 
-# Typo detection (for filtering non-scoreable lines)
-TYPO_MAX_DIST = 2
-TYPO_MIN_SIM = 0.75
+# =============================================================================
+# Token Scoring Thresholds
+# =============================================================================
+# Minimum Jaccard similarity (1/3) to pair an addition with a deletion.
+# Below this, the addition is treated as a pure addition (full scoring).
+TOKEN_PAIRING_MIN_SIMILARITY = 1 / 3  # ≈ 0.333
+
+# Max pending deletions in a change hunk before skipping similarity-based line pairing.
+# Above this, all additions are treated as pure additions to avoid O(n²) cost in line pairing algorithm.
+TOKEN_PAIRING_MAX_PENDING_DELETIONS = 55
 
 # Excessive open PRs penalty
 EXCESSIVE_PR_PENALTY_THRESHOLD = 10
 EXCESSIVE_PR_PENALTY_SLOPE = 0.50
 EXCESSIVE_PR_MIN_MULTIPLIER = 0.00
-
-COMMENT_PATTERNS = [
-    r'^\s*#',  # Python, Ruby, Shell, etc.
-    r'^\s*//',  # C, C++, Java, JavaScript, Go, Rust, etc.
-    r'^\s*/\*',  # C-style multi-line start
-    r'^\s*\*',  # C-style multi-line continuation
-    r'^\s*\*/',  # C-style multi-line end
-    r'^\s*--',  # SQL, Lua, Haskell
-    r'^\s*<!--',  # HTML, XML
-    r'^\s*%',  # LaTeX, MATLAB
-    r'^\s*;',  # Lisp, Assembly
-    r'^\s*"""',  # Python docstring
-    r"^\s*'''",  # Python docstring
-]
-
-PREPROCESSOR_LANGUAGES = {
-    'c',
-    'h',
-    'cpp',
-    'cxx',
-    'cc',
-    'hpp',
-    'hxx',
-    'hh',
-    'h++',
-    'cs',
-    'rs',
-    'swift',
-}

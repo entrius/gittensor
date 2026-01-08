@@ -23,6 +23,7 @@ Configuration:
 import os
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Tuple
 
@@ -36,7 +37,11 @@ from gittensor.validator.evaluation.dynamic_emissions import apply_dynamic_emiss
 from gittensor.validator.evaluation.inspections import detect_and_penalize_miners_sharing_github
 from gittensor.validator.evaluation.normalize import normalize_rewards_linear
 from gittensor.validator.evaluation.scoring import finalize_miner_scores, score_miner_prs
-from gittensor.validator.utils.load_weights import load_master_repo_weights, load_programming_language_weights, load_token_weights
+from gittensor.validator.utils.load_weights import (
+    load_master_repo_weights,
+    load_programming_language_weights,
+    load_token_weights,
+)
 from gittensor.validator.utils.storage import DatabaseStorage
 
 
@@ -59,6 +64,14 @@ load_dotenv(validator_env)
 # Enable bittensor logging to console
 bt.logging.set_debug(True)
 
+# Set to an integer to limit the number of miners to score (e.g., 2, 5, 10)
+# Set to None to score all miners
+MINER_LIMIT = 4
+
+# Set to empty list [] to score all miners (subject to MINER_LIMIT)
+SPECIFIC_GITHUB_IDS = []
+
+
 try:
     from gittensor.validator.test.simulation.mock_evaluations import get_custom_evaluations
 
@@ -75,6 +88,8 @@ LOAD_ALL_MINERS = """
 SELECT DISTINCT m.uid, m.hotkey, m.github_id
 FROM miners m
 INNER JOIN pull_requests pr ON m.uid = pr.uid AND m.hotkey = pr.hotkey AND m.github_id = pr.github_id
+INNER JOIN miner_evaluations me ON m.uid = me.uid AND m.hotkey = me.hotkey AND m.github_id = me.github_id
+where me.total_merged_prs > 0
 ORDER BY m.uid
 """
 
@@ -104,12 +119,32 @@ def create_db_connection():
 
 
 def load_miner_identities(conn) -> List[Tuple[int, str, str]]:
-    """Load miner identities (uid, hotkey, github_id) from database."""
+    """Load miner identities (uid, hotkey, github_id) from database.
+
+    Applies filters based on SPECIFIC_GITHUB_IDS and MINER_LIMIT configuration.
+    """
     cur = conn.cursor()
     cur.execute(LOAD_ALL_MINERS)
     miners = cur.fetchall()
     cur.close()
-    print(f'  Found {len(miners)} miners with PRs in DB')
+    total_in_db = len(miners)
+    print(f'  Found {total_in_db} miners with PRs in DB')
+
+    # Filter by specific github_ids if configured
+    if SPECIFIC_GITHUB_IDS:
+        github_id_set = set(SPECIFIC_GITHUB_IDS)
+        miners = [(uid, hotkey, gid) for uid, hotkey, gid in miners if gid in github_id_set]
+        found_ids = {gid for _, _, gid in miners}
+        missing_ids = github_id_set - found_ids
+        if missing_ids:
+            print(f'  WARNING: github_ids not found in DB: {missing_ids}')
+        print(f'  Filtered to {len(miners)} miners by SPECIFIC_GITHUB_IDS')
+
+    # Apply miner limit if configured
+    if MINER_LIMIT is not None and len(miners) > MINER_LIMIT:
+        miners = miners[:MINER_LIMIT]
+        print(f'  Limited to {len(miners)} miners by MINER_LIMIT')
+
     return miners
 
 

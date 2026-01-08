@@ -7,7 +7,7 @@ from typing import Dict, Optional
 
 import bittensor as bt
 
-from gittensor.classes import Issue, MinerEvaluation, PRState, PullRequest, TokenScoringResult
+from gittensor.classes import Issue, MinerEvaluation, PRState, PrScoringResult, PullRequest
 from gittensor.constants import (
     EXCESSIVE_PR_MIN_MULTIPLIER,
     EXCESSIVE_PR_PENALTY_SLOPE,
@@ -66,13 +66,7 @@ def score_miner_prs(
     for label, prs in pr_groups:
         for i, pr in enumerate(prs, start=1):
             bt.logging.info(f'\n[{i}/{len(prs)}] {label} PR #{pr.number} in {pr.repository_full_name}')
-            score_pull_request(
-                pr,
-                miner_eval,
-                master_repositories,
-                programming_languages,
-				token_weights
-            )
+            score_pull_request(pr, miner_eval, master_repositories, programming_languages, token_weights)
 
 
 def score_pull_request(
@@ -147,7 +141,7 @@ def calculate_base_score(
 ) -> float:
     """Calculate base score from tier base + contribution bonus using token-based scoring."""
     # Use token-based scoring
-    scoring_result: TokenScoringResult = calculate_token_score_from_file_changes(
+    scoring_result: PrScoringResult = calculate_token_score_from_file_changes(
         pr.file_changes,
         file_contents,
         token_weights,

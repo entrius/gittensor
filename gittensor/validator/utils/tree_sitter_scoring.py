@@ -7,17 +7,21 @@ import bittensor as bt
 from tree_sitter import Node, Parser, Tree
 
 from gittensor.classes import (
+    FilePatch,
     FileScoreResult,
-    LineChangeInfo,
-    PatchChanges,
+    Hunk,
+    LineChange,
+    LineChangeType,
+    PrScoringResult,
     ScoreBreakdown,
-    TokenScoringResult,
 )
 from gittensor.constants import (
     MAX_FILE_SIZE_BYTES,
-    MAX_LINES_SCORED_FOR_MITIGATED_EXT,
-    MITIGATED_EXTENSIONS,
+    MAX_LINES_SCORED_FOR_NON_CODE_EXT,
+    NON_CODE_EXTENSIONS,
     TEST_FILE_CONTRIBUTION_WEIGHT,
+    TOKEN_PAIRING_MAX_PENDING_DELETIONS,
+    TOKEN_PAIRING_MIN_SIMILARITY,
 )
 from gittensor.validator.utils.load_weights import TokenWeights
 
@@ -28,6 +32,10 @@ if TYPE_CHECKING:
 # Regex to parse hunk headers: @@ -old_start,old_count +new_start,new_count @@
 # Captures: group(1) = old_start, group(2) = new_start
 HUNK_HEADER_PATTERN = re.compile(r'^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@')
+
+# Extended pattern that also captures counts (defaults to 1 if not present)
+# Captures: group(1)=old_start, group(2)=old_count, group(3)=new_start, group(4)=new_count
+HUNK_HEADER_FULL_PATTERN = re.compile(r'^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@')
 
 # Simple tokenizer pattern: split on whitespace and common delimiters, keep tokens
 TOKEN_PATTERN = re.compile(r'[a-zA-Z_][a-zA-Z0-9_]*|[0-9]+(?:\.[0-9]+)?|"[^"]*"|\'[^\']*\'|[^\s]')
@@ -48,16 +56,6 @@ def extract_added_lines(patch: Optional[str]) -> Set[int]:
 
     Returns:
         Set of 1-based line numbers that were added
-
-    Example:
-        patch = '''@@ -10,3 +10,5 @@
-         context
-        -deleted
-        +added line 1
-        +added line 2
-         context'''
-
-        extract_added_lines(patch) -> {11, 12}
     """
     if not patch:
         return set()
@@ -77,7 +75,6 @@ def extract_added_lines(patch: Optional[str]) -> Set[int]:
         if current_line == 0:
             continue
 
-        # Determine line type by first character
         if not line:
             continue
 
@@ -97,7 +94,6 @@ def extract_added_lines(patch: Optional[str]) -> Set[int]:
             # "\ No newline at end of file" - ignore
             pass
         else:
-            # Unknown line type, treat as context
             current_line += 1
 
     return added_lines
@@ -134,85 +130,127 @@ def get_changed_tokens(old_line: str, new_line: str) -> Set[str]:
     return {t for t in delta if t and not t.isspace()}
 
 
-def extract_patch_changes(patch: Optional[str]) -> PatchChanges:
+def get_token_set(line: str) -> Set[str]:
+    """Get normalized token set for a line."""
+    return {normalize_token(t) for t in tokenize_line(line) if normalize_token(t)}
+
+
+def jaccard_similarity(set1: Set[str], set2: Set[str]) -> float:
+    """Jaccard similarity coefficient"""
+    if not set1 and not set2:
+        return 1.0  # Both empty = identical
+    if not set1 or not set2:
+        return 0.0
+    intersection = len(set1 & set2)
+    union = len(set1 | set2)
+    return intersection / union
+
+
+def find_best_match(
+    new_content: str,
+    pending_deletions: List[Tuple[int, str]],
+    min_similarity: float = TOKEN_PAIRING_MIN_SIMILARITY,
+) -> Optional[int]:
     """
-    Parse patch to categorize each line as addition, modification, or deletion.
+    Find the index of the best matching deletion for a new line using token similarity.
+
+    Args:
+        new_content: The content of the new (added) line
+        pending_deletions: List of (line_num, content) tuples for buffered deletions
+        min_similarity: Minimum Jaccard similarity threshold (default: 1/3 ≈ 0.333).
+                       Below this, the line is treated as a pure addition.
+
+    Returns:
+        Index into pending_deletions of best match, or None if no match exceeds threshold.
+    """
+    if not pending_deletions:
+        return None
+
+    new_tokens = get_token_set(new_content)
+    best_idx = None
+    best_similarity = min_similarity
+
+    for idx, (_, old_content) in enumerate(pending_deletions):
+        old_tokens = get_token_set(old_content)
+        similarity = jaccard_similarity(new_tokens, old_tokens)
+        if similarity >= best_similarity:
+            best_similarity = similarity
+            best_idx = idx
+
+    return best_idx
+
+
+def extract_file_patch(patch: Optional[str], filename: str = '') -> FilePatch:
+    """
+    Parse patch to create a FilePatch preserving hunk structure.
 
     For modifications (- followed by +), extracts the tokens that changed.
-    For pure additions (+ without preceding -), marks as pure addition.
-    For pure deletions (- without following +), marks as pure deletion.
+    For pure additions (+ without preceding -), marks as ADDITION.
+    For pure deletions (- without following +), marks as DELETION.
 
     Args:
         patch: Unified diff patch string
+        filename: Optional filename for the FilePatch
 
     Returns:
-        PatchChanges with additions (keyed by new line) and deletions (keyed by old line)
-
-    Example:
-        patch = '''@@ -1,4 +1,3 @@
-         def foo():
-        -    x = 1
-        +    x = 2
-        -    old_line
-        +    y = 3'''
-
-        Result:
-        PatchChanges(
-            additions={
-                2: LineChangeInfo(line_num=2, is_pure_addition=False, ...),
-                3: LineChangeInfo(line_num=3, is_pure_addition=True, ...),
-            },
-            deletions={
-                3: LineChangeInfo(line_num=3, is_pure_deletion=True, content='    old_line'),
-            }
-        )
+        FilePatch with list of Hunks containing LineChange objects
     """
     if not patch:
-        return PatchChanges(additions={}, deletions={})
+        return FilePatch(filename=filename)
 
-    additions: Dict[int, LineChangeInfo] = {}
-    deletions: Dict[int, LineChangeInfo] = {}
+    hunks: List[Hunk] = []
+    current_hunk: Optional[Hunk] = None
     current_old_line = 0
     current_new_line = 0
     # Buffer: list of (old_line_num, content) for deletions waiting to pair with additions
     pending_deletions: List[Tuple[int, str]] = []
 
     def flush_pending_deletions() -> None:
-        """Record any unpaired deletions as pure deletions."""
+        """Record any unpaired deletions as pure deletions in current hunk."""
         nonlocal pending_deletions
+        if current_hunk is None:
+            pending_deletions = []
+            return
         for old_line, content in pending_deletions:
-            deletions[old_line] = LineChangeInfo(
-                line_num=old_line,
-                is_pure_addition=False,
-                is_pure_deletion=True,
-                changed_tokens=set(),
-                content=content,
+            current_hunk.changes.append(
+                LineChange(
+                    line_num=old_line,
+                    change_type=LineChangeType.DELETION,
+                    content=content,
+                )
             )
         pending_deletions = []
 
-    lines = patch.split('\n')
-    i = 0
-
-    while i < len(lines):
-        line = lines[i]
-
+    for line in patch.split('\n'):
         # Check for hunk header
-        match = HUNK_HEADER_PATTERN.match(line)
+        match = HUNK_HEADER_FULL_PATTERN.match(line)
         if match:
             # Flush any pending deletions from previous hunk
             flush_pending_deletions()
-            current_old_line = int(match.group(1))
-            current_new_line = int(match.group(2))
-            i += 1
+
+            # Parse hunk header values (count defaults to 1 if not present)
+            old_start = int(match.group(1))
+            old_count = int(match.group(2)) if match.group(2) else 1
+            new_start = int(match.group(3))
+            new_count = int(match.group(4)) if match.group(4) else 1
+
+            # Create new hunk
+            current_hunk = Hunk(
+                old_start=old_start,
+                old_count=old_count,
+                new_start=new_start,
+                new_count=new_count,
+            )
+            hunks.append(current_hunk)
+            current_old_line = old_start
+            current_new_line = new_start
             continue
 
         # Skip if we haven't seen a hunk header yet
-        if current_new_line == 0:
-            i += 1
+        if current_hunk is None:
             continue
 
         if not line:
-            i += 1
             continue
 
         first_char = line[0]
@@ -222,58 +260,66 @@ def extract_patch_changes(patch: Optional[str]) -> PatchChanges:
             content = line[1:]
             pending_deletions.append((current_old_line, content))
             current_old_line += 1
-            i += 1
 
         elif first_char == '+':
             new_content = line[1:]
 
-            if pending_deletions:
-                # This is a modification - pair with first pending deletion
-                old_line, old_content = pending_deletions.pop(0)
-                changed_tokens = get_changed_tokens(old_content, new_content)
+            # Skip similarity matching if too many pending deletions (O(n²) mitigation)
+            if len(pending_deletions) > TOKEN_PAIRING_MAX_PENDING_DELETIONS:
+                best_idx = None
+            else:
+                # Find best semantic match using token similarity
+                best_idx = find_best_match(new_content, pending_deletions)
 
-                additions[current_new_line] = LineChangeInfo(
-                    line_num=current_new_line,
-                    is_pure_addition=False,
-                    is_pure_deletion=False,
-                    changed_tokens=changed_tokens,
-                    content=new_content,
+            if best_idx is not None:
+                # Pair with best matching deletion - this is a modification
+                old_line, old_content = pending_deletions.pop(best_idx)
+                changed_tokens = get_changed_tokens(old_content, new_content)
+                similarity = jaccard_similarity(get_token_set(old_content), get_token_set(new_content))
+
+                current_hunk.changes.append(
+                    LineChange(
+                        line_num=current_new_line,
+                        change_type=LineChangeType.MODIFICATION,
+                        content=new_content,
+                        changed_tokens=changed_tokens,
+                        old_content=old_content,
+                        old_line_num=old_line,
+                        similarity=similarity,
+                    )
                 )
             else:
-                # Pure addition - no preceding deletion
-                additions[current_new_line] = LineChangeInfo(
-                    line_num=current_new_line,
-                    is_pure_addition=True,
-                    is_pure_deletion=False,
-                    changed_tokens=set(),
-                    content=new_content,
+                # No good match - treat as pure addition
+                current_hunk.changes.append(
+                    LineChange(
+                        line_num=current_new_line,
+                        change_type=LineChangeType.ADDITION,
+                        content=new_content,
+                    )
                 )
 
             current_new_line += 1
-            i += 1
 
         elif first_char == ' ':
             # Context line - flush pending deletions (they weren't paired)
             flush_pending_deletions()
             current_old_line += 1
             current_new_line += 1
-            i += 1
 
         elif first_char == '\\':
             # "\ No newline at end of file" - ignore
-            i += 1
+            pass
 
         else:
             # Unknown line type - flush pending and move on
             flush_pending_deletions()
             current_old_line += 1
             current_new_line += 1
-            i += 1
 
     # Flush any remaining deletions at end of patch
     flush_pending_deletions()
 
-    return PatchChanges(additions=additions, deletions=deletions)
+    return FilePatch(filename=filename, hunks=hunks)
 
 
 def get_parser(language: str) -> Optional[Parser]:
@@ -409,7 +455,7 @@ def calculate_line_scores_with_changes(
     content: str,
     extension: str,
     weights: TokenWeights,
-    change_info: Dict[int, LineChangeInfo],
+    change_info: Dict[int, LineChange],
 ) -> Dict[int, float]:
     """
     Calculate per-line scores with change-aware logic.
@@ -423,7 +469,7 @@ def calculate_line_scores_with_changes(
         content: Full file content as string
         extension: File extension (with or without dot)
         weights: TokenWeights instance with scoring configuration
-        change_info: Dict mapping line numbers to LineChangeInfo
+        change_info: Dict mapping line numbers to LineChange
 
     Returns:
         Dict mapping 1-based line numbers to scores.
@@ -448,7 +494,6 @@ def calculate_line_scores_with_changes(
         """
         Check if the node's text matches any changed token.
 
-        Matching rules:
         - For short tokens (<=2 chars): require exact match to avoid false positives
           (e.g., 'c' shouldn't match 'calculate')
         - For longer tokens: allow substring match to handle string content changes
@@ -482,13 +527,13 @@ def calculate_line_scores_with_changes(
                 walk_node(child)
             return
 
-        info = change_info[start_line]
+        change = change_info[start_line]
 
         # Skip comments entirely (score 0)
         if node_type in ('comment', 'line_comment', 'block_comment', 'documentation_comment'):
             return
 
-        if info.is_pure_addition:
+        if change.is_addition:
             # Pure addition: full line scoring (structural + leaf)
             structural_weight = weights.get_structural_weight(node_type)
             if structural_weight > 0:
@@ -502,7 +547,7 @@ def calculate_line_scores_with_changes(
             # Modification: only score leaf tokens that match changed tokens
             # No structural bonus (structure already existed)
             if node.child_count == 0:
-                if node_matches_changed_token(node, info.changed_tokens):
+                if node_matches_changed_token(node, change.changed_tokens):
                     leaf_weight = weights.get_leaf_weight(node_type)
                     add_score(start_line, leaf_weight)
 
@@ -558,8 +603,9 @@ def calculate_score_with_breakdown(
     Returns:
         ScoreBreakdown with total score and structural/leaf breakdown
     """
-    patch_changes = extract_patch_changes(patch)
-    if not patch_changes.additions:
+    file_patch = extract_file_patch(patch)
+    additions_by_line = file_patch.additions_by_line
+    if not additions_by_line:
         return ScoreBreakdown()
 
     language = weights.get_language(extension)
@@ -597,18 +643,18 @@ def calculate_score_with_breakdown(
         start_line = node.start_point[0] + 1  # Convert to 1-based
 
         # Only process lines we have change info for (additions/modifications)
-        if start_line not in patch_changes.additions:
+        if start_line not in additions_by_line:
             for child in node.children:
                 walk_node(child)
             return
 
-        info = patch_changes.additions[start_line]
+        change = additions_by_line[start_line]
 
         # Skip comments entirely - they don't count toward lines_with_score
         if node_type in ('comment', 'line_comment', 'block_comment', 'documentation_comment'):
             return
 
-        if info.is_pure_addition:
+        if change.is_addition:
             # Pure addition: full line scoring (structural + leaf)
             structural_weight = weights.get_structural_weight(node_type)
             if structural_weight > 0:
@@ -628,7 +674,7 @@ def calculate_score_with_breakdown(
         else:
             # Modification: only score leaf tokens that match changed tokens
             if node.child_count == 0:
-                if node_matches_changed_token(node, info.changed_tokens):
+                if node_matches_changed_token(node, change.changed_tokens):
                     leaf_weight = weights.get_leaf_weight(node_type)
                     if leaf_weight > 0:
                         breakdown.leaf_count += 1
@@ -650,7 +696,7 @@ def calculate_token_score_from_file_changes(
     file_contents: Dict[str, Optional[str]],
     weights: TokenWeights,
     programming_languages: Dict[str, float],
-) -> TokenScoringResult:
+) -> PrScoringResult:
     """
     Calculate contribution score using tree-sitter token-based analysis.
 
@@ -667,10 +713,10 @@ def calculate_token_score_from_file_changes(
         programming_languages: Language weight mapping (for fallback/documentation files)
 
     Returns:
-        TokenScoringResult with total score, low-value flag, and per-file details
+        PrScoringResult with total score, low-value flag, and per-file details
     """
     if not file_changes:
-        return TokenScoringResult(
+        return PrScoringResult(
             total_score=0.0,
             is_low_value_pr=True,
             total_lines_scored=0,
@@ -689,6 +735,10 @@ def calculate_token_score_from_file_changes(
     total_leaf_count = 0
     total_leaf_score = 0.0
     total_lines_with_score = 0
+
+    # Track aggregate metrics for typo detection
+    total_changed_tokens = 0
+    total_modifications = 0
 
     for file in file_changes:
         ext = file.file_extension
@@ -710,8 +760,8 @@ def calculate_token_score_from_file_changes(
             continue
 
         # Handle mitigated extensions early - no content fetch or patch parsing needed
-        if ext in MITIGATED_EXTENSIONS:
-            lines_to_score = min(file.changes, MAX_LINES_SCORED_FOR_MITIGATED_EXT)
+        if ext in NON_CODE_EXTENSIONS:
+            lines_to_score = min(file.changes, MAX_LINES_SCORED_FOR_NON_CODE_EXT)
             lang_weight = programming_languages.get(ext, 0.01)
             file_score = lang_weight * lines_to_score * test_weight
 
@@ -794,6 +844,9 @@ def calculate_token_score_from_file_changes(
             )
             continue
 
+        # Parse patch to get hunk-aware structure
+        file_patch = extract_file_patch(file.patch, file.short_name)
+
         # Use tree-sitter AST scoring with change-aware logic
         file_breakdown = calculate_score_with_breakdown(content, ext, weights, file.patch)
         file_score = file_breakdown.total_score
@@ -829,6 +882,11 @@ def calculate_token_score_from_file_changes(
         total_leaf_score += file_breakdown.leaf_score
         total_lines_with_score += file_breakdown.lines_with_score
 
+        # Track metrics for typo detection (non-test files only)
+        if not is_test_file:
+            total_changed_tokens += file_patch.total_changed_tokens
+            total_modifications += file_patch.total_modifications
+
         file_results.append(
             FileScoreResult(
                 filename=file.short_name,
@@ -838,6 +896,7 @@ def calculate_token_score_from_file_changes(
                 is_test_file=is_test_file,
                 scoring_method=scoring_method,
                 breakdown=file_breakdown,
+                patch=file_patch,
             )
         )
 
@@ -865,12 +924,14 @@ def calculate_token_score_from_file_changes(
         total_breakdown,
     )
 
-    return TokenScoringResult(
+    return PrScoringResult(
         total_score=total_score,
         is_low_value_pr=is_low_value_pr,
         total_lines_scored=total_lines_scored,
         file_results=file_results,
         breakdown=total_breakdown,
+        total_changed_tokens=total_changed_tokens,
+        total_modifications=total_modifications,
     )
 
 

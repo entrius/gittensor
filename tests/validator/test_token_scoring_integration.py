@@ -17,7 +17,7 @@ import pytest
 from gittensor.validator.utils.load_weights import TokenWeights, load_token_weights
 from gittensor.validator.utils.tree_sitter_scoring import (
     calculate_score_with_breakdown,
-    extract_patch_changes,
+    extract_file_patch,
 )
 
 
@@ -33,9 +33,9 @@ class TestFullScoringPipeline:
         Test scoring of Rust lib.rs with mixed additions and modifications.
 
         This patch:
-        - Adds 4 new lines (variable declaration)
-        - Modifies 2 existing lines (using new variable)
-        - Has 2 pure deletions (old return statement)
+        - Adds 4 new lines (variable declaration) + 1 blank + Ok(actual_alpha)
+        - Modifies 1 existing line (saturating_sub line)
+        - Has 3 pure deletions (old Ok block - no good similarity match)
 
         Note: Line numbers in patch adjusted to match file content for testing.
         """
@@ -90,9 +90,9 @@ class TestFullScoringPipeline:
         breakdown = calculate_score_with_breakdown(file_content, 'rs', weights, patch)
 
         # Verify patch parsing
-        patch_changes = extract_patch_changes(patch)
-        assert len(patch_changes.additions) == 6  # 4 pure additions + 2 modifications
-        assert len(patch_changes.deletions) == 2  # 2 pure deletions
+        file_patch = extract_file_patch(patch, 'test.rs')
+        assert len(file_patch.additions_by_line) == 6  # 5 pure additions + 1 modification
+        assert len(file_patch.deletions_by_line) == 3  # 3 pure deletions (Ok block has no good match)
 
         # Verify scoring results
         assert breakdown.total_score > 0, 'Should have positive score'
@@ -109,15 +109,15 @@ class TestFullScoringPipeline:
         # The comment line should NOT contribute to lines_with_score
         # (line with "// Decrese alpha out counter" is context, not added)
         # Lines with score should be <= total additions
-        assert breakdown.lines_with_score <= len(patch_changes.additions)
+        assert breakdown.lines_with_score <= len(file_patch.additions_by_line)
 
         # Verify score breakdown adds up
         assert abs(breakdown.total_score - (breakdown.structural_score + breakdown.leaf_score)) < 0.01
 
         # Print breakdown for debugging
         print('\nRust mixed changes scoring breakdown:')
-        print(f'  Patch additions: {len(patch_changes.additions)}')
-        print(f'  Patch deletions: {len(patch_changes.deletions)}')
+        print(f'  Patch additions: {len(file_patch.additions_by_line)}')
+        print(f'  Patch deletions: {len(file_patch.deletions_by_line)}')
         print(f'  Lines with score: {breakdown.lines_with_score}')
         print(f'  Structural: {breakdown.structural_count} nodes = {breakdown.structural_score:.2f}')
         print(f'  Leaf: {breakdown.leaf_count} tokens = {breakdown.leaf_score:.2f}')
@@ -191,11 +191,11 @@ def helper_function(x, y):
 
         # Run scoring
         breakdown = calculate_score_with_breakdown(file_content, 'py', weights, patch)
-        patch_changes = extract_patch_changes(patch)
+        file_patch = extract_file_patch(patch, 'test.py')
 
         # All 26 non-empty lines are additions (28 total - 2 blank)
         # But blank lines in patch still count
-        total_additions = len(patch_changes.additions)
+        total_additions = len(file_patch.additions_by_line)
         assert total_additions == 26  # 28 lines but 2 are blank (still counted as additions)
 
         # Structural elements: class definition, 2 function definitions (def __init__, async def, def helper)

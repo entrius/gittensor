@@ -7,7 +7,7 @@ from typing import Dict, List, Optional, Set
 
 import bittensor as bt
 
-from gittensor.constants import MITIGATED_EXTENSIONS
+from gittensor.constants import NON_CODE_EXTENSIONS
 from gittensor.validator.configurations.tier_config import Tier
 
 
@@ -192,7 +192,7 @@ def load_token_weights() -> TokenWeights:
         structural_bonus=structural_bonus,
         leaf_tokens=leaf_tokens,
         extension_to_language=extension_to_language,
-        documentation_extensions=set(MITIGATED_EXTENSIONS),
+        documentation_extensions=set(NON_CODE_EXTENSIONS),
     )
 
     bt.logging.info(

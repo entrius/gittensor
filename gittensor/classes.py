@@ -361,8 +361,119 @@ class MinerEvaluation:
 
 
 # =============================================================================
-# Token Scoring Classes
+# Token Scoring Data Structures
 # =============================================================================
+
+
+class LineChangeType(str, Enum):
+    """Type of line change in a patch."""
+
+    ADDITION = 'addition'  # Pure addition (new line with no matching deletion)
+    DELETION = 'deletion'  # Pure deletion (removed line with no matching addition)
+    MODIFICATION = 'modification'  # Changed line (paired addition/deletion)
+
+
+@dataclass
+class LineChange:
+    """Represents a single line change with detailed metadata."""
+
+    line_num: int
+    change_type: LineChangeType
+    content: str
+    changed_tokens: Set[str] = field(default_factory=set)
+    old_content: Optional[str] = None  # For modifications: the original line
+    old_line_num: Optional[int] = None  # For modifications: line number in old file
+    similarity: Optional[float] = None  # Jaccard similarity for matched pairs
+
+    @property
+    def is_addition(self) -> bool:
+        return self.change_type == LineChangeType.ADDITION
+
+    @property
+    def is_deletion(self) -> bool:
+        return self.change_type == LineChangeType.DELETION
+
+    @property
+    def is_modification(self) -> bool:
+        return self.change_type == LineChangeType.MODIFICATION
+
+
+@dataclass
+class Hunk:
+    """Represents a single hunk from a unified diff."""
+
+    old_start: int
+    old_count: int
+    new_start: int
+    new_count: int
+    changes: List[LineChange] = field(default_factory=list)
+
+    @property
+    def additions(self) -> List[LineChange]:
+        """Get all pure additions in this hunk."""
+        return [c for c in self.changes if c.change_type == LineChangeType.ADDITION]
+
+    @property
+    def deletions(self) -> List[LineChange]:
+        """Get all pure deletions in this hunk."""
+        return [c for c in self.changes if c.change_type == LineChangeType.DELETION]
+
+    @property
+    def modifications(self) -> List[LineChange]:
+        """Get all modifications in this hunk."""
+        return [c for c in self.changes if c.change_type == LineChangeType.MODIFICATION]
+
+    @property
+    def total_changed_tokens(self) -> int:
+        """Count of unique changed tokens across all modifications."""
+        return sum(len(c.changed_tokens) for c in self.modifications)
+
+
+@dataclass
+class FilePatch:
+    """Parsed patch data for a single file, preserving hunk structure."""
+
+    filename: str = ''
+    hunks: List[Hunk] = field(default_factory=list)
+
+    @property
+    def all_changes(self) -> List[LineChange]:
+        """Flatten all changes from all hunks."""
+        return [c for hunk in self.hunks for c in hunk.changes]
+
+    @property
+    def additions_by_line(self) -> Dict[int, LineChange]:
+        """Additions and modifications keyed by new file line number."""
+        return {
+            c.line_num: c
+            for c in self.all_changes
+            if c.change_type in (LineChangeType.ADDITION, LineChangeType.MODIFICATION)
+        }
+
+    @property
+    def deletions_by_line(self) -> Dict[int, LineChange]:
+        """Pure deletions keyed by old file line number."""
+        return {c.line_num: c for c in self.all_changes if c.change_type == LineChangeType.DELETION}
+
+    @property
+    def total_additions(self) -> int:
+        """Count of pure additions."""
+        return sum(1 for c in self.all_changes if c.change_type == LineChangeType.ADDITION)
+
+    @property
+    def total_deletions(self) -> int:
+        """Count of pure deletions."""
+        return sum(1 for c in self.all_changes if c.change_type == LineChangeType.DELETION)
+
+    @property
+    def total_modifications(self) -> int:
+        """Count of modifications."""
+        return sum(1 for c in self.all_changes if c.change_type == LineChangeType.MODIFICATION)
+
+    @property
+    def total_changed_tokens(self) -> int:
+        """Count of changed tokens across all modifications."""
+        return sum(len(c.changed_tokens) for c in self.all_changes if c.is_modification)
 
 
 @dataclass
@@ -388,50 +499,21 @@ class FileScoreResult:
     is_test_file: bool
     scoring_method: str  # 'tree-sitter', 'line-count', 'skipped-*'
     breakdown: Optional[ScoreBreakdown] = None  # Only populated for tree-sitter scoring
+    patch: Optional[FilePatch] = None  # Parsed patch data (when available)
 
 
 @dataclass
-class TokenScoringResult:
-    """Result of token-based scoring for a PR."""
+class PrScoringResult:
+    """Result of scoring a pull request.
+
+    Contains aggregate metrics for the PR, including total score, line counts,
+    and additional metrics for typo detection and change tracking.
+    """
 
     total_score: float
     is_low_value_pr: bool
     total_lines_scored: int
     file_results: List[FileScoreResult]
     breakdown: Optional[ScoreBreakdown] = None  # Aggregated breakdown across all files
-
-
-@dataclass
-class LineChangeInfo:
-    """Info about what changed on a specific line in a patch."""
-
-    line_num: int  # new file for additions, old file for deletions
-    is_pure_addition: bool  # New line with no corresponding deletion
-    is_pure_deletion: bool  # Deleted line with no corresponding addition
-    changed_tokens: Set[str]  # empty for pure additions/deletions
-    content: str = ''  # The line content (useful for deletions)
-
-
-@dataclass
-class PatchChanges:
-    """Parsed changes from a unified diff patch."""
-
-    # Additions and modifications, keyed by NEW file line number
-    additions: Dict[int, LineChangeInfo]
-    # Pure deletions, keyed by OLD file line number
-    deletions: Dict[int, LineChangeInfo]
-
-    @property
-    def total_additions(self) -> int:
-        """Count of pure additions."""
-        return sum(1 for c in self.additions.values() if c.is_pure_addition)
-
-    @property
-    def total_modifications(self) -> int:
-        """Count of modifications (changed lines)."""
-        return sum(1 for c in self.additions.values() if not c.is_pure_addition)
-
-    @property
-    def total_deletions(self) -> int:
-        """Count of pure deletions."""
-        return len(self.deletions)
+    total_changed_tokens: int = 0  # For typo detection: sum of changed tokens across modifications
+    total_modifications: int = 0  # Count of modified lines (not pure additions/deletions)

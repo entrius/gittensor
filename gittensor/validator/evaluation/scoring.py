@@ -7,7 +7,7 @@ from typing import Dict, Optional
 
 import bittensor as bt
 
-from gittensor.classes import Issue, MinerEvaluation, PRState, PrScoringResult, PullRequest
+from gittensor.classes import Issue, MinerEvaluation, PrScoringResult, PRState, PullRequest
 from gittensor.constants import (
     EXCESSIVE_PR_MIN_MULTIPLIER,
     EXCESSIVE_PR_PENALTY_SLOPE,

@@ -255,9 +255,7 @@ class TestChangeAwareScoringBasics:
     def test_pure_addition_gets_full_score(self, weights):
         """Pure additions get full structural + leaf scores."""
         code = 'def foo():\n    x = 1'
-        change_info = {
-            1: LineChange(line_num=1, change_type=LineChangeType.ADDITION, content='def foo():')
-        }
+        change_info = {1: LineChange(line_num=1, change_type=LineChangeType.ADDITION, content='def foo():')}
         scores = calculate_line_scores_with_changes(code, 'py', weights, change_info)
         assert scores.get(1, 0) >= weights.get_structural_weight('function_definition')
 
@@ -285,9 +283,7 @@ class TestChangeAwareScoringBasics:
     def test_comment_addition_scores_zero(self, weights):
         """Adding a comment still scores zero."""
         code = '# this is a comment'
-        change_info = {
-            1: LineChange(line_num=1, change_type=LineChangeType.ADDITION, content='# this is a comment')
-        }
+        change_info = {1: LineChange(line_num=1, change_type=LineChangeType.ADDITION, content='# this is a comment')}
         scores = calculate_line_scores_with_changes(code, 'py', weights, change_info)
         assert scores.get(1, 0) == 0.0
 
@@ -541,7 +537,12 @@ class TestEdgeCasesTokenMatching:
         code = 'message = "hello world"'
         # 'world' should match the string containing it
         change_info = {
-            1: LineChange(line_num=1, change_type=LineChangeType.MODIFICATION, content='message = "hello world"', changed_tokens={'world'})
+            1: LineChange(
+                line_num=1,
+                change_type=LineChangeType.MODIFICATION,
+                content='message = "hello world"',
+                changed_tokens={'world'},
+            )
         }
         scores = calculate_line_scores_with_changes(code, 'py', weights, change_info)
         assert scores.get(1, 0) > 0
@@ -736,10 +737,7 @@ class TestRealWorldPatchExtraction:
         for line_num in [248, 309, 378]:
             assert additions[line_num].change_type == LineChangeType.MODIFICATION
             # The changed token is the operator and comment
-            assert (
-                'Expect' in additions[line_num].changed_tokens
-                or 'decrease' in additions[line_num].changed_tokens
-            )
+            assert 'Expect' in additions[line_num].changed_tokens or 'decrease' in additions[line_num].changed_tokens
 
         # No pure deletions
         assert len(deletions) == 0

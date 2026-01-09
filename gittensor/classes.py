@@ -364,11 +364,6 @@ class MinerEvaluation:
         )
 
 
-# =============================================================================
-# Token Scoring Data Structures
-# =============================================================================
-
-
 @dataclass
 class ScoreBreakdown:
     """Breakdown of scores by type (structural vs leaf) and change type (added vs deleted).

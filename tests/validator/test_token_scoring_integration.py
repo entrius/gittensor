@@ -90,7 +90,9 @@ def farewell(name):
         assert breakdown.added_count > 0 or breakdown.deleted_count > 0, 'Should detect changes'
 
         print('\nModified file scoring breakdown:')
-        print(f'  Structural: +{breakdown.structural_added_count}/-{breakdown.structural_deleted_count} = {breakdown.structural_score:.2f}')
+        print(
+            f'  Structural: +{breakdown.structural_added_count}/-{breakdown.structural_deleted_count} = {breakdown.structural_score:.2f}'
+        )
         print(f'  Leaf: +{breakdown.leaf_added_count}/-{breakdown.leaf_deleted_count} = {breakdown.leaf_score:.2f}')
         print(f'  Total score: {breakdown.total_score:.2f}')
 
@@ -100,9 +102,9 @@ def farewell(name):
 
         No changes = no score.
         """
-        content = '''def example():
+        content = """def example():
     return 42
-'''
+"""
         breakdown = score_tree_diff(content, content, 'py', weights)
 
         # Identical files should have zero score
@@ -116,21 +118,23 @@ def farewell(name):
 
         Adding only comments should result in low/zero structural score.
         """
-        old_content = '''def process(data):
+        old_content = """def process(data):
     return data * 2
-'''
-        new_content = '''# This function processes data
+"""
+        new_content = """# This function processes data
 # It multiplies the input by 2
 def process(data):
     # Multiply by 2
     return data * 2  # Return the result
-'''
+"""
         breakdown = score_tree_diff(old_content, new_content, 'py', weights)
 
         # Should have minimal score (only comments were added)
         # Comments should not contribute to structural or meaningful leaf tokens
         print('\nComment-only changes:')
-        print(f'  Structural: +{breakdown.structural_added_count}/-{breakdown.structural_deleted_count} = {breakdown.structural_score:.2f}')
+        print(
+            f'  Structural: +{breakdown.structural_added_count}/-{breakdown.structural_deleted_count} = {breakdown.structural_score:.2f}'
+        )
         print(f'  Leaf: +{breakdown.leaf_added_count}/-{breakdown.leaf_deleted_count} = {breakdown.leaf_score:.2f}')
         print(f'  Total score: {breakdown.total_score:.2f}')
 
@@ -141,7 +145,7 @@ def process(data):
         """
         Test scoring a Rust file to ensure language support.
         """
-        new_content = '''impl Calculator {
+        new_content = """impl Calculator {
     fn add(&self, a: i32, b: i32) -> i32 {
         a + b
     }
@@ -150,7 +154,7 @@ def process(data):
         a * b
     }
 }
-'''
+"""
         breakdown = score_tree_diff(None, new_content, 'rs', weights)
 
         # Should have positive score
@@ -168,7 +172,7 @@ def process(data):
         """
         Test scoring a TypeScript file.
         """
-        new_content = '''interface User {
+        new_content = """interface User {
     id: number;
     name: string;
 }
@@ -181,7 +185,7 @@ const createUser = (id: number, name: string): User => ({
     id,
     name,
 });
-'''
+"""
         breakdown = score_tree_diff(None, new_content, 'ts', weights)
 
         # Should have positive score
@@ -198,10 +202,10 @@ const createUser = (id: number, name: string): User => ({
 
         All nodes should be counted as deletions.
         """
-        old_content = '''class OldClass:
+        old_content = """class OldClass:
     def method(self):
         pass
-'''
+"""
         breakdown = score_tree_diff(old_content, None, 'py', weights)
 
         # Should have positive score (deletions are scored)

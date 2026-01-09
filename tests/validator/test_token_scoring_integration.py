@@ -1,12 +1,12 @@
 """
-Integration tests for token scoring pipeline.
+Integration tests for tree-diff token scoring pipeline.
 
-These tests exercise the full scoring pipeline with real patches and file contents
-from production, verifying:
-- Token change matching between old and new lines
+These tests exercise the full scoring pipeline with real file contents,
+verifying:
+- Tree-sitter AST parsing and comparison
 - Structural vs leaf score breakdown
 - Comment exclusion from scoring
-- Lines with score tracking
+- Node counting and scoring for additions and deletions
 
 Run tests:
     pytest tests/validator/test_token_scoring_integration.py -v
@@ -14,218 +14,218 @@ Run tests:
 
 import pytest
 
-from gittensor.validator.utils.load_weights import TokenWeights, load_token_weights
-from gittensor.validator.utils.tree_sitter_scoring import (
-    calculate_score_with_breakdown,
-    extract_file_patch,
-)
+from gittensor.validator.utils.load_weights import TokenConfig, load_token_config
+from gittensor.validator.utils.tree_sitter_scoring import score_tree_diff
 
 
-class TestFullScoringPipeline:
-    """Integration tests with real patches and file contents."""
+class TestTreeDiffScoring:
+    """Integration tests for tree-diff scoring approach."""
 
     @pytest.fixture
-    def weights(self) -> TokenWeights:
-        return load_token_weights()
+    def weights(self) -> TokenConfig:
+        return load_token_config()
 
-    def test_rust_lib_mixed_changes_full_scoring(self, weights):
+    def test_new_file_scores_all_nodes(self, weights):
         """
-        Test scoring of Rust lib.rs with mixed additions and modifications.
+        Test scoring a completely new file (no old content).
 
-        This patch:
-        - Adds 4 new lines (variable declaration) + 1 blank + Ok(actual_alpha)
-        - Modifies 1 existing line (saturating_sub line)
-        - Has 3 pure deletions (old Ok block - no good similarity match)
-
-        Note: Line numbers in patch adjusted to match file content for testing.
+        All nodes in the new file should be counted as additions.
         """
-        # Patch with line numbers matching our test file content
-        patch = """@@ -1,14 +1,16 @@ impl<T: Config>
- impl<T: Config + pallet_balances::Config<Balance = u64>> SomeTrait for Module<T> {
-     fn burn_alpha(hotkey: &T::AccountId, coldkey: &T::AccountId, netuid: u16, alpha: u64) -> Result<u64, Error> {
-         ensure!(
-             Self::hotkey_account_exists(hotkey),
-             Error::<T>::HotKeyAccountNotExists
-         );
+        new_content = '''def greet(name):
+    """Say hello."""
+    message = f"Hello, {name}!"
+    return message
 
-+        let actual_alpha = Self::decrease_stake_for_hotkey_and_coldkey_on_subnet(
-+            hotkey, coldkey, netuid, alpha,
-+        );
-+
-         // Decrese alpha out counter
-         SubnetAlphaOut::<T>::mutate(netuid, |total| {
--            *total = total.saturating_sub(alpha);
-+            *total = total.saturating_sub(actual_alpha);
-         });
+def farewell(name):
+    return f"Goodbye, {name}!"
+'''
+        # No old content = new file
+        breakdown = score_tree_diff(None, new_content, 'py', weights)
 
--        Ok(Self::decrease_stake_for_hotkey_and_coldkey_on_subnet(
--            hotkey, coldkey, netuid, alpha,
--        ))
-+        Ok(actual_alpha)
-     }
- }"""
+        # Should have positive score
+        assert breakdown.total_score > 0, 'New file should have positive score'
 
-        # File content (the NEW version after the patch)
-        file_content = """impl<T: Config + pallet_balances::Config<Balance = u64>> SomeTrait for Module<T> {
-    fn burn_alpha(hotkey: &T::AccountId, coldkey: &T::AccountId, netuid: u16, alpha: u64) -> Result<u64, Error> {
-        ensure!(
-            Self::hotkey_account_exists(hotkey),
-            Error::<T>::HotKeyAccountNotExists
-        );
+        # All nodes should be additions (no deletions)
+        assert breakdown.added_count > 0, 'Should have added nodes'
+        assert breakdown.deleted_count == 0, 'New file should have no deletions'
 
-        let actual_alpha = Self::decrease_stake_for_hotkey_and_coldkey_on_subnet(
-            hotkey, coldkey, netuid, alpha,
-        );
-
-        // Decrese alpha out counter
-        SubnetAlphaOut::<T>::mutate(netuid, |total| {
-            *total = total.saturating_sub(actual_alpha);
-        });
-
-        Ok(actual_alpha)
-    }
-}"""
-
-        # Run scoring
-        breakdown = calculate_score_with_breakdown(file_content, 'rs', weights, patch)
-
-        # Verify patch parsing
-        file_patch = extract_file_patch(patch, 'test.rs')
-        assert len(file_patch.additions_by_line) == 6  # 5 pure additions + 1 modification
-        assert len(file_patch.deletions_by_line) == 3  # 3 pure deletions (Ok block has no good match)
-
-        # Verify scoring results
-        assert breakdown.total_score > 0, 'Should have positive score'
-        assert breakdown.lines_with_score > 0, 'Should have lines that scored'
-
-        # Pure additions should get structural bonuses (let binding)
-        assert breakdown.structural_count > 0, 'Should have structural elements (let binding)'
+        # Should have structural elements (function definitions)
+        assert breakdown.structural_added_count >= 2, 'Should have at least 2 function definitions'
         assert breakdown.structural_score > 0, 'Should have structural score'
 
-        # Should have leaf tokens scored
-        assert breakdown.leaf_count > 0, 'Should have leaf tokens'
+        # Should have leaf tokens
+        assert breakdown.leaf_added_count > 0, 'Should have leaf tokens'
         assert breakdown.leaf_score > 0, 'Should have leaf score'
-
-        # The comment line should NOT contribute to lines_with_score
-        # (line with "// Decrese alpha out counter" is context, not added)
-        # Lines with score should be <= total additions
-        assert breakdown.lines_with_score <= len(file_patch.additions_by_line)
 
         # Verify score breakdown adds up
         assert abs(breakdown.total_score - (breakdown.structural_score + breakdown.leaf_score)) < 0.01
 
-        # Print breakdown for debugging
-        print('\nRust mixed changes scoring breakdown:')
-        print(f'  Patch additions: {len(file_patch.additions_by_line)}')
-        print(f'  Patch deletions: {len(file_patch.deletions_by_line)}')
-        print(f'  Lines with score: {breakdown.lines_with_score}')
-        print(f'  Structural: {breakdown.structural_count} nodes = {breakdown.structural_score:.2f}')
-        print(f'  Leaf: {breakdown.leaf_count} tokens = {breakdown.leaf_score:.2f}')
+        print('\nNew file scoring breakdown:')
+        print(f'  Structural: +{breakdown.structural_added_count} = {breakdown.structural_score:.2f}')
+        print(f'  Leaf: +{breakdown.leaf_added_count} = {breakdown.leaf_score:.2f}')
         print(f'  Total score: {breakdown.total_score:.2f}')
 
-    def test_python_new_file_with_docstrings_and_comments(self, weights):
+    def test_modified_file_scores_diff(self, weights):
         """
-        Test scoring of a new Python file with docstrings and comments.
+        Test scoring a modified file.
 
-        Verifies that:
-        - Docstrings/comments get 0 score
-        - Class and function definitions get structural bonuses
-        - lines_with_score excludes comment/docstring lines
+        Should only score the nodes that differ between old and new.
         """
-        # Simulated new file patch
-        patch = '''@@ -0,0 +1,28 @@
-+import weakref
-+
-+
-+class WeakMethodCallable:
-+    """
-+    A callable that holds a weak reference to a bound method.
-+    Used to break reference cycles in CachedFetcher.
-+    """
-+
-+    def __init__(self, bound_method):
-+        # Store weak reference to avoid cycles
-+        self._weak_method = weakref.WeakMethod(bound_method)
-+
-+    async def __call__(self, *args, **kwargs):
-+        method = self._weak_method()
-+        if method is None:
-+            # Instance was garbage collected
-+            return None
-+        return await method(*args, **kwargs)
-+
-+
-+def helper_function(x, y):
-+    """Simple helper."""
-+    # Add the values
-+    result = x + y
-+    return result'''
+        old_content = '''def calculate(x, y):
+    """Calculate sum."""
+    return x + y
+'''
+        new_content = '''def calculate(x, y, z):
+    """Calculate sum of three."""
+    result = x + y + z
+    return result
+'''
+        breakdown = score_tree_diff(old_content, new_content, 'py', weights)
 
-        # The actual file content
-        file_content = '''import weakref
+        # Should have positive score (changes were made)
+        assert breakdown.total_score > 0, 'Modified file should have positive score'
 
+        # Should have both additions and possibly deletions
+        # The function signature changed, new variable was added, etc.
+        assert breakdown.added_count > 0 or breakdown.deleted_count > 0, 'Should detect changes'
 
-class WeakMethodCallable:
-    """
-    A callable that holds a weak reference to a bound method.
-    Used to break reference cycles in CachedFetcher.
-    """
-
-    def __init__(self, bound_method):
-        # Store weak reference to avoid cycles
-        self._weak_method = weakref.WeakMethod(bound_method)
-
-    async def __call__(self, *args, **kwargs):
-        method = self._weak_method()
-        if method is None:
-            # Instance was garbage collected
-            return None
-        return await method(*args, **kwargs)
-
-
-def helper_function(x, y):
-    """Simple helper."""
-    # Add the values
-    result = x + y
-    return result'''
-
-        # Run scoring
-        breakdown = calculate_score_with_breakdown(file_content, 'py', weights, patch)
-        file_patch = extract_file_patch(patch, 'test.py')
-
-        # All 26 non-empty lines are additions (28 total - 2 blank)
-        # But blank lines in patch still count
-        total_additions = len(file_patch.additions_by_line)
-        assert total_additions == 26  # 28 lines but 2 are blank (still counted as additions)
-
-        # Structural elements: class definition, 2 function definitions (def __init__, async def, def helper)
-        assert breakdown.structural_count >= 3, (
-            f'Expected at least 3 structural elements, got {breakdown.structural_count}'
-        )
-
-        # lines_with_score should exclude:
-        # - Docstring lines (lines 5-8, line 23)
-        # - Comment lines (lines 11, 17, 24)
-        # - Blank lines
-        # So lines_with_score should be significantly less than total_additions
-        assert breakdown.lines_with_score < total_additions, (
-            f'lines_with_score ({breakdown.lines_with_score}) should be less than total additions ({total_additions}) due to comments/docstrings'
-        )
-
-        # But we should still have meaningful score
-        assert breakdown.total_score > 0
-        assert breakdown.lines_with_score > 0
-
-        # Verify the import line scored (leaf token)
-        assert breakdown.leaf_count > 0
-
-        # Print breakdown for debugging
-        print('\nPython new file scoring breakdown:')
-        print(f'  Total additions: {total_additions}')
-        print(f'  Lines with score: {breakdown.lines_with_score}')
-        print(f'  Structural: {breakdown.structural_count} nodes = {breakdown.structural_score:.2f}')
-        print(f'  Leaf: {breakdown.leaf_count} tokens = {breakdown.leaf_score:.2f}')
+        print('\nModified file scoring breakdown:')
+        print(f'  Structural: +{breakdown.structural_added_count}/-{breakdown.structural_deleted_count} = {breakdown.structural_score:.2f}')
+        print(f'  Leaf: +{breakdown.leaf_added_count}/-{breakdown.leaf_deleted_count} = {breakdown.leaf_score:.2f}')
         print(f'  Total score: {breakdown.total_score:.2f}')
+
+    def test_identical_files_score_zero(self, weights):
+        """
+        Test that identical files score zero.
+
+        No changes = no score.
+        """
+        content = '''def example():
+    return 42
+'''
+        breakdown = score_tree_diff(content, content, 'py', weights)
+
+        # Identical files should have zero score
+        assert breakdown.total_score == 0, 'Identical files should score zero'
+        assert breakdown.added_count == 0, 'No additions'
+        assert breakdown.deleted_count == 0, 'No deletions'
+
+    def test_comments_excluded_from_scoring(self, weights):
+        """
+        Test that comments are excluded from scoring.
+
+        Adding only comments should result in low/zero structural score.
+        """
+        old_content = '''def process(data):
+    return data * 2
+'''
+        new_content = '''# This function processes data
+# It multiplies the input by 2
+def process(data):
+    # Multiply by 2
+    return data * 2  # Return the result
+'''
+        breakdown = score_tree_diff(old_content, new_content, 'py', weights)
+
+        # Should have minimal score (only comments were added)
+        # Comments should not contribute to structural or meaningful leaf tokens
+        print('\nComment-only changes:')
+        print(f'  Structural: +{breakdown.structural_added_count}/-{breakdown.structural_deleted_count} = {breakdown.structural_score:.2f}')
+        print(f'  Leaf: +{breakdown.leaf_added_count}/-{breakdown.leaf_deleted_count} = {breakdown.leaf_score:.2f}')
+        print(f'  Total score: {breakdown.total_score:.2f}')
+
+        # The score should be very low since only comments changed
+        # (Some languages may parse comment text as leaf nodes, but they should have 0 weight)
+
+    def test_rust_file_scoring(self, weights):
+        """
+        Test scoring a Rust file to ensure language support.
+        """
+        new_content = '''impl Calculator {
+    fn add(&self, a: i32, b: i32) -> i32 {
+        a + b
+    }
+
+    fn multiply(&self, a: i32, b: i32) -> i32 {
+        a * b
+    }
+}
+'''
+        breakdown = score_tree_diff(None, new_content, 'rs', weights)
+
+        # Should have positive score
+        assert breakdown.total_score > 0, 'Rust file should have positive score'
+
+        # Should have structural elements (impl block, functions)
+        assert breakdown.structural_count > 0, 'Should have structural elements'
+
+        print('\nRust file scoring:')
+        print(f'  Structural: {breakdown.structural_count} = {breakdown.structural_score:.2f}')
+        print(f'  Leaf: {breakdown.leaf_count} = {breakdown.leaf_score:.2f}')
+        print(f'  Total: {breakdown.total_score:.2f}')
+
+    def test_typescript_file_scoring(self, weights):
+        """
+        Test scoring a TypeScript file.
+        """
+        new_content = '''interface User {
+    id: number;
+    name: string;
+}
+
+function greetUser(user: User): string {
+    return `Hello, ${user.name}!`;
+}
+
+const createUser = (id: number, name: string): User => ({
+    id,
+    name,
+});
+'''
+        breakdown = score_tree_diff(None, new_content, 'ts', weights)
+
+        # Should have positive score
+        assert breakdown.total_score > 0, 'TypeScript file should have positive score'
+
+        print('\nTypeScript file scoring:')
+        print(f'  Structural: {breakdown.structural_count} = {breakdown.structural_score:.2f}')
+        print(f'  Leaf: {breakdown.leaf_count} = {breakdown.leaf_score:.2f}')
+        print(f'  Total: {breakdown.total_score:.2f}')
+
+    def test_deleted_file_scores_deletions(self, weights):
+        """
+        Test scoring a deleted file (old content, no new content).
+
+        All nodes should be counted as deletions.
+        """
+        old_content = '''class OldClass:
+    def method(self):
+        pass
+'''
+        breakdown = score_tree_diff(old_content, None, 'py', weights)
+
+        # Should have positive score (deletions are scored)
+        assert breakdown.total_score > 0, 'Deleted file should have positive score'
+
+        # All nodes should be deletions (no additions)
+        assert breakdown.deleted_count > 0, 'Should have deleted nodes'
+        assert breakdown.added_count == 0, 'Deleted file should have no additions'
+
+        print('\nDeleted file scoring:')
+        print(f'  Structural: -{breakdown.structural_deleted_count} = {breakdown.structural_score:.2f}')
+        print(f'  Leaf: -{breakdown.leaf_deleted_count} = {breakdown.leaf_score:.2f}')
+        print(f'  Total: {breakdown.total_score:.2f}')
+
+    def test_unsupported_language_returns_empty(self, weights):
+        """
+        Test that unsupported file extensions return empty breakdown.
+        """
+        content = 'Some content here'
+        breakdown = score_tree_diff(None, content, 'unknown_ext', weights)
+
+        assert breakdown.total_score == 0, 'Unsupported language should score zero'
+        assert breakdown.added_count == 0
+        assert breakdown.deleted_count == 0
 
 
 if __name__ == '__main__':

@@ -2,8 +2,12 @@
 import base64
 import fnmatch
 import time
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
+
+if TYPE_CHECKING:
+    from gittensor.classes import FileChange as FileChangeType
 
 import bittensor as bt
 import requests
@@ -68,6 +72,7 @@ QUERY = """
                 }
               }
               baseRefName
+              baseRefOid
               headRefName
               headRefOid
               author {
@@ -700,5 +705,109 @@ def fetch_file_contents_batch(
             results[path] = None
         else:
             results[path] = file_data.get('text')
+
+    return results
+
+
+@dataclass
+class FileContentPair:
+    """Holds both old (base) and new (head) content for a file."""
+
+    old_content: Optional[str]  # None for new files
+    new_content: Optional[str]  # None for deleted files
+
+
+def fetch_file_contents_with_base(
+    repo_owner: str,
+    repo_name: str,
+    base_sha: str,
+    head_sha: str,
+    file_changes: List['FileChangeType'],
+    token: str,
+) -> Dict[str, FileContentPair]:
+    """
+    Fetch both base and head (old and new) versions of files in a single GraphQL request.
+
+    Args:
+        repo_owner: Repository owner
+        repo_name: Repository name
+        base_sha: The base branch SHA (before PR changes)
+        head_sha: The head/merge commit SHA (after PR changes)
+        file_changes: List of FileChange objects (needed for status and previous_filename)
+        token: GitHub PAT for authentication
+
+    Returns:
+        Dict mapping file paths to FileContentPair (old_content, new_content)
+        - For new files: old_content is None
+        - For deleted files: new_content is None
+        - For renamed files: old_content fetched from previous_filename
+    """
+    if not file_changes:
+        return {}
+
+    # Build GraphQL query with both base and head versions
+    file_fields = []
+    for i, fc in enumerate(file_changes):
+        # Determine the path to fetch for base version
+        # For renames, use previous_filename; otherwise use current filename
+        base_path = fc.previous_filename if fc.previous_filename else fc.filename
+        head_path = fc.filename
+
+        # Only fetch base version if file wasn't newly added
+        if fc.status != 'added':
+            base_expr = f'{base_sha}:{base_path}'
+            file_fields.append(
+                f'base{i}: object(expression: "{base_expr}") {{ ... on Blob {{ text byteSize isBinary }} }}'
+            )
+
+        # Only fetch head version if file wasn't deleted
+        if fc.status != 'removed':
+            head_expr = f'{head_sha}:{head_path}'
+            file_fields.append(
+                f'head{i}: object(expression: "{head_expr}") {{ ... on Blob {{ text byteSize isBinary }} }}'
+            )
+
+    if not file_fields:
+        return {}
+
+    query = f"""
+        query($owner: String!, $name: String!) {{
+            repository(owner: $owner, name: $name) {{
+                {' '.join(file_fields)}
+            }}
+        }}
+    """
+
+    variables = {'owner': repo_owner, 'name': repo_name}
+
+    # Execute with retry logic
+    data = execute_graphql_query(query, variables, token)
+    if data is None:
+        bt.logging.warning(f'Failed to fetch file contents for {repo_owner}/{repo_name}')
+        return {fc.filename: FileContentPair(None, None) for fc in file_changes}
+
+    if 'errors' in data:
+        bt.logging.warning(f'GraphQL errors fetching files: {data["errors"]}')
+
+    repo_data = data.get('data', {}).get('repository', {})
+    results: Dict[str, FileContentPair] = {}
+
+    for i, fc in enumerate(file_changes):
+        old_content = None
+        new_content = None
+
+        # Extract base (old) content if applicable
+        if fc.status != 'added':
+            base_data = repo_data.get(f'base{i}')
+            if base_data and not base_data.get('isBinary') and base_data.get('byteSize', 0) <= MAX_FILE_SIZE_BYTES:
+                old_content = base_data.get('text')
+
+        # Extract head (new) content if applicable
+        if fc.status != 'removed':
+            head_data = repo_data.get(f'head{i}')
+            if head_data and not head_data.get('isBinary') and head_data.get('byteSize', 0) <= MAX_FILE_SIZE_BYTES:
+                new_content = head_data.get('text')
+
+        results[fc.filename] = FileContentPair(old_content=old_content, new_content=new_content)
 
     return results

@@ -9,7 +9,7 @@ import bittensor as bt
 from gittensor.validator.utils.load_weights import (
     load_master_repo_weights,
     load_programming_language_weights,
-    load_token_weights,
+    load_token_config,
 )
 
 # ADD THIS for proper type hinting to navigate code easier.
@@ -38,18 +38,19 @@ async def forward(self: 'BaseValidatorNeuron') -> None:
 
         master_repositories = load_master_repo_weights()
         programming_languages = load_programming_language_weights()
-        token_weights = load_token_weights()
+        token_config = load_token_config()
+
+        # Count languages with tree-sitter support
+        tree_sitter_count = sum(1 for c in token_config.language_configs.values() if c.language is not None)
 
         bt.logging.info('***** Starting scoring round *****')
         bt.logging.info(f'Total Repositories loaded from master_repositories.json: {len(master_repositories)}')
         bt.logging.info(f'Total Languages loaded from programming_languages.json: {len(programming_languages)}')
-        bt.logging.info(
-            f'Total Token weight loaded from token_weights.json: {len(token_weights.extension_to_language)} languages supported'
-        )
+        bt.logging.info(f'Total Token config loaded from token_weights.json: {tree_sitter_count} tree-sitter languages')
         bt.logging.info(f'Number of neurons to evaluate: {len(miner_uids)}')
 
         # Get rewards for the responses - queries miners individually
-        rewards = await get_rewards(self, miner_uids, master_repositories, programming_languages, token_weights)
+        rewards = await get_rewards(self, miner_uids, master_repositories, programming_languages, token_config)
 
         # Update the scores based on the rewards
         self.update_scores(rewards, miner_uids)

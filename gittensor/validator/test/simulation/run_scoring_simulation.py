@@ -40,7 +40,7 @@ from gittensor.validator.evaluation.scoring import finalize_miner_scores, score_
 from gittensor.validator.utils.load_weights import (
     load_master_repo_weights,
     load_programming_language_weights,
-    load_token_weights,
+    load_token_config,
 )
 from gittensor.validator.utils.storage import DatabaseStorage
 
@@ -66,7 +66,7 @@ bt.logging.set_debug(True)
 
 # Set to an integer to limit the number of miners to score (e.g., 2, 5, 10)
 # Set to None to score all miners
-MINER_LIMIT = 4
+MINER_LIMIT = 2
 
 # Set to empty list [] to score all miners (subject to MINER_LIMIT)
 SPECIFIC_GITHUB_IDS = []
@@ -183,11 +183,11 @@ def run_scoring_simulation(
     time.sleep(0.1)
     master_repos = load_master_repo_weights()
     prog_langs = load_programming_language_weights()
-    token_weights = load_token_weights()
+    token_config = load_token_config()
     github_pat = os.getenv('GITHUB_PAT') or os.getenv('GITHUB_TOKEN')
     print(f'  {len(master_repos)} repos, {len(prog_langs)} languages')
     print(
-        f'  Token weights: {len(token_weights.structural_bonus)} structural, {len(token_weights.leaf_tokens)} leaf types'
+        f'  Token config: {len(token_config.structural_bonus)} structural, {len(token_config.leaf_tokens)} leaf types'
     )
     if not github_pat:
         print('  ERROR: No GitHub PAT set - cannot fetch PRs from GitHub')
@@ -237,7 +237,7 @@ def run_scoring_simulation(
     for uid, ev in evals.items():
         if ev.failed_reason:
             continue
-        score_miner_prs(ev, master_repos, prog_langs, token_weights)
+        score_miner_prs(ev, master_repos, prog_langs, token_config)
 
     # 6. Detect duplicate GitHub accounts
     print('\n[6/9] Checking for duplicate GitHub accounts...')

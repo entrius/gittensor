@@ -20,7 +20,7 @@ from gittensor.validator.evaluation.scoring import (
     finalize_miner_scores,
     score_miner_prs,
 )
-from gittensor.validator.utils.load_weights import RepositoryConfig, TokenWeights
+from gittensor.validator.utils.load_weights import LanguageConfig, RepositoryConfig, TokenConfig
 
 # NOTE: there was a circular import error, needed this if to resolve it
 if TYPE_CHECKING:
@@ -56,8 +56,8 @@ async def evaluate_miners_pull_requests(
     uid: int,
     response: GitPatSynapse,
     master_repositories: Dict[str, RepositoryConfig],
-    programming_languages: Dict[str, float],
-    token_weights: TokenWeights,
+    programming_languages: Dict[str, LanguageConfig],
+    token_config: TokenConfig,
 ) -> MinerEvaluation:
     """
     Entry point from taking a miners response -> Get PRs -> Score PRs by tier
@@ -67,7 +67,7 @@ async def evaluate_miners_pull_requests(
         response: The GitPatSynapse (github access token) returned by the miner
         master_repositories: The incentivized repositories and their RepositoryConfig objects
         programming_languages: The programming languages and their weights
-        token_weights: Token-based scoring weights configuration
+        token_config: Token-based scoring weights configuration
 
     Returns:
         MinerEvaluation: The object containing scores, valid_prs, etc.
@@ -82,7 +82,7 @@ async def evaluate_miners_pull_requests(
 
     load_miners_prs(miner_eval, master_repositories)
 
-    score_miner_prs(miner_eval, master_repositories, programming_languages, token_weights)
+    score_miner_prs(miner_eval, master_repositories, programming_languages, token_config)
 
     # Clear PAT after scoring to avoid storing sensitive data
     miner_eval.github_pat = None
@@ -95,15 +95,15 @@ async def get_rewards(
     self: Validator,
     uids: set[int],
     master_repositories: Dict[str, RepositoryConfig],
-    programming_languages: Dict[str, float],
-    token_weights: TokenWeights,
+    programming_languages: Dict[str, LanguageConfig],
+    token_config: TokenConfig,
 ) -> np.ndarray:
     """
     Args:
         uids (set[int]): All valid miner uids in the subnet
         master_repositories (Dict[str, RepositoryConfig]): The dict of repositories (name -> RepositoryConfig)
-        programming_languages (Dict[str, float]): The dict of languages (extension, weight)
-        token_weights (TokenWeights): Token-based scoring weights configuration
+        programming_languages (Dict[str, LanguageConfig]): The dict of languages (extension -> LanguageConfig)
+        token_config (TokenConfig): Token-based scoring weights configuration
     Returns:
         rewards (array[int]): An array of scores for all miners in sorted fashion, miner n score = index[n]
     """
@@ -121,7 +121,7 @@ async def get_rewards(
 
         # Calculate score
         miner_evaluation = await evaluate_miners_pull_requests(
-            uid, miner_response, master_repositories, programming_languages, token_weights
+            uid, miner_response, master_repositories, programming_languages, token_config
         )
         miner_evaluations[uid] = miner_evaluation
 

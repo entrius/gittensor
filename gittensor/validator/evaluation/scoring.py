@@ -25,7 +25,11 @@ from gittensor.constants import (
     TIME_DECAY_SIGMOID_STEEPNESS_SCALAR,
     UNIQUE_PR_BOOST,
 )
-from gittensor.utils.github_api_tools import fetch_file_contents_batch, get_pull_request_file_changes
+from gittensor.utils.github_api_tools import (
+    FileContentPair,
+    fetch_file_contents_with_base,
+    get_pull_request_file_changes,
+)
 from gittensor.validator.configurations.tier_config import (
     TIERS,
     TIERS_ORDER,
@@ -38,15 +42,15 @@ from gittensor.validator.evaluation.credibility import (
     calculate_tier_stats,
     is_tier_unlocked,
 )
-from gittensor.validator.utils.load_weights import RepositoryConfig, TokenWeights
+from gittensor.validator.utils.load_weights import LanguageConfig, RepositoryConfig, TokenConfig
 from gittensor.validator.utils.tree_sitter_scoring import calculate_token_score_from_file_changes
 
 
 def score_miner_prs(
     miner_eval: MinerEvaluation,
     master_repositories: Dict[str, RepositoryConfig],
-    programming_languages: Dict[str, float],
-    token_weights: TokenWeights,
+    programming_languages: Dict[str, LanguageConfig],
+    token_config: TokenConfig,
 ) -> None:
     """Score all pull requests for a miner."""
 
@@ -66,15 +70,15 @@ def score_miner_prs(
     for label, prs in pr_groups:
         for i, pr in enumerate(prs, start=1):
             bt.logging.info(f'\n[{i}/{len(prs)}] {label} PR #{pr.number} in {pr.repository_full_name}')
-            score_pull_request(pr, miner_eval, master_repositories, programming_languages, token_weights)
+            score_pull_request(pr, miner_eval, master_repositories, programming_languages, token_config)
 
 
 def score_pull_request(
     pr: PullRequest,
     miner_eval: MinerEvaluation,
     master_repositories: Dict[str, RepositoryConfig],
-    programming_languages: Dict[str, float],
-    token_weights: TokenWeights,
+    programming_languages: Dict[str, LanguageConfig],
+    token_config: TokenConfig,
 ) -> None:
     """Scores a single PR and assigns the PullRequest object tier config & other fields (low value, etc)."""
 
@@ -84,6 +88,7 @@ def score_pull_request(
         return
 
     # Only fetch file changes from GitHub if not already loaded (they are preloaded for testing only)
+    # TODO: with token based scoring I believe file changes are no longer necessary to pull from github
     if not pr.file_changes:
         file_changes = get_pull_request_file_changes(pr.repository_full_name, pr.number, miner_eval.github_pat)
         if not file_changes:
@@ -94,16 +99,22 @@ def score_pull_request(
     # Fetch full file contents for token-based scoring
     file_contents = _fetch_file_contents_for_pr(pr, miner_eval.github_pat)
 
-    pr.base_score = calculate_base_score(pr, programming_languages, token_weights, file_contents)
+    pr.base_score = calculate_base_score(pr, programming_languages, token_config, file_contents)
     calculate_pr_multipliers(pr, miner_eval, master_repositories)
 
     if pr.pr_state == PRState.MERGED and not pr.low_value_pr:
         miner_eval.unique_repos_contributed_to.add(pr.repository_full_name)
 
 
-def _fetch_file_contents_for_pr(pr: PullRequest, github_pat: str) -> Dict[str, Optional[str]]:
-    """Fetch full file contents for all files in a PR using GraphQL batch fetch."""
-    if not pr.file_changes or not pr.head_ref_oid:
+def _fetch_file_contents_for_pr(pr: PullRequest, github_pat: str) -> Dict[str, FileContentPair]:
+    """Fetch both base and head file contents for all files in a PR using GraphQL batch fetch.
+
+    Returns:
+        Dict mapping filename to FileContentPair(old_content, new_content)
+        - old_content: File content before the PR (None for new files)
+        - new_content: File content after the PR (None for deleted files)
+    """
+    if not pr.file_changes or not pr.head_ref_oid or not pr.base_ref_oid:
         return {}
 
     # Extract owner and repo name
@@ -113,12 +124,10 @@ def _fetch_file_contents_for_pr(pr: PullRequest, github_pat: str) -> Dict[str, O
         return {}
 
     owner, repo_name = parts
-    file_paths = [f.filename for f in pr.file_changes if f.status != 'removed']
 
-    if not file_paths:
-        return {}
-
-    return fetch_file_contents_batch(owner, repo_name, pr.head_ref_oid, file_paths, github_pat)
+    return fetch_file_contents_with_base(
+        owner, repo_name, pr.base_ref_oid, pr.head_ref_oid, pr.file_changes, github_pat
+    )
 
 
 def get_tier_config(repo_full_name: str, master_repositories: Dict[str, RepositoryConfig]) -> Optional[TierConfig]:
@@ -135,24 +144,24 @@ def get_tier_config(repo_full_name: str, master_repositories: Dict[str, Reposito
 
 def calculate_base_score(
     pr: PullRequest,
-    programming_languages: Dict[str, float],
-    token_weights: TokenWeights,
-    file_contents: Dict[str, Optional[str]],
+    programming_languages: Dict[str, LanguageConfig],
+    token_config: TokenConfig,
+    file_contents: Dict[str, FileContentPair],
 ) -> float:
     """Calculate base score from tier base + contribution bonus using token-based scoring."""
     # Use token-based scoring
     scoring_result: PrScoringResult = calculate_token_score_from_file_changes(
         pr.file_changes,
         file_contents,
-        token_weights,
+        token_config,
         programming_languages,
     )
 
     contribution_score = scoring_result.total_score
-    pr.total_lines_scored = scoring_result.total_lines_scored
+    pr.total_nodes_scored = scoring_result.total_nodes_scored
 
     if scoring_result.is_low_value_pr:
-        bt.logging.warning(f'PR #{pr.number} is low-value (>90% test/comment/typo changes), base score = 0')
+        bt.logging.warning(f'PR #{pr.number} is low-value, base score = 0')
         pr.low_value_pr = scoring_result.is_low_value_pr
         return 0.0
 
@@ -283,7 +292,7 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
             pr.calculate_final_earned_score()
             evaluation.base_total_score += pr.base_score
             evaluation.total_score += pr.earned_score
-            evaluation.total_lines_changed += pr.total_lines_scored
+            evaluation.total_nodes_scored += pr.total_nodes_scored
 
         # Process open PRs for collateral
         for pr in evaluation.open_pull_requests:

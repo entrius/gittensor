@@ -3,12 +3,25 @@
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional
 
 import bittensor as bt
 
 from gittensor.constants import NON_CODE_EXTENSIONS
 from gittensor.validator.configurations.tier_config import Tier
+
+
+@dataclass
+class LanguageConfig:
+    """Configuration for a programming language extension.
+
+    Attributes:
+        weight: Language complexity weight for scoring
+        language: Tree-sitter language name (None if not supported by tree-sitter)
+    """
+
+    weight: float
+    language: Optional[str] = None
 
 
 @dataclass
@@ -29,35 +42,44 @@ class RepositoryConfig:
 
 
 @dataclass
-class TokenWeights:
-    """Configuration for token-based scoring weights."""
+class TokenConfig:
+    """Configuration for token-based scoring weights.
+
+    Attributes:
+        structural_bonus: Weights for structural AST nodes (functions, classes, etc.)
+        leaf_tokens: Weights for leaf AST nodes (identifiers, literals, etc.)
+        language_configs: Language configurations from programming_languages.json
+    """
 
     structural_bonus: Dict[str, float] = field(default_factory=dict)
     leaf_tokens: Dict[str, float] = field(default_factory=dict)
-    extension_to_language: Dict[str, str] = field(default_factory=dict)
-    documentation_extensions: Set[str] = field(default_factory=set)
+    language_configs: Dict[str, LanguageConfig] = field(default_factory=dict)
 
     def get_structural_weight(self, node_type: str) -> float:
+        """Get weight for a structural node type."""
         return self.structural_bonus.get(node_type, 0.0)
 
     def get_leaf_weight(self, node_type: str) -> float:
+        """Get weight for a leaf token type."""
         return self.leaf_tokens.get(node_type, 0.0)
 
     def get_language(self, extension: str) -> Optional[str]:
         """Get the tree-sitter language name for a file extension."""
         ext = extension.lstrip('.').lower()
-        return self.extension_to_language.get(ext)
-
-    def is_documentation_file(self, extension: str) -> bool:
-        ext = extension.lstrip('.').lower()
-        return ext in self.documentation_extensions
+        config = self.language_configs.get(ext)
+        return config.language if config else None
 
     def supports_tree_sitter(self, extension: Optional[str]) -> bool:
         """Check if a file extension is supported by tree-sitter."""
         if not extension:
             return False
         ext = extension.lstrip('.').lower()
-        return ext in self.extension_to_language and ext not in self.documentation_extensions
+        # Non-code extensions use line-count scoring, not tree-sitter
+        if ext in NON_CODE_EXTENSIONS:
+            return False
+        config = self.language_configs.get(ext)
+        return config is not None and config.language is not None
+
 
 
 def _get_weights_dir() -> Path:
@@ -118,12 +140,12 @@ def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
         return {}
 
 
-def load_programming_language_weights() -> Dict[str, float]:
+def load_programming_language_weights() -> Dict[str, LanguageConfig]:
     """
     Load programming language weights from the local JSON file.
 
     Returns:
-        Dictionary mapping extension (str) to weight (float).
+        Dictionary mapping extension (str) to LanguageConfig object.
         Returns empty dict on error.
     """
     weights_file = _get_weights_dir() / 'programming_languages.json'
@@ -136,13 +158,19 @@ def load_programming_language_weights() -> Dict[str, float]:
             bt.logging.error(f'Expected dict from {weights_file}, got {type(data)}')
             return {}
 
-        # Validate that all values are numeric
-        result = {}
-        for extension, weight in data.items():
+        result: Dict[str, LanguageConfig] = {}
+        for extension, config in data.items():
             try:
-                result[extension] = float(weight)
+                if isinstance(config, dict):
+                    result[extension] = LanguageConfig(
+                        weight=float(config.get('weight', 1.0)),
+                        language=config.get('language'),
+                    )
+                else:
+                    # Backwards compatibility: handle plain float values
+                    result[extension] = LanguageConfig(weight=float(config))
             except (ValueError, TypeError) as e:
-                bt.logging.warning(f'Could not convert weight to float for {extension}: {weight} - {e}')
+                bt.logging.warning(f'Could not parse config for {extension}: {config} - {e}')
                 continue
 
         bt.logging.debug(f'Successfully loaded {len(result)} language entries from {weights_file}')
@@ -159,19 +187,15 @@ def load_programming_language_weights() -> Dict[str, float]:
         return {}
 
 
-def load_extension_to_language() -> Dict[str, str]:
-    """Load extension to tree-sitter language mapping."""
-    path = _get_weights_dir() / 'extension_to_language.json'
-    try:
-        with open(path, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError) as e:
-        bt.logging.error(f'Failed to load extension_to_language.json: {e}')
-        return {}
+def load_token_config() -> TokenConfig:
+    """Load token configuration from JSON files.
 
+    Loads structural and leaf token weights from token_weights.json,
+    and language configurations from programming_languages.json.
 
-def load_token_weights() -> TokenWeights:
-    """Load token weights from JSON configuration files."""
+    Returns:
+        TokenConfig with all scoring configuration loaded.
+    """
     weights_file = _get_weights_dir() / 'token_weights.json'
 
     try:
@@ -186,21 +210,25 @@ def load_token_weights() -> TokenWeights:
 
     structural_bonus = dict(data.get('structural_bonus', {}))
     leaf_tokens = dict(data.get('leaf_tokens', {}))
-    extension_to_language = load_extension_to_language()
 
-    weights = TokenWeights(
+    # Load language configurations (includes tree-sitter language mapping)
+    language_configs = load_programming_language_weights()
+
+    # Count languages with tree-sitter support
+    tree_sitter_count = sum(1 for c in language_configs.values() if c.language is not None)
+
+    config = TokenConfig(
         structural_bonus=structural_bonus,
         leaf_tokens=leaf_tokens,
-        extension_to_language=extension_to_language,
-        documentation_extensions=set(NON_CODE_EXTENSIONS),
+        language_configs=language_configs,
     )
 
     bt.logging.info(
-        f'Loaded token weights: {len(structural_bonus)} structural, '
-        f'{len(leaf_tokens)} leaf, {len(extension_to_language)} languages'
+        f'Loaded token config: {len(structural_bonus)} structural, '
+        f'{len(leaf_tokens)} leaf, {tree_sitter_count} tree-sitter languages'
     )
 
-    return weights
+    return config
 
 
 def get_supported_extensions() -> List[str]:
@@ -210,16 +238,19 @@ def get_supported_extensions() -> List[str]:
     Returns:
         List[str]: List of supported file extensions (without dots).
     """
-    weights = load_token_weights()
-    return [ext for ext in weights.extension_to_language.keys() if ext not in weights.documentation_extensions]
+    config = load_token_config()
+    return [
+        ext
+        for ext, lang_config in config.language_configs.items()
+        if lang_config.language is not None and ext not in NON_CODE_EXTENSIONS
+    ]
 
 
 def get_documentation_extensions() -> List[str]:
     """
-    Get a list of file extensions that use regex-based scoring.
+    Get a list of file extensions that use line-count scoring.
 
     Returns:
-        List[str]: List of documentation file extensions (without dots).
+        List[str]: List of documentation/config file extensions (without dots).
     """
-    weights = load_token_weights()
-    return list(weights.documentation_extensions)
+    return list(NON_CODE_EXTENSIONS)

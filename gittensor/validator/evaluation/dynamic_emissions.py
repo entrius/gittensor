@@ -31,7 +31,7 @@ def get_network_totals(miner_evaluations: Dict[int, MinerEvaluation]) -> tuple[i
     total_merged_prs = 0
 
     for evaluation in miner_evaluations.values():
-        total_lines += evaluation.total_lines_changed
+        total_lines += evaluation.total_nodes_scored
         for pr in evaluation.merged_pull_requests:
             if not pr.low_value_pr:
                 total_merged_prs += 1

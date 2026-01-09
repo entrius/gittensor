@@ -26,7 +26,32 @@ GITTENSOR_MINER_DETAILS_URL = 'https://gittensor.io/miners/details?githubId='
 # =============================================================================
 DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT = 0.12
 TEST_FILE_CONTRIBUTION_WEIGHT = 0.05
-NON_CODE_EXTENSIONS = ['md', 'mdx', 'markdown', 'txt', 'text', 'json', 'jsonc', 'rst', 'adoc', 'asciidoc', 'toml']
+# Extensions that use line-count scoring (capped at MAX_LINES_SCORED_FOR_NON_CODE_EXT)
+# These are documentation, config, or data files
+NON_CODE_EXTENSIONS = [
+    'md',
+    'mdx',
+    'markdown',
+    'txt',
+    'text',
+    'rst',
+    'adoc',
+    'asciidoc',
+    'json',
+    'jsonc',
+    'yaml',
+    'yml',
+    'toml',
+    'xml',
+    'csv',
+    'tsv',
+    'ini',
+    'cfg',
+    'conf',
+    'config',
+    'properties',
+    'plist',
+]
 MAX_LINES_SCORED_FOR_NON_CODE_EXT = 300
 
 # =============================================================================
@@ -78,6 +103,18 @@ UNIQUE_PRS_RECYCLE_DECAY_RATE = 0.006
 
 
 # =============================================================================
+# Low-Value PR Detection (Tiered Thresholds)
+# =============================================================================
+# PRs with score-per-line below these thresholds are flagged as low-value.
+# Smaller PRs have stricter thresholds
+# Larger PRs are more lenient (naturally include config, docs, etc.).
+LOW_VALUE_THRESHOLD_SMALL = 0.5
+LOW_VALUE_THRESHOLD_MEDIUM = 0.35
+LOW_VALUE_THRESHOLD_LARGE = 0.25
+LOW_VALUE_SIZE_SMALL = 20  # Lines threshold for "small" PRs
+LOW_VALUE_SIZE_MEDIUM = 250  # Lines threshold for "medium" PRs
+
+# =============================================================================
 # Spam & Gaming Mitigation
 # =============================================================================
 MAINTAINER_ASSOCIATIONS = ['OWNER', 'MEMBER', 'COLLABORATOR']
@@ -85,18 +122,6 @@ MAINTAINER_ASSOCIATIONS = ['OWNER', 'MEMBER', 'COLLABORATOR']
 # Issue multiplier bonuses
 MAX_ISSUE_AGE_BONUS = 0.75  # Max bonus for issue age (scales with sqrt of days open)
 MAINTAINER_ISSUE_BONUS = 0.25  # Extra bonus when issue was created by a maintainer
-
-# =============================================================================
-# Token Scoring Thresholds
-# =============================================================================
-# Minimum Jaccard similarity (1/3) to pair an addition with a deletion.
-# Below this, the addition is treated as a pure addition (full scoring).
-TOKEN_PAIRING_MIN_SIMILARITY = 1 / 3  # ≈ 0.333
-
-# Max pending deletions in a change hunk before skipping similarity-based line pairing.
-# Above this, all additions are treated as pure additions to avoid O(n²) cost in line pairing algorithm.
-TOKEN_PAIRING_MAX_PENDING_DELETIONS = 55
-
 # Excessive open PRs penalty
 EXCESSIVE_PR_PENALTY_THRESHOLD = 10
 EXCESSIVE_PR_PENALTY_SLOPE = 0.50

@@ -56,9 +56,10 @@ class FileChange:
     changes: int
     additions: int
     deletions: int
-    status: str  # "added", "modified", "removed", etc.
+    status: str  # "added", "modified", "removed", "renamed", etc.
     patch: Optional[str] = None  # The actual diff content
     file_extension: Optional[str] = None
+    previous_filename: Optional[str] = None  # For renamed files
 
     @property
     def short_name(self) -> str:
@@ -109,6 +110,7 @@ class FileChange:
             deletions=file_diff['deletions'],
             status=file_diff['status'],
             patch=file_diff.get('patch'),
+            previous_filename=file_diff.get('previous_filename'),
         )
 
 
@@ -167,7 +169,7 @@ class PullRequest:
     additions: int = 0
     deletions: int = 0
     commits: int = 0
-    total_lines_scored: int = 0
+    total_nodes_scored: int = 0  # Total AST nodes scored for this PR
     gittensor_tagged: bool = False
     merged_by_login: Optional[str] = None
     file_changes: Optional[List[FileChange]] = None
@@ -175,6 +177,7 @@ class PullRequest:
     description: Optional[str] = None
     last_edited_at: Optional[datetime] = None
     head_ref_oid: Optional[str] = None
+    base_ref_oid: Optional[str] = None
 
     def set_file_changes(self, file_changes: List[FileChange]) -> None:
         """Set the file changes for this pull request"""
@@ -278,6 +281,7 @@ class PullRequest:
             last_edited_at=last_edited_at,
             gittensor_tagged=gittensor_tagged,
             head_ref_oid=pr_data.get('headRefOid'),
+            base_ref_oid=pr_data.get('baseRefOid'),
         )
 
 
@@ -290,7 +294,7 @@ class MinerEvaluation:
     base_total_score: float = 0.0
     total_score: float = 0.0
     total_collateral_score: float = 0.0  # Collateral from open PRs
-    total_lines_changed: int = 0
+    total_nodes_scored: int = 0  # Total AST nodes scored across all PRs
     unique_repos_count: int = 0
     failed_reason: Optional[str] = None
     evaluation_timestamp: Optional[datetime] = None
@@ -365,127 +369,70 @@ class MinerEvaluation:
 # =============================================================================
 
 
-class LineChangeType(str, Enum):
-    """Type of line change in a patch."""
-
-    ADDITION = 'addition'  # Pure addition (new line with no matching deletion)
-    DELETION = 'deletion'  # Pure deletion (removed line with no matching addition)
-    MODIFICATION = 'modification'  # Changed line (paired addition/deletion)
-
-
-@dataclass
-class LineChange:
-    """Represents a single line change with detailed metadata."""
-
-    line_num: int
-    change_type: LineChangeType
-    content: str
-    changed_tokens: Set[str] = field(default_factory=set)
-    old_content: Optional[str] = None  # For modifications: the original line
-    old_line_num: Optional[int] = None  # For modifications: line number in old file
-    similarity: Optional[float] = None  # Jaccard similarity for matched pairs
-
-    @property
-    def is_addition(self) -> bool:
-        return self.change_type == LineChangeType.ADDITION
-
-    @property
-    def is_deletion(self) -> bool:
-        return self.change_type == LineChangeType.DELETION
-
-    @property
-    def is_modification(self) -> bool:
-        return self.change_type == LineChangeType.MODIFICATION
-
-
-@dataclass
-class Hunk:
-    """Represents a single hunk from a unified diff."""
-
-    old_start: int
-    old_count: int
-    new_start: int
-    new_count: int
-    changes: List[LineChange] = field(default_factory=list)
-
-    @property
-    def additions(self) -> List[LineChange]:
-        """Get all pure additions in this hunk."""
-        return [c for c in self.changes if c.change_type == LineChangeType.ADDITION]
-
-    @property
-    def deletions(self) -> List[LineChange]:
-        """Get all pure deletions in this hunk."""
-        return [c for c in self.changes if c.change_type == LineChangeType.DELETION]
-
-    @property
-    def modifications(self) -> List[LineChange]:
-        """Get all modifications in this hunk."""
-        return [c for c in self.changes if c.change_type == LineChangeType.MODIFICATION]
-
-    @property
-    def total_changed_tokens(self) -> int:
-        """Count of unique changed tokens across all modifications."""
-        return sum(len(c.changed_tokens) for c in self.modifications)
-
-
-@dataclass
-class FilePatch:
-    """Parsed patch data for a single file, preserving hunk structure."""
-
-    filename: str = ''
-    hunks: List[Hunk] = field(default_factory=list)
-
-    @property
-    def all_changes(self) -> List[LineChange]:
-        """Flatten all changes from all hunks."""
-        return [c for hunk in self.hunks for c in hunk.changes]
-
-    @property
-    def additions_by_line(self) -> Dict[int, LineChange]:
-        """Additions and modifications keyed by new file line number."""
-        return {
-            c.line_num: c
-            for c in self.all_changes
-            if c.change_type in (LineChangeType.ADDITION, LineChangeType.MODIFICATION)
-        }
-
-    @property
-    def deletions_by_line(self) -> Dict[int, LineChange]:
-        """Pure deletions keyed by old file line number."""
-        return {c.line_num: c for c in self.all_changes if c.change_type == LineChangeType.DELETION}
-
-    @property
-    def total_additions(self) -> int:
-        """Count of pure additions."""
-        return sum(1 for c in self.all_changes if c.change_type == LineChangeType.ADDITION)
-
-    @property
-    def total_deletions(self) -> int:
-        """Count of pure deletions."""
-        return sum(1 for c in self.all_changes if c.change_type == LineChangeType.DELETION)
-
-    @property
-    def total_modifications(self) -> int:
-        """Count of modifications."""
-        return sum(1 for c in self.all_changes if c.change_type == LineChangeType.MODIFICATION)
-
-    @property
-    def total_changed_tokens(self) -> int:
-        """Count of changed tokens across all modifications."""
-        return sum(len(c.changed_tokens) for c in self.all_changes if c.is_modification)
-
-
 @dataclass
 class ScoreBreakdown:
-    """Breakdown of scores by type (structural vs leaf tokens)."""
+    """Breakdown of scores by type (structural vs leaf) and change type (added vs deleted).
+
+    With tree-diff scoring, we track nodes that differ between old and new ASTs:
+    - Added: nodes in new tree but not in old tree
+    - Deleted: nodes in old tree but not in new tree
+
+    Both additions and deletions represent meaningful work and are scored.
+    """
 
     total_score: float = 0.0
-    structural_count: int = 0  # Number of structural bonuses applied
-    structural_score: float = 0.0  # Total from structural bonuses
-    leaf_count: int = 0  # Number of leaf tokens scored
-    leaf_score: float = 0.0  # Total from leaf tokens
-    lines_with_score: int = 0  # Number of lines that contributed (excludes comments)
+
+    # Structural changes (function/class definitions, control flow, etc.)
+    structural_added_count: int = 0
+    structural_added_score: float = 0.0
+    structural_deleted_count: int = 0
+    structural_deleted_score: float = 0.0
+
+    # Leaf token changes (identifiers, literals, operators, etc.)
+    leaf_added_count: int = 0
+    leaf_added_score: float = 0.0
+    leaf_deleted_count: int = 0
+    leaf_deleted_score: float = 0.0
+
+    @property
+    def structural_count(self) -> int:
+        """Total structural changes (added + deleted)."""
+        return self.structural_added_count + self.structural_deleted_count
+
+    @property
+    def structural_score(self) -> float:
+        """Total structural score (added + deleted)."""
+        return self.structural_added_score + self.structural_deleted_score
+
+    @property
+    def leaf_count(self) -> int:
+        """Total leaf changes (added + deleted)."""
+        return self.leaf_added_count + self.leaf_deleted_count
+
+    @property
+    def leaf_score(self) -> float:
+        """Total leaf score (added + deleted)."""
+        return self.leaf_added_score + self.leaf_deleted_score
+
+    @property
+    def added_count(self) -> int:
+        """Total added nodes (structural + leaf)."""
+        return self.structural_added_count + self.leaf_added_count
+
+    @property
+    def added_score(self) -> float:
+        """Total score from additions."""
+        return self.structural_added_score + self.leaf_added_score
+
+    @property
+    def deleted_count(self) -> int:
+        """Total deleted nodes (structural + leaf)."""
+        return self.structural_deleted_count + self.leaf_deleted_count
+
+    @property
+    def deleted_score(self) -> float:
+        """Total score from deletions."""
+        return self.structural_deleted_score + self.leaf_deleted_score
 
 
 @dataclass
@@ -494,26 +441,23 @@ class FileScoreResult:
 
     filename: str
     score: float
-    lines_scored: int
+    nodes_scored: int  # Number of AST nodes scored (for tree-diff) or lines (for line-count)
     total_lines: int
     is_test_file: bool
-    scoring_method: str  # 'tree-sitter', 'line-count', 'skipped-*'
-    breakdown: Optional[ScoreBreakdown] = None  # Only populated for tree-sitter scoring
-    patch: Optional[FilePatch] = None  # Parsed patch data (when available)
+    scoring_method: str  # 'tree-diff', 'line-count', 'skipped-*'
+    breakdown: Optional[ScoreBreakdown] = None  # Only populated for tree-diff scoring
 
 
 @dataclass
 class PrScoringResult:
     """Result of scoring a pull request.
 
-    Contains aggregate metrics for the PR, including total score, line counts,
-    and additional metrics for typo detection and change tracking.
+    Contains aggregate metrics for the PR, including total score and per-file details.
     """
 
     total_score: float
     is_low_value_pr: bool
-    total_lines_scored: int
+    total_nodes_scored: int  # Total AST nodes scored across all files
+    total_raw_lines: int  # Total lines changed (additions + deletions) from git stats
     file_results: List[FileScoreResult]
     breakdown: Optional[ScoreBreakdown] = None  # Aggregated breakdown across all files
-    total_changed_tokens: int = 0  # For typo detection: sum of changed tokens across modifications
-    total_modifications: int = 0  # Count of modified lines (not pure additions/deletions)

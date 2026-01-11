@@ -88,7 +88,6 @@ def score_pull_request(
         return
 
     # Only fetch file changes from GitHub if not already loaded (they are preloaded for testing only)
-    # TODO: with token based scoring I believe file changes are no longer necessary to pull from github
     if not pr.file_changes:
         file_changes = get_pull_request_file_changes(pr.repository_full_name, pr.number, miner_eval.github_pat)
         if not file_changes:

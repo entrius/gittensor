@@ -328,14 +328,12 @@ def calculate_token_score_from_file_changes(
             total_score=0.0,
             is_low_value_pr=True,
             total_nodes_scored=0,
-            total_raw_lines=0,
             file_results=[],
         )
 
     file_results: List[FileScoreResult] = []
     total_score = 0.0
     total_nodes_scored = 0
-    total_raw_lines = 0
 
     # Aggregate breakdown across all files (tracking added/deleted separately)
     total_structural_added_count = 0
@@ -375,7 +373,6 @@ def calculate_token_score_from_file_changes(
 
             total_score += file_score
             total_nodes_scored += lines_to_score
-            total_raw_lines += file.changes
 
             file_results.append(
                 FileScoreResult(
@@ -465,8 +462,6 @@ def calculate_token_score_from_file_changes(
 
         total_score += file_score
         total_nodes_scored += nodes_scored
-        # Raw lines = all additions + deletions (from git stats)
-        total_raw_lines += file.changes
 
         # Aggregate breakdown (tracking added/deleted separately)
         total_structural_added_count += file_breakdown.structural_added_count
@@ -489,6 +484,9 @@ def calculate_token_score_from_file_changes(
                 breakdown=file_breakdown,
             )
         )
+
+    # Compute total raw lines (additions + deletions) for low-value detection
+    total_raw_lines = sum(f.total_lines for f in file_results)
 
     # Determine if this is a low-value PR using tiered thresholds
     low_value = is_low_value_pr(total_score, total_raw_lines)
@@ -526,7 +524,6 @@ def calculate_token_score_from_file_changes(
         total_score=total_score,
         is_low_value_pr=low_value,
         total_nodes_scored=total_nodes_scored,
-        total_raw_lines=total_raw_lines,
         file_results=file_results,
         breakdown=total_breakdown,
     )

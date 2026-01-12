@@ -159,6 +159,14 @@ def calculate_base_score(
     contribution_score = scoring_result.total_score
     pr.total_nodes_scored = scoring_result.total_nodes_scored
 
+    # Assign token scoring breakdown to PR
+    if scoring_result.breakdown:
+        pr.token_score = scoring_result.breakdown.total_score
+        pr.structural_count = scoring_result.breakdown.structural_count
+        pr.structural_score = scoring_result.breakdown.structural_score
+        pr.leaf_count = scoring_result.breakdown.leaf_count
+        pr.leaf_score = scoring_result.breakdown.leaf_score
+
     if scoring_result.is_low_value_pr:
         bt.logging.warning(f'PR #{pr.number} is low-value, base score = 0')
         pr.low_value_pr = scoring_result.is_low_value_pr
@@ -292,6 +300,13 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
             evaluation.base_total_score += pr.base_score
             evaluation.total_score += pr.earned_score
             evaluation.total_nodes_scored += pr.total_nodes_scored
+
+            # Aggregate token scoring breakdown
+            evaluation.total_token_score += pr.token_score
+            evaluation.total_structural_count += pr.structural_count
+            evaluation.total_structural_score += pr.structural_score
+            evaluation.total_leaf_count += pr.leaf_count
+            evaluation.total_leaf_score += pr.leaf_score
 
         # Process open PRs for collateral
         for pr in evaluation.open_pull_requests:

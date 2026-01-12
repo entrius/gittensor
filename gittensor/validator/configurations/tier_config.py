@@ -24,6 +24,13 @@ class TierStats:
     earned_score: float = 0.0
     collateral_score: float = 0.0
 
+    # Token scoring breakdown for this tier
+    token_score: float = 0.0
+    structural_count: int = 0
+    structural_score: float = 0.0
+    leaf_count: int = 0
+    leaf_score: float = 0.0
+
     @property
     def total_attempts(self) -> int:
         return self.merged_count + self.closed_count
@@ -57,6 +64,7 @@ class TierConfig:
     required_merges: Optional[int]
     required_unique_repos_merged_to: Optional[int]
     required_credibility: Optional[float]
+    required_min_token_score: Optional[float]  # Minimum total token score to unlock tier
 
     # Tier-specific scaling
     credibility_scalar: int
@@ -73,18 +81,21 @@ TIERS: dict[Tier, TierConfig] = {
         required_merges=3,
         required_unique_repos_merged_to=3,
         required_credibility=0.70,
+        required_min_token_score=None,  # No token score requirement for Bronze
         credibility_scalar=1.0,
     ),
     Tier.SILVER: TierConfig(
         required_merges=4,
         required_unique_repos_merged_to=3,
         required_credibility=0.65,
+        required_min_token_score=50.0,  # Minimum token score for Silver unlock
         credibility_scalar=1.5,
     ),
     Tier.GOLD: TierConfig(
         required_merges=5,
         required_unique_repos_merged_to=3,
         required_credibility=0.60,
+        required_min_token_score=150.0,  # Minimum token score for Gold unlock
         credibility_scalar=2.0,
     ),
 }

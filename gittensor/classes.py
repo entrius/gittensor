@@ -171,6 +171,13 @@ class PullRequest:
     commits: int = 0
     total_nodes_scored: int = 0  # Total AST nodes scored for this PR
     gittensor_tagged: bool = False
+
+    # Token scoring breakdown (after test weight applied)
+    token_score: float = 0.0
+    structural_count: int = 0
+    structural_score: float = 0.0
+    leaf_count: int = 0
+    leaf_score: float = 0.0
     merged_by_login: Optional[str] = None
     file_changes: Optional[List[FileChange]] = None
     issues: Optional[List[Issue]] = None
@@ -296,6 +303,13 @@ class MinerEvaluation:
     total_collateral_score: float = 0.0  # Collateral from open PRs
     total_nodes_scored: int = 0  # Total AST nodes scored across all PRs
     unique_repos_count: int = 0
+
+    # Overall token scoring breakdown (aggregated across all PRs)
+    total_token_score: float = 0.0
+    total_structural_count: int = 0
+    total_structural_score: float = 0.0
+    total_leaf_count: int = 0
+    total_leaf_score: float = 0.0
     failed_reason: Optional[str] = None
     evaluation_timestamp: Optional[datetime] = None
     merged_pull_requests: List[PullRequest] = field(default_factory=list)
@@ -453,6 +467,5 @@ class PrScoringResult:
     total_score: float
     is_low_value_pr: bool
     total_nodes_scored: int  # Total AST nodes scored across all files
-    total_raw_lines: int  # Total lines changed (additions + deletions) from git stats
     file_results: List[FileScoreResult]
     breakdown: Optional[ScoreBreakdown] = None  # Aggregated breakdown across all files

@@ -19,7 +19,7 @@ INSERT INTO pull_requests (
     earned_score, collateral_score,
     additions, deletions, commits, total_nodes_scored, gittensor_tagged, low_value_pr,
     merged_by_login, description, last_edited_at,
-    token_score, structural_count, structural_score, leaf_count, leaf_score, raw_lines
+    token_score, structural_count, structural_score, leaf_count, leaf_score
 ) VALUES %s
 ON CONFLICT (number, repository_full_name)
 DO UPDATE SET
@@ -55,7 +55,6 @@ DO UPDATE SET
     structural_score = EXCLUDED.structural_score,
     leaf_count = EXCLUDED.leaf_count,
     leaf_score = EXCLUDED.leaf_score,
-    raw_lines = EXCLUDED.raw_lines,
     updated_at = NOW()
 """
 
@@ -96,8 +95,7 @@ INSERT INTO miner_evaluations (
     uid, hotkey, github_id, failed_reason, base_total_score, total_score, total_collateral_score,
     total_nodes_scored, total_open_prs, total_closed_prs, total_merged_prs, total_prs, unique_repos_count,
     current_tier,
-    total_token_score, total_structural_count, total_structural_score,
-    total_leaf_count, total_leaf_score, total_raw_lines
+    total_token_score, total_structural_count, total_structural_score, total_leaf_count, total_leaf_score
 ) VALUES %s
 ON CONFLICT (uid, hotkey, github_id)
 DO UPDATE SET
@@ -117,7 +115,6 @@ DO UPDATE SET
     total_structural_score = EXCLUDED.total_structural_score,
     total_leaf_count = EXCLUDED.total_leaf_count,
     total_leaf_score = EXCLUDED.total_leaf_score,
-    total_raw_lines = EXCLUDED.total_raw_lines,
     updated_at = NOW()
 RETURNING id
 """
@@ -125,16 +122,19 @@ RETURNING id
 # Miner Tier Stats Queries (1:1 with miner_evaluations)
 BULK_UPSERT_MINER_TIER_STATS = """
 INSERT INTO miner_tier_stats (
-    evaluation_id,
+    evaluation_id, uid, hotkey, github_id,
     bronze_merged_prs, bronze_closed_prs, bronze_total_prs, bronze_collateral_score, bronze_score, bronze_unique_repos,
-    bronze_token_score, bronze_structural_count, bronze_structural_score, bronze_leaf_count, bronze_leaf_score, bronze_raw_lines,
+    bronze_token_score, bronze_structural_count, bronze_structural_score, bronze_leaf_count, bronze_leaf_score,
     silver_merged_prs, silver_closed_prs, silver_total_prs, silver_collateral_score, silver_score, silver_unique_repos,
-    silver_token_score, silver_structural_count, silver_structural_score, silver_leaf_count, silver_leaf_score, silver_raw_lines,
+    silver_token_score, silver_structural_count, silver_structural_score, silver_leaf_count, silver_leaf_score,
     gold_merged_prs, gold_closed_prs, gold_total_prs, gold_collateral_score, gold_score, gold_unique_repos,
-    gold_token_score, gold_structural_count, gold_structural_score, gold_leaf_count, gold_leaf_score, gold_raw_lines
+    gold_token_score, gold_structural_count, gold_structural_score, gold_leaf_count, gold_leaf_score
 ) VALUES %s
 ON CONFLICT (evaluation_id)
 DO UPDATE SET
+    uid = EXCLUDED.uid,
+    hotkey = EXCLUDED.hotkey,
+    github_id = EXCLUDED.github_id,
     bronze_merged_prs = EXCLUDED.bronze_merged_prs,
     bronze_closed_prs = EXCLUDED.bronze_closed_prs,
     bronze_total_prs = EXCLUDED.bronze_total_prs,
@@ -146,7 +146,6 @@ DO UPDATE SET
     bronze_structural_score = EXCLUDED.bronze_structural_score,
     bronze_leaf_count = EXCLUDED.bronze_leaf_count,
     bronze_leaf_score = EXCLUDED.bronze_leaf_score,
-    bronze_raw_lines = EXCLUDED.bronze_raw_lines,
     silver_merged_prs = EXCLUDED.silver_merged_prs,
     silver_closed_prs = EXCLUDED.silver_closed_prs,
     silver_total_prs = EXCLUDED.silver_total_prs,
@@ -158,7 +157,6 @@ DO UPDATE SET
     silver_structural_score = EXCLUDED.silver_structural_score,
     silver_leaf_count = EXCLUDED.silver_leaf_count,
     silver_leaf_score = EXCLUDED.silver_leaf_score,
-    silver_raw_lines = EXCLUDED.silver_raw_lines,
     gold_merged_prs = EXCLUDED.gold_merged_prs,
     gold_closed_prs = EXCLUDED.gold_closed_prs,
     gold_total_prs = EXCLUDED.gold_total_prs,
@@ -170,6 +168,5 @@ DO UPDATE SET
     gold_structural_score = EXCLUDED.gold_structural_score,
     gold_leaf_count = EXCLUDED.gold_leaf_count,
     gold_leaf_score = EXCLUDED.gold_leaf_score,
-    gold_raw_lines = EXCLUDED.gold_raw_lines,
     updated_at = NOW()
 """

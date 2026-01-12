@@ -39,6 +39,12 @@ def calculate_tier_stats(
             repos_per_tier[tier].add(pr.repository_full_name)
             if include_scoring_details:
                 stats[tier].earned_score += pr.earned_score
+            # Aggregate token scoring breakdown
+            stats[tier].token_score += pr.token_score
+            stats[tier].structural_count += pr.structural_count
+            stats[tier].structural_score += pr.structural_score
+            stats[tier].leaf_count += pr.leaf_count
+            stats[tier].leaf_score += pr.leaf_score
 
     for pr in closed_prs:
         if tier := get_tier(pr):
@@ -87,6 +93,13 @@ def is_tier_unlocked(tier: Tier, tier_stats: Dict[Tier, TierStats]) -> bool:
             if stats.credibility < config.required_credibility:
                 bt.logging.info(
                     f'{tier.value} locked: {check_tier.value} needs {config.required_credibility:.2f} credibility, has {stats.credibility:.2f}'
+                )
+                return False
+
+        if config.required_min_token_score is not None:
+            if stats.token_score < config.required_min_token_score:
+                bt.logging.info(
+                    f'{tier.value} locked: {check_tier.value} needs {config.required_min_token_score:.1f} token score, has {stats.token_score:.1f}'
                 )
                 return False
 

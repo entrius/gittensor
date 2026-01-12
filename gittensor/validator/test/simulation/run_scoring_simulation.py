@@ -85,12 +85,12 @@ except ImportError:
 # =============================================================================
 
 LOAD_ALL_MINERS = """
-SELECT DISTINCT m.uid, m.hotkey, m.github_id
+SELECT DISTINCT m.uid, m.hotkey, m.github_id, me.total_score
 FROM miners m
 INNER JOIN pull_requests pr ON m.uid = pr.uid AND m.hotkey = pr.hotkey AND m.github_id = pr.github_id
 INNER JOIN miner_evaluations me ON m.uid = me.uid AND m.hotkey = me.hotkey AND m.github_id = me.github_id
 where me.total_merged_prs > 0
-ORDER BY m.uid
+ORDER BY me.total_score desc
 """
 
 
@@ -122,23 +122,34 @@ def load_miner_identities(conn) -> List[Tuple[int, str, str]]:
     """Load miner identities (uid, hotkey, github_id) from database.
 
     Applies filters based on SPECIFIC_GITHUB_IDS and MINER_LIMIT configuration.
+    If SPECIFIC_GITHUB_IDS are provided, bypasses DB entirely and creates mock identities
+    to fetch PRs directly from GitHub GraphQL.
     """
+    # If specific github_ids are provided, bypass DB and create mock identities directly
+    # This allows fetching fresh PRs from GraphQL without requiring DB records
+    if SPECIFIC_GITHUB_IDS:
+        miners = []
+        print(f'  Using SPECIFIC_GITHUB_IDS (bypassing DB): {SPECIFIC_GITHUB_IDS}')
+        for i, github_id in enumerate(SPECIFIC_GITHUB_IDS):
+            mock_uid = -(i + 1)
+            mock_hotkey = f'mock_hotkey_{github_id}'
+            miners.append((mock_uid, mock_hotkey, github_id))
+            print(f'    -> Mock miner: uid={mock_uid}, github_id={github_id}')
+
+        # Apply miner limit if configured
+        if MINER_LIMIT is not None and len(miners) > MINER_LIMIT:
+            miners = miners[:MINER_LIMIT]
+            print(f'  Limited to {len(miners)} miners by MINER_LIMIT')
+
+        return miners
+
+    # Otherwise, load from database
     cur = conn.cursor()
     cur.execute(LOAD_ALL_MINERS)
     miners = cur.fetchall()
     cur.close()
     total_in_db = len(miners)
     print(f'  Found {total_in_db} miners with PRs in DB')
-
-    # Filter by specific github_ids if configured
-    if SPECIFIC_GITHUB_IDS:
-        github_id_set = set(SPECIFIC_GITHUB_IDS)
-        miners = [(uid, hotkey, gid) for uid, hotkey, gid in miners if gid in github_id_set]
-        found_ids = {gid for _, _, gid in miners}
-        missing_ids = github_id_set - found_ids
-        if missing_ids:
-            print(f'  WARNING: github_ids not found in DB: {missing_ids}')
-        print(f'  Filtered to {len(miners)} miners by SPECIFIC_GITHUB_IDS')
 
     # Apply miner limit if configured
     if MINER_LIMIT is not None and len(miners) > MINER_LIMIT:
@@ -211,7 +222,7 @@ def run_scoring_simulation(
     sys.stdout.flush()
     time.sleep(0.1)
     evals: Dict[int, MinerEvaluation] = {}
-    for uid, hotkey, github_id in miners:
+    for uid, hotkey, github_id, _ in miners:
         print(f'  Fetching PRs for uid={uid} ({github_id})...')
         ev = create_miner_evaluation(uid, hotkey, github_id, github_pat)
         load_miners_prs(ev, master_repos, max_prs=100)
@@ -276,8 +287,6 @@ def run_scoring_simulation(
             print('  WARNING: Database storage not enabled. Check DB env vars.')
     else:
         print('\n[9/9] Skipping evaluation storage (store_evaluations=False)')
-
-    conn.close()
 
     # Print summary
     _print_summary(evals, normalized, scaled)

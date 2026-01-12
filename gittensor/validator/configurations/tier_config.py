@@ -6,7 +6,7 @@ from gittensor.constants import (
     DEFAULT_COLLATERAL_PERCENT,
     DEFAULT_MAX_CONTRIBUTION_SCORE_FOR_FULL_BONUS,
     DEFAULT_MERGED_PR_BASE_SCORE,
-    MAX_LINE_CONTRIBUTION_BONUS,
+    MAX_CONTRIBUTION_BONUS,
 )
 
 
@@ -55,7 +55,7 @@ class Tier(str, Enum):
 TIER_DEFAULTS = {
     'merged_pr_base_score': DEFAULT_MERGED_PR_BASE_SCORE,
     'contribution_score_for_full_bonus': DEFAULT_MAX_CONTRIBUTION_SCORE_FOR_FULL_BONUS,
-    'contribution_score_max_bonus': MAX_LINE_CONTRIBUTION_BONUS,
+    'contribution_score_max_bonus': MAX_CONTRIBUTION_BONUS,
     'open_pr_collateral_percentage': DEFAULT_COLLATERAL_PERCENT,
 }
 
@@ -83,7 +83,7 @@ TIERS: dict[Tier, TierConfig] = {
         required_credibility=0.70,
         required_min_token_score=None,
         required_unique_repos_count=3,
-        required_min_token_score_per_repo=1.0,  # Each of 3 repos must have at least 5.0 token score
+        required_min_token_score_per_repo=1.0,  # Each of unique repos must have at least x token score
         credibility_scalar=1.0,
     ),
     Tier.SILVER: TierConfig(

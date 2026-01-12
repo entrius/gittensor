@@ -9,11 +9,13 @@ import bittensor as bt
 
 from gittensor.classes import Issue, MinerEvaluation, PrScoringResult, PRState, PullRequest
 from gittensor.constants import (
+    DEFAULT_MERGED_PR_BASE_SCORE,
     EXCESSIVE_PR_MIN_MULTIPLIER,
     EXCESSIVE_PR_PENALTY_SLOPE,
     EXCESSIVE_PR_PENALTY_THRESHOLD,
     MAINTAINER_ASSOCIATIONS,
     MAINTAINER_ISSUE_BONUS,
+    MAX_CODE_DENSITY_MULTIPLIER,
     MAX_ISSUE_AGE_BONUS,
     MAX_ISSUE_AGE_FOR_MAX_SCORE,
     MAX_ISSUE_CLOSE_WINDOW_DAYS,
@@ -96,7 +98,7 @@ def score_pull_request(
         pr.set_file_changes(file_changes)
 
     # Fetch full file contents for token-based scoring
-    file_contents = _fetch_file_contents_for_pr(pr, miner_eval.github_pat)
+    file_contents = fetch_file_contents_for_pr(pr, miner_eval.github_pat)
 
     pr.base_score = calculate_base_score(pr, programming_languages, token_config, file_contents)
     calculate_pr_multipliers(pr, miner_eval, master_repositories)
@@ -105,7 +107,7 @@ def score_pull_request(
         miner_eval.unique_repos_contributed_to.add(pr.repository_full_name)
 
 
-def _fetch_file_contents_for_pr(pr: PullRequest, github_pat: str) -> Dict[str, FileContentPair]:
+def fetch_file_contents_for_pr(pr: PullRequest, github_pat: str) -> Dict[str, FileContentPair]:
     """Fetch both base and head file contents for all files in a PR using GraphQL batch fetch.
 
     Returns:
@@ -147,7 +149,7 @@ def calculate_base_score(
     token_config: TokenConfig,
     file_contents: Dict[str, FileContentPair],
 ) -> float:
-    """Calculate base score from tier base + contribution bonus using token-based scoring."""
+    """Calculate base score using code density scaling + contribution bonus."""
     # Use token-based scoring
     scoring_result: PrScoringResult = calculate_token_score_from_file_changes(
         pr.file_changes,
@@ -156,10 +158,8 @@ def calculate_base_score(
         programming_languages,
     )
 
-    contribution_score = scoring_result.total_score
     pr.total_nodes_scored = scoring_result.total_nodes_scored
 
-    # Assign token scoring breakdown to PR
     if scoring_result.score_breakdown:
         pr.token_score = scoring_result.score_breakdown.total_score
         pr.structural_count = scoring_result.score_breakdown.structural_count
@@ -167,19 +167,34 @@ def calculate_base_score(
         pr.leaf_count = scoring_result.score_breakdown.leaf_count
         pr.leaf_score = scoring_result.score_breakdown.leaf_score
 
-    if scoring_result.is_low_value_pr:
-        bt.logging.warning(f'PR #{pr.number} is low-value, base score = 0')
-        pr.low_value_pr = scoring_result.is_low_value_pr
-        return 0.0
+    # NOTE: Low-value PR detection deprecated - kept for potential future use
+    # if scoring_result.is_low_value_pr:
+    #     bt.logging.warning(f'PR #{pr.number} is low-value, base score = 0')
+    #     pr.low_value_pr = scoring_result.is_low_value_pr
+    #     return 0.0
 
+    # Calculate total lines changed across all files
+    total_lines = sum(f.total_lines for f in scoring_result.file_results)
+
+    # Calculate code density (token_score / total_lines), capped at MAX_CODE_DENSITY_MULTIPLIER
+    if total_lines > 0 and pr.token_score > 0:
+        code_density = min(pr.token_score / total_lines, MAX_CODE_DENSITY_MULTIPLIER)
+    else:
+        code_density = 0.0
+
+    # Calculate initial base score scaled by code density
+    initial_base_score = DEFAULT_MERGED_PR_BASE_SCORE * code_density
+
+    # Calculate contribution bonus (capped)
     tier_config: TierConfig = pr.repository_tier_configuration
-
-    bonus_percent = min(1.0, contribution_score / tier_config.contribution_score_for_full_bonus)
+    bonus_percent = min(1.0, scoring_result.total_score / tier_config.contribution_score_for_full_bonus)
     contribution_bonus = round(bonus_percent * tier_config.contribution_score_max_bonus, 2)
-    base_score = tier_config.merged_pr_base_score + contribution_bonus
+
+    # Final base score = density-scaled base + contribution bonus
+    base_score = round(initial_base_score + contribution_bonus, 2)
 
     bt.logging.info(
-        f'Base score: {tier_config.merged_pr_base_score} + {contribution_bonus} bonus '
+        f'Base score: {initial_base_score:.2f} (density {code_density:.2f}) + {contribution_bonus} bonus '
         f'({bonus_percent * 100:.0f}% of max {tier_config.contribution_score_max_bonus}) = {base_score:.2f}'
     )
     if scoring_result.score_breakdown:

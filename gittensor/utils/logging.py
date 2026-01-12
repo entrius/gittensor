@@ -57,11 +57,15 @@ def log_scoring_results(
         max_name_len = max(len(f.filename) for f in file_results)
         for result in file_results:
             test_mark = ' [test]' if result.is_test_file else ''
-            method_mark = f' ({result.scoring_method})'
+            # Use "lines" for line-count files, "nodes" for token-scored files
+            if result.scoring_method == 'line-count':
+                count_str = f'{result.nodes_scored:>3} lines'
+            else:
+                count_str = f'{result.nodes_scored:>3} nodes'
             bt.logging.debug(
                 f'  │   {result.filename:<{max_name_len}}  '
-                f'{result.nodes_scored:>3} nodes  '
-                f'{result.score:>6.2f}{test_mark}{method_mark}'
+                f'{count_str}  '
+                f'{result.score:>6.2f}{test_mark}'
             )
 
     # Count files by scoring method
@@ -100,12 +104,23 @@ def log_scoring_results(
 
     breakdown_str = ' | '.join(breakdown_parts) if breakdown_parts else ''
 
-    score_per_line = total_score / total_raw_lines if total_raw_lines > 0 else 0
+    # Calculate token score (total minus line-count score)
+    token_score = total_score - line_count_score
+    density = total_score / total_raw_lines if total_raw_lines > 0 else 0
     threshold = get_low_value_threshold(total_raw_lines)
     low_value_str = ' [LOW VALUE]' if low_value else ''
+
+    # Build score display: show token and line scores separately if both exist
+    if line_count_score > 0 and token_score > 0:
+        score_str = f'Token: {token_score:.2f} | Line: {line_count_score:.2f} | Total: {total_score:.2f}'
+    elif line_count_score > 0:
+        score_str = f'Line Score: {line_count_score:.2f}'
+    else:
+        score_str = f'Token Score: {token_score:.2f}'
+
     bt.logging.info(
-        f'  ├─ Token Score: {total_score:.2f} | '
-        f'Lines: {total_raw_lines} | Score/Line: {score_per_line:.2f} (threshold: {threshold}){low_value_str}'
+        f'  ├─ {score_str} | '
+        f'Lines: {total_raw_lines} | Density: {density:.2f} (threshold: {threshold}){low_value_str}'
     )
 
     if breakdown_str:

@@ -61,6 +61,7 @@ DEFAULT_MERGED_PR_BASE_SCORE = 30
 
 # Boosts
 UNIQUE_PR_BOOST = 0.4
+MAX_CODE_DENSITY_MULTIPLIER = 3.0
 
 # Issue boosts
 MAX_ISSUE_CLOSE_WINDOW_DAYS = 1
@@ -89,7 +90,7 @@ COMMENT_NODE_TYPES = frozenset(
 TIER_BASED_INCENTIVE_MECHANISM_START_DATE = datetime(2025, 12, 31, 3, 45, 00, tzinfo=timezone.utc)
 DEFAULT_COLLATERAL_PERCENT = 0.20
 
-MAX_LINE_CONTRIBUTION_BONUS = 30
+MAX_CONTRIBUTION_BONUS = 30
 DEFAULT_MAX_CONTRIBUTION_SCORE_FOR_FULL_BONUS = 2000  # For reference: 2000 score = 1,000 python lines
 
 # =============================================================================
@@ -112,16 +113,15 @@ MERGED_PRS_RECYCLE_DECAY_RATE = 0.0015
 UNIQUE_PRS_MAX_RECYCLE = 0.9
 UNIQUE_PRS_RECYCLE_DECAY_RATE = 0.006
 
-
 # =============================================================================
 # Low-Value PR Detection (Tiered Thresholds)
 # =============================================================================
-# PRs with score-per-line below these thresholds are flagged as low-value.
 # Smaller PRs have stricter thresholds
 # Larger PRs are more lenient (naturally include config, docs, etc.).
-LOW_VALUE_THRESHOLD_SMALL = 0.4
-LOW_VALUE_THRESHOLD_MEDIUM = 0.35
-LOW_VALUE_THRESHOLD_LARGE = 0.3
+# NOTE: This is deprecated at the moment. all values set to 0
+LOW_VALUE_THRESHOLD_SMALL = 0.0  # 0.4
+LOW_VALUE_THRESHOLD_MEDIUM = 0.0  # 0.35
+LOW_VALUE_THRESHOLD_LARGE = 0.0  # 0.3
 LOW_VALUE_SIZE_SMALL = 20  # Lines threshold for "small" PRs
 LOW_VALUE_SIZE_MEDIUM = 250  # Lines threshold for "medium" PRs
 

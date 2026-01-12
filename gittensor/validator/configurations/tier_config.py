@@ -19,6 +19,8 @@ class TierStats:
     open_count: int = 0
 
     unique_repo_contribution_count: int = 0
+    # Unique repos that meet a min token score threshold (set during calculation)
+    qualified_unique_repo_count: int = 0
 
     # Included as scoring details at the tier level
     earned_score: float = 0.0
@@ -60,11 +62,11 @@ TIER_DEFAULTS = {
 
 @dataclass(frozen=True)
 class TierConfig:
-    # Tier unlock requirements
-    required_merges: Optional[int]
-    required_unique_repos_merged_to: Optional[int]
     required_credibility: Optional[float]
     required_min_token_score: Optional[float]  # Minimum total token score to unlock tier
+    # Unique repos with min token score requirement (both must be set or both None)
+    required_unique_repos_count: Optional[int]  # Number of unique repos needed
+    required_min_token_score_per_repo: Optional[float]  # Min token score each repo must have
 
     # Tier-specific scaling
     credibility_scalar: int
@@ -78,24 +80,24 @@ class TierConfig:
 
 TIERS: dict[Tier, TierConfig] = {
     Tier.BRONZE: TierConfig(
-        required_merges=3,
-        required_unique_repos_merged_to=3,
         required_credibility=0.70,
-        required_min_token_score=None,  # No token score requirement for Bronze
+        required_min_token_score=None,
+        required_unique_repos_count=3,
+        required_min_token_score_per_repo=1.0,  # Each of 3 repos must have at least 5.0 token score
         credibility_scalar=1.0,
     ),
     Tier.SILVER: TierConfig(
-        required_merges=4,
-        required_unique_repos_merged_to=3,
         required_credibility=0.65,
-        required_min_token_score=50.0,  # Minimum token score for Silver unlock
+        required_min_token_score=50.0,  # Minimum total token score for Silver unlock
+        required_unique_repos_count=3,
+        required_min_token_score_per_repo=1.0,  # Each of unique repos must have at least x token score
         credibility_scalar=1.5,
     ),
     Tier.GOLD: TierConfig(
-        required_merges=5,
-        required_unique_repos_merged_to=3,
         required_credibility=0.60,
-        required_min_token_score=150.0,  # Minimum token score for Gold unlock
+        required_min_token_score=150.0,  # Minimum total token score for Gold unlock
+        required_unique_repos_count=3,
+        required_min_token_score_per_repo=1.0,  # Each of unique repos must have at least x token score
         credibility_scalar=2.0,
     ),
 }

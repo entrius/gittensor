@@ -30,13 +30,18 @@ def calculate_tier_stats(
     include_scoring_details: bool = False,
 ) -> Dict[Tier, TierStats]:
     """Calculate merged/closed counts per tier."""
+    from collections import defaultdict
+
     stats: Dict[Tier, TierStats] = {tier: TierStats() for tier in Tier}
     repos_per_tier: Dict[Tier, set] = {tier: set() for tier in Tier}
+    # Track token scores per repository per tier
+    repo_token_scores_per_tier: Dict[Tier, Dict[str, float]] = {tier: defaultdict(float) for tier in Tier}
 
     for pr in merged_prs:
         if (tier := get_tier(pr)) and not pr.low_value_pr:
             stats[tier].merged_count += 1
             repos_per_tier[tier].add(pr.repository_full_name)
+            repo_token_scores_per_tier[tier][pr.repository_full_name] += pr.token_score
             if include_scoring_details:
                 stats[tier].earned_score += pr.earned_score
             # Aggregate token scoring breakdown
@@ -58,6 +63,16 @@ def calculate_tier_stats(
 
     for tier in TIERS_ORDER:
         stats[tier].unique_repo_contribution_count = len(repos_per_tier[tier])
+        # Calculate qualified repos based on tier's min token score per repo requirement
+        config = TIERS[tier]
+        if config.required_min_token_score_per_repo is not None:
+            qualified_count = sum(
+                1 for score in repo_token_scores_per_tier[tier].values() if score >= config.required_min_token_score_per_repo
+            )
+            stats[tier].qualified_unique_repo_count = qualified_count
+        else:
+            # If no min token score per repo required, all unique repos qualify
+            stats[tier].qualified_unique_repo_count = len(repos_per_tier[tier])
 
     return stats
 
@@ -66,7 +81,7 @@ def is_tier_unlocked(tier: Tier, tier_stats: Dict[Tier, TierStats]) -> bool:
     """
     Check if a tier is unlocked by verifying this tier and all below meet their own requirements.
 
-    Each tier's required_merges/required_credibility defines what's needed to maintain THAT tier.
+    Each tier's requirements define what's needed to maintain THAT tier.
     """
     tier_idx = TIERS_ORDER.index(tier)
 
@@ -74,20 +89,6 @@ def is_tier_unlocked(tier: Tier, tier_stats: Dict[Tier, TierStats]) -> bool:
         check_tier = TIERS_ORDER[i]
         config = TIERS[check_tier]
         stats = tier_stats[check_tier]
-
-        if config.required_merges is not None:
-            if stats.merged_count < config.required_merges:
-                bt.logging.info(
-                    f'{tier.value} locked: {check_tier.value} needs {config.required_merges} merges, has {stats.merged_count}'
-                )
-                return False
-
-        if config.required_unique_repos_merged_to is not None:
-            if stats.unique_repo_contribution_count < config.required_unique_repos_merged_to:
-                bt.logging.info(
-                    f'{tier.value} locked: {check_tier.value} needs {config.required_unique_repos_merged_to} unique repos merged to, has {stats.unique_repo_contribution_count}'
-                )
-                return False
 
         if config.required_credibility is not None:
             if stats.credibility < config.required_credibility:
@@ -99,7 +100,16 @@ def is_tier_unlocked(tier: Tier, tier_stats: Dict[Tier, TierStats]) -> bool:
         if config.required_min_token_score is not None:
             if stats.token_score < config.required_min_token_score:
                 bt.logging.info(
-                    f'{tier.value} locked: {check_tier.value} needs {config.required_min_token_score:.1f} token score, has {stats.token_score:.1f}'
+                    f'{tier.value} locked: {check_tier.value} needs {config.required_min_token_score:.1f} total token score, has {stats.token_score:.1f}'
+                )
+                return False
+
+        # Check unique repos with min token score requirement
+        if config.required_unique_repos_count is not None:
+            if stats.qualified_unique_repo_count < config.required_unique_repos_count:
+                min_score_str = f' with {config.required_min_token_score_per_repo:.1f}+ token score' if config.required_min_token_score_per_repo else ''
+                bt.logging.info(
+                    f'{tier.value} locked: {check_tier.value} needs {config.required_unique_repos_count} unique repos{min_score_str}, has {stats.qualified_unique_repo_count}'
                 )
                 return False
 

@@ -57,7 +57,7 @@ MAX_LINES_SCORED_FOR_NON_CODE_EXT = 300
 # =============================================================================
 # Repository & PR Scoring
 # =============================================================================
-DEFAULT_MERGED_PR_BASE_SCORE = 50
+DEFAULT_MERGED_PR_BASE_SCORE = 30
 
 # Boosts
 UNIQUE_PR_BOOST = 0.4
@@ -71,6 +71,17 @@ TIME_DECAY_GRACE_PERIOD_HOURS = 12  # hours before time decay begins
 TIME_DECAY_SIGMOID_MIDPOINT = 10  # days until 50% score loss
 TIME_DECAY_SIGMOID_STEEPNESS_SCALAR = 0.4
 TIME_DECAY_MIN_MULTIPLIER = 0.05  # 5% of score will retain through lookback days (90D)
+
+# comment nodes for token scoring
+COMMENT_NODE_TYPES = frozenset(
+    {
+        'comment',
+        'line_comment',
+        'block_comment',
+        'documentation_comment',
+        'doc_comment',
+    }
+)
 
 # =============================================================================
 # Tiers & Collateral System
@@ -108,9 +119,9 @@ UNIQUE_PRS_RECYCLE_DECAY_RATE = 0.006
 # PRs with score-per-line below these thresholds are flagged as low-value.
 # Smaller PRs have stricter thresholds
 # Larger PRs are more lenient (naturally include config, docs, etc.).
-LOW_VALUE_THRESHOLD_SMALL = 0.5
+LOW_VALUE_THRESHOLD_SMALL = 0.4
 LOW_VALUE_THRESHOLD_MEDIUM = 0.35
-LOW_VALUE_THRESHOLD_LARGE = 0.25
+LOW_VALUE_THRESHOLD_LARGE = 0.3
 LOW_VALUE_SIZE_SMALL = 20  # Lines threshold for "small" PRs
 LOW_VALUE_SIZE_MEDIUM = 250  # Lines threshold for "medium" PRs
 

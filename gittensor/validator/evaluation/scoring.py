@@ -160,12 +160,12 @@ def calculate_base_score(
     pr.total_nodes_scored = scoring_result.total_nodes_scored
 
     # Assign token scoring breakdown to PR
-    if scoring_result.breakdown:
-        pr.token_score = scoring_result.breakdown.total_score
-        pr.structural_count = scoring_result.breakdown.structural_count
-        pr.structural_score = scoring_result.breakdown.structural_score
-        pr.leaf_count = scoring_result.breakdown.leaf_count
-        pr.leaf_score = scoring_result.breakdown.leaf_score
+    if scoring_result.score_breakdown:
+        pr.token_score = scoring_result.score_breakdown.total_score
+        pr.structural_count = scoring_result.score_breakdown.structural_count
+        pr.structural_score = scoring_result.score_breakdown.structural_score
+        pr.leaf_count = scoring_result.score_breakdown.leaf_count
+        pr.leaf_score = scoring_result.score_breakdown.leaf_score
 
     if scoring_result.is_low_value_pr:
         bt.logging.warning(f'PR #{pr.number} is low-value, base score = 0')

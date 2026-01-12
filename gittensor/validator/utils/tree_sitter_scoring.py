@@ -12,6 +12,8 @@ from gittensor.classes import (
     ScoreBreakdown,
 )
 from gittensor.constants import (
+    COMMENT_NODE_TYPES,
+    DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT,
     LOW_VALUE_SIZE_MEDIUM,
     LOW_VALUE_SIZE_SMALL,
     LOW_VALUE_THRESHOLD_LARGE,
@@ -79,21 +81,6 @@ def parse_code(content: str, language: str) -> Optional[Tree]:
         bt.logging.debug(f'Failed to parse code: {e}')
         return None
 
-
-# =============================================================================
-# Tree Diff Scoring
-# =============================================================================
-
-# Node types that represent comments (always score 0)
-COMMENT_NODE_TYPES = frozenset(
-    {
-        'comment',
-        'line_comment',
-        'block_comment',
-        'documentation_comment',
-        'doc_comment',
-    }
-)
 
 # Type alias for node signatures
 # Structural: ("structural", node_type)
@@ -164,7 +151,6 @@ def score_tree_diff(
 ) -> ScoreBreakdown:
     """
     Calculate score by comparing old and new file ASTs using symmetric difference.
-
     - Structural nodes are identified by type only (moving code around = no change)
     - Leaf nodes are identified by type + content (actual token changes)
     - Both additions (in new but not old) and deletions (in old but not new) are scored
@@ -199,8 +185,6 @@ def score_tree_diff(
             new_signatures = collect_node_signatures(new_tree, weights)
 
     # Compute symmetric difference using Counter subtraction
-    # added = elements in new but not in old (or more copies in new)
-    # deleted = elements in old but not in new (or more copies in old)
     added = new_signatures - old_signatures
     deleted = old_signatures - new_signatures
 
@@ -233,27 +217,15 @@ def score_tree_diff(
     return breakdown
 
 
-# =============================================================================
-# Low-Value PR Detection
-# =============================================================================
-
-
 def get_low_value_threshold(total_raw_lines: int) -> float:
     """Get the score-per-line threshold for low-value PR detection.
-
-    Uses tiered thresholds based on PR size:
-    - Small PRs (<20 lines): Higher threshold (0.5) - should be dense, meaningful code
-    - Medium PRs (20-100 lines): Medium threshold (0.35)
-    - Large PRs (>100 lines): Lower threshold (0.25) - naturally include mixed content
-
-    This prevents miners from padding small PRs with low-value content to meet
-    a single threshold.
+    This prevents miners from padding small PRs with low-value content to meet a single threshold.
 
     Args:
         total_raw_lines: Total lines changed (additions + deletions) from git stats
 
     Returns:
-        Score-per-line threshold for this PR size
+        Score-per-line threshold for this PR size (code density threshold)
     """
     if total_raw_lines < LOW_VALUE_SIZE_SMALL:
         return LOW_VALUE_THRESHOLD_SMALL
@@ -264,12 +236,7 @@ def get_low_value_threshold(total_raw_lines: int) -> float:
 
 
 def is_low_value_pr(total_score: float, total_raw_lines: int) -> bool:
-    """Determine if a PR is low-value based on score-per-line with tiered thresholds.
-
-    Low-value PRs are those with an average token score per line below
-    the threshold for their size tier. This catches:
-    - PRs with mostly whitespace/comments (low score per line)
-    - PRs that pad with low-value content to meet requirements
+    """Determine if a PR is low-value based on code density (score-per-line) with tiered thresholds.
 
     Args:
         total_score: Total token score for the PR
@@ -281,15 +248,10 @@ def is_low_value_pr(total_score: float, total_raw_lines: int) -> bool:
     if total_raw_lines == 0:
         return True
 
-    score_per_line = total_score / total_raw_lines
+    code_density = total_score / total_raw_lines
     threshold = get_low_value_threshold(total_raw_lines)
 
-    return score_per_line < threshold
-
-
-# =============================================================================
-# Main Scoring Pipeline
-# =============================================================================
+    return code_density < threshold
 
 
 def calculate_token_score_from_file_changes(
@@ -300,11 +262,6 @@ def calculate_token_score_from_file_changes(
 ) -> PrScoringResult:
     """
     Calculate contribution score using tree-sitter AST comparison.
-
-    Compares old and new file ASTs to score meaningful changes:
-    - Structural nodes (functions, classes, etc.) identified by type only
-    - Leaf nodes (identifiers, literals) identified by type + content
-    - Both additions and deletions are scored
 
     Args:
         file_changes: List of FileChange objects from the PR
@@ -332,7 +289,7 @@ def calculate_token_score_from_file_changes(
         is_test_file = file.is_test_file()
         file_weight = TEST_FILE_CONTRIBUTION_WEIGHT if is_test_file else 1.0
 
-        # Skip deleted files (status == 'removed')
+        # Skip deleted files
         if file.status == 'removed':
             file_results.append(
                 FileScoreResult(
@@ -346,15 +303,15 @@ def calculate_token_score_from_file_changes(
             )
             continue
 
-        # Handle mitigated extensions early - no content fetch needed
+        # Handle non code extensions
         if ext in NON_CODE_EXTENSIONS:
             lines_to_score = min(file.changes, MAX_LINES_SCORED_FOR_NON_CODE_EXT)
             lang_config = programming_languages.get(ext)
-            lang_weight = lang_config.weight if lang_config else 0.01
+            lang_weight = lang_config.weight if lang_config else DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT
             file_score = lang_weight * lines_to_score * file_weight
 
             total_score += file_score
-            total_nodes_scored += lines_to_score
+            # total_nodes_scored += lines_to_score
 
             file_results.append(
                 FileScoreResult(
@@ -424,8 +381,13 @@ def calculate_token_score_from_file_changes(
         file_breakdown = score_tree_diff(old_content, new_content, ext, weights)
         scoring_method = 'tree-diff'
 
-        # Apply test file weight
-        file_breakdown = file_breakdown.with_weight(file_weight)
+        # Get language weight for this file type
+        lang_config = programming_languages.get(ext)
+        lang_weight = lang_config.weight if lang_config else 1.0
+
+        # Apply combined weight: language weight × test file weight
+        combined_weight = lang_weight * file_weight
+        file_breakdown = file_breakdown.with_weight(combined_weight)
         file_score = file_breakdown.total_score
 
         # Track nodes scored for this file

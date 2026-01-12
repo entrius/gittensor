@@ -326,16 +326,6 @@ def calculate_token_score_from_file_changes(
     total_score = 0.0
     total_nodes_scored = 0
 
-    # Aggregate breakdown across all files (tracking added/deleted separately)
-    total_structural_added_count = 0
-    total_structural_added_score = 0.0
-    total_structural_deleted_count = 0
-    total_structural_deleted_score = 0.0
-    total_leaf_added_count = 0
-    total_leaf_added_score = 0.0
-    total_leaf_deleted_count = 0
-    total_leaf_deleted_score = 0.0
-
     for file in file_changes:
         ext = file.file_extension
         is_test_file = file.is_test_file()
@@ -431,38 +421,17 @@ def calculate_token_score_from_file_changes(
 
         # Use tree diff scoring - compare old and new ASTs
         file_breakdown = score_tree_diff(old_content, new_content, ext, weights)
-        file_score = file_breakdown.total_score
         scoring_method = 'tree-diff'
 
         # Apply test file weight
-        file_score *= file_weight
-        file_breakdown = ScoreBreakdown(
-            total_score=file_breakdown.total_score * file_weight,
-            structural_added_count=file_breakdown.structural_added_count,
-            structural_added_score=file_breakdown.structural_added_score * file_weight,
-            structural_deleted_count=file_breakdown.structural_deleted_count,
-            structural_deleted_score=file_breakdown.structural_deleted_score * file_weight,
-            leaf_added_count=file_breakdown.leaf_added_count,
-            leaf_added_score=file_breakdown.leaf_added_score * file_weight,
-            leaf_deleted_count=file_breakdown.leaf_deleted_count,
-            leaf_deleted_score=file_breakdown.leaf_deleted_score * file_weight,
-        )
+        file_breakdown = file_breakdown.with_weight(file_weight)
+        file_score = file_breakdown.total_score
 
         # Track nodes scored for this file
         nodes_scored = file_breakdown.added_count + file_breakdown.deleted_count
 
         total_score += file_score
         total_nodes_scored += nodes_scored
-
-        # Aggregate breakdown (tracking added/deleted separately)
-        total_structural_added_count += file_breakdown.structural_added_count
-        total_structural_added_score += file_breakdown.structural_added_score
-        total_structural_deleted_count += file_breakdown.structural_deleted_count
-        total_structural_deleted_score += file_breakdown.structural_deleted_score
-        total_leaf_added_count += file_breakdown.leaf_added_count
-        total_leaf_added_score += file_breakdown.leaf_added_score
-        total_leaf_deleted_count += file_breakdown.leaf_deleted_count
-        total_leaf_deleted_score += file_breakdown.leaf_deleted_score
 
         file_results.append(
             FileScoreResult(
@@ -482,26 +451,9 @@ def calculate_token_score_from_file_changes(
     # Determine if this is a low-value PR using tiered thresholds
     low_value = is_low_value_pr(total_score, total_raw_lines)
 
-    # Create aggregate breakdown (only if there were any breakdowns)
-    total_breakdown = None
-    total_node_count = (
-        total_structural_added_count
-        + total_structural_deleted_count
-        + total_leaf_added_count
-        + total_leaf_deleted_count
-    )
-    if total_node_count > 0:
-        total_breakdown = ScoreBreakdown(
-            total_score=total_score,
-            structural_added_count=total_structural_added_count,
-            structural_added_score=total_structural_added_score,
-            structural_deleted_count=total_structural_deleted_count,
-            structural_deleted_score=total_structural_deleted_score,
-            leaf_added_count=total_leaf_added_count,
-            leaf_added_score=total_leaf_added_score,
-            leaf_deleted_count=total_leaf_deleted_count,
-            leaf_deleted_score=total_leaf_deleted_score,
-        )
+    # Compute aggregate breakdown from file_results
+    breakdowns = [r.breakdown for r in file_results if r.breakdown is not None]
+    total_breakdown = sum(breakdowns, start=ScoreBreakdown()) if breakdowns else None
 
     _log_scoring_results(
         file_results,

@@ -446,6 +446,35 @@ class ScoreBreakdown:
         """Total score from deletions."""
         return self.structural_deleted_score + self.leaf_deleted_score
 
+    def with_weight(self, weight: float) -> "ScoreBreakdown":
+        """Return new ScoreBreakdown with scores multiplied by weight (counts unchanged)."""
+        return ScoreBreakdown(
+            structural_added_count=self.structural_added_count,
+            structural_added_score=self.structural_added_score * weight,
+            structural_deleted_count=self.structural_deleted_count,
+            structural_deleted_score=self.structural_deleted_score * weight,
+            leaf_added_count=self.leaf_added_count,
+            leaf_added_score=self.leaf_added_score * weight,
+            leaf_deleted_count=self.leaf_deleted_count,
+            leaf_deleted_score=self.leaf_deleted_score * weight,
+        )
+
+    def __add__(self, other: "ScoreBreakdown") -> "ScoreBreakdown":
+        """Sum two breakdowns together.
+
+        Enables: sum(breakdowns, start=ScoreBreakdown())
+        """
+        return ScoreBreakdown(
+            structural_added_count=self.structural_added_count + other.structural_added_count,
+            structural_added_score=self.structural_added_score + other.structural_added_score,
+            structural_deleted_count=self.structural_deleted_count + other.structural_deleted_count,
+            structural_deleted_score=self.structural_deleted_score + other.structural_deleted_score,
+            leaf_added_count=self.leaf_added_count + other.leaf_added_count,
+            leaf_added_score=self.leaf_added_score + other.leaf_added_score,
+            leaf_deleted_count=self.leaf_deleted_count + other.leaf_deleted_count,
+            leaf_deleted_score=self.leaf_deleted_score + other.leaf_deleted_score,
+        )
+
 
 @dataclass
 class FileScoreResult:

@@ -325,7 +325,9 @@ class TestLookbackExpiry:
     def _bronze_prs(self, pr_factory, bronze_config):
         """Helper to create Bronze PRs that unlock Bronze (with unique repos)."""
         bronze_tier_config = TIERS[Tier.BRONZE]
-        return pr_factory.merged_batch(bronze_config, count=bronze_tier_config.required_unique_repos_count, unique_repos=True)
+        return pr_factory.merged_batch(
+            bronze_config, count=bronze_tier_config.required_unique_repos_count, unique_repos=True
+        )
 
     def test_silver_prs_expire_locks_gold(self, pr_factory, bronze_config, silver_config, gold_config):
         """
@@ -898,7 +900,9 @@ class TestUniqueRepoRequirement:
         silver_tier_config = TIERS[Tier.SILVER]
 
         # Bronze unlocked with unique repos
-        bronze_prs = pr_factory.merged_batch(bronze_config, count=bronze_tier_config.required_unique_repos_count, unique_repos=True)
+        bronze_prs = pr_factory.merged_batch(
+            bronze_config, count=bronze_tier_config.required_unique_repos_count, unique_repos=True
+        )
 
         # Silver has enough merges but all to same repo
         silver_prs = pr_factory.merged_batch(
@@ -920,13 +924,29 @@ class TestUniqueRepoRequirement:
         silver_tier_config = TIERS[Tier.SILVER]
         gold_tier_config = TIERS[Tier.GOLD]
         # Calculate token scores needed per PR to meet total requirements
-        silver_token_per_pr = (silver_tier_config.required_min_token_score or 50.0) / silver_tier_config.required_unique_repos_count + 1.0
-        gold_token_per_pr = (gold_tier_config.required_min_token_score or 150.0) / gold_tier_config.required_unique_repos_count + 1.0
+        silver_token_per_pr = (
+            silver_tier_config.required_min_token_score or 50.0
+        ) / silver_tier_config.required_unique_repos_count + 1.0
+        gold_token_per_pr = (
+            gold_tier_config.required_min_token_score or 150.0
+        ) / gold_tier_config.required_unique_repos_count + 1.0
 
         # All tiers with unique repos (with sufficient token scores)
-        bronze_prs = pr_factory.merged_batch(bronze_config, count=bronze_tier_config.required_unique_repos_count, unique_repos=True)
-        silver_prs = pr_factory.merged_batch(silver_config, count=silver_tier_config.required_unique_repos_count, unique_repos=True, token_score=silver_token_per_pr)
-        gold_prs = pr_factory.merged_batch(gold_config, count=gold_tier_config.required_unique_repos_count, unique_repos=True, token_score=gold_token_per_pr)
+        bronze_prs = pr_factory.merged_batch(
+            bronze_config, count=bronze_tier_config.required_unique_repos_count, unique_repos=True
+        )
+        silver_prs = pr_factory.merged_batch(
+            silver_config,
+            count=silver_tier_config.required_unique_repos_count,
+            unique_repos=True,
+            token_score=silver_token_per_pr,
+        )
+        gold_prs = pr_factory.merged_batch(
+            gold_config,
+            count=gold_tier_config.required_unique_repos_count,
+            unique_repos=True,
+            token_score=gold_token_per_pr,
+        )
 
         stats = calculate_tier_stats(bronze_prs + silver_prs + gold_prs, [])
 
@@ -944,12 +964,15 @@ class TestUniqueRepoRequirement:
         silver_tier_config = TIERS[Tier.SILVER]
 
         # Bronze with unique repos
-        bronze_prs = pr_factory.merged_batch(bronze_config, count=bronze_tier_config.required_unique_repos_count, unique_repos=True)
+        bronze_prs = pr_factory.merged_batch(
+            bronze_config, count=bronze_tier_config.required_unique_repos_count, unique_repos=True
+        )
 
         # Silver with same repo spam (using default repo which is 'test/repo')
         # Reset to ensure we're using the default repo
         silver_prs = [
-            pr_factory.merged(silver_config, repo='test/shared-repo') for _ in range(silver_tier_config.required_unique_repos_count)
+            pr_factory.merged(silver_config, repo='test/shared-repo')
+            for _ in range(silver_tier_config.required_unique_repos_count)
         ]
 
         stats = calculate_tier_stats(bronze_prs + silver_prs, [])
@@ -1141,7 +1164,9 @@ class TestLowValuePRHandling:
         bronze_tier_config = TIERS[Tier.BRONZE]
 
         # Normal Bronze PRs (meets Bronze requirements)
-        bronze_prs = pr_factory.merged_batch(bronze_config, count=bronze_tier_config.required_unique_repos_count, unique_repos=True)
+        bronze_prs = pr_factory.merged_batch(
+            bronze_config, count=bronze_tier_config.required_unique_repos_count, unique_repos=True
+        )
 
         # Mix of normal and low-value Silver PRs
         silver_normal = [pr_factory.merged(silver_config, repo=f'owner/silver-{i}') for i in range(2)]
@@ -1183,7 +1208,9 @@ class TestPRsWithoutTierConfig:
         bronze_tier_config = TIERS[Tier.BRONZE]
 
         # Normal PRs that meet requirements
-        normal_prs = pr_factory.merged_batch(bronze_config, count=bronze_tier_config.required_unique_repos_count, unique_repos=True)
+        normal_prs = pr_factory.merged_batch(
+            bronze_config, count=bronze_tier_config.required_unique_repos_count, unique_repos=True
+        )
 
         # PRs without tier config (should be ignored)
         untracked_prs = [
@@ -1206,7 +1233,9 @@ class TestPRsWithoutTierConfig:
         bronze_tier_config = TIERS[Tier.BRONZE]
 
         # Normal merged PRs
-        merged = pr_factory.merged_batch(bronze_config, count=bronze_tier_config.required_unique_repos_count, unique_repos=True)
+        merged = pr_factory.merged_batch(
+            bronze_config, count=bronze_tier_config.required_unique_repos_count, unique_repos=True
+        )
 
         # Lots of closed PRs without tier config (should be ignored)
         untracked_closed = [
@@ -1230,7 +1259,9 @@ class TestPRsWithoutTierConfig:
 
         bronze_tier_config = TIERS[Tier.BRONZE]
 
-        merged = pr_factory.merged_batch(bronze_config, count=bronze_tier_config.required_unique_repos_count, unique_repos=True)
+        merged = pr_factory.merged_batch(
+            bronze_config, count=bronze_tier_config.required_unique_repos_count, unique_repos=True
+        )
 
         # Open PRs without tier config
         untracked_open = [

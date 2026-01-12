@@ -67,7 +67,9 @@ def calculate_tier_stats(
         config = TIERS[tier]
         if config.required_min_token_score_per_repo is not None:
             qualified_count = sum(
-                1 for score in repo_token_scores_per_tier[tier].values() if score >= config.required_min_token_score_per_repo
+                1
+                for score in repo_token_scores_per_tier[tier].values()
+                if score >= config.required_min_token_score_per_repo
             )
             stats[tier].qualified_unique_repo_count = qualified_count
         else:
@@ -107,7 +109,11 @@ def is_tier_unlocked(tier: Tier, tier_stats: Dict[Tier, TierStats]) -> bool:
         # Check unique repos with min token score requirement
         if config.required_unique_repos_count is not None:
             if stats.qualified_unique_repo_count < config.required_unique_repos_count:
-                min_score_str = f' with {config.required_min_token_score_per_repo:.1f}+ token score' if config.required_min_token_score_per_repo else ''
+                min_score_str = (
+                    f' with {config.required_min_token_score_per_repo:.1f}+ token score'
+                    if config.required_min_token_score_per_repo
+                    else ''
+                )
                 bt.logging.info(
                     f'{tier.value} locked: {check_tier.value} needs {config.required_unique_repos_count} unique repos{min_score_str}, has {stats.qualified_unique_repo_count}'
                 )

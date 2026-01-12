@@ -338,8 +338,8 @@ class TestTierUnlocking:
                 merged_count=required_repos - 1,
                 closed_count=closed_count,
                 unique_repo_contribution_count=required_unique_repos,
-            qualified_unique_repo_count=required_unique_repos,
-            token_score=required_unique_repos * 30.0,
+                qualified_unique_repo_count=required_unique_repos,
+                token_score=required_unique_repos * 30.0,
             ),
             Tier.SILVER: TierStats(),
             Tier.GOLD: TierStats(),
@@ -354,7 +354,7 @@ class TestTierUnlocking:
             unique_repo_contribution_count=required_unique_repos,
             qualified_unique_repo_count=required_unique_repos,
             token_score=required_unique_repos * 30.0,
-            )
+        )
         assert is_tier_unlocked(Tier.BRONZE, stats) is True
 
     def test_silver_requires_bronze_unlocked(self):
@@ -368,8 +368,8 @@ class TestTierUnlocking:
                 merged_count=silver_config.required_unique_repos_count,
                 closed_count=0,
                 unique_repo_contribution_count=silver_config.required_unique_repos_count,
-            qualified_unique_repo_count=silver_config.required_unique_repos_count,
-            token_score=silver_config.required_unique_repos_count * 30.0,
+                qualified_unique_repo_count=silver_config.required_unique_repos_count,
+                token_score=silver_config.required_unique_repos_count * 30.0,
             ),
             Tier.GOLD: TierStats(),
         }
@@ -425,8 +425,8 @@ class TestTierUnlocking:
                 merged_count=required_repos,
                 closed_count=closed_count,
                 unique_repo_contribution_count=required_unique_repos,
-            qualified_unique_repo_count=required_unique_repos,
-            token_score=required_unique_repos * 30.0,
+                qualified_unique_repo_count=required_unique_repos,
+                token_score=required_unique_repos * 30.0,
             ),
             Tier.GOLD: TierStats(),
         }
@@ -440,7 +440,7 @@ class TestTierUnlocking:
             unique_repo_contribution_count=required_unique_repos,
             qualified_unique_repo_count=required_unique_repos,
             token_score=required_unique_repos * 30.0,
-            )
+        )
         assert is_tier_unlocked(Tier.SILVER, stats) is True
 
     def test_silver_requires_all_conditions(self):
@@ -744,9 +744,7 @@ class TestBronzeEdgeCases:
 
         # Recovery: add more merged PRs to boost credibility (to unique repos)
         extra_needed = (
-            int(
-                (required_credibility * (required_repos + closed_count) - required_repos) / (1 - required_credibility)
-            )
+            int((required_credibility * (required_repos + closed_count) - required_repos) / (1 - required_credibility))
             + 1
         )
         merged.extend(pr_factory.merged_batch(bronze_config, count=extra_needed, unique_repos=True))
@@ -778,14 +776,30 @@ class TestBronzeLookbackExpiry:
         silver_tier_config = TIERS[Tier.SILVER]
         gold_tier_config = TIERS[Tier.GOLD]
         # Calculate token scores needed per PR to meet total requirements
-        silver_token_per_pr = (silver_tier_config.required_min_token_score or 50.0) / silver_tier_config.required_unique_repos_count + 1.0
-        gold_token_per_pr = (gold_tier_config.required_min_token_score or 150.0) / gold_tier_config.required_unique_repos_count + 1.0
+        silver_token_per_pr = (
+            silver_tier_config.required_min_token_score or 50.0
+        ) / silver_tier_config.required_unique_repos_count + 1.0
+        gold_token_per_pr = (
+            gold_tier_config.required_min_token_score or 150.0
+        ) / gold_tier_config.required_unique_repos_count + 1.0
 
         # Before: All tiers unlocked (with unique repos)
         merged_before = (
-            pr_factory.merged_batch(bronze_config, count=bronze_tier_config.required_unique_repos_count, unique_repos=True)
-            + pr_factory.merged_batch(silver_config, count=silver_tier_config.required_unique_repos_count, unique_repos=True, token_score=silver_token_per_pr)
-            + pr_factory.merged_batch(gold_config, count=gold_tier_config.required_unique_repos_count, unique_repos=True, token_score=gold_token_per_pr)
+            pr_factory.merged_batch(
+                bronze_config, count=bronze_tier_config.required_unique_repos_count, unique_repos=True
+            )
+            + pr_factory.merged_batch(
+                silver_config,
+                count=silver_tier_config.required_unique_repos_count,
+                unique_repos=True,
+                token_score=silver_token_per_pr,
+            )
+            + pr_factory.merged_batch(
+                gold_config,
+                count=gold_tier_config.required_unique_repos_count,
+                unique_repos=True,
+                token_score=gold_token_per_pr,
+            )
         )
 
         stats_before = calculate_tier_stats(merged_before, [])
@@ -795,8 +809,16 @@ class TestBronzeLookbackExpiry:
         # After: Bronze PRs expired, only Silver and Gold remain
         pr_factory.reset()
         merged_after = pr_factory.merged_batch(
-            silver_config, count=silver_tier_config.required_unique_repos_count, unique_repos=True, token_score=silver_token_per_pr
-        ) + pr_factory.merged_batch(gold_config, count=gold_tier_config.required_unique_repos_count, unique_repos=True, token_score=gold_token_per_pr)
+            silver_config,
+            count=silver_tier_config.required_unique_repos_count,
+            unique_repos=True,
+            token_score=silver_token_per_pr,
+        ) + pr_factory.merged_batch(
+            gold_config,
+            count=gold_tier_config.required_unique_repos_count,
+            unique_repos=True,
+            token_score=gold_token_per_pr,
+        )
 
         stats_after = calculate_tier_stats(merged_after, [])
         credibility_after = calculate_credibility_per_tier(merged_after, [])
@@ -823,7 +845,9 @@ class TestBronzeLookbackExpiry:
         # Before: Bronze with buffer (unique repos)
         merged_before = pr_factory.merged_batch(
             bronze_config, count=bronze_tier_config.required_unique_repos_count + extra_bronze, unique_repos=True
-        ) + pr_factory.merged_batch(silver_config, count=silver_tier_config.required_unique_repos_count, unique_repos=True)
+        ) + pr_factory.merged_batch(
+            silver_config, count=silver_tier_config.required_unique_repos_count, unique_repos=True
+        )
 
         stats_before = calculate_tier_stats(merged_before, [])
         assert is_tier_unlocked(Tier.SILVER, stats_before) is True
@@ -832,7 +856,9 @@ class TestBronzeLookbackExpiry:
         pr_factory.reset()
         merged_after = pr_factory.merged_batch(
             bronze_config, count=bronze_tier_config.required_unique_repos_count, unique_repos=True
-        ) + pr_factory.merged_batch(silver_config, count=silver_tier_config.required_unique_repos_count, unique_repos=True)
+        ) + pr_factory.merged_batch(
+            silver_config, count=silver_tier_config.required_unique_repos_count, unique_repos=True
+        )
 
         stats_after = calculate_tier_stats(merged_after, [])
         assert is_tier_unlocked(Tier.BRONZE, stats_after) is True
@@ -846,14 +872,30 @@ class TestBronzeLookbackExpiry:
         silver_tier_config = TIERS[Tier.SILVER]
         gold_tier_config = TIERS[Tier.GOLD]
         # Calculate token scores needed per PR to meet total requirements
-        silver_token_per_pr = (silver_tier_config.required_min_token_score or 50.0) / silver_tier_config.required_unique_repos_count + 1.0
-        gold_token_per_pr = (gold_tier_config.required_min_token_score or 150.0) / gold_tier_config.required_unique_repos_count + 1.0
+        silver_token_per_pr = (
+            silver_tier_config.required_min_token_score or 50.0
+        ) / silver_tier_config.required_unique_repos_count + 1.0
+        gold_token_per_pr = (
+            gold_tier_config.required_min_token_score or 150.0
+        ) / gold_tier_config.required_unique_repos_count + 1.0
 
         # At threshold: exactly bronze_required merges (unique repos)
         merged = (
-            pr_factory.merged_batch(bronze_config, count=bronze_tier_config.required_unique_repos_count, unique_repos=True)
-            + pr_factory.merged_batch(silver_config, count=silver_tier_config.required_unique_repos_count, unique_repos=True, token_score=silver_token_per_pr)
-            + pr_factory.merged_batch(gold_config, count=gold_tier_config.required_unique_repos_count, unique_repos=True, token_score=gold_token_per_pr)
+            pr_factory.merged_batch(
+                bronze_config, count=bronze_tier_config.required_unique_repos_count, unique_repos=True
+            )
+            + pr_factory.merged_batch(
+                silver_config,
+                count=silver_tier_config.required_unique_repos_count,
+                unique_repos=True,
+                token_score=silver_token_per_pr,
+            )
+            + pr_factory.merged_batch(
+                gold_config,
+                count=gold_tier_config.required_unique_repos_count,
+                unique_repos=True,
+                token_score=gold_token_per_pr,
+            )
         )
 
         stats = calculate_tier_stats(merged, [])
@@ -862,9 +904,21 @@ class TestBronzeLookbackExpiry:
         # One Bronze expires
         pr_factory.reset()
         merged_after = (
-            pr_factory.merged_batch(bronze_config, count=bronze_tier_config.required_unique_repos_count - 1, unique_repos=True)
-            + pr_factory.merged_batch(silver_config, count=silver_tier_config.required_unique_repos_count, unique_repos=True, token_score=silver_token_per_pr)
-            + pr_factory.merged_batch(gold_config, count=gold_tier_config.required_unique_repos_count, unique_repos=True, token_score=gold_token_per_pr)
+            pr_factory.merged_batch(
+                bronze_config, count=bronze_tier_config.required_unique_repos_count - 1, unique_repos=True
+            )
+            + pr_factory.merged_batch(
+                silver_config,
+                count=silver_tier_config.required_unique_repos_count,
+                unique_repos=True,
+                token_score=silver_token_per_pr,
+            )
+            + pr_factory.merged_batch(
+                gold_config,
+                count=gold_tier_config.required_unique_repos_count,
+                unique_repos=True,
+                token_score=gold_token_per_pr,
+            )
         )
 
         stats_after = calculate_tier_stats(merged_after, [])
@@ -917,22 +971,32 @@ class TestBronzeLookbackExpiry:
         bronze_prs = pr_factory.merged_batch(
             bronze_config, count=bronze_tier_config.required_unique_repos_count + 2, unique_repos=True
         )
-        silver_prs = pr_factory.merged_batch(silver_config, count=silver_tier_config.required_unique_repos_count, unique_repos=True)
-        gold_prs = pr_factory.merged_batch(gold_config, count=gold_tier_config.required_unique_repos_count + 5, unique_repos=True)
+        silver_prs = pr_factory.merged_batch(
+            silver_config, count=silver_tier_config.required_unique_repos_count, unique_repos=True
+        )
+        gold_prs = pr_factory.merged_batch(
+            gold_config, count=gold_tier_config.required_unique_repos_count + 5, unique_repos=True
+        )
 
         stats = calculate_tier_stats(bronze_prs + silver_prs + gold_prs, [])
         assert is_tier_unlocked(Tier.GOLD, stats) is True
 
         # Phase 2: Some Bronze expires (still above threshold)
-        stats = calculate_tier_stats(bronze_prs[: bronze_tier_config.required_unique_repos_count + 1] + silver_prs + gold_prs, [])
+        stats = calculate_tier_stats(
+            bronze_prs[: bronze_tier_config.required_unique_repos_count + 1] + silver_prs + gold_prs, []
+        )
         assert is_tier_unlocked(Tier.GOLD, stats) is True
 
         # Phase 3: More Bronze expires (exactly at threshold)
-        stats = calculate_tier_stats(bronze_prs[: bronze_tier_config.required_unique_repos_count] + silver_prs + gold_prs, [])
+        stats = calculate_tier_stats(
+            bronze_prs[: bronze_tier_config.required_unique_repos_count] + silver_prs + gold_prs, []
+        )
         assert is_tier_unlocked(Tier.GOLD, stats) is True
 
         # Phase 4: One more Bronze expires (below threshold)
-        stats = calculate_tier_stats(bronze_prs[: bronze_tier_config.required_unique_repos_count - 1] + silver_prs + gold_prs, [])
+        stats = calculate_tier_stats(
+            bronze_prs[: bronze_tier_config.required_unique_repos_count - 1] + silver_prs + gold_prs, []
+        )
         assert is_tier_unlocked(Tier.BRONZE, stats) is False
         assert is_tier_unlocked(Tier.GOLD, stats) is False  # Cascade!
 
@@ -944,15 +1008,29 @@ class TestBronzeLookbackExpiry:
         silver_tier_config = TIERS[Tier.SILVER]
         gold_tier_config = TIERS[Tier.GOLD]
         # Calculate token scores needed per PR to meet total requirements
-        silver_token_per_pr = (silver_tier_config.required_min_token_score or 50.0) / silver_tier_config.required_unique_repos_count + 1.0
-        gold_token_per_pr = (gold_tier_config.required_min_token_score or 150.0) / gold_tier_config.required_unique_repos_count + 1.0
+        silver_token_per_pr = (
+            silver_tier_config.required_min_token_score or 50.0
+        ) / silver_tier_config.required_unique_repos_count + 1.0
+        gold_token_per_pr = (
+            gold_tier_config.required_min_token_score or 150.0
+        ) / gold_tier_config.required_unique_repos_count + 1.0
 
         # Lost access: Bronze one below threshold (unique repos)
         old_bronze = pr_factory.merged_batch(
             bronze_config, count=bronze_tier_config.required_unique_repos_count - 1, unique_repos=True
         )
-        silver_prs = pr_factory.merged_batch(silver_config, count=silver_tier_config.required_unique_repos_count, unique_repos=True, token_score=silver_token_per_pr)
-        gold_prs = pr_factory.merged_batch(gold_config, count=gold_tier_config.required_unique_repos_count, unique_repos=True, token_score=gold_token_per_pr)
+        silver_prs = pr_factory.merged_batch(
+            silver_config,
+            count=silver_tier_config.required_unique_repos_count,
+            unique_repos=True,
+            token_score=silver_token_per_pr,
+        )
+        gold_prs = pr_factory.merged_batch(
+            gold_config,
+            count=gold_tier_config.required_unique_repos_count,
+            unique_repos=True,
+            token_score=gold_token_per_pr,
+        )
 
         stats = calculate_tier_stats(old_bronze + silver_prs + gold_prs, [])
         assert is_tier_unlocked(Tier.BRONZE, stats) is False
@@ -1016,7 +1094,9 @@ class TestCredibilityCalculation:
         silver_tier_config = TIERS[Tier.SILVER]
 
         # Silver has enough merges but Bronze is not unlocked (unique repos)
-        merged = pr_factory.merged_batch(silver_config, count=silver_tier_config.required_unique_repos_count, unique_repos=True)
+        merged = pr_factory.merged_batch(
+            silver_config, count=silver_tier_config.required_unique_repos_count, unique_repos=True
+        )
 
         result = calculate_credibility_per_tier(merged, [])
 
@@ -1084,8 +1164,12 @@ class TestTierDemotion:
         gold_tier_config = TIERS[Tier.GOLD]
 
         merged = (
-            pr_factory.merged_batch(bronze_config, count=bronze_tier_config.required_unique_repos_count, unique_repos=True)
-            + pr_factory.merged_batch(silver_config, count=silver_tier_config.required_unique_repos_count, unique_repos=True)
+            pr_factory.merged_batch(
+                bronze_config, count=bronze_tier_config.required_unique_repos_count, unique_repos=True
+            )
+            + pr_factory.merged_batch(
+                silver_config, count=silver_tier_config.required_unique_repos_count, unique_repos=True
+            )
             + pr_factory.merged_batch(
                 gold_config, count=gold_tier_config.required_unique_repos_count - 1, unique_repos=True
             )  # One short
@@ -1127,8 +1211,12 @@ class TestTierDemotion:
         gold_closed_count = int(gold_merged_count * (1 - gold_required_credibility) / gold_required_credibility) + 2
 
         merged = (
-            pr_factory.merged_batch(bronze_config, count=bronze_tier_config.required_unique_repos_count, unique_repos=True)
-            + pr_factory.merged_batch(silver_config, count=silver_tier_config.required_unique_repos_count, unique_repos=True)
+            pr_factory.merged_batch(
+                bronze_config, count=bronze_tier_config.required_unique_repos_count, unique_repos=True
+            )
+            + pr_factory.merged_batch(
+                silver_config, count=silver_tier_config.required_unique_repos_count, unique_repos=True
+            )
             + pr_factory.merged_batch(gold_config, count=gold_merged_count, unique_repos=True)
         )
         closed = pr_factory.closed_batch(gold_config, count=gold_closed_count, unique_repos=True)
@@ -1177,9 +1265,15 @@ class TestTierDemotion:
 
         # Phase 1: Strong start - all tiers unlocked (unique repos)
         merged = (
-            pr_factory.merged_batch(bronze_config, count=bronze_tier_config.required_unique_repos_count, unique_repos=True)
-            + pr_factory.merged_batch(silver_config, count=silver_tier_config.required_unique_repos_count, unique_repos=True)
-            + pr_factory.merged_batch(gold_config, count=gold_tier_config.required_unique_repos_count + 3, unique_repos=True)
+            pr_factory.merged_batch(
+                bronze_config, count=bronze_tier_config.required_unique_repos_count, unique_repos=True
+            )
+            + pr_factory.merged_batch(
+                silver_config, count=silver_tier_config.required_unique_repos_count, unique_repos=True
+            )
+            + pr_factory.merged_batch(
+                gold_config, count=gold_tier_config.required_unique_repos_count + 3, unique_repos=True
+            )
         )
 
         stats = calculate_tier_stats(merged, [])

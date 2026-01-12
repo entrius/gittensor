@@ -269,7 +269,9 @@ def silver_unlocked_miner(pr_factory, bronze_config, silver_config) -> MinerScen
     return MinerScenario(
         merged=(
             pr_factory.merged_batch(tier=bronze_config, count=bronze_repos, unique_repos=True)
-            + pr_factory.merged_batch(tier=silver_config, count=silver_repos, unique_repos=True, token_score=silver_token_per_pr)
+            + pr_factory.merged_batch(
+                tier=silver_config, count=silver_repos, unique_repos=True, token_score=silver_token_per_pr
+            )
         ),
         closed=[],
         open=[],
@@ -295,7 +297,9 @@ def silver_threshold_miner(pr_factory, bronze_config, silver_config) -> MinerSce
     return MinerScenario(
         merged=(
             pr_factory.merged_batch(tier=bronze_config, count=bronze_repos, unique_repos=True)
-            + pr_factory.merged_batch(tier=silver_config, count=silver_repos, unique_repos=True, token_score=silver_token_per_pr)
+            + pr_factory.merged_batch(
+                tier=silver_config, count=silver_repos, unique_repos=True, token_score=silver_token_per_pr
+            )
         ),
         closed=pr_factory.closed_batch(tier=silver_config, count=closed_count, unique_repos=True),
         open=[],
@@ -319,8 +323,12 @@ def gold_unlocked_miner(pr_factory, bronze_config, silver_config, gold_config) -
     return MinerScenario(
         merged=(
             pr_factory.merged_batch(tier=bronze_config, count=bronze_repos, unique_repos=True)
-            + pr_factory.merged_batch(tier=silver_config, count=silver_repos, unique_repos=True, token_score=silver_token_per_pr)
-            + pr_factory.merged_batch(tier=gold_config, count=gold_repos, unique_repos=True, token_score=gold_token_per_pr)
+            + pr_factory.merged_batch(
+                tier=silver_config, count=silver_repos, unique_repos=True, token_score=silver_token_per_pr
+            )
+            + pr_factory.merged_batch(
+                tier=gold_config, count=gold_repos, unique_repos=True, token_score=gold_token_per_pr
+            )
         ),
         closed=[],
         open=[],
@@ -349,8 +357,12 @@ def gold_threshold_miner(pr_factory, bronze_config, silver_config, gold_config) 
     return MinerScenario(
         merged=(
             pr_factory.merged_batch(tier=bronze_config, count=bronze_repos, unique_repos=True)
-            + pr_factory.merged_batch(tier=silver_config, count=silver_repos, unique_repos=True, token_score=silver_token_per_pr)
-            + pr_factory.merged_batch(tier=gold_config, count=gold_repos, unique_repos=True, token_score=gold_token_per_pr)
+            + pr_factory.merged_batch(
+                tier=silver_config, count=silver_repos, unique_repos=True, token_score=silver_token_per_pr
+            )
+            + pr_factory.merged_batch(
+                tier=gold_config, count=gold_repos, unique_repos=True, token_score=gold_token_per_pr
+            )
         ),
         closed=pr_factory.closed_batch(tier=gold_config, count=closed_count, unique_repos=True),
         open=[],
@@ -384,8 +396,12 @@ def demoted_from_gold_miner(pr_factory, bronze_config, silver_config, gold_confi
     return MinerScenario(
         merged=(
             pr_factory.merged_batch(tier=bronze_config, count=bronze_repos, unique_repos=True)
-            + pr_factory.merged_batch(tier=silver_config, count=silver_repos, unique_repos=True, token_score=silver_token_per_pr)
-            + pr_factory.merged_batch(tier=gold_config, count=gold_repos, unique_repos=True, token_score=gold_token_per_pr)
+            + pr_factory.merged_batch(
+                tier=silver_config, count=silver_repos, unique_repos=True, token_score=silver_token_per_pr
+            )
+            + pr_factory.merged_batch(
+                tier=gold_config, count=gold_repos, unique_repos=True, token_score=gold_token_per_pr
+            )
         ),
         closed=pr_factory.closed_batch(tier=gold_config, count=closed_count, unique_repos=True),
         open=[],
@@ -411,7 +427,9 @@ def demoted_from_silver_miner(pr_factory, bronze_config, silver_config) -> Miner
     return MinerScenario(
         merged=(
             pr_factory.merged_batch(tier=bronze_config, count=bronze_repos, unique_repos=True)
-            + pr_factory.merged_batch(tier=silver_config, count=silver_repos, unique_repos=True, token_score=silver_token_per_pr)
+            + pr_factory.merged_batch(
+                tier=silver_config, count=silver_repos, unique_repos=True, token_score=silver_token_per_pr
+            )
         ),
         closed=pr_factory.closed_batch(tier=silver_config, count=closed_count, unique_repos=True),
         open=[],

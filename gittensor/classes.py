@@ -389,8 +389,6 @@ class ScoreBreakdown:
     Both additions and deletions represent meaningful work and are scored.
     """
 
-    total_score: float = 0.0
-
     # Structural changes (function/class definitions, control flow, etc.)
     structural_added_count: int = 0
     structural_added_score: float = 0.0
@@ -402,6 +400,11 @@ class ScoreBreakdown:
     leaf_added_score: float = 0.0
     leaf_deleted_count: int = 0
     leaf_deleted_score: float = 0.0
+
+    @property 
+    def total_score(self) -> float:
+        """Total score for this file"""
+        return self.structural_added_score + self.structural_deleted_score + self.leaf_added_score + self.leaf_deleted_score
 
     @property
     def structural_count(self) -> int:
@@ -468,4 +471,4 @@ class PrScoringResult:
     is_low_value_pr: bool
     total_nodes_scored: int  # Total AST nodes scored across all files
     file_results: List[FileScoreResult]
-    breakdown: Optional[ScoreBreakdown] = None  # Aggregated breakdown across all files
+    score_breakdown: Optional[ScoreBreakdown] = None  # Aggregated breakdown across all files

@@ -80,7 +80,7 @@ def parse_code(content: str, language: str) -> Optional[Tree]:
 
 
 # =============================================================================
-# Tree Diff Scoring (Option B: Hybrid Approach)
+# Tree Diff Scoring
 # =============================================================================
 
 # Node types that represent comments (always score 0)
@@ -100,12 +100,12 @@ COMMENT_NODE_TYPES = frozenset(
 NodeSignature = Union[Tuple[str, str], Tuple[str, str, str]]
 
 
-def _is_comment_node(node: Node) -> bool:
+def is_comment_node(node: Node) -> bool:
     """Check if a node is a comment."""
     return node.type in COMMENT_NODE_TYPES
 
 
-def _collect_node_signatures(
+def collect_node_signatures(
     tree: Tree,
     weights: TokenConfig,
 ) -> Counter[NodeSignature]:
@@ -129,7 +129,7 @@ def _collect_node_signatures(
 
     def walk_node(node: Node) -> None:
         # Skip comments entirely
-        if _is_comment_node(node):
+        if is_comment_node(node):
             return
 
         node_type = node.type
@@ -164,7 +164,6 @@ def score_tree_diff(
     """
     Calculate score by comparing old and new file ASTs using symmetric difference.
 
-    This is the Option B hybrid approach:
     - Structural nodes are identified by type only (moving code around = no change)
     - Leaf nodes are identified by type + content (actual token changes)
     - Both additions (in new but not old) and deletions (in old but not new) are scored
@@ -191,12 +190,12 @@ def score_tree_diff(
     if old_content:
         old_tree = parse_code(old_content, language)
         if old_tree:
-            old_signatures = _collect_node_signatures(old_tree, weights)
+            old_signatures = collect_node_signatures(old_tree, weights)
 
     if new_content:
         new_tree = parse_code(new_content, language)
         if new_tree:
-            new_signatures = _collect_node_signatures(new_tree, weights)
+            new_signatures = collect_node_signatures(new_tree, weights)
 
     # Compute symmetric difference using Counter subtraction
     # added = elements in new but not in old (or more copies in new)
@@ -229,14 +228,6 @@ def score_tree_diff(
             weight = weights.get_leaf_weight(node_type)
             breakdown.leaf_deleted_count += count
             breakdown.leaf_deleted_score += weight * count
-
-    # Compute total score
-    breakdown.total_score = (
-        breakdown.structural_added_score
-        + breakdown.structural_deleted_score
-        + breakdown.leaf_added_score
-        + breakdown.leaf_deleted_score
-    )
 
     return breakdown
 
@@ -348,7 +339,7 @@ def calculate_token_score_from_file_changes(
     for file in file_changes:
         ext = file.file_extension
         is_test_file = file.is_test_file()
-        test_weight = TEST_FILE_CONTRIBUTION_WEIGHT if is_test_file else 1.0
+        file_weight = TEST_FILE_CONTRIBUTION_WEIGHT if is_test_file else 1.0
 
         # Skip deleted files (status == 'removed')
         if file.status == 'removed':
@@ -369,7 +360,7 @@ def calculate_token_score_from_file_changes(
             lines_to_score = min(file.changes, MAX_LINES_SCORED_FOR_NON_CODE_EXT)
             lang_config = programming_languages.get(ext)
             lang_weight = lang_config.weight if lang_config else 0.01
-            file_score = lang_weight * lines_to_score * test_weight
+            file_score = lang_weight * lines_to_score * file_weight
 
             total_score += file_score
             total_nodes_scored += lines_to_score
@@ -444,17 +435,17 @@ def calculate_token_score_from_file_changes(
         scoring_method = 'tree-diff'
 
         # Apply test file weight
-        file_score *= test_weight
+        file_score *= file_weight
         file_breakdown = ScoreBreakdown(
-            total_score=file_breakdown.total_score * test_weight,
+            total_score=file_breakdown.total_score * file_weight,
             structural_added_count=file_breakdown.structural_added_count,
-            structural_added_score=file_breakdown.structural_added_score * test_weight,
+            structural_added_score=file_breakdown.structural_added_score * file_weight,
             structural_deleted_count=file_breakdown.structural_deleted_count,
-            structural_deleted_score=file_breakdown.structural_deleted_score * test_weight,
+            structural_deleted_score=file_breakdown.structural_deleted_score * file_weight,
             leaf_added_count=file_breakdown.leaf_added_count,
-            leaf_added_score=file_breakdown.leaf_added_score * test_weight,
+            leaf_added_score=file_breakdown.leaf_added_score * file_weight,
             leaf_deleted_count=file_breakdown.leaf_deleted_count,
-            leaf_deleted_score=file_breakdown.leaf_deleted_score * test_weight,
+            leaf_deleted_score=file_breakdown.leaf_deleted_score * file_weight,
         )
 
         # Track nodes scored for this file
@@ -525,7 +516,7 @@ def calculate_token_score_from_file_changes(
         is_low_value_pr=low_value,
         total_nodes_scored=total_nodes_scored,
         file_results=file_results,
-        breakdown=total_breakdown,
+        score_breakdown=total_breakdown,
     )
 
 

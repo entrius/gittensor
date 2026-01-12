@@ -42,11 +42,11 @@ def setup_events_logger(full_path, events_retention_size):
 
 
 def log_scoring_results(
-    file_results: List["FileScoreResult"],
+    file_results: List['FileScoreResult'],
     total_score: float,
     total_raw_lines: int,
     low_value: bool,
-    breakdown: Optional["ScoreBreakdown"] = None,
+    breakdown: Optional['ScoreBreakdown'] = None,
 ) -> None:
     """Log scoring results for debugging."""
     from gittensor.validator.utils.tree_sitter_scoring import get_low_value_threshold

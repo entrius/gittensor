@@ -2229,10 +2229,6 @@
     "tier": "Bronze",
     "weight": 0.32
   },
-  "esphome/esphome": {
-    "tier": "Bronze",
-    "weight": 0.28
-  },
   "espnet/espnet": {
     "tier": "Bronze",
     "weight": 0.17
@@ -2843,19 +2839,6 @@
   "hiyouga/LLaMA-Factory": {
     "tier": "Bronze",
     "weight": 0.24
-  },
-  "home-assistant/core": {
-    "additional_acceptable_branches": ["dev"],
-    "tier": "Gold",
-    "weight": 48.92
-  },
-  "home-assistant/frontend": {
-    "tier": "Silver",
-    "weight": 5.85
-  },
-  "home-assistant/home-assistant.io": {
-    "tier": "Bronze",
-    "weight": 0.22
   },
   "honza/vim-snippets": {
     "tier": "Silver",

@@ -401,10 +401,15 @@ class ScoreBreakdown:
     leaf_deleted_count: int = 0
     leaf_deleted_score: float = 0.0
 
-    @property 
+    @property
     def total_score(self) -> float:
         """Total score for this file"""
-        return self.structural_added_score + self.structural_deleted_score + self.leaf_added_score + self.leaf_deleted_score
+        return (
+            self.structural_added_score
+            + self.structural_deleted_score
+            + self.leaf_added_score
+            + self.leaf_deleted_score
+        )
 
     @property
     def structural_count(self) -> int:
@@ -446,7 +451,7 @@ class ScoreBreakdown:
         """Total score from deletions."""
         return self.structural_deleted_score + self.leaf_deleted_score
 
-    def with_weight(self, weight: float) -> "ScoreBreakdown":
+    def with_weight(self, weight: float) -> 'ScoreBreakdown':
         """Return new ScoreBreakdown with scores multiplied by weight (counts unchanged)."""
         return ScoreBreakdown(
             structural_added_count=self.structural_added_count,
@@ -459,7 +464,7 @@ class ScoreBreakdown:
             leaf_deleted_score=self.leaf_deleted_score * weight,
         )
 
-    def __add__(self, other: "ScoreBreakdown") -> "ScoreBreakdown":
+    def __add__(self, other: 'ScoreBreakdown') -> 'ScoreBreakdown':
         """Sum two breakdowns together.
 
         Enables: sum(breakdowns, start=ScoreBreakdown())

@@ -319,6 +319,20 @@ class TestTierUnlocking:
             token_score=max(required_repos * token_per_repo, min_total),
         )
 
+    def _unlocked_gold_stats(self) -> TierStats:
+        """Helper to create Gold stats that meet unlock requirements (including qualified repos)."""
+        gold_config = TIERS[Tier.GOLD]
+        required_repos = gold_config.required_unique_repos_count or 3
+        token_per_repo = gold_config.required_min_token_score_per_repo or 25.0
+        min_total = gold_config.required_min_token_score or 150.0
+        return TierStats(
+            merged_count=required_repos,
+            closed_count=0,
+            unique_repo_contribution_count=required_repos,
+            qualified_unique_repo_count=required_repos,
+            token_score=max(required_repos * token_per_repo, min_total),
+        )
+
     def test_bronze_locked_with_no_activity(self, empty_tier_stats):
         """Bronze is locked when miner has no PRs."""
         assert is_tier_unlocked(Tier.BRONZE, empty_tier_stats) is False
@@ -359,18 +373,10 @@ class TestTierUnlocking:
 
     def test_silver_requires_bronze_unlocked(self):
         """Silver cannot be unlocked if Bronze is locked."""
-        silver_config = TIERS[Tier.SILVER]
-
         # Perfect Silver stats but Bronze locked
         stats = {
             Tier.BRONZE: TierStats(),  # No Bronze activity
-            Tier.SILVER: TierStats(
-                merged_count=silver_config.required_unique_repos_count,
-                closed_count=0,
-                unique_repo_contribution_count=silver_config.required_unique_repos_count,
-                qualified_unique_repo_count=silver_config.required_unique_repos_count,
-                token_score=silver_config.required_unique_repos_count * 30.0,
-            ),
+            Tier.SILVER: self._unlocked_silver_stats(),
             Tier.GOLD: TierStats(),
         }
         assert is_tier_unlocked(Tier.SILVER, stats) is False
@@ -414,7 +420,7 @@ class TestTierUnlocking:
         silver_config = TIERS[Tier.SILVER]
         required_repos = silver_config.required_unique_repos_count
         required_credibility = silver_config.required_credibility
-        required_unique_repos = silver_config.required_unique_repos_count
+        required_token_score = silver_config.required_min_token_score or 300.0
 
         # Calculate closed count to be just below credibility threshold
         closed_count = int(required_repos * (1 - required_credibility) / required_credibility) + 1
@@ -424,23 +430,17 @@ class TestTierUnlocking:
             Tier.SILVER: TierStats(
                 merged_count=required_repos,
                 closed_count=closed_count,
-                unique_repo_contribution_count=required_unique_repos,
-                qualified_unique_repo_count=required_unique_repos,
-                token_score=required_unique_repos * 30.0,
+                unique_repo_contribution_count=required_repos,
+                qualified_unique_repo_count=required_repos,
+                token_score=required_token_score,
             ),
             Tier.GOLD: TierStats(),
         }
         assert stats[Tier.SILVER].credibility < required_credibility
         assert is_tier_unlocked(Tier.SILVER, stats) is False
 
-        # Fix credibility
-        stats[Tier.SILVER] = TierStats(
-            merged_count=required_repos,
-            closed_count=0,
-            unique_repo_contribution_count=required_unique_repos,
-            qualified_unique_repo_count=required_unique_repos,
-            token_score=required_unique_repos * 30.0,
-        )
+        # Fix credibility - use helper method
+        stats[Tier.SILVER] = self._unlocked_silver_stats()
         assert is_tier_unlocked(Tier.SILVER, stats) is True
 
     def test_silver_requires_all_conditions(self):

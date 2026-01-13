@@ -89,7 +89,6 @@ DO UPDATE SET
 """
 
 # Miner Evaluation Queries
-# Note: Per-tier stats are stored in miner_tier_stats table (see BULK_UPSERT_MINER_TIER_STATS)
 BULK_UPSERT_MINER_EVALUATION = """
 INSERT INTO miner_evaluations (
     uid, hotkey, github_id, failed_reason, base_total_score, total_score, total_collateral_score,
@@ -116,13 +115,12 @@ DO UPDATE SET
     total_leaf_count = EXCLUDED.total_leaf_count,
     total_leaf_score = EXCLUDED.total_leaf_score,
     updated_at = NOW()
-RETURNING id
 """
 
-# Miner Tier Stats Queries (1:1 with miner_evaluations)
+# Miner Tier Stats Queries (joins on uid, hotkey, github_id)
 BULK_UPSERT_MINER_TIER_STATS = """
 INSERT INTO miner_tier_stats (
-    evaluation_id, uid, hotkey, github_id,
+    uid, hotkey, github_id,
     bronze_merged_prs, bronze_closed_prs, bronze_total_prs, bronze_collateral_score, bronze_score, bronze_unique_repos,
     bronze_token_score, bronze_structural_count, bronze_structural_score, bronze_leaf_count, bronze_leaf_score,
     silver_merged_prs, silver_closed_prs, silver_total_prs, silver_collateral_score, silver_score, silver_unique_repos,
@@ -130,11 +128,8 @@ INSERT INTO miner_tier_stats (
     gold_merged_prs, gold_closed_prs, gold_total_prs, gold_collateral_score, gold_score, gold_unique_repos,
     gold_token_score, gold_structural_count, gold_structural_score, gold_leaf_count, gold_leaf_score
 ) VALUES %s
-ON CONFLICT (evaluation_id)
+ON CONFLICT (uid, hotkey, github_id)
 DO UPDATE SET
-    uid = EXCLUDED.uid,
-    hotkey = EXCLUDED.hotkey,
-    github_id = EXCLUDED.github_id,
     bronze_merged_prs = EXCLUDED.bronze_merged_prs,
     bronze_closed_prs = EXCLUDED.bronze_closed_prs,
     bronze_total_prs = EXCLUDED.bronze_total_prs,

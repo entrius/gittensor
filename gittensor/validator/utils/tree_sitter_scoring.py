@@ -311,7 +311,6 @@ def calculate_token_score_from_file_changes(
             file_score = lang_weight * lines_to_score * file_weight
 
             total_score += file_score
-            # total_nodes_scored += lines_to_score
 
             file_results.append(
                 FileScoreResult(

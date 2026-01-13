@@ -58,6 +58,9 @@ MAX_LINES_SCORED_FOR_NON_CODE_EXT = 300
 # Repository & PR Scoring
 # =============================================================================
 DEFAULT_MERGED_PR_BASE_SCORE = 30
+MIN_TOKEN_SCORE_FOR_BASE_SCORE = 5  # PRs below this get 0 base score (can still earn contribution bonus)
+MAX_CONTRIBUTION_BONUS = 30
+DEFAULT_MAX_CONTRIBUTION_SCORE_FOR_FULL_BONUS = 2000
 
 # Boosts
 UNIQUE_PR_BOOST = 0.4
@@ -65,7 +68,7 @@ MAX_CODE_DENSITY_MULTIPLIER = 3.0
 
 # Issue boosts
 MAX_ISSUE_CLOSE_WINDOW_DAYS = 1
-MAX_ISSUE_AGE_FOR_MAX_SCORE = 45  # days
+MAX_ISSUE_AGE_FOR_MAX_SCORE = 40  # days
 
 # Time decay (sigmoid curve)
 TIME_DECAY_GRACE_PERIOD_HOURS = 12  # hours before time decay begins
@@ -89,9 +92,6 @@ COMMENT_NODE_TYPES = frozenset(
 # =============================================================================
 TIER_BASED_INCENTIVE_MECHANISM_START_DATE = datetime(2025, 12, 31, 3, 45, 00, tzinfo=timezone.utc)
 DEFAULT_COLLATERAL_PERCENT = 0.20
-
-MAX_CONTRIBUTION_BONUS = 30
-DEFAULT_MAX_CONTRIBUTION_SCORE_FOR_FULL_BONUS = 2000  # For reference: 2000 score = 1,000 python lines
 
 # =============================================================================
 # Rewards & Emissions
@@ -122,8 +122,8 @@ UNIQUE_PRS_RECYCLE_DECAY_RATE = 0.006
 LOW_VALUE_THRESHOLD_SMALL = 0.0  # 0.4
 LOW_VALUE_THRESHOLD_MEDIUM = 0.0  # 0.35
 LOW_VALUE_THRESHOLD_LARGE = 0.0  # 0.3
-LOW_VALUE_SIZE_SMALL = 20  # Lines threshold for "small" PRs
-LOW_VALUE_SIZE_MEDIUM = 250  # Lines threshold for "medium" PRs
+LOW_VALUE_SIZE_SMALL = 25  # Lines threshold for "small" PRs
+LOW_VALUE_SIZE_MEDIUM = 125  # Lines threshold for "medium" PRs
 
 # =============================================================================
 # Spam & Gaming Mitigation

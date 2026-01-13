@@ -62,7 +62,9 @@ def log_scoring_results(
                 count_str = f'{result.nodes_scored:>3} lines'
             else:
                 count_str = f'{result.nodes_scored:>3} nodes'
-            bt.logging.debug(f'  │   {result.filename:<{max_name_len}}  {count_str}  {result.score:>6.2f}{test_mark}')
+            bt.logging.debug(
+                f'  │   {result.filename:<{max_name_len}}  ' f'{count_str}  ' f'{result.score:>6.2f}{test_mark}'
+            )
 
     # Count files by scoring method
     line_count_files = [f for f in file_results if f.scoring_method == 'line-count']
@@ -115,7 +117,8 @@ def log_scoring_results(
         score_str = f'Token Score: {token_score:.2f}'
 
     bt.logging.info(
-        f'  ├─ {score_str} | Lines: {total_raw_lines} | Density: {density:.2f} (threshold: {threshold}){low_value_str}'
+        f'  ├─ {score_str} | '
+        f'Total Lines: {total_raw_lines} | Density: {density:.2f} (threshold: {threshold}){low_value_str}'
     )
 
     if breakdown_str:

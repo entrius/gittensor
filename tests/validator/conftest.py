@@ -88,7 +88,7 @@ class PRBuilder:
         repo: Optional[str] = None,
         unique_repo: bool = False,
         low_value_pr: bool = False,
-        token_score: float = 30.0,  # Default high enough to qualify for all tiers
+        token_score: Optional[float] = None,  # Auto-calculated from tier if None
     ) -> PullRequest:
         """Create a mock PullRequest with the given parameters.
 
@@ -97,8 +97,16 @@ class PRBuilder:
                          If False and repo is None, uses 'test/repo'.
             low_value_pr: If True, marks the PR as low-value (won't count toward
                           merge counts or unique repos for merged PRs).
-            token_score: Token score for this PR (default 30.0 qualifies for all tiers).
+            token_score: Token score for this PR. If None, auto-calculates based on tier
+                         requirements to ensure the PR qualifies.
         """
+        # Auto-calculate token score if not specified - ensure it meets tier requirements
+        if token_score is None:
+            required_repos = tier.required_unique_repos_count or 3
+            min_per_repo = tier.required_min_token_score_per_repo or 5.0
+            min_total = tier.required_min_token_score or 0.0
+            # Each PR should contribute enough to meet both per-repo and total requirements
+            token_score = max(min_per_repo, min_total / required_repos) + 1.0
         if number is None:
             number = self._next_number()
 

@@ -63,6 +63,7 @@ class DatabaseStorage:
             result.stored_counts['issues'] = self.repo.store_issues_bulk(miner_eval.get_all_issues())
             result.stored_counts['file_changes'] = self.repo.store_file_changes_bulk(miner_eval.get_all_file_changes())
             result.stored_counts['evaluations'] = 1 if self.repo.set_miner_evaluation(miner_eval) else 0
+            result.stored_counts['tier_stats'] = 1 if self.repo.set_miner_tier_stats(miner_eval) else 0
 
             # Commit transaction
             self.db_connection.commit()

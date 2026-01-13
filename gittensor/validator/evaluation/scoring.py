@@ -19,6 +19,7 @@ from gittensor.constants import (
     MAX_ISSUE_AGE_BONUS,
     MAX_ISSUE_AGE_FOR_MAX_SCORE,
     MAX_ISSUE_CLOSE_WINDOW_DAYS,
+    MIN_TOKEN_SCORE_FOR_BASE_SCORE,
     SECONDS_PER_DAY,
     SECONDS_PER_HOUR,
     TIME_DECAY_GRACE_PERIOD_HOURS,
@@ -150,7 +151,6 @@ def calculate_base_score(
     file_contents: Dict[str, FileContentPair],
 ) -> float:
     """Calculate base score using code density scaling + contribution bonus."""
-    # Use token-based scoring
     scoring_result: PrScoringResult = calculate_token_score_from_file_changes(
         pr.file_changes,
         file_contents,
@@ -159,7 +159,6 @@ def calculate_base_score(
     )
 
     pr.total_nodes_scored = scoring_result.total_nodes_scored
-
     if scoring_result.score_breakdown:
         pr.token_score = scoring_result.score_breakdown.total_score
         pr.structural_count = scoring_result.score_breakdown.structural_count
@@ -167,25 +166,22 @@ def calculate_base_score(
         pr.leaf_count = scoring_result.score_breakdown.leaf_count
         pr.leaf_score = scoring_result.score_breakdown.leaf_score
 
-    # NOTE: Low-value PR detection deprecated - kept for potential future use
-    # if scoring_result.is_low_value_pr:
-    #     bt.logging.warning(f'PR #{pr.number} is low-value, base score = 0')
-    #     pr.low_value_pr = scoring_result.is_low_value_pr
-    #     return 0.0
-
     # Calculate total lines changed across all files
     total_lines = sum(f.total_lines for f in scoring_result.file_results)
 
-    # Calculate code density (token_score / total_lines), capped at MAX_CODE_DENSITY_MULTIPLIER
-    if total_lines > 0 and pr.token_score > 0:
+    # Check minimum token score threshold for base score. PRs below threshold get 0 base score
+    if pr.token_score < MIN_TOKEN_SCORE_FOR_BASE_SCORE:
+        code_density = 0.0
+        initial_base_score = 0.0
+    elif total_lines > 0:
+        # Calculate code density (token_score / total_lines), capped
         code_density = min(pr.token_score / total_lines, MAX_CODE_DENSITY_MULTIPLIER)
+        initial_base_score = DEFAULT_MERGED_PR_BASE_SCORE * code_density
     else:
         code_density = 0.0
+        initial_base_score = 0.0
 
-    # Calculate initial base score scaled by code density
-    initial_base_score = DEFAULT_MERGED_PR_BASE_SCORE * code_density
-
-    # Calculate contribution bonus (capped)
+    # Calculate contribution bonus, capped
     tier_config: TierConfig = pr.repository_tier_configuration
     bonus_percent = min(1.0, scoring_result.total_score / tier_config.contribution_score_for_full_bonus)
     contribution_bonus = round(bonus_percent * tier_config.contribution_score_max_bonus, 2)
@@ -193,15 +189,16 @@ def calculate_base_score(
     # Final base score = density-scaled base + contribution bonus
     base_score = round(initial_base_score + contribution_bonus, 2)
 
+    # Log with note if below token threshold
+    threshold_note = (
+        f' [below {MIN_TOKEN_SCORE_FOR_BASE_SCORE} token threshold]'
+        if pr.token_score < MIN_TOKEN_SCORE_FOR_BASE_SCORE
+        else ''
+    )
     bt.logging.info(
-        f'Base score: {initial_base_score:.2f} (density {code_density:.2f}) + {contribution_bonus} bonus '
+        f'Base score: {initial_base_score:.2f} (density {code_density:.2f}){threshold_note} + {contribution_bonus} bonus '
         f'({bonus_percent * 100:.0f}% of max {tier_config.contribution_score_max_bonus}) = {base_score:.2f}'
     )
-    if scoring_result.score_breakdown:
-        bt.logging.debug(
-            f'  Token breakdown: {scoring_result.score_breakdown.structural_count} structural ({scoring_result.score_breakdown.structural_score:.2f}) + '
-            f'{scoring_result.score_breakdown.leaf_count} leaf ({scoring_result.score_breakdown.leaf_score:.2f})'
-        )
 
     return base_score
 

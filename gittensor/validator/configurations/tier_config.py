@@ -19,7 +19,7 @@ class TierStats:
     open_count: int = 0
 
     unique_repo_contribution_count: int = 0
-    # Unique repos that meet a min token score threshold (set during calculation)
+    # Unique repos that meet a min token score threshold
     qualified_unique_repo_count: int = 0
 
     # Included as scoring details at the tier level
@@ -83,21 +83,21 @@ TIERS: dict[Tier, TierConfig] = {
         required_credibility=0.70,
         required_min_token_score=None,
         required_unique_repos_count=3,
-        required_min_token_score_per_repo=1.0,  # Each of unique repos must have at least x token score
+        required_min_token_score_per_repo=5.0,  # At least n initial unique repos must have at least x token score
         credibility_scalar=1.0,
     ),
     Tier.SILVER: TierConfig(
         required_credibility=0.65,
-        required_min_token_score=50.0,  # Minimum total token score for Silver unlock
+        required_min_token_score=300.0,  # Minimum total token score for Silver unlock
         required_unique_repos_count=3,
-        required_min_token_score_per_repo=1.0,  # Each of unique repos must have at least x token score
+        required_min_token_score_per_repo=89.0,  # At least n repos must have at least x token score
         credibility_scalar=1.5,
     ),
     Tier.GOLD: TierConfig(
         required_credibility=0.60,
-        required_min_token_score=150.0,  # Minimum total token score for Gold unlock
+        required_min_token_score=500.0,  # Minimum total token score for Gold unlock
         required_unique_repos_count=3,
-        required_min_token_score_per_repo=1.0,  # Each of unique repos must have at least x token score
+        required_min_token_score_per_repo=144.0,  # At least n unique repos must have at least x token score
         credibility_scalar=2.0,
     ),
 }

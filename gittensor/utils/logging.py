@@ -62,9 +62,7 @@ def log_scoring_results(
                 count_str = f'{result.nodes_scored:>3} lines'
             else:
                 count_str = f'{result.nodes_scored:>3} nodes'
-            bt.logging.debug(
-                f'  │   {result.filename:<{max_name_len}}  ' f'{count_str}  ' f'{result.score:>6.2f}{test_mark}'
-            )
+            bt.logging.debug(f'  │   {result.filename:<{max_name_len}}  {count_str}  {result.score:>6.2f}{test_mark}')
 
     # Count files by scoring method
     line_count_files = [f for f in file_results if f.scoring_method == 'line-count']

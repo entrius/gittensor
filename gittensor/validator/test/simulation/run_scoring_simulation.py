@@ -66,7 +66,7 @@ bt.logging.set_debug(True)
 
 # Set to an integer to limit the number of miners to score (e.g., 2, 5, 10)
 # Set to None to score all miners
-MINER_LIMIT = 2
+MINER_LIMIT = 3
 
 # Set to empty list [] to score all miners (subject to MINER_LIMIT)
 SPECIFIC_GITHUB_IDS = []
@@ -133,7 +133,8 @@ def load_miner_identities(conn) -> List[Tuple[int, str, str]]:
         for i, github_id in enumerate(SPECIFIC_GITHUB_IDS):
             mock_uid = -(i + 1)
             mock_hotkey = f'mock_hotkey_{github_id}'
-            miners.append((mock_uid, mock_hotkey, github_id))
+            # Include dummy total_score (0.0) to match DB query result format
+            miners.append((mock_uid, mock_hotkey, github_id, 0.0))
             print(f'    -> Mock miner: uid={mock_uid}, github_id={github_id}')
 
         # Apply miner limit if configured
@@ -161,7 +162,9 @@ def load_miner_identities(conn) -> List[Tuple[int, str, str]]:
 
 def create_miner_evaluation(uid: int, hotkey: str, github_id: str, github_pat: str) -> MinerEvaluation:
     """Create a MinerEvaluation with identity info and GitHub PAT."""
-    miner_eval = MinerEvaluation(uid=uid, hotkey=hotkey, github_id=github_id, github_pat=github_pat)
+    # Ensure github_id is a string (may be int from config or DB)
+    github_id_str = str(github_id) if github_id else '0'
+    miner_eval = MinerEvaluation(uid=uid, hotkey=hotkey, github_id=github_id_str, github_pat=github_pat)
     for tier in TIERS.keys():
         miner_eval.stats_by_tier[tier] = TierStats()
     return miner_eval

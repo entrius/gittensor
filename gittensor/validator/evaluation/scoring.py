@@ -331,6 +331,7 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
         evaluation.unique_repos_count = len(evaluation.unique_repos_contributed_to)
 
         # Calculate tier stats one more time now that scoring is fully applied (for logging + dashboard).
+        # This also calculates qualified_unique_repo_count per tier.
         tier_stats = calculate_tier_stats(
             merged_prs=evaluation.merged_pull_requests,
             closed_prs=evaluation.closed_pull_requests,
@@ -343,6 +344,9 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
             evaluation.stats_by_tier[tier] = tier_stats[tier]
             if is_tier_unlocked(tier, tier_stats):
                 evaluation.current_tier = tier
+
+        # Set overall qualified unique repos count (Bronze threshold is lowest, so use that for overall count)
+        evaluation.qualified_unique_repos_count = tier_stats[Tier.BRONZE].qualified_unique_repo_count
 
         # Determine next tier for display
         current_tier_str = evaluation.current_tier.value if evaluation.current_tier else 'None'

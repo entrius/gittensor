@@ -92,7 +92,8 @@ DO UPDATE SET
 BULK_UPSERT_MINER_EVALUATION = """
 INSERT INTO miner_evaluations (
     uid, hotkey, github_id, failed_reason, base_total_score, total_score, total_collateral_score,
-    total_nodes_scored, total_open_prs, total_closed_prs, total_merged_prs, total_prs, unique_repos_count,
+    total_nodes_scored, total_open_prs, total_closed_prs, total_merged_prs, total_prs,
+    unique_repos_count, qualified_unique_repos_count,
     current_tier,
     total_token_score, total_structural_count, total_structural_score, total_leaf_count, total_leaf_score
 ) VALUES %s
@@ -108,6 +109,7 @@ DO UPDATE SET
     total_merged_prs = EXCLUDED.total_merged_prs,
     total_prs = EXCLUDED.total_prs,
     unique_repos_count = EXCLUDED.unique_repos_count,
+    qualified_unique_repos_count = EXCLUDED.qualified_unique_repos_count,
     current_tier = EXCLUDED.current_tier,
     total_token_score = EXCLUDED.total_token_score,
     total_structural_count = EXCLUDED.total_structural_count,
@@ -121,11 +123,14 @@ DO UPDATE SET
 BULK_UPSERT_MINER_TIER_STATS = """
 INSERT INTO miner_tier_stats (
     uid, hotkey, github_id,
-    bronze_merged_prs, bronze_closed_prs, bronze_total_prs, bronze_collateral_score, bronze_score, bronze_unique_repos,
+    bronze_merged_prs, bronze_closed_prs, bronze_total_prs, bronze_collateral_score, bronze_score,
+    bronze_unique_repos, bronze_qualified_unique_repos,
     bronze_token_score, bronze_structural_count, bronze_structural_score, bronze_leaf_count, bronze_leaf_score,
-    silver_merged_prs, silver_closed_prs, silver_total_prs, silver_collateral_score, silver_score, silver_unique_repos,
+    silver_merged_prs, silver_closed_prs, silver_total_prs, silver_collateral_score, silver_score,
+    silver_unique_repos, silver_qualified_unique_repos,
     silver_token_score, silver_structural_count, silver_structural_score, silver_leaf_count, silver_leaf_score,
-    gold_merged_prs, gold_closed_prs, gold_total_prs, gold_collateral_score, gold_score, gold_unique_repos,
+    gold_merged_prs, gold_closed_prs, gold_total_prs, gold_collateral_score, gold_score,
+    gold_unique_repos, gold_qualified_unique_repos,
     gold_token_score, gold_structural_count, gold_structural_score, gold_leaf_count, gold_leaf_score
 ) VALUES %s
 ON CONFLICT (uid, hotkey, github_id)
@@ -136,6 +141,7 @@ DO UPDATE SET
     bronze_collateral_score = EXCLUDED.bronze_collateral_score,
     bronze_score = EXCLUDED.bronze_score,
     bronze_unique_repos = EXCLUDED.bronze_unique_repos,
+    bronze_qualified_unique_repos = EXCLUDED.bronze_qualified_unique_repos,
     bronze_token_score = EXCLUDED.bronze_token_score,
     bronze_structural_count = EXCLUDED.bronze_structural_count,
     bronze_structural_score = EXCLUDED.bronze_structural_score,
@@ -147,6 +153,7 @@ DO UPDATE SET
     silver_collateral_score = EXCLUDED.silver_collateral_score,
     silver_score = EXCLUDED.silver_score,
     silver_unique_repos = EXCLUDED.silver_unique_repos,
+    silver_qualified_unique_repos = EXCLUDED.silver_qualified_unique_repos,
     silver_token_score = EXCLUDED.silver_token_score,
     silver_structural_count = EXCLUDED.silver_structural_count,
     silver_structural_score = EXCLUDED.silver_structural_score,
@@ -158,6 +165,7 @@ DO UPDATE SET
     gold_collateral_score = EXCLUDED.gold_collateral_score,
     gold_score = EXCLUDED.gold_score,
     gold_unique_repos = EXCLUDED.gold_unique_repos,
+    gold_qualified_unique_repos = EXCLUDED.gold_qualified_unique_repos,
     gold_token_score = EXCLUDED.gold_token_score,
     gold_structural_count = EXCLUDED.gold_structural_count,
     gold_structural_score = EXCLUDED.gold_structural_score,

@@ -303,6 +303,7 @@ class MinerEvaluation:
     total_collateral_score: float = 0.0  # Collateral from open PRs
     total_nodes_scored: int = 0  # Total AST nodes scored across all PRs
     unique_repos_count: int = 0
+    qualified_unique_repos_count: int = 0  # Repos meeting min token score threshold
 
     # Overall token scoring breakdown (aggregated across all PRs)
     total_token_score: float = 0.0

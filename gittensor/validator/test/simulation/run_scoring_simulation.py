@@ -66,7 +66,7 @@ bt.logging.set_debug(True)
 
 # Set to an integer to limit the number of miners to score (e.g., 2, 5, 10)
 # Set to None to score all miners
-MINER_LIMIT = 3
+MINER_LIMIT = None
 
 # Set to empty list [] to score all miners (subject to MINER_LIMIT)
 SPECIFIC_GITHUB_IDS = []
@@ -89,8 +89,6 @@ SELECT DISTINCT m.uid, m.hotkey, m.github_id, me.total_score
 FROM miners m
 INNER JOIN pull_requests pr ON m.uid = pr.uid AND m.hotkey = pr.hotkey AND m.github_id = pr.github_id
 INNER JOIN miner_evaluations me ON m.uid = me.uid AND m.hotkey = me.hotkey AND m.github_id = me.github_id
-where me.total_merged_prs > 0
-ORDER BY me.total_score desc
 """
 
 

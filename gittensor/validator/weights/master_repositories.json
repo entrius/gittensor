@@ -4009,6 +4009,10 @@
     "tier": "Silver",
     "weight": 3.63
   },
+  "nvim-treesitter/nvim-treesitter": {
+    "tier": "Silver",
+    "weight": 5.63
+  },
   "nwjs/nw.js": {
     "tier": "Bronze",
     "weight": 0.19

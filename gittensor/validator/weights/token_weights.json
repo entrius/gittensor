@@ -26,12 +26,12 @@
     "do_statement": 0.35,
     "loop_expression": 0.4,
 
-    "try_statement": 0.4,
-    "catch_clause": 0.3,
+    "try_statement": 0.1,
+    "catch_clause": 0.15,
     "finally_clause": 0.2,
-    "except_clause": 0.3,
-    "raise_statement": 0.3,
-    "throw_statement": 0.3,
+    "except_clause": 0.15,
+    "raise_statement": 0.1,
+    "throw_statement": 0.1,
 
     "with_statement": 0.6,
     "async_function_definition": 1.5,

@@ -2999,6 +2999,14 @@
     "tier": "Silver",
     "weight": 4.28
   },
+  "impel-intelligence/dippy-studio-bittensor-miner": {
+    "tier": "Silver",
+    "weight": 4.28
+  },
+  "impel-intelligence/dippy-studio-bittensor-orchestrator": {
+    "tier": "Silver",
+    "weight": 4.28
+  },
   "impress/impress.js": {
     "tier": "Bronze",
     "weight": 0.25

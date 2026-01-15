@@ -2,8 +2,12 @@
 import base64
 import fnmatch
 import time
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
+
+if TYPE_CHECKING:
+    from gittensor.classes import FileChange as FileChangeType
 
 import bittensor as bt
 import requests
@@ -16,6 +20,7 @@ from gittensor.classes import (
 from gittensor.constants import (
     BASE_GITHUB_API_URL,
     MAINTAINER_ASSOCIATIONS,
+    MAX_FILE_SIZE_BYTES,
     TIER_BASED_INCENTIVE_MECHANISM_START_DATE,
 )
 from gittensor.utils.utils import parse_repo_name
@@ -67,7 +72,9 @@ QUERY = """
                 }
               }
               baseRefName
+              baseRefOid
               headRefName
+              headRefOid
               author {
                 login
               }
@@ -269,6 +276,68 @@ def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -
     except Exception as e:
         bt.logging.error(f'Error getting file changes for PR #{pr_number} in {repository}: {e}')
         return []
+
+
+def execute_graphql_query(
+    query: str,
+    variables: Dict[str, Any],
+    token: str,
+    max_attempts: int = 6,
+    timeout: int = 30,
+) -> Optional[Dict[str, Any]]:
+    """
+    Execute a GraphQL query with retry logic and exponential backoff.
+
+    Args:
+        query: The GraphQL query string
+        variables: Query variables
+        token: GitHub PAT for authentication
+        max_attempts: Maximum retry attempts (default 6)
+        timeout: Request timeout in seconds (default 30)
+
+    Returns:
+        Parsed JSON response data, or None if all attempts failed
+    """
+    headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
+
+    for attempt in range(max_attempts):
+        try:
+            response = requests.post(
+                f'{BASE_GITHUB_API_URL}/graphql',
+                headers=headers,
+                json={'query': query, 'variables': variables},
+                timeout=timeout,
+            )
+
+            if response.status_code == 200:
+                return response.json()
+
+            # Retry on failure
+            if attempt < (max_attempts - 1):
+                backoff_delay = 5 * (2**attempt)  # 5s, 10s, 20s, 40s, 80s
+                bt.logging.warning(
+                    f'GraphQL request failed with status {response.status_code} '
+                    f'(attempt {attempt + 1}/{max_attempts}), retrying in {backoff_delay}s...'
+                )
+                time.sleep(backoff_delay)
+            else:
+                bt.logging.error(
+                    f'GraphQL request failed with status {response.status_code} '
+                    f'after {max_attempts} attempts: {response.text}'
+                )
+
+        except requests.exceptions.RequestException as e:
+            if attempt < (max_attempts - 1):
+                backoff_delay = 5 * (2**attempt)
+                bt.logging.warning(
+                    f'GraphQL request exception (attempt {attempt + 1}/{max_attempts}), '
+                    f'retrying in {backoff_delay}s: {e}'
+                )
+                time.sleep(backoff_delay)
+            else:
+                bt.logging.error(f'GraphQL request failed after {max_attempts} attempts: {e}')
+
+    return None
 
 
 def get_github_graphql_query(
@@ -568,3 +637,177 @@ def load_miners_prs(
 
     except Exception as e:
         bt.logging.error(f'Error fetching PRs via GraphQL: {e}')
+
+
+def fetch_file_contents_batch(
+    repo_owner: str,
+    repo_name: str,
+    head_sha: str,
+    file_paths: List[str],
+    token: str,
+) -> Dict[str, Optional[str]]:
+    """
+    Fetch multiple file contents from a repository in a single GraphQL request.
+
+    Uses retry logic with exponential backoff for reliability.
+
+    Args:
+        repo_owner: Repository owner
+        repo_name: Repository name
+        head_sha: The commit SHA to fetch files at
+        file_paths: List of file paths to fetch
+        token: GitHub PAT for authentication
+
+    Returns:
+        Dict mapping file paths to their contents (None if file is binary, deleted, or too large)
+    """
+    if not file_paths:
+        return {}
+
+    # Build GraphQL query with aliased file fields
+    file_fields = []
+    for i, path in enumerate(file_paths):
+        expression = f'{head_sha}:{path}'
+        file_fields.append(
+            f'file{i}: object(expression: "{expression}") {{ ... on Blob {{ text byteSize isBinary }} }}'
+        )
+
+    query = f"""
+        query($owner: String!, $name: String!) {{
+            repository(owner: $owner, name: $name) {{
+                {' '.join(file_fields)}
+            }}
+        }}
+    """
+
+    variables = {'owner': repo_owner, 'name': repo_name}
+
+    # Execute with retry logic
+    data = execute_graphql_query(query, variables, token)
+    if data is None:
+        bt.logging.warning(f'Failed to fetch file contents for {repo_owner}/{repo_name}')
+        return {path: None for path in file_paths}
+
+    if 'errors' in data:
+        bt.logging.warning(f'GraphQL errors fetching files: {data["errors"]}')
+
+    repo_data = data.get('data', {}).get('repository', {})
+    results = {}
+
+    for i, path in enumerate(file_paths):
+        file_data = repo_data.get(f'file{i}')
+
+        if file_data is None:
+            results[path] = None
+        elif file_data.get('isBinary'):
+            results[path] = None
+        elif file_data.get('byteSize', 0) > MAX_FILE_SIZE_BYTES:
+            results[path] = None
+        else:
+            results[path] = file_data.get('text')
+
+    return results
+
+
+@dataclass
+class FileContentPair:
+    """Holds both old (base) and new (head) content for a file."""
+
+    old_content: Optional[str]  # None for new files
+    new_content: Optional[str]  # None for deleted files
+
+
+def fetch_file_contents_with_base(
+    repo_owner: str,
+    repo_name: str,
+    base_sha: str,
+    head_sha: str,
+    file_changes: List['FileChangeType'],
+    token: str,
+) -> Dict[str, FileContentPair]:
+    """
+    Fetch both base and head (old and new) versions of files in a single GraphQL request.
+
+    Args:
+        repo_owner: Repository owner
+        repo_name: Repository name
+        base_sha: The base branch SHA (before PR changes)
+        head_sha: The head/merge commit SHA (after PR changes)
+        file_changes: List of FileChange objects (needed for status and previous_filename)
+        token: GitHub PAT for authentication
+
+    Returns:
+        Dict mapping file paths to FileContentPair (old_content, new_content)
+        - For new files: old_content is None
+        - For deleted files: new_content is None
+        - For renamed files: old_content fetched from previous_filename
+    """
+    if not file_changes:
+        return {}
+
+    # Build GraphQL query with both base and head versions
+    file_fields = []
+    for i, fc in enumerate(file_changes):
+        # Determine the path to fetch for base version
+        # For renames, use previous_filename; otherwise use current filename
+        base_path = fc.previous_filename if fc.previous_filename else fc.filename
+        head_path = fc.filename
+
+        # Only fetch base version if file wasn't newly added
+        if fc.status != 'added':
+            base_expr = f'{base_sha}:{base_path}'
+            file_fields.append(
+                f'base{i}: object(expression: "{base_expr}") {{ ... on Blob {{ text byteSize isBinary }} }}'
+            )
+
+        # Only fetch head version if file wasn't deleted
+        if fc.status != 'removed':
+            head_expr = f'{head_sha}:{head_path}'
+            file_fields.append(
+                f'head{i}: object(expression: "{head_expr}") {{ ... on Blob {{ text byteSize isBinary }} }}'
+            )
+
+    if not file_fields:
+        return {}
+
+    query = f"""
+        query($owner: String!, $name: String!) {{
+            repository(owner: $owner, name: $name) {{
+                {' '.join(file_fields)}
+            }}
+        }}
+    """
+
+    variables = {'owner': repo_owner, 'name': repo_name}
+
+    # Execute with retry logic
+    data = execute_graphql_query(query, variables, token)
+    if data is None:
+        bt.logging.warning(f'Failed to fetch file contents for {repo_owner}/{repo_name}')
+        return {fc.filename: FileContentPair(None, None) for fc in file_changes}
+
+    if 'errors' in data:
+        bt.logging.warning(f'GraphQL errors fetching files: {data["errors"]}')
+
+    repo_data = data.get('data', {}).get('repository', {})
+    results: Dict[str, FileContentPair] = {}
+
+    for i, fc in enumerate(file_changes):
+        old_content = None
+        new_content = None
+
+        # Extract base (old) content if applicable
+        if fc.status != 'added':
+            base_data = repo_data.get(f'base{i}')
+            if base_data and not base_data.get('isBinary') and base_data.get('byteSize', 0) <= MAX_FILE_SIZE_BYTES:
+                old_content = base_data.get('text')
+
+        # Extract head (new) content if applicable
+        if fc.status != 'removed':
+            head_data = repo_data.get(f'head{i}')
+            if head_data and not head_data.get('isBinary') and head_data.get('byteSize', 0) <= MAX_FILE_SIZE_BYTES:
+                new_content = head_data.get('text')
+
+        results[fc.filename] = FileContentPair(old_content=old_content, new_content=new_content)
+
+    return results

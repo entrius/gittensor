@@ -6,7 +6,7 @@ from gittensor.constants import (
     DEFAULT_COLLATERAL_PERCENT,
     DEFAULT_MAX_CONTRIBUTION_SCORE_FOR_FULL_BONUS,
     DEFAULT_MERGED_PR_BASE_SCORE,
-    MAX_LINE_CONTRIBUTION_BONUS,
+    MAX_CONTRIBUTION_BONUS,
 )
 
 
@@ -19,10 +19,19 @@ class TierStats:
     open_count: int = 0
 
     unique_repo_contribution_count: int = 0
+    # Unique repos that meet a min token score threshold
+    qualified_unique_repo_count: int = 0
 
     # Included as scoring details at the tier level
     earned_score: float = 0.0
     collateral_score: float = 0.0
+
+    # Token scoring breakdown for this tier
+    token_score: float = 0.0
+    structural_count: int = 0
+    structural_score: float = 0.0
+    leaf_count: int = 0
+    leaf_score: float = 0.0
 
     @property
     def total_attempts(self) -> int:
@@ -46,17 +55,18 @@ class Tier(str, Enum):
 TIER_DEFAULTS = {
     'merged_pr_base_score': DEFAULT_MERGED_PR_BASE_SCORE,
     'contribution_score_for_full_bonus': DEFAULT_MAX_CONTRIBUTION_SCORE_FOR_FULL_BONUS,
-    'contribution_score_max_bonus': MAX_LINE_CONTRIBUTION_BONUS,
+    'contribution_score_max_bonus': MAX_CONTRIBUTION_BONUS,
     'open_pr_collateral_percentage': DEFAULT_COLLATERAL_PERCENT,
 }
 
 
 @dataclass(frozen=True)
 class TierConfig:
-    # Tier unlock requirements
-    required_merges: Optional[int]
-    required_unique_repos_merged_to: Optional[int]
     required_credibility: Optional[float]
+    required_min_token_score: Optional[float]  # Minimum total token score to unlock tier
+    # Unique repos with min token score requirement (both must be set or both None)
+    required_unique_repos_count: Optional[int]  # Number of unique repos needed
+    required_min_token_score_per_repo: Optional[float]  # Min token score each repo must have
 
     # Tier-specific scaling
     credibility_scalar: int
@@ -70,21 +80,24 @@ class TierConfig:
 
 TIERS: dict[Tier, TierConfig] = {
     Tier.BRONZE: TierConfig(
-        required_merges=3,
-        required_unique_repos_merged_to=3,
         required_credibility=0.70,
+        required_min_token_score=None,
+        required_unique_repos_count=3,
+        required_min_token_score_per_repo=5.0,  # At least n initial unique repos must have at least x token score
         credibility_scalar=1.0,
     ),
     Tier.SILVER: TierConfig(
-        required_merges=4,
-        required_unique_repos_merged_to=3,
         required_credibility=0.65,
+        required_min_token_score=300.0,  # Minimum total token score for Silver unlock
+        required_unique_repos_count=3,
+        required_min_token_score_per_repo=89.0,  # At least n repos must have at least x token score
         credibility_scalar=1.5,
     ),
     Tier.GOLD: TierConfig(
-        required_merges=5,
-        required_unique_repos_merged_to=3,
         required_credibility=0.60,
+        required_min_token_score=500.0,  # Minimum total token score for Gold unlock
+        required_unique_repos_count=3,
+        required_min_token_score_per_repo=144.0,  # At least n unique repos must have at least x token score
         credibility_scalar=2.0,
     ),
 }

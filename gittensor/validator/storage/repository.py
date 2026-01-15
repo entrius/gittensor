@@ -19,6 +19,7 @@ from .queries import (
     BULK_UPSERT_FILE_CHANGES,
     BULK_UPSERT_ISSUES,
     BULK_UPSERT_MINER_EVALUATION,
+    BULK_UPSERT_MINER_TIER_STATS,
     BULK_UPSERT_PULL_REQUESTS,
     SET_MINER,
 )
@@ -152,12 +153,17 @@ class Repository(BaseRepository):
                     pr.additions,
                     pr.deletions,
                     pr.commits,
-                    pr.total_lines_scored,
+                    pr.total_nodes_scored,
                     pr.gittensor_tagged,
                     pr.low_value_pr,
                     pr.merged_by_login,
                     pr.description,
                     pr.last_edited_at,
+                    pr.token_score,
+                    pr.structural_count,
+                    pr.structural_score,
+                    pr.leaf_count,
+                    pr.leaf_score,
                 )
             )
 
@@ -276,7 +282,7 @@ class Repository(BaseRepository):
 
     def set_miner_evaluation(self, evaluation: MinerEvaluation) -> bool:
         """
-        Insert a new miner evaluation
+        Insert or update a miner evaluation.
 
         Args:
             evaluation: MinerEvaluation object to store
@@ -284,7 +290,7 @@ class Repository(BaseRepository):
         Returns:
             True if successful, False otherwise
         """
-        values = [
+        eval_values = [
             (
                 evaluation.uid,
                 evaluation.hotkey,
@@ -293,31 +299,19 @@ class Repository(BaseRepository):
                 evaluation.base_total_score,
                 evaluation.total_score,
                 evaluation.total_collateral_score,
-                evaluation.total_lines_changed,
+                evaluation.total_nodes_scored,
                 evaluation.total_open_prs,
                 evaluation.total_closed_prs,
                 evaluation.total_merged_prs,
                 evaluation.total_prs,
                 evaluation.unique_repos_count,
+                evaluation.qualified_unique_repos_count,
                 evaluation.current_tier.value if evaluation.current_tier else None,
-                evaluation.stats_by_tier[Tier.BRONZE].merged_count,
-                evaluation.stats_by_tier[Tier.BRONZE].closed_count,
-                evaluation.stats_by_tier[Tier.BRONZE].total_prs,
-                evaluation.stats_by_tier[Tier.BRONZE].collateral_score,
-                evaluation.stats_by_tier[Tier.BRONZE].earned_score,
-                evaluation.stats_by_tier[Tier.BRONZE].unique_repo_contribution_count,
-                evaluation.stats_by_tier[Tier.SILVER].merged_count,
-                evaluation.stats_by_tier[Tier.SILVER].closed_count,
-                evaluation.stats_by_tier[Tier.SILVER].total_prs,
-                evaluation.stats_by_tier[Tier.SILVER].collateral_score,
-                evaluation.stats_by_tier[Tier.SILVER].earned_score,
-                evaluation.stats_by_tier[Tier.SILVER].unique_repo_contribution_count,
-                evaluation.stats_by_tier[Tier.GOLD].merged_count,
-                evaluation.stats_by_tier[Tier.GOLD].closed_count,
-                evaluation.stats_by_tier[Tier.GOLD].total_prs,
-                evaluation.stats_by_tier[Tier.GOLD].collateral_score,
-                evaluation.stats_by_tier[Tier.GOLD].earned_score,
-                evaluation.stats_by_tier[Tier.GOLD].unique_repo_contribution_count,
+                evaluation.total_token_score,
+                evaluation.total_structural_count,
+                evaluation.total_structural_score,
+                evaluation.total_leaf_count,
+                evaluation.total_leaf_score,
             )
         ]
 
@@ -325,10 +319,83 @@ class Repository(BaseRepository):
             with self.get_cursor() as cursor:
                 from psycopg2.extras import execute_values
 
-                execute_values(cursor, BULK_UPSERT_MINER_EVALUATION, values)
+                execute_values(cursor, BULK_UPSERT_MINER_EVALUATION, eval_values)
                 self.db.commit()
                 return True
         except Exception as e:
             self.db.rollback()
             self.logger.error(f'Error in miner evaluation storage: {e}')
+            return False
+
+    def set_miner_tier_stats(self, evaluation: MinerEvaluation) -> bool:
+        """
+        Insert or update miner tier stats.
+
+        Args:
+            evaluation: MinerEvaluation object containing tier stats
+
+        Returns:
+            True if successful, False otherwise
+        """
+        bronze = evaluation.stats_by_tier[Tier.BRONZE]
+        silver = evaluation.stats_by_tier[Tier.SILVER]
+        gold = evaluation.stats_by_tier[Tier.GOLD]
+
+        tier_stats_values = [
+            (
+                evaluation.uid,
+                evaluation.hotkey,
+                evaluation.github_id,
+                # Bronze tier
+                bronze.merged_count,
+                bronze.closed_count,
+                bronze.total_prs,
+                bronze.collateral_score,
+                bronze.earned_score,
+                bronze.unique_repo_contribution_count,
+                bronze.qualified_unique_repo_count,
+                bronze.token_score,
+                bronze.structural_count,
+                bronze.structural_score,
+                bronze.leaf_count,
+                bronze.leaf_score,
+                # Silver tier
+                silver.merged_count,
+                silver.closed_count,
+                silver.total_prs,
+                silver.collateral_score,
+                silver.earned_score,
+                silver.unique_repo_contribution_count,
+                silver.qualified_unique_repo_count,
+                silver.token_score,
+                silver.structural_count,
+                silver.structural_score,
+                silver.leaf_count,
+                silver.leaf_score,
+                # Gold tier
+                gold.merged_count,
+                gold.closed_count,
+                gold.total_prs,
+                gold.collateral_score,
+                gold.earned_score,
+                gold.unique_repo_contribution_count,
+                gold.qualified_unique_repo_count,
+                gold.token_score,
+                gold.structural_count,
+                gold.structural_score,
+                gold.leaf_count,
+                gold.leaf_score,
+            )
+        ]
+
+        try:
+            with self.get_cursor() as cursor:
+                from psycopg2.extras import execute_values
+
+                execute_values(cursor, BULK_UPSERT_MINER_TIER_STATS, tier_stats_values)
+                self.db.commit()
+                return True
+        except Exception as e:
+            self.db.rollback()
+            self.logger.error(f'Error in miner tier stats storage: {e}')
             return False

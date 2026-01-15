@@ -628,7 +628,7 @@
     "tier": "Bronze",
     "weight": 0.28
   },
-  "PlatformNetwork/platform": {
+  "PlatformNetwork/term-challenge": {
     "tier": "Silver",
     "weight": 6.52
   },
@@ -4736,6 +4736,7 @@
     "weight": 0.3
   },
   "sbt/sbt": {
+    "additional_acceptable_branches": ["1.12.x"],
     "tier": "Bronze",
     "weight": 0.89
   },

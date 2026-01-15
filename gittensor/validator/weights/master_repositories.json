@@ -120,10 +120,6 @@
     "tier": "Bronze",
     "weight": 0.19
   },
-  "CandlesTAO/candles": {
-    "tier": "Silver",
-    "weight": 6.52
-  },
   "CarGuo/GSYVideoPlayer": {
     "tier": "Bronze",
     "weight": 0.18
@@ -628,7 +624,7 @@
     "tier": "Bronze",
     "weight": 0.28
   },
-  "PlatformNetwork/term-challenge": {
+  "PlatformNetwork/platform": {
     "tier": "Silver",
     "weight": 6.52
   },

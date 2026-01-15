@@ -3,7 +3,7 @@ import os
 import bittensor as bt
 
 # NOTE: bump this number when we make new updates
-__version__ = '3.0.3'
+__version__ = '3.1.0'
 
 
 VALIDATOR_WAIT = 60  # 60 seconds

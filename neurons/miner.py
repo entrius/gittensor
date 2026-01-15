@@ -92,5 +92,5 @@ if __name__ == '__main__':
             'Repeating an action makes a habit. Your habits create your character. And your character is your destiny.'
         )
         while True:
-            bt.logging.info('GitTensor miner running...')
+            bt.logging.info('Gittensor miner running...')
             time.sleep(30)

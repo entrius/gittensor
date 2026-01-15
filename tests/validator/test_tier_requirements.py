@@ -49,20 +49,20 @@ class TestCredibilityThresholdBehavior:
         When tier is unlocked and at/above activation threshold, actual credibility is calculated.
         """
         bronze_tier_config = TIERS[Tier.BRONZE]
-        required_merges = bronze_tier_config.required_merges
+        required_repos = bronze_tier_config.required_unique_repos_count
         required_credibility = bronze_tier_config.required_credibility
 
         # Create PRs that unlock Bronze at exactly the credibility requirement (unique repos)
         # merged / (merged + closed) = required_credibility
-        # For required_merges merged, closed = merged * (1 - required_credibility) / required_credibility
-        closed_count = int(required_merges * (1 - required_credibility) / required_credibility)
+        # For required_repos merged, closed = merged * (1 - required_credibility) / required_credibility
+        closed_count = int(required_repos * (1 - required_credibility) / required_credibility)
 
-        merged = pr_factory.merged_batch(bronze_config, count=required_merges, unique_repos=True)
+        merged = pr_factory.merged_batch(bronze_config, count=required_repos, unique_repos=True)
         closed = pr_factory.closed_batch(bronze_config, count=closed_count, unique_repos=True)
 
         credibility = calculate_credibility_per_tier(merged, closed)
 
-        expected = required_merges / (required_merges + closed_count)
+        expected = required_repos / (required_repos + closed_count)
         assert credibility[Tier.BRONZE] == pytest.approx(expected, abs=0.01)
         assert credibility[Tier.BRONZE] >= required_credibility
 
@@ -71,10 +71,10 @@ class TestCredibilityThresholdBehavior:
         Above activation threshold, actual credibility is calculated.
         """
         bronze_tier_config = TIERS[Tier.BRONZE]
-        required_merges = bronze_tier_config.required_merges
+        required_repos = bronze_tier_config.required_unique_repos_count
 
         # Unlock Bronze with perfect credibility (no closed PRs, unique repos)
-        merged = pr_factory.merged_batch(bronze_config, count=required_merges, unique_repos=True)
+        merged = pr_factory.merged_batch(bronze_config, count=required_repos, unique_repos=True)
 
         credibility = calculate_credibility_per_tier(merged, [])
 
@@ -91,14 +91,14 @@ class TestCredibilityThresholdBehavior:
         - Silver locks → Gold cascades to locked
         """
         silver_tier_config = TIERS[Tier.SILVER]
-        required_merges = silver_tier_config.required_merges
+        required_repos = silver_tier_config.required_unique_repos_count
         required_credibility = silver_tier_config.required_credibility
 
         # Calculate closed count to drop just below required credibility
         # credibility = merged / (merged + closed)
         # We want: merged / (merged + closed) < required_credibility
-        # With required_merges merged, we need enough closed to drop below threshold
-        merged_count = required_merges
+        # With required_repos merged, we need enough closed to drop below threshold
+        merged_count = required_repos
         # To get credibility just below threshold:
         # merged / total < required_credibility
         # merged < required_credibility * total
@@ -119,7 +119,7 @@ class TestCredibilityThresholdBehavior:
         # Verify Silver credibility is below requirement
         assert stats[Tier.SILVER].credibility < required_credibility
         # Verify Silver has enough merges
-        assert stats[Tier.SILVER].merged_count >= required_merges
+        assert stats[Tier.SILVER].merged_count >= required_repos
 
         # Silver should be locked (credibility too low)
         assert is_tier_unlocked(Tier.SILVER, stats) is False
@@ -132,12 +132,12 @@ class TestCredibilityThresholdBehavior:
         """
         bronze_tier_config = TIERS[Tier.BRONZE]
         silver_tier_config = TIERS[Tier.SILVER]
-        required_merges = silver_tier_config.required_merges
+        required_repos = silver_tier_config.required_unique_repos_count
         required_credibility = silver_tier_config.required_credibility
 
         # Calculate exact counts for required_credibility
         # closed = merged * (1 - required_credibility) / required_credibility
-        merged_count = required_merges
+        merged_count = required_repos
         closed_count = int(merged_count * (1 - required_credibility) / required_credibility)
 
         # Verify our math: merged / (merged + closed) should equal required_credibility
@@ -145,7 +145,7 @@ class TestCredibilityThresholdBehavior:
 
         # Need Bronze unlocked first (with unique repos)
         bronze_merged = pr_factory.merged_batch(
-            bronze_config, count=bronze_tier_config.required_merges, unique_repos=True
+            bronze_config, count=bronze_tier_config.required_unique_repos_count, unique_repos=True
         )
         silver_merged = pr_factory.merged_batch(silver_config, count=merged_count, unique_repos=True)
         silver_closed = pr_factory.closed_batch(silver_config, count=closed_count, unique_repos=True)
@@ -165,11 +165,11 @@ class TestCredibilityThresholdBehavior:
         bronze_tier_config = TIERS[Tier.BRONZE]
         silver_tier_config = TIERS[Tier.SILVER]
         gold_tier_config = TIERS[Tier.GOLD]
-        required_merges = gold_tier_config.required_merges
+        required_repos = gold_tier_config.required_unique_repos_count
         required_credibility = gold_tier_config.required_credibility
 
         # Get well above threshold
-        merged_count = required_merges + 5  # Extra buffer
+        merged_count = required_repos + 5  # Extra buffer
         # For 90% credibility with merged_count merges:
         # 0.9 = merged / (merged + closed)
         # closed = merged * (1 - 0.9) / 0.9 = merged / 9
@@ -177,10 +177,10 @@ class TestCredibilityThresholdBehavior:
 
         # Unlock Bronze and Silver first (with unique repos)
         bronze_merged = pr_factory.merged_batch(
-            bronze_config, count=bronze_tier_config.required_merges, unique_repos=True
+            bronze_config, count=bronze_tier_config.required_unique_repos_count, unique_repos=True
         )
         silver_merged = pr_factory.merged_batch(
-            silver_config, count=silver_tier_config.required_merges, unique_repos=True
+            silver_config, count=silver_tier_config.required_unique_repos_count, unique_repos=True
         )
 
         gold_merged = pr_factory.merged_batch(gold_config, count=merged_count, unique_repos=True)
@@ -196,11 +196,11 @@ class TestCredibilityThresholdBehavior:
         Having many merges doesn't help if credibility is below requirement.
         """
         silver_tier_config = TIERS[Tier.SILVER]
-        required_merges = silver_tier_config.required_merges
+        required_repos = silver_tier_config.required_unique_repos_count
         required_credibility = silver_tier_config.required_credibility
 
         # Way more merges than required, but terrible credibility
-        merged_count = required_merges * 5
+        merged_count = required_repos * 5
         # Calculate closed to get credibility just below requirement
         closed_count = int(merged_count * (1 - required_credibility) / required_credibility) + 2
 
@@ -210,7 +210,7 @@ class TestCredibilityThresholdBehavior:
         stats = calculate_tier_stats(merged, closed)
 
         # Plenty of merges
-        assert stats[Tier.SILVER].merged_count > required_merges
+        assert stats[Tier.SILVER].merged_count > required_repos
         # But credibility below threshold
         assert stats[Tier.SILVER].credibility < required_credibility
         # Still locked
@@ -229,12 +229,12 @@ class TestLowerTierCredibilityCascade:
         silver_tier_config = TIERS[Tier.SILVER]
         gold_tier_config = TIERS[Tier.GOLD]
 
-        silver_required_merges = silver_tier_config.required_merges
+        silver_required_repos = silver_tier_config.required_unique_repos_count
         silver_required_credibility = silver_tier_config.required_credibility
-        gold_required_merges = gold_tier_config.required_merges
+        gold_required_repos = gold_tier_config.required_unique_repos_count
 
         # Silver: enough merges but terrible credibility
-        silver_merged_count = silver_required_merges
+        silver_merged_count = silver_required_repos
         silver_closed_count = (
             int(silver_merged_count * (1 - silver_required_credibility) / silver_required_credibility) + 2
         )
@@ -243,7 +243,7 @@ class TestLowerTierCredibilityCascade:
         silver_closed = pr_factory.closed_batch(silver_config, count=silver_closed_count)
 
         # Gold: perfect stats
-        gold_merged = pr_factory.merged_batch(gold_config, count=gold_required_merges + 5)
+        gold_merged = pr_factory.merged_batch(gold_config, count=gold_required_repos + 5)
 
         stats = calculate_tier_stats(silver_merged + gold_merged, silver_closed)
         credibility = calculate_credibility_per_tier(silver_merged + gold_merged, silver_closed)
@@ -252,7 +252,7 @@ class TestLowerTierCredibilityCascade:
         assert stats[Tier.SILVER].credibility < silver_required_credibility
 
         # Gold has perfect stats
-        assert stats[Tier.GOLD].merged_count >= gold_required_merges
+        assert stats[Tier.GOLD].merged_count >= gold_required_repos
         assert stats[Tier.GOLD].credibility == 1.0
 
         # But Gold is locked because Silver is locked
@@ -270,24 +270,24 @@ class TestLowerTierCredibilityCascade:
         silver_tier_config = TIERS[Tier.SILVER]
         gold_tier_config = TIERS[Tier.GOLD]
 
-        silver_required_merges = silver_tier_config.required_merges
+        silver_required_repos = silver_tier_config.required_unique_repos_count
         silver_required_credibility = silver_tier_config.required_credibility
-        gold_required_merges = gold_tier_config.required_merges
+        gold_required_repos = gold_tier_config.required_unique_repos_count
 
         # Need Bronze unlocked first (with unique repos)
         bronze_merged = pr_factory.merged_batch(
-            bronze_config, count=bronze_tier_config.required_merges, unique_repos=True
+            bronze_config, count=bronze_tier_config.required_unique_repos_count, unique_repos=True
         )
 
         # Initial state: Silver below credibility threshold (unique repos)
-        silver_merged_count = silver_required_merges
+        silver_merged_count = silver_required_repos
         silver_closed_count = (
             int(silver_merged_count * (1 - silver_required_credibility) / silver_required_credibility) + 2
         )
 
         silver_merged = pr_factory.merged_batch(silver_config, count=silver_merged_count, unique_repos=True)
         silver_closed = pr_factory.closed_batch(silver_config, count=silver_closed_count, unique_repos=True)
-        gold_merged = pr_factory.merged_batch(gold_config, count=gold_required_merges + 5, unique_repos=True)
+        gold_merged = pr_factory.merged_batch(gold_config, count=gold_required_repos + 5, unique_repos=True)
 
         stats = calculate_tier_stats(bronze_merged + silver_merged + gold_merged, silver_closed)
         assert is_tier_unlocked(Tier.GOLD, stats) is False
@@ -325,7 +325,9 @@ class TestLookbackExpiry:
     def _bronze_prs(self, pr_factory, bronze_config):
         """Helper to create Bronze PRs that unlock Bronze (with unique repos)."""
         bronze_tier_config = TIERS[Tier.BRONZE]
-        return pr_factory.merged_batch(bronze_config, count=bronze_tier_config.required_merges, unique_repos=True)
+        return pr_factory.merged_batch(
+            bronze_config, count=bronze_tier_config.required_unique_repos_count, unique_repos=True
+        )
 
     def test_silver_prs_expire_locks_gold(self, pr_factory, bronze_config, silver_config, gold_config):
         """
@@ -340,9 +342,9 @@ class TestLookbackExpiry:
         silver_tier_config = TIERS[Tier.SILVER]
         gold_tier_config = TIERS[Tier.GOLD]
 
-        bronze_required = bronze_tier_config.required_merges
-        silver_required = silver_tier_config.required_merges
-        gold_required = gold_tier_config.required_merges
+        bronze_required = bronze_tier_config.required_unique_repos_count
+        silver_required = silver_tier_config.required_unique_repos_count
+        gold_required = gold_tier_config.required_unique_repos_count
 
         # Before expiry: Gold unlocked (Bronze + Silver + Gold PRs, unique repos)
         bronze_prs = pr_factory.merged_batch(bronze_config, count=bronze_required, unique_repos=True)
@@ -382,9 +384,9 @@ class TestLookbackExpiry:
         silver_tier_config = TIERS[Tier.SILVER]
         gold_tier_config = TIERS[Tier.GOLD]
 
-        bronze_required = bronze_tier_config.required_merges
-        silver_required = silver_tier_config.required_merges
-        gold_required = gold_tier_config.required_merges
+        bronze_required = bronze_tier_config.required_unique_repos_count
+        silver_required = silver_tier_config.required_unique_repos_count
+        gold_required = gold_tier_config.required_unique_repos_count
         extra_silver = 2  # Buffer above requirement
 
         # Before: all tiers unlocked with extra Silver merges (unique repos)
@@ -426,9 +428,9 @@ class TestLookbackExpiry:
         silver_tier_config = TIERS[Tier.SILVER]
         gold_tier_config = TIERS[Tier.GOLD]
 
-        bronze_required = bronze_tier_config.required_merges
-        silver_required = silver_tier_config.required_merges
-        gold_required = gold_tier_config.required_merges
+        bronze_required = bronze_tier_config.required_unique_repos_count
+        silver_required = silver_tier_config.required_unique_repos_count
+        gold_required = gold_tier_config.required_unique_repos_count
 
         # At threshold: exactly silver_required (with Bronze unlocked, unique repos)
         merged = (
@@ -466,8 +468,8 @@ class TestLookbackExpiry:
         bronze_tier_config = TIERS[Tier.BRONZE]
         silver_tier_config = TIERS[Tier.SILVER]
 
-        bronze_required = bronze_tier_config.required_merges
-        silver_required = silver_tier_config.required_merges
+        bronze_required = bronze_tier_config.required_unique_repos_count
+        silver_required = silver_tier_config.required_unique_repos_count
         silver_cred_required = silver_tier_config.required_credibility
 
         # Before: high credibility (well above threshold, unique repos)
@@ -507,9 +509,9 @@ class TestLookbackExpiry:
         silver_tier_config = TIERS[Tier.SILVER]
         gold_tier_config = TIERS[Tier.GOLD]
 
-        bronze_required = bronze_tier_config.required_merges
-        silver_required = silver_tier_config.required_merges
-        gold_required = gold_tier_config.required_merges
+        bronze_required = bronze_tier_config.required_unique_repos_count
+        silver_required = silver_tier_config.required_unique_repos_count
+        gold_required = gold_tier_config.required_unique_repos_count
         gold_cred_required = gold_tier_config.required_credibility
 
         # Calculate counts so losing 1 merged PR drops credibility below threshold
@@ -556,9 +558,9 @@ class TestLookbackExpiry:
         silver_tier_config = TIERS[Tier.SILVER]
         gold_tier_config = TIERS[Tier.GOLD]
 
-        bronze_required = bronze_tier_config.required_merges
-        silver_required = silver_tier_config.required_merges
-        gold_required = gold_tier_config.required_merges
+        bronze_required = bronze_tier_config.required_unique_repos_count
+        silver_required = silver_tier_config.required_unique_repos_count
+        gold_required = gold_tier_config.required_unique_repos_count
         gold_cred_required = gold_tier_config.required_credibility
 
         # Before: below threshold (unique repos)
@@ -598,8 +600,8 @@ class TestLookbackExpiry:
         bronze_tier_config = TIERS[Tier.BRONZE]
         silver_tier_config = TIERS[Tier.SILVER]
 
-        bronze_required = bronze_tier_config.required_merges
-        silver_required = silver_tier_config.required_merges
+        bronze_required = bronze_tier_config.required_unique_repos_count
+        silver_required = silver_tier_config.required_unique_repos_count
 
         # Before: Silver unlocked (unique repos)
         bronze_prs = pr_factory.merged_batch(bronze_config, count=bronze_required, unique_repos=True)
@@ -628,9 +630,9 @@ class TestLookbackExpiry:
         silver_tier_config = TIERS[Tier.SILVER]
         gold_tier_config = TIERS[Tier.GOLD]
 
-        bronze_required = bronze_tier_config.required_merges
-        silver_required = silver_tier_config.required_merges
-        gold_required = gold_tier_config.required_merges
+        bronze_required = bronze_tier_config.required_unique_repos_count
+        silver_required = silver_tier_config.required_unique_repos_count
+        gold_required = gold_tier_config.required_unique_repos_count
 
         # Phase 1: Full unlock with buffer (unique repos)
         bronze_prs = pr_factory.merged_batch(bronze_config, count=bronze_required, unique_repos=True)
@@ -667,9 +669,9 @@ class TestLookbackExpiry:
         silver_tier_config = TIERS[Tier.SILVER]
         gold_tier_config = TIERS[Tier.GOLD]
 
-        bronze_required = bronze_tier_config.required_merges
-        silver_required = silver_tier_config.required_merges
-        gold_required = gold_tier_config.required_merges
+        bronze_required = bronze_tier_config.required_unique_repos_count
+        silver_required = silver_tier_config.required_unique_repos_count
+        gold_required = gold_tier_config.required_unique_repos_count
 
         # Lost access: Bronze unlocked, but one below Silver threshold (unique repos)
         bronze_prs = pr_factory.merged_batch(bronze_config, count=bronze_required, unique_repos=True)
@@ -711,16 +713,16 @@ class TestUniqueRepoRequirement:
         - But only has 1 unique repo → tier locked
         """
         bronze_tier_config = TIERS[Tier.BRONZE]
-        required_merges = bronze_tier_config.required_merges
-        required_unique_repos = bronze_tier_config.required_unique_repos_merged_to
+        required_repos = bronze_tier_config.required_unique_repos_count
+        required_unique_repos = bronze_tier_config.required_unique_repos_count
 
         # Create PRs all to the same repo (default behavior without unique_repos=True)
-        merged = pr_factory.merged_batch(bronze_config, count=required_merges)
+        merged = pr_factory.merged_batch(bronze_config, count=required_repos)
 
         stats = calculate_tier_stats(merged, [])
 
         # Has enough merges
-        assert stats[Tier.BRONZE].merged_count >= required_merges
+        assert stats[Tier.BRONZE].merged_count >= required_repos
         # But only 1 unique repo
         assert stats[Tier.BRONZE].unique_repo_contribution_count == 1
         # Required unique repos is 3
@@ -738,16 +740,16 @@ class TestUniqueRepoRequirement:
         - Tier unlocks
         """
         bronze_tier_config = TIERS[Tier.BRONZE]
-        required_merges = bronze_tier_config.required_merges
-        required_unique_repos = bronze_tier_config.required_unique_repos_merged_to
+        required_repos = bronze_tier_config.required_unique_repos_count
+        required_unique_repos = bronze_tier_config.required_unique_repos_count
 
         # Create PRs to unique repos
-        merged = pr_factory.merged_batch(bronze_config, count=required_merges, unique_repos=True)
+        merged = pr_factory.merged_batch(bronze_config, count=required_repos, unique_repos=True)
 
         stats = calculate_tier_stats(merged, [])
 
         # Has enough merges
-        assert stats[Tier.BRONZE].merged_count >= required_merges
+        assert stats[Tier.BRONZE].merged_count >= required_repos
         # Has enough unique repos
         assert stats[Tier.BRONZE].unique_repo_contribution_count >= required_unique_repos
         # Tier is unlocked
@@ -795,16 +797,16 @@ class TestUniqueRepoRequirement:
         """
         Verify each tier has the expected unique repo requirement (all are 3).
         """
-        assert TIERS[Tier.BRONZE].required_unique_repos_merged_to == 3
-        assert TIERS[Tier.SILVER].required_unique_repos_merged_to == 3
-        assert TIERS[Tier.GOLD].required_unique_repos_merged_to == 3
+        assert TIERS[Tier.BRONZE].required_unique_repos_count == 3
+        assert TIERS[Tier.SILVER].required_unique_repos_count == 3
+        assert TIERS[Tier.GOLD].required_unique_repos_count == 3
 
     def test_exactly_at_unique_repo_threshold(self, pr_factory, bronze_config):
         """
         Tier unlocks when exactly at unique repo requirement.
         """
         bronze_tier_config = TIERS[Tier.BRONZE]
-        required_unique_repos = bronze_tier_config.required_unique_repos_merged_to
+        required_unique_repos = bronze_tier_config.required_unique_repos_count
 
         # Create exactly required number of unique repos
         merged = pr_factory.merged_batch(bronze_config, count=required_unique_repos, unique_repos=True)
@@ -819,7 +821,7 @@ class TestUniqueRepoRequirement:
         Tier stays locked when one below unique repo requirement.
         """
         bronze_tier_config = TIERS[Tier.BRONZE]
-        required_unique_repos = bronze_tier_config.required_unique_repos_merged_to
+        required_unique_repos = bronze_tier_config.required_unique_repos_count
 
         # Create one less than required unique repos
         merged = pr_factory.merged_batch(bronze_config, count=required_unique_repos - 1, unique_repos=True)
@@ -898,17 +900,19 @@ class TestUniqueRepoRequirement:
         silver_tier_config = TIERS[Tier.SILVER]
 
         # Bronze unlocked with unique repos
-        bronze_prs = pr_factory.merged_batch(bronze_config, count=bronze_tier_config.required_merges, unique_repos=True)
+        bronze_prs = pr_factory.merged_batch(
+            bronze_config, count=bronze_tier_config.required_unique_repos_count, unique_repos=True
+        )
 
         # Silver has enough merges but all to same repo
         silver_prs = pr_factory.merged_batch(
-            silver_config, count=silver_tier_config.required_merges
+            silver_config, count=silver_tier_config.required_unique_repos_count
         )  # No unique_repos=True
 
         stats = calculate_tier_stats(bronze_prs + silver_prs, [])
 
         assert is_tier_unlocked(Tier.BRONZE, stats) is True
-        assert stats[Tier.SILVER].merged_count >= silver_tier_config.required_merges
+        assert stats[Tier.SILVER].merged_count >= silver_tier_config.required_unique_repos_count
         assert stats[Tier.SILVER].unique_repo_contribution_count == 1
         assert is_tier_unlocked(Tier.SILVER, stats) is False
 
@@ -919,11 +923,30 @@ class TestUniqueRepoRequirement:
         bronze_tier_config = TIERS[Tier.BRONZE]
         silver_tier_config = TIERS[Tier.SILVER]
         gold_tier_config = TIERS[Tier.GOLD]
+        # Calculate token scores needed per PR to meet total requirements
+        silver_token_per_pr = (
+            silver_tier_config.required_min_token_score or 50.0
+        ) / silver_tier_config.required_unique_repos_count + 1.0
+        gold_token_per_pr = (
+            gold_tier_config.required_min_token_score or 150.0
+        ) / gold_tier_config.required_unique_repos_count + 1.0
 
-        # All tiers with unique repos
-        bronze_prs = pr_factory.merged_batch(bronze_config, count=bronze_tier_config.required_merges, unique_repos=True)
-        silver_prs = pr_factory.merged_batch(silver_config, count=silver_tier_config.required_merges, unique_repos=True)
-        gold_prs = pr_factory.merged_batch(gold_config, count=gold_tier_config.required_merges, unique_repos=True)
+        # All tiers with unique repos (with sufficient token scores)
+        bronze_prs = pr_factory.merged_batch(
+            bronze_config, count=bronze_tier_config.required_unique_repos_count, unique_repos=True
+        )
+        silver_prs = pr_factory.merged_batch(
+            silver_config,
+            count=silver_tier_config.required_unique_repos_count,
+            unique_repos=True,
+            token_score=silver_token_per_pr,
+        )
+        gold_prs = pr_factory.merged_batch(
+            gold_config,
+            count=gold_tier_config.required_unique_repos_count,
+            unique_repos=True,
+            token_score=gold_token_per_pr,
+        )
 
         stats = calculate_tier_stats(bronze_prs + silver_prs + gold_prs, [])
 
@@ -941,18 +964,21 @@ class TestUniqueRepoRequirement:
         silver_tier_config = TIERS[Tier.SILVER]
 
         # Bronze with unique repos
-        bronze_prs = pr_factory.merged_batch(bronze_config, count=bronze_tier_config.required_merges, unique_repos=True)
+        bronze_prs = pr_factory.merged_batch(
+            bronze_config, count=bronze_tier_config.required_unique_repos_count, unique_repos=True
+        )
 
         # Silver with same repo spam (using default repo which is 'test/repo')
         # Reset to ensure we're using the default repo
         silver_prs = [
-            pr_factory.merged(silver_config, repo='test/shared-repo') for _ in range(silver_tier_config.required_merges)
+            pr_factory.merged(silver_config, repo='test/shared-repo')
+            for _ in range(silver_tier_config.required_unique_repos_count)
         ]
 
         stats = calculate_tier_stats(bronze_prs + silver_prs, [])
 
         # Bronze has its unique repos
-        assert stats[Tier.BRONZE].unique_repo_contribution_count == bronze_tier_config.required_merges
+        assert stats[Tier.BRONZE].unique_repo_contribution_count == bronze_tier_config.required_unique_repos_count
         # Silver only has 1 unique repo (all to same repo)
         assert stats[Tier.SILVER].unique_repo_contribution_count == 1
         # Bronze unlocked, Silver locked
@@ -990,7 +1016,7 @@ class TestUniqueRepoEdgeCases:
         Having more unique repos than required still unlocks the tier.
         """
         bronze_tier_config = TIERS[Tier.BRONZE]
-        required_unique_repos = bronze_tier_config.required_unique_repos_merged_to
+        required_unique_repos = bronze_tier_config.required_unique_repos_count
 
         # Create many more unique repos than required
         merged = pr_factory.merged_batch(bronze_config, count=10, unique_repos=True)
@@ -1021,10 +1047,10 @@ class TestLowValuePRHandling:
         Merged PRs with low_value_pr=True should not count toward merge count.
         """
         bronze_tier_config = TIERS[Tier.BRONZE]
-        required_merges = bronze_tier_config.required_merges
+        required_repos = bronze_tier_config.required_unique_repos_count
 
         # Create normal merged PRs (unique repos)
-        normal_prs = pr_factory.merged_batch(bronze_config, count=required_merges - 1, unique_repos=True)
+        normal_prs = pr_factory.merged_batch(bronze_config, count=required_repos - 1, unique_repos=True)
 
         # Create low-value merged PRs
         low_value_prs = [pr_factory.merged(bronze_config, unique_repo=True, low_value_pr=True) for _ in range(5)]
@@ -1032,7 +1058,7 @@ class TestLowValuePRHandling:
         stats = calculate_tier_stats(normal_prs + low_value_prs, [])
 
         # Only normal PRs counted
-        assert stats[Tier.BRONZE].merged_count == required_merges - 1
+        assert stats[Tier.BRONZE].merged_count == required_repos - 1
         # Tier locked because we're 1 short of required merges
         assert is_tier_unlocked(Tier.BRONZE, stats) is False
 
@@ -1067,15 +1093,15 @@ class TestLowValuePRHandling:
         This is the asymmetry: low-value filter only applies to merged PRs.
         """
         bronze_tier_config = TIERS[Tier.BRONZE]
-        required_merges = bronze_tier_config.required_merges
+        required_repos = bronze_tier_config.required_unique_repos_count
         required_credibility = bronze_tier_config.required_credibility
 
         # Create enough normal merged PRs (unique repos)
-        merged = pr_factory.merged_batch(bronze_config, count=required_merges, unique_repos=True)
+        merged = pr_factory.merged_batch(bronze_config, count=required_repos, unique_repos=True)
 
         # Create low-value closed PRs to tank credibility
         # Calculate how many closed PRs to drop below credibility threshold
-        closed_count = int(required_merges * (1 - required_credibility) / required_credibility) + 2
+        closed_count = int(required_repos * (1 - required_credibility) / required_credibility) + 2
         closed = [pr_factory.closed(bronze_config, unique_repo=True, low_value_pr=True) for _ in range(closed_count)]
 
         stats = calculate_tier_stats(merged, closed)
@@ -1138,7 +1164,9 @@ class TestLowValuePRHandling:
         bronze_tier_config = TIERS[Tier.BRONZE]
 
         # Normal Bronze PRs (meets Bronze requirements)
-        bronze_prs = pr_factory.merged_batch(bronze_config, count=bronze_tier_config.required_merges, unique_repos=True)
+        bronze_prs = pr_factory.merged_batch(
+            bronze_config, count=bronze_tier_config.required_unique_repos_count, unique_repos=True
+        )
 
         # Mix of normal and low-value Silver PRs
         silver_normal = [pr_factory.merged(silver_config, repo=f'owner/silver-{i}') for i in range(2)]
@@ -1149,7 +1177,7 @@ class TestLowValuePRHandling:
         stats = calculate_tier_stats(bronze_prs + silver_normal + silver_low_value, [])
 
         # Bronze meets requirements
-        assert stats[Tier.BRONZE].merged_count >= bronze_tier_config.required_merges
+        assert stats[Tier.BRONZE].merged_count >= bronze_tier_config.required_unique_repos_count
         assert is_tier_unlocked(Tier.BRONZE, stats) is True
 
         # Silver only has 2 normal merges (low-value not counted)
@@ -1180,7 +1208,9 @@ class TestPRsWithoutTierConfig:
         bronze_tier_config = TIERS[Tier.BRONZE]
 
         # Normal PRs that meet requirements
-        normal_prs = pr_factory.merged_batch(bronze_config, count=bronze_tier_config.required_merges, unique_repos=True)
+        normal_prs = pr_factory.merged_batch(
+            bronze_config, count=bronze_tier_config.required_unique_repos_count, unique_repos=True
+        )
 
         # PRs without tier config (should be ignored)
         untracked_prs = [
@@ -1190,9 +1220,9 @@ class TestPRsWithoutTierConfig:
         stats = calculate_tier_stats(normal_prs + untracked_prs, [])
 
         # Only normal PRs counted
-        assert stats[Tier.BRONZE].merged_count == bronze_tier_config.required_merges
+        assert stats[Tier.BRONZE].merged_count == bronze_tier_config.required_unique_repos_count
         # Untracked repos don't add to unique count
-        assert stats[Tier.BRONZE].unique_repo_contribution_count == bronze_tier_config.required_merges
+        assert stats[Tier.BRONZE].unique_repo_contribution_count == bronze_tier_config.required_unique_repos_count
 
     def test_closed_pr_without_tier_not_counted(self, pr_factory, bronze_config):
         """
@@ -1203,7 +1233,9 @@ class TestPRsWithoutTierConfig:
         bronze_tier_config = TIERS[Tier.BRONZE]
 
         # Normal merged PRs
-        merged = pr_factory.merged_batch(bronze_config, count=bronze_tier_config.required_merges, unique_repos=True)
+        merged = pr_factory.merged_batch(
+            bronze_config, count=bronze_tier_config.required_unique_repos_count, unique_repos=True
+        )
 
         # Lots of closed PRs without tier config (should be ignored)
         untracked_closed = [
@@ -1227,7 +1259,9 @@ class TestPRsWithoutTierConfig:
 
         bronze_tier_config = TIERS[Tier.BRONZE]
 
-        merged = pr_factory.merged_batch(bronze_config, count=bronze_tier_config.required_merges, unique_repos=True)
+        merged = pr_factory.merged_batch(
+            bronze_config, count=bronze_tier_config.required_unique_repos_count, unique_repos=True
+        )
 
         # Open PRs without tier config
         untracked_open = [

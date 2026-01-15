@@ -7,16 +7,19 @@ from typing import Dict, Optional
 
 import bittensor as bt
 
-from gittensor.classes import Issue, MinerEvaluation, PRState, PullRequest
+from gittensor.classes import Issue, MinerEvaluation, PrScoringResult, PRState, PullRequest
 from gittensor.constants import (
+    DEFAULT_MERGED_PR_BASE_SCORE,
     EXCESSIVE_PR_MIN_MULTIPLIER,
     EXCESSIVE_PR_PENALTY_SLOPE,
     EXCESSIVE_PR_PENALTY_THRESHOLD,
     MAINTAINER_ASSOCIATIONS,
     MAINTAINER_ISSUE_BONUS,
+    MAX_CODE_DENSITY_MULTIPLIER,
     MAX_ISSUE_AGE_BONUS,
     MAX_ISSUE_AGE_FOR_MAX_SCORE,
     MAX_ISSUE_CLOSE_WINDOW_DAYS,
+    MIN_TOKEN_SCORE_FOR_BASE_SCORE,
     SECONDS_PER_DAY,
     SECONDS_PER_HOUR,
     TIME_DECAY_GRACE_PERIOD_HOURS,
@@ -25,7 +28,11 @@ from gittensor.constants import (
     TIME_DECAY_SIGMOID_STEEPNESS_SCALAR,
     UNIQUE_PR_BOOST,
 )
-from gittensor.utils.github_api_tools import get_pull_request_file_changes
+from gittensor.utils.github_api_tools import (
+    FileContentPair,
+    fetch_file_contents_with_base,
+    get_pull_request_file_changes,
+)
 from gittensor.validator.configurations.tier_config import (
     TIERS,
     TIERS_ORDER,
@@ -38,13 +45,15 @@ from gittensor.validator.evaluation.credibility import (
     calculate_tier_stats,
     is_tier_unlocked,
 )
-from gittensor.validator.utils.load_weights import RepositoryConfig
+from gittensor.validator.utils.load_weights import LanguageConfig, RepositoryConfig, TokenConfig
+from gittensor.validator.utils.tree_sitter_scoring import calculate_token_score_from_file_changes
 
 
 def score_miner_prs(
     miner_eval: MinerEvaluation,
     master_repositories: Dict[str, RepositoryConfig],
-    programming_languages: Dict[str, float],
+    programming_languages: Dict[str, LanguageConfig],
+    token_config: TokenConfig,
 ) -> None:
     """Score all pull requests for a miner."""
 
@@ -64,19 +73,15 @@ def score_miner_prs(
     for label, prs in pr_groups:
         for i, pr in enumerate(prs, start=1):
             bt.logging.info(f'\n[{i}/{len(prs)}] {label} PR #{pr.number} in {pr.repository_full_name}')
-            score_pull_request(
-                pr,
-                miner_eval,
-                master_repositories,
-                programming_languages,
-            )
+            score_pull_request(pr, miner_eval, master_repositories, programming_languages, token_config)
 
 
 def score_pull_request(
     pr: PullRequest,
     miner_eval: MinerEvaluation,
     master_repositories: Dict[str, RepositoryConfig],
-    programming_languages: Dict[str, float],
+    programming_languages: Dict[str, LanguageConfig],
+    token_config: TokenConfig,
 ) -> None:
     """Scores a single PR and assigns the PullRequest object tier config & other fields (low value, etc)."""
 
@@ -93,11 +98,38 @@ def score_pull_request(
             return
         pr.set_file_changes(file_changes)
 
-    pr.base_score = calculate_base_score(pr, programming_languages)
+    # Fetch full file contents for token-based scoring
+    file_contents = fetch_file_contents_for_pr(pr, miner_eval.github_pat)
+
+    pr.base_score = calculate_base_score(pr, programming_languages, token_config, file_contents)
     calculate_pr_multipliers(pr, miner_eval, master_repositories)
 
     if pr.pr_state == PRState.MERGED and not pr.low_value_pr:
         miner_eval.unique_repos_contributed_to.add(pr.repository_full_name)
+
+
+def fetch_file_contents_for_pr(pr: PullRequest, github_pat: str) -> Dict[str, FileContentPair]:
+    """Fetch both base and head file contents for all files in a PR using GraphQL batch fetch.
+
+    Returns:
+        Dict mapping filename to FileContentPair(old_content, new_content)
+        - old_content: File content before the PR (None for new files)
+        - new_content: File content after the PR (None for deleted files)
+    """
+    if not pr.file_changes or not pr.head_ref_oid or not pr.base_ref_oid:
+        return {}
+
+    # Extract owner and repo name
+    parts = pr.repository_full_name.split('/')
+    if len(parts) != 2:
+        bt.logging.warning(f'Invalid repository name format: {pr.repository_full_name}')
+        return {}
+
+    owner, repo_name = parts
+
+    return fetch_file_contents_with_base(
+        owner, repo_name, pr.base_ref_oid, pr.head_ref_oid, pr.file_changes, github_pat
+    )
 
 
 def get_tier_config(repo_full_name: str, master_repositories: Dict[str, RepositoryConfig]) -> Optional[TierConfig]:
@@ -112,23 +144,59 @@ def get_tier_config(repo_full_name: str, master_repositories: Dict[str, Reposito
     return tier_config
 
 
-def calculate_base_score(pr: PullRequest, programming_languages: Dict[str, float]) -> float:
-    """Calculate base score from tier base + contribution bonus."""
-    contribution_score, is_low_value_pr = pr.calculate_score_from_file_changes(programming_languages)
+def calculate_base_score(
+    pr: PullRequest,
+    programming_languages: Dict[str, LanguageConfig],
+    token_config: TokenConfig,
+    file_contents: Dict[str, FileContentPair],
+) -> float:
+    """Calculate base score using code density scaling + contribution bonus."""
+    scoring_result: PrScoringResult = calculate_token_score_from_file_changes(
+        pr.file_changes,
+        file_contents,
+        token_config,
+        programming_languages,
+    )
 
-    if is_low_value_pr:
-        bt.logging.warning(f'PR #{pr.number} is low-value (>90% test/comment/typo changes), base score = 0')
-        pr.low_value_pr = is_low_value_pr
-        return 0.0
+    pr.total_nodes_scored = scoring_result.total_nodes_scored
+    if scoring_result.score_breakdown:
+        pr.token_score = scoring_result.score_breakdown.total_score
+        pr.structural_count = scoring_result.score_breakdown.structural_count
+        pr.structural_score = scoring_result.score_breakdown.structural_score
+        pr.leaf_count = scoring_result.score_breakdown.leaf_count
+        pr.leaf_score = scoring_result.score_breakdown.leaf_score
 
+    # Calculate total lines changed across all files
+    total_lines = sum(f.total_lines for f in scoring_result.file_results)
+
+    # Check minimum token score threshold for base score. PRs below threshold get 0 base score
+    if pr.token_score < MIN_TOKEN_SCORE_FOR_BASE_SCORE:
+        code_density = 0.0
+        initial_base_score = 0.0
+    elif total_lines > 0:
+        # Calculate code density (token_score / total_lines), capped
+        code_density = min(pr.token_score / total_lines, MAX_CODE_DENSITY_MULTIPLIER)
+        initial_base_score = DEFAULT_MERGED_PR_BASE_SCORE * code_density
+    else:
+        code_density = 0.0
+        initial_base_score = 0.0
+
+    # Calculate contribution bonus, capped
     tier_config: TierConfig = pr.repository_tier_configuration
-
-    bonus_percent = min(1.0, contribution_score / tier_config.contribution_score_for_full_bonus)
+    bonus_percent = min(1.0, scoring_result.total_score / tier_config.contribution_score_for_full_bonus)
     contribution_bonus = round(bonus_percent * tier_config.contribution_score_max_bonus, 2)
-    base_score = tier_config.merged_pr_base_score + contribution_bonus
 
+    # Final base score = density-scaled base + contribution bonus
+    base_score = round(initial_base_score + contribution_bonus, 2)
+
+    # Log with note if below token threshold
+    threshold_note = (
+        f' [below {MIN_TOKEN_SCORE_FOR_BASE_SCORE} token threshold]'
+        if pr.token_score < MIN_TOKEN_SCORE_FOR_BASE_SCORE
+        else ''
+    )
     bt.logging.info(
-        f'Base score: {tier_config.merged_pr_base_score} + {contribution_bonus} bonus '
+        f'Base score: {initial_base_score:.2f} (density {code_density:.2f}){threshold_note} + {contribution_bonus} bonus '
         f'({bonus_percent * 100:.0f}% of max {tier_config.contribution_score_max_bonus}) = {base_score:.2f}'
     )
 
@@ -243,7 +311,14 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
             pr.calculate_final_earned_score()
             evaluation.base_total_score += pr.base_score
             evaluation.total_score += pr.earned_score
-            evaluation.total_lines_changed += pr.total_lines_scored
+            evaluation.total_nodes_scored += pr.total_nodes_scored
+
+            # Aggregate token scoring breakdown
+            evaluation.total_token_score += pr.token_score
+            evaluation.total_structural_count += pr.structural_count
+            evaluation.total_structural_score += pr.structural_score
+            evaluation.total_leaf_count += pr.leaf_count
+            evaluation.total_leaf_score += pr.leaf_score
 
         # Process open PRs for collateral
         for pr in evaluation.open_pull_requests:
@@ -256,6 +331,7 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
         evaluation.unique_repos_count = len(evaluation.unique_repos_contributed_to)
 
         # Calculate tier stats one more time now that scoring is fully applied (for logging + dashboard).
+        # This also calculates qualified_unique_repo_count per tier.
         tier_stats = calculate_tier_stats(
             merged_prs=evaluation.merged_pull_requests,
             closed_prs=evaluation.closed_pull_requests,
@@ -268,6 +344,9 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
             evaluation.stats_by_tier[tier] = tier_stats[tier]
             if is_tier_unlocked(tier, tier_stats):
                 evaluation.current_tier = tier
+
+        # Set overall qualified unique repos count (Bronze threshold is lowest, so use that for overall count)
+        evaluation.qualified_unique_repos_count = tier_stats[Tier.BRONZE].qualified_unique_repo_count
 
         # Determine next tier for display
         current_tier_str = evaluation.current_tier.value if evaluation.current_tier else 'None'

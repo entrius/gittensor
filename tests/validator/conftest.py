@@ -6,14 +6,6 @@ Pytest fixtures for validator tests.
 
 This module provides reusable fixtures for testing tier credibility,
 scoring, and other validator functionality.
-
-Usage:
-    Fixtures are automatically available in all test files under tests/validator/
-
-    # In your test file:
-    def test_something(pr_factory, bronze_config):
-        pr = pr_factory(state=PRState.MERGED, tier=bronze_config)
-        ...
 """
 
 from dataclasses import dataclass
@@ -96,6 +88,7 @@ class PRBuilder:
         repo: Optional[str] = None,
         unique_repo: bool = False,
         low_value_pr: bool = False,
+        token_score: Optional[float] = None,  # Auto-calculated from tier if None
     ) -> PullRequest:
         """Create a mock PullRequest with the given parameters.
 
@@ -104,7 +97,16 @@ class PRBuilder:
                          If False and repo is None, uses 'test/repo'.
             low_value_pr: If True, marks the PR as low-value (won't count toward
                           merge counts or unique repos for merged PRs).
+            token_score: Token score for this PR. If None, auto-calculates based on tier
+                         requirements to ensure the PR qualifies.
         """
+        # Auto-calculate token score if not specified - ensure it meets tier requirements
+        if token_score is None:
+            required_repos = tier.required_unique_repos_count or 3
+            min_per_repo = tier.required_min_token_score_per_repo or 5.0
+            min_total = tier.required_min_token_score or 0.0
+            # Each PR should contribute enough to meet both per-repo and total requirements
+            token_score = max(min_per_repo, min_total / required_repos) + 1.0
         if number is None:
             number = self._next_number()
 
@@ -126,6 +128,7 @@ class PRBuilder:
             earned_score=earned_score,
             collateral_score=collateral_score,
             low_value_pr=low_value_pr,
+            token_score=token_score,
         )
 
     def merged(self, tier: TierConfig, **kwargs) -> PullRequest:
@@ -249,98 +252,129 @@ def new_miner(pr_factory, bronze_config) -> MinerScenario:
 
 @pytest.fixture
 def bronze_miner(pr_factory, bronze_config) -> MinerScenario:
-    """Miner with Bronze unlocked (meets requirements with 100% credibility and unique repos)."""
+    """Miner with Bronze unlocked (meets requirements with 100% credibility and qualified unique repos)."""
     pr_factory.reset()
     bronze_tier_config = TIERS[Tier.BRONZE]
+    required_repos = bronze_tier_config.required_unique_repos_count or 3
     return MinerScenario(
-        merged=pr_factory.merged_batch(tier=bronze_config, count=bronze_tier_config.required_merges, unique_repos=True),
+        merged=pr_factory.merged_batch(tier=bronze_config, count=required_repos, unique_repos=True),
         closed=[],
         open=[],
-        description=f'Bronze miner: {bronze_tier_config.required_merges} merged to unique repos = 100% credibility',
+        description=f'Bronze miner: {required_repos} merged to unique repos = 100% credibility',
     )
 
 
 @pytest.fixture
 def silver_unlocked_miner(pr_factory, bronze_config, silver_config) -> MinerScenario:
-    """Miner who has unlocked Silver (Bronze and Silver requirements met with unique repos)."""
+    """Miner who has unlocked Silver (Bronze and Silver requirements met with qualified unique repos)."""
     pr_factory.reset()
     bronze_tier_config = TIERS[Tier.BRONZE]
     silver_tier_config = TIERS[Tier.SILVER]
+    bronze_repos = bronze_tier_config.required_unique_repos_count or 3
+    silver_repos = silver_tier_config.required_unique_repos_count or 3
+    # Ensure enough token score per PR to meet Silver's total token score requirement
+    silver_token_per_pr = (silver_tier_config.required_min_token_score or 50.0) / silver_repos + 1.0
     return MinerScenario(
         merged=(
-            pr_factory.merged_batch(tier=bronze_config, count=bronze_tier_config.required_merges, unique_repos=True)
-            + pr_factory.merged_batch(tier=silver_config, count=silver_tier_config.required_merges, unique_repos=True)
+            pr_factory.merged_batch(tier=bronze_config, count=bronze_repos, unique_repos=True)
+            + pr_factory.merged_batch(
+                tier=silver_config, count=silver_repos, unique_repos=True, token_score=silver_token_per_pr
+            )
         ),
         closed=[],
         open=[],
-        description='Silver miner: Bronze + Silver unlocked with 100% credibility and unique repos',
+        description='Silver miner: Bronze + Silver unlocked with 100% credibility and qualified repos',
     )
 
 
 @pytest.fixture
 def silver_threshold_miner(pr_factory, bronze_config, silver_config) -> MinerScenario:
-    """Miner exactly at Silver credibility threshold with unique repos."""
+    """Miner exactly at Silver credibility threshold with qualified repos."""
     pr_factory.reset()
     bronze_tier_config = TIERS[Tier.BRONZE]
     silver_tier_config = TIERS[Tier.SILVER]
-    required_merges = silver_tier_config.required_merges
+    bronze_repos = bronze_tier_config.required_unique_repos_count or 3
+    silver_repos = silver_tier_config.required_unique_repos_count or 3
     required_credibility = silver_tier_config.required_credibility
 
     # Calculate closed to be exactly at threshold
-    closed_count = int(required_merges * (1 - required_credibility) / required_credibility)
+    closed_count = int(silver_repos * (1 - required_credibility) / required_credibility)
+    # Ensure enough token score per PR to meet Silver's total token score requirement
+    silver_token_per_pr = (silver_tier_config.required_min_token_score or 50.0) / silver_repos + 1.0
 
     return MinerScenario(
         merged=(
-            pr_factory.merged_batch(tier=bronze_config, count=bronze_tier_config.required_merges, unique_repos=True)
-            + pr_factory.merged_batch(tier=silver_config, count=required_merges, unique_repos=True)
+            pr_factory.merged_batch(tier=bronze_config, count=bronze_repos, unique_repos=True)
+            + pr_factory.merged_batch(
+                tier=silver_config, count=silver_repos, unique_repos=True, token_score=silver_token_per_pr
+            )
         ),
         closed=pr_factory.closed_batch(tier=silver_config, count=closed_count, unique_repos=True),
         open=[],
-        description=f'Silver threshold: {required_merges} merged, {closed_count} closed = ~{required_credibility * 100}%',
+        description=f'Silver threshold: {silver_repos} merged, {closed_count} closed = ~{required_credibility * 100}%',
     )
 
 
 @pytest.fixture
 def gold_unlocked_miner(pr_factory, bronze_config, silver_config, gold_config) -> MinerScenario:
-    """Miner who has unlocked Gold tier (all tiers unlocked with unique repos)."""
+    """Miner who has unlocked Gold tier (all tiers unlocked with qualified repos)."""
     pr_factory.reset()
     bronze_tier_config = TIERS[Tier.BRONZE]
     silver_tier_config = TIERS[Tier.SILVER]
     gold_tier_config = TIERS[Tier.GOLD]
+    bronze_repos = bronze_tier_config.required_unique_repos_count or 3
+    silver_repos = silver_tier_config.required_unique_repos_count or 3
+    gold_repos = gold_tier_config.required_unique_repos_count or 3
+    # Ensure enough token score per PR to meet each tier's requirements
+    silver_token_per_pr = (silver_tier_config.required_min_token_score or 50.0) / silver_repos + 1.0
+    gold_token_per_pr = (gold_tier_config.required_min_token_score or 150.0) / gold_repos + 1.0
     return MinerScenario(
         merged=(
-            pr_factory.merged_batch(tier=bronze_config, count=bronze_tier_config.required_merges, unique_repos=True)
-            + pr_factory.merged_batch(tier=silver_config, count=silver_tier_config.required_merges, unique_repos=True)
-            + pr_factory.merged_batch(tier=gold_config, count=gold_tier_config.required_merges, unique_repos=True)
+            pr_factory.merged_batch(tier=bronze_config, count=bronze_repos, unique_repos=True)
+            + pr_factory.merged_batch(
+                tier=silver_config, count=silver_repos, unique_repos=True, token_score=silver_token_per_pr
+            )
+            + pr_factory.merged_batch(
+                tier=gold_config, count=gold_repos, unique_repos=True, token_score=gold_token_per_pr
+            )
         ),
         closed=[],
         open=[],
-        description='Gold miner: All tiers unlocked with 100% credibility and unique repos',
+        description='Gold miner: All tiers unlocked with 100% credibility and qualified repos',
     )
 
 
 @pytest.fixture
 def gold_threshold_miner(pr_factory, bronze_config, silver_config, gold_config) -> MinerScenario:
-    """Miner exactly at Gold credibility threshold with unique repos."""
+    """Miner exactly at Gold credibility threshold with qualified repos."""
     pr_factory.reset()
     bronze_tier_config = TIERS[Tier.BRONZE]
     silver_tier_config = TIERS[Tier.SILVER]
     gold_tier_config = TIERS[Tier.GOLD]
-    required_merges = gold_tier_config.required_merges
+    bronze_repos = bronze_tier_config.required_unique_repos_count or 3
+    silver_repos = silver_tier_config.required_unique_repos_count or 3
+    gold_repos = gold_tier_config.required_unique_repos_count or 3
     required_credibility = gold_tier_config.required_credibility
 
     # Calculate closed to be exactly at threshold
-    closed_count = int(required_merges * (1 - required_credibility) / required_credibility)
+    closed_count = int(gold_repos * (1 - required_credibility) / required_credibility)
+    # Ensure enough token score per PR to meet each tier's requirements
+    silver_token_per_pr = (silver_tier_config.required_min_token_score or 50.0) / silver_repos + 1.0
+    gold_token_per_pr = (gold_tier_config.required_min_token_score or 150.0) / gold_repos + 1.0
 
     return MinerScenario(
         merged=(
-            pr_factory.merged_batch(tier=bronze_config, count=bronze_tier_config.required_merges, unique_repos=True)
-            + pr_factory.merged_batch(tier=silver_config, count=silver_tier_config.required_merges, unique_repos=True)
-            + pr_factory.merged_batch(tier=gold_config, count=required_merges, unique_repos=True)
+            pr_factory.merged_batch(tier=bronze_config, count=bronze_repos, unique_repos=True)
+            + pr_factory.merged_batch(
+                tier=silver_config, count=silver_repos, unique_repos=True, token_score=silver_token_per_pr
+            )
+            + pr_factory.merged_batch(
+                tier=gold_config, count=gold_repos, unique_repos=True, token_score=gold_token_per_pr
+            )
         ),
         closed=pr_factory.closed_batch(tier=gold_config, count=closed_count, unique_repos=True),
         open=[],
-        description=f'Gold threshold: {required_merges} merged, {closed_count} closed = ~{required_credibility * 100}%',
+        description=f'Gold threshold: {gold_repos} merged, {closed_count} closed = ~{required_credibility * 100}%',
     )
 
 
@@ -356,21 +390,30 @@ def demoted_from_gold_miner(pr_factory, bronze_config, silver_config, gold_confi
     bronze_tier_config = TIERS[Tier.BRONZE]
     silver_tier_config = TIERS[Tier.SILVER]
     gold_tier_config = TIERS[Tier.GOLD]
-    gold_required = gold_tier_config.required_merges
+    bronze_repos = bronze_tier_config.required_unique_repos_count or 3
+    silver_repos = silver_tier_config.required_unique_repos_count or 3
+    gold_repos = gold_tier_config.required_unique_repos_count or 3
     gold_cred_required = gold_tier_config.required_credibility
 
     # Calculate closed to drop below Gold credibility requirement
-    closed_count = int(gold_required * (1 - gold_cred_required) / gold_cred_required) + 2
+    closed_count = int(gold_repos * (1 - gold_cred_required) / gold_cred_required) + 2
+    # Ensure enough token score per PR to meet each tier's requirements
+    silver_token_per_pr = (silver_tier_config.required_min_token_score or 50.0) / silver_repos + 1.0
+    gold_token_per_pr = (gold_tier_config.required_min_token_score or 150.0) / gold_repos + 1.0
 
     return MinerScenario(
         merged=(
-            pr_factory.merged_batch(tier=bronze_config, count=bronze_tier_config.required_merges, unique_repos=True)
-            + pr_factory.merged_batch(tier=silver_config, count=silver_tier_config.required_merges, unique_repos=True)
-            + pr_factory.merged_batch(tier=gold_config, count=gold_required, unique_repos=True)
+            pr_factory.merged_batch(tier=bronze_config, count=bronze_repos, unique_repos=True)
+            + pr_factory.merged_batch(
+                tier=silver_config, count=silver_repos, unique_repos=True, token_score=silver_token_per_pr
+            )
+            + pr_factory.merged_batch(
+                tier=gold_config, count=gold_repos, unique_repos=True, token_score=gold_token_per_pr
+            )
         ),
         closed=pr_factory.closed_batch(tier=gold_config, count=closed_count, unique_repos=True),
         open=[],
-        description=f'Demoted from Gold: {gold_required}/{gold_required + closed_count} (below {gold_cred_required * 100}% threshold)',
+        description=f'Demoted from Gold: {gold_repos}/{gold_repos + closed_count} (below {gold_cred_required * 100}% threshold)',
     )
 
 
@@ -380,44 +423,55 @@ def demoted_from_silver_miner(pr_factory, bronze_config, silver_config) -> Miner
     pr_factory.reset()
     bronze_tier_config = TIERS[Tier.BRONZE]
     silver_tier_config = TIERS[Tier.SILVER]
-    silver_required = silver_tier_config.required_merges
+    bronze_repos = bronze_tier_config.required_unique_repos_count or 3
+    silver_repos = silver_tier_config.required_unique_repos_count or 3
     silver_cred_required = silver_tier_config.required_credibility
 
     # Calculate closed to drop below Silver credibility requirement
-    closed_count = int(silver_required * (1 - silver_cred_required) / silver_cred_required) + 2
+    closed_count = int(silver_repos * (1 - silver_cred_required) / silver_cred_required) + 2
+    # Ensure enough token score per PR to meet Silver's requirements
+    silver_token_per_pr = (silver_tier_config.required_min_token_score or 50.0) / silver_repos + 1.0
 
     return MinerScenario(
         merged=(
-            pr_factory.merged_batch(tier=bronze_config, count=bronze_tier_config.required_merges, unique_repos=True)
-            + pr_factory.merged_batch(tier=silver_config, count=silver_required, unique_repos=True)
+            pr_factory.merged_batch(tier=bronze_config, count=bronze_repos, unique_repos=True)
+            + pr_factory.merged_batch(
+                tier=silver_config, count=silver_repos, unique_repos=True, token_score=silver_token_per_pr
+            )
         ),
         closed=pr_factory.closed_batch(tier=silver_config, count=closed_count, unique_repos=True),
         open=[],
-        description=f'Demoted from Silver: {silver_required}/{silver_required + closed_count} (below {silver_cred_required * 100}% threshold)',
+        description=f'Demoted from Silver: {silver_repos}/{silver_repos + closed_count} (below {silver_cred_required * 100}% threshold)',
     )
 
 
 @pytest.fixture
 def cascade_demoted_miner(pr_factory, bronze_config, silver_config, gold_config) -> MinerScenario:
-    """Miner with perfect Gold stats but Silver is locked (cascade demotion due to not enough merges)."""
+    """Miner with perfect Gold stats but Silver is locked (cascade demotion due to not enough qualified repos)."""
     pr_factory.reset()
     bronze_tier_config = TIERS[Tier.BRONZE]
     silver_tier_config = TIERS[Tier.SILVER]
     gold_tier_config = TIERS[Tier.GOLD]
+    bronze_repos = bronze_tier_config.required_unique_repos_count or 3
+    silver_repos = silver_tier_config.required_unique_repos_count or 3
+    gold_repos = gold_tier_config.required_unique_repos_count or 3
+    gold_token_per_pr = (gold_tier_config.required_min_token_score or 150.0) / gold_repos + 1.0
+    # Silver has low token scores - below the per-repo requirement
+    silver_low_token = (silver_tier_config.required_min_token_score_per_repo or 10.0) - 5.0
 
     return MinerScenario(
         merged=(
-            pr_factory.merged_batch(tier=bronze_config, count=bronze_tier_config.required_merges, unique_repos=True)
+            pr_factory.merged_batch(tier=bronze_config, count=bronze_repos, unique_repos=True)
             + pr_factory.merged_batch(
-                tier=silver_config, count=silver_tier_config.required_merges - 1, unique_repos=True
-            )  # One short
+                tier=silver_config, count=silver_repos, unique_repos=True, token_score=silver_low_token
+            )  # Low token score - doesn't qualify
             + pr_factory.merged_batch(
-                tier=gold_config, count=gold_tier_config.required_merges + 5, unique_repos=True
+                tier=gold_config, count=gold_repos + 5, unique_repos=True, token_score=gold_token_per_pr
             )  # Perfect Gold
         ),
         closed=[],
         open=[],
-        description='Cascade demotion: Silver locked (1 merge short) -> Gold locked despite 100%',
+        description='Cascade demotion: Silver locked (low token score repos) -> Gold locked despite 100%',
     )
 
 
@@ -509,32 +563,51 @@ def empty_tier_stats() -> dict:
 
 
 def _unlocked_bronze_stats() -> TierStats:
-    """Helper to create Bronze stats that meet unlock requirements (including unique repos)."""
+    """Helper to create Bronze stats that meet unlock requirements (including qualified repos)."""
     bronze_config = TIERS[Tier.BRONZE]
+    required_repos = bronze_config.required_unique_repos_count or 3
+    token_per_repo = bronze_config.required_min_token_score_per_repo or 5.0
+    total_token_score = required_repos * token_per_repo  # Enough token score to meet requirements
     return TierStats(
-        merged_count=bronze_config.required_merges,
+        merged_count=required_repos,
         closed_count=0,
-        unique_repo_contribution_count=bronze_config.required_unique_repos_merged_to,
+        unique_repo_contribution_count=required_repos,
+        qualified_unique_repo_count=required_repos,
+        token_score=total_token_score,
     )
 
 
 def _unlocked_silver_stats() -> TierStats:
-    """Helper to create Silver stats that meet unlock requirements (including unique repos)."""
+    """Helper to create Silver stats that meet unlock requirements (including qualified repos)."""
     silver_config = TIERS[Tier.SILVER]
+    required_repos = silver_config.required_unique_repos_count or 3
+    token_per_repo = silver_config.required_min_token_score_per_repo or 10.0
+    # Silver requires 50.0 total token score, so we ensure that's met
+    min_total = silver_config.required_min_token_score or 50.0
+    total_token_score = max(required_repos * token_per_repo, min_total)
     return TierStats(
-        merged_count=silver_config.required_merges,
+        merged_count=required_repos,
         closed_count=0,
-        unique_repo_contribution_count=silver_config.required_unique_repos_merged_to,
+        unique_repo_contribution_count=required_repos,
+        qualified_unique_repo_count=required_repos,
+        token_score=total_token_score,
     )
 
 
 def _unlocked_gold_stats() -> TierStats:
-    """Helper to create Gold stats that meet unlock requirements (including unique repos)."""
+    """Helper to create Gold stats that meet unlock requirements (including qualified repos)."""
     gold_config = TIERS[Tier.GOLD]
+    required_repos = gold_config.required_unique_repos_count or 3
+    token_per_repo = gold_config.required_min_token_score_per_repo or 25.0
+    # Gold requires 150.0 total token score, so we ensure that's met
+    min_total = gold_config.required_min_token_score or 150.0
+    total_token_score = max(required_repos * token_per_repo, min_total)
     return TierStats(
-        merged_count=gold_config.required_merges,
+        merged_count=required_repos,
         closed_count=0,
-        unique_repo_contribution_count=gold_config.required_unique_repos_merged_to,
+        unique_repo_contribution_count=required_repos,
+        qualified_unique_repo_count=required_repos,
+        token_score=total_token_score,
     )
 
 
@@ -562,14 +635,20 @@ def gold_unlocked_stats() -> dict:
 def gold_locked_stats() -> dict:
     """TierStats where Gold is locked (below credibility requirement)."""
     gold_config = TIERS[Tier.GOLD]
-    required_merges = gold_config.required_merges
+    required_repos = gold_config.required_unique_repos_count or 3
     required_credibility = gold_config.required_credibility
 
     # Calculate closed count to be just below credibility threshold
-    closed_count = int(required_merges * (1 - required_credibility) / required_credibility) + 1
+    closed_count = int(required_repos * (1 - required_credibility) / required_credibility) + 1
 
     return {
         Tier.BRONZE: _unlocked_bronze_stats(),
         Tier.SILVER: _unlocked_silver_stats(),
-        Tier.GOLD: TierStats(merged_count=required_merges, closed_count=closed_count),
+        Tier.GOLD: TierStats(
+            merged_count=required_repos,
+            closed_count=closed_count,
+            unique_repo_contribution_count=required_repos,
+            qualified_unique_repo_count=required_repos,
+            token_score=gold_config.required_min_token_score or 150.0,
+        ),
     }

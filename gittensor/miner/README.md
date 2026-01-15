@@ -209,7 +209,7 @@ python neurons/miner.py --wallet.name <wallet> --wallet.hotkey <hotkey> --netuid
 
 ### Work on recognized repositories
 
-- see all recognized repositories [here](https://gittensor.io/repositories)
+- see all recognized repositories [here](https://gittensor.io/onboard?tab=repositories)
 
 - Miners receive score once their pull request to a recognized repository becomes accepted and merged
 

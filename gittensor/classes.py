@@ -7,12 +7,6 @@ from typing import DefaultDict, Dict, List, Optional, Set
 
 import bittensor as bt
 
-from gittensor.constants import (
-    DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT,
-    MAX_LINES_SCORED_FOR_MITIGATED_EXT,
-    MITIGATED_EXTENSIONS,
-    TEST_FILE_CONTRIBUTION_WEIGHT,
-)
 from gittensor.utils.utils import parse_repo_name
 from gittensor.validator.configurations.tier_config import Tier, TierConfig, TierStats
 
@@ -62,9 +56,10 @@ class FileChange:
     changes: int
     additions: int
     deletions: int
-    status: str  # "added", "modified", "removed", etc.
+    status: str  # "added", "modified", "removed", "renamed", etc.
     patch: Optional[str] = None  # The actual diff content
     file_extension: Optional[str] = None
+    previous_filename: Optional[str] = None  # For renamed files
 
     @property
     def short_name(self) -> str:
@@ -115,6 +110,7 @@ class FileChange:
             deletions=file_diff['deletions'],
             status=file_diff['status'],
             patch=file_diff.get('patch'),
+            previous_filename=file_diff.get('previous_filename'),
         )
 
 
@@ -173,75 +169,26 @@ class PullRequest:
     additions: int = 0
     deletions: int = 0
     commits: int = 0
-    total_lines_scored: int = 0
+    total_nodes_scored: int = 0  # Total AST nodes scored for this PR
     gittensor_tagged: bool = False
+
+    # Token scoring breakdown (after test weight applied)
+    token_score: float = 0.0
+    structural_count: int = 0
+    structural_score: float = 0.0
+    leaf_count: int = 0
+    leaf_score: float = 0.0
     merged_by_login: Optional[str] = None
     file_changes: Optional[List[FileChange]] = None
     issues: Optional[List[Issue]] = None
     description: Optional[str] = None
     last_edited_at: Optional[datetime] = None
+    head_ref_oid: Optional[str] = None
+    base_ref_oid: Optional[str] = None
 
     def set_file_changes(self, file_changes: List[FileChange]) -> None:
         """Set the file changes for this pull request"""
         self.file_changes = file_changes
-
-    def calculate_score_from_file_changes(self, programming_languages: Dict[str, float]) -> tuple[float, bool]:
-        """Calculate the score for a single PR based on its file changes.
-
-        Returns:
-            tuple[float, bool]: (score, is_low_value_pr) where is_low_value_pr is True
-            if >90% of changes are test files or non-scoreable lines (comments/typos).
-        """
-        from gittensor.validator.utils.spam_detection import count_non_scoreable_lines
-
-        if not self.file_changes:
-            return 0.0, True
-
-        pr_contribution_score = 0.0
-        total_raw_changes = 0
-        substantive_changes = 0
-        file_details = []
-
-        for file in self.file_changes:
-            language_weight = programming_languages.get(file.file_extension, DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT)
-
-            total_changes_to_score = file.changes
-            if file.file_extension in MITIGATED_EXTENSIONS:
-                total_changes_to_score = min(file.changes, MAX_LINES_SCORED_FOR_MITIGATED_EXT)
-
-            total_raw_changes += total_changes_to_score
-
-            non_scoreable_lines = count_non_scoreable_lines(file.patch, total_changes_to_score, file.file_extension)
-            scored_changes = max(0, total_changes_to_score - non_scoreable_lines)
-
-            self.total_lines_scored += scored_changes
-            is_test_file = file.is_test_file()
-            file_weight = TEST_FILE_CONTRIBUTION_WEIGHT if is_test_file else 1.0
-
-            is_substantive_file = not is_test_file and file.file_extension not in MITIGATED_EXTENSIONS
-
-            if is_substantive_file:
-                substantive_changes += scored_changes
-
-            file_score = language_weight * file_weight * scored_changes
-            pr_contribution_score += file_score
-
-            file_details.append((file.short_name, scored_changes, file.changes, file_score, is_test_file))
-
-        substantive_ratio = substantive_changes / total_raw_changes if total_raw_changes > 0 else 0
-        is_low_value_pr = substantive_ratio < 0.1
-
-        # Log & return
-        bt.logging.debug(f'  ├─ Files ({len(self.file_changes)} changes):')
-        max_name_len = max(len(f[0]) for f in file_details) if file_details else 0
-        for name, scored, total, score, is_test in file_details:
-            test_mark = ' [test]' if is_test else ''
-            bt.logging.debug(f'  │   {name:<{max_name_len}}  {scored:>3}/{total:<3} lines  {score:>6.2f}{test_mark}')
-        bt.logging.info(
-            f'  ├─ Contribution: {pr_contribution_score:.2f} | Substantive: {substantive_changes}/{total_raw_changes} ({substantive_ratio * 100:.0f}%)'
-        )
-
-        return pr_contribution_score, is_low_value_pr
 
     def calculate_final_earned_score(self) -> float:
         """Combine base score with all multipliers."""
@@ -340,6 +287,8 @@ class PullRequest:
             description=description,
             last_edited_at=last_edited_at,
             gittensor_tagged=gittensor_tagged,
+            head_ref_oid=pr_data.get('headRefOid'),
+            base_ref_oid=pr_data.get('baseRefOid'),
         )
 
 
@@ -352,8 +301,16 @@ class MinerEvaluation:
     base_total_score: float = 0.0
     total_score: float = 0.0
     total_collateral_score: float = 0.0  # Collateral from open PRs
-    total_lines_changed: int = 0
+    total_nodes_scored: int = 0  # Total AST nodes scored across all PRs
     unique_repos_count: int = 0
+    qualified_unique_repos_count: int = 0  # Repos meeting min token score threshold
+
+    # Overall token scoring breakdown (aggregated across all PRs)
+    total_token_score: float = 0.0
+    total_structural_count: int = 0
+    total_structural_score: float = 0.0
+    total_leaf_count: int = 0
+    total_leaf_score: float = 0.0
     failed_reason: Optional[str] = None
     evaluation_timestamp: Optional[datetime] = None
     merged_pull_requests: List[PullRequest] = field(default_factory=list)
@@ -420,3 +377,133 @@ class MinerEvaluation:
         self.closed_pull_requests.append(
             PullRequest.from_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id)
         )
+
+
+@dataclass
+class ScoreBreakdown:
+    """Breakdown of scores by type (structural vs leaf) and change type (added vs deleted).
+
+    With tree-diff scoring, we track nodes that differ between old and new ASTs:
+    - Added: nodes in new tree but not in old tree
+    - Deleted: nodes in old tree but not in new tree
+
+    Both additions and deletions represent meaningful work and are scored.
+    """
+
+    # Structural changes (function/class definitions, control flow, etc.)
+    structural_added_count: int = 0
+    structural_added_score: float = 0.0
+    structural_deleted_count: int = 0
+    structural_deleted_score: float = 0.0
+
+    # Leaf token changes (identifiers, literals, operators, etc.)
+    leaf_added_count: int = 0
+    leaf_added_score: float = 0.0
+    leaf_deleted_count: int = 0
+    leaf_deleted_score: float = 0.0
+
+    @property
+    def total_score(self) -> float:
+        """Total score for this file"""
+        return (
+            self.structural_added_score
+            + self.structural_deleted_score
+            + self.leaf_added_score
+            + self.leaf_deleted_score
+        )
+
+    @property
+    def structural_count(self) -> int:
+        """Total structural changes (added + deleted)."""
+        return self.structural_added_count + self.structural_deleted_count
+
+    @property
+    def structural_score(self) -> float:
+        """Total structural score (added + deleted)."""
+        return self.structural_added_score + self.structural_deleted_score
+
+    @property
+    def leaf_count(self) -> int:
+        """Total leaf changes (added + deleted)."""
+        return self.leaf_added_count + self.leaf_deleted_count
+
+    @property
+    def leaf_score(self) -> float:
+        """Total leaf score (added + deleted)."""
+        return self.leaf_added_score + self.leaf_deleted_score
+
+    @property
+    def added_count(self) -> int:
+        """Total added nodes (structural + leaf)."""
+        return self.structural_added_count + self.leaf_added_count
+
+    @property
+    def added_score(self) -> float:
+        """Total score from additions."""
+        return self.structural_added_score + self.leaf_added_score
+
+    @property
+    def deleted_count(self) -> int:
+        """Total deleted nodes (structural + leaf)."""
+        return self.structural_deleted_count + self.leaf_deleted_count
+
+    @property
+    def deleted_score(self) -> float:
+        """Total score from deletions."""
+        return self.structural_deleted_score + self.leaf_deleted_score
+
+    def with_weight(self, weight: float) -> 'ScoreBreakdown':
+        """Return new ScoreBreakdown with scores multiplied by weight (counts unchanged)."""
+        return ScoreBreakdown(
+            structural_added_count=self.structural_added_count,
+            structural_added_score=self.structural_added_score * weight,
+            structural_deleted_count=self.structural_deleted_count,
+            structural_deleted_score=self.structural_deleted_score * weight,
+            leaf_added_count=self.leaf_added_count,
+            leaf_added_score=self.leaf_added_score * weight,
+            leaf_deleted_count=self.leaf_deleted_count,
+            leaf_deleted_score=self.leaf_deleted_score * weight,
+        )
+
+    def __add__(self, other: 'ScoreBreakdown') -> 'ScoreBreakdown':
+        """Sum two breakdowns together.
+
+        Enables: sum(breakdowns, start=ScoreBreakdown())
+        """
+        return ScoreBreakdown(
+            structural_added_count=self.structural_added_count + other.structural_added_count,
+            structural_added_score=self.structural_added_score + other.structural_added_score,
+            structural_deleted_count=self.structural_deleted_count + other.structural_deleted_count,
+            structural_deleted_score=self.structural_deleted_score + other.structural_deleted_score,
+            leaf_added_count=self.leaf_added_count + other.leaf_added_count,
+            leaf_added_score=self.leaf_added_score + other.leaf_added_score,
+            leaf_deleted_count=self.leaf_deleted_count + other.leaf_deleted_count,
+            leaf_deleted_score=self.leaf_deleted_score + other.leaf_deleted_score,
+        )
+
+
+@dataclass
+class FileScoreResult:
+    """Result of scoring a single file."""
+
+    filename: str
+    score: float
+    nodes_scored: int  # Number of AST nodes scored (for tree-diff) or lines (for line-count)
+    total_lines: int
+    is_test_file: bool
+    scoring_method: str  # 'tree-diff', 'line-count', 'skipped-*'
+    breakdown: Optional[ScoreBreakdown] = None  # Only populated for tree-diff scoring
+
+
+@dataclass
+class PrScoringResult:
+    """Result of scoring a pull request.
+
+    Contains aggregate metrics for the PR, including total score and per-file details.
+    """
+
+    total_score: float
+    is_low_value_pr: bool
+    total_nodes_scored: int  # Total AST nodes scored across all files
+    file_results: List[FileScoreResult]
+    score_breakdown: Optional[ScoreBreakdown] = None  # Aggregated breakdown across all files

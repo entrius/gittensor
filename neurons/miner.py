@@ -8,6 +8,7 @@ import typing
 import bittensor as bt
 
 from gittensor.miner import token_mgmt
+from gittensor.miner.issue_prefs import load_issue_preferences
 from gittensor.synapses import GitPatSynapse
 from neurons.base.miner import BaseMinerNeuron
 
@@ -22,18 +23,26 @@ class Miner(BaseMinerNeuron):
 
     async def forward(self, synapse: GitPatSynapse) -> GitPatSynapse:
         """
-        Processes the incoming GitPatSynapse by loading GitHub access token.
+        Processes the incoming GitPatSynapse by loading GitHub access token
+        and issue preferences.
 
         Args:
             synapse (GitPatSynapse): The synapse object representing the token request.
 
         Returns:
-            GitPatSynapse: The same synapse object with the GitHub access token set.
+            GitPatSynapse: The synapse with GitHub token and issue preferences set.
         """
-
+        # Load GitHub token
         github_token = token_mgmt.load_token()
         synapse.github_access_token = github_token
+
+        # Load issue preferences from local config
+        # Set via: gittensor-cli issue prefer <id1> <id2> ...
+        synapse.issue_preferences = load_issue_preferences()
+
         bt.logging.debug(f'synapse received from hotkey: {synapse.axon.hotkey}')
+        if synapse.issue_preferences:
+            bt.logging.debug(f'serving issue preferences: {synapse.issue_preferences}')
 
         return synapse
 

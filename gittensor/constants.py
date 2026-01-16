@@ -92,20 +92,13 @@ DEFAULT_COLLATERAL_PERCENT = 0.20
 # =============================================================================
 RECYCLE_UID = 0
 
-DEFAULT_FIXED_RECYCLE_RATE = 0.50
-DYNAMIC_EMISSIONS_BUFFER_DAYS = 45  # After 45 days of launching tier based IM, we will restore dynamic emissions
+# Network emission scaling (unique repos)
+UNIQUE_REPOS_MAX_RECYCLE = 0.9
+UNIQUE_REPOS_RECYCLE_DECAY_RATE = 0.006
 
-# Network emission scaling (lines contributed)
-LINES_CONTRIBUTED_MAX_RECYCLE = 0.9
-LINES_CONTRIBUTED_RECYCLE_DECAY_RATE = 0.000005
-
-# Network emission scaling (total merged prs)
-MERGED_PRS_MAX_RECYCLE = 0.9
-MERGED_PRS_RECYCLE_DECAY_RATE = 0.0015
-
-# Network emission scaling (unique PRs)
-UNIQUE_PRS_MAX_RECYCLE = 0.9
-UNIQUE_PRS_RECYCLE_DECAY_RATE = 0.006
+# Network emission scaling (total token score from tiered miners)
+TOKEN_SCORE_MAX_RECYCLE = 0.9
+TOKEN_SCORE_RECYCLE_DECAY_RATE = 0.000016  # ~35% release at 20k tokens
 
 # =============================================================================
 # Low-Value PR Detection (Tiered Thresholds)

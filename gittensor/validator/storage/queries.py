@@ -15,9 +15,9 @@ INSERT INTO pull_requests (
     merged_at, pr_created_at, pr_state,
     repo_weight_multiplier, base_score, issue_multiplier,
     open_pr_spam_multiplier, repository_uniqueness_multiplier, time_decay_multiplier,
-    gittensor_tag_multiplier, credibility_multiplier, raw_credibility, credibility_scalar,
+    credibility_multiplier, raw_credibility, credibility_scalar,
     earned_score, collateral_score,
-    additions, deletions, commits, total_nodes_scored, gittensor_tagged, low_value_pr,
+    additions, deletions, commits, total_nodes_scored, low_value_pr,
     merged_by_login, description, last_edited_at,
     token_score, structural_count, structural_score, leaf_count, leaf_score
 ) VALUES %s
@@ -35,7 +35,6 @@ DO UPDATE SET
     open_pr_spam_multiplier = EXCLUDED.open_pr_spam_multiplier,
     repository_uniqueness_multiplier = EXCLUDED.repository_uniqueness_multiplier,
     time_decay_multiplier = EXCLUDED.time_decay_multiplier,
-    gittensor_tag_multiplier = EXCLUDED.gittensor_tag_multiplier,
     credibility_multiplier = EXCLUDED.credibility_multiplier,
     raw_credibility = EXCLUDED.raw_credibility,
     credibility_scalar = EXCLUDED.credibility_scalar,
@@ -45,7 +44,6 @@ DO UPDATE SET
     deletions = EXCLUDED.deletions,
     commits = EXCLUDED.commits,
     total_nodes_scored = EXCLUDED.total_nodes_scored,
-    gittensor_tagged = EXCLUDED.gittensor_tagged,
     low_value_pr = EXCLUDED.low_value_pr,
     merged_by_login = EXCLUDED.merged_by_login,
     description = EXCLUDED.description,

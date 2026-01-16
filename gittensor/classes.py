@@ -158,7 +158,6 @@ class PullRequest:
     open_pr_spam_multiplier: float = 1.0
     repository_uniqueness_multiplier: float = 1.0
     time_decay_multiplier: float = 1.0
-    gittensor_tag_multiplier: float = 1.0
     credibility_multiplier: float = 1.0
     raw_credibility: float = 1.0  # Before applying ^k scalar
     credibility_scalar: int = 1  # The k value from tier config
@@ -170,7 +169,6 @@ class PullRequest:
     deletions: int = 0
     commits: int = 0
     total_nodes_scored: int = 0  # Total AST nodes scored for this PR
-    gittensor_tagged: bool = False
 
     # Token scoring breakdown (after test weight applied)
     token_score: float = 0.0
@@ -198,7 +196,6 @@ class PullRequest:
             'spam': self.open_pr_spam_multiplier,
             'unique': self.repository_uniqueness_multiplier,
             'decay': self.time_decay_multiplier,
-            'tag': self.gittensor_tag_multiplier,
             'cred': self.credibility_multiplier,
         }
 
@@ -219,7 +216,6 @@ class PullRequest:
     @classmethod
     def from_graphql_response(cls, pr_data: dict, uid: int, hotkey: str, github_id: str) -> 'PullRequest':
         """Create PullRequest from GraphQL API response for any PR state."""
-        from gittensor.constants import GITTENSOR_MINER_DETAILS_URL, PR_TAGLINE_PREFIX
         from gittensor.validator.utils.datetime_utils import parse_github_timestamp_to_cst
 
         repository_full_name = parse_repo_name(pr_data['repository'])
@@ -252,22 +248,6 @@ class PullRequest:
         )
         merged_at = parse_github_timestamp_to_cst(pr_data['mergedAt']) if is_merged else None
 
-        # Gittensor tag detection - validates tagline contains correct miner URL
-        gittensor_tagged = False
-        if description:
-            expected_tagline = f'{PR_TAGLINE_PREFIX}{GITTENSOR_MINER_DETAILS_URL}{github_id}'
-            description_end = description[-150:].strip().rstrip('.,!?;: \t\n')
-            if description_end.lower().endswith(expected_tagline.lower()):
-                if is_merged:
-                    gittensor_tagged = last_edited_at is None or last_edited_at <= merged_at
-                    if not gittensor_tagged:
-                        bt.logging.warning(
-                            f'PR #{pr_data["number"]} in {repository_full_name} has Gittensor tagline but was edited after merge '
-                            f'(merged: {merged_at.isoformat()}, last edited: {last_edited_at.isoformat()})'
-                        )
-                else:
-                    gittensor_tagged = True
-
         return cls(
             number=pr_data['number'],
             repository_full_name=repository_full_name,
@@ -286,7 +266,6 @@ class PullRequest:
             issues=issues if issues else None,
             description=description,
             last_edited_at=last_edited_at,
-            gittensor_tagged=gittensor_tagged,
             head_ref_oid=pr_data.get('headRefOid'),
             base_ref_oid=pr_data.get('baseRefOid'),
         )

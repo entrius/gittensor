@@ -16,12 +16,6 @@ MIN_GITHUB_ACCOUNT_AGE = 180  # days
 MAX_FILE_SIZE_BYTES = 1_000_000
 
 # =============================================================================
-# Gittensor Branding
-# =============================================================================
-PR_TAGLINE_PREFIX = 'Contribution by Gittensor, see my contribution statistics at '
-GITTENSOR_MINER_DETAILS_URL = 'https://gittensor.io/miners/details?githubId='
-
-# =============================================================================
 # Language & File Scoring
 # =============================================================================
 DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT = 0.12

@@ -212,7 +212,6 @@ def calculate_pr_multipliers(
 
     pr.repo_weight_multiplier = round(repo_config.weight if repo_config else 0.01, 2)
     pr.issue_multiplier = round(calculate_issue_multiplier(pr), 2)
-    pr.gittensor_tag_multiplier = 1.0 if pr.gittensor_tagged else 0.0
 
     if is_merged:
         pr.open_pr_spam_multiplier = round(calculate_pr_spam_penalty_multiplier(miner_eval.total_open_prs), 2)
@@ -488,7 +487,7 @@ def calculate_open_pr_collateral_score(pr: PullRequest) -> float:
 
     Applicable multipliers: repo_weight, issue
     NOT applicable: time_decay (merge-based), credibility_multiplier (merge-based),
-                    uniqueness (cross-miner), open_pr_spam (not for collateral), gittensor_tag (exploitable)
+                    uniqueness (cross-miner), open_pr_spam (not for collateral)
     """
     from math import prod
 

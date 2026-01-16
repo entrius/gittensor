@@ -29,7 +29,20 @@ See full guide **[here](https://docs.gittensor.io/miner.html)**
 
 ## Validators
 
-See full guide **[here](https://docs.gittensor.io/validator.html)**
+**Recommended: Deploy with Docker for automatic updates**
+
+```bash
+# Quick start
+git clone https://github.com/entrius/gittensor.git
+cd gittensor
+cp env.example .env
+# Edit .env with your wallet details and WANDB_API_KEY
+docker-compose up -d
+```
+
+Your validator will automatically update within 5 minutes of any push to main.
+
+See full guide **[here](https://docs.gittensor.io/validator.html)** | [Docker deployment docs](docs/DOCKER.md)
 
 ## Scoring & Rewards
 

@@ -1,5 +1,35 @@
 #!/bin/bash
 
+# ============================================================================
+# DEPRECATION NOTICE
+# ============================================================================
+# This script is DEPRECATED and will be removed in a future release.
+#
+# Please migrate to Docker deployment for automatic updates:
+#   cp env.example .env
+#   # Edit .env with your configuration
+#   docker-compose up -d
+#
+# See docs/DOCKER.md for full documentation.
+# ============================================================================
+
+echo ""
+echo "⚠️  DEPRECATION WARNING"
+echo "============================================================================"
+echo "This script (run_validator.sh) is deprecated."
+echo ""
+echo "Please migrate to Docker deployment for automatic updates:"
+echo "  cp env.example .env"
+echo "  # Edit .env with your configuration"
+echo "  docker-compose up -d"
+echo ""
+echo "See docs/DOCKER.md for full documentation."
+echo "============================================================================"
+echo ""
+echo "Continuing with PM2-based startup in 5 seconds..."
+echo "(Press Ctrl+C to cancel)"
+sleep 5
+
 # Exit on error
 set -e
 

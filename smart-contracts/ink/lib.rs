@@ -1,0 +1,1307 @@
+#![cfg_attr(not(feature = "std"), no_std, no_main)]
+
+mod errors;
+mod events;
+mod types;
+
+pub use errors::Error;
+pub use types::*;
+
+#[ink::contract]
+mod issue_bounty_manager {
+    use crate::events::*;
+    use crate::types::*;
+    use crate::Error;
+    use ink::prelude::string::String;
+    use ink::prelude::vec::Vec;
+    use ink::storage::Mapping;
+
+    // ========================================================================
+    // Constants
+    // ========================================================================
+
+    /// Minimum bounty amount: 10 ALPHA (9 decimals)
+    pub const MIN_BOUNTY: u128 = 10_000_000_000;
+
+    /// Default submission window: ~2 days at 12s blocks
+    pub const DEFAULT_SUBMISSION_WINDOW_BLOCKS: u32 = 14400;
+
+    /// Default competition deadline: ~7 days at 12s blocks
+    pub const DEFAULT_COMPETITION_DEADLINE_BLOCKS: u32 = 50400;
+
+    /// Default proposal expiry: ~3.3 hours at 12s blocks
+    pub const DEFAULT_PROPOSAL_EXPIRY_BLOCKS: u32 = 1000;
+
+    /// Consensus threshold percentage (51% of stake required)
+    pub const CONSENSUS_THRESHOLD_PERCENT: u128 = 51;
+
+    // ========================================================================
+    // Contract Storage
+    // ========================================================================
+
+    #[ink(storage)]
+    pub struct IssueBountyManager {
+        /// Contract owner with administrative privileges
+        owner: AccountId,
+        /// Treasury hotkey for staking operations
+        treasury_hotkey: AccountId,
+        /// Subnet ID for this contract
+        netuid: u16,
+        /// Counter for generating unique issue IDs
+        next_issue_id: u64,
+        /// Counter for generating unique competition IDs
+        next_competition_id: u64,
+        /// Unallocated emissions storage (alpha pool)
+        alpha_pool: Balance,
+        /// Total network stake for consensus calculation
+        total_network_stake: u128,
+        /// Submission window in blocks
+        submission_window_blocks: u32,
+        /// Competition deadline in blocks
+        competition_deadline_blocks: u32,
+        /// Proposal expiry in blocks
+        proposal_expiry_blocks: u32,
+
+        // Mappings
+        /// Mapping from issue ID to Issue struct
+        issues: Mapping<u64, Issue>,
+        /// Mapping from URL hash to issue ID for deduplication
+        url_hash_to_id: Mapping<[u8; 32], u64>,
+        /// FIFO queue of issue IDs awaiting bounty fill
+        bounty_queue: Vec<u64>,
+        /// Mapping from competition ID to Competition struct
+        competitions: Mapping<u64, Competition>,
+        /// Mapping from issue ID to active competition ID
+        issue_to_competition: Mapping<u64, u64>,
+        /// Mapping from miner hotkey to active competition ID
+        miner_in_competition: Mapping<AccountId, u64>,
+
+        // Pair proposals
+        pair_proposals: Mapping<u64, PairProposal>,
+        has_pair_proposal: Mapping<u64, bool>,
+        pair_proposal_voters: Mapping<(u64, AccountId), bool>,
+
+        // Solution votes
+        solution_votes: Mapping<u64, SolutionVote>,
+        has_solution_vote: Mapping<u64, bool>,
+        solution_vote_voters: Mapping<(u64, AccountId), bool>,
+
+        // Timeout votes
+        timeout_votes: Mapping<u64, CancelVote>,
+        has_timeout_vote: Mapping<u64, bool>,
+        timeout_vote_voters: Mapping<(u64, AccountId), bool>,
+
+        // Cancel votes
+        cancel_votes: Mapping<u64, CancelVote>,
+        has_cancel_vote: Mapping<u64, bool>,
+        cancel_vote_voters: Mapping<(u64, AccountId), bool>,
+    }
+
+    impl IssueBountyManager {
+        // ========================================================================
+        // Constructor
+        // ========================================================================
+
+        /// Creates a new IssueBountyManager contract
+        #[ink(constructor)]
+        pub fn new(owner: AccountId, treasury_hotkey: AccountId, netuid: u16) -> Self {
+            Self {
+                owner,
+                treasury_hotkey,
+                netuid,
+                next_issue_id: 1,
+                next_competition_id: 1,
+                alpha_pool: 0,
+                total_network_stake: 0,
+                submission_window_blocks: DEFAULT_SUBMISSION_WINDOW_BLOCKS,
+                competition_deadline_blocks: DEFAULT_COMPETITION_DEADLINE_BLOCKS,
+                proposal_expiry_blocks: DEFAULT_PROPOSAL_EXPIRY_BLOCKS,
+                issues: Mapping::default(),
+                url_hash_to_id: Mapping::default(),
+                bounty_queue: Vec::new(),
+                competitions: Mapping::default(),
+                issue_to_competition: Mapping::default(),
+                miner_in_competition: Mapping::default(),
+                pair_proposals: Mapping::default(),
+                has_pair_proposal: Mapping::default(),
+                pair_proposal_voters: Mapping::default(),
+                solution_votes: Mapping::default(),
+                has_solution_vote: Mapping::default(),
+                solution_vote_voters: Mapping::default(),
+                timeout_votes: Mapping::default(),
+                has_timeout_vote: Mapping::default(),
+                timeout_vote_voters: Mapping::default(),
+                cancel_votes: Mapping::default(),
+                has_cancel_vote: Mapping::default(),
+                cancel_vote_voters: Mapping::default(),
+            }
+        }
+
+        // ========================================================================
+        // Issue Registry Functions
+        // ========================================================================
+
+        /// Registers a new GitHub issue for competition
+        #[ink(message)]
+        pub fn register_issue(
+            &mut self,
+            github_url: String,
+            repository_full_name: String,
+            issue_number: u32,
+            target_bounty: u128,
+        ) -> Result<u64, Error> {
+            if self.env().caller() != self.owner {
+                return Err(Error::NotOwner);
+            }
+
+            if target_bounty < MIN_BOUNTY {
+                return Err(Error::BountyTooLow);
+            }
+            if issue_number == 0 {
+                return Err(Error::InvalidIssueNumber);
+            }
+            if !self.is_valid_repo_name(&repository_full_name) {
+                return Err(Error::InvalidRepositoryName);
+            }
+
+            let url_hash = self.hash_string(&github_url);
+
+            if self.url_hash_to_id.get(url_hash).is_some() {
+                return Err(Error::IssueAlreadyExists);
+            }
+
+            let current_block = self.env().block_number();
+            let issue_id = self.next_issue_id;
+            self.next_issue_id = self.next_issue_id.saturating_add(1);
+
+            let new_issue = Issue {
+                id: issue_id,
+                github_url_hash: url_hash,
+                repository_full_name: repository_full_name.clone(),
+                issue_number,
+                bounty_amount: 0,
+                target_bounty,
+                status: IssueStatus::Registered,
+                registered_at_block: current_block,
+            };
+
+            self.issues.insert(issue_id, &new_issue);
+            self.url_hash_to_id.insert(url_hash, &issue_id);
+            self.bounty_queue.push(issue_id);
+
+            self.env().emit_event(IssueRegistered {
+                issue_id,
+                github_url_hash: url_hash,
+                repository_full_name,
+                issue_number,
+                target_bounty,
+            });
+
+            self.fill_bounties();
+
+            Ok(issue_id)
+        }
+
+        /// Cancels an issue before it enters competition
+        #[ink(message)]
+        pub fn cancel_issue(&mut self, issue_id: u64) -> Result<(), Error> {
+            if self.env().caller() != self.owner {
+                return Err(Error::NotOwner);
+            }
+
+            let mut issue = self.issues.get(issue_id).ok_or(Error::IssueNotFound)?;
+
+            if !self.is_modifiable(issue.status) {
+                return Err(Error::CannotCancel);
+            }
+
+            let returned_bounty = issue.bounty_amount;
+            self.alpha_pool = self.alpha_pool.saturating_add(returned_bounty);
+
+            issue.status = IssueStatus::Cancelled;
+            issue.bounty_amount = 0;
+            self.issues.insert(issue_id, &issue);
+
+            self.remove_from_bounty_queue(issue_id);
+
+            self.env().emit_event(IssueCancelled {
+                issue_id,
+                returned_bounty,
+            });
+
+            Ok(())
+        }
+
+        // ========================================================================
+        // Bounty Pool Functions
+        // ========================================================================
+
+        /// Deposits funds to the alpha pool
+        #[ink(message, payable)]
+        pub fn deposit_to_pool(&mut self) {
+            let amount = self.env().transferred_value();
+            if amount == 0 {
+                return;
+            }
+            self.alpha_pool = self.alpha_pool.saturating_add(amount);
+
+            self.env().emit_event(PoolDeposit {
+                depositor: self.env().caller(),
+                amount,
+            });
+
+            self.fill_bounties();
+        }
+
+        /// Alias for deposit_to_pool (backwards compatibility for emissions)
+        #[ink(message, payable)]
+        pub fn receive_emissions(&mut self) {
+            let amount = self.env().transferred_value();
+            if amount == 0 {
+                return;
+            }
+            self.alpha_pool = self.alpha_pool.saturating_add(amount);
+
+            self.env().emit_event(PoolDeposit {
+                depositor: self.env().caller(),
+                amount,
+            });
+
+            self.fill_bounties();
+        }
+
+        // ========================================================================
+        // Validator Consensus Functions
+        // ========================================================================
+
+        /// Proposes a pair of miners for a competition on an issue
+        #[ink(message)]
+        pub fn propose_pair(
+            &mut self,
+            issue_id: u64,
+            miner1_hotkey: AccountId,
+            miner2_hotkey: AccountId,
+        ) -> Result<(), Error> {
+            if miner1_hotkey == miner2_hotkey {
+                return Err(Error::SameMiners);
+            }
+
+            let issue = self.issues.get(issue_id).ok_or(Error::IssueNotFound)?;
+            if issue.status != IssueStatus::Active {
+                return Err(Error::IssueNotActive);
+            }
+
+            if self.miner_in_competition.get(miner1_hotkey).is_some() {
+                return Err(Error::MinerAlreadyInCompetition);
+            }
+            if self.miner_in_competition.get(miner2_hotkey).is_some() {
+                return Err(Error::MinerAlreadyInCompetition);
+            }
+
+            let caller = self.env().caller();
+            let stake = self.get_validator_stake(caller);
+            if stake == 0 {
+                return Err(Error::InsufficientStake);
+            }
+
+            let current_block = self.env().block_number();
+
+            let proposal = PairProposal {
+                issue_id,
+                miner1_hotkey,
+                miner2_hotkey,
+                proposer: caller,
+                proposed_at_block: current_block,
+                total_stake_voted: stake,
+                votes_count: 1,
+            };
+
+            self.pair_proposals.insert(issue_id, &proposal);
+            self.has_pair_proposal.insert(issue_id, &true);
+            self.pair_proposal_voters.insert((issue_id, caller), &true);
+
+            self.env().emit_event(PairVoteCast {
+                issue_id,
+                voter: caller,
+                stake,
+            });
+
+            if self.check_consensus(stake) {
+                self.start_competition(issue_id, miner1_hotkey, miner2_hotkey);
+                self.clear_pair_proposal(issue_id);
+            }
+
+            Ok(())
+        }
+
+        /// Votes on an existing pair proposal
+        #[ink(message)]
+        pub fn vote_pair(&mut self, issue_id: u64) -> Result<(), Error> {
+            if !self.has_pair_proposal.get(issue_id).unwrap_or(false) {
+                return Err(Error::ProposalNotFound);
+            }
+
+            let mut proposal = self
+                .pair_proposals
+                .get(issue_id)
+                .ok_or(Error::ProposalNotFound)?;
+
+            let current_block = self.env().block_number();
+            let expiry_block = proposal
+                .proposed_at_block
+                .saturating_add(self.proposal_expiry_blocks);
+
+            if current_block > expiry_block {
+                self.clear_pair_proposal(issue_id);
+                return Err(Error::ProposalExpired);
+            }
+
+            let caller = self.env().caller();
+
+            if self
+                .pair_proposal_voters
+                .get((issue_id, caller))
+                .unwrap_or(false)
+            {
+                return Err(Error::AlreadyVoted);
+            }
+
+            let issue = self.issues.get(issue_id).ok_or(Error::IssueNotFound)?;
+            if issue.status != IssueStatus::Active {
+                return Err(Error::IssueNotActive);
+            }
+
+            let stake = self.get_validator_stake(caller);
+            if stake == 0 {
+                return Err(Error::InsufficientStake);
+            }
+
+            self.pair_proposal_voters.insert((issue_id, caller), &true);
+            proposal.total_stake_voted = proposal.total_stake_voted.saturating_add(stake);
+            proposal.votes_count = proposal.votes_count.saturating_add(1);
+            self.pair_proposals.insert(issue_id, &proposal);
+
+            self.env().emit_event(PairVoteCast {
+                issue_id,
+                voter: caller,
+                stake,
+            });
+
+            if self.check_consensus(proposal.total_stake_voted) {
+                self.start_competition(issue_id, proposal.miner1_hotkey, proposal.miner2_hotkey);
+                self.clear_pair_proposal(issue_id);
+            }
+
+            Ok(())
+        }
+
+        /// Votes for a solution winner in an active competition
+        #[ink(message)]
+        pub fn vote_solution(
+            &mut self,
+            competition_id: u64,
+            winner_hotkey: AccountId,
+            pr_url_hash: [u8; 32],
+        ) -> Result<(), Error> {
+            let competition = self
+                .competitions
+                .get(competition_id)
+                .ok_or(Error::CompetitionNotFound)?;
+
+            if competition.status != CompetitionStatus::Active {
+                return Err(Error::CompetitionNotActive);
+            }
+
+            if winner_hotkey != competition.miner1_hotkey
+                && winner_hotkey != competition.miner2_hotkey
+            {
+                return Err(Error::InvalidWinner);
+            }
+
+            let current_block = self.env().block_number();
+            if current_block <= competition.submission_window_end_block {
+                return Err(Error::SubmissionWindowNotEnded);
+            }
+
+            let caller = self.env().caller();
+
+            if self
+                .solution_vote_voters
+                .get((competition_id, caller))
+                .unwrap_or(false)
+            {
+                return Err(Error::AlreadyVoted);
+            }
+
+            let stake = self.get_validator_stake(caller);
+            if stake == 0 {
+                return Err(Error::InsufficientStake);
+            }
+
+            let mut solution_vote = if !self
+                .has_solution_vote
+                .get(competition_id)
+                .unwrap_or(false)
+            {
+                let sv = SolutionVote {
+                    competition_id,
+                    winner_hotkey,
+                    pr_url_hash,
+                    total_stake_voted: 0,
+                    votes_count: 0,
+                };
+                self.has_solution_vote.insert(competition_id, &true);
+                sv
+            } else {
+                self.solution_votes
+                    .get(competition_id)
+                    .unwrap_or_default()
+            };
+
+            self.solution_vote_voters
+                .insert((competition_id, caller), &true);
+            solution_vote.total_stake_voted = solution_vote.total_stake_voted.saturating_add(stake);
+            solution_vote.votes_count = solution_vote.votes_count.saturating_add(1);
+            self.solution_votes.insert(competition_id, &solution_vote);
+
+            if self.check_consensus(solution_vote.total_stake_voted) {
+                self.complete_competition(competition_id, winner_hotkey, pr_url_hash);
+                self.clear_solution_vote(competition_id);
+            }
+
+            Ok(())
+        }
+
+        /// Votes to time out a competition that has passed its deadline
+        #[ink(message)]
+        pub fn vote_timeout(&mut self, competition_id: u64) -> Result<(), Error> {
+            let competition = self
+                .competitions
+                .get(competition_id)
+                .ok_or(Error::CompetitionNotFound)?;
+
+            if competition.status != CompetitionStatus::Active {
+                return Err(Error::CompetitionNotActive);
+            }
+
+            let current_block = self.env().block_number();
+            if current_block <= competition.deadline_block {
+                return Err(Error::DeadlineNotPassed);
+            }
+
+            let caller = self.env().caller();
+
+            if self
+                .timeout_vote_voters
+                .get((competition_id, caller))
+                .unwrap_or(false)
+            {
+                return Err(Error::AlreadyVoted);
+            }
+
+            let stake = self.get_validator_stake(caller);
+            if stake == 0 {
+                return Err(Error::InsufficientStake);
+            }
+
+            let reason_hash = [0u8; 32];
+
+            let mut timeout_vote = if !self
+                .has_timeout_vote
+                .get(competition_id)
+                .unwrap_or(false)
+            {
+                let tv = CancelVote {
+                    competition_id,
+                    reason_hash,
+                    total_stake_voted: 0,
+                    votes_count: 0,
+                };
+                self.has_timeout_vote.insert(competition_id, &true);
+                tv
+            } else {
+                self.timeout_votes.get(competition_id).unwrap_or_default()
+            };
+
+            self.timeout_vote_voters
+                .insert((competition_id, caller), &true);
+            timeout_vote.total_stake_voted = timeout_vote.total_stake_voted.saturating_add(stake);
+            timeout_vote.votes_count = timeout_vote.votes_count.saturating_add(1);
+            self.timeout_votes.insert(competition_id, &timeout_vote);
+
+            if self.check_consensus(timeout_vote.total_stake_voted) {
+                self.timeout_competition(competition_id);
+                self.clear_timeout_vote(competition_id);
+            }
+
+            Ok(())
+        }
+
+        /// Votes to cancel a competition (e.g., external solution found)
+        #[ink(message)]
+        pub fn vote_cancel(
+            &mut self,
+            competition_id: u64,
+            reason_hash: [u8; 32],
+        ) -> Result<(), Error> {
+            let competition = self
+                .competitions
+                .get(competition_id)
+                .ok_or(Error::CompetitionNotFound)?;
+
+            if competition.status != CompetitionStatus::Active {
+                return Err(Error::CompetitionNotActive);
+            }
+
+            let caller = self.env().caller();
+
+            if self
+                .cancel_vote_voters
+                .get((competition_id, caller))
+                .unwrap_or(false)
+            {
+                return Err(Error::AlreadyVoted);
+            }
+
+            let stake = self.get_validator_stake(caller);
+            if stake == 0 {
+                return Err(Error::InsufficientStake);
+            }
+
+            let mut cancel_vote = if !self
+                .has_cancel_vote
+                .get(competition_id)
+                .unwrap_or(false)
+            {
+                let cv = CancelVote {
+                    competition_id,
+                    reason_hash,
+                    total_stake_voted: 0,
+                    votes_count: 0,
+                };
+                self.has_cancel_vote.insert(competition_id, &true);
+                cv
+            } else {
+                self.cancel_votes.get(competition_id).unwrap_or_default()
+            };
+
+            self.cancel_vote_voters
+                .insert((competition_id, caller), &true);
+            cancel_vote.total_stake_voted = cancel_vote.total_stake_voted.saturating_add(stake);
+            cancel_vote.votes_count = cancel_vote.votes_count.saturating_add(1);
+            self.cancel_votes.insert(competition_id, &cancel_vote);
+
+            if self.check_consensus(cancel_vote.total_stake_voted) {
+                self.cancel_competition(competition_id, reason_hash);
+                self.clear_cancel_vote(competition_id);
+            }
+
+            Ok(())
+        }
+
+        // ========================================================================
+        // Admin Functions
+        // ========================================================================
+
+        /// Sets a new owner
+        #[ink(message)]
+        pub fn set_owner(&mut self, new_owner: AccountId) -> Result<(), Error> {
+            if self.env().caller() != self.owner {
+                return Err(Error::NotOwner);
+            }
+            self.owner = new_owner;
+            Ok(())
+        }
+
+        /// Sets a new treasury hotkey
+        #[ink(message)]
+        pub fn set_treasury_hotkey(&mut self, new_hotkey: AccountId) -> Result<(), Error> {
+            if self.env().caller() != self.owner {
+                return Err(Error::NotOwner);
+            }
+            self.treasury_hotkey = new_hotkey;
+            Ok(())
+        }
+
+        /// Sets the total network stake for consensus calculation
+        #[ink(message)]
+        pub fn set_total_network_stake(&mut self, stake: u128) -> Result<(), Error> {
+            if self.env().caller() != self.owner {
+                return Err(Error::NotOwner);
+            }
+            self.total_network_stake = stake;
+            Ok(())
+        }
+
+        /// Sets competition timing configuration
+        #[ink(message)]
+        pub fn set_competition_config(
+            &mut self,
+            submission_window_blocks: u32,
+            competition_deadline_blocks: u32,
+            proposal_expiry_blocks: u32,
+        ) -> Result<(), Error> {
+            if self.env().caller() != self.owner {
+                return Err(Error::NotOwner);
+            }
+            self.submission_window_blocks = submission_window_blocks;
+            self.competition_deadline_blocks = competition_deadline_blocks;
+            self.proposal_expiry_blocks = proposal_expiry_blocks;
+            Ok(())
+        }
+
+        // ========================================================================
+        // Query Functions (for CLI reads)
+        // ========================================================================
+
+        /// Returns the contract owner
+        #[ink(message)]
+        pub fn owner(&self) -> AccountId {
+            self.owner
+        }
+
+        /// Returns the treasury hotkey
+        #[ink(message)]
+        pub fn treasury_hotkey(&self) -> AccountId {
+            self.treasury_hotkey
+        }
+
+        /// Returns the subnet ID
+        #[ink(message)]
+        pub fn netuid(&self) -> u16 {
+            self.netuid
+        }
+
+        /// Returns the next issue ID
+        #[ink(message)]
+        pub fn next_issue_id(&self) -> u64 {
+            self.next_issue_id
+        }
+
+        /// Returns the next competition ID
+        #[ink(message)]
+        pub fn next_competition_id(&self) -> u64 {
+            self.next_competition_id
+        }
+
+        /// Returns the alpha pool balance
+        #[ink(message)]
+        pub fn get_alpha_pool(&self) -> Balance {
+            self.alpha_pool
+        }
+
+        /// Returns the total network stake
+        #[ink(message)]
+        pub fn get_total_network_stake(&self) -> u128 {
+            self.total_network_stake
+        }
+
+        /// Returns the submission window blocks
+        #[ink(message)]
+        pub fn get_submission_window_blocks(&self) -> u32 {
+            self.submission_window_blocks
+        }
+
+        /// Returns the competition deadline blocks
+        #[ink(message)]
+        pub fn get_competition_deadline_blocks(&self) -> u32 {
+            self.competition_deadline_blocks
+        }
+
+        /// Returns the proposal expiry blocks
+        #[ink(message)]
+        pub fn get_proposal_expiry_blocks(&self) -> u32 {
+            self.proposal_expiry_blocks
+        }
+
+        /// Returns an issue by ID
+        #[ink(message)]
+        pub fn get_issue(&self, issue_id: u64) -> Option<Issue> {
+            self.issues.get(issue_id)
+        }
+
+        /// Returns a competition by ID
+        #[ink(message)]
+        pub fn get_competition(&self, competition_id: u64) -> Option<Competition> {
+            self.competitions.get(competition_id)
+        }
+
+        /// Returns a pair proposal for an issue
+        #[ink(message)]
+        pub fn get_pair_proposal(&self, issue_id: u64) -> Option<PairProposal> {
+            if self.has_pair_proposal.get(issue_id).unwrap_or(false) {
+                self.pair_proposals.get(issue_id)
+            } else {
+                None
+            }
+        }
+
+        /// Returns the competition ID a miner is in (0 if not in any)
+        #[ink(message)]
+        pub fn get_miner_competition(&self, hotkey: AccountId) -> u64 {
+            self.miner_in_competition.get(hotkey).unwrap_or(0)
+        }
+
+        /// Returns true if miner is in an active competition
+        #[ink(message)]
+        pub fn is_miner_in_competition(&self, hotkey: AccountId) -> bool {
+            self.miner_in_competition.get(hotkey).is_some()
+        }
+
+        /// Returns the issue ID for a URL hash
+        #[ink(message)]
+        pub fn get_issue_by_url_hash(&self, url_hash: [u8; 32]) -> u64 {
+            self.url_hash_to_id.get(url_hash).unwrap_or(0)
+        }
+
+        /// Returns the competition ID for an issue
+        #[ink(message)]
+        pub fn get_issue_competition(&self, issue_id: u64) -> u64 {
+            self.issue_to_competition.get(issue_id).unwrap_or(0)
+        }
+
+        /// Returns the bounty queue
+        #[ink(message)]
+        pub fn get_bounty_queue(&self) -> Vec<u64> {
+            self.bounty_queue.clone()
+        }
+
+        /// Returns all issues with a given status
+        #[ink(message)]
+        pub fn get_issues_by_status(&self, status: IssueStatus) -> Vec<Issue> {
+            let mut result = Vec::new();
+            let mut issue_id = 1u64;
+            while issue_id < self.next_issue_id {
+                if let Some(issue) = self.issues.get(issue_id) {
+                    if issue.status == status {
+                        result.push(issue);
+                    }
+                }
+                issue_id = issue_id.saturating_add(1);
+            }
+            result
+        }
+
+        /// Returns all active competitions
+        #[ink(message)]
+        pub fn get_active_competitions(&self) -> Vec<Competition> {
+            let mut result = Vec::new();
+            let mut comp_id = 1u64;
+            while comp_id < self.next_competition_id {
+                if let Some(comp) = self.competitions.get(comp_id) {
+                    if comp.status == CompetitionStatus::Active {
+                        result.push(comp);
+                    }
+                }
+                comp_id = comp_id.saturating_add(1);
+            }
+            result
+        }
+
+        // ========================================================================
+        // Internal Functions
+        // ========================================================================
+
+        /// Validates repository name format (owner/repo)
+        fn is_valid_repo_name(&self, name: &str) -> bool {
+            let bytes = name.as_bytes();
+            if bytes.is_empty() {
+                return false;
+            }
+            let mut slash_pos: Option<usize> = None;
+
+            for (i, &b) in bytes.iter().enumerate() {
+                if b == b'/' {
+                    if slash_pos.is_some() || i == 0 {
+                        return false;
+                    }
+                    slash_pos = Some(i);
+                }
+            }
+
+            match slash_pos {
+                Some(pos) => {
+                    let len = bytes.len();
+                    pos < len.saturating_sub(1)
+                }
+                None => false,
+            }
+        }
+
+        /// Checks if an issue status allows modification
+        fn is_modifiable(&self, status: IssueStatus) -> bool {
+            matches!(status, IssueStatus::Registered | IssueStatus::Active)
+        }
+
+        /// Hashes a string to [u8; 32] using keccak256
+        fn hash_string(&self, s: &str) -> [u8; 32] {
+            use ink::env::hash::{HashOutput, Keccak256};
+            let mut output = <Keccak256 as HashOutput>::Type::default();
+            ink::env::hash_bytes::<Keccak256>(s.as_bytes(), &mut output);
+            output
+        }
+
+        /// Fills bounties from the alpha pool using FIFO order
+        fn fill_bounties(&mut self) {
+            let mut i = 0usize;
+
+            while i < self.bounty_queue.len() && self.alpha_pool > 0 {
+                let issue_id = self.bounty_queue[i];
+
+                if let Some(mut issue) = self.issues.get(issue_id) {
+                    if !self.is_modifiable(issue.status) {
+                        self.swap_remove_at(i);
+                        continue;
+                    }
+
+                    let remaining = issue.target_bounty.saturating_sub(issue.bounty_amount);
+                    if remaining == 0 {
+                        self.swap_remove_at(i);
+                        continue;
+                    }
+
+                    let fill_amount = if remaining < self.alpha_pool {
+                        remaining
+                    } else {
+                        self.alpha_pool
+                    };
+
+                    issue.bounty_amount = issue.bounty_amount.saturating_add(fill_amount);
+                    self.alpha_pool = self.alpha_pool.saturating_sub(fill_amount);
+
+                    let is_fully_funded = issue.bounty_amount >= issue.target_bounty;
+
+                    if is_fully_funded {
+                        issue.status = IssueStatus::Active;
+                        self.issues.insert(issue_id, &issue);
+                        self.swap_remove_at(i);
+                    } else {
+                        self.issues.insert(issue_id, &issue);
+                        i = i.saturating_add(1);
+                    }
+                } else {
+                    self.swap_remove_at(i);
+                }
+            }
+        }
+
+        /// Helper to swap-remove from bounty queue at index
+        fn swap_remove_at(&mut self, idx: usize) {
+            let len = self.bounty_queue.len();
+            if len == 0 {
+                return;
+            }
+            let last_idx = len.saturating_sub(1);
+            if idx < last_idx {
+                self.bounty_queue.swap(idx, last_idx);
+            }
+            self.bounty_queue.pop();
+        }
+
+        /// Removes an issue from the bounty queue
+        fn remove_from_bounty_queue(&mut self, issue_id: u64) {
+            if let Some(pos) = self.bounty_queue.iter().position(|&id| id == issue_id) {
+                self.swap_remove_at(pos);
+            }
+        }
+
+        /// Gets a validator's stake (placeholder implementation)
+        fn get_validator_stake(&self, _validator: AccountId) -> u128 {
+            if self.total_network_stake > 0 {
+                self.total_network_stake.saturating_div(10)
+            } else {
+                1_000_000_000_000
+            }
+        }
+
+        /// Checks if total voted stake meets consensus threshold
+        fn check_consensus(&self, total_voted: u128) -> bool {
+            if self.total_network_stake == 0 {
+                return false;
+            }
+
+            let threshold = self
+                .total_network_stake
+                .saturating_mul(CONSENSUS_THRESHOLD_PERCENT)
+                .saturating_div(100);
+
+            total_voted > threshold
+        }
+
+        /// Starts a competition from a pair proposal
+        fn start_competition(
+            &mut self,
+            issue_id: u64,
+            miner1_hotkey: AccountId,
+            miner2_hotkey: AccountId,
+        ) -> u64 {
+            let current_block = self.env().block_number();
+            let competition_id = self.next_competition_id;
+            self.next_competition_id = self.next_competition_id.saturating_add(1);
+
+            let competition = Competition {
+                id: competition_id,
+                issue_id,
+                miner1_hotkey,
+                miner2_hotkey,
+                start_block: current_block,
+                submission_window_end_block: current_block
+                    .saturating_add(self.submission_window_blocks),
+                deadline_block: current_block.saturating_add(self.competition_deadline_blocks),
+                status: CompetitionStatus::Active,
+                winner_hotkey: AccountId::from([0u8; 32]),
+                winning_pr_url_hash: [0u8; 32],
+                payout_amount: 0,
+            };
+
+            self.competitions.insert(competition_id, &competition);
+
+            self.issue_to_competition.insert(issue_id, &competition_id);
+            self.miner_in_competition
+                .insert(miner1_hotkey, &competition_id);
+            self.miner_in_competition
+                .insert(miner2_hotkey, &competition_id);
+
+            if let Some(mut issue) = self.issues.get(issue_id) {
+                issue.status = IssueStatus::InCompetition;
+                self.issues.insert(issue_id, &issue);
+            }
+
+            self.env().emit_event(CompetitionStarted {
+                competition_id,
+                issue_id,
+                miner1_hotkey,
+                miner2_hotkey,
+                deadline_block: competition.deadline_block,
+            });
+
+            competition_id
+        }
+
+        /// Completes a competition with a winner
+        fn complete_competition(
+            &mut self,
+            competition_id: u64,
+            winner: AccountId,
+            pr_hash: [u8; 32],
+        ) {
+            if let Some(mut competition) = self.competitions.get(competition_id) {
+                let issue_id = competition.issue_id;
+
+                if let Some(mut issue) = self.issues.get(issue_id) {
+                    let payout = issue.bounty_amount;
+
+                    competition.status = CompetitionStatus::Completed;
+                    competition.winner_hotkey = winner;
+                    competition.winning_pr_url_hash = pr_hash;
+                    competition.payout_amount = payout;
+                    self.competitions.insert(competition_id, &competition);
+
+                    issue.status = IssueStatus::Completed;
+                    issue.bounty_amount = 0;
+                    self.issues.insert(issue_id, &issue);
+
+                    self.miner_in_competition.remove(competition.miner1_hotkey);
+                    self.miner_in_competition.remove(competition.miner2_hotkey);
+                    self.issue_to_competition.remove(issue_id);
+
+                    self.env().emit_event(CompetitionCompleted {
+                        competition_id,
+                        issue_id,
+                        winner_hotkey: winner,
+                        payout,
+                        pr_url_hash: pr_hash,
+                    });
+                }
+            }
+        }
+
+        /// Times out a competition, returning issue to Active status
+        fn timeout_competition(&mut self, competition_id: u64) {
+            if let Some(mut competition) = self.competitions.get(competition_id) {
+                let issue_id = competition.issue_id;
+
+                competition.status = CompetitionStatus::TimedOut;
+                self.competitions.insert(competition_id, &competition);
+
+                if let Some(mut issue) = self.issues.get(issue_id) {
+                    issue.status = IssueStatus::Active;
+                    self.issues.insert(issue_id, &issue);
+                }
+
+                self.miner_in_competition.remove(competition.miner1_hotkey);
+                self.miner_in_competition.remove(competition.miner2_hotkey);
+                self.issue_to_competition.remove(issue_id);
+
+                self.env().emit_event(CompetitionEnded {
+                    competition_id,
+                    issue_id,
+                    status: 2,
+                    reason_hash: [0u8; 32],
+                });
+            }
+        }
+
+        /// Cancels a competition, recycling bounty to pool
+        fn cancel_competition(&mut self, competition_id: u64, reason_hash: [u8; 32]) {
+            if let Some(mut competition) = self.competitions.get(competition_id) {
+                let issue_id = competition.issue_id;
+
+                if let Some(mut issue) = self.issues.get(issue_id) {
+                    let recycled_amount = issue.bounty_amount;
+
+                    competition.status = CompetitionStatus::Cancelled;
+                    self.competitions.insert(competition_id, &competition);
+
+                    issue.status = IssueStatus::Completed;
+                    issue.bounty_amount = 0;
+                    self.issues.insert(issue_id, &issue);
+
+                    self.alpha_pool = self.alpha_pool.saturating_add(recycled_amount);
+
+                    self.miner_in_competition.remove(competition.miner1_hotkey);
+                    self.miner_in_competition.remove(competition.miner2_hotkey);
+                    self.issue_to_competition.remove(issue_id);
+
+                    self.env().emit_event(CompetitionEnded {
+                        competition_id,
+                        issue_id,
+                        status: 3,
+                        reason_hash,
+                    });
+                }
+            }
+        }
+
+        /// Clears pair proposal data
+        fn clear_pair_proposal(&mut self, issue_id: u64) {
+            self.pair_proposals.remove(issue_id);
+            self.has_pair_proposal.insert(issue_id, &false);
+        }
+
+        /// Clears solution vote data
+        fn clear_solution_vote(&mut self, competition_id: u64) {
+            self.solution_votes.remove(competition_id);
+            self.has_solution_vote.insert(competition_id, &false);
+        }
+
+        /// Clears timeout vote data
+        fn clear_timeout_vote(&mut self, competition_id: u64) {
+            self.timeout_votes.remove(competition_id);
+            self.has_timeout_vote.insert(competition_id, &false);
+        }
+
+        /// Clears cancel vote data
+        fn clear_cancel_vote(&mut self, competition_id: u64) {
+            self.cancel_votes.remove(competition_id);
+            self.has_cancel_vote.insert(competition_id, &false);
+        }
+    }
+
+    // ========================================================================
+    // Tests
+    // ========================================================================
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        fn default_accounts() -> ink::env::test::DefaultAccounts<ink::env::DefaultEnvironment> {
+            ink::env::test::default_accounts::<ink::env::DefaultEnvironment>()
+        }
+
+        fn set_caller(caller: AccountId) {
+            ink::env::test::set_caller::<ink::env::DefaultEnvironment>(caller);
+        }
+
+        #[ink::test]
+        fn test_constructor() {
+            let accounts = default_accounts();
+            let contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
+
+            assert_eq!(contract.owner(), accounts.alice);
+            assert_eq!(contract.treasury_hotkey(), accounts.bob);
+            assert_eq!(contract.netuid(), 74);
+            assert_eq!(contract.next_issue_id(), 1);
+            assert_eq!(contract.next_competition_id(), 1);
+            assert_eq!(contract.get_alpha_pool(), 0);
+        }
+
+        #[ink::test]
+        fn test_register_issue() {
+            let accounts = default_accounts();
+            set_caller(accounts.alice);
+            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
+
+            let result = contract.register_issue(
+                String::from("https://github.com/test/repo/issues/1"),
+                String::from("test/repo"),
+                1,
+                MIN_BOUNTY,
+            );
+
+            assert!(result.is_ok());
+            assert_eq!(result.unwrap(), 1);
+            assert_eq!(contract.next_issue_id(), 2);
+
+            let issue = contract.get_issue(1);
+            assert!(issue.is_some());
+            let issue = issue.unwrap();
+            assert_eq!(issue.id, 1);
+            assert_eq!(issue.issue_number, 1);
+            assert_eq!(issue.status, IssueStatus::Registered);
+        }
+
+        #[ink::test]
+        fn test_register_issue_not_owner() {
+            let accounts = default_accounts();
+            set_caller(accounts.bob);
+            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
+
+            let result = contract.register_issue(
+                String::from("https://github.com/test/repo/issues/1"),
+                String::from("test/repo"),
+                1,
+                MIN_BOUNTY,
+            );
+
+            assert_eq!(result, Err(Error::NotOwner));
+        }
+
+        #[ink::test]
+        fn test_register_issue_bounty_too_low() {
+            let accounts = default_accounts();
+            set_caller(accounts.alice);
+            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
+
+            let result = contract.register_issue(
+                String::from("https://github.com/test/repo/issues/1"),
+                String::from("test/repo"),
+                1,
+                MIN_BOUNTY.saturating_sub(1),
+            );
+
+            assert_eq!(result, Err(Error::BountyTooLow));
+        }
+
+        #[ink::test]
+        fn test_register_issue_invalid_repo_name() {
+            let accounts = default_accounts();
+            set_caller(accounts.alice);
+            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
+
+            let result = contract.register_issue(
+                String::from("https://github.com/test/issues/1"),
+                String::from("testrepo"),
+                1,
+                MIN_BOUNTY,
+            );
+            assert_eq!(result, Err(Error::InvalidRepositoryName));
+
+            let result = contract.register_issue(
+                String::from("https://github.com/test/issues/1"),
+                String::from("/repo"),
+                1,
+                MIN_BOUNTY,
+            );
+            assert_eq!(result, Err(Error::InvalidRepositoryName));
+
+            let result = contract.register_issue(
+                String::from("https://github.com/test/issues/1"),
+                String::from("test/"),
+                1,
+                MIN_BOUNTY,
+            );
+            assert_eq!(result, Err(Error::InvalidRepositoryName));
+        }
+
+        #[ink::test]
+        fn test_is_valid_repo_name() {
+            let accounts = default_accounts();
+            let contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
+
+            assert!(contract.is_valid_repo_name("owner/repo"));
+            assert!(contract.is_valid_repo_name("test/test"));
+            assert!(!contract.is_valid_repo_name("noslash"));
+            assert!(!contract.is_valid_repo_name("/startwithslash"));
+            assert!(!contract.is_valid_repo_name("endwithslash/"));
+            assert!(!contract.is_valid_repo_name("multiple/slashes/here"));
+        }
+
+        #[ink::test]
+        fn test_cancel_issue() {
+            let accounts = default_accounts();
+            set_caller(accounts.alice);
+            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
+
+            let issue_id = contract
+                .register_issue(
+                    String::from("https://github.com/test/repo/issues/1"),
+                    String::from("test/repo"),
+                    1,
+                    MIN_BOUNTY,
+                )
+                .unwrap();
+
+            let result = contract.cancel_issue(issue_id);
+            assert!(result.is_ok());
+
+            let issue = contract.get_issue(issue_id).unwrap();
+            assert_eq!(issue.status, IssueStatus::Cancelled);
+        }
+
+        #[ink::test]
+        fn test_set_owner() {
+            let accounts = default_accounts();
+            set_caller(accounts.alice);
+            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
+
+            assert_eq!(contract.owner(), accounts.alice);
+
+            let result = contract.set_owner(accounts.charlie);
+            assert!(result.is_ok());
+            assert_eq!(contract.owner(), accounts.charlie);
+        }
+
+        #[ink::test]
+        fn test_set_total_network_stake() {
+            let accounts = default_accounts();
+            set_caller(accounts.alice);
+            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
+
+            let result = contract.set_total_network_stake(1_000_000_000_000_000);
+            assert!(result.is_ok());
+            assert_eq!(contract.get_total_network_stake(), 1_000_000_000_000_000);
+        }
+
+        #[ink::test]
+        fn test_get_issues_by_status() {
+            let accounts = default_accounts();
+            set_caller(accounts.alice);
+            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
+
+            contract
+                .register_issue(
+                    String::from("https://github.com/test/repo/issues/1"),
+                    String::from("test/repo"),
+                    1,
+                    MIN_BOUNTY,
+                )
+                .unwrap();
+            contract
+                .register_issue(
+                    String::from("https://github.com/test/repo/issues/2"),
+                    String::from("test/repo"),
+                    2,
+                    MIN_BOUNTY,
+                )
+                .unwrap();
+
+            let registered = contract.get_issues_by_status(IssueStatus::Registered);
+            assert_eq!(registered.len(), 2);
+
+            let active = contract.get_issues_by_status(IssueStatus::Active);
+            assert_eq!(active.len(), 0);
+        }
+    }
+}

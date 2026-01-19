@@ -18,3 +18,4 @@ debugpy==1.8.11
 pytz==2025.2
 psycopg2-binary==2.9.10
 python-dotenv==1.2.1
+substrate-interface

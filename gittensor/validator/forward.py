@@ -26,7 +26,9 @@ from gittensor.validator.issue_competitions import (
 from gittensor.validator.issue_competitions.constants import (
     ISSUE_COMPETITIONS_ENABLED,
     ISSUE_CONTRACT_ADDRESS_TESTNET,
+    ISSUES_CONTRACT_UID,
     ISSUES_EMISSION_WEIGHT,
+    ISSUES_FIXED_EMISSION_RATE,
     OSS_EMISSION_WEIGHT,
 )
 from gittensor.validator.utils.config import VALIDATOR_STEPS_INTERVAL, VALIDATOR_WAIT
@@ -124,5 +126,13 @@ async def forward(self: 'BaseValidatorNeuron') -> None:
 
         # Update the scores based on the combined rewards
         self.update_scores(combined_rewards, miner_uids)
+
+        # =====================================================================
+        # CONTRACT UID EMISSIONS ROUTING (for issue bounty payouts)
+        # =====================================================================
+        if ISSUES_CONTRACT_UID >= 0 and ISSUES_FIXED_EMISSION_RATE > 0:
+            bt.logging.info(f'Routing {ISSUES_FIXED_EMISSION_RATE:.2%} emissions to contract UID {ISSUES_CONTRACT_UID}')
+            # Note: Actual emission routing is handled by setting weights
+            # This log helps debug that the configuration is active
 
     await asyncio.sleep(VALIDATOR_WAIT)

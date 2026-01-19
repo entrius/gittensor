@@ -5,6 +5,7 @@
 
 import hashlib
 import json
+import os
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -22,15 +23,51 @@ except ImportError:
     ContractInstance = None
     Keypair = None
 
-# Default path to contract metadata file
+# Default path to contract metadata file (ink! Rust contract)
 DEFAULT_CONTRACT_METADATA_PATH = Path(__file__).parent.parent.parent.parent.parent / \
-    'smart-contracts' / 'solidity' / 'IssueBountyManager.contract'
+    'smart-contracts' / 'ink' / 'target' / 'ink' / 'issue_bounty_manager.contract'
 
 # Default gas limits for contract calls
 DEFAULT_GAS_LIMIT = {
     'ref_time': 10_000_000_000,  # 10 billion
     'proof_size': 500_000,  # 500 KB
 }
+
+# Config file path for local dev environment
+GITTENSOR_CONFIG_PATH = Path.home() / '.gittensor' / 'contract_config.json'
+
+
+def get_contract_address_from_config() -> Optional[str]:
+    """
+    Get contract address from environment variable or local config file.
+
+    Priority:
+    1. CONTRACT_ADDRESS environment variable
+    2. ~/.gittensor/contract_config.json (written by dev-environment up.sh)
+    3. Return None (caller should use constants as fallback)
+
+    Returns:
+        Contract address string or None
+    """
+    # 1. Environment variable (highest priority)
+    env_addr = os.environ.get('CONTRACT_ADDRESS')
+    if env_addr:
+        bt.logging.debug(f'Using contract address from env: {env_addr[:20]}...')
+        return env_addr
+
+    # 2. Local config file (for dev environment)
+    if GITTENSOR_CONFIG_PATH.exists():
+        try:
+            with open(GITTENSOR_CONFIG_PATH) as f:
+                config = json.load(f)
+                addr = config.get('contract_address')
+                if addr:
+                    bt.logging.debug(f'Using contract address from config: {addr[:20]}...')
+                    return addr
+        except (json.JSONDecodeError, IOError) as e:
+            bt.logging.warning(f'Failed to read contract config: {e}')
+
+    return None
 
 
 class IssueStatus(Enum):
@@ -106,25 +143,42 @@ class IssueCompetitionContractClient:
 
     def __init__(
         self,
-        contract_address: str,
-        subtensor: bt.Subtensor,
+        contract_address: Optional[str] = None,
+        subtensor: Optional[bt.Subtensor] = None,
         metadata_path: Optional[Path] = None,
     ):
         """
         Initialize the contract client.
 
         Args:
-            contract_address: Address of the deployed contract
+            contract_address: Address of the deployed contract (optional, will check env/config)
             subtensor: Bittensor subtensor instance for chain interaction
             metadata_path: Path to the .contract metadata file (optional)
         """
-        self.contract_address = contract_address
+        # Try to get contract address from various sources
+        if contract_address:
+            self.contract_address = contract_address
+        else:
+            # Check env var and config file
+            config_addr = get_contract_address_from_config()
+            if config_addr:
+                self.contract_address = config_addr
+            else:
+                # Fall back to constants (may be empty for testnet/mainnet)
+                try:
+                    from gittensor.validator.issue_competitions.constants import (
+                        ISSUE_CONTRACT_ADDRESS_TESTNET,
+                    )
+                    self.contract_address = ISSUE_CONTRACT_ADDRESS_TESTNET
+                except ImportError:
+                    self.contract_address = ''
+
         self.subtensor = subtensor
         self.metadata_path = metadata_path or DEFAULT_CONTRACT_METADATA_PATH
         self._contract = None
         self._initialized = False
 
-        if not contract_address:
+        if not self.contract_address:
             bt.logging.warning('Issue competition contract address not set')
 
     def _ensure_contract(self) -> bool:
@@ -173,6 +227,104 @@ class IssueCompetitionContractClient:
 
         return self._contract is not None
 
+    def _raw_contract_read(self, method_name: str, args: dict = None) -> Optional[bytes]:
+        """
+        Read from contract using raw RPC call.
+
+        This is a workaround for substrate-interface Ink! 5 incompatibility.
+        Uses state_call to ContractsApi_call and extracts raw result bytes.
+
+        Args:
+            method_name: Contract method name (e.g., 'next_issue_id')
+            args: Optional method arguments
+
+        Returns:
+            Raw return data bytes, or None on error
+        """
+        if not self._ensure_contract():
+            return None
+
+        try:
+            # Get method selector from metadata
+            metadata_path = self.metadata_path.with_suffix('.json')
+            if not metadata_path.exists():
+                metadata_path = self.metadata_path  # Try .contract file
+
+            with open(metadata_path) as f:
+                metadata = json.load(f)
+
+            selector = None
+            for msg in metadata.get('spec', {}).get('messages', []):
+                if msg['label'] == method_name:
+                    selector = bytes.fromhex(msg['selector'].replace('0x', ''))
+                    break
+
+            if not selector:
+                bt.logging.error(f'Method {method_name} not found in contract metadata')
+                return None
+
+            # Build input data (selector + encoded args)
+            # For now, we only support no-arg methods
+            input_data = selector
+
+            # Build ContractsApi_call params
+            # origin (32 bytes) + dest (32 bytes) + value (16 bytes) + gas_limit (1 byte None) + storage_limit (1 byte None) + input_data (compact Vec)
+            from substrateinterface import Keypair
+            caller = Keypair.create_from_uri('//Alice')
+
+            origin = bytes.fromhex(self.subtensor.substrate.ss58_decode(caller.ss58_address))
+            dest = bytes.fromhex(self.subtensor.substrate.ss58_decode(self.contract_address))
+            value = b'\x00' * 16  # 0 balance
+            gas_limit = b'\x00'  # None
+            storage_limit = b'\x00'  # None
+
+            # Compact encode input_data length
+            data_len = len(input_data)
+            if data_len < 64:
+                compact_len = bytes([data_len << 2])
+            else:
+                compact_len = bytes([(data_len << 2) | 1, data_len >> 6])
+
+            call_params = origin + dest + value + gas_limit + storage_limit + compact_len + input_data
+
+            # Make state_call
+            result = self.subtensor.substrate.rpc_request(
+                'state_call',
+                ['ContractsApi_call', '0x' + call_params.hex()]
+            )
+
+            if not result.get('result'):
+                return None
+
+            raw = bytes.fromhex(result['result'].replace('0x', ''))
+
+            # Parse response to extract return data
+            # Structure: gas_consumed(16) + more_data... + return_value
+            if len(raw) < 32:
+                return None
+
+            # For simple u32 returns, the value is typically at offset 27
+            # For more complex returns, we'd need full SCALE decoding
+            # Return the raw bytes after gas info for caller to decode
+            return raw[16:]
+
+        except Exception as e:
+            bt.logging.debug(f'Raw contract read failed: {e}')
+            return None
+
+    def _extract_u32_from_response(self, response_bytes: bytes) -> Optional[int]:
+        """Extract u32 value from Ink! 5 contract response bytes."""
+        if not response_bytes or len(response_bytes) < 15:
+            return None
+
+        # For simple u32 returns in Ink! 5, value is at offset 11 in the response after gas
+        # (offset 27 from raw, minus 16 for gas = 11)
+        try:
+            import struct
+            return struct.unpack_from('<I', response_bytes, 11)[0]
+        except Exception:
+            return None
+
     @staticmethod
     def hash_url(url: str) -> bytes:
         """
@@ -215,9 +367,12 @@ class IssueCompetitionContractClient:
             return []
 
         try:
+            # ink! contract uses get_issues_by_status with Active status
+            # IssueStatus::Active = 1 in the enum
             result = self._contract.read(
                 self.subtensor.substrate,
-                'getAvailableIssues',
+                'get_issues_by_status',
+                args={'status': {'Active': None}},
             )
             if result.contract_result_data is None:
                 return []
@@ -246,8 +401,8 @@ class IssueCompetitionContractClient:
         try:
             result = self._contract.read(
                 self.subtensor.substrate,
-                'getIssue',
-                args={'issueId': issue_id},
+                'get_issue',
+                args={'issue_id': issue_id},
             )
             if result.contract_result_data is None:
                 return None
@@ -272,8 +427,8 @@ class IssueCompetitionContractClient:
         try:
             result = self._contract.read(
                 self.subtensor.substrate,
-                'isMinerInCompetition',
-                args={'minerHotkey': miner_hotkey},
+                'is_miner_in_competition',
+                args={'hotkey': miner_hotkey},
             )
             return bool(result.contract_result_data)
         except Exception as e:
@@ -293,7 +448,7 @@ class IssueCompetitionContractClient:
         try:
             result = self._contract.read(
                 self.subtensor.substrate,
-                'getActiveCompetitions',
+                'get_active_competitions',
             )
             if result.contract_result_data is None:
                 return []
@@ -322,8 +477,8 @@ class IssueCompetitionContractClient:
         try:
             result = self._contract.read(
                 self.subtensor.substrate,
-                'getCompetition',
-                args={'competitionId': competition_id},
+                'get_competition',
+                args={'competition_id': competition_id},
             )
             if result.contract_result_data is None:
                 return None
@@ -348,8 +503,8 @@ class IssueCompetitionContractClient:
         try:
             result = self._contract.read(
                 self.subtensor.substrate,
-                'getPairProposal',
-                args={'issueId': issue_id},
+                'get_pair_proposal',
+                args={'issue_id': issue_id},
             )
             if result.contract_result_data is None:
                 return None
@@ -371,7 +526,7 @@ class IssueCompetitionContractClient:
         try:
             result = self._contract.read(
                 self.subtensor.substrate,
-                'getAlphaPool',
+                'get_alpha_pool',
             )
             return int(result.contract_result_data or 0)
         except Exception as e:
@@ -419,11 +574,11 @@ class IssueCompetitionContractClient:
 
             result = self._contract.exec(
                 keypair=keypair,
-                method='proposePair',
+                method='propose_pair',
                 args={
-                    'issueId': issue_id,
-                    'miner1Hotkey': miner1_hotkey,
-                    'miner2Hotkey': miner2_hotkey,
+                    'issue_id': issue_id,
+                    'miner1_hotkey': miner1_hotkey,
+                    'miner2_hotkey': miner2_hotkey,
                 },
                 value=0,
                 gas_limit=DEFAULT_GAS_LIMIT,
@@ -465,8 +620,8 @@ class IssueCompetitionContractClient:
 
             result = self._contract.exec(
                 keypair=keypair,
-                method='votePair',
-                args={'issueId': issue_id},
+                method='vote_pair',
+                args={'issue_id': issue_id},
                 value=0,
                 gas_limit=DEFAULT_GAS_LIMIT,
             )
@@ -519,11 +674,11 @@ class IssueCompetitionContractClient:
 
             result = self._contract.exec(
                 keypair=keypair,
-                method='voteSolution',
+                method='vote_solution',
                 args={
-                    'competitionId': competition_id,
-                    'winnerHotkey': winner_hotkey,
-                    'prUrlHash': pr_url_hash,
+                    'competition_id': competition_id,
+                    'winner_hotkey': winner_hotkey,
+                    'pr_url_hash': list(pr_url_hash),  # Convert bytes to list for SCALE encoding
                 },
                 value=0,
                 gas_limit=DEFAULT_GAS_LIMIT,
@@ -565,8 +720,8 @@ class IssueCompetitionContractClient:
 
             result = self._contract.exec(
                 keypair=keypair,
-                method='voteTimeout',
-                args={'competitionId': competition_id},
+                method='vote_timeout',
+                args={'competition_id': competition_id},
                 value=0,
                 gas_limit=DEFAULT_GAS_LIMIT,
             )
@@ -613,10 +768,10 @@ class IssueCompetitionContractClient:
 
             result = self._contract.exec(
                 keypair=keypair,
-                method='voteCancel',
+                method='vote_cancel',
                 args={
-                    'competitionId': competition_id,
-                    'reasonHash': reason_hash,
+                    'competition_id': competition_id,
+                    'reason_hash': list(reason_hash),  # Convert bytes to list for SCALE encoding
                 },
                 value=0,
                 gas_limit=DEFAULT_GAS_LIMIT,
@@ -639,15 +794,23 @@ class IssueCompetitionContractClient:
 
     def _parse_issue(self, raw_data: dict) -> ContractIssue:
         """Parse raw contract data into ContractIssue."""
-        # Handle both snake_case and camelCase keys from Solidity contract
-        github_url_hash = raw_data.get('github_url_hash') or raw_data.get('githubUrlHash', [])
+        # ink! contract uses snake_case keys
+        github_url_hash = raw_data.get('github_url_hash')
+        if github_url_hash is None:
+            github_url_hash = raw_data.get('githubUrlHash', b'\x00' * 32)
         if isinstance(github_url_hash, str):
-            github_url_hash = bytes.fromhex(github_url_hash.replace('0x', ''))
+            hex_str = github_url_hash.replace('0x', '').replace('0X', '')
+            github_url_hash = bytes.fromhex(hex_str) if hex_str else b'\x00' * 32
         elif isinstance(github_url_hash, list):
-            github_url_hash = bytes(github_url_hash)
+            github_url_hash = bytes(github_url_hash) if github_url_hash else b'\x00' * 32
 
-        bounty_amount = raw_data.get('bounty_amount') or raw_data.get('bountyAmount', 0)
-        target_bounty = raw_data.get('target_bounty') or raw_data.get('targetBounty', 0)
+        # Use explicit None check to avoid treating 0 as falsy
+        bounty_amount = raw_data.get('bounty_amount')
+        if bounty_amount is None:
+            bounty_amount = raw_data.get('bountyAmount', 0)
+        target_bounty = raw_data.get('target_bounty')
+        if target_bounty is None:
+            target_bounty = raw_data.get('targetBounty', 0)
 
         return ContractIssue(
             id=raw_data.get('id', 0),
@@ -663,7 +826,7 @@ class IssueCompetitionContractClient:
 
     def _parse_competition(self, raw_data: dict) -> ContractCompetition:
         """Parse raw contract data into ContractCompetition."""
-        # Handle both snake_case and camelCase keys from Solidity contract
+        # ink! contract uses snake_case keys
         return ContractCompetition(
             id=raw_data.get('id', 0),
             issue_id=raw_data.get('issue_id') or raw_data.get('issueId', 0),

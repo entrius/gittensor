@@ -15,13 +15,13 @@ Simulates the full issue competition flow:
 8. Store to database and generate report
 
 Usage:
-    # Mock mode (default - no contract needed)
-    python run_issue_bounty_simulation.py --mock [--store] [--miners N] [--issues N]
+    # Live contract mode (default - uses real contract)
+    python run_issue_bounty_simulation.py --network localnet [--store]
+    python run_issue_bounty_simulation.py --network testnet --contract-address 5xxx [--store]
+    python run_issue_bounty_simulation.py --network mainnet --contract-address 5xxx [--store]
 
-    # Live contract mode
-    python run_issue_bounty_simulation.py --live --network localnet [--store]
-    python run_issue_bounty_simulation.py --live --network testnet --contract-address 5xxx [--store]
-    python run_issue_bounty_simulation.py --live --network mainnet --contract-address 5xxx [--store]
+    # Mock mode (for testing only - must be explicitly specified)
+    python run_issue_bounty_simulation.py --mock [--store] [--miners N] [--issues N]
 
 Networks:
     localnet: ws://127.0.0.1:9944 (default for local development)
@@ -1027,13 +1027,13 @@ Examples:
     mode_group.add_argument(
         '--mock',
         action='store_true',
-        default=True,
-        help='Use mock contract client (default)',
+        default=False,
+        help='Use mock contract client (for testing only - must be explicitly specified)',
     )
     mode_group.add_argument(
         '--live',
         action='store_true',
-        help='Use live contract on blockchain',
+        help='Use live contract on blockchain (default behavior)',
     )
 
     # Network options (for live mode)
@@ -1076,8 +1076,11 @@ Examples:
 
     args = parser.parse_args()
 
-    # Validate live mode requirements
-    if args.live:
+    # Determine mode: default to live unless --mock explicitly specified
+    use_live_mode = not args.mock
+
+    # Validate live mode requirements (applies when not using mock)
+    if use_live_mode:
         if args.network in ['testnet', 'mainnet'] and not args.contract_address:
             if not os.getenv('CONTRACT_ADDRESS'):
                 parser.error(f'--contract-address required for {args.network}')
@@ -1087,7 +1090,7 @@ Examples:
             num_miners=args.miners,
             num_issues=args.issues,
             store_results=args.store,
-            live_mode=args.live,
+            live_mode=use_live_mode,
             network=args.network,
             contract_address=args.contract_address,
             ws_endpoint=args.ws_endpoint,

@@ -23,3 +23,6 @@ CLAUDE.md
 # Rust/Cargo build artifacts
 target/
 **/*.rs.bk
+
+# ruff cache
+.ruff_cache/

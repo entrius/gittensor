@@ -491,6 +491,13 @@ def calculate_open_pr_collateral_score(pr: PullRequest) -> float:
     """
     from math import prod
 
+    # Guard against missing tier configuration
+    if pr.repository_tier_configuration is None:
+        bt.logging.warning(
+            f'OPEN PR #{pr.number} in {pr.repository_full_name} has no tier configuration. Skipping collateral calculation.'
+        )
+        return 0.0
+
     multipliers = {
         'repo_weight': pr.repo_weight_multiplier,
         'issue': pr.issue_multiplier,

@@ -72,7 +72,7 @@ setup(
     install_requires=requirements,
     entry_points={
         'console_scripts': [
-            'gittensor-cli=gittensor.cli.main:main',
+            'gitt=gittensor.cli.main:main',
         ],
     },
     classifiers=[

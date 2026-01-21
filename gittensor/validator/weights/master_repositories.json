@@ -1960,6 +1960,7 @@
     "weight": 3.6
   },
   "deskflow/deskflow": {
+    "inactive_at": "2026-01-23T00:00:00.000Z",
     "tier": "Bronze",
     "weight": 0.61
   },

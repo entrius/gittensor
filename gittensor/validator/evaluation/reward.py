@@ -125,6 +125,9 @@ async def get_rewards(
         )
         miner_evaluations[uid] = miner_evaluation
 
+    # If evaluation of miner was successful, store to cache, if api failure, fallback to previous successful evaluation if any
+    self.store_or_use_cached_evaluation(miner_evaluations)
+
     # Adjust scores for duplicate accounts
     detect_and_penalize_miners_sharing_github(miner_evaluations)
 

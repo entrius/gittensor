@@ -110,7 +110,7 @@ class Validator(BaseValidatorNeuron):
             except Exception as e:
                 bt.logging.error(f'Error when attempting to store miners evaluation for uid {uid}: {e}')
 
-    def store_or_use_cached_evaluation(self, miner_evaluations: Dict[int, MinerEvaluation]):
+    def store_or_use_cached_evaluation(self, miner_evaluations: Dict[int, MinerEvaluation]) -> None:
         """
         Handle evaluation cache: store successful evals, fallback to cache for GitHub failures.
 

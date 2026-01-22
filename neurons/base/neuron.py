@@ -51,9 +51,9 @@ class BaseNeuron(ABC):
     def config(cls):
         return config(cls)
 
-    subtensor: 'bt.subtensor'
-    wallet: 'bt.wallet'
-    metagraph: 'bt.metagraph'
+    subtensor: 'bt.Subtensor'
+    wallet: 'bt.Wallet'
+    metagraph: 'bt.Metagraph'
     spec_version: int = spec_version
 
     @property
@@ -85,8 +85,8 @@ class BaseNeuron(ABC):
             self.subtensor = MockSubtensor(self.config.netuid, wallet=self.wallet)
             self.metagraph = MockMetagraph(self.config.netuid, subtensor=self.subtensor)
         else:
-            self.wallet = bt.wallet(config=self.config)
-            self.subtensor = bt.subtensor(config=self.config)
+            self.wallet = bt.Wallet(config=self.config)
+            self.subtensor = bt.Subtensor(config=self.config)
             self.metagraph = self.subtensor.metagraph(self.config.netuid)
 
         bt.logging.info(f'Wallet: {self.wallet}')

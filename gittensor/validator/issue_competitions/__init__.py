@@ -32,6 +32,12 @@ from .solution_detection import (
     check_external_solution,
     detect_issue_solution,
 )
+from .emission_harvester import (
+    EmissionHarvester,
+    HarvestConfig,
+    create_harvester_for_validator,
+    get_harvest_config,
+)
 
 __all__ = [
     # Forward pass
@@ -58,4 +64,9 @@ __all__ = [
     'detect_issue_solution',
     'check_external_solution',
     'SolutionDetectionResult',
+    # Emission harvesting
+    'EmissionHarvester',
+    'HarvestConfig',
+    'create_harvester_for_validator',
+    'get_harvest_config',
 ]

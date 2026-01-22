@@ -7,8 +7,8 @@ Gittensor CLI - Main Entry Point
 This module provides the main CLI entry point for Gittensor miner commands.
 
 Usage:
-    gittensor-cli --help
-    gittensor-cli issue --help
+    gitt --help
+    gitt issue --help
 """
 
 import click
@@ -16,7 +16,7 @@ from .issue_commands import issue
 
 
 @click.group()
-@click.version_option(version='0.1.0', prog_name='gittensor-cli')
+@click.version_option(version='0.1.0', prog_name='gitt')
 def cli():
     """
     Gittensor CLI - Tools for miners on Subnet 74.

@@ -73,3 +73,38 @@ pub struct PairVoteCast {
     pub voter: AccountId,
     pub stake: u128,
 }
+
+/// Event emitted when emissions are harvested
+#[ink::event]
+pub struct EmissionsHarvested {
+    #[ink(topic)]
+    pub amount: u128,
+    pub bounties_filled: u32,
+    pub recycled: u128,
+}
+
+/// Event emitted when a bounty is filled from emissions
+#[ink::event]
+pub struct BountyFilled {
+    #[ink(topic)]
+    pub issue_id: u64,
+    pub amount: u128,
+}
+
+/// Event emitted when excess emissions are recycled to owner
+#[ink::event]
+pub struct EmissionsRecycled {
+    pub amount: u128,
+    #[ink(topic)]
+    pub destination: AccountId,
+}
+
+/// Event emitted when a bounty is paid out to a miner
+#[ink::event]
+pub struct BountyPaidOut {
+    #[ink(topic)]
+    pub issue_id: u64,
+    #[ink(topic)]
+    pub miner: AccountId,
+    pub amount: u128,
+}

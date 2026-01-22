@@ -304,9 +304,31 @@ def _read_contract_packed_storage(substrate, contract_addr: str) -> Optional[Dic
     }
 
 
+def _compute_ink5_lazy_key(root_key_hex: str, encoded_key: bytes) -> str:
+    """
+    Compute Ink! 5 lazy mapping storage key using blake2_128concat.
+
+    Args:
+        root_key_hex: Hex string of the mapping root key (e.g., '52789899')
+        encoded_key: SCALE-encoded key bytes
+
+    Returns:
+        Hex-encoded storage key
+    """
+    import hashlib
+
+    root_key = bytes.fromhex(root_key_hex.replace('0x', ''))
+    # Blake2_128Concat: blake2_128(root_key || encoded_key) || root_key || encoded_key
+    data = root_key + encoded_key
+    h = hashlib.blake2b(data, digest_size=16).digest()
+    return '0x' + (h + data).hex()
+
+
 def _read_issues_from_child_storage(substrate, contract_addr: str) -> List[Dict[str, Any]]:
     """
     Read all issues from contract child storage.
+
+    Uses Ink! 5 lazy mapping key computation to directly read issue storage.
 
     Args:
         substrate: SubstrateInterface instance
@@ -321,18 +343,28 @@ def _read_issues_from_child_storage(substrate, contract_addr: str) -> List[Dict[
     if not child_key:
         return []
 
-    # Get all storage keys
-    keys_result = substrate.rpc_request('childstate_getKeysPaged', [child_key, '0x', 100, None, None])
-    keys = keys_result.get('result', [])
+    # First, read packed storage to get next_issue_id
+    packed_storage = _read_contract_packed_storage(substrate, contract_addr)
+    if not packed_storage:
+        return []
 
-    # Issue keys contain '52789899' (the issues mapping root key from contract metadata)
-    issue_keys = [k for k in keys if '52789899' in k]
+    next_issue_id = packed_storage.get('next_issue_id', 1)
+
+    # If next_issue_id is 1, no issues have been registered yet
+    if next_issue_id <= 1:
+        return []
 
     issues = []
     status_names = ['Registered', 'Active', 'InCompetition', 'Completed', 'Cancelled']
 
-    for key in issue_keys:
-        val_result = substrate.rpc_request('childstate_getStorage', [child_key, key, None])
+    # Iterate through all issue IDs (1 to next_issue_id - 1)
+    # Issues mapping root key is '52789899'
+    for issue_id in range(1, next_issue_id):
+        # SCALE encode u64 as little-endian 8 bytes
+        encoded_id = struct.pack('<Q', issue_id)
+        lazy_key = _compute_ink5_lazy_key('52789899', encoded_id)
+
+        val_result = substrate.rpc_request('childstate_getStorage', [child_key, lazy_key, None])
         if not val_result.get('result'):
             continue
 
@@ -350,7 +382,7 @@ def _read_issues_from_child_storage(substrate, contract_addr: str) -> List[Dict[
             # registered_at_block: u32 (4 bytes)
 
             offset = 0
-            issue_id = struct.unpack_from('<Q', data, offset)[0]
+            stored_issue_id = struct.unpack_from('<Q', data, offset)[0]
             offset += 8
             offset += 32  # Skip url_hash
 
@@ -359,6 +391,10 @@ def _read_issues_from_child_storage(substrate, contract_addr: str) -> List[Dict[
             if len_byte & 0x03 == 0:
                 str_len = len_byte >> 2
                 offset += 1
+            elif len_byte & 0x03 == 1:
+                # Two-byte length
+                str_len = (data[offset] | (data[offset + 1] << 8)) >> 2
+                offset += 2
             else:
                 str_len = 0
                 offset += 1
@@ -381,7 +417,7 @@ def _read_issues_from_child_storage(substrate, contract_addr: str) -> List[Dict[
             status = status_names[status_byte] if status_byte < len(status_names) else 'Unknown'
 
             issues.append({
-                'id': issue_id,
+                'id': stored_issue_id,
                 'repository_full_name': repo_name,
                 'issue_number': issue_number,
                 'bounty_amount': bounty_amount,
@@ -453,9 +489,9 @@ def issue_list(rpc_url: str, contract: str, testnet: bool, from_api: bool):
 
     \b
     Example:
-        gittensor-cli issue list
-        gittensor-cli issue list --testnet
-        gittensor-cli issue list --from-api
+        gitt issue list
+        gitt issue list --testnet
+        gitt issue list --from-api
     """
     console.print('\n[bold cyan]Available Issues for Competition[/bold cyan]\n')
 
@@ -567,9 +603,9 @@ def issue_list(rpc_url: str, contract: str, testnet: bool, from_api: bool):
         console.print('[dim]Bounty Pool shows: filled/target (percentage)[/dim]')
     else:
         console.print('[yellow]No issues found. Register an issue with:[/yellow]')
-        console.print('[dim]  gittensor-cli issue register --repo owner/repo --issue 1 --bounty 100[/dim]')
+        console.print('[dim]  gitt issue register --repo owner/repo --issue 1 --bounty 100[/dim]')
 
-    console.print('\n[dim]Use "gittensor-cli issue prefer <id1> <id2> ..." to set preferences[/dim]')
+    console.print('\n[dim]Use "gitt issue prefer <id1> <id2> ..." to set preferences[/dim]')
 
 
 @issue.command('prefer')
@@ -588,8 +624,8 @@ def issue_prefer(issue_ids: tuple, clear: bool):
 
     \b
     Examples:
-        gittensor-cli issue prefer 42 15 8
-        gittensor-cli issue prefer 1 2 3 --clear
+        gitt issue prefer 42 15 8
+        gitt issue prefer 1 2 3 --clear
     """
     if clear:
         clear_preferences()
@@ -600,7 +636,7 @@ def issue_prefer(issue_ids: tuple, clear: bool):
             console.print(f'[cyan]Current preferences:[/cyan] {current}')
         else:
             console.print('[yellow]No preferences set. Provide issue IDs to set preferences.[/yellow]')
-        console.print('\n[dim]Usage: gittensor-cli issue prefer <id1> <id2> ...[/dim]')
+        console.print('\n[dim]Usage: gitt issue prefer <id1> <id2> ...[/dim]')
         return
 
     preferences = list(issue_ids)[:5]  # Max 5
@@ -637,7 +673,7 @@ def issue_enroll(issue_id: int):
 
     \b
     Example:
-        gittensor-cli issue enroll 42
+        gitt issue enroll 42
     """
     current = load_preferences()
     if issue_id in current:
@@ -682,8 +718,8 @@ def issue_status(wallet_name: str, wallet_hotkey: str, api_url: str):
 
     \b
     Example:
-        gittensor-cli issue status
-        gittensor-cli issue status --wallet-name mywallet
+        gitt issue status
+        gitt issue status --wallet-name mywallet
     """
     console.print('\n[bold cyan]Issue Competition Status[/bold cyan]\n')
 
@@ -699,7 +735,7 @@ def issue_status(wallet_name: str, wallet_hotkey: str, api_url: str):
     else:
         console.print(Panel(
             '[yellow]No preferences set.[/yellow]\n'
-            '[dim]Use "gittensor-cli issue prefer" to join competitions.[/dim]',
+            '[dim]Use "gitt issue prefer" to join competitions.[/dim]',
             title='Local Preferences',
             border_style='yellow',
         ))
@@ -745,8 +781,8 @@ def issue_withdraw(force: bool):
 
     \b
     Example:
-        gittensor-cli issue withdraw
-        gittensor-cli issue withdraw --force
+        gitt issue withdraw
+        gitt issue withdraw --force
     """
     preferences = load_preferences()
 
@@ -794,8 +830,8 @@ def issue_elo(wallet_name: str, wallet_hotkey: str, api_url: str):
 
     \b
     Example:
-        gittensor-cli issue elo
-        gittensor-cli issue elo --wallet-name mywallet
+        gitt issue elo
+        gitt issue elo --wallet-name mywallet
     """
     console.print('\n[bold cyan]ELO Rating[/bold cyan]\n')
 
@@ -868,8 +904,8 @@ def issue_competitions(api_url: str, limit: int):
 
     \b
     Example:
-        gittensor-cli issue competitions
-        gittensor-cli issue competitions --limit 20
+        gitt issue competitions
+        gitt issue competitions --limit 20
     """
     console.print('\n[bold cyan]Active Competitions[/bold cyan]\n')
 
@@ -926,8 +962,8 @@ def issue_leaderboard(api_url: str, limit: int):
 
     \b
     Example:
-        gittensor-cli issue leaderboard
-        gittensor-cli issue leaderboard --limit 25
+        gitt issue leaderboard
+        gitt issue leaderboard --limit 25
     """
     console.print('\n[bold cyan]ELO Leaderboard[/bold cyan]\n')
 
@@ -1035,8 +1071,8 @@ def issue_register(
 
     \b
     Examples:
-        gittensor-cli issue register --repo opentensor/btcli --issue 144 --bounty 100
-        gittensor-cli issue register --repo tensorflow/tensorflow --issue 12345 --bounty 50 --testnet
+        gitt issue register --repo opentensor/btcli --issue 144 --bounty 100
+        gitt issue register --repo tensorflow/tensorflow --issue 12345 --bounty 50 --testnet
     """
     console.print('\n[bold cyan]Register Issue for Competition[/bold cyan]\n')
 
@@ -1099,7 +1135,7 @@ def issue_register(
         else:
             # Load wallet for non-local networks
             console.print(f'[dim]Loading wallet {wallet_name}/{wallet_hotkey}...[/dim]')
-            wallet = bt.wallet(name=wallet_name, hotkey=wallet_hotkey)
+            wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
             keypair = Keypair(ss58_address=wallet.hotkey.ss58_address, public_key=wallet.hotkey.public_key)
 
         # Load contract

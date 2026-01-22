@@ -42,4 +42,14 @@ pub enum Error {
     InsufficientStake,
     /// Both miners in pair proposal are the same
     SameMiners,
+    /// Bounty not found for the given issue ID
+    BountyNotFound,
+    /// Bounty has not been completed yet
+    BountyNotCompleted,
+    /// Bounty has no funds allocated
+    BountyNotFunded,
+    /// Stake transfer operation failed
+    TransferFailed,
+    /// Chain extension call failed
+    ChainExtensionFailed,
 }

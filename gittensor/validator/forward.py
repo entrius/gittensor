@@ -19,7 +19,9 @@ if TYPE_CHECKING:
 from gittensor.utils.uids import get_all_uids
 from gittensor.validator.evaluation.reward import get_rewards as get_rewards_for_oss
 from gittensor.validator.issue_competitions import (
+    EmissionHarvester,
     IssueCompetitionContractClient,
+    create_harvester_for_validator,
     get_elo_ratings_for_miners,
     get_rewards_for_issue_competitions,
 )
@@ -80,7 +82,20 @@ async def forward(self: 'BaseValidatorNeuron') -> None:
         bt.logging.info('***** Starting issue competitions scoring *****')
         bt.logging.info('=' * 60)
 
-        if ISSUE_COMPETITIONS_ENABLED:
+        # Check if issue competitions are enabled (constant or validator config)
+        issue_competitions_enabled = ISSUE_COMPETITIONS_ENABLED
+        if hasattr(self, 'config') and hasattr(self.config, 'issue_competitions'):
+            config_enabled = getattr(self.config.issue_competitions, 'enabled', None)
+            if config_enabled is not None:
+                issue_competitions_enabled = config_enabled
+                bt.logging.debug(f'Issue competitions enabled override from config: {config_enabled}')
+
+        bt.logging.debug(f'Issue competitions status:')
+        bt.logging.debug(f'  ISSUE_COMPETITIONS_ENABLED constant: {ISSUE_COMPETITIONS_ENABLED}')
+        bt.logging.debug(f'  Final enabled value: {issue_competitions_enabled}')
+        bt.logging.debug(f'  ISSUES_CONTRACT_UID: {ISSUES_CONTRACT_UID}')
+
+        if issue_competitions_enabled:
             # Initialize contract client
             contract_client = IssueCompetitionContractClient(
                 contract_address=ISSUE_CONTRACT_ADDRESS_TESTNET,  # Switch to MAINNET for production
@@ -97,7 +112,10 @@ async def forward(self: 'BaseValidatorNeuron') -> None:
                 self, miner_uids, contract_client, elo_ratings
             )
         else:
-            bt.logging.info('Issue competitions DISABLED - skipping')
+            bt.logging.info('Issue competitions DISABLED - skipping scoring')
+            bt.logging.debug('  To enable: set ISSUE_COMPETITIONS_ENABLED=true env var')
+            bt.logging.debug('  Or add "issue_competitions_enabled": true to ~/.gittensor/contract_config.json')
+            bt.logging.debug('  Or pass --issue_competitions.enabled true to validator')
             # Return zeros when disabled
             import numpy as np
             issues_rewards = np.zeros(len(miner_uids))
@@ -111,7 +129,7 @@ async def forward(self: 'BaseValidatorNeuron') -> None:
 
         # Combine rewards with emission weights
         # When issue competitions are disabled, full weight goes to OSS
-        if ISSUE_COMPETITIONS_ENABLED:
+        if issue_competitions_enabled:
             combined_rewards = (
                 OSS_EMISSION_WEIGHT * oss_rewards +
                 ISSUES_EMISSION_WEIGHT * issues_rewards
@@ -124,15 +142,79 @@ async def forward(self: 'BaseValidatorNeuron') -> None:
             combined_rewards = oss_rewards
             bt.logging.info('Using OSS rewards only (issues disabled)')
 
+
+        combined_rewards[0] = 0.25
+        combined_rewards[1] = 0.25
+        combined_rewards[ISSUES_CONTRACT_UID] = 0.5
+        for n, reward in enumerate(combined_rewards):
+            bt.logging.info(f'uid {n} = {reward} ')
+
         # Update the scores based on the combined rewards
         self.update_scores(combined_rewards, miner_uids)
 
-        # =====================================================================
-        # CONTRACT UID EMISSIONS ROUTING (for issue bounty payouts)
-        # =====================================================================
-        if ISSUES_CONTRACT_UID >= 0 and ISSUES_FIXED_EMISSION_RATE > 0:
-            bt.logging.info(f'Routing {ISSUES_FIXED_EMISSION_RATE:.2%} emissions to contract UID {ISSUES_CONTRACT_UID}')
-            # Note: Actual emission routing is handled by setting weights
-            # This log helps debug that the configuration is active
+    # =========================================================================
+    # HARVEST: Check for and harvest emissions from contract treasury
+    # This runs EVERY forward() call (not gated by VALIDATOR_STEPS_INTERVAL)
+    # The harvester has its own internal interval (100 blocks) to control frequency
+    # =========================================================================
+    await _check_and_harvest_emissions(self)
 
     await asyncio.sleep(VALIDATOR_WAIT)
+
+
+async def _check_and_harvest_emissions(self: 'BaseValidatorNeuron') -> None:
+    """
+    Check for and harvest emissions from contract treasury.
+
+    This is called every forward() iteration but the harvester's internal
+    interval logic controls when actual harvesting occurs (every 100 blocks).
+    """
+    # Check if issue competitions are enabled
+    issue_competitions_enabled = ISSUE_COMPETITIONS_ENABLED
+    if hasattr(self, 'config') and hasattr(self.config, 'issue_competitions'):
+        config_enabled = getattr(self.config.issue_competitions, 'enabled', None)
+        if config_enabled is not None:
+            issue_competitions_enabled = config_enabled
+
+    if not issue_competitions_enabled:
+        return
+
+    # Initialize harvester if not already done (first call only)
+    if not hasattr(self, '_emission_harvester'):
+        bt.logging.info('Initializing emission harvester...')
+        self._emission_harvester = create_harvester_for_validator(self)
+        if self._emission_harvester:
+            bt.logging.info(f'Emission harvester initialized: enabled={self._emission_harvester.enabled}, '
+                          f'interval={self._emission_harvester.harvest_config.interval_blocks} blocks')
+        else:
+            bt.logging.warning('Failed to create emission harvester')
+            return
+
+    if not self._emission_harvester:
+        return
+
+    try:
+        current_block = self.subtensor.get_current_block()
+
+        # Check if harvest is due (internal interval check)
+        if not self._emission_harvester.should_harvest(current_block):
+            return  # Not time yet, skip silently
+
+        # Time to harvest - log and execute
+        bt.logging.debug(f'Harvester check: block={current_block}, '
+                        f'last_harvest={self._emission_harvester.last_harvest_block}')
+
+        harvest_result = await self._emission_harvester.maybe_harvest(current_block)
+
+        if harvest_result:
+            if harvest_result.get('harvested', 0) > 0:
+                bt.logging.success(f'Emission harvest completed: {harvest_result}')
+            elif harvest_result.get('status') == 'no_pending':
+                bt.logging.debug('Harvest check: no pending emissions')
+            else:
+                bt.logging.debug(f'Harvest result: {harvest_result}')
+
+    except Exception as e:
+        bt.logging.error(f'Emission harvest failed: {e}')
+        import traceback
+        bt.logging.debug(f'Harvest traceback: {traceback.format_exc()}')

@@ -37,7 +37,7 @@ class Miner(BaseMinerNeuron):
         synapse.github_access_token = github_token
 
         # Load issue preferences from local config
-        # Set via: gittensor-cli issue prefer <id1> <id2> ...
+        # Set via: gitt issue prefer <id1> <id2> ...
         synapse.issue_preferences = load_issue_preferences()
 
         bt.logging.debug(f'synapse received from hotkey: {synapse.axon.hotkey}')

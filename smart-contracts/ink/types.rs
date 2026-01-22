@@ -177,3 +177,15 @@ pub struct CancelVote {
     /// Number of votes cast
     pub votes_count: u64,
 }
+
+/// Result of a harvest_emissions call
+#[derive(Debug, Clone, Encode, Decode, Default)]
+#[cfg_attr(feature = "std", derive(scale_info::TypeInfo))]
+pub struct HarvestResult {
+    /// Total amount harvested from emissions
+    pub harvested: u128,
+    /// Number of bounties filled
+    pub bounties_filled: u32,
+    /// Amount recycled to owner
+    pub recycled: u128,
+}

@@ -52,8 +52,41 @@ ISSUE_CONTRACT_ADDRESS_TESTNET = ""
 # Feature Flags
 # =============================================================================
 
-# Enable/disable issue competitions via environment variable
-ISSUE_COMPETITIONS_ENABLED = os.environ.get('ISSUE_COMPETITIONS_ENABLED', 'false').lower() == 'true'
+
+def _get_issue_competitions_enabled() -> bool:
+    """
+    Check if issue competitions are enabled.
+
+    Priority:
+    1. ISSUE_COMPETITIONS_ENABLED environment variable
+    2. issue_competitions_enabled from ~/.gittensor/contract_config.json
+    3. Default: False
+
+    Returns:
+        True if issue competitions should be enabled
+    """
+    # 1. Environment variable (highest priority)
+    env_val = os.environ.get('ISSUE_COMPETITIONS_ENABLED')
+    if env_val is not None:
+        return env_val.lower() == 'true'
+
+    # 2. Config file
+    config_path = Path.home() / '.gittensor' / 'contract_config.json'
+    if config_path.exists():
+        try:
+            config = json.loads(config_path.read_text())
+            enabled = config.get('issue_competitions_enabled')
+            if enabled is not None:
+                return bool(enabled)
+        except (json.JSONDecodeError, IOError):
+            pass
+
+    # 3. Default
+    return False
+
+
+# Enable/disable issue competitions - checks env var and config file
+ISSUE_COMPETITIONS_ENABLED = _get_issue_competitions_enabled()
 
 # Contract UID for emissions routing (-1 = disabled)
 ISSUES_CONTRACT_UID = int(os.environ.get('ISSUES_CONTRACT_UID', '-1'))

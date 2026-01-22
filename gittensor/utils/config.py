@@ -154,8 +154,33 @@ def add_miner_args(cls, parser):
     )
 
 
+def add_contract_args(parser):
+    """Add contract-related arguments for emission harvesting."""
+    parser.add_argument(
+        '--contract.harvest_emissions',
+        type=bool,
+        default=True,
+        help='Enable automatic emission harvesting from contract treasury (default: True)',
+    )
+    parser.add_argument(
+        '--contract.harvest_interval',
+        type=int,
+        default=100,
+        help='Blocks between harvest attempts (default: 100, ~25 seconds at 250ms blocks)',
+    )
+    parser.add_argument(
+        '--contract.address',
+        type=str,
+        default=None,
+        help='Contract address for emission harvesting (reads from ~/.gittensor/contract_config.json if not set)',
+    )
+
+
 def add_validator_args(cls, parser):
     """Add validator specific arguments to the parser."""
+
+    # Add contract args for emission harvesting
+    add_contract_args(parser)
 
     parser.add_argument(
         '--neuron.name',
@@ -250,9 +275,9 @@ def config(cls):
     Returns the configuration object specific to this miner or validator after adding relevant arguments.
     """
     parser = argparse.ArgumentParser()
-    bt.wallet.add_args(parser)
-    bt.subtensor.add_args(parser)
+    bt.Wallet.add_args(parser)
+    bt.Subtensor.add_args(parser)
     bt.logging.add_args(parser)
-    bt.axon.add_args(parser)
+    bt.Axon.add_args(parser)
     cls.add_args(parser)
-    return bt.config(parser)
+    return bt.Config(parser)

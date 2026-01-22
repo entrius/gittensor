@@ -7,7 +7,54 @@ mod types;
 pub use errors::Error;
 pub use types::*;
 
-#[ink::contract]
+// ============================================================================
+// Chain Extension for Subtensor Staking Operations
+// ============================================================================
+
+/// Subtensor chain extension for staking operations.
+/// These functions allow the contract to interact with the Subtensor runtime
+/// for querying and transferring stake.
+///
+/// Note: All functions use `handle_status = false` which means they return
+/// raw values without automatic error handling from status codes. The caller
+/// is responsible for interpreting the return values.
+#[ink::chain_extension(extension = 5001)]
+pub trait SubtensorExtension {
+    type ErrorCode = ();
+
+    /// Query stake info for hotkey/coldkey/netuid.
+    /// Returns the stake amount or 0 if no stake exists.
+    #[ink(function = 0, handle_status = false)]
+    fn get_stake_info(hotkey: [u8; 32], coldkey: [u8; 32], netuid: u16) -> u128;
+
+    /// Transfer stake ownership to a different coldkey.
+    /// Returns 0 on success, non-zero error code on failure.
+    #[ink(function = 6, handle_status = false)]
+    fn transfer_stake(
+        destination_coldkey: [u8; 32],
+        hotkey: [u8; 32],
+        origin_netuid: u16,
+        destination_netuid: u16,
+        amount: u128,
+    ) -> u32;
+}
+
+/// Custom environment with Subtensor chain extension.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[ink::scale_derive(TypeInfo)]
+pub enum CustomEnvironment {}
+
+impl ink::env::Environment for CustomEnvironment {
+    const MAX_EVENT_TOPICS: usize = 4;
+    type AccountId = ink::primitives::AccountId;
+    type Balance = u128;
+    type Hash = ink::primitives::Hash;
+    type Timestamp = u64;
+    type BlockNumber = u32;
+    type ChainExtension = SubtensorExtension;
+}
+
+#[ink::contract(env = crate::CustomEnvironment)]
 mod issue_bounty_manager {
     use crate::events::*;
     use crate::types::*;
@@ -95,6 +142,12 @@ mod issue_bounty_manager {
         cancel_votes: Mapping<u64, CancelVote>,
         has_cancel_vote: Mapping<u64, bool>,
         cancel_vote_voters: Mapping<(u64, AccountId), bool>,
+
+        // Emission management
+        /// Emissions that couldn't be recycled (kept for next harvest)
+        overflow_pool: Balance,
+        /// Block number of last harvest
+        last_harvest_block: u32,
     }
 
     impl IssueBountyManager {
@@ -134,6 +187,8 @@ mod issue_bounty_manager {
                 cancel_votes: Mapping::default(),
                 has_cancel_vote: Mapping::default(),
                 cancel_vote_voters: Mapping::default(),
+                overflow_pool: 0,
+                last_harvest_block: 0,
             }
         }
 
@@ -648,6 +703,259 @@ mod issue_bounty_manager {
             self.competition_deadline_blocks = competition_deadline_blocks;
             self.proposal_expiry_blocks = proposal_expiry_blocks;
             Ok(())
+        }
+
+        // ========================================================================
+        // Emission Harvesting Functions
+        // ========================================================================
+
+        /// Query pending emissions (stake on treasury hotkey owned by owner).
+        /// Uses chain extension to query Subtensor runtime.
+        #[ink(message)]
+        pub fn get_pending_emissions(&self) -> Balance {
+            let hotkey_bytes: [u8; 32] = *self.treasury_hotkey.as_ref();
+            let coldkey_bytes: [u8; 32] = *self.owner.as_ref();
+
+            // With handle_status = false, the chain extension returns raw value
+            self.env()
+                .extension()
+                .get_stake_info(hotkey_bytes, coldkey_bytes, self.netuid)
+        }
+
+        /// Returns the overflow pool balance (emissions that couldn't be recycled).
+        #[ink(message)]
+        pub fn get_overflow_pool(&self) -> Balance {
+            self.overflow_pool
+        }
+
+        /// Returns the block number of the last harvest.
+        #[ink(message)]
+        pub fn get_last_harvest_block(&self) -> u32 {
+            self.last_harvest_block
+        }
+
+        /// Harvest emissions and distribute to bounties.
+        ///
+        /// PERMISSIONLESS - Anyone can call this function.
+        ///
+        /// Flow:
+        /// 1. Check pending emissions on treasury hotkey (via chain extension)
+        /// 2. Add any overflow from previous harvests
+        /// 3. Fill pending bounties in queue order
+        /// 4. Recycle any remainder to owner's coldkey
+        #[ink(message)]
+        pub fn harvest_emissions(&mut self) -> Result<HarvestResult, Error> {
+            // Query pending emissions via chain extension
+            let pending = self.get_pending_emissions();
+
+            // Include any overflow from previous harvests
+            let total_available = pending.saturating_add(self.overflow_pool);
+
+            if total_available == 0 {
+                return Ok(HarvestResult {
+                    harvested: 0,
+                    bounties_filled: 0,
+                    recycled: 0,
+                });
+            }
+
+            // Add pending emissions to the alpha pool for bounty filling
+            self.alpha_pool = self.alpha_pool.saturating_add(pending);
+            self.overflow_pool = 0; // Clear overflow, it's now in alpha_pool
+
+            let mut bounties_filled: u32 = 0;
+            let alpha_before = self.alpha_pool;
+
+            // Fill bounties from alpha pool (existing logic)
+            self.fill_bounties();
+
+            // Count how many bounties were filled
+            let filled_amount = alpha_before.saturating_sub(self.alpha_pool);
+            if filled_amount > 0 {
+                // Count filled bounties by checking active issues
+                for issue_id in self.bounty_queue.iter() {
+                    if let Some(issue) = self.issues.get(*issue_id) {
+                        if issue.bounty_amount >= issue.target_bounty {
+                            bounties_filled = bounties_filled.saturating_add(1);
+
+                            self.env().emit_event(BountyFilled {
+                                issue_id: *issue_id,
+                                amount: issue.bounty_amount,
+                            });
+                        }
+                    }
+                }
+            }
+
+            // Recycle any remaining alpha pool to owner
+            let recycled = self.alpha_pool;
+            if recycled > 0 {
+                let owner_bytes: [u8; 32] = *self.owner.as_ref();
+                let hotkey_bytes: [u8; 32] = *self.treasury_hotkey.as_ref();
+
+                // With handle_status = false, returns raw u32 (0 = success)
+                let result = self.env().extension().transfer_stake(
+                    owner_bytes,
+                    hotkey_bytes,
+                    self.netuid,
+                    self.netuid,
+                    recycled,
+                );
+
+                if result == 0 {
+                    // Transfer successful
+                    self.alpha_pool = 0;
+                    self.env().emit_event(EmissionsRecycled {
+                        amount: recycled,
+                        destination: self.owner,
+                    });
+                } else {
+                    // Transfer failed, keep in overflow for next harvest
+                    self.overflow_pool = self.overflow_pool.saturating_add(recycled);
+                    self.alpha_pool = 0;
+                }
+            }
+
+            self.last_harvest_block = self.env().block_number();
+
+            let harvested = pending;
+            let final_recycled = if self.overflow_pool > 0 { 0 } else { recycled };
+
+            self.env().emit_event(EmissionsHarvested {
+                amount: harvested,
+                bounties_filled,
+                recycled: final_recycled,
+            });
+
+            Ok(HarvestResult {
+                harvested,
+                bounties_filled,
+                recycled: final_recycled,
+            })
+        }
+
+        /// Harvest emissions using an externally-provided amount.
+        ///
+        /// PERMISSIONLESS - Anyone can call this function.
+        ///
+        /// This is a workaround for local development where the chain extension
+        /// for get_stake_info may not be implemented. The validator queries
+        /// stake directly via subtensor RPC and passes the amount here.
+        ///
+        /// Flow:
+        /// 1. Add provided amount to alpha pool
+        /// 2. Fill pending bounties in queue order
+        /// 3. Move remainder to overflow pool (for recycling later)
+        #[ink(message)]
+        pub fn harvest_emissions_external(&mut self, amount: Balance) -> Result<HarvestResult, Error> {
+            if amount == 0 {
+                return Ok(HarvestResult {
+                    harvested: 0,
+                    bounties_filled: 0,
+                    recycled: 0,
+                });
+            }
+
+            // Add the externally-provided emission amount to the alpha pool
+            self.alpha_pool = self.alpha_pool.saturating_add(amount);
+            let alpha_before = self.alpha_pool;
+
+            // Fill bounties from alpha pool (existing FIFO logic)
+            self.fill_bounties();
+
+            // Count how many bounties were filled
+            let mut bounties_filled: u32 = 0;
+            let filled_amount = alpha_before.saturating_sub(self.alpha_pool);
+            if filled_amount > 0 {
+                for issue_id in self.bounty_queue.iter() {
+                    if let Some(issue) = self.issues.get(*issue_id) {
+                        if issue.bounty_amount >= issue.target_bounty {
+                            bounties_filled = bounties_filled.saturating_add(1);
+
+                            self.env().emit_event(BountyFilled {
+                                issue_id: *issue_id,
+                                amount: issue.bounty_amount,
+                            });
+                        }
+                    }
+                }
+            }
+
+            // Move any remainder to overflow pool (will be recycled on next regular harvest)
+            let recycled = self.alpha_pool;
+            if recycled > 0 {
+                self.overflow_pool = self.overflow_pool.saturating_add(recycled);
+                self.alpha_pool = 0;
+            }
+
+            self.last_harvest_block = self.env().block_number();
+
+            self.env().emit_event(EmissionsHarvested {
+                amount,
+                bounties_filled,
+                recycled,
+            });
+
+            Ok(HarvestResult {
+                harvested: amount,
+                bounties_filled,
+                recycled,
+            })
+        }
+
+        /// Pay out a completed bounty to the winning miner.
+        ///
+        /// Called when a competition is completed and verified.
+        /// Transfers stake ownership to the miner's coldkey.
+        #[ink(message)]
+        pub fn payout_bounty(
+            &mut self,
+            competition_id: u64,
+            miner_coldkey: AccountId,
+        ) -> Result<Balance, Error> {
+            // Only owner can initiate payouts
+            if self.env().caller() != self.owner {
+                return Err(Error::NotOwner);
+            }
+
+            let competition = self
+                .competitions
+                .get(competition_id)
+                .ok_or(Error::CompetitionNotFound)?;
+
+            if competition.status != CompetitionStatus::Completed {
+                return Err(Error::BountyNotCompleted);
+            }
+
+            let payout_amount = competition.payout_amount;
+            if payout_amount == 0 {
+                return Err(Error::BountyNotFunded);
+            }
+
+            // Transfer stake ownership to miner via chain extension
+            let miner_bytes: [u8; 32] = *miner_coldkey.as_ref();
+            let hotkey_bytes: [u8; 32] = *self.treasury_hotkey.as_ref();
+
+            // With handle_status = false, returns raw u32 (0 = success)
+            let result = self.env().extension().transfer_stake(
+                miner_bytes,
+                hotkey_bytes,
+                self.netuid,
+                self.netuid,
+                payout_amount,
+            );
+
+            if result == 0 {
+                // Transfer successful
+                self.env().emit_event(BountyPaidOut {
+                    issue_id: competition.issue_id,
+                    miner: miner_coldkey,
+                    amount: payout_amount,
+                });
+                Ok(payout_amount)
+            } else {
+                Err(Error::TransferFailed)
+            }
         }
 
         // ========================================================================

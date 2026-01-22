@@ -23,10 +23,6 @@ except ImportError:
     ContractInstance = None
     Keypair = None
 
-# Default path to contract metadata file (ink! Rust contract)
-DEFAULT_CONTRACT_METADATA_PATH = Path(__file__).parent.parent.parent.parent.parent / \
-    'smart-contracts' / 'ink' / 'target' / 'ink' / 'issue_bounty_manager.contract'
-
 # Default gas limits for contract calls
 DEFAULT_GAS_LIMIT = {
     'ref_time': 10_000_000_000,  # 10 billion
@@ -35,6 +31,110 @@ DEFAULT_GAS_LIMIT = {
 
 # Config file path for local dev environment
 GITTENSOR_CONFIG_PATH = Path.home() / '.gittensor' / 'contract_config.json'
+
+# Contract metadata filename
+CONTRACT_METADATA_FILENAME = 'issue_bounty_manager.contract'
+
+
+def _find_contract_metadata_path() -> Optional[Path]:
+    """
+    Find the contract metadata file path using multiple resolution strategies.
+
+    Priority:
+    1. CONTRACT_METADATA_PATH environment variable
+    2. metadata_path from ~/.gittensor/contract_config.json
+    3. Search common locations relative to gittensor package
+
+    Returns:
+        Path to contract metadata file if found, None otherwise
+    """
+    # 1. Environment variable (highest priority)
+    env_path = os.environ.get('CONTRACT_METADATA_PATH')
+    if env_path:
+        path = Path(env_path)
+        if path.exists():
+            bt.logging.debug(f'Using contract metadata from env: {path}')
+            return path
+        bt.logging.warning(f'CONTRACT_METADATA_PATH set but file not found: {path}')
+
+    # 2. Config file (written by dev-environment up.sh)
+    if GITTENSOR_CONFIG_PATH.exists():
+        try:
+            config = json.loads(GITTENSOR_CONFIG_PATH.read_text())
+            metadata_path = config.get('metadata_path')
+            if metadata_path:
+                path = Path(metadata_path)
+                if path.exists():
+                    bt.logging.debug(f'Using contract metadata from config: {path}')
+                    return path
+        except (json.JSONDecodeError, IOError):
+            pass
+
+    # 3. Search common locations relative to this package
+    # Try to find gittensor package root by looking for known markers
+    search_paths = []
+
+    # From this file's location, try to find the smart-contracts folder
+    # This file is at: gittensor/gittensor/validator/issue_competitions/contract_client.py
+    # smart-contracts is at: gittensor/smart-contracts/
+    current_file = Path(__file__).resolve()
+
+    # Go up to gittensor/gittensor/, then up one more to gittensor/ (repo root)
+    # contract_client.py -> issue_competitions -> validator -> gittensor -> gittensor (repo)
+    repo_root_candidates = [
+        current_file.parent.parent.parent.parent,  # 4 levels up from contract_client.py
+    ]
+
+    # Also check if we're installed as a package and have a data directory
+    try:
+        import gittensor
+        if hasattr(gittensor, '__path__'):
+            for gittensor_path in gittensor.__path__:
+                # gittensor package is at gittensor/gittensor/, so repo is one level up
+                repo_root_candidates.append(Path(gittensor_path).parent)
+    except (ImportError, AttributeError):
+        pass
+
+    # Build search paths
+    for repo_root in repo_root_candidates:
+        search_paths.extend([
+            repo_root / 'smart-contracts' / 'ink' / 'target' / 'ink' / CONTRACT_METADATA_FILENAME,
+            repo_root / 'smart-contracts' / 'target' / 'ink' / CONTRACT_METADATA_FILENAME,
+        ])
+
+    # Try each path
+    for path in search_paths:
+        if path.exists():
+            bt.logging.debug(f'Found contract metadata at: {path}')
+            return path
+
+    # Log searched paths for debugging
+    bt.logging.debug(f'Contract metadata not found. Searched: {[str(p) for p in search_paths[:4]]}')
+    return None
+
+
+def get_contract_metadata_path() -> Optional[Path]:
+    """
+    Get the contract metadata file path.
+
+    This function caches the result after first call.
+
+    Returns:
+        Path to contract metadata file if found, None otherwise
+    """
+    if not hasattr(get_contract_metadata_path, '_cached_path'):
+        get_contract_metadata_path._cached_path = _find_contract_metadata_path()
+    return get_contract_metadata_path._cached_path
+
+
+# Default path - resolved lazily
+def _get_default_metadata_path() -> Path:
+    """Get default metadata path, with fallback to a placeholder."""
+    path = get_contract_metadata_path()
+    if path:
+        return path
+    # Return a placeholder that will fail gracefully
+    return Path.home() / '.gittensor' / 'contracts' / CONTRACT_METADATA_FILENAME
 
 
 def get_contract_address_from_config() -> Optional[str]:
@@ -174,9 +274,14 @@ class IssueCompetitionContractClient:
                     self.contract_address = ''
 
         self.subtensor = subtensor
-        self.metadata_path = metadata_path or DEFAULT_CONTRACT_METADATA_PATH
+        self.metadata_path = metadata_path or _get_default_metadata_path()
         self._contract = None
         self._initialized = False
+
+        bt.logging.debug(f'IssueCompetitionContractClient initialized:')
+        bt.logging.debug(f'  contract_address: {self.contract_address or "NOT SET"}')
+        bt.logging.debug(f'  metadata_path: {self.metadata_path}')
+        bt.logging.debug(f'  metadata_exists: {self.metadata_path.exists() if self.metadata_path else False}')
 
         if not self.contract_address:
             bt.logging.warning('Issue competition contract address not set')
@@ -325,6 +430,62 @@ class IssueCompetitionContractClient:
         except Exception:
             return None
 
+    def _extract_u128_from_response(self, response_bytes: bytes) -> Optional[int]:
+        """Extract u128 value from Ink! 5 contract response bytes."""
+        if not response_bytes or len(response_bytes) < 27:
+            return None
+
+        # Ink! 5 contract response structure after gas info (16 bytes):
+        # - Result flags and status bytes
+        # - Then the actual return value
+        # For u128, we need to find where the 16-byte value starts
+        try:
+            import struct
+            # The response structure varies, try to find the u128 value
+            # Typically at offset 11 after gas (which is already removed)
+            # u128 is 16 bytes little-endian
+            low = struct.unpack_from('<Q', response_bytes, 11)[0]
+            high = struct.unpack_from('<Q', response_bytes, 19)[0]
+            return low + (high << 64)
+        except Exception:
+            return None
+
+    def _read_contract_u128(self, method_name: str) -> int:
+        """
+        Read a u128 value from a no-arg contract method using raw RPC.
+
+        This is a workaround for substrate-interface Ink! 5 decoding issues.
+
+        Args:
+            method_name: Contract method name
+
+        Returns:
+            u128 value, or 0 on error
+        """
+        response = self._raw_contract_read(method_name)
+        if response is None:
+            return 0
+
+        value = self._extract_u128_from_response(response)
+        return value if value is not None else 0
+
+    def _read_contract_u32(self, method_name: str) -> int:
+        """
+        Read a u32 value from a no-arg contract method using raw RPC.
+
+        Args:
+            method_name: Contract method name
+
+        Returns:
+            u32 value, or 0 on error
+        """
+        response = self._raw_contract_read(method_name)
+        if response is None:
+            return 0
+
+        value = self._extract_u32_from_response(response)
+        return value if value is not None else 0
+
     @staticmethod
     def hash_url(url: str) -> bytes:
         """
@@ -355,9 +516,307 @@ class IssueCompetitionContractClient:
     # Query Functions (Read-only)
     # =========================================================================
 
+    def _get_read_keypair(self) -> 'Keypair':
+        """Get a keypair for read-only contract calls."""
+        if not SUBSTRATE_INTERFACE_AVAILABLE:
+            return None
+        # Use Alice as a dummy caller for read-only queries
+        return Keypair.create_from_uri('//Alice')
+
+    def _get_child_storage_key(self) -> Optional[str]:
+        """
+        Get the child storage key for the contract's trie.
+
+        Returns:
+            Hex-encoded child storage key or None if contract doesn't exist
+        """
+        if not self.subtensor or not self.contract_address:
+            return None
+
+        try:
+            contract_info = self.subtensor.substrate.query(
+                'Contracts', 'ContractInfoOf', [self.contract_address]
+            )
+            if not contract_info:
+                return None
+
+            # Handle both object with .value and direct dict returns
+            if hasattr(contract_info, 'value'):
+                info = contract_info.value
+            else:
+                info = contract_info
+
+            if not info or 'trie_id' not in info:
+                return None
+
+            trie_id = info['trie_id']
+
+            # Handle different formats: hex string, tuple of ints, or tuple wrapper
+            if isinstance(trie_id, str):
+                trie_id_hex = trie_id.replace('0x', '')
+                trie_id_bytes = bytes.fromhex(trie_id_hex)
+            elif isinstance(trie_id, (tuple, list)):
+                # Might be ((bytes...),) or (bytes...) - unwrap if needed
+                if len(trie_id) == 1 and isinstance(trie_id[0], (tuple, list)):
+                    trie_id = trie_id[0]
+                trie_id_bytes = bytes(trie_id)
+            elif isinstance(trie_id, bytes):
+                trie_id_bytes = trie_id
+            else:
+                bt.logging.debug(f'Unknown trie_id format: {type(trie_id)}')
+                return None
+
+            prefix = b':child_storage:default:'
+            return '0x' + (prefix + trie_id_bytes).hex()
+        except Exception as e:
+            bt.logging.debug(f'Error getting child storage key: {e}')
+            return None
+
+    def _compute_ink5_lazy_key(self, root_key_hex: str, encoded_key: bytes) -> str:
+        """
+        Compute Ink! 5 lazy mapping storage key using blake2_128concat.
+
+        Args:
+            root_key_hex: Hex string of the mapping root key (e.g., '52789899')
+            encoded_key: SCALE-encoded key bytes
+
+        Returns:
+            Hex-encoded storage key
+        """
+        root_key = bytes.fromhex(root_key_hex.replace('0x', ''))
+        # Blake2_128Concat: blake2_128(root_key || encoded_key) || root_key || encoded_key
+        data = root_key + encoded_key
+        h = hashlib.blake2b(data, digest_size=16).digest()
+        return '0x' + (h + data).hex()
+
+    def _read_packed_storage(self) -> Optional[dict]:
+        """
+        Read the packed root storage from the contract.
+
+        Returns:
+            Dict with next_issue_id, next_competition_id, etc. or None on error
+        """
+        import struct
+
+        child_key = self._get_child_storage_key()
+        if not child_key:
+            return None
+
+        try:
+            # Get all storage keys
+            keys_result = self.subtensor.substrate.rpc_request(
+                'childstate_getKeysPaged', [child_key, '0x', 10, None, None]
+            )
+            keys = keys_result.get('result', [])
+
+            # Find the packed storage key (ends with 00000000)
+            packed_key = None
+            for k in keys:
+                if k.endswith('00000000'):
+                    packed_key = k
+                    break
+
+            if not packed_key:
+                return None
+
+            # Read the packed storage value
+            val_result = self.subtensor.substrate.rpc_request(
+                'childstate_getStorage', [child_key, packed_key, None]
+            )
+            if not val_result.get('result'):
+                return None
+
+            data = bytes.fromhex(val_result['result'].replace('0x', ''))
+
+            # Decode packed struct (minimum 74 bytes for core fields)
+            if len(data) < 74:
+                return None
+
+            offset = 64  # Skip owner (32) + treasury (32)
+            netuid = struct.unpack_from('<H', data, offset)[0]
+            offset += 2
+            next_issue_id = struct.unpack_from('<Q', data, offset)[0]
+            offset += 8
+            next_competition_id = struct.unpack_from('<Q', data, offset)[0]
+
+            return {
+                'netuid': netuid,
+                'next_issue_id': next_issue_id,
+                'next_competition_id': next_competition_id,
+            }
+        except Exception as e:
+            bt.logging.debug(f'Error reading packed storage: {e}')
+            return None
+
+    def _read_issue_from_child_storage(self, issue_id: int) -> Optional[ContractIssue]:
+        """
+        Read a single issue from contract child storage using Ink! 5 lazy mapping keys.
+
+        Args:
+            issue_id: The issue ID to read
+
+        Returns:
+            ContractIssue or None if not found
+        """
+        import struct
+
+        child_key = self._get_child_storage_key()
+        if not child_key:
+            return None
+
+        try:
+            # Compute lazy mapping key for issues (root key: 52789899)
+            encoded_id = struct.pack('<Q', issue_id)
+            lazy_key = self._compute_ink5_lazy_key('52789899', encoded_id)
+
+            val_result = self.subtensor.substrate.rpc_request(
+                'childstate_getStorage', [child_key, lazy_key, None]
+            )
+            if not val_result.get('result'):
+                return None
+
+            data = bytes.fromhex(val_result['result'].replace('0x', ''))
+
+            # Decode Issue struct
+            offset = 0
+            stored_id = struct.unpack_from('<Q', data, offset)[0]
+            offset += 8
+
+            github_url_hash = data[offset:offset + 32]
+            offset += 32
+
+            # String: compact-encoded length
+            len_byte = data[offset]
+            if len_byte & 0x03 == 0:
+                str_len = len_byte >> 2
+                offset += 1
+            elif len_byte & 0x03 == 1:
+                str_len = (data[offset] | (data[offset + 1] << 8)) >> 2
+                offset += 2
+            else:
+                str_len = 0
+                offset += 1
+
+            repo_name = data[offset:offset + str_len].decode('utf-8', errors='replace')
+            offset += str_len
+
+            issue_number = struct.unpack_from('<I', data, offset)[0]
+            offset += 4
+
+            bounty_lo, bounty_hi = struct.unpack_from('<QQ', data, offset)
+            bounty_amount = bounty_lo + (bounty_hi << 64)
+            offset += 16
+
+            target_lo, target_hi = struct.unpack_from('<QQ', data, offset)
+            target_bounty = target_lo + (target_hi << 64)
+            offset += 16
+
+            status_byte = data[offset]
+            offset += 1
+
+            registered_at_block = struct.unpack_from('<I', data, offset)[0]
+
+            return ContractIssue(
+                id=stored_id,
+                github_url_hash=github_url_hash,
+                repository_full_name=repo_name,
+                issue_number=issue_number,
+                bounty_amount=int(bounty_amount),
+                target_bounty=int(target_bounty),
+                status=IssueStatus(status_byte),
+                registered_at_block=registered_at_block,
+                is_fully_funded=int(bounty_amount) >= int(target_bounty),
+            )
+        except Exception as e:
+            bt.logging.debug(f'Error reading issue {issue_id} from child storage: {e}')
+            return None
+
+    def _read_competition_from_child_storage(self, comp_id: int) -> Optional[ContractCompetition]:
+        """
+        Read a single competition from contract child storage using Ink! 5 lazy mapping keys.
+
+        Args:
+            comp_id: The competition ID to read
+
+        Returns:
+            ContractCompetition or None if not found
+        """
+        import struct
+
+        child_key = self._get_child_storage_key()
+        if not child_key:
+            return None
+
+        try:
+            # Compute lazy mapping key for competitions (root key: f3a8d93e)
+            encoded_id = struct.pack('<Q', comp_id)
+            lazy_key = self._compute_ink5_lazy_key('f3a8d93e', encoded_id)
+
+            val_result = self.subtensor.substrate.rpc_request(
+                'childstate_getStorage', [child_key, lazy_key, None]
+            )
+            if not val_result.get('result'):
+                return None
+
+            data = bytes.fromhex(val_result['result'].replace('0x', ''))
+
+            # Decode Competition struct
+            offset = 0
+            stored_id = struct.unpack_from('<Q', data, offset)[0]
+            offset += 8
+
+            issue_id = struct.unpack_from('<Q', data, offset)[0]
+            offset += 8
+
+            miner1_hotkey = self.subtensor.substrate.ss58_encode(data[offset:offset + 32].hex())
+            offset += 32
+
+            miner2_hotkey = self.subtensor.substrate.ss58_encode(data[offset:offset + 32].hex())
+            offset += 32
+
+            start_block = struct.unpack_from('<I', data, offset)[0]
+            offset += 4
+
+            submission_window_end = struct.unpack_from('<I', data, offset)[0]
+            offset += 4
+
+            deadline_block = struct.unpack_from('<I', data, offset)[0]
+            offset += 4
+
+            status_byte = data[offset]
+            offset += 1
+
+            winner_hotkey = self.subtensor.substrate.ss58_encode(data[offset:offset + 32].hex())
+            offset += 32
+
+            winning_pr_hash = data[offset:offset + 32]
+            offset += 32
+
+            payout_lo, payout_hi = struct.unpack_from('<QQ', data, offset)
+            payout_amount = payout_lo + (payout_hi << 64)
+
+            return ContractCompetition(
+                id=stored_id,
+                issue_id=issue_id,
+                miner1_hotkey=miner1_hotkey,
+                miner2_hotkey=miner2_hotkey,
+                start_block=start_block,
+                submission_window_end_block=submission_window_end,
+                deadline_block=deadline_block,
+                status=CompetitionStatus(status_byte),
+                winner_hotkey=winner_hotkey if winner_hotkey != '5C4hrfjw9DjXZTzV3MwzrrAr9P1MJhSrvWGWqi1eSuyUpnhM' else None,
+                winning_pr_url_hash=winning_pr_hash if winning_pr_hash != b'\x00' * 32 else None,
+                payout_amount=int(payout_amount) if payout_amount > 0 else None,
+            )
+        except Exception as e:
+            bt.logging.debug(f'Error reading competition {comp_id} from child storage: {e}')
+            return None
+
     def get_available_issues(self) -> List[ContractIssue]:
         """
         Query contract for issues with status=Active (ready for competition).
+
+        Uses direct child storage reads to bypass Ink! 5 type decoding issues.
 
         Returns:
             List of active issues available for competition
@@ -366,20 +825,24 @@ class IssueCompetitionContractClient:
             bt.logging.debug('Contract not ready, returning empty issue list')
             return []
 
+        # Use direct child storage reads (bypasses Ink! 5 type issues)
         try:
-            # ink! contract uses get_issues_by_status with Active status
-            # IssueStatus::Active = 1 in the enum
-            result = self._contract.read(
-                self.subtensor.substrate,
-                'get_issues_by_status',
-                args={'status': {'Active': None}},
-            )
-            if result.contract_result_data is None:
+            packed = self._read_packed_storage()
+            if not packed:
+                bt.logging.debug('Could not read packed storage')
+                return []
+
+            next_issue_id = packed.get('next_issue_id', 1)
+            if next_issue_id <= 1:
                 return []
 
             issues = []
-            for issue_data in result.contract_result_data:
-                issues.append(self._parse_issue(issue_data))
+            for issue_id in range(1, next_issue_id):
+                issue = self._read_issue_from_child_storage(issue_id)
+                if issue and issue.status == IssueStatus.ACTIVE:
+                    issues.append(issue)
+
+            bt.logging.debug(f'Found {len(issues)} active issues via child storage')
             return issues
         except Exception as e:
             bt.logging.error(f'Error fetching available issues: {e}')
@@ -388,6 +851,8 @@ class IssueCompetitionContractClient:
     def get_issue(self, issue_id: int) -> Optional[ContractIssue]:
         """
         Get a specific issue by ID.
+
+        Uses direct child storage reads to bypass Ink! 5 type decoding issues.
 
         Args:
             issue_id: The issue ID to query
@@ -398,15 +863,9 @@ class IssueCompetitionContractClient:
         if not self._ensure_contract():
             return None
 
+        # Use direct child storage read (bypasses Ink! 5 type issues)
         try:
-            result = self._contract.read(
-                self.subtensor.substrate,
-                'get_issue',
-                args={'issue_id': issue_id},
-            )
-            if result.contract_result_data is None:
-                return None
-            return self._parse_issue(result.contract_result_data)
+            return self._read_issue_from_child_storage(issue_id)
         except Exception as e:
             bt.logging.error(f'Error fetching issue {issue_id}: {e}')
             return None
@@ -425,8 +884,9 @@ class IssueCompetitionContractClient:
             return False
 
         try:
+            keypair = self._get_read_keypair()
             result = self._contract.read(
-                self.subtensor.substrate,
+                keypair,
                 'is_miner_in_competition',
                 args={'hotkey': miner_hotkey},
             )
@@ -439,23 +899,32 @@ class IssueCompetitionContractClient:
         """
         Get all active competitions.
 
+        Uses direct child storage reads to bypass Ink! 5 type decoding issues.
+
         Returns:
             List of active competitions
         """
         if not self._ensure_contract():
             return []
 
+        # Use direct child storage reads (bypasses Ink! 5 type issues)
         try:
-            result = self._contract.read(
-                self.subtensor.substrate,
-                'get_active_competitions',
-            )
-            if result.contract_result_data is None:
+            packed = self._read_packed_storage()
+            if not packed:
+                bt.logging.debug('Could not read packed storage for competitions')
+                return []
+
+            next_comp_id = packed.get('next_competition_id', 1)
+            if next_comp_id <= 1:
                 return []
 
             competitions = []
-            for comp_data in result.contract_result_data:
-                competitions.append(self._parse_competition(comp_data))
+            for comp_id in range(1, next_comp_id):
+                comp = self._read_competition_from_child_storage(comp_id)
+                if comp and comp.status == CompetitionStatus.ACTIVE:
+                    competitions.append(comp)
+
+            bt.logging.debug(f'Found {len(competitions)} active competitions via child storage')
             return competitions
         except Exception as e:
             bt.logging.error(f'Error fetching active competitions: {e}')
@@ -464,6 +933,8 @@ class IssueCompetitionContractClient:
     def get_competition(self, competition_id: int) -> Optional[ContractCompetition]:
         """
         Get a specific competition by ID.
+
+        Uses direct child storage reads to bypass Ink! 5 type decoding issues.
 
         Args:
             competition_id: The competition ID to query
@@ -474,15 +945,9 @@ class IssueCompetitionContractClient:
         if not self._ensure_contract():
             return None
 
+        # Use direct child storage read (bypasses Ink! 5 type issues)
         try:
-            result = self._contract.read(
-                self.subtensor.substrate,
-                'get_competition',
-                args={'competition_id': competition_id},
-            )
-            if result.contract_result_data is None:
-                return None
-            return self._parse_competition(result.contract_result_data)
+            return self._read_competition_from_child_storage(competition_id)
         except Exception as e:
             bt.logging.error(f'Error fetching competition {competition_id}: {e}')
             return None
@@ -501,8 +966,9 @@ class IssueCompetitionContractClient:
             return None
 
         try:
+            keypair = self._get_read_keypair()
             result = self._contract.read(
-                self.subtensor.substrate,
+                keypair,
                 'get_pair_proposal',
                 args={'issue_id': issue_id},
             )
@@ -523,12 +989,11 @@ class IssueCompetitionContractClient:
         if not self._ensure_contract():
             return 0
 
+        # Use raw RPC call due to substrate-interface Ink! 5 decoding issues
         try:
-            result = self._contract.read(
-                self.subtensor.substrate,
-                'get_alpha_pool',
-            )
-            return int(result.contract_result_data or 0)
+            value = self._read_contract_u128('get_alpha_pool')
+            bt.logging.debug(f'Alpha pool (raw read): {value}')
+            return value
         except Exception as e:
             bt.logging.error(f'Error fetching alpha pool: {e}')
             return 0
@@ -542,7 +1007,7 @@ class IssueCompetitionContractClient:
         issue_id: int,
         miner1_hotkey: str,
         miner2_hotkey: str,
-        wallet: bt.wallet,
+        wallet: bt.Wallet,
     ) -> bool:
         """
         Propose a miner pair for competition.
@@ -595,7 +1060,7 @@ class IssueCompetitionContractClient:
             bt.logging.error(f'Error proposing pair: {e}')
             return False
 
-    def vote_pair(self, issue_id: int, wallet: bt.wallet) -> bool:
+    def vote_pair(self, issue_id: int, wallet: bt.Wallet) -> bool:
         """
         Vote on an existing pair proposal.
 
@@ -642,7 +1107,7 @@ class IssueCompetitionContractClient:
         competition_id: int,
         winner_hotkey: str,
         pr_url: str,
-        wallet: bt.wallet,
+        wallet: bt.Wallet,
     ) -> bool:
         """
         Vote for a competition winner.
@@ -695,7 +1160,7 @@ class IssueCompetitionContractClient:
             bt.logging.error(f'Error voting solution: {e}')
             return False
 
-    def vote_timeout(self, competition_id: int, wallet: bt.wallet) -> bool:
+    def vote_timeout(self, competition_id: int, wallet: bt.Wallet) -> bool:
         """
         Vote to timeout a competition that has passed its deadline.
 
@@ -741,7 +1206,7 @@ class IssueCompetitionContractClient:
         self,
         competition_id: int,
         reason: str,
-        wallet: bt.wallet,
+        wallet: bt.Wallet,
     ) -> bool:
         """
         Vote to cancel a competition (e.g., external solution detected).
@@ -851,3 +1316,331 @@ class IssueCompetitionContractClient:
             proposed_at_block=raw_data.get('proposed_at_block') or raw_data.get('proposedAtBlock', 0),
             total_stake_voted=raw_data.get('total_stake_voted') or raw_data.get('totalStakeVoted', 0),
         )
+
+    # =========================================================================
+    # Emission Harvesting Functions
+    # =========================================================================
+
+    def get_pending_emissions(self) -> int:
+        """
+        Query pending emissions on the treasury hotkey owned by the contract.
+
+        Uses the contract's chain extension to query Subtensor staking info.
+
+        Returns:
+            Pending emission amount (0 if contract not ready or no emissions)
+        """
+        if not self._ensure_contract():
+            return 0
+
+        # Use raw RPC call due to substrate-interface Ink! 5 decoding issues
+        try:
+            value = self._read_contract_u128('get_pending_emissions')
+            bt.logging.debug(f'Pending emissions (raw read): {value}')
+            return value
+        except Exception as e:
+            bt.logging.error(f'Error fetching pending emissions: {e}')
+            return 0
+
+    def get_overflow_pool(self) -> int:
+        """
+        Query the overflow pool balance (emissions that couldn't be recycled).
+
+        Returns:
+            Overflow pool balance (0 if contract not ready)
+        """
+        if not self._ensure_contract():
+            return 0
+
+        # Use raw RPC call due to substrate-interface Ink! 5 decoding issues
+        try:
+            value = self._read_contract_u128('get_overflow_pool')
+            bt.logging.debug(f'Overflow pool (raw read): {value}')
+            return value
+        except Exception as e:
+            bt.logging.error(f'Error fetching overflow pool: {e}')
+            return 0
+
+    def get_last_harvest_block(self) -> int:
+        """
+        Query the block number of the last harvest.
+
+        Returns:
+            Last harvest block number (0 if never harvested or not ready)
+        """
+        if not self._ensure_contract():
+            return 0
+
+        # Use raw RPC call due to substrate-interface Ink! 5 decoding issues
+        try:
+            value = self._read_contract_u32('get_last_harvest_block')
+            bt.logging.debug(f'Last harvest block (raw read): {value}')
+            return value
+        except Exception as e:
+            bt.logging.error(f'Error fetching last harvest block: {e}')
+            return 0
+
+    def harvest_emissions(self, wallet: bt.Wallet) -> Optional[dict]:
+        """
+        Harvest emissions from the treasury hotkey and distribute to bounties.
+
+        This function is PERMISSIONLESS - anyone can call it.
+        It queries pending emissions, fills bounties, and recycles the remainder.
+
+        Args:
+            wallet: Wallet for signing the transaction (any valid wallet works)
+
+        Returns:
+            HarvestResult dict with harvested, bounties_filled, recycled; None on error
+        """
+        if not self._ensure_contract():
+            bt.logging.warning('Cannot harvest emissions: contract not ready')
+            return None
+
+        try:
+            # Check pending emissions first
+            pending = self.get_pending_emissions()
+            if pending == 0:
+                bt.logging.debug('No pending emissions to harvest')
+                return {'harvested': 0, 'bounties_filled': 0, 'recycled': 0, 'status': 'no_pending'}
+
+            bt.logging.info(f'Harvesting {pending} pending emissions...')
+
+            keypair = Keypair.create_from_uri(wallet.hotkey.ss58_address)
+
+            result = self._contract.exec(
+                keypair=keypair,
+                method='harvest_emissions',
+                args={},
+                value=0,
+                gas_limit={
+                    'ref_time': 50_000_000_000,  # 50 billion
+                    'proof_size': 1_000_000,  # 1 MB
+                },
+            )
+
+            if result.is_success:
+                # Parse result from contract return value
+                harvest_result = result.contract_result_data
+                if harvest_result:
+                    harvested = harvest_result.get('harvested', 0)
+                    bounties_filled = harvest_result.get('bounties_filled', 0)
+                    recycled = harvest_result.get('recycled', 0)
+                    bt.logging.success(
+                        f'Harvested {harvested} emissions, '
+                        f'filled {bounties_filled} bounties, '
+                        f'recycled {recycled}'
+                    )
+                    return {
+                        'harvested': harvested,
+                        'bounties_filled': bounties_filled,
+                        'recycled': recycled,
+                        'status': 'success',
+                    }
+                else:
+                    bt.logging.info(f'Harvest succeeded: {result.extrinsic_hash}')
+                    return {'status': 'success', 'tx_hash': result.extrinsic_hash}
+            else:
+                bt.logging.warning(f'Harvest failed: {result.error_message}')
+                return {'status': 'failed', 'error': result.error_message}
+
+        except Exception as e:
+            bt.logging.error(f'Harvest error: {e}')
+            return {'status': 'error', 'error': str(e)}
+
+    def payout_bounty(
+        self,
+        competition_id: int,
+        miner_coldkey: str,
+        wallet: bt.Wallet,
+    ) -> Optional[int]:
+        """
+        Pay out a completed bounty to the winning miner.
+
+        This transfers stake ownership from the treasury hotkey to the miner's coldkey.
+        Only the contract owner can call this function.
+
+        Args:
+            competition_id: ID of the completed competition
+            miner_coldkey: SS58 address of the miner's coldkey
+            wallet: Owner wallet for signing
+
+        Returns:
+            Payout amount on success, None on error
+        """
+        if not self._ensure_contract():
+            bt.logging.warning('Cannot payout bounty: contract not ready')
+            return None
+
+        try:
+            bt.logging.info(
+                f'Paying out bounty for competition {competition_id} '
+                f'to miner {miner_coldkey[:16]}...'
+            )
+
+            keypair = Keypair.create_from_uri(wallet.hotkey.ss58_address)
+
+            result = self._contract.exec(
+                keypair=keypair,
+                method='payout_bounty',
+                args={
+                    'competition_id': competition_id,
+                    'miner_coldkey': miner_coldkey,
+                },
+                value=0,
+                gas_limit=DEFAULT_GAS_LIMIT,
+            )
+
+            if result.is_success:
+                payout_amount = result.contract_result_data
+                bt.logging.success(
+                    f'Bounty payout succeeded: {payout_amount} to {miner_coldkey[:16]}...'
+                )
+                return int(payout_amount) if payout_amount else 0
+            else:
+                bt.logging.error(f'Bounty payout failed: {result.error_message}')
+                return None
+
+        except Exception as e:
+            bt.logging.error(f'Error paying out bounty: {e}')
+            return None
+
+    def get_stake_via_subtensor(
+        self,
+        treasury_hotkey: str,
+        treasury_coldkey: str,
+        netuid: int,
+    ) -> int:
+        """
+        Query stake directly via subtensor RPC (bypasses chain extension).
+
+        This is a workaround for local development where the chain extension
+        for get_stake_info may not be implemented. Queries the Alpha stake
+        directly from the subtensor storage.
+
+        Args:
+            treasury_hotkey: SS58 address of the treasury hotkey
+            treasury_coldkey: SS58 address of the treasury coldkey
+            netuid: Subnet ID
+
+        Returns:
+            Stake amount in RAO (0 if not found or error)
+        """
+        if not self.subtensor:
+            bt.logging.warning('Cannot query stake: subtensor not configured')
+            return 0
+
+        try:
+            result = self.subtensor.substrate.query(
+                module='SubtensorModule',
+                storage_function='Alpha',
+                params=[treasury_hotkey, treasury_coldkey, netuid],
+            )
+            stake = 0
+
+            if result is None:
+                stake = 0
+            elif hasattr(result, 'value'):
+                val = result.value
+                # Handle U64F64 fixed-point format: {'bits': value}
+                # U64F64 stores value * 2^64, so divide to get actual TAO
+                # Then multiply by 1e9 to convert TAO to RAO
+                if isinstance(val, dict) and 'bits' in val:
+                    bits = int(val['bits'])
+                    # Convert from U64F64 to RAO: (bits / 2^64) * 1e9
+                    stake = int(bits / (2**64) * 1_000_000_000)
+                    bt.logging.debug(f'Alpha U64F64 bits={bits}, converted to {stake} RAO')
+                elif val:
+                    stake = int(val)
+            elif isinstance(result, dict):
+                # Direct dict result (not wrapped in scale object)
+                if 'bits' in result:
+                    bits = int(result['bits'])
+                    stake = int(bits / (2**64) * 1_000_000_000)
+                else:
+                    stake = int(result.get('value', result.get('Alpha', 0)) or 0)
+            elif isinstance(result, (int, float)):
+                stake = int(result)
+            else:
+                # Try to convert directly
+                stake = int(result) if result else 0
+
+            bt.logging.debug(
+                f'Stake via subtensor RPC: hotkey={treasury_hotkey[:16]}..., '
+                f'coldkey={treasury_coldkey[:16]}..., netuid={netuid}, stake={stake}'
+            )
+            return stake
+        except Exception as e:
+            bt.logging.error(f'Error querying stake via subtensor: {e}')
+            return 0
+
+    def harvest_emissions_external(
+        self,
+        wallet: bt.Wallet,
+        amount: int,
+    ) -> Optional[dict]:
+        """
+        Harvest emissions using an externally-provided amount.
+
+        This is a workaround for local development where the chain extension
+        for get_stake_info may not be implemented. The validator queries
+        stake directly via subtensor RPC and passes the amount here.
+
+        Args:
+            wallet: Wallet for signing the transaction
+            amount: Amount of emissions to harvest (from subtensor query)
+
+        Returns:
+            HarvestResult dict with harvested, bounties_filled, recycled; None on error
+        """
+        if not self._ensure_contract():
+            bt.logging.warning('Cannot harvest emissions: contract not ready')
+            return None
+
+        if amount == 0:
+            bt.logging.debug('No emissions to harvest (amount=0)')
+            return {'harvested': 0, 'bounties_filled': 0, 'recycled': 0, 'status': 'no_pending'}
+
+        try:
+            bt.logging.info(f'Harvesting {amount} emissions (external)...')
+
+            keypair = Keypair.create_from_uri(wallet.hotkey.ss58_address)
+
+            result = self._contract.exec(
+                keypair=keypair,
+                method='harvest_emissions_external',
+                args={'amount': amount},
+                value=0,
+                gas_limit={
+                    'ref_time': 50_000_000_000,  # 50 billion
+                    'proof_size': 1_000_000,  # 1 MB
+                },
+            )
+
+            if result.is_success:
+                harvest_result = result.contract_result_data
+                if harvest_result:
+                    harvested = harvest_result.get('harvested', 0)
+                    bounties_filled = harvest_result.get('bounties_filled', 0)
+                    recycled = harvest_result.get('recycled', 0)
+                    bt.logging.success(
+                        f'Harvested (external) {harvested} emissions, '
+                        f'filled {bounties_filled} bounties, '
+                        f'recycled {recycled}'
+                    )
+                    return {
+                        'harvested': harvested,
+                        'bounties_filled': bounties_filled,
+                        'recycled': recycled,
+                        'status': 'success',
+                    }
+                else:
+                    bt.logging.info(f'Harvest (external) succeeded: {result.extrinsic_hash}')
+                    return {'status': 'success', 'tx_hash': result.extrinsic_hash}
+            else:
+                bt.logging.warning(f'Harvest (external) failed: {result.error_message}')
+                return {'status': 'failed', 'error': result.error_message}
+
+        except Exception as e:
+            bt.logging.error(f'Harvest (external) error: {e}')
+            return {'status': 'error', 'error': str(e)}

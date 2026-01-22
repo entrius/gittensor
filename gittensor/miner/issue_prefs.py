@@ -31,7 +31,7 @@ def load_issue_preferences() -> List[int]:
     Load miner's issue preferences from local config file.
 
     The preferences file is created by the CLI command:
-        gittensor-cli issue prefer <id1> <id2> ...
+        gitt issue prefer <id1> <id2> ...
 
     Returns:
         List of issue IDs in preference order (most preferred first).

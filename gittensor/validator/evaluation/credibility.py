@@ -38,7 +38,7 @@ def calculate_tier_stats(
     repo_token_scores_per_tier: Dict[Tier, Dict[str, float]] = {tier: defaultdict(float) for tier in Tier}
 
     for pr in merged_prs:
-        if (tier := get_tier(pr)) and not pr.low_value_pr:
+        if tier := get_tier(pr):
             stats[tier].merged_count += 1
             repos_per_tier[tier].add(pr.repository_full_name)
             repo_token_scores_per_tier[tier][pr.repository_full_name] += pr.token_score

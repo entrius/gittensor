@@ -18,7 +18,7 @@
 
 import threading
 import time
-from typing import Dict
+from typing import Dict, List
 
 import bittensor as bt
 import wandb
@@ -83,13 +83,32 @@ class Validator(BaseValidatorNeuron):
         self.load_state()
 
     async def bulk_store_evaluation(self, miner_evals: Dict[int, MinerEvaluation]):
-        """
-        Wrapper function to store all miner evaluations at once.
-        """
+        """Store all miner evaluations, log summary rather than per-UID."""
+        if self.db_storage is None:
+            return
 
-        if self.db_storage is not None:
-            for uid, evaluation in miner_evals.items():
-                await self.store_evaluation(uid, evaluation)
+        successful_count = 0
+        failed_uids: List[int] = []
+
+        for uid, evaluation in miner_evals.items():
+            try:
+                storage_result = self.db_storage.store_evaluation(evaluation)
+                if storage_result.success:
+                    successful_count += 1
+                else:
+                    failed_uids.append(uid)
+                    bt.logging.warning(f'Storage partially failed for UID {uid}:')
+                    for error in storage_result.errors:
+                        bt.logging.warning(f'  - {error}')
+            except Exception as e:
+                failed_uids.append(uid)
+                bt.logging.error(f'Error storing evaluation for UID {uid}: {e}')
+
+        # Summary logging
+        if successful_count > 0:
+            bt.logging.success(f'Stored validation results for {successful_count} UIDs to DB')
+        if failed_uids:
+            bt.logging.warning(f'Failed to store {len(failed_uids)} UIDs: {failed_uids}')
 
     async def store_evaluation(self, uid: int, miner_eval: MinerEvaluation):
         """

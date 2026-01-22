@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Dict
 
+from aiohttp import ClientConnectorError
+
 import bittensor as bt
 import numpy as np
 
@@ -47,6 +49,9 @@ async def query_miner(self, uid: int) -> GitPatSynapse:
         miner_response = response[0] if response else None
         return miner_response
 
+    except ClientConnectorError:
+        bt.logging.warning(f'Cannot connect to UID {uid} - miner unreachable')
+        return None
     except Exception as e:
         bt.logging.error(f'Error querying miner UID {uid}: {e}')
         return None

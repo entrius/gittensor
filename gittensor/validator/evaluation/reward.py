@@ -4,10 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Dict
 
-from aiohttp import ClientConnectorError
-
 import bittensor as bt
 import numpy as np
+from aiohttp import ClientConnectorError
 
 from gittensor.classes import MinerEvaluation
 from gittensor.synapses import GitPatSynapse

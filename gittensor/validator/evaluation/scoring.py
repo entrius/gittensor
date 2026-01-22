@@ -350,7 +350,11 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
                 evaluation.current_tier = tier
 
         # Set overall qualified unique repos count (Bronze threshold is lowest, so use that for overall count)
-        evaluation.qualified_unique_repos_count = tier_stats[Tier.BRONZE].qualified_unique_repo_count + tier_stats[Tier.SILVER].qualified_unique_repo_count + tier_stats[Tier.GOLD].qualified_unique_repo_count
+        evaluation.qualified_unique_repos_count = (
+            tier_stats[Tier.BRONZE].qualified_unique_repo_count
+            + tier_stats[Tier.SILVER].qualified_unique_repo_count
+            + tier_stats[Tier.GOLD].qualified_unique_repo_count
+        )
 
         # Determine next tier for display
         current_tier_str = evaluation.current_tier.value if evaluation.current_tier else 'None'

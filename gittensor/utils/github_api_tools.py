@@ -48,13 +48,8 @@ QUERY = """
               lastEditedAt
               bodyText
               state
-              commits(first: 100) {
+              commits {
                 totalCount
-                nodes {
-                  commit {
-                    message
-                  }
-                }
               }
               repository {
                 name
@@ -82,7 +77,7 @@ QUERY = """
               mergedBy {
                 login
               }
-              closingIssuesReferences(first: 50) {
+              closingIssuesReferences(first: 10) {
                 nodes {
                   number
                   title
@@ -95,7 +90,7 @@ QUERY = """
                   authorAssociation
                 }
               }
-              reviews(first: 50, states: APPROVED) {
+              reviews(first: 10, states: APPROVED) {
                 nodes {
                   author {
                     login

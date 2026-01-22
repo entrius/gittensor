@@ -357,7 +357,7 @@ def get_github_graphql_query(
         Optional[requests.Response]: Response object from the GraphQL query or None if errors occurred
     """
 
-    attempts = 6
+    max_attempts = 8
     headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
     variables = {
         'userId': global_user_id,
@@ -365,7 +365,7 @@ def get_github_graphql_query(
         'cursor': cursor,
     }
 
-    for attempt in range(attempts):
+    for attempt in range(max_attempts):
         try:
             response = requests.post(
                 f'{BASE_GITHUB_API_URL}/graphql',
@@ -376,29 +376,28 @@ def get_github_graphql_query(
 
             if response.status_code == 200:
                 return response
+
             # error - log and retry
-            elif attempt < (attempts - 1):
-                # Exponential backoff: 5s, 10s, 20s, 40s, 80s
-                backoff_delay = 5 * (2**attempt)
+            if attempt < (max_attempts - 1):
+                backoff_delay = min(5 * (2**attempt), 30)  # cap at 30s
                 bt.logging.warning(
-                    f'GraphQL request failed with status {response.status_code} (attempt {attempt + 1}/{attempts}), retrying in {backoff_delay}s...'
+                    f'GraphQL request for PRs failed with status {response.status_code} (attempt {attempt + 1}/{max_attempts}), retrying in {backoff_delay}s...'
                 )
                 time.sleep(backoff_delay)
             else:
                 bt.logging.error(
-                    f'GraphQL request failed with status {response.status_code} after {attempts} attempts: {response.text}'
+                    f'GraphQL request for PRs failed with status {response.status_code} after {max_attempts} attempts: {response.text}'
                 )
 
         except requests.exceptions.RequestException as e:
-            if attempt < (attempts - 1):
-                # Exponential backoff: 5s, 10s, 20s, 40s, 80s
-                backoff_delay = 5 * (2**attempt)
+            if attempt < (max_attempts - 1):
+                backoff_delay = min(5 * (2**attempt), 30)  # cap at 30s
                 bt.logging.warning(
-                    f'GraphQL request connection error (attempt {attempt + 1}/{attempts}): {e}, retrying in {backoff_delay}s...'
+                    f'GraphQL request connection error (attempt {attempt + 1}/{max_attempts}): {e}, retrying in {backoff_delay}s...'
                 )
                 time.sleep(backoff_delay)
             else:
-                bt.logging.error(f'GraphQL request failed after {attempts} attempts: {e}')
+                bt.logging.error(f'GraphQL request failed after {max_attempts} attempts: {e}')
                 return None
 
     return None

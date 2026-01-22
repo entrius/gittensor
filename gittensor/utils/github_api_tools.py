@@ -282,11 +282,11 @@ def execute_graphql_query(
     query: str,
     variables: Dict[str, Any],
     token: str,
-    max_attempts: int = 6,
+    max_attempts: int = 8,
     timeout: int = 30,
 ) -> Optional[Dict[str, Any]]:
     """
-    Execute a GraphQL query with retry logic and exponential backoff.
+    Execute a GraphQL query with retry logic and backoff.
 
     Args:
         query: The GraphQL query string
@@ -314,7 +314,7 @@ def execute_graphql_query(
 
             # Retry on failure
             if attempt < (max_attempts - 1):
-                backoff_delay = 5 * (2**attempt)  # 5s, 10s, 20s, 40s, 80s
+                backoff_delay = min(5 * (2**attempt), 30)  # max of 30 second wait between retries
                 bt.logging.warning(
                     f'GraphQL request failed with status {response.status_code} '
                     f'(attempt {attempt + 1}/{max_attempts}), retrying in {backoff_delay}s...'

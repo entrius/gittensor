@@ -1515,12 +1515,12 @@ class IssueCompetitionContractClient:
         Query stake directly via subtensor RPC (bypasses chain extension).
 
         This is a workaround for local development where the chain extension
-        for get_stake_info may not be implemented. Queries the Alpha stake
+        for get_stake_info may not be implemented. Queries the TotalHotkeyAlpha
         directly from the subtensor storage.
 
         Args:
             treasury_hotkey: SS58 address of the treasury hotkey
-            treasury_coldkey: SS58 address of the treasury coldkey
+            treasury_coldkey: SS58 address of the treasury coldkey (unused but kept for API compat)
             netuid: Subnet ID
 
         Returns:
@@ -1531,10 +1531,12 @@ class IssueCompetitionContractClient:
             return 0
 
         try:
+            # Use TotalHotkeyAlpha which returns actual stake in RAO
+            # (Alpha returns a U64F64 weighted value which is harder to interpret)
             result = self.subtensor.substrate.query(
                 module='SubtensorModule',
-                storage_function='Alpha',
-                params=[treasury_hotkey, treasury_coldkey, netuid],
+                storage_function='TotalHotkeyAlpha',
+                params=[treasury_hotkey, netuid],
             )
             stake = 0
 
@@ -1542,23 +1544,8 @@ class IssueCompetitionContractClient:
                 stake = 0
             elif hasattr(result, 'value'):
                 val = result.value
-                # Handle U64F64 fixed-point format: {'bits': value}
-                # U64F64 stores value * 2^64, so divide to get actual TAO
-                # Then multiply by 1e9 to convert TAO to RAO
-                if isinstance(val, dict) and 'bits' in val:
-                    bits = int(val['bits'])
-                    # Convert from U64F64 to RAO: (bits / 2^64) * 1e9
-                    stake = int(bits / (2**64) * 1_000_000_000)
-                    bt.logging.debug(f'Alpha U64F64 bits={bits}, converted to {stake} RAO')
-                elif val:
+                if val is not None:
                     stake = int(val)
-            elif isinstance(result, dict):
-                # Direct dict result (not wrapped in scale object)
-                if 'bits' in result:
-                    bits = int(result['bits'])
-                    stake = int(bits / (2**64) * 1_000_000_000)
-                else:
-                    stake = int(result.get('value', result.get('Alpha', 0)) or 0)
             elif isinstance(result, (int, float)):
                 stake = int(result)
             else:
@@ -1566,8 +1553,8 @@ class IssueCompetitionContractClient:
                 stake = int(result) if result else 0
 
             bt.logging.debug(
-                f'Stake via subtensor RPC: hotkey={treasury_hotkey[:16]}..., '
-                f'coldkey={treasury_coldkey[:16]}..., netuid={netuid}, stake={stake}'
+                f'Stake via TotalHotkeyAlpha: hotkey={treasury_hotkey[:16]}..., '
+                f'netuid={netuid}, stake={stake} RAO ({stake/1e9:.4f} TAO)'
             )
             return stake
         except Exception as e:

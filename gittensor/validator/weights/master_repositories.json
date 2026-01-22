@@ -27,7 +27,7 @@
     "tier": "Bronze",
     "weight": 0.18
   },
-  "All-Hands-AI/OpenHands": {
+  "OpenHands/OpenHands": {
     "tier": "Gold",
     "weight": 17.65
   },
@@ -790,10 +790,6 @@
     "tier": "Bronze",
     "weight": 0.62
   },
-  "Stability-AI/stablediffusion": {
-    "tier": "Bronze",
-    "weight": 0.23
-  },
   "Stirling-Tools/Stirling-PDF": {
     "tier": "Bronze",
     "weight": 0.18
@@ -821,10 +817,6 @@
   "Tencent/weui-wxss": {
     "tier": "Bronze",
     "weight": 0.2
-  },
-  "Tenexium/tenex-subnet": {
-    "tier": "Silver",
-    "weight": 4.38
   },
   "Textualize/rich": {
     "tier": "Bronze",
@@ -5580,10 +5572,6 @@
   "yangzongzhuan/RuoYi-Vue3": {
     "tier": "Bronze",
     "weight": 0.19
-  },
-  "yeongpin/cursor-free-vip": {
-    "tier": "Silver",
-    "weight": 3.49
   },
   "ygs-code/vue": {
     "tier": "Bronze",

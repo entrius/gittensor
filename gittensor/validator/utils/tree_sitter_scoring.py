@@ -14,11 +14,6 @@ from gittensor.classes import (
 from gittensor.constants import (
     COMMENT_NODE_TYPES,
     DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT,
-    LOW_VALUE_SIZE_MEDIUM,
-    LOW_VALUE_SIZE_SMALL,
-    LOW_VALUE_THRESHOLD_LARGE,
-    LOW_VALUE_THRESHOLD_MEDIUM,
-    LOW_VALUE_THRESHOLD_SMALL,
     MAX_FILE_SIZE_BYTES,
     MAX_LINES_SCORED_FOR_NON_CODE_EXT,
     NON_CODE_EXTENSIONS,
@@ -217,43 +212,6 @@ def score_tree_diff(
     return breakdown
 
 
-def get_low_value_threshold(total_raw_lines: int) -> float:
-    """Get the score-per-line threshold for low-value PR detection.
-    This prevents miners from padding small PRs with low-value content to meet a single threshold.
-
-    Args:
-        total_raw_lines: Total lines changed (additions + deletions) from git stats
-
-    Returns:
-        Score-per-line threshold for this PR size (code density threshold)
-    """
-    if total_raw_lines < LOW_VALUE_SIZE_SMALL:
-        return LOW_VALUE_THRESHOLD_SMALL
-    elif total_raw_lines < LOW_VALUE_SIZE_MEDIUM:
-        return LOW_VALUE_THRESHOLD_MEDIUM
-    else:
-        return LOW_VALUE_THRESHOLD_LARGE
-
-
-def is_low_value_pr(total_score: float, total_raw_lines: int) -> bool:
-    """Determine if a PR is low-value based on code density (score-per-line) with tiered thresholds.
-
-    Args:
-        total_score: Total token score for the PR
-        total_raw_lines: Total lines changed (additions + deletions) from git stats
-
-    Returns:
-        True if PR is low-value, False otherwise
-    """
-    if total_raw_lines == 0:
-        return True
-
-    code_density = total_score / total_raw_lines
-    threshold = get_low_value_threshold(total_raw_lines)
-
-    return code_density < threshold
-
-
 def calculate_token_score_from_file_changes(
     file_changes: List['FileChange'],
     file_contents: Dict[str, FileContentPair],
@@ -270,12 +228,11 @@ def calculate_token_score_from_file_changes(
         programming_languages: Language weight mapping (for fallback/documentation files)
 
     Returns:
-        PrScoringResult with total score, low-value flag, and per-file details
+        PrScoringResult with total score and per-file details
     """
     if not file_changes:
         return PrScoringResult(
             total_score=0.0,
-            is_low_value_pr=True,
             total_nodes_scored=0,
             file_results=[],
         )
@@ -407,11 +364,8 @@ def calculate_token_score_from_file_changes(
             )
         )
 
-    # Compute total raw lines (additions + deletions) for low-value detection
+    # Compute total raw lines for logging
     total_raw_lines = sum(f.total_lines for f in file_results)
-
-    # Determine if this is a low-value PR using tiered thresholds
-    low_value = is_low_value_pr(total_score, total_raw_lines)
 
     # Compute aggregate breakdown from file_results
     breakdowns = [r.breakdown for r in file_results if r.breakdown is not None]
@@ -421,13 +375,11 @@ def calculate_token_score_from_file_changes(
         file_results,
         total_score,
         total_raw_lines,
-        low_value,
         total_breakdown,
     )
 
     return PrScoringResult(
         total_score=total_score,
-        is_low_value_pr=low_value,
         total_nodes_scored=total_nodes_scored,
         file_results=file_results,
         score_breakdown=total_breakdown,

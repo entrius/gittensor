@@ -16,12 +16,6 @@ MIN_GITHUB_ACCOUNT_AGE = 180  # days
 MAX_FILE_SIZE_BYTES = 1_000_000
 
 # =============================================================================
-# Gittensor Branding
-# =============================================================================
-PR_TAGLINE_PREFIX = 'Contribution by Gittensor, see my contribution statistics at '
-GITTENSOR_MINER_DETAILS_URL = 'https://gittensor.io/miners/details?githubId='
-
-# =============================================================================
 # Language & File Scoring
 # =============================================================================
 DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT = 0.12
@@ -98,32 +92,13 @@ DEFAULT_COLLATERAL_PERCENT = 0.20
 # =============================================================================
 RECYCLE_UID = 0
 
-DEFAULT_FIXED_RECYCLE_RATE = 0.50
-DYNAMIC_EMISSIONS_BUFFER_DAYS = 45  # After 45 days of launching tier based IM, we will restore dynamic emissions
+# Network emission scaling (unique repos)
+UNIQUE_REPOS_MAX_RECYCLE = 0.9
+UNIQUE_REPOS_RECYCLE_DECAY_RATE = 0.006
 
-# Network emission scaling (lines contributed)
-LINES_CONTRIBUTED_MAX_RECYCLE = 0.9
-LINES_CONTRIBUTED_RECYCLE_DECAY_RATE = 0.000005
-
-# Network emission scaling (total merged prs)
-MERGED_PRS_MAX_RECYCLE = 0.9
-MERGED_PRS_RECYCLE_DECAY_RATE = 0.0015
-
-# Network emission scaling (unique PRs)
-UNIQUE_PRS_MAX_RECYCLE = 0.9
-UNIQUE_PRS_RECYCLE_DECAY_RATE = 0.006
-
-# =============================================================================
-# Low-Value PR Detection (Tiered Thresholds)
-# =============================================================================
-# Smaller PRs have stricter thresholds
-# Larger PRs are more lenient (naturally include config, docs, etc.).
-# NOTE: This is deprecated at the moment. all values set to 0
-LOW_VALUE_THRESHOLD_SMALL = 0.0  # 0.4
-LOW_VALUE_THRESHOLD_MEDIUM = 0.0  # 0.35
-LOW_VALUE_THRESHOLD_LARGE = 0.0  # 0.3
-LOW_VALUE_SIZE_SMALL = 25  # Lines threshold for "small" PRs
-LOW_VALUE_SIZE_MEDIUM = 125  # Lines threshold for "medium" PRs
+# Network emission scaling (total token score from tiered miners)
+TOKEN_SCORE_MAX_RECYCLE = 0.9
+TOKEN_SCORE_RECYCLE_DECAY_RATE = 0.000016  # ~35% release at 20k tokens
 
 # =============================================================================
 # Spam & Gaming Mitigation

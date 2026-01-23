@@ -83,7 +83,7 @@ def score_pull_request(
     programming_languages: Dict[str, LanguageConfig],
     token_config: TokenConfig,
 ) -> None:
-    """Scores a single PR and assigns the PullRequest object tier config & other fields (low value, etc)."""
+    """Scores a single PR and populates relevant PullRequest fields (tier_config, etc.)"""
 
     pr.repository_tier_configuration = get_tier_config(pr.repository_full_name, master_repositories)
     if not pr.repository_tier_configuration:
@@ -104,7 +104,7 @@ def score_pull_request(
     pr.base_score = calculate_base_score(pr, programming_languages, token_config, file_contents)
     calculate_pr_multipliers(pr, miner_eval, master_repositories)
 
-    if pr.pr_state == PRState.MERGED and not pr.low_value_pr:
+    if pr.pr_state == PRState.MERGED:
         miner_eval.unique_repos_contributed_to.add(pr.repository_full_name)
 
 
@@ -212,7 +212,6 @@ def calculate_pr_multipliers(
 
     pr.repo_weight_multiplier = round(repo_config.weight if repo_config else 0.01, 2)
     pr.issue_multiplier = round(calculate_issue_multiplier(pr), 2)
-    pr.gittensor_tag_multiplier = 1.0 if pr.gittensor_tagged else 0.0
 
     if is_merged:
         pr.open_pr_spam_multiplier = round(calculate_pr_spam_penalty_multiplier(miner_eval.total_open_prs), 2)
@@ -286,16 +285,23 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
         bt.logging.info(f'UID {uid}')
         bt.logging.info('=' * 50)
 
+        # Process open PRs for collateral
+        for pr in evaluation.open_pull_requests:
+            pr.collateral_score = calculate_open_pr_collateral_score(pr)
+            evaluation.total_collateral_score += pr.collateral_score
+
+        has_contributions = len(evaluation.merged_pull_requests) > 0 or len(evaluation.closed_pull_requests) > 0
+
+        if not has_contributions:
+            bt.logging.info('No merged or closed PRs - skipping tier evaluation')
+            continue
+
         evaluation.credibility_by_tier = calculate_credibility_per_tier(
             evaluation.merged_pull_requests, evaluation.closed_pull_requests
         )
 
         # Process merged PRs
         for pr in evaluation.merged_pull_requests:
-            # Skip over low value PRs
-            if pr.low_value_pr:
-                continue
-
             pr.repository_uniqueness_multiplier = calculate_uniqueness_multiplier(
                 pr.repository_full_name, repo_counts, total_contributing_miners
             )
@@ -320,18 +326,12 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
             evaluation.total_leaf_count += pr.leaf_count
             evaluation.total_leaf_score += pr.leaf_score
 
-        # Process open PRs for collateral
-        for pr in evaluation.open_pull_requests:
-            pr.collateral_score = calculate_open_pr_collateral_score(pr)
-            evaluation.total_collateral_score += pr.collateral_score
-
-        # Apply collateral deduction
+        # Apply collateral deduction (0 - 0 = 0 for empty miners)
         earned_score = evaluation.total_score
         evaluation.total_score = max(0.0, earned_score - evaluation.total_collateral_score)
         evaluation.unique_repos_count = len(evaluation.unique_repos_contributed_to)
 
-        # Calculate tier stats one more time now that scoring is fully applied (for logging + dashboard).
-        # This also calculates qualified_unique_repo_count per tier.
+        # Calculate tier stats (empty stats for no contributions, used for logging + dashboard)
         tier_stats = calculate_tier_stats(
             merged_prs=evaluation.merged_pull_requests,
             closed_prs=evaluation.closed_pull_requests,
@@ -346,7 +346,11 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
                 evaluation.current_tier = tier
 
         # Set overall qualified unique repos count (Bronze threshold is lowest, so use that for overall count)
-        evaluation.qualified_unique_repos_count = tier_stats[Tier.BRONZE].qualified_unique_repo_count
+        evaluation.qualified_unique_repos_count = (
+            tier_stats[Tier.BRONZE].qualified_unique_repo_count
+            + tier_stats[Tier.SILVER].qualified_unique_repo_count
+            + tier_stats[Tier.GOLD].qualified_unique_repo_count
+        )
 
         # Determine next tier for display
         current_tier_str = evaluation.current_tier.value if evaluation.current_tier else 'None'
@@ -488,7 +492,7 @@ def calculate_open_pr_collateral_score(pr: PullRequest) -> float:
 
     Applicable multipliers: repo_weight, issue
     NOT applicable: time_decay (merge-based), credibility_multiplier (merge-based),
-                    uniqueness (cross-miner), open_pr_spam (not for collateral), gittensor_tag (exploitable)
+                    uniqueness (cross-miner), open_pr_spam (not for collateral)
     """
     from math import prod
 

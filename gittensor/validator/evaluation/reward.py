@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Dict
 
 import bittensor as bt
 import numpy as np
+from aiohttp import ClientConnectorError
 
 from gittensor.classes import MinerEvaluation
 from gittensor.synapses import GitPatSynapse
@@ -47,6 +48,9 @@ async def query_miner(self, uid: int) -> GitPatSynapse:
         miner_response = response[0] if response else None
         return miner_response
 
+    except ClientConnectorError:
+        bt.logging.warning(f'Cannot connect to UID {uid} - miner unreachable')
+        return None
     except Exception as e:
         bt.logging.error(f'Error querying miner UID {uid}: {e}')
         return None
@@ -124,6 +128,9 @@ async def get_rewards(
             uid, miner_response, master_repositories, programming_languages, token_config
         )
         miner_evaluations[uid] = miner_evaluation
+
+    # If evaluation of miner was successful, store to cache, if api failure, fallback to previous successful evaluation if any
+    self.store_or_use_cached_evaluation(miner_evaluations)
 
     # Adjust scores for duplicate accounts
     detect_and_penalize_miners_sharing_github(miner_evaluations)

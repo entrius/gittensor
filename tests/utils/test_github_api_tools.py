@@ -104,15 +104,15 @@ class TestGraphQLRetryLogic:
     @patch('gittensor.utils.github_api_tools.requests.post')
     @patch('gittensor.utils.github_api_tools.time.sleep')
     @patch('gittensor.utils.github_api_tools.bt.logging')
-    def test_gives_up_after_six_attempts(self, mock_logging, mock_sleep, mock_post, graphql_params):
-        """Test that function gives up after 6 failed attempts."""
+    def test_gives_up_after_eight_attempts(self, mock_logging, mock_sleep, mock_post, graphql_params):
+        """Test that function gives up after 8 failed attempts."""
         mock_response_502 = Mock(status_code=502, text='<html><title>502 Bad Gateway</title></html>')
         mock_post.return_value = mock_response_502
 
         result = get_github_graphql_query(**graphql_params)
 
-        assert mock_post.call_count == 6, 'Should try exactly 6 times'
-        assert mock_sleep.call_count == 5, 'Should sleep 5 times between attempts'
+        assert mock_post.call_count == 8, 'Should try exactly 8 times'
+        assert mock_sleep.call_count == 7, 'Should sleep 7 times between attempts'
         assert result is None
         mock_logging.error.assert_called()
 
@@ -204,15 +204,15 @@ class TestGraphQLRetryLogic:
     @patch('gittensor.utils.github_api_tools.requests.post')
     @patch('gittensor.utils.github_api_tools.time.sleep')
     @patch('gittensor.utils.github_api_tools.bt.logging')
-    def test_gives_up_after_six_connection_errors(self, mock_logging, mock_sleep, mock_post, graphql_params):
-        """Test that function gives up after 6 connection errors."""
+    def test_gives_up_after_eight_connection_errors(self, mock_logging, mock_sleep, mock_post, graphql_params):
+        """Test that function gives up after 8 connection errors."""
         import requests
 
         mock_post.side_effect = requests.exceptions.ConnectionError('Connection refused')
 
         result = get_github_graphql_query(**graphql_params)
 
-        assert mock_post.call_count == 6, 'Should try 6 times before giving up'
+        assert mock_post.call_count == 8, 'Should try 8 times before giving up'
         assert result is None
 
     @patch('gittensor.utils.github_api_tools.requests.post')
@@ -232,16 +232,16 @@ class TestGraphQLRetryLogic:
     @patch('gittensor.utils.github_api_tools.time.sleep')
     @patch('gittensor.utils.github_api_tools.bt.logging')
     def test_exponential_backoff_timing(self, mock_logging, mock_sleep, mock_post, graphql_params):
-        """Test that exponential backoff uses correct delays: 5s, 10s, 20s, 40s, 80s."""
+        """Test that exponential backoff uses correct delays: 5s, 10s, 20s, 30s (capped), 30s, 30s, 30s."""
         mock_response_500 = Mock(status_code=500, text='Internal Server Error')
         mock_post.return_value = mock_response_500
 
         _ = get_github_graphql_query(**graphql_params)
 
-        # Verify exponential backoff delays
-        expected_delays = [call(5), call(10), call(20), call(40), call(80)]
+        # Verify exponential backoff delays (capped at 30s)
+        expected_delays = [call(5), call(10), call(20), call(30), call(30), call(30), call(30)]
         mock_sleep.assert_has_calls(expected_delays)
-        assert mock_sleep.call_count == 5, 'Should sleep 5 times for 6 attempts'
+        assert mock_sleep.call_count == 7, 'Should sleep 7 times for 8 attempts'
 
 
 # ============================================================================

@@ -101,18 +101,6 @@ TOKEN_SCORE_MAX_RECYCLE = 0.9
 TOKEN_SCORE_RECYCLE_DECAY_RATE = 0.000016  # ~35% release at 20k tokens
 
 # =============================================================================
-# Low-Value PR Detection (Tiered Thresholds)
-# =============================================================================
-# Smaller PRs have stricter thresholds
-# Larger PRs are more lenient (naturally include config, docs, etc.).
-# NOTE: This is deprecated at the moment. all values set to 0
-LOW_VALUE_THRESHOLD_SMALL = 0.0  # 0.4
-LOW_VALUE_THRESHOLD_MEDIUM = 0.0  # 0.35
-LOW_VALUE_THRESHOLD_LARGE = 0.0  # 0.3
-LOW_VALUE_SIZE_SMALL = 25  # Lines threshold for "small" PRs
-LOW_VALUE_SIZE_MEDIUM = 125  # Lines threshold for "medium" PRs
-
-# =============================================================================
 # Spam & Gaming Mitigation
 # =============================================================================
 MAINTAINER_ASSOCIATIONS = ['OWNER', 'MEMBER', 'COLLABORATOR']

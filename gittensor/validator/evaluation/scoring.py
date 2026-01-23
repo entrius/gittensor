@@ -83,7 +83,7 @@ def score_pull_request(
     programming_languages: Dict[str, LanguageConfig],
     token_config: TokenConfig,
 ) -> None:
-    """Scores a single PR and assigns the PullRequest object tier config & other fields (low value, etc)."""
+    """Scores a single PR and populates relevant PullRequest fields (tier_config, etc.)"""
 
     pr.repository_tier_configuration = get_tier_config(pr.repository_full_name, master_repositories)
     if not pr.repository_tier_configuration:
@@ -104,7 +104,7 @@ def score_pull_request(
     pr.base_score = calculate_base_score(pr, programming_languages, token_config, file_contents)
     calculate_pr_multipliers(pr, miner_eval, master_repositories)
 
-    if pr.pr_state == PRState.MERGED and not pr.low_value_pr:
+    if pr.pr_state == PRState.MERGED:
         miner_eval.unique_repos_contributed_to.add(pr.repository_full_name)
 
 
@@ -302,10 +302,6 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
 
         # Process merged PRs
         for pr in evaluation.merged_pull_requests:
-            # Skip over low value PRs
-            if pr.low_value_pr:
-                continue
-
             pr.repository_uniqueness_multiplier = calculate_uniqueness_multiplier(
                 pr.repository_full_name, repo_counts, total_contributing_miners
             )

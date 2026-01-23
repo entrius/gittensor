@@ -17,7 +17,7 @@ INSERT INTO pull_requests (
     open_pr_spam_multiplier, repository_uniqueness_multiplier, time_decay_multiplier,
     credibility_multiplier, raw_credibility, credibility_scalar,
     earned_score, collateral_score,
-    additions, deletions, commits, total_nodes_scored, low_value_pr,
+    additions, deletions, commits, total_nodes_scored,
     merged_by_login, description, last_edited_at,
     token_score, structural_count, structural_score, leaf_count, leaf_score
 ) VALUES %s
@@ -44,7 +44,6 @@ DO UPDATE SET
     deletions = EXCLUDED.deletions,
     commits = EXCLUDED.commits,
     total_nodes_scored = EXCLUDED.total_nodes_scored,
-    low_value_pr = EXCLUDED.low_value_pr,
     merged_by_login = EXCLUDED.merged_by_login,
     description = EXCLUDED.description,
     last_edited_at = EXCLUDED.last_edited_at,

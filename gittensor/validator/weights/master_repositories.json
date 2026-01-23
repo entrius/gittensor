@@ -1103,6 +1103,7 @@
     "weight": 0.18
   },
   "ant-design/ant-design": {
+    "additional_acceptable_branches": ["feature"],
     "tier": "Bronze",
     "weight": 0.64
   },

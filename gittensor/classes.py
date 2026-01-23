@@ -150,7 +150,6 @@ class PullRequest:
     # PR state based fields
     pr_state: PRState
     repository_tier_configuration: Optional[TierConfig] = None  # assigned when scoring PR
-    low_value_pr: bool = False
 
     # Score fields
     repo_weight_multiplier: float = 1.0
@@ -483,7 +482,6 @@ class PrScoringResult:
     """
 
     total_score: float
-    is_low_value_pr: bool
     total_nodes_scored: int  # Total AST nodes scored across all files
     file_results: List[FileScoreResult]
     score_breakdown: Optional[ScoreBreakdown] = None  # Aggregated breakdown across all files

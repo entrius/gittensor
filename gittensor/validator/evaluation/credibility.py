@@ -38,7 +38,7 @@ def calculate_tier_stats(
     repo_token_scores_per_tier: Dict[Tier, Dict[str, float]] = {tier: defaultdict(float) for tier in Tier}
 
     for pr in merged_prs:
-        if (tier := get_tier(pr)) and not pr.low_value_pr:
+        if tier := get_tier(pr):
             stats[tier].merged_count += 1
             repos_per_tier[tier].add(pr.repository_full_name)
             repo_token_scores_per_tier[tier][pr.repository_full_name] += pr.token_score
@@ -79,11 +79,16 @@ def calculate_tier_stats(
     return stats
 
 
-def is_tier_unlocked(tier: Tier, tier_stats: Dict[Tier, TierStats]) -> bool:
+def is_tier_unlocked(tier: Tier, tier_stats: Dict[Tier, TierStats], log_reasons: bool = True) -> bool:
     """
     Check if a tier is unlocked by verifying this tier and all below meet their own requirements.
 
     Each tier's requirements define what's needed to maintain THAT tier.
+
+    Args:
+        tier: The tier to check
+        tier_stats: Dictionary of tier statistics
+        log_reasons: Whether to log the reason when a tier is locked (default True)
     """
     tier_idx = TIERS_ORDER.index(tier)
 
@@ -94,29 +99,32 @@ def is_tier_unlocked(tier: Tier, tier_stats: Dict[Tier, TierStats]) -> bool:
 
         if config.required_credibility is not None:
             if stats.credibility < config.required_credibility:
-                bt.logging.info(
-                    f'{tier.value} locked: {check_tier.value} needs {config.required_credibility:.2f} credibility, has {stats.credibility:.2f}'
-                )
+                if log_reasons:
+                    bt.logging.info(
+                        f'{tier.value} locked: {check_tier.value} needs {config.required_credibility:.2f} credibility, has {stats.credibility:.2f}'
+                    )
                 return False
 
         if config.required_min_token_score is not None:
             if stats.token_score < config.required_min_token_score:
-                bt.logging.info(
-                    f'{tier.value} locked: {check_tier.value} needs {config.required_min_token_score:.1f} total token score, has {stats.token_score:.1f}'
-                )
+                if log_reasons:
+                    bt.logging.info(
+                        f'{tier.value} locked: {check_tier.value} needs {config.required_min_token_score:.1f} total token score, has {stats.token_score:.1f}'
+                    )
                 return False
 
         # Check unique repos with min token score requirement
         if config.required_unique_repos_count is not None:
             if stats.qualified_unique_repo_count < config.required_unique_repos_count:
-                min_score_str = (
-                    f' with {config.required_min_token_score_per_repo:.1f}+ token score'
-                    if config.required_min_token_score_per_repo
-                    else ''
-                )
-                bt.logging.info(
-                    f'{tier.value} locked: {check_tier.value} needs {config.required_unique_repos_count} unique repos{min_score_str}, has {stats.qualified_unique_repo_count}'
-                )
+                if log_reasons:
+                    min_score_str = (
+                        f' with {config.required_min_token_score_per_repo:.1f}+ token score'
+                        if config.required_min_token_score_per_repo
+                        else ''
+                    )
+                    bt.logging.info(
+                        f'{tier.value} locked: {check_tier.value} needs {config.required_unique_repos_count} unique repos{min_score_str}, has {stats.qualified_unique_repo_count}'
+                    )
                 return False
 
     return True
@@ -139,7 +147,8 @@ def calculate_credibility_per_tier(
         stats: TierStats = tier_stats[tier]
 
         # Check if tier is unlocked (includes checking lower tiers)
-        tier_unlocked = is_tier_unlocked(tier, tier_stats)
+        # Suppress logging here - tier unlock reasons are logged in finalize_miner_scores
+        tier_unlocked = is_tier_unlocked(tier, tier_stats, log_reasons=False)
 
         # No activity in this tier
         if stats.total_attempts == 0:

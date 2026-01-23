@@ -285,6 +285,17 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
         bt.logging.info(f'UID {uid}')
         bt.logging.info('=' * 50)
 
+        # Process open PRs for collateral
+        for pr in evaluation.open_pull_requests:
+            pr.collateral_score = calculate_open_pr_collateral_score(pr)
+            evaluation.total_collateral_score += pr.collateral_score
+
+        has_contributions = len(evaluation.merged_pull_requests) > 0 or len(evaluation.closed_pull_requests) > 0
+
+        if not has_contributions:
+            bt.logging.info('No merged or closed PRs - skipping tier evaluation')
+            continue
+
         evaluation.credibility_by_tier = calculate_credibility_per_tier(
             evaluation.merged_pull_requests, evaluation.closed_pull_requests
         )
@@ -315,18 +326,12 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
             evaluation.total_leaf_count += pr.leaf_count
             evaluation.total_leaf_score += pr.leaf_score
 
-        # Process open PRs for collateral
-        for pr in evaluation.open_pull_requests:
-            pr.collateral_score = calculate_open_pr_collateral_score(pr)
-            evaluation.total_collateral_score += pr.collateral_score
-
-        # Apply collateral deduction
+        # Apply collateral deduction (0 - 0 = 0 for empty miners)
         earned_score = evaluation.total_score
         evaluation.total_score = max(0.0, earned_score - evaluation.total_collateral_score)
         evaluation.unique_repos_count = len(evaluation.unique_repos_contributed_to)
 
-        # Calculate tier stats one more time now that scoring is fully applied (for logging + dashboard).
-        # This also calculates qualified_unique_repo_count per tier.
+        # Calculate tier stats (empty stats for no contributions, used for logging + dashboard)
         tier_stats = calculate_tier_stats(
             merged_prs=evaluation.merged_pull_requests,
             closed_prs=evaluation.closed_pull_requests,
@@ -341,7 +346,11 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
                 evaluation.current_tier = tier
 
         # Set overall qualified unique repos count (Bronze threshold is lowest, so use that for overall count)
-        evaluation.qualified_unique_repos_count = tier_stats[Tier.BRONZE].qualified_unique_repo_count
+        evaluation.qualified_unique_repos_count = (
+            tier_stats[Tier.BRONZE].qualified_unique_repo_count
+            + tier_stats[Tier.SILVER].qualified_unique_repo_count
+            + tier_stats[Tier.GOLD].qualified_unique_repo_count
+        )
 
         # Determine next tier for display
         current_tier_str = evaluation.current_tier.value if evaluation.current_tier else 'None'

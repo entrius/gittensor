@@ -112,4 +112,4 @@ def log_scoring_results(
     bt.logging.info(f'  ├─ {score_str} | Total Lines: {total_raw_lines} | Density: {density:.2f}')
 
     if breakdown_str:
-        bt.logging.info(f'  │   └─ Breakdown: {breakdown_str}')
+        bt.logging.info(f'  │ └─ Breakdown: {breakdown_str}')

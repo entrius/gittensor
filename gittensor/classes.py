@@ -1,6 +1,7 @@
 import re
+from copy import deepcopy
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from math import prod
 from typing import DefaultDict, Dict, List, Optional, Set
@@ -149,7 +150,6 @@ class PullRequest:
     # PR state based fields
     pr_state: PRState
     repository_tier_configuration: Optional[TierConfig] = None  # assigned when scoring PR
-    low_value_pr: bool = False
 
     # Score fields
     repo_weight_multiplier: float = 1.0
@@ -482,7 +482,96 @@ class PrScoringResult:
     """
 
     total_score: float
-    is_low_value_pr: bool
     total_nodes_scored: int  # Total AST nodes scored across all files
     file_results: List[FileScoreResult]
     score_breakdown: Optional[ScoreBreakdown] = None  # Aggregated breakdown across all files
+
+
+@dataclass
+class CachedEvaluation:
+    hotkey: str
+    github_id: str
+    evaluation: 'MinerEvaluation'
+    cached_at: datetime
+
+
+class MinerEvaluationCache:
+    """
+    In-memory cache for successful miner evaluations, keyed by UID.
+
+    Used as fallback when GitHub API is unavailable. Validates that
+    hotkey and github_id match before returning cached data to handle
+    miner re-registration on the same UID.
+    """
+
+    def __init__(self):
+        self._cache: Dict[int, CachedEvaluation] = {}
+
+    def store(self, evaluation: 'MinerEvaluation') -> None:
+        """Store a successful evaluation in the cache."""
+        if evaluation.failed_reason is not None:
+            return
+
+        if not evaluation.hotkey or not evaluation.github_id or evaluation.github_id == '0':
+            return
+
+        cached_eval = self.create_lightweight_copy(evaluation)
+
+        self._cache[evaluation.uid] = CachedEvaluation(
+            hotkey=evaluation.hotkey,
+            github_id=evaluation.github_id,
+            evaluation=cached_eval,
+            cached_at=datetime.now(timezone.utc),
+        )
+
+        bt.logging.debug(f'Cached successful evaluation for UID {evaluation.uid}')
+
+    def get(self, uid: int, hotkey: str, github_id: str) -> Optional['MinerEvaluation']:
+        """
+        Retrieve a cached evaluation if identity matches.
+
+        Returns:
+            Cached MinerEvaluation if found and identity matches, None otherwise
+        """
+        cached = self._cache.get(uid)
+
+        if cached is None:
+            return None
+
+        if cached.hotkey != hotkey or cached.github_id != github_id:
+            bt.logging.debug(
+                f'Cache miss for UID {uid}: identity mismatch '
+                f'(cached hotkey={cached.hotkey[:8]}..., github_id={cached.github_id} vs '
+                f'current hotkey={hotkey[:8]}..., github_id={github_id})'
+                'Removing cached evaluation'
+            )
+            del self._cache[uid]
+            return None
+
+        bt.logging.debug(f'Cache hit for UID {uid} (cached at {cached.cached_at.isoformat()})')
+
+        return deepcopy(cached.evaluation)
+
+    def invalidate(self, uid: int) -> None:
+        """Remove a cached evaluation for a specific UID."""
+        if uid in self._cache:
+            del self._cache[uid]
+            bt.logging.debug(f'Invalidated cache for UID {uid}')
+
+    def clear(self) -> None:
+        """Clear all cached evaluations."""
+        self._cache.clear()
+        bt.logging.info('Cleared evaluation cache')
+
+    def create_lightweight_copy(self, evaluation: 'MinerEvaluation') -> 'MinerEvaluation':
+        """Create a memory-efficient copy, stripping file patches."""
+        light_eval = deepcopy(evaluation)
+
+        for pr in light_eval.merged_pull_requests + light_eval.open_pull_requests + light_eval.closed_pull_requests:
+            if pr.file_changes:
+                for fc in pr.file_changes:
+                    fc.patch = None
+
+        light_eval.github_pat = None
+
+        return light_eval

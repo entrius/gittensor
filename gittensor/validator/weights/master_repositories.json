@@ -118,10 +118,6 @@
     "tier": "Bronze",
     "weight": 0.19
   },
-  "CandlesTAO/candles": {
-    "tier": "Silver",
-    "weight": 4.53
-  },
   "CarGuo/GSYVideoPlayer": {
     "tier": "Bronze",
     "weight": 0.18
@@ -4845,6 +4841,7 @@
     "weight": 0.3
   },
   "sbt/sbt": {
+    "additional_acceptable_branches": ["1.12.x"],
     "tier": "Bronze",
     "weight": 0.89
   },

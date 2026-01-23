@@ -115,9 +115,9 @@ def log_scoring_results(
         score_str = f'Token Score: {token_score:.2f}'
 
     bt.logging.info(
-        f'  ├─ {score_str} | '
+        f' ├─ {score_str} | '
         f'Total Lines: {total_raw_lines} | Density: {density:.2f} (threshold: {threshold}){low_value_str}'
     )
 
     if breakdown_str:
-        bt.logging.info(f'  │   └─ Breakdown: {breakdown_str}')
+        bt.logging.info(f'  │ └─ Breakdown: {breakdown_str}')

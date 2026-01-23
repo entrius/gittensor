@@ -582,7 +582,9 @@ def load_miners_prs(
 
                 # Check if repo is inactive
                 if repo_config.inactive_at is not None:
-                    inactive_dt = datetime.fromisoformat(repo_config.inactive_at.rstrip('Z')).replace(tzinfo=timezone.utc)
+                    inactive_dt = datetime.fromisoformat(repo_config.inactive_at.rstrip('Z')).replace(
+                        tzinfo=timezone.utc
+                    )
                     # Skip PR if it was created after the repo became inactive
                     if pr_creation_time >= inactive_dt:
                         bt.logging.info(
@@ -591,9 +593,7 @@ def load_miners_prs(
                         continue
 
                 if pr_state in (PRState.OPEN.value, PRState.CLOSED.value):
-                    try_add_open_or_closed_pr(
-                        miner_eval, pr_raw, pr_state, lookback_date_filter
-                    )
+                    try_add_open_or_closed_pr(miner_eval, pr_raw, pr_state, lookback_date_filter)
                     continue
 
                 should_skip, skip_reason = should_skip_merged_pr(

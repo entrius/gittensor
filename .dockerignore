@@ -55,9 +55,6 @@ auto_updater/
 .ruff_cache
 .mypy_cache
 
-# Shell scripts (not needed in container)
-scripts/
-
 # Claude/AI configs
 .claude/
 

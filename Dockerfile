@@ -10,9 +10,6 @@ RUN apt-get update \
 # Install uv
 RUN pip install --break-system-packages uv
 
-# Create non-root user 
-RUN useradd -m -u 1000 gittensor
-
 WORKDIR /app
 
 # Copy dependency files
@@ -27,7 +24,3 @@ RUN uv venv --python python3 $VENV_DIR && uv sync
 # Copy application code and install
 COPY . .
 RUN uv pip install -e .
-
-# Set ownership and switch to non-root user
-RUN chown -R gittensor:gittensor /app /opt/venv
-USER gittensor

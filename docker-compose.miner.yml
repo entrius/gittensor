@@ -1,3 +1,4 @@
+version: "3.8"
 services:
   miner:
     image: entrius/gittensor:latest
@@ -10,6 +11,6 @@ services:
       - "${PORT}:${PORT}"
     volumes:
       # 'ro' = readonly
-      - ${WALLET_PATH}:/home/gittensor/.bittensor/wallets:ro
+      - ${WALLET_PATH}:/root/.bittensor/wallets:ro
     labels:
       - "com.centurylinklabs.watchtower.enable=true"

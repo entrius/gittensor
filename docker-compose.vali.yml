@@ -1,8 +1,10 @@
+version: "3.8"
 services:
   validator:
     image: entrius/gittensor:latest
     container_name: gt-vali
     restart: unless-stopped
+    mem_limit: "3g"
     entrypoint: /app/scripts/vali-entrypoint.sh
     env_file:
       - .env
@@ -10,12 +12,12 @@ services:
       - "${PORT}:${PORT}"
     volumes:
       # 'ro' = readonly
-      - ${WALLET_PATH}:/home/gittensor/.bittensor/wallets:ro
+      - ${WALLET_PATH}:/root/.bittensor/wallets:ro
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
 
   watchtower:
-    image: containrrr/watchtower:latest
+    image: nickfedor/watchtower
     container_name: gittensor-watchtower
     restart: unless-stopped
     volumes:

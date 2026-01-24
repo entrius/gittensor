@@ -1,0 +1,15 @@
+services:
+  miner:
+    image: entrius/gittensor:latest
+    container_name: gt-miner
+    restart: unless-stopped
+    entrypoint: /app/scripts/miner-entrypoint.sh
+    env_file:
+      - .env
+    ports:
+      - "${PORT}:${PORT}"
+    volumes:
+      # 'ro' = readonly
+      - ${WALLET_PATH}:/home/gittensor/.bittensor/wallets:ro
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"

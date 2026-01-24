@@ -12,6 +12,9 @@ services:
     volumes:
       # 'ro' = readonly
       - ${WALLET_PATH}:/root/.bittensor/wallets:ro
+    # optional: uncomment this if you are running validator database
+    # networks:
+    #   - gittensor_network
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
 
@@ -26,7 +29,7 @@ services:
       WATCHTOWER_LABEL_ENABLE: "true"
       WATCHTOWER_CLEANUP: "true"
 
-# uncomment this if you are running validator database in separate compose
+# uncomment this if you are running validator database
 # networks:
 #   gittensor_network:
 #     external: true

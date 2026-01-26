@@ -3532,6 +3532,7 @@
     "weight": 0.01
   },
   "louislam/uptime-kuma": {
+    "inactive_at": "2026-01-26T02:52:00.000Z",
     "tier": "Bronze",
     "weight": 0.19
   },
@@ -4691,6 +4692,10 @@
   "raycast/extensions": {
     "tier": "Bronze",
     "weight": 0.3
+  },
+  "react-component/select": {
+    "tier": "Bronze",
+    "weight": 0.18
   },
   "react-navigation/react-navigation": {
     "tier": "Bronze",

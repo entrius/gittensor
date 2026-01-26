@@ -87,6 +87,13 @@ COMMENT_NODE_TYPES = frozenset(
 TIER_BASED_INCENTIVE_MECHANISM_START_DATE = datetime(2025, 12, 31, 3, 45, 00, tzinfo=timezone.utc)
 DEFAULT_COLLATERAL_PERCENT = 0.20
 
+# Tier-based emission allocation splits
+TIER_EMISSION_SPLITS = {
+    'Bronze': 0.15,  # 15% of emissions
+    'Silver': 0.35,  # 35% of emissions
+    'Gold': 0.50,  # 50% of emissions
+}
+
 # =============================================================================
 # Rewards & Emissions
 # =============================================================================

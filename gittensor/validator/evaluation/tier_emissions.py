@@ -14,13 +14,13 @@ import bittensor as bt
 
 from gittensor.classes import MinerEvaluation
 from gittensor.constants import TIER_EMISSION_SPLITS
-from gittensor.validator.configurations.tier_config import Tier, TIERS_ORDER
+from gittensor.validator.configurations.tier_config import TIERS_ORDER, Tier
 
 
 def allocate_emissions_by_tier(miner_evaluations: Dict[int, MinerEvaluation]) -> None:
     """
     Replace each miner's total_score with tier-weighted emission allocations.
-    15% of emissions will go to Bronze tier contributions, 35% to silver, and 50% to gold. 
+    15% of emissions will go to Bronze tier contributions, 35% to silver, and 50% to gold.
 
     Algorithm:
     1. Calculate net score per miner per tier: max(0, earned - collateral)
@@ -136,9 +136,7 @@ def allocate_emissions_by_tier(miner_evaluations: Dict[int, MinerEvaluation]) ->
         # Log non-zero allocations
         if total_allocation > 0:
             alloc_parts = [
-                f'{tier.value}={tier_allocations[tier]:.4f}'
-                for tier in TIERS_ORDER
-                if tier_allocations[tier] > 0
+                f'{tier.value}={tier_allocations[tier]:.4f}' for tier in TIERS_ORDER if tier_allocations[tier] > 0
             ]
             bt.logging.info(f'  UID {uid}: {" + ".join(alloc_parts)} = {total_allocation:.4f}')
 

@@ -91,7 +91,7 @@ DEFAULT_COLLATERAL_PERCENT = 0.20
 TIER_EMISSION_SPLITS = {
     'Bronze': 0.15,  # 15% of emissions
     'Silver': 0.35,  # 35% of emissions
-    'Gold': 0.50,    # 50% of emissions
+    'Gold': 0.50,  # 50% of emissions
 }
 
 # =============================================================================

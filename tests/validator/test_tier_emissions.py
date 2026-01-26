@@ -229,9 +229,7 @@ class TestMaxTierRedistribution:
         """When max tier is Silver, Bronze and Silver split emissions proportionally."""
         # Original: Bronze 15%, Silver 35%, Gold 50%
         # After redistribution: Bronze 15/(15+35) = 30%, Silver 35/(15+35) = 70%
-        miner = self._create_miner_eval(
-            uid=1, current_tier=Tier.SILVER, bronze_earned=100.0, silver_earned=100.0
-        )
+        miner = self._create_miner_eval(uid=1, current_tier=Tier.SILVER, bronze_earned=100.0, silver_earned=100.0)
         evaluations = {1: miner}
 
         allocate_emissions_by_tier(evaluations)
@@ -242,12 +240,8 @@ class TestMaxTierRedistribution:
 
     def test_two_miners_max_tier_silver(self):
         """Two miners with max tier Silver split redistributed emissions."""
-        miner_a = self._create_miner_eval(
-            uid=1, current_tier=Tier.SILVER, bronze_earned=75.0, silver_earned=100.0
-        )
-        miner_b = self._create_miner_eval(
-            uid=2, current_tier=Tier.BRONZE, bronze_earned=25.0
-        )
+        miner_a = self._create_miner_eval(uid=1, current_tier=Tier.SILVER, bronze_earned=75.0, silver_earned=100.0)
+        miner_b = self._create_miner_eval(uid=2, current_tier=Tier.BRONZE, bronze_earned=25.0)
         evaluations = {1: miner_a, 2: miner_b}
 
         allocate_emissions_by_tier(evaluations)
@@ -347,9 +341,7 @@ class TestNegativeNetScore:
 class TestSingleMinerEdgeCases:
     """Test edge cases with single miners."""
 
-    def _create_miner_eval(
-        self, uid: int, current_tier: Tier, **tier_scores
-    ) -> MinerEvaluation:
+    def _create_miner_eval(self, uid: int, current_tier: Tier, **tier_scores) -> MinerEvaluation:
         """Helper to create a MinerEvaluation with tier stats."""
         eval = MinerEvaluation(uid=uid, hotkey=f'hotkey_{uid}')
         eval.current_tier = current_tier
@@ -373,9 +365,7 @@ class TestSingleMinerEdgeCases:
 
     def test_scores_only_in_lower_tiers(self):
         """Miner with Gold tier but scores only in Bronze and Silver."""
-        miner = self._create_miner_eval(
-            uid=1, current_tier=Tier.GOLD, bronze=100.0, silver=100.0, gold=0.0
-        )
+        miner = self._create_miner_eval(uid=1, current_tier=Tier.GOLD, bronze=100.0, silver=100.0, gold=0.0)
         evaluations = {1: miner}
 
         allocate_emissions_by_tier(evaluations)
@@ -423,9 +413,7 @@ class TestTierProgression:
         """When pioneer unlocks Gold, allocations change dramatically."""
         # Miner A (pioneer): Has all tiers
         # Miner B: Still at Bronze only
-        miner_a = self._create_miner_eval(
-            uid=1, current_tier=Tier.GOLD, bronze=100.0, silver=200.0, gold=300.0
-        )
+        miner_a = self._create_miner_eval(uid=1, current_tier=Tier.GOLD, bronze=100.0, silver=200.0, gold=300.0)
         miner_b = self._create_miner_eval(uid=2, current_tier=Tier.BRONZE, bronze=100.0)
         evaluations = {1: miner_a, 2: miner_b}
 

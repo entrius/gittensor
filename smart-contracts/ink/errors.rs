@@ -52,4 +52,6 @@ pub enum Error {
     TransferFailed,
     /// Chain extension call failed
     ChainExtensionFailed,
+    /// Recycling emissions failed during harvest
+    RecyclingFailed,
 }

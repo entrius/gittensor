@@ -1,6 +1,24 @@
 use ink::prelude::string::String;
 use ink::primitives::AccountId;
-use scale::{Decode, Encode};
+use scale::{Compact, Decode, Encode};
+
+/// StakeInfo returned by chain extension function 0.
+/// Must match subtensor's StakeInfo struct exactly for SCALE decoding.
+/// The chain extension returns Option<StakeInfo>, so we decode Some(StakeInfo)
+/// by skipping the Option discriminant byte.
+#[derive(Debug, Clone, Decode, Encode)]
+#[cfg_attr(feature = "std", derive(scale_info::TypeInfo))]
+pub struct StakeInfo {
+    pub hotkey: AccountId,
+    pub coldkey: AccountId,
+    pub netuid: Compact<u16>,
+    pub stake: Compact<u64>,      // THE VALUE WE NEED
+    pub locked: Compact<u64>,
+    pub emission: Compact<u64>,
+    pub tao_emission: Compact<u64>,
+    pub drain: Compact<u64>,
+    pub is_registered: bool,
+}
 
 /// Status of an issue in its lifecycle
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Encode, Decode, Default)]

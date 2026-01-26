@@ -6,6 +6,8 @@
 import hashlib
 import json
 import os
+import struct
+import traceback
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -16,12 +18,21 @@ import bittensor as bt
 try:
     from substrateinterface import Keypair
     from substrateinterface.contracts import ContractInstance
+    from substrateinterface.exceptions import ExtrinsicNotFound
 
     SUBSTRATE_INTERFACE_AVAILABLE = True
 except ImportError:
     SUBSTRATE_INTERFACE_AVAILABLE = False
     ContractInstance = None
     Keypair = None
+    ExtrinsicNotFound = None
+
+# Also import async_substrate_interface's ExtrinsicNotFound (used by bittensor SDK)
+# These are different classes that both need to be caught
+try:
+    from async_substrate_interface.errors import ExtrinsicNotFound as AsyncExtrinsicNotFound
+except ImportError:
+    AsyncExtrinsicNotFound = None
 
 # Default gas limits for contract calls
 DEFAULT_GAS_LIMIT = {
@@ -425,7 +436,6 @@ class IssueCompetitionContractClient:
         # For simple u32 returns in Ink! 5, value is at offset 11 in the response after gas
         # (offset 27 from raw, minus 16 for gas = 11)
         try:
-            import struct
             return struct.unpack_from('<I', response_bytes, 11)[0]
         except Exception:
             return None
@@ -440,7 +450,6 @@ class IssueCompetitionContractClient:
         # - Then the actual return value
         # For u128, we need to find where the 16-byte value starts
         try:
-            import struct
             # The response structure varies, try to find the u128 value
             # Typically at offset 11 after gas (which is already removed)
             # u128 is 16 bytes little-endian
@@ -596,8 +605,6 @@ class IssueCompetitionContractClient:
         Returns:
             Dict with next_issue_id, next_competition_id, etc. or None on error
         """
-        import struct
-
         child_key = self._get_child_storage_key()
         if not child_key:
             return None
@@ -658,8 +665,6 @@ class IssueCompetitionContractClient:
         Returns:
             ContractIssue or None if not found
         """
-        import struct
-
         child_key = self._get_child_storage_key()
         if not child_key:
             return None
@@ -741,8 +746,6 @@ class IssueCompetitionContractClient:
         Returns:
             ContractCompetition or None if not found
         """
-        import struct
-
         child_key = self._get_child_storage_key()
         if not child_key:
             return None
@@ -1015,6 +1018,8 @@ class IssueCompetitionContractClient:
         Creates a new pair proposal or votes on an existing one if the same
         pair is proposed. Requires stake to vote.
 
+        Uses raw extrinsic submission to bypass Ink! 5 type decoding issues.
+
         Args:
             issue_id: Issue to start competition for
             miner1_hotkey: First miner's hotkey
@@ -1034,26 +1039,22 @@ class IssueCompetitionContractClient:
                 f'{miner1_hotkey[:8]}... vs {miner2_hotkey[:8]}...'
             )
 
-            # Create keypair from wallet hotkey
-            keypair = Keypair.create_from_uri(wallet.hotkey.ss58_address)
-
-            result = self._contract.exec(
-                keypair=keypair,
-                method='propose_pair',
+            keypair = wallet.hotkey
+            tx_hash = self._exec_contract_raw(
+                method_name='propose_pair',
                 args={
                     'issue_id': issue_id,
                     'miner1_hotkey': miner1_hotkey,
                     'miner2_hotkey': miner2_hotkey,
                 },
-                value=0,
-                gas_limit=DEFAULT_GAS_LIMIT,
+                keypair=keypair,
             )
 
-            if result.is_success:
-                bt.logging.info(f'Pair proposal succeeded: {result.extrinsic_hash}')
+            if tx_hash:
+                bt.logging.info(f'Pair proposal succeeded: {tx_hash}')
                 return True
             else:
-                bt.logging.error(f'Pair proposal failed: {result.error_message}')
+                bt.logging.error('Pair proposal failed')
                 return False
 
         except Exception as e:
@@ -1066,6 +1067,8 @@ class IssueCompetitionContractClient:
 
         Adds the caller's stake-weighted vote to the proposal. If consensus
         (51%) is reached, the competition starts automatically.
+
+        Uses raw extrinsic submission to bypass Ink! 5 type decoding issues.
 
         Args:
             issue_id: Issue with active proposal
@@ -1081,21 +1084,18 @@ class IssueCompetitionContractClient:
         try:
             bt.logging.info(f'Voting on pair proposal for issue {issue_id}')
 
-            keypair = Keypair.create_from_uri(wallet.hotkey.ss58_address)
-
-            result = self._contract.exec(
-                keypair=keypair,
-                method='vote_pair',
+            keypair = wallet.hotkey
+            tx_hash = self._exec_contract_raw(
+                method_name='vote_pair',
                 args={'issue_id': issue_id},
-                value=0,
-                gas_limit=DEFAULT_GAS_LIMIT,
+                keypair=keypair,
             )
 
-            if result.is_success:
-                bt.logging.info(f'Vote pair succeeded: {result.extrinsic_hash}')
+            if tx_hash:
+                bt.logging.info(f'Vote pair succeeded: {tx_hash}')
                 return True
             else:
-                bt.logging.error(f'Vote pair failed: {result.error_message}')
+                bt.logging.error('Vote pair failed')
                 return False
 
         except Exception as e:
@@ -1114,6 +1114,8 @@ class IssueCompetitionContractClient:
 
         Casts a stake-weighted vote for the proposed winner. If consensus
         (51%) is reached, the competition completes and bounty is paid.
+
+        Uses raw extrinsic submission to bypass Ink! 5 type decoding issues.
 
         Args:
             competition_id: Competition to vote on
@@ -1135,25 +1137,22 @@ class IssueCompetitionContractClient:
                 f'winner={winner_hotkey[:8]}...'
             )
 
-            keypair = Keypair.create_from_uri(wallet.hotkey.ss58_address)
-
-            result = self._contract.exec(
-                keypair=keypair,
-                method='vote_solution',
+            keypair = wallet.hotkey
+            tx_hash = self._exec_contract_raw(
+                method_name='vote_solution',
                 args={
                     'competition_id': competition_id,
                     'winner_hotkey': winner_hotkey,
-                    'pr_url_hash': list(pr_url_hash),  # Convert bytes to list for SCALE encoding
+                    'pr_url_hash': pr_url_hash,
                 },
-                value=0,
-                gas_limit=DEFAULT_GAS_LIMIT,
+                keypair=keypair,
             )
 
-            if result.is_success:
-                bt.logging.info(f'Vote solution succeeded: {result.extrinsic_hash}')
+            if tx_hash:
+                bt.logging.info(f'Vote solution succeeded: {tx_hash}')
                 return True
             else:
-                bt.logging.error(f'Vote solution failed: {result.error_message}')
+                bt.logging.error('Vote solution failed')
                 return False
 
         except Exception as e:
@@ -1166,6 +1165,8 @@ class IssueCompetitionContractClient:
 
         Casts a stake-weighted vote to timeout. If consensus (51%) is reached,
         the competition is cancelled and bounty returns to pool.
+
+        Uses raw extrinsic submission to bypass Ink! 5 type decoding issues.
 
         Args:
             competition_id: Competition to timeout
@@ -1181,21 +1182,18 @@ class IssueCompetitionContractClient:
         try:
             bt.logging.info(f'Voting timeout for competition {competition_id}')
 
-            keypair = Keypair.create_from_uri(wallet.hotkey.ss58_address)
-
-            result = self._contract.exec(
-                keypair=keypair,
-                method='vote_timeout',
+            keypair = wallet.hotkey
+            tx_hash = self._exec_contract_raw(
+                method_name='vote_timeout',
                 args={'competition_id': competition_id},
-                value=0,
-                gas_limit=DEFAULT_GAS_LIMIT,
+                keypair=keypair,
             )
 
-            if result.is_success:
-                bt.logging.info(f'Vote timeout succeeded: {result.extrinsic_hash}')
+            if tx_hash:
+                bt.logging.info(f'Vote timeout succeeded: {tx_hash}')
                 return True
             else:
-                bt.logging.error(f'Vote timeout failed: {result.error_message}')
+                bt.logging.error('Vote timeout failed')
                 return False
 
         except Exception as e:
@@ -1210,6 +1208,8 @@ class IssueCompetitionContractClient:
     ) -> bool:
         """
         Vote to cancel a competition (e.g., external solution detected).
+
+        Uses raw extrinsic submission to bypass Ink! 5 type decoding issues.
 
         Args:
             competition_id: Competition to cancel
@@ -1229,24 +1229,21 @@ class IssueCompetitionContractClient:
                 f'Voting cancel for competition {competition_id}: {reason}'
             )
 
-            keypair = Keypair.create_from_uri(wallet.hotkey.ss58_address)
-
-            result = self._contract.exec(
-                keypair=keypair,
-                method='vote_cancel',
+            keypair = wallet.hotkey
+            tx_hash = self._exec_contract_raw(
+                method_name='vote_cancel',
                 args={
                     'competition_id': competition_id,
-                    'reason_hash': list(reason_hash),  # Convert bytes to list for SCALE encoding
+                    'reason_hash': reason_hash,
                 },
-                value=0,
-                gas_limit=DEFAULT_GAS_LIMIT,
+                keypair=keypair,
             )
 
-            if result.is_success:
-                bt.logging.info(f'Vote cancel succeeded: {result.extrinsic_hash}')
+            if tx_hash:
+                bt.logging.info(f'Vote cancel succeeded: {tx_hash}')
                 return True
             else:
-                bt.logging.error(f'Vote cancel failed: {result.error_message}')
+                bt.logging.error('Vote cancel failed')
                 return False
 
         except Exception as e:
@@ -1256,55 +1253,6 @@ class IssueCompetitionContractClient:
     # =========================================================================
     # Helper Functions
     # =========================================================================
-
-    def _parse_issue(self, raw_data: dict) -> ContractIssue:
-        """Parse raw contract data into ContractIssue."""
-        # ink! contract uses snake_case keys
-        github_url_hash = raw_data.get('github_url_hash')
-        if github_url_hash is None:
-            github_url_hash = raw_data.get('githubUrlHash', b'\x00' * 32)
-        if isinstance(github_url_hash, str):
-            hex_str = github_url_hash.replace('0x', '').replace('0X', '')
-            github_url_hash = bytes.fromhex(hex_str) if hex_str else b'\x00' * 32
-        elif isinstance(github_url_hash, list):
-            github_url_hash = bytes(github_url_hash) if github_url_hash else b'\x00' * 32
-
-        # Use explicit None check to avoid treating 0 as falsy
-        bounty_amount = raw_data.get('bounty_amount')
-        if bounty_amount is None:
-            bounty_amount = raw_data.get('bountyAmount', 0)
-        target_bounty = raw_data.get('target_bounty')
-        if target_bounty is None:
-            target_bounty = raw_data.get('targetBounty', 0)
-
-        return ContractIssue(
-            id=raw_data.get('id', 0),
-            github_url_hash=github_url_hash,
-            repository_full_name=raw_data.get('repository_full_name') or raw_data.get('repositoryFullName', ''),
-            issue_number=raw_data.get('issue_number') or raw_data.get('issueNumber', 0),
-            bounty_amount=int(bounty_amount),
-            target_bounty=int(target_bounty),
-            status=IssueStatus(raw_data.get('status', 0)),
-            registered_at_block=raw_data.get('registered_at_block') or raw_data.get('registeredAtBlock', 0),
-            is_fully_funded=int(bounty_amount) >= int(target_bounty),
-        )
-
-    def _parse_competition(self, raw_data: dict) -> ContractCompetition:
-        """Parse raw contract data into ContractCompetition."""
-        # ink! contract uses snake_case keys
-        return ContractCompetition(
-            id=raw_data.get('id', 0),
-            issue_id=raw_data.get('issue_id') or raw_data.get('issueId', 0),
-            miner1_hotkey=raw_data.get('miner1_hotkey') or raw_data.get('miner1Hotkey', ''),
-            miner2_hotkey=raw_data.get('miner2_hotkey') or raw_data.get('miner2Hotkey', ''),
-            start_block=raw_data.get('start_block') or raw_data.get('startBlock', 0),
-            submission_window_end_block=raw_data.get('submission_window_end_block') or raw_data.get('submissionWindowEndBlock', 0),
-            deadline_block=raw_data.get('deadline_block') or raw_data.get('deadlineBlock', 0),
-            status=CompetitionStatus(raw_data.get('status', 0)),
-            winner_hotkey=raw_data.get('winner_hotkey') or raw_data.get('winnerHotkey'),
-            winning_pr_url_hash=raw_data.get('winning_pr_url_hash') or raw_data.get('winningPrUrlHash'),
-            payout_amount=raw_data.get('payout_amount') or raw_data.get('payoutAmount'),
-        )
 
     def _parse_pair_proposal(self, raw_data: dict) -> PairProposal:
         """Parse raw contract data into PairProposal."""
@@ -1316,6 +1264,221 @@ class IssueCompetitionContractClient:
             proposed_at_block=raw_data.get('proposed_at_block') or raw_data.get('proposedAtBlock', 0),
             total_stake_voted=raw_data.get('total_stake_voted') or raw_data.get('totalStakeVoted', 0),
         )
+
+    # =========================================================================
+    # Raw Extrinsic Execution (Ink! 5 Workaround)
+    # =========================================================================
+
+    def _exec_contract_raw(
+        self,
+        method_name: str,
+        args: dict,
+        keypair,
+        gas_limit: dict = None,
+        value: int = 0,
+    ) -> Optional[str]:
+        """
+        Execute a contract method using raw extrinsic submission.
+
+        Bypasses substrate-interface's broken Ink! 5 type decoding by:
+        1. Building the call data manually (selector + SCALE-encoded args)
+        2. Composing and signing the extrinsic directly
+        3. Submitting without waiting for decoded return value
+        4. Returning extrinsic hash on success
+
+        Args:
+            method_name: Contract method name (e.g., 'harvest_emissions')
+            args: Method arguments as dict
+            keypair: Signing keypair
+            gas_limit: Gas limits dict (defaults to DEFAULT_GAS_LIMIT)
+            value: Value to transfer (default 0)
+
+        Returns:
+            Extrinsic hash on success, None on failure
+        """
+        if not self._ensure_contract():
+            return None
+
+        gas_limit = gas_limit or DEFAULT_GAS_LIMIT
+
+        try:
+            # 1. Get method selector from metadata
+            with open(self.metadata_path) as f:
+                metadata = json.load(f)
+
+            selector = None
+            method_spec = None
+            for msg in metadata.get('spec', {}).get('messages', []):
+                if msg['label'] == method_name:
+                    selector = bytes.fromhex(msg['selector'].replace('0x', ''))
+                    method_spec = msg
+                    break
+
+            if not selector:
+                bt.logging.error(f'Method {method_name} not found in contract metadata')
+                return None
+
+            # 2. SCALE-encode arguments
+            encoded_args = self._encode_args(method_spec, args, metadata)
+
+            # 3. Build call data: selector + encoded args
+            call_data = selector + encoded_args
+
+            # 4. Compose Contracts.call extrinsic
+            call = self.subtensor.substrate.compose_call(
+                call_module='Contracts',
+                call_function='call',
+                call_params={
+                    'dest': {'Id': self.contract_address},
+                    'value': value,
+                    'gas_limit': gas_limit,
+                    'storage_deposit_limit': None,
+                    'data': '0x' + call_data.hex(),
+                }
+            )
+
+            # 5. Check signer balance before submitting (fee requirement)
+            signer_address = keypair.ss58_address
+            account_info = self.subtensor.substrate.query('System', 'Account', [signer_address])
+            # Handle both ScaleType object and dict responses
+            if hasattr(account_info, 'value'):
+                account_data = account_info.value
+            else:
+                account_data = account_info
+            free_balance = account_data.get('data', {}).get('free', 0)
+            if free_balance < 1_000_000_000:  # Less than 1 TAO
+                bt.logging.error(
+                    f'{method_name} cannot proceed: signer {signer_address[:16]}... has insufficient '
+                    f'free balance ({free_balance / 1e9:.4f} TAO) to pay transaction fees. '
+                    f'Fund this account with TAO for gas fees.'
+                )
+                return None
+
+            # 6. Sign and submit
+            extrinsic = self.subtensor.substrate.create_signed_extrinsic(
+                call=call,
+                keypair=keypair,
+            )
+
+            result = self.subtensor.substrate.submit_extrinsic(
+                extrinsic,
+                wait_for_inclusion=True,
+                wait_for_finalization=False,
+            )
+
+            # Try to check success, but handle ExtrinsicNotFound from both packages
+            # Note: substrateinterface and async_substrate_interface have different ExtrinsicNotFound classes
+            _extrinsic_not_found_types = tuple(
+                t for t in [ExtrinsicNotFound, AsyncExtrinsicNotFound] if t is not None
+            )
+            try:
+                if result.is_success:
+                    bt.logging.info(f'{method_name} succeeded: {result.extrinsic_hash}')
+                    return result.extrinsic_hash
+                else:
+                    bt.logging.error(f'{method_name} failed: {result.error_message}')
+                    return None
+            except _extrinsic_not_found_types:
+                # Extrinsic was included but events not verifiable (py-substrate-interface quirk)
+                # This is common with async_substrate_interface used by bittensor SDK
+                bt.logging.warning(
+                    f'{method_name} included but events not verifiable. '
+                    f'Assuming success. Hash: {result.extrinsic_hash}'
+                )
+                return result.extrinsic_hash
+
+        except Exception as e:
+            # Capture full exception details including traceback for debugging
+            error_type = type(e).__name__
+            error_msg = str(e) if str(e) else repr(e)
+            traceback_str = traceback.format_exc()
+            bt.logging.error(
+                f'{method_name} error ({error_type}): {error_msg}\n'
+                f'Full traceback:\n{traceback_str}'
+            )
+            # Log additional details for debugging
+            if hasattr(e, 'args') and e.args:
+                bt.logging.debug(f'{method_name} exception args: {e.args}')
+            # Log exception chain if present
+            if e.__cause__:
+                bt.logging.debug(f'{method_name} exception cause: {type(e.__cause__).__name__}: {e.__cause__}')
+            if e.__context__ and e.__context__ is not e.__cause__:
+                bt.logging.debug(f'{method_name} exception context: {type(e.__context__).__name__}: {e.__context__}')
+            return None
+
+    def _encode_args(self, method_spec: dict, args: dict, metadata: dict) -> bytes:
+        """
+        SCALE-encode method arguments for Ink! 5 contracts.
+
+        Handles common types:
+        - u32, u64, u128: Little-endian fixed-width
+        - AccountId: 32-byte array
+        """
+        encoded = b''
+
+        for arg_spec in method_spec.get('args', []):
+            arg_name = arg_spec['label']
+            arg_type_id = arg_spec['type']['type']
+
+            if arg_name not in args:
+                raise ValueError(f'Missing argument: {arg_name}')
+
+            value = args[arg_name]
+            type_def = self._get_type_def(arg_type_id, metadata)
+
+            # Encode based on type
+            if type_def == 'u32':
+                encoded += struct.pack('<I', value)
+            elif type_def == 'u64':
+                encoded += struct.pack('<Q', value)
+            elif type_def == 'u128':
+                encoded += struct.pack('<QQ', value & 0xFFFFFFFFFFFFFFFF, value >> 64)
+            elif type_def == 'AccountId':
+                if isinstance(value, str):
+                    # SS58 address - decode to bytes
+                    encoded += bytes.fromhex(self.subtensor.substrate.ss58_decode(value))
+                elif isinstance(value, (list, bytes)):
+                    encoded += bytes(value) if isinstance(value, list) else value
+                else:
+                    raise ValueError(f'Unknown AccountId format: {type(value)}')
+            elif type_def == 'array32':
+                # Fixed 32-byte array (e.g., [u8; 32] for hashes)
+                if isinstance(value, bytes):
+                    if len(value) != 32:
+                        raise ValueError(f'Array must be 32 bytes, got {len(value)}')
+                    encoded += value
+                elif isinstance(value, list):
+                    if len(value) != 32:
+                        raise ValueError(f'Array must be 32 bytes, got {len(value)}')
+                    encoded += bytes(value)
+                else:
+                    raise ValueError(f'Unknown array format: {type(value)}')
+            else:
+                raise ValueError(f'Unsupported type: {type_def} for arg {arg_name}')
+
+        return encoded
+
+    def _get_type_def(self, type_id: int, metadata: dict) -> str:
+        """Get type definition string from metadata."""
+        types = metadata.get('types', [])
+        for t in types:
+            if t.get('id') == type_id:
+                type_def = t.get('type', {}).get('def', {})
+                path = t.get('type', {}).get('path', [])
+                if 'primitive' in type_def:
+                    return type_def['primitive']
+                if 'array' in type_def:
+                    # Check if it's [u8; 32] (32-byte hash array)
+                    array_def = type_def['array']
+                    if array_def.get('len') == 32:
+                        return 'array32'
+                    return 'array'
+                if 'composite' in type_def:
+                    # Check if it's AccountId
+                    if path and 'AccountId' in path[-1]:
+                        return 'AccountId'
+                    return 'composite'
+        return 'unknown'
 
     # =========================================================================
     # Emission Harvesting Functions
@@ -1342,25 +1505,6 @@ class IssueCompetitionContractClient:
             bt.logging.error(f'Error fetching pending emissions: {e}')
             return 0
 
-    def get_overflow_pool(self) -> int:
-        """
-        Query the overflow pool balance (emissions that couldn't be recycled).
-
-        Returns:
-            Overflow pool balance (0 if contract not ready)
-        """
-        if not self._ensure_contract():
-            return 0
-
-        # Use raw RPC call due to substrate-interface Ink! 5 decoding issues
-        try:
-            value = self._read_contract_u128('get_overflow_pool')
-            bt.logging.debug(f'Overflow pool (raw read): {value}')
-            return value
-        except Exception as e:
-            bt.logging.error(f'Error fetching overflow pool: {e}')
-            return 0
-
     def get_last_harvest_block(self) -> int:
         """
         Query the block number of the last harvest.
@@ -1380,69 +1524,74 @@ class IssueCompetitionContractClient:
             bt.logging.error(f'Error fetching last harvest block: {e}')
             return 0
 
+    def get_last_known_stake(self) -> int:
+        """
+        Query the last known stake used for delta calculation.
+
+        This is used to calculate actual emissions by comparing current stake
+        to the last known value, preventing double-counting.
+
+        Returns:
+            Last known stake value (0 if contract not ready)
+        """
+        if not self._ensure_contract():
+            return 0
+
+        # Use raw RPC call due to substrate-interface Ink! 5 decoding issues
+        try:
+            value = self._read_contract_u128('get_last_known_stake')
+            bt.logging.debug(f'Last known stake (raw read): {value}')
+            return value
+        except Exception as e:
+            bt.logging.error(f'Error fetching last known stake: {e}')
+            return 0
+
     def harvest_emissions(self, wallet: bt.Wallet) -> Optional[dict]:
         """
         Harvest emissions from the treasury hotkey and distribute to bounties.
 
         This function is PERMISSIONLESS - anyone can call it.
-        It queries pending emissions, fills bounties, and recycles the remainder.
+        The contract handles everything internally via chain extensions:
+        - Queries pending stake via get_stake_info (function 0)
+        - Fills bounties from the pool
+        - Recycles remainder via transfer_stake (function 6)
+        - If recycling fails, the contract reverts with RecyclingFailed error
+
+        Uses raw extrinsic submission to bypass Ink! 5 type decoding issues.
 
         Args:
             wallet: Wallet for signing the transaction (any valid wallet works)
 
         Returns:
-            HarvestResult dict with harvested, bounties_filled, recycled; None on error
+            Dict with status and tx_hash on success; error details on failure
         """
         if not self._ensure_contract():
             bt.logging.warning('Cannot harvest emissions: contract not ready')
             return None
 
         try:
-            # Check pending emissions first
-            pending = self.get_pending_emissions()
-            if pending == 0:
-                bt.logging.debug('No pending emissions to harvest')
-                return {'harvested': 0, 'bounties_filled': 0, 'recycled': 0, 'status': 'no_pending'}
+            bt.logging.debug('Calling contract harvest_emissions...')
 
-            bt.logging.info(f'Harvesting {pending} pending emissions...')
-
-            keypair = Keypair.create_from_uri(wallet.hotkey.ss58_address)
-
-            result = self._contract.exec(
-                keypair=keypair,
-                method='harvest_emissions',
+            # Let the contract handle everything via chain extensions
+            keypair = wallet.hotkey
+            tx_hash = self._exec_contract_raw(
+                method_name='harvest_emissions',
                 args={},
-                value=0,
-                gas_limit={
-                    'ref_time': 50_000_000_000,  # 50 billion
-                    'proof_size': 1_000_000,  # 1 MB
-                },
+                keypair=keypair,
+                gas_limit=DEFAULT_GAS_LIMIT,
             )
 
-            if result.is_success:
-                # Parse result from contract return value
-                harvest_result = result.contract_result_data
-                if harvest_result:
-                    harvested = harvest_result.get('harvested', 0)
-                    bounties_filled = harvest_result.get('bounties_filled', 0)
-                    recycled = harvest_result.get('recycled', 0)
-                    bt.logging.success(
-                        f'Harvested {harvested} emissions, '
-                        f'filled {bounties_filled} bounties, '
-                        f'recycled {recycled}'
-                    )
-                    return {
-                        'harvested': harvested,
-                        'bounties_filled': bounties_filled,
-                        'recycled': recycled,
-                        'status': 'success',
-                    }
-                else:
-                    bt.logging.info(f'Harvest succeeded: {result.extrinsic_hash}')
-                    return {'status': 'success', 'tx_hash': result.extrinsic_hash}
+            if tx_hash:
+                # Contract succeeded - recycling worked
+                # (Contract reverts if recycling fails, so success means recycling succeeded)
+                bt.logging.success(f'Harvest succeeded: {tx_hash}')
+                return {
+                    'status': 'success',
+                    'tx_hash': tx_hash,
+                    'recycled': True,
+                }
             else:
-                bt.logging.warning(f'Harvest failed: {result.error_message}')
-                return {'status': 'failed', 'error': result.error_message}
+                return {'status': 'failed', 'error': 'Transaction failed'}
 
         except Exception as e:
             bt.logging.error(f'Harvest error: {e}')
@@ -1460,174 +1609,53 @@ class IssueCompetitionContractClient:
         This transfers stake ownership from the treasury hotkey to the miner's coldkey.
         Only the contract owner can call this function.
 
+        Uses raw extrinsic submission to bypass Ink! 5 type decoding issues.
+
         Args:
             competition_id: ID of the completed competition
             miner_coldkey: SS58 address of the miner's coldkey
             wallet: Owner wallet for signing
 
         Returns:
-            Payout amount on success, None on error
+            Payout amount on success (queried from competition), None on error
         """
         if not self._ensure_contract():
             bt.logging.warning('Cannot payout bounty: contract not ready')
             return None
 
         try:
+            # Get the competition details first to know the payout amount
+            competition = self.get_competition(competition_id)
+            expected_payout = competition.payout_amount if competition else None
+
             bt.logging.info(
                 f'Paying out bounty for competition {competition_id} '
                 f'to miner {miner_coldkey[:16]}...'
             )
 
-            keypair = Keypair.create_from_uri(wallet.hotkey.ss58_address)
-
-            result = self._contract.exec(
-                keypair=keypair,
-                method='payout_bounty',
+            # Use raw execution to bypass Ink! 5 type decoding
+            keypair = wallet.hotkey
+            tx_hash = self._exec_contract_raw(
+                method_name='payout_bounty',
                 args={
                     'competition_id': competition_id,
                     'miner_coldkey': miner_coldkey,
                 },
-                value=0,
+                keypair=keypair,
                 gas_limit=DEFAULT_GAS_LIMIT,
             )
 
-            if result.is_success:
-                payout_amount = result.contract_result_data
+            if tx_hash:
                 bt.logging.success(
-                    f'Bounty payout succeeded: {payout_amount} to {miner_coldkey[:16]}...'
+                    f'Bounty payout succeeded: {tx_hash} to {miner_coldkey[:16]}...'
                 )
-                return int(payout_amount) if payout_amount else 0
+                # Return the expected payout amount from competition data
+                return int(expected_payout) if expected_payout else 0
             else:
-                bt.logging.error(f'Bounty payout failed: {result.error_message}')
+                bt.logging.error('Bounty payout failed')
                 return None
 
         except Exception as e:
             bt.logging.error(f'Error paying out bounty: {e}')
             return None
 
-    def get_stake_via_subtensor(
-        self,
-        treasury_hotkey: str,
-        treasury_coldkey: str,
-        netuid: int,
-    ) -> int:
-        """
-        Query stake directly via subtensor RPC (bypasses chain extension).
-
-        This is a workaround for local development where the chain extension
-        for get_stake_info may not be implemented. Queries the TotalHotkeyAlpha
-        directly from the subtensor storage.
-
-        Args:
-            treasury_hotkey: SS58 address of the treasury hotkey
-            treasury_coldkey: SS58 address of the treasury coldkey (unused but kept for API compat)
-            netuid: Subnet ID
-
-        Returns:
-            Stake amount in RAO (0 if not found or error)
-        """
-        if not self.subtensor:
-            bt.logging.warning('Cannot query stake: subtensor not configured')
-            return 0
-
-        try:
-            # Use TotalHotkeyAlpha which returns actual stake in RAO
-            # (Alpha returns a U64F64 weighted value which is harder to interpret)
-            result = self.subtensor.substrate.query(
-                module='SubtensorModule',
-                storage_function='TotalHotkeyAlpha',
-                params=[treasury_hotkey, netuid],
-            )
-            stake = 0
-
-            if result is None:
-                stake = 0
-            elif hasattr(result, 'value'):
-                val = result.value
-                if val is not None:
-                    stake = int(val)
-            elif isinstance(result, (int, float)):
-                stake = int(result)
-            else:
-                # Try to convert directly
-                stake = int(result) if result else 0
-
-            bt.logging.debug(
-                f'Stake via TotalHotkeyAlpha: hotkey={treasury_hotkey[:16]}..., '
-                f'netuid={netuid}, stake={stake} RAO ({stake/1e9:.4f} TAO)'
-            )
-            return stake
-        except Exception as e:
-            bt.logging.error(f'Error querying stake via subtensor: {e}')
-            return 0
-
-    def harvest_emissions_external(
-        self,
-        wallet: bt.Wallet,
-        amount: int,
-    ) -> Optional[dict]:
-        """
-        Harvest emissions using an externally-provided amount.
-
-        This is a workaround for local development where the chain extension
-        for get_stake_info may not be implemented. The validator queries
-        stake directly via subtensor RPC and passes the amount here.
-
-        Args:
-            wallet: Wallet for signing the transaction
-            amount: Amount of emissions to harvest (from subtensor query)
-
-        Returns:
-            HarvestResult dict with harvested, bounties_filled, recycled; None on error
-        """
-        if not self._ensure_contract():
-            bt.logging.warning('Cannot harvest emissions: contract not ready')
-            return None
-
-        if amount == 0:
-            bt.logging.debug('No emissions to harvest (amount=0)')
-            return {'harvested': 0, 'bounties_filled': 0, 'recycled': 0, 'status': 'no_pending'}
-
-        try:
-            bt.logging.info(f'Harvesting {amount} emissions (external)...')
-
-            keypair = Keypair.create_from_uri(wallet.hotkey.ss58_address)
-
-            result = self._contract.exec(
-                keypair=keypair,
-                method='harvest_emissions_external',
-                args={'amount': amount},
-                value=0,
-                gas_limit={
-                    'ref_time': 50_000_000_000,  # 50 billion
-                    'proof_size': 1_000_000,  # 1 MB
-                },
-            )
-
-            if result.is_success:
-                harvest_result = result.contract_result_data
-                if harvest_result:
-                    harvested = harvest_result.get('harvested', 0)
-                    bounties_filled = harvest_result.get('bounties_filled', 0)
-                    recycled = harvest_result.get('recycled', 0)
-                    bt.logging.success(
-                        f'Harvested (external) {harvested} emissions, '
-                        f'filled {bounties_filled} bounties, '
-                        f'recycled {recycled}'
-                    )
-                    return {
-                        'harvested': harvested,
-                        'bounties_filled': bounties_filled,
-                        'recycled': recycled,
-                        'status': 'success',
-                    }
-                else:
-                    bt.logging.info(f'Harvest (external) succeeded: {result.extrinsic_hash}')
-                    return {'status': 'success', 'tx_hash': result.extrinsic_hash}
-            else:
-                bt.logging.warning(f'Harvest (external) failed: {result.error_message}')
-                return {'status': 'failed', 'error': result.error_message}
-
-        except Exception as e:
-            bt.logging.error(f'Harvest (external) error: {e}')
-            return {'status': 'error', 'error': str(e)}

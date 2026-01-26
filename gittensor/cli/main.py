@@ -13,6 +13,7 @@ Usage:
 
 import click
 from .issue_commands import issue
+from .config_commands import config
 
 
 @click.group()
@@ -29,6 +30,7 @@ def cli():
 
 # Register subcommands
 cli.add_command(issue)
+cli.add_command(config)
 
 
 def main():

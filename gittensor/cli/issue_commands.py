@@ -23,6 +23,20 @@ from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
 
+# CLI config file location (same as config_commands.py)
+CLI_CONFIG_FILE = Path.home() / '.gittensor' / 'cli_config.json'
+
+
+def load_cli_config() -> dict:
+    """Load CLI configuration from file."""
+    if not CLI_CONFIG_FILE.exists():
+        return {}
+    try:
+        with open(CLI_CONFIG_FILE, 'r') as f:
+            return json.load(f)
+    except (json.JSONDecodeError, IOError):
+        return {}
+
 # Default paths and URLs
 GITTENSOR_DIR = Path.home() / '.gittensor'
 ISSUE_PREFERENCES_FILE = GITTENSOR_DIR / 'issue_preferences.json'
@@ -204,13 +218,14 @@ def issue():
     pass
 
 
-def _get_contract_child_storage_key(substrate, contract_addr: str) -> Optional[str]:
+def _get_contract_child_storage_key(substrate, contract_addr: str, verbose: bool = False) -> Optional[str]:
     """
     Get the child storage key for a contract's trie.
 
     Args:
         substrate: SubstrateInterface instance
         contract_addr: Contract address
+        verbose: If True, print debug output
 
     Returns:
         Hex-encoded child storage key or None if contract doesn't exist
@@ -218,17 +233,21 @@ def _get_contract_child_storage_key(substrate, contract_addr: str) -> Optional[s
     try:
         contract_info = substrate.query('Contracts', 'ContractInfoOf', [contract_addr])
         if not contract_info or not contract_info.value:
+            if verbose:
+                console.print(f'[dim]Debug: Contract not found at {contract_addr}[/dim]')
             return None
 
         trie_id_hex = contract_info.value['trie_id'].replace('0x', '')
         prefix = b':child_storage:default:'
         trie_id_bytes = bytes.fromhex(trie_id_hex)
         return '0x' + (prefix + trie_id_bytes).hex()
-    except Exception:
+    except Exception as e:
+        if verbose:
+            console.print(f'[dim]Debug: Contract info query failed: {e}[/dim]')
         return None
 
 
-def _read_contract_packed_storage(substrate, contract_addr: str) -> Optional[Dict[str, Any]]:
+def _read_contract_packed_storage(substrate, contract_addr: str, verbose: bool = False) -> Optional[Dict[str, Any]]:
     """
     Read the packed root storage from a contract using childstate RPC.
 
@@ -238,19 +257,25 @@ def _read_contract_packed_storage(substrate, contract_addr: str) -> Optional[Dic
     Args:
         substrate: SubstrateInterface instance
         contract_addr: Contract address
+        verbose: If True, print debug output
 
     Returns:
         Dict with owner, netuid, next_issue_id, etc. or None on error
     """
     import struct
 
-    child_key = _get_contract_child_storage_key(substrate, contract_addr)
+    child_key = _get_contract_child_storage_key(substrate, contract_addr, verbose)
     if not child_key:
+        if verbose:
+            console.print('[dim]Debug: Failed to get contract child storage key[/dim]')
         return None
 
     # Get all storage keys for this contract
     keys_result = substrate.rpc_request('childstate_getKeysPaged', [child_key, '0x', 100, None, None])
     keys = keys_result.get('result', [])
+
+    if verbose:
+        console.print(f'[dim]Debug: Found {len(keys)} storage keys in contract[/dim]')
 
     # Find the packed storage key (ends with 00000000)
     packed_key = None
@@ -260,28 +285,36 @@ def _read_contract_packed_storage(substrate, contract_addr: str) -> Optional[Dic
             break
 
     if not packed_key:
+        if verbose:
+            console.print('[dim]Debug: No packed storage key (ending in 00000000) found[/dim]')
         return None
 
     # Read the packed storage value
     val_result = substrate.rpc_request('childstate_getStorage', [child_key, packed_key, None])
     if not val_result.get('result'):
+        if verbose:
+            console.print('[dim]Debug: Failed to read packed storage value[/dim]')
         return None
 
     data = bytes.fromhex(val_result['result'].replace('0x', ''))
+    if verbose:
+        console.print(f'[dim]Debug: Packed storage data length = {len(data)} bytes[/dim]')
 
-    # Decode packed struct:
+    # Decode packed struct (matches IssueBountyManager in lib.rs):
     # owner: AccountId (32 bytes)
     # treasury_hotkey: AccountId (32 bytes)
     # netuid: u16 (2 bytes)
     # next_issue_id: u64 (8 bytes)
     # next_competition_id: u64 (8 bytes)
     # alpha_pool: u128 (16 bytes)
-    # total_network_stake: u128 (16 bytes)
     # submission_window_blocks: u32 (4 bytes)
     # competition_deadline_blocks: u32 (4 bytes)
     # proposal_expiry_blocks: u32 (4 bytes)
+    # Total: 110 bytes minimum
 
-    if len(data) < 126:  # Minimum expected size
+    if len(data) < 110:  # Minimum expected size
+        if verbose:
+            console.print(f'[dim]Debug: Packed storage too small ({len(data)} < 110 bytes)[/dim]')
         return None
 
     offset = 0
@@ -294,6 +327,9 @@ def _read_contract_packed_storage(substrate, contract_addr: str) -> Optional[Dic
     next_issue_id = struct.unpack_from('<Q', data, offset)[0]
     offset += 8
     next_competition_id = struct.unpack_from('<Q', data, offset)[0]
+    offset += 8
+    alpha_pool_lo, alpha_pool_hi = struct.unpack_from('<QQ', data, offset)
+    alpha_pool = alpha_pool_lo + (alpha_pool_hi << 64)
 
     return {
         'owner': substrate.ss58_encode(owner.hex()),
@@ -301,6 +337,7 @@ def _read_contract_packed_storage(substrate, contract_addr: str) -> Optional[Dic
         'netuid': netuid,
         'next_issue_id': next_issue_id,
         'next_competition_id': next_competition_id,
+        'alpha_pool': alpha_pool,
     }
 
 
@@ -324,7 +361,7 @@ def _compute_ink5_lazy_key(root_key_hex: str, encoded_key: bytes) -> str:
     return '0x' + (h + data).hex()
 
 
-def _read_issues_from_child_storage(substrate, contract_addr: str) -> List[Dict[str, Any]]:
+def _read_issues_from_child_storage(substrate, contract_addr: str, verbose: bool = False) -> List[Dict[str, Any]]:
     """
     Read all issues from contract child storage.
 
@@ -333,25 +370,34 @@ def _read_issues_from_child_storage(substrate, contract_addr: str) -> List[Dict[
     Args:
         substrate: SubstrateInterface instance
         contract_addr: Contract address
+        verbose: If True, print debug output
 
     Returns:
         List of issue dictionaries
     """
     import struct
 
-    child_key = _get_contract_child_storage_key(substrate, contract_addr)
+    child_key = _get_contract_child_storage_key(substrate, contract_addr, verbose)
     if not child_key:
+        if verbose:
+            console.print('[dim]Debug: Cannot read issues - no child storage key[/dim]')
         return []
 
     # First, read packed storage to get next_issue_id
-    packed_storage = _read_contract_packed_storage(substrate, contract_addr)
+    packed_storage = _read_contract_packed_storage(substrate, contract_addr, verbose)
     if not packed_storage:
+        if verbose:
+            console.print('[dim]Debug: Cannot read issues - packed storage read failed[/dim]')
         return []
 
     next_issue_id = packed_storage.get('next_issue_id', 1)
+    if verbose:
+        console.print(f'[dim]Debug: next_issue_id from contract = {next_issue_id}[/dim]')
 
     # If next_issue_id is 1, no issues have been registered yet
     if next_issue_id <= 1:
+        if verbose:
+            console.print('[dim]Debug: No issues registered (next_issue_id <= 1)[/dim]')
         return []
 
     issues = []
@@ -359,6 +405,9 @@ def _read_issues_from_child_storage(substrate, contract_addr: str) -> List[Dict[
 
     # Iterate through all issue IDs (1 to next_issue_id - 1)
     # Issues mapping root key is '52789899'
+    if verbose:
+        console.print(f'[dim]Debug: Reading issues 1 to {next_issue_id - 1} using mapping key 52789899[/dim]')
+
     for issue_id in range(1, next_issue_id):
         # SCALE encode u64 as little-endian 8 bytes
         encoded_id = struct.pack('<Q', issue_id)
@@ -366,6 +415,8 @@ def _read_issues_from_child_storage(substrate, contract_addr: str) -> List[Dict[
 
         val_result = substrate.rpc_request('childstate_getStorage', [child_key, lazy_key, None])
         if not val_result.get('result'):
+            if verbose:
+                console.print(f'[dim]Debug: No storage found for issue_id={issue_id} (key={lazy_key[:20]}...)[/dim]')
             continue
 
         data = bytes.fromhex(val_result['result'].replace('0x', ''))
@@ -424,7 +475,11 @@ def _read_issues_from_child_storage(substrate, contract_addr: str) -> List[Dict[
                 'target_bounty': target_bounty,
                 'status': status,
             })
-        except Exception:
+            if verbose:
+                console.print(f'[dim]Debug: Decoded issue {stored_issue_id}: {repo_name}#{issue_number}[/dim]')
+        except Exception as e:
+            if verbose:
+                console.print(f'[dim]Debug: Failed to decode issue {issue_id}: {e}[/dim]')
             continue
 
     # Sort by ID
@@ -432,7 +487,7 @@ def _read_issues_from_child_storage(substrate, contract_addr: str) -> List[Dict[
     return issues
 
 
-def read_issues_from_contract(ws_endpoint: str, contract_addr: str) -> List[Dict[str, Any]]:
+def read_issues_from_contract(ws_endpoint: str, contract_addr: str, verbose: bool = False) -> List[Dict[str, Any]]:
     """
     Read issues directly from the smart contract (no API dependency).
 
@@ -442,6 +497,7 @@ def read_issues_from_contract(ws_endpoint: str, contract_addr: str) -> List[Dict
     Args:
         ws_endpoint: WebSocket endpoint for Subtensor
         contract_addr: Contract address
+        verbose: If True, print debug output
 
     Returns:
         List of issue dictionaries
@@ -449,17 +505,25 @@ def read_issues_from_contract(ws_endpoint: str, contract_addr: str) -> List[Dict
     try:
         from substrateinterface import SubstrateInterface
 
+        if verbose:
+            console.print(f'[dim]Debug: Connecting to {ws_endpoint}...[/dim]')
+
         # Connect to subtensor
         substrate = SubstrateInterface(url=ws_endpoint)
 
+        if verbose:
+            console.print('[dim]Debug: Connected successfully[/dim]')
+
         # Read issues directly from child storage
-        return _read_issues_from_child_storage(substrate, contract_addr)
+        return _read_issues_from_child_storage(substrate, contract_addr, verbose)
 
     except ImportError as e:
         console.print(f'[yellow]Cannot read from contract: {e}[/yellow]')
         console.print('[dim]Install with: pip install substrate-interface[/dim]')
         return []
     except Exception as e:
+        if verbose:
+            console.print(f'[dim]Debug: Connection/read error: {e}[/dim]')
         console.print(f'[yellow]Error reading from contract: {e}[/yellow]')
         return []
 
@@ -477,7 +541,8 @@ def read_issues_from_contract(ws_endpoint: str, contract_addr: str) -> List[Dict
 )
 @click.option('--testnet', is_flag=True, help='Use testnet contract address')
 @click.option('--from-api', is_flag=True, help='Force reading from API instead of contract')
-def issue_list(rpc_url: str, contract: str, testnet: bool, from_api: bool):
+@click.option('--verbose', '-v', is_flag=True, help='Show debug output for contract reads')
+def issue_list(rpc_url: str, contract: str, testnet: bool, from_api: bool, verbose: bool):
     """
     List available issues for competition.
 
@@ -507,10 +572,12 @@ def issue_list(rpc_url: str, contract: str, testnet: bool, from_api: bool):
         console.print(f'[dim]Data source: Contract at {contract_addr[:20]}...[/dim]')
         console.print(f'[dim]Endpoint: {ws_endpoint}[/dim]\n')
 
-        issues = read_issues_from_contract(ws_endpoint, contract_addr)
+        issues = read_issues_from_contract(ws_endpoint, contract_addr, verbose)
 
         if not issues:
             console.print('[yellow]No issues found in contract or contract read failed.[/yellow]')
+            if verbose:
+                console.print('[dim]Debug: Contract read returned empty list[/dim]')
             console.print('[dim]Falling back to API...[/dim]\n')
             from_api = True
 
@@ -562,11 +629,9 @@ def issue_list(rpc_url: str, contract: str, testnet: bool, from_api: bool):
             try:
                 bounty = float(bounty_raw) if bounty_raw else 0.0
                 target = float(target_raw) if target_raw else 0.0
-                # Convert from smallest units (9 decimals) to ALPHA
-                if bounty > 1_000_000:
-                    bounty = bounty / 1_000_000_000
-                if target > 1_000_000:
-                    target = target / 1_000_000_000
+                # Always convert from smallest units (9 decimals) to ALPHA
+                bounty = bounty / 1_000_000_000
+                target = target / 1_000_000_000
             except (ValueError, TypeError):
                 bounty = 0.0
                 target = 0.0
@@ -753,7 +818,7 @@ def issue_status(wallet_name: str, wallet_hotkey: str, api_url: str):
                     comp_panel = Panel(
                         f'[green]Competition ID:[/green] {comp.get("id", "?")}\n'
                         f'[green]Issue:[/green] {comp.get("repository_full_name", "?")}#{comp.get("issue_number", "?")}\n'
-                        f'[green]Bounty:[/green] {comp.get("bounty_amount", 0) / 1e9:.2f} TAO\n'
+                        f'[green]Bounty:[/green] {comp.get("bounty_amount", 0) / 1e9:.2f} ALPHA\n'
                         f'[green]Miner 1:[/green] {comp.get("miner1_hotkey", "?")[:12]}...\n'
                         f'[green]Miner 2:[/green] {comp.get("miner2_hotkey", "?")[:12]}...\n'
                         f'[green]Status:[/green] {comp.get("status", "Unknown")}',
@@ -1128,15 +1193,22 @@ def issue_register(
         console.print(f'[dim]Connecting to {ws_endpoint}...[/dim]')
         substrate = SubstrateInterface(url=ws_endpoint)
 
-        # For local development, use Alice
-        if network_name.lower() == 'local':
-            console.print('[dim]Using //Alice for local development...[/dim]')
+        # Load wallet from CLI config or CLI args
+        cli_config = load_cli_config()
+        effective_wallet = cli_config.get('wallet', wallet_name)
+        effective_hotkey = cli_config.get('hotkey', wallet_hotkey)
+
+        # For local development, check config first, then fall back to //Alice
+        if network_name.lower() == 'local' and effective_wallet == 'default' and effective_hotkey == 'default':
+            console.print('[dim]Using //Alice for local development (no config set)...[/dim]')
             keypair = Keypair.create_from_uri('//Alice')
         else:
-            # Load wallet for non-local networks
-            console.print(f'[dim]Loading wallet {wallet_name}/{wallet_hotkey}...[/dim]')
-            wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
-            keypair = Keypair(ss58_address=wallet.hotkey.ss58_address, public_key=wallet.hotkey.public_key)
+            # Load wallet from config or CLI args
+            console.print(f'[dim]Loading wallet {effective_wallet}/{effective_hotkey}...[/dim]')
+            wallet = bt.Wallet(name=effective_wallet, hotkey=effective_hotkey)
+            # Use COLDKEY for owner-only operations (register_issue requires owner)
+            # Contract owner is set to deployer's coldkey during contract instantiation
+            keypair = wallet.coldkey
 
         # Load contract
         contract_metadata = Path(__file__).parent.parent.parent / 'smart-contracts' / 'ink' / 'target' / 'ink' / 'issue_bounty_manager.contract'
@@ -1167,7 +1239,15 @@ def issue_register(
             gas_limit={'ref_time': 10_000_000_000, 'proof_size': 1_000_000},
         )
 
-        console.print(f'\n[green]✅ Issue registered successfully![/green]')
+        # Check if transaction was successful
+        if hasattr(result, 'is_success') and not result.is_success:
+            console.print(f'\n[red]Transaction failed![/red]')
+            if hasattr(result, 'error_message'):
+                console.print(f'[red]Error: {result.error_message}[/red]')
+            console.print(f'[cyan]Transaction Hash:[/cyan] {result.extrinsic_hash}')
+            return
+
+        console.print(f'\n[green]Issue registered successfully![/green]')
         console.print(f'[cyan]Transaction Hash:[/cyan] {result.extrinsic_hash}')
         console.print(f'[dim]Issue will be visible once bounty is funded via depositToPool()[/dim]')
 
@@ -1176,6 +1256,684 @@ def issue_register(
         console.print('[dim]Install with: pip install substrate-interface bittensor[/dim]')
     except Exception as e:
         console.print(f'[red]Error registering issue: {e}[/red]')
+
+
+@issue.command('harvest')
+@click.option(
+    '--wallet-name',
+    default='validator',
+    help='Wallet name',
+)
+@click.option(
+    '--wallet-hotkey',
+    default='default',
+    help='Hotkey name',
+)
+@click.option(
+    '--rpc-url',
+    default='wss://entrypoint-finney.opentensor.ai:443',
+    help='Subtensor RPC endpoint',
+)
+@click.option(
+    '--contract',
+    default='',
+    help='Contract address (uses config if empty)',
+)
+@click.option('--verbose', '-v', is_flag=True, help='Show detailed output')
+def issue_harvest(wallet_name: str, wallet_hotkey: str, rpc_url: str, contract: str, verbose: bool):
+    """
+    Manually trigger emission harvest from contract treasury.
+
+    This command is useful for debugging harvest failures. It will:
+    - Show wallet balance (must have >1 TAO for fees)
+    - Attempt to call harvest_emissions() on the contract
+    - Display full error details if harvest fails
+
+    The harvest operation is permissionless - any wallet can trigger it.
+    The contract handles emission collection and distribution internally.
+
+    \b
+    Examples:
+        gitt issue harvest
+        gitt issue harvest --verbose
+        gitt issue harvest --wallet-name mywallet --wallet-hotkey mykey
+    """
+    console.print('\n[bold cyan]Manual Emission Harvest[/bold cyan]\n')
+
+    # Get configuration
+    contract_addr = get_contract_address(contract, testnet=False)
+    ws_endpoint = get_ws_endpoint(rpc_url)
+
+    if not contract_addr:
+        console.print('[red]Error: Contract address not configured.[/red]')
+        console.print('[dim]Set CONTRACT_ADDRESS env var or run ./up.sh --issues[/dim]')
+        return
+
+    console.print(f'[dim]Contract: {contract_addr}[/dim]')
+    console.print(f'[dim]Endpoint: {ws_endpoint}[/dim]')
+    console.print(f'[dim]Wallet: {wallet_name}/{wallet_hotkey}[/dim]\n')
+
+    try:
+        import bittensor as bt
+        from gittensor.validator.issue_competitions.contract_client import (
+            IssueCompetitionContractClient,
+        )
+
+        # Load wallet
+        console.print('[yellow]Loading wallet...[/yellow]')
+        wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
+        hotkey_addr = wallet.hotkey.ss58_address
+        console.print(f'[green]Hotkey address:[/green] {hotkey_addr}')
+
+        # Connect to subtensor
+        console.print(f'\n[yellow]Connecting to subtensor...[/yellow]')
+        subtensor = bt.Subtensor(network=ws_endpoint)
+
+        # Show wallet balance (informational only - let contract client handle insufficient funds)
+        if verbose:
+            try:
+                balance = subtensor.get_balance(hotkey_addr)
+                console.print(f'[dim]Wallet balance: {balance}[/dim]')
+            except Exception as e:
+                console.print(f'[dim]Could not fetch balance: {e}[/dim]')
+
+        # Create contract client
+        console.print(f'\n[yellow]Initializing contract client...[/yellow]')
+        client = IssueCompetitionContractClient(
+            contract_address=contract_addr,
+            subtensor=subtensor,
+        )
+
+        if verbose:
+            # Show contract state
+            console.print('[dim]Reading contract state...[/dim]')
+            try:
+                alpha_pool = client.get_alpha_pool()
+                pending = client.get_pending_emissions()
+                last_harvest = client.get_last_harvest_block()
+                current_block = subtensor.get_current_block()
+
+                console.print(f'[dim]Alpha pool: {alpha_pool / 1e9:.4f} ALPHA[/dim]')
+                console.print(f'[dim]Pending emissions: {pending / 1e9:.4f} ALPHA[/dim]')
+                console.print(f'[dim]Last harvest block: {last_harvest}[/dim]')
+                console.print(f'[dim]Current block: {current_block}[/dim]')
+                if last_harvest > 0:
+                    console.print(f'[dim]Blocks since harvest: {current_block - last_harvest}[/dim]')
+            except Exception as e:
+                console.print(f'[yellow]Warning: Could not read contract state: {e}[/yellow]')
+
+        # Attempt harvest
+        console.print(f'\n[yellow]Calling harvest_emissions()...[/yellow]')
+        result = client.harvest_emissions(wallet)
+
+        if result:
+            if result.get('status') == 'success':
+                console.print(f'\n[green]Harvest succeeded![/green]')
+                console.print(f'[cyan]Transaction hash:[/cyan] {result.get("tx_hash", "N/A")}')
+                if result.get('recycled'):
+                    console.print('[dim]Emissions recycled to staking pool.[/dim]')
+            elif result.get('status') == 'failed':
+                console.print(f'\n[red]Harvest failed![/red]')
+                console.print(f'[red]Error: {result.get("error", "Unknown error")}[/red]')
+            else:
+                console.print(f'\n[yellow]Harvest result: {result}[/yellow]')
+        else:
+            console.print(f'\n[red]Harvest returned None - check logs for details.[/red]')
+            console.print('[dim]Run with --verbose for more information.[/dim]')
+
+    except ImportError as e:
+        console.print(f'[red]Error: Missing dependency - {e}[/red]')
+        console.print('[dim]Install with: pip install bittensor substrate-interface[/dim]')
+    except Exception as e:
+        import traceback
+        console.print(f'\n[red]Error during harvest: {type(e).__name__}: {e}[/red]')
+        if verbose:
+            console.print(f'[dim]Full traceback:\n{traceback.format_exc()}[/dim]')
+        else:
+            console.print('[dim]Run with --verbose for full traceback.[/dim]')
+
+
+@issue.group(hidden=True)
+def admin():
+    """Admin/testing commands for direct contract interaction (development only).
+
+    These commands provide direct access to contract methods for debugging
+    and testing. They bypass the normal API layer and read directly from
+    the smart contract.
+    """
+    pass
+
+
+@admin.command('pool')
+@click.option(
+    '--rpc-url',
+    default='wss://entrypoint-finney.opentensor.ai:443',
+    help='Subtensor RPC endpoint',
+)
+@click.option(
+    '--contract',
+    default='',
+    help='Contract address (uses config if empty)',
+)
+@click.option('--verbose', '-v', is_flag=True, help='Show debug output')
+def admin_pool(rpc_url: str, contract: str, verbose: bool):
+    """View current alpha pool balance."""
+    contract_addr = get_contract_address(contract, testnet=False)
+    ws_endpoint = get_ws_endpoint(rpc_url)
+
+    if not contract_addr:
+        console.print('[red]Error: Contract address not configured.[/red]')
+        return
+
+    console.print(f'[dim]Contract: {contract_addr}[/dim]')
+
+    try:
+        from substrateinterface import SubstrateInterface
+
+        substrate = SubstrateInterface(url=ws_endpoint)
+        packed = _read_contract_packed_storage(substrate, contract_addr, verbose)
+
+        if packed:
+            alpha_pool = packed.get('alpha_pool', 0)
+            console.print(f'[green]Alpha Pool:[/green] {alpha_pool / 1e9:.4f} ALPHA ({alpha_pool} raw)')
+        else:
+            console.print('[yellow]Could not read contract storage.[/yellow]')
+    except Exception as e:
+        console.print(f'[red]Error: {e}[/red]')
+
+
+@admin.command('pending')
+@click.option(
+    '--rpc-url',
+    default='wss://entrypoint-finney.opentensor.ai:443',
+    help='Subtensor RPC endpoint',
+)
+@click.option(
+    '--contract',
+    default='',
+    help='Contract address (uses config if empty)',
+)
+@click.option('--verbose', '-v', is_flag=True, help='Show debug output')
+def admin_pending(rpc_url: str, contract: str, verbose: bool):
+    """View pending emissions value (current stake on treasury)."""
+    contract_addr = get_contract_address(contract, testnet=False)
+    ws_endpoint = get_ws_endpoint(rpc_url)
+
+    if not contract_addr:
+        console.print('[red]Error: Contract address not configured.[/red]')
+        return
+
+    console.print(f'[dim]Contract: {contract_addr}[/dim]')
+
+    try:
+        from gittensor.validator.issue_competitions.contract_client import (
+            IssueCompetitionContractClient,
+        )
+        import bittensor as bt
+
+        subtensor = bt.Subtensor(network=ws_endpoint)
+        client = IssueCompetitionContractClient(
+            contract_address=contract_addr,
+            subtensor=subtensor,
+        )
+
+        pending = client.get_pending_emissions()
+        last_known = client.get_last_known_stake()
+        delta = pending - last_known if pending > last_known else 0
+
+        console.print(f'[green]Current Stake (Total):[/green] {pending / 1e9:.4f} ALPHA')
+        console.print(f'[green]Last Known Stake:[/green] {last_known / 1e9:.4f} ALPHA')
+        console.print(f'[green]Delta (New Emissions):[/green] {delta / 1e9:.4f} ALPHA')
+    except ImportError as e:
+        console.print(f'[red]Error: Missing dependency - {e}[/red]')
+    except Exception as e:
+        console.print(f'[red]Error: {e}[/red]')
+
+
+@admin.command('issue')
+@click.argument('issue_id', type=int)
+@click.option(
+    '--rpc-url',
+    default='wss://entrypoint-finney.opentensor.ai:443',
+    help='Subtensor RPC endpoint',
+)
+@click.option(
+    '--contract',
+    default='',
+    help='Contract address (uses config if empty)',
+)
+@click.option('--verbose', '-v', is_flag=True, help='Show debug output')
+def admin_issue(issue_id: int, rpc_url: str, contract: str, verbose: bool):
+    """View raw issue data from contract."""
+    contract_addr = get_contract_address(contract, testnet=False)
+    ws_endpoint = get_ws_endpoint(rpc_url)
+
+    if not contract_addr:
+        console.print('[red]Error: Contract address not configured.[/red]')
+        return
+
+    console.print(f'[dim]Contract: {contract_addr}[/dim]')
+    console.print(f'[dim]Reading issue {issue_id}...[/dim]\n')
+
+    try:
+        from substrateinterface import SubstrateInterface
+
+        substrate = SubstrateInterface(url=ws_endpoint)
+        issues = _read_issues_from_child_storage(substrate, contract_addr, verbose)
+
+        issue = next((i for i in issues if i['id'] == issue_id), None)
+
+        if issue:
+            console.print(Panel(
+                f'[cyan]ID:[/cyan] {issue["id"]}\n'
+                f'[cyan]Repository:[/cyan] {issue["repository_full_name"]}\n'
+                f'[cyan]Issue Number:[/cyan] #{issue["issue_number"]}\n'
+                f'[cyan]Bounty Amount:[/cyan] {issue["bounty_amount"] / 1e9:.4f} ALPHA\n'
+                f'[cyan]Target Bounty:[/cyan] {issue["target_bounty"] / 1e9:.4f} ALPHA\n'
+                f'[cyan]Fill %:[/cyan] {(issue["bounty_amount"] / issue["target_bounty"] * 100) if issue["target_bounty"] > 0 else 0:.1f}%\n'
+                f'[cyan]Status:[/cyan] {issue["status"]}',
+                title=f'Issue #{issue_id}',
+                border_style='green',
+            ))
+        else:
+            console.print(f'[yellow]Issue {issue_id} not found.[/yellow]')
+    except Exception as e:
+        console.print(f'[red]Error: {e}[/red]')
+
+
+@admin.command('competition')
+@click.argument('competition_id', type=int)
+@click.option(
+    '--rpc-url',
+    default='wss://entrypoint-finney.opentensor.ai:443',
+    help='Subtensor RPC endpoint',
+)
+@click.option(
+    '--contract',
+    default='',
+    help='Contract address (uses config if empty)',
+)
+@click.option('--verbose', '-v', is_flag=True, help='Show debug output')
+def admin_competition(competition_id: int, rpc_url: str, contract: str, verbose: bool):
+    """View competition details from contract."""
+    contract_addr = get_contract_address(contract, testnet=False)
+    ws_endpoint = get_ws_endpoint(rpc_url)
+
+    if not contract_addr:
+        console.print('[red]Error: Contract address not configured.[/red]')
+        return
+
+    console.print(f'[dim]Contract: {contract_addr}[/dim]')
+    console.print(f'[dim]Reading competition {competition_id}...[/dim]\n')
+
+    try:
+        from gittensor.validator.issue_competitions.contract_client import (
+            IssueCompetitionContractClient,
+        )
+        import bittensor as bt
+
+        subtensor = bt.Subtensor(network=ws_endpoint)
+        client = IssueCompetitionContractClient(
+            contract_address=contract_addr,
+            subtensor=subtensor,
+        )
+
+        comp = client.get_competition(competition_id)
+
+        if comp:
+            # Handle dataclass return type
+            payout = comp.payout_amount if comp.payout_amount else 0
+            winner = comp.winner_hotkey if comp.winner_hotkey else 'None'
+            console.print(Panel(
+                f'[cyan]ID:[/cyan] {comp.id}\n'
+                f'[cyan]Issue ID:[/cyan] {comp.issue_id}\n'
+                f'[cyan]Miner 1:[/cyan] {comp.miner1_hotkey}\n'
+                f'[cyan]Miner 2:[/cyan] {comp.miner2_hotkey}\n'
+                f'[cyan]Status:[/cyan] {comp.status.name}\n'
+                f'[cyan]Start Block:[/cyan] {comp.start_block}\n'
+                f'[cyan]Deadline Block:[/cyan] {comp.deadline_block}\n'
+                f'[cyan]Winner:[/cyan] {winner}\n'
+                f'[cyan]Payout Amount:[/cyan] {payout / 1e9:.4f} ALPHA',
+                title=f'Competition #{competition_id}',
+                border_style='green',
+            ))
+        else:
+            console.print(f'[yellow]Competition {competition_id} not found.[/yellow]')
+    except ImportError as e:
+        console.print(f'[red]Error: Missing dependency - {e}[/red]')
+    except Exception as e:
+        console.print(f'[red]Error: {e}[/red]')
+
+
+@admin.command('proposal')
+@click.argument('issue_id', type=int)
+@click.option(
+    '--rpc-url',
+    default='wss://entrypoint-finney.opentensor.ai:443',
+    help='Subtensor RPC endpoint',
+)
+@click.option(
+    '--contract',
+    default='',
+    help='Contract address (uses config if empty)',
+)
+@click.option('--verbose', '-v', is_flag=True, help='Show debug output')
+def admin_proposal(issue_id: int, rpc_url: str, contract: str, verbose: bool):
+    """View pair proposal state for an issue."""
+    contract_addr = get_contract_address(contract, testnet=False)
+    ws_endpoint = get_ws_endpoint(rpc_url)
+
+    if not contract_addr:
+        console.print('[red]Error: Contract address not configured.[/red]')
+        return
+
+    console.print(f'[dim]Contract: {contract_addr}[/dim]')
+    console.print(f'[dim]Reading proposal for issue {issue_id}...[/dim]\n')
+
+    try:
+        from gittensor.validator.issue_competitions.contract_client import (
+            IssueCompetitionContractClient,
+        )
+        import bittensor as bt
+
+        subtensor = bt.Subtensor(network=ws_endpoint)
+        client = IssueCompetitionContractClient(
+            contract_address=contract_addr,
+            subtensor=subtensor,
+        )
+
+        proposal = client.get_pair_proposal(issue_id)
+
+        if proposal:
+            # Handle dataclass return type
+            console.print(Panel(
+                f'[cyan]Issue ID:[/cyan] {proposal.issue_id}\n'
+                f'[cyan]Miner 1:[/cyan] {proposal.miner1_hotkey}\n'
+                f'[cyan]Miner 2:[/cyan] {proposal.miner2_hotkey}\n'
+                f'[cyan]Proposer:[/cyan] {proposal.proposer}\n'
+                f'[cyan]Proposed At Block:[/cyan] {proposal.proposed_at_block}\n'
+                f'[cyan]Total Stake Voted:[/cyan] {proposal.total_stake_voted / 1e9:.4f}',
+                title=f'Pair Proposal for Issue #{issue_id}',
+                border_style='yellow',
+            ))
+        else:
+            console.print(f'[yellow]No active proposal for issue {issue_id}.[/yellow]')
+    except ImportError as e:
+        console.print(f'[red]Error: Missing dependency - {e}[/red]')
+    except Exception as e:
+        console.print(f'[red]Error: {e}[/red]')
+
+
+@admin.command('propose')
+@click.argument('issue_id', type=int)
+@click.argument('miner1_hotkey', type=str)
+@click.argument('miner2_hotkey', type=str)
+@click.option(
+    '--wallet-name',
+    default='default',
+    help='Wallet name',
+)
+@click.option(
+    '--wallet-hotkey',
+    default='default',
+    help='Hotkey name',
+)
+@click.option(
+    '--rpc-url',
+    default='wss://entrypoint-finney.opentensor.ai:443',
+    help='Subtensor RPC endpoint',
+)
+@click.option(
+    '--contract',
+    default='',
+    help='Contract address (uses config if empty)',
+)
+def admin_propose(
+    issue_id: int,
+    miner1_hotkey: str,
+    miner2_hotkey: str,
+    wallet_name: str,
+    wallet_hotkey: str,
+    rpc_url: str,
+    contract: str,
+):
+    """Propose a miner pair for competition testing."""
+    contract_addr = get_contract_address(contract, testnet=False)
+    ws_endpoint = get_ws_endpoint(rpc_url)
+
+    if not contract_addr:
+        console.print('[red]Error: Contract address not configured.[/red]')
+        return
+
+    console.print(f'[dim]Contract: {contract_addr}[/dim]')
+    console.print(f'[yellow]Proposing pair for issue {issue_id}...[/yellow]\n')
+    console.print(f'  Miner 1: {miner1_hotkey}')
+    console.print(f'  Miner 2: {miner2_hotkey}\n')
+
+    try:
+        from gittensor.validator.issue_competitions.contract_client import (
+            IssueCompetitionContractClient,
+        )
+        import bittensor as bt
+
+        wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
+        subtensor = bt.Subtensor(network=ws_endpoint)
+        client = IssueCompetitionContractClient(
+            contract_address=contract_addr,
+            subtensor=subtensor,
+        )
+
+        result = client.propose_pair(issue_id, miner1_hotkey, miner2_hotkey, wallet)
+        if result:
+            console.print(f'[green]Proposal submitted![/green]')
+        else:
+            console.print('[red]Proposal failed.[/red]')
+    except ImportError as e:
+        console.print(f'[red]Error: Missing dependency - {e}[/red]')
+    except Exception as e:
+        console.print(f'[red]Error: {e}[/red]')
+
+
+@admin.command('vote-pair')
+@click.argument('issue_id', type=int)
+@click.option(
+    '--wallet-name',
+    default='default',
+    help='Wallet name',
+)
+@click.option(
+    '--wallet-hotkey',
+    default='default',
+    help='Hotkey name',
+)
+@click.option(
+    '--rpc-url',
+    default='wss://entrypoint-finney.opentensor.ai:443',
+    help='Subtensor RPC endpoint',
+)
+@click.option(
+    '--contract',
+    default='',
+    help='Contract address (uses config if empty)',
+)
+def admin_vote_pair(
+    issue_id: int,
+    wallet_name: str,
+    wallet_hotkey: str,
+    rpc_url: str,
+    contract: str,
+):
+    """Vote on an existing pair proposal."""
+    contract_addr = get_contract_address(contract, testnet=False)
+    ws_endpoint = get_ws_endpoint(rpc_url)
+
+    if not contract_addr:
+        console.print('[red]Error: Contract address not configured.[/red]')
+        return
+
+    console.print(f'[dim]Contract: {contract_addr}[/dim]')
+    console.print(f'[yellow]Voting on pair proposal for issue {issue_id}...[/yellow]\n')
+
+    try:
+        from gittensor.validator.issue_competitions.contract_client import (
+            IssueCompetitionContractClient,
+        )
+        import bittensor as bt
+
+        wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
+        subtensor = bt.Subtensor(network=ws_endpoint)
+        client = IssueCompetitionContractClient(
+            contract_address=contract_addr,
+            subtensor=subtensor,
+        )
+
+        result = client.vote_pair(issue_id, wallet)
+        if result:
+            console.print(f'[green]Vote submitted![/green]')
+        else:
+            console.print('[red]Vote failed.[/red]')
+    except ImportError as e:
+        console.print(f'[red]Error: Missing dependency - {e}[/red]')
+    except Exception as e:
+        console.print(f'[red]Error: {e}[/red]')
+
+
+@admin.command('vote-solution')
+@click.argument('competition_id', type=int)
+@click.argument('winner_hotkey', type=str)
+@click.argument('pr_url', type=str)
+@click.option(
+    '--wallet-name',
+    default='default',
+    help='Wallet name',
+)
+@click.option(
+    '--wallet-hotkey',
+    default='default',
+    help='Hotkey name',
+)
+@click.option(
+    '--rpc-url',
+    default='wss://entrypoint-finney.opentensor.ai:443',
+    help='Subtensor RPC endpoint',
+)
+@click.option(
+    '--contract',
+    default='',
+    help='Contract address (uses config if empty)',
+)
+def admin_vote_solution(
+    competition_id: int,
+    winner_hotkey: str,
+    pr_url: str,
+    wallet_name: str,
+    wallet_hotkey: str,
+    rpc_url: str,
+    contract: str,
+):
+    """Vote for a solution winner in an active competition."""
+    contract_addr = get_contract_address(contract, testnet=False)
+    ws_endpoint = get_ws_endpoint(rpc_url)
+
+    if not contract_addr:
+        console.print('[red]Error: Contract address not configured.[/red]')
+        return
+
+    console.print(f'[dim]Contract: {contract_addr}[/dim]')
+    console.print(f'[yellow]Voting on solution for competition {competition_id}...[/yellow]\n')
+    console.print(f'  Winner: {winner_hotkey}')
+    console.print(f'  PR URL: {pr_url}\n')
+
+    try:
+        from gittensor.validator.issue_competitions.contract_client import (
+            IssueCompetitionContractClient,
+        )
+        import bittensor as bt
+
+        wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
+        subtensor = bt.Subtensor(network=ws_endpoint)
+        client = IssueCompetitionContractClient(
+            contract_address=contract_addr,
+            subtensor=subtensor,
+        )
+
+        result = client.vote_solution(competition_id, winner_hotkey, pr_url, wallet)
+        if result:
+            console.print(f'[green]Solution vote submitted![/green]')
+        else:
+            console.print('[red]Vote failed.[/red]')
+    except ImportError as e:
+        console.print(f'[red]Error: Missing dependency - {e}[/red]')
+    except Exception as e:
+        console.print(f'[red]Error: {e}[/red]')
+
+
+@admin.command('competitions')
+@click.option(
+    '--rpc-url',
+    default='wss://entrypoint-finney.opentensor.ai:443',
+    help='Subtensor RPC endpoint',
+)
+@click.option(
+    '--contract',
+    default='',
+    help='Contract address (uses config if empty)',
+)
+@click.option('--verbose', '-v', is_flag=True, help='Show debug output')
+def admin_competitions(rpc_url: str, contract: str, verbose: bool):
+    """List all active competitions from contract."""
+    contract_addr = get_contract_address(contract, testnet=False)
+    ws_endpoint = get_ws_endpoint(rpc_url)
+
+    if not contract_addr:
+        console.print('[red]Error: Contract address not configured.[/red]')
+        return
+
+    console.print(f'[dim]Contract: {contract_addr}[/dim]')
+    console.print('[dim]Reading active competitions...[/dim]\n')
+
+    try:
+        from gittensor.validator.issue_competitions.contract_client import (
+            IssueCompetitionContractClient,
+        )
+        import bittensor as bt
+
+        subtensor = bt.Subtensor(network=ws_endpoint)
+        client = IssueCompetitionContractClient(
+            contract_address=contract_addr,
+            subtensor=subtensor,
+        )
+
+        competitions = client.get_active_competitions()
+
+        if competitions:
+            table = Table(show_header=True, header_style='bold magenta')
+            table.add_column('ID', style='cyan', justify='right')
+            table.add_column('Issue ID', style='green', justify='right')
+            table.add_column('Miner 1', style='yellow')
+            table.add_column('Miner 2', style='yellow')
+            table.add_column('Status', style='blue')
+            table.add_column('Deadline', style='magenta', justify='right')
+
+            for comp in competitions:
+                # Handle dataclass return type
+                table.add_row(
+                    str(comp.id),
+                    str(comp.issue_id),
+                    comp.miner1_hotkey[:12] + '...',
+                    comp.miner2_hotkey[:12] + '...',
+                    comp.status.name,
+                    str(comp.deadline_block),
+                )
+
+            console.print(table)
+            console.print(f'\n[dim]Found {len(competitions)} active competition(s)[/dim]')
+        else:
+            console.print('[dim]No active competitions found.[/dim]')
+    except ImportError as e:
+        console.print(f'[red]Error: Missing dependency - {e}[/red]')
+    except Exception as e:
+        console.print(f'[red]Error: {e}[/red]')
 
 
 def register_issue_commands(cli):

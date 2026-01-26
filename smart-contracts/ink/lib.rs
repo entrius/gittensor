@@ -18,16 +18,21 @@ pub use types::*;
 /// Note: All functions use `handle_status = false` which means they return
 /// raw values without automatic error handling from status codes. The caller
 /// is responsible for interpreting the return values.
+///
+/// IMPORTANT: Function 0 returns Option<StakeInfo>, which ink! decodes automatically.
+/// The StakeInfo struct in types.rs must match subtensor's StakeInfo exactly.
 #[ink::chain_extension(extension = 5001)]
 pub trait SubtensorExtension {
     type ErrorCode = ();
 
     /// Query stake info for hotkey/coldkey/netuid.
-    /// Returns the stake amount or 0 if no stake exists.
+    /// Returns Option<StakeInfo> - None if no stake exists, Some(info) with stake details.
+    /// ink! handles SCALE decoding automatically.
     #[ink(function = 0, handle_status = false)]
-    fn get_stake_info(hotkey: [u8; 32], coldkey: [u8; 32], netuid: u16) -> u128;
+    fn get_stake_info(hotkey: [u8; 32], coldkey: [u8; 32], netuid: u16) -> Option<crate::StakeInfo>;
 
     /// Transfer stake ownership to a different coldkey.
+    /// Amount is in AlphaCurrency (u64), NOT u128!
     /// Returns 0 on success, non-zero error code on failure.
     #[ink(function = 6, handle_status = false)]
     fn transfer_stake(
@@ -35,7 +40,7 @@ pub trait SubtensorExtension {
         hotkey: [u8; 32],
         origin_netuid: u16,
         destination_netuid: u16,
-        amount: u128,
+        amount: u64,
     ) -> u32;
 }
 
@@ -79,8 +84,10 @@ mod issue_bounty_manager {
     /// Default proposal expiry: ~3.3 hours at 12s blocks
     pub const DEFAULT_PROPOSAL_EXPIRY_BLOCKS: u32 = 1000;
 
-    /// Consensus threshold percentage (51% of stake required)
-    pub const CONSENSUS_THRESHOLD_PERCENT: u128 = 51;
+    /// Minimum stake required for consensus: 100 TAO (9 decimals)
+    /// This is an absolute threshold - proposals pass when total voted stake
+    /// exceeds this amount, rather than requiring a percentage of network stake.
+    pub const MIN_CONSENSUS_STAKE: u128 = 100_000_000_000_000;
 
     // ========================================================================
     // Contract Storage
@@ -100,8 +107,6 @@ mod issue_bounty_manager {
         next_competition_id: u64,
         /// Unallocated emissions storage (alpha pool)
         alpha_pool: Balance,
-        /// Total network stake for consensus calculation
-        total_network_stake: u128,
         /// Submission window in blocks
         submission_window_blocks: u32,
         /// Competition deadline in blocks
@@ -144,10 +149,10 @@ mod issue_bounty_manager {
         cancel_vote_voters: Mapping<(u64, AccountId), bool>,
 
         // Emission management
-        /// Emissions that couldn't be recycled (kept for next harvest)
-        overflow_pool: Balance,
         /// Block number of last harvest
         last_harvest_block: u32,
+        /// Last known stake for delta calculation (prevents double-counting)
+        last_known_stake: Balance,
     }
 
     impl IssueBountyManager {
@@ -165,7 +170,6 @@ mod issue_bounty_manager {
                 next_issue_id: 1,
                 next_competition_id: 1,
                 alpha_pool: 0,
-                total_network_stake: 0,
                 submission_window_blocks: DEFAULT_SUBMISSION_WINDOW_BLOCKS,
                 competition_deadline_blocks: DEFAULT_COMPETITION_DEADLINE_BLOCKS,
                 proposal_expiry_blocks: DEFAULT_PROPOSAL_EXPIRY_BLOCKS,
@@ -187,8 +191,8 @@ mod issue_bounty_manager {
                 cancel_votes: Mapping::default(),
                 has_cancel_vote: Mapping::default(),
                 cancel_vote_voters: Mapping::default(),
-                overflow_pool: 0,
                 last_harvest_block: 0,
+                last_known_stake: 0,
             }
         }
 
@@ -252,7 +256,8 @@ mod issue_bounty_manager {
                 target_bounty,
             });
 
-            self.fill_bounties();
+            // NOTE: No auto-fill - issues stay Registered until harvest or explicit fill
+            // This prevents issues from appearing as Active immediately upon registration
 
             Ok(issue_id)
         }
@@ -294,23 +299,6 @@ mod issue_bounty_manager {
         /// Deposits funds to the alpha pool
         #[ink(message, payable)]
         pub fn deposit_to_pool(&mut self) {
-            let amount = self.env().transferred_value();
-            if amount == 0 {
-                return;
-            }
-            self.alpha_pool = self.alpha_pool.saturating_add(amount);
-
-            self.env().emit_event(PoolDeposit {
-                depositor: self.env().caller(),
-                amount,
-            });
-
-            self.fill_bounties();
-        }
-
-        /// Alias for deposit_to_pool (backwards compatibility for emissions)
-        #[ink(message, payable)]
-        pub fn receive_emissions(&mut self) {
             let amount = self.env().transferred_value();
             if amount == 0 {
                 return;
@@ -678,16 +666,6 @@ mod issue_bounty_manager {
             Ok(())
         }
 
-        /// Sets the total network stake for consensus calculation
-        #[ink(message)]
-        pub fn set_total_network_stake(&mut self, stake: u128) -> Result<(), Error> {
-            if self.env().caller() != self.owner {
-                return Err(Error::NotOwner);
-            }
-            self.total_network_stake = stake;
-            Ok(())
-        }
-
         /// Sets competition timing configuration
         #[ink(message)]
         pub fn set_competition_config(
@@ -705,27 +683,48 @@ mod issue_bounty_manager {
             Ok(())
         }
 
+        /// Resets stake tracking to current stake value (OWNER ONLY).
+        ///
+        /// Emergency function to reset the last_known_stake tracker.
+        /// Use this if stake tracking gets out of sync (e.g., after manual
+        /// stake operations or contract migration).
+        ///
+        /// Setting to current stake means next harvest will only count
+        /// NEW emissions from this point forward.
+        #[ink(message)]
+        pub fn reset_stake_tracking(&mut self) -> Result<(), Error> {
+            if self.env().caller() != self.owner {
+                return Err(Error::NotOwner);
+            }
+
+            let current_stake = self.get_pending_emissions();
+            self.last_known_stake = current_stake;
+            Ok(())
+        }
+
         // ========================================================================
         // Emission Harvesting Functions
         // ========================================================================
 
         /// Query pending emissions (stake on treasury hotkey owned by owner).
         /// Uses chain extension to query Subtensor runtime.
+        ///
+        /// The chain extension returns Option<StakeInfo>, which ink! decodes automatically.
         #[ink(message)]
         pub fn get_pending_emissions(&self) -> Balance {
             let hotkey_bytes: [u8; 32] = *self.treasury_hotkey.as_ref();
             let coldkey_bytes: [u8; 32] = *self.owner.as_ref();
 
-            // With handle_status = false, the chain extension returns raw value
-            self.env()
+            // Chain extension returns Option<StakeInfo>, ink! decodes it
+            let stake_info = self.env()
                 .extension()
-                .get_stake_info(hotkey_bytes, coldkey_bytes, self.netuid)
-        }
+                .get_stake_info(hotkey_bytes, coldkey_bytes, self.netuid);
 
-        /// Returns the overflow pool balance (emissions that couldn't be recycled).
-        #[ink(message)]
-        pub fn get_overflow_pool(&self) -> Balance {
-            self.overflow_pool
+            // Extract stake value from Option<StakeInfo>
+            match stake_info {
+                Some(info) => info.stake.0 as u128,
+                None => 0,
+            }
         }
 
         /// Returns the block number of the last harvest.
@@ -734,24 +733,37 @@ mod issue_bounty_manager {
             self.last_harvest_block
         }
 
+        /// Returns the last known stake used for delta calculation.
+        #[ink(message)]
+        pub fn get_last_known_stake(&self) -> Balance {
+            self.last_known_stake
+        }
+
         /// Harvest emissions and distribute to bounties.
         ///
         /// PERMISSIONLESS - Anyone can call this function.
         ///
         /// Flow:
-        /// 1. Check pending emissions on treasury hotkey (via chain extension)
-        /// 2. Add any overflow from previous harvests
+        /// 1. Query current stake on treasury hotkey (via chain extension)
+        /// 2. Calculate delta from last known stake (only count NEW emissions)
         /// 3. Fill pending bounties in queue order
         /// 4. Recycle any remainder to owner's coldkey
+        /// 5. If recycling fails, emit HarvestFailed event but keep in alpha_pool
+        ///
+        /// IMPORTANT: The chain extension returns TOTAL stake, not emissions delta.
+        /// We track last_known_stake to compute the actual new emissions.
         #[ink(message)]
         pub fn harvest_emissions(&mut self) -> Result<HarvestResult, Error> {
-            // Query pending emissions via chain extension
-            let pending = self.get_pending_emissions();
+            // Query current total stake via chain extension
+            let current_stake = self.get_pending_emissions();
 
-            // Include any overflow from previous harvests
-            let total_available = pending.saturating_add(self.overflow_pool);
+            // Calculate delta: only new stake since last harvest counts as emissions
+            // This prevents double-counting the same stake across multiple harvests
+            let pending = current_stake.saturating_sub(self.last_known_stake);
 
-            if total_available == 0 {
+            if pending == 0 {
+                // Update tracking even if no new emissions (stake could have been withdrawn)
+                self.last_known_stake = current_stake;
                 return Ok(HarvestResult {
                     harvested: 0,
                     bounties_filled: 0,
@@ -759,9 +771,11 @@ mod issue_bounty_manager {
                 });
             }
 
-            // Add pending emissions to the alpha pool for bounty filling
+            // Update last known stake BEFORE distribution to prevent reentrancy issues
+            self.last_known_stake = current_stake;
+
+            // Add only the NEW emissions to the alpha pool for bounty filling
             self.alpha_pool = self.alpha_pool.saturating_add(pending);
-            self.overflow_pool = 0; // Clear overflow, it's now in alpha_pool
 
             let mut bounties_filled: u32 = 0;
             let alpha_before = self.alpha_pool;
@@ -788,10 +802,16 @@ mod issue_bounty_manager {
             }
 
             // Recycle any remaining alpha pool to owner
-            let recycled = self.alpha_pool;
-            if recycled > 0 {
+            let to_recycle = self.alpha_pool;
+            let mut recycled: Balance = 0;
+
+            if to_recycle > 0 {
                 let owner_bytes: [u8; 32] = *self.owner.as_ref();
                 let hotkey_bytes: [u8; 32] = *self.treasury_hotkey.as_ref();
+
+                // Convert u128 to u64 for chain extension (AlphaCurrency is u64)
+                // Use try_into with fallback to u64::MAX for safety (unlikely to overflow)
+                let amount_u64: u64 = to_recycle.try_into().unwrap_or(u64::MAX);
 
                 // With handle_status = false, returns raw u32 (0 = success)
                 let result = self.env().extension().transfer_stake(
@@ -799,105 +819,39 @@ mod issue_bounty_manager {
                     hotkey_bytes,
                     self.netuid,
                     self.netuid,
-                    recycled,
+                    amount_u64,
                 );
 
                 if result == 0 {
                     // Transfer successful
+                    recycled = to_recycle;
                     self.alpha_pool = 0;
                     self.env().emit_event(EmissionsRecycled {
                         amount: recycled,
                         destination: self.owner,
                     });
                 } else {
-                    // Transfer failed, keep in overflow for next harvest
-                    self.overflow_pool = self.overflow_pool.saturating_add(recycled);
-                    self.alpha_pool = 0;
+                    // Recycling failed - emit warning event but don't fail harvest
+                    // Amount stays in alpha_pool for next harvest attempt
+                    let reason_code = u8::try_from(result).unwrap_or(255);
+                    self.env().emit_event(HarvestFailed {
+                        reason: reason_code,
+                        amount: to_recycle,
+                    });
+                    // Note: alpha_pool keeps the amount, will retry next harvest
                 }
             }
 
             self.last_harvest_block = self.env().block_number();
 
-            let harvested = pending;
-            let final_recycled = if self.overflow_pool > 0 { 0 } else { recycled };
-
             self.env().emit_event(EmissionsHarvested {
-                amount: harvested,
-                bounties_filled,
-                recycled: final_recycled,
-            });
-
-            Ok(HarvestResult {
-                harvested,
-                bounties_filled,
-                recycled: final_recycled,
-            })
-        }
-
-        /// Harvest emissions using an externally-provided amount.
-        ///
-        /// PERMISSIONLESS - Anyone can call this function.
-        ///
-        /// This is a workaround for local development where the chain extension
-        /// for get_stake_info may not be implemented. The validator queries
-        /// stake directly via subtensor RPC and passes the amount here.
-        ///
-        /// Flow:
-        /// 1. Add provided amount to alpha pool
-        /// 2. Fill pending bounties in queue order
-        /// 3. Move remainder to overflow pool (for recycling later)
-        #[ink(message)]
-        pub fn harvest_emissions_external(&mut self, amount: Balance) -> Result<HarvestResult, Error> {
-            if amount == 0 {
-                return Ok(HarvestResult {
-                    harvested: 0,
-                    bounties_filled: 0,
-                    recycled: 0,
-                });
-            }
-
-            // Add the externally-provided emission amount to the alpha pool
-            self.alpha_pool = self.alpha_pool.saturating_add(amount);
-            let alpha_before = self.alpha_pool;
-
-            // Fill bounties from alpha pool (existing FIFO logic)
-            self.fill_bounties();
-
-            // Count how many bounties were filled
-            let mut bounties_filled: u32 = 0;
-            let filled_amount = alpha_before.saturating_sub(self.alpha_pool);
-            if filled_amount > 0 {
-                for issue_id in self.bounty_queue.iter() {
-                    if let Some(issue) = self.issues.get(*issue_id) {
-                        if issue.bounty_amount >= issue.target_bounty {
-                            bounties_filled = bounties_filled.saturating_add(1);
-
-                            self.env().emit_event(BountyFilled {
-                                issue_id: *issue_id,
-                                amount: issue.bounty_amount,
-                            });
-                        }
-                    }
-                }
-            }
-
-            // Move any remainder to overflow pool (will be recycled on next regular harvest)
-            let recycled = self.alpha_pool;
-            if recycled > 0 {
-                self.overflow_pool = self.overflow_pool.saturating_add(recycled);
-                self.alpha_pool = 0;
-            }
-
-            self.last_harvest_block = self.env().block_number();
-
-            self.env().emit_event(EmissionsHarvested {
-                amount,
+                amount: pending,
                 bounties_filled,
                 recycled,
             });
 
             Ok(HarvestResult {
-                harvested: amount,
+                harvested: pending,
                 bounties_filled,
                 recycled,
             })
@@ -936,13 +890,16 @@ mod issue_bounty_manager {
             let miner_bytes: [u8; 32] = *miner_coldkey.as_ref();
             let hotkey_bytes: [u8; 32] = *self.treasury_hotkey.as_ref();
 
+            // Convert u128 to u64 for chain extension (AlphaCurrency is u64)
+            let amount_u64: u64 = payout_amount.try_into().unwrap_or(u64::MAX);
+
             // With handle_status = false, returns raw u32 (0 = success)
             let result = self.env().extension().transfer_stake(
                 miner_bytes,
                 hotkey_bytes,
                 self.netuid,
                 self.netuid,
-                payout_amount,
+                amount_u64,
             );
 
             if result == 0 {
@@ -996,12 +953,6 @@ mod issue_bounty_manager {
         #[ink(message)]
         pub fn get_alpha_pool(&self) -> Balance {
             self.alpha_pool
-        }
-
-        /// Returns the total network stake
-        #[ink(message)]
-        pub fn get_total_network_stake(&self) -> u128 {
-            self.total_network_stake
         }
 
         /// Returns the submission window blocks
@@ -1213,27 +1164,30 @@ mod issue_bounty_manager {
             }
         }
 
-        /// Gets a validator's stake (placeholder implementation)
-        fn get_validator_stake(&self, _validator: AccountId) -> u128 {
-            if self.total_network_stake > 0 {
-                self.total_network_stake.saturating_div(10)
-            } else {
-                1_000_000_000_000
+        /// Gets a validator's stake via chain extension.
+        /// Queries the actual stake the validator has on the treasury hotkey.
+        ///
+        /// The chain extension returns Option<StakeInfo>, which ink! decodes automatically.
+        fn get_validator_stake(&self, validator: AccountId) -> u128 {
+            let validator_bytes: [u8; 32] = *validator.as_ref();
+            let hotkey_bytes: [u8; 32] = *self.treasury_hotkey.as_ref();
+
+            // Chain extension returns Option<StakeInfo>, ink! decodes it
+            let stake_info = self.env()
+                .extension()
+                .get_stake_info(hotkey_bytes, validator_bytes, self.netuid);
+
+            // Extract stake value from Option<StakeInfo>
+            match stake_info {
+                Some(info) => info.stake.0 as u128,
+                None => 0,
             }
         }
 
-        /// Checks if total voted stake meets consensus threshold
+        /// Checks if total voted stake meets minimum consensus threshold.
+        /// Uses absolute stake threshold rather than percentage of network stake.
         fn check_consensus(&self, total_voted: u128) -> bool {
-            if self.total_network_stake == 0 {
-                return false;
-            }
-
-            let threshold = self
-                .total_network_stake
-                .saturating_mul(CONSENSUS_THRESHOLD_PERCENT)
-                .saturating_div(100);
-
-            total_voted > threshold
+            total_voted >= MIN_CONSENSUS_STAKE
         }
 
         /// Starts a competition from a pair proposal
@@ -1569,17 +1523,6 @@ mod issue_bounty_manager {
             let result = contract.set_owner(accounts.charlie);
             assert!(result.is_ok());
             assert_eq!(contract.owner(), accounts.charlie);
-        }
-
-        #[ink::test]
-        fn test_set_total_network_stake() {
-            let accounts = default_accounts();
-            set_caller(accounts.alice);
-            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
-
-            let result = contract.set_total_network_stake(1_000_000_000_000_000);
-            assert!(result.is_ok());
-            assert_eq!(contract.get_total_network_stake(), 1_000_000_000_000_000);
         }
 
         #[ink::test]

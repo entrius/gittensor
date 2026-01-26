@@ -165,8 +165,8 @@ def add_contract_args(parser):
     parser.add_argument(
         '--contract.harvest_interval',
         type=int,
-        default=100,
-        help='Blocks between harvest attempts (default: 100, ~25 seconds at 250ms blocks)',
+        default=1000,
+        help='Blocks between harvest attempts (default: 1000, ~200 minutes at 12s blocks)',
     )
     parser.add_argument(
         '--contract.address',

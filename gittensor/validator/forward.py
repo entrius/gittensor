@@ -155,7 +155,7 @@ async def forward(self: 'BaseValidatorNeuron') -> None:
     # =========================================================================
     # HARVEST: Check for and harvest emissions from contract treasury
     # This runs EVERY forward() call (not gated by VALIDATOR_STEPS_INTERVAL)
-    # The harvester has its own internal interval (100 blocks) to control frequency
+    # The harvester has its own internal interval (1000 blocks) to control frequency
     # =========================================================================
     await _check_and_harvest_emissions(self)
 
@@ -167,7 +167,7 @@ async def _check_and_harvest_emissions(self: 'BaseValidatorNeuron') -> None:
     Check for and harvest emissions from contract treasury.
 
     This is called every forward() iteration but the harvester's internal
-    interval logic controls when actual harvesting occurs (every 100 blocks).
+    interval logic controls when actual harvesting occurs (every 1000 blocks).
     """
     # Check if issue competitions are enabled
     issue_competitions_enabled = ISSUE_COMPETITIONS_ENABLED

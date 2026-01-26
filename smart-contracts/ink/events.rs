@@ -108,3 +108,13 @@ pub struct BountyPaidOut {
     pub miner: AccountId,
     pub amount: u128,
 }
+
+/// Event emitted when harvest fails due to recycling error
+#[ink::event]
+pub struct HarvestFailed {
+    /// Error code from transfer_stake chain extension
+    #[ink(topic)]
+    pub reason: u8,
+    /// Amount that failed to recycle
+    pub amount: u128,
+}

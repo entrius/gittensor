@@ -31,11 +31,8 @@ class HarvestConfig:
     """Configuration for the emission harvester."""
 
     enabled: bool = True
-    interval_blocks: int = 100  # ~25 seconds at 250ms blocks
+    interval_blocks: int = 1000  # ~200 minutes at 12s blocks (reduced frequency to avoid rate limiting)
     contract_address: Optional[str] = None
-    treasury_hotkey: Optional[str] = None
-    treasury_coldkey: Optional[str] = None
-    netuid: int = 2  # Default to local dev netuid
 
 
 def get_harvest_config(config: bt.Config) -> HarvestConfig:
@@ -57,19 +54,15 @@ def get_harvest_config(config: bt.Config) -> HarvestConfig:
     # Load from bittensor config
     if contract_config is not None:
         harvest_config.enabled = getattr(contract_config, 'harvest_emissions', True)
-        harvest_config.interval_blocks = getattr(contract_config, 'harvest_interval', 100)
+        harvest_config.interval_blocks = getattr(contract_config, 'harvest_interval', 1000)
         harvest_config.contract_address = getattr(contract_config, 'address', None)
 
-    # Load treasury info from gittensor config file
-    if GITTENSOR_CONFIG_PATH.exists():
+    # Load contract address from gittensor config file if not set
+    if not harvest_config.contract_address and GITTENSOR_CONFIG_PATH.exists():
         try:
             with open(GITTENSOR_CONFIG_PATH) as f:
                 gittensor_config = json.load(f)
-                harvest_config.treasury_hotkey = gittensor_config.get('treasury_hotkey')
-                harvest_config.treasury_coldkey = gittensor_config.get('treasury_coldkey')
-                harvest_config.netuid = gittensor_config.get('netuid', 2)
-                if not harvest_config.contract_address:
-                    harvest_config.contract_address = gittensor_config.get('contract_address')
+                harvest_config.contract_address = gittensor_config.get('contract_address')
         except (json.JSONDecodeError, IOError) as e:
             bt.logging.warning(f'Failed to read gittensor config: {e}')
 
@@ -187,67 +180,30 @@ class EmissionHarvester:
         """
         Execute harvest_emissions on the contract.
 
-        Uses external stake query via subtensor RPC by default (bypasses chain extension).
-        Falls back to contract's chain extension if treasury keys are not configured.
+        The contract handles everything via chain extension:
+        - Queries its own pending stake via get_stake_info (function 0)
+        - Fills bounties from the pool
+        - Recycles remainder via transfer_stake (function 6)
 
         Returns:
             Result dict with harvest status and amounts
         """
         try:
-            # Check if we have treasury keys for external query
-            treasury_hotkey = self.harvest_config.treasury_hotkey
-            treasury_coldkey = self.harvest_config.treasury_coldkey
-            netuid = self.harvest_config.netuid
+            bt.logging.debug('Calling contract harvest_emissions...')
 
-            if treasury_hotkey and treasury_coldkey:
-                # Use external query via subtensor RPC (bypasses chain extension)
-                pending = self.contract_client.get_stake_via_subtensor(
-                    treasury_hotkey=treasury_hotkey,
-                    treasury_coldkey=treasury_coldkey,
-                    netuid=netuid,
-                )
-                overflow = self.contract_client.get_overflow_pool()
+            # Let the contract do everything - it queries stake via chain extension
+            result = self.contract_client.harvest_emissions(self.wallet)
 
-                if pending == 0 and overflow == 0:
-                    bt.logging.debug('No pending emissions to harvest (external query)')
-                    return {'harvested': 0, 'status': 'no_pending'}
-
-                bt.logging.info(
-                    f'Harvesting emissions (external): pending={pending}, overflow={overflow}'
-                )
-
-                # Execute harvest with external amount
-                result = self.contract_client.harvest_emissions_external(self.wallet, pending)
-            else:
-                # Fall back to contract's chain extension query
-                bt.logging.debug('Treasury keys not configured, using chain extension')
-                pending = self.contract_client.get_pending_emissions()
-                overflow = self.contract_client.get_overflow_pool()
-
-                if pending == 0 and overflow == 0:
-                    bt.logging.debug('No pending emissions to harvest')
-                    return {'harvested': 0, 'status': 'no_pending'}
-
-                bt.logging.info(
-                    f'Harvesting emissions: pending={pending}, overflow={overflow}'
-                )
-
-                # Execute harvest via contract's chain extension
-                result = self.contract_client.harvest_emissions(self.wallet)
+            # Always update last_harvest_block to prevent immediate retry on failure
+            # (avoids "Transaction temporarily banned" errors from substrate)
+            self.last_harvest_block = self.get_current_block()
 
             if result:
-                self.last_harvest_block = self.get_current_block()
-
                 if result.get('status') == 'success':
-                    bt.logging.success(
-                        f'Harvest complete: harvested={result.get("harvested", 0)}, '
-                        f'bounties_filled={result.get("bounties_filled", 0)}, '
-                        f'recycled={result.get("recycled", 0)}'
-                    )
-                elif result.get('status') == 'no_pending':
-                    bt.logging.debug('No emissions to harvest')
+                    bt.logging.success('Harvest complete: recycling succeeded')
                 else:
-                    bt.logging.warning(f'Harvest result: {result}')
+                    error_msg = result.get('error', 'Unknown error')
+                    bt.logging.error(f'Harvest failed: {error_msg}')
 
                 return result
             else:

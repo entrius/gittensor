@@ -94,11 +94,11 @@ RECYCLE_UID = 0
 
 # Network emission scaling (unique repos)
 UNIQUE_REPOS_MAX_RECYCLE = 0.8
-UNIQUE_REPOS_RECYCLE_DECAY_RATE = 0.0035
+UNIQUE_REPOS_RECYCLE_DECAY_RATE = 0.005
 
 # Network emission scaling (total token score from tiered miners)
 TOKEN_SCORE_MAX_RECYCLE = 0.8
-TOKEN_SCORE_RECYCLE_DECAY_RATE = 0.000008
+TOKEN_SCORE_RECYCLE_DECAY_RATE = 0.000012
 
 # =============================================================================
 # Spam & Gaming Mitigation

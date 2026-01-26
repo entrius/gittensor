@@ -48,13 +48,8 @@ QUERY = """
               lastEditedAt
               bodyText
               state
-              commits(first: 100) {
+              commits {
                 totalCount
-                nodes {
-                  commit {
-                    message
-                  }
-                }
               }
               repository {
                 name
@@ -82,7 +77,7 @@ QUERY = """
               mergedBy {
                 login
               }
-              closingIssuesReferences(first: 50) {
+              closingIssuesReferences(first: 10) {
                 nodes {
                   number
                   title
@@ -95,7 +90,7 @@ QUERY = """
                   authorAssociation
                 }
               }
-              reviews(first: 50, states: APPROVED) {
+              reviews(first: 10, states: APPROVED) {
                 nodes {
                   author {
                     login
@@ -282,11 +277,11 @@ def execute_graphql_query(
     query: str,
     variables: Dict[str, Any],
     token: str,
-    max_attempts: int = 6,
+    max_attempts: int = 8,
     timeout: int = 30,
 ) -> Optional[Dict[str, Any]]:
     """
-    Execute a GraphQL query with retry logic and exponential backoff.
+    Execute a GraphQL query with retry logic and backoff.
 
     Args:
         query: The GraphQL query string
@@ -314,7 +309,7 @@ def execute_graphql_query(
 
             # Retry on failure
             if attempt < (max_attempts - 1):
-                backoff_delay = 5 * (2**attempt)  # 5s, 10s, 20s, 40s, 80s
+                backoff_delay = min(5 * (2**attempt), 30)  # max of 30 second wait between retries
                 bt.logging.warning(
                     f'GraphQL request failed with status {response.status_code} '
                     f'(attempt {attempt + 1}/{max_attempts}), retrying in {backoff_delay}s...'
@@ -357,7 +352,7 @@ def get_github_graphql_query(
         Optional[requests.Response]: Response object from the GraphQL query or None if errors occurred
     """
 
-    attempts = 6
+    max_attempts = 8
     headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
     variables = {
         'userId': global_user_id,
@@ -365,7 +360,7 @@ def get_github_graphql_query(
         'cursor': cursor,
     }
 
-    for attempt in range(attempts):
+    for attempt in range(max_attempts):
         try:
             response = requests.post(
                 f'{BASE_GITHUB_API_URL}/graphql',
@@ -376,29 +371,28 @@ def get_github_graphql_query(
 
             if response.status_code == 200:
                 return response
+
             # error - log and retry
-            elif attempt < (attempts - 1):
-                # Exponential backoff: 5s, 10s, 20s, 40s, 80s
-                backoff_delay = 5 * (2**attempt)
+            if attempt < (max_attempts - 1):
+                backoff_delay = min(5 * (2**attempt), 30)  # cap at 30s
                 bt.logging.warning(
-                    f'GraphQL request failed with status {response.status_code} (attempt {attempt + 1}/{attempts}), retrying in {backoff_delay}s...'
+                    f'GraphQL request for PRs failed with status {response.status_code} (attempt {attempt + 1}/{max_attempts}), retrying in {backoff_delay}s...'
                 )
                 time.sleep(backoff_delay)
             else:
                 bt.logging.error(
-                    f'GraphQL request failed with status {response.status_code} after {attempts} attempts: {response.text}'
+                    f'GraphQL request for PRs failed with status {response.status_code} after {max_attempts} attempts: {response.text}'
                 )
 
         except requests.exceptions.RequestException as e:
-            if attempt < (attempts - 1):
-                # Exponential backoff: 5s, 10s, 20s, 40s, 80s
-                backoff_delay = 5 * (2**attempt)
+            if attempt < (max_attempts - 1):
+                backoff_delay = min(5 * (2**attempt), 30)  # cap at 30s
                 bt.logging.warning(
-                    f'GraphQL request connection error (attempt {attempt + 1}/{attempts}): {e}, retrying in {backoff_delay}s...'
+                    f'GraphQL request connection error (attempt {attempt + 1}/{max_attempts}): {e}, retrying in {backoff_delay}s...'
                 )
                 time.sleep(backoff_delay)
             else:
-                bt.logging.error(f'GraphQL request failed after {attempts} attempts: {e}')
+                bt.logging.error(f'GraphQL request failed after {max_attempts} attempts: {e}')
                 return None
 
     return None
@@ -407,10 +401,8 @@ def get_github_graphql_query(
 def try_add_open_or_closed_pr(
     miner_eval: MinerEvaluation,
     pr_raw: Dict,
-    repository_full_name: str,
     pr_state: str,
     lookback_date_filter: datetime,
-    active_repositories: List[str],
 ) -> None:
     """
     Attempts to add an OPEN or CLOSED PR to miner_eval if eligible.
@@ -418,14 +410,9 @@ def try_add_open_or_closed_pr(
     Args:
         miner_eval: The MinerEvaluation to add the PR to
         pr_raw: Raw PR data from GraphQL
-        repository_full_name: Full repository name (owner/repo), lowercase
         pr_state: GitHub PR state (OPEN, CLOSED, MERGED)
         lookback_date_filter: Date filter for lookback period
-        active_repositories: List of active repository names (lowercase)
     """
-    if repository_full_name not in active_repositories:
-        return
-
     # Ignore all maintainer contributions
     if pr_raw.get('authorAssociation') in MAINTAINER_ASSOCIATIONS:
         return
@@ -447,7 +434,7 @@ def try_add_open_or_closed_pr(
 def should_skip_merged_pr(
     pr_raw: Dict,
     repository_full_name: str,
-    master_repositories: Dict[str, RepositoryConfig],
+    repo_config: RepositoryConfig,
     lookback_date_filter: datetime,
 ) -> tuple[bool, Optional[str]]:
     """
@@ -456,7 +443,7 @@ def should_skip_merged_pr(
     Args:
         pr_raw (Dict): Raw PR data from GraphQL
         repository_full_name (str): Full repository name (owner/repo)
-        master_repositories (Dict[str, RepositoryConfig]): Repository metadata (keys are normalized to lowercase)
+        repo_config (RepositoryConfig): Repository configuration
         lookback_date_filter (datetime): Date filter for lookback period
 
     Returns:
@@ -467,12 +454,6 @@ def should_skip_merged_pr(
         return (True, f'PR #{pr_raw["number"]} is MERGED, but missing a mergedAt timestamp. Skipping...')
 
     merged_dt = datetime.fromisoformat(pr_raw['mergedAt'].rstrip('Z')).replace(tzinfo=timezone.utc)
-
-    # Filter by master_repositories - keys are already normalized to lowercase
-    if repository_full_name not in master_repositories:
-        return (True, f'Skipping PR #{pr_raw["number"]} in {repository_full_name} - ineligible repo')
-
-    repo_config = master_repositories[repository_full_name]
 
     # Filter by lookback window
     if merged_dt < lookback_date_filter:
@@ -531,16 +512,6 @@ def should_skip_merged_pr(
             f"merged to '{base_ref}' (not default branch '{default_branch}' or additional acceptable branches)",
         )
 
-    # Check if repo is inactive
-    if repo_config.inactive_at is not None:
-        inactive_dt = datetime.fromisoformat(repo_config.inactive_at.rstrip('Z')).replace(tzinfo=timezone.utc)
-        # Skip PR if it was merged at or after the repo became inactive
-        if merged_dt >= inactive_dt:
-            return (
-                True,
-                f'Skipping PR #{pr_raw["number"]} in {repository_full_name} - PR was merged at/after repo became inactive (merged: {merged_dt.isoformat()}, inactive: {inactive_dt.isoformat()})',
-            )
-
     # All checks passed
     return (False, None)
 
@@ -563,12 +534,6 @@ def load_miners_prs(
     global_user_id = base64.b64encode(f'04:User{miner_eval.github_id}'.encode()).decode()
 
     cursor = None
-
-    # Build list of active repositories (those without an inactive_at timestamp)
-    # Keys are already normalized to lowercase
-    active_repositories = [
-        repo_full_name for repo_full_name, config in master_repositories.items() if config.inactive_at is None
-    ]
 
     try:
         while len(miner_eval.merged_pull_requests) < max_prs:
@@ -609,14 +574,30 @@ def load_miners_prs(
                     )
                     return
 
-                if pr_state in (PRState.OPEN.value, PRState.CLOSED.value):
-                    try_add_open_or_closed_pr(
-                        miner_eval, pr_raw, repository_full_name, pr_state, lookback_date_filter, active_repositories
+                if repository_full_name not in master_repositories:
+                    bt.logging.info(f'Skipping PR #{pr_raw["number"]} in {repository_full_name} - ineligible repo')
+                    continue
+
+                repo_config = master_repositories[repository_full_name]
+
+                # Check if repo is inactive
+                if repo_config.inactive_at is not None:
+                    inactive_dt = datetime.fromisoformat(repo_config.inactive_at.rstrip('Z')).replace(
+                        tzinfo=timezone.utc
                     )
+                    # Skip PR if it was created after the repo became inactive
+                    if pr_creation_time >= inactive_dt:
+                        bt.logging.info(
+                            f'Skipping PR #{pr_raw["number"]} in {repository_full_name} - PR was created after repo became inactive (created: {pr_creation_time.isoformat()}, inactive: {inactive_dt.isoformat()})'
+                        )
+                        continue
+
+                if pr_state in (PRState.OPEN.value, PRState.CLOSED.value):
+                    try_add_open_or_closed_pr(miner_eval, pr_raw, pr_state, lookback_date_filter)
                     continue
 
                 should_skip, skip_reason = should_skip_merged_pr(
-                    pr_raw, repository_full_name, master_repositories, lookback_date_filter
+                    pr_raw, repository_full_name, repo_config, lookback_date_filter
                 )
 
                 if should_skip:

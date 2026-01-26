@@ -13,9 +13,17 @@ def normalize_rewards_linear(miner_evaluations: Dict[int, MinerEvaluation]) -> D
         return {}
 
     rewards: Dict[int, float] = {}
+    zero_reward_count = 0
+
     for uid, evaluation in miner_evaluations.items():
         rewards[uid] = evaluation.total_score
-        bt.logging.info(f'Final reward for uid {uid}: {rewards[uid]:.2f}')
+        if rewards[uid] > 0:
+            bt.logging.info(f'Final reward for uid {uid}: {rewards[uid]:.2f}')
+        else:
+            zero_reward_count += 1
+
+    if zero_reward_count > 0:
+        bt.logging.info(f'{zero_reward_count} miners have 0 reward')
 
     total = sum(rewards.values())
     if total <= 0:

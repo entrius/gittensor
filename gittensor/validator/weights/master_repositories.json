@@ -27,10 +27,6 @@
     "tier": "Bronze",
     "weight": 0.18
   },
-  "All-Hands-AI/OpenHands": {
-    "tier": "Gold",
-    "weight": 17.65
-  },
   "AlphaCoreBittensor/alphacore": {
     "tier": "Silver",
     "weight": 4.56
@@ -95,16 +91,14 @@
     "tier": "Silver",
     "weight": 8.22
   },
-  "BigBrotherTrade/trader": {
-    "tier": "Bronze",
-    "weight": 0.17
-  },
   "Billionmail/BillionMail": {
     "tier": "Silver",
     "weight": 5.26
   },
   "BitMind-AI/bitmind-subnet": {
-    "additional_acceptable_branches": ["testnet"],
+    "additional_acceptable_branches": [
+      "testnet"
+    ],
     "tier": "Gold",
     "weight": 24.96
   },
@@ -116,13 +110,13 @@
     "tier": "Bronze",
     "weight": 0.35
   },
+  "BruceDevices/firmware": {
+    "tier": "Silver",
+    "weight": 3.44
+  },
   "CaiJimmy/hugo-theme-stack": {
     "tier": "Bronze",
     "weight": 0.19
-  },
-  "CandlesTAO/candles": {
-    "tier": "Silver",
-    "weight": 4.53
   },
   "CarGuo/GSYVideoPlayer": {
     "tier": "Bronze",
@@ -165,6 +159,10 @@
     "tier": "Bronze",
     "weight": 0.43
   },
+  "Comfy-Org/ComfyUI": {
+    "tier": "Bronze",
+    "weight": 0.25
+  },
   "CreativeBuilds/sn77": {
     "tier": "Silver",
     "weight": 7.76
@@ -201,7 +199,7 @@
     "tier": "Bronze",
     "weight": 0.6
   },
-  "Desearch-ai/subnet-22": {
+  "Desearch-ai/subnet-22-desearch": {
     "tier": "Silver",
     "weight": 7.42
   },
@@ -356,7 +354,7 @@
     "tier": "Silver",
     "weight": 4.65
   },
-  "HugoBlox/hugo-blox-builder": {
+  "HugoBlox/kit": {
     "tier": "Bronze",
     "weight": 0.2
   },
@@ -369,7 +367,9 @@
     "weight": 0.29
   },
   "JeffreySu/WeiXinMPSDK": {
-    "additional_acceptable_branches": ["Developer"],
+    "additional_acceptable_branches": [
+      "Developer"
+    ],
     "tier": "Bronze",
     "weight": 0.29
   },
@@ -380,10 +380,6 @@
   "JetBrains/kotlin": {
     "tier": "Bronze",
     "weight": 0.62
-  },
-  "KMFODA/DistributedTraining": {
-    "tier": "Silver",
-    "weight": 4.44
   },
   "KartikTalwar/gmail.js": {
     "inactive_at": "2025-11-29T17:45:38.525Z",
@@ -427,7 +423,10 @@
     "weight": 0.24
   },
   "LimeSurvey/LimeSurvey": {
-    "additional_acceptable_branches": ["develop-minor", "develop-major"],
+    "additional_acceptable_branches": [
+      "develop-minor",
+      "develop-major"
+    ],
     "tier": "Bronze",
     "weight": 0.28
   },
@@ -500,7 +499,7 @@
     "tier": "Bronze",
     "weight": 0.3
   },
-  "NVIDIA-Omniverse/IsaacSim": {
+  "NVIDIA-Omniverse/IsaacSim-dockerfiles": {
     "tier": "Gold",
     "weight": 15.36
   },
@@ -575,6 +574,10 @@
   "OpenGradient/BitQuant-Subnet": {
     "tier": "Silver",
     "weight": 4.43
+  },
+  "OpenHands/OpenHands": {
+    "tier": "Gold",
+    "weight": 17.65
   },
   "OpenMined/PySyft": {
     "tier": "Bronze",
@@ -704,6 +707,10 @@
     "tier": "Bronze",
     "weight": 0.19
   },
+  "RaspberryPiFoundation/blockly": {
+    "tier": "Bronze",
+    "weight": 0.17
+  },
   "ReactiveX/RxJava": {
     "tier": "Bronze",
     "weight": 0.23
@@ -769,7 +776,9 @@
     "weight": 17.06
   },
   "SillyTavern/SillyTavern": {
-    "additional_acceptable_branches": ["staging"],
+    "additional_acceptable_branches": [
+      "staging"
+    ],
     "tier": "Bronze",
     "weight": 0.19
   },
@@ -789,10 +798,6 @@
   "SonarSource/sonarqube": {
     "tier": "Bronze",
     "weight": 0.62
-  },
-  "Stability-AI/stablediffusion": {
-    "tier": "Bronze",
-    "weight": 0.23
   },
   "Stirling-Tools/Stirling-PDF": {
     "tier": "Bronze",
@@ -821,10 +826,6 @@
   "Tencent/weui-wxss": {
     "tier": "Bronze",
     "weight": 0.2
-  },
-  "Tenexium/tenex-subnet": {
-    "tier": "Silver",
-    "weight": 4.38
   },
   "Textualize/rich": {
     "tier": "Bronze",
@@ -865,7 +866,9 @@
     "weight": 0.17
   },
   "ToolJet/ToolJet": {
-    "additional_acceptable_branches": ["develop"],
+    "additional_acceptable_branches": [
+      "develop"
+    ],
     "tier": "Gold",
     "weight": 16.46
   },
@@ -1018,7 +1021,9 @@
     "weight": 0.18
   },
   "alextselegidis/easyappointments": {
-    "additional_acceptable_branches": ["develop"],
+    "additional_acceptable_branches": [
+      "develop"
+    ],
     "tier": "Bronze",
     "weight": 0.25
   },
@@ -1100,7 +1105,7 @@
   },
   "anomalyco/opencode": {
     "tier": "Silver",
-    "weight": 5.06
+    "weight": 5.42
   },
   "ansible/ansible": {
     "tier": "Silver",
@@ -1111,6 +1116,9 @@
     "weight": 0.18
   },
   "ant-design/ant-design": {
+    "additional_acceptable_branches": [
+      "feature"
+    ],
     "tier": "Bronze",
     "weight": 0.64
   },
@@ -1507,7 +1515,9 @@
     "weight": 0.35
   },
   "bigskysoftware/htmx": {
-    "additional_acceptable_branches": ["dev"],
+    "additional_acceptable_branches": [
+      "dev"
+    ],
     "tier": "Bronze",
     "weight": 0.18
   },
@@ -1630,10 +1640,6 @@
   "catboost/catboost": {
     "tier": "Silver",
     "weight": 3.9
-  },
-  "ccbikai/Sink": {
-    "tier": "Bronze",
-    "weight": 0.19
   },
   "ccxt/ccxt": {
     "tier": "Bronze",
@@ -1799,10 +1805,6 @@
     "tier": "Bronze",
     "weight": 0.23
   },
-  "comfyanonymous/ComfyUI": {
-    "tier": "Bronze",
-    "weight": 0.25
-  },
   "commaai/openpilot": {
     "tier": "Gold",
     "weight": 23.58
@@ -1960,6 +1962,7 @@
     "weight": 3.6
   },
   "deskflow/deskflow": {
+    "inactive_at": "2026-01-23T00:00:00.000Z",
     "tier": "Bronze",
     "weight": 0.61
   },
@@ -2088,7 +2091,9 @@
     "weight": 0.21
   },
   "dotnet/dotnet-docker": {
-    "additional_acceptable_branches": ["nightly"],
+    "additional_acceptable_branches": [
+      "nightly"
+    ],
     "tier": "Silver",
     "weight": 3.79
   },
@@ -2131,6 +2136,10 @@
   "drupal/drupal": {
     "tier": "Bronze",
     "weight": 0.26
+  },
+  "dstrbtd/DistributedTraining": {
+    "tier": "Silver",
+    "weight": 4.44
   },
   "eKoopmans/html2pdf.js": {
     "tier": "Bronze",
@@ -2177,7 +2186,9 @@
     "weight": 0.17
   },
   "elebumm/RedditVideoMakerBot": {
-    "additional_acceptable_branches": ["develop"],
+    "additional_acceptable_branches": [
+      "develop"
+    ],
     "tier": "Bronze",
     "weight": 0.17
   },
@@ -2674,10 +2685,6 @@
     "tier": "Silver",
     "weight": 3.45
   },
-  "google/blockly": {
-    "tier": "Bronze",
-    "weight": 0.17
-  },
   "google/closure-compiler": {
     "tier": "Bronze",
     "weight": 0.55
@@ -2746,6 +2753,10 @@
     "tier": "Silver",
     "weight": 4.78
   },
+  "gradients-ai/G.O.D": {
+    "tier": "Gold",
+    "weight": 28.63
+  },
   "gradio-app/gradio": {
     "tier": "Bronze",
     "weight": 0.18
@@ -2795,7 +2806,9 @@
     "weight": 0.21
   },
   "hacksider/Deep-Live-Cam": {
-    "additional_acceptable_branches": ["premain"],
+    "additional_acceptable_branches": [
+      "premain"
+    ],
     "tier": "Bronze",
     "weight": 0.25
   },
@@ -2876,7 +2889,7 @@
     "tier": "Bronze",
     "weight": 0.18
   },
-  "hiyouga/LLaMA-Factory": {
+  "hiyouga/LlamaFactory": {
     "tier": "Bronze",
     "weight": 0.24
   },
@@ -2929,7 +2942,9 @@
     "weight": 21.56
   },
   "hummingbot/hummingbot": {
-    "additional_acceptable_branches": ["development"],
+    "additional_acceptable_branches": [
+      "development"
+    ],
     "tier": "Bronze",
     "weight": 0.18
   },
@@ -2975,7 +2990,9 @@
     "weight": 0.19
   },
   "idurar/idurar-erp-crm": {
-    "additional_acceptable_branches": ["dev"],
+    "additional_acceptable_branches": [
+      "dev"
+    ],
     "tier": "Bronze",
     "weight": 0.32
   },
@@ -3067,6 +3084,10 @@
     "tier": "Bronze",
     "weight": 0.29
   },
+  "janhq/jan": {
+    "tier": "Bronze",
+    "weight": 0.53
+  },
   "jbeder/yaml-cpp": {
     "tier": "Bronze",
     "weight": 0.25
@@ -3145,7 +3166,9 @@
     "weight": 0.18
   },
   "joomla/joomla-cms": {
-    "additional_acceptable_branches": ["*-dev"],
+    "additional_acceptable_branches": [
+      "*-dev"
+    ],
     "tier": "Bronze",
     "weight": 0.28
   },
@@ -3186,12 +3209,16 @@
     "weight": 0.21
   },
   "juice-shop/juice-shop": {
-    "additional_acceptable_branches": ["develop"],
+    "additional_acceptable_branches": [
+      "develop"
+    ],
     "tier": "Bronze",
     "weight": 0.35
   },
   "juliangarnier/anime": {
-    "additional_acceptable_branches": ["dev"],
+    "additional_acceptable_branches": [
+      "dev"
+    ],
     "tier": "Silver",
     "weight": 3.48
   },
@@ -3505,6 +3532,7 @@
     "weight": 0.01
   },
   "louislam/uptime-kuma": {
+    "inactive_at": "2026-01-26T02:52:00.000Z",
     "tier": "Bronze",
     "weight": 0.19
   },
@@ -3525,7 +3553,9 @@
     "weight": 4.26
   },
   "macrocosm-os/data-universe": {
-    "additional_acceptable_branches": ["dev"],
+    "additional_acceptable_branches": [
+      "dev"
+    ],
     "tier": "Silver",
     "weight": 4.85
   },
@@ -3606,7 +3636,9 @@
     "weight": 0.25
   },
   "medusajs/medusa": {
-    "additional_acceptable_branches": ["develop"],
+    "additional_acceptable_branches": [
+      "develop"
+    ],
     "tier": "Gold",
     "weight": 16.6
   },
@@ -3617,10 +3649,6 @@
   "mem0ai/mem0": {
     "tier": "Bronze",
     "weight": 0.22
-  },
-  "menloresearch/jan": {
-    "tier": "Bronze",
-    "weight": 0.53
   },
   "mermaid-js/mermaid": {
     "tier": "Bronze",
@@ -3649,6 +3677,10 @@
   "metersphere/metersphere": {
     "tier": "Bronze",
     "weight": 0.17
+  },
+  "miantiao-me/Sink": {
+    "tier": "Bronze",
+    "weight": 0.19
   },
   "microfeed/microfeed": {
     "tier": "Bronze",
@@ -3903,7 +3935,7 @@
     "tier": "Bronze",
     "weight": 0.18
   },
-  "neuralinternet/compute-subnet": {
+  "neuralinternet/SN27": {
     "tier": "Silver",
     "weight": 4.83
   },
@@ -3956,7 +3988,9 @@
     "weight": 3.6
   },
   "nocodb/nocodb": {
-    "additional_acceptable_branches": ["develop"],
+    "additional_acceptable_branches": [
+      "develop"
+    ],
     "tier": "Gold",
     "weight": 19.98
   },
@@ -3969,7 +4003,9 @@
     "weight": 0.32
   },
   "nodemcu/nodemcu-firmware": {
-    "additional_acceptable_branches": ["dev"],
+    "additional_acceptable_branches": [
+      "dev"
+    ],
     "tier": "Bronze",
     "weight": 0.26
   },
@@ -4077,6 +4113,10 @@
     "tier": "Silver",
     "weight": 5
   },
+  "one-covenant/basilica": {
+    "tier": "Silver",
+    "weight": 3.96
+  },
   "one-covenant/bittensor-rs": {
     "tier": "Silver",
     "weight": 10
@@ -4084,6 +4124,10 @@
   "one-covenant/grail": {
     "tier": "Silver",
     "weight": 3.97
+  },
+  "one-covenant/templar": {
+    "tier": "Silver",
+    "weight": 3.95
   },
   "oneoneone-io/subnet-111": {
     "tier": "Silver",
@@ -4198,17 +4242,24 @@
     "weight": 0.29
   },
   "opentensor/bittensor": {
-    "additional_acceptable_branches": ["staging", "SDKv10"],
+    "additional_acceptable_branches": [
+      "staging",
+      "SDKv10"
+    ],
     "tier": "Gold",
     "weight": 77.99
   },
   "opentensor/btcli": {
-    "additional_acceptable_branches": ["staging"],
+    "additional_acceptable_branches": [
+      "staging"
+    ],
     "tier": "Gold",
     "weight": 22.05
   },
   "opentensor/subtensor": {
-    "additional_acceptable_branches": ["devnet-ready"],
+    "additional_acceptable_branches": [
+      "devnet-ready"
+    ],
     "tier": "Gold",
     "weight": 78.01
   },
@@ -4280,7 +4331,7 @@
     "tier": "Bronze",
     "weight": 0.28
   },
-  "pagehelper/Mybatis-PageHelper": {
+  "pagehelper-org/Mybatis-PageHelper": {
     "tier": "Bronze",
     "weight": 0.17
   },
@@ -4389,7 +4440,9 @@
     "weight": 4.59
   },
   "pi-hole/web": {
-    "additional_acceptable_branches": ["development"],
+    "additional_acceptable_branches": [
+      "development"
+    ],
     "tier": "Gold",
     "weight": 21.25
   },
@@ -4448,10 +4501,6 @@
   "poteto/hiring-without-whiteboards": {
     "tier": "Bronze",
     "weight": 0.19
-  },
-  "pr3y/Bruce": {
-    "tier": "Silver",
-    "weight": 3.44
   },
   "prakhar1989/docker-curriculum": {
     "tier": "Bronze",
@@ -4578,7 +4627,9 @@
     "weight": 24.24
   },
   "qdrant/qdrant": {
-    "additional_acceptable_branches": ["dev"],
+    "additional_acceptable_branches": [
+      "dev"
+    ],
     "tier": "Silver",
     "weight": 6.13
   },
@@ -4641,10 +4692,6 @@
   "raycast/extensions": {
     "tier": "Bronze",
     "weight": 0.3
-  },
-  "rayonlabs/G.O.D": {
-    "tier": "Gold",
-    "weight": 28.63
   },
   "react-navigation/react-navigation": {
     "tier": "Bronze",
@@ -4750,7 +4797,7 @@
     "tier": "Gold",
     "weight": 20.8
   },
-  "rubygems/rubygems": {
+  "ruby/rubygems": {
     "tier": "Bronze",
     "weight": 0.22
   },
@@ -4795,6 +4842,7 @@
     "weight": 0.3
   },
   "sbt/sbt": {
+    "additional_acceptable_branches": ["1.12.x"],
     "tier": "Bronze",
     "weight": 0.89
   },
@@ -4859,7 +4907,9 @@
     "weight": 0.31
   },
   "shiftlayer-llc/brainplay-subnet": {
-    "additional_acceptable_branches": ["dev"],
+    "additional_acceptable_branches": [
+      "dev"
+    ],
     "tier": "Silver",
     "weight": 4.17
   },
@@ -5003,10 +5053,6 @@
     "tier": "Bronze",
     "weight": 0.17
   },
-  "sst/opencode": {
-    "tier": "Silver",
-    "weight": 5.42
-  },
   "starship/starship": {
     "tier": "Silver",
     "weight": 3.46
@@ -5146,7 +5192,9 @@
     "weight": 0.4
   },
   "tauri-apps/tauri": {
-    "additional_acceptable_branches": ["dev"],
+    "additional_acceptable_branches": [
+      "dev"
+    ],
     "tier": "Gold",
     "weight": 16.25
   },
@@ -5242,6 +5290,10 @@
     "tier": "Bronze",
     "weight": 0.18
   },
+  "timercrack/trader": {
+    "tier": "Bronze",
+    "weight": 0.17
+  },
   "tmk/tmk_keyboard": {
     "tier": "Bronze",
     "weight": 0.24
@@ -5269,14 +5321,6 @@
   "torvalds/linux": {
     "tier": "Gold",
     "weight": 77.99
-  },
-  "tplr-ai/basilica": {
-    "tier": "Silver",
-    "weight": 3.96
-  },
-  "tplr-ai/templar": {
-    "tier": "Silver",
-    "weight": 3.95
   },
   "traccar/traccar": {
     "tier": "Bronze",
@@ -5328,7 +5372,9 @@
     "weight": 5.96
   },
   "tw93/Pake": {
-    "additional_acceptable_branches": ["dev"],
+    "additional_acceptable_branches": [
+      "dev"
+    ],
     "tier": "Bronze",
     "weight": 0.18
   },
@@ -5579,10 +5625,6 @@
   "yangzongzhuan/RuoYi-Vue3": {
     "tier": "Bronze",
     "weight": 0.19
-  },
-  "yeongpin/cursor-free-vip": {
-    "tier": "Silver",
-    "weight": 3.49
   },
   "ygs-code/vue": {
     "tier": "Bronze",

@@ -18,12 +18,12 @@
 
 import threading
 import time
-from typing import Dict
+from typing import Dict, List
 
 import bittensor as bt
 import wandb
 
-from gittensor.classes import MinerEvaluation
+from gittensor.classes import MinerEvaluation, MinerEvaluationCache
 from gittensor.validator.forward import forward
 from gittensor.validator.utils.config import WANDB_PROJECT, __version__
 from gittensor.validator.utils.storage import DatabaseStorage
@@ -38,9 +38,13 @@ class Validator(BaseValidatorNeuron):
     """
 
     db_storage: DatabaseStorage = None
+    evaluation_cache: MinerEvaluationCache = None
 
     def __init__(self, config=None):
         super(Validator, self).__init__(config=config)
+
+        # Init in-memory cache for miner evaluations (fallback when GitHub API fails)
+        self.evaluation_cache = MinerEvaluationCache()
 
         # Init DB for validation result storage. Requires STORE_DB_RESULTS in .env
         if self.config.database.store_validation_results:
@@ -79,13 +83,32 @@ class Validator(BaseValidatorNeuron):
         self.load_state()
 
     async def bulk_store_evaluation(self, miner_evals: Dict[int, MinerEvaluation]):
-        """
-        Wrapper function to store all miner evaluations at once.
-        """
+        """Store all miner evaluations, log summary rather than per-UID."""
+        if self.db_storage is None:
+            return
 
-        if self.db_storage is not None:
-            for uid, evaluation in miner_evals.items():
-                await self.store_evaluation(uid, evaluation)
+        successful_count = 0
+        failed_uids: List[int] = []
+
+        for uid, evaluation in miner_evals.items():
+            try:
+                storage_result = self.db_storage.store_evaluation(evaluation)
+                if storage_result.success:
+                    successful_count += 1
+                else:
+                    failed_uids.append(uid)
+                    bt.logging.warning(f'Storage partially failed for UID {uid}:')
+                    for error in storage_result.errors:
+                        bt.logging.warning(f'  - {error}')
+            except Exception as e:
+                failed_uids.append(uid)
+                bt.logging.error(f'Error storing evaluation for UID {uid}: {e}')
+
+        # Summary logging
+        if successful_count > 0:
+            bt.logging.success(f'Stored validation results for {successful_count} UIDs to DB')
+        if failed_uids:
+            bt.logging.warning(f'Failed to store {len(failed_uids)} UIDs: {failed_uids}')
 
     async def store_evaluation(self, uid: int, miner_eval: MinerEvaluation):
         """
@@ -105,6 +128,32 @@ class Validator(BaseValidatorNeuron):
 
             except Exception as e:
                 bt.logging.error(f'Error when attempting to store miners evaluation for uid {uid}: {e}')
+
+    def store_or_use_cached_evaluation(self, miner_evaluations: Dict[int, MinerEvaluation]) -> None:
+        """
+        Handle evaluation cache: store successful evals, fallback to cache for GitHub failures.
+
+        Mutates the passed dict, replacing failed evaluations with cached ones if available.
+        """
+        for uid, miner_eval in miner_evaluations.items():
+            # Skip miners that failed validation (invalid PAT, etc.)
+            if miner_eval.failed_reason is not None:
+                continue
+
+            # Successful evaluation with PRs - store to cache
+            if miner_eval.total_prs > 0:
+                self.evaluation_cache.store(miner_eval)
+                continue
+
+            # if failure, try cache fallback
+            cached_eval = self.evaluation_cache.get(uid, miner_eval.hotkey, miner_eval.github_id)
+            if cached_eval is not None:
+                bt.logging.info(
+                    f'UID {uid}: GitHub returned no PRs, using cached evaluation '
+                    f'(merged={cached_eval.total_merged_prs}, open={cached_eval.total_open_prs}, '
+                    f'closed={cached_eval.total_closed_prs})'
+                )
+                miner_evaluations[uid] = cached_eval
 
     async def forward(self):
         """

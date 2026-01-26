@@ -153,7 +153,6 @@ class Repository(BaseRepository):
                     pr.deletions,
                     pr.commits,
                     pr.total_nodes_scored,
-                    pr.low_value_pr,
                     pr.merged_by_login,
                     pr.description,
                     pr.last_edited_at,

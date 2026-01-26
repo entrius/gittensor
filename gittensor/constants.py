@@ -93,12 +93,12 @@ DEFAULT_COLLATERAL_PERCENT = 0.20
 RECYCLE_UID = 0
 
 # Network emission scaling (unique repos)
-UNIQUE_REPOS_MAX_RECYCLE = 0.9
-UNIQUE_REPOS_RECYCLE_DECAY_RATE = 0.006
+UNIQUE_REPOS_MAX_RECYCLE = 0.8
+UNIQUE_REPOS_RECYCLE_DECAY_RATE = 0.0035
 
 # Network emission scaling (total token score from tiered miners)
-TOKEN_SCORE_MAX_RECYCLE = 0.9
-TOKEN_SCORE_RECYCLE_DECAY_RATE = 0.000016  # ~35% release at 20k tokens
+TOKEN_SCORE_MAX_RECYCLE = 0.8
+TOKEN_SCORE_RECYCLE_DECAY_RATE = 0.000008
 
 # =============================================================================
 # Spam & Gaming Mitigation

@@ -25,7 +25,7 @@ import wandb
 
 from gittensor.classes import MinerEvaluation, MinerEvaluationCache
 from gittensor.validator.forward import forward
-from gittensor.validator.utils.config import WANDB_PROJECT, __version__
+from gittensor.validator.utils.config import STORE_DB_RESULTS, WANDB_PROJECT, WANDB_VALIDATOR_NAME, __version__
 from gittensor.validator.utils.storage import DatabaseStorage
 from neurons.base.validator import BaseValidatorNeuron
 
@@ -46,8 +46,9 @@ class Validator(BaseValidatorNeuron):
         # Init in-memory cache for miner evaluations (fallback when GitHub API fails)
         self.evaluation_cache = MinerEvaluationCache()
 
-        # Init DB for validation result storage. Requires STORE_DB_RESULTS in .env
-        if self.config.database.store_validation_results:
+        # DB connection for validation result storage.
+        # Requires STORE_DB_RESULTS=true in .env
+        if STORE_DB_RESULTS:
             bt.logging.warning('Validation result storage enabled.')
             self.db_storage = DatabaseStorage()
 
@@ -72,7 +73,7 @@ class Validator(BaseValidatorNeuron):
                 wandb.init(
                     entity='entrius-gittensor',
                     project=WANDB_PROJECT,
-                    name=f'vali-{self.uid}-{__version__}',
+                    name=f'{WANDB_VALIDATOR_NAME}-{self.uid}-{__version__}',
                     config=self.config,
                     reinit=True,
                 )
@@ -112,7 +113,7 @@ class Validator(BaseValidatorNeuron):
 
     async def store_evaluation(self, uid: int, miner_eval: MinerEvaluation):
         """
-        Stores the miner eval if DB storage is enabled by validator via --database.store_validation_results flag.
+        Stores the miner eval if DB storage is enabled via STORE_DB_RESULTS=true in .env.
         """
 
         if self.db_storage is not None:

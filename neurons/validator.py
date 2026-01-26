@@ -21,8 +21,8 @@ import time
 from typing import Dict, List
 
 import bittensor as bt
-
 import wandb
+
 from gittensor.__init__ import __version__
 from gittensor.classes import MinerEvaluation, MinerEvaluationCache
 from gittensor.validator.forward import forward

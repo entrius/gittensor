@@ -1387,6 +1387,9 @@ class IssueCompetitionContractClient:
                 )
                 return result.extrinsic_hash
 
+        except TimeoutError as e:
+            bt.logging.warning(f'{method_name} timed out: {e}')
+            return None
         except Exception as e:
             # Capture full exception details including traceback for debugging
             error_type = type(e).__name__

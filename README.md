@@ -9,7 +9,7 @@
 Incentivize open source contributions.
 
 [![Website](https://img.shields.io/badge/Website-gittensor.io-blue?logo=googlechrome&logoColor=white)](https://gittensor.io)
-[![Discord](https://img.shields.io/discord/1140657726694240287?label=Discord&logo=discord)](https://discord.com/invite/bittensor)
+[![Discord](https://img.shields.io/discord/799672011265015819?label=Discord&logo=discord)](https://discord.com/invite/bittensor)
 [![Twitter](https://img.shields.io/twitter/follow/gittensor_io?style=social)](https://x.com/gittensor_io)
 
 ## Introduction

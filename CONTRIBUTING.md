@@ -4,9 +4,16 @@
 
 Before contributing, please:
 
-1. Read the [README](README.md) to understand the project goals
-2. Review the [miner guide](gittensor/miner/README.md) and [validator guide](gittensor/validator/README.md)
-3. Check existing issues and discussions to avoid duplicate work
+1. Read the [README](./README.md) to understand the project goals
+2. Understand Miner and Validator interactions/design
+3. Check existing issues, PRs, and discussions to avoid duplicate work
+
+## Creating Issues
+
+When opening an issue, use the appropriate template:
+
+- **[Bug Report](.github/ISSUE_TEMPLATE/bug_report.md)** - Report bugs or unexpected behavior. Include steps to reproduce, expected vs actual behavior, and environment details.
+- **[Feature Request](.github/ISSUE_TEMPLATE/feature_request.md)** - Suggest new features or improvements. Explain the motivation and proposed solution.
 
 ## Lifecycle of a Pull Request
 
@@ -24,8 +31,7 @@ Before contributing, please:
 
   _NOTE: We do NOT accept PRs that are only testing changes/additions, they will need to be backed up with a good reason_
 
-- Do NOT add comments that are over-explanatory, redundant, or extraneous to inflate line count.
-- We will NOT accept PRs that are pure documentation changes, or typo fixes
+- Do NOT add comments that are over-explanatory, redundant
 - When making your changes, ask yourself: will this raise the value of the repository?
 - Ensure ALL tests pass, the PR will not be accepted if there are failing tests
 
@@ -34,11 +40,12 @@ Before contributing, please:
 1. Push your branch to the repository
 2. Open a PR targeting the `test` branch
 3. Use draft PRs for work-in-progress changes
-4. Fill out the PR template with:
-   - Clear description of changes
-   - Motivation and context
-   - Related issues (if any)
-   - Testing performed
+4. Fill out the [PR template](.github/PULL_REQUEST_TEMPLATE.md):
+   - **Summary**: Clear description of changes
+   - **Related Issues**: Link issues using `Fixes #123` or `Closes #456`
+   - **Type of Change**: Select bug fix, new feature, refactor, documentation, or other
+   - **Testing**: Confirm tests added/updated and manual testing performed
+   - **Checklist**: Verify code style, self-review, and documentation
 
 ### 4. Code Review
 
@@ -48,9 +55,11 @@ Before contributing, please:
 
 Apply appropriate labels to help categorize and track your contribution:
 
-- `feature` - New feature additions or enhancements
 - `bug` - Bug fixes
+- `feature` - New feature additions
+- `enhancement` - Improvements to existing features
 - `refactor` - Code refactoring without functionality changes
+- `documentation` - Documentation updates
 
 ## Code Standards
 

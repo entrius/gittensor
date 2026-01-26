@@ -14,6 +14,9 @@ When opening an issue, use the appropriate template:
 
 - **[Bug Report](.github/ISSUE_TEMPLATE/bug_report.md)** - Report bugs or unexpected behavior. Include steps to reproduce, expected vs actual behavior, and environment details.
 - **[Feature Request](.github/ISSUE_TEMPLATE/feature_request.md)** - Suggest new features or improvements. Explain the motivation and proposed solution.
+- **Blank Issue** - For issues that don't fit the above templates.
+
+For security vulnerabilities, **do not create a public issue**. Report them privately via [GitHub Security Advisories](https://github.com/entrius/gittensor/security/advisories/new).
 
 ## Lifecycle of a Pull Request
 

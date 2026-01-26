@@ -300,7 +300,7 @@ class MinerEvaluation:
     # Tier level details (None = no tier unlocked yet)
     current_tier: Optional[Tier] = None
     credibility_by_tier: Dict[Tier, float] = field(default_factory=dict)
-    stats_by_tier: Dict[Tier, TierStats] = field(default_factory=dict)
+    stats_by_tier: Dict[Tier, TierStats] = field(default_factory=lambda: {tier: TierStats() for tier in Tier})
 
     @property
     def total_prs(self) -> int:

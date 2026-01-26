@@ -4693,6 +4693,10 @@
     "tier": "Bronze",
     "weight": 0.3
   },
+  "react-component/select": {
+    "tier": "Bronze",
+    "weight": 0.18
+  },
   "react-navigation/react-navigation": {
     "tier": "Bronze",
     "weight": 0.17

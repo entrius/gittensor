@@ -75,7 +75,7 @@ pub struct Issue {
 }
 
 /// Represents a head-to-head competition between two miners
-#[derive(Debug, Clone, Encode, Decode)]
+#[derive(Debug, Clone, PartialEq, Eq, Encode, Decode)]
 #[cfg_attr(feature = "std", derive(scale_info::TypeInfo, ink::storage::traits::StorageLayout))]
 pub struct Competition {
     /// Unique competition ID

@@ -446,68 +446,31 @@ mod issue_bounty_manager {
             winner_hotkey: AccountId,
             pr_url_hash: [u8; 32],
         ) -> Result<(), Error> {
-            let competition = self
-                .competitions
-                .get(competition_id)
-                .ok_or(Error::CompetitionNotFound)?;
+            let competition = self.validate_active_competition(competition_id)?;
 
-            if competition.status != CompetitionStatus::Active {
-                return Err(Error::CompetitionNotActive);
-            }
-
+            // Solution-specific: validate winner and submission window
             if winner_hotkey != competition.miner1_hotkey
                 && winner_hotkey != competition.miner2_hotkey
             {
                 return Err(Error::InvalidWinner);
             }
-
-            let current_block = self.env().block_number();
-            if current_block <= competition.submission_window_end_block {
+            if self.env().block_number() <= competition.submission_window_end_block {
                 return Err(Error::SubmissionWindowNotEnded);
             }
 
-            let caller = self.env().caller();
+            // Common vote validation
+            self.check_not_voted_solution(competition_id, self.env().caller())?;
+            let (caller, stake) = self.get_caller_stake_validated()?;
 
-            if self
-                .solution_vote_voters
-                .get((competition_id, caller))
-                .unwrap_or(false)
-            {
-                return Err(Error::AlreadyVoted);
-            }
+            // Get or create vote, accumulate stake
+            let mut vote = self.get_or_create_solution_vote(competition_id, winner_hotkey, pr_url_hash);
+            self.solution_vote_voters.insert((competition_id, caller), &true);
+            vote.total_stake_voted = vote.total_stake_voted.saturating_add(stake);
+            vote.votes_count = vote.votes_count.saturating_add(1);
+            self.solution_votes.insert(competition_id, &vote);
 
-            let stake = self.get_validator_stake(caller);
-            if stake == 0 {
-                return Err(Error::InsufficientStake);
-            }
-
-            let mut solution_vote = if !self
-                .has_solution_vote
-                .get(competition_id)
-                .unwrap_or(false)
-            {
-                let sv = SolutionVote {
-                    competition_id,
-                    winner_hotkey,
-                    pr_url_hash,
-                    total_stake_voted: 0,
-                    votes_count: 0,
-                };
-                self.has_solution_vote.insert(competition_id, &true);
-                sv
-            } else {
-                self.solution_votes
-                    .get(competition_id)
-                    .unwrap_or_default()
-            };
-
-            self.solution_vote_voters
-                .insert((competition_id, caller), &true);
-            solution_vote.total_stake_voted = solution_vote.total_stake_voted.saturating_add(stake);
-            solution_vote.votes_count = solution_vote.votes_count.saturating_add(1);
-            self.solution_votes.insert(competition_id, &solution_vote);
-
-            if self.check_consensus(solution_vote.total_stake_voted) {
+            // Check consensus and execute
+            if self.check_consensus(vote.total_stake_voted) {
                 self.complete_competition(competition_id, winner_hotkey, pr_url_hash);
                 self.clear_solution_vote(competition_id);
             }
@@ -518,61 +481,26 @@ mod issue_bounty_manager {
         /// Votes to time out a competition that has passed its deadline
         #[ink(message)]
         pub fn vote_timeout(&mut self, competition_id: u64) -> Result<(), Error> {
-            let competition = self
-                .competitions
-                .get(competition_id)
-                .ok_or(Error::CompetitionNotFound)?;
+            let competition = self.validate_active_competition(competition_id)?;
 
-            if competition.status != CompetitionStatus::Active {
-                return Err(Error::CompetitionNotActive);
-            }
-
-            let current_block = self.env().block_number();
-            if current_block <= competition.deadline_block {
+            // Timeout-specific: validate deadline has passed
+            if self.env().block_number() <= competition.deadline_block {
                 return Err(Error::DeadlineNotPassed);
             }
 
-            let caller = self.env().caller();
+            // Common vote validation
+            self.check_not_voted_timeout(competition_id, self.env().caller())?;
+            let (caller, stake) = self.get_caller_stake_validated()?;
 
-            if self
-                .timeout_vote_voters
-                .get((competition_id, caller))
-                .unwrap_or(false)
-            {
-                return Err(Error::AlreadyVoted);
-            }
+            // Get or create vote, accumulate stake
+            let mut vote = self.get_or_create_timeout_vote(competition_id);
+            self.timeout_vote_voters.insert((competition_id, caller), &true);
+            vote.total_stake_voted = vote.total_stake_voted.saturating_add(stake);
+            vote.votes_count = vote.votes_count.saturating_add(1);
+            self.timeout_votes.insert(competition_id, &vote);
 
-            let stake = self.get_validator_stake(caller);
-            if stake == 0 {
-                return Err(Error::InsufficientStake);
-            }
-
-            let reason_hash = [0u8; 32];
-
-            let mut timeout_vote = if !self
-                .has_timeout_vote
-                .get(competition_id)
-                .unwrap_or(false)
-            {
-                let tv = CancelVote {
-                    competition_id,
-                    reason_hash,
-                    total_stake_voted: 0,
-                    votes_count: 0,
-                };
-                self.has_timeout_vote.insert(competition_id, &true);
-                tv
-            } else {
-                self.timeout_votes.get(competition_id).unwrap_or_default()
-            };
-
-            self.timeout_vote_voters
-                .insert((competition_id, caller), &true);
-            timeout_vote.total_stake_voted = timeout_vote.total_stake_voted.saturating_add(stake);
-            timeout_vote.votes_count = timeout_vote.votes_count.saturating_add(1);
-            self.timeout_votes.insert(competition_id, &timeout_vote);
-
-            if self.check_consensus(timeout_vote.total_stake_voted) {
+            // Check consensus and execute
+            if self.check_consensus(vote.total_stake_voted) {
                 self.timeout_competition(competition_id);
                 self.clear_timeout_vote(competition_id);
             }
@@ -587,54 +515,21 @@ mod issue_bounty_manager {
             competition_id: u64,
             reason_hash: [u8; 32],
         ) -> Result<(), Error> {
-            let competition = self
-                .competitions
-                .get(competition_id)
-                .ok_or(Error::CompetitionNotFound)?;
+            self.validate_active_competition(competition_id)?;
 
-            if competition.status != CompetitionStatus::Active {
-                return Err(Error::CompetitionNotActive);
-            }
+            // Common vote validation
+            self.check_not_voted_cancel(competition_id, self.env().caller())?;
+            let (caller, stake) = self.get_caller_stake_validated()?;
 
-            let caller = self.env().caller();
+            // Get or create vote, accumulate stake
+            let mut vote = self.get_or_create_cancel_vote(competition_id, reason_hash);
+            self.cancel_vote_voters.insert((competition_id, caller), &true);
+            vote.total_stake_voted = vote.total_stake_voted.saturating_add(stake);
+            vote.votes_count = vote.votes_count.saturating_add(1);
+            self.cancel_votes.insert(competition_id, &vote);
 
-            if self
-                .cancel_vote_voters
-                .get((competition_id, caller))
-                .unwrap_or(false)
-            {
-                return Err(Error::AlreadyVoted);
-            }
-
-            let stake = self.get_validator_stake(caller);
-            if stake == 0 {
-                return Err(Error::InsufficientStake);
-            }
-
-            let mut cancel_vote = if !self
-                .has_cancel_vote
-                .get(competition_id)
-                .unwrap_or(false)
-            {
-                let cv = CancelVote {
-                    competition_id,
-                    reason_hash,
-                    total_stake_voted: 0,
-                    votes_count: 0,
-                };
-                self.has_cancel_vote.insert(competition_id, &true);
-                cv
-            } else {
-                self.cancel_votes.get(competition_id).unwrap_or_default()
-            };
-
-            self.cancel_vote_voters
-                .insert((competition_id, caller), &true);
-            cancel_vote.total_stake_voted = cancel_vote.total_stake_voted.saturating_add(stake);
-            cancel_vote.votes_count = cancel_vote.votes_count.saturating_add(1);
-            self.cancel_votes.insert(competition_id, &cancel_vote);
-
-            if self.check_consensus(cancel_vote.total_stake_voted) {
+            // Check consensus and execute
+            if self.check_consensus(vote.total_stake_voted) {
                 self.cancel_competition(competition_id, reason_hash);
                 self.clear_cancel_vote(competition_id);
             }
@@ -1059,6 +954,113 @@ mod issue_bounty_manager {
 
         // ========================================================================
         // Internal Functions
+        // ========================================================================
+
+        // ========================================================================
+        // Vote Processing Helpers
+        // ========================================================================
+
+        /// Validates a competition exists and is active.
+        fn validate_active_competition(&self, competition_id: u64) -> Result<Competition, Error> {
+            let competition = self
+                .competitions
+                .get(competition_id)
+                .ok_or(Error::CompetitionNotFound)?;
+
+            if competition.status != CompetitionStatus::Active {
+                return Err(Error::CompetitionNotActive);
+            }
+
+            Ok(competition)
+        }
+
+        /// Gets the caller's validated stake (returns error if zero).
+        fn get_caller_stake_validated(&self) -> Result<(AccountId, u128), Error> {
+            let caller = self.env().caller();
+            let stake = self.get_validator_stake(caller);
+            if stake == 0 {
+                return Err(Error::InsufficientStake);
+            }
+            Ok((caller, stake))
+        }
+
+        /// Checks if caller has already voted for a solution.
+        fn check_not_voted_solution(&self, competition_id: u64, caller: AccountId) -> Result<(), Error> {
+            if self.solution_vote_voters.get((competition_id, caller)).unwrap_or(false) {
+                return Err(Error::AlreadyVoted);
+            }
+            Ok(())
+        }
+
+        /// Checks if caller has already voted for timeout.
+        fn check_not_voted_timeout(&self, competition_id: u64, caller: AccountId) -> Result<(), Error> {
+            if self.timeout_vote_voters.get((competition_id, caller)).unwrap_or(false) {
+                return Err(Error::AlreadyVoted);
+            }
+            Ok(())
+        }
+
+        /// Checks if caller has already voted for cancel.
+        fn check_not_voted_cancel(&self, competition_id: u64, caller: AccountId) -> Result<(), Error> {
+            if self.cancel_vote_voters.get((competition_id, caller)).unwrap_or(false) {
+                return Err(Error::AlreadyVoted);
+            }
+            Ok(())
+        }
+
+        /// Gets existing solution vote or creates a new one.
+        fn get_or_create_solution_vote(
+            &mut self,
+            competition_id: u64,
+            winner_hotkey: AccountId,
+            pr_url_hash: [u8; 32],
+        ) -> SolutionVote {
+            if self.has_solution_vote.get(competition_id).unwrap_or(false) {
+                self.solution_votes.get(competition_id).unwrap_or_default()
+            } else {
+                self.has_solution_vote.insert(competition_id, &true);
+                SolutionVote {
+                    competition_id,
+                    winner_hotkey,
+                    pr_url_hash,
+                    total_stake_voted: 0,
+                    votes_count: 0,
+                }
+            }
+        }
+
+        /// Gets existing timeout vote or creates a new one.
+        fn get_or_create_timeout_vote(&mut self, competition_id: u64) -> CancelVote {
+            if self.has_timeout_vote.get(competition_id).unwrap_or(false) {
+                self.timeout_votes.get(competition_id).unwrap_or_default()
+            } else {
+                self.has_timeout_vote.insert(competition_id, &true);
+                CancelVote {
+                    competition_id,
+                    reason_hash: [0u8; 32],
+                    total_stake_voted: 0,
+                    votes_count: 0,
+                }
+            }
+        }
+
+        /// Gets existing cancel vote or creates a new one.
+        fn get_or_create_cancel_vote(&mut self, competition_id: u64, reason_hash: [u8; 32]) -> CancelVote {
+            if self.has_cancel_vote.get(competition_id).unwrap_or(false) {
+                self.cancel_votes.get(competition_id).unwrap_or_default()
+            } else {
+                self.has_cancel_vote.insert(competition_id, &true);
+                CancelVote {
+                    competition_id,
+                    reason_hash,
+                    total_stake_voted: 0,
+                    votes_count: 0,
+                }
+            }
+        }
+
+        // ========================================================================
+        // Internal Utility Functions
         // ========================================================================
 
         /// Validates repository name format (owner/repo)
@@ -1553,6 +1555,486 @@ mod issue_bounty_manager {
 
             let active = contract.get_issues_by_status(IssueStatus::Active);
             assert_eq!(active.len(), 0);
+        }
+
+        // ================================================================
+        // Voting Validation Tests
+        // ================================================================
+
+        #[ink::test]
+        fn test_validate_active_competition_not_found() {
+            let accounts = default_accounts();
+            let contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
+
+            let result = contract.validate_active_competition(999);
+            assert_eq!(result, Err(Error::CompetitionNotFound));
+        }
+
+        #[ink::test]
+        fn test_check_consensus_threshold() {
+            let accounts = default_accounts();
+            let contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
+
+            // Below threshold (100 TAO = 100_000_000_000_000)
+            assert!(!contract.check_consensus(99_999_999_999_999));
+            // At threshold
+            assert!(contract.check_consensus(MIN_CONSENSUS_STAKE));
+            // Above threshold
+            assert!(contract.check_consensus(MIN_CONSENSUS_STAKE + 1));
+        }
+
+        #[ink::test]
+        fn test_check_not_voted_solution() {
+            let accounts = default_accounts();
+            set_caller(accounts.alice);
+            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
+
+            // Initially not voted
+            let result = contract.check_not_voted_solution(1, accounts.bob);
+            assert!(result.is_ok());
+
+            // Mark as voted
+            contract.solution_vote_voters.insert((1, accounts.bob), &true);
+
+            // Now should return AlreadyVoted error
+            let result = contract.check_not_voted_solution(1, accounts.bob);
+            assert_eq!(result, Err(Error::AlreadyVoted));
+
+            // Different user should still be able to vote
+            let result = contract.check_not_voted_solution(1, accounts.charlie);
+            assert!(result.is_ok());
+        }
+
+        // ================================================================
+        // Bounty Pool Tests
+        // ================================================================
+
+        #[ink::test]
+        fn test_fill_bounties_fifo_order() {
+            let accounts = default_accounts();
+            set_caller(accounts.alice);
+            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
+
+            // Register two issues
+            contract
+                .register_issue(
+                    String::from("https://github.com/test/repo/issues/1"),
+                    String::from("test/repo"),
+                    1,
+                    MIN_BOUNTY,
+                )
+                .unwrap();
+            contract
+                .register_issue(
+                    String::from("https://github.com/test/repo/issues/2"),
+                    String::from("test/repo"),
+                    2,
+                    MIN_BOUNTY * 2,
+                )
+                .unwrap();
+
+            // Add partial funds (only enough for first issue)
+            contract.alpha_pool = MIN_BOUNTY;
+            contract.fill_bounties();
+
+            // First issue should be filled and active
+            let issue1 = contract.get_issue(1).unwrap();
+            assert_eq!(issue1.bounty_amount, MIN_BOUNTY);
+            assert_eq!(issue1.status, IssueStatus::Active);
+
+            // Second issue should still be registered with no bounty
+            let issue2 = contract.get_issue(2).unwrap();
+            assert_eq!(issue2.bounty_amount, 0);
+            assert_eq!(issue2.status, IssueStatus::Registered);
+
+            // Pool should be empty
+            assert_eq!(contract.get_alpha_pool(), 0);
+        }
+
+        #[ink::test]
+        fn test_fill_bounties_partial_fill() {
+            let accounts = default_accounts();
+            set_caller(accounts.alice);
+            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
+
+            // Register issue with large target
+            contract
+                .register_issue(
+                    String::from("https://github.com/test/repo/issues/1"),
+                    String::from("test/repo"),
+                    1,
+                    MIN_BOUNTY * 3,
+                )
+                .unwrap();
+
+            // Add partial funds
+            contract.alpha_pool = MIN_BOUNTY;
+            contract.fill_bounties();
+
+            // Issue should be partially filled but still Registered
+            let issue = contract.get_issue(1).unwrap();
+            assert_eq!(issue.bounty_amount, MIN_BOUNTY);
+            assert_eq!(issue.status, IssueStatus::Registered);
+
+            // Add more funds to complete it
+            contract.alpha_pool = MIN_BOUNTY * 2;
+            contract.fill_bounties();
+
+            let issue = contract.get_issue(1).unwrap();
+            assert_eq!(issue.bounty_amount, MIN_BOUNTY * 3);
+            assert_eq!(issue.status, IssueStatus::Active);
+        }
+
+        // ================================================================
+        // Competition State Tests
+        // ================================================================
+
+        #[ink::test]
+        fn test_start_competition_state_changes() {
+            let accounts = default_accounts();
+            set_caller(accounts.alice);
+            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
+
+            // Register and fill an issue
+            contract
+                .register_issue(
+                    String::from("https://github.com/test/repo/issues/1"),
+                    String::from("test/repo"),
+                    1,
+                    MIN_BOUNTY,
+                )
+                .unwrap();
+            contract.alpha_pool = MIN_BOUNTY;
+            contract.fill_bounties();
+
+            // Start competition manually (simulating consensus)
+            let comp_id = contract.start_competition(1, accounts.bob, accounts.charlie);
+
+            // Verify competition was created
+            let comp = contract.get_competition(comp_id).unwrap();
+            assert_eq!(comp.id, 1);
+            assert_eq!(comp.issue_id, 1);
+            assert_eq!(comp.miner1_hotkey, accounts.bob);
+            assert_eq!(comp.miner2_hotkey, accounts.charlie);
+            assert_eq!(comp.status, CompetitionStatus::Active);
+
+            // Verify issue status changed
+            let issue = contract.get_issue(1).unwrap();
+            assert_eq!(issue.status, IssueStatus::InCompetition);
+
+            // Verify miners are tracked
+            assert!(contract.is_miner_in_competition(accounts.bob));
+            assert!(contract.is_miner_in_competition(accounts.charlie));
+            assert_eq!(contract.get_miner_competition(accounts.bob), comp_id);
+        }
+
+        #[ink::test]
+        fn test_complete_competition_state_changes() {
+            let accounts = default_accounts();
+            set_caller(accounts.alice);
+            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
+
+            // Setup: register, fill, and start competition
+            contract
+                .register_issue(
+                    String::from("https://github.com/test/repo/issues/1"),
+                    String::from("test/repo"),
+                    1,
+                    MIN_BOUNTY,
+                )
+                .unwrap();
+            contract.alpha_pool = MIN_BOUNTY;
+            contract.fill_bounties();
+            let comp_id = contract.start_competition(1, accounts.bob, accounts.charlie);
+
+            // Complete the competition
+            let pr_hash = [1u8; 32];
+            contract.complete_competition(comp_id, accounts.bob, pr_hash);
+
+            // Verify competition state
+            let comp = contract.get_competition(comp_id).unwrap();
+            assert_eq!(comp.status, CompetitionStatus::Completed);
+            assert_eq!(comp.winner_hotkey, accounts.bob);
+            assert_eq!(comp.winning_pr_url_hash, pr_hash);
+            assert_eq!(comp.payout_amount, MIN_BOUNTY);
+
+            // Verify issue completed
+            let issue = contract.get_issue(1).unwrap();
+            assert_eq!(issue.status, IssueStatus::Completed);
+            assert_eq!(issue.bounty_amount, 0);
+
+            // Verify miners released
+            assert!(!contract.is_miner_in_competition(accounts.bob));
+            assert!(!contract.is_miner_in_competition(accounts.charlie));
+        }
+
+        #[ink::test]
+        fn test_timeout_competition_returns_to_active() {
+            let accounts = default_accounts();
+            set_caller(accounts.alice);
+            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
+
+            // Setup: register, fill, and start competition
+            contract
+                .register_issue(
+                    String::from("https://github.com/test/repo/issues/1"),
+                    String::from("test/repo"),
+                    1,
+                    MIN_BOUNTY,
+                )
+                .unwrap();
+            contract.alpha_pool = MIN_BOUNTY;
+            contract.fill_bounties();
+            let comp_id = contract.start_competition(1, accounts.bob, accounts.charlie);
+
+            // Timeout the competition
+            contract.timeout_competition(comp_id);
+
+            // Verify competition timed out
+            let comp = contract.get_competition(comp_id).unwrap();
+            assert_eq!(comp.status, CompetitionStatus::TimedOut);
+
+            // Issue should return to Active (can be re-competed)
+            let issue = contract.get_issue(1).unwrap();
+            assert_eq!(issue.status, IssueStatus::Active);
+
+            // Miners released
+            assert!(!contract.is_miner_in_competition(accounts.bob));
+        }
+
+        #[ink::test]
+        fn test_cancel_competition_recycles_bounty() {
+            let accounts = default_accounts();
+            set_caller(accounts.alice);
+            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
+
+            // Setup: register, fill, and start competition
+            contract
+                .register_issue(
+                    String::from("https://github.com/test/repo/issues/1"),
+                    String::from("test/repo"),
+                    1,
+                    MIN_BOUNTY,
+                )
+                .unwrap();
+            contract.alpha_pool = MIN_BOUNTY;
+            contract.fill_bounties();
+            assert_eq!(contract.get_alpha_pool(), 0);
+
+            let comp_id = contract.start_competition(1, accounts.bob, accounts.charlie);
+
+            // Cancel the competition
+            let reason_hash = [2u8; 32];
+            contract.cancel_competition(comp_id, reason_hash);
+
+            // Verify competition cancelled
+            let comp = contract.get_competition(comp_id).unwrap();
+            assert_eq!(comp.status, CompetitionStatus::Cancelled);
+
+            // Bounty should be recycled to alpha pool
+            assert_eq!(contract.get_alpha_pool(), MIN_BOUNTY);
+
+            // Issue marked completed (cancelled externally)
+            let issue = contract.get_issue(1).unwrap();
+            assert_eq!(issue.status, IssueStatus::Completed);
+        }
+
+        // ================================================================
+        // Vote Storage Tests
+        // ================================================================
+
+        #[ink::test]
+        fn test_get_or_create_solution_vote_creates_new() {
+            let accounts = default_accounts();
+            set_caller(accounts.alice);
+            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
+
+            let pr_hash = [1u8; 32];
+            let vote = contract.get_or_create_solution_vote(1, accounts.bob, pr_hash);
+
+            assert_eq!(vote.competition_id, 1);
+            assert_eq!(vote.winner_hotkey, accounts.bob);
+            assert_eq!(vote.pr_url_hash, pr_hash);
+            assert_eq!(vote.total_stake_voted, 0);
+            assert_eq!(vote.votes_count, 0);
+
+            // has flag should be set
+            assert!(contract.has_solution_vote.get(1).unwrap_or(false));
+        }
+
+        #[ink::test]
+        fn test_get_or_create_solution_vote_returns_existing() {
+            let accounts = default_accounts();
+            set_caller(accounts.alice);
+            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
+
+            // Create and store initial vote
+            let pr_hash = [1u8; 32];
+            let mut vote = contract.get_or_create_solution_vote(1, accounts.bob, pr_hash);
+            vote.total_stake_voted = 1000;
+            vote.votes_count = 5;
+            contract.solution_votes.insert(1, &vote);
+
+            // Get existing vote (different params should be ignored)
+            let vote2 = contract.get_or_create_solution_vote(1, accounts.charlie, [2u8; 32]);
+
+            // Should return existing vote data
+            assert_eq!(vote2.winner_hotkey, accounts.bob);
+            assert_eq!(vote2.total_stake_voted, 1000);
+            assert_eq!(vote2.votes_count, 5);
+        }
+
+        #[ink::test]
+        fn test_clear_solution_vote() {
+            let accounts = default_accounts();
+            set_caller(accounts.alice);
+            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
+
+            // Create a vote
+            contract.has_solution_vote.insert(1, &true);
+            let vote = SolutionVote {
+                competition_id: 1,
+                winner_hotkey: accounts.bob,
+                pr_url_hash: [1u8; 32],
+                total_stake_voted: 1000,
+                votes_count: 5,
+            };
+            contract.solution_votes.insert(1, &vote);
+
+            // Clear it
+            contract.clear_solution_vote(1);
+
+            // Verify cleared
+            assert!(!contract.has_solution_vote.get(1).unwrap_or(false));
+            assert!(contract.solution_votes.get(1).is_none());
+        }
+
+        // ================================================================
+        // Pair Proposal Tests
+        // ================================================================
+
+        #[ink::test]
+        fn test_propose_pair_same_miners_fails() {
+            let accounts = default_accounts();
+            set_caller(accounts.alice);
+            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
+
+            // Register and activate an issue
+            contract
+                .register_issue(
+                    String::from("https://github.com/test/repo/issues/1"),
+                    String::from("test/repo"),
+                    1,
+                    MIN_BOUNTY,
+                )
+                .unwrap();
+            contract.alpha_pool = MIN_BOUNTY;
+            contract.fill_bounties();
+
+            // Try to propose same miner twice
+            let result = contract.propose_pair(1, accounts.bob, accounts.bob);
+            assert_eq!(result, Err(Error::SameMiners));
+        }
+
+        #[ink::test]
+        fn test_propose_pair_issue_not_active() {
+            let accounts = default_accounts();
+            set_caller(accounts.alice);
+            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
+
+            // Register but don't fill issue (stays Registered)
+            contract
+                .register_issue(
+                    String::from("https://github.com/test/repo/issues/1"),
+                    String::from("test/repo"),
+                    1,
+                    MIN_BOUNTY,
+                )
+                .unwrap();
+
+            let result = contract.propose_pair(1, accounts.bob, accounts.charlie);
+            assert_eq!(result, Err(Error::IssueNotActive));
+        }
+
+        #[ink::test]
+        fn test_propose_pair_miner_already_in_competition() {
+            let accounts = default_accounts();
+            set_caller(accounts.alice);
+            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
+
+            // Register and fill two issues
+            contract
+                .register_issue(
+                    String::from("https://github.com/test/repo/issues/1"),
+                    String::from("test/repo"),
+                    1,
+                    MIN_BOUNTY,
+                )
+                .unwrap();
+            contract
+                .register_issue(
+                    String::from("https://github.com/test/repo/issues/2"),
+                    String::from("test/repo"),
+                    2,
+                    MIN_BOUNTY,
+                )
+                .unwrap();
+            contract.alpha_pool = MIN_BOUNTY * 2;
+            contract.fill_bounties();
+
+            // Start competition with bob and charlie
+            contract.start_competition(1, accounts.bob, accounts.charlie);
+
+            // Try to propose bob for another competition
+            let result = contract.propose_pair(2, accounts.bob, accounts.eve);
+            assert_eq!(result, Err(Error::MinerAlreadyInCompetition));
+        }
+
+        // ================================================================
+        // Config Tests
+        // ================================================================
+
+        #[ink::test]
+        fn test_set_competition_config() {
+            let accounts = default_accounts();
+            set_caller(accounts.alice);
+            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
+
+            // Verify defaults
+            assert_eq!(contract.get_submission_window_blocks(), DEFAULT_SUBMISSION_WINDOW_BLOCKS);
+            assert_eq!(contract.get_competition_deadline_blocks(), DEFAULT_COMPETITION_DEADLINE_BLOCKS);
+            assert_eq!(contract.get_proposal_expiry_blocks(), DEFAULT_PROPOSAL_EXPIRY_BLOCKS);
+
+            // Update config
+            let result = contract.set_competition_config(100, 200, 50);
+            assert!(result.is_ok());
+
+            assert_eq!(contract.get_submission_window_blocks(), 100);
+            assert_eq!(contract.get_competition_deadline_blocks(), 200);
+            assert_eq!(contract.get_proposal_expiry_blocks(), 50);
+        }
+
+        #[ink::test]
+        fn test_set_competition_config_not_owner() {
+            let accounts = default_accounts();
+            set_caller(accounts.bob); // Not owner
+            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
+
+            let result = contract.set_competition_config(100, 200, 50);
+            assert_eq!(result, Err(Error::NotOwner));
+        }
+
+        #[ink::test]
+        fn test_set_treasury_hotkey() {
+            let accounts = default_accounts();
+            set_caller(accounts.alice);
+            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
+
+            assert_eq!(contract.treasury_hotkey(), accounts.bob);
+
+            let result = contract.set_treasury_hotkey(accounts.charlie);
+            assert!(result.is_ok());
+            assert_eq!(contract.treasury_hotkey(), accounts.charlie);
         }
     }
 }

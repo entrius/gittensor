@@ -91,10 +91,12 @@ pub struct BountyFilled {
     pub amount: u128,
 }
 
-/// Event emitted when excess emissions are recycled to owner
+/// Event emitted when excess emissions are recycled (destroyed via recycle_alpha)
+/// True recycling: tokens are destroyed and SubnetAlphaOut is reduced
 #[ink::event]
 pub struct EmissionsRecycled {
     pub amount: u128,
+    /// The hotkey from which tokens were recycled (source, not destination)
     #[ink(topic)]
     pub destination: AccountId,
 }
@@ -117,4 +119,19 @@ pub struct HarvestFailed {
     pub reason: u8,
     /// Amount that failed to recycle
     pub amount: u128,
+}
+
+/// Event emitted when stake is moved to the Gittensor validator
+#[ink::event]
+pub struct StakeMovedToValidator {
+    #[ink(topic)]
+    pub amount: u128,
+    pub validator: AccountId,
+}
+
+/// Warning event when stake move to validator fails (non-fatal)
+#[ink::event]
+pub struct StakeMoveFailedWarning {
+    pub amount: u128,
+    pub validator: AccountId,
 }

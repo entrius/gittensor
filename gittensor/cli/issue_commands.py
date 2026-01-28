@@ -303,6 +303,7 @@ def _read_contract_packed_storage(substrate, contract_addr: str, verbose: bool =
     # Decode packed struct (matches IssueBountyManager in lib.rs):
     # owner: AccountId (32 bytes)
     # treasury_hotkey: AccountId (32 bytes)
+    # validator_hotkey: AccountId (32 bytes)
     # netuid: u16 (2 bytes)
     # next_issue_id: u64 (8 bytes)
     # next_competition_id: u64 (8 bytes)
@@ -310,17 +311,19 @@ def _read_contract_packed_storage(substrate, contract_addr: str, verbose: bool =
     # submission_window_blocks: u32 (4 bytes)
     # competition_deadline_blocks: u32 (4 bytes)
     # proposal_expiry_blocks: u32 (4 bytes)
-    # Total: 110 bytes minimum
+    # Total: 142 bytes minimum
 
-    if len(data) < 110:  # Minimum expected size
+    if len(data) < 142:  # Minimum expected size
         if verbose:
-            console.print(f'[dim]Debug: Packed storage too small ({len(data)} < 110 bytes)[/dim]')
+            console.print(f'[dim]Debug: Packed storage too small ({len(data)} < 142 bytes)[/dim]')
         return None
 
     offset = 0
     owner = data[offset:offset + 32]
     offset += 32
     treasury = data[offset:offset + 32]
+    offset += 32
+    validator_hotkey = data[offset:offset + 32]
     offset += 32
     netuid = struct.unpack_from('<H', data, offset)[0]
     offset += 2
@@ -334,6 +337,7 @@ def _read_contract_packed_storage(substrate, contract_addr: str, verbose: bool =
     return {
         'owner': substrate.ss58_encode(owner.hex()),
         'treasury_hotkey': substrate.ss58_encode(treasury.hex()),
+        'validator_hotkey': substrate.ss58_encode(validator_hotkey.hex()),
         'netuid': netuid,
         'next_issue_id': next_issue_id,
         'next_competition_id': next_competition_id,
@@ -393,6 +397,14 @@ def _read_issues_from_child_storage(substrate, contract_addr: str, verbose: bool
     next_issue_id = packed_storage.get('next_issue_id', 1)
     if verbose:
         console.print(f'[dim]Debug: next_issue_id from contract = {next_issue_id}[/dim]')
+
+    # Sanity check: next_issue_id should be reasonable (< 1 million for any real deployment)
+    # A corrupted value indicates storage decoder mismatch
+    MAX_REASONABLE_ISSUE_ID = 1_000_000
+    if next_issue_id > MAX_REASONABLE_ISSUE_ID:
+        console.print(f'[yellow]Warning: next_issue_id ({next_issue_id}) is unreasonably large.[/yellow]')
+        console.print('[yellow]This may indicate a storage format mismatch. Check contract version.[/yellow]')
+        return []
 
     # If next_issue_id is 1, no issues have been registered yet
     if next_issue_id <= 1:
@@ -1371,7 +1383,14 @@ def issue_harvest(wallet_name: str, wallet_hotkey: str, rpc_url: str, contract: 
                 console.print(f'\n[green]Harvest succeeded![/green]')
                 console.print(f'[cyan]Transaction hash:[/cyan] {result.get("tx_hash", "N/A")}')
                 if result.get('recycled'):
-                    console.print('[dim]Emissions recycled to staking pool.[/dim]')
+                    console.print('[dim]Emissions recycled (tokens destroyed via recycle_alpha).[/dim]')
+                else:
+                    console.print('[dim]No emissions to recycle.[/dim]')
+            elif result.get('status') == 'partial':
+                console.print(f'\n[yellow]Harvest completed but recycling failed![/yellow]')
+                console.print(f'[cyan]Transaction hash:[/cyan] {result.get("tx_hash", "N/A")}')
+                console.print(f'[red]Error: {result.get("error", "Unknown")}[/red]')
+                console.print('[dim]Check proxy permissions: contract needs NonCritical proxy.[/dim]')
             elif result.get('status') == 'failed':
                 console.print(f'\n[red]Harvest failed![/red]')
                 console.print(f'[red]Error: {result.get("error", "Unknown error")}[/red]')

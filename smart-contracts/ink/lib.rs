@@ -99,6 +99,8 @@ mod issue_bounty_manager {
         owner: AccountId,
         /// Treasury hotkey for staking operations
         treasury_hotkey: AccountId,
+        /// Validator hotkey where bounty funds are staked
+        validator_hotkey: AccountId,
         /// Subnet ID for this contract
         netuid: u16,
         /// Counter for generating unique issue IDs
@@ -162,10 +164,16 @@ mod issue_bounty_manager {
 
         /// Creates a new IssueBountyManager contract
         #[ink(constructor)]
-        pub fn new(owner: AccountId, treasury_hotkey: AccountId, netuid: u16) -> Self {
+        pub fn new(
+            owner: AccountId,
+            treasury_hotkey: AccountId,
+            validator_hotkey: AccountId,
+            netuid: u16,
+        ) -> Self {
             Self {
                 owner,
                 treasury_hotkey,
+                validator_hotkey,
                 netuid,
                 next_issue_id: 1,
                 next_competition_id: 1,
@@ -561,6 +569,16 @@ mod issue_bounty_manager {
             Ok(())
         }
 
+        /// Sets a new validator hotkey
+        #[ink(message)]
+        pub fn set_validator_hotkey(&mut self, new_hotkey: AccountId) -> Result<(), Error> {
+            if self.env().caller() != self.owner {
+                return Err(Error::NotOwner);
+            }
+            self.validator_hotkey = new_hotkey;
+            Ok(())
+        }
+
         /// Sets competition timing configuration
         #[ink(message)]
         pub fn set_competition_config(
@@ -678,9 +696,11 @@ mod issue_bounty_manager {
             // Fill bounties from alpha pool (existing logic)
             self.fill_bounties();
 
+            // Calculate how much was allocated to bounties
+            let bounty_funds_allocated = alpha_before.saturating_sub(self.alpha_pool);
+
             // Count how many bounties were filled
-            let filled_amount = alpha_before.saturating_sub(self.alpha_pool);
-            if filled_amount > 0 {
+            if bounty_funds_allocated > 0 {
                 // Count filled bounties by checking active issues
                 for issue_id in self.bounty_queue.iter() {
                     if let Some(issue) = self.issues.get(*issue_id) {
@@ -696,41 +716,83 @@ mod issue_bounty_manager {
                 }
             }
 
-            // Recycle any remaining alpha pool to owner
+            // Move bounty funds to validator hotkey (stake on Gittensor validator)
+            // This uses move_stake which requires Staking proxy
+            if bounty_funds_allocated > 0 {
+                let amount_u64: u64 = bounty_funds_allocated.try_into().unwrap_or(u64::MAX);
+
+                let move_call = RawCall::proxied_move_stake(
+                    &self.owner,              // real: execute as owner (treasury coldkey)
+                    &self.treasury_hotkey,    // origin_hotkey: where stake currently is
+                    &self.validator_hotkey,   // destination_hotkey: Gittensor validator
+                    self.netuid,              // origin_netuid
+                    self.netuid,              // destination_netuid (same subnet)
+                    amount_u64,
+                );
+
+                let move_result = self.env().call_runtime(&move_call);
+
+                if move_result.is_ok() {
+                    // CRITICAL: move_stake reduced stake on treasury hotkey, so we must
+                    // also reduce last_known_stake to keep the delta calculation accurate.
+                    // Otherwise, next harvest would see current_stake < last_known_stake = 0 pending.
+                    self.last_known_stake = self.last_known_stake.saturating_sub(bounty_funds_allocated);
+
+                    self.env().emit_event(StakeMovedToValidator {
+                        amount: bounty_funds_allocated,
+                        validator: self.validator_hotkey,
+                    });
+                } else {
+                    // Log warning but don't fail harvest - stake remains on treasury hotkey
+                    self.env().emit_event(StakeMoveFailedWarning {
+                        amount: bounty_funds_allocated,
+                        validator: self.validator_hotkey,
+                    });
+                }
+            }
+
+            // Recycle any remaining alpha pool (TRUE recycling - destroys tokens)
             let to_recycle = self.alpha_pool;
             let mut recycled: Balance = 0;
 
             if to_recycle > 0 {
-                let owner_bytes: [u8; 32] = *self.owner.as_ref();
-                let hotkey_bytes: [u8; 32] = *self.treasury_hotkey.as_ref();
-
-                // Convert u128 to u64 for chain extension (AlphaCurrency is u64)
+                // Convert u128 to u64 for recycle (AlphaCurrency is u64)
                 // Use try_into with fallback to u64::MAX for safety (unlikely to overflow)
                 let amount_u64: u64 = to_recycle.try_into().unwrap_or(u64::MAX);
 
-                // With handle_status = false, returns raw u32 (0 = success)
-                let result = self.env().extension().transfer_stake(
-                    owner_bytes,
-                    hotkey_bytes,
-                    self.netuid,
-                    self.netuid,
-                    amount_u64,
+                // Use call_runtime with Proxy::proxy to recycle alpha.
+                // The contract acts as a NonCritical proxy for the owner (treasury_coldkey),
+                // allowing it to execute recycle_alpha on behalf of the owner.
+                // recycle_alpha DESTROYS tokens and reduces SubnetAlphaOut - this is TRUE recycling.
+                let proxy_call = RawCall::proxied_recycle_alpha(
+                    &self.owner,            // real: execute as owner (treasury_coldkey)
+                    &self.treasury_hotkey,  // hotkey to recycle from
+                    amount_u64,             // amount to recycle (destroy)
+                    self.netuid,            // subnet ID
                 );
 
-                if result == 0 {
-                    // Transfer successful
+                let result = self.env().call_runtime(&proxy_call);
+
+                if result.is_ok() {
+                    // Recycle successful - tokens destroyed
                     recycled = to_recycle;
                     self.alpha_pool = 0;
+
+                    // CRITICAL: recycle_alpha reduced stake on treasury hotkey, so we must
+                    // also reduce last_known_stake to keep the delta calculation accurate.
+                    // Otherwise, next harvest would see current_stake < last_known_stake = 0 pending.
+                    self.last_known_stake = self.last_known_stake.saturating_sub(recycled);
+
                     self.env().emit_event(EmissionsRecycled {
                         amount: recycled,
-                        destination: self.owner,
+                        destination: self.treasury_hotkey, // Source of recycled tokens (not a transfer destination)
                     });
                 } else {
                     // Recycling failed - emit warning event but don't fail harvest
                     // Amount stays in alpha_pool for next harvest attempt
-                    let reason_code = u8::try_from(result).unwrap_or(255);
+                    // Note: call_runtime doesn't provide detailed error codes like chain extension
                     self.env().emit_event(HarvestFailed {
-                        reason: reason_code,
+                        reason: 255, // Generic error code
                         amount: to_recycle,
                     });
                     // Note: alpha_pool keeps the amount, will retry next harvest
@@ -781,23 +843,24 @@ mod issue_bounty_manager {
                 return Err(Error::BountyNotFunded);
             }
 
-            // Transfer stake ownership to miner via chain extension
-            let miner_bytes: [u8; 32] = *miner_coldkey.as_ref();
-            let hotkey_bytes: [u8; 32] = *self.treasury_hotkey.as_ref();
-
-            // Convert u128 to u64 for chain extension (AlphaCurrency is u64)
+            // Convert u128 to u64 for transfer (AlphaCurrency is u64)
             let amount_u64: u64 = payout_amount.try_into().unwrap_or(u64::MAX);
 
-            // With handle_status = false, returns raw u32 (0 = success)
-            let result = self.env().extension().transfer_stake(
-                miner_bytes,
-                hotkey_bytes,
-                self.netuid,
-                self.netuid,
-                amount_u64,
+            // Use call_runtime with Proxy::proxy to transfer stake to miner.
+            // The contract acts as a Staking proxy for the owner (treasury_coldkey),
+            // allowing it to execute transfer_stake on behalf of the owner.
+            let proxy_call = RawCall::proxied_transfer_stake(
+                &self.owner,           // real: execute as owner
+                &miner_coldkey,        // destination_coldkey: pay out to miner
+                &self.treasury_hotkey, // hotkey
+                self.netuid,           // origin_netuid
+                self.netuid,           // destination_netuid
+                amount_u64,            // amount
             );
 
-            if result == 0 {
+            let result = self.env().call_runtime(&proxy_call);
+
+            if result.is_ok() {
                 // Transfer successful
                 self.env().emit_event(BountyPaidOut {
                     issue_id: competition.issue_id,
@@ -824,6 +887,12 @@ mod issue_bounty_manager {
         #[ink(message)]
         pub fn treasury_hotkey(&self) -> AccountId {
             self.treasury_hotkey
+        }
+
+        /// Returns the validator hotkey
+        #[ink(message)]
+        pub fn validator_hotkey(&self) -> AccountId {
+            self.validator_hotkey
         }
 
         /// Returns the subnet ID
@@ -1381,7 +1450,7 @@ mod issue_bounty_manager {
         #[ink::test]
         fn test_constructor() {
             let accounts = default_accounts();
-            let contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
+            let contract = IssueBountyManager::new(accounts.alice, accounts.bob, accounts.charlie, accounts.django, 74);
 
             assert_eq!(contract.owner(), accounts.alice);
             assert_eq!(contract.treasury_hotkey(), accounts.bob);
@@ -1395,7 +1464,7 @@ mod issue_bounty_manager {
         fn test_register_issue() {
             let accounts = default_accounts();
             set_caller(accounts.alice);
-            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
+            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, accounts.charlie, accounts.django, 74);
 
             let result = contract.register_issue(
                 String::from("https://github.com/test/repo/issues/1"),
@@ -1420,7 +1489,7 @@ mod issue_bounty_manager {
         fn test_register_issue_not_owner() {
             let accounts = default_accounts();
             set_caller(accounts.bob);
-            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
+            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, accounts.charlie, accounts.django, 74);
 
             let result = contract.register_issue(
                 String::from("https://github.com/test/repo/issues/1"),
@@ -1436,7 +1505,7 @@ mod issue_bounty_manager {
         fn test_register_issue_bounty_too_low() {
             let accounts = default_accounts();
             set_caller(accounts.alice);
-            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
+            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, accounts.charlie, accounts.django, 74);
 
             let result = contract.register_issue(
                 String::from("https://github.com/test/repo/issues/1"),
@@ -1452,7 +1521,7 @@ mod issue_bounty_manager {
         fn test_register_issue_invalid_repo_name() {
             let accounts = default_accounts();
             set_caller(accounts.alice);
-            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
+            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, accounts.charlie, accounts.django, 74);
 
             let result = contract.register_issue(
                 String::from("https://github.com/test/issues/1"),
@@ -1482,7 +1551,7 @@ mod issue_bounty_manager {
         #[ink::test]
         fn test_is_valid_repo_name() {
             let accounts = default_accounts();
-            let contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
+            let contract = IssueBountyManager::new(accounts.alice, accounts.bob, accounts.charlie, accounts.django, 74);
 
             assert!(contract.is_valid_repo_name("owner/repo"));
             assert!(contract.is_valid_repo_name("test/test"));
@@ -1496,7 +1565,7 @@ mod issue_bounty_manager {
         fn test_cancel_issue() {
             let accounts = default_accounts();
             set_caller(accounts.alice);
-            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
+            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, accounts.charlie, accounts.django, 74);
 
             let issue_id = contract
                 .register_issue(
@@ -1518,7 +1587,7 @@ mod issue_bounty_manager {
         fn test_set_owner() {
             let accounts = default_accounts();
             set_caller(accounts.alice);
-            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
+            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, accounts.charlie, accounts.django, 74);
 
             assert_eq!(contract.owner(), accounts.alice);
 
@@ -1531,7 +1600,7 @@ mod issue_bounty_manager {
         fn test_get_issues_by_status() {
             let accounts = default_accounts();
             set_caller(accounts.alice);
-            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
+            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, accounts.charlie, accounts.django, 74);
 
             contract
                 .register_issue(
@@ -1564,7 +1633,7 @@ mod issue_bounty_manager {
         #[ink::test]
         fn test_validate_active_competition_not_found() {
             let accounts = default_accounts();
-            let contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
+            let contract = IssueBountyManager::new(accounts.alice, accounts.bob, accounts.charlie, accounts.django, 74);
 
             let result = contract.validate_active_competition(999);
             assert_eq!(result, Err(Error::CompetitionNotFound));
@@ -1573,7 +1642,7 @@ mod issue_bounty_manager {
         #[ink::test]
         fn test_check_consensus_threshold() {
             let accounts = default_accounts();
-            let contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
+            let contract = IssueBountyManager::new(accounts.alice, accounts.bob, accounts.charlie, accounts.django, 74);
 
             // Below threshold (100 TAO = 100_000_000_000_000)
             assert!(!contract.check_consensus(99_999_999_999_999));
@@ -1587,7 +1656,7 @@ mod issue_bounty_manager {
         fn test_check_not_voted_solution() {
             let accounts = default_accounts();
             set_caller(accounts.alice);
-            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
+            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, accounts.charlie, accounts.django, 74);
 
             // Initially not voted
             let result = contract.check_not_voted_solution(1, accounts.bob);
@@ -1613,7 +1682,7 @@ mod issue_bounty_manager {
         fn test_fill_bounties_fifo_order() {
             let accounts = default_accounts();
             set_caller(accounts.alice);
-            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
+            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, accounts.charlie, accounts.django, 74);
 
             // Register two issues
             contract
@@ -1655,7 +1724,7 @@ mod issue_bounty_manager {
         fn test_fill_bounties_partial_fill() {
             let accounts = default_accounts();
             set_caller(accounts.alice);
-            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
+            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, accounts.charlie, accounts.django, 74);
 
             // Register issue with large target
             contract
@@ -1693,7 +1762,7 @@ mod issue_bounty_manager {
         fn test_start_competition_state_changes() {
             let accounts = default_accounts();
             set_caller(accounts.alice);
-            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
+            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, accounts.charlie, accounts.django, 74);
 
             // Register and fill an issue
             contract
@@ -1732,7 +1801,7 @@ mod issue_bounty_manager {
         fn test_complete_competition_state_changes() {
             let accounts = default_accounts();
             set_caller(accounts.alice);
-            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
+            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, accounts.charlie, accounts.django, 74);
 
             // Setup: register, fill, and start competition
             contract
@@ -1772,7 +1841,7 @@ mod issue_bounty_manager {
         fn test_timeout_competition_returns_to_active() {
             let accounts = default_accounts();
             set_caller(accounts.alice);
-            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
+            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, accounts.charlie, accounts.django, 74);
 
             // Setup: register, fill, and start competition
             contract
@@ -1806,7 +1875,7 @@ mod issue_bounty_manager {
         fn test_cancel_competition_recycles_bounty() {
             let accounts = default_accounts();
             set_caller(accounts.alice);
-            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
+            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, accounts.charlie, accounts.django, 74);
 
             // Setup: register, fill, and start competition
             contract
@@ -1847,7 +1916,7 @@ mod issue_bounty_manager {
         fn test_get_or_create_solution_vote_creates_new() {
             let accounts = default_accounts();
             set_caller(accounts.alice);
-            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
+            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, accounts.charlie, accounts.django, 74);
 
             let pr_hash = [1u8; 32];
             let vote = contract.get_or_create_solution_vote(1, accounts.bob, pr_hash);
@@ -1866,7 +1935,7 @@ mod issue_bounty_manager {
         fn test_get_or_create_solution_vote_returns_existing() {
             let accounts = default_accounts();
             set_caller(accounts.alice);
-            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
+            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, accounts.charlie, accounts.django, 74);
 
             // Create and store initial vote
             let pr_hash = [1u8; 32];
@@ -1888,7 +1957,7 @@ mod issue_bounty_manager {
         fn test_clear_solution_vote() {
             let accounts = default_accounts();
             set_caller(accounts.alice);
-            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
+            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, accounts.charlie, accounts.django, 74);
 
             // Create a vote
             contract.has_solution_vote.insert(1, &true);
@@ -1917,7 +1986,7 @@ mod issue_bounty_manager {
         fn test_propose_pair_same_miners_fails() {
             let accounts = default_accounts();
             set_caller(accounts.alice);
-            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
+            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, accounts.charlie, accounts.django, 74);
 
             // Register and activate an issue
             contract
@@ -1940,7 +2009,7 @@ mod issue_bounty_manager {
         fn test_propose_pair_issue_not_active() {
             let accounts = default_accounts();
             set_caller(accounts.alice);
-            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
+            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, accounts.charlie, accounts.django, 74);
 
             // Register but don't fill issue (stays Registered)
             contract
@@ -1960,7 +2029,7 @@ mod issue_bounty_manager {
         fn test_propose_pair_miner_already_in_competition() {
             let accounts = default_accounts();
             set_caller(accounts.alice);
-            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
+            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, accounts.charlie, accounts.django, 74);
 
             // Register and fill two issues
             contract
@@ -1998,7 +2067,7 @@ mod issue_bounty_manager {
         fn test_set_competition_config() {
             let accounts = default_accounts();
             set_caller(accounts.alice);
-            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
+            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, accounts.charlie, accounts.django, 74);
 
             // Verify defaults
             assert_eq!(contract.get_submission_window_blocks(), DEFAULT_SUBMISSION_WINDOW_BLOCKS);
@@ -2018,7 +2087,7 @@ mod issue_bounty_manager {
         fn test_set_competition_config_not_owner() {
             let accounts = default_accounts();
             set_caller(accounts.bob); // Not owner
-            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
+            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, accounts.charlie, accounts.django, 74);
 
             let result = contract.set_competition_config(100, 200, 50);
             assert_eq!(result, Err(Error::NotOwner));
@@ -2028,7 +2097,7 @@ mod issue_bounty_manager {
         fn test_set_treasury_hotkey() {
             let accounts = default_accounts();
             set_caller(accounts.alice);
-            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, 74);
+            let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, accounts.charlie, accounts.django, 74);
 
             assert_eq!(contract.treasury_hotkey(), accounts.bob);
 

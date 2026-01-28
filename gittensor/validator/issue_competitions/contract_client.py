@@ -34,6 +34,15 @@ try:
 except ImportError:
     AsyncExtrinsicNotFound = None
 
+# Import SubstrateRequestException for graceful error handling
+try:
+    from async_substrate_interface.errors import SubstrateRequestException
+except ImportError:
+    try:
+        from substrateinterface.exceptions import SubstrateRequestException
+    except ImportError:
+        SubstrateRequestException = None
+
 # Default gas limits for contract calls
 DEFAULT_GAS_LIMIT = {
     'ref_time': 10_000_000_000,  # 10 billion
@@ -635,11 +644,12 @@ class IssueCompetitionContractClient:
 
             data = bytes.fromhex(val_result['result'].replace('0x', ''))
 
-            # Decode packed struct (minimum 74 bytes for core fields)
-            if len(data) < 74:
+            # Decode packed struct (minimum 114 bytes for core fields)
+            # owner (32) + treasury (32) + validator_hotkey (32) + netuid (2) + next_issue_id (8) + next_competition_id (8)
+            if len(data) < 114:
                 return None
 
-            offset = 64  # Skip owner (32) + treasury (32)
+            offset = 96  # Skip owner (32) + treasury (32) + validator_hotkey (32)
             netuid = struct.unpack_from('<H', data, offset)[0]
             offset += 2
             next_issue_id = struct.unpack_from('<Q', data, offset)[0]
@@ -837,6 +847,14 @@ class IssueCompetitionContractClient:
 
             next_issue_id = packed.get('next_issue_id', 1)
             if next_issue_id <= 1:
+                return []
+
+            # Sanity check: prevent iteration over corrupted values
+            MAX_REASONABLE_ISSUE_ID = 1_000_000
+            if next_issue_id > MAX_REASONABLE_ISSUE_ID:
+                bt.logging.warning(
+                    f'next_issue_id ({next_issue_id}) is unreasonably large - possible storage format mismatch'
+                )
                 return []
 
             issues = []
@@ -1391,9 +1409,24 @@ class IssueCompetitionContractClient:
             bt.logging.warning(f'{method_name} timed out: {e}')
             return None
         except Exception as e:
+            # Check for SubstrateRequestException with specific error codes
+            error_msg = str(e) if str(e) else repr(e)
+
+            # Handle "Transaction is temporarily banned" (error code 1012)
+            # This happens when the same transaction is submitted too quickly
+            if SubstrateRequestException is not None and isinstance(e, SubstrateRequestException):
+                if '1012' in error_msg or 'temporarily banned' in error_msg.lower():
+                    bt.logging.warning(
+                        f'{method_name}: Transaction temporarily banned (duplicate/too fast). '
+                        f'Will retry on next cycle.'
+                    )
+                    return None
+                # Handle other substrate request errors gracefully
+                bt.logging.warning(f'{method_name} substrate error: {error_msg}')
+                return None
+
             # Capture full exception details including traceback for debugging
             error_type = type(e).__name__
-            error_msg = str(e) if str(e) else repr(e)
             traceback_str = traceback.format_exc()
             bt.logging.error(
                 f'{method_name} error ({error_type}): {error_msg}\n'
@@ -1407,6 +1440,127 @@ class IssueCompetitionContractClient:
                 bt.logging.debug(f'{method_name} exception cause: {type(e.__cause__).__name__}: {e.__cause__}')
             if e.__context__ and e.__context__ is not e.__cause__:
                 bt.logging.debug(f'{method_name} exception context: {type(e.__context__).__name__}: {e.__context__}')
+            return None
+
+    def _exec_contract_raw_with_events(
+        self,
+        method_name: str,
+        args: dict,
+        keypair,
+        gas_limit: dict = None,
+        value: int = 0,
+    ) -> Optional[dict]:
+        """
+        Execute a contract method and return both tx_hash and events.
+
+        Same as _exec_contract_raw but returns a dict with tx_hash and events
+        instead of just the tx_hash string.
+
+        Returns:
+            Dict with 'tx_hash' and 'events' on success, None on failure
+        """
+        if not self._ensure_contract():
+            return None
+
+        gas_limit = gas_limit or DEFAULT_GAS_LIMIT
+
+        try:
+            # Build call data (same as _exec_contract_raw)
+            with open(self.metadata_path) as f:
+                metadata = json.load(f)
+
+            selector = None
+            method_spec = None
+            for msg in metadata.get('spec', {}).get('messages', []):
+                if msg['label'] == method_name:
+                    selector = bytes.fromhex(msg['selector'].replace('0x', ''))
+                    method_spec = msg
+                    break
+
+            if not selector:
+                bt.logging.error(f'Method {method_name} not found in contract metadata')
+                return None
+
+            encoded_args = self._encode_args(method_spec, args, metadata)
+            call_data = selector + encoded_args
+
+            call = self.subtensor.substrate.compose_call(
+                call_module='Contracts',
+                call_function='call',
+                call_params={
+                    'dest': {'Id': self.contract_address},
+                    'value': value,
+                    'gas_limit': gas_limit,
+                    'storage_deposit_limit': None,
+                    'data': '0x' + call_data.hex(),
+                }
+            )
+
+            extrinsic = self.subtensor.substrate.create_signed_extrinsic(
+                call=call,
+                keypair=keypair,
+            )
+
+            result = self.subtensor.substrate.submit_extrinsic(
+                extrinsic,
+                wait_for_inclusion=True,
+                wait_for_finalization=False,
+            )
+
+            # Extract events from result
+            events = []
+            _extrinsic_not_found_types = tuple(
+                t for t in [ExtrinsicNotFound, AsyncExtrinsicNotFound] if t is not None
+            )
+            try:
+                if result.is_success:
+                    # Get triggered events - handle different event object formats
+                    if hasattr(result, 'triggered_events'):
+                        for event in result.triggered_events:
+                            try:
+                                # Try .value attribute (ScaleType objects)
+                                if hasattr(event, 'value'):
+                                    event_data = event.value
+                                else:
+                                    event_data = event
+
+                                # Handle both dict and object access
+                                if isinstance(event_data, dict):
+                                    module = event_data.get('module_id', '')
+                                    event_id = event_data.get('event_id', '')
+                                    attrs = event_data.get('attributes', {})
+                                else:
+                                    module = getattr(event_data, 'module_id', '')
+                                    event_id = getattr(event_data, 'event_id', '')
+                                    attrs = getattr(event_data, 'attributes', {})
+
+                                events.append({
+                                    'module': module,
+                                    'event': event_id,
+                                    'attributes': attrs,
+                                })
+                            except Exception as ev_err:
+                                bt.logging.debug(f'Could not parse event: {ev_err}')
+                                # Still include raw event info for debugging
+                                events.append({'raw': str(event)})
+
+                    return {
+                        'tx_hash': result.extrinsic_hash,
+                        'events': events,
+                    }
+                else:
+                    bt.logging.error(f'{method_name} failed: {result.error_message}')
+                    return None
+            except _extrinsic_not_found_types:
+                # Events not verifiable but tx likely succeeded
+                bt.logging.warning(f'{method_name} included but events not verifiable')
+                return {
+                    'tx_hash': result.extrinsic_hash,
+                    'events': [],
+                }
+
+        except Exception as e:
+            bt.logging.error(f'{method_name} error: {e}')
             return None
 
     def _encode_args(self, method_spec: dict, args: dict, metadata: dict) -> bytes:
@@ -1557,8 +1711,10 @@ class IssueCompetitionContractClient:
         The contract handles everything internally via chain extensions:
         - Queries pending stake via get_stake_info (function 0)
         - Fills bounties from the pool
-        - Recycles remainder via transfer_stake (function 6)
-        - If recycling fails, the contract reverts with RecyclingFailed error
+        - Recycles remainder via recycle_alpha (via NonCritical proxy)
+
+        NOTE: The contract does NOT revert on recycle failure - it emits HarvestFailed
+        event and continues. We check for AlphaRecycled event to confirm success.
 
         Uses raw extrinsic submission to bypass Ink! 5 type decoding issues.
 
@@ -1577,24 +1733,63 @@ class IssueCompetitionContractClient:
 
             # Let the contract handle everything via chain extensions
             keypair = wallet.hotkey
-            tx_hash = self._exec_contract_raw(
+            result = self._exec_contract_raw_with_events(
                 method_name='harvest_emissions',
                 args={},
                 keypair=keypair,
                 gas_limit=DEFAULT_GAS_LIMIT,
             )
 
-            if tx_hash:
-                # Contract succeeded - recycling worked
-                # (Contract reverts if recycling fails, so success means recycling succeeded)
-                bt.logging.success(f'Harvest succeeded: {tx_hash}')
+            if result is None:
+                return {'status': 'failed', 'error': 'Transaction failed'}
+
+            tx_hash = result.get('tx_hash')
+            events = result.get('events', [])
+
+            # Check for AlphaRecycled event (confirms recycle succeeded)
+            recycled = False
+            for e in events:
+                event_name = e.get('event', '') if isinstance(e, dict) else str(e)
+                if 'AlphaRecycled' in event_name or 'AlphaRecycled' in str(e):
+                    recycled = True
+                    break
+
+            # Check for HarvestFailed contract event (0xff prefix in ContractEmitted data)
+            harvest_failed = False
+            for e in events:
+                event_name = e.get('event', '') if isinstance(e, dict) else str(e)
+                if 'ContractEmitted' in event_name or 'ContractEmitted' in str(e):
+                    # The event data starts with 0xff for HarvestFailed
+                    attrs = e.get('attributes', {}) if isinstance(e, dict) else {}
+                    data = attrs.get('data', '') if isinstance(attrs, dict) else ''
+                    if data and str(data).startswith('0xff'):
+                        harvest_failed = True
+                        break
+
+            if harvest_failed and not recycled:
+                bt.logging.warning(f'Harvest completed but recycling failed: {tx_hash}')
+                return {
+                    'status': 'partial',
+                    'tx_hash': tx_hash,
+                    'recycled': False,
+                    'error': 'Recycling failed (check proxy permissions)',
+                }
+            elif recycled:
+                bt.logging.success(f'Harvest succeeded with recycling: {tx_hash}')
                 return {
                     'status': 'success',
                     'tx_hash': tx_hash,
                     'recycled': True,
                 }
             else:
-                return {'status': 'failed', 'error': 'Transaction failed'}
+                # No emissions to harvest or unknown state
+                bt.logging.info(f'Harvest completed (no recycling needed): {tx_hash}')
+                return {
+                    'status': 'success',
+                    'tx_hash': tx_hash,
+                    'recycled': False,
+                }
+
 
         except Exception as e:
             bt.logging.error(f'Harvest error: {e}')

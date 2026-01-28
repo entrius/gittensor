@@ -183,35 +183,67 @@ class EmissionHarvester:
         The contract handles everything via chain extension:
         - Queries its own pending stake via get_stake_info (function 0)
         - Fills bounties from the pool
-        - Recycles remainder via transfer_stake (function 6)
+        - Moves bounty funds to validator via move_stake
+        - Recycles remainder via transfer_stake
+
+        Includes retry logic with exponential backoff for transient errors
+        like "Transaction temporarily banned".
 
         Returns:
             Result dict with harvest status and amounts
         """
-        try:
-            bt.logging.debug('Calling contract harvest_emissions...')
+        max_retries = 3
+        base_delay = 5  # seconds
 
-            # Let the contract do everything - it queries stake via chain extension
-            result = self.contract_client.harvest_emissions(self.wallet)
+        for attempt in range(max_retries):
+            try:
+                bt.logging.debug(f'Calling contract harvest_emissions... (attempt {attempt + 1}/{max_retries})')
 
-            # Always update last_harvest_block to prevent immediate retry on failure
-            # (avoids "Transaction temporarily banned" errors from substrate)
-            self.last_harvest_block = self.get_current_block()
+                # Let the contract do everything - it queries stake via chain extension
+                result = self.contract_client.harvest_emissions(self.wallet)
 
-            if result:
-                if result.get('status') == 'success':
-                    bt.logging.success('Harvest complete: recycling succeeded')
+                # Always update last_harvest_block to prevent immediate retry on failure
+                self.last_harvest_block = self.get_current_block()
+
+                if result:
+                    if result.get('status') == 'success':
+                        bt.logging.success('Harvest complete: recycling succeeded')
+                    else:
+                        error_msg = result.get('error', 'Unknown error')
+                        # Use warning for transient errors, error for persistent ones
+                        if any(kw in error_msg.lower() for kw in ['banned', 'timeout', 'connection']):
+                            bt.logging.warning(f'Harvest skipped (transient): {error_msg}')
+                        else:
+                            bt.logging.error(f'Harvest failed: {error_msg}')
+
+                    return result
                 else:
-                    error_msg = result.get('error', 'Unknown error')
-                    bt.logging.error(f'Harvest failed: {error_msg}')
+                    return {'status': 'error', 'error': 'No result from contract'}
 
-                return result
-            else:
-                return {'status': 'error', 'error': 'No result from contract'}
+            except Exception as e:
+                error_str = str(e).lower()
 
-        except Exception as e:
-            bt.logging.error(f'Harvest error: {e}')
-            return {'status': 'error', 'error': str(e)}
+                # Check for retryable errors (temporary bans, connection issues)
+                is_retryable = (
+                    'temporarily banned' in error_str
+                    or 'connection' in error_str
+                    or 'timeout' in error_str
+                )
+
+                if is_retryable and attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)
+                    bt.logging.warning(
+                        f'Harvest failed with retryable error, waiting {delay}s '
+                        f'(attempt {attempt + 1}/{max_retries}): {e}'
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+
+                bt.logging.error(f'Harvest error (attempt {attempt + 1}/{max_retries}): {e}')
+                return {'status': 'error', 'error': str(e)}
+
+        # Should not reach here, but just in case
+        return {'status': 'error', 'error': 'Max retries exceeded'}
 
     async def start_background_loop(self):
         """

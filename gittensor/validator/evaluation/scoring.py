@@ -11,15 +11,19 @@ from gittensor.classes import Issue, MinerEvaluation, PrScoringResult, PRState, 
 from gittensor.constants import (
     DEFAULT_MERGED_PR_BASE_SCORE,
     EXCESSIVE_PR_MIN_MULTIPLIER,
+    EXCESSIVE_PR_PENALTY_BASE_THRESHOLD,
     EXCESSIVE_PR_PENALTY_SLOPE,
-    EXCESSIVE_PR_PENALTY_THRESHOLD,
     MAINTAINER_ASSOCIATIONS,
     MAINTAINER_ISSUE_BONUS,
     MAX_CODE_DENSITY_MULTIPLIER,
     MAX_ISSUE_AGE_BONUS,
     MAX_ISSUE_AGE_FOR_MAX_SCORE,
     MAX_ISSUE_CLOSE_WINDOW_DAYS,
+    MAX_OPEN_PR_THRESHOLD,
     MIN_TOKEN_SCORE_FOR_BASE_SCORE,
+    OPEN_PR_THRESHOLD_BRONZE_REQUIRED,
+    OPEN_PR_THRESHOLD_GOLD_REQUIRED,
+    OPEN_PR_THRESHOLD_SILVER_REQUIRED,
     SECONDS_PER_DAY,
     SECONDS_PER_HOUR,
     TIME_DECAY_GRACE_PERIOD_HOURS,
@@ -38,6 +42,7 @@ from gittensor.validator.configurations.tier_config import (
     TIERS_ORDER,
     Tier,
     TierConfig,
+    TierStats,
     get_tier_from_config,
 )
 from gittensor.validator.evaluation.credibility import (
@@ -214,7 +219,9 @@ def calculate_pr_multipliers(
     pr.issue_multiplier = round(calculate_issue_multiplier(pr), 2)
 
     if is_merged:
-        pr.open_pr_spam_multiplier = round(calculate_pr_spam_penalty_multiplier(miner_eval.total_open_prs), 2)
+        # Spam multiplier is recalculated in finalize_miner_scores with tier stats
+        # Set to 1.0 here as placeholder; will be updated when tier unlock status is known
+        pr.open_pr_spam_multiplier = 1.0
         pr.time_decay_multiplier = round(calculate_time_decay_multiplier(pr), 2)
 
     else:
@@ -244,12 +251,80 @@ def count_repository_contributors(miner_evaluations: Dict[int, MinerEvaluation])
     return repo_counts
 
 
-def calculate_pr_spam_penalty_multiplier(total_open_prs: int) -> float:
-    """Apply penalty for excessive open PRs"""
-    if total_open_prs <= EXCESSIVE_PR_PENALTY_THRESHOLD:
+def calculate_open_pr_threshold(
+    merged_prs: list[PullRequest],
+    tier_stats: Dict[Tier, TierStats] = None,
+) -> int:
+    """
+    Calculate dynamic open PR threshold based on merged PR count per tier.
+
+    Top contributors who have merged more PRs in UNLOCKED tiers
+    get a higher threshold before the spam penalty applies.
+
+    Bonus = floor(merged_prs / required) for each unlocked tier:
+    - Bronze: floor(bronze_prs / 20) - e.g., 40 PRs = +2 bonus
+    - Silver: floor(silver_prs / 10) - e.g., 20 PRs = +2 bonus
+    - Gold: floor(gold_prs / 5) - requires Bronze & Silver bonuses > 0
+
+    Threshold = min(BASE_THRESHOLD + bonus, MAX_OPEN_PR_THRESHOLD)
+    """
+    # If no tier stats provided, use base threshold (no bonus)
+    if tier_stats is None:
+        return EXCESSIVE_PR_PENALTY_BASE_THRESHOLD
+
+    # Determine which tiers are unlocked
+    unlocked_tiers = set()
+    for tier in TIERS_ORDER:
+        if is_tier_unlocked(tier, tier_stats, log_reasons=False):
+            unlocked_tiers.add(tier)
+
+    # Count merged PRs per tier (only from unlocked tiers)
+    tier_counts = {Tier.BRONZE: 0, Tier.SILVER: 0, Tier.GOLD: 0}
+    for pr in merged_prs:
+        tier = get_tier_from_config(pr.repository_tier_configuration) if pr.repository_tier_configuration else None
+        if tier and tier in unlocked_tiers:
+            tier_counts[tier] += 1
+
+    bonus = 0
+
+    # Bronze bonus: floor(bronze_prs / 20) - e.g., 40 PRs = +2 bonus
+    bronze_bonus = 0
+    if Tier.BRONZE in unlocked_tiers:
+        bronze_bonus = tier_counts[Tier.BRONZE] // OPEN_PR_THRESHOLD_BRONZE_REQUIRED
+    bonus += bronze_bonus
+
+    # Silver bonus: floor(silver_prs / 10) - e.g., 20 PRs = +2 bonus
+    silver_bonus = 0
+    if Tier.SILVER in unlocked_tiers:
+        silver_bonus = tier_counts[Tier.SILVER] // OPEN_PR_THRESHOLD_SILVER_REQUIRED
+    bonus += silver_bonus
+
+    # Gold bonus: floor(gold_prs / 5) - requires Bronze & Silver bonuses > 0
+    if Tier.GOLD in unlocked_tiers and bronze_bonus > 0 and silver_bonus > 0:
+        gold_bonus = tier_counts[Tier.GOLD] // OPEN_PR_THRESHOLD_GOLD_REQUIRED
+        bonus += gold_bonus
+
+    return min(EXCESSIVE_PR_PENALTY_BASE_THRESHOLD + bonus, MAX_OPEN_PR_THRESHOLD)
+
+
+def calculate_pr_spam_penalty_multiplier(
+    total_open_prs: int,
+    merged_prs: list[PullRequest],
+    tier_stats: Dict[Tier, TierStats] = None,
+) -> float:
+    """
+    Apply penalty for excessive open PRs.
+
+    The threshold is dynamic based on the miner's merged PR history
+    in UNLOCKED tiers only. Top contributors with more merged PRs
+    in unlocked tiers get a higher threshold before penalties apply.
+    """
+    threshold = calculate_open_pr_threshold(merged_prs, tier_stats)
+
+    if total_open_prs <= threshold:
         return 1.0
 
-    excess_pr_count = total_open_prs - EXCESSIVE_PR_PENALTY_THRESHOLD
+    excess_pr_count = total_open_prs - threshold
     calculated_multiplier = 1.0 - (excess_pr_count * EXCESSIVE_PR_PENALTY_SLOPE)
     return max(EXCESSIVE_PR_MIN_MULTIPLIER, calculated_multiplier)
 
@@ -300,11 +375,30 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
             evaluation.merged_pull_requests, evaluation.closed_pull_requests
         )
 
+        # Calculate tier stats early to determine unlocked tiers for spam multiplier
+        tier_stats = calculate_tier_stats(
+            merged_prs=evaluation.merged_pull_requests,
+            closed_prs=evaluation.closed_pull_requests,
+            open_prs=evaluation.open_pull_requests,
+            include_scoring_details=False,  # Will recalculate with scoring details later
+        )
+
+        # Calculate spam multiplier once per miner (same for all their merged PRs)
+        spam_multiplier = round(
+            calculate_pr_spam_penalty_multiplier(
+                evaluation.total_open_prs, evaluation.merged_pull_requests, tier_stats
+            ),
+            2,
+        )
+
         # Process merged PRs
         for pr in evaluation.merged_pull_requests:
             pr.repository_uniqueness_multiplier = calculate_uniqueness_multiplier(
                 pr.repository_full_name, repo_counts, total_contributing_miners
             )
+
+            # Apply spam multiplier (calculated once per miner based on unlocked tiers)
+            pr.open_pr_spam_multiplier = spam_multiplier
 
             # Apply tier level credibility^k to each PRs score
             tier_config = pr.repository_tier_configuration

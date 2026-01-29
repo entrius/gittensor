@@ -116,6 +116,17 @@ MAINTAINER_ASSOCIATIONS = ['OWNER', 'MEMBER', 'COLLABORATOR']
 MAX_ISSUE_AGE_BONUS = 0.75  # Max bonus for issue age (scales with sqrt of days open)
 MAINTAINER_ISSUE_BONUS = 0.25  # Extra bonus when issue was created by a maintainer
 # Excessive open PRs penalty
-EXCESSIVE_PR_PENALTY_THRESHOLD = 10
+EXCESSIVE_PR_PENALTY_BASE_THRESHOLD = 10
 EXCESSIVE_PR_PENALTY_SLOPE = 0.50
 EXCESSIVE_PR_MIN_MULTIPLIER = 0.00
+
+# Dynamic open PR threshold bonus for top contributors
+# Bonus = floor(merged_prs / required) for each unlocked tier
+# Examples:
+# - 40 Bronze PRs / 20 required = +2 bonus
+# - 20 Silver PRs / 10 required = +2 bonus
+# - 10 Gold PRs / 5 required = +2 bonus (requires Bronze & Silver bonuses > 0)
+OPEN_PR_THRESHOLD_BRONZE_REQUIRED = 20  # Merged Bronze PRs per +1 bonus
+OPEN_PR_THRESHOLD_SILVER_REQUIRED = 10  # Merged Silver PRs per +1 bonus
+OPEN_PR_THRESHOLD_GOLD_REQUIRED = 5  # Merged Gold PRs per +1 bonus (requires Bronze & Silver bonuses > 0)
+MAX_OPEN_PR_THRESHOLD = 30  # Maximum open PR threshold (base + bonus capped at this value)

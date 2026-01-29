@@ -256,13 +256,6 @@ def add_validator_args(cls, parser):
     )
 
     parser.add_argument(
-        '--database.store_validation_results',
-        action='store_true',
-        help='If set, the validator will attempt to store validation results in a database (NOT RECOMMENDED).',
-        default=False,
-    )
-
-    parser.add_argument(
         '--neuron.remote_debug_port',
         type=int,
         help='FOR DEVELOPMENT: Port for remote debugging API endpoint. If set, enables debug API on this port and debugpy on port+1.',

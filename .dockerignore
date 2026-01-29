@@ -1,0 +1,65 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info
+*.egg
+.eggs
+dist
+build
+*.manifest
+*.spec
+
+# Virtual environments
+venv
+gittensor-venv
+.venv
+env
+
+# IDE and editor
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# Environment files (secrets)
+.env
+*.env
+.env.*
+
+# Data and logs
+data/
+logs/
+*.log
+
+# Documentation (not needed in container, except README.md for setup.py)
+docs/
+
+# Tests (not needed in production)
+tests/
+.pytest_cache
+.coverage
+htmlcov/
+
+# Auto-updater (deprecated)
+auto_updater/
+
+# Development files
+.ruff_cache
+.mypy_cache
+
+# Claude/AI configs
+.claude/
+
+# Miscellaneous
+*.bak
+*.tmp
+.DS_Store
+Thumbs.db

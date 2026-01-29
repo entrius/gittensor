@@ -45,12 +45,9 @@ def log_scoring_results(
     file_results: List['FileScoreResult'],
     total_score: float,
     total_raw_lines: int,
-    low_value: bool,
     breakdown: Optional['ScoreBreakdown'] = None,
 ) -> None:
     """Log scoring results for debugging."""
-    from gittensor.validator.utils.tree_sitter_scoring import get_low_value_threshold
-
     bt.logging.debug(f'  ├─ Files ({len(file_results)} scored):')
 
     if file_results:
@@ -103,8 +100,6 @@ def log_scoring_results(
     # Calculate token score (total minus line-count score)
     token_score = total_score - line_count_score
     density = total_score / total_raw_lines if total_raw_lines > 0 else 0
-    threshold = get_low_value_threshold(total_raw_lines)
-    low_value_str = ' [LOW VALUE]' if low_value else ''
 
     # Build score display: show token and line scores separately if both exist
     if line_count_score > 0 and token_score > 0:
@@ -114,10 +109,7 @@ def log_scoring_results(
     else:
         score_str = f'Token Score: {token_score:.2f}'
 
-    bt.logging.info(
-        f'  ├─ {score_str} | '
-        f'Total Lines: {total_raw_lines} | Density: {density:.2f} (threshold: {threshold}){low_value_str}'
-    )
+    bt.logging.info(f'  ├─ {score_str} | Total Lines: {total_raw_lines} | Density: {density:.2f}')
 
     if breakdown_str:
-        bt.logging.info(f'  │   └─ Breakdown: {breakdown_str}')
+        bt.logging.info(f'  │ └─ Breakdown: {breakdown_str}')

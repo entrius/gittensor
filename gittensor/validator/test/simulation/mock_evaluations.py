@@ -48,7 +48,6 @@ def get_custom_evaluations() -> Dict[int, MinerEvaluation]:
     #     additions=150,
     #     deletions=30,
     #     commits=3,
-    #     gittensor_tagged=True,
     #     issues=[
     #         Issue(
     #             number=100,
@@ -85,7 +84,6 @@ def get_custom_evaluations() -> Dict[int, MinerEvaluation]:
     #     pr_state=PRState.OPEN,
     #     additions=50,
     #     deletions=10,
-    #     gittensor_tagged=True,
     # )
     # open_pr.set_file_changes([
     #     FileChange(pr_number=1002, repository_full_name="opentensor/bittensor",

@@ -130,9 +130,7 @@ class TestCalculateOpenPrThreshold:
         """Gold bonus requires Bronze & Silver bonuses > 0."""
         # All tiers unlocked
         tier_stats = make_tier_stats(
-            bronze_merged=7, bronze_closed=3,
-            silver_merged=13, silver_closed=7,
-            gold_merged=6, gold_closed=4
+            bronze_merged=7, bronze_closed=3, silver_merged=13, silver_closed=7, gold_merged=6, gold_closed=4
         )
         # Only 5 gold PRs, missing Bronze and Silver requirements
         prs = [MockPR(Tier.GOLD) for _ in range(5)]
@@ -143,9 +141,7 @@ class TestCalculateOpenPrThreshold:
         """Gold bonus granted when Bronze & Silver bonuses > 0."""
         # All tiers unlocked
         tier_stats = make_tier_stats(
-            bronze_merged=7, bronze_closed=3,
-            silver_merged=13, silver_closed=7,
-            gold_merged=6, gold_closed=4
+            bronze_merged=7, bronze_closed=3, silver_merged=13, silver_closed=7, gold_merged=6, gold_closed=4
         )
         # 20 Bronze + 10 Silver + 5 Gold = all requirements met
         prs = (
@@ -160,9 +156,7 @@ class TestCalculateOpenPrThreshold:
         """10 Gold PRs grant +2 bonus (floor(10/5) = 2)."""
         # All tiers unlocked
         tier_stats = make_tier_stats(
-            bronze_merged=7, bronze_closed=3,
-            silver_merged=13, silver_closed=7,
-            gold_merged=6, gold_closed=4
+            bronze_merged=7, bronze_closed=3, silver_merged=13, silver_closed=7, gold_merged=6, gold_closed=4
         )
         # 20 Bronze + 10 Silver + 10 Gold
         prs = (
@@ -177,9 +171,12 @@ class TestCalculateOpenPrThreshold:
         """Gold PRs don't count when Gold tier is locked."""
         # Bronze and Silver unlocked, Gold locked
         tier_stats = make_tier_stats(
-            bronze_merged=7, bronze_closed=3,
-            silver_merged=13, silver_closed=7,
-            gold_merged=5, gold_closed=5  # 50% < 60% required
+            bronze_merged=7,
+            bronze_closed=3,
+            silver_merged=13,
+            silver_closed=7,
+            gold_merged=5,
+            gold_closed=5,  # 50% < 60% required
         )
         prs = (
             [MockPR(Tier.BRONZE) for _ in range(20)]
@@ -193,15 +190,10 @@ class TestCalculateOpenPrThreshold:
         """Only bonuses for tiers with met requirements are granted."""
         # All tiers unlocked
         tier_stats = make_tier_stats(
-            bronze_merged=7, bronze_closed=3,
-            silver_merged=13, silver_closed=7,
-            gold_merged=6, gold_closed=4
+            bronze_merged=7, bronze_closed=3, silver_merged=13, silver_closed=7, gold_merged=6, gold_closed=4
         )
         # 20 Bronze (meets), 5 Silver (below 10), 0 Gold
-        prs = (
-            [MockPR(Tier.BRONZE) for _ in range(20)]
-            + [MockPR(Tier.SILVER) for _ in range(5)]
-        )
+        prs = [MockPR(Tier.BRONZE) for _ in range(20)] + [MockPR(Tier.SILVER) for _ in range(5)]
         # Only Bronze (+1), Silver = floor(5/10) = 0
         assert calculate_open_pr_threshold(prs, tier_stats) == EXCESSIVE_PR_PENALTY_BASE_THRESHOLD + 1
 
@@ -209,9 +201,7 @@ class TestCalculateOpenPrThreshold:
         """Test high contributor with many PRs across all tiers."""
         # All tiers unlocked
         tier_stats = make_tier_stats(
-            bronze_merged=7, bronze_closed=3,
-            silver_merged=13, silver_closed=7,
-            gold_merged=6, gold_closed=4
+            bronze_merged=7, bronze_closed=3, silver_merged=13, silver_closed=7, gold_merged=6, gold_closed=4
         )
         # 60 Bronze + 30 Silver + 15 Gold
         prs = (
@@ -226,9 +216,7 @@ class TestCalculateOpenPrThreshold:
         """Test that threshold is capped at MAX_OPEN_PR_THRESHOLD."""
         # All tiers unlocked
         tier_stats = make_tier_stats(
-            bronze_merged=7, bronze_closed=3,
-            silver_merged=13, silver_closed=7,
-            gold_merged=6, gold_closed=4
+            bronze_merged=7, bronze_closed=3, silver_merged=13, silver_closed=7, gold_merged=6, gold_closed=4
         )
         # 200 Bronze + 100 Silver + 50 Gold = would be +10 +10 +10 = +30 bonus
         # But capped at MAX_OPEN_PR_THRESHOLD (30)
@@ -290,9 +278,7 @@ class TestCalculatePrSpamPenaltyMultiplier:
         """Top contributor with multiplied bonuses gets higher threshold."""
         # All tiers unlocked
         tier_stats = make_tier_stats(
-            bronze_merged=7, bronze_closed=3,
-            silver_merged=13, silver_closed=7,
-            gold_merged=6, gold_closed=4
+            bronze_merged=7, bronze_closed=3, silver_merged=13, silver_closed=7, gold_merged=6, gold_closed=4
         )
         # 40 Bronze + 20 Silver + 10 Gold
         # Base (10) + Bronze (+2) + Silver (+2) + Gold (+2) = 16 threshold

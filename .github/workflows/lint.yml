@@ -13,8 +13,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.head_ref }}
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.PAT || secrets.GITHUB_TOKEN }}
+          persist-credentials: true
 
       - uses: astral-sh/ruff-action@v3
         with:

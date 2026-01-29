@@ -261,9 +261,9 @@ def calculate_open_pr_threshold(
     Top contributors who have merged more PRs in UNLOCKED tiers
     get a higher threshold before the spam penalty applies.
 
-    Bonus = floor(merged_prs / required) for each unlocked tier:
+    Bonus = floor(merged_prs / required) for each unlocked tier (hierarchical):
     - Bronze: floor(bronze_prs / 20) - e.g., 40 PRs = +2 bonus
-    - Silver: floor(silver_prs / 10) - e.g., 20 PRs = +2 bonus
+    - Silver: floor(silver_prs / 10) - requires Bronze bonus > 0
     - Gold: floor(gold_prs / 5) - requires Bronze & Silver bonuses > 0
 
     Threshold = min(BASE_THRESHOLD + bonus, MAX_OPEN_PR_THRESHOLD)
@@ -293,9 +293,9 @@ def calculate_open_pr_threshold(
         bronze_bonus = tier_counts[Tier.BRONZE] // OPEN_PR_THRESHOLD_BRONZE_REQUIRED
     bonus += bronze_bonus
 
-    # Silver bonus: floor(silver_prs / 10) - e.g., 20 PRs = +2 bonus
+    # Silver bonus: floor(silver_prs / 10) - requires Bronze bonus > 0
     silver_bonus = 0
-    if Tier.SILVER in unlocked_tiers:
+    if Tier.SILVER in unlocked_tiers and bronze_bonus > 0:
         silver_bonus = tier_counts[Tier.SILVER] // OPEN_PR_THRESHOLD_SILVER_REQUIRED
     bonus += silver_bonus
 

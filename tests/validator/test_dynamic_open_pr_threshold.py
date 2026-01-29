@@ -95,27 +95,36 @@ class TestCalculateOpenPrThreshold:
         assert calculate_open_pr_threshold(prs, tier_stats) == EXCESSIVE_PR_PENALTY_BASE_THRESHOLD
 
     def test_silver_meets_requirement_gets_bonus(self):
-        """Silver PRs meeting requirement grant +1 bonus."""
+        """Silver PRs meeting requirement grant +1 bonus (requires Bronze bonus > 0)."""
         # Bronze and Silver unlocked
         tier_stats = make_tier_stats(bronze_merged=7, bronze_closed=3, silver_merged=13, silver_closed=7)
-        # 10 silver PRs = floor(10/10) = +1
-        prs = [MockPR(Tier.SILVER) for _ in range(10)]
-        assert calculate_open_pr_threshold(prs, tier_stats) == EXCESSIVE_PR_PENALTY_BASE_THRESHOLD + 1
+        # 20 Bronze + 10 Silver: Bronze bonus = 1, Silver bonus = 1
+        prs = [MockPR(Tier.BRONZE) for _ in range(20)] + [MockPR(Tier.SILVER) for _ in range(10)]
+        assert calculate_open_pr_threshold(prs, tier_stats) == EXCESSIVE_PR_PENALTY_BASE_THRESHOLD + 2
+
+    def test_silver_requires_bronze_bonus(self):
+        """Silver bonus requires Bronze bonus > 0."""
+        # Bronze and Silver unlocked
+        tier_stats = make_tier_stats(bronze_merged=7, bronze_closed=3, silver_merged=13, silver_closed=7)
+        # 19 Bronze (bonus=0) + 20 Silver: No Silver bonus because Bronze bonus = 0
+        prs = [MockPR(Tier.BRONZE) for _ in range(19)] + [MockPR(Tier.SILVER) for _ in range(20)]
+        assert calculate_open_pr_threshold(prs, tier_stats) == EXCESSIVE_PR_PENALTY_BASE_THRESHOLD
 
     def test_silver_double_requirement_gets_double_bonus(self):
-        """20 Silver PRs grant +2 bonus (floor(20/10) = 2)."""
+        """20 Silver PRs grant +2 bonus (floor(20/10) = 2), requires Bronze bonus."""
         # Bronze and Silver unlocked
         tier_stats = make_tier_stats(bronze_merged=7, bronze_closed=3, silver_merged=13, silver_closed=7)
-        # 20 silver PRs = floor(20/10) = +2
-        prs = [MockPR(Tier.SILVER) for _ in range(20)]
-        assert calculate_open_pr_threshold(prs, tier_stats) == EXCESSIVE_PR_PENALTY_BASE_THRESHOLD + 2
+        # 20 Bronze + 20 Silver: Bronze bonus = 1, Silver bonus = 2
+        prs = [MockPR(Tier.BRONZE) for _ in range(20)] + [MockPR(Tier.SILVER) for _ in range(20)]
+        assert calculate_open_pr_threshold(prs, tier_stats) == EXCESSIVE_PR_PENALTY_BASE_THRESHOLD + 3
 
     def test_silver_locked_ignores_silver_prs(self):
         """Silver PRs don't count when Silver tier is locked."""
         # Bronze unlocked, Silver locked (below 65% credibility)
         tier_stats = make_tier_stats(bronze_merged=7, bronze_closed=3, silver_merged=5, silver_closed=5)
-        prs = [MockPR(Tier.SILVER) for _ in range(20)]
-        assert calculate_open_pr_threshold(prs, tier_stats) == EXCESSIVE_PR_PENALTY_BASE_THRESHOLD
+        prs = [MockPR(Tier.BRONZE) for _ in range(20)] + [MockPR(Tier.SILVER) for _ in range(20)]
+        # Only Bronze bonus = 1 (Silver locked)
+        assert calculate_open_pr_threshold(prs, tier_stats) == EXCESSIVE_PR_PENALTY_BASE_THRESHOLD + 1
 
     def test_gold_requires_bronze_and_silver_bonuses(self):
         """Gold bonus requires Bronze & Silver bonuses > 0."""

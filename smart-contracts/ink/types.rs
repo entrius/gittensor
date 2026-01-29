@@ -72,6 +72,9 @@ impl RawCall {
     /// The proxy pallet will validate that the caller (contract) is a Transfer proxy
     /// for the `real` account before executing the inner call with `real` as origin.
     ///
+    /// TODO: Replace with V2 chain extensions once PR #2383 is merged.
+    /// V2 chain extensions will be proxy-aware.
+    ///
     /// # Arguments
     /// * `real` - The account to execute as (owner/treasury coldkey)
     /// * `destination_coldkey` - Where to transfer stake ownership to
@@ -139,6 +142,9 @@ impl RawCall {
     ///
     /// move_stake moves stake from one hotkey to another within the same coldkey.
     /// Used to stake bounty funds on the Gittensor validator.
+    ///
+    /// TODO: Replace with V2 chain extensions once PR #2383 is merged.
+    /// V2 chain extensions will be proxy-aware.
     ///
     /// # Arguments
     /// * `real` - The account to execute as (owner/treasury coldkey)
@@ -210,6 +216,9 @@ impl RawCall {
     ///
     /// NOTE: recycle_alpha is NOT in Staking or Transfer proxy filters.
     /// It requires NonCritical (or Any) proxy type.
+    ///
+    /// TODO: Replace with V2 chain extensions once PR #2383 is merged.
+    /// V2 chain extensions will be proxy-aware.
     ///
     /// # Arguments
     /// * `real` - The account to execute as (owner/treasury coldkey)
@@ -396,7 +405,7 @@ pub struct PairProposal {
     /// Total stake that has voted for this proposal
     pub total_stake_voted: u128,
     /// Number of votes cast
-    pub votes_count: u64,
+    pub votes_count: u32,
 }
 
 impl Default for PairProposal {
@@ -421,12 +430,14 @@ pub struct SolutionVote {
     pub competition_id: u64,
     /// Proposed winner's hotkey
     pub winner_hotkey: AccountId,
+    /// Proposed winner's coldkey (for auto-payout)
+    pub winner_coldkey: AccountId,
     /// Hash of the PR URL
     pub pr_url_hash: [u8; 32],
     /// Total stake that has voted
     pub total_stake_voted: u128,
     /// Number of votes cast
-    pub votes_count: u64,
+    pub votes_count: u32,
 }
 
 impl Default for SolutionVote {
@@ -434,6 +445,7 @@ impl Default for SolutionVote {
         Self {
             competition_id: 0,
             winner_hotkey: AccountId::from([0u8; 32]),
+            winner_coldkey: AccountId::from([0u8; 32]),
             pr_url_hash: [0u8; 32],
             total_stake_voted: 0,
             votes_count: 0,
@@ -452,7 +464,7 @@ pub struct CancelVote {
     /// Total stake that has voted
     pub total_stake_voted: u128,
     /// Number of votes cast
-    pub votes_count: u64,
+    pub votes_count: u32,
 }
 
 /// Result of a harvest_emissions call
@@ -465,4 +477,20 @@ pub struct HarvestResult {
     pub bounties_filled: u32,
     /// Amount recycled to owner
     pub recycled: u128,
+}
+
+/// Contract configuration returned by get_config()
+#[derive(Debug, Clone, Encode, Decode)]
+#[cfg_attr(feature = "std", derive(scale_info::TypeInfo))]
+pub struct ContractConfig {
+    /// Submission window in blocks
+    pub submission_window_blocks: u32,
+    /// Competition deadline in blocks
+    pub competition_deadline_blocks: u32,
+    /// Proposal expiry in blocks
+    pub proposal_expiry_blocks: u32,
+    /// Number of validator votes required for consensus
+    pub required_validator_votes: u32,
+    /// Subnet ID
+    pub netuid: u16,
 }

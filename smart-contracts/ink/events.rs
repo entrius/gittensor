@@ -20,9 +20,11 @@ pub struct IssueCancelled {
     pub returned_bounty: u128,
 }
 
-/// Event emitted when funds are deposited to the alpha pool
+/// Event emitted when funds are deposited directly to an issue's bounty
 #[ink::event]
-pub struct PoolDeposit {
+pub struct IssueDeposit {
+    #[ink(topic)]
+    pub issue_id: u64,
     #[ink(topic)]
     pub depositor: AccountId,
     pub amount: u128,

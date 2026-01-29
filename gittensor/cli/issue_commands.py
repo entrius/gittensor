@@ -1716,7 +1716,7 @@ def admin_propose(
     rpc_url: str,
     contract: str,
 ):
-    """Propose a miner pair for competition testing."""
+    """Propose a miner pair for competition (or vote if same pair already proposed)."""
     contract_addr = get_contract_address(contract, testnet=False)
     ws_endpoint = get_ws_endpoint(rpc_url)
 
@@ -1744,73 +1744,9 @@ def admin_propose(
 
         result = client.propose_pair(issue_id, miner1_hotkey, miner2_hotkey, wallet)
         if result:
-            console.print(f'[green]Proposal submitted![/green]')
+            console.print(f'[green]Pair proposal submitted![/green]')
         else:
             console.print('[red]Proposal failed.[/red]')
-    except ImportError as e:
-        console.print(f'[red]Error: Missing dependency - {e}[/red]')
-    except Exception as e:
-        console.print(f'[red]Error: {e}[/red]')
-
-
-@admin.command('vote-pair')
-@click.argument('issue_id', type=int)
-@click.option(
-    '--wallet-name',
-    default='default',
-    help='Wallet name',
-)
-@click.option(
-    '--wallet-hotkey',
-    default='default',
-    help='Hotkey name',
-)
-@click.option(
-    '--rpc-url',
-    default='wss://entrypoint-finney.opentensor.ai:443',
-    help='Subtensor RPC endpoint',
-)
-@click.option(
-    '--contract',
-    default='',
-    help='Contract address (uses config if empty)',
-)
-def admin_vote_pair(
-    issue_id: int,
-    wallet_name: str,
-    wallet_hotkey: str,
-    rpc_url: str,
-    contract: str,
-):
-    """Vote on an existing pair proposal."""
-    contract_addr = get_contract_address(contract, testnet=False)
-    ws_endpoint = get_ws_endpoint(rpc_url)
-
-    if not contract_addr:
-        console.print('[red]Error: Contract address not configured.[/red]')
-        return
-
-    console.print(f'[dim]Contract: {contract_addr}[/dim]')
-    console.print(f'[yellow]Voting on pair proposal for issue {issue_id}...[/yellow]\n')
-
-    try:
-        from gittensor.validator.issue_competitions.contract_client import (
-            IssueCompetitionContractClient,
-        )
-        import bittensor as bt
-
-        wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
-        subtensor = bt.Subtensor(network=ws_endpoint)
-        client = IssueCompetitionContractClient(
-            contract_address=contract_addr,
-            subtensor=subtensor,
-        )
-
-        result = client.vote_pair(issue_id, wallet)
-        if result:
-            console.print(f'[green]Vote submitted![/green]')
-        else:
-            console.print('[red]Vote failed.[/red]')
     except ImportError as e:
         console.print(f'[red]Error: Missing dependency - {e}[/red]')
     except Exception as e:
@@ -1820,6 +1756,7 @@ def admin_vote_pair(
 @admin.command('vote-solution')
 @click.argument('competition_id', type=int)
 @click.argument('winner_hotkey', type=str)
+@click.argument('winner_coldkey', type=str)
 @click.argument('pr_url', type=str)
 @click.option(
     '--wallet-name',
@@ -1844,13 +1781,14 @@ def admin_vote_pair(
 def admin_vote_solution(
     competition_id: int,
     winner_hotkey: str,
+    winner_coldkey: str,
     pr_url: str,
     wallet_name: str,
     wallet_hotkey: str,
     rpc_url: str,
     contract: str,
 ):
-    """Vote for a solution winner in an active competition."""
+    """Vote for a solution winner in an active competition (triggers auto-payout)."""
     contract_addr = get_contract_address(contract, testnet=False)
     ws_endpoint = get_ws_endpoint(rpc_url)
 
@@ -1860,7 +1798,8 @@ def admin_vote_solution(
 
     console.print(f'[dim]Contract: {contract_addr}[/dim]')
     console.print(f'[yellow]Voting on solution for competition {competition_id}...[/yellow]\n')
-    console.print(f'  Winner: {winner_hotkey}')
+    console.print(f'  Winner Hotkey:  {winner_hotkey}')
+    console.print(f'  Winner Coldkey: {winner_coldkey}')
     console.print(f'  PR URL: {pr_url}\n')
 
     try:
@@ -1876,7 +1815,7 @@ def admin_vote_solution(
             subtensor=subtensor,
         )
 
-        result = client.vote_solution(competition_id, winner_hotkey, pr_url, wallet)
+        result = client.vote_solution(competition_id, winner_hotkey, winner_coldkey, pr_url, wallet)
         if result:
             console.print(f'[green]Solution vote submitted![/green]')
         else:
@@ -1949,6 +1888,206 @@ def admin_competitions(rpc_url: str, contract: str, verbose: bool):
             console.print(f'\n[dim]Found {len(competitions)} active competition(s)[/dim]')
         else:
             console.print('[dim]No active competitions found.[/dim]')
+    except ImportError as e:
+        console.print(f'[red]Error: Missing dependency - {e}[/red]')
+    except Exception as e:
+        console.print(f'[red]Error: {e}[/red]')
+
+
+@admin.command('vote-cancel-issue')
+@click.argument('issue_id', type=int)
+@click.argument('reason', type=str)
+@click.option(
+    '--wallet-name',
+    default='default',
+    help='Wallet name',
+)
+@click.option(
+    '--wallet-hotkey',
+    default='default',
+    help='Hotkey name',
+)
+@click.option(
+    '--rpc-url',
+    default='wss://entrypoint-finney.opentensor.ai:443',
+    help='Subtensor RPC endpoint',
+)
+@click.option(
+    '--contract',
+    default='',
+    help='Contract address (uses config if empty)',
+)
+def admin_vote_cancel_issue(
+    issue_id: int,
+    reason: str,
+    wallet_name: str,
+    wallet_hotkey: str,
+    rpc_url: str,
+    contract: str,
+):
+    """Vote to cancel an issue (works on Registered, Active, or InCompetition)."""
+    contract_addr = get_contract_address(contract, testnet=False)
+    ws_endpoint = get_ws_endpoint(rpc_url)
+
+    if not contract_addr:
+        console.print('[red]Error: Contract address not configured.[/red]')
+        return
+
+    console.print(f'[dim]Contract: {contract_addr}[/dim]')
+    console.print(f'[yellow]Voting to cancel issue {issue_id}...[/yellow]\n')
+    console.print(f'  Reason: {reason}\n')
+
+    try:
+        from gittensor.validator.issue_competitions.contract_client import (
+            IssueCompetitionContractClient,
+        )
+        import bittensor as bt
+
+        wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
+        subtensor = bt.Subtensor(network=ws_endpoint)
+        client = IssueCompetitionContractClient(
+            contract_address=contract_addr,
+            subtensor=subtensor,
+        )
+
+        result = client.vote_cancel_issue(issue_id, reason, wallet)
+        if result:
+            console.print(f'[green]Vote cancel submitted![/green]')
+        else:
+            console.print('[red]Vote cancel failed.[/red]')
+    except ImportError as e:
+        console.print(f'[red]Error: Missing dependency - {e}[/red]')
+    except Exception as e:
+        console.print(f'[red]Error: {e}[/red]')
+
+
+@admin.command('vote-timeout')
+@click.argument('competition_id', type=int)
+@click.option(
+    '--wallet-name',
+    default='default',
+    help='Wallet name',
+)
+@click.option(
+    '--wallet-hotkey',
+    default='default',
+    help='Hotkey name',
+)
+@click.option(
+    '--rpc-url',
+    default='wss://entrypoint-finney.opentensor.ai:443',
+    help='Subtensor RPC endpoint',
+)
+@click.option(
+    '--contract',
+    default='',
+    help='Contract address (uses config if empty)',
+)
+def admin_vote_timeout(
+    competition_id: int,
+    wallet_name: str,
+    wallet_hotkey: str,
+    rpc_url: str,
+    contract: str,
+):
+    """Vote to timeout an expired competition."""
+    contract_addr = get_contract_address(contract, testnet=False)
+    ws_endpoint = get_ws_endpoint(rpc_url)
+
+    if not contract_addr:
+        console.print('[red]Error: Contract address not configured.[/red]')
+        return
+
+    console.print(f'[dim]Contract: {contract_addr}[/dim]')
+    console.print(f'[yellow]Voting to timeout competition {competition_id}...[/yellow]\n')
+
+    try:
+        from gittensor.validator.issue_competitions.contract_client import (
+            IssueCompetitionContractClient,
+        )
+        import bittensor as bt
+
+        wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
+        subtensor = bt.Subtensor(network=ws_endpoint)
+        client = IssueCompetitionContractClient(
+            contract_address=contract_addr,
+            subtensor=subtensor,
+        )
+
+        result = client.vote_timeout(competition_id, wallet)
+        if result:
+            console.print(f'[green]Vote timeout submitted![/green]')
+        else:
+            console.print('[red]Vote timeout failed.[/red]')
+    except ImportError as e:
+        console.print(f'[red]Error: Missing dependency - {e}[/red]')
+    except Exception as e:
+        console.print(f'[red]Error: {e}[/red]')
+
+
+@issue.command('deposit')
+@click.argument('issue_id', type=int)
+@click.argument('amount', type=float)
+@click.option(
+    '--wallet-name',
+    default='default',
+    help='Wallet name',
+)
+@click.option(
+    '--wallet-hotkey',
+    default='default',
+    help='Hotkey name',
+)
+@click.option(
+    '--rpc-url',
+    default='wss://entrypoint-finney.opentensor.ai:443',
+    help='Subtensor RPC endpoint',
+)
+@click.option(
+    '--contract',
+    default='',
+    help='Contract address (uses config if empty)',
+)
+def issue_deposit(
+    issue_id: int,
+    amount: float,
+    wallet_name: str,
+    wallet_hotkey: str,
+    rpc_url: str,
+    contract: str,
+):
+    """Deposit funds directly to an issue's bounty (anyone can fund)."""
+    contract_addr = get_contract_address(contract, testnet=False)
+    ws_endpoint = get_ws_endpoint(rpc_url)
+
+    if not contract_addr:
+        console.print('[red]Error: Contract address not configured.[/red]')
+        return
+
+    # Convert to ALPHA units (9 decimals)
+    amount_in_units = int(amount * 1_000_000_000)
+
+    console.print(f'[dim]Contract: {contract_addr}[/dim]')
+    console.print(f'[yellow]Depositing {amount} ALPHA to issue {issue_id}...[/yellow]\n')
+
+    try:
+        from gittensor.validator.issue_competitions.contract_client import (
+            IssueCompetitionContractClient,
+        )
+        import bittensor as bt
+
+        wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
+        subtensor = bt.Subtensor(network=ws_endpoint)
+        client = IssueCompetitionContractClient(
+            contract_address=contract_addr,
+            subtensor=subtensor,
+        )
+
+        result = client.deposit_to_issue(issue_id, amount_in_units, wallet)
+        if result:
+            console.print(f'[green]Deposit successful![/green]')
+        else:
+            console.print('[red]Deposit failed.[/red]')
     except ImportError as e:
         console.print(f'[red]Error: Missing dependency - {e}[/red]')
     except Exception as e:

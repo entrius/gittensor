@@ -84,10 +84,12 @@ mod issue_bounty_manager {
     /// Default proposal expiry: ~3.3 hours at 12s blocks
     pub const DEFAULT_PROPOSAL_EXPIRY_BLOCKS: u32 = 1000;
 
-    /// Minimum stake required for consensus: 100 TAO (9 decimals)
-    /// This is an absolute threshold - proposals pass when total voted stake
-    /// exceeds this amount, rather than requiring a percentage of network stake.
-    pub const MIN_CONSENSUS_STAKE: u128 = 100_000_000_000_000;
+    /// Number of validator votes required for consensus.
+    /// Currently hardcoded to 1 for simplicity.
+    ///
+    /// TODO: Replace with VotingPower chain extensions once PR #2376 is merged.
+    /// Future: check if voter's voting_power / total_voting_power >= threshold
+    pub const REQUIRED_VALIDATOR_VOTES: u32 = 1;
 
     // ========================================================================
     // Contract Storage
@@ -145,10 +147,9 @@ mod issue_bounty_manager {
         has_timeout_vote: Mapping<u64, bool>,
         timeout_vote_voters: Mapping<(u64, AccountId), bool>,
 
-        // Cancel votes
-        cancel_votes: Mapping<u64, CancelVote>,
-        has_cancel_vote: Mapping<u64, bool>,
-        cancel_vote_voters: Mapping<(u64, AccountId), bool>,
+        // Issue cancel votes (validators can cancel issues at any stage)
+        cancel_issue_votes: Mapping<u64, CancelVote>,
+        cancel_issue_voters: Mapping<(u64, AccountId), bool>,
 
         // Emission management
         /// Block number of last harvest
@@ -196,9 +197,8 @@ mod issue_bounty_manager {
                 timeout_votes: Mapping::default(),
                 has_timeout_vote: Mapping::default(),
                 timeout_vote_voters: Mapping::default(),
-                cancel_votes: Mapping::default(),
-                has_cancel_vote: Mapping::default(),
-                cancel_vote_voters: Mapping::default(),
+                cancel_issue_votes: Mapping::default(),
+                cancel_issue_voters: Mapping::default(),
                 last_harvest_block: 0,
                 last_known_stake: 0,
             }
@@ -301,24 +301,62 @@ mod issue_bounty_manager {
         }
 
         // ========================================================================
-        // Bounty Pool Functions
+        // Bounty Funding Functions
         // ========================================================================
 
-        /// Deposits funds to the alpha pool
+        /// Deposits funds directly to a specific issue's bounty.
+        ///
+        /// Anyone can call this to fund a specific issue. The deposit is capped
+        /// at the remaining amount needed to reach target_bounty. Any excess
+        /// is refunded to the caller.
+        ///
+        /// The issue must be in Registered status (not yet fully funded).
+        /// When the bounty reaches target_bounty, the issue automatically
+        /// becomes Active and is removed from the FIFO queue.
         #[ink(message, payable)]
-        pub fn deposit_to_pool(&mut self) {
-            let amount = self.env().transferred_value();
-            if amount == 0 {
-                return;
-            }
-            self.alpha_pool = self.alpha_pool.saturating_add(amount);
+        pub fn deposit_to_issue(&mut self, issue_id: u64) -> Result<Balance, Error> {
+            let deposit = self.env().transferred_value();
+            let mut issue = self.issues.get(issue_id).ok_or(Error::IssueNotFound)?;
 
-            self.env().emit_event(PoolDeposit {
+            // Can only deposit to Registered issues (not yet fully funded)
+            if issue.status != IssueStatus::Registered {
+                return Err(Error::IssueNotFundable);
+            }
+
+            // Cap deposit so it doesn't exceed target_bounty
+            let remaining = issue.target_bounty.saturating_sub(issue.bounty_amount);
+            let actual_deposit = deposit.min(remaining);
+
+            if actual_deposit == 0 {
+                return Err(Error::BountyAlreadyFunded);
+            }
+
+            issue.bounty_amount = issue.bounty_amount.saturating_add(actual_deposit);
+
+            // Auto-activate when fully funded
+            if issue.bounty_amount >= issue.target_bounty {
+                issue.status = IssueStatus::Active;
+                // Remove from bounty_queue since it's now fully funded
+                self.remove_from_bounty_queue(issue_id);
+            }
+
+            self.issues.insert(issue_id, &issue);
+
+            // Refund excess to caller
+            let refund = deposit.saturating_sub(actual_deposit);
+            if refund > 0 {
+                self.env()
+                    .transfer(self.env().caller(), refund)
+                    .map_err(|_| Error::TransferFailed)?;
+            }
+
+            self.env().emit_event(IssueDeposit {
+                issue_id,
                 depositor: self.env().caller(),
-                amount,
+                amount: actual_deposit,
             });
 
-            self.fill_bounties();
+            Ok(actual_deposit)
         }
 
         // ========================================================================
@@ -377,7 +415,7 @@ mod issue_bounty_manager {
                 stake,
             });
 
-            if self.check_consensus(stake) {
+            if self.check_consensus(proposal.votes_count ) {
                 self.start_competition(issue_id, miner1_hotkey, miner2_hotkey);
                 self.clear_pair_proposal(issue_id);
             }
@@ -385,73 +423,16 @@ mod issue_bounty_manager {
             Ok(())
         }
 
-        /// Votes on an existing pair proposal
-        #[ink(message)]
-        pub fn vote_pair(&mut self, issue_id: u64) -> Result<(), Error> {
-            if !self.has_pair_proposal.get(issue_id).unwrap_or(false) {
-                return Err(Error::ProposalNotFound);
-            }
-
-            let mut proposal = self
-                .pair_proposals
-                .get(issue_id)
-                .ok_or(Error::ProposalNotFound)?;
-
-            let current_block = self.env().block_number();
-            let expiry_block = proposal
-                .proposed_at_block
-                .saturating_add(self.proposal_expiry_blocks);
-
-            if current_block > expiry_block {
-                self.clear_pair_proposal(issue_id);
-                return Err(Error::ProposalExpired);
-            }
-
-            let caller = self.env().caller();
-
-            if self
-                .pair_proposal_voters
-                .get((issue_id, caller))
-                .unwrap_or(false)
-            {
-                return Err(Error::AlreadyVoted);
-            }
-
-            let issue = self.issues.get(issue_id).ok_or(Error::IssueNotFound)?;
-            if issue.status != IssueStatus::Active {
-                return Err(Error::IssueNotActive);
-            }
-
-            let stake = self.get_validator_stake(caller);
-            if stake == 0 {
-                return Err(Error::InsufficientStake);
-            }
-
-            self.pair_proposal_voters.insert((issue_id, caller), &true);
-            proposal.total_stake_voted = proposal.total_stake_voted.saturating_add(stake);
-            proposal.votes_count = proposal.votes_count.saturating_add(1);
-            self.pair_proposals.insert(issue_id, &proposal);
-
-            self.env().emit_event(PairVoteCast {
-                issue_id,
-                voter: caller,
-                stake,
-            });
-
-            if self.check_consensus(proposal.total_stake_voted) {
-                self.start_competition(issue_id, proposal.miner1_hotkey, proposal.miner2_hotkey);
-                self.clear_pair_proposal(issue_id);
-            }
-
-            Ok(())
-        }
-
-        /// Votes for a solution winner in an active competition
+        /// Votes for a solution winner in an active competition.
+        ///
+        /// When consensus is reached, the competition is completed and the bounty
+        /// is automatically paid out to the winner's coldkey.
         #[ink(message)]
         pub fn vote_solution(
             &mut self,
             competition_id: u64,
             winner_hotkey: AccountId,
+            winner_coldkey: AccountId,
             pr_url_hash: [u8; 32],
         ) -> Result<(), Error> {
             let competition = self.validate_active_competition(competition_id)?;
@@ -471,15 +452,15 @@ mod issue_bounty_manager {
             let (caller, stake) = self.get_caller_stake_validated()?;
 
             // Get or create vote, accumulate stake
-            let mut vote = self.get_or_create_solution_vote(competition_id, winner_hotkey, pr_url_hash);
+            let mut vote = self.get_or_create_solution_vote(competition_id, winner_hotkey, pr_url_hash, winner_coldkey);
             self.solution_vote_voters.insert((competition_id, caller), &true);
             vote.total_stake_voted = vote.total_stake_voted.saturating_add(stake);
             vote.votes_count = vote.votes_count.saturating_add(1);
             self.solution_votes.insert(competition_id, &vote);
 
-            // Check consensus and execute
-            if self.check_consensus(vote.total_stake_voted) {
-                self.complete_competition(competition_id, winner_hotkey, pr_url_hash);
+            // Check consensus and execute (includes auto-payout)
+            if self.check_consensus(vote.votes_count ) {
+                self.complete_competition(competition_id, winner_hotkey, pr_url_hash, winner_coldkey);
                 self.clear_solution_vote(competition_id);
             }
 
@@ -508,7 +489,7 @@ mod issue_bounty_manager {
             self.timeout_votes.insert(competition_id, &vote);
 
             // Check consensus and execute
-            if self.check_consensus(vote.total_stake_voted) {
+            if self.check_consensus(vote.votes_count ) {
                 self.timeout_competition(competition_id);
                 self.clear_timeout_vote(competition_id);
             }
@@ -516,30 +497,45 @@ mod issue_bounty_manager {
             Ok(())
         }
 
-        /// Votes to cancel a competition (e.g., external solution found)
+        /// Votes to cancel an issue (e.g., external solution found, issue invalid).
+        ///
+        /// This unified cancel mechanism works on issues in any non-finalized state:
+        /// - Registered: Returns bounty to alpha_pool, removes from queue
+        /// - Active: Returns bounty to alpha_pool
+        /// - InCompetition: Cancels competition, releases miners, returns bounty
+        ///
+        /// Key difference from old cancel_competition: sets issue status to Cancelled
+        /// (not Completed) to indicate validator-initiated cancellation.
         #[ink(message)]
-        pub fn vote_cancel(
+        pub fn vote_cancel_issue(
             &mut self,
-            competition_id: u64,
+            issue_id: u64,
             reason_hash: [u8; 32],
         ) -> Result<(), Error> {
-            self.validate_active_competition(competition_id)?;
+            let issue = self.issues.get(issue_id).ok_or(Error::IssueNotFound)?;
 
-            // Common vote validation
-            self.check_not_voted_cancel(competition_id, self.env().caller())?;
-            let (caller, stake) = self.get_caller_stake_validated()?;
+            // Can cancel Registered, Active, or InCompetition
+            if matches!(
+                issue.status,
+                IssueStatus::Completed | IssueStatus::Cancelled
+            ) {
+                return Err(Error::IssueAlreadyFinalized);
+            }
 
-            // Get or create vote, accumulate stake
-            let mut vote = self.get_or_create_cancel_vote(competition_id, reason_hash);
-            self.cancel_vote_voters.insert((competition_id, caller), &true);
-            vote.total_stake_voted = vote.total_stake_voted.saturating_add(stake);
+            // Standard vote validation
+            self.check_not_voted_cancel_issue(issue_id, self.env().caller())?;
+            let (caller, _stake) = self.get_caller_stake_validated()?;
+
+            // Get or create vote, increment count
+            let mut vote = self.get_or_create_cancel_issue_vote(issue_id, reason_hash);
+            self.cancel_issue_voters.insert((issue_id, caller), &true);
             vote.votes_count = vote.votes_count.saturating_add(1);
-            self.cancel_votes.insert(competition_id, &vote);
+            self.cancel_issue_votes.insert(issue_id, &vote);
 
             // Check consensus and execute
-            if self.check_consensus(vote.total_stake_voted) {
-                self.cancel_competition(competition_id, reason_hash);
-                self.clear_cancel_vote(competition_id);
+            if self.check_consensus(vote.votes_count ) {
+                self.execute_cancel_issue(issue_id, reason_hash);
+                self.clear_cancel_issue_vote(issue_id);
             }
 
             Ok(())
@@ -596,35 +592,16 @@ mod issue_bounty_manager {
             Ok(())
         }
 
-        /// Resets stake tracking to current stake value (OWNER ONLY).
-        ///
-        /// Emergency function to reset the last_known_stake tracker.
-        /// Use this if stake tracking gets out of sync (e.g., after manual
-        /// stake operations or contract migration).
-        ///
-        /// Setting to current stake means next harvest will only count
-        /// NEW emissions from this point forward.
-        #[ink(message)]
-        pub fn reset_stake_tracking(&mut self) -> Result<(), Error> {
-            if self.env().caller() != self.owner {
-                return Err(Error::NotOwner);
-            }
-
-            let current_stake = self.get_pending_emissions();
-            self.last_known_stake = current_stake;
-            Ok(())
-        }
-
         // ========================================================================
         // Emission Harvesting Functions
         // ========================================================================
 
-        /// Query pending emissions (stake on treasury hotkey owned by owner).
+        /// Query total stake on treasury hotkey owned by owner.
         /// Uses chain extension to query Subtensor runtime.
         ///
         /// The chain extension returns Option<StakeInfo>, which ink! decodes automatically.
         #[ink(message)]
-        pub fn get_pending_emissions(&self) -> Balance {
+        pub fn get_treasury_stake(&self) -> Balance {
             let hotkey_bytes: [u8; 32] = *self.treasury_hotkey.as_ref();
             let coldkey_bytes: [u8; 32] = *self.owner.as_ref();
 
@@ -646,12 +623,6 @@ mod issue_bounty_manager {
             self.last_harvest_block
         }
 
-        /// Returns the last known stake used for delta calculation.
-        #[ink(message)]
-        pub fn get_last_known_stake(&self) -> Balance {
-            self.last_known_stake
-        }
-
         /// Harvest emissions and distribute to bounties.
         ///
         /// PERMISSIONLESS - Anyone can call this function.
@@ -668,7 +639,7 @@ mod issue_bounty_manager {
         #[ink(message)]
         pub fn harvest_emissions(&mut self) -> Result<HarvestResult, Error> {
             // Query current total stake via chain extension
-            let current_stake = self.get_pending_emissions();
+            let current_stake = self.get_treasury_stake();
 
             // Calculate delta: only new stake since last harvest counts as emissions
             // This prevents double-counting the same stake across multiple harvests
@@ -814,63 +785,22 @@ mod issue_bounty_manager {
             })
         }
 
-        /// Pay out a completed bounty to the winning miner.
+        /// Manual payout fallback for edge cases where auto-payout failed.
         ///
-        /// Called when a competition is completed and verified.
-        /// Transfers stake ownership to the miner's coldkey.
+        /// Normally payouts happen automatically when vote_solution reaches consensus.
+        /// This owner-only function is a fallback for recovering from failures.
         #[ink(message)]
         pub fn payout_bounty(
             &mut self,
             competition_id: u64,
             miner_coldkey: AccountId,
         ) -> Result<Balance, Error> {
-            // Only owner can initiate payouts
+            // Only owner can initiate manual payouts
             if self.env().caller() != self.owner {
                 return Err(Error::NotOwner);
             }
 
-            let competition = self
-                .competitions
-                .get(competition_id)
-                .ok_or(Error::CompetitionNotFound)?;
-
-            if competition.status != CompetitionStatus::Completed {
-                return Err(Error::BountyNotCompleted);
-            }
-
-            let payout_amount = competition.payout_amount;
-            if payout_amount == 0 {
-                return Err(Error::BountyNotFunded);
-            }
-
-            // Convert u128 to u64 for transfer (AlphaCurrency is u64)
-            let amount_u64: u64 = payout_amount.try_into().unwrap_or(u64::MAX);
-
-            // Use call_runtime with Proxy::proxy to transfer stake to miner.
-            // The contract acts as a Staking proxy for the owner (treasury_coldkey),
-            // allowing it to execute transfer_stake on behalf of the owner.
-            let proxy_call = RawCall::proxied_transfer_stake(
-                &self.owner,           // real: execute as owner
-                &miner_coldkey,        // destination_coldkey: pay out to miner
-                &self.treasury_hotkey, // hotkey
-                self.netuid,           // origin_netuid
-                self.netuid,           // destination_netuid
-                amount_u64,            // amount
-            );
-
-            let result = self.env().call_runtime(&proxy_call);
-
-            if result.is_ok() {
-                // Transfer successful
-                self.env().emit_event(BountyPaidOut {
-                    issue_id: competition.issue_id,
-                    miner: miner_coldkey,
-                    amount: payout_amount,
-                });
-                Ok(payout_amount)
-            } else {
-                Err(Error::TransferFailed)
-            }
+            self.execute_payout(competition_id, miner_coldkey)
         }
 
         // ========================================================================
@@ -1021,6 +951,19 @@ mod issue_bounty_manager {
             result
         }
 
+        /// Returns all contract configuration in a single call.
+        /// This consolidates individual config getters for efficiency.
+        #[ink(message)]
+        pub fn get_config(&self) -> ContractConfig {
+            ContractConfig {
+                submission_window_blocks: self.submission_window_blocks,
+                competition_deadline_blocks: self.competition_deadline_blocks,
+                proposal_expiry_blocks: self.proposal_expiry_blocks,
+                required_validator_votes: REQUIRED_VALIDATOR_VOTES,
+                netuid: self.netuid,
+            }
+        }
+
         // ========================================================================
         // Internal Functions
         // ========================================================================
@@ -1069,9 +1012,9 @@ mod issue_bounty_manager {
             Ok(())
         }
 
-        /// Checks if caller has already voted for cancel.
-        fn check_not_voted_cancel(&self, competition_id: u64, caller: AccountId) -> Result<(), Error> {
-            if self.cancel_vote_voters.get((competition_id, caller)).unwrap_or(false) {
+        /// Checks if caller has already voted to cancel an issue.
+        fn check_not_voted_cancel_issue(&self, issue_id: u64, caller: AccountId) -> Result<(), Error> {
+            if self.cancel_issue_voters.get((issue_id, caller)).unwrap_or(false) {
                 return Err(Error::AlreadyVoted);
             }
             Ok(())
@@ -1083,6 +1026,7 @@ mod issue_bounty_manager {
             competition_id: u64,
             winner_hotkey: AccountId,
             pr_url_hash: [u8; 32],
+            winner_coldkey: AccountId,
         ) -> SolutionVote {
             if self.has_solution_vote.get(competition_id).unwrap_or(false) {
                 self.solution_votes.get(competition_id).unwrap_or_default()
@@ -1091,6 +1035,7 @@ mod issue_bounty_manager {
                 SolutionVote {
                     competition_id,
                     winner_hotkey,
+                    winner_coldkey,
                     pr_url_hash,
                     total_stake_voted: 0,
                     votes_count: 0,
@@ -1113,19 +1058,23 @@ mod issue_bounty_manager {
             }
         }
 
-        /// Gets existing cancel vote or creates a new one.
-        fn get_or_create_cancel_vote(&mut self, competition_id: u64, reason_hash: [u8; 32]) -> CancelVote {
-            if self.has_cancel_vote.get(competition_id).unwrap_or(false) {
-                self.cancel_votes.get(competition_id).unwrap_or_default()
+        /// Gets existing issue cancel vote or creates a new one.
+        fn get_or_create_cancel_issue_vote(&mut self, issue_id: u64, reason_hash: [u8; 32]) -> CancelVote {
+            if let Some(vote) = self.cancel_issue_votes.get(issue_id) {
+                vote
             } else {
-                self.has_cancel_vote.insert(competition_id, &true);
                 CancelVote {
-                    competition_id,
+                    competition_id: issue_id, // Reusing competition_id field for issue_id
                     reason_hash,
                     total_stake_voted: 0,
                     votes_count: 0,
                 }
             }
+        }
+
+        /// Clears issue cancel vote data
+        fn clear_cancel_issue_vote(&mut self, issue_id: u64) {
+            self.cancel_issue_votes.remove(issue_id);
         }
 
         // ========================================================================
@@ -1255,10 +1204,12 @@ mod issue_bounty_manager {
             }
         }
 
-        /// Checks if total voted stake meets minimum consensus threshold.
-        /// Uses absolute stake threshold rather than percentage of network stake.
-        fn check_consensus(&self, total_voted: u128) -> bool {
-            total_voted >= MIN_CONSENSUS_STAKE
+        /// Checks if vote count meets minimum consensus threshold.
+        ///
+        /// TODO: Replace with VotingPower chain extensions once PR #2376 is merged.
+        /// Future: check if voter's voting_power / total_voting_power >= threshold
+        fn check_consensus(&self, votes_count: u32) -> bool {
+            votes_count >= REQUIRED_VALIDATOR_VOTES
         }
 
         /// Starts a competition from a pair proposal
@@ -1311,12 +1262,13 @@ mod issue_bounty_manager {
             competition_id
         }
 
-        /// Completes a competition with a winner
+        /// Completes a competition with a winner and triggers auto-payout.
         fn complete_competition(
             &mut self,
             competition_id: u64,
             winner: AccountId,
             pr_hash: [u8; 32],
+            winner_coldkey: AccountId,
         ) {
             if let Some(mut competition) = self.competitions.get(competition_id) {
                 let issue_id = competition.issue_id;
@@ -1345,6 +1297,11 @@ mod issue_bounty_manager {
                         payout,
                         pr_url_hash: pr_hash,
                     });
+
+                    // Auto-payout to winner
+                    if payout > 0 {
+                        let _ = self.execute_payout(competition_id, winner_coldkey);
+                    }
                 }
             }
         }
@@ -1375,20 +1332,20 @@ mod issue_bounty_manager {
             }
         }
 
-        /// Cancels a competition, recycling bounty to pool
+        /// Cancels a competition, recycling bounty to pool.
+        /// Note: This helper is called by execute_cancel_issue. Issue status
+        /// is set by the caller (Cancelled for validator cancel, Completed for other cases).
         fn cancel_competition(&mut self, competition_id: u64, reason_hash: [u8; 32]) {
             if let Some(mut competition) = self.competitions.get(competition_id) {
                 let issue_id = competition.issue_id;
 
-                if let Some(mut issue) = self.issues.get(issue_id) {
+                if let Some(issue) = self.issues.get(issue_id) {
                     let recycled_amount = issue.bounty_amount;
 
                     competition.status = CompetitionStatus::Cancelled;
                     self.competitions.insert(competition_id, &competition);
 
-                    issue.status = IssueStatus::Completed;
-                    issue.bounty_amount = 0;
-                    self.issues.insert(issue_id, &issue);
+                    // Note: Issue status is NOT set here - caller handles it
 
                     self.alpha_pool = self.alpha_pool.saturating_add(recycled_amount);
 
@@ -1403,6 +1360,93 @@ mod issue_bounty_manager {
                         reason_hash,
                     });
                 }
+            }
+        }
+
+        /// Executes issue cancellation with proper cascade to competition if needed.
+        ///
+        /// Hierarchy: Issue (parent) -> Competition (child)
+        ///
+        /// Order of Operations:
+        /// - If Registered/Active: Return bounty to alpha_pool, set status = Cancelled
+        /// - If InCompetition: Cancel competition first, then set issue status = Cancelled
+        fn execute_cancel_issue(&mut self, issue_id: u64, reason_hash: [u8; 32]) {
+            let mut issue = match self.issues.get(issue_id) {
+                Some(i) => i,
+                None => return,
+            };
+
+            let returned_bounty = issue.bounty_amount;
+
+            // If InCompetition, handle competition cleanup FIRST
+            if issue.status == IssueStatus::InCompetition {
+                if let Some(competition_id) = self.issue_to_competition.get(issue_id) {
+                    // cancel_competition handles: release miners, emit event, add to pool
+                    self.cancel_competition(competition_id, reason_hash);
+                }
+            } else {
+                // Registered/Active: remove from bounty queue and return funds
+                self.remove_from_bounty_queue(issue_id);
+                self.alpha_pool = self.alpha_pool.saturating_add(returned_bounty);
+            }
+
+            // Set issue status to Cancelled (not Completed - indicates validator cancel)
+            issue.status = IssueStatus::Cancelled;
+            issue.bounty_amount = 0;
+            self.issues.insert(issue_id, &issue);
+
+            self.env().emit_event(IssueCancelled {
+                issue_id,
+                returned_bounty,
+            });
+        }
+
+        /// Internal payout execution - transfers bounty to winner's coldkey.
+        fn execute_payout(
+            &mut self,
+            competition_id: u64,
+            miner_coldkey: AccountId,
+        ) -> Result<Balance, Error> {
+            let competition = self
+                .competitions
+                .get(competition_id)
+                .ok_or(Error::CompetitionNotFound)?;
+
+            if competition.status != CompetitionStatus::Completed {
+                return Err(Error::BountyNotCompleted);
+            }
+
+            let payout_amount = competition.payout_amount;
+            if payout_amount == 0 {
+                return Err(Error::BountyNotFunded);
+            }
+
+            // Convert u128 to u64 for transfer (AlphaCurrency is u64)
+            let amount_u64: u64 = payout_amount.try_into().unwrap_or(u64::MAX);
+
+            // Use call_runtime with Proxy::proxy to transfer stake to miner.
+            // The contract acts as a Staking proxy for the owner (treasury_coldkey),
+            // allowing it to execute transfer_stake on behalf of the owner.
+            let proxy_call = RawCall::proxied_transfer_stake(
+                &self.owner,             // real: execute as owner
+                &miner_coldkey,          // destination_coldkey: pay out to miner
+                &self.validator_hotkey,  // hotkey (bounty funds on validator)
+                self.netuid,             // origin_netuid
+                self.netuid,             // destination_netuid
+                amount_u64,              // amount
+            );
+
+            let result = self.env().call_runtime(&proxy_call);
+
+            if result.is_ok() {
+                self.env().emit_event(BountyPaidOut {
+                    issue_id: competition.issue_id,
+                    miner: miner_coldkey,
+                    amount: payout_amount,
+                });
+                Ok(payout_amount)
+            } else {
+                Err(Error::TransferFailed)
             }
         }
 
@@ -1422,12 +1466,6 @@ mod issue_bounty_manager {
         fn clear_timeout_vote(&mut self, competition_id: u64) {
             self.timeout_votes.remove(competition_id);
             self.has_timeout_vote.insert(competition_id, &false);
-        }
-
-        /// Clears cancel vote data
-        fn clear_cancel_vote(&mut self, competition_id: u64) {
-            self.cancel_votes.remove(competition_id);
-            self.has_cancel_vote.insert(competition_id, &false);
         }
     }
 

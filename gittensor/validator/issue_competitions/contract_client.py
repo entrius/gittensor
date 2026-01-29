@@ -1034,7 +1034,7 @@ class IssueCompetitionContractClient:
         Propose a miner pair for competition.
 
         Creates a new pair proposal or votes on an existing one if the same
-        pair is proposed. Requires stake to vote.
+        pair is proposed. If consensus is reached, competition starts automatically.
 
         Uses raw extrinsic submission to bypass Ink! 5 type decoding issues.
 
@@ -1079,65 +1079,27 @@ class IssueCompetitionContractClient:
             bt.logging.error(f'Error proposing pair: {e}')
             return False
 
-    def vote_pair(self, issue_id: int, wallet: bt.Wallet) -> bool:
-        """
-        Vote on an existing pair proposal.
-
-        Adds the caller's stake-weighted vote to the proposal. If consensus
-        (51%) is reached, the competition starts automatically.
-
-        Uses raw extrinsic submission to bypass Ink! 5 type decoding issues.
-
-        Args:
-            issue_id: Issue with active proposal
-            wallet: Validator wallet for signing
-
-        Returns:
-            True if vote succeeded
-        """
-        if not self._ensure_contract():
-            bt.logging.warning('Cannot vote pair: contract not ready')
-            return False
-
-        try:
-            bt.logging.info(f'Voting on pair proposal for issue {issue_id}')
-
-            keypair = wallet.hotkey
-            tx_hash = self._exec_contract_raw(
-                method_name='vote_pair',
-                args={'issue_id': issue_id},
-                keypair=keypair,
-            )
-
-            if tx_hash:
-                bt.logging.info(f'Vote pair succeeded: {tx_hash}')
-                return True
-            else:
-                bt.logging.error('Vote pair failed')
-                return False
-
-        except Exception as e:
-            bt.logging.error(f'Error voting on pair: {e}')
-            return False
-
     def vote_solution(
         self,
         competition_id: int,
         winner_hotkey: str,
+        winner_coldkey: str,
         pr_url: str,
         wallet: bt.Wallet,
     ) -> bool:
         """
         Vote for a competition winner.
 
-        Casts a stake-weighted vote for the proposed winner. If consensus
-        (51%) is reached, the competition completes and bounty is paid.
+        Casts a vote for the proposed winner. When consensus is reached,
+        the competition completes and bounty is automatically paid to the
+        winner's coldkey.
 
         Uses raw extrinsic submission to bypass Ink! 5 type decoding issues.
 
         Args:
             competition_id: Competition to vote on
             winner_hotkey: Hotkey of the proposed winner
+            winner_coldkey: Coldkey to receive the payout
             pr_url: URL of the winning PR (will be hashed)
             wallet: Validator wallet for signing
 
@@ -1161,6 +1123,7 @@ class IssueCompetitionContractClient:
                 args={
                     'competition_id': competition_id,
                     'winner_hotkey': winner_hotkey,
+                    'winner_coldkey': winner_coldkey,
                     'pr_url_hash': pr_url_hash,
                 },
                 keypair=keypair,
@@ -1218,19 +1181,24 @@ class IssueCompetitionContractClient:
             bt.logging.error(f'Error voting timeout: {e}')
             return False
 
-    def vote_cancel(
+    def vote_cancel_issue(
         self,
-        competition_id: int,
+        issue_id: int,
         reason: str,
         wallet: bt.Wallet,
     ) -> bool:
         """
-        Vote to cancel a competition (e.g., external solution detected).
+        Vote to cancel an issue (e.g., external solution detected, issue invalid).
+
+        This unified cancel mechanism works on issues in any non-finalized state:
+        - Registered: Returns bounty to alpha_pool, removes from queue
+        - Active: Returns bounty to alpha_pool
+        - InCompetition: Cancels competition, releases miners, returns bounty
 
         Uses raw extrinsic submission to bypass Ink! 5 type decoding issues.
 
         Args:
-            competition_id: Competition to cancel
+            issue_id: Issue to cancel
             reason: Reason for cancellation
             wallet: Validator wallet for signing
 
@@ -1238,34 +1206,90 @@ class IssueCompetitionContractClient:
             True if vote succeeded
         """
         if not self._ensure_contract():
-            bt.logging.warning('Cannot vote cancel: contract not ready')
+            bt.logging.warning('Cannot vote cancel issue: contract not ready')
             return False
 
         try:
             reason_hash = hashlib.sha256(reason.encode()).digest()
             bt.logging.info(
-                f'Voting cancel for competition {competition_id}: {reason}'
+                f'Voting cancel for issue {issue_id}: {reason}'
             )
 
             keypair = wallet.hotkey
             tx_hash = self._exec_contract_raw(
-                method_name='vote_cancel',
+                method_name='vote_cancel_issue',
                 args={
-                    'competition_id': competition_id,
+                    'issue_id': issue_id,
                     'reason_hash': reason_hash,
                 },
                 keypair=keypair,
             )
 
             if tx_hash:
-                bt.logging.info(f'Vote cancel succeeded: {tx_hash}')
+                bt.logging.info(f'Vote cancel issue succeeded: {tx_hash}')
                 return True
             else:
-                bt.logging.error('Vote cancel failed')
+                bt.logging.error('Vote cancel issue failed')
                 return False
 
         except Exception as e:
-            bt.logging.error(f'Error voting cancel: {e}')
+            bt.logging.error(f'Error voting cancel issue: {e}')
+            return False
+
+
+    def deposit_to_issue(
+        self,
+        issue_id: int,
+        amount: int,
+        wallet: bt.Wallet,
+    ) -> bool:
+        """
+        Deposit funds directly to a specific issue's bounty.
+
+        Anyone can call this to fund a specific issue. The deposit is capped
+        at the remaining amount needed to reach target_bounty. Any excess
+        is refunded to the caller.
+
+        The issue must be in Registered status (not yet fully funded).
+        When the bounty reaches target_bounty, the issue automatically
+        becomes Active and is removed from the FIFO queue.
+
+        Uses raw extrinsic submission to bypass Ink! 5 type decoding issues.
+
+        Args:
+            issue_id: Issue to deposit to
+            amount: Amount to deposit (in ALPHA, 9 decimals)
+            wallet: Wallet for signing
+
+        Returns:
+            True if deposit succeeded
+        """
+        if not self._ensure_contract():
+            bt.logging.warning('Cannot deposit to issue: contract not ready')
+            return False
+
+        try:
+            bt.logging.info(
+                f'Depositing {amount} to issue {issue_id}'
+            )
+
+            keypair = wallet.hotkey
+            tx_hash = self._exec_contract_raw(
+                method_name='deposit_to_issue',
+                args={'issue_id': issue_id},
+                keypair=keypair,
+                value=amount,
+            )
+
+            if tx_hash:
+                bt.logging.info(f'Deposit to issue succeeded: {tx_hash}')
+                return True
+            else:
+                bt.logging.error('Deposit to issue failed')
+                return False
+
+        except Exception as e:
+            bt.logging.error(f'Error depositing to issue: {e}')
             return False
 
     # =========================================================================
@@ -1641,26 +1665,27 @@ class IssueCompetitionContractClient:
     # Emission Harvesting Functions
     # =========================================================================
 
-    def get_pending_emissions(self) -> int:
+    def get_treasury_stake(self) -> int:
         """
-        Query pending emissions on the treasury hotkey owned by the contract.
+        Query total stake on treasury hotkey owned by the contract.
 
         Uses the contract's chain extension to query Subtensor staking info.
 
         Returns:
-            Pending emission amount (0 if contract not ready or no emissions)
+            Total stake amount (0 if contract not ready or no stake)
         """
         if not self._ensure_contract():
             return 0
 
         # Use raw RPC call due to substrate-interface Ink! 5 decoding issues
         try:
-            value = self._read_contract_u128('get_pending_emissions')
-            bt.logging.debug(f'Pending emissions (raw read): {value}')
+            value = self._read_contract_u128('get_treasury_stake')
+            bt.logging.debug(f'Treasury stake (raw read): {value}')
             return value
         except Exception as e:
-            bt.logging.error(f'Error fetching pending emissions: {e}')
+            bt.logging.error(f'Error fetching treasury stake: {e}')
             return 0
+
 
     def get_last_harvest_block(self) -> int:
         """
@@ -1679,28 +1704,6 @@ class IssueCompetitionContractClient:
             return value
         except Exception as e:
             bt.logging.error(f'Error fetching last harvest block: {e}')
-            return 0
-
-    def get_last_known_stake(self) -> int:
-        """
-        Query the last known stake used for delta calculation.
-
-        This is used to calculate actual emissions by comparing current stake
-        to the last known value, preventing double-counting.
-
-        Returns:
-            Last known stake value (0 if contract not ready)
-        """
-        if not self._ensure_contract():
-            return 0
-
-        # Use raw RPC call due to substrate-interface Ink! 5 decoding issues
-        try:
-            value = self._read_contract_u128('get_last_known_stake')
-            bt.logging.debug(f'Last known stake (raw read): {value}')
-            return value
-        except Exception as e:
-            bt.logging.error(f'Error fetching last known stake: {e}')
             return 0
 
     def harvest_emissions(self, wallet: bt.Wallet) -> Optional[dict]:

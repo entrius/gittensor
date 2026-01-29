@@ -54,4 +54,10 @@ pub enum Error {
     ChainExtensionFailed,
     /// Recycling emissions failed during harvest
     RecyclingFailed,
+    /// Issue cannot be funded in its current state (not Registered)
+    IssueNotFundable,
+    /// Bounty is already fully funded
+    BountyAlreadyFunded,
+    /// Issue has already been finalized (Completed or Cancelled)
+    IssueAlreadyFinalized,
 }

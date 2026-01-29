@@ -21,9 +21,9 @@ from gittensor.constants import (
     MAX_ISSUE_CLOSE_WINDOW_DAYS,
     MAX_OPEN_PR_THRESHOLD,
     MIN_TOKEN_SCORE_FOR_BASE_SCORE,
-    OPEN_PR_THRESHOLD_BRONZE_REQUIRED,
-    OPEN_PR_THRESHOLD_GOLD_REQUIRED,
-    OPEN_PR_THRESHOLD_SILVER_REQUIRED,
+    OPEN_PR_THRESHOLD_BRONZE_TOKEN_SCORE,
+    OPEN_PR_THRESHOLD_GOLD_TOKEN_SCORE,
+    OPEN_PR_THRESHOLD_SILVER_TOKEN_SCORE,
     SECONDS_PER_DAY,
     SECONDS_PER_HOUR,
     TIME_DECAY_GRACE_PERIOD_HOURS,
@@ -252,19 +252,18 @@ def count_repository_contributors(miner_evaluations: Dict[int, MinerEvaluation])
 
 
 def calculate_open_pr_threshold(
-    merged_prs: list[PullRequest],
     tier_stats: Dict[Tier, TierStats] = None,
 ) -> int:
     """
-    Calculate dynamic open PR threshold based on merged PR count per tier.
+    Calculate dynamic open PR threshold based on token score per tier.
 
-    Top contributors who have merged more PRs in UNLOCKED tiers
+    Top contributors who have earned more token score in UNLOCKED tiers
     get a higher threshold before the spam penalty applies.
 
-    Bonus = floor(merged_prs / required) for each unlocked tier (hierarchical):
-    - Bronze: floor(bronze_prs / 20) - e.g., 40 PRs = +2 bonus
-    - Silver: floor(silver_prs / 10) - requires Bronze bonus > 0
-    - Gold: floor(gold_prs / 5) - requires Bronze & Silver bonuses > 0
+    Bonus = floor(token_score / required) for each unlocked tier (hierarchical):
+    - Bronze: floor(bronze_token_score / 200) - e.g., 400 score = +2 bonus
+    - Silver: floor(silver_token_score / 500) - requires Bronze bonus > 0
+    - Gold: floor(gold_token_score / 1000) - requires Bronze & Silver bonuses > 0
 
     Threshold = min(BASE_THRESHOLD + bonus, MAX_OPEN_PR_THRESHOLD)
     """
@@ -278,30 +277,23 @@ def calculate_open_pr_threshold(
         if is_tier_unlocked(tier, tier_stats, log_reasons=False):
             unlocked_tiers.add(tier)
 
-    # Count merged PRs per tier (only from unlocked tiers)
-    tier_counts = {Tier.BRONZE: 0, Tier.SILVER: 0, Tier.GOLD: 0}
-    for pr in merged_prs:
-        tier = get_tier_from_config(pr.repository_tier_configuration) if pr.repository_tier_configuration else None
-        if tier and tier in unlocked_tiers:
-            tier_counts[tier] += 1
-
     bonus = 0
 
-    # Bronze bonus: floor(bronze_prs / 20) - e.g., 40 PRs = +2 bonus
+    # Bronze bonus: floor(bronze_token_score / 100)
     bronze_bonus = 0
     if Tier.BRONZE in unlocked_tiers:
-        bronze_bonus = tier_counts[Tier.BRONZE] // OPEN_PR_THRESHOLD_BRONZE_REQUIRED
+        bronze_bonus = int(tier_stats[Tier.BRONZE].token_score // OPEN_PR_THRESHOLD_BRONZE_TOKEN_SCORE)
     bonus += bronze_bonus
 
-    # Silver bonus: floor(silver_prs / 10) - requires Bronze bonus > 0
+    # Silver bonus: floor(silver_token_score / 300) - requires Bronze bonus > 0
     silver_bonus = 0
     if Tier.SILVER in unlocked_tiers and bronze_bonus > 0:
-        silver_bonus = tier_counts[Tier.SILVER] // OPEN_PR_THRESHOLD_SILVER_REQUIRED
+        silver_bonus = int(tier_stats[Tier.SILVER].token_score // OPEN_PR_THRESHOLD_SILVER_TOKEN_SCORE)
     bonus += silver_bonus
 
-    # Gold bonus: floor(gold_prs / 5) - requires Bronze & Silver bonuses > 0
+    # Gold bonus: floor(gold_token_score / 500) - requires Bronze & Silver bonuses > 0
     if Tier.GOLD in unlocked_tiers and bronze_bonus > 0 and silver_bonus > 0:
-        gold_bonus = tier_counts[Tier.GOLD] // OPEN_PR_THRESHOLD_GOLD_REQUIRED
+        gold_bonus = int(tier_stats[Tier.GOLD].token_score // OPEN_PR_THRESHOLD_GOLD_TOKEN_SCORE)
         bonus += gold_bonus
 
     return min(EXCESSIVE_PR_PENALTY_BASE_THRESHOLD + bonus, MAX_OPEN_PR_THRESHOLD)
@@ -309,17 +301,16 @@ def calculate_open_pr_threshold(
 
 def calculate_pr_spam_penalty_multiplier(
     total_open_prs: int,
-    merged_prs: list[PullRequest],
     tier_stats: Dict[Tier, TierStats] = None,
 ) -> float:
     """
     Apply penalty for excessive open PRs.
 
-    The threshold is dynamic based on the miner's merged PR history
-    in UNLOCKED tiers only. Top contributors with more merged PRs
+    The threshold is dynamic based on the miner's token score
+    in UNLOCKED tiers only. Top contributors with more token score
     in unlocked tiers get a higher threshold before penalties apply.
     """
-    threshold = calculate_open_pr_threshold(merged_prs, tier_stats)
+    threshold = calculate_open_pr_threshold(tier_stats)
 
     if total_open_prs <= threshold:
         return 1.0
@@ -385,9 +376,7 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
 
         # Calculate spam multiplier once per miner (same for all their merged PRs)
         spam_multiplier = round(
-            calculate_pr_spam_penalty_multiplier(
-                evaluation.total_open_prs, evaluation.merged_pull_requests, tier_stats
-            ),
+            calculate_pr_spam_penalty_multiplier(evaluation.total_open_prs, tier_stats),
             2,
         )
 

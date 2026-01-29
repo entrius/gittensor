@@ -5611,6 +5611,9 @@
     "weight": 0.19
   },
   "xinnan-tech/xiaozhi-esp32-server": {
+    "additional_acceptable_branches": [
+      "live2d-actions"
+    ],
     "tier": "Bronze",
     "weight": 0.3
   },

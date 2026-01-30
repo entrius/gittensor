@@ -422,9 +422,6 @@ impl Default for CompetitionProposal {
     }
 }
 
-/// Type alias for backward compatibility
-pub type PairProposal = CompetitionProposal;
-
 /// Votes for a solution winner in a competition
 #[derive(Debug, Clone, Encode, Decode)]
 #[cfg_attr(feature = "std", derive(scale_info::TypeInfo, ink::storage::traits::StorageLayout))]

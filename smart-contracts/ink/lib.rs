@@ -417,17 +417,6 @@ mod issue_bounty_manager {
             Ok(())
         }
 
-        /// Alias for backward compatibility
-        #[ink(message)]
-        pub fn propose_pair(
-            &mut self,
-            issue_id: u64,
-            miner1_hotkey: AccountId,
-            miner2_hotkey: AccountId,
-        ) -> Result<(), Error> {
-            self.propose_competition(issue_id, miner1_hotkey, miner2_hotkey)
-        }
-
         /// Votes for a solution winner in an active competition.
         ///
         /// When consensus is reached, the competition is completed and the bounty
@@ -888,12 +877,6 @@ mod issue_bounty_manager {
         #[ink(message)]
         pub fn get_competition_proposal(&self, issue_id: u64) -> Option<CompetitionProposal> {
             self.competition_proposals.get(issue_id)
-        }
-
-        /// Alias for backward compatibility
-        #[ink(message)]
-        pub fn get_pair_proposal(&self, issue_id: u64) -> Option<CompetitionProposal> {
-            self.get_competition_proposal(issue_id)
         }
 
         /// Returns the competition ID a miner is in (0 if not in any)

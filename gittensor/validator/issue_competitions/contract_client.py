@@ -253,10 +253,6 @@ class CompetitionProposal:
     total_stake_voted: int
 
 
-# Backward compatibility alias
-PairProposal = CompetitionProposal
-
-
 class IssueCompetitionContractClient:
     """
     Client for interacting with the Issues Competition smart contract.
@@ -1004,11 +1000,6 @@ class IssueCompetitionContractClient:
             bt.logging.error(f'Error fetching competition proposal for issue {issue_id}: {e}')
             return None
 
-    # Backward compatibility alias
-    def get_pair_proposal(self, issue_id: int) -> Optional[CompetitionProposal]:
-        """Deprecated: Use get_competition_proposal instead."""
-        return self.get_competition_proposal(issue_id)
-
     def get_alpha_pool(self) -> int:
         """
         Get the current alpha pool balance.
@@ -1087,17 +1078,6 @@ class IssueCompetitionContractClient:
         except Exception as e:
             bt.logging.error(f'Error proposing competition: {e}')
             return False
-
-    # Backward compatibility alias
-    def propose_pair(
-        self,
-        issue_id: int,
-        miner1_hotkey: str,
-        miner2_hotkey: str,
-        wallet: bt.Wallet,
-    ) -> bool:
-        """Deprecated: Use propose_competition instead."""
-        return self.propose_competition(issue_id, miner1_hotkey, miner2_hotkey, wallet)
 
     def vote_solution(
         self,
@@ -1326,9 +1306,6 @@ class IssueCompetitionContractClient:
             proposed_at_block=raw_data.get('proposed_at_block') or raw_data.get('proposedAtBlock', 0),
             total_stake_voted=raw_data.get('total_stake_voted') or raw_data.get('totalStakeVoted', 0),
         )
-
-    # Backward compatibility alias
-    _parse_pair_proposal = _parse_competition_proposal
 
     # =========================================================================
     # Raw Extrinsic Execution (Ink! 5 Workaround)

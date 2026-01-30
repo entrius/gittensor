@@ -16,50 +16,48 @@ from typing import List, Optional, Dict, Any
 
 from rich.console import Console
 
-# CLI config file location (same as config_commands.py)
-CLI_CONFIG_FILE = Path.home() / '.gittensor' / 'cli_config.json'
-
 # Default paths and URLs
 GITTENSOR_DIR = Path.home() / '.gittensor'
+CONFIG_FILE = GITTENSOR_DIR / 'config.json'
 ISSUE_PREFERENCES_FILE = GITTENSOR_DIR / 'issue_preferences.json'
-CONTRACT_CONFIG_FILE = GITTENSOR_DIR / 'contract_config.json'
 DEFAULT_API_URL = 'http://localhost:3000'
 
 console = Console()
 
 
-def load_cli_config() -> dict:
-    """Load CLI configuration from file."""
-    if not CLI_CONFIG_FILE.exists():
-        return {}
-    try:
-        with open(CLI_CONFIG_FILE, 'r') as f:
-            return json.load(f)
-    except (json.JSONDecodeError, IOError):
-        return {}
-
-
-def get_preferences_file() -> Path:
-    """Get the path to the issue preferences file, creating directory if needed."""
-    GITTENSOR_DIR.mkdir(parents=True, exist_ok=True)
-    return ISSUE_PREFERENCES_FILE
-
-
-def load_contract_config() -> Dict[str, Any]:
+def load_config() -> Dict[str, Any]:
     """
-    Load contract configuration from environment or config file.
+    Load unified configuration from environment or config file.
 
     Priority:
-    1. CONTRACT_ADDRESS environment variable
-    2. ~/.gittensor/contract_config.json (written by dev-environment up.sh)
+    1. Environment variables (CONTRACT_ADDRESS, WS_ENDPOINT, GITTENSOR_API_URL)
+    2. ~/.gittensor/config.json
     3. Empty dict (defaults will be used)
 
+    Config file format:
+        {
+            "contract_address": "5Cxxx...",
+            "ws_endpoint": "ws://localhost:9944",
+            "api_url": "http://localhost:3000",
+            "network": "local",
+            "wallet": "default",
+            "hotkey": "default"
+        }
+
     Returns:
-        Dict with contract_address, ws_endpoint, netuid, network keys
+        Dict with all config keys
     """
     config: Dict[str, Any] = {}
 
-    # 1. Check environment variable first
+    # 1. Load from config file first (base values)
+    if CONFIG_FILE.exists():
+        try:
+            with open(CONFIG_FILE, 'r') as f:
+                config = json.load(f)
+        except (json.JSONDecodeError, IOError):
+            pass
+
+    # 2. Override with environment variables (higher priority)
     env_addr = os.environ.get('CONTRACT_ADDRESS')
     if env_addr:
         config['contract_address'] = env_addr
@@ -68,19 +66,17 @@ def load_contract_config() -> Dict[str, Any]:
     if env_ws:
         config['ws_endpoint'] = env_ws
 
-    # 2. Load from config file (fills in missing values)
-    if CONTRACT_CONFIG_FILE.exists():
-        try:
-            with open(CONTRACT_CONFIG_FILE, 'r') as f:
-                file_config = json.load(f)
-                # Only use file values if not already set from env
-                for key in ['contract_address', 'ws_endpoint', 'netuid', 'network']:
-                    if key not in config and key in file_config:
-                        config[key] = file_config[key]
-        except (json.JSONDecodeError, IOError):
-            pass
+    env_api = os.environ.get('GITTENSOR_API_URL')
+    if env_api:
+        config['api_url'] = env_api
 
     return config
+
+
+def get_preferences_file() -> Path:
+    """Get the path to the issue preferences file, creating directory if needed."""
+    GITTENSOR_DIR.mkdir(parents=True, exist_ok=True)
+    return ISSUE_PREFERENCES_FILE
 
 
 def get_contract_address(cli_value: str = '', testnet: bool = False) -> str:
@@ -97,7 +93,7 @@ def get_contract_address(cli_value: str = '', testnet: bool = False) -> str:
     if cli_value:
         return cli_value
 
-    config = load_contract_config()
+    config = load_config()
     if config.get('contract_address'):
         return config['contract_address']
 
@@ -122,7 +118,7 @@ def get_ws_endpoint(cli_value: str = '') -> str:
     if cli_value and cli_value != 'wss://entrypoint-finney.opentensor.ai:443':
         return cli_value
 
-    config = load_contract_config()
+    config = load_config()
     if config.get('ws_endpoint'):
         return config['ws_endpoint']
 
@@ -135,8 +131,8 @@ def get_api_url(cli_value: str = '') -> str:
 
     Priority:
     1. CLI argument (if not default)
-    2. GITTENSOR_API_URL environment variable
-    3. Config file (~/.gittensor/contract_config.json)
+    2. Environment variable (GITTENSOR_API_URL)
+    3. Config file (~/.gittensor/config.json)
     4. Default (localhost:3000)
 
     Args:
@@ -145,21 +141,13 @@ def get_api_url(cli_value: str = '') -> str:
     Returns:
         API URL string
     """
-    # 1. CLI argument (if explicitly provided and not default)
     if cli_value and cli_value != DEFAULT_API_URL:
         return cli_value
 
-    # 2. Environment variable
-    env_url = os.environ.get('GITTENSOR_API_URL')
-    if env_url:
-        return env_url
-
-    # 3. Config file
-    config = load_contract_config()
+    config = load_config()
     if config.get('api_url'):
         return config['api_url']
 
-    # 4. Default
     return DEFAULT_API_URL
 
 

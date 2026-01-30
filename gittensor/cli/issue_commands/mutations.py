@@ -21,11 +21,10 @@ from rich.panel import Panel
 
 from .helpers import (
     console,
-    load_cli_config,
+    load_config,
     load_preferences,
     save_preferences,
     clear_preferences,
-    load_contract_config,
     get_contract_address,
     get_ws_endpoint,
     ISSUE_PREFERENCES_FILE,
@@ -116,7 +115,7 @@ def issue_register(
     ws_endpoint = get_ws_endpoint(rpc_url)
 
     # Determine network name from config
-    config = load_contract_config()
+    config = load_config()
     network_name = config.get('network', 'mainnet').capitalize()
     if testnet:
         network_name = 'Testnet'
@@ -154,10 +153,9 @@ def issue_register(
         console.print(f'[dim]Connecting to {ws_endpoint}...[/dim]')
         substrate = SubstrateInterface(url=ws_endpoint)
 
-        # Load wallet from CLI config or CLI args
-        cli_config = load_cli_config()
-        effective_wallet = cli_config.get('wallet', wallet_name)
-        effective_hotkey = cli_config.get('hotkey', wallet_hotkey)
+        # Load wallet from config or CLI args
+        effective_wallet = config.get('wallet', wallet_name)
+        effective_hotkey = config.get('hotkey', wallet_hotkey)
 
         # For local development, check config first, then fall back to //Alice
         if network_name.lower() == 'local' and effective_wallet == 'default' and effective_hotkey == 'default':

@@ -25,20 +25,20 @@ from .mutations import (
     issue_withdraw,
 )
 
-# Re-export helpers for backward compatibility
+# Re-export helpers
 from .helpers import (
     console,
     load_preferences,
     save_preferences,
     clear_preferences,
-    load_contract_config,
+    load_config,
     get_contract_address,
     get_ws_endpoint,
     get_api_url,
     read_issues_from_contract,
     GITTENSOR_DIR,
     ISSUE_PREFERENCES_FILE,
-    CONTRACT_CONFIG_FILE,
+    CONFIG_FILE,
     DEFAULT_API_URL,
 )
 
@@ -102,13 +102,13 @@ __all__ = [
     'load_preferences',
     'save_preferences',
     'clear_preferences',
-    'load_contract_config',
+    'load_config',
     'get_contract_address',
     'get_ws_endpoint',
     'get_api_url',
     'read_issues_from_contract',
     'GITTENSOR_DIR',
     'ISSUE_PREFERENCES_FILE',
-    'CONTRACT_CONFIG_FILE',
+    'CONFIG_FILE',
     'DEFAULT_API_URL',
 ]

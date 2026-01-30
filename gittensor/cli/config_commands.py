@@ -21,27 +21,27 @@ from rich.table import Table
 
 # Config file location
 GITTENSOR_DIR = Path.home() / '.gittensor'
-CLI_CONFIG_FILE = GITTENSOR_DIR / 'cli_config.json'
+CONFIG_FILE = GITTENSOR_DIR / 'config.json'
 
 console = Console()
 
 
-def load_cli_config() -> dict:
-    """Load CLI configuration from file."""
-    if not CLI_CONFIG_FILE.exists():
+def load_config() -> dict:
+    """Load unified configuration from file."""
+    if not CONFIG_FILE.exists():
         return {}
     try:
-        with open(CLI_CONFIG_FILE, 'r') as f:
+        with open(CONFIG_FILE, 'r') as f:
             return json.load(f)
     except (json.JSONDecodeError, IOError):
         return {}
 
 
-def save_cli_config(config: dict) -> bool:
-    """Save CLI configuration to file."""
+def save_config(config: dict) -> bool:
+    """Save configuration to file."""
     GITTENSOR_DIR.mkdir(parents=True, exist_ok=True)
     try:
-        with open(CLI_CONFIG_FILE, 'w') as f:
+        with open(CONFIG_FILE, 'w') as f:
             json.dump(config, f, indent=2)
         return True
     except IOError as e:
@@ -51,7 +51,7 @@ def save_cli_config(config: dict) -> bool:
 
 def get_config_value(key: str, default: str = '') -> str:
     """Get a config value with optional default."""
-    config = load_cli_config()
+    config = load_config()
     return config.get(key, default)
 
 
@@ -77,7 +77,7 @@ def config(ctx):
 
 def show_config():
     """Display current configuration."""
-    config = load_cli_config()
+    config = load_config()
 
     if not config:
         console.print('\n[yellow]No configuration set.[/yellow]')
@@ -95,7 +95,7 @@ def show_config():
         table.add_row(key, str(value))
 
     console.print(table)
-    console.print(f'\n[dim]Config file: {CLI_CONFIG_FILE}[/dim]')
+    console.print(f'\n[dim]Config file: {CONFIG_FILE}[/dim]')
 
 
 @config.command('wallet')
@@ -112,7 +112,7 @@ def config_wallet(name: Optional[str]):
         gitt config wallet              # Show current wallet
         gitt config wallet owner-wallet # Set wallet to owner-wallet
     """
-    config = load_cli_config()
+    config = load_config()
 
     if name is None:
         current = config.get('wallet', '(not set)')
@@ -120,7 +120,7 @@ def config_wallet(name: Optional[str]):
         return
 
     config['wallet'] = name
-    if save_cli_config(config):
+    if save_config(config):
         console.print(f'[green]Wallet set to:[/green] {name}')
 
 
@@ -138,7 +138,7 @@ def config_hotkey(name: Optional[str]):
         gitt config hotkey          # Show current hotkey
         gitt config hotkey default  # Set hotkey to default
     """
-    config = load_cli_config()
+    config = load_config()
 
     if name is None:
         current = config.get('hotkey', '(not set)')
@@ -146,7 +146,7 @@ def config_hotkey(name: Optional[str]):
         return
 
     config['hotkey'] = name
-    if save_cli_config(config):
+    if save_config(config):
         console.print(f'[green]Hotkey set to:[/green] {name}')
 
 
@@ -164,7 +164,7 @@ def config_network(name: Optional[str]):
         gitt config network         # Show current network
         gitt config network local   # Set network to local
     """
-    config = load_cli_config()
+    config = load_config()
 
     if name is None:
         current = config.get('network', '(not set)')
@@ -172,7 +172,7 @@ def config_network(name: Optional[str]):
         return
 
     config['network'] = name
-    if save_cli_config(config):
+    if save_config(config):
         console.print(f'[green]Network set to:[/green] {name}')
 
         # Show endpoint hint based on network
@@ -196,7 +196,7 @@ def config_set(wallet: Optional[str], hotkey: Optional[str], network: Optional[s
         gitt config set --wallet contract-treasury --hotkey contract-treasury
         gitt config set --wallet mywallet --hotkey myhotkey --network local
     """
-    config = load_cli_config()
+    config = load_config()
     changed = []
     if wallet:
         config['wallet'] = wallet
@@ -208,7 +208,7 @@ def config_set(wallet: Optional[str], hotkey: Optional[str], network: Optional[s
         config['network'] = network
         changed.append(f'network={network}')
 
-    if changed and save_cli_config(config):
+    if changed and save_config(config):
         console.print(f'[green]Config updated: {", ".join(changed)}[/green]')
     elif not changed:
         console.print('[yellow]No options provided. Use --wallet, --hotkey, or --network[/yellow]')
@@ -224,7 +224,7 @@ def config_clear(force: bool):
         gitt config clear
         gitt config clear --force
     """
-    if not CLI_CONFIG_FILE.exists():
+    if not CONFIG_FILE.exists():
         console.print('[yellow]No configuration to clear.[/yellow]')
         return
 
@@ -233,7 +233,7 @@ def config_clear(force: bool):
         return
 
     try:
-        CLI_CONFIG_FILE.unlink()
+        CONFIG_FILE.unlink()
         console.print('[green]Configuration cleared.[/green]')
     except IOError as e:
         console.print(f'[red]Failed to clear config: {e}[/red]')

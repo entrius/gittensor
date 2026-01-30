@@ -32,7 +32,7 @@ from rich.panel import Panel
 from .helpers import (
     console,
     load_preferences,
-    load_contract_config,
+    load_config,
     get_contract_address,
     get_ws_endpoint,
     get_api_url,
@@ -101,7 +101,7 @@ def view_issues(rpc_url: str, contract: str, testnet: bool, from_api: bool, verb
     console.print('\n[bold cyan]Available Issues for Competition[/bold cyan]\n')
 
     # Load configuration
-    config = load_contract_config()
+    config = load_config()
     contract_addr = get_contract_address(contract, testnet)
     ws_endpoint = get_ws_endpoint(rpc_url)
 

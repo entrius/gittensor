@@ -4,12 +4,12 @@
 """Issue Competitions sub-mechanism for Gittensor validator."""
 
 from .contract_client import (
+    CompetitionProposal,
     CompetitionStatus,
     ContractCompetition,
     ContractIssue,
     IssueCompetitionContractClient,
     IssueStatus,
-    PairProposal,
 )
 from .elo import (
     CompetitionRecord,
@@ -55,7 +55,7 @@ __all__ = [
     'ContractCompetition',
     'IssueStatus',
     'CompetitionStatus',
-    'PairProposal',
+    'CompetitionProposal',
     # Pairing
     'find_pairs_for_issues',
     'find_best_pair_for_issue',

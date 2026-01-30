@@ -13,7 +13,7 @@ gitt issue admin (alias: a)     - Owner-only commands
 
 ## Configuration
 
-The CLI reads from `~/.gittensor/config.json` (unified config):
+The CLI reads from `~/.gittensor/config.json`:
 
 ```json
 {
@@ -26,16 +26,20 @@ The CLI reads from `~/.gittensor/config.json` (unified config):
 }
 ```
 
-**Priority order:**
-1. CLI arguments (highest)
-2. Environment variables (`CONTRACT_ADDRESS`, `WS_ENDPOINT`, `GITTENSOR_API_URL`)
-3. Config file (`~/.gittensor/config.json`)
+**Priority:** CLI arguments > config file
 
-**Local files:**
-| File | Description |
-|------|-------------|
-| `~/.gittensor/config.json` | Unified CLI configuration |
-| `~/.gittensor/issue_preferences.json` | Local issue preferences |
+**Manage via:** `gitt config <key> <value>`
+
+| Key | Description |
+|-----|-------------|
+| `wallet` | Default wallet name |
+| `hotkey` | Default hotkey name |
+| `network` | Network (local, testnet, mainnet) |
+| `ws_endpoint` | WebSocket RPC endpoint |
+| `api_url` | Gittensor API URL |
+| `contract_address` | Smart contract address (protected) |
+
+**Note:** `contract_address` requires confirmation to change. This is set automatically by deployment scripts.
 
 ## Command Reference
 

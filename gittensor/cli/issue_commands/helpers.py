@@ -7,7 +7,6 @@ Shared helper functions for issue commands.
 
 import hashlib
 import json
-import os
 import struct
 import urllib.request
 import urllib.error
@@ -27,12 +26,12 @@ console = Console()
 
 def load_config() -> Dict[str, Any]:
     """
-    Load unified configuration from environment or config file.
+    Load configuration from ~/.gittensor/config.json.
 
     Priority:
-    1. Environment variables (CONTRACT_ADDRESS, WS_ENDPOINT, GITTENSOR_API_URL)
+    1. CLI arguments (highest - handled by callers)
     2. ~/.gittensor/config.json
-    3. Empty dict (defaults will be used)
+    3. Defaults
 
     Config file format:
         {
@@ -44,33 +43,18 @@ def load_config() -> Dict[str, Any]:
             "hotkey": "default"
         }
 
+    Manage via: gitt config <key> <value>
+
     Returns:
         Dict with all config keys
     """
-    config: Dict[str, Any] = {}
-
-    # 1. Load from config file first (base values)
     if CONFIG_FILE.exists():
         try:
             with open(CONFIG_FILE, 'r') as f:
-                config = json.load(f)
+                return json.load(f)
         except (json.JSONDecodeError, IOError):
             pass
-
-    # 2. Override with environment variables (higher priority)
-    env_addr = os.environ.get('CONTRACT_ADDRESS')
-    if env_addr:
-        config['contract_address'] = env_addr
-
-    env_ws = os.environ.get('WS_ENDPOINT')
-    if env_ws:
-        config['ws_endpoint'] = env_ws
-
-    env_api = os.environ.get('GITTENSOR_API_URL')
-    if env_api:
-        config['api_url'] = env_api
-
-    return config
+    return {}
 
 
 def get_preferences_file() -> Path:
@@ -127,13 +111,12 @@ def get_ws_endpoint(cli_value: str = '') -> str:
 
 def get_api_url(cli_value: str = '') -> str:
     """
-    Get API URL from CLI arg, env, or config file.
+    Get API URL from CLI arg or config file.
 
     Priority:
     1. CLI argument (if not default)
-    2. Environment variable (GITTENSOR_API_URL)
-    3. Config file (~/.gittensor/config.json)
-    4. Default (localhost:3000)
+    2. Config file (~/.gittensor/config.json)
+    3. Default (localhost:3000)
 
     Args:
         cli_value: Value passed via --api-url CLI option

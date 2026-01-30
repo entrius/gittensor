@@ -132,19 +132,16 @@ mod issue_bounty_manager {
         /// Mapping from miner hotkey to active competition ID
         miner_in_competition: Mapping<AccountId, u64>,
 
-        // Pair proposals
-        pair_proposals: Mapping<u64, PairProposal>,
-        has_pair_proposal: Mapping<u64, bool>,
-        pair_proposal_voters: Mapping<(u64, AccountId), bool>,
+        // Competition proposals
+        competition_proposals: Mapping<u64, CompetitionProposal>,
+        competition_proposal_voters: Mapping<(u64, AccountId), bool>,
 
         // Solution votes
         solution_votes: Mapping<u64, SolutionVote>,
-        has_solution_vote: Mapping<u64, bool>,
         solution_vote_voters: Mapping<(u64, AccountId), bool>,
 
         // Timeout votes
         timeout_votes: Mapping<u64, CancelVote>,
-        has_timeout_vote: Mapping<u64, bool>,
         timeout_vote_voters: Mapping<(u64, AccountId), bool>,
 
         // Issue cancel votes (validators can cancel issues at any stage)
@@ -188,14 +185,11 @@ mod issue_bounty_manager {
                 competitions: Mapping::default(),
                 issue_to_competition: Mapping::default(),
                 miner_in_competition: Mapping::default(),
-                pair_proposals: Mapping::default(),
-                has_pair_proposal: Mapping::default(),
-                pair_proposal_voters: Mapping::default(),
+                competition_proposals: Mapping::default(),
+                competition_proposal_voters: Mapping::default(),
                 solution_votes: Mapping::default(),
-                has_solution_vote: Mapping::default(),
                 solution_vote_voters: Mapping::default(),
                 timeout_votes: Mapping::default(),
-                has_timeout_vote: Mapping::default(),
                 timeout_vote_voters: Mapping::default(),
                 cancel_issue_votes: Mapping::default(),
                 cancel_issue_voters: Mapping::default(),
@@ -363,9 +357,10 @@ mod issue_bounty_manager {
         // Validator Consensus Functions
         // ========================================================================
 
-        /// Proposes a pair of miners for a competition on an issue
+        /// Proposes a competition between two miners on an issue.
+        /// If consensus is reached, the competition starts automatically.
         #[ink(message)]
-        pub fn propose_pair(
+        pub fn propose_competition(
             &mut self,
             issue_id: u64,
             miner1_hotkey: AccountId,
@@ -395,7 +390,7 @@ mod issue_bounty_manager {
 
             let current_block = self.env().block_number();
 
-            let proposal = PairProposal {
+            let proposal = CompetitionProposal {
                 issue_id,
                 miner1_hotkey,
                 miner2_hotkey,
@@ -405,9 +400,8 @@ mod issue_bounty_manager {
                 votes_count: 1,
             };
 
-            self.pair_proposals.insert(issue_id, &proposal);
-            self.has_pair_proposal.insert(issue_id, &true);
-            self.pair_proposal_voters.insert((issue_id, caller), &true);
+            self.competition_proposals.insert(issue_id, &proposal);
+            self.competition_proposal_voters.insert((issue_id, caller), &true);
 
             self.env().emit_event(PairVoteCast {
                 issue_id,
@@ -415,12 +409,23 @@ mod issue_bounty_manager {
                 stake,
             });
 
-            if self.check_consensus(proposal.votes_count ) {
+            if self.check_consensus(proposal.votes_count) {
                 self.start_competition(issue_id, miner1_hotkey, miner2_hotkey);
-                self.clear_pair_proposal(issue_id);
+                self.clear_competition_proposal(issue_id);
             }
 
             Ok(())
+        }
+
+        /// Alias for backward compatibility
+        #[ink(message)]
+        pub fn propose_pair(
+            &mut self,
+            issue_id: u64,
+            miner1_hotkey: AccountId,
+            miner2_hotkey: AccountId,
+        ) -> Result<(), Error> {
+            self.propose_competition(issue_id, miner1_hotkey, miner2_hotkey)
         }
 
         /// Votes for a solution winner in an active competition.
@@ -879,14 +884,16 @@ mod issue_bounty_manager {
             self.competitions.get(competition_id)
         }
 
-        /// Returns a pair proposal for an issue
+        /// Returns the competition proposal for an issue
         #[ink(message)]
-        pub fn get_pair_proposal(&self, issue_id: u64) -> Option<PairProposal> {
-            if self.has_pair_proposal.get(issue_id).unwrap_or(false) {
-                self.pair_proposals.get(issue_id)
-            } else {
-                None
-            }
+        pub fn get_competition_proposal(&self, issue_id: u64) -> Option<CompetitionProposal> {
+            self.competition_proposals.get(issue_id)
+        }
+
+        /// Alias for backward compatibility
+        #[ink(message)]
+        pub fn get_pair_proposal(&self, issue_id: u64) -> Option<CompetitionProposal> {
+            self.get_competition_proposal(issue_id)
         }
 
         /// Returns the competition ID a miner is in (0 if not in any)
@@ -1028,10 +1035,9 @@ mod issue_bounty_manager {
             pr_url_hash: [u8; 32],
             winner_coldkey: AccountId,
         ) -> SolutionVote {
-            if self.has_solution_vote.get(competition_id).unwrap_or(false) {
-                self.solution_votes.get(competition_id).unwrap_or_default()
+            if let Some(vote) = self.solution_votes.get(competition_id) {
+                vote
             } else {
-                self.has_solution_vote.insert(competition_id, &true);
                 SolutionVote {
                     competition_id,
                     winner_hotkey,
@@ -1045,10 +1051,9 @@ mod issue_bounty_manager {
 
         /// Gets existing timeout vote or creates a new one.
         fn get_or_create_timeout_vote(&mut self, competition_id: u64) -> CancelVote {
-            if self.has_timeout_vote.get(competition_id).unwrap_or(false) {
-                self.timeout_votes.get(competition_id).unwrap_or_default()
+            if let Some(vote) = self.timeout_votes.get(competition_id) {
+                vote
             } else {
-                self.has_timeout_vote.insert(competition_id, &true);
                 CancelVote {
                     competition_id,
                     reason_hash: [0u8; 32],
@@ -1332,7 +1337,7 @@ mod issue_bounty_manager {
             }
         }
 
-        /// Cancels a competition, recycling bounty to pool.
+        /// Cancels a competition, attempting to recycle bounty with fallback to pool.
         /// Note: This helper is called by execute_cancel_issue. Issue status
         /// is set by the caller (Cancelled for validator cancel, Completed for other cases).
         fn cancel_competition(&mut self, competition_id: u64, reason_hash: [u8; 32]) {
@@ -1347,7 +1352,8 @@ mod issue_bounty_manager {
 
                     // Note: Issue status is NOT set here - caller handles it
 
-                    self.alpha_pool = self.alpha_pool.saturating_add(recycled_amount);
+                    // Try instant recycle with fallback to pool
+                    let _ = self.recycle(recycled_amount);
 
                     self.miner_in_competition.remove(competition.miner1_hotkey);
                     self.miner_in_competition.remove(competition.miner2_hotkey);
@@ -1368,7 +1374,7 @@ mod issue_bounty_manager {
         /// Hierarchy: Issue (parent) -> Competition (child)
         ///
         /// Order of Operations:
-        /// - If Registered/Active: Return bounty to alpha_pool, set status = Cancelled
+        /// - If Registered/Active: Try to recycle bounty, fallback to alpha_pool
         /// - If InCompetition: Cancel competition first, then set issue status = Cancelled
         fn execute_cancel_issue(&mut self, issue_id: u64, reason_hash: [u8; 32]) {
             let mut issue = match self.issues.get(issue_id) {
@@ -1381,13 +1387,14 @@ mod issue_bounty_manager {
             // If InCompetition, handle competition cleanup FIRST
             if issue.status == IssueStatus::InCompetition {
                 if let Some(competition_id) = self.issue_to_competition.get(issue_id) {
-                    // cancel_competition handles: release miners, emit event, add to pool
+                    // cancel_competition handles: release miners, emit event, recycle/pool
                     self.cancel_competition(competition_id, reason_hash);
                 }
             } else {
-                // Registered/Active: remove from bounty queue and return funds
+                // Registered/Active: remove from bounty queue
                 self.remove_from_bounty_queue(issue_id);
-                self.alpha_pool = self.alpha_pool.saturating_add(returned_bounty);
+                // Try instant recycle with fallback to pool
+                let _ = self.recycle(returned_bounty);
             }
 
             // Set issue status to Cancelled (not Completed - indicates validator cancel)
@@ -1450,22 +1457,54 @@ mod issue_bounty_manager {
             }
         }
 
-        /// Clears pair proposal data
-        fn clear_pair_proposal(&mut self, issue_id: u64) {
-            self.pair_proposals.remove(issue_id);
-            self.has_pair_proposal.insert(issue_id, &false);
+        /// Clears competition proposal data
+        fn clear_competition_proposal(&mut self, issue_id: u64) {
+            self.competition_proposals.remove(issue_id);
+        }
+
+        /// Recycles (destroys) alpha tokens via runtime call.
+        /// On failure, falls back to keeping in alpha_pool for retry.
+        ///
+        /// Returns true if recycle succeeded, false if fallback to pool.
+        fn recycle(&mut self, amount: Balance) -> bool {
+            if amount == 0 {
+                return true;
+            }
+
+            let amount_u64: u64 = amount.try_into().unwrap_or(u64::MAX);
+
+            let proxy_call = RawCall::proxied_recycle_alpha(
+                &self.owner,
+                &self.treasury_hotkey,
+                amount_u64,
+                self.netuid,
+            );
+
+            let result = self.env().call_runtime(&proxy_call);
+
+            if result.is_ok() {
+                self.last_known_stake = self.last_known_stake.saturating_sub(amount);
+                self.env().emit_event(EmissionsRecycled {
+                    amount,
+                    destination: self.treasury_hotkey,
+                });
+                true
+            } else {
+                // Fallback: keep in alpha_pool for next harvest attempt
+                self.alpha_pool = self.alpha_pool.saturating_add(amount);
+                self.env().emit_event(RecycleFailed { amount });
+                false
+            }
         }
 
         /// Clears solution vote data
         fn clear_solution_vote(&mut self, competition_id: u64) {
             self.solution_votes.remove(competition_id);
-            self.has_solution_vote.insert(competition_id, &false);
         }
 
         /// Clears timeout vote data
         fn clear_timeout_vote(&mut self, competition_id: u64) {
             self.timeout_votes.remove(competition_id);
-            self.has_timeout_vote.insert(competition_id, &false);
         }
     }
 

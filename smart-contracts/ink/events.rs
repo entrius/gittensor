@@ -137,3 +137,10 @@ pub struct StakeMoveFailedWarning {
     pub amount: u128,
     pub validator: AccountId,
 }
+
+/// Event emitted when recycling fails (amount kept in alpha_pool for retry)
+#[ink::event]
+pub struct RecycleFailed {
+    #[ink(topic)]
+    pub amount: u128,
+}

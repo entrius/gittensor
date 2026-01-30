@@ -388,10 +388,10 @@ impl Default for Competition {
     }
 }
 
-/// A proposal to pair two miners for a competition
+/// A proposal to start a competition between two miners
 #[derive(Debug, Clone, Encode, Decode)]
 #[cfg_attr(feature = "std", derive(scale_info::TypeInfo, ink::storage::traits::StorageLayout))]
-pub struct PairProposal {
+pub struct CompetitionProposal {
     /// ID of the issue for this proposal
     pub issue_id: u64,
     /// First miner's hotkey
@@ -408,7 +408,7 @@ pub struct PairProposal {
     pub votes_count: u32,
 }
 
-impl Default for PairProposal {
+impl Default for CompetitionProposal {
     fn default() -> Self {
         Self {
             issue_id: 0,
@@ -421,6 +421,9 @@ impl Default for PairProposal {
         }
     }
 }
+
+/// Type alias for backward compatibility
+pub type PairProposal = CompetitionProposal;
 
 /// Votes for a solution winner in a competition
 #[derive(Debug, Clone, Encode, Decode)]

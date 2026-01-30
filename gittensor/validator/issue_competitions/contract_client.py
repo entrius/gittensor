@@ -242,7 +242,7 @@ class ContractCompetition:
 
 
 @dataclass
-class PairProposal:
+class CompetitionProposal:
     """A proposal to pair two miners for a competition."""
 
     issue_id: int
@@ -251,6 +251,10 @@ class PairProposal:
     proposer: str
     proposed_at_block: int
     total_stake_voted: int
+
+
+# Backward compatibility alias
+PairProposal = CompetitionProposal
 
 
 class IssueCompetitionContractClient:
@@ -973,9 +977,9 @@ class IssueCompetitionContractClient:
             bt.logging.error(f'Error fetching competition {competition_id}: {e}')
             return None
 
-    def get_pair_proposal(self, issue_id: int) -> Optional[PairProposal]:
+    def get_competition_proposal(self, issue_id: int) -> Optional[CompetitionProposal]:
         """
-        Get the active pair proposal for an issue.
+        Get the active competition proposal for an issue.
 
         Args:
             issue_id: The issue ID
@@ -990,15 +994,20 @@ class IssueCompetitionContractClient:
             keypair = self._get_read_keypair()
             result = self._contract.read(
                 keypair,
-                'get_pair_proposal',
+                'get_competition_proposal',
                 args={'issue_id': issue_id},
             )
             if result.contract_result_data is None:
                 return None
-            return self._parse_pair_proposal(result.contract_result_data)
+            return self._parse_competition_proposal(result.contract_result_data)
         except Exception as e:
-            bt.logging.error(f'Error fetching pair proposal for issue {issue_id}: {e}')
+            bt.logging.error(f'Error fetching competition proposal for issue {issue_id}: {e}')
             return None
+
+    # Backward compatibility alias
+    def get_pair_proposal(self, issue_id: int) -> Optional[CompetitionProposal]:
+        """Deprecated: Use get_competition_proposal instead."""
+        return self.get_competition_proposal(issue_id)
 
     def get_alpha_pool(self) -> int:
         """
@@ -1023,7 +1032,7 @@ class IssueCompetitionContractClient:
     # Transaction Functions (Write)
     # =========================================================================
 
-    def propose_pair(
+    def propose_competition(
         self,
         issue_id: int,
         miner1_hotkey: str,
@@ -1033,7 +1042,7 @@ class IssueCompetitionContractClient:
         """
         Propose a miner pair for competition.
 
-        Creates a new pair proposal or votes on an existing one if the same
+        Creates a new competition proposal or votes on an existing one if the same
         pair is proposed. If consensus is reached, competition starts automatically.
 
         Uses raw extrinsic submission to bypass Ink! 5 type decoding issues.
@@ -1048,18 +1057,18 @@ class IssueCompetitionContractClient:
             True if proposal/vote succeeded
         """
         if not self._ensure_contract():
-            bt.logging.warning('Cannot propose pair: contract not ready')
+            bt.logging.warning('Cannot propose competition: contract not ready')
             return False
 
         try:
             bt.logging.info(
-                f'Proposing pair for issue {issue_id}: '
+                f'Proposing competition for issue {issue_id}: '
                 f'{miner1_hotkey[:8]}... vs {miner2_hotkey[:8]}...'
             )
 
             keypair = wallet.hotkey
             tx_hash = self._exec_contract_raw(
-                method_name='propose_pair',
+                method_name='propose_competition',
                 args={
                     'issue_id': issue_id,
                     'miner1_hotkey': miner1_hotkey,
@@ -1069,15 +1078,26 @@ class IssueCompetitionContractClient:
             )
 
             if tx_hash:
-                bt.logging.info(f'Pair proposal succeeded: {tx_hash}')
+                bt.logging.info(f'Competition proposal succeeded: {tx_hash}')
                 return True
             else:
-                bt.logging.error('Pair proposal failed')
+                bt.logging.error('Competition proposal failed')
                 return False
 
         except Exception as e:
-            bt.logging.error(f'Error proposing pair: {e}')
+            bt.logging.error(f'Error proposing competition: {e}')
             return False
+
+    # Backward compatibility alias
+    def propose_pair(
+        self,
+        issue_id: int,
+        miner1_hotkey: str,
+        miner2_hotkey: str,
+        wallet: bt.Wallet,
+    ) -> bool:
+        """Deprecated: Use propose_competition instead."""
+        return self.propose_competition(issue_id, miner1_hotkey, miner2_hotkey, wallet)
 
     def vote_solution(
         self,
@@ -1296,9 +1316,9 @@ class IssueCompetitionContractClient:
     # Helper Functions
     # =========================================================================
 
-    def _parse_pair_proposal(self, raw_data: dict) -> PairProposal:
-        """Parse raw contract data into PairProposal."""
-        return PairProposal(
+    def _parse_competition_proposal(self, raw_data: dict) -> CompetitionProposal:
+        """Parse raw contract data into CompetitionProposal."""
+        return CompetitionProposal(
             issue_id=raw_data.get('issue_id') or raw_data.get('issueId', 0),
             miner1_hotkey=raw_data.get('miner1_hotkey') or raw_data.get('miner1Hotkey', ''),
             miner2_hotkey=raw_data.get('miner2_hotkey') or raw_data.get('miner2Hotkey', ''),
@@ -1306,6 +1326,9 @@ class IssueCompetitionContractClient:
             proposed_at_block=raw_data.get('proposed_at_block') or raw_data.get('proposedAtBlock', 0),
             total_stake_voted=raw_data.get('total_stake_voted') or raw_data.get('totalStakeVoted', 0),
         )
+
+    # Backward compatibility alias
+    _parse_pair_proposal = _parse_competition_proposal
 
     # =========================================================================
     # Raw Extrinsic Execution (Ink! 5 Workaround)

@@ -436,6 +436,7 @@ fn test_timeout_competition_returns_to_active() {
 }
 
 #[ink::test]
+#[ignore = "execute_cancel_issue uses recycle() which calls call_runtime (not supported in off-chain tests)"]
 fn test_execute_cancel_issue_recycles_bounty() {
     let accounts = default_accounts();
     set_caller(accounts.alice);
@@ -464,7 +465,7 @@ fn test_execute_cancel_issue_recycles_bounty() {
     let comp = contract.get_competition(comp_id).unwrap();
     assert_eq!(comp.status, CompetitionStatus::Cancelled);
 
-    // Bounty should be recycled to alpha pool
+    // Bounty should be in alpha pool (recycle fails in off-chain tests, falls back to pool)
     assert_eq!(contract.get_alpha_pool(), MIN_BOUNTY);
 
     // Issue marked Cancelled (not Completed - unified cancel behavior)
@@ -492,9 +493,6 @@ fn test_get_or_create_solution_vote_creates_new() {
     assert_eq!(vote.pr_url_hash, pr_hash);
     assert_eq!(vote.total_stake_voted, 0);
     assert_eq!(vote.votes_count, 0);
-
-    // has flag should be set
-    assert!(contract.has_solution_vote.get(1).unwrap_or(false));
 }
 
 #[ink::test]
@@ -527,7 +525,6 @@ fn test_clear_solution_vote() {
     let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, accounts.charlie, 74);
 
     // Create a vote
-    contract.has_solution_vote.insert(1, &true);
     let vote = SolutionVote {
         competition_id: 1,
         winner_hotkey: accounts.bob,
@@ -542,7 +539,6 @@ fn test_clear_solution_vote() {
     contract.clear_solution_vote(1);
 
     // Verify cleared
-    assert!(!contract.has_solution_vote.get(1).unwrap_or(false));
     assert!(contract.solution_votes.get(1).is_none());
 }
 
@@ -551,7 +547,7 @@ fn test_clear_solution_vote() {
 // ================================================================
 
 #[ink::test]
-fn test_propose_pair_same_miners_fails() {
+fn test_propose_competition_same_miners_fails() {
     let accounts = default_accounts();
     set_caller(accounts.alice);
     let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, accounts.charlie, 74);
@@ -569,12 +565,12 @@ fn test_propose_pair_same_miners_fails() {
     contract.fill_bounties();
 
     // Try to propose same miner twice
-    let result = contract.propose_pair(1, accounts.bob, accounts.bob);
+    let result = contract.propose_competition(1, accounts.bob, accounts.bob);
     assert_eq!(result, Err(Error::SameMiners));
 }
 
 #[ink::test]
-fn test_propose_pair_issue_not_active() {
+fn test_propose_competition_issue_not_active() {
     let accounts = default_accounts();
     set_caller(accounts.alice);
     let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, accounts.charlie, 74);
@@ -589,12 +585,12 @@ fn test_propose_pair_issue_not_active() {
         )
         .unwrap();
 
-    let result = contract.propose_pair(1, accounts.bob, accounts.charlie);
+    let result = contract.propose_competition(1, accounts.bob, accounts.charlie);
     assert_eq!(result, Err(Error::IssueNotActive));
 }
 
 #[ink::test]
-fn test_propose_pair_miner_already_in_competition() {
+fn test_propose_competition_miner_already_in_competition() {
     let accounts = default_accounts();
     set_caller(accounts.alice);
     let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, accounts.charlie, 74);
@@ -623,7 +619,7 @@ fn test_propose_pair_miner_already_in_competition() {
     contract.start_competition(1, accounts.bob, accounts.charlie);
 
     // Try to propose bob for another competition
-    let result = contract.propose_pair(2, accounts.bob, accounts.eve);
+    let result = contract.propose_competition(2, accounts.bob, accounts.eve);
     assert_eq!(result, Err(Error::MinerAlreadyInCompetition));
 }
 
@@ -780,21 +776,21 @@ fn test_validate_active_competition_not_active() {
 }
 
 #[ink::test]
-fn test_propose_pair_issue_not_found() {
+fn test_propose_competition_issue_not_found() {
     let accounts = default_accounts();
     set_caller(accounts.alice);
     let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, accounts.charlie, 74);
 
     // Propose pair for non-existent issue
-    let result = contract.propose_pair(1, accounts.bob, accounts.charlie);
+    let result = contract.propose_competition(1, accounts.bob, accounts.charlie);
     assert_eq!(result, Err(Error::IssueNotFound));
 }
 
-// NOTE: This test is ignored because propose_pair uses chain extensions
+// NOTE: This test is ignored because propose_competition uses chain extensions
 // for validator stake lookup, which is not supported in off-chain tests.
 #[ink::test]
-#[ignore = "propose_pair uses chain extensions for stake lookup"]
-fn test_propose_pair_replaces_existing_proposal() {
+#[ignore = "propose_competition uses chain extensions for stake lookup"]
+fn test_propose_competition_replaces_existing_proposal() {
     let accounts = default_accounts();
     set_caller(accounts.alice);
     let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, accounts.charlie, 74);
@@ -810,7 +806,7 @@ fn test_propose_pair_replaces_existing_proposal() {
     contract.fill_bounties();
 
     // Manually create an existing pair proposal
-    let proposal = PairProposal {
+    let proposal = CompetitionProposal {
         issue_id: 1,
         miner1_hotkey: accounts.bob,
         miner2_hotkey: accounts.charlie,
@@ -819,11 +815,10 @@ fn test_propose_pair_replaces_existing_proposal() {
         total_stake_voted: 100,
         votes_count: 1,
     };
-    contract.pair_proposals.insert(1, &proposal);
-    contract.has_pair_proposal.insert(1, &true);
+    contract.competition_proposals.insert(1, &proposal);
 
-    // New propose_pair should replace the existing proposal
-    let result = contract.propose_pair(1, accounts.django, accounts.eve);
+    // New propose_competition should replace the existing proposal
+    let result = contract.propose_competition(1, accounts.django, accounts.eve);
 
     // With REQUIRED_VALIDATOR_VOTES=1 and off-chain test (stake=0), this should fail
     // because the caller has no stake in off-chain tests
@@ -1193,7 +1188,6 @@ fn test_get_or_create_timeout_vote() {
     assert_eq!(vote.reason_hash, [0u8; 32]);
     assert_eq!(vote.total_stake_voted, 0);
     assert_eq!(vote.votes_count, 0);
-    assert!(contract.has_timeout_vote.get(1).unwrap_or(false));
 
     // Store with data, then retrieve existing
     let mut stored_vote = vote;
@@ -1241,7 +1235,6 @@ fn test_clear_timeout_vote() {
     let mut contract = IssueBountyManager::new(accounts.alice, accounts.bob, accounts.charlie, 74);
 
     // Create a timeout vote
-    contract.has_timeout_vote.insert(1, &true);
     let vote = CancelVote {
         competition_id: 1,
         reason_hash: [0u8; 32],
@@ -1253,7 +1246,6 @@ fn test_clear_timeout_vote() {
     // Clear it
     contract.clear_timeout_vote(1);
 
-    assert!(!contract.has_timeout_vote.get(1).unwrap_or(false));
     assert!(contract.timeout_votes.get(1).is_none());
 }
 

@@ -120,8 +120,6 @@ mod issue_bounty_manager {
         // Emission management
         /// Block number of last harvest
         last_harvest_block: u32,
-        /// Last known stake for delta calculation (prevents double-counting)
-        last_known_stake: Balance,
     }
 
     impl IssueBountyManager {
@@ -152,7 +150,6 @@ mod issue_bounty_manager {
                 cancel_issue_votes: Mapping::default(),
                 cancel_issue_voters: Mapping::default(),
                 last_harvest_block: 0,
-                last_known_stake: 0,
             }
         }
 
@@ -398,22 +395,25 @@ mod issue_bounty_manager {
         ///
         /// PERMISSIONLESS - Anyone can call this function.
         ///
-        /// Flow:
+        /// Flow (Ground Truth Accounting):
         /// 1. Query current stake on treasury hotkey (via chain extension)
-        /// 2. Calculate delta from last known stake (only count NEW emissions)
-        /// 3. Fill pending bounties in queue order
-        /// 4. Recycle any remainder to owner's coldkey
-        /// 5. If recycling fails, emit HarvestFailed event but keep in alpha_pool
+        /// 2. Calculate committed funds (sum of bounty_amount for Registered/Active issues)
+        /// 3. Available = current_stake - committed (ground truth, self-correcting)
+        /// 4. Fill pending bounties from available funds
+        /// 5. Recycle any remainder to owner's coldkey
+        /// 6. Update alpha_pool as read-only cache for UI
         #[ink(message)]
         pub fn harvest_emissions(&mut self) -> Result<HarvestResult, Error> {
             // Query current total stake via chain extension
             let current_stake = self.get_treasury_stake();
 
-            // Calculate delta: only new stake since last harvest counts as emissions
-            let pending = current_stake.saturating_sub(self.last_known_stake);
+            // Ground truth calculation: available = current_stake - committed
+            let committed = self.get_total_committed();
+            let available = current_stake.saturating_sub(committed);
 
-            if pending == 0 {
-                self.last_known_stake = current_stake;
+            if available == 0 {
+                // Update alpha_pool cache (should be 0 since nothing available)
+                self.alpha_pool = 0;
                 return Ok(HarvestResult {
                     harvested: 0,
                     bounties_filled: 0,
@@ -421,16 +421,13 @@ mod issue_bounty_manager {
                 });
             }
 
-            // Update last known stake BEFORE distribution
-            self.last_known_stake = current_stake;
-
-            // Add only the NEW emissions to the alpha pool for bounty filling
-            self.alpha_pool = self.alpha_pool.saturating_add(pending);
+            // Set alpha_pool to available funds for bounty filling
+            self.alpha_pool = available;
 
             let mut bounties_filled: u32 = 0;
             let alpha_before = self.alpha_pool;
 
-            // Fill bounties from alpha pool
+            // Fill bounties from available funds
             self.fill_bounties();
 
             // Calculate how much was allocated to bounties
@@ -468,8 +465,6 @@ mod issue_bounty_manager {
                 let move_result = self.env().call_runtime(&move_call);
 
                 if move_result.is_ok() {
-                    self.last_known_stake = self.last_known_stake.saturating_sub(bounty_funds_allocated);
-
                     self.env().emit_event(StakeMovedToValidator {
                         amount: bounty_funds_allocated,
                         validator: self.validator_hotkey,
@@ -501,7 +496,6 @@ mod issue_bounty_manager {
                 if result.is_ok() {
                     recycled = to_recycle;
                     self.alpha_pool = 0;
-                    self.last_known_stake = self.last_known_stake.saturating_sub(recycled);
 
                     self.env().emit_event(EmissionsRecycled {
                         amount: recycled,
@@ -518,13 +512,13 @@ mod issue_bounty_manager {
             self.last_harvest_block = self.env().block_number();
 
             self.env().emit_event(EmissionsHarvested {
-                amount: pending,
+                amount: available,
                 bounties_filled,
                 recycled,
             });
 
             Ok(HarvestResult {
-                harvested: pending,
+                harvested: available,
                 bounties_filled,
                 recycled,
             })
@@ -816,6 +810,20 @@ mod issue_bounty_manager {
             }
         }
 
+        /// Calculate total funds committed to non-finalized issues (ground truth).
+        /// Iterates through all issues and sums bounty_amount for Registered/Active issues.
+        fn get_total_committed(&self) -> u128 {
+            let mut committed = 0u128;
+            for issue_id in 1..self.next_issue_id {
+                if let Some(issue) = self.issues.get(issue_id) {
+                    if matches!(issue.status, IssueStatus::Registered | IssueStatus::Active) {
+                        committed = committed.saturating_add(issue.bounty_amount);
+                    }
+                }
+            }
+            committed
+        }
+
         /// Checks if vote count meets minimum consensus threshold.
         fn check_consensus(&self, votes_count: u32) -> bool {
             votes_count >= REQUIRED_VALIDATOR_VOTES
@@ -951,7 +959,6 @@ mod issue_bounty_manager {
             let result = self.env().call_runtime(&proxy_call);
 
             if result.is_ok() {
-                self.last_known_stake = self.last_known_stake.saturating_sub(amount);
                 self.env().emit_event(EmissionsRecycled {
                     amount,
                     destination: self.treasury_hotkey,

@@ -23,6 +23,10 @@
     "tier": "Gold",
     "weight": 27.91
   },
+  "EclairFoundation/eclair": {
+    "tier": "Gold",
+    "weight": 30.27
+  },
   "Aider-AI/aider": {
     "tier": "Bronze",
     "weight": 0.18

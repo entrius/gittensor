@@ -2,9 +2,11 @@
 
 mod errors;
 mod events;
+mod runtime_calls;
 mod types;
 
 pub use errors::Error;
+pub use runtime_calls::RawCall;
 pub use types::*;
 
 // ============================================================================
@@ -62,6 +64,7 @@ impl ink::env::Environment for CustomEnvironment {
 #[ink::contract(env = crate::CustomEnvironment)]
 mod issue_bounty_manager {
     use crate::events::*;
+    use crate::runtime_calls::RawCall;
     use crate::types::*;
     use crate::Error;
     use ink::prelude::string::String;
@@ -199,6 +202,7 @@ mod issue_bounty_manager {
                 target_bounty,
                 status: IssueStatus::Registered,
                 registered_at_block: current_block,
+                solver_coldkey: None,
             };
 
             self.issues.insert(issue_id, &new_issue);
@@ -524,18 +528,37 @@ mod issue_bounty_manager {
             })
         }
 
-        /// Manual payout fallback for edge cases where auto-payout failed.
+        /// Manual payout retry for cases where auto-payout failed.
+        /// Uses solver determined by validator consensus, not caller-specified.
         #[ink(message)]
-        pub fn payout_bounty(
-            &mut self,
-            issue_id: u64,
-            solver_coldkey: AccountId,
-        ) -> Result<Balance, Error> {
+        pub fn payout_bounty(&mut self, issue_id: u64) -> Result<Balance, Error> {
             if self.env().caller() != self.owner {
                 return Err(Error::NotOwner);
             }
 
-            self.execute_payout(issue_id, solver_coldkey)
+            let issue = self.issues.get(issue_id).ok_or(Error::IssueNotFound)?;
+
+            if issue.status != IssueStatus::Completed {
+                return Err(Error::BountyNotCompleted);
+            }
+
+            if issue.bounty_amount == 0 {
+                return Err(Error::BountyAlreadyPaid);
+            }
+
+            let solver_coldkey = issue.solver_coldkey.ok_or(Error::NoSolverSet)?;
+            let payout = issue.bounty_amount;
+
+            // Attempt payout
+            let result = self.execute_payout_internal(issue_id, solver_coldkey, payout)?;
+
+            // Zero bounty_amount on success
+            if let Some(mut issue) = self.issues.get(issue_id) {
+                issue.bounty_amount = 0;
+                self.issues.insert(issue_id, &issue);
+            }
+
+            Ok(result)
         }
 
         // ========================================================================
@@ -840,9 +863,13 @@ mod issue_bounty_manager {
             if let Some(mut issue) = self.issues.get(issue_id) {
                 let payout = issue.bounty_amount;
 
+                // Mark issue as completed and store solver
                 issue.status = IssueStatus::Completed;
-                issue.bounty_amount = 0;
+                issue.solver_coldkey = Some(solver_coldkey);
                 self.issues.insert(issue_id, &issue);
+
+                // Explicitly remove from bounty queue (don't rely on lazy cleanup)
+                self.remove_from_bounty_queue(issue_id);
 
                 self.env().emit_event(BountyPaidOut {
                     issue_id,
@@ -850,9 +877,18 @@ mod issue_bounty_manager {
                     amount: payout,
                 });
 
-                // Auto-payout to solver
-                if payout > 0 {
-                    let _ = self.execute_payout_internal(issue_id, solver_coldkey, payout);
+                // Attempt payout - only zero bounty_amount on success
+                // If payout fails, bounty_amount remains non-zero for retry via payout_bounty
+                if payout > 0
+                    && self
+                        .execute_payout_internal(issue_id, solver_coldkey, payout)
+                        .is_ok()
+                {
+                    // Zero bounty_amount only after successful payout
+                    if let Some(mut issue) = self.issues.get(issue_id) {
+                        issue.bounty_amount = 0;
+                        self.issues.insert(issue_id, &issue);
+                    }
                 }
 
                 // Store solution info for reference (optional - can be queried from events)
@@ -881,32 +917,6 @@ mod issue_bounty_manager {
                 issue_id,
                 returned_bounty,
             });
-        }
-
-        /// Internal payout execution - transfers bounty to solver's coldkey
-        fn execute_payout(
-            &mut self,
-            issue_id: u64,
-            solver_coldkey: AccountId,
-        ) -> Result<Balance, Error> {
-            let issue = self
-                .issues
-                .get(issue_id)
-                .ok_or(Error::IssueNotFound)?;
-
-            if issue.status != IssueStatus::Completed {
-                return Err(Error::BountyNotCompleted);
-            }
-
-            // Get payout amount from solution vote (stored before completion)
-            let vote = self.solution_votes.get(issue_id).ok_or(Error::BountyNotFunded)?;
-            let payout_amount = vote.total_stake_voted; // Note: this should be bounty amount, not stake
-
-            if payout_amount == 0 {
-                return Err(Error::BountyNotFunded);
-            }
-
-            self.execute_payout_internal(issue_id, solver_coldkey, payout_amount)
         }
 
         /// Internal payout helper

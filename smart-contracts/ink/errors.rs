@@ -49,4 +49,8 @@ pub enum Error {
     // BountyAlreadyFunded - REMOVED in v0 (unused, fill_bounties skips silently)
     /// Issue has already been finalized (Completed or Cancelled)
     IssueAlreadyFinalized,
+    /// No solver was set on the completed issue (should not happen)
+    NoSolverSet,
+    /// Bounty has already been paid out
+    BountyAlreadyPaid,
 }

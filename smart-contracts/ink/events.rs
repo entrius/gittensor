@@ -20,12 +20,6 @@ pub struct IssueCancelled {
     pub returned_bounty: u128,
 }
 
-// PoolDeposit - REMOVED in v0 (no manual deposit function implemented)
-// CompetitionStarted - REMOVED in v0 (no competitions)
-// CompetitionCompleted - REMOVED in v0 (no competitions)
-// CompetitionEnded - REMOVED in v0 (no competitions)
-// PairVoteCast - REMOVED in v0 (no competitions)
-
 /// Event emitted when emissions are harvested
 #[ink::event]
 pub struct EmissionsHarvested {

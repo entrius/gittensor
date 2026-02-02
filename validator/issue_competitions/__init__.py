@@ -1,7 +1,7 @@
 # The MIT License (MIT)
 # Copyright 2025 Entrius
 
-"""Issue Bounties sub-mechanism for Gittensor validator (v0 - no competitions)."""
+"""Issue Bounties sub-mechanism for Gittensor validator"""
 
 from .contract_client import (
     ContractIssue,

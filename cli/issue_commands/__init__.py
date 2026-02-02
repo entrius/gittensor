@@ -2,7 +2,7 @@
 # Copyright © 2025 Entrius
 
 """
-CLI commands for managing issue bounties (v0 - no competitions).
+CLI commands for managing issue bounties
 
 Command structure:
     gitt issue (alias: i)           - Top-level mutation commands
@@ -37,7 +37,7 @@ from .helpers import (
 
 @click.group()
 def issue():
-    """Issue bounty commands (v0 - no competitions).
+    """Issue bounty commands
 
     Manage issue bounties for GitHub issues. Miners who solve issues
     receive ALPHA token bounties.

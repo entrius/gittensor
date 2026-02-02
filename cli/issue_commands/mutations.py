@@ -2,23 +2,16 @@
 # Copyright © 2025 Entrius
 
 """
-Top-level mutation commands for issue CLI (v0 - no competitions).
+Top-level mutation commands for issue CLI
 
 Commands:
     gitt issue register
     gitt issue harvest
-
-Removed (v1 only):
-    gitt issue deposit    - No external deposits in v0
-    gitt issue prefer     - No miner preferences in v0
-    gitt issue enroll     - No miner enrollment in v0
-    gitt issue withdraw   - No miner withdrawal in v0
 """
 
 from pathlib import Path
 
 import click
-from rich.console import Console
 from rich.panel import Panel
 
 from .helpers import (

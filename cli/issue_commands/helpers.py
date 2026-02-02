@@ -2,14 +2,12 @@
 # Copyright © 2025 Entrius
 
 """
-Shared helper functions for issue commands (v0 - no competitions).
+Shared helper functions for issue commands
 """
 
 import hashlib
 import json
 import struct
-import urllib.request
-import urllib.error
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 
@@ -162,7 +160,7 @@ def _get_contract_child_storage_key(substrate, contract_addr: str, verbose: bool
 
 def _read_contract_packed_storage(substrate, contract_addr: str, verbose: bool = False) -> Optional[Dict[str, Any]]:
     """
-    Read the packed root storage from a contract using childstate RPC (v0 - no competitions).
+    Read the packed root storage from a contract using childstate RPC
 
     This bypasses the broken state_call/ContractsApi_call method and reads
     storage directly. Works around substrate-interface Ink! 5 compatibility issues.
@@ -211,16 +209,16 @@ def _read_contract_packed_storage(substrate, contract_addr: str, verbose: bool =
     if verbose:
         console.print(f'[dim]Debug: Packed storage data length = {len(data)} bytes[/dim]')
 
-    # Decode packed struct (matches v0 IssueBountyManager in lib.rs):
+    # Decode packed struct (matches IssueBountyManager in lib.rs):
     # owner: AccountId (32 bytes)
     # treasury_hotkey: AccountId (32 bytes)
     # validator_hotkey: AccountId (32 bytes)
     # netuid: u16 (2 bytes)
     # next_issue_id: u64 (8 bytes)
     # alpha_pool: u128 (16 bytes)
-    # Total: 106 bytes minimum (v0 - no competition fields)
+    # Total: 106 bytes minimum
 
-    if len(data) < 106:  # Minimum expected size for v0
+    if len(data) < 106:
         if verbose:
             console.print(f'[dim]Debug: Packed storage too small ({len(data)} < 106 bytes)[/dim]')
         return None
@@ -269,7 +267,7 @@ def _compute_ink5_lazy_key(root_key_hex: str, encoded_key: bytes) -> str:
 
 def _read_issues_from_child_storage(substrate, contract_addr: str, verbose: bool = False) -> List[Dict[str, Any]]:
     """
-    Read all issues from contract child storage (v0 - no InCompetition status).
+    Read all issues from contract child storage.
 
     Uses Ink! 5 lazy mapping key computation to directly read issue storage.
 
@@ -312,7 +310,6 @@ def _read_issues_from_child_storage(substrate, contract_addr: str, verbose: bool
         return []
 
     issues = []
-    # v0 status names (no InCompetition)
     status_names = ['Registered', 'Active', 'Completed', 'Cancelled']
 
     # Iterate through all issue IDs (1 to next_issue_id - 1)

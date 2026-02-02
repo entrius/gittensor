@@ -2,19 +2,14 @@
 # Copyright © 2025 Entrius
 
 """
-Validator subgroup commands for issue CLI (v0 - no competitions).
+Validator subgroup commands for issue CLI
 
 Commands:
     gitt issue val vote-solution (alias: solution)
     gitt issue val vote-cancel-issue (alias: cancel)
-
-Removed (v1 only):
-    gitt issue val propose-competition  - No competitions
-    gitt issue val vote-timeout         - No competitions
 """
 
 import click
-from rich.console import Console
 
 from .helpers import (
     console,
@@ -25,7 +20,7 @@ from .helpers import (
 
 @click.group(name='val')
 def val():
-    """Validator consensus operations (v0 - no competitions).
+    """Validator consensus operations
 
     These commands are used by validators to manage issue bounty payouts.
 
@@ -73,11 +68,6 @@ def val_vote_solution(
     contract: str,
 ):
     """Vote for a solution on an active issue (triggers auto-payout on consensus).
-
-    v0 changes from v1:
-    - Votes on issue directly (not competition)
-    - No competition pairing required
-    - Any bronze+ miner can be voted as solver
 
     \b
     Arguments:

@@ -2,7 +2,7 @@
 # Copyright © 2025 Entrius
 
 """
-View subgroup commands for issue CLI (v0 - no competitions).
+View subgroup commands for issue CLI
 
 Commands:
     gitt issue view issues
@@ -10,24 +10,13 @@ Commands:
     gitt issue view pending-harvest
     gitt issue view issue <id>
     gitt issue view config
-
-Removed (v1 only):
-    gitt issue view competition <id>         - No competitions
-    gitt issue view competition-proposal <id> - No competitions
-    gitt issue view active-competitions      - No competitions
-    gitt issue view status                   - API command (no miner status)
-    gitt issue view elo                      - No ELO
-    gitt issue view competitions             - API command
-    gitt issue view leaderboard              - No ELO leaderboard
 """
 
 import json
 import urllib.request
 import urllib.error
-from typing import Optional
 
 import click
-from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
 
@@ -36,11 +25,9 @@ from .helpers import (
     load_config,
     get_contract_address,
     get_ws_endpoint,
-    get_api_url,
     read_issues_from_contract,
     _read_contract_packed_storage,
     _read_issues_from_child_storage,
-    DEFAULT_API_URL,
 )
 
 

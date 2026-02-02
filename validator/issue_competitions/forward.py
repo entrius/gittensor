@@ -2,9 +2,8 @@
 # Copyright 2025 Entrius
 
 """
-Forward pass for Issue Bounties sub-mechanism (v0 - no competitions).
+Forward pass for Issue Bounties sub-mechanism
 
-Simplified v0 logic:
 1. Continue running OSS contribution scoring (to know miner tiers)
 2. Get active issues from smart contract
 3. For each active issue:
@@ -164,8 +163,6 @@ async def forward_issue_bounties(
     tier_data: Dict[str, Dict],
 ) -> Dict[str, Any]:
     """
-    Simplified v0 forward loop for issue bounties.
-
     1. Get active issues from smart contract
     2. For each active issue:
        - Query GitHub API to check if issue is CLOSED

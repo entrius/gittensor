@@ -1,7 +1,7 @@
 # The MIT License (MIT)
 # Copyright 2025 Entrius
 
-"""Constants for the Issue Bounties sub-mechanism (v0 - no competitions)."""
+"""Constants for the Issue Bounties sub-mechanism"""
 
 import json
 import os

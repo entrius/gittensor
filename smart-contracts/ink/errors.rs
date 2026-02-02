@@ -1,6 +1,6 @@
 use scale::{Decode, Encode};
 
-/// Errors that can occur in the IssueBountyManager contract (v0 - no competitions)
+/// Errors that can occur in the IssueBountyManager contract
 #[derive(Debug, PartialEq, Eq, Encode, Decode)]
 #[cfg_attr(feature = "std", derive(scale_info::TypeInfo))]
 pub enum Error {
@@ -20,21 +20,12 @@ pub enum Error {
     InvalidIssueNumber,
     /// Issue is not in Active status
     IssueNotActive,
-    // MinerAlreadyInCompetition - REMOVED in v0 (no competitions)
-    // CompetitionNotFound - REMOVED in v0 (no competitions)
-    // CompetitionNotActive - REMOVED in v0 (no competitions)
     /// Solver is not a valid miner (bronze+ tier required)
     InvalidSolver,
-    // SubmissionWindowNotEnded - REMOVED in v0 (no competitions)
-    // DeadlineNotPassed - REMOVED in v0 (no competitions)
-    // ProposalNotFound - REMOVED in v0 (no competitions)
     /// Caller has already voted on this proposal
     AlreadyVoted,
-    // ProposalExpired - REMOVED in v0 (no competitions)
     /// Caller has insufficient stake to vote
     InsufficientStake,
-    // SameMiners - REMOVED in v0 (no competitions)
-    // BountyNotFound - REMOVED in v0 (unused, IssueNotFound used instead)
     /// Bounty has not been completed yet
     BountyNotCompleted,
     /// Bounty has no funds allocated
@@ -45,8 +36,6 @@ pub enum Error {
     ChainExtensionFailed,
     /// Recycling emissions failed during harvest
     RecyclingFailed,
-    // IssueNotFundable - REMOVED in v0 (unused, fill_bounties skips silently)
-    // BountyAlreadyFunded - REMOVED in v0 (unused, fill_bounties skips silently)
     /// Issue has already been finalized (Completed or Cancelled)
     IssueAlreadyFinalized,
     /// No solver was set on the completed issue (should not happen)

@@ -20,7 +20,7 @@ pub struct StakeInfo {
     pub is_registered: bool,
 }
 
-/// Status of an issue in its lifecycle (v0 - no competitions)
+/// Status of an issue in its lifecycle
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Encode, Decode, Default)]
 #[cfg_attr(feature = "std", derive(scale_info::TypeInfo, ink::storage::traits::StorageLayout))]
 pub enum IssueStatus {
@@ -29,14 +29,12 @@ pub enum IssueStatus {
     Registered,
     /// Issue has bounty filled, ready for solution
     Active,
-    // InCompetition - REMOVED in v0 (no competitions)
     /// Issue has been completed (solution found)
     Completed,
     /// Issue was cancelled
     Cancelled,
 }
 
-// CompetitionStatus - REMOVED in v0 (no competitions)
 
 /// Represents a GitHub issue registered for bounty
 #[derive(Debug, Clone, Encode, Decode, Default)]
@@ -62,10 +60,8 @@ pub struct Issue {
     pub solver_coldkey: Option<AccountId>,
 }
 
-// Competition struct - REMOVED in v0 (no competitions)
-// CompetitionProposal struct - REMOVED in v0 (no competitions)
 
-/// Votes for a solution on an issue (v0 - issue-based, not competition-based)
+/// Votes for a solution on an issue
 #[derive(Debug, Clone, Encode, Decode)]
 #[cfg_attr(feature = "std", derive(scale_info::TypeInfo, ink::storage::traits::StorageLayout))]
 pub struct SolutionVote {

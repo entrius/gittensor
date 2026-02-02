@@ -86,7 +86,7 @@ mod issue_bounty_manager {
     pub const REQUIRED_VALIDATOR_VOTES: u32 = 1;
 
     // ========================================================================
-    // Contract Storage (v0 - no competitions)
+    // Contract Storage
     // ========================================================================
 
     #[ink(storage)]
@@ -112,7 +112,7 @@ mod issue_bounty_manager {
         /// FIFO queue of issue IDs awaiting bounty fill
         bounty_queue: Vec<u64>,
 
-        // Solution votes (v0 - vote on issues directly, not competitions)
+        // Solution votes (vote on issues directly)
         solution_votes: Mapping<u64, SolutionVote>,
         solution_vote_voters: Mapping<(u64, AccountId), bool>,
 
@@ -130,7 +130,7 @@ mod issue_bounty_manager {
         // Constructor
         // ========================================================================
 
-        /// Creates a new IssueBountyManager contract (v0 - no competitions)
+        /// Creates a new IssueBountyManager contract
         #[ink(constructor)]
         pub fn new(
             owner: AccountId,
@@ -251,15 +251,10 @@ mod issue_bounty_manager {
         }
 
         // ========================================================================
-        // Validator Consensus Functions (v0 - simplified)
+        // Validator Consensus Functions
         // ========================================================================
 
         /// Votes for a solution on an active issue.
-        ///
-        /// v0 changes from v1:
-        /// - Votes on issue directly (not competition)
-        /// - No competition pairing required
-        /// - Any bronze+ miner can be voted as solver
         ///
         /// When consensus is reached, the issue is completed and bounty paid out.
         #[ink(message)]
@@ -852,7 +847,7 @@ mod issue_bounty_manager {
             votes_count >= REQUIRED_VALIDATOR_VOTES
         }
 
-        /// Completes an issue with a solution and triggers auto-payout (v0 - no competitions)
+        /// Completes an issue with a solution and triggers auto-payout
         fn complete_issue(
             &mut self,
             issue_id: u64,

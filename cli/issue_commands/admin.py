@@ -2,7 +2,7 @@
 # Copyright © 2025 Entrius
 
 """
-Admin subgroup commands for issue CLI (v0 - no competitions).
+Admin subgroup commands for issue CLI
 
 Commands:
     gitt issue admin cancel
@@ -10,9 +10,6 @@ Commands:
     gitt issue admin set-owner
     gitt issue admin set-treasury
     gitt issue admin set-validator
-
-Removed (v1 only):
-    gitt issue admin set-config  - No competition timing config in v0
 """
 
 from typing import Optional

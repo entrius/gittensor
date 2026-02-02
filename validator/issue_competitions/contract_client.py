@@ -1,7 +1,7 @@
 # The MIT License (MIT)
 # Copyright 2025 Entrius
 
-"""Client for interacting with the Issue Bounty smart contract (v0 - no competitions)."""
+"""Client for interacting with the Issue Bounty smart contract"""
 
 import hashlib
 import json
@@ -129,7 +129,7 @@ def get_contract_address_from_config() -> Optional[str]:
 
 
 class IssueStatus(Enum):
-    """Status of an issue in its lifecycle (v0 - no InCompetition)."""
+    """Status of an issue in its lifecycle"""
     REGISTERED = 0
     ACTIVE = 1
     COMPLETED = 2
@@ -152,7 +152,7 @@ class ContractIssue:
 
 class IssueCompetitionContractClient:
     """
-    Client for interacting with the Issue Bounty smart contract (v0 - no competitions).
+    Client for interacting with the Issue Bounty smart contract
 
     This client handles all read/write operations with the on-chain contract
     for the issue bounties sub-mechanism.
@@ -285,7 +285,7 @@ class IssueCompetitionContractClient:
         return '0x' + (h + data).hex()
 
     def _read_packed_storage(self) -> Optional[dict]:
-        """Read the packed root storage from the contract (v0 - no competitions)."""
+        """Read the packed root storage from the contract"""
         child_key = self._get_child_storage_key()
         if not child_key:
             return None
@@ -313,7 +313,6 @@ class IssueCompetitionContractClient:
 
             data = bytes.fromhex(val_result['result'].replace('0x', ''))
 
-            # v0 packed struct (smaller - no competition fields):
             # owner (32) + treasury (32) + validator_hotkey (32) + netuid (2) + next_issue_id (8)
             if len(data) < 106:
                 return None
@@ -564,7 +563,7 @@ class IssueCompetitionContractClient:
         wallet: bt.Wallet,
     ) -> bool:
         """
-        Vote for a solution on an active issue (v0 - issue-based, not competition-based).
+        Vote for a solution on an active issue
 
         Casts a vote for the proposed solver. When consensus is reached,
         the issue completes and bounty is automatically paid to the
@@ -866,7 +865,7 @@ class IssueCompetitionContractClient:
         solver_coldkey: str,
         wallet: bt.Wallet,
     ) -> Optional[int]:
-        """Pay out a completed bounty to the solver (v0 - issue-based)."""
+        """Pay out a completed bounty to the solver"""
         if not self._ensure_contract():
             return None
 

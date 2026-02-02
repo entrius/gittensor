@@ -20,14 +20,7 @@ pub struct IssueCancelled {
     pub returned_bounty: u128,
 }
 
-/// Event emitted when funds are deposited to the bounty pool
-#[ink::event]
-pub struct PoolDeposit {
-    #[ink(topic)]
-    pub depositor: AccountId,
-    pub amount: u128,
-}
-
+// PoolDeposit - REMOVED in v0 (no manual deposit function implemented)
 // CompetitionStarted - REMOVED in v0 (no competitions)
 // CompetitionCompleted - REMOVED in v0 (no competitions)
 // CompetitionEnded - REMOVED in v0 (no competitions)

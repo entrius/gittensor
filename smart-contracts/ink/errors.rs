@@ -34,8 +34,7 @@ pub enum Error {
     /// Caller has insufficient stake to vote
     InsufficientStake,
     // SameMiners - REMOVED in v0 (no competitions)
-    /// Bounty not found for the given issue ID
-    BountyNotFound,
+    // BountyNotFound - REMOVED in v0 (unused, IssueNotFound used instead)
     /// Bounty has not been completed yet
     BountyNotCompleted,
     /// Bounty has no funds allocated
@@ -46,10 +45,8 @@ pub enum Error {
     ChainExtensionFailed,
     /// Recycling emissions failed during harvest
     RecyclingFailed,
-    /// Issue cannot be funded in its current state (not Registered)
-    IssueNotFundable,
-    /// Bounty is already fully funded
-    BountyAlreadyFunded,
+    // IssueNotFundable - REMOVED in v0 (unused, fill_bounties skips silently)
+    // BountyAlreadyFunded - REMOVED in v0 (unused, fill_bounties skips silently)
     /// Issue has already been finalized (Completed or Cancelled)
     IssueAlreadyFinalized,
 }

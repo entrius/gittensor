@@ -67,24 +67,17 @@ pub struct HarvestFailed {
     pub amount: u128,
 }
 
-/// Event emitted when stake is moved to the Gittensor validator
-#[ink::event]
-pub struct StakeMovedToValidator {
-    #[ink(topic)]
-    pub amount: u128,
-    pub validator: AccountId,
-}
-
-/// Warning event when stake move to validator fails (non-fatal)
-#[ink::event]
-pub struct StakeMoveFailedWarning {
-    pub amount: u128,
-    pub validator: AccountId,
-}
-
 /// Event emitted when recycling fails (amount kept in alpha_pool for retry)
 #[ink::event]
 pub struct RecycleFailed {
     #[ink(topic)]
     pub amount: u128,
+}
+
+/// Debug event for stake query debugging
+#[ink::event]
+pub struct DebugStakeQuery {
+    pub treasury_stake: u128,
+    pub committed: u128,
+    pub available: u128,
 }

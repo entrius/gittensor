@@ -313,11 +313,11 @@ class IssueCompetitionContractClient:
 
             data = bytes.fromhex(val_result['result'].replace('0x', ''))
 
-            # owner (32) + treasury (32) + validator_hotkey (32) + netuid (2) + next_issue_id (8)
-            if len(data) < 106:
+            # owner (32) + treasury (32) + netuid (2) + next_issue_id (8)
+            if len(data) < 74:
                 return None
 
-            offset = 96  # Skip owner + treasury + validator_hotkey
+            offset = 64  # Skip owner + treasury
             netuid = struct.unpack_from('<H', data, offset)[0]
             offset += 2
             next_issue_id = struct.unpack_from('<Q', data, offset)[0]

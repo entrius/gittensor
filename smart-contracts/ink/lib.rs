@@ -93,10 +93,8 @@ mod issue_bounty_manager {
     pub struct IssueBountyManager {
         /// Contract owner with administrative privileges
         owner: AccountId,
-        /// Treasury hotkey for staking operations
+        /// Treasury hotkey for staking operations and bounty payouts
         treasury_hotkey: AccountId,
-        /// Validator hotkey where bounty funds are staked
-        validator_hotkey: AccountId,
         /// Subnet ID for this contract
         netuid: u16,
         /// Counter for generating unique issue IDs
@@ -135,13 +133,11 @@ mod issue_bounty_manager {
         pub fn new(
             owner: AccountId,
             treasury_hotkey: AccountId,
-            validator_hotkey: AccountId,
             netuid: u16,
         ) -> Self {
             Self {
                 owner,
                 treasury_hotkey,
-                validator_hotkey,
                 netuid,
                 next_issue_id: 1,
                 alpha_pool: 0,
@@ -353,15 +349,6 @@ mod issue_bounty_manager {
             Ok(())
         }
 
-        /// Sets a new validator hotkey
-        #[ink(message)]
-        pub fn set_validator_hotkey(&mut self, new_hotkey: AccountId) -> Result<(), Error> {
-            if self.env().caller() != self.owner {
-                return Err(Error::NotOwner);
-            }
-            self.validator_hotkey = new_hotkey;
-            Ok(())
-        }
 
         // ========================================================================
         // Emission Harvesting Functions
@@ -410,6 +397,13 @@ mod issue_bounty_manager {
             let committed = self.get_total_committed();
             let available = current_stake.saturating_sub(committed);
 
+            // DEBUG: Emit what chain extension actually returns during execution
+            self.env().emit_event(DebugStakeQuery {
+                treasury_stake: current_stake,
+                committed,
+                available,
+            });
+
             if available == 0 {
                 // Update alpha_pool cache (should be 0 since nothing available)
                 self.alpha_pool = 0;
@@ -445,34 +439,6 @@ mod issue_bounty_manager {
                             });
                         }
                     }
-                }
-            }
-
-            // Move bounty funds to validator hotkey
-            if bounty_funds_allocated > 0 {
-                let amount_u64: u64 = bounty_funds_allocated.try_into().unwrap_or(u64::MAX);
-
-                let move_call = RawCall::proxied_move_stake(
-                    &self.owner,
-                    &self.treasury_hotkey,
-                    &self.validator_hotkey,
-                    self.netuid,
-                    self.netuid,
-                    amount_u64,
-                );
-
-                let move_result = self.env().call_runtime(&move_call);
-
-                if move_result.is_ok() {
-                    self.env().emit_event(StakeMovedToValidator {
-                        amount: bounty_funds_allocated,
-                        validator: self.validator_hotkey,
-                    });
-                } else {
-                    self.env().emit_event(StakeMoveFailedWarning {
-                        amount: bounty_funds_allocated,
-                        validator: self.validator_hotkey,
-                    });
                 }
             }
 
@@ -570,12 +536,6 @@ mod issue_bounty_manager {
         #[ink(message)]
         pub fn treasury_hotkey(&self) -> AccountId {
             self.treasury_hotkey
-        }
-
-        /// Returns the validator hotkey
-        #[ink(message)]
-        pub fn validator_hotkey(&self) -> AccountId {
-            self.validator_hotkey
         }
 
         /// Returns the subnet ID
@@ -914,7 +874,7 @@ mod issue_bounty_manager {
             });
         }
 
-        /// Internal payout helper
+        /// Internal payout helper - transfers stake from treasury_hotkey to solver
         fn execute_payout_internal(
             &mut self,
             issue_id: u64,
@@ -926,7 +886,7 @@ mod issue_bounty_manager {
             let proxy_call = RawCall::proxied_transfer_stake(
                 &self.owner,
                 &solver_coldkey,
-                &self.validator_hotkey,
+                &self.treasury_hotkey,
                 self.netuid,
                 self.netuid,
                 amount_u64,

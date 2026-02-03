@@ -170,8 +170,7 @@ def issue_register(
             keypair = wallet.coldkey
 
         # Load contract
-        # Go up 4 levels: mutations.py -> issue_commands -> cli -> gittensor -> REPO_ROOT
-        contract_metadata = Path(__file__).parent.parent.parent.parent / 'smart-contracts' / 'ink' / 'target' / 'ink' / 'issue_bounty_manager.contract'
+        contract_metadata = Path(__file__).parent.parent.parent / 'smart-contracts' / 'ink' / 'target' / 'ink' / 'issue_bounty_manager.contract'
         if not contract_metadata.exists():
             console.print(f'[red]Error: Contract metadata not found at {contract_metadata}[/red]')
             return
@@ -201,22 +200,9 @@ def issue_register(
 
         # Check if transaction was successful
         if hasattr(result, 'is_success') and not result.is_success:
-            console.print(f'\n[red]Transaction failed: Contract rejected the request[/red]')
-
-            # Check for ContractReverted and provide helpful context
-            error_info = getattr(result, 'error_message', None)
-            is_revert = error_info and isinstance(error_info, dict) and error_info.get('name') == 'ContractReverted'
-
-            if is_revert:
-                console.print('[yellow]Possible reasons:[/yellow]')
-                console.print('  • Issue already registered (same repo + issue number)')
-                console.print('  • Bounty too low (minimum 10 ALPHA)')
-                console.print('  • Invalid repository format (must be owner/repo)')
-                console.print('  • Caller is not the contract owner')
-                console.print('[dim]Use "gitt issue view list" to check existing issues[/dim]')
-            elif error_info:
-                console.print(f'[red]Error: {error_info}[/red]')
-
+            console.print(f'\n[red]Transaction failed![/red]')
+            if hasattr(result, 'error_message'):
+                console.print(f'[red]Error: {result.error_message}[/red]')
             console.print(f'[cyan]Transaction Hash:[/cyan] {result.extrinsic_hash}')
             return
 
@@ -228,19 +214,7 @@ def issue_register(
         console.print(f'[red]Error: Missing dependency - {e}[/red]')
         console.print('[dim]Install with: pip install substrate-interface bittensor[/dim]')
     except Exception as e:
-        error_msg = str(e)
-        # Map contract errors to user-friendly messages
-        if 'ContractReverted' in error_msg:
-            console.print(f'\n[red]Transaction failed: Contract rejected the request[/red]')
-            # Provide context-specific hints based on the operation
-            console.print('[yellow]Possible reasons:[/yellow]')
-            console.print('  • Issue already registered (same repo + issue number)')
-            console.print('  • Bounty too low (minimum 10 ALPHA)')
-            console.print('  • Invalid repository format (must be owner/repo)')
-            console.print('  • Caller is not the contract owner')
-            console.print('[dim]Use "gitt issue view list" to check existing issues[/dim]')
-        else:
-            console.print(f'[red]Error registering issue: {e}[/red]')
+        console.print(f'[red]Error registering issue: {e}[/red]')
 
 
 @click.command('harvest')

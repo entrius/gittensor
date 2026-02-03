@@ -37,7 +37,7 @@ pub enum IssueStatus {
 
 
 /// Represents a GitHub issue registered for bounty
-#[derive(Debug, Clone, Encode, Decode, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Encode, Decode, Default)]
 #[cfg_attr(feature = "std", derive(scale_info::TypeInfo, ink::storage::traits::StorageLayout))]
 pub struct Issue {
     /// Unique issue ID

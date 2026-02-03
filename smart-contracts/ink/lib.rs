@@ -31,7 +31,8 @@ pub trait SubtensorExtension {
     /// Returns Option<StakeInfo> - None if no stake exists, Some(info) with stake details.
     /// ink! handles SCALE decoding automatically.
     #[ink(function = 0, handle_status = false)]
-    fn get_stake_info(hotkey: [u8; 32], coldkey: [u8; 32], netuid: u16) -> Option<crate::StakeInfo>;
+    fn get_stake_info(hotkey: [u8; 32], coldkey: [u8; 32], netuid: u16)
+        -> Option<crate::StakeInfo>;
 
     /// Transfer stake ownership to a different coldkey.
     /// Amount is in AlphaCurrency (u64), NOT u128!
@@ -130,11 +131,7 @@ mod issue_bounty_manager {
 
         /// Creates a new IssueBountyManager contract
         #[ink(constructor)]
-        pub fn new(
-            owner: AccountId,
-            treasury_hotkey: AccountId,
-            netuid: u16,
-        ) -> Self {
+        pub fn new(owner: AccountId, treasury_hotkey: AccountId, netuid: u16) -> Self {
             Self {
                 owner,
                 treasury_hotkey,
@@ -272,7 +269,12 @@ mod issue_bounty_manager {
             let (caller, stake) = self.get_caller_stake_validated()?;
 
             // Get or create vote, accumulate stake
-            let mut vote = self.get_or_create_solution_vote(issue_id, solver_hotkey, pr_url_hash, solver_coldkey);
+            let mut vote = self.get_or_create_solution_vote(
+                issue_id,
+                solver_hotkey,
+                pr_url_hash,
+                solver_coldkey,
+            );
             self.solution_vote_voters.insert((issue_id, caller), &true);
             vote.total_stake_voted = vote.total_stake_voted.saturating_add(stake);
             vote.votes_count = vote.votes_count.saturating_add(1);
@@ -349,7 +351,6 @@ mod issue_bounty_manager {
             Ok(())
         }
 
-
         // ========================================================================
         // Emission Harvesting Functions
         // ========================================================================
@@ -361,9 +362,10 @@ mod issue_bounty_manager {
             let hotkey_bytes: [u8; 32] = *self.treasury_hotkey.as_ref();
             let coldkey_bytes: [u8; 32] = *self.owner.as_ref();
 
-            let stake_info = self.env()
-                .extension()
-                .get_stake_info(hotkey_bytes, coldkey_bytes, self.netuid);
+            let stake_info =
+                self.env()
+                    .extension()
+                    .get_stake_info(hotkey_bytes, coldkey_bytes, self.netuid);
 
             match stake_info {
                 Some(info) => info.stake.0 as u128,
@@ -615,15 +617,27 @@ mod issue_bounty_manager {
 
         /// Checks if caller has already voted for a solution.
         fn check_not_voted_solution(&self, issue_id: u64, caller: AccountId) -> Result<(), Error> {
-            if self.solution_vote_voters.get((issue_id, caller)).unwrap_or(false) {
+            if self
+                .solution_vote_voters
+                .get((issue_id, caller))
+                .unwrap_or(false)
+            {
                 return Err(Error::AlreadyVoted);
             }
             Ok(())
         }
 
         /// Checks if caller has already voted to cancel an issue.
-        fn check_not_voted_cancel_issue(&self, issue_id: u64, caller: AccountId) -> Result<(), Error> {
-            if self.cancel_issue_voters.get((issue_id, caller)).unwrap_or(false) {
+        fn check_not_voted_cancel_issue(
+            &self,
+            issue_id: u64,
+            caller: AccountId,
+        ) -> Result<(), Error> {
+            if self
+                .cancel_issue_voters
+                .get((issue_id, caller))
+                .unwrap_or(false)
+            {
                 return Err(Error::AlreadyVoted);
             }
             Ok(())
@@ -652,7 +666,11 @@ mod issue_bounty_manager {
         }
 
         /// Gets existing issue cancel vote or creates a new one.
-        fn get_or_create_cancel_issue_vote(&mut self, issue_id: u64, reason_hash: [u8; 32]) -> CancelVote {
+        fn get_or_create_cancel_issue_vote(
+            &mut self,
+            issue_id: u64,
+            reason_hash: [u8; 32],
+        ) -> CancelVote {
             if let Some(vote) = self.cancel_issue_votes.get(issue_id) {
                 vote
             } else {
@@ -778,9 +796,10 @@ mod issue_bounty_manager {
             let validator_bytes: [u8; 32] = *validator.as_ref();
             let hotkey_bytes: [u8; 32] = *self.treasury_hotkey.as_ref();
 
-            let stake_info = self.env()
-                .extension()
-                .get_stake_info(hotkey_bytes, validator_bytes, self.netuid);
+            let stake_info =
+                self.env()
+                    .extension()
+                    .get_stake_info(hotkey_bytes, validator_bytes, self.netuid);
 
             match stake_info {
                 Some(info) => info.stake.0 as u128,
@@ -940,5 +959,10 @@ mod issue_bounty_manager {
         fn clear_solution_vote(&mut self, issue_id: u64) {
             self.solution_votes.remove(issue_id);
         }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        include!("tests.rs");
     }
 }

@@ -344,9 +344,8 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
         )
 
         # Calculate spam multiplier once per miner (same for all their merged PRs)
-        spam_multiplier = round(
-            calculate_pr_spam_penalty_multiplier(evaluation.total_open_prs, tier_stats),
-            2,
+        spam_multiplier = calculate_pr_spam_penalty_multiplier(
+            evaluation.total_open_prs, tier_stats
         )
 
         # Process merged PRs

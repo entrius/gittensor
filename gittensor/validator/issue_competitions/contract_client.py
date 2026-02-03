@@ -1669,7 +1669,9 @@ class IssueCompetitionContractClient:
         """
         Query total stake on treasury hotkey owned by the contract.
 
-        Uses the contract's chain extension to query Subtensor staking info.
+        NOTE: Chain extensions don't work in dry-run mode (state_call), so we
+        query the Subtensor Alpha storage directly instead of using the
+        contract's get_treasury_stake() method.
 
         Returns:
             Total stake amount (0 if contract not ready or no stake)
@@ -1677,11 +1679,72 @@ class IssueCompetitionContractClient:
         if not self._ensure_contract():
             return 0
 
-        # Use raw RPC call due to substrate-interface Ink! 5 decoding issues
         try:
-            value = self._read_contract_u128('get_treasury_stake')
-            bt.logging.debug(f'Treasury stake (raw read): {value}')
-            return value
+            # Read contract's packed storage to get treasury_hotkey, owner, and netuid
+            child_key = self._get_child_storage_key()
+            if not child_key:
+                bt.logging.debug('Cannot get treasury stake: no child storage key')
+                return 0
+
+            # Get packed storage key (ends with 00000000)
+            keys_result = self.subtensor.substrate.rpc_request(
+                'childstate_getKeysPaged', [child_key, '0x', 10, None, None]
+            )
+            keys = keys_result.get('result', [])
+            packed_key = next((k for k in keys if k.endswith('00000000')), None)
+            if not packed_key:
+                bt.logging.debug('Cannot get treasury stake: no packed storage key')
+                return 0
+
+            # Read packed storage
+            val_result = self.subtensor.substrate.rpc_request(
+                'childstate_getStorage', [child_key, packed_key, None]
+            )
+            if not val_result.get('result'):
+                bt.logging.debug('Cannot get treasury stake: no packed storage value')
+                return 0
+
+            data = bytes.fromhex(val_result['result'].replace('0x', ''))
+            if len(data) < 98:  # Need at least owner(32) + treasury(32) + validator(32) + netuid(2)
+                bt.logging.debug('Cannot get treasury stake: packed storage too small')
+                return 0
+
+            # Extract owner (coldkey), treasury_hotkey, and netuid from packed storage
+            owner = data[0:32]
+            treasury_hotkey = data[32:64]
+            netuid = struct.unpack_from('<H', data, 96)[0]
+
+            # Convert to SS58 addresses
+            owner_ss58 = self.subtensor.substrate.ss58_encode(owner.hex())
+            treasury_ss58 = self.subtensor.substrate.ss58_encode(treasury_hotkey.hex())
+
+            # Query SubtensorModule::Alpha directly
+            # Alpha storage: (hotkey, coldkey, netuid) -> U64F64 stake amount
+            alpha_result = self.subtensor.substrate.query(
+                'SubtensorModule',
+                'Alpha',
+                [treasury_ss58, owner_ss58, netuid]
+            )
+
+            if not alpha_result:
+                bt.logging.debug('No Alpha stake found')
+                return 0
+
+            # Alpha returns U64F64 fixed-point: bits field contains raw value
+            # Upper 64 bits are integer part (the stake amount in raw units)
+            if hasattr(alpha_result, 'value') and alpha_result.value:
+                bits = alpha_result.value.get('bits', 0)
+            elif isinstance(alpha_result, dict):
+                bits = alpha_result.get('bits', 0)
+            else:
+                bits = 0
+
+            # Extract integer part (upper 64 bits of U64F64)
+            stake_raw = bits >> 64 if bits else 0
+
+            bt.logging.debug(f'Treasury stake (direct query): {stake_raw} ({stake_raw / 1e9:.4f} α)')
+            return stake_raw
+
         except Exception as e:
             bt.logging.error(f'Error fetching treasury stake: {e}')
             return 0

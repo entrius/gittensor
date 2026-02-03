@@ -10,9 +10,7 @@ import bittensor as bt
 from gittensor.classes import Issue, MinerEvaluation, PrScoringResult, PRState, PullRequest
 from gittensor.constants import (
     DEFAULT_MERGED_PR_BASE_SCORE,
-    EXCESSIVE_PR_MIN_MULTIPLIER,
     EXCESSIVE_PR_PENALTY_BASE_THRESHOLD,
-    EXCESSIVE_PR_PENALTY_SLOPE,
     MAINTAINER_ASSOCIATIONS,
     MAINTAINER_ISSUE_BONUS,
     MAX_CODE_DENSITY_MULTIPLIER,
@@ -21,9 +19,7 @@ from gittensor.constants import (
     MAX_ISSUE_CLOSE_WINDOW_DAYS,
     MAX_OPEN_PR_THRESHOLD,
     MIN_TOKEN_SCORE_FOR_BASE_SCORE,
-    OPEN_PR_THRESHOLD_BRONZE_TOKEN_SCORE,
-    OPEN_PR_THRESHOLD_GOLD_TOKEN_SCORE,
-    OPEN_PR_THRESHOLD_SILVER_TOKEN_SCORE,
+    OPEN_PR_THRESHOLD_TOKEN_SCORE,
     SECONDS_PER_DAY,
     SECONDS_PER_HOUR,
     TIME_DECAY_GRACE_PERIOD_HOURS,
@@ -255,47 +251,23 @@ def calculate_open_pr_threshold(
     tier_stats: Dict[Tier, TierStats] = None,
 ) -> int:
     """
-    Calculate dynamic open PR threshold based on token score per tier.
+    Calculate dynamic open PR threshold based on total token score across unlocked tiers.
 
-    Top contributors who have earned more token score in UNLOCKED tiers
-    get a higher threshold before the spam penalty applies.
-
-    Bonus = floor(token_score / required) for each unlocked tier (hierarchical):
-    - Bronze: floor(bronze_token_score / 200) - e.g., 400 score = +2 bonus
-    - Silver: floor(silver_token_score / 500) - requires Bronze bonus > 0
-    - Gold: floor(gold_token_score / 1000) - requires Bronze & Silver bonuses > 0
+    Bonus = floor(total_unlocked_token_score / 500)
+    Example: 1500 token score across unlocked tiers / 500 = +3 bonus
 
     Threshold = min(BASE_THRESHOLD + bonus, MAX_OPEN_PR_THRESHOLD)
     """
-    # If no tier stats provided, use base threshold (no bonus)
     if tier_stats is None:
         return EXCESSIVE_PR_PENALTY_BASE_THRESHOLD
 
-    # Determine which tiers are unlocked
-    unlocked_tiers = set()
+    # Sum token scores from all unlocked tiers
+    total_unlocked_token_score = 0.0
     for tier in TIERS_ORDER:
         if is_tier_unlocked(tier, tier_stats, log_reasons=False):
-            unlocked_tiers.add(tier)
+            total_unlocked_token_score += tier_stats[tier].token_score
 
-    bonus = 0
-
-    # Bronze bonus: floor(bronze_token_score / 100)
-    bronze_bonus = 0
-    if Tier.BRONZE in unlocked_tiers:
-        bronze_bonus = int(tier_stats[Tier.BRONZE].token_score // OPEN_PR_THRESHOLD_BRONZE_TOKEN_SCORE)
-    bonus += bronze_bonus
-
-    # Silver bonus: floor(silver_token_score / 300) - requires Bronze bonus > 0
-    silver_bonus = 0
-    if Tier.SILVER in unlocked_tiers and bronze_bonus > 0:
-        silver_bonus = int(tier_stats[Tier.SILVER].token_score // OPEN_PR_THRESHOLD_SILVER_TOKEN_SCORE)
-    bonus += silver_bonus
-
-    # Gold bonus: floor(gold_token_score / 500) - requires Bronze & Silver bonuses > 0
-    if Tier.GOLD in unlocked_tiers and bronze_bonus > 0 and silver_bonus > 0:
-        gold_bonus = int(tier_stats[Tier.GOLD].token_score // OPEN_PR_THRESHOLD_GOLD_TOKEN_SCORE)
-        bonus += gold_bonus
-
+    bonus = int(total_unlocked_token_score // OPEN_PR_THRESHOLD_TOKEN_SCORE)
     return min(EXCESSIVE_PR_PENALTY_BASE_THRESHOLD + bonus, MAX_OPEN_PR_THRESHOLD)
 
 
@@ -306,18 +278,15 @@ def calculate_pr_spam_penalty_multiplier(
     """
     Apply penalty for excessive open PRs.
 
-    The threshold is dynamic based on the miner's token score
-    in UNLOCKED tiers only. Top contributors with more token score
-    in unlocked tiers get a higher threshold before penalties apply.
+    Binary multiplier:
+    - 1.0 if open PRs <= threshold
+    - 0.0 otherwise
+
+    The threshold is dynamic based on the miner's total token score
+    across unlocked tiers.
     """
     threshold = calculate_open_pr_threshold(tier_stats)
-
-    if total_open_prs <= threshold:
-        return 1.0
-
-    excess_pr_count = total_open_prs - threshold
-    calculated_multiplier = 1.0 - (excess_pr_count * EXCESSIVE_PR_PENALTY_SLOPE)
-    return max(EXCESSIVE_PR_MIN_MULTIPLIER, calculated_multiplier)
+    return 1.0 if total_open_prs <= threshold else 0.0
 
 
 def calculate_time_decay_multiplier(pr: PullRequest) -> float:

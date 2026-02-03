@@ -1,13 +1,10 @@
 """
-Tests for dynamic open PR threshold based on token score per tier.
+Tests for dynamic open PR threshold based on total token score across unlocked tiers.
 
-Top contributors who have earned more token score in UNLOCKED tiers
-get a higher threshold before the spam penalty applies.
+Bonus = floor(total_unlocked_token_score / 500)
+Example: 1500 token score across unlocked tiers / 500 = +3 bonus
 
-Bonus = floor(token_score / required) for each unlocked tier (hierarchical):
-- Bronze: floor(bronze_token_score / 200) - e.g., 400 score = +2 bonus
-- Silver: floor(silver_token_score / 500) - requires Bronze bonus > 0
-- Gold: floor(gold_token_score / 1000) - requires Bronze & Silver bonuses > 0
+Multiplier is binary: 1.0 if <= threshold, 0.0 otherwise
 
 Run tests:
     pytest tests/validator/test_dynamic_open_pr_threshold.py -v
@@ -57,7 +54,7 @@ class TestCalculateOpenPrThreshold:
     """Tests for calculate_open_pr_threshold function."""
 
     def test_no_tier_stats_returns_base_threshold(self):
-        """Without tier stats, threshold should be the base threshold (no bonus)."""
+        """Without tier stats, threshold should be the base threshold."""
         assert calculate_open_pr_threshold(tier_stats=None) == EXCESSIVE_PR_PENALTY_BASE_THRESHOLD
 
     def test_no_token_score_returns_base_threshold(self):
@@ -65,262 +62,143 @@ class TestCalculateOpenPrThreshold:
         tier_stats = make_tier_stats(bronze_merged=7, bronze_closed=3)
         assert calculate_open_pr_threshold(tier_stats) == EXCESSIVE_PR_PENALTY_BASE_THRESHOLD
 
-    def test_bronze_below_requirement_no_bonus(self):
-        """Bronze token score below requirement doesn't grant bonus."""
-        # Bronze unlocked: 70% credibility, 199 token score < 200 required
-        tier_stats = make_tier_stats(bronze_merged=7, bronze_closed=3, bronze_token_score=199.0)
+    def test_below_500_no_bonus(self):
+        """Token score below 500 doesn't grant bonus."""
+        tier_stats = make_tier_stats(bronze_merged=7, bronze_closed=3, bronze_token_score=499.0)
         assert calculate_open_pr_threshold(tier_stats) == EXCESSIVE_PR_PENALTY_BASE_THRESHOLD
 
-    def test_bronze_meets_requirement_gets_bonus(self):
-        """Bronze token score meeting requirement grants +1 bonus."""
-        # Bronze unlocked: 70% credibility, 200 token score = +1
-        tier_stats = make_tier_stats(bronze_merged=7, bronze_closed=3, bronze_token_score=200.0)
+    def test_500_token_score_gets_bonus(self):
+        """500 token score grants +1 bonus."""
+        tier_stats = make_tier_stats(bronze_merged=7, bronze_closed=3, bronze_token_score=500.0)
         assert calculate_open_pr_threshold(tier_stats) == EXCESSIVE_PR_PENALTY_BASE_THRESHOLD + 1
 
-    def test_bronze_double_requirement_gets_double_bonus(self):
-        """400 Bronze token score grants +2 bonus (floor(400/200) = 2)."""
-        # Bronze unlocked: 70% credibility
-        tier_stats = make_tier_stats(bronze_merged=7, bronze_closed=3, bronze_token_score=400.0)
+    def test_1000_token_score_gets_double_bonus(self):
+        """1000 token score grants +2 bonus."""
+        tier_stats = make_tier_stats(bronze_merged=7, bronze_closed=3, bronze_token_score=1000.0)
         assert calculate_open_pr_threshold(tier_stats) == EXCESSIVE_PR_PENALTY_BASE_THRESHOLD + 2
 
-    def test_bronze_locked_ignores_token_score(self):
-        """Bronze token score doesn't count when Bronze tier is locked."""
+    def test_locked_tier_ignores_token_score(self):
+        """Token score from locked tiers doesn't count."""
         # Bronze locked: 50% credibility (below 70% requirement)
-        tier_stats = make_tier_stats(bronze_merged=5, bronze_closed=5, bronze_token_score=400.0)
+        tier_stats = make_tier_stats(bronze_merged=5, bronze_closed=5, bronze_token_score=1000.0)
         assert calculate_open_pr_threshold(tier_stats) == EXCESSIVE_PR_PENALTY_BASE_THRESHOLD
 
-    def test_silver_meets_requirement_gets_bonus(self):
-        """Silver token score meeting requirement grants +1 bonus (requires Bronze bonus > 0)."""
+    def test_sum_across_unlocked_tiers(self):
+        """Token scores sum across all unlocked tiers."""
         # Bronze and Silver unlocked
         tier_stats = make_tier_stats(
             bronze_merged=7,
             bronze_closed=3,
-            bronze_token_score=200.0,
+            bronze_token_score=300.0,
             silver_merged=13,
             silver_closed=7,
-            silver_token_score=500.0,
+            silver_token_score=700.0,
         )
-        # Bronze bonus = 1, Silver bonus = 1
+        # Total: 300 + 700 = 1000 -> floor(1000/500) = +2
         assert calculate_open_pr_threshold(tier_stats) == EXCESSIVE_PR_PENALTY_BASE_THRESHOLD + 2
 
-    def test_silver_requires_bronze_bonus(self):
-        """Silver bonus requires Bronze bonus > 0."""
-        # Bronze and Silver unlocked, but Bronze token score < 200
+    def test_locked_tier_excluded_from_sum(self):
+        """Only unlocked tier token scores are summed."""
+        # Bronze unlocked, Silver locked (50% credibility)
         tier_stats = make_tier_stats(
             bronze_merged=7,
             bronze_closed=3,
-            bronze_token_score=199.0,
-            silver_merged=13,
-            silver_closed=7,
-            silver_token_score=1000.0,
-        )
-        # Bronze bonus = 0, so Silver bonus = 0
-        assert calculate_open_pr_threshold(tier_stats) == EXCESSIVE_PR_PENALTY_BASE_THRESHOLD
-
-    def test_silver_double_requirement_gets_double_bonus(self):
-        """1000 Silver token score grants +2 bonus (floor(1000/500) = 2)."""
-        # Bronze and Silver unlocked
-        tier_stats = make_tier_stats(
-            bronze_merged=7,
-            bronze_closed=3,
-            bronze_token_score=200.0,
-            silver_merged=13,
-            silver_closed=7,
-            silver_token_score=1000.0,
-        )
-        # Bronze bonus = 1, Silver bonus = 2
-        assert calculate_open_pr_threshold(tier_stats) == EXCESSIVE_PR_PENALTY_BASE_THRESHOLD + 3
-
-    def test_silver_locked_ignores_token_score(self):
-        """Silver token score doesn't count when Silver tier is locked."""
-        # Bronze unlocked, Silver locked (below 65% credibility)
-        tier_stats = make_tier_stats(
-            bronze_merged=7,
-            bronze_closed=3,
-            bronze_token_score=200.0,
+            bronze_token_score=500.0,
             silver_merged=5,
             silver_closed=5,
             silver_token_score=1000.0,
         )
-        # Only Bronze bonus = 1 (Silver locked)
+        # Only Bronze counts: 500 -> +1 bonus
         assert calculate_open_pr_threshold(tier_stats) == EXCESSIVE_PR_PENALTY_BASE_THRESHOLD + 1
 
-    def test_gold_requires_bronze_and_silver_bonuses(self):
-        """Gold bonus requires Bronze & Silver bonuses > 0."""
-        # All tiers unlocked, but only Gold has token score
+    def test_all_tiers_unlocked_sum(self):
+        """All unlocked tiers contribute to the sum."""
+        # All tiers unlocked
         tier_stats = make_tier_stats(
             bronze_merged=7,
             bronze_closed=3,
-            bronze_token_score=0.0,
-            silver_merged=13,
-            silver_closed=7,
-            silver_token_score=0.0,
-            gold_merged=6,
-            gold_closed=4,
-            gold_token_score=1000.0,
-        )
-        # No Bronze or Silver bonus, so Gold bonus not granted
-        assert calculate_open_pr_threshold(tier_stats) == EXCESSIVE_PR_PENALTY_BASE_THRESHOLD
-
-    def test_gold_bonus_with_all_requirements_met(self):
-        """Gold bonus granted when Bronze & Silver bonuses > 0."""
-        # All tiers unlocked with sufficient token scores
-        tier_stats = make_tier_stats(
-            bronze_merged=7,
-            bronze_closed=3,
-            bronze_token_score=200.0,
+            bronze_token_score=500.0,
             silver_merged=13,
             silver_closed=7,
             silver_token_score=500.0,
             gold_merged=6,
             gold_closed=4,
-            gold_token_score=1000.0,
+            gold_token_score=500.0,
         )
-        # Bronze (+1) + Silver (+1) + Gold (+1) = 3
+        # Total: 500 + 500 + 500 = 1500 -> floor(1500/500) = +3
         assert calculate_open_pr_threshold(tier_stats) == EXCESSIVE_PR_PENALTY_BASE_THRESHOLD + 3
 
-    def test_gold_multiplier_bonus(self):
-        """2000 Gold token score grants +2 bonus (floor(2000/1000) = 2)."""
-        # All tiers unlocked
-        tier_stats = make_tier_stats(
-            bronze_merged=7,
-            bronze_closed=3,
-            bronze_token_score=200.0,
-            silver_merged=13,
-            silver_closed=7,
-            silver_token_score=500.0,
-            gold_merged=6,
-            gold_closed=4,
-            gold_token_score=2000.0,
-        )
-        # Bronze (+1) + Silver (+1) + Gold (+2) = 4
-        assert calculate_open_pr_threshold(tier_stats) == EXCESSIVE_PR_PENALTY_BASE_THRESHOLD + 4
-
-    def test_gold_locked_ignores_token_score(self):
-        """Gold token score doesn't count when Gold tier is locked."""
-        # Bronze and Silver unlocked, Gold locked
-        tier_stats = make_tier_stats(
-            bronze_merged=7,
-            bronze_closed=3,
-            bronze_token_score=200.0,
-            silver_merged=13,
-            silver_closed=7,
-            silver_token_score=500.0,
-            gold_merged=5,
-            gold_closed=5,
-            gold_token_score=2000.0,  # 50% < 60% required
-        )
-        # Bronze (+1) + Silver (+1) = 2, no Gold bonus
-        assert calculate_open_pr_threshold(tier_stats) == EXCESSIVE_PR_PENALTY_BASE_THRESHOLD + 2
-
-    def test_partial_requirements_partial_bonus(self):
-        """Only bonuses for tiers with met requirements are granted."""
-        # All tiers unlocked
-        tier_stats = make_tier_stats(
-            bronze_merged=7,
-            bronze_closed=3,
-            bronze_token_score=200.0,
-            silver_merged=13,
-            silver_closed=7,
-            silver_token_score=250.0,  # < 500
-            gold_merged=6,
-            gold_closed=4,
-            gold_token_score=0.0,
-        )
-        # Only Bronze (+1), Silver = floor(250/500) = 0
-        assert calculate_open_pr_threshold(tier_stats) == EXCESSIVE_PR_PENALTY_BASE_THRESHOLD + 1
-
-    def test_max_bonus_scenario(self):
-        """Test high contributor with high token scores across all tiers."""
-        # All tiers unlocked
-        tier_stats = make_tier_stats(
-            bronze_merged=7,
-            bronze_closed=3,
-            bronze_token_score=600.0,  # floor(600/200) = 3
-            silver_merged=13,
-            silver_closed=7,
-            silver_token_score=1500.0,  # floor(1500/500) = 3
-            gold_merged=6,
-            gold_closed=4,
-            gold_token_score=3000.0,  # floor(3000/1000) = 3
-        )
-        # Bronze (+3) + Silver (+3) + Gold (+3) = 9
-        assert calculate_open_pr_threshold(tier_stats) == EXCESSIVE_PR_PENALTY_BASE_THRESHOLD + 9
-
     def test_threshold_capped_at_max(self):
-        """Test that threshold is capped at MAX_OPEN_PR_THRESHOLD."""
+        """Threshold is capped at MAX_OPEN_PR_THRESHOLD."""
         # All tiers unlocked with very high token scores
         tier_stats = make_tier_stats(
             bronze_merged=7,
             bronze_closed=3,
-            bronze_token_score=2000.0,  # floor(2000/200) = 10
+            bronze_token_score=5000.0,
             silver_merged=13,
             silver_closed=7,
-            silver_token_score=5000.0,  # floor(5000/500) = 10
+            silver_token_score=5000.0,
             gold_merged=6,
             gold_closed=4,
-            gold_token_score=10000.0,  # floor(10000/1000) = 10
+            gold_token_score=5000.0,
         )
-        # Would be 10 + 10 + 10 + 10 = 40, but capped at 30
+        # Total: 15000 -> floor(15000/500) = +30, base + 30 = 40, capped at 30
         assert calculate_open_pr_threshold(tier_stats) == MAX_OPEN_PR_THRESHOLD
 
 
 class TestCalculatePrSpamPenaltyMultiplier:
-    """Tests for calculate_pr_spam_penalty_multiplier function."""
+    """Tests for calculate_pr_spam_penalty_multiplier function (binary multiplier)."""
 
     def test_no_penalty_below_threshold(self):
-        """No penalty when open PRs are at or below threshold."""
+        """No penalty when open PRs are below threshold."""
         assert calculate_pr_spam_penalty_multiplier(5) == 1.0
+
+    def test_no_penalty_at_threshold(self):
+        """No penalty when open PRs are exactly at threshold."""
         assert calculate_pr_spam_penalty_multiplier(10) == 1.0
 
-    def test_penalty_above_threshold(self):
-        """Penalty applied when open PRs exceed threshold."""
-        # 11 open PRs = 1 excess, 1 * 0.5 = 0.5 penalty, multiplier = 0.5
-        assert calculate_pr_spam_penalty_multiplier(11) == 0.5
+    def test_zero_multiplier_above_threshold(self):
+        """Multiplier is 0.0 when open PRs exceed threshold."""
+        assert calculate_pr_spam_penalty_multiplier(11) == 0.0
 
-    def test_penalty_capped_at_minimum(self):
-        """Penalty should not go below minimum multiplier."""
-        # 15 open PRs = 5 excess, 5 * 0.5 = 2.5 penalty, multiplier = -1.5 -> capped at 0.0
-        assert calculate_pr_spam_penalty_multiplier(15) == 0.0
+    def test_zero_multiplier_well_above_threshold(self):
+        """Multiplier is 0.0 regardless of how far above threshold."""
+        assert calculate_pr_spam_penalty_multiplier(20) == 0.0
 
-    def test_top_contributor_with_bronze_bonus(self):
-        """Top contributor with 400 Bronze token score gets +2 threshold."""
-        # Bronze unlocked with 400 token score = +2
-        tier_stats = make_tier_stats(bronze_merged=7, bronze_closed=3, bronze_token_score=400.0)
+    def test_bonus_increases_threshold(self):
+        """Token score bonus increases the threshold."""
+        # Bronze unlocked with 1000 token score = +2 bonus
+        tier_stats = make_tier_stats(bronze_merged=7, bronze_closed=3, bronze_token_score=1000.0)
 
-        # Base (10) + Bronze (+2) = 12 threshold
-        # 12 open PRs = no penalty
+        # Base (10) + bonus (+2) = 12 threshold
         assert calculate_pr_spam_penalty_multiplier(12, tier_stats) == 1.0
+        assert calculate_pr_spam_penalty_multiplier(13, tier_stats) == 0.0
 
-        # 13 open PRs = 1 excess
-        assert calculate_pr_spam_penalty_multiplier(13, tier_stats) == 0.5
-
-    def test_contributor_with_locked_tier_gets_no_bonus(self):
-        """Contributors with token score in locked tiers don't get bonus threshold."""
+    def test_locked_tier_no_bonus(self):
+        """Token score in locked tiers doesn't increase threshold."""
         # Bronze locked (below 70% credibility)
-        tier_stats = make_tier_stats(bronze_merged=5, bronze_closed=5, bronze_token_score=400.0)
+        tier_stats = make_tier_stats(bronze_merged=5, bronze_closed=5, bronze_token_score=1000.0)
 
-        # 11 open PRs = 1 excess (base threshold = 10)
-        assert calculate_pr_spam_penalty_multiplier(11, tier_stats) == 0.5
+        # No bonus, threshold = 10
+        assert calculate_pr_spam_penalty_multiplier(10, tier_stats) == 1.0
+        assert calculate_pr_spam_penalty_multiplier(11, tier_stats) == 0.0
 
     def test_high_threshold_for_top_contributor(self):
-        """Top contributor with multiplied bonuses gets higher threshold."""
+        """Top contributor with high token score gets higher threshold."""
         # All tiers unlocked with token scores
         tier_stats = make_tier_stats(
             bronze_merged=7,
             bronze_closed=3,
-            bronze_token_score=400.0,  # +2
+            bronze_token_score=1000.0,
             silver_merged=13,
             silver_closed=7,
-            silver_token_score=1000.0,  # +2
+            silver_token_score=1000.0,
             gold_merged=6,
             gold_closed=4,
-            gold_token_score=2000.0,  # +2
+            gold_token_score=1000.0,
         )
-        # Base (10) + Bronze (+2) + Silver (+2) + Gold (+2) = 16 threshold
+        # Total: 3000 -> floor(3000/500) = +6 bonus
+        # Threshold = 10 + 6 = 16
 
-        # 16 open PRs = no penalty
         assert calculate_pr_spam_penalty_multiplier(16, tier_stats) == 1.0
-
-        # 17 open PRs = 1 excess
-        assert calculate_pr_spam_penalty_multiplier(17, tier_stats) == 0.5
+        assert calculate_pr_spam_penalty_multiplier(17, tier_stats) == 0.0

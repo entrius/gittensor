@@ -116,17 +116,11 @@ MAINTAINER_ASSOCIATIONS = ['OWNER', 'MEMBER', 'COLLABORATOR']
 MAX_ISSUE_AGE_BONUS = 0.75  # Max bonus for issue age (scales with sqrt of days open)
 MAINTAINER_ISSUE_BONUS = 0.25  # Extra bonus when issue was created by a maintainer
 # Excessive open PRs penalty
+# Multiplier = 1.0 if open PRs <= threshold, 0.0 otherwise
 EXCESSIVE_PR_PENALTY_BASE_THRESHOLD = 10
-EXCESSIVE_PR_PENALTY_SLOPE = 0.50
-EXCESSIVE_PR_MIN_MULTIPLIER = 0.00
 
 # Dynamic open PR threshold bonus for top contributors
-# Bonus = floor(token_score / required) for each unlocked tier (hierarchical)
-# Examples:
-# - 400 Bronze token score / 200 required = +2 bonus
-# - 1000 Silver token score / 500 required = +2 bonus
-# - 2000 Gold token score / 1000 required = +2 bonus (requires Bronze & Silver bonuses > 0)
-OPEN_PR_THRESHOLD_BRONZE_TOKEN_SCORE = 200.0  # Bronze token score per +1 bonus
-OPEN_PR_THRESHOLD_SILVER_TOKEN_SCORE = 500.0  # Silver token score per +1 bonus (requires Bronze bonus > 0)
-OPEN_PR_THRESHOLD_GOLD_TOKEN_SCORE = 1000.0  # Gold token score per +1 bonus (requires Bronze & Silver bonuses > 0)
+# Bonus = floor(total_unlocked_token_score / 500)
+# Example: 1500 token score across unlocked tiers / 500 = +3 bonus
+OPEN_PR_THRESHOLD_TOKEN_SCORE = 500.0  # Token score per +1 bonus (sum of all unlocked tiers)
 MAX_OPEN_PR_THRESHOLD = 30  # Maximum open PR threshold (base + bonus capped at this value)

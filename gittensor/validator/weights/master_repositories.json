@@ -5718,5 +5718,9 @@
   "zxlie/FeHelper": {
     "tier": "Bronze",
     "weight": 0.17
+  },
+  "opentensor/btwallet": {
+    "weight": 10,
+    "tier": "Gold"
   }
 }

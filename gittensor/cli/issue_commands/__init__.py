@@ -5,10 +5,11 @@
 CLI commands for managing issue bounties
 
 Command structure:
-    gitt issue (alias: i)           - Top-level mutation commands
-    gitt issue view (alias: v)      - Read commands (contract + API)
-    gitt issue val                  - Validator consensus commands
-    gitt issue admin (alias: a)     - Owner-only commands
+    gitt view (alias: v)         - Read commands (contract + API)
+    gitt register (alias: reg)   - Registration commands
+    gitt harvest                 - Harvest emissions (top-level)
+    gitt val                     - Validator consensus commands
+    gitt admin (alias: a)        - Owner-only commands
 """
 
 import click
@@ -35,56 +36,50 @@ from .helpers import (
 )
 
 
-@click.group()
-def issue():
-    """Issue bounty commands
-
-    Manage issue bounties for GitHub issues. Miners who solve issues
-    receive ALPHA token bounties.
+# Create register group for `gitt register issue`
+@click.group(name='register')
+def register_group():
+    """Registration commands.
 
     \b
-    Subcommands:
-        view    Read contract state and API data (alias: v)
-        val     Validator consensus operations
-        admin   Owner-only commands (alias: a)
-
-    \b
-    Examples:
-        gitt issue register --repo owner/repo --issue 1 --bounty 100
-        gitt issue view issues --testnet
-        gitt i v bounty-pool
+    Commands:
+        issue    Register a new issue bounty
     """
     pass
 
 
-# Register subgroups
-issue.add_command(view)
-issue.add_command(view, name='v')  # Alias
-issue.add_command(val)
-issue.add_command(admin)
-issue.add_command(admin, name='a')  # Alias
-
-# Register top-level mutation commands
-issue.add_command(issue_register, name='register')
-issue.add_command(issue_harvest, name='harvest')
-
-# Add backward compatibility alias for view issues
-view.add_command(view.commands['issues'], name='list')
+# Add issue_register as 'issue' subcommand under register
+register_group.add_command(issue_register, name='issue')
 
 
-def register_issue_commands(cli):
-    """Register issue commands with a parent CLI group."""
-    cli.add_command(issue)
-    # Register 'i' alias at the parent level
-    cli.add_command(issue, name='i')
+def register_commands(cli):
+    """Register all issue-related commands with the root CLI group."""
+    # View group and alias
+    cli.add_command(view)
+    cli.add_command(view, name='v')
+
+    # Register group and alias
+    cli.add_command(register_group, name='register')
+    cli.add_command(register_group, name='reg')
+
+    # Harvest as top-level command (no subgroup)
+    cli.add_command(issue_harvest, name='harvest')
+
+    # Validator group
+    cli.add_command(val)
+
+    # Admin group and alias
+    cli.add_command(admin)
+    cli.add_command(admin, name='a')
 
 
 __all__ = [
-    'issue',
-    'register_issue_commands',
+    'register_commands',
     'view',
     'val',
     'admin',
+    'register_group',
+    'issue_harvest',
     # Helpers
     'console',
     'load_config',

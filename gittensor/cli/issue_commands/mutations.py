@@ -5,8 +5,8 @@
 Top-level mutation commands for issue CLI
 
 Commands:
-    gitt issue register
-    gitt issue harvest
+    gitt register issue
+    gitt harvest
 """
 
 from pathlib import Path
@@ -87,8 +87,8 @@ def issue_register(
 
     \b
     Examples:
-        gitt issue register --repo opentensor/btcli --issue 144 --bounty 100
-        gitt issue register --repo tensorflow/tensorflow --issue 12345 --bounty 50 --testnet
+        gitt register issue --repo opentensor/btcli --issue 144 --bounty 100
+        gitt reg issue --repo tensorflow/tensorflow --issue 12345 --bounty 50 --testnet
     """
     console.print('\n[bold cyan]Register Issue for Bounty[/bold cyan]\n')
 
@@ -204,7 +204,7 @@ def issue_register(
                 console.print('  • Bounty too low (minimum 10 ALPHA)')
                 console.print('  • Invalid repository format (must be owner/repo)')
                 console.print('  • Caller is not the contract owner')
-                console.print('[dim]Use "gitt issue view list" to check existing issues[/dim]')
+                console.print('[dim]Use "gitt view issues" to check existing issues[/dim]')
             elif error_info:
                 console.print(f'[red]Error: {error_info}[/red]')
 
@@ -229,7 +229,7 @@ def issue_register(
             console.print('  • Bounty too low (minimum 10 ALPHA)')
             console.print('  • Invalid repository format (must be owner/repo)')
             console.print('  • Caller is not the contract owner')
-            console.print('[dim]Use "gitt issue view list" to check existing issues[/dim]')
+            console.print('[dim]Use "gitt view issues" to check existing issues[/dim]')
         else:
             console.print(f'[red]Error registering issue: {e}[/red]')
 
@@ -265,9 +265,9 @@ def issue_harvest(wallet_name: str, wallet_hotkey: str, rpc_url: str, contract: 
 
     \b
     Examples:
-        gitt issue harvest
-        gitt issue harvest --verbose
-        gitt issue harvest --wallet-name mywallet --wallet-hotkey mykey
+        gitt harvest
+        gitt harvest --verbose
+        gitt harvest --wallet-name mywallet --wallet-hotkey mykey
     """
     console.print('\n[bold cyan]Manual Emission Harvest[/bold cyan]\n')
 

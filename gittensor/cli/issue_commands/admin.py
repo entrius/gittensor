@@ -5,11 +5,10 @@
 Admin subgroup commands for issue CLI
 
 Commands:
-    gitt issue admin cancel
-    gitt issue admin payout
-    gitt issue admin set-owner
-    gitt issue admin set-treasury
-    gitt issue admin set-validator
+    gitt admin cancel-issue (alias: a cancel-issue)
+    gitt admin payout-issue (alias: a payout-issue)
+    gitt admin set-owner (alias: a set-owner)
+    gitt admin set-treasury (alias: a set-treasury)
 """
 
 from typing import Optional
@@ -32,15 +31,15 @@ def admin():
 
     \b
     Commands:
-        cancel         Cancel an issue
-        payout         Manual payout fallback
+        cancel-issue   Cancel an issue
+        payout-issue   Manual payout fallback
         set-owner      Transfer ownership
         set-treasury   Change treasury hotkey
     """
     pass
 
 
-@admin.command('cancel')
+@admin.command('cancel-issue')
 @click.argument('issue_id', type=int)
 @click.option(
     '--rpc-url',
@@ -68,7 +67,7 @@ def admin_cancel(issue_id: int, rpc_url: str, contract: str, wallet_name: str, w
     console.print(f'[dim]Use the contract directly or vote_cancel_issue for validator cancellation.[/dim]')
 
 
-@admin.command('payout')
+@admin.command('payout-issue')
 @click.argument('issue_id', type=int)
 @click.argument('solver_coldkey', type=str)
 @click.option(

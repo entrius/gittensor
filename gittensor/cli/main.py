@@ -5,8 +5,12 @@
 Gittensor CLI - Main entry point
 
 Usage:
-    gitt issue ...     - Issue bounty commands
-    gitt config        - Show configuration
+    gitt config              - Show/set CLI configuration
+    gitt view ...            - Read commands (alias: v)
+    gitt register ...        - Registration commands (alias: reg)
+    gitt harvest             - Harvest emissions
+    gitt val ...             - Validator commands
+    gitt admin ...           - Owner commands (alias: a)
 """
 
 import click
@@ -31,7 +35,22 @@ def cli():
     pass
 
 
-@cli.command('config')
+@click.group(name='config', invoke_without_command=True)
+@click.pass_context
+def config_group(ctx):
+    """CLI configuration management.
+
+    Show current configuration (default) or set config values.
+
+    \b
+    Subcommands:
+        set <key> <value>    Set a config value
+    """
+    # If no subcommand, show config
+    if ctx.invoked_subcommand is None:
+        show_config()
+
+
 def show_config():
     """Show current CLI configuration"""
     console.print('\n[bold]Gittensor CLI Configuration[/bold]\n')
@@ -64,10 +83,58 @@ def show_config():
         console.print(f'[red]Error reading config: {e}[/red]')
 
 
-# Import and register issue commands
-# Use absolute import from the package-level cli
-from .issue_commands import register_issue_commands
-register_issue_commands(cli)
+@config_group.command('set')
+@click.argument('key', type=str)
+@click.argument('value', type=str)
+def config_set(key: str, value: str):
+    """Set a configuration value.
+
+    \b
+    Common keys:
+        wallet              Wallet name
+        hotkey              Hotkey name
+        contract_address    Contract address
+        ws_endpoint         WebSocket endpoint
+        api_url             API URL
+        network             Network (local, testnet, mainnet)
+
+    \b
+    Examples:
+        gitt config set wallet alice
+        gitt config set contract_address 5Cxxx...
+        gitt config set network local
+    """
+    # Ensure config directory exists
+    GITTENSOR_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Load existing config or start fresh
+    config = {}
+    if CONFIG_FILE.exists():
+        try:
+            config = json.loads(CONFIG_FILE.read_text())
+        except json.JSONDecodeError:
+            console.print('[yellow]Warning: Existing config was invalid, starting fresh[/yellow]')
+
+    # Set the value
+    old_value = config.get(key)
+    config[key] = value
+
+    # Write config
+    CONFIG_FILE.write_text(json.dumps(config, indent=2))
+
+    if old_value is not None:
+        console.print(f'[green]Updated {key}:[/green] {old_value} → {value}')
+    else:
+        console.print(f'[green]Set {key}:[/green] {value}')
+
+
+# Register config group
+cli.add_command(config_group)
+
+
+# Import and register issue commands with new flat structure
+from .issue_commands import register_commands
+register_commands(cli)
 
 
 def main():

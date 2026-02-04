@@ -5,11 +5,11 @@
 View subgroup commands for issue CLI
 
 Commands:
-    gitt issue view issues
-    gitt issue view bounty-pool
-    gitt issue view pending-harvest
-    gitt issue view issue <id>
-    gitt issue view config
+    gitt view issues (alias: v issues)
+    gitt view issue <id> (alias: v issue <id>)
+    gitt view issue-bounty-pool (alias: v issue-bounty-pool)
+    gitt view issue-pending-harvest (alias: v issue-pending-harvest)
+    gitt view issue-contract-config (alias: v issue-contract-config)
 """
 
 import json
@@ -37,11 +37,11 @@ def view():
 
     \b
     Contract reads:
-        issues              List issues by status
-        bounty-pool         View current alpha pool balance
-        pending-harvest     View pending emissions value
-        issue <id>          View raw issue data
-        config              View contract configuration
+        issues                   List issues by status
+        issue <id>               View raw issue data
+        issue-bounty-pool        View current alpha pool balance
+        issue-pending-harvest    View pending emissions value
+        issue-contract-config    View contract configuration
     """
     pass
 
@@ -71,8 +71,8 @@ def view_issues(rpc_url: str, contract: str, testnet: bool, from_api: bool, verb
 
     \b
     Example:
-        gitt issue view issues
-        gitt i v issues --testnet
+        gitt view issues
+        gitt v issues --testnet
     """
     console.print('\n[bold cyan]Available Issues[/bold cyan]\n')
 
@@ -184,10 +184,10 @@ def view_issues(rpc_url: str, contract: str, testnet: bool, from_api: bool, verb
         console.print('[dim]Bounty Pool shows: filled/target (percentage)[/dim]')
     else:
         console.print('[yellow]No issues found. Register an issue with:[/yellow]')
-        console.print('[dim]  gitt issue register --repo owner/repo --issue 1 --bounty 100[/dim]')
+        console.print('[dim]  gitt register issue --repo owner/repo --issue 1 --bounty 100[/dim]')
 
 
-@view.command('bounty-pool')
+@view.command('issue-bounty-pool')
 @click.option(
     '--rpc-url',
     default='wss://entrypoint-finney.opentensor.ai:443',
@@ -225,7 +225,7 @@ def view_bounty_pool(rpc_url: str, contract: str, verbose: bool):
         console.print(f'[red]Error: {e}[/red]')
 
 
-@view.command('pending-harvest')
+@view.command('issue-pending-harvest')
 @click.option(
     '--rpc-url',
     default='wss://entrypoint-finney.opentensor.ai:443',
@@ -319,7 +319,7 @@ def view_issue(issue_id: int, rpc_url: str, contract: str, verbose: bool):
         console.print(f'[red]Error: {e}[/red]')
 
 
-@view.command('config')
+@view.command('issue-contract-config')
 @click.option(
     '--rpc-url',
     default='wss://entrypoint-finney.opentensor.ai:443',
@@ -331,7 +331,7 @@ def view_issue(issue_id: int, rpc_url: str, contract: str, verbose: bool):
     help='Contract address (uses config if empty)',
 )
 @click.option('--verbose', '-v', is_flag=True, help='Show debug output')
-def view_config(rpc_url: str, contract: str, verbose: bool):
+def view_issue_contract_config(rpc_url: str, contract: str, verbose: bool):
     """View contract configuration."""
     contract_addr = get_contract_address(contract, testnet=False)
     ws_endpoint = get_ws_endpoint(rpc_url)

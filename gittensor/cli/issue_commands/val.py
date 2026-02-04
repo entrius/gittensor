@@ -5,8 +5,8 @@
 Validator subgroup commands for issue CLI
 
 Commands:
-    gitt issue val vote-solution (alias: solution)
-    gitt issue val vote-cancel-issue (alias: cancel)
+    gitt val vote-issue-solution (alias: solution)
+    gitt val vote-issue-cancel (alias: cancel)
 """
 
 import re
@@ -54,13 +54,13 @@ def val():
 
     \b
     Commands:
-        vote-solution        Vote for a solver (alias: solution)
-        vote-cancel-issue    Vote to cancel issue (alias: cancel)
+        vote-issue-solution  Vote for a solver (alias: solution)
+        vote-issue-cancel    Vote to cancel issue (alias: cancel)
     """
     pass
 
 
-@val.command('vote-solution')
+@val.command('vote-issue-solution')
 @click.argument('issue_id', type=int)
 @click.argument('solver_hotkey', type=str)
 @click.argument('solver_coldkey', type=str)
@@ -106,9 +106,9 @@ def val_vote_solution(
 
     \b
     Examples:
-        gitt issue val vote-solution 1 5Hxxx... 5Hyyy... 123
-        gitt issue val vote-solution 1 5Hxxx... 5Hyyy... https://github.com/.../pull/123
-        gitt i val solution 42 <hotkey> <coldkey> 456
+        gitt val vote-issue-solution 1 5Hxxx... 5Hyyy... 123
+        gitt val vote-issue-solution 1 5Hxxx... 5Hyyy... https://github.com/.../pull/123
+        gitt val solution 42 <hotkey> <coldkey> 456
     """
     contract_addr = get_contract_address(contract, testnet=False)
     ws_endpoint = get_ws_endpoint(rpc_url)
@@ -156,7 +156,7 @@ def val_vote_solution(
 val.add_command(val_vote_solution, name='solution')
 
 
-@val.command('vote-cancel-issue')
+@val.command('vote-issue-cancel')
 @click.argument('issue_id', type=int)
 @click.argument('reason', type=str)
 @click.option(
@@ -196,8 +196,8 @@ def val_vote_cancel_issue(
 
     \b
     Examples:
-        gitt issue val vote-cancel-issue 1 "External solution found"
-        gitt i val cancel 42 "Issue invalid"
+        gitt val vote-issue-cancel 1 "External solution found"
+        gitt val cancel 42 "Issue invalid"
     """
     contract_addr = get_contract_address(contract, testnet=False)
     ws_endpoint = get_ws_endpoint(rpc_url)

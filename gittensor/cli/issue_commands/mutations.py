@@ -144,9 +144,9 @@ def issue_register(
         console.print(f'[dim]Connecting to {ws_endpoint}...[/dim]')
         substrate = SubstrateInterface(url=ws_endpoint)
 
-        # Load wallet from config or CLI args
-        effective_wallet = config.get('wallet', wallet_name)
-        effective_hotkey = config.get('hotkey', wallet_hotkey)
+        # CLI flags override config; fall back to config if not explicitly supplied
+        effective_wallet = wallet_name if wallet_name != 'default' else config.get('wallet', wallet_name)
+        effective_hotkey = wallet_hotkey if wallet_hotkey != 'default' else config.get('hotkey', wallet_hotkey)
 
         # For local development, check config first, then fall back to //Alice
         if network_name.lower() == 'local' and effective_wallet == 'default' and effective_hotkey == 'default':

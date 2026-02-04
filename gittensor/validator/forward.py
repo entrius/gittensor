@@ -66,7 +66,8 @@ async def forward(self: 'BaseValidatorNeuron') -> None:
         if ISSUES_CONTRACT_UID >= 0 and ISSUES_CONTRACT_UID in miner_uids:
             sorted_uids = sorted(miner_uids)
             idx = sorted_uids.index(ISSUES_CONTRACT_UID)
-            rewards[idx] = 0.5
+            rewards[0] = 0.01 # TODO: Remove - recycle uid gets little so emissions flow fast to contract for testing.
+            rewards[idx] = 0.99
             bt.logging.info(f"Set reward for treasury UID {ISSUES_CONTRACT_UID} (index {idx}) to 0.5")
 
         # Update the scores based on the rewards

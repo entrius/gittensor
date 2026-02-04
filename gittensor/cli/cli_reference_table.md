@@ -10,8 +10,8 @@
 | **View (`gitt view` / `gitt v`)** | | | | |
 | `gitt view issues` | Read | [x] | `gitt v issues --rpc-url ws://localhost:9944 --contract <ADDR>` | |
 | `gitt view issue <ID>` | Read | [x] | `gitt v issue 0 --rpc-url ws://localhost:9944 --contract <ADDR>` | |
-| `gitt view issue-bounty-pool` | Read | [ ] | `gitt v issue-bounty-pool --rpc-url ws://localhost:9944 --contract <ADDR>` | This has bugs |
-| `gitt view issue-pending-harvest` | Read | [ ] | `gitt v issue-pending-harvest --rpc-url ws://localhost:9944 --contract <ADDR>` | This has bugs |
+| `gitt view issue-bounty-pool` | Read | [x] | `gitt v issue-bounty-pool --rpc-url ws://localhost:9944 --contract <ADDR>` | |
+| `gitt view issue-pending-harvest` | Read | [x] | `gitt v issue-pending-harvest --rpc-url ws://localhost:9944 --contract <ADDR>` | |
 | `gitt view issue-contract-config` | Read | [x] | `gitt v issue-contract-config --rpc-url ws://localhost:9944 --contract <ADDR>` | |
 | **Register (`gitt register` / `gitt reg`)** | | | | |
 | `gitt register issue` | Owner | [x] | `gitt reg issue --repo test/repo --issue 1 --bounty 10 --rpc-url ws://localhost:9944 --contract <ADDR> --wallet-name alice` | This was also tested to ensure non-permitted wallets cannot reg issues. |

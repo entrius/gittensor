@@ -200,7 +200,7 @@ def view_issues(rpc_url: str, contract: str, testnet: bool, from_api: bool, verb
 )
 @click.option('--verbose', '-v', is_flag=True, help='Show debug output')
 def view_bounty_pool(rpc_url: str, contract: str, verbose: bool):
-    """View current alpha pool balance."""
+    """View total bounty pool (sum of all issue bounty amounts)."""
     contract_addr = get_contract_address(contract, testnet=False)
     ws_endpoint = get_ws_endpoint(rpc_url)
 
@@ -214,13 +214,11 @@ def view_bounty_pool(rpc_url: str, contract: str, verbose: bool):
         from substrateinterface import SubstrateInterface
 
         substrate = SubstrateInterface(url=ws_endpoint)
-        packed = _read_contract_packed_storage(substrate, contract_addr, verbose)
+        issues = _read_issues_from_child_storage(substrate, contract_addr, verbose)
 
-        if packed:
-            alpha_pool = packed.get('alpha_pool', 0)
-            console.print(f'[green]Alpha Pool:[/green] {alpha_pool / 1e9:.4f} ALPHA ({alpha_pool} raw)')
-        else:
-            console.print('[yellow]Could not read contract storage.[/yellow]')
+        total_bounty_pool = sum(issue.get('bounty_amount', 0) for issue in issues)
+        console.print(f'[green]Issue Bounty Pool:[/green] {total_bounty_pool / 1e9:.4f} ALPHA ({total_bounty_pool} raw)')
+        console.print(f'[dim]Sum of bounty amounts from {len(issues)} issue(s)[/dim]')
     except Exception as e:
         console.print(f'[red]Error: {e}[/red]')
 
@@ -238,7 +236,7 @@ def view_bounty_pool(rpc_url: str, contract: str, verbose: bool):
 )
 @click.option('--verbose', '-v', is_flag=True, help='Show debug output')
 def view_pending_harvest(rpc_url: str, contract: str, verbose: bool):
-    """View pending emissions value (current stake on treasury)."""
+    """View pending harvest (treasury stake minus allocated bounties)."""
     contract_addr = get_contract_address(contract, testnet=False)
     ws_endpoint = get_ws_endpoint(rpc_url)
 
@@ -249,19 +247,31 @@ def view_pending_harvest(rpc_url: str, contract: str, verbose: bool):
     console.print(f'[dim]Contract: {contract_addr}[/dim]')
 
     try:
+        from substrateinterface import SubstrateInterface
         from gittensor.validator.issue_competitions.contract_client import (
             IssueCompetitionContractClient,
         )
         import bittensor as bt
 
+        # Get treasury stake
         subtensor = bt.Subtensor(network=ws_endpoint)
         client = IssueCompetitionContractClient(
             contract_address=contract_addr,
             subtensor=subtensor,
         )
+        treasury_stake = client.get_treasury_stake()
 
-        pending = client.get_treasury_stake()
-        console.print(f'[green]Treasury Stake:[/green] {pending / 1e9:.4f} ALPHA')
+        # Get total bounty pool (sum of all issue bounty amounts)
+        substrate = SubstrateInterface(url=ws_endpoint)
+        issues = _read_issues_from_child_storage(substrate, contract_addr, verbose)
+        total_bounty_pool = sum(issue.get('bounty_amount', 0) for issue in issues)
+
+        # Pending harvest = treasury stake - allocated bounties
+        pending_harvest = max(0, treasury_stake - total_bounty_pool)
+
+        console.print(f'[green]Treasury Stake:[/green] {treasury_stake / 1e9:.4f} ALPHA')
+        console.print(f'[green]Allocated to Bounties:[/green] {total_bounty_pool / 1e9:.4f} ALPHA')
+        console.print(f'[green]Pending Harvest:[/green] {pending_harvest / 1e9:.4f} ALPHA')
     except ImportError as e:
         console.print(f'[red]Error: Missing dependency - {e}[/red]')
     except Exception as e:

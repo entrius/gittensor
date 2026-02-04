@@ -336,13 +336,47 @@ mod issue_bounty_manager {
             Ok(())
         }
 
-        /// Sets a new treasury hotkey
+        /// Sets a new treasury hotkey.
+        ///
+        /// Resets bounty amounts to 0 for all Active/Registered issues since
+        /// the new treasury has no stake to back them. Issues remain in their
+        /// current status and will be re-funded on next harvest.
         #[ink(message)]
         pub fn set_treasury_hotkey(&mut self, new_hotkey: AccountId) -> Result<(), Error> {
             if self.env().caller() != self.owner {
                 return Err(Error::NotOwner);
             }
+
+            let old_hotkey = self.treasury_hotkey;
+
+            // Reset bounty amounts for all Active/Registered issues
+            let mut bounties_reset: u128 = 0;
+            let mut issues_affected: u32 = 0;
+
+            for issue_id in 1..self.next_issue_id {
+                if let Some(mut issue) = self.issues.get(issue_id) {
+                    if self.is_modifiable(issue.status) && issue.bounty_amount > 0 {
+                        bounties_reset = bounties_reset.saturating_add(issue.bounty_amount);
+                        issues_affected = issues_affected.saturating_add(1);
+                        issue.bounty_amount = 0;
+                        self.issues.insert(issue_id, &issue);
+                    }
+                }
+            }
+
+            // Reset alpha pool
+            self.alpha_pool = 0;
+
+            // Update treasury hotkey
             self.treasury_hotkey = new_hotkey;
+
+            self.env().emit_event(TreasuryHotkeyChanged {
+                old_hotkey,
+                new_hotkey,
+                bounties_reset,
+                issues_affected,
+            });
+
             Ok(())
         }
 

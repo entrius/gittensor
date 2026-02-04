@@ -929,10 +929,20 @@ class IssueCompetitionContractClient:
     def payout_bounty(
         self,
         issue_id: int,
-        solver_coldkey: str,
         wallet: bt.Wallet,
     ) -> Optional[int]:
-        """Pay out a completed bounty to the solver"""
+        """Pay out a completed bounty to the solver.
+
+        The solver address is determined by validator consensus and stored
+        in the contract - no need to pass it here.
+
+        Args:
+            issue_id: The ID of the completed issue
+            wallet: Owner wallet for signing (uses coldkey)
+
+        Returns:
+            Payout amount in raw units, or None on failure
+        """
         if not self._ensure_contract():
             return None
 
@@ -942,12 +952,11 @@ class IssueCompetitionContractClient:
 
             bt.logging.info(f'Paying out bounty for issue {issue_id}')
 
-            keypair = wallet.hotkey
+            keypair = wallet.coldkey
             tx_hash = self._exec_contract_raw(
                 method_name='payout_bounty',
                 args={
                     'issue_id': issue_id,
-                    'solver_coldkey': solver_coldkey,
                 },
                 keypair=keypair,
                 gas_limit=DEFAULT_GAS_LIMIT,
@@ -961,3 +970,129 @@ class IssueCompetitionContractClient:
         except Exception as e:
             bt.logging.error(f'Error paying out bounty: {e}')
             return None
+
+    def cancel_issue(
+        self,
+        issue_id: int,
+        wallet: bt.Wallet,
+    ) -> bool:
+        """Cancel an issue (owner only).
+
+        Args:
+            issue_id: The ID of the issue to cancel
+            wallet: Owner wallet for signing (uses coldkey)
+
+        Returns:
+            True if cancellation succeeded
+        """
+        if not self._ensure_contract():
+            return False
+
+        try:
+            bt.logging.info(f'Cancelling issue {issue_id}')
+
+            keypair = wallet.coldkey
+            tx_hash = self._exec_contract_raw(
+                method_name='cancel_issue',
+                args={
+                    'issue_id': issue_id,
+                },
+                keypair=keypair,
+                gas_limit=DEFAULT_GAS_LIMIT,
+            )
+
+            if tx_hash:
+                bt.logging.info(f'Issue {issue_id} cancelled: {tx_hash}')
+                return True
+            else:
+                bt.logging.error(f'Failed to cancel issue {issue_id}')
+                return False
+
+        except Exception as e:
+            bt.logging.error(f'Error cancelling issue: {e}')
+            return False
+
+    def set_owner(
+        self,
+        new_owner: str,
+        wallet: bt.Wallet,
+    ) -> bool:
+        """Transfer contract ownership (owner only).
+
+        WARNING: This operation is irreversible. The current owner will
+        lose all admin privileges.
+
+        Args:
+            new_owner: SS58 address of the new owner
+            wallet: Current owner wallet for signing (uses coldkey)
+
+        Returns:
+            True if ownership transfer succeeded
+        """
+        if not self._ensure_contract():
+            return False
+
+        try:
+            bt.logging.info(f'Transferring ownership to {new_owner}')
+
+            keypair = wallet.coldkey
+            tx_hash = self._exec_contract_raw(
+                method_name='set_owner',
+                args={
+                    'new_owner': new_owner,
+                },
+                keypair=keypair,
+                gas_limit=DEFAULT_GAS_LIMIT,
+            )
+
+            if tx_hash:
+                bt.logging.info(f'Ownership transferred: {tx_hash}')
+                return True
+            else:
+                bt.logging.error('Failed to transfer ownership')
+                return False
+
+        except Exception as e:
+            bt.logging.error(f'Error transferring ownership: {e}')
+            return False
+
+    def set_treasury_hotkey(
+        self,
+        new_hotkey: str,
+        wallet: bt.Wallet,
+    ) -> bool:
+        """Change the treasury hotkey (owner only).
+
+        Args:
+            new_hotkey: SS58 address of the new treasury hotkey
+            wallet: Owner wallet for signing (uses coldkey)
+
+        Returns:
+            True if treasury hotkey change succeeded
+        """
+        if not self._ensure_contract():
+            return False
+
+        try:
+            bt.logging.info(f'Setting treasury hotkey to {new_hotkey}')
+
+            keypair = wallet.coldkey
+            tx_hash = self._exec_contract_raw(
+                method_name='set_treasury_hotkey',
+                args={
+                    'new_hotkey': new_hotkey,
+                },
+                keypair=keypair,
+                gas_limit=DEFAULT_GAS_LIMIT,
+            )
+
+            if tx_hash:
+                bt.logging.info(f'Treasury hotkey updated: {tx_hash}')
+                return True
+            else:
+                bt.logging.error('Failed to set treasury hotkey')
+                return False
+
+        except Exception as e:
+            bt.logging.error(f'Error setting treasury hotkey: {e}')
+            return False

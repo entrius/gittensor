@@ -81,3 +81,16 @@ pub struct DebugStakeQuery {
     pub committed: u128,
     pub available: u128,
 }
+
+/// Event emitted when treasury hotkey is changed
+#[ink::event]
+pub struct TreasuryHotkeyChanged {
+    #[ink(topic)]
+    pub old_hotkey: AccountId,
+    #[ink(topic)]
+    pub new_hotkey: AccountId,
+    /// Total bounty amount that was reset across all issues
+    pub bounties_reset: u128,
+    /// Number of issues affected
+    pub issues_affected: u32,
+}

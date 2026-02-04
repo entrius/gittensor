@@ -26,6 +26,7 @@ from .helpers import (
     get_contract_address,
     get_ws_endpoint,
     read_issues_from_contract,
+    get_bounty_pool_totals,
     _read_contract_packed_storage,
     _read_issues_from_child_storage,
 )
@@ -200,7 +201,7 @@ def view_issues(rpc_url: str, contract: str, testnet: bool, from_api: bool, verb
 )
 @click.option('--verbose', '-v', is_flag=True, help='Show debug output')
 def view_bounty_pool(rpc_url: str, contract: str, verbose: bool):
-    """View current alpha pool balance."""
+    """View committed bounty funds (sum of all issue bounties)."""
     contract_addr = get_contract_address(contract, testnet=False)
     ws_endpoint = get_ws_endpoint(rpc_url)
 
@@ -208,19 +209,23 @@ def view_bounty_pool(rpc_url: str, contract: str, verbose: bool):
         console.print('[red]Error: Contract address not configured.[/red]')
         return
 
-    console.print(f'[dim]Contract: {contract_addr}[/dim]')
+    console.print(f'[dim]Contract: {contract_addr}[/dim]\n')
 
     try:
-        from substrateinterface import SubstrateInterface
+        totals = get_bounty_pool_totals(ws_endpoint, contract_addr, verbose)
 
-        substrate = SubstrateInterface(url=ws_endpoint)
-        packed = _read_contract_packed_storage(substrate, contract_addr, verbose)
+        registered = totals['registered'] / 1e9
+        registered_count = totals['registered_count']
+        active = totals['active'] / 1e9
+        active_count = totals['active_count']
+        total = totals['total'] / 1e9
 
-        if packed:
-            alpha_pool = packed.get('alpha_pool', 0)
-            console.print(f'[green]Alpha Pool:[/green] {alpha_pool / 1e9:.4f} ALPHA ({alpha_pool} raw)')
-        else:
-            console.print('[yellow]Could not read contract storage.[/yellow]')
+        console.print('[bold cyan]Bounty Pool Summary[/bold cyan]\n')
+        console.print(f'Registered Issues: [yellow]{registered:.4f}[/yellow] ALPHA ({registered_count} issues awaiting full funding)')
+        console.print(f'Active Issues:     [green]{active:.4f}[/green] ALPHA ({active_count} issues fully funded)')
+        console.print('─' * 40)
+        console.print(f'[bold]Total Committed:   {total:.4f} ALPHA[/bold]')
+
     except Exception as e:
         console.print(f'[red]Error: {e}[/red]')
 
@@ -238,7 +243,7 @@ def view_bounty_pool(rpc_url: str, contract: str, verbose: bool):
 )
 @click.option('--verbose', '-v', is_flag=True, help='Show debug output')
 def view_pending_harvest(rpc_url: str, contract: str, verbose: bool):
-    """View pending emissions value (current stake on treasury)."""
+    """View available funds (treasury stake minus committed bounties)."""
     contract_addr = get_contract_address(contract, testnet=False)
     ws_endpoint = get_ws_endpoint(rpc_url)
 
@@ -246,7 +251,7 @@ def view_pending_harvest(rpc_url: str, contract: str, verbose: bool):
         console.print('[red]Error: Contract address not configured.[/red]')
         return
 
-    console.print(f'[dim]Contract: {contract_addr}[/dim]')
+    console.print(f'[dim]Contract: {contract_addr}[/dim]\n')
 
     try:
         from gittensor.validator.issue_competitions.contract_client import (
@@ -260,8 +265,22 @@ def view_pending_harvest(rpc_url: str, contract: str, verbose: bool):
             subtensor=subtensor,
         )
 
-        pending = client.get_treasury_stake()
-        console.print(f'[green]Treasury Stake:[/green] {pending / 1e9:.4f} ALPHA')
+        # Get treasury stake (total funds in treasury)
+        treasury_stake = client.get_treasury_stake()
+
+        # Get committed bounties (sum of all issue bounty_amounts)
+        totals = get_bounty_pool_totals(ws_endpoint, contract_addr, verbose)
+        committed = totals['total']
+
+        # Calculate available (treasury - committed)
+        available = max(0, treasury_stake - committed)
+
+        console.print('[bold cyan]Pending Harvest[/bold cyan]\n')
+        console.print(f'Treasury Stake: [green]{treasury_stake / 1e9:.4f}[/green] ALPHA (total in treasury)')
+        console.print(f'Committed:      [yellow]{committed / 1e9:.4f}[/yellow] ALPHA (locked in bounties)')
+        console.print('─' * 40)
+        console.print(f'[bold]Available:      {available / 1e9:.4f} ALPHA (ready for harvest/allocation)[/bold]')
+
     except ImportError as e:
         console.print(f'[red]Error: Missing dependency - {e}[/red]')
     except Exception as e:

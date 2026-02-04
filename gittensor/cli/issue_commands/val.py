@@ -9,6 +9,7 @@ Commands:
     gitt issue val vote-cancel-issue (alias: cancel)
 """
 
+import re
 import click
 
 from .helpers import (
@@ -16,6 +17,33 @@ from .helpers import (
     get_contract_address,
     get_ws_endpoint,
 )
+
+
+def parse_pr_number(pr_input: str) -> int:
+    """
+    Parse PR number from either a number or a URL.
+
+    Args:
+        pr_input: Either a PR number as string, or a full GitHub PR URL
+
+    Returns:
+        PR number as integer
+
+    Examples:
+        parse_pr_number("123") -> 123
+        parse_pr_number("https://github.com/owner/repo/pull/123") -> 123
+    """
+    # First try as plain number
+    if pr_input.isdigit():
+        return int(pr_input)
+
+    # Try to extract from URL
+    match = re.search(r'/pull/(\d+)', pr_input)
+    if match:
+        return int(match.group(1))
+
+    # Invalid input
+    raise ValueError(f"Cannot parse PR number from: {pr_input}")
 
 
 @click.group(name='val')
@@ -36,7 +64,7 @@ def val():
 @click.argument('issue_id', type=int)
 @click.argument('solver_hotkey', type=str)
 @click.argument('solver_coldkey', type=str)
-@click.argument('pr_url', type=str)
+@click.argument('pr_number_or_url', type=str)
 @click.option(
     '--wallet-name',
     default='default',
@@ -61,7 +89,7 @@ def val_vote_solution(
     issue_id: int,
     solver_hotkey: str,
     solver_coldkey: str,
-    pr_url: str,
+    pr_number_or_url: str,
     wallet_name: str,
     wallet_hotkey: str,
     rpc_url: str,
@@ -74,12 +102,13 @@ def val_vote_solution(
         ISSUE_ID: Issue to vote on
         SOLVER_HOTKEY: Solver's hotkey
         SOLVER_COLDKEY: Solver's coldkey (payout destination)
-        PR_URL: URL of the solving PR
+        PR_NUMBER_OR_URL: PR number or full URL (e.g., 123 or https://github.com/.../pull/123)
 
     \b
     Examples:
+        gitt issue val vote-solution 1 5Hxxx... 5Hyyy... 123
         gitt issue val vote-solution 1 5Hxxx... 5Hyyy... https://github.com/.../pull/123
-        gitt i val solution 42 <hotkey> <coldkey> <pr_url>
+        gitt i val solution 42 <hotkey> <coldkey> 456
     """
     contract_addr = get_contract_address(contract, testnet=False)
     ws_endpoint = get_ws_endpoint(rpc_url)
@@ -88,11 +117,17 @@ def val_vote_solution(
         console.print('[red]Error: Contract address not configured.[/red]')
         return
 
+    try:
+        pr_number = parse_pr_number(pr_number_or_url)
+    except ValueError as e:
+        console.print(f'[red]Error: {e}[/red]')
+        return
+
     console.print(f'[dim]Contract: {contract_addr}[/dim]')
     console.print(f'[yellow]Voting on solution for issue {issue_id}...[/yellow]\n')
     console.print(f'  Solver Hotkey:  {solver_hotkey}')
     console.print(f'  Solver Coldkey: {solver_coldkey}')
-    console.print(f'  PR URL: {pr_url}\n')
+    console.print(f'  PR Number: {pr_number}\n')
 
     try:
         from gittensor.validator.issue_competitions.contract_client import (
@@ -107,7 +142,7 @@ def val_vote_solution(
             subtensor=subtensor,
         )
 
-        result = client.vote_solution(issue_id, solver_hotkey, solver_coldkey, pr_url, wallet)
+        result = client.vote_solution(issue_id, solver_hotkey, solver_coldkey, pr_number, wallet)
         if result:
             console.print(f'[green]Solution vote submitted![/green]')
         else:

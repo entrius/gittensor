@@ -8,11 +8,12 @@ Forward pass for Issue Bounties sub-mechanism
 2. Get active issues from smart contract
 3. For each active issue:
    - Query GitHub API to check if issue is CLOSED
-   - If solved by bronze+ miner -> vote_solution(issue_id, solver_hotkey, pr_url)
+   - If solved by bronze+ miner -> vote_solution(issue_id, solver_hotkey, pr_number)
    - If closed but not by miner -> vote_cancel_issue(issue_id)
 """
 
 import asyncio
+import re
 from typing import Dict, List, Optional, Any
 
 import bittensor as bt
@@ -24,6 +25,22 @@ from .contract_client import (
 )
 
 
+def extract_pr_number_from_url(pr_url: str) -> Optional[int]:
+    """
+    Extract PR number from a GitHub PR URL.
+
+    Args:
+        pr_url: Full GitHub PR URL (e.g., https://github.com/owner/repo/pull/123)
+
+    Returns:
+        PR number as integer, or None if invalid URL
+    """
+    if not pr_url:
+        return None
+    match = re.search(r'/pull/(\d+)', pr_url)
+    return int(match.group(1)) if match else None
+
+
 async def check_github_issue_closed(issue: ContractIssue) -> Optional[Dict[str, Any]]:
     """
     Check if a GitHub issue is closed and get the solving PR info.
@@ -32,7 +49,7 @@ async def check_github_issue_closed(issue: ContractIssue) -> Optional[Dict[str, 
         issue: The contract issue to check
 
     Returns:
-        Dict with 'is_closed', 'solver_github_id', 'pr_url' or None on error
+        Dict with 'is_closed', 'solver_github_id', 'pr_number' or None on error
     """
     try:
         import aiohttp
@@ -60,11 +77,12 @@ async def check_github_issue_closed(issue: ContractIssue) -> Optional[Dict[str, 
                 # Find linked PR that closed the issue
                 # Check closed_by field or search linked PRs
                 solver_github_id = None
-                pr_url = None
+                pr_number = None
 
                 # If issue has pull_request field, it was closed by a PR
                 if data.get('pull_request'):
                     pr_url = data['pull_request'].get('html_url')
+                    pr_number = extract_pr_number_from_url(pr_url)
 
                 # Get the user who closed it (approximation)
                 if data.get('closed_by'):
@@ -73,7 +91,7 @@ async def check_github_issue_closed(issue: ContractIssue) -> Optional[Dict[str, 
                 return {
                     'is_closed': True,
                     'solver_github_id': solver_github_id,
-                    'pr_url': pr_url,
+                    'pr_number': pr_number,
                 }
 
     except ImportError:
@@ -166,7 +184,7 @@ async def forward_issue_bounties(
     1. Get active issues from smart contract
     2. For each active issue:
        - Query GitHub API to check if issue is CLOSED
-       - If solved by bronze+ miner -> vote_solution(issue_id, solver_hotkey, pr_url)
+       - If solved by bronze+ miner -> vote_solution(issue_id, solver_hotkey, pr_number)
        - If closed but not by miner -> vote_cancel_issue(issue_id)
 
     Args:
@@ -207,7 +225,7 @@ async def forward_issue_bounties(
 
                 # Issue is closed - find solver
                 solver_github_id = github_state.get('solver_github_id')
-                pr_url = github_state.get('pr_url', '')
+                pr_number = github_state.get('pr_number')
 
                 if solver_github_id:
                     miner_hotkey = lookup_miner_by_github_id(solver_github_id, miners_github_mapping)
@@ -221,18 +239,19 @@ async def forward_issue_bounties(
                         )
 
                         if miner_coldkey:
+                            # Use pr_number if available, otherwise use 0
                             success = contract_client.vote_solution(
                                 issue_id=issue.id,
                                 solver_hotkey=miner_hotkey,
                                 solver_coldkey=miner_coldkey,
-                                pr_url=pr_url or f"https://github.com/{issue.repository_full_name}/issues/{issue.issue_number}",
+                                pr_number=pr_number or 0,
                                 wallet=validator.wallet,
                             )
 
                             if success:
                                 results['votes_cast'] += 1
                                 bt.logging.success(
-                                    f"Voted solution for issue {issue.id}: {miner_hotkey[:12]}..."
+                                    f"Voted solution for issue {issue.id}: {miner_hotkey[:12]}... PR#{pr_number}"
                                 )
                             else:
                                 results['errors'].append(f"Vote failed for issue {issue.id}")

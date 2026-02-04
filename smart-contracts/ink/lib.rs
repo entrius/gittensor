@@ -80,10 +80,8 @@ mod issue_bounty_manager {
     pub const MIN_BOUNTY: u128 = 10_000_000_000;
 
     /// Number of validator votes required for consensus.
-    /// Currently hardcoded to 1 for simplicity.
-    ///
-    /// TODO: Replace with VotingPower chain extensions once PR #2376 is merged.
-    /// Future: check if voter's voting_power / total_voting_power >= threshold
+    /// MVP uses count-based consensus (N validators must agree).
+    /// TODO (PR #2376): Replace with VotingPower chain extensions for stake-weighted voting.
     pub const REQUIRED_VALIDATOR_VOTES: u32 = 1;
 
     // ========================================================================
@@ -196,6 +194,8 @@ mod issue_bounty_manager {
                 status: IssueStatus::Registered,
                 registered_at_block: current_block,
                 solver_coldkey: None,
+                solver_hotkey: None,
+                winning_pr_number: None,
             };
 
             self.issues.insert(issue_id, &new_issue);
@@ -256,7 +256,7 @@ mod issue_bounty_manager {
             issue_id: u64,
             solver_hotkey: AccountId,
             solver_coldkey: AccountId,
-            pr_url_hash: [u8; 32],
+            pr_number: u32,
         ) -> Result<(), Error> {
             let issue = self.issues.get(issue_id).ok_or(Error::IssueNotFound)?;
 
@@ -269,12 +269,7 @@ mod issue_bounty_manager {
             let (caller, stake) = self.get_caller_stake_validated()?;
 
             // Get or create vote, accumulate stake
-            let mut vote = self.get_or_create_solution_vote(
-                issue_id,
-                solver_hotkey,
-                pr_url_hash,
-                solver_coldkey,
-            );
+            let mut vote = self.get_or_create_solution_vote(issue_id, solver_hotkey, pr_number, solver_coldkey);
             self.solution_vote_voters.insert((issue_id, caller), &true);
             vote.total_stake_voted = vote.total_stake_voted.saturating_add(stake);
             vote.votes_count = vote.votes_count.saturating_add(1);
@@ -282,7 +277,7 @@ mod issue_bounty_manager {
 
             // Check consensus and execute (includes auto-payout)
             if self.check_consensus(vote.votes_count) {
-                self.complete_issue(issue_id, solver_hotkey, pr_url_hash, solver_coldkey);
+                self.complete_issue(issue_id, solver_hotkey, pr_number, solver_coldkey);
                 self.clear_solution_vote(issue_id);
             }
 
@@ -648,7 +643,7 @@ mod issue_bounty_manager {
             &mut self,
             issue_id: u64,
             solver_hotkey: AccountId,
-            pr_url_hash: [u8; 32],
+            pr_number: u32,
             solver_coldkey: AccountId,
         ) -> SolutionVote {
             if let Some(vote) = self.solution_votes.get(issue_id) {
@@ -658,7 +653,7 @@ mod issue_bounty_manager {
                     issue_id,
                     solver_hotkey,
                     solver_coldkey,
-                    pr_url_hash,
+                    pr_number,
                     total_stake_voted: 0,
                     votes_count: 0,
                 }
@@ -791,20 +786,14 @@ mod issue_bounty_manager {
             }
         }
 
-        /// Gets a validator's stake via chain extension.
-        fn get_validator_stake(&self, validator: AccountId) -> u128 {
-            let validator_bytes: [u8; 32] = *validator.as_ref();
-            let hotkey_bytes: [u8; 32] = *self.treasury_hotkey.as_ref();
-
-            let stake_info =
-                self.env()
-                    .extension()
-                    .get_stake_info(hotkey_bytes, validator_bytes, self.netuid);
-
-            match stake_info {
-                Some(info) => info.stake.0 as u128,
-                None => 0,
-            }
+        /// Returns voting weight for a validator.
+        /// MVP: Returns constant 1 for count-based consensus.
+        /// TODO (PR #2376): Replace with VotingPower chain extension for stake-weighted voting.
+        fn get_validator_stake(&self, _validator: AccountId) -> u128 {
+            // MVP: Count-based consensus - each validator gets weight of 1
+            // When VotingPower chain extension is available (PR #2376), this will query:
+            // self.env().extension().get_voting_power(validator) as u128
+            1
         }
 
         /// Calculate total funds committed to non-finalized issues (ground truth).
@@ -831,15 +820,17 @@ mod issue_bounty_manager {
             &mut self,
             issue_id: u64,
             solver_hotkey: AccountId,
-            pr_hash: [u8; 32],
+            pr_number: u32,
             solver_coldkey: AccountId,
         ) {
             if let Some(mut issue) = self.issues.get(issue_id) {
                 let payout = issue.bounty_amount;
 
-                // Mark issue as completed and store solver
+                // Mark issue as completed and store solver info
                 issue.status = IssueStatus::Completed;
                 issue.solver_coldkey = Some(solver_coldkey);
+                issue.solver_hotkey = Some(solver_hotkey);
+                issue.winning_pr_number = Some(pr_number);
                 self.issues.insert(issue_id, &issue);
 
                 // Explicitly remove from bounty queue (don't rely on lazy cleanup)
@@ -864,10 +855,6 @@ mod issue_bounty_manager {
                         self.issues.insert(issue_id, &issue);
                     }
                 }
-
-                // Store solution info for reference (optional - can be queried from events)
-                let _ = solver_hotkey;
-                let _ = pr_hash;
             }
         }
 

@@ -56,8 +56,12 @@ pub struct Issue {
     pub status: IssueStatus,
     /// Block number when registered
     pub registered_at_block: u32,
-    /// Solver coldkey (set when issue is completed via consensus)
+    /// Solver coldkey (set when issue is completed via consensus) - receives payout
     pub solver_coldkey: Option<AccountId>,
+    /// Solver hotkey (set when issue is completed via consensus) - the miner identity
+    pub solver_hotkey: Option<AccountId>,
+    /// Winning PR number (set when issue is completed) - combined with repository_full_name to form URL
+    pub winning_pr_number: Option<u32>,
 }
 
 
@@ -71,8 +75,8 @@ pub struct SolutionVote {
     pub solver_hotkey: AccountId,
     /// Proposed solver's coldkey (for payout)
     pub solver_coldkey: AccountId,
-    /// Hash of the PR URL
-    pub pr_url_hash: [u8; 32],
+    /// PR number (combined with issue's repository_full_name to form URL)
+    pub pr_number: u32,
     /// Total stake that has voted
     pub total_stake_voted: u128,
     /// Number of votes cast
@@ -85,7 +89,7 @@ impl Default for SolutionVote {
             issue_id: 0,
             solver_hotkey: AccountId::from([0u8; 32]),
             solver_coldkey: AccountId::from([0u8; 32]),
-            pr_url_hash: [0u8; 32],
+            pr_number: 0,
             total_stake_voted: 0,
             votes_count: 0,
         }

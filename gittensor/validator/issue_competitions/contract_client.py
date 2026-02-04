@@ -222,11 +222,6 @@ class IssueCompetitionContractClient:
         """Hash a URL for deduplication."""
         return hashlib.sha256(url.encode()).digest()
 
-    @staticmethod
-    def hash_pr_url(pr_url: str) -> bytes:
-        """Hash a PR URL for on-chain storage."""
-        return hashlib.sha256(pr_url.encode()).digest()
-
     # =========================================================================
     # Query Functions (Read-only)
     # =========================================================================
@@ -559,7 +554,7 @@ class IssueCompetitionContractClient:
         issue_id: int,
         solver_hotkey: str,
         solver_coldkey: str,
-        pr_url: str,
+        pr_number: int,
         wallet: bt.Wallet,
     ) -> bool:
         """
@@ -573,7 +568,7 @@ class IssueCompetitionContractClient:
             issue_id: Issue to vote on
             solver_hotkey: Hotkey of the proposed solver
             solver_coldkey: Coldkey to receive the payout
-            pr_url: URL of the solving PR (will be hashed)
+            pr_number: PR number that solved the issue (combined with repo for URL)
             wallet: Validator wallet for signing
 
         Returns:
@@ -584,9 +579,8 @@ class IssueCompetitionContractClient:
             return False
 
         try:
-            pr_url_hash = self.hash_pr_url(pr_url)
             bt.logging.info(
-                f'Voting solution for issue {issue_id}: solver={solver_hotkey[:8]}...'
+                f'Voting solution for issue {issue_id}: solver={solver_hotkey[:8]}... PR#{pr_number}'
             )
 
             keypair = wallet.hotkey
@@ -596,7 +590,7 @@ class IssueCompetitionContractClient:
                     'issue_id': issue_id,
                     'solver_hotkey': solver_hotkey,
                     'solver_coldkey': solver_coldkey,
-                    'pr_url_hash': pr_url_hash,
+                    'pr_number': pr_number,
                 },
                 keypair=keypair,
             )
@@ -852,14 +846,15 @@ class IssueCompetitionContractClient:
                 return 0
 
             data = bytes.fromhex(val_result['result'].replace('0x', ''))
-            if len(data) < 98:  # Need at least owner(32) + treasury(32) + validator(32) + netuid(2)
+            if len(data) < 74:  # Need at least owner(32) + treasury(32) + netuid(2) + next_id(8)
                 bt.logging.debug('Cannot get treasury stake: packed storage too small')
                 return 0
 
             # Extract owner (coldkey), treasury_hotkey, and netuid from packed storage
+            # Layout: owner(32) + treasury(32) + netuid(2) + next_issue_id(8) + alpha_pool(16)
             owner = data[0:32]
             treasury_hotkey = data[32:64]
-            netuid = struct.unpack_from('<H', data, 96)[0]
+            netuid = struct.unpack_from('<H', data, 64)[0]
 
             # Convert to SS58 addresses
             owner_ss58 = self.subtensor.substrate.ss58_encode(owner.hex())

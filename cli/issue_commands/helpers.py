@@ -392,6 +392,67 @@ def _read_issues_from_child_storage(substrate, contract_addr: str, verbose: bool
     return issues
 
 
+def get_bounty_pool_totals(ws_endpoint: str, contract_addr: str, verbose: bool = False) -> Dict[str, Any]:
+    """
+    Calculate bounty pool totals by summing bounty_amount from all issues.
+
+    Args:
+        ws_endpoint: WebSocket endpoint for Subtensor
+        contract_addr: Contract address
+        verbose: If True, print debug output
+
+    Returns:
+        Dict with keys:
+        - registered: Total bounty for Registered status issues (int)
+        - registered_count: Number of Registered issues
+        - active: Total bounty for Active status issues (int)
+        - active_count: Number of Active issues
+        - total: Sum of all committed bounties (int)
+    """
+    result = {
+        'registered': 0,
+        'registered_count': 0,
+        'active': 0,
+        'active_count': 0,
+        'total': 0,
+    }
+
+    try:
+        from substrateinterface import SubstrateInterface
+
+        if verbose:
+            console.print(f'[dim]Debug: Connecting to {ws_endpoint}...[/dim]')
+
+        substrate = SubstrateInterface(url=ws_endpoint)
+        issues = _read_issues_from_child_storage(substrate, contract_addr, verbose)
+
+        for issue in issues:
+            status = issue.get('status', '')
+            bounty = issue.get('bounty_amount', 0)
+
+            if status == 'Registered':
+                result['registered'] += bounty
+                result['registered_count'] += 1
+            elif status == 'Active':
+                result['active'] += bounty
+                result['active_count'] += 1
+
+        result['total'] = result['registered'] + result['active']
+
+        if verbose:
+            console.print(f'[dim]Debug: Bounty totals - registered={result["registered"]}, active={result["active"]}[/dim]')
+
+        return result
+
+    except ImportError as e:
+        console.print(f'[yellow]Cannot calculate bounty totals: {e}[/yellow]')
+        return result
+    except Exception as e:
+        if verbose:
+            console.print(f'[dim]Debug: Error calculating bounty totals: {e}[/dim]')
+        return result
+
+
 def read_issues_from_contract(ws_endpoint: str, contract_addr: str, verbose: bool = False) -> List[Dict[str, Any]]:
     """
     Read issues directly from the smart contract (no API dependency).

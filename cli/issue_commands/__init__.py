@@ -68,9 +68,6 @@ issue.add_command(admin, name='a')  # Alias
 issue.add_command(issue_register, name='register')
 issue.add_command(issue_harvest, name='harvest')
 
-# Add backward compatibility alias for view issues
-view.add_command(view.commands['issues'], name='list')
-
 
 def register_issue_commands(cli):
     """Register issue commands with a parent CLI group."""

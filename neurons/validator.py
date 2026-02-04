@@ -18,11 +18,11 @@
 
 import threading
 import time
-from typing import Dict, List
+from typing import Dict, List, Set
 
 import bittensor as bt
-import wandb
 
+import wandb
 from gittensor.__init__ import __version__
 from gittensor.classes import MinerEvaluation, MinerEvaluationCache
 from gittensor.validator.forward import forward
@@ -84,15 +84,26 @@ class Validator(BaseValidatorNeuron):
         bt.logging.info('load_state()')
         self.load_state()
 
-    async def bulk_store_evaluation(self, miner_evals: Dict[int, MinerEvaluation]):
-        """Store all miner evaluations, log summary rather than per-UID."""
+    async def bulk_store_evaluation(self, miner_evals: Dict[int, MinerEvaluation], skip_uids: Set[int] = None):
+        """Store all miner evaluations, log summary rather than per-UID.
+
+        Args:
+            miner_evals: Dict of UID -> MinerEvaluation to store.
+            skip_uids: Set of UIDs to skip (e.g. cached evaluations that were already stored previously).
+        """
         if self.db_storage is None:
             return
 
+        skip_uids = skip_uids or set()
         successful_count = 0
+        skipped_count = 0
         failed_uids: List[int] = []
 
         for uid, evaluation in miner_evals.items():
+            if uid in skip_uids:
+                skipped_count += 1
+                continue
+
             try:
                 storage_result = self.db_storage.store_evaluation(evaluation)
                 if storage_result.success:
@@ -109,6 +120,8 @@ class Validator(BaseValidatorNeuron):
         # Summary logging
         if successful_count > 0:
             bt.logging.success(f'Stored validation results for {successful_count} UIDs to DB')
+        if skipped_count > 0:
+            bt.logging.info(f'Skipped {skipped_count} UIDs (cached evaluations)')
         if failed_uids:
             bt.logging.warning(f'Failed to store {len(failed_uids)} UIDs: {failed_uids}')
 
@@ -131,12 +144,18 @@ class Validator(BaseValidatorNeuron):
             except Exception as e:
                 bt.logging.error(f'Error when attempting to store miners evaluation for uid {uid}: {e}')
 
-    def store_or_use_cached_evaluation(self, miner_evaluations: Dict[int, MinerEvaluation]) -> None:
+    def store_or_use_cached_evaluation(self, miner_evaluations: Dict[int, MinerEvaluation]) -> Set[int]:
         """
         Handle evaluation cache: store successful evals, fallback to cache for GitHub failures.
 
         Mutates the passed dict, replacing failed evaluations with cached ones if available.
+
+        Returns:
+            Set of UIDs that were restored from cache (should be skipped during DB storage
+            since the cached data was already stored previously).
         """
+        cached_uids: Set[int] = set()
+
         for uid, miner_eval in miner_evaluations.items():
             # Skip miners that failed validation (invalid PAT, etc.)
             if miner_eval.failed_reason is not None:
@@ -156,6 +175,9 @@ class Validator(BaseValidatorNeuron):
                     f'closed={cached_eval.total_closed_prs})'
                 )
                 miner_evaluations[uid] = cached_eval
+                cached_uids.add(uid)
+
+        return cached_uids
 
     async def forward(self):
         """

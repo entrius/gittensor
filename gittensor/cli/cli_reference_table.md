@@ -21,7 +21,7 @@
 | `gitt val vote-issue-solution <ID> <HOTKEY> <COLDKEY> <PR>` | Validator | [x] | `gitt val solution 0 <HOTKEY> <COLDKEY> 1 --rpc-url ws://localhost:9944 --contract <ADDR> --wallet-name validator1` | alias: `solution` |
 | `gitt val vote-issue-cancel <ID> <REASON>` | Validator | [x] | `gitt val cancel 0 "reason" --rpc-url ws://localhost:9944 --contract <ADDR> --wallet-name validator1` | alias: `cancel` Successfully tested for: - Cancellation works for Registered issues - Cancellation works for Active issues - Cacellation fails for completed bounties - Cancelled bounty fails to be cancelled again |
 | **Admin (`gitt admin` / `gitt a`)** | | | | |
-| `gitt admin cancel-issue <ID>` | Owner | [ ] | `gitt a cancel-issue 0 --rpc-url ws://localhost:9944 --contract <ADDR> --wallet-name alice` | Not implemented |
-| `gitt admin payout-issue <ID> <COLDKEY>` | Owner | [ ] | `gitt a payout-issue 0 <COLDKEY> --rpc-url ws://localhost:9944 --contract <ADDR> --wallet-name alice` | Not implemented - still takes solver coldkey (old) |
-| `gitt admin set-owner <NEW_OWNER>` | Owner | [ ] | `gitt a set-owner <ADDR> --rpc-url ws://localhost:9944 --contract <ADDR> --wallet-name alice` | Not implemented |
-| `gitt admin set-treasury <NEW_TREASURY>` | Owner | [ ] | `gitt a set-treasury <ADDR> --rpc-url ws://localhost:9944 --contract <ADDR> --wallet-name alice` | Not implemented |
+| `gitt admin cancel-issue <ID>` | Owner | [x] | `gitt a cancel-issue 0 --rpc-url ws://localhost:9944 --contract <ADDR> --wallet-name alice` | Not implemented |
+| `gitt admin payout-issue <ID> <COLDKEY>` | Owner | [x] | `gitt a payout-issue 0 <COLDKEY> --rpc-url ws://localhost:9944 --contract <ADDR> --wallet-name alice` | Not implemented - still takes solver coldkey (old) |
+| `gitt admin set-owner <NEW_OWNER>` | Owner | [x] | `gitt a set-owner <ADDR> --rpc-url ws://localhost:9944 --contract <ADDR> --wallet-name alice` | |
+| `gitt admin set-treasury <NEW_TREASURY>` | Owner | [x] | `gitt a set-treasury <ADDR> --rpc-url ws://localhost:9944 --contract <ADDR> --wallet-name alice` | |

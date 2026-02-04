@@ -535,10 +535,6 @@
     "tier": "Bronze",
     "weight": 0.57
   },
-  "Nickel5-Inc/Gaia": {
-    "tier": "Silver",
-    "weight": 7.15
-  },
   "NixOS/nixpkgs": {
     "tier": "Bronze",
     "weight": 0.24

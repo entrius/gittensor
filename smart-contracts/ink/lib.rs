@@ -448,29 +448,13 @@ mod issue_bounty_manager {
             // Set alpha_pool to available funds for bounty filling
             self.alpha_pool = available;
 
-            let mut bounties_filled: u32 = 0;
-            let alpha_before = self.alpha_pool;
+            // Fill bounties from available funds (returns list of fully-funded bounties)
+            let filled_bounties = self.fill_bounties();
+            let bounties_filled: u32 = u32::try_from(filled_bounties.len()).unwrap_or(u32::MAX);
 
-            // Fill bounties from available funds
-            self.fill_bounties();
-
-            // Calculate how much was allocated to bounties
-            let bounty_funds_allocated = alpha_before.saturating_sub(self.alpha_pool);
-
-            // Count how many bounties were filled
-            if bounty_funds_allocated > 0 {
-                for issue_id in self.bounty_queue.iter() {
-                    if let Some(issue) = self.issues.get(*issue_id) {
-                        if issue.bounty_amount >= issue.target_bounty {
-                            bounties_filled = bounties_filled.saturating_add(1);
-
-                            self.env().emit_event(BountyFilled {
-                                issue_id: *issue_id,
-                                amount: issue.bounty_amount,
-                            });
-                        }
-                    }
-                }
+            // Emit BountyFilled event for each fully-funded bounty
+            for (issue_id, amount) in filled_bounties {
+                self.env().emit_event(BountyFilled { issue_id, amount });
             }
 
             // Recycle any remaining alpha pool
@@ -756,22 +740,25 @@ mod issue_bounty_manager {
             output
         }
 
-        /// Fills bounties from the alpha pool using FIFO order
-        fn fill_bounties(&mut self) {
+        /// Fills bounties from the alpha pool using FIFO order.
+        /// Issues are filled in registration order (first registered = first filled).
+        /// Returns a list of (issue_id, bounty_amount) for each fully-funded bounty.
+        fn fill_bounties(&mut self) -> Vec<(u64, Balance)> {
             let mut i = 0usize;
+            let mut filled: Vec<(u64, Balance)> = Vec::new();
 
             while i < self.bounty_queue.len() && self.alpha_pool > 0 {
                 let issue_id = self.bounty_queue[i];
 
                 if let Some(mut issue) = self.issues.get(issue_id) {
                     if !self.is_modifiable(issue.status) {
-                        self.swap_remove_at(i);
+                        self.remove_at(i);
                         continue;
                     }
 
                     let remaining = issue.target_bounty.saturating_sub(issue.bounty_amount);
                     if remaining == 0 {
-                        self.swap_remove_at(i);
+                        self.remove_at(i);
                         continue;
                     }
 
@@ -789,34 +776,32 @@ mod issue_bounty_manager {
                     if is_fully_funded {
                         issue.status = IssueStatus::Active;
                         self.issues.insert(issue_id, &issue);
-                        self.swap_remove_at(i);
+                        filled.push((issue_id, issue.bounty_amount));
+                        self.remove_at(i);
                     } else {
                         self.issues.insert(issue_id, &issue);
                         i = i.saturating_add(1);
                     }
                 } else {
-                    self.swap_remove_at(i);
+                    self.remove_at(i);
                 }
             }
+
+            filled
         }
 
-        /// Helper to swap-remove from bounty queue at index
-        fn swap_remove_at(&mut self, idx: usize) {
-            let len = self.bounty_queue.len();
-            if len == 0 {
-                return;
+        /// Helper to remove from bounty queue at index, preserving FIFO order.
+        /// Uses Vec::remove which shifts remaining elements left.
+        fn remove_at(&mut self, idx: usize) {
+            if idx < self.bounty_queue.len() {
+                self.bounty_queue.remove(idx);
             }
-            let last_idx = len.saturating_sub(1);
-            if idx < last_idx {
-                self.bounty_queue.swap(idx, last_idx);
-            }
-            self.bounty_queue.pop();
         }
 
-        /// Removes an issue from the bounty queue
+        /// Removes an issue from the bounty queue, preserving FIFO order.
         fn remove_from_bounty_queue(&mut self, issue_id: u64) {
             if let Some(pos) = self.bounty_queue.iter().position(|&id| id == issue_id) {
-                self.swap_remove_at(pos);
+                self.remove_at(pos);
             }
         }
 

@@ -998,44 +998,44 @@ fn vote_cancel_issue_fails_already_voted() {
 }
 
 // ============================================================================
-// Swap Remove / Queue Helper Tests
+// Queue Helper Tests (Order-Preserving Removal)
 // ============================================================================
 
 #[ink::test]
-fn swap_remove_at_removes_only_element() {
+fn remove_at_removes_only_element() {
     let mut contract = create_default_contract();
     contract.bounty_queue.push(1);
 
-    contract.swap_remove_at(0);
+    contract.remove_at(0);
     assert!(contract.bounty_queue.is_empty());
 }
 
 #[ink::test]
-fn swap_remove_at_removes_last_element() {
+fn remove_at_removes_last_element() {
     let mut contract = create_default_contract();
     contract.bounty_queue.push(1);
     contract.bounty_queue.push(2);
     contract.bounty_queue.push(3);
 
-    contract.swap_remove_at(2); // remove last
+    contract.remove_at(2); // remove last
     assert_eq!(contract.bounty_queue, vec![1, 2]);
 }
 
 #[ink::test]
-fn swap_remove_at_swaps_with_last() {
+fn remove_at_preserves_order() {
     let mut contract = create_default_contract();
     contract.bounty_queue.push(1);
     contract.bounty_queue.push(2);
     contract.bounty_queue.push(3);
 
-    contract.swap_remove_at(0); // remove first, last takes its place
-    assert_eq!(contract.bounty_queue, vec![3, 2]);
+    contract.remove_at(0); // remove first, order preserved
+    assert_eq!(contract.bounty_queue, vec![2, 3]);
 }
 
 #[ink::test]
-fn swap_remove_at_noop_on_empty() {
+fn remove_at_noop_on_empty() {
     let mut contract = create_default_contract();
-    contract.swap_remove_at(0); // should not panic
+    contract.remove_at(0); // should not panic
     assert!(contract.bounty_queue.is_empty());
 }
 

@@ -1,5 +1,28 @@
 # Storage Queries - Only SET/INSERT operations for writing data
 
+# Cleanup Queries - Remove stale data when a miner re-registers on a new uid/hotkey
+CLEANUP_STALE_MINER_EVALUATIONS = """
+DELETE FROM miner_evaluations
+WHERE github_id = %s
+  AND github_id != '0'
+  AND (uid != %s OR hotkey != %s)
+  AND created_at <= %s
+"""
+
+CLEANUP_STALE_MINER_TIER_STATS = """
+DELETE FROM miner_tier_stats
+WHERE github_id = %s
+  AND github_id != '0'
+  AND (uid != %s OR hotkey != %s)
+"""
+
+CLEANUP_STALE_MINERS = """
+DELETE FROM miners
+WHERE github_id = %s
+  AND github_id != '0'
+  AND (uid != %s OR hotkey != %s)
+"""
+
 # Miner Queries
 SET_MINER = """
 INSERT INTO miners (uid, hotkey, github_id)

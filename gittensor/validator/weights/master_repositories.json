@@ -1392,7 +1392,7 @@
   },
   "autoppia/autoppia_iwa": {
     "tier": "Silver",
-    "weight": 6.46
+    "weight": 4.25
   },
   "autoppia/autoppia_web_agents_subnet": {
     "tier": "Silver",
@@ -1400,7 +1400,7 @@
   },
   "autoppia/autoppia_webs_demo": {
     "tier": "Silver",
-    "weight": 6.46
+    "weight": 4.25
   },
   "autorope/donkeycar": {
     "tier": "Bronze",

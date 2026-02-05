@@ -169,16 +169,7 @@ class IssueCompetitionContractClient:
             self.contract_address = contract_address
         else:
             config_addr = get_contract_address_from_config()
-            if config_addr:
-                self.contract_address = config_addr
-            else:
-                try:
-                    from gittensor.validator.issue_competitions.constants import (
-                        ISSUE_CONTRACT_ADDRESS_TESTNET,
-                    )
-                    self.contract_address = ISSUE_CONTRACT_ADDRESS_TESTNET
-                except ImportError:
-                    self.contract_address = ''
+            self.contract_address = config_addr or ''
 
         self.subtensor = subtensor
         self.metadata_path = metadata_path or _get_default_metadata_path()

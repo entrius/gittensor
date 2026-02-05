@@ -2,7 +2,7 @@
 # Copyright 2025 Entrius
 
 """
-Forward pass for Issue Bounties sub-mechanism
+Utility functions for Issue Bounties sub-mechanism
 
 1. Continue running OSS contribution scoring (to know miner tiers)
 2. Get active issues from smart contract
@@ -12,17 +12,53 @@ Forward pass for Issue Bounties sub-mechanism
    - If closed but not by miner -> vote_cancel_issue(issue_id)
 """
 
-import asyncio
+import json
 import re
-from typing import Dict, List, Optional, Any
+from pathlib import Path
+from typing import Any, Dict, Optional
 
 import bittensor as bt
 
 from .contract_client import (
+    ContractIssue,
     IssueCompetitionContractClient,
     IssueStatus,
-    ContractIssue,
 )
+
+
+def get_contract_address(network: str = 'local') -> Optional[str]:
+    """
+    Get the contract address from environment or config file.
+
+    Priority:
+    1. CONTRACT_ADDRESS environment variable (highest priority)
+    2. ~/.gittensor/contract_config.json (written by dev-environment up.sh)
+
+    Args:
+        network: Network name (unused, kept for API compatibility)
+
+    Returns:
+        Contract address string or None if not configured
+    """
+    import os
+
+    # 1. Environment variable (highest priority)
+    env_addr = os.environ.get('CONTRACT_ADDRESS')
+    if env_addr:
+        return env_addr
+
+    # 2. Config file (written by up.sh during development)
+    config_path = Path.home() / '.gittensor' / 'contract_config.json'
+    if config_path.exists():
+        try:
+            config = json.loads(config_path.read_text())
+            addr = config.get('contract_address')
+            if addr:
+                return addr
+        except (json.JSONDecodeError, IOError):
+            pass
+
+    return None
 
 
 def extract_pr_number_from_url(pr_url: str) -> Optional[int]:
@@ -139,39 +175,9 @@ def get_miner_coldkey(hotkey: str, subtensor: bt.Subtensor, netuid: int) -> Opti
 
 
 def is_bronze_or_higher(hotkey: str, tier_data: Dict) -> bool:
-    """
-    Check if a miner is bronze tier or higher.
-
-    Bronze tier requirements (from tier_config.py):
-    - 70% credibility (merged/attempted ratio)
-    - 3+ unique repositories
-    - 5+ token score per repository
-
-    Args:
-        hotkey: Miner hotkey
-        tier_data: Dict with miner tier information
-
-    Returns:
-        True if miner is bronze+ tier
-    """
-    miner_tier = tier_data.get(hotkey, {})
-
-    # Check credibility
-    credibility = miner_tier.get('credibility', 0)
-    if credibility < 0.7:
-        return False
-
-    # Check unique repos
-    unique_repos = miner_tier.get('unique_repos', 0)
-    if unique_repos < 3:
-        return False
-
-    # Check token score
-    avg_score = miner_tier.get('avg_token_score', 0)
-    if avg_score < 5:
-        return False
-
-    return True
+    """Check if miner has any tier (Bronze/Silver/Gold)."""
+    miner_info = tier_data.get(hotkey, {})
+    return miner_info.get('current_tier') is not None
 
 
 async def forward_issue_bounties(

@@ -119,3 +119,9 @@ MAINTAINER_ISSUE_BONUS = 0.25  # Extra bonus when issue was created by a maintai
 EXCESSIVE_PR_PENALTY_THRESHOLD = 10
 EXCESSIVE_PR_PENALTY_SLOPE = 0.50
 EXCESSIVE_PR_MIN_MULTIPLIER = 0.00
+
+# =============================================================================
+# Issues Competition
+# =============================================================================
+ISSUES_TREASURY_UID = RECYCLE_UID  # UID of the smart contract neuron, if set to RECYCLE_UID then it's disabled
+ISSUES_TREASURY_EMISSION_SHARE = 0.50  # % of emissions routed to funding issues treasury

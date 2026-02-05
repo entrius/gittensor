@@ -5719,6 +5719,10 @@
     "tier": "Bronze",
     "weight": 0.17
   },
+  "opentensor/async-substrate-interface": {
+    "weight": 10,
+    "tier": "Gold"
+  },
   "opentensor/btwallet": {
     "weight": 10,
     "tier": "Gold"

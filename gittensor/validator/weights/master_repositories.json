@@ -1819,7 +1819,8 @@
   },
   "conda/conda": {
     "tier": "Silver",
-    "weight": 3.53
+    "weight": 3.53,
+    "inactive_at": "2026-02-05T00:00:00Z"
   },
   "conduktor/kafka-stack-docker-compose": {
     "tier": "Bronze",
@@ -5726,6 +5727,10 @@
   "zxlie/FeHelper": {
     "tier": "Bronze",
     "weight": 0.17
+  },
+  "opentensor/async-substrate-interface": {
+    "weight": 10,
+    "tier": "Gold"
   },
   "opentensor/btwallet": {
     "weight": 10,

@@ -63,7 +63,7 @@ setup(
     long_description=long_description,
     long_description_content_type='text/markdown',
     url='https://github.com/entrius/gittensor',
-    author='bittensor.com',  # TODO(developer): Change this value to your module subnet author name.
+    author='Entrius',
     packages=find_packages(),
     include_package_data=True,
     author_email='',

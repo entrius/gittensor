@@ -9,948 +9,7 @@
   },
   "404-Repo/404-gen-subnet": {
     "tier": "Gold",
-    "weight": 19.47
-  },
-  "Activiti/Activiti": {
-    "tier": "Bronze",
-    "weight": 0.32
-  },
-  "AffineFoundation/affine-cortex": {
-    "tier": "Gold",
-    "weight": 22.21
-  },
-  "AffineFoundation/affinetes": {
-    "tier": "Gold",
-    "weight": 20.88
-  },
-  "Aider-AI/aider": {
-    "tier": "Bronze",
-    "weight": 0.18
-  },
-  "AlphaCoreBittensor/alphacore": {
-    "tier": "Silver",
-    "weight": 4.56
-  },
-  "ApolloAuto/apollo": {
-    "tier": "Bronze",
-    "weight": 0.3
-  },
-  "AppFlowy-IO/AppFlowy": {
-    "tier": "Gold",
-    "weight": 12.72
-  },
-  "ArduPilot/ardupilot": {
-    "tier": "Bronze",
-    "weight": 0.32
-  },
-  "Arduino-IRremote/Arduino-IRremote": {
-    "tier": "Bronze",
-    "weight": 0.25
-  },
-  "AtsushiSakai/PythonRobotics": {
-    "tier": "Bronze",
-    "weight": 0.19
-  },
-  "AykutSarac/jsoncrack.com": {
-    "tier": "Bronze",
-    "weight": 0.17
-  },
-  "Azure-Samples/azure-search-openai-demo": {
-    "tier": "Bronze",
-    "weight": 0.32
-  },
-  "Azure-Samples/cognitive-services-speech-sdk": {
-    "tier": "Bronze",
-    "weight": 0.27
-  },
-  "Azure/Azure-Sentinel": {
-    "tier": "Bronze",
-    "weight": 0.31
-  },
-  "Azure/azure-cli": {
-    "tier": "Bronze",
-    "weight": 0.31
-  },
-  "Azure/azure-powershell": {
-    "tier": "Bronze",
-    "weight": 0.29
-  },
-  "Azure/azure-sdk-for-net": {
-    "tier": "Bronze",
-    "weight": 0.29
-  },
-  "Azure/azure-sdk-for-python": {
-    "tier": "Bronze",
-    "weight": 0.31
-  },
-  "AzureAD/microsoft-authentication-library-for-js": {
-    "tier": "Bronze",
-    "weight": 0.29
-  },
-  "Barbariandev/MANTIS": {
-    "tier": "Silver",
-    "weight": 8.22
-  },
-  "Billionmail/BillionMail": {
-    "tier": "Silver",
-    "weight": 5.26
-  },
-  "BitMind-AI/bitmind-subnet": {
-    "additional_acceptable_branches": [
-      "testnet"
-    ],
-    "tier": "Gold",
-    "weight": 19.32
-  },
-  "Bitsec-AI/subnet": {
-    "tier": "Silver",
-    "weight": 4.55
-  },
-  "BretFisher/udemy-docker-mastery": {
-    "tier": "Bronze",
-    "weight": 0.35
-  },
-  "BruceDevices/firmware": {
-    "tier": "Silver",
-    "weight": 3.44
-  },
-  "CaiJimmy/hugo-theme-stack": {
-    "tier": "Bronze",
-    "weight": 0.19
-  },
-  "CarGuo/GSYVideoPlayer": {
-    "tier": "Bronze",
-    "weight": 0.18
-  },
-  "CareyWang/sub-web": {
-    "tier": "Bronze",
-    "weight": 0.18
-  },
-  "CesiumGS/cesium": {
-    "tier": "Bronze",
-    "weight": 0.19
-  },
-  "Chainlit/chainlit": {
-    "inactive_at": "2025-11-29T17:45:38.525Z",
-    "tier": "Bronze",
-    "weight": 0.01
-  },
-  "ChatGPTNextWeb/NextChat": {
-    "tier": "Bronze",
-    "weight": 0.64
-  },
-  "ChutesAI/chutes": {
-    "tier": "Gold",
-    "weight": 21.97
-  },
-  "CleverRaven/Cataclysm-DDA": {
-    "tier": "Bronze",
-    "weight": 0.28
-  },
-  "ClickHouse/ClickHouse": {
-    "tier": "Silver",
-    "weight": 3.93
-  },
-  "CocoaPods/Specs": {
-    "tier": "Bronze",
-    "weight": 0.22
-  },
-  "ColorlibHQ/AdminLTE": {
-    "tier": "Bronze",
-    "weight": 0.43
-  },
-  "Comfy-Org/ComfyUI": {
-    "tier": "Bronze",
-    "weight": 0.25
-  },
-  "CreativeBuilds/sn77": {
-    "tier": "Silver",
-    "weight": 7.76
-  },
-  "CreditTone/hooker": {
-    "tier": "Bronze",
-    "weight": 0.17
-  },
-  "Dash-Industry-Forum/dash.js": {
-    "tier": "Bronze",
-    "weight": 0.29
-  },
-  "DataLinkDC/dinky": {
-    "tier": "Bronze",
-    "weight": 0.27
-  },
-  "Datalux/Osintgram": {
-    "tier": "Bronze",
-    "weight": 0.17
-  },
-  "Datura-ai/lium-io": {
-    "tier": "Gold",
-    "weight": 21.73
-  },
-  "DeepLabCut/DeepLabCut": {
-    "tier": "Bronze",
-    "weight": 0.29
-  },
-  "DefectDojo/django-DefectDojo": {
-    "tier": "Bronze",
-    "weight": 0.19
-  },
-  "DefinitelyTyped/DefinitelyTyped": {
-    "tier": "Bronze",
-    "weight": 0.6
-  },
-  "Desearch-ai/subnet-22-desearch": {
-    "tier": "Silver",
-    "weight": 7.42
-  },
-  "Dolibarr/dolibarr": {
-    "tier": "Bronze",
-    "weight": 0.27
-  },
-  "DotNetNext/SqlSugar": {
-    "inactive_at": "2025-11-29T17:45:38.525Z",
-    "tier": "Bronze",
-    "weight": 0.01
-  },
-  "DrKLO/Telegram": {
-    "tier": "Bronze",
-    "weight": 0.35
-  },
-  "EastWorld/wechat-app-mall": {
-    "tier": "Bronze",
-    "weight": 0.35
-  },
-  "EasyDarwin/EasyDarwin": {
-    "tier": "Bronze",
-    "weight": 0.19
-  },
-  "Ebazhanov/linkedin-skill-assessments-quizzes": {
-    "inactive_at": "2025-11-04T02:18:33.094Z",
-    "tier": "Bronze",
-    "weight": 0.01
-  },
-  "EfficientFrontier-SignalPlus/EfficientFrontier": {
-    "tier": "Silver",
-    "weight": 4.51
-  },
-  "EleutherAI/lm-evaluation-harness": {
-    "tier": "Bronze",
-    "weight": 0.17
-  },
-  "EsotericSoftware/spine-runtimes": {
-    "tier": "Bronze",
-    "weight": 0.27
-  },
-  "Eugeny/tabby": {
-    "tier": "Bronze",
-    "weight": 0.17
-  },
-  "EvolutionAPI/evolution-api": {
-    "tier": "Bronze",
-    "weight": 0.3
-  },
-  "Expensify/App": {
-    "tier": "Bronze",
-    "weight": 0.29
-  },
-  "FRRouting/frr": {
-    "tier": "Bronze",
-    "weight": 0.23
-  },
-  "FaridSafi/react-native-gifted-chat": {
-    "tier": "Bronze",
-    "weight": 0.17
-  },
-  "FlowiseAI/Flowise": {
-    "tier": "Bronze",
-    "weight": 0.59
-  },
-  "FoundationAgents/MetaGPT": {
-    "tier": "Bronze",
-    "weight": 0.24
-  },
-  "FoundationAgents/OpenManus": {
-    "tier": "Bronze",
-    "weight": 0.24
-  },
-  "FreeRDP/FreeRDP": {
-    "tier": "Bronze",
-    "weight": 0.31
-  },
-  "FreeRTOS/FreeRTOS-Kernel": {
-    "tier": "Bronze",
-    "weight": 0.23
-  },
-  "FunkinCrew/Funkin": {
-    "tier": "Bronze",
-    "weight": 0.19
-  },
-  "Fyrd/caniuse": {
-    "tier": "Bronze",
-    "weight": 0.17
-  },
-  "General-Tao-Ventures/cartha-cli": {
-    "tier": "Silver",
-    "weight": 4.5
-  },
-  "General-Tao-Ventures/cartha-validator": {
-    "tier": "Silver",
-    "weight": 4.48
-  },
-  "GoogleChrome/lighthouse": {
-    "tier": "Bronze",
-    "weight": 0.37
-  },
-  "GoogleChrome/samples": {
-    "tier": "Bronze",
-    "weight": 0.31
-  },
-  "GoogleCloudPlatform/golang-samples": {
-    "tier": "Bronze",
-    "weight": 0.23
-  },
-  "GoogleCloudPlatform/python-docs-samples": {
-    "tier": "Bronze",
-    "weight": 0.21
-  },
-  "GoogleCloudPlatform/training-data-analyst": {
-    "tier": "Bronze",
-    "weight": 0.21
-  },
-  "GraphiteAI/Graphite-Subnet": {
-    "tier": "Silver",
-    "weight": 4.47
-  },
-  "Grasscutters/Grasscutter": {
-    "tier": "Bronze",
-    "weight": 0.18
-  },
-  "Guovin/iptv-api": {
-    "tier": "Bronze",
-    "weight": 0.33
-  },
-  "HabitRPG/habitica": {
-    "tier": "Bronze",
-    "weight": 0.33
-  },
-  "HackTricks-wiki/hacktricks": {
-    "tier": "Bronze",
-    "weight": 0.18
-  },
-  "Hacker0x01/react-datepicker": {
-    "inactive_at": "2025-11-29T17:45:38.525Z",
-    "tier": "Bronze",
-    "weight": 0.01
-  },
-  "Homebrew/brew": {
-    "tier": "Bronze",
-    "weight": 0.27
-  },
-  "Homebrew/homebrew-cask": {
-    "tier": "Bronze",
-    "weight": 0.27
-  },
-  "Homebrew/homebrew-core": {
-    "tier": "Silver",
-    "weight": 4.65
-  },
-  "HugoBlox/kit": {
-    "tier": "Bronze",
-    "weight": 0.2
-  },
-  "It-s-AI/llm-detection": {
-    "tier": "Silver",
-    "weight": 4.46
-  },
-  "JabRef/jabref": {
-    "tier": "Bronze",
-    "weight": 0.29
-  },
-  "JeffreySu/WeiXinMPSDK": {
-    "additional_acceptable_branches": [
-      "Developer"
-    ],
-    "tier": "Bronze",
-    "weight": 0.29
-  },
-  "JetBrains/intellij-community": {
-    "tier": "Bronze",
-    "weight": 0.18
-  },
-  "JetBrains/kotlin": {
-    "tier": "Bronze",
-    "weight": 0.62
-  },
-  "KartikTalwar/gmail.js": {
-    "inactive_at": "2025-11-29T17:45:38.525Z",
-    "tier": "Bronze",
-    "weight": 0.01
-  },
-  "Kitware/CMake": {
-    "tier": "Bronze",
-    "weight": 0.25
-  },
-  "Klipper3d/klipper": {
-    "tier": "Bronze",
-    "weight": 0.27
-  },
-  "Kong/insomnia": {
-    "tier": "Bronze",
-    "weight": 0.53
-  },
-  "Kong/kong": {
-    "tier": "Silver",
-    "weight": 3.78
-  },
-  "LFDT-web3j/web3j": {
-    "tier": "Bronze",
-    "weight": 0.28
-  },
-  "LSPosed/MagiskOnWSALocal": {
-    "tier": "Bronze",
-    "weight": 0.25
-  },
-  "Laravel-Lang/lang": {
-    "tier": "Bronze",
-    "weight": 0.27
-  },
-  "Leaflet/Leaflet": {
-    "tier": "Bronze",
-    "weight": 0.25
-  },
-  "Lienol/openwrt": {
-    "tier": "Bronze",
-    "weight": 0.24
-  },
-  "LimeSurvey/LimeSurvey": {
-    "additional_acceptable_branches": [
-      "develop-minor",
-      "develop-major"
-    ],
-    "tier": "Bronze",
-    "weight": 0.28
-  },
-  "LineageOS/android": {
-    "tier": "Bronze",
-    "weight": 0.18
-  },
-  "Lucaslhm/Flipper-IRDB": {
-    "tier": "Bronze",
-    "weight": 0.17
-  },
-  "MAZHARMIK/Interview_DS_Algo": {
-    "tier": "Bronze",
-    "weight": 0.25
-  },
-  "MIC-DKFZ/nnUNet": {
-    "tier": "Bronze",
-    "weight": 0.17
-  },
-  "MagicMirrorOrg/MagicMirror": {
-    "tier": "Bronze",
-    "weight": 0.19
-  },
-  "MarlinFirmware/Marlin": {
-    "tier": "Bronze",
-    "weight": 0.32
-  },
-  "MatrixTM/MHDDoS": {
-    "tier": "Bronze",
-    "weight": 0.18
-  },
-  "Mbed-TLS/mbedtls": {
-    "tier": "Bronze",
-    "weight": 0.25
-  },
-  "MetaMask/metamask-extension": {
-    "tier": "Gold",
-    "weight": 27.55
-  },
-  "MicrosoftDocs/azure-docs": {
-    "tier": "Bronze",
-    "weight": 0.25
-  },
-  "MicrosoftLearning/AZ-104-MicrosoftAzureAdministrator": {
-    "tier": "Bronze",
-    "weight": 0.19
-  },
-  "MinecraftForge/MinecraftForge": {
-    "tier": "Bronze",
-    "weight": 0.29
-  },
-  "Mintplex-Labs/anything-llm": {
-    "tier": "Silver",
-    "weight": 3.51
-  },
-  "MudBlazor/MudBlazor": {
-    "inactive_at": "2025-11-29T17:45:38.525Z",
-    "tier": "Bronze",
-    "weight": 0.01
-  },
-  "MvvmCross/MvvmCross": {
-    "tier": "Bronze",
-    "weight": 0.25
-  },
-  "MystenLabs/sui": {
-    "tier": "Gold",
-    "weight": 27.04
-  },
-  "NG-ZORRO/ng-zorro-antd": {
-    "tier": "Bronze",
-    "weight": 0.3
-  },
-  "NVIDIA-Omniverse/IsaacSim-dockerfiles": {
-    "tier": "Gold",
-    "weight": 13.13
-  },
-  "NVIDIA/Megatron-LM": {
-    "tier": "Bronze",
-    "weight": 0.18
-  },
-  "NVIDIA/apex": {
-    "tier": "Bronze",
-    "weight": 0.54
-  },
-  "NaiboWang/EasySpider": {
-    "tier": "Bronze",
-    "weight": 0.24
-  },
-  "NanmiCoder/MediaCrawler": {
-    "tier": "Bronze",
-    "weight": 0.35
-  },
-  "NationalSecurityAgency/ghidra": {
-    "tier": "Bronze",
-    "weight": 0.23
-  },
-  "NervJS/taro": {
-    "tier": "Bronze",
-    "weight": 0.21
-  },
-  "Netflix/zuul": {
-    "tier": "Bronze",
-    "weight": 0.54
-  },
-  "NginxProxyManager/nginx-proxy-manager": {
-    "tier": "Bronze",
-    "weight": 0.57
-  },
-  "NixOS/nixpkgs": {
-    "tier": "Bronze",
-    "weight": 0.24
-  },
-  "NobyDa/Script": {
-    "tier": "Bronze",
-    "weight": 0.32
-  },
-  "NousResearch/atropos": {
-    "tier": "Silver",
-    "weight": 4.95
-  },
-  "OAI/OpenAPI-Specification": {
-    "tier": "Silver",
-    "weight": 4.04
-  },
-  "OffchainLabs/prysm": {
-    "tier": "Bronze",
-    "weight": 0.22
-  },
-  "OpenAPITools/openapi-generator": {
-    "tier": "Bronze",
-    "weight": 0.19
-  },
-  "OpenBB-finance/OpenBB": {
-    "tier": "Bronze",
-    "weight": 0.18
-  },
-  "OpenDroneMap/WebODM": {
-    "tier": "Bronze",
-    "weight": 0.28
-  },
-  "OpenGradient/BitQuant-Subnet": {
-    "tier": "Silver",
-    "weight": 4.43
-  },
-  "OpenHands/OpenHands": {
-    "tier": "Gold",
-    "weight": 14.64
-  },
-  "OpenMined/PySyft": {
-    "tier": "Bronze",
-    "weight": 0.17
-  },
-  "OpenSignLabs/OpenSign": {
-    "tier": "Silver",
-    "weight": 5.47
-  },
-  "OpenVPN/openvpn": {
-    "tier": "Bronze",
-    "weight": 0.6
-  },
-  "OpenZeppelin/openzeppelin-contracts": {
-    "tier": "Bronze",
-    "weight": 0.22
-  },
-  "OrchardCMS/OrchardCore": {
-    "tier": "Bronze",
-    "weight": 0.27
-  },
-  "Orpheus-AI/Zeus": {
-    "tier": "Silver",
-    "weight": 6.94
-  },
-  "PHPMailer/PHPMailer": {
-    "tier": "Bronze",
-    "weight": 0.32
-  },
-  "PX4/PX4-Autopilot": {
-    "tier": "Gold",
-    "weight": 14.1
-  },
-  "PaddlePaddle/PaddleDetection": {
-    "tier": "Bronze",
-    "weight": 0.18
-  },
-  "PaddlePaddle/PaddleNLP": {
-    "tier": "Bronze",
-    "weight": 0.18
-  },
-  "PaperMC/Paper": {
-    "tier": "Bronze",
-    "weight": 0.17
-  },
-  "PathOfBuildingCommunity/PathOfBuilding": {
-    "tier": "Bronze",
-    "weight": 0.18
-  },
-  "PipedreamHQ/pipedream": {
-    "tier": "Bronze",
-    "weight": 0.35
-  },
-  "Platane/snk": {
-    "tier": "Bronze",
-    "weight": 0.28
-  },
-  "PlatformNetwork/platform": {
-    "tier": "Silver",
-    "weight": 4.42
-  },
-  "PointCloudLibrary/pcl": {
-    "tier": "Bronze",
-    "weight": 0.28
-  },
-  "Polymarket/agents": {
-    "tier": "Silver",
-    "weight": 5.34
-  },
-  "PowerShell/PowerShell": {
-    "tier": "Silver",
-    "weight": 3.54
-  },
-  "PrestaShop/PrestaShop": {
-    "tier": "Bronze",
-    "weight": 0.29
-  },
-  "Project-OSRM/osrm-backend": {
-    "tier": "Bronze",
-    "weight": 0.27
-  },
-  "ProvableHQ/snarkOS": {
-    "tier": "Bronze",
-    "weight": 0.24
-  },
-  "PyGithub/PyGithub": {
-    "tier": "Bronze",
-    "weight": 0.17
-  },
-  "PyQt5/PyQt": {
-    "tier": "Bronze",
-    "weight": 0.17
-  },
-  "Qiskit/qiskit": {
-    "tier": "Bronze",
-    "weight": 0.3
-  },
-  "QuivrHQ/quivr": {
-    "tier": "Bronze",
-    "weight": 0.18
-  },
-  "RIOT-OS/RIOT": {
-    "tier": "Bronze",
-    "weight": 0.25
-  },
-  "RT-Thread/rt-thread": {
-    "tier": "Bronze",
-    "weight": 0.27
-  },
-  "RVC-Boss/GPT-SoVITS": {
-    "tier": "Bronze",
-    "weight": 0.23
-  },
-  "RainerKuemmerle/g2o": {
-    "tier": "Bronze",
-    "weight": 0.23
-  },
-  "Raphire/Win11Debloat": {
-    "tier": "Bronze",
-    "weight": 0.34
-  },
-  "Rapptz/discord.py": {
-    "tier": "Silver",
-    "weight": 3.53
-  },
-  "RasaHQ/rasa": {
-    "tier": "Bronze",
-    "weight": 0.19
-  },
-  "RaspberryPiFoundation/blockly": {
-    "tier": "Bronze",
-    "weight": 0.17
-  },
-  "ReactiveX/RxJava": {
-    "tier": "Bronze",
-    "weight": 0.23
-  },
-  "RedTeamSubnet/RedTeam": {
-    "tier": "Silver",
-    "weight": 4.4
-  },
-  "RichardLitt/standard-readme": {
-    "tier": "Bronze",
-    "weight": 0.19
-  },
-  "RobinHerbots/Inputmask": {
-    "tier": "Bronze",
-    "weight": 0.3
-  },
-  "RobotLocomotion/drake": {
-    "tier": "Bronze",
-    "weight": 0.24
-  },
-  "RocketChat/Rocket.Chat": {
-    "tier": "Bronze",
-    "weight": 0.32
-  },
-  "RogueTensor/bitagent_subnet": {
-    "tier": "Silver",
-    "weight": 4.39
-  },
-  "Rudrabha/Wav2Lip": {
-    "tier": "Bronze",
-    "weight": 0.17
-  },
-  "RyanFitzgerald/devportfolio": {
-    "tier": "Bronze",
-    "weight": 0.19
-  },
-  "SVG-Edit/svgedit": {
-    "tier": "Bronze",
-    "weight": 0.17
-  },
-  "SWE-agent/SWE-agent": {
-    "tier": "Gold",
-    "weight": 16.22
-  },
-  "SchemaStore/schemastore": {
-    "tier": "Bronze",
-    "weight": 0.3
-  },
-  "SeleniumHQ/docker-selenium": {
-    "tier": "Silver",
-    "weight": 3.7
-  },
-  "SeleniumHQ/selenium": {
-    "tier": "Silver",
-    "weight": 3.69
-  },
-  "SigmaHQ/sigma": {
-    "tier": "Bronze",
-    "weight": 0.17
-  },
-  "Significant-Gravitas/AutoGPT": {
-    "tier": "Gold",
-    "weight": 14.26
-  },
-  "SillyTavern/SillyTavern": {
-    "additional_acceptable_branches": [
-      "staging"
-    ],
-    "tier": "Bronze",
-    "weight": 0.19
-  },
-  "Sjj1024/PakePlus": {
-    "tier": "Bronze",
-    "weight": 0.21
-  },
-  "Skyvern-AI/skyvern": {
-    "tier": "Bronze",
-    "weight": 0.54
-  },
-  "Snailclimb/JavaGuide": {
-    "inactive_at": "2025-11-29T17:45:38.525Z",
-    "tier": "Bronze",
-    "weight": 0.01
-  },
-  "SonarSource/sonarqube": {
-    "tier": "Bronze",
-    "weight": 0.62
-  },
-  "Stirling-Tools/Stirling-PDF": {
-    "tier": "Bronze",
-    "weight": 0.18
-  },
-  "Studio-42/elFinder": {
-    "tier": "Bronze",
-    "weight": 0.29
-  },
-  "SuiteCRM/SuiteCRM": {
-    "tier": "Bronze",
-    "weight": 0.27
-  },
-  "Swap-Subnet/swap-subnet": {
-    "tier": "Silver",
-    "weight": 3.99
-  },
-  "TanStack/query": {
-    "tier": "Bronze",
-    "weight": 0.17
-  },
-  "Team-Rizzo/talisman-ai": {
-    "tier": "Gold",
-    "weight": 13.41
-  },
-  "Tencent/weui-wxss": {
-    "tier": "Bronze",
-    "weight": 0.2
-  },
-  "Textualize/rich": {
-    "tier": "Bronze",
-    "weight": 0.17
-  },
-  "TheAlgorithms/C-Sharp": {
-    "inactive_at": "2025-11-10T16:39:22.045Z",
-    "tier": "Bronze",
-    "weight": 0.01
-  },
-  "TheOdinProject/curriculum": {
-    "tier": "Bronze",
-    "weight": 0.38
-  },
-  "TheOdinProject/theodinproject": {
-    "tier": "Bronze",
-    "weight": 0.22
-  },
-  "TheWidlarzGroup/react-native-video": {
-    "tier": "Bronze",
-    "weight": 0.22
-  },
-  "TiddlyWiki/TiddlyWiki5": {
-    "inactive_at": "2025-11-29T17:45:38.525Z",
-    "tier": "Bronze",
-    "weight": 0.01
-  },
-  "TideDra/zotero-arxiv-daily": {
-    "tier": "Bronze",
-    "weight": 0.31
-  },
-  "TonyChen56/WeChatRobot": {
-    "tier": "Bronze",
-    "weight": 0.26
-  },
-  "TooTallNate/Java-WebSocket": {
-    "tier": "Bronze",
-    "weight": 0.17
-  },
-  "ToolJet/ToolJet": {
-    "additional_acceptable_branches": [
-      "develop"
-    ],
-    "tier": "Gold",
-    "weight": 13.86
-  },
-  "Trinea/android-open-project": {
-    "tier": "Bronze",
-    "weight": 0.22
-  },
-  "TrinityCore/TrinityCore": {
-    "tier": "Bronze",
-    "weight": 0.29
-  },
-  "TryGhost/Ghost": {
-    "tier": "Bronze",
-    "weight": 0.36
-  },
-  "Uberi/speech_recognition": {
-    "tier": "Bronze",
-    "weight": 0.17
-  },
-  "Ultimaker/Cura": {
-    "tier": "Bronze",
-    "weight": 0.29
-  },
-  "Uniswap/interface": {
-    "tier": "Bronze",
-    "weight": 0.31
-  },
-  "Uniswap/v4-core": {
-    "tier": "Gold",
-    "weight": 37.07
-  },
-  "Unitech/pm2": {
-    "tier": "Gold",
-    "weight": 22.46
-  },
-  "Unity-Technologies/ml-agents": {
-    "tier": "Bronze",
-    "weight": 0.17
-  },
-  "Unstructured-IO/unstructured": {
-    "tier": "Silver",
-    "weight": 6.75
-  },
-  "VickScarlet/lifeRestart": {
-    "tier": "Bronze",
-    "weight": 0.18
-  },
-  "Vonng/ddia": {
-    "tier": "Bronze",
-    "weight": 0.18
-  },
-  "WebGoat/WebGoat": {
-    "tier": "Bronze",
-    "weight": 0.35
-  },
-  "WhiskeySockets/Baileys": {
-    "tier": "Bronze",
-    "weight": 0.31
-  },
-  "WordPress/WordPress": {
-    "tier": "Silver",
-    "weight": 4.68
-  },
-  "WordPress/gutenberg": {
-    "tier": "Bronze",
-    "weight": 0.33
-  },
-  "XRPLF/rippled": {
-    "tier": "Bronze",
-    "weight": 0.25
-  },
-  "XX-net/XX-Net": {
-    "tier": "Bronze",
-    "weight": 0.19
-  },
-  "Yorko/mlcourse.ai": {
-    "tier": "Bronze",
-    "weight": 0.33
-  },
-  "YunaiV/ruoyi-vue-pro": {
-    "tier": "Bronze",
-    "weight": 0.19
-  },
-  "YunaiV/yudao-cloud": {
-    "tier": "Bronze",
-    "weight": 0.18
+    "weight": 19.31
   },
   "abi/screenshot-to-code": {
     "tier": "Bronze",
@@ -980,6 +39,18 @@
     "tier": "Bronze",
     "weight": 0.22
   },
+  "Activiti/Activiti": {
+    "tier": "Bronze",
+    "weight": 0.32
+  },
+  "AffineFoundation/affine-cortex": {
+    "tier": "Gold",
+    "weight": 22.02
+  },
+  "AffineFoundation/affinetes": {
+    "tier": "Gold",
+    "weight": 20.71
+  },
   "aframevr/aframe": {
     "tier": "Bronze",
     "weight": 0.19
@@ -995,6 +66,10 @@
   "ai/size-limit": {
     "tier": "Bronze",
     "weight": 0.17
+  },
+  "Aider-AI/aider": {
+    "tier": "Bronze",
+    "weight": 0.18
   },
   "airbnb/javascript": {
     "tier": "Bronze",
@@ -1023,18 +98,6 @@
     "tier": "Bronze",
     "weight": 0.25
   },
-  "alibaba/COLA": {
-    "tier": "Bronze",
-    "weight": 0.17
-  },
-  "alibaba/DataX": {
-    "tier": "Bronze",
-    "weight": 0.32
-  },
-  "alibaba/Sentinel": {
-    "tier": "Silver",
-    "weight": 3.51
-  },
   "alibaba/arthas": {
     "tier": "Bronze",
     "weight": 0.32
@@ -1042,6 +105,14 @@
   "alibaba/canal": {
     "tier": "Silver",
     "weight": 3.75
+  },
+  "alibaba/COLA": {
+    "tier": "Bronze",
+    "weight": 0.17
+  },
+  "alibaba/DataX": {
+    "tier": "Bronze",
+    "weight": 0.32
   },
   "alibaba/druid": {
     "tier": "Bronze",
@@ -1059,9 +130,17 @@
     "tier": "Silver",
     "weight": 4.8
   },
+  "alibaba/Sentinel": {
+    "tier": "Silver",
+    "weight": 3.51
+  },
   "alibaba/spring-cloud-alibaba": {
     "tier": "Silver",
     "weight": 3.64
+  },
+  "AlphaCoreBittensor/alphacore": {
+    "tier": "Silver",
+    "weight": 4.56
   },
   "alshedivat/al-folio": {
     "tier": "Bronze",
@@ -1144,7 +223,7 @@
   },
   "apache/airflow": {
     "tier": "Gold",
-    "weight": 14.21
+    "weight": 14.09
   },
   "apache/arrow": {
     "tier": "Bronze",
@@ -1320,7 +399,7 @@
   },
   "apache/tvm": {
     "tier": "Gold",
-    "weight": 17.75
+    "weight": 17.61
   },
   "apache/zeppelin": {
     "tier": "Bronze",
@@ -1334,9 +413,17 @@
     "tier": "Bronze",
     "weight": 0.31
   },
+  "ApolloAuto/apollo": {
+    "tier": "Bronze",
+    "weight": 0.3
+  },
   "apolloconfig/apollo": {
     "tier": "Bronze",
     "weight": 0.35
+  },
+  "AppFlowy-IO/AppFlowy": {
+    "tier": "Gold",
+    "weight": 12.61
   },
   "appium/appium": {
     "tier": "Bronze",
@@ -1356,11 +443,19 @@
   },
   "appwrite/appwrite": {
     "tier": "Gold",
-    "weight": 13.67
+    "weight": 13.56
   },
   "aptos-labs/aptos-core": {
     "tier": "Bronze",
     "weight": 0.25
+  },
+  "Arduino-IRremote/Arduino-IRremote": {
+    "tier": "Bronze",
+    "weight": 0.25
+  },
+  "ArduPilot/ardupilot": {
+    "tier": "Bronze",
+    "weight": 0.32
   },
   "argoproj/argo-cd": {
     "tier": "Bronze",
@@ -1380,11 +475,15 @@
   },
   "astral-sh/ruff": {
     "tier": "Gold",
-    "weight": 19.96
+    "weight": 19.8
   },
   "astropy/astropy": {
     "tier": "Bronze",
     "weight": 0.29
+  },
+  "AtsushiSakai/PythonRobotics": {
+    "tier": "Bronze",
+    "weight": 0.19
   },
   "audreyfeldroy/cookiecutter-pypackage": {
     "tier": "Bronze",
@@ -1416,7 +515,7 @@
   },
   "aws/aws-cli": {
     "tier": "Gold",
-    "weight": 17.64
+    "weight": 17.5
   },
   "aws/aws-sdk-java": {
     "tier": "Bronze",
@@ -1438,6 +537,10 @@
     "tier": "Bronze",
     "weight": 0.91
   },
+  "AykutSarac/jsoncrack.com": {
+    "tier": "Bronze",
+    "weight": 0.17
+  },
   "ayn2op/discordo": {
     "tier": "Bronze",
     "weight": 0.27
@@ -1449,6 +552,38 @@
   "azerothcore/azerothcore-wotlk": {
     "tier": "Bronze",
     "weight": 0.27
+  },
+  "Azure-Samples/azure-search-openai-demo": {
+    "tier": "Bronze",
+    "weight": 0.32
+  },
+  "Azure-Samples/cognitive-services-speech-sdk": {
+    "tier": "Bronze",
+    "weight": 0.27
+  },
+  "Azure/azure-cli": {
+    "tier": "Bronze",
+    "weight": 0.31
+  },
+  "Azure/azure-powershell": {
+    "tier": "Bronze",
+    "weight": 0.29
+  },
+  "Azure/azure-sdk-for-net": {
+    "tier": "Bronze",
+    "weight": 0.29
+  },
+  "Azure/azure-sdk-for-python": {
+    "tier": "Bronze",
+    "weight": 0.31
+  },
+  "Azure/Azure-Sentinel": {
+    "tier": "Bronze",
+    "weight": 0.31
+  },
+  "AzureAD/microsoft-authentication-library-for-js": {
+    "tier": "Bronze",
+    "weight": 0.29
   },
   "babaohuang/GeminiProChat": {
     "tier": "Bronze",
@@ -1482,13 +617,17 @@
     "tier": "Bronze",
     "weight": 0.18
   },
+  "Barbariandev/MANTIS": {
+    "tier": "Silver",
+    "weight": 8.22
+  },
   "base/node": {
     "tier": "Bronze",
     "weight": 0.59
   },
   "basecamp/omarchy": {
     "tier": "Gold",
-    "weight": 25.7
+    "weight": 25.48
   },
   "bazelbuild/bazel": {
     "tier": "Silver",
@@ -1508,7 +647,7 @@
   },
   "bevyengine/bevy": {
     "tier": "Gold",
-    "weight": 13.54
+    "weight": 13.43
   },
   "bia-pain-bache/BPB-Worker-Panel": {
     "tier": "Bronze",
@@ -1524,6 +663,10 @@
     ],
     "tier": "Bronze",
     "weight": 0.18
+  },
+  "Billionmail/BillionMail": {
+    "tier": "Silver",
+    "weight": 5.26
   },
   "binance/binance-spot-api-docs": {
     "tier": "Bronze",
@@ -1547,19 +690,26 @@
   },
   "bitcoin/bips": {
     "tier": "Gold",
-    "weight": 26.57
+    "weight": 26.35
   },
   "bitcoin/bitcoin": {
     "tier": "Gold",
-    "weight": 93.12
+    "weight": 92.34
   },
   "bitcoinj/bitcoinj": {
     "tier": "Gold",
-    "weight": 26.12
+    "weight": 25.9
   },
   "bitcoinjs/bitcoinjs-lib": {
     "tier": "Gold",
-    "weight": 25.3
+    "weight": 25.08
+  },
+  "BitMind-AI/bitmind-subnet": {
+    "additional_acceptable_branches": [
+      "testnet"
+    ],
+    "tier": "Gold",
+    "weight": 19.16
   },
   "bitnami/charts": {
     "tier": "Bronze",
@@ -1567,19 +717,23 @@
   },
   "bitpay/bitcore": {
     "tier": "Gold",
-    "weight": 24.92
+    "weight": 24.71
   },
   "bitrecs/bitrecs-subnet": {
     "tier": "Silver",
     "weight": 4.35
   },
+  "Bitsec-AI/subnet": {
+    "tier": "Silver",
+    "weight": 4.55
+  },
   "bitwarden/clients": {
     "tier": "Gold",
-    "weight": 14.15
+    "weight": 14.04
   },
   "bitwarden/server": {
     "tier": "Gold",
-    "weight": 17.87
+    "weight": 17.72
   },
   "blockscout/blockscout": {
     "tier": "Bronze",
@@ -1599,7 +753,11 @@
   },
   "brave/brave-browser": {
     "tier": "Gold",
-    "weight": 20.68
+    "weight": 20.51
+  },
+  "BretFisher/udemy-docker-mastery": {
+    "tier": "Bronze",
+    "weight": 0.35
   },
   "brianfrankcooper/YCSB": {
     "tier": "Bronze",
@@ -1612,6 +770,10 @@
   "browser-use/browser-use": {
     "tier": "Bronze",
     "weight": 0.24
+  },
+  "BruceDevices/firmware": {
+    "tier": "Silver",
+    "weight": 3.44
   },
   "btcsuite/btcd": {
     "tier": "Bronze",
@@ -1629,6 +791,10 @@
     "tier": "Silver",
     "weight": 3.71
   },
+  "CaiJimmy/hugo-theme-stack": {
+    "tier": "Bronze",
+    "weight": 0.19
+  },
   "cakephp/cakephp": {
     "tier": "Bronze",
     "weight": 0.28
@@ -1636,6 +802,14 @@
   "calcom/cal.com": {
     "tier": "Bronze",
     "weight": 0.32
+  },
+  "CareyWang/sub-web": {
+    "tier": "Bronze",
+    "weight": 0.18
+  },
+  "CarGuo/GSYVideoPlayer": {
+    "tier": "Bronze",
+    "weight": 0.18
   },
   "carla-simulator/carla": {
     "tier": "Bronze",
@@ -1661,9 +835,18 @@
     "tier": "Silver",
     "weight": 3.71
   },
+  "CesiumGS/cesium": {
+    "tier": "Bronze",
+    "weight": 0.19
+  },
   "cf-pages/Telegraph-Image": {
     "tier": "Bronze",
     "weight": 0.22
+  },
+  "Chainlit/chainlit": {
+    "inactive_at": "2025-11-29T17:45:38.525Z",
+    "tier": "Bronze",
+    "weight": 0.01
   },
   "chakra-ui/chakra-ui": {
     "tier": "Bronze",
@@ -1688,6 +871,10 @@
   "chatchat-space/Langchain-Chatchat": {
     "tier": "Bronze",
     "weight": 0.22
+  },
+  "ChatGPTNextWeb/NextChat": {
+    "tier": "Bronze",
+    "weight": 0.64
   },
   "chavyleung/scripts": {
     "tier": "Bronze",
@@ -1721,6 +908,10 @@
     "tier": "Bronze",
     "weight": 0.17
   },
+  "ChutesAI/chutes": {
+    "tier": "Gold",
+    "weight": 21.78
+  },
   "citation-style-language/styles": {
     "tier": "Bronze",
     "weight": 0.24
@@ -1741,9 +932,17 @@
     "tier": "Bronze",
     "weight": 0.17
   },
+  "CleverRaven/Cataclysm-DDA": {
+    "tier": "Bronze",
+    "weight": 0.28
+  },
   "cli/cli": {
     "tier": "Gold",
-    "weight": 18.1
+    "weight": 17.95
+  },
+  "ClickHouse/ClickHouse": {
+    "tier": "Silver",
+    "weight": 3.93
   },
   "cline/cline": {
     "tier": "Bronze",
@@ -1772,6 +971,10 @@
   "cncf/curriculum": {
     "tier": "Bronze",
     "weight": 0.18
+  },
+  "CocoaPods/Specs": {
+    "tier": "Bronze",
+    "weight": 0.22
   },
   "code4craft/webmagic": {
     "tier": "Bronze",
@@ -1809,9 +1012,17 @@
     "tier": "Bronze",
     "weight": 0.23
   },
+  "ColorlibHQ/AdminLTE": {
+    "tier": "Bronze",
+    "weight": 0.43
+  },
+  "Comfy-Org/ComfyUI": {
+    "tier": "Bronze",
+    "weight": 0.25
+  },
   "commaai/openpilot": {
     "tier": "Gold",
-    "weight": 18.48
+    "weight": 18.33
   },
   "community/community": {
     "tier": "Bronze",
@@ -1844,7 +1055,7 @@
   },
   "cosmos/cosmos-sdk": {
     "tier": "Gold",
-    "weight": 24.56
+    "weight": 24.35
   },
   "cotes2020/jekyll-theme-chirpy": {
     "tier": "Bronze",
@@ -1853,6 +1064,14 @@
   "cq-panda/Vue.NetCore": {
     "tier": "Bronze",
     "weight": 0.25
+  },
+  "CreativeBuilds/sn77": {
+    "tier": "Silver",
+    "weight": 7.76
+  },
+  "CreditTone/hooker": {
+    "tier": "Bronze",
+    "weight": 0.17
   },
   "crewAIInc/crewAI": {
     "tier": "Silver",
@@ -1914,6 +1133,10 @@
     "tier": "Bronze",
     "weight": 0.17
   },
+  "Dash-Industry-Forum/dash.js": {
+    "tier": "Bronze",
+    "weight": 0.29
+  },
   "dataabc/weiboSpider": {
     "tier": "Bronze",
     "weight": 0.17
@@ -1922,9 +1145,21 @@
     "tier": "Bronze",
     "weight": 0.17
   },
+  "DataLinkDC/dinky": {
+    "tier": "Bronze",
+    "weight": 0.27
+  },
+  "Datalux/Osintgram": {
+    "tier": "Bronze",
+    "weight": 0.17
+  },
+  "Datura-ai/lium-io": {
+    "tier": "Gold",
+    "weight": 21.55
+  },
   "dbeaver/dbeaver": {
     "tier": "Gold",
-    "weight": 35.68
+    "weight": 35.39
   },
   "dcloudio/mui": {
     "tier": "Bronze",
@@ -1950,21 +1185,37 @@
     "tier": "Bronze",
     "weight": 0.19
   },
+  "DeepLabCut/DeepLabCut": {
+    "tier": "Bronze",
+    "weight": 0.29
+  },
   "deepseek-ai/DeepSeek-V3": {
     "tier": "Bronze",
     "weight": 0.25
   },
   "deepset-ai/haystack": {
     "tier": "Gold",
-    "weight": 13.5
+    "weight": 13.39
   },
   "deepspeedai/DeepSpeed": {
     "tier": "Bronze",
     "weight": 0.23
   },
+  "DefectDojo/django-DefectDojo": {
+    "tier": "Bronze",
+    "weight": 0.19
+  },
+  "DefinitelyTyped/DefinitelyTyped": {
+    "tier": "Bronze",
+    "weight": 0.6
+  },
   "denoland/deno": {
     "tier": "Silver",
     "weight": 3.6
+  },
+  "Desearch-ai/subnet-22-desearch": {
+    "tier": "Silver",
+    "weight": 7.42
   },
   "deskflow/deskflow": {
     "inactive_at": "2026-01-23T00:00:00.000Z",
@@ -2025,7 +1276,7 @@
   },
   "dmlc/xgboost": {
     "tier": "Gold",
-    "weight": 13.37
+    "weight": 13.26
   },
   "docker-library/docs": {
     "tier": "Bronze",
@@ -2045,7 +1296,7 @@
   },
   "docker/compose": {
     "tier": "Gold",
-    "weight": 17.53
+    "weight": 17.39
   },
   "docker/docker-py": {
     "tier": "Silver",
@@ -2065,11 +1316,15 @@
   },
   "dogecoin/dogecoin": {
     "tier": "Gold",
-    "weight": 24.21
+    "weight": 24.01
   },
   "doggy8088/Learn-Git-in-30-days": {
     "tier": "Bronze",
     "weight": 0.18
+  },
+  "Dolibarr/dolibarr": {
+    "tier": "Bronze",
+    "weight": 0.27
   },
   "domoticz/domoticz": {
     "tier": "Bronze",
@@ -2102,13 +1357,13 @@
     "tier": "Silver",
     "weight": 3.79
   },
-  "dotnet/eShop": {
-    "tier": "Bronze",
-    "weight": 0.28
-  },
   "dotnet/efcore": {
     "tier": "Bronze",
     "weight": 0.62
+  },
+  "dotnet/eShop": {
+    "tier": "Bronze",
+    "weight": 0.28
   },
   "dotnet/roslyn": {
     "tier": "Bronze",
@@ -2122,6 +1377,11 @@
     "tier": "Bronze",
     "weight": 0.29
   },
+  "DotNetNext/SqlSugar": {
+    "inactive_at": "2025-11-29T17:45:38.525Z",
+    "tier": "Bronze",
+    "weight": 0.01
+  },
   "doublesymmetry/react-native-track-player": {
     "tier": "Bronze",
     "weight": 0.19
@@ -2129,6 +1389,10 @@
   "dreamhunter2333/cloudflare_temp_email": {
     "tier": "Bronze",
     "weight": 0.18
+  },
+  "DrKLO/Telegram": {
+    "tier": "Bronze",
+    "weight": 0.35
   },
   "dromara/lamp-cloud": {
     "tier": "Bronze",
@@ -2146,13 +1410,22 @@
     "tier": "Silver",
     "weight": 4.44
   },
-  "eKoopmans/html2pdf.js": {
+  "EastWorld/wechat-app-mall": {
     "tier": "Bronze",
-    "weight": 0.29
+    "weight": 0.35
+  },
+  "EasyDarwin/EasyDarwin": {
+    "tier": "Bronze",
+    "weight": 0.19
   },
   "easzlab/kubeasz": {
     "tier": "Bronze",
     "weight": 0.19
+  },
+  "Ebazhanov/linkedin-skill-assessments-quizzes": {
+    "inactive_at": "2025-11-04T02:18:33.094Z",
+    "tier": "Bronze",
+    "weight": 0.01
   },
   "eclipse-sumo/sumo": {
     "tier": "Bronze",
@@ -2162,6 +1435,10 @@
     "tier": "Silver",
     "weight": 3.48
   },
+  "EfficientFrontier-SignalPlus/EfficientFrontier": {
+    "tier": "Silver",
+    "weight": 4.51
+  },
   "egametang/ET": {
     "tier": "Bronze",
     "weight": 0.29
@@ -2169,6 +1446,10 @@
   "eigent-ai/eigent": {
     "tier": "Silver",
     "weight": 8.91
+  },
+  "eKoopmans/html2pdf.js": {
+    "tier": "Bronze",
+    "weight": 0.29
   },
   "elastic/beats": {
     "tier": "Bronze",
@@ -2209,6 +1490,10 @@
     "tier": "Bronze",
     "weight": 0.36
   },
+  "EleutherAI/lm-evaluation-harness": {
+    "tier": "Bronze",
+    "weight": 0.17
+  },
   "elizaOS/eliza": {
     "tier": "Bronze",
     "weight": 0.31
@@ -2235,7 +1520,7 @@
   },
   "entrius/gittensor": {
     "tier": "Gold",
-    "weight": 60
+    "weight": 59.5
   },
   "envoyproxy/envoy": {
     "tier": "Silver",
@@ -2265,6 +1550,10 @@
     "tier": "Bronze",
     "weight": 0.58
   },
+  "EsotericSoftware/spine-runtimes": {
+    "tier": "Bronze",
+    "weight": 0.27
+  },
   "esp8266/Arduino": {
     "tier": "Bronze",
     "weight": 0.32
@@ -2275,11 +1564,11 @@
   },
   "espressif/arduino-esp32": {
     "tier": "Gold",
-    "weight": 13.09
+    "weight": 12.98
   },
   "espressif/esp-idf": {
     "tier": "Gold",
-    "weight": 13.05
+    "weight": 12.94
   },
   "etcd-io/etcd": {
     "tier": "Silver",
@@ -2299,15 +1588,15 @@
   },
   "ethereum-optimism/optimism": {
     "tier": "Gold",
-    "weight": 23.89
-  },
-  "ethereum/EIPs": {
-    "tier": "Gold",
-    "weight": 23.58
+    "weight": 23.69
   },
   "ethereum/consensus-specs": {
     "tier": "Bronze",
     "weight": 0.27
+  },
+  "ethereum/EIPs": {
+    "tier": "Gold",
+    "weight": 23.38
   },
   "ethereum/ethereum-org-website": {
     "tier": "Bronze",
@@ -2315,7 +1604,7 @@
   },
   "ethereum/go-ethereum": {
     "tier": "Gold",
-    "weight": 53.48
+    "weight": 53.04
   },
   "ethereum/web3.py": {
     "tier": "Silver",
@@ -2323,11 +1612,23 @@
   },
   "ethers-io/ethers.js": {
     "tier": "Gold",
-    "weight": 23.28
+    "weight": 23.09
+  },
+  "Eugeny/tabby": {
+    "tier": "Bronze",
+    "weight": 0.17
+  },
+  "EvolutionAPI/evolution-api": {
+    "tier": "Bronze",
+    "weight": 0.3
   },
   "excalidraw/excalidraw": {
     "tier": "Gold",
-    "weight": 13.81
+    "weight": 13.7
+  },
+  "Expensify/App": {
+    "tier": "Bronze",
+    "weight": 0.29
   },
   "expo/expo": {
     "tier": "Bronze",
@@ -2402,6 +1703,10 @@
     "tier": "Bronze",
     "weight": 0.19
   },
+  "FaridSafi/react-native-gifted-chat": {
+    "tier": "Bronze",
+    "weight": 0.17
+  },
   "fastapi/fastapi": {
     "tier": "Silver",
     "weight": 3.47
@@ -2470,6 +1775,10 @@
     "tier": "Bronze",
     "weight": 0.29
   },
+  "FlowiseAI/Flowise": {
+    "tier": "Bronze",
+    "weight": 0.59
+  },
   "flowsurface-rs/flowsurface": {
     "tier": "Silver",
     "weight": 5.88
@@ -2514,6 +1823,14 @@
     "tier": "Bronze",
     "weight": 0.18
   },
+  "FoundationAgents/MetaGPT": {
+    "tier": "Bronze",
+    "weight": 0.24
+  },
+  "FoundationAgents/OpenManus": {
+    "tier": "Bronze",
+    "weight": 0.24
+  },
   "francescopace/espectre": {
     "tier": "Silver",
     "weight": 5.3
@@ -2538,13 +1855,29 @@
     "tier": "Bronze",
     "weight": 0.26
   },
+  "FreeRDP/FreeRDP": {
+    "tier": "Bronze",
+    "weight": 0.31
+  },
+  "FreeRTOS/FreeRTOS-Kernel": {
+    "tier": "Bronze",
+    "weight": 0.23
+  },
   "freqtrade/freqtrade": {
     "tier": "Bronze",
     "weight": 0.35
   },
+  "FRRouting/frr": {
+    "tier": "Bronze",
+    "weight": 0.23
+  },
   "fullstackhero/dotnet-starter-kit": {
     "tier": "Bronze",
     "weight": 0.27
+  },
+  "FunkinCrew/Funkin": {
+    "tier": "Bronze",
+    "weight": 0.19
   },
   "fuzhengwei/CodeGuide": {
     "tier": "Bronze",
@@ -2553,6 +1886,10 @@
   "fx-integral/metahash": {
     "tier": "Silver",
     "weight": 4.31
+  },
+  "Fyrd/caniuse": {
+    "tier": "Bronze",
+    "weight": 0.17
   },
   "garylab/dnmp": {
     "tier": "Bronze",
@@ -2569,6 +1906,14 @@
   "gcc-mirror/gcc": {
     "tier": "Bronze",
     "weight": 0.28
+  },
+  "General-Tao-Ventures/cartha-cli": {
+    "tier": "Silver",
+    "weight": 4.5
+  },
+  "General-Tao-Ventures/cartha-validator": {
+    "tier": "Silver",
+    "weight": 4.48
   },
   "geoserver/geoserver": {
     "tier": "Bronze",
@@ -2596,7 +1941,7 @@
   },
   "git/git": {
     "tier": "Gold",
-    "weight": 17.32
+    "weight": 17.18
   },
   "gitbutlerapp/gitbutler": {
     "tier": "Silver",
@@ -2644,7 +1989,7 @@
   },
   "godotengine/godot": {
     "tier": "Gold",
-    "weight": 14.05
+    "weight": 13.94
   },
   "godotengine/godot-docs": {
     "tier": "Bronze",
@@ -2664,7 +2009,7 @@
   },
   "golang/go": {
     "tier": "Gold",
-    "weight": 17.22
+    "weight": 17.08
   },
   "google-gemini/gemini-cli": {
     "tier": "Silver",
@@ -2742,6 +2087,26 @@
     "tier": "Silver",
     "weight": 6.34
   },
+  "GoogleChrome/lighthouse": {
+    "tier": "Bronze",
+    "weight": 0.37
+  },
+  "GoogleChrome/samples": {
+    "tier": "Bronze",
+    "weight": 0.31
+  },
+  "GoogleCloudPlatform/golang-samples": {
+    "tier": "Bronze",
+    "weight": 0.23
+  },
+  "GoogleCloudPlatform/python-docs-samples": {
+    "tier": "Bronze",
+    "weight": 0.21
+  },
+  "GoogleCloudPlatform/training-data-analyst": {
+    "tier": "Bronze",
+    "weight": 0.21
+  },
   "googlemaps/android-maps-utils": {
     "tier": "Bronze",
     "weight": 0.27
@@ -2760,7 +2125,7 @@
   },
   "gradients-ai/G.O.D": {
     "tier": "Gold",
-    "weight": 21.29
+    "weight": 21.11
   },
   "gradio-app/gradio": {
     "tier": "Bronze",
@@ -2778,9 +2143,17 @@
     "tier": "Bronze",
     "weight": 0.17
   },
+  "GraphiteAI/Graphite-Subnet": {
+    "tier": "Silver",
+    "weight": 4.47
+  },
   "graphql/graphql-js": {
     "tier": "Bronze",
     "weight": 0.54
+  },
+  "Grasscutters/Grasscutter": {
+    "tier": "Bronze",
+    "weight": 0.18
   },
   "grpc/grpc": {
     "tier": "Bronze",
@@ -2798,6 +2171,10 @@
     "tier": "Bronze",
     "weight": 0.21
   },
+  "Guovin/iptv-api": {
+    "tier": "Bronze",
+    "weight": 0.33
+  },
   "gz-yami/mall4cloud": {
     "tier": "Bronze",
     "weight": 0.17
@@ -2810,12 +2187,25 @@
     "tier": "Bronze",
     "weight": 0.21
   },
+  "HabitRPG/habitica": {
+    "tier": "Bronze",
+    "weight": 0.33
+  },
+  "Hacker0x01/react-datepicker": {
+    "inactive_at": "2025-11-29T17:45:38.525Z",
+    "tier": "Bronze",
+    "weight": 0.01
+  },
   "hacksider/Deep-Live-Cam": {
     "additional_acceptable_branches": [
       "premain"
     ],
     "tier": "Bronze",
     "weight": 0.25
+  },
+  "HackTricks-wiki/hacktricks": {
+    "tier": "Bronze",
+    "weight": 0.18
   },
   "hadley/r4ds": {
     "tier": "Bronze",
@@ -2864,7 +2254,7 @@
   },
   "helix-editor/helix": {
     "tier": "Gold",
-    "weight": 13.33
+    "weight": 13.22
   },
   "helm/helm": {
     "tier": "Silver",
@@ -2898,6 +2288,18 @@
     "tier": "Bronze",
     "weight": 0.24
   },
+  "Homebrew/brew": {
+    "tier": "Bronze",
+    "weight": 0.27
+  },
+  "Homebrew/homebrew-cask": {
+    "tier": "Bronze",
+    "weight": 0.27
+  },
+  "Homebrew/homebrew-core": {
+    "tier": "Silver",
+    "weight": 4.65
+  },
   "honza/vim-snippets": {
     "tier": "Silver",
     "weight": 3.69
@@ -2908,7 +2310,7 @@
   },
   "hoppscotch/hoppscotch": {
     "tier": "Gold",
-    "weight": 20.13
+    "weight": 19.97
   },
   "hpcaitech/ColossalAI": {
     "tier": "Bronze",
@@ -2936,7 +2338,7 @@
   },
   "huggingface/lerobot": {
     "tier": "Gold",
-    "weight": 14.53
+    "weight": 14.41
   },
   "huggingface/pytorch-image-models": {
     "tier": "Silver",
@@ -2944,7 +2346,11 @@
   },
   "huggingface/transformers": {
     "tier": "Gold",
-    "weight": 17.12
+    "weight": 16.98
+  },
+  "HugoBlox/kit": {
+    "tier": "Bronze",
+    "weight": 0.2
   },
   "hummingbot/hummingbot": {
     "additional_acceptable_branches": [
@@ -2974,14 +2380,6 @@
     "tier": "Bronze",
     "weight": 0.01
   },
-  "iGaoWei/BigDataView": {
-    "tier": "Bronze",
-    "weight": 0.17
-  },
-  "iNavFlight/inav": {
-    "tier": "Bronze",
-    "weight": 0.24
-  },
   "iam-veeramalla/terraform-zero-to-hero": {
     "tier": "Bronze",
     "weight": 0.23
@@ -3001,6 +2399,10 @@
     "tier": "Bronze",
     "weight": 0.32
   },
+  "iGaoWei/BigDataView": {
+    "tier": "Bronze",
+    "weight": 0.17
+  },
   "illuspas/Node-Media-Server": {
     "tier": "Bronze",
     "weight": 0.17
@@ -3011,7 +2413,7 @@
   },
   "immich-app/immich": {
     "tier": "Gold",
-    "weight": 13.77
+    "weight": 13.65
   },
   "immortalwrt/immortalwrt": {
     "tier": "Bronze",
@@ -3032,6 +2434,10 @@
   "impress/impress.js": {
     "tier": "Bronze",
     "weight": 0.25
+  },
+  "iNavFlight/inav": {
+    "tier": "Bronze",
+    "weight": 0.24
   },
   "inference-labs-inc/subnet-2": {
     "tier": "Silver",
@@ -3063,7 +2469,7 @@
   },
   "ipython/ipython": {
     "tier": "Gold",
-    "weight": 17.02
+    "weight": 16.88
   },
   "ireader/media-server": {
     "tier": "Bronze",
@@ -3075,15 +2481,23 @@
   },
   "isaac-sim/IsaacLab": {
     "tier": "Gold",
-    "weight": 13.29
+    "weight": 13.18
   },
   "istio/istio": {
     "tier": "Silver",
     "weight": 3.85
   },
+  "It-s-AI/llm-detection": {
+    "tier": "Silver",
+    "weight": 4.46
+  },
   "ivy-llc/ivy": {
     "tier": "Bronze",
     "weight": 0.33
+  },
+  "JabRef/jabref": {
+    "tier": "Bronze",
+    "weight": 0.29
   },
   "jackyzha0/quartz": {
     "tier": "Bronze",
@@ -3101,6 +2515,13 @@
     "tier": "Bronze",
     "weight": 0.58
   },
+  "JeffreySu/WeiXinMPSDK": {
+    "additional_acceptable_branches": [
+      "Developer"
+    ],
+    "tier": "Bronze",
+    "weight": 0.29
+  },
   "jekyll/jekyll": {
     "tier": "Bronze",
     "weight": 0.26
@@ -3111,7 +2532,7 @@
   },
   "jellyfin/jellyfin": {
     "tier": "Gold",
-    "weight": 14
+    "weight": 13.89
   },
   "jenkinsci/docker": {
     "tier": "Bronze",
@@ -3137,6 +2558,14 @@
   "jestjs/jest": {
     "tier": "Bronze",
     "weight": 0.22
+  },
+  "JetBrains/intellij-community": {
+    "tier": "Bronze",
+    "weight": 0.18
+  },
+  "JetBrains/kotlin": {
+    "tier": "Bronze",
+    "weight": 0.62
   },
   "jetty/jetty.project": {
     "tier": "Bronze",
@@ -3241,7 +2670,7 @@
   },
   "jupyter/jupyter": {
     "tier": "Gold",
-    "weight": 18.35
+    "weight": 18.2
   },
   "jupyter/notebook": {
     "tier": "Bronze",
@@ -3253,7 +2682,7 @@
   },
   "jupyterlab/jupyterlab": {
     "tier": "Gold",
-    "weight": 38.67
+    "weight": 38.34
   },
   "just-the-docs/just-the-docs": {
     "tier": "Bronze",
@@ -3270,6 +2699,11 @@
   "kananinirav/AWS-Certified-Cloud-Practitioner-Notes": {
     "tier": "Bronze",
     "weight": 0.18
+  },
+  "KartikTalwar/gmail.js": {
+    "inactive_at": "2025-11-29T17:45:38.525Z",
+    "tier": "Bronze",
+    "weight": 0.01
   },
   "kavishdevar/librepods": {
     "tier": "Bronze",
@@ -3303,9 +2737,17 @@
     "tier": "Bronze",
     "weight": 0.2
   },
+  "Kitware/CMake": {
+    "tier": "Bronze",
+    "weight": 0.25
+  },
   "kivy/python-for-android": {
     "tier": "Bronze",
     "weight": 0.17
+  },
+  "Klipper3d/klipper": {
+    "tier": "Bronze",
+    "weight": 0.27
   },
   "knowm/XChange": {
     "tier": "Bronze",
@@ -3314,6 +2756,14 @@
   "koajs/koa": {
     "tier": "Bronze",
     "weight": 0.18
+  },
+  "Kong/insomnia": {
+    "tier": "Bronze",
+    "weight": 0.53
+  },
+  "Kong/kong": {
+    "tier": "Silver",
+    "weight": 3.78
   },
   "krishnaik06/Roadmap-To-Learn-Generative-AI-In-2025": {
     "tier": "Bronze",
@@ -3333,91 +2783,91 @@
   },
   "kubernetes-client/java": {
     "tier": "Gold",
-    "weight": 16.06
+    "weight": 15.92
   },
   "kubernetes-client/python": {
     "tier": "Gold",
-    "weight": 15.98
+    "weight": 15.84
   },
   "kubernetes-sigs/aws-load-balancer-controller": {
     "tier": "Gold",
-    "weight": 15.9
+    "weight": 15.77
   },
   "kubernetes-sigs/cluster-api": {
     "tier": "Gold",
-    "weight": 15.82
+    "weight": 15.69
   },
   "kubernetes-sigs/external-dns": {
     "tier": "Gold",
-    "weight": 15.75
+    "weight": 15.62
   },
   "kubernetes-sigs/kubespray": {
     "tier": "Gold",
-    "weight": 15.68
+    "weight": 15.55
   },
   "kubernetes-sigs/kustomize": {
     "tier": "Gold",
-    "weight": 15.6
+    "weight": 15.47
   },
   "kubernetes-sigs/metrics-server": {
     "tier": "Gold",
-    "weight": 15.53
+    "weight": 15.4
   },
   "kubernetes/autoscaler": {
     "tier": "Gold",
-    "weight": 15.46
+    "weight": 15.33
   },
   "kubernetes/client-go": {
     "tier": "Gold",
-    "weight": 15.39
+    "weight": 15.27
   },
   "kubernetes/community": {
     "tier": "Gold",
-    "weight": 15.33
+    "weight": 15.2
   },
   "kubernetes/dashboard": {
     "tier": "Gold",
-    "weight": 15.26
+    "weight": 15.13
   },
   "kubernetes/enhancements": {
     "tier": "Gold",
-    "weight": 15.19
+    "weight": 15.07
   },
   "kubernetes/ingress-nginx": {
     "tier": "Gold",
-    "weight": 15.13
+    "weight": 15
   },
   "kubernetes/kops": {
     "tier": "Gold",
-    "weight": 15.06
+    "weight": 14.94
   },
   "kubernetes/kube-state-metrics": {
     "tier": "Gold",
-    "weight": 15
+    "weight": 14.88
   },
   "kubernetes/kubernetes": {
     "tier": "Gold",
-    "weight": 48.92
+    "weight": 48.51
   },
   "kubernetes/sample-controller": {
     "tier": "Gold",
-    "weight": 14.94
+    "weight": 14.81
   },
   "kubernetes/test-infra": {
     "tier": "Gold",
-    "weight": 14.88
+    "weight": 14.75
   },
   "kubernetes/website": {
     "tier": "Gold",
-    "weight": 14.82
+    "weight": 14.69
   },
   "labring/FastGPT": {
     "tier": "Gold",
-    "weight": 14.76
+    "weight": 14.64
   },
   "langchain-ai/langchain": {
     "tier": "Gold",
-    "weight": 14.31
+    "weight": 14.19
   },
   "langflow-ai/langflow": {
     "tier": "Bronze",
@@ -3430,6 +2880,10 @@
   "laradock/laradock": {
     "tier": "Bronze",
     "weight": 0.2
+  },
+  "Laravel-Lang/lang": {
+    "tier": "Bronze",
+    "weight": 0.27
   },
   "laravel/framework": {
     "tier": "Bronze",
@@ -3445,7 +2899,7 @@
   },
   "latent-to/taohash": {
     "tier": "Gold",
-    "weight": 13.59
+    "weight": 13.47
   },
   "laurent22/joplin": {
     "tier": "Bronze",
@@ -3463,6 +2917,10 @@
     "tier": "Silver",
     "weight": 4.87
   },
+  "Leaflet/Leaflet": {
+    "tier": "Bronze",
+    "weight": 0.25
+  },
   "leethomason/tinyxml2": {
     "tier": "Bronze",
     "weight": 0.25
@@ -3473,7 +2931,11 @@
   },
   "letta-ai/letta": {
     "tier": "Gold",
-    "weight": 31.52
+    "weight": 31.26
+  },
+  "LFDT-web3j/web3j": {
+    "tier": "Bronze",
+    "weight": 0.28
   },
   "liangliangyy/DjangoBlog": {
     "tier": "Bronze",
@@ -3506,6 +2968,22 @@
   "lichess-org/lila": {
     "tier": "Silver",
     "weight": 3.57
+  },
+  "Lienol/openwrt": {
+    "tier": "Bronze",
+    "weight": 0.24
+  },
+  "LimeSurvey/LimeSurvey": {
+    "additional_acceptable_branches": [
+      "develop-minor",
+      "develop-major"
+    ],
+    "tier": "Bronze",
+    "weight": 0.28
+  },
+  "LineageOS/android": {
+    "tier": "Bronze",
+    "weight": 0.18
   },
   "liquibase/liquibase": {
     "tier": "Bronze",
@@ -3540,6 +3018,14 @@
     "inactive_at": "2026-01-26T02:52:00.000Z",
     "tier": "Bronze",
     "weight": 0.19
+  },
+  "LSPosed/MagiskOnWSALocal": {
+    "tier": "Bronze",
+    "weight": 0.25
+  },
+  "Lucaslhm/Flipper-IRDB": {
+    "tier": "Bronze",
+    "weight": 0.17
   },
   "ly525/luban-h5": {
     "tier": "Bronze",
@@ -3584,21 +3070,29 @@
     "tier": "Bronze",
     "weight": 0.31
   },
+  "MagicMirrorOrg/MagicMirror": {
+    "tier": "Bronze",
+    "weight": 0.19
+  },
   "makeplane/plane": {
     "tier": "Bronze",
     "weight": 0.53
   },
   "manifold-inc/hone": {
     "tier": "Gold",
-    "weight": 19.17
+    "weight": 19.01
   },
   "manifold-inc/targon": {
     "tier": "Gold",
-    "weight": 21.51
+    "weight": 21.33
   },
   "markedjs/marked": {
     "tier": "Bronze",
     "weight": 0.18
+  },
+  "MarlinFirmware/Marlin": {
+    "tier": "Bronze",
+    "weight": 0.32
   },
   "marmelab/react-admin": {
     "tier": "Bronze",
@@ -3610,11 +3104,15 @@
   },
   "mastodon/mastodon": {
     "tier": "Gold",
-    "weight": 13.45
+    "weight": 13.34
   },
   "matplotlib/matplotlib": {
     "tier": "Bronze",
     "weight": 0.35
+  },
+  "MatrixTM/MHDDoS": {
+    "tier": "Bronze",
+    "weight": 0.18
   },
   "mattermost/mattermost": {
     "tier": "Silver",
@@ -3632,6 +3130,14 @@
     "tier": "Silver",
     "weight": 5.62
   },
+  "MAZHARMIK/Interview_DS_Algo": {
+    "tier": "Bronze",
+    "weight": 0.25
+  },
+  "Mbed-TLS/mbedtls": {
+    "tier": "Bronze",
+    "weight": 0.25
+  },
   "mdn/browser-compat-data": {
     "tier": "Bronze",
     "weight": 0.19
@@ -3645,7 +3151,7 @@
       "develop"
     ],
     "tier": "Gold",
-    "weight": 13.96
+    "weight": 13.84
   },
   "meilisearch/meilisearch": {
     "tier": "Silver",
@@ -3671,9 +3177,13 @@
     "tier": "Bronze",
     "weight": 0.62
   },
+  "MetaMask/metamask-extension": {
+    "tier": "Gold",
+    "weight": 27.32
+  },
   "metanova-labs/nova": {
     "tier": "Gold",
-    "weight": 19.02
+    "weight": 18.87
   },
   "meteor/meteor": {
     "tier": "Bronze",
@@ -3687,6 +3197,10 @@
     "tier": "Bronze",
     "weight": 0.19
   },
+  "MIC-DKFZ/nnUNet": {
+    "tier": "Bronze",
+    "weight": 0.17
+  },
   "microfeed/microfeed": {
     "tier": "Bronze",
     "weight": 0.29
@@ -3695,34 +3209,6 @@
     "tier": "Bronze",
     "weight": 0.29
   },
-  "microsoft/DirectX-Graphics-Samples": {
-    "tier": "Bronze",
-    "weight": 0.25
-  },
-  "microsoft/LightGBM": {
-    "tier": "Bronze",
-    "weight": 0.61
-  },
-  "microsoft/PowerToys": {
-    "tier": "Bronze",
-    "weight": 0.17
-  },
-  "microsoft/TypeScript": {
-    "tier": "Silver",
-    "weight": 3.65
-  },
-  "microsoft/WPF-Samples": {
-    "tier": "Bronze",
-    "weight": 0.28
-  },
-  "microsoft/WinAppDriver": {
-    "tier": "Bronze",
-    "weight": 0.26
-  },
-  "microsoft/Windows-driver-samples": {
-    "tier": "Bronze",
-    "weight": 0.27
-  },
   "microsoft/autogen": {
     "tier": "Bronze",
     "weight": 0.24
@@ -3730,6 +3216,10 @@
   "microsoft/azure-pipelines-tasks": {
     "tier": "Bronze",
     "weight": 0.29
+  },
+  "microsoft/DirectX-Graphics-Samples": {
+    "tier": "Bronze",
+    "weight": 0.25
   },
   "microsoft/dotnet": {
     "tier": "Silver",
@@ -3743,6 +3233,10 @@
     "tier": "Bronze",
     "weight": 0.28
   },
+  "microsoft/LightGBM": {
+    "tier": "Bronze",
+    "weight": 0.61
+  },
   "microsoft/markitdown": {
     "tier": "Bronze",
     "weight": 0.18
@@ -3752,6 +3246,10 @@
     "weight": 0.19
   },
   "microsoft/playwright": {
+    "tier": "Bronze",
+    "weight": 0.17
+  },
+  "microsoft/PowerToys": {
     "tier": "Bronze",
     "weight": 0.17
   },
@@ -3771,17 +3269,41 @@
     "tier": "Silver",
     "weight": 3.52
   },
+  "microsoft/TypeScript": {
+    "tier": "Silver",
+    "weight": 3.65
+  },
   "microsoft/vscode": {
     "tier": "Gold",
-    "weight": 34.46
+    "weight": 34.18
   },
   "microsoft/vscode-docs": {
     "tier": "Bronze",
     "weight": 0.2
   },
+  "microsoft/WinAppDriver": {
+    "tier": "Bronze",
+    "weight": 0.26
+  },
+  "microsoft/Windows-driver-samples": {
+    "tier": "Bronze",
+    "weight": 0.27
+  },
   "microsoft/winget-pkgs": {
     "tier": "Bronze",
     "weight": 0.2
+  },
+  "microsoft/WPF-Samples": {
+    "tier": "Bronze",
+    "weight": 0.28
+  },
+  "MicrosoftDocs/azure-docs": {
+    "tier": "Bronze",
+    "weight": 0.25
+  },
+  "MicrosoftLearning/AZ-104-MicrosoftAzureAdministrator": {
+    "tier": "Bronze",
+    "weight": 0.19
   },
   "miguelgrinberg/python-socketio": {
     "inactive_at": "2025-11-29T17:45:38.525Z",
@@ -3804,6 +3326,10 @@
     "tier": "Bronze",
     "weight": 0.23
   },
+  "MinecraftForge/MinecraftForge": {
+    "tier": "Bronze",
+    "weight": 0.29
+  },
   "mingrammer/diagrams": {
     "tier": "Bronze",
     "weight": 0.18
@@ -3811,6 +3337,10 @@
   "minio/minio": {
     "tier": "Silver",
     "weight": 4.25
+  },
+  "Mintplex-Labs/anything-llm": {
+    "tier": "Silver",
+    "weight": 3.51
   },
   "mit-pdos/xv6-riscv": {
     "tier": "Bronze",
@@ -3854,7 +3384,7 @@
   },
   "monero-project/monero": {
     "tier": "Gold",
-    "weight": 28.09
+    "weight": 27.86
   },
   "mongodb/mongo": {
     "tier": "Bronze",
@@ -3884,13 +3414,22 @@
     "tier": "Bronze",
     "weight": 0.66
   },
+  "MudBlazor/MudBlazor": {
+    "inactive_at": "2025-11-29T17:45:38.525Z",
+    "tier": "Bronze",
+    "weight": 0.01
+  },
   "mudler/LocalAI": {
     "tier": "Gold",
-    "weight": 12.86
+    "weight": 12.76
   },
   "mui/material-ui": {
     "tier": "Silver",
     "weight": 4.04
+  },
+  "MvvmCross/MvvmCross": {
+    "tier": "Bronze",
+    "weight": 0.25
   },
   "mybatis/generator": {
     "tier": "Bronze",
@@ -3906,15 +3445,31 @@
   },
   "mysql/mysql-server": {
     "tier": "Gold",
-    "weight": 13.01
+    "weight": 12.9
+  },
+  "MystenLabs/sui": {
+    "tier": "Gold",
+    "weight": 26.82
   },
   "n8n-io/n8n": {
     "tier": "Silver",
     "weight": 3.66
   },
+  "NaiboWang/EasySpider": {
+    "tier": "Bronze",
+    "weight": 0.24
+  },
+  "NanmiCoder/MediaCrawler": {
+    "tier": "Bronze",
+    "weight": 0.35
+  },
   "naptha/tesseract.js": {
     "tier": "Bronze",
     "weight": 0.18
+  },
+  "NationalSecurityAgency/ghidra": {
+    "tier": "Bronze",
+    "weight": 0.23
   },
   "neetcode-gh/leetcode": {
     "tier": "Silver",
@@ -3922,7 +3477,11 @@
   },
   "neovim/neovim": {
     "tier": "Gold",
-    "weight": 33.38
+    "weight": 33.1
+  },
+  "NervJS/taro": {
+    "tier": "Bronze",
+    "weight": 0.21
   },
   "nestjs/nest": {
     "tier": "Bronze",
@@ -3931,6 +3490,10 @@
   "netbirdio/netbird": {
     "tier": "Silver",
     "weight": 5.57
+  },
+  "Netflix/zuul": {
+    "tier": "Bronze",
+    "weight": 0.54
   },
   "netty/netty": {
     "tier": "Bronze",
@@ -3946,19 +3509,23 @@
   },
   "nextcloud/android": {
     "tier": "Gold",
-    "weight": 30.72
+    "weight": 30.46
   },
   "nextcloud/desktop": {
     "tier": "Gold",
-    "weight": 29.98
+    "weight": 29.73
   },
   "nextcloud/news": {
     "tier": "Gold",
-    "weight": 29.3
+    "weight": 29.06
   },
   "nextcloud/server": {
     "tier": "Gold",
-    "weight": 28.68
+    "weight": 28.44
+  },
+  "NG-ZORRO/ng-zorro-antd": {
+    "tier": "Bronze",
+    "weight": 0.3
   },
   "nginx/docker-nginx": {
     "tier": "Silver",
@@ -3970,11 +3537,19 @@
   },
   "nginx/nginx": {
     "tier": "Gold",
-    "weight": 32.4
+    "weight": 32.13
+  },
+  "NginxProxyManager/nginx-proxy-manager": {
+    "tier": "Bronze",
+    "weight": 0.57
   },
   "nimbusdotstorage/Nimbus": {
     "tier": "Bronze",
     "weight": 0.15
+  },
+  "NixOS/nixpkgs": {
+    "tier": "Bronze",
+    "weight": 0.24
   },
   "nl8590687/ASRT_SpeechRecognition": {
     "tier": "Bronze",
@@ -3992,12 +3567,16 @@
     "tier": "Silver",
     "weight": 3.6
   },
+  "NobyDa/Script": {
+    "tier": "Bronze",
+    "weight": 0.32
+  },
   "nocodb/nocodb": {
     "additional_acceptable_branches": [
       "develop"
     ],
     "tier": "Gold",
-    "weight": 16.14
+    "weight": 16
   },
   "nodejs/node": {
     "tier": "Silver",
@@ -4022,6 +3601,10 @@
     "tier": "Bronze",
     "weight": 0.3
   },
+  "NousResearch/atropos": {
+    "tier": "Silver",
+    "weight": 4.95
+  },
   "novicezk/midjourney-proxy": {
     "tier": "Bronze",
     "weight": 0.29
@@ -4040,7 +3623,7 @@
   },
   "numpy/numpy": {
     "tier": "Gold",
-    "weight": 12.97
+    "weight": 12.87
   },
   "nushell/nushell": {
     "tier": "Bronze",
@@ -4049,6 +3632,18 @@
   "nuxt/nuxt": {
     "tier": "Bronze",
     "weight": 0.17
+  },
+  "NVIDIA-Omniverse/IsaacSim-dockerfiles": {
+    "tier": "Gold",
+    "weight": 13.02
+  },
+  "NVIDIA/apex": {
+    "tier": "Bronze",
+    "weight": 0.54
+  },
+  "NVIDIA/Megatron-LM": {
+    "tier": "Bronze",
+    "weight": 0.18
   },
   "nvim-lua/kickstart.nvim": {
     "tier": "Bronze",
@@ -4065,6 +3660,10 @@
   "nwjs/nw.js": {
     "tier": "Bronze",
     "weight": 0.19
+  },
+  "OAI/OpenAPI-Specification": {
+    "tier": "Silver",
+    "weight": 4.04
   },
   "obsidianmd/obsidian-releases": {
     "tier": "Bronze",
@@ -4090,6 +3689,10 @@
     "tier": "Bronze",
     "weight": 0.63
   },
+  "OffchainLabs/prysm": {
+    "tier": "Bronze",
+    "weight": 0.22
+  },
   "ohmyzsh/ohmyzsh": {
     "tier": "Bronze",
     "weight": 0.65
@@ -4100,7 +3703,7 @@
   },
   "ollama/ollama": {
     "tier": "Gold",
-    "weight": 13.91
+    "weight": 13.79
   },
   "olton/metroui": {
     "tier": "Bronze",
@@ -4178,6 +3781,14 @@
     "tier": "Bronze",
     "weight": 0.29
   },
+  "OpenAPITools/openapi-generator": {
+    "tier": "Bronze",
+    "weight": 0.19
+  },
+  "OpenBB-finance/OpenBB": {
+    "tier": "Bronze",
+    "weight": 0.18
+  },
   "opencart/opencart": {
     "tier": "Bronze",
     "weight": 0.29
@@ -4194,6 +3805,10 @@
     "tier": "Bronze",
     "weight": 0.18
   },
+  "OpenDroneMap/WebODM": {
+    "tier": "Bronze",
+    "weight": 0.28
+  },
   "openedx/edx-platform": {
     "tier": "Bronze",
     "weight": 0.32
@@ -4202,9 +3817,17 @@
     "tier": "Bronze",
     "weight": 0.27
   },
+  "OpenGradient/BitQuant-Subnet": {
+    "tier": "Silver",
+    "weight": 4.43
+  },
+  "OpenHands/OpenHands": {
+    "tier": "Gold",
+    "weight": 14.52
+  },
   "openinterpreter/open-interpreter": {
     "tier": "Gold",
-    "weight": 14.58
+    "weight": 14.46
   },
   "openjdk/jdk": {
     "tier": "Silver",
@@ -4213,6 +3836,10 @@
   "openlayers/openlayers": {
     "tier": "Bronze",
     "weight": 0.18
+  },
+  "OpenMined/PySyft": {
+    "tier": "Bronze",
+    "weight": 0.17
   },
   "openprose/prose": {
     "tier": "Silver",
@@ -4225,6 +3852,10 @@
   "openshift/origin": {
     "tier": "Bronze",
     "weight": 0.26
+  },
+  "OpenSignLabs/OpenSign": {
+    "tier": "Silver",
+    "weight": 5.47
   },
   "opensourcepos/opensourcepos": {
     "tier": "Bronze",
@@ -4246,27 +3877,35 @@
     "tier": "Bronze",
     "weight": 0.29
   },
+  "opentensor/async-substrate-interface": {
+    "weight": 12.51,
+    "tier": "Gold"
+  },
   "opentensor/bittensor": {
     "additional_acceptable_branches": [
       "staging",
       "SDKv10"
     ],
     "tier": "Gold",
-    "weight": 45.47
+    "weight": 45.1
   },
   "opentensor/btcli": {
     "additional_acceptable_branches": [
       "staging"
     ],
     "tier": "Gold",
-    "weight": 17.43
+    "weight": 17.28
+  },
+  "opentensor/btwallet": {
+    "weight": 12.48,
+    "tier": "Gold"
   },
   "opentensor/subtensor": {
     "additional_acceptable_branches": [
       "devnet-ready"
     ],
     "tier": "Gold",
-    "weight": 70.57
+    "weight": 69.98
   },
   "openvinotoolkit/open_model_zoo": {
     "tier": "Bronze",
@@ -4275,6 +3914,10 @@
   "openvinotoolkit/openvino": {
     "tier": "Bronze",
     "weight": 0.26
+  },
+  "OpenVPN/openvpn": {
+    "tier": "Bronze",
+    "weight": 0.6
   },
   "openvswitch/ovs": {
     "tier": "Bronze",
@@ -4288,6 +3931,10 @@
     "tier": "Bronze",
     "weight": 0.3
   },
+  "OpenZeppelin/openzeppelin-contracts": {
+    "tier": "Bronze",
+    "weight": 0.22
+  },
   "ophub/amlogic-s9xxx-armbian": {
     "tier": "Bronze",
     "weight": 0.19
@@ -4300,6 +3947,10 @@
     "tier": "Bronze",
     "weight": 0.21
   },
+  "OrchardCMS/OrchardCore": {
+    "tier": "Bronze",
+    "weight": 0.27
+  },
   "ordinals/ord": {
     "tier": "Bronze",
     "weight": 0.22
@@ -4308,9 +3959,13 @@
     "tier": "Bronze",
     "weight": 0.27
   },
+  "Orpheus-AI/Zeus": {
+    "tier": "Silver",
+    "weight": 6.94
+  },
   "otavioschwanck/github-pr-reviewer.nvim": {
     "tier": "Gold",
-    "weight": 14.47
+    "weight": 14.35
   },
   "othneildrew/Best-README-Template": {
     "tier": "Bronze",
@@ -4322,7 +3977,7 @@
   },
   "oven-sh/bun": {
     "tier": "Gold",
-    "weight": 14.42
+    "weight": 14.3
   },
   "owncast/owncast": {
     "tier": "Bronze",
@@ -4331,6 +3986,14 @@
   "owncloud/android": {
     "tier": "Bronze",
     "weight": 0.21
+  },
+  "PaddlePaddle/PaddleDetection": {
+    "tier": "Bronze",
+    "weight": 0.18
+  },
+  "PaddlePaddle/PaddleNLP": {
+    "tier": "Bronze",
+    "weight": 0.18
   },
   "pagefaultgames/pokerogue": {
     "tier": "Bronze",
@@ -4356,6 +4019,10 @@
     "tier": "Silver",
     "weight": 3.47
   },
+  "PaperMC/Paper": {
+    "tier": "Bronze",
+    "weight": 0.17
+  },
   "paradigmxyz/reth": {
     "tier": "Bronze",
     "weight": 0.22
@@ -4374,7 +4041,7 @@
   },
   "paritytech/polkadot-sdk": {
     "tier": "Gold",
-    "weight": 19.63
+    "weight": 19.47
   },
   "parse-community/parse-dashboard": {
     "tier": "Bronze",
@@ -4383,6 +4050,10 @@
   "parse-community/parse-server": {
     "tier": "Bronze",
     "weight": 0.19
+  },
+  "PathOfBuildingCommunity/PathOfBuilding": {
+    "tier": "Bronze",
+    "weight": 0.18
   },
   "pathwaycom/pathway": {
     "tier": "Bronze",
@@ -4398,11 +4069,11 @@
   },
   "pebble-dev/mobile-app": {
     "tier": "Gold",
-    "weight": 12.9
+    "weight": 12.79
   },
   "pebble-dev/pebble-firmware": {
     "tier": "Gold",
-    "weight": 12.65
+    "weight": 12.55
   },
   "pedroslopez/whatsapp-web.js": {
     "tier": "Bronze",
@@ -4414,7 +4085,7 @@
   },
   "penpot/penpot": {
     "tier": "Gold",
-    "weight": 13.63
+    "weight": 13.52
   },
   "pentaho/pentaho-kettle": {
     "tier": "Bronze",
@@ -4430,11 +4101,15 @@
   },
   "photoprism/photoprism": {
     "tier": "Gold",
-    "weight": 13.25
+    "weight": 13.14
   },
   "php/php-src": {
     "tier": "Silver",
     "weight": 3.83
+  },
+  "PHPMailer/PHPMailer": {
+    "tier": "Bronze",
+    "weight": 0.32
   },
   "phpmyadmin/phpmyadmin": {
     "tier": "Bronze",
@@ -4449,7 +4124,7 @@
       "development"
     ],
     "tier": "Gold",
-    "weight": 16.92
+    "weight": 16.78
   },
   "pimcore/pimcore": {
     "tier": "Bronze",
@@ -4462,6 +4137,10 @@
   "pinpoint-apm/pinpoint": {
     "tier": "Bronze",
     "weight": 0.17
+  },
+  "PipedreamHQ/pipedream": {
+    "tier": "Bronze",
+    "weight": 0.35
   },
   "piskvorky/gensim": {
     "tier": "Bronze",
@@ -4479,6 +4158,14 @@
     "tier": "Bronze",
     "weight": 0.27
   },
+  "Platane/snk": {
+    "tier": "Bronze",
+    "weight": 0.28
+  },
+  "PlatformNetwork/platform": {
+    "tier": "Silver",
+    "weight": 4.42
+  },
   "playframework/playframework": {
     "tier": "Bronze",
     "weight": 0.22
@@ -4493,19 +4180,31 @@
   },
   "pocketbase/pocketbase": {
     "tier": "Gold",
-    "weight": 13.21
+    "weight": 13.1
+  },
+  "PointCloudLibrary/pcl": {
+    "tier": "Bronze",
+    "weight": 0.28
   },
   "pola-rs/polars": {
     "tier": "Gold",
-    "weight": 13.17
+    "weight": 13.06
+  },
+  "Polymarket/agents": {
+    "tier": "Silver",
+    "weight": 5.34
   },
   "postgres/postgres": {
     "tier": "Gold",
-    "weight": 12.94
+    "weight": 12.83
   },
   "poteto/hiring-without-whiteboards": {
     "tier": "Bronze",
     "weight": 0.19
+  },
+  "PowerShell/PowerShell": {
+    "tier": "Silver",
+    "weight": 3.54
   },
   "prakhar1989/docker-curriculum": {
     "tier": "Bronze",
@@ -4518,6 +4217,10 @@
   "preactjs/preact": {
     "tier": "Bronze",
     "weight": 0.18
+  },
+  "PrestaShop/PrestaShop": {
+    "tier": "Bronze",
+    "weight": 0.29
   },
   "prestodb/presto": {
     "tier": "Bronze",
@@ -4534,6 +4237,10 @@
   "progit/progit2": {
     "tier": "Bronze",
     "weight": 0.19
+  },
+  "Project-OSRM/osrm-backend": {
+    "tier": "Bronze",
+    "weight": 0.27
   },
   "prometheus-community/helm-charts": {
     "tier": "Bronze",
@@ -4555,6 +4262,10 @@
     "tier": "Bronze",
     "weight": 0.31
   },
+  "ProvableHQ/snarkOS": {
+    "tier": "Bronze",
+    "weight": 0.24
+  },
   "psf/black": {
     "tier": "Bronze",
     "weight": 0.18
@@ -4575,9 +4286,17 @@
     "tier": "Bronze",
     "weight": 0.22
   },
+  "PX4/PX4-Autopilot": {
+    "tier": "Gold",
+    "weight": 13.99
+  },
   "pyca/cryptography": {
     "tier": "Silver",
     "weight": 4.06
+  },
+  "PyGithub/PyGithub": {
+    "tier": "Bronze",
+    "weight": 0.17
   },
   "pymc-devs/pymc": {
     "tier": "Bronze",
@@ -4586,6 +4305,10 @@
   "pypa/pip": {
     "tier": "Silver",
     "weight": 3.72
+  },
+  "PyQt5/PyQt": {
+    "tier": "Bronze",
+    "weight": 0.17
   },
   "pytest-dev/pytest": {
     "tier": "Bronze",
@@ -4605,7 +4328,7 @@
   },
   "python/cpython": {
     "tier": "Gold",
-    "weight": 18.61
+    "weight": 18.46
   },
   "python/mypy": {
     "tier": "Bronze",
@@ -4621,7 +4344,7 @@
   },
   "pytorch/pytorch": {
     "tier": "Gold",
-    "weight": 16.83
+    "weight": 16.69
   },
   "pytorch/vision": {
     "tier": "Silver",
@@ -4629,7 +4352,7 @@
   },
   "qbittensor-labs/quantum": {
     "tier": "Gold",
-    "weight": 18.88
+    "weight": 18.73
   },
   "qdrant/qdrant": {
     "additional_acceptable_branches": [
@@ -4642,6 +4365,10 @@
     "tier": "Bronze",
     "weight": 0.28
   },
+  "Qiskit/qiskit": {
+    "tier": "Bronze",
+    "weight": 0.3
+  },
   "qist/tvbox": {
     "tier": "Bronze",
     "weight": 0.31
@@ -4653,6 +4380,10 @@
   "qmk/qmk_firmware": {
     "tier": "Bronze",
     "weight": 0.35
+  },
+  "QuivrHQ/quivr": {
+    "tier": "Bronze",
+    "weight": 0.18
   },
   "rabbitmq/rabbitmq-server": {
     "tier": "Silver",
@@ -4670,9 +4401,25 @@
     "tier": "Silver",
     "weight": 3.61
   },
+  "RainerKuemmerle/g2o": {
+    "tier": "Bronze",
+    "weight": 0.23
+  },
+  "Raphire/Win11Debloat": {
+    "tier": "Bronze",
+    "weight": 0.34
+  },
   "rapid7/metasploit-framework": {
     "tier": "Bronze",
     "weight": 0.47
+  },
+  "Rapptz/discord.py": {
+    "tier": "Silver",
+    "weight": 3.53
+  },
+  "RasaHQ/rasa": {
+    "tier": "Bronze",
+    "weight": 0.19
   },
   "raspberrypi/documentation": {
     "tier": "Bronze",
@@ -4680,7 +4427,7 @@
   },
   "raspberrypi/firmware": {
     "tier": "Gold",
-    "weight": 19.79
+    "weight": 19.63
   },
   "raspberrypi/linux": {
     "tier": "Silver",
@@ -4690,9 +4437,13 @@
     "tier": "Silver",
     "weight": 4.61
   },
+  "RaspberryPiFoundation/blockly": {
+    "tier": "Bronze",
+    "weight": 0.17
+  },
   "ray-project/ray": {
     "tier": "Gold",
-    "weight": 20.31
+    "weight": 20.14
   },
   "raycast/extensions": {
     "tier": "Bronze",
@@ -4710,9 +4461,13 @@
     "tier": "Bronze",
     "weight": 0.28
   },
+  "ReactiveX/RxJava": {
+    "tier": "Bronze",
+    "weight": 0.23
+  },
   "reactjs/react.dev": {
     "tier": "Gold",
-    "weight": 16.74
+    "weight": 16.6
   },
   "realpython/materials": {
     "tier": "Bronze",
@@ -4738,6 +4493,10 @@
     "tier": "Bronze",
     "weight": 0.22
   },
+  "RedTeamSubnet/RedTeam": {
+    "tier": "Silver",
+    "weight": 4.4
+  },
   "reduxjs/redux": {
     "tier": "Bronze",
     "weight": 0.33
@@ -4762,17 +4521,41 @@
     "tier": "Bronze",
     "weight": 0.17
   },
+  "RichardLitt/standard-readme": {
+    "tier": "Bronze",
+    "weight": 0.19
+  },
   "ridgesai/ridges": {
     "tier": "Gold",
-    "weight": 21.08
+    "weight": 20.91
+  },
+  "RIOT-OS/RIOT": {
+    "tier": "Bronze",
+    "weight": 0.25
   },
   "riscv-collab/riscv-gnu-toolchain": {
     "tier": "Bronze",
     "weight": 0.23
   },
+  "RobinHerbots/Inputmask": {
+    "tier": "Bronze",
+    "weight": 0.3
+  },
   "robotframework/robotframework": {
     "tier": "Bronze",
     "weight": 0.17
+  },
+  "RobotLocomotion/drake": {
+    "tier": "Bronze",
+    "weight": 0.24
+  },
+  "RocketChat/Rocket.Chat": {
+    "tier": "Bronze",
+    "weight": 0.32
+  },
+  "RogueTensor/bitagent_subnet": {
+    "tier": "Silver",
+    "weight": 4.39
   },
   "rolling-scopes-school/tasks": {
     "tier": "Bronze",
@@ -4788,7 +4571,7 @@
   },
   "ros2/ros2": {
     "tier": "Gold",
-    "weight": 12.83
+    "weight": 12.72
   },
   "rstudio/bookdown": {
     "tier": "Bronze",
@@ -4798,21 +4581,29 @@
     "tier": "Bronze",
     "weight": 0.18
   },
+  "RT-Thread/rt-thread": {
+    "tier": "Bronze",
+    "weight": 0.27
+  },
   "ruby-china/homeland": {
     "tier": "Bronze",
     "weight": 0.21
   },
   "ruby/ruby": {
     "tier": "Gold",
-    "weight": 16.65
+    "weight": 16.51
   },
   "ruby/rubygems": {
     "tier": "Bronze",
     "weight": 0.22
   },
+  "Rudrabha/Wav2Lip": {
+    "tier": "Bronze",
+    "weight": 0.17
+  },
   "run-llama/llama_index": {
     "tier": "Gold",
-    "weight": 14.36
+    "weight": 14.24
   },
   "runelite/runelite": {
     "tier": "Bronze",
@@ -4820,9 +4611,17 @@
   },
   "rust-lang/rust": {
     "tier": "Gold",
-    "weight": 16.56
+    "weight": 16.42
   },
   "rustdesk/rustdesk": {
+    "tier": "Bronze",
+    "weight": 0.19
+  },
+  "RVC-Boss/GPT-SoVITS": {
+    "tier": "Bronze",
+    "weight": 0.23
+  },
+  "RyanFitzgerald/devportfolio": {
     "tier": "Bronze",
     "weight": 0.19
   },
@@ -4861,6 +4660,10 @@
     "tier": "Bronze",
     "weight": 0.55
   },
+  "SchemaStore/schemastore": {
+    "tier": "Bronze",
+    "weight": 0.3
+  },
   "schwabe/ics-openvpn": {
     "tier": "Bronze",
     "weight": 0.23
@@ -4871,11 +4674,11 @@
   },
   "scipy/scipy": {
     "tier": "Gold",
-    "weight": 16.47
+    "weight": 16.33
   },
   "score-technologies/turbovision": {
     "tier": "Gold",
-    "weight": 18.75
+    "weight": 18.59
   },
   "scrapy/scrapy": {
     "tier": "Bronze",
@@ -4884,6 +4687,14 @@
   "scratchfoundation/scratch-gui": {
     "tier": "Bronze",
     "weight": 0.32
+  },
+  "SeleniumHQ/docker-selenium": {
+    "tier": "Silver",
+    "weight": 3.7
+  },
+  "SeleniumHQ/selenium": {
+    "tier": "Silver",
+    "weight": 3.69
   },
   "sentient-agi/ROMA": {
     "tier": "Silver",
@@ -4924,9 +4735,13 @@
     "tier": "Silver",
     "weight": 4.17
   },
+  "SigmaHQ/sigma": {
+    "tier": "Bronze",
+    "weight": 0.17
+  },
   "signalapp/Signal-Android": {
     "tier": "Gold",
-    "weight": 12.79
+    "weight": 12.68
   },
   "signalapp/Signal-Server": {
     "tier": "Bronze",
@@ -4935,6 +4750,17 @@
   "signalwire/freeswitch": {
     "tier": "Bronze",
     "weight": 0.24
+  },
+  "Significant-Gravitas/AutoGPT": {
+    "tier": "Gold",
+    "weight": 14.14
+  },
+  "SillyTavern/SillyTavern": {
+    "additional_acceptable_branches": [
+      "staging"
+    ],
+    "tier": "Bronze",
+    "weight": 0.19
   },
   "singgel/JAVA": {
     "tier": "Bronze",
@@ -4948,9 +4774,17 @@
     "tier": "Bronze",
     "weight": 0.53
   },
+  "Sjj1024/PakePlus": {
+    "tier": "Bronze",
+    "weight": 0.21
+  },
   "skylot/jadx": {
     "tier": "Bronze",
     "weight": 0.22
+  },
+  "Skyvern-AI/skyvern": {
+    "tier": "Bronze",
+    "weight": 0.54
   },
   "slack-go/slack": {
     "tier": "Bronze",
@@ -4966,11 +4800,16 @@
   },
   "smartcontractkit/chainlink": {
     "tier": "Gold",
-    "weight": 22.99
+    "weight": 22.8
   },
   "smogon/pokemon-showdown": {
     "tier": "Bronze",
     "weight": 0.29
+  },
+  "Snailclimb/JavaGuide": {
+    "inactive_at": "2025-11-29T17:45:38.525Z",
+    "tier": "Bronze",
+    "weight": 0.01
   },
   "socketio/socket.io": {
     "tier": "Bronze",
@@ -4990,7 +4829,11 @@
   },
   "solana-foundation/anchor": {
     "tier": "Gold",
-    "weight": 40.53
+    "weight": 40.19
+  },
+  "SonarSource/sonarqube": {
+    "tier": "Bronze",
+    "weight": 0.62
   },
   "sorin-ionescu/prezto": {
     "tier": "Bronze",
@@ -5014,7 +4857,7 @@
   },
   "sportstensor/sn41": {
     "tier": "Gold",
-    "weight": 12.68
+    "weight": 12.58
   },
   "spree/spree": {
     "tier": "Bronze",
@@ -5084,6 +4927,10 @@
     "tier": "Bronze",
     "weight": 0.28
   },
+  "Stirling-Tools/Stirling-PDF": {
+    "tier": "Bronze",
+    "weight": 0.18
+  },
   "stleary/JSON-java": {
     "tier": "Bronze",
     "weight": 0.29
@@ -5102,7 +4949,11 @@
   },
   "streamlit/streamlit": {
     "tier": "Gold",
-    "weight": 12.76
+    "weight": 12.65
+  },
+  "Studio-42/elFinder": {
+    "tier": "Bronze",
+    "weight": 0.29
   },
   "sudheerj/javascript-interview-questions": {
     "inactive_at": "2025-11-04T02:18:33.094Z",
@@ -5114,9 +4965,13 @@
     "tier": "Bronze",
     "weight": 0.01
   },
+  "SuiteCRM/SuiteCRM": {
+    "tier": "Bronze",
+    "weight": 0.27
+  },
   "supabase/supabase": {
     "tier": "Gold",
-    "weight": 20.5
+    "weight": 20.32
   },
   "sveltejs/svelte": {
     "tier": "Bronze",
@@ -5125,6 +4980,10 @@
   "svenfuchs/rails-i18n": {
     "tier": "Bronze",
     "weight": 0.22
+  },
+  "SVG-Edit/svgedit": {
+    "tier": "Bronze",
+    "weight": 0.17
   },
   "swagger-api/swagger-codegen": {
     "tier": "Bronze",
@@ -5138,9 +4997,17 @@
     "tier": "Silver",
     "weight": 3.62
   },
+  "Swap-Subnet/swap-subnet": {
+    "tier": "Silver",
+    "weight": 3.99
+  },
   "swarm-subnet/swarm": {
     "tier": "Silver",
     "weight": 4.16
+  },
+  "SWE-agent/SWE-agent": {
+    "tier": "Gold",
+    "weight": 16.08
   },
   "swiftlang/swift": {
     "tier": "Silver",
@@ -5166,10 +5033,6 @@
     "tier": "Silver",
     "weight": 3.8
   },
-  "tModLoader/tModLoader": {
-    "tier": "Bronze",
-    "weight": 0.27
-  },
   "taikoxyz/taiko-mono": {
     "tier": "Bronze",
     "weight": 0.18
@@ -5185,6 +5048,10 @@
   "tangly1024/NotionNext": {
     "tier": "Bronze",
     "weight": 0.38
+  },
+  "TanStack/query": {
+    "tier": "Bronze",
+    "weight": 0.17
   },
   "taofu-labs/tpn-subnet": {
     "tier": "Silver",
@@ -5207,11 +5074,19 @@
       "dev"
     ],
     "tier": "Gold",
-    "weight": 13.72
+    "weight": 13.61
+  },
+  "Team-Rizzo/talisman-ai": {
+    "tier": "Gold",
+    "weight": 13.3
   },
   "teddysun/across": {
     "tier": "Bronze",
     "weight": 0.19
+  },
+  "Tencent/weui-wxss": {
+    "tier": "Bronze",
+    "weight": 0.2
   },
   "tensorflow/datasets": {
     "tier": "Bronze",
@@ -5235,7 +5110,7 @@
   },
   "tensorflow/tensorflow": {
     "tier": "Gold",
-    "weight": 17.98
+    "weight": 17.83
   },
   "tensorplex-labs/dojo": {
     "tier": "Silver",
@@ -5257,6 +5132,15 @@
     "tier": "Bronze",
     "weight": 0.21
   },
+  "Textualize/rich": {
+    "tier": "Bronze",
+    "weight": 0.17
+  },
+  "TheAlgorithms/C-Sharp": {
+    "inactive_at": "2025-11-10T16:39:22.045Z",
+    "tier": "Bronze",
+    "weight": 0.01
+  },
   "thedevs-network/kutt": {
     "tier": "Bronze",
     "weight": 0.55
@@ -5264,6 +5148,18 @@
   "thenervelab/thebrain": {
     "tier": "Silver",
     "weight": 4.12
+  },
+  "TheOdinProject/curriculum": {
+    "tier": "Bronze",
+    "weight": 0.38
+  },
+  "TheOdinProject/theodinproject": {
+    "tier": "Bronze",
+    "weight": 0.22
+  },
+  "TheWidlarzGroup/react-native-video": {
+    "tier": "Bronze",
+    "weight": 0.22
   },
   "thingsboard/thingsboard": {
     "tier": "Bronze",
@@ -5293,6 +5189,15 @@
     "tier": "Bronze",
     "weight": 0.25
   },
+  "TiddlyWiki/TiddlyWiki5": {
+    "inactive_at": "2025-11-29T17:45:38.525Z",
+    "tier": "Bronze",
+    "weight": 0.01
+  },
+  "TideDra/zotero-arxiv-daily": {
+    "tier": "Bronze",
+    "weight": 0.31
+  },
   "tidyverse/dplyr": {
     "tier": "Bronze",
     "weight": 0.18
@@ -5309,9 +5214,13 @@
     "tier": "Bronze",
     "weight": 0.24
   },
+  "tModLoader/tModLoader": {
+    "tier": "Bronze",
+    "weight": 0.27
+  },
   "tmux/tmux": {
     "tier": "Gold",
-    "weight": 16.38
+    "weight": 16.25
   },
   "toeverything/AFFiNE": {
     "tier": "Bronze",
@@ -5320,6 +5229,21 @@
   "ton-blockchain/ton": {
     "tier": "Bronze",
     "weight": 0.24
+  },
+  "TonyChen56/WeChatRobot": {
+    "tier": "Bronze",
+    "weight": 0.26
+  },
+  "ToolJet/ToolJet": {
+    "additional_acceptable_branches": [
+      "develop"
+    ],
+    "tier": "Gold",
+    "weight": 13.74
+  },
+  "TooTallNate/Java-WebSocket": {
+    "tier": "Bronze",
+    "weight": 0.17
   },
   "topjohnwu/Magisk": {
     "tier": "Bronze",
@@ -5331,7 +5255,7 @@
   },
   "torvalds/linux": {
     "tier": "Gold",
-    "weight": 42.76
+    "weight": 42.4
   },
   "traccar/traccar": {
     "tier": "Bronze",
@@ -5348,6 +5272,14 @@
   "travist/jsencrypt": {
     "tier": "Bronze",
     "weight": 0.17
+  },
+  "Trinea/android-open-project": {
+    "tier": "Bronze",
+    "weight": 0.22
+  },
+  "TrinityCore/TrinityCore": {
+    "tier": "Bronze",
+    "weight": 0.29
   },
   "trinodb/trino": {
     "tier": "Bronze",
@@ -5368,6 +5300,10 @@
   "trustwallet/assets": {
     "tier": "Bronze",
     "weight": 0.32
+  },
+  "TryGhost/Ghost": {
+    "tier": "Bronze",
+    "weight": 0.36
   },
   "tssovi/grokking-the-object-oriented-design-interview": {
     "inactive_at": "2025-11-04T02:18:33.094Z",
@@ -5421,9 +5357,17 @@
     "tier": "Bronze",
     "weight": 0.27
   },
+  "Uberi/speech_recognition": {
+    "tier": "Bronze",
+    "weight": 0.17
+  },
   "ubicloud/ubicloud": {
     "tier": "Bronze",
     "weight": 0.39
+  },
+  "Ultimaker/Cura": {
+    "tier": "Bronze",
+    "weight": 0.29
   },
   "ultralytics/ultralytics": {
     "tier": "Bronze",
@@ -5445,9 +5389,29 @@
     "tier": "Bronze",
     "weight": 0.18
   },
+  "Uniswap/interface": {
+    "tier": "Bronze",
+    "weight": 0.31
+  },
+  "Uniswap/v4-core": {
+    "tier": "Gold",
+    "weight": 36.76
+  },
+  "Unitech/pm2": {
+    "tier": "Gold",
+    "weight": 22.27
+  },
+  "Unity-Technologies/ml-agents": {
+    "tier": "Bronze",
+    "weight": 0.17
+  },
   "unslothai/unsloth": {
     "tier": "Bronze",
     "weight": 0.18
+  },
+  "Unstructured-IO/unstructured": {
+    "tier": "Silver",
+    "weight": 6.75
   },
   "up-for-grabs/up-for-grabs.net": {
     "tier": "Bronze",
@@ -5479,11 +5443,15 @@
   },
   "vercel/next.js": {
     "tier": "Gold",
-    "weight": 16.3
+    "weight": 16.16
   },
   "vercel/vercel": {
     "tier": "Bronze",
     "weight": 0.62
+  },
+  "VickScarlet/lifeRestart": {
+    "tier": "Bronze",
+    "weight": 0.18
   },
   "vidaio-subnet/vidaio-subnet": {
     "tier": "Silver",
@@ -5511,7 +5479,7 @@
   },
   "vitejs/vite": {
     "tier": "Gold",
-    "weight": 18.23
+    "weight": 18.07
   },
   "vllm-project/vllm": {
     "tier": "Silver",
@@ -5520,6 +5488,10 @@
   "vnpy/vnpy": {
     "tier": "Bronze",
     "weight": 0.36
+  },
+  "Vonng/ddia": {
+    "tier": "Bronze",
+    "weight": 0.18
   },
   "vuejs/core": {
     "tier": "Bronze",
@@ -5557,6 +5529,10 @@
     "tier": "Bronze",
     "weight": 0.21
   },
+  "WebGoat/WebGoat": {
+    "tier": "Bronze",
+    "weight": 0.35
+  },
   "webpack/webpack": {
     "tier": "Bronze",
     "weight": 0.25
@@ -5572,6 +5548,10 @@
   "whatwg/html": {
     "tier": "Bronze",
     "weight": 0.2
+  },
+  "WhiskeySockets/Baileys": {
+    "tier": "Bronze",
+    "weight": 0.31
   },
   "wine-mirror/wine": {
     "tier": "Bronze",
@@ -5601,6 +5581,14 @@
     "tier": "Bronze",
     "weight": 0.19
   },
+  "WordPress/gutenberg": {
+    "tier": "Bronze",
+    "weight": 0.33
+  },
+  "WordPress/WordPress": {
+    "tier": "Silver",
+    "weight": 4.68
+  },
   "wzdnzd/aggregator": {
     "tier": "Bronze",
     "weight": 0.32
@@ -5624,6 +5612,10 @@
     "tier": "Bronze",
     "weight": 0.3
   },
+  "XRPLF/rippled": {
+    "tier": "Bronze",
+    "weight": 0.25
+  },
   "xtekky/gpt4free": {
     "tier": "Bronze",
     "weight": 0.35
@@ -5631,6 +5623,10 @@
   "xuxueli/xxl-job": {
     "tier": "Bronze",
     "weight": 0.35
+  },
+  "XX-net/XX-Net": {
+    "tier": "Bronze",
+    "weight": 0.19
   },
   "yanez-compliance/MIID-subnet": {
     "tier": "Silver",
@@ -5664,6 +5660,10 @@
     "tier": "Bronze",
     "weight": 0.19
   },
+  "Yorko/mlcourse.ai": {
+    "tier": "Bronze",
+    "weight": 0.33
+  },
   "youzan/vant": {
     "tier": "Bronze",
     "weight": 0.33
@@ -5680,17 +5680,25 @@
     "tier": "Bronze",
     "weight": 0.17
   },
+  "YunaiV/ruoyi-vue-pro": {
+    "tier": "Bronze",
+    "weight": 0.19
+  },
+  "YunaiV/yudao-cloud": {
+    "tier": "Bronze",
+    "weight": 0.18
+  },
   "yutiansut/QUANTAXIS": {
     "tier": "Bronze",
     "weight": 0.31
   },
   "zcash/zcash": {
     "tier": "Gold",
-    "weight": 22.72
+    "weight": 22.53
   },
   "zed-industries/zed": {
     "tier": "Gold",
-    "weight": 14.7
+    "weight": 14.58
   },
   "zellij-org/zellij": {
     "tier": "Bronze",
@@ -5727,13 +5735,5 @@
   "zxlie/FeHelper": {
     "tier": "Bronze",
     "weight": 0.17
-  },
-  "opentensor/async-substrate-interface": {
-    "weight": 10,
-    "tier": "Gold"
-  },
-  "opentensor/btwallet": {
-    "weight": 10,
-    "tier": "Gold"
   }
 }

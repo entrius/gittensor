@@ -51,7 +51,6 @@ from .helpers import (
     default='',
     help='Contract address (uses default if empty)',
 )
-@click.option('--testnet', is_flag=True, help='Use testnet contract address')
 @click.option(
     '--wallet-name',
     default='default',
@@ -68,7 +67,6 @@ def issue_register(
     bounty: float,
     rpc_url: str,
     contract: str,
-    testnet: bool,
     wallet_name: str,
     wallet_hotkey: str,
 ):
@@ -88,7 +86,7 @@ def issue_register(
     \b
     Examples:
         gitt register issue --repo opentensor/btcli --issue 144 --bounty 100
-        gitt reg issue --repo tensorflow/tensorflow --issue 12345 --bounty 50 --testnet
+        gitt reg issue --repo tensorflow/tensorflow --issue 12345 --bounty 50
     """
     console.print('\n[bold cyan]Register Issue for Bounty[/bold cyan]\n')
 
@@ -102,14 +100,12 @@ def issue_register(
 
     # Display registration details
     # Get contract address and endpoint from env/config if not provided
-    contract_addr = get_contract_address(contract, testnet)
+    contract_addr = get_contract_address(contract)
     ws_endpoint = get_ws_endpoint(rpc_url)
 
     # Determine network name from config
     config = load_config()
     network_name = config.get('network', 'mainnet').capitalize()
-    if testnet:
-        network_name = 'Testnet'
 
     console.print(Panel(
         f'[cyan]Repository:[/cyan] {repo}\n'
@@ -162,7 +158,7 @@ def issue_register(
 
         # Load contract
         # Go up 4 levels: mutations.py -> issue_commands -> cli -> gittensor -> REPO_ROOT
-        contract_metadata = Path(__file__).parent.parent.parent.parent / 'smart-contracts' / 'ink' / 'target' / 'ink' / 'issue_bounty_manager.contract'
+        contract_metadata = Path(__file__).parent.parent.parent.parent / 'smart-contracts' / 'issues-v0' / 'target' / 'ink' / 'issue_bounty_manager.contract'
         if not contract_metadata.exists():
             console.print(f'[red]Error: Contract metadata not found at {contract_metadata}[/red]')
             return
@@ -272,7 +268,7 @@ def issue_harvest(wallet_name: str, wallet_hotkey: str, rpc_url: str, contract: 
     console.print('\n[bold cyan]Manual Emission Harvest[/bold cyan]\n')
 
     # Get configuration
-    contract_addr = get_contract_address(contract, testnet=False)
+    contract_addr = get_contract_address(contract)
     ws_endpoint = get_ws_endpoint(rpc_url)
 
     if not contract_addr:

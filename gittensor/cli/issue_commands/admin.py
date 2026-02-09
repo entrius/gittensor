@@ -71,7 +71,7 @@ def admin_cancel(issue_id: int, rpc_url: str, contract: str, wallet_name: str, w
     Arguments:
         ISSUE_ID: Issue to cancel
     """
-    contract_addr = get_contract_address(contract, testnet=False)
+    contract_addr = get_contract_address(contract)
     ws_endpoint = get_ws_endpoint(rpc_url)
 
     if not contract_addr:
@@ -144,7 +144,7 @@ def admin_payout(issue_id: int, rpc_url: str, contract: str, wallet_name: str, w
     Arguments:
         ISSUE_ID: Completed issue ID
     """
-    contract_addr = get_contract_address(contract, testnet=False)
+    contract_addr = get_contract_address(contract)
     ws_endpoint = get_ws_endpoint(rpc_url)
 
     if not contract_addr:
@@ -214,7 +214,7 @@ def admin_set_owner(new_owner: str, rpc_url: str, contract: str, wallet_name: st
     Arguments:
         NEW_OWNER: SS58 address of the new owner
     """
-    contract_addr = get_contract_address(contract, testnet=False)
+    contract_addr = get_contract_address(contract)
     ws_endpoint = get_ws_endpoint(rpc_url)
 
     if not contract_addr:
@@ -281,7 +281,7 @@ def admin_set_treasury(new_treasury: str, rpc_url: str, contract: str, wallet_na
     Arguments:
         NEW_TREASURY: SS58 address of the new treasury hotkey
     """
-    contract_addr = get_contract_address(contract, testnet=False)
+    contract_addr = get_contract_address(contract)
     ws_endpoint = get_ws_endpoint(rpc_url)
 
     if not contract_addr:

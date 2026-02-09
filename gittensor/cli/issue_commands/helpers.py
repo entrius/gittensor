@@ -7,11 +7,14 @@ Shared helper functions for issue commands
 
 import hashlib
 import json
+import os
 import struct
 from pathlib import Path
-from typing import List, Optional, Dict, Any
+from typing import Any, Dict, List, Optional
 
 from rich.console import Console
+
+from gittensor.constants import CONTRACT_ADDRESS
 
 # Default paths and URLs
 GITTENSOR_DIR = Path.home() / '.gittensor'
@@ -54,30 +57,19 @@ def load_config() -> Dict[str, Any]:
     return {}
 
 
-def get_contract_address(cli_value: str = '', testnet: bool = False) -> str:
+def get_contract_address(cli_value: str = '') -> str:
     """
-    Get contract address from CLI arg, env, or config file.
+    Get contract address. CLI arg > env var > constants.py default.
 
     Args:
         cli_value: Value passed via --contract CLI option
-        testnet: If True and no address found, use testnet default
 
     Returns:
-        Contract address string (may be empty if not configured)
+        Contract address string
     """
     if cli_value:
         return cli_value
-
-    config = load_config()
-    if config.get('contract_address'):
-        return config['contract_address']
-
-    # Fall back to testnet default if requested
-    if testnet:
-        # TODO: Add testnet contract address constant
-        return ''
-
-    return ''
+    return os.environ.get('CONTRACT_ADDRESS') or CONTRACT_ADDRESS
 
 
 def get_ws_endpoint(cli_value: str = '') -> str:

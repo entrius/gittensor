@@ -7,38 +7,20 @@ import hashlib
 import json
 import os
 import struct
-import traceback
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import bittensor as bt
+from substrateinterface import Keypair
+from substrateinterface.exceptions import ExtrinsicNotFound
 
-try:
-    from substrateinterface import Keypair
-    from substrateinterface.contracts import ContractInstance
-    from substrateinterface.exceptions import ExtrinsicNotFound
-
-    SUBSTRATE_INTERFACE_AVAILABLE = True
-except ImportError:
-    SUBSTRATE_INTERFACE_AVAILABLE = False
-    ContractInstance = None
-    Keypair = None
-    ExtrinsicNotFound = None
-
+# Bittensor uses async_substrate_interface which has its own exception type
 try:
     from async_substrate_interface.errors import ExtrinsicNotFound as AsyncExtrinsicNotFound
 except ImportError:
-    AsyncExtrinsicNotFound = None
-
-try:
-    from async_substrate_interface.errors import SubstrateRequestException
-except ImportError:
-    try:
-        from substrateinterface.exceptions import SubstrateRequestException
-    except ImportError:
-        SubstrateRequestException = None
+    AsyncExtrinsicNotFound = ExtrinsicNotFound
 
 # Default gas limits for contract calls
 DEFAULT_GAS_LIMIT = {
@@ -46,90 +28,35 @@ DEFAULT_GAS_LIMIT = {
     'proof_size': 500_000,
 }
 
-GITTENSOR_CONFIG_PATH = Path.home() / '.gittensor' / 'contract_config.json'
-CONTRACT_METADATA_FILENAME = 'issue_bounty_manager.contract'
+# Load contract metadata from JSON (selectors and arg types)
+# Regenerate with: python gittensor/validator/issue_competitions/update_metadata.py
+_METADATA_PATH = Path(__file__).parent / 'metadata.json'
 
 
-def _find_contract_metadata_path() -> Optional[Path]:
-    """Find the contract metadata file path."""
-    env_path = os.environ.get('CONTRACT_METADATA_PATH')
-    if env_path:
-        path = Path(env_path)
-        if path.exists():
-            return path
+def _load_contract_metadata() -> Tuple[Dict[str, bytes], Dict[str, List]]:
+    """Load selectors and arg types from metadata.json."""
+    with open(_METADATA_PATH) as f:
+        data = json.load(f)
 
-    if GITTENSOR_CONFIG_PATH.exists():
-        try:
-            config = json.loads(GITTENSOR_CONFIG_PATH.read_text())
-            metadata_path = config.get('metadata_path')
-            if metadata_path:
-                path = Path(metadata_path)
-                if path.exists():
-                    return path
-        except (json.JSONDecodeError, IOError):
-            pass
+    selectors = {name: bytes.fromhex(sel) for name, sel in data['selectors'].items()}
+    arg_types = {name: [tuple(arg) for arg in args] for name, args in data['arg_types'].items()}
 
-    current_file = Path(__file__).resolve()
-    repo_root_candidates = [
-        current_file.parent.parent.parent.parent,
-    ]
-
-    try:
-        import gittensor
-        if hasattr(gittensor, '__path__'):
-            for gittensor_path in gittensor.__path__:
-                repo_root_candidates.append(Path(gittensor_path).parent)
-    except (ImportError, AttributeError):
-        pass
-
-    for repo_root in repo_root_candidates:
-        search_paths = [
-            repo_root / 'smart-contracts' / 'ink' / 'target' / 'ink' / CONTRACT_METADATA_FILENAME,
-            repo_root / 'smart-contracts' / 'target' / 'ink' / CONTRACT_METADATA_FILENAME,
-        ]
-        for path in search_paths:
-            if path.exists():
-                return path
-
-    return None
+    return selectors, arg_types
 
 
-def get_contract_metadata_path() -> Optional[Path]:
-    """Get the contract metadata file path (cached)."""
-    if not hasattr(get_contract_metadata_path, '_cached_path'):
-        get_contract_metadata_path._cached_path = _find_contract_metadata_path()
-    return get_contract_metadata_path._cached_path
-
-
-def _get_default_metadata_path() -> Path:
-    """Get default metadata path, with fallback."""
-    path = get_contract_metadata_path()
-    if path:
-        return path
-    return Path.home() / '.gittensor' / 'contracts' / CONTRACT_METADATA_FILENAME
+CONTRACT_SELECTORS, CONTRACT_ARG_TYPES = _load_contract_metadata()
 
 
 def get_contract_address_from_config() -> Optional[str]:
-    """Get contract address from environment or config file."""
-    env_addr = os.environ.get('CONTRACT_ADDRESS')
-    if env_addr:
-        return env_addr
+    """Get contract address from env var or constants.py default."""
+    from gittensor.constants import CONTRACT_ADDRESS
 
-    if GITTENSOR_CONFIG_PATH.exists():
-        try:
-            with open(GITTENSOR_CONFIG_PATH) as f:
-                config = json.load(f)
-                addr = config.get('contract_address')
-                if addr:
-                    return addr
-        except (json.JSONDecodeError, IOError):
-            pass
-
-    return None
+    return os.environ.get('CONTRACT_ADDRESS') or CONTRACT_ADDRESS
 
 
 class IssueStatus(Enum):
     """Status of an issue in its lifecycle"""
+
     REGISTERED = 0
     ACTIVE = 1
     COMPLETED = 2
@@ -139,6 +66,7 @@ class IssueStatus(Enum):
 @dataclass
 class ContractIssue:
     """Issue data from the smart contract."""
+
     id: int
     github_url_hash: bytes
     repository_full_name: str
@@ -162,7 +90,6 @@ class IssueCompetitionContractClient:
         self,
         contract_address: Optional[str] = None,
         subtensor: Optional[bt.Subtensor] = None,
-        metadata_path: Optional[Path] = None,
     ):
         """Initialize the contract client."""
         if contract_address:
@@ -172,41 +99,25 @@ class IssueCompetitionContractClient:
             self.contract_address = config_addr or ''
 
         self.subtensor = subtensor
-        self.metadata_path = metadata_path or _get_default_metadata_path()
-        self._contract = None
         self._initialized = False
 
         if not self.contract_address:
             bt.logging.warning('Issue bounty contract address not set')
 
-    def _ensure_contract(self) -> bool:
-        """Ensure contract connection is established."""
+    def _ensure_initialized(self) -> bool:
+        """Ensure client is ready for contract interactions."""
         if not self.contract_address:
             return False
 
-        if not SUBSTRATE_INTERFACE_AVAILABLE:
-            bt.logging.warning('substrate-interface library not available')
+        if not self.subtensor:
+            bt.logging.warning('Subtensor not available')
             return False
 
-        if self._contract is None and not self._initialized:
+        if not self._initialized:
             self._initialized = True
-            try:
-                if not self.metadata_path.exists():
-                    bt.logging.warning(f'Contract metadata not found at {self.metadata_path}')
-                    return False
+            bt.logging.info(f'Contract client ready for {self.contract_address}')
 
-                self._contract = ContractInstance.create_from_address(
-                    contract_address=self.contract_address,
-                    metadata_file=str(self.metadata_path),
-                    substrate=self.subtensor.substrate,
-                )
-                bt.logging.info(f'Connected to contract at {self.contract_address}')
-            except Exception as e:
-                bt.logging.error(f'Failed to initialize contract: {e}')
-                self._contract = None
-                return False
-
-        return self._contract is not None
+        return True
 
     @staticmethod
     def hash_url(url: str) -> bytes:
@@ -217,10 +128,8 @@ class IssueCompetitionContractClient:
     # Query Functions (Read-only)
     # =========================================================================
 
-    def _get_read_keypair(self) -> 'Keypair':
+    def _get_read_keypair(self) -> Keypair:
         """Get a keypair for read-only contract calls."""
-        if not SUBSTRATE_INTERFACE_AVAILABLE:
-            return None
         return Keypair.create_from_uri('//Alice')
 
     def _get_child_storage_key(self) -> Optional[str]:
@@ -229,9 +138,7 @@ class IssueCompetitionContractClient:
             return None
 
         try:
-            contract_info = self.subtensor.substrate.query(
-                'Contracts', 'ContractInfoOf', [self.contract_address]
-            )
+            contract_info = self.subtensor.substrate.query('Contracts', 'ContractInfoOf', [self.contract_address])
             if not contract_info:
                 return None
 
@@ -291,9 +198,7 @@ class IssueCompetitionContractClient:
             if not packed_key:
                 return None
 
-            val_result = self.subtensor.substrate.rpc_request(
-                'childstate_getStorage', [child_key, packed_key, None]
-            )
+            val_result = self.subtensor.substrate.rpc_request('childstate_getStorage', [child_key, packed_key, None])
             if not val_result.get('result'):
                 return None
 
@@ -326,9 +231,7 @@ class IssueCompetitionContractClient:
             encoded_id = struct.pack('<Q', issue_id)
             lazy_key = self._compute_ink5_lazy_key('52789899', encoded_id)
 
-            val_result = self.subtensor.substrate.rpc_request(
-                'childstate_getStorage', [child_key, lazy_key, None]
-            )
+            val_result = self.subtensor.substrate.rpc_request('childstate_getStorage', [child_key, lazy_key, None])
             if not val_result.get('result'):
                 return None
 
@@ -338,7 +241,7 @@ class IssueCompetitionContractClient:
             stored_id = struct.unpack_from('<Q', data, offset)[0]
             offset += 8
 
-            github_url_hash = data[offset:offset + 32]
+            github_url_hash = data[offset : offset + 32]
             offset += 32
 
             len_byte = data[offset]
@@ -352,7 +255,7 @@ class IssueCompetitionContractClient:
                 str_len = 0
                 offset += 1
 
-            repo_name = data[offset:offset + str_len].decode('utf-8', errors='replace')
+            repo_name = data[offset : offset + str_len].decode('utf-8', errors='replace')
             offset += str_len
 
             issue_number = struct.unpack_from('<I', data, offset)[0]
@@ -388,7 +291,7 @@ class IssueCompetitionContractClient:
 
     def get_issues_by_status(self, status: IssueStatus) -> List[ContractIssue]:
         """Get all issues with a given status."""
-        if not self._ensure_contract():
+        if not self._ensure_initialized():
             return []
 
         try:
@@ -422,7 +325,7 @@ class IssueCompetitionContractClient:
 
     def get_issue(self, issue_id: int) -> Optional[ContractIssue]:
         """Get a specific issue by ID."""
-        if not self._ensure_contract():
+        if not self._ensure_initialized():
             return None
 
         try:
@@ -433,7 +336,7 @@ class IssueCompetitionContractClient:
 
     def get_alpha_pool(self) -> int:
         """Get the current alpha pool balance."""
-        if not self._ensure_contract():
+        if not self._ensure_initialized():
             return 0
 
         try:
@@ -463,19 +366,11 @@ class IssueCompetitionContractClient:
 
     def _raw_contract_read(self, method_name: str, args: dict = None) -> Optional[bytes]:
         """Read from contract using raw RPC call."""
-        if not self._ensure_contract():
+        if not self._ensure_initialized():
             return None
 
         try:
-            with open(self.metadata_path) as f:
-                metadata = json.load(f)
-
-            selector = None
-            for msg in metadata.get('spec', {}).get('messages', []):
-                if msg['label'] == method_name:
-                    selector = bytes.fromhex(msg['selector'].replace('0x', ''))
-                    break
-
+            selector = CONTRACT_SELECTORS.get(method_name)
             if not selector:
                 return None
 
@@ -497,10 +392,7 @@ class IssueCompetitionContractClient:
 
             call_params = origin + dest + value + gas_limit + storage_limit + compact_len + input_data
 
-            result = self.subtensor.substrate.rpc_request(
-                'state_call',
-                ['ContractsApi_call', '0x' + call_params.hex()]
-            )
+            result = self.subtensor.substrate.rpc_request('state_call', ['ContractsApi_call', '0x' + call_params.hex()])
 
             if not result.get('result'):
                 return None
@@ -565,14 +457,12 @@ class IssueCompetitionContractClient:
         Returns:
             True if vote succeeded
         """
-        if not self._ensure_contract():
+        if not self._ensure_initialized():
             bt.logging.warning('Cannot vote solution: contract not ready')
             return False
 
         try:
-            bt.logging.info(
-                f'Voting solution for issue {issue_id}: solver={solver_hotkey[:8]}... PR#{pr_number}'
-            )
+            bt.logging.info(f'Voting solution for issue {issue_id}: solver={solver_hotkey[:8]}... PR#{pr_number}')
 
             keypair = wallet.hotkey
             tx_hash = self._exec_contract_raw(
@@ -614,7 +504,7 @@ class IssueCompetitionContractClient:
         Returns:
             True if vote succeeded
         """
-        if not self._ensure_contract():
+        if not self._ensure_initialized():
             bt.logging.warning('Cannot vote cancel issue: contract not ready')
             return False
 
@@ -656,28 +546,18 @@ class IssueCompetitionContractClient:
         value: int = 0,
     ) -> Optional[str]:
         """Execute a contract method using raw extrinsic submission."""
-        if not self._ensure_contract():
+        if not self._ensure_initialized():
             return None
 
         gas_limit = gas_limit or DEFAULT_GAS_LIMIT
 
         try:
-            with open(self.metadata_path) as f:
-                metadata = json.load(f)
-
-            selector = None
-            method_spec = None
-            for msg in metadata.get('spec', {}).get('messages', []):
-                if msg['label'] == method_name:
-                    selector = bytes.fromhex(msg['selector'].replace('0x', ''))
-                    method_spec = msg
-                    break
-
+            selector = CONTRACT_SELECTORS.get(method_name)
             if not selector:
-                bt.logging.error(f'Method {method_name} not found in contract metadata')
+                bt.logging.error(f'Method {method_name} not found in CONTRACT_SELECTORS')
                 return None
 
-            encoded_args = self._encode_args(method_spec, args, metadata)
+            encoded_args = self._encode_args(method_name, args)
             call_data = selector + encoded_args
 
             call = self.subtensor.substrate.compose_call(
@@ -689,7 +569,7 @@ class IssueCompetitionContractClient:
                     'gas_limit': gas_limit,
                     'storage_deposit_limit': None,
                     'data': '0x' + call_data.hex(),
-                }
+                },
             )
 
             signer_address = keypair.ss58_address
@@ -714,9 +594,7 @@ class IssueCompetitionContractClient:
                 wait_for_finalization=False,
             )
 
-            _extrinsic_not_found_types = tuple(
-                t for t in [ExtrinsicNotFound, AsyncExtrinsicNotFound] if t is not None
-            )
+            _extrinsic_not_found_types = tuple(t for t in [ExtrinsicNotFound, AsyncExtrinsicNotFound] if t is not None)
             try:
                 if result.is_success:
                     return result.extrinsic_hash
@@ -730,19 +608,16 @@ class IssueCompetitionContractClient:
             bt.logging.error(f'{method_name} error: {e}')
             return None
 
-    def _encode_args(self, method_spec: dict, args: dict, metadata: dict) -> bytes:
-        """SCALE-encode method arguments for Ink! 5 contracts."""
+    def _encode_args(self, method_name: str, args: dict) -> bytes:
+        """SCALE-encode method arguments using hardcoded type definitions."""
+        arg_types = CONTRACT_ARG_TYPES.get(method_name, [])
         encoded = b''
 
-        for arg_spec in method_spec.get('args', []):
-            arg_name = arg_spec['label']
-            arg_type_id = arg_spec['type']['type']
-
+        for arg_name, type_def in arg_types:
             if arg_name not in args:
                 raise ValueError(f'Missing argument: {arg_name}')
 
             value = args[arg_name]
-            type_def = self._get_type_def(arg_type_id, metadata)
 
             if type_def == 'u32':
                 encoded += struct.pack('<I', value)
@@ -760,11 +635,11 @@ class IssueCompetitionContractClient:
             elif type_def == 'array32':
                 if isinstance(value, bytes):
                     if len(value) != 32:
-                        raise ValueError(f'Array must be 32 bytes')
+                        raise ValueError('Array must be 32 bytes')
                     encoded += value
                 elif isinstance(value, list):
                     if len(value) != 32:
-                        raise ValueError(f'Array must be 32 bytes')
+                        raise ValueError('Array must be 32 bytes')
                     encoded += bytes(value)
                 else:
                     raise ValueError(f'Unknown array format: {type(value)}')
@@ -772,26 +647,6 @@ class IssueCompetitionContractClient:
                 raise ValueError(f'Unsupported type: {type_def} for arg {arg_name}')
 
         return encoded
-
-    def _get_type_def(self, type_id: int, metadata: dict) -> str:
-        """Get type definition string from metadata."""
-        types = metadata.get('types', [])
-        for t in types:
-            if t.get('id') == type_id:
-                type_def = t.get('type', {}).get('def', {})
-                path = t.get('type', {}).get('path', [])
-                if 'primitive' in type_def:
-                    return type_def['primitive']
-                if 'array' in type_def:
-                    array_def = type_def['array']
-                    if array_def.get('len') == 32:
-                        return 'array32'
-                    return 'array'
-                if 'composite' in type_def:
-                    if path and 'AccountId' in path[-1]:
-                        return 'AccountId'
-                    return 'composite'
-        return 'unknown'
 
     # =========================================================================
     # Emission Harvesting Functions
@@ -808,7 +663,7 @@ class IssueCompetitionContractClient:
         Returns:
             Total stake amount (0 if contract not ready or no stake)
         """
-        if not self._ensure_contract():
+        if not self._ensure_initialized():
             return 0
 
         try:
@@ -829,9 +684,7 @@ class IssueCompetitionContractClient:
                 return 0
 
             # Read packed storage
-            val_result = self.subtensor.substrate.rpc_request(
-                'childstate_getStorage', [child_key, packed_key, None]
-            )
+            val_result = self.subtensor.substrate.rpc_request('childstate_getStorage', [child_key, packed_key, None])
             if not val_result.get('result'):
                 bt.logging.debug('Cannot get treasury stake: no packed storage value')
                 return 0
@@ -854,9 +707,7 @@ class IssueCompetitionContractClient:
             # Query SubtensorModule::Alpha directly
             # Alpha storage: (hotkey, coldkey, netuid) -> U64F64 stake amount
             alpha_result = self.subtensor.substrate.query(
-                'SubtensorModule',
-                'Alpha',
-                [treasury_ss58, owner_ss58, netuid]
+                'SubtensorModule', 'Alpha', [treasury_ss58, owner_ss58, netuid]
             )
 
             if not alpha_result:
@@ -884,7 +735,7 @@ class IssueCompetitionContractClient:
 
     def get_last_harvest_block(self) -> int:
         """Query the block number of the last harvest."""
-        if not self._ensure_contract():
+        if not self._ensure_initialized():
             return 0
 
         try:
@@ -896,7 +747,7 @@ class IssueCompetitionContractClient:
 
     def harvest_emissions(self, wallet: bt.Wallet) -> Optional[dict]:
         """Harvest emissions from the treasury hotkey and distribute to bounties."""
-        if not self._ensure_contract():
+        if not self._ensure_initialized():
             return None
 
         try:
@@ -934,7 +785,7 @@ class IssueCompetitionContractClient:
         Returns:
             Payout amount in raw units, or None on failure
         """
-        if not self._ensure_contract():
+        if not self._ensure_initialized():
             return None
 
         try:
@@ -976,7 +827,7 @@ class IssueCompetitionContractClient:
         Returns:
             True if cancellation succeeded
         """
-        if not self._ensure_contract():
+        if not self._ensure_initialized():
             return False
 
         try:
@@ -1020,7 +871,7 @@ class IssueCompetitionContractClient:
         Returns:
             True if ownership transfer succeeded
         """
-        if not self._ensure_contract():
+        if not self._ensure_initialized():
             return False
 
         try:
@@ -1061,7 +912,7 @@ class IssueCompetitionContractClient:
         Returns:
             True if treasury hotkey change succeeded
         """
-        if not self._ensure_contract():
+        if not self._ensure_initialized():
             return False
 
         try:

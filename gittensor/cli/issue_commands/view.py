@@ -57,10 +57,9 @@ def view():
     default='',
     help='Contract address (uses default if empty)',
 )
-@click.option('--testnet', is_flag=True, help='Use testnet contract address')
 @click.option('--from-api', is_flag=True, help='Force reading from API instead of contract')
 @click.option('--verbose', '-v', is_flag=True, help='Show debug output for contract reads')
-def view_issues(rpc_url: str, contract: str, testnet: bool, from_api: bool, verbose: bool):
+def view_issues(rpc_url: str, contract: str, from_api: bool, verbose: bool):
     """
     List available issues.
 
@@ -72,13 +71,13 @@ def view_issues(rpc_url: str, contract: str, testnet: bool, from_api: bool, verb
     \b
     Example:
         gitt view issues
-        gitt v issues --testnet
+        gitt v issues --from-api
     """
     console.print('\n[bold cyan]Available Issues[/bold cyan]\n')
 
     # Load configuration
     config = load_config()
-    contract_addr = get_contract_address(contract, testnet)
+    contract_addr = get_contract_address(contract)
     ws_endpoint = get_ws_endpoint(rpc_url)
 
     issues = []
@@ -201,7 +200,7 @@ def view_issues(rpc_url: str, contract: str, testnet: bool, from_api: bool, verb
 @click.option('--verbose', '-v', is_flag=True, help='Show debug output')
 def view_bounty_pool(rpc_url: str, contract: str, verbose: bool):
     """View total bounty pool (sum of all issue bounty amounts)."""
-    contract_addr = get_contract_address(contract, testnet=False)
+    contract_addr = get_contract_address(contract)
     ws_endpoint = get_ws_endpoint(rpc_url)
 
     if not contract_addr:
@@ -237,7 +236,7 @@ def view_bounty_pool(rpc_url: str, contract: str, verbose: bool):
 @click.option('--verbose', '-v', is_flag=True, help='Show debug output')
 def view_pending_harvest(rpc_url: str, contract: str, verbose: bool):
     """View pending harvest (treasury stake minus allocated bounties)."""
-    contract_addr = get_contract_address(contract, testnet=False)
+    contract_addr = get_contract_address(contract)
     ws_endpoint = get_ws_endpoint(rpc_url)
 
     if not contract_addr:
@@ -293,7 +292,7 @@ def view_pending_harvest(rpc_url: str, contract: str, verbose: bool):
 @click.option('--verbose', '-v', is_flag=True, help='Show debug output')
 def view_issue(issue_id: int, rpc_url: str, contract: str, verbose: bool):
     """View raw issue data from contract."""
-    contract_addr = get_contract_address(contract, testnet=False)
+    contract_addr = get_contract_address(contract)
     ws_endpoint = get_ws_endpoint(rpc_url)
 
     if not contract_addr:
@@ -343,7 +342,7 @@ def view_issue(issue_id: int, rpc_url: str, contract: str, verbose: bool):
 @click.option('--verbose', '-v', is_flag=True, help='Show debug output')
 def view_issue_contract_config(rpc_url: str, contract: str, verbose: bool):
     """View contract configuration."""
-    contract_addr = get_contract_address(contract, testnet=False)
+    contract_addr = get_contract_address(contract)
     ws_endpoint = get_ws_endpoint(rpc_url)
 
     if not contract_addr:

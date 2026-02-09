@@ -12,12 +12,13 @@ Utility functions for Issue Bounties sub-mechanism
    - If closed but not by miner -> vote_cancel_issue(issue_id)
 """
 
-import json
+import os
 import re
-from pathlib import Path
 from typing import Any, Dict, Optional
 
 import bittensor as bt
+
+from gittensor.constants import CONTRACT_ADDRESS
 
 from .contract_client import (
     ContractIssue,
@@ -26,39 +27,14 @@ from .contract_client import (
 )
 
 
-def get_contract_address(network: str = 'local') -> Optional[str]:
+def get_contract_address() -> Optional[str]:
     """
-    Get the contract address from environment or config file.
-
-    Priority:
-    1. CONTRACT_ADDRESS environment variable (highest priority)
-    2. ~/.gittensor/contract_config.json (written by dev-environment up.sh)
-
-    Args:
-        network: Network name (unused, kept for API compatibility)
+    Get contract address. Override via CONTRACT_ADDRESS env var for dev/testing.
 
     Returns:
-        Contract address string or None if not configured
+        Contract address string (env var override or constants.py default)
     """
-    import os
-
-    # 1. Environment variable (highest priority)
-    env_addr = os.environ.get('CONTRACT_ADDRESS')
-    if env_addr:
-        return env_addr
-
-    # 2. Config file (written by up.sh during development)
-    config_path = Path.home() / '.gittensor' / 'contract_config.json'
-    if config_path.exists():
-        try:
-            config = json.loads(config_path.read_text())
-            addr = config.get('contract_address')
-            if addr:
-                return addr
-        except (json.JSONDecodeError, IOError):
-            pass
-
-    return None
+    return os.environ.get('CONTRACT_ADDRESS') or CONTRACT_ADDRESS
 
 
 def extract_pr_number_from_url(pr_url: str) -> Optional[int]:

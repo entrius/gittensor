@@ -1,0 +1,105 @@
+{
+  "selectors": {
+    "register_issue": "5c056a24",
+    "cancel_issue": "5d6026a5",
+    "vote_solution": "656be730",
+    "vote_cancel_issue": "e4bcd2ad",
+    "set_owner": "367facd6",
+    "set_treasury_hotkey": "a8abaa18",
+    "get_treasury_stake": "7bb7429c",
+    "get_last_harvest_block": "99eee47d",
+    "harvest_emissions": "44237deb",
+    "payout_bounty": "d38906bc",
+    "get_alpha_pool": "9b84c72a",
+    "get_issue": "f56df897",
+    "get_issues_by_status": "e4870d63"
+  },
+  "arg_types": {
+    "register_issue": [
+      [
+        "github_url",
+        "str"
+      ],
+      [
+        "repository_full_name",
+        "str"
+      ],
+      [
+        "issue_number",
+        "u32"
+      ],
+      [
+        "target_bounty",
+        "u128"
+      ]
+    ],
+    "cancel_issue": [
+      [
+        "issue_id",
+        "u64"
+      ]
+    ],
+    "vote_solution": [
+      [
+        "issue_id",
+        "u64"
+      ],
+      [
+        "solver_hotkey",
+        "AccountId"
+      ],
+      [
+        "solver_coldkey",
+        "AccountId"
+      ],
+      [
+        "pr_number",
+        "u32"
+      ]
+    ],
+    "vote_cancel_issue": [
+      [
+        "issue_id",
+        "u64"
+      ],
+      [
+        "reason_hash",
+        "array32"
+      ]
+    ],
+    "set_owner": [
+      [
+        "new_owner",
+        "AccountId"
+      ]
+    ],
+    "set_treasury_hotkey": [
+      [
+        "new_hotkey",
+        "AccountId"
+      ]
+    ],
+    "get_treasury_stake": [],
+    "get_last_harvest_block": [],
+    "harvest_emissions": [],
+    "payout_bounty": [
+      [
+        "issue_id",
+        "u64"
+      ]
+    ],
+    "get_alpha_pool": [],
+    "get_issue": [
+      [
+        "issue_id",
+        "u64"
+      ]
+    ],
+    "get_issues_by_status": [
+      [
+        "status",
+        "unknown"
+      ]
+    ]
+  }
+}

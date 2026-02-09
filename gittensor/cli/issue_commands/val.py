@@ -110,7 +110,7 @@ def val_vote_solution(
         gitt val vote-issue-solution 1 5Hxxx... 5Hyyy... https://github.com/.../pull/123
         gitt val solution 42 <hotkey> <coldkey> 456
     """
-    contract_addr = get_contract_address(contract, testnet=False)
+    contract_addr = get_contract_address(contract)
     ws_endpoint = get_ws_endpoint(rpc_url)
 
     if not contract_addr:
@@ -199,7 +199,7 @@ def val_vote_cancel_issue(
         gitt val vote-issue-cancel 1 "External solution found"
         gitt val cancel 42 "Issue invalid"
     """
-    contract_addr = get_contract_address(contract, testnet=False)
+    contract_addr = get_contract_address(contract)
     ws_endpoint = get_ws_endpoint(rpc_url)
 
     if not contract_addr:

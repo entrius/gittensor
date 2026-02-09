@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
+from gittensor.utils.utils import parse_repo_name
+
 if TYPE_CHECKING:
     from gittensor.classes import FileChange as FileChangeType
 
@@ -21,10 +23,9 @@ from gittensor.constants import (
     BASE_GITHUB_API_URL,
     MAINTAINER_ASSOCIATIONS,
     MAX_FILE_SIZE_BYTES,
+    PR_LOOKBACK_DAYS,
     TIER_BASED_INCENTIVE_MECHANISM_START_DATE,
 )
-from gittensor.utils.utils import parse_repo_name
-from gittensor.validator.utils.config import PR_LOOKBACK_DAYS
 from gittensor.validator.utils.load_weights import RepositoryConfig
 
 # core github graphql query

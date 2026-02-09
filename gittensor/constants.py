@@ -51,6 +51,7 @@ MAX_LINES_SCORED_FOR_NON_CODE_EXT = 300
 # =============================================================================
 # Repository & PR Scoring
 # =============================================================================
+PR_LOOKBACK_DAYS = 90  # how many days a merged pr will count for scoring
 DEFAULT_MERGED_PR_BASE_SCORE = 30
 MIN_TOKEN_SCORE_FOR_BASE_SCORE = 5  # PRs below this get 0 base score (can still earn contribution bonus)
 MAX_CONTRIBUTION_BONUS = 30
@@ -123,5 +124,6 @@ EXCESSIVE_PR_MIN_MULTIPLIER = 0.00
 # =============================================================================
 # Issues Competition
 # =============================================================================
-ISSUES_TREASURY_UID = RECYCLE_UID  # UID of the smart contract neuron, if set to RECYCLE_UID then it's disabled
+CONTRACT_ADDRESS = '5CEAWpWBWBB8rdhSwhK92YbcJ6ZBx3bajVHcWAtUddkYxLFK'
+ISSUES_TREASURY_UID = 4  # UID of the smart contract neuron, if set to RECYCLE_UID then it's disabled
 ISSUES_TREASURY_EMISSION_SHARE = 0.50  # % of emissions routed to funding issues treasury

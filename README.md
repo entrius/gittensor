@@ -14,11 +14,11 @@ Incentivize open source contributions.
 
 ## Introduction
 
-Gittensor is a Bittensor subnet (SN74) that accelerates open source software development by rewarding meaningful contributions. Miners earn TAO by making real, merged pull requests to recognized open source repositories.
+[Gittensor](https://gittensor.io/) is a [Bittensor subnet](https://docs.learnbittensor.org/subnets/understanding-subnets) (SN74) that accelerates open source software development by rewarding meaningful contributions. Miners earn TAO by making real, merged pull requests to recognized open source repositories.
 
 ## How it Works
 
-Miners register with a fine-grained GitHub personal access token (PAT) and contribute to whitelisted open source repositories. When their pull requests get merged, validators authenticate account ownership via the PAT, verify the merged contributions, and score them based on code quality, repository weight, and programming language factors. Rewards are distributed proportionally to contribution scores.
+Miners register with a fine-grained [GitHub personal access token](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens) (PAT) and contribute to whitelisted open source repositories. When their pull requests get merged, validators authenticate account ownership via the PAT, verify the merged contributions, and score them based on code quality, repository weight, and programming language factors. Rewards are distributed proportionally to contribution scores.
 
 ## Why Gittensor
 
@@ -72,7 +72,7 @@ See full guide **[here](https://docs.gittensor.io/validator.html)**
 
 - Master Repositories & Weights
 
-A list of repositories pulled from github that have been deemed valid for scoring. They each have an associated weight based on factors like: forks, commits, contributors, stars, etc.
+A list of repositories pulled from GitHub that have been deemed valid for scoring. They each have an associated weight based on factors like: forks, commits, contributors, stars, etc.
 
 _NOTE: this list will be dynamic. It will see various audits, additions, deletions, weight changes, and shuffles as the subnet matures._
 
@@ -91,3 +91,7 @@ Weights assigned to AST (Abstract Syntax Tree) node types for token-based scorin
 ### Scoring
 
 See full guide **[here](https://docs.gittensor.io/scoring.html)**
+
+## License
+
+MIT - See [LICENSE](LICENSE) for details.

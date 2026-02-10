@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Dict
 
 import bittensor as bt
 
-from gittensor.classes import MinerEvaluation, Tier
+from gittensor.classes import MinerEvaluation
 from gittensor.constants import ISSUES_TREASURY_EMISSION_SHARE, ISSUES_TREASURY_UID
 from gittensor.validator.utils.load_weights import (
     load_master_repo_weights,
@@ -22,12 +22,13 @@ from gittensor.utils.uids import get_all_uids
 from gittensor.validator.evaluation.reward import get_rewards
 
 # Issue bounties integration
-from gittensor.validator.issue_competitions import (
-    IssueCompetitionContractClient,
-    forward_issue_bounties,
+from gittensor.utils.github_api_tools import check_github_issue_closed
+from gittensor.validator.issue_competitions.contract_client import IssueCompetitionContractClient, IssueStatus
+from gittensor.validator.utils.config import GITTENSOR_VALIDATOR_PAT, VALIDATOR_STEPS_INTERVAL, VALIDATOR_WAIT
+from gittensor.validator.utils.issue_competitions import (
     get_contract_address,
+    get_miner_coldkey,
 )
-from gittensor.validator.utils.config import VALIDATOR_STEPS_INTERVAL, VALIDATOR_WAIT
 
 
 async def forward(self: 'BaseValidatorNeuron') -> None:
@@ -105,75 +106,131 @@ async def oss_contributions(self: 'BaseValidatorNeuron', miner_uids: set[int]) -
 
 
 async def issues_competition(
-    validator: 'BaseValidatorNeuron',
+    self: 'BaseValidatorNeuron',
     miner_evaluations: Dict[int, MinerEvaluation],
 ) -> None:
     """
     Run the issue bounties forward pass.
 
-    Checks active issues from the smart contract and votes on solutions
-    when GitHub issues are closed by registered miners.
+    1. Harvest emissions into the bounty pool
+    2. Get active issues from the smart contract
+    3. For each active issue, check GitHub:
+       - If solved by bronze+ miner -> vote_solution
+       - If closed but not by eligible miner -> vote_cancel_issue
 
     Args:
-        validator: The validator instance
+        self: The validator instance
         miner_evaluations: Fresh scoring data from oss_contributions(), keyed by UID
     """
     try:
         contract_addr = get_contract_address()
         if not contract_addr:
-            bt.logging.debug("Issue bounties: no contract address configured")
+            bt.logging.warning("Issue bounties: no contract address configured")
             return
 
-        bt.logging.info(f"Running issue bounties forward (contract: {contract_addr[:12]}...)")
+        bt.logging.info("Running issue bounties")
+        bt.logging.info(f"Contract address: {contract_addr}")
 
         # Create contract client
         contract_client = IssueCompetitionContractClient(
             contract_address=contract_addr,
-            subtensor=validator.subtensor,
+            subtensor=self.subtensor,
         )
 
         # Harvest emissions first - flush accumulated stake into bounty pool
-        harvest_result = contract_client.harvest_emissions(validator.wallet)
+        harvest_result = contract_client.harvest_emissions(self.wallet)
         if harvest_result and harvest_result.get('status') == 'success':
             bt.logging.info(f"Harvested emissions: {harvest_result.get('tx_hash', '')[:16]}...")
 
-        # Build mappings from fresh scoring data
-        miners_github_mapping = {
+        # Build mapping of github_id->hotkey for bronze+ miners only (eligible for payouts)
+        eligible_miners = {
             eval.github_id: eval.hotkey
             for eval in miner_evaluations.values()
-            if eval.github_id and eval.github_id != '0'
+            if eval.github_id and eval.github_id != '0' and eval.current_tier is not None
         }
-
-        tier_data = {
-            eval.hotkey: {
-                'credibility': eval.credibility_by_tier.get(Tier.BRONZE, 0),
-                'unique_repos': eval.unique_repos_count,
-                'current_tier': eval.current_tier,
-            }
-            for eval in miner_evaluations.values()
-            if eval.hotkey
-        }
-
-        bt.logging.debug(f"Issue bounties: {len(miners_github_mapping)} github mappings, {len(tier_data)} tier entries")
-
-        # Run issue bounties forward
-        results = await forward_issue_bounties(
-            validator=validator,
-            contract_client=contract_client,
-            miners_github_mapping=miners_github_mapping,
-            tier_data=tier_data,
+        bt.logging.info(
+            f"Issue bounties: {len(eligible_miners)} eligible miners (bronze+) out of {len(miner_evaluations)} total"
         )
 
-        if results['votes_cast'] > 0 or results['cancels_cast'] > 0:
-            bt.logging.success(
-                f"Issue bounties: processed {results['issues_processed']} issues, "
-                f"{results['votes_cast']} solution votes, {results['cancels_cast']} cancel votes"
-            )
-        elif results['issues_processed'] > 0:
-            bt.logging.debug(f"Issue bounties: processed {results['issues_processed']} issues (no state changes)")
+        # Get active issues from contract
+        active_issues = contract_client.get_issues_by_status(IssueStatus.ACTIVE)
+        bt.logging.info(f"Found {len(active_issues)} active issues")
 
-        if results['errors']:
-            bt.logging.warning(f"Issue bounties errors: {results['errors'][:3]}")
+        votes_cast = 0
+        cancels_cast = 0
+        errors = []
+
+        for issue in active_issues:
+            try:
+                github_state = check_github_issue_closed(
+                    issue.repository_full_name, issue.issue_number, GITTENSOR_VALIDATOR_PAT
+                )
+
+                if github_state is None:
+                    bt.logging.warning(f"Could not check GitHub for issue {issue.id}")
+                    continue
+
+                if not github_state.get('is_closed'):
+                    continue
+
+                # Issue is closed - find solver
+                solver_github_id = github_state.get('solver_github_id')
+                pr_number = github_state.get('pr_number')
+
+                if not solver_github_id:
+                    success = contract_client.vote_cancel_issue(
+                        issue_id=issue.id,
+                        reason="Issue closed without identifiable solver",
+                        wallet=self.wallet,
+                    )
+                    if success:
+                        cancels_cast += 1
+                    continue
+
+                miner_hotkey = eligible_miners.get(str(solver_github_id))
+                if not miner_hotkey:
+                    success = contract_client.vote_cancel_issue(
+                        issue_id=issue.id,
+                        reason="Issue closed externally (not by eligible miner)",
+                        wallet=self.wallet,
+                    )
+                    if success:
+                        cancels_cast += 1
+                        bt.logging.info(f"Voted cancel for issue {issue.id} (not eligible)")
+                    continue
+
+                miner_coldkey = get_miner_coldkey(miner_hotkey, self.subtensor, self.config.netuid)
+                if not miner_coldkey:
+                    bt.logging.warning(f"Could not get coldkey for {miner_hotkey}")
+                    continue
+
+                success = contract_client.vote_solution(
+                    issue_id=issue.id,
+                    solver_hotkey=miner_hotkey,
+                    solver_coldkey=miner_coldkey,
+                    pr_number=pr_number or 0,
+                    wallet=self.wallet,
+                )
+                if success:
+                    votes_cast += 1
+                    bt.logging.success(f"Voted solution for issue {issue.id}: {miner_hotkey[:12]}... PR#{pr_number}")
+                else:
+                    errors.append(f"Vote failed for issue {issue.id}")
+
+            except Exception as e:
+                bt.logging.error(f"Error processing issue {issue.id}: {e}")
+                errors.append(f"Issue {issue.id}: {str(e)}")
+
+        if votes_cast > 0 or cancels_cast > 0:
+            bt.logging.success(
+                f"Issue bounties: processed {len(active_issues)} issues, "
+                f"{votes_cast} solution votes, {cancels_cast} cancel votes"
+            )
+        elif active_issues:
+            bt.logging.debug(f"Issue bounties: processed {len(active_issues)} issues (no state changes)")
+
+        if errors:
+            bt.logging.warning(f"Issue bounties errors: {errors[:3]}")
 
     except Exception as e:
         bt.logging.error(f"Issue bounties forward failed: {e}")

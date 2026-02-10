@@ -6,6 +6,7 @@ VALIDATOR_WAIT = 60  # 60 seconds
 VALIDATOR_STEPS_INTERVAL = 120  # 2 hours, every time a scoring round happens
 
 # required env vars
+GITTENSOR_VALIDATOR_PAT = os.getenv('GITTENSOR_VALIDATOR_PAT')
 WANDB_API_KEY = os.getenv('WANDB_API_KEY')
 WANDB_PROJECT = os.getenv('WANDB_PROJECT', 'gittensor-validators')
 WANDB_VALIDATOR_NAME = os.getenv('WANDB_VALIDATOR_NAME', 'vali')

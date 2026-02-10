@@ -1,6 +1,7 @@
 # Entrius 2025
 import base64
 import fnmatch
+import re
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -619,6 +620,71 @@ def load_miners_prs(
 
     except Exception as e:
         bt.logging.error(f'Error fetching PRs via GraphQL: {e}')
+
+
+def extract_pr_number_from_url(pr_url: str) -> Optional[int]:
+    """Extract PR number from a GitHub PR URL.
+
+    Args:
+        pr_url: Full GitHub PR URL (e.g., https://github.com/owner/repo/pull/123)
+
+    Returns:
+        PR number as integer, or None if invalid URL
+    """
+    if not pr_url:
+        return None
+    match = re.search(r'/pull/(\d+)', pr_url)
+    return int(match.group(1)) if match else None
+
+
+def check_github_issue_closed(repo: str, issue_number: int, token: str) -> Optional[Dict[str, Any]]:
+    """Check if a GitHub issue is closed and get the solving PR info.
+
+    Args:
+        repo: Repository full name (e.g., 'owner/repo')
+        issue_number: GitHub issue number
+        token: GitHub PAT for authentication
+
+    Returns:
+        Dict with 'is_closed', 'solver_github_id', 'pr_number' or None on error
+    """
+    headers = make_headers(token)
+
+    try:
+        response = requests.get(
+            f'{BASE_GITHUB_API_URL}/repos/{repo}/issues/{issue_number}',
+            headers=headers,
+            timeout=15,
+        )
+
+        if response.status_code != 200:
+            bt.logging.warning(f"GitHub API error for {repo}#{issue_number}: {response.status_code}")
+            return None
+
+        data = response.json()
+
+        if data.get('state') != 'closed':
+            return {'is_closed': False}
+
+        solver_github_id = None
+        pr_number = None
+
+        if data.get('pull_request'):
+            pr_url = data['pull_request'].get('html_url')
+            pr_number = extract_pr_number_from_url(pr_url)
+
+        if data.get('closed_by'):
+            solver_github_id = data['closed_by'].get('id')
+
+        return {
+            'is_closed': True,
+            'solver_github_id': solver_github_id,
+            'pr_number': pr_number,
+        }
+
+    except Exception as e:
+        bt.logging.error(f"Error checking GitHub issue {repo}#{issue_number}: {e}")
+        return None
 
 
 def fetch_file_contents_batch(

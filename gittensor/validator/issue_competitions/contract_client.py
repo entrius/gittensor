@@ -33,7 +33,7 @@ DEFAULT_GAS_LIMIT = {
 _METADATA_PATH = Path(__file__).parent / 'metadata.json'
 
 
-def _load_contract_metadata() -> Tuple[Dict[str, bytes], Dict[str, List]]:
+def load_contract_metadata() -> Tuple[Dict[str, bytes], Dict[str, List]]:
     """Load selectors and arg types from metadata.json."""
     with open(_METADATA_PATH) as f:
         data = json.load(f)
@@ -44,7 +44,7 @@ def _load_contract_metadata() -> Tuple[Dict[str, bytes], Dict[str, List]]:
     return selectors, arg_types
 
 
-CONTRACT_SELECTORS, CONTRACT_ARG_TYPES = _load_contract_metadata()
+CONTRACT_SELECTORS, CONTRACT_ARG_TYPES = load_contract_metadata()
 
 
 def get_contract_address_from_config() -> Optional[str]:
@@ -99,12 +99,12 @@ class IssueCompetitionContractClient:
             self.contract_address = config_addr or ''
 
         self.subtensor = subtensor
-        self._initialized = False
+        self.initialized = False
 
         if not self.contract_address:
             bt.logging.warning('Issue bounty contract address not set')
 
-    def _ensure_initialized(self) -> bool:
+    def ensure_initialized(self) -> bool:
         """Ensure client is ready for contract interactions."""
         if not self.contract_address:
             return False
@@ -113,9 +113,9 @@ class IssueCompetitionContractClient:
             bt.logging.warning('Subtensor not available')
             return False
 
-        if not self._initialized:
-            self._initialized = True
-            bt.logging.info(f'Contract client ready for {self.contract_address}')
+        if not self.initialized:
+            self.initialized = True
+            bt.logging.debug(f'Contract client ready for {self.contract_address}')
 
         return True
 
@@ -127,10 +127,6 @@ class IssueCompetitionContractClient:
     # =========================================================================
     # Query Functions (Read-only)
     # =========================================================================
-
-    def _get_read_keypair(self) -> Keypair:
-        """Get a keypair for read-only contract calls."""
-        return Keypair.create_from_uri('//Alice')
 
     def _get_child_storage_key(self) -> Optional[str]:
         """Get the child storage key for the contract's trie."""
@@ -170,7 +166,7 @@ class IssueCompetitionContractClient:
             bt.logging.debug(f'Error getting child storage key: {e}')
             return None
 
-    def _compute_ink5_lazy_key(self, root_key_hex: str, encoded_key: bytes) -> str:
+    def compute_ink5_lazy_key(self, root_key_hex: str, encoded_key: bytes) -> str:
         """Compute Ink! 5 lazy mapping storage key using blake2_128concat."""
         root_key = bytes.fromhex(root_key_hex.replace('0x', ''))
         data = root_key + encoded_key
@@ -221,7 +217,7 @@ class IssueCompetitionContractClient:
             bt.logging.debug(f'Error reading packed storage: {e}')
             return None
 
-    def _read_issue_from_child_storage(self, issue_id: int) -> Optional[ContractIssue]:
+    def read_issue_from_child_storage(self, issue_id: int) -> Optional[ContractIssue]:
         """Read a single issue from contract child storage."""
         child_key = self._get_child_storage_key()
         if not child_key:
@@ -229,7 +225,7 @@ class IssueCompetitionContractClient:
 
         try:
             encoded_id = struct.pack('<Q', issue_id)
-            lazy_key = self._compute_ink5_lazy_key('52789899', encoded_id)
+            lazy_key = self.compute_ink5_lazy_key('52789899', encoded_id)
 
             val_result = self.subtensor.substrate.rpc_request('childstate_getStorage', [child_key, lazy_key, None])
             if not val_result.get('result'):
@@ -291,7 +287,7 @@ class IssueCompetitionContractClient:
 
     def get_issues_by_status(self, status: IssueStatus) -> List[ContractIssue]:
         """Get all issues with a given status."""
-        if not self._ensure_initialized():
+        if not self.ensure_initialized():
             return []
 
         try:
@@ -310,7 +306,7 @@ class IssueCompetitionContractClient:
 
             issues = []
             for issue_id in range(1, next_issue_id):
-                issue = self._read_issue_from_child_storage(issue_id)
+                issue = self.read_issue_from_child_storage(issue_id)
                 if issue and issue.status == status:
                     issues.append(issue)
 
@@ -325,18 +321,18 @@ class IssueCompetitionContractClient:
 
     def get_issue(self, issue_id: int) -> Optional[ContractIssue]:
         """Get a specific issue by ID."""
-        if not self._ensure_initialized():
+        if not self.ensure_initialized():
             return None
 
         try:
-            return self._read_issue_from_child_storage(issue_id)
+            return self.read_issue_from_child_storage(issue_id)
         except Exception as e:
             bt.logging.error(f'Error fetching issue {issue_id}: {e}')
             return None
 
     def get_alpha_pool(self) -> int:
         """Get the current alpha pool balance."""
-        if not self._ensure_initialized():
+        if not self.ensure_initialized():
             return 0
 
         try:
@@ -366,7 +362,7 @@ class IssueCompetitionContractClient:
 
     def _raw_contract_read(self, method_name: str, args: dict = None) -> Optional[bytes]:
         """Read from contract using raw RPC call."""
-        if not self._ensure_initialized():
+        if not self.ensure_initialized():
             return None
 
         try:
@@ -457,7 +453,7 @@ class IssueCompetitionContractClient:
         Returns:
             True if vote succeeded
         """
-        if not self._ensure_initialized():
+        if not self.ensure_initialized():
             bt.logging.warning('Cannot vote solution: contract not ready')
             return False
 
@@ -504,7 +500,7 @@ class IssueCompetitionContractClient:
         Returns:
             True if vote succeeded
         """
-        if not self._ensure_initialized():
+        if not self.ensure_initialized():
             bt.logging.warning('Cannot vote cancel issue: contract not ready')
             return False
 
@@ -546,7 +542,7 @@ class IssueCompetitionContractClient:
         value: int = 0,
     ) -> Optional[str]:
         """Execute a contract method using raw extrinsic submission."""
-        if not self._ensure_initialized():
+        if not self.ensure_initialized():
             return None
 
         gas_limit = gas_limit or DEFAULT_GAS_LIMIT
@@ -663,7 +659,7 @@ class IssueCompetitionContractClient:
         Returns:
             Total stake amount (0 if contract not ready or no stake)
         """
-        if not self._ensure_initialized():
+        if not self.ensure_initialized():
             return 0
 
         try:
@@ -735,7 +731,7 @@ class IssueCompetitionContractClient:
 
     def get_last_harvest_block(self) -> int:
         """Query the block number of the last harvest."""
-        if not self._ensure_initialized():
+        if not self.ensure_initialized():
             return 0
 
         try:
@@ -747,7 +743,7 @@ class IssueCompetitionContractClient:
 
     def harvest_emissions(self, wallet: bt.Wallet) -> Optional[dict]:
         """Harvest emissions from the treasury hotkey and distribute to bounties."""
-        if not self._ensure_initialized():
+        if not self.ensure_initialized():
             return None
 
         try:
@@ -785,7 +781,7 @@ class IssueCompetitionContractClient:
         Returns:
             Payout amount in raw units, or None on failure
         """
-        if not self._ensure_initialized():
+        if not self.ensure_initialized():
             return None
 
         try:
@@ -827,7 +823,7 @@ class IssueCompetitionContractClient:
         Returns:
             True if cancellation succeeded
         """
-        if not self._ensure_initialized():
+        if not self.ensure_initialized():
             return False
 
         try:
@@ -871,7 +867,7 @@ class IssueCompetitionContractClient:
         Returns:
             True if ownership transfer succeeded
         """
-        if not self._ensure_initialized():
+        if not self.ensure_initialized():
             return False
 
         try:
@@ -912,7 +908,7 @@ class IssueCompetitionContractClient:
         Returns:
             True if treasury hotkey change succeeded
         """
-        if not self._ensure_initialized():
+        if not self.ensure_initialized():
             return False
 
         try:

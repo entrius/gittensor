@@ -61,12 +61,12 @@
     "decorator": 0.4,
     "attribute": 0.25,
 
-    "list_lit": 0.4,
-    "vec_lit": 0.2,
-    "map_lit": 0.3,
+    "list_lit": 0.15,
+    "vec_lit": 0.1,
+    "map_lit": 0.15,
     "anon_fn_lit": 0.5,
-    "kwd_lit": 0.15,
-    "sym_lit": 0.1
+    "kwd_lit": 0.05,
+    "sym_lit": 0.05
   },
 
   "leaf_tokens": {

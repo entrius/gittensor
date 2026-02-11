@@ -18,11 +18,10 @@ from gittensor.validator.utils.load_weights import (
 if TYPE_CHECKING:
     from neurons.base.validator import BaseValidatorNeuron
 
-from gittensor.utils.uids import get_all_uids
-from gittensor.validator.evaluation.reward import get_rewards
-
 # Issue bounties integration
 from gittensor.utils.github_api_tools import check_github_issue_closed
+from gittensor.utils.uids import get_all_uids
+from gittensor.validator.evaluation.reward import get_rewards
 from gittensor.validator.issue_competitions.contract_client import IssueCompetitionContractClient, IssueStatus
 from gittensor.validator.utils.config import GITTENSOR_VALIDATOR_PAT, VALIDATOR_STEPS_INTERVAL, VALIDATOR_WAIT
 from gittensor.validator.utils.issue_competitions import (
@@ -128,7 +127,7 @@ async def issues_competition(
             bt.logging.warning("Issue bounties: no contract address configured")
             return
 
-        bt.logging.info("Running issue bounties")
+        bt.logging.info('***** Starting Issue Bounties *****')
         bt.logging.info(f"Contract address: {contract_addr}")
 
         # Create contract client
@@ -140,7 +139,7 @@ async def issues_competition(
         # Harvest emissions first - flush accumulated stake into bounty pool
         harvest_result = contract_client.harvest_emissions(self.wallet)
         if harvest_result and harvest_result.get('status') == 'success':
-            bt.logging.info(f"Harvested emissions: {harvest_result.get('tx_hash', '')[:16]}...")
+            bt.logging.info(f"Harvested emissions extrinsic: {harvest_result.get('tx_hash', '')}")
 
         # Build mapping of github_id->hotkey for bronze+ miners only (eligible for payouts)
         eligible_miners = {

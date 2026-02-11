@@ -126,4 +126,4 @@ EXCESSIVE_PR_MIN_MULTIPLIER = 0.00
 # =============================================================================
 CONTRACT_ADDRESS = '5CEAWpWBWBB8rdhSwhK92YbcJ6ZBx3bajVHcWAtUddkYxLFK'
 ISSUES_TREASURY_UID = 4  # UID of the smart contract neuron, if set to RECYCLE_UID then it's disabled
-ISSUES_TREASURY_EMISSION_SHARE = 0.50  # % of emissions routed to funding issues treasury
+ISSUES_TREASURY_EMISSION_SHARE = 0.30  # % of emissions routed to funding issues treasury

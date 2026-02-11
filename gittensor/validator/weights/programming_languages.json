@@ -28,6 +28,7 @@
   "dockerfile": { "weight": 1.0, "language": "dockerfile" },
   "elm": { "weight": 1.75, "language": "elm" },
   "env": { "weight": 0.25 },
+  "erb": { "weight": 0.8 },
   "erl": { "weight": 1.5, "language": "erlang" },
   "ex": { "weight": 1.5, "language": "elixir" },
   "exs": { "weight": 1.5, "language": "elixir" },

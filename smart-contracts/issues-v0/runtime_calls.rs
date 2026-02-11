@@ -17,22 +17,14 @@ pub const PROXY_PALLET_INDEX: u8 = 16;
 /// Verify with: subtensor/pallets/subtensor/src/macros/dispatches.rs
 pub const TRANSFER_STAKE_CALL_INDEX: u8 = 86;
 
-/// move_stake call variant index within SubtensorModule
-/// Verified: subtensor/pallets/subtensor/src/macros/dispatches.rs:1618
-pub const MOVE_STAKE_CALL_INDEX: u8 = 85;
-
 /// recycle_alpha call variant index within SubtensorModule
 /// Verified: subtensor/pallets/subtensor/src/macros/dispatches.rs:1998
 /// Recycles alpha tokens, destroying them and reducing SubnetAlphaOut
 pub const RECYCLE_ALPHA_CALL_INDEX: u8 = 101;
 
-/// ProxyType::Staking variant index (for move_stake)
+/// ProxyType::Transfer variant index (for transfer_stake)
 /// From Subtensor runtime (verified via substrate encoding):
 /// Any=0, Owner=1, NonCritical=2, Governance=7, Staking=8, Transfer=10
-pub const PROXY_TYPE_STAKING: u8 = 8;
-
-/// ProxyType::Transfer variant index (for transfer_stake)
-/// transfer_stake requires Transfer proxy type, NOT Staking
 pub const PROXY_TYPE_TRANSFER: u8 = 10;
 
 /// ProxyType::NonCritical variant index (for recycle_alpha)
@@ -117,74 +109,6 @@ impl RawCall {
 
         // hotkey: AccountId (32 bytes)
         call_bytes.extend_from_slice(hotkey.as_ref());
-
-        // origin_netuid: u16 (2 bytes, little-endian)
-        call_bytes.extend_from_slice(&origin_netuid.to_le_bytes());
-
-        // destination_netuid: u16 (2 bytes, little-endian)
-        call_bytes.extend_from_slice(&destination_netuid.to_le_bytes());
-
-        // alpha_amount: u64 (8 bytes, little-endian)
-        call_bytes.extend_from_slice(&amount.to_le_bytes());
-
-        Self(call_bytes)
-    }
-
-    /// Encode a proxied move_stake call.
-    ///
-    /// Creates a Proxy::proxy call wrapping a SubtensorModule::move_stake call.
-    /// The proxy pallet will validate that the caller (contract) is a Staking proxy
-    /// for the `real` account before executing the inner call with `real` as origin.
-    ///
-    /// move_stake moves stake from one hotkey to another within the same coldkey.
-    /// Used to stake bounty funds on the Gittensor validator.
-    ///
-    /// # Arguments
-    /// * `real` - The account to execute as (owner/treasury coldkey)
-    /// * `origin_hotkey` - Source hotkey (treasury_hotkey)
-    /// * `destination_hotkey` - Target hotkey (validator_hotkey)
-    /// * `origin_netuid` - Source subnet ID
-    /// * `destination_netuid` - Target subnet ID
-    /// * `amount` - Amount of alpha to move (u64)
-    pub fn proxied_move_stake(
-        real: &AccountId,
-        origin_hotkey: &AccountId,
-        destination_hotkey: &AccountId,
-        origin_netuid: u16,
-        destination_netuid: u16,
-        amount: u64,
-    ) -> Self {
-        let mut call_bytes = Vec::with_capacity(128);
-
-        // Proxy pallet index
-        call_bytes.push(PROXY_PALLET_INDEX);
-
-        // proxy() is the first call variant (index 0)
-        call_bytes.push(0);
-
-        // real: MultiAddress<AccountId, ()>
-        // MultiAddress::Id variant = 0, then 32 bytes of AccountId
-        call_bytes.push(0);
-        call_bytes.extend_from_slice(real.as_ref());
-
-        // force_proxy_type: Option<ProxyType>
-        // Some = 1, then ProxyType::Staking (move_stake requires Staking proxy)
-        call_bytes.push(1);
-        call_bytes.push(PROXY_TYPE_STAKING);
-
-        // call: Box<RuntimeCall> - the inner move_stake call
-        // SubtensorModule pallet index
-        call_bytes.push(SUBTENSOR_MODULE_PALLET_INDEX);
-
-        // move_stake call variant index
-        call_bytes.push(MOVE_STAKE_CALL_INDEX);
-
-        // move_stake arguments:
-        // origin_hotkey: AccountId (32 bytes)
-        call_bytes.extend_from_slice(origin_hotkey.as_ref());
-
-        // destination_hotkey: AccountId (32 bytes)
-        call_bytes.extend_from_slice(destination_hotkey.as_ref());
 
         // origin_netuid: u16 (2 bytes, little-endian)
         call_bytes.extend_from_slice(&origin_netuid.to_le_bytes());

@@ -139,7 +139,7 @@ async def issues_competition(
         # Harvest emissions first - flush accumulated stake into bounty pool
         harvest_result = contract_client.harvest_emissions(self.wallet)
         if harvest_result and harvest_result.get('status') == 'success':
-            bt.logging.info(f"Harvested emissions extrinsic: {harvest_result.get('tx_hash', '')}")
+            bt.logging.success(f"Harvested emissions! Extrinsic: {harvest_result.get('tx_hash', '')}")
 
         # Build mapping of github_id->hotkey for bronze+ miners only (eligible for payouts)
         eligible_miners = {

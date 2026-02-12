@@ -131,7 +131,7 @@ async def get_rewards(
         miner_evaluations[uid] = miner_evaluation
 
     # If evaluation of miner was successful, store to cache, if api failure, fallback to previous successful evaluation if any
-    self.store_or_use_cached_evaluation(miner_evaluations)
+    cached_uids = self.store_or_use_cached_evaluation(miner_evaluations)
 
     # Adjust scores for duplicate accounts
     detect_and_penalize_miners_sharing_github(miner_evaluations)
@@ -149,7 +149,7 @@ async def get_rewards(
     final_rewards = apply_dynamic_emissions_using_network_contributions(normalized_rewards, miner_evaluations)
 
     # Store miner evaluations after calculating all scores
-    await self.bulk_store_evaluation(miner_evaluations)
+    await self.bulk_store_evaluation(miner_evaluations, skip_uids=cached_uids)
 
     return (
         np.array([final_rewards.get(uid, 0.0) for uid in sorted(uids)]),

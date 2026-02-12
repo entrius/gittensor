@@ -27,6 +27,7 @@ github_api_tools = pytest.importorskip(
 get_github_graphql_query = github_api_tools.get_github_graphql_query
 get_github_id = github_api_tools.get_github_id
 get_github_account_age_days = github_api_tools.get_github_account_age_days
+get_pull_request_file_changes = github_api_tools.get_pull_request_file_changes
 
 
 # ============================================================================
@@ -378,6 +379,117 @@ class TestOtherGitHubAPIFunctions:
         assert isinstance(result, int)
         assert result > 1000  # Account older than 1000 days
         assert mock_get.call_count == 2
+
+
+# ============================================================================
+# File Changes Retry Logic Tests
+# ============================================================================
+
+
+class TestFileChangesRetryLogic:
+    """Test suite for retry logic in get_pull_request_file_changes."""
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    def test_successful_request_no_retry(self, mock_get):
+        """Test that a successful request returns file changes without retrying."""
+        mock_response = Mock(status_code=200)
+        mock_response.json.return_value = [
+            {
+                'filename': 'test.py',
+                'status': 'modified',
+                'changes': 2,
+                'additions': 1,
+                'deletions': 1,
+                'patch': '@@ -1 +1 @@\n-old\n+new',
+            },
+        ]
+        mock_get.return_value = mock_response
+
+        result = get_pull_request_file_changes('owner/repo', 1, 'fake_token')
+
+        assert mock_get.call_count == 1
+        assert result is not None
+        assert len(result) == 1
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_retry_on_502_then_success(self, mock_logging, mock_sleep, mock_get):
+        """Test that 502 triggers retry and succeeds on second attempt."""
+        mock_502 = Mock(status_code=502, text='Bad Gateway')
+        mock_200 = Mock(status_code=200)
+        mock_200.json.return_value = [
+            {'filename': 'test.py', 'status': 'modified', 'changes': 1, 'additions': 1, 'deletions': 0, 'patch': ''},
+        ]
+
+        mock_get.side_effect = [mock_502, mock_200]
+
+        result = get_pull_request_file_changes('owner/repo', 1, 'fake_token')
+
+        assert mock_get.call_count == 2
+        assert mock_sleep.call_count == 1
+        assert len(result) == 1
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_gives_up_after_three_attempts(self, mock_logging, mock_sleep, mock_get):
+        """Test that function gives up after 3 failed attempts and returns empty list."""
+        mock_500 = Mock(status_code=500, text='Internal Server Error')
+        mock_get.return_value = mock_500
+
+        result = get_pull_request_file_changes('owner/repo', 1, 'fake_token')
+
+        assert mock_get.call_count == 3
+        assert mock_sleep.call_count == 2
+        assert result == []
+        mock_logging.error.assert_called()
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_retry_on_connection_error_then_success(self, mock_logging, mock_sleep, mock_get):
+        """Test that connection errors trigger retry."""
+        import requests
+
+        mock_200 = Mock(status_code=200)
+        mock_200.json.return_value = []
+
+        mock_get.side_effect = [requests.exceptions.ConnectionError('refused'), mock_200]
+
+        result = get_pull_request_file_changes('owner/repo', 1, 'fake_token')
+
+        assert mock_get.call_count == 2
+        assert mock_sleep.call_count == 1
+        assert result == []
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_gives_up_after_three_connection_errors(self, mock_logging, mock_sleep, mock_get):
+        """Test that function gives up after 3 connection errors."""
+        import requests
+
+        mock_get.side_effect = requests.exceptions.ConnectionError('refused')
+
+        result = get_pull_request_file_changes('owner/repo', 1, 'fake_token')
+
+        assert mock_get.call_count == 3
+        assert result == []
+        mock_logging.error.assert_called()
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_exponential_backoff_timing(self, mock_logging, mock_sleep, mock_get):
+        """Test that backoff delays are 5s, 10s for 3 attempts."""
+        mock_500 = Mock(status_code=500, text='Internal Server Error')
+        mock_get.return_value = mock_500
+
+        get_pull_request_file_changes('owner/repo', 1, 'fake_token')
+
+        mock_sleep.assert_has_calls([call(5), call(10)])
+        assert mock_sleep.call_count == 2
 
 
 if __name__ == '__main__':

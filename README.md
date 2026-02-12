@@ -36,6 +36,9 @@ The result: a sustainable incentive layer that channels resources toward buildin
 
 **Recommended: Deploy with Docker**
 
+> [!NOTE]
+> The port in .env must be accessible by the public.
+
 ```bash
 # Quick start
 git clone https://github.com/entrius/gittensor.git

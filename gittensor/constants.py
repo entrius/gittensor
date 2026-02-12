@@ -21,7 +21,7 @@ MAX_FILE_SIZE_BYTES = 1_000_000
 DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT = 0.12
 TEST_FILE_CONTRIBUTION_WEIGHT = 0.05
 # Extensions that use line-count scoring (capped at MAX_LINES_SCORED_FOR_NON_CODE_EXT)
-# These are documentation, config, or data files
+# These are documentation, config, data files, or template languages without tree-sitter support
 NON_CODE_EXTENSIONS = [
     'md',
     'mdx',
@@ -45,6 +45,7 @@ NON_CODE_EXTENSIONS = [
     'config',
     'properties',
     'plist',
+    'erb',
 ]
 MAX_LINES_SCORED_FOR_NON_CODE_EXT = 300
 

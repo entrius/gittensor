@@ -104,6 +104,94 @@ class TestGraphQLRetryLogic:
     @patch('gittensor.utils.github_api_tools.requests.post')
     @patch('gittensor.utils.github_api_tools.time.sleep')
     @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_502_halves_page_size_on_retry(self, mock_logging, mock_sleep, mock_post, graphql_params):
+        """Test that 502 errors cause the page size (limit) to be halved on each retry."""
+        mock_response_502 = Mock(status_code=502, text='502 Bad Gateway')
+        mock_response_200 = Mock(status_code=200)
+
+        mock_post.side_effect = [mock_response_502, mock_response_502, mock_response_200]
+
+        result = get_github_graphql_query(**graphql_params)
+
+        assert result.status_code == 200
+        # Initial limit=100, halved to 50 after first 502, halved to 25 after second 502
+        limits = [c.kwargs['json']['variables']['limit'] for c in mock_post.call_args_list]
+        assert limits == [100, 50, 25]
+
+    @patch('gittensor.utils.github_api_tools.requests.post')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_page_size_floors_at_10(self, mock_logging, mock_sleep, mock_post, graphql_params):
+        """Test that page size never drops below 10 even after many 502s."""
+        mock_response_502 = Mock(status_code=502, text='502 Bad Gateway')
+        mock_post.return_value = mock_response_502
+
+        get_github_graphql_query(**graphql_params)
+
+        # 100 -> 50 -> 25 -> 12 -> 10 -> 10 -> 10 -> 10
+        limits = [c.kwargs['json']['variables']['limit'] for c in mock_post.call_args_list]
+        assert limits == [100, 50, 25, 12, 10, 10, 10, 10]
+
+    @patch('gittensor.utils.github_api_tools.requests.post')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_non_5xx_does_not_reduce_page_size(self, mock_logging, mock_sleep, mock_post, graphql_params):
+        """Test that non-5xx errors (e.g. 401) do not reduce page size."""
+        mock_response_401 = Mock(status_code=401, text='Unauthorized')
+        mock_response_200 = Mock(status_code=200)
+
+        mock_post.side_effect = [mock_response_401, mock_response_401, mock_response_200]
+
+        result = get_github_graphql_query(**graphql_params)
+
+        assert result.status_code == 200
+        limits = [c.kwargs['json']['variables']['limit'] for c in mock_post.call_args_list]
+        assert limits == [100, 100, 100], 'Page size should stay at 100 for non-5xx errors'
+
+    @patch('gittensor.utils.github_api_tools.requests.post')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_503_and_504_also_reduce_page_size(self, mock_logging, mock_sleep, mock_post, graphql_params):
+        """Test that 503 and 504 errors also trigger page size reduction."""
+        mock_response_503 = Mock(status_code=503, text='Service Unavailable')
+        mock_response_504 = Mock(status_code=504, text='Gateway Timeout')
+        mock_response_200 = Mock(status_code=200)
+
+        mock_post.side_effect = [mock_response_503, mock_response_504, mock_response_200]
+
+        result = get_github_graphql_query(**graphql_params)
+
+        assert result.status_code == 200
+        limits = [c.kwargs['json']['variables']['limit'] for c in mock_post.call_args_list]
+        assert limits == [100, 50, 25]
+
+    @patch('gittensor.utils.github_api_tools.requests.post')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_small_initial_limit_not_reduced_below_10(self, mock_logging, mock_sleep, mock_post):
+        """Test that a small initial limit (e.g. 15) floors correctly at 10."""
+        mock_response_502 = Mock(status_code=502, text='502 Bad Gateway')
+        mock_response_200 = Mock(status_code=200)
+
+        mock_post.side_effect = [mock_response_502, mock_response_502, mock_response_200]
+
+        params = {
+            'token': 'fake_github_token',
+            'global_user_id': 'MDQ6VXNlcjEyMzQ1',
+            'merged_pr_count': 85,
+            'max_prs': 100,
+            'cursor': None,
+        }
+        result = get_github_graphql_query(**params)
+
+        assert result.status_code == 200
+        # Initial limit = min(100, 100-85) = 15, halved to 10, stays at 10
+        limits = [c.kwargs['json']['variables']['limit'] for c in mock_post.call_args_list]
+        assert limits == [15, 10, 10]
+
+    @patch('gittensor.utils.github_api_tools.requests.post')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
     def test_gives_up_after_eight_attempts(self, mock_logging, mock_sleep, mock_post, graphql_params):
         """Test that function gives up after 8 failed attempts."""
         mock_response_502 = Mock(status_code=502, text='<html><title>502 Bad Gateway</title></html>')

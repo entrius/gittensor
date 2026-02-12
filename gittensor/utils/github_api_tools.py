@@ -354,13 +354,14 @@ def get_github_graphql_query(
 
     max_attempts = 8
     headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
-    variables = {
-        'userId': global_user_id,
-        'limit': min(100, max_prs - merged_pr_count),
-        'cursor': cursor,
-    }
+    limit = min(100, max_prs - merged_pr_count)
 
     for attempt in range(max_attempts):
+        variables = {
+            'userId': global_user_id,
+            'limit': limit,
+            'cursor': cursor,
+        }
         try:
             response = requests.post(
                 f'{BASE_GITHUB_API_URL}/graphql',
@@ -375,9 +376,18 @@ def get_github_graphql_query(
             # error - log and retry
             if attempt < (max_attempts - 1):
                 backoff_delay = min(5 * (2**attempt), 30)  # cap at 30s
-                bt.logging.warning(
-                    f'GraphQL request for PRs failed with status {response.status_code} (attempt {attempt + 1}/{max_attempts}), retrying in {backoff_delay}s...'
-                )
+                # Reduce page size on server-side errors (query may be too expensive)
+                if response.status_code in (502, 503, 504) and limit > 10:
+                    limit = max(limit // 2, 10)
+                    bt.logging.warning(
+                        f'GraphQL request for PRs failed with status {response.status_code} '
+                        f'(attempt {attempt + 1}/{max_attempts}), reducing page size to {limit} and retrying in {backoff_delay}s...'
+                    )
+                else:
+                    bt.logging.warning(
+                        f'GraphQL request for PRs failed with status {response.status_code} '
+                        f'(attempt {attempt + 1}/{max_attempts}), retrying in {backoff_delay}s...'
+                    )
                 time.sleep(backoff_delay)
             else:
                 bt.logging.error(

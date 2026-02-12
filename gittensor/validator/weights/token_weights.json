@@ -59,7 +59,14 @@
 
     "assert_statement": 0.25,
     "decorator": 0.4,
-    "attribute": 0.25
+    "attribute": 0.25,
+
+    "list_lit": 0.15,
+    "vec_lit": 0.1,
+    "map_lit": 0.15,
+    "anon_fn_lit": 0.5,
+    "kwd_lit": 0.05,
+    "sym_lit": 0.05
   },
 
   "leaf_tokens": {
@@ -103,6 +110,13 @@
     "line_comment": 0.0,
     "block_comment": 0.0,
     "documentation_comment": 0.0,
-    "doc_comment": 0.0
+    "doc_comment": 0.0,
+
+    "sym_name": 0.07,
+    "kwd_name": 0.07,
+    "num_lit": 0.03,
+    "str_lit": 0.03,
+    "nil_lit": 0.1,
+    "sym_ns": 0.05
   }
 }

@@ -1391,6 +1391,9 @@
     "weight": 0.29
   },
   "autoppia/autoppia_iwa": {
+    "additional_acceptable_branches": [
+      "feature/*"
+    ],
     "tier": "Silver",
     "weight": 4.25
   },
@@ -1399,6 +1402,9 @@
     "weight": 6.46
   },
   "autoppia/autoppia_webs_demo": {
+    "additional_acceptable_branches": [
+      "feature/*"
+    ],
     "tier": "Silver",
     "weight": 4.25
   },

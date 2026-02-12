@@ -498,6 +498,9 @@
     "weight": 6.46
   },
   "autoppia/autoppia_webs_demo": {
+    "additional_acceptable_branches": [
+      "feature/*"
+    ],
     "tier": "Silver",
     "weight": 4.25
   },

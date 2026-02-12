@@ -5,16 +5,24 @@
 CLI commands for managing issue bounties
 
 Command structure:
-    gitt view (alias: v)         - Read commands (contract + API)
-    gitt register (alias: reg)   - Registration commands
+    gitt issues (alias: i)       - Issue management commands
+        list [--id <ID>]             List issues or view a specific issue
+        register                     Register a new issue bounty
+        bounty-pool                  View total bounty pool
+        pending-harvest              View pending emissions
     gitt harvest                 - Harvest emissions (top-level)
-    gitt val                     - Validator consensus commands
+    gitt vote                    - Validator consensus commands
     gitt admin (alias: a)        - Owner-only commands
+        info                         View contract configuration
+        cancel-issue                 Cancel an issue
+        payout-issue                 Manual payout fallback
+        set-owner                    Transfer ownership
+        set-treasury                 Change treasury hotkey
 """
 
 import click
 
-from .view import view
+from .view import issues_list, issues_bounty_pool, issues_pending_harvest, admin_info
 from .val import val
 from .admin import admin
 from .mutations import (
@@ -27,67 +35,68 @@ from .helpers import (
     console,
     load_config,
     get_contract_address,
-    get_ws_endpoint,
-    get_api_url,
+    resolve_network,
     read_issues_from_contract,
     GITTENSOR_DIR,
     CONFIG_FILE,
-    DEFAULT_API_URL,
+    NETWORK_MAP,
 )
 
 
-# Create register group for `gitt register issue`
-@click.group(name='register')
-def register_group():
-    """Registration commands.
+@click.group(name='issues')
+def issues_group():
+    """Issue management commands.
 
     \b
     Commands:
-        issue    Register a new issue bounty
+        list              List issues or view a specific issue
+        register          Register a new issue bounty
+        bounty-pool       View total bounty pool
+        pending-harvest   View pending emissions
     """
     pass
 
 
-# Add issue_register as 'issue' subcommand under register
-register_group.add_command(issue_register, name='issue')
+issues_group.add_command(issues_list, name='list')
+issues_group.add_command(issue_register, name='register')
+issues_group.add_command(issues_bounty_pool, name='bounty-pool')
+issues_group.add_command(issues_pending_harvest, name='pending-harvest')
+
+# Add info to admin group
+admin.add_command(admin_info, name='info')
 
 
 def register_commands(cli):
     """Register all issue-related commands with the root CLI group."""
-    # View group and alias
-    cli.add_command(view)
-    cli.add_command(view, name='v')
+    # Issues group with alias
+    cli.add_command(issues_group, name='issues')
+    cli.add_alias('issues', 'i')
 
-    # Register group and alias
-    cli.add_command(register_group, name='register')
-    cli.add_command(register_group, name='reg')
-
-    # Harvest as top-level command (no subgroup)
+    # Harvest as top-level command
     cli.add_command(issue_harvest, name='harvest')
 
-    # Validator group
-    cli.add_command(val)
+    # Validator vote group
+    cli.add_command(val, name='vote')
 
-    # Admin group and alias
+    # Admin group with alias
     cli.add_command(admin)
-    cli.add_command(admin, name='a')
+    cli.add_alias('admin', 'a')
 
 
 __all__ = [
     'register_commands',
-    'view',
+    'issues_group',
     'val',
     'admin',
-    'register_group',
+    'issue_register',
     'issue_harvest',
     # Helpers
     'console',
     'load_config',
     'get_contract_address',
-    'get_ws_endpoint',
-    'get_api_url',
+    'resolve_network',
     'read_issues_from_contract',
     'GITTENSOR_DIR',
     'CONFIG_FILE',
-    'DEFAULT_API_URL',
+    'NETWORK_MAP',
 ]

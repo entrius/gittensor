@@ -6,10 +6,9 @@ Gittensor CLI - Main entry point
 
 Usage:
     gitt config              - Show/set CLI configuration
-    gitt view ...            - Read commands (alias: v)
-    gitt register ...        - Registration commands (alias: reg)
+    gitt issues ...          - Issue management (alias: i)
     gitt harvest             - Harvest emissions
-    gitt val ...             - Validator commands
+    gitt vote ...            - Validator vote commands
     gitt admin ...           - Owner commands (alias: a)
 """
 
@@ -28,7 +27,47 @@ GITTENSOR_DIR = Path.home() / '.gittensor'
 CONFIG_FILE = GITTENSOR_DIR / 'config.json'
 
 
-@click.group()
+class AliasGroup(click.Group):
+    """Click Group that supports command aliases without duplicate help entries."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._aliases = {}  # alias -> canonical name
+
+    def add_alias(self, name, alias):
+        """Register an alias for an existing command."""
+        self._aliases[alias] = name
+
+    def get_command(self, ctx, cmd_name):
+        # Resolve alias to canonical name
+        canonical = self._aliases.get(cmd_name, cmd_name)
+        return super().get_command(ctx, canonical)
+
+    def format_commands(self, ctx, formatter):
+        """Write the help text, appending aliases to command descriptions."""
+        # Build reverse map: canonical -> list of aliases
+        alias_map = {}
+        for alias, canonical in self._aliases.items():
+            alias_map.setdefault(canonical, []).append(alias)
+
+        commands = []
+        for subcommand in self.list_commands(ctx):
+            cmd = self.commands.get(subcommand)
+            if cmd is None or cmd.hidden:
+                continue
+            help_text = cmd.get_short_help_str(limit=150)
+            aliases = alias_map.get(subcommand)
+            if aliases:
+                alias_str = ', '.join(sorted(aliases))
+                subcommand = f'{subcommand}, {alias_str}'
+            commands.append((subcommand, help_text))
+
+        if commands:
+            with formatter.section('Commands'):
+                formatter.write_dl(commands)
+
+
+@click.group(cls=AliasGroup)
 @click.version_option(version='3.2.0', prog_name='gittensor')
 def cli():
     """Gittensor CLI - Manage issue bounties and validator operations"""
@@ -95,8 +134,7 @@ def config_set(key: str, value: str):
         hotkey              Hotkey name
         contract_address    Contract address
         ws_endpoint         WebSocket endpoint
-        api_url             API URL
-        network             Network (local, testnet, mainnet)
+        network             Network (local, test, finney)
 
     \b
     Examples:

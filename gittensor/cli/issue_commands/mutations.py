@@ -5,7 +5,7 @@
 Top-level mutation commands for issue CLI
 
 Commands:
-    gitt register issue
+    gitt register
     gitt harvest
 """
 
@@ -18,7 +18,8 @@ from .helpers import (
     console,
     load_config,
     get_contract_address,
-    get_ws_endpoint,
+    resolve_network,
+    NETWORK_MAP,
 )
 
 
@@ -42,9 +43,15 @@ from .helpers import (
     help='Bounty amount in ALPHA tokens',
 )
 @click.option(
+    '--network', '-n',
+    default=None,
+    type=click.Choice(['finney', 'test', 'local'], case_sensitive=False),
+    help='Network (finney/test/local)',
+)
+@click.option(
     '--rpc-url',
-    default='wss://entrypoint-finney.opentensor.ai:443',
-    help='Subtensor RPC endpoint',
+    default=None,
+    help='Subtensor RPC endpoint (overrides --network)',
 )
 @click.option(
     '--contract',
@@ -52,12 +59,12 @@ from .helpers import (
     help='Contract address (uses default if empty)',
 )
 @click.option(
-    '--wallet-name',
+    '--wallet-name', '--wallet.name', '--wallet',
     default='default',
     help='Wallet name (must be contract owner)',
 )
 @click.option(
-    '--wallet-hotkey',
+    '--wallet-hotkey', '--wallet.hotkey', '--hotkey',
     default='default',
     help='Hotkey name',
 )
@@ -65,6 +72,7 @@ def issue_register(
     repo: str,
     issue_number: int,
     bounty: float,
+    network: str,
     rpc_url: str,
     contract: str,
     wallet_name: str,
@@ -85,8 +93,8 @@ def issue_register(
 
     \b
     Examples:
-        gitt register issue --repo opentensor/btcli --issue 144 --bounty 100
-        gitt reg issue --repo tensorflow/tensorflow --issue 12345 --bounty 50
+        gitt issues register --repo opentensor/btcli --issue 144 --bounty 100
+        gitt i reg --repo tensorflow/tensorflow --issue 12345 --bounty 50
     """
     console.print('\n[bold cyan]Register Issue for Bounty[/bold cyan]\n')
 
@@ -99,13 +107,9 @@ def issue_register(
     github_url = f'https://github.com/{repo}/issues/{issue_number}'
 
     # Display registration details
-    # Get contract address and endpoint from env/config if not provided
     contract_addr = get_contract_address(contract)
-    ws_endpoint = get_ws_endpoint(rpc_url)
-
-    # Determine network name from config
+    ws_endpoint, network_name = resolve_network(network, rpc_url)
     config = load_config()
-    network_name = config.get('network', 'mainnet').capitalize()
 
     console.print(Panel(
         f'[cyan]Repository:[/cyan] {repo}\n'
@@ -113,7 +117,7 @@ def issue_register(
         f'[cyan]GitHub URL:[/cyan] {github_url}\n'
         f'[cyan]Target Bounty:[/cyan] {bounty:.2f} ALPHA\n'
         f'[cyan]Network:[/cyan] {network_name}\n'
-        f'[cyan]WS Endpoint:[/cyan] {ws_endpoint}\n'
+        f'[cyan]RPC Endpoint:[/cyan] {ws_endpoint}\n'
         f'[cyan]Contract:[/cyan] {contract_addr if contract_addr else "(not configured)"}',
         title='Issue Registration',
         border_style='blue',
@@ -232,19 +236,25 @@ def issue_register(
 
 @click.command('harvest')
 @click.option(
-    '--wallet-name',
+    '--wallet-name', '--wallet.name', '--wallet',
     default='validator',
     help='Wallet name',
 )
 @click.option(
-    '--wallet-hotkey',
+    '--wallet-hotkey', '--wallet.hotkey', '--hotkey',
     default='default',
     help='Hotkey name',
 )
 @click.option(
+    '--network', '-n',
+    default=None,
+    type=click.Choice(['finney', 'test', 'local'], case_sensitive=False),
+    help='Network (finney/test/local)',
+)
+@click.option(
     '--rpc-url',
-    default='wss://entrypoint-finney.opentensor.ai:443',
-    help='Subtensor RPC endpoint',
+    default=None,
+    help='Subtensor RPC endpoint (overrides --network)',
 )
 @click.option(
     '--contract',
@@ -252,7 +262,7 @@ def issue_register(
     help='Contract address (uses config if empty)',
 )
 @click.option('--verbose', '-v', is_flag=True, help='Show detailed output')
-def issue_harvest(wallet_name: str, wallet_hotkey: str, rpc_url: str, contract: str, verbose: bool):
+def issue_harvest(wallet_name: str, wallet_hotkey: str, network: str, rpc_url: str, contract: str, verbose: bool):
     """
     Manually trigger emission harvest from contract treasury.
 
@@ -269,15 +279,15 @@ def issue_harvest(wallet_name: str, wallet_hotkey: str, rpc_url: str, contract: 
 
     # Get configuration
     contract_addr = get_contract_address(contract)
-    ws_endpoint = get_ws_endpoint(rpc_url)
+    ws_endpoint, network_name = resolve_network(network, rpc_url)
 
     if not contract_addr:
         console.print('[red]Error: Contract address not configured.[/red]')
         console.print('[dim]Set CONTRACT_ADDRESS env var or run ./up.sh --issues[/dim]')
         return
 
+    console.print(f'[dim]Network: {network_name} ({ws_endpoint})[/dim]')
     console.print(f'[dim]Contract: {contract_addr}[/dim]')
-    console.print(f'[dim]Endpoint: {ws_endpoint}[/dim]')
     console.print(f'[dim]Wallet: {wallet_name}/{wallet_hotkey}[/dim]\n')
 
     try:

@@ -16,10 +16,9 @@ from rich.console import Console
 
 from gittensor.constants import CONTRACT_ADDRESS
 
-# Default paths and URLs
+# Default paths
 GITTENSOR_DIR = Path.home() / '.gittensor'
 CONFIG_FILE = GITTENSOR_DIR / 'config.json'
-DEFAULT_API_URL = 'http://localhost:3000'
 
 console = Console()
 
@@ -36,9 +35,8 @@ def load_config() -> Dict[str, Any]:
     Config file format:
         {
             "contract_address": "5Cxxx...",
-            "ws_endpoint": "ws://localhost:9944",
-            "api_url": "http://localhost:3000",
-            "network": "local",
+            "ws_endpoint": "wss://entrypoint-finney.opentensor.ai:443",
+            "network": "finney",
             "wallet": "default",
             "hotkey": "default"
         }
@@ -72,9 +70,62 @@ def get_contract_address(cli_value: str = '') -> str:
     return os.environ.get('CONTRACT_ADDRESS') or CONTRACT_ADDRESS
 
 
+NETWORK_MAP = {
+    'finney': 'wss://entrypoint-finney.opentensor.ai:443',
+    'test': 'wss://test.finney.opentensor.ai:443',
+    'local': 'ws://127.0.0.1:9944',
+}
+
+# Reverse lookup: URL -> network name
+_URL_TO_NETWORK = {url: name for name, url in NETWORK_MAP.items()}
+
+
+def resolve_network(network: Optional[str] = None, rpc_url: Optional[str] = None) -> tuple:
+    """
+    Resolve --network and --rpc-url into (endpoint, network_name).
+
+    Priority:
+        1. --rpc-url (explicit URL always wins)
+        2. --network (mapped to known endpoint)
+        3. Config file ws_endpoint / network
+        4. Default: finney (mainnet)
+
+    Args:
+        network: Network name from --network option (test/finney/local)
+        rpc_url: Explicit RPC URL from --rpc-url option
+
+    Returns:
+        Tuple of (ws_endpoint, network_name)
+    """
+    # --rpc-url takes highest priority
+    if rpc_url:
+        name = _URL_TO_NETWORK.get(rpc_url, 'custom')
+        return rpc_url, name
+
+    # --network maps to a known endpoint
+    if network:
+        key = network.lower()
+        if key in NETWORK_MAP:
+            return NETWORK_MAP[key], key
+        # Treat unknown network value as a custom URL
+        return network, 'custom'
+
+    # Fall back to config file
+    config = load_config()
+    if config.get('ws_endpoint'):
+        endpoint = config['ws_endpoint']
+        name = _URL_TO_NETWORK.get(endpoint, config.get('network', 'custom'))
+        return endpoint, name
+
+    # Default: finney (mainnet)
+    return NETWORK_MAP['finney'], 'finney'
+
+
 def get_ws_endpoint(cli_value: str = '') -> str:
     """
     Get WebSocket endpoint from CLI arg, env, or config file.
+
+    Deprecated: prefer resolve_network() for new code.
 
     Args:
         cli_value: Value passed via --rpc-url CLI option
@@ -90,31 +141,6 @@ def get_ws_endpoint(cli_value: str = '') -> str:
         return config['ws_endpoint']
 
     return cli_value  # Return CLI default
-
-
-def get_api_url(cli_value: str = '') -> str:
-    """
-    Get API URL from CLI arg or config file.
-
-    Priority:
-    1. CLI argument (if not default)
-    2. Config file (~/.gittensor/config.json)
-    3. Default (localhost:3000)
-
-    Args:
-        cli_value: Value passed via --api-url CLI option
-
-    Returns:
-        API URL string
-    """
-    if cli_value and cli_value != DEFAULT_API_URL:
-        return cli_value
-
-    config = load_config()
-    if config.get('api_url'):
-        return config['api_url']
-
-    return DEFAULT_API_URL
 
 
 # ============================================================================

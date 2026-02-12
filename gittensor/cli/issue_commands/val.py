@@ -2,11 +2,11 @@
 # Copyright © 2025 Entrius
 
 """
-Validator subgroup commands for issue CLI
+Validator vote commands for issue CLI
 
 Commands:
-    gitt val vote-issue-solution (alias: solution)
-    gitt val vote-issue-cancel (alias: cancel)
+    gitt vote solution
+    gitt vote cancel
 """
 
 import re
@@ -15,7 +15,7 @@ import click
 from .helpers import (
     console,
     get_contract_address,
-    get_ws_endpoint,
+    resolve_network,
 )
 
 
@@ -46,39 +46,45 @@ def parse_pr_number(pr_input: str) -> int:
     raise ValueError(f"Cannot parse PR number from: {pr_input}")
 
 
-@click.group(name='val')
+@click.group(name='vote')
 def val():
-    """Validator consensus operations
+    """Validator consensus operations.
 
     These commands are used by validators to manage issue bounty payouts.
 
     \b
     Commands:
-        vote-issue-solution  Vote for a solver (alias: solution)
-        vote-issue-cancel    Vote to cancel issue (alias: cancel)
+        solution   Vote for a solver on an active issue
+        cancel     Vote to cancel an issue
     """
     pass
 
 
-@val.command('vote-issue-solution')
+@val.command('solution')
 @click.argument('issue_id', type=int)
 @click.argument('solver_hotkey', type=str)
 @click.argument('solver_coldkey', type=str)
 @click.argument('pr_number_or_url', type=str)
 @click.option(
-    '--wallet-name',
+    '--wallet-name', '--wallet.name', '--wallet',
     default='default',
     help='Wallet name',
 )
 @click.option(
-    '--wallet-hotkey',
+    '--wallet-hotkey', '--wallet.hotkey', '--hotkey',
     default='default',
     help='Hotkey name',
 )
 @click.option(
+    '--network', '-n',
+    default=None,
+    type=click.Choice(['finney', 'test', 'local'], case_sensitive=False),
+    help='Network (finney/test/local)',
+)
+@click.option(
     '--rpc-url',
-    default='wss://entrypoint-finney.opentensor.ai:443',
-    help='Subtensor RPC endpoint',
+    default=None,
+    help='Subtensor RPC endpoint (overrides --network)',
 )
 @click.option(
     '--contract',
@@ -92,6 +98,7 @@ def val_vote_solution(
     pr_number_or_url: str,
     wallet_name: str,
     wallet_hotkey: str,
+    network: str,
     rpc_url: str,
     contract: str,
 ):
@@ -106,12 +113,11 @@ def val_vote_solution(
 
     \b
     Examples:
-        gitt val vote-issue-solution 1 5Hxxx... 5Hyyy... 123
-        gitt val vote-issue-solution 1 5Hxxx... 5Hyyy... https://github.com/.../pull/123
-        gitt val solution 42 <hotkey> <coldkey> 456
+        gitt vote solution 1 5Hxxx... 5Hyyy... 123
+        gitt vote solution 1 5Hxxx... 5Hyyy... https://github.com/.../pull/123
     """
     contract_addr = get_contract_address(contract)
-    ws_endpoint = get_ws_endpoint(rpc_url)
+    ws_endpoint, network_name = resolve_network(network, rpc_url)
 
     if not contract_addr:
         console.print('[red]Error: Contract address not configured.[/red]')
@@ -123,6 +129,7 @@ def val_vote_solution(
         console.print(f'[red]Error: {e}[/red]')
         return
 
+    console.print(f'[dim]Network: {network_name} ({ws_endpoint})[/dim]')
     console.print(f'[dim]Contract: {contract_addr}[/dim]')
     console.print(f'[yellow]Voting on solution for issue {issue_id}...[/yellow]\n')
     console.print(f'  Solver Hotkey:  {solver_hotkey}')
@@ -152,27 +159,30 @@ def val_vote_solution(
     except Exception as e:
         console.print(f'[red]Error: {e}[/red]')
 
-# Add 'solution' alias
-val.add_command(val_vote_solution, name='solution')
 
-
-@val.command('vote-issue-cancel')
+@val.command('cancel')
 @click.argument('issue_id', type=int)
 @click.argument('reason', type=str)
 @click.option(
-    '--wallet-name',
+    '--wallet-name', '--wallet.name', '--wallet',
     default='default',
     help='Wallet name',
 )
 @click.option(
-    '--wallet-hotkey',
+    '--wallet-hotkey', '--wallet.hotkey', '--hotkey',
     default='default',
     help='Hotkey name',
 )
 @click.option(
+    '--network', '-n',
+    default=None,
+    type=click.Choice(['finney', 'test', 'local'], case_sensitive=False),
+    help='Network (finney/test/local)',
+)
+@click.option(
     '--rpc-url',
-    default='wss://entrypoint-finney.opentensor.ai:443',
-    help='Subtensor RPC endpoint',
+    default=None,
+    help='Subtensor RPC endpoint (overrides --network)',
 )
 @click.option(
     '--contract',
@@ -184,6 +194,7 @@ def val_vote_cancel_issue(
     reason: str,
     wallet_name: str,
     wallet_hotkey: str,
+    network: str,
     rpc_url: str,
     contract: str,
 ):
@@ -196,16 +207,17 @@ def val_vote_cancel_issue(
 
     \b
     Examples:
-        gitt val vote-issue-cancel 1 "External solution found"
-        gitt val cancel 42 "Issue invalid"
+        gitt vote cancel 1 "External solution found"
+        gitt vote cancel 42 "Issue invalid"
     """
     contract_addr = get_contract_address(contract)
-    ws_endpoint = get_ws_endpoint(rpc_url)
+    ws_endpoint, network_name = resolve_network(network, rpc_url)
 
     if not contract_addr:
         console.print('[red]Error: Contract address not configured.[/red]')
         return
 
+    console.print(f'[dim]Network: {network_name} ({ws_endpoint})[/dim]')
     console.print(f'[dim]Contract: {contract_addr}[/dim]')
     console.print(f'[yellow]Voting to cancel issue {issue_id}...[/yellow]\n')
     console.print(f'  Reason: {reason}\n')
@@ -233,5 +245,3 @@ def val_vote_cancel_issue(
     except Exception as e:
         console.print(f'[red]Error: {e}[/red]')
 
-# Add 'cancel' alias
-val.add_command(val_vote_cancel_issue, name='cancel')

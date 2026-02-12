@@ -19,7 +19,7 @@ from rich.console import Console
 from .helpers import (
     console,
     get_contract_address,
-    get_ws_endpoint,
+    resolve_network,
 )
 
 
@@ -31,6 +31,7 @@ def admin():
 
     \b
     Commands:
+        info           View contract configuration
         cancel-issue   Cancel an issue
         payout-issue   Manual payout fallback
         set-owner      Transfer ownership
@@ -42,9 +43,15 @@ def admin():
 @admin.command('cancel-issue')
 @click.argument('issue_id', type=int)
 @click.option(
+    '--network', '-n',
+    default=None,
+    type=click.Choice(['finney', 'test', 'local'], case_sensitive=False),
+    help='Network (finney/test/local)',
+)
+@click.option(
     '--rpc-url',
-    default='wss://entrypoint-finney.opentensor.ai:443',
-    help='Subtensor RPC endpoint',
+    default=None,
+    help='Subtensor RPC endpoint (overrides --network)',
 )
 @click.option(
     '--contract',
@@ -52,16 +59,16 @@ def admin():
     help='Contract address (uses config if empty)',
 )
 @click.option(
-    '--wallet-name',
+    '--wallet-name', '--wallet.name', '--wallet',
     default='default',
     help='Wallet name (must be owner)',
 )
 @click.option(
-    '--wallet-hotkey',
+    '--wallet-hotkey', '--wallet.hotkey', '--hotkey',
     default='default',
     help='Hotkey name',
 )
-def admin_cancel(issue_id: int, rpc_url: str, contract: str, wallet_name: str, wallet_hotkey: str):
+def admin_cancel(issue_id: int, network: str, rpc_url: str, contract: str, wallet_name: str, wallet_hotkey: str):
     """Cancel an issue (owner only).
 
     Immediately cancels an issue without requiring validator consensus.
@@ -72,12 +79,13 @@ def admin_cancel(issue_id: int, rpc_url: str, contract: str, wallet_name: str, w
         ISSUE_ID: Issue to cancel
     """
     contract_addr = get_contract_address(contract)
-    ws_endpoint = get_ws_endpoint(rpc_url)
+    ws_endpoint, network_name = resolve_network(network, rpc_url)
 
     if not contract_addr:
         console.print('[red]Error: Contract address not configured.[/red]')
         return
 
+    console.print(f'[dim]Network: {network_name} ({ws_endpoint})[/dim]')
     console.print(f'[dim]Contract: {contract_addr}[/dim]')
     console.print(f'[yellow]Cancelling issue {issue_id}...[/yellow]\n')
 
@@ -115,9 +123,15 @@ def admin_cancel(issue_id: int, rpc_url: str, contract: str, wallet_name: str, w
 @admin.command('payout-issue')
 @click.argument('issue_id', type=int)
 @click.option(
+    '--network', '-n',
+    default=None,
+    type=click.Choice(['finney', 'test', 'local'], case_sensitive=False),
+    help='Network (finney/test/local)',
+)
+@click.option(
     '--rpc-url',
-    default='wss://entrypoint-finney.opentensor.ai:443',
-    help='Subtensor RPC endpoint',
+    default=None,
+    help='Subtensor RPC endpoint (overrides --network)',
 )
 @click.option(
     '--contract',
@@ -125,16 +139,16 @@ def admin_cancel(issue_id: int, rpc_url: str, contract: str, wallet_name: str, w
     help='Contract address (uses config if empty)',
 )
 @click.option(
-    '--wallet-name',
+    '--wallet-name', '--wallet.name', '--wallet',
     default='default',
     help='Wallet name (must be owner)',
 )
 @click.option(
-    '--wallet-hotkey',
+    '--wallet-hotkey', '--wallet.hotkey', '--hotkey',
     default='default',
     help='Hotkey name',
 )
-def admin_payout(issue_id: int, rpc_url: str, contract: str, wallet_name: str, wallet_hotkey: str):
+def admin_payout(issue_id: int, network: str, rpc_url: str, contract: str, wallet_name: str, wallet_hotkey: str):
     """Manual payout fallback (owner only).
 
     Pays out a completed issue bounty to the solver. The solver address
@@ -145,12 +159,13 @@ def admin_payout(issue_id: int, rpc_url: str, contract: str, wallet_name: str, w
         ISSUE_ID: Completed issue ID
     """
     contract_addr = get_contract_address(contract)
-    ws_endpoint = get_ws_endpoint(rpc_url)
+    ws_endpoint, network_name = resolve_network(network, rpc_url)
 
     if not contract_addr:
         console.print('[red]Error: Contract address not configured.[/red]')
         return
 
+    console.print(f'[dim]Network: {network_name} ({ws_endpoint})[/dim]')
     console.print(f'[dim]Contract: {contract_addr}[/dim]')
     console.print(f'[yellow]Manual payout for issue {issue_id}...[/yellow]\n')
 
@@ -188,9 +203,15 @@ def admin_payout(issue_id: int, rpc_url: str, contract: str, wallet_name: str, w
 @admin.command('set-owner')
 @click.argument('new_owner', type=str)
 @click.option(
+    '--network', '-n',
+    default=None,
+    type=click.Choice(['finney', 'test', 'local'], case_sensitive=False),
+    help='Network (finney/test/local)',
+)
+@click.option(
     '--rpc-url',
-    default='wss://entrypoint-finney.opentensor.ai:443',
-    help='Subtensor RPC endpoint',
+    default=None,
+    help='Subtensor RPC endpoint (overrides --network)',
 )
 @click.option(
     '--contract',
@@ -198,16 +219,16 @@ def admin_payout(issue_id: int, rpc_url: str, contract: str, wallet_name: str, w
     help='Contract address',
 )
 @click.option(
-    '--wallet-name',
+    '--wallet-name', '--wallet.name', '--wallet',
     default='default',
     help='Wallet name (must be current owner)',
 )
 @click.option(
-    '--wallet-hotkey',
+    '--wallet-hotkey', '--wallet.hotkey', '--hotkey',
     default='default',
     help='Hotkey name',
 )
-def admin_set_owner(new_owner: str, rpc_url: str, contract: str, wallet_name: str, wallet_hotkey: str):
+def admin_set_owner(new_owner: str, network: str, rpc_url: str, contract: str, wallet_name: str, wallet_hotkey: str):
     """Transfer contract ownership (owner only).
 
     \b
@@ -215,12 +236,13 @@ def admin_set_owner(new_owner: str, rpc_url: str, contract: str, wallet_name: st
         NEW_OWNER: SS58 address of the new owner
     """
     contract_addr = get_contract_address(contract)
-    ws_endpoint = get_ws_endpoint(rpc_url)
+    ws_endpoint, network_name = resolve_network(network, rpc_url)
 
     if not contract_addr:
         console.print('[red]Error: Contract address not configured.[/red]')
         return
 
+    console.print(f'[dim]Network: {network_name} ({ws_endpoint})[/dim]')
     console.print(f'[dim]Contract: {contract_addr}[/dim]')
     console.print(f'[yellow]Transferring ownership to {new_owner}...[/yellow]\n')
 
@@ -251,9 +273,15 @@ def admin_set_owner(new_owner: str, rpc_url: str, contract: str, wallet_name: st
 @admin.command('set-treasury')
 @click.argument('new_treasury', type=str)
 @click.option(
+    '--network', '-n',
+    default=None,
+    type=click.Choice(['finney', 'test', 'local'], case_sensitive=False),
+    help='Network (finney/test/local)',
+)
+@click.option(
     '--rpc-url',
-    default='wss://entrypoint-finney.opentensor.ai:443',
-    help='Subtensor RPC endpoint',
+    default=None,
+    help='Subtensor RPC endpoint (overrides --network)',
 )
 @click.option(
     '--contract',
@@ -261,16 +289,16 @@ def admin_set_owner(new_owner: str, rpc_url: str, contract: str, wallet_name: st
     help='Contract address',
 )
 @click.option(
-    '--wallet-name',
+    '--wallet-name', '--wallet.name', '--wallet',
     default='default',
     help='Wallet name (must be owner)',
 )
 @click.option(
-    '--wallet-hotkey',
+    '--wallet-hotkey', '--wallet.hotkey', '--hotkey',
     default='default',
     help='Hotkey name',
 )
-def admin_set_treasury(new_treasury: str, rpc_url: str, contract: str, wallet_name: str, wallet_hotkey: str):
+def admin_set_treasury(new_treasury: str, network: str, rpc_url: str, contract: str, wallet_name: str, wallet_hotkey: str):
     """Change treasury hotkey (owner only).
 
     The treasury hotkey receives staking emissions that fund bounty payouts.
@@ -282,12 +310,13 @@ def admin_set_treasury(new_treasury: str, rpc_url: str, contract: str, wallet_na
         NEW_TREASURY: SS58 address of the new treasury hotkey
     """
     contract_addr = get_contract_address(contract)
-    ws_endpoint = get_ws_endpoint(rpc_url)
+    ws_endpoint, network_name = resolve_network(network, rpc_url)
 
     if not contract_addr:
         console.print('[red]Error: Contract address not configured.[/red]')
         return
 
+    console.print(f'[dim]Network: {network_name} ({ws_endpoint})[/dim]')
     console.print(f'[dim]Contract: {contract_addr}[/dim]')
     console.print(f'[yellow]Setting treasury hotkey to {new_treasury}...[/yellow]\n')
 

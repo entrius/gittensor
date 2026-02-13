@@ -7,10 +7,12 @@ Validator vote commands for issue CLI
 Commands:
     gitt vote solution
     gitt vote cancel
+    gitt vote list
 """
 
 import re
 import click
+from rich.table import Table
 
 from .helpers import (
     console,
@@ -47,7 +49,7 @@ def parse_pr_number(pr_input: str) -> int:
 
 
 @click.group(name='vote')
-def val():
+def vote():
     """Validator consensus operations.
 
     These commands are used by validators to manage issue bounty payouts.
@@ -56,11 +58,12 @@ def val():
     Commands:
         solution   Vote for a solver on an active issue
         cancel     Vote to cancel an issue
+        list       List whitelisted validators
     """
     pass
 
 
-@val.command('solution')
+@vote.command('solution')
 @click.argument('issue_id', type=int)
 @click.argument('solver_hotkey', type=str)
 @click.argument('solver_coldkey', type=str)
@@ -160,7 +163,7 @@ def val_vote_solution(
         console.print(f'[red]Error: {e}[/red]')
 
 
-@val.command('cancel')
+@vote.command('cancel')
 @click.argument('issue_id', type=int)
 @click.argument('reason', type=str)
 @click.option(
@@ -240,6 +243,81 @@ def val_vote_cancel_issue(
             console.print(f'[green]Vote cancel submitted![/green]')
         else:
             console.print('[red]Vote cancel failed.[/red]')
+    except ImportError as e:
+        console.print(f'[red]Error: Missing dependency - {e}[/red]')
+    except Exception as e:
+        console.print(f'[red]Error: {e}[/red]')
+
+
+@vote.command('list')
+@click.option(
+    '--network', '-n',
+    default=None,
+    type=click.Choice(['finney', 'test', 'local'], case_sensitive=False),
+    help='Network (finney/test/local)',
+)
+@click.option(
+    '--rpc-url',
+    default=None,
+    help='Subtensor RPC endpoint (overrides --network)',
+)
+@click.option(
+    '--contract',
+    default='',
+    help='Contract address (uses config if empty)',
+)
+def vote_list_validators(network: str, rpc_url: str, contract: str):
+    """List whitelisted validators and consensus threshold.
+
+    Shows all validator hotkeys that are authorized to vote on
+    solutions and issue cancellations.
+
+    \b
+    Examples:
+        gitt vote list
+        gitt vote list --network test
+    """
+    contract_addr = get_contract_address(contract)
+    ws_endpoint, network_name = resolve_network(network, rpc_url)
+
+    if not contract_addr:
+        console.print('[red]Error: Contract address not configured.[/red]')
+        return
+
+    console.print(f'[dim]Network: {network_name} ({ws_endpoint})[/dim]')
+    console.print(f'[dim]Contract: {contract_addr}[/dim]\n')
+
+    try:
+        from gittensor.validator.issue_competitions.contract_client import (
+            IssueCompetitionContractClient,
+        )
+        import bittensor as bt
+
+        subtensor = bt.Subtensor(network=ws_endpoint)
+        client = IssueCompetitionContractClient(
+            contract_address=contract_addr,
+            subtensor=subtensor,
+        )
+
+        validators = client.get_validators()
+        n = len(validators)
+        required = (n // 2) + 1
+
+        if validators:
+            table = Table(show_header=True, header_style='bold magenta')
+            table.add_column('#', style='dim', justify='right')
+            table.add_column('Validator Hotkey', style='cyan')
+
+            for i, v in enumerate(validators, 1):
+                table.add_row(str(i), v)
+
+            console.print(table)
+            console.print(f'\n[green]Validators:[/green] {n}')
+            console.print(f'[green]Consensus threshold:[/green] {required} of {n} votes required')
+        else:
+            console.print('[yellow]No validators whitelisted.[/yellow]')
+            console.print('[dim]Add validators with: gitt admin add-vali <HOTKEY>[/dim]')
+
     except ImportError as e:
         console.print(f'[red]Error: Missing dependency - {e}[/red]')
     except Exception as e:

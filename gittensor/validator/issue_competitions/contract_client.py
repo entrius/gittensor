@@ -846,6 +846,148 @@ class IssueCompetitionContractClient:
             bt.logging.error(f'Error transferring ownership: {e}')
             return False
 
+    def add_validator(
+        self,
+        hotkey: str,
+        wallet: bt.Wallet,
+    ) -> bool:
+        """Add a validator hotkey to the whitelist (owner only).
+
+        Args:
+            hotkey: SS58 address of the validator hotkey to whitelist
+            wallet: Owner wallet for signing (uses coldkey)
+
+        Returns:
+            True if addition succeeded
+        """
+        try:
+            bt.logging.info(f'Adding validator {hotkey}')
+
+            keypair = wallet.coldkey
+            tx_hash = self._exec_contract_raw(
+                method_name='add_validator',
+                args={
+                    'hotkey': hotkey,
+                },
+                keypair=keypair,
+                gas_limit=DEFAULT_GAS_LIMIT,
+            )
+
+            if tx_hash:
+                bt.logging.info(f'Validator added: {tx_hash}')
+                return True
+            else:
+                bt.logging.error('Failed to add validator')
+                return False
+
+        except Exception as e:
+            bt.logging.error(f'Error adding validator: {e}')
+            return False
+
+    def remove_validator(
+        self,
+        hotkey: str,
+        wallet: bt.Wallet,
+    ) -> bool:
+        """Remove a validator hotkey from the whitelist (owner only).
+
+        Args:
+            hotkey: SS58 address of the validator hotkey to remove
+            wallet: Owner wallet for signing (uses coldkey)
+
+        Returns:
+            True if removal succeeded
+        """
+        try:
+            bt.logging.info(f'Removing validator {hotkey}')
+
+            keypair = wallet.coldkey
+            tx_hash = self._exec_contract_raw(
+                method_name='remove_validator',
+                args={
+                    'hotkey': hotkey,
+                },
+                keypair=keypair,
+                gas_limit=DEFAULT_GAS_LIMIT,
+            )
+
+            if tx_hash:
+                bt.logging.info(f'Validator removed: {tx_hash}')
+                return True
+            else:
+                bt.logging.error('Failed to remove validator')
+                return False
+
+        except Exception as e:
+            bt.logging.error(f'Error removing validator: {e}')
+            return False
+
+    def get_validators(self) -> List[str]:
+        """Query the list of whitelisted validator hotkeys.
+
+        Returns:
+            List of SS58 addresses, or empty list on error.
+        """
+        try:
+            response = self._raw_contract_read('get_validators')
+            if response is None:
+                return []
+
+            return self._decode_validator_list(response)
+        except Exception as e:
+            bt.logging.error(f'Error fetching validators: {e}')
+            return []
+
+    def _decode_validator_list(self, response_bytes: bytes) -> List[str]:
+        """Decode a SCALE-encoded Vec<AccountId> from contract response.
+
+        The response has an ink! envelope prefix (flags + result bytes),
+        then a SCALE compact-encoded length followed by 32-byte AccountIds.
+        """
+        if not response_bytes or len(response_bytes) < 12:
+            return []
+
+        try:
+            # Skip ink! response envelope: look for the compact-encoded vec length
+            # The envelope is: flags(4) + Ok discriminant(1) + data...
+            # But exact offset varies, so we scan for a plausible start.
+            # With 0 validators, the compact length byte is 0x00.
+            # With N validators, compact length = N << 2 (for N < 64).
+            # We know the data payload starts at offset 11 based on other extractors.
+            offset = 11
+
+            if offset >= len(response_bytes):
+                return []
+
+            # Read SCALE compact length
+            first_byte = response_bytes[offset]
+            mode = first_byte & 0x03
+            if mode == 0:
+                count = first_byte >> 2
+                offset += 1
+            elif mode == 1:
+                if offset + 2 > len(response_bytes):
+                    return []
+                count = (response_bytes[offset] | (response_bytes[offset + 1] << 8)) >> 2
+                offset += 2
+            else:
+                return []
+
+            validators = []
+            for _ in range(count):
+                if offset + 32 > len(response_bytes):
+                    break
+                account_bytes = response_bytes[offset:offset + 32]
+                ss58 = self.subtensor.substrate.ss58_encode(account_bytes.hex())
+                validators.append(ss58)
+                offset += 32
+
+            return validators
+
+        except Exception as e:
+            bt.logging.debug(f'Error decoding validator list: {e}')
+            return []
+
     def set_treasury_hotkey(
         self,
         new_hotkey: str,

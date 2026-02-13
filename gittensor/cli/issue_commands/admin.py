@@ -9,6 +9,8 @@ Commands:
     gitt admin payout-issue (alias: a payout-issue)
     gitt admin set-owner (alias: a set-owner)
     gitt admin set-treasury (alias: a set-treasury)
+    gitt admin add-vali (alias: a add-vali)
+    gitt admin remove-vali (alias: a remove-vali)
 """
 
 from typing import Optional
@@ -36,6 +38,8 @@ def admin():
         payout-issue   Manual payout fallback
         set-owner      Transfer ownership
         set-treasury   Change treasury hotkey
+        add-vali       Add a validator to the whitelist
+        remove-vali    Remove a validator from the whitelist
     """
     pass
 
@@ -339,6 +343,158 @@ def admin_set_treasury(new_treasury: str, network: str, rpc_url: str, contract: 
             console.print(f'[dim]Note: Issue bounty amounts have been reset. Run harvest to re-fund from new treasury.[/dim]')
         else:
             console.print('[red]Treasury hotkey update failed.[/red]')
+    except ImportError as e:
+        console.print(f'[red]Error: Missing dependency - {e}[/red]')
+    except Exception as e:
+        console.print(f'[red]Error: {e}[/red]')
+
+
+@admin.command('add-vali')
+@click.argument('hotkey', type=str)
+@click.option(
+    '--network', '-n',
+    default=None,
+    type=click.Choice(['finney', 'test', 'local'], case_sensitive=False),
+    help='Network (finney/test/local)',
+)
+@click.option(
+    '--rpc-url',
+    default=None,
+    help='Subtensor RPC endpoint (overrides --network)',
+)
+@click.option(
+    '--contract',
+    default='',
+    help='Contract address',
+)
+@click.option(
+    '--wallet-name', '--wallet.name', '--wallet',
+    default='default',
+    help='Wallet name (must be owner)',
+)
+@click.option(
+    '--wallet-hotkey', '--wallet.hotkey', '--hotkey',
+    default='default',
+    help='Hotkey name',
+)
+def admin_add_validator(hotkey: str, network: str, rpc_url: str, contract: str, wallet_name: str, wallet_hotkey: str):
+    """Add a validator to the voting whitelist (owner only).
+
+    Whitelisted validators can vote on solutions and issue cancellations.
+    The consensus threshold adjusts automatically: simple majority after
+    3 validators are added.
+
+    \b
+    Arguments:
+        HOTKEY: SS58 address of the validator hotkey to whitelist
+    """
+    contract_addr = get_contract_address(contract)
+    ws_endpoint, network_name = resolve_network(network, rpc_url)
+
+    if not contract_addr:
+        console.print('[red]Error: Contract address not configured.[/red]')
+        return
+
+    console.print(f'[dim]Network: {network_name} ({ws_endpoint})[/dim]')
+    console.print(f'[dim]Contract: {contract_addr}[/dim]')
+    console.print(f'[yellow]Adding validator {hotkey}...[/yellow]\n')
+
+    try:
+        from gittensor.validator.issue_competitions.contract_client import (
+            IssueCompetitionContractClient,
+        )
+        import bittensor as bt
+
+        wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
+        subtensor = bt.Subtensor(network=ws_endpoint)
+        client = IssueCompetitionContractClient(
+            contract_address=contract_addr,
+            subtensor=subtensor,
+        )
+
+        result = client.add_validator(hotkey, wallet)
+        if result:
+            console.print(f'[green]Validator {hotkey} added to whitelist![/green]')
+        else:
+            console.print('[red]Failed to add validator.[/red]')
+            console.print('[yellow]Possible reasons:[/yellow]')
+            console.print('  - Caller is not the contract owner')
+            console.print('  - Validator is already whitelisted')
+    except ImportError as e:
+        console.print(f'[red]Error: Missing dependency - {e}[/red]')
+    except Exception as e:
+        console.print(f'[red]Error: {e}[/red]')
+
+
+@admin.command('remove-vali')
+@click.argument('hotkey', type=str)
+@click.option(
+    '--network', '-n',
+    default=None,
+    type=click.Choice(['finney', 'test', 'local'], case_sensitive=False),
+    help='Network (finney/test/local)',
+)
+@click.option(
+    '--rpc-url',
+    default=None,
+    help='Subtensor RPC endpoint (overrides --network)',
+)
+@click.option(
+    '--contract',
+    default='',
+    help='Contract address',
+)
+@click.option(
+    '--wallet-name', '--wallet.name', '--wallet',
+    default='default',
+    help='Wallet name (must be owner)',
+)
+@click.option(
+    '--wallet-hotkey', '--wallet.hotkey', '--hotkey',
+    default='default',
+    help='Hotkey name',
+)
+def admin_remove_validator(hotkey: str, network: str, rpc_url: str, contract: str, wallet_name: str, wallet_hotkey: str):
+    """Remove a validator from the voting whitelist (owner only).
+
+    The consensus threshold adjusts automatically after removal.
+
+    \b
+    Arguments:
+        HOTKEY: SS58 address of the validator hotkey to remove
+    """
+    contract_addr = get_contract_address(contract)
+    ws_endpoint, network_name = resolve_network(network, rpc_url)
+
+    if not contract_addr:
+        console.print('[red]Error: Contract address not configured.[/red]')
+        return
+
+    console.print(f'[dim]Network: {network_name} ({ws_endpoint})[/dim]')
+    console.print(f'[dim]Contract: {contract_addr}[/dim]')
+    console.print(f'[yellow]Removing validator {hotkey}...[/yellow]\n')
+
+    try:
+        from gittensor.validator.issue_competitions.contract_client import (
+            IssueCompetitionContractClient,
+        )
+        import bittensor as bt
+
+        wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
+        subtensor = bt.Subtensor(network=ws_endpoint)
+        client = IssueCompetitionContractClient(
+            contract_address=contract_addr,
+            subtensor=subtensor,
+        )
+
+        result = client.remove_validator(hotkey, wallet)
+        if result:
+            console.print(f'[green]Validator {hotkey} removed from whitelist![/green]')
+        else:
+            console.print('[red]Failed to remove validator.[/red]')
+            console.print('[yellow]Possible reasons:[/yellow]')
+            console.print('  - Caller is not the contract owner')
+            console.print('  - Validator is not in the whitelist')
     except ImportError as e:
         console.print(f'[red]Error: Missing dependency - {e}[/red]')
     except Exception as e:

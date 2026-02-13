@@ -79,11 +79,6 @@ mod issue_bounty_manager {
     /// Minimum bounty amount: 10 ALPHA (9 decimals)
     pub const MIN_BOUNTY: u128 = 10_000_000_000;
 
-    /// Number of validator votes required for consensus.
-    /// MVP uses count-based consensus (N validators must agree).
-    /// TODO (PR #2376): Replace with VotingPower chain extensions for stake-weighted voting.
-    pub const REQUIRED_VALIDATOR_VOTES: u32 = 1;
-
     // ========================================================================
     // Contract Storage
     // ========================================================================
@@ -101,13 +96,14 @@ mod issue_bounty_manager {
         /// Unallocated emissions storage (alpha pool)
         alpha_pool: Balance,
 
-        // Mappings
         /// Mapping from issue ID to Issue struct
         issues: Mapping<u64, Issue>,
         /// Mapping from URL hash to issue ID for deduplication
         url_hash_to_id: Mapping<[u8; 32], u64>,
         /// FIFO queue of issue IDs awaiting bounty fill
         bounty_queue: Vec<u64>,
+
+        validators: Vec<AccountId>,
 
         // Solution votes (vote on issues directly)
         solution_votes: Mapping<u64, SolutionVote>,
@@ -139,6 +135,7 @@ mod issue_bounty_manager {
                 issues: Mapping::default(),
                 url_hash_to_id: Mapping::default(),
                 bounty_queue: Vec::new(),
+                validators: Vec::new(),
                 solution_votes: Mapping::default(),
                 solution_vote_voters: Mapping::default(),
                 cancel_issue_votes: Mapping::default(),
@@ -247,6 +244,45 @@ mod issue_bounty_manager {
         // Validator Consensus Functions
         // ========================================================================
 
+        fn required_validator_votes(&self) -> u32 {
+            let n = u32::try_from(self.validators.len()).unwrap_or(u32::MAX);
+            n.saturating_div(2).saturating_add(1)
+        }
+
+        #[ink(message)]
+        pub fn add_validator(&mut self, hotkey: AccountId) -> Result<(), Error> {
+            if self.env().caller() != self.owner {
+                return Err(Error::NotOwner);
+            }
+            if self.validators.contains(&hotkey) {
+                return Err(Error::ValidatorAlreadyWhitelisted);
+            }
+            self.validators.push(hotkey);
+            self.env().emit_event(ValidatorAdded { hotkey });
+
+            Ok(())
+        }
+
+        #[ink(message)]
+        pub fn remove_validator(&mut self, hotkey: AccountId) -> Result<(), Error> {
+            if self.env().caller() != self.owner {
+                return Err(Error::NotOwner);
+            }
+            let pos = self
+                .validators
+                .iter()
+                .position(|v| v == &hotkey)
+                .ok_or(Error::ValidatorNotWhitelisted)?;
+            self.validators.remove(pos);
+            self.env().emit_event(ValidatorRemoved { hotkey });
+            Ok(())
+        }
+
+        #[ink(message)]
+        pub fn get_validators(&self) -> Vec<AccountId> {
+            self.validators.clone()
+        }
+
         /// Votes for a solution on an active issue.
         ///
         /// When consensus is reached, the issue is completed and bounty paid out.
@@ -269,7 +305,12 @@ mod issue_bounty_manager {
             let (caller, stake) = self.get_caller_stake_validated()?;
 
             // Get or create vote, accumulate stake
-            let mut vote = self.get_or_create_solution_vote(issue_id, solver_hotkey, pr_number, solver_coldkey);
+            let mut vote = self.get_or_create_solution_vote(
+                issue_id,
+                solver_hotkey,
+                pr_number,
+                solver_coldkey,
+            );
             self.solution_vote_voters.insert((issue_id, caller), &true);
             vote.total_stake_voted = vote.total_stake_voted.saturating_add(stake);
             vote.votes_count = vote.votes_count.saturating_add(1);
@@ -427,13 +468,6 @@ mod issue_bounty_manager {
             // Ground truth calculation: available = current_stake - committed
             let committed = self.get_total_committed();
             let available = current_stake.saturating_sub(committed);
-
-            // DEBUG: Emit what chain extension actually returns during execution
-            self.env().emit_event(DebugStakeQuery {
-                treasury_stake: current_stake,
-                committed,
-                available,
-            });
 
             if available == 0 {
                 // Update alpha_pool cache (should be 0 since nothing available)
@@ -609,7 +643,7 @@ mod issue_bounty_manager {
         #[ink(message)]
         pub fn get_config(&self) -> ContractConfig {
             ContractConfig {
-                required_validator_votes: REQUIRED_VALIDATOR_VOTES,
+                required_validator_votes: self.required_validator_votes(),
                 netuid: self.netuid,
             }
         }
@@ -806,13 +840,16 @@ mod issue_bounty_manager {
         }
 
         /// Returns voting weight for a validator.
-        /// MVP: Returns constant 1 for count-based consensus.
+        /// NOTE: V0 returns 1, every whitelisted voter (validator) gets equal representation
         /// TODO (PR #2376): Replace with VotingPower chain extension for stake-weighted voting.
-        fn get_validator_stake(&self, _validator: AccountId) -> u128 {
-            // MVP: Count-based consensus - each validator gets weight of 1
+        fn get_validator_stake(&self, validator: AccountId) -> u128 {
             // When VotingPower chain extension is available (PR #2376), this will query:
             // self.env().extension().get_voting_power(validator) as u128
-            1
+            if self.validators.contains(&validator) {
+                1
+            } else {
+                0
+            }
         }
 
         /// Calculate total funds committed to non-finalized issues (ground truth).
@@ -831,7 +868,11 @@ mod issue_bounty_manager {
 
         /// Checks if vote count meets minimum consensus threshold.
         fn check_consensus(&self, votes_count: u32) -> bool {
-            votes_count >= REQUIRED_VALIDATOR_VOTES
+            let n = u32::try_from(self.validators.len()).unwrap_or(0);
+            if n == 0 {
+                return false;
+            }
+            votes_count >= self.required_validator_votes()
         }
 
         /// Completes an issue with a solution and triggers auto-payout

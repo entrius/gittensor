@@ -28,6 +28,9 @@ METHODS_WE_USE = [
     'get_alpha_pool',
     'get_issue',
     'get_issues_by_status',
+    'add_validator',
+    'remove_validator',
+    'get_validators',
 ]
 
 

@@ -23,7 +23,7 @@ Command structure:
 import click
 
 from .view import issues_list, issues_bounty_pool, issues_pending_harvest, admin_info
-from .val import val
+from .vote import vote
 from .admin import admin
 from .mutations import (
     issue_register,
@@ -76,7 +76,7 @@ def register_commands(cli):
     cli.add_command(issue_harvest, name='harvest')
 
     # Validator vote group
-    cli.add_command(val, name='vote')
+    cli.add_command(vote, name='vote')
 
     # Admin group with alias
     cli.add_command(admin)
@@ -86,7 +86,7 @@ def register_commands(cli):
 __all__ = [
     'register_commands',
     'issues_group',
-    'val',
+    'vote',
     'admin',
     'issue_register',
     'issue_harvest',

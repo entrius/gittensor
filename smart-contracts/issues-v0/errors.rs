@@ -42,4 +42,8 @@ pub enum Error {
     NoSolverSet,
     /// Bounty has already been paid out
     BountyAlreadyPaid,
+    /// Validator already included as a voter
+    ValidatorAlreadyWhitelisted,
+    // Validator doesn't exist in whitelist
+    ValidatorNotWhitelisted,
 }

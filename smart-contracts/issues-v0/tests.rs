@@ -151,7 +151,7 @@ fn get_issues_by_status_returns_empty_initially() {
 fn get_config_returns_correct_values() {
     let contract = create_default_contract();
     let config = contract.get_config();
-    assert_eq!(config.required_validator_votes, REQUIRED_VALIDATOR_VOTES);
+    assert_eq!(config.required_validator_votes, 1);
     assert_eq!(config.netuid, TEST_NETUID);
 }
 
@@ -237,8 +237,14 @@ fn is_modifiable_returns_false_for_finalized() {
 
 #[ink::test]
 fn check_consensus_with_required_votes() {
-    let contract = create_default_contract();
-    // REQUIRED_VALIDATOR_VOTES is currently 1
+    let mut contract = create_default_contract();
+    // With 0 validators, consensus is impossible
+    assert!(!contract.check_consensus(0));
+    assert!(!contract.check_consensus(1));
+
+    // Add 1 validator: required = (1/2)+1 = 1
+    set_caller(account(1));
+    contract.add_validator(account(3)).unwrap();
     assert!(!contract.check_consensus(0));
     assert!(contract.check_consensus(1));
     assert!(contract.check_consensus(5));
@@ -881,7 +887,7 @@ fn vote_solution_fails_issue_not_found() {
         999,
         account(6), // solver_hotkey
         account(5), // solver_coldkey
-        [0xBB; 32], // pr_url_hash
+        42, // pr_number
     );
     assert_eq!(result, Err(crate::Error::IssueNotFound));
 }
@@ -893,7 +899,7 @@ fn vote_solution_fails_issue_not_active() {
 
     // Issue is Registered, not Active
     set_caller(account(4));
-    let result = contract.vote_solution(id, account(6), account(5), [0xBB; 32]);
+    let result = contract.vote_solution(id, account(6), account(5), 42);
     assert_eq!(result, Err(crate::Error::IssueNotActive));
 }
 
@@ -907,7 +913,7 @@ fn vote_solution_fails_on_completed_issue() {
     contract.issues.insert(id, &issue);
 
     set_caller(account(4));
-    let result = contract.vote_solution(id, account(6), account(5), [0xBB; 32]);
+    let result = contract.vote_solution(id, account(6), account(5), 42);
     assert_eq!(result, Err(crate::Error::IssueNotActive));
 }
 
@@ -920,7 +926,7 @@ fn vote_solution_fails_on_cancelled_issue() {
     contract.cancel_issue(id).unwrap();
 
     set_caller(account(4));
-    let result = contract.vote_solution(id, account(6), account(5), [0xBB; 32]);
+    let result = contract.vote_solution(id, account(6), account(5), 42);
     assert_eq!(result, Err(crate::Error::IssueNotActive));
 }
 
@@ -941,7 +947,7 @@ fn vote_solution_fails_already_voted() {
         .insert((id, account(4)), &true);
 
     set_caller(account(4));
-    let result = contract.vote_solution(id, account(6), account(5), [0xBB; 32]);
+    let result = contract.vote_solution(id, account(6), account(5), 42);
     assert_eq!(result, Err(crate::Error::AlreadyVoted));
 }
 
@@ -1056,12 +1062,12 @@ fn remove_from_bounty_queue_noop_for_missing_id() {
 #[ink::test]
 fn get_or_create_solution_vote_creates_new() {
     let mut contract = create_default_contract();
-    let vote = contract.get_or_create_solution_vote(1, account(6), [0xBB; 32], account(5));
+    let vote = contract.get_or_create_solution_vote(1, account(6), 42, account(5));
 
     assert_eq!(vote.issue_id, 1);
     assert_eq!(vote.solver_hotkey, account(6));
     assert_eq!(vote.solver_coldkey, account(5));
-    assert_eq!(vote.pr_url_hash, [0xBB; 32]);
+    assert_eq!(vote.pr_number, 42);
     assert_eq!(vote.votes_count, 0);
     assert_eq!(vote.total_stake_voted, 0);
 }
@@ -1075,7 +1081,7 @@ fn get_or_create_solution_vote_returns_existing() {
         issue_id: 1,
         solver_hotkey: account(6),
         solver_coldkey: account(5),
-        pr_url_hash: [0xBB; 32],
+        pr_number: 42,
         total_stake_voted: 500,
         votes_count: 3,
     };
@@ -1084,7 +1090,7 @@ fn get_or_create_solution_vote_returns_existing() {
     let vote = contract.get_or_create_solution_vote(
         1,
         account(7), // different solver -- should be ignored
-        [0xFF; 32], // different hash -- should be ignored
+        99,         // different pr -- should be ignored
         account(8),
     );
 
@@ -1137,7 +1143,7 @@ fn clear_solution_vote_removes_record() {
         issue_id: 1,
         solver_hotkey: account(6),
         solver_coldkey: account(5),
-        pr_url_hash: [0xBB; 32],
+        pr_number: 42,
         total_stake_voted: 100,
         votes_count: 1,
     };
@@ -1401,11 +1407,17 @@ fn get_treasury_stake_returns_zero_when_no_stake() {
 }
 
 #[ink::test]
-fn get_validator_stake_returns_mocked_value() {
-    register_mock_extension();
+fn get_validator_stake_returns_zero_for_non_whitelisted() {
     let contract = create_default_contract();
-    let stake = contract.get_validator_stake(account(4));
-    assert_eq!(stake, MOCK_STAKE as u128);
+    assert_eq!(contract.get_validator_stake(account(4)), 0);
+}
+
+#[ink::test]
+fn get_validator_stake_returns_one_for_whitelisted() {
+    let mut contract = create_default_contract();
+    set_caller(account(1));
+    contract.add_validator(account(4)).unwrap();
+    assert_eq!(contract.get_validator_stake(account(4)), 1);
 }
 
 // ============================================================================
@@ -1421,6 +1433,10 @@ fn setup_active_issue_with_mock() -> (IssueBountyManager, u64) {
     register_mock_extension();
     let mut contract = create_default_contract();
     let id = register_test_issue(&mut contract);
+
+    // Whitelist account(4) as a validator for voting tests
+    set_caller(account(1));
+    contract.add_validator(account(4)).unwrap();
 
     let mut issue = contract.issues.get(id).unwrap();
     issue.status = crate::IssueStatus::Active;
@@ -1440,11 +1456,11 @@ fn vote_solution_succeeds_and_completes_issue() {
         id,
         account(6), // solver_hotkey
         account(5), // solver_coldkey
-        [0xBB; 32], // pr_url_hash
+        42, // pr_number
     );
     assert!(result.is_ok());
 
-    // With REQUIRED_VALIDATOR_VOTES = 1, one vote should complete the issue
+    // With 1 whitelisted validator, required votes = (1/2)+1 = 1, so one vote completes
     let issue = contract.get_issue(id).unwrap();
     assert_eq!(issue.status, crate::IssueStatus::Completed);
     assert_eq!(issue.solver_coldkey, Some(account(5)));
@@ -1459,7 +1475,7 @@ fn vote_solution_removes_issue_from_bounty_queue() {
 
     set_caller(account(4));
     contract
-        .vote_solution(id, account(6), account(5), [0xBB; 32])
+        .vote_solution(id, account(6), account(5), 42)
         .unwrap();
 
     assert!(!contract.get_bounty_queue().contains(&id));
@@ -1471,7 +1487,7 @@ fn vote_solution_clears_vote_record_after_consensus() {
 
     set_caller(account(4));
     contract
-        .vote_solution(id, account(6), account(5), [0xBB; 32])
+        .vote_solution(id, account(6), account(5), 42)
         .unwrap();
 
     // Vote record should be cleaned up after consensus
@@ -1484,7 +1500,7 @@ fn vote_solution_records_voter() {
 
     set_caller(account(4));
     contract
-        .vote_solution(id, account(6), account(5), [0xBB; 32])
+        .vote_solution(id, account(6), account(5), 42)
         .unwrap();
 
     // Voter should be recorded (prevents double voting)
@@ -1495,8 +1511,7 @@ fn vote_solution_records_voter() {
 }
 
 #[ink::test]
-fn vote_solution_fails_with_zero_stake() {
-    register_mock_extension_with_stake(0);
+fn vote_solution_fails_for_non_whitelisted_caller() {
     let mut contract = create_default_contract();
     let id = register_test_issue(&mut contract);
 
@@ -1505,8 +1520,9 @@ fn vote_solution_fails_with_zero_stake() {
     issue.bounty_amount = MIN_BOUNTY;
     contract.issues.insert(id, &issue);
 
+    // account(4) is not whitelisted, so get_validator_stake returns 0
     set_caller(account(4));
-    let result = contract.vote_solution(id, account(6), account(5), [0xBB; 32]);
+    let result = contract.vote_solution(id, account(6), account(5), 42);
     assert_eq!(result, Err(crate::Error::InsufficientStake));
 }
 
@@ -1520,11 +1536,15 @@ fn vote_cancel_issue_succeeds_on_registered_issue() {
     let mut contract = create_default_contract();
     let id = register_test_issue(&mut contract);
 
+    // Whitelist account(4) as validator
+    set_caller(account(1));
+    contract.add_validator(account(4)).unwrap();
+
     set_caller(account(4));
     let result = contract.vote_cancel_issue(id, [0xCC; 32]);
     assert!(result.is_ok());
 
-    // With REQUIRED_VALIDATOR_VOTES = 1, issue should be cancelled
+    // With 1 whitelisted validator, one vote cancels
     let issue = contract.get_issue(id).unwrap();
     assert_eq!(issue.status, crate::IssueStatus::Cancelled);
     assert_eq!(issue.bounty_amount, 0);
@@ -1550,6 +1570,10 @@ fn vote_cancel_issue_removes_from_bounty_queue() {
     let mut contract = create_default_contract();
     let id = register_test_issue(&mut contract);
 
+    // Whitelist account(4) as validator
+    set_caller(account(1));
+    contract.add_validator(account(4)).unwrap();
+
     assert!(contract.get_bounty_queue().contains(&id));
 
     set_caller(account(4));
@@ -1564,6 +1588,10 @@ fn vote_cancel_issue_clears_vote_record_after_consensus() {
     let mut contract = create_default_contract();
     let id = register_test_issue(&mut contract);
 
+    // Whitelist account(4) as validator
+    set_caller(account(1));
+    contract.add_validator(account(4)).unwrap();
+
     set_caller(account(4));
     contract.vote_cancel_issue(id, [0xCC; 32]).unwrap();
 
@@ -1576,6 +1604,10 @@ fn vote_cancel_issue_records_voter() {
     let mut contract = create_default_contract();
     let id = register_test_issue(&mut contract);
 
+    // Whitelist account(4) as validator
+    set_caller(account(1));
+    contract.add_validator(account(4)).unwrap();
+
     set_caller(account(4));
     contract.vote_cancel_issue(id, [0xCC; 32]).unwrap();
 
@@ -1586,12 +1618,200 @@ fn vote_cancel_issue_records_voter() {
 }
 
 #[ink::test]
-fn vote_cancel_issue_fails_with_zero_stake() {
-    register_mock_extension_with_stake(0);
+fn vote_cancel_issue_fails_for_non_whitelisted_caller() {
     let mut contract = create_default_contract();
     let id = register_test_issue(&mut contract);
 
+    // account(4) is not whitelisted, so get_validator_stake returns 0
     set_caller(account(4));
     let result = contract.vote_cancel_issue(id, [0xCC; 32]);
     assert_eq!(result, Err(crate::Error::InsufficientStake));
+}
+
+// ============================================================================
+// Validator Whitelist Tests
+// ============================================================================
+
+#[ink::test]
+fn add_validator_succeeds() {
+    let mut contract = create_default_contract();
+    set_caller(account(1));
+    assert!(contract.add_validator(account(3)).is_ok());
+    assert_eq!(contract.get_validators(), vec![account(3)]);
+}
+
+#[ink::test]
+fn add_validator_fails_for_non_owner() {
+    let mut contract = create_default_contract();
+    set_caller(account(4));
+    assert_eq!(contract.add_validator(account(3)), Err(crate::Error::NotOwner));
+}
+
+#[ink::test]
+fn add_validator_fails_duplicate() {
+    let mut contract = create_default_contract();
+    set_caller(account(1));
+    contract.add_validator(account(3)).unwrap();
+    assert_eq!(
+        contract.add_validator(account(3)),
+        Err(crate::Error::ValidatorAlreadyWhitelisted),
+    );
+}
+
+#[ink::test]
+fn remove_validator_succeeds() {
+    let mut contract = create_default_contract();
+    set_caller(account(1));
+    contract.add_validator(account(3)).unwrap();
+    assert!(contract.remove_validator(account(3)).is_ok());
+    assert!(contract.get_validators().is_empty());
+}
+
+#[ink::test]
+fn remove_validator_fails_for_non_owner() {
+    let mut contract = create_default_contract();
+    set_caller(account(1));
+    contract.add_validator(account(3)).unwrap();
+
+    set_caller(account(4));
+    assert_eq!(contract.remove_validator(account(3)), Err(crate::Error::NotOwner));
+}
+
+#[ink::test]
+fn remove_validator_fails_not_whitelisted() {
+    let mut contract = create_default_contract();
+    set_caller(account(1));
+    assert_eq!(
+        contract.remove_validator(account(3)),
+        Err(crate::Error::ValidatorNotWhitelisted),
+    );
+}
+
+#[ink::test]
+fn required_votes_scales_with_validator_count() {
+    let mut contract = create_default_contract();
+    set_caller(account(1));
+
+    // 0 validators: (0/2)+1 = 1 (but consensus blocked by n==0 guard)
+    assert_eq!(contract.required_validator_votes(), 1);
+
+    // 1 validator: (1/2)+1 = 1
+    contract.add_validator(account(3)).unwrap();
+    assert_eq!(contract.required_validator_votes(), 1);
+
+    // 2 validators: (2/2)+1 = 2 (unanimity)
+    contract.add_validator(account(4)).unwrap();
+    assert_eq!(contract.required_validator_votes(), 2);
+
+    // 3 validators: (3/2)+1 = 2 (simple majority)
+    contract.add_validator(account(5)).unwrap();
+    assert_eq!(contract.required_validator_votes(), 2);
+
+    // 4 validators: (4/2)+1 = 3
+    contract.add_validator(account(6)).unwrap();
+    assert_eq!(contract.required_validator_votes(), 3);
+
+    // 5 validators: (5/2)+1 = 3
+    contract.add_validator(account(7)).unwrap();
+    assert_eq!(contract.required_validator_votes(), 3);
+}
+
+// ============================================================================
+// 3-Validator Majority Tests (2 of 3 required)
+// ============================================================================
+
+/// Helper: creates contract with 3 whitelisted validators and an Active issue.
+/// Uses accounts 3, 4, 5 as validators. bounty_amount = 0 to avoid call_runtime.
+fn setup_3_validator_active_issue() -> (IssueBountyManager, u64) {
+    register_mock_extension();
+    let mut contract = create_default_contract();
+    let id = register_test_issue(&mut contract);
+
+    // Whitelist 3 validators: required votes = (3/2)+1 = 2
+    set_caller(account(1));
+    contract.add_validator(account(3)).unwrap();
+    contract.add_validator(account(4)).unwrap();
+    contract.add_validator(account(5)).unwrap();
+
+    let mut issue = contract.issues.get(id).unwrap();
+    issue.status = crate::IssueStatus::Active;
+    issue.bounty_amount = 0;
+    contract.issues.insert(id, &issue);
+
+    (contract, id)
+}
+
+#[ink::test]
+fn three_validators_one_vote_does_not_complete() {
+    let (mut contract, id) = setup_3_validator_active_issue();
+
+    // First vote: not enough for consensus
+    set_caller(account(3));
+    contract.vote_solution(id, account(6), account(5), 42).unwrap();
+
+    // Issue should still be Active (1 vote < 2 required)
+    let issue = contract.get_issue(id).unwrap();
+    assert_eq!(issue.status, crate::IssueStatus::Active);
+
+    // Vote record should still exist (not cleared)
+    assert!(contract.solution_votes.get(id).is_some());
+    let vote = contract.solution_votes.get(id).unwrap();
+    assert_eq!(vote.votes_count, 1);
+}
+
+#[ink::test]
+fn three_validators_two_votes_completes() {
+    let (mut contract, id) = setup_3_validator_active_issue();
+
+    // First vote
+    set_caller(account(3));
+    contract.vote_solution(id, account(6), account(5), 42).unwrap();
+
+    // Second vote reaches majority (2 of 3)
+    set_caller(account(4));
+    contract.vote_solution(id, account(6), account(5), 42).unwrap();
+
+    let issue = contract.get_issue(id).unwrap();
+    assert_eq!(issue.status, crate::IssueStatus::Completed);
+    assert_eq!(issue.solver_coldkey, Some(account(5)));
+    assert_eq!(issue.solver_hotkey, Some(account(6)));
+    assert_eq!(issue.winning_pr_number, Some(42));
+
+    // Vote record should be cleared after consensus
+    assert!(contract.solution_votes.get(id).is_none());
+}
+
+#[ink::test]
+fn three_validators_cancel_needs_two_votes() {
+    let (mut contract, id) = setup_3_validator_active_issue();
+
+    // First cancel vote: not enough
+    set_caller(account(3));
+    contract.vote_cancel_issue(id, [0xCC; 32]).unwrap();
+
+    let issue = contract.get_issue(id).unwrap();
+    assert_eq!(issue.status, crate::IssueStatus::Active);
+
+    // Second cancel vote: majority reached
+    set_caller(account(4));
+    contract.vote_cancel_issue(id, [0xCC; 32]).unwrap();
+
+    let issue = contract.get_issue(id).unwrap();
+    assert_eq!(issue.status, crate::IssueStatus::Cancelled);
+}
+
+#[ink::test]
+fn three_validators_third_vote_still_blocked_after_consensus() {
+    let (mut contract, id) = setup_3_validator_active_issue();
+
+    // Two votes complete the issue
+    set_caller(account(3));
+    contract.vote_solution(id, account(6), account(5), 42).unwrap();
+    set_caller(account(4));
+    contract.vote_solution(id, account(6), account(5), 42).unwrap();
+
+    // Third validator tries to vote on now-Completed issue
+    set_caller(account(5));
+    let result = contract.vote_solution(id, account(6), account(5), 42);
+    assert_eq!(result, Err(crate::Error::IssueNotActive));
 }

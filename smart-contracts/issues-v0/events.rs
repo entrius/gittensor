@@ -74,14 +74,6 @@ pub struct RecycleFailed {
     pub amount: u128,
 }
 
-/// Debug event for stake query debugging
-#[ink::event]
-pub struct DebugStakeQuery {
-    pub treasury_stake: u128,
-    pub committed: u128,
-    pub available: u128,
-}
-
 /// Event emitted when treasury hotkey is changed
 #[ink::event]
 pub struct TreasuryHotkeyChanged {
@@ -93,4 +85,18 @@ pub struct TreasuryHotkeyChanged {
     pub bounties_reset: u128,
     /// Number of issues affected
     pub issues_affected: u32,
+}
+
+/// Event emitted when a new validator is added to the whitelist for voting
+#[ink::event]
+pub struct ValidatorAdded {
+    #[ink(topic)]
+    pub hotkey: AccountId,
+}
+
+/// Event emitted when a validator is removed from the whitelist for voting
+#[ink::event]
+pub struct ValidatorRemoved {
+    #[ink(topic)]
+    pub hotkey: AccountId,
 }

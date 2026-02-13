@@ -404,11 +404,11 @@ def get_github_graphql_query(
             if attempt < (max_attempts - 1):
                 backoff_delay = min(5 * (2**attempt), 30)  # cap at 30s
                 # Reduce page size on server-side errors (query may be too expensive)
-                if response.status_code in (502, 503, 504) and limit > 10:
+                if response.status_code in (502, 503, 504):
                     limit = max(limit // 2, 10)
                     bt.logging.warning(
                         f'GraphQL request for PRs failed with status {response.status_code} '
-                        f'(attempt {attempt + 1}/{max_attempts}), reducing page size to {limit} and retrying in {backoff_delay}s...'
+                        f'(attempt {attempt + 1}/{max_attempts}), page size set to {limit}, retrying in {backoff_delay}s...'
                     )
                 else:
                     bt.logging.warning(

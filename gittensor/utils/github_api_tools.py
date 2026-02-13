@@ -262,6 +262,7 @@ def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -
     max_attempts = 3
     headers = make_headers(token)
 
+    last_error = None
     for attempt in range(max_attempts):
         try:
             response = requests.get(
@@ -271,32 +272,28 @@ def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -
                 file_diffs = response.json()
                 return [FileChange.from_github_response(pr_number, repository, file_diff) for file_diff in file_diffs]
 
-            if attempt < (max_attempts - 1):
+            last_error = f'status {response.status_code}'
+            if attempt < max_attempts:
                 backoff_delay = min(5 * (2**attempt), 30)
                 bt.logging.warning(
                     f'File changes request for PR #{pr_number} in {repository} failed with status {response.status_code} '
                     f'(attempt {attempt + 1}/{max_attempts}), retrying in {backoff_delay}s...'
                 )
                 time.sleep(backoff_delay)
-            else:
-                bt.logging.error(
-                    f'File changes request for PR #{pr_number} in {repository} failed with status {response.status_code} '
-                    f'after {max_attempts} attempts'
-                )
 
         except requests.exceptions.RequestException as e:
-            if attempt < (max_attempts - 1):
+            last_error = str(e)
+            if attempt < max_attempts:
                 backoff_delay = min(5 * (2**attempt), 30)
                 bt.logging.warning(
                     f'File changes request error for PR #{pr_number} in {repository} '
                     f'(attempt {attempt + 1}/{max_attempts}): {e}, retrying in {backoff_delay}s...'
                 )
                 time.sleep(backoff_delay)
-            else:
-                bt.logging.error(
-                    f'File changes request for PR #{pr_number} in {repository} failed after {max_attempts} attempts: {e}'
-                )
 
+    bt.logging.error(
+        f'File changes request for PR #{pr_number} in {repository} failed after {max_attempts} attempts: {last_error}'
+    )
     return []
 
 

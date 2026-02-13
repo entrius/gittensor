@@ -441,7 +441,7 @@ class TestFileChangesRetryLogic:
         result = get_pull_request_file_changes('owner/repo', 1, 'fake_token')
 
         assert mock_get.call_count == 3
-        assert mock_sleep.call_count == 2
+        assert mock_sleep.call_count == 3
         assert result == []
         mock_logging.error.assert_called()
 
@@ -488,8 +488,8 @@ class TestFileChangesRetryLogic:
 
         get_pull_request_file_changes('owner/repo', 1, 'fake_token')
 
-        mock_sleep.assert_has_calls([call(5), call(10)])
-        assert mock_sleep.call_count == 2
+        mock_sleep.assert_has_calls([call(5), call(10), call(20)])
+        assert mock_sleep.call_count == 3
 
 
 if __name__ == '__main__':

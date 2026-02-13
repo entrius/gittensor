@@ -703,11 +703,32 @@ def check_github_issue_closed(repo: str, issue_number: int, token: str) -> Optio
         solver_github_id = None
         pr_number = None
 
-        if data.get('pull_request'):
-            pr_url = data['pull_request'].get('html_url')
-            pr_number = extract_pr_number_from_url(pr_url)
+        # Find the merged PR that closed this issue via timeline events
+        try:
+            timeline_response = requests.get(
+                f'{BASE_GITHUB_API_URL}/repos/{repo}/issues/{issue_number}/timeline',
+                headers=headers,
+                timeout=15,
+            )
+            if timeline_response.status_code == 200:
+                for event in timeline_response.json():
+                    if event.get('event') == 'closed' and event.get('commit_id'):
+                        # Issue closed by a merge commit — look up the PR to get its author
+                        pr_resp = requests.get(
+                            f'{BASE_GITHUB_API_URL}/repos/{repo}/commits/{event["commit_id"]}/pulls',
+                            headers=headers,
+                            timeout=15,
+                        )
+                        if pr_resp.status_code == 200 and pr_resp.json():
+                            merged_pr = pr_resp.json()[0]
+                            pr_number = merged_pr.get('number')
+                            solver_github_id = merged_pr.get('user', {}).get('id')
+                        break
+        except Exception as e:
+            bt.logging.warning(f"Error fetching timeline for {repo}#{issue_number}: {e}")
 
-        if data.get('closed_by'):
+        # Fallback: use closed_by if we couldn't find the PR author
+        if not solver_github_id and data.get('closed_by'):
             solver_github_id = data['closed_by'].get('id')
 
         return {

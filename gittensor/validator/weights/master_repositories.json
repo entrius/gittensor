@@ -4772,6 +4772,10 @@
     "tier": "Bronze",
     "weight": 0.18
   },
+  "sipeed/picoclaw": {
+    "weight": 8.26,
+    "tier": "Silver"
+  },
   "siteserver/cms": {
     "tier": "Bronze",
     "weight": 0.29

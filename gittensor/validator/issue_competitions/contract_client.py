@@ -345,7 +345,12 @@ class IssueCompetitionContractClient:
         return value if value is not None else 0
 
     def _raw_contract_read(self, method_name: str, args: dict = None) -> Optional[bytes]:
-        """Read from contract using raw RPC call."""
+        """Read from contract using raw RPC call.
+
+        Returns the ink! return payload (after stripping the ContractExecResult
+        envelope, ExecReturnValue flags, data Vec wrapper, and ink! Result
+        discriminant).  Returns None on any error or revert.
+        """
         try:
             selector = CONTRACT_SELECTORS.get(method_name)
             if not selector:
@@ -357,7 +362,8 @@ class IssueCompetitionContractClient:
 
             origin = bytes.fromhex(self.subtensor.substrate.ss58_decode(caller.ss58_address))
             dest = bytes.fromhex(self.subtensor.substrate.ss58_decode(self.contract_address))
-            value = b'\x00' * 16
+            # Subtensor chain Balance is u64, not u128
+            value = b'\x00' * 8
             gas_limit = b'\x00'
             storage_limit = b'\x00'
 
@@ -379,28 +385,69 @@ class IssueCompetitionContractClient:
             if len(raw) < 32:
                 return None
 
-            return raw[16:]
+            # Parse ContractExecResult (after 16-byte gas prefix):
+            #   StorageDeposit: 1 byte enum + 8 bytes u64 = 9
+            #   debug_message:  1 byte (compact 0 = empty)
+            #   Result:         1 byte (0x00 = Ok)
+            #   flags:          4 bytes u32 (0 = success, 1 = REVERT)
+            #   data:           compact len + bytes
+            #   ink! data[0]:   Result discriminant (0x00 = Ok)
+            #   ink! data[1:]:  SCALE-encoded return value
+            r = raw[16:]
+
+            # Check Result discriminant at offset 10
+            if len(r) < 15 or r[10] != 0x00:
+                return None
+
+            # Check REVERT flag at offset 11-14
+            flags = struct.unpack_from('<I', r, 11)[0]
+            if flags & 1:
+                return None
+
+            # Read data Vec<u8> compact length at offset 15
+            data_compact = r[15]
+            data_mode = data_compact & 0x03
+            if data_mode == 0:
+                data_len = data_compact >> 2
+                data_start = 16
+            elif data_mode == 1:
+                if len(r) < 17:
+                    return None
+                data_len = (r[15] | (r[16] << 8)) >> 2
+                data_start = 17
+            else:
+                return None
+
+            if len(r) < data_start + data_len or data_len < 1:
+                return None
+
+            # First byte of data is ink! Result discriminant (0x00 = Ok)
+            if r[data_start] != 0x00:
+                return None
+
+            # Return the actual SCALE-encoded return value
+            return r[data_start + 1:data_start + data_len]
 
         except Exception as e:
             bt.logging.debug(f'Raw contract read failed: {e}')
             return None
 
     def _extract_u32_from_response(self, response_bytes: bytes) -> Optional[int]:
-        """Extract u32 value from response bytes."""
-        if not response_bytes or len(response_bytes) < 15:
+        """Extract u32 value from SCALE-encoded return bytes."""
+        if not response_bytes or len(response_bytes) < 4:
             return None
         try:
-            return struct.unpack_from('<I', response_bytes, 11)[0]
+            return struct.unpack_from('<I', response_bytes, 0)[0]
         except Exception:
             return None
 
     def _extract_u128_from_response(self, response_bytes: bytes) -> Optional[int]:
-        """Extract u128 value from response bytes."""
-        if not response_bytes or len(response_bytes) < 27:
+        """Extract u128 value from SCALE-encoded return bytes."""
+        if not response_bytes or len(response_bytes) < 16:
             return None
         try:
-            low = struct.unpack_from('<Q', response_bytes, 11)[0]
-            high = struct.unpack_from('<Q', response_bytes, 19)[0]
+            low = struct.unpack_from('<Q', response_bytes, 0)[0]
+            high = struct.unpack_from('<Q', response_bytes, 8)[0]
             return low + (high << 64)
         except Exception:
             return None
@@ -939,25 +986,16 @@ class IssueCompetitionContractClient:
             return []
 
     def _decode_validator_list(self, response_bytes: bytes) -> List[str]:
-        """Decode a SCALE-encoded Vec<AccountId> from contract response.
+        """Decode a SCALE-encoded Vec<AccountId> from clean return bytes.
 
-        The response has an ink! envelope prefix (flags + result bytes),
-        then a SCALE compact-encoded length followed by 32-byte AccountIds.
+        The bytes are the raw SCALE encoding: compact-length followed by
+        N * 32-byte AccountIds.
         """
-        if not response_bytes or len(response_bytes) < 12:
+        if not response_bytes:
             return []
 
         try:
-            # Skip ink! response envelope: look for the compact-encoded vec length
-            # The envelope is: flags(4) + Ok discriminant(1) + data...
-            # But exact offset varies, so we scan for a plausible start.
-            # With 0 validators, the compact length byte is 0x00.
-            # With N validators, compact length = N << 2 (for N < 64).
-            # We know the data payload starts at offset 11 based on other extractors.
-            offset = 11
-
-            if offset >= len(response_bytes):
-                return []
+            offset = 0
 
             # Read SCALE compact length
             first_byte = response_bytes[offset]
@@ -985,7 +1023,7 @@ class IssueCompetitionContractClient:
             return validators
 
         except Exception as e:
-            bt.logging.debug(f'Error decoding validator list: {e}')
+            bt.logging.error(f'Error decoding validator list: {e}')
             return []
 
     def set_treasury_hotkey(

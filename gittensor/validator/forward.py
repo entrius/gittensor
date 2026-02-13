@@ -162,8 +162,9 @@ async def issues_competition(
         errors = []
 
         for issue in active_issues:
+            bounty_display = issue.bounty_amount / 1e9
             issue_label = (
-                f"{issue.repository_full_name}#{issue.issue_number} (id={issue.id}, bounty={issue.bounty_amount})"
+                f"{issue.repository_full_name}#{issue.issue_number} (id={issue.id}, bounty={bounty_display:.2f} ALPHA)"
             )
             try:
                 bt.logging.info(f"--- Processing issue: {issue_label} ---")
@@ -241,16 +242,18 @@ async def issues_competition(
                 bt.logging.error(f"Error processing {issue_label}: {e}")
                 errors.append(f"{issue_label}: {str(e)}")
 
-        if votes_cast > 0 or cancels_cast > 0:
-            bt.logging.success(
-                f"Issue bounties: processed {len(active_issues)} issues, "
-                f"{votes_cast} solution votes, {cancels_cast} cancel votes"
-            )
-        elif active_issues:
-            bt.logging.debug(f"Issue bounties: processed {len(active_issues)} issues (no state changes)")
-
         if errors:
             bt.logging.warning(f"Issue bounties errors: {errors[:3]}")
+
+        if votes_cast > 0 or cancels_cast > 0:
+            bt.logging.success(
+                f"=== Issue Bounties Complete: processed {len(active_issues)} issues, "
+                f"{votes_cast} solution votes, {cancels_cast} cancel votes ==="
+            )
+        else:
+            bt.logging.info(
+                f"=== Issue Bounties Complete: processed {len(active_issues)} issues (no state changes) ==="
+            )
 
     except Exception as e:
         bt.logging.error(f"Issue bounties forward failed: {e}")

@@ -57,7 +57,7 @@ def load_config() -> Dict[str, Any]:
 
 def get_contract_address(cli_value: str = '') -> str:
     """
-    Get contract address. CLI arg > env var > constants.py default.
+    Get contract address. CLI arg > env var > config.json > constants.py default.
 
     Args:
         cli_value: Value passed via --contract CLI option
@@ -67,7 +67,13 @@ def get_contract_address(cli_value: str = '') -> str:
     """
     if cli_value:
         return cli_value
-    return os.environ.get('CONTRACT_ADDRESS') or CONTRACT_ADDRESS
+    env_val = os.environ.get('CONTRACT_ADDRESS')
+    if env_val:
+        return env_val
+    config = load_config()
+    if config.get('contract_address'):
+        return config['contract_address']
+    return CONTRACT_ADDRESS
 
 
 NETWORK_MAP = {

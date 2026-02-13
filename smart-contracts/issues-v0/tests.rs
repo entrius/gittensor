@@ -46,7 +46,7 @@ fn set_caller(caller: AccountId) {
 // ============================================================================
 
 /// Mock for Subtensor chain extension (extension 5001).
-/// Intercepts get_stake_info (func 0) and transfer_stake (func 6).
+/// Intercepts get_stake_info (func 0) and proxy_call (func 16).
 struct MockSubtensorExtension {
     stake_amount: u64,
 }
@@ -58,7 +58,7 @@ impl ink::env::test::ChainExtension for MockSubtensorExtension {
 
     /// Handles chain extension calls:
     ///   func 0 (get_stake_info) -> returns Some(StakeInfo) with self.stake_amount
-    ///   func 6 (transfer_stake) -> returns 0 (success)
+    ///   func 16 (proxy_call) -> returns 0 (success)
     fn call(&mut self, func_id: u16, _input: &[u8], output: &mut Vec<u8>) -> u32 {
         match func_id {
             0 => {
@@ -80,8 +80,8 @@ impl ink::env::test::ChainExtension for MockSubtensorExtension {
                 result.encode_to(output);
                 0 // success
             }
-            6 => {
-                // transfer_stake -> return 0u32 (success)
+            16 => {
+                // proxy_call -> return 0u32 (success)
                 0u32.encode_to(output);
                 0
             }
@@ -881,7 +881,7 @@ fn vote_solution_fails_issue_not_found() {
         999,
         account(6), // solver_hotkey
         account(5), // solver_coldkey
-        [0xBB; 32], // pr_url_hash
+        42,         // pr_number
     );
     assert_eq!(result, Err(crate::Error::IssueNotFound));
 }
@@ -893,7 +893,7 @@ fn vote_solution_fails_issue_not_active() {
 
     // Issue is Registered, not Active
     set_caller(account(4));
-    let result = contract.vote_solution(id, account(6), account(5), [0xBB; 32]);
+    let result = contract.vote_solution(id, account(6), account(5), 42);
     assert_eq!(result, Err(crate::Error::IssueNotActive));
 }
 
@@ -907,7 +907,7 @@ fn vote_solution_fails_on_completed_issue() {
     contract.issues.insert(id, &issue);
 
     set_caller(account(4));
-    let result = contract.vote_solution(id, account(6), account(5), [0xBB; 32]);
+    let result = contract.vote_solution(id, account(6), account(5), 42);
     assert_eq!(result, Err(crate::Error::IssueNotActive));
 }
 
@@ -920,7 +920,7 @@ fn vote_solution_fails_on_cancelled_issue() {
     contract.cancel_issue(id).unwrap();
 
     set_caller(account(4));
-    let result = contract.vote_solution(id, account(6), account(5), [0xBB; 32]);
+    let result = contract.vote_solution(id, account(6), account(5), 42);
     assert_eq!(result, Err(crate::Error::IssueNotActive));
 }
 
@@ -941,7 +941,7 @@ fn vote_solution_fails_already_voted() {
         .insert((id, account(4)), &true);
 
     set_caller(account(4));
-    let result = contract.vote_solution(id, account(6), account(5), [0xBB; 32]);
+    let result = contract.vote_solution(id, account(6), account(5), 42);
     assert_eq!(result, Err(crate::Error::AlreadyVoted));
 }
 
@@ -1056,12 +1056,12 @@ fn remove_from_bounty_queue_noop_for_missing_id() {
 #[ink::test]
 fn get_or_create_solution_vote_creates_new() {
     let mut contract = create_default_contract();
-    let vote = contract.get_or_create_solution_vote(1, account(6), [0xBB; 32], account(5));
+    let vote = contract.get_or_create_solution_vote(1, account(6), 42, account(5));
 
     assert_eq!(vote.issue_id, 1);
     assert_eq!(vote.solver_hotkey, account(6));
     assert_eq!(vote.solver_coldkey, account(5));
-    assert_eq!(vote.pr_url_hash, [0xBB; 32]);
+    assert_eq!(vote.pr_number, 42);
     assert_eq!(vote.votes_count, 0);
     assert_eq!(vote.total_stake_voted, 0);
 }
@@ -1075,7 +1075,7 @@ fn get_or_create_solution_vote_returns_existing() {
         issue_id: 1,
         solver_hotkey: account(6),
         solver_coldkey: account(5),
-        pr_url_hash: [0xBB; 32],
+        pr_number: 42,
         total_stake_voted: 500,
         votes_count: 3,
     };
@@ -1084,7 +1084,7 @@ fn get_or_create_solution_vote_returns_existing() {
     let vote = contract.get_or_create_solution_vote(
         1,
         account(7), // different solver -- should be ignored
-        [0xFF; 32], // different hash -- should be ignored
+        99,         // different pr -- should be ignored
         account(8),
     );
 
@@ -1137,7 +1137,7 @@ fn clear_solution_vote_removes_record() {
         issue_id: 1,
         solver_hotkey: account(6),
         solver_coldkey: account(5),
-        pr_url_hash: [0xBB; 32],
+        pr_number: 42,
         total_stake_voted: 100,
         votes_count: 1,
     };
@@ -1414,7 +1414,7 @@ fn get_validator_stake_returns_mocked_value() {
 
 /// Helper: creates a contract with an Active issue and mock extension.
 /// bounty_amount is set to 0 so that complete_issue/execute_cancel_issue
-/// won't call call_runtime (which the off-chain env doesn't support).
+/// won't trigger proxy_call (payout/recycle paths).
 /// This lets us test the full consensus/completion/cancellation flow.
 /// Payout transfers require E2E tests against a real Subtensor node.
 fn setup_active_issue_with_mock() -> (IssueBountyManager, u64) {
@@ -1424,7 +1424,7 @@ fn setup_active_issue_with_mock() -> (IssueBountyManager, u64) {
 
     let mut issue = contract.issues.get(id).unwrap();
     issue.status = crate::IssueStatus::Active;
-    issue.bounty_amount = 0; // zero avoids call_runtime in payout/recycle paths
+    issue.bounty_amount = 0; // zero avoids proxy_call in payout/recycle paths
     contract.issues.insert(id, &issue);
 
     (contract, id)
@@ -1440,7 +1440,7 @@ fn vote_solution_succeeds_and_completes_issue() {
         id,
         account(6), // solver_hotkey
         account(5), // solver_coldkey
-        [0xBB; 32], // pr_url_hash
+        42,         // pr_number
     );
     assert!(result.is_ok());
 
@@ -1459,7 +1459,7 @@ fn vote_solution_removes_issue_from_bounty_queue() {
 
     set_caller(account(4));
     contract
-        .vote_solution(id, account(6), account(5), [0xBB; 32])
+        .vote_solution(id, account(6), account(5), 42)
         .unwrap();
 
     assert!(!contract.get_bounty_queue().contains(&id));
@@ -1471,7 +1471,7 @@ fn vote_solution_clears_vote_record_after_consensus() {
 
     set_caller(account(4));
     contract
-        .vote_solution(id, account(6), account(5), [0xBB; 32])
+        .vote_solution(id, account(6), account(5), 42)
         .unwrap();
 
     // Vote record should be cleaned up after consensus
@@ -1484,7 +1484,7 @@ fn vote_solution_records_voter() {
 
     set_caller(account(4));
     contract
-        .vote_solution(id, account(6), account(5), [0xBB; 32])
+        .vote_solution(id, account(6), account(5), 42)
         .unwrap();
 
     // Voter should be recorded (prevents double voting)
@@ -1506,7 +1506,7 @@ fn vote_solution_fails_with_zero_stake() {
     contract.issues.insert(id, &issue);
 
     set_caller(account(4));
-    let result = contract.vote_solution(id, account(6), account(5), [0xBB; 32]);
+    let result = contract.vote_solution(id, account(6), account(5), 42);
     assert_eq!(result, Err(crate::Error::InsufficientStake));
 }
 
@@ -1534,7 +1534,7 @@ fn vote_cancel_issue_succeeds_on_registered_issue() {
 fn vote_cancel_issue_succeeds_on_active_issue() {
     let (mut contract, id) = setup_active_issue_with_mock();
     // bounty_amount is 0 from setup, so recycle(0) returns true
-    // without calling call_runtime
+    // without calling proxy_call
 
     set_caller(account(4));
     let result = contract.vote_cancel_issue(id, [0xCC; 32]);

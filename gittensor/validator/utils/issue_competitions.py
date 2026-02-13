@@ -3,22 +3,37 @@
 
 """Utility functions for Issue Bounties sub-mechanism."""
 
+import json
 import os
+from pathlib import Path
 from typing import Dict, Optional
 
 import bittensor as bt
 
 from gittensor.constants import CONTRACT_ADDRESS
 
+_CONFIG_FILE = Path.home() / '.gittensor' / 'config.json'
+
 
 def get_contract_address() -> Optional[str]:
     """
-    Get contract address. Override via CONTRACT_ADDRESS env var for dev/testing.
+    Get contract address. env var > ~/.gittensor/config.json > constants.py default.
 
     Returns:
-        Contract address string (env var override or constants.py default)
+        Contract address string
     """
-    return os.environ.get('CONTRACT_ADDRESS') or CONTRACT_ADDRESS
+    env_val = os.environ.get('CONTRACT_ADDRESS')
+    if env_val:
+        return env_val
+    if _CONFIG_FILE.exists():
+        try:
+            with open(_CONFIG_FILE, 'r') as f:
+                config = json.load(f)
+            if config.get('contract_address'):
+                return config['contract_address']
+        except (json.JSONDecodeError, IOError):
+            pass
+    return CONTRACT_ADDRESS
 
 
 def get_miner_coldkey(hotkey: str, subtensor: bt.Subtensor, netuid: int) -> Optional[str]:

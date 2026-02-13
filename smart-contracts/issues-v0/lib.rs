@@ -5,8 +5,9 @@ mod events;
 mod runtime_calls;
 mod types;
 
+use ink::prelude::vec::Vec;
+
 pub use errors::Error;
-pub use runtime_calls::RawCall;
 pub use types::*;
 
 // ============================================================================
@@ -34,16 +35,14 @@ pub trait SubtensorExtension {
     fn get_stake_info(hotkey: [u8; 32], coldkey: [u8; 32], netuid: u16)
         -> Option<crate::StakeInfo>;
 
-    /// Transfer stake ownership to a different coldkey.
-    /// Amount is in AlphaCurrency (u64), NOT u128!
+    /// Proxy-aware call dispatcher (function 16).
+    /// Dispatches any RuntimeCall through pallet_proxy on behalf of real_coldkey.
     /// Returns 0 on success, non-zero error code on failure.
-    #[ink(function = 6, handle_status = false)]
-    fn transfer_stake(
-        destination_coldkey: [u8; 32],
-        hotkey: [u8; 32],
-        origin_netuid: u16,
-        destination_netuid: u16,
-        amount: u64,
+    #[ink(function = 16, handle_status = false)]
+    fn proxy_call(
+        real_coldkey: [u8; 32],
+        proxy_type: Option<u8>,
+        call_data: Vec<u8>,
     ) -> u32;
 }
 
@@ -65,7 +64,7 @@ impl ink::env::Environment for CustomEnvironment {
 #[ink::contract(env = crate::CustomEnvironment)]
 mod issue_bounty_manager {
     use crate::events::*;
-    use crate::runtime_calls::RawCall;
+    use crate::runtime_calls::{InnerCall, PROXY_TYPE_NON_CRITICAL, PROXY_TYPE_TRANSFER};
     use crate::types::*;
     use crate::Error;
     use ink::prelude::string::String;
@@ -464,16 +463,19 @@ mod issue_bounty_manager {
             if to_recycle > 0 {
                 let amount_u64: u64 = to_recycle.try_into().unwrap_or(u64::MAX);
 
-                let proxy_call = RawCall::proxied_recycle_alpha(
-                    &self.owner,
+                let call_data = InnerCall::recycle_alpha(
                     &self.treasury_hotkey,
                     amount_u64,
                     self.netuid,
                 );
+                let owner_bytes: [u8; 32] = *self.owner.as_ref();
+                let result_code = self.env().extension().proxy_call(
+                    owner_bytes,
+                    Some(PROXY_TYPE_NON_CRITICAL),
+                    call_data,
+                );
 
-                let result = self.env().call_runtime(&proxy_call);
-
-                if result.is_ok() {
+                if result_code == 0 {
                     recycled = to_recycle;
                     self.alpha_pool = 0;
 
@@ -908,18 +910,21 @@ mod issue_bounty_manager {
         ) -> Result<Balance, Error> {
             let amount_u64: u64 = payout_amount.try_into().unwrap_or(u64::MAX);
 
-            let proxy_call = RawCall::proxied_transfer_stake(
-                &self.owner,
+            let call_data = InnerCall::transfer_stake(
                 &solver_coldkey,
                 &self.treasury_hotkey,
                 self.netuid,
                 self.netuid,
                 amount_u64,
             );
+            let owner_bytes: [u8; 32] = *self.owner.as_ref();
+            let result_code = self.env().extension().proxy_call(
+                owner_bytes,
+                Some(PROXY_TYPE_TRANSFER),
+                call_data,
+            );
 
-            let result = self.env().call_runtime(&proxy_call);
-
-            if result.is_ok() {
+            if result_code == 0 {
                 self.env().emit_event(BountyPaidOut {
                     issue_id,
                     miner: solver_coldkey,
@@ -939,16 +944,19 @@ mod issue_bounty_manager {
 
             let amount_u64: u64 = amount.try_into().unwrap_or(u64::MAX);
 
-            let proxy_call = RawCall::proxied_recycle_alpha(
-                &self.owner,
+            let call_data = InnerCall::recycle_alpha(
                 &self.treasury_hotkey,
                 amount_u64,
                 self.netuid,
             );
+            let owner_bytes: [u8; 32] = *self.owner.as_ref();
+            let result_code = self.env().extension().proxy_call(
+                owner_bytes,
+                Some(PROXY_TYPE_NON_CRITICAL),
+                call_data,
+            );
 
-            let result = self.env().call_runtime(&proxy_call);
-
-            if result.is_ok() {
+            if result_code == 0 {
                 self.env().emit_event(EmissionsRecycled {
                     amount,
                     destination: self.treasury_hotkey,

@@ -34,7 +34,7 @@ def get_miner_coldkey(hotkey: str, subtensor: bt.Subtensor, netuid: int) -> Opti
         Coldkey address or None
     """
     try:
-        result = subtensor.query_subtensor("Owner", None, [hotkey])
+        result = subtensor.get_hotkey_owner(hotkey)
         if result:
             return str(result)
     except Exception as e:

@@ -24,8 +24,8 @@ pub enum Error {
     InvalidSolver,
     /// Caller has already voted on this proposal
     AlreadyVoted,
-    /// Caller has insufficient stake to vote
-    InsufficientStake,
+    /// Caller is not a whitelisted validator
+    NotWhitelistedValidator,
     /// Bounty has not been completed yet
     BountyNotCompleted,
     /// Bounty has no funds allocated

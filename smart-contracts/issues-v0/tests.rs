@@ -1069,7 +1069,6 @@ fn get_or_create_solution_vote_creates_new() {
     assert_eq!(vote.solver_coldkey, account(5));
     assert_eq!(vote.pr_number, 42);
     assert_eq!(vote.votes_count, 0);
-    assert_eq!(vote.total_stake_voted, 0);
 }
 
 #[ink::test]
@@ -1082,7 +1081,6 @@ fn get_or_create_solution_vote_returns_existing() {
         solver_hotkey: account(6),
         solver_coldkey: account(5),
         pr_number: 42,
-        total_stake_voted: 500,
         votes_count: 3,
     };
     contract.solution_votes.insert(1, &existing);
@@ -1097,7 +1095,6 @@ fn get_or_create_solution_vote_returns_existing() {
     // Should return the stored vote, not create a new one
     assert_eq!(vote.solver_hotkey, account(6));
     assert_eq!(vote.votes_count, 3);
-    assert_eq!(vote.total_stake_voted, 500);
 }
 
 #[ink::test]
@@ -1108,7 +1105,6 @@ fn get_or_create_cancel_issue_vote_creates_new() {
     assert_eq!(vote.issue_id, 1);
     assert_eq!(vote.reason_hash, [0xCC; 32]);
     assert_eq!(vote.votes_count, 0);
-    assert_eq!(vote.total_stake_voted, 0);
 }
 
 #[ink::test]
@@ -1118,7 +1114,6 @@ fn get_or_create_cancel_issue_vote_returns_existing() {
     let existing = crate::CancelVote {
         issue_id: 1,
         reason_hash: [0xCC; 32],
-        total_stake_voted: 1000,
         votes_count: 2,
     };
     contract.cancel_issue_votes.insert(1, &existing);
@@ -1129,7 +1124,6 @@ fn get_or_create_cancel_issue_vote_returns_existing() {
 
     assert_eq!(vote.reason_hash, [0xCC; 32]);
     assert_eq!(vote.votes_count, 2);
-    assert_eq!(vote.total_stake_voted, 1000);
 }
 
 // ============================================================================
@@ -1144,7 +1138,6 @@ fn clear_solution_vote_removes_record() {
         solver_hotkey: account(6),
         solver_coldkey: account(5),
         pr_number: 42,
-        total_stake_voted: 100,
         votes_count: 1,
     };
     contract.solution_votes.insert(1, &vote);
@@ -1159,7 +1152,6 @@ fn clear_cancel_issue_vote_removes_record() {
     let vote = crate::CancelVote {
         issue_id: 1,
         reason_hash: [0xCC; 32],
-        total_stake_voted: 100,
         votes_count: 1,
     };
     contract.cancel_issue_votes.insert(1, &vote);
@@ -1406,20 +1398,6 @@ fn get_treasury_stake_returns_zero_when_no_stake() {
     assert_eq!(stake, 0);
 }
 
-#[ink::test]
-fn get_validator_stake_returns_zero_for_non_whitelisted() {
-    let contract = create_default_contract();
-    assert_eq!(contract.get_validator_stake(account(4)), 0);
-}
-
-#[ink::test]
-fn get_validator_stake_returns_one_for_whitelisted() {
-    let mut contract = create_default_contract();
-    set_caller(account(1));
-    contract.add_validator(account(4)).unwrap();
-    assert_eq!(contract.get_validator_stake(account(4)), 1);
-}
-
 // ============================================================================
 // Vote Solution Happy Path (with mocked chain extension)
 // ============================================================================
@@ -1520,10 +1498,10 @@ fn vote_solution_fails_for_non_whitelisted_caller() {
     issue.bounty_amount = MIN_BOUNTY;
     contract.issues.insert(id, &issue);
 
-    // account(4) is not whitelisted, so get_validator_stake returns 0
+    // account(4) is not whitelisted
     set_caller(account(4));
     let result = contract.vote_solution(id, account(6), account(5), 42);
-    assert_eq!(result, Err(crate::Error::InsufficientStake));
+    assert_eq!(result, Err(crate::Error::NotWhitelistedValidator));
 }
 
 // ============================================================================
@@ -1622,10 +1600,10 @@ fn vote_cancel_issue_fails_for_non_whitelisted_caller() {
     let mut contract = create_default_contract();
     let id = register_test_issue(&mut contract);
 
-    // account(4) is not whitelisted, so get_validator_stake returns 0
+    // account(4) is not whitelisted
     set_caller(account(4));
     let result = contract.vote_cancel_issue(id, [0xCC; 32]);
-    assert_eq!(result, Err(crate::Error::InsufficientStake));
+    assert_eq!(result, Err(crate::Error::NotWhitelistedValidator));
 }
 
 // ============================================================================

@@ -77,8 +77,6 @@ pub struct SolutionVote {
     pub solver_coldkey: AccountId,
     /// PR number (combined with issue's repository_full_name to form URL)
     pub pr_number: u32,
-    /// Total stake that has voted
-    pub total_stake_voted: u128,
     /// Number of votes cast
     pub votes_count: u32,
 }
@@ -90,7 +88,6 @@ impl Default for SolutionVote {
             solver_hotkey: AccountId::from([0u8; 32]),
             solver_coldkey: AccountId::from([0u8; 32]),
             pr_number: 0,
-            total_stake_voted: 0,
             votes_count: 0,
         }
     }
@@ -104,8 +101,6 @@ pub struct CancelVote {
     pub issue_id: u64,
     /// Hash of the reason for cancellation
     pub reason_hash: [u8; 32],
-    /// Total stake that has voted
-    pub total_stake_voted: u128,
     /// Number of votes cast
     pub votes_count: u32,
 }

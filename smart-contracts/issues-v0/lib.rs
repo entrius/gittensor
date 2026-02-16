@@ -302,9 +302,9 @@ mod issue_bounty_manager {
 
             // Check not already voted
             self.check_not_voted_solution(issue_id, self.env().caller())?;
-            let (caller, stake) = self.get_caller_stake_validated()?;
+            let caller = self.validate_whitelisted_caller()?;
 
-            // Get or create vote, accumulate stake
+            // Get or create vote
             let mut vote = self.get_or_create_solution_vote(
                 issue_id,
                 solver_hotkey,
@@ -312,7 +312,6 @@ mod issue_bounty_manager {
                 solver_coldkey,
             );
             self.solution_vote_voters.insert((issue_id, caller), &true);
-            vote.total_stake_voted = vote.total_stake_voted.saturating_add(stake);
             vote.votes_count = vote.votes_count.saturating_add(1);
             self.solution_votes.insert(issue_id, &vote);
 
@@ -346,7 +345,7 @@ mod issue_bounty_manager {
 
             // Standard vote validation
             self.check_not_voted_cancel_issue(issue_id, self.env().caller())?;
-            let (caller, _stake) = self.get_caller_stake_validated()?;
+            let caller = self.validate_whitelisted_caller()?;
 
             // Get or create vote, increment count
             let mut vote = self.get_or_create_cancel_issue_vote(issue_id, reason_hash);
@@ -652,14 +651,13 @@ mod issue_bounty_manager {
         // Internal Functions
         // ========================================================================
 
-        /// Gets the caller's validated stake (returns error if zero).
-        fn get_caller_stake_validated(&self) -> Result<(AccountId, u128), Error> {
+        /// Validates caller is a whitelisted validator, returns caller AccountId.
+        fn validate_whitelisted_caller(&self) -> Result<AccountId, Error> {
             let caller = self.env().caller();
-            let stake = self.get_validator_stake(caller);
-            if stake == 0 {
-                return Err(Error::InsufficientStake);
+            if !self.validators.contains(&caller) {
+                return Err(Error::NotWhitelistedValidator);
             }
-            Ok((caller, stake))
+            Ok(caller)
         }
 
         /// Checks if caller has already voted for a solution.
@@ -706,7 +704,6 @@ mod issue_bounty_manager {
                     solver_hotkey,
                     solver_coldkey,
                     pr_number,
-                    total_stake_voted: 0,
                     votes_count: 0,
                 }
             }
@@ -724,7 +721,6 @@ mod issue_bounty_manager {
                 CancelVote {
                     issue_id,
                     reason_hash,
-                    total_stake_voted: 0,
                     votes_count: 0,
                 }
             }
@@ -839,19 +835,6 @@ mod issue_bounty_manager {
             }
         }
 
-        /// Returns voting weight for a validator.
-        /// NOTE: V0 returns 1, every whitelisted voter (validator) gets equal representation
-        /// TODO (PR #2376): Replace with VotingPower chain extension for stake-weighted voting.
-        fn get_validator_stake(&self, validator: AccountId) -> u128 {
-            // When VotingPower chain extension is available (PR #2376), this will query:
-            // self.env().extension().get_voting_power(validator) as u128
-            if self.validators.contains(&validator) {
-                1
-            } else {
-                0
-            }
-        }
-
         /// Calculate total funds committed to non-finalized issues (ground truth).
         /// Iterates through all issues and sums bounty_amount for Registered/Active issues.
         fn get_total_committed(&self) -> u128 {
@@ -911,7 +894,7 @@ mod issue_bounty_manager {
                 {
                     // Zero bounty_amount only after successful payout
                     if let Some(mut issue) = self.issues.get(issue_id) {
-                        issue.bounty_amount = 0;
+                    issue.bounty_amount = 0;
                         self.issues.insert(issue_id, &issue);
                     }
                 }

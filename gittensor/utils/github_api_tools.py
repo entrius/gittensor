@@ -671,14 +671,84 @@ def extract_pr_number_from_url(pr_url: str) -> Optional[int]:
     return int(match.group(1)) if match else None
 
 
-def find_solver_from_timeline(repo: str, issue_number: int, headers: dict) -> tuple:
+def find_solver_from_cross_references(repo: str, issue_number: int, timeline_events: list, token: str) -> tuple:
+    """Fallback solver detection via cross-referenced merged PRs.
+
+    When a closed event has no commit_id, this searches timeline cross-references
+    for merged PRs and verifies via GraphQL that they actually close the issue.
+
+    Returns:
+        (solver_github_id, pr_number) — either may be None if no match found.
+    """
+    owner, name = repo.split('/')
+
+    # Filter for cross-referenced events that are merged PRs
+    candidates = []
+    for event in timeline_events:
+        if event.get('event') != 'cross-referenced':
+            continue
+        source_issue = event.get('source', {}).get('issue', {})
+        pr_info = source_issue.get('pull_request', {})
+        if pr_info.get('merged_at'):
+            pr_number = source_issue.get('number')
+            user_id = source_issue.get('user', {}).get('id')
+            if pr_number:
+                candidates.append((pr_number, user_id))
+
+    bt.logging.debug(f'Found {len(candidates)} merged PR candidates from cross-references')
+
+    # Verify each candidate actually closes this issue via GraphQL
+    query = """
+    query($owner: String!, $name: String!, $prNumber: Int!) {
+      repository(owner: $owner, name: $name) {
+        pullRequest(number: $prNumber) {
+          closingIssuesReferences(first: 20) {
+            nodes { number }
+          }
+        }
+      }
+    }
+    """
+
+    for pr_number, user_id in candidates:
+        bt.logging.debug(f'Verifying PR#{pr_number} closes issue #{issue_number} via GraphQL')
+        result = execute_graphql_query(
+            query=query,
+            variables={'owner': owner, 'name': name, 'prNumber': pr_number},
+            token=token,
+            max_attempts=3,
+        )
+        if not result:
+            continue
+
+        closing_nodes = (
+            result.get('data', {})
+            .get('repository', {})
+            .get('pullRequest', {})
+            .get('closingIssuesReferences', {})
+            .get('nodes', [])
+        )
+        closing_numbers = [node.get('number') for node in closing_nodes]
+        bt.logging.debug(f'PR#{pr_number} closingIssuesReferences: {closing_numbers}')
+
+        if issue_number in closing_numbers:
+            bt.logging.debug(f'Verified solver via cross-reference: PR#{pr_number}, solver_id={user_id}')
+            return user_id, pr_number
+
+    return None, None
+
+
+def find_solver_from_timeline(repo: str, issue_number: int, token: str) -> tuple:
     """Find the PR author who closed an issue by walking its timeline events.
 
     Uses retry logic with exponential backoff for transient failures.
+    Falls back to cross-reference analysis when closed events lack a commit_id.
 
     Returns:
         (solver_github_id, pr_number) — either may be None if not found.
     """
+    bt.logging.debug(f'Finding solver for {repo}#{issue_number}')
+    headers = make_headers(token)
     max_attempts = 3
     last_error = None
 
@@ -701,24 +771,36 @@ def find_solver_from_timeline(repo: str, issue_number: int, headers: dict) -> tu
                     time.sleep(backoff_delay)
                 continue
 
-            for event in timeline_response.json():
-                if event.get('event') != 'closed' or not event.get('commit_id'):
+            timeline_events = timeline_response.json()
+
+            for event in timeline_events:
+                if event.get('event') != 'closed':
                     continue
 
-                # Issue was closed by a merge commit — look up the associated PR
-                pr_resp = requests.get(
-                    f'{BASE_GITHUB_API_URL}/repos/{repo}/commits/{event["commit_id"]}/pulls',
-                    headers=headers,
-                    timeout=15,
-                )
-                if pr_resp.status_code == 200 and pr_resp.json():
-                    merged_pr = pr_resp.json()[0]
-                    return merged_pr.get('user', {}).get('id'), merged_pr.get('number')
+                commit_id = event.get('commit_id')
 
-                # PR lookup failed
-                return None, None
+                if commit_id:
+                    bt.logging.debug(f'Closed event has commit_id: {commit_id}')
+                    # Issue was closed by a merge commit
+                    pr_resp = requests.get(
+                        f'{BASE_GITHUB_API_URL}/repos/{repo}/commits/{commit_id}/pulls',
+                        headers=headers,
+                        timeout=15,
+                    )
+                    if pr_resp.status_code == 200 and pr_resp.json():
+                        merged_pr = pr_resp.json()[0]
+                        solver_id = merged_pr.get('user', {}).get('id')
+                        pr_number = merged_pr.get('number')
+                        bt.logging.debug(f'Found solver via commit: PR#{pr_number}, solver_id={solver_id}')
+                        return solver_id, pr_number
 
-            # No closing commit event found in timeline
+                    # PR lookup failed
+                    return None, None
+                else:
+                    bt.logging.debug(f'Closed event has null commit_id, using cross-reference fallback')
+                    return find_solver_from_cross_references(repo, issue_number, timeline_events, token)
+
+            # No closed event found in timeline
             return None, None
 
         except requests.exceptions.RequestException as e:
@@ -764,7 +846,7 @@ def check_github_issue_closed(repo: str, issue_number: int, token: str) -> Optio
         if data.get('state') != 'closed':
             return {'is_closed': False}
 
-        solver_github_id, pr_number = find_solver_from_timeline(repo, issue_number, headers)
+        solver_github_id, pr_number = find_solver_from_timeline(repo, issue_number, token)
 
         return {
             'is_closed': True,

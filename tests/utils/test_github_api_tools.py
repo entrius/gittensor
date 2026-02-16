@@ -492,5 +492,162 @@ class TestFileChangesRetryLogic:
         assert mock_sleep.call_count == 3
 
 
+# ============================================================================
+# Solver Detection Tests (find_solver_from_timeline + cross-reference fallback)
+# ============================================================================
+
+find_solver_from_timeline = github_api_tools.find_solver_from_timeline
+
+
+class TestFindSolverFromTimeline:
+    """Test suite for find_solver_from_timeline with cross-reference fallback."""
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_primary_path_commit_id_present(self, mock_logging, mock_get):
+        """Primary path works when commit_id is present in the closed event."""
+        timeline_response = Mock(status_code=200)
+        timeline_response.json.return_value = [
+            {'event': 'closed', 'commit_id': 'abc123'},
+        ]
+
+        pr_response = Mock(status_code=200)
+        pr_response.json.return_value = [
+            {'user': {'id': 42}, 'number': 14},
+        ]
+
+        mock_get.side_effect = [timeline_response, pr_response]
+
+        solver_id, pr_number = find_solver_from_timeline('owner/repo', 12, 'fake_token')
+
+        assert solver_id == 42
+        assert pr_number == 14
+        assert mock_get.call_count == 2
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_fallback_triggers_on_null_commit_id(self, mock_logging, mock_get, mock_graphql):
+        """Fallback triggers and succeeds when commit_id is null + cross-referenced merged PR verified."""
+        timeline_response = Mock(status_code=200)
+        timeline_response.json.return_value = [
+            {
+                'event': 'cross-referenced',
+                'source': {
+                    'issue': {
+                        'number': 14,
+                        'user': {'id': 42},
+                        'pull_request': {'merged_at': '2025-06-01T00:00:00Z'},
+                    },
+                },
+            },
+            {'event': 'closed', 'commit_id': None},
+        ]
+
+        mock_get.return_value = timeline_response
+
+        mock_graphql.return_value = {
+            'data': {
+                'repository': {
+                    'pullRequest': {
+                        'closingIssuesReferences': {
+                            'nodes': [{'number': 12}],
+                        },
+                    },
+                },
+            },
+        }
+
+        solver_id, pr_number = find_solver_from_timeline('owner/repo', 12, 'fake_token')
+
+        assert solver_id == 42
+        assert pr_number == 14
+        mock_graphql.assert_called_once()
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_fallback_returns_none_when_pr_does_not_close_issue(self, mock_logging, mock_get, mock_graphql):
+        """Fallback returns (None, None) when cross-referenced PR doesn't close the issue."""
+        timeline_response = Mock(status_code=200)
+        timeline_response.json.return_value = [
+            {
+                'event': 'cross-referenced',
+                'source': {
+                    'issue': {
+                        'number': 14,
+                        'user': {'id': 42},
+                        'pull_request': {'merged_at': '2025-06-01T00:00:00Z'},
+                    },
+                },
+            },
+            {'event': 'closed', 'commit_id': None},
+        ]
+
+        mock_get.return_value = timeline_response
+
+        # GraphQL says PR#14 closes issue #99, not #12
+        mock_graphql.return_value = {
+            'data': {
+                'repository': {
+                    'pullRequest': {
+                        'closingIssuesReferences': {
+                            'nodes': [{'number': 99}],
+                        },
+                    },
+                },
+            },
+        }
+
+        solver_id, pr_number = find_solver_from_timeline('owner/repo', 12, 'fake_token')
+
+        assert solver_id is None
+        assert pr_number is None
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_unmerged_cross_referenced_prs_are_ignored(self, mock_logging, mock_get):
+        """Unmerged cross-referenced PRs are ignored in the fallback path."""
+        timeline_response = Mock(status_code=200)
+        timeline_response.json.return_value = [
+            {
+                'event': 'cross-referenced',
+                'source': {
+                    'issue': {
+                        'number': 14,
+                        'user': {'id': 42},
+                        # No merged_at — PR is not merged
+                        'pull_request': {'merged_at': None},
+                    },
+                },
+            },
+            {'event': 'closed', 'commit_id': None},
+        ]
+
+        mock_get.return_value = timeline_response
+
+        solver_id, pr_number = find_solver_from_timeline('owner/repo', 12, 'fake_token')
+
+        assert solver_id is None
+        assert pr_number is None
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_no_closed_event_returns_none(self, mock_logging, mock_get):
+        """No closed event in timeline returns (None, None)."""
+        timeline_response = Mock(status_code=200)
+        timeline_response.json.return_value = [
+            {'event': 'labeled', 'label': {'name': 'bug'}},
+            {'event': 'commented', 'body': 'Working on this'},
+        ]
+
+        mock_get.return_value = timeline_response
+
+        solver_id, pr_number = find_solver_from_timeline('owner/repo', 12, 'fake_token')
+
+        assert solver_id is None
+        assert pr_number is None
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

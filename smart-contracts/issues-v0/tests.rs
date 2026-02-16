@@ -1263,12 +1263,27 @@ fn get_total_committed_includes_active_issues() {
 }
 
 #[ink::test]
-fn get_total_committed_ignores_completed() {
+fn get_total_committed_includes_completed_with_unpaid_bounty() {
+    // Completed issue with bounty_amount > 0 means payout failed — funds must stay reserved
     let mut contract = create_default_contract();
     let id = register_test_issue(&mut contract);
 
     let mut issue = contract.issues.get(id).unwrap();
     issue.bounty_amount = MIN_BOUNTY;
+    issue.status = crate::IssueStatus::Completed;
+    contract.issues.insert(id, &issue);
+
+    assert_eq!(contract.get_total_committed(), MIN_BOUNTY);
+}
+
+#[ink::test]
+fn get_total_committed_ignores_completed_with_zero_bounty() {
+    // Completed issue with bounty_amount = 0 means payout succeeded — not committed
+    let mut contract = create_default_contract();
+    let id = register_test_issue(&mut contract);
+
+    let mut issue = contract.issues.get(id).unwrap();
+    issue.bounty_amount = 0;
     issue.status = crate::IssueStatus::Completed;
     contract.issues.insert(id, &issue);
 
@@ -1792,4 +1807,57 @@ fn three_validators_third_vote_still_blocked_after_consensus() {
     set_caller(account(5));
     let result = contract.vote_solution(id, account(6), account(5), 42);
     assert_eq!(result, Err(crate::Error::IssueNotActive));
+}
+
+// ============================================================================
+// Failed Payout → Harvest Recycling Protection
+// ============================================================================
+
+#[ink::test]
+fn failed_payout_funds_not_recycled_by_harvest() {
+    // Simulates: issue completed with failed payout → harvest must not recycle those funds.
+    //
+    // call_runtime panics in the off-chain test env, so we can't drive the
+    // payout through vote_solution. Instead we manually set the post-failure
+    // state (Completed + bounty_amount > 0) which is exactly what complete_issue
+    // produces when execute_payout_internal returns TransferFailed.
+
+    let bounty = MOCK_STAKE as u128;
+    register_mock_extension_with_stake(MOCK_STAKE);
+    let mut contract = create_default_contract();
+
+    let id = register_test_issue(&mut contract);
+
+    // Simulate failed-payout state: Completed with bounty_amount still set
+    let mut issue = contract.issues.get(id).unwrap();
+    issue.bounty_amount = bounty;
+    issue.status = crate::IssueStatus::Completed;
+    issue.solver_coldkey = Some(account(5));
+    issue.solver_hotkey = Some(account(6));
+    issue.winning_pr_number = Some(42);
+    contract.issues.insert(id, &issue);
+
+    // get_total_committed must include the failed-payout funds
+    assert_eq!(
+        contract.get_total_committed(),
+        bounty,
+        "committed should include completed issue with unpaid bounty"
+    );
+
+    // Harvest: stake = bounty = committed → available = 0 → nothing recycled
+    set_caller(account(1));
+    let result = contract.harvest_emissions().unwrap();
+    assert_eq!(
+        result.recycled, 0,
+        "must not recycle funds reserved for retry payout"
+    );
+    assert_eq!(result.harvested, 0);
+
+    // Funds still committed after harvest
+    assert_eq!(contract.get_total_committed(), bounty);
+    let issue = contract.get_issue(id).unwrap();
+    assert_eq!(
+        issue.bounty_amount, bounty,
+        "bounty_amount must survive harvest for retry via payout_bounty"
+    );
 }

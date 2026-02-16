@@ -835,14 +835,23 @@ mod issue_bounty_manager {
             }
         }
 
-        /// Calculate total funds committed to non-finalized issues (ground truth).
-        /// Iterates through all issues and sums bounty_amount for Registered/Active issues.
+        /// Calculate total funds committed to issues that still need those funds (ground truth).
+        /// Sums bounty_amount for Registered/Active issues, plus Completed issues
+        /// with bounty_amount > 0 (failed payouts awaiting retry via payout_bounty).
         fn get_total_committed(&self) -> u128 {
             let mut committed = 0u128;
             for issue_id in 1..self.next_issue_id {
                 if let Some(issue) = self.issues.get(issue_id) {
-                    if matches!(issue.status, IssueStatus::Registered | IssueStatus::Active) {
-                        committed = committed.saturating_add(issue.bounty_amount);
+                    match issue.status {
+                        IssueStatus::Registered | IssueStatus::Active => {
+                            committed = committed.saturating_add(issue.bounty_amount);
+                        }
+                        // Completed issues with bounty_amount > 0 had failed payouts —
+                        // these funds must stay reserved for retry via payout_bounty()
+                        IssueStatus::Completed if issue.bounty_amount > 0 => {
+                            committed = committed.saturating_add(issue.bounty_amount);
+                        }
+                        _ => {}
                     }
                 }
             }
@@ -878,12 +887,6 @@ mod issue_bounty_manager {
 
                 // Explicitly remove from bounty queue (don't rely on lazy cleanup)
                 self.remove_from_bounty_queue(issue_id);
-
-                self.env().emit_event(BountyPaidOut {
-                    issue_id,
-                    miner: solver_coldkey,
-                    amount: payout,
-                });
 
                 // Attempt payout - only zero bounty_amount on success
                 // If payout fails, bounty_amount remains non-zero for retry via payout_bounty

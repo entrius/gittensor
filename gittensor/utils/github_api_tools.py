@@ -677,6 +677,10 @@ def find_solver_from_cross_references(repo: str, issue_number: int, token: str) 
     When a closed event has no commit_id, this queries GitHub's GraphQL API
     directly for cross-referenced merged PRs that close the issue.
 
+    Filters to only PRs targeting the same repo (baseRepository match) to
+    prevent false matches from unrelated repos mentioning the issue.
+    When multiple candidates exist, the most recently merged PR is selected.
+
     Returns:
         (solver_github_id, pr_number) — either may be None if no match found.
     """
@@ -693,7 +697,9 @@ def find_solver_from_cross_references(repo: str, issue_number: int, token: str) 
                   ... on PullRequest {
                     number
                     merged
+                    mergedAt
                     author { ... on User { databaseId } }
+                    baseRepository { nameWithOwner }
                     closingIssuesReferences(first: 20) {
                       nodes { number }
                     }
@@ -730,99 +736,50 @@ def find_solver_from_cross_references(repo: str, issue_number: int, token: str) 
         pr = node.get('source', {})
         if not pr or not pr.get('merged'):
             continue
+
+        # Reject PRs targeting a different repo (prevents cross-repo gaming)
+        base_repo = pr.get('baseRepository', {}).get('nameWithOwner', '')
+        if base_repo.lower() != repo.lower():
+            bt.logging.debug(
+                f'Skipping PR#{pr.get("number")} from {base_repo} (does not target {repo})'
+            )
+            continue
+
         pr_number = pr.get('number')
         user_id = pr.get('author', {}).get('databaseId')
+        merged_at = pr.get('mergedAt', '')
         closing_numbers = [n.get('number') for n in pr.get('closingIssuesReferences', {}).get('nodes', [])]
         if pr_number and issue_number in closing_numbers:
-            candidates.append((pr_number, user_id))
+            candidates.append((pr_number, user_id, merged_at))
 
     bt.logging.debug(f'Found {len(candidates)} verified closing PRs via GraphQL for {repo}#{issue_number}')
 
-    if candidates:
-        pr_number, user_id = candidates[0]
-        bt.logging.debug(f'Solver via GraphQL cross-reference: PR#{pr_number}, solver_id={user_id}')
-        return user_id, pr_number
+    if not candidates:
+        return None, None
 
-    return None, None
+    if len(candidates) > 1:
+        bt.logging.warning(f'Multiple closing PRs found for {repo}#{issue_number}:')
+        for pr_num, uid, merged in candidates:
+            bt.logging.debug(f'  PR#{pr_num}, solver_id={uid}, merged_at={merged}')
+        # Sort by mergedAt descending, pick the most recent
+        candidates.sort(key=lambda c: c[2], reverse=True)
+
+    pr_number, user_id, merged_at = candidates[0]
+    bt.logging.debug(f'Solver via GraphQL cross-reference: PR#{pr_number}, solver_id={user_id}, merged_at={merged_at}')
+    return user_id, pr_number
 
 
 def find_solver_from_timeline(repo: str, issue_number: int, token: str) -> tuple:
-    """Find the PR author who closed an issue by walking its timeline events.
+    """Find the PR author who closed an issue.
 
-    Uses retry logic with exponential backoff for transient failures.
-    Falls back to cross-reference analysis when closed events lack a commit_id.
+    Uses GraphQL cross-reference analysis to find merged PRs that close the
+    issue, with baseRepository validation and closingIssuesReferences check.
 
     Returns:
         (solver_github_id, pr_number) — either may be None if not found.
     """
     bt.logging.debug(f'Finding solver for {repo}#{issue_number}')
-    headers = make_headers(token)
-    max_attempts = 3
-    last_error = None
-
-    for attempt in range(max_attempts):
-        try:
-            timeline_response = requests.get(
-                f'{BASE_GITHUB_API_URL}/repos/{repo}/issues/{issue_number}/timeline',
-                headers=headers,
-                timeout=15,
-            )
-
-            if timeline_response.status_code != 200:
-                last_error = f'status {timeline_response.status_code}'
-                if attempt < max_attempts - 1:
-                    backoff_delay = min(5 * (2**attempt), 30)
-                    bt.logging.warning(
-                        f'Timeline request for {repo}#{issue_number} failed with status {timeline_response.status_code} '
-                        f'(attempt {attempt + 1}/{max_attempts}), retrying in {backoff_delay}s...'
-                    )
-                    time.sleep(backoff_delay)
-                continue
-
-            timeline_events = timeline_response.json()
-
-            for event in timeline_events:
-                if event.get('event') != 'closed':
-                    continue
-
-                commit_id = event.get('commit_id')
-
-                if commit_id:
-                    bt.logging.debug(f'Closed event has commit_id: {commit_id}')
-                    # Issue was closed by a merge commit
-                    pr_resp = requests.get(
-                        f'{BASE_GITHUB_API_URL}/repos/{repo}/commits/{commit_id}/pulls',
-                        headers=headers,
-                        timeout=15,
-                    )
-                    if pr_resp.status_code == 200 and pr_resp.json():
-                        merged_pr = pr_resp.json()[0]
-                        solver_id = merged_pr.get('user', {}).get('id')
-                        pr_number = merged_pr.get('number')
-                        bt.logging.debug(f'Found solver via commit: PR#{pr_number}, solver_id={solver_id}')
-                        return solver_id, pr_number
-
-                    # PR lookup failed
-                    return None, None
-                else:
-                    bt.logging.debug(f'Closed event has null commit_id, using cross-reference fallback')
-                    return find_solver_from_cross_references(repo, issue_number, token)
-
-            # No closed event found in timeline
-            return None, None
-
-        except requests.exceptions.RequestException as e:
-            last_error = str(e)
-            if attempt < max_attempts - 1:
-                backoff_delay = min(5 * (2**attempt), 30)
-                bt.logging.warning(
-                    f'Timeline request error for {repo}#{issue_number} '
-                    f'(attempt {attempt + 1}/{max_attempts}): {e}, retrying in {backoff_delay}s...'
-                )
-                time.sleep(backoff_delay)
-
-    bt.logging.error(f'Timeline request for {repo}#{issue_number} failed after {max_attempts} attempts: {last_error}')
-    return None, None
+    return find_solver_from_cross_references(repo, issue_number, token)
 
 
 def check_github_issue_closed(repo: str, issue_number: int, token: str) -> Optional[Dict[str, Any]]:

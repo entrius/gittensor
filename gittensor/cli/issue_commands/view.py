@@ -12,28 +12,30 @@ Commands:
 """
 
 import click
-from rich.table import Table
 from rich.panel import Panel
+from rich.table import Table
 
 from .helpers import (
-    console,
-    get_contract_address,
-    resolve_network,
-    read_issues_from_contract,
     _read_contract_packed_storage,
     _read_issues_from_child_storage,
+    console,
+    get_contract_address,
+    read_issues_from_contract,
+    resolve_network,
 )
 
 
 @click.command('list')
 @click.option(
-    '--id', 'issue_id',
+    '--id',
+    'issue_id',
     default=None,
     type=int,
     help='View a specific issue by ID',
 )
 @click.option(
-    '--network', '-n',
+    '--network',
+    '-n',
     default=None,
     type=click.Choice(['finney', 'test', 'local'], case_sensitive=False),
     help='Network (finney/test/local)',
@@ -80,17 +82,19 @@ def issues_list(issue_id: int, network: str, rpc_url: str, contract: str, verbos
         issue = next((i for i in issues if i['id'] == issue_id), None)
 
         if issue:
-            console.print(Panel(
-                f'[cyan]ID:[/cyan] {issue["id"]}\n'
-                f'[cyan]Repository:[/cyan] {issue["repository_full_name"]}\n'
-                f'[cyan]Issue Number:[/cyan] #{issue["issue_number"]}\n'
-                f'[cyan]Bounty Amount:[/cyan] {issue["bounty_amount"] / 1e9:.4f} ALPHA\n'
-                f'[cyan]Target Bounty:[/cyan] {issue["target_bounty"] / 1e9:.4f} ALPHA\n'
-                f'[cyan]Fill %:[/cyan] {(issue["bounty_amount"] / issue["target_bounty"] * 100) if issue["target_bounty"] > 0 else 0:.1f}%\n'
-                f'[cyan]Status:[/cyan] {issue["status"]}',
-                title=f'Issue #{issue_id}',
-                border_style='green',
-            ))
+            console.print(
+                Panel(
+                    f'[cyan]ID:[/cyan] {issue["id"]}\n'
+                    f'[cyan]Repository:[/cyan] {issue["repository_full_name"]}\n'
+                    f'[cyan]Issue Number:[/cyan] #{issue["issue_number"]}\n'
+                    f'[cyan]Bounty Amount:[/cyan] {issue["bounty_amount"] / 1e9:.4f} ALPHA\n'
+                    f'[cyan]Target Bounty:[/cyan] {issue["target_bounty"] / 1e9:.4f} ALPHA\n'
+                    f'[cyan]Fill %:[/cyan] {(issue["bounty_amount"] / issue["target_bounty"] * 100) if issue["target_bounty"] > 0 else 0:.1f}%\n'
+                    f'[cyan]Status:[/cyan] {issue["status"]}',
+                    title=f'Issue #{issue_id}',
+                    border_style='green',
+                )
+            )
         else:
             console.print(f'[yellow]Issue {issue_id} not found.[/yellow]')
         return
@@ -158,7 +162,8 @@ def issues_list(issue_id: int, network: str, rpc_url: str, contract: str, verbos
 
 @click.command('bounty-pool')
 @click.option(
-    '--network', '-n',
+    '--network',
+    '-n',
     default=None,
     type=click.Choice(['finney', 'test', 'local'], case_sensitive=False),
     help='Network (finney/test/local)',
@@ -193,7 +198,9 @@ def issues_bounty_pool(network: str, rpc_url: str, contract: str, verbose: bool)
         issues = _read_issues_from_child_storage(substrate, contract_addr, verbose)
 
         total_bounty_pool = sum(issue.get('bounty_amount', 0) for issue in issues)
-        console.print(f'[green]Issue Bounty Pool:[/green] {total_bounty_pool / 1e9:.4f} ALPHA ({total_bounty_pool} raw)')
+        console.print(
+            f'[green]Issue Bounty Pool:[/green] {total_bounty_pool / 1e9:.4f} ALPHA ({total_bounty_pool} raw)'
+        )
         console.print(f'[dim]Sum of bounty amounts from {len(issues)} issue(s)[/dim]')
     except Exception as e:
         console.print(f'[red]Error: {e}[/red]')
@@ -201,7 +208,8 @@ def issues_bounty_pool(network: str, rpc_url: str, contract: str, verbose: bool)
 
 @click.command('pending-harvest')
 @click.option(
-    '--network', '-n',
+    '--network',
+    '-n',
     default=None,
     type=click.Choice(['finney', 'test', 'local'], case_sensitive=False),
     help='Network (finney/test/local)',
@@ -230,11 +238,12 @@ def issues_pending_harvest(network: str, rpc_url: str, contract: str, verbose: b
     console.print(f'[dim]Contract: {contract_addr}[/dim]')
 
     try:
+        import bittensor as bt
         from substrateinterface import SubstrateInterface
+
         from gittensor.validator.issue_competitions.contract_client import (
             IssueCompetitionContractClient,
         )
-        import bittensor as bt
 
         # Get treasury stake
         subtensor = bt.Subtensor(network=ws_endpoint)
@@ -263,7 +272,8 @@ def issues_pending_harvest(network: str, rpc_url: str, contract: str, verbose: b
 
 @click.command('info')
 @click.option(
-    '--network', '-n',
+    '--network',
+    '-n',
     default=None,
     type=click.Choice(['finney', 'test', 'local'], case_sensitive=False),
     help='Network (finney/test/local)',
@@ -290,7 +300,7 @@ def admin_info(network: str, rpc_url: str, contract: str, verbose: bool):
 
     console.print(f'[dim]Network: {network_name} ({ws_endpoint})[/dim]')
     console.print(f'[dim]Contract: {contract_addr}[/dim]')
-    console.print(f'[dim]Reading config...[/dim]\n')
+    console.print('[dim]Reading config...[/dim]\n')
 
     try:
         from substrateinterface import SubstrateInterface
@@ -299,14 +309,16 @@ def admin_info(network: str, rpc_url: str, contract: str, verbose: bool):
         packed = _read_contract_packed_storage(substrate, contract_addr, verbose)
 
         if packed:
-            console.print(Panel(
-                f'[cyan]Owner:[/cyan] {packed.get("owner", "N/A")}\n'
-                f'[cyan]Treasury Hotkey:[/cyan] {packed.get("treasury_hotkey", "N/A")}\n'
-                f'[cyan]Netuid:[/cyan] {packed.get("netuid", "N/A")}\n'
-                f'[cyan]Next Issue ID:[/cyan] {packed.get("next_issue_id", "N/A")}',
-                title='Contract Configuration (v0)',
-                border_style='green',
-            ))
+            console.print(
+                Panel(
+                    f'[cyan]Owner:[/cyan] {packed.get("owner", "N/A")}\n'
+                    f'[cyan]Treasury Hotkey:[/cyan] {packed.get("treasury_hotkey", "N/A")}\n'
+                    f'[cyan]Netuid:[/cyan] {packed.get("netuid", "N/A")}\n'
+                    f'[cyan]Next Issue ID:[/cyan] {packed.get("next_issue_id", "N/A")}',
+                    title='Contract Configuration (v0)',
+                    border_style='green',
+                )
+            )
         else:
             console.print('[yellow]Could not read contract configuration.[/yellow]')
     except Exception as e:

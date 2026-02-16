@@ -100,9 +100,7 @@ class IssueCompetitionContractClient:
 
         # Validate the contract exists on-chain
         try:
-            contract_info = self.subtensor.substrate.query(
-                'Contracts', 'ContractInfoOf', [self.contract_address]
-            )
+            contract_info = self.subtensor.substrate.query('Contracts', 'ContractInfoOf', [self.contract_address])
             if not contract_info or (hasattr(contract_info, 'value') and not contract_info.value):
                 raise ValueError(
                     f'No contract found at {self.contract_address}. '
@@ -426,7 +424,7 @@ class IssueCompetitionContractClient:
                 return None
 
             # Return the actual SCALE-encoded return value
-            return r[data_start + 1:data_start + data_len]
+            return r[data_start + 1 : data_start + data_len]
 
         except Exception as e:
             bt.logging.debug(f'Raw contract read failed: {e}')
@@ -1015,7 +1013,7 @@ class IssueCompetitionContractClient:
             for _ in range(count):
                 if offset + 32 > len(response_bytes):
                     break
-                account_bytes = response_bytes[offset:offset + 32]
+                account_bytes = response_bytes[offset : offset + 32]
                 ss58 = self.subtensor.substrate.ss58_encode(account_bytes.hex())
                 validators.append(ss58)
                 offset += 32

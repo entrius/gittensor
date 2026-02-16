@@ -147,6 +147,7 @@ def get_ws_endpoint(cli_value: str = '') -> str:
 # Contract storage reading helpers (shared by view and admin commands)
 # ============================================================================
 
+
 def _get_contract_child_storage_key(substrate, contract_addr: str, verbose: bool = False) -> Optional[str]:
     """
     Get the child storage key for a contract's trie.
@@ -241,9 +242,9 @@ def _read_contract_packed_storage(substrate, contract_addr: str, verbose: bool =
         return None
 
     offset = 0
-    owner = data[offset:offset + 32]
+    owner = data[offset : offset + 32]
     offset += 32
-    treasury = data[offset:offset + 32]
+    treasury = data[offset : offset + 32]
     offset += 32
     netuid = struct.unpack_from('<H', data, offset)[0]
     offset += 2
@@ -373,7 +374,7 @@ def _read_issues_from_child_storage(substrate, contract_addr: str, verbose: bool
                 str_len = 0
                 offset += 1
 
-            repo_name = data[offset:offset + str_len].decode('utf-8', errors='replace')
+            repo_name = data[offset : offset + str_len].decode('utf-8', errors='replace')
             offset += str_len
 
             issue_number = struct.unpack_from('<I', data, offset)[0]
@@ -390,14 +391,16 @@ def _read_issues_from_child_storage(substrate, contract_addr: str, verbose: bool
             status_byte = data[offset]
             status = status_names[status_byte] if status_byte < len(status_names) else 'Unknown'
 
-            issues.append({
-                'id': stored_issue_id,
-                'repository_full_name': repo_name,
-                'issue_number': issue_number,
-                'bounty_amount': bounty_amount,
-                'target_bounty': target_bounty,
-                'status': status,
-            })
+            issues.append(
+                {
+                    'id': stored_issue_id,
+                    'repository_full_name': repo_name,
+                    'issue_number': issue_number,
+                    'bounty_amount': bounty_amount,
+                    'target_bounty': target_bounty,
+                    'status': status,
+                }
+            )
             if verbose:
                 console.print(f'[dim]Debug: Decoded issue {stored_issue_id}: {repo_name}#{issue_number}[/dim]')
         except Exception as e:

@@ -724,11 +724,7 @@ def find_solver_from_cross_references(repo: str, issue_number: int, token: str) 
         return None, None
 
     timeline_nodes = (
-        result.get('data', {})
-        .get('repository', {})
-        .get('issue', {})
-        .get('timelineItems', {})
-        .get('nodes', [])
+        result.get('data', {}).get('repository', {}).get('issue', {}).get('timelineItems', {}).get('nodes', [])
     )
 
     candidates = []
@@ -740,9 +736,7 @@ def find_solver_from_cross_references(repo: str, issue_number: int, token: str) 
         # Reject PRs targeting a different repo (prevents cross-repo gaming)
         base_repo = pr.get('baseRepository', {}).get('nameWithOwner', '')
         if base_repo.lower() != repo.lower():
-            bt.logging.debug(
-                f'Skipping PR#{pr.get("number")} from {base_repo} (does not target {repo})'
-            )
+            bt.logging.debug(f'Skipping PR#{pr.get("number")} from {base_repo} (does not target {repo})')
             continue
 
         pr_number = pr.get('number')
@@ -803,7 +797,7 @@ def check_github_issue_closed(repo: str, issue_number: int, token: str) -> Optio
         )
 
         if response.status_code != 200:
-            bt.logging.warning(f"GitHub API error for {repo}#{issue_number}: {response.status_code}")
+            bt.logging.warning(f'GitHub API error for {repo}#{issue_number}: {response.status_code}')
             return None
 
         data = response.json()
@@ -820,7 +814,7 @@ def check_github_issue_closed(repo: str, issue_number: int, token: str) -> Optio
         }
 
     except Exception as e:
-        bt.logging.error(f"Error checking GitHub issue {repo}#{issue_number}: {e}")
+        bt.logging.error(f'Error checking GitHub issue {repo}#{issue_number}: {e}')
         return None
 
 

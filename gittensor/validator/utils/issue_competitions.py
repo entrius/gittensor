@@ -4,7 +4,7 @@
 """Utility functions for Issue Bounties sub-mechanism."""
 
 import os
-from typing import Dict, Optional
+from typing import Optional
 
 import bittensor as bt
 
@@ -38,5 +38,5 @@ def get_miner_coldkey(hotkey: str, subtensor: bt.Subtensor, netuid: int) -> Opti
         if result:
             return str(result)
     except Exception as e:
-        bt.logging.debug(f"Error getting coldkey for {hotkey}: {e}")
+        bt.logging.debug(f'Error getting coldkey for {hotkey}: {e}')
     return None

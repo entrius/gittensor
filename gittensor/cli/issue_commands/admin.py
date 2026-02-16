@@ -13,10 +13,7 @@ Commands:
     gitt admin remove-vali (alias: a remove-vali)
 """
 
-from typing import Optional
-
 import click
-from rich.console import Console
 
 from .helpers import (
     console,
@@ -47,7 +44,8 @@ def admin():
 @admin.command('cancel-issue')
 @click.argument('issue_id', type=int)
 @click.option(
-    '--network', '-n',
+    '--network',
+    '-n',
     default=None,
     type=click.Choice(['finney', 'test', 'local'], case_sensitive=False),
     help='Network (finney/test/local)',
@@ -63,12 +61,16 @@ def admin():
     help='Contract address (uses config if empty)',
 )
 @click.option(
-    '--wallet-name', '--wallet.name', '--wallet',
+    '--wallet-name',
+    '--wallet.name',
+    '--wallet',
     default='default',
     help='Wallet name (must be owner)',
 )
 @click.option(
-    '--wallet-hotkey', '--wallet.hotkey', '--hotkey',
+    '--wallet-hotkey',
+    '--wallet.hotkey',
+    '--hotkey',
     default='default',
     help='Hotkey name',
 )
@@ -94,10 +96,11 @@ def admin_cancel(issue_id: int, network: str, rpc_url: str, contract: str, walle
     console.print(f'[yellow]Cancelling issue {issue_id}...[/yellow]\n')
 
     try:
+        import bittensor as bt
+
         from gittensor.validator.issue_competitions.contract_client import (
             IssueCompetitionContractClient,
         )
-        import bittensor as bt
 
         wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
         subtensor = bt.Subtensor(network=ws_endpoint)
@@ -127,7 +130,8 @@ def admin_cancel(issue_id: int, network: str, rpc_url: str, contract: str, walle
 @admin.command('payout-issue')
 @click.argument('issue_id', type=int)
 @click.option(
-    '--network', '-n',
+    '--network',
+    '-n',
     default=None,
     type=click.Choice(['finney', 'test', 'local'], case_sensitive=False),
     help='Network (finney/test/local)',
@@ -143,12 +147,16 @@ def admin_cancel(issue_id: int, network: str, rpc_url: str, contract: str, walle
     help='Contract address (uses config if empty)',
 )
 @click.option(
-    '--wallet-name', '--wallet.name', '--wallet',
+    '--wallet-name',
+    '--wallet.name',
+    '--wallet',
     default='default',
     help='Wallet name (must be owner)',
 )
 @click.option(
-    '--wallet-hotkey', '--wallet.hotkey', '--hotkey',
+    '--wallet-hotkey',
+    '--wallet.hotkey',
+    '--hotkey',
     default='default',
     help='Hotkey name',
 )
@@ -174,10 +182,11 @@ def admin_payout(issue_id: int, network: str, rpc_url: str, contract: str, walle
     console.print(f'[yellow]Manual payout for issue {issue_id}...[/yellow]\n')
 
     try:
+        import bittensor as bt
+
         from gittensor.validator.issue_competitions.contract_client import (
             IssueCompetitionContractClient,
         )
-        import bittensor as bt
 
         wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
         subtensor = bt.Subtensor(network=ws_endpoint)
@@ -207,7 +216,8 @@ def admin_payout(issue_id: int, network: str, rpc_url: str, contract: str, walle
 @admin.command('set-owner')
 @click.argument('new_owner', type=str)
 @click.option(
-    '--network', '-n',
+    '--network',
+    '-n',
     default=None,
     type=click.Choice(['finney', 'test', 'local'], case_sensitive=False),
     help='Network (finney/test/local)',
@@ -223,12 +233,16 @@ def admin_payout(issue_id: int, network: str, rpc_url: str, contract: str, walle
     help='Contract address',
 )
 @click.option(
-    '--wallet-name', '--wallet.name', '--wallet',
+    '--wallet-name',
+    '--wallet.name',
+    '--wallet',
     default='default',
     help='Wallet name (must be current owner)',
 )
 @click.option(
-    '--wallet-hotkey', '--wallet.hotkey', '--hotkey',
+    '--wallet-hotkey',
+    '--wallet.hotkey',
+    '--hotkey',
     default='default',
     help='Hotkey name',
 )
@@ -251,10 +265,11 @@ def admin_set_owner(new_owner: str, network: str, rpc_url: str, contract: str, w
     console.print(f'[yellow]Transferring ownership to {new_owner}...[/yellow]\n')
 
     try:
+        import bittensor as bt
+
         from gittensor.validator.issue_competitions.contract_client import (
             IssueCompetitionContractClient,
         )
-        import bittensor as bt
 
         wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
         subtensor = bt.Subtensor(network=ws_endpoint)
@@ -277,7 +292,8 @@ def admin_set_owner(new_owner: str, network: str, rpc_url: str, contract: str, w
 @admin.command('set-treasury')
 @click.argument('new_treasury', type=str)
 @click.option(
-    '--network', '-n',
+    '--network',
+    '-n',
     default=None,
     type=click.Choice(['finney', 'test', 'local'], case_sensitive=False),
     help='Network (finney/test/local)',
@@ -293,16 +309,22 @@ def admin_set_owner(new_owner: str, network: str, rpc_url: str, contract: str, w
     help='Contract address',
 )
 @click.option(
-    '--wallet-name', '--wallet.name', '--wallet',
+    '--wallet-name',
+    '--wallet.name',
+    '--wallet',
     default='default',
     help='Wallet name (must be owner)',
 )
 @click.option(
-    '--wallet-hotkey', '--wallet.hotkey', '--hotkey',
+    '--wallet-hotkey',
+    '--wallet.hotkey',
+    '--hotkey',
     default='default',
     help='Hotkey name',
 )
-def admin_set_treasury(new_treasury: str, network: str, rpc_url: str, contract: str, wallet_name: str, wallet_hotkey: str):
+def admin_set_treasury(
+    new_treasury: str, network: str, rpc_url: str, contract: str, wallet_name: str, wallet_hotkey: str
+):
     """Change treasury hotkey (owner only).
 
     The treasury hotkey receives staking emissions that fund bounty payouts.
@@ -325,10 +347,11 @@ def admin_set_treasury(new_treasury: str, network: str, rpc_url: str, contract: 
     console.print(f'[yellow]Setting treasury hotkey to {new_treasury}...[/yellow]\n')
 
     try:
+        import bittensor as bt
+
         from gittensor.validator.issue_competitions.contract_client import (
             IssueCompetitionContractClient,
         )
-        import bittensor as bt
 
         wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
         subtensor = bt.Subtensor(network=ws_endpoint)
@@ -340,7 +363,9 @@ def admin_set_treasury(new_treasury: str, network: str, rpc_url: str, contract: 
         result = client.set_treasury_hotkey(new_treasury, wallet)
         if result:
             console.print(f'[green]Treasury hotkey updated to {new_treasury}![/green]')
-            console.print(f'[dim]Note: Issue bounty amounts have been reset. Run harvest to re-fund from new treasury.[/dim]')
+            console.print(
+                '[dim]Note: Issue bounty amounts have been reset. Run harvest to re-fund from new treasury.[/dim]'
+            )
         else:
             console.print('[red]Treasury hotkey update failed.[/red]')
     except ImportError as e:
@@ -352,7 +377,8 @@ def admin_set_treasury(new_treasury: str, network: str, rpc_url: str, contract: 
 @admin.command('add-vali')
 @click.argument('hotkey', type=str)
 @click.option(
-    '--network', '-n',
+    '--network',
+    '-n',
     default=None,
     type=click.Choice(['finney', 'test', 'local'], case_sensitive=False),
     help='Network (finney/test/local)',
@@ -368,12 +394,16 @@ def admin_set_treasury(new_treasury: str, network: str, rpc_url: str, contract: 
     help='Contract address',
 )
 @click.option(
-    '--wallet-name', '--wallet.name', '--wallet',
+    '--wallet-name',
+    '--wallet.name',
+    '--wallet',
     default='default',
     help='Wallet name (must be owner)',
 )
 @click.option(
-    '--wallet-hotkey', '--wallet.hotkey', '--hotkey',
+    '--wallet-hotkey',
+    '--wallet.hotkey',
+    '--hotkey',
     default='default',
     help='Hotkey name',
 )
@@ -400,10 +430,11 @@ def admin_add_validator(hotkey: str, network: str, rpc_url: str, contract: str, 
     console.print(f'[yellow]Adding validator {hotkey}...[/yellow]\n')
 
     try:
+        import bittensor as bt
+
         from gittensor.validator.issue_competitions.contract_client import (
             IssueCompetitionContractClient,
         )
-        import bittensor as bt
 
         wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
         subtensor = bt.Subtensor(network=ws_endpoint)
@@ -429,7 +460,8 @@ def admin_add_validator(hotkey: str, network: str, rpc_url: str, contract: str, 
 @admin.command('remove-vali')
 @click.argument('hotkey', type=str)
 @click.option(
-    '--network', '-n',
+    '--network',
+    '-n',
     default=None,
     type=click.Choice(['finney', 'test', 'local'], case_sensitive=False),
     help='Network (finney/test/local)',
@@ -445,16 +477,22 @@ def admin_add_validator(hotkey: str, network: str, rpc_url: str, contract: str, 
     help='Contract address',
 )
 @click.option(
-    '--wallet-name', '--wallet.name', '--wallet',
+    '--wallet-name',
+    '--wallet.name',
+    '--wallet',
     default='default',
     help='Wallet name (must be owner)',
 )
 @click.option(
-    '--wallet-hotkey', '--wallet.hotkey', '--hotkey',
+    '--wallet-hotkey',
+    '--wallet.hotkey',
+    '--hotkey',
     default='default',
     help='Hotkey name',
 )
-def admin_remove_validator(hotkey: str, network: str, rpc_url: str, contract: str, wallet_name: str, wallet_hotkey: str):
+def admin_remove_validator(
+    hotkey: str, network: str, rpc_url: str, contract: str, wallet_name: str, wallet_hotkey: str
+):
     """Remove a validator from the voting whitelist (owner only).
 
     The consensus threshold adjusts automatically after removal.
@@ -475,10 +513,11 @@ def admin_remove_validator(hotkey: str, network: str, rpc_url: str, contract: st
     console.print(f'[yellow]Removing validator {hotkey}...[/yellow]\n')
 
     try:
+        import bittensor as bt
+
         from gittensor.validator.issue_competitions.contract_client import (
             IssueCompetitionContractClient,
         )
-        import bittensor as bt
 
         wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
         subtensor = bt.Subtensor(network=ws_endpoint)

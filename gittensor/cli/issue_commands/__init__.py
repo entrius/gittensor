@@ -22,25 +22,25 @@ Command structure:
 
 import click
 
-from .view import issues_list, issues_bounty_pool, issues_pending_harvest, admin_info
-from .vote import vote
 from .admin import admin
-from .mutations import (
-    issue_register,
-    issue_harvest,
-)
 
 # Re-export helpers
 from .helpers import (
-    console,
-    load_config,
-    get_contract_address,
-    resolve_network,
-    read_issues_from_contract,
-    GITTENSOR_DIR,
     CONFIG_FILE,
+    GITTENSOR_DIR,
     NETWORK_MAP,
+    console,
+    get_contract_address,
+    load_config,
+    read_issues_from_contract,
+    resolve_network,
 )
+from .mutations import (
+    issue_harvest,
+    issue_register,
+)
+from .view import admin_info, issues_bounty_pool, issues_list, issues_pending_harvest
+from .vote import vote
 
 
 @click.group(name='issues')

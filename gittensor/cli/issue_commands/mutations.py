@@ -16,10 +16,9 @@ from rich.panel import Panel
 
 from .helpers import (
     console,
-    load_config,
     get_contract_address,
+    load_config,
     resolve_network,
-    NETWORK_MAP,
 )
 
 
@@ -43,7 +42,8 @@ from .helpers import (
     help='Bounty amount in ALPHA tokens',
 )
 @click.option(
-    '--network', '-n',
+    '--network',
+    '-n',
     default=None,
     type=click.Choice(['finney', 'test', 'local'], case_sensitive=False),
     help='Network (finney/test/local)',
@@ -59,12 +59,16 @@ from .helpers import (
     help='Contract address (uses default if empty)',
 )
 @click.option(
-    '--wallet-name', '--wallet.name', '--wallet',
+    '--wallet-name',
+    '--wallet.name',
+    '--wallet',
     default='default',
     help='Wallet name (must be contract owner)',
 )
 @click.option(
-    '--wallet-hotkey', '--wallet.hotkey', '--hotkey',
+    '--wallet-hotkey',
+    '--wallet.hotkey',
+    '--hotkey',
     default='default',
     help='Hotkey name',
 )
@@ -111,17 +115,19 @@ def issue_register(
     ws_endpoint, network_name = resolve_network(network, rpc_url)
     config = load_config()
 
-    console.print(Panel(
-        f'[cyan]Repository:[/cyan] {repo}\n'
-        f'[cyan]Issue Number:[/cyan] #{issue_number}\n'
-        f'[cyan]GitHub URL:[/cyan] {github_url}\n'
-        f'[cyan]Target Bounty:[/cyan] {bounty:.2f} ALPHA\n'
-        f'[cyan]Network:[/cyan] {network_name}\n'
-        f'[cyan]RPC Endpoint:[/cyan] {ws_endpoint}\n'
-        f'[cyan]Contract:[/cyan] {contract_addr if contract_addr else "(not configured)"}',
-        title='Issue Registration',
-        border_style='blue',
-    ))
+    console.print(
+        Panel(
+            f'[cyan]Repository:[/cyan] {repo}\n'
+            f'[cyan]Issue Number:[/cyan] #{issue_number}\n'
+            f'[cyan]GitHub URL:[/cyan] {github_url}\n'
+            f'[cyan]Target Bounty:[/cyan] {bounty:.2f} ALPHA\n'
+            f'[cyan]Network:[/cyan] {network_name}\n'
+            f'[cyan]RPC Endpoint:[/cyan] {ws_endpoint}\n'
+            f'[cyan]Contract:[/cyan] {contract_addr if contract_addr else "(not configured)"}',
+            title='Issue Registration',
+            border_style='blue',
+        )
+    )
 
     if not contract_addr:
         console.print('\n[red]Error: Contract address not configured.[/red]')
@@ -136,9 +142,9 @@ def issue_register(
     console.print('\n[yellow]Submitting on-chain transaction to contract...[/yellow]')
 
     try:
-        from substrateinterface import SubstrateInterface, Keypair
-        from substrateinterface.contracts import ContractInstance
         import bittensor as bt
+        from substrateinterface import Keypair, SubstrateInterface
+        from substrateinterface.contracts import ContractInstance
 
         # Connect to subtensor
         console.print(f'[dim]Connecting to {ws_endpoint}...[/dim]')
@@ -162,7 +168,14 @@ def issue_register(
 
         # Load contract
         # Go up 4 levels: mutations.py -> issue_commands -> cli -> gittensor -> REPO_ROOT
-        contract_metadata = Path(__file__).parent.parent.parent.parent / 'smart-contracts' / 'issues-v0' / 'target' / 'ink' / 'issue_bounty_manager.contract'
+        contract_metadata = (
+            Path(__file__).parent.parent.parent.parent
+            / 'smart-contracts'
+            / 'issues-v0'
+            / 'target'
+            / 'ink'
+            / 'issue_bounty_manager.contract'
+        )
         if not contract_metadata.exists():
             console.print(f'[red]Error: Contract metadata not found at {contract_metadata}[/red]')
             return
@@ -192,7 +205,7 @@ def issue_register(
 
         # Check if transaction was successful
         if hasattr(result, 'is_success') and not result.is_success:
-            console.print(f'\n[red]Transaction failed: Contract rejected the request[/red]')
+            console.print('\n[red]Transaction failed: Contract rejected the request[/red]')
 
             # Check for ContractReverted and provide helpful context
             error_info = getattr(result, 'error_message', None)
@@ -211,9 +224,9 @@ def issue_register(
             console.print(f'[cyan]Transaction Hash:[/cyan] {result.extrinsic_hash}')
             return
 
-        console.print(f'\n[green]Issue registered successfully![/green]')
+        console.print('\n[green]Issue registered successfully![/green]')
         console.print(f'[cyan]Transaction Hash:[/cyan] {result.extrinsic_hash}')
-        console.print(f'[dim]Issue will be visible once bounty is funded via harvest_emissions()[/dim]')
+        console.print('[dim]Issue will be visible once bounty is funded via harvest_emissions()[/dim]')
 
     except ImportError as e:
         console.print(f'[red]Error: Missing dependency - {e}[/red]')
@@ -222,7 +235,7 @@ def issue_register(
         error_msg = str(e)
         # Map contract errors to user-friendly messages
         if 'ContractReverted' in error_msg:
-            console.print(f'\n[red]Transaction failed: Contract rejected the request[/red]')
+            console.print('\n[red]Transaction failed: Contract rejected the request[/red]')
             # Provide context-specific hints based on the operation
             console.print('[yellow]Possible reasons:[/yellow]')
             console.print('  • Issue already registered (same repo + issue number)')
@@ -236,17 +249,22 @@ def issue_register(
 
 @click.command('harvest')
 @click.option(
-    '--wallet-name', '--wallet.name', '--wallet',
+    '--wallet-name',
+    '--wallet.name',
+    '--wallet',
     default='validator',
     help='Wallet name',
 )
 @click.option(
-    '--wallet-hotkey', '--wallet.hotkey', '--hotkey',
+    '--wallet-hotkey',
+    '--wallet.hotkey',
+    '--hotkey',
     default='default',
     help='Hotkey name',
 )
 @click.option(
-    '--network', '-n',
+    '--network',
+    '-n',
     default=None,
     type=click.Choice(['finney', 'test', 'local'], case_sensitive=False),
     help='Network (finney/test/local)',
@@ -292,6 +310,7 @@ def issue_harvest(wallet_name: str, wallet_hotkey: str, network: str, rpc_url: s
 
     try:
         import bittensor as bt
+
         from gittensor.validator.issue_competitions.contract_client import (
             IssueCompetitionContractClient,
         )
@@ -303,7 +322,7 @@ def issue_harvest(wallet_name: str, wallet_hotkey: str, network: str, rpc_url: s
         console.print(f'[green]Hotkey address:[/green] {hotkey_addr}')
 
         # Connect to subtensor
-        console.print(f'\n[yellow]Connecting to subtensor...[/yellow]')
+        console.print('\n[yellow]Connecting to subtensor...[/yellow]')
         subtensor = bt.Subtensor(network=ws_endpoint)
 
         # Show wallet balance (informational only)
@@ -315,7 +334,7 @@ def issue_harvest(wallet_name: str, wallet_hotkey: str, network: str, rpc_url: s
                 console.print(f'[dim]Could not fetch balance: {e}[/dim]')
 
         # Create contract client
-        console.print(f'\n[yellow]Initializing contract client...[/yellow]')
+        console.print('\n[yellow]Initializing contract client...[/yellow]')
         client = IssueCompetitionContractClient(
             contract_address=contract_addr,
             subtensor=subtensor,
@@ -340,26 +359,26 @@ def issue_harvest(wallet_name: str, wallet_hotkey: str, network: str, rpc_url: s
                 console.print(f'[yellow]Warning: Could not read contract state: {e}[/yellow]')
 
         # Attempt harvest
-        console.print(f'\n[yellow]Calling harvest_emissions()...[/yellow]')
+        console.print('\n[yellow]Calling harvest_emissions()...[/yellow]')
         result = client.harvest_emissions(wallet)
 
         if result:
             if result.get('status') == 'success':
-                console.print(f'\n[green]Harvest succeeded![/green]')
+                console.print('\n[green]Harvest succeeded![/green]')
                 console.print(f'[cyan]Transaction hash:[/cyan] {result.get("tx_hash", "N/A")}')
                 console.print('[dim]Treasury stake processed. Excess emissions recycled if any.[/dim]')
             elif result.get('status') == 'partial':
-                console.print(f'\n[yellow]Harvest completed but recycling failed![/yellow]')
+                console.print('\n[yellow]Harvest completed but recycling failed![/yellow]')
                 console.print(f'[cyan]Transaction hash:[/cyan] {result.get("tx_hash", "N/A")}')
                 console.print(f'[red]Error: {result.get("error", "Unknown")}[/red]')
                 console.print('[dim]Check proxy permissions: contract needs NonCritical proxy.[/dim]')
             elif result.get('status') == 'failed':
-                console.print(f'\n[red]Harvest failed![/red]')
+                console.print('\n[red]Harvest failed![/red]')
                 console.print(f'[red]Error: {result.get("error", "Unknown error")}[/red]')
             else:
                 console.print(f'\n[yellow]Harvest result: {result}[/yellow]')
         else:
-            console.print(f'\n[red]Harvest returned None - check logs for details.[/red]')
+            console.print('\n[red]Harvest returned None - check logs for details.[/red]')
             console.print('[dim]Run with --verbose for more information.[/dim]')
 
     except ImportError as e:
@@ -367,6 +386,7 @@ def issue_harvest(wallet_name: str, wallet_hotkey: str, network: str, rpc_url: s
         console.print('[dim]Install with: pip install bittensor substrate-interface[/dim]')
     except Exception as e:
         import traceback
+
         console.print(f'\n[red]Error during harvest: {type(e).__name__}: {e}[/red]')
         if verbose:
             console.print(f'[dim]Full traceback:\n{traceback.format_exc()}[/dim]')

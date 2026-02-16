@@ -55,7 +55,7 @@ def get_type_string(type_id: int, types: list) -> str:
 
 def main():
     if not CONTRACT_FILE.exists():
-        print(f"Error: {CONTRACT_FILE} not found")
+        print(f'Error: {CONTRACT_FILE} not found')
         print("Run 'cargo contract build' first")
         return 1
 
@@ -94,9 +94,9 @@ def main():
         json.dump(metadata, f, indent=2)
         f.write('\n')
 
-    print(f"Updated {METADATA_FILE}")
-    print(f"  {len(selectors)} selectors")
-    print(f"  {len(arg_types)} arg type mappings")
+    print(f'Updated {METADATA_FILE}')
+    print(f'  {len(selectors)} selectors')
+    print(f'  {len(arg_types)} arg type mappings')
 
 
 if __name__ == '__main__':

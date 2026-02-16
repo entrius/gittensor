@@ -11,6 +11,7 @@ Commands:
 """
 
 import re
+
 import click
 from rich.table import Table
 
@@ -45,7 +46,7 @@ def parse_pr_number(pr_input: str) -> int:
         return int(match.group(1))
 
     # Invalid input
-    raise ValueError(f"Cannot parse PR number from: {pr_input}")
+    raise ValueError(f'Cannot parse PR number from: {pr_input}')
 
 
 @click.group(name='vote')
@@ -69,17 +70,22 @@ def vote():
 @click.argument('solver_coldkey', type=str)
 @click.argument('pr_number_or_url', type=str)
 @click.option(
-    '--wallet-name', '--wallet.name', '--wallet',
+    '--wallet-name',
+    '--wallet.name',
+    '--wallet',
     default='default',
     help='Wallet name',
 )
 @click.option(
-    '--wallet-hotkey', '--wallet.hotkey', '--hotkey',
+    '--wallet-hotkey',
+    '--wallet.hotkey',
+    '--hotkey',
     default='default',
     help='Hotkey name',
 )
 @click.option(
-    '--network', '-n',
+    '--network',
+    '-n',
     default=None,
     type=click.Choice(['finney', 'test', 'local'], case_sensitive=False),
     help='Network (finney/test/local)',
@@ -140,10 +146,11 @@ def val_vote_solution(
     console.print(f'  PR Number: {pr_number}\n')
 
     try:
+        import bittensor as bt
+
         from gittensor.validator.issue_competitions.contract_client import (
             IssueCompetitionContractClient,
         )
-        import bittensor as bt
 
         wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
         subtensor = bt.Subtensor(network=ws_endpoint)
@@ -154,7 +161,7 @@ def val_vote_solution(
 
         result = client.vote_solution(issue_id, solver_hotkey, solver_coldkey, pr_number, wallet)
         if result:
-            console.print(f'[green]Solution vote submitted![/green]')
+            console.print('[green]Solution vote submitted![/green]')
         else:
             console.print('[red]Vote failed.[/red]')
     except ImportError as e:
@@ -167,17 +174,22 @@ def val_vote_solution(
 @click.argument('issue_id', type=int)
 @click.argument('reason', type=str)
 @click.option(
-    '--wallet-name', '--wallet.name', '--wallet',
+    '--wallet-name',
+    '--wallet.name',
+    '--wallet',
     default='default',
     help='Wallet name',
 )
 @click.option(
-    '--wallet-hotkey', '--wallet.hotkey', '--hotkey',
+    '--wallet-hotkey',
+    '--wallet.hotkey',
+    '--hotkey',
     default='default',
     help='Hotkey name',
 )
 @click.option(
-    '--network', '-n',
+    '--network',
+    '-n',
     default=None,
     type=click.Choice(['finney', 'test', 'local'], case_sensitive=False),
     help='Network (finney/test/local)',
@@ -226,10 +238,11 @@ def val_vote_cancel_issue(
     console.print(f'  Reason: {reason}\n')
 
     try:
+        import bittensor as bt
+
         from gittensor.validator.issue_competitions.contract_client import (
             IssueCompetitionContractClient,
         )
-        import bittensor as bt
 
         wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
         subtensor = bt.Subtensor(network=ws_endpoint)
@@ -240,7 +253,7 @@ def val_vote_cancel_issue(
 
         result = client.vote_cancel_issue(issue_id, reason, wallet)
         if result:
-            console.print(f'[green]Vote cancel submitted![/green]')
+            console.print('[green]Vote cancel submitted![/green]')
         else:
             console.print('[red]Vote cancel failed.[/red]')
     except ImportError as e:
@@ -251,7 +264,8 @@ def val_vote_cancel_issue(
 
 @vote.command('list')
 @click.option(
-    '--network', '-n',
+    '--network',
+    '-n',
     default=None,
     type=click.Choice(['finney', 'test', 'local'], case_sensitive=False),
     help='Network (finney/test/local)',
@@ -288,10 +302,11 @@ def vote_list_validators(network: str, rpc_url: str, contract: str):
     console.print(f'[dim]Contract: {contract_addr}[/dim]\n')
 
     try:
+        import bittensor as bt
+
         from gittensor.validator.issue_competitions.contract_client import (
             IssueCompetitionContractClient,
         )
-        import bittensor as bt
 
         subtensor = bt.Subtensor(network=ws_endpoint)
         client = IssueCompetitionContractClient(
@@ -322,4 +337,3 @@ def vote_list_validators(network: str, rpc_url: str, contract: str):
         console.print(f'[red]Error: Missing dependency - {e}[/red]')
     except Exception as e:
         console.print(f'[red]Error: {e}[/red]')
-

@@ -3,6 +3,6 @@
 
 """Gittensor CLI package"""
 
-from .main import main, cli
+from .main import cli, main
 
 __all__ = ['main', 'cli']

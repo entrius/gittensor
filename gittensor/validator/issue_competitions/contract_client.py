@@ -592,7 +592,7 @@ class IssueCompetitionContractClient:
             else:
                 account_data = account_info
             free_balance = account_data.get('data', {}).get('free', 0)
-            if free_balance < 1_000_000_000:
+            if free_balance < 100_000_000:
                 bt.logging.error(f'{method_name}: insufficient balance for fees')
                 return None
 

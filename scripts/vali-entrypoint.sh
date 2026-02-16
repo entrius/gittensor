@@ -6,7 +6,7 @@ if [ -z "$HOTKEY_NAME" ]; then echo "HOTKEY_NAME is not set" && exit 1; fi
 if [ -z "$SUBTENSOR_NETWORK" ]; then echo "SUBTENSOR_NETWORK is not set" && exit 1; fi
 if [ -z "$PORT" ]; then echo "PORT is not set" && exit 1; fi
 if [ -z "$LOG_LEVEL" ]; then echo "LOG_LEVEL is not set" && exit 1; fi
-if [ -z "$GITTENSOR_VALIDATOR_PAT" ]; then echo "GITTENSOR_VALIDATOR_PAT is not set" && exit 1; fi
+# if [ -z "$GITTENSOR_VALIDATOR_PAT" ]; then echo "GITTENSOR_VALIDATOR_PAT is not set" && exit 1; fi
 
 exec python neurons/validator.py \
   --netuid ${NETUID} \

@@ -122,6 +122,10 @@ async def issues_competition(
         miner_evaluations: Fresh scoring data from oss_contributions(), keyed by UID
     """
     try:
+        if not GITTENSOR_VALIDATOR_PAT:
+            bt.logging.info("GITTENSOR_VALIDATOR_PAT not set, skipping issue bounties voting entirely.")
+            return
+
         contract_addr = get_contract_address()
         if not contract_addr:
             bt.logging.warning("Issue bounties: no contract address configured")
@@ -252,7 +256,7 @@ async def issues_competition(
             )
         else:
             bt.logging.info(
-                f"=== Issue Bounties Complete: processed {len(active_issues)} issues (no state changes) ==="
+                '***** Issue Bounties Complete: processed {len(active_issues)} issues (no state changes) *****'
             )
 
     except Exception as e:

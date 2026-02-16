@@ -671,69 +671,77 @@ def extract_pr_number_from_url(pr_url: str) -> Optional[int]:
     return int(match.group(1)) if match else None
 
 
-def find_solver_from_cross_references(repo: str, issue_number: int, timeline_events: list, token: str) -> tuple:
-    """Fallback solver detection via cross-referenced merged PRs.
+def find_solver_from_cross_references(repo: str, issue_number: int, token: str) -> tuple:
+    """Fallback solver detection via GraphQL cross-referenced merged PRs.
 
-    When a closed event has no commit_id, this searches timeline cross-references
-    for merged PRs and verifies via GraphQL that they actually close the issue.
+    When a closed event has no commit_id, this queries GitHub's GraphQL API
+    directly for cross-referenced merged PRs that close the issue.
 
     Returns:
         (solver_github_id, pr_number) — either may be None if no match found.
     """
     owner, name = repo.split('/')
 
-    # Filter for cross-referenced events that are merged PRs
-    candidates = []
-    for event in timeline_events:
-        if event.get('event') != 'cross-referenced':
-            continue
-        source_issue = event.get('source', {}).get('issue', {})
-        pr_info = source_issue.get('pull_request', {})
-        if pr_info.get('merged_at'):
-            pr_number = source_issue.get('number')
-            user_id = source_issue.get('user', {}).get('id')
-            if pr_number:
-                candidates.append((pr_number, user_id))
-
-    bt.logging.debug(f'Found {len(candidates)} merged PR candidates from cross-references')
-
-    # Verify each candidate actually closes this issue via GraphQL
     query = """
-    query($owner: String!, $name: String!, $prNumber: Int!) {
+    query($owner: String!, $name: String!, $issueNumber: Int!) {
       repository(owner: $owner, name: $name) {
-        pullRequest(number: $prNumber) {
-          closingIssuesReferences(first: 20) {
-            nodes { number }
+        issue(number: $issueNumber) {
+          timelineItems(itemTypes: [CROSS_REFERENCED_EVENT], first: 50) {
+            nodes {
+              ... on CrossReferencedEvent {
+                source {
+                  ... on PullRequest {
+                    number
+                    merged
+                    author { ... on User { databaseId } }
+                    closingIssuesReferences(first: 20) {
+                      nodes { number }
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
     }
     """
 
-    for pr_number, user_id in candidates:
-        bt.logging.debug(f'Verifying PR#{pr_number} closes issue #{issue_number} via GraphQL')
-        result = execute_graphql_query(
-            query=query,
-            variables={'owner': owner, 'name': name, 'prNumber': pr_number},
-            token=token,
-            max_attempts=3,
-        )
-        if not result:
+    result = execute_graphql_query(
+        query=query,
+        variables={'owner': owner, 'name': name, 'issueNumber': issue_number},
+        token=token,
+        max_attempts=3,
+    )
+    if not result:
+        bt.logging.warning(f'GraphQL cross-reference query failed for {repo}#{issue_number}')
+        return None, None
+
+    timeline_nodes = (
+        result.get('data', {})
+        .get('repository', {})
+        .get('issue', {})
+        .get('timelineItems', {})
+        .get('nodes', [])
+    )
+
+    candidates = []
+    for node in timeline_nodes:
+        pr = node.get('source', {})
+        if not pr or not pr.get('merged'):
             continue
+        pr_number = pr.get('number')
+        user_id = pr.get('author', {}).get('databaseId')
+        closing_numbers = [n.get('number') for n in pr.get('closingIssuesReferences', {}).get('nodes', [])]
+        if pr_number and issue_number in closing_numbers:
+            candidates.append((pr_number, user_id))
 
-        closing_nodes = (
-            result.get('data', {})
-            .get('repository', {})
-            .get('pullRequest', {})
-            .get('closingIssuesReferences', {})
-            .get('nodes', [])
-        )
-        closing_numbers = [node.get('number') for node in closing_nodes]
-        bt.logging.debug(f'PR#{pr_number} closingIssuesReferences: {closing_numbers}')
+    bt.logging.debug(f'Found {len(candidates)} verified closing PRs via GraphQL for {repo}#{issue_number}')
 
-        if issue_number in closing_numbers:
-            bt.logging.debug(f'Verified solver via cross-reference: PR#{pr_number}, solver_id={user_id}')
-            return user_id, pr_number
+    if candidates:
+        pr_number, user_id = candidates[0]
+        bt.logging.debug(f'Solver via GraphQL cross-reference: PR#{pr_number}, solver_id={user_id}')
+        return user_id, pr_number
 
     return None, None
 
@@ -798,7 +806,7 @@ def find_solver_from_timeline(repo: str, issue_number: int, token: str) -> tuple
                     return None, None
                 else:
                     bt.logging.debug(f'Closed event has null commit_id, using cross-reference fallback')
-                    return find_solver_from_cross_references(repo, issue_number, timeline_events, token)
+                    return find_solver_from_cross_references(repo, issue_number, token)
 
             # No closed event found in timeline
             return None, None

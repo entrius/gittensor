@@ -12,13 +12,14 @@ Usage:
     gitt admin ...           - Owner commands (alias: a)
 """
 
-import click
 import json
 from pathlib import Path
 
+import click
 from rich.console import Console
 from rich.table import Table
 
+from gittensor.cli.issue_commands import register_commands
 
 console = Console()
 
@@ -170,8 +171,7 @@ def config_set(key: str, value: str):
 cli.add_command(config_group)
 
 
-# Import and register issue commands with new flat structure
-from .issue_commands import register_commands
+# Register issue commands with new flat structure
 register_commands(cli)
 
 

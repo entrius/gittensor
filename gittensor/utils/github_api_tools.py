@@ -846,7 +846,10 @@ def fetch_file_contents_batch(
     # Build GraphQL query with aliased file fields
     file_fields = []
     for i, path in enumerate(file_paths):
-        expression = f'{head_sha}:{path}'
+        # Escape backslashes and double quotes in file paths to prevent
+        # GraphQL query syntax errors from special characters in filenames
+        safe_path = path.replace('\\', '\\\\').replace('"', '\\"')
+        expression = f'{head_sha}:{safe_path}'
         file_fields.append(
             f'file{i}: object(expression: "{expression}") {{ ... on Blob {{ text byteSize isBinary }} }}'
         )
@@ -932,16 +935,21 @@ def fetch_file_contents_with_base(
         base_path = fc.previous_filename if fc.previous_filename else fc.filename
         head_path = fc.filename
 
+        # Escape backslashes and double quotes in file paths to prevent
+        # GraphQL query syntax errors from special characters in filenames
+        safe_base_path = base_path.replace('\\', '\\\\').replace('"', '\\"')
+        safe_head_path = head_path.replace('\\', '\\\\').replace('"', '\\"')
+
         # Only fetch base version if file wasn't newly added
         if fc.status != 'added':
-            base_expr = f'{base_sha}:{base_path}'
+            base_expr = f'{base_sha}:{safe_base_path}'
             file_fields.append(
                 f'base{i}: object(expression: "{base_expr}") {{ ... on Blob {{ text byteSize isBinary }} }}'
             )
 
         # Only fetch head version if file wasn't deleted
         if fc.status != 'removed':
-            head_expr = f'{head_sha}:{head_path}'
+            head_expr = f'{head_sha}:{safe_head_path}'
             file_fields.append(
                 f'head{i}: object(expression: "{head_expr}") {{ ... on Blob {{ text byteSize isBinary }} }}'
             )

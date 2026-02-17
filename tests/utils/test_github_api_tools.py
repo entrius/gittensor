@@ -492,5 +492,223 @@ class TestFileChangesRetryLogic:
         assert mock_sleep.call_count == 3
 
 
+# ============================================================================
+# Solver Detection Tests
+# ============================================================================
+
+find_solver_from_timeline = github_api_tools.find_solver_from_timeline
+find_solver_from_cross_references = github_api_tools.find_solver_from_cross_references
+
+
+def _graphql_response(nodes):
+    """Helper to build a GraphQL cross-reference response."""
+    return {
+        'data': {
+            'repository': {
+                'issue': {
+                    'timelineItems': {
+                        'nodes': nodes,
+                    },
+                },
+            },
+        },
+    }
+
+
+def _pr_node(
+    number, merged=True, merged_at='2025-06-01T00:00:00Z', user_id=42, base_repo='owner/repo', closing_issues=None
+):
+    """Helper to build a single cross-referenced PR node."""
+    return {
+        'source': {
+            'number': number,
+            'merged': merged,
+            'mergedAt': merged_at,
+            'author': {'databaseId': user_id},
+            'baseRepository': {'nameWithOwner': base_repo},
+            'closingIssuesReferences': {
+                'nodes': [{'number': n} for n in (closing_issues or [])],
+            },
+        },
+    }
+
+
+class TestFindSolverFromCrossReferences:
+    """Test suite for find_solver_from_cross_references (GraphQL-based solver detection)."""
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_single_merged_pr_closing_issue(self, mock_logging, mock_graphql):
+        """Single merged PR with closing reference returns correct solver."""
+        mock_graphql.return_value = _graphql_response(
+            [
+                _pr_node(number=14, user_id=42, closing_issues=[12]),
+            ]
+        )
+
+        solver_id, pr_number = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
+
+        assert solver_id == 42
+        assert pr_number == 14
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_unmerged_pr_is_filtered_out(self, mock_logging, mock_graphql):
+        """Unmerged PRs are ignored even if they have closing references."""
+        mock_graphql.return_value = _graphql_response(
+            [
+                _pr_node(number=14, merged=False, user_id=42, closing_issues=[12]),
+            ]
+        )
+
+        solver_id, pr_number = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
+
+        assert solver_id is None
+        assert pr_number is None
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_pr_from_different_repo_is_filtered_out(self, mock_logging, mock_graphql):
+        """PRs targeting a different base repo are rejected (prevents cross-repo gaming)."""
+        mock_graphql.return_value = _graphql_response(
+            [
+                _pr_node(number=14, user_id=99, base_repo='attacker/evil-repo', closing_issues=[12]),
+            ]
+        )
+
+        solver_id, pr_number = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
+
+        assert solver_id is None
+        assert pr_number is None
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_pr_mentioning_but_not_closing_issue_is_filtered_out(self, mock_logging, mock_graphql):
+        """PRs that mention the issue but don't have it in closingIssuesReferences are ignored."""
+        mock_graphql.return_value = _graphql_response(
+            [
+                _pr_node(number=14, user_id=42, closing_issues=[99]),  # Closes #99, not #12
+            ]
+        )
+
+        solver_id, pr_number = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
+
+        assert solver_id is None
+        assert pr_number is None
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_multiple_candidates_picks_most_recent(self, mock_logging, mock_graphql):
+        """When multiple merged PRs close the issue, the most recently merged one is selected."""
+        mock_graphql.return_value = _graphql_response(
+            [
+                _pr_node(number=10, user_id=100, merged_at='2025-01-01T00:00:00Z', closing_issues=[12]),
+                _pr_node(number=20, user_id=200, merged_at='2025-06-15T00:00:00Z', closing_issues=[12]),
+                _pr_node(number=15, user_id=150, merged_at='2025-03-01T00:00:00Z', closing_issues=[12]),
+            ]
+        )
+
+        solver_id, pr_number = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
+
+        assert solver_id == 200
+        assert pr_number == 20
+        mock_logging.warning.assert_called()  # Should warn about multiple candidates
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_mixed_valid_and_invalid_candidates(self, mock_logging, mock_graphql):
+        """Only valid candidates survive all filters (merged + same repo + closing ref)."""
+        mock_graphql.return_value = _graphql_response(
+            [
+                # Invalid: unmerged
+                _pr_node(number=10, merged=False, user_id=100, closing_issues=[12]),
+                # Invalid: wrong repo
+                _pr_node(number=11, user_id=101, base_repo='other/repo', closing_issues=[12]),
+                # Invalid: doesn't close this issue
+                _pr_node(number=13, user_id=103, closing_issues=[99]),
+                # Valid
+                _pr_node(number=14, user_id=42, merged_at='2025-06-01T00:00:00Z', closing_issues=[12]),
+            ]
+        )
+
+        solver_id, pr_number = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
+
+        assert solver_id == 42
+        assert pr_number == 14
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_fork_pr_targeting_main_repo_is_accepted(self, mock_logging, mock_graphql):
+        """PRs from forks that target the main repo (baseRepository matches) are accepted."""
+        mock_graphql.return_value = _graphql_response(
+            [
+                _pr_node(
+                    number=14,
+                    user_id=42,
+                    base_repo='owner/repo',  # PR targets the main repo
+                    closing_issues=[12],
+                ),
+            ]
+        )
+
+        solver_id, pr_number = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
+
+        assert solver_id == 42
+        assert pr_number == 14
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_base_repo_check_is_case_insensitive(self, mock_logging, mock_graphql):
+        """Base repo comparison is case-insensitive (GitHub repos are case-insensitive)."""
+        mock_graphql.return_value = _graphql_response(
+            [
+                _pr_node(number=14, user_id=42, base_repo='Owner/Repo', closing_issues=[12]),
+            ]
+        )
+
+        solver_id, pr_number = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
+
+        assert solver_id == 42
+        assert pr_number == 14
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_no_cross_references_returns_none(self, mock_logging, mock_graphql):
+        """Empty timeline nodes returns (None, None)."""
+        mock_graphql.return_value = _graphql_response([])
+
+        solver_id, pr_number = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
+
+        assert solver_id is None
+        assert pr_number is None
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_graphql_query_failure_returns_none(self, mock_logging, mock_graphql):
+        """GraphQL query failure returns (None, None)."""
+        mock_graphql.return_value = None
+
+        solver_id, pr_number = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
+
+        assert solver_id is None
+        assert pr_number is None
+
+
+class TestFindSolverFromTimeline:
+    """Test that find_solver_from_timeline delegates to cross-references."""
+
+    @patch('gittensor.utils.github_api_tools.find_solver_from_cross_references')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_delegates_to_cross_references(self, mock_logging, mock_cross_ref):
+        """find_solver_from_timeline delegates directly to find_solver_from_cross_references."""
+        mock_cross_ref.return_value = (42, 14)
+
+        solver_id, pr_number = find_solver_from_timeline('owner/repo', 12, 'fake_token')
+
+        assert solver_id == 42
+        assert pr_number == 14
+        mock_cross_ref.assert_called_once_with('owner/repo', 12, 'fake_token')
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

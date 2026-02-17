@@ -2,14 +2,14 @@
 # Copyright © 2023 Yuma Rao
 
 # Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
-# documentation files (the “Software”), to deal in the Software without restriction, including without limitation
+# documentation files (the "Software"), to deal in the Software without restriction, including without limitation
 # the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software,
 # and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 
 # The above copyright notice and this permission notice shall be included in all copies or substantial portions of
 # the Software.
 
-# THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO
 # THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
 # THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 # OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
@@ -20,7 +20,7 @@ import asyncio
 import threading
 import time
 import traceback
-from typing import Union
+from typing import Optional, Union
 
 import bittensor as bt
 
@@ -30,17 +30,33 @@ from neurons.base.neuron import BaseNeuron
 
 class BaseMinerNeuron(BaseNeuron):
     """
-    Base class for Bittensor miners.
+    Base class for Bittensor miners. Provides core infrastructure for running
+    a miner on the Bittensor network including axon serving, background threading,
+    and network synchronization.
     """
 
     neuron_type: str = 'MinerNeuron'
 
     @classmethod
-    def add_args(cls, parser: argparse.ArgumentParser):
+    def add_args(cls, parser: argparse.ArgumentParser) -> None:
+        """Add miner-specific arguments to the argument parser.
+
+        Args:
+            parser: The argument parser to add miner arguments to.
+        """
         super().add_args(parser)
         add_miner_args(cls, parser)
 
-    def __init__(self, config=None):
+    def __init__(self, config: Optional['bt.Config'] = None) -> None:
+        """Initialize the miner neuron.
+
+        Sets up the axon for handling incoming requests from validators,
+        attaches forward, blacklist, and priority functions, and initializes
+        background thread runners.
+
+        Args:
+            config: Configuration object for the miner. If None, uses default config.
+        """
         super().__init__(config=config)
 
         # Warn if allowing incoming requests from anyone.
@@ -73,7 +89,7 @@ class BaseMinerNeuron(BaseNeuron):
         self.thread: Union[threading.Thread, None] = None
         self.lock = asyncio.Lock()
 
-    def run(self):
+    def run(self) -> None:
         """
         Initiates and manages the main loop for the miner on the Bittensor network. The main loop handles graceful shutdown on keyboard interrupts and logs unforeseen errors.
 
@@ -82,7 +98,7 @@ class BaseMinerNeuron(BaseNeuron):
         2. Starts the miner's axon, making it active on the network.
         3. Periodically resynchronizes with the chain; updating the metagraph with the latest network state and setting weights.
 
-        The miner continues its operations until `should_exit` is set to True or an external interruption occurs.
+        The miner continues its operations until ``should_exit`` is set to True or an external interruption occurs.
         During each epoch of its operation, the miner waits for new blocks on the Bittensor network, updates its
         knowledge of the network (metagraph), and sets its weights. This process ensures the miner remains active
         and up-to-date with the network's latest state.
@@ -137,7 +153,7 @@ class BaseMinerNeuron(BaseNeuron):
         except Exception:
             bt.logging.error(traceback.format_exc())
 
-    def run_in_background_thread(self):
+    def run_in_background_thread(self) -> None:
         """
         Starts the miner's operations in a separate background thread.
         This is useful for non-blocking operations.
@@ -150,7 +166,7 @@ class BaseMinerNeuron(BaseNeuron):
             self.is_running = True
             bt.logging.debug('Started')
 
-    def stop_run_thread(self):
+    def stop_run_thread(self) -> None:
         """
         Stops the miner's operations that are running in the background thread.
         """
@@ -162,15 +178,18 @@ class BaseMinerNeuron(BaseNeuron):
             self.is_running = False
             bt.logging.debug('Stopped')
 
-    def __enter__(self):
+    def __enter__(self) -> 'BaseMinerNeuron':
         """
         Starts the miner's operations in a background thread upon entering the context.
         This method facilitates the use of the miner in a 'with' statement.
+
+        Returns:
+            The miner instance.
         """
         self.run_in_background_thread()
         return self
 
-    def __exit__(self, exc_type, exc_value, traceback):
+    def __exit__(self, exc_type: type, exc_value: BaseException, traceback: object) -> None:
         """
         Stops the miner's background operations upon exiting the context.
         This method facilitates the use of the miner in a 'with' statement.
@@ -185,8 +204,12 @@ class BaseMinerNeuron(BaseNeuron):
         """
         self.stop_run_thread()
 
-    def resync_metagraph(self):
-        """Resyncs the metagraph and updates the hotkeys and moving averages based on the new metagraph."""
+    def resync_metagraph(self) -> None:
+        """Resyncs the metagraph and updates the hotkeys and moving averages based on the new metagraph.
+
+        Synchronizes the local metagraph state with the current on-chain state
+        via the subtensor connection.
+        """
         bt.logging.debug('resync_metagraph()')
 
         # Sync the metagraph.

@@ -481,6 +481,8 @@ def calculate_issue_multiplier(pr: PullRequest) -> float:
         age_ratio = math.sqrt(min(days_open, MAX_ISSUE_AGE_FOR_MAX_SCORE)) / math.sqrt(MAX_ISSUE_AGE_FOR_MAX_SCORE)
         age_bonus = MAX_ISSUE_AGE_BONUS * age_ratio
         total_bonus = age_bonus + maintainer_bonus
+        # Cap total multiplier at 2.0 as documented
+        total_bonus = min(total_bonus, 1.0)
         bt.logging.info(f'Issue #{issue.number} - Open for {days_open} days | bonus: {total_bonus:.2f}{maintainer_str}')
         return 1.0 + total_bonus
     except (ValueError, AttributeError) as e:

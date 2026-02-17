@@ -85,8 +85,8 @@ class BaseNeuron(ABC):
             self.subtensor = MockSubtensor(self.config.netuid, wallet=self.wallet)
             self.metagraph = MockMetagraph(self.config.netuid, subtensor=self.subtensor)
         else:
-            self.wallet = bt.wallet(config=self.config)
-            self.subtensor = bt.subtensor(config=self.config)
+            self.wallet = bt.Wallet(config=self.config)
+            self.subtensor = bt.Subtensor(config=self.config)
             self.metagraph = self.subtensor.metagraph(self.config.netuid)
 
         bt.logging.info(f'Wallet: {self.wallet}')
@@ -108,7 +108,7 @@ class BaseNeuron(ABC):
         if self.config.mock:
             return  # Don't reconnect in mock mode
         bt.logging.info('Reconnecting subtensor...')
-        self.subtensor = bt.subtensor(config=self.config)
+        self.subtensor = bt.Subtensor(config=self.config)
 
     @abstractmethod
     async def forward(self, synapse: bt.Synapse) -> bt.Synapse: ...

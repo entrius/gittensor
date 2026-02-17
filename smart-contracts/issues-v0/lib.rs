@@ -1,0 +1,1001 @@
+#![cfg_attr(not(feature = "std"), no_std, no_main)]
+
+mod errors;
+mod events;
+mod runtime_calls;
+mod types;
+
+pub use errors::Error;
+pub use runtime_calls::RawCall;
+pub use types::*;
+
+// ============================================================================
+// Chain Extension for Subtensor Staking Operations
+// ============================================================================
+
+/// Subtensor chain extension for staking operations.
+/// These functions allow the contract to interact with the Subtensor runtime
+/// for querying and transferring stake.
+///
+/// Note: All functions use `handle_status = false` which means they return
+/// raw values without automatic error handling from status codes. The caller
+/// is responsible for interpreting the return values.
+///
+/// IMPORTANT: Function 0 returns Option<StakeInfo>, which ink! decodes automatically.
+/// The StakeInfo struct in types.rs must match subtensor's StakeInfo exactly.
+#[ink::chain_extension(extension = 5001)]
+pub trait SubtensorExtension {
+    type ErrorCode = ();
+
+    /// Query stake info for hotkey/coldkey/netuid.
+    /// Returns Option<StakeInfo> - None if no stake exists, Some(info) with stake details.
+    /// ink! handles SCALE decoding automatically.
+    #[ink(function = 0, handle_status = false)]
+    fn get_stake_info(hotkey: [u8; 32], coldkey: [u8; 32], netuid: u16)
+        -> Option<crate::StakeInfo>;
+
+    /// Transfer stake ownership to a different coldkey.
+    /// Amount is in AlphaCurrency (u64), NOT u128!
+    /// Returns 0 on success, non-zero error code on failure.
+    #[ink(function = 6, handle_status = false)]
+    fn transfer_stake(
+        destination_coldkey: [u8; 32],
+        hotkey: [u8; 32],
+        origin_netuid: u16,
+        destination_netuid: u16,
+        amount: u64,
+    ) -> u32;
+}
+
+/// Custom environment with Subtensor chain extension.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[ink::scale_derive(TypeInfo)]
+pub enum CustomEnvironment {}
+
+impl ink::env::Environment for CustomEnvironment {
+    const MAX_EVENT_TOPICS: usize = 4;
+    type AccountId = ink::primitives::AccountId;
+    type Balance = u128;
+    type Hash = ink::primitives::Hash;
+    type Timestamp = u64;
+    type BlockNumber = u32;
+    type ChainExtension = SubtensorExtension;
+}
+
+#[ink::contract(env = crate::CustomEnvironment)]
+mod issue_bounty_manager {
+    use crate::events::*;
+    use crate::runtime_calls::RawCall;
+    use crate::types::*;
+    use crate::Error;
+    use ink::prelude::string::String;
+    use ink::prelude::vec::Vec;
+    use ink::storage::Mapping;
+
+    // ========================================================================
+    // Constants
+    // ========================================================================
+
+    /// Minimum bounty amount: 10 ALPHA (9 decimals)
+    pub const MIN_BOUNTY: u128 = 10_000_000_000;
+
+    // ========================================================================
+    // Contract Storage
+    // ========================================================================
+
+    #[ink(storage)]
+    pub struct IssueBountyManager {
+        /// Contract owner with administrative privileges
+        owner: AccountId,
+        /// Treasury hotkey for staking operations and bounty payouts
+        treasury_hotkey: AccountId,
+        /// Subnet ID for this contract
+        netuid: u16,
+        /// Counter for generating unique issue IDs
+        next_issue_id: u64,
+        /// Unallocated emissions storage (alpha pool)
+        alpha_pool: Balance,
+
+        /// Mapping from issue ID to Issue struct
+        issues: Mapping<u64, Issue>,
+        /// Mapping from URL hash to issue ID for deduplication
+        url_hash_to_id: Mapping<[u8; 32], u64>,
+        /// FIFO queue of issue IDs awaiting bounty fill
+        bounty_queue: Vec<u64>,
+
+        validators: Vec<AccountId>,
+
+        // Solution votes (vote on issues directly)
+        solution_votes: Mapping<u64, SolutionVote>,
+        solution_vote_voters: Mapping<(u64, AccountId), bool>,
+
+        // Issue cancel votes (validators can cancel issues at any stage)
+        cancel_issue_votes: Mapping<u64, CancelVote>,
+        cancel_issue_voters: Mapping<(u64, AccountId), bool>,
+
+        // Emission management
+        /// Block number of last harvest
+        last_harvest_block: u32,
+    }
+
+    impl IssueBountyManager {
+        // ========================================================================
+        // Constructor
+        // ========================================================================
+
+        /// Creates a new IssueBountyManager contract
+        #[ink(constructor)]
+        pub fn new(owner: AccountId, treasury_hotkey: AccountId, netuid: u16) -> Self {
+            Self {
+                owner,
+                treasury_hotkey,
+                netuid,
+                next_issue_id: 1,
+                alpha_pool: 0,
+                issues: Mapping::default(),
+                url_hash_to_id: Mapping::default(),
+                bounty_queue: Vec::new(),
+                validators: Vec::new(),
+                solution_votes: Mapping::default(),
+                solution_vote_voters: Mapping::default(),
+                cancel_issue_votes: Mapping::default(),
+                cancel_issue_voters: Mapping::default(),
+                last_harvest_block: 0,
+            }
+        }
+
+        // ========================================================================
+        // Issue Registry Functions
+        // ========================================================================
+
+        /// Registers a new GitHub issue for bounty
+        #[ink(message)]
+        pub fn register_issue(
+            &mut self,
+            github_url: String,
+            repository_full_name: String,
+            issue_number: u32,
+            target_bounty: u128,
+        ) -> Result<u64, Error> {
+            if self.env().caller() != self.owner {
+                return Err(Error::NotOwner);
+            }
+
+            if target_bounty < MIN_BOUNTY {
+                return Err(Error::BountyTooLow);
+            }
+            if issue_number == 0 {
+                return Err(Error::InvalidIssueNumber);
+            }
+            if !self.is_valid_repo_name(&repository_full_name) {
+                return Err(Error::InvalidRepositoryName);
+            }
+
+            let url_hash = self.hash_string(&github_url);
+
+            if self.url_hash_to_id.get(url_hash).is_some() {
+                return Err(Error::IssueAlreadyExists);
+            }
+
+            let current_block = self.env().block_number();
+            let issue_id = self.next_issue_id;
+            self.next_issue_id = self.next_issue_id.saturating_add(1);
+
+            let new_issue = Issue {
+                id: issue_id,
+                github_url_hash: url_hash,
+                repository_full_name: repository_full_name.clone(),
+                issue_number,
+                bounty_amount: 0,
+                target_bounty,
+                status: IssueStatus::Registered,
+                registered_at_block: current_block,
+                solver_coldkey: None,
+                solver_hotkey: None,
+                winning_pr_number: None,
+            };
+
+            self.issues.insert(issue_id, &new_issue);
+            self.url_hash_to_id.insert(url_hash, &issue_id);
+            self.bounty_queue.push(issue_id);
+
+            self.env().emit_event(IssueRegistered {
+                issue_id,
+                github_url_hash: url_hash,
+                repository_full_name,
+                issue_number,
+                target_bounty,
+            });
+
+            Ok(issue_id)
+        }
+
+        /// Cancels an issue (owner only)
+        #[ink(message)]
+        pub fn cancel_issue(&mut self, issue_id: u64) -> Result<(), Error> {
+            if self.env().caller() != self.owner {
+                return Err(Error::NotOwner);
+            }
+
+            let mut issue = self.issues.get(issue_id).ok_or(Error::IssueNotFound)?;
+
+            if !self.is_modifiable(issue.status) {
+                return Err(Error::CannotCancel);
+            }
+
+            let returned_bounty = issue.bounty_amount;
+            self.alpha_pool = self.alpha_pool.saturating_add(returned_bounty);
+
+            issue.status = IssueStatus::Cancelled;
+            issue.bounty_amount = 0;
+            self.issues.insert(issue_id, &issue);
+
+            self.remove_from_bounty_queue(issue_id);
+
+            self.env().emit_event(IssueCancelled {
+                issue_id,
+                returned_bounty,
+            });
+
+            Ok(())
+        }
+
+        // ========================================================================
+        // Validator Consensus Functions
+        // ========================================================================
+
+        fn required_validator_votes(&self) -> u32 {
+            let n = u32::try_from(self.validators.len()).unwrap_or(u32::MAX);
+            n.saturating_div(2).saturating_add(1)
+        }
+
+        #[ink(message)]
+        pub fn add_validator(&mut self, hotkey: AccountId) -> Result<(), Error> {
+            if self.env().caller() != self.owner {
+                return Err(Error::NotOwner);
+            }
+            if self.validators.contains(&hotkey) {
+                return Err(Error::ValidatorAlreadyWhitelisted);
+            }
+            self.validators.push(hotkey);
+            self.env().emit_event(ValidatorAdded { hotkey });
+
+            Ok(())
+        }
+
+        #[ink(message)]
+        pub fn remove_validator(&mut self, hotkey: AccountId) -> Result<(), Error> {
+            if self.env().caller() != self.owner {
+                return Err(Error::NotOwner);
+            }
+            let pos = self
+                .validators
+                .iter()
+                .position(|v| v == &hotkey)
+                .ok_or(Error::ValidatorNotWhitelisted)?;
+            self.validators.remove(pos);
+            self.env().emit_event(ValidatorRemoved { hotkey });
+            Ok(())
+        }
+
+        #[ink(message)]
+        pub fn get_validators(&self) -> Vec<AccountId> {
+            self.validators.clone()
+        }
+
+        /// Votes for a solution on an active issue.
+        ///
+        /// When consensus is reached, the issue is completed and bounty paid out.
+        #[ink(message)]
+        pub fn vote_solution(
+            &mut self,
+            issue_id: u64,
+            solver_hotkey: AccountId,
+            solver_coldkey: AccountId,
+            pr_number: u32,
+        ) -> Result<(), Error> {
+            let issue = self.issues.get(issue_id).ok_or(Error::IssueNotFound)?;
+
+            if issue.status != IssueStatus::Active {
+                return Err(Error::IssueNotActive);
+            }
+
+            // Check not already voted
+            self.check_not_voted_solution(issue_id, self.env().caller())?;
+            let caller = self.validate_whitelisted_caller()?;
+
+            // Get or create vote
+            let mut vote = self.get_or_create_solution_vote(
+                issue_id,
+                solver_hotkey,
+                pr_number,
+                solver_coldkey,
+            );
+            self.solution_vote_voters.insert((issue_id, caller), &true);
+            vote.votes_count = vote.votes_count.saturating_add(1);
+            self.solution_votes.insert(issue_id, &vote);
+
+            // Check consensus and execute (includes auto-payout)
+            if self.check_consensus(vote.votes_count) {
+                self.complete_issue(issue_id, solver_hotkey, pr_number, solver_coldkey);
+                self.clear_solution_vote(issue_id);
+            }
+
+            Ok(())
+        }
+
+        /// Votes to cancel an issue (e.g., external solution found, issue invalid).
+        ///
+        /// Works on issues in Registered or Active state.
+        #[ink(message)]
+        pub fn vote_cancel_issue(
+            &mut self,
+            issue_id: u64,
+            reason_hash: [u8; 32],
+        ) -> Result<(), Error> {
+            let issue = self.issues.get(issue_id).ok_or(Error::IssueNotFound)?;
+
+            // Can cancel Registered or Active
+            if matches!(
+                issue.status,
+                IssueStatus::Completed | IssueStatus::Cancelled
+            ) {
+                return Err(Error::IssueAlreadyFinalized);
+            }
+
+            // Standard vote validation
+            self.check_not_voted_cancel_issue(issue_id, self.env().caller())?;
+            let caller = self.validate_whitelisted_caller()?;
+
+            // Get or create vote, increment count
+            let mut vote = self.get_or_create_cancel_issue_vote(issue_id, reason_hash);
+            self.cancel_issue_voters.insert((issue_id, caller), &true);
+            vote.votes_count = vote.votes_count.saturating_add(1);
+            self.cancel_issue_votes.insert(issue_id, &vote);
+
+            // Check consensus and execute
+            if self.check_consensus(vote.votes_count) {
+                self.execute_cancel_issue(issue_id, reason_hash);
+                self.clear_cancel_issue_vote(issue_id);
+            }
+
+            Ok(())
+        }
+
+        // ========================================================================
+        // Admin Functions
+        // ========================================================================
+
+        /// Sets a new owner
+        #[ink(message)]
+        pub fn set_owner(&mut self, new_owner: AccountId) -> Result<(), Error> {
+            if self.env().caller() != self.owner {
+                return Err(Error::NotOwner);
+            }
+            self.owner = new_owner;
+            Ok(())
+        }
+
+        /// Sets a new treasury hotkey.
+        ///
+        /// Resets bounty amounts to 0 for all Active/Registered issues since
+        /// the new treasury has no stake to back them. Issues remain in their
+        /// current status and will be re-funded on next harvest.
+        #[ink(message)]
+        pub fn set_treasury_hotkey(&mut self, new_hotkey: AccountId) -> Result<(), Error> {
+            if self.env().caller() != self.owner {
+                return Err(Error::NotOwner);
+            }
+
+            let old_hotkey = self.treasury_hotkey;
+
+            // Reset bounty amounts for all Active/Registered issues
+            let mut bounties_reset: u128 = 0;
+            let mut issues_affected: u32 = 0;
+
+            for issue_id in 1..self.next_issue_id {
+                if let Some(mut issue) = self.issues.get(issue_id) {
+                    if self.is_modifiable(issue.status) && issue.bounty_amount > 0 {
+                        bounties_reset = bounties_reset.saturating_add(issue.bounty_amount);
+                        issues_affected = issues_affected.saturating_add(1);
+                        issue.bounty_amount = 0;
+                        self.issues.insert(issue_id, &issue);
+                    }
+                }
+            }
+
+            // Reset alpha pool
+            self.alpha_pool = 0;
+
+            // Update treasury hotkey
+            self.treasury_hotkey = new_hotkey;
+
+            self.env().emit_event(TreasuryHotkeyChanged {
+                old_hotkey,
+                new_hotkey,
+                bounties_reset,
+                issues_affected,
+            });
+
+            Ok(())
+        }
+
+        // ========================================================================
+        // Emission Harvesting Functions
+        // ========================================================================
+
+        /// Query total stake on treasury hotkey owned by owner.
+        /// Uses chain extension to query Subtensor runtime.
+        #[ink(message)]
+        pub fn get_treasury_stake(&self) -> Balance {
+            let hotkey_bytes: [u8; 32] = *self.treasury_hotkey.as_ref();
+            let coldkey_bytes: [u8; 32] = *self.owner.as_ref();
+
+            let stake_info =
+                self.env()
+                    .extension()
+                    .get_stake_info(hotkey_bytes, coldkey_bytes, self.netuid);
+
+            match stake_info {
+                Some(info) => info.stake.0 as u128,
+                None => 0,
+            }
+        }
+
+        /// Returns the block number of the last harvest.
+        #[ink(message)]
+        pub fn get_last_harvest_block(&self) -> u32 {
+            self.last_harvest_block
+        }
+
+        /// Harvest emissions and distribute to bounties.
+        ///
+        /// PERMISSIONLESS - Anyone can call this function.
+        ///
+        /// Flow (Ground Truth Accounting):
+        /// 1. Query current stake on treasury hotkey (via chain extension)
+        /// 2. Calculate committed funds (sum of bounty_amount for Registered/Active issues)
+        /// 3. Available = current_stake - committed (ground truth, self-correcting)
+        /// 4. Fill pending bounties from available funds
+        /// 5. Recycle any remainder to owner's coldkey
+        /// 6. Update alpha_pool as read-only cache for UI
+        #[ink(message)]
+        pub fn harvest_emissions(&mut self) -> Result<HarvestResult, Error> {
+            // Query current total stake via chain extension
+            let current_stake = self.get_treasury_stake();
+
+            // Ground truth calculation: available = current_stake - committed
+            let committed = self.get_total_committed();
+            let available = current_stake.saturating_sub(committed);
+
+            if available == 0 {
+                // Update alpha_pool cache (should be 0 since nothing available)
+                self.alpha_pool = 0;
+                return Ok(HarvestResult {
+                    harvested: 0,
+                    bounties_filled: 0,
+                    recycled: 0,
+                });
+            }
+
+            // Set alpha_pool to available funds for bounty filling
+            self.alpha_pool = available;
+
+            // Fill bounties from available funds (returns list of fully-funded bounties)
+            let filled_bounties = self.fill_bounties();
+            let bounties_filled: u32 = u32::try_from(filled_bounties.len()).unwrap_or(u32::MAX);
+
+            // Emit BountyFilled event for each fully-funded bounty
+            for (issue_id, amount) in filled_bounties {
+                self.env().emit_event(BountyFilled { issue_id, amount });
+            }
+
+            // Recycle any remaining alpha pool
+            let to_recycle = self.alpha_pool;
+            let mut recycled: Balance = 0;
+
+            if to_recycle > 0 {
+                let amount_u64: u64 = to_recycle.try_into().unwrap_or(u64::MAX);
+
+                let proxy_call = RawCall::proxied_recycle_alpha(
+                    &self.owner,
+                    &self.treasury_hotkey,
+                    amount_u64,
+                    self.netuid,
+                );
+
+                let result = self.env().call_runtime(&proxy_call);
+
+                if result.is_ok() {
+                    recycled = to_recycle;
+                    self.alpha_pool = 0;
+
+                    self.env().emit_event(EmissionsRecycled {
+                        amount: recycled,
+                        destination: self.treasury_hotkey,
+                    });
+                } else {
+                    self.env().emit_event(HarvestFailed {
+                        reason: 255,
+                        amount: to_recycle,
+                    });
+                }
+            }
+
+            self.last_harvest_block = self.env().block_number();
+
+            self.env().emit_event(EmissionsHarvested {
+                amount: available,
+                bounties_filled,
+                recycled,
+            });
+
+            Ok(HarvestResult {
+                harvested: available,
+                bounties_filled,
+                recycled,
+            })
+        }
+
+        /// Manual payout retry for cases where auto-payout failed.
+        /// Uses solver determined by validator consensus, not caller-specified.
+        #[ink(message)]
+        pub fn payout_bounty(&mut self, issue_id: u64) -> Result<Balance, Error> {
+            if self.env().caller() != self.owner {
+                return Err(Error::NotOwner);
+            }
+
+            let issue = self.issues.get(issue_id).ok_or(Error::IssueNotFound)?;
+
+            if issue.status != IssueStatus::Completed {
+                return Err(Error::BountyNotCompleted);
+            }
+
+            if issue.bounty_amount == 0 {
+                return Err(Error::BountyAlreadyPaid);
+            }
+
+            let solver_coldkey = issue.solver_coldkey.ok_or(Error::NoSolverSet)?;
+            let payout = issue.bounty_amount;
+
+            // Attempt payout
+            let result = self.execute_payout_internal(issue_id, solver_coldkey, payout)?;
+
+            // Zero bounty_amount on success
+            if let Some(mut issue) = self.issues.get(issue_id) {
+                issue.bounty_amount = 0;
+                self.issues.insert(issue_id, &issue);
+            }
+
+            Ok(result)
+        }
+
+        // ========================================================================
+        // Query Functions
+        // ========================================================================
+
+        /// Returns the contract owner
+        #[ink(message)]
+        pub fn owner(&self) -> AccountId {
+            self.owner
+        }
+
+        /// Returns the treasury hotkey
+        #[ink(message)]
+        pub fn treasury_hotkey(&self) -> AccountId {
+            self.treasury_hotkey
+        }
+
+        /// Returns the subnet ID
+        #[ink(message)]
+        pub fn netuid(&self) -> u16 {
+            self.netuid
+        }
+
+        /// Returns the next issue ID
+        #[ink(message)]
+        pub fn next_issue_id(&self) -> u64 {
+            self.next_issue_id
+        }
+
+        /// Returns the alpha pool balance
+        #[ink(message)]
+        pub fn get_alpha_pool(&self) -> Balance {
+            self.alpha_pool
+        }
+
+        /// Returns an issue by ID
+        #[ink(message)]
+        pub fn get_issue(&self, issue_id: u64) -> Option<Issue> {
+            self.issues.get(issue_id)
+        }
+
+        /// Returns the issue ID for a URL hash
+        #[ink(message)]
+        pub fn get_issue_by_url_hash(&self, url_hash: [u8; 32]) -> u64 {
+            self.url_hash_to_id.get(url_hash).unwrap_or(0)
+        }
+
+        /// Returns the bounty queue
+        #[ink(message)]
+        pub fn get_bounty_queue(&self) -> Vec<u64> {
+            self.bounty_queue.clone()
+        }
+
+        /// Returns all issues with a given status
+        #[ink(message)]
+        pub fn get_issues_by_status(&self, status: IssueStatus) -> Vec<Issue> {
+            let mut result = Vec::new();
+            let mut issue_id = 1u64;
+            while issue_id < self.next_issue_id {
+                if let Some(issue) = self.issues.get(issue_id) {
+                    if issue.status == status {
+                        result.push(issue);
+                    }
+                }
+                issue_id = issue_id.saturating_add(1);
+            }
+            result
+        }
+
+        /// Returns all contract configuration in a single call.
+        #[ink(message)]
+        pub fn get_config(&self) -> ContractConfig {
+            ContractConfig {
+                required_validator_votes: self.required_validator_votes(),
+                netuid: self.netuid,
+            }
+        }
+
+        // ========================================================================
+        // Internal Functions
+        // ========================================================================
+
+        /// Validates caller is a whitelisted validator, returns caller AccountId.
+        fn validate_whitelisted_caller(&self) -> Result<AccountId, Error> {
+            let caller = self.env().caller();
+            if !self.validators.contains(&caller) {
+                return Err(Error::NotWhitelistedValidator);
+            }
+            Ok(caller)
+        }
+
+        /// Checks if caller has already voted for a solution.
+        fn check_not_voted_solution(&self, issue_id: u64, caller: AccountId) -> Result<(), Error> {
+            if self
+                .solution_vote_voters
+                .get((issue_id, caller))
+                .unwrap_or(false)
+            {
+                return Err(Error::AlreadyVoted);
+            }
+            Ok(())
+        }
+
+        /// Checks if caller has already voted to cancel an issue.
+        fn check_not_voted_cancel_issue(
+            &self,
+            issue_id: u64,
+            caller: AccountId,
+        ) -> Result<(), Error> {
+            if self
+                .cancel_issue_voters
+                .get((issue_id, caller))
+                .unwrap_or(false)
+            {
+                return Err(Error::AlreadyVoted);
+            }
+            Ok(())
+        }
+
+        /// Gets existing solution vote or creates a new one.
+        fn get_or_create_solution_vote(
+            &mut self,
+            issue_id: u64,
+            solver_hotkey: AccountId,
+            pr_number: u32,
+            solver_coldkey: AccountId,
+        ) -> SolutionVote {
+            if let Some(vote) = self.solution_votes.get(issue_id) {
+                vote
+            } else {
+                SolutionVote {
+                    issue_id,
+                    solver_hotkey,
+                    solver_coldkey,
+                    pr_number,
+                    votes_count: 0,
+                }
+            }
+        }
+
+        /// Gets existing issue cancel vote or creates a new one.
+        fn get_or_create_cancel_issue_vote(
+            &mut self,
+            issue_id: u64,
+            reason_hash: [u8; 32],
+        ) -> CancelVote {
+            if let Some(vote) = self.cancel_issue_votes.get(issue_id) {
+                vote
+            } else {
+                CancelVote {
+                    issue_id,
+                    reason_hash,
+                    votes_count: 0,
+                }
+            }
+        }
+
+        /// Clears issue cancel vote data
+        fn clear_cancel_issue_vote(&mut self, issue_id: u64) {
+            self.cancel_issue_votes.remove(issue_id);
+        }
+
+        /// Validates repository name format (owner/repo)
+        fn is_valid_repo_name(&self, name: &str) -> bool {
+            let bytes = name.as_bytes();
+            if bytes.is_empty() {
+                return false;
+            }
+            let mut slash_pos: Option<usize> = None;
+
+            for (i, &b) in bytes.iter().enumerate() {
+                if b == b'/' {
+                    if slash_pos.is_some() || i == 0 {
+                        return false;
+                    }
+                    slash_pos = Some(i);
+                }
+            }
+
+            match slash_pos {
+                Some(pos) => {
+                    let len = bytes.len();
+                    pos < len.saturating_sub(1)
+                }
+                None => false,
+            }
+        }
+
+        /// Checks if an issue status allows modification
+        fn is_modifiable(&self, status: IssueStatus) -> bool {
+            matches!(status, IssueStatus::Registered | IssueStatus::Active)
+        }
+
+        /// Hashes a string to [u8; 32] using keccak256
+        fn hash_string(&self, s: &str) -> [u8; 32] {
+            use ink::env::hash::{HashOutput, Keccak256};
+            let mut output = <Keccak256 as HashOutput>::Type::default();
+            ink::env::hash_bytes::<Keccak256>(s.as_bytes(), &mut output);
+            output
+        }
+
+        /// Fills bounties from the alpha pool using FIFO order.
+        /// Issues are filled in registration order (first registered = first filled).
+        /// Returns a list of (issue_id, bounty_amount) for each fully-funded bounty.
+        fn fill_bounties(&mut self) -> Vec<(u64, Balance)> {
+            let mut i = 0usize;
+            let mut filled: Vec<(u64, Balance)> = Vec::new();
+
+            while i < self.bounty_queue.len() && self.alpha_pool > 0 {
+                let issue_id = self.bounty_queue[i];
+
+                if let Some(mut issue) = self.issues.get(issue_id) {
+                    if !self.is_modifiable(issue.status) {
+                        self.remove_at(i);
+                        continue;
+                    }
+
+                    let remaining = issue.target_bounty.saturating_sub(issue.bounty_amount);
+                    if remaining == 0 {
+                        self.remove_at(i);
+                        continue;
+                    }
+
+                    let fill_amount = if remaining < self.alpha_pool {
+                        remaining
+                    } else {
+                        self.alpha_pool
+                    };
+
+                    issue.bounty_amount = issue.bounty_amount.saturating_add(fill_amount);
+                    self.alpha_pool = self.alpha_pool.saturating_sub(fill_amount);
+
+                    let is_fully_funded = issue.bounty_amount >= issue.target_bounty;
+
+                    if is_fully_funded {
+                        issue.status = IssueStatus::Active;
+                        self.issues.insert(issue_id, &issue);
+                        filled.push((issue_id, issue.bounty_amount));
+                        self.remove_at(i);
+                    } else {
+                        self.issues.insert(issue_id, &issue);
+                        i = i.saturating_add(1);
+                    }
+                } else {
+                    self.remove_at(i);
+                }
+            }
+
+            filled
+        }
+
+        /// Helper to remove from bounty queue at index, preserving FIFO order.
+        /// Uses Vec::remove which shifts remaining elements left.
+        fn remove_at(&mut self, idx: usize) {
+            if idx < self.bounty_queue.len() {
+                self.bounty_queue.remove(idx);
+            }
+        }
+
+        /// Removes an issue from the bounty queue, preserving FIFO order.
+        fn remove_from_bounty_queue(&mut self, issue_id: u64) {
+            if let Some(pos) = self.bounty_queue.iter().position(|&id| id == issue_id) {
+                self.remove_at(pos);
+            }
+        }
+
+        /// Calculate total funds committed to issues that still need those funds (ground truth).
+        /// Sums bounty_amount for Registered/Active issues, plus Completed issues
+        /// with bounty_amount > 0 (failed payouts awaiting retry via payout_bounty).
+        fn get_total_committed(&self) -> u128 {
+            let mut committed = 0u128;
+            for issue_id in 1..self.next_issue_id {
+                if let Some(issue) = self.issues.get(issue_id) {
+                    match issue.status {
+                        IssueStatus::Registered | IssueStatus::Active => {
+                            committed = committed.saturating_add(issue.bounty_amount);
+                        }
+                        // Completed issues with bounty_amount > 0 had failed payouts —
+                        // these funds must stay reserved for retry via payout_bounty()
+                        IssueStatus::Completed if issue.bounty_amount > 0 => {
+                            committed = committed.saturating_add(issue.bounty_amount);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            committed
+        }
+
+        /// Checks if vote count meets minimum consensus threshold.
+        fn check_consensus(&self, votes_count: u32) -> bool {
+            let n = u32::try_from(self.validators.len()).unwrap_or(0);
+            if n == 0 {
+                return false;
+            }
+            votes_count >= self.required_validator_votes()
+        }
+
+        /// Completes an issue with a solution and triggers auto-payout
+        fn complete_issue(
+            &mut self,
+            issue_id: u64,
+            solver_hotkey: AccountId,
+            pr_number: u32,
+            solver_coldkey: AccountId,
+        ) {
+            if let Some(mut issue) = self.issues.get(issue_id) {
+                let payout = issue.bounty_amount;
+
+                // Mark issue as completed and store solver info
+                issue.status = IssueStatus::Completed;
+                issue.solver_coldkey = Some(solver_coldkey);
+                issue.solver_hotkey = Some(solver_hotkey);
+                issue.winning_pr_number = Some(pr_number);
+                self.issues.insert(issue_id, &issue);
+
+                // Explicitly remove from bounty queue (don't rely on lazy cleanup)
+                self.remove_from_bounty_queue(issue_id);
+
+                // Attempt payout - only zero bounty_amount on success
+                // If payout fails, bounty_amount remains non-zero for retry via payout_bounty
+                if payout > 0
+                    && self
+                        .execute_payout_internal(issue_id, solver_coldkey, payout)
+                        .is_ok()
+                {
+                    // Zero bounty_amount only after successful payout
+                    if let Some(mut issue) = self.issues.get(issue_id) {
+                    issue.bounty_amount = 0;
+                        self.issues.insert(issue_id, &issue);
+                    }
+                }
+            }
+        }
+
+        /// Executes issue cancellation
+        fn execute_cancel_issue(&mut self, issue_id: u64, _reason_hash: [u8; 32]) {
+            let mut issue = match self.issues.get(issue_id) {
+                Some(i) => i,
+                None => return,
+            };
+
+            let returned_bounty = issue.bounty_amount;
+
+            self.remove_from_bounty_queue(issue_id);
+            let _ = self.recycle(returned_bounty);
+
+            issue.status = IssueStatus::Cancelled;
+            issue.bounty_amount = 0;
+            self.issues.insert(issue_id, &issue);
+
+            self.env().emit_event(IssueCancelled {
+                issue_id,
+                returned_bounty,
+            });
+        }
+
+        /// Internal payout helper - transfers stake from treasury_hotkey to solver
+        fn execute_payout_internal(
+            &mut self,
+            issue_id: u64,
+            solver_coldkey: AccountId,
+            payout_amount: Balance,
+        ) -> Result<Balance, Error> {
+            let amount_u64: u64 = payout_amount.try_into().unwrap_or(u64::MAX);
+
+            let proxy_call = RawCall::proxied_transfer_stake(
+                &self.owner,
+                &solver_coldkey,
+                &self.treasury_hotkey,
+                self.netuid,
+                self.netuid,
+                amount_u64,
+            );
+
+            let result = self.env().call_runtime(&proxy_call);
+
+            if result.is_ok() {
+                self.env().emit_event(BountyPaidOut {
+                    issue_id,
+                    miner: solver_coldkey,
+                    amount: payout_amount,
+                });
+                Ok(payout_amount)
+            } else {
+                Err(Error::TransferFailed)
+            }
+        }
+
+        /// Recycles (destroys) alpha tokens via runtime call.
+        fn recycle(&mut self, amount: Balance) -> bool {
+            if amount == 0 {
+                return true;
+            }
+
+            let amount_u64: u64 = amount.try_into().unwrap_or(u64::MAX);
+
+            let proxy_call = RawCall::proxied_recycle_alpha(
+                &self.owner,
+                &self.treasury_hotkey,
+                amount_u64,
+                self.netuid,
+            );
+
+            let result = self.env().call_runtime(&proxy_call);
+
+            if result.is_ok() {
+                self.env().emit_event(EmissionsRecycled {
+                    amount,
+                    destination: self.treasury_hotkey,
+                });
+                true
+            } else {
+                self.alpha_pool = self.alpha_pool.saturating_add(amount);
+                self.env().emit_event(RecycleFailed { amount });
+                false
+            }
+        }
+
+        /// Clears solution vote data
+        fn clear_solution_vote(&mut self, issue_id: u64) {
+            self.solution_votes.remove(issue_id);
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        include!("tests.rs");
+    }
+}

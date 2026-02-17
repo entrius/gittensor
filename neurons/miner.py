@@ -88,9 +88,14 @@ class Miner(BaseMinerNeuron):
 
 if __name__ == '__main__':
     with Miner() as miner:
+        # load token on startup just to check if it's valid if not then exit
+        if not token_mgmt.load_token():
+            exit(1)
+
         bt.logging.info(
             'Repeating an action makes a habit. Your habits create your character. And your character is your destiny.'
         )
+
         while True:
             bt.logging.info('Gittensor miner running...')
-            time.sleep(30)
+            time.sleep(45)

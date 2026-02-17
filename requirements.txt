@@ -1,5 +1,5 @@
-bittensor==9.9.0
-bittensor-cli==9.10.1
+bittensor==10.0.1
+bittensor-cli==9.17.0
 bittensor-commit-reveal==0.4.0
 bittensor-wallet==4.0.0
 levenshtein==0.27.3
@@ -18,3 +18,4 @@ debugpy==1.8.11
 pytz==2025.2
 psycopg2-binary==2.9.10
 python-dotenv==1.2.1
+substrate-interface

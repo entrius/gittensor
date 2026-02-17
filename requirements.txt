@@ -1,4 +1,4 @@
-bittensor==10.0.1
+bittensor==10.1.0
 bittensor-cli==9.17.0
 bittensor-commit-reveal==0.4.0
 bittensor-wallet==4.0.0

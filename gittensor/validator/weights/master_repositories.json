@@ -2312,6 +2312,9 @@
     "weight": 0.17
   },
   "hoppscotch/hoppscotch": {
+    "additional_acceptable_branches": [
+      "next"
+    ],
     "tier": "Gold",
     "weight": 20.13
   },

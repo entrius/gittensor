@@ -2,7 +2,7 @@
 # Copyright © 2025 Entrius
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Dict
+from typing import TYPE_CHECKING, Dict, Tuple
 
 import bittensor as bt
 import numpy as np
@@ -102,7 +102,7 @@ async def get_rewards(
     master_repositories: Dict[str, RepositoryConfig],
     programming_languages: Dict[str, LanguageConfig],
     token_config: TokenConfig,
-) -> np.ndarray:
+) -> Tuple[np.ndarray, Dict[int, MinerEvaluation]]:
     """
     Args:
         uids (set[int]): All valid miner uids in the subnet
@@ -151,4 +151,7 @@ async def get_rewards(
     # Store miner evaluations after calculating all scores
     await self.bulk_store_evaluation(miner_evaluations, skip_uids=cached_uids)
 
-    return np.array([final_rewards.get(uid, 0.0) for uid in sorted(uids)])
+    return (
+        np.array([final_rewards.get(uid, 0.0) for uid in sorted(uids)]),
+        miner_evaluations,
+    )

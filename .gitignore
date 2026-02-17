@@ -19,3 +19,8 @@ wandb
 CLAUDE.md
 .claude/
 .vscode/
+
+# Rust/Cargo build artifacts
+target/
+**/*.rs.bk
+*.lock

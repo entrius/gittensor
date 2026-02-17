@@ -138,6 +138,9 @@ def make_headers(token: str) -> Dict[str, str]:
 
 
 # In-process cache for GitHub /user responses, keyed by PAT.
+# Uses an OrderedDict with a max size to prevent unbounded memory growth
+# across scoring rounds with many different miners.
+_GITHUB_USER_CACHE_MAX_SIZE = 1024
 _GITHUB_USER_CACHE: Dict[str, Dict[str, Any]] = {}
 
 
@@ -170,6 +173,10 @@ def get_github_user(token: str) -> Optional[Dict[str, Any]]:
                     bt.logging.warning(f'Failed to parse GitHub /user JSON response: {e}')
                     return None
 
+                # Evict oldest entry if cache is at capacity
+                if len(_GITHUB_USER_CACHE) >= _GITHUB_USER_CACHE_MAX_SIZE:
+                    oldest_key = next(iter(_GITHUB_USER_CACHE))
+                    del _GITHUB_USER_CACHE[oldest_key]
                 _GITHUB_USER_CACHE[token] = user_data
                 return user_data
 

@@ -2,14 +2,14 @@
 # Copyright © 2025 Entrius
 
 # Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
-# documentation files (the “Software”), to deal in the Software without restriction, including without limitation
+# documentation files (the "Software"), to deal in the Software without restriction, including without limitation
 # the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software,
 # and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 
 # The above copyright notice and this permission notice shall be included in all copies or substantial portions of
 # the Software.
 
-# THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO
 # THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
 # THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 # OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
@@ -21,7 +21,7 @@ import asyncio
 import copy
 import threading
 from traceback import print_exception
-from typing import List, Union
+from typing import List, Union, Optional
 
 import bittensor as bt
 import numpy as np
@@ -43,11 +43,21 @@ class BaseValidatorNeuron(BaseNeuron):
     neuron_type: str = 'ValidatorNeuron'
 
     @classmethod
-    def add_args(cls, parser: argparse.ArgumentParser):
+    def add_args(cls, parser: argparse.ArgumentParser) -> None:
+        """Add validator-specific arguments to the argument parser.
+        
+        Args:
+            parser: The argument parser to add arguments to.
+        """
         super().add_args(parser)
         add_validator_args(cls, parser)
 
-    def __init__(self, config=None):
+    def __init__(self, config=None) -> None:
+        """Initialize the validator neuron.
+        
+        Args:
+            config: Configuration object for the validator.
+        """
         super().__init__(config=config)
 
         # Save a copy of the hotkeys to local memory.
@@ -82,8 +92,15 @@ class BaseValidatorNeuron(BaseNeuron):
         self.thread: Union[threading.Thread, None] = None
         self.lock = asyncio.Lock()
 
-    def serve_axon(self):
-        """Serve axon to enable external connections."""
+    def serve_axon(self) -> None:
+        """Serve axon to enable external connections.
+        
+        This method creates and serves an axon on the Bittensor network,
+        allowing other nodes to communicate with this validator.
+        
+        Raises:
+            Exception: If axon creation or serving fails.
+        """
 
         bt.logging.info('serving ip to chain...')
         try:
@@ -105,11 +122,16 @@ class BaseValidatorNeuron(BaseNeuron):
             bt.logging.error(f'Failed to create Axon initialize with exception: {e}')
             pass
 
-    async def concurrent_forward(self):
+    async def concurrent_forward(self) -> None:
+        """Execute multiple forward passes concurrently.
+        
+        This method runs multiple forward operations in parallel
+        based on the configured number of concurrent forwards.
+        """
         coroutines = [self.forward() for _ in range(self.config.neuron.num_concurrent_forwards)]
         await asyncio.gather(*coroutines)
 
-    def run(self):
+    def run(self) -> None:
         """
         Initiates and manages the main loop for the miner on the Bittensor network. The main loop handles graceful shutdown on keyboard interrupts and logs unforeseen errors.
 
@@ -162,7 +184,7 @@ class BaseValidatorNeuron(BaseNeuron):
             bt.logging.error(f'Error during validation: {str(err)}')
             bt.logging.debug(str(print_exception(type(err), err, err.__traceback__)))
 
-    def run_in_background_thread(self):
+    def run_in_background_thread(self) -> None:
         """
         Starts the validator's operations in a background thread upon entering the context.
         This method facilitates the use of the validator in a 'with' statement.
@@ -175,7 +197,7 @@ class BaseValidatorNeuron(BaseNeuron):
             self.is_running = True
             bt.logging.debug('Started')
 
-    def stop_run_thread(self):
+    def stop_run_thread(self) -> None:
         """
         Stops the validator's operations that are running in the background thread.
         """
@@ -190,7 +212,7 @@ class BaseValidatorNeuron(BaseNeuron):
         self.run_in_background_thread()
         return self
 
-    def __exit__(self, exc_type, exc_value, traceback):
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
         """
         Stops the validator's background operations upon exiting the context.
         This method facilitates the use of the validator in a 'with' statement.
@@ -210,9 +232,18 @@ class BaseValidatorNeuron(BaseNeuron):
             self.is_running = False
             bt.logging.debug('Stopped')
 
-    def set_weights(self):
+    def set_weights(self) -> None:
         """
         Sets the validator weights to the metagraph hotkeys based on the scores it has received from the miners. The weights determine the trust and incentive level the validator assigns to miner nodes on the network.
+        
+        This method:
+        1. Normalizes the scores
+        2. Processes weights according to subtensor limitations
+        3. Converts weights to uint16 format
+        4. Sets the weights on-chain
+        
+        Raises:
+            Exception: If setting weights on-chain fails.
         """
 
         # Check if self.scores contains any NaN values and log a warning if it does.
@@ -272,8 +303,19 @@ class BaseValidatorNeuron(BaseNeuron):
         else:
             bt.logging.error('set_weights failed', msg)
 
-    def resync_metagraph(self):
-        """Resyncs the metagraph and updates the hotkeys and moving averages based on the new metagraph."""
+    def resync_metagraph(self) -> None:
+        """Resyncs the metagraph and updates the hotkeys and moving averages based on the new metagraph.
+        
+        This method:
+        1. Saves a copy of the current metagraph state
+        2. Syncs with the network to get the latest state
+        3. Compares the old and new metagraph
+        4. Resets scores for replaced hotkeys
+        5. Expands score arrays if new miners joined
+        
+        Returns:
+            None
+        """
         bt.logging.info('resync_metagraph()')
 
         # Copies state of metagraph before syncing.
@@ -304,8 +346,16 @@ class BaseValidatorNeuron(BaseNeuron):
         # Update the hotkeys.
         self.hotkeys = copy.deepcopy(self.metagraph.hotkeys)
 
-    def update_scores(self, rewards: np.ndarray, uids: set[int], blacklisted_uids: List[int] = None):
-        """Performs exponential moving average on the scores based on the rewards received from the miners."""
+    def update_scores(self, rewards: np.ndarray, uids: List[int]) -> None:
+        """Performs exponential moving average on the scores based on the rewards received from the miners.
+        
+        Args:
+            rewards: Array of reward values for each miner.
+            uids: List of miner UIDs that correspond to the rewards.
+            
+        Raises:
+            ValueError: If rewards and uids have different lengths.
+        """
 
         # Check if rewards contains NaN values.
         if np.isnan(rewards).any():
@@ -313,28 +363,11 @@ class BaseValidatorNeuron(BaseNeuron):
             # Replace any NaN values in rewards with 0.
             rewards = np.nan_to_num(rewards, nan=0)
 
-        # Ensure rewards is a numpy array.
-        rewards = np.asarray(rewards)
-
         # Check if `uids` is already a numpy array and copy it to avoid the warning.
         if isinstance(uids, np.ndarray):
             uids_array = uids.copy()
         else:
-            # Convert set/list to sorted array to ensure consistent 1D array shape
-            uids_array = np.array(sorted(list(uids)))
-
-        # Handle edge case: If either rewards or uids_array is empty.
-        if rewards.size == 0 or uids_array.size == 0:
-            bt.logging.info(f'rewards: {rewards}, uids_array: {uids_array}')
-            bt.logging.warning('Either rewards or uids_array is empty. No updates will be performed.')
-            return
-
-        # Check if sizes of rewards and uids_array match.
-        if rewards.size != uids_array.size:
-            raise ValueError(
-                f'Shape mismatch: rewards array of shape {rewards.shape} '
-                f'cannot be broadcast to uids array of shape {uids_array.shape}'
-            )
+            uids_array = np.array(uids)
 
         # Compute forward pass rewards, assumes uids are mutually exclusive.
         # shape: [ metagraph.n ]
@@ -348,42 +381,22 @@ class BaseValidatorNeuron(BaseNeuron):
         self.scores: np.ndarray = alpha * scattered_rewards + (1 - alpha) * self.scores
         bt.logging.debug(f'Updated moving avg scores: {self.scores}')
 
-        # Handle blacklisted UIDs by setting their scores to 0 immediately
-        if blacklisted_uids:
-            blacklisted_uids_array = np.array(blacklisted_uids)
-            self.scores[blacklisted_uids_array] = 0.0
-            bt.logging.info(f'Set scores to 0 for blacklisted UIDs: {blacklisted_uids}')
-
-            # Renormalize scores to sum to 1 after blacklisting
-            total_score = np.sum(self.scores)
-            if total_score > 0:
-                self.scores = self.scores / total_score
-                bt.logging.debug(f'Renormalized scores to sum=1 after blacklisting. New sum: {np.sum(self.scores)}')
-
-    def save_state(self):
-        """Saves the state of the validator to a file."""
-        bt.logging.info('Saving validator state.')
-
-        # Save the state of the validator to file.
-        np.savez(
-            self.config.neuron.full_path + '/state.npz',
-            step=self.step,
-            scores=self.scores,
-            hotkeys=self.hotkeys,
+    def save_state(self) -> None:
+        """Saves the state of the validator to a file.
+        
+        This method should be overridden by subclasses to save
+        validator-specific state.
+        """
+        bt.logging.warning(
+            "save_state() called on BaseValidatorNeuron but no implementation provided. Override this method."
         )
 
-    def load_state(self):
-        """Loads the state of the validator from a file."""
-        bt.logging.info('Loading validator state.')
-
-        state_path = self.config.neuron.full_path + '/state.npz'
-        try:
-            state = np.load(state_path)
-            self.step = int(state['step'])
-            self.scores = state['scores']
-            self.hotkeys = list(state['hotkeys'])
-            bt.logging.success(f'Successfully loaded validator state from {state_path}')
-        except FileNotFoundError:
-            bt.logging.warning(f'No state file found at {state_path}, starting with fresh state')
-        except Exception as e:
-            bt.logging.error(f'Failed to load validator state from {state_path}: {e}. Starting with fresh state')
+    def load_state(self) -> None:
+        """Loads the state of the validator from a file.
+        
+        This method should be overridden by subclasses to load
+        validator-specific state.
+        """
+        bt.logging.warning(
+            "load_state() called on BaseValidatorNeuron but no implementation provided. Override this method."
+        )

@@ -4758,6 +4758,9 @@
     "weight": 0.24
   },
   "Significant-Gravitas/AutoGPT": {
+    "additional_acceptable_branches": [
+      "dev"
+    ],
     "tier": "Gold",
     "weight": 14.26
   },

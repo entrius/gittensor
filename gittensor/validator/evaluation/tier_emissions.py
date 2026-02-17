@@ -78,7 +78,7 @@ def allocate_emissions_by_tier(miner_evaluations: Dict[int, MinerEvaluation]) ->
     active_pct_sum = sum(TIER_EMISSION_SPLITS[tier.value] for tier in active_tiers)
 
     # Final percentages after redistribution. I.e, if gold is not yet unlocked, its 50% allocation will be
-    # proportionally distributed to the silver/gold tiers.
+    # proportionally distributed to the bronze/silver tiers.
     final_tier_pcts: Dict[Tier, float] = {}
     for tier in TIERS_ORDER:
         if tier in active_tiers:

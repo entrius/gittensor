@@ -495,7 +495,7 @@ def should_skip_merged_pr(
     if merged_dt < lookback_date_filter:
         return (
             True,
-            f'Skipping PR #{pr_raw["number"]} in {repository_full_name} - merged within {PR_LOOKBACK_DAYS} day lookback window',
+            f'Skipping PR #{pr_raw["number"]} in {repository_full_name} - merged before {PR_LOOKBACK_DAYS}-day lookback window',
         )
 
     # Skip if PR author is a maintainer

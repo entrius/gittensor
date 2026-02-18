@@ -8,19 +8,220 @@ Shared helper functions for issue commands
 import hashlib
 import json
 import os
+import re
 import struct
+import urllib.error
+import urllib.request
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
+import click
 from rich.console import Console
 
 from gittensor.constants import CONTRACT_ADDRESS
+
+# ALPHA token conversion
+ALPHA_DECIMALS = 9
+ALPHA_RAW_UNIT = 10**ALPHA_DECIMALS
+MIN_BOUNTY_ALPHA = 10.0
+MAX_ISSUE_ID = 1_000_000
+REPO_PATTERN = re.compile(r'^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$')
+GITHUB_API_TIMEOUT = 10
+
+# Status display colors
+STATUS_COLORS: Dict[str, str] = {
+    'Active': 'green',
+    'Registered': 'yellow',
+    'Completed': 'dim',
+    'Cancelled': 'dim',
+}
 
 # Default paths
 GITTENSOR_DIR = Path.home() / '.gittensor'
 CONFIG_FILE = GITTENSOR_DIR / 'config.json'
 
 console = Console()
+
+
+def format_alpha(raw_amount: int, decimals: int = 2) -> str:
+    """Format raw token amount (9-decimal) as human-readable ALPHA string."""
+    return f'{raw_amount / ALPHA_RAW_UNIT:.{decimals}f}'
+
+
+def colorize_status(status: str) -> str:
+    """Wrap status text with the appropriate Rich color tag."""
+    color = STATUS_COLORS.get(status, 'white')
+    return f'[{color}]{status}[/{color}]'
+
+
+def print_success(message: str) -> None:
+    """Print a standardized success message."""
+    console.print(f'\n  [green]\u2713[/green] {message}\n')
+
+
+def print_error(message: str) -> None:
+    """Print a standardized error message."""
+    console.print(f'\n  [red]\u2717[/red] {message}\n')
+
+
+def print_network_header(network_name: str, contract_addr: str) -> None:
+    """Print a one-line network and contract context header."""
+    short = f'{contract_addr[:12]}...{contract_addr[-6:]}' if len(contract_addr) > 20 else contract_addr
+    console.print(f'[dim]Network: {network_name} \u2022 Contract: {short}[/dim]\n')
+
+
+# ---------------------------------------------------------------------------
+# Input validation
+# ---------------------------------------------------------------------------
+
+
+def validate_bounty_amount(bounty: float) -> int:
+    """Validate bounty and convert to raw ALPHA units without precision loss.
+
+    Raises click.BadParameter if the value has too many decimals or is below
+    the contract minimum.
+    """
+    if bounty < MIN_BOUNTY_ALPHA:
+        raise click.BadParameter(
+            f'Minimum bounty is {MIN_BOUNTY_ALPHA} ALPHA (got {bounty})',
+            param_hint='--bounty',
+        )
+
+    try:
+        d = Decimal(str(bounty))
+    except InvalidOperation:
+        raise click.BadParameter(f'Invalid number: {bounty}', param_hint='--bounty')
+
+    # Check decimal places
+    sign, digits, exponent = d.as_tuple()
+    decimal_places = max(0, -exponent)
+    if decimal_places > ALPHA_DECIMALS:
+        raise click.BadParameter(
+            f'Maximum {ALPHA_DECIMALS} decimal places allowed (got {decimal_places})',
+            param_hint='--bounty',
+        )
+
+    raw = int(d * ALPHA_RAW_UNIT)
+    if raw <= 0:
+        raise click.BadParameter('Bounty must result in a positive amount', param_hint='--bounty')
+
+    return raw
+
+
+def validate_repository(repo: str, verify_exists: bool = True) -> Tuple[str, str]:
+    """Validate owner/repo format and optionally verify it exists on GitHub.
+
+    Returns (owner, repo_name) on success.
+    Raises click.BadParameter on failure.
+    """
+    repo = repo.strip()
+
+    if not REPO_PATTERN.match(repo):
+        raise click.BadParameter(
+            f'Repository must be in owner/repo format with alphanumeric characters, '
+            f"hyphens, underscores, or dots (got '{repo}')",
+            param_hint='--repo',
+        )
+
+    owner, repo_name = repo.split('/', 1)
+
+    if verify_exists:
+        url = f'https://api.github.com/repos/{owner}/{repo_name}'
+        try:
+            req = urllib.request.Request(url, headers={'User-Agent': 'gittensor-cli'})
+            urllib.request.urlopen(req, timeout=GITHUB_API_TIMEOUT)
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                raise click.BadParameter(
+                    f"Repository '{owner}/{repo_name}' not found on GitHub",
+                    param_hint='--repo',
+                )
+            # Non-404 HTTP errors: warn but don't block
+            console.print(f'[yellow]Warning: GitHub API returned {e.code} — skipping existence check[/yellow]')
+        except (urllib.error.URLError, OSError):
+            console.print('[yellow]Warning: Could not reach GitHub API — skipping existence check[/yellow]')
+
+    return owner, repo_name
+
+
+def validate_github_issue(owner: str, repo: str, issue_number: int) -> Optional[Dict[str, Any]]:
+    """Verify a GitHub issue exists, is open, and is not a pull request.
+
+    Returns the issue JSON data on success, or None if verification was skipped
+    due to network issues.  Raises click.BadParameter on validation failure.
+    """
+    url = f'https://api.github.com/repos/{owner}/{repo}/issues/{issue_number}'
+    try:
+        req = urllib.request.Request(url, headers={'User-Agent': 'gittensor-cli'})
+        resp = urllib.request.urlopen(req, timeout=GITHUB_API_TIMEOUT)
+        data = json.loads(resp.read().decode())
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            raise click.BadParameter(
+                f'Issue #{issue_number} not found in {owner}/{repo}',
+                param_hint='--issue',
+            )
+        console.print(f'[yellow]Warning: GitHub API returned {e.code} — skipping issue check[/yellow]')
+        return None
+    except (urllib.error.URLError, OSError):
+        console.print('[yellow]Warning: Could not reach GitHub API — skipping issue check[/yellow]')
+        return None
+
+    if 'pull_request' in data:
+        raise click.BadParameter(
+            f'#{issue_number} is a pull request, not an issue',
+            param_hint='--issue',
+        )
+
+    state = data.get('state', 'unknown')
+    if state != 'open':
+        console.print(f'[yellow]Warning: Issue #{issue_number} is {state}[/yellow]')
+
+    return data
+
+
+def validate_issue_id(value: int, param_name: str = 'issue_id') -> int:
+    """Validate an on-chain issue ID is in a reasonable range (1 to 999999)."""
+    if value < 1 or value >= MAX_ISSUE_ID:
+        raise click.BadParameter(
+            f'{param_name} must be between 1 and {MAX_ISSUE_ID - 1} (got {value})',
+            param_hint=param_name,
+        )
+    return value
+
+
+def validate_ss58_address(address: str, param_name: str = 'address') -> str:
+    """Validate an SS58 address.
+
+    Uses scalecodec's ss58_decode for proper base58+checksum validation.
+    Falls back to a length/prefix heuristic if scalecodec is not installed.
+    """
+    address = address.strip()
+    if not address:
+        raise click.BadParameter(f'Empty {param_name}', param_hint=param_name)
+
+    try:
+        from scalecodec.utils.ss58 import ss58_decode
+
+        ss58_decode(address)
+        return address
+    except ImportError:
+        pass
+    except Exception:
+        raise click.BadParameter(
+            f'Invalid SS58 address for {param_name}: {address}',
+            param_hint=param_name,
+        )
+
+    # Fallback: basic structure check (starts with 1-9/A-H/J-N/P-Z, 46-48 chars)
+    if not re.match(r'^[1-9A-HJ-NP-Za-km-z]{46,48}$', address):
+        raise click.BadParameter(
+            f'Invalid SS58 address for {param_name}: {address}',
+            param_hint=param_name,
+        )
+
+    return address
 
 
 def load_config() -> Dict[str, Any]:
@@ -119,28 +320,6 @@ def resolve_network(network: Optional[str] = None, rpc_url: Optional[str] = None
 
     # Default: finney (mainnet)
     return NETWORK_MAP['finney'], 'finney'
-
-
-def get_ws_endpoint(cli_value: str = '') -> str:
-    """
-    Get WebSocket endpoint from CLI arg, env, or config file.
-
-    Deprecated: prefer resolve_network() for new code.
-
-    Args:
-        cli_value: Value passed via --rpc-url CLI option
-
-    Returns:
-        WebSocket endpoint string
-    """
-    if cli_value and cli_value != 'wss://entrypoint-finney.opentensor.ai:443':
-        return cli_value
-
-    config = load_config()
-    if config.get('ws_endpoint'):
-        return config['ws_endpoint']
-
-    return cli_value  # Return CLI default
 
 
 # ============================================================================

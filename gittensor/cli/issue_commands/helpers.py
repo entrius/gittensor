@@ -25,7 +25,9 @@ from gittensor.constants import CONTRACT_ADDRESS
 ALPHA_DECIMALS = 9
 ALPHA_RAW_UNIT = 10**ALPHA_DECIMALS
 MIN_BOUNTY_ALPHA = 10.0
+MAX_BOUNTY_ALPHA = 100_000_000.0
 MAX_ISSUE_ID = 1_000_000
+MAX_ISSUE_NUMBER = 2**32 - 1
 REPO_PATTERN = re.compile(r'^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$')
 GITHUB_API_TIMEOUT = 10
 
@@ -88,12 +90,20 @@ def validate_bounty_amount(bounty: float) -> int:
             param_hint='--bounty',
         )
 
+    if bounty > MAX_BOUNTY_ALPHA:
+        raise click.BadParameter(
+            f'Bounty cannot exceed {MAX_BOUNTY_ALPHA:,.0f} ALPHA',
+            param_hint='--bounty',
+        )
+
     try:
         d = Decimal(str(bounty))
     except InvalidOperation:
         raise click.BadParameter(f'Invalid number: {bounty}', param_hint='--bounty')
 
-    # Check decimal places
+    if not d.is_finite():
+        raise click.BadParameter(f'Bounty must be a finite number (got {bounty})', param_hint='--bounty')
+
     sign, digits, exponent = d.as_tuple()
     decimal_places = max(0, -exponent)
     if decimal_places > ALPHA_DECIMALS:

@@ -15,6 +15,7 @@ import click
 from rich.panel import Panel
 
 from .helpers import (
+    MAX_ISSUE_NUMBER,
     console,
     format_alpha,
     get_contract_address,
@@ -122,9 +123,9 @@ def issue_register(
     try:
         owner, repo_name = validate_repository(repo)
         bounty_amount = validate_bounty_amount(bounty)
-        if issue_number < 1:
+        if issue_number < 1 or issue_number > MAX_ISSUE_NUMBER:
             raise click.BadParameter(
-                f'Issue number must be positive (got {issue_number})',
+                f'Issue number must be between 1 and {MAX_ISSUE_NUMBER} (got {issue_number})',
                 param_hint='--issue',
             )
         validate_github_issue(owner, repo_name, issue_number)

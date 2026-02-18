@@ -2,6 +2,7 @@
 import os
 import sys
 import time
+from typing import Optional
 
 import bittensor as bt
 import requests
@@ -9,8 +10,15 @@ import requests
 from gittensor.constants import BASE_GITHUB_API_URL
 
 
-def init():
-    """Initialize and check if GitHub token exists in environment"""
+def init() -> bool:
+    """Initialize and check if GitHub token exists in environment
+    
+    Returns:
+        bool: Always returns True if token exists, otherwise exits
+        
+    Raises:
+        SystemExit: If GITTENSOR_MINER_PAT environment variable is not set
+    """
     token = os.getenv('GITTENSOR_MINER_PAT')
     if not token:
         bt.logging.error('GitHub Token NOT FOUND. Please set GITTENSOR_MINER_PAT environment variable.')
@@ -21,10 +29,12 @@ def init():
     return True
 
 
-def load_token():
+def load_token() -> Optional[str]:
     """
     Load GitHub token from environment variable
-    Returns the GitHub access token string.
+    
+    Returns:
+        Optional[str]: The GitHub access token string if valid, None otherwise
     """
     bt.logging.info('Loading GitHub token from environment.')
 
@@ -43,11 +53,15 @@ def load_token():
     return None
 
 
-def is_token_valid(token) -> bool:
+def is_token_valid(token: str) -> bool:
     """
     Test if a GitHub token is valid by making a simple API call.
+    
+    Args:
+        token (str): GitHub personal access token to validate
+        
     Returns:
-        True if valid token, False otherwise
+        bool: True if valid token, False otherwise
     """
     headers = {'Authorization': f'token {token}', 'Accept': 'application/vnd.github.v3+json'}
 

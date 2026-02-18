@@ -16,9 +16,15 @@ from rich.panel import Panel
 
 from .helpers import (
     console,
+    format_alpha,
     get_contract_address,
     load_config,
     resolve_network,
+    validate_bounty,
+    validate_issue_id,
+    validate_repo_format,
+    verify_github_issue,
+    verify_github_repo,
 )
 
 
@@ -56,21 +62,21 @@ from .helpers import (
 @click.option(
     '--contract',
     default='',
-    help='Contract address (uses default if empty)',
+    help='Contract address (uses configured/default value if empty)',
 )
 @click.option(
     '--wallet-name',
     '--wallet.name',
     '--wallet',
     default='default',
-    help='Wallet name (must be contract owner)',
+    help='Wallet name (owner wallet)',
 )
 @click.option(
     '--wallet-hotkey',
     '--wallet.hotkey',
     '--hotkey',
     default='default',
-    help='Hotkey name',
+    help='Hotkey name for signing',
 )
 def issue_register(
     repo: str,
@@ -102,9 +108,21 @@ def issue_register(
     """
     console.print('\n[bold cyan]Register Issue for Bounty[/bold cyan]\n')
 
-    # Validate repo format
-    if '/' not in repo:
-        console.print('[red]Error: Repository must be in owner/repo format[/red]')
+    # Validate all inputs upfront (fast-fail before any network calls)
+    try:
+        validate_repo_format(repo)
+        validate_issue_id(issue_number, 'Issue number')
+        bounty_amount = validate_bounty(bounty)
+    except click.BadParameter as e:
+        console.print(f'[red]Error: {e.format_message()}[/red]')
+        return
+
+    # Verify repo and issue exist on GitHub
+    try:
+        verify_github_repo(repo)
+        verify_github_issue(repo, issue_number)
+    except click.BadParameter as e:
+        console.print(f'[red]Error: {e.format_message()}[/red]')
         return
 
     # Construct GitHub URL
@@ -120,7 +138,7 @@ def issue_register(
             f'[cyan]Repository:[/cyan] {repo}\n'
             f'[cyan]Issue Number:[/cyan] #{issue_number}\n'
             f'[cyan]GitHub URL:[/cyan] {github_url}\n'
-            f'[cyan]Target Bounty:[/cyan] {bounty:.2f} ALPHA\n'
+            f'[cyan]Target Bounty:[/cyan] {format_alpha(bounty_amount, 4)} ALPHA\n'
             f'[cyan]Network:[/cyan] {network_name}\n'
             f'[cyan]RPC Endpoint:[/cyan] {ws_endpoint}\n'
             f'[cyan]Contract:[/cyan] {contract_addr if contract_addr else "(not configured)"}',
@@ -139,16 +157,15 @@ def issue_register(
         return
 
     # Perform actual contract call (on-chain transaction)
-    console.print('\n[yellow]Submitting on-chain transaction to contract...[/yellow]')
-
     try:
         import bittensor as bt
         from substrateinterface import Keypair, SubstrateInterface
         from substrateinterface.contracts import ContractInstance
 
         # Connect to subtensor
-        console.print(f'[dim]Connecting to {ws_endpoint}...[/dim]')
-        substrate = SubstrateInterface(url=ws_endpoint)
+        with console.status('[bold yellow]Connecting to subtensor...') as status:
+            substrate = SubstrateInterface(url=ws_endpoint)
+            status.update('[bold yellow]Connected. Loading wallet...')
 
         # CLI flags override config; fall back to config if not explicitly supplied
         effective_wallet = wallet_name if wallet_name != 'default' else config.get('wallet', wallet_name)
@@ -186,22 +203,18 @@ def issue_register(
             substrate=substrate,
         )
 
-        # Convert bounty to contract units (9 decimals for ALPHA)
-        bounty_amount = int(bounty * 1_000_000_000)
-
-        console.print('[yellow]Calling register_issue on contract...[/yellow]')
-
-        result = contract.exec(
-            keypair,
-            'register_issue',
-            args={
-                'github_url': github_url,
-                'repository_full_name': repo,
-                'issue_number': issue_number,
-                'target_bounty': bounty_amount,
-            },
-            gas_limit={'ref_time': 10_000_000_000, 'proof_size': 1_000_000},
-        )
+        with console.status('[bold yellow]Submitting transaction...'):
+            result = contract.exec(
+                keypair,
+                'register_issue',
+                args={
+                    'github_url': github_url,
+                    'repository_full_name': repo,
+                    'issue_number': issue_number,
+                    'target_bounty': bounty_amount,
+                },
+                gas_limit={'ref_time': 10_000_000_000, 'proof_size': 1_000_000},
+            )
 
         # Check if transaction was successful
         if hasattr(result, 'is_success') and not result.is_success:
@@ -217,7 +230,7 @@ def issue_register(
                 console.print('  • Bounty too low (minimum 10 ALPHA)')
                 console.print('  • Invalid repository format (must be owner/repo)')
                 console.print('  • Caller is not the contract owner')
-                console.print('[dim]Use "gitt view issues" to check existing issues[/dim]')
+                console.print('[dim]Use "gitt issues list" to check existing issues[/dim]')
             elif error_info:
                 console.print(f'[red]Error: {error_info}[/red]')
 
@@ -242,7 +255,7 @@ def issue_register(
             console.print('  • Bounty too low (minimum 10 ALPHA)')
             console.print('  • Invalid repository format (must be owner/repo)')
             console.print('  • Caller is not the contract owner')
-            console.print('[dim]Use "gitt view issues" to check existing issues[/dim]')
+            console.print('[dim]Use "gitt issues list" to check existing issues[/dim]')
         else:
             console.print(f'[red]Error registering issue: {e}[/red]')
 
@@ -253,14 +266,14 @@ def issue_register(
     '--wallet.name',
     '--wallet',
     default='validator',
-    help='Wallet name',
+    help='Wallet name (signing wallet)',
 )
 @click.option(
     '--wallet-hotkey',
     '--wallet.hotkey',
     '--hotkey',
     default='default',
-    help='Hotkey name',
+    help='Hotkey name for signing',
 )
 @click.option(
     '--network',
@@ -277,7 +290,7 @@ def issue_register(
 @click.option(
     '--contract',
     default='',
-    help='Contract address (uses config if empty)',
+    help='Contract address (uses configured/default value if empty)',
 )
 @click.option('--verbose', '-v', is_flag=True, help='Show detailed output')
 def issue_harvest(wallet_name: str, wallet_hotkey: str, network: str, rpc_url: str, contract: str, verbose: bool):
@@ -304,9 +317,16 @@ def issue_harvest(wallet_name: str, wallet_hotkey: str, network: str, rpc_url: s
         console.print('[dim]Set CONTRACT_ADDRESS env var or run ./up.sh --issues[/dim]')
         return
 
-    console.print(f'[dim]Network: {network_name} ({ws_endpoint})[/dim]')
-    console.print(f'[dim]Contract: {contract_addr}[/dim]')
-    console.print(f'[dim]Wallet: {wallet_name}/{wallet_hotkey}[/dim]\n')
+    console.print(
+        Panel(
+            f'[cyan]Network:[/cyan] {network_name}\n'
+            f'[cyan]RPC Endpoint:[/cyan] {ws_endpoint}\n'
+            f'[cyan]Contract:[/cyan] {contract_addr}\n'
+            f'[cyan]Wallet:[/cyan] {wallet_name}/{wallet_hotkey}',
+            title='Harvest Emissions',
+            border_style='blue',
+        )
+    )
 
     try:
         import bittensor as bt
@@ -316,14 +336,13 @@ def issue_harvest(wallet_name: str, wallet_hotkey: str, network: str, rpc_url: s
         )
 
         # Load wallet
-        console.print('[yellow]Loading wallet...[/yellow]')
         wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
         hotkey_addr = wallet.hotkey.ss58_address
         console.print(f'[green]Hotkey address:[/green] {hotkey_addr}')
 
         # Connect to subtensor
-        console.print('\n[yellow]Connecting to subtensor...[/yellow]')
-        subtensor = bt.Subtensor(network=ws_endpoint)
+        with console.status('[bold yellow]Connecting to subtensor...'):
+            subtensor = bt.Subtensor(network=ws_endpoint)
 
         # Show wallet balance (informational only)
         if verbose:
@@ -349,8 +368,8 @@ def issue_harvest(wallet_name: str, wallet_hotkey: str, network: str, rpc_url: s
                 last_harvest = client.get_last_harvest_block()
                 current_block = subtensor.get_current_block()
 
-                console.print(f'[dim]Alpha pool: {alpha_pool / 1e9:.4f} ALPHA[/dim]')
-                console.print(f'[dim]Treasury stake: {pending / 1e9:.4f} ALPHA[/dim]')
+                console.print(f'[dim]Alpha pool: {format_alpha(alpha_pool, 4)} ALPHA[/dim]')
+                console.print(f'[dim]Treasury stake: {format_alpha(pending, 4)} ALPHA[/dim]')
                 console.print(f'[dim]Last harvest block: {last_harvest}[/dim]')
                 console.print(f'[dim]Current block: {current_block}[/dim]')
                 if last_harvest > 0:
@@ -359,8 +378,8 @@ def issue_harvest(wallet_name: str, wallet_hotkey: str, network: str, rpc_url: s
                 console.print(f'[yellow]Warning: Could not read contract state: {e}[/yellow]')
 
         # Attempt harvest
-        console.print('\n[yellow]Calling harvest_emissions()...[/yellow]')
-        result = client.harvest_emissions(wallet)
+        with console.status('[bold yellow]Calling harvest_emissions()...'):
+            result = client.harvest_emissions(wallet)
 
         if result:
             if result.get('status') == 'success':

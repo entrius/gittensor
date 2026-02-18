@@ -26,14 +26,20 @@ from .admin import admin
 
 # Re-export helpers
 from .helpers import (
+    ALPHA_RAW_UNIT,
     CONFIG_FILE,
     GITTENSOR_DIR,
     NETWORK_MAP,
     console,
+    format_alpha,
     get_contract_address,
     load_config,
     read_issues_from_contract,
     resolve_network,
+    validate_bounty,
+    validate_issue_id,
+    validate_repo_format,
+    validate_ss58_address,
 )
 from .mutations import (
     issue_harvest,
@@ -96,7 +102,13 @@ __all__ = [
     'get_contract_address',
     'resolve_network',
     'read_issues_from_contract',
+    'format_alpha',
+    'validate_bounty',
+    'validate_repo_format',
+    'validate_ss58_address',
+    'validate_issue_id',
     'GITTENSOR_DIR',
     'CONFIG_FILE',
     'NETWORK_MAP',
+    'ALPHA_RAW_UNIT',
 ]

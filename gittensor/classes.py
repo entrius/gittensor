@@ -548,7 +548,7 @@ class MinerEvaluationCache:
                 f'Cache miss for UID {uid}: identity mismatch '
                 f'(cached hotkey={cached.hotkey[:8]}..., github_id={cached.github_id} vs '
                 f'current hotkey={hotkey[:8]}..., github_id={github_id}). '
-                f'Removing cached evaluation'
+                'Removing cached evaluation'
             )
             del self._cache[uid]
             return None

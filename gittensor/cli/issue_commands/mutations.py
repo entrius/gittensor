@@ -16,9 +16,13 @@ from rich.panel import Panel
 
 from .helpers import (
     console,
+    format_alpha,
     get_contract_address,
     load_config,
     resolve_network,
+    validate_repo_format,
+    verify_github_issue,
+    verify_github_repo,
 )
 
 
@@ -33,13 +37,13 @@ from .helpers import (
     'issue_number',
     required=True,
     type=int,
-    help='GitHub issue number',
+    help='GitHub issue number (1-1,000,000)',
 )
 @click.option(
     '--bounty',
     required=True,
     type=float,
-    help='Bounty amount in ALPHA tokens',
+    help='Bounty amount in ALPHA tokens (min 10)',
 )
 @click.option(
     '--network',
@@ -72,6 +76,11 @@ from .helpers import (
     default='default',
     help='Hotkey name',
 )
+@click.option(
+    '--github-pat',
+    default='',
+    help='GitHub PAT for verification (optional)',
+)
 def issue_register(
     repo: str,
     issue_number: int,
@@ -81,6 +90,7 @@ def issue_register(
     contract: str,
     wallet_name: str,
     wallet_hotkey: str,
+    github_pat: str,
 ):
     """
     Register a new issue with a bounty (OWNER ONLY).
@@ -97,14 +107,56 @@ def issue_register(
 
     \b
     Examples:
-        gitt issues register --repo opentensor/btcli --issue 144 --bounty 100
-        gitt i reg --repo tensorflow/tensorflow --issue 12345 --bounty 50
+        gitt register --repo opentensor/btcli --issue 144 --bounty 100
+        gitt register --repo tensorflow/tensorflow --issue 12345 --bounty 50
     """
     console.print('\n[bold cyan]Register Issue for Bounty[/bold cyan]\n')
 
-    # Validate repo format
-    if '/' not in repo:
-        console.print('[red]Error: Repository must be in owner/repo format[/red]')
+    # 1. Validate repository format
+    if not validate_repo_format(repo):
+        console.print('[red]Error: Repository must be in owner/repo format (alphanumeric, no spaces).[/red]')
+        return
+
+    # 2. Validate issue number
+    if issue_number < 1 or issue_number >= 1_000_000:
+        console.print('[red]Error: Issue number must be between 1 and 1,000,000.[/red]')
+        return
+
+    # 3. Validate bounty amount (min and precision)
+    if bounty < 10.0:
+        console.print('[red]Error: Minimum bounty is 10.0 ALPHA.[/red]')
+        return
+
+    # Check for excessive precision (> 9 decimals)
+    bounty_str = str(bounty)
+    if '.' in bounty_str:
+        decimals = len(bounty_str.split('.')[1])
+        if decimals > 9:
+            console.print('[red]Error: Bounty amount exceeds maximum precision (9 decimal places).[/red]')
+            return
+
+    # 4. Verify on GitHub
+    pat = github_pat or load_config().get('github_pat')
+    with console.status('[yellow]Verifying issue on GitHub...[/yellow]'):
+        issue_info = verify_github_issue(repo, issue_number, pat)
+
+    if not issue_info:
+        # If issue not found, check if repo exists at least
+        with console.status('[yellow]Issue not found. Checking if repository exists...[/yellow]'):
+            repo_exists = verify_github_repo(repo, pat)
+
+        if not repo_exists:
+            console.print(f'[red]Error: Repository "{repo}" does not exist on GitHub.[/red]')
+        else:
+            console.print(f'[red]Error: Issue #{issue_number} does not exist in repository "{repo}".[/red]')
+        return
+
+    if issue_info.get('is_pull_request'):
+        console.print('[red]Error: The specified issue is a pull request. Gittensor only supports issues.[/red]')
+        return
+
+    if issue_info.get('state') != 'open':
+        console.print(f'[red]Error: Issue #{issue_number} is already {issue_info.get("state")}.[/red]')
         return
 
     # Construct GitHub URL
@@ -118,9 +170,10 @@ def issue_register(
     console.print(
         Panel(
             f'[cyan]Repository:[/cyan] {repo}\n'
+            f'[cyan]Issue Name:[/cyan] {issue_info.get("title")}\n'
             f'[cyan]Issue Number:[/cyan] #{issue_number}\n'
             f'[cyan]GitHub URL:[/cyan] {github_url}\n'
-            f'[cyan]Target Bounty:[/cyan] {bounty:.2f} ALPHA\n'
+            f'[cyan]Target Bounty:[/cyan] {bounty:.4f} ALPHA\n'
             f'[cyan]Network:[/cyan] {network_name}\n'
             f'[cyan]RPC Endpoint:[/cyan] {ws_endpoint}\n'
             f'[cyan]Contract:[/cyan] {contract_addr if contract_addr else "(not configured)"}',
@@ -131,7 +184,7 @@ def issue_register(
 
     if not contract_addr:
         console.print('\n[red]Error: Contract address not configured.[/red]')
-        console.print('[dim]Run ./up.sh --issues to deploy the contract first.[/dim]')
+        console.print('[dim]Run gitt config set contract_address <address>[/dim]')
         return
 
     if not click.confirm('\nProceed with registration?', default=True):
@@ -139,112 +192,96 @@ def issue_register(
         return
 
     # Perform actual contract call (on-chain transaction)
-    console.print('\n[yellow]Submitting on-chain transaction to contract...[/yellow]')
+    with console.status('[yellow]Submitting on-chain transaction...[/yellow]'):
+        try:
+            import bittensor as bt
+            from substrateinterface import Keypair, SubstrateInterface
+            from substrateinterface.contracts import ContractInstance
 
-    try:
-        import bittensor as bt
-        from substrateinterface import Keypair, SubstrateInterface
-        from substrateinterface.contracts import ContractInstance
+            # Connect to subtensor
+            substrate = SubstrateInterface(url=ws_endpoint)
 
-        # Connect to subtensor
-        console.print(f'[dim]Connecting to {ws_endpoint}...[/dim]')
-        substrate = SubstrateInterface(url=ws_endpoint)
+            # CLI flags override config; fall back to config if not explicitly supplied
+            effective_wallet = wallet_name if wallet_name != 'default' else config.get('wallet', wallet_name)
+            effective_hotkey = wallet_hotkey if wallet_hotkey != 'default' else config.get('hotkey', wallet_hotkey)
 
-        # CLI flags override config; fall back to config if not explicitly supplied
-        effective_wallet = wallet_name if wallet_name != 'default' else config.get('wallet', wallet_name)
-        effective_hotkey = wallet_hotkey if wallet_hotkey != 'default' else config.get('hotkey', wallet_hotkey)
+            # For local development, check config first, then fall back to //Alice
+            if network_name.lower() == 'local' and effective_wallet == 'default' and effective_hotkey == 'default':
+                keypair = Keypair.create_from_uri('//Alice')
+            else:
+                # Load wallet from config or CLI args
+                wallet = bt.Wallet(name=effective_wallet, hotkey=effective_hotkey)
+                keypair = wallet.coldkey
 
-        # For local development, check config first, then fall back to //Alice
-        if network_name.lower() == 'local' and effective_wallet == 'default' and effective_hotkey == 'default':
-            console.print('[dim]Using //Alice for local development (no config set)...[/dim]')
-            keypair = Keypair.create_from_uri('//Alice')
-        else:
-            # Load wallet from config or CLI args
-            console.print(f'[dim]Loading wallet {effective_wallet}/{effective_hotkey}...[/dim]')
-            wallet = bt.Wallet(name=effective_wallet, hotkey=effective_hotkey)
-            # Use COLDKEY for owner-only operations (register_issue requires owner)
-            # Contract owner is set to deployer's coldkey during contract instantiation
-            keypair = wallet.coldkey
+            # Load contract
+            contract_metadata = (
+                Path(__file__).parent.parent.parent.parent
+                / 'smart-contracts'
+                / 'issues-v0'
+                / 'target'
+                / 'ink'
+                / 'issue_bounty_manager.contract'
+            )
+            if not contract_metadata.exists():
+                console.print(f'[red]Error: Contract metadata not found at {contract_metadata}[/red]')
+                return
 
-        # Load contract
-        # Go up 4 levels: mutations.py -> issue_commands -> cli -> gittensor -> REPO_ROOT
-        contract_metadata = (
-            Path(__file__).parent.parent.parent.parent
-            / 'smart-contracts'
-            / 'issues-v0'
-            / 'target'
-            / 'ink'
-            / 'issue_bounty_manager.contract'
-        )
-        if not contract_metadata.exists():
-            console.print(f'[red]Error: Contract metadata not found at {contract_metadata}[/red]')
-            return
+            contract_instance = ContractInstance.create_from_address(
+                contract_address=contract_addr,
+                metadata_file=str(contract_metadata),
+                substrate=substrate,
+            )
 
-        contract = ContractInstance.create_from_address(
-            contract_address=contract_addr,
-            metadata_file=str(contract_metadata),
-            substrate=substrate,
-        )
+            # Convert bounty to contract units (9 decimals for ALPHA)
+            bounty_amount = int(bounty * 1_000_000_000)
 
-        # Convert bounty to contract units (9 decimals for ALPHA)
-        bounty_amount = int(bounty * 1_000_000_000)
+            result = contract_instance.exec(
+                keypair,
+                'register_issue',
+                args={
+                    'github_url': github_url,
+                    'repository_full_name': repo,
+                    'issue_number': issue_number,
+                    'target_bounty': bounty_amount,
+                },
+                gas_limit={'ref_time': 10_000_000_000, 'proof_size': 1_000_000},
+            )
 
-        console.print('[yellow]Calling register_issue on contract...[/yellow]')
+            # Check if transaction was successful
+            if hasattr(result, 'is_success') and not result.is_success:
+                console.print('\n[red]Transaction failed: Contract rejected the request[/red]')
 
-        result = contract.exec(
-            keypair,
-            'register_issue',
-            args={
-                'github_url': github_url,
-                'repository_full_name': repo,
-                'issue_number': issue_number,
-                'target_bounty': bounty_amount,
-            },
-            gas_limit={'ref_time': 10_000_000_000, 'proof_size': 1_000_000},
-        )
+                error_info = getattr(result, 'error_message', None)
+                is_revert = error_info and isinstance(error_info, dict) and error_info.get('name') == 'ContractReverted'
 
-        # Check if transaction was successful
-        if hasattr(result, 'is_success') and not result.is_success:
-            console.print('\n[red]Transaction failed: Contract rejected the request[/red]')
+                if is_revert:
+                    console.print('[yellow]Possible reasons:[/yellow]')
+                    console.print('  • Issue already registered (same repo + issue number)')
+                    console.print('  • Bounty too low (minimum 10 ALPHA)')
+                    console.print('  • Invalid repository format (must be owner/repo)')
+                    console.print('  • Caller is not the contract owner')
+                elif error_info:
+                    console.print(f'[red]Error: {error_info}[/red]')
 
-            # Check for ContractReverted and provide helpful context
-            error_info = getattr(result, 'error_message', None)
-            is_revert = error_info and isinstance(error_info, dict) and error_info.get('name') == 'ContractReverted'
+                console.print(f'[cyan]Transaction Hash:[/cyan] {result.extrinsic_hash}')
+                return
 
-            if is_revert:
+            console.print('\n[green]Issue registered successfully![/green]')
+            console.print(f'[cyan]Transaction Hash:[/cyan] {result.extrinsic_hash}')
+            console.print('[dim]Issue will be visible once bounty is funded via harvest_emissions()[/dim]')
+
+        except ImportError as e:
+            console.print(f'[red]Error: Missing dependency - {e}[/red]')
+        except Exception as e:
+            error_msg = str(e)
+            if 'ContractReverted' in error_msg:
+                console.print('\n[red]Transaction failed: Contract rejected the request[/red]')
                 console.print('[yellow]Possible reasons:[/yellow]')
                 console.print('  • Issue already registered (same repo + issue number)')
                 console.print('  • Bounty too low (minimum 10 ALPHA)')
-                console.print('  • Invalid repository format (must be owner/repo)')
                 console.print('  • Caller is not the contract owner')
-                console.print('[dim]Use "gitt view issues" to check existing issues[/dim]')
-            elif error_info:
-                console.print(f'[red]Error: {error_info}[/red]')
-
-            console.print(f'[cyan]Transaction Hash:[/cyan] {result.extrinsic_hash}')
-            return
-
-        console.print('\n[green]Issue registered successfully![/green]')
-        console.print(f'[cyan]Transaction Hash:[/cyan] {result.extrinsic_hash}')
-        console.print('[dim]Issue will be visible once bounty is funded via harvest_emissions()[/dim]')
-
-    except ImportError as e:
-        console.print(f'[red]Error: Missing dependency - {e}[/red]')
-        console.print('[dim]Install with: pip install substrate-interface bittensor[/dim]')
-    except Exception as e:
-        error_msg = str(e)
-        # Map contract errors to user-friendly messages
-        if 'ContractReverted' in error_msg:
-            console.print('\n[red]Transaction failed: Contract rejected the request[/red]')
-            # Provide context-specific hints based on the operation
-            console.print('[yellow]Possible reasons:[/yellow]')
-            console.print('  • Issue already registered (same repo + issue number)')
-            console.print('  • Bounty too low (minimum 10 ALPHA)')
-            console.print('  • Invalid repository format (must be owner/repo)')
-            console.print('  • Caller is not the contract owner')
-            console.print('[dim]Use "gitt view issues" to check existing issues[/dim]')
-        else:
-            console.print(f'[red]Error registering issue: {e}[/red]')
+            else:
+                console.print(f'[red]Error registering issue: {e}[/red]')
 
 
 @click.command('harvest')

@@ -121,26 +121,128 @@ def resolve_network(network: Optional[str] = None, rpc_url: Optional[str] = None
     return NETWORK_MAP['finney'], 'finney'
 
 
-def get_ws_endpoint(cli_value: str = '') -> str:
+def format_alpha(amount: int) -> str:
     """
-    Get WebSocket endpoint from CLI arg, env, or config file.
-
-    Deprecated: prefer resolve_network() for new code.
+    Format ALPHA token amount (1e9 units) for display.
 
     Args:
-        cli_value: Value passed via --rpc-url CLI option
+        amount: Raw amount in contract units (u128)
 
     Returns:
-        WebSocket endpoint string
+        Formatted string (e.g., "10.5000 ALPHA")
     """
-    if cli_value and cli_value != 'wss://entrypoint-finney.opentensor.ai:443':
-        return cli_value
+    return f'{amount / 1_000_000_000:.4f} ALPHA'
 
-    config = load_config()
-    if config.get('ws_endpoint'):
-        return config['ws_endpoint']
 
-    return cli_value  # Return CLI default
+def validate_ss58(address: str) -> bool:
+    """
+    Validate if a string is a valid SS58 address.
+
+    Args:
+        address: Address to validate
+
+    Returns:
+        True if valid, False otherwise
+    """
+    try:
+        from bittensor.utils import is_valid_ss58_address
+        return is_valid_ss58_address(address)
+    except ImportError:
+        # Fallback basic check if bittensor is not loaded
+        if not address or len(address) < 47 or len(address) > 49:
+            return False
+        import base58
+        try:
+            base58.b58decode(address)
+            return True
+        except Exception:
+            return False
+
+
+def validate_repo_format(repo: str) -> bool:
+    """
+    Enforce strict repository format: owner/repo
+
+    Args:
+        repo: Repository string
+
+    Returns:
+        True if valid format, False otherwise
+    """
+    if not repo or '/' not in repo:
+        return False
+
+    parts = repo.split('/')
+    if len(parts) != 2:
+        return False
+
+    owner, name = parts
+    # Ensure both parts are non-empty and have no spaces
+    if not owner or not name or ' ' in owner or ' ' in name:
+        return False
+
+    # Check for basic characters
+    import re
+    pattern = re.compile(r'^[a-zA-Z0-9._-]+$')
+    return bool(pattern.match(owner)) and bool(pattern.match(name))
+
+
+def verify_github_repo(repo: str, pat: Optional[str] = None) -> bool:
+    """
+    Verify if a repository exists on GitHub.
+
+    Args:
+        repo: Repository in owner/repo format
+        pat: Optional GitHub PAT
+
+    Returns:
+        True if exists, False otherwise
+    """
+    import requests
+    url = f'https://api.github.com/repos/{repo}'
+    headers = {'Accept': 'application/vnd.github.v3+json'}
+    if pat:
+        headers['Authorization'] = f'token {pat}'
+
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        return response.status_code == 200
+    except Exception:
+        return False
+
+
+def verify_github_issue(repo: str, issue_number: int, pat: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Verify if an issue exists on GitHub and get its status.
+
+    Args:
+        repo: Repository in owner/repo format
+        issue_number: GitHub issue number
+        pat: Optional GitHub PAT
+
+    Returns:
+        Dict with status info or empty dict if not found
+    """
+    import requests
+    url = f'https://api.github.com/repos/{repo}/issues/{issue_number}'
+    headers = {'Accept': 'application/vnd.github.v3+json'}
+    if pat:
+        headers['Authorization'] = f'token {pat}'
+
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code != 200:
+            return {}
+
+        data = response.json()
+        return {
+            'exists': True,
+            'is_pull_request': 'pull_request' in data,
+            'state': data.get('state'),
+            'title': data.get('title')
+        }
+    except Exception:
+        return {}
 
 
 # ============================================================================

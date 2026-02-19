@@ -19,6 +19,7 @@ from .helpers import (
     _read_contract_packed_storage,
     _read_issues_from_child_storage,
     console,
+    format_alpha,
     get_contract_address,
     read_issues_from_contract,
     resolve_network,
@@ -75,7 +76,8 @@ def issues_list(issue_id: int, network: str, rpc_url: str, contract: str, verbos
     console.print(f'[dim]Network: {network_name} ({ws_endpoint})[/dim]')
     console.print(f'[dim]Contract: {contract_addr[:20]}...[/dim]\n')
 
-    issues = read_issues_from_contract(ws_endpoint, contract_addr, verbose)
+    with console.status('[yellow]Reading issues from contract...[/yellow]'):
+        issues = read_issues_from_contract(ws_endpoint, contract_addr, verbose)
 
     # Single issue detail view
     if issue_id is not None:
@@ -87,8 +89,8 @@ def issues_list(issue_id: int, network: str, rpc_url: str, contract: str, verbos
                     f'[cyan]ID:[/cyan] {issue["id"]}\n'
                     f'[cyan]Repository:[/cyan] {issue["repository_full_name"]}\n'
                     f'[cyan]Issue Number:[/cyan] #{issue["issue_number"]}\n'
-                    f'[cyan]Bounty Amount:[/cyan] {issue["bounty_amount"] / 1e9:.4f} ALPHA\n'
-                    f'[cyan]Target Bounty:[/cyan] {issue["target_bounty"] / 1e9:.4f} ALPHA\n'
+                    f'[cyan]Bounty Amount:[/cyan] {format_alpha(issue["bounty_amount"])}\n'
+                    f'[cyan]Target Bounty:[/cyan] {format_alpha(issue["target_bounty"])}\n'
                     f'[cyan]Fill %:[/cyan] {(issue["bounty_amount"] / issue["target_bounty"] * 100) if issue["target_bounty"] > 0 else 0:.1f}%\n'
                     f'[cyan]Status:[/cyan] {issue["status"]}',
                     title=f'Issue #{issue_id}',
@@ -118,46 +120,44 @@ def issues_list(issue_id: int, network: str, rpc_url: str, contract: str, verbos
             target_raw = issue.get('target_bounty', 0)
             status = issue.get('status', 'unknown')
 
-            try:
-                bounty = float(bounty_raw) / 1_000_000_000 if bounty_raw else 0.0
-                target = float(target_raw) / 1_000_000_000 if target_raw else 0.0
-            except (ValueError, TypeError):
-                bounty = 0.0
-                target = 0.0
-
             # Format bounty pool display with fill percentage
-            if target > 0:
-                fill_pct = (bounty / target) * 100
-                if fill_pct >= 100:
-                    bounty_display = f'{bounty:.1f} (100%)'
-                elif bounty > 0:
-                    bounty_display = f'{bounty:.1f}/{target:.1f} ({fill_pct:.0f}%)'
-                else:
-                    bounty_display = f'0/{target:.1f} (0%)'
+            if target_raw > 0:
+                fill_pct = (bounty_raw / target_raw) * 100
+                bounty_display = f'{bounty_raw / 1e9:.1f}/{target_raw / 1e9:.1f} ({fill_pct:.0f}%)'
             else:
-                bounty_display = f'{bounty:.2f}' if bounty > 0 else '0.00'
+                bounty_display = f'{bounty_raw / 1e9:.2f}'
 
-            # Format status
+            # Format status with colors
             if isinstance(status, dict):
-                status = list(status.keys())[0] if status else 'Unknown'
+                status_str = list(status.keys())[0] if status else 'Unknown'
             elif isinstance(status, str):
-                status = status.capitalize()
+                status_str = status.capitalize()
             else:
-                status = str(status)
+                status_str = str(status)
+
+            status_style = 'blue'
+            if status_str.lower() == 'active':
+                status_style = 'bold green'
+            elif status_str.lower() == 'completed':
+                status_style = 'green'
+            elif status_str.lower() == 'cancelled':
+                status_style = 'red'
+            elif status_str.lower() == 'registered':
+                status_style = 'cyan'
 
             table.add_row(
                 str(issue_id),
                 repo,
                 f'#{num}',
                 bounty_display,
-                status,
+                f'[{status_style}]{status_str}[/{status_style}]',
             )
         console.print(table)
         console.print(f'\n[dim]Showing {len(issues)} issue(s)[/dim]')
         console.print('[dim]Bounty Pool shows: filled/target (percentage)[/dim]')
     else:
         console.print('[yellow]No issues found. Register an issue with:[/yellow]')
-        console.print('[dim]  gitt issues register --repo owner/repo --issue 1 --bounty 100[/dim]')
+        console.print('[dim]  gitt register --repo owner/repo --issue 1 --bounty 100[/dim]')
 
 
 @click.command('bounty-pool')
@@ -194,13 +194,12 @@ def issues_bounty_pool(network: str, rpc_url: str, contract: str, verbose: bool)
     try:
         from substrateinterface import SubstrateInterface
 
-        substrate = SubstrateInterface(url=ws_endpoint)
-        issues = _read_issues_from_child_storage(substrate, contract_addr, verbose)
+        with console.status('[yellow]Reading issues...[/yellow]'):
+            substrate = SubstrateInterface(url=ws_endpoint)
+            issues = _read_issues_from_child_storage(substrate, contract_addr, verbose)
 
         total_bounty_pool = sum(issue.get('bounty_amount', 0) for issue in issues)
-        console.print(
-            f'[green]Issue Bounty Pool:[/green] {total_bounty_pool / 1e9:.4f} ALPHA ({total_bounty_pool} raw)'
-        )
+        console.print(f'[green]Issue Bounty Pool:[/green] {format_alpha(total_bounty_pool)}')
         console.print(f'[dim]Sum of bounty amounts from {len(issues)} issue(s)[/dim]')
     except Exception as e:
         console.print(f'[red]Error: {e}[/red]')
@@ -245,25 +244,26 @@ def issues_pending_harvest(network: str, rpc_url: str, contract: str, verbose: b
             IssueCompetitionContractClient,
         )
 
-        # Get treasury stake
-        subtensor = bt.Subtensor(network=ws_endpoint)
-        client = IssueCompetitionContractClient(
-            contract_address=contract_addr,
-            subtensor=subtensor,
-        )
-        treasury_stake = client.get_treasury_stake()
+        with console.status('[yellow]Reading contract data...[/yellow]'):
+            # Get treasury stake
+            subtensor = bt.Subtensor(network=ws_endpoint)
+            client = IssueCompetitionContractClient(
+                contract_address=contract_addr,
+                subtensor=subtensor,
+            )
+            treasury_stake = client.get_treasury_stake()
 
-        # Get total bounty pool (sum of all issue bounty amounts)
-        substrate = SubstrateInterface(url=ws_endpoint)
-        issues = _read_issues_from_child_storage(substrate, contract_addr, verbose)
-        total_bounty_pool = sum(issue.get('bounty_amount', 0) for issue in issues)
+            # Get total bounty pool (sum of all issue bounty amounts)
+            substrate = SubstrateInterface(url=ws_endpoint)
+            issues = _read_issues_from_child_storage(substrate, contract_addr, verbose)
+            total_bounty_pool = sum(issue.get('bounty_amount', 0) for issue in issues)
 
         # Pending harvest = treasury stake - allocated bounties
         pending_harvest = max(0, treasury_stake - total_bounty_pool)
 
-        console.print(f'[green]Treasury Stake:[/green] {treasury_stake / 1e9:.4f} ALPHA')
-        console.print(f'[green]Allocated to Bounties:[/green] {total_bounty_pool / 1e9:.4f} ALPHA')
-        console.print(f'[green]Pending Harvest:[/green] {pending_harvest / 1e9:.4f} ALPHA')
+        console.print(f'[green]Treasury Stake:[/green] {format_alpha(treasury_stake)}')
+        console.print(f'[green]Allocated to Bounties:[/green] {format_alpha(total_bounty_pool)}')
+        console.print(f'[green]Pending Harvest:[/green] {format_alpha(pending_harvest)}')
     except ImportError as e:
         console.print(f'[red]Error: Missing dependency - {e}[/red]')
     except Exception as e:
@@ -300,13 +300,13 @@ def admin_info(network: str, rpc_url: str, contract: str, verbose: bool):
 
     console.print(f'[dim]Network: {network_name} ({ws_endpoint})[/dim]')
     console.print(f'[dim]Contract: {contract_addr}[/dim]')
-    console.print('[dim]Reading config...[/dim]\n')
 
     try:
         from substrateinterface import SubstrateInterface
 
-        substrate = SubstrateInterface(url=ws_endpoint)
-        packed = _read_contract_packed_storage(substrate, contract_addr, verbose)
+        with console.status('[yellow]Reading contract configuration...[/yellow]'):
+            substrate = SubstrateInterface(url=ws_endpoint)
+            packed = _read_contract_packed_storage(substrate, contract_addr, verbose)
 
         if packed:
             console.print(
@@ -315,7 +315,7 @@ def admin_info(network: str, rpc_url: str, contract: str, verbose: bool):
                     f'[cyan]Treasury Hotkey:[/cyan] {packed.get("treasury_hotkey", "N/A")}\n'
                     f'[cyan]Netuid:[/cyan] {packed.get("netuid", "N/A")}\n'
                     f'[cyan]Next Issue ID:[/cyan] {packed.get("next_issue_id", "N/A")}',
-                    title='Contract Configuration (v0)',
+                    title='Contract Configuration',
                     border_style='green',
                 )
             )

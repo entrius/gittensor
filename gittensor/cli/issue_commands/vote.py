@@ -19,6 +19,7 @@ from .helpers import (
     console,
     get_contract_address,
     resolve_network,
+    validate_ss58,
 )
 
 
@@ -125,6 +126,14 @@ def val_vote_solution(
         gitt vote solution 1 5Hxxx... 5Hyyy... 123
         gitt vote solution 1 5Hxxx... 5Hyyy... https://github.com/.../pull/123
     """
+    if not validate_ss58(solver_hotkey):
+        console.print(f'[red]Error: Invalid SS58 address for solver hotkey: {solver_hotkey}[/red]')
+        return
+
+    if not validate_ss58(solver_coldkey):
+        console.print(f'[red]Error: Invalid SS58 address for solver coldkey: {solver_coldkey}[/red]')
+        return
+
     contract_addr = get_contract_address(contract)
     ws_endpoint, network_name = resolve_network(network, rpc_url)
 
@@ -159,7 +168,9 @@ def val_vote_solution(
             subtensor=subtensor,
         )
 
-        result = client.vote_solution(issue_id, solver_hotkey, solver_coldkey, pr_number, wallet)
+        with console.status('[yellow]Submitting solution vote...[/yellow]'):
+            result = client.vote_solution(issue_id, solver_hotkey, solver_coldkey, pr_number, wallet)
+
         if result:
             console.print('[green]Solution vote submitted![/green]')
         else:
@@ -251,7 +262,9 @@ def val_vote_cancel_issue(
             subtensor=subtensor,
         )
 
-        result = client.vote_cancel_issue(issue_id, reason, wallet)
+        with console.status('[yellow]Submitting cancellation vote...[/yellow]'):
+            result = client.vote_cancel_issue(issue_id, reason, wallet)
+
         if result:
             console.print('[green]Vote cancel submitted![/green]')
         else:

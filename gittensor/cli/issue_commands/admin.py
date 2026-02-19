@@ -17,8 +17,10 @@ import click
 
 from .helpers import (
     console,
+    format_alpha,
     get_contract_address,
     resolve_network,
+    validate_ss58,
 )
 
 
@@ -30,7 +32,6 @@ def admin():
 
     \b
     Commands:
-        info           View contract configuration
         cancel-issue   Cancel an issue
         payout-issue   Manual payout fallback
         set-owner      Transfer ownership
@@ -110,13 +111,17 @@ def admin_cancel(issue_id: int, network: str, rpc_url: str, contract: str, walle
         )
 
         # Show issue info before cancellation
-        issue = client.get_issue(issue_id)
+        with console.status('[yellow]Fetching issue info...[/yellow]'):
+            issue = client.get_issue(issue_id)
+
         if issue:
             console.print(f'  Issue: {issue.repository_full_name}#{issue.issue_number}')
             console.print(f'  Status: {issue.status.name}')
-            console.print(f'  Bounty: {issue.bounty_amount / 1e9:.4f} ALPHA\n')
+            console.print(f'  Bounty: {format_alpha(issue.bounty_amount)}\n')
 
-        result = client.cancel_issue(issue_id, wallet)
+        with console.status('[yellow]Submitting cancellation transaction...[/yellow]'):
+            result = client.cancel_issue(issue_id, wallet)
+
         if result:
             console.print(f'[green]Issue {issue_id} cancelled successfully![/green]')
         else:
@@ -196,15 +201,19 @@ def admin_payout(issue_id: int, network: str, rpc_url: str, contract: str, walle
         )
 
         # Show issue info before payout
-        issue = client.get_issue(issue_id)
+        with console.status('[yellow]Fetching issue info...[/yellow]'):
+            issue = client.get_issue(issue_id)
+
         if issue:
             console.print(f'  Issue: {issue.repository_full_name}#{issue.issue_number}')
             console.print(f'  Status: {issue.status.name}')
-            console.print(f'  Bounty: {issue.bounty_amount / 1e9:.4f} ALPHA\n')
+            console.print(f'  Bounty: {format_alpha(issue.bounty_amount)}\n')
 
-        result = client.payout_bounty(issue_id, wallet)
+        with console.status('[yellow]Submitting payout transaction...[/yellow]'):
+            result = client.payout_bounty(issue_id, wallet)
+
         if result:
-            console.print(f'[green]Payout successful! Amount: {result / 1e9:.4f} ALPHA[/green]')
+            console.print(f'[green]Payout successful! Amount: {format_alpha(result)}[/green]')
         else:
             console.print('[red]Payout failed.[/red]')
     except ImportError as e:
@@ -253,6 +262,10 @@ def admin_set_owner(new_owner: str, network: str, rpc_url: str, contract: str, w
     Arguments:
         NEW_OWNER: SS58 address of the new owner
     """
+    if not validate_ss58(new_owner):
+        console.print(f'[red]Error: Invalid SS58 address for new owner: {new_owner}[/red]')
+        return
+
     contract_addr = get_contract_address(contract)
     ws_endpoint, network_name = resolve_network(network, rpc_url)
 
@@ -278,7 +291,9 @@ def admin_set_owner(new_owner: str, network: str, rpc_url: str, contract: str, w
             subtensor=subtensor,
         )
 
-        result = client.set_owner(new_owner, wallet)
+        with console.status('[yellow]Submitting ownership transfer transaction...[/yellow]'):
+            result = client.set_owner(new_owner, wallet)
+
         if result:
             console.print(f'[green]Ownership transferred to {new_owner}![/green]')
         else:
@@ -335,6 +350,10 @@ def admin_set_treasury(
     Arguments:
         NEW_TREASURY: SS58 address of the new treasury hotkey
     """
+    if not validate_ss58(new_treasury):
+        console.print(f'[red]Error: Invalid SS58 address for new treasury: {new_treasury}[/red]')
+        return
+
     contract_addr = get_contract_address(contract)
     ws_endpoint, network_name = resolve_network(network, rpc_url)
 
@@ -360,7 +379,9 @@ def admin_set_treasury(
             subtensor=subtensor,
         )
 
-        result = client.set_treasury_hotkey(new_treasury, wallet)
+        with console.status('[yellow]Submitting treasury update transaction...[/yellow]'):
+            result = client.set_treasury_hotkey(new_treasury, wallet)
+
         if result:
             console.print(f'[green]Treasury hotkey updated to {new_treasury}![/green]')
             console.print(
@@ -418,6 +439,10 @@ def admin_add_validator(hotkey: str, network: str, rpc_url: str, contract: str, 
     Arguments:
         HOTKEY: SS58 address of the validator hotkey to whitelist
     """
+    if not validate_ss58(hotkey):
+        console.print(f'[red]Error: Invalid SS58 address for validator hotkey: {hotkey}[/red]')
+        return
+
     contract_addr = get_contract_address(contract)
     ws_endpoint, network_name = resolve_network(network, rpc_url)
 
@@ -443,7 +468,9 @@ def admin_add_validator(hotkey: str, network: str, rpc_url: str, contract: str, 
             subtensor=subtensor,
         )
 
-        result = client.add_validator(hotkey, wallet)
+        with console.status(f'[yellow]Adding validator {hotkey[:8]}... to whitelist...[/yellow]'):
+            result = client.add_validator(hotkey, wallet)
+
         if result:
             console.print(f'[green]Validator {hotkey} added to whitelist![/green]')
         else:
@@ -501,6 +528,10 @@ def admin_remove_validator(
     Arguments:
         HOTKEY: SS58 address of the validator hotkey to remove
     """
+    if not validate_ss58(hotkey):
+        console.print(f'[red]Error: Invalid SS58 address for validator hotkey: {hotkey}[/red]')
+        return
+
     contract_addr = get_contract_address(contract)
     ws_endpoint, network_name = resolve_network(network, rpc_url)
 
@@ -526,7 +557,9 @@ def admin_remove_validator(
             subtensor=subtensor,
         )
 
-        result = client.remove_validator(hotkey, wallet)
+        with console.status(f'[yellow]Removing validator {hotkey[:8]}... from whitelist...[/yellow]'):
+            result = client.remove_validator(hotkey, wallet)
+
         if result:
             console.print(f'[green]Validator {hotkey} removed from whitelist![/green]')
         else:

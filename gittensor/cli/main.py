@@ -69,7 +69,7 @@ class AliasGroup(click.Group):
 
 
 @click.group(cls=AliasGroup)
-@click.version_option(version='3.2.0', prog_name='gittensor')
+@click.version_option(version='3.3.0', prog_name='gittensor')
 def cli():
     """Gittensor CLI - Manage issue bounties and validator operations"""
     pass

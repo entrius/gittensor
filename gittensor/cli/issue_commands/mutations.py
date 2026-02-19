@@ -9,16 +9,20 @@ Commands:
     gitt harvest
 """
 
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 import click
 from rich.panel import Panel
 
 from .helpers import (
+    ALPHA_RAW_UNIT,
     console,
     format_alpha,
     get_contract_address,
     load_config,
+    print_error,
+    print_success,
     resolve_network,
     validate_repo_format,
     verify_github_issue,
@@ -37,12 +41,12 @@ from .helpers import (
     'issue_number',
     required=True,
     type=int,
-    help='GitHub issue number (1-1,000,000)',
+    help='GitHub issue number (1-999,999)',
 )
 @click.option(
     '--bounty',
     required=True,
-    type=float,
+    type=str,
     help='Bounty amount in ALPHA tokens (min 10)',
 )
 @click.option(
@@ -84,7 +88,7 @@ from .helpers import (
 def issue_register(
     repo: str,
     issue_number: int,
-    bounty: float,
+    bounty: str,
     network: str,
     rpc_url: str,
     contract: str,
@@ -114,26 +118,29 @@ def issue_register(
 
     # 1. Validate repository format
     if not validate_repo_format(repo):
-        console.print('[red]Error: Repository must be in owner/repo format (alphanumeric, no spaces).[/red]')
+        print_error('Repository must be in owner/repo format (alphanumeric, no spaces).')
         return
 
     # 2. Validate issue number
     if issue_number < 1 or issue_number >= 1_000_000:
-        console.print('[red]Error: Issue number must be between 1 and 1,000,000.[/red]')
+        print_error('Issue number must be between 1 and 999,999.')
         return
 
-    # 3. Validate bounty amount (min and precision)
-    if bounty < 10.0:
-        console.print('[red]Error: Minimum bounty is 10.0 ALPHA.[/red]')
+    # 3. Validate bounty amount (min and precision using Decimal)
+    try:
+        bounty_dec = Decimal(bounty)
+    except InvalidOperation:
+        print_error(f'Invalid bounty amount: {bounty}')
+        return
+
+    if bounty_dec < Decimal('10.0'):
+        print_error('Minimum bounty is 10.0 ALPHA.')
         return
 
     # Check for excessive precision (> 9 decimals)
-    bounty_str = str(bounty)
-    if '.' in bounty_str:
-        decimals = len(bounty_str.split('.')[1])
-        if decimals > 9:
-            console.print('[red]Error: Bounty amount exceeds maximum precision (9 decimal places).[/red]')
-            return
+    if bounty_dec.as_tuple().exponent < -9:
+        print_error('Bounty amount exceeds maximum precision (9 decimal places).')
+        return
 
     # 4. Verify on GitHub
     pat = github_pat or load_config().get('github_pat')
@@ -146,17 +153,17 @@ def issue_register(
             repo_exists = verify_github_repo(repo, pat)
 
         if not repo_exists:
-            console.print(f'[red]Error: Repository "{repo}" does not exist on GitHub.[/red]')
+            print_error(f'Repository "{repo}" does not exist on GitHub.')
         else:
-            console.print(f'[red]Error: Issue #{issue_number} does not exist in repository "{repo}".[/red]')
+            print_error(f'Issue #{issue_number} does not exist in repository "{repo}".')
         return
 
     if issue_info.get('is_pull_request'):
-        console.print('[red]Error: The specified issue is a pull request. Gittensor only supports issues.[/red]')
+        print_error('The specified issue is a pull request. Gittensor only supports issues.')
         return
 
     if issue_info.get('state') != 'open':
-        console.print(f'[red]Error: Issue #{issue_number} is already {issue_info.get("state")}.[/red]')
+        print_error(f'Issue #{issue_number} is already {issue_info.get("state")}.')
         return
 
     # Construct GitHub URL
@@ -173,7 +180,7 @@ def issue_register(
             f'[cyan]Issue Name:[/cyan] {issue_info.get("title")}\n'
             f'[cyan]Issue Number:[/cyan] #{issue_number}\n'
             f'[cyan]GitHub URL:[/cyan] {github_url}\n'
-            f'[cyan]Target Bounty:[/cyan] {bounty:.4f} ALPHA\n'
+            f'[cyan]Target Bounty:[/cyan] {bounty_dec:.4f} ALPHA\n'
             f'[cyan]Network:[/cyan] {network_name}\n'
             f'[cyan]RPC Endpoint:[/cyan] {ws_endpoint}\n'
             f'[cyan]Contract:[/cyan] {contract_addr if contract_addr else "(not configured)"}',
@@ -183,8 +190,7 @@ def issue_register(
     )
 
     if not contract_addr:
-        console.print('\n[red]Error: Contract address not configured.[/red]')
-        console.print('[dim]Run gitt config set contract_address <address>[/dim]')
+        print_error('Contract address not configured. Set via: gitt config set contract_address <address>')
         return
 
     if not click.confirm('\nProceed with registration?', default=True):
@@ -223,7 +229,7 @@ def issue_register(
                 / 'issue_bounty_manager.contract'
             )
             if not contract_metadata.exists():
-                console.print(f'[red]Error: Contract metadata not found at {contract_metadata}[/red]')
+                print_error(f'Contract metadata not found at {contract_metadata}')
                 return
 
             contract_instance = ContractInstance.create_from_address(
@@ -233,7 +239,7 @@ def issue_register(
             )
 
             # Convert bounty to contract units (9 decimals for ALPHA)
-            bounty_amount = int(bounty * 1_000_000_000)
+            bounty_amount = int(bounty_dec * ALPHA_RAW_UNIT)
 
             result = contract_instance.exec(
                 keypair,
@@ -249,7 +255,7 @@ def issue_register(
 
             # Check if transaction was successful
             if hasattr(result, 'is_success') and not result.is_success:
-                console.print('\n[red]Transaction failed: Contract rejected the request[/red]')
+                print_error('Transaction failed: Contract rejected the request')
 
                 error_info = getattr(result, 'error_message', None)
                 is_revert = error_info and isinstance(error_info, dict) and error_info.get('name') == 'ContractReverted'
@@ -266,22 +272,22 @@ def issue_register(
                 console.print(f'[cyan]Transaction Hash:[/cyan] {result.extrinsic_hash}')
                 return
 
-            console.print('\n[green]Issue registered successfully![/green]')
+            print_success('Issue registered successfully!')
             console.print(f'[cyan]Transaction Hash:[/cyan] {result.extrinsic_hash}')
             console.print('[dim]Issue will be visible once bounty is funded via harvest_emissions()[/dim]')
 
         except ImportError as e:
-            console.print(f'[red]Error: Missing dependency - {e}[/red]')
+            print_error(f'Missing dependency - {e}')
         except Exception as e:
             error_msg = str(e)
             if 'ContractReverted' in error_msg:
-                console.print('\n[red]Transaction failed: Contract rejected the request[/red]')
+                print_error('Transaction failed: Contract rejected the request')
                 console.print('[yellow]Possible reasons:[/yellow]')
                 console.print('  • Issue already registered (same repo + issue number)')
                 console.print('  • Bounty too low (minimum 10 ALPHA)')
                 console.print('  • Caller is not the contract owner')
             else:
-                console.print(f'[red]Error registering issue: {e}[/red]')
+                print_error(f'Error registering issue: {e}')
 
 
 @click.command('harvest')

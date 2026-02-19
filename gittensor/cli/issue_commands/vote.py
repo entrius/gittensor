@@ -18,6 +18,8 @@ from rich.table import Table
 from .helpers import (
     console,
     get_contract_address,
+    print_error,
+    print_success,
     resolve_network,
     validate_ss58,
 )
@@ -126,25 +128,29 @@ def val_vote_solution(
         gitt vote solution 1 5Hxxx... 5Hyyy... 123
         gitt vote solution 1 5Hxxx... 5Hyyy... https://github.com/.../pull/123
     """
+    if issue_id < 1 or issue_id >= 1_000_000:
+        print_error('Issue ID must be between 1 and 999,999.')
+        return
+
     if not validate_ss58(solver_hotkey):
-        console.print(f'[red]Error: Invalid SS58 address for solver hotkey: {solver_hotkey}[/red]')
+        print_error(f'Invalid SS58 address for solver hotkey: {solver_hotkey}')
         return
 
     if not validate_ss58(solver_coldkey):
-        console.print(f'[red]Error: Invalid SS58 address for solver coldkey: {solver_coldkey}[/red]')
+        print_error(f'Invalid SS58 address for solver coldkey: {solver_coldkey}')
         return
 
     contract_addr = get_contract_address(contract)
     ws_endpoint, network_name = resolve_network(network, rpc_url)
 
     if not contract_addr:
-        console.print('[red]Error: Contract address not configured.[/red]')
+        print_error('Contract address not configured.')
         return
 
     try:
         pr_number = parse_pr_number(pr_number_or_url)
     except ValueError as e:
-        console.print(f'[red]Error: {e}[/red]')
+        print_error(str(e))
         return
 
     console.print(f'[dim]Network: {network_name} ({ws_endpoint})[/dim]')
@@ -172,13 +178,13 @@ def val_vote_solution(
             result = client.vote_solution(issue_id, solver_hotkey, solver_coldkey, pr_number, wallet)
 
         if result:
-            console.print('[green]Solution vote submitted![/green]')
+            print_success('Solution vote submitted!')
         else:
-            console.print('[red]Vote failed.[/red]')
+            print_error('Vote failed.')
     except ImportError as e:
-        console.print(f'[red]Error: Missing dependency - {e}[/red]')
+        print_error(f'Missing dependency - {e}')
     except Exception as e:
-        console.print(f'[red]Error: {e}[/red]')
+        print_error(str(e))
 
 
 @vote.command('cancel')
@@ -236,11 +242,15 @@ def val_vote_cancel_issue(
         gitt vote cancel 1 "External solution found"
         gitt vote cancel 42 "Issue invalid"
     """
+    if issue_id < 1 or issue_id >= 1_000_000:
+        print_error('Issue ID must be between 1 and 999,999.')
+        return
+
     contract_addr = get_contract_address(contract)
     ws_endpoint, network_name = resolve_network(network, rpc_url)
 
     if not contract_addr:
-        console.print('[red]Error: Contract address not configured.[/red]')
+        print_error('Contract address not configured.')
         return
 
     console.print(f'[dim]Network: {network_name} ({ws_endpoint})[/dim]')
@@ -266,13 +276,13 @@ def val_vote_cancel_issue(
             result = client.vote_cancel_issue(issue_id, reason, wallet)
 
         if result:
-            console.print('[green]Vote cancel submitted![/green]')
+            print_success('Vote cancel submitted!')
         else:
-            console.print('[red]Vote cancel failed.[/red]')
+            print_error('Vote cancel failed.')
     except ImportError as e:
-        console.print(f'[red]Error: Missing dependency - {e}[/red]')
+        print_error(f'Missing dependency - {e}')
     except Exception as e:
-        console.print(f'[red]Error: {e}[/red]')
+        print_error(str(e))
 
 
 @vote.command('list')
@@ -293,7 +303,8 @@ def val_vote_cancel_issue(
     default='',
     help='Contract address (uses config if empty)',
 )
-def vote_list_validators(network: str, rpc_url: str, contract: str):
+@click.option('--json', 'json_output', is_flag=True, help='Output in JSON format')
+def vote_list_validators(network: str, rpc_url: str, contract: str, json_output: bool):
     """List whitelisted validators and consensus threshold.
 
     Shows all validator hotkeys that are authorized to vote on
@@ -308,11 +319,16 @@ def vote_list_validators(network: str, rpc_url: str, contract: str):
     ws_endpoint, network_name = resolve_network(network, rpc_url)
 
     if not contract_addr:
-        console.print('[red]Error: Contract address not configured.[/red]')
+        if json_output:
+            import json as json_lib
+            print(json_lib.dumps({'status': 'error', 'message': 'Contract address not configured'}))
+        else:
+            print_error('Contract address not configured.')
         return
 
-    console.print(f'[dim]Network: {network_name} ({ws_endpoint})[/dim]')
-    console.print(f'[dim]Contract: {contract_addr}[/dim]\n')
+    if not json_output:
+        console.print(f'[dim]Network: {network_name} ({ws_endpoint})[/dim]')
+        console.print(f'[dim]Contract: {contract_addr}[/dim]\n')
 
     try:
         import bittensor as bt
@@ -321,15 +337,21 @@ def vote_list_validators(network: str, rpc_url: str, contract: str):
             IssueCompetitionContractClient,
         )
 
-        subtensor = bt.Subtensor(network=ws_endpoint)
-        client = IssueCompetitionContractClient(
-            contract_address=contract_addr,
-            subtensor=subtensor,
-        )
+        with console.status('[yellow]Fetching validators...[/yellow]', disable=json_output):
+            subtensor = bt.Subtensor(network=ws_endpoint)
+            client = IssueCompetitionContractClient(
+                contract_address=contract_addr,
+                subtensor=subtensor,
+            )
+            validators = client.get_validators()
 
-        validators = client.get_validators()
         n = len(validators)
         required = (n // 2) + 1
+
+        if json_output:
+            import json as json_lib
+            print(json_lib.dumps({'validators': validators, 'required_votes': required, 'total_validators': n}))
+            return
 
         if validators:
             table = Table(show_header=True, header_style='bold magenta')
@@ -347,6 +369,14 @@ def vote_list_validators(network: str, rpc_url: str, contract: str):
             console.print('[dim]Add validators with: gitt admin add-vali <HOTKEY>[/dim]')
 
     except ImportError as e:
-        console.print(f'[red]Error: Missing dependency - {e}[/red]')
+        if json_output:
+            import json as json_lib
+            print(json_lib.dumps({'status': 'error', 'message': f'Missing dependency - {e}'}))
+        else:
+            print_error(f'Missing dependency - {e}')
     except Exception as e:
-        console.print(f'[red]Error: {e}[/red]')
+        if json_output:
+            import json as json_lib
+            print(json_lib.dumps({'status': 'error', 'message': str(e)}))
+        else:
+            print_error(str(e))

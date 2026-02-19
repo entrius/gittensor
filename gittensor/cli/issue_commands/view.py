@@ -21,6 +21,7 @@ from .helpers import (
     console,
     format_alpha,
     get_contract_address,
+    print_error,
     read_issues_from_contract,
     resolve_network,
 )
@@ -51,8 +52,9 @@ from .helpers import (
     default='',
     help='Contract address (uses default if empty)',
 )
+@click.option('--json', 'json_output', is_flag=True, help='Output in JSON format')
 @click.option('--verbose', '-v', is_flag=True, help='Show debug output for contract reads')
-def issues_list(issue_id: int, network: str, rpc_url: str, contract: str, verbose: bool):
+def issues_list(issue_id: int, network: str, rpc_url: str, contract: str, json_output: bool, verbose: bool):
     """
     List issues or view a specific issue.
 
@@ -61,23 +63,36 @@ def issues_list(issue_id: int, network: str, rpc_url: str, contract: str, verbos
 
     \b
     Examples:
-        gitt issues list
-        gitt i list --network test
-        gitt i list --id 1
+        gitt list
+        gitt list --network test
+        gitt list --id 1
     """
     contract_addr = get_contract_address(contract)
     ws_endpoint, network_name = resolve_network(network, rpc_url)
 
     if not contract_addr:
-        console.print('[red]Error: Contract address not configured.[/red]')
-        console.print('[dim]Set via: gitt config set contract_address <ADDR>[/dim]')
+        if json_output:
+            import json as json_lib
+            print(json_lib.dumps({'status': 'error', 'message': 'Contract address not configured'}))
+        else:
+            print_error('Contract address not configured. Set via: gitt config set contract_address <ADDR>')
         return
 
-    console.print(f'[dim]Network: {network_name} ({ws_endpoint})[/dim]')
-    console.print(f'[dim]Contract: {contract_addr[:20]}...[/dim]\n')
+    if not json_output:
+        console.print(f'[dim]Network: {network_name} ({ws_endpoint})[/dim]')
+        console.print(f'[dim]Contract: {contract_addr[:20]}...[/dim]\n')
 
-    with console.status('[yellow]Reading issues from contract...[/yellow]'):
+    with console.status('[yellow]Reading issues from contract...[/yellow]', spinner='dots', disable=json_output):
         issues = read_issues_from_contract(ws_endpoint, contract_addr, verbose)
+
+    if json_output:
+        import json as json_lib
+        if issue_id is not None:
+            issue = next((i for i in issues if i['id'] == issue_id), None)
+            print(json_lib.dumps(issue if issue else {'status': 'error', 'message': f'Issue {issue_id} not found'}))
+        else:
+            print(json_lib.dumps(issues))
+        return
 
     # Single issue detail view
     if issue_id is not None:
@@ -178,31 +193,46 @@ def issues_list(issue_id: int, network: str, rpc_url: str, contract: str, verbos
     default='',
     help='Contract address (uses config if empty)',
 )
+@click.option('--json', 'json_output', is_flag=True, help='Output in JSON format')
 @click.option('--verbose', '-v', is_flag=True, help='Show debug output')
-def issues_bounty_pool(network: str, rpc_url: str, contract: str, verbose: bool):
+def issues_bounty_pool(network: str, rpc_url: str, contract: str, json_output: bool, verbose: bool):
     """View total bounty pool (sum of all issue bounty amounts)."""
     contract_addr = get_contract_address(contract)
     ws_endpoint, network_name = resolve_network(network, rpc_url)
 
     if not contract_addr:
-        console.print('[red]Error: Contract address not configured.[/red]')
+        if json_output:
+            import json as json_lib
+            print(json_lib.dumps({'status': 'error', 'message': 'Contract address not configured'}))
+        else:
+            print_error('Contract address not configured.')
         return
 
-    console.print(f'[dim]Network: {network_name} ({ws_endpoint})[/dim]')
-    console.print(f'[dim]Contract: {contract_addr}[/dim]')
+    if not json_output:
+        console.print(f'[dim]Network: {network_name} ({ws_endpoint})[/dim]')
+        console.print(f'[dim]Contract: {contract_addr}[/dim]')
 
     try:
         from substrateinterface import SubstrateInterface
 
-        with console.status('[yellow]Reading issues...[/yellow]'):
+        with console.status('[yellow]Reading issues...[/yellow]', disable=json_output):
             substrate = SubstrateInterface(url=ws_endpoint)
             issues = _read_issues_from_child_storage(substrate, contract_addr, verbose)
 
         total_bounty_pool = sum(issue.get('bounty_amount', 0) for issue in issues)
-        console.print(f'[green]Issue Bounty Pool:[/green] {format_alpha(total_bounty_pool)}')
-        console.print(f'[dim]Sum of bounty amounts from {len(issues)} issue(s)[/dim]')
+
+        if json_output:
+            import json as json_lib
+            print(json_lib.dumps({'total_bounty_pool': total_bounty_pool, 'issue_count': len(issues)}))
+        else:
+            console.print(f'[green]Issue Bounty Pool:[/green] {format_alpha(total_bounty_pool)}')
+            console.print(f'[dim]Sum of bounty amounts from {len(issues)} issue(s)[/dim]')
     except Exception as e:
-        console.print(f'[red]Error: {e}[/red]')
+        if json_output:
+            import json as json_lib
+            print(json_lib.dumps({'status': 'error', 'message': str(e)}))
+        else:
+            print_error(str(e))
 
 
 @click.command('pending-harvest')
@@ -223,18 +253,24 @@ def issues_bounty_pool(network: str, rpc_url: str, contract: str, verbose: bool)
     default='',
     help='Contract address (uses config if empty)',
 )
+@click.option('--json', 'json_output', is_flag=True, help='Output in JSON format')
 @click.option('--verbose', '-v', is_flag=True, help='Show debug output')
-def issues_pending_harvest(network: str, rpc_url: str, contract: str, verbose: bool):
+def issues_pending_harvest(network: str, rpc_url: str, contract: str, json_output: bool, verbose: bool):
     """View pending harvest (treasury stake minus allocated bounties)."""
     contract_addr = get_contract_address(contract)
     ws_endpoint, network_name = resolve_network(network, rpc_url)
 
     if not contract_addr:
-        console.print('[red]Error: Contract address not configured.[/red]')
+        if json_output:
+            import json as json_lib
+            print(json_lib.dumps({'status': 'error', 'message': 'Contract address not configured'}))
+        else:
+            print_error('Contract address not configured.')
         return
 
-    console.print(f'[dim]Network: {network_name} ({ws_endpoint})[/dim]')
-    console.print(f'[dim]Contract: {contract_addr}[/dim]')
+    if not json_output:
+        console.print(f'[dim]Network: {network_name} ({ws_endpoint})[/dim]')
+        console.print(f'[dim]Contract: {contract_addr}[/dim]')
 
     try:
         import bittensor as bt
@@ -244,7 +280,7 @@ def issues_pending_harvest(network: str, rpc_url: str, contract: str, verbose: b
             IssueCompetitionContractClient,
         )
 
-        with console.status('[yellow]Reading contract data...[/yellow]'):
+        with console.status('[yellow]Reading contract data...[/yellow]', disable=json_output):
             # Get treasury stake
             subtensor = bt.Subtensor(network=ws_endpoint)
             client = IssueCompetitionContractClient(
@@ -261,13 +297,33 @@ def issues_pending_harvest(network: str, rpc_url: str, contract: str, verbose: b
         # Pending harvest = treasury stake - allocated bounties
         pending_harvest = max(0, treasury_stake - total_bounty_pool)
 
-        console.print(f'[green]Treasury Stake:[/green] {format_alpha(treasury_stake)}')
-        console.print(f'[green]Allocated to Bounties:[/green] {format_alpha(total_bounty_pool)}')
-        console.print(f'[green]Pending Harvest:[/green] {format_alpha(pending_harvest)}')
+        if json_output:
+            import json as json_lib
+            print(
+                json_lib.dumps(
+                    {
+                        'treasury_stake': treasury_stake,
+                        'allocated_to_bounties': total_bounty_pool,
+                        'pending_harvest': pending_harvest,
+                    }
+                )
+            )
+        else:
+            console.print(f'[green]Treasury Stake:[/green] {format_alpha(treasury_stake)}')
+            console.print(f'[green]Allocated to Bounties:[/green] {format_alpha(total_bounty_pool)}')
+            console.print(f'[green]Pending Harvest:[/green] {format_alpha(pending_harvest)}')
     except ImportError as e:
-        console.print(f'[red]Error: Missing dependency - {e}[/red]')
+        if json_output:
+            import json as json_lib
+            print(json_lib.dumps({'status': 'error', 'message': f'Missing dependency - {e}'}))
+        else:
+            print_error(f'Missing dependency - {e}')
     except Exception as e:
-        console.print(f'[red]Error: {e}[/red]')
+        if json_output:
+            import json as json_lib
+            print(json_lib.dumps({'status': 'error', 'message': str(e)}))
+        else:
+            print_error(str(e))
 
 
 @click.command('info')
@@ -288,38 +344,56 @@ def issues_pending_harvest(network: str, rpc_url: str, contract: str, verbose: b
     default='',
     help='Contract address (uses config if empty)',
 )
+@click.option('--json', 'json_output', is_flag=True, help='Output in JSON format')
 @click.option('--verbose', '-v', is_flag=True, help='Show debug output')
-def admin_info(network: str, rpc_url: str, contract: str, verbose: bool):
+def admin_info(network: str, rpc_url: str, contract: str, json_output: bool, verbose: bool):
     """View contract configuration."""
     contract_addr = get_contract_address(contract)
     ws_endpoint, network_name = resolve_network(network, rpc_url)
 
     if not contract_addr:
-        console.print('[red]Error: Contract address not configured.[/red]')
+        if json_output:
+            import json as json_lib
+            print(json_lib.dumps({'status': 'error', 'message': 'Contract address not configured'}))
+        else:
+            print_error('Contract address not configured.')
         return
 
-    console.print(f'[dim]Network: {network_name} ({ws_endpoint})[/dim]')
-    console.print(f'[dim]Contract: {contract_addr}[/dim]')
+    if not json_output:
+        console.print(f'[dim]Network: {network_name} ({ws_endpoint})[/dim]')
+        console.print(f'[dim]Contract: {contract_addr}[/dim]')
 
     try:
         from substrateinterface import SubstrateInterface
 
-        with console.status('[yellow]Reading contract configuration...[/yellow]'):
+        with console.status('[yellow]Reading contract configuration...[/yellow]', disable=json_output):
             substrate = SubstrateInterface(url=ws_endpoint)
             packed = _read_contract_packed_storage(substrate, contract_addr, verbose)
 
         if packed:
-            console.print(
-                Panel(
-                    f'[cyan]Owner:[/cyan] {packed.get("owner", "N/A")}\n'
-                    f'[cyan]Treasury Hotkey:[/cyan] {packed.get("treasury_hotkey", "N/A")}\n'
-                    f'[cyan]Netuid:[/cyan] {packed.get("netuid", "N/A")}\n'
-                    f'[cyan]Next Issue ID:[/cyan] {packed.get("next_issue_id", "N/A")}',
-                    title='Contract Configuration',
-                    border_style='green',
+            if json_output:
+                import json as json_lib
+                print(json_lib.dumps(packed))
+            else:
+                console.print(
+                    Panel(
+                        f'[cyan]Owner:[/cyan] {packed.get("owner", "N/A")}\n'
+                        f'[cyan]Treasury Hotkey:[/cyan] {packed.get("treasury_hotkey", "N/A")}\n'
+                        f'[cyan]Netuid:[/cyan] {packed.get("netuid", "N/A")}\n'
+                        f'[cyan]Next Issue ID:[/cyan] {packed.get("next_issue_id", "N/A")}',
+                        title='Contract Configuration',
+                        border_style='green',
+                    )
                 )
-            )
         else:
-            console.print('[yellow]Could not read contract configuration.[/yellow]')
+            if json_output:
+                import json as json_lib
+                print(json_lib.dumps({'status': 'error', 'message': 'Could not read contract configuration'}))
+            else:
+                console.print('[yellow]Could not read contract configuration.[/yellow]')
     except Exception as e:
-        console.print(f'[red]Error: {e}[/red]')
+        if json_output:
+            import json as json_lib
+            print(json_lib.dumps({'status': 'error', 'message': str(e)}))
+        else:
+            print_error(str(e))

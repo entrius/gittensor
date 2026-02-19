@@ -8,19 +8,36 @@ Shared helper functions for issue commands
 import hashlib
 import json
 import os
+import re
 import struct
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from rich.console import Console
+from rich.panel import Panel
 
 from gittensor.constants import CONTRACT_ADDRESS
+
+# Constants
+ALPHA_DECIMALS = 9
+ALPHA_RAW_UNIT = 10**ALPHA_DECIMALS
 
 # Default paths
 GITTENSOR_DIR = Path.home() / '.gittensor'
 CONFIG_FILE = GITTENSOR_DIR / 'config.json'
 
 console = Console()
+
+
+def print_success(message: str):
+    """Print a standardized success message."""
+    console.print(f'[bold green]✓[/bold green] {message}')
+
+
+def print_error(message: str):
+    """Print a standardized error message."""
+    console.print(f'[bold red]✗[/bold red] [red]Error:[/red] {message}')
 
 
 def load_config() -> Dict[str, Any]:
@@ -123,7 +140,7 @@ def resolve_network(network: Optional[str] = None, rpc_url: Optional[str] = None
 
 def format_alpha(amount: int) -> str:
     """
-    Format ALPHA token amount (1e9 units) for display.
+    Format ALPHA token amount (1e9 units) for display using Decimal for precision.
 
     Args:
         amount: Raw amount in contract units (u128)
@@ -131,7 +148,8 @@ def format_alpha(amount: int) -> str:
     Returns:
         Formatted string (e.g., "10.5000 ALPHA")
     """
-    return f'{amount / 1_000_000_000:.4f} ALPHA'
+    decimal_amount = Decimal(amount) / Decimal(ALPHA_RAW_UNIT)
+    return f'{decimal_amount:.4f} ALPHA'
 
 
 def validate_ss58(address: str) -> bool:
@@ -144,13 +162,15 @@ def validate_ss58(address: str) -> bool:
     Returns:
         True if valid, False otherwise
     """
+    # Quick regex check for SS58 format (starts with 5, length 47-48, base58 chars)
+    if not re.match(r'^5[a-zA-Z1-9]{46,47}$', address):
+        return False
+
     try:
         from bittensor.utils import is_valid_ss58_address
         return is_valid_ss58_address(address)
     except ImportError:
         # Fallback basic check if bittensor is not loaded
-        if not address or len(address) < 47 or len(address) > 49:
-            return False
         import base58
         try:
             base58.b58decode(address)

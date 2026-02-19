@@ -32,7 +32,7 @@ def test_validate_ss58():
     assert validate_ss58("invalid") is False
     assert validate_ss58("") is False
     assert validate_ss58("5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQ") is False # too short
-    assert validate_ss58("1" * 48) is False # Valid length but probably invalid checksum/format
+    assert validate_ss58("GGrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY") is False # doesn't start with 5
 
 def test_validate_repo_format():
     assert validate_repo_format("opentensor/btcli") is True

@@ -102,7 +102,7 @@ def issues_list(issue_id: int, network: str, rpc_url: str, contract: str, verbos
     # Table view of all issues
     console.print('[bold cyan]Available Issues[/bold cyan]\n')
 
-    table = Table(show_header=True, header_style='bold magenta')
+    table = Table(show_header=True, header_style='bold magenta', box=None)
     table.add_column('ID', style='cyan', justify='right')
     table.add_column('Repository', style='green')
     table.add_column('Issue #', style='yellow', justify='right')

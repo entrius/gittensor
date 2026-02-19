@@ -71,16 +71,20 @@ def register_commands(cli):
     # Issues group with alias
     cli.add_command(issues_group, name='issues')
     cli.add_alias('issues', 'i')
+    cli.add_alias('issues', 'is')
 
     # Harvest as top-level command
     cli.add_command(issue_harvest, name='harvest')
+    cli.add_alias('harvest', 'h')
 
     # Validator vote group
     cli.add_command(vote, name='vote')
+    cli.add_alias('vote', 'v')
 
     # Admin group with alias
     cli.add_command(admin)
     cli.add_alias('admin', 'a')
+    cli.add_alias('admin', 'adm')
 
 
 __all__ = [

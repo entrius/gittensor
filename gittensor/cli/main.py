@@ -6,10 +6,10 @@ Gittensor CLI - Main entry point
 
 Usage:
     gitt config              - Show/set CLI configuration
-    gitt issues ...          - Issue management (alias: i)
-    gitt harvest             - Harvest emissions
-    gitt vote ...            - Validator vote commands
-    gitt admin ...           - Owner commands (alias: a)
+    gitt issues ...          - Issue management (alias: i, is)
+    gitt harvest             - Harvest emissions (alias: h)
+    gitt vote ...            - Validator vote commands (alias: v)
+    gitt admin ...           - Owner commands (alias: a, adm)
 """
 
 import json

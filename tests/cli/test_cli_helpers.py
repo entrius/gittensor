@@ -29,7 +29,6 @@ from gittensor.cli.issue_commands.helpers import (
     validate_ss58_address,
 )
 
-
 # =============================================================================
 # format_alpha
 # =============================================================================
@@ -227,10 +226,13 @@ def _get_cli_root():
     """Return the root Click group that has 'issues' and 'vote' registered."""
     try:
         from gittensor.cli.main import cli
+
         return cli
     except ImportError:
-        from gittensor.cli.issue_commands import register_commands
         import click
+
+        from gittensor.cli.issue_commands import register_commands
+
         root = click.Group()
         register_commands(root)
         return root
@@ -250,9 +252,14 @@ class TestCliRegisterValidation:
     """Ensure register command rejects bad input before any network call."""
 
     def test_register_rejects_low_bounty(self, cli_root, runner):
-        with patch('gittensor.cli.issue_commands.mutations.get_contract_address', return_value='0x1234567890123456789012345678901234567890'), \
-             patch('gittensor.cli.issue_commands.mutations.validate_repository', return_value=('owner', 'repo')), \
-             patch('gittensor.cli.issue_commands.mutations.validate_github_issue', return_value={}):
+        with (
+            patch(
+                'gittensor.cli.issue_commands.mutations.get_contract_address',
+                return_value='0x1234567890123456789012345678901234567890',
+            ),
+            patch('gittensor.cli.issue_commands.mutations.validate_repository', return_value=('owner', 'repo')),
+            patch('gittensor.cli.issue_commands.mutations.validate_github_issue', return_value={}),
+        ):
             result = runner.invoke(
                 cli_root,
                 ['issues', 'register', '--repo', 'owner/repo', '--issue', '1', '--bounty', '5', '-y'],
@@ -262,7 +269,10 @@ class TestCliRegisterValidation:
         assert 'Minimum' in result.output or '5' in result.output
 
     def test_register_rejects_bad_repo_format(self, cli_root, runner):
-        with patch('gittensor.cli.issue_commands.mutations.get_contract_address', return_value='0x1234567890123456789012345678901234567890'):
+        with patch(
+            'gittensor.cli.issue_commands.mutations.get_contract_address',
+            return_value='0x1234567890123456789012345678901234567890',
+        ):
             result = runner.invoke(
                 cli_root,
                 ['issues', 'register', '--repo', 'no-slash', '--issue', '1', '--bounty', '10', '-y'],
@@ -272,7 +282,10 @@ class TestCliRegisterValidation:
         assert 'owner/repo' in result.output or 'Repository' in result.output
 
     def test_register_rejects_issue_zero(self, cli_root, runner):
-        with patch('gittensor.cli.issue_commands.mutations.get_contract_address', return_value='0x1234567890123456789012345678901234567890'):
+        with patch(
+            'gittensor.cli.issue_commands.mutations.get_contract_address',
+            return_value='0x1234567890123456789012345678901234567890',
+        ):
             result = runner.invoke(
                 cli_root,
                 ['issues', 'register', '--repo', 'a/b', '--issue', '0', '--bounty', '10', '-y'],
@@ -286,11 +299,15 @@ class TestCliVoteValidation:
     """Ensure vote solution rejects invalid issue_id / PR (validators wired)."""
 
     def test_vote_solution_rejects_issue_id_zero(self, cli_root, runner):
-        with patch('gittensor.cli.issue_commands.vote.get_contract_address', return_value='0x1234567890123456789012345678901234567890'):
+        with patch(
+            'gittensor.cli.issue_commands.vote.get_contract_address',
+            return_value='0x1234567890123456789012345678901234567890',
+        ):
             result = runner.invoke(
                 cli_root,
                 [
-                    'vote', 'solution',
+                    'vote',
+                    'solution',
                     '0',
                     '5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY',
                     '5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY',
@@ -299,15 +316,18 @@ class TestCliVoteValidation:
                 catch_exceptions=False,
             )
         assert result.exit_code != 0
-        assert result.exit_code != 0
         assert 'between' in result.output or '1' in result.output or 'issue' in result.output.lower()
 
     def test_vote_solution_rejects_pr_zero(self, cli_root, runner):
-        with patch('gittensor.cli.issue_commands.vote.get_contract_address', return_value='0x1234567890123456789012345678901234567890'):
+        with patch(
+            'gittensor.cli.issue_commands.vote.get_contract_address',
+            return_value='0x1234567890123456789012345678901234567890',
+        ):
             result = runner.invoke(
                 cli_root,
                 [
-                    'vote', 'solution',
+                    'vote',
+                    'solution',
                     '1',
                     '5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY',
                     '5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY',
@@ -323,7 +343,10 @@ class TestCliAdminValidation:
     """Ensure admin cancel rejects invalid issue_id (validator wired)."""
 
     def test_admin_cancel_rejects_issue_id_zero(self, cli_root, runner):
-        with patch('gittensor.cli.issue_commands.admin.get_contract_address', return_value='0x1234567890123456789012345678901234567890'):
+        with patch(
+            'gittensor.cli.issue_commands.admin.get_contract_address',
+            return_value='0x1234567890123456789012345678901234567890',
+        ):
             result = runner.invoke(
                 cli_root,
                 ['admin', 'cancel-issue', '0'],
@@ -350,7 +373,14 @@ class TestCliMissingContractConfig:
         with patch('gittensor.cli.issue_commands.vote.get_contract_address', return_value=''):
             result = runner.invoke(
                 cli_root,
-                ['vote', 'solution', '1', '5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY', '5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY', '1'],
+                [
+                    'vote',
+                    'solution',
+                    '1',
+                    '5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY',
+                    '5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY',
+                    '1',
+                ],
                 catch_exceptions=False,
             )
         assert result.exit_code != 0

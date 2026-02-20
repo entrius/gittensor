@@ -16,6 +16,7 @@ from rich.panel import Panel
 
 from .helpers import (
     MAX_ISSUE_NUMBER,
+    _is_interactive,
     console,
     format_alpha,
     get_contract_address,
@@ -27,7 +28,6 @@ from .helpers import (
     validate_bounty_amount,
     validate_github_issue,
     validate_repository,
-    _is_interactive,
 )
 
 
@@ -124,7 +124,9 @@ def issue_register(
     config = load_config()
 
     if not contract_addr:
-        raise click.ClickException('Contract address not configured. Run ./up.sh --issues to deploy the contract first.')
+        raise click.ClickException(
+            'Contract address not configured. Run ./up.sh --issues to deploy the contract first.'
+        )
 
     # Validate inputs before showing summary
     try:

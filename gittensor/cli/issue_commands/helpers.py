@@ -5,12 +5,12 @@
 Shared helper functions for issue commands
 """
 
-import sys
 import hashlib
 import json
 import os
 import re
 import struct
+import sys
 import urllib.error
 import urllib.request
 from decimal import Decimal, InvalidOperation

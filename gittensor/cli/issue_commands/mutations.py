@@ -308,9 +308,9 @@ def issue_harvest(wallet_name: str, wallet_hotkey: str, network: str, rpc_url: s
     ws_endpoint, network_name = resolve_network(network, rpc_url)
 
     if not contract_addr:
-        print_error('Contract address not configured.')
-        console.print('[dim]Set CONTRACT_ADDRESS env var or run ./up.sh --issues[/dim]')
-        return
+        raise click.ClickException(
+            'Contract address not configured. Set CONTRACT_ADDRESS env var or run ./up.sh --issues.'
+        )
 
     print_network_header(network_name, contract_addr)
     console.print(f'[dim]Wallet: {wallet_name}/{wallet_hotkey}[/dim]\n')

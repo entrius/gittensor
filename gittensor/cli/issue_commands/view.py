@@ -12,13 +12,13 @@ Commands:
 """
 
 import json as json_mod
+from decimal import Decimal
 
 import click
 from rich.panel import Panel
 from rich.table import Table
 
 from .helpers import (
-    ALPHA_RAW_UNIT,
     _read_contract_packed_storage,
     _read_issues_from_child_storage,
     colorize_status,
@@ -137,23 +137,29 @@ def issues_list(issue_id: int, network: str, rpc_url: str, contract: str, verbos
             target_raw = issue.get('target_bounty', 0)
             status = issue.get('status', 'unknown')
 
+            # Keep list rendering resilient to unexpected storage payload shapes.
             try:
-                bounty = float(bounty_raw) / ALPHA_RAW_UNIT if bounty_raw else 0.0
-                target = float(target_raw) / ALPHA_RAW_UNIT if target_raw else 0.0
-            except (ValueError, TypeError):
-                bounty = 0.0
-                target = 0.0
+                bounty_val = int(bounty_raw) if bounty_raw else 0
+            except (TypeError, ValueError):
+                bounty_val = 0
+            try:
+                target_val = int(target_raw) if target_raw else 0
+            except (TypeError, ValueError):
+                target_val = 0
 
-            if target > 0:
-                fill_pct = (bounty / target) * 100
+            bounty_str = format_alpha(bounty_val, 1) if bounty_val else '0.0'
+            target_str = format_alpha(target_val, 1) if target_val else '0.0'
+
+            if target_val > 0:
+                fill_pct = float(Decimal(bounty_val) / Decimal(target_val) * 100)
                 if fill_pct >= 100:
-                    bounty_display = f'{bounty:.1f} (100%)'
-                elif bounty > 0:
-                    bounty_display = f'{bounty:.1f}/{target:.1f} ({fill_pct:.0f}%)'
+                    bounty_display = f'{bounty_str} (100%)'
+                elif bounty_val > 0:
+                    bounty_display = f'{bounty_str}/{target_str} ({fill_pct:.0f}%)'
                 else:
-                    bounty_display = f'0/{target:.1f} (0%)'
+                    bounty_display = f'0/{target_str} (0%)'
             else:
-                bounty_display = f'{bounty:.2f}' if bounty > 0 else '0.00'
+                bounty_display = bounty_str if bounty_val > 0 else '0.00'
 
             if isinstance(status, dict):
                 status = list(status.keys())[0] if status else 'Unknown'

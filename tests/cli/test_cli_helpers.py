@@ -480,3 +480,13 @@ class TestCliMissingContractConfig:
             )
         assert result.exit_code != 0
         assert 'Contract address not configured' in result.output
+
+    def test_harvest_missing_contract_fails(self, cli_root, runner):
+        with patch('gittensor.cli.issue_commands.mutations.get_contract_address', return_value=''):
+            result = runner.invoke(
+                cli_root,
+                ['harvest'],
+                catch_exceptions=False,
+            )
+        assert result.exit_code != 0
+        assert 'Contract address not configured' in result.output

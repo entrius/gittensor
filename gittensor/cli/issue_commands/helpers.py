@@ -7,15 +7,25 @@ Shared helper functions for issue commands
 
 import hashlib
 import json
+import math
 import os
+import re
 import struct
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import click
+import requests
 from rich.console import Console
 
 from gittensor.constants import CONTRACT_ADDRESS
 
+# Token constants
+ALPHA_DECIMALS = 9
+ALPHA_RAW_UNIT = 10**ALPHA_DECIMALS
+MIN_BOUNTY_ALPHA = 10  # Contract minimum
+GITHUB_VERIFY_TIMEOUT_SECONDS = 5
 # Default paths
 GITTENSOR_DIR = Path.home() / '.gittensor'
 CONFIG_FILE = GITTENSOR_DIR / 'config.json'
@@ -121,26 +131,108 @@ def resolve_network(network: Optional[str] = None, rpc_url: Optional[str] = None
     return NETWORK_MAP['finney'], 'finney'
 
 
-def get_ws_endpoint(cli_value: str = '') -> str:
-    """
-    Get WebSocket endpoint from CLI arg, env, or config file.
+# ============================================================================
+# Input validation helpers
+# ============================================================================
 
-    Deprecated: prefer resolve_network() for new code.
 
-    Args:
-        cli_value: Value passed via --rpc-url CLI option
+def format_alpha(raw_amount: int, decimals: int = 2) -> str:
+    """Format raw token amount as human-readable ALPHA string."""
+    return f'{raw_amount / ALPHA_RAW_UNIT:.{decimals}f}'
 
-    Returns:
-        WebSocket endpoint string
-    """
-    if cli_value and cli_value != 'wss://entrypoint-finney.opentensor.ai:443':
-        return cli_value
 
-    config = load_config()
-    if config.get('ws_endpoint'):
-        return config['ws_endpoint']
+def validate_bounty(bounty: float) -> int:
+    """Validate bounty amount and convert to raw units without precision loss."""
+    if not math.isfinite(bounty):
+        raise click.BadParameter(f'Bounty must be a finite number, got {bounty}')
+    if bounty <= 0:
+        raise click.BadParameter(f'Bounty must be positive, got {bounty}')
+    if bounty < MIN_BOUNTY_ALPHA:
+        raise click.BadParameter(f'Bounty must be at least {MIN_BOUNTY_ALPHA} ALPHA, got {bounty}')
+    try:
+        d = Decimal(str(bounty))
+    except InvalidOperation:
+        raise click.BadParameter(f'Invalid bounty amount: {bounty}')
+    if not d.is_finite():
+        raise click.BadParameter(f'Bounty must be a finite number, got {bounty}')
+    if d.as_tuple().exponent < -ALPHA_DECIMALS:
+        raise click.BadParameter(f'Bounty has too many decimal places (max {ALPHA_DECIMALS})')
+    raw = int(d * ALPHA_RAW_UNIT)
+    if raw == 0:
+        raise click.BadParameter(f'Bounty {bounty} converts to 0 raw units - value too small')
+    return raw
 
-    return cli_value  # Return CLI default
+
+def validate_repo_format(repo: str) -> None:
+    """Validate owner/repo format strictly."""
+    if not re.match(r'^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$', repo):
+        raise click.BadParameter(f"Invalid repository format: '{repo}'. Expected 'owner/repo' (e.g., opentensor/btcli)")
+
+
+def verify_github_repo(repo: str) -> None:
+    """Verify repository exists on GitHub. Fails gracefully if GitHub is unreachable."""
+    try:
+        resp = requests.get(f'https://api.github.com/repos/{repo}', timeout=GITHUB_VERIFY_TIMEOUT_SECONDS)
+        if resp.status_code == 404:
+            raise click.BadParameter(f"Repository '{repo}' not found on GitHub")
+        if resp.status_code == 403:
+            console.print('[dim]GitHub API rate limit - skipping repo verification[/dim]')
+        elif resp.status_code not in (200, 301):
+            console.print(f'[dim]GitHub returned status {resp.status_code} - skipping repo verification[/dim]')
+    except requests.RequestException:
+        console.print('[dim]GitHub unreachable - skipping repo verification[/dim]')
+
+
+def verify_github_issue(repo: str, issue_number: int) -> None:
+    """Verify issue exists on GitHub, is open, and is not a PR."""
+    try:
+        resp = requests.get(
+            f'https://api.github.com/repos/{repo}/issues/{issue_number}',
+            timeout=GITHUB_VERIFY_TIMEOUT_SECONDS,
+        )
+        if resp.status_code == 404:
+            raise click.BadParameter(f'Issue #{issue_number} not found in {repo}')
+        if resp.status_code == 200:
+            try:
+                data = resp.json()
+            except ValueError:
+                console.print('[dim]GitHub returned unexpected response - skipping issue verification[/dim]')
+                return
+            if data.get('pull_request'):
+                raise click.BadParameter(f'#{issue_number} is a pull request, not an issue')
+            if data.get('state') != 'open':
+                if data.get('state') == 'closed':
+                    console.print(f'[yellow]Warning: Issue #{issue_number} is already closed[/yellow]')
+                else:
+                    console.print(f'[yellow]Warning: Issue #{issue_number} is already {data.get("state")}[/yellow]')
+        elif resp.status_code == 403:
+            console.print('[dim]GitHub API rate limit - skipping issue verification[/dim]')
+        elif resp.status_code not in (200, 301):
+            console.print(f'[dim]GitHub returned status {resp.status_code} - skipping issue verification[/dim]')
+    except requests.RequestException:
+        console.print('[dim]GitHub unreachable - skipping issue verification[/dim]')
+
+
+def validate_issue_id(value: int, name: str = 'Issue ID') -> None:
+    """Validate issue ID is in reasonable range."""
+    if value < 1 or value >= 1_000_000:
+        raise click.BadParameter(f'{name} must be between 1 and 999,999, got {value}')
+
+
+def validate_ss58_address(address: str, name: str = 'Address') -> None:
+    """Validate SS58 address format."""
+    if not isinstance(address, str) or not address or len(address) < 46 or len(address) > 48:
+        raise click.BadParameter(f"Invalid SS58 address for {name}: '{address}'")
+    if not address.startswith('5'):
+        raise click.BadParameter(f"Invalid SS58 address for {name}: must start with '5', got '{address}'")
+    try:
+        from substrateinterface import Keypair
+
+        Keypair(ss58_address=address)
+    except ImportError:
+        pass
+    except Exception:
+        raise click.BadParameter(f"Invalid SS58 address for {name}: '{address}'")
 
 
 # ============================================================================

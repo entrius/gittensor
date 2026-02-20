@@ -13,12 +13,15 @@ Commands:
 import re
 
 import click
+from rich.panel import Panel
 from rich.table import Table
 
 from .helpers import (
     console,
     get_contract_address,
     resolve_network,
+    validate_issue_id,
+    validate_ss58_address,
 )
 
 
@@ -74,14 +77,14 @@ def vote():
     '--wallet.name',
     '--wallet',
     default='default',
-    help='Wallet name',
+    help='Wallet name (signing wallet)',
 )
 @click.option(
     '--wallet-hotkey',
     '--wallet.hotkey',
     '--hotkey',
     default='default',
-    help='Hotkey name',
+    help='Hotkey name for signing',
 )
 @click.option(
     '--network',
@@ -98,7 +101,7 @@ def vote():
 @click.option(
     '--contract',
     default='',
-    help='Contract address (uses config if empty)',
+    help='Contract address (uses configured/default value if empty)',
 )
 def val_vote_solution(
     issue_id: int,
@@ -132,18 +135,32 @@ def val_vote_solution(
         console.print('[red]Error: Contract address not configured.[/red]')
         return
 
+    # Validate inputs
+    try:
+        validate_issue_id(issue_id)
+        validate_ss58_address(solver_hotkey, 'Solver hotkey')
+        validate_ss58_address(solver_coldkey, 'Solver coldkey')
+    except click.BadParameter as e:
+        console.print(f'[red]Error: {e.format_message()}[/red]')
+        return
+
     try:
         pr_number = parse_pr_number(pr_number_or_url)
     except ValueError as e:
         console.print(f'[red]Error: {e}[/red]')
         return
 
-    console.print(f'[dim]Network: {network_name} ({ws_endpoint})[/dim]')
-    console.print(f'[dim]Contract: {contract_addr}[/dim]')
-    console.print(f'[yellow]Voting on solution for issue {issue_id}...[/yellow]\n')
-    console.print(f'  Solver Hotkey:  {solver_hotkey}')
-    console.print(f'  Solver Coldkey: {solver_coldkey}')
-    console.print(f'  PR Number: {pr_number}\n')
+    console.print(
+        Panel(
+            f'[cyan]Issue ID:[/cyan] {issue_id}\n'
+            f'[cyan]Solver Hotkey:[/cyan] {solver_hotkey}\n'
+            f'[cyan]Solver Coldkey:[/cyan] {solver_coldkey}\n'
+            f'[cyan]PR Number:[/cyan] {pr_number}\n'
+            f'[cyan]Network:[/cyan] {network_name}',
+            title='Vote Solution',
+            border_style='blue',
+        )
+    )
 
     try:
         import bittensor as bt
@@ -152,14 +169,16 @@ def val_vote_solution(
             IssueCompetitionContractClient,
         )
 
-        wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
-        subtensor = bt.Subtensor(network=ws_endpoint)
-        client = IssueCompetitionContractClient(
-            contract_address=contract_addr,
-            subtensor=subtensor,
-        )
+        with console.status('[bold yellow]Connecting to subtensor...'):
+            wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
+            subtensor = bt.Subtensor(network=ws_endpoint)
+            client = IssueCompetitionContractClient(
+                contract_address=contract_addr,
+                subtensor=subtensor,
+            )
 
-        result = client.vote_solution(issue_id, solver_hotkey, solver_coldkey, pr_number, wallet)
+        with console.status('[bold yellow]Submitting vote...'):
+            result = client.vote_solution(issue_id, solver_hotkey, solver_coldkey, pr_number, wallet)
         if result:
             console.print('[green]Solution vote submitted![/green]')
         else:
@@ -178,14 +197,14 @@ def val_vote_solution(
     '--wallet.name',
     '--wallet',
     default='default',
-    help='Wallet name',
+    help='Wallet name (signing wallet)',
 )
 @click.option(
     '--wallet-hotkey',
     '--wallet.hotkey',
     '--hotkey',
     default='default',
-    help='Hotkey name',
+    help='Hotkey name for signing',
 )
 @click.option(
     '--network',
@@ -202,7 +221,7 @@ def val_vote_solution(
 @click.option(
     '--contract',
     default='',
-    help='Contract address (uses config if empty)',
+    help='Contract address (uses configured/default value if empty)',
 )
 def val_vote_cancel_issue(
     issue_id: int,
@@ -232,10 +251,20 @@ def val_vote_cancel_issue(
         console.print('[red]Error: Contract address not configured.[/red]')
         return
 
-    console.print(f'[dim]Network: {network_name} ({ws_endpoint})[/dim]')
-    console.print(f'[dim]Contract: {contract_addr}[/dim]')
-    console.print(f'[yellow]Voting to cancel issue {issue_id}...[/yellow]\n')
-    console.print(f'  Reason: {reason}\n')
+    # Validate inputs
+    try:
+        validate_issue_id(issue_id)
+    except click.BadParameter as e:
+        console.print(f'[red]Error: {e.format_message()}[/red]')
+        return
+
+    console.print(
+        Panel(
+            f'[cyan]Issue ID:[/cyan] {issue_id}\n[cyan]Reason:[/cyan] {reason}\n[cyan]Network:[/cyan] {network_name}',
+            title='Vote Cancel Issue',
+            border_style='yellow',
+        )
+    )
 
     try:
         import bittensor as bt
@@ -244,14 +273,16 @@ def val_vote_cancel_issue(
             IssueCompetitionContractClient,
         )
 
-        wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
-        subtensor = bt.Subtensor(network=ws_endpoint)
-        client = IssueCompetitionContractClient(
-            contract_address=contract_addr,
-            subtensor=subtensor,
-        )
+        with console.status('[bold yellow]Connecting to subtensor...'):
+            wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
+            subtensor = bt.Subtensor(network=ws_endpoint)
+            client = IssueCompetitionContractClient(
+                contract_address=contract_addr,
+                subtensor=subtensor,
+            )
 
-        result = client.vote_cancel_issue(issue_id, reason, wallet)
+        with console.status('[bold yellow]Submitting cancel vote...'):
+            result = client.vote_cancel_issue(issue_id, reason, wallet)
         if result:
             console.print('[green]Vote cancel submitted![/green]')
         else:
@@ -278,7 +309,7 @@ def val_vote_cancel_issue(
 @click.option(
     '--contract',
     default='',
-    help='Contract address (uses config if empty)',
+    help='Contract address (uses configured/default value if empty)',
 )
 def vote_list_validators(network: str, rpc_url: str, contract: str):
     """List whitelisted validators and consensus threshold.
@@ -298,8 +329,7 @@ def vote_list_validators(network: str, rpc_url: str, contract: str):
         console.print('[red]Error: Contract address not configured.[/red]')
         return
 
-    console.print(f'[dim]Network: {network_name} ({ws_endpoint})[/dim]')
-    console.print(f'[dim]Contract: {contract_addr}[/dim]\n')
+    console.print(f'[dim]gitt | {network_name} | {contract_addr[:12]}...[/dim]\n')
 
     try:
         import bittensor as bt
@@ -308,13 +338,13 @@ def vote_list_validators(network: str, rpc_url: str, contract: str):
             IssueCompetitionContractClient,
         )
 
-        subtensor = bt.Subtensor(network=ws_endpoint)
-        client = IssueCompetitionContractClient(
-            contract_address=contract_addr,
-            subtensor=subtensor,
-        )
-
-        validators = client.get_validators()
+        with console.status('[bold yellow]Fetching validators...'):
+            subtensor = bt.Subtensor(network=ws_endpoint)
+            client = IssueCompetitionContractClient(
+                contract_address=contract_addr,
+                subtensor=subtensor,
+            )
+            validators = client.get_validators()
         n = len(validators)
         required = (n // 2) + 1
 

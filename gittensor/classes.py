@@ -319,16 +319,11 @@ class MinerEvaluation:
         return len(self.closed_pull_requests)
 
     def get_all_issues(self) -> List[Issue]:
-        """Aggregate all unique issues from all pull requests (merged, open, closed)."""
-        seen = set()
+        """Aggregate all issues from all pull requests (merged, open, closed)."""
         all_issues = []
         for pr in self.merged_pull_requests + self.open_pull_requests + self.closed_pull_requests:
             if pr.issues:
-                for issue in pr.issues:
-                    key = (issue.number, issue.repository_full_name)
-                    if key not in seen:
-                        seen.add(key)
-                        all_issues.append(issue)
+                all_issues.extend(pr.issues)
         return all_issues
 
     def get_all_file_changes(self) -> List[FileChange]:

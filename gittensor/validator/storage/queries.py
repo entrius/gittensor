@@ -84,7 +84,7 @@ INSERT INTO issues (
     number, pr_number, repository_full_name, title, created_at, closed_at,
     author_login, state, author_association
 ) VALUES %s
-ON CONFLICT (number, repository_full_name)
+ON CONFLICT (number, pr_number, repository_full_name)
 DO UPDATE SET
     title = EXCLUDED.title,
     closed_at = EXCLUDED.closed_at,

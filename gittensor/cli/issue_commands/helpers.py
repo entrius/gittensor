@@ -8,11 +8,15 @@ Shared helper functions for issue commands
 import hashlib
 import json
 import os
+import re
 import struct
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import click
 from rich.console import Console
+from rich.text import Text
 
 from gittensor.constants import CONTRACT_ADDRESS
 
@@ -21,6 +25,287 @@ GITTENSOR_DIR = Path.home() / '.gittensor'
 CONFIG_FILE = GITTENSOR_DIR / 'config.json'
 
 console = Console()
+
+# ALPHA token formatting constants
+ALPHA_DECIMALS = 9
+ALPHA_SCALE = 10**ALPHA_DECIMALS
+MIN_BOUNTY_ALPHA = Decimal('10')
+MAX_BOUNTY_ALPHA = Decimal('100_000_000')  # 100M ALPHA — prevents u128 encoding overflow
+MAX_ISSUE_ID = 1_000_000
+
+
+def format_alpha(raw_amount: int, decimals: int = 2) -> str:
+    """
+    Format a raw nanoALPHA integer for display.
+
+    Args:
+        raw_amount: Amount in nanoALPHA (raw contract units)
+        decimals: Number of decimal places to show (default 2)
+
+    Returns:
+        Formatted string like "100.00 ALPHA"
+    """
+    value = Decimal(raw_amount) / Decimal(ALPHA_SCALE)
+    return f'{value:.{decimals}f} ALPHA'
+
+
+def print_success(message: str) -> None:
+    """Print a success message with a green checkmark."""
+    console.print(f'\n[green]\u2713[/green] {message}\n')
+
+
+def print_error(message: str) -> None:
+    """Print an error message with a red X."""
+    console.print(f'\n[red]\u2717[/red] {message}\n')
+
+
+def print_network_header(network_name: str, contract_addr: str) -> None:
+    """Print a compact network/contract context header."""
+    short = f'{contract_addr[:12]}...{contract_addr[-6:]}' if len(contract_addr) > 20 else contract_addr
+    console.print(f'[dim]Network: {network_name} \u2022 Contract: {short}[/dim]')
+
+
+STATUS_COLORS = {
+    'Active': 'green',
+    'Registered': 'yellow',
+    'Completed': 'dim',
+    'Cancelled': 'dim',
+}
+
+
+def colorize_status(status: str) -> Text:
+    """Return a Rich Text object with the status colored by issue state."""
+    color = STATUS_COLORS.get(status, 'white')
+    return Text(status, style=color)
+
+
+def validate_and_convert_bounty(bounty) -> int:
+    """
+    Validate and convert a bounty amount from ALPHA to nanoALPHA.
+
+    Accepts str, int, or float. When --bounty is typed as str in Click,
+    the value arrives as a string and is parsed directly into Decimal,
+    completely avoiding IEEE 754 floating-point precision loss.
+
+    Args:
+        bounty: Bounty amount in ALPHA tokens (str, int, or float)
+
+    Returns:
+        Raw nanoALPHA integer
+
+    Raises:
+        click.BadParameter: If bounty is invalid
+    """
+    import math
+
+    # Reject non-finite floats (inf, -inf, nan) before Decimal conversion
+    if isinstance(bounty, float) and not math.isfinite(bounty):
+        raise click.BadParameter(f'Invalid bounty amount: {bounty}', param_hint='--bounty')
+
+    try:
+        d = Decimal(str(bounty))
+    except (InvalidOperation, ValueError):
+        raise click.BadParameter(f'Invalid bounty amount: {bounty}', param_hint='--bounty')
+
+    if d < MIN_BOUNTY_ALPHA:
+        raise click.BadParameter(
+            f'Bounty must be at least {MIN_BOUNTY_ALPHA} ALPHA (got {bounty})', param_hint='--bounty'
+        )
+
+    if d > MAX_BOUNTY_ALPHA:
+        raise click.BadParameter(
+            f'Bounty must be at most {MAX_BOUNTY_ALPHA:,} ALPHA (got {bounty})', param_hint='--bounty'
+        )
+
+    # Check for excessive decimal places
+    if d.as_tuple().exponent < -ALPHA_DECIMALS:
+        raise click.BadParameter(f'Bounty has too many decimal places (max {ALPHA_DECIMALS})', param_hint='--bounty')
+
+    raw = int(d * ALPHA_SCALE)
+    if raw <= 0:
+        raise click.BadParameter(f'Bounty converts to 0 nanoALPHA: {bounty}', param_hint='--bounty')
+
+    return raw
+
+
+# Regex for valid GitHub repo name characters
+_REPO_NAME_RE = re.compile(r'^[A-Za-z0-9\-._]+$')
+
+
+def validate_repo_format(repo: str) -> tuple:
+    """
+    Validate that a repository string is in owner/repo format.
+
+    Args:
+        repo: Repository string to validate
+
+    Returns:
+        Tuple of (owner, repo_name)
+
+    Raises:
+        click.BadParameter: If format is invalid
+    """
+    parts = repo.split('/')
+    if len(parts) != 2:
+        raise click.BadParameter(f'Repository must be in owner/repo format (got "{repo}")', param_hint='--repo')
+
+    owner, name = parts
+    if not owner or not name:
+        raise click.BadParameter(
+            f'Repository owner and name must both be non-empty (got "{repo}")', param_hint='--repo'
+        )
+
+    if ' ' in repo:
+        raise click.BadParameter(f'Repository must not contain spaces (got "{repo}")', param_hint='--repo')
+
+    if not _REPO_NAME_RE.match(owner) or not _REPO_NAME_RE.match(name):
+        raise click.BadParameter(
+            f'Repository owner/name may only contain alphanumeric characters, hyphens, dots, and underscores (got "{repo}")',
+            param_hint='--repo',
+        )
+
+    return owner, name
+
+
+_GITHUB_API_TIMEOUT = 10
+
+
+def check_github_repo_exists(repo: str) -> bool:
+    """
+    Check if a GitHub repository exists via the public API.
+
+    Args:
+        repo: Repository in owner/repo format
+
+    Returns:
+        True if the repo exists or check was inconclusive (network error / rate limit)
+
+    Raises:
+        click.BadParameter: If the repo definitively does not exist (404)
+    """
+    import urllib.error
+    import urllib.request
+
+    try:
+        req = urllib.request.Request(
+            f'https://api.github.com/repos/{repo}',
+            headers={'User-Agent': 'gittensor-cli'},
+        )
+        urllib.request.urlopen(req, timeout=_GITHUB_API_TIMEOUT)
+        return True
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            raise click.BadParameter(f"Repository '{repo}' not found on GitHub", param_hint='--repo')
+        if e.code == 403:
+            console.print(f'[yellow]Warning: GitHub API rate-limited, skipping repo check for "{repo}"[/yellow]')
+            return True
+        console.print(f'[yellow]Warning: GitHub API returned {e.code} for "{repo}", skipping check[/yellow]')
+        return True
+    except Exception as e:
+        console.print(f'[yellow]Warning: Could not verify GitHub repo "{repo}": {e}[/yellow]')
+        return True
+
+
+def validate_issue_id(value: int, label: str = 'issue ID', param_hint: str = None) -> int:
+    """
+    Validate that an issue ID is within a reasonable range.
+
+    Args:
+        value: Issue ID to validate
+        label: Human-readable label for error messages
+        param_hint: CLI parameter name for error context
+
+    Returns:
+        The validated issue ID
+
+    Raises:
+        click.BadParameter: If value is out of range
+    """
+    if value < 1:
+        raise click.BadParameter(f'{label} must be >= 1 (got {value})', param_hint=param_hint)
+    if value >= MAX_ISSUE_ID:
+        raise click.BadParameter(f'{label} must be < {MAX_ISSUE_ID:,} (got {value})', param_hint=param_hint)
+    return value
+
+
+def check_github_issue_exists(repo: str, issue_number: int) -> bool:
+    """
+    Check if a GitHub issue exists, is not a pull request, and is open.
+
+    Args:
+        repo: Repository in owner/repo format
+        issue_number: GitHub issue number
+
+    Returns:
+        True if the issue exists (or check was inconclusive)
+
+    Raises:
+        click.BadParameter: If issue does not exist or is a pull request
+    """
+    import urllib.error
+    import urllib.request
+
+    try:
+        req = urllib.request.Request(
+            f'https://api.github.com/repos/{repo}/issues/{issue_number}',
+            headers={'User-Agent': 'gittensor-cli'},
+        )
+        resp = urllib.request.urlopen(req, timeout=_GITHUB_API_TIMEOUT)
+        data = json.loads(resp.read().decode())
+        if 'pull_request' in data:
+            raise click.BadParameter(f'#{issue_number} in {repo} is a pull request, not an issue', param_hint='--issue')
+        if data.get('state') == 'closed':
+            console.print(f'[yellow]Warning: Issue #{issue_number} is already closed.[/yellow]')
+        return True
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            raise click.BadParameter(f'GitHub issue #{issue_number} not found in {repo}', param_hint='--issue')
+        if e.code == 403:
+            console.print('[yellow]Warning: GitHub API rate-limited, skipping issue check[/yellow]')
+            return True
+        console.print(f'[yellow]Warning: GitHub API returned {e.code}, skipping issue check[/yellow]')
+        return True
+    except click.BadParameter:
+        raise
+    except Exception as e:
+        console.print(f'[yellow]Warning: Could not verify GitHub issue #{issue_number}: {e}[/yellow]')
+        return True
+
+
+_SS58_RE = re.compile(r'^[1-9A-HJ-NP-Za-km-z]{46,48}$')
+
+
+def validate_ss58_address(address: str, label: str = 'address', param_hint: str = None) -> str:
+    """
+    Validate an SS58 address using substrateinterface with regex fallback.
+
+    Args:
+        address: SS58 address string to validate
+        label: Human-readable label for error messages
+        param_hint: CLI parameter name for error context
+
+    Returns:
+        The cleaned (stripped) address string
+
+    Raises:
+        click.BadParameter: If the address is invalid
+    """
+    address = address.strip()
+    if not address:
+        raise click.BadParameter(f'{label} must not be empty', param_hint=param_hint)
+
+    try:
+        from substrateinterface import Keypair
+
+        Keypair(ss58_address=address)
+    except ImportError:
+        # Fallback: regex check for base58 format (no checksum validation)
+        if not _SS58_RE.match(address):
+            raise click.BadParameter(f'Invalid SS58 address: {address}', param_hint=param_hint)
+    except Exception:
+        raise click.BadParameter(f'Invalid SS58 address: {address}', param_hint=param_hint)
+
+    return address
 
 
 def load_config() -> Dict[str, Any]:
@@ -119,28 +404,6 @@ def resolve_network(network: Optional[str] = None, rpc_url: Optional[str] = None
 
     # Default: finney (mainnet)
     return NETWORK_MAP['finney'], 'finney'
-
-
-def get_ws_endpoint(cli_value: str = '') -> str:
-    """
-    Get WebSocket endpoint from CLI arg, env, or config file.
-
-    Deprecated: prefer resolve_network() for new code.
-
-    Args:
-        cli_value: Value passed via --rpc-url CLI option
-
-    Returns:
-        WebSocket endpoint string
-    """
-    if cli_value and cli_value != 'wss://entrypoint-finney.opentensor.ai:443':
-        return cli_value
-
-    config = load_config()
-    if config.get('ws_endpoint'):
-        return config['ws_endpoint']
-
-    return cli_value  # Return CLI default
 
 
 # ============================================================================
@@ -312,8 +575,7 @@ def _read_issues_from_child_storage(substrate, contract_addr: str, verbose: bool
         console.print(f'[dim]Debug: next_issue_id from contract = {next_issue_id}[/dim]')
 
     # Sanity check: next_issue_id should be reasonable (< 1 million for any real deployment)
-    MAX_REASONABLE_ISSUE_ID = 1_000_000
-    if next_issue_id > MAX_REASONABLE_ISSUE_ID:
+    if next_issue_id > MAX_ISSUE_ID:
         console.print(f'[yellow]Warning: next_issue_id ({next_issue_id}) is unreasonably large.[/yellow]')
         console.print('[yellow]This may indicate a storage format mismatch. Check contract version.[/yellow]')
         return []

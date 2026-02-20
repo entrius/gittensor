@@ -26,14 +26,29 @@ from .admin import admin
 
 # Re-export helpers
 from .helpers import (
+    ALPHA_DECIMALS,
+    ALPHA_SCALE,
     CONFIG_FILE,
     GITTENSOR_DIR,
+    MAX_BOUNTY_ALPHA,
+    MAX_ISSUE_ID,
+    MIN_BOUNTY_ALPHA,
     NETWORK_MAP,
+    STATUS_COLORS,
+    colorize_status,
     console,
+    format_alpha,
     get_contract_address,
     load_config,
+    print_error,
+    print_network_header,
+    print_success,
     read_issues_from_contract,
     resolve_network,
+    validate_and_convert_bounty,
+    validate_issue_id,
+    validate_repo_format,
+    validate_ss58_address,
 )
 from .mutations import (
     issue_harvest,
@@ -45,15 +60,7 @@ from .vote import vote
 
 @click.group(name='issues')
 def issues_group():
-    """Issue management commands.
-
-    \b
-    Commands:
-        list              List issues or view a specific issue
-        register          Register a new issue bounty
-        bounty-pool       View total bounty pool
-        pending-harvest   View pending emissions
-    """
+    """Issue management commands."""
     pass
 
 
@@ -92,10 +99,25 @@ __all__ = [
     'issue_harvest',
     # Helpers
     'console',
+    'format_alpha',
+    'print_success',
+    'print_error',
+    'print_network_header',
     'load_config',
     'get_contract_address',
     'resolve_network',
     'read_issues_from_contract',
+    'validate_and_convert_bounty',
+    'validate_issue_id',
+    'validate_repo_format',
+    'validate_ss58_address',
+    'colorize_status',
+    'ALPHA_DECIMALS',
+    'ALPHA_SCALE',
+    'MIN_BOUNTY_ALPHA',
+    'MAX_BOUNTY_ALPHA',
+    'MAX_ISSUE_ID',
+    'STATUS_COLORS',
     'GITTENSOR_DIR',
     'CONFIG_FILE',
     'NETWORK_MAP',

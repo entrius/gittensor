@@ -14,11 +14,18 @@ Commands:
 """
 
 import click
+from rich.panel import Panel
 
 from .helpers import (
     console,
+    format_alpha,
     get_contract_address,
+    print_error,
+    print_network_header,
+    print_success,
     resolve_network,
+    validate_issue_id,
+    validate_ss58_address,
 )
 
 
@@ -27,16 +34,6 @@ def admin():
     """Owner-only administrative commands.
 
     These commands require the contract owner wallet.
-
-    \b
-    Commands:
-        info           View contract configuration
-        cancel-issue   Cancel an issue
-        payout-issue   Manual payout fallback
-        set-owner      Transfer ownership
-        set-treasury   Change treasury hotkey
-        add-vali       Add a validator to the whitelist
-        remove-vali    Remove a validator from the whitelist
     """
     pass
 
@@ -65,7 +62,7 @@ def admin():
     '--wallet.name',
     '--wallet',
     default='default',
-    help='Wallet name (must be owner)',
+    help='Wallet name',
 )
 @click.option(
     '--wallet-hotkey',
@@ -83,17 +80,21 @@ def admin_cancel(issue_id: int, network: str, rpc_url: str, contract: str, walle
     \b
     Arguments:
         ISSUE_ID: Issue to cancel
+
+    \b
+    Examples:
+        gitt admin cancel-issue 1
+        gitt admin cancel-issue 42 --network test
     """
+    validate_issue_id(issue_id, 'issue ID')
+
     contract_addr = get_contract_address(contract)
     ws_endpoint, network_name = resolve_network(network, rpc_url)
 
     if not contract_addr:
-        console.print('[red]Error: Contract address not configured.[/red]')
-        return
+        raise click.ClickException('Contract address not configured.')
 
-    console.print(f'[dim]Network: {network_name} ({ws_endpoint})[/dim]')
-    console.print(f'[dim]Contract: {contract_addr}[/dim]')
-    console.print(f'[yellow]Cancelling issue {issue_id}...[/yellow]\n')
+    print_network_header(network_name, contract_addr)
 
     try:
         import bittensor as bt
@@ -103,28 +104,40 @@ def admin_cancel(issue_id: int, network: str, rpc_url: str, contract: str, walle
         )
 
         wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
-        subtensor = bt.Subtensor(network=ws_endpoint)
-        client = IssueCompetitionContractClient(
-            contract_address=contract_addr,
-            subtensor=subtensor,
-        )
+
+        with console.status('Connecting to subtensor...', spinner='dots'):
+            subtensor = bt.Subtensor(network=ws_endpoint)
+            client = IssueCompetitionContractClient(
+                contract_address=contract_addr,
+                subtensor=subtensor,
+            )
 
         # Show issue info before cancellation
-        issue = client.get_issue(issue_id)
-        if issue:
-            console.print(f'  Issue: {issue.repository_full_name}#{issue.issue_number}')
-            console.print(f'  Status: {issue.status.name}')
-            console.print(f'  Bounty: {issue.bounty_amount / 1e9:.4f} ALPHA\n')
+        with console.status('Reading issue info...', spinner='dots'):
+            issue = client.get_issue(issue_id)
 
-        result = client.cancel_issue(issue_id, wallet)
+        if issue:
+            console.print(
+                Panel(
+                    f'[cyan]Issue:[/cyan] {issue.repository_full_name}#{issue.issue_number}\n'
+                    f'[cyan]Status:[/cyan] {issue.status.name}\n'
+                    f'[cyan]Bounty:[/cyan] {format_alpha(issue.bounty_amount, 4)}',
+                    title=f'Cancel Issue #{issue_id}',
+                    border_style='yellow',
+                )
+            )
+
+        with console.status('Cancelling issue...', spinner='dots'):
+            result = client.cancel_issue(issue_id, wallet)
+
         if result:
-            console.print(f'[green]Issue {issue_id} cancelled successfully![/green]')
+            print_success(f'Issue {issue_id} cancelled successfully!')
         else:
-            console.print('[red]Cancellation failed.[/red]')
+            print_error('Cancellation failed.')
     except ImportError as e:
-        console.print(f'[red]Error: Missing dependency - {e}[/red]')
+        print_error(f'Missing dependency - {e}')
     except Exception as e:
-        console.print(f'[red]Error: {e}[/red]')
+        print_error(str(e))
 
 
 @admin.command('payout-issue')
@@ -151,7 +164,7 @@ def admin_cancel(issue_id: int, network: str, rpc_url: str, contract: str, walle
     '--wallet.name',
     '--wallet',
     default='default',
-    help='Wallet name (must be owner)',
+    help='Wallet name',
 )
 @click.option(
     '--wallet-hotkey',
@@ -169,17 +182,21 @@ def admin_payout(issue_id: int, network: str, rpc_url: str, contract: str, walle
     \b
     Arguments:
         ISSUE_ID: Completed issue ID
+
+    \b
+    Examples:
+        gitt admin payout-issue 1
+        gitt admin payout-issue 42 --network test
     """
+    validate_issue_id(issue_id, 'issue ID')
+
     contract_addr = get_contract_address(contract)
     ws_endpoint, network_name = resolve_network(network, rpc_url)
 
     if not contract_addr:
-        console.print('[red]Error: Contract address not configured.[/red]')
-        return
+        raise click.ClickException('Contract address not configured.')
 
-    console.print(f'[dim]Network: {network_name} ({ws_endpoint})[/dim]')
-    console.print(f'[dim]Contract: {contract_addr}[/dim]')
-    console.print(f'[yellow]Manual payout for issue {issue_id}...[/yellow]\n')
+    print_network_header(network_name, contract_addr)
 
     try:
         import bittensor as bt
@@ -189,28 +206,40 @@ def admin_payout(issue_id: int, network: str, rpc_url: str, contract: str, walle
         )
 
         wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
-        subtensor = bt.Subtensor(network=ws_endpoint)
-        client = IssueCompetitionContractClient(
-            contract_address=contract_addr,
-            subtensor=subtensor,
-        )
+
+        with console.status('Connecting to subtensor...', spinner='dots'):
+            subtensor = bt.Subtensor(network=ws_endpoint)
+            client = IssueCompetitionContractClient(
+                contract_address=contract_addr,
+                subtensor=subtensor,
+            )
 
         # Show issue info before payout
-        issue = client.get_issue(issue_id)
-        if issue:
-            console.print(f'  Issue: {issue.repository_full_name}#{issue.issue_number}')
-            console.print(f'  Status: {issue.status.name}')
-            console.print(f'  Bounty: {issue.bounty_amount / 1e9:.4f} ALPHA\n')
+        with console.status('Reading issue info...', spinner='dots'):
+            issue = client.get_issue(issue_id)
 
-        result = client.payout_bounty(issue_id, wallet)
+        if issue:
+            console.print(
+                Panel(
+                    f'[cyan]Issue:[/cyan] {issue.repository_full_name}#{issue.issue_number}\n'
+                    f'[cyan]Status:[/cyan] {issue.status.name}\n'
+                    f'[cyan]Bounty:[/cyan] {format_alpha(issue.bounty_amount, 4)}',
+                    title=f'Payout Issue #{issue_id}',
+                    border_style='blue',
+                )
+            )
+
+        with console.status('Processing payout...', spinner='dots'):
+            result = client.payout_bounty(issue_id, wallet)
+
         if result:
-            console.print(f'[green]Payout successful! Amount: {result / 1e9:.4f} ALPHA[/green]')
+            print_success(f'Payout successful! Amount: {format_alpha(result, 4)}')
         else:
-            console.print('[red]Payout failed.[/red]')
+            print_error('Payout failed.')
     except ImportError as e:
-        console.print(f'[red]Error: Missing dependency - {e}[/red]')
+        print_error(f'Missing dependency - {e}')
     except Exception as e:
-        console.print(f'[red]Error: {e}[/red]')
+        print_error(str(e))
 
 
 @admin.command('set-owner')
@@ -230,14 +259,14 @@ def admin_payout(issue_id: int, network: str, rpc_url: str, contract: str, walle
 @click.option(
     '--contract',
     default='',
-    help='Contract address',
+    help='Contract address (uses config if empty)',
 )
 @click.option(
     '--wallet-name',
     '--wallet.name',
     '--wallet',
     default='default',
-    help='Wallet name (must be current owner)',
+    help='Wallet name',
 )
 @click.option(
     '--wallet-hotkey',
@@ -252,17 +281,27 @@ def admin_set_owner(new_owner: str, network: str, rpc_url: str, contract: str, w
     \b
     Arguments:
         NEW_OWNER: SS58 address of the new owner
+
+    \b
+    Examples:
+        gitt admin set-owner 5Hxxx...
     """
+    validate_ss58_address(new_owner, 'new owner')
+
     contract_addr = get_contract_address(contract)
     ws_endpoint, network_name = resolve_network(network, rpc_url)
 
     if not contract_addr:
-        console.print('[red]Error: Contract address not configured.[/red]')
-        return
+        raise click.ClickException('Contract address not configured.')
 
-    console.print(f'[dim]Network: {network_name} ({ws_endpoint})[/dim]')
-    console.print(f'[dim]Contract: {contract_addr}[/dim]')
-    console.print(f'[yellow]Transferring ownership to {new_owner}...[/yellow]\n')
+    print_network_header(network_name, contract_addr)
+    console.print(
+        Panel(
+            f'[cyan]New Owner:[/cyan] {new_owner}',
+            title='Transfer Ownership',
+            border_style='yellow',
+        )
+    )
 
     try:
         import bittensor as bt
@@ -272,21 +311,25 @@ def admin_set_owner(new_owner: str, network: str, rpc_url: str, contract: str, w
         )
 
         wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
-        subtensor = bt.Subtensor(network=ws_endpoint)
-        client = IssueCompetitionContractClient(
-            contract_address=contract_addr,
-            subtensor=subtensor,
-        )
 
-        result = client.set_owner(new_owner, wallet)
+        with console.status('Connecting to subtensor...', spinner='dots'):
+            subtensor = bt.Subtensor(network=ws_endpoint)
+            client = IssueCompetitionContractClient(
+                contract_address=contract_addr,
+                subtensor=subtensor,
+            )
+
+        with console.status('Transferring ownership...', spinner='dots'):
+            result = client.set_owner(new_owner, wallet)
+
         if result:
-            console.print(f'[green]Ownership transferred to {new_owner}![/green]')
+            print_success(f'Ownership transferred to {new_owner}!')
         else:
-            console.print('[red]Ownership transfer failed.[/red]')
+            print_error('Ownership transfer failed.')
     except ImportError as e:
-        console.print(f'[red]Error: Missing dependency - {e}[/red]')
+        print_error(f'Missing dependency - {e}')
     except Exception as e:
-        console.print(f'[red]Error: {e}[/red]')
+        print_error(str(e))
 
 
 @admin.command('set-treasury')
@@ -306,14 +349,14 @@ def admin_set_owner(new_owner: str, network: str, rpc_url: str, contract: str, w
 @click.option(
     '--contract',
     default='',
-    help='Contract address',
+    help='Contract address (uses config if empty)',
 )
 @click.option(
     '--wallet-name',
     '--wallet.name',
     '--wallet',
     default='default',
-    help='Wallet name (must be owner)',
+    help='Wallet name',
 )
 @click.option(
     '--wallet-hotkey',
@@ -334,17 +377,27 @@ def admin_set_treasury(
     \b
     Arguments:
         NEW_TREASURY: SS58 address of the new treasury hotkey
+
+    \b
+    Examples:
+        gitt admin set-treasury 5Hxxx...
     """
+    validate_ss58_address(new_treasury, 'new treasury')
+
     contract_addr = get_contract_address(contract)
     ws_endpoint, network_name = resolve_network(network, rpc_url)
 
     if not contract_addr:
-        console.print('[red]Error: Contract address not configured.[/red]')
-        return
+        raise click.ClickException('Contract address not configured.')
 
-    console.print(f'[dim]Network: {network_name} ({ws_endpoint})[/dim]')
-    console.print(f'[dim]Contract: {contract_addr}[/dim]')
-    console.print(f'[yellow]Setting treasury hotkey to {new_treasury}...[/yellow]\n')
+    print_network_header(network_name, contract_addr)
+    console.print(
+        Panel(
+            f'[cyan]New Treasury:[/cyan] {new_treasury}',
+            title='Set Treasury Hotkey',
+            border_style='yellow',
+        )
+    )
 
     try:
         import bittensor as bt
@@ -354,24 +407,28 @@ def admin_set_treasury(
         )
 
         wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
-        subtensor = bt.Subtensor(network=ws_endpoint)
-        client = IssueCompetitionContractClient(
-            contract_address=contract_addr,
-            subtensor=subtensor,
-        )
 
-        result = client.set_treasury_hotkey(new_treasury, wallet)
+        with console.status('Connecting to subtensor...', spinner='dots'):
+            subtensor = bt.Subtensor(network=ws_endpoint)
+            client = IssueCompetitionContractClient(
+                contract_address=contract_addr,
+                subtensor=subtensor,
+            )
+
+        with console.status('Updating treasury hotkey...', spinner='dots'):
+            result = client.set_treasury_hotkey(new_treasury, wallet)
+
         if result:
-            console.print(f'[green]Treasury hotkey updated to {new_treasury}![/green]')
+            print_success(f'Treasury hotkey updated to {new_treasury}!')
             console.print(
                 '[dim]Note: Issue bounty amounts have been reset. Run harvest to re-fund from new treasury.[/dim]'
             )
         else:
-            console.print('[red]Treasury hotkey update failed.[/red]')
+            print_error('Treasury hotkey update failed.')
     except ImportError as e:
-        console.print(f'[red]Error: Missing dependency - {e}[/red]')
+        print_error(f'Missing dependency - {e}')
     except Exception as e:
-        console.print(f'[red]Error: {e}[/red]')
+        print_error(str(e))
 
 
 @admin.command('add-vali')
@@ -391,14 +448,14 @@ def admin_set_treasury(
 @click.option(
     '--contract',
     default='',
-    help='Contract address',
+    help='Contract address (uses config if empty)',
 )
 @click.option(
     '--wallet-name',
     '--wallet.name',
     '--wallet',
     default='default',
-    help='Wallet name (must be owner)',
+    help='Wallet name',
 )
 @click.option(
     '--wallet-hotkey',
@@ -417,17 +474,27 @@ def admin_add_validator(hotkey: str, network: str, rpc_url: str, contract: str, 
     \b
     Arguments:
         HOTKEY: SS58 address of the validator hotkey to whitelist
+
+    \b
+    Examples:
+        gitt admin add-vali 5Hxxx...
     """
+    validate_ss58_address(hotkey, 'validator hotkey')
+
     contract_addr = get_contract_address(contract)
     ws_endpoint, network_name = resolve_network(network, rpc_url)
 
     if not contract_addr:
-        console.print('[red]Error: Contract address not configured.[/red]')
-        return
+        raise click.ClickException('Contract address not configured.')
 
-    console.print(f'[dim]Network: {network_name} ({ws_endpoint})[/dim]')
-    console.print(f'[dim]Contract: {contract_addr}[/dim]')
-    console.print(f'[yellow]Adding validator {hotkey}...[/yellow]\n')
+    print_network_header(network_name, contract_addr)
+    console.print(
+        Panel(
+            f'[cyan]Validator Hotkey:[/cyan] {hotkey}',
+            title='Add Validator',
+            border_style='blue',
+        )
+    )
 
     try:
         import bittensor as bt
@@ -437,24 +504,28 @@ def admin_add_validator(hotkey: str, network: str, rpc_url: str, contract: str, 
         )
 
         wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
-        subtensor = bt.Subtensor(network=ws_endpoint)
-        client = IssueCompetitionContractClient(
-            contract_address=contract_addr,
-            subtensor=subtensor,
-        )
 
-        result = client.add_validator(hotkey, wallet)
+        with console.status('Connecting to subtensor...', spinner='dots'):
+            subtensor = bt.Subtensor(network=ws_endpoint)
+            client = IssueCompetitionContractClient(
+                contract_address=contract_addr,
+                subtensor=subtensor,
+            )
+
+        with console.status('Adding validator...', spinner='dots'):
+            result = client.add_validator(hotkey, wallet)
+
         if result:
-            console.print(f'[green]Validator {hotkey} added to whitelist![/green]')
+            print_success(f'Validator {hotkey} added to whitelist!')
         else:
-            console.print('[red]Failed to add validator.[/red]')
+            print_error('Failed to add validator.')
             console.print('[yellow]Possible reasons:[/yellow]')
             console.print('  - Caller is not the contract owner')
             console.print('  - Validator is already whitelisted')
     except ImportError as e:
-        console.print(f'[red]Error: Missing dependency - {e}[/red]')
+        print_error(f'Missing dependency - {e}')
     except Exception as e:
-        console.print(f'[red]Error: {e}[/red]')
+        print_error(str(e))
 
 
 @admin.command('remove-vali')
@@ -474,14 +545,14 @@ def admin_add_validator(hotkey: str, network: str, rpc_url: str, contract: str, 
 @click.option(
     '--contract',
     default='',
-    help='Contract address',
+    help='Contract address (uses config if empty)',
 )
 @click.option(
     '--wallet-name',
     '--wallet.name',
     '--wallet',
     default='default',
-    help='Wallet name (must be owner)',
+    help='Wallet name',
 )
 @click.option(
     '--wallet-hotkey',
@@ -500,17 +571,27 @@ def admin_remove_validator(
     \b
     Arguments:
         HOTKEY: SS58 address of the validator hotkey to remove
+
+    \b
+    Examples:
+        gitt admin remove-vali 5Hxxx...
     """
+    validate_ss58_address(hotkey, 'validator hotkey')
+
     contract_addr = get_contract_address(contract)
     ws_endpoint, network_name = resolve_network(network, rpc_url)
 
     if not contract_addr:
-        console.print('[red]Error: Contract address not configured.[/red]')
-        return
+        raise click.ClickException('Contract address not configured.')
 
-    console.print(f'[dim]Network: {network_name} ({ws_endpoint})[/dim]')
-    console.print(f'[dim]Contract: {contract_addr}[/dim]')
-    console.print(f'[yellow]Removing validator {hotkey}...[/yellow]\n')
+    print_network_header(network_name, contract_addr)
+    console.print(
+        Panel(
+            f'[cyan]Validator Hotkey:[/cyan] {hotkey}',
+            title='Remove Validator',
+            border_style='red',
+        )
+    )
 
     try:
         import bittensor as bt
@@ -520,21 +601,25 @@ def admin_remove_validator(
         )
 
         wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
-        subtensor = bt.Subtensor(network=ws_endpoint)
-        client = IssueCompetitionContractClient(
-            contract_address=contract_addr,
-            subtensor=subtensor,
-        )
 
-        result = client.remove_validator(hotkey, wallet)
+        with console.status('Connecting to subtensor...', spinner='dots'):
+            subtensor = bt.Subtensor(network=ws_endpoint)
+            client = IssueCompetitionContractClient(
+                contract_address=contract_addr,
+                subtensor=subtensor,
+            )
+
+        with console.status('Removing validator...', spinner='dots'):
+            result = client.remove_validator(hotkey, wallet)
+
         if result:
-            console.print(f'[green]Validator {hotkey} removed from whitelist![/green]')
+            print_success(f'Validator {hotkey} removed from whitelist!')
         else:
-            console.print('[red]Failed to remove validator.[/red]')
+            print_error('Failed to remove validator.')
             console.print('[yellow]Possible reasons:[/yellow]')
             console.print('  - Caller is not the contract owner')
             console.print('  - Validator is not in the whitelist')
     except ImportError as e:
-        console.print(f'[red]Error: Missing dependency - {e}[/red]')
+        print_error(f'Missing dependency - {e}')
     except Exception as e:
-        console.print(f'[red]Error: {e}[/red]')
+        print_error(str(e))

@@ -12,10 +12,10 @@ from gittensor.constants import BASE_GITHUB_API_URL
 
 def init() -> bool:
     """Initialize and check if GitHub token exists in environment
-    
+
     Returns:
         bool: Always returns True if token exists, otherwise exits
-        
+
     Raises:
         SystemExit: If GITTENSOR_MINER_PAT environment variable is not set
     """
@@ -32,7 +32,7 @@ def init() -> bool:
 def load_token() -> Optional[str]:
     """
     Load GitHub token from environment variable
-    
+
     Returns:
         Optional[str]: The GitHub access token string if valid, None otherwise
     """
@@ -56,10 +56,10 @@ def load_token() -> Optional[str]:
 def is_token_valid(token: str) -> bool:
     """
     Test if a GitHub token is valid by making a simple API call.
-    
+
     Args:
         token (str): GitHub personal access token to validate
-        
+
     Returns:
         bool: True if valid token, False otherwise
     """

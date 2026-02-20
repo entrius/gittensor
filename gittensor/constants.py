@@ -132,4 +132,20 @@ MAX_OPEN_PR_THRESHOLD = 30  # Maximum open PR threshold (base + bonus capped at 
 # =============================================================================
 CONTRACT_ADDRESS = '5FWNdk8YNtNcHKrAx2krqenFrFAZG7vmsd2XN2isJSew3MrD'
 ISSUES_TREASURY_UID = 111  # UID of the smart contract neuron, if set to RECYCLE_UID then it's disabled
-ISSUES_TREASURY_EMISSION_SHARE = 0.15  # % of emissions routed to funding issues treasury
+ISSUES_TREASURY_EMISSION_SHARE = 0.15  # % of emissions allocated to funding issues treasury
+
+# =============================================================================
+# Merge Predictions
+# =============================================================================
+PREDICTIONS_EMISSIONS_SHARE = 0.15  # % of emissions allocated to prediction competition
+
+PREDICTIONS_EMA_BETA = 0.1  # EMA decay rate for predictions record
+PREDICTIONS_TIMELINESS_EXPONENT = 1.8  # curve for early prediction bonus. higher = sharper curve. 1.0 = linear
+# variance threshold for full rewards
+# if variance across predictions for a PR is low, the solution must be 'obvious'
+PREDICTIONS_CONSENSUS_VARIANCE_TARGET = 0.10
+
+# Cooldown & Limits
+PREDICTIONS_COOLDOWN_SECONDS = 300  # 5 min cooldown per miner per PR re-prediction
+PREDICTIONS_MIN_VALUE = 0.0
+PREDICTIONS_MAX_VALUE = 1.0

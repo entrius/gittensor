@@ -148,8 +148,10 @@ def val_vote_solution(
                 f'PR number must be positive (got {pr_number})',
                 param_hint='pr_number_or_url',
             )
-    except (click.BadParameter, ValueError) as e:
-        raise click.ClickException(str(e))
+    except click.BadParameter:
+        raise
+    except ValueError as e:
+        raise click.BadParameter(str(e), param_hint='pr_number_or_url')
 
     print_network_header(network_name, contract_addr)
 

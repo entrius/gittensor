@@ -94,7 +94,8 @@ def validate_bounty_amount(bounty: str) -> int:
     """Validate bounty and convert to raw ALPHA units without precision loss.
 
     Accepts a string so Click does not parse as float (avoids IEEE 754 loss at
-    the CLI boundary). Raises click.BadParameter if invalid or below minimum.
+    the CLI boundary). Caps at 100M ALPHA to avoid u128 overflow. Raises
+    click.BadParameter if invalid, below minimum, or above maximum.
     """
     bounty = bounty.strip()
     if not bounty:
@@ -208,7 +209,7 @@ def validate_github_issue(owner: str, repo: str, issue_number: int) -> Optional[
 
 
 def validate_issue_id(value: int, param_name: str = 'issue_id') -> int:
-    """Validate an on-chain issue ID is in a reasonable range (1 to 999999)."""
+    """Validate an on-chain issue ID (1 to 999999, u32-friendly range)."""
     if value < 1 or value >= MAX_ISSUE_ID:
         raise click.BadParameter(
             f'{param_name} must be between 1 and {MAX_ISSUE_ID - 1} (got {value})',

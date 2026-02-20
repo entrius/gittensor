@@ -19,7 +19,9 @@ from click.testing import CliRunner
 from gittensor.cli.issue_commands.helpers import (
     ALPHA_DECIMALS,
     ALPHA_RAW_UNIT,
+    MAX_BOUNTY_ALPHA,
     MAX_ISSUE_ID,
+    MAX_ISSUE_NUMBER,
     STATUS_COLORS,
     colorize_status,
     format_alpha,
@@ -28,6 +30,7 @@ from gittensor.cli.issue_commands.helpers import (
     validate_repository,
     validate_ss58_address,
 )
+from gittensor.cli.issue_commands.vote import parse_pr_number
 
 # =============================================================================
 # format_alpha
@@ -127,6 +130,40 @@ class TestValidateBountyAmount:
         with pytest.raises(click.BadParameter) as exc_info:
             validate_bounty_amount('   ')
         assert 'empty' in str(exc_info.value).lower()
+
+    def test_bounty_at_max_accepted(self):
+        raw = validate_bounty_amount('100000000')
+        assert raw == 100_000_000 * ALPHA_RAW_UNIT
+
+    def test_bounty_over_max_rejected(self):
+        with pytest.raises(click.BadParameter) as exc_info:
+            validate_bounty_amount('100000001')
+        assert '100,000,000' in str(exc_info.value) or 'exceed' in str(exc_info.value).lower()
+        assert exc_info.value.param_hint == '--bounty'
+
+
+# =============================================================================
+# parse_pr_number (vote)
+# =============================================================================
+
+
+class TestParsePrNumber:
+    def test_plain_number(self):
+        assert parse_pr_number('123') == 123
+        assert parse_pr_number('1') == 1
+
+    def test_url_with_pull(self):
+        assert parse_pr_number('https://github.com/owner/repo/pull/456') == 456
+        assert parse_pr_number('https://github.com/a/b/pull/99') == 99
+
+    def test_invalid_raises(self):
+        with pytest.raises(ValueError) as exc_info:
+            parse_pr_number('not-a-number')
+        assert 'Cannot parse' in str(exc_info.value) or 'not-a-number' in str(exc_info.value)
+
+    def test_empty_string_raises(self):
+        with pytest.raises(ValueError):
+            parse_pr_number('')
 
 
 # =============================================================================
@@ -246,6 +283,12 @@ class TestConstants:
     def test_max_issue_id(self):
         assert MAX_ISSUE_ID == 1_000_000
 
+    def test_max_bounty_alpha(self):
+        assert MAX_BOUNTY_ALPHA == 100_000_000
+
+    def test_max_issue_number_u32_friendly(self):
+        assert MAX_ISSUE_NUMBER == 2**32 - 1
+
     def test_format_alpha_uses_raw_unit(self):
         assert format_alpha(ALPHA_RAW_UNIT) == '1.00'
         assert format_alpha(ALPHA_RAW_UNIT, decimals=4) == '1.0000'
@@ -349,6 +392,24 @@ class TestCliRegisterValidation:
         assert result.exit_code != 0
         assert 'between' in result.output or '0' in result.output or 'issue' in result.output.lower()
 
+    def test_register_rejects_issue_number_over_max(self, cli_root, runner):
+        over_max = str(MAX_ISSUE_NUMBER + 1)
+        with (
+            patch(
+                'gittensor.cli.issue_commands.mutations.get_contract_address',
+                return_value='0x1234567890123456789012345678901234567890',
+            ),
+            patch('gittensor.cli.issue_commands.mutations.validate_repository', return_value=('a', 'b')),
+            patch('gittensor.cli.issue_commands.mutations.validate_github_issue', return_value={}),
+        ):
+            result = runner.invoke(
+                cli_root,
+                ['issues', 'register', '--repo', 'a/b', '--issue', over_max, '--bounty', '10', '-y'],
+                catch_exceptions=False,
+            )
+        assert result.exit_code != 0
+        assert 'between' in result.output or over_max in result.output or 'issue' in result.output.lower()
+
 
 class TestCliVoteValidation:
     """Ensure vote solution rejects invalid issue_id / PR (validators wired)."""
@@ -392,6 +453,26 @@ class TestCliVoteValidation:
             )
         assert result.exit_code != 0
         assert 'PR' in result.output or 'positive' in result.output
+
+    def test_vote_solution_rejects_invalid_pr(self, cli_root, runner):
+        with patch(
+            'gittensor.cli.issue_commands.vote.get_contract_address',
+            return_value='0x1234567890123456789012345678901234567890',
+        ):
+            result = runner.invoke(
+                cli_root,
+                [
+                    'vote',
+                    'solution',
+                    '1',
+                    '5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY',
+                    '5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY',
+                    'not-a-pr',
+                ],
+                catch_exceptions=False,
+            )
+        assert result.exit_code != 0
+        assert 'Cannot parse' in result.output or 'not-a-pr' in result.output or 'pr_number' in result.output.lower()
 
 
 class TestCliAdminValidation:

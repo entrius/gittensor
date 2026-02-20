@@ -203,7 +203,10 @@ def validate_github_issue(owner: str, repo: str, issue_number: int) -> Optional[
 
     state = data.get('state', 'unknown')
     if state != 'open':
-        console.print(f'[yellow]Warning: Issue #{issue_number} is {state}[/yellow]')
+        if state == 'closed':
+            console.print(f'[yellow]Warning: Issue #{issue_number} is already closed.[/yellow]')
+        else:
+            console.print(f'[yellow]Warning: Issue #{issue_number} is {state}.[/yellow]')
 
     return data
 

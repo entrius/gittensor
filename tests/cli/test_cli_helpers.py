@@ -9,6 +9,7 @@ validate_issue_id, validate_ss58_address, colorize_status, and CLI
 invocation with validation (no live network).
 """
 
+import json
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -26,6 +27,7 @@ from gittensor.cli.issue_commands.helpers import (
     colorize_status,
     format_alpha,
     validate_bounty_amount,
+    validate_github_issue,
     validate_issue_id,
     validate_repository,
     validate_ss58_address,
@@ -239,6 +241,25 @@ class TestValidateIssueId:
         msg = str(exc_info.value)
         assert '999999' in msg or '1' in msg
         assert exc_info.value.param_hint == 'issue_id'
+
+
+# =============================================================================
+# validate_github_issue
+# =============================================================================
+
+
+class TestValidateGitHubIssue:
+    def test_closed_issue_warns_and_returns_data(self):
+        """Issue #210 Task 3: closed → warn 'Issue #{number} is already closed.', do not reject."""
+        issue_data = {'state': 'closed', 'number': 42, 'title': 'Test'}
+        mock_resp = type('Resp', (), {'read': lambda self: json.dumps(issue_data).encode()})()
+        with patch('urllib.request.urlopen', return_value=mock_resp):
+            with patch('gittensor.cli.issue_commands.helpers.console.print') as mock_print:
+                result = validate_github_issue('owner', 'repo', 42)
+        assert result == issue_data
+        mock_print.assert_called_once()
+        call_args = mock_print.call_args[0][0]
+        assert 'Issue #42 is already closed' in call_args
 
 
 # =============================================================================

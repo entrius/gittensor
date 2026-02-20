@@ -5,6 +5,7 @@
 Shared helper functions for issue commands
 """
 
+import sys
 import hashlib
 import json
 import os
@@ -47,8 +48,14 @@ console = Console()
 
 
 def format_alpha(raw_amount: int, decimals: int = 2) -> str:
-    """Format raw token amount (9-decimal) as human-readable ALPHA string."""
-    return f'{raw_amount / ALPHA_RAW_UNIT:.{decimals}f}'
+    """Format raw token amount (9-decimal) as human-readable ALPHA string.
+
+    Uses Decimal to avoid float rounding in display.
+    """
+    if raw_amount == 0:
+        return f'{0:.{decimals}f}'
+    q = Decimal(raw_amount) / Decimal(ALPHA_RAW_UNIT)
+    return f'{q:.{decimals}f}'
 
 
 def colorize_status(status: str) -> str:
@@ -71,6 +78,11 @@ def print_network_header(network_name: str, contract_addr: str) -> None:
     """Print a one-line network and contract context header."""
     short = f'{contract_addr[:12]}...{contract_addr[-6:]}' if len(contract_addr) > 20 else contract_addr
     console.print(f'[dim]Network: {network_name} \u2022 Contract: {short}[/dim]\n')
+
+
+def _is_interactive() -> bool:
+    """Return True if stdin is a TTY (interactive session)."""
+    return getattr(sys.stdin, 'isatty', lambda: False)()
 
 
 # ---------------------------------------------------------------------------

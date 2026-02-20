@@ -27,6 +27,7 @@ from .helpers import (
     validate_bounty_amount,
     validate_github_issue,
     validate_repository,
+    _is_interactive,
 )
 
 
@@ -80,6 +81,12 @@ from .helpers import (
     default='default',
     help='Hotkey name',
 )
+@click.option(
+    '--yes',
+    '-y',
+    is_flag=True,
+    help='Skip confirmation prompt (non-interactive/CI)',
+)
 def issue_register(
     repo: str,
     issue_number: int,
@@ -89,6 +96,7 @@ def issue_register(
     contract: str,
     wallet_name: str,
     wallet_hotkey: str,
+    yes: bool,
 ):
     """
     Register a new issue with a bounty (OWNER ONLY).
@@ -107,6 +115,7 @@ def issue_register(
     Examples:
         gitt issues register --repo opentensor/btcli --issue 144 --bounty 100
         gitt i reg --repo tensorflow/tensorflow --issue 12345 --bounty 50
+        gitt i reg --repo owner/repo --issue 1 --bounty 10 -y
     """
     console.print('\n[bold cyan]Register Issue for Bounty[/bold cyan]\n')
 
@@ -115,9 +124,7 @@ def issue_register(
     config = load_config()
 
     if not contract_addr:
-        print_error('Contract address not configured.')
-        console.print('[dim]Run ./up.sh --issues to deploy the contract first.[/dim]')
-        return
+        raise click.ClickException('Contract address not configured. Run ./up.sh --issues to deploy the contract first.')
 
     # Validate inputs before showing summary
     try:
@@ -130,8 +137,7 @@ def issue_register(
             )
         validate_github_issue(owner, repo_name, issue_number)
     except click.BadParameter as e:
-        print_error(str(e))
-        return
+        raise click.ClickException(str(e))
 
     github_url = f'https://github.com/{repo}/issues/{issue_number}'
 
@@ -149,7 +155,8 @@ def issue_register(
         )
     )
 
-    if not click.confirm('\nProceed with registration?', default=True):
+    skip_confirm = yes or not _is_interactive()
+    if not skip_confirm and not click.confirm('\nProceed with registration?', default=True):
         console.print('[yellow]Registration cancelled.[/yellow]')
         return
 

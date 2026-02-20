@@ -100,14 +100,12 @@ def admin_cancel(issue_id: int, network: str, rpc_url: str, contract: str, walle
     ws_endpoint, network_name = resolve_network(network, rpc_url)
 
     if not contract_addr:
-        print_error('Contract address not configured.')
-        return
+        raise click.ClickException('Contract address not configured.')
 
     try:
         validate_issue_id(issue_id)
     except click.BadParameter as e:
-        print_error(str(e))
-        return
+        raise click.ClickException(str(e))
 
     print_network_header(network_name, contract_addr)
 
@@ -206,14 +204,12 @@ def admin_payout(issue_id: int, network: str, rpc_url: str, contract: str, walle
     ws_endpoint, network_name = resolve_network(network, rpc_url)
 
     if not contract_addr:
-        print_error('Contract address not configured.')
-        return
+        raise click.ClickException('Contract address not configured.')
 
     try:
         validate_issue_id(issue_id)
     except click.BadParameter as e:
-        print_error(str(e))
-        return
+        raise click.ClickException(str(e))
 
     print_network_header(network_name, contract_addr)
 
@@ -308,14 +304,12 @@ def admin_set_owner(new_owner: str, network: str, rpc_url: str, contract: str, w
     ws_endpoint, network_name = resolve_network(network, rpc_url)
 
     if not contract_addr:
-        print_error('Contract address not configured.')
-        return
+        raise click.ClickException('Contract address not configured.')
 
     try:
         validate_ss58_address(new_owner, 'new_owner')
     except click.BadParameter as e:
-        print_error(str(e))
-        return
+        raise click.ClickException(str(e))
 
     print_network_header(network_name, contract_addr)
 
@@ -407,14 +401,12 @@ def admin_set_treasury(
     ws_endpoint, network_name = resolve_network(network, rpc_url)
 
     if not contract_addr:
-        print_error('Contract address not configured.')
-        return
+        raise click.ClickException('Contract address not configured.')
 
     try:
         validate_ss58_address(new_treasury, 'new_treasury')
     except click.BadParameter as e:
-        print_error(str(e))
-        return
+        raise click.ClickException(str(e))
 
     print_network_header(network_name, contract_addr)
 
@@ -507,14 +499,12 @@ def admin_add_validator(hotkey: str, network: str, rpc_url: str, contract: str, 
     ws_endpoint, network_name = resolve_network(network, rpc_url)
 
     if not contract_addr:
-        print_error('Contract address not configured.')
-        return
+        raise click.ClickException('Contract address not configured.')
 
     try:
         validate_ss58_address(hotkey, 'hotkey')
     except click.BadParameter as e:
-        print_error(str(e))
-        return
+        raise click.ClickException(str(e))
 
     print_network_header(network_name, contract_addr)
 
@@ -607,14 +597,12 @@ def admin_remove_validator(
     ws_endpoint, network_name = resolve_network(network, rpc_url)
 
     if not contract_addr:
-        print_error('Contract address not configured.')
-        return
+        raise click.ClickException('Contract address not configured.')
 
     try:
         validate_ss58_address(hotkey, 'hotkey')
     except click.BadParameter as e:
-        print_error(str(e))
-        return
+        raise click.ClickException(str(e))
 
     print_network_header(network_name, contract_addr)
 

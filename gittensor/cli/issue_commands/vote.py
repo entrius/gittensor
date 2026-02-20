@@ -136,8 +136,7 @@ def val_vote_solution(
     ws_endpoint, network_name = resolve_network(network, rpc_url)
 
     if not contract_addr:
-        print_error('Contract address not configured.')
-        return
+        raise click.ClickException('Contract address not configured.')
 
     try:
         validate_issue_id(issue_id)
@@ -150,8 +149,7 @@ def val_vote_solution(
                 param_hint='pr_number_or_url',
             )
     except (click.BadParameter, ValueError) as e:
-        print_error(str(e))
-        return
+        raise click.ClickException(str(e))
 
     print_network_header(network_name, contract_addr)
 
@@ -251,14 +249,12 @@ def val_vote_cancel_issue(
     ws_endpoint, network_name = resolve_network(network, rpc_url)
 
     if not contract_addr:
-        print_error('Contract address not configured.')
-        return
+        raise click.ClickException('Contract address not configured.')
 
     try:
         validate_issue_id(issue_id)
     except click.BadParameter as e:
-        print_error(str(e))
-        return
+        raise click.ClickException(str(e))
 
     print_network_header(network_name, contract_addr)
 
@@ -328,8 +324,7 @@ def vote_list_validators(network: str, rpc_url: str, contract: str, as_json: boo
     ws_endpoint, network_name = resolve_network(network, rpc_url)
 
     if not contract_addr:
-        print_error('Contract address not configured.')
-        return
+        raise click.ClickException('Contract address not configured.')
 
     if not as_json:
         print_network_header(network_name, contract_addr)

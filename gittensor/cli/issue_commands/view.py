@@ -73,9 +73,7 @@ def issues_list(issue_id: int, network: str, rpc_url: str, contract: str, verbos
     ws_endpoint, network_name = resolve_network(network, rpc_url)
 
     if not contract_addr:
-        print_error('Contract address not configured.')
-        console.print('[dim]Set via: gitt config set contract_address <ADDR>[/dim]')
-        return
+        raise click.ClickException('Contract address not configured. Set via: gitt config set contract_address <ADDR>.')
 
     if not as_json:
         print_network_header(network_name, contract_addr)
@@ -211,8 +209,7 @@ def issues_bounty_pool(network: str, rpc_url: str, contract: str, verbose: bool,
     ws_endpoint, network_name = resolve_network(network, rpc_url)
 
     if not contract_addr:
-        print_error('Contract address not configured.')
-        return
+        raise click.ClickException('Contract address not configured.')
 
     if not as_json:
         print_network_header(network_name, contract_addr)
@@ -279,8 +276,7 @@ def issues_pending_harvest(network: str, rpc_url: str, contract: str, verbose: b
     ws_endpoint, network_name = resolve_network(network, rpc_url)
 
     if not contract_addr:
-        print_error('Contract address not configured.')
-        return
+        raise click.ClickException('Contract address not configured.')
 
     if not as_json:
         print_network_header(network_name, contract_addr)
@@ -364,8 +360,7 @@ def admin_info(network: str, rpc_url: str, contract: str, verbose: bool, as_json
     ws_endpoint, network_name = resolve_network(network, rpc_url)
 
     if not contract_addr:
-        print_error('Contract address not configured.')
-        return
+        raise click.ClickException('Contract address not configured.')
 
     if not as_json:
         print_network_header(network_name, contract_addr)

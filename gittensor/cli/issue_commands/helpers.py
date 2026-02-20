@@ -221,15 +221,15 @@ def validate_issue_id(value: int, param_name: str = 'issue_id') -> int:
 def validate_ss58_address(address: str, param_name: str = 'address') -> str:
     """Validate an SS58 address.
 
-    Uses scalecodec's ss58_decode for proper base58+checksum validation.
-    Falls back to a length/prefix heuristic if scalecodec is not installed.
+    Uses substrate-interface's ss58_decode (existing stack) for base58+checksum
+    validation. Falls back to a length/prefix regex if not available.
     """
     address = address.strip()
     if not address:
         raise click.BadParameter(f'Empty {param_name}', param_hint=param_name)
 
     try:
-        from scalecodec.utils.ss58 import ss58_decode
+        from substrateinterface.utils.ss58 import ss58_decode
 
         ss58_decode(address)
         return address

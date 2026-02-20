@@ -13,12 +13,20 @@ Commands:
 import re
 
 import click
+from rich.panel import Panel
 from rich.table import Table
 
 from .helpers import (
     console,
     get_contract_address,
+    output_json,
+    print_error,
+    print_network_header,
+    print_success,
+    print_warning,
     resolve_network,
+    validate_issue_id,
+    validate_ss58_address,
 )
 
 
@@ -116,8 +124,8 @@ def val_vote_solution(
     \b
     Arguments:
         ISSUE_ID: Issue to vote on
-        SOLVER_HOTKEY: Solver's hotkey
-        SOLVER_COLDKEY: Solver's coldkey (payout destination)
+        SOLVER_HOTKEY: Solver's hotkey (SS58 address)
+        SOLVER_COLDKEY: Solver's coldkey (SS58 address, payout destination)
         PR_NUMBER_OR_URL: PR number or full URL (e.g., 123 or https://github.com/.../pull/123)
 
     \b
@@ -129,21 +137,44 @@ def val_vote_solution(
     ws_endpoint, network_name = resolve_network(network, rpc_url)
 
     if not contract_addr:
-        console.print('[red]Error: Contract address not configured.[/red]')
+        print_error('Contract address not configured.')
+        return
+
+    # --- Validate inputs ---
+
+    try:
+        validate_issue_id(issue_id)
+    except click.BadParameter as e:
+        print_error(e.format_message())
+        return
+
+    try:
+        solver_hotkey = validate_ss58_address(solver_hotkey, 'solver_hotkey')
+        solver_coldkey = validate_ss58_address(solver_coldkey, 'solver_coldkey')
+    except click.BadParameter as e:
+        print_error(e.format_message())
         return
 
     try:
         pr_number = parse_pr_number(pr_number_or_url)
     except ValueError as e:
-        console.print(f'[red]Error: {e}[/red]')
+        print_error(str(e))
         return
 
-    console.print(f'[dim]Network: {network_name} ({ws_endpoint})[/dim]')
-    console.print(f'[dim]Contract: {contract_addr}[/dim]')
-    console.print(f'[yellow]Voting on solution for issue {issue_id}...[/yellow]\n')
-    console.print(f'  Solver Hotkey:  {solver_hotkey}')
-    console.print(f'  Solver Coldkey: {solver_coldkey}')
-    console.print(f'  PR Number: {pr_number}\n')
+    # --- Display vote summary ---
+
+    print_network_header(network_name, ws_endpoint, contract_addr)
+
+    console.print(
+        Panel(
+            f'[cyan]Issue ID:[/cyan] {issue_id}\n'
+            f'[cyan]Solver Hotkey:[/cyan] {solver_hotkey}\n'
+            f'[cyan]Solver Coldkey:[/cyan] {solver_coldkey}\n'
+            f'[cyan]PR Number:[/cyan] #{pr_number}',
+            title='Solution Vote',
+            border_style='blue',
+        )
+    )
 
     try:
         import bittensor as bt
@@ -152,22 +183,23 @@ def val_vote_solution(
             IssueCompetitionContractClient,
         )
 
-        wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
-        subtensor = bt.Subtensor(network=ws_endpoint)
-        client = IssueCompetitionContractClient(
-            contract_address=contract_addr,
-            subtensor=subtensor,
-        )
+        with console.status('[bold cyan]Submitting solution vote...[/bold cyan]'):
+            wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
+            subtensor = bt.Subtensor(network=ws_endpoint)
+            client = IssueCompetitionContractClient(
+                contract_address=contract_addr,
+                subtensor=subtensor,
+            )
+            result = client.vote_solution(issue_id, solver_hotkey, solver_coldkey, pr_number, wallet)
 
-        result = client.vote_solution(issue_id, solver_hotkey, solver_coldkey, pr_number, wallet)
         if result:
-            console.print('[green]Solution vote submitted![/green]')
+            print_success('Solution vote submitted!')
         else:
-            console.print('[red]Vote failed.[/red]')
+            print_error('Vote failed.')
     except ImportError as e:
-        console.print(f'[red]Error: Missing dependency - {e}[/red]')
+        print_error(f'Missing dependency - {e}')
     except Exception as e:
-        console.print(f'[red]Error: {e}[/red]')
+        print_error(str(e))
 
 
 @vote.command('cancel')
@@ -229,13 +261,25 @@ def val_vote_cancel_issue(
     ws_endpoint, network_name = resolve_network(network, rpc_url)
 
     if not contract_addr:
-        console.print('[red]Error: Contract address not configured.[/red]')
+        print_error('Contract address not configured.')
         return
 
-    console.print(f'[dim]Network: {network_name} ({ws_endpoint})[/dim]')
-    console.print(f'[dim]Contract: {contract_addr}[/dim]')
-    console.print(f'[yellow]Voting to cancel issue {issue_id}...[/yellow]\n')
-    console.print(f'  Reason: {reason}\n')
+    try:
+        validate_issue_id(issue_id)
+    except click.BadParameter as e:
+        print_error(e.format_message())
+        return
+
+    print_network_header(network_name, ws_endpoint, contract_addr)
+
+    console.print(
+        Panel(
+            f'[cyan]Issue ID:[/cyan] {issue_id}\n'
+            f'[cyan]Reason:[/cyan] {reason}',
+            title='Cancel Vote',
+            border_style='yellow',
+        )
+    )
 
     try:
         import bittensor as bt
@@ -244,22 +288,23 @@ def val_vote_cancel_issue(
             IssueCompetitionContractClient,
         )
 
-        wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
-        subtensor = bt.Subtensor(network=ws_endpoint)
-        client = IssueCompetitionContractClient(
-            contract_address=contract_addr,
-            subtensor=subtensor,
-        )
+        with console.status('[bold cyan]Submitting cancel vote...[/bold cyan]'):
+            wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
+            subtensor = bt.Subtensor(network=ws_endpoint)
+            client = IssueCompetitionContractClient(
+                contract_address=contract_addr,
+                subtensor=subtensor,
+            )
+            result = client.vote_cancel_issue(issue_id, reason, wallet)
 
-        result = client.vote_cancel_issue(issue_id, reason, wallet)
         if result:
-            console.print('[green]Vote cancel submitted![/green]')
+            print_success('Cancel vote submitted!')
         else:
-            console.print('[red]Vote cancel failed.[/red]')
+            print_error('Cancel vote failed.')
     except ImportError as e:
-        console.print(f'[red]Error: Missing dependency - {e}[/red]')
+        print_error(f'Missing dependency - {e}')
     except Exception as e:
-        console.print(f'[red]Error: {e}[/red]')
+        print_error(str(e))
 
 
 @vote.command('list')
@@ -280,7 +325,8 @@ def val_vote_cancel_issue(
     default='',
     help='Contract address (uses config if empty)',
 )
-def vote_list_validators(network: str, rpc_url: str, contract: str):
+@click.option('--json', 'output_json_flag', is_flag=True, help='Output as JSON')
+def vote_list_validators(network: str, rpc_url: str, contract: str, output_json_flag: bool):
     """List whitelisted validators and consensus threshold.
 
     Shows all validator hotkeys that are authorized to vote on
@@ -290,16 +336,17 @@ def vote_list_validators(network: str, rpc_url: str, contract: str):
     Examples:
         gitt vote list
         gitt vote list --network test
+        gitt vote list --json
     """
     contract_addr = get_contract_address(contract)
     ws_endpoint, network_name = resolve_network(network, rpc_url)
 
     if not contract_addr:
-        console.print('[red]Error: Contract address not configured.[/red]')
+        print_error('Contract address not configured.')
         return
 
-    console.print(f'[dim]Network: {network_name} ({ws_endpoint})[/dim]')
-    console.print(f'[dim]Contract: {contract_addr}[/dim]\n')
+    if not output_json_flag:
+        print_network_header(network_name, ws_endpoint, contract_addr)
 
     try:
         import bittensor as bt
@@ -308,15 +355,24 @@ def vote_list_validators(network: str, rpc_url: str, contract: str):
             IssueCompetitionContractClient,
         )
 
-        subtensor = bt.Subtensor(network=ws_endpoint)
-        client = IssueCompetitionContractClient(
-            contract_address=contract_addr,
-            subtensor=subtensor,
-        )
+        with console.status('[bold cyan]Reading validators...[/bold cyan]'):
+            subtensor = bt.Subtensor(network=ws_endpoint)
+            client = IssueCompetitionContractClient(
+                contract_address=contract_addr,
+                subtensor=subtensor,
+            )
+            validators = client.get_validators()
 
-        validators = client.get_validators()
         n = len(validators)
         required = (n // 2) + 1
+
+        if output_json_flag:
+            output_json({
+                'validators': validators,
+                'count': n,
+                'consensus_threshold': required,
+            })
+            return
 
         if validators:
             table = Table(show_header=True, header_style='bold magenta')
@@ -330,10 +386,17 @@ def vote_list_validators(network: str, rpc_url: str, contract: str):
             console.print(f'\n[green]Validators:[/green] {n}')
             console.print(f'[green]Consensus threshold:[/green] {required} of {n} votes required')
         else:
-            console.print('[yellow]No validators whitelisted.[/yellow]')
-            console.print('[dim]Add validators with: gitt admin add-vali <HOTKEY>[/dim]')
+            console.print(
+                Panel(
+                    '[yellow]No validators whitelisted.[/yellow]\n\n'
+                    '[dim]Add validators with:[/dim]\n'
+                    '  gitt admin add-vali <HOTKEY>',
+                    title='Validators',
+                    border_style='dim',
+                )
+            )
 
     except ImportError as e:
-        console.print(f'[red]Error: Missing dependency - {e}[/red]')
+        print_error(f'Missing dependency - {e}')
     except Exception as e:
-        console.print(f'[red]Error: {e}[/red]')
+        print_error(str(e))

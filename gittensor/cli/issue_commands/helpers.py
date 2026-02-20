@@ -8,10 +8,15 @@ Shared helper functions for issue commands
 import hashlib
 import json
 import os
+import re
 import struct
+import urllib.error
+import urllib.request
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
+import click
 from rich.console import Console
 
 from gittensor.constants import CONTRACT_ADDRESS
@@ -21,6 +26,210 @@ GITTENSOR_DIR = Path.home() / '.gittensor'
 CONFIG_FILE = GITTENSOR_DIR / 'config.json'
 
 console = Console()
+
+# ALPHA token constants
+ALPHA_DECIMALS = 9
+ALPHA_RAW_UNIT = 10**ALPHA_DECIMALS
+MIN_BOUNTY_ALPHA = Decimal('10')
+
+# Repo name regex: exactly one slash, valid GitHub characters on each side
+_REPO_PATTERN = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9._-]*/[a-zA-Z0-9][a-zA-Z0-9._-]*$')
+
+# Status color map for Rich markup
+_STATUS_STYLES = {
+    'Active': '[bold green]Active[/bold green]',
+    'Registered': '[yellow]Registered[/yellow]',
+    'Completed': '[dim]Completed[/dim]',
+    'Cancelled': '[dim red]Cancelled[/dim red]',
+}
+
+
+# ============================================================================
+# Display helpers
+# ============================================================================
+
+
+def format_alpha(raw: int, decimals: int = 2) -> str:
+    """Format a raw ALPHA amount (9 decimal places) for display."""
+    return f'{raw / ALPHA_RAW_UNIT:,.{decimals}f} ALPHA'
+
+
+def style_status(status: str) -> str:
+    """Apply Rich color markup to an issue status string."""
+    return _STATUS_STYLES.get(status, status)
+
+
+def print_success(message: str) -> None:
+    """Print a standardized success message."""
+    console.print(f'[bold green]\u2713[/bold green] {message}')
+
+
+def print_error(message: str) -> None:
+    """Print a standardized error message."""
+    console.print(f'[bold red]\u2717[/bold red] {message}')
+
+
+def print_warning(message: str) -> None:
+    """Print a standardized warning message."""
+    console.print(f'[bold yellow]![/bold yellow] {message}')
+
+
+def print_network_header(network_name: str, ws_endpoint: str, contract_addr: str = '') -> None:
+    """Print a standardized network context header."""
+    console.print(f'[dim]Network:[/dim] [cyan]{network_name}[/cyan] [dim]({ws_endpoint})[/dim]')
+    if contract_addr:
+        display = f'{contract_addr[:10]}...{contract_addr[-6:]}' if len(contract_addr) > 20 else contract_addr
+        console.print(f'[dim]Contract:[/dim] [cyan]{display}[/cyan]')
+    console.print()
+
+
+def output_json(data: Any) -> None:
+    """Print data as formatted JSON."""
+    console.print_json(json.dumps(data, default=str))
+
+
+# ============================================================================
+# Input validation helpers
+# ============================================================================
+
+
+def parse_bounty_amount(value: str) -> int:
+    """
+    Parse a bounty amount string into raw ALPHA units (9 decimal places).
+
+    Validates exact precision (no floating-point loss) and minimum 10 ALPHA.
+
+    Returns:
+        Raw bounty amount as integer (value * 10^9)
+
+    Raises:
+        click.BadParameter on invalid input
+    """
+    try:
+        d = Decimal(value)
+    except InvalidOperation:
+        raise click.BadParameter(f'Invalid bounty amount: {value!r}. Must be a decimal number.')
+
+    if d <= 0:
+        raise click.BadParameter('Bounty must be a positive number.')
+
+    # Check decimal precision (at most 9 places)
+    _sign, _digits, exponent = d.as_tuple()
+    if exponent < -ALPHA_DECIMALS:
+        raise click.BadParameter(
+            f'Bounty has too many decimal places (max {ALPHA_DECIMALS}). '
+            f'Precision would be lost.'
+        )
+
+    if d < MIN_BOUNTY_ALPHA:
+        raise click.BadParameter(f'Bounty must be at least {MIN_BOUNTY_ALPHA} ALPHA. Got: {value}')
+
+    return int(d * ALPHA_RAW_UNIT)
+
+
+def validate_repo(repo: str) -> str:
+    """
+    Validate repository format: owner/repo.
+
+    Returns the validated (stripped) repo string.
+    Raises click.BadParameter if format is invalid.
+    """
+    repo = repo.strip()
+    if not _REPO_PATTERN.match(repo):
+        raise click.BadParameter(
+            f'Invalid repository format: {repo!r}. Must be owner/repo (e.g., opentensor/btcli).'
+        )
+    return repo
+
+
+def verify_github_repo(repo: str) -> bool:
+    """
+    Check if a GitHub repository exists. Returns False on 404, True otherwise.
+
+    Fails open on network errors so offline usage is not blocked.
+    """
+    url = f'https://api.github.com/repos/{repo}'
+    req = urllib.request.Request(url, headers={'User-Agent': 'gittensor-cli'})
+    try:
+        urllib.request.urlopen(req, timeout=5)
+        return True
+    except urllib.error.HTTPError as e:
+        return e.code != 404
+    except (urllib.error.URLError, OSError):
+        return True
+
+
+def validate_issue_id(value: int, param_name: str = 'issue_id') -> int:
+    """
+    Validate that an issue ID/number is in a reasonable range (1..999,999).
+
+    Raises click.BadParameter if out of range.
+    """
+    if not isinstance(value, int) or value < 1 or value >= 1_000_000:
+        raise click.BadParameter(f'Invalid {param_name}: {value}. Must be between 1 and 999,999.')
+    return value
+
+
+def verify_github_issue(repo: str, number: int) -> Tuple[bool, str]:
+    """
+    Check if a GitHub issue exists, is open, and is not a pull request.
+
+    Returns (ok, message). Fails open on network errors.
+    """
+    url = f'https://api.github.com/repos/{repo}/issues/{number}'
+    req = urllib.request.Request(url, headers={'User-Agent': 'gittensor-cli'})
+    try:
+        response = urllib.request.urlopen(req, timeout=5)
+        data = json.loads(response.read().decode())
+
+        if data.get('pull_request'):
+            return False, f'#{number} is a pull request, not an issue.'
+
+        state = data.get('state', 'unknown')
+        if state != 'open':
+            return False, f'Issue #{number} is {state} (expected open).'
+
+        title = data.get('title', '')
+        return True, f'#{number}: {title}'
+
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return False, f'Issue #{number} not found in {repo}.'
+        return True, f'Could not verify (HTTP {e.code}).'
+    except (urllib.error.URLError, OSError):
+        return True, 'Could not verify (network unavailable).'
+
+
+def validate_ss58_address(address: str, param_name: str = 'address') -> str:
+    """
+    Validate an SS58 address using scalecodec (transitive dep of substrate-interface).
+
+    Falls back to basic length check if scalecodec is not available.
+    Raises click.BadParameter if address is invalid.
+    """
+    address = address.strip()
+    if not address:
+        raise click.BadParameter(f'{param_name} cannot be empty.')
+
+    try:
+        from scalecodec.utils.ss58 import ss58_decode
+
+        ss58_decode(address)
+        return address
+    except ImportError:
+        if len(address) < 46 or len(address) > 48:
+            raise click.BadParameter(
+                f'Invalid SS58 address for {param_name}: {address[:20]}... '
+                f'(expected 46-48 characters, got {len(address)}).'
+            )
+        return address
+    except Exception:
+        raise click.BadParameter(f'Invalid SS58 address for {param_name}: {address[:20]}...')
+
+
+# ============================================================================
+# Configuration helpers
+# ============================================================================
 
 
 def load_config() -> Dict[str, Any]:
@@ -119,28 +328,6 @@ def resolve_network(network: Optional[str] = None, rpc_url: Optional[str] = None
 
     # Default: finney (mainnet)
     return NETWORK_MAP['finney'], 'finney'
-
-
-def get_ws_endpoint(cli_value: str = '') -> str:
-    """
-    Get WebSocket endpoint from CLI arg, env, or config file.
-
-    Deprecated: prefer resolve_network() for new code.
-
-    Args:
-        cli_value: Value passed via --rpc-url CLI option
-
-    Returns:
-        WebSocket endpoint string
-    """
-    if cli_value and cli_value != 'wss://entrypoint-finney.opentensor.ai:443':
-        return cli_value
-
-    config = load_config()
-    if config.get('ws_endpoint'):
-        return config['ws_endpoint']
-
-    return cli_value  # Return CLI default
 
 
 # ============================================================================

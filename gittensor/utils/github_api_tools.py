@@ -518,7 +518,7 @@ def execute_graphql_query(
         query: The GraphQL query string
         variables: Query variables
         token: GitHub PAT for authentication
-        max_attempts: Maximum retry attempts (default 8)
+        max_attempts: Maximum retry attempts (default 6)
         timeout: Request timeout in seconds (default 30)
 
     Returns:

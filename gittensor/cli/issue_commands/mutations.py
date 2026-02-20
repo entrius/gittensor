@@ -47,8 +47,8 @@ from .helpers import (
 @click.option(
     '--bounty',
     required=True,
-    type=float,
-    help='Bounty amount in ALPHA tokens',
+    type=str,
+    help='Bounty amount in ALPHA (e.g. 10 or 10.5)',
 )
 @click.option(
     '--network',
@@ -90,7 +90,7 @@ from .helpers import (
 def issue_register(
     repo: str,
     issue_number: int,
-    bounty: float,
+    bounty: str,
     network: str,
     rpc_url: str,
     contract: str,
@@ -148,7 +148,7 @@ def issue_register(
             f'[cyan]Repository:[/cyan] {repo}\n'
             f'[cyan]Issue Number:[/cyan] #{issue_number}\n'
             f'[cyan]GitHub URL:[/cyan] {github_url}\n'
-            f'[cyan]Target Bounty:[/cyan] {bounty:.2f} ALPHA\n'
+            f'[cyan]Target Bounty:[/cyan] {format_alpha(bounty_amount, 2)} ALPHA\n'
             f'[cyan]Network:[/cyan] {network_name}\n'
             f'[cyan]RPC Endpoint:[/cyan] {ws_endpoint}\n'
             f'[cyan]Contract:[/cyan] {contract_addr}',

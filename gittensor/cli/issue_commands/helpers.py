@@ -25,8 +25,8 @@ from gittensor.constants import CONTRACT_ADDRESS
 # ALPHA token conversion
 ALPHA_DECIMALS = 9
 ALPHA_RAW_UNIT = 10**ALPHA_DECIMALS
-MIN_BOUNTY_ALPHA = 10.0
-MAX_BOUNTY_ALPHA = 100_000_000.0
+MIN_BOUNTY_ALPHA = 10
+MAX_BOUNTY_ALPHA = 100_000_000
 MAX_ISSUE_ID = 1_000_000
 MAX_ISSUE_NUMBER = 2**32 - 1
 REPO_PATTERN = re.compile(r'^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$')
@@ -90,31 +90,35 @@ def _is_interactive() -> bool:
 # ---------------------------------------------------------------------------
 
 
-def validate_bounty_amount(bounty: float) -> int:
+def validate_bounty_amount(bounty: str) -> int:
     """Validate bounty and convert to raw ALPHA units without precision loss.
 
-    Raises click.BadParameter if the value has too many decimals or is below
-    the contract minimum.
+    Accepts a string so Click does not parse as float (avoids IEEE 754 loss at
+    the CLI boundary). Raises click.BadParameter if invalid or below minimum.
     """
-    if bounty < MIN_BOUNTY_ALPHA:
-        raise click.BadParameter(
-            f'Minimum bounty is {MIN_BOUNTY_ALPHA} ALPHA (got {bounty})',
-            param_hint='--bounty',
-        )
-
-    if bounty > MAX_BOUNTY_ALPHA:
-        raise click.BadParameter(
-            f'Bounty cannot exceed {MAX_BOUNTY_ALPHA:,.0f} ALPHA',
-            param_hint='--bounty',
-        )
+    bounty = bounty.strip()
+    if not bounty:
+        raise click.BadParameter('Bounty cannot be empty', param_hint='--bounty')
 
     try:
-        d = Decimal(str(bounty))
+        d = Decimal(bounty)
     except InvalidOperation:
         raise click.BadParameter(f'Invalid number: {bounty}', param_hint='--bounty')
 
     if not d.is_finite():
         raise click.BadParameter(f'Bounty must be a finite number (got {bounty})', param_hint='--bounty')
+
+    if d < MIN_BOUNTY_ALPHA:
+        raise click.BadParameter(
+            f'Minimum bounty is {MIN_BOUNTY_ALPHA} ALPHA (got {bounty})',
+            param_hint='--bounty',
+        )
+
+    if d > MAX_BOUNTY_ALPHA:
+        raise click.BadParameter(
+            f'Bounty cannot exceed {MAX_BOUNTY_ALPHA:,} ALPHA',
+            param_hint='--bounty',
+        )
 
     sign, digits, exponent = d.as_tuple()
     decimal_places = max(0, -exponent)

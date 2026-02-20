@@ -12,14 +12,14 @@ invocation with validation (no live network).
 from decimal import Decimal
 from unittest.mock import patch
 
+import click
 import pytest
 from click.testing import CliRunner
 
-# Helpers are standalone; import directly
 from gittensor.cli.issue_commands.helpers import (
+    ALPHA_DECIMALS,
     ALPHA_RAW_UNIT,
     MAX_ISSUE_ID,
-    MIN_BOUNTY_ALPHA,
     STATUS_COLORS,
     colorize_status,
     format_alpha,
@@ -74,41 +74,59 @@ class TestFormatAlpha:
 class TestValidateBountyAmount:
     def test_minimum(self):
         with pytest.raises(Exception) as exc_info:
-            validate_bounty_amount(9.0)
+            validate_bounty_amount('9')
         assert 'Minimum' in str(exc_info.value) or '9' in str(exc_info.value)
 
     def test_at_minimum_ok(self):
-        raw = validate_bounty_amount(MIN_BOUNTY_ALPHA)
+        raw = validate_bounty_amount('10')
         assert raw == 10 * ALPHA_RAW_UNIT
 
     def test_max_decimals_rejected(self):
         with pytest.raises(Exception):
-            validate_bounty_amount(10.1234567891)
+            validate_bounty_amount('10.1234567891')
 
     def test_max_decimals_ok(self):
-        raw = validate_bounty_amount(10.123456789)
+        raw = validate_bounty_amount('10.123456789')
         assert raw == int(Decimal('10.123456789') * ALPHA_RAW_UNIT)
 
     def test_negative_rejected(self):
         with pytest.raises(Exception):
-            validate_bounty_amount(-1)
+            validate_bounty_amount('-1')
 
     def test_inf_rejected(self):
         with pytest.raises(Exception):
-            validate_bounty_amount(float('inf'))
+            validate_bounty_amount('inf')
 
     def test_nan_rejected(self):
         with pytest.raises(Exception):
-            validate_bounty_amount(float('nan'))
+            validate_bounty_amount('nan')
 
-    def test_ieee754_precision_preserved(self):
-        # 10.1 as float can be 10.099999...; Decimal(str()) fixes it
-        raw = validate_bounty_amount(10.1)
-        assert raw == 10_100_000_000  # 10.1 * 1e9
+    def test_precision_preserved_via_string(self):
+        raw = validate_bounty_amount('10.1')
+        assert raw == 10_100_000_000
 
     def test_large_bounty_ok(self):
-        raw = validate_bounty_amount(1_000_000.5)
+        raw = validate_bounty_amount('1000000.5')
         assert raw == 1_000_000_500_000_000
+
+    def test_zero_bounty_rejected(self):
+        with pytest.raises(click.BadParameter):
+            validate_bounty_amount('0')
+
+    def test_bounty_bad_parameter_has_param_hint(self):
+        with pytest.raises(click.BadParameter) as exc_info:
+            validate_bounty_amount('5')
+        assert exc_info.value.param_hint == '--bounty'
+
+    def test_invalid_string_rejected(self):
+        with pytest.raises(click.BadParameter) as exc_info:
+            validate_bounty_amount('abc')
+        assert 'Invalid number' in str(exc_info.value)
+
+    def test_empty_string_rejected(self):
+        with pytest.raises(click.BadParameter) as exc_info:
+            validate_bounty_amount('   ')
+        assert 'empty' in str(exc_info.value).lower()
 
 
 # =============================================================================
@@ -146,6 +164,15 @@ class TestValidateRepository:
         assert owner == 'owner'
         assert name == 'repo'
 
+    def test_double_slash_rejected(self):
+        with pytest.raises(click.BadParameter):
+            validate_repository('owner//repo', verify_exists=False)
+
+    def test_repo_bad_parameter_has_param_hint(self):
+        with pytest.raises(click.BadParameter) as exc_info:
+            validate_repository('no-slash', verify_exists=False)
+        assert exc_info.value.param_hint == '--repo'
+
 
 # =============================================================================
 # validate_issue_id
@@ -169,6 +196,13 @@ class TestValidateIssueId:
         with pytest.raises(Exception):
             validate_issue_id(MAX_ISSUE_ID)
 
+    def test_custom_param_name_in_message(self):
+        with pytest.raises(click.BadParameter) as exc_info:
+            validate_issue_id(0, param_name='issue_id')
+        msg = str(exc_info.value)
+        assert '999999' in msg or '1' in msg
+        assert exc_info.value.param_hint == 'issue_id'
+
 
 # =============================================================================
 # validate_ss58_address
@@ -191,9 +225,30 @@ class TestValidateSs58Address:
             validate_ss58_address('short')
 
     def test_invalid_chars_rejected(self):
-        # '0' is not in base58 set [1-9A-HJ-NP-Za-km-z]; regex or ss58_decode rejects
         with pytest.raises(Exception):
             validate_ss58_address('0' * 47)
+
+    def test_ss58_bad_parameter_has_param_hint(self):
+        with pytest.raises(click.BadParameter) as exc_info:
+            validate_ss58_address('', param_name='solver_hotkey')
+        assert exc_info.value.param_hint == 'solver_hotkey'
+
+
+# =============================================================================
+# Constants
+# =============================================================================
+
+
+class TestConstants:
+    def test_alpha_decimals(self):
+        assert ALPHA_DECIMALS == 9
+
+    def test_max_issue_id(self):
+        assert MAX_ISSUE_ID == 1_000_000
+
+    def test_format_alpha_uses_raw_unit(self):
+        assert format_alpha(ALPHA_RAW_UNIT) == '1.00'
+        assert format_alpha(ALPHA_RAW_UNIT, decimals=4) == '1.0000'
 
 
 # =============================================================================
@@ -340,7 +395,7 @@ class TestCliVoteValidation:
 
 
 class TestCliAdminValidation:
-    """Ensure admin cancel rejects invalid issue_id (validator wired)."""
+    """Ensure admin cancel and payout reject invalid issue_id (validator wired)."""
 
     def test_admin_cancel_rejects_issue_id_zero(self, cli_root, runner):
         with patch(
@@ -350,6 +405,36 @@ class TestCliAdminValidation:
             result = runner.invoke(
                 cli_root,
                 ['admin', 'cancel-issue', '0'],
+                catch_exceptions=False,
+            )
+        assert result.exit_code != 0
+        assert 'between' in result.output or '1' in result.output
+
+    def test_admin_payout_rejects_issue_id_zero(self, cli_root, runner):
+        with patch(
+            'gittensor.cli.issue_commands.admin.get_contract_address',
+            return_value='0x1234567890123456789012345678901234567890',
+        ):
+            result = runner.invoke(
+                cli_root,
+                ['admin', 'payout-issue', '0'],
+                catch_exceptions=False,
+            )
+        assert result.exit_code != 0
+        assert 'between' in result.output or '1' in result.output
+
+
+class TestCliVoteCancelValidation:
+    """Ensure vote cancel rejects invalid issue_id."""
+
+    def test_vote_cancel_rejects_issue_id_zero(self, cli_root, runner):
+        with patch(
+            'gittensor.cli.issue_commands.vote.get_contract_address',
+            return_value='0x1234567890123456789012345678901234567890',
+        ):
+            result = runner.invoke(
+                cli_root,
+                ['vote', 'cancel', '0', 'reason text'],
                 catch_exceptions=False,
             )
         assert result.exit_code != 0

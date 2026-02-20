@@ -319,16 +319,11 @@ class MinerEvaluation:
         return len(self.closed_pull_requests)
 
     def get_all_issues(self) -> List[Issue]:
-        """Aggregate all unique issues from all pull requests (merged, open, closed)."""
-        seen = set()
+        """Aggregate all issues from all pull requests (merged, open, closed)."""
         all_issues = []
         for pr in self.merged_pull_requests + self.open_pull_requests + self.closed_pull_requests:
             if pr.issues:
-                for issue in pr.issues:
-                    key = (issue.number, issue.repository_full_name)
-                    if key not in seen:
-                        seen.add(key)
-                        all_issues.append(issue)
+                all_issues.extend(pr.issues)
         return all_issues
 
     def get_all_file_changes(self) -> List[FileChange]:
@@ -547,7 +542,7 @@ class MinerEvaluationCache:
             bt.logging.debug(
                 f'Cache miss for UID {uid}: identity mismatch '
                 f'(cached hotkey={cached.hotkey[:8]}..., github_id={cached.github_id} vs '
-                f'current hotkey={hotkey[:8]}..., github_id={github_id})'
+                f'current hotkey={hotkey[:8]}..., github_id={github_id}). '
                 'Removing cached evaluation'
             )
             del self._cache[uid]

@@ -841,7 +841,7 @@ def find_open_prs_for_issue(repo: str, issue_number: int, token: str) -> List[Di
                 'state': pr.get('state', ''),
                 'createdAt': pr.get('createdAt', ''),
                 'url': pr.get('url', ''),
-                'author': pr.get('author', {}).get('login', 'unknown'),
+                'author': (pr.get('author') or {}).get('login', 'unknown'),
                 'baseRepository': base_repo,
                 'reviewDecision': pr.get('reviewDecision'),
                 'reviewCount': pr.get('reviews', {}).get('totalCount', 0),

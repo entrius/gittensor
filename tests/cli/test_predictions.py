@@ -512,4 +512,135 @@ class TestCliPredict:
         data = json.loads(result.output)
         assert data['issue_id'] == 1
         assert data['repository'] == 'owner/repo'
+        assert data['miner_hotkey'] == '5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY'
         assert data['predictions']['10'] == 0.75
+
+    def test_invalid_json_input_rejected(self, cli_root, runner):
+        patches = self._mock_predict_deps()
+        with patches[0], patches[1], patches[2], patches[3], patches[4]:
+            result = runner.invoke(
+                cli_root,
+                [
+                    'issues',
+                    'predict',
+                    '--id',
+                    '1',
+                    '--json-input',
+                    'not-valid-json',
+                    '-y',
+                ],
+                catch_exceptions=False,
+            )
+        assert result.exit_code != 0
+        assert 'Invalid JSON' in result.output
+
+    def test_no_open_prs_exits(self, cli_root, runner):
+        mock_wallet = MagicMock()
+        mock_wallet.hotkey.ss58_address = '5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY'
+        with (
+            patch.dict('os.environ', {'GITTENSOR_MINER_PAT': 'ghp_test'}),
+            patch(
+                'gittensor.cli.issue_commands.predictions._verify_miner_registered',
+                return_value=mock_wallet,
+            ),
+            patch(
+                'gittensor.cli.issue_commands.predictions.get_contract_address',
+                return_value=CONTRACT_ADDR,
+            ),
+            patch(
+                'gittensor.cli.issue_commands.predictions.read_issues_from_contract',
+                return_value=[SAMPLE_ISSUE],
+            ),
+            patch(
+                'gittensor.cli.issue_commands.predictions._fetch_open_prs_for_issue',
+                return_value=[],
+            ),
+        ):
+            result = runner.invoke(
+                cli_root,
+                ['issues', 'predict', '--id', '1', '--pr', '10', '--probability', '0.5', '-y'],
+                catch_exceptions=False,
+            )
+        assert result.exit_code == 0
+        assert 'No open PRs' in result.output
+
+    def test_pr_not_in_open_prs_rejected(self, cli_root, runner):
+        patches = self._mock_predict_deps()
+        with patches[0], patches[1], patches[2], patches[3], patches[4]:
+            result = runner.invoke(
+                cli_root,
+                [
+                    'issues',
+                    'predict',
+                    '--id',
+                    '1',
+                    '--pr',
+                    '999',
+                    '--probability',
+                    '0.5',
+                    '-y',
+                ],
+                catch_exceptions=False,
+            )
+        assert result.exit_code != 0
+        assert 'not in the list' in result.output
+
+
+# =============================================================================
+# _display_pr_table (smoke test)
+# =============================================================================
+
+
+class TestDisplayPrTable:
+    def test_renders_without_error(self):
+        from gittensor.cli.issue_commands.predictions import _display_pr_table
+
+        # Should not raise any exception
+        _display_pr_table(SAMPLE_PRS)
+
+    def test_empty_list_renders(self):
+        from gittensor.cli.issue_commands.predictions import _display_pr_table
+
+        _display_pr_table([])
+
+
+# =============================================================================
+# _fetch_open_prs_for_issue (GraphQL + REST fallback)
+# =============================================================================
+
+
+class TestFetchOpenPrsForIssue:
+    def test_graphql_success_returns_prs(self):
+        from gittensor.cli.issue_commands.predictions import _fetch_open_prs_for_issue
+
+        mock_module = MagicMock()
+        mock_module.find_open_prs_for_issue.return_value = SAMPLE_PRS
+        with patch.dict('sys.modules', {'gittensor.utils.github_api_tools': mock_module}):
+            result = _fetch_open_prs_for_issue('owner/repo', 42, 'ghp_test')
+        assert len(result) == 2
+
+    def test_graphql_fails_falls_back_to_rest(self):
+        from gittensor.cli.issue_commands.predictions import _fetch_open_prs_for_issue
+
+        rest_prs = [SAMPLE_PRS[0]]
+        mock_module = MagicMock()
+        mock_module.find_open_prs_for_issue.side_effect = Exception('GraphQL error')
+        with (
+            patch.dict('sys.modules', {'gittensor.utils.github_api_tools': mock_module}),
+            patch(
+                'gittensor.cli.issue_commands.predictions._fetch_prs_rest',
+                return_value=rest_prs,
+            ),
+        ):
+            result = _fetch_open_prs_for_issue('owner/repo', 42, 'ghp_test')
+        assert len(result) == 1
+
+    def test_no_token_uses_rest_directly(self):
+        from gittensor.cli.issue_commands.predictions import _fetch_open_prs_for_issue
+
+        with patch(
+            'gittensor.cli.issue_commands.predictions._fetch_prs_rest',
+            return_value=SAMPLE_PRS,
+        ):
+            result = _fetch_open_prs_for_issue('owner/repo', 42, None)
+        assert len(result) == 2

@@ -32,6 +32,8 @@ from .helpers import (
     validate_issue_id,
 )
 
+GITTENSOR_NETUID = 74  # GitTensor subnet netuid
+
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
@@ -88,7 +90,7 @@ def _fetch_prs_rest(
                 'state': 'OPEN',
                 'createdAt': item.get('created_at', ''),
                 'url': item.get('html_url', ''),
-                'author': item.get('user', {}).get('login', 'unknown'),
+                'author': (item.get('user') or {}).get('login', 'unknown'),
                 'baseRepository': repo,
                 'reviewDecision': None,
                 'reviewCount': 0,
@@ -467,8 +469,7 @@ def issues_predict(
 
     # --- Load wallet + verify registration ---
     ws_endpoint, network_name = resolve_network(network, rpc_url)
-    netuid = 74  # GitTensor subnet
-    _verify_miner_registered(wallet_name, wallet_hotkey, ws_endpoint, netuid, verbose)
+    wallet = _verify_miner_registered(wallet_name, wallet_hotkey, ws_endpoint, GITTENSOR_NETUID, verbose)
 
     # --- Resolve issue from contract ---
     issue = _resolve_issue_from_contract(issue_id, network, rpc_url, contract, verbose, as_json)
@@ -567,6 +568,7 @@ def issues_predict(
     payload = {
         'issue_id': issue_id,
         'repository': repo,
+        'miner_hotkey': wallet.hotkey.ss58_address,
         'predictions': {str(k): v for k, v in predictions.items()},
     }
 

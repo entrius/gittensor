@@ -763,6 +763,94 @@ def find_solver_from_cross_references(repo: str, issue_number: int, token: str) 
     return user_id, pr_number
 
 
+def find_open_prs_for_issue(repo: str, issue_number: int, token: str) -> List[Dict[str, Any]]:
+    """Find open PRs that reference a given issue via GraphQL cross-references.
+
+    Uses the same timelineItems(CROSS_REFERENCED_EVENT) approach as
+    ``find_solver_from_cross_references`` but filters for **open** PRs instead
+    of merged ones.  Results are scoped to PRs whose baseRepository matches
+    *repo* so that cross-repo mentions are excluded.
+
+    Args:
+        repo: Repository full name (e.g., 'owner/repo').
+        issue_number: GitHub issue number.
+        token: GitHub PAT for authentication.
+
+    Returns:
+        List of dicts, each with keys: number, title, state, createdAt, url,
+        author, baseRepository, reviewDecision, reviewCount.
+    """
+    owner, name = repo.split('/')
+
+    query = """
+    query($owner: String!, $name: String!, $issueNumber: Int!) {
+      repository(owner: $owner, name: $name) {
+        issue(number: $issueNumber) {
+          timelineItems(itemTypes: [CROSS_REFERENCED_EVENT], first: 50) {
+            nodes {
+              ... on CrossReferencedEvent {
+                source {
+                  ... on PullRequest {
+                    number
+                    title
+                    state
+                    createdAt
+                    url
+                    author { login }
+                    baseRepository { nameWithOwner }
+                    reviewDecision
+                    reviews { totalCount }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    """
+
+    result = execute_graphql_query(
+        query=query,
+        variables={'owner': owner, 'name': name, 'issueNumber': issue_number},
+        token=token,
+        max_attempts=3,
+    )
+    if not result:
+        bt.logging.warning(f'GraphQL open-PR query failed for {repo}#{issue_number}')
+        return []
+
+    timeline_nodes = (
+        result.get('data', {}).get('repository', {}).get('issue', {}).get('timelineItems', {}).get('nodes', [])
+    )
+
+    prs: List[Dict[str, Any]] = []
+    for node in timeline_nodes:
+        pr = node.get('source', {})
+        if not pr or pr.get('state') != 'OPEN':
+            continue
+
+        base_repo = pr.get('baseRepository', {}).get('nameWithOwner', '')
+        if base_repo.lower() != repo.lower():
+            continue
+
+        prs.append(
+            {
+                'number': pr.get('number'),
+                'title': pr.get('title', ''),
+                'state': pr.get('state', ''),
+                'createdAt': pr.get('createdAt', ''),
+                'url': pr.get('url', ''),
+                'author': pr.get('author', {}).get('login', 'unknown'),
+                'baseRepository': base_repo,
+                'reviewDecision': pr.get('reviewDecision'),
+                'reviewCount': pr.get('reviews', {}).get('totalCount', 0),
+            }
+        )
+
+    return prs
+
+
 def find_solver_from_timeline(repo: str, issue_number: int, token: str) -> tuple:
     """Find the PR author who closed an issue.
 

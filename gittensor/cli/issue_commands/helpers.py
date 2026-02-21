@@ -31,6 +31,7 @@ MAX_ISSUE_ID = 1_000_000
 MAX_ISSUE_NUMBER = 2**32 - 1
 REPO_PATTERN = re.compile(r'^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$')
 GITHUB_API_TIMEOUT = 10
+MAINNET_NETUID = 74
 
 # Status display colors
 STATUS_COLORS: Dict[str, str] = {
@@ -661,3 +662,22 @@ def read_issues_from_contract(ws_endpoint: str, contract_addr: str, verbose: boo
             console.print(f'[dim]Debug: Connection/read error: {e}[/dim]')
         console.print(f'[yellow]Error reading from contract: {e}[/yellow]')
         return []
+
+
+def read_netuid_from_contract(ws_endpoint: str, contract_addr: str, verbose: bool = False) -> int:
+    """Read the netuid from contract packed storage, falling back to the mainnet default.
+
+    Connects to the chain and reads the packed storage root to extract netuid.
+    Returns MAINNET_NETUID (74) if the read fails for any reason.
+    """
+    try:
+        from substrateinterface import SubstrateInterface
+
+        substrate = SubstrateInterface(url=ws_endpoint)
+        packed = _read_contract_packed_storage(substrate, contract_addr, verbose)
+        if packed and packed.get('netuid'):
+            return packed['netuid']
+    except Exception as e:
+        if verbose:
+            console.print(f'[dim]Debug: Failed to read netuid from contract: {e}[/dim]')
+    return MAINNET_NETUID

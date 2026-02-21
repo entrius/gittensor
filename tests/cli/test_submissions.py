@@ -6,11 +6,17 @@ Tests for submissions and predict CLI commands, and find_prs_for_issue.
 """
 
 import json
+import sys
 from unittest.mock import MagicMock, patch
 
+import click
 import pytest
 from click.testing import CliRunner
 
+from gittensor.cli.issue_commands.helpers import (
+    format_pred_lines,
+    validate_predictions,
+)
 from gittensor.cli.issue_commands.submissions import issues_predict, issues_submissions
 from gittensor.utils.github_api_tools import find_prs_for_issue
 
@@ -93,10 +99,9 @@ def _make_graphql_timeline_response(prs):
 # Patch targets
 # =============================================================================
 
-_PATCH_FIND_PRS = 'gittensor.cli.issue_commands.submissions._load_find_prs'
-_PATCH_READ_ISSUES = 'gittensor.cli.issue_commands.submissions.read_issues_from_contract'
+_PATCH_FIND_PRS = 'gittensor.cli.issue_commands.submissions.find_prs_for_issue'
+_PATCH_FETCH_ISSUE = 'gittensor.cli.issue_commands.submissions.fetch_issue_from_contract'
 _PATCH_RESOLVE = 'gittensor.cli.issue_commands.submissions.resolve_network'
-_PATCH_LOAD_BT = 'gittensor.cli.issue_commands.submissions._load_bittensor'
 _PATCH_READ_NETUID = 'gittensor.cli.issue_commands.submissions.read_netuid_from_contract'
 
 
@@ -109,43 +114,37 @@ _PATCH_READ_NETUID = 'gittensor.cli.issue_commands.submissions.read_netuid_from_
 def predict_mocks():
     """Set up all mocks needed for predict command tests.
 
-    Yields a namespace with all mock objects for easy access and overriding.
+    After the flow reorder, issue fetch and PR fetch happen before wallet loading.
+    The bittensor mock is only needed for the wallet/registration step.
     """
-    with patch(_PATCH_LOAD_BT) as mock_load_bt, \
-         patch(_PATCH_RESOLVE) as mock_resolve, \
-         patch(_PATCH_READ_ISSUES) as mock_read, \
-         patch(_PATCH_FIND_PRS) as mock_load_find, \
-         patch(_PATCH_READ_NETUID) as mock_netuid:
+    # Mock bittensor module (inline import in predict command)
+    bt_mod = MagicMock()
+    wallet = MagicMock()
+    wallet.hotkey.ss58_address = '5FakeHotkey123'
+    bt_mod.Wallet.return_value = wallet
+
+    metagraph = MagicMock()
+    metagraph.hotkeys = ['5FakeHotkey123', '5OtherHotkey456']
+    subtensor = MagicMock()
+    subtensor.metagraph.return_value = metagraph
+    bt_mod.Subtensor.return_value = subtensor
+
+    with patch(_PATCH_RESOLVE) as mock_resolve, \
+         patch(_PATCH_FETCH_ISSUE) as mock_fetch, \
+         patch(_PATCH_FIND_PRS) as mock_find, \
+         patch(_PATCH_READ_NETUID) as mock_netuid, \
+         patch.dict(sys.modules, {'bittensor': bt_mod}):
 
         mock_resolve.return_value = ('wss://test.endpoint', 'test')
-        mock_read.return_value = [SAMPLE_ISSUE]
+        mock_fetch.return_value = SAMPLE_ISSUE
+        mock_find.return_value = SAMPLE_OPEN_PRS
         mock_netuid.return_value = 74
 
-        # Mock find_prs_for_issue (returned by _load_find_prs)
-        find_prs_fn = MagicMock(return_value=SAMPLE_OPEN_PRS)
-        mock_load_find.return_value = find_prs_fn
-
-        # Mock bittensor module (returned by _load_bittensor)
-        bt_mod = MagicMock()
-        wallet = MagicMock()
-        wallet.hotkey.ss58_address = '5FakeHotkey123'
-        bt_mod.Wallet.return_value = wallet
-
-        metagraph = MagicMock()
-        metagraph.hotkeys = ['5FakeHotkey123', '5OtherHotkey456']
-        subtensor = MagicMock()
-        subtensor.metagraph.return_value = metagraph
-        bt_mod.Subtensor.return_value = subtensor
-
-        mock_load_bt.return_value = bt_mod
-
         yield {
-            'load_bt': mock_load_bt,
             'bt': bt_mod,
             'resolve': mock_resolve,
-            'read': mock_read,
-            'load_find': mock_load_find,
-            'find_prs': find_prs_fn,
+            'fetch_issue': mock_fetch,
+            'find_prs': mock_find,
             'netuid': mock_netuid,
             'wallet': wallet,
             'metagraph': metagraph,
@@ -307,13 +306,12 @@ class TestSubmissionsCommand:
         return runner.invoke(issues_submissions, args, catch_exceptions=False)
 
     @patch(_PATCH_FIND_PRS)
-    @patch(_PATCH_READ_ISSUES)
+    @patch(_PATCH_FETCH_ISSUE)
     @patch(_PATCH_RESOLVE)
-    def test_displays_table(self, mock_resolve, mock_read, mock_load_find):
+    def test_displays_table(self, mock_resolve, mock_fetch, mock_find):
         mock_resolve.return_value = ('wss://test.endpoint', 'test')
-        mock_read.return_value = [SAMPLE_ISSUE]
-        mock_find = MagicMock(return_value=[SAMPLE_OPEN_PRS[0]])
-        mock_load_find.return_value = mock_find
+        mock_fetch.return_value = SAMPLE_ISSUE
+        mock_find.return_value = [SAMPLE_OPEN_PRS[0]]
 
         result = self._invoke(['--id', '1'])
 
@@ -323,13 +321,12 @@ class TestSubmissionsCommand:
         assert 'alice' in result.output
 
     @patch(_PATCH_FIND_PRS)
-    @patch(_PATCH_READ_ISSUES)
+    @patch(_PATCH_FETCH_ISSUE)
     @patch(_PATCH_RESOLVE)
-    def test_json_output(self, mock_resolve, mock_read, mock_load_find):
+    def test_json_output(self, mock_resolve, mock_fetch, mock_find):
         mock_resolve.return_value = ('wss://test.endpoint', 'test')
-        mock_read.return_value = [SAMPLE_ISSUE]
-        mock_find = MagicMock(return_value=[SAMPLE_OPEN_PRS[0]])
-        mock_load_find.return_value = mock_find
+        mock_fetch.return_value = SAMPLE_ISSUE
+        mock_find.return_value = [SAMPLE_OPEN_PRS[0]]
 
         result = self._invoke(['--id', '1', '--json'])
 
@@ -344,11 +341,11 @@ class TestSubmissionsCommand:
         assert result.exit_code != 0
         assert 'must be between' in result.output
 
-    @patch(_PATCH_READ_ISSUES)
+    @patch(_PATCH_FETCH_ISSUE)
     @patch(_PATCH_RESOLVE)
-    def test_issue_not_found(self, mock_resolve, mock_read):
+    def test_issue_not_found(self, mock_resolve, mock_fetch):
         mock_resolve.return_value = ('wss://test.endpoint', 'test')
-        mock_read.return_value = []
+        mock_fetch.side_effect = click.ClickException('Issue 999 not found on contract.')
 
         result = self._invoke(['--id', '999'])
 
@@ -356,12 +353,12 @@ class TestSubmissionsCommand:
         assert 'not found' in result.output
 
     @patch(_PATCH_FIND_PRS)
-    @patch(_PATCH_READ_ISSUES)
+    @patch(_PATCH_FETCH_ISSUE)
     @patch(_PATCH_RESOLVE)
-    def test_no_open_prs(self, mock_resolve, mock_read, mock_load_find):
+    def test_no_open_prs(self, mock_resolve, mock_fetch, mock_find):
         mock_resolve.return_value = ('wss://test.endpoint', 'test')
-        mock_read.return_value = [SAMPLE_ISSUE]
-        mock_load_find.return_value = MagicMock(return_value=[])
+        mock_fetch.return_value = SAMPLE_ISSUE
+        mock_find.return_value = []
 
         result = self._invoke(['--id', '1'])
 
@@ -369,17 +366,16 @@ class TestSubmissionsCommand:
         assert 'No open PRs found' in result.output
 
     @patch(_PATCH_FIND_PRS)
-    @patch(_PATCH_READ_ISSUES)
+    @patch(_PATCH_FETCH_ISSUE)
     @patch(_PATCH_RESOLVE)
-    def test_warns_on_non_active_status(self, mock_resolve, mock_read, mock_load_find):
+    def test_completed_issue_continues(self, mock_resolve, mock_fetch, mock_find):
         mock_resolve.return_value = ('wss://test.endpoint', 'test')
-        mock_read.return_value = [{**SAMPLE_ISSUE, 'status': 'Completed'}]
-        mock_load_find.return_value = MagicMock(return_value=[])
+        mock_fetch.return_value = {**SAMPLE_ISSUE, 'status': 'Completed'}
+        mock_find.return_value = []
 
         result = self._invoke(['--id', '1'])
 
         assert result.exit_code == 0
-        assert 'Completed' in result.output
 
 
 # =============================================================================
@@ -457,7 +453,9 @@ class TestPredictCommand:
         assert '--pr is required' in result.output
 
     def test_non_active_issue_rejected(self, predict_mocks):
-        predict_mocks['read'].return_value = [{**SAMPLE_ISSUE, 'status': 'Completed'}]
+        predict_mocks['fetch_issue'].side_effect = click.ClickException(
+            'Issue 1 has status "Completed" — predictions require Active status.'
+        )
 
         result = self._invoke(['--id', '1', '--pr', '123', '--probability', '0.5', '-y'])
 
@@ -479,3 +477,86 @@ class TestPredictCommand:
         payload = json.loads(result.output)
         assert '123' in payload['predictions']
         assert '456' in payload['predictions']
+
+    # --- JSON edge case tests ---
+
+    def test_json_input_parse_error(self, predict_mocks):
+        result = self._invoke(['--id', '1', '--json-input', 'not valid json', '-y'])
+
+        assert result.exit_code != 0
+        assert 'Invalid JSON input' in result.output
+
+    def test_json_input_array_rejected(self, predict_mocks):
+        result = self._invoke(['--id', '1', '--json-input', '[1, 2]', '-y'])
+
+        assert result.exit_code != 0
+        assert 'JSON object' in result.output
+
+    def test_json_input_non_numeric_key(self, predict_mocks):
+        result = self._invoke(['--id', '1', '--json-input', '{"abc": 0.5}', '-y'])
+
+        assert result.exit_code != 0
+        assert 'Invalid PR number' in result.output
+
+    def test_json_input_invalid_probability_value(self, predict_mocks):
+        result = self._invoke(['--id', '1', '--json-input', '{"123": "high"}', '-y'])
+
+        assert result.exit_code != 0
+        assert 'Invalid probability' in result.output
+
+    def test_json_input_empty_dict(self, predict_mocks):
+        result = self._invoke(['--id', '1', '--json-input', '{}', '-y'])
+
+        assert result.exit_code != 0
+        assert 'No predictions provided' in result.output
+
+
+# =============================================================================
+# Helper unit tests
+# =============================================================================
+
+
+class TestValidatePredictions:
+    def test_valid_single_prediction(self):
+        validate_predictions({1: 0.5}, {1, 2, 3})
+
+    def test_valid_multiple_predictions(self):
+        validate_predictions({1: 0.3, 2: 0.4}, {1, 2, 3})
+
+    def test_probability_above_one_raises(self):
+        with pytest.raises(click.ClickException, match='between 0.0 and 1.0'):
+            validate_predictions({1: 1.5}, {1})
+
+    def test_probability_below_zero_raises(self):
+        with pytest.raises(click.ClickException, match='between 0.0 and 1.0'):
+            validate_predictions({1: -0.1}, {1})
+
+    def test_pr_not_in_open_prs_raises(self):
+        with pytest.raises(click.ClickException, match='not an open PR'):
+            validate_predictions({999: 0.5}, {1, 2})
+
+    def test_sum_exceeds_one_raises(self):
+        with pytest.raises(click.ClickException, match='exceeds 1.0'):
+            validate_predictions({1: 0.6, 2: 0.6}, {1, 2})
+
+    def test_sum_exactly_one_ok(self):
+        validate_predictions({1: 0.5, 2: 0.5}, {1, 2})
+
+    def test_empty_predictions_ok(self):
+        validate_predictions({}, {1, 2})
+
+
+class TestFormatPredLines:
+    def test_single_prediction(self):
+        result = format_pred_lines({123: 0.7})
+        assert 'PR #123' in result
+        assert '70.00%' in result
+
+    def test_multiple_predictions(self):
+        result = format_pred_lines({123: 0.5, 456: 0.3})
+        assert 'PR #123' in result
+        assert 'PR #456' in result
+
+    def test_empty_predictions(self):
+        result = format_pred_lines({})
+        assert result == ''

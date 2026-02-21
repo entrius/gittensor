@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import click
 from rich.console import Console
+from rich.table import Table
 
 from gittensor.constants import CONTRACT_ADDRESS
 
@@ -681,3 +682,124 @@ def read_netuid_from_contract(ws_endpoint: str, contract_addr: str, verbose: boo
         if verbose:
             console.print(f'[dim]Debug: Failed to read netuid from contract: {e}[/dim]')
     return MAINNET_NETUID
+
+
+# ---------------------------------------------------------------------------
+# Issue fetching and display helpers
+# ---------------------------------------------------------------------------
+
+
+def fetch_issue_from_contract(
+    issue_id: int,
+    ws_endpoint: str,
+    contract_addr: str,
+    verbose: bool,
+    *,
+    require_active: bool = False,
+) -> Dict[str, Any]:
+    """Read an issue from the contract and validate existence and status.
+
+    Args:
+        issue_id: On-chain issue ID.
+        ws_endpoint: WebSocket endpoint for Subtensor.
+        contract_addr: Contract address.
+        verbose: If True, print debug output.
+        require_active: If True, raise ClickException when status is not Active.
+            If False, warn when status is not Active or Registered.
+
+    Returns:
+        Issue dict from contract storage.
+
+    Raises:
+        click.ClickException: If issue not found or status is invalid.
+    """
+    with console.status('[bold cyan]Reading issues from contract...', spinner='dots'):
+        issues = read_issues_from_contract(ws_endpoint, contract_addr, verbose)
+
+    issue = next((i for i in issues if i['id'] == issue_id), None)
+    if not issue:
+        raise click.ClickException(f'Issue {issue_id} not found on contract.')
+
+    status = issue.get('status', '')
+    if require_active and status != 'Active':
+        raise click.ClickException(f'Issue {issue_id} has status "{status}" — predictions require Active status.')
+    elif not require_active and status not in ('Active', 'Registered'):
+        console.print(f'[yellow]Warning: Issue {issue_id} has status "{status}".[/yellow]')
+
+    return issue
+
+
+def build_pr_table(prs: List[Dict[str, Any]]) -> Table:
+    """Build a Rich table displaying PR information.
+
+    Args:
+        prs: List of PR dicts with number, title, author, created_at, review_status, url.
+
+    Returns:
+        Rich Table ready for printing.
+    """
+    table = Table(show_header=True, header_style='bold magenta')
+    table.add_column('PR #', style='cyan', justify='right')
+    table.add_column('Title', style='green', max_width=50)
+    table.add_column('Author', style='yellow')
+    table.add_column('Created', style='dim')
+    table.add_column('Review', justify='center')
+    table.add_column('URL', style='dim')
+
+    for pr in prs:
+        created = pr.get('created_at', '')[:10]  # YYYY-MM-DD
+        review = pr.get('review_status') or '-'
+        if review == 'APPROVED':
+            review_style = '[green]APPROVED[/green]'
+        elif review == 'CHANGES_REQUESTED':
+            review_style = '[red]CHANGES[/red]'
+        else:
+            review_style = f'[dim]{review}[/dim]'
+
+        table.add_row(
+            str(pr['number']),
+            pr.get('title', ''),
+            pr.get('author', 'unknown'),
+            created,
+            review_style,
+            pr.get('url', ''),
+        )
+
+    return table
+
+
+def format_pred_lines(predictions: Dict[int, float]) -> str:
+    """Format predictions as display lines for Rich panels.
+
+    Args:
+        predictions: Dict mapping PR number to probability.
+
+    Returns:
+        Multi-line string with formatted predictions.
+    """
+    return '\n'.join(f'  PR #{k}: {v:.2%}' for k, v in predictions.items())
+
+
+def validate_predictions(predictions: Dict[int, float], open_pr_numbers: set) -> None:
+    """Validate that all predictions have valid probabilities and reference open PRs.
+
+    Checks:
+        - Each probability is in [0.0, 1.0]
+        - Each PR number exists in open_pr_numbers
+        - Sum of probabilities does not exceed 1.0
+
+    Raises:
+        click.ClickException: On any validation failure.
+    """
+    for pr_num, prob in predictions.items():
+        if prob < 0.0 or prob > 1.0:
+            raise click.ClickException(f'Probability for PR #{pr_num} must be between 0.0 and 1.0 (got {prob}).')
+        if pr_num not in open_pr_numbers:
+            raise click.ClickException(
+                f'PR #{pr_num} is not an open PR for this issue. '
+                f'Open PRs: {sorted(open_pr_numbers) if open_pr_numbers else "none"}'
+            )
+
+    total_prob = sum(predictions.values())
+    if total_prob > 1.0:
+        raise click.ClickException(f'Sum of probabilities ({total_prob:.4f}) exceeds 1.0.')

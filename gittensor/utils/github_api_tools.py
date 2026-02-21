@@ -724,7 +724,18 @@ def find_prs_for_issue(
     owner, name = repo.split('/')
 
     if token:
-        return _find_prs_for_issue_graphql(owner, name, issue_number, token, repo, state_filter)
+        prs = _find_prs_for_issue_graphql(owner, name, issue_number, token, repo, state_filter)
+        if prs:
+            return prs
+        # GraphQL returned nothing — fall back to authenticated REST
+        bt.logging.debug(f'GraphQL returned no PRs for {repo}#{issue_number}, falling back to REST')
+        prs = _find_prs_for_issue_rest(owner, name, issue_number, repo, state_filter, token=token)
+        if prs:
+            return prs
+        # Authenticated REST also returned nothing — try unauthenticated
+        # (fine-grained PATs can filter out cross-reference events)
+        bt.logging.debug(f'Authenticated REST returned no PRs for {repo}#{issue_number}, retrying unauthenticated')
+        return _find_prs_for_issue_rest(owner, name, issue_number, repo, state_filter, _quiet=True)
     return _find_prs_for_issue_rest(owner, name, issue_number, repo, state_filter)
 
 
@@ -830,15 +841,20 @@ def _find_prs_for_issue_rest(
     issue_number: int,
     repo: str,
     state_filter: Optional[Literal['open', 'merged', 'closed']],
+    token: Optional[str] = None,
+    _quiet: bool = False,
 ) -> List[PRInfo]:
-    """REST API fallback for find_prs_for_issue (unauthenticated)."""
-    bt.logging.warning('No GitHub token provided — using unauthenticated REST API (lower rate limits)')
+    """REST API fallback for find_prs_for_issue."""
+    if not token and not _quiet:
+        bt.logging.warning('No GitHub token provided — using unauthenticated REST API (lower rate limits)')
 
     url = f'{BASE_GITHUB_API_URL}/repos/{owner}/{name}/issues/{issue_number}/timeline'
     headers = {
         'Accept': 'application/vnd.github.mockingbird-preview+json',
         'User-Agent': 'gittensor-cli',
     }
+    if token:
+        headers['Authorization'] = f'token {token}'
 
     try:
         response = requests.get(url, headers=headers, timeout=15)

@@ -7,13 +7,14 @@ Tests for submissions and predict CLI commands, and find_prs_for_issue.
 
 import json
 import sys
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import click
 import pytest
 from click.testing import CliRunner
 
 from gittensor.cli.issue_commands.helpers import (
+    collect_predictions,
     format_pred_lines,
     validate_predictions,
 )
@@ -560,3 +561,174 @@ class TestFormatPredLines:
     def test_empty_predictions(self):
         result = format_pred_lines({})
         assert result == ''
+
+
+# =============================================================================
+# collect_predictions unit tests
+# =============================================================================
+
+
+class TestCollectPredictions:
+    """Direct unit tests for the collect_predictions helper."""
+
+    def test_json_input_mode(self):
+        preds = collect_predictions(
+            pr_number=None,
+            probability=None,
+            json_input='{"123": 0.5, "456": 0.3}',
+            open_prs=SAMPLE_OPEN_PRS,
+            issue_id=1,
+            repo='owner/repo',
+            issue_number_gh=42,
+        )
+        assert preds == {123: 0.5, 456: 0.3}
+
+    def test_pr_probability_mode(self):
+        preds = collect_predictions(
+            pr_number=123,
+            probability=0.7,
+            json_input=None,
+            open_prs=SAMPLE_OPEN_PRS,
+            issue_id=1,
+            repo='owner/repo',
+            issue_number_gh=42,
+        )
+        assert preds == {123: 0.7}
+
+    def test_pr_without_probability_raises(self):
+        with pytest.raises(click.ClickException, match='--probability is required'):
+            collect_predictions(
+                pr_number=123,
+                probability=None,
+                json_input=None,
+                open_prs=SAMPLE_OPEN_PRS,
+                issue_id=1,
+                repo='owner/repo',
+                issue_number_gh=42,
+            )
+
+    def test_probability_without_pr_raises(self):
+        with pytest.raises(click.ClickException, match='--pr is required'):
+            collect_predictions(
+                pr_number=None,
+                probability=0.5,
+                json_input=None,
+                open_prs=SAMPLE_OPEN_PRS,
+                issue_id=1,
+                repo='owner/repo',
+                issue_number_gh=42,
+            )
+
+    @patch('gittensor.cli.issue_commands.helpers._is_interactive', return_value=False)
+    def test_interactive_mode_requires_tty(self, _mock_tty):
+        with pytest.raises(click.ClickException, match='TTY'):
+            collect_predictions(
+                pr_number=None,
+                probability=None,
+                json_input=None,
+                open_prs=SAMPLE_OPEN_PRS,
+                issue_id=1,
+                repo='owner/repo',
+                issue_number_gh=42,
+            )
+
+    @patch('gittensor.cli.issue_commands.helpers._is_interactive', return_value=True)
+    @patch('click.prompt', side_effect=['123', 0.6, '456', 0.2, 'done'])
+    def test_interactive_mode_collects_multiple(self, _mock_prompt, _mock_tty):
+        preds = collect_predictions(
+            pr_number=None,
+            probability=None,
+            json_input=None,
+            open_prs=SAMPLE_OPEN_PRS,
+            issue_id=1,
+            repo='owner/repo',
+            issue_number_gh=42,
+        )
+        assert preds == {123: 0.6, 456: 0.2}
+
+    @patch('gittensor.cli.issue_commands.helpers._is_interactive', return_value=True)
+    @patch('click.prompt', side_effect=['done'])
+    def test_interactive_mode_empty_raises(self, _mock_prompt, _mock_tty):
+        with pytest.raises(click.ClickException, match='No predictions provided'):
+            collect_predictions(
+                pr_number=None,
+                probability=None,
+                json_input=None,
+                open_prs=SAMPLE_OPEN_PRS,
+                issue_id=1,
+                repo='owner/repo',
+                issue_number_gh=42,
+            )
+
+    def test_json_input_non_numeric_value_raises(self):
+        with pytest.raises(click.ClickException, match='Invalid probability'):
+            collect_predictions(
+                pr_number=None,
+                probability=None,
+                json_input='{"123": "high"}',
+                open_prs=SAMPLE_OPEN_PRS,
+                issue_id=1,
+                repo='owner/repo',
+                issue_number_gh=42,
+            )
+
+
+# =============================================================================
+# Cascading fallback sequence tests
+# =============================================================================
+
+
+class TestCascadingFallback:
+    """Verify the exact call sequence of the GraphQL → REST(auth) → REST(unauth) cascade."""
+
+    @patch('gittensor.utils.github_api_tools._find_prs_for_issue_rest')
+    @patch('gittensor.utils.github_api_tools._find_prs_for_issue_graphql')
+    def test_graphql_success_skips_rest(self, mock_gql, mock_rest):
+        """When GraphQL returns results, REST is never called."""
+        mock_gql.return_value = [{'number': 101}]
+
+        result = find_prs_for_issue('owner/repo', 42, token='tok')
+
+        assert result == [{'number': 101}]
+        mock_gql.assert_called_once()
+        mock_rest.assert_not_called()
+
+    @patch('gittensor.utils.github_api_tools._find_prs_for_issue_rest')
+    @patch('gittensor.utils.github_api_tools._find_prs_for_issue_graphql')
+    def test_graphql_empty_falls_to_rest_auth(self, mock_gql, mock_rest):
+        """When GraphQL returns empty, authenticated REST is tried next."""
+        mock_gql.return_value = []
+        mock_rest.return_value = [{'number': 202}]
+
+        result = find_prs_for_issue('owner/repo', 42, token='tok')
+
+        assert result == [{'number': 202}]
+        mock_gql.assert_called_once()
+        mock_rest.assert_called_once_with('owner', 'repo', 42, 'owner/repo', None, token='tok')
+
+    @patch('gittensor.utils.github_api_tools._find_prs_for_issue_rest')
+    @patch('gittensor.utils.github_api_tools._find_prs_for_issue_graphql')
+    def test_full_cascade_graphql_rest_auth_rest_unauth(self, mock_gql, mock_rest):
+        """When GraphQL and authenticated REST both return empty, unauthenticated REST is tried."""
+        mock_gql.return_value = []
+        mock_rest.side_effect = [[], [{'number': 303}]]
+
+        result = find_prs_for_issue('owner/repo', 42, token='tok')
+
+        assert result == [{'number': 303}]
+        mock_gql.assert_called_once()
+        assert mock_rest.call_count == 2
+        # First call: authenticated REST
+        assert mock_rest.call_args_list[0] == call('owner', 'repo', 42, 'owner/repo', None, token='tok')
+        # Second call: unauthenticated REST
+        assert mock_rest.call_args_list[1] == call('owner', 'repo', 42, 'owner/repo', None, _quiet=True)
+
+    @patch('gittensor.utils.github_api_tools._find_prs_for_issue_rest')
+    def test_no_token_skips_graphql(self, mock_rest):
+        """When no token is provided, only unauthenticated REST is called."""
+        mock_rest.return_value = [{'number': 404}]
+
+        result = find_prs_for_issue('owner/repo', 42, token=None)
+
+        assert result == [{'number': 404}]
+        mock_rest.assert_called_once_with('owner', 'repo', 42, 'owner/repo', None)

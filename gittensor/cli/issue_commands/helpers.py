@@ -780,6 +780,121 @@ def format_pred_lines(predictions: Dict[int, float]) -> str:
     return '\n'.join(f'  PR #{k}: {v:.2%}' for k, v in predictions.items())
 
 
+def collect_predictions(
+    pr_number: Optional[int],
+    probability: Optional[float],
+    json_input: Optional[str],
+    open_prs: List[Dict[str, Any]],
+    issue_id: int,
+    repo: str,
+    issue_number_gh: int,
+) -> Dict[int, float]:
+    """Collect predictions from one of three input modes.
+
+    Modes:
+        1. ``--json-input '{"101": 0.85}'`` — batch JSON dict
+        2. ``--pr N --probability F`` — single prediction
+        3. Interactive TTY prompts (default when no flags provided)
+
+    Args:
+        pr_number: PR number from ``--pr`` flag, or None.
+        probability: Probability from ``--probability`` flag, or None.
+        json_input: Raw JSON string from ``--json-input`` flag, or None.
+        open_prs: List of open PR dicts (used for interactive table display).
+        issue_id: On-chain issue ID (for display).
+        repo: Repository full name (for display).
+        issue_number_gh: GitHub issue number (for display).
+
+    Returns:
+        Dict mapping PR numbers to probabilities.
+
+    Raises:
+        click.ClickException: On invalid input or empty predictions.
+    """
+    predictions: Dict[int, float] = {}
+
+    if json_input is not None:
+        try:
+            raw = json.loads(json_input)
+        except json.JSONDecodeError as e:
+            raise click.ClickException(f'Invalid JSON input: {e}')
+
+        if not isinstance(raw, dict):
+            raise click.ClickException('--json-input must be a JSON object mapping PR numbers to probabilities.')
+
+        for k, v in raw.items():
+            try:
+                pn = int(k)
+            except ValueError:
+                raise click.ClickException(f'Invalid PR number in JSON: {k}')
+            try:
+                prob = float(v)
+            except (ValueError, TypeError):
+                raise click.ClickException(f'Invalid probability for PR {k}: {v}')
+            predictions[pn] = prob
+
+    elif pr_number is not None:
+        if probability is None:
+            raise click.ClickException('--probability is required when using --pr.')
+        predictions[pr_number] = probability
+
+    elif probability is not None:
+        raise click.ClickException('--pr is required when using --probability.')
+
+    else:
+        if not _is_interactive():
+            raise click.ClickException(
+                'Interactive mode requires a TTY. Use --pr/--probability or --json-input in scripts.'
+            )
+
+        if not open_prs:
+            raise click.ClickException(f'No open PRs found for issue {issue_id} — nothing to predict on.')
+
+        console.print(f'\n[bold cyan]Open PRs for Issue #{issue_id}[/bold cyan] ({repo}#{issue_number_gh})\n')
+        console.print(build_pr_table(open_prs))
+        console.print()
+
+        running_sum = 0.0
+        while True:
+            console.print(f'[dim]Probability budget remaining: {1.0 - running_sum:.2f}[/dim]')
+            pr_input = click.prompt('PR number (or "done" to finish)', type=str, default='done')
+            if pr_input.strip().lower() == 'done':
+                break
+
+            try:
+                input_pr = int(pr_input)
+            except ValueError:
+                console.print('[red]Please enter a valid PR number.[/red]')
+                continue
+
+            if input_pr in predictions:
+                console.print(
+                    f'[yellow]PR #{input_pr} already has a prediction ({predictions[input_pr]:.2%}). Skipping.[/yellow]'
+                )
+                continue
+
+            prob_input = click.prompt(f'Probability for PR #{input_pr}', type=float)
+
+            if prob_input < 0.0 or prob_input > 1.0:
+                console.print('[red]Probability must be between 0.0 and 1.0.[/red]')
+                continue
+
+            if running_sum + prob_input > 1.0:
+                console.print(f'[red]Sum would exceed 1.0 ({running_sum + prob_input:.2f}). Try a lower value.[/red]')
+                continue
+
+            predictions[input_pr] = prob_input
+            running_sum += prob_input
+
+            if running_sum >= 0.9:
+                console.print(f'[yellow]Warning: Total probability is now {running_sum:.2f}[/yellow]')
+
+    if not predictions:
+        raise click.ClickException('No predictions provided.')
+
+    return predictions
+
+
 def validate_predictions(predictions: Dict[int, float], open_pr_numbers: set) -> None:
     """Validate that all predictions have valid probabilities and reference open PRs.
 

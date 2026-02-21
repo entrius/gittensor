@@ -11,7 +11,7 @@ Commands:
 
 import json as json_mod
 import os
-from typing import Dict, Optional
+from typing import Optional
 
 import click
 from rich.panel import Panel
@@ -21,6 +21,7 @@ from gittensor.utils.github_api_tools import find_prs_for_issue
 from .helpers import (
     _is_interactive,
     build_pr_table,
+    collect_predictions,
     console,
     fetch_issue_from_contract,
     format_pred_lines,
@@ -249,87 +250,15 @@ def issues_predict(
     open_pr_numbers = {pr['number'] for pr in open_prs}
 
     # --- Collect predictions (three input modes) ---
-    predictions: Dict[int, float] = {}
-
-    if json_input is not None:
-        # Mode 1: --json-input '{"101": 0.85}'
-        try:
-            raw = json_mod.loads(json_input)
-        except json_mod.JSONDecodeError as e:
-            raise click.ClickException(f'Invalid JSON input: {e}')
-
-        if not isinstance(raw, dict):
-            raise click.ClickException('--json-input must be a JSON object mapping PR numbers to probabilities.')
-
-        for k, v in raw.items():
-            try:
-                pn = int(k)
-            except ValueError:
-                raise click.ClickException(f'Invalid PR number in JSON: {k}')
-            try:
-                prob = float(v)
-            except (ValueError, TypeError):
-                raise click.ClickException(f'Invalid probability for PR {k}: {v}')
-            predictions[pn] = prob
-
-    elif pr_number is not None:
-        # Mode 2: --pr N --probability F
-        if probability is None:
-            raise click.ClickException('--probability is required when using --pr.')
-        predictions[pr_number] = probability
-
-    elif probability is not None:
-        raise click.ClickException('--pr is required when using --probability.')
-
-    else:
-        # Mode 3: Interactive TTY prompts
-        if not _is_interactive():
-            raise click.ClickException(
-                'Interactive mode requires a TTY. Use --pr/--probability or --json-input in scripts.'
-            )
-
-        if not open_prs:
-            raise click.ClickException(f'No open PRs found for issue {issue_id} — nothing to predict on.')
-
-        console.print(f'\n[bold cyan]Open PRs for Issue #{issue_id}[/bold cyan] ({repo}#{issue_number_gh})\n')
-        console.print(build_pr_table(open_prs))
-        console.print()
-
-        running_sum = 0.0
-        while True:
-            console.print(f'[dim]Probability budget remaining: {1.0 - running_sum:.2f}[/dim]')
-            pr_input = click.prompt('PR number (or "done" to finish)', type=str, default='done')
-            if pr_input.strip().lower() == 'done':
-                break
-
-            try:
-                input_pr = int(pr_input)
-            except ValueError:
-                console.print('[red]Please enter a valid PR number.[/red]')
-                continue
-
-            if input_pr in predictions:
-                console.print(f'[yellow]PR #{input_pr} already has a prediction ({predictions[input_pr]:.2%}). Skipping.[/yellow]')
-                continue
-
-            prob_input = click.prompt(f'Probability for PR #{input_pr}', type=float)
-
-            if prob_input < 0.0 or prob_input > 1.0:
-                console.print('[red]Probability must be between 0.0 and 1.0.[/red]')
-                continue
-
-            if running_sum + prob_input > 1.0:
-                console.print(f'[red]Sum would exceed 1.0 ({running_sum + prob_input:.2f}). Try a lower value.[/red]')
-                continue
-
-            predictions[input_pr] = prob_input
-            running_sum += prob_input
-
-            if running_sum >= 0.9:
-                console.print(f'[yellow]Warning: Total probability is now {running_sum:.2f}[/yellow]')
-
-    if not predictions:
-        raise click.ClickException('No predictions provided.')
+    predictions = collect_predictions(
+        pr_number=pr_number,
+        probability=probability,
+        json_input=json_input,
+        open_prs=open_prs,
+        issue_id=issue_id,
+        repo=repo,
+        issue_number_gh=issue_number_gh,
+    )
 
     validate_predictions(predictions, open_pr_numbers)
 

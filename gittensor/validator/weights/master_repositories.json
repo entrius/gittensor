@@ -3044,6 +3044,10 @@
     "tier": "Bronze",
     "weight": 0.21
   },
+  "lyogavin/airllm": {
+    "weight": 3.89,
+    "tier": "Silver"
+  },
   "lyswhut/lx-music-desktop": {
     "tier": "Bronze",
     "weight": 0.22

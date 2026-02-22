@@ -94,15 +94,20 @@ def issues_submissions(issue_id: int, network: str, rpc_url: str, contract: str,
     issue_number = issue['issue_number']
 
     # Get GitHub PAT (optional for submissions)
-    token = os.environ.get('GITTENSOR_MINER_PAT')
+    token = os.environ.get('GITTENSOR_MINER_PAT') or None
     if not token and not as_json:
         console.print(
             '[yellow]Warning: GITTENSOR_MINER_PAT not set — using unauthenticated API (lower rate limits).[/yellow]'
         )
 
     # Fetch open PRs
-    with console.status('[bold cyan]Fetching open PRs...', spinner='dots'):
-        prs = find_prs_for_issue(repo, issue_number, token=token, state_filter='open')
+    try:
+        with console.status('[bold cyan]Fetching open PRs...', spinner='dots'):
+            prs = find_prs_for_issue(repo, issue_number, token=token, state_filter='open')
+    except Exception as e:
+        if not as_json:
+            console.print(f'[yellow]Warning: Could not fetch PRs from GitHub: {e}[/yellow]')
+        prs = []
 
     if as_json:
         # Strip internal fields from JSON output
@@ -219,16 +224,27 @@ def issues_predict(
         gitt issues predict --id 1 --json-input '{"123": 0.5, "456": 0.3}' -y
         gitt issues predict --id 1
     """
-    # Validate issue ID
+    # --- Phase 1: Cheap local validation (no network I/O) ---
     try:
         validate_issue_id(issue_id)
     except click.BadParameter as e:
         raise click.ClickException(str(e))
 
-    # --- Validate environment ---
-    token = os.environ.get('GITTENSOR_MINER_PAT')
+    token = os.environ.get('GITTENSOR_MINER_PAT') or None
     if not token:
         raise click.ClickException('GITTENSOR_MINER_PAT environment variable is required for predict.')
+
+    # Validate flag combinations before any network calls
+    if pr_number is not None and json_input is not None:
+        raise click.ClickException('Use either --pr/--probability or --json-input, not both.')
+    if probability is not None and json_input is not None:
+        raise click.ClickException('Use either --pr/--probability or --json-input, not both.')
+    if pr_number is not None and probability is None and json_input is None:
+        raise click.ClickException('--probability is required when using --pr.')
+    if pr_number is None and probability is not None and json_input is None:
+        raise click.ClickException('--pr is required when using --probability.')
+    if probability is not None and not (0.0 <= probability <= 1.0):
+        raise click.ClickException(f'Probability must be between 0.0 and 1.0 (got {probability}).')
 
     contract_addr = get_contract_address(contract)
     ws_endpoint, network_name = resolve_network(network, rpc_url)
@@ -239,7 +255,7 @@ def issues_predict(
     if not as_json:
         print_network_header(network_name, contract_addr)
 
-    # --- Fetch issue and PRs first (fail fast before wallet/network) ---
+    # --- Phase 2: On-chain and GitHub reads (fail fast before wallet) ---
     issue = fetch_issue_from_contract(issue_id, ws_endpoint, contract_addr, verbose, require_active=True)
     repo = issue['repository_full_name']
     issue_number_gh = issue['issue_number']
@@ -249,7 +265,7 @@ def issues_predict(
 
     open_pr_numbers = {pr['number'] for pr in open_prs}
 
-    # --- Collect predictions (three input modes) ---
+    # --- Phase 3: Collect and validate predictions ---
     predictions = collect_predictions(
         pr_number=pr_number,
         probability=probability,
@@ -262,7 +278,7 @@ def issues_predict(
 
     validate_predictions(predictions, open_pr_numbers)
 
-    # --- Load wallet and verify registration ---
+    # --- Phase 4: Load wallet and verify registration (expensive, last) ---
     try:
         import bittensor as bt
 
@@ -290,7 +306,7 @@ def issues_predict(
     if not as_json:
         console.print(f'[dim]Miner hotkey: {hotkey_addr}[/dim]')
 
-    # --- Build payload ---
+    # --- Phase 5: Build payload, confirm, output ---
     total_prob = sum(predictions.values())
     payload = {
         'issue_id': issue_id,

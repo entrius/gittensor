@@ -702,6 +702,35 @@ class TestSubmissionsCommand:
 
         assert result.exit_code == 0
 
+    @patch(_PATCH_FIND_PRS)
+    @patch(_PATCH_FETCH_ISSUE)
+    @patch(_PATCH_RESOLVE)
+    def test_github_api_failure_graceful(self, mock_resolve, mock_fetch, mock_find):
+        """GitHub API failure should show warning and empty results, not crash."""
+        mock_resolve.return_value = ('wss://test.endpoint', 'test')
+        mock_fetch.return_value = SAMPLE_ISSUE
+        mock_find.side_effect = Exception('GitHub API rate limited')
+
+        result = self._invoke(['--id', '1'])
+
+        assert result.exit_code == 0
+        assert 'No open PRs found' in result.output
+
+    @patch(_PATCH_FIND_PRS)
+    @patch(_PATCH_FETCH_ISSUE)
+    @patch(_PATCH_RESOLVE)
+    def test_empty_pat_treated_as_none(self, mock_resolve, mock_fetch, mock_find):
+        """Empty string GITTENSOR_MINER_PAT should be treated as unset."""
+        mock_resolve.return_value = ('wss://test.endpoint', 'test')
+        mock_fetch.return_value = SAMPLE_ISSUE
+        mock_find.return_value = []
+
+        result = self._invoke(['--id', '1'], env={'GITTENSOR_MINER_PAT': ''})
+
+        assert result.exit_code == 0
+        # Should warn about missing PAT
+        assert 'GITTENSOR_MINER_PAT' in result.output or 'unauthenticated' in result.output.lower()
+
 
 # =============================================================================
 # predict command tests
@@ -901,6 +930,57 @@ class TestPredictCommand:
 
         assert result.exit_code != 0
         assert 'between 0.0 and 1.0' in result.output
+
+    # --- Early flag-conflict validation (before network I/O) ---
+
+    def test_pr_and_json_input_mutually_exclusive(self, predict_mocks):
+        """--pr and --json-input cannot be used together."""
+        result = self._invoke(['--id', '1', '--pr', '123', '--probability', '0.5', '--json-input', '{"456": 0.3}', '-y'])
+
+        assert result.exit_code != 0
+        assert 'not both' in result.output
+        # Verify no network calls were made (fail fast)
+        predict_mocks['fetch_issue'].assert_not_called()
+
+    def test_probability_and_json_input_mutually_exclusive(self, predict_mocks):
+        """--probability and --json-input cannot be used together."""
+        result = self._invoke(['--id', '1', '--probability', '0.5', '--json-input', '{"456": 0.3}', '-y'])
+
+        assert result.exit_code != 0
+        assert 'not both' in result.output
+        predict_mocks['fetch_issue'].assert_not_called()
+
+    def test_early_probability_range_check(self, predict_mocks):
+        """Out-of-range probability caught before network calls."""
+        result = self._invoke(['--id', '1', '--pr', '123', '--probability', '2.0', '-y'])
+
+        assert result.exit_code != 0
+        assert 'between 0.0 and 1.0' in result.output
+        predict_mocks['fetch_issue'].assert_not_called()
+
+    def test_early_pr_without_probability_check(self, predict_mocks):
+        """--pr without --probability caught before network calls."""
+        result = self._invoke(['--id', '1', '--pr', '123', '-y'])
+
+        assert result.exit_code != 0
+        assert '--probability is required' in result.output
+        predict_mocks['fetch_issue'].assert_not_called()
+
+    def test_early_probability_without_pr_check(self, predict_mocks):
+        """--probability without --pr caught before network calls."""
+        result = self._invoke(['--id', '1', '--probability', '0.5', '-y'])
+
+        assert result.exit_code != 0
+        assert '--pr is required' in result.output
+        predict_mocks['fetch_issue'].assert_not_called()
+
+    def test_empty_string_pat_treated_as_missing(self):
+        """Empty string GITTENSOR_MINER_PAT should be treated as unset."""
+        runner = CliRunner(env={'GITTENSOR_MINER_PAT': ''})
+        result = runner.invoke(issues_predict, ['--id', '1', '--pr', '1', '--probability', '0.5', '-y'])
+
+        assert result.exit_code != 0
+        assert 'GITTENSOR_MINER_PAT' in result.output
 
 
 # =============================================================================

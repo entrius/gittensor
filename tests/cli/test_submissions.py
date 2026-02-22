@@ -6,6 +6,7 @@ Tests for submissions and predict CLI commands, find_prs_for_issue, and shared h
 """
 
 import json
+import os
 import sys
 from unittest.mock import MagicMock, call, patch
 
@@ -15,11 +16,14 @@ from click.testing import CliRunner
 
 from gittensor.cli.issue_commands.helpers import (
     build_pr_table,
+    build_prediction_payload,
     collect_predictions,
     fetch_issue_from_contract,
     format_pred_lines,
+    get_github_pat,
     validate_issue_id,
     validate_predictions,
+    verify_miner_registration,
 )
 from gittensor.cli.issue_commands.submissions import issues_predict, issues_submissions
 from gittensor.utils.github_api_tools import _resolve_pr_state, find_prs_for_issue
@@ -125,7 +129,7 @@ def _make_rest_timeline_event(pr_number, title='PR', author='user', state='open'
 _PATCH_FIND_PRS = 'gittensor.cli.issue_commands.submissions.find_prs_for_issue'
 _PATCH_FETCH_ISSUE = 'gittensor.cli.issue_commands.submissions.fetch_issue_from_contract'
 _PATCH_RESOLVE = 'gittensor.cli.issue_commands.submissions.resolve_network'
-_PATCH_READ_NETUID = 'gittensor.cli.issue_commands.submissions.read_netuid_from_contract'
+_PATCH_VERIFY_MINER = 'gittensor.cli.issue_commands.submissions.verify_miner_registration'
 
 
 # =============================================================================
@@ -137,41 +141,24 @@ _PATCH_READ_NETUID = 'gittensor.cli.issue_commands.submissions.read_netuid_from_
 def predict_mocks():
     """Set up all mocks needed for predict command tests.
 
-    After the flow reorder, issue fetch and PR fetch happen before wallet loading.
-    The bittensor mock is only needed for the wallet/registration step.
+    verify_miner_registration is now a helper — we mock it to return a hotkey address
+    directly, avoiding the need to mock bittensor internals.
     """
-    # Mock bittensor module (inline import in predict command)
-    bt_mod = MagicMock()
-    wallet = MagicMock()
-    wallet.hotkey.ss58_address = '5FakeHotkey123'
-    bt_mod.Wallet.return_value = wallet
-
-    metagraph = MagicMock()
-    metagraph.hotkeys = ['5FakeHotkey123', '5OtherHotkey456']
-    subtensor = MagicMock()
-    subtensor.metagraph.return_value = metagraph
-    bt_mod.Subtensor.return_value = subtensor
-
     with patch(_PATCH_RESOLVE) as mock_resolve, \
          patch(_PATCH_FETCH_ISSUE) as mock_fetch, \
          patch(_PATCH_FIND_PRS) as mock_find, \
-         patch(_PATCH_READ_NETUID) as mock_netuid, \
-         patch.dict(sys.modules, {'bittensor': bt_mod}):
+         patch(_PATCH_VERIFY_MINER) as mock_verify:
 
         mock_resolve.return_value = ('wss://test.endpoint', 'test')
         mock_fetch.return_value = SAMPLE_ISSUE
         mock_find.return_value = SAMPLE_OPEN_PRS
-        mock_netuid.return_value = 74
+        mock_verify.return_value = '5FakeHotkey123'
 
         yield {
-            'bt': bt_mod,
             'resolve': mock_resolve,
             'fetch_issue': mock_fetch,
             'find_prs': mock_find,
-            'netuid': mock_netuid,
-            'wallet': wallet,
-            'metagraph': metagraph,
-            'subtensor': subtensor,
+            'verify_miner': mock_verify,
         }
 
 
@@ -855,7 +842,10 @@ class TestPredictCommand:
         assert 'Completed' in result.output
 
     def test_unregistered_hotkey_rejected(self, predict_mocks):
-        predict_mocks['wallet'].hotkey.ss58_address = '5NotRegistered'
+        predict_mocks['verify_miner'].side_effect = click.ClickException(
+            'Hotkey 5NotRegistered is not registered on the metagraph. '
+            'Register your miner before submitting predictions.'
+        )
 
         result = self._invoke(['--id', '1', '--pr', '123', '--probability', '0.5', '-y'])
 
@@ -871,13 +861,15 @@ class TestPredictCommand:
         assert '456' in payload['predictions']
 
     def test_wallet_load_failure(self, predict_mocks):
-        """ImportError during wallet loading shows helpful message."""
-        predict_mocks['bt'].Wallet.side_effect = Exception('wallet file not found')
+        """Wallet loading failure shows helpful message."""
+        predict_mocks['verify_miner'].side_effect = click.ClickException(
+            'Failed to load wallet or connect to network: wallet file not found'
+        )
 
         result = self._invoke(['--id', '1', '--pr', '123', '--probability', '0.5', '-y'])
 
         assert result.exit_code != 0
-        assert 'Failed to load wallet' in result.output or 'wallet' in result.output.lower()
+        assert 'Failed to load wallet' in result.output
 
     def test_predict_shows_hotkey(self, predict_mocks):
         """Successful predict displays the miner hotkey."""
@@ -1345,3 +1337,148 @@ class TestCascadingFallback:
         find_prs_for_issue('owner/repo', 42, token=None, state_filter='merged')
 
         mock_rest.assert_called_once_with('owner', 'repo', 42, 'owner/repo', 'merged')
+
+
+# =============================================================================
+# get_github_pat tests
+# =============================================================================
+
+
+class TestGetGithubPat:
+    """Unit tests for the get_github_pat helper."""
+
+    @patch.dict(os.environ, {'GITTENSOR_MINER_PAT': 'ghp_test123'})
+    def test_returns_pat_when_set(self):
+        assert get_github_pat() == 'ghp_test123'
+
+    @patch.dict(os.environ, {}, clear=True)
+    def test_returns_none_when_unset(self):
+        result = get_github_pat()
+        assert result is None
+
+    @patch.dict(os.environ, {'GITTENSOR_MINER_PAT': ''})
+    def test_empty_string_returns_none(self):
+        """Empty PAT should be treated as unset."""
+        result = get_github_pat()
+        assert result is None
+
+    @patch.dict(os.environ, {'GITTENSOR_MINER_PAT': '  '})
+    def test_whitespace_only_returns_value(self):
+        """Whitespace-only PAT is technically set — caller decides whether to strip."""
+        result = get_github_pat()
+        assert result == '  '
+
+
+# =============================================================================
+# verify_miner_registration tests
+# =============================================================================
+
+
+class TestVerifyMinerRegistration:
+    """Unit tests for the verify_miner_registration helper."""
+
+    def _make_mock_bt(self, hotkey_addr='5FakeRegistered', metagraph_hotkeys=None):
+        """Create a mock bittensor module with wallet and subtensor."""
+        mock_bt = MagicMock()
+        mock_wallet = MagicMock()
+        mock_wallet.hotkey.ss58_address = hotkey_addr
+        mock_bt.Wallet.return_value = mock_wallet
+
+        mock_metagraph = MagicMock()
+        mock_metagraph.hotkeys = metagraph_hotkeys or [hotkey_addr]
+        mock_subtensor = MagicMock()
+        mock_subtensor.metagraph.return_value = mock_metagraph
+        mock_bt.Subtensor.return_value = mock_subtensor
+        return mock_bt
+
+    @patch('gittensor.cli.issue_commands.helpers.read_netuid_from_contract', return_value=422)
+    def test_registered_hotkey_returns_address(self, mock_netuid):
+        mock_bt = self._make_mock_bt('5FakeRegistered', ['5FakeRegistered', '5OtherKey'])
+        with patch.dict(sys.modules, {'bittensor': mock_bt}):
+            result = verify_miner_registration('default', 'default', 'wss://test', '0xContract', False)
+
+        assert result == '5FakeRegistered'
+        mock_bt.Wallet.assert_called_once_with(name='default', hotkey='default')
+
+    @patch('gittensor.cli.issue_commands.helpers.read_netuid_from_contract', return_value=422)
+    def test_unregistered_hotkey_raises(self, mock_netuid):
+        mock_bt = self._make_mock_bt('5NotRegistered', ['5SomeOtherKey'])
+        with patch.dict(sys.modules, {'bittensor': mock_bt}):
+            with pytest.raises(click.ClickException, match='not registered'):
+                verify_miner_registration('default', 'default', 'wss://test', '0xContract', False)
+
+    def test_wallet_load_exception_raises(self):
+        mock_bt = MagicMock()
+        mock_bt.Wallet.side_effect = Exception('wallet file not found')
+        with patch.dict(sys.modules, {'bittensor': mock_bt}):
+            with pytest.raises(click.ClickException, match='Failed to load wallet'):
+                verify_miner_registration('bad', 'hotkey', 'wss://test', '0xContract', False)
+
+    def test_missing_bittensor_raises(self):
+        with patch.dict(sys.modules, {'bittensor': None}):
+            with pytest.raises(click.ClickException, match='Missing dependency'):
+                verify_miner_registration('default', 'default', 'wss://test', '0xContract', False)
+
+    @patch('gittensor.cli.issue_commands.helpers.read_netuid_from_contract', return_value=74)
+    def test_custom_wallet_name_passed(self, mock_netuid):
+        mock_bt = self._make_mock_bt('5FakeKey')
+        with patch.dict(sys.modules, {'bittensor': mock_bt}):
+            verify_miner_registration('my_wallet', 'my_hotkey', 'wss://test', '0xContract', False)
+
+        mock_bt.Wallet.assert_called_once_with(name='my_wallet', hotkey='my_hotkey')
+
+    @patch('gittensor.cli.issue_commands.helpers.read_netuid_from_contract', return_value=422)
+    def test_subtensor_connect_failure_raises(self, mock_netuid):
+        mock_bt = MagicMock()
+        mock_wallet = MagicMock()
+        mock_wallet.hotkey.ss58_address = '5FakeKey'
+        mock_bt.Wallet.return_value = mock_wallet
+        mock_bt.Subtensor.side_effect = Exception('Connection refused')
+        with patch.dict(sys.modules, {'bittensor': mock_bt}):
+            with pytest.raises(click.ClickException, match='Failed to load wallet or connect'):
+                verify_miner_registration('default', 'default', 'wss://test', '0xContract', False)
+
+
+# =============================================================================
+# build_prediction_payload tests
+# =============================================================================
+
+
+class TestBuildPredictionPayload:
+    """Unit tests for the build_prediction_payload helper."""
+
+    def test_basic_payload(self):
+        payload = build_prediction_payload(1, 'owner/repo', 42, '5FakeHotkey', {123: 0.7})
+
+        assert payload['issue_id'] == 1
+        assert payload['repository'] == 'owner/repo'
+        assert payload['issue_number'] == 42
+        assert payload['miner_hotkey'] == '5FakeHotkey'
+        assert payload['predictions'] == {'123': 0.7}
+
+    def test_prediction_keys_are_strings(self):
+        payload = build_prediction_payload(1, 'owner/repo', 42, '5Key', {123: 0.5, 456: 0.3})
+
+        for k in payload['predictions']:
+            assert isinstance(k, str)
+
+    def test_multiple_predictions(self):
+        preds = {101: 0.3, 202: 0.4, 303: 0.2}
+        payload = build_prediction_payload(5, 'org/lib', 99, '5Hotkey', preds)
+
+        assert len(payload['predictions']) == 3
+        assert payload['predictions']['101'] == 0.3
+        assert payload['predictions']['202'] == 0.4
+        assert payload['predictions']['303'] == 0.2
+
+    def test_empty_predictions(self):
+        payload = build_prediction_payload(1, 'owner/repo', 42, '5Key', {})
+
+        assert payload['predictions'] == {}
+
+    def test_payload_is_json_serializable(self):
+        payload = build_prediction_payload(1, 'owner/repo', 42, '5Key', {123: 0.7})
+
+        serialized = json.dumps(payload)
+        deserialized = json.loads(serialized)
+        assert deserialized == payload

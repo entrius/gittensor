@@ -895,6 +895,89 @@ def collect_predictions(
     return predictions
 
 
+def get_github_pat() -> Optional[str]:
+    """Return the GitHub PAT from environment, or None if unset/empty."""
+    return os.environ.get('GITTENSOR_MINER_PAT') or None
+
+
+def verify_miner_registration(
+    wallet_name: str,
+    wallet_hotkey: str,
+    ws_endpoint: str,
+    contract_addr: str,
+    verbose: bool,
+) -> str:
+    """Load wallet and verify hotkey is registered on the metagraph.
+
+    Args:
+        wallet_name: Bittensor wallet name.
+        wallet_hotkey: Bittensor hotkey name.
+        ws_endpoint: WebSocket endpoint for Subtensor.
+        contract_addr: Contract address (for netuid lookup).
+        verbose: If True, print debug output.
+
+    Returns:
+        The miner's SS58 hotkey address.
+
+    Raises:
+        click.ClickException: If wallet loading fails, hotkey is not registered,
+            or bittensor is not installed.
+    """
+    try:
+        import bittensor as bt
+
+        wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
+        hotkey_addr = wallet.hotkey.ss58_address
+
+        with console.status('[bold cyan]Verifying miner registration...', spinner='dots'):
+            subtensor = bt.Subtensor(network=ws_endpoint)
+            netuid = read_netuid_from_contract(ws_endpoint, contract_addr, verbose)
+            metagraph = subtensor.metagraph(netuid=netuid)
+
+        if hotkey_addr not in metagraph.hotkeys:
+            raise click.ClickException(
+                f'Hotkey {hotkey_addr} is not registered on the metagraph. '
+                f'Register your miner before submitting predictions.'
+            )
+
+        return hotkey_addr
+
+    except ImportError as e:
+        raise click.ClickException(f'Missing dependency — {e}. Install with: pip install bittensor')
+    except click.ClickException:
+        raise
+    except Exception as e:
+        raise click.ClickException(f'Failed to load wallet or connect to network: {e}')
+
+
+def build_prediction_payload(
+    issue_id: int,
+    repo: str,
+    issue_number: int,
+    hotkey_addr: str,
+    predictions: Dict[int, float],
+) -> Dict[str, Any]:
+    """Build the prediction payload dict for broadcast or JSON output.
+
+    Args:
+        issue_id: On-chain issue ID.
+        repo: Repository full name (owner/repo).
+        issue_number: GitHub issue number.
+        hotkey_addr: Miner's SS58 hotkey address.
+        predictions: Dict mapping PR numbers to probabilities.
+
+    Returns:
+        Payload dict with string-keyed predictions.
+    """
+    return {
+        'issue_id': issue_id,
+        'repository': repo,
+        'issue_number': issue_number,
+        'miner_hotkey': hotkey_addr,
+        'predictions': {str(k): v for k, v in predictions.items()},
+    }
+
+
 def validate_predictions(predictions: Dict[int, float], open_pr_numbers: set) -> None:
     """Validate that all predictions have valid probabilities and reference open PRs.
 

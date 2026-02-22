@@ -10,7 +10,6 @@ Commands:
 """
 
 import json as json_mod
-import os
 from typing import Optional
 
 import click
@@ -21,16 +20,18 @@ from gittensor.utils.github_api_tools import find_prs_for_issue
 from .helpers import (
     _is_interactive,
     build_pr_table,
+    build_prediction_payload,
     collect_predictions,
     console,
     fetch_issue_from_contract,
     format_pred_lines,
     get_contract_address,
+    get_github_pat,
     print_network_header,
-    read_netuid_from_contract,
     resolve_network,
     validate_issue_id,
     validate_predictions,
+    verify_miner_registration,
 )
 
 
@@ -94,7 +95,7 @@ def issues_submissions(issue_id: int, network: str, rpc_url: str, contract: str,
     issue_number = issue['issue_number']
 
     # Get GitHub PAT (optional for submissions)
-    token = os.environ.get('GITTENSOR_MINER_PAT') or None
+    token = get_github_pat()
     if not token and not as_json:
         console.print(
             '[yellow]Warning: GITTENSOR_MINER_PAT not set — using unauthenticated API (lower rate limits).[/yellow]'
@@ -230,7 +231,7 @@ def issues_predict(
     except click.BadParameter as e:
         raise click.ClickException(str(e))
 
-    token = os.environ.get('GITTENSOR_MINER_PAT') or None
+    token = get_github_pat()
     if not token:
         raise click.ClickException('GITTENSOR_MINER_PAT environment variable is required for predict.')
 
@@ -260,8 +261,11 @@ def issues_predict(
     repo = issue['repository_full_name']
     issue_number_gh = issue['issue_number']
 
-    with console.status('[bold cyan]Fetching open PRs...', spinner='dots'):
-        open_prs = find_prs_for_issue(repo, issue_number_gh, token=token, state_filter='open')
+    try:
+        with console.status('[bold cyan]Fetching open PRs...', spinner='dots'):
+            open_prs = find_prs_for_issue(repo, issue_number_gh, token=token, state_filter='open')
+    except Exception as e:
+        raise click.ClickException(f'Failed to fetch PRs from GitHub: {e}')
 
     open_pr_numbers = {pr['number'] for pr in open_prs}
 
@@ -279,42 +283,14 @@ def issues_predict(
     validate_predictions(predictions, open_pr_numbers)
 
     # --- Phase 4: Load wallet and verify registration (expensive, last) ---
-    try:
-        import bittensor as bt
-
-        wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
-        hotkey_addr = wallet.hotkey.ss58_address
-
-        with console.status('[bold cyan]Verifying miner registration...', spinner='dots'):
-            subtensor = bt.Subtensor(network=ws_endpoint)
-            netuid = read_netuid_from_contract(ws_endpoint, contract_addr, verbose)
-            metagraph = subtensor.metagraph(netuid=netuid)
-
-        if hotkey_addr not in metagraph.hotkeys:
-            raise click.ClickException(
-                f'Hotkey {hotkey_addr} is not registered on the metagraph. '
-                f'Register your miner before submitting predictions.'
-            )
-
-    except ImportError as e:
-        raise click.ClickException(f'Missing dependency — {e}. Install with: pip install bittensor')
-    except click.ClickException:
-        raise
-    except Exception as e:
-        raise click.ClickException(f'Failed to load wallet or connect to network: {e}')
+    hotkey_addr = verify_miner_registration(wallet_name, wallet_hotkey, ws_endpoint, contract_addr, verbose)
 
     if not as_json:
         console.print(f'[dim]Miner hotkey: {hotkey_addr}[/dim]')
 
     # --- Phase 5: Build payload, confirm, output ---
+    payload = build_prediction_payload(issue_id, repo, issue_number_gh, hotkey_addr, predictions)
     total_prob = sum(predictions.values())
-    payload = {
-        'issue_id': issue_id,
-        'repository': repo,
-        'issue_number': issue_number_gh,
-        'miner_hotkey': hotkey_addr,
-        'predictions': {str(k): v for k, v in predictions.items()},
-    }
 
     # --- Confirmation ---
     skip_confirm = yes or not _is_interactive()

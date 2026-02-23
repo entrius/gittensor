@@ -2795,10 +2795,6 @@
     "tier": "Gold",
     "weight": 15.98
   },
-  "kubernetes-retired/dashboard": {
-    "tier": "Gold",
-    "weight": 15.26
-  },
   "kubernetes-sigs/aws-load-balancer-controller": {
     "tier": "Gold",
     "weight": 15.9

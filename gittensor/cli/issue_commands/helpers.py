@@ -12,6 +12,7 @@ import re
 import struct
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -661,3 +662,288 @@ def read_issues_from_contract(ws_endpoint: str, contract_addr: str, verbose: boo
             console.print(f'[dim]Debug: Connection/read error: {e}[/dim]')
         console.print(f'[yellow]Error reading from contract: {e}[/yellow]')
         return []
+
+
+# ---------------------------------------------------------------------------
+# Submissions / predict helpers
+# ---------------------------------------------------------------------------
+
+BOUNTIED_STATUSES = ('Registered', 'Active')
+
+
+def get_github_pat() -> Optional[str]:
+    """Return GITTENSOR_MINER_PAT from environment, or None."""
+    return os.environ.get('GITTENSOR_MINER_PAT') or None
+
+
+def fetch_issue_prs(repository_full_name: str, issue_number: int, token: Optional[str]) -> List[Dict[str, Any]]:
+    """Fetch open PRs referencing the issue.
+
+    Delegates to ``find_prs_for_issue`` in ``github_api_tools`` which cascades:
+    GraphQL cross-reference timeline → authenticated REST → unauthenticated REST.
+    """
+    try:
+        from gittensor.utils.github_api_tools import find_prs_for_issue
+
+        return find_prs_for_issue(repository_full_name, issue_number, token=token, state_filter='open')
+    except Exception as e:
+        console.print(f'[yellow]Failed to fetch PRs from GitHub ({e}); showing none.[/yellow]')
+        return []
+
+
+def fetch_issue_from_contract(
+    ws_endpoint: str,
+    contract_addr: str,
+    issue_id: int,
+    require_active: bool = False,
+    verbose: bool = False,
+) -> Dict[str, Any]:
+    """Resolve on-chain issue by ID, validate status. Raises ClickException on failure."""
+    issues = read_issues_from_contract(ws_endpoint, contract_addr, verbose)
+    issue = next((i for i in issues if i.get('id') == issue_id), None)
+    if not issue:
+        raise click.ClickException(f'Issue {issue_id} not found on-chain.')
+    status = issue.get('status') or ''
+    if status not in BOUNTIED_STATUSES:
+        raise click.ClickException(f'Issue {issue_id} is not in a bountied state (status: {status}).')
+    if require_active and status != 'Active':
+        raise click.ClickException(
+            f'Issue {issue_id} is not active (status: {status}). Predictions require Active status.'
+        )
+    repo = issue.get('repository_full_name', '')
+    issue_number = issue.get('issue_number', 0)
+    if not repo or not issue_number:
+        raise click.ClickException('Issue missing repository or issue number.')
+    return issue
+
+
+def validate_probability(value: float, param_hint: str = 'probability') -> float:
+    """Ensure probability is in [0.0, 1.0]. Raises click.BadParameter if not."""
+    if not (0.0 <= value <= 1.0):
+        raise click.BadParameter(
+            f'Probability must be between 0.0 and 1.0 (got {value})',
+            param_hint=param_hint,
+        )
+    return value
+
+
+def validate_predictions(
+    predictions: Dict[int, float],
+    valid_pr_numbers: set,
+    param_hint: str = 'predictions',
+) -> None:
+    """Validate PR existence and sum <= 1.0. Raises on failure with available PRs listed."""
+    for num in predictions:
+        if num not in valid_pr_numbers:
+            available = sorted(valid_pr_numbers)
+            raise click.BadParameter(
+                f'PR #{num} is not an open PR for this issue. Open PRs: {available}',
+                param_hint=param_hint,
+            )
+    total = sum(predictions.values())
+    if total > 1.0:
+        raise click.BadParameter(
+            f'Sum of probabilities must be <= 1.0 (got {total:.4f})',
+            param_hint=param_hint,
+        )
+
+
+def build_pr_table(prs: List[Dict[str, Any]], issue_number: Optional[int] = None):
+    """Build a Rich Table of open PRs (reusable by submissions and predict).
+
+    Args:
+        prs: List of PR dicts from GitHub API.
+        issue_number: If provided, adds a "Closes?" column indicating
+            whether the PR references closing keywords for this issue.
+    """
+    from rich.table import Table
+
+    table = Table(show_header=True, header_style='bold magenta')
+    table.add_column('PR #', style='cyan', justify='right')
+    table.add_column('Title', style='green', max_width=50)
+    table.add_column('Author', style='yellow')
+    table.add_column('Created', style='dim')
+    table.add_column('Review', justify='right')
+    if issue_number is not None:
+        table.add_column('Closes?', justify='center')
+    table.add_column('URL', style='dim')
+    for pr in prs:
+        created = (pr.get('created_at') or '')[:10]
+        review = 'Approved' if (pr.get('review_count') or 0) > 0 else '\u2014'
+        row = [
+            str(pr.get('number', '')),
+            (pr.get('title') or '')[:50],
+            pr.get('author_login', ''),
+            created,
+            review,
+        ]
+        if issue_number is not None:
+            closes = issue_number in (pr.get('closing_numbers') or [])
+            row.append('[green]\u2713[/green]' if closes else '\u2014')
+        row.append((pr.get('url') or '')[:60])
+        table.add_row(*row)
+    return table
+
+
+def format_prediction_lines(predictions: Dict[int, float]) -> str:
+    """Format predictions as indented lines for Rich panels."""
+    lines = [f'  PR #{num}: {prob * 100:.2f}%' for num, prob in sorted(predictions.items())]
+    total = sum(predictions.values())
+    lines.append(f'Total: {total * 100:.2f}%')
+    return '\n'.join(lines)
+
+
+def collect_predictions(
+    pr_number: Optional[int],
+    probability: Optional[float],
+    json_input: Optional[str],
+    prs: List[Dict[str, Any]],
+    pr_numbers: set,
+    issue_id: int,
+) -> Dict[int, float]:
+    """Collect and validate predictions from one of three input modes.
+
+    Modes:
+      1. ``--json-input`` — batch predictions from JSON string
+      2. ``--pr N --probability F`` — single prediction
+      3. Interactive TTY prompt (default when neither is set)
+
+    Handles flag conflict validation, JSON parsing, probability validation,
+    and PR-set validation. Returns dict mapping PR number → probability.
+    """
+    # --- Flag conflict checks ---
+    if pr_number is not None and json_input is not None:
+        raise click.ClickException('Use either --pr/--probability or --json-input, not both.')
+    if probability is not None and json_input is not None:
+        raise click.ClickException('Use either --pr/--probability or --json-input, not both.')
+    if pr_number is None and probability is not None and json_input is None:
+        raise click.ClickException('--probability requires --pr.')
+
+    # --- Mode 1: JSON batch ---
+    if json_input is not None:
+        predictions: Dict[int, float] = {}
+        try:
+            raw = json.loads(json_input)
+            if not isinstance(raw, dict):
+                raise click.BadParameter(
+                    'JSON input must be an object: {"pr_number": probability, ...}',
+                    param_hint='--json-input',
+                )
+            for k, v in raw.items():
+                try:
+                    pr_num = int(k)
+                except (TypeError, ValueError):
+                    raise click.BadParameter(f'Invalid PR number in JSON: {k}', param_hint='--json-input')
+                try:
+                    predictions[pr_num] = validate_probability(float(v), '--json-input')
+                except (TypeError, ValueError):
+                    raise click.BadParameter(
+                        f'Invalid probability value for PR #{k} in JSON: {v}', param_hint='--json-input'
+                    )
+        except json.JSONDecodeError as e:
+            raise click.BadParameter(f'Invalid JSON: {e}', param_hint='--json-input')
+        validate_predictions(predictions, pr_numbers, '--json-input')
+        return predictions
+
+    # --- Mode 2: single --pr + --probability ---
+    if pr_number is not None:
+        if probability is None:
+            raise click.ClickException('--probability is required when --pr is set.')
+        predictions = {pr_number: validate_probability(probability, '--probability')}
+        validate_predictions(predictions, pr_numbers, '--probability')
+        return predictions
+
+    # --- Mode 3: interactive TTY ---
+    if not prs:
+        raise click.ClickException('No open PRs for this issue.')
+    console.print(f'[bold cyan]Predict merge probability for issue #{issue_id}[/bold cyan]\n')
+    console.print(build_pr_table(prs))
+    console.print(
+        '\n[dim]Assign a probability (0.0\u20131.0) to each PR. Press Enter to skip. Total must be \u2264 1.0.[/dim]\n'
+    )
+    predictions = {}
+    total = 0.0
+    for pr in prs:
+        num = pr.get('number')
+        if num is None:
+            continue
+        while True:
+            raw_input = click.prompt(
+                f'  Probability for PR #{num} (0\u20131, blank to skip)', default='', show_default=False
+            )
+            if not raw_input.strip():
+                break
+            try:
+                val = float(raw_input.strip())
+                validate_probability(val, f'PR #{num}')
+                if total + val > 1.0:
+                    print_error(f'Sum would exceed 1.0 ({total:.2f} + {val:.2f}). Enter a lower value or skip.')
+                    continue
+                predictions[num] = val
+                total += val
+                if total >= 0.99:
+                    console.print(f'[yellow]Running total: {total:.2f} \u2014 approaching 1.0[/yellow]')
+                else:
+                    console.print(f'[dim]Running total: {total:.2f}[/dim]')
+                break
+            except (click.BadParameter, ValueError):
+                console.print('[yellow]Enter a number between 0.0 and 1.0[/yellow]')
+    if not predictions:
+        raise click.ClickException('No predictions entered.')
+    validate_predictions(predictions, pr_numbers, 'predictions')
+    return predictions
+
+
+def build_prediction_payload(
+    issue_id: int,
+    repository: str,
+    issue_number: int,
+    miner_hotkey: str,
+    predictions: Dict[int, float],
+) -> Dict[str, Any]:
+    """Build the validated payload structured for future synapse broadcast.
+
+    PR numbers are stringified in the predictions dict for JSON serialization
+    compatibility (JSON keys must be strings).
+    """
+    return {
+        'issue_id': issue_id,
+        'repository': repository,
+        'issue_number': issue_number,
+        'miner_hotkey': miner_hotkey,
+        'predictions': {str(k): v for k, v in predictions.items()},
+    }
+
+
+def read_netuid_from_contract(ws_endpoint: str, contract_addr: str, verbose: bool = False) -> Optional[int]:
+    """Read the subnet netuid from contract packed storage."""
+    try:
+        from substrateinterface import SubstrateInterface
+
+        substrate = SubstrateInterface(url=ws_endpoint)
+        packed = _read_contract_packed_storage(substrate, contract_addr, verbose)
+        if packed and packed.get('netuid') is not None:
+            return int(packed['netuid'])
+    except Exception as e:
+        if verbose:
+            console.print(f'[dim]Debug: Failed to read netuid: {e}[/dim]')
+    return None
+
+
+def verify_miner_registration(
+    ws_endpoint: str,
+    contract_addr: str,
+    hotkey_ss58: str,
+    verbose: bool = False,
+) -> bool:
+    """Return True if hotkey is registered on the subnet (netuid from contract)."""
+    try:
+        import bittensor as bt
+
+        netuid = read_netuid_from_contract(ws_endpoint, contract_addr, verbose)
+        if netuid is None:
+            return False
+        subtensor = bt.Subtensor(network=ws_endpoint)
+        return bool(subtensor.is_hotkey_registered(netuid=netuid, hotkey_ss58=hotkey_ss58))
+    except Exception:
+        return False

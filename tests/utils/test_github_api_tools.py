@@ -18,6 +18,7 @@ Run with: python run_tests.py tests/utils/
 from unittest.mock import Mock, call, patch
 
 import pytest
+import requests
 
 # Use importorskip to gracefully handle import issues
 github_api_tools = pytest.importorskip(
@@ -498,6 +499,7 @@ class TestFileChangesRetryLogic:
 
 find_solver_from_timeline = github_api_tools.find_solver_from_timeline
 find_solver_from_cross_references = github_api_tools.find_solver_from_cross_references
+get_prs_referencing_issue = github_api_tools.get_prs_referencing_issue
 
 
 def _graphql_response(nodes):
@@ -516,21 +518,139 @@ def _graphql_response(nodes):
 
 
 def _pr_node(
-    number, merged=True, merged_at='2025-06-01T00:00:00Z', user_id=42, base_repo='owner/repo', closing_issues=None
+    number,
+    merged=True,
+    merged_at='2025-06-01T00:00:00Z',
+    user_id=42,
+    base_repo='owner/repo',
+    closing_issues=None,
+    state=None,
 ):
-    """Helper to build a single cross-referenced PR node."""
+    """Helper to build a single cross-referenced PR node (matches get_prs_referencing_issue shape)."""
+    if state is None:
+        state = 'MERGED' if merged else 'OPEN'
     return {
         'source': {
             'number': number,
             'merged': merged,
             'mergedAt': merged_at,
-            'author': {'databaseId': user_id},
+            'state': state,
+            'title': f'PR #{number}',
+            'createdAt': merged_at,
+            'url': f'https://github.com/{base_repo}/pull/{number}',
+            'author': {'databaseId': user_id, 'login': 'user'},
             'baseRepository': {'nameWithOwner': base_repo},
             'closingIssuesReferences': {
                 'nodes': [{'number': n} for n in (closing_issues or [])],
             },
+            'reviews': {'totalCount': 0},
         },
     }
+
+
+class TestGetPrsReferencingIssue:
+    """Test get_prs_referencing_issue (shared timeline PR fetch)."""
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    def test_open_only_returns_only_open_prs(self, mock_graphql):
+        mock_graphql.return_value = _graphql_response(
+            [
+                _pr_node(number=10, merged=False, state='OPEN', closing_issues=[12]),
+                _pr_node(number=11, merged=True, state='MERGED', closing_issues=[12]),
+            ]
+        )
+        prs = get_prs_referencing_issue('owner/repo', 12, 'token', open_only=True)
+        assert len(prs) == 1
+        assert prs[0]['number'] == 10
+        assert prs[0]['state'] == 'OPEN'
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    def test_open_only_empty_when_no_open(self, mock_graphql):
+        mock_graphql.return_value = _graphql_response(
+            [
+                _pr_node(number=11, merged=True, state='MERGED', closing_issues=[12]),
+            ]
+        )
+        prs = get_prs_referencing_issue('owner/repo', 12, 'token', open_only=True)
+        assert len(prs) == 0
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    def test_ghost_author_returns_ghost_login(self, mock_graphql):
+        node = _pr_node(number=10, merged=False, state='OPEN', closing_issues=[12])
+        node['source']['author'] = None  # deleted GitHub account
+        mock_graphql.return_value = _graphql_response([node])
+        prs = get_prs_referencing_issue('owner/repo', 12, 'token')
+        assert prs[0]['author_login'] == 'ghost'
+        assert prs[0]['author_id'] is None
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    def test_null_source_node_skipped(self, mock_graphql):
+        mock_graphql.return_value = _graphql_response([{'source': {}}, {'source': None}])
+        prs = get_prs_referencing_issue('owner/repo', 12, 'token')
+        assert len(prs) == 0
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    def test_missing_pr_number_skipped(self, mock_graphql):
+        node = _pr_node(number=10, merged=False, state='OPEN', closing_issues=[12])
+        del node['source']['number']
+        mock_graphql.return_value = _graphql_response([node])
+        prs = get_prs_referencing_issue('owner/repo', 12, 'token')
+        assert len(prs) == 0
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    def test_all_states_returned_when_open_only_false(self, mock_graphql):
+        mock_graphql.return_value = _graphql_response(
+            [
+                _pr_node(number=10, merged=False, state='OPEN', closing_issues=[12]),
+                _pr_node(number=11, merged=True, state='MERGED', closing_issues=[12]),
+                _pr_node(number=12, merged=False, state='CLOSED', closing_issues=[12]),
+            ]
+        )
+        prs = get_prs_referencing_issue('owner/repo', 12, 'token', open_only=False)
+        assert len(prs) == 3
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    def test_reviews_counted_correctly(self, mock_graphql):
+        node = _pr_node(number=10, merged=False, state='OPEN', closing_issues=[12])
+        node['source']['reviews'] = {'totalCount': 3}
+        mock_graphql.return_value = _graphql_response([node])
+        prs = get_prs_referencing_issue('owner/repo', 12, 'token')
+        assert prs[0]['review_count'] == 3
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    def test_closing_numbers_populated(self, mock_graphql):
+        mock_graphql.return_value = _graphql_response(
+            [_pr_node(number=10, merged=False, state='OPEN', closing_issues=[12, 15, 20])]
+        )
+        prs = get_prs_referencing_issue('owner/repo', 12, 'token')
+        assert prs[0]['closing_numbers'] == [12, 15, 20]
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    def test_empty_graphql_result_returns_empty(self, mock_graphql):
+        mock_graphql.return_value = None
+        prs = get_prs_referencing_issue('owner/repo', 12, 'token')
+        assert prs == []
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    def test_multiple_open_prs_all_returned(self, mock_graphql):
+        mock_graphql.return_value = _graphql_response(
+            [
+                _pr_node(number=10, merged=False, state='OPEN', closing_issues=[12]),
+                _pr_node(number=11, merged=False, state='OPEN', closing_issues=[12]),
+                _pr_node(number=12, merged=False, state='OPEN', closing_issues=[12]),
+            ]
+        )
+        prs = get_prs_referencing_issue('owner/repo', 12, 'token', open_only=True)
+        assert len(prs) == 3
+        assert {p['number'] for p in prs} == {10, 11, 12}
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    def test_pr_from_different_repo_filtered(self, mock_graphql):
+        mock_graphql.return_value = _graphql_response(
+            [_pr_node(number=10, merged=False, state='OPEN', base_repo='other/repo', closing_issues=[12])]
+        )
+        prs = get_prs_referencing_issue('owner/repo', 12, 'token')
+        assert len(prs) == 0
 
 
 class TestFindSolverFromCrossReferences:
@@ -692,6 +812,349 @@ class TestFindSolverFromCrossReferences:
 
         assert solver_id is None
         assert pr_number is None
+
+
+class TestResolvePrState:
+    """Test _resolve_pr_state state normalization."""
+
+    def test_open_lowercased(self):
+        assert github_api_tools._resolve_pr_state('open') == 'OPEN'
+
+    def test_closed_lowercased(self):
+        assert github_api_tools._resolve_pr_state('closed') == 'CLOSED'
+
+    def test_already_uppercase(self):
+        assert github_api_tools._resolve_pr_state('OPEN') == 'OPEN'
+
+    def test_merged_flag_overrides_state(self):
+        assert github_api_tools._resolve_pr_state('closed', merged=True) == 'MERGED'
+
+    def test_merged_flag_overrides_open(self):
+        assert github_api_tools._resolve_pr_state('open', merged=True) == 'MERGED'
+
+    def test_mixed_case_normalized(self):
+        assert github_api_tools._resolve_pr_state('Open') == 'OPEN'
+        assert github_api_tools._resolve_pr_state('Closed') == 'CLOSED'
+
+    def test_merged_flag_false_preserves_state(self):
+        assert github_api_tools._resolve_pr_state('closed', merged=False) == 'CLOSED'
+
+
+class TestSearchPrsRest:
+    """Test _search_prs_rest REST Search API helper."""
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    def test_parses_search_results(self, mock_get):
+        mock_get.return_value.json.return_value = {
+            'items': [
+                {
+                    'number': 10,
+                    'title': 'Fix bug',
+                    'state': 'open',
+                    'html_url': 'https://github.com/owner/repo/pull/10',
+                    'created_at': '2025-01-01T00:00:00Z',
+                    'user': {'login': 'dev1'},
+                },
+            ],
+        }
+        mock_get.return_value.raise_for_status = lambda: None
+        mock_get.return_value.status_code = 200
+        prs = github_api_tools._search_prs_rest('owner/repo', 42)
+        assert len(prs) == 1
+        assert prs[0]['number'] == 10
+        assert prs[0]['author_login'] == 'dev1'
+        assert prs[0]['state'] == 'OPEN'
+        assert prs[0]['review_count'] == 0
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    def test_auth_token_sent_in_header(self, mock_get):
+        mock_get.return_value.json.return_value = {'items': []}
+        mock_get.return_value.raise_for_status = lambda: None
+        mock_get.return_value.status_code = 200
+        github_api_tools._search_prs_rest('owner/repo', 42, token='my-token')
+        headers = mock_get.call_args[1]['headers']
+        # make_headers uses 'token ...', not 'Bearer ...'
+        assert headers['Authorization'] == 'token my-token'
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    def test_no_auth_header_without_token(self, mock_get):
+        mock_get.return_value.json.return_value = {'items': []}
+        mock_get.return_value.raise_for_status = lambda: None
+        mock_get.return_value.status_code = 200
+        github_api_tools._search_prs_rest('owner/repo', 42, token=None)
+        headers = mock_get.call_args[1]['headers']
+        assert 'Authorization' not in headers
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    def test_retry_on_500_success(self, mock_sleep, mock_get):
+        # Fail with 500 first, then succeed
+        bad_resp = Mock()
+        bad_resp.status_code = 500
+        bad_resp.raise_for_status.side_effect = requests.HTTPError('500 Server Error')
+
+        good_resp = Mock()
+        good_resp.status_code = 200
+        good_resp.raise_for_status = lambda: None
+        good_resp.json.return_value = {'items': [{'number': 1}]}
+
+        mock_get.side_effect = [bad_resp, good_resp]
+
+        prs = github_api_tools._search_prs_rest('owner/repo', 42)
+        assert len(prs) == 1
+        assert mock_get.call_count == 2
+        mock_sleep.assert_called_once()
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    def test_retry_exhausted_raises(self, mock_sleep, mock_get):
+        # Fail with 500 always
+        bad_resp = Mock()
+        bad_resp.status_code = 500
+        bad_resp.raise_for_status.side_effect = requests.HTTPError('500 Server Error')
+        mock_get.return_value = bad_resp
+
+        with pytest.raises(requests.HTTPError):
+            github_api_tools._search_prs_rest('owner/repo', 42)
+
+        assert mock_get.call_count == 3
+        assert mock_sleep.call_count == 2
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    def test_retry_on_request_exception(self, mock_sleep, mock_get):
+        # Raise RequestException first, then succeed
+        good_resp = Mock()
+        good_resp.status_code = 200
+        good_resp.raise_for_status = lambda: None
+        good_resp.json.return_value = {'items': [{'number': 1}]}
+
+        mock_get.side_effect = [requests.exceptions.RequestException('Connection error'), good_resp]
+
+        prs = github_api_tools._search_prs_rest('owner/repo', 42)
+        assert len(prs) == 1
+        assert mock_get.call_count == 2
+        mock_sleep.assert_called_once()
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    def test_skips_items_without_number(self, mock_get):
+        mock_get.return_value.json.return_value = {
+            'items': [{'title': 'no number', 'state': 'open', 'user': {'login': 'x'}}],
+        }
+        mock_get.return_value.raise_for_status = lambda: None
+        mock_get.return_value.status_code = 200
+        prs = github_api_tools._search_prs_rest('owner/repo', 42)
+        assert len(prs) == 0
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    def test_missing_user_defaults_to_ghost(self, mock_get):
+        mock_get.return_value.json.return_value = {
+            'items': [{'number': 5, 'title': 'X', 'state': 'open', 'html_url': '', 'user': None}],
+        }
+        mock_get.return_value.raise_for_status = lambda: None
+        mock_get.return_value.status_code = 200
+        prs = github_api_tools._search_prs_rest('owner/repo', 42)
+        assert prs[0]['author_login'] == 'ghost'
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    def test_absent_user_key_defaults_to_ghost(self, mock_get):
+        mock_get.return_value.json.return_value = {
+            'items': [{'number': 5, 'title': 'X', 'state': 'open', 'html_url': ''}],
+        }
+        mock_get.return_value.raise_for_status = lambda: None
+        mock_get.return_value.status_code = 200
+        prs = github_api_tools._search_prs_rest('owner/repo', 42)
+        assert prs[0]['author_login'] == 'ghost'
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    def test_http_error_propagates(self, mock_sleep, mock_get):
+        # 403 should NOT retry (unless we decide otherwise, but currently loop catches RequestException and 5xx)
+        # requests.HTTPError is a subclass of RequestException.
+        # However, typically 4xx (client errors) are not retried in some logics, but my implementation retries RequestException.
+        # Wait, my implementation:
+        # if resp.status_code >= 500: raise_for_status() -> catches exception -> retries.
+        # resp.raise_for_status() (outside if) -> catches exception -> retries.
+        # So 403 will retry 3 times then raise.
+
+        mock_get.return_value.status_code = 403
+        mock_get.return_value.raise_for_status.side_effect = requests.HTTPError('403 rate limited')
+
+        with pytest.raises(requests.HTTPError):
+            github_api_tools._search_prs_rest('owner/repo', 42)
+
+        # Should retry 3 times
+        assert mock_get.call_count == 3
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    def test_state_all_omits_state_clause(self, mock_get):
+        mock_get.return_value.json.return_value = {'items': []}
+        mock_get.return_value.raise_for_status = lambda: None
+        mock_get.return_value.status_code = 200
+        github_api_tools._search_prs_rest('owner/repo', 42, state='all')
+        query = mock_get.call_args[1]['params']['q']
+        assert 'state:' not in query
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    def test_state_open_includes_state_clause(self, mock_get):
+        mock_get.return_value.json.return_value = {'items': []}
+        mock_get.return_value.raise_for_status = lambda: None
+        mock_get.return_value.status_code = 200
+        github_api_tools._search_prs_rest('owner/repo', 42, state='open')
+        query = mock_get.call_args[1]['params']['q']
+        assert 'state:open' in query
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    def test_timeout_propagates(self, mock_sleep, mock_get):
+        mock_get.side_effect = requests.Timeout('timed out')
+        with pytest.raises(requests.Timeout):
+            github_api_tools._search_prs_rest('owner/repo', 42)
+
+        # Should retry 3 times
+        assert mock_get.call_count == 3
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    def test_multiple_items_all_parsed(self, mock_get):
+        mock_get.return_value.json.return_value = {
+            'items': [
+                {'number': 1, 'title': 'A', 'state': 'open', 'html_url': '', 'user': {'login': 'a'}, 'created_at': ''},
+                {'number': 2, 'title': 'B', 'state': 'open', 'html_url': '', 'user': {'login': 'b'}, 'created_at': ''},
+                {'number': 3, 'title': 'C', 'state': 'open', 'html_url': '', 'user': {'login': 'c'}, 'created_at': ''},
+            ],
+        }
+        mock_get.return_value.raise_for_status = lambda: None
+        mock_get.return_value.status_code = 200
+        prs = github_api_tools._search_prs_rest('owner/repo', 42)
+        assert len(prs) == 3
+        assert {p['number'] for p in prs} == {1, 2, 3}
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    def test_closed_state_normalized_to_uppercase(self, mock_get):
+        mock_get.return_value.json.return_value = {
+            'items': [{'number': 5, 'title': 'X', 'state': 'closed', 'html_url': '', 'user': {'login': 'x'}}],
+        }
+        mock_get.return_value.raise_for_status = lambda: None
+        mock_get.return_value.status_code = 200
+        prs = github_api_tools._search_prs_rest('owner/repo', 42, state='all')
+        assert prs[0]['state'] == 'CLOSED'
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    def test_empty_items_returns_empty(self, mock_get):
+        mock_get.return_value.json.return_value = {'items': []}
+        mock_get.return_value.raise_for_status = lambda: None
+        mock_get.return_value.status_code = 200
+        prs = github_api_tools._search_prs_rest('owner/repo', 42)
+        assert prs == []
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    def test_missing_items_key_returns_empty(self, mock_get):
+        mock_get.return_value.json.return_value = {}
+        mock_get.return_value.raise_for_status = lambda: None
+        mock_get.return_value.status_code = 200
+        prs = github_api_tools._search_prs_rest('owner/repo', 42)
+        assert prs == []
+
+
+class TestFindPrsForIssue:
+    """Test find_prs_for_issue 3-level cascading PR discovery."""
+
+    @patch('gittensor.utils.github_api_tools.get_prs_referencing_issue')
+    def test_graphql_results_returned_directly(self, mock_graphql):
+        mock_graphql.return_value = [{'number': 10, 'state': 'OPEN'}]
+        prs = github_api_tools.find_prs_for_issue('owner/repo', 42, token='tok')
+        assert len(prs) == 1
+        mock_graphql.assert_called_once_with('owner/repo', 42, 'tok', open_only=True)
+
+    @patch('gittensor.utils.github_api_tools._search_prs_rest')
+    @patch('gittensor.utils.github_api_tools.get_prs_referencing_issue', return_value=[])
+    def test_graphql_empty_cascades_to_auth_rest(self, mock_graphql, mock_rest):
+        mock_rest.return_value = [{'number': 20}]
+        prs = github_api_tools.find_prs_for_issue('owner/repo', 42, token='tok')
+        assert prs[0]['number'] == 20
+        mock_rest.assert_called_once_with('owner/repo', 42, token='tok', state='open')
+
+    @patch('gittensor.utils.github_api_tools._search_prs_rest', side_effect=[[], [{'number': 30}]])
+    @patch('gittensor.utils.github_api_tools.get_prs_referencing_issue', return_value=[])
+    def test_full_three_level_cascade(self, mock_graphql, mock_rest):
+        prs = github_api_tools.find_prs_for_issue('owner/repo', 42, token='tok')
+        assert prs[0]['number'] == 30
+        assert mock_rest.call_count == 2
+        mock_rest.assert_any_call('owner/repo', 42, token='tok', state='open')
+        mock_rest.assert_any_call('owner/repo', 42, token=None, state='open')
+
+    @patch('gittensor.utils.github_api_tools._search_prs_rest')
+    def test_no_token_skips_graphql(self, mock_rest):
+        mock_rest.return_value = [{'number': 10}]
+        prs = github_api_tools.find_prs_for_issue('owner/repo', 42, token=None)
+        assert len(prs) == 1
+        mock_rest.assert_called_once_with('owner/repo', 42, token=None, state='open')
+
+    @patch('gittensor.utils.github_api_tools._search_prs_rest', side_effect=Exception('network'))
+    def test_all_levels_fail_returns_empty(self, mock_rest):
+        prs = github_api_tools.find_prs_for_issue('owner/repo', 42, token=None)
+        assert prs == []
+
+    @patch('gittensor.utils.github_api_tools._search_prs_rest')
+    @patch('gittensor.utils.github_api_tools.get_prs_referencing_issue', side_effect=Exception('gql fail'))
+    def test_graphql_exception_cascades_to_rest(self, mock_graphql, mock_rest):
+        mock_rest.return_value = [{'number': 10}]
+        prs = github_api_tools.find_prs_for_issue('owner/repo', 42, token='tok')
+        assert prs[0]['number'] == 10
+
+    @patch('gittensor.utils.github_api_tools.get_prs_referencing_issue')
+    def test_state_filter_all_passes_open_only_false(self, mock_graphql):
+        mock_graphql.return_value = [{'number': 10}]
+        github_api_tools.find_prs_for_issue('owner/repo', 42, token='tok', state_filter='all')
+        mock_graphql.assert_called_once_with('owner/repo', 42, 'tok', open_only=False)
+
+    @patch('gittensor.utils.github_api_tools.get_prs_referencing_issue')
+    def test_state_filter_open_passes_open_only_true(self, mock_graphql):
+        mock_graphql.return_value = [{'number': 10}]
+        github_api_tools.find_prs_for_issue('owner/repo', 42, token='tok', state_filter='open')
+        mock_graphql.assert_called_once_with('owner/repo', 42, 'tok', open_only=True)
+
+    @patch('gittensor.utils.github_api_tools._search_prs_rest')
+    @patch('gittensor.utils.github_api_tools.get_prs_referencing_issue', return_value=[])
+    def test_state_filter_all_propagates_to_rest(self, mock_graphql, mock_rest):
+        mock_rest.return_value = [{'number': 10}]
+        github_api_tools.find_prs_for_issue('owner/repo', 42, token='tok', state_filter='all')
+        mock_rest.assert_called_once_with('owner/repo', 42, token='tok', state='all')
+
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    @patch('gittensor.utils.github_api_tools._search_prs_rest')
+    @patch('gittensor.utils.github_api_tools.get_prs_referencing_issue', side_effect=Exception('gql rate limit'))
+    def test_logs_debug_on_graphql_failure(self, mock_graphql, mock_rest, mock_logging):
+        mock_rest.return_value = [{'number': 10}]
+        github_api_tools.find_prs_for_issue('owner/repo', 42, token='tok')
+        mock_logging.debug.assert_any_call('GraphQL PR fetch failed for owner/repo#42: gql rate limit')
+
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    @patch('gittensor.utils.github_api_tools._search_prs_rest', side_effect=[Exception('rest 403'), [{'number': 10}]])
+    @patch('gittensor.utils.github_api_tools.get_prs_referencing_issue', return_value=[])
+    def test_logs_debug_on_auth_rest_failure(self, mock_graphql, mock_rest, mock_logging):
+        github_api_tools.find_prs_for_issue('owner/repo', 42, token='tok')
+        mock_logging.debug.assert_any_call('Authenticated REST search failed for owner/repo#42: rest 403')
+
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    @patch('gittensor.utils.github_api_tools._search_prs_rest', side_effect=Exception('network down'))
+    def test_logs_debug_on_unauth_rest_failure(self, mock_rest, mock_logging):
+        prs = github_api_tools.find_prs_for_issue('owner/repo', 42, token=None)
+        assert prs == []
+        mock_logging.debug.assert_any_call('Unauthenticated REST search failed for owner/repo#42: network down')
+
+    @patch('gittensor.utils.github_api_tools._search_prs_rest', side_effect=[[], []])
+    @patch('gittensor.utils.github_api_tools.get_prs_referencing_issue', return_value=[])
+    def test_all_levels_empty_returns_empty(self, mock_graphql, mock_rest):
+        prs = github_api_tools.find_prs_for_issue('owner/repo', 42, token='tok')
+        assert prs == []
+
+    @patch('gittensor.utils.github_api_tools._search_prs_rest')
+    def test_no_token_with_state_all(self, mock_rest):
+        mock_rest.return_value = [{'number': 10}]
+        prs = github_api_tools.find_prs_for_issue('owner/repo', 42, token=None, state_filter='all')
+        assert len(prs) == 1
+        mock_rest.assert_called_once_with('owner/repo', 42, token=None, state='all')
 
 
 class TestFindSolverFromTimeline:

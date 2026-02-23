@@ -5,7 +5,7 @@ import re
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, TypedDict
 
 from gittensor.utils.utils import parse_repo_name
 
@@ -671,96 +671,251 @@ def extract_pr_number_from_url(pr_url: str) -> Optional[int]:
     return int(match.group(1)) if match else None
 
 
-def find_solver_from_cross_references(repo: str, issue_number: int, token: str) -> tuple:
-    """Fallback solver detection via GraphQL cross-referenced merged PRs.
+class PRInfo(TypedDict, total=False):
+    """Typed dictionary for PR data returned by GitHub API helpers."""
 
-    When a closed event has no commit_id, this queries GitHub's GraphQL API
-    directly for cross-referenced merged PRs that close the issue.
+    number: int
+    title: str
+    author_login: str
+    author_id: int
+    created_at: str
+    merged_at: str
+    state: str
+    url: str
+    review_count: int
+    closing_numbers: List[int]
 
-    Filters to only PRs targeting the same repo (baseRepository match) to
-    prevent false matches from unrelated repos mentioning the issue.
-    When multiple candidates exist, the most recently merged PR is selected.
 
-    Returns:
-        (solver_github_id, pr_number) — either may be None if no match found.
-    """
-    owner, name = repo.split('/')
-
-    query = """
-    query($owner: String!, $name: String!, $issueNumber: Int!) {
-      repository(owner: $owner, name: $name) {
-        issue(number: $issueNumber) {
-          timelineItems(itemTypes: [CROSS_REFERENCED_EVENT], first: 50) {
-            nodes {
-              ... on CrossReferencedEvent {
-                source {
-                  ... on PullRequest {
-                    number
-                    merged
-                    mergedAt
-                    author { ... on User { databaseId } }
-                    baseRepository { nameWithOwner }
-                    closingIssuesReferences(first: 20) {
-                      nodes { number }
-                    }
-                  }
+# GraphQL fragment used by both get_prs_referencing_issue and find_solver_from_cross_references
+_PR_TIMELINE_QUERY = """
+query($owner: String!, $name: String!, $issueNumber: Int!) {
+  repository(owner: $owner, name: $name) {
+    issue(number: $issueNumber) {
+      timelineItems(itemTypes: [CROSS_REFERENCED_EVENT], first: 50) {
+        nodes {
+          ... on CrossReferencedEvent {
+            source {
+              ... on PullRequest {
+                number
+                state
+                title
+                url
+                merged
+                mergedAt
+                createdAt
+                author { ... on User { databaseId login } }
+                baseRepository { nameWithOwner }
+                closingIssuesReferences(first: 20) {
+                  nodes { number }
                 }
+                reviews(first: 1, states: APPROVED) { totalCount }
               }
             }
           }
         }
       }
     }
-    """
+  }
+}
+"""
 
+
+def get_prs_referencing_issue(
+    repo: str,
+    issue_number: int,
+    token: str,
+    open_only: bool = False,
+) -> List[PRInfo]:
+    """Fetch PRs that reference the issue via GraphQL timeline (same methodology as issue_competitions).
+
+    Args:
+        repo: Repository full name (owner/repo).
+        issue_number: GitHub issue number.
+        token: GitHub PAT (required for GraphQL).
+        open_only: If True, return only OPEN PRs; otherwise return all referenced PRs.
+
+    Returns:
+        List of PRInfo dicts.
+    """
+    owner, name = repo.split('/')
     result = execute_graphql_query(
-        query=query,
+        query=_PR_TIMELINE_QUERY,
         variables={'owner': owner, 'name': name, 'issueNumber': issue_number},
         token=token,
         max_attempts=3,
     )
     if not result:
-        bt.logging.warning(f'GraphQL cross-reference query failed for {repo}#{issue_number}')
-        return None, None
+        return []
 
     timeline_nodes = (
         result.get('data', {}).get('repository', {}).get('issue', {}).get('timelineItems', {}).get('nodes', [])
     )
-
-    candidates = []
+    out: List[PRInfo] = []
     for node in timeline_nodes:
         pr = node.get('source', {})
-        if not pr or not pr.get('merged'):
+        if not pr:
             continue
-
-        # Reject PRs targeting a different repo (prevents cross-repo gaming)
         base_repo = pr.get('baseRepository', {}).get('nameWithOwner', '')
         if base_repo.lower() != repo.lower():
-            bt.logging.debug(f'Skipping PR#{pr.get("number")} from {base_repo} (does not target {repo})')
             continue
-
         pr_number = pr.get('number')
-        user_id = pr.get('author', {}).get('databaseId')
-        merged_at = pr.get('mergedAt', '')
-        closing_numbers = [n.get('number') for n in pr.get('closingIssuesReferences', {}).get('nodes', [])]
-        if pr_number and issue_number in closing_numbers:
-            candidates.append((pr_number, user_id, merged_at))
+        if not pr_number:
+            continue
+        state = pr.get('state', '')
+        if open_only and state != 'OPEN':
+            continue
+        author = pr.get('author', {}) or {}
+        reviews = pr.get('reviews', {}) or {}
+        closing = pr.get('closingIssuesReferences', {}).get('nodes', [])
+        closing_numbers = [n.get('number') for n in closing if n.get('number') is not None]
+        out.append(
+            {
+                'number': pr_number,
+                'title': pr.get('title') or '',
+                'author_login': author.get('login') or 'ghost',
+                'author_id': author.get('databaseId'),
+                'created_at': pr.get('createdAt') or '',
+                'merged_at': pr.get('mergedAt') or '',
+                'state': state,
+                'url': pr.get('url') or '',
+                'review_count': reviews.get('totalCount', 0) or 0,
+                'closing_numbers': closing_numbers,
+            }
+        )
+    return out
 
-    bt.logging.debug(f'Found {len(candidates)} verified closing PRs via GraphQL for {repo}#{issue_number}')
 
-    if not candidates:
+def _resolve_pr_state(raw_state: str, merged: bool = False) -> str:
+    """Normalize PR state to uppercase GraphQL-style (OPEN, CLOSED, MERGED)."""
+    if merged:
+        return 'MERGED'
+    return raw_state.upper()
+
+
+def _search_prs_rest(
+    repo: str,
+    issue_number: int,
+    token: Optional[str] = None,
+    state: str = 'open',
+) -> List[PRInfo]:
+    """Search for PRs referencing an issue via GitHub REST Search API.
+
+    Args:
+        repo: Repository full name (owner/repo).
+        issue_number: GitHub issue number.
+        token: Optional GitHub PAT for authenticated requests (higher rate limits).
+        state: PR state filter for the search query ('open' or omitted for all).
+    """
+    if token:
+        headers = make_headers(token)
+    else:
+        headers = {'Accept': 'application/vnd.github.v3+json'}
+
+    state_clause = f' state:{state}' if state != 'all' else ''
+    max_attempts = 3
+
+    for attempt in range(max_attempts):
+        try:
+            resp = requests.get(
+                f'{BASE_GITHUB_API_URL}/search/issues',
+                params={'q': f'repo:{repo} type:pr{state_clause} {issue_number} in:title,body', 'per_page': '50'},
+                headers=headers,
+                timeout=10,
+            )
+            resp.raise_for_status()
+            out: List[PRInfo] = []
+            for item in resp.json().get('items', []):
+                number = item.get('number')
+                if number is None:
+                    continue
+                user = item.get('user') or {}
+                out.append(
+                    {
+                        'number': number,
+                        'title': item.get('title') or '',
+                        'author_login': user.get('login') or 'ghost',
+                        'created_at': item.get('created_at') or '',
+                        'state': _resolve_pr_state(item.get('state', 'open')),
+                        'url': item.get('html_url') or '',
+                        'review_count': 0,
+                        'merged_at': None,
+                        'closing_numbers': [],
+                    }
+                )
+            return out
+
+        except requests.exceptions.RequestException as e:
+            if attempt < max_attempts - 1:
+                backoff = 2 * (attempt + 1)
+                bt.logging.warning(
+                    f'REST search failed for {repo}#{issue_number} (attempt {attempt + 1}/{max_attempts}): {e}, retrying in {backoff}s...'
+                )
+                time.sleep(backoff)
+            else:
+                raise
+
+    return []
+
+
+def find_prs_for_issue(
+    repo: str,
+    issue_number: int,
+    token: Optional[str] = None,
+    state_filter: Literal['open', 'all'] = 'open',
+) -> List[PRInfo]:
+    """Cascading PR discovery: GraphQL → authenticated REST → unauthenticated REST.
+
+    Fine-grained PATs can filter out cross-reference timeline events, so the
+    function retries with progressively less authentication until PRs are found.
+
+    Args:
+        repo: Repository full name (owner/repo).
+        issue_number: GitHub issue number.
+        token: Optional GitHub PAT.
+        state_filter: 'open' for open PRs only, 'all' for all states.
+    """
+    open_only = state_filter == 'open'
+    rest_state = 'open' if state_filter == 'open' else 'all'
+    if token:
+        try:
+            prs = get_prs_referencing_issue(repo, issue_number, token, open_only=open_only)
+            if prs:
+                return prs
+        except Exception as exc:
+            bt.logging.debug(f'GraphQL PR fetch failed for {repo}#{issue_number}: {exc}')
+        try:
+            prs = _search_prs_rest(repo, issue_number, token=token, state=rest_state)
+            if prs:
+                return prs
+        except Exception as exc:
+            bt.logging.debug(f'Authenticated REST search failed for {repo}#{issue_number}: {exc}')
+    try:
+        return _search_prs_rest(repo, issue_number, token=None, state=rest_state)
+    except Exception as exc:
+        bt.logging.debug(f'Unauthenticated REST search failed for {repo}#{issue_number}: {exc}')
+        return []
+
+
+def find_solver_from_cross_references(repo: str, issue_number: int, token: str) -> tuple:
+    """Fallback solver detection via GraphQL cross-referenced merged PRs.
+
+    Uses get_prs_referencing_issue; filters to merged PRs that close this issue,
+    returns the most recently merged PR's author databaseId and number.
+    """
+    prs = get_prs_referencing_issue(repo, issue_number, token, open_only=False)
+    merged = [p for p in prs if p.get('state') == 'MERGED' and issue_number in p.get('closing_numbers', [])]
+    bt.logging.debug(f'Found {len(merged)} verified closing PRs via GraphQL for {repo}#{issue_number}')
+    if not merged:
         return None, None
-
-    if len(candidates) > 1:
-        bt.logging.warning(f'Multiple closing PRs found for {repo}#{issue_number}:')
-        for pr_num, uid, merged in candidates:
-            bt.logging.debug(f'  PR#{pr_num}, solver_id={uid}, merged_at={merged}')
-        # Sort by mergedAt descending, pick the most recent
-        candidates.sort(key=lambda c: c[2], reverse=True)
-
-    pr_number, user_id, merged_at = candidates[0]
-    bt.logging.debug(f'Solver via GraphQL cross-reference: PR#{pr_number}, solver_id={user_id}, merged_at={merged_at}')
-    return user_id, pr_number
+    if len(merged) > 1:
+        bt.logging.warning(f'Multiple closing PRs found for {repo}#{issue_number}, selecting most recent.')
+    merged.sort(key=lambda p: p.get('merged_at', ''), reverse=True)
+    best = merged[0]
+    bt.logging.debug(
+        f'Solver via GraphQL cross-reference: PR#{best["number"]}, '
+        f'solver_id={best.get("author_id")}, merged_at={best.get("merged_at")}'
+    )
+    return best.get('author_id'), best['number']
 
 
 def find_solver_from_timeline(repo: str, issue_number: int, token: str) -> tuple:

@@ -73,23 +73,29 @@ def print_success(message: str) -> None:
     """Print a standardized success message."""
     console.print(f'\n[green]\u2713 {message}[/green]\n', highlight=True)
 
+
 def print_error(message: str) -> None:
     """Print a standardized error message."""
     console.print(f'\n[red]\u2717 {message}[/red]\n', highlight=True)
+
 
 def print_hint(message: str) -> None:
     """Print a hint message."""
     console.print(f'\n[dim]{message}[/dim]\n', highlight=True)
 
+
 def print_warning(message: str) -> None:
     """Print a warning message."""
     console.print(f'\n[yellow]{message}[/yellow]\n', highlight=True)
 
+
 def confirm_panel(message: str, title: str):
     console.print(Panel(message, title=title, border_style='blue'))
 
+
 def success_panel(message: str, title: str):
     console.print(Panel(message, title=title, border_style='green'))
+
 
 def emit_error_json(message: str, error_type: str = 'cli_error') -> None:
     """Emit a machine-readable error payload to stdout."""
@@ -122,9 +128,13 @@ def handle_exception(as_json: bool, message: str, error_type: str = 'cli_error')
     raise SystemExit(1)
 
 
-def loading_context(message: str, as_json: bool, spinner: str = 'dots', color = 'cyan') -> ContextManager[Any]:
+def loading_context(message: str, as_json: bool, spinner: str = 'dots', color='cyan') -> ContextManager[Any]:
     """Return a spinner context in human mode, or a no-op context in JSON mode."""
-    return nullcontext() if as_json else console.status(f'[{color}]{message}[/{color}]', spinner=spinner, spinner_style=color)
+    return (
+        nullcontext()
+        if as_json
+        else console.status(f'[{color}]{message}[/{color}]', spinner=spinner, spinner_style=color)
+    )
 
 
 def print_network_header(network_name: str, contract_addr: str) -> None:
@@ -183,11 +193,7 @@ def print_issue_submission_table(
     console.print(f'Showing {len(pull_requests)} submissions{suffix}')
 
 
-def verify_miner_registration(
-    ws_endpoint: str,
-    contract_addr: str,
-    hotkey_ss58: str
-) -> bool:
+def verify_miner_registration(ws_endpoint: str, contract_addr: str, hotkey_ss58: str) -> bool:
     """Return whether the hotkey is registered on the subnet configured by the contract netuid."""
     import bittensor as bt
     from substrateinterface import SubstrateInterface

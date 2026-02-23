@@ -23,12 +23,11 @@ TABLE_THEMES = {
     # Full wrapped grid
     'square': TableTheme(
         box_style=box.SQUARE,
-        header_style= 'bold white', #'bold magenta',
+        header_style='bold white',  #'bold magenta',
         border_style='grey35',
         show_lines=True,
         pad_edge=True,
     ),
-
     # Minimal separators with a heavier header rule
     'minimal': TableTheme(
         box_style=box.MINIMAL_HEAVY_HEAD,

@@ -76,11 +76,7 @@ def issues_submissions(
     ws_endpoint, network_name = resolve_network(network, rpc_url)
 
     if not contract_addr:
-        handle_exception(
-            as_json,
-            'Contract address not configured.',
-            'config_error'
-        )
+        handle_exception(as_json, 'Contract address not configured.', 'config_error')
 
     if not as_json:
         print_network_header(network_name, contract_addr)

@@ -48,9 +48,7 @@ def test_submissions_json_schema_is_stable(cli_root, runner, sample_issue, sampl
     assert first['closes_issue'] is True
 
 
-def test_submissions_json_handles_missing_closing_numbers(
-    cli_root, runner, sample_issue, sample_prs_missing_closing
-):
+def test_submissions_json_handles_missing_closing_numbers(cli_root, runner, sample_issue, sample_prs_missing_closing):
     with (
         patch('gittensor.cli.issue_commands.submissions.get_contract_address', return_value='0xabc'),
         patch('gittensor.cli.issue_commands.submissions.resolve_network', return_value=('ws://x', 'test')),

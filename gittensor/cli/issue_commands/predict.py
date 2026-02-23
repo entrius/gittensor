@@ -88,10 +88,10 @@ def issues_predict(
     rpc_url: str | None,
     contract: str,
     verbose: bool,
-    as_json: bool
+    as_json: bool,
 ):
     """Submit miner predictions for PRs on a bountied issue.
-    
+
     [dim]This command validates active issue state, miner registration,
     and probability bounds (each in [0.0, 1.0], total <= 1.0).[/dim]
 
@@ -169,9 +169,7 @@ def issues_predict(
         )
 
         skip_continue_prompt = yes or not _is_interactive()
-        if not skip_continue_prompt and not click.confirm(
-            'Ready to start prediction?', default=True
-        ):
+        if not skip_continue_prompt and not click.confirm('Ready to start prediction?', default=True):
             print_warning('Prediction cancelled')
             return
 
@@ -224,7 +222,7 @@ def issues_predict(
         if not skip_confirm and not click.confirm('Proceed?', default=True):
             print_warning('Prediction cancelled')
             return
-    
+
     success_panel(json_mod.dumps(payload, indent=2), title='Prediction Payload')
     print_success('Prediction prepared (TODO: broadcast)')
     broadcast_predictions_stub(payload)
@@ -380,6 +378,7 @@ def broadcast_predictions_stub(payload: dict[str, object]) -> None:
     """Broadcast integration seam (stub)."""
     pass
 
+
 def _collect_predictions_interactive(prs: list[dict]) -> dict[int, float]:
     """Prompt for per-PR probabilities in interactive mode."""
     predictions: dict[int, float] = {}
@@ -410,7 +409,9 @@ def _collect_predictions_interactive(prs: list[dict]) -> dict[int, float]:
 
             proposed_total = running_total + value
             if proposed_total > 1.0:
-                print_error(f'Total probability cannot exceed 1.0 (current {running_total:.4f}, proposed {proposed_total:.4f})')
+                print_error(
+                    f'Total probability cannot exceed 1.0 (current {running_total:.4f}, proposed {proposed_total:.4f})'
+                )
                 continue
 
             predictions[number] = value

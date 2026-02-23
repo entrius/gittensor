@@ -1525,6 +1525,10 @@
     "tier": "Gold",
     "weight": 60
   },
+  "entrius/venth": {
+    "tier": "Silver",
+    "weight": 3.52
+  },
   "envoyproxy/envoy": {
     "tier": "Silver",
     "weight": 3.88
@@ -5013,9 +5017,13 @@
     "tier": "Silver",
     "weight": 3.99
   },
+  "swarm-subnet/Langostino": {
+    "tier": "Silver",
+    "weight": 4.07
+  },
   "swarm-subnet/swarm": {
     "tier": "Silver",
-    "weight": 4.16
+    "weight": 4.78
   },
   "SWE-agent/SWE-agent": {
     "tier": "Gold",
@@ -5754,3 +5762,4 @@
     "weight": 0.17
   }
 }
+

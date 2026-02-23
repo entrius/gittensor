@@ -7,9 +7,7 @@ import json
 from unittest.mock import patch
 
 
-def test_predict_interactive_continue_cancel_skips_miner_validation(
-    cli_root, runner, sample_issue, sample_prs
-):
+def test_predict_interactive_continue_cancel_skips_miner_validation(cli_root, runner, sample_issue, sample_prs):
     with (
         patch('gittensor.cli.issue_commands.predict.get_contract_address', return_value='0xabc'),
         patch('gittensor.cli.issue_commands.predict.resolve_network', return_value=('ws://x', 'test')),
@@ -106,9 +104,7 @@ def test_predict_rejects_json_input_probability_total_over_one(runner, cli_root)
     assert 'Sum of probabilities must be <= 1.0' in payload['error']['message']
 
 
-def test_predict_rejects_pr_not_in_open_set_before_miner_validation(
-    cli_root, runner, sample_issue, sample_prs
-):
+def test_predict_rejects_pr_not_in_open_set_before_miner_validation(cli_root, runner, sample_issue, sample_prs):
     with (
         patch('gittensor.cli.issue_commands.predict.get_contract_address', return_value='0xabc'),
         patch('gittensor.cli.issue_commands.predict.resolve_network', return_value=('ws://x', 'test')),

@@ -16,6 +16,7 @@ import urllib.request
 from contextlib import nullcontext
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+from rich.panel import Panel
 from typing import Any, ContextManager, Dict, List, Optional, Tuple
 
 import click
@@ -69,20 +70,25 @@ def colorize_status(status: str) -> str:
 
 def print_success(message: str) -> None:
     """Print a standardized success message."""
-    console.print(f'\n[green]\u2713[/green] {message}\n')
-
+    console.print(f'\n[green]\u2713 {message}[/green]\n', highlight=True)
 
 def print_error(message: str) -> None:
     """Print a standardized error message."""
-    console.print(f'\n[red]{message}[/red]\n')
+    console.print(f'\n[red]\u2717 {message}[/red]\n', highlight=True)
 
 def print_hint(message: str) -> None:
     """Print a hint message."""
-    console.print(f'\n[dim]{message}[/dim] \n')
+    console.print(f'\n[dim]{message}[/dim]\n', highlight=True)
 
 def print_warning(message: str) -> None:
     """Print a warning message."""
-    console.print(f'\n[yellow]{message}[/yellow]\n')
+    console.print(f'\n[yellow]{message}[/yellow]\n', highlight=True)
+
+def confirm_panel(message: str, title: str):
+    console.print(Panel(message, title=title, border_style='blue'))
+
+def success_panel(message: str, title: str):
+    console.print(Panel(message, title=title, border_style='green'))
 
 def emit_error_json(message: str, error_type: str = 'cli_error') -> None:
     """Emit a machine-readable error payload to stdout."""
@@ -115,15 +121,16 @@ def handle_exception(as_json: bool, message: str, error_type: str = 'cli_error')
     raise SystemExit(1)
 
 
-def loading_context(message: str, as_json: bool) -> ContextManager[Any]:
+def loading_context(message: str, as_json: bool, spinner: str = 'dots', color = 'cyan') -> ContextManager[Any]:
     """Return a spinner context in human mode, or a no-op context in JSON mode."""
-    return nullcontext() if as_json else console.status(message, spinner='dots')
+    return nullcontext() if as_json else console.status(f'[{color}]{message}[/{color}]', spinner=spinner, spinner_style=color)
 
 
 def print_network_header(network_name: str, contract_addr: str) -> None:
     """Print a one-line network and contract context header."""
     short = f'{contract_addr[:12]}...{contract_addr[-6:]}' if len(contract_addr) > 20 else contract_addr
-    print_hint(f'Network: {network_name} \u2022 Contract: {short}')
+    console.print(f'Network: {network_name} \u2022 Contract: {short}')
+
 
 def _is_interactive() -> bool:
     """Return True if stdin is a TTY (interactive session)."""

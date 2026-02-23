@@ -23,7 +23,7 @@ TABLE_THEMES = {
     # Full wrapped grid
     'square': TableTheme(
         box_style=box.SQUARE,
-        header_style='bold magenta',
+        header_style= 'bold white', #'bold magenta',
         border_style='grey35',
         show_lines=True,
         pad_edge=True,
@@ -63,17 +63,18 @@ def build_pr_table(prs: List[Dict[str, Any]]) -> Table:
     least one approval review exists; it does not mean the PR is merge-ready.
     """
     table = build_table(theme='square', show_header=True)
-    table.add_column('PR #', style='cyan', justify='right')
-    table.add_column('Title', style='green', max_width=50)
-    table.add_column('Author', style='yellow')
-    table.add_column('Created', style='magenta')
-    table.add_column('Review', style='white')
+    table.add_column('PR #', style='white', justify='right')
+    table.add_column('Title', style='white', max_width=50)
+    table.add_column('Author', style='white')
+    table.add_column('Created', style='white')
+    table.add_column('Status', style='white')
     table.add_column('URL', style='blue', max_width=60)
 
     for pr in prs:
         created_at = str(pr.get('created_at') or '')
         created_display = created_at[:10] if created_at else 'N/A'
-        review_display = 'Approved' if (pr.get('review_count') or 0) > 0 else 'Pending'
+        is_approved = (pr.get('review_count') or 0) > 0
+        review_display = '[green]Approved[/green]' if is_approved else '[yellow]Pending[/yellow]'
         table.add_row(
             str(pr.get('number') or 'N/A'),
             pr.get('title') or 'Untitled',

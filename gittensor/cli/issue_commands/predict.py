@@ -7,8 +7,8 @@ import json as json_mod
 
 import click
 from gittensor.cli.issue_commands.tables import build_pr_table
-from rich.panel import Panel
 
+from .help import StyledCommand
 from .helpers import (
     _is_interactive,
     console,
@@ -20,6 +20,11 @@ from .helpers import (
     handle_exception,
     loading_context,
     print_error,
+    print_success,
+    print_hint,
+    print_warning,
+    confirm_panel,
+    success_panel,
     print_network_header,
     resolve_network,
     load_config,
@@ -28,7 +33,7 @@ from .helpers import (
 )
 
 
-@click.command('predict')
+@click.command('predict', cls=StyledCommand)
 @click.option(
     '--id',
     'issue_id',
@@ -88,28 +93,25 @@ def issues_predict(
     as_json: bool
 ):
     """Submit miner predictions for PRs on a bountied issue.
+    
+    [dim]This command validates active issue state, miner registration,
+    and probability bounds (each in [0.0, 1.0], total <= 1.0).[/dim]
 
-    Validates an active on-chain issue, miner registration, matching PRs, and
-    probability constraints (each in ``[0.0, 1.0]``, total ``<= 1.0``).
+    [dim]Input modes:
+        1. `--pr <pr_number> --probability <0.0-1.0>` for a single prediction
+        2. `--json-input '{"101": 0.85, "103": 0.10}'` for batch predictions
+        3. Interactive prompt (default when neither `--pr` nor `--json-input` is provided)[/dim]
 
-    \b
-    Input modes:
-      1. ``--pr <pr_number> --probability <0.0-1.0>`` for a single prediction
-      2. ``--json-input '{"101": 0.85, "103": 0.10}'`` for batch predictions
-      3. Interactive prompt (default when neither ``--pr`` nor ``--json-input`` is provided)
+    [dim]Notes:
+        - `--yes/-y` skips confirmation prompts.
+        - `--pr/--probability` and `--json-input` are mutually exclusive.[/dim]
 
-    \b
-    Notes:
-      - ``--yes/-y`` skips the confirmation prompt.
-      - ``--pr/--probability`` and ``--json-input`` are mutually exclusive.
-      - Current implementation validates and builds payload only (stub send path).
-
-    \b
-    Examples:
-        gitt i predict --id 42 --pr 101 --probability 0.85 -y
-        gitt i predict --id 42 --json-input '{"101": 0.5, "103": 0.3}' -y
-        gitt i predict --id 42
-        gitt i predict --id 42 --pr 101 --probability 0.7 -y --json
+    [dim]Examples:
+        $ gitt i predict --id 42 --pr 101 --probability 0.85 -y
+        $ gitt i predict --id 42 --json-input '{"101": 0.5, "103": 0.3}' -y
+        $ gitt i predict --id 42
+        $ gitt i predict --id 42 --pr 101 --probability 0.7 -y --json
+    [/dim]
     """
     # 1) Validate on-chain issue ID.
     try:
@@ -139,7 +141,7 @@ def issues_predict(
 
     if not as_json:
         print_network_header(network_name, contract_addr)
-        console.print(f'[dim]Wallet: {effective_wallet}/{effective_hotkey}[/dim]\n')
+        console.print(f'Wallet: {effective_wallet}/{effective_hotkey}\n')
 
     # 5) Resolve issue + fetch eligible open PR submissions.
     repo_full_name, issue_number = _resolve_issue_context(
@@ -157,20 +159,20 @@ def issues_predict(
     )
 
     if not pull_requests:
-        handle_exception(as_json, 'No open PR submissions found for this issue.')
+        handle_exception(as_json, 'No open pull request submissions found for this issue')
 
     # 6) Show submissions table only for interactive mode.
     if is_interactive_mode:
-        console.print(
-            f'[bold cyan]Open PR submissions for issue {issue_id}[/bold cyan] '
-            f'[dim]({repo_full_name}#{issue_number})[/dim]\n'
-        )
+        issue_url = f'https://github.com/{repo_full_name}/issues/{issue_number}'
+        print_success(f'{len(pull_requests)} open pull request submissions available. [blue]{issue_url}[/blue]')
         console.print(build_pr_table(pull_requests))
+        console.print(f'Showing {len(pull_requests)} submissions\n')
+
         skip_continue_prompt = yes or not _is_interactive()
         if not skip_continue_prompt and not click.confirm(
             'Ready to start prediction?', default=True
         ):
-            console.print('[yellow]Prediction cancelled.[/yellow]')
+            print_warning('Prediction cancelled')
             return
 
     # 7) Interactive mode: verify miner first to avoid wasting manual input.
@@ -215,17 +217,16 @@ def issues_predict(
         broadcast_predictions_stub(payload)
         return
 
-    lines = format_prediction_lines(predictions)
-    lines += '\n\nThis is a stubbed send path. No network broadcast is executed yet.'
-    console.print(Panel(lines, title='Prediction Confirmation', border_style='blue'))
-
-    skip_confirm = yes or not _is_interactive()
-    if not skip_confirm and not click.confirm('Proceed?', default=True):
-        console.print('[yellow]Prediction cancelled.[/yellow]')
-        return
+    if is_interactive_mode:
+        lines = format_prediction_lines(predictions)
+        confirm_panel(lines, title='Prediction Confirmation')
+        skip_confirm = yes or not _is_interactive()
+        if not skip_confirm and not click.confirm('Proceed?', default=True):
+            print_warning('Prediction cancelled')
+            return
     
-    console.print(Panel(json_mod.dumps(payload, indent=2), title='Validated Payload (Stub)', border_style='green'))
-    console.print('[green]Prediction payload prepared (broadcast TODO).[/green]')
+    success_panel(json_mod.dumps(payload, indent=2), title='Prediction Payload')
+    print_success('Prediction prepared (TODO: broadcast)')
     broadcast_predictions_stub(payload)
 
 
@@ -285,7 +286,7 @@ def _resolve_issue_context(
 ) -> tuple[str, int]:
     """Load and validate on-chain issue context for prediction."""
     try:
-        with loading_context('[bold cyan]Reading issues from contract...', as_json):
+        with loading_context('Reading issues from contract...', as_json):
             issue = fetch_issue_from_contract(
                 ws_endpoint, contract_addr, issue_id, require_active=True, verbose=verbose
             )
@@ -301,10 +302,10 @@ def _fetch_open_issue_pull_requests(repo_full_name: str, issue_number: int, as_j
     """Fetch open PR submissions for the resolved repository issue."""
     token = get_github_pat() or ''
     if not token and not as_json:
-        console.print('[dim]No GITTENSOR_MINER_PAT set; using unauthenticated GitHub API requests.[/dim]')
+        print_warning('No GitHub token (GITTENSOR_MINER_PAT) found; using unauthenticated requests (lower rate limits)')
 
     try:
-        with loading_context('[bold cyan]Fetching open PR submissions from GitHub...', as_json):
+        with loading_context('Fetching open pull request submissions from GitHub...', as_json):
             return fetch_issue_prs(repo_full_name, issue_number, token, open_only=True)
     except click.ClickException as e:
         handle_exception(as_json, str(e))
@@ -321,7 +322,7 @@ def _resolve_registered_miner_hotkey(
     try:
         import bittensor as bt
 
-        with loading_context('[bold cyan]Validating miner identity and registration...', as_json):
+        with loading_context('Validating miner identity and registration...', as_json):
             wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
             miner_hotkey = wallet.hotkey.ss58_address
             is_registered = verify_miner_registration(ws_endpoint, contract_addr, miner_hotkey)

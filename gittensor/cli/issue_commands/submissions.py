@@ -7,6 +7,7 @@ import click
 
 from gittensor.cli.issue_commands.tables import build_pr_table
 
+from .help import StyledCommand
 from .helpers import (
     console,
     emit_json,
@@ -19,12 +20,13 @@ from .helpers import (
     print_network_header,
     print_warning,
     print_hint,
+    print_success,
     resolve_network,
     validate_issue_id,
 )
 
 
-@click.command('submissions')
+@click.command('submissions', cls=StyledCommand)
 @click.option(
     '--id',
     'issue_id',
@@ -62,13 +64,13 @@ def issues_submissions(
     """
     List open PR submissions for a bountied issue.
 
-    Shows PRs that reference or target the issue, filtered to open PRs only.
+    [dim]This command shows PRs that reference or target the issue, filtered to open PRs only.[/dim]
 
-    \b
-    Examples:
-        gitt issues submissions --id 42
-        gitt i submissions --id 42
-        gitt i submissions --id 42 --json
+    [dim]Examples
+        $ gitt issues submissions --id 42
+        $ gitt i submissions --id 42
+        $ gitt i submissions --id 42 --json
+    [/dim]
     """
     try:
         validate_issue_id(issue_id, 'id')
@@ -89,7 +91,7 @@ def issues_submissions(
         print_network_header(network_name, contract_addr)
 
     try:
-        with loading_context('[bold cyan]Reading issues from contract...', as_json):
+        with loading_context('Fetching issue from contract...', as_json):
             issue = fetch_issue_from_contract(
                 ws_endpoint, contract_addr, issue_id, require_active=False, verbose=verbose
             )
@@ -101,10 +103,10 @@ def issues_submissions(
 
     token = get_github_pat() or ''
     if not token and not as_json:
-        print_warning('No GITTENSOR_MINER_PAT set; using unauthenticated GitHub API requests')
+        print_warning('No GitHub token (GITTENSOR_MINER_PAT) found; using unauthenticated requests (lower rate limits)')
 
     try:
-        with loading_context('[bold cyan]Fetching open PR submissions from GitHub...', as_json):
+        with loading_context('Fetching open pull request submissions from GitHub...', as_json):
             pull_requests = fetch_issue_prs(repo_name, issue_number, token, open_only=True)
     except click.ClickException as e:
         handle_exception(as_json, str(e), 'click_exception')
@@ -134,14 +136,12 @@ def issues_submissions(
         emit_json(payload)
         return
 
-    console.print(
-        f'[bold cyan]Open PR submissions for issue {issue_id}[/bold cyan] '
-        f'[dim]({repo_name}#{issue_number})[/dim]\n'
-    )
+    issue_url = f'https://github.com/{repo_name}/issues/{issue_number}'
 
     if not pull_requests:
-        console.print('[yellow]No open PR submissions found.[/yellow]')
+        print_warning(f'No open submissions available ({issue_url}).')
         return
 
+    print_success(f'{len(pull_requests)} open pull request submissions available. [blue]{issue_url}[/blue]')
     console.print(build_pr_table(pull_requests))
-    console.print(f'\n[dim]Showing {len(pull_requests)} open submission(s)[/dim]')
+    console.print(f'Showing {len(pull_requests)} submissions')

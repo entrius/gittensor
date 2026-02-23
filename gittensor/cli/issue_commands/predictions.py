@@ -66,7 +66,7 @@ def issues_submissions(issue_id: int, network: str, rpc_url: str, contract: str,
         gitt i submissions --id 42 --network test -v
     """
     try:
-        validate_issue_id(issue_id)
+        validate_issue_id(issue_id, param_name='--id')
     except click.BadParameter as e:
         raise click.ClickException(str(e))
 
@@ -182,7 +182,7 @@ def issues_predict(
     """
     # --- Phase 1: cheap local validation (no network) ---
     try:
-        validate_issue_id(issue_id)
+        validate_issue_id(issue_id, param_name='--id')
     except click.BadParameter as e:
         raise click.ClickException(str(e))
 
@@ -229,6 +229,7 @@ def issues_predict(
     effective_hotkey = wallet_hotkey if wallet_hotkey != 'default' else config.get('hotkey', wallet_hotkey)
 
     try:
+        # Deferred import: bittensor optional at CLI import time (not all envs have it).
         import bittensor as bt
 
         wallet = bt.Wallet(name=effective_wallet, hotkey=effective_hotkey)

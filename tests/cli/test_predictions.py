@@ -1,7 +1,7 @@
 # The MIT License (MIT)
 # Copyright © 2025 Entrius
 
-"""Tests for submissions and predict CLI commands and their helpers (44 tests)."""
+"""Tests for submissions and predict CLI commands and their helpers (109 tests)."""
 
 import json
 import os

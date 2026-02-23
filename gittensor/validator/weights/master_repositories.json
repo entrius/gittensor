@@ -3040,6 +3040,10 @@
     "tier": "Bronze",
     "weight": 0.21
   },
+  "lyogavin/airllm": {
+    "weight": 3.89,
+    "tier": "Silver"
+  },
   "lyswhut/lx-music-desktop": {
     "tier": "Bronze",
     "weight": 0.22
@@ -3727,20 +3731,20 @@
     "weight": 5
   },
   "one-covenant/basilica": {
-    "tier": "Silver",
-    "weight": 3.96
+    "tier": "Gold",
+    "weight": 21.96
   },
   "one-covenant/bittensor-rs": {
     "tier": "Silver",
     "weight": 10
   },
   "one-covenant/grail": {
-    "tier": "Silver",
-    "weight": 3.97
+    "tier": "Gold",
+    "weight": 21.97
   },
   "one-covenant/templar": {
-    "tier": "Silver",
-    "weight": 3.95
+    "tier": "Gold",
+    "weight": 21.98
   },
   "oneoneone-io/subnet-111": {
     "tier": "Silver",
@@ -4429,10 +4433,6 @@
   "raspberrypi/documentation": {
     "tier": "Bronze",
     "weight": 0.29
-  },
-  "raspberrypi/firmware": {
-    "tier": "Gold",
-    "weight": 19.79
   },
   "raspberrypi/linux": {
     "tier": "Silver",

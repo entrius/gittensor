@@ -821,7 +821,7 @@ def _find_prs_for_issue_graphql(
             {
                 'number': pr['number'],
                 'title': pr.get('title', ''),
-                'author': author_data.get('login', 'unknown'),
+                'author': author_data.get('login') or 'ghost',
                 'author_database_id': author_data.get('databaseId'),
                 'state': effective_state,
                 'created_at': pr.get('createdAt', ''),
@@ -890,12 +890,12 @@ def _find_prs_for_issue_rest(
         if state_filter and state_filter.lower() != effective_state.lower():
             continue
 
-        user_data = issue_data.get('user', {})
+        user_data = issue_data.get('user') or {}
         prs.append(
             {
                 'number': pr_number,
                 'title': issue_data.get('title', ''),
-                'author': user_data.get('login', 'unknown'),
+                'author': user_data.get('login') or 'ghost',
                 'author_database_id': user_data.get('id'),
                 'state': effective_state,
                 'created_at': issue_data.get('created_at', ''),

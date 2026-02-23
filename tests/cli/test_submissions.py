@@ -1620,10 +1620,9 @@ class TestFindPrsForIssueGraphql:
         assert result[0]['state'] == 'MERGED'
 
     @patch('gittensor.utils.github_api_tools.execute_graphql_query')
-    def test_author_unknown_fallback(self, mock_gql):
-        """When author is missing/null, should default to 'unknown'."""
+    def test_ghost_author_null(self, mock_gql):
+        """When author is null (deleted GitHub account), should default to 'ghost'."""
         response = _make_graphql_timeline_response([{'number': 101}])
-        # Set author to None
         response['data']['repository']['issue']['timelineItems']['nodes'][0]['source']['author'] = None
 
         mock_gql.return_value = response
@@ -1631,7 +1630,24 @@ class TestFindPrsForIssueGraphql:
         from gittensor.utils.github_api_tools import _find_prs_for_issue_graphql
 
         result = _find_prs_for_issue_graphql('owner', 'repo', 42, 'tok', 'owner/repo', None)
-        assert result[0]['author'] == 'unknown'
+        assert result[0]['author'] == 'ghost'
+        assert result[0]['author_database_id'] is None
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    def test_ghost_author_empty_login(self, mock_gql):
+        """When author login is empty string, should fall back to 'ghost'."""
+        response = _make_graphql_timeline_response([{'number': 101}])
+        response['data']['repository']['issue']['timelineItems']['nodes'][0]['source']['author'] = {
+            'login': '',
+            'databaseId': None,
+        }
+
+        mock_gql.return_value = response
+
+        from gittensor.utils.github_api_tools import _find_prs_for_issue_graphql
+
+        result = _find_prs_for_issue_graphql('owner', 'repo', 42, 'tok', 'owner/repo', None)
+        assert result[0]['author'] == 'ghost'
 
 
 # =============================================================================
@@ -1767,6 +1783,97 @@ class TestFindPrsForIssueRest:
 
         result = _find_prs_for_issue_rest('owner', 'repo', 42, 'owner/repo', None)
         assert result[0]['closes_issue'] is False
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    def test_rest_ghost_author_null_user(self, mock_get):
+        """Null user in REST event should default to 'ghost'."""
+        event = _make_rest_timeline_event(101)
+        event['source']['issue']['user'] = None
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = [event]
+        mock_get.return_value = mock_response
+
+        from gittensor.utils.github_api_tools import _find_prs_for_issue_rest
+
+        result = _find_prs_for_issue_rest('owner', 'repo', 42, 'owner/repo', None)
+        assert result[0]['author'] == 'ghost'
+        assert result[0]['author_database_id'] is None
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    def test_rest_state_filter_merged(self, mock_get):
+        """REST state filter should correctly select merged PRs."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = [
+            _make_rest_timeline_event(101, state='open'),
+            _make_rest_timeline_event(102, state='closed', merged_at='2025-06-01T00:00:00Z'),
+        ]
+        mock_get.return_value = mock_response
+
+        from gittensor.utils.github_api_tools import _find_prs_for_issue_rest
+
+        result = _find_prs_for_issue_rest('owner', 'repo', 42, 'owner/repo', 'merged')
+        assert len(result) == 1
+        assert result[0]['number'] == 102
+        assert result[0]['state'] == 'MERGED'
+
+
+# =============================================================================
+# Ghost author display and JSON tests
+# =============================================================================
+
+
+class TestGhostAuthorDisplay:
+    """Tests verifying ghost/deleted GitHub accounts display correctly end-to-end."""
+
+    def test_ghost_pr_in_table(self):
+        """Ghost author PRs should render in the Rich table without errors."""
+        prs = [{**SAMPLE_OPEN_PRS[0], 'author': 'ghost'}]
+        table = build_pr_table(prs)
+        assert table.row_count == 1
+
+    @patch(_PATCH_FIND_PRS)
+    @patch(_PATCH_FETCH_ISSUE)
+    @patch(_PATCH_RESOLVE)
+    def test_ghost_author_in_submissions_output(self, mock_resolve, mock_fetch, mock_find):
+        """Ghost author should appear in submissions output."""
+        mock_resolve.return_value = ('wss://test.endpoint', 'test')
+        mock_fetch.return_value = SAMPLE_ISSUE
+        mock_find.return_value = [{**SAMPLE_OPEN_PRS[0], 'author': 'ghost'}]
+
+        runner = CliRunner()
+        result = runner.invoke(issues_submissions, ['--id', '1'], catch_exceptions=False)
+
+        assert result.exit_code == 0
+        assert 'ghost' in result.output
+
+    @patch(_PATCH_FIND_PRS)
+    @patch(_PATCH_FETCH_ISSUE)
+    @patch(_PATCH_RESOLVE)
+    def test_ghost_author_in_json_output(self, mock_resolve, mock_fetch, mock_find):
+        """Ghost author should serialize correctly in JSON output."""
+        mock_resolve.return_value = ('wss://test.endpoint', 'test')
+        mock_fetch.return_value = SAMPLE_ISSUE
+        mock_find.return_value = [{**SAMPLE_OPEN_PRS[0], 'author': 'ghost'}]
+
+        runner = CliRunner()
+        result = runner.invoke(issues_submissions, ['--id', '1', '--json'], catch_exceptions=False)
+
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data[0]['author'] == 'ghost'
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    def test_ghost_author_database_id_is_none(self, mock_gql):
+        """Ghost/deleted accounts should have None as database_id."""
+        response = _make_graphql_timeline_response([{'number': 101}])
+        response['data']['repository']['issue']['timelineItems']['nodes'][0]['source']['author'] = None
+        mock_gql.return_value = response
+
+        result = find_prs_for_issue('owner/repo', 42, token='tok')
+        assert result[0]['author'] == 'ghost'
+        assert result[0]['author_database_id'] is None
 
 
 # =============================================================================

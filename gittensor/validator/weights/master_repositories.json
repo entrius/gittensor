@@ -3,7 +3,7 @@
     "tier": "Bronze",
     "weight": 0.29
   },
-  "404-Repo/404-base-miner": {
+  "404-Repo/404-base-miner-gs": {
     "tier": "Silver",
     "weight": 4.58
   },
@@ -1032,9 +1032,9 @@
     "weight": 0.23
   },
   "conda/conda": {
+    "inactive_at": "2026-02-05T00:00:00Z",
     "tier": "Silver",
-    "weight": 3.53,
-    "inactive_at": "2026-02-05T00:00:00Z"
+    "weight": 3.53
   },
   "conduktor/kafka-stack-docker-compose": {
     "tier": "Bronze",
@@ -2307,7 +2307,7 @@
     "tier": "Silver",
     "weight": 3.69
   },
-  "hoochanlon/hamulete": {
+  "hoochanlon/hamuleite": {
     "tier": "Bronze",
     "weight": 0.17
   },
@@ -2831,10 +2831,6 @@
     "tier": "Gold",
     "weight": 15.33
   },
-  "kubernetes/dashboard": {
-    "tier": "Gold",
-    "weight": 15.26
-  },
   "kubernetes/enhancements": {
     "tier": "Gold",
     "weight": 15.19
@@ -3007,7 +3003,7 @@
     "tier": "Silver",
     "weight": 3.52
   },
-  "lobehub/lobe-chat": {
+  "lobehub/lobehub": {
     "tier": "Bronze",
     "weight": 0.33
   },
@@ -3822,7 +3818,7 @@
     "tier": "Bronze",
     "weight": 0.28
   },
-  "openedx/edx-platform": {
+  "openedx/openedx-platform": {
     "tier": "Bronze",
     "weight": 0.32
   },
@@ -3891,8 +3887,8 @@
     "weight": 0.29
   },
   "opentensor/async-substrate-interface": {
-    "weight": 10,
-    "tier": "Gold"
+    "tier": "Gold",
+    "weight": 10
   },
   "opentensor/bittensor": {
     "additional_acceptable_branches": [
@@ -3910,8 +3906,8 @@
     "weight": 17.43
   },
   "opentensor/btwallet": {
-    "weight": 10,
-    "tier": "Gold"
+    "tier": "Gold",
+    "weight": 10
   },
   "opentensor/subtensor": {
     "additional_acceptable_branches": [
@@ -4779,8 +4775,8 @@
     "weight": 0.18
   },
   "sipeed/picoclaw": {
-    "weight": 8.26,
-    "tier": "Silver"
+    "tier": "Silver",
+    "weight": 8.26
   },
   "siteserver/cms": {
     "tier": "Bronze",
@@ -5227,8 +5223,8 @@
     "weight": 0.17
   },
   "tinygrad/tinygrad": {
-    "weight": 33.33,
-    "tier": "Gold"
+    "tier": "Gold",
+    "weight": 33.33
   },
   "tmk/tmk_keyboard": {
     "tier": "Bronze",
@@ -5457,13 +5453,13 @@
     "tier": "Bronze",
     "weight": 0.54
   },
-  "vercel/ai-chatbot": {
-    "tier": "Bronze",
-    "weight": 0.31
-  },
   "vercel/next.js": {
     "tier": "Gold",
     "weight": 16.3
+  },
+  "vercel/openchat": {
+    "tier": "Bronze",
+    "weight": 0.31
   },
   "vercel/vercel": {
     "tier": "Bronze",

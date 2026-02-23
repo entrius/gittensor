@@ -816,7 +816,7 @@ def _find_prs_for_issue_graphql(
         review_nodes = pr.get('reviews', {}).get('nodes', [])
         review_status = review_nodes[0].get('state') if review_nodes else None
 
-        author_data = pr.get('author', {})
+        author_data = pr.get('author') or {}
         prs.append(
             {
                 'number': pr['number'],

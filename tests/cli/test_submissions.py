@@ -1482,3 +1482,446 @@ class TestBuildPredictionPayload:
         serialized = json.dumps(payload)
         deserialized = json.loads(serialized)
         assert deserialized == payload
+
+
+# =============================================================================
+# read_netuid_from_contract tests
+# =============================================================================
+
+_PATCH_READ_PACKED = 'gittensor.cli.issue_commands.helpers._read_contract_packed_storage'
+
+
+class TestReadNetuidFromContract:
+    """Unit tests for read_netuid_from_contract helper."""
+
+    def _make_mock_substrate_module(self):
+        """Create a mock substrateinterface module for sys.modules injection."""
+        mock_mod = MagicMock()
+        return mock_mod
+
+    @patch(_PATCH_READ_PACKED, return_value={'netuid': 422})
+    def test_returns_netuid_from_contract(self, mock_packed):
+        from gittensor.cli.issue_commands.helpers import read_netuid_from_contract
+
+        mock_mod = self._make_mock_substrate_module()
+        with patch.dict(sys.modules, {'substrateinterface': mock_mod}):
+            result = read_netuid_from_contract('wss://test', '0xContract', False)
+        assert result == 422
+
+    @patch(_PATCH_READ_PACKED, return_value=None)
+    def test_returns_default_when_packed_is_none(self, mock_packed):
+        from gittensor.cli.issue_commands.helpers import MAINNET_NETUID, read_netuid_from_contract
+
+        mock_mod = self._make_mock_substrate_module()
+        with patch.dict(sys.modules, {'substrateinterface': mock_mod}):
+            result = read_netuid_from_contract('wss://test', '0xContract', False)
+        assert result == MAINNET_NETUID
+
+    @patch(_PATCH_READ_PACKED, return_value={'netuid': 0})
+    def test_returns_default_when_netuid_is_zero(self, mock_packed):
+        """netuid=0 is falsy, should fall back to default."""
+        from gittensor.cli.issue_commands.helpers import MAINNET_NETUID, read_netuid_from_contract
+
+        mock_mod = self._make_mock_substrate_module()
+        with patch.dict(sys.modules, {'substrateinterface': mock_mod}):
+            result = read_netuid_from_contract('wss://test', '0xContract', False)
+        assert result == MAINNET_NETUID
+
+    def test_returns_default_on_connection_error(self):
+        from gittensor.cli.issue_commands.helpers import MAINNET_NETUID, read_netuid_from_contract
+
+        mock_mod = MagicMock()
+        mock_mod.SubstrateInterface.side_effect = Exception('Connection refused')
+        with patch.dict(sys.modules, {'substrateinterface': mock_mod}):
+            result = read_netuid_from_contract('wss://bad-endpoint', '0xContract', False)
+        assert result == MAINNET_NETUID
+
+    @patch(_PATCH_READ_PACKED, return_value={'netuid': 74, 'owner': '5Fake'})
+    def test_mainnet_netuid_returned(self, mock_packed):
+        from gittensor.cli.issue_commands.helpers import read_netuid_from_contract
+
+        mock_mod = self._make_mock_substrate_module()
+        with patch.dict(sys.modules, {'substrateinterface': mock_mod}):
+            result = read_netuid_from_contract('wss://finney', '0xContract', False)
+        assert result == 74
+
+
+# =============================================================================
+# _find_prs_for_issue_graphql direct tests
+# =============================================================================
+
+
+class TestFindPrsForIssueGraphql:
+    """Direct unit tests for the internal GraphQL implementation."""
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    def test_skips_nodes_without_number(self, mock_gql):
+        """Nodes with empty source (non-PR events) should be skipped."""
+        mock_gql.return_value = _make_graphql_timeline_response([
+            {'number': 101},
+        ])
+        # Inject a node with empty source
+        nodes = mock_gql.return_value['data']['repository']['issue']['timelineItems']['nodes']
+        nodes.insert(0, {'source': {}})
+        nodes.insert(1, {'source': None})
+
+        from gittensor.utils.github_api_tools import _find_prs_for_issue_graphql
+
+        result = _find_prs_for_issue_graphql('owner', 'repo', 42, 'tok', 'owner/repo', None)
+        assert len(result) == 1
+        assert result[0]['number'] == 101
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    def test_case_insensitive_repo_match(self, mock_gql):
+        """Repo matching should be case-insensitive."""
+        mock_gql.return_value = _make_graphql_timeline_response([
+            {'number': 101, 'base_repo': 'Owner/Repo'},
+        ])
+
+        from gittensor.utils.github_api_tools import _find_prs_for_issue_graphql
+
+        result = _find_prs_for_issue_graphql('owner', 'repo', 42, 'tok', 'owner/repo', None)
+        assert len(result) == 1
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    def test_graphql_query_returns_none(self, mock_gql):
+        """When execute_graphql_query returns None, should return empty list."""
+        mock_gql.return_value = None
+
+        from gittensor.utils.github_api_tools import _find_prs_for_issue_graphql
+
+        result = _find_prs_for_issue_graphql('owner', 'repo', 42, 'tok', 'owner/repo', None)
+        assert result == []
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    def test_state_filter_open_excludes_merged(self, mock_gql):
+        mock_gql.return_value = _make_graphql_timeline_response([
+            {'number': 101, 'state': 'OPEN'},
+            {'number': 102, 'state': 'CLOSED', 'merged': True, 'mergedAt': '2025-01-01'},
+            {'number': 103, 'state': 'CLOSED'},
+        ])
+
+        from gittensor.utils.github_api_tools import _find_prs_for_issue_graphql
+
+        result = _find_prs_for_issue_graphql('owner', 'repo', 42, 'tok', 'owner/repo', 'open')
+        assert len(result) == 1
+        assert result[0]['number'] == 101
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    def test_merged_at_populated(self, mock_gql):
+        mock_gql.return_value = _make_graphql_timeline_response([
+            {'number': 101, 'state': 'CLOSED', 'merged': True, 'mergedAt': '2025-06-15T12:00:00Z'},
+        ])
+
+        from gittensor.utils.github_api_tools import _find_prs_for_issue_graphql
+
+        result = _find_prs_for_issue_graphql('owner', 'repo', 42, 'tok', 'owner/repo', None)
+        assert result[0]['merged_at'] == '2025-06-15T12:00:00Z'
+        assert result[0]['state'] == 'MERGED'
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    def test_author_unknown_fallback(self, mock_gql):
+        """When author is missing/null, should default to 'unknown'."""
+        response = _make_graphql_timeline_response([{'number': 101}])
+        # Set author to None
+        response['data']['repository']['issue']['timelineItems']['nodes'][0]['source']['author'] = None
+
+        mock_gql.return_value = response
+
+        from gittensor.utils.github_api_tools import _find_prs_for_issue_graphql
+
+        result = _find_prs_for_issue_graphql('owner', 'repo', 42, 'tok', 'owner/repo', None)
+        assert result[0]['author'] == 'unknown'
+
+
+# =============================================================================
+# _find_prs_for_issue_rest direct tests
+# =============================================================================
+
+
+class TestFindPrsForIssueRest:
+    """Direct unit tests for the internal REST implementation."""
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    def test_auth_header_included_with_token(self, mock_get):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = []
+        mock_get.return_value = mock_response
+
+        from gittensor.utils.github_api_tools import _find_prs_for_issue_rest
+
+        _find_prs_for_issue_rest('owner', 'repo', 42, 'owner/repo', None, token='ghp_test')
+
+        headers = mock_get.call_args[1]['headers']
+        assert headers['Authorization'] == 'token ghp_test'
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    def test_no_auth_header_without_token(self, mock_get):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = []
+        mock_get.return_value = mock_response
+
+        from gittensor.utils.github_api_tools import _find_prs_for_issue_rest
+
+        _find_prs_for_issue_rest('owner', 'repo', 42, 'owner/repo', None)
+
+        headers = mock_get.call_args[1]['headers']
+        assert 'Authorization' not in headers
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    def test_skips_non_pr_issues(self, mock_get):
+        """Events referencing non-PR issues should be skipped."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = [
+            {
+                'event': 'cross-referenced',
+                'source': {
+                    'type': 'issue',
+                    'issue': {
+                        'number': 50,
+                        'title': 'Just an issue',
+                        'state': 'open',
+                        'user': {'login': 'user', 'id': 1},
+                        'created_at': '2025-01-01',
+                        'html_url': 'https://github.com/owner/repo/issues/50',
+                        # No 'pull_request' key — it's a regular issue
+                    },
+                },
+            },
+        ]
+        mock_get.return_value = mock_response
+
+        from gittensor.utils.github_api_tools import _find_prs_for_issue_rest
+
+        result = _find_prs_for_issue_rest('owner', 'repo', 42, 'owner/repo', None)
+        assert result == []
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    def test_request_exception_returns_empty(self, mock_get):
+        import requests
+
+        mock_get.side_effect = requests.exceptions.ConnectionError('Network unreachable')
+
+        from gittensor.utils.github_api_tools import _find_prs_for_issue_rest
+
+        result = _find_prs_for_issue_rest('owner', 'repo', 42, 'owner/repo', None)
+        assert result == []
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    def test_quiet_mode_no_warning(self, mock_get):
+        """_quiet=True should not emit unauthenticated warning."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = []
+        mock_get.return_value = mock_response
+
+        from gittensor.utils.github_api_tools import _find_prs_for_issue_rest
+
+        # Should not raise or warn
+        result = _find_prs_for_issue_rest('owner', 'repo', 42, 'owner/repo', None, _quiet=True)
+        assert result == []
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    def test_rest_closed_not_merged_is_closed(self, mock_get):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = [
+            _make_rest_timeline_event(101, state='closed', merged_at=None),
+        ]
+        mock_get.return_value = mock_response
+
+        from gittensor.utils.github_api_tools import _find_prs_for_issue_rest
+
+        result = _find_prs_for_issue_rest('owner', 'repo', 42, 'owner/repo', None)
+        assert result[0]['state'] == 'CLOSED'
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    def test_rest_review_status_always_none(self, mock_get):
+        """REST API doesn't provide review status — should always be None."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = [
+            _make_rest_timeline_event(101),
+        ]
+        mock_get.return_value = mock_response
+
+        from gittensor.utils.github_api_tools import _find_prs_for_issue_rest
+
+        result = _find_prs_for_issue_rest('owner', 'repo', 42, 'owner/repo', None)
+        assert result[0]['review_status'] is None
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    def test_rest_closes_issue_always_false(self, mock_get):
+        """REST API doesn't provide closing info — should always be False."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = [
+            _make_rest_timeline_event(101),
+        ]
+        mock_get.return_value = mock_response
+
+        from gittensor.utils.github_api_tools import _find_prs_for_issue_rest
+
+        result = _find_prs_for_issue_rest('owner', 'repo', 42, 'owner/repo', None)
+        assert result[0]['closes_issue'] is False
+
+
+# =============================================================================
+# Additional predict command edge cases
+# =============================================================================
+
+
+class TestPredictEdgeCases:
+    """Edge case tests for the predict command."""
+
+    def _invoke(self, args, env=None):
+        runner = CliRunner(env=env or {'GITTENSOR_MINER_PAT': 'fake-pat'})
+        return runner.invoke(issues_predict, args, catch_exceptions=False)
+
+    def test_github_api_failure_in_predict(self, predict_mocks):
+        """GitHub API failure in predict should raise ClickException, not crash."""
+        predict_mocks['find_prs'].side_effect = Exception('GitHub API rate limited')
+
+        result = self._invoke(['--id', '1', '--pr', '123', '--probability', '0.7', '-y'])
+
+        assert result.exit_code != 0
+        assert 'Failed to fetch PRs' in result.output
+
+    def test_predict_invalid_issue_id_zero(self, predict_mocks):
+        result = self._invoke(['--id', '0', '--pr', '123', '--probability', '0.5', '-y'])
+
+        assert result.exit_code != 0
+        assert 'must be between' in result.output
+
+    def test_predict_no_contract_address(self, predict_mocks):
+        """Empty contract address should raise error."""
+        with patch('gittensor.cli.issue_commands.submissions.get_contract_address', return_value=''):
+            result = self._invoke(['--id', '1', '--pr', '123', '--probability', '0.7', '-y'])
+
+        assert result.exit_code != 0
+        assert 'Contract address' in result.output
+
+    def test_predict_json_output_on_github_failure(self, predict_mocks):
+        """--json mode should also fail cleanly on GitHub API error."""
+        predict_mocks['find_prs'].side_effect = Exception('timeout')
+
+        result = self._invoke(['--id', '1', '--pr', '123', '--probability', '0.7', '-y', '--json'])
+
+        assert result.exit_code != 0
+        assert 'Failed to fetch PRs' in result.output
+
+    def test_predict_verify_miner_called_after_github(self, predict_mocks):
+        """verify_miner_registration should be called (Phase 4 after Phase 2 GitHub fetch)."""
+        result = self._invoke(['--id', '1', '--pr', '123', '--probability', '0.7', '-y'])
+
+        assert result.exit_code == 0
+        predict_mocks['verify_miner'].assert_called_once()
+
+    def test_predict_multiple_prs_json_keys_all_strings(self, predict_mocks):
+        """All prediction keys in JSON output should be strings, even for multi-PR input."""
+        result = self._invoke([
+            '--id', '1', '--json-input', '{"123": 0.3, "456": 0.4}', '-y', '--json',
+        ])
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert all(isinstance(k, str) for k in payload['predictions'])
+        assert len(payload['predictions']) == 2
+
+    def test_predict_boundary_sum_exactly_one(self, predict_mocks):
+        """Sum of probabilities exactly 1.0 should be accepted."""
+        result = self._invoke([
+            '--id', '1', '--json-input', '{"123": 0.6, "456": 0.4}', '-y',
+        ])
+
+        assert result.exit_code == 0
+
+    def test_predict_shows_network_header(self, predict_mocks):
+        """Non-JSON output should include network header."""
+        result = self._invoke(['--id', '1', '--pr', '123', '--probability', '0.7', '-y'])
+
+        assert result.exit_code == 0
+        assert 'Network:' in result.output or 'Contract:' in result.output
+
+
+# =============================================================================
+# Additional submissions command edge cases
+# =============================================================================
+
+
+class TestSubmissionsEdgeCases:
+    """Edge case tests for the submissions command."""
+
+    def _invoke(self, args, env=None):
+        runner = CliRunner(env=env)
+        return runner.invoke(issues_submissions, args, catch_exceptions=False)
+
+    @patch(_PATCH_FIND_PRS)
+    @patch(_PATCH_FETCH_ISSUE)
+    @patch(_PATCH_RESOLVE)
+    def test_multiple_prs_all_displayed(self, mock_resolve, mock_fetch, mock_find):
+        mock_resolve.return_value = ('wss://test.endpoint', 'test')
+        mock_fetch.return_value = SAMPLE_ISSUE
+        mock_find.return_value = SAMPLE_OPEN_PRS
+
+        result = self._invoke(['--id', '1'])
+
+        assert result.exit_code == 0
+        assert '123' in result.output
+        assert '456' in result.output
+        assert 'alice' in result.output
+        assert 'bob' in result.output
+
+    @patch(_PATCH_FIND_PRS)
+    @patch(_PATCH_FETCH_ISSUE)
+    @patch(_PATCH_RESOLVE)
+    def test_json_output_is_list(self, mock_resolve, mock_fetch, mock_find):
+        """JSON output should always be a list, even with one PR."""
+        mock_resolve.return_value = ('wss://test.endpoint', 'test')
+        mock_fetch.return_value = SAMPLE_ISSUE
+        mock_find.return_value = [SAMPLE_OPEN_PRS[0]]
+
+        result = self._invoke(['--id', '1', '--json'])
+
+        data = json.loads(result.output)
+        assert isinstance(data, list)
+
+    @patch(_PATCH_FIND_PRS)
+    @patch(_PATCH_FETCH_ISSUE)
+    @patch(_PATCH_RESOLVE)
+    def test_json_output_empty_list_when_no_prs(self, mock_resolve, mock_fetch, mock_find):
+        """JSON output should be an empty list when no PRs found."""
+        mock_resolve.return_value = ('wss://test.endpoint', 'test')
+        mock_fetch.return_value = SAMPLE_ISSUE
+        mock_find.return_value = []
+
+        result = self._invoke(['--id', '1', '--json'])
+
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data == []
+
+    @patch(_PATCH_FIND_PRS)
+    @patch(_PATCH_FETCH_ISSUE)
+    @patch(_PATCH_RESOLVE)
+    def test_github_link_shown_when_no_prs(self, mock_resolve, mock_fetch, mock_find):
+        """Empty results should show GitHub issue link."""
+        mock_resolve.return_value = ('wss://test.endpoint', 'test')
+        mock_fetch.return_value = SAMPLE_ISSUE
+        mock_find.return_value = []
+
+        result = self._invoke(['--id', '1'])
+
+        assert result.exit_code == 0
+        assert 'github.com' in result.output
+
+    def test_no_contract_address_shows_error(self):
+        with patch('gittensor.cli.issue_commands.submissions.get_contract_address', return_value=''):
+            with patch(_PATCH_RESOLVE, return_value=('wss://test', 'test')):
+                result = self._invoke(['--id', '1'])
+
+        assert result.exit_code != 0
+        assert 'Contract address' in result.output

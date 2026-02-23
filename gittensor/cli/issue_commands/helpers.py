@@ -12,6 +12,7 @@ import re
 import struct
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -620,6 +621,129 @@ def _read_issues_from_child_storage(substrate, contract_addr: str, verbose: bool
     # Sort by ID
     issues.sort(key=lambda x: x['id'])
     return issues
+
+
+def _github_headers() -> Dict[str, str]:
+    """Build GitHub API headers using GITTENSOR_MINER_PAT if available.
+
+    Returns empty dict (unauthenticated) when no PAT is set.
+    """
+    pat = os.environ.get('GITTENSOR_MINER_PAT', '').strip()
+    headers: Dict[str, str] = {'Accept': 'application/vnd.github.v3+json'}
+    if pat:
+        headers['Authorization'] = f'token {pat}'
+    return headers
+
+
+def fetch_open_prs_for_issue(
+    owner: str,
+    repo: str,
+    issue_number: int,
+    verbose: bool = False,
+) -> List[Dict[str, Any]]:
+    """Fetch open PRs that reference a given issue using the GitHub Search API.
+
+    Uses GITTENSOR_MINER_PAT for authentication when available, otherwise
+    falls back to the unauthenticated endpoint (lower rate limit).
+
+    Args:
+        owner: Repository owner
+        repo: Repository name
+        issue_number: GitHub issue number
+        verbose: Print debug output
+
+    Returns:
+        List of PR dicts with keys: number, title, author, created_at,
+        review_status, url, html_url.
+    """
+    headers = _github_headers()
+    query = f'repo:{owner}/{repo} is:pr is:open {issue_number}'
+    url = f'https://api.github.com/search/issues?q={urllib.parse.quote(query)}&per_page=100'
+
+    if verbose:
+        console.print(f'[dim]Debug: GitHub search URL: {url}[/dim]')
+
+    for attempt in range(3):
+        try:
+            req = urllib.request.Request(url, headers=headers)
+            resp = urllib.request.urlopen(req, timeout=GITHUB_API_TIMEOUT)
+            data = json.loads(resp.read().decode())
+            break
+        except urllib.error.HTTPError as e:
+            if verbose:
+                console.print(f'[dim]Debug: GitHub search returned {e.code} (attempt {attempt + 1}/3)[/dim]')
+            if attempt == 2:
+                console.print(f'[yellow]Warning: GitHub search API returned {e.code}[/yellow]')
+                return []
+        except (urllib.error.URLError, OSError) as e:
+            if verbose:
+                console.print(f'[dim]Debug: GitHub search failed: {e} (attempt {attempt + 1}/3)[/dim]')
+            if attempt == 2:
+                console.print('[yellow]Warning: Could not reach GitHub API[/yellow]')
+                return []
+
+    items = data.get('items', [])
+    prs = []
+    for item in items:
+        # The search API returns issues + PRs; filter to PRs only
+        if 'pull_request' not in item:
+            continue
+        prs.append({
+            'number': item['number'],
+            'title': item['title'],
+            'author': item.get('user', {}).get('login', 'unknown'),
+            'created_at': item.get('created_at', ''),
+            'url': item.get('pull_request', {}).get('html_url', item.get('html_url', '')),
+            'html_url': item.get('html_url', ''),
+        })
+
+    # Enrich with review status via the pulls API
+    for pr in prs:
+        pr['review_status'] = _get_pr_review_status(owner, repo, pr['number'], headers, verbose)
+
+    if verbose:
+        console.print(f'[dim]Debug: Found {len(prs)} open PR(s) for issue #{issue_number}[/dim]')
+
+    return prs
+
+
+def _get_pr_review_status(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    headers: Dict[str, str],
+    verbose: bool = False,
+) -> str:
+    """Get the review status for a specific PR.
+
+    Returns one of: 'APPROVED', 'CHANGES_REQUESTED', 'REVIEW_REQUIRED', 'PENDING', 'UNKNOWN'.
+    """
+    url = f'https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/reviews'
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        resp = urllib.request.urlopen(req, timeout=GITHUB_API_TIMEOUT)
+        reviews = json.loads(resp.read().decode())
+    except Exception:
+        if verbose:
+            console.print(f'[dim]Debug: Could not fetch reviews for PR #{pr_number}[/dim]')
+        return 'UNKNOWN'
+
+    if not reviews:
+        return 'REVIEW_REQUIRED'
+
+    # Take the latest non-COMMENTED review state per reviewer
+    latest = {}
+    for review in reviews:
+        state = review.get('state', '')
+        user = review.get('user', {}).get('login', '')
+        if state in ('APPROVED', 'CHANGES_REQUESTED', 'DISMISSED'):
+            latest[user] = state
+
+    if any(s == 'APPROVED' for s in latest.values()):
+        return 'APPROVED'
+    if any(s == 'CHANGES_REQUESTED' for s in latest.values()):
+        return 'CHANGES_REQUESTED'
+    return 'PENDING'
 
 
 def read_issues_from_contract(ws_endpoint: str, contract_addr: str, verbose: bool = False) -> List[Dict[str, Any]]:

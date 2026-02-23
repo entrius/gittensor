@@ -7,6 +7,10 @@ Gittensor CLI - Main entry point
 Usage:
     gitt config              - Show/set CLI configuration
     gitt issues ...          - Issue management (alias: i)
+        list                     List issues or view a specific issue
+        register                 Register a new issue bounty
+        submissions --id <N>     List open PRs for a bountied issue
+        predict --id <N>         Predict merge probabilities for PRs
     gitt harvest             - Harvest emissions
     gitt vote ...            - Validator vote commands
     gitt admin ...           - Owner commands (alias: a)

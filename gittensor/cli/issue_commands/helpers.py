@@ -13,9 +13,10 @@ import struct
 import sys
 import urllib.error
 import urllib.request
+from contextlib import nullcontext
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, ContextManager, Dict, List, Optional, Tuple
 
 import click
 from rich.console import Console
@@ -39,6 +40,8 @@ STATUS_COLORS: Dict[str, str] = {
     'Completed': 'dim',
     'Cancelled': 'dim',
 }
+
+ISSUE_BOUNTY_ELIGIBLE_STATUSES = {'registered', 'active'}
 
 # Default paths
 GITTENSOR_DIR = Path.home() / '.gittensor'
@@ -66,23 +69,117 @@ def colorize_status(status: str) -> str:
 
 def print_success(message: str) -> None:
     """Print a standardized success message."""
-    console.print(f'\n  [green]\u2713[/green] {message}\n')
+    console.print(f'\n[green]\u2713[/green] {message}\n')
 
 
 def print_error(message: str) -> None:
     """Print a standardized error message."""
-    console.print(f'\n  [red]\u2717[/red] {message}\n')
+    console.print(f'\n[red]{message}[/red]\n')
+
+def print_hint(message: str) -> None:
+    """Print a hint message."""
+    console.print(f'\n[dim]{message}[/dim] \n')
+
+def print_warning(message: str) -> None:
+    """Print a warning message."""
+    console.print(f'\n[yellow]{message}[/yellow]\n')
+
+def emit_error_json(message: str, error_type: str = 'cli_error') -> None:
+    """Emit a machine-readable error payload to stdout."""
+    payload = {
+        'success': False,
+        'error': {
+            'type': error_type,
+            'message': message,
+        },
+    }
+    # click.echo writes plain text to stdout without Rich styling.
+    click.echo(json.dumps(payload), err=False)
+
+
+def emit_json(payload: Any, pretty: bool = True) -> None:
+    """Emit a machine-readable JSON payload to stdout."""
+    if pretty:
+        output = json.dumps(payload, indent=2, ensure_ascii=False)
+    else:
+        output = json.dumps(payload, separators=(',', ':'), ensure_ascii=False)
+    click.echo(output, err=False)
+
+
+def handle_exception(as_json: bool, message: str, error_type: str = 'cli_error') -> None:
+    """Emit a CLI error in JSON or human format and exit non-zero."""
+    if as_json:
+        emit_error_json(message, error_type=error_type)
+    else:
+        print_error(message)
+    raise SystemExit(1)
+
+
+def loading_context(message: str, as_json: bool) -> ContextManager[Any]:
+    """Return a spinner context in human mode, or a no-op context in JSON mode."""
+    return nullcontext() if as_json else console.status(message, spinner='dots')
 
 
 def print_network_header(network_name: str, contract_addr: str) -> None:
     """Print a one-line network and contract context header."""
     short = f'{contract_addr[:12]}...{contract_addr[-6:]}' if len(contract_addr) > 20 else contract_addr
-    console.print(f'[dim]Network: {network_name} \u2022 Contract: {short}[/dim]\n')
-
+    print_hint(f'Network: {network_name} \u2022 Contract: {short}')
 
 def _is_interactive() -> bool:
     """Return True if stdin is a TTY (interactive session)."""
     return getattr(sys.stdin, 'isatty', lambda: False)()
+
+
+def get_github_pat() -> Optional[str]:
+    """Return GITTENSOR_MINER_PAT from environment, or None."""
+    return os.environ.get('GITTENSOR_MINER_PAT') or None
+
+
+def fetch_issue_prs(
+    repository_full_name: str,
+    issue_number: int,
+    token: Optional[str],
+    open_only: bool = True,
+) -> List[Dict[str, Any]]:
+    """Fetch PR submissions for an issue."""
+    try:
+        from gittensor.utils.github_api_tools import find_prs_for_issue
+
+        prs: List[Dict[str, Any]] = find_prs_for_issue(
+            repository_full_name,
+            issue_number,
+            token=token or None,
+            open_only=open_only,
+        )
+        # Intentionally return GitHub tool output as-is (no CLI schema mapping yet).
+        return prs
+    except Exception as e:
+        raise click.ClickException(f'Failed to fetch PR submissions from GitHub: {e}')
+
+
+def verify_miner_registration(
+    ws_endpoint: str,
+    contract_addr: str,
+    hotkey_ss58: str
+) -> bool:
+    """Return whether the hotkey is registered on the subnet configured by the contract netuid."""
+    from substrateinterface import SubstrateInterface
+    import bittensor as bt
+
+    substrate = SubstrateInterface(url=ws_endpoint)
+    packed = _read_contract_packed_storage(substrate, contract_addr)
+    netuid = None
+    if packed and packed.get('netuid') is not None:
+        netuid = int(packed['netuid'])
+    if netuid is None:
+        return False
+
+    subtensor = bt.Subtensor(network=ws_endpoint)
+    try:
+        return bool(subtensor.is_hotkey_registered(netuid=netuid, hotkey_ss58=hotkey_ss58))
+    except TypeError:
+        # API compatibility fallback across bittensor versions.
+        return bool(subtensor.is_hotkey_registered(netuid, hotkey_ss58))
 
 
 # ---------------------------------------------------------------------------
@@ -661,3 +758,31 @@ def read_issues_from_contract(ws_endpoint: str, contract_addr: str, verbose: boo
             console.print(f'[dim]Debug: Connection/read error: {e}[/dim]')
         console.print(f'[yellow]Error reading from contract: {e}[/yellow]')
         return []
+
+
+def fetch_issue_from_contract(
+    ws_endpoint: str,
+    contract_addr: str,
+    issue_id: int,
+    require_active: bool = False,
+    verbose: bool = False,
+) -> Dict[str, Any]:
+    """Resolve an on-chain issue and validate bountied/active status."""
+    issues = read_issues_from_contract(ws_endpoint, contract_addr, verbose)
+    issue = next((i for i in issues if i.get('id') == issue_id), None)
+    if not issue:
+        raise click.ClickException(f'Issue ID {issue_id} not found on-chain.')
+
+    status = issue.get('status') or ''
+    status_normalized = str(status).strip().lower()
+    if status_normalized not in ISSUE_BOUNTY_ELIGIBLE_STATUSES:
+        raise click.ClickException(f'Issue #{issue_id} is not in a bountied state (status: {status}).')
+    if require_active and status_normalized != 'active':
+        raise click.ClickException(f'Issue #{issue_id} is not active (status: {status}).')
+
+    repo = issue.get('repository_full_name', '')
+    issue_number = issue.get('issue_number', 0)
+    if not repo or not issue_number:
+        raise click.ClickException('Issue missing repository or issue number.')
+
+    return issue

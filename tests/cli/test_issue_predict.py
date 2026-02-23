@@ -6,6 +6,7 @@
 import json
 from unittest.mock import patch
 
+
 def test_predict_interactive_continue_cancel_skips_miner_validation(
     cli_root, runner, sample_issue, sample_prs
 ):
@@ -13,8 +14,7 @@ def test_predict_interactive_continue_cancel_skips_miner_validation(
         patch('gittensor.cli.issue_commands.predict.get_contract_address', return_value='0xabc'),
         patch('gittensor.cli.issue_commands.predict.resolve_network', return_value=('ws://x', 'test')),
         patch('gittensor.cli.issue_commands.predict.fetch_issue_from_contract', return_value=sample_issue),
-        patch('gittensor.cli.issue_commands.predict.get_github_pat', return_value='token'),
-        patch('gittensor.cli.issue_commands.predict.fetch_issue_prs', return_value=sample_prs),
+        patch('gittensor.cli.issue_commands.predict.fetch_open_issue_pull_requests', return_value=sample_prs),
         patch('gittensor.cli.issue_commands.predict._is_interactive', return_value=True),
         patch('gittensor.cli.issue_commands.predict._resolve_registered_miner_hotkey') as mock_resolve_miner,
     ):
@@ -26,7 +26,7 @@ def test_predict_interactive_continue_cancel_skips_miner_validation(
         )
 
     assert result.exit_code == 0
-    assert 'Prediction cancelled.' in result.output
+    assert 'Prediction cancelled' in result.output
     mock_resolve_miner.assert_not_called()
 
 
@@ -35,8 +35,7 @@ def test_predict_json_success_payload_schema(cli_root, runner, sample_issue, sam
         patch('gittensor.cli.issue_commands.predict.get_contract_address', return_value='0xabc'),
         patch('gittensor.cli.issue_commands.predict.resolve_network', return_value=('ws://x', 'test')),
         patch('gittensor.cli.issue_commands.predict.fetch_issue_from_contract', return_value=sample_issue),
-        patch('gittensor.cli.issue_commands.predict.get_github_pat', return_value='token'),
-        patch('gittensor.cli.issue_commands.predict.fetch_issue_prs', return_value=sample_prs),
+        patch('gittensor.cli.issue_commands.predict.fetch_open_issue_pull_requests', return_value=sample_prs),
         patch(
             'gittensor.cli.issue_commands.predict._resolve_registered_miner_hotkey',
             return_value='5FakeHotkey123',
@@ -114,8 +113,7 @@ def test_predict_rejects_pr_not_in_open_set_before_miner_validation(
         patch('gittensor.cli.issue_commands.predict.get_contract_address', return_value='0xabc'),
         patch('gittensor.cli.issue_commands.predict.resolve_network', return_value=('ws://x', 'test')),
         patch('gittensor.cli.issue_commands.predict.fetch_issue_from_contract', return_value=sample_issue),
-        patch('gittensor.cli.issue_commands.predict.get_github_pat', return_value='token'),
-        patch('gittensor.cli.issue_commands.predict.fetch_issue_prs', return_value=sample_prs),
+        patch('gittensor.cli.issue_commands.predict.fetch_open_issue_pull_requests', return_value=sample_prs),
         patch('gittensor.cli.issue_commands.predict._resolve_registered_miner_hotkey') as mock_resolve_miner,
     ):
         result = runner.invoke(

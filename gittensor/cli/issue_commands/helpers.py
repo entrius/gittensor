@@ -16,12 +16,13 @@ import urllib.request
 from contextlib import nullcontext
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from rich.panel import Panel
 from typing import Any, ContextManager, Dict, List, Optional, Tuple
 
 import click
 from rich.console import Console
+from rich.panel import Panel
 
+from gittensor.cli.issue_commands.tables import build_pr_table
 from gittensor.constants import CONTRACT_ADDRESS
 
 # ALPHA token conversion
@@ -142,26 +143,44 @@ def get_github_pat() -> Optional[str]:
     return os.environ.get('GITTENSOR_MINER_PAT') or None
 
 
-def fetch_issue_prs(
+def fetch_open_issue_pull_requests(
     repository_full_name: str,
     issue_number: int,
-    token: Optional[str],
-    open_only: bool = True,
+    as_json: bool,
 ) -> List[Dict[str, Any]]:
-    """Fetch PR submissions for an issue."""
+    """Fetch open PR submissions for a GitHub issue."""
+    token = get_github_pat() or ''
+    if not token and not as_json:
+        print_warning('No GitHub token (GITTENSOR_MINER_PAT) found; using unauthenticated requests (lower rate limits)')
+
     try:
         from gittensor.utils.github_api_tools import find_prs_for_issue
 
-        prs: List[Dict[str, Any]] = find_prs_for_issue(
-            repository_full_name,
-            issue_number,
-            token=token or None,
-            open_only=open_only,
-        )
-        # Intentionally return GitHub tool output as-is (no CLI schema mapping yet).
-        return prs
+        with loading_context('Fetching open pull request submissions from GitHub...', as_json):
+            prs: List[Dict[str, Any]] = find_prs_for_issue(
+                repository_full_name,
+                issue_number,
+                token=token or None,
+                open_only=True,
+            )
+            # Intentionally return GitHub tool output as-is (no CLI schema mapping yet).
+            return prs
     except Exception as e:
         raise click.ClickException(f'Failed to fetch PR submissions from GitHub: {e}')
+
+
+def print_issue_submission_table(
+    repository_full_name: str,
+    issue_number: int,
+    pull_requests: List[Dict[str, Any]],
+    trailing_newline: bool = False,
+) -> None:
+    """Render the shared PR submissions success message and table."""
+    issue_url = f'https://github.com/{repository_full_name}/issues/{issue_number}'
+    print_success(f'{len(pull_requests)} open pull request submissions available. [blue]{issue_url}[/blue]')
+    console.print(build_pr_table(pull_requests))
+    suffix = '\n' if trailing_newline else ''
+    console.print(f'Showing {len(pull_requests)} submissions{suffix}')
 
 
 def verify_miner_registration(
@@ -170,8 +189,8 @@ def verify_miner_registration(
     hotkey_ss58: str
 ) -> bool:
     """Return whether the hotkey is registered on the subnet configured by the contract netuid."""
-    from substrateinterface import SubstrateInterface
     import bittensor as bt
+    from substrateinterface import SubstrateInterface
 
     substrate = SubstrateInterface(url=ws_endpoint)
     packed = _read_contract_packed_storage(substrate, contract_addr)

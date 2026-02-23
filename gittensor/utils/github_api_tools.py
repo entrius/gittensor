@@ -20,7 +20,6 @@ from gittensor.classes import (
     MinerEvaluation,
     PRState,
 )
-from gittensor.utils.models import PRInfo
 from gittensor.constants import (
     BASE_GITHUB_API_URL,
     MAINTAINER_ASSOCIATIONS,
@@ -28,6 +27,7 @@ from gittensor.constants import (
     PR_LOOKBACK_DAYS,
     TIER_BASED_INCENTIVE_MECHANISM_START_DATE,
 )
+from gittensor.utils.models import PRInfo
 from gittensor.validator.utils.load_weights import RepositoryConfig
 
 # core github graphql query

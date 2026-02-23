@@ -6,13 +6,13 @@
 import json
 from unittest.mock import patch
 
+
 def test_submissions_json_schema_is_stable(cli_root, runner, sample_issue, sample_prs):
     with (
         patch('gittensor.cli.issue_commands.submissions.get_contract_address', return_value='0xabc'),
         patch('gittensor.cli.issue_commands.submissions.resolve_network', return_value=('ws://x', 'test')),
         patch('gittensor.cli.issue_commands.submissions.fetch_issue_from_contract', return_value=sample_issue),
-        patch('gittensor.cli.issue_commands.submissions.get_github_pat', return_value='token'),
-        patch('gittensor.cli.issue_commands.submissions.fetch_issue_prs', return_value=sample_prs),
+        patch('gittensor.cli.issue_commands.submissions.fetch_open_issue_pull_requests', return_value=sample_prs),
     ):
         result = runner.invoke(
             cli_root,
@@ -55,9 +55,8 @@ def test_submissions_json_handles_missing_closing_numbers(
         patch('gittensor.cli.issue_commands.submissions.get_contract_address', return_value='0xabc'),
         patch('gittensor.cli.issue_commands.submissions.resolve_network', return_value=('ws://x', 'test')),
         patch('gittensor.cli.issue_commands.submissions.fetch_issue_from_contract', return_value=sample_issue),
-        patch('gittensor.cli.issue_commands.submissions.get_github_pat', return_value='token'),
         patch(
-            'gittensor.cli.issue_commands.submissions.fetch_issue_prs',
+            'gittensor.cli.issue_commands.submissions.fetch_open_issue_pull_requests',
             return_value=sample_prs_missing_closing,
         ),
     ):
@@ -106,8 +105,7 @@ def test_submissions_human_no_open_prs_message(cli_root, runner, sample_issue):
         patch('gittensor.cli.issue_commands.submissions.get_contract_address', return_value='0xabc'),
         patch('gittensor.cli.issue_commands.submissions.resolve_network', return_value=('ws://x', 'test')),
         patch('gittensor.cli.issue_commands.submissions.fetch_issue_from_contract', return_value=sample_issue),
-        patch('gittensor.cli.issue_commands.submissions.get_github_pat', return_value='token'),
-        patch('gittensor.cli.issue_commands.submissions.fetch_issue_prs', return_value=[]),
+        patch('gittensor.cli.issue_commands.submissions.fetch_open_issue_pull_requests', return_value=[]),
     ):
         result = runner.invoke(
             cli_root,
@@ -116,4 +114,4 @@ def test_submissions_human_no_open_prs_message(cli_root, runner, sample_issue):
         )
 
     assert result.exit_code == 0
-    assert 'No open PR submissions found.' in result.output
+    assert 'No open submissions available' in result.output

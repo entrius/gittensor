@@ -6,28 +6,26 @@
 import json as json_mod
 
 import click
-from gittensor.cli.issue_commands.tables import build_pr_table
 
 from .help import StyledCommand
 from .helpers import (
     _is_interactive,
+    confirm_panel,
     console,
     emit_json,
     fetch_issue_from_contract,
-    fetch_issue_prs,
+    fetch_open_issue_pull_requests,
     get_contract_address,
-    get_github_pat,
     handle_exception,
+    load_config,
     loading_context,
     print_error,
-    print_success,
-    print_hint,
-    print_warning,
-    confirm_panel,
-    success_panel,
+    print_issue_submission_table,
     print_network_header,
+    print_success,
+    print_warning,
     resolve_network,
-    load_config,
+    success_panel,
     validate_issue_id,
     verify_miner_registration,
 )
@@ -152,8 +150,8 @@ def issues_predict(
         as_json=as_json,
     )
 
-    pull_requests = _fetch_open_issue_pull_requests(
-        repo_full_name=repo_full_name,
+    pull_requests = fetch_open_issue_pull_requests(
+        repository_full_name=repo_full_name,
         issue_number=issue_number,
         as_json=as_json,
     )
@@ -163,10 +161,12 @@ def issues_predict(
 
     # 6) Show submissions table only for interactive mode.
     if is_interactive_mode:
-        issue_url = f'https://github.com/{repo_full_name}/issues/{issue_number}'
-        print_success(f'{len(pull_requests)} open pull request submissions available. [blue]{issue_url}[/blue]')
-        console.print(build_pr_table(pull_requests))
-        console.print(f'Showing {len(pull_requests)} submissions\n')
+        print_issue_submission_table(
+            repository_full_name=repo_full_name,
+            issue_number=issue_number,
+            pull_requests=pull_requests,
+            trailing_newline=True,
+        )
 
         skip_continue_prompt = yes or not _is_interactive()
         if not skip_continue_prompt and not click.confirm(
@@ -296,19 +296,6 @@ def _resolve_issue_context(
     repo_full_name = str(issue.get('repository_full_name', ''))
     issue_number = int(issue.get('issue_number', 0))
     return repo_full_name, issue_number
-
-
-def _fetch_open_issue_pull_requests(repo_full_name: str, issue_number: int, as_json: bool) -> list[dict]:
-    """Fetch open PR submissions for the resolved repository issue."""
-    token = get_github_pat() or ''
-    if not token and not as_json:
-        print_warning('No GitHub token (GITTENSOR_MINER_PAT) found; using unauthenticated requests (lower rate limits)')
-
-    try:
-        with loading_context('Fetching open pull request submissions from GitHub...', as_json):
-            return fetch_issue_prs(repo_full_name, issue_number, token, open_only=True)
-    except click.ClickException as e:
-        handle_exception(as_json, str(e))
 
 
 def _resolve_registered_miner_hotkey(

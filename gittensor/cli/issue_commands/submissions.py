@@ -5,22 +5,17 @@
 
 import click
 
-from gittensor.cli.issue_commands.tables import build_pr_table
-
 from .help import StyledCommand
 from .helpers import (
-    console,
     emit_json,
     fetch_issue_from_contract,
-    fetch_issue_prs,
-    get_github_pat,
+    fetch_open_issue_pull_requests,
     get_contract_address,
     handle_exception,
     loading_context,
+    print_issue_submission_table,
     print_network_header,
     print_warning,
-    print_hint,
-    print_success,
     resolve_network,
     validate_issue_id,
 )
@@ -101,13 +96,12 @@ def issues_submissions(
     repo_name = str(issue.get('repository_full_name', ''))
     issue_number = int(issue.get('issue_number', 0))
 
-    token = get_github_pat() or ''
-    if not token and not as_json:
-        print_warning('No GitHub token (GITTENSOR_MINER_PAT) found; using unauthenticated requests (lower rate limits)')
-
     try:
-        with loading_context('Fetching open pull request submissions from GitHub...', as_json):
-            pull_requests = fetch_issue_prs(repo_name, issue_number, token, open_only=True)
+        pull_requests = fetch_open_issue_pull_requests(
+            repository_full_name=repo_name,
+            issue_number=issue_number,
+            as_json=as_json,
+        )
     except click.ClickException as e:
         handle_exception(as_json, str(e), 'click_exception')
 
@@ -139,9 +133,11 @@ def issues_submissions(
     issue_url = f'https://github.com/{repo_name}/issues/{issue_number}'
 
     if not pull_requests:
-        print_warning(f'No open submissions available ({issue_url}).')
+        print_warning(f'No open submissions available ({issue_url})')
         return
 
-    print_success(f'{len(pull_requests)} open pull request submissions available. [blue]{issue_url}[/blue]')
-    console.print(build_pr_table(pull_requests))
-    console.print(f'Showing {len(pull_requests)} submissions')
+    print_issue_submission_table(
+        repository_full_name=repo_name,
+        issue_number=issue_number,
+        pull_requests=pull_requests,
+    )

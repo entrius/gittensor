@@ -4,6 +4,7 @@ import fnmatch
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 if TYPE_CHECKING:
@@ -19,8 +20,10 @@ from gittensor.classes import (
 )
 from gittensor.constants import (
     BASE_GITHUB_API_URL,
+    DEFAULT_RATE_LIMIT_WAIT_SECONDS,
     MAINTAINER_ASSOCIATIONS,
     MAX_FILE_SIZE_BYTES,
+    MAX_RATE_LIMIT_WAIT_SECONDS,
     TIER_BASED_INCENTIVE_MECHANISM_START_DATE,
 )
 from gittensor.utils.utils import parse_repo_name
@@ -110,6 +113,55 @@ QUERY = """
     """
 
 
+def _is_rate_limit_response(status_code: int) -> bool:
+    """Return True if status code indicates GitHub rate limiting (403 or 429)."""
+    return status_code in (403, 429)
+
+
+def _parse_retry_after(response: requests.Response) -> int:
+    """
+    Parse Retry-After from GitHub rate limit response.
+    Retry-After can be an integer (seconds) or an HTTP-date.
+    Returns wait time in seconds, capped by MAX_RATE_LIMIT_WAIT_SECONDS.
+    """
+    value = response.headers.get('Retry-After')
+    if not value:
+        return DEFAULT_RATE_LIMIT_WAIT_SECONDS
+
+    value = value.strip()
+    if value.isdigit():
+        return min(int(value), MAX_RATE_LIMIT_WAIT_SECONDS)
+
+    try:
+        # HTTP-date format
+        parsed = parsedate_to_datetime(value)
+        now = datetime.now(timezone.utc)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        delta = (parsed - now).total_seconds()
+        return max(0, min(int(delta), MAX_RATE_LIMIT_WAIT_SECONDS))
+    except Exception:
+        return DEFAULT_RATE_LIMIT_WAIT_SECONDS
+
+
+def _graphql_rate_limit_from_errors(data: Dict[str, Any]) -> Optional[int]:
+    """
+    Check GraphQL 200 response for rate limit errors (RATE_LIMITED or secondary limit).
+    Returns suggested wait time in seconds, or None if not rate limited.
+    """
+    errors = data.get('errors') if isinstance(data, dict) else None
+    if not isinstance(errors, list):
+        return None
+    for err in errors:
+        if not isinstance(err, dict):
+            continue
+        msg = (err.get('message') or '').lower()
+        err_type = (err.get('type') or '').upper()
+        if err_type == 'RATE_LIMITED' or 'rate limit' in msg or 'secondary rate limit' in msg:
+            return DEFAULT_RATE_LIMIT_WAIT_SECONDS
+    return None
+
+
 def branch_matches_pattern(branch_name: str, patterns: List[str]) -> bool:
     """Check if a branch name matches any pattern in the list.
 
@@ -162,30 +214,47 @@ def get_github_user(token: str) -> Optional[Dict[str, Any]]:
 
     headers = make_headers(token)
 
-    # Retry logic for timeout issues
+    # Retry logic for timeout and rate limit
     for attempt in range(6):
         try:
             response = requests.get(f'{BASE_GITHUB_API_URL}/user', headers=headers, timeout=30)
             if response.status_code == 200:
                 try:
-                    user_data: Dict[str, Any] = response.json()
+                    user_data = response.json()
                 except Exception as e:  # pragma: no cover
                     bt.logging.warning(f'Failed to parse GitHub /user JSON response: {e}')
                     return None
-
+                if not isinstance(user_data, dict):
+                    bt.logging.warning('GitHub /user response is not a JSON object')
+                    return None
                 _GITHUB_USER_CACHE[token] = user_data
                 return user_data
+
+            if _is_rate_limit_response(response.status_code):
+                wait_sec = _parse_retry_after(response)
+                bt.logging.warning(
+                    f'GitHub rate limit (status {response.status_code}), waiting {wait_sec}s (attempt {attempt + 1}/6)'
+                )
+                time.sleep(wait_sec)
+                continue
+
+            # 401 Unauthorized: invalid or revoked token; retrying will not help
+            if response.status_code == 401:
+                bt.logging.warning('GitHub /user returned 401 Unauthorized (invalid or revoked token)')
+                return None
 
             bt.logging.warning(
                 f'GitHub /user request failed with status {response.status_code} (attempt {attempt + 1}/6)'
             )
             if attempt < 5:
-                time.sleep(2)
+                backoff_delay = 5 * (2**attempt)
+                time.sleep(backoff_delay)
 
         except Exception as e:
             bt.logging.warning(f'Could not fetch GitHub user (attempt {attempt + 1}/6): {e}')
-            if attempt < 5:  # Don't sleep on last attempt
-                time.sleep(2)
+            if attempt < 5:
+                backoff_delay = 5 * (2**attempt)
+                time.sleep(backoff_delay)
 
     return None
 
@@ -253,29 +322,63 @@ def get_github_account_age_days(token: str) -> Optional[int]:
 
 def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -> Optional[List[FileChange]]:
     """
-    Get the diff for a specific PR by repository name and PR number
-    Args:
-        repository (str): Repository in format 'owner/repo'
-        pr_number (int): PR number
-        token (str): Github pat
-    Returns:
-        List[FileChanges]: List object with file changes or None if error
+    Get the diff for a specific PR by repository name and PR number.
+    Validates response shape and each file entry; skips malformed entries and respects rate limits.
     """
     headers = make_headers(token)
+    max_attempts = 6
 
-    try:
-        response = requests.get(
-            f'{BASE_GITHUB_API_URL}/repos/{repository}/pulls/{pr_number}/files', headers=headers, timeout=15
-        )
-        if response.status_code == 200:
-            file_diffs = response.json()
-            return [FileChange.from_github_response(pr_number, repository, file_diff) for file_diff in file_diffs]
+    for attempt in range(max_attempts):
+        try:
+            response = requests.get(
+                f'{BASE_GITHUB_API_URL}/repos/{repository}/pulls/{pr_number}/files',
+                headers=headers,
+                timeout=15,
+            )
+            if response.status_code == 200:
+                try:
+                    raw = response.json()
+                except Exception as e:
+                    bt.logging.warning(f'PR files response not valid JSON for PR #{pr_number}: {e}')
+                    return []
+                if not isinstance(raw, list):
+                    bt.logging.warning(
+                        f'PR files response for #{pr_number} is not a list (got {type(raw).__name__}), returning empty'
+                    )
+                    return []
+                file_changes: List[FileChange] = []
+                for i, file_diff in enumerate(raw):
+                    fc = FileChange.safe_from_github_response(pr_number, repository, file_diff)
+                    if fc is None:
+                        bt.logging.debug(
+                            f'PR #{pr_number} file entry {i} skipped (missing/invalid keys or types)'
+                        )
+                        continue
+                    file_changes.append(fc)
+                return file_changes
 
-        return []
+            if _is_rate_limit_response(response.status_code):
+                wait_sec = _parse_retry_after(response)
+                bt.logging.warning(
+                    f'Rate limit when fetching PR files (status {response.status_code}), '
+                    f'waiting {wait_sec}s (attempt {attempt + 1}/{max_attempts})'
+                )
+                time.sleep(wait_sec)
+                continue
 
-    except Exception as e:
-        bt.logging.error(f'Error getting file changes for PR #{pr_number} in {repository}: {e}')
-        return []
+            if attempt < (max_attempts - 1):
+                time.sleep(2)
+            else:
+                bt.logging.error(
+                    f'PR files request failed with status {response.status_code} after {max_attempts} attempts'
+                )
+
+        except Exception as e:
+            bt.logging.error(f'Error getting file changes for PR #{pr_number} in {repository}: {e}')
+            if attempt < (max_attempts - 1):
+                time.sleep(2)
+
+    return []
 
 
 def execute_graphql_query(
@@ -310,7 +413,33 @@ def execute_graphql_query(
             )
 
             if response.status_code == 200:
-                return response.json()
+                try:
+                    data = response.json()
+                except Exception as e:
+                    bt.logging.warning(f'GraphQL response not valid JSON: {e}')
+                    if attempt < (max_attempts - 1):
+                        time.sleep(5 * (2**attempt))
+                    continue
+                if not isinstance(data, dict):
+                    bt.logging.warning('GraphQL response is not a JSON object')
+                    if attempt < (max_attempts - 1):
+                        time.sleep(5 * (2**attempt))
+                    continue
+                wait_sec = _graphql_rate_limit_from_errors(data)
+                if wait_sec is not None:
+                    bt.logging.warning(
+                        f'GraphQL rate limit in response body, waiting {wait_sec}s (attempt {attempt + 1}/{max_attempts})'
+                    )
+                    time.sleep(wait_sec)
+                    continue
+                return data
+            if _is_rate_limit_response(response.status_code):
+                wait_sec = _parse_retry_after(response)
+                bt.logging.warning(
+                    f'GraphQL rate limit (status {response.status_code}), waiting {wait_sec}s (attempt {attempt + 1}/{max_attempts})'
+                )
+                time.sleep(wait_sec)
+                continue
 
             # Retry on failure
             if attempt < (max_attempts - 1):
@@ -375,9 +504,28 @@ def get_github_graphql_query(
             )
 
             if response.status_code == 200:
+                try:
+                    data = response.json()
+                except Exception:
+                    return response
+                if isinstance(data, dict):
+                    wait_sec = _graphql_rate_limit_from_errors(data)
+                    if wait_sec is not None:
+                        bt.logging.warning(
+                            f'GraphQL rate limit in response (attempt {attempt + 1}/{attempts}), waiting {wait_sec}s...'
+                        )
+                        time.sleep(wait_sec)
+                        continue
                 return response
+            if _is_rate_limit_response(response.status_code):
+                wait_sec = _parse_retry_after(response)
+                bt.logging.warning(
+                    f'GraphQL rate limit (status {response.status_code}), waiting {wait_sec}s (attempt {attempt + 1}/{attempts})...'
+                )
+                time.sleep(wait_sec)
+                continue
             # error - log and retry
-            elif attempt < (attempts - 1):
+            if attempt < (attempts - 1):
                 # Exponential backoff: 5s, 10s, 20s, 40s, 80s
                 backoff_delay = 5 * (2**attempt)
                 bt.logging.warning(
@@ -435,11 +583,14 @@ def try_add_open_or_closed_pr(
 
     if pr_state == PRState.CLOSED.value:
         closed_at = pr_raw.get('closedAt')
-        if not closed_at:
-            bt.logging.warning(f'PR #{pr_raw["number"]} is CLOSED but missing closedAt timestamp.')
+        if not closed_at or not isinstance(closed_at, str):
+            bt.logging.warning(f'PR #{pr_raw.get("number", "?")} is CLOSED but missing closedAt timestamp.')
             return
-
-        closed_dt = datetime.fromisoformat(closed_at.rstrip('Z')).replace(tzinfo=timezone.utc)
+        try:
+            closed_dt = datetime.fromisoformat(closed_at.rstrip('Z')).replace(tzinfo=timezone.utc)
+        except (ValueError, TypeError):
+            bt.logging.warning(f'PR #{pr_raw.get("number", "?")} has invalid closedAt format, skipping.')
+            return
         if closed_dt >= lookback_date_filter:
             miner_eval.add_closed_pull_request(pr_raw)
 
@@ -590,16 +741,41 @@ def load_miners_prs(
                 bt.logging.warning('User not found or no pull requests')
                 break
 
-            pr_data: Dict = user_data.get('pullRequests', {})
-            prs: Dict = pr_data.get('nodes', [])
-            page_info: Dict = pr_data.get('pageInfo', {})
+            pr_data = user_data.get('pullRequests') or {}
+            prs = pr_data.get('nodes') or []
+            if not isinstance(prs, list):
+                bt.logging.warning('GraphQL pullRequests.nodes is not a list, breaking fetch')
+                break
+            page_info = pr_data.get('pageInfo') or {}
 
             for pr_raw in prs:
-                repository_full_name = parse_repo_name(pr_raw['repository'])
-                pr_state = pr_raw['state']
+                if not isinstance(pr_raw, dict):
+                    bt.logging.debug('Skipping non-dict PR node in GraphQL response')
+                    continue
+                repo_node = pr_raw.get('repository')
+                if not isinstance(repo_node, dict) or not isinstance(repo_node.get('owner'), dict) or not repo_node.get('name'):
+                    bt.logging.debug(f'Skipping PR node with missing/invalid repository (number={pr_raw.get("number")})')
+                    continue
+                try:
+                    repository_full_name = parse_repo_name(repo_node)
+                except (KeyError, TypeError) as e:
+                    bt.logging.debug(f'Skipping PR node: parse_repo_name failed: {e}')
+                    continue
+                pr_state = pr_raw.get('state')
+                if not pr_state or not isinstance(pr_state, str):
+                    bt.logging.debug(f'Skipping PR node with missing state (repository={repository_full_name})')
+                    continue
+                created_at_raw = pr_raw.get('createdAt')
+                if not created_at_raw or not isinstance(created_at_raw, str):
+                    bt.logging.debug(f'Skipping PR #{pr_raw.get("number")} with missing createdAt')
+                    continue
+                try:
+                    pr_creation_time = datetime.fromisoformat(created_at_raw.rstrip('Z')).replace(tzinfo=timezone.utc)
+                except (ValueError, TypeError) as e:
+                    bt.logging.debug(f'Skipping PR #{pr_raw.get("number")}: invalid createdAt: {e}')
+                    continue
 
                 # Stop querying once we hit PRs older than the tier incentive start date
-                pr_creation_time = datetime.fromisoformat(pr_raw['createdAt'].rstrip('Z')).replace(tzinfo=timezone.utc)
 
                 if pr_creation_time < TIER_BASED_INCENTIVE_MECHANISM_START_DATE:
                     bt.logging.info(

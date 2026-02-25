@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from math import prod
-from typing import DefaultDict, Dict, List, Optional, Set
+from typing import Any, DefaultDict, Dict, List, Optional, Set
 
 import bittensor as bt
 
@@ -111,6 +111,49 @@ class FileChange:
             status=file_diff['status'],
             patch=file_diff.get('patch'),
             previous_filename=file_diff.get('previous_filename'),
+        )
+
+    @classmethod
+    def safe_from_github_response(
+        cls, pr_number: int, repository_full_name: str, file_diff: Any
+    ) -> Optional['FileChange']:
+        """
+        Create FileChange from GitHub API response with validation.
+        Returns None if file_diff is missing required keys or has invalid types.
+        """
+        if not isinstance(file_diff, dict):
+            return None
+        required = {'filename', 'changes', 'additions', 'deletions', 'status'}
+        if not required.issubset(file_diff.keys()):
+            return None
+        filename = file_diff.get('filename')
+        if not isinstance(filename, str) or not filename.strip():
+            return None
+        try:
+            changes = int(file_diff['changes'])
+            additions = int(file_diff['additions'])
+            deletions = int(file_diff['deletions'])
+        except (TypeError, ValueError):
+            return None
+        status = file_diff.get('status')
+        if not isinstance(status, str) or not status.strip():
+            return None
+        patch = file_diff.get('patch')
+        previous_filename = file_diff.get('previous_filename')
+        if patch is not None and not isinstance(patch, str):
+            patch = None
+        if previous_filename is not None and not isinstance(previous_filename, str):
+            previous_filename = None
+        return cls(
+            pr_number=pr_number,
+            repository_full_name=repository_full_name,
+            filename=filename,
+            changes=changes,
+            additions=additions,
+            deletions=deletions,
+            status=status,
+            patch=patch,
+            previous_filename=previous_filename,
         )
 
 

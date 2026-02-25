@@ -23,10 +23,14 @@ import pytest
 github_api_tools = pytest.importorskip(
     'gittensor.utils.github_api_tools', reason='Requires gittensor package with all dependencies'
 )
+classes_module = pytest.importorskip('gittensor.classes', reason='Requires gittensor package')
+FileChange = classes_module.FileChange
 
 get_github_graphql_query = github_api_tools.get_github_graphql_query
 get_github_id = github_api_tools.get_github_id
 get_github_account_age_days = github_api_tools.get_github_account_age_days
+get_pull_request_file_changes = github_api_tools.get_pull_request_file_changes
+execute_graphql_query = github_api_tools.execute_graphql_query
 
 
 # ============================================================================
@@ -290,6 +294,164 @@ class TestOtherGitHubAPIFunctions:
         assert isinstance(result, int)
         assert result > 1000  # Account older than 1000 days
         assert mock_get.call_count == 2
+
+
+# ============================================================================
+# Rate Limit Handling Tests
+# ============================================================================
+
+
+class TestRateLimitHandling:
+    """Test suite for GitHub API rate limit (429/403) and Retry-After handling."""
+
+    @patch('gittensor.utils.github_api_tools.requests.post')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_graphql_429_then_success_with_retry_after(self, mock_logging, mock_sleep, mock_post, graphql_params):
+        """On 429, wait Retry-After seconds then retry; succeed on second attempt."""
+        mock_429 = Mock(status_code=429, headers={'Retry-After': '3'}, text='rate limited')
+        mock_200 = Mock(status_code=200)
+        mock_200.json.return_value = {'data': {'node': None}}
+        mock_post.side_effect = [mock_429, mock_200]
+
+        result = get_github_graphql_query(**graphql_params)
+
+        assert result is not None
+        assert result.status_code == 200
+        mock_sleep.assert_called_once_with(3)
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    def test_get_github_user_403_rate_limit_then_success(self, mock_sleep, mock_get, clear_github_cache):
+        """On 403 rate limit, wait Retry-After then retry; /user returns 200 on second attempt."""
+        mock_403 = Mock(status_code=403, headers={'Retry-After': '2'}, text='rate limit')
+        mock_200 = Mock(status_code=200)
+        mock_200.json.return_value = {'id': 1, 'login': 'u'}
+        mock_get.side_effect = [mock_403, mock_200]
+
+        result = get_github_id('token')
+
+        assert result == '1'
+        mock_sleep.assert_called_once_with(2)
+
+
+# ============================================================================
+# FileChange.safe_from_github_response Tests
+# ============================================================================
+
+
+class TestSafeFromGithubResponse:
+    """Test FileChange.safe_from_github_response edge cases."""
+
+    def test_returns_none_for_non_dict(self):
+        assert FileChange.safe_from_github_response(1, 'o/r', None) is None
+        assert FileChange.safe_from_github_response(1, 'o/r', []) is None
+        assert FileChange.safe_from_github_response(1, 'o/r', 'x') is None
+
+    def test_returns_none_for_missing_required_keys(self):
+        assert FileChange.safe_from_github_response(1, 'o/r', {'filename': 'a.py'}) is None
+        assert FileChange.safe_from_github_response(
+            1, 'o/r', {'filename': 'a.py', 'changes': 1, 'additions': 0, 'deletions': 0}
+        ) is None  # missing status
+
+    def test_returns_none_for_invalid_types(self):
+        assert FileChange.safe_from_github_response(
+            1, 'o/r', {'filename': 123, 'changes': 1, 'additions': 0, 'deletions': 0, 'status': 'm'}
+        ) is None
+        assert FileChange.safe_from_github_response(
+            1, 'o/r', {'filename': 'a.py', 'changes': 'x', 'additions': 0, 'deletions': 0, 'status': 'm'}
+        ) is None
+
+    def test_returns_file_change_for_valid_input(self):
+        fc = FileChange.safe_from_github_response(
+            1,
+            'owner/repo',
+            {'filename': 'src/a.py', 'changes': 10, 'additions': 6, 'deletions': 4, 'status': 'modified'},
+        )
+        assert fc is not None
+        assert fc.filename == 'src/a.py'
+        assert fc.changes == 10
+        assert fc.additions == 6
+        assert fc.deletions == 4
+        assert fc.status == 'modified'
+
+
+# ============================================================================
+# Safe FileChange and PR Files Response Tests
+# ============================================================================
+
+
+class TestSafeFileChangeAndPRFiles:
+    """Test suite for get_pull_request_file_changes validation and safe FileChange parsing."""
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    def test_pr_files_non_list_response_returns_empty(self, mock_get):
+        """When API returns a non-list (e.g. error object), return empty list."""
+        mock_get.return_value = Mock(status_code=200, json=lambda: {'message': 'Not Found'})
+
+        result = get_pull_request_file_changes('owner/repo', 1, 'token')
+
+        assert result == []
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    def test_pr_files_malformed_entry_skipped(self, mock_get):
+        """Valid list with one malformed file entry yields only valid FileChanges."""
+        mock_get.return_value = Mock(
+            status_code=200,
+            json=lambda: [
+                {'filename': 'a.py', 'changes': 10, 'additions': 5, 'deletions': 5, 'status': 'modified'},
+                {'filename': 'b.py'},  # missing required keys
+                {'filename': 'c.py', 'changes': 2, 'additions': 1, 'deletions': 1, 'status': 'added'},
+            ],
+        )
+
+        result = get_pull_request_file_changes('owner/repo', 2, 'token')
+
+        assert result is not None
+        assert len(result) == 2
+        assert result[0].filename == 'a.py'
+        assert result[1].filename == 'c.py'
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    def test_pr_files_429_wait_and_retry(self, mock_get):
+        """On 429, wait Retry-After then retry; return files on success."""
+        mock_429 = Mock(status_code=429, headers={'Retry-After': '1'})
+        mock_200 = Mock(
+            status_code=200,
+            json=lambda: [{'filename': 'x.py', 'changes': 0, 'additions': 0, 'deletions': 0, 'status': 'modified'}],
+        )
+        mock_get.side_effect = [mock_429, mock_200]
+
+        result = get_pull_request_file_changes('owner/repo', 3, 'token')
+
+        assert result is not None
+        assert len(result) == 1
+        assert result[0].filename == 'x.py'
+
+
+# ============================================================================
+# GraphQL execute_graphql_query Rate Limit in Body
+# ============================================================================
+
+
+class TestExecuteGraphQLRateLimitInBody:
+    """Test execute_graphql_query when 200 response contains rate limit errors."""
+
+    @patch('gittensor.utils.github_api_tools.requests.post')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    def test_200_with_rate_limit_error_wait_and_retry(self, mock_sleep, mock_post):
+        """When response is 200 but errors contain RATE_LIMITED, wait and retry."""
+        rate_limited_body = {'data': None, 'errors': [{'type': 'RATE_LIMITED', 'message': 'rate limit exceeded'}]}
+        success_body = {'data': {'repository': {'file0': {'text': 'x'}}}}
+        mock_post.side_effect = [
+            Mock(status_code=200, json=lambda: rate_limited_body),
+            Mock(status_code=200, json=lambda: success_body),
+        ]
+
+        result = execute_graphql_query('query { x }', {}, 'token')
+
+        assert result == success_body
+        assert mock_sleep.call_count == 1
 
 
 if __name__ == '__main__':

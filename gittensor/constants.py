@@ -14,6 +14,10 @@ BASE_GITHUB_API_URL = 'https://api.github.com'
 MIN_GITHUB_ACCOUNT_AGE = 180  # days
 # 1MB max file size for github api file fetches. Files exceeding this get no score.
 MAX_FILE_SIZE_BYTES = 1_000_000
+# Rate limit: max seconds to wait when Retry-After is present (cap to avoid indefinite wait)
+MAX_RATE_LIMIT_WAIT_SECONDS = 300
+# Default wait when rate limited but Retry-After header is missing or invalid
+DEFAULT_RATE_LIMIT_WAIT_SECONDS = 60
 
 # =============================================================================
 # Language & File Scoring

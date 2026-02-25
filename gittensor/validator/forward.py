@@ -256,7 +256,7 @@ async def issues_competition(
             )
         else:
             bt.logging.info(
-                '***** Issue Bounties Complete: processed {len(active_issues)} issues (no state changes) *****'
+                f'***** Issue Bounties Complete: processed {len(active_issues)} issues (no state changes) *****'
             )
 
     except Exception as e:

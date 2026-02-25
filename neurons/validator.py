@@ -18,14 +18,17 @@
 
 import threading
 import time
+from functools import partial
 from typing import Dict, List, Set
 
 import bittensor as bt
-import wandb
 
+import wandb
 from gittensor.__init__ import __version__
 from gittensor.classes import MinerEvaluation, MinerEvaluationCache
 from gittensor.validator.forward import forward
+from gittensor.validator.merge_predictions.handler import blacklist_prediction, handle_prediction, priority_prediction
+from gittensor.validator.merge_predictions.mp_storage import PredictionStorage
 from gittensor.validator.utils.config import STORE_DB_RESULTS, WANDB_PROJECT, WANDB_VALIDATOR_NAME
 from gittensor.validator.utils.storage import DatabaseStorage
 from neurons.base.validator import BaseValidatorNeuron
@@ -44,6 +47,18 @@ class Validator(BaseValidatorNeuron):
     def __init__(self, config=None):
         super(Validator, self).__init__(config=config)
 
+        # Merge predictions — SQLite storage + axon handler
+        self.mp_storage = PredictionStorage()
+        if hasattr(self, 'axon') and self.axon is not None:
+            self.axon.attach(
+                forward_fn=partial(handle_prediction, self),
+                blacklist_fn=partial(blacklist_prediction, self),
+                priority_fn=partial(priority_prediction, self),
+            )
+            bt.logging.info('Merge predictions handler attached to axon')
+        else:
+            bt.logging.warning('Axon not available, skipping prediction handler attachment')
+
         # Init in-memory cache for miner evaluations (fallback when GitHub API fails)
         self.evaluation_cache = MinerEvaluationCache()
 
@@ -52,21 +67,6 @@ class Validator(BaseValidatorNeuron):
         if STORE_DB_RESULTS:
             bt.logging.warning('Validation result storage enabled.')
             self.db_storage = DatabaseStorage()
-
-        # Init remote debugging API (FOR DEVELOPMENT ONLY). Requires DEBUGPY_PORT in .env
-        if self.config.neuron.remote_debug_port is not None:
-            from gittensor.validator.test.live_testnet.test_validator_live import start_debug_api
-
-            bt.logging.warning('Remote debugging api enabled.')
-
-            # Start debug API in background thread
-            debug_thread = threading.Thread(
-                target=start_debug_api,
-                args=(self, self.config.neuron.remote_debug_port),
-                daemon=True,
-                name='RemoteDebugAPI',
-            )
-            debug_thread.start()
 
         # Initialize wandb only if disable_set_weights is False
         if not self.config.neuron.disable_set_weights:

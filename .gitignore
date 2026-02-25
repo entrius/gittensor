@@ -16,6 +16,11 @@ wandb
 
 *.log
 
+# Merge predictions local DB
+gt-merge-preds.db
+gt-merge-preds.db-wal
+gt-merge-preds.db-shm
+
 CLAUDE.md
 .claude/
 .vscode/

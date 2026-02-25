@@ -11,17 +11,17 @@ from aiohttp import ClientConnectorError
 from gittensor.classes import MinerEvaluation
 from gittensor.synapses import GitPatSynapse
 from gittensor.utils.github_api_tools import load_miners_prs
-from gittensor.validator.evaluation.dynamic_emissions import apply_dynamic_emissions_using_network_contributions
-from gittensor.validator.evaluation.inspections import (
+from gittensor.validator.oss_contributions.dynamic_emissions import apply_dynamic_emissions_using_network_contributions
+from gittensor.validator.oss_contributions.inspections import (
     detect_and_penalize_miners_sharing_github,
     validate_response_and_initialize_miner_evaluation,
 )
-from gittensor.validator.evaluation.normalize import normalize_rewards_linear
-from gittensor.validator.evaluation.scoring import (
+from gittensor.validator.oss_contributions.normalize import normalize_rewards_linear
+from gittensor.validator.oss_contributions.scoring import (
     finalize_miner_scores,
     score_miner_prs,
 )
-from gittensor.validator.evaluation.tier_emissions import allocate_emissions_by_tier
+from gittensor.validator.oss_contributions.tier_emissions import allocate_emissions_by_tier
 from gittensor.validator.utils.load_weights import LanguageConfig, RepositoryConfig, TokenConfig
 
 # NOTE: there was a circular import error, needed this if to resolve it

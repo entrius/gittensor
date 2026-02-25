@@ -14,7 +14,7 @@ import bittensor as bt
 
 from gittensor.classes import MinerEvaluation
 from gittensor.constants import TIER_EMISSION_SPLITS
-from gittensor.validator.configurations.tier_config import TIERS_ORDER, Tier
+from gittensor.validator.oss_contributions.tier_config import TIERS_ORDER, Tier
 
 
 def allocate_emissions_by_tier(miner_evaluations: Dict[int, MinerEvaluation]) -> None:

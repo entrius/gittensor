@@ -146,6 +146,6 @@ PREDICTIONS_TIMELINESS_EXPONENT = 1.8  # curve for early prediction bonus. highe
 PREDICTIONS_CONSENSUS_VARIANCE_TARGET = 0.10
 
 # Cooldown & Limits
-PREDICTIONS_COOLDOWN_SECONDS = 300  # 5 min cooldown per miner per PR re-prediction
+PREDICTIONS_COOLDOWN_SECONDS = 900  # 15 min cooldown per miner per PR re-prediction
 PREDICTIONS_MIN_VALUE = 0.0
 PREDICTIONS_MAX_VALUE = 1.0

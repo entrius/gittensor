@@ -16,7 +16,7 @@ Run specific test class:
 import pytest
 
 from gittensor.classes import PRState
-from gittensor.validator.configurations.tier_config import (
+from gittensor.validator.oss_contributions.tier_config import (
     TIERS,
     TIERS_ORDER,
     Tier,
@@ -25,7 +25,7 @@ from gittensor.validator.configurations.tier_config import (
     get_next_tier,
     get_tier_from_config,
 )
-from gittensor.validator.evaluation.credibility import (
+from gittensor.validator.oss_contributions.credibility import (
     calculate_credibility_per_tier,
     calculate_tier_stats,
     is_tier_unlocked,

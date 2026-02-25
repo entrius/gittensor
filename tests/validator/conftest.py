@@ -15,7 +15,7 @@ from typing import List, Optional
 import pytest
 
 from gittensor.classes import PRState, PullRequest
-from gittensor.validator.configurations.tier_config import (
+from gittensor.validator.oss_contributions.tier_config import (
     TIERS,
     Tier,
     TierConfig,

@@ -14,8 +14,8 @@ from gittensor.constants import (
     EXCESSIVE_PR_PENALTY_BASE_THRESHOLD,
     MAX_OPEN_PR_THRESHOLD,
 )
-from gittensor.validator.configurations.tier_config import Tier, TierStats
-from gittensor.validator.evaluation.scoring import (
+from gittensor.validator.oss_contributions.tier_config import Tier, TierStats
+from gittensor.validator.oss_contributions.scoring import (
     calculate_open_pr_threshold,
     calculate_pr_spam_penalty_multiplier,
 )

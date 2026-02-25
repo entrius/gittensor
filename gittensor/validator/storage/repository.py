@@ -13,7 +13,7 @@ from typing import List, TypeVar
 import numpy as np
 
 from gittensor.classes import FileChange, Issue, Miner, MinerEvaluation, PullRequest
-from gittensor.validator.configurations.tier_config import Tier
+from gittensor.validator.oss_contributions.tier_config import Tier
 
 from .queries import (
     BULK_UPSERT_FILE_CHANGES,

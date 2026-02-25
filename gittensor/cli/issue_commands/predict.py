@@ -7,6 +7,8 @@ import json as json_mod
 
 import click
 
+from gittensor.miner.broadcast import broadcast_predictions
+
 from .help import StyledCommand
 from .helpers import (
     _is_interactive,
@@ -212,7 +214,13 @@ def issues_predict(
     # 10) Emit machine output or interactive confirmation flow.
     if as_json:
         emit_json(payload, pretty=True)
-        broadcast_predictions_stub(payload)
+        results = broadcast_predictions(
+            payload=payload,
+            wallet_name=effective_wallet,
+            wallet_hotkey=effective_hotkey,
+            ws_endpoint=ws_endpoint,
+        )
+        emit_json(results, pretty=True)
         return
 
     if is_interactive_mode:
@@ -224,8 +232,13 @@ def issues_predict(
             return
 
     success_panel(json_mod.dumps(payload, indent=2), title='Prediction Payload')
-    print_success('Prediction prepared (TODO: broadcast)')
-    broadcast_predictions_stub(payload)
+    results = broadcast_predictions(
+        payload=payload,
+        wallet_name=effective_wallet,
+        wallet_hotkey=effective_hotkey,
+        ws_endpoint=ws_endpoint,
+    )
+    _print_broadcast_results(results)
 
 
 def validate_probability(value: float, param_hint: str = 'probability') -> float:
@@ -374,9 +387,21 @@ def build_prediction_payload(
     }
 
 
-def broadcast_predictions_stub(payload: dict[str, object]) -> None:
-    """Broadcast integration seam (stub)."""
-    pass
+def _print_broadcast_results(results: dict[str, object]) -> None:
+    """Print broadcast results in human-readable format."""
+    if results.get('success'):
+        print_success(
+            f"Prediction accepted by {results['accepted']}/{results['total_validators']} validator(s)"
+        )
+    else:
+        print_error(
+            f"Prediction rejected or unreachable: {results['rejected']}/{results['total_validators']} validator(s)"
+        )
+
+    for r in results.get('results', []):
+        status = 'accepted' if r['accepted'] else 'rejected'
+        reason = f" ({r['rejection_reason']})" if r.get('rejection_reason') else ''
+        console.print(f"  {r['validator']}... {status}{reason}")
 
 
 def _collect_predictions_interactive(prs: list[dict]) -> dict[int, float]:

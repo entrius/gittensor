@@ -8,7 +8,7 @@ from typing import Dict, List, Optional
 import bittensor as bt
 
 from gittensor.constants import NON_CODE_EXTENSIONS
-from gittensor.validator.configurations.tier_config import Tier
+from gittensor.validator.oss_contributions.tier_config import Tier
 
 
 @dataclass

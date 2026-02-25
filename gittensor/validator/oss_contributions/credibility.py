@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Dict, List
 
 import bittensor as bt
 
-from gittensor.validator.configurations.tier_config import (
+from gittensor.validator.oss_contributions.tier_config import (
     TIERS,
     TIERS_ORDER,
     Tier,

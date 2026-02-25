@@ -230,13 +230,6 @@ def add_validator_args(cls, parser):
         default='opentensor-dev',
     )
 
-    parser.add_argument(
-        '--neuron.remote_debug_port',
-        type=int,
-        help='FOR DEVELOPMENT: Port for remote debugging API endpoint. If set, enables debug API on this port and debugpy on port+1.',
-        default=None,
-    )
-
 
 def config(cls):
     """

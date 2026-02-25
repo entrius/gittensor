@@ -1,0 +1,35 @@
+services:
+  validator:
+    image: entrius/gittensor:latest
+    container_name: gt-vali
+    restart: unless-stopped
+    mem_limit: "3g"
+    entrypoint: /app/scripts/vali-entrypoint.sh
+    env_file:
+      - .env
+    ports:
+      - "${PORT}:${PORT}"
+    volumes:
+      # 'ro' = readonly
+      - ${WALLET_PATH}:/root/.bittensor/wallets:ro
+    # optional: uncomment this if you are running validator database
+    # networks:
+    #   - gittensor_network
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
+  watchtower:
+    image: nickfedor/watchtower
+    container_name: gittensor-watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      WATCHTOWER_POLL_INTERVAL: 200
+      WATCHTOWER_LABEL_ENABLE: "true"
+      WATCHTOWER_CLEANUP: "true"
+
+# uncomment this if you are running validator database
+# networks:
+#   gittensor_network:
+#     external: true

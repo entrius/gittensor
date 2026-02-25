@@ -63,13 +63,18 @@ setup(
     long_description=long_description,
     long_description_content_type='text/markdown',
     url='https://github.com/entrius/gittensor',
-    author='bittensor.com',  # TODO(developer): Change this value to your module subnet author name.
+    author='Entrius',
     packages=find_packages(),
     include_package_data=True,
     author_email='',
     license='MIT',
     python_requires='>=3.8',
     install_requires=requirements,
+    entry_points={
+        'console_scripts': [
+            'gitt=gittensor.cli.main:main',
+        ],
+    },
     classifiers=[
         'Development Status :: 3 - Alpha',
         'Intended Audience :: Developers',

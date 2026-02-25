@@ -10,16 +10,16 @@ import bittensor as bt
 from gittensor.classes import Issue, MinerEvaluation, PrScoringResult, PRState, PullRequest
 from gittensor.constants import (
     DEFAULT_MERGED_PR_BASE_SCORE,
-    EXCESSIVE_PR_MIN_MULTIPLIER,
-    EXCESSIVE_PR_PENALTY_SLOPE,
-    EXCESSIVE_PR_PENALTY_THRESHOLD,
+    EXCESSIVE_PR_PENALTY_BASE_THRESHOLD,
     MAINTAINER_ASSOCIATIONS,
     MAINTAINER_ISSUE_BONUS,
     MAX_CODE_DENSITY_MULTIPLIER,
     MAX_ISSUE_AGE_BONUS,
     MAX_ISSUE_AGE_FOR_MAX_SCORE,
     MAX_ISSUE_CLOSE_WINDOW_DAYS,
+    MAX_OPEN_PR_THRESHOLD,
     MIN_TOKEN_SCORE_FOR_BASE_SCORE,
+    OPEN_PR_THRESHOLD_TOKEN_SCORE,
     SECONDS_PER_DAY,
     SECONDS_PER_HOUR,
     TIME_DECAY_GRACE_PERIOD_HOURS,
@@ -38,6 +38,7 @@ from gittensor.validator.configurations.tier_config import (
     TIERS_ORDER,
     Tier,
     TierConfig,
+    TierStats,
     get_tier_from_config,
 )
 from gittensor.validator.evaluation.credibility import (
@@ -83,7 +84,7 @@ def score_pull_request(
     programming_languages: Dict[str, LanguageConfig],
     token_config: TokenConfig,
 ) -> None:
-    """Scores a single PR and assigns the PullRequest object tier config & other fields (low value, etc)."""
+    """Scores a single PR and populates relevant PullRequest fields (tier_config, etc.)"""
 
     pr.repository_tier_configuration = get_tier_config(pr.repository_full_name, master_repositories)
     if not pr.repository_tier_configuration:
@@ -104,7 +105,7 @@ def score_pull_request(
     pr.base_score = calculate_base_score(pr, programming_languages, token_config, file_contents)
     calculate_pr_multipliers(pr, miner_eval, master_repositories)
 
-    if pr.pr_state == PRState.MERGED and not pr.low_value_pr:
+    if pr.pr_state == PRState.MERGED:
         miner_eval.unique_repos_contributed_to.add(pr.repository_full_name)
 
 
@@ -214,7 +215,9 @@ def calculate_pr_multipliers(
     pr.issue_multiplier = round(calculate_issue_multiplier(pr), 2)
 
     if is_merged:
-        pr.open_pr_spam_multiplier = round(calculate_pr_spam_penalty_multiplier(miner_eval.total_open_prs), 2)
+        # Spam multiplier is recalculated in finalize_miner_scores with tier stats
+        # Set to 1.0 here as placeholder; will be updated when tier unlock status is known
+        pr.open_pr_spam_multiplier = 1.0
         pr.time_decay_multiplier = round(calculate_time_decay_multiplier(pr), 2)
 
     else:
@@ -244,14 +247,46 @@ def count_repository_contributors(miner_evaluations: Dict[int, MinerEvaluation])
     return repo_counts
 
 
-def calculate_pr_spam_penalty_multiplier(total_open_prs: int) -> float:
-    """Apply penalty for excessive open PRs"""
-    if total_open_prs <= EXCESSIVE_PR_PENALTY_THRESHOLD:
-        return 1.0
+def calculate_open_pr_threshold(
+    tier_stats: Dict[Tier, TierStats] = None,
+) -> int:
+    """
+    Calculate dynamic open PR threshold based on total token score across unlocked tiers.
 
-    excess_pr_count = total_open_prs - EXCESSIVE_PR_PENALTY_THRESHOLD
-    calculated_multiplier = 1.0 - (excess_pr_count * EXCESSIVE_PR_PENALTY_SLOPE)
-    return max(EXCESSIVE_PR_MIN_MULTIPLIER, calculated_multiplier)
+    Bonus = floor(total_unlocked_token_score / 500)
+    Example: 1500 token score across unlocked tiers / 500 = +3 bonus
+
+    Threshold = min(BASE_THRESHOLD + bonus, MAX_OPEN_PR_THRESHOLD)
+    """
+    if tier_stats is None:
+        return EXCESSIVE_PR_PENALTY_BASE_THRESHOLD
+
+    # Sum token scores from all unlocked tiers
+    total_unlocked_token_score = 0.0
+    for tier in TIERS_ORDER:
+        if is_tier_unlocked(tier, tier_stats, log_reasons=False):
+            total_unlocked_token_score += tier_stats[tier].token_score
+
+    bonus = int(total_unlocked_token_score // OPEN_PR_THRESHOLD_TOKEN_SCORE)
+    return min(EXCESSIVE_PR_PENALTY_BASE_THRESHOLD + bonus, MAX_OPEN_PR_THRESHOLD)
+
+
+def calculate_pr_spam_penalty_multiplier(
+    total_open_prs: int,
+    tier_stats: Dict[Tier, TierStats] = None,
+) -> float:
+    """
+    Apply penalty for excessive open PRs.
+
+    Binary multiplier:
+    - 1.0 if open PRs <= threshold
+    - 0.0 otherwise
+
+    The threshold is dynamic based on the miner's total token score
+    across unlocked tiers.
+    """
+    threshold = calculate_open_pr_threshold(tier_stats)
+    return 1.0 if total_open_prs <= threshold else 0.0
 
 
 def calculate_time_decay_multiplier(pr: PullRequest) -> float:
@@ -285,19 +320,40 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
         bt.logging.info(f'UID {uid}')
         bt.logging.info('=' * 50)
 
+        # Process open PRs for collateral
+        for pr in evaluation.open_pull_requests:
+            pr.collateral_score = calculate_open_pr_collateral_score(pr)
+            evaluation.total_collateral_score += pr.collateral_score
+
+        has_contributions = len(evaluation.merged_pull_requests) > 0 or len(evaluation.closed_pull_requests) > 0
+
+        if not has_contributions:
+            bt.logging.info('No merged or closed PRs - skipping tier evaluation')
+            continue
+
         evaluation.credibility_by_tier = calculate_credibility_per_tier(
             evaluation.merged_pull_requests, evaluation.closed_pull_requests
         )
 
+        # Calculate tier stats early to determine unlocked tiers for spam multiplier
+        tier_stats = calculate_tier_stats(
+            merged_prs=evaluation.merged_pull_requests,
+            closed_prs=evaluation.closed_pull_requests,
+            open_prs=evaluation.open_pull_requests,
+            include_scoring_details=False,  # Will recalculate with scoring details later
+        )
+
+        # Calculate spam multiplier once per miner (same for all their merged PRs)
+        spam_multiplier = calculate_pr_spam_penalty_multiplier(evaluation.total_open_prs, tier_stats)
+
         # Process merged PRs
         for pr in evaluation.merged_pull_requests:
-            # Skip over low value PRs
-            if pr.low_value_pr:
-                continue
-
             pr.repository_uniqueness_multiplier = calculate_uniqueness_multiplier(
                 pr.repository_full_name, repo_counts, total_contributing_miners
             )
+
+            # Apply spam multiplier (calculated once per miner based on unlocked tiers)
+            pr.open_pr_spam_multiplier = spam_multiplier
 
             # Apply tier level credibility^k to each PRs score
             tier_config = pr.repository_tier_configuration
@@ -319,18 +375,12 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
             evaluation.total_leaf_count += pr.leaf_count
             evaluation.total_leaf_score += pr.leaf_score
 
-        # Process open PRs for collateral
-        for pr in evaluation.open_pull_requests:
-            pr.collateral_score = calculate_open_pr_collateral_score(pr)
-            evaluation.total_collateral_score += pr.collateral_score
-
-        # Apply collateral deduction
+        # Apply collateral deduction (0 - 0 = 0 for empty miners)
         earned_score = evaluation.total_score
         evaluation.total_score = max(0.0, earned_score - evaluation.total_collateral_score)
         evaluation.unique_repos_count = len(evaluation.unique_repos_contributed_to)
 
-        # Calculate tier stats one more time now that scoring is fully applied (for logging + dashboard).
-        # This also calculates qualified_unique_repo_count per tier.
+        # Calculate tier stats (empty stats for no contributions, used for logging + dashboard)
         tier_stats = calculate_tier_stats(
             merged_prs=evaluation.merged_pull_requests,
             closed_prs=evaluation.closed_pull_requests,
@@ -345,7 +395,11 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
                 evaluation.current_tier = tier
 
         # Set overall qualified unique repos count (Bronze threshold is lowest, so use that for overall count)
-        evaluation.qualified_unique_repos_count = tier_stats[Tier.BRONZE].qualified_unique_repo_count
+        evaluation.qualified_unique_repos_count = (
+            tier_stats[Tier.BRONZE].qualified_unique_repo_count
+            + tier_stats[Tier.SILVER].qualified_unique_repo_count
+            + tier_stats[Tier.GOLD].qualified_unique_repo_count
+        )
 
         # Determine next tier for display
         current_tier_str = evaluation.current_tier.value if evaluation.current_tier else 'None'
@@ -490,6 +544,13 @@ def calculate_open_pr_collateral_score(pr: PullRequest) -> float:
                     uniqueness (cross-miner), open_pr_spam (not for collateral)
     """
     from math import prod
+
+    # Guard against missing tier configuration
+    if pr.repository_tier_configuration is None:
+        bt.logging.warning(
+            f'OPEN PR #{pr.number} in {pr.repository_full_name} has no tier configuration. Skipping collateral calculation.'
+        )
+        return 0.0
 
     multipliers = {
         'repo_weight': pr.repo_weight_multiplier,

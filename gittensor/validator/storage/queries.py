@@ -1,5 +1,28 @@
 # Storage Queries - Only SET/INSERT operations for writing data
 
+# Cleanup Queries - Remove stale data when a miner re-registers on a new uid/hotkey
+CLEANUP_STALE_MINER_EVALUATIONS = """
+DELETE FROM miner_evaluations
+WHERE github_id = %s
+  AND github_id != '0'
+  AND (uid != %s OR hotkey != %s)
+  AND created_at <= %s
+"""
+
+CLEANUP_STALE_MINER_TIER_STATS = """
+DELETE FROM miner_tier_stats
+WHERE github_id = %s
+  AND github_id != '0'
+  AND (uid != %s OR hotkey != %s)
+"""
+
+CLEANUP_STALE_MINERS = """
+DELETE FROM miners
+WHERE github_id = %s
+  AND github_id != '0'
+  AND (uid != %s OR hotkey != %s)
+"""
+
 # Miner Queries
 SET_MINER = """
 INSERT INTO miners (uid, hotkey, github_id)
@@ -17,7 +40,7 @@ INSERT INTO pull_requests (
     open_pr_spam_multiplier, repository_uniqueness_multiplier, time_decay_multiplier,
     credibility_multiplier, raw_credibility, credibility_scalar,
     earned_score, collateral_score,
-    additions, deletions, commits, total_nodes_scored, low_value_pr,
+    additions, deletions, commits, total_nodes_scored,
     merged_by_login, description, last_edited_at,
     token_score, structural_count, structural_score, leaf_count, leaf_score
 ) VALUES %s
@@ -44,7 +67,6 @@ DO UPDATE SET
     deletions = EXCLUDED.deletions,
     commits = EXCLUDED.commits,
     total_nodes_scored = EXCLUDED.total_nodes_scored,
-    low_value_pr = EXCLUDED.low_value_pr,
     merged_by_login = EXCLUDED.merged_by_login,
     description = EXCLUDED.description,
     last_edited_at = EXCLUDED.last_edited_at,
@@ -62,7 +84,7 @@ INSERT INTO issues (
     number, pr_number, repository_full_name, title, created_at, closed_at,
     author_login, state, author_association
 ) VALUES %s
-ON CONFLICT (number, repository_full_name)
+ON CONFLICT (number, pr_number, repository_full_name)
 DO UPDATE SET
     title = EXCLUDED.title,
     closed_at = EXCLUDED.closed_at,

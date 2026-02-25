@@ -18,14 +18,15 @@
 
 import threading
 import time
-from typing import Dict
+from typing import Dict, List, Set
 
 import bittensor as bt
 import wandb
 
-from gittensor.classes import MinerEvaluation
+from gittensor.__init__ import __version__
+from gittensor.classes import MinerEvaluation, MinerEvaluationCache
 from gittensor.validator.forward import forward
-from gittensor.validator.utils.config import WANDB_PROJECT, __version__
+from gittensor.validator.utils.config import STORE_DB_RESULTS, WANDB_PROJECT, WANDB_VALIDATOR_NAME
 from gittensor.validator.utils.storage import DatabaseStorage
 from neurons.base.validator import BaseValidatorNeuron
 
@@ -38,12 +39,17 @@ class Validator(BaseValidatorNeuron):
     """
 
     db_storage: DatabaseStorage = None
+    evaluation_cache: MinerEvaluationCache = None
 
     def __init__(self, config=None):
         super(Validator, self).__init__(config=config)
 
-        # Init DB for validation result storage. Requires STORE_DB_RESULTS in .env
-        if self.config.database.store_validation_results:
+        # Init in-memory cache for miner evaluations (fallback when GitHub API fails)
+        self.evaluation_cache = MinerEvaluationCache()
+
+        # DB connection for validation result storage.
+        # Requires STORE_DB_RESULTS=true in .env
+        if STORE_DB_RESULTS:
             bt.logging.warning('Validation result storage enabled.')
             self.db_storage = DatabaseStorage()
 
@@ -68,7 +74,7 @@ class Validator(BaseValidatorNeuron):
                 wandb.init(
                     entity='entrius-gittensor',
                     project=WANDB_PROJECT,
-                    name=f'vali-{self.uid}-{__version__}',
+                    name=f'{WANDB_VALIDATOR_NAME}-{self.uid}-{__version__}',
                     config=self.config,
                     reinit=True,
                 )
@@ -78,18 +84,50 @@ class Validator(BaseValidatorNeuron):
         bt.logging.info('load_state()')
         self.load_state()
 
-    async def bulk_store_evaluation(self, miner_evals: Dict[int, MinerEvaluation]):
-        """
-        Wrapper function to store all miner evaluations at once.
-        """
+    async def bulk_store_evaluation(self, miner_evals: Dict[int, MinerEvaluation], skip_uids: Set[int] = None):
+        """Store all miner evaluations, log summary rather than per-UID.
 
-        if self.db_storage is not None:
-            for uid, evaluation in miner_evals.items():
-                await self.store_evaluation(uid, evaluation)
+        Args:
+            miner_evals: Dict of UID -> MinerEvaluation to store.
+            skip_uids: Set of UIDs to skip (e.g. cached evaluations that were already stored previously).
+        """
+        if self.db_storage is None:
+            return
+
+        skip_uids = skip_uids or set()
+        successful_count = 0
+        skipped_count = 0
+        failed_uids: List[int] = []
+
+        for uid, evaluation in miner_evals.items():
+            if uid in skip_uids:
+                skipped_count += 1
+                continue
+
+            try:
+                storage_result = self.db_storage.store_evaluation(evaluation)
+                if storage_result.success:
+                    successful_count += 1
+                else:
+                    failed_uids.append(uid)
+                    bt.logging.warning(f'Storage partially failed for UID {uid}:')
+                    for error in storage_result.errors:
+                        bt.logging.warning(f'  - {error}')
+            except Exception as e:
+                failed_uids.append(uid)
+                bt.logging.error(f'Error storing evaluation for UID {uid}: {e}')
+
+        # Summary logging
+        if successful_count > 0:
+            bt.logging.success(f'Stored validation results for {successful_count} UIDs to DB')
+        if skipped_count > 0:
+            bt.logging.info(f'Skipped {skipped_count} UIDs (cached evaluations)')
+        if failed_uids:
+            bt.logging.warning(f'Failed to store {len(failed_uids)} UIDs: {failed_uids}')
 
     async def store_evaluation(self, uid: int, miner_eval: MinerEvaluation):
         """
-        Stores the miner eval if DB storage is enabled by validator via --database.store_validation_results flag.
+        Stores the miner eval if DB storage is enabled via STORE_DB_RESULTS=true in .env.
         """
 
         if self.db_storage is not None:
@@ -105,6 +143,41 @@ class Validator(BaseValidatorNeuron):
 
             except Exception as e:
                 bt.logging.error(f'Error when attempting to store miners evaluation for uid {uid}: {e}')
+
+    def store_or_use_cached_evaluation(self, miner_evaluations: Dict[int, MinerEvaluation]) -> Set[int]:
+        """
+        Handle evaluation cache: store successful evals, fallback to cache for GitHub failures.
+
+        Mutates the passed dict, replacing failed evaluations with cached ones if available.
+
+        Returns:
+            Set of UIDs that were restored from cache (should be skipped during DB storage
+            since the cached data was already stored previously).
+        """
+        cached_uids: Set[int] = set()
+
+        for uid, miner_eval in miner_evaluations.items():
+            # Skip miners that failed validation (invalid PAT, etc.)
+            if miner_eval.failed_reason is not None:
+                continue
+
+            # Successful evaluation with PRs - store to cache
+            if miner_eval.total_prs > 0:
+                self.evaluation_cache.store(miner_eval)
+                continue
+
+            # if failure, try cache fallback
+            cached_eval = self.evaluation_cache.get(uid, miner_eval.hotkey, miner_eval.github_id)
+            if cached_eval is not None:
+                bt.logging.info(
+                    f'UID {uid}: GitHub returned no PRs, using cached evaluation '
+                    f'(merged={cached_eval.total_merged_prs}, open={cached_eval.total_open_prs}, '
+                    f'closed={cached_eval.total_closed_prs})'
+                )
+                miner_evaluations[uid] = cached_eval
+                cached_uids.add(uid)
+
+        return cached_uids
 
     async def forward(self):
         """

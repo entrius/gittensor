@@ -6,38 +6,76 @@
 
 # Gittensor
 
-Gittensor aims to accelerate the development of open source software (OSS) and enable OSS developers to be rewarded for meaningful work. We incentivize open source contributions.
+Incentivize open source contributions.
 
-## Socials
+[![Website](https://img.shields.io/badge/Website-gittensor.io-blue)](https://gittensor.io)
+[![Discord](https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white)](https://discord.com/invite/bittensor)
+[![Twitter](https://img.shields.io/twitter/follow/gittensor_io?style=social)](https://x.com/gittensor_io)
 
-- **Website:** [gittensor.io](https://gittensor.io)
-- **X (Twitter):** [@gittensor_io](https://x.com/gittensor_io)
-- **Discord:** [Join our channel, 74, in the Bittensor discord](https://discord.gg/aK2ZNUQfRt)
+## Introduction
 
----
+[Gittensor](https://gittensor.io/) is a [Bittensor subnet](https://docs.learnbittensor.org/subnets/understanding-subnets) (SN74) that accelerates open source software development by rewarding meaningful contributions. Miners earn TAO by making real, merged pull requests to recognized open source repositories.
 
-## At a Glance
+## How it Works
 
-- **Miners**: Provide a fine-grained Github personal access token (PAT) and create pull requests (PRs) to recognized repositories.
-- **Validators**: Utilize miner PATs to authenticate account ownership and search recognized repositories for successfully merged miner PRs
+Miners register with a fine-grained [GitHub personal access token](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens) (PAT) and contribute to whitelisted open source repositories. When their pull requests get merged, validators authenticate account ownership via the PAT, verify the merged contributions, and score them based on code quality, repository weight, and programming language factors. Rewards are distributed proportionally to contribution scores.
+
+## Why Gittensor
+
+Open source powers the modern world, yet most contributors work for free. Gittensor solves this by creating a decentralized marketplace where:
+
+- **Real work gets rewarded** — Only merged PRs to legitimate repositories earn emissions
+- **Quality over quantity** — Semantic code analysis evaluates actual contribution value
+- **Sybil-resistant** — GitHub account verification and merge requirements prevent gaming
+
+The result: a sustainable incentive layer that channels resources toward building and maintaining the software we all depend on.
 
 ---
 
 ## Miners
 
+**Recommended: Deploy with Docker**
+
+> [!NOTE]
+> The port in .env must be accessible by the public.
+
+```bash
+# Quick start
+git clone https://github.com/entrius/gittensor.git
+cd gittensor
+cp env.example .env
+# Edit .env with proper values
+nano .env
+
+docker-compose -f docker-compose.miner.yml up -d
+```
+
 See full guide **[here](https://docs.gittensor.io/miner.html)**
 
 ## Validators
 
+**Recommended: Deploy with Docker and Docker Watchtower for automatic updates**
+
+```bash
+# Quick start
+git clone https://github.com/entrius/gittensor.git
+cd gittensor
+cp env.example .env
+# Edit .env with proper values
+nano .env
+
+docker-compose -f docker-compose.vali.yml up -d
+```
+
 See full guide **[here](https://docs.gittensor.io/validator.html)**
 
-## Scoring & Rewards
+## Reward Algorithm
 
 ### Important Structures
 
 - Master Repositories & Weights
 
-A list of repositories pulled from github that have been deemed valid for scoring. They each have an associated weight based on factors like: forks, commits, contributors, stars, etc.
+A list of repositories pulled from GitHub that have been deemed valid for scoring. They each have an associated weight based on factors like: forks, commits, contributors, stars, etc.
 
 _NOTE: this list will be dynamic. It will see various audits, additions, deletions, weight changes, and shuffles as the subnet matures._
 
@@ -57,14 +95,6 @@ Weights assigned to AST (Abstract Syntax Tree) node types for token-based scorin
 
 See full guide **[here](https://docs.gittensor.io/scoring.html)**
 
-### Collaborative emissions scaling
+## License
 
-Adopted from bitcast, subnet 93, collaborative emissions scaling has the network ‘unlock’ emissions as more miners join and earn a score. Miners will benefit by experiencing individual and cumulative network growth. Two major values affecting the total emissions unlocked rate are:
-
-- Total lines changed within the last 90 days (`PR_LOOKBACK_DAYS`)
-- Total merged pull requests within the last 90 days
-- Total unique repositories contributed to within the last 90 days
-
-As total lines changed and total unique repositories increases, the percentage of total available emissions increases. Whatever is not released is recycled.
-
-The rate of emissions unlocked will be monitored and adjusted as the subnet matures to ensure fair distribution of alpha.
+MIT - See [LICENSE](LICENSE) for details.

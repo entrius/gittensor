@@ -21,6 +21,9 @@ from .queries import (
     BULK_UPSERT_MINER_EVALUATION,
     BULK_UPSERT_MINER_TIER_STATS,
     BULK_UPSERT_PULL_REQUESTS,
+    CLEANUP_STALE_MINER_EVALUATIONS,
+    CLEANUP_STALE_MINER_TIER_STATS,
+    CLEANUP_STALE_MINERS,
     SET_MINER,
 )
 
@@ -106,6 +109,27 @@ class Repository(BaseRepository):
         params = (miner.uid, miner.hotkey, miner.github_id)
         return self.set_entity(SET_MINER, params)
 
+    def cleanup_stale_miner_data(self, evaluation: MinerEvaluation) -> None:
+        """
+        Remove stale evaluation data when a miner re-registers on a new uid/hotkey.
+
+        Deletes miner_evaluations, miner_tier_stats, and miners rows for the same
+        github_id but under a different (uid, hotkey) pair, ensuring only one
+        evaluation per real github user exists in the database.
+
+        Args:
+            evaluation: The current MinerEvaluation being stored
+        """
+        if not evaluation.github_id or evaluation.github_id == '0':
+            return
+
+        params = (evaluation.github_id, evaluation.uid, evaluation.hotkey)
+        eval_params = params + (evaluation.evaluation_timestamp,)
+
+        self.execute_command(CLEANUP_STALE_MINER_EVALUATIONS, eval_params)
+        self.execute_command(CLEANUP_STALE_MINER_TIER_STATS, params)
+        self.execute_command(CLEANUP_STALE_MINERS, params)
+
     def store_pull_requests_bulk(self, pull_requests: List[PullRequest]) -> int:
         """
         Bulk insert/update pull requests with efficient SQL conflict resolution
@@ -153,7 +177,6 @@ class Repository(BaseRepository):
                     pr.deletions,
                     pr.commits,
                     pr.total_nodes_scored,
-                    pr.low_value_pr,
                     pr.merged_by_login,
                     pr.description,
                     pr.last_edited_at,

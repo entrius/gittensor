@@ -29,6 +29,7 @@ get_github_id = github_api_tools.get_github_id
 get_github_account_age_days = github_api_tools.get_github_account_age_days
 get_pull_request_file_changes = github_api_tools.get_pull_request_file_changes
 find_prs_for_issue = github_api_tools.find_prs_for_issue
+execute_graphql_query = github_api_tools.execute_graphql_query
 
 
 # ============================================================================
@@ -518,6 +519,32 @@ class TestFileChangesRetryLogic:
 
         assert mock_get.call_count == 3, 'Should try exactly 3 times'
         assert mock_sleep.call_count == 2, 'Should only sleep between retries, not after the last attempt'
+
+
+# ============================================================================
+# execute_graphql_query Retry Logic Tests
+# ============================================================================
+
+
+class TestExecuteGraphQLQueryRetryLogic:
+    """Test suite for retry logic in execute_graphql_query."""
+
+    @patch('gittensor.utils.github_api_tools.requests.post')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_exception_backoff_capped_at_30s(self, mock_logging, mock_sleep, mock_post):
+        """Test that exception handler backoff delay is capped at 30 seconds."""
+        import requests
+
+        mock_post.side_effect = requests.exceptions.ConnectionError('Connection refused')
+
+        result = execute_graphql_query('query {}', {}, 'fake_token', max_attempts=8)
+
+        assert result is None
+        # Verify delays are capped at 30: 5, 10, 20, 30, 30, 30, 30
+        expected_delays = [call(5), call(10), call(20), call(30), call(30), call(30), call(30)]
+        mock_sleep.assert_has_calls(expected_delays)
+        assert mock_sleep.call_count == 7
 
 
 # ============================================================================

@@ -3003,6 +3003,10 @@
     "tier": "Bronze",
     "weight": 0.24
   },
+  "llmsresearch/paperbanana": {
+    "weight": 3.54,
+    "tier": "Silver"
+  },
   "llmware-ai/llmware": {
     "tier": "Silver",
     "weight": 3.48

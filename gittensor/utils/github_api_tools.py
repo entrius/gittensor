@@ -554,7 +554,7 @@ def execute_graphql_query(
 
         except requests.exceptions.RequestException as e:
             if attempt < (max_attempts - 1):
-                backoff_delay = 5 * (2**attempt)
+                backoff_delay = min(5 * (2**attempt), 30)
                 bt.logging.warning(
                     f'GraphQL request exception (attempt {attempt + 1}/{max_attempts}), '
                     f'retrying in {backoff_delay}s: {e}'
@@ -797,7 +797,7 @@ def load_miners_prs(
                 break
 
             pr_data: Dict = user_data.get('pullRequests', {})
-            prs: Dict = pr_data.get('nodes', [])
+            prs: List = pr_data.get('nodes', [])
             page_info: Dict = pr_data.get('pageInfo', {})
 
             for pr_raw in prs:

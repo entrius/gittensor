@@ -442,7 +442,7 @@ class TestFileChangesRetryLogic:
         result = get_pull_request_file_changes('owner/repo', 1, 'fake_token')
 
         assert mock_get.call_count == 3
-        assert mock_sleep.call_count == 3
+        assert mock_sleep.call_count == 2, 'Should sleep between attempts but not after the last one'
         assert result == []
         mock_logging.error.assert_called()
 
@@ -483,14 +483,41 @@ class TestFileChangesRetryLogic:
     @patch('gittensor.utils.github_api_tools.time.sleep')
     @patch('gittensor.utils.github_api_tools.bt.logging')
     def test_exponential_backoff_timing(self, mock_logging, mock_sleep, mock_get):
-        """Test that backoff delays are 5s, 10s for 3 attempts."""
+        """Test that backoff delays are 5s, 10s for 3 attempts (no sleep after last attempt)."""
         mock_500 = Mock(status_code=500, text='Internal Server Error')
         mock_get.return_value = mock_500
 
         get_pull_request_file_changes('owner/repo', 1, 'fake_token')
 
-        mock_sleep.assert_has_calls([call(5), call(10), call(20)])
-        assert mock_sleep.call_count == 3
+        mock_sleep.assert_has_calls([call(5), call(10)])
+        assert mock_sleep.call_count == 2, 'Should sleep between attempts but not after the last one'
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_no_sleep_after_final_http_error(self, mock_logging, mock_sleep, mock_get):
+        """Verify no unnecessary sleep occurs after the final failed HTTP attempt."""
+        mock_403 = Mock(status_code=403, text='Forbidden')
+        mock_get.return_value = mock_403
+
+        get_pull_request_file_changes('owner/repo', 42, 'fake_token')
+
+        assert mock_get.call_count == 3, 'Should try exactly 3 times'
+        assert mock_sleep.call_count == 2, 'Should only sleep between retries, not after the last attempt'
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_no_sleep_after_final_connection_error(self, mock_logging, mock_sleep, mock_get):
+        """Verify no unnecessary sleep occurs after the final failed connection attempt."""
+        import requests
+
+        mock_get.side_effect = requests.exceptions.Timeout('timed out')
+
+        get_pull_request_file_changes('owner/repo', 42, 'fake_token')
+
+        assert mock_get.call_count == 3, 'Should try exactly 3 times'
+        assert mock_sleep.call_count == 2, 'Should only sleep between retries, not after the last attempt'
 
 
 # ============================================================================

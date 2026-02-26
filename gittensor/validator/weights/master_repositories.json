@@ -494,6 +494,9 @@
     "weight": 4.25
   },
   "autoppia/autoppia_web_agents_subnet": {
+    "additional_acceptable_branches": [
+      "dev"
+    ],
     "tier": "Silver",
     "weight": 6.46
   },

@@ -51,6 +51,14 @@
     "tier": "Gold",
     "weight": 20.88
   },
+  "AffineIO/affine-cortex": {
+    "tier": "Gold",
+    "weight": 22.21
+  },
+  "AffineIO/affinetes": {
+    "tier": "Gold",
+    "weight": 20.88
+  },
   "aframevr/aframe": {
     "tier": "Bronze",
     "weight": 0.19
@@ -817,6 +825,10 @@
   "carla-simulator/carla": {
     "tier": "Bronze",
     "weight": 0.27
+  },
+  "cashubtc/Numo": {
+    "weight": 8.88,
+    "tier": "Silver"
   },
   "catboost/catboost": {
     "tier": "Silver",
@@ -2998,6 +3010,10 @@
   "lllyasviel/Fooocus": {
     "tier": "Bronze",
     "weight": 0.24
+  },
+  "llmsresearch/paperbanana": {
+    "weight": 3.54,
+    "tier": "Silver"
   },
   "llmware-ai/llmware": {
     "tier": "Silver",
@@ -5762,4 +5778,3 @@
     "weight": 0.17
   }
 }
-

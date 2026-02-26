@@ -495,7 +495,8 @@
   },
   "autoppia/autoppia_web_agents_subnet": {
     "additional_acceptable_branches": [
-      "dev"
+      "dev",
+      "dev-gittensor"
     ],
     "tier": "Silver",
     "weight": 6.46

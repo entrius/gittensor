@@ -51,6 +51,14 @@
     "tier": "Gold",
     "weight": 20.88
   },
+  "AffineIO/affine-cortex": {
+    "tier": "Gold",
+    "weight": 22.21
+  },
+  "AffineIO/affinetes": {
+    "tier": "Gold",
+    "weight": 20.88
+  },
   "aframevr/aframe": {
     "tier": "Bronze",
     "weight": 0.19
@@ -92,9 +100,7 @@
     "weight": 0.18
   },
   "alextselegidis/easyappointments": {
-    "additional_acceptable_branches": [
-      "develop"
-    ],
+    "additional_acceptable_branches": ["develop"],
     "tier": "Bronze",
     "weight": 0.25
   },
@@ -191,9 +197,7 @@
     "weight": 0.18
   },
   "ant-design/ant-design": {
-    "additional_acceptable_branches": [
-      "feature"
-    ],
+    "additional_acceptable_branches": ["feature"],
     "tier": "Bronze",
     "weight": 0.64
   },
@@ -494,13 +498,12 @@
     "weight": 4.25
   },
   "autoppia/autoppia_web_agents_subnet": {
+    "additional_acceptable_branches": ["dev"],
     "tier": "Silver",
     "weight": 6.46
   },
   "autoppia/autoppia_webs_demo": {
-    "additional_acceptable_branches": [
-      "feature/*"
-    ],
+    "additional_acceptable_branches": ["feature/*"],
     "tier": "Silver",
     "weight": 4.25
   },
@@ -661,9 +664,7 @@
     "weight": 0.35
   },
   "bigskysoftware/htmx": {
-    "additional_acceptable_branches": [
-      "dev"
-    ],
+    "additional_acceptable_branches": ["dev"],
     "tier": "Bronze",
     "weight": 0.18
   },
@@ -708,9 +709,7 @@
     "weight": 25.3
   },
   "BitMind-AI/bitmind-subnet": {
-    "additional_acceptable_branches": [
-      "testnet"
-    ],
+    "additional_acceptable_branches": ["testnet"],
     "tier": "Gold",
     "weight": 19.32
   },
@@ -817,6 +816,10 @@
   "carla-simulator/carla": {
     "tier": "Bronze",
     "weight": 0.27
+  },
+  "cashubtc/Numo": {
+    "weight": 8.88,
+    "tier": "Silver"
   },
   "catboost/catboost": {
     "tier": "Silver",
@@ -1354,9 +1357,7 @@
     "weight": 0.21
   },
   "dotnet/dotnet-docker": {
-    "additional_acceptable_branches": [
-      "nightly"
-    ],
+    "additional_acceptable_branches": ["nightly"],
     "tier": "Silver",
     "weight": 3.79
   },
@@ -1475,9 +1476,7 @@
     "weight": 0.17
   },
   "elebumm/RedditVideoMakerBot": {
-    "additional_acceptable_branches": [
-      "develop"
-    ],
+    "additional_acceptable_branches": ["develop"],
     "tier": "Bronze",
     "weight": 0.17
   },
@@ -1524,6 +1523,10 @@
   "entrius/gittensor": {
     "tier": "Gold",
     "weight": 60
+  },
+  "entrius/gittensor-ui": {
+    "tier": "Silver",
+    "weight": 1.01
   },
   "entrius/venth": {
     "tier": "Silver",
@@ -2204,9 +2207,7 @@
     "weight": 0.01
   },
   "hacksider/Deep-Live-Cam": {
-    "additional_acceptable_branches": [
-      "premain"
-    ],
+    "additional_acceptable_branches": ["premain"],
     "tier": "Bronze",
     "weight": 0.25
   },
@@ -2316,9 +2317,7 @@
     "weight": 0.17
   },
   "hoppscotch/hoppscotch": {
-    "additional_acceptable_branches": [
-      "next"
-    ],
+    "additional_acceptable_branches": ["next"],
     "tier": "Gold",
     "weight": 20.13
   },
@@ -2363,9 +2362,7 @@
     "weight": 0.2
   },
   "hummingbot/hummingbot": {
-    "additional_acceptable_branches": [
-      "development"
-    ],
+    "additional_acceptable_branches": ["development"],
     "tier": "Bronze",
     "weight": 0.18
   },
@@ -2403,9 +2400,7 @@
     "weight": 0.19
   },
   "idurar/idurar-erp-crm": {
-    "additional_acceptable_branches": [
-      "dev"
-    ],
+    "additional_acceptable_branches": ["dev"],
     "tier": "Bronze",
     "weight": 0.32
   },
@@ -2526,9 +2521,7 @@
     "weight": 0.58
   },
   "JeffreySu/WeiXinMPSDK": {
-    "additional_acceptable_branches": [
-      "Developer"
-    ],
+    "additional_acceptable_branches": ["Developer"],
     "tier": "Bronze",
     "weight": 0.29
   },
@@ -2610,9 +2603,7 @@
     "weight": 0.18
   },
   "joomla/joomla-cms": {
-    "additional_acceptable_branches": [
-      "*-dev"
-    ],
+    "additional_acceptable_branches": ["*-dev"],
     "tier": "Bronze",
     "weight": 0.28
   },
@@ -2653,16 +2644,12 @@
     "weight": 0.21
   },
   "juice-shop/juice-shop": {
-    "additional_acceptable_branches": [
-      "develop"
-    ],
+    "additional_acceptable_branches": ["develop"],
     "tier": "Bronze",
     "weight": 0.35
   },
   "juliangarnier/anime": {
-    "additional_acceptable_branches": [
-      "dev"
-    ],
+    "additional_acceptable_branches": ["dev"],
     "tier": "Silver",
     "weight": 3.48
   },
@@ -2980,10 +2967,7 @@
     "weight": 0.24
   },
   "LimeSurvey/LimeSurvey": {
-    "additional_acceptable_branches": [
-      "develop-minor",
-      "develop-major"
-    ],
+    "additional_acceptable_branches": ["develop-minor", "develop-major"],
     "tier": "Bronze",
     "weight": 0.28
   },
@@ -2998,6 +2982,10 @@
   "lllyasviel/Fooocus": {
     "tier": "Bronze",
     "weight": 0.24
+  },
+  "llmsresearch/paperbanana": {
+    "weight": 3.54,
+    "tier": "Silver"
   },
   "llmware-ai/llmware": {
     "tier": "Silver",
@@ -3021,9 +3009,7 @@
     "weight": 0.01
   },
   "louislam/uptime-kuma": {
-    "additional_acceptable_branches": [
-      "3.0.X"
-    ],
+    "additional_acceptable_branches": ["3.0.X"],
     "inactive_at": "2026-01-26T02:52:00.000Z",
     "tier": "Bronze",
     "weight": 0.19
@@ -3057,9 +3043,7 @@
     "weight": 4.26
   },
   "macrocosm-os/data-universe": {
-    "additional_acceptable_branches": [
-      "dev"
-    ],
+    "additional_acceptable_branches": ["dev"],
     "tier": "Silver",
     "weight": 4.85
   },
@@ -3160,9 +3144,7 @@
     "weight": 0.25
   },
   "medusajs/medusa": {
-    "additional_acceptable_branches": [
-      "develop"
-    ],
+    "additional_acceptable_branches": ["develop"],
     "tier": "Gold",
     "weight": 13.96
   },
@@ -3585,9 +3567,7 @@
     "weight": 0.32
   },
   "nocodb/nocodb": {
-    "additional_acceptable_branches": [
-      "develop"
-    ],
+    "additional_acceptable_branches": ["develop"],
     "tier": "Gold",
     "weight": 16.14
   },
@@ -3600,9 +3580,7 @@
     "weight": 0.32
   },
   "nodemcu/nodemcu-firmware": {
-    "additional_acceptable_branches": [
-      "dev"
-    ],
+    "additional_acceptable_branches": ["dev"],
     "tier": "Bronze",
     "weight": 0.26
   },
@@ -3895,17 +3873,12 @@
     "weight": 10
   },
   "opentensor/bittensor": {
-    "additional_acceptable_branches": [
-      "staging",
-      "SDKv10"
-    ],
+    "additional_acceptable_branches": ["staging", "SDKv10"],
     "tier": "Gold",
     "weight": 45.47
   },
   "opentensor/btcli": {
-    "additional_acceptable_branches": [
-      "staging"
-    ],
+    "additional_acceptable_branches": ["staging"],
     "tier": "Gold",
     "weight": 17.43
   },
@@ -3914,9 +3887,7 @@
     "weight": 10
   },
   "opentensor/subtensor": {
-    "additional_acceptable_branches": [
-      "devnet-ready"
-    ],
+    "additional_acceptable_branches": ["devnet-ready"],
     "tier": "Gold",
     "weight": 70.57
   },
@@ -4133,9 +4104,7 @@
     "weight": 4.59
   },
   "pi-hole/web": {
-    "additional_acceptable_branches": [
-      "development"
-    ],
+    "additional_acceptable_branches": ["development"],
     "tier": "Gold",
     "weight": 16.92
   },
@@ -4368,9 +4337,7 @@
     "weight": 18.88
   },
   "qdrant/qdrant": {
-    "additional_acceptable_branches": [
-      "dev"
-    ],
+    "additional_acceptable_branches": ["dev"],
     "tier": "Silver",
     "weight": 6.13
   },
@@ -4659,9 +4626,7 @@
     "weight": 0.3
   },
   "sbt/sbt": {
-    "additional_acceptable_branches": [
-      "1.12.x"
-    ],
+    "additional_acceptable_branches": ["1.12.x"],
     "tier": "Bronze",
     "weight": 0.89
   },
@@ -4738,9 +4703,7 @@
     "weight": 0.31
   },
   "shiftlayer-llc/brainplay-subnet": {
-    "additional_acceptable_branches": [
-      "dev"
-    ],
+    "additional_acceptable_branches": ["dev"],
     "tier": "Silver",
     "weight": 4.17
   },
@@ -4761,16 +4724,12 @@
     "weight": 0.24
   },
   "Significant-Gravitas/AutoGPT": {
-    "additional_acceptable_branches": [
-      "dev"
-    ],
+    "additional_acceptable_branches": ["dev"],
     "tier": "Gold",
     "weight": 14.26
   },
   "SillyTavern/SillyTavern": {
-    "additional_acceptable_branches": [
-      "staging"
-    ],
+    "additional_acceptable_branches": ["staging"],
     "tier": "Bronze",
     "weight": 0.19
   },
@@ -5090,9 +5049,7 @@
     "weight": 0.4
   },
   "tauri-apps/tauri": {
-    "additional_acceptable_branches": [
-      "dev"
-    ],
+    "additional_acceptable_branches": ["dev"],
     "tier": "Gold",
     "weight": 13.72
   },
@@ -5259,9 +5216,7 @@
     "weight": 0.26
   },
   "ToolJet/ToolJet": {
-    "additional_acceptable_branches": [
-      "develop"
-    ],
+    "additional_acceptable_branches": ["develop"],
     "tier": "Gold",
     "weight": 13.86
   },
@@ -5343,9 +5298,7 @@
     "weight": 5.96
   },
   "tw93/Pake": {
-    "additional_acceptable_branches": [
-      "dev"
-    ],
+    "additional_acceptable_branches": ["dev"],
     "tier": "Bronze",
     "weight": 0.18
   },
@@ -5630,9 +5583,7 @@
     "weight": 0.19
   },
   "xinnan-tech/xiaozhi-esp32-server": {
-    "additional_acceptable_branches": [
-      "live2d-actions"
-    ],
+    "additional_acceptable_branches": ["live2d-actions"],
     "tier": "Bronze",
     "weight": 0.3
   },
@@ -5762,4 +5713,3 @@
     "weight": 0.17
   }
 }
-

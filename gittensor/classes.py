@@ -156,7 +156,7 @@ class PullRequest:
     base_score: float = 0.0
     issue_multiplier: float = 1.0
     open_pr_spam_multiplier: float = 1.0
-    repository_uniqueness_multiplier: float = 1.0  # Stores pioneer reward multiplier
+    repository_uniqueness_multiplier: float = 1.0
     time_decay_multiplier: float = 1.0
     credibility_multiplier: float = 1.0
     raw_credibility: float = 1.0  # Before applying ^k scalar
@@ -194,7 +194,7 @@ class PullRequest:
             'repo': self.repo_weight_multiplier,
             'issue': self.issue_multiplier,
             'spam': self.open_pr_spam_multiplier,
-            'pioneer': self.repository_uniqueness_multiplier,
+            'unique': self.repository_uniqueness_multiplier,
             'decay': self.time_decay_multiplier,
             'cred': self.credibility_multiplier,
         }

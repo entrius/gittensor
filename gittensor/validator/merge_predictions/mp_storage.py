@@ -54,6 +54,16 @@ class PredictionStorage:
                 )
             ''')
             conn.execute('''
+                CREATE TABLE IF NOT EXISTS prediction_emas (
+                    uid        INTEGER NOT NULL,
+                    hotkey     TEXT    NOT NULL,
+                    ema_score  REAL    NOT NULL DEFAULT 0.0,
+                    rounds     INTEGER NOT NULL DEFAULT 0,
+                    updated_at TEXT    NOT NULL,
+                    PRIMARY KEY (uid, hotkey)
+                )
+            ''')
+            conn.execute('''
                 CREATE INDEX IF NOT EXISTS idx_predictions_issue
                 ON predictions (issue_id)
             ''')
@@ -152,5 +162,44 @@ class PredictionStorage:
             rows = conn.execute(
                 'SELECT * FROM predictions WHERE issue_id = ? ORDER BY uid, pr_number',
                 (issue_id,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    # =========================================================================
+    # EMA tracking
+    # =========================================================================
+
+    def get_ema(self, uid: int, hotkey: str) -> float:
+        """Get a miner's current prediction EMA score. Returns 0.0 if no record."""
+        with self._get_connection() as conn:
+            row = conn.execute(
+                'SELECT ema_score FROM prediction_emas WHERE uid = ? AND hotkey = ?',
+                (uid, hotkey),
+            ).fetchone()
+        return float(row['ema_score']) if row else 0.0
+
+    def update_ema(self, uid: int, hotkey: str, new_ema: float) -> None:
+        """Upsert a miner's prediction EMA score."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            with self._get_connection() as conn:
+                conn.execute(
+                    '''
+                    INSERT INTO prediction_emas (uid, hotkey, ema_score, rounds, updated_at)
+                    VALUES (?, ?, ?, 1, ?)
+                    ON CONFLICT (uid, hotkey)
+                    DO UPDATE SET ema_score = excluded.ema_score,
+                                  rounds = prediction_emas.rounds + 1,
+                                  updated_at = excluded.updated_at
+                    ''',
+                    (uid, hotkey, new_ema, now),
+                )
+                conn.commit()
+
+    def get_all_emas(self) -> list[dict]:
+        """Get all miner EMA scores. Used at weight-setting time for blending."""
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                'SELECT uid, hotkey, ema_score, rounds, updated_at FROM prediction_emas ORDER BY uid',
             ).fetchall()
         return [dict(r) for r in rows]

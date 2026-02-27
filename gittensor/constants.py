@@ -140,10 +140,15 @@ ISSUES_TREASURY_EMISSION_SHARE = 0.15  # % of emissions allocated to funding iss
 PREDICTIONS_EMISSIONS_SHARE = 0.15  # % of emissions allocated to prediction competition
 
 PREDICTIONS_EMA_BETA = 0.1  # EMA decay rate for predictions record
+PREDICTIONS_CORRECTNESS_EXPONENT = 3  # exponent on correctness to harshly punish incorrect predictions
 PREDICTIONS_TIMELINESS_EXPONENT = 1.8  # curve for early prediction bonus. higher = sharper curve. 1.0 = linear
+PREDICTIONS_MAX_TIMELINESS_BONUS = 0.75  # max bonus for earliest predictions
+PREDICTIONS_MAX_CONSENSUS_BONUS = 0.25  # max bonus for pre-convergence predictions
+PREDICTIONS_MAX_ORDER_BONUS = 0.75  # max bonus for first correct predictor (applies to merged PR only)
+PREDICTIONS_ORDER_CORRECTNESS_THRESHOLD = 0.66  # min raw correctness to qualify for order bonus
 # variance threshold for full rewards
-# if variance across predictions for a PR is low, the solution must be 'obvious'
-PREDICTIONS_CONSENSUS_VARIANCE_TARGET = 0.10
+# if variance across predictions never exceeds this threshold, the solution must be 'obvious'
+PREDICTIONS_CONSENSUS_VARIANCE_TARGET = 0.2
 
 # Cooldown & Limits
 PREDICTIONS_COOLDOWN_SECONDS = 900  # 15 min cooldown per miner per PR re-prediction

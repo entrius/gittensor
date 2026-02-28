@@ -746,6 +746,7 @@
     "weight": 0.19
   },
   "bokeh/bokeh": {
+    "additional_acceptable_branches": ["branch-*.*"],
     "tier": "Bronze",
     "weight": 0.17
   },

@@ -26,7 +26,7 @@ from gittensor.constants import (
     TIME_DECAY_MIN_MULTIPLIER,
     TIME_DECAY_SIGMOID_MIDPOINT,
     TIME_DECAY_SIGMOID_STEEPNESS_SCALAR,
-    UNIQUE_PR_BOOST,
+    PIONEER_PR_BOOST,
 )
 from gittensor.utils.github_api_tools import (
     FileContentPair,
@@ -348,8 +348,8 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
 
         # Process merged PRs
         for pr in evaluation.merged_pull_requests:
-            pr.repository_uniqueness_multiplier = calculate_uniqueness_multiplier(
-                pr.repository_full_name, repo_counts, total_contributing_miners
+            pr.pioneer_multiplier = calculate_pioneer_multiplier(
+                pr, evaluation, miner_evaluations
             )
 
             # Apply spam multiplier (calculated once per miner based on unlocked tiers)
@@ -431,15 +431,52 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
     bt.logging.info('Finalization complete.')
 
 
-def calculate_uniqueness_multiplier(
-    repo_full_name: str, repo_counts: Dict[str, int], total_contributing_miners: int
+def calculate_pioneer_multiplier(
+    target_pr: PullRequest, target_miner_eval: MinerEvaluation, all_evaluations: Dict[int, MinerEvaluation]
 ) -> float:
-    """Calculate repository uniqueness multiplier based on how many miners contribute to a repo."""
-    if total_contributing_miners == 0:
-        return 1.0
-    repo_count = repo_counts.get(repo_full_name, 0)
-    uniqueness_score = (total_contributing_miners - repo_count + 1) / total_contributing_miners
-    return 1.0 + (uniqueness_score * UNIQUE_PR_BOOST)
+    """
+    Calculate pioneer multiplier for a merged PR.
+    
+    Instead of a naive binary check, this uses an exponential decay model.
+    The bonus starts at its maximum for the very first PR in a repository
+    within the 90-day lookback window, and halves for each subsequent PR 
+    merged on that same repository, regardless of which miner merges it.
+    
+    This creates a "gold rush" dynamic:
+    - 1st PR: 1.0 + MAX_BOOST (e.g., 6.0)
+    - 2nd PR: 1.0 + (MAX_BOOST * 0.5) (e.g., 3.5)
+    - 3rd PR: 1.0 + (MAX_BOOST * 0.25) (e.g., 2.25)
+    - ... and so on until it reaches ~1.0.
+    """
+    repo_name = target_pr.repository_full_name
+    target_time = target_pr.merged_at
+    previous_prs_count = 0
+
+    for uid, evaluation in all_evaluations.items():
+        if evaluation is None:
+            continue
+        for pr in evaluation.merged_pull_requests:
+            if pr.repository_full_name == repo_name and pr.merged_at:
+                # Count how many PRs were merged BEFORE the target PR
+                if pr.merged_at < target_time:
+                    previous_prs_count += 1
+                
+                # Tie-breaker for PRs merged at the exact same second
+                elif pr.merged_at == target_time and pr.number != target_pr.number:
+                    if uid < target_miner_eval.uid:
+                        previous_prs_count += 1
+                    # If same miner merged two PRs at the same exact second, break tie by PR number
+                    elif uid == target_miner_eval.uid and pr.number < target_pr.number:
+                        previous_prs_count += 1
+
+    # Apply exponential decay: halving the boost for each prior PR
+    pioneer_bonus = PIONEER_PR_BOOST * (0.5 ** previous_prs_count)
+    
+    if pioneer_bonus > 0.05:  # Only log significant bonuses to reduce noise
+        bt.logging.info(f"PIONEER BONUS: {repo_name} | PR #{target_pr.number} (Miner {target_miner_eval.uid}) "
+                        f"| Prior PRs: {previous_prs_count} | Multiplier: {1.0 + pioneer_bonus:.2f}")
+        
+    return 1.0 + pioneer_bonus
 
 
 def calculate_issue_multiplier(pr: PullRequest) -> float:

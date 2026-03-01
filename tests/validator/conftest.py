@@ -88,6 +88,8 @@ class PRBuilder:
         repo: Optional[str] = None,
         unique_repo: bool = False,
         token_score: Optional[float] = None,  # Auto-calculated from tier if None
+        merged_at: Optional[datetime] = None,
+        uid: int = 0,
     ) -> PullRequest:
         """Create a mock PullRequest with the given parameters.
 
@@ -96,6 +98,8 @@ class PRBuilder:
                          If False and repo is None, uses 'test/repo'.
             token_score: Token score for this PR. If None, auto-calculates based on tier
                          requirements to ensure the PR qualifies.
+            merged_at: Explicit merge timestamp. If None and state is MERGED, uses now().
+            uid: Miner UID for this PR (default 0).
         """
         # Auto-calculate token score if not specified - ensure it meets tier requirements
         if token_score is None:
@@ -110,15 +114,18 @@ class PRBuilder:
         if repo is None:
             repo = self._next_repo() if unique_repo else 'test/repo'
 
+        if merged_at is None and state == PRState.MERGED:
+            merged_at = datetime.now(timezone.utc)
+
         return PullRequest(
             number=number,
             repository_full_name=repo,
-            uid=0,
+            uid=uid,
             hotkey='test_hotkey',
             github_id='12345',
             title=f'Test PR #{number}',
             author_login='testuser',
-            merged_at=datetime.now(timezone.utc) if state == PRState.MERGED else None,
+            merged_at=merged_at,
             created_at=datetime.now(timezone.utc),
             pr_state=state,
             repository_tier_configuration=tier,

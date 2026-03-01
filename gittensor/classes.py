@@ -156,7 +156,8 @@ class PullRequest:
     base_score: float = 0.0
     issue_multiplier: float = 1.0
     open_pr_spam_multiplier: float = 1.0
-    repository_uniqueness_multiplier: float = 1.0
+    pioneer_multiplier: float = 1.0
+    pioneer_rank: int = 0
     time_decay_multiplier: float = 1.0
     credibility_multiplier: float = 1.0
     raw_credibility: float = 1.0  # Before applying ^k scalar
@@ -194,18 +195,22 @@ class PullRequest:
             'repo': self.repo_weight_multiplier,
             'issue': self.issue_multiplier,
             'spam': self.open_pr_spam_multiplier,
-            'unique': self.repository_uniqueness_multiplier,
+            'pioneer': self.pioneer_multiplier,
             'decay': self.time_decay_multiplier,
             'cred': self.credibility_multiplier,
         }
 
         self.earned_score = self.base_score * prod(multipliers.values())
 
-        # Log all multipliers (credibility shows ^k format)
-        mult_str = ' × '.join(
-            f'cred={self.raw_credibility:.2f}^{self.credibility_scalar}' if k == 'cred' else f'{k}={v:.2f}'
-            for k, v in multipliers.items()
-        )
+        def _format_multiplier(k: str, v: float) -> str:
+            if k == 'cred':
+                return f'cred={self.raw_credibility:.2f}^{self.credibility_scalar}'
+            if k == 'pioneer':
+                tag = 'P' if self.pioneer_rank == 1 else 'F'
+                return f'pioneer={v:.2f}({tag})'
+            return f'{k}={v:.2f}'
+
+        mult_str = ' × '.join(_format_multiplier(k, v) for k, v in multipliers.items())
         bt.logging.info(
             f'├─ {self.pr_state.value} PR #{self.number} ({self.repository_full_name}) → {self.earned_score:.2f}'
         )

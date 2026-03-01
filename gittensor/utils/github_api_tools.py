@@ -806,7 +806,9 @@ def load_miners_prs(
                     pr_state = pr_raw['state']
 
                     # Stop querying once we hit PRs older than the tier incentive start date
-                    pr_creation_time = datetime.fromisoformat(pr_raw['createdAt'].rstrip('Z')).replace(tzinfo=timezone.utc)
+                    pr_creation_time = datetime.fromisoformat(pr_raw['createdAt'].rstrip('Z')).replace(
+                        tzinfo=timezone.utc
+                    )
 
                     if pr_creation_time < TIER_BASED_INCENTIVE_MECHANISM_START_DATE:
                         bt.logging.info(

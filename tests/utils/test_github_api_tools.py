@@ -952,9 +952,9 @@ class TestLoadMinersPrsErrorResilience:
         load_miners_prs(miner_eval, master_repos)
 
         # Both good PRs should be collected; only the bad one is skipped
-        assert (
-            len(miner_eval.merged_pull_requests) == 2
-        ), f'Expected 2 merged PRs (skipping the bad one), got {len(miner_eval.merged_pull_requests)}'
+        assert len(miner_eval.merged_pull_requests) == 2, (
+            f'Expected 2 merged PRs (skipping the bad one), got {len(miner_eval.merged_pull_requests)}'
+        )
         collected_numbers = {pr.number for pr in miner_eval.merged_pull_requests}
         assert collected_numbers == {1, 3}, f'Expected PRs #1 and #3, got {collected_numbers}'
 

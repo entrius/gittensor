@@ -801,64 +801,71 @@ def load_miners_prs(
             page_info: Dict = pr_data.get('pageInfo', {})
 
             for pr_raw in prs:
-                repository_full_name = parse_repo_name(pr_raw['repository'])
-                pr_state = pr_raw['state']
+                try:
+                    repository_full_name = parse_repo_name(pr_raw['repository'])
+                    pr_state = pr_raw['state']
 
-                # Stop querying once we hit PRs older than the tier incentive start date
-                pr_creation_time = datetime.fromisoformat(pr_raw['createdAt'].rstrip('Z')).replace(tzinfo=timezone.utc)
-
-                if pr_creation_time < TIER_BASED_INCENTIVE_MECHANISM_START_DATE:
-                    bt.logging.info(
-                        f'Reached PR #{pr_raw["number"]} in {repository_full_name} created at {pr_creation_time}, '
-                        f'before tier incentive start date ({TIER_BASED_INCENTIVE_MECHANISM_START_DATE}). '
-                        f'Stopping PR fetch.'
-                    )
-                    return
-
-                if repository_full_name not in master_repositories:
-                    bt.logging.info(f'Skipping PR #{pr_raw["number"]} in {repository_full_name} - ineligible repo')
-                    continue
-
-                repo_config = master_repositories[repository_full_name]
-
-                # Check if repo is inactive
-                if repo_config.inactive_at is not None:
-                    inactive_dt = datetime.fromisoformat(repo_config.inactive_at.rstrip('Z')).replace(
+                    # Stop querying once we hit PRs older than the tier incentive start date
+                    pr_creation_time = datetime.fromisoformat(pr_raw['createdAt'].rstrip('Z')).replace(
                         tzinfo=timezone.utc
                     )
-                    # Skip PR if it was created after the repo became inactive
-                    if pr_creation_time >= inactive_dt:
+
+                    if pr_creation_time < TIER_BASED_INCENTIVE_MECHANISM_START_DATE:
                         bt.logging.info(
-                            f'Skipping PR #{pr_raw["number"]} in {repository_full_name} - PR was created after repo became inactive (created: {pr_creation_time.isoformat()}, inactive: {inactive_dt.isoformat()})'
+                            f'Reached PR #{pr_raw["number"]} in {repository_full_name} created at {pr_creation_time}, '
+                            f'before tier incentive start date ({TIER_BASED_INCENTIVE_MECHANISM_START_DATE}). '
+                            f'Stopping PR fetch.'
                         )
+                        return
+
+                    if repository_full_name not in master_repositories:
+                        bt.logging.info(f'Skipping PR #{pr_raw["number"]} in {repository_full_name} - ineligible repo')
                         continue
 
-                if pr_state in (PRState.OPEN.value, PRState.CLOSED.value):
-                    try_add_open_or_closed_pr(miner_eval, pr_raw, pr_state, lookback_date_filter)
-                    continue
+                    repo_config = master_repositories[repository_full_name]
 
-                should_skip, skip_reason = should_skip_merged_pr(
-                    pr_raw, repository_full_name, repo_config, lookback_date_filter
-                )
+                    # Check if repo is inactive
+                    if repo_config.inactive_at is not None:
+                        inactive_dt = datetime.fromisoformat(repo_config.inactive_at.rstrip('Z')).replace(
+                            tzinfo=timezone.utc
+                        )
+                        # Skip PR if it was created after the repo became inactive
+                        if pr_creation_time >= inactive_dt:
+                            bt.logging.info(
+                                f'Skipping PR #{pr_raw["number"]} in {repository_full_name} - PR was created after repo became inactive (created: {pr_creation_time.isoformat()}, inactive: {inactive_dt.isoformat()})'
+                            )
+                            continue
 
-                if should_skip:
-                    bt.logging.debug(skip_reason)
-                    continue
+                    if pr_state in (PRState.OPEN.value, PRState.CLOSED.value):
+                        try_add_open_or_closed_pr(miner_eval, pr_raw, pr_state, lookback_date_filter)
+                        continue
 
-                miner_eval.add_merged_pull_request(pr_raw)
+                    should_skip, skip_reason = should_skip_merged_pr(
+                        pr_raw, repository_full_name, repo_config, lookback_date_filter
+                    )
+
+                    if should_skip:
+                        bt.logging.debug(skip_reason)
+                        continue
+
+                    miner_eval.add_merged_pull_request(pr_raw)
+
+                except Exception as e:
+                    pr_number = pr_raw.get('number', '?')
+                    bt.logging.warning(f'Error processing PR #{pr_number}, skipping: {e}')
 
             if not page_info.get('hasNextPage') or len(prs) == 0:
                 break
 
             cursor = page_info.get('endCursor')
 
-        bt.logging.info(
-            f'Fetched {len(miner_eval.merged_pull_requests)} merged PRs, {len(miner_eval.open_pull_requests)} open PRs, '
-            f'{len(miner_eval.closed_pull_requests)} closed'
-        )
-
     except Exception as e:
-        bt.logging.error(f'Error fetching PRs via GraphQL: {e}')
+        bt.logging.error(f'Unexpected error fetching PRs via GraphQL: {e}')
+
+    bt.logging.info(
+        f'Fetched {len(miner_eval.merged_pull_requests)} merged PRs, {len(miner_eval.open_pull_requests)} open PRs, '
+        f'{len(miner_eval.closed_pull_requests)} closed'
+    )
 
 
 def extract_pr_number_from_url(pr_url: str) -> Optional[int]:

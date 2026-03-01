@@ -51,14 +51,6 @@
     "tier": "Gold",
     "weight": 20.88
   },
-  "AffineIO/affine-cortex": {
-    "tier": "Gold",
-    "weight": 22.21
-  },
-  "AffineIO/affinetes": {
-    "tier": "Gold",
-    "weight": 20.88
-  },
   "aframevr/aframe": {
     "tier": "Bronze",
     "weight": 0.19

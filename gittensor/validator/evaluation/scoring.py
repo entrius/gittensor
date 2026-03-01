@@ -3,7 +3,7 @@
 
 import math
 from datetime import datetime, timezone
-from typing import Dict, Optional
+from typing import Dict, List, Optional, Tuple
 
 import bittensor as bt
 
@@ -20,13 +20,14 @@ from gittensor.constants import (
     MAX_OPEN_PR_THRESHOLD,
     MIN_TOKEN_SCORE_FOR_BASE_SCORE,
     OPEN_PR_THRESHOLD_TOKEN_SCORE,
+    PIONEER_BASE_BONUS,
+    PIONEER_MULTI_REPO_DECAY_EXPONENT,
     SECONDS_PER_DAY,
     SECONDS_PER_HOUR,
     TIME_DECAY_GRACE_PERIOD_HOURS,
     TIME_DECAY_MIN_MULTIPLIER,
     TIME_DECAY_SIGMOID_MIDPOINT,
     TIME_DECAY_SIGMOID_STEEPNESS_SCALAR,
-    UNIQUE_PR_BOOST,
 )
 from gittensor.utils.github_api_tools import (
     FileContentPair,
@@ -226,25 +227,98 @@ def calculate_pr_multipliers(
         pr.credibility_multiplier = 1.0
 
 
-def count_repository_contributors(miner_evaluations: Dict[int, MinerEvaluation]) -> Dict[str, int]:
+def is_pioneer_eligible(pr: PullRequest) -> bool:
+    """Determine whether a merged PR is eligible for pioneer selection."""
+    return (
+        pr.repository_tier_configuration is not None
+        and pr.merged_at is not None
+        and pr.token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE
+    )
+
+
+def collect_repo_pioneer_candidates(
+    miner_evaluations: Dict[int, MinerEvaluation],
+) -> Dict[str, List[Tuple[datetime, int, int]]]:
     """
-    Count how many miners contribute to each repository and log statistics.
+    Collect quality-qualified pioneer candidates per repo.
 
     Returns:
-        Dict[str, int]: Dictionary mapping repository names to contributor counts
+        repo -> list of (merged_at, pr_number, uid) for eligible merged PRs
     """
-    repo_counts: Dict[str, int] = {}
-
+    repo_candidates: Dict[str, List[Tuple[datetime, int, int]]] = {}
     for evaluation in miner_evaluations.values():
-        for repo in evaluation.unique_repos_contributed_to:
-            repo_counts[repo] = repo_counts.get(repo, 0) + 1
+        miner_earliest_per_repo: Dict[str, Tuple[datetime, int]] = {}
 
-    if repo_counts:
-        bt.logging.info(f'Repository contribution counts: {len(repo_counts)} total repositories')
-        for repo, count in sorted(repo_counts.items(), key=lambda x: -x[1]):
-            bt.logging.info(f'{repo}: {count}')
+        for pr in evaluation.merged_pull_requests:
+            if not is_pioneer_eligible(pr):
+                continue
 
-    return repo_counts
+            repo = pr.repository_full_name
+            existing = miner_earliest_per_repo.get(repo)
+            if existing is None:
+                miner_earliest_per_repo[repo] = (pr.merged_at, pr.number)
+                continue
+
+            if pr.merged_at < existing[0]:
+                miner_earliest_per_repo[repo] = (pr.merged_at, pr.number)
+                continue
+
+            if pr.merged_at == existing[0] and pr.number < existing[1]:
+                miner_earliest_per_repo[repo] = (pr.merged_at, pr.number)
+
+        for repo, (merge_time, pr_number) in miner_earliest_per_repo.items():
+            repo_candidates.setdefault(repo, []).append((merge_time, pr_number, evaluation.uid))
+
+    return repo_candidates
+
+
+def build_repo_contributor_ordering(
+    miner_evaluations: Dict[int, MinerEvaluation],
+) -> Tuple[Dict[str, Dict[int, int]], Dict[str, int]]:
+    """
+    Build chronological contributor ordering for each repository.
+
+    For each repo, determines the order in which unique miners first contributed
+    (based on their earliest merged PR timestamp). Used to calculate exploration
+    rewards where contributor position determines pioneer eligibility.
+
+    Returns:
+        Tuple of:
+        - Dict mapping repo name to {uid: 1-based position} where position 1 = pioneer
+        - Dict mapping repo name to the pioneer's PR number (earliest eligible PR)
+    """
+    repo_first_merges = collect_repo_pioneer_candidates(miner_evaluations)
+    repo_ordering: Dict[str, Dict[int, int]] = {}
+    pioneer_pr_numbers: Dict[str, int] = {}
+    for repo, entries in repo_first_merges.items():
+        entries.sort()
+        repo_ordering[repo] = {
+            uid: position + 1 for position, (_, _, uid) in enumerate(entries)
+        }
+        _, earliest_pr_number, _ = entries[0]
+        pioneer_pr_numbers[repo] = earliest_pr_number
+
+    if repo_ordering:
+        bt.logging.info(f'Pioneer analysis: {len(repo_ordering)} repositories with contributions')
+        for repo in sorted(repo_ordering):
+            ordering = repo_ordering[repo]
+            pioneer_uid = next(uid for uid, pos in ordering.items() if pos == 1)
+            bt.logging.info(
+                f'  {repo}: {len(ordering)} contributor(s), pioneer=uid {pioneer_uid}'
+            )
+
+    return repo_ordering, pioneer_pr_numbers
+
+
+def count_pioneered_repositories(repo_contributor_ordering: Dict[str, Dict[int, int]]) -> Dict[int, int]:
+    """Count how many repositories each miner pioneered (position 1)."""
+    pioneered_counts: Dict[int, int] = {}
+    for ordering in repo_contributor_ordering.values():
+        for uid, position in ordering.items():
+            if position != 1:
+                continue
+            pioneered_counts[uid] = pioneered_counts.get(uid, 0) + 1
+    return pioneered_counts
 
 
 def calculate_open_pr_threshold(
@@ -305,11 +379,11 @@ def calculate_time_decay_multiplier(pr: PullRequest) -> float:
 
 
 def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None:
-    """Finalize all miner scores: apply uniqueness multipliers, calculate totals, and deduct collateral."""
+    """Finalize all miner scores: apply pioneer rewards, calculate totals, and deduct collateral."""
     bt.logging.info('**Finalizing miner scores**')
 
-    repo_counts = count_repository_contributors(miner_evaluations)
-    total_contributing_miners = sum(1 for ev in miner_evaluations.values() if ev.unique_repos_contributed_to)
+    repo_contributor_ordering, pioneer_pr_numbers = build_repo_contributor_ordering(miner_evaluations)
+    pioneered_counts = count_pioneered_repositories(repo_contributor_ordering)
 
     for uid, evaluation in miner_evaluations.items():
         if not evaluation:
@@ -348,9 +422,26 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
 
         # Process merged PRs
         for pr in evaluation.merged_pull_requests:
-            pr.repository_uniqueness_multiplier = calculate_uniqueness_multiplier(
-                pr.repository_full_name, repo_counts, total_contributing_miners
+            ordering = repo_contributor_ordering.get(pr.repository_full_name, {})
+            pr.pioneer_rank = ordering.get(pr.uid, 0)
+
+            # Only the pioneering PR (rank 1, earliest eligible PR) gets the bonus
+            is_pioneer_pr = (
+                pr.pioneer_rank == 1
+                and pioneer_pr_numbers.get(pr.repository_full_name) == pr.number
             )
+
+            if is_pioneer_pr:
+                pr.pioneer_multiplier = calculate_pioneer_reward_multiplier(
+                    pioneered_counts.get(pr.uid, 1)
+                )
+                bt.logging.info(
+                    f'Pioneer reward | repo={pr.repository_full_name} uid={pr.uid} pr={pr.number} '
+                    f'base_bonus={PIONEER_BASE_BONUS:.2f} pioneered_repos={pioneered_counts.get(pr.uid, 1)} '
+                    f'exponent={PIONEER_MULTI_REPO_DECAY_EXPONENT:.2f} multiplier={pr.pioneer_multiplier:.2f}'
+                )
+            else:
+                pr.pioneer_multiplier = 1.0
 
             # Apply spam multiplier (calculated once per miner based on unlocked tiers)
             pr.open_pr_spam_multiplier = spam_multiplier
@@ -431,15 +522,18 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
     bt.logging.info('Finalization complete.')
 
 
-def calculate_uniqueness_multiplier(
-    repo_full_name: str, repo_counts: Dict[str, int], total_contributing_miners: int
-) -> float:
-    """Calculate repository uniqueness multiplier based on how many miners contribute to a repo."""
-    if total_contributing_miners == 0:
-        return 1.0
-    repo_count = repo_counts.get(repo_full_name, 0)
-    uniqueness_score = (total_contributing_miners - repo_count + 1) / total_contributing_miners
-    return 1.0 + (uniqueness_score * UNIQUE_PR_BOOST)
+def calculate_pioneer_reward_multiplier(pioneered_repo_count: int) -> float:
+    """
+    Calculate exploration reward multiplier for a pioneering PR.
+
+    Only called for the single PR that earned pioneer status on a repository.
+    The bonus has diminishing returns based on how many repos the miner
+    pioneered in this scoring window, discouraging land-grab strategies.
+    """
+    count = max(1, pioneered_repo_count)
+    decay = count**PIONEER_MULTI_REPO_DECAY_EXPONENT
+    pioneer_bonus = PIONEER_BASE_BONUS / decay
+    return round(1.0 + pioneer_bonus, 2)
 
 
 def calculate_issue_multiplier(pr: PullRequest) -> float:
@@ -541,7 +635,7 @@ def calculate_open_pr_collateral_score(pr: PullRequest) -> float:
 
     Applicable multipliers: repo_weight, issue
     NOT applicable: time_decay (merge-based), credibility_multiplier (merge-based),
-                    uniqueness (cross-miner), open_pr_spam (not for collateral)
+                    pioneer reward (cross-miner), open_pr_spam (not for collateral)
     """
     from math import prod
 

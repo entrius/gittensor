@@ -861,6 +861,41 @@ def load_miners_prs(
         bt.logging.error(f'Error fetching PRs via GraphQL: {e}')
 
 
+def get_pr_open_times(repo: str, pr_numbers: List[int], token: str) -> Dict[int, datetime]:
+    """Fetch PR creation dates from GitHub API.
+
+    Args:
+        repo: Repository full name (e.g., 'owner/repo')
+        pr_numbers: List of PR numbers to fetch
+        token: GitHub PAT for authentication
+
+    Returns:
+        Dict mapping pr_number to created_at datetime (UTC). PRs that fail
+        to fetch are omitted from the result.
+    """
+    headers = make_headers(token)
+    result: Dict[int, datetime] = {}
+
+    for pr_number in pr_numbers:
+        try:
+            response = requests.get(
+                f'{BASE_GITHUB_API_URL}/repos/{repo}/pulls/{pr_number}',
+                headers=headers,
+                timeout=15,
+            )
+            if response.status_code == 200:
+                data = response.json()
+                created_at = data.get('created_at')
+                if created_at:
+                    result[pr_number] = datetime.fromisoformat(created_at.rstrip('Z')).replace(tzinfo=timezone.utc)
+            else:
+                bt.logging.debug(f'Failed to fetch PR #{pr_number} from {repo}: status {response.status_code}')
+        except requests.exceptions.RequestException as e:
+            bt.logging.debug(f'Error fetching PR #{pr_number} from {repo}: {e}')
+
+    return result
+
+
 def extract_pr_number_from_url(pr_url: str) -> Optional[int]:
     """Extract PR number from a GitHub PR URL.
 

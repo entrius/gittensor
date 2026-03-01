@@ -205,11 +205,11 @@ def issues_predict(
             as_json=as_json,
         )
 
-    payload = build_prediction_payload(
-        issue_id=issue_id,
-        repository=repo_full_name,
-        predictions=predictions,
-    )
+    payload = {
+        'issue_id': issue_id,
+        'repository': repo_full_name,
+        'predictions': dict(predictions),
+    }
 
     # 10) Emit machine output or interactive confirmation flow.
     if as_json:
@@ -374,25 +374,10 @@ def format_prediction_lines(predictions: dict[int, float]) -> str:
     return '\n'.join(lines)
 
 
-def build_prediction_payload(
-    issue_id: int,
-    repository: str,
-    predictions: dict[int, float],
-) -> dict[str, object]:
-    """Build validated payload for future network broadcast."""
-    return {
-        'issue_id': issue_id,
-        'repository': repository,
-        'predictions': dict(predictions),
-    }
-
-
 def _print_broadcast_results(results: dict[str, object]) -> None:
     """Print broadcast results in human-readable format."""
     if results.get('success'):
-        print_success(
-            f"Prediction accepted by {results['accepted']}/{results['total_validators']} validator(s)"
-        )
+        print_success(f"Prediction accepted by {results['accepted']}/{results['total_validators']} validator(s)")
     else:
         print_error(
             f"Prediction rejected or unreachable: {results['rejected']}/{results['total_validators']} validator(s)"

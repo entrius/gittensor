@@ -55,12 +55,11 @@ class PredictionStorage:
             ''')
             conn.execute('''
                 CREATE TABLE IF NOT EXISTS prediction_emas (
-                    uid        INTEGER NOT NULL,
-                    hotkey     TEXT    NOT NULL,
+                    github_id  TEXT    NOT NULL,
                     ema_score  REAL    NOT NULL DEFAULT 0.0,
                     rounds     INTEGER NOT NULL DEFAULT 0,
                     updated_at TEXT    NOT NULL,
-                    PRIMARY KEY (uid, hotkey)
+                    PRIMARY KEY (github_id)
                 )
             ''')
             conn.execute('''
@@ -156,6 +155,22 @@ class PredictionStorage:
                 )
                 conn.commit()
 
+    def get_peak_variance_time(self, issue_id: int) -> Optional[datetime]:
+        """Get the timestamp when variance was highest for an issue.
+
+        Returns the prediction timestamp with the max variance_at_prediction,
+        or None if no predictions exist.
+        """
+        with self._get_connection() as conn:
+            row = conn.execute(
+                'SELECT timestamp FROM predictions WHERE issue_id = ? '
+                'ORDER BY variance_at_prediction DESC LIMIT 1',
+                (issue_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return datetime.fromisoformat(row['timestamp'])
+
     def get_predictions_for_issue(self, issue_id: int) -> list[dict]:
         """Get all predictions for an issue (used at settlement)."""
         with self._get_connection() as conn:
@@ -169,30 +184,30 @@ class PredictionStorage:
     # EMA tracking
     # =========================================================================
 
-    def get_ema(self, uid: int, hotkey: str) -> float:
+    def get_ema(self, github_id: str) -> float:
         """Get a miner's current prediction EMA score. Returns 0.0 if no record."""
         with self._get_connection() as conn:
             row = conn.execute(
-                'SELECT ema_score FROM prediction_emas WHERE uid = ? AND hotkey = ?',
-                (uid, hotkey),
+                'SELECT ema_score FROM prediction_emas WHERE github_id = ?',
+                (github_id,),
             ).fetchone()
         return float(row['ema_score']) if row else 0.0
 
-    def update_ema(self, uid: int, hotkey: str, new_ema: float) -> None:
-        """Upsert a miner's prediction EMA score."""
+    def update_ema(self, github_id: str, new_ema: float) -> None:
+        """Upsert a miner's prediction EMA score, keyed by github_id."""
         now = datetime.now(timezone.utc).isoformat()
         with self._lock:
             with self._get_connection() as conn:
                 conn.execute(
                     '''
-                    INSERT INTO prediction_emas (uid, hotkey, ema_score, rounds, updated_at)
-                    VALUES (?, ?, ?, 1, ?)
-                    ON CONFLICT (uid, hotkey)
+                    INSERT INTO prediction_emas (github_id, ema_score, rounds, updated_at)
+                    VALUES (?, ?, 1, ?)
+                    ON CONFLICT (github_id)
                     DO UPDATE SET ema_score = excluded.ema_score,
                                   rounds = prediction_emas.rounds + 1,
                                   updated_at = excluded.updated_at
                     ''',
-                    (uid, hotkey, new_ema, now),
+                    (github_id, new_ema, now),
                 )
                 conn.commit()
 
@@ -200,6 +215,6 @@ class PredictionStorage:
         """Get all miner EMA scores. Used at weight-setting time for blending."""
         with self._get_connection() as conn:
             rows = conn.execute(
-                'SELECT uid, hotkey, ema_score, rounds, updated_at FROM prediction_emas ORDER BY uid',
+                'SELECT github_id, ema_score, rounds, updated_at FROM prediction_emas ORDER BY github_id',
             ).fetchall()
         return [dict(r) for r in rows]

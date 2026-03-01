@@ -1,7 +1,7 @@
 # The MIT License (MIT)
 # Copyright © 2025 Entrius
 from collections import Counter
-from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 
 import bittensor as bt
 from tree_sitter import Node, Parser, Tree
@@ -14,6 +14,7 @@ from gittensor.classes import (
 from gittensor.constants import (
     COMMENT_NODE_TYPES,
     DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT,
+    MAX_AST_DEPTH,
     MAX_FILE_SIZE_BYTES,
     MAX_LINES_SCORED_FOR_NON_CODE_EXT,
     NON_CODE_EXTENSIONS,
@@ -29,6 +30,51 @@ if TYPE_CHECKING:
 
 # Cache parsers to avoid repeated initialization
 _parser_cache: Dict[str, Parser] = {}
+
+
+def _normalize_content(content: Any) -> Optional[str]:
+    """
+    Normalize content for parsing: ensure str or None, strip whitespace.
+    Returns None for None, non-str types, or empty/whitespace-only strings.
+    """
+    if content is None:
+        return None
+    if not isinstance(content, str):
+        bt.logging.debug(f'Content type is {type(content).__name__}, expected str')
+        return None
+    s = content.strip()
+    return s if s else None
+
+
+def _safe_encode_content(content: str) -> Optional[bytes]:
+    """Encode string to UTF-8 bytes; use replace for invalid codepoints. Returns None on failure."""
+    try:
+        return content.encode('utf-8', errors='replace')
+    except Exception as e:
+        bt.logging.debug(f'Failed to encode content: {e}')
+        return None
+
+
+def _safe_decode_node_text(raw: Optional[bytes]) -> str:
+    """Decode node bytes to string; use replace for invalid bytes to avoid UnicodeDecodeError."""
+    if not raw:
+        return ''
+    try:
+        return raw.decode('utf-8', errors='replace')
+    except Exception:
+        return ''
+
+
+def _safe_content_byte_size(content: Optional[str]) -> int:
+    """Return byte size of content (UTF-8); 0 if None, non-str, or encode error."""
+    if content is None:
+        return 0
+    if not isinstance(content, str):
+        return 0
+    try:
+        return len(content.encode('utf-8', errors='replace'))
+    except Exception:
+        return 0
 
 
 def get_parser(language: str) -> Optional[Parser]:
@@ -59,19 +105,30 @@ def parse_code(content: str, language: str) -> Optional[Tree]:
     """
     Parse source code into a tree-sitter AST.
 
+    Handles edge cases: None/non-str content, empty string, invalid UTF-8 (replace).
+    Returns None if content is invalid or encoding/parsing fails.
+
     Args:
-        content: Source code as string
+        content: Source code as string (or None/non-str; will return None)
         language: Tree-sitter language name
 
     Returns:
         Tree object or None if parsing failed
     """
+    normalized = _normalize_content(content)
+    if normalized is None:
+        return None
+
     parser = get_parser(language)
     if not parser:
         return None
 
+    encoded = _safe_encode_content(normalized)
+    if encoded is None:
+        return None
+
     try:
-        return parser.parse(content.encode('utf-8'))
+        return parser.parse(encoded)
     except Exception as e:
         bt.logging.debug(f'Failed to parse code: {e}')
         return None
@@ -91,6 +148,7 @@ def is_comment_node(node: Node) -> bool:
 def collect_node_signatures(
     tree: Tree,
     weights: TokenConfig,
+    max_depth: int = MAX_AST_DEPTH,
 ) -> Counter[NodeSignature]:
     """
     Collect node signatures from an AST for tree diff comparison.
@@ -100,17 +158,24 @@ def collect_node_signatures(
     - Leaf nodes: ("leaf", node_type, text) - captures content for meaningful tokens
 
     Comments are skipped entirely (score 0).
+    Depth is limited to max_depth to avoid stack overflow on pathological ASTs.
+    Node text is decoded with errors='replace' to handle invalid UTF-8 in source.
 
     Args:
         tree: Parsed tree-sitter AST
         weights: TokenConfig instance with structural_bonus definitions
+        max_depth: Maximum recursion depth (default MAX_AST_DEPTH)
 
     Returns:
         Counter of node signatures (multiset for handling duplicates)
     """
     signatures: Counter[NodeSignature] = Counter()
 
-    def walk_node(node: Node) -> None:
+    def walk_node(node: Node, depth: int) -> None:
+        if depth > max_depth:
+            bt.logging.debug(f'AST depth exceeded {max_depth}, truncating walk')
+            return
+
         # Skip comments entirely
         if is_comment_node(node):
             return
@@ -126,15 +191,16 @@ def collect_node_signatures(
         if node.child_count == 0:
             # Skip comment types at leaf level too
             if node_type not in COMMENT_NODE_TYPES:
-                # Leaf signature: type + text content
-                text = node.text.decode('utf-8') if node.text else ''
+                # Leaf signature: type + text content (safe decode for invalid UTF-8)
+                text = _safe_decode_node_text(node.text)
                 signatures[('leaf', node_type, text)] += 1
 
         # Recurse into children
         for child in node.children:
-            walk_node(child)
+            walk_node(child, depth + 1)
 
-    walk_node(tree.root_node)
+    if tree and tree.root_node:
+        walk_node(tree.root_node, 0)
     return signatures
 
 
@@ -165,17 +231,21 @@ def score_tree_diff(
     if not language:
         return breakdown
 
-    # Parse both versions
+    # Normalize content: None, non-str, empty/whitespace become None for consistent handling
+    old_normalized = _normalize_content(old_content)
+    new_normalized = _normalize_content(new_content)
+
+    # Parse both versions (parse_code accepts str or None via _normalize_content internally)
     old_signatures: Counter[NodeSignature] = Counter()
     new_signatures: Counter[NodeSignature] = Counter()
 
-    if old_content:
-        old_tree = parse_code(old_content, language)
+    if old_normalized:
+        old_tree = parse_code(old_normalized, language)
         if old_tree:
             old_signatures = collect_node_signatures(old_tree, weights)
 
-    if new_content:
-        new_tree = parse_code(new_content, language)
+    if new_normalized:
+        new_tree = parse_code(new_normalized, language)
         if new_tree:
             new_signatures = collect_node_signatures(new_tree, weights)
 
@@ -299,12 +369,27 @@ def calculate_token_score_from_file_changes(
             )
             continue
 
-        # Extract old and new content for tree comparison
-        old_content = content_pair.old_content  # None for new files
-        new_content = content_pair.new_content
+        # Extract and normalize old and new content for tree comparison
+        old_content = _normalize_content(content_pair.old_content)
+        new_content = _normalize_content(content_pair.new_content)
 
-        # Check file size - score 0 for large files
-        if len(new_content.encode('utf-8')) > MAX_FILE_SIZE_BYTES:
+        # Skip if new content is missing after normalization (e.g. empty or non-str)
+        if new_content is None:
+            bt.logging.debug(f'  │   {file.short_name}: skipped (empty or invalid content)')
+            file_results.append(
+                FileScoreResult(
+                    filename=file.short_name,
+                    score=0.0,
+                    nodes_scored=0,
+                    total_lines=file.changes,
+                    is_test_file=is_test_file,
+                    scoring_method='skipped-empty',
+                )
+            )
+            continue
+
+        # Check file size - score 0 for large files (safe byte size for invalid UTF-8)
+        if _safe_content_byte_size(new_content) > MAX_FILE_SIZE_BYTES:
             bt.logging.debug(f'  │   {file.short_name}: skipped (file too large, >{MAX_FILE_SIZE_BYTES} bytes)')
             file_results.append(
                 FileScoreResult(

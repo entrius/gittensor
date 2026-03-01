@@ -72,6 +72,9 @@ TIME_DECAY_SIGMOID_MIDPOINT = 10  # days until 50% score loss
 TIME_DECAY_SIGMOID_STEEPNESS_SCALAR = 0.4
 TIME_DECAY_MIN_MULTIPLIER = 0.05  # 5% of score will retain through lookback days (90D)
 
+# Tree-sitter AST walk: max recursion depth to avoid stack overflow on pathological input
+MAX_AST_DEPTH = 2000
+
 # comment nodes for token scoring
 COMMENT_NODE_TYPES = frozenset(
     {

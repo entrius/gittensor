@@ -345,7 +345,8 @@ class TestOtherGitHubAPIFunctions:
 
     @patch('gittensor.utils.github_api_tools.requests.get')
     @patch('gittensor.utils.github_api_tools.time.sleep')
-    def test_get_github_id_retry_logic(self, mock_sleep, mock_get, clear_github_cache):
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_get_github_id_retry_logic(self, mock_logging, mock_sleep, mock_get, clear_github_cache):
         """Test that get_github_id retries on failure."""
         mock_response_success = Mock()
         mock_response_success.status_code = 200
@@ -364,7 +365,8 @@ class TestOtherGitHubAPIFunctions:
 
     @patch('gittensor.utils.github_api_tools.requests.get')
     @patch('gittensor.utils.github_api_tools.time.sleep')
-    def test_get_github_account_age_retry_logic(self, mock_sleep, mock_get, clear_github_cache):
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_get_github_account_age_retry_logic(self, mock_logging, mock_sleep, mock_get, clear_github_cache):
         """Test that get_github_account_age_days retries on failure."""
         mock_response_success = Mock()
         mock_response_success.status_code = 200
@@ -837,6 +839,128 @@ class TestFindSolverFromTimeline:
         assert solver_id == 42
         assert pr_number == 14
         mock_cross_ref.assert_called_once_with('owner/repo', 12, 'fake_token')
+
+
+# ============================================================================
+# load_miners_prs Per-PR Error Resilience Tests
+# ============================================================================
+
+load_miners_prs = github_api_tools.load_miners_prs
+
+
+def _make_pr_node(
+    number,
+    repo_owner,
+    repo_name,
+    state='MERGED',
+    created_at='2026-02-01T00:00:00Z',
+    merged_at='2026-02-02T00:00:00Z',
+    closed_at=None,
+    default_branch='main',
+    closing_issues_refs=None,
+    head_repository=None,
+):
+    """Build a single PR node matching the GraphQL QUERY schema."""
+    if closing_issues_refs is None:
+        closing_issues_refs = {'nodes': []}
+    return {
+        'title': f'PR #{number}',
+        'number': number,
+        'additions': 10,
+        'deletions': 2,
+        'mergedAt': merged_at if state == 'MERGED' else None,
+        'createdAt': created_at,
+        'closedAt': closed_at,
+        'lastEditedAt': None,
+        'bodyText': 'test body',
+        'state': state,
+        'commits': {'totalCount': 1},
+        'repository': {
+            'name': repo_name,
+            'owner': {'login': repo_owner},
+            'defaultBranchRef': {'name': default_branch},
+        },
+        'headRepository': head_repository
+        or {
+            'name': repo_name,
+            'owner': {'login': 'contributor'},
+        },
+        'baseRefName': default_branch,
+        'baseRefOid': 'abc123',
+        'headRefName': 'feature-branch',
+        'headRefOid': 'def456',
+        'author': {'login': 'contributor'},
+        'authorAssociation': 'CONTRIBUTOR',
+        'mergedBy': {'login': 'maintainer'} if state == 'MERGED' else None,
+        'closingIssuesReferences': closing_issues_refs,
+        'reviews': {'nodes': [{'author': {'login': 'reviewer'}}]},
+    }
+
+
+def _make_graphql_response(pr_nodes):
+    """Wrap PR nodes in the full GraphQL response structure."""
+    mock_response = Mock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        'data': {
+            'node': {
+                'pullRequests': {
+                    'pageInfo': {'hasNextPage': False, 'endCursor': None},
+                    'nodes': pr_nodes,
+                }
+            }
+        }
+    }
+    return mock_response
+
+
+class TestLoadMinersPrsErrorResilience:
+    """Test that a single bad PR doesn't abort fetching for the entire miner."""
+
+    @patch('gittensor.utils.github_api_tools.get_github_graphql_query')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_null_closing_issues_skips_bad_pr_continues_rest(self, mock_logging, mock_graphql_query):
+        """Simulate a banned/reinstated repo returning null for closingIssuesReferences.
+
+        This is the exact scenario from affinefoundation/affinetes: the GraphQL API returns
+        null for nested fields on PRs from a repo that was temporarily banned. The validator
+        should skip that single PR and continue processing the rest.
+        """
+        from gittensor.classes import MinerEvaluation
+        from gittensor.validator.utils.load_weights import RepositoryConfig
+
+        good_pr_before = _make_pr_node(
+            1, 'goodorg', 'goodrepo', created_at='2026-02-15T00:00:00Z', merged_at='2026-02-16T00:00:00Z'
+        )
+        bad_pr = _make_pr_node(
+            2, 'affinefoundation', 'affinetes', created_at='2026-02-10T00:00:00Z', merged_at='2026-02-11T00:00:00Z'
+        )
+        # Simulate the banned repo returning null for closingIssuesReferences
+        bad_pr['closingIssuesReferences'] = None
+        good_pr_after = _make_pr_node(
+            3, 'goodorg', 'goodrepo', created_at='2026-02-05T00:00:00Z', merged_at='2026-02-06T00:00:00Z'
+        )
+
+        mock_graphql_query.return_value = _make_graphql_response([good_pr_before, bad_pr, good_pr_after])
+
+        master_repos = {
+            'goodorg/goodrepo': RepositoryConfig(weight=1.0),
+            'affinefoundation/affinetes': RepositoryConfig(weight=1.0),
+        }
+        miner_eval = MinerEvaluation(uid=74, hotkey='test_hotkey', github_id='12345', github_pat='fake_pat')
+
+        load_miners_prs(miner_eval, master_repos)
+
+        # Both good PRs should be collected; only the bad one is skipped
+        assert (
+            len(miner_eval.merged_pull_requests) == 2
+        ), f'Expected 2 merged PRs (skipping the bad one), got {len(miner_eval.merged_pull_requests)}'
+        collected_numbers = {pr.number for pr in miner_eval.merged_pull_requests}
+        assert collected_numbers == {1, 3}, f'Expected PRs #1 and #3, got {collected_numbers}'
+
+        # Verify the warning was logged for the bad PR
+        warning_calls = [str(c) for c in mock_logging.warning.call_args_list]
+        assert any('PR #2' in w for w in warning_calls), f'Expected a warning about PR #2, got: {warning_calls}'
 
 
 if __name__ == '__main__':

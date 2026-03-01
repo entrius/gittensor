@@ -51,14 +51,6 @@
     "tier": "Gold",
     "weight": 20.88
   },
-  "AffineIO/affine-cortex": {
-    "tier": "Gold",
-    "weight": 22.21
-  },
-  "AffineIO/affinetes": {
-    "tier": "Gold",
-    "weight": 20.88
-  },
   "aframevr/aframe": {
     "tier": "Bronze",
     "weight": 0.19
@@ -498,10 +490,7 @@
     "weight": 4.25
   },
   "autoppia/autoppia_web_agents_subnet": {
-    "additional_acceptable_branches": [
-      "dev",
-      "dev-gittensor"
-    ],
+    "additional_acceptable_branches": ["dev", "dev-gittensor"],
     "tier": "Silver",
     "weight": 6.46
   },

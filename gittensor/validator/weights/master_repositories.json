@@ -1116,6 +1116,10 @@
     "tier": "Bronze",
     "weight": 0.24
   },
+  "D4Vinci/Scrapling": {
+    "weight": 0.26,
+    "tier": "Bronze"
+  },
   "danielmiessler/SecLists": {
     "tier": "Bronze",
     "weight": 0.35

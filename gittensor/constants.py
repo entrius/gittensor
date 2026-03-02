@@ -112,7 +112,7 @@ TOKEN_SCORE_RECYCLE_DECAY_RATE = 0.000012
 # =============================================================================
 # Spam & Gaming Mitigation
 # =============================================================================
-MAINTAINER_ASSOCIATIONS = ['OWNER', 'MEMBER', 'COLLABORATOR']
+MAINTAINER_ASSOCIATIONS = ['OWNER', 'COLLABORATOR']
 
 # Issue multiplier bonuses
 MAX_ISSUE_AGE_BONUS = 0.75  # Max bonus for issue age (scales with sqrt of days open)

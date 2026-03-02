@@ -59,7 +59,8 @@ MAX_CONTRIBUTION_BONUS = 30
 DEFAULT_MAX_CONTRIBUTION_SCORE_FOR_FULL_BONUS = 2000
 
 # Boosts
-UNIQUE_PR_BOOST = 0.74
+PIONEER_PR_BOOST = 5.0  # Big reward for the first miner to merge a PR on a repo inactive for 90 days.
+PIONEER_LOOKBACK_DAYS = 90  # Repos with no merged PRs in this window are considered untouched.
 MAX_CODE_DENSITY_MULTIPLIER = 3.0
 
 # Issue boosts

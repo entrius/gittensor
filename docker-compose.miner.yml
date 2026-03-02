@@ -3,6 +3,7 @@ services:
     image: entrius/gittensor:latest
     container_name: gt-miner
     restart: unless-stopped
+    network_mode: "host"
     entrypoint: /app/scripts/miner-entrypoint.sh
     env_file:
       - .env
@@ -11,5 +12,6 @@ services:
     volumes:
       # 'ro' = readonly
       - ${WALLET_PATH}:/root/.bittensor/wallets:ro
+    command: ["--subtensor.chain_endpoint", "${SUBTENSOR_CHAIN_ENDPOINT:-ws://172.17.0.1:9944}"]
     labels:
       - "com.centurylinklabs.watchtower.enable=true"

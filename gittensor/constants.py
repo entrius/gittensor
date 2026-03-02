@@ -59,7 +59,8 @@ MAX_CONTRIBUTION_BONUS = 30
 DEFAULT_MAX_CONTRIBUTION_SCORE_FOR_FULL_BONUS = 2000
 
 # Boosts
-UNIQUE_PR_BOOST = 0.74
+PIONEER_BASE_BONUS = 1.5  # Bonus for pioneer (rank-1 only, 2.5x total multiplier)
+PIONEER_MULTI_REPO_DAMPING = 0.5  # Exponent for diminishing returns when pioneering many repos
 MAX_CODE_DENSITY_MULTIPLIER = 3.0
 
 # Issue boosts

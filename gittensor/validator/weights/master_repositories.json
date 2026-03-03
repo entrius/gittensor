@@ -4257,10 +4257,6 @@
     "tier": "Bronze",
     "weight": 0.19
   },
-  "pulumi/pulumi": {
-    "tier": "Silver",
-    "weight": 3.73
-  },
   "puppeteer/puppeteer": {
     "tier": "Bronze",
     "weight": 0.22

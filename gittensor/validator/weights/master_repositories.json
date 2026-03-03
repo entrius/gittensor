@@ -498,12 +498,12 @@
     "weight": 4.25
   },
   "autoppia/autoppia_web_agents_subnet": {
-    "additional_acceptable_branches": ["dev"],
+    "additional_acceptable_branches": ["dev", "dev-gittensor"],
     "tier": "Silver",
     "weight": 6.46
   },
   "autoppia/autoppia_webs_demo": {
-    "additional_acceptable_branches": ["feature/*"],
+    "additional_acceptable_branches": ["feature/*", "fix/*"],
     "tier": "Silver",
     "weight": 4.25
   },
@@ -746,6 +746,7 @@
     "weight": 0.19
   },
   "bokeh/bokeh": {
+    "additional_acceptable_branches": ["branch-*.*"],
     "tier": "Bronze",
     "weight": 0.17
   },
@@ -1122,6 +1123,10 @@
   "d3/d3": {
     "tier": "Bronze",
     "weight": 0.24
+  },
+  "D4Vinci/Scrapling": {
+    "weight": 0.26,
+    "tier": "Bronze"
   },
   "danielmiessler/SecLists": {
     "tier": "Bronze",

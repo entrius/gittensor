@@ -43,7 +43,7 @@ The result: a sustainable incentive layer that channels resources toward buildin
 # Quick start
 git clone https://github.com/entrius/gittensor.git
 cd gittensor
-cp env.example .env
+cp .env.example .env
 # Edit .env with proper values
 nano .env
 
@@ -60,7 +60,7 @@ See full guide **[here](https://docs.gittensor.io/miner.html)**
 # Quick start
 git clone https://github.com/entrius/gittensor.git
 cd gittensor
-cp env.example .env
+cp .env.example .env
 # Edit .env with proper values
 nano .env
 
@@ -83,7 +83,7 @@ _NOTE: don’t be afraid to provide recommendations for your favorite open sourc
 
 - Programming Language Weights
 
-A list of major file types/extensions, mostly related to programming languages, but also plenty of markdown, documentation, and other common files are included. Each extension has a weight for scoring. If the extension has a language full name then it code in those languages will be evaluated using token-based scoring.
+A list of major file types/extensions, mostly related to programming languages, but also plenty of markdown, documentation, and other common files are included. Each extension has a weight for scoring. If the extension has a language full name then code in those languages will be evaluated using token-based scoring.
 
 _NOTE: this list will also be dynamic. Additions, and weight changes will occur as the subnet matures._
 

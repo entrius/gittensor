@@ -83,6 +83,10 @@
     "tier": "Bronze",
     "weight": 0.19
   },
+  "airweave-ai/error-monitoring-agent": {
+    "weight": 0.39,
+    "tier": "Bronze"
+  },
   "alacritty/alacritty": {
     "tier": "Bronze",
     "weight": 0.58

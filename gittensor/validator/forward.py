@@ -94,6 +94,8 @@ def build_prediction_ema_rewards(
         return prediction_rewards
 
     # Build github_id -> uid mapping from current miner evaluations
+    # NOTE: detect_and_penalize_miners_sharing_github() already zeroes github_id
+    # for duplicate accounts before this runs, so the '!= 0' filter handles them.
     github_id_to_uid: Dict[str, int] = {}
     for uid, evaluation in miner_evaluations.items():
         if evaluation and evaluation.github_id and evaluation.github_id != '0':

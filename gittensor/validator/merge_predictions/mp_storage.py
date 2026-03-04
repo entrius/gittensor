@@ -4,9 +4,11 @@
 
 Each validator stores predictions independently. One row per miner per PR.
 Thread-safe via WAL mode — the axon handler writes while the scoring loop reads.
-DB file lives at repo root (predictions.db) for easy Docker volume mounting.
+DB path is configurable via MP_DB_PATH env var; defaults to <repo>/gt-merge-preds.db
+locally and /app/data/gt-merge-preds.db in Docker (persisted via named volume).
 """
 
+import os
 import sqlite3
 import threading
 from datetime import datetime, timezone
@@ -17,8 +19,10 @@ import bittensor as bt
 
 from gittensor.constants import PREDICTIONS_COOLDOWN_SECONDS
 
-# DB at repo root — easy to find in Docker, gitignored
-DEFAULT_DB_PATH = str(Path(__file__).resolve().parents[3] / 'gt-merge-preds.db')
+DEFAULT_DB_PATH = os.environ.get(
+    'MP_DB_PATH',
+    str(Path(__file__).resolve().parents[3] / 'gt-merge-preds.db'),
+)
 
 
 class PredictionStorage:
@@ -60,6 +64,14 @@ class PredictionStorage:
                     rounds     INTEGER NOT NULL DEFAULT 0,
                     updated_at TEXT    NOT NULL,
                     PRIMARY KEY (github_id)
+                )
+            ''')
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS settled_issues (
+                    issue_id          INTEGER NOT NULL PRIMARY KEY,
+                    outcome           TEXT    NOT NULL,
+                    merged_pr_number  INTEGER,
+                    settled_at        TEXT    NOT NULL
                 )
             ''')
             conn.execute('''
@@ -179,6 +191,39 @@ class PredictionStorage:
                 (issue_id,),
             ).fetchall()
         return [dict(r) for r in rows]
+
+    def delete_predictions_for_issue(self, issue_id: int) -> int:
+        """Delete all predictions for a settled/cancelled issue. Returns rows deleted."""
+        with self._lock:
+            with self._get_connection() as conn:
+                cursor = conn.execute('DELETE FROM predictions WHERE issue_id = ?', (issue_id,))
+                conn.commit()
+                return cursor.rowcount
+
+    # =========================================================================
+    # Settlement tracking
+    # =========================================================================
+
+    def is_issue_settled(self, issue_id: int) -> bool:
+        """Check if an issue has already been settled."""
+        with self._get_connection() as conn:
+            row = conn.execute(
+                'SELECT 1 FROM settled_issues WHERE issue_id = ?',
+                (issue_id,),
+            ).fetchone()
+        return row is not None
+
+    def mark_issue_settled(self, issue_id: int, outcome: str, merged_pr_number: int | None = None) -> None:
+        """Record that an issue has been settled. Idempotent (INSERT OR IGNORE)."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            with self._get_connection() as conn:
+                conn.execute(
+                    'INSERT OR IGNORE INTO settled_issues (issue_id, outcome, merged_pr_number, settled_at) '
+                    'VALUES (?, ?, ?, ?)',
+                    (issue_id, outcome, merged_pr_number, now),
+                )
+                conn.commit()
 
     # =========================================================================
     # EMA tracking

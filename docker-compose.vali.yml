@@ -12,6 +12,7 @@ services:
     volumes:
       # 'ro' = readonly
       - ${WALLET_PATH}:/root/.bittensor/wallets:ro
+      - mp-data:/app/data
     # optional: uncomment this if you are running validator database
     # networks:
     #   - gittensor_network
@@ -28,6 +29,9 @@ services:
       WATCHTOWER_POLL_INTERVAL: 200
       WATCHTOWER_LABEL_ENABLE: "true"
       WATCHTOWER_CLEANUP: "true"
+
+volumes:
+  mp-data:
 
 # uncomment this if you are running validator database
 # networks:

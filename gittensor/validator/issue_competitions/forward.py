@@ -39,7 +39,9 @@ async def issue_competitions(
     """
     try:
         if not GITTENSOR_VALIDATOR_PAT:
-            bt.logging.info('GITTENSOR_VALIDATOR_PAT not set, skipping issue bounties voting entirely.')
+            bt.logging.warning(
+                'GITTENSOR_VALIDATOR_PAT not set, skipping issue bounties voting entirely. (This does NOT affect vtrust/consensus)'
+            )
             return
 
         contract_addr = get_contract_address()

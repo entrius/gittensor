@@ -4467,6 +4467,7 @@
     "weight": 0.22
   },
   "RedTeamSubnet/RedTeam": {
+    "additional_acceptable_branches": ["dev"],
     "tier": "Silver",
     "weight": 4.4
   },

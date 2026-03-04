@@ -4258,6 +4258,7 @@
     "weight": 0.19
   },
   "pulumi/pulumi": {
+    "inactive_at": "2026-03-04T17:03:48.522Z",
     "tier": "Silver",
     "weight": 3.73
   },

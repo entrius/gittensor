@@ -26,15 +26,15 @@ async def handle_prediction(validator: 'Validator', synapse: PredictionSynapse) 
     miner_hotkey = synapse.dendrite.hotkey
     uid = validator.metagraph.hotkeys.index(miner_hotkey)
 
-    # 1) Verify issue is active on-chain
-    error = check_issue_active(validator, synapse.issue_id)
+    # 1) Verify issue is in a predictable state on-chain
+    error, issue = check_issue_active(validator, synapse.issue_id)
     if error:
         synapse.accepted = False
         synapse.rejection_reason = error
         return synapse
 
     # 2) Verify predicted PRs are still open on GitHub
-    error = check_prs_open(synapse.repository, synapse.issue_id, synapse.predictions)
+    error = check_prs_open(synapse.repository, issue.issue_number, synapse.predictions)
     if error:
         synapse.accepted = False
         synapse.rejection_reason = error

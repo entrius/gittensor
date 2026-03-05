@@ -214,6 +214,7 @@ def issues_predict(
         'issue_id': issue_id,
         'repository': repo_full_name,
         'predictions': dict(predictions),
+        'github_access_token': '***',
     }
 
     # 10) Emit machine output or interactive confirmation flow.

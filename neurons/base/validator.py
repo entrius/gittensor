@@ -94,6 +94,7 @@ class BaseValidatorNeuron(BaseNeuron):
                     netuid=self.config.netuid,
                     axon=self.axon,
                 )
+                self.axon.start()
                 bt.logging.info(
                     f'Running validator {self.axon} on network: {self.config.subtensor.chain_endpoint} with netuid: {self.config.netuid}'
                 )

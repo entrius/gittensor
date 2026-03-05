@@ -32,8 +32,8 @@ def check_issue_active(validator: 'Validator', issue_id: int) -> str | None:
         issue = client.get_issue(issue_id)
         if issue is None:
             return f'Issue {issue_id} not found on-chain'
-        if issue.status != IssueStatus.ACTIVE:
-            return f'Issue {issue_id} is not active (status: {issue.status.name})'
+        if issue.status not in (IssueStatus.REGISTERED, IssueStatus.ACTIVE):
+            return f'Issue {issue_id} is not in a predictable state (status: {issue.status.name})'
     except Exception as e:
         bt.logging.warning(f'Failed to check issue state for {issue_id}: {e}')
         return f'Could not verify issue state: {e}'

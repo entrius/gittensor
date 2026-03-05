@@ -3,10 +3,10 @@
 """Broadcast PredictionSynapse from miner to all validator axons."""
 
 import asyncio
-import os
 
 import bittensor as bt
 
+from gittensor.miner.token_mgmt import load_token
 from gittensor.synapses import PredictionSynapse
 
 
@@ -15,6 +15,7 @@ def broadcast_predictions(
     wallet_name: str,
     wallet_hotkey: str,
     ws_endpoint: str,
+    netuid: int,
 ) -> dict[str, object]:
     """Broadcast PredictionSynapse to all validator axons via dendrite.
 
@@ -23,17 +24,18 @@ def broadcast_predictions(
         wallet_name: Bittensor wallet name.
         wallet_hotkey: Bittensor hotkey name.
         ws_endpoint: Subtensor RPC endpoint.
+        netuid: Subnet UID to broadcast on.
 
     Returns:
         Dict with success, total_validators, accepted, rejected, results.
     """
-    github_pat = os.getenv('GITTENSOR_MINER_PAT')
+    github_pat = load_token(quiet=True)
     if not github_pat:
-        return {'success': False, 'error': 'GITTENSOR_MINER_PAT environment variable not set.', 'results': []}
+        return {'success': False, 'error': 'GITTENSOR_MINER_PAT not set or invalid.', 'results': []}
 
     wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
     subtensor = bt.Subtensor(network=ws_endpoint)
-    metagraph = subtensor.metagraph(netuid=subtensor.get_subnets()[0] if hasattr(subtensor, 'get_subnets') else 74)
+    metagraph = subtensor.metagraph(netuid=netuid)
     dendrite = bt.Dendrite(wallet=wallet)
 
     synapse = PredictionSynapse(
@@ -43,10 +45,10 @@ def broadcast_predictions(
         predictions={int(k): float(v) for k, v in payload['predictions'].items()},
     )
 
-    # Get all validator axons (neurons with stake that serve axons).
+    # Get axons for UIDs with validator permit that are actively serving.
     validator_axons = [
         axon for uid, axon in enumerate(metagraph.axons)
-        if metagraph.S[uid] > 0 and axon.ip != '0.0.0.0'
+        if metagraph.validator_permit[uid] and axon.is_serving
     ]
 
     if not validator_axons:

@@ -84,7 +84,7 @@ def issues_submissions(
     try:
         with loading_context('Fetching issue from contract...', as_json):
             issue = fetch_issue_from_contract(
-                ws_endpoint, contract_addr, issue_id, require_active=False, verbose=verbose
+                ws_endpoint, contract_addr, issue_id, verbose=verbose
             )
     except click.ClickException as e:
         handle_exception(as_json, str(e))

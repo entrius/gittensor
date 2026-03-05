@@ -26,6 +26,7 @@ from .helpers import (
     print_network_header,
     print_success,
     print_warning,
+    resolve_netuid_from_contract,
     resolve_network,
     success_panel,
     validate_issue_id,
@@ -139,6 +140,10 @@ def issues_predict(
     ws_endpoint, network_name = resolve_network(network, rpc_url)
     effective_wallet, effective_hotkey = _resolve_wallet_identity(wallet_name, wallet_hotkey)
 
+    netuid = resolve_netuid_from_contract(ws_endpoint, contract_addr)
+    if netuid is None:
+        handle_exception(as_json, 'Could not resolve netuid from contract.')
+
     if not as_json:
         print_network_header(network_name, contract_addr)
         console.print(f'Wallet: {effective_wallet}/{effective_hotkey}\n')
@@ -219,6 +224,7 @@ def issues_predict(
             wallet_name=effective_wallet,
             wallet_hotkey=effective_hotkey,
             ws_endpoint=ws_endpoint,
+            netuid=netuid,
         )
         emit_json(results, pretty=True)
         return
@@ -237,6 +243,7 @@ def issues_predict(
         wallet_name=effective_wallet,
         wallet_hotkey=effective_hotkey,
         ws_endpoint=ws_endpoint,
+        netuid=netuid,
     )
     _print_broadcast_results(results)
 
@@ -299,7 +306,7 @@ def _resolve_issue_context(
     try:
         with loading_context('Reading issues from contract...', as_json):
             issue = fetch_issue_from_contract(
-                ws_endpoint, contract_addr, issue_id, require_active=True, verbose=verbose
+                ws_endpoint, contract_addr, issue_id, verbose=verbose
             )
     except click.ClickException as e:
         handle_exception(as_json, str(e))
@@ -376,6 +383,9 @@ def format_prediction_lines(predictions: dict[int, float]) -> str:
 
 def _print_broadcast_results(results: dict[str, object]) -> None:
     """Print broadcast results in human-readable format."""
+    if results.get('error'):
+        print_error(str(results['error']))
+        return
     if results.get('success'):
         print_success(f"Prediction accepted by {results['accepted']}/{results['total_validators']} validator(s)")
     else:

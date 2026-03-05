@@ -28,7 +28,6 @@ from gittensor.validator.merge_predictions.scoring import (
     PrOutcome,
     PrPrediction,
     compute_merged_pr_order_ranks,
-    fill_unpredicted_prs,
     score_consensus_bonus,
     score_correctness,
     score_miner_issue,
@@ -433,32 +432,6 @@ class TestPredictionScoring:
         ranks = compute_merged_pr_order_ranks(preds, merged_pr_number=1)
         assert ranks[1] == 1  # earlier
         assert ranks[0] == 2
-
-    # -- Aggregation: fill_unpredicted_prs --
-
-    def test_fill_unpredicted_prs(self):
-        settlement = datetime(2025, 7, 1, tzinfo=timezone.utc)
-        preds = [
-            PrPrediction(pr_number=1, prediction=0.6, prediction_time=datetime(2025, 6, 5, tzinfo=timezone.utc), variance_at_prediction=0.0),
-        ]
-        filled = fill_unpredicted_prs(preds, [1, 2, 3], settlement)
-        assert len(filled) == 3
-        filled_map = {p.pr_number: p for p in filled}
-        assert filled_map[2].prediction == pytest.approx(0.2)
-        assert filled_map[3].prediction == pytest.approx(0.2)
-        assert filled_map[2].prediction_time == settlement
-
-    def test_fill_all_predicted(self):
-        t = datetime(2025, 6, 5, tzinfo=timezone.utc)
-        settlement = datetime(2025, 7, 1, tzinfo=timezone.utc)
-        preds = [
-            PrPrediction(pr_number=1, prediction=0.6, prediction_time=t, variance_at_prediction=0.0),
-            PrPrediction(pr_number=2, prediction=0.4, prediction_time=t, variance_at_prediction=0.0),
-        ]
-        filled = fill_unpredicted_prs(preds, [1, 2], settlement)
-        assert len(filled) == 2
-        filled_map = {p.pr_number: p for p in filled}
-        assert filled_map[1].prediction == pytest.approx(0.6)
 
     # -- Aggregation: score_miner_issue --
 

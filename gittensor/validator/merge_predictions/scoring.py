@@ -9,11 +9,13 @@ Formula per PR:
 
 Where:
     - correctness: log-loss derived (prediction for merged, 1-prediction for non-merged), cubed
-    - timeliness_bonus: 0.0-0.75, rewards early predictions
-    - consensus_bonus: 0.0-0.25, rewards pre-convergence predictions
-    - order_bonus: 0.0-0.75, rewards first correct predictor (merged PR only)
+    - timeliness_bonus: 0.0-0.75, rewards early predictions (gated: raw correctness >= 0.66)
+    - consensus_bonus: 0.0-0.25, rewards pre-convergence predictions (gated: raw correctness >= 0.66)
+    - order_bonus: 0.0-0.75, rewards first correct predictor, merged PR only (gated: raw correctness >= 0.66)
 
-Issue score: weighted mean where merged PR gets weight=N (total PRs), non-merged get weight=1.
+All bonuses require raw correctness >= ORDER_CORRECTNESS_THRESHOLD to activate.
+Issue score: weighted_mean × coverage, where merged PR gets weight=N, non-merged weight=1,
+    and coverage = prs_predicted / total_prs.
 """
 
 from dataclasses import dataclass
@@ -168,40 +170,6 @@ def compute_merged_pr_order_ranks(
 # =============================================================================
 
 
-def fill_unpredicted_prs(
-    predictions: list[PrPrediction],
-    all_pr_numbers: list[int],
-    settlement_time: datetime,
-) -> list[PrPrediction]:
-    """Fill in missing PR predictions so every miner covers every PR.
-
-    Unallocated probability is spread uniformly across unpredicted PRs.
-    Filled predictions get settlement_time as their timestamp (worst timeliness).
-    """
-    predicted_prs = {p.pr_number for p in predictions}
-    missing_prs = [pr for pr in all_pr_numbers if pr not in predicted_prs]
-
-    if not missing_prs:
-        return list(predictions)
-
-    allocated = sum(p.prediction for p in predictions)
-    unallocated = max(0.0, 1.0 - allocated)
-    fill_value = unallocated / len(missing_prs)
-
-    filled = list(predictions)
-    for pr_number in missing_prs:
-        filled.append(
-            PrPrediction(
-                pr_number=pr_number,
-                prediction=fill_value,
-                prediction_time=settlement_time,
-                variance_at_prediction=0.0,
-            )
-        )
-
-    return filled
-
-
 def score_miner_issue(
     uid: int,
     predictions: list[PrPrediction],
@@ -215,27 +183,27 @@ def score_miner_issue(
     Fills unpredicted PRs, scores each PR, then computes a weighted issue score
     where the merged PR gets weight=N (total PRs) and non-merged get weight=1.
     """
-    all_pr_numbers = [o.pr_number for o in outcomes]
     outcome_map = {o.pr_number: o for o in outcomes}
     merged_prs = {o.pr_number for o in outcomes if o.outcome == 1.0}
-    n_prs = len(all_pr_numbers)
-
-    full_predictions = fill_unpredicted_prs(predictions, all_pr_numbers, settlement_time)
+    n_prs = len(outcomes)
 
     miner_rank = merged_pr_order_ranks.get(uid, 0)
 
     pr_scores = []
-    for pred in full_predictions:
+    for pred in predictions:
         outcome = outcome_map.get(pred.pr_number)
         if outcome is None:
             continue
 
-        correctness = score_correctness(pred.prediction, outcome.outcome)
-        timeliness_bonus = score_timeliness(pred.prediction_time, settlement_time, outcome.pr_open_time)
-        consensus_bonus = score_consensus_bonus(pred.prediction_time, peak_variance_time, settlement_time)
+        rc = raw_correctness(pred.prediction, outcome.outcome)
+        correctness = rc ** PREDICTIONS_CORRECTNESS_EXPONENT
+        qualifies_for_bonus = rc >= PREDICTIONS_ORDER_CORRECTNESS_THRESHOLD
+
+        timeliness_bonus = score_timeliness(pred.prediction_time, settlement_time, outcome.pr_open_time) if qualifies_for_bonus else 0.0
+        consensus_bonus = score_consensus_bonus(pred.prediction_time, peak_variance_time, settlement_time) if qualifies_for_bonus else 0.0
 
         is_merged = pred.pr_number in merged_prs
-        order_bonus = score_order_bonus(miner_rank) if is_merged else 0.0
+        order_bonus = score_order_bonus(miner_rank) if is_merged and qualifies_for_bonus else 0.0
 
         score = correctness * (1.0 + timeliness_bonus + consensus_bonus + order_bonus)
         pr_scores.append(
@@ -257,7 +225,12 @@ def score_miner_issue(
         weighted_sum += ps.score * weight
         total_weight += weight
 
-    issue_score = weighted_sum / total_weight if total_weight > 0 else 0.0
+    raw_issue_score = weighted_sum / total_weight if total_weight > 0 else 0.0
+
+    # Coverage multiplier: reward miners who reviewed the full field
+    prs_predicted = len(pr_scores)
+    coverage = prs_predicted / n_prs if n_prs > 0 else 0.0
+    issue_score = raw_issue_score * coverage
 
     return MinerIssueScore(uid=uid, pr_scores=pr_scores, issue_score=issue_score)
 

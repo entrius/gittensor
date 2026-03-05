@@ -45,10 +45,11 @@ def broadcast_predictions(
         predictions={int(k): float(v) for k, v in payload['predictions'].items()},
     )
 
-    # Get axons for UIDs with validator permit that are actively serving.
+    # Get axons for high-trust validators with permit that are actively serving.
+    MIN_VTRUST = 0.6
     validator_axons = [
         axon for uid, axon in enumerate(metagraph.axons)
-        if metagraph.validator_permit[uid] and axon.is_serving
+        if metagraph.validator_permit[uid] and axon.is_serving and float(metagraph.Tv[uid]) > MIN_VTRUST
     ]
 
     if not validator_axons:

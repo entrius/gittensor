@@ -94,21 +94,32 @@ class PredictionStorage:
         remaining = PREDICTIONS_COOLDOWN_SECONDS - elapsed
         return remaining if remaining > 0 else None
 
-    def get_miner_total_for_issue(self, uid: int, hotkey: str, issue_id: int, exclude_pr: Optional[int] = None) -> float:
-        """Get sum of a miner's existing predictions for an issue, optionally excluding a PR being updated."""
+    def get_miner_total_for_issue(
+        self, uid: int, hotkey: str, issue_id: int,
+        exclude_pr: Optional[int] = None, only_prs: Optional[set[int]] = None,
+    ) -> float:
+        """Get sum of a miner's existing predictions for an issue.
+
+        Args:
+            exclude_pr: Exclude this PR from the sum (for updates).
+            only_prs: If provided, only count predictions on these PRs (open PRs).
+                       Predictions on closed PRs are excluded from the total,
+                       freeing that probability for reallocation.
+        """
         with self._get_connection() as conn:
+            query = 'SELECT COALESCE(SUM(prediction), 0.0) as total FROM predictions WHERE uid = ? AND hotkey = ? AND issue_id = ?'
+            params: list = [uid, hotkey, issue_id]
+
             if exclude_pr is not None:
-                row = conn.execute(
-                    'SELECT COALESCE(SUM(prediction), 0.0) as total FROM predictions '
-                    'WHERE uid = ? AND hotkey = ? AND issue_id = ? AND pr_number != ?',
-                    (uid, hotkey, issue_id, exclude_pr),
-                ).fetchone()
-            else:
-                row = conn.execute(
-                    'SELECT COALESCE(SUM(prediction), 0.0) as total FROM predictions '
-                    'WHERE uid = ? AND hotkey = ? AND issue_id = ?',
-                    (uid, hotkey, issue_id),
-                ).fetchone()
+                query += ' AND pr_number != ?'
+                params.append(exclude_pr)
+
+            if only_prs:
+                placeholders = ','.join('?' for _ in only_prs)
+                query += f' AND pr_number IN ({placeholders})'
+                params.extend(only_prs)
+
+            row = conn.execute(query, params).fetchone()
         return float(row['total'])
 
     def compute_current_variance(self, issue_id: int) -> float:

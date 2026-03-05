@@ -34,7 +34,7 @@ async def handle_prediction(validator: 'Validator', synapse: PredictionSynapse) 
         return synapse
 
     # 2) Verify predicted PRs are still open on GitHub
-    error = check_prs_open(synapse.repository, issue.issue_number, synapse.predictions)
+    error, open_pr_numbers = check_prs_open(synapse.repository, issue.issue_number, synapse.predictions)
     if error:
         synapse.accepted = False
         synapse.rejection_reason = error
@@ -64,8 +64,10 @@ async def handle_prediction(validator: 'Validator', synapse: PredictionSynapse) 
             synapse.rejection_reason = f'PR #{pr_number} on cooldown ({cooldown_remaining:.0f}s remaining)'
             return synapse
 
-        # Total probability check (existing + new, excluding this PR if it's an update)
-        existing_total = mp_storage.get_miner_total_for_issue(uid, miner_hotkey, synapse.issue_id, exclude_pr=pr_number)
+        # Total probability check (only count predictions on open PRs, excluding this PR if it's an update)
+        existing_total = mp_storage.get_miner_total_for_issue(
+            uid, miner_hotkey, synapse.issue_id, exclude_pr=pr_number, only_prs=open_pr_numbers,
+        )
         if existing_total + pred_value > 1.0:
             synapse.accepted = False
             synapse.rejection_reason = (

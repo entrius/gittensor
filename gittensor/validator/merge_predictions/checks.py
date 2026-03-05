@@ -42,11 +42,15 @@ def check_issue_active(validator: 'Validator', issue_id: int) -> tuple[str | Non
     return None, issue
 
 
-def check_prs_open(repository: str, issue_number: int, predictions: dict[int, float]) -> str | None:
-    """Verify all predicted PRs are still open on GitHub. Returns error string or None."""
+def check_prs_open(repository: str, issue_number: int, predictions: dict[int, float]) -> tuple[str | None, set[int]]:
+    """Verify all predicted PRs are still open on GitHub.
+
+    Returns (error, open_pr_numbers). open_pr_numbers is the full set of open PRs
+    for this issue, used downstream to exclude closed-PR predictions from probability totals.
+    """
     if not GITTENSOR_VALIDATOR_PAT:
         bt.logging.warning('No GITTENSOR_VALIDATOR_PAT, skipping PR open check')
-        return None
+        return None, set()
 
     try:
         from gittensor.utils.github_api_tools import find_prs_for_issue
@@ -56,10 +60,10 @@ def check_prs_open(repository: str, issue_number: int, predictions: dict[int, fl
 
         for pr_number in predictions:
             if pr_number not in open_pr_numbers:
-                return f'PR #{pr_number} is not open on {repository}'
+                return f'PR #{pr_number} is not open on {repository}', open_pr_numbers
 
     except Exception as e:
         bt.logging.warning(f'Failed to check PR state for {repository}: {e}')
-        return None
+        return None, set()
 
-    return None
+    return None, open_pr_numbers

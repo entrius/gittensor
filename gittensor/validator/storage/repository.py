@@ -8,11 +8,12 @@ and miner evaluations.
 
 import logging
 from contextlib import contextmanager
+from datetime import datetime
 from typing import List, TypeVar
 
 import numpy as np
 
-from gittensor.classes import FileChange, Issue, Miner, MinerEvaluation, PullRequest
+from gittensor.classes import FileChange, Issue, Miner, MinerEvaluation, PRState, PullRequest
 from gittensor.validator.configurations.tier_config import Tier
 
 from .queries import (
@@ -24,6 +25,7 @@ from .queries import (
     CLEANUP_STALE_MINER_EVALUATIONS,
     CLEANUP_STALE_MINER_TIER_STATS,
     CLEANUP_STALE_MINERS,
+    GET_MERGED_PULL_REQUEST_HISTORY_BY_REPOS,
     SET_MINER,
 )
 
@@ -109,6 +111,48 @@ class Repository(BaseRepository):
         params = (miner.uid, miner.hotkey, miner.github_id)
         return self.set_entity(SET_MINER, params)
 
+    def get_merged_pull_request_history_by_repos(
+        self,
+        repository_full_names: List[str],
+        merged_at_from: datetime,
+        merged_at_to: datetime,
+    ) -> List[PullRequest]:
+        """
+        Fetch merged PR history for the provided repositories within a merge-time window.
+
+        Returns rows ordered by the same deterministic pioneer event key
+        (repo, merged_at, created_at nulls last, pr_number, uid).
+        """
+        if not repository_full_names:
+            return []
+
+        with self.get_cursor() as cursor:
+            cursor.execute(
+                GET_MERGED_PULL_REQUEST_HISTORY_BY_REPOS,
+                (repository_full_names, merged_at_from, merged_at_to),
+            )
+            rows = cursor.fetchall()
+
+        history: List[PullRequest] = []
+        for row in rows:
+            repo_full_name, merged_at, created_at, pr_number, uid = row
+            history.append(
+                PullRequest(
+                    number=int(pr_number),
+                    repository_full_name=repo_full_name,
+                    uid=int(uid),
+                    hotkey='',
+                    github_id='0',
+                    title='',
+                    author_login='',
+                    merged_at=merged_at,
+                    created_at=created_at,
+                    pr_state=PRState.MERGED,
+                )
+            )
+
+        return history
+
     def cleanup_stale_miner_data(self, evaluation: MinerEvaluation) -> None:
         """
         Remove stale evaluation data when a miner re-registers on a new uid/hotkey.
@@ -166,7 +210,8 @@ class Repository(BaseRepository):
                     pr.base_score,
                     pr.issue_multiplier,
                     pr.open_pr_spam_multiplier,
-                    pr.repository_uniqueness_multiplier,
+                    pr.pioneer_multiplier,
+                    pr.pioneer_rank,
                     pr.time_decay_multiplier,
                     pr.credibility_multiplier,
                     pr.raw_credibility,

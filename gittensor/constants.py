@@ -59,8 +59,15 @@ MAX_CONTRIBUTION_BONUS = 30
 DEFAULT_MAX_CONTRIBUTION_SCORE_FOR_FULL_BONUS = 2000
 
 # Boosts
-UNIQUE_PR_BOOST = 0.74
 MAX_CODE_DENSITY_MULTIPLIER = 3.0
+
+# Pioneer tuning guide:
+# - pioneer winner multiplier = 1 + PIONEER_BASE_BONUS
+# - reward is per winning PR (no cross-repo decay by uid)
+# - pioneer inactivity lookback reuses PR_LOOKBACK_DAYS
+# - base bonus 2.0 gives a meaningful first-win signal (3.0x)
+# - if untouched-repo breadth does not increase, raise BASE_BONUS in small steps (e.g. +0.25 / +0.5)
+PIONEER_BASE_BONUS = 2.0
 
 # Issue boosts
 MAX_ISSUE_CLOSE_WINDOW_DAYS = 1

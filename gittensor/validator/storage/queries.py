@@ -1,4 +1,4 @@
-# Storage Queries - Only SET/INSERT operations for writing data
+# Storage SQL queries (write + read)
 
 # Cleanup Queries - Remove stale data when a miner re-registers on a new uid/hotkey
 CLEANUP_STALE_MINER_EVALUATIONS = """
@@ -37,7 +37,7 @@ INSERT INTO pull_requests (
     number, repository_full_name, uid, hotkey, github_id, title, author_login,
     merged_at, pr_created_at, pr_state,
     repo_weight_multiplier, base_score, issue_multiplier,
-    open_pr_spam_multiplier, repository_uniqueness_multiplier, time_decay_multiplier,
+    open_pr_spam_multiplier, pioneer_multiplier, pioneer_rank, time_decay_multiplier,
     credibility_multiplier, raw_credibility, credibility_scalar,
     earned_score, collateral_score,
     additions, deletions, commits, total_nodes_scored,
@@ -56,7 +56,8 @@ DO UPDATE SET
     base_score = EXCLUDED.base_score,
     issue_multiplier = EXCLUDED.issue_multiplier,
     open_pr_spam_multiplier = EXCLUDED.open_pr_spam_multiplier,
-    repository_uniqueness_multiplier = EXCLUDED.repository_uniqueness_multiplier,
+    pioneer_multiplier = EXCLUDED.pioneer_multiplier,
+    pioneer_rank = EXCLUDED.pioneer_rank,
     time_decay_multiplier = EXCLUDED.time_decay_multiplier,
     credibility_multiplier = EXCLUDED.credibility_multiplier,
     raw_credibility = EXCLUDED.raw_credibility,
@@ -76,6 +77,28 @@ DO UPDATE SET
     leaf_count = EXCLUDED.leaf_count,
     leaf_score = EXCLUDED.leaf_score,
     updated_at = NOW()
+"""
+
+# Keep ORDER BY in sync with scoring._pioneer_order_key for deterministic pioneer gating/ranking.
+GET_MERGED_PULL_REQUEST_HISTORY_BY_REPOS = """
+SELECT
+    repository_full_name,
+    merged_at,
+    pr_created_at,
+    number,
+    uid
+FROM pull_requests
+WHERE repository_full_name = ANY(%s)
+  AND pr_state = 'MERGED'
+  AND merged_at IS NOT NULL
+  AND merged_at >= %s
+  AND merged_at <= %s
+ORDER BY
+    repository_full_name,
+    merged_at,
+    pr_created_at NULLS LAST,
+    number,
+    uid
 """
 
 # Issue Queries

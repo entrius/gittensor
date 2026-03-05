@@ -2,13 +2,15 @@
 # Copyright © 2025 Entrius
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Dict, Tuple
+from datetime import timedelta
+from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple
 
 import bittensor as bt
 import numpy as np
 from aiohttp import ClientConnectorError
 
-from gittensor.classes import MinerEvaluation
+from gittensor.classes import MinerEvaluation, PullRequest
+from gittensor.constants import PR_LOOKBACK_DAYS
 from gittensor.synapses import GitPatSynapse
 from gittensor.utils.github_api_tools import load_miners_prs
 from gittensor.validator.evaluation.dynamic_emissions import apply_dynamic_emissions_using_network_contributions
@@ -136,8 +138,11 @@ async def get_rewards(
     # Adjust scores for duplicate accounts
     detect_and_penalize_miners_sharing_github(miner_evaluations)
 
-    # Finalize scores: apply unique contribution multiplier, credibility, sum totals, deduct collateral
-    finalize_miner_scores(miner_evaluations)
+    # Load merged PR history used by pioneer lookback gating.
+    merged_history = _get_merged_history_for_cycle(self, miner_evaluations)
+
+    # Finalize scores: apply pioneer rewards, credibility, sum totals, deduct collateral
+    finalize_miner_scores(miner_evaluations, merged_history=merged_history)
 
     # Allocate emissions by tier: replace total_score with tier-weighted allocations
     allocate_emissions_by_tier(miner_evaluations)
@@ -155,3 +160,48 @@ async def get_rewards(
         np.array([final_rewards.get(uid, 0.0) for uid in sorted(uids)]),
         miner_evaluations,
     )
+
+
+def _get_merged_history_for_cycle(
+    self: Validator, miner_evaluations: Dict[int, MinerEvaluation]
+) -> Optional[List[PullRequest]]:
+    """Load merged PR history for repos touched by current cycle merged candidates.
+
+    Returns:
+        - `None` when DB is unavailable or history fetch fails (pioneer disabled)
+        - `[]` when history is available but empty
+        - populated list when history rows exist
+    """
+    db_storage = self.db_storage
+    if db_storage is None or not db_storage.is_enabled():
+        return None
+
+    cycle_candidates = [
+        pr
+        for evaluation in miner_evaluations.values()
+        for pr in evaluation.merged_pull_requests
+        if pr.repository_full_name and pr.merged_at is not None
+    ]
+    if not cycle_candidates:
+        return []
+
+    cycle_repos: Set[str] = {pr.repository_full_name for pr in cycle_candidates}
+    # Bound history to the minimum range required by lookback gating for this cycle.
+    merged_at_from = min(pr.merged_at for pr in cycle_candidates) - timedelta(days=PR_LOOKBACK_DAYS)
+    merged_at_to = max(pr.merged_at for pr in cycle_candidates)
+
+    try:
+        bt.logging.debug(
+            f'Pioneer history fetch | repos={len(cycle_repos)} '
+            f'merged_at_from={merged_at_from.isoformat()} merged_at_to={merged_at_to.isoformat()}'
+        )
+        history = db_storage.get_merged_pull_request_history_by_repos(
+            sorted(cycle_repos),
+            merged_at_from,
+            merged_at_to,
+        )
+        bt.logging.debug(f'Pioneer history fetch result | rows={len(history)}')
+        return history
+    except Exception as e:
+        bt.logging.warning(f'Pioneer history unavailable; rewards disabled: {e}')
+        return None

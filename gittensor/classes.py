@@ -8,6 +8,7 @@ from typing import DefaultDict, Dict, List, Optional, Set
 
 import bittensor as bt
 
+from gittensor.constants import MIN_TOKEN_SCORE_FOR_BASE_SCORE
 from gittensor.utils.utils import parse_repo_name
 from gittensor.validator.configurations.tier_config import Tier, TierConfig, TierStats
 
@@ -145,7 +146,8 @@ class PullRequest:
     title: str
     author_login: str
     merged_at: Optional[datetime]  # None for OPEN PRs
-    created_at: datetime
+    # Legacy rows may have null created_at; pioneer ordering treats nulls as last.
+    created_at: Optional[datetime]
 
     # PR state based fields
     pr_state: PRState
@@ -156,7 +158,9 @@ class PullRequest:
     base_score: float = 0.0
     issue_multiplier: float = 1.0
     open_pr_spam_multiplier: float = 1.0
-    repository_uniqueness_multiplier: float = 1.0
+    pioneer_multiplier: float = 1.0  # Persisted score multiplier for winning pioneer PRs.
+    pioneer_rank: int = 0  # Persisted per-repo pioneer rank (0 means non-pioneer).
+    is_untouched_in_lookback_window: bool = False  # Transient gate result for current scoring run.
     time_decay_multiplier: float = 1.0
     credibility_multiplier: float = 1.0
     raw_credibility: float = 1.0  # Before applying ^k scalar
@@ -188,13 +192,26 @@ class PullRequest:
         """Set the file changes for this pull request"""
         self.file_changes = file_changes
 
+    def is_pioneer_eligible(self) -> bool:
+        """Check base pioneer eligibility for this PR (history-agnostic).
+
+        Repository lookback/window checks are evaluated in scoring, where merged history is available.
+        """
+
+        return (
+            self.pr_state == PRState.MERGED
+            and self.merged_at is not None
+            and self.repository_tier_configuration is not None
+            and self.token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE
+        )
+
     def calculate_final_earned_score(self) -> float:
         """Combine base score with all multipliers."""
         multipliers = {
             'repo': self.repo_weight_multiplier,
             'issue': self.issue_multiplier,
             'spam': self.open_pr_spam_multiplier,
-            'unique': self.repository_uniqueness_multiplier,
+            'pioneer': self.pioneer_multiplier,
             'decay': self.time_decay_multiplier,
             'cred': self.credibility_multiplier,
         }

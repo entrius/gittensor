@@ -261,7 +261,9 @@ def run_scoring_simulation(
     print('\n[7/9] Finalizing scores...')
     sys.stdout.flush()
     time.sleep(0.1)
-    finalize_miner_scores(evals)
+    # No DB history in this standalone simulation; treat history as available-empty
+    # so pioneer logic still runs within the cycle.
+    finalize_miner_scores(evals, merged_history=[])
 
     # 8. Normalize & apply dynamic emissions
     print('\n[8/9] Normalizing & applying dynamic emissions...')

@@ -1,9 +1,10 @@
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Dict, List
 
 import bittensor as bt
 
-from gittensor.classes import Miner, MinerEvaluation
+from gittensor.classes import Miner, MinerEvaluation, PullRequest
 from gittensor.validator.storage.database import create_database_connection
 from gittensor.validator.storage.repository import Repository
 
@@ -83,6 +84,21 @@ class DatabaseStorage:
             self.logger.error(error_msg)
 
         return result
+
+    def get_merged_pull_request_history_by_repos(
+        self,
+        repository_full_names: List[str],
+        merged_at_from: datetime,
+        merged_at_to: datetime,
+    ) -> List[PullRequest]:
+        """Read merged PR history for pioneer inactivity gating within merge-time bounds."""
+        if not self.is_enabled() or self.repo is None:
+            return []
+        return self.repo.get_merged_pull_request_history_by_repos(
+            repository_full_names,
+            merged_at_from,
+            merged_at_to,
+        )
 
     def _log_storage_summary(self, counts: Dict[str, int]):
         """Log a summary of what was stored"""

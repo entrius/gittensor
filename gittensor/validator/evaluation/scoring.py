@@ -2,8 +2,9 @@
 # Copyright © 2025 Entrius
 
 import math
-from datetime import datetime, timezone
-from typing import Dict, Optional
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
+from typing import Dict, Optional, Tuple
 
 import bittensor as bt
 
@@ -20,13 +21,14 @@ from gittensor.constants import (
     MAX_OPEN_PR_THRESHOLD,
     MIN_TOKEN_SCORE_FOR_BASE_SCORE,
     OPEN_PR_THRESHOLD_TOKEN_SCORE,
+    PIONEER_BASE_BONUS,
+    PR_LOOKBACK_DAYS,
     SECONDS_PER_DAY,
     SECONDS_PER_HOUR,
     TIME_DECAY_GRACE_PERIOD_HOURS,
     TIME_DECAY_MIN_MULTIPLIER,
     TIME_DECAY_SIGMOID_MIDPOINT,
     TIME_DECAY_SIGMOID_STEEPNESS_SCALAR,
-    UNIQUE_PR_BOOST,
 )
 from gittensor.utils.github_api_tools import (
     FileContentPair,
@@ -48,6 +50,27 @@ from gittensor.validator.evaluation.credibility import (
 )
 from gittensor.validator.utils.load_weights import LanguageConfig, RepositoryConfig, TokenConfig
 from gittensor.validator.utils.tree_sitter_scoring import calculate_token_score_from_file_changes
+
+
+@dataclass
+class PioneerRepositoryTimeline:
+    """Chronological merged-PR timeline for one repository."""
+
+    merged_prs: list[PullRequest] = field(default_factory=list)
+    candidate_pr_numbers: set[int] = field(default_factory=set)
+
+    def add_history_pr(self, pr: PullRequest) -> None:
+        self.merged_prs.append(pr)
+
+    def add_candidate_pr(self, pr: PullRequest) -> None:
+        self.merged_prs.append(pr)
+        self.candidate_pr_numbers.add(pr.number)
+
+    def sorted_prs(self) -> list[PullRequest]:
+        return sorted(self.merged_prs, key=_pioneer_order_key)
+
+    def is_cycle_candidate(self, pr: PullRequest) -> bool:
+        return pr.number in self.candidate_pr_numbers
 
 
 def score_miner_prs(
@@ -226,25 +249,158 @@ def calculate_pr_multipliers(
         pr.credibility_multiplier = 1.0
 
 
-def count_repository_contributors(miner_evaluations: Dict[int, MinerEvaluation]) -> Dict[str, int]:
-    """
-    Count how many miners contribute to each repository and log statistics.
+def _pioneer_order_key(pr: PullRequest) -> Tuple[datetime, datetime, int, int]:
+    """Stable ordering key for pioneer event-time processing."""
+    merged_at = pr.merged_at or datetime.max.replace(tzinfo=timezone.utc)
+    created_at = pr.created_at or datetime.max.replace(tzinfo=timezone.utc)
+    return (merged_at, created_at, pr.number, pr.uid)
 
-    Returns:
-        Dict[str, int]: Dictionary mapping repository names to contributor counts
-    """
-    repo_counts: Dict[str, int] = {}
 
-    for evaluation in miner_evaluations.values():
-        for repo in evaluation.unique_repos_contributed_to:
-            repo_counts[repo] = repo_counts.get(repo, 0) + 1
+def _reset_lookback_inactivity_gate(candidates: list[PullRequest]) -> None:
+    """Default all candidates to non-untouched before gate evaluation."""
+    for pr in candidates:
+        pr.is_untouched_in_lookback_window = False
 
-    if repo_counts:
-        bt.logging.info(f'Repository contribution counts: {len(repo_counts)} total repositories')
-        for repo, count in sorted(repo_counts.items(), key=lambda x: -x[1]):
-            bt.logging.info(f'{repo}: {count}')
 
-    return repo_counts
+def _build_pioneer_timelines(
+    candidates: list[PullRequest], history: list[PullRequest]
+) -> Dict[str, PioneerRepositoryTimeline]:
+    """Build per-repo timelines from history and cycle-eligible candidates."""
+    eligible_candidates = [pr for pr in candidates if pr.is_pioneer_eligible()]
+    # Exclude cycle PRs while replaying historical merged rows.
+    candidate_keys = {(pr.repository_full_name, pr.number) for pr in candidates}
+
+    timelines_by_repo: Dict[str, PioneerRepositoryTimeline] = {}
+
+    def get_or_create_timeline(repo_full_name: str) -> PioneerRepositoryTimeline:
+        timeline = timelines_by_repo.get(repo_full_name)
+        if timeline is None:
+            timeline = PioneerRepositoryTimeline()
+            timelines_by_repo[repo_full_name] = timeline
+        return timeline
+
+    for pr in history:
+        if pr.pr_state != PRState.MERGED or pr.merged_at is None:
+            continue
+        if (pr.repository_full_name, pr.number) in candidate_keys:
+            continue
+        timeline = get_or_create_timeline(pr.repository_full_name)
+        timeline.add_history_pr(pr)
+
+    for pr in eligible_candidates:
+        timeline = get_or_create_timeline(pr.repository_full_name)
+        timeline.add_candidate_pr(pr)
+
+    return timelines_by_repo
+
+
+def _apply_lookback_inactivity_to_timeline(
+    timeline: PioneerRepositoryTimeline, lookback_delta: timedelta
+) -> None:
+    """Apply lookback inactivity gate to cycle candidates within one repo timeline."""
+    prior_repo_merge_at: datetime | None = None
+    for pr in timeline.sorted_prs():
+        if timeline.is_cycle_candidate(pr):
+            # Candidate is untouched when no prior repo merge exists inside the lookback window.
+            pr.is_untouched_in_lookback_window = (
+                prior_repo_merge_at is None or prior_repo_merge_at <= (pr.merged_at - lookback_delta)
+            )
+
+        # Any merged PR contributes to subsequent "last merge" state.
+        prior_repo_merge_at = pr.merged_at
+
+
+def _compute_lookback_inactivity_gate(candidates: list[PullRequest], history: list[PullRequest]) -> None:
+    """Set lookback inactivity gate result for candidate PRs."""
+    _reset_lookback_inactivity_gate(candidates)
+    timelines_by_repo = _build_pioneer_timelines(candidates, history)
+
+    lookback_delta = timedelta(days=PR_LOOKBACK_DAYS)
+    for timeline in timelines_by_repo.values():
+        _apply_lookback_inactivity_to_timeline(timeline, lookback_delta)
+
+
+def _rank_pioneer_candidates(candidates: list[PullRequest]) -> None:
+    """Rank pioneer candidates per repo with one representative PR per (repo, uid)."""
+    for pr in candidates:
+        pr.pioneer_rank = 0
+
+    # repo -> cycle PRs that passed lookback inactivity gate.
+    candidates_by_repo: Dict[str, list[PullRequest]] = {}
+
+    def get_or_create_repo_candidates(repo_full_name: str) -> list[PullRequest]:
+        repo_candidates = candidates_by_repo.get(repo_full_name)
+        if repo_candidates is None:
+            repo_candidates = []
+            candidates_by_repo[repo_full_name] = repo_candidates
+        return repo_candidates
+
+    for pr in candidates:
+        if not pr.is_untouched_in_lookback_window:
+            continue
+        get_or_create_repo_candidates(pr.repository_full_name).append(pr)
+
+    for repo_candidates in candidates_by_repo.values():
+        repo_candidates.sort(key=_pioneer_order_key)
+
+        representatives: list[PullRequest] = []
+        seen_uids: set[int] = set()
+        for pr in repo_candidates:
+            if pr.uid in seen_uids:
+                continue
+            seen_uids.add(pr.uid)
+            representatives.append(pr)
+
+        for rank, pr in enumerate(representatives, start=1):
+            pr.pioneer_rank = rank
+
+
+def _apply_pioneer_awards(candidates: list[PullRequest]) -> None:
+    """Apply pioneer multipliers for rank-1 repo winners."""
+    for pr in candidates:
+        pr.pioneer_multiplier = 1.0
+
+    # Reward each winning PR independently, without cross-repo decay per uid.
+    winner_multiplier = 1.0 + PIONEER_BASE_BONUS
+    for pr in candidates:
+        if pr.pioneer_rank == 1:
+            pr.pioneer_multiplier = winner_multiplier
+            bt.logging.info(
+                f'Pioneer winner | repo={pr.repository_full_name} uid={pr.uid} '
+                f'pr={pr.number} multiplier={pr.pioneer_multiplier:.2f}'
+            )
+
+
+def _get_cycle_merged_candidates(miner_evaluations: Dict[int, MinerEvaluation]) -> list[PullRequest]:
+    """Flatten merged PRs for this scoring cycle across all miners."""
+    return [pr for evaluation in miner_evaluations.values() for pr in evaluation.merged_pull_requests]
+
+
+def _reset_pioneer_fields(candidates: list[PullRequest]) -> None:
+    """Clear pioneer fields when lookback history is unavailable."""
+    for pr in candidates:
+        pr.pioneer_rank = 0
+        pr.pioneer_multiplier = 1.0
+        pr.is_untouched_in_lookback_window = False
+
+
+def apply_pioneer_mechanism(
+    miner_evaluations: Dict[int, MinerEvaluation], merged_history: list[PullRequest]
+) -> None:
+    """Apply pioneer gating, ranking, and awards to all merged PRs in cycle."""
+    cycle_candidates = _get_cycle_merged_candidates(miner_evaluations)
+
+    _compute_lookback_inactivity_gate(cycle_candidates, history=merged_history)
+    _rank_pioneer_candidates(cycle_candidates)
+    _apply_pioneer_awards(cycle_candidates)
+
+    repos_touched = {pr.repository_full_name for pr in cycle_candidates if pr.repository_full_name}
+    untouched_candidates = sum(1 for pr in cycle_candidates if pr.is_untouched_in_lookback_window)
+    winner_count = sum(1 for pr in cycle_candidates if pr.pioneer_rank == 1)
+    bt.logging.info(
+        f'Pioneer summary | repos={len(repos_touched)} candidates={len(cycle_candidates)} '
+        f'untouched={untouched_candidates} winners={winner_count} history_rows={len(merged_history)}'
+    )
 
 
 def calculate_open_pr_threshold(
@@ -304,12 +460,25 @@ def calculate_time_decay_multiplier(pr: PullRequest) -> float:
     return max(sigmoid, TIME_DECAY_MIN_MULTIPLIER)
 
 
-def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None:
-    """Finalize all miner scores: apply uniqueness multipliers, calculate totals, and deduct collateral."""
+def finalize_miner_scores(
+    miner_evaluations: Dict[int, MinerEvaluation],
+    merged_history: Optional[list[PullRequest]] = None,
+) -> None:
+    """Finalize all miner scores, including pioneer rewards, then deduct collateral.
+
+    `merged_history` semantics:
+    - None: history unavailable -> disable pioneer rewards (fail-closed)
+    - []: history available but empty -> apply pioneer against cycle-only events
+    """
     bt.logging.info('**Finalizing miner scores**')
 
-    repo_counts = count_repository_contributors(miner_evaluations)
-    total_contributing_miners = sum(1 for ev in miner_evaluations.values() if ev.unique_repos_contributed_to)
+    if merged_history is not None:
+        apply_pioneer_mechanism(miner_evaluations, merged_history=merged_history)
+    else:
+        bt.logging.warning(
+            'Pioneer rewards disabled: merged PR history unavailable for lookback gate.'
+        )
+        _reset_pioneer_fields(_get_cycle_merged_candidates(miner_evaluations))
 
     for uid, evaluation in miner_evaluations.items():
         if not evaluation:
@@ -348,10 +517,6 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
 
         # Process merged PRs
         for pr in evaluation.merged_pull_requests:
-            pr.repository_uniqueness_multiplier = calculate_uniqueness_multiplier(
-                pr.repository_full_name, repo_counts, total_contributing_miners
-            )
-
             # Apply spam multiplier (calculated once per miner based on unlocked tiers)
             pr.open_pr_spam_multiplier = spam_multiplier
 
@@ -429,18 +594,6 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
         )
 
     bt.logging.info('Finalization complete.')
-
-
-def calculate_uniqueness_multiplier(
-    repo_full_name: str, repo_counts: Dict[str, int], total_contributing_miners: int
-) -> float:
-    """Calculate repository uniqueness multiplier based on how many miners contribute to a repo."""
-    if total_contributing_miners == 0:
-        return 1.0
-    repo_count = repo_counts.get(repo_full_name, 0)
-    uniqueness_score = (total_contributing_miners - repo_count + 1) / total_contributing_miners
-    return 1.0 + (uniqueness_score * UNIQUE_PR_BOOST)
-
 
 def calculate_issue_multiplier(pr: PullRequest) -> float:
     """
@@ -541,7 +694,7 @@ def calculate_open_pr_collateral_score(pr: PullRequest) -> float:
 
     Applicable multipliers: repo_weight, issue
     NOT applicable: time_decay (merge-based), credibility_multiplier (merge-based),
-                    uniqueness (cross-miner), open_pr_spam (not for collateral)
+                    pioneer (merged-only), open_pr_spam (not for collateral)
     """
     from math import prod
 

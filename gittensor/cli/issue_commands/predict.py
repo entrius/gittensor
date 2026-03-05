@@ -180,17 +180,7 @@ def issues_predict(
             print_warning('Prediction cancelled')
             return
 
-    # 7) Interactive mode: verify miner first to avoid wasting manual input.
-    if is_interactive_mode:
-        _resolve_registered_miner_hotkey(
-            wallet_name=effective_wallet,
-            wallet_hotkey=effective_hotkey,
-            ws_endpoint=ws_endpoint,
-            contract_addr=contract_addr,
-            as_json=as_json,
-        )
-
-    # 8) Collect predictions by mode; validate PR membership for non-interactive modes.
+    # 7) Collect predictions by mode; validate PR membership for non-interactive modes.
     try:
         if is_interactive_mode:
             predictions = _collect_predictions_interactive(pull_requests)
@@ -200,16 +190,6 @@ def issues_predict(
     except (click.ClickException, click.BadParameter) as e:
         handle_exception(as_json, str(e))
 
-    # 9) Single/batch modes: verify miner after prediction payload validation.
-    if not is_interactive_mode:
-        _resolve_registered_miner_hotkey(
-            wallet_name=effective_wallet,
-            wallet_hotkey=effective_hotkey,
-            ws_endpoint=ws_endpoint,
-            contract_addr=contract_addr,
-            as_json=as_json,
-        )
-
     payload = {
         'issue_id': issue_id,
         'repository': repo_full_name,
@@ -217,20 +197,8 @@ def issues_predict(
         'github_access_token': '***',
     }
 
-    # 10) Emit machine output or interactive confirmation flow.
-    if as_json:
-        emit_json(payload, pretty=True)
-        results = broadcast_predictions(
-            payload=payload,
-            wallet_name=effective_wallet,
-            wallet_hotkey=effective_hotkey,
-            ws_endpoint=ws_endpoint,
-            netuid=netuid,
-        )
-        emit_json(results, pretty=True)
-        return
-
-    if is_interactive_mode:
+    # 8) Confirmation prompt (interactive only).
+    if not as_json and is_interactive_mode:
         lines = format_prediction_lines(predictions)
         confirm_panel(lines, title='Prediction Confirmation')
         skip_confirm = yes or not _is_interactive()
@@ -238,15 +206,35 @@ def issues_predict(
             print_warning('Prediction cancelled')
             return
 
-    success_panel(json_mod.dumps(payload, indent=2), title='Prediction Payload')
-    results = broadcast_predictions(
-        payload=payload,
+    # 9) Verify miner registration before broadcasting.
+    _resolve_registered_miner_hotkey(
         wallet_name=effective_wallet,
         wallet_hotkey=effective_hotkey,
         ws_endpoint=ws_endpoint,
-        netuid=netuid,
+        contract_addr=contract_addr,
+        as_json=as_json,
     )
-    _print_broadcast_results(results)
+
+    # 10) Show payload and broadcast to validators.
+    if as_json:
+        emit_json(payload, pretty=True)
+
+    if not as_json:
+        success_panel(json_mod.dumps(payload, indent=2), title='Prediction Synapse')
+
+    with loading_context('Broadcasting predictions to validators...', as_json):
+        results = broadcast_predictions(
+            payload=payload,
+            wallet_name=effective_wallet,
+            wallet_hotkey=effective_hotkey,
+            ws_endpoint=ws_endpoint,
+            netuid=netuid,
+        )
+
+    if as_json:
+        emit_json(results, pretty=True)
+    else:
+        _print_broadcast_results(results)
 
 
 def validate_probability(value: float, param_hint: str = 'probability') -> float:

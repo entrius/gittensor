@@ -4,11 +4,8 @@
 
 Each validator stores predictions independently. One row per miner per PR.
 Thread-safe via WAL mode — the axon handler writes while the scoring loop reads.
-DB path is configurable via MP_DB_PATH env var; defaults to <repo>/gt-merge-preds.db
-locally and /app/data/gt-merge-preds.db in Docker (persisted via named volume).
 """
 
-import os
 import sqlite3
 import threading
 from datetime import datetime, timezone
@@ -18,18 +15,14 @@ from typing import Optional
 import bittensor as bt
 
 from gittensor.constants import PREDICTIONS_COOLDOWN_SECONDS
-
-DEFAULT_DB_PATH = os.environ.get(
-    'MP_DB_PATH',
-    str(Path(__file__).resolve().parents[3] / 'gt-merge-preds.db'),
-)
+from gittensor.validator.utils.config import MP_DB_PATH
 
 
 class PredictionStorage:
     """Thread-safe SQLite storage for merge predictions."""
 
     def __init__(self, db_path: Optional[str] = None):
-        self._db_path = db_path or DEFAULT_DB_PATH
+        self._db_path = db_path or MP_DB_PATH
         Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
         self._init_db()

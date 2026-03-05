@@ -170,8 +170,8 @@ def _log_issue_settlement(
             sum(p.prediction for p in merged_preds) / len(merged_preds) if merged_preds else 0.0
         )
         bt.logging.info(
-            f'    uid={uid}  (gh:{gh_id})   PRs predicted: {len(preds)}   '
-            f'avg on merged PR#{merged_pr_number}: {avg_on_merged:.2f}'
+            f'    UID: {uid}  (gh: {gh_id})   PRs predicted: {len(preds)}   '
+            f'avg on merged PR #{merged_pr_number}: {avg_on_merged:.2f}'
         )
 
     # Scoring results
@@ -182,7 +182,7 @@ def _log_issue_settlement(
             rank_str = f'rank #{r["rank"]}' if r['rank'] > 0 else 'unranked'
             marker = '\u2605' if r == sorted_results[0] else ' '
             bt.logging.info(
-                f'    {marker} uid={r["uid"]}  score={r["score"]:.4f}  '
+                f'    {marker} UID: {r["uid"]}  score: {r["score"]:.4f}  '
                 f'ema: {r["previous_ema"]:.4f} \u2192 {r["new_ema"]:.4f}  ({rank_str})'
             )
 
@@ -193,6 +193,7 @@ def _settle_issue(
     issue,
     issue_label: str,
     merged_pr_number: int,
+    settlement_reason: str = 'completed',
 ) -> bool:
     """Full settlement pipeline for one issue.
 
@@ -204,6 +205,13 @@ def _settle_issue(
     predictions = mp_storage.get_predictions_for_issue(issue.id)
     if not predictions:
         return False
+
+    unique_prs = {p['pr_number'] for p in predictions}
+    bt.logging.info(
+        f'--- Settling {settlement_reason} issue ID: {issue.id}, '
+        f'{issue.repository_full_name}#{issue.issue_number}, '
+        f'{len(unique_prs)} PRs submitted (merged PR #{merged_pr_number}) ---'
+    )
 
     settlement_time = datetime.now(timezone.utc)
 
@@ -325,11 +333,6 @@ async def merge_predictions(
                     voided += 1
                     continue
 
-                bt.logging.info(
-                    f'--- Settling completed issue ID {issue.id}, {issue.repository_full_name}'
-                    f'#{issue.issue_number} (merged PR #{merged_pr_number}) ---'
-                )
-
                 if _settle_issue(self.mp_storage, self.metagraph, issue, issue_label, merged_pr_number):
                     completed_settled += 1
                 else:
@@ -361,11 +364,7 @@ async def merge_predictions(
 
                 if merged_pr_number:
                     # Cancelled but PR was merged (solver not in subnet) — still score
-                    bt.logging.info(
-                        f'--- Settling cancelled issue ID {issue.id}, {issue.repository_full_name}'
-                        f'#{issue.issue_number} (merged PR #{merged_pr_number}, solver not in subnet) ---'
-                    )
-                    if _settle_issue(self.mp_storage, self.metagraph, issue, issue_label, merged_pr_number):
+                    if _settle_issue(self.mp_storage, self.metagraph, issue, issue_label, merged_pr_number, settlement_reason='cancelled'):
                         cancelled_settled += 1
                     else:
                         skipped += 1

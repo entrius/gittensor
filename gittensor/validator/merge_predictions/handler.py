@@ -11,9 +11,9 @@ from typing import TYPE_CHECKING, Tuple
 import bittensor as bt
 
 from gittensor.synapses import PredictionSynapse
-from gittensor.validator.utils.github_validation import validate_github_credentials
 from gittensor.validator.merge_predictions.checks import check_issue_active, check_prs_open
 from gittensor.validator.merge_predictions.validation import validate_prediction_values
+from gittensor.validator.utils.github_validation import validate_github_credentials
 
 if TYPE_CHECKING:
     from neurons.validator import Validator
@@ -65,9 +65,7 @@ async def handle_prediction(validator: 'Validator', synapse: PredictionSynapse) 
             return synapse
 
         # Total probability check (existing + new, excluding this PR if it's an update)
-        existing_total = mp_storage.get_miner_total_for_issue(
-            uid, miner_hotkey, synapse.issue_id, exclude_pr=pr_number
-        )
+        existing_total = mp_storage.get_miner_total_for_issue(uid, miner_hotkey, synapse.issue_id, exclude_pr=pr_number)
         if existing_total + pred_value > 1.0:
             synapse.accepted = False
             synapse.rejection_reason = (
@@ -93,9 +91,10 @@ async def handle_prediction(validator: 'Validator', synapse: PredictionSynapse) 
             variance_at_prediction=variance,
         )
 
-    bt.logging.info(
-        f'Prediction stored: uid={uid}, issue={synapse.issue_id}, '
-        f'PRs={[pr for pr, _ in stored_prs]}, github_id={github_id}'
+    bt.logging.success(
+        f'Merge prediction stored — UID: {uid}, ID: {synapse.issue_id}, '
+        f'issue: #{issue.issue_number}, repo: {synapse.repository}, '
+        f'PRs: {[pr for pr, _ in stored_prs]}, github_id: {github_id}'
     )
 
     synapse.accepted = True

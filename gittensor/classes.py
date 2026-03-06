@@ -8,6 +8,7 @@ from typing import DefaultDict, Dict, List, Optional, Set
 
 import bittensor as bt
 
+from gittensor.constants import MIN_TOKEN_SCORE_FOR_BASE_SCORE
 from gittensor.utils.utils import parse_repo_name
 from gittensor.validator.oss_contributions.tier_config import Tier, TierConfig, TierStats
 
@@ -156,7 +157,8 @@ class PullRequest:
     base_score: float = 0.0
     issue_multiplier: float = 1.0
     open_pr_spam_multiplier: float = 1.0
-    repository_uniqueness_multiplier: float = 1.0
+    pioneer_dividend: float = 0.0  # Additive bonus for pioneering a repo
+    pioneer_rank: int = 0  # 0 = not eligible, 1 = pioneer, 2+ = follower position
     time_decay_multiplier: float = 1.0
     credibility_multiplier: float = 1.0
     raw_credibility: float = 1.0  # Before applying ^k scalar
@@ -188,13 +190,24 @@ class PullRequest:
         """Set the file changes for this pull request"""
         self.file_changes = file_changes
 
+    def is_pioneer_eligible(self) -> bool:
+        """Check if this PR qualifies for pioneer consideration.
+
+        A PR is eligible if it is merged, has a tier configuration,
+        and meets the minimum token score quality gate.
+        """
+        return (
+            self.repository_tier_configuration is not None
+            and self.merged_at is not None
+            and self.token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE
+        )
+
     def calculate_final_earned_score(self) -> float:
-        """Combine base score with all multipliers."""
+        """Combine base score with all multipliers. Pioneer dividend is added separately after."""
         multipliers = {
             'repo': self.repo_weight_multiplier,
             'issue': self.issue_multiplier,
             'spam': self.open_pr_spam_multiplier,
-            'unique': self.repository_uniqueness_multiplier,
             'decay': self.time_decay_multiplier,
             'cred': self.credibility_multiplier,
         }
@@ -202,10 +215,12 @@ class PullRequest:
         self.earned_score = self.base_score * prod(multipliers.values())
 
         # Log all multipliers (credibility shows ^k format)
-        mult_str = ' × '.join(
-            f'cred={self.raw_credibility:.2f}^{self.credibility_scalar}' if k == 'cred' else f'{k}={v:.2f}'
-            for k, v in multipliers.items()
-        )
+        def _format_multiplier(k: str, v: float) -> str:
+            if k == 'cred':
+                return f'cred={self.raw_credibility:.2f}^{self.credibility_scalar}'
+            return f'{k}={v:.2f}'
+
+        mult_str = ' × '.join(_format_multiplier(k, v) for k, v in multipliers.items())
         bt.logging.info(
             f'├─ {self.pr_state.value} PR #{self.number} ({self.repository_full_name}) → {self.earned_score:.2f}'
         )

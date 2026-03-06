@@ -15,8 +15,8 @@ WANDB_VALIDATOR_NAME = os.getenv('WANDB_VALIDATOR_NAME', 'vali')
 # optional env vars
 STORE_DB_RESULTS = os.getenv('STORE_DB_RESULTS', 'false').lower() == 'true'
 
-# Merge predictions DB path — defaults to gt-merge-preds.db in the repo root
-MP_DB_PATH = str(Path(__file__).resolve().parents[3] / 'gt-merge-preds.db')
+# Merge predictions DB path — defaults to /app/data/ so it lands inside the Docker volume
+MP_DB_PATH = os.getenv('MP_DB_PATH', str(Path(__file__).resolve().parents[3] / 'data' / 'gt-merge-preds.db'))
 
 # log values
 bt.logging.info(f'VALIDATOR_WAIT: {VALIDATOR_WAIT}')

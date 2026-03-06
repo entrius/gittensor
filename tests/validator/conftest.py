@@ -88,6 +88,8 @@ class PRBuilder:
         repo: Optional[str] = None,
         unique_repo: bool = False,
         token_score: Optional[float] = None,  # Auto-calculated from tier if None
+        uid: int = 0,
+        merged_at: Optional[datetime] = None,
     ) -> PullRequest:
         """Create a mock PullRequest with the given parameters.
 
@@ -110,15 +112,18 @@ class PRBuilder:
         if repo is None:
             repo = self._next_repo() if unique_repo else 'test/repo'
 
+        if merged_at is None:
+            merged_at = datetime.now(timezone.utc) if state == PRState.MERGED else None
+
         return PullRequest(
             number=number,
             repository_full_name=repo,
-            uid=0,
-            hotkey='test_hotkey',
-            github_id='12345',
+            uid=uid,
+            hotkey=f'hotkey_{uid}',
+            github_id=str(uid),
             title=f'Test PR #{number}',
-            author_login='testuser',
-            merged_at=datetime.now(timezone.utc) if state == PRState.MERGED else None,
+            author_login=f'user_{uid}',
+            merged_at=merged_at,
             created_at=datetime.now(timezone.utc),
             pr_state=state,
             repository_tier_configuration=tier,

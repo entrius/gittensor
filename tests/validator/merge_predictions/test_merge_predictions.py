@@ -213,8 +213,8 @@ class TestPredictionHandler:
 
     @patch('gittensor.validator.merge_predictions.handler.validate_prediction_values', return_value=None)
     @patch('gittensor.validator.merge_predictions.handler.validate_github_credentials', return_value=('gh_alice', None))
-    @patch('gittensor.validator.merge_predictions.handler.check_prs_open', return_value=None)
-    @patch('gittensor.validator.merge_predictions.handler.check_issue_active', return_value=None)
+    @patch('gittensor.validator.merge_predictions.handler.check_prs_open', return_value=(None, {1}))
+    @patch('gittensor.validator.merge_predictions.handler.check_issue_active', return_value=(None, MagicMock(issue_number=10)))
     def test_successful_prediction_stored(self, _cia, _cpo, _vgc, _vpv, mock_validator, make_synapse):
         from gittensor.validator.merge_predictions.handler import handle_prediction
 
@@ -224,7 +224,7 @@ class TestPredictionHandler:
         rows = mock_validator.mp_storage.get_predictions_for_issue(1)
         assert len(rows) == 1
 
-    @patch('gittensor.validator.merge_predictions.handler.check_issue_active', return_value='Issue not found')
+    @patch('gittensor.validator.merge_predictions.handler.check_issue_active', return_value=('Issue not found', None))
     def test_reject_inactive_issue(self, _cia, mock_validator, make_synapse):
         from gittensor.validator.merge_predictions.handler import handle_prediction
 
@@ -233,8 +233,8 @@ class TestPredictionHandler:
         assert result.accepted is False
         assert 'Issue not found' in result.rejection_reason
 
-    @patch('gittensor.validator.merge_predictions.handler.check_prs_open', return_value='PR #1 is not open')
-    @patch('gittensor.validator.merge_predictions.handler.check_issue_active', return_value=None)
+    @patch('gittensor.validator.merge_predictions.handler.check_prs_open', return_value=('PR #1 is not open', set()))
+    @patch('gittensor.validator.merge_predictions.handler.check_issue_active', return_value=(None, MagicMock(issue_number=10)))
     def test_reject_closed_pr(self, _cia, _cpo, mock_validator, make_synapse):
         from gittensor.validator.merge_predictions.handler import handle_prediction
 
@@ -244,8 +244,8 @@ class TestPredictionHandler:
         assert 'not open' in result.rejection_reason
 
     @patch('gittensor.validator.merge_predictions.handler.validate_github_credentials', return_value=(None, 'Bad PAT'))
-    @patch('gittensor.validator.merge_predictions.handler.check_prs_open', return_value=None)
-    @patch('gittensor.validator.merge_predictions.handler.check_issue_active', return_value=None)
+    @patch('gittensor.validator.merge_predictions.handler.check_prs_open', return_value=(None, {1}))
+    @patch('gittensor.validator.merge_predictions.handler.check_issue_active', return_value=(None, MagicMock(issue_number=10)))
     def test_reject_invalid_github_creds(self, _cia, _cpo, _vgc, mock_validator, make_synapse):
         from gittensor.validator.merge_predictions.handler import handle_prediction
 
@@ -256,8 +256,8 @@ class TestPredictionHandler:
 
     @patch('gittensor.validator.merge_predictions.handler.validate_prediction_values', return_value='Values bad')
     @patch('gittensor.validator.merge_predictions.handler.validate_github_credentials', return_value=('gh_alice', None))
-    @patch('gittensor.validator.merge_predictions.handler.check_prs_open', return_value=None)
-    @patch('gittensor.validator.merge_predictions.handler.check_issue_active', return_value=None)
+    @patch('gittensor.validator.merge_predictions.handler.check_prs_open', return_value=(None, {1}))
+    @patch('gittensor.validator.merge_predictions.handler.check_issue_active', return_value=(None, MagicMock(issue_number=10)))
     def test_reject_invalid_values(self, _cia, _cpo, _vgc, _vpv, mock_validator, make_synapse):
         from gittensor.validator.merge_predictions.handler import handle_prediction
 
@@ -268,8 +268,8 @@ class TestPredictionHandler:
 
     @patch('gittensor.validator.merge_predictions.handler.validate_prediction_values', return_value=None)
     @patch('gittensor.validator.merge_predictions.handler.validate_github_credentials', return_value=('gh_alice', None))
-    @patch('gittensor.validator.merge_predictions.handler.check_prs_open', return_value=None)
-    @patch('gittensor.validator.merge_predictions.handler.check_issue_active', return_value=None)
+    @patch('gittensor.validator.merge_predictions.handler.check_prs_open', return_value=(None, {1}))
+    @patch('gittensor.validator.merge_predictions.handler.check_issue_active', return_value=(None, MagicMock(issue_number=10)))
     def test_reject_cooldown(self, _cia, _cpo, _vgc, _vpv, mock_validator, make_synapse):
         from gittensor.validator.merge_predictions.handler import handle_prediction
 
@@ -285,8 +285,8 @@ class TestPredictionHandler:
 
     @patch('gittensor.validator.merge_predictions.handler.validate_prediction_values', return_value=None)
     @patch('gittensor.validator.merge_predictions.handler.validate_github_credentials', return_value=('gh_alice', None))
-    @patch('gittensor.validator.merge_predictions.handler.check_prs_open', return_value=None)
-    @patch('gittensor.validator.merge_predictions.handler.check_issue_active', return_value=None)
+    @patch('gittensor.validator.merge_predictions.handler.check_prs_open', return_value=(None, {1, 2}))
+    @patch('gittensor.validator.merge_predictions.handler.check_issue_active', return_value=(None, MagicMock(issue_number=10)))
     def test_reject_total_exceeds_one(self, _cia, _cpo, _vgc, _vpv, mock_validator, make_synapse):
         from gittensor.validator.merge_predictions.handler import handle_prediction
 

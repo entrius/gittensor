@@ -11,6 +11,7 @@ def test_predict_interactive_continue_cancel_skips_miner_validation(cli_root, ru
     with (
         patch('gittensor.cli.issue_commands.predict.get_contract_address', return_value='0xabc'),
         patch('gittensor.cli.issue_commands.predict.resolve_network', return_value=('ws://x', 'test')),
+        patch('gittensor.cli.issue_commands.predict.resolve_netuid_from_contract', return_value=1),
         patch('gittensor.cli.issue_commands.predict.fetch_issue_from_contract', return_value=sample_issue),
         patch('gittensor.cli.issue_commands.predict.fetch_open_issue_pull_requests', return_value=sample_prs),
         patch('gittensor.cli.issue_commands.predict._is_interactive', return_value=True),
@@ -32,15 +33,16 @@ def test_predict_json_success_payload_schema(cli_root, runner, sample_issue, sam
     with (
         patch('gittensor.cli.issue_commands.predict.get_contract_address', return_value='0xabc'),
         patch('gittensor.cli.issue_commands.predict.resolve_network', return_value=('ws://x', 'test')),
+        patch('gittensor.cli.issue_commands.predict.resolve_netuid_from_contract', return_value=1),
         patch('gittensor.cli.issue_commands.predict.fetch_issue_from_contract', return_value=sample_issue),
         patch('gittensor.cli.issue_commands.predict.fetch_open_issue_pull_requests', return_value=sample_prs),
         patch(
             'gittensor.cli.issue_commands.predict._resolve_registered_miner_hotkey',
             return_value='5FakeHotkey123',
         ),
-        patch('gittensor.cli.issue_commands.predict.broadcast_predictions_stub') as mock_broadcast_stub,
+        patch('gittensor.cli.issue_commands.predict.broadcast_predictions') as mock_broadcast_stub,
     ):
-        mock_broadcast_stub.side_effect = lambda payload: payload
+        mock_broadcast_stub.return_value = {'issue_id': 42, 'repository': 'entrius/gittensor', 'predictions': {'101': 0.7}}
         result = runner.invoke(
             cli_root,
             ['issues', 'predict', '--id', '42', '--pr', '101', '--probability', '0.7', '--json'],
@@ -49,11 +51,12 @@ def test_predict_json_success_payload_schema(cli_root, runner, sample_issue, sam
 
     assert result.exit_code == 0
     mock_broadcast_stub.assert_called_once()
-    payload = json.loads(result.output)
-    assert set(payload.keys()) == {'issue_id', 'repository', 'predictions'}
+    call_kwargs = mock_broadcast_stub.call_args
+    payload = call_kwargs.kwargs['payload']
+    assert {'issue_id', 'repository', 'predictions'} <= set(payload.keys())
     assert payload['issue_id'] == 42
     assert payload['repository'] == 'entrius/gittensor'
-    assert {int(k): v for k, v in payload['predictions'].items()} == {101: 0.7}
+    assert payload['predictions'] == {101: 0.7}
 
 
 def test_predict_json_requires_non_interactive_inputs(runner, cli_root):
@@ -108,6 +111,7 @@ def test_predict_rejects_pr_not_in_open_set_before_miner_validation(cli_root, ru
     with (
         patch('gittensor.cli.issue_commands.predict.get_contract_address', return_value='0xabc'),
         patch('gittensor.cli.issue_commands.predict.resolve_network', return_value=('ws://x', 'test')),
+        patch('gittensor.cli.issue_commands.predict.resolve_netuid_from_contract', return_value=1),
         patch('gittensor.cli.issue_commands.predict.fetch_issue_from_contract', return_value=sample_issue),
         patch('gittensor.cli.issue_commands.predict.fetch_open_issue_pull_requests', return_value=sample_prs),
         patch('gittensor.cli.issue_commands.predict._resolve_registered_miner_hotkey') as mock_resolve_miner,

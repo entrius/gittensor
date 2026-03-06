@@ -21,10 +21,10 @@ from gittensor.validator.utils.load_weights import (
 )
 
 if TYPE_CHECKING:
-    from neurons.base.validator import BaseValidatorNeuron
+    from neurons.validator import Validator
 
 
-async def forward(self: 'BaseValidatorNeuron') -> None:
+async def forward(self: 'Validator') -> None:
     """Execute the validator's forward pass.
 
     Performs the core validation cycle every VALIDATOR_STEPS_INTERVAL steps:

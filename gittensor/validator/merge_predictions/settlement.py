@@ -23,7 +23,6 @@ import bittensor as bt
 from gittensor.classes import MinerEvaluation
 from gittensor.utils.github_api_tools import check_github_issue_closed, get_pr_open_times
 from gittensor.validator.issue_competitions.contract_client import IssueCompetitionContractClient, IssueStatus
-from gittensor.validator.merge_predictions.mp_storage import PredictionStorage
 from gittensor.validator.merge_predictions.scoring import (
     MinerIssueScore,
     PrOutcome,
@@ -36,12 +35,19 @@ from gittensor.validator.utils.config import GITTENSOR_VALIDATOR_PAT
 from gittensor.validator.utils.issue_competitions import get_contract_address
 
 if TYPE_CHECKING:
-    from neurons.base.validator import BaseValidatorNeuron
+    from neurons.validator import Validator
 
 
 # =============================================================================
 # Helper functions
 # =============================================================================
+
+
+def db_storage_void(validator: 'Validator', issue_id: int) -> None:
+    """Best-effort mirror of a voided issue to Postgres."""
+    if validator.db_storage:
+        now = datetime.now(timezone.utc).isoformat()
+        validator.db_storage.store_merge_settled_issue(issue_id, 'voided', None, now)
 
 
 def _build_outcomes(
@@ -62,9 +68,7 @@ def _build_outcomes(
         outcome_value = 1.0 if pr_num == merged_pr_number else 0.0
         pr_open_time = pr_open_times.get(pr_num)
         if pr_open_time is None:
-            pr_pred_times = [
-                datetime.fromisoformat(p['timestamp']) for p in predictions if p['pr_number'] == pr_num
-            ]
+            pr_pred_times = [datetime.fromisoformat(p['timestamp']) for p in predictions if p['pr_number'] == pr_num]
             pr_open_time = min(pr_pred_times) if pr_pred_times else settlement_time
 
         outcomes.append(PrOutcome(pr_number=pr_num, outcome=outcome_value, pr_open_time=pr_open_time))
@@ -87,9 +91,7 @@ def _group_miner_predictions(
     for p in predictions:
         uid = p['uid']
         if uid >= len(metagraph.hotkeys) or metagraph.hotkeys[uid] != p['hotkey']:
-            bt.logging.debug(
-                f'Merge predictions: skipping deregistered miner uid={uid} hotkey={p["hotkey"][:12]}...'
-            )
+            bt.logging.debug(f'Merge predictions: skipping deregistered miner uid={uid} hotkey={p["hotkey"][:12]}...')
             continue
 
         all_miners_predictions[uid].append(
@@ -106,7 +108,7 @@ def _group_miner_predictions(
 
 
 def _score_and_update_emas(
-    mp_storage: PredictionStorage,
+    validator: 'Validator',
     miners_preds: dict[int, list[PrPrediction]],
     uid_to_github_id: dict[int, str],
     outcomes: list[PrOutcome],
@@ -115,6 +117,7 @@ def _score_and_update_emas(
     order_ranks: dict[int, int],
 ) -> list[dict]:
     """Score each miner and update EMA. Returns list of result dicts for logging."""
+    mp_storage = validator.mp_storage
     results = []
 
     for uid, miner_preds in miners_preds.items():
@@ -136,15 +139,22 @@ def _score_and_update_emas(
         new_ema = update_ema(issue_score.issue_score, previous_ema)
         mp_storage.update_ema(github_id, new_ema)
 
-        results.append({
-            'uid': uid,
-            'github_id': github_id,
-            'score': issue_score.issue_score,
-            'previous_ema': previous_ema,
-            'new_ema': new_ema,
-            'rank': order_ranks.get(uid, 0),
-            'prs_predicted': len(miner_preds),
-        })
+        # Mirror EMA to Postgres
+        if validator.db_storage:
+            now = datetime.now(timezone.utc).isoformat()
+            validator.db_storage.store_merge_prediction_ema(github_id, new_ema, 1, now)
+
+        results.append(
+            {
+                'uid': uid,
+                'github_id': github_id,
+                'score': issue_score.issue_score,
+                'previous_ema': previous_ema,
+                'new_ema': new_ema,
+                'rank': order_ranks.get(uid, 0),
+                'prs_predicted': len(miner_preds),
+            }
+        )
 
     return results
 
@@ -159,16 +169,12 @@ def _log_issue_settlement(
     """Rich per-issue logging block."""
     # Submission summary
     total_submissions = sum(len(preds) for preds in all_miners_predictions.values())
-    bt.logging.info(
-        f'  {total_submissions} submissions from {len(all_miners_predictions)} miners:'
-    )
+    bt.logging.info(f'  {total_submissions} submissions from {len(all_miners_predictions)} miners:')
 
     for uid, preds in all_miners_predictions.items():
         gh_id = uid_to_github_id.get(uid, '?')
         merged_preds = [p for p in preds if p.pr_number == merged_pr_number]
-        avg_on_merged = (
-            sum(p.prediction for p in merged_preds) / len(merged_preds) if merged_preds else 0.0
-        )
+        avg_on_merged = sum(p.prediction for p in merged_preds) / len(merged_preds) if merged_preds else 0.0
         bt.logging.info(
             f'    UID: {uid}  (gh: {gh_id})   PRs predicted: {len(preds)}   '
             f'avg on merged PR #{merged_pr_number}: {avg_on_merged:.2f}'
@@ -188,8 +194,7 @@ def _log_issue_settlement(
 
 
 def _settle_issue(
-    mp_storage: PredictionStorage,
-    metagraph,
+    validator: 'Validator',
     issue,
     issue_label: str,
     merged_pr_number: int,
@@ -202,6 +207,8 @@ def _settle_issue(
 
     Returns True if settled successfully.
     """
+    mp_storage = validator.mp_storage
+
     predictions = mp_storage.get_predictions_for_issue(issue.id)
     if not predictions:
         return False
@@ -224,12 +231,12 @@ def _settle_issue(
     if merged_pr_number not in predicted_pr_numbers:
         predicted_pr_numbers.append(merged_pr_number)
 
-    pr_open_times = get_pr_open_times(
-        issue.repository_full_name, predicted_pr_numbers, GITTENSOR_VALIDATOR_PAT
-    )
+    pr_open_times = get_pr_open_times(issue.repository_full_name, predicted_pr_numbers, GITTENSOR_VALIDATOR_PAT)
 
-    outcomes = _build_outcomes(predictions, merged_pr_number, issue.repository_full_name, pr_open_times, settlement_time)
-    all_miners_predictions, uid_to_github_id = _group_miner_predictions(predictions, metagraph)
+    outcomes = _build_outcomes(
+        predictions, merged_pr_number, issue.repository_full_name, pr_open_times, settlement_time
+    )
+    all_miners_predictions, uid_to_github_id = _group_miner_predictions(predictions, validator.metagraph)
 
     if not all_miners_predictions:
         bt.logging.debug(f'Merge predictions: no active miners had predictions for {issue_label}')
@@ -240,8 +247,13 @@ def _settle_issue(
     order_ranks = compute_merged_pr_order_ranks(all_miners_predictions, merged_pr_number)
 
     miner_results = _score_and_update_emas(
-        mp_storage, all_miners_predictions, uid_to_github_id,
-        outcomes, settlement_time, peak_variance_time, order_ranks,
+        validator,
+        all_miners_predictions,
+        uid_to_github_id,
+        outcomes,
+        settlement_time,
+        peak_variance_time,
+        order_ranks,
     )
 
     _log_issue_settlement(issue_label, merged_pr_number, all_miners_predictions, uid_to_github_id, miner_results)
@@ -250,6 +262,11 @@ def _settle_issue(
     bt.logging.info(f'  Predictions deleted ({rows_deleted} rows)')
 
     mp_storage.mark_issue_settled(issue.id, 'scored', merged_pr_number)
+
+    # Mirror settlement + delete to Postgres
+    if validator.db_storage:
+        now = datetime.now(timezone.utc).isoformat()
+        validator.db_storage.store_merge_settled_issue(issue.id, 'scored', merged_pr_number, now)
 
     return True
 
@@ -260,7 +277,7 @@ def _settle_issue(
 
 
 async def merge_predictions(
-    self: 'BaseValidatorNeuron',
+    self: 'Validator',
     miner_evaluations: Dict[int, MinerEvaluation],
 ) -> None:
     """Settle merge predictions for COMPLETED and CANCELLED issues.
@@ -330,10 +347,11 @@ async def merge_predictions(
                         f'{rows_deleted} predictions deleted, no EMA impact'
                     )
                     self.mp_storage.mark_issue_settled(issue.id, 'voided')
+                    db_storage_void(self, issue.id)
                     voided += 1
                     continue
 
-                if _settle_issue(self.mp_storage, self.metagraph, issue, issue_label, merged_pr_number):
+                if _settle_issue(self, issue, issue_label, merged_pr_number):
                     completed_settled += 1
                 else:
                     skipped += 1
@@ -364,7 +382,7 @@ async def merge_predictions(
 
                 if merged_pr_number:
                     # Cancelled but PR was merged (solver not in subnet) — still score
-                    if _settle_issue(self.mp_storage, self.metagraph, issue, issue_label, merged_pr_number, settlement_reason='cancelled'):
+                    if _settle_issue(self, issue, issue_label, merged_pr_number, settlement_reason='cancelled'):
                         cancelled_settled += 1
                     else:
                         skipped += 1
@@ -377,6 +395,7 @@ async def merge_predictions(
                         f'{rows_deleted} predictions deleted, no EMA impact'
                     )
                     self.mp_storage.mark_issue_settled(issue.id, 'voided')
+                    db_storage_void(self, issue.id)
                     voided += 1
 
             except Exception as e:

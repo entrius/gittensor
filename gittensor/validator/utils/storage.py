@@ -84,6 +84,51 @@ class DatabaseStorage:
 
         return result
 
+    def store_merge_prediction(
+        self, uid: int, hotkey: str, github_id: str, issue_id: int,
+        repository: str, pr_number: int, prediction: float,
+        variance_at_prediction: float, timestamp: str,
+    ) -> bool:
+        if not self.is_enabled():
+            return False
+        try:
+            return self.repo.store_merge_prediction(
+                uid, hotkey, github_id, issue_id, repository,
+                pr_number, prediction, variance_at_prediction, timestamp,
+            )
+        except Exception as e:
+            self.logger.warning(f'Postgres merge prediction write failed (non-fatal): {e}')
+            return False
+
+    def store_merge_prediction_ema(self, github_id: str, ema_score: float, rounds: int, updated_at: str) -> bool:
+        if not self.is_enabled():
+            return False
+        try:
+            return self.repo.store_merge_prediction_ema(github_id, ema_score, rounds, updated_at)
+        except Exception as e:
+            self.logger.warning(f'Postgres merge prediction EMA write failed (non-fatal): {e}')
+            return False
+
+    def store_merge_settled_issue(
+        self, issue_id: int, outcome: str, merged_pr_number: int | None, settled_at: str,
+    ) -> bool:
+        if not self.is_enabled():
+            return False
+        try:
+            return self.repo.store_merge_settled_issue(issue_id, outcome, merged_pr_number, settled_at)
+        except Exception as e:
+            self.logger.warning(f'Postgres merge settled issue write failed (non-fatal): {e}')
+            return False
+
+    def delete_merge_predictions_for_issue(self, issue_id: int) -> bool:
+        if not self.is_enabled():
+            return False
+        try:
+            return self.repo.delete_merge_predictions_for_issue(issue_id)
+        except Exception as e:
+            self.logger.warning(f'Postgres merge prediction delete failed (non-fatal): {e}')
+            return False
+
     def _log_storage_summary(self, counts: Dict[str, int]):
         """Log a summary of what was stored"""
         self.logger.info('Storage Summary:')

@@ -6,6 +6,7 @@ Attached to the validator's axon via functools.partial in Validator.__init__().
 Runs in the axon's FastAPI thread pool — fully parallel to the main scoring loop.
 """
 
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Tuple
 
 import bittensor as bt
@@ -66,7 +67,11 @@ async def handle_prediction(validator: 'Validator', synapse: PredictionSynapse) 
 
         # Total probability check (only count predictions on open PRs, excluding this PR if it's an update)
         existing_total = mp_storage.get_miner_total_for_issue(
-            uid, miner_hotkey, synapse.issue_id, exclude_pr=pr_number, only_prs=open_pr_numbers,
+            uid,
+            miner_hotkey,
+            synapse.issue_id,
+            exclude_pr=pr_number,
+            only_prs=open_pr_numbers,
         )
         if existing_total + pred_value > 1.0:
             return _reject(
@@ -79,6 +84,8 @@ async def handle_prediction(validator: 'Validator', synapse: PredictionSynapse) 
     # 6) Compute variance at time of submission and store all predictions
     variance = mp_storage.compute_current_variance(synapse.issue_id)
 
+    now = datetime.now(timezone.utc).isoformat()
+
     for pr_number, pred_value in stored_prs:
         mp_storage.store_prediction(
             uid=uid,
@@ -90,6 +97,15 @@ async def handle_prediction(validator: 'Validator', synapse: PredictionSynapse) 
             prediction=pred_value,
             variance_at_prediction=variance,
         )
+
+        # Mirror to Postgres
+        if validator.db_storage:
+            validator.db_storage.store_merge_prediction(
+                uid=uid, hotkey=miner_hotkey, github_id=github_id,
+                issue_id=synapse.issue_id, repository=synapse.repository,
+                pr_number=pr_number, prediction=pred_value,
+                variance_at_prediction=variance, timestamp=now,
+            )
 
     bt.logging.success(
         f'Merge prediction stored — UID: {uid}, ID: {synapse.issue_id}, '

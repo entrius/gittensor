@@ -26,33 +26,35 @@ async def handle_prediction(validator: 'Validator', synapse: PredictionSynapse) 
     miner_hotkey = synapse.dendrite.hotkey
     uid = validator.metagraph.hotkeys.index(miner_hotkey)
 
+    def _reject(reason: str) -> PredictionSynapse:
+        synapse.accepted = False
+        synapse.rejection_reason = reason
+        bt.logging.warning(
+            f'Merge prediction rejected — UID: {uid}, ID: {synapse.issue_id}, '
+            f'repo: {synapse.repository}, PRs: {list(synapse.predictions.keys())}, '
+            f'reason: {reason}'
+        )
+        return synapse
+
     # 1) Verify issue is in a predictable state on-chain
     error, issue = check_issue_active(validator, synapse.issue_id)
     if error:
-        synapse.accepted = False
-        synapse.rejection_reason = error
-        return synapse
+        return _reject(error)
 
     # 2) Verify predicted PRs are still open on GitHub
     error, open_pr_numbers = check_prs_open(synapse.repository, issue.issue_number, synapse.predictions)
     if error:
-        synapse.accepted = False
-        synapse.rejection_reason = error
-        return synapse
+        return _reject(error)
 
     # 3) Validate GitHub identity + account age
     github_id, error = validate_github_credentials(uid, synapse.github_access_token)
     if error:
-        synapse.accepted = False
-        synapse.rejection_reason = error
-        return synapse
+        return _reject(error)
 
     # 4) Validate prediction values
     error = validate_prediction_values(synapse.predictions)
     if error:
-        synapse.accepted = False
-        synapse.rejection_reason = error
-        return synapse
+        return _reject(error)
 
     # 5) Per-PR: check cooldown, check total <= 1.0, store
     stored_prs = []
@@ -60,21 +62,17 @@ async def handle_prediction(validator: 'Validator', synapse: PredictionSynapse) 
         # Cooldown check
         cooldown_remaining = mp_storage.check_cooldown(uid, miner_hotkey, synapse.issue_id, pr_number)
         if cooldown_remaining is not None:
-            synapse.accepted = False
-            synapse.rejection_reason = f'PR #{pr_number} on cooldown ({cooldown_remaining:.0f}s remaining)'
-            return synapse
+            return _reject(f'PR #{pr_number} on cooldown ({cooldown_remaining:.0f}s remaining)')
 
         # Total probability check (only count predictions on open PRs, excluding this PR if it's an update)
         existing_total = mp_storage.get_miner_total_for_issue(
             uid, miner_hotkey, synapse.issue_id, exclude_pr=pr_number, only_prs=open_pr_numbers,
         )
         if existing_total + pred_value > 1.0:
-            synapse.accepted = False
-            synapse.rejection_reason = (
+            return _reject(
                 f'Total probability would exceed 1.0 '
                 f'(existing: {existing_total:.4f} + new: {pred_value:.4f} = {existing_total + pred_value:.4f})'
             )
-            return synapse
 
         stored_prs.append((pr_number, pred_value))
 

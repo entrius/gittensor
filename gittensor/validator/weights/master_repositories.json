@@ -51,6 +51,10 @@
     "tier": "Silver",
     "weight": 15.28
   },
+  "AffineFoundation/liveweb-arena": {
+    "tier": "Gold",
+    "weight": 20.88
+  },
   "aframevr/aframe": {
     "tier": "Bronze",
     "weight": 0.12
@@ -486,6 +490,7 @@
     "weight": 0.17
   },
   "autoppia/autoppia_iwa": {
+    "additional_acceptable_branches": ["contribution/*"],
     "tier": "Silver",
     "weight": 5.33
   },
@@ -4480,6 +4485,7 @@
     "weight": 0.13
   },
   "RedTeamSubnet/RedTeam": {
+    "additional_acceptable_branches": ["dev"],
     "tier": "Bronze",
     "weight": 0.39
   },
@@ -5043,6 +5049,7 @@
     "weight": 0.1
   },
   "taofu-labs/tpn-subnet": {
+    "additional_acceptable_branches": ["development"],
     "tier": "Bronze",
     "weight": 0.36
   },

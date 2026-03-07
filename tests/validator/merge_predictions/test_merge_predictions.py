@@ -337,7 +337,7 @@ class TestPredictionHandler:
         s = make_synapse(predictions={2: 0.5}, hotkey='hk_alice')
         result = _run(handle_prediction(mock_validator, s))
         assert result.accepted is False
-        assert 'exceed 1.0' in result.rejection_reason
+        assert 'exceeds 1.0' in result.rejection_reason
 
     def test_blacklist_unregistered_hotkey(self, mock_validator, make_synapse):
         from gittensor.validator.merge_predictions.handler import blacklist_prediction

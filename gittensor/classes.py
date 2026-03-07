@@ -10,7 +10,7 @@ import bittensor as bt
 
 from gittensor.constants import MIN_TOKEN_SCORE_FOR_BASE_SCORE
 from gittensor.utils.utils import parse_repo_name
-from gittensor.validator.configurations.tier_config import Tier, TierConfig, TierStats
+from gittensor.validator.oss_contributions.tier_config import Tier, TierConfig, TierStats
 
 GITHUB_DOMAIN = 'https://github.com/'
 

@@ -2,20 +2,14 @@
 # Copyright © 2025 Entrius
 
 from collections import defaultdict
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List
 
 import bittensor as bt
 
 from gittensor.classes import MinerEvaluation
-from gittensor.constants import (
-    MIN_GITHUB_ACCOUNT_AGE,
-    RECYCLE_UID,
-)
+from gittensor.constants import RECYCLE_UID
 from gittensor.synapses import GitPatSynapse
-from gittensor.utils.github_api_tools import (
-    get_github_account_age_days,
-    get_github_id,
-)
+from gittensor.validator.utils.github_validation import validate_github_credentials
 
 
 def detect_and_penalize_miners_sharing_github(miner_evaluations: Dict[int, MinerEvaluation]):
@@ -80,21 +74,3 @@ def validate_response_and_initialize_miner_evaluation(uid: int, response: GitPat
     miner_eval.github_id = github_id
     miner_eval.github_pat = response.github_access_token
     return miner_eval
-
-
-def validate_github_credentials(uid: int, pat: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
-    """Validate PAT and return (github_id, error_reason) tuple."""
-    if not pat:
-        return None, f'No Github PAT provided by miner {uid}'
-
-    github_id = get_github_id(pat)
-    if not github_id:
-        return None, f"No Github id found for miner {uid}'s PAT"
-
-    account_age = get_github_account_age_days(pat)
-    if not account_age:
-        return None, f'Could not determine Github account age for miner {uid}'
-    if account_age < MIN_GITHUB_ACCOUNT_AGE:
-        return None, f"Miner {uid}'s Github account too young ({account_age} < {MIN_GITHUB_ACCOUNT_AGE} days)"
-
-    return github_id, None

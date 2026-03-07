@@ -10,7 +10,7 @@ Run tests:
 
 import pytest
 
-from gittensor.validator.configurations.tier_config import Tier
+from gittensor.validator.oss_contributions.tier_config import Tier
 from gittensor.validator.utils.load_weights import (
     LanguageConfig,
     RepositoryConfig,

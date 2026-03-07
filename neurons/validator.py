@@ -16,7 +16,6 @@
 # DEALINGS IN THE SOFTWARE.
 
 
-import threading
 import time
 from functools import partial
 from typing import Dict, List, Set

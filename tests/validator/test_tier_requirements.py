@@ -22,14 +22,14 @@ Run specific test class:
 
 import pytest
 
-from gittensor.validator.oss_contributions.tier_config import (
-    TIERS,
-    Tier,
-)
 from gittensor.validator.oss_contributions.credibility import (
     calculate_credibility_per_tier,
     calculate_tier_stats,
     is_tier_unlocked,
+)
+from gittensor.validator.oss_contributions.tier_config import (
+    TIERS,
+    Tier,
 )
 
 

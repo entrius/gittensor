@@ -78,7 +78,7 @@ async def forward(self: 'Validator') -> None:
 
 
 def build_prediction_ema_rewards(
-    self: 'BaseValidatorNeuron',
+    self: 'Validator',
     miner_uids: set[int],
     miner_evaluations: Dict[int, MinerEvaluation],
 ) -> np.ndarray:
@@ -124,7 +124,7 @@ def build_prediction_ema_rewards(
 
 
 async def oss_contributions(
-    self: 'BaseValidatorNeuron', miner_uids: set[int]
+    self: 'Validator', miner_uids: set[int]
 ) -> Tuple[np.ndarray, Dict[int, MinerEvaluation]]:
     """Score OSS contributions and return raw rewards + miner evaluations.
 

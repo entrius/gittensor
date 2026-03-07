@@ -45,11 +45,11 @@ def broadcast_predictions(
         predictions={int(k): float(v) for k, v in payload['predictions'].items()},
     )
 
-    # Get axons for high-trust validators with permit that are actively serving.
-    MIN_VTRUST = 0.6
+    # Get axons for high-trust validators (> 0.6 vtrust) with permit that are actively serving.
     validator_axons = [
-        axon for uid, axon in enumerate(metagraph.axons)
-        if metagraph.validator_permit[uid] and axon.is_serving and float(metagraph.Tv[uid]) > MIN_VTRUST
+        axon
+        for uid, axon in enumerate(metagraph.axons)
+        if metagraph.validator_permit[uid] and axon.is_serving and float(metagraph.Tv[uid]) > 0.6
     ]
 
     if not validator_axons:
@@ -66,12 +66,14 @@ def broadcast_predictions(
 
     results = []
     for axon, resp in zip(validator_axons, responses):
-        results.append({
-            'validator': axon.hotkey[:16],
-            'accepted': resp.accepted if hasattr(resp, 'accepted') else None,
-            'rejection_reason': resp.rejection_reason if hasattr(resp, 'rejection_reason') else None,
-            'status_code': resp.dendrite.status_code if hasattr(resp, 'dendrite') else None,
-        })
+        results.append(
+            {
+                'validator': axon.hotkey[:16],
+                'accepted': resp.accepted if hasattr(resp, 'accepted') else None,
+                'rejection_reason': resp.rejection_reason if hasattr(resp, 'rejection_reason') else None,
+                'status_code': resp.dendrite.status_code if hasattr(resp, 'dendrite') else None,
+            }
+        )
 
     accepted_count = sum(1 for r in results if r['accepted'] is True)
     return {

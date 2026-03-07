@@ -6,13 +6,11 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
 import pytest
-
 from bittensor.core.synapse import TerminalInfo
 
 from gittensor.synapses import PredictionSynapse
 from gittensor.validator.merge_predictions.mp_storage import PredictionStorage
 from gittensor.validator.merge_predictions.scoring import PrOutcome, PrPrediction
-
 
 # ============================================================================
 # Storage

@@ -25,7 +25,6 @@ from gittensor.constants import (
 )
 from gittensor.validator.merge_predictions.scoring import (
     MinerIssueScore,
-    PrOutcome,
     PrPrediction,
     compute_merged_pr_order_ranks,
     score_consensus_bonus,

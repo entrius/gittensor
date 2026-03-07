@@ -15,11 +15,11 @@ from gittensor.constants import (
     PIONEER_DIVIDEND_RATE_2ND,
     PIONEER_DIVIDEND_RATE_REST,
 )
-from gittensor.validator.configurations.tier_config import TIERS, Tier
-from gittensor.validator.evaluation.scoring import (
+from gittensor.validator.oss_contributions.scoring import (
     calculate_pioneer_dividends,
     finalize_miner_scores,
 )
+from gittensor.validator.oss_contributions.tier_config import TIERS, Tier
 from tests.validator.conftest import PRBuilder
 
 # ==========================================================================

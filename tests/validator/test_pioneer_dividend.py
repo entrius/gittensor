@@ -26,6 +26,7 @@ from tests.validator.conftest import PRBuilder
 # Fixtures
 # ==========================================================================
 
+
 @pytest.fixture
 def builder():
     return PRBuilder()
@@ -39,6 +40,7 @@ def bronze():
 # ==========================================================================
 # TestPioneerEligibility
 # ==========================================================================
+
 
 class TestPioneerEligibility:
     """Tests for PullRequest.is_pioneer_eligible instance method."""
@@ -59,14 +61,18 @@ class TestPioneerEligibility:
 
     def test_ineligible_below_token_score_threshold(self, builder, bronze):
         pr = builder.create(
-            state=PRState.MERGED, tier=bronze, uid=1,
+            state=PRState.MERGED,
+            tier=bronze,
+            uid=1,
             token_score=MIN_TOKEN_SCORE_FOR_BASE_SCORE - 1,
         )
         assert not pr.is_pioneer_eligible()
 
     def test_eligible_at_exact_token_score_threshold(self, builder, bronze):
         pr = builder.create(
-            state=PRState.MERGED, tier=bronze, uid=1,
+            state=PRState.MERGED,
+            tier=bronze,
+            uid=1,
             token_score=MIN_TOKEN_SCORE_FOR_BASE_SCORE,
         )
         assert pr.is_pioneer_eligible()
@@ -76,6 +82,7 @@ class TestPioneerEligibility:
 # TestCalculatePioneerDividends
 # ==========================================================================
 
+
 class TestCalculatePioneerDividends:
     """Tests for calculate_pioneer_dividends function."""
 
@@ -83,8 +90,13 @@ class TestCalculatePioneerDividends:
         """A lone pioneer with no followers earns zero dividend."""
         now = datetime.now(timezone.utc)
         pr = builder.create(
-            state=PRState.MERGED, tier=bronze, repo='org/repo-a', uid=1,
-            merged_at=now, earned_score=0.0, collateral_score=0.0,
+            state=PRState.MERGED,
+            tier=bronze,
+            repo='org/repo-a',
+            uid=1,
+            merged_at=now,
+            earned_score=0.0,
+            collateral_score=0.0,
         )
         pr.base_score = 30.0
         evals = {1: MinerEvaluation(uid=1, hotkey='h1', merged_pull_requests=[pr])}
@@ -96,12 +108,22 @@ class TestCalculatePioneerDividends:
         """Pioneer earns 30% of first follower's earned_score."""
         now = datetime.now(timezone.utc)
         pioneer_pr = builder.create(
-            state=PRState.MERGED, tier=bronze, repo='org/repo-a', uid=1,
-            merged_at=now - timedelta(days=5), earned_score=0.0, collateral_score=0.0,
+            state=PRState.MERGED,
+            tier=bronze,
+            repo='org/repo-a',
+            uid=1,
+            merged_at=now - timedelta(days=5),
+            earned_score=0.0,
+            collateral_score=0.0,
         )
         follower_pr = builder.create(
-            state=PRState.MERGED, tier=bronze, repo='org/repo-a', uid=2,
-            merged_at=now, earned_score=0.0, collateral_score=0.0,
+            state=PRState.MERGED,
+            tier=bronze,
+            repo='org/repo-a',
+            uid=2,
+            merged_at=now,
+            earned_score=0.0,
+            collateral_score=0.0,
         )
         pioneer_pr.base_score = 30.0
         follower_pr.base_score = 20.0
@@ -124,16 +146,26 @@ class TestCalculatePioneerDividends:
         """Pioneer dividend uses per-position rates: 30%, 20%, 10%, 10%."""
         now = datetime.now(timezone.utc)
         pioneer_pr = builder.create(
-            state=PRState.MERGED, tier=bronze, repo='org/repo-a', uid=1,
-            merged_at=now - timedelta(days=10), earned_score=0.0, collateral_score=0.0,
+            state=PRState.MERGED,
+            tier=bronze,
+            repo='org/repo-a',
+            uid=1,
+            merged_at=now - timedelta(days=10),
+            earned_score=0.0,
+            collateral_score=0.0,
         )
         pioneer_pr.base_score = 30.0
         pioneer_pr.earned_score = 30.0
         follower_prs = []
         for uid in range(2, 6):  # 4 followers
             pr = builder.create(
-                state=PRState.MERGED, tier=bronze, repo='org/repo-a', uid=uid,
-                merged_at=now - timedelta(days=10 - uid), earned_score=0.0, collateral_score=0.0,
+                state=PRState.MERGED,
+                tier=bronze,
+                repo='org/repo-a',
+                uid=uid,
+                merged_at=now - timedelta(days=10 - uid),
+                earned_score=0.0,
+                collateral_score=0.0,
             )
             pr.base_score = 10.0
             pr.earned_score = 10.0
@@ -148,7 +180,8 @@ class TestCalculatePioneerDividends:
             10.0 * PIONEER_DIVIDEND_RATE_1ST
             + 10.0 * PIONEER_DIVIDEND_RATE_2ND
             + 10.0 * PIONEER_DIVIDEND_RATE_REST
-            + 10.0 * PIONEER_DIVIDEND_RATE_REST, 2
+            + 10.0 * PIONEER_DIVIDEND_RATE_REST,
+            2,
         )
         assert pioneer_pr.pioneer_dividend == expected_dividend
 
@@ -156,8 +189,13 @@ class TestCalculatePioneerDividends:
         """Dividend scales with followers but is capped at PIONEER_DIVIDEND_MAX_RATIO × own earned."""
         now = datetime.now(timezone.utc)
         pioneer_pr = builder.create(
-            state=PRState.MERGED, tier=bronze, repo='org/repo-a', uid=1,
-            merged_at=now - timedelta(days=30), earned_score=0.0, collateral_score=0.0,
+            state=PRState.MERGED,
+            tier=bronze,
+            repo='org/repo-a',
+            uid=1,
+            merged_at=now - timedelta(days=30),
+            earned_score=0.0,
+            collateral_score=0.0,
         )
         pioneer_pr.base_score = 30.0
         pioneer_pr.earned_score = 30.0
@@ -165,8 +203,13 @@ class TestCalculatePioneerDividends:
         follower_prs = []
         for uid in range(2, 12):  # 10 followers
             pr = builder.create(
-                state=PRState.MERGED, tier=bronze, repo='org/repo-a', uid=uid,
-                merged_at=now - timedelta(days=30 - uid), earned_score=0.0, collateral_score=0.0,
+                state=PRState.MERGED,
+                tier=bronze,
+                repo='org/repo-a',
+                uid=uid,
+                merged_at=now - timedelta(days=30 - uid),
+                earned_score=0.0,
+                collateral_score=0.0,
             )
             pr.base_score = 30.0
             pr.earned_score = 30.0
@@ -186,15 +229,25 @@ class TestCalculatePioneerDividends:
         """Dividend is capped at PIONEER_DIVIDEND_MAX_RATIO × pioneer's own earned_score."""
         now = datetime.now(timezone.utc)
         pioneer_pr = builder.create(
-            state=PRState.MERGED, tier=bronze, repo='org/repo-a', uid=1,
-            merged_at=now - timedelta(days=10), earned_score=0.0, collateral_score=0.0,
+            state=PRState.MERGED,
+            tier=bronze,
+            repo='org/repo-a',
+            uid=1,
+            merged_at=now - timedelta(days=10),
+            earned_score=0.0,
+            collateral_score=0.0,
         )
         pioneer_pr.base_score = 10.0
         pioneer_pr.earned_score = 10.0
         # 1 follower with much higher earned_score
         follower_pr = builder.create(
-            state=PRState.MERGED, tier=bronze, repo='org/repo-a', uid=2,
-            merged_at=now, earned_score=0.0, collateral_score=0.0,
+            state=PRState.MERGED,
+            tier=bronze,
+            repo='org/repo-a',
+            uid=2,
+            merged_at=now,
+            earned_score=0.0,
+            collateral_score=0.0,
         )
         follower_pr.base_score = 100.0
         follower_pr.earned_score = 100.0
@@ -212,23 +265,43 @@ class TestCalculatePioneerDividends:
         """A follower with multiple PRs on the same repo contributes all earned_scores to dividend."""
         now = datetime.now(timezone.utc)
         pioneer_pr = builder.create(
-            state=PRState.MERGED, tier=bronze, repo='org/repo-a', uid=1,
-            merged_at=now - timedelta(days=10), earned_score=0.0, collateral_score=0.0,
+            state=PRState.MERGED,
+            tier=bronze,
+            repo='org/repo-a',
+            uid=1,
+            merged_at=now - timedelta(days=10),
+            earned_score=0.0,
+            collateral_score=0.0,
         )
         pioneer_pr.base_score = 30.0
         pioneer_pr.earned_score = 30.0
         # Follower has 3 PRs on the same repo
         f_pr1 = builder.create(
-            state=PRState.MERGED, tier=bronze, repo='org/repo-a', uid=2,
-            merged_at=now - timedelta(days=5), earned_score=0.0, collateral_score=0.0,
+            state=PRState.MERGED,
+            tier=bronze,
+            repo='org/repo-a',
+            uid=2,
+            merged_at=now - timedelta(days=5),
+            earned_score=0.0,
+            collateral_score=0.0,
         )
         f_pr2 = builder.create(
-            state=PRState.MERGED, tier=bronze, repo='org/repo-a', uid=2,
-            merged_at=now - timedelta(days=3), earned_score=0.0, collateral_score=0.0,
+            state=PRState.MERGED,
+            tier=bronze,
+            repo='org/repo-a',
+            uid=2,
+            merged_at=now - timedelta(days=3),
+            earned_score=0.0,
+            collateral_score=0.0,
         )
         f_pr3 = builder.create(
-            state=PRState.MERGED, tier=bronze, repo='org/repo-a', uid=2,
-            merged_at=now - timedelta(days=1), earned_score=0.0, collateral_score=0.0,
+            state=PRState.MERGED,
+            tier=bronze,
+            repo='org/repo-a',
+            uid=2,
+            merged_at=now - timedelta(days=1),
+            earned_score=0.0,
+            collateral_score=0.0,
         )
         f_pr1.base_score = 5.0
         f_pr1.earned_score = 5.0
@@ -251,20 +324,40 @@ class TestCalculatePioneerDividends:
         now = datetime.now(timezone.utc)
         # UID 1 pioneers repo-a, UID 2 pioneers repo-b
         pr1a = builder.create(
-            state=PRState.MERGED, tier=bronze, repo='org/repo-a', uid=1,
-            merged_at=now - timedelta(days=10), earned_score=0.0, collateral_score=0.0,
+            state=PRState.MERGED,
+            tier=bronze,
+            repo='org/repo-a',
+            uid=1,
+            merged_at=now - timedelta(days=10),
+            earned_score=0.0,
+            collateral_score=0.0,
         )
         pr2a = builder.create(
-            state=PRState.MERGED, tier=bronze, repo='org/repo-a', uid=2,
-            merged_at=now - timedelta(days=5), earned_score=0.0, collateral_score=0.0,
+            state=PRState.MERGED,
+            tier=bronze,
+            repo='org/repo-a',
+            uid=2,
+            merged_at=now - timedelta(days=5),
+            earned_score=0.0,
+            collateral_score=0.0,
         )
         pr2b = builder.create(
-            state=PRState.MERGED, tier=bronze, repo='org/repo-b', uid=2,
-            merged_at=now - timedelta(days=10), earned_score=0.0, collateral_score=0.0,
+            state=PRState.MERGED,
+            tier=bronze,
+            repo='org/repo-b',
+            uid=2,
+            merged_at=now - timedelta(days=10),
+            earned_score=0.0,
+            collateral_score=0.0,
         )
         pr1b = builder.create(
-            state=PRState.MERGED, tier=bronze, repo='org/repo-b', uid=1,
-            merged_at=now - timedelta(days=5), earned_score=0.0, collateral_score=0.0,
+            state=PRState.MERGED,
+            tier=bronze,
+            repo='org/repo-b',
+            uid=1,
+            merged_at=now - timedelta(days=5),
+            earned_score=0.0,
+            collateral_score=0.0,
         )
         for pr in [pr1a, pr2a, pr2b, pr1b]:
             pr.base_score = 30.0
@@ -286,15 +379,24 @@ class TestCalculatePioneerDividends:
         """Low token_score PR cannot be pioneer; quality follower becomes pioneer."""
         now = datetime.now(timezone.utc)
         snipe_pr = builder.create(
-            state=PRState.MERGED, tier=bronze, repo='org/repo-a', uid=1,
+            state=PRState.MERGED,
+            tier=bronze,
+            repo='org/repo-a',
+            uid=1,
             merged_at=now - timedelta(days=10),
             token_score=MIN_TOKEN_SCORE_FOR_BASE_SCORE - 1,
-            earned_score=0.0, collateral_score=0.0,
+            earned_score=0.0,
+            collateral_score=0.0,
         )
         snipe_pr.base_score = 5.0
         good_pr = builder.create(
-            state=PRState.MERGED, tier=bronze, repo='org/repo-a', uid=2,
-            merged_at=now - timedelta(days=5), earned_score=0.0, collateral_score=0.0,
+            state=PRState.MERGED,
+            tier=bronze,
+            repo='org/repo-a',
+            uid=2,
+            merged_at=now - timedelta(days=5),
+            earned_score=0.0,
+            collateral_score=0.0,
         )
         good_pr.base_score = 30.0
         evals = {
@@ -314,16 +416,25 @@ class TestCalculatePioneerDividends:
         """Ineligible PR from same miner on same repo must not get pioneer_rank."""
         now = datetime.now(timezone.utc)
         eligible_pr = builder.create(
-            state=PRState.MERGED, tier=bronze, repo='org/repo-a', uid=1,
-            merged_at=now - timedelta(days=10), earned_score=0.0, collateral_score=0.0,
+            state=PRState.MERGED,
+            tier=bronze,
+            repo='org/repo-a',
+            uid=1,
+            merged_at=now - timedelta(days=10),
+            earned_score=0.0,
+            collateral_score=0.0,
         )
         eligible_pr.base_score = 30.0
         eligible_pr.earned_score = 30.0
         ineligible_pr = builder.create(
-            state=PRState.MERGED, tier=bronze, repo='org/repo-a', uid=1,
+            state=PRState.MERGED,
+            tier=bronze,
+            repo='org/repo-a',
+            uid=1,
             merged_at=now - timedelta(days=5),
             token_score=MIN_TOKEN_SCORE_FOR_BASE_SCORE - 1,
-            earned_score=0.0, collateral_score=0.0,
+            earned_score=0.0,
+            collateral_score=0.0,
         )
         ineligible_pr.base_score = 2.0
         ineligible_pr.earned_score = 2.0
@@ -339,12 +450,24 @@ class TestCalculatePioneerDividends:
         """Same merged_at timestamp: lower PR number wins pioneer status."""
         now = datetime.now(timezone.utc)
         pr1 = builder.create(
-            state=PRState.MERGED, tier=bronze, repo='org/repo-a', uid=1,
-            merged_at=now, number=10, earned_score=0.0, collateral_score=0.0,
+            state=PRState.MERGED,
+            tier=bronze,
+            repo='org/repo-a',
+            uid=1,
+            merged_at=now,
+            number=10,
+            earned_score=0.0,
+            collateral_score=0.0,
         )
         pr2 = builder.create(
-            state=PRState.MERGED, tier=bronze, repo='org/repo-a', uid=2,
-            merged_at=now, number=20, earned_score=0.0, collateral_score=0.0,
+            state=PRState.MERGED,
+            tier=bronze,
+            repo='org/repo-a',
+            uid=2,
+            merged_at=now,
+            number=20,
+            earned_score=0.0,
+            collateral_score=0.0,
         )
         pr1.base_score = 30.0
         pr2.base_score = 30.0
@@ -361,16 +484,31 @@ class TestCalculatePioneerDividends:
         """Follow-up PRs by the pioneer on same repo don't get dividend."""
         now = datetime.now(timezone.utc)
         pioneer_pr = builder.create(
-            state=PRState.MERGED, tier=bronze, repo='org/repo-a', uid=1,
-            merged_at=now - timedelta(days=10), earned_score=0.0, collateral_score=0.0,
+            state=PRState.MERGED,
+            tier=bronze,
+            repo='org/repo-a',
+            uid=1,
+            merged_at=now - timedelta(days=10),
+            earned_score=0.0,
+            collateral_score=0.0,
         )
         followup_pr = builder.create(
-            state=PRState.MERGED, tier=bronze, repo='org/repo-a', uid=1,
-            merged_at=now - timedelta(days=2), earned_score=0.0, collateral_score=0.0,
+            state=PRState.MERGED,
+            tier=bronze,
+            repo='org/repo-a',
+            uid=1,
+            merged_at=now - timedelta(days=2),
+            earned_score=0.0,
+            collateral_score=0.0,
         )
         follower_pr = builder.create(
-            state=PRState.MERGED, tier=bronze, repo='org/repo-a', uid=2,
-            merged_at=now, earned_score=0.0, collateral_score=0.0,
+            state=PRState.MERGED,
+            tier=bronze,
+            repo='org/repo-a',
+            uid=2,
+            merged_at=now,
+            earned_score=0.0,
+            collateral_score=0.0,
         )
         pioneer_pr.base_score = 30.0
         pioneer_pr.earned_score = 30.0
@@ -397,8 +535,14 @@ class TestCalculatePioneerDividends:
         """No crash when all PRs are ineligible."""
         now = datetime.now(timezone.utc)
         pr = builder.create(
-            state=PRState.MERGED, tier=bronze, repo='org/repo-a', uid=1,
-            merged_at=now, token_score=0.0, earned_score=0.0, collateral_score=0.0,
+            state=PRState.MERGED,
+            tier=bronze,
+            repo='org/repo-a',
+            uid=1,
+            merged_at=now,
+            token_score=0.0,
+            earned_score=0.0,
+            collateral_score=0.0,
         )
         evals = {1: MinerEvaluation(uid=1, hotkey='h1', merged_pull_requests=[pr])}
         calculate_pioneer_dividends(evals)
@@ -410,6 +554,7 @@ class TestCalculatePioneerDividends:
 # TestFinalizeWithDividend
 # ==========================================================================
 
+
 class TestFinalizeWithDividend:
     """Integration tests: pioneer dividend flows through finalize_miner_scores."""
 
@@ -417,12 +562,22 @@ class TestFinalizeWithDividend:
         """Pioneer dividend is added on top of earned_score: base × multipliers + dividend."""
         now = datetime.now(timezone.utc)
         pioneer_pr = builder.create(
-            state=PRState.MERGED, tier=bronze, repo='org/repo-a', uid=1,
-            merged_at=now - timedelta(days=5), earned_score=0.0, collateral_score=0.0,
+            state=PRState.MERGED,
+            tier=bronze,
+            repo='org/repo-a',
+            uid=1,
+            merged_at=now - timedelta(days=5),
+            earned_score=0.0,
+            collateral_score=0.0,
         )
         follower_pr = builder.create(
-            state=PRState.MERGED, tier=bronze, repo='org/repo-a', uid=2,
-            merged_at=now, earned_score=0.0, collateral_score=0.0,
+            state=PRState.MERGED,
+            tier=bronze,
+            repo='org/repo-a',
+            uid=2,
+            merged_at=now,
+            earned_score=0.0,
+            collateral_score=0.0,
         )
         pioneer_pr.base_score = 30.0
         follower_pr.base_score = 30.0
@@ -451,8 +606,13 @@ class TestFinalizeWithDividend:
         now = datetime.now(timezone.utc)
         # Create a solo miner scenario for baseline
         solo_pr = builder.create(
-            state=PRState.MERGED, tier=bronze, repo='org/solo-repo', uid=3,
-            merged_at=now, earned_score=0.0, collateral_score=0.0,
+            state=PRState.MERGED,
+            tier=bronze,
+            repo='org/solo-repo',
+            uid=3,
+            merged_at=now,
+            earned_score=0.0,
+            collateral_score=0.0,
         )
         solo_pr.base_score = 30.0
         solo_eval = MinerEvaluation(uid=3, hotkey='h3', merged_pull_requests=[solo_pr])
@@ -460,12 +620,22 @@ class TestFinalizeWithDividend:
 
         # Create a follower scenario
         pioneer_pr = builder.create(
-            state=PRState.MERGED, tier=bronze, repo='org/repo-a', uid=1,
-            merged_at=now - timedelta(days=5), earned_score=0.0, collateral_score=0.0,
+            state=PRState.MERGED,
+            tier=bronze,
+            repo='org/repo-a',
+            uid=1,
+            merged_at=now - timedelta(days=5),
+            earned_score=0.0,
+            collateral_score=0.0,
         )
         follower_pr = builder.create(
-            state=PRState.MERGED, tier=bronze, repo='org/repo-a', uid=2,
-            merged_at=now, earned_score=0.0, collateral_score=0.0,
+            state=PRState.MERGED,
+            tier=bronze,
+            repo='org/repo-a',
+            uid=2,
+            merged_at=now,
+            earned_score=0.0,
+            collateral_score=0.0,
         )
         pioneer_pr.base_score = 30.0
         follower_pr.base_score = 30.0
@@ -484,6 +654,7 @@ class TestFinalizeWithDividend:
 # TestPioneerIncentiveEvidence
 # ==========================================================================
 
+
 class TestPioneerIncentiveEvidence:
     """Evidence tests proving the mechanism rewards exploration over pile-on."""
 
@@ -496,23 +667,27 @@ class TestPioneerIncentiveEvidence:
         pile_evals = {}
         for uid in range(1, 6):
             pr = builder.create(
-                state=PRState.MERGED, tier=bronze, repo='org/saturated', uid=uid,
-                merged_at=now - timedelta(days=uid), earned_score=0.0, collateral_score=0.0,
+                state=PRState.MERGED,
+                tier=bronze,
+                repo='org/saturated',
+                uid=uid,
+                merged_at=now - timedelta(days=uid),
+                earned_score=0.0,
+                collateral_score=0.0,
             )
             pr.base_score = 30.0
             pr.earned_score = 30.0
             pile_evals[uid] = MinerEvaluation(uid=uid, hotkey=f'h{uid}', merged_pull_requests=[pr])
         calculate_pioneer_dividends(pile_evals)
-        pile_total_dividend = sum(
-            pr.pioneer_dividend for ev in pile_evals.values() for pr in ev.merged_pull_requests
-        )
+        pile_total_dividend = sum(pr.pioneer_dividend for ev in pile_evals.values() for pr in ev.merged_pull_requests)
 
         # With pile-on, only pioneer gets dividend (based on follower earned_scores)
         expected = round(
             30.0 * PIONEER_DIVIDEND_RATE_1ST
             + 30.0 * PIONEER_DIVIDEND_RATE_2ND
             + 30.0 * PIONEER_DIVIDEND_RATE_REST
-            + 30.0 * PIONEER_DIVIDEND_RATE_REST, 2
+            + 30.0 * PIONEER_DIVIDEND_RATE_REST,
+            2,
         )
         assert pile_total_dividend == expected
 
@@ -523,14 +698,24 @@ class TestPioneerIncentiveEvidence:
         # Scenario 1: 1 follower
         builder.reset()
         pr1 = builder.create(
-            state=PRState.MERGED, tier=bronze, repo='org/repo-a', uid=1,
-            merged_at=now - timedelta(days=10), earned_score=0.0, collateral_score=0.0,
+            state=PRState.MERGED,
+            tier=bronze,
+            repo='org/repo-a',
+            uid=1,
+            merged_at=now - timedelta(days=10),
+            earned_score=0.0,
+            collateral_score=0.0,
         )
         pr1.base_score = 30.0
         pr1.earned_score = 30.0
         f1 = builder.create(
-            state=PRState.MERGED, tier=bronze, repo='org/repo-a', uid=2,
-            merged_at=now, earned_score=0.0, collateral_score=0.0,
+            state=PRState.MERGED,
+            tier=bronze,
+            repo='org/repo-a',
+            uid=2,
+            merged_at=now,
+            earned_score=0.0,
+            collateral_score=0.0,
         )
         f1.base_score = 30.0
         f1.earned_score = 30.0
@@ -544,16 +729,26 @@ class TestPioneerIncentiveEvidence:
         # Scenario 2: 5 followers
         builder.reset()
         pr2 = builder.create(
-            state=PRState.MERGED, tier=bronze, repo='org/repo-b', uid=1,
-            merged_at=now - timedelta(days=10), earned_score=0.0, collateral_score=0.0,
+            state=PRState.MERGED,
+            tier=bronze,
+            repo='org/repo-b',
+            uid=1,
+            merged_at=now - timedelta(days=10),
+            earned_score=0.0,
+            collateral_score=0.0,
         )
         pr2.base_score = 30.0
         pr2.earned_score = 30.0
         followers = []
         for uid in range(2, 7):
             f = builder.create(
-                state=PRState.MERGED, tier=bronze, repo='org/repo-b', uid=uid,
-                merged_at=now - timedelta(days=10 - uid), earned_score=0.0, collateral_score=0.0,
+                state=PRState.MERGED,
+                tier=bronze,
+                repo='org/repo-b',
+                uid=uid,
+                merged_at=now - timedelta(days=10 - uid),
+                earned_score=0.0,
+                collateral_score=0.0,
             )
             f.base_score = 30.0
             f.earned_score = 30.0

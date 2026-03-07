@@ -139,7 +139,7 @@ class BaseValidatorNeuron(BaseNeuron):
                 f'Running validator {self.axon} on network: {self.config.subtensor.chain_endpoint} with netuid: {self.config.netuid}'
             )
         else:
-            bt.logging.info("Validator axon not starting, continuing with validator process anyways.")
+            bt.logging.info('Validator axon not starting, continuing with validator process anyways.')
 
         bt.logging.info(f'Validator starting at block: {self.block}')
 

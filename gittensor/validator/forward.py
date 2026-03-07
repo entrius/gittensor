@@ -123,9 +123,7 @@ def build_prediction_ema_rewards(
     return prediction_rewards
 
 
-async def oss_contributions(
-    self: 'Validator', miner_uids: set[int]
-) -> Tuple[np.ndarray, Dict[int, MinerEvaluation]]:
+async def oss_contributions(self: 'Validator', miner_uids: set[int]) -> Tuple[np.ndarray, Dict[int, MinerEvaluation]]:
     """Score OSS contributions and return raw rewards + miner evaluations.
 
     Pure scoring — no treasury allocation or weight updates. Those are

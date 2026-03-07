@@ -98,12 +98,10 @@ def score_timeliness(prediction_time: datetime, settlement_time: datetime, pr_op
 
     time_remaining = (settlement_time - prediction_time).total_seconds()
     ratio = max(0.0, min(1.0, time_remaining / total_window))
-    return PREDICTIONS_MAX_TIMELINESS_BONUS * ratio ** PREDICTIONS_TIMELINESS_EXPONENT
+    return PREDICTIONS_MAX_TIMELINESS_BONUS * ratio**PREDICTIONS_TIMELINESS_EXPONENT
 
 
-def score_consensus_bonus(
-    prediction_time: datetime, peak_variance_time: datetime, settlement_time: datetime
-) -> float:
+def score_consensus_bonus(prediction_time: datetime, peak_variance_time: datetime, settlement_time: datetime) -> float:
     """Bounded consensus bonus (0.0 to MAX_CONSENSUS_BONUS).
 
     Rewards predictions made before or near peak disagreement.
@@ -195,11 +193,19 @@ def score_miner_issue(
             continue
 
         rc = raw_correctness(pred.prediction, outcome.outcome)
-        correctness = rc ** PREDICTIONS_CORRECTNESS_EXPONENT
+        correctness = rc**PREDICTIONS_CORRECTNESS_EXPONENT
         qualifies_for_bonus = rc >= PREDICTIONS_ORDER_CORRECTNESS_THRESHOLD
 
-        timeliness_bonus = score_timeliness(pred.prediction_time, settlement_time, outcome.pr_open_time) if qualifies_for_bonus else 0.0
-        consensus_bonus = score_consensus_bonus(pred.prediction_time, peak_variance_time, settlement_time) if qualifies_for_bonus else 0.0
+        timeliness_bonus = (
+            score_timeliness(pred.prediction_time, settlement_time, outcome.pr_open_time)
+            if qualifies_for_bonus
+            else 0.0
+        )
+        consensus_bonus = (
+            score_consensus_bonus(pred.prediction_time, peak_variance_time, settlement_time)
+            if qualifies_for_bonus
+            else 0.0
+        )
 
         is_merged = pred.pr_number in merged_prs
         order_bonus = score_order_bonus(miner_rank) if is_merged and qualifies_for_bonus else 0.0

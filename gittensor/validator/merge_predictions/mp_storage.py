@@ -36,7 +36,7 @@ class PredictionStorage:
 
     def _init_db(self):
         with self._get_connection() as conn:
-            conn.execute('''
+            conn.execute("""
                 CREATE TABLE IF NOT EXISTS predictions (
                     uid             INTEGER NOT NULL,
                     hotkey          TEXT    NOT NULL,
@@ -49,8 +49,8 @@ class PredictionStorage:
                     variance_at_prediction REAL,
                     PRIMARY KEY (uid, hotkey, github_id, issue_id, pr_number)
                 )
-            ''')
-            conn.execute('''
+            """)
+            conn.execute("""
                 CREATE TABLE IF NOT EXISTS prediction_emas (
                     github_id  TEXT    NOT NULL,
                     ema_score  REAL    NOT NULL DEFAULT 0.0,
@@ -58,23 +58,23 @@ class PredictionStorage:
                     updated_at TEXT    NOT NULL,
                     PRIMARY KEY (github_id)
                 )
-            ''')
-            conn.execute('''
+            """)
+            conn.execute("""
                 CREATE TABLE IF NOT EXISTS settled_issues (
                     issue_id          INTEGER NOT NULL PRIMARY KEY,
                     outcome           TEXT    NOT NULL,
                     merged_pr_number  INTEGER,
                     settled_at        TEXT    NOT NULL
                 )
-            ''')
-            conn.execute('''
+            """)
+            conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_predictions_issue
                 ON predictions (issue_id)
-            ''')
-            conn.execute('''
+            """)
+            conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_predictions_miner_issue
                 ON predictions (uid, hotkey, issue_id)
-            ''')
+            """)
             conn.commit()
         bt.logging.info(f'Prediction storage initialized at {self._db_path}')
 
@@ -95,8 +95,12 @@ class PredictionStorage:
         return remaining if remaining > 0 else None
 
     def get_miner_total_for_issue(
-        self, uid: int, hotkey: str, issue_id: int,
-        exclude_pr: Optional[int] = None, only_prs: Optional[set[int]] = None,
+        self,
+        uid: int,
+        hotkey: str,
+        issue_id: int,
+        exclude_pr: Optional[int] = None,
+        only_prs: Optional[set[int]] = None,
     ) -> float:
         """Get sum of a miner's existing predictions for an issue.
 
@@ -126,13 +130,13 @@ class PredictionStorage:
         """Compute avg variance across all PRs for an issue (used for consensus bonus)."""
         with self._get_connection() as conn:
             rows = conn.execute(
-                '''
+                """
                 SELECT pr_number, AVG(prediction) as mean_pred,
                        AVG(prediction * prediction) - AVG(prediction) * AVG(prediction) as var_pred
                 FROM predictions
                 WHERE issue_id = ?
                 GROUP BY pr_number
-                ''',
+                """,
                 (issue_id,),
             ).fetchall()
 
@@ -159,14 +163,14 @@ class PredictionStorage:
         with self._lock:
             with self._get_connection() as conn:
                 conn.execute(
-                    '''
+                    """
                     INSERT INTO predictions (uid, hotkey, github_id, issue_id, repository, pr_number, prediction, timestamp, variance_at_prediction)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT (uid, hotkey, github_id, issue_id, pr_number)
                     DO UPDATE SET prediction = excluded.prediction,
                                   timestamp = excluded.timestamp,
                                   variance_at_prediction = excluded.variance_at_prediction
-                    ''',
+                    """,
                     (uid, hotkey, github_id, issue_id, repository, pr_number, prediction, now, variance_at_prediction),
                 )
                 conn.commit()
@@ -179,8 +183,7 @@ class PredictionStorage:
         """
         with self._get_connection() as conn:
             row = conn.execute(
-                'SELECT timestamp FROM predictions WHERE issue_id = ? '
-                'ORDER BY variance_at_prediction DESC LIMIT 1',
+                'SELECT timestamp FROM predictions WHERE issue_id = ? ORDER BY variance_at_prediction DESC LIMIT 1',
                 (issue_id,),
             ).fetchone()
         if row is None:
@@ -248,14 +251,14 @@ class PredictionStorage:
         with self._lock:
             with self._get_connection() as conn:
                 conn.execute(
-                    '''
+                    """
                     INSERT INTO prediction_emas (github_id, ema_score, rounds, updated_at)
                     VALUES (?, ?, 1, ?)
                     ON CONFLICT (github_id)
                     DO UPDATE SET ema_score = excluded.ema_score,
                                   rounds = prediction_emas.rounds + 1,
                                   updated_at = excluded.updated_at
-                    ''',
+                    """,
                     (github_id, new_ema, now),
                 )
                 conn.commit()

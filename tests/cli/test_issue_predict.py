@@ -42,7 +42,11 @@ def test_predict_json_success_payload_schema(cli_root, runner, sample_issue, sam
         ),
         patch('gittensor.cli.issue_commands.predict.broadcast_predictions') as mock_broadcast_stub,
     ):
-        mock_broadcast_stub.return_value = {'issue_id': 42, 'repository': 'entrius/gittensor', 'predictions': {'101': 0.7}}
+        mock_broadcast_stub.return_value = {
+            'issue_id': 42,
+            'repository': 'entrius/gittensor',
+            'predictions': {'101': 0.7},
+        }
         result = runner.invoke(
             cli_root,
             ['issues', 'predict', '--id', '42', '--pr', '101', '--probability', '0.7', '--json'],

@@ -52,20 +52,21 @@ class TestPredictionStorage:
 
     def test_tables_created(self, mp_storage):
         with mp_storage._get_connection() as conn:
-            tables = {
-                r[0]
-                for r in conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table'"
-                ).fetchall()
-            }
+            tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
         assert 'predictions' in tables
         assert 'prediction_emas' in tables
         assert 'settled_issues' in tables
 
     def test_store_and_retrieve_prediction(self, mp_storage):
         mp_storage.store_prediction(
-            uid=0, hotkey='hk', github_id='gh1', issue_id=1,
-            repository='r/r', pr_number=10, prediction=0.6, variance_at_prediction=0.1,
+            uid=0,
+            hotkey='hk',
+            github_id='gh1',
+            issue_id=1,
+            repository='r/r',
+            pr_number=10,
+            prediction=0.6,
+            variance_at_prediction=0.1,
         )
         rows = mp_storage.get_predictions_for_issue(1)
         assert len(rows) == 1
@@ -109,8 +110,14 @@ class TestPredictionStorage:
 
     def test_cooldown_active(self, mp_storage):
         mp_storage.store_prediction(
-            uid=0, hotkey='hk', github_id='gh1', issue_id=1,
-            repository='r/r', pr_number=1, prediction=0.5, variance_at_prediction=0.0,
+            uid=0,
+            hotkey='hk',
+            github_id='gh1',
+            issue_id=1,
+            repository='r/r',
+            pr_number=1,
+            prediction=0.5,
+            variance_at_prediction=0.0,
         )
         remaining = mp_storage.check_cooldown(0, 'hk', 1, 1)
         assert remaining is not None
@@ -136,8 +143,14 @@ class TestPredictionStorage:
 
     def test_compute_variance_single_miner(self, mp_storage):
         mp_storage.store_prediction(
-            uid=0, hotkey='hk', github_id='gh1', issue_id=1,
-            repository='r/r', pr_number=1, prediction=0.5, variance_at_prediction=0.0,
+            uid=0,
+            hotkey='hk',
+            github_id='gh1',
+            issue_id=1,
+            repository='r/r',
+            pr_number=1,
+            prediction=0.5,
+            variance_at_prediction=0.0,
         )
         assert mp_storage.compute_current_variance(1) == pytest.approx(0.0)
 
@@ -213,7 +226,10 @@ class TestPredictionHandler:
     @patch('gittensor.validator.merge_predictions.handler.validate_prediction_values', return_value=None)
     @patch('gittensor.validator.merge_predictions.handler.validate_github_credentials', return_value=('gh_alice', None))
     @patch('gittensor.validator.merge_predictions.handler.check_prs_open', return_value=(None, {1}))
-    @patch('gittensor.validator.merge_predictions.handler.check_issue_active', return_value=(None, MagicMock(issue_number=10)))
+    @patch(
+        'gittensor.validator.merge_predictions.handler.check_issue_active',
+        return_value=(None, MagicMock(issue_number=10)),
+    )
     def test_successful_prediction_stored(self, _cia, _cpo, _vgc, _vpv, mock_validator, make_synapse):
         from gittensor.validator.merge_predictions.handler import handle_prediction
 
@@ -233,7 +249,10 @@ class TestPredictionHandler:
         assert 'Issue not found' in result.rejection_reason
 
     @patch('gittensor.validator.merge_predictions.handler.check_prs_open', return_value=('PR #1 is not open', set()))
-    @patch('gittensor.validator.merge_predictions.handler.check_issue_active', return_value=(None, MagicMock(issue_number=10)))
+    @patch(
+        'gittensor.validator.merge_predictions.handler.check_issue_active',
+        return_value=(None, MagicMock(issue_number=10)),
+    )
     def test_reject_closed_pr(self, _cia, _cpo, mock_validator, make_synapse):
         from gittensor.validator.merge_predictions.handler import handle_prediction
 
@@ -244,7 +263,10 @@ class TestPredictionHandler:
 
     @patch('gittensor.validator.merge_predictions.handler.validate_github_credentials', return_value=(None, 'Bad PAT'))
     @patch('gittensor.validator.merge_predictions.handler.check_prs_open', return_value=(None, {1}))
-    @patch('gittensor.validator.merge_predictions.handler.check_issue_active', return_value=(None, MagicMock(issue_number=10)))
+    @patch(
+        'gittensor.validator.merge_predictions.handler.check_issue_active',
+        return_value=(None, MagicMock(issue_number=10)),
+    )
     def test_reject_invalid_github_creds(self, _cia, _cpo, _vgc, mock_validator, make_synapse):
         from gittensor.validator.merge_predictions.handler import handle_prediction
 
@@ -256,7 +278,10 @@ class TestPredictionHandler:
     @patch('gittensor.validator.merge_predictions.handler.validate_prediction_values', return_value='Values bad')
     @patch('gittensor.validator.merge_predictions.handler.validate_github_credentials', return_value=('gh_alice', None))
     @patch('gittensor.validator.merge_predictions.handler.check_prs_open', return_value=(None, {1}))
-    @patch('gittensor.validator.merge_predictions.handler.check_issue_active', return_value=(None, MagicMock(issue_number=10)))
+    @patch(
+        'gittensor.validator.merge_predictions.handler.check_issue_active',
+        return_value=(None, MagicMock(issue_number=10)),
+    )
     def test_reject_invalid_values(self, _cia, _cpo, _vgc, _vpv, mock_validator, make_synapse):
         from gittensor.validator.merge_predictions.handler import handle_prediction
 
@@ -268,7 +293,10 @@ class TestPredictionHandler:
     @patch('gittensor.validator.merge_predictions.handler.validate_prediction_values', return_value=None)
     @patch('gittensor.validator.merge_predictions.handler.validate_github_credentials', return_value=('gh_alice', None))
     @patch('gittensor.validator.merge_predictions.handler.check_prs_open', return_value=(None, {1}))
-    @patch('gittensor.validator.merge_predictions.handler.check_issue_active', return_value=(None, MagicMock(issue_number=10)))
+    @patch(
+        'gittensor.validator.merge_predictions.handler.check_issue_active',
+        return_value=(None, MagicMock(issue_number=10)),
+    )
     def test_reject_cooldown(self, _cia, _cpo, _vgc, _vpv, mock_validator, make_synapse):
         from gittensor.validator.merge_predictions.handler import handle_prediction
 
@@ -285,14 +313,23 @@ class TestPredictionHandler:
     @patch('gittensor.validator.merge_predictions.handler.validate_prediction_values', return_value=None)
     @patch('gittensor.validator.merge_predictions.handler.validate_github_credentials', return_value=('gh_alice', None))
     @patch('gittensor.validator.merge_predictions.handler.check_prs_open', return_value=(None, {1, 2}))
-    @patch('gittensor.validator.merge_predictions.handler.check_issue_active', return_value=(None, MagicMock(issue_number=10)))
+    @patch(
+        'gittensor.validator.merge_predictions.handler.check_issue_active',
+        return_value=(None, MagicMock(issue_number=10)),
+    )
     def test_reject_total_exceeds_one(self, _cia, _cpo, _vgc, _vpv, mock_validator, make_synapse):
         from gittensor.validator.merge_predictions.handler import handle_prediction
 
         # Seed existing prediction via storage directly to avoid cooldown
         mock_validator.mp_storage.store_prediction(
-            uid=0, hotkey='hk_alice', github_id='gh_alice', issue_id=1,
-            repository='test/repo', pr_number=1, prediction=0.8, variance_at_prediction=0.0,
+            uid=0,
+            hotkey='hk_alice',
+            github_id='gh_alice',
+            issue_id=1,
+            repository='test/repo',
+            pr_number=1,
+            prediction=0.8,
+            variance_at_prediction=0.0,
         )
 
         # New prediction on different PR would push total > 1.0
@@ -336,38 +373,34 @@ class TestPredictionScoring:
 
     def test_correctness_merged_pr(self):
         result = score_correctness(0.9, 1.0)
-        assert result == pytest.approx(0.9 ** PREDICTIONS_CORRECTNESS_EXPONENT)
+        assert result == pytest.approx(0.9**PREDICTIONS_CORRECTNESS_EXPONENT)
 
     def test_correctness_non_merged_pr(self):
         result = score_correctness(0.1, 0.0)
-        assert result == pytest.approx(0.9 ** PREDICTIONS_CORRECTNESS_EXPONENT)
+        assert result == pytest.approx(0.9**PREDICTIONS_CORRECTNESS_EXPONENT)
 
     def test_correctness_wrong_prediction(self):
         result = score_correctness(0.3, 1.0)
-        assert result == pytest.approx(0.3 ** PREDICTIONS_CORRECTNESS_EXPONENT)
+        assert result == pytest.approx(0.3**PREDICTIONS_CORRECTNESS_EXPONENT)
 
     def test_correctness_uniform_spray(self):
         result = score_correctness(0.25, 1.0)
-        assert result == pytest.approx(0.25 ** PREDICTIONS_CORRECTNESS_EXPONENT)
+        assert result == pytest.approx(0.25**PREDICTIONS_CORRECTNESS_EXPONENT)
 
     # -- Timeliness --
 
     def test_timeliness_at_pr_open(self, base_times):
-        result = score_timeliness(
-            base_times['pr_open'], base_times['settlement'], base_times['pr_open']
-        )
+        result = score_timeliness(base_times['pr_open'], base_times['settlement'], base_times['pr_open'])
         assert result == pytest.approx(PREDICTIONS_MAX_TIMELINESS_BONUS)
 
     def test_timeliness_at_settlement(self, base_times):
-        result = score_timeliness(
-            base_times['settlement'], base_times['settlement'], base_times['pr_open']
-        )
+        result = score_timeliness(base_times['settlement'], base_times['settlement'], base_times['pr_open'])
         assert result == pytest.approx(0.0)
 
     def test_timeliness_midpoint(self, base_times):
         midpoint = base_times['pr_open'] + timedelta(days=15)
         result = score_timeliness(midpoint, base_times['settlement'], base_times['pr_open'])
-        expected = PREDICTIONS_MAX_TIMELINESS_BONUS * (0.5 ** PREDICTIONS_TIMELINESS_EXPONENT)
+        expected = PREDICTIONS_MAX_TIMELINESS_BONUS * (0.5**PREDICTIONS_TIMELINESS_EXPONENT)
         assert result == pytest.approx(expected)
 
     def test_timeliness_zero_window(self):
@@ -396,9 +429,7 @@ class TestPredictionScoring:
         assert result == pytest.approx(PREDICTIONS_MAX_CONSENSUS_BONUS * 0.5)
 
     def test_consensus_at_settlement(self, base_times):
-        result = score_consensus_bonus(
-            base_times['settlement'], base_times['peak_variance'], base_times['settlement']
-        )
+        result = score_consensus_bonus(base_times['settlement'], base_times['peak_variance'], base_times['settlement'])
         assert result == pytest.approx(0.0)
 
     # -- Order --
@@ -414,8 +445,22 @@ class TestPredictionScoring:
 
     def test_compute_order_ranks_filters_below_threshold(self):
         preds = {
-            0: [PrPrediction(pr_number=1, prediction=0.5, prediction_time=datetime(2025, 6, 1, tzinfo=timezone.utc), variance_at_prediction=0.0)],
-            1: [PrPrediction(pr_number=1, prediction=0.9, prediction_time=datetime(2025, 6, 2, tzinfo=timezone.utc), variance_at_prediction=0.0)],
+            0: [
+                PrPrediction(
+                    pr_number=1,
+                    prediction=0.5,
+                    prediction_time=datetime(2025, 6, 1, tzinfo=timezone.utc),
+                    variance_at_prediction=0.0,
+                )
+            ],
+            1: [
+                PrPrediction(
+                    pr_number=1,
+                    prediction=0.9,
+                    prediction_time=datetime(2025, 6, 2, tzinfo=timezone.utc),
+                    variance_at_prediction=0.0,
+                )
+            ],
         }
         ranks = compute_merged_pr_order_ranks(preds, merged_pr_number=1)
         assert 0 not in ranks
@@ -512,8 +557,14 @@ class TestSettlement:
         """Helper: store a set of predictions for a miner."""
         for pr_num, value in preds.items():
             mp_storage.store_prediction(
-                uid=uid, hotkey=hotkey, github_id=github_id, issue_id=issue_id,
-                repository='test/repo', pr_number=pr_num, prediction=value, variance_at_prediction=0.05,
+                uid=uid,
+                hotkey=hotkey,
+                github_id=github_id,
+                issue_id=issue_id,
+                repository='test/repo',
+                pr_number=pr_num,
+                prediction=value,
+                variance_at_prediction=0.05,
             )
 
     def _make_contract_issue(self, issue_id=1, repo='test/repo', issue_number=10):
@@ -554,7 +605,14 @@ class TestSettlement:
         mock_check_closed.return_value = {'is_closed': True, 'pr_number': 1}
         mock_pr_times.return_value = {1: pr_open_time, 2: pr_open_time}
 
-        self._seed_predictions(mock_validator.mp_storage, uid=0, hotkey='hk_alice', github_id='gh_alice', issue_id=1, preds={1: 0.7, 2: 0.2})
+        self._seed_predictions(
+            mock_validator.mp_storage,
+            uid=0,
+            hotkey='hk_alice',
+            github_id='gh_alice',
+            issue_id=1,
+            preds={1: 0.7, 2: 0.2},
+        )
 
         _run(merge_predictions(mock_validator, {}))
 
@@ -582,8 +640,12 @@ class TestSettlement:
         mock_check_closed.return_value = {'is_closed': True, 'pr_number': 1}
         mock_pr_times.return_value = {1: pr_open_time}
 
-        self._seed_predictions(mock_validator.mp_storage, uid=0, hotkey='hk_alice', github_id='gh_alice', issue_id=1, preds={1: 0.8})
-        self._seed_predictions(mock_validator.mp_storage, uid=0, hotkey='hk_alice', github_id='gh_alice', issue_id=2, preds={1: 0.9})
+        self._seed_predictions(
+            mock_validator.mp_storage, uid=0, hotkey='hk_alice', github_id='gh_alice', issue_id=1, preds={1: 0.8}
+        )
+        self._seed_predictions(
+            mock_validator.mp_storage, uid=0, hotkey='hk_alice', github_id='gh_alice', issue_id=2, preds={1: 0.9}
+        )
 
         _run(merge_predictions(mock_validator, {}))
 
@@ -598,9 +660,7 @@ class TestSettlement:
     @patch('gittensor.validator.merge_predictions.settlement.get_contract_address', return_value='5Faddr')
     @patch('gittensor.validator.merge_predictions.settlement.GITTENSOR_VALIDATOR_PAT', 'ghp_test')
     @patch('gittensor.validator.merge_predictions.settlement.IssueCompetitionContractClient')
-    def test_cancelled_issue_no_merge_no_ema_impact(
-        self, MockContract, _gca, mock_check_closed, mock_validator
-    ):
+    def test_cancelled_issue_no_merge_no_ema_impact(self, MockContract, _gca, mock_check_closed, mock_validator):
         """Cancelled issue with no merged PR: predictions voided, no EMA impact."""
         from gittensor.validator.merge_predictions.settlement import merge_predictions
 
@@ -609,7 +669,9 @@ class TestSettlement:
 
         mock_check_closed.return_value = {'is_closed': True, 'pr_number': None}
 
-        self._seed_predictions(mock_validator.mp_storage, uid=0, hotkey='hk_alice', github_id='gh_alice', issue_id=1, preds={1: 0.8})
+        self._seed_predictions(
+            mock_validator.mp_storage, uid=0, hotkey='hk_alice', github_id='gh_alice', issue_id=1, preds={1: 0.8}
+        )
 
         _run(merge_predictions(mock_validator, {}))
 
@@ -636,7 +698,14 @@ class TestSettlement:
         mock_check_closed.return_value = {'is_closed': True, 'pr_number': 1}
         mock_pr_times.return_value = {1: pr_open_time, 2: pr_open_time}
 
-        self._seed_predictions(mock_validator.mp_storage, uid=0, hotkey='hk_alice', github_id='gh_alice', issue_id=1, preds={1: 0.7, 2: 0.2})
+        self._seed_predictions(
+            mock_validator.mp_storage,
+            uid=0,
+            hotkey='hk_alice',
+            github_id='gh_alice',
+            issue_id=1,
+            preds={1: 0.7, 2: 0.2},
+        )
 
         _run(merge_predictions(mock_validator, {}))
 
@@ -648,9 +717,7 @@ class TestSettlement:
     @patch('gittensor.validator.merge_predictions.settlement.get_contract_address', return_value='5Faddr')
     @patch('gittensor.validator.merge_predictions.settlement.GITTENSOR_VALIDATOR_PAT', 'ghp_test')
     @patch('gittensor.validator.merge_predictions.settlement.IssueCompetitionContractClient')
-    def test_already_settled_skipped(
-        self, MockContract, _gca, mock_validator
-    ):
+    def test_already_settled_skipped(self, MockContract, _gca, mock_validator):
         """Already-settled issues are skipped without calling GitHub, even if predictions exist."""
         from gittensor.validator.merge_predictions.settlement import merge_predictions
 
@@ -659,7 +726,9 @@ class TestSettlement:
 
         # Pre-mark as settled and seed predictions anyway
         mock_validator.mp_storage.mark_issue_settled(contract_issue.id, 'scored', merged_pr_number=1)
-        self._seed_predictions(mock_validator.mp_storage, uid=0, hotkey='hk_alice', github_id='gh_alice', issue_id=1, preds={1: 0.8})
+        self._seed_predictions(
+            mock_validator.mp_storage, uid=0, hotkey='hk_alice', github_id='gh_alice', issue_id=1, preds={1: 0.8}
+        )
 
         with patch('gittensor.validator.merge_predictions.settlement.check_github_issue_closed') as mock_check:
             _run(merge_predictions(mock_validator, {}))
@@ -674,9 +743,7 @@ class TestSettlement:
     @patch('gittensor.validator.merge_predictions.settlement.get_contract_address', return_value='5Faddr')
     @patch('gittensor.validator.merge_predictions.settlement.GITTENSOR_VALIDATOR_PAT', 'ghp_test')
     @patch('gittensor.validator.merge_predictions.settlement.IssueCompetitionContractClient')
-    def test_deregistered_miner_skipped(
-        self, MockContract, _gca, mock_check_closed, mock_pr_times, mock_validator
-    ):
+    def test_deregistered_miner_skipped(self, MockContract, _gca, mock_check_closed, mock_pr_times, mock_validator):
         from gittensor.validator.merge_predictions.settlement import merge_predictions
 
         pr_open_time = datetime(2025, 6, 1, tzinfo=timezone.utc)
@@ -686,8 +753,12 @@ class TestSettlement:
         mock_check_closed.return_value = {'is_closed': True, 'pr_number': 1}
         mock_pr_times.return_value = {1: pr_open_time}
 
-        self._seed_predictions(mock_validator.mp_storage, uid=0, hotkey='hk_alice', github_id='gh_alice', issue_id=1, preds={1: 0.7})
-        self._seed_predictions(mock_validator.mp_storage, uid=5, hotkey='hk_gone', github_id='gh_gone', issue_id=1, preds={1: 0.6})
+        self._seed_predictions(
+            mock_validator.mp_storage, uid=0, hotkey='hk_alice', github_id='gh_alice', issue_id=1, preds={1: 0.7}
+        )
+        self._seed_predictions(
+            mock_validator.mp_storage, uid=5, hotkey='hk_gone', github_id='gh_gone', issue_id=1, preds={1: 0.6}
+        )
 
         _run(merge_predictions(mock_validator, {}))
 
@@ -714,7 +785,9 @@ class TestSettlement:
         mock_check_closed.return_value = {'is_closed': True, 'pr_number': 1}
         mock_pr_times.return_value = {1: pr_open_time}
 
-        self._seed_predictions(mock_validator.mp_storage, uid=0, hotkey='hk_alice', github_id='gh_alice', issue_id=1, preds={1: 0.8})
+        self._seed_predictions(
+            mock_validator.mp_storage, uid=0, hotkey='hk_alice', github_id='gh_alice', issue_id=1, preds={1: 0.8}
+        )
 
         _run(merge_predictions(mock_validator, {}))
         ema_after_first = mock_validator.mp_storage.get_ema('gh_alice')
@@ -726,7 +799,9 @@ class TestSettlement:
         self._setup_contract_mock(MockContract, completed=[issue2])
         mock_pr_times.return_value = {1: pr_open_time}
 
-        self._seed_predictions(mock_validator.mp_storage, uid=0, hotkey='hk_alice', github_id='gh_alice', issue_id=2, preds={1: 0.9})
+        self._seed_predictions(
+            mock_validator.mp_storage, uid=0, hotkey='hk_alice', github_id='gh_alice', issue_id=2, preds={1: 0.9}
+        )
 
         _run(merge_predictions(mock_validator, {}))
         ema_after_second = mock_validator.mp_storage.get_ema('gh_alice')
@@ -751,7 +826,9 @@ class TestSettlement:
         mock_check_closed.return_value = {'is_closed': True, 'pr_number': 1}
         mock_pr_times.return_value = {1: pr_open_time}
 
-        self._seed_predictions(mock_validator.mp_storage, uid=0, hotkey='hk_alice', github_id='gh_alice', issue_id=1, preds={1: 0.8})
+        self._seed_predictions(
+            mock_validator.mp_storage, uid=0, hotkey='hk_alice', github_id='gh_alice', issue_id=1, preds={1: 0.8}
+        )
 
         _run(merge_predictions(mock_validator, {}))
 
@@ -761,9 +838,7 @@ class TestSettlement:
     @patch('gittensor.validator.merge_predictions.settlement.get_contract_address', return_value='5Faddr')
     @patch('gittensor.validator.merge_predictions.settlement.GITTENSOR_VALIDATOR_PAT', 'ghp_test')
     @patch('gittensor.validator.merge_predictions.settlement.IssueCompetitionContractClient')
-    def test_voided_issue_recorded(
-        self, MockContract, _gca, mock_check_closed, mock_validator
-    ):
+    def test_voided_issue_recorded(self, MockContract, _gca, mock_check_closed, mock_validator):
         """After voiding a cancelled issue, it is recorded in settled_issues."""
         from gittensor.validator.merge_predictions.settlement import merge_predictions
 
@@ -772,7 +847,9 @@ class TestSettlement:
 
         mock_check_closed.return_value = {'is_closed': True, 'pr_number': None}
 
-        self._seed_predictions(mock_validator.mp_storage, uid=0, hotkey='hk_alice', github_id='gh_alice', issue_id=1, preds={1: 0.8})
+        self._seed_predictions(
+            mock_validator.mp_storage, uid=0, hotkey='hk_alice', github_id='gh_alice', issue_id=1, preds={1: 0.8}
+        )
 
         _run(merge_predictions(mock_validator, {}))
 

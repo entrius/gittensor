@@ -101,10 +101,15 @@ async def handle_prediction(validator: 'Validator', synapse: PredictionSynapse) 
         # Mirror to Postgres
         if validator.db_storage:
             validator.db_storage.store_merge_prediction(
-                uid=uid, hotkey=miner_hotkey, github_id=github_id,
-                issue_id=synapse.issue_id, repository=synapse.repository,
-                pr_number=pr_number, prediction=pred_value,
-                variance_at_prediction=variance, timestamp=now,
+                uid=uid,
+                hotkey=miner_hotkey,
+                github_id=github_id,
+                issue_id=synapse.issue_id,
+                repository=synapse.repository,
+                pr_number=pr_number,
+                prediction=pred_value,
+                variance_at_prediction=variance,
+                timestamp=now,
             )
 
     bt.logging.success(

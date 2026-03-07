@@ -294,9 +294,7 @@ def _resolve_issue_context(
     """Load and validate on-chain issue context for prediction."""
     try:
         with loading_context('Reading issues from contract...', as_json):
-            issue = fetch_issue_from_contract(
-                ws_endpoint, contract_addr, issue_id, verbose=verbose
-            )
+            issue = fetch_issue_from_contract(ws_endpoint, contract_addr, issue_id, verbose=verbose)
     except click.ClickException as e:
         handle_exception(as_json, str(e))
 
@@ -376,16 +374,16 @@ def _print_broadcast_results(results: dict[str, object]) -> None:
         print_error(str(results['error']))
         return
     if results.get('success'):
-        print_success(f"Prediction accepted by {results['accepted']}/{results['total_validators']} validator(s)")
+        print_success(f'Prediction accepted by {results["accepted"]}/{results["total_validators"]} validator(s)')
     else:
         print_error(
-            f"Prediction rejected or unreachable: {results['rejected']}/{results['total_validators']} validator(s)"
+            f'Prediction rejected or unreachable: {results["rejected"]}/{results["total_validators"]} validator(s)'
         )
 
     for r in results.get('results', []):
         status = 'accepted' if r['accepted'] else 'rejected'
-        reason = f" ({r['rejection_reason']})" if r.get('rejection_reason') else ''
-        console.print(f"  {r['validator']}... {status}{reason}")
+        reason = f' ({r["rejection_reason"]})' if r.get('rejection_reason') else ''
+        console.print(f'  {r["validator"]}... {status}{reason}')
 
 
 def _collect_predictions_interactive(prs: list[dict]) -> dict[int, float]:

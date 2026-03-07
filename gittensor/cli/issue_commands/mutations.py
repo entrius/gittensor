@@ -9,8 +9,6 @@ Commands:
     gitt harvest
 """
 
-from pathlib import Path
-
 import click
 from rich.panel import Panel
 
@@ -164,86 +162,51 @@ def issue_register(
 
     try:
         import bittensor as bt
-        from substrateinterface import Keypair, SubstrateInterface
-        from substrateinterface.contracts import ContractInstance
 
-        with console.status('[bold cyan]Connecting to network...', spinner='dots'):
-            substrate = SubstrateInterface(url=ws_endpoint)
+        from gittensor.validator.issue_competitions.contract_client import (
+            IssueCompetitionContractClient,
+        )
 
         # CLI flags override config; fall back to config if not explicitly supplied
         effective_wallet = wallet_name if wallet_name != 'default' else config.get('wallet', wallet_name)
         effective_hotkey = wallet_hotkey if wallet_hotkey != 'default' else config.get('hotkey', wallet_hotkey)
 
-        # For local development, check config first, then fall back to //Alice
-        if network_name.lower() == 'local' and effective_wallet == 'default' and effective_hotkey == 'default':
-            console.print('[dim]Using //Alice for local development (no config set)...[/dim]')
-            keypair = Keypair.create_from_uri('//Alice')
-        else:
-            # Load wallet from config or CLI args
-            console.print(f'[dim]Loading wallet {effective_wallet}/{effective_hotkey}...[/dim]')
+        with console.status('[bold cyan]Loading wallet...', spinner='dots'):
             wallet = bt.Wallet(name=effective_wallet, hotkey=effective_hotkey)
-            # Use COLDKEY for owner-only operations (register_issue requires owner)
-            # Contract owner is set to deployer's coldkey during contract instantiation
-            keypair = wallet.coldkey
 
-        # Load contract
-        # Go up 4 levels: mutations.py -> issue_commands -> cli -> gittensor -> REPO_ROOT
-        contract_metadata = (
-            Path(__file__).parent.parent.parent.parent
-            / 'smart-contracts'
-            / 'issues-v0'
-            / 'target'
-            / 'ink'
-            / 'issue_bounty_manager.contract'
-        )
-        if not contract_metadata.exists():
-            console.print(f'[red]Error: Contract metadata not found at {contract_metadata}[/red]')
-            return
+        with console.status('[bold cyan]Connecting to network...', spinner='dots'):
+            subtensor = bt.Subtensor(network=ws_endpoint)
 
-        contract_instance = ContractInstance.create_from_address(
-            contract_address=contract_addr,
-            metadata_file=str(contract_metadata),
-            substrate=substrate,
-        )
+        with console.status('[bold cyan]Initializing contract client...', spinner='dots'):
+            client = IssueCompetitionContractClient(
+                contract_address=contract_addr,
+                subtensor=subtensor,
+            )
 
         console.print('[dim]Submitting transaction...[/dim]')
 
-        result = contract_instance.exec(
-            keypair,
-            'register_issue',
-            args={
-                'github_url': github_url,
-                'repository_full_name': repo,
-                'issue_number': issue_number,
-                'target_bounty': bounty_amount,
-            },
-            gas_limit={'ref_time': 10_000_000_000, 'proof_size': 1_000_000},
+        tx_hash = client.register_issue(
+            github_url=github_url,
+            repository_full_name=repo,
+            issue_number=issue_number,
+            target_bounty=bounty_amount,
+            wallet=wallet,
         )
 
-        # Check if transaction was successful
-        if hasattr(result, 'is_success') and not result.is_success:
-            error_info = getattr(result, 'error_message', None)
-            is_revert = error_info and isinstance(error_info, dict) and error_info.get('name') == 'ContractReverted'
-
-            if is_revert:
-                print_error('Contract rejected the request')
-                console.print('[yellow]Possible reasons:[/yellow]')
-                console.print('  \u2022 Issue already registered (same repo + issue number)')
-                console.print('  \u2022 Bounty too low (minimum 10 ALPHA)')
-                console.print('  \u2022 Caller is not the contract owner')
-            elif error_info:
-                print_error(str(error_info))
-
-            console.print(f'[cyan]Transaction Hash:[/cyan] {result.extrinsic_hash}')
-            return
-
-        print_success('Issue registered successfully!')
-        console.print(f'[cyan]Transaction Hash:[/cyan] {result.extrinsic_hash}')
-        console.print('[dim]Issue will be visible once bounty is funded via harvest_emissions()[/dim]')
+        if tx_hash:
+            print_success('Issue registered successfully!')
+            console.print(f'[cyan]Transaction Hash:[/cyan] {tx_hash}')
+            console.print('[dim]Issue will be visible once bounty is funded via harvest_emissions()[/dim]')
+        else:
+            print_error('Contract rejected the request')
+            console.print('[yellow]Possible reasons:[/yellow]')
+            console.print('  \u2022 Issue already registered (same repo + issue number)')
+            console.print('  \u2022 Bounty too low (minimum 10 ALPHA)')
+            console.print('  \u2022 Caller is not the contract owner')
 
     except ImportError as e:
         print_error(f'Missing dependency - {e}')
-        console.print('[dim]Install with: pip install substrate-interface bittensor[/dim]')
+        console.print('[dim]Install with: pip install bittensor[/dim]')
     except Exception as e:
         error_msg = str(e)
         if 'ContractReverted' in error_msg:

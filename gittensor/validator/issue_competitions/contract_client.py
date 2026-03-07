@@ -454,6 +454,54 @@ class IssueCompetitionContractClient:
     # Transaction Functions (Write)
     # =========================================================================
 
+    def register_issue(
+        self,
+        github_url: str,
+        repository_full_name: str,
+        issue_number: int,
+        target_bounty: int,
+        wallet: bt.Wallet,
+    ) -> Optional[str]:
+        """
+        Register a new issue with a bounty (owner only).
+
+        Args:
+            github_url: Full GitHub issue URL
+            repository_full_name: Repository in owner/repo format
+            issue_number: GitHub issue number
+            target_bounty: Target bounty amount in raw units
+            wallet: Owner wallet for signing (uses coldkey)
+
+        Returns:
+            Transaction hash on success, None on failure
+        """
+        try:
+            bt.logging.info(f'Registering issue: {repository_full_name}#{issue_number} bounty={target_bounty}')
+
+            keypair = wallet.coldkey
+            tx_hash = self._exec_contract_raw(
+                method_name='register_issue',
+                args={
+                    'github_url': github_url,
+                    'repository_full_name': repository_full_name,
+                    'issue_number': issue_number,
+                    'target_bounty': target_bounty,
+                },
+                keypair=keypair,
+                gas_limit={'ref_time': 10_000_000_000, 'proof_size': 1_000_000},
+            )
+
+            if tx_hash:
+                bt.logging.info(f'Issue registered: {tx_hash}')
+                return tx_hash
+            else:
+                bt.logging.error('Failed to register issue')
+                return None
+
+        except Exception as e:
+            bt.logging.error(f'Error registering issue: {e}')
+            return None
+
     def vote_solution(
         self,
         issue_id: int,
@@ -643,6 +691,18 @@ class IssueCompetitionContractClient:
                     encoded += bytes(value) if isinstance(value, list) else value
                 else:
                     raise ValueError(f'Unknown AccountId format: {type(value)}')
+            elif type_def == 'str':
+                str_bytes = value.encode('utf-8') if isinstance(value, str) else value
+                str_len = len(str_bytes)
+                if str_len < 64:
+                    encoded += bytes([str_len << 2])
+                elif str_len < 16384:
+                    encoded += bytes([(str_len << 2) | 1, str_len >> 6])
+                else:
+                    encoded += bytes(
+                        [(str_len << 2) | 2, (str_len >> 6) & 0xFF, (str_len >> 14) & 0xFF, (str_len >> 22) & 0xFF]
+                    )
+                encoded += str_bytes
             elif type_def == 'array32':
                 if isinstance(value, bytes):
                     if len(value) != 32:

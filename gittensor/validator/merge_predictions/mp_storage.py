@@ -99,7 +99,7 @@ class PredictionStorage:
         uid: int,
         hotkey: str,
         issue_id: int,
-        exclude_pr: Optional[int] = None,
+        exclude_prs: Optional[set[int]] = None,
         only_prs: Optional[set[int]] = None,
     ) -> float:
         """Get sum of a miner's existing predictions for an issue.

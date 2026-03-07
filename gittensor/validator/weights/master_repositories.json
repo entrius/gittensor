@@ -490,6 +490,7 @@
     "weight": 0.29
   },
   "autoppia/autoppia_iwa": {
+    "additional_acceptable_branches": ["contribution/*"],
     "tier": "Silver",
     "weight": 4.25
   },

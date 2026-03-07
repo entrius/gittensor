@@ -51,11 +51,7 @@
     "tier": "Gold",
     "weight": 20.88
   },
-  "AffineIO/affine-cortex": {
-    "tier": "Gold",
-    "weight": 22.21
-  },
-  "AffineIO/affinetes": {
+  "AffineFoundation/liveweb-arena": {
     "tier": "Gold",
     "weight": 20.88
   },
@@ -494,6 +490,7 @@
     "weight": 0.29
   },
   "autoppia/autoppia_iwa": {
+    "additional_acceptable_branches": ["contribution/*"],
     "tier": "Silver",
     "weight": 4.25
   },
@@ -4480,6 +4477,7 @@
     "weight": 0.22
   },
   "RedTeamSubnet/RedTeam": {
+    "additional_acceptable_branches": ["dev"],
     "tier": "Silver",
     "weight": 4.4
   },
@@ -5043,6 +5041,7 @@
     "weight": 0.17
   },
   "taofu-labs/tpn-subnet": {
+    "additional_acceptable_branches": ["development"],
     "tier": "Silver",
     "weight": 4.15
   },

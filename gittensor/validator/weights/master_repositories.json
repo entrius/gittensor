@@ -5041,6 +5041,7 @@
     "weight": 0.17
   },
   "taofu-labs/tpn-subnet": {
+    "additional_acceptable_branches": ["development"],
     "tier": "Silver",
     "weight": 4.15
   },

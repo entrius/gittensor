@@ -51,6 +51,10 @@
     "tier": "Gold",
     "weight": 20.88
   },
+  "AffineFoundation/liveweb-arena": {
+    "tier": "Gold",
+    "weight": 20.88
+  },
   "aframevr/aframe": {
     "tier": "Bronze",
     "weight": 0.19
@@ -486,6 +490,7 @@
     "weight": 0.29
   },
   "autoppia/autoppia_iwa": {
+    "additional_acceptable_branches": ["contribution/*"],
     "tier": "Silver",
     "weight": 4.25
   },
@@ -1523,7 +1528,7 @@
   },
   "entrius/gittensor-ui": {
     "tier": "Silver",
-    "weight": 1.01
+    "weight": 10
   },
   "entrius/venth": {
     "tier": "Silver",
@@ -3781,6 +3786,10 @@
     "tier": "Bronze",
     "weight": 0.29
   },
+  "openclaw/openclaw": {
+    "weight": 38.92,
+    "tier": "Gold"
+  },
   "opencv/opencv": {
     "tier": "Silver",
     "weight": 3.79
@@ -4258,6 +4267,7 @@
     "weight": 0.19
   },
   "pulumi/pulumi": {
+    "inactive_at": "2026-03-04T17:03:48.522Z",
     "tier": "Silver",
     "weight": 3.73
   },

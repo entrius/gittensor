@@ -101,11 +101,12 @@ class TestPredictionStorage:
         total = mp_storage.get_miner_total_for_issue(0, 'hk', 1)
         assert total == pytest.approx(0.7)
 
-    def test_miner_total_excludes_pr(self, mp_storage):
+    def test_miner_total_excludes_prs(self, mp_storage):
         base = dict(uid=0, hotkey='hk', github_id='gh1', issue_id=1, repository='r/r')
         mp_storage.store_prediction(**base, pr_number=1, prediction=0.3, variance_at_prediction=0.0)
         mp_storage.store_prediction(**base, pr_number=2, prediction=0.4, variance_at_prediction=0.0)
-        total = mp_storage.get_miner_total_for_issue(0, 'hk', 1, exclude_pr=2)
+        mp_storage.store_prediction(**base, pr_number=3, prediction=0.2, variance_at_prediction=0.0)
+        total = mp_storage.get_miner_total_for_issue(0, 'hk', 1, exclude_prs={2, 3})
         assert total == pytest.approx(0.3)
 
     def test_cooldown_active(self, mp_storage):

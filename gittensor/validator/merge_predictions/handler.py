@@ -57,36 +57,34 @@ async def handle_prediction(validator: 'Validator', synapse: PredictionSynapse) 
     if error:
         return _reject(error)
 
-    # 5) Per-PR: check cooldown, check total <= 1.0, store
-    stored_prs = []
-    for pr_number, pred_value in synapse.predictions.items():
-        # Cooldown check
+    # 5) Per-PR cooldown check
+    submitted_prs = list(synapse.predictions.items())
+    for pr_number, pred_value in submitted_prs:
         cooldown_remaining = mp_storage.check_cooldown(uid, miner_hotkey, synapse.issue_id, pr_number)
         if cooldown_remaining is not None:
             return _reject(f'PR #{pr_number} on cooldown ({cooldown_remaining:.0f}s remaining)')
 
-        # Total probability check (only count predictions on open PRs, excluding this PR if it's an update)
-        existing_total = mp_storage.get_miner_total_for_issue(
-            uid,
-            miner_hotkey,
-            synapse.issue_id,
-            exclude_pr=pr_number,
-            only_prs=open_pr_numbers,
+    # 6) Total probability check — exclude all PRs in this submission (they will be overwritten)
+    submitted_pr_numbers = set(synapse.predictions.keys())
+    existing_total = mp_storage.get_miner_total_for_issue(
+        uid,
+        miner_hotkey,
+        synapse.issue_id,
+        exclude_prs=submitted_pr_numbers,
+        only_prs=open_pr_numbers,
+    )
+    new_total = sum(synapse.predictions.values())
+    if existing_total + new_total > 1.0:
+        return _reject(
+            f'Total probability exceeds 1.0 — other open PRs: {existing_total:.4f} + submission: {new_total:.4f} = {existing_total + new_total:.4f}'
         )
-        if existing_total + pred_value > 1.0:
-            return _reject(
-                f'Total probability would exceed 1.0 '
-                f'(existing: {existing_total:.4f} + new: {pred_value:.4f} = {existing_total + pred_value:.4f})'
-            )
 
-        stored_prs.append((pr_number, pred_value))
-
-    # 6) Compute variance at time of submission and store all predictions
+    # 7) Compute variance at time of submission and store all predictions
     variance = mp_storage.compute_current_variance(synapse.issue_id)
 
     now = datetime.now(timezone.utc).isoformat()
 
-    for pr_number, pred_value in stored_prs:
+    for pr_number, pred_value in submitted_prs:
         mp_storage.store_prediction(
             uid=uid,
             hotkey=miner_hotkey,
@@ -115,7 +113,7 @@ async def handle_prediction(validator: 'Validator', synapse: PredictionSynapse) 
     bt.logging.success(
         f'Merge prediction stored — UID: {uid}, ID: {synapse.issue_id}, '
         f'issue: #{issue.issue_number}, repo: {synapse.repository}, '
-        f'PRs: {[pr for pr, _ in stored_prs]}, github_id: {github_id}'
+        f'PRs: {[pr for pr, _ in submitted_prs]}, github_id: {github_id}'
     )
 
     synapse.accepted = True

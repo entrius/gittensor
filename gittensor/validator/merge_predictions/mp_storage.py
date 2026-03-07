@@ -105,7 +105,7 @@ class PredictionStorage:
         """Get sum of a miner's existing predictions for an issue.
 
         Args:
-            exclude_pr: Exclude this PR from the sum (for updates).
+            exclude_prs: Exclude these PRs from the sum (for batch updates).
             only_prs: If provided, only count predictions on these PRs (open PRs).
                        Predictions on closed PRs are excluded from the total,
                        freeing that probability for reallocation.
@@ -114,9 +114,10 @@ class PredictionStorage:
             query = 'SELECT COALESCE(SUM(prediction), 0.0) as total FROM predictions WHERE uid = ? AND hotkey = ? AND issue_id = ?'
             params: list = [uid, hotkey, issue_id]
 
-            if exclude_pr is not None:
-                query += ' AND pr_number != ?'
-                params.append(exclude_pr)
+            if exclude_prs:
+                placeholders = ','.join('?' for _ in exclude_prs)
+                query += f' AND pr_number NOT IN ({placeholders})'
+                params.extend(exclude_prs)
 
             if only_prs:
                 placeholders = ','.join('?' for _ in only_prs)

@@ -3,7 +3,7 @@
 
 import math
 from datetime import datetime, timezone
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 import bittensor as bt
 
@@ -20,13 +20,16 @@ from gittensor.constants import (
     MAX_OPEN_PR_THRESHOLD,
     MIN_TOKEN_SCORE_FOR_BASE_SCORE,
     OPEN_PR_THRESHOLD_TOKEN_SCORE,
+    PIONEER_DIVIDEND_MAX_RATIO,
+    PIONEER_DIVIDEND_RATE_1ST,
+    PIONEER_DIVIDEND_RATE_2ND,
+    PIONEER_DIVIDEND_RATE_REST,
     SECONDS_PER_DAY,
     SECONDS_PER_HOUR,
     TIME_DECAY_GRACE_PERIOD_HOURS,
     TIME_DECAY_MIN_MULTIPLIER,
     TIME_DECAY_SIGMOID_MIDPOINT,
     TIME_DECAY_SIGMOID_STEEPNESS_SCALAR,
-    UNIQUE_PR_BOOST,
 )
 from gittensor.utils.github_api_tools import (
     FileContentPair,
@@ -226,27 +229,6 @@ def calculate_pr_multipliers(
         pr.credibility_multiplier = 1.0
 
 
-def count_repository_contributors(miner_evaluations: Dict[int, MinerEvaluation]) -> Dict[str, int]:
-    """
-    Count how many miners contribute to each repository and log statistics.
-
-    Returns:
-        Dict[str, int]: Dictionary mapping repository names to contributor counts
-    """
-    repo_counts: Dict[str, int] = {}
-
-    for evaluation in miner_evaluations.values():
-        for repo in evaluation.unique_repos_contributed_to:
-            repo_counts[repo] = repo_counts.get(repo, 0) + 1
-
-    if repo_counts:
-        bt.logging.info(f'Repository contribution counts: {len(repo_counts)} total repositories')
-        for repo, count in sorted(repo_counts.items(), key=lambda x: -x[1]):
-            bt.logging.info(f'{repo}: {count}')
-
-    return repo_counts
-
-
 def calculate_open_pr_threshold(
     tier_stats: Dict[Tier, TierStats] = None,
 ) -> int:
@@ -304,13 +286,85 @@ def calculate_time_decay_multiplier(pr: PullRequest) -> float:
     return max(sigmoid, TIME_DECAY_MIN_MULTIPLIER)
 
 
+def calculate_pioneer_dividends(
+    miner_evaluations: Dict[int, MinerEvaluation],
+) -> None:
+    """Determine pioneers and set pioneer_rank + pioneer_dividend on each PR.
+
+    For each repo, the pioneer is the miner with the earliest merged PR that
+    passes the quality gate (is_pioneer_eligible). The pioneer's earliest PR
+    on that repo earns a dividend based on ALL followers' earned_scores (post-
+    multiplier), using per-position rates (30%/20%/10%). The dividend uses the
+    follower's multipliers, not the pioneer's — so it reflects follower quality.
+
+    Must be called AFTER all earned_scores have been computed.
+    """
+    # Build index: (repo, uid) -> eligible PRs, and per-repo aggregates for ordering
+    pr_index: Dict[str, Dict[int, list]] = {}  # repo -> {uid: [eligible PRs]}
+    repo_contributions: Dict[str, Dict[int, Tuple[datetime, int, float]]] = {}
+
+    for evaluation in miner_evaluations.values():
+        for pr in evaluation.merged_pull_requests:
+            if not pr.is_pioneer_eligible():
+                continue
+            repo = pr.repository_full_name
+            pr_index.setdefault(repo, {}).setdefault(pr.uid, []).append(pr)
+
+            current = repo_contributions.setdefault(repo, {}).get(pr.uid)
+            if current is None:
+                repo_contributions[repo][pr.uid] = (pr.merged_at, pr.number, pr.earned_score)
+            else:
+                earliest_at, earliest_num, total_score = current
+                new_total = total_score + pr.earned_score
+                if pr.merged_at < earliest_at or (pr.merged_at == earliest_at and pr.number < earliest_num):
+                    repo_contributions[repo][pr.uid] = (pr.merged_at, pr.number, new_total)
+                else:
+                    repo_contributions[repo][pr.uid] = (earliest_at, earliest_num, new_total)
+
+    # For each repo: rank contributors, calculate dividend, apply to pioneer PR
+    for repo, uid_entries in repo_contributions.items():
+        sorted_uids = sorted(uid_entries.items(), key=lambda x: (x[1][0], x[1][1]))
+
+        # Set pioneer_rank via index lookup (no full evaluation scan)
+        for rank_pos, (uid, _) in enumerate(sorted_uids):
+            for pr in pr_index[repo][uid]:
+                pr.pioneer_rank = rank_pos + 1
+
+        # Calculate dividend from followers' earned_scores
+        dividend = 0.0
+        for pos, (_, entry) in enumerate(sorted_uids[1:]):
+            follower_earned = entry[2]
+            if pos == 0:
+                dividend += follower_earned * PIONEER_DIVIDEND_RATE_1ST
+            elif pos == 1:
+                dividend += follower_earned * PIONEER_DIVIDEND_RATE_2ND
+            else:
+                dividend += follower_earned * PIONEER_DIVIDEND_RATE_REST
+
+        if dividend <= 0:
+            continue
+
+        # Find pioneer's earliest PR via index and apply capped dividend
+        pioneer_uid = sorted_uids[0][0]
+        pioneer_pr_number = sorted_uids[0][1][1]
+        pioneer_pr = next(pr for pr in pr_index[repo][pioneer_uid] if pr.number == pioneer_pr_number)
+        max_dividend = pioneer_pr.earned_score * PIONEER_DIVIDEND_MAX_RATIO
+        capped = min(dividend, max_dividend)
+        pioneer_pr.pioneer_dividend = round(capped, 2)
+        pioneer_pr.earned_score += pioneer_pr.pioneer_dividend
+
+        cap_note = f' (capped from {dividend:.2f})' if capped < dividend else ''
+        bt.logging.info(
+            f'Pioneer dividend | repo={repo} pioneer=uid {pioneer_uid} '
+            f'followers={len(sorted_uids) - 1} dividend={capped:.2f}{cap_note}'
+        )
+
+
 def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None:
-    """Finalize all miner scores: apply uniqueness multipliers, calculate totals, and deduct collateral."""
+    """Finalize all miner scores: compute earned_scores, then apply pioneer dividends, then collateral."""
     bt.logging.info('**Finalizing miner scores**')
 
-    repo_counts = count_repository_contributors(miner_evaluations)
-    total_contributing_miners = sum(1 for ev in miner_evaluations.values() if ev.unique_repos_contributed_to)
-
+    # Phase 1: Compute all earned_scores (base × multipliers) for every miner
     for uid, evaluation in miner_evaluations.items():
         if not evaluation:
             continue
@@ -348,10 +402,6 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
 
         # Process merged PRs
         for pr in evaluation.merged_pull_requests:
-            pr.repository_uniqueness_multiplier = calculate_uniqueness_multiplier(
-                pr.repository_full_name, repo_counts, total_contributing_miners
-            )
-
             # Apply spam multiplier (calculated once per miner based on unlocked tiers)
             pr.open_pr_spam_multiplier = spam_multiplier
 
@@ -364,9 +414,6 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
             pr.credibility_multiplier = round(credibility**tier_config.credibility_scalar, 2)
 
             pr.calculate_final_earned_score()
-            evaluation.base_total_score += pr.base_score
-            evaluation.total_score += pr.earned_score
-            evaluation.total_nodes_scored += pr.total_nodes_scored
 
             # Aggregate token scoring breakdown
             evaluation.total_token_score += pr.token_score
@@ -374,6 +421,25 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
             evaluation.total_structural_score += pr.structural_score
             evaluation.total_leaf_count += pr.leaf_count
             evaluation.total_leaf_score += pr.leaf_score
+
+    # Phase 2: Calculate pioneer dividends from follower earned_scores
+    # Must happen after Phase 1 so all earned_scores are available
+    calculate_pioneer_dividends(miner_evaluations)
+
+    # Phase 3: Aggregate totals (including dividends), collateral, tier stats, logging
+    for uid, evaluation in miner_evaluations.items():
+        if not evaluation:
+            continue
+
+        has_contributions = len(evaluation.merged_pull_requests) > 0 or len(evaluation.closed_pull_requests) > 0
+        if not has_contributions:
+            continue
+
+        # Aggregate scores (earned_score now includes pioneer_dividend from Phase 2)
+        for pr in evaluation.merged_pull_requests:
+            evaluation.base_total_score += pr.base_score
+            evaluation.total_score += pr.earned_score
+            evaluation.total_nodes_scored += pr.total_nodes_scored
 
         # Apply collateral deduction (0 - 0 = 0 for empty miners)
         earned_score = evaluation.total_score
@@ -429,17 +495,6 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
         )
 
     bt.logging.info('Finalization complete.')
-
-
-def calculate_uniqueness_multiplier(
-    repo_full_name: str, repo_counts: Dict[str, int], total_contributing_miners: int
-) -> float:
-    """Calculate repository uniqueness multiplier based on how many miners contribute to a repo."""
-    if total_contributing_miners == 0:
-        return 1.0
-    repo_count = repo_counts.get(repo_full_name, 0)
-    uniqueness_score = (total_contributing_miners - repo_count + 1) / total_contributing_miners
-    return 1.0 + (uniqueness_score * UNIQUE_PR_BOOST)
 
 
 def calculate_issue_multiplier(pr: PullRequest) -> float:

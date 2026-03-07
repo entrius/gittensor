@@ -699,7 +699,9 @@ class IssueCompetitionContractClient:
                 elif str_len < 16384:
                     encoded += bytes([(str_len << 2) | 1, str_len >> 6])
                 else:
-                    encoded += bytes([(str_len << 2) | 2, (str_len >> 6) & 0xFF, (str_len >> 14) & 0xFF, (str_len >> 22) & 0xFF])
+                    encoded += bytes(
+                        [(str_len << 2) | 2, (str_len >> 6) & 0xFF, (str_len >> 14) & 0xFF, (str_len >> 22) & 0xFF]
+                    )
                 encoded += str_bytes
             elif type_def == 'array32':
                 if isinstance(value, bytes):

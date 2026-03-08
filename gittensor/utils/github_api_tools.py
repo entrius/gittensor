@@ -268,18 +268,41 @@ def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -
     last_error = None
     for attempt in range(max_attempts):
         try:
-            response = requests.get(
-                f'{BASE_GITHUB_API_URL}/repos/{repository}/pulls/{pr_number}/files', headers=headers, timeout=15
-            )
-            if response.status_code == 200:
-                file_diffs = response.json()
-                return [FileChange.from_github_response(pr_number, repository, file_diff) for file_diff in file_diffs]
+            all_file_diffs: List[Dict[str, Any]] = []
+            page = 1
+            per_page = 100
 
-            last_error = f'status {response.status_code}'
+            while True:
+                response = requests.get(
+                    f'{BASE_GITHUB_API_URL}/repos/{repository}/pulls/{pr_number}/files',
+                    headers=headers,
+                    params={'per_page': str(per_page), 'page': str(page)},
+                    timeout=15,
+                )
+                if response.status_code != 200:
+                    last_error = f'status {response.status_code}'
+                    break
+
+                file_diffs = response.json()
+                if not isinstance(file_diffs, list):
+                    last_error = 'invalid JSON payload for files list'
+                    break
+
+                all_file_diffs.extend(file_diffs)
+
+                # No more pages.
+                if len(file_diffs) < per_page:
+                    return [
+                        FileChange.from_github_response(pr_number, repository, file_diff)
+                        for file_diff in all_file_diffs
+                    ]
+
+                page += 1
+
             if attempt < max_attempts - 1:
                 backoff_delay = min(5 * (2**attempt), 30)
                 bt.logging.warning(
-                    f'File changes request for PR #{pr_number} in {repository} failed with status {response.status_code} '
+                    f'File changes request for PR #{pr_number} in {repository} failed ({last_error}) '
                     f'(attempt {attempt + 1}/{max_attempts}), retrying in {backoff_delay}s...'
                 )
                 time.sleep(backoff_delay)

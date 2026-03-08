@@ -416,6 +416,102 @@ class TestFileChangesRetryLogic:
         assert len(result) == 1
 
     @patch('gittensor.utils.github_api_tools.requests.get')
+    def test_paginates_pr_files_until_last_page(self, mock_get):
+        """Test that file listing paginates when PR has more than 100 changed files."""
+        page1 = [
+            {
+                'filename': f'file_{i}.py',
+                'status': 'modified',
+                'changes': 1,
+                'additions': 1,
+                'deletions': 0,
+                'patch': '',
+            }
+            for i in range(100)
+        ]
+        page2 = [
+            {
+                'filename': 'file_100.py',
+                'status': 'modified',
+                'changes': 1,
+                'additions': 1,
+                'deletions': 0,
+                'patch': '',
+            },
+            {
+                'filename': 'file_101.py',
+                'status': 'modified',
+                'changes': 1,
+                'additions': 1,
+                'deletions': 0,
+                'patch': '',
+            },
+        ]
+
+        mock_response_page1 = Mock(status_code=200)
+        mock_response_page1.json.return_value = page1
+        mock_response_page2 = Mock(status_code=200)
+        mock_response_page2.json.return_value = page2
+
+        mock_get.side_effect = [mock_response_page1, mock_response_page2]
+
+        result = get_pull_request_file_changes('owner/repo', 1, 'fake_token')
+
+        assert result is not None
+        assert len(result) == 102
+        assert mock_get.call_count == 2
+        assert mock_get.call_args_list[0].kwargs['params'] == {'per_page': '100', 'page': '1'}
+        assert mock_get.call_args_list[1].kwargs['params'] == {'per_page': '100', 'page': '2'}
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_retry_when_second_page_fails(self, mock_logging, mock_sleep, mock_get):
+        """Test that a failure on page 2 triggers retry from page 1."""
+        page1 = [
+            {
+                'filename': f'file_{i}.py',
+                'status': 'modified',
+                'changes': 1,
+                'additions': 1,
+                'deletions': 0,
+                'patch': '',
+            }
+            for i in range(100)
+        ]
+        page2 = [
+            {
+                'filename': 'file_100.py',
+                'status': 'modified',
+                'changes': 1,
+                'additions': 1,
+                'deletions': 0,
+                'patch': '',
+            },
+        ]
+
+        ok_page1_attempt1 = Mock(status_code=200)
+        ok_page1_attempt1.json.return_value = page1
+        fail_page2_attempt1 = Mock(status_code=502, text='Bad Gateway')
+        ok_page1_attempt2 = Mock(status_code=200)
+        ok_page1_attempt2.json.return_value = page1
+        ok_page2_attempt2 = Mock(status_code=200)
+        ok_page2_attempt2.json.return_value = page2
+
+        mock_get.side_effect = [ok_page1_attempt1, fail_page2_attempt1, ok_page1_attempt2, ok_page2_attempt2]
+
+        result = get_pull_request_file_changes('owner/repo', 1, 'fake_token')
+
+        assert result is not None
+        assert len(result) == 101
+        assert mock_get.call_count == 4
+        assert mock_sleep.call_count == 1
+        assert mock_get.call_args_list[0].kwargs['params'] == {'per_page': '100', 'page': '1'}
+        assert mock_get.call_args_list[1].kwargs['params'] == {'per_page': '100', 'page': '2'}
+        assert mock_get.call_args_list[2].kwargs['params'] == {'per_page': '100', 'page': '1'}
+        assert mock_get.call_args_list[3].kwargs['params'] == {'per_page': '100', 'page': '2'}
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
     @patch('gittensor.utils.github_api_tools.time.sleep')
     @patch('gittensor.utils.github_api_tools.bt.logging')
     def test_retry_on_502_then_success(self, mock_logging, mock_sleep, mock_get):

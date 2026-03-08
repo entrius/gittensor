@@ -914,6 +914,232 @@ def _make_graphql_response(pr_nodes):
     return mock_response
 
 
+_escape_graphql_expression = github_api_tools._escape_graphql_expression
+_MAX_FILES_PER_GRAPHQL_BATCH = github_api_tools._MAX_FILES_PER_GRAPHQL_BATCH
+fetch_file_contents_batch = github_api_tools.fetch_file_contents_batch
+fetch_file_contents_with_base = github_api_tools.fetch_file_contents_with_base
+FileContentPair = github_api_tools.FileContentPair
+
+
+# ============================================================================
+# GraphQL Expression Escaping Tests
+# ============================================================================
+
+
+class TestEscapeGraphQLExpression:
+    """Tests for _escape_graphql_expression helper."""
+
+    def test_plain_path_unchanged(self):
+        """Normal file paths pass through unmodified."""
+        assert _escape_graphql_expression('abc123:src/main.py') == 'abc123:src/main.py'
+
+    def test_double_quotes_escaped(self):
+        """Double quotes in paths are escaped to prevent query breakage."""
+        assert _escape_graphql_expression('abc123:path/with"quote.py') == 'abc123:path/with\\"quote.py'
+
+    def test_backslash_escaped(self):
+        """Backslashes in paths are escaped."""
+        assert _escape_graphql_expression('abc123:path\\file.py') == 'abc123:path\\\\file.py'
+
+    def test_both_quote_and_backslash(self):
+        """Paths with both special characters are fully escaped."""
+        result = _escape_graphql_expression('abc123:dir\\"file.py')
+        assert result == 'abc123:dir\\\\\\"file.py'
+
+    def test_empty_string(self):
+        """Empty string returns empty string."""
+        assert _escape_graphql_expression('') == ''
+
+
+# ============================================================================
+# File Contents Batch Tests
+# ============================================================================
+
+
+class TestFetchFileContentsBatch:
+    """Tests for fetch_file_contents_batch batching and escaping."""
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    def test_empty_paths_returns_empty(self, mock_graphql):
+        """Empty file list returns empty dict without any API call."""
+        result = fetch_file_contents_batch('owner', 'repo', 'abc123', [], 'token')
+        assert result == {}
+        mock_graphql.assert_not_called()
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    def test_small_batch_single_request(self, mock_graphql):
+        """Few files are fetched in a single GraphQL request."""
+        mock_graphql.return_value = {
+            'data': {
+                'repository': {
+                    'file0': {'text': 'content_a', 'byteSize': 9, 'isBinary': False},
+                    'file1': {'text': 'content_b', 'byteSize': 9, 'isBinary': False},
+                }
+            }
+        }
+
+        result = fetch_file_contents_batch('owner', 'repo', 'abc123', ['a.py', 'b.py'], 'token')
+
+        assert mock_graphql.call_count == 1
+        assert result == {'a.py': 'content_a', 'b.py': 'content_b'}
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    def test_large_batch_split_into_multiple_requests(self, mock_graphql):
+        """More files than _MAX_FILES_PER_GRAPHQL_BATCH triggers multiple requests."""
+        total_files = _MAX_FILES_PER_GRAPHQL_BATCH + 10
+        paths = [f'file_{i}.py' for i in range(total_files)]
+
+        def side_effect(query, variables, token):
+            # Count how many file aliases are in the query
+            count = query.count('... on Blob')
+            repo_data = {}
+            for i in range(count):
+                repo_data[f'file{i}'] = {'text': f'content', 'byteSize': 7, 'isBinary': False}
+            return {'data': {'repository': repo_data}}
+
+        mock_graphql.side_effect = side_effect
+
+        result = fetch_file_contents_batch('owner', 'repo', 'abc123', paths, 'token')
+
+        assert mock_graphql.call_count == 2, 'Should split into 2 batches'
+        assert len(result) == total_files
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    def test_special_characters_in_path_escaped(self, mock_graphql):
+        """File paths with special characters are properly escaped in the query."""
+        mock_graphql.return_value = {
+            'data': {
+                'repository': {
+                    'file0': {'text': 'ok', 'byteSize': 2, 'isBinary': False},
+                }
+            }
+        }
+
+        fetch_file_contents_batch('owner', 'repo', 'abc123', ['path/with"quote.py'], 'token')
+
+        query_arg = mock_graphql.call_args[0][0]
+        assert '\\"' in query_arg, 'Double quotes in path should be escaped in GraphQL query'
+        assert 'with"quote' not in query_arg, 'Unescaped double quote should not appear'
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    def test_failed_batch_returns_none_for_affected_files(self, mock_graphql):
+        """Failed GraphQL request returns None for all files in that batch."""
+        mock_graphql.return_value = None
+
+        result = fetch_file_contents_batch('owner', 'repo', 'abc123', ['a.py', 'b.py'], 'token')
+
+        assert result == {'a.py': None, 'b.py': None}
+
+
+# ============================================================================
+# File Contents With Base Batch Tests
+# ============================================================================
+
+
+class TestFetchFileContentsWithBase:
+    """Tests for fetch_file_contents_with_base batching and escaping."""
+
+    @staticmethod
+    def _make_file_change(filename, status='modified', previous_filename=None):
+        """Create a mock FileChange object."""
+        fc = Mock()
+        fc.filename = filename
+        fc.status = status
+        fc.previous_filename = previous_filename
+        return fc
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    def test_empty_file_changes_returns_empty(self, mock_graphql):
+        """Empty file changes returns empty dict."""
+        result = fetch_file_contents_with_base('owner', 'repo', 'base', 'head', [], 'token')
+        assert result == {}
+        mock_graphql.assert_not_called()
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    def test_escapes_special_characters_in_paths(self, mock_graphql):
+        """File paths with special characters are escaped in both base and head expressions."""
+        fc = self._make_file_change('path/with"quote.py')
+        mock_graphql.return_value = {
+            'data': {
+                'repository': {
+                    'base0': {'text': 'old', 'byteSize': 3, 'isBinary': False},
+                    'head0': {'text': 'new', 'byteSize': 3, 'isBinary': False},
+                }
+            }
+        }
+
+        fetch_file_contents_with_base('owner', 'repo', 'base_sha', 'head_sha', [fc], 'token')
+
+        query_arg = mock_graphql.call_args[0][0]
+        assert 'with\\"quote' in query_arg, 'Double quotes should be escaped'
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    def test_large_pr_batched(self, mock_graphql):
+        """PRs with many files are split into batches."""
+        total_files = _MAX_FILES_PER_GRAPHQL_BATCH + 5
+        file_changes = [self._make_file_change(f'file_{i}.py') for i in range(total_files)]
+
+        def side_effect(query, variables, token):
+            repo_data = {}
+            # Count base/head aliases in the query
+            for prefix in ('base', 'head'):
+                i = 0
+                while f'{prefix}{i}:' in query:
+                    repo_data[f'{prefix}{i}'] = {'text': 'content', 'byteSize': 7, 'isBinary': False}
+                    i += 1
+            return {'data': {'repository': repo_data}}
+
+        mock_graphql.side_effect = side_effect
+
+        result = fetch_file_contents_with_base(
+            'owner', 'repo', 'base_sha', 'head_sha', file_changes, 'token'
+        )
+
+        assert mock_graphql.call_count == 2, 'Should split into 2 batches'
+        assert len(result) == total_files
+        for fc in file_changes:
+            assert fc.filename in result
+            assert isinstance(result[fc.filename], FileContentPair)
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    def test_added_file_no_base_fetch(self, mock_graphql):
+        """Added files should not fetch base content."""
+        fc = self._make_file_change('new_file.py', status='added')
+        mock_graphql.return_value = {
+            'data': {
+                'repository': {
+                    'head0': {'text': 'new content', 'byteSize': 11, 'isBinary': False},
+                }
+            }
+        }
+
+        result = fetch_file_contents_with_base('owner', 'repo', 'base_sha', 'head_sha', [fc], 'token')
+
+        assert result['new_file.py'].old_content is None
+        assert result['new_file.py'].new_content == 'new content'
+        query_arg = mock_graphql.call_args[0][0]
+        assert 'base0' not in query_arg, 'Should not fetch base for added file'
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    def test_removed_file_no_head_fetch(self, mock_graphql):
+        """Removed files should not fetch head content."""
+        fc = self._make_file_change('deleted.py', status='removed')
+        mock_graphql.return_value = {
+            'data': {
+                'repository': {
+                    'base0': {'text': 'old content', 'byteSize': 11, 'isBinary': False},
+                }
+            }
+        }
+
+        result = fetch_file_contents_with_base('owner', 'repo', 'base_sha', 'head_sha', [fc], 'token')
+
+        assert result['deleted.py'].old_content == 'old content'
+        assert result['deleted.py'].new_content is None
+        query_arg = mock_graphql.call_args[0][0]
+        assert 'head0' not in query_arg, 'Should not fetch head for removed file'
+
+
 class TestLoadMinersPrsErrorResilience:
     """Test that a single bad PR doesn't abort fetching for the entire miner."""
 

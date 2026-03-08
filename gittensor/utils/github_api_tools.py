@@ -980,6 +980,28 @@ def check_github_issue_closed(repo: str, issue_number: int, token: str) -> Optio
         return None
 
 
+def _escape_graphql_expression(expression: str) -> str:
+    """Escape special characters in a GraphQL string literal.
+
+    File paths containing backslashes or double quotes break GraphQL query
+    syntax when interpolated directly. This escapes them so the query remains
+    valid.
+
+    Args:
+        expression: Raw string to embed inside a GraphQL double-quoted literal.
+
+    Returns:
+        Escaped string safe for embedding in GraphQL queries.
+    """
+    return expression.replace('\\', '\\\\').replace('"', '\\"')
+
+
+# Maximum files per GraphQL batch request. GitHub's GraphQL API has query
+# complexity limits; batching too many object lookups in a single request can
+# cause a 502/complexity error and lose all results.
+_MAX_FILES_PER_GRAPHQL_BATCH = 50
+
+
 def fetch_file_contents_batch(
     repo_owner: str,
     repo_name: str,
@@ -988,9 +1010,10 @@ def fetch_file_contents_batch(
     token: str,
 ) -> Dict[str, Optional[str]]:
     """
-    Fetch multiple file contents from a repository in a single GraphQL request.
+    Fetch multiple file contents from a repository in batched GraphQL requests.
 
-    Uses retry logic with exponential backoff for reliability.
+    Uses retry logic with exponential backoff for reliability. Batches files
+    to avoid exceeding GitHub's GraphQL complexity limits.
 
     Args:
         repo_owner: Repository owner
@@ -1005,47 +1028,53 @@ def fetch_file_contents_batch(
     if not file_paths:
         return {}
 
-    # Build GraphQL query with aliased file fields
-    file_fields = []
-    for i, path in enumerate(file_paths):
-        expression = f'{head_sha}:{path}'
-        file_fields.append(
-            f'file{i}: object(expression: "{expression}") {{ ... on Blob {{ text byteSize isBinary }} }}'
-        )
+    results: Dict[str, Optional[str]] = {}
 
-    query = f"""
-        query($owner: String!, $name: String!) {{
-            repository(owner: $owner, name: $name) {{
-                {' '.join(file_fields)}
+    # Process files in batches to avoid exceeding GraphQL complexity limits
+    for batch_start in range(0, len(file_paths), _MAX_FILES_PER_GRAPHQL_BATCH):
+        batch_paths = file_paths[batch_start : batch_start + _MAX_FILES_PER_GRAPHQL_BATCH]
+
+        # Build GraphQL query with aliased file fields
+        file_fields = []
+        for i, path in enumerate(batch_paths):
+            expression = _escape_graphql_expression(f'{head_sha}:{path}')
+            file_fields.append(
+                f'file{i}: object(expression: "{expression}") {{ ... on Blob {{ text byteSize isBinary }} }}'
+            )
+
+        query = f"""
+            query($owner: String!, $name: String!) {{
+                repository(owner: $owner, name: $name) {{
+                    {' '.join(file_fields)}
+                }}
             }}
-        }}
-    """
+        """
 
-    variables = {'owner': repo_owner, 'name': repo_name}
+        variables = {'owner': repo_owner, 'name': repo_name}
 
-    # Execute with retry logic
-    data = execute_graphql_query(query, variables, token)
-    if data is None:
-        bt.logging.warning(f'Failed to fetch file contents for {repo_owner}/{repo_name}')
-        return {path: None for path in file_paths}
+        data = execute_graphql_query(query, variables, token)
+        if data is None:
+            bt.logging.warning(f'Failed to fetch file contents for {repo_owner}/{repo_name}')
+            for path in batch_paths:
+                results[path] = None
+            continue
 
-    if 'errors' in data:
-        bt.logging.warning(f'GraphQL errors fetching files: {data["errors"]}')
+        if 'errors' in data:
+            bt.logging.warning(f'GraphQL errors fetching files: {data["errors"]}')
 
-    repo_data = data.get('data', {}).get('repository', {})
-    results = {}
+        repo_data = data.get('data', {}).get('repository', {})
 
-    for i, path in enumerate(file_paths):
-        file_data = repo_data.get(f'file{i}')
+        for i, path in enumerate(batch_paths):
+            file_data = repo_data.get(f'file{i}')
 
-        if file_data is None:
-            results[path] = None
-        elif file_data.get('isBinary'):
-            results[path] = None
-        elif file_data.get('byteSize', 0) > MAX_FILE_SIZE_BYTES:
-            results[path] = None
-        else:
-            results[path] = file_data.get('text')
+            if file_data is None:
+                results[path] = None
+            elif file_data.get('isBinary'):
+                results[path] = None
+            elif file_data.get('byteSize', 0) > MAX_FILE_SIZE_BYTES:
+                results[path] = None
+            else:
+                results[path] = file_data.get('text')
 
     return results
 
@@ -1058,6 +1087,78 @@ class FileContentPair:
     new_content: Optional[str]  # None for deleted files
 
 
+def _fetch_file_contents_with_base_batch(
+    repo_owner: str,
+    repo_name: str,
+    base_sha: str,
+    head_sha: str,
+    file_changes: List['FileChangeType'],
+    token: str,
+) -> Dict[str, FileContentPair]:
+    """Fetch base and head file contents for a single batch of file changes.
+
+    Internal helper called by fetch_file_contents_with_base for each batch.
+    """
+    file_fields = []
+    for i, fc in enumerate(file_changes):
+        base_path = fc.previous_filename if fc.previous_filename else fc.filename
+        head_path = fc.filename
+
+        if fc.status != 'added':
+            base_expr = _escape_graphql_expression(f'{base_sha}:{base_path}')
+            file_fields.append(
+                f'base{i}: object(expression: "{base_expr}") {{ ... on Blob {{ text byteSize isBinary }} }}'
+            )
+
+        if fc.status != 'removed':
+            head_expr = _escape_graphql_expression(f'{head_sha}:{head_path}')
+            file_fields.append(
+                f'head{i}: object(expression: "{head_expr}") {{ ... on Blob {{ text byteSize isBinary }} }}'
+            )
+
+    if not file_fields:
+        return {}
+
+    query = f"""
+        query($owner: String!, $name: String!) {{
+            repository(owner: $owner, name: $name) {{
+                {' '.join(file_fields)}
+            }}
+        }}
+    """
+
+    variables = {'owner': repo_owner, 'name': repo_name}
+
+    data = execute_graphql_query(query, variables, token)
+    if data is None:
+        bt.logging.warning(f'Failed to fetch file contents for {repo_owner}/{repo_name}')
+        return {fc.filename: FileContentPair(None, None) for fc in file_changes}
+
+    if 'errors' in data:
+        bt.logging.warning(f'GraphQL errors fetching files: {data["errors"]}')
+
+    repo_data = data.get('data', {}).get('repository', {})
+    results: Dict[str, FileContentPair] = {}
+
+    for i, fc in enumerate(file_changes):
+        old_content = None
+        new_content = None
+
+        if fc.status != 'added':
+            base_data = repo_data.get(f'base{i}')
+            if base_data and not base_data.get('isBinary') and base_data.get('byteSize', 0) <= MAX_FILE_SIZE_BYTES:
+                old_content = base_data.get('text')
+
+        if fc.status != 'removed':
+            head_data = repo_data.get(f'head{i}')
+            if head_data and not head_data.get('isBinary') and head_data.get('byteSize', 0) <= MAX_FILE_SIZE_BYTES:
+                new_content = head_data.get('text')
+
+        results[fc.filename] = FileContentPair(old_content=old_content, new_content=new_content)
+
+    return results
+
+
 def fetch_file_contents_with_base(
     repo_owner: str,
     repo_name: str,
@@ -1067,7 +1168,11 @@ def fetch_file_contents_with_base(
     token: str,
 ) -> Dict[str, FileContentPair]:
     """
-    Fetch both base and head (old and new) versions of files in a single GraphQL request.
+    Fetch both base and head (old and new) versions of files via batched GraphQL requests.
+
+    Large PRs are split into batches to avoid exceeding GitHub's GraphQL query
+    complexity limits. File paths are escaped to prevent query syntax errors
+    from special characters.
 
     Args:
         repo_owner: Repository owner
@@ -1086,69 +1191,13 @@ def fetch_file_contents_with_base(
     if not file_changes:
         return {}
 
-    # Build GraphQL query with both base and head versions
-    file_fields = []
-    for i, fc in enumerate(file_changes):
-        # Determine the path to fetch for base version
-        # For renames, use previous_filename; otherwise use current filename
-        base_path = fc.previous_filename if fc.previous_filename else fc.filename
-        head_path = fc.filename
-
-        # Only fetch base version if file wasn't newly added
-        if fc.status != 'added':
-            base_expr = f'{base_sha}:{base_path}'
-            file_fields.append(
-                f'base{i}: object(expression: "{base_expr}") {{ ... on Blob {{ text byteSize isBinary }} }}'
-            )
-
-        # Only fetch head version if file wasn't deleted
-        if fc.status != 'removed':
-            head_expr = f'{head_sha}:{head_path}'
-            file_fields.append(
-                f'head{i}: object(expression: "{head_expr}") {{ ... on Blob {{ text byteSize isBinary }} }}'
-            )
-
-    if not file_fields:
-        return {}
-
-    query = f"""
-        query($owner: String!, $name: String!) {{
-            repository(owner: $owner, name: $name) {{
-                {' '.join(file_fields)}
-            }}
-        }}
-    """
-
-    variables = {'owner': repo_owner, 'name': repo_name}
-
-    # Execute with retry logic
-    data = execute_graphql_query(query, variables, token)
-    if data is None:
-        bt.logging.warning(f'Failed to fetch file contents for {repo_owner}/{repo_name}')
-        return {fc.filename: FileContentPair(None, None) for fc in file_changes}
-
-    if 'errors' in data:
-        bt.logging.warning(f'GraphQL errors fetching files: {data["errors"]}')
-
-    repo_data = data.get('data', {}).get('repository', {})
     results: Dict[str, FileContentPair] = {}
 
-    for i, fc in enumerate(file_changes):
-        old_content = None
-        new_content = None
-
-        # Extract base (old) content if applicable
-        if fc.status != 'added':
-            base_data = repo_data.get(f'base{i}')
-            if base_data and not base_data.get('isBinary') and base_data.get('byteSize', 0) <= MAX_FILE_SIZE_BYTES:
-                old_content = base_data.get('text')
-
-        # Extract head (new) content if applicable
-        if fc.status != 'removed':
-            head_data = repo_data.get(f'head{i}')
-            if head_data and not head_data.get('isBinary') and head_data.get('byteSize', 0) <= MAX_FILE_SIZE_BYTES:
-                new_content = head_data.get('text')
-
-        results[fc.filename] = FileContentPair(old_content=old_content, new_content=new_content)
+    for batch_start in range(0, len(file_changes), _MAX_FILES_PER_GRAPHQL_BATCH):
+        batch = file_changes[batch_start : batch_start + _MAX_FILES_PER_GRAPHQL_BATCH]
+        batch_results = _fetch_file_contents_with_base_batch(
+            repo_owner, repo_name, base_sha, head_sha, batch, token
+        )
+        results.update(batch_results)
 
     return results

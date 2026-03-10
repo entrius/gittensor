@@ -2,61 +2,133 @@
 # Copyright © 2025 Entrius
 
 import asyncio
-from typing import TYPE_CHECKING, Dict
+from typing import TYPE_CHECKING, Dict, Tuple
 
 import bittensor as bt
+import numpy as np
 
 from gittensor.classes import MinerEvaluation
-from gittensor.constants import ISSUES_TREASURY_EMISSION_SHARE, ISSUES_TREASURY_UID
+from gittensor.constants import ISSUES_TREASURY_EMISSION_SHARE, ISSUES_TREASURY_UID, PREDICTIONS_EMISSIONS_SHARE
+from gittensor.utils.uids import get_all_uids
+from gittensor.validator.issue_competitions.forward import issue_competitions
+from gittensor.validator.merge_predictions.settlement import merge_predictions
+from gittensor.validator.oss_contributions.reward import get_rewards
+from gittensor.validator.utils.config import VALIDATOR_STEPS_INTERVAL, VALIDATOR_WAIT
 from gittensor.validator.utils.load_weights import (
     load_master_repo_weights,
     load_programming_language_weights,
     load_token_config,
 )
 
-# ADD THIS for proper type hinting to navigate code easier.
 if TYPE_CHECKING:
-    from neurons.base.validator import BaseValidatorNeuron
-
-# Issue bounties integration
-from gittensor.utils.github_api_tools import check_github_issue_closed
-from gittensor.utils.uids import get_all_uids
-from gittensor.validator.evaluation.reward import get_rewards
-from gittensor.validator.issue_competitions.contract_client import IssueCompetitionContractClient, IssueStatus
-from gittensor.validator.utils.config import GITTENSOR_VALIDATOR_PAT, VALIDATOR_STEPS_INTERVAL, VALIDATOR_WAIT
-from gittensor.validator.utils.issue_competitions import (
-    get_contract_address,
-    get_miner_coldkey,
-)
+    from neurons.validator import Validator
 
 
-async def forward(self: 'BaseValidatorNeuron') -> None:
+async def forward(self: 'Validator') -> None:
     """Execute the validator's forward pass.
 
     Performs the core validation cycle every VALIDATOR_STEPS_INTERVAL steps:
-    1. Get all available miner UIDs
-    2. Score OSS contributions and get miner evaluations
-    3. Update scores using exponential moving average
-    4. Run issue bounties verification (needs tier data from scoring)
+    1. Score OSS contributions (pure scoring, no side effects)
+    2. Run issue bounties verification (needs tier data from scoring)
+    3. Settle merge predictions (score + update EMAs)
+    4. Build blended rewards array across all emission sources
+    5. Update scores with blended rewards
 
-    Args:
-        self: The validator instance containing all necessary state
+    Emission blending:
+    - OSS contributions: 70% (1.0 - treasury - predictions)
+    - Issue bounties treasury: 15% flat to treasury UID
+    - Merge predictions: 15% distributed by EMA scores
     """
 
     if self.step % VALIDATOR_STEPS_INTERVAL == 0:
         miner_uids = get_all_uids(self)
 
-        # Score OSS contributions - returns evaluations for issue verification
-        miner_evaluations = await oss_contributions(self, miner_uids)
+        rewards, miner_evaluations = await oss_contributions(self, miner_uids)
 
-        # Issue bounties verification
-        await issues_competition(self, miner_evaluations)
+        await issue_competitions(self, miner_evaluations)
+
+        await merge_predictions(self, miner_evaluations)
+
+        # Build blended rewards array across all emission sources
+        oss_share = 1.0 - ISSUES_TREASURY_EMISSION_SHARE - PREDICTIONS_EMISSIONS_SHARE
+        rewards *= oss_share
+
+        if ISSUES_TREASURY_UID > 0 and ISSUES_TREASURY_UID in miner_uids:
+            sorted_uids = sorted(miner_uids)
+            treasury_idx = sorted_uids.index(ISSUES_TREASURY_UID)
+            rewards[treasury_idx] = ISSUES_TREASURY_EMISSION_SHARE
+
+            bt.logging.info(
+                f'Treasury allocation: Smart Contract UID {ISSUES_TREASURY_UID} receives '
+                f'{ISSUES_TREASURY_EMISSION_SHARE * 100:.0f}% of emissions'
+            )
+
+        prediction_rewards = build_prediction_ema_rewards(self, miner_uids, miner_evaluations)
+        rewards += prediction_rewards
+
+        bt.logging.info(
+            f'Blended rewards: OSS {oss_share * 100:.0f}% + treasury {ISSUES_TREASURY_EMISSION_SHARE * 100:.0f}% '
+            f'+ predictions {PREDICTIONS_EMISSIONS_SHARE * 100:.0f}% '
+            f'(prediction sum={prediction_rewards.sum():.4f})'
+        )
+
+        self.update_scores(rewards, miner_uids)
 
     await asyncio.sleep(VALIDATOR_WAIT)
 
 
-async def oss_contributions(self: 'BaseValidatorNeuron', miner_uids: set[int]) -> Dict[int, MinerEvaluation]:
-    """Score OSS contributions and return miner evaluations for downstream use."""
+def build_prediction_ema_rewards(
+    self: 'Validator',
+    miner_uids: set[int],
+    miner_evaluations: Dict[int, MinerEvaluation],
+) -> np.ndarray:
+    """Build rewards array from prediction EMA scores, scaled to PREDICTIONS_EMISSIONS_SHARE.
+
+    Maps github_id-keyed EMAs back to UIDs via miner_evaluations.
+    """
+    sorted_uids = sorted(miner_uids)
+    prediction_rewards = np.zeros(len(sorted_uids), dtype=np.float64)
+
+    all_emas = self.mp_storage.get_all_emas()
+    if not all_emas:
+        return prediction_rewards
+
+    # Build github_id -> uid mapping from current miner evaluations
+    # NOTE: detect_and_penalize_miners_sharing_github() already zeroes github_id
+    # for duplicate accounts before this runs, so the '!= 0' filter handles them.
+    github_id_to_uid: Dict[str, int] = {}
+    for uid, evaluation in miner_evaluations.items():
+        if evaluation and evaluation.github_id and evaluation.github_id != '0':
+            github_id_to_uid[evaluation.github_id] = uid
+
+    for mp_record in all_emas:
+        github_id = mp_record['github_id']
+        ema_score = mp_record['ema_score']
+
+        if ema_score <= 0:
+            continue
+
+        uid = github_id_to_uid.get(github_id)
+        if uid is None or uid not in miner_uids:
+            continue
+
+        idx = sorted_uids.index(uid)
+        prediction_rewards[idx] = ema_score
+
+    # Normalize to sum=1.0, then scale to prediction share
+    total = prediction_rewards.sum()
+    if total > 0:
+        prediction_rewards = (prediction_rewards / total) * PREDICTIONS_EMISSIONS_SHARE
+
+    return prediction_rewards
+
+
+async def oss_contributions(self: 'Validator', miner_uids: set[int]) -> Tuple[np.ndarray, Dict[int, MinerEvaluation]]:
+    """Score OSS contributions and return raw rewards + miner evaluations.
+
+    Pure scoring — no treasury allocation or weight updates. Those are
+    handled by the caller (forward()).
+    """
     master_repositories = load_master_repo_weights()
     programming_languages = load_programming_language_weights()
     token_config = load_token_config()
@@ -73,191 +145,4 @@ async def oss_contributions(self: 'BaseValidatorNeuron', miner_uids: set[int]) -
         self, miner_uids, master_repositories, programming_languages, token_config
     )
 
-    # -------------------------------------------------------------------------
-    # Issue Bounties Treasury Allocation
-    # The smart contract neuron (ISSUES_TREASURY_UID) accumulates emissions
-    # which fund issue bounty payouts. We allocate a fixed percentage of
-    # total emissions to this treasury by scaling down all miner rewards
-    # and assigning the remainder to the treasury UID.
-    # -------------------------------------------------------------------------
-    if ISSUES_TREASURY_UID > 0 and ISSUES_TREASURY_UID in miner_uids:
-        treasury_share = ISSUES_TREASURY_EMISSION_SHARE
-        miner_share = 1.0 - treasury_share
-
-        # rewards array is indexed by position in sorted(miner_uids)
-        sorted_uids = sorted(miner_uids)
-        treasury_idx = sorted_uids.index(ISSUES_TREASURY_UID)
-
-        # Scale down all rewards proportionally
-        rewards *= miner_share
-
-        # Assign treasury's share
-        rewards[treasury_idx] = treasury_share
-
-        bt.logging.info(
-            f'Treasury allocation: Smart Contract UID {ISSUES_TREASURY_UID} receives '
-            f'{treasury_share * 100:.0f}% of emissions, miners share {miner_share * 100:.0f}%'
-        )
-
-    self.update_scores(rewards, miner_uids)
-
-    return miner_evaluations
-
-
-async def issues_competition(
-    self: 'BaseValidatorNeuron',
-    miner_evaluations: Dict[int, MinerEvaluation],
-) -> None:
-    """
-    Run the issue bounties forward pass.
-
-    1. Harvest emissions into the bounty pool
-    2. Get active issues from the smart contract
-    3. For each active issue, check GitHub:
-       - If solved by bronze+ miner -> vote_solution
-       - If closed but not by eligible miner -> vote_cancel_issue
-
-    Args:
-        self: The validator instance
-        miner_evaluations: Fresh scoring data from oss_contributions(), keyed by UID
-    """
-    try:
-        if not GITTENSOR_VALIDATOR_PAT:
-            bt.logging.info('GITTENSOR_VALIDATOR_PAT not set, skipping issue bounties voting entirely.')
-            return
-
-        contract_addr = get_contract_address()
-        if not contract_addr:
-            bt.logging.warning('Issue bounties: no contract address configured')
-            return
-
-        bt.logging.info('***** Starting Issue Bounties *****')
-        bt.logging.info(f'Contract address: {contract_addr}')
-
-        # Create contract client
-        contract_client = IssueCompetitionContractClient(
-            contract_address=contract_addr,
-            subtensor=self.subtensor,
-        )
-
-        # Harvest emissions first - flush accumulated stake into bounty pool
-        harvest_result = contract_client.harvest_emissions(self.wallet)
-        if harvest_result and harvest_result.get('status') == 'success':
-            bt.logging.success(f'Harvested emissions! Extrinsic: {harvest_result.get("tx_hash", "")}')
-
-        # Build mapping of github_id->hotkey for bronze+ miners only (eligible for payouts)
-        eligible_miners = {
-            eval.github_id: eval.hotkey
-            for eval in miner_evaluations.values()
-            if eval.github_id and eval.github_id != '0' and eval.current_tier is not None
-        }
-        bt.logging.info(
-            f'Issue bounties: {len(eligible_miners)} eligible miners (bronze+) out of {len(miner_evaluations)} total'
-        )
-        for github_id, hotkey in eligible_miners.items():
-            bt.logging.info(f'  Eligible miner: github_id={github_id}, hotkey={hotkey[:12]}...')
-
-        # Get active issues from contract
-        active_issues = contract_client.get_issues_by_status(IssueStatus.ACTIVE)
-        bt.logging.info(f'Found {len(active_issues)} active issues')
-
-        votes_cast = 0
-        cancels_cast = 0
-        errors = []
-
-        for issue in active_issues:
-            bounty_display = issue.bounty_amount / 1e9
-            issue_label = (
-                f'{issue.repository_full_name}#{issue.issue_number} (id={issue.id}, bounty={bounty_display:.2f} ALPHA)'
-            )
-            try:
-                bt.logging.info(f'--- Processing issue: {issue_label} ---')
-
-                github_state = check_github_issue_closed(
-                    issue.repository_full_name, issue.issue_number, GITTENSOR_VALIDATOR_PAT
-                )
-
-                if github_state is None:
-                    bt.logging.warning(f'Could not check GitHub state for {issue_label}')
-                    continue
-
-                if not github_state.get('is_closed'):
-                    bt.logging.info(f'Issue still open on GitHub: {issue_label}')
-                    continue
-
-                solver_github_id = github_state.get('solver_github_id')
-                pr_number = github_state.get('pr_number')
-                bt.logging.info(
-                    f'Issue closed on GitHub: {issue_label} | solver_github_id={solver_github_id}, pr_number={pr_number}'
-                )
-
-                if not solver_github_id:
-                    bt.logging.info(f'No identifiable solver, voting cancel: {issue_label}')
-                    success = contract_client.vote_cancel_issue(
-                        issue_id=issue.id,
-                        reason='Issue closed without identifiable solver',
-                        wallet=self.wallet,
-                    )
-                    if success:
-                        cancels_cast += 1
-                        bt.logging.info(f'Voted cancel (no solver): {issue_label}')
-                    continue
-
-                miner_hotkey = eligible_miners.get(str(solver_github_id))
-                if not miner_hotkey:
-                    bt.logging.info(f'Solver {solver_github_id} not in eligible miners, voting cancel: {issue_label}')
-                    success = contract_client.vote_cancel_issue(
-                        issue_id=issue.id,
-                        reason=f'Issue closed externally (not by eligible miner, solver: {solver_github_id})',
-                        wallet=self.wallet,
-                    )
-                    if success:
-                        cancels_cast += 1
-                        bt.logging.info(f'Voted cancel (solver {solver_github_id} not eligible): {issue_label}')
-                    continue
-
-                miner_coldkey = get_miner_coldkey(miner_hotkey, self.subtensor, self.config.netuid)
-                if not miner_coldkey:
-                    bt.logging.warning(
-                        f'Could not get coldkey for hotkey {miner_hotkey} (solver {solver_github_id}): {issue_label}'
-                    )
-                    continue
-
-                bt.logging.info(
-                    f'Voting solution: {issue_label} | PR#{pr_number}, solver={solver_github_id}, hotkey={miner_hotkey[:12]}...'
-                )
-                success = contract_client.vote_solution(
-                    issue_id=issue.id,
-                    solver_hotkey=miner_hotkey,
-                    solver_coldkey=miner_coldkey,
-                    pr_number=pr_number or 0,
-                    wallet=self.wallet,
-                )
-                if success:
-                    votes_cast += 1
-                    bt.logging.success(
-                        f'Voted solution for {issue_label}: hotkey={miner_hotkey[:12]}..., PR#{pr_number}'
-                    )
-                else:
-                    bt.logging.warning(f'Vote solution call failed: {issue_label}')
-                    errors.append(f'Vote failed for {issue_label}')
-
-            except Exception as e:
-                bt.logging.error(f'Error processing {issue_label}: {e}')
-                errors.append(f'{issue_label}: {str(e)}')
-
-        if errors:
-            bt.logging.warning(f'Issue bounties errors: {errors[:3]}')
-
-        if votes_cast > 0 or cancels_cast > 0:
-            bt.logging.success(
-                f'=== Issue Bounties Complete: processed {len(active_issues)} issues, '
-                f'{votes_cast} solution votes, {cancels_cast} cancel votes ==='
-            )
-        else:
-            bt.logging.info(
-                f'***** Issue Bounties Complete: processed {len(active_issues)} issues (no state changes) *****'
-            )
-
-    except Exception as e:
-        bt.logging.error(f'Issue bounties forward failed: {e}')
+    return rewards, miner_evaluations

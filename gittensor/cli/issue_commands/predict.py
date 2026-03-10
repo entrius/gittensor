@@ -7,6 +7,8 @@ import json as json_mod
 
 import click
 
+from gittensor.miner.broadcast import broadcast_predictions
+
 from .help import StyledCommand
 from .helpers import (
     _is_interactive,
@@ -24,6 +26,7 @@ from .helpers import (
     print_network_header,
     print_success,
     print_warning,
+    resolve_netuid_from_contract,
     resolve_network,
     success_panel,
     validate_issue_id,
@@ -137,6 +140,10 @@ def issues_predict(
     ws_endpoint, network_name = resolve_network(network, rpc_url)
     effective_wallet, effective_hotkey = _resolve_wallet_identity(wallet_name, wallet_hotkey)
 
+    netuid = resolve_netuid_from_contract(ws_endpoint, contract_addr)
+    if netuid is None:
+        handle_exception(as_json, 'Could not resolve netuid from contract.')
+
     if not as_json:
         print_network_header(network_name, contract_addr)
         console.print(f'Wallet: {effective_wallet}/{effective_hotkey}\n')
@@ -173,17 +180,7 @@ def issues_predict(
             print_warning('Prediction cancelled')
             return
 
-    # 7) Interactive mode: verify miner first to avoid wasting manual input.
-    if is_interactive_mode:
-        _resolve_registered_miner_hotkey(
-            wallet_name=effective_wallet,
-            wallet_hotkey=effective_hotkey,
-            ws_endpoint=ws_endpoint,
-            contract_addr=contract_addr,
-            as_json=as_json,
-        )
-
-    # 8) Collect predictions by mode; validate PR membership for non-interactive modes.
+    # 7) Collect predictions by mode; validate PR membership for non-interactive modes.
     try:
         if is_interactive_mode:
             predictions = _collect_predictions_interactive(pull_requests)
@@ -193,29 +190,15 @@ def issues_predict(
     except (click.ClickException, click.BadParameter) as e:
         handle_exception(as_json, str(e))
 
-    # 9) Single/batch modes: verify miner after prediction payload validation.
-    if not is_interactive_mode:
-        _resolve_registered_miner_hotkey(
-            wallet_name=effective_wallet,
-            wallet_hotkey=effective_hotkey,
-            ws_endpoint=ws_endpoint,
-            contract_addr=contract_addr,
-            as_json=as_json,
-        )
+    payload = {
+        'issue_id': issue_id,
+        'repository': repo_full_name,
+        'predictions': dict(predictions),
+        'github_access_token': '***',
+    }
 
-    payload = build_prediction_payload(
-        issue_id=issue_id,
-        repository=repo_full_name,
-        predictions=predictions,
-    )
-
-    # 10) Emit machine output or interactive confirmation flow.
-    if as_json:
-        emit_json(payload, pretty=True)
-        broadcast_predictions_stub(payload)
-        return
-
-    if is_interactive_mode:
+    # 8) Confirmation prompt (interactive only).
+    if not as_json and is_interactive_mode:
         lines = format_prediction_lines(predictions)
         confirm_panel(lines, title='Prediction Confirmation')
         skip_confirm = yes or not _is_interactive()
@@ -223,9 +206,35 @@ def issues_predict(
             print_warning('Prediction cancelled')
             return
 
-    success_panel(json_mod.dumps(payload, indent=2), title='Prediction Payload')
-    print_success('Prediction prepared (TODO: broadcast)')
-    broadcast_predictions_stub(payload)
+    # 9) Verify miner registration before broadcasting.
+    _resolve_registered_miner_hotkey(
+        wallet_name=effective_wallet,
+        wallet_hotkey=effective_hotkey,
+        ws_endpoint=ws_endpoint,
+        contract_addr=contract_addr,
+        as_json=as_json,
+    )
+
+    # 10) Show payload and broadcast to validators.
+    if as_json:
+        emit_json(payload, pretty=True)
+
+    if not as_json:
+        success_panel(json_mod.dumps(payload, indent=2), title='Prediction Synapse')
+
+    with loading_context('Broadcasting predictions to validators...', as_json):
+        results = broadcast_predictions(
+            payload=payload,
+            wallet_name=effective_wallet,
+            wallet_hotkey=effective_hotkey,
+            ws_endpoint=ws_endpoint,
+            netuid=netuid,
+        )
+
+    if as_json:
+        emit_json(results, pretty=True)
+    else:
+        _print_broadcast_results(results)
 
 
 def validate_probability(value: float, param_hint: str = 'probability') -> float:
@@ -285,9 +294,7 @@ def _resolve_issue_context(
     """Load and validate on-chain issue context for prediction."""
     try:
         with loading_context('Reading issues from contract...', as_json):
-            issue = fetch_issue_from_contract(
-                ws_endpoint, contract_addr, issue_id, require_active=True, verbose=verbose
-            )
+            issue = fetch_issue_from_contract(ws_endpoint, contract_addr, issue_id, verbose=verbose)
     except click.ClickException as e:
         handle_exception(as_json, str(e))
 
@@ -361,22 +368,22 @@ def format_prediction_lines(predictions: dict[int, float]) -> str:
     return '\n'.join(lines)
 
 
-def build_prediction_payload(
-    issue_id: int,
-    repository: str,
-    predictions: dict[int, float],
-) -> dict[str, object]:
-    """Build validated payload for future network broadcast."""
-    return {
-        'issue_id': issue_id,
-        'repository': repository,
-        'predictions': dict(predictions),
-    }
+def _print_broadcast_results(results: dict[str, object]) -> None:
+    """Print broadcast results in human-readable format."""
+    if results.get('error'):
+        print_error(str(results['error']))
+        return
+    if results.get('success'):
+        print_success(f'Prediction accepted by {results["accepted"]}/{results["total_validators"]} validator(s)')
+    else:
+        print_error(
+            f'Prediction rejected or unreachable: {results["rejected"]}/{results["total_validators"]} validator(s)'
+        )
 
-
-def broadcast_predictions_stub(payload: dict[str, object]) -> None:
-    """Broadcast integration seam (stub)."""
-    pass
+    for r in results.get('results', []):
+        status = 'accepted' if r['accepted'] else 'rejected'
+        reason = f' ({r["rejection_reason"]})' if r.get('rejection_reason') else ''
+        console.print(f'  {r["validator"]}... {status}{reason}')
 
 
 def _collect_predictions_interactive(prs: list[dict]) -> dict[int, float]:

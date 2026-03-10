@@ -15,8 +15,7 @@ import pytest
 
 from gittensor.classes import MinerEvaluation
 from gittensor.constants import TIER_EMISSION_SPLITS
-from gittensor.validator.configurations.tier_config import Tier, TierStats
-from gittensor.validator.evaluation.tier_emissions import allocate_emissions_by_tier
+from gittensor.validator.oss_contributions.tier_config import Tier, TierStats, allocate_emissions_by_tier
 
 
 class TestTierEmissionSplitsConstant:

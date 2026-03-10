@@ -13,7 +13,7 @@ from typing import List, TypeVar
 import numpy as np
 
 from gittensor.classes import FileChange, Issue, Miner, MinerEvaluation, PullRequest
-from gittensor.validator.configurations.tier_config import Tier
+from gittensor.validator.oss_contributions.tier_config import Tier
 
 from .queries import (
     BULK_UPSERT_FILE_CHANGES,
@@ -24,7 +24,11 @@ from .queries import (
     CLEANUP_STALE_MINER_EVALUATIONS,
     CLEANUP_STALE_MINER_TIER_STATS,
     CLEANUP_STALE_MINERS,
+    DELETE_MERGE_PREDICTIONS_FOR_ISSUE,
     SET_MINER,
+    UPSERT_MERGE_PREDICTION,
+    UPSERT_MERGE_PREDICTION_EMA,
+    UPSERT_MERGE_SETTLED_ISSUE,
 )
 
 T = TypeVar('T')
@@ -421,3 +425,46 @@ class Repository(BaseRepository):
             self.db.rollback()
             self.logger.error(f'Error in miner tier stats storage: {e}')
             return False
+
+    # Merge Prediction Storage
+    def store_merge_prediction(
+        self,
+        uid: int,
+        hotkey: str,
+        github_id: str,
+        issue_id: int,
+        repository: str,
+        pr_number: int,
+        prediction: float,
+        variance_at_prediction: float,
+        timestamp: str,
+    ) -> bool:
+        params = (
+            uid,
+            hotkey,
+            github_id,
+            issue_id,
+            repository,
+            pr_number,
+            prediction,
+            variance_at_prediction,
+            timestamp,
+        )
+        return self.set_entity(UPSERT_MERGE_PREDICTION, params)
+
+    def store_merge_prediction_ema(self, github_id: str, ema_score: float, rounds: int, updated_at: str) -> bool:
+        params = (github_id, ema_score, rounds, updated_at)
+        return self.set_entity(UPSERT_MERGE_PREDICTION_EMA, params)
+
+    def store_merge_settled_issue(
+        self,
+        issue_id: int,
+        outcome: str,
+        merged_pr_number: int | None,
+        settled_at: str,
+    ) -> bool:
+        params = (issue_id, outcome, merged_pr_number, settled_at)
+        return self.set_entity(UPSERT_MERGE_SETTLED_ISSUE, params)
+
+    def delete_merge_predictions_for_issue(self, issue_id: int) -> bool:
+        return self.execute_command(DELETE_MERGE_PREDICTIONS_FOR_ISSUE, (issue_id,))

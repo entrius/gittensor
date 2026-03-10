@@ -36,18 +36,18 @@ from gittensor.utils.github_api_tools import (
     fetch_file_contents_with_base,
     get_pull_request_file_changes,
 )
-from gittensor.validator.configurations.tier_config import (
+from gittensor.validator.oss_contributions.credibility import (
+    calculate_credibility_per_tier,
+    calculate_tier_stats,
+    is_tier_unlocked,
+)
+from gittensor.validator.oss_contributions.tier_config import (
     TIERS,
     TIERS_ORDER,
     Tier,
     TierConfig,
     TierStats,
     get_tier_from_config,
-)
-from gittensor.validator.evaluation.credibility import (
-    calculate_credibility_per_tier,
-    calculate_tier_stats,
-    is_tier_unlocked,
 )
 from gittensor.validator.utils.load_weights import LanguageConfig, RepositoryConfig, TokenConfig
 from gittensor.validator.utils.tree_sitter_scoring import calculate_token_score_from_file_changes

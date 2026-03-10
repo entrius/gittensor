@@ -21,6 +21,7 @@ from typing import Any, ContextManager, Dict, List, Optional, Tuple
 import click
 from rich.console import Console
 from rich.panel import Panel
+from substrateinterface import SubstrateInterface
 
 from gittensor.cli.issue_commands.tables import build_pr_table
 from gittensor.constants import CONTRACT_ADDRESS
@@ -43,7 +44,6 @@ STATUS_COLORS: Dict[str, str] = {
     'Cancelled': 'dim',
 }
 
-ISSUE_BOUNTY_ELIGIBLE_STATUSES = {'registered', 'active'}
 
 # Default paths
 GITTENSOR_DIR = Path.home() / '.gittensor'
@@ -193,16 +193,21 @@ def print_issue_submission_table(
     console.print(f'Showing {len(pull_requests)} submissions{suffix}')
 
 
-def verify_miner_registration(ws_endpoint: str, contract_addr: str, hotkey_ss58: str) -> bool:
-    """Return whether the hotkey is registered on the subnet configured by the contract netuid."""
-    import bittensor as bt
-    from substrateinterface import SubstrateInterface
+def resolve_netuid_from_contract(ws_endpoint: str, contract_addr: str) -> Optional[int]:
+    """Read the subnet netuid stored in the on-chain contract."""
 
     substrate = SubstrateInterface(url=ws_endpoint)
     packed = _read_contract_packed_storage(substrate, contract_addr)
-    netuid = None
     if packed and packed.get('netuid') is not None:
-        netuid = int(packed['netuid'])
+        return int(packed['netuid'])
+    return None
+
+
+def verify_miner_registration(ws_endpoint: str, contract_addr: str, hotkey_ss58: str) -> bool:
+    """Return whether the hotkey is registered on the subnet configured by the contract netuid."""
+    import bittensor as bt
+
+    netuid = resolve_netuid_from_contract(ws_endpoint, contract_addr)
     if netuid is None:
         return False
 
@@ -796,10 +801,9 @@ def fetch_issue_from_contract(
     ws_endpoint: str,
     contract_addr: str,
     issue_id: int,
-    require_active: bool = False,
     verbose: bool = False,
 ) -> Dict[str, Any]:
-    """Resolve an on-chain issue and validate bountied/active status."""
+    """Resolve an on-chain issue and validate bountied status."""
     issues = read_issues_from_contract(ws_endpoint, contract_addr, verbose)
     issue = next((i for i in issues if i.get('id') == issue_id), None)
     if not issue:
@@ -807,10 +811,8 @@ def fetch_issue_from_contract(
 
     status = issue.get('status') or ''
     status_normalized = str(status).strip().lower()
-    if status_normalized not in ISSUE_BOUNTY_ELIGIBLE_STATUSES:
+    if status_normalized not in {'registered', 'active'}:
         raise click.ClickException(f'Issue #{issue_id} is not in a bountied state (status: {status}).')
-    if require_active and status_normalized != 'active':
-        raise click.ClickException(f'Issue #{issue_id} is not active (status: {status}).')
 
     repo = issue.get('repository_full_name', '')
     issue_number = issue.get('issue_number', 0)

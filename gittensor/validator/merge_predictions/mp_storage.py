@@ -1,0 +1,273 @@
+# Entrius 2025
+
+"""SQLite storage for merge predictions.
+
+Each validator stores predictions independently. One row per miner per PR.
+Thread-safe via WAL mode — the axon handler writes while the scoring loop reads.
+"""
+
+import sqlite3
+import threading
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Optional
+
+import bittensor as bt
+
+from gittensor.constants import PREDICTIONS_COOLDOWN_SECONDS
+from gittensor.validator.utils.config import MP_DB_PATH
+
+
+class PredictionStorage:
+    """Thread-safe SQLite storage for merge predictions."""
+
+    def __init__(self, db_path: Optional[str] = None):
+        self._db_path = db_path or MP_DB_PATH
+        Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.Lock()
+        self._init_db()
+
+    def _get_connection(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self._db_path)
+        conn.execute('PRAGMA journal_mode=WAL')
+        conn.execute('PRAGMA busy_timeout=5000')
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def _init_db(self):
+        with self._get_connection() as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS predictions (
+                    uid             INTEGER NOT NULL,
+                    hotkey          TEXT    NOT NULL,
+                    github_id       TEXT    NOT NULL,
+                    issue_id        INTEGER NOT NULL,
+                    repository      TEXT    NOT NULL,
+                    pr_number       INTEGER NOT NULL,
+                    prediction      REAL    NOT NULL,
+                    timestamp       TEXT    NOT NULL,
+                    variance_at_prediction REAL,
+                    PRIMARY KEY (uid, hotkey, github_id, issue_id, pr_number)
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS prediction_emas (
+                    github_id  TEXT    NOT NULL,
+                    ema_score  REAL    NOT NULL DEFAULT 0.0,
+                    rounds     INTEGER NOT NULL DEFAULT 0,
+                    updated_at TEXT    NOT NULL,
+                    PRIMARY KEY (github_id)
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS settled_issues (
+                    issue_id          INTEGER NOT NULL PRIMARY KEY,
+                    outcome           TEXT    NOT NULL,
+                    merged_pr_number  INTEGER,
+                    settled_at        TEXT    NOT NULL
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_predictions_issue
+                ON predictions (issue_id)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_predictions_miner_issue
+                ON predictions (uid, hotkey, issue_id)
+            """)
+            conn.commit()
+        bt.logging.info(f'Prediction storage initialized at {self._db_path}')
+
+    def check_cooldown(self, uid: int, hotkey: str, issue_id: int, pr_number: int) -> Optional[float]:
+        """Return seconds remaining on cooldown, or None if no cooldown active."""
+        with self._get_connection() as conn:
+            row = conn.execute(
+                'SELECT timestamp FROM predictions WHERE uid = ? AND hotkey = ? AND issue_id = ? AND pr_number = ?',
+                (uid, hotkey, issue_id, pr_number),
+            ).fetchone()
+
+        if row is None:
+            return None
+
+        last_ts = datetime.fromisoformat(row['timestamp'])
+        elapsed = (datetime.now(timezone.utc) - last_ts).total_seconds()
+        remaining = PREDICTIONS_COOLDOWN_SECONDS - elapsed
+        return remaining if remaining > 0 else None
+
+    def get_miner_total_for_issue(
+        self,
+        uid: int,
+        hotkey: str,
+        issue_id: int,
+        exclude_prs: Optional[set[int]] = None,
+        only_prs: Optional[set[int]] = None,
+    ) -> float:
+        """Get sum of a miner's existing predictions for an issue.
+
+        Args:
+            exclude_prs: Exclude these PRs from the sum (for batch updates).
+            only_prs: If provided, only count predictions on these PRs (open PRs).
+                       Predictions on closed PRs are excluded from the total,
+                       freeing that probability for reallocation.
+        """
+        with self._get_connection() as conn:
+            query = 'SELECT COALESCE(SUM(prediction), 0.0) as total FROM predictions WHERE uid = ? AND hotkey = ? AND issue_id = ?'
+            params: list = [uid, hotkey, issue_id]
+
+            if exclude_prs:
+                placeholders = ','.join('?' for _ in exclude_prs)
+                query += f' AND pr_number NOT IN ({placeholders})'
+                params.extend(exclude_prs)
+
+            if only_prs:
+                placeholders = ','.join('?' for _ in only_prs)
+                query += f' AND pr_number IN ({placeholders})'
+                params.extend(only_prs)
+
+            row = conn.execute(query, params).fetchone()
+        return float(row['total'])
+
+    def compute_current_variance(self, issue_id: int) -> float:
+        """Compute avg variance across all PRs for an issue (used for consensus bonus)."""
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT pr_number, AVG(prediction) as mean_pred,
+                       AVG(prediction * prediction) - AVG(prediction) * AVG(prediction) as var_pred
+                FROM predictions
+                WHERE issue_id = ?
+                GROUP BY pr_number
+                """,
+                (issue_id,),
+            ).fetchall()
+
+        if not rows:
+            return 0.0
+
+        variances = [max(0.0, float(r['var_pred'])) for r in rows]
+        return sum(variances) / len(variances)
+
+    def store_prediction(
+        self,
+        uid: int,
+        hotkey: str,
+        github_id: str,
+        issue_id: int,
+        repository: str,
+        pr_number: int,
+        prediction: float,
+        variance_at_prediction: float,
+    ) -> None:
+        """Insert or replace a single PR prediction. Resets timestamp on that PR only."""
+        now = datetime.now(timezone.utc).isoformat()
+
+        with self._lock:
+            with self._get_connection() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO predictions (uid, hotkey, github_id, issue_id, repository, pr_number, prediction, timestamp, variance_at_prediction)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT (uid, hotkey, github_id, issue_id, pr_number)
+                    DO UPDATE SET prediction = excluded.prediction,
+                                  timestamp = excluded.timestamp,
+                                  variance_at_prediction = excluded.variance_at_prediction
+                    """,
+                    (uid, hotkey, github_id, issue_id, repository, pr_number, prediction, now, variance_at_prediction),
+                )
+                conn.commit()
+
+    def get_peak_variance_time(self, issue_id: int) -> Optional[datetime]:
+        """Get the timestamp when variance was highest for an issue.
+
+        Returns the prediction timestamp with the max variance_at_prediction,
+        or None if no predictions exist.
+        """
+        with self._get_connection() as conn:
+            row = conn.execute(
+                'SELECT timestamp FROM predictions WHERE issue_id = ? ORDER BY variance_at_prediction DESC LIMIT 1',
+                (issue_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return datetime.fromisoformat(row['timestamp'])
+
+    def get_predictions_for_issue(self, issue_id: int) -> list[dict]:
+        """Get all predictions for an issue (used at settlement)."""
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                'SELECT * FROM predictions WHERE issue_id = ? ORDER BY uid, pr_number',
+                (issue_id,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def delete_predictions_for_issue(self, issue_id: int) -> int:
+        """Delete all predictions for a settled/cancelled issue. Returns rows deleted."""
+        with self._lock:
+            with self._get_connection() as conn:
+                cursor = conn.execute('DELETE FROM predictions WHERE issue_id = ?', (issue_id,))
+                conn.commit()
+                return cursor.rowcount
+
+    # =========================================================================
+    # Settlement tracking
+    # =========================================================================
+
+    def is_issue_settled(self, issue_id: int) -> bool:
+        """Check if an issue has already been settled."""
+        with self._get_connection() as conn:
+            row = conn.execute(
+                'SELECT 1 FROM settled_issues WHERE issue_id = ?',
+                (issue_id,),
+            ).fetchone()
+        return row is not None
+
+    def mark_issue_settled(self, issue_id: int, outcome: str, merged_pr_number: int | None = None) -> None:
+        """Record that an issue has been settled. Idempotent (INSERT OR IGNORE)."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            with self._get_connection() as conn:
+                conn.execute(
+                    'INSERT OR IGNORE INTO settled_issues (issue_id, outcome, merged_pr_number, settled_at) '
+                    'VALUES (?, ?, ?, ?)',
+                    (issue_id, outcome, merged_pr_number, now),
+                )
+                conn.commit()
+
+    # =========================================================================
+    # EMA tracking
+    # =========================================================================
+
+    def get_ema(self, github_id: str) -> float:
+        """Get a miner's current prediction EMA score. Returns 0.0 if no record."""
+        with self._get_connection() as conn:
+            row = conn.execute(
+                'SELECT ema_score FROM prediction_emas WHERE github_id = ?',
+                (github_id,),
+            ).fetchone()
+        return float(row['ema_score']) if row else 0.0
+
+    def update_ema(self, github_id: str, new_ema: float) -> None:
+        """Upsert a miner's prediction EMA score, keyed by github_id."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            with self._get_connection() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO prediction_emas (github_id, ema_score, rounds, updated_at)
+                    VALUES (?, ?, 1, ?)
+                    ON CONFLICT (github_id)
+                    DO UPDATE SET ema_score = excluded.ema_score,
+                                  rounds = prediction_emas.rounds + 1,
+                                  updated_at = excluded.updated_at
+                    """,
+                    (github_id, new_ema, now),
+                )
+                conn.commit()
+
+    def get_all_emas(self) -> list[dict]:
+        """Get all miner EMA scores. Used at weight-setting time for blending."""
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                'SELECT github_id, ema_score, rounds, updated_at FROM prediction_emas ORDER BY github_id',
+            ).fetchall()
+        return [dict(r) for r in rows]

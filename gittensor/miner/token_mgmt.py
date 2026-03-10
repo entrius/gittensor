@@ -29,27 +29,31 @@ def init() -> bool:
     return True
 
 
-def load_token() -> Optional[str]:
+def load_token(quiet: bool = False) -> Optional[str]:
     """
     Load GitHub token from environment variable
 
     Returns:
         Optional[str]: The GitHub access token string if valid, None otherwise
     """
-    bt.logging.info('Loading GitHub token from environment.')
+    if not quiet:
+        bt.logging.info('Loading GitHub token from environment.')
 
     access_token = os.getenv('GITTENSOR_MINER_PAT')
 
     if not access_token:
-        bt.logging.error('No GitHub token found in GITTENSOR_MINER_PAT environment variable!')
+        if not quiet:
+            bt.logging.error('No GitHub token found in GITTENSOR_MINER_PAT environment variable!')
         return None
 
     # Test if token is still valid
     if is_token_valid(access_token):
-        bt.logging.info('GitHub token loaded successfully and is valid.')
+        if not quiet:
+            bt.logging.info('GitHub token loaded successfully and is valid.')
         return access_token
 
-    bt.logging.error('GitHub token is invalid or expired.')
+    if not quiet:
+        bt.logging.error('GitHub token is invalid or expired.')
     return None
 
 

@@ -98,4 +98,4 @@ if __name__ == '__main__':
 
         while True:
             bt.logging.info('Gittensor miner running...')
-            time.sleep(45)
+            time.sleep(100)

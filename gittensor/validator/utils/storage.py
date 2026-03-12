@@ -84,7 +84,7 @@ class DatabaseStorage:
 
         return result
 
-    def store_merge_prediction(
+    def store_prediction(
         self,
         uid: int,
         hotkey: str,
@@ -99,7 +99,7 @@ class DatabaseStorage:
         if not self.is_enabled():
             return False
         try:
-            return self.repo.store_merge_prediction(
+            return self.repo.store_prediction(
                 uid,
                 hotkey,
                 github_id,
@@ -114,16 +114,16 @@ class DatabaseStorage:
             self.logger.warning(f'Postgres merge prediction write failed (non-fatal): {e}')
             return False
 
-    def store_merge_prediction_ema(self, github_id: str, ema_score: float, rounds: int, updated_at: str) -> bool:
+    def store_prediction_ema(self, github_id: str, ema_score: float, rounds: int, updated_at: str) -> bool:
         if not self.is_enabled():
             return False
         try:
-            return self.repo.store_merge_prediction_ema(github_id, ema_score, rounds, updated_at)
+            return self.repo.store_prediction_ema(github_id, ema_score, rounds, updated_at)
         except Exception as e:
             self.logger.warning(f'Postgres merge prediction EMA write failed (non-fatal): {e}')
             return False
 
-    def store_merge_settled_issue(
+    def store_settled_issue(
         self,
         issue_id: int,
         outcome: str,
@@ -133,16 +133,16 @@ class DatabaseStorage:
         if not self.is_enabled():
             return False
         try:
-            return self.repo.store_merge_settled_issue(issue_id, outcome, merged_pr_number, settled_at)
+            return self.repo.store_settled_issue(issue_id, outcome, merged_pr_number, settled_at)
         except Exception as e:
             self.logger.warning(f'Postgres merge settled issue write failed (non-fatal): {e}')
             return False
 
-    def delete_merge_predictions_for_issue(self, issue_id: int) -> bool:
+    def delete_predictions_for_issue(self, issue_id: int) -> bool:
         if not self.is_enabled():
             return False
         try:
-            return self.repo.delete_merge_predictions_for_issue(issue_id)
+            return self.repo.delete_predictions_for_issue(issue_id)
         except Exception as e:
             self.logger.warning(f'Postgres merge prediction delete failed (non-fatal): {e}')
             return False

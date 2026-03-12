@@ -24,11 +24,11 @@ from .queries import (
     CLEANUP_STALE_MINER_EVALUATIONS,
     CLEANUP_STALE_MINER_TIER_STATS,
     CLEANUP_STALE_MINERS,
-    DELETE_MERGE_PREDICTIONS_FOR_ISSUE,
+    DELETE_PREDICTIONS_FOR_ISSUE,
     SET_MINER,
-    UPSERT_MERGE_PREDICTION,
-    UPSERT_MERGE_PREDICTION_EMA,
-    UPSERT_MERGE_SETTLED_ISSUE,
+    UPSERT_PREDICTION,
+    UPSERT_PREDICTION_EMA,
+    UPSERT_SETTLED_ISSUE,
 )
 
 T = TypeVar('T')
@@ -427,7 +427,7 @@ class Repository(BaseRepository):
             return False
 
     # Merge Prediction Storage
-    def store_merge_prediction(
+    def store_prediction(
         self,
         uid: int,
         hotkey: str,
@@ -450,13 +450,13 @@ class Repository(BaseRepository):
             variance_at_prediction,
             timestamp,
         )
-        return self.set_entity(UPSERT_MERGE_PREDICTION, params)
+        return self.set_entity(UPSERT_PREDICTION, params)
 
-    def store_merge_prediction_ema(self, github_id: str, ema_score: float, rounds: int, updated_at: str) -> bool:
+    def store_prediction_ema(self, github_id: str, ema_score: float, rounds: int, updated_at: str) -> bool:
         params = (github_id, ema_score, rounds, updated_at)
-        return self.set_entity(UPSERT_MERGE_PREDICTION_EMA, params)
+        return self.set_entity(UPSERT_PREDICTION_EMA, params)
 
-    def store_merge_settled_issue(
+    def store_settled_issue(
         self,
         issue_id: int,
         outcome: str,
@@ -464,7 +464,7 @@ class Repository(BaseRepository):
         settled_at: str,
     ) -> bool:
         params = (issue_id, outcome, merged_pr_number, settled_at)
-        return self.set_entity(UPSERT_MERGE_SETTLED_ISSUE, params)
+        return self.set_entity(UPSERT_SETTLED_ISSUE, params)
 
-    def delete_merge_predictions_for_issue(self, issue_id: int) -> bool:
-        return self.execute_command(DELETE_MERGE_PREDICTIONS_FOR_ISSUE, (issue_id,))
+    def delete_predictions_for_issue(self, issue_id: int) -> bool:
+        return self.execute_command(DELETE_PREDICTIONS_FOR_ISSUE, (issue_id,))

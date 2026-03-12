@@ -2968,6 +2968,10 @@
     "tier": "Bronze",
     "weight": 0.24
   },
+  "lightgbm-org/LightGBM": {
+    "tier": "Bronze",
+    "weight": 0.61
+  },
   "LimeSurvey/LimeSurvey": {
     "additional_acceptable_branches": ["develop-minor", "develop-major"],
     "tier": "Bronze",
@@ -3229,10 +3233,6 @@
   "microsoft/generative-ai-for-beginners": {
     "tier": "Bronze",
     "weight": 0.28
-  },
-  "microsoft/LightGBM": {
-    "tier": "Bronze",
-    "weight": 0.61
   },
   "microsoft/markitdown": {
     "tier": "Bronze",
@@ -5423,13 +5423,13 @@
     "tier": "Bronze",
     "weight": 0.54
   },
+  "vercel/chatbot": {
+    "tier": "Bronze",
+    "weight": 0.31
+  },
   "vercel/next.js": {
     "tier": "Gold",
     "weight": 16.3
-  },
-  "vercel/openchat": {
-    "tier": "Bronze",
-    "weight": 0.31
   },
   "vercel/vercel": {
     "tier": "Bronze",

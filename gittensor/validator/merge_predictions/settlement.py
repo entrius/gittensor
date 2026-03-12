@@ -47,7 +47,7 @@ def db_storage_void(validator: 'Validator', issue_id: int) -> None:
     """Best-effort mirror of a voided issue to Postgres."""
     if validator.db_storage:
         now = datetime.now(timezone.utc).isoformat()
-        validator.db_storage.store_merge_settled_issue(issue_id, 'voided', None, now)
+        validator.db_storage.store_settled_issue(issue_id, 'voided', None, now)
 
 
 def _build_outcomes(
@@ -142,7 +142,7 @@ def _score_and_update_emas(
         # Mirror EMA to Postgres
         if validator.db_storage:
             now = datetime.now(timezone.utc).isoformat()
-            validator.db_storage.store_merge_prediction_ema(github_id, new_ema, 1, now)
+            validator.db_storage.store_prediction_ema(github_id, new_ema, 1, now)
 
         results.append(
             {
@@ -266,7 +266,7 @@ def _settle_issue(
     # Mirror settlement + delete to Postgres
     if validator.db_storage:
         now = datetime.now(timezone.utc).isoformat()
-        validator.db_storage.store_merge_settled_issue(issue.id, 'scored', merged_pr_number, now)
+        validator.db_storage.store_settled_issue(issue.id, 'scored', merged_pr_number, now)
 
     return True
 

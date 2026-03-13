@@ -91,12 +91,13 @@ async def handle_prediction(validator: 'Validator', synapse: PredictionSynapse) 
             github_id=github_id,
             issue_id=synapse.issue_id,
             repository=synapse.repository,
+            issue_number=issue.issue_number,
             pr_number=pr_number,
             prediction=pred_value,
             variance_at_prediction=variance,
         )
 
-        # Mirror to Postgres
+        # Save to Postgres if enabled
         if validator.db_storage:
             validator.db_storage.store_prediction(
                 uid=uid,
@@ -104,6 +105,7 @@ async def handle_prediction(validator: 'Validator', synapse: PredictionSynapse) 
                 github_id=github_id,
                 issue_id=synapse.issue_id,
                 repository=synapse.repository,
+                issue_number=issue.issue_number,
                 pr_number=pr_number,
                 prediction=pred_value,
                 variance_at_prediction=variance,

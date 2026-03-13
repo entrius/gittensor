@@ -64,6 +64,7 @@ class TestPredictionStorage:
             github_id='gh1',
             issue_id=1,
             repository='r/r',
+            issue_number=10,
             pr_number=10,
             prediction=0.6,
             variance_at_prediction=0.1,
@@ -74,7 +75,7 @@ class TestPredictionStorage:
         assert rows[0]['pr_number'] == 10
 
     def test_upsert_replaces_prediction(self, mp_storage):
-        kwargs = dict(uid=0, hotkey='hk', github_id='gh1', issue_id=1, repository='r/r', pr_number=10)
+        kwargs = dict(uid=0, hotkey='hk', github_id='gh1', issue_id=1, repository='r/r', issue_number=10, pr_number=10)
         mp_storage.store_prediction(**kwargs, prediction=0.3, variance_at_prediction=0.1)
         mp_storage.store_prediction(**kwargs, prediction=0.8, variance_at_prediction=0.2)
         rows = mp_storage.get_predictions_for_issue(1)
@@ -82,7 +83,7 @@ class TestPredictionStorage:
         assert rows[0]['prediction'] == pytest.approx(0.8)
 
     def test_upsert_preserves_other_prs(self, mp_storage):
-        base = dict(uid=0, hotkey='hk', github_id='gh1', issue_id=1, repository='r/r')
+        base = dict(uid=0, hotkey='hk', github_id='gh1', issue_id=1, repository='r/r', issue_number=10)
         mp_storage.store_prediction(**base, pr_number=1, prediction=0.3, variance_at_prediction=0.0)
         mp_storage.store_prediction(**base, pr_number=2, prediction=0.4, variance_at_prediction=0.0)
 
@@ -95,14 +96,14 @@ class TestPredictionStorage:
         assert by_pr[2]['prediction'] == pytest.approx(0.4)
 
     def test_miner_total_for_issue(self, mp_storage):
-        base = dict(uid=0, hotkey='hk', github_id='gh1', issue_id=1, repository='r/r')
+        base = dict(uid=0, hotkey='hk', github_id='gh1', issue_id=1, repository='r/r', issue_number=10)
         mp_storage.store_prediction(**base, pr_number=1, prediction=0.3, variance_at_prediction=0.0)
         mp_storage.store_prediction(**base, pr_number=2, prediction=0.4, variance_at_prediction=0.0)
         total = mp_storage.get_miner_total_for_issue(0, 'hk', 1)
         assert total == pytest.approx(0.7)
 
     def test_miner_total_excludes_prs(self, mp_storage):
-        base = dict(uid=0, hotkey='hk', github_id='gh1', issue_id=1, repository='r/r')
+        base = dict(uid=0, hotkey='hk', github_id='gh1', issue_id=1, repository='r/r', issue_number=10)
         mp_storage.store_prediction(**base, pr_number=1, prediction=0.3, variance_at_prediction=0.0)
         mp_storage.store_prediction(**base, pr_number=2, prediction=0.4, variance_at_prediction=0.0)
         mp_storage.store_prediction(**base, pr_number=3, prediction=0.2, variance_at_prediction=0.0)
@@ -116,6 +117,7 @@ class TestPredictionStorage:
             github_id='gh1',
             issue_id=1,
             repository='r/r',
+            issue_number=10,
             pr_number=1,
             prediction=0.5,
             variance_at_prediction=0.0,
@@ -130,9 +132,9 @@ class TestPredictionStorage:
         old_ts = (datetime.now(timezone.utc) - timedelta(seconds=PREDICTIONS_COOLDOWN_SECONDS + 60)).isoformat()
         with mp_storage._get_connection() as conn:
             conn.execute(
-                'INSERT INTO predictions (uid, hotkey, github_id, issue_id, repository, pr_number, prediction, timestamp, variance_at_prediction) '
-                'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                (0, 'hk', 'gh1', 1, 'r/r', 1, 0.5, old_ts, 0.0),
+                'INSERT INTO predictions (uid, hotkey, github_id, issue_id, repository, issue_number, pr_number, prediction, timestamp, variance_at_prediction) '
+                'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                (0, 'hk', 'gh1', 1, 'r/r', 10, 1, 0.5, old_ts, 0.0),
             )
             conn.commit()
 
@@ -149,6 +151,7 @@ class TestPredictionStorage:
             github_id='gh1',
             issue_id=1,
             repository='r/r',
+            issue_number=10,
             pr_number=1,
             prediction=0.5,
             variance_at_prediction=0.0,
@@ -156,7 +159,7 @@ class TestPredictionStorage:
         assert mp_storage.compute_current_variance(1) == pytest.approx(0.0)
 
     def test_compute_variance_disagreement(self, mp_storage):
-        base = dict(github_id='gh1', issue_id=1, repository='r/r', pr_number=1)
+        base = dict(github_id='gh1', issue_id=1, repository='r/r', issue_number=10, pr_number=1)
         mp_storage.store_prediction(uid=0, hotkey='hk0', **base, prediction=0.9, variance_at_prediction=0.0)
         mp_storage.store_prediction(uid=1, hotkey='hk1', **base, prediction=0.1, variance_at_prediction=0.0)
         var = mp_storage.compute_current_variance(1)
@@ -164,7 +167,7 @@ class TestPredictionStorage:
         assert var > 0
 
     def test_peak_variance_time(self, mp_storage):
-        base = dict(uid=0, hotkey='hk', github_id='gh1', issue_id=1, repository='r/r')
+        base = dict(uid=0, hotkey='hk', github_id='gh1', issue_id=1, repository='r/r', issue_number=10)
         mp_storage.store_prediction(**base, pr_number=1, prediction=0.5, variance_at_prediction=0.1)
         mp_storage.store_prediction(**base, pr_number=2, prediction=0.5, variance_at_prediction=0.9)
         peak = mp_storage.get_peak_variance_time(1)
@@ -188,7 +191,7 @@ class TestPredictionStorage:
         assert ids == {'gh1', 'gh2'}
 
     def test_delete_predictions_for_issue(self, mp_storage):
-        base = dict(uid=0, hotkey='hk', github_id='gh1', issue_id=1, repository='r/r')
+        base = dict(uid=0, hotkey='hk', github_id='gh1', issue_id=1, repository='r/r', issue_number=10)
         mp_storage.store_prediction(**base, pr_number=1, prediction=0.3, variance_at_prediction=0.0)
         mp_storage.store_prediction(**base, pr_number=2, prediction=0.4, variance_at_prediction=0.0)
         deleted = mp_storage.delete_predictions_for_issue(1)
@@ -328,6 +331,7 @@ class TestPredictionHandler:
             github_id='gh_alice',
             issue_id=1,
             repository='test/repo',
+            issue_number=10,
             pr_number=1,
             prediction=0.8,
             variance_at_prediction=0.0,
@@ -554,7 +558,7 @@ class TestSettlement:
     (not ACTIVE). Predictions are deleted after settlement as the "settled" marker.
     """
 
-    def _seed_predictions(self, mp_storage, uid, hotkey, github_id, issue_id, preds):
+    def _seed_predictions(self, mp_storage, uid, hotkey, github_id, issue_id, preds, issue_number=10):
         """Helper: store a set of predictions for a miner."""
         for pr_num, value in preds.items():
             mp_storage.store_prediction(
@@ -563,6 +567,7 @@ class TestSettlement:
                 github_id=github_id,
                 issue_id=issue_id,
                 repository='test/repo',
+                issue_number=issue_number,
                 pr_number=pr_num,
                 prediction=value,
                 variance_at_prediction=0.05,

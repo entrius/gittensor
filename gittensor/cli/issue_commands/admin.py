@@ -30,7 +30,7 @@ from .helpers import (
 
 
 @click.group(name='admin')
-def admin():
+def admin() -> None:
     """Owner-only administrative commands.
 
     These commands require the contract owner wallet.
@@ -81,7 +81,7 @@ def admin():
     default='default',
     help='Hotkey name',
 )
-def admin_cancel(issue_id: int, network: str, rpc_url: str, contract: str, wallet_name: str, wallet_hotkey: str):
+def admin_cancel(issue_id: int, network: str, rpc_url: str, contract: str, wallet_name: str, wallet_hotkey: str) -> None:
     """Cancel an issue (owner only).
 
     Immediately cancels an issue without requiring validator consensus.
@@ -185,7 +185,7 @@ def admin_cancel(issue_id: int, network: str, rpc_url: str, contract: str, walle
     default='default',
     help='Hotkey name',
 )
-def admin_payout(issue_id: int, network: str, rpc_url: str, contract: str, wallet_name: str, wallet_hotkey: str):
+def admin_payout(issue_id: int, network: str, rpc_url: str, contract: str, wallet_name: str, wallet_hotkey: str) -> None:
     """Manual payout fallback (owner only).
 
     Pays out a completed issue bounty to the solver. The solver address
@@ -289,7 +289,7 @@ def admin_payout(issue_id: int, network: str, rpc_url: str, contract: str, walle
     default='default',
     help='Hotkey name',
 )
-def admin_set_owner(new_owner: str, network: str, rpc_url: str, contract: str, wallet_name: str, wallet_hotkey: str):
+def admin_set_owner(new_owner: str, network: str, rpc_url: str, contract: str, wallet_name: str, wallet_hotkey: str) -> None:
     """Transfer contract ownership (owner only).
 
     \b
@@ -480,7 +480,7 @@ def admin_set_treasury(
     default='default',
     help='Hotkey name',
 )
-def admin_add_validator(hotkey: str, network: str, rpc_url: str, contract: str, wallet_name: str, wallet_hotkey: str):
+def admin_add_validator(hotkey: str, network: str, rpc_url: str, contract: str, wallet_name: str, wallet_hotkey: str) -> None:
     """Add a validator to the voting whitelist (owner only).
 
     Whitelisted validators can vote on solutions and issue cancellations.

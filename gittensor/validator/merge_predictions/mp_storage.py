@@ -43,6 +43,7 @@ class PredictionStorage:
                     github_id       TEXT    NOT NULL,
                     issue_id        INTEGER NOT NULL,
                     repository      TEXT    NOT NULL,
+                    issue_number    INTEGER NOT NULL,
                     pr_number       INTEGER NOT NULL,
                     prediction      REAL    NOT NULL,
                     timestamp       TEXT    NOT NULL,
@@ -67,6 +68,13 @@ class PredictionStorage:
                     settled_at        TEXT    NOT NULL
                 )
             """)
+
+            # Migrations
+            try:
+                conn.execute('ALTER TABLE predictions ADD COLUMN issue_number INTEGER NOT NULL DEFAULT 0')
+            except sqlite3.OperationalError:
+                pass
+
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_predictions_issue
                 ON predictions (issue_id)
@@ -154,6 +162,7 @@ class PredictionStorage:
         github_id: str,
         issue_id: int,
         repository: str,
+        issue_number: int,
         pr_number: int,
         prediction: float,
         variance_at_prediction: float,
@@ -165,14 +174,25 @@ class PredictionStorage:
             with self._get_connection() as conn:
                 conn.execute(
                     """
-                    INSERT INTO predictions (uid, hotkey, github_id, issue_id, repository, pr_number, prediction, timestamp, variance_at_prediction)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO predictions (uid, hotkey, github_id, issue_id, repository, issue_number, pr_number, prediction, timestamp, variance_at_prediction)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT (uid, hotkey, github_id, issue_id, pr_number)
                     DO UPDATE SET prediction = excluded.prediction,
                                   timestamp = excluded.timestamp,
                                   variance_at_prediction = excluded.variance_at_prediction
                     """,
-                    (uid, hotkey, github_id, issue_id, repository, pr_number, prediction, now, variance_at_prediction),
+                    (
+                        uid,
+                        hotkey,
+                        github_id,
+                        issue_id,
+                        repository,
+                        issue_number,
+                        pr_number,
+                        prediction,
+                        now,
+                        variance_at_prediction,
+                    ),
                 )
                 conn.commit()
 

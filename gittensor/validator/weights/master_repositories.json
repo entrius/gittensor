@@ -4445,6 +4445,10 @@
     "tier": "Bronze",
     "weight": 0.17
   },
+  "react-component/picker": {
+    "tier": "Bronze",
+    "weight": 0.1
+  },
   "react-component/select": {
     "tier": "Bronze",
     "weight": 0.1

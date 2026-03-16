@@ -10,7 +10,7 @@ import bittensor as bt
 
 from gittensor.constants import MIN_TOKEN_SCORE_FOR_BASE_SCORE
 from gittensor.utils.utils import parse_repo_name
-from gittensor.validator.configurations.tier_config import Tier, TierConfig, TierStats
+from gittensor.validator.oss_contributions.tier_config import Tier, TierConfig, TierStats
 
 GITHUB_DOMAIN = 'https://github.com/'
 
@@ -349,7 +349,7 @@ class MinerEvaluation:
                 all_file_changes.extend(pr.file_changes)
         return all_file_changes
 
-    def add_merged_pull_request(self, raw_pr: Dict):
+    def add_merged_pull_request(self, raw_pr: Dict) -> None:
         """Add a merged pull request that will be factored into scoring."""
         bt.logging.info(
             f"Accepting MERGED PR #{raw_pr['number']} in {parse_repo_name(raw_pr['repository'])} -> '{raw_pr['baseRefName']}'"
@@ -358,12 +358,12 @@ class MinerEvaluation:
             PullRequest.from_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id)
         )
 
-    def add_open_pull_request(self, raw_pr: Dict):
+    def add_open_pull_request(self, raw_pr: Dict) -> None:
         """Add an open pull request that will be factored into scoring."""
         bt.logging.info(f'Counting OPEN PR #{raw_pr["number"]} in {parse_repo_name(raw_pr["repository"])}')
         self.open_pull_requests.append(PullRequest.from_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id))
 
-    def add_closed_pull_request(self, raw_pr: Dict):
+    def add_closed_pull_request(self, raw_pr: Dict) -> None:
         """Add a closed pull request that will be factored into scoring."""
         bt.logging.info(
             f'CLOSED PR #{raw_pr["number"]} in {parse_repo_name(raw_pr["repository"])} counting towards credibility'

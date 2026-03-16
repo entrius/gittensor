@@ -199,8 +199,8 @@ DO UPDATE SET
 UPSERT_PREDICTION = """
 INSERT INTO predictions (
     uid, hotkey, github_id, issue_id, repository,
-    pr_number, prediction, variance_at_prediction, timestamp
-) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+    issue_number, pr_number, prediction, variance_at_prediction, timestamp
+) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 ON CONFLICT (uid, hotkey, github_id, issue_id, pr_number)
 DO UPDATE SET
     prediction = EXCLUDED.prediction,

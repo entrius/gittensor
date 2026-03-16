@@ -4652,8 +4652,8 @@
   },
   "sbt/sbt": {
     "additional_acceptable_branches": ["1.12.x"],
-    "tier": "Silver",
-    "weight": 4.2
+    "tier": "Bronze",
+    "weight": 1.2
   },
   "scala/scala": {
     "tier": "Bronze",

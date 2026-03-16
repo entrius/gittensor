@@ -1,16 +1,24 @@
 # Entrius 2025
 
 """
-Guard-rail test: emission shares must never exceed 100% cumulatively.
+Guard-rail tests: emission shares and top-K constant configuration.
 
-If ISSUES_TREASURY_EMISSION_SHARE + PREDICTIONS_EMISSIONS_SHARE >= 1.0,
-OSS contributions would receive zero or negative share, breaking the reward system.
+Ensures:
+- Combined non-OSS emission shares (treasury + predictions) never reach 100%.
+- PREDICTIONS_TOP_K_SHARES sums to exactly 1.0 and has length == PREDICTIONS_TOP_K.
 
 Run:
     pytest tests/validator/test_emission_shares.py -v
 """
 
-from gittensor.constants import ISSUES_TREASURY_EMISSION_SHARE, PREDICTIONS_EMISSIONS_SHARE
+import pytest
+
+from gittensor.constants import (
+    ISSUES_TREASURY_EMISSION_SHARE,
+    PREDICTIONS_EMISSIONS_SHARE,
+    PREDICTIONS_TOP_K,
+    PREDICTIONS_TOP_K_SHARES,
+)
 
 
 def test_combined_emission_shares_leave_room_for_oss():
@@ -23,3 +31,18 @@ def test_combined_emission_shares_leave_room_for_oss():
         f'= {combined}) must be < 1.0, otherwise OSS contributions get nothing'
     )
     assert oss_share > 0.0
+
+
+def test_top_k_shares_sum_to_one():
+    """Top-K shares must sum to exactly 1.0."""
+    assert sum(PREDICTIONS_TOP_K_SHARES) == pytest.approx(1.0), (
+        f'PREDICTIONS_TOP_K_SHARES must sum to 1.0, got {sum(PREDICTIONS_TOP_K_SHARES)}'
+    )
+
+
+def test_top_k_shares_length_matches_top_k():
+    """PREDICTIONS_TOP_K_SHARES length must equal PREDICTIONS_TOP_K."""
+    assert len(PREDICTIONS_TOP_K_SHARES) == PREDICTIONS_TOP_K, (
+        f'PREDICTIONS_TOP_K_SHARES has {len(PREDICTIONS_TOP_K_SHARES)} entries '
+        f'but PREDICTIONS_TOP_K is {PREDICTIONS_TOP_K}'
+    )

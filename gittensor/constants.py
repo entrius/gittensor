@@ -145,6 +145,8 @@ ISSUES_TREASURY_EMISSION_SHARE = 0.15  # % of emissions allocated to funding iss
 # Merge Predictions
 # =============================================================================
 PREDICTIONS_EMISSIONS_SHARE = 0.15  # % of emissions allocated to prediction competition
+PREDICTIONS_TOP_K = 3  # only top-K miners by EMA receive prediction rewards
+PREDICTIONS_TOP_K_SHARES = [0.50, 0.35, 0.15]  # fixed reward split for top-K miners (must sum to 1.0)
 
 PREDICTIONS_EMA_BETA = 0.1  # EMA decay rate for predictions record
 PREDICTIONS_CORRECTNESS_EXPONENT = 3  # exponent on correctness to harshly punish incorrect predictions

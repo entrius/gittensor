@@ -5388,6 +5388,10 @@
     "tier": "Bronze",
     "weight": 0.1
   },
+  "unconst/agcli": {
+    "weight": 20,
+    "tier": "Silver"
+  },
   "Uniswap/interface": {
     "tier": "Bronze",
     "weight": 0.18

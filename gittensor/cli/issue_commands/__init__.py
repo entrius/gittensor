@@ -48,7 +48,7 @@ from .vote import vote
 
 
 @click.group(name='issues')
-def issues_group():
+def issues_group() -> None:
     """Issue management commands.
 
     \b
@@ -74,7 +74,7 @@ issues_group.add_command(issues_pending_harvest, name='pending-harvest')
 admin.add_command(admin_info, name='info')
 
 
-def register_commands(cli):
+def register_commands(cli) -> None:
     """Register all issue-related commands with the root CLI group."""
     # Issues group with alias
     cli.add_command(issues_group, name='issues')

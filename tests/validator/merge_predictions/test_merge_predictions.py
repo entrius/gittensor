@@ -18,6 +18,7 @@ from gittensor.constants import (
     PREDICTIONS_COOLDOWN_SECONDS,
     PREDICTIONS_CORRECTNESS_EXPONENT,
     PREDICTIONS_EMA_BETA,
+    PREDICTIONS_EMISSIONS_SHARE,
     PREDICTIONS_MAX_CONSENSUS_BONUS,
     PREDICTIONS_MAX_ORDER_BONUS,
     PREDICTIONS_MAX_TIMELINESS_BONUS,
@@ -515,7 +516,161 @@ class TestPredictionScoring:
 
 
 # =============================================================================
-# 4. Validation
+# 4. Top-K reward distribution (build_prediction_ema_rewards)
+# =============================================================================
+
+
+def _make_mock_validator(ema_records: list[dict]) -> MagicMock:
+    """Create a mock validator with mp_storage returning given EMA records."""
+    validator = MagicMock()
+    validator.mp_storage.get_all_emas.return_value = ema_records
+    return validator
+
+
+def _make_evaluations(uid_to_github_id: dict[int, str]) -> dict:
+    """Create mock miner evaluations mapping uid -> github_id."""
+    evaluations = {}
+    for uid, github_id in uid_to_github_id.items():
+        ev = MagicMock()
+        ev.github_id = github_id
+        evaluations[uid] = ev
+    return evaluations
+
+
+class TestBuildPredictionEmaRewards:
+    """Tests for the top-K reward distribution integrated with validator state."""
+
+    def _call(self, validator, miner_uids, evaluations):
+        from gittensor.validator.forward import build_prediction_ema_rewards
+
+        return build_prediction_ema_rewards(validator, miner_uids, evaluations)
+
+    def test_standard_top3_split(self):
+        """3+ miners with positive EMA -> 50/35/15 split."""
+        emas = [
+            {'github_id': 'a', 'ema_score': 0.9, 'rounds': 10},
+            {'github_id': 'b', 'ema_score': 0.7, 'rounds': 8},
+            {'github_id': 'c', 'ema_score': 0.5, 'rounds': 6},
+            {'github_id': 'd', 'ema_score': 0.3, 'rounds': 4},
+        ]
+        validator = _make_mock_validator(emas)
+        uids = {1, 2, 3, 4}
+        evals = _make_evaluations({1: 'a', 2: 'b', 3: 'c', 4: 'd'})
+
+        rewards = self._call(validator, uids, evals)
+        sorted_uids = sorted(uids)
+
+        assert rewards[sorted_uids.index(1)] == pytest.approx(0.50 * PREDICTIONS_EMISSIONS_SHARE)
+        assert rewards[sorted_uids.index(2)] == pytest.approx(0.35 * PREDICTIONS_EMISSIONS_SHARE)
+        assert rewards[sorted_uids.index(3)] == pytest.approx(0.15 * PREDICTIONS_EMISSIONS_SHARE)
+        assert rewards[sorted_uids.index(4)] == 0.0
+
+    def test_two_miners_only(self):
+        """Only 2 miners with positive EMA -> 50% and 35%, rest unallocated."""
+        emas = [
+            {'github_id': 'a', 'ema_score': 0.8, 'rounds': 5},
+            {'github_id': 'b', 'ema_score': 0.4, 'rounds': 3},
+        ]
+        validator = _make_mock_validator(emas)
+        uids = {1, 2, 3}
+        evals = _make_evaluations({1: 'a', 2: 'b', 3: '0'})
+
+        rewards = self._call(validator, uids, evals)
+        sorted_uids = sorted(uids)
+
+        assert rewards[sorted_uids.index(1)] == pytest.approx(0.50 * PREDICTIONS_EMISSIONS_SHARE)
+        assert rewards[sorted_uids.index(2)] == pytest.approx(0.35 * PREDICTIONS_EMISSIONS_SHARE)
+        assert rewards[sorted_uids.index(3)] == 0.0
+        assert rewards.sum() < PREDICTIONS_EMISSIONS_SHARE
+
+    def test_single_miner(self):
+        """Single miner -> receives 50%, rest unallocated."""
+        emas = [
+            {'github_id': 'a', 'ema_score': 0.6, 'rounds': 2},
+        ]
+        validator = _make_mock_validator(emas)
+        uids = {1, 2}
+        evals = _make_evaluations({1: 'a', 2: '0'})
+
+        rewards = self._call(validator, uids, evals)
+        sorted_uids = sorted(uids)
+
+        assert rewards[sorted_uids.index(1)] == pytest.approx(0.50 * PREDICTIONS_EMISSIONS_SHARE)
+        assert rewards[sorted_uids.index(2)] == 0.0
+
+    def test_no_positive_ema(self):
+        """No miners with positive EMA -> all zeros."""
+        emas = [
+            {'github_id': 'a', 'ema_score': 0.0, 'rounds': 1},
+            {'github_id': 'b', 'ema_score': -0.1, 'rounds': 1},
+        ]
+        validator = _make_mock_validator(emas)
+        uids = {1, 2}
+        evals = _make_evaluations({1: 'a', 2: 'b'})
+
+        rewards = self._call(validator, uids, evals)
+        assert rewards.sum() == 0.0
+
+    def test_no_emas_at_all(self):
+        """Empty EMA table -> all zeros."""
+        validator = _make_mock_validator([])
+        uids = {1, 2}
+        evals = _make_evaluations({1: 'a', 2: 'b'})
+
+        rewards = self._call(validator, uids, evals)
+        assert rewards.sum() == 0.0
+
+    def test_tie_broken_by_rounds(self):
+        """Equal EMA scores -> higher rounds count wins."""
+        emas = [
+            {'github_id': 'a', 'ema_score': 0.5, 'rounds': 3},
+            {'github_id': 'b', 'ema_score': 0.5, 'rounds': 10},
+            {'github_id': 'c', 'ema_score': 0.5, 'rounds': 7},
+        ]
+        validator = _make_mock_validator(emas)
+        uids = {1, 2, 3}
+        evals = _make_evaluations({1: 'a', 2: 'b', 3: 'c'})
+
+        rewards = self._call(validator, uids, evals)
+        sorted_uids = sorted(uids)
+
+        assert rewards[sorted_uids.index(2)] == pytest.approx(0.50 * PREDICTIONS_EMISSIONS_SHARE)
+        assert rewards[sorted_uids.index(3)] == pytest.approx(0.35 * PREDICTIONS_EMISSIONS_SHARE)
+        assert rewards[sorted_uids.index(1)] == pytest.approx(0.15 * PREDICTIONS_EMISSIONS_SHARE)
+
+    def test_deregistered_miner_excluded(self):
+        """Miner with EMA but no evaluation entry (deregistered) is excluded."""
+        emas = [
+            {'github_id': 'a', 'ema_score': 0.9, 'rounds': 10},
+            {'github_id': 'orphan', 'ema_score': 0.8, 'rounds': 8},
+            {'github_id': 'c', 'ema_score': 0.5, 'rounds': 6},
+        ]
+        validator = _make_mock_validator(emas)
+        uids = {1, 3}
+        evals = _make_evaluations({1: 'a', 3: 'c'})
+
+        rewards = self._call(validator, uids, evals)
+        sorted_uids = sorted(uids)
+
+        assert rewards[sorted_uids.index(1)] == pytest.approx(0.50 * PREDICTIONS_EMISSIONS_SHARE)
+        assert rewards[sorted_uids.index(3)] == pytest.approx(0.35 * PREDICTIONS_EMISSIONS_SHARE)
+
+    def test_total_never_exceeds_emission_share(self):
+        """Total prediction rewards must never exceed PREDICTIONS_EMISSIONS_SHARE."""
+        emas = [
+            {'github_id': str(i), 'ema_score': 1.0 - i * 0.01, 'rounds': 100 - i}
+            for i in range(20)
+        ]
+        validator = _make_mock_validator(emas)
+        uids = set(range(20))
+        evals = _make_evaluations({i: str(i) for i in range(20)})
+
+        rewards = self._call(validator, uids, evals)
+        assert rewards.sum() == pytest.approx(PREDICTIONS_EMISSIONS_SHARE)
+
+
+# =============================================================================
+# 5. Validation
 # =============================================================================
 
 
@@ -547,7 +702,7 @@ class TestValidation:
 
 
 # =============================================================================
-# 5. Settlement
+# 6. Settlement
 # =============================================================================
 
 

@@ -1,0 +1,13 @@
+{
+  "pythonVersion": "3.12",
+  "typeCheckingMode": "standard",
+  "include": [
+    "gittensor",
+    "neurons",
+    "scripts",
+    "tests"
+  ],
+  "venvPath": ".",
+  "venv": "gittensor-venv",
+  "reportMissingTypeStubs": false
+}

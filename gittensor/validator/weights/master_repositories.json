@@ -194,8 +194,8 @@
   },
   "ant-design/ant-design": {
     "additional_acceptable_branches": ["feature"],
-    "tier": "Silver",
-    "weight": 3.98
+    "tier": "Bronze",
+    "weight": 1
   },
   "ant-design/ant-design-pro": {
     "tier": "Bronze",
@@ -553,8 +553,8 @@
     "weight": 0.12
   },
   "azerothcore/azerothcore-wotlk": {
-    "tier": "Silver",
-    "weight": 3.51
+    "tier": "Bronze",
+    "weight": 0.88
   },
   "Azure-Samples/azure-search-openai-demo": {
     "tier": "Bronze",
@@ -953,8 +953,8 @@
     "weight": 0.13
   },
   "cloudflare/cloudflare-docs": {
-    "tier": "Silver",
-    "weight": 3.42
+    "tier": "Bronze",
+    "weight": 0.86
   },
   "cloudwu/skynet": {
     "tier": "Bronze",
@@ -1560,8 +1560,8 @@
     "weight": 0.13
   },
   "erxes/erxes": {
-    "tier": "Silver",
-    "weight": 3.46
+    "tier": "Bronze",
+    "weight": 0.87
   },
   "eslint/eslint": {
     "tier": "Bronze",
@@ -1858,8 +1858,8 @@
     "inactive_at": "2026-03-14"
   },
   "frappe/frappe": {
-    "tier": "Silver",
-    "weight": 3.73,
+    "tier": "Bronze",
+    "weight": 0.93,
     "inactive_at": "2026-03-14"
   },
   "frappe/gantt": {
@@ -2520,8 +2520,8 @@
     "weight": 0.17
   },
   "janhq/jan": {
-    "tier": "Silver",
-    "weight": 3.85
+    "tier": "Bronze",
+    "weight": 0.96
   },
   "jbeder/yaml-cpp": {
     "tier": "Bronze",
@@ -2878,8 +2878,8 @@
     "weight": 0.11
   },
   "langgenius/dify": {
-    "tier": "Silver",
-    "weight": 3.2
+    "tier": "Bronze",
+    "weight": 0.8
   },
   "laradock/laradock": {
     "tier": "Bronze",
@@ -3417,8 +3417,8 @@
     "weight": 0.21
   },
   "mrdoob/three.js": {
-    "tier": "Silver",
-    "weight": 4.12
+    "tier": "Bronze",
+    "weight": 1.03
   },
   "MudBlazor/MudBlazor": {
     "inactive_at": "2025-11-29T17:45:38.525Z",
@@ -3628,8 +3628,8 @@
     "weight": 0.55
   },
   "nushell/nushell": {
-    "tier": "Silver",
-    "weight": 3.91
+    "tier": "Bronze",
+    "weight": 0.98
   },
   "nuxt/nuxt": {
     "tier": "Bronze",
@@ -3696,8 +3696,8 @@
     "weight": 0.13
   },
   "ohmyzsh/ohmyzsh": {
-    "tier": "Silver",
-    "weight": 4.05
+    "tier": "Bronze",
+    "weight": 1.01
   },
   "oldratlee/useful-scripts": {
     "tier": "Bronze",
@@ -3919,8 +3919,8 @@
     "weight": 0.13
   },
   "openwrt/luci": {
-    "tier": "Silver",
-    "weight": 3.67
+    "tier": "Bronze",
+    "weight": 0.92
   },
   "openwrt/openwrt": {
     "tier": "Bronze",
@@ -4317,8 +4317,8 @@
     "weight": 0.23
   },
   "python-telegram-bot/python-telegram-bot": {
-    "tier": "Silver",
-    "weight": 3.32
+    "tier": "Bronze",
+    "weight": 0.83
   },
   "python-visualization/folium": {
     "tier": "Bronze",
@@ -4362,8 +4362,8 @@
     "weight": 0.15
   },
   "Qiskit/qiskit": {
-    "tier": "Silver",
-    "weight": 3.62
+    "tier": "Bronze",
+    "weight": 0.91
   },
   "qist/tvbox": {
     "tier": "Bronze",
@@ -4444,6 +4444,10 @@
   "raycast/extensions": {
     "tier": "Bronze",
     "weight": 0.17
+  },
+  "react-component/image": {
+    "tier": "Bronze",
+    "weight": 0.1
   },
   "react-component/picker": {
     "tier": "Bronze",
@@ -4653,7 +4657,7 @@
   "sbt/sbt": {
     "additional_acceptable_branches": ["1.12.x"],
     "tier": "Bronze",
-    "weight": 1.2
+    "weight": 0.3
   },
   "scala/scala": {
     "tier": "Bronze",
@@ -4928,8 +4932,8 @@
     "weight": 0.15
   },
   "Stirling-Tools/Stirling-PDF": {
-    "tier": "Silver",
-    "weight": 3.24
+    "tier": "Bronze",
+    "weight": 0.81
   },
   "stleary/JSON-java": {
     "tier": "Bronze",
@@ -4974,8 +4978,8 @@
     "weight": 0.91
   },
   "sveltejs/svelte": {
-    "tier": "Silver",
-    "weight": 3.28
+    "tier": "Bronze",
+    "weight": 0.82
   },
   "svenfuchs/rails-i18n": {
     "tier": "Bronze",
@@ -5153,8 +5157,8 @@
     "weight": 0.36
   },
   "TheOdinProject/curriculum": {
-    "tier": "Silver",
-    "weight": 3.79
+    "tier": "Bronze",
+    "weight": 0.95
   },
   "TheOdinProject/theodinproject": {
     "tier": "Bronze",
@@ -5337,8 +5341,8 @@
     "weight": 0.19
   },
   "twentyhq/twenty": {
-    "tier": "Silver",
-    "weight": 3.37
+    "tier": "Bronze",
+    "weight": 0.84
   },
   "typeorm/typeorm": {
     "tier": "Bronze",
@@ -5385,8 +5389,8 @@
     "weight": 0.24
   },
   "umbraco/Umbraco-CMS": {
-    "tier": "Silver",
-    "weight": 3.56
+    "tier": "Bronze",
+    "weight": 0.89
   },
   "unclecode/crawl4ai": {
     "tier": "Bronze",

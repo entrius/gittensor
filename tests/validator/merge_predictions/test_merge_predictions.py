@@ -657,10 +657,7 @@ class TestBuildPredictionEmaRewards:
 
     def test_total_never_exceeds_emission_share(self):
         """Total prediction rewards must never exceed PREDICTIONS_EMISSIONS_SHARE."""
-        emas = [
-            {'github_id': str(i), 'ema_score': 1.0 - i * 0.01, 'rounds': 100 - i}
-            for i in range(20)
-        ]
+        emas = [{'github_id': str(i), 'ema_score': 1.0 - i * 0.01, 'rounds': 100 - i} for i in range(20)]
         validator = _make_mock_validator(emas)
         uids = set(range(20))
         evals = _make_evaluations({i: str(i) for i in range(20)})

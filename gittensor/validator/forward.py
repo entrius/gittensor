@@ -8,7 +8,13 @@ import bittensor as bt
 import numpy as np
 
 from gittensor.classes import MinerEvaluation
-from gittensor.constants import ISSUES_TREASURY_EMISSION_SHARE, ISSUES_TREASURY_UID, PREDICTIONS_EMISSIONS_SHARE
+from gittensor.constants import (
+    ISSUES_TREASURY_EMISSION_SHARE,
+    ISSUES_TREASURY_UID,
+    PREDICTIONS_EMISSIONS_SHARE,
+    PREDICTIONS_TOP_K,
+    PREDICTIONS_TOP_K_SHARES,
+)
 from gittensor.utils.uids import get_all_uids
 from gittensor.validator.issue_competitions.forward import issue_competitions
 from gittensor.validator.merge_predictions.settlement import merge_predictions
@@ -82,7 +88,11 @@ def build_prediction_ema_rewards(
     miner_uids: set[int],
     miner_evaluations: Dict[int, MinerEvaluation],
 ) -> np.ndarray:
-    """Build rewards array from prediction EMA scores, scaled to PREDICTIONS_EMISSIONS_SHARE.
+    """Build rewards array from prediction EMA scores using top-K winner-takes-most.
+
+    Only the top PREDICTIONS_TOP_K miners by EMA score receive rewards,
+    split according to PREDICTIONS_TOP_K_SHARES (50%/35%/15%).
+    Ties are broken by rounds (more settled issues = higher rank).
 
     Maps github_id-keyed EMAs back to UIDs via miner_evaluations.
     """
@@ -101,6 +111,8 @@ def build_prediction_ema_rewards(
         if evaluation and evaluation.github_id and evaluation.github_id != '0':
             github_id_to_uid[evaluation.github_id] = uid
 
+    # Collect eligible miners: (ema_score, rounds, uid)
+    eligible: list[tuple[float, int, int]] = []
     for mp_record in all_emas:
         github_id = mp_record['github_id']
         ema_score = mp_record['ema_score']
@@ -112,13 +124,27 @@ def build_prediction_ema_rewards(
         if uid is None or uid not in miner_uids:
             continue
 
-        idx = sorted_uids.index(uid)
-        prediction_rewards[idx] = ema_score
+        rounds = mp_record.get('rounds', 0) or 0
+        eligible.append((ema_score, rounds, uid))
 
-    # Normalize to sum=1.0, then scale to prediction share
-    total = prediction_rewards.sum()
-    if total > 0:
-        prediction_rewards = (prediction_rewards / total) * PREDICTIONS_EMISSIONS_SHARE
+    if not eligible:
+        return prediction_rewards
+
+    # Rank by EMA descending, then by rounds descending (tiebreaker)
+    eligible.sort(key=lambda x: (x[0], x[1]), reverse=True)
+
+    # Award top-K miners their fixed shares
+    top_k = min(PREDICTIONS_TOP_K, len(eligible))
+    for rank in range(top_k):
+        _, _, uid = eligible[rank]
+        idx = sorted_uids.index(uid)
+        prediction_rewards[idx] = PREDICTIONS_TOP_K_SHARES[rank] * PREDICTIONS_EMISSIONS_SHARE
+
+    top_miners_log = ', '.join(
+        f'UID {uid} (ema={ema:.4f}, rounds={rounds}, share={PREDICTIONS_TOP_K_SHARES[i] * 100:.0f}%)'
+        for i, (ema, rounds, uid) in enumerate(eligible[:top_k])
+    )
+    bt.logging.info(f'Merge prediction top-{top_k} rewards: {top_miners_log}')
 
     return prediction_rewards
 

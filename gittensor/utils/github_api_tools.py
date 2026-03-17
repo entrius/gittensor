@@ -254,6 +254,7 @@ def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -
     Get the diff for a specific PR by repository name and PR number.
 
     Uses retry logic with exponential backoff for transient failures.
+    Handles pagination to fetch ALL files (not limited to default 30).
 
     Args:
         repository (str): Repository in format 'owner/repo'
@@ -264,39 +265,61 @@ def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -
     """
     max_attempts = 3
     headers = make_headers(token)
+    all_file_diffs = []
+    page = 1
 
-    last_error = None
-    for attempt in range(max_attempts):
-        try:
-            response = requests.get(
-                f'{BASE_GITHUB_API_URL}/repos/{repository}/pulls/{pr_number}/files', headers=headers, timeout=15
+    while True:
+        last_error = None
+        for attempt in range(max_attempts):
+            try:
+                # Request max 100 files per page (GitHub API limit)
+                url = f'{BASE_GITHUB_API_URL}/repos/{repository}/pulls/{pr_number}/files?per_page=100&page={page}'
+                response = requests.get(url, headers=headers, timeout=15)
+                if response.status_code == 200:
+                    file_diffs = response.json()
+                    all_file_diffs.extend(file_diffs)
+
+                    # Check if there are more pages via Link header
+                    link_header = response.headers.get('Link', '')
+                    if 'rel="next"' not in link_header:
+                        # No more pages, we're done
+                        return [FileChange.from_github_response(pr_number, repository, fd) for fd in all_file_diffs]
+
+                    # More pages exist, continue to next page
+                    page += 1
+                    break
+
+                last_error = f'status {response.status_code}'
+                if attempt < max_attempts - 1:
+                    backoff_delay = min(5 * (2**attempt), 30)
+                    bt.logging.warning(
+                        f'File changes request for PR #{pr_number} in {repository} (page {page}) failed with status {response.status_code} '
+                        f'(attempt {attempt + 1}/{max_attempts}), retrying in {backoff_delay}s...'
+                    )
+                    time.sleep(backoff_delay)
+
+            except requests.exceptions.RequestException as e:
+                last_error = str(e)
+                if attempt < max_attempts - 1:
+                    backoff_delay = min(5 * (2**attempt), 30)
+                    bt.logging.warning(
+                        f'File changes request error for PR #{pr_number} in {repository} (page {page}) '
+                        f'(attempt {attempt + 1}/{max_attempts}): {e}, retrying in {backoff_delay}s...'
+                    )
+                    time.sleep(backoff_delay)
+
+        # If we get here, the request failed after max_attempts
+        if last_error:
+            bt.logging.error(
+                f'File changes request for PR #{pr_number} in {repository} (page {page}) failed after {max_attempts} attempts: {last_error}'
             )
-            if response.status_code == 200:
-                file_diffs = response.json()
-                return [FileChange.from_github_response(pr_number, repository, file_diff) for file_diff in file_diffs]
+            # Return partial results if we got any files, otherwise empty list
+            if all_file_diffs:
+                bt.logging.warning(f'Returning {len(all_file_diffs)} files fetched before failure')
+                return [FileChange.from_github_response(pr_number, repository, fd) for fd in all_file_diffs]
+            return []
 
-            last_error = f'status {response.status_code}'
-            if attempt < max_attempts - 1:
-                backoff_delay = min(5 * (2**attempt), 30)
-                bt.logging.warning(
-                    f'File changes request for PR #{pr_number} in {repository} failed with status {response.status_code} '
-                    f'(attempt {attempt + 1}/{max_attempts}), retrying in {backoff_delay}s...'
-                )
-                time.sleep(backoff_delay)
-
-        except requests.exceptions.RequestException as e:
-            last_error = str(e)
-            if attempt < max_attempts - 1:
-                backoff_delay = min(5 * (2**attempt), 30)
-                bt.logging.warning(
-                    f'File changes request error for PR #{pr_number} in {repository} '
-                    f'(attempt {attempt + 1}/{max_attempts}): {e}, retrying in {backoff_delay}s...'
-                )
-                time.sleep(backoff_delay)
-
-    bt.logging.error(
-        f'File changes request for PR #{pr_number} in {repository} failed after {max_attempts} attempts: {last_error}'
-    )
+    # This should never be reached, but satisfies type checker
     return []
 
 

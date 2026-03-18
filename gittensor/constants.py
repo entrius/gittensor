@@ -121,6 +121,9 @@ TOKEN_SCORE_RECYCLE_DECAY_RATE = 0.000012
 # =============================================================================
 MAINTAINER_ASSOCIATIONS = ['OWNER', 'COLLABORATOR']
 
+# PR Review Quality Multiplier
+REVIEW_PENALTY_RATE = 0.12  # 12% deduction per CHANGES_REQUESTED review from a maintainer
+
 # Issue multiplier bonuses
 MAX_ISSUE_AGE_BONUS = 0.75  # Max bonus for issue age (scales with sqrt of days open)
 MAINTAINER_ISSUE_BONUS = 0.25  # Extra bonus when issue was created by a maintainer

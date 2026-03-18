@@ -524,6 +524,203 @@ class TestFileChangesRetryLogic:
 
 
 # ============================================================================
+# File Changes Pagination Tests
+# ============================================================================
+
+
+def _make_file_diffs(count: int, start: int = 0) -> list:
+    """Build a list of mock GitHub file-diff dicts."""
+    return [
+        {
+            'filename': f'file_{start + i}.py',
+            'status': 'modified',
+            'changes': 1,
+            'additions': 1,
+            'deletions': 0,
+            'patch': '',
+        }
+        for i in range(count)
+    ]
+
+
+class TestFileChangesPagination:
+    """Test suite for pagination in get_pull_request_file_changes."""
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    def test_passes_per_page_param(self, mock_get):
+        """Verify per_page=100 is sent to fetch more than the default 30 files."""
+        mock_response = Mock(status_code=200)
+        mock_response.json.return_value = _make_file_diffs(5)
+        mock_get.return_value = mock_response
+
+        result = get_pull_request_file_changes('owner/repo', 1, 'fake_token')
+
+        assert len(result) == 5
+        assert mock_get.call_count == 1
+        _, kwargs = mock_get.call_args
+        assert kwargs['params']['per_page'] == 100
+        assert kwargs['params']['page'] == 1
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    def test_paginates_when_first_page_is_full(self, mock_get):
+        """Fetch two pages when the first page returns exactly per_page files."""
+        page1 = _make_file_diffs(100, start=0)
+        page2 = _make_file_diffs(2, start=100)
+
+        mock_page1 = Mock(status_code=200)
+        mock_page1.json.return_value = page1
+        mock_page2 = Mock(status_code=200)
+        mock_page2.json.return_value = page2
+
+        mock_get.side_effect = [mock_page1, mock_page2]
+
+        result = get_pull_request_file_changes('owner/repo', 1, 'fake_token')
+
+        assert len(result) == 102
+        assert mock_get.call_count == 2
+        assert mock_get.call_args_list[0][1]['params'] == {'per_page': 100, 'page': 1}
+        assert mock_get.call_args_list[1][1]['params'] == {'per_page': 100, 'page': 2}
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    def test_three_pages(self, mock_get):
+        """Aggregate files across three pages for a large PR."""
+        mock_pages = []
+        for pg in range(3):
+            count = 100 if pg < 2 else 50
+            m = Mock(status_code=200)
+            m.json.return_value = _make_file_diffs(count, start=pg * 100)
+            mock_pages.append(m)
+
+        mock_get.side_effect = mock_pages
+
+        result = get_pull_request_file_changes('owner/repo', 1, 'fake_token')
+
+        assert len(result) == 250
+        assert mock_get.call_count == 3
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    def test_exactly_100_files_fetches_second_page(self, mock_get):
+        """When first page has exactly 100 files, a second request confirms no more pages."""
+        mock_page1 = Mock(status_code=200)
+        mock_page1.json.return_value = _make_file_diffs(100)
+        mock_page2 = Mock(status_code=200)
+        mock_page2.json.return_value = []
+
+        mock_get.side_effect = [mock_page1, mock_page2]
+
+        result = get_pull_request_file_changes('owner/repo', 1, 'fake_token')
+
+        assert len(result) == 100
+        assert mock_get.call_count == 2
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    def test_empty_first_page_returns_empty_list(self, mock_get):
+        """PR with zero changed files returns an empty list on the first page."""
+        mock_response = Mock(status_code=200)
+        mock_response.json.return_value = []
+        mock_get.return_value = mock_response
+
+        result = get_pull_request_file_changes('owner/repo', 1, 'fake_token')
+
+        assert result == []
+        assert mock_get.call_count == 1
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_retry_resets_pagination_on_mid_page_failure(self, mock_logging, mock_sleep, mock_get):
+        """When page 2 fails with 502, the retry restarts from page 1 with halved per_page."""
+        page1 = _make_file_diffs(100, start=0)
+        page2 = _make_file_diffs(3, start=100)
+
+        # Attempt 1: page 1 OK (per_page=100), page 2 fails with 502
+        ok_page1_a1 = Mock(status_code=200)
+        ok_page1_a1.json.return_value = page1
+        fail_page2 = Mock(status_code=502, text='Bad Gateway')
+
+        # Attempt 2: page 1 OK (per_page=50 after halving), page 2 OK
+        ok_page1_a2 = Mock(status_code=200)
+        ok_page1_a2.json.return_value = _make_file_diffs(50, start=0)
+        ok_page2_a2 = Mock(status_code=200)
+        ok_page2_a2.json.return_value = _make_file_diffs(50, start=50)
+        ok_page3_a2 = Mock(status_code=200)
+        ok_page3_a2.json.return_value = page2
+
+        mock_get.side_effect = [ok_page1_a1, fail_page2, ok_page1_a2, ok_page2_a2, ok_page3_a2]
+
+        result = get_pull_request_file_changes('owner/repo', 1, 'fake_token')
+
+        assert len(result) == 103, 'Should have 50 + 50 + 3 files, not double-counted'
+        assert mock_sleep.call_count == 1
+        # Verify retry restarted from page 1 with halved per_page
+        assert mock_get.call_args_list[2][1]['params'] == {'per_page': 50, 'page': 1}
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_5xx_halves_page_size_on_retry(self, mock_logging, mock_sleep, mock_get):
+        """502/503/504 errors halve per_page (floor 10) to work around large-payload failures."""
+        mock_502 = Mock(status_code=502, text='Bad Gateway')
+        mock_200 = Mock(status_code=200)
+        mock_200.json.return_value = _make_file_diffs(5)
+
+        mock_get.side_effect = [mock_502, mock_502, mock_200]
+
+        result = get_pull_request_file_changes('owner/repo', 1, 'fake_token')
+
+        assert len(result) == 5
+        # per_page: 100 -> 50 -> 25
+        params = [c[1]['params'] for c in mock_get.call_args_list]
+        assert params[0]['per_page'] == 100
+        assert params[1]['per_page'] == 50
+        assert params[2]['per_page'] == 25
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_page_size_floors_at_10(self, mock_logging, mock_sleep, mock_get):
+        """Page size never drops below 10 even after repeated 5xx errors."""
+        mock_502 = Mock(status_code=502, text='Bad Gateway')
+        mock_get.return_value = mock_502
+
+        get_pull_request_file_changes('owner/repo', 1, 'fake_token')
+
+        # per_page: 100 -> 50 -> 25 (3 attempts, stops)
+        params = [c[1]['params']['per_page'] for c in mock_get.call_args_list]
+        assert params == [100, 50, 25]
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_non_5xx_does_not_reduce_page_size(self, mock_logging, mock_sleep, mock_get):
+        """Non-5xx errors (e.g. 403) do not reduce page size."""
+        mock_403 = Mock(status_code=403, text='Forbidden')
+        mock_200 = Mock(status_code=200)
+        mock_200.json.return_value = _make_file_diffs(5)
+
+        mock_get.side_effect = [mock_403, mock_200]
+
+        result = get_pull_request_file_changes('owner/repo', 1, 'fake_token')
+
+        assert len(result) == 5
+        params = [c[1]['params']['per_page'] for c in mock_get.call_args_list]
+        assert params == [100, 100], 'Page size should stay at 100 for non-5xx errors'
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_all_pages_fail_returns_empty_list(self, mock_logging, mock_sleep, mock_get):
+        """If every attempt fails on the first page, return empty list."""
+        mock_get.return_value = Mock(status_code=500, text='Internal Server Error')
+
+        result = get_pull_request_file_changes('owner/repo', 1, 'fake_token')
+
+        assert result == []
+        assert mock_get.call_count == 3
+        mock_logging.error.assert_called()
+
+
+# ============================================================================
 # execute_graphql_query Retry Logic Tests
 # ============================================================================
 

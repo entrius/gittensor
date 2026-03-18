@@ -254,6 +254,9 @@ def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -
     Get the diff for a specific PR by repository name and PR number.
 
     Uses retry logic with exponential backoff for transient failures.
+    Paginates with per_page=100 (GitHub max) to fetch ALL changed files,
+    not just the default 30. On 5xx errors the page size is halved
+    (floor 10) to work around large-payload failures.
 
     Args:
         repository (str): Repository in format 'owner/repo'
@@ -263,34 +266,66 @@ def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -
         List[FileChanges]: List object with file changes or None if error
     """
     max_attempts = 3
+    per_page = 100
     headers = make_headers(token)
 
+    all_file_diffs: list = []
+    page = 1
+    attempt = 0
     last_error = None
-    for attempt in range(max_attempts):
+
+    while attempt < max_attempts:
         try:
             response = requests.get(
-                f'{BASE_GITHUB_API_URL}/repos/{repository}/pulls/{pr_number}/files', headers=headers, timeout=15
+                f'{BASE_GITHUB_API_URL}/repos/{repository}/pulls/{pr_number}/files',
+                headers=headers,
+                params={'per_page': per_page, 'page': page},
+                timeout=15,
             )
+
             if response.status_code == 200:
                 file_diffs = response.json()
-                return [FileChange.from_github_response(pr_number, repository, file_diff) for file_diff in file_diffs]
+                all_file_diffs.extend(file_diffs)
 
+                if len(file_diffs) < per_page:
+                    return [
+                        FileChange.from_github_response(pr_number, repository, file_diff)
+                        for file_diff in all_file_diffs
+                    ]
+
+                page += 1
+                continue
+
+            # Request failed — prepare retry
             last_error = f'status {response.status_code}'
-            if attempt < max_attempts - 1:
-                backoff_delay = min(5 * (2**attempt), 30)
+
+            # Reduce page size on server-side errors (payload may be too large)
+            if response.status_code in (502, 503, 504):
+                per_page = max(per_page // 2, 10)
+
+            all_file_diffs = []
+            page = 1
+            attempt += 1
+
+            if attempt < max_attempts:
+                backoff_delay = min(5 * (2 ** (attempt - 1)), 30)
                 bt.logging.warning(
-                    f'File changes request for PR #{pr_number} in {repository} failed with status {response.status_code} '
-                    f'(attempt {attempt + 1}/{max_attempts}), retrying in {backoff_delay}s...'
+                    f'File changes request for PR #{pr_number} in {repository} failed with {last_error} '
+                    f'(attempt {attempt}/{max_attempts}), per_page={per_page}, retrying in {backoff_delay}s...'
                 )
                 time.sleep(backoff_delay)
 
         except requests.exceptions.RequestException as e:
             last_error = str(e)
-            if attempt < max_attempts - 1:
-                backoff_delay = min(5 * (2**attempt), 30)
+            all_file_diffs = []
+            page = 1
+            attempt += 1
+
+            if attempt < max_attempts:
+                backoff_delay = min(5 * (2 ** (attempt - 1)), 30)
                 bt.logging.warning(
                     f'File changes request error for PR #{pr_number} in {repository} '
-                    f'(attempt {attempt + 1}/{max_attempts}): {e}, retrying in {backoff_delay}s...'
+                    f'(attempt {attempt}/{max_attempts}): {e}, retrying in {backoff_delay}s...'
                 )
                 time.sleep(backoff_delay)
 

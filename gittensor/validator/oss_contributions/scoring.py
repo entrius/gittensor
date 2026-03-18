@@ -24,6 +24,7 @@ from gittensor.constants import (
     PIONEER_DIVIDEND_RATE_1ST,
     PIONEER_DIVIDEND_RATE_2ND,
     PIONEER_DIVIDEND_RATE_REST,
+    REVIEW_PENALTY_RATE,
     SECONDS_PER_DAY,
     SECONDS_PER_HOUR,
     TIME_DECAY_GRACE_PERIOD_HOURS,
@@ -35,6 +36,7 @@ from gittensor.utils.github_api_tools import (
     FileContentPair,
     fetch_file_contents_with_base,
     get_pull_request_file_changes,
+    get_pull_request_maintainer_changes_requested_count,
 )
 from gittensor.validator.oss_contributions.credibility import (
     calculate_credibility_per_tier,
@@ -207,6 +209,23 @@ def calculate_base_score(
     return base_score
 
 
+def calculate_review_quality_multiplier(changes_requested_count: int) -> float:
+    """Calculate the review quality multiplier based on CHANGES_REQUESTED reviews from maintainers.
+
+    Each CHANGES_REQUESTED review from a maintainer (OWNER, MEMBER, or COLLABORATOR) reduces the multiplier
+    by REVIEW_PENALTY_RATE cumulatively, floored at 0.0.
+
+    Formula: max(0.0, 1.0 - REVIEW_PENALTY_RATE × N)
+
+    Args:
+        changes_requested_count: Number of CHANGES_REQUESTED reviews from maintainers
+
+    Returns:
+        float: Multiplier in [0.0, 1.0]
+    """
+    return max(0.0, 1.0 - REVIEW_PENALTY_RATE * changes_requested_count)
+
+
 def calculate_pr_multipliers(
     pr: PullRequest, miner_eval: MinerEvaluation, master_repositories: Dict[str, RepositoryConfig]
 ) -> None:
@@ -223,10 +242,21 @@ def calculate_pr_multipliers(
         pr.open_pr_spam_multiplier = 1.0
         pr.time_decay_multiplier = round(calculate_time_decay_multiplier(pr), 2)
 
+        changes_requested_count = get_pull_request_maintainer_changes_requested_count(
+            pr.repository_full_name, pr.number, miner_eval.github_pat
+        )
+        pr.review_quality_multiplier = round(calculate_review_quality_multiplier(changes_requested_count), 2)
+        if changes_requested_count > 0:
+            bt.logging.info(
+                f'PR #{pr.number} - {changes_requested_count} maintainer CHANGES_REQUESTED review(s) → '
+                f'review_quality_multiplier={pr.review_quality_multiplier:.2f}'
+            )
+
     else:
         pr.open_pr_spam_multiplier = 1.0
         pr.time_decay_multiplier = 1.0
         pr.credibility_multiplier = 1.0
+        pr.review_quality_multiplier = 1.0
 
 
 def calculate_open_pr_threshold(

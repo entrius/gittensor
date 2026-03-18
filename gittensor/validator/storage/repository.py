@@ -176,6 +176,7 @@ class Repository(BaseRepository):
                     pr.credibility_multiplier,
                     pr.raw_credibility,
                     pr.credibility_scalar,
+                    pr.review_quality_multiplier,
                     pr.earned_score,
                     pr.collateral_score,
                     pr.additions,

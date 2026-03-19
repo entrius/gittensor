@@ -339,6 +339,7 @@ def get_pull_request_maintainer_changes_requested_count(repository: str, pr_numb
     """
     Count CHANGES_REQUESTED reviews from maintainers for a PR.
 
+    Paginates with per_page=100 (GitHub max) to fetch ALL reviews.
     Uses retry logic with exponential backoff for transient failures.
     On error, returns 0 (fail-safe: no penalty applied).
 
@@ -350,42 +351,62 @@ def get_pull_request_maintainer_changes_requested_count(repository: str, pr_numb
         int: Number of CHANGES_REQUESTED reviews from maintainers
     """
     max_attempts = 3
+    per_page = 100
     headers = make_headers(token)
 
+    all_reviews: list = []
+    page = 1
+    attempt = 0
     last_error = None
-    for attempt in range(max_attempts):
+
+    while attempt < max_attempts:
         try:
             response = requests.get(
                 f'{BASE_GITHUB_API_URL}/repos/{repository}/pulls/{pr_number}/reviews',
                 headers=headers,
-                params={'per_page': 100},
+                params={'per_page': per_page, 'page': page},
                 timeout=15,
             )
             if response.status_code == 200:
                 reviews = response.json()
-                return sum(
-                    1
-                    for review in reviews
-                    if review.get('state') == 'CHANGES_REQUESTED'
-                    and review.get('author_association') in MAINTAINER_ASSOCIATIONS
-                )
+                all_reviews.extend(reviews)
 
+                if len(reviews) < per_page:
+                    return sum(
+                        1
+                        for review in all_reviews
+                        if review.get('state') == 'CHANGES_REQUESTED'
+                        and review.get('author_association') in MAINTAINER_ASSOCIATIONS
+                    )
+
+                page += 1
+                continue
+
+            # Request failed — prepare retry
             last_error = f'status {response.status_code}'
-            if attempt < max_attempts - 1:
-                backoff_delay = min(5 * (2**attempt), 30)
+            all_reviews = []
+            page = 1
+            attempt += 1
+
+            if attempt < max_attempts:
+                backoff_delay = min(5 * (2 ** (attempt - 1)), 30)
                 bt.logging.warning(
                     f'Reviews request for PR #{pr_number} in {repository} failed with status {response.status_code} '
-                    f'(attempt {attempt + 1}/{max_attempts}), retrying in {backoff_delay}s...'
+                    f'(attempt {attempt}/{max_attempts}), retrying in {backoff_delay}s...'
                 )
                 time.sleep(backoff_delay)
 
         except requests.exceptions.RequestException as e:
             last_error = str(e)
-            if attempt < max_attempts - 1:
-                backoff_delay = min(5 * (2**attempt), 30)
+            all_reviews = []
+            page = 1
+            attempt += 1
+
+            if attempt < max_attempts:
+                backoff_delay = min(5 * (2 ** (attempt - 1)), 30)
                 bt.logging.warning(
                     f'Reviews request error for PR #{pr_number} in {repository} '
-                    f'(attempt {attempt + 1}/{max_attempts}): {e}, retrying in {backoff_delay}s...'
+                    f'(attempt {attempt}/{max_attempts}): {e}, retrying in {backoff_delay}s...'
                 )
                 time.sleep(backoff_delay)
 

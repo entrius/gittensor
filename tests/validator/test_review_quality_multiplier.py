@@ -218,12 +218,47 @@ class TestGetPullRequestMaintainerChangesRequestedCount:
         assert get_pull_request_maintainer_changes_requested_count('owner/repo', 1, 'token') == 0
 
     @patch('gittensor.utils.github_api_tools.requests.get')
-    def test_uses_per_page_100(self, mock_get):
-        """Ensures pagination parameter is set to avoid missing reviews."""
+    def test_uses_per_page_100_and_page_param(self, mock_get):
+        """Ensures pagination parameters are sent on each request."""
         mock_get.return_value = Mock(status_code=200, **{'json.return_value': []})
         get_pull_request_maintainer_changes_requested_count('owner/repo', 42, 'token')
         _, kwargs = mock_get.call_args
         assert kwargs.get('params', {}).get('per_page') == 100
+        assert kwargs.get('params', {}).get('page') == 1
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    def test_paginates_across_multiple_pages(self, mock_get):
+        """Fetches all pages when reviews exceed per_page and accumulates counts."""
+        page1 = [_make_review('CHANGES_REQUESTED', 'OWNER')] * 100  # full page
+        page2 = [
+            _make_review('CHANGES_REQUESTED', 'COLLABORATOR'),
+            _make_review('APPROVED', 'OWNER'),
+        ]
+        mock_get.side_effect = [
+            Mock(status_code=200, **{'json.return_value': page1}),
+            Mock(status_code=200, **{'json.return_value': page2}),
+        ]
+        result = get_pull_request_maintainer_changes_requested_count('owner/repo', 1, 'token')
+        assert result == 101  # 100 from page1 + 1 from page2
+        assert mock_get.call_count == 2
+        # Verify page param increments
+        assert mock_get.call_args_list[0][1]['params']['page'] == 1
+        assert mock_get.call_args_list[1][1]['params']['page'] == 2
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_pagination_resets_on_retry(self, mock_logging, mock_sleep, mock_get):
+        """On failure mid-pagination, retries from page 1."""
+        page1 = [_make_review('CHANGES_REQUESTED', 'OWNER')] * 100
+        mock_get.side_effect = [
+            Mock(status_code=200, **{'json.return_value': page1}),  # page 1 OK
+            Mock(status_code=500),  # page 2 fails
+            Mock(status_code=200, **{'json.return_value': page1}),  # retry page 1
+            Mock(status_code=200, **{'json.return_value': [_make_review('CHANGES_REQUESTED', 'OWNER')]}),  # retry page 2
+        ]
+        result = get_pull_request_maintainer_changes_requested_count('owner/repo', 1, 'token')
+        assert result == 101
 
     @patch('gittensor.utils.github_api_tools.requests.get')
     def test_member_association_not_counted(self, mock_get):

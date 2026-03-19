@@ -335,6 +335,88 @@ def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -
     return []
 
 
+def get_pull_request_maintainer_changes_requested_count(repository: str, pr_number: int, token: str) -> int:
+    """
+    Count CHANGES_REQUESTED reviews from maintainers for a PR.
+
+    Paginates with per_page=100 (GitHub max) to fetch ALL reviews.
+    Uses retry logic with exponential backoff for transient failures.
+    On error, returns 0 (fail-safe: no penalty applied).
+
+    Args:
+        repository (str): Repository in format 'owner/repo'
+        pr_number (int): PR number
+        token (str): Github pat
+    Returns:
+        int: Number of CHANGES_REQUESTED reviews from maintainers
+    """
+    max_attempts = 3
+    per_page = 100
+    headers = make_headers(token)
+
+    all_reviews: list = []
+    page = 1
+    attempt = 0
+    last_error = None
+
+    while attempt < max_attempts:
+        try:
+            response = requests.get(
+                f'{BASE_GITHUB_API_URL}/repos/{repository}/pulls/{pr_number}/reviews',
+                headers=headers,
+                params={'per_page': per_page, 'page': page},
+                timeout=15,
+            )
+            if response.status_code == 200:
+                reviews = response.json()
+                all_reviews.extend(reviews)
+
+                if len(reviews) < per_page:
+                    return sum(
+                        1
+                        for review in all_reviews
+                        if review.get('state') == 'CHANGES_REQUESTED'
+                        and review.get('author_association') in MAINTAINER_ASSOCIATIONS
+                    )
+
+                page += 1
+                continue
+
+            # Request failed — prepare retry
+            last_error = f'status {response.status_code}'
+            all_reviews = []
+            page = 1
+            attempt += 1
+
+            if attempt < max_attempts:
+                backoff_delay = min(5 * (2 ** (attempt - 1)), 30)
+                bt.logging.warning(
+                    f'Reviews request for PR #{pr_number} in {repository} failed with status {response.status_code} '
+                    f'(attempt {attempt}/{max_attempts}), retrying in {backoff_delay}s...'
+                )
+                time.sleep(backoff_delay)
+
+        except requests.exceptions.RequestException as e:
+            last_error = str(e)
+            all_reviews = []
+            page = 1
+            attempt += 1
+
+            if attempt < max_attempts:
+                backoff_delay = min(5 * (2 ** (attempt - 1)), 30)
+                bt.logging.warning(
+                    f'Reviews request error for PR #{pr_number} in {repository} '
+                    f'(attempt {attempt}/{max_attempts}): {e}, retrying in {backoff_delay}s...'
+                )
+                time.sleep(backoff_delay)
+
+    bt.logging.error(
+        f'Reviews request for PR #{pr_number} in {repository} failed after {max_attempts} attempts: {last_error}. '
+        f'Defaulting to 0 (no penalty).'
+    )
+    return 0
+
+
 # GraphQL fragment used by both issue submissions and solver detection.
 _PR_TIMELINE_QUERY = """
 query($owner: String!, $name: String!, $issueNumber: Int!) {

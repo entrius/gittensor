@@ -858,21 +858,34 @@ def load_miners_prs(
     global_user_id = base64.b64encode(f'04:User{miner_eval.github_id}'.encode()).decode()
 
     cursor = None
+    current_page_size: Optional[int] = None  # None = let get_github_graphql_query choose default
 
     try:
         while len(miner_eval.merged_pull_requests) < max_prs:
-            response = get_github_graphql_query(
-                miner_eval.github_pat, global_user_id, len(miner_eval.merged_pull_requests), max_prs, cursor
+            result = get_github_graphql_query(
+                miner_eval.github_pat,
+                global_user_id,
+                len(miner_eval.merged_pull_requests),
+                max_prs,
+                cursor,
+                page_size=current_page_size,
             )
-            if not response:
+
+            # Carry reduced page size forward for subsequent pages
+            current_page_size = result.page_size
+
+            if not result.response:
                 bt.logging.warning('No response from github, breaking fetch loop...')
                 break
 
-            data: Dict = response.json()
+            data: Dict = result.response.json()
 
+            # Resource limit errors are already handled in get_github_graphql_query; break on others
             if 'errors' in data:
-                bt.logging.error(f'GraphQL errors: {data["errors"]}')
-                break
+                non_resource_errors = [e for e in data['errors'] if e.get('type') != 'RESOURCE_LIMITS_EXCEEDED']
+                if non_resource_errors:
+                    bt.logging.error(f'GraphQL errors: {non_resource_errors}')
+                    break
 
             user_data: Dict = data.get('data', {}).get('node')
             if not user_data:

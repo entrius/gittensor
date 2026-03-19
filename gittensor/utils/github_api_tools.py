@@ -601,26 +601,43 @@ def execute_graphql_query(
     return None
 
 
+@dataclass
+class GraphQLPageResult:
+    """Result of a paginated GraphQL query."""
+
+    response: Optional[requests.Response]
+    page_size: int  # actual page size used (may have been reduced on retry)
+
+
 def get_github_graphql_query(
-    token: str, global_user_id: str, merged_pr_count: int, max_prs: int, cursor: Optional[str]
-) -> Optional[requests.Response]:
+    token: str,
+    global_user_id: str,
+    merged_pr_count: int,
+    max_prs: int,
+    cursor: Optional[str],
+    page_size: Optional[int] = None,
+) -> GraphQLPageResult:
     """
     Get all merged PRs for a user across all repositories using GraphQL API with pagination.
 
+    Handles RESOURCE_LIMITS_EXCEEDED (HTTP 200 with errors in body) by halving
+    page size and retrying, same pattern as 502/503/504 handling.
+
     Args:
-        token (str): GitHub PAT
-        global_user_id (str): Converted numeric user ID to GraphQL global node ID
-        merged_pr_count (int): Count of all validated and merged PRs
-        max_prs (int): Maximum number of PRs to fetch across all pages
-        cursor (Optional[str]): Pagination cursor (where query left off last), None for first page
+        token: GitHub PAT
+        global_user_id: Converted numeric user ID to GraphQL global node ID
+        merged_pr_count: Count of all validated and merged PRs
+        max_prs: Maximum number of PRs to fetch across all pages
+        cursor: Pagination cursor (where query left off last), None for first page
+        page_size: Override page size (used when retrying with smaller pages)
 
     Returns:
-        Optional[requests.Response]: Response object from the GraphQL query or None if errors occurred
+        GraphQLPageResult with response and the page size actually used
     """
 
     max_attempts = 8
     headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
-    limit = min(100, max_prs - merged_pr_count)
+    limit = page_size if page_size is not None else min(100, max_prs - merged_pr_count)
 
     for attempt in range(max_attempts):
         variables = {
@@ -637,12 +654,35 @@ def get_github_graphql_query(
             )
 
             if response.status_code == 200:
-                return response
+                # Check for RESOURCE_LIMITS_EXCEEDED in response body (GitHub returns 200 with errors)
+                try:
+                    data = response.json()
+                except Exception:
+                    return GraphQLPageResult(response=response, page_size=limit)
 
-            # error - log and retry
+                if _has_resource_limit_errors(data):
+                    if attempt < (max_attempts - 1):
+                        old_limit = limit
+                        limit = max(limit // 2, 10)
+                        backoff_delay = min(2 * (2**attempt), 15)
+                        bt.logging.warning(
+                            f'GraphQL RESOURCE_LIMITS_EXCEEDED (attempt {attempt + 1}/{max_attempts}), '
+                            f'page size {old_limit} -> {limit}, retrying in {backoff_delay}s...'
+                        )
+                        time.sleep(backoff_delay)
+                        continue
+                    else:
+                        bt.logging.error(
+                            f'GraphQL RESOURCE_LIMITS_EXCEEDED at page size {limit} '
+                            f'after {max_attempts} attempts'
+                        )
+                        return GraphQLPageResult(response=None, page_size=limit)
+
+                return GraphQLPageResult(response=response, page_size=limit)
+
+            # HTTP error - log and retry
             if attempt < (max_attempts - 1):
-                backoff_delay = min(5 * (2**attempt), 30)  # cap at 30s
-                # Reduce page size on server-side errors (query may be too expensive)
+                backoff_delay = min(5 * (2**attempt), 30)
                 if response.status_code in (502, 503, 504):
                     limit = max(limit // 2, 10)
                     bt.logging.warning(
@@ -662,16 +702,24 @@ def get_github_graphql_query(
 
         except requests.exceptions.RequestException as e:
             if attempt < (max_attempts - 1):
-                backoff_delay = min(5 * (2**attempt), 30)  # cap at 30s
+                backoff_delay = min(5 * (2**attempt), 30)
                 bt.logging.warning(
                     f'GraphQL request connection error (attempt {attempt + 1}/{max_attempts}): {e}, retrying in {backoff_delay}s...'
                 )
                 time.sleep(backoff_delay)
             else:
                 bt.logging.error(f'GraphQL request failed after {max_attempts} attempts: {e}')
-                return None
+                return GraphQLPageResult(response=None, page_size=limit)
 
-    return None
+    return GraphQLPageResult(response=None, page_size=limit)
+
+
+def _has_resource_limit_errors(data: Dict) -> bool:
+    """Check if a GraphQL response contains RESOURCE_LIMITS_EXCEEDED errors."""
+    errors = data.get('errors')
+    if not errors or not isinstance(errors, list):
+        return False
+    return any(isinstance(e, dict) and e.get('type') == 'RESOURCE_LIMITS_EXCEEDED' for e in errors)
 
 
 def try_add_open_or_closed_pr(

@@ -161,6 +161,8 @@ class PullRequest:
     pioneer_rank: int = 0  # 0 = not eligible, 1 = pioneer, 2+ = follower position
     time_decay_multiplier: float = 1.0
     credibility_multiplier: float = 1.0
+    review_quality_multiplier: float = 1.0  # Penalty for CHANGES_REQUESTED reviews from maintainers
+    changes_requested_count: int = 0  # Number of maintainer CHANGES_REQUESTED reviews
     raw_credibility: float = 1.0  # Before applying ^k scalar
     credibility_scalar: int = 1  # The k value from tier config
     earned_score: float = 0.0
@@ -210,6 +212,7 @@ class PullRequest:
             'spam': self.open_pr_spam_multiplier,
             'decay': self.time_decay_multiplier,
             'cred': self.credibility_multiplier,
+            'review': self.review_quality_multiplier,
         }
 
         self.earned_score = self.base_score * prod(multipliers.values())

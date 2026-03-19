@@ -265,10 +265,10 @@ class TestGetPullRequestMaintainerChangesRequestedCount:
         assert result == 101
 
     @patch('gittensor.utils.github_api_tools.requests.get')
-    def test_member_association_not_counted(self, mock_get):
-        """MEMBER is not in MAINTAINER_ASSOCIATIONS and should not be counted."""
+    def test_contributor_association_not_counted(self, mock_get):
+        """CONTRIBUTOR is not in MAINTAINER_ASSOCIATIONS and should not be counted."""
         reviews = [
-            _make_review('CHANGES_REQUESTED', 'MEMBER'),
+            _make_review('CHANGES_REQUESTED', 'CONTRIBUTOR'),
         ]
         mock_get.return_value = Mock(status_code=200, **{'json.return_value': reviews})
         assert get_pull_request_maintainer_changes_requested_count('owner/repo', 1, 'token') == 0

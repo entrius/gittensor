@@ -174,6 +174,7 @@ class Repository(BaseRepository):
                     pr.pioneer_rank,
                     pr.time_decay_multiplier,
                     pr.credibility_multiplier,
+                    pr.review_quality_multiplier,
                     pr.raw_credibility,
                     pr.credibility_scalar,
                     pr.earned_score,

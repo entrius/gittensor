@@ -119,7 +119,7 @@ TOKEN_SCORE_RECYCLE_DECAY_RATE = 0.000012
 # =============================================================================
 # Spam & Gaming Mitigation
 # =============================================================================
-MAINTAINER_ASSOCIATIONS = ['OWNER', 'COLLABORATOR']
+MAINTAINER_ASSOCIATIONS = ['OWNER', 'MEMBER', 'COLLABORATOR']
 
 # PR Review Quality Multiplier
 REVIEW_PENALTY_RATE = 0.12  # 12% deduction per CHANGES_REQUESTED review from a maintainer

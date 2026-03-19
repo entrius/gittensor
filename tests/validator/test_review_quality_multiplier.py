@@ -105,6 +105,10 @@ class TestReviewQualityMultiplierOnPullRequest:
         pr = builder.create(state=PRState.MERGED, tier=bronze)
         assert pr.review_quality_multiplier == 1.0
 
+    def test_default_changes_requested_count_is_zero(self, builder, bronze):
+        pr = builder.create(state=PRState.MERGED, tier=bronze)
+        assert pr.changes_requested_count == 0
+
     def test_review_multiplier_reduces_earned_score(self, builder, bronze):
         pr = builder.create(state=PRState.MERGED, tier=bronze)
         pr.base_score = 100.0

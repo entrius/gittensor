@@ -108,6 +108,13 @@ def score_pull_request(
     file_contents = fetch_file_contents_for_pr(pr, miner_eval.github_pat)
 
     pr.base_score = calculate_base_score(pr, programming_languages, token_config, file_contents)
+
+    # Fetch review data before multiplier calculation (only for merged PRs)
+    if pr.pr_state == PRState.MERGED:
+        pr.changes_requested_count = get_pull_request_maintainer_changes_requested_count(
+            pr.repository_full_name, pr.number, miner_eval.github_pat
+        )
+
     calculate_pr_multipliers(pr, miner_eval, master_repositories)
 
     if pr.pr_state == PRState.MERGED:
@@ -223,7 +230,13 @@ def calculate_review_quality_multiplier(changes_requested_count: int) -> float:
     Returns:
         float: Multiplier in [0.0, 1.0]
     """
-    return max(0.0, 1.0 - REVIEW_PENALTY_RATE * changes_requested_count)
+    multiplier = max(0.0, 1.0 - REVIEW_PENALTY_RATE * changes_requested_count)
+    if changes_requested_count > 0:
+        bt.logging.info(
+            f'{changes_requested_count} maintainer CHANGES_REQUESTED review(s) → '
+            f'review_quality_multiplier={multiplier:.2f}'
+        )
+    return multiplier
 
 
 def calculate_pr_multipliers(
@@ -242,15 +255,7 @@ def calculate_pr_multipliers(
         pr.open_pr_spam_multiplier = 1.0
         pr.time_decay_multiplier = round(calculate_time_decay_multiplier(pr), 2)
 
-        changes_requested_count = get_pull_request_maintainer_changes_requested_count(
-            pr.repository_full_name, pr.number, miner_eval.github_pat
-        )
-        pr.review_quality_multiplier = round(calculate_review_quality_multiplier(changes_requested_count), 2)
-        if changes_requested_count > 0:
-            bt.logging.info(
-                f'PR #{pr.number} - {changes_requested_count} maintainer CHANGES_REQUESTED review(s) → '
-                f'review_quality_multiplier={pr.review_quality_multiplier:.2f}'
-            )
+        pr.review_quality_multiplier = round(calculate_review_quality_multiplier(pr.changes_requested_count), 2)
 
     else:
         pr.open_pr_spam_multiplier = 1.0

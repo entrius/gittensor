@@ -755,8 +755,7 @@ def get_github_graphql_query(
                         continue
                     else:
                         bt.logging.error(
-                            f'GraphQL RESOURCE_LIMITS_EXCEEDED at page size {limit} '
-                            f'after {max_attempts} attempts'
+                            f'GraphQL RESOURCE_LIMITS_EXCEEDED at page size {limit} after {max_attempts} attempts'
                         )
                         return GraphQLPageResult(response=None, page_size=limit)
 

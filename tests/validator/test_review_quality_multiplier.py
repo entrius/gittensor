@@ -259,7 +259,9 @@ class TestGetPullRequestMaintainerChangesRequestedCount:
             Mock(status_code=200, **{'json.return_value': page1}),  # page 1 OK
             Mock(status_code=500),  # page 2 fails
             Mock(status_code=200, **{'json.return_value': page1}),  # retry page 1
-            Mock(status_code=200, **{'json.return_value': [_make_review('CHANGES_REQUESTED', 'OWNER')]}),  # retry page 2
+            Mock(
+                status_code=200, **{'json.return_value': [_make_review('CHANGES_REQUESTED', 'OWNER')]}
+            ),  # retry page 2
         ]
         result = get_pull_request_maintainer_changes_requested_count('owner/repo', 1, 'token')
         assert result == 101

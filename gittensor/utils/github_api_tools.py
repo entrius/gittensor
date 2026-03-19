@@ -80,7 +80,7 @@ QUERY = """
               mergedBy {
                 login
               }
-              closingIssuesReferences(first: 10) {
+              closingIssuesReferences(first: 3) {
                 nodes {
                   number
                   title
@@ -93,7 +93,7 @@ QUERY = """
                   authorAssociation
                 }
               }
-              reviews(first: 10, states: APPROVED) {
+              reviews(first: 3, states: APPROVED) {
                 nodes {
                   author {
                     login

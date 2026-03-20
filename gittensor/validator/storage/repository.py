@@ -304,7 +304,8 @@ class Repository(BaseRepository):
                 return len(values)
         except Exception as e:
             self.db.rollback()
-            self.logger.error(f'Error in bulk file change storage: {e}')
+            prs = {(fc.pr_number, fc.repository_full_name) for fc in file_changes}
+            self.logger.error(f'Error in bulk file change storage: {e} | PRs: {prs}')
             return 0
 
     def set_miner_evaluation(self, evaluation: MinerEvaluation) -> bool:

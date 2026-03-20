@@ -73,7 +73,8 @@ class FileChange:
             self.file_extension = self._calculate_file_extension()
 
     def _calculate_file_extension(self) -> str:
-        return self.filename.split('.')[-1].lower() if '.' in self.filename else ''
+        basename = self.filename.split('/')[-1]
+        return basename.split('.')[-1].lower() if '.' in basename else ''
 
     def is_test_file(self) -> bool:
         filename_lower = self.filename.lower()

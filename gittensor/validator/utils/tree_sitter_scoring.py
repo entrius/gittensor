@@ -14,6 +14,7 @@ from gittensor.classes import (
 from gittensor.constants import (
     COMMENT_NODE_TYPES,
     DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT,
+    INLINE_TEST_EXTENSIONS,
     MAX_FILE_SIZE_BYTES,
     MAX_LINES_SCORED_FOR_NON_CODE_EXT,
     NON_CODE_EXTENSIONS,
@@ -136,6 +137,86 @@ def collect_node_signatures(
 
     walk_node(tree.root_node)
     return signatures
+
+
+# =============================================================================
+# Inline test detection
+# =============================================================================
+
+
+def has_inline_tests(tree: Tree, extension: str) -> bool:
+    """Check whether a parsed AST contains inline test blocks.
+
+    Detects language-specific test constructs that live inside production source
+    files rather than in dedicated test files.  Currently supports:
+    - Rust: #[cfg(test)] modules, #[test] / #[<path>::test] functions
+    - Zig:  test declarations (``test "name" { ... }``)
+    - D:    unittest { ... } blocks
+    """
+    if extension == 'rs':
+        return _has_rust_test_items(tree.root_node)
+    if extension == 'zig':
+        return _has_node_type(tree.root_node, 'TestDecl')
+    if extension == 'd':
+        return _has_node_type(tree.root_node, 'unittest_declaration')
+    return False
+
+
+def _has_rust_test_items(node: Node) -> bool:
+    """Check if any attribute in the tree is ``#[test]``, ``path::test``, or ``cfg(...test...)``."""
+    for child in node.children:
+        if child.type in ('attribute_item', 'inner_attribute_item'):
+            attr = next((c for c in child.children if c.type == 'attribute'), None)
+            if attr:
+                text = attr.text.decode('utf-8') if attr.text else ''
+                if text == 'test' or text.endswith('::test'):
+                    return True
+                # Only walk cfg() attributes for test predicates;
+                # skip doc(), cfg_attr(), derive(), etc.
+                name = next((c for c in attr.children if c.type == 'identifier'), None)
+                if name and name.text and name.text.decode('utf-8') == 'cfg':
+                    if _has_test_identifier(attr):
+                        return True
+        if child.child_count > 0 and _has_rust_test_items(child):
+            return True
+    return False
+
+
+def _has_test_identifier(node: Node, inside_not: bool = False) -> bool:
+    """Walk attribute AST for an ``identifier`` whose text is ``test``.
+
+    Handles all forms: ``#[test]``, ``#[tokio::test]``, ``#[cfg(test)]``,
+    ``#![cfg(test)]``, compound ``cfg(all(test, ...))``.  Tracks ``not()``
+    scopes so negated predicates are correctly excluded.
+    """
+    for child in node.children:
+        if child.type == 'identifier' and child.text and child.text.decode('utf-8') == 'test':
+            if not inside_not:
+                return True
+        elif child.type == 'token_tree':
+            prev = child.prev_sibling
+            in_not = inside_not != (
+                prev is not None
+                and prev.type == 'identifier'
+                and prev.text is not None
+                and prev.text.decode('utf-8') == 'not'
+            )
+            if _has_test_identifier(child, in_not):
+                return True
+        elif child.child_count > 0:
+            if _has_test_identifier(child, inside_not):
+                return True
+    return False
+
+
+def _has_node_type(node: Node, target_type: str) -> bool:
+    """Recursively check if any descendant matches *target_type*."""
+    for child in node.children:
+        if child.type == target_type:
+            return True
+        if child.child_count > 0 and _has_node_type(child, target_type):
+            return True
+    return False
 
 
 def score_tree_diff(
@@ -341,6 +422,19 @@ def calculate_token_score_from_file_changes(
         lang_config = programming_languages.get(ext)
         lang_weight = lang_config.weight if lang_config else 1.0
 
+        # For non-test files in inline-test languages, check if either
+        # version contains inline tests and downweight the entire file if so.
+        inline_tests = False
+        if not is_test_file and ext in INLINE_TEST_EXTENSIONS:
+            lang = weights.get_language(ext)
+            for content in (new_content, old_content):
+                if content:
+                    tree = parse_code(content, lang)
+                    if tree and has_inline_tests(tree, ext):
+                        inline_tests = True
+                        file_weight = TEST_FILE_CONTRIBUTION_WEIGHT
+                        break
+
         # Apply combined weight: language weight × test file weight
         combined_weight = lang_weight * file_weight
         file_breakdown = file_breakdown.with_weight(combined_weight)
@@ -359,6 +453,7 @@ def calculate_token_score_from_file_changes(
                 nodes_scored=nodes_scored,
                 total_lines=file.changes,
                 is_test_file=is_test_file,
+                has_inline_tests=inline_tests,
                 scoring_method=scoring_method,
                 breakdown=file_breakdown,
             )

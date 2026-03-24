@@ -90,6 +90,9 @@ COMMENT_NODE_TYPES = frozenset(
     }
 )
 
+# Extensions where source files may contain inline test blocks (e.g. Rust #[cfg(test)], Zig test declarations)
+INLINE_TEST_EXTENSIONS = frozenset({'rs', 'zig', 'd'})
+
 # =============================================================================
 # Tiers & Collateral System
 # =============================================================================

@@ -1526,6 +1526,14 @@
     "tier": "Bronze",
     "weight": 0.12
   },
+  "entrius/allways": {
+    "tier": "Gold",
+    "weight": 53.48
+  },
+  "entrius/allways-ui": {
+    "tier": "Gold",
+    "weight": 26.91
+  },
   "entrius/gittensor": {
     "tier": "Gold",
     "weight": 53.48

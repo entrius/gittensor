@@ -33,11 +33,47 @@ def test_rust_production_only_not_detected():
     assert has_inline_tests(code, 'rs') is False
 
 
+def test_rust_tokio_test_detected():
+    """#[tokio::test] async test attribute should be detected."""
+    code = 'async fn helper() {}\n#[tokio::test]\nasync fn test_it() {}\n'
+    assert has_inline_tests(code, 'rs') is True
+
+
+def test_rust_indented_test_detected():
+    """Indented #[test] inside a mod should still be detected."""
+    code = '    #[test]\n    fn test_it() {}\n'
+    assert has_inline_tests(code, 'rs') is True
+
+
+def test_rust_test_in_comment_not_detected():
+    """#[test] inside a line comment must not trigger detection."""
+    code = 'fn prod() {}\n// Use #[test] to annotate test functions\n'
+    assert has_inline_tests(code, 'rs') is False
+
+
+def test_rust_test_in_doc_comment_not_detected():
+    """#[test] inside a doc comment must not trigger detection."""
+    code = '/// Example: #[test]\nfn documented() {}\n'
+    assert has_inline_tests(code, 'rs') is False
+
+
+def test_rust_test_in_string_not_detected():
+    """#[test] inside a string literal must not trigger detection."""
+    code = 'fn f() { let s = "#[test]"; }\n'
+    assert has_inline_tests(code, 'rs') is False
+
+
 # -- Zig ------------------------------------------------------------------
 
 
-def test_zig_test_detected():
+def test_zig_named_test_detected():
     code = 'fn add(a: i32, b: i32) i32 { return a + b; }\ntest "add" { }\n'
+    assert has_inline_tests(code, 'zig') is True
+
+
+def test_zig_unnamed_test_detected():
+    """Zig allows unnamed test blocks: test { ... }"""
+    code = 'fn add(a: i32, b: i32) i32 { return a + b; }\ntest {\n    // ...\n}\n'
     assert has_inline_tests(code, 'zig') is True
 
 

@@ -145,9 +145,9 @@ def collect_node_signatures(
 # =============================================================================
 
 _INLINE_TEST_PATTERNS: Dict[str, re.Pattern] = {
-    'rs': re.compile(r'#\[(?:cfg\()?test\b|#!\[cfg\(test\)\]'),
-    'zig': re.compile(r'\btest\s+"'),
-    'd': re.compile(r'\bunittest\b'),
+    'rs': re.compile(r'^\s*(?:#\[(?:cfg\()?test\b|#!\[cfg\(test\)\]|#\[\w+::test\b)', re.MULTILINE),
+    'zig': re.compile(r'^\s*test\b\s*[{"]', re.MULTILINE),
+    'd': re.compile(r'^\s*unittest\b', re.MULTILINE),
 }
 
 
@@ -156,8 +156,8 @@ def has_inline_tests(content: str, extension: str) -> bool:
 
     Uses simple pattern matching to detect language-specific test constructs
     that live inside production source files.  Currently supports:
-    - Rust: ``#[cfg(test)]``, ``#![cfg(test)]``, ``#[test]``
-    - Zig:  ``test "name" { ... }``
+    - Rust: ``#[cfg(test)]``, ``#![cfg(test)]``, ``#[test]``, ``#[tokio::test]``
+    - Zig:  ``test "name" { ... }``, ``test { ... }``
     - D:    ``unittest { ... }``
     """
     pattern = _INLINE_TEST_PATTERNS.get(extension)

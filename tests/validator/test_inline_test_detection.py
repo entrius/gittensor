@@ -3,7 +3,6 @@
 from gittensor.constants import INLINE_TEST_EXTENSIONS
 from gittensor.validator.utils.tree_sitter_scoring import has_inline_tests
 
-
 # -- Rust ------------------------------------------------------------------
 
 

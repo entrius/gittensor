@@ -1526,6 +1526,14 @@
     "tier": "Bronze",
     "weight": 0.12
   },
+  "entrius/allways": {
+    "tier": "Gold",
+    "weight": 53.48
+  },
+  "entrius/allways-ui": {
+    "tier": "Gold",
+    "weight": 26.91
+  },
   "entrius/gittensor": {
     "tier": "Gold",
     "weight": 53.48
@@ -3628,6 +3636,7 @@
     "weight": 0.55
   },
   "nushell/nushell": {
+    "inactive_at": "2026-03-25T21:23:46.318Z",
     "tier": "Bronze",
     "weight": 0.98
   },
@@ -5271,6 +5280,9 @@
     "weight": 0.16
   },
   "traefik/traefik": {
+    "additional_acceptable_branches": [
+      "v*"
+    ],
     "tier": "Bronze",
     "weight": 0.3
   },

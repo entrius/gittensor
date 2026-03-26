@@ -5280,6 +5280,9 @@
     "weight": 0.16
   },
   "traefik/traefik": {
+    "additional_acceptable_branches": [
+      "v*"
+    ],
     "tier": "Bronze",
     "weight": 0.3
   },

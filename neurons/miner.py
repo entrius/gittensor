@@ -53,7 +53,16 @@ class Miner(BaseMinerNeuron):
             bt.logging.warning('Received a request without a dendrite or hotkey.')
             return True, 'Missing dendrite or hotkey'
 
-        uid = self.metagraph.hotkeys.index(synapse.dendrite.hotkey)
+        # Safely get UID, handling case where hotkey is not in metagraph
+        try:
+            uid = self.metagraph.hotkeys.index(synapse.dendrite.hotkey)
+        except ValueError:
+            # Hotkey not in metagraph
+            if not self.config.blacklist.allow_non_registered:
+                bt.logging.trace(f'Blacklisting un-registered hotkey {synapse.dendrite.hotkey}')
+                return True, 'Unrecognized hotkey'
+            uid = -1  # Indicate not registered
+
         if not self.config.blacklist.allow_non_registered and synapse.dendrite.hotkey not in self.metagraph.hotkeys:
             # Ignore requests from un-registered entities.
             bt.logging.trace(f'Blacklisting un-registered hotkey {synapse.dendrite.hotkey}')
@@ -61,12 +70,13 @@ class Miner(BaseMinerNeuron):
 
         if self.config.blacklist.force_validator_permit:
             # If the config is set to force validator permit, then we should only allow requests from validators.
-            bt.logging.debug(
-                f'Validator permit: {self.metagraph.validator_permit[uid]}, Stake: {self.metagraph.S[uid]}'
-            )
-            if not self.metagraph.validator_permit[uid] or self.metagraph.S[uid] < self.config.blacklist.min_stake:
-                bt.logging.warning(f'Blacklisting a request from non-validator hotkey {synapse.dendrite.hotkey}')
-                return True, 'Non-validator hotkey'
+            if uid >= 0:
+                bt.logging.debug(
+                    f'Validator permit: {self.metagraph.validator_permit[uid]}, Stake: {self.metagraph.S[uid]}'
+                )
+                if not self.metagraph.validator_permit[uid] or self.metagraph.S[uid] < self.config.blacklist.min_stake:
+                    bt.logging.warning(f'Blacklisting a request from non-validator hotkey {synapse.dendrite.hotkey}')
+                    return True, 'Non-validator hotkey'
 
         bt.logging.trace(f'Not Blacklisting recognized hotkey {synapse.dendrite.hotkey}')
         return False, 'Hotkey recognized!'
@@ -74,13 +84,19 @@ class Miner(BaseMinerNeuron):
     async def priority(self, synapse: GitPatSynapse) -> float:
         """
         Determines the processing priority for incoming token requests.
-        This function is unchanged.
         """
         if synapse.dendrite is None or synapse.dendrite.hotkey is None:
             bt.logging.warning('Received a request without a dendrite or hotkey.')
             return 0.0
 
-        caller_uid = self.metagraph.hotkeys.index(synapse.dendrite.hotkey)  # Get the caller index.
+        # Safely get the caller index, handling case where hotkey is not in metagraph
+        try:
+            caller_uid = self.metagraph.hotkeys.index(synapse.dendrite.hotkey)  # Get the caller index.
+        except ValueError:
+            # Hotkey not in metagraph - return lowest priority
+            bt.logging.warning(f'Hotkey {synapse.dendrite.hotkey} not in metagraph, returning priority 0.0')
+            return 0.0
+
         priority = float(self.metagraph.S[caller_uid])  # Return the stake as the priority.
         bt.logging.trace(f'Prioritizing {synapse.dendrite.hotkey} with value: {priority}')
         return priority

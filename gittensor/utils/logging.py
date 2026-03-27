@@ -53,12 +53,7 @@ def log_scoring_results(
     if file_results:
         max_name_len = max(len(f.filename) for f in file_results)
         for result in file_results:
-            if result.has_inline_tests:
-                test_mark = ' [inline-tests]'
-            elif result.is_test_file:
-                test_mark = ' [test]'
-            else:
-                test_mark = ''
+            test_mark = ' [test]' if result.is_test_file else ''
             # Use "lines" for line-count files, "nodes" for token-scored files
             if result.scoring_method == 'line-count':
                 count_str = f'{result.nodes_scored:>3} lines'

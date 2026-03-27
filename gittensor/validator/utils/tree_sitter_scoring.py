@@ -1,6 +1,5 @@
 # The MIT License (MIT)
 # Copyright © 2025 Entrius
-import re
 from collections import Counter
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
 
@@ -16,6 +15,7 @@ from gittensor.constants import (
     COMMENT_NODE_TYPES,
     DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT,
     INLINE_TEST_EXTENSIONS,
+    INLINE_TEST_PATTERNS,
     MAX_FILE_SIZE_BYTES,
     MAX_LINES_SCORED_FOR_NON_CODE_EXT,
     NON_CODE_EXTENSIONS,
@@ -140,17 +140,6 @@ def collect_node_signatures(
     return signatures
 
 
-# =============================================================================
-# Inline test detection
-# =============================================================================
-
-_INLINE_TEST_PATTERNS: Dict[str, re.Pattern] = {
-    'rs': re.compile(r'^\s*(?:#\[(?:cfg\()?test\b|#!\[cfg\(test\)\]|#\[\w+::test\b)', re.MULTILINE),
-    'zig': re.compile(r'^\s*test\b\s*[{"]', re.MULTILINE),
-    'd': re.compile(r'^\s*unittest\b', re.MULTILINE),
-}
-
-
 def has_inline_tests(content: str, extension: str) -> bool:
     """Check whether source code contains inline test markers.
 
@@ -160,7 +149,7 @@ def has_inline_tests(content: str, extension: str) -> bool:
     - Zig:  ``test "name" { ... }``, ``test { ... }``
     - D:    ``unittest { ... }``
     """
-    pattern = _INLINE_TEST_PATTERNS.get(extension)
+    pattern = INLINE_TEST_PATTERNS.get(extension)
     if pattern is None:
         return False
     return pattern.search(content) is not None
@@ -371,11 +360,10 @@ def calculate_token_score_from_file_changes(
 
         # For non-test files in inline-test languages, check if either
         # version contains inline tests and downweight the entire file if so.
-        inline_tests = False
         if not is_test_file and ext in INLINE_TEST_EXTENSIONS:
             for content in (new_content, old_content):
                 if content and has_inline_tests(content, ext):
-                    inline_tests = True
+                    is_test_file = True
                     file_weight = TEST_FILE_CONTRIBUTION_WEIGHT
                     break
 
@@ -397,7 +385,6 @@ def calculate_token_score_from_file_changes(
                 nodes_scored=nodes_scored,
                 total_lines=file.changes,
                 is_test_file=is_test_file,
-                has_inline_tests=inline_tests,
                 scoring_method=scoring_method,
                 breakdown=file_breakdown,
             )

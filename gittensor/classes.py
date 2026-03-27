@@ -490,7 +490,6 @@ class FileScoreResult:
     total_lines: int
     is_test_file: bool
     scoring_method: str  # 'tree-diff', 'line-count', 'skipped-*'
-    has_inline_tests: bool = False  # File contains inline test blocks (e.g. Rust #[cfg(test)])
     breakdown: Optional[ScoreBreakdown] = None  # Only populated for tree-diff scoring
 
 

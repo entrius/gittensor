@@ -475,7 +475,8 @@
   },
   "astral-sh/ruff": {
     "tier": "Silver",
-    "weight": 13.72
+    "weight": 13.72,
+    "inactive_at": "2026-03-30T18:00:00.00Z"
   },
   "astropy/astropy": {
     "tier": "Bronze",
@@ -5280,9 +5281,7 @@
     "weight": 0.16
   },
   "traefik/traefik": {
-    "additional_acceptable_branches": [
-      "v*"
-    ],
+    "additional_acceptable_branches": ["v*"],
     "tier": "Bronze",
     "weight": 0.3
   },

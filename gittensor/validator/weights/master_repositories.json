@@ -1733,10 +1733,6 @@
     "tier": "Bronze",
     "weight": 0.11
   },
-  "fastapi/fastapi": {
-    "tier": "Bronze",
-    "weight": 0.27
-  },
   "fastlane/fastlane": {
     "tier": "Bronze",
     "weight": 0.11
@@ -4335,20 +4331,9 @@
     "weight": 0.17
   },
   "python/cpython": {
+    "inactive_at": "2026-03-30T00:00:00Z",
     "tier": "Bronze",
     "weight": 1.05
-  },
-  "python/mypy": {
-    "tier": "Bronze",
-    "weight": 0.24
-  },
-  "python/peps": {
-    "tier": "Bronze",
-    "weight": 0.1
-  },
-  "python/typeshed": {
-    "tier": "Bronze",
-    "weight": 0.16
   },
   "pytorch/pytorch": {
     "tier": "Bronze",
@@ -5281,9 +5266,7 @@
     "weight": 0.16
   },
   "traefik/traefik": {
-    "additional_acceptable_branches": [
-      "v*"
-    ],
+    "additional_acceptable_branches": ["v*"],
     "tier": "Bronze",
     "weight": 0.3
   },

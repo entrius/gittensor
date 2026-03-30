@@ -53,7 +53,7 @@
   },
   "AffineFoundation/liveweb-arena": {
     "tier": "Silver",
-    "weight": 14.87
+    "weight": 4.87
   },
   "aframevr/aframe": {
     "tier": "Bronze",
@@ -474,6 +474,7 @@
     "weight": 0.17
   },
   "astral-sh/ruff": {
+    "inactive_at": "2026-03-28T00:00:00Z",
     "tier": "Silver",
     "weight": 13.72
   },

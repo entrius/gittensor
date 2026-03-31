@@ -358,14 +358,12 @@ def calculate_token_score_from_file_changes(
         lang_config = programming_languages.get(ext)
         lang_weight = lang_config.weight if lang_config else 1.0
 
-        # For non-test files in inline-test languages, check if either
-        # version contains inline tests and downweight the entire file if so.
+        # For non-test files in inline-test languages, check if the current
+        # file contains inline tests and downweight the entire file if so.
         if not is_test_file and ext in INLINE_TEST_EXTENSIONS:
-            for content in (new_content, old_content):
-                if content and has_inline_tests(content, ext):
-                    is_test_file = True
-                    file_weight = TEST_FILE_CONTRIBUTION_WEIGHT
-                    break
+            if has_inline_tests(new_content, ext):
+                is_test_file = True
+                file_weight = TEST_FILE_CONTRIBUTION_WEIGHT
 
         # Apply combined weight: language weight × test file weight
         combined_weight = lang_weight * file_weight

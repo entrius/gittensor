@@ -131,7 +131,7 @@ class TestBannedOrganizations:
     # orgs may be banned for:
     # - exploitative PR manipulation
     # - explicit removal request
-    BANNED_ORGS = ['conda', 'conda-incubator', 'conda-archive', 'louislam']
+    BANNED_ORGS = ['conda', 'conda-incubator', 'conda-archive', 'louislam', 'python', 'fastapi', 'astral-sh']
 
     def test_banned_org_repos_are_inactive(self):
         """Repositories from banned organizations must be marked as inactive."""

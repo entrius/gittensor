@@ -16,6 +16,8 @@ BASE_GITHUB_API_URL = 'https://api.github.com'
 MIN_GITHUB_ACCOUNT_AGE = 180  # days
 # 1MB max file size for github api file fetches. Files exceeding this get no score.
 MAX_FILE_SIZE_BYTES = 1_000_000
+# Too many object lookups in one GraphQL query can trigger 502 errors and lose all results.
+MAX_FILES_PER_GRAPHQL_BATCH = 50
 
 # =============================================================================
 # Language & File Scoring

@@ -15,6 +15,7 @@ Note: These tests require the full gittensor package to be importable.
 Run with: python run_tests.py tests/utils/
 """
 
+from typing import Dict
 from unittest.mock import Mock, call, patch
 
 import pytest
@@ -1181,6 +1182,279 @@ class TestLoadMinersPrsErrorResilience:
         # Verify the warning was logged for the bad PR
         warning_calls = [str(c) for c in mock_logging.warning.call_args_list]
         assert any('PR #2' in w for w in warning_calls), f'Expected a warning about PR #2, got: {warning_calls}'
+
+
+# ============================================================================
+# GraphQL Batch-Size Limit Tests
+# ============================================================================
+
+fetch_file_contents_batch = github_api_tools.fetch_file_contents_batch
+fetch_file_contents_with_base = github_api_tools.fetch_file_contents_with_base
+FileContentPair = github_api_tools.FileContentPair
+
+
+def _make_blob_response(text: str) -> Dict:
+    """Create a mock GraphQL Blob response object."""
+    return {'text': text, 'byteSize': len(text), 'isBinary': False}
+
+
+def _make_file_change(filename: str, status: str = 'modified', previous_filename: str = None):
+    """Create a mock FileChange-like object for fetch_file_contents_with_base tests."""
+    change = Mock()
+    change.filename = filename
+    change.status = status
+    change.previous_filename = previous_filename
+    return change
+
+
+class TestFetchFileContentsBatch:
+    """Tests for batch-size limiting in fetch_file_contents_batch."""
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    def test_empty_paths_returns_empty_dict(self, mock_execute):
+        """No GraphQL call should be made when file_paths is empty."""
+        result = fetch_file_contents_batch('owner', 'repo', 'abc123', [], 'token')
+        assert result == {}
+        mock_execute.assert_not_called()
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    def test_single_batch_under_limit(self, mock_execute):
+        """Files under the batch limit should be fetched in a single GraphQL request."""
+        paths = [f'src/file{i}.py' for i in range(5)]
+        mock_execute.return_value = {
+            'data': {'repository': {f'file{i}': _make_blob_response(f'content_{i}') for i in range(5)}}
+        }
+
+        result = fetch_file_contents_batch('owner', 'repo', 'sha1', paths, 'token')
+
+        assert mock_execute.call_count == 1
+        assert len(result) == 5
+        for i, path in enumerate(paths):
+            assert result[path] == f'content_{i}'
+
+    @patch('gittensor.utils.github_api_tools.MAX_FILES_PER_GRAPHQL_BATCH', 3)
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    def test_multiple_batches_splits_correctly(self, mock_execute):
+        """Files exceeding the batch limit should be split into multiple GraphQL requests."""
+        paths = [f'src/file{i}.py' for i in range(7)]
+
+        def mock_query_side_effect(query, variables, token):
+            # Count how many file aliases are in the query
+            file_count = query.count('object(expression:')
+            return {
+                'data': {
+                    'repository': {f'file{i}': _make_blob_response(f'batch_content_{i}') for i in range(file_count)}
+                }
+            }
+
+        mock_execute.side_effect = mock_query_side_effect
+
+        result = fetch_file_contents_batch('owner', 'repo', 'sha1', paths, 'token')
+
+        # 7 files / batch size 3 = 3 batches (3 + 3 + 1)
+        assert mock_execute.call_count == 3
+        assert len(result) == 7
+
+    @patch('gittensor.utils.github_api_tools.MAX_FILES_PER_GRAPHQL_BATCH', 3)
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_failed_batch_returns_none_without_losing_other_batches(self, mock_logging, mock_execute):
+        """A failed batch should return None for its files but not affect other batches."""
+        paths = [f'file{i}.py' for i in range(6)]
+
+        # First batch succeeds, second batch fails
+        mock_execute.side_effect = [
+            {'data': {'repository': {f'file{i}': _make_blob_response(f'ok_{i}') for i in range(3)}}},
+            None,  # second batch fails
+        ]
+
+        result = fetch_file_contents_batch('owner', 'repo', 'sha1', paths, 'token')
+
+        assert len(result) == 6
+        # First batch files have content
+        assert result['file0.py'] == 'ok_0'
+        assert result['file1.py'] == 'ok_1'
+        assert result['file2.py'] == 'ok_2'
+        # Second batch files are None due to failure
+        assert result['file3.py'] is None
+        assert result['file4.py'] is None
+        assert result['file5.py'] is None
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    def test_binary_and_oversized_files_return_none(self, mock_execute):
+        """Binary files and files exceeding MAX_FILE_SIZE_BYTES should return None."""
+        paths = ['normal.py', 'binary.bin', 'huge.py']
+        mock_execute.return_value = {
+            'data': {
+                'repository': {
+                    'file0': _make_blob_response('print("hello")'),
+                    'file1': {'text': None, 'byteSize': 100, 'isBinary': True},
+                    'file2': {'text': 'x' * 100, 'byteSize': 2_000_000, 'isBinary': False},
+                }
+            }
+        }
+
+        result = fetch_file_contents_batch('owner', 'repo', 'sha1', paths, 'token')
+
+        assert result['normal.py'] == 'print("hello")'
+        assert result['binary.bin'] is None
+        assert result['huge.py'] is None
+
+    @patch('gittensor.utils.github_api_tools.MAX_FILES_PER_GRAPHQL_BATCH', 50)
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    def test_exactly_batch_size_uses_single_request(self, mock_execute):
+        """Exactly MAX_FILES_PER_GRAPHQL_BATCH files should use a single request."""
+        paths = [f'file{i}.py' for i in range(50)]
+        mock_execute.return_value = {
+            'data': {'repository': {f'file{i}': _make_blob_response(f'c{i}') for i in range(50)}}
+        }
+
+        result = fetch_file_contents_batch('owner', 'repo', 'sha1', paths, 'token')
+
+        assert mock_execute.call_count == 1
+        assert len(result) == 50
+
+
+class TestFetchFileContentsWithBase:
+    """Tests for batch-size limiting in fetch_file_contents_with_base."""
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    def test_empty_file_changes_returns_empty_dict(self, mock_execute):
+        """No GraphQL call should be made when file_changes is empty."""
+        result = fetch_file_contents_with_base('owner', 'repo', 'base', 'head', [], 'token')
+        assert result == {}
+        mock_execute.assert_not_called()
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    def test_single_batch_fetches_base_and_head(self, mock_execute):
+        """Modified files should have both old and new content fetched."""
+        changes = [_make_file_change('app.py', status='modified')]
+        mock_execute.return_value = {
+            'data': {
+                'repository': {
+                    'base0': _make_blob_response('old code'),
+                    'head0': _make_blob_response('new code'),
+                }
+            }
+        }
+
+        result = fetch_file_contents_with_base('owner', 'repo', 'base_sha', 'head_sha', changes, 'token')
+
+        assert len(result) == 1
+        assert result['app.py'].old_content == 'old code'
+        assert result['app.py'].new_content == 'new code'
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    def test_added_file_has_no_old_content(self, mock_execute):
+        """Newly added files should only fetch head content, not base."""
+        changes = [_make_file_change('new_file.py', status='added')]
+        mock_execute.return_value = {
+            'data': {
+                'repository': {
+                    'head0': _make_blob_response('brand new'),
+                }
+            }
+        }
+
+        result = fetch_file_contents_with_base('owner', 'repo', 'base', 'head', changes, 'token')
+
+        assert result['new_file.py'].old_content is None
+        assert result['new_file.py'].new_content == 'brand new'
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    def test_removed_file_has_no_new_content(self, mock_execute):
+        """Deleted files should only fetch base content, not head."""
+        changes = [_make_file_change('old_file.py', status='removed')]
+        mock_execute.return_value = {
+            'data': {
+                'repository': {
+                    'base0': _make_blob_response('deleted code'),
+                }
+            }
+        }
+
+        result = fetch_file_contents_with_base('owner', 'repo', 'base', 'head', changes, 'token')
+
+        assert result['old_file.py'].old_content == 'deleted code'
+        assert result['old_file.py'].new_content is None
+
+    @patch('gittensor.utils.github_api_tools.MAX_FILES_PER_GRAPHQL_BATCH', 2)
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    def test_multiple_batches_splits_file_changes(self, mock_execute):
+        """File changes exceeding the batch limit should be split into multiple requests."""
+        changes = [_make_file_change(f'file{i}.py') for i in range(5)]
+
+        def mock_side_effect(query, variables, token):
+            file_count = query.count('base')
+            return {
+                'data': {
+                    'repository': {
+                        **{f'base{i}': _make_blob_response(f'old_{i}') for i in range(file_count)},
+                        **{f'head{i}': _make_blob_response(f'new_{i}') for i in range(file_count)},
+                    }
+                }
+            }
+
+        mock_execute.side_effect = mock_side_effect
+
+        result = fetch_file_contents_with_base('owner', 'repo', 'base', 'head', changes, 'token')
+
+        # 5 files / batch size 2 = 3 batches (2 + 2 + 1)
+        assert mock_execute.call_count == 3
+        assert len(result) == 5
+
+    @patch('gittensor.utils.github_api_tools.MAX_FILES_PER_GRAPHQL_BATCH', 2)
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_failed_batch_isolates_failure(self, mock_logging, mock_execute):
+        """A failed batch should return None pairs without affecting other batches."""
+        changes = [_make_file_change(f'f{i}.py') for i in range(4)]
+
+        mock_execute.side_effect = [
+            {
+                'data': {
+                    'repository': {
+                        'base0': _make_blob_response('old_0'),
+                        'head0': _make_blob_response('new_0'),
+                        'base1': _make_blob_response('old_1'),
+                        'head1': _make_blob_response('new_1'),
+                    }
+                }
+            },
+            None,  # second batch fails
+        ]
+
+        result = fetch_file_contents_with_base('owner', 'repo', 'base', 'head', changes, 'token')
+
+        assert len(result) == 4
+        # First batch succeeded
+        assert result['f0.py'].old_content == 'old_0'
+        assert result['f0.py'].new_content == 'new_0'
+        # Second batch failed — None pairs
+        assert result['f2.py'].old_content is None
+        assert result['f2.py'].new_content is None
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    def test_renamed_file_fetches_from_previous_filename(self, mock_execute):
+        """Renamed files should fetch base content from the previous filename."""
+        changes = [_make_file_change('new_name.py', status='renamed', previous_filename='old_name.py')]
+        mock_execute.return_value = {
+            'data': {
+                'repository': {
+                    'base0': _make_blob_response('original'),
+                    'head0': _make_blob_response('updated'),
+                }
+            }
+        }
+
+        result = fetch_file_contents_with_base('owner', 'repo', 'base_sha', 'head_sha', changes, 'token')
+
+        assert result['new_name.py'].old_content == 'original'
+        assert result['new_name.py'].new_content == 'updated'
+        # Verify the base expression uses old_name.py
+        query_arg = mock_execute.call_args[0][0]
+        assert 'base_sha:old_name.py' in query_arg
+        assert 'head_sha:new_name.py' in query_arg
 
 
 if __name__ == '__main__':

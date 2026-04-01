@@ -24,6 +24,7 @@ from gittensor.constants import (
     BASE_GITHUB_API_URL,
     MAINTAINER_ASSOCIATIONS,
     MAX_FILE_SIZE_BYTES,
+    MAX_FILES_PER_GRAPHQL_BATCH,
     PR_LOOKBACK_DAYS,
     TIER_BASED_INCENTIVE_MECHANISM_START_DATE,
 )
@@ -1192,34 +1193,27 @@ def check_github_issue_closed(repo: str, issue_number: int, token: str) -> Optio
         return None
 
 
-def fetch_file_contents_batch(
+def _fetch_file_contents_batch(
     repo_owner: str,
     repo_name: str,
     head_sha: str,
-    file_paths: List[str],
+    batch_paths: List[str],
     token: str,
 ) -> Dict[str, Optional[str]]:
-    """
-    Fetch multiple file contents from a repository in a single GraphQL request.
-
-    Uses retry logic with exponential backoff for reliability.
+    """Fetch file contents for a single batch of paths in one GraphQL request.
 
     Args:
         repo_owner: Repository owner
         repo_name: Repository name
         head_sha: The commit SHA to fetch files at
-        file_paths: List of file paths to fetch
+        batch_paths: File paths for this batch
         token: GitHub PAT for authentication
 
     Returns:
-        Dict mapping file paths to their contents (None if file is binary, deleted, or too large)
+        Dict mapping file paths to their contents (None if binary, deleted, or too large)
     """
-    if not file_paths:
-        return {}
-
-    # Build GraphQL query with aliased file fields
     file_fields = []
-    for i, path in enumerate(file_paths):
+    for i, path in enumerate(batch_paths):
         expression = f'{head_sha}:{path}'
         file_fields.append(
             f'file{i}: object(expression: "{expression}") {{ ... on Blob {{ text byteSize isBinary }} }}'
@@ -1235,19 +1229,18 @@ def fetch_file_contents_batch(
 
     variables = {'owner': repo_owner, 'name': repo_name}
 
-    # Execute with retry logic
     data = execute_graphql_query(query, variables, token)
     if data is None:
         bt.logging.warning(f'Failed to fetch file contents for {repo_owner}/{repo_name}')
-        return {path: None for path in file_paths}
+        return {path: None for path in batch_paths}
 
     if 'errors' in data:
         bt.logging.warning(f'GraphQL errors fetching files: {data["errors"]}')
 
     repo_data = data.get('data', {}).get('repository', {})
-    results = {}
+    results: Dict[str, Optional[str]] = {}
 
-    for i, path in enumerate(file_paths):
+    for i, path in enumerate(batch_paths):
         file_data = repo_data.get(f'file{i}')
 
         if file_data is None:
@@ -1262,6 +1255,38 @@ def fetch_file_contents_batch(
     return results
 
 
+def fetch_file_contents_batch(
+    repo_owner: str,
+    repo_name: str,
+    head_sha: str,
+    file_paths: List[str],
+    token: str,
+) -> Dict[str, Optional[str]]:
+    """Fetch file contents in batched GraphQL requests so large PRs don't hit complexity limits.
+
+    Args:
+        repo_owner: Repository owner
+        repo_name: Repository name
+        head_sha: The commit SHA to fetch files at
+        file_paths: List of file paths to fetch
+        token: GitHub PAT for authentication
+
+    Returns:
+        Dict mapping file paths to their contents (None if binary, deleted, or too large)
+    """
+    if not file_paths:
+        return {}
+
+    results: Dict[str, Optional[str]] = {}
+
+    for batch_start in range(0, len(file_paths), MAX_FILES_PER_GRAPHQL_BATCH):
+        batch_paths = file_paths[batch_start : batch_start + MAX_FILES_PER_GRAPHQL_BATCH]
+        batch_results = _fetch_file_contents_batch(repo_owner, repo_name, head_sha, batch_paths, token)
+        results.update(batch_results)
+
+    return results
+
+
 @dataclass
 class FileContentPair:
     """Holds both old (base) and new (head) content for a file."""
@@ -1270,50 +1295,41 @@ class FileContentPair:
     new_content: Optional[str]  # None for deleted files
 
 
-def fetch_file_contents_with_base(
+def _fetch_file_contents_with_base_batch(
     repo_owner: str,
     repo_name: str,
     base_sha: str,
     head_sha: str,
-    file_changes: List['FileChangeType'],
+    batch_changes: List['FileChangeType'],
     token: str,
 ) -> Dict[str, FileContentPair]:
-    """
-    Fetch both base and head (old and new) versions of files in a single GraphQL request.
+    """Fetch base and head file contents for a single batch of file changes.
 
     Args:
         repo_owner: Repository owner
         repo_name: Repository name
         base_sha: The base branch SHA (before PR changes)
         head_sha: The head/merge commit SHA (after PR changes)
-        file_changes: List of FileChange objects (needed for status and previous_filename)
+        batch_changes: File changes for this batch
         token: GitHub PAT for authentication
 
     Returns:
         Dict mapping file paths to FileContentPair (old_content, new_content)
-        - For new files: old_content is None
-        - For deleted files: new_content is None
-        - For renamed files: old_content fetched from previous_filename
     """
-    if not file_changes:
-        return {}
-
-    # Build GraphQL query with both base and head versions
     file_fields = []
-    for i, fc in enumerate(file_changes):
-        # Determine the path to fetch for base version
-        # For renames, use previous_filename; otherwise use current filename
+    for i, fc in enumerate(batch_changes):
+        # Renames need the old path for the base version
         base_path = fc.previous_filename if fc.previous_filename else fc.filename
         head_path = fc.filename
 
-        # Only fetch base version if file wasn't newly added
+        # New files have no base version to fetch
         if fc.status != 'added':
             base_expr = f'{base_sha}:{base_path}'
             file_fields.append(
                 f'base{i}: object(expression: "{base_expr}") {{ ... on Blob {{ text byteSize isBinary }} }}'
             )
 
-        # Only fetch head version if file wasn't deleted
+        # Deleted files have no head version to fetch
         if fc.status != 'removed':
             head_expr = f'{head_sha}:{head_path}'
             file_fields.append(
@@ -1333,11 +1349,10 @@ def fetch_file_contents_with_base(
 
     variables = {'owner': repo_owner, 'name': repo_name}
 
-    # Execute with retry logic
     data = execute_graphql_query(query, variables, token)
     if data is None:
         bt.logging.warning(f'Failed to fetch file contents for {repo_owner}/{repo_name}')
-        return {fc.filename: FileContentPair(None, None) for fc in file_changes}
+        return {fc.filename: FileContentPair(None, None) for fc in batch_changes}
 
     if 'errors' in data:
         bt.logging.warning(f'GraphQL errors fetching files: {data["errors"]}')
@@ -1345,22 +1360,56 @@ def fetch_file_contents_with_base(
     repo_data = data.get('data', {}).get('repository', {})
     results: Dict[str, FileContentPair] = {}
 
-    for i, fc in enumerate(file_changes):
+    for i, fc in enumerate(batch_changes):
         old_content = None
         new_content = None
 
-        # Extract base (old) content if applicable
+        # Pull the old content unless this file was just added
         if fc.status != 'added':
             base_data = repo_data.get(f'base{i}')
             if base_data and not base_data.get('isBinary') and base_data.get('byteSize', 0) <= MAX_FILE_SIZE_BYTES:
                 old_content = base_data.get('text')
 
-        # Extract head (new) content if applicable
+        # Pull the new content unless this file was removed
         if fc.status != 'removed':
             head_data = repo_data.get(f'head{i}')
             if head_data and not head_data.get('isBinary') and head_data.get('byteSize', 0) <= MAX_FILE_SIZE_BYTES:
                 new_content = head_data.get('text')
 
         results[fc.filename] = FileContentPair(old_content=old_content, new_content=new_content)
+
+    return results
+
+
+def fetch_file_contents_with_base(
+    repo_owner: str,
+    repo_name: str,
+    base_sha: str,
+    head_sha: str,
+    file_changes: List['FileChangeType'],
+    token: str,
+) -> Dict[str, FileContentPair]:
+    """Fetch old and new versions of files in batches so large PRs don't hit complexity limits.
+
+    Args:
+        repo_owner: Repository owner
+        repo_name: Repository name
+        base_sha: The base branch SHA (before PR changes)
+        head_sha: The head/merge commit SHA (after PR changes)
+        file_changes: List of FileChange objects (needed for status and previous_filename)
+        token: GitHub PAT for authentication
+
+    Returns:
+        Dict mapping file paths to FileContentPair (old_content, new_content)
+    """
+    if not file_changes:
+        return {}
+
+    results: Dict[str, FileContentPair] = {}
+
+    for batch_start in range(0, len(file_changes), MAX_FILES_PER_GRAPHQL_BATCH):
+        batch = file_changes[batch_start : batch_start + MAX_FILES_PER_GRAPHQL_BATCH]
+        batch_results = _fetch_file_contents_with_base_batch(repo_owner, repo_name, base_sha, head_sha, batch, token)
+        results.update(batch_results)
 
     return results

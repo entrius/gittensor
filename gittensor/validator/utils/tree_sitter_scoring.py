@@ -14,6 +14,8 @@ from gittensor.classes import (
 from gittensor.constants import (
     COMMENT_NODE_TYPES,
     DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT,
+    INLINE_TEST_EXTENSIONS,
+    INLINE_TEST_PATTERNS,
     MAX_FILE_SIZE_BYTES,
     MAX_LINES_SCORED_FOR_NON_CODE_EXT,
     NON_CODE_EXTENSIONS,
@@ -136,6 +138,21 @@ def collect_node_signatures(
 
     walk_node(tree.root_node)
     return signatures
+
+
+def has_inline_tests(content: str, extension: str) -> bool:
+    """Check whether source code contains inline test markers.
+
+    Uses simple pattern matching to detect language-specific test constructs
+    that live inside production source files.  Currently supports:
+    - Rust: ``#[cfg(test)]``, ``#![cfg(test)]``, ``#[test]``, ``#[tokio::test]``
+    - Zig:  ``test "name" { ... }``, ``test { ... }``
+    - D:    ``unittest { ... }``
+    """
+    pattern = INLINE_TEST_PATTERNS.get(extension)
+    if pattern is None:
+        return False
+    return pattern.search(content) is not None
 
 
 def score_tree_diff(
@@ -340,6 +357,13 @@ def calculate_token_score_from_file_changes(
         # Get language weight for this file type
         lang_config = programming_languages.get(ext)
         lang_weight = lang_config.weight if lang_config else 1.0
+
+        # For non-test files in inline-test languages, check if the current
+        # file contains inline tests and downweight the entire file if so.
+        if not is_test_file and ext in INLINE_TEST_EXTENSIONS:
+            if has_inline_tests(new_content, ext):
+                is_test_file = True
+                file_weight = TEST_FILE_CONTRIBUTION_WEIGHT
 
         # Apply combined weight: language weight × test file weight
         combined_weight = lang_weight * file_weight

@@ -6,7 +6,6 @@
 import json
 from unittest.mock import patch
 
-
 FAKE_ISSUES = [
     {
         'id': 1,

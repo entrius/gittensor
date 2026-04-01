@@ -1,5 +1,7 @@
 # Entrius 2025
+import re
 from datetime import datetime, timezone
+from typing import Dict
 
 # =============================================================================
 # General
@@ -89,6 +91,15 @@ COMMENT_NODE_TYPES = frozenset(
         'doc_comment',
     }
 )
+
+# Extensions where source files may contain inline test blocks (e.g. Rust #[cfg(test)], Zig test declarations)
+INLINE_TEST_EXTENSIONS = frozenset({'rs', 'zig', 'd'})
+
+INLINE_TEST_PATTERNS: Dict[str, re.Pattern] = {
+    'rs': re.compile(r'^\s*(?:#\[(?:cfg\()?test\b|#!\[cfg\(test\)\]|#\[\w+::test\b)', re.MULTILINE),
+    'zig': re.compile(r'^\s*test\b\s*[{"]', re.MULTILINE),
+    'd': re.compile(r'^\s*unittest\b', re.MULTILINE),
+}
 
 # =============================================================================
 # Tiers & Collateral System

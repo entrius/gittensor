@@ -35,7 +35,7 @@ from .helpers import (
 @click.option(
     '--repo',
     required=True,
-    help='Repository in owner/repo format (e.g., opentensor/btcli)',
+    help='Repository in owner/repo format (e.g., latent-to/btcli)',
 )
 @click.option(
     '--issue',
@@ -113,7 +113,7 @@ def issue_register(
 
     \b
     Examples:
-        gitt issues register --repo opentensor/btcli --issue 144 --bounty 100
+        gitt issues register --repo latent-to/btcli --issue 144 --bounty 100
         gitt i reg --repo tensorflow/tensorflow --issue 12345 --bounty 50
         gitt i reg --repo owner/repo --issue 1 --bounty 10 -y
     """

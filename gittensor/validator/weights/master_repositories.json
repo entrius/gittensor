@@ -1227,7 +1227,7 @@
     "tier": "Silver",
     "weight": 5.07
   },
-  "Desearch-ai/subnet-22-desearch": {
+  "Desearch-ai/subnet-22": {
     "tier": "Silver",
     "weight": 6.15
   },
@@ -3245,7 +3245,7 @@
     "tier": "Bronze",
     "weight": 0.16
   },
-  "microsoft/LightGBM": {
+  "lightgbm-org/LightGBM": {
     "tier": "Bronze",
     "weight": 0.25
   },
@@ -3886,21 +3886,21 @@
     "tier": "Bronze",
     "weight": 0.16
   },
-  "opentensor/async-substrate-interface": {
+  "latent-to/async-substrate-interface": {
     "tier": "Gold",
     "weight": 24.78
   },
-  "opentensor/bittensor": {
+  "latent-to/bittensor": {
     "additional_acceptable_branches": ["staging", "SDKv10"],
     "tier": "Gold",
     "weight": 43.72
   },
-  "opentensor/btcli": {
+  "latent-to/btcli": {
     "additional_acceptable_branches": ["staging"],
     "tier": "Gold",
     "weight": 21.54
   },
-  "opentensor/btwallet": {
+  "latent-to/btwallet": {
     "tier": "Gold",
     "weight": 23.02
   },
@@ -4081,7 +4081,7 @@
     "tier": "Bronze",
     "weight": 0.53
   },
-  "pedroslopez/whatsapp-web.js": {
+  "wwebjs/whatsapp-web.js": {
     "tier": "Bronze",
     "weight": 0.11
   },
@@ -5450,7 +5450,7 @@
     "tier": "Bronze",
     "weight": 0.83
   },
-  "vercel/openchat": {
+  "vercel/chatbot": {
     "tier": "Bronze",
     "weight": 0.18
   },

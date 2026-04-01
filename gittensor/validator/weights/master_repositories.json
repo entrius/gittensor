@@ -2441,10 +2441,6 @@
     "tier": "Bronze",
     "weight": 0.14
   },
-  "impel-intelligence/dippy-studio-bittensor": {
-    "tier": "Bronze",
-    "weight": 0.38
-  },
   "impel-intelligence/dippy-studio-bittensor-miner": {
     "tier": "Bronze",
     "weight": 0.38
@@ -3515,10 +3511,6 @@
     "tier": "Bronze",
     "weight": 0.11
   },
-  "neuralinternet/SN27": {
-    "tier": "Bronze",
-    "weight": 0.44
-  },
   "nextcloud/android": {
     "tier": "Bronze",
     "weight": 1.2
@@ -4554,10 +4546,6 @@
   "RocketChat/Rocket.Chat": {
     "tier": "Bronze",
     "weight": 0.19
-  },
-  "RogueTensor/bitagent_subnet": {
-    "tier": "Bronze",
-    "weight": 0.39
   },
   "rolling-scopes-school/tasks": {
     "tier": "Bronze",
@@ -5609,10 +5597,6 @@
   "xiaolai/regular-investing-in-box": {
     "tier": "Bronze",
     "weight": 0.16
-  },
-  "xiaorouji/openwrt-passwall": {
-    "tier": "Bronze",
-    "weight": 0.11
   },
   "xinnan-tech/xiaozhi-esp32-server": {
     "additional_acceptable_branches": ["live2d-actions"],

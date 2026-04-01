@@ -745,6 +745,7 @@
   },
   "bokeh/bokeh": {
     "additional_acceptable_branches": ["branch-*.*"],
+    "inactive_at": "2026-03-31T00:00:00Z",
     "tier": "Bronze",
     "weight": 0.11
   },

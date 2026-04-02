@@ -195,36 +195,3 @@ DO UPDATE SET
     gold_leaf_score = EXCLUDED.gold_leaf_score,
     updated_at = NOW()
 """
-
-# Merge Prediction Queries
-UPSERT_PREDICTION = """
-INSERT INTO predictions (
-    uid, hotkey, github_id, issue_id, repository,
-    issue_number, pr_number, prediction, variance_at_prediction, timestamp
-) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-ON CONFLICT (uid, hotkey, github_id, issue_id, pr_number)
-DO UPDATE SET
-    prediction = EXCLUDED.prediction,
-    variance_at_prediction = EXCLUDED.variance_at_prediction,
-    timestamp = EXCLUDED.timestamp
-"""
-
-UPSERT_PREDICTION_EMA = """
-INSERT INTO prediction_emas (github_id, ema_score, rounds, updated_at)
-VALUES (%s, %s, %s, %s)
-ON CONFLICT (github_id)
-DO UPDATE SET
-    ema_score = EXCLUDED.ema_score,
-    rounds = prediction_emas.rounds + 1,
-    updated_at = EXCLUDED.updated_at
-"""
-
-UPSERT_SETTLED_ISSUE = """
-INSERT INTO settled_issues (issue_id, outcome, merged_pr_number, settled_at)
-VALUES (%s, %s, %s, %s)
-ON CONFLICT (issue_id) DO NOTHING
-"""
-
-DELETE_PREDICTIONS_FOR_ISSUE = """
-DELETE FROM predictions WHERE issue_id = %s
-"""

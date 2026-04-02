@@ -152,28 +152,3 @@ MAX_OPEN_PR_THRESHOLD = 30  # Maximum open PR threshold (base + bonus capped at 
 # Issues Competition
 # =============================================================================
 CONTRACT_ADDRESS = '5FWNdk8YNtNcHKrAx2krqenFrFAZG7vmsd2XN2isJSew3MrD'
-ISSUES_TREASURY_UID = 111  # UID of the smart contract neuron, if set to RECYCLE_UID then it's disabled
-ISSUES_TREASURY_EMISSION_SHARE = 0.15  # % of emissions allocated to funding issues treasury
-
-# =============================================================================
-# Merge Predictions
-# =============================================================================
-PREDICTIONS_EMISSIONS_SHARE = 0.15  # % of emissions allocated to prediction competition
-PREDICTIONS_TOP_K = 3  # only top-K miners by EMA receive prediction rewards
-PREDICTIONS_TOP_K_SHARES = [0.50, 0.35, 0.15]  # fixed reward split for top-K miners (must sum to 1.0)
-
-PREDICTIONS_EMA_BETA = 0.1  # EMA decay rate for predictions record
-PREDICTIONS_CORRECTNESS_EXPONENT = 3  # exponent on correctness to harshly punish incorrect predictions
-PREDICTIONS_TIMELINESS_EXPONENT = 1.8  # curve for early prediction bonus. higher = sharper curve. 1.0 = linear
-PREDICTIONS_MAX_TIMELINESS_BONUS = 0.75  # max bonus for earliest predictions
-PREDICTIONS_MAX_CONSENSUS_BONUS = 0.25  # max bonus for pre-convergence predictions
-PREDICTIONS_MAX_ORDER_BONUS = 0.75  # max bonus for first correct predictor (applies to merged PR only)
-PREDICTIONS_ORDER_CORRECTNESS_THRESHOLD = 0.66  # min raw correctness to qualify for order bonus
-# variance threshold for full rewards
-# if variance across predictions never exceeds this threshold, the solution must be 'obvious'
-PREDICTIONS_CONSENSUS_VARIANCE_TARGET = 0.2
-
-# Cooldown & Limits
-PREDICTIONS_COOLDOWN_SECONDS = 900  # 15 min cooldown per miner per PR re-prediction
-PREDICTIONS_MIN_VALUE = 0.0
-PREDICTIONS_MAX_VALUE = 1.0

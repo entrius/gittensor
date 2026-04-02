@@ -12,7 +12,6 @@ services:
     volumes:
       # 'ro' = readonly
       - ${WALLET_PATH}:/root/.bittensor/wallets:ro
-      - ./merge-prediction-data:/app/data
     # optional: uncomment this if you are running validator database
     # networks:
     #   - gittensor_network

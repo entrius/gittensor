@@ -8,16 +8,8 @@ import bittensor as bt
 import numpy as np
 
 from gittensor.classes import MinerEvaluation
-from gittensor.constants import (
-    ISSUES_TREASURY_EMISSION_SHARE,
-    ISSUES_TREASURY_UID,
-    PREDICTIONS_EMISSIONS_SHARE,
-    PREDICTIONS_TOP_K,
-    PREDICTIONS_TOP_K_SHARES,
-)
 from gittensor.utils.uids import get_all_uids
 from gittensor.validator.issue_competitions.forward import issue_competitions
-from gittensor.validator.merge_predictions.settlement import merge_predictions
 from gittensor.validator.oss_contributions.reward import get_rewards
 from gittensor.validator.utils.config import VALIDATOR_STEPS_INTERVAL, VALIDATOR_WAIT
 from gittensor.validator.utils.load_weights import (
@@ -34,16 +26,9 @@ async def forward(self: 'Validator') -> None:
     """Execute the validator's forward pass.
 
     Performs the core validation cycle every VALIDATOR_STEPS_INTERVAL steps:
-    1. Score OSS contributions (pure scoring, no side effects)
-    2. Run issue bounties verification (needs tier data from scoring)
-    3. Settle merge predictions (score + update EMAs)
-    4. Build blended rewards array across all emission sources
-    5. Update scores with blended rewards
-
-    Emission blending:
-    - OSS contributions: 70% (1.0 - treasury - predictions)
-    - Issue bounties treasury: 15% flat to treasury UID
-    - Merge predictions: 15% distributed by EMA scores
+    1. Score OSS contributions
+    2. Run issue competitions verification
+    3. Update scores with rewards
     """
 
     if self.step % VALIDATOR_STEPS_INTERVAL == 0:
@@ -53,100 +38,9 @@ async def forward(self: 'Validator') -> None:
 
         await issue_competitions(self, miner_evaluations)
 
-        await merge_predictions(self, miner_evaluations)
-
-        # Build blended rewards array across all emission sources
-        oss_share = 1.0 - ISSUES_TREASURY_EMISSION_SHARE - PREDICTIONS_EMISSIONS_SHARE
-        rewards *= oss_share
-
-        if ISSUES_TREASURY_UID > 0 and ISSUES_TREASURY_UID in miner_uids:
-            sorted_uids = sorted(miner_uids)
-            treasury_idx = sorted_uids.index(ISSUES_TREASURY_UID)
-            rewards[treasury_idx] = ISSUES_TREASURY_EMISSION_SHARE
-
-            bt.logging.info(
-                f'Treasury allocation: Smart Contract UID {ISSUES_TREASURY_UID} receives '
-                f'{ISSUES_TREASURY_EMISSION_SHARE * 100:.0f}% of emissions'
-            )
-
-        prediction_rewards = build_prediction_ema_rewards(self, miner_uids, miner_evaluations)
-        rewards += prediction_rewards
-
-        bt.logging.info(
-            f'Blended rewards: OSS {oss_share * 100:.0f}% + treasury {ISSUES_TREASURY_EMISSION_SHARE * 100:.0f}% '
-            f'+ predictions {PREDICTIONS_EMISSIONS_SHARE * 100:.0f}% '
-            f'(prediction sum={prediction_rewards.sum():.4f})'
-        )
-
         self.update_scores(rewards, miner_uids)
 
     await asyncio.sleep(VALIDATOR_WAIT)
-
-
-def build_prediction_ema_rewards(
-    self: 'Validator',
-    miner_uids: set[int],
-    miner_evaluations: Dict[int, MinerEvaluation],
-) -> np.ndarray:
-    """Build rewards array from prediction EMA scores using top-K winner-takes-most.
-
-    Only the top PREDICTIONS_TOP_K miners by EMA score receive rewards,
-    split according to PREDICTIONS_TOP_K_SHARES (50%/35%/15%).
-    Ties are broken by rounds (more settled issues = higher rank).
-
-    Maps github_id-keyed EMAs back to UIDs via miner_evaluations.
-    """
-    sorted_uids = sorted(miner_uids)
-    prediction_rewards = np.zeros(len(sorted_uids), dtype=np.float64)
-
-    all_emas = self.mp_storage.get_all_emas()
-    if not all_emas:
-        return prediction_rewards
-
-    # Build github_id -> uid mapping from current miner evaluations
-    # NOTE: detect_and_penalize_miners_sharing_github() already zeroes github_id
-    # for duplicate accounts before this runs, so the '!= 0' filter handles them.
-    github_id_to_uid: Dict[str, int] = {}
-    for uid, evaluation in miner_evaluations.items():
-        if evaluation and evaluation.github_id and evaluation.github_id != '0':
-            github_id_to_uid[evaluation.github_id] = uid
-
-    # Collect eligible miners: (ema_score, rounds, uid)
-    eligible: list[tuple[float, int, int]] = []
-    for mp_record in all_emas:
-        github_id = mp_record['github_id']
-        ema_score = mp_record['ema_score']
-
-        if ema_score <= 0:
-            continue
-
-        uid = github_id_to_uid.get(github_id)
-        if uid is None or uid not in miner_uids:
-            continue
-
-        rounds = mp_record.get('rounds', 0) or 0
-        eligible.append((ema_score, rounds, uid))
-
-    if not eligible:
-        return prediction_rewards
-
-    # Rank by EMA descending, then by rounds descending (tiebreaker)
-    eligible.sort(key=lambda x: (x[0], x[1]), reverse=True)
-
-    # Award top-K miners their fixed shares
-    top_k = min(PREDICTIONS_TOP_K, len(eligible))
-    for rank in range(top_k):
-        _, _, uid = eligible[rank]
-        idx = sorted_uids.index(uid)
-        prediction_rewards[idx] = PREDICTIONS_TOP_K_SHARES[rank] * PREDICTIONS_EMISSIONS_SHARE
-
-    top_miners_log = ', '.join(
-        f'UID {uid} (ema={ema:.4f}, rounds={rounds}, share={PREDICTIONS_TOP_K_SHARES[i] * 100:.0f}%)'
-        for i, (ema, rounds, uid) in enumerate(eligible[:top_k])
-    )
-    bt.logging.info(f'Merge prediction top-{top_k} rewards: {top_miners_log}')
-
-    return prediction_rewards
 
 
 async def oss_contributions(self: 'Validator', miner_uids: set[int]) -> Tuple[np.ndarray, Dict[int, MinerEvaluation]]:

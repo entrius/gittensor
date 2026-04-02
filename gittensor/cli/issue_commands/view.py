@@ -7,7 +7,6 @@ Read-only issue commands
 Commands:
     gitt issues list [--id <ID>]
     gitt issues bounty-pool
-    gitt issues pending-harvest
     gitt admin info
 """
 
@@ -250,90 +249,6 @@ def issues_bounty_pool(network: str, rpc_url: str, contract: str, verbose: bool,
             f'[green]Issue Bounty Pool:[/green] {format_alpha(total_bounty_pool, 4)} ALPHA ({total_bounty_pool} raw)'
         )
         console.print(f'[dim]Sum of bounty amounts from {len(issues)} issue(s)[/dim]')
-    except Exception as e:
-        print_error(str(e))
-
-
-@click.command('pending-harvest')
-@click.option(
-    '--network',
-    '-n',
-    default=None,
-    type=click.Choice(['finney', 'test', 'local'], case_sensitive=False),
-    help='Network (finney/test/local)',
-)
-@click.option(
-    '--rpc-url',
-    default=None,
-    help='Subtensor RPC endpoint (overrides --network)',
-)
-@click.option(
-    '--contract',
-    default='',
-    help='Contract address (uses config if empty)',
-)
-@click.option('--verbose', '-v', is_flag=True, help='Show debug output')
-@click.option('--json', 'as_json', is_flag=True, help='Output as JSON for scripting')
-def issues_pending_harvest(network: str, rpc_url: str, contract: str, verbose: bool, as_json: bool):
-    """View pending harvest (treasury stake minus allocated bounties).
-
-    \b
-    Examples:
-        gitt issues pending-harvest
-        gitt i pending-harvest --json
-    """
-    contract_addr = get_contract_address(contract)
-    ws_endpoint, network_name = resolve_network(network, rpc_url)
-
-    if not contract_addr:
-        raise click.ClickException('Contract address not configured.')
-
-    if not as_json:
-        print_network_header(network_name, contract_addr)
-
-    try:
-        import bittensor as bt
-        from substrateinterface import SubstrateInterface
-
-        from gittensor.validator.issue_competitions.contract_client import (
-            IssueCompetitionContractClient,
-        )
-
-        with console.status('[bold cyan]Reading treasury and contract data...', spinner='dots'):
-            subtensor = bt.Subtensor(network=ws_endpoint)
-            client = IssueCompetitionContractClient(
-                contract_address=contract_addr,
-                subtensor=subtensor,
-            )
-            treasury_stake = client.get_treasury_stake()
-
-            substrate = SubstrateInterface(url=ws_endpoint)
-            issues = _read_issues_from_child_storage(substrate, contract_addr, verbose)
-            total_bounty_pool = sum(issue.get('bounty_amount', 0) for issue in issues)
-
-        pending_harvest = max(0, treasury_stake - total_bounty_pool)
-
-        if as_json:
-            console.print(
-                json_mod.dumps(
-                    {
-                        'treasury_stake_raw': treasury_stake,
-                        'treasury_stake_alpha': format_alpha(treasury_stake, 4),
-                        'allocated_bounties_raw': total_bounty_pool,
-                        'allocated_bounties_alpha': format_alpha(total_bounty_pool, 4),
-                        'pending_harvest_raw': pending_harvest,
-                        'pending_harvest_alpha': format_alpha(pending_harvest, 4),
-                    },
-                    indent=2,
-                )
-            )
-            return
-
-        console.print(f'[green]Treasury Stake:[/green] {format_alpha(treasury_stake, 4)} ALPHA')
-        console.print(f'[green]Allocated to Bounties:[/green] {format_alpha(total_bounty_pool, 4)} ALPHA')
-        console.print(f'[green]Pending Harvest:[/green] {format_alpha(pending_harvest, 4)} ALPHA')
-    except ImportError as e:
-        print_error(f'Missing dependency — {e}')
     except Exception as e:
         print_error(str(e))
 

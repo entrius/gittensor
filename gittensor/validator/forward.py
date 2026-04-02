@@ -9,7 +9,6 @@ import numpy as np
 
 from gittensor.classes import MinerEvaluation
 from gittensor.utils.uids import get_all_uids
-from gittensor.validator.issue_competitions.forward import issue_competitions
 from gittensor.validator.oss_contributions.reward import get_rewards
 from gittensor.validator.utils.config import VALIDATOR_STEPS_INTERVAL, VALIDATOR_WAIT
 from gittensor.validator.utils.load_weights import (
@@ -36,7 +35,9 @@ async def forward(self: 'Validator') -> None:
 
         rewards, miner_evaluations = await oss_contributions(self, miner_uids)
 
-        await issue_competitions(self, miner_evaluations)
+        # TODO: re-enable for v1 issue bounties (user-funded, not emission-funded)
+        # from gittensor.validator.issue_competitions.forward import issue_competitions
+        # await issue_competitions(self, miner_evaluations)
 
         self.update_scores(rewards, miner_uids)
 

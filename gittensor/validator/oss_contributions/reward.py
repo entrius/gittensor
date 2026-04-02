@@ -20,7 +20,6 @@ from gittensor.validator.oss_contributions.scoring import (
     finalize_miner_scores,
     score_miner_prs,
 )
-from gittensor.validator.oss_contributions.tier_config import allocate_emissions_by_tier
 from gittensor.validator.utils.load_weights import LanguageConfig, RepositoryConfig, TokenConfig
 
 # NOTE: there was a circular import error, needed this if to resolve it
@@ -120,13 +119,10 @@ async def get_rewards(
     # Adjust scores for duplicate accounts
     detect_and_penalize_miners_sharing_github(miner_evaluations)
 
-    # Finalize scores: apply pioneer dividends, credibility, sum totals, deduct collateral
+    # Finalize scores: apply eligibility gate, credibility, pioneer dividends, collateral
     finalize_miner_scores(miner_evaluations)
 
-    # Allocate emissions by tier: replace total_score with tier-weighted allocations
-    allocate_emissions_by_tier(miner_evaluations)
-
-    # Normalize the rewards between [0,1]
+    # Normalize the rewards between [0,1] — single flat pool
     normalized_rewards = normalize_rewards_linear(miner_evaluations)
 
     # Scale rewards according to dynamic emission curve based off of miners total contributions.

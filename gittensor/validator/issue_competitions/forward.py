@@ -62,7 +62,7 @@ async def issue_competitions(
         eligible_miners = {
             eval.github_id: eval.hotkey
             for eval in miner_evaluations.values()
-            if eval.github_id and eval.github_id != '0' and eval.current_tier is not None
+            if eval.github_id and eval.github_id != '0' and eval.is_eligible
         }
         bt.logging.info(
             f'Issue bounties: {len(eligible_miners)} eligible miners (bronze+) out of {len(miner_evaluations)} total'

@@ -25,7 +25,6 @@ from gittensor.constants import (
     MAINTAINER_ASSOCIATIONS,
     MAX_FILE_SIZE_BYTES,
     PR_LOOKBACK_DAYS,
-    TIER_BASED_INCENTIVE_MECHANISM_START_DATE,
 )
 from gittensor.utils.models import PRInfo
 from gittensor.validator.utils.load_weights import RepositoryConfig
@@ -971,19 +970,6 @@ def load_miners_prs(
                 try:
                     repository_full_name = parse_repo_name(pr_raw['repository'])
                     pr_state = pr_raw['state']
-
-                    # Stop querying once we hit PRs older than the tier incentive start date
-                    pr_creation_time = datetime.fromisoformat(pr_raw['createdAt'].rstrip('Z')).replace(
-                        tzinfo=timezone.utc
-                    )
-
-                    if pr_creation_time < TIER_BASED_INCENTIVE_MECHANISM_START_DATE:
-                        bt.logging.info(
-                            f'Reached PR #{pr_raw["number"]} in {repository_full_name} created at {pr_creation_time}, '
-                            f'before tier incentive start date ({TIER_BASED_INCENTIVE_MECHANISM_START_DATE}). '
-                            f'Stopping PR fetch.'
-                        )
-                        return
 
                     if repository_full_name not in master_repositories:
                         bt.logging.info(f'Skipping PR #{pr_raw["number"]} in {repository_full_name} - ineligible repo')

@@ -66,7 +66,6 @@ class DatabaseStorage:
             self.repo.cleanup_stale_miner_data(miner_eval)
 
             result.stored_counts['evaluations'] = 1 if self.repo.set_miner_evaluation(miner_eval) else 0
-            result.stored_counts['tier_stats'] = 1 if self.repo.set_miner_tier_stats(miner_eval) else 0
 
             # Commit transaction
             self.db_connection.commit()

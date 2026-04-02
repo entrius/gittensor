@@ -10,7 +10,6 @@ import bittensor as bt
 
 from gittensor.constants import MIN_TOKEN_SCORE_FOR_BASE_SCORE
 from gittensor.utils.utils import parse_repo_name
-from gittensor.validator.oss_contributions.tier_config import Tier, TierConfig, TierStats
 
 GITHUB_DOMAIN = 'https://github.com/'
 
@@ -151,7 +150,6 @@ class PullRequest:
 
     # PR state based fields
     pr_state: PRState
-    repository_tier_configuration: Optional[TierConfig] = None  # assigned when scoring PR
 
     # Score fields
     repo_weight_multiplier: float = 1.0
@@ -164,8 +162,6 @@ class PullRequest:
     credibility_multiplier: float = 1.0
     review_quality_multiplier: float = 1.0  # Penalty for CHANGES_REQUESTED reviews from maintainers
     changes_requested_count: int = 0  # Number of maintainer CHANGES_REQUESTED reviews
-    raw_credibility: float = 1.0  # Before applying ^k scalar
-    credibility_scalar: int = 1  # The k value from tier config
     earned_score: float = 0.0
     collateral_score: float = 0.0  # For OPEN PRs: potential_score * collateral_percent
 
@@ -196,14 +192,9 @@ class PullRequest:
     def is_pioneer_eligible(self) -> bool:
         """Check if this PR qualifies for pioneer consideration.
 
-        A PR is eligible if it is merged, has a tier configuration,
-        and meets the minimum token score quality gate.
+        A PR is eligible if it is merged and meets the minimum token score quality gate.
         """
-        return (
-            self.repository_tier_configuration is not None
-            and self.merged_at is not None
-            and self.token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE
-        )
+        return self.merged_at is not None and self.token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE
 
     def calculate_final_earned_score(self) -> float:
         """Combine base score with all multipliers. Pioneer dividend is added separately after."""
@@ -218,13 +209,7 @@ class PullRequest:
 
         self.earned_score = self.base_score * prod(multipliers.values())
 
-        # Log all multipliers (credibility shows ^k format)
-        def _format_multiplier(k: str, v: float) -> str:
-            if k == 'cred':
-                return f'cred={self.raw_credibility:.2f}^{self.credibility_scalar}'
-            return f'{k}={v:.2f}'
-
-        mult_str = ' × '.join(_format_multiplier(k, v) for k, v in multipliers.items())
+        mult_str = ' × '.join(f'{k}={v:.2f}' for k, v in multipliers.items())
         bt.logging.info(
             f'├─ {self.pr_state.value} PR #{self.number} ({self.repository_full_name}) → {self.earned_score:.2f}'
         )
@@ -301,7 +286,6 @@ class MinerEvaluation:
     total_collateral_score: float = 0.0  # Collateral from open PRs
     total_nodes_scored: int = 0  # Total AST nodes scored across all PRs
     unique_repos_count: int = 0
-    qualified_unique_repos_count: int = 0  # Repos meeting min token score threshold
 
     # Overall token scoring breakdown (aggregated across all PRs)
     total_token_score: float = 0.0
@@ -316,10 +300,9 @@ class MinerEvaluation:
     closed_pull_requests: List[PullRequest] = field(default_factory=list)
     unique_repos_contributed_to: Set[str] = field(default_factory=set)
 
-    # Tier level details (None = no tier unlocked yet)
-    current_tier: Optional[Tier] = None
-    credibility_by_tier: Dict[Tier, float] = field(default_factory=dict)
-    stats_by_tier: Dict[Tier, TierStats] = field(default_factory=lambda: {tier: TierStats() for tier in Tier})
+    # Eligibility and credibility
+    is_eligible: bool = False
+    credibility: float = 0.0
 
     @property
     def total_prs(self) -> int:

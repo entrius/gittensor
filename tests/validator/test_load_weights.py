@@ -10,7 +10,6 @@ Run tests:
 
 import pytest
 
-from gittensor.validator.oss_contributions.tier_config import Tier
 from gittensor.validator.utils.load_weights import (
     LanguageConfig,
     RepositoryConfig,
@@ -113,14 +112,6 @@ class TestLoadMasterRepositories:
         repos = load_master_repo_weights()
         for repo_name in repos.keys():
             assert repo_name == repo_name.lower(), f'{repo_name} should be lowercase'
-
-    def test_repos_have_valid_tiers(self):
-        """Repositories should have valid tier assignments."""
-        repos = load_master_repo_weights()
-        valid_tiers = {Tier.BRONZE, Tier.SILVER, Tier.GOLD, None}
-        for repo_name, config in repos.items():
-            assert config.tier in valid_tiers, f'{repo_name} has invalid tier: {config.tier}'
-
 
 class TestBannedOrganizations:
     """Tests ensuring banned organizations are not active in the repository list.

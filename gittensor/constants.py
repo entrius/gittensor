@@ -1,6 +1,5 @@
 # Entrius 2025
 import re
-from datetime import datetime, timezone
 from typing import Dict
 
 # =============================================================================
@@ -53,11 +52,11 @@ MAX_LINES_SCORED_FOR_NON_CODE_EXT = 300
 # =============================================================================
 # Repository & PR Scoring
 # =============================================================================
-PR_LOOKBACK_DAYS = 90  # how many days a merged pr will count for scoring
-DEFAULT_MERGED_PR_BASE_SCORE = 30
+PR_LOOKBACK_DAYS = 35  # rolling window for scoring
+MERGED_PR_BASE_SCORE = 30
 MIN_TOKEN_SCORE_FOR_BASE_SCORE = 5  # PRs below this get 0 base score (can still earn contribution bonus)
 MAX_CONTRIBUTION_BONUS = 30
-DEFAULT_MAX_CONTRIBUTION_SCORE_FOR_FULL_BONUS = 2000
+CONTRIBUTION_SCORE_FOR_FULL_BONUS = 2000
 
 # Boosts
 MAX_CODE_DENSITY_MULTIPLIER = 3.0
@@ -78,7 +77,7 @@ MAX_ISSUE_AGE_FOR_MAX_SCORE = 40  # days
 TIME_DECAY_GRACE_PERIOD_HOURS = 12  # hours before time decay begins
 TIME_DECAY_SIGMOID_MIDPOINT = 10  # days until 50% score loss
 TIME_DECAY_SIGMOID_STEEPNESS_SCALAR = 0.4
-TIME_DECAY_MIN_MULTIPLIER = 0.05  # 5% of score will retain through lookback days (90D)
+TIME_DECAY_MIN_MULTIPLIER = 0.05  # 5% of score will retain through lookback window
 
 # comment nodes for token scoring
 COMMENT_NODE_TYPES = frozenset(
@@ -101,17 +100,16 @@ INLINE_TEST_PATTERNS: Dict[str, re.Pattern] = {
 }
 
 # =============================================================================
-# Tiers & Collateral System
+# Eligibility Gate
 # =============================================================================
-TIER_BASED_INCENTIVE_MECHANISM_START_DATE = datetime(2025, 12, 31, 3, 45, 00, tzinfo=timezone.utc)
-DEFAULT_COLLATERAL_PERCENT = 0.20
+MIN_VALID_MERGED_PRS = 5  # minimum "valid" merged PRs (token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE) to receive score
+MIN_CREDIBILITY = 0.75  # minimum credibility ratio to receive score
+CREDIBILITY_MULLIGAN_COUNT = 1  # number of closed PRs forgiven (erased from merged+closed counts entirely)
 
-# Tier-based emission allocation splits
-TIER_EMISSION_SPLITS = {
-    'Bronze': 0.15,  # 15% of emissions
-    'Silver': 0.35,  # 35% of emissions
-    'Gold': 0.50,  # 50% of emissions
-}
+# =============================================================================
+# Collateral
+# =============================================================================
+OPEN_PR_COLLATERAL_PERCENT = 0.20
 
 # =============================================================================
 # Rewards & Emissions
@@ -142,9 +140,9 @@ MAINTAINER_ISSUE_BONUS = 0.25  # Extra bonus when issue was created by a maintai
 EXCESSIVE_PR_PENALTY_BASE_THRESHOLD = 10
 
 # Dynamic open PR threshold bonus for top contributors
-# Bonus = floor(total_unlocked_token_score / 500)
-# Example: 1500 token score across unlocked tiers / 500 = +3 bonus
-OPEN_PR_THRESHOLD_TOKEN_SCORE = 500.0  # Token score per +1 bonus (sum of all unlocked tiers)
+# Bonus = floor(total_token_score / 300)
+# Example: 900 total token score / 300 = +3 bonus
+OPEN_PR_THRESHOLD_TOKEN_SCORE = 300.0  # Token score per +1 bonus
 MAX_OPEN_PR_THRESHOLD = 30  # Maximum open PR threshold (base + bonus capped at this value)
 
 # =============================================================================

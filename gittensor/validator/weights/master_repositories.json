@@ -479,6 +479,7 @@
     "weight": 13.72
   },
   "astropy/astropy": {
+    "inactive_at": "2026-03-30T00:00:00Z",
     "tier": "Bronze",
     "weight": 0.17
   },

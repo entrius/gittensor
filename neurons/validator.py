@@ -17,6 +17,7 @@
 
 
 import time
+from functools import partial
 from typing import Dict, List, Set
 
 import bittensor as bt
@@ -25,6 +26,14 @@ import wandb
 from gittensor.__init__ import __version__
 from gittensor.classes import MinerEvaluation, MinerEvaluationCache
 from gittensor.validator.forward import forward
+from gittensor.validator.pat_handler import (
+    blacklist_pat_broadcast,
+    blacklist_pat_check,
+    handle_pat_broadcast,
+    handle_pat_check,
+    priority_pat_broadcast,
+    priority_pat_check,
+)
 from gittensor.validator.utils.config import STORE_DB_RESULTS, WANDB_PROJECT, WANDB_VALIDATOR_NAME
 from gittensor.validator.utils.storage import DatabaseStorage
 from neurons.base.validator import BaseValidatorNeuron
@@ -42,6 +51,19 @@ class Validator(BaseValidatorNeuron):
 
     def __init__(self, config=None):
         super(Validator, self).__init__(config=config)
+
+        # Attach PAT broadcast and check handlers to the axon
+        if hasattr(self, 'axon') and self.axon is not None:
+            self.axon.attach(
+                forward_fn=partial(handle_pat_broadcast, self),
+                blacklist_fn=partial(blacklist_pat_broadcast, self),
+                priority_fn=partial(priority_pat_broadcast, self),
+            )
+            self.axon.attach(
+                forward_fn=partial(handle_pat_check, self),
+                blacklist_fn=partial(blacklist_pat_check, self),
+                priority_fn=partial(priority_pat_check, self),
+            )
 
         # Init in-memory cache for miner evaluations (fallback when GitHub API fails)
         self.evaluation_cache = MinerEvaluationCache()

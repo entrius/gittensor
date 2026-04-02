@@ -170,6 +170,11 @@ def config_set(key: str, value: str):
 # Register config group
 cli.add_command(config_group)
 
+# Register miner commands
+from gittensor.cli.miner_commands import register_miner_commands
+
+register_miner_commands(cli)
+
 
 # Register issue commands with new flat structure
 register_commands(cli)

@@ -115,45 +115,6 @@ def add_args(cls, parser):
     )
 
 
-def add_miner_args(cls, parser):
-    """Add miner specific arguments to the parser."""
-
-    parser.add_argument(
-        '--neuron.name',
-        type=str,
-        help='Trials for this neuron go in neuron.root / (wallet_cold - wallet_hot) / neuron.name. ',
-        default='miner',
-    )
-
-    parser.add_argument(
-        '--blacklist.force_validator_permit',
-        action='store_true',
-        help='If set, we will force incoming requests to have a permit.',
-        default=True,
-    )
-
-    parser.add_argument(
-        '--blacklist.allow_non_registered',
-        action='store_true',
-        help='If set, miners will accept queries from non registered entities. (Dangerous!)',
-        default=False,
-    )
-
-    parser.add_argument(
-        '--blacklist.min_stake',
-        type=int,
-        help='Minimum stake required for a validator to query this miner.',
-        default=12500,
-    )
-
-    parser.add_argument(
-        '--dev_mode',
-        action='store_true',
-        help='Enable development mode with additional logging and features.',
-        default=False,
-    )
-
-
 def add_validator_args(cls, parser):
     """Add validator specific arguments to the parser."""
 

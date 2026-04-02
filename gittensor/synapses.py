@@ -4,13 +4,28 @@ from typing import Optional
 import bittensor as bt
 
 
-class GitPatSynapse(bt.Synapse):
-    """
-    This synapse is used to request GitHub access tokens from a miner and receive the response.
+class PatBroadcastSynapse(bt.Synapse):
+    """Miner-initiated push synapse to broadcast their GitHub PAT to validators.
 
-    Attributes:
-    - github_access_token: A string value representing the GitHub access token.
-      Initially None for requests, and set to the actual token for responses.
+    The miner sets github_access_token on the request. The validator validates the PAT
+    (checks it works, extracts GitHub ID, verifies account age, runs a test query)
+    and responds with accepted/rejection_reason.
     """
 
-    github_access_token: Optional[str] = None
+    # Miner request
+    github_access_token: str
+
+    # Validator response
+    accepted: Optional[bool] = None
+    rejection_reason: Optional[str] = None
+
+
+class PatCheckSynapse(bt.Synapse):
+    """Lightweight probe for miners to check if a validator has their PAT stored.
+
+    No PAT is sent — the validator identifies the miner by their dendrite hotkey
+    and checks local storage.
+    """
+
+    # Validator response
+    has_pat: Optional[bool] = None

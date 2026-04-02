@@ -5378,13 +5378,13 @@
     "tier": "Bronze",
     "weight": 0.89
   },
+  "unarbos/agcli": {
+    "weight": 20,
+    "tier": "Silver"
+  },
   "unclecode/crawl4ai": {
     "tier": "Bronze",
     "weight": 0.1
-  },
-  "unconst/agcli": {
-    "weight": 20,
-    "tier": "Silver"
   },
   "Uniswap/interface": {
     "tier": "Bronze",

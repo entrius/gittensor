@@ -90,21 +90,25 @@ def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, json_mode)
     results = []
     for uid, axon, resp in zip(validator_uids, validator_axons, responses):
         has_pat = getattr(resp, 'has_pat', None)
+        pat_valid = getattr(resp, 'pat_valid', None)
+        reason = getattr(resp, 'rejection_reason', None)
         results.append({
             'uid': uid,
             'hotkey': axon.hotkey[:16] + '...',
             'has_pat': has_pat,
+            'pat_valid': pat_valid,
+            'rejection_reason': reason,
         })
 
-    has_count = sum(1 for r in results if r['has_pat'] is True)
+    valid_count = sum(1 for r in results if r['pat_valid'] is True)
     no_response_count = sum(1 for r in results if r['has_pat'] is None)
 
     # 6. Display results
     if json_mode:
         click.echo(json.dumps({
             'total_validators': len(results),
-            'have_pat': has_count,
-            'missing_pat': len(results) - has_count - no_response_count,
+            'valid': valid_count,
+            'invalid': len(results) - valid_count - no_response_count,
             'no_response': no_response_count,
             'results': results,
         }, indent=2))
@@ -112,19 +116,22 @@ def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, json_mode)
         table = Table(title='PAT Check Results')
         table.add_column('UID', style='cyan', justify='right')
         table.add_column('Validator', style='dim')
-        table.add_column('Has PAT', justify='center')
+        table.add_column('Status', justify='center')
+        table.add_column('Reason', style='dim')
 
         for r in results:
-            if r['has_pat'] is True:
-                status = '[green]Yes[/green]'
+            if r['pat_valid'] is True:
+                status = '[green]✓ valid[/green]'
             elif r['has_pat'] is False:
-                status = '[red]No[/red]'
+                status = '[red]✗ no PAT[/red]'
+            elif r['pat_valid'] is False:
+                status = '[red]✗ invalid[/red]'
             else:
-                status = '[yellow]No Response[/yellow]'
-            table.add_row(str(r['uid']), r['hotkey'], status)
+                status = '[yellow]— no response[/yellow]'
+            table.add_row(str(r['uid']), r['hotkey'], status, r.get('rejection_reason') or '')
 
         console.print(table)
-        console.print(f'\n[bold]{has_count}/{len(results)} validators have your PAT stored.[/bold]')
+        console.print(f'\n[bold]{valid_count}/{len(results)} validators have a valid PAT stored.[/bold]')
 
 
 def _error(msg: str, json_mode: bool):

@@ -91,17 +91,22 @@ async def get_rewards(
     # Snapshot PATs once at the start of the scoring round.
     # Mid-round broadcasts update the JSON file but do not affect this round.
     all_pats = pat_storage.load_all_pats()
-    pat_by_hotkey = {entry['hotkey']: entry for entry in all_pats}
+    pat_by_uid = {entry['uid']: entry for entry in all_pats}
 
-    bt.logging.info(f'PAT storage snapshot: {len(pat_by_hotkey)} miners have stored PATs')
+    bt.logging.info(f'PAT storage snapshot: {len(pat_by_uid)} miners have stored PATs')
 
     miner_evaluations: Dict[int, MinerEvaluation] = {}
 
     # Look up PATs and calculate score.
     for uid in uids:
         hotkey = self.metagraph.hotkeys[uid]
-        pat_entry = pat_by_hotkey.get(hotkey)
-        pat = pat_entry['pat'] if pat_entry else None
+        pat_entry = pat_by_uid.get(uid)
+        pat = None
+        if pat_entry:
+            if pat_entry.get('hotkey') == hotkey:
+                pat = pat_entry['pat']
+            else:
+                bt.logging.info(f'UID {uid}: stale PAT entry (hotkey mismatch) — miner must re-broadcast')
 
         # Calculate score
         miner_evaluation = await evaluate_miners_pull_requests(

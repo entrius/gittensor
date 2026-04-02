@@ -67,16 +67,6 @@ def mock_response_502():
     return response
 
 
-@pytest.fixture
-def clear_github_cache():
-    """Clear the GitHub user cache before test."""
-    import gittensor.utils.github_api_tools as api_tools
-
-    api_tools._GITHUB_USER_CACHE.clear()
-    yield
-    api_tools._GITHUB_USER_CACHE.clear()
-
-
 # ============================================================================
 # GraphQL Retry Logic Tests
 # ============================================================================
@@ -367,7 +357,7 @@ class TestOtherGitHubAPIFunctions:
     @patch('gittensor.utils.github_api_tools.requests.get')
     @patch('gittensor.utils.github_api_tools.time.sleep')
     @patch('gittensor.utils.github_api_tools.bt.logging')
-    def test_get_github_id_retry_logic(self, mock_logging, mock_sleep, mock_get, clear_github_cache):
+    def test_get_github_id_retry_logic(self, mock_logging, mock_sleep, mock_get):
         """Test that get_github_id retries on failure."""
         mock_response_success = Mock()
         mock_response_success.status_code = 200
@@ -387,7 +377,7 @@ class TestOtherGitHubAPIFunctions:
     @patch('gittensor.utils.github_api_tools.requests.get')
     @patch('gittensor.utils.github_api_tools.time.sleep')
     @patch('gittensor.utils.github_api_tools.bt.logging')
-    def test_get_github_account_age_retry_logic(self, mock_logging, mock_sleep, mock_get, clear_github_cache):
+    def test_get_github_account_age_retry_logic(self, mock_logging, mock_sleep, mock_get):
         """Test that get_github_account_age_days retries on failure."""
         mock_response_success = Mock()
         mock_response_success.status_code = 200

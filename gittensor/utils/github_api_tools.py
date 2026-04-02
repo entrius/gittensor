@@ -138,12 +138,8 @@ def make_headers(token: str) -> Dict[str, str]:
     }
 
 
-# In-process cache for GitHub /user responses, keyed by PAT.
-_GITHUB_USER_CACHE: Dict[str, Dict[str, Any]] = {}
-
-
 def get_github_user(token: str) -> Optional[Dict[str, Any]]:
-    """Fetch GitHub user data for a PAT with retry and in-process cache.
+    """Fetch GitHub user data for a PAT with retry.
 
     Args:
         token (str): Github pat
@@ -152,11 +148,6 @@ def get_github_user(token: str) -> Optional[Dict[str, Any]]:
     """
     if not token:
         return None
-
-    # Check cache first to avoid duplicate /user calls for the same PAT.
-    cached = _GITHUB_USER_CACHE.get(token)
-    if cached is not None:
-        return cached
 
     headers = make_headers(token)
 
@@ -171,7 +162,6 @@ def get_github_user(token: str) -> Optional[Dict[str, Any]]:
                     bt.logging.warning(f'Failed to parse GitHub /user JSON response: {e}')
                     return None
 
-                _GITHUB_USER_CACHE[token] = user_data
                 return user_data
 
             bt.logging.warning(

@@ -99,13 +99,16 @@ class TestHandlePatBroadcast:
 
         assert result.accepted is True
         assert result.rejection_reason is None
+        # PAT should be cleared from response
+        assert result.github_access_token == ''
 
-        # Verify PAT was stored
-        entry = pat_storage.get_pat_by_hotkey('hotkey_1')
+        # Verify PAT was stored by UID
+        entry = pat_storage.get_pat_by_uid(1)
         assert entry is not None
         assert entry['pat'] == 'ghp_valid'
-        assert entry['github_id'] == 'github_42'
+        assert entry['hotkey'] == 'hotkey_1'
         assert entry['uid'] == 1
+        assert 'github_id' not in entry
 
     def test_unregistered_hotkey_rejected(self, mock_validator):
         synapse = _make_broadcast_synapse('unknown_hotkey')
@@ -123,7 +126,7 @@ class TestHandlePatBroadcast:
         assert 'PAT invalid' in result.rejection_reason
 
         # Verify PAT was NOT stored
-        assert pat_storage.get_pat_by_hotkey('hotkey_1') is None
+        assert pat_storage.get_pat_by_uid(1) is None
 
     @patch('gittensor.validator.pat_handler._test_pat_against_repo', return_value='GitHub API returned 403')
     @patch('gittensor.validator.pat_handler.validate_github_credentials', return_value=('github_42', None))
@@ -134,27 +137,43 @@ class TestHandlePatBroadcast:
         assert result.accepted is False
         assert '403' in result.rejection_reason
 
-    @patch(
-        'gittensor.validator.pat_handler.validate_github_credentials',
-        return_value=(None, "Miner 1's Github account too young (30 < 180 days)"),
-    )
-    def test_young_account_rejected(self, mock_validate, mock_validator):
-        synapse = _make_broadcast_synapse('hotkey_1')
-        result = _run(handle_pat_broadcast(mock_validator, synapse))
-
-        assert result.accepted is False
-        assert 'too young' in result.rejection_reason
 
 
 class TestHandlePatCheck:
-    def test_has_pat(self, mock_validator):
-        pat_storage.save_pat('hotkey_1', 1, 'ghp_test', 'id_1')
+    @patch('gittensor.validator.pat_handler._test_pat_against_repo', return_value=None)
+    @patch('gittensor.validator.pat_handler.validate_github_credentials', return_value=('github_42', None))
+    def test_valid_pat(self, mock_validate, mock_test_query, mock_validator):
+        pat_storage.save_pat(1, 'hotkey_1', 'ghp_test')
 
         synapse = _make_check_synapse('hotkey_1')
         result = _run(handle_pat_check(mock_validator, synapse))
         assert result.has_pat is True
+        assert result.pat_valid is True
+        assert result.rejection_reason is None
 
     def test_missing_pat(self, mock_validator):
         synapse = _make_check_synapse('hotkey_1')
         result = _run(handle_pat_check(mock_validator, synapse))
         assert result.has_pat is False
+        assert result.pat_valid is False
+
+    def test_stale_pat_reports_false(self, mock_validator):
+        """If a different miner now holds this UID, has_pat should be False."""
+        pat_storage.save_pat(1, 'old_hotkey', 'ghp_old')
+
+        synapse = _make_check_synapse('hotkey_1')
+        result = _run(handle_pat_check(mock_validator, synapse))
+        assert result.has_pat is False
+        assert result.pat_valid is False
+
+    @patch('gittensor.validator.pat_handler._test_pat_against_repo', return_value=None)
+    @patch('gittensor.validator.pat_handler.validate_github_credentials', return_value=(None, 'PAT expired'))
+    def test_stored_but_invalid_pat(self, mock_validate, mock_test_query, mock_validator):
+        """PAT is stored but fails re-validation."""
+        pat_storage.save_pat(1, 'hotkey_1', 'ghp_expired')
+
+        synapse = _make_check_synapse('hotkey_1')
+        result = _run(handle_pat_check(mock_validator, synapse))
+        assert result.has_pat is True
+        assert result.pat_valid is False
+        assert 'PAT expired' in result.rejection_reason

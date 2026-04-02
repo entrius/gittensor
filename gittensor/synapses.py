@@ -21,11 +21,13 @@ class PatBroadcastSynapse(bt.Synapse):
 
 
 class PatCheckSynapse(bt.Synapse):
-    """Lightweight probe for miners to check if a validator has their PAT stored.
+    """Probe for miners to check if a validator has their PAT stored and valid.
 
-    No PAT is sent — the validator identifies the miner by their dendrite hotkey
-    and checks local storage.
+    No PAT is sent — the validator identifies the miner by their dendrite hotkey,
+    looks up the stored PAT, and re-validates it (GitHub API check + test query).
     """
 
     # Validator response
     has_pat: Optional[bool] = None
+    pat_valid: Optional[bool] = None
+    rejection_reason: Optional[str] = None

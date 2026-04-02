@@ -147,11 +147,11 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, json_mode):
 
         for r in results:
             if r['accepted'] is True:
-                status = '[green]Accepted[/green]'
+                status = '[green]✓[/green]'
             elif r['accepted'] is False:
-                status = '[red]Rejected[/red]'
+                status = '[red]✗[/red]'
             else:
-                status = '[yellow]No Response[/yellow]'
+                status = '[yellow]—[/yellow]'
             table.add_row(str(r['uid']), r['hotkey'], status, r.get('rejection_reason') or '')
 
         console.print(table)

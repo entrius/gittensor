@@ -33,6 +33,7 @@ async def handle_pat_broadcast(validator: Validator, synapse: PatBroadcastSynaps
     def _reject(reason: str) -> PatBroadcastSynapse:
         synapse.accepted = False
         synapse.rejection_reason = reason
+        synapse.github_access_token = ''
         bt.logging.warning(f'PAT broadcast rejected — hotkey: {hotkey[:16]}... reason: {reason}')
         return synapse
 
@@ -53,8 +54,10 @@ async def handle_pat_broadcast(validator: Validator, synapse: PatBroadcastSynaps
         return _reject(f'PAT test query failed: {test_error}')
 
     # 4. Store PAT
-    pat_storage.save_pat(hotkey=hotkey, uid=uid, pat=synapse.github_access_token, github_id=github_id)
+    pat_storage.save_pat(uid=uid, hotkey=hotkey, pat=synapse.github_access_token)
 
+    # Clear PAT from response so it isn't echoed back
+    synapse.github_access_token = ''
     synapse.accepted = True
     bt.logging.success(f'PAT broadcast accepted — UID: {uid}, hotkey: {hotkey[:16]}..., github_id: {github_id}')
     return synapse
@@ -82,10 +85,34 @@ async def priority_pat_broadcast(validator: Validator, synapse: PatBroadcastSyna
 # ---------------------------------------------------------------------------
 
 async def handle_pat_check(validator: Validator, synapse: PatCheckSynapse) -> PatCheckSynapse:
-    """Check if the validator has the miner's PAT stored."""
+    """Check if the validator has the miner's PAT stored and re-validate it."""
     hotkey = synapse.dendrite.hotkey
-    entry = pat_storage.get_pat_by_hotkey(hotkey)
-    synapse.has_pat = entry is not None
+    uid = validator.metagraph.hotkeys.index(hotkey)
+    entry = pat_storage.get_pat_by_uid(uid)
+
+    # Check if PAT exists and hotkey matches (not a stale entry from a previous miner)
+    if entry is None or entry.get('hotkey') != hotkey:
+        synapse.has_pat = False
+        synapse.pat_valid = False
+        synapse.rejection_reason = 'No PAT stored for this miner'
+        return synapse
+
+    synapse.has_pat = True
+
+    # Re-validate the stored PAT
+    _, error = validate_github_credentials(uid, entry['pat'])
+    if error:
+        synapse.pat_valid = False
+        synapse.rejection_reason = error
+        return synapse
+
+    test_error = _test_pat_against_repo(entry['pat'])
+    if test_error:
+        synapse.pat_valid = False
+        synapse.rejection_reason = f'PAT test query failed: {test_error}'
+        return synapse
+
+    synapse.pat_valid = True
     return synapse
 
 
@@ -117,12 +144,13 @@ _TEST_REPO = 'torvalds/linux'
 def _test_pat_against_repo(pat: str) -> str | None:
     """Run a test API call against a known repo to catch org-restricted or expired PATs.
 
+    Fetches a small number of closed PRs to mimic the real scoring query pattern.
     Returns an error string on failure, None on success.
     """
     headers = {'Authorization': f'token {pat}', 'Accept': 'application/vnd.github.v3+json'}
     try:
         response = requests.get(
-            f'{BASE_GITHUB_API_URL}/repos/{_TEST_REPO}/pulls?state=closed&per_page=1',
+            f'{BASE_GITHUB_API_URL}/repos/{_TEST_REPO}/pulls?state=closed&per_page=3',
             headers=headers,
             timeout=15,
         )

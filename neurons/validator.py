@@ -26,6 +26,7 @@ import wandb
 from gittensor.__init__ import __version__
 from gittensor.classes import MinerEvaluation, MinerEvaluationCache
 from gittensor.validator.forward import forward
+from gittensor.validator import pat_storage
 from gittensor.validator.pat_handler import (
     blacklist_pat_broadcast,
     blacklist_pat_check,
@@ -51,6 +52,9 @@ class Validator(BaseValidatorNeuron):
 
     def __init__(self, config=None):
         super(Validator, self).__init__(config=config)
+
+        # Ensure PAT storage file exists on boot
+        pat_storage.ensure_pats_file()
 
         # Attach PAT broadcast and check handlers to the axon
         if hasattr(self, 'axon') and self.axon is not None:

@@ -479,6 +479,7 @@
     "weight": 13.72
   },
   "astropy/astropy": {
+    "inactive_at": "2026-03-30T00:00:00Z",
     "tier": "Bronze",
     "weight": 0.17
   },
@@ -3622,6 +3623,7 @@
     "weight": 0.37
   },
   "numpy/numpy": {
+    "inactive_at": "2026-03-31T00:00:00Z",
     "tier": "Bronze",
     "weight": 0.55
   },
@@ -4661,6 +4663,7 @@
     "weight": 0.17
   },
   "scipy/scipy": {
+    "inactive_at": "2026-03-31T00:00:00Z",
     "tier": "Bronze",
     "weight": 0.95
   },

@@ -131,7 +131,18 @@ class TestBannedOrganizations:
     # orgs may be banned for:
     # - exploitative PR manipulation
     # - explicit removal request
-    BANNED_ORGS = ['conda', 'conda-incubator', 'conda-archive', 'louislam', 'python', 'fastapi', 'astral-sh', 'astropy']
+    BANNED_ORGS = [
+        'conda',
+        'conda-incubator',
+        'conda-archive',
+        'louislam',
+        'python',
+        'fastapi',
+        'astral-sh',
+        'astropy',
+        'numpy',
+        'scipy',
+    ]
 
     def test_banned_org_repos_are_inactive(self):
         """Repositories from banned organizations must be marked as inactive."""
@@ -140,9 +151,9 @@ class TestBannedOrganizations:
         for repo_name, config in repos.items():
             org = repo_name.split('/')[0] if '/' in repo_name else None
             if org in self.BANNED_ORGS:
-                assert config.inactive_at is not None, (
-                    f'Repository {repo_name} from banned org {org} must be marked inactive'
-                )
+                assert (
+                    config.inactive_at is not None
+                ), f'Repository {repo_name} from banned org {org} must be marked inactive'
 
     def test_no_active_banned_org_repos(self):
         """Count of active repositories from banned orgs should be zero."""

@@ -21,7 +21,6 @@ from typing import Any, ContextManager, Dict, List, Optional, Tuple
 import click
 from rich.console import Console
 from rich.panel import Panel
-from substrateinterface import SubstrateInterface
 
 from gittensor.cli.issue_commands.tables import build_pr_table
 from gittensor.constants import CONTRACT_ADDRESS
@@ -195,6 +194,8 @@ def print_issue_submission_table(
 
 def resolve_netuid_from_contract(ws_endpoint: str, contract_addr: str) -> Optional[int]:
     """Read the subnet netuid stored in the on-chain contract."""
+    # Keep this import local so CLI help can render without optional chain deps installed.
+    from substrateinterface import SubstrateInterface
 
     substrate = SubstrateInterface(url=ws_endpoint)
     packed = _read_contract_packed_storage(substrate, contract_addr)

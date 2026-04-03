@@ -157,7 +157,7 @@ def fetch_open_issue_pull_requests(
     repository_full_name: str,
     issue_number: int,
     as_json: bool,
-) -> List[Dict[str, Any]]:
+) -> list:
     """Fetch open PR submissions for a GitHub issue."""
     token = get_github_pat() or ''
     if not token and not as_json:
@@ -167,7 +167,7 @@ def fetch_open_issue_pull_requests(
         from gittensor.utils.github_api_tools import find_prs_for_issue
 
         with loading_context('Fetching open pull request submissions from GitHub...', as_json):
-            prs: List[Dict[str, Any]] = find_prs_for_issue(
+            prs = find_prs_for_issue(
                 repository_full_name,
                 issue_number,
                 token=token or None,
@@ -216,7 +216,7 @@ def verify_miner_registration(ws_endpoint: str, contract_addr: str, hotkey_ss58:
         return bool(subtensor.is_hotkey_registered(netuid=netuid, hotkey_ss58=hotkey_ss58))
     except TypeError:
         # API compatibility fallback across bittensor versions.
-        return bool(subtensor.is_hotkey_registered(netuid, hotkey_ss58))
+        return bool(subtensor.is_hotkey_registered(hotkey_ss58, netuid))
 
 
 # ---------------------------------------------------------------------------
@@ -256,7 +256,7 @@ def validate_bounty_amount(bounty: str) -> int:
         )
 
     sign, digits, exponent = d.as_tuple()
-    decimal_places = max(0, -exponent)
+    decimal_places = max(0, -int(exponent))
     if decimal_places > ALPHA_DECIMALS:
         raise click.BadParameter(
             f'Maximum {ALPHA_DECIMALS} decimal places allowed (got {decimal_places})',

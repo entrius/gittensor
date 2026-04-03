@@ -49,7 +49,7 @@ def get_parser(language: str) -> Optional[Parser]:
     try:
         from tree_sitter_language_pack import get_parser as get_ts_parser
 
-        parser = get_ts_parser(language)
+        parser = get_ts_parser(language)  # type: ignore[arg-type]
         _parser_cache[language] = parser
         return parser
     except Exception as e:
@@ -203,12 +203,12 @@ def score_tree_diff(
     # Score added nodes
     for signature, count in added.items():
         if signature[0] == 'structural':
-            _, node_type = signature
+            node_type = signature[1]
             weight = weights.get_structural_weight(node_type)
             breakdown.structural_added_count += count
             breakdown.structural_added_score += weight * count
         else:  # leaf
-            _, node_type, _ = signature
+            node_type = signature[1]
             weight = weights.get_leaf_weight(node_type)
             breakdown.leaf_added_count += count
             breakdown.leaf_added_score += weight * count
@@ -216,12 +216,12 @@ def score_tree_diff(
     # Score deleted nodes
     for signature, count in deleted.items():
         if signature[0] == 'structural':
-            _, node_type = signature
+            node_type = signature[1]
             weight = weights.get_structural_weight(node_type)
             breakdown.structural_deleted_count += count
             breakdown.structural_deleted_score += weight * count
         else:  # leaf
-            _, node_type, _ = signature
+            node_type = signature[1]
             weight = weights.get_leaf_weight(node_type)
             breakdown.leaf_deleted_count += count
             breakdown.leaf_deleted_score += weight * count
@@ -259,7 +259,7 @@ def calculate_token_score_from_file_changes(
     total_nodes_scored = 0
 
     for file in file_changes:
-        ext = file.file_extension
+        ext = file.file_extension or ''
         is_test_file = file.is_test_file()
         file_weight = TEST_FILE_CONTRIBUTION_WEIGHT if is_test_file else 1.0
 

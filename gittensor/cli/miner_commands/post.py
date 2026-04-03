@@ -1,6 +1,7 @@
 # Entrius 2025
 
 """gitt miner post — Broadcast GitHub PAT to validators."""
+from __future__ import annotations
 
 import asyncio
 import json
@@ -58,10 +59,14 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_m
             sys.exit(1)
         pat = click.prompt('Enter your GitHub Personal Access Token', hide_input=True)
 
+    # 1b. Validate PAT locally
     if not json_mode:
-        console.print('[dim]Validating PAT locally...[/dim]')
+        with console.status('[bold]Validating PAT...'):
+            pat_valid = _validate_pat_locally(pat)
+    else:
+        pat_valid = _validate_pat_locally(pat)
 
-    if not _validate_pat_locally(pat):
+    if not pat_valid:
         _error('GitHub PAT is invalid or expired. Check your GITTENSOR_MINER_PAT.', json_mode)
         sys.exit(1)
 
@@ -77,25 +82,36 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_m
         console.print(f'[dim]Wallet: {wallet_name}/{wallet_hotkey} | Network: {ws_endpoint} | Netuid: {netuid}[/dim]')
 
     # 3. Set up bittensor objects
-    try:
-        wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
-        subtensor = bt.Subtensor(network=ws_endpoint)
-        metagraph = subtensor.metagraph(netuid=netuid)
-        dendrite = bt.Dendrite(wallet=wallet)
-    except Exception as e:
-        _error(f'Failed to initialize bittensor: {e}', json_mode)
-        sys.exit(1)
+    if not json_mode:
+        with console.status('[bold]Connecting to network...'):
+            try:
+                wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
+                subtensor = bt.Subtensor(network=ws_endpoint)
+                metagraph = subtensor.metagraph(netuid=netuid)
+                dendrite = bt.Dendrite(wallet=wallet)
+            except Exception as e:
+                _error(f'Failed to initialize bittensor: {e}', json_mode)
+                sys.exit(1)
+    else:
+        try:
+            wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
+            subtensor = bt.Subtensor(network=ws_endpoint)
+            metagraph = subtensor.metagraph(netuid=netuid)
+            dendrite = bt.Dendrite(wallet=wallet)
+        except Exception as e:
+            _error(f'Failed to initialize bittensor: {e}', json_mode)
+            sys.exit(1)
 
     # Verify miner is registered
     if wallet.hotkey.ss58_address not in metagraph.hotkeys:
         _error(f'Hotkey {wallet.hotkey.ss58_address[:16]}... is not registered on subnet {netuid}.', json_mode)
         sys.exit(1)
 
-    # 4. Find active validator axons (vtrust > 0 = has actually set weights in consensus)
+    # 4. Find active validator axons (vtrust > 0.1 = actively participating in consensus)
     validator_axons = []
     validator_uids = []
     for uid in range(metagraph.n):
-        if metagraph.validator_trust[uid] > 0 and metagraph.axons[uid].is_serving:
+        if metagraph.validator_trust[uid] > 0.1 and metagraph.axons[uid].is_serving:
             validator_axons.append(metagraph.axons[uid])
             validator_uids.append(uid)
 
@@ -103,20 +119,28 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_m
         _error('No reachable validator axons found on the network.', json_mode)
         sys.exit(1)
 
-    if not json_mode:
-        console.print(f'[dim]Broadcasting to {len(validator_axons)} validators...[/dim]')
-
     # 5. Broadcast
     synapse = PatBroadcastSynapse(github_access_token=pat)
 
-    responses = asyncio.get_event_loop().run_until_complete(
-        dendrite(
-            axons=validator_axons,
-            synapse=synapse,
-            deserialize=False,
-            timeout=30.0,
+    if not json_mode:
+        with console.status(f'[bold]Broadcasting to {len(validator_axons)} validators...'):
+            responses = asyncio.get_event_loop().run_until_complete(
+                dendrite(
+                    axons=validator_axons,
+                    synapse=synapse,
+                    deserialize=False,
+                    timeout=30.0,
+                )
+            )
+    else:
+        responses = asyncio.get_event_loop().run_until_complete(
+            dendrite(
+                axons=validator_axons,
+                synapse=synapse,
+                deserialize=False,
+                timeout=30.0,
+            )
         )
-    )
 
     # 6. Collect results
     results = []
@@ -221,7 +245,7 @@ def _resolve_endpoint(network: str | None, rpc_url: str | None) -> str:
     if config_endpoint:
         return config_endpoint
     if config_network:
-        return NETWORK_MAP.get(config_network, config_network)
+        return NETWORK_MAP.get(config_network) or config_network
     return NETWORK_MAP['finney']
 
 

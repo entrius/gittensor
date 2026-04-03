@@ -22,7 +22,7 @@ def setup_events_logger(full_path, events_retention_size):
         if self.isEnabledFor(EVENTS_LEVEL_NUM):
             self._log(EVENTS_LEVEL_NUM, message, args, **kws)
 
-    logging.Logger.event = event
+    logging.Logger.event = event  # type: ignore[attr-defined]
 
     formatter = logging.Formatter(
         '%(asctime)s | %(levelname)s | %(message)s',

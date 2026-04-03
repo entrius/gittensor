@@ -129,7 +129,7 @@ async def issue_competitions(
                         bt.logging.info(f'Voted cancel (solver {solver_github_id} not eligible): {issue_label}')
                     continue
 
-                miner_coldkey = get_miner_coldkey(miner_hotkey, self.subtensor, self.config.netuid)
+                miner_coldkey = get_miner_coldkey(miner_hotkey, self.subtensor, self.config.netuid)  # type: ignore[attr-defined]
                 if not miner_coldkey:
                     bt.logging.warning(
                         f'Could not get coldkey for hotkey {miner_hotkey} (solver {solver_github_id}): {issue_label}'

@@ -925,6 +925,10 @@ def load_miners_prs(
     """
     bt.logging.info('*****Fetching PRs*****')
 
+    if not miner_eval.github_pat:
+        bt.logging.warning(f'UID {miner_eval.uid} has no github_pat, skipping PR fetch')
+        return
+
     lookback_date_filter = datetime.now(timezone.utc) - timedelta(days=PR_LOOKBACK_DAYS)
     global_user_id = base64.b64encode(f'04:User{miner_eval.github_id}'.encode()).decode()
 
@@ -983,6 +987,9 @@ def load_miners_prs(
                         inactive_dt = datetime.fromisoformat(repo_config.inactive_at.rstrip('Z')).replace(
                             tzinfo=timezone.utc
                         )
+                        pr_creation_time = datetime.fromisoformat(pr_raw['createdAt'].rstrip('Z')).replace(
+                            tzinfo=timezone.utc
+                        )
                         # Skip PR if it was created after the repo became inactive
                         if pr_creation_time >= inactive_dt:
                             bt.logging.info(
@@ -999,7 +1006,7 @@ def load_miners_prs(
                     )
 
                     if should_skip:
-                        bt.logging.debug(skip_reason)
+                        bt.logging.debug(skip_reason or '')
                         continue
 
                     miner_eval.add_merged_pull_request(pr_raw)

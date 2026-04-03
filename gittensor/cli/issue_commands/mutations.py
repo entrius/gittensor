@@ -208,7 +208,7 @@ def issue_register(
         console.print('[dim]Submitting transaction...[/dim]')
 
         result = contract_instance.exec(
-            keypair,
+            keypair,  # type: ignore[arg-type]
             'register_issue',
             args={
                 'github_url': github_url,

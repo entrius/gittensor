@@ -142,7 +142,7 @@ class PullRequest:
     repository_full_name: str
     uid: int
     hotkey: str
-    github_id: str
+    github_id: Optional[str]
     title: str
     author_login: str
     merged_at: Optional[datetime]  # None for OPEN PRs
@@ -218,7 +218,7 @@ class PullRequest:
         return self.earned_score
 
     @classmethod
-    def from_graphql_response(cls, pr_data: dict, uid: int, hotkey: str, github_id: str) -> 'PullRequest':
+    def from_graphql_response(cls, pr_data: dict, uid: int, hotkey: str, github_id: Optional[str]) -> 'PullRequest':
         """Create PullRequest from GraphQL API response for any PR state."""
         from gittensor.validator.utils.datetime_utils import parse_github_timestamp_to_cst
 
@@ -247,9 +247,8 @@ class PullRequest:
             )
 
         description: str = pr_data.get('bodyText', '')
-        last_edited_at = (
-            parse_github_timestamp_to_cst(pr_data.get('lastEditedAt')) if pr_data.get('lastEditedAt') else None
-        )
+        raw_edited_at = pr_data.get('lastEditedAt')
+        last_edited_at = parse_github_timestamp_to_cst(raw_edited_at) if isinstance(raw_edited_at, str) else None
         merged_at = parse_github_timestamp_to_cst(pr_data['mergedAt']) if is_merged else None
 
         return cls(

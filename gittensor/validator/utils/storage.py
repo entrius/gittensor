@@ -45,10 +45,11 @@ class DatabaseStorage:
 
         try:
             # Start transaction
+            assert self.db_connection is not None and self.repo is not None
             self.db_connection.autocommit = False
 
             # Store all entities using bulk methods
-            miner = Miner(miner_eval.uid, miner_eval.hotkey, miner_eval.github_id)
+            miner = Miner(miner_eval.uid, miner_eval.hotkey, miner_eval.github_id or '')
 
             result.stored_counts['miners'] = self.repo.set_miner(miner)
             result.stored_counts['merged_pull_requests'] = self.repo.store_pull_requests_bulk(
@@ -73,8 +74,9 @@ class DatabaseStorage:
 
         except Exception as ex:
             # Rollback transaction
-            self.db_connection.rollback()
-            self.db_connection.autocommit = True
+            if self.db_connection is not None:
+                self.db_connection.rollback()
+                self.db_connection.autocommit = True
 
             error_msg = f'Failed to store evaluation data for UID {miner_eval.uid}: {str(ex)}'
             result.success = False

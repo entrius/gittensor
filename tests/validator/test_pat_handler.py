@@ -115,7 +115,7 @@ class TestHandlePatBroadcast:
         result = _run(handle_pat_broadcast(mock_validator, synapse))
 
         assert result.accepted is False
-        assert 'not registered' in result.rejection_reason
+        assert 'not registered' in (result.rejection_reason or '')
 
     @patch('gittensor.validator.pat_handler.validate_github_credentials', return_value=(None, 'PAT invalid'))
     def test_invalid_pat_rejected(self, mock_validate, mock_validator):
@@ -123,7 +123,7 @@ class TestHandlePatBroadcast:
         result = _run(handle_pat_broadcast(mock_validator, synapse))
 
         assert result.accepted is False
-        assert 'PAT invalid' in result.rejection_reason
+        assert 'PAT invalid' in (result.rejection_reason or '')
 
         # Verify PAT was NOT stored
         assert pat_storage.get_pat_by_uid(1) is None
@@ -135,7 +135,7 @@ class TestHandlePatBroadcast:
         result = _run(handle_pat_broadcast(mock_validator, synapse))
 
         assert result.accepted is False
-        assert '403' in result.rejection_reason
+        assert '403' in (result.rejection_reason or '')
 
 
 
@@ -176,4 +176,4 @@ class TestHandlePatCheck:
         result = _run(handle_pat_check(mock_validator, synapse))
         assert result.has_pat is True
         assert result.pat_valid is False
-        assert 'PAT expired' in result.rejection_reason
+        assert 'PAT expired' in (result.rejection_reason or '')

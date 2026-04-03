@@ -20,13 +20,19 @@ if TYPE_CHECKING:
     from neurons.validator import Validator
 
 
+def _get_hotkey(synapse: bt.Synapse) -> str:
+    """Extract the caller's hotkey from a synapse, raising if missing."""
+    assert synapse.dendrite is not None and synapse.dendrite.hotkey is not None
+    return synapse.dendrite.hotkey
+
+
 # ---------------------------------------------------------------------------
 # PatBroadcastSynapse handlers
 # ---------------------------------------------------------------------------
 
 async def handle_pat_broadcast(validator: 'Validator', synapse: PatBroadcastSynapse) -> PatBroadcastSynapse:
     """Validate and store a miner's GitHub PAT."""
-    hotkey = synapse.dendrite.hotkey
+    hotkey = _get_hotkey(synapse)
 
     def _reject(reason: str) -> PatBroadcastSynapse:
         synapse.accepted = False
@@ -63,7 +69,7 @@ async def handle_pat_broadcast(validator: 'Validator', synapse: PatBroadcastSyna
 
 async def blacklist_pat_broadcast(validator: 'Validator', synapse: PatBroadcastSynapse) -> Tuple[bool, str]:
     """Reject PAT broadcasts from unregistered hotkeys."""
-    hotkey = synapse.dendrite.hotkey
+    hotkey = _get_hotkey(synapse)
     if hotkey not in validator.metagraph.hotkeys:
         return True, f'Hotkey {hotkey[:16]}... not registered'
     return False, 'Hotkey recognized'
@@ -71,7 +77,7 @@ async def blacklist_pat_broadcast(validator: 'Validator', synapse: PatBroadcastS
 
 async def priority_pat_broadcast(validator: 'Validator', synapse: PatBroadcastSynapse) -> float:
     """Prioritize PAT broadcasts by stake."""
-    hotkey = synapse.dendrite.hotkey
+    hotkey = _get_hotkey(synapse)
     if hotkey not in validator.metagraph.hotkeys:
         return 0.0
     uid = validator.metagraph.hotkeys.index(hotkey)
@@ -84,15 +90,18 @@ async def priority_pat_broadcast(validator: 'Validator', synapse: PatBroadcastSy
 
 async def handle_pat_check(validator: 'Validator', synapse: PatCheckSynapse) -> PatCheckSynapse:
     """Check if the validator has the miner's PAT stored and re-validate it."""
-    hotkey = synapse.dendrite.hotkey
+    hotkey = _get_hotkey(synapse)
     uid = validator.metagraph.hotkeys.index(hotkey)
     entry = pat_storage.get_pat_by_uid(uid)
+
+    bt.logging.info(f'PAT check request — UID: {uid}, hotkey: {hotkey[:16]}...')
 
     # Check if PAT exists and hotkey matches (not a stale entry from a previous miner)
     if entry is None or entry.get('hotkey') != hotkey:
         synapse.has_pat = False
         synapse.pat_valid = False
         synapse.rejection_reason = 'No PAT stored for this miner'
+        bt.logging.info(f'PAT check result — UID: {uid}: no PAT stored')
         return synapse
 
     synapse.has_pat = True
@@ -102,21 +111,24 @@ async def handle_pat_check(validator: 'Validator', synapse: PatCheckSynapse) -> 
     if error:
         synapse.pat_valid = False
         synapse.rejection_reason = error
+        bt.logging.warning(f'PAT check result — UID: {uid}: validation failed: {error}')
         return synapse
 
     test_error = _test_pat_against_repo(entry['pat'])
     if test_error:
         synapse.pat_valid = False
         synapse.rejection_reason = f'PAT test query failed: {test_error}'
+        bt.logging.warning(f'PAT check result — UID: {uid}: test query failed: {test_error}')
         return synapse
 
     synapse.pat_valid = True
+    bt.logging.success(f'PAT check result — UID: {uid}: valid')
     return synapse
 
 
 async def blacklist_pat_check(validator: 'Validator', synapse: PatCheckSynapse) -> Tuple[bool, str]:
     """Reject PAT checks from unregistered hotkeys."""
-    hotkey = synapse.dendrite.hotkey
+    hotkey = _get_hotkey(synapse)
     if hotkey not in validator.metagraph.hotkeys:
         return True, f'Hotkey {hotkey[:16]}... not registered'
     return False, 'Hotkey recognized'
@@ -124,7 +136,7 @@ async def blacklist_pat_check(validator: 'Validator', synapse: PatCheckSynapse) 
 
 async def priority_pat_check(validator: 'Validator', synapse: PatCheckSynapse) -> float:
     """Prioritize PAT checks by stake."""
-    hotkey = synapse.dendrite.hotkey
+    hotkey = _get_hotkey(synapse)
     if hotkey not in validator.metagraph.hotkeys:
         return 0.0
     uid = validator.metagraph.hotkeys.index(hotkey)

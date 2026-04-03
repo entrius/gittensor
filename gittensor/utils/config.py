@@ -19,6 +19,7 @@
 import argparse
 import os
 import subprocess
+from typing import Any
 
 import bittensor as bt
 
@@ -41,7 +42,7 @@ def is_cuda_available():
     return 'cpu'
 
 
-def check_config(cls, config: 'bt.Config'):
+def check_config(cls, config: Any):
     r"""Checks/validates the config namespace object."""
     bt.logging.check_config(config)
 

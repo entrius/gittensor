@@ -81,6 +81,7 @@ def score_pull_request(
     token_config: TokenConfig,
 ) -> None:
     """Scores a single PR and populates relevant PullRequest fields."""
+    assert miner_eval.github_pat is not None, f'UID {miner_eval.uid} has no github_pat'
 
     repo_config = master_repositories.get(pr.repository_full_name)
     if not repo_config:
@@ -137,7 +138,7 @@ def calculate_base_score(
 ) -> float:
     """Calculate base score using code density scaling + contribution bonus."""
     scoring_result: PrScoringResult = calculate_token_score_from_file_changes(
-        pr.file_changes,
+        pr.file_changes or [],
         file_contents,
         token_config,
         programming_languages,
@@ -244,6 +245,7 @@ def calculate_pr_spam_penalty_multiplier(total_open_prs: int, total_token_score:
 def calculate_time_decay_multiplier(pr: PullRequest) -> float:
     """Calculate time decay multiplier for a single PR based on merge date."""
 
+    assert pr.merged_at is not None, f'PR #{pr.number} has no merged_at'
     now = datetime.now(timezone.utc)
     hours_since_merge = (now - pr.merged_at).total_seconds() / SECONDS_PER_HOUR
 
@@ -276,6 +278,7 @@ def calculate_pioneer_dividends(
         for pr in evaluation.merged_pull_requests:
             if not pr.is_pioneer_eligible():
                 continue
+            assert pr.merged_at is not None
             repo = pr.repository_full_name
             pr_index.setdefault(repo, {}).setdefault(pr.uid, []).append(pr)
 
@@ -484,7 +487,7 @@ def is_valid_issue(issue: Issue, pr: PullRequest) -> bool:
         bt.logging.warning(f'Skipping issue #{issue.number} - Issue was created after PR was created')
         return False
 
-    if is_merged:
+    if is_merged and pr.merged_at:
         if pr.last_edited_at and pr.last_edited_at > pr.merged_at:
             bt.logging.warning(f'Skipping issue #{issue.number} - PR was edited after merge')
             return False

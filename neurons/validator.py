@@ -16,6 +16,7 @@
 # DEALINGS IN THE SOFTWARE.
 
 
+import os
 import time
 from functools import partial
 from typing import Dict, List, Set
@@ -52,6 +53,9 @@ class Validator(BaseValidatorNeuron):
 
     def __init__(self, config=None):
         super(Validator, self).__init__(config=config)
+
+        if os.environ.get('DEV_MODE'):
+            bt.logging.warning('⚠ DEV_MODE is active — maintainer PR filtering is bypassed')
 
         # Ensure PAT storage file exists on boot
         pat_storage.ensure_pats_file()

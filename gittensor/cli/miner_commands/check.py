@@ -45,25 +45,36 @@ def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, json_mode)
         console.print(f'[dim]Wallet: {wallet_name}/{wallet_hotkey} | Network: {ws_endpoint} | Netuid: {netuid}[/dim]')
 
     # 2. Set up bittensor objects
-    try:
-        wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
-        subtensor = bt.Subtensor(network=ws_endpoint)
-        metagraph = subtensor.metagraph(netuid=netuid)
-        dendrite = bt.Dendrite(wallet=wallet)
-    except Exception as e:
-        _error(f'Failed to initialize bittensor: {e}', json_mode)
-        sys.exit(1)
+    if not json_mode:
+        with console.status('[bold]Connecting to network...'):
+            try:
+                wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
+                subtensor = bt.Subtensor(network=ws_endpoint)
+                metagraph = subtensor.metagraph(netuid=netuid)
+                dendrite = bt.Dendrite(wallet=wallet)
+            except Exception as e:
+                _error(f'Failed to initialize bittensor: {e}', json_mode)
+                sys.exit(1)
+    else:
+        try:
+            wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
+            subtensor = bt.Subtensor(network=ws_endpoint)
+            metagraph = subtensor.metagraph(netuid=netuid)
+            dendrite = bt.Dendrite(wallet=wallet)
+        except Exception as e:
+            _error(f'Failed to initialize bittensor: {e}', json_mode)
+            sys.exit(1)
 
     # Verify miner is registered
     if wallet.hotkey.ss58_address not in metagraph.hotkeys:
         _error(f'Hotkey {wallet.hotkey.ss58_address[:16]}... is not registered on subnet {netuid}.', json_mode)
         sys.exit(1)
 
-    # 3. Find active validator axons (vtrust > 0 = has actually set weights in consensus)
+    # 3. Find active validator axons (vtrust > 0.1 = actively participating in consensus)
     validator_axons = []
     validator_uids = []
     for uid in range(metagraph.n):
-        if metagraph.validator_trust[uid] > 0 and metagraph.axons[uid].is_serving:
+        if metagraph.validator_trust[uid] > 0.1 and metagraph.axons[uid].is_serving:
             validator_axons.append(metagraph.axons[uid])
             validator_uids.append(uid)
 
@@ -71,20 +82,28 @@ def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, json_mode)
         _error('No reachable validator axons found on the network.', json_mode)
         sys.exit(1)
 
-    if not json_mode:
-        console.print(f'[dim]Checking {len(validator_axons)} validators...[/dim]')
-
     # 4. Send check probes
     synapse = PatCheckSynapse()
 
-    responses = asyncio.get_event_loop().run_until_complete(
-        dendrite(
-            axons=validator_axons,
-            synapse=synapse,
-            deserialize=False,
-            timeout=15.0,
+    if not json_mode:
+        with console.status(f'[bold]Checking {len(validator_axons)} validators...'):
+            responses = asyncio.get_event_loop().run_until_complete(
+                dendrite(
+                    axons=validator_axons,
+                    synapse=synapse,
+                    deserialize=False,
+                    timeout=15.0,
+                )
+            )
+    else:
+        responses = asyncio.get_event_loop().run_until_complete(
+            dendrite(
+                axons=validator_axons,
+                synapse=synapse,
+                deserialize=False,
+                timeout=15.0,
+            )
         )
-    )
 
     # 5. Collect results
     results = []

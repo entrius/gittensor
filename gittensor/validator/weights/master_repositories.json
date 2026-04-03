@@ -479,6 +479,7 @@
     "weight": 13.72
   },
   "astropy/astropy": {
+    "inactive_at": "2026-03-30T00:00:00Z",
     "tier": "Bronze",
     "weight": 0.17
   },
@@ -1227,7 +1228,7 @@
     "tier": "Silver",
     "weight": 5.07
   },
-  "Desearch-ai/subnet-22-desearch": {
+  "Desearch-ai/subnet-22": {
     "tier": "Silver",
     "weight": 6.15
   },
@@ -2441,10 +2442,6 @@
     "tier": "Bronze",
     "weight": 0.14
   },
-  "impel-intelligence/dippy-studio-bittensor": {
-    "tier": "Bronze",
-    "weight": 0.38
-  },
   "impel-intelligence/dippy-studio-bittensor-miner": {
     "tier": "Bronze",
     "weight": 0.38
@@ -3245,7 +3242,7 @@
     "tier": "Bronze",
     "weight": 0.16
   },
-  "microsoft/LightGBM": {
+  "lightgbm-org/LightGBM": {
     "tier": "Bronze",
     "weight": 0.25
   },
@@ -3515,10 +3512,6 @@
     "tier": "Bronze",
     "weight": 0.11
   },
-  "neuralinternet/SN27": {
-    "tier": "Bronze",
-    "weight": 0.44
-  },
   "nextcloud/android": {
     "tier": "Bronze",
     "weight": 1.2
@@ -3630,6 +3623,7 @@
     "weight": 0.37
   },
   "numpy/numpy": {
+    "inactive_at": "2026-03-31T00:00:00Z",
     "tier": "Bronze",
     "weight": 0.55
   },
@@ -3886,21 +3880,21 @@
     "tier": "Bronze",
     "weight": 0.16
   },
-  "opentensor/async-substrate-interface": {
+  "latent-to/async-substrate-interface": {
     "tier": "Gold",
     "weight": 24.78
   },
-  "opentensor/bittensor": {
+  "latent-to/bittensor": {
     "additional_acceptable_branches": ["staging", "SDKv10"],
     "tier": "Gold",
     "weight": 43.72
   },
-  "opentensor/btcli": {
+  "latent-to/btcli": {
     "additional_acceptable_branches": ["staging"],
     "tier": "Gold",
     "weight": 21.54
   },
-  "opentensor/btwallet": {
+  "latent-to/btwallet": {
     "tier": "Gold",
     "weight": 23.02
   },
@@ -4081,7 +4075,7 @@
     "tier": "Bronze",
     "weight": 0.53
   },
-  "pedroslopez/whatsapp-web.js": {
+  "wwebjs/whatsapp-web.js": {
     "tier": "Bronze",
     "weight": 0.11
   },
@@ -4555,10 +4549,6 @@
     "tier": "Bronze",
     "weight": 0.19
   },
-  "RogueTensor/bitagent_subnet": {
-    "tier": "Bronze",
-    "weight": 0.39
-  },
   "rolling-scopes-school/tasks": {
     "tier": "Bronze",
     "weight": 0.2
@@ -4673,6 +4663,7 @@
     "weight": 0.17
   },
   "scipy/scipy": {
+    "inactive_at": "2026-03-31T00:00:00Z",
     "tier": "Bronze",
     "weight": 0.95
   },
@@ -5390,13 +5381,13 @@
     "tier": "Bronze",
     "weight": 0.89
   },
+  "unarbos/agcli": {
+    "weight": 20,
+    "tier": "Silver"
+  },
   "unclecode/crawl4ai": {
     "tier": "Bronze",
     "weight": 0.1
-  },
-  "unconst/agcli": {
-    "weight": 20,
-    "tier": "Silver"
   },
   "Uniswap/interface": {
     "tier": "Bronze",
@@ -5450,7 +5441,7 @@
     "tier": "Bronze",
     "weight": 0.83
   },
-  "vercel/openchat": {
+  "vercel/chatbot": {
     "tier": "Bronze",
     "weight": 0.18
   },
@@ -5609,10 +5600,6 @@
   "xiaolai/regular-investing-in-box": {
     "tier": "Bronze",
     "weight": 0.16
-  },
-  "xiaorouji/openwrt-passwall": {
-    "tier": "Bronze",
-    "weight": 0.11
   },
   "xinnan-tech/xiaozhi-esp32-server": {
     "additional_acceptable_branches": ["live2d-actions"],

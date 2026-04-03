@@ -23,6 +23,7 @@ from .helpers import (
     _read_issues_from_child_storage,
     colorize_status,
     console,
+    emit_error_json,
     format_alpha,
     get_contract_address,
     print_error,
@@ -88,6 +89,9 @@ def issues_list(issue_id: int, network: str, rpc_url: str, contract: str, verbos
             issue['target_alpha'] = format_alpha(issue.get('target_bounty', 0), 4)
         if issue_id is not None:
             issue = next((i for i in issues if i['id'] == issue_id), None)
+            if issue is None:
+                emit_error_json(f'Issue {issue_id} not found on-chain.', error_type='not_found')
+                raise SystemExit(1)
             console.print(json_mod.dumps(issue, indent=2, default=str))
         else:
             console.print(json_mod.dumps(issues, indent=2, default=str))

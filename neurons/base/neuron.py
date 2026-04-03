@@ -15,12 +15,9 @@
 # OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 # DEALINGS IN THE SOFTWARE.
 
-from __future__ import annotations
-
 import copy
 import time
 from abc import ABC, abstractmethod
-from typing import Any
 
 import bittensor as bt
 from websockets.exceptions import ConnectionClosedError
@@ -51,22 +48,21 @@ class BaseNeuron(ABC):
         add_args(cls, parser)
 
     @classmethod
-    def _default_config(cls) -> Any:
+    def config(cls):
         return config(cls)
 
-    subtensor: bt.Subtensor
-    wallet: bt.Wallet
-    metagraph: bt.Metagraph
+    subtensor: 'bt.subtensor'
+    wallet: 'bt.wallet'
+    metagraph: 'bt.metagraph'
     spec_version: int = spec_version
-    config: Any
 
     @property
     def block(self):
         return ttl_get_block(self)
 
     def __init__(self, config=None):
-        base_config = copy.deepcopy(config or BaseNeuron._default_config())
-        self.config = BaseNeuron._default_config()
+        base_config = copy.deepcopy(config or BaseNeuron.config())
+        self.config = self.config()
         self.config.merge(base_config)
         self.check_config(self.config)
 
@@ -85,7 +81,7 @@ class BaseNeuron(ABC):
 
         # The wallet holds the cryptographic key pairs for the miner.
         if self.config.mock:
-            self.wallet = bt.Wallet(config=self.config)  # MockWallet removed from bittensor SDK
+            self.wallet = bt.MockWallet(config=self.config)
             self.subtensor = MockSubtensor(self.config.netuid, wallet=self.wallet)
             self.metagraph = MockMetagraph(self.config.netuid, subtensor=self.subtensor)
         else:
@@ -115,16 +111,10 @@ class BaseNeuron(ABC):
         self.subtensor = bt.Subtensor(config=self.config)
 
     @abstractmethod
-    async def forward(self) -> None: ...
+    async def forward(self, synapse: bt.Synapse) -> bt.Synapse: ...
 
     @abstractmethod
     def run(self): ...
-
-    def resync_metagraph(self) -> None:
-        """Resync the metagraph. Override in subclass."""
-
-    def set_weights(self) -> None:
-        """Set weights on chain. Override in subclass."""
 
     def sync(self):
         """

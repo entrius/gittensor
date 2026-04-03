@@ -1,15 +1,13 @@
-from __future__ import annotations
-
 import asyncio
 import random
 import time
-from typing import Any, List
+from typing import List
 
 import bittensor as bt
 
 
 class MockSubtensor(bt.MockSubtensor):
-    def __init__(self, netuid: int, n: int = 16, wallet: 'bt.Wallet | None' = None, network: str = 'mock'):
+    def __init__(self, netuid, n=16, wallet=None, network='mock'):
         super().__init__(network=network)
 
         if not self.subnet_exists(netuid):
@@ -19,8 +17,8 @@ class MockSubtensor(bt.MockSubtensor):
         if wallet is not None:
             self.force_register_neuron(
                 netuid=netuid,
-                hotkey_ss58=wallet.hotkey.ss58_address,
-                coldkey_ss58=wallet.coldkey.ss58_address,
+                hotkey=wallet.hotkey.ss58_address,
+                coldkey=wallet.coldkey.ss58_address,
                 balance=100000,
                 stake=100000,
             )
@@ -29,15 +27,15 @@ class MockSubtensor(bt.MockSubtensor):
         for i in range(1, n + 1):
             self.force_register_neuron(
                 netuid=netuid,
-                hotkey_ss58=f'miner-hotkey-{i}',
-                coldkey_ss58='mock-coldkey',
+                hotkey=f'miner-hotkey-{i}',
+                coldkey='mock-coldkey',
                 balance=100000,
                 stake=100000,
             )
 
 
 class MockMetagraph(bt.Metagraph):
-    def __init__(self, netuid: int = 1, network: str = 'mock', subtensor: 'bt.Subtensor | None' = None):
+    def __init__(self, netuid=1, network='mock', subtensor=None):
         super().__init__(netuid=netuid, network=network, sync=False)
 
         if subtensor is not None:
@@ -57,7 +55,7 @@ class MockDendrite(bt.Dendrite):
     Replaces a real bittensor network request with a mock request that just returns some static response for all axons that are passed and adds some random delay.
     """
 
-    def __init__(self, wallet: 'bt.Wallet'):
+    def __init__(self, wallet):
         super().__init__(wallet)
 
     async def forward(
@@ -79,7 +77,7 @@ class MockDendrite(bt.Dendrite):
                 """Queries a single axon for a response."""
 
                 start_time = time.time()
-                s: Any = synapse.copy()
+                s = synapse.copy()
                 # Attach some more required data so it looks real
                 s = self.preprocess_synapse_for_request(axon, s, timeout)
                 # We just want to mock the response, so we'll just fill in some data
@@ -90,12 +88,12 @@ class MockDendrite(bt.Dendrite):
                     s.dummy_output = s.dummy_input * 2
                     s.dendrite.status_code = 200
                     s.dendrite.status_message = 'OK'
-                    synapse.dendrite.process_time = str(process_time)  # type: ignore[union-attr]
+                    synapse.dendrite.process_time = str(process_time)
                 else:
                     s.dummy_output = 0
                     s.dendrite.status_code = 408
                     s.dendrite.status_message = 'Timeout'
-                    synapse.dendrite.process_time = str(timeout)  # type: ignore[union-attr]
+                    synapse.dendrite.process_time = str(timeout)
 
                 # Return the updated synapse object after deserializing if requested
                 if deserialize:

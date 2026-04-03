@@ -16,7 +16,7 @@ import urllib.request
 from contextlib import nullcontext
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any, ContextManager, Dict, List, Optional, Tuple
+from typing import Any, Callable, ContextManager, Dict, List, Optional, Tuple, TypeVar
 
 import click
 from rich.console import Console
@@ -49,6 +49,110 @@ GITTENSOR_DIR = Path.home() / '.gittensor'
 CONFIG_FILE = GITTENSOR_DIR / 'config.json'
 
 console = Console()
+
+CommandFunc = TypeVar('CommandFunc', bound=Callable[..., Any])
+NETWORK_CHOICE = click.Choice(['finney', 'test', 'local'], case_sensitive=False)
+
+
+def apply_click_options(*decorators: Callable[[CommandFunc], CommandFunc]) -> Callable[[CommandFunc], CommandFunc]:
+    """Apply Click decorators in the declared display order."""
+
+    def wrapper(func: CommandFunc) -> CommandFunc:
+        for decorator in reversed(decorators):
+            func = decorator(func)
+        return func
+
+    return wrapper
+
+
+def with_wallet_options(
+    wallet_default: str = 'default', hotkey_default: str = 'default'
+) -> Callable[[CommandFunc], CommandFunc]:
+    """Add the standard wallet name/hotkey options."""
+    return apply_click_options(
+        click.option(
+            '--wallet-name',
+            '--wallet.name',
+            '--wallet',
+            default=wallet_default,
+            help='Wallet name',
+        ),
+        click.option(
+            '--wallet-hotkey',
+            '--wallet.hotkey',
+            '--hotkey',
+            default=hotkey_default,
+            help='Hotkey name',
+        ),
+    )
+
+
+def with_network_contract_options(
+    contract_help: str,
+) -> Callable[[CommandFunc], CommandFunc]:
+    """Add the standard network / rpc / contract option bundle."""
+    return apply_click_options(
+        click.option(
+            '--network',
+            '-n',
+            default=None,
+            type=NETWORK_CHOICE,
+            help='Network (finney/test/local)',
+        ),
+        click.option(
+            '--rpc-url',
+            default=None,
+            help='Subtensor RPC endpoint (overrides --network)',
+        ),
+        click.option(
+            '--contract',
+            default='',
+            help=contract_help,
+        ),
+    )
+
+
+def with_cli_behavior_options(
+    *,
+    include_verbose: bool = False,
+    include_json: bool = False,
+    include_yes: bool = False,
+    verbose_help: str = 'Show debug output',
+    json_help: str = 'Output as JSON for scripting',
+    yes_help: str = 'Skip confirmation prompt (non-interactive/CI)',
+) -> Callable[[CommandFunc], CommandFunc]:
+    """Add common CLI behavior options such as verbose, JSON, and confirmation controls."""
+    decorators: list[Callable[[CommandFunc], CommandFunc]] = []
+
+    if include_verbose:
+        decorators.append(
+            click.option(
+                '--verbose',
+                '-v',
+                is_flag=True,
+                help=verbose_help,
+            )
+        )
+    if include_json:
+        decorators.append(
+            click.option(
+                '--json',
+                'as_json',
+                is_flag=True,
+                help=json_help,
+            )
+        )
+    if include_yes:
+        decorators.append(
+            click.option(
+                '--yes',
+                '-y',
+                is_flag=True,
+                help=yes_help,
+            )
+        )
+
+    return apply_click_options(*decorators)
 
 
 def format_alpha(raw_amount: int, decimals: int = 2) -> str:

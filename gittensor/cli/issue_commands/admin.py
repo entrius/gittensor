@@ -27,6 +27,8 @@ from .helpers import (
     resolve_network,
     validate_issue_id,
     validate_ss58_address,
+    with_network_contract_options,
+    with_wallet_options,
 )
 
 
@@ -41,37 +43,8 @@ def admin():
 
 @admin.command('cancel-issue')
 @click.argument('issue_id', type=int)
-@click.option(
-    '--network',
-    '-n',
-    default=None,
-    type=click.Choice(['finney', 'test', 'local'], case_sensitive=False),
-    help='Network (finney/test/local)',
-)
-@click.option(
-    '--rpc-url',
-    default=None,
-    help='Subtensor RPC endpoint (overrides --network)',
-)
-@click.option(
-    '--contract',
-    default='',
-    help='Contract address (uses config if empty)',
-)
-@click.option(
-    '--wallet-name',
-    '--wallet.name',
-    '--wallet',
-    default='default',
-    help='Wallet name',
-)
-@click.option(
-    '--wallet-hotkey',
-    '--wallet.hotkey',
-    '--hotkey',
-    default='default',
-    help='Hotkey name',
-)
+@with_wallet_options()
+@with_network_contract_options('Contract address (uses config if empty)')
 def admin_cancel(issue_id: int, network: str, rpc_url: str, contract: str, wallet_name: str, wallet_hotkey: str):
     """Cancel an issue (owner only).
 
@@ -144,37 +117,8 @@ def admin_cancel(issue_id: int, network: str, rpc_url: str, contract: str, walle
 
 @admin.command('payout-issue')
 @click.argument('issue_id', type=int)
-@click.option(
-    '--network',
-    '-n',
-    default=None,
-    type=click.Choice(['finney', 'test', 'local'], case_sensitive=False),
-    help='Network (finney/test/local)',
-)
-@click.option(
-    '--rpc-url',
-    default=None,
-    help='Subtensor RPC endpoint (overrides --network)',
-)
-@click.option(
-    '--contract',
-    default='',
-    help='Contract address (uses config if empty)',
-)
-@click.option(
-    '--wallet-name',
-    '--wallet.name',
-    '--wallet',
-    default='default',
-    help='Wallet name',
-)
-@click.option(
-    '--wallet-hotkey',
-    '--wallet.hotkey',
-    '--hotkey',
-    default='default',
-    help='Hotkey name',
-)
+@with_wallet_options()
+@with_network_contract_options('Contract address (uses config if empty)')
 def admin_payout(issue_id: int, network: str, rpc_url: str, contract: str, wallet_name: str, wallet_hotkey: str):
     """Manual payout fallback (owner only).
 
@@ -248,37 +192,8 @@ def admin_payout(issue_id: int, network: str, rpc_url: str, contract: str, walle
 
 @admin.command('set-owner')
 @click.argument('new_owner', type=str)
-@click.option(
-    '--network',
-    '-n',
-    default=None,
-    type=click.Choice(['finney', 'test', 'local'], case_sensitive=False),
-    help='Network (finney/test/local)',
-)
-@click.option(
-    '--rpc-url',
-    default=None,
-    help='Subtensor RPC endpoint (overrides --network)',
-)
-@click.option(
-    '--contract',
-    default='',
-    help='Contract address',
-)
-@click.option(
-    '--wallet-name',
-    '--wallet.name',
-    '--wallet',
-    default='default',
-    help='Wallet name',
-)
-@click.option(
-    '--wallet-hotkey',
-    '--wallet.hotkey',
-    '--hotkey',
-    default='default',
-    help='Hotkey name',
-)
+@with_wallet_options()
+@with_network_contract_options('Contract address')
 def admin_set_owner(new_owner: str, network: str, rpc_url: str, contract: str, wallet_name: str, wallet_hotkey: str):
     """Transfer contract ownership (owner only).
 
@@ -339,37 +254,8 @@ def admin_set_owner(new_owner: str, network: str, rpc_url: str, contract: str, w
 
 @admin.command('set-treasury')
 @click.argument('new_treasury', type=str)
-@click.option(
-    '--network',
-    '-n',
-    default=None,
-    type=click.Choice(['finney', 'test', 'local'], case_sensitive=False),
-    help='Network (finney/test/local)',
-)
-@click.option(
-    '--rpc-url',
-    default=None,
-    help='Subtensor RPC endpoint (overrides --network)',
-)
-@click.option(
-    '--contract',
-    default='',
-    help='Contract address',
-)
-@click.option(
-    '--wallet-name',
-    '--wallet.name',
-    '--wallet',
-    default='default',
-    help='Wallet name',
-)
-@click.option(
-    '--wallet-hotkey',
-    '--wallet.hotkey',
-    '--hotkey',
-    default='default',
-    help='Hotkey name',
-)
+@with_wallet_options()
+@with_network_contract_options('Contract address')
 def admin_set_treasury(
     new_treasury: str, network: str, rpc_url: str, contract: str, wallet_name: str, wallet_hotkey: str
 ):
@@ -438,37 +324,8 @@ def admin_set_treasury(
 
 @admin.command('add-vali')
 @click.argument('hotkey', type=str)
-@click.option(
-    '--network',
-    '-n',
-    default=None,
-    type=click.Choice(['finney', 'test', 'local'], case_sensitive=False),
-    help='Network (finney/test/local)',
-)
-@click.option(
-    '--rpc-url',
-    default=None,
-    help='Subtensor RPC endpoint (overrides --network)',
-)
-@click.option(
-    '--contract',
-    default='',
-    help='Contract address',
-)
-@click.option(
-    '--wallet-name',
-    '--wallet.name',
-    '--wallet',
-    default='default',
-    help='Wallet name',
-)
-@click.option(
-    '--wallet-hotkey',
-    '--wallet.hotkey',
-    '--hotkey',
-    default='default',
-    help='Hotkey name',
-)
+@with_wallet_options()
+@with_network_contract_options('Contract address')
 def admin_add_validator(hotkey: str, network: str, rpc_url: str, contract: str, wallet_name: str, wallet_hotkey: str):
     """Add a validator to the voting whitelist (owner only).
 
@@ -535,37 +392,8 @@ def admin_add_validator(hotkey: str, network: str, rpc_url: str, contract: str, 
 
 @admin.command('remove-vali')
 @click.argument('hotkey', type=str)
-@click.option(
-    '--network',
-    '-n',
-    default=None,
-    type=click.Choice(['finney', 'test', 'local'], case_sensitive=False),
-    help='Network (finney/test/local)',
-)
-@click.option(
-    '--rpc-url',
-    default=None,
-    help='Subtensor RPC endpoint (overrides --network)',
-)
-@click.option(
-    '--contract',
-    default='',
-    help='Contract address',
-)
-@click.option(
-    '--wallet-name',
-    '--wallet.name',
-    '--wallet',
-    default='default',
-    help='Wallet name',
-)
-@click.option(
-    '--wallet-hotkey',
-    '--wallet.hotkey',
-    '--hotkey',
-    default='default',
-    help='Hotkey name',
-)
+@with_wallet_options()
+@with_network_contract_options('Contract address')
 def admin_remove_validator(
     hotkey: str, network: str, rpc_url: str, contract: str, wallet_name: str, wallet_hotkey: str
 ):

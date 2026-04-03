@@ -27,6 +27,9 @@ from .helpers import (
     resolve_network,
     validate_issue_id,
     validate_ss58_address,
+    with_cli_behavior_options,
+    with_network_contract_options,
+    with_wallet_options,
 )
 
 
@@ -71,37 +74,8 @@ def vote():
 @click.argument('solver_hotkey', type=str)
 @click.argument('solver_coldkey', type=str)
 @click.argument('pr_number_or_url', type=str)
-@click.option(
-    '--wallet-name',
-    '--wallet.name',
-    '--wallet',
-    default='default',
-    help='Wallet name',
-)
-@click.option(
-    '--wallet-hotkey',
-    '--wallet.hotkey',
-    '--hotkey',
-    default='default',
-    help='Hotkey name',
-)
-@click.option(
-    '--network',
-    '-n',
-    default=None,
-    type=click.Choice(['finney', 'test', 'local'], case_sensitive=False),
-    help='Network (finney/test/local)',
-)
-@click.option(
-    '--rpc-url',
-    default=None,
-    help='Subtensor RPC endpoint (overrides --network)',
-)
-@click.option(
-    '--contract',
-    default='',
-    help='Contract address (uses config if empty)',
-)
+@with_wallet_options()
+@with_network_contract_options('Contract address (uses config if empty)')
 def val_vote_solution(
     issue_id: int,
     solver_hotkey: str,
@@ -190,37 +164,8 @@ def val_vote_solution(
 @vote.command('cancel')
 @click.argument('issue_id', type=int)
 @click.argument('reason', type=str)
-@click.option(
-    '--wallet-name',
-    '--wallet.name',
-    '--wallet',
-    default='default',
-    help='Wallet name',
-)
-@click.option(
-    '--wallet-hotkey',
-    '--wallet.hotkey',
-    '--hotkey',
-    default='default',
-    help='Hotkey name',
-)
-@click.option(
-    '--network',
-    '-n',
-    default=None,
-    type=click.Choice(['finney', 'test', 'local'], case_sensitive=False),
-    help='Network (finney/test/local)',
-)
-@click.option(
-    '--rpc-url',
-    default=None,
-    help='Subtensor RPC endpoint (overrides --network)',
-)
-@click.option(
-    '--contract',
-    default='',
-    help='Contract address (uses config if empty)',
-)
+@with_wallet_options()
+@with_network_contract_options('Contract address (uses config if empty)')
 def val_vote_cancel_issue(
     issue_id: int,
     reason: str,
@@ -290,24 +235,8 @@ def val_vote_cancel_issue(
 
 
 @vote.command('list')
-@click.option(
-    '--network',
-    '-n',
-    default=None,
-    type=click.Choice(['finney', 'test', 'local'], case_sensitive=False),
-    help='Network (finney/test/local)',
-)
-@click.option(
-    '--rpc-url',
-    default=None,
-    help='Subtensor RPC endpoint (overrides --network)',
-)
-@click.option(
-    '--contract',
-    default='',
-    help='Contract address (uses config if empty)',
-)
-@click.option('--json', 'as_json', is_flag=True, help='Output as JSON for scripting')
+@with_cli_behavior_options(include_json=True)
+@with_network_contract_options('Contract address (uses config if empty)')
 def vote_list_validators(network: str, rpc_url: str, contract: str, as_json: bool):
     """List whitelisted validators and consensus threshold.
 

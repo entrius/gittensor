@@ -19,8 +19,8 @@ import click
 from rich.console import Console
 from rich.table import Table
 
-from gittensor.cli.issue_commands.help import StyledAliasGroup, StyledGroup
 from gittensor.cli.issue_commands import register_commands
+from gittensor.cli.issue_commands.help import StyledAliasGroup, StyledGroup
 
 console = Console()
 

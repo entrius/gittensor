@@ -31,6 +31,8 @@ from .helpers import (
     print_network_header,
     read_issues_from_contract,
     resolve_network,
+    with_cli_behavior_options,
+    with_network_contract_options,
 )
 
 
@@ -42,25 +44,12 @@ from .helpers import (
     type=int,
     help='View a specific issue by ID',
 )
-@click.option(
-    '--network',
-    '-n',
-    default=None,
-    type=click.Choice(['finney', 'test', 'local'], case_sensitive=False),
-    help='Network (finney/test/local)',
+@with_cli_behavior_options(
+    include_verbose=True,
+    include_json=True,
+    verbose_help='Show debug output for contract reads',
 )
-@click.option(
-    '--rpc-url',
-    default=None,
-    help='Subtensor RPC endpoint (overrides --network)',
-)
-@click.option(
-    '--contract',
-    default='',
-    help='Contract address (uses default if empty)',
-)
-@click.option('--verbose', '-v', is_flag=True, help='Show debug output for contract reads')
-@click.option('--json', 'as_json', is_flag=True, help='Output as JSON for scripting')
+@with_network_contract_options('Contract address (uses default if empty)')
 def issues_list(issue_id: int, network: str, rpc_url: str, contract: str, verbose: bool, as_json: bool):
     """List issues or view a specific issue.
 
@@ -189,25 +178,8 @@ def issues_list(issue_id: int, network: str, rpc_url: str, contract: str, verbos
 
 
 @click.command('bounty-pool', cls=StyledCommand)
-@click.option(
-    '--network',
-    '-n',
-    default=None,
-    type=click.Choice(['finney', 'test', 'local'], case_sensitive=False),
-    help='Network (finney/test/local)',
-)
-@click.option(
-    '--rpc-url',
-    default=None,
-    help='Subtensor RPC endpoint (overrides --network)',
-)
-@click.option(
-    '--contract',
-    default='',
-    help='Contract address (uses config if empty)',
-)
-@click.option('--verbose', '-v', is_flag=True, help='Show debug output')
-@click.option('--json', 'as_json', is_flag=True, help='Output as JSON for scripting')
+@with_cli_behavior_options(include_verbose=True, include_json=True)
+@with_network_contract_options('Contract address (uses config if empty)')
 def issues_bounty_pool(network: str, rpc_url: str, contract: str, verbose: bool, as_json: bool):
     """View total bounty pool (sum of all issue bounty amounts).
 
@@ -256,25 +228,8 @@ def issues_bounty_pool(network: str, rpc_url: str, contract: str, verbose: bool,
 
 
 @click.command('pending-harvest', cls=StyledCommand)
-@click.option(
-    '--network',
-    '-n',
-    default=None,
-    type=click.Choice(['finney', 'test', 'local'], case_sensitive=False),
-    help='Network (finney/test/local)',
-)
-@click.option(
-    '--rpc-url',
-    default=None,
-    help='Subtensor RPC endpoint (overrides --network)',
-)
-@click.option(
-    '--contract',
-    default='',
-    help='Contract address (uses config if empty)',
-)
-@click.option('--verbose', '-v', is_flag=True, help='Show debug output')
-@click.option('--json', 'as_json', is_flag=True, help='Output as JSON for scripting')
+@with_cli_behavior_options(include_verbose=True, include_json=True)
+@with_network_contract_options('Contract address (uses config if empty)')
 def issues_pending_harvest(network: str, rpc_url: str, contract: str, verbose: bool, as_json: bool):
     """View pending harvest (treasury stake minus allocated bounties).
 
@@ -340,25 +295,8 @@ def issues_pending_harvest(network: str, rpc_url: str, contract: str, verbose: b
 
 
 @click.command('info', cls=StyledCommand)
-@click.option(
-    '--network',
-    '-n',
-    default=None,
-    type=click.Choice(['finney', 'test', 'local'], case_sensitive=False),
-    help='Network (finney/test/local)',
-)
-@click.option(
-    '--rpc-url',
-    default=None,
-    help='Subtensor RPC endpoint (overrides --network)',
-)
-@click.option(
-    '--contract',
-    default='',
-    help='Contract address (uses config if empty)',
-)
-@click.option('--verbose', '-v', is_flag=True, help='Show debug output')
-@click.option('--json', 'as_json', is_flag=True, help='Output as JSON for scripting')
+@with_cli_behavior_options(include_verbose=True, include_json=True)
+@with_network_contract_options('Contract address (uses config if empty)')
 def admin_info(network: str, rpc_url: str, contract: str, verbose: bool, as_json: bool):
     """View contract configuration.
 

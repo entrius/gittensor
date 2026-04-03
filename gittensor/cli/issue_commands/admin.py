@@ -16,6 +16,7 @@ Commands:
 import click
 from rich.panel import Panel
 
+from .help import StyledGroup
 from .helpers import (
     console,
     format_alpha,
@@ -29,21 +30,11 @@ from .helpers import (
 )
 
 
-@click.group(name='admin')
+@click.group(name='admin', cls=StyledGroup)
 def admin():
     """Owner-only administrative commands.
 
     These commands require the contract owner wallet.
-
-    \b
-    Commands:
-        info           View contract configuration
-        cancel-issue   Cancel an issue
-        payout-issue   Manual payout fallback
-        set-owner      Transfer ownership
-        set-treasury   Change treasury hotkey
-        add-vali       Add a validator to the whitelist
-        remove-vali    Remove a validator from the whitelist
     """
     pass
 
@@ -84,17 +75,16 @@ def admin():
 def admin_cancel(issue_id: int, network: str, rpc_url: str, contract: str, wallet_name: str, wallet_hotkey: str):
     """Cancel an issue (owner only).
 
-    Immediately cancels an issue without requiring validator consensus.
-    Bounty funds are returned to the alpha pool.
+    [dim]Immediately cancels an issue without validator consensus. Bounty funds are returned to the alpha pool.[/dim]
 
-    \b
-    Arguments:
+    [dim]Arguments:
         ISSUE_ID: On-chain issue ID to cancel
+    [/dim]
 
-    \b
-    Examples:
-        gitt admin cancel-issue 1
-        gitt a cancel-issue 5 --network test
+    [dim]Examples:
+        $ gitt admin cancel-issue 1
+        $ gitt a cancel-issue 5 --network test
+    [/dim]
     """
     contract_addr = get_contract_address(contract)
     ws_endpoint, network_name = resolve_network(network, rpc_url)
@@ -188,17 +178,17 @@ def admin_cancel(issue_id: int, network: str, rpc_url: str, contract: str, walle
 def admin_payout(issue_id: int, network: str, rpc_url: str, contract: str, wallet_name: str, wallet_hotkey: str):
     """Manual payout fallback (owner only).
 
-    Pays out a completed issue bounty to the solver. The solver address
-    is determined by validator consensus and stored in the contract.
+    [dim]Pays out a completed issue bounty to the solver.
+    The solver address is determined by validator consensus and stored in the contract.[/dim]
 
-    \b
-    Arguments:
+    [dim]Arguments:
         ISSUE_ID: On-chain ID of a completed issue
+    [/dim]
 
-    \b
-    Examples:
-        gitt admin payout-issue 1
-        gitt a payout-issue 3 --network test
+    [dim]Examples:
+        $ gitt admin payout-issue 1
+        $ gitt a payout-issue 3 --network test
+    [/dim]
     """
     contract_addr = get_contract_address(contract)
     ws_endpoint, network_name = resolve_network(network, rpc_url)
@@ -292,13 +282,13 @@ def admin_payout(issue_id: int, network: str, rpc_url: str, contract: str, walle
 def admin_set_owner(new_owner: str, network: str, rpc_url: str, contract: str, wallet_name: str, wallet_hotkey: str):
     """Transfer contract ownership (owner only).
 
-    \b
-    Arguments:
+    [dim]Arguments:
         NEW_OWNER: SS58 address of the new owner
+    [/dim]
 
-    \b
-    Examples:
-        gitt admin set-owner 5Hxxx...
+    [dim]Examples:
+        $ gitt admin set-owner 5Hxxx...
+    [/dim]
     """
     contract_addr = get_contract_address(contract)
     ws_endpoint, network_name = resolve_network(network, rpc_url)
@@ -385,17 +375,16 @@ def admin_set_treasury(
 ):
     """Change treasury hotkey (owner only).
 
-    The treasury hotkey receives staking emissions that fund bounty payouts.
-    Changing the treasury resets all Active/Registered issue bounty amounts
-    to 0 (they will be re-funded on next harvest from the new treasury).
+    [dim]The treasury hotkey receives staking emissions that fund bounty payouts. Changing the treasury resets all
+    Active/Registered issue bounty amounts to 0 (they will be re-funded on the next harvest from the new treasury).[/dim]
 
-    \b
-    Arguments:
+    [dim]Arguments:
         NEW_TREASURY: SS58 address of the new treasury hotkey
+    [/dim]
 
-    \b
-    Examples:
-        gitt admin set-treasury 5Hxxx...
+    [dim]Examples:
+        $ gitt admin set-treasury 5Hxxx...
+    [/dim]
     """
     contract_addr = get_contract_address(contract)
     ws_endpoint, network_name = resolve_network(network, rpc_url)
@@ -483,17 +472,16 @@ def admin_set_treasury(
 def admin_add_validator(hotkey: str, network: str, rpc_url: str, contract: str, wallet_name: str, wallet_hotkey: str):
     """Add a validator to the voting whitelist (owner only).
 
-    Whitelisted validators can vote on solutions and issue cancellations.
-    The consensus threshold adjusts automatically: simple majority after
-    3 validators are added.
+    [dim]Whitelisted validators can vote on solutions and issue cancellations.
+    The consensus threshold adjusts automatically to a simple majority after 3 validators are added.[/dim]
 
-    \b
-    Arguments:
+    [dim]Arguments:
         HOTKEY: SS58 address of the validator hotkey to whitelist
+    [/dim]
 
-    \b
-    Examples:
-        gitt admin add-vali 5Hxxx...
+    [dim]Examples:
+        $ gitt admin add-vali 5Hxxx...
+    [/dim]
     """
     contract_addr = get_contract_address(contract)
     ws_endpoint, network_name = resolve_network(network, rpc_url)
@@ -583,15 +571,15 @@ def admin_remove_validator(
 ):
     """Remove a validator from the voting whitelist (owner only).
 
-    The consensus threshold adjusts automatically after removal.
+    [dim]The consensus threshold adjusts automatically after removal.[/dim]
 
-    \b
-    Arguments:
+    [dim]Arguments:
         HOTKEY: SS58 address of the validator hotkey to remove
+    [/dim]
 
-    \b
-    Examples:
-        gitt admin remove-vali 5Hxxx...
+    [dim]Examples:
+        $ gitt admin remove-vali 5Hxxx...
+    [/dim]
     """
     contract_addr = get_contract_address(contract)
     ws_endpoint, network_name = resolve_network(network, rpc_url)

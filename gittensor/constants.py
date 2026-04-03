@@ -120,7 +120,7 @@ RECYCLE_UID = 0
 UNIQUE_REPOS_MAX_RECYCLE = 0.8
 UNIQUE_REPOS_RECYCLE_DECAY_RATE = 0.005
 
-# Network emission scaling (total token score from tiered miners)
+# Network emission scaling (total token score from eligible miners)
 TOKEN_SCORE_MAX_RECYCLE = 0.8
 TOKEN_SCORE_RECYCLE_DECAY_RATE = 0.000012
 

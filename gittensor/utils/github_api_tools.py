@@ -1,6 +1,7 @@
 # Entrius 2025
 import base64
 import fnmatch
+import os
 import re
 import time
 from dataclasses import dataclass
@@ -808,7 +809,7 @@ def try_add_open_or_closed_pr(
         lookback_date_filter: Date filter for lookback period
     """
     # Ignore all maintainer contributions
-    if pr_raw.get('authorAssociation') in MAINTAINER_ASSOCIATIONS:
+    if not os.environ.get('DEV_MODE') and pr_raw.get('authorAssociation') in MAINTAINER_ASSOCIATIONS:
         return
 
     if pr_state == PRState.OPEN.value:
@@ -858,7 +859,7 @@ def should_skip_merged_pr(
 
     # Skip if PR author is a maintainer
     author_association = pr_raw.get('authorAssociation')
-    if author_association in MAINTAINER_ASSOCIATIONS:
+    if not os.environ.get('DEV_MODE') and author_association in MAINTAINER_ASSOCIATIONS:
         return (
             True,
             f'Skipping PR #{pr_raw["number"]} in {repository_full_name} - author is {author_association} (has direct merge capabilities)',

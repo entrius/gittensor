@@ -31,7 +31,7 @@ class RepositoryConfig:
         weight: Repository weight for scoring
         inactive_at: ISO timestamp when repository became inactive (None if active)
         additional_acceptable_branches: List of additional branch patterns to accept (None if only default branch)
-        tier: Repository tier (Bronze, Silver, Gold) - None if not assigned
+
     """
 
     weight: float

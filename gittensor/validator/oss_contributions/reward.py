@@ -37,7 +37,7 @@ async def evaluate_miners_pull_requests(
     stale_hotkey: Optional[str] = None,
 ) -> MinerEvaluation:
     """
-    Entry point from taking a miners response -> Get PRs -> Score PRs by tier
+    Entry point from taking a miners response -> Get PRs -> Score PRs
 
     Args:
         uid: The uid of the miner being evaluated

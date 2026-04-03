@@ -135,25 +135,28 @@ async def priority_pat_check(validator: 'Validator', synapse: PatCheckSynapse) -
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-# A known public repo used for test queries. The PAT just needs read access to public repos.
-_TEST_REPO = 'torvalds/linux'
+_TEST_GRAPHQL_QUERY = '{ viewer { login } }'
 
 
 def _test_pat_against_repo(pat: str) -> Optional[str]:
-    """Run a test API call against a known repo to catch org-restricted or expired PATs.
+    """Run a test GraphQL call to verify the PAT has the access scoring requires.
 
-    Fetches a small number of closed PRs to mimic the real scoring query pattern.
+    Scoring uses the GraphQL API to fetch miner PRs, so this mirrors the real path.
     Returns an error string on failure, None on success.
     """
-    headers = {'Authorization': f'token {pat}', 'Accept': 'application/vnd.github.v3+json'}
+    headers = {'Authorization': f'bearer {pat}', 'Accept': 'application/json'}
     try:
-        response = requests.get(
-            f'{BASE_GITHUB_API_URL}/repos/{_TEST_REPO}/pulls?state=closed&per_page=3',
+        response = requests.post(
+            f'{BASE_GITHUB_API_URL}/graphql',
+            json={'query': _TEST_GRAPHQL_QUERY},
             headers=headers,
             timeout=15,
         )
-        if response.status_code == 200:
-            return None
-        return f'GitHub API returned {response.status_code}'
+        if response.status_code != 200:
+            return f'GitHub GraphQL API returned {response.status_code}'
+        data = response.json()
+        if 'errors' in data:
+            return f'GraphQL error: {data["errors"][0].get("message", "unknown")}'
+        return None
     except requests.RequestException as e:
         return str(e)

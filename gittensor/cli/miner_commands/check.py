@@ -59,11 +59,11 @@ def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, json_mode)
         _error(f'Hotkey {wallet.hotkey.ss58_address[:16]}... is not registered on subnet {netuid}.', json_mode)
         sys.exit(1)
 
-    # 3. Find validator axons
+    # 3. Find active validator axons (vtrust > 0 = has actually set weights in consensus)
     validator_axons = []
     validator_uids = []
     for uid in range(metagraph.n):
-        if metagraph.validator_permit[uid] and metagraph.axons[uid].is_serving:
+        if metagraph.validator_trust[uid] > 0 and metagraph.axons[uid].is_serving:
             validator_axons.append(metagraph.axons[uid])
             validator_uids.append(uid)
 

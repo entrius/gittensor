@@ -17,19 +17,25 @@ def runner():
 
 
 class TestMinerPost:
-    def test_no_pat_env_var(self, runner, monkeypatch):
+    def test_no_pat_prompts_interactively(self, runner, monkeypatch):
         monkeypatch.delenv('GITTENSOR_MINER_PAT', raising=False)
-        result = runner.invoke(cli, ['miner', 'post', '--wallet', 'test', '--hotkey', 'test'])
-        assert result.exit_code != 0
-        assert 'GITTENSOR_MINER_PAT' in result.output
+        result = runner.invoke(cli, ['miner', 'post', '--wallet', 'test', '--hotkey', 'test'], input='')
+        assert 'Enter your GitHub Personal Access Token' in result.output
 
-    def test_no_pat_env_var_json(self, runner, monkeypatch):
+    def test_no_pat_json_mode_exits(self, runner, monkeypatch):
         monkeypatch.delenv('GITTENSOR_MINER_PAT', raising=False)
         result = runner.invoke(cli, ['miner', 'post', '--json-output', '--wallet', 'test', '--hotkey', 'test'])
         assert result.exit_code != 0
         output = json.loads(result.output)
         assert output['success'] is False
-        assert 'GITTENSOR_MINER_PAT' in output['error']
+
+    @patch('gittensor.cli.miner_commands.post._validate_pat_locally', return_value=False)
+    def test_pat_flag_used(self, mock_validate, runner, monkeypatch):
+        monkeypatch.delenv('GITTENSOR_MINER_PAT', raising=False)
+        result = runner.invoke(cli, ['miner', 'post', '--pat', 'ghp_test123', '--wallet', 'test', '--hotkey', 'test'])
+        assert result.exit_code != 0
+        assert 'invalid' in result.output.lower() or 'expired' in result.output.lower()
+        mock_validate.assert_called_once_with('ghp_test123')
 
     @patch('gittensor.cli.miner_commands.post._validate_pat_locally', return_value=False)
     def test_invalid_pat_exits(self, mock_validate, runner, monkeypatch):

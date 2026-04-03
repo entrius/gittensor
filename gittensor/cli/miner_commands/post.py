@@ -26,32 +26,37 @@ NETUID_DEFAULT = 2
 @click.option('--netuid', type=int, default=NETUID_DEFAULT, help='Subnet UID.', show_default=True)
 @click.option('--network', default=None, help='Network name (local, test, finney).')
 @click.option('--rpc-url', default=None, help='Subtensor RPC endpoint URL (overrides --network).')
+@click.option('--pat', default=None, help='GitHub Personal Access Token. If not provided, falls back to GITTENSOR_MINER_PAT env var or interactive prompt.')
 @click.option('--json-output', 'json_mode', is_flag=True, default=False, help='Output results as JSON.')
-def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, json_mode):
+def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_mode):
     """Broadcast your GitHub PAT to all validators on the network.
 
     Validators will validate your PAT (test GitHub API access, check account age),
     then store it locally for use during scoring rounds.
 
     \b
-    Requires:
-        GITTENSOR_MINER_PAT environment variable set to a valid GitHub PAT.
+    PAT resolution order:
+        1. --pat flag
+        2. GITTENSOR_MINER_PAT environment variable
+        3. Interactive prompt (non-JSON mode only)
 
     \b
     Examples:
+        gitt miner post --wallet alice --hotkey default --pat ghp_xxxx
         gitt miner post --wallet alice --hotkey default
         gitt miner post --wallet alice --hotkey default --network test
-        gitt miner post --wallet alice --hotkey default --rpc-url ws://localhost:9944
     """
     import bittensor as bt
 
     from gittensor.synapses import PatBroadcastSynapse
 
-    # 1. Load and validate PAT locally
-    pat = os.environ.get('GITTENSOR_MINER_PAT')
+    # 1. Load and validate PAT locally (flag > env var > interactive prompt)
+    pat = pat or os.environ.get('GITTENSOR_MINER_PAT')
     if not pat:
-        _error('GITTENSOR_MINER_PAT environment variable is not set.', json_mode)
-        sys.exit(1)
+        if json_mode:
+            _error('--pat flag or GITTENSOR_MINER_PAT environment variable is required for JSON mode.', json_mode)
+            sys.exit(1)
+        pat = click.prompt('Enter your GitHub Personal Access Token', hide_input=True)
 
     if not json_mode:
         console.print('[dim]Validating PAT locally...[/dim]')
@@ -86,11 +91,11 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, json_mode):
         _error(f'Hotkey {wallet.hotkey.ss58_address[:16]}... is not registered on subnet {netuid}.', json_mode)
         sys.exit(1)
 
-    # 4. Find validator axons
+    # 4. Find active validator axons (vtrust > 0 = has actually set weights in consensus)
     validator_axons = []
     validator_uids = []
     for uid in range(metagraph.n):
-        if metagraph.validator_permit[uid] and metagraph.axons[uid].is_serving:
+        if metagraph.validator_trust[uid] > 0 and metagraph.axons[uid].is_serving:
             validator_axons.append(metagraph.axons[uid])
             validator_uids.append(uid)
 
@@ -159,11 +164,27 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, json_mode):
 
 
 def _validate_pat_locally(pat: str) -> bool:
-    """Quick check that the PAT works against GitHub API."""
+    """Validate PAT mirrors the validator-side checks: user identity + GraphQL access."""
     headers = {'Authorization': f'token {pat}', 'Accept': 'application/vnd.github.v3+json'}
     try:
-        response = requests.get(f'{BASE_GITHUB_API_URL}/user', headers=headers, timeout=15)
-        return response.status_code == 200
+        # Check basic auth
+        user_resp = requests.get(f'{BASE_GITHUB_API_URL}/user', headers=headers, timeout=15)
+        if user_resp.status_code != 200:
+            return False
+
+        # Check GraphQL access (same test the validator runs during PAT broadcast)
+        gql_headers = {'Authorization': f'bearer {pat}', 'Accept': 'application/json'}
+        gql_resp = requests.post(
+            f'{BASE_GITHUB_API_URL}/graphql',
+            json={'query': '{ viewer { login } }'},
+            headers=gql_headers,
+            timeout=15,
+        )
+        if gql_resp.status_code != 200:
+            console.print('[red]PAT lacks GraphQL API access. Fine-grained PATs need "Public Repositories (read-only)" permission.[/red]')
+            return False
+
+        return True
     except requests.RequestException:
         return False
 

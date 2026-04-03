@@ -15,6 +15,7 @@ Note: These tests require the full gittensor package to be importable.
 Run with: python run_tests.py tests/utils/
 """
 
+from datetime import datetime, timedelta, timezone
 from unittest.mock import Mock, call, patch
 
 import pytest
@@ -1139,16 +1140,24 @@ class TestLoadMinersPrsErrorResilience:
         from gittensor.classes import MinerEvaluation
         from gittensor.validator.utils.load_weights import RepositoryConfig
 
+        now = datetime.now(timezone.utc)
+        recent = (now - timedelta(days=5)).strftime('%Y-%m-%dT%H:%M:%SZ')
+        recent_merge = (now - timedelta(days=4)).strftime('%Y-%m-%dT%H:%M:%SZ')
+        mid = (now - timedelta(days=10)).strftime('%Y-%m-%dT%H:%M:%SZ')
+        mid_merge = (now - timedelta(days=9)).strftime('%Y-%m-%dT%H:%M:%SZ')
+        older = (now - timedelta(days=15)).strftime('%Y-%m-%dT%H:%M:%SZ')
+        older_merge = (now - timedelta(days=14)).strftime('%Y-%m-%dT%H:%M:%SZ')
+
         good_pr_before = _make_pr_node(
-            1, 'goodorg', 'goodrepo', created_at='2026-02-15T00:00:00Z', merged_at='2026-02-16T00:00:00Z'
+            1, 'goodorg', 'goodrepo', created_at=recent, merged_at=recent_merge
         )
         bad_pr = _make_pr_node(
-            2, 'affinefoundation', 'affinetes', created_at='2026-02-10T00:00:00Z', merged_at='2026-02-11T00:00:00Z'
+            2, 'affinefoundation', 'affinetes', created_at=mid, merged_at=mid_merge
         )
         # Simulate the banned repo returning null for closingIssuesReferences
         bad_pr['closingIssuesReferences'] = None
         good_pr_after = _make_pr_node(
-            3, 'goodorg', 'goodrepo', created_at='2026-02-05T00:00:00Z', merged_at='2026-02-06T00:00:00Z'
+            3, 'goodorg', 'goodrepo', created_at=older, merged_at=older_merge
         )
 
         mock_graphql_query.return_value = _make_graphql_response([good_pr_before, bad_pr, good_pr_after])

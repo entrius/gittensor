@@ -1,0 +1,8 @@
+{
+  "typeCheckingMode": "basic",
+  "include": ["gittensor", "neurons", "tests"],
+  "exclude": ["gittensor-venv"],
+  "pythonVersion": "3.9",
+  "reportMissingImports": true,
+  "reportMissingTypeStubs": false
+}

@@ -16,12 +16,14 @@
 # DEALINGS IN THE SOFTWARE.
 
 
+from __future__ import annotations
+
 import argparse
 import asyncio
 import copy
 import threading
 from traceback import print_exception
-from typing import List, Union
+from typing import Any, List, Optional, Union
 
 import bittensor as bt
 import numpy as np
@@ -79,7 +81,7 @@ class BaseValidatorNeuron(BaseNeuron):
         # Instantiate runners
         self.should_exit: bool = False
         self.is_running: bool = False
-        self.thread: Union[threading.Thread, None] = None
+        self.thread: threading.Thread | None = None
         self.lock = asyncio.Lock()
 
     def serve_axon(self):
@@ -191,7 +193,8 @@ class BaseValidatorNeuron(BaseNeuron):
         if self.is_running:
             bt.logging.debug('Stopping validator in background thread.')
             self.should_exit = True
-            self.thread.join(5)
+            if self.thread is not None:
+                self.thread.join(5)
             self.is_running = False
             bt.logging.debug('Stopped')
 
@@ -215,7 +218,8 @@ class BaseValidatorNeuron(BaseNeuron):
         if self.is_running:
             bt.logging.debug('Stopping validator in background thread.')
             self.should_exit = True
-            self.thread.join(5)
+            if self.thread is not None:
+                self.thread.join(5)
             self.is_running = False
             bt.logging.debug('Stopped')
 
@@ -242,8 +246,8 @@ class BaseValidatorNeuron(BaseNeuron):
         # Compute raw_weights safely
         raw_weights = self.scores / norm
 
-        bt.logging.debug('raw_weights', raw_weights)
-        bt.logging.debug('raw_weight_uids', str(self.metagraph.uids.tolist()))
+        bt.logging.debug(f'raw_weights: {raw_weights}')
+        bt.logging.debug(f'raw_weight_uids: {self.metagraph.uids.tolist()}')
         # Process the raw weights to final_weights via subtensor limitations.
         (
             processed_weight_uids,
@@ -255,19 +259,19 @@ class BaseValidatorNeuron(BaseNeuron):
             subtensor=self.subtensor,
             metagraph=self.metagraph,
         )
-        bt.logging.debug('processed_weights', processed_weights)
-        bt.logging.debug('processed_weight_uids', processed_weight_uids)
+        bt.logging.debug(f'processed_weights: {processed_weights}')
+        bt.logging.debug(f'processed_weight_uids: {processed_weight_uids}')
 
         # Convert to uint16 weights and uids.
         (
             uint_uids,
             uint_weights,
         ) = convert_weights_and_uids_for_emit(uids=processed_weight_uids, weights=processed_weights)
-        bt.logging.debug('uint_weights', uint_weights)
-        bt.logging.debug('uint_uids', uint_uids)
+        bt.logging.debug(f'uint_weights: {uint_weights}')
+        bt.logging.debug(f'uint_uids: {uint_uids}')
 
         # Set the weights on chain via our subtensor connection.
-        result, msg = self.subtensor.set_weights(
+        response = self.subtensor.set_weights(
             wallet=self.wallet,
             netuid=self.config.netuid,
             uids=uint_uids,
@@ -276,10 +280,10 @@ class BaseValidatorNeuron(BaseNeuron):
             wait_for_inclusion=False,
             version_key=self.spec_version,
         )
-        if result is True:
+        if response.success:
             bt.logging.info('set_weights on chain successfully!')
         else:
-            bt.logging.error('set_weights failed', msg)
+            bt.logging.error(f'set_weights failed: {response.message}')
 
     def resync_metagraph(self):
         """Resyncs the metagraph and updates the hotkeys and moving averages based on the new metagraph."""
@@ -313,7 +317,7 @@ class BaseValidatorNeuron(BaseNeuron):
         # Update the hotkeys.
         self.hotkeys = copy.deepcopy(self.metagraph.hotkeys)
 
-    def update_scores(self, rewards: np.ndarray, uids: set[int], blacklisted_uids: List[int] = None):
+    def update_scores(self, rewards: np.ndarray, uids: set[int] | np.ndarray, blacklisted_uids: Optional[List[int]] = None):
         """Performs exponential moving average on the scores based on the rewards received from the miners."""
 
         # Check if rewards contains NaN values.

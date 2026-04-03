@@ -3,7 +3,7 @@
 """Tests for gitt miner post and gitt miner check CLI commands."""
 
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from click.testing import CliRunner

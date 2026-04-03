@@ -21,7 +21,6 @@ from .helpers import (
     get_contract_address,
     load_config,
     print_error,
-    print_network_header,
     print_success,
     resolve_network,
     validate_bounty_amount,
@@ -253,5 +252,3 @@ def issue_register(
             console.print('  \u2022 Caller is not the contract owner')
         else:
             print_error(f'Error registering issue: {e}')
-
-

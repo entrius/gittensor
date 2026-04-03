@@ -582,4 +582,3 @@ class TestCliMissingContractConfig:
             )
         assert result.exit_code != 0
         assert 'Contract address not configured' in result.output
-

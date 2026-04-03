@@ -1,6 +1,7 @@
 # Entrius 2025
 
 """gitt miner post — Broadcast GitHub PAT to validators."""
+
 from __future__ import annotations
 
 import asyncio
@@ -27,7 +28,11 @@ NETUID_DEFAULT = 2
 @click.option('--netuid', type=int, default=NETUID_DEFAULT, help='Subnet UID.', show_default=True)
 @click.option('--network', default=None, help='Network name (local, test, finney).')
 @click.option('--rpc-url', default=None, help='Subtensor RPC endpoint URL (overrides --network).')
-@click.option('--pat', default=None, help='GitHub Personal Access Token. If not provided, falls back to GITTENSOR_MINER_PAT env var or interactive prompt.')
+@click.option(
+    '--pat',
+    default=None,
+    help='GitHub Personal Access Token. If not provided, falls back to GITTENSOR_MINER_PAT env var or interactive prompt.',
+)
 @click.option('--json-output', 'json_mode', is_flag=True, default=False, help='Output results as JSON.')
 def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_mode):
     """Broadcast your GitHub PAT to all validators on the network.
@@ -148,25 +153,32 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_m
         accepted = getattr(resp, 'accepted', None)
         reason = getattr(resp, 'rejection_reason', None)
         status_code = getattr(resp.dendrite, 'status_code', None) if hasattr(resp, 'dendrite') else None
-        results.append({
-            'uid': uid,
-            'hotkey': axon.hotkey[:16] + '...',
-            'accepted': accepted,
-            'rejection_reason': reason,
-            'status_code': status_code,
-        })
+        results.append(
+            {
+                'uid': uid,
+                'hotkey': axon.hotkey[:16] + '...',
+                'accepted': accepted,
+                'rejection_reason': reason,
+                'status_code': status_code,
+            }
+        )
 
     accepted_count = sum(1 for r in results if r['accepted'] is True)
 
     # 7. Display results
     if json_mode:
-        click.echo(json.dumps({
-            'success': accepted_count > 0,
-            'total_validators': len(results),
-            'accepted': accepted_count,
-            'rejected': len(results) - accepted_count,
-            'results': results,
-        }, indent=2))
+        click.echo(
+            json.dumps(
+                {
+                    'success': accepted_count > 0,
+                    'total_validators': len(results),
+                    'accepted': accepted_count,
+                    'rejected': len(results) - accepted_count,
+                    'results': results,
+                },
+                indent=2,
+            )
+        )
     else:
         table = Table(title='PAT Broadcast Results')
         table.add_column('UID', style='cyan', justify='right')
@@ -205,7 +217,9 @@ def _validate_pat_locally(pat: str) -> bool:
             timeout=15,
         )
         if gql_resp.status_code != 200:
-            console.print('[red]PAT lacks GraphQL API access. Fine-grained PATs need "Public Repositories (read-only)" permission.[/red]')
+            console.print(
+                '[red]PAT lacks GraphQL API access. Fine-grained PATs need "Public Repositories (read-only)" permission.[/red]'
+            )
             return False
 
         return True
@@ -216,6 +230,7 @@ def _validate_pat_locally(pat: str) -> bool:
 def _load_config_value(key: str):
     """Load a value from ~/.gittensor/config.json, or None."""
     from pathlib import Path
+
     config_file = Path.home() / '.gittensor' / 'config.json'
     if not config_file.exists():
         return None

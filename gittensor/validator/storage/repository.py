@@ -344,4 +344,3 @@ class Repository(BaseRepository):
             self.db.rollback()
             self.logger.error(f'Error in miner evaluation storage: {e}')
             return False
-

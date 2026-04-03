@@ -138,7 +138,6 @@ class TestHandlePatBroadcast:
         assert '403' in (result.rejection_reason or '')
 
 
-
 class TestHandlePatCheck:
     @patch('gittensor.validator.pat_handler._test_pat_against_repo', return_value=None)
     @patch('gittensor.validator.pat_handler.validate_github_credentials', return_value=('github_42', None))

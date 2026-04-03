@@ -3,7 +3,7 @@
 
 import math
 from datetime import datetime, timezone
-from typing import Dict, Optional, Tuple
+from typing import Dict, Tuple
 
 import bittensor as bt
 
@@ -417,9 +417,7 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
         bt.logging.info(
             f'├─ PRs: {evaluation.total_merged_prs} merged | {evaluation.total_open_prs} open | {evaluation.total_closed_prs} closed'
         )
-        bt.logging.info(
-            f'└─ Eligible: {evaluation.is_eligible} | Credibility: {evaluation.credibility:.2f}'
-        )
+        bt.logging.info(f'└─ Eligible: {evaluation.is_eligible} | Credibility: {evaluation.credibility:.2f}')
 
     bt.logging.info('Finalization complete.')
 

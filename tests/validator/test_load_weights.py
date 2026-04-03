@@ -113,6 +113,7 @@ class TestLoadMasterRepositories:
         for repo_name in repos.keys():
             assert repo_name == repo_name.lower(), f'{repo_name} should be lowercase'
 
+
 class TestBannedOrganizations:
     """Tests ensuring banned organizations are not active in the repository list.
 

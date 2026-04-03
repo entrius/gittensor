@@ -30,6 +30,7 @@ def _get_hotkey(synapse: bt.Synapse) -> str:
 # PatBroadcastSynapse handlers
 # ---------------------------------------------------------------------------
 
+
 async def handle_pat_broadcast(validator: 'Validator', synapse: PatBroadcastSynapse) -> PatBroadcastSynapse:
     """Validate and store a miner's GitHub PAT."""
     hotkey = _get_hotkey(synapse)
@@ -87,6 +88,7 @@ async def priority_pat_broadcast(validator: 'Validator', synapse: PatBroadcastSy
 # ---------------------------------------------------------------------------
 # PatCheckSynapse handlers
 # ---------------------------------------------------------------------------
+
 
 async def handle_pat_check(validator: 'Validator', synapse: PatCheckSynapse) -> PatCheckSynapse:
     """Check if the validator has the miner's PAT stored and re-validate it."""

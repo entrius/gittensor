@@ -10,7 +10,7 @@ import click
 from rich.console import Console
 from rich.table import Table
 
-from .post import NETUID_DEFAULT, NETWORK_MAP, _load_config_value, _resolve_endpoint
+from .post import NETUID_DEFAULT, _load_config_value, _resolve_endpoint
 
 console = Console()
 
@@ -111,26 +111,33 @@ def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, json_mode)
         has_pat = getattr(resp, 'has_pat', None)
         pat_valid = getattr(resp, 'pat_valid', None)
         reason = getattr(resp, 'rejection_reason', None)
-        results.append({
-            'uid': uid,
-            'hotkey': axon.hotkey[:16] + '...',
-            'has_pat': has_pat,
-            'pat_valid': pat_valid,
-            'rejection_reason': reason,
-        })
+        results.append(
+            {
+                'uid': uid,
+                'hotkey': axon.hotkey[:16] + '...',
+                'has_pat': has_pat,
+                'pat_valid': pat_valid,
+                'rejection_reason': reason,
+            }
+        )
 
     valid_count = sum(1 for r in results if r['pat_valid'] is True)
     no_response_count = sum(1 for r in results if r['has_pat'] is None)
 
     # 6. Display results
     if json_mode:
-        click.echo(json.dumps({
-            'total_validators': len(results),
-            'valid': valid_count,
-            'invalid': len(results) - valid_count - no_response_count,
-            'no_response': no_response_count,
-            'results': results,
-        }, indent=2))
+        click.echo(
+            json.dumps(
+                {
+                    'total_validators': len(results),
+                    'valid': valid_count,
+                    'invalid': len(results) - valid_count - no_response_count,
+                    'no_response': no_response_count,
+                    'results': results,
+                },
+                indent=2,
+            )
+        )
     else:
         table = Table(title='PAT Check Results')
         table.add_column('UID', style='cyan', justify='right')

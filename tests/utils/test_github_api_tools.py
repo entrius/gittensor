@@ -1148,17 +1148,11 @@ class TestLoadMinersPrsErrorResilience:
         older = (now - timedelta(days=15)).strftime('%Y-%m-%dT%H:%M:%SZ')
         older_merge = (now - timedelta(days=14)).strftime('%Y-%m-%dT%H:%M:%SZ')
 
-        good_pr_before = _make_pr_node(
-            1, 'goodorg', 'goodrepo', created_at=recent, merged_at=recent_merge
-        )
-        bad_pr = _make_pr_node(
-            2, 'affinefoundation', 'affinetes', created_at=mid, merged_at=mid_merge
-        )
+        good_pr_before = _make_pr_node(1, 'goodorg', 'goodrepo', created_at=recent, merged_at=recent_merge)
+        bad_pr = _make_pr_node(2, 'affinefoundation', 'affinetes', created_at=mid, merged_at=mid_merge)
         # Simulate the banned repo returning null for closingIssuesReferences
         bad_pr['closingIssuesReferences'] = None
-        good_pr_after = _make_pr_node(
-            3, 'goodorg', 'goodrepo', created_at=older, merged_at=older_merge
-        )
+        good_pr_after = _make_pr_node(3, 'goodorg', 'goodrepo', created_at=older, merged_at=older_merge)
 
         mock_graphql_query.return_value = _make_graphql_response([good_pr_before, bad_pr, good_pr_after])
 

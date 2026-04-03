@@ -13,7 +13,6 @@ from gittensor.constants import (
     PIONEER_DIVIDEND_MAX_RATIO,
     PIONEER_DIVIDEND_RATE_1ST,
     PIONEER_DIVIDEND_RATE_2ND,
-    PIONEER_DIVIDEND_RATE_REST,
 )
 from gittensor.validator.oss_contributions.scoring import (
     calculate_pioneer_dividends,
@@ -73,8 +72,11 @@ class TestPioneerDividendCalculation:
         """Pioneer with no followers gets no dividend."""
         now = datetime.now(timezone.utc)
         pr = builder.create(
-            state=PRState.MERGED, uid=1, repo='test/repo',
-            merged_at=now, earned_score=100.0,
+            state=PRState.MERGED,
+            uid=1,
+            repo='test/repo',
+            merged_at=now,
+            earned_score=100.0,
         )
         evals = {1: self._make_eval(1, [pr])}
         calculate_pioneer_dividends(evals)
@@ -84,12 +86,18 @@ class TestPioneerDividendCalculation:
         """Pioneer gets dividend from the 1st follower."""
         now = datetime.now(timezone.utc)
         pioneer_pr = builder.create(
-            state=PRState.MERGED, uid=1, repo='test/repo',
-            merged_at=now - timedelta(days=5), earned_score=100.0,
+            state=PRState.MERGED,
+            uid=1,
+            repo='test/repo',
+            merged_at=now - timedelta(days=5),
+            earned_score=100.0,
         )
         follower_pr = builder.create(
-            state=PRState.MERGED, uid=2, repo='test/repo',
-            merged_at=now - timedelta(days=1), earned_score=80.0,
+            state=PRState.MERGED,
+            uid=2,
+            repo='test/repo',
+            merged_at=now - timedelta(days=1),
+            earned_score=80.0,
         )
         evals = {
             1: self._make_eval(1, [pioneer_pr]),
@@ -106,16 +114,25 @@ class TestPioneerDividendCalculation:
         """Pioneer dividend diminishes across follower positions."""
         now = datetime.now(timezone.utc)
         pioneer_pr = builder.create(
-            state=PRState.MERGED, uid=1, repo='test/repo',
-            merged_at=now - timedelta(days=10), earned_score=200.0,
+            state=PRState.MERGED,
+            uid=1,
+            repo='test/repo',
+            merged_at=now - timedelta(days=10),
+            earned_score=200.0,
         )
         f1_pr = builder.create(
-            state=PRState.MERGED, uid=2, repo='test/repo',
-            merged_at=now - timedelta(days=5), earned_score=100.0,
+            state=PRState.MERGED,
+            uid=2,
+            repo='test/repo',
+            merged_at=now - timedelta(days=5),
+            earned_score=100.0,
         )
         f2_pr = builder.create(
-            state=PRState.MERGED, uid=3, repo='test/repo',
-            merged_at=now - timedelta(days=1), earned_score=80.0,
+            state=PRState.MERGED,
+            uid=3,
+            repo='test/repo',
+            merged_at=now - timedelta(days=1),
+            earned_score=80.0,
         )
         evals = {
             1: self._make_eval(1, [pioneer_pr]),
@@ -132,15 +149,21 @@ class TestPioneerDividendCalculation:
         """Pioneer dividend is capped at PIONEER_DIVIDEND_MAX_RATIO × pioneer's earned_score."""
         now = datetime.now(timezone.utc)
         pioneer_pr = builder.create(
-            state=PRState.MERGED, uid=1, repo='test/repo',
-            merged_at=now - timedelta(days=10), earned_score=10.0,
+            state=PRState.MERGED,
+            uid=1,
+            repo='test/repo',
+            merged_at=now - timedelta(days=10),
+            earned_score=10.0,
         )
         # Large follower scores
         followers = []
         for i in range(5):
             pr = builder.create(
-                state=PRState.MERGED, uid=i + 2, repo='test/repo',
-                merged_at=now - timedelta(days=5 - i), earned_score=500.0,
+                state=PRState.MERGED,
+                uid=i + 2,
+                repo='test/repo',
+                merged_at=now - timedelta(days=5 - i),
+                earned_score=500.0,
             )
             followers.append(pr)
 
@@ -157,12 +180,18 @@ class TestPioneerDividendCalculation:
         """Pioneer dividends are independent per repository."""
         now = datetime.now(timezone.utc)
         pr_a = builder.create(
-            state=PRState.MERGED, uid=1, repo='test/repo-a',
-            merged_at=now - timedelta(days=5), earned_score=100.0,
+            state=PRState.MERGED,
+            uid=1,
+            repo='test/repo-a',
+            merged_at=now - timedelta(days=5),
+            earned_score=100.0,
         )
         pr_b = builder.create(
-            state=PRState.MERGED, uid=2, repo='test/repo-b',
-            merged_at=now - timedelta(days=5), earned_score=100.0,
+            state=PRState.MERGED,
+            uid=2,
+            repo='test/repo-b',
+            merged_at=now - timedelta(days=5),
+            earned_score=100.0,
         )
         evals = {
             1: self._make_eval(1, [pr_a]),
@@ -178,12 +207,18 @@ class TestPioneerDividendCalculation:
         """PRs below token score threshold don't participate in pioneer calculation."""
         now = datetime.now(timezone.utc)
         pioneer_pr = builder.create(
-            state=PRState.MERGED, uid=1, repo='test/repo',
-            merged_at=now - timedelta(days=5), earned_score=100.0,
+            state=PRState.MERGED,
+            uid=1,
+            repo='test/repo',
+            merged_at=now - timedelta(days=5),
+            earned_score=100.0,
         )
         ineligible_pr = builder.create(
-            state=PRState.MERGED, uid=2, repo='test/repo',
-            merged_at=now - timedelta(days=1), earned_score=50.0,
+            state=PRState.MERGED,
+            uid=2,
+            repo='test/repo',
+            merged_at=now - timedelta(days=1),
+            earned_score=50.0,
             token_score=MIN_TOKEN_SCORE_FOR_BASE_SCORE - 1,
         )
         evals = {

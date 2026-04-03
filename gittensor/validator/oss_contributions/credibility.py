@@ -34,9 +34,7 @@ def calculate_credibility(merged_prs: List['PullRequest'], closed_prs: List['Pul
     return merged_count / total_attempts
 
 
-def check_eligibility(
-    merged_prs: List['PullRequest'], closed_prs: List['PullRequest']
-) -> Tuple[bool, float, str]:
+def check_eligibility(merged_prs: List['PullRequest'], closed_prs: List['PullRequest']) -> Tuple[bool, float, str]:
     """Check if a miner passes the eligibility gate.
 
     Gate requires:

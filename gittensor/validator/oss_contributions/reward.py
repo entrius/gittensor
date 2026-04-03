@@ -112,7 +112,12 @@ async def get_rewards(
 
         # Calculate score
         miner_evaluation = await evaluate_miners_pull_requests(
-            uid, hotkey, pat, master_repositories, programming_languages, token_config,
+            uid,
+            hotkey,
+            pat,
+            master_repositories,
+            programming_languages,
+            token_config,
             stale_hotkey=stale_hotkey,
         )
         miner_evaluations[uid] = miner_evaluation

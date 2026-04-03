@@ -170,7 +170,7 @@ def config_set(key: str, value: str):
 cli.add_command(config_group)
 
 # Register miner commands
-from gittensor.cli.miner_commands import register_miner_commands
+from gittensor.cli.miner_commands import register_miner_commands  # noqa: E402
 
 register_miner_commands(cli)
 

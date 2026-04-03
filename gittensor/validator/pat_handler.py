@@ -6,9 +6,7 @@ Miners push their GitHub PAT to validators via PatBroadcastSynapse.
 Miners check if a validator has their PAT via PatCheckSynapse.
 """
 
-from __future__ import annotations
-
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING, Optional, Tuple
 
 import bittensor as bt
 import requests
@@ -26,7 +24,7 @@ if TYPE_CHECKING:
 # PatBroadcastSynapse handlers
 # ---------------------------------------------------------------------------
 
-async def handle_pat_broadcast(validator: Validator, synapse: PatBroadcastSynapse) -> PatBroadcastSynapse:
+async def handle_pat_broadcast(validator: 'Validator', synapse: PatBroadcastSynapse) -> PatBroadcastSynapse:
     """Validate and store a miner's GitHub PAT."""
     hotkey = synapse.dendrite.hotkey
 
@@ -63,7 +61,7 @@ async def handle_pat_broadcast(validator: Validator, synapse: PatBroadcastSynaps
     return synapse
 
 
-async def blacklist_pat_broadcast(validator: Validator, synapse: PatBroadcastSynapse) -> Tuple[bool, str]:
+async def blacklist_pat_broadcast(validator: 'Validator', synapse: PatBroadcastSynapse) -> Tuple[bool, str]:
     """Reject PAT broadcasts from unregistered hotkeys."""
     hotkey = synapse.dendrite.hotkey
     if hotkey not in validator.metagraph.hotkeys:
@@ -71,7 +69,7 @@ async def blacklist_pat_broadcast(validator: Validator, synapse: PatBroadcastSyn
     return False, 'Hotkey recognized'
 
 
-async def priority_pat_broadcast(validator: Validator, synapse: PatBroadcastSynapse) -> float:
+async def priority_pat_broadcast(validator: 'Validator', synapse: PatBroadcastSynapse) -> float:
     """Prioritize PAT broadcasts by stake."""
     hotkey = synapse.dendrite.hotkey
     if hotkey not in validator.metagraph.hotkeys:
@@ -84,7 +82,7 @@ async def priority_pat_broadcast(validator: Validator, synapse: PatBroadcastSyna
 # PatCheckSynapse handlers
 # ---------------------------------------------------------------------------
 
-async def handle_pat_check(validator: Validator, synapse: PatCheckSynapse) -> PatCheckSynapse:
+async def handle_pat_check(validator: 'Validator', synapse: PatCheckSynapse) -> PatCheckSynapse:
     """Check if the validator has the miner's PAT stored and re-validate it."""
     hotkey = synapse.dendrite.hotkey
     uid = validator.metagraph.hotkeys.index(hotkey)
@@ -116,7 +114,7 @@ async def handle_pat_check(validator: Validator, synapse: PatCheckSynapse) -> Pa
     return synapse
 
 
-async def blacklist_pat_check(validator: Validator, synapse: PatCheckSynapse) -> Tuple[bool, str]:
+async def blacklist_pat_check(validator: 'Validator', synapse: PatCheckSynapse) -> Tuple[bool, str]:
     """Reject PAT checks from unregistered hotkeys."""
     hotkey = synapse.dendrite.hotkey
     if hotkey not in validator.metagraph.hotkeys:
@@ -124,7 +122,7 @@ async def blacklist_pat_check(validator: Validator, synapse: PatCheckSynapse) ->
     return False, 'Hotkey recognized'
 
 
-async def priority_pat_check(validator: Validator, synapse: PatCheckSynapse) -> float:
+async def priority_pat_check(validator: 'Validator', synapse: PatCheckSynapse) -> float:
     """Prioritize PAT checks by stake."""
     hotkey = synapse.dendrite.hotkey
     if hotkey not in validator.metagraph.hotkeys:
@@ -141,7 +139,7 @@ async def priority_pat_check(validator: Validator, synapse: PatCheckSynapse) -> 
 _TEST_REPO = 'torvalds/linux'
 
 
-def _test_pat_against_repo(pat: str) -> str | None:
+def _test_pat_against_repo(pat: str) -> Optional[str]:
     """Run a test API call against a known repo to catch org-restricted or expired PATs.
 
     Fetches a small number of closed PRs to mimic the real scoring query pattern.

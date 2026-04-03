@@ -44,7 +44,7 @@ def detect_and_penalize_miners_sharing_github(miner_evaluations: Dict[int, Miner
 
 
 def validate_response_and_initialize_miner_evaluation(
-    uid: int, hotkey: str, pat: Optional[str]
+    uid: int, hotkey: str, pat: Optional[str], stale_hotkey: Optional[str] = None
 ) -> MinerEvaluation:
     """
     Validate a miner's stored PAT and initialize their evaluation object.
@@ -53,6 +53,7 @@ def validate_response_and_initialize_miner_evaluation(
         uid: The miner's unique identifier
         hotkey: The miner's hotkey
         pat: The miner's GitHub PAT from local storage (may be None if not stored)
+        stale_hotkey: If set, the UID has a stored PAT from this old hotkey (re-registration detected)
 
     Returns:
         MinerEvaluation: Initialized evaluation object with failure reason if validation failed
@@ -65,7 +66,14 @@ def validate_response_and_initialize_miner_evaluation(
         return MinerEvaluation(uid=uid, hotkey='', failed_reason=f'No hotkey for miner {uid}')
 
     if not pat:
-        return MinerEvaluation(uid=uid, hotkey=hotkey, failed_reason=f'No stored PAT for miner {uid}')
+        if stale_hotkey:
+            reason = (
+                f'New miner registered on UID {uid}: '
+                f'hotkey changed {stale_hotkey[:16]}... → {hotkey[:16]}... — miner must run `gitt miner post`'
+            )
+        else:
+            reason = f'No stored PAT for miner {uid} — miner must run `gitt miner post`'
+        return MinerEvaluation(uid=uid, hotkey=hotkey, failed_reason=reason)
 
     miner_eval = MinerEvaluation(uid=uid, hotkey=hotkey)
 

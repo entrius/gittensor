@@ -34,6 +34,7 @@ async def evaluate_miners_pull_requests(
     master_repositories: Dict[str, RepositoryConfig],
     programming_languages: Dict[str, LanguageConfig],
     token_config: TokenConfig,
+    stale_hotkey: Optional[str] = None,
 ) -> MinerEvaluation:
     """
     Entry point from taking a miners response -> Get PRs -> Score PRs by tier
@@ -45,6 +46,7 @@ async def evaluate_miners_pull_requests(
         master_repositories: The incentivized repositories and their RepositoryConfig objects
         programming_languages: The programming languages and their weights
         token_config: Token-based scoring weights configuration
+        stale_hotkey: If set, the UID has a stored PAT from this old hotkey (re-registration detected)
 
     Returns:
         MinerEvaluation: The object containing scores, valid_prs, etc.
@@ -52,7 +54,7 @@ async def evaluate_miners_pull_requests(
 
     bt.logging.info(f'******* Reward function called for UID: {uid} *******')
 
-    miner_eval = validate_response_and_initialize_miner_evaluation(uid, hotkey, pat)
+    miner_eval = validate_response_and_initialize_miner_evaluation(uid, hotkey, pat, stale_hotkey=stale_hotkey)
     if miner_eval.failed_reason is not None:
         bt.logging.info(f'UID {uid} not being evaluated: {miner_eval.failed_reason}')
         return miner_eval
@@ -101,15 +103,17 @@ async def get_rewards(
         hotkey = self.metagraph.hotkeys[uid]
         pat_entry = pat_by_uid.get(uid)
         pat = None
+        stale_hotkey = None
         if pat_entry:
             if pat_entry.get('hotkey') == hotkey:
                 pat = pat_entry['pat']
             else:
-                bt.logging.info(f'UID {uid}: stale PAT entry (hotkey mismatch) — miner must re-broadcast')
+                stale_hotkey = pat_entry.get('hotkey')
 
         # Calculate score
         miner_evaluation = await evaluate_miners_pull_requests(
-            uid, hotkey, pat, master_repositories, programming_languages, token_config
+            uid, hotkey, pat, master_repositories, programming_languages, token_config,
+            stale_hotkey=stale_hotkey,
         )
         miner_evaluations[uid] = miner_evaluation
 

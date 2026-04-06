@@ -1,7 +1,7 @@
 # The MIT License (MIT)
 # Copyright © 2025 Entrius
 
-"""Issue bounties forward pass — verify and vote on active issues."""
+"""Issue bounties forward pass — harvest, verify, and vote on active issues."""
 
 from typing import TYPE_CHECKING, Dict
 
@@ -57,6 +57,11 @@ async def issue_competitions(
             contract_address=contract_addr,
             subtensor=self.subtensor,
         )
+
+        # Harvest emissions first - flush accumulated stake into bounty pool
+        harvest_result = contract_client.harvest_emissions(self.wallet)
+        if harvest_result and harvest_result.get('status') == 'success':
+            bt.logging.success(f'Harvested emissions! Extrinsic: {harvest_result.get("tx_hash", "")}')
 
         # Build mapping of github_id->hotkey for bronze+ miners only (eligible for payouts)
         eligible_miners = {

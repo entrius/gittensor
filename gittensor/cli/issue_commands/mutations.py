@@ -6,6 +6,7 @@ Top-level mutation commands for issue CLI
 
 Commands:
     gitt register
+    gitt harvest
 """
 
 from pathlib import Path
@@ -21,6 +22,7 @@ from .helpers import (
     get_contract_address,
     load_config,
     print_error,
+    print_network_header,
     print_success,
     resolve_network,
     validate_bounty_amount,
@@ -237,7 +239,7 @@ def issue_register(
 
         print_success('Issue registered successfully!')
         console.print(f'[cyan]Transaction Hash:[/cyan] {result.extrinsic_hash}')
-        console.print('[dim]Issue registered on contract.[/dim]')
+        console.print('[dim]Issue will be visible once bounty is funded via harvest_emissions()[/dim]')
 
     except ImportError as e:
         print_error(f'Missing dependency - {e}')
@@ -252,3 +254,143 @@ def issue_register(
             console.print('  \u2022 Caller is not the contract owner')
         else:
             print_error(f'Error registering issue: {e}')
+
+
+@click.command('harvest')
+@click.option(
+    '--wallet-name',
+    '--wallet.name',
+    '--wallet',
+    default='validator',
+    help='Wallet name',
+)
+@click.option(
+    '--wallet-hotkey',
+    '--wallet.hotkey',
+    '--hotkey',
+    default='default',
+    help='Hotkey name',
+)
+@click.option(
+    '--network',
+    '-n',
+    default=None,
+    type=click.Choice(['finney', 'test', 'local'], case_sensitive=False),
+    help='Network (finney/test/local)',
+)
+@click.option(
+    '--rpc-url',
+    default=None,
+    help='Subtensor RPC endpoint (overrides --network)',
+)
+@click.option(
+    '--contract',
+    default='',
+    help='Contract address (uses config if empty)',
+)
+@click.option('--verbose', '-v', is_flag=True, help='Show detailed output')
+def issue_harvest(wallet_name: str, wallet_hotkey: str, network: str, rpc_url: str, contract: str, verbose: bool):
+    """
+    Manually trigger emission harvest from contract treasury.
+
+    This command is permissionless - any wallet can trigger it.
+    The contract handles emission collection and distribution internally.
+
+    \b
+    Examples:
+        gitt harvest
+        gitt harvest --verbose
+        gitt harvest --wallet-name mywallet --wallet-hotkey mykey
+    """
+    console.print('\n[bold cyan]Manual Emission Harvest[/bold cyan]\n')
+
+    contract_addr = get_contract_address(contract)
+    ws_endpoint, network_name = resolve_network(network, rpc_url)
+
+    if not contract_addr:
+        raise click.ClickException(
+            'Contract address not configured. Set CONTRACT_ADDRESS env var or run ./up.sh --issues.'
+        )
+
+    print_network_header(network_name, contract_addr)
+    console.print(f'[dim]Wallet: {wallet_name}/{wallet_hotkey}[/dim]\n')
+
+    try:
+        import bittensor as bt
+
+        from gittensor.validator.issue_competitions.contract_client import (
+            IssueCompetitionContractClient,
+        )
+
+        with console.status('[bold cyan]Loading wallet...', spinner='dots'):
+            wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
+            hotkey_addr = wallet.hotkey.ss58_address
+        console.print(f'[green]Hotkey address:[/green] {hotkey_addr}')
+
+        with console.status('[bold cyan]Connecting to network...', spinner='dots'):
+            subtensor = bt.Subtensor(network=ws_endpoint)
+
+        # Show wallet balance (informational only)
+        if verbose:
+            try:
+                balance = subtensor.get_balance(hotkey_addr)
+                console.print(f'[dim]Wallet balance: {balance}[/dim]')
+            except Exception as e:
+                console.print(f'[dim]Could not fetch balance: {e}[/dim]')
+
+        with console.status('[bold cyan]Initializing contract client...', spinner='dots'):
+            client = IssueCompetitionContractClient(
+                contract_address=contract_addr,
+                subtensor=subtensor,
+            )
+
+        if verbose:
+            # Show contract state
+            console.print('[dim]Reading contract state...[/dim]')
+            try:
+                alpha_pool = client.get_alpha_pool()
+                pending = client.get_treasury_stake()
+                last_harvest = client.get_last_harvest_block()
+                current_block = subtensor.get_current_block()
+
+                console.print(f'[dim]Alpha pool: {format_alpha(alpha_pool, 4)} ALPHA[/dim]')
+                console.print(f'[dim]Treasury stake: {format_alpha(pending, 4)} ALPHA[/dim]')
+                console.print(f'[dim]Last harvest block: {last_harvest}[/dim]')
+                console.print(f'[dim]Current block: {current_block}[/dim]')
+                if last_harvest > 0:
+                    console.print(f'[dim]Blocks since harvest: {current_block - last_harvest}[/dim]')
+            except Exception as e:
+                console.print(f'[yellow]Warning: Could not read contract state: {e}[/yellow]')
+
+        with console.status('[bold cyan]Calling harvest_emissions()...', spinner='dots'):
+            result = client.harvest_emissions(wallet)
+
+        if result:
+            if result.get('status') == 'success':
+                print_success('Harvest succeeded!')
+                console.print(f'[cyan]Transaction hash:[/cyan] {result.get("tx_hash", "N/A")}')
+                console.print('[dim]Treasury stake processed. Excess emissions recycled if any.[/dim]')
+            elif result.get('status') == 'partial':
+                console.print('\n[yellow]Harvest completed but recycling failed[/yellow]')
+                console.print(f'[cyan]Transaction hash:[/cyan] {result.get("tx_hash", "N/A")}')
+                print_error(result.get('error', 'Unknown'))
+                console.print('[dim]Check proxy permissions: contract needs NonCritical proxy.[/dim]')
+            elif result.get('status') == 'failed':
+                print_error(f'Harvest failed: {result.get("error", "Unknown error")}')
+            else:
+                console.print(f'\n[yellow]Harvest result: {result}[/yellow]')
+        else:
+            print_error('Harvest returned None — check logs for details.')
+            console.print('[dim]Run with --verbose for more information.[/dim]')
+
+    except ImportError as e:
+        print_error(f'Missing dependency — {e}')
+        console.print('[dim]Install with: pip install bittensor substrate-interface[/dim]')
+    except Exception as e:
+        import traceback
+
+        print_error(f'{type(e).__name__}: {e}')
+        if verbose:
+            console.print(f'[dim]Full traceback:\n{traceback.format_exc()}[/dim]')
+        else:
+            console.print('[dim]Run with --verbose for full traceback.[/dim]')

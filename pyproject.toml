@@ -1,18 +1,49 @@
-[tool.black]
-line-length = 120
-skip-string-normalization = true
-target-version = ['py39']
+[project]
+name = "gittensor"
+version = "5.0.0"
+description = "gittensor"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12"
+dependencies = [
+    "bittensor==10.0.1",
+    "bittensor-cli==9.17.0",
+    "bittensor-commit-reveal==0.4.0",
+    "bittensor-wallet==4.0.0",
+    "click",
+    "levenshtein==0.27.3",
+    "psycopg2-binary==2.9.10",
+    "python-dotenv==1.2.1",
+    "pytz==2025.2",
+    "rich",
+    "substrate-interface",
+    "tree-sitter==0.24.0",
+    "tree-sitter-language-pack==0.7.2",
+    "wandb==0.21.3",
+]
 
-[tool.isort]
-profile = "black"
-line_length = 120
-multi_line_output = 3
-include_trailing_comma = true
-skip_gitignore = true
+[project.optional-dependencies]
+dev = [
+    "pytest==9.0.0",
+    "pyright",
+    "ruff==0.14.10",
+]
+debug = [
+    "debugpy==1.8.11",
+    "fastapi==0.110.1",
+    "uvicorn==0.32.0",
+]
+
+[project.scripts]
+gitt = "gittensor.cli.main:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [tool.ruff]
 line-length = 120
-target-version = "py39"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]
@@ -21,3 +52,5 @@ ignore = ["E501"]
 [tool.ruff.format]
 quote-style = "single"
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -788,7 +788,7 @@ def read_issues_from_contract(ws_endpoint: str, contract_addr: str, verbose: boo
 
     except ImportError as e:
         console.print(f'[yellow]Cannot read from contract: {e}[/yellow]')
-        console.print('[dim]Install with: pip install substrate-interface[/dim]')
+        console.print('[dim]Install with: uv sync[/dim]')
         return []
     except Exception as e:
         if verbose:

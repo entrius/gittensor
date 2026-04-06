@@ -27,3 +27,4 @@ CLAUDE.md
 target/
 **/*.rs.bk
 *.lock
+!uv.lock

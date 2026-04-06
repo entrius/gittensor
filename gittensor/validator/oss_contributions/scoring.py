@@ -319,7 +319,7 @@ def calculate_pioneer_dividends(
         max_dividend = pioneer_pr.earned_score * PIONEER_DIVIDEND_MAX_RATIO
         capped = min(dividend, max_dividend)
         pioneer_pr.pioneer_dividend = round(capped, 2)
-        pioneer_pr.earned_score += pioneer_pr.pioneer_dividend
+        pioneer_pr.earned_score = round(pioneer_pr.earned_score + pioneer_pr.pioneer_dividend, 2)
 
         cap_note = f' (capped from {dividend:.2f})' if capped < dividend else ''
         bt.logging.info(
@@ -518,7 +518,7 @@ def calculate_open_pr_collateral_score(pr: PullRequest) -> float:
 
     Applicable multipliers: repo_weight, issue
     NOT applicable: time_decay (merge-based), credibility_multiplier (merge-based),
-                    uniqueness (cross-miner), open_pr_spam (not for collateral)
+                    open_pr_spam (not for collateral)
     """
     from math import prod
 

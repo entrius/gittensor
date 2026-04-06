@@ -30,7 +30,7 @@ async def issue_competitions(
     1. Harvest emissions into the bounty pool
     2. Get active issues from the smart contract
     3. For each active issue, check GitHub:
-       - If solved by bronze+ miner -> vote_solution
+       - If solved by eligible miner -> vote_solution
        - If closed but not by eligible miner -> vote_cancel_issue
 
     Args:
@@ -63,15 +63,13 @@ async def issue_competitions(
         if harvest_result and harvest_result.get('status') == 'success':
             bt.logging.success(f'Harvested emissions! Extrinsic: {harvest_result.get("tx_hash", "")}')
 
-        # Build mapping of github_id->hotkey for bronze+ miners only (eligible for payouts)
+        # Build mapping of github_id->hotkey for eligible miners only
         eligible_miners = {
             eval.github_id: eval.hotkey
             for eval in miner_evaluations.values()
             if eval.github_id and eval.github_id != '0' and eval.is_eligible
         }
-        bt.logging.info(
-            f'Issue bounties: {len(eligible_miners)} eligible miners (bronze+) out of {len(miner_evaluations)} total'
-        )
+        bt.logging.info(f'Issue bounties: {len(eligible_miners)} eligible miners out of {len(miner_evaluations)} total')
         for github_id, hotkey in eligible_miners.items():
             bt.logging.info(f'  Eligible miner: github_id={github_id}, hotkey={hotkey[:12]}...')
 

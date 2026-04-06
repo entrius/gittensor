@@ -4264,14 +4264,6 @@
     "tier": "Bronze",
     "weight": 0.13
   },
-  "psf/black": {
-    "tier": "Bronze",
-    "weight": 0.1
-  },
-  "psf/requests": {
-    "tier": "Bronze",
-    "weight": 0.13
-  },
   "puikinsh/Adminator-admin-dashboard": {
     "tier": "Bronze",
     "weight": 0.11
@@ -4313,10 +4305,6 @@
   "pytest-dev/pytest": {
     "tier": "Bronze",
     "weight": 0.1
-  },
-  "python-pillow/Pillow": {
-    "tier": "Bronze",
-    "weight": 0.23
   },
   "python-telegram-bot/python-telegram-bot": {
     "tier": "Bronze",

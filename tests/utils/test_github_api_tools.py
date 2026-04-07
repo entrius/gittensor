@@ -15,8 +15,8 @@ Note: These tests require the full gittensor package to be importable.
 Run with: python run_tests.py tests/utils/
 """
 
-from typing import Dict
 from datetime import datetime, timedelta, timezone
+from typing import Dict, Optional
 from unittest.mock import Mock, call, patch
 
 import pytest
@@ -1191,7 +1191,7 @@ def _make_blob_response(text: str) -> Dict:
     return {'text': text, 'byteSize': len(text), 'isBinary': False}
 
 
-def _make_file_change(filename: str, status: str = 'modified', previous_filename: str = None):
+def _make_file_change(filename: str, status: str = 'modified', previous_filename: Optional[str] = None):
     """Create a mock FileChange-like object for fetch_file_contents_with_base tests."""
     change = Mock()
     change.filename = filename

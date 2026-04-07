@@ -491,6 +491,24 @@
     "tier": "Bronze",
     "weight": 0.17
   },
+  "autoppia/autoppia_iwa": {
+    "additional_acceptable_branches": ["contribution/*"],
+    "inactive_at": "2026-04-06T00:00:00Z",
+    "tier": "Silver",
+    "weight": 5.33
+  },
+  "autoppia/autoppia_web_agents_subnet": {
+    "additional_acceptable_branches": ["dev", "dev-gittensor"],
+    "inactive_at": "2026-04-06T00:00:00Z",
+    "tier": "Silver",
+    "weight": 5.79
+  },
+  "autoppia/autoppia_webs_demo": {
+    "additional_acceptable_branches": ["feature/*", "fix/*"],
+    "inactive_at": "2026-04-06T00:00:00Z",
+    "tier": "Silver",
+    "weight": 5.2
+  },
   "autorope/donkeycar": {
     "tier": "Bronze",
     "weight": 0.16

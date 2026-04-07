@@ -26,7 +26,6 @@ from typing import List, Union
 import bittensor as bt
 import numpy as np
 
-from gittensor.mock import MockDendrite
 from gittensor.utils.config import add_validator_args
 from neurons.base.neuron import BaseNeuron
 from neurons.base.utils.weight_utils import (
@@ -54,10 +53,7 @@ class BaseValidatorNeuron(BaseNeuron):
         self.hotkeys = copy.deepcopy(self.metagraph.hotkeys)
 
         # Dendrite lets us send messages to other nodes (axons) in the network.
-        if self.config.mock:
-            self.dendrite = MockDendrite(wallet=self.wallet)
-        else:
-            self.dendrite = bt.Dendrite(wallet=self.wallet)
+        self.dendrite = bt.Dendrite(wallet=self.wallet)
         bt.logging.info(f'Dendrite: {self.dendrite}')
 
         # Set up initial scoring weights for validation

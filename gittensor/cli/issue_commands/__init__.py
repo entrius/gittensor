@@ -8,7 +8,6 @@ Command structure:
     gitt issues (alias: i)       - Issue management commands
         list                         List issues or view a specific issue
         submissions                  List open PR submissions for an issue
-        predict                      Predict merge probabilities for PR submissions
         register                     Register a new issue bounty
         bounty-pool                  View total bounty pool
         pending-harvest              View pending emissions
@@ -41,7 +40,6 @@ from .mutations import (
     issue_harvest,
     issue_register,
 )
-from .predict import issues_predict
 from .submissions import issues_submissions
 from .view import admin_info, issues_bounty_pool, issues_list, issues_pending_harvest
 from .vote import vote
@@ -55,7 +53,6 @@ def issues_group():
     Commands:
         list              List issues or view a specific issue
         submissions       List open PR submissions for an issue
-        predict           Predict merge probabilities for PR submissions
         register          Register a new issue bounty
         bounty-pool       View total bounty pool
         pending-harvest   View pending emissions
@@ -65,7 +62,6 @@ def issues_group():
 
 issues_group.add_command(issues_list, name='list')
 issues_group.add_command(issues_submissions, name='submissions')
-issues_group.add_command(issues_predict, name='predict')
 issues_group.add_command(issue_register, name='register')
 issues_group.add_command(issues_bounty_pool, name='bounty-pool')
 issues_group.add_command(issues_pending_harvest, name='pending-harvest')
@@ -97,7 +93,6 @@ __all__ = [
     'vote',
     'admin',
     'issues_submissions',
-    'issues_predict',
     'issue_register',
     'issue_harvest',
     # Helpers

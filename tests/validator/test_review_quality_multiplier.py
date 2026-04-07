@@ -20,7 +20,6 @@ from gittensor.classes import PRState
 from gittensor.constants import MAINTAINER_ASSOCIATIONS, REVIEW_PENALTY_RATE
 from gittensor.utils.github_api_tools import get_pull_request_maintainer_changes_requested_count
 from gittensor.validator.oss_contributions.scoring import calculate_review_quality_multiplier
-from gittensor.validator.oss_contributions.tier_config import TIERS, Tier
 from tests.validator.conftest import PRBuilder
 
 # ============================================================================
@@ -31,11 +30,6 @@ from tests.validator.conftest import PRBuilder
 @pytest.fixture
 def builder():
     return PRBuilder()
-
-
-@pytest.fixture
-def bronze():
-    return TIERS[Tier.BRONZE]
 
 
 # ============================================================================
@@ -101,16 +95,16 @@ class TestCalculateReviewQualityMultiplier:
 class TestReviewQualityMultiplierOnPullRequest:
     """Tests for review_quality_multiplier field on PullRequest and its effect on earned_score."""
 
-    def test_default_multiplier_is_one(self, builder, bronze):
-        pr = builder.create(state=PRState.MERGED, tier=bronze)
+    def test_default_multiplier_is_one(self, builder):
+        pr = builder.create(state=PRState.MERGED)
         assert pr.review_quality_multiplier == 1.0
 
-    def test_default_changes_requested_count_is_zero(self, builder, bronze):
-        pr = builder.create(state=PRState.MERGED, tier=bronze)
+    def test_default_changes_requested_count_is_zero(self, builder):
+        pr = builder.create(state=PRState.MERGED)
         assert pr.changes_requested_count == 0
 
-    def test_review_multiplier_reduces_earned_score(self, builder, bronze):
-        pr = builder.create(state=PRState.MERGED, tier=bronze)
+    def test_review_multiplier_reduces_earned_score(self, builder):
+        pr = builder.create(state=PRState.MERGED)
         pr.base_score = 100.0
         pr.repo_weight_multiplier = 1.0
         pr.issue_multiplier = 1.0
@@ -126,8 +120,8 @@ class TestReviewQualityMultiplierOnPullRequest:
 
         assert score_one_review == pytest.approx(score_no_penalty * 0.88)
 
-    def test_zero_multiplier_zeroes_earned_score(self, builder, bronze):
-        pr = builder.create(state=PRState.MERGED, tier=bronze)
+    def test_zero_multiplier_zeroes_earned_score(self, builder):
+        pr = builder.create(state=PRState.MERGED)
         pr.base_score = 50.0
         pr.repo_weight_multiplier = 1.0
         pr.issue_multiplier = 1.0
@@ -138,9 +132,9 @@ class TestReviewQualityMultiplierOnPullRequest:
 
         assert pr.calculate_final_earned_score() == 0.0
 
-    def test_multiplier_participates_in_product(self, builder, bronze):
+    def test_multiplier_participates_in_product(self, builder):
         """review_quality_multiplier participates in the product of all multipliers."""
-        pr = builder.create(state=PRState.MERGED, tier=bronze)
+        pr = builder.create(state=PRState.MERGED)
         pr.base_score = 80.0
         pr.repo_weight_multiplier = 1.0
         pr.issue_multiplier = 1.0

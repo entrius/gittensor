@@ -3,6 +3,8 @@
 
 """Issue submissions command (`gitt issues submissions`)."""
 
+from __future__ import annotations
+
 import click
 
 from .help import StyledCommand

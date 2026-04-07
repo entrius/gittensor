@@ -23,7 +23,6 @@ import bittensor as bt
 from websockets.exceptions import ConnectionClosedError
 
 from gittensor import __spec_version__ as spec_version
-from gittensor.mock import MockMetagraph, MockSubtensor
 
 # Sync calls set weights and also resyncs the metagraph.
 from gittensor.utils.config import add_args, check_config, config
@@ -80,14 +79,9 @@ class BaseNeuron(ABC):
         bt.logging.info('Setting up bittensor objects.')
 
         # The wallet holds the cryptographic key pairs for the miner.
-        if self.config.mock:
-            self.wallet = bt.MockWallet(config=self.config)
-            self.subtensor = MockSubtensor(self.config.netuid, wallet=self.wallet)
-            self.metagraph = MockMetagraph(self.config.netuid, subtensor=self.subtensor)
-        else:
-            self.wallet = bt.Wallet(config=self.config)
-            self.subtensor = bt.Subtensor(config=self.config)
-            self.metagraph = self.subtensor.metagraph(self.config.netuid)
+        self.wallet = bt.Wallet(config=self.config)
+        self.subtensor = bt.Subtensor(config=self.config)
+        self.metagraph = self.subtensor.metagraph(self.config.netuid)
 
         bt.logging.info(f'Wallet: {self.wallet}')
         bt.logging.info(f'Subtensor: {self.subtensor}')
@@ -105,8 +99,6 @@ class BaseNeuron(ABC):
 
     def _reconnect_subtensor(self):
         """Recreate subtensor connection when WebSocket goes stale."""
-        if self.config.mock:
-            return  # Don't reconnect in mock mode
         bt.logging.info('Reconnecting subtensor...')
         self.subtensor = bt.Subtensor(config=self.config)
 

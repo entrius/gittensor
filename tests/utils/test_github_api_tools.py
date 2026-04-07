@@ -15,6 +15,7 @@ Note: These tests require the full gittensor package to be importable.
 Run with: python run_tests.py tests/utils/
 """
 
+from datetime import datetime, timedelta, timezone
 from unittest.mock import Mock, call, patch
 
 import pytest
@@ -65,16 +66,6 @@ def mock_response_502():
     response.status_code = 502
     response.text = '<html><title>502 Bad Gateway</title></html>'
     return response
-
-
-@pytest.fixture
-def clear_github_cache():
-    """Clear the GitHub user cache before test."""
-    import gittensor.utils.github_api_tools as api_tools
-
-    api_tools._GITHUB_USER_CACHE.clear()
-    yield
-    api_tools._GITHUB_USER_CACHE.clear()
 
 
 # ============================================================================
@@ -367,7 +358,7 @@ class TestOtherGitHubAPIFunctions:
     @patch('gittensor.utils.github_api_tools.requests.get')
     @patch('gittensor.utils.github_api_tools.time.sleep')
     @patch('gittensor.utils.github_api_tools.bt.logging')
-    def test_get_github_id_retry_logic(self, mock_logging, mock_sleep, mock_get, clear_github_cache):
+    def test_get_github_id_retry_logic(self, mock_logging, mock_sleep, mock_get):
         """Test that get_github_id retries on failure."""
         mock_response_success = Mock()
         mock_response_success.status_code = 200
@@ -387,7 +378,7 @@ class TestOtherGitHubAPIFunctions:
     @patch('gittensor.utils.github_api_tools.requests.get')
     @patch('gittensor.utils.github_api_tools.time.sleep')
     @patch('gittensor.utils.github_api_tools.bt.logging')
-    def test_get_github_account_age_retry_logic(self, mock_logging, mock_sleep, mock_get, clear_github_cache):
+    def test_get_github_account_age_retry_logic(self, mock_logging, mock_sleep, mock_get):
         """Test that get_github_account_age_days retries on failure."""
         mock_response_success = Mock()
         mock_response_success.status_code = 200
@@ -1149,17 +1140,19 @@ class TestLoadMinersPrsErrorResilience:
         from gittensor.classes import MinerEvaluation
         from gittensor.validator.utils.load_weights import RepositoryConfig
 
-        good_pr_before = _make_pr_node(
-            1, 'goodorg', 'goodrepo', created_at='2026-02-15T00:00:00Z', merged_at='2026-02-16T00:00:00Z'
-        )
-        bad_pr = _make_pr_node(
-            2, 'affinefoundation', 'affinetes', created_at='2026-02-10T00:00:00Z', merged_at='2026-02-11T00:00:00Z'
-        )
+        now = datetime.now(timezone.utc)
+        recent = (now - timedelta(days=5)).strftime('%Y-%m-%dT%H:%M:%SZ')
+        recent_merge = (now - timedelta(days=4)).strftime('%Y-%m-%dT%H:%M:%SZ')
+        mid = (now - timedelta(days=10)).strftime('%Y-%m-%dT%H:%M:%SZ')
+        mid_merge = (now - timedelta(days=9)).strftime('%Y-%m-%dT%H:%M:%SZ')
+        older = (now - timedelta(days=15)).strftime('%Y-%m-%dT%H:%M:%SZ')
+        older_merge = (now - timedelta(days=14)).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+        good_pr_before = _make_pr_node(1, 'goodorg', 'goodrepo', created_at=recent, merged_at=recent_merge)
+        bad_pr = _make_pr_node(2, 'affinefoundation', 'affinetes', created_at=mid, merged_at=mid_merge)
         # Simulate the banned repo returning null for closingIssuesReferences
         bad_pr['closingIssuesReferences'] = None
-        good_pr_after = _make_pr_node(
-            3, 'goodorg', 'goodrepo', created_at='2026-02-05T00:00:00Z', merged_at='2026-02-06T00:00:00Z'
-        )
+        good_pr_after = _make_pr_node(3, 'goodorg', 'goodrepo', created_at=older, merged_at=older_merge)
 
         mock_graphql_query.return_value = _make_graphql_response([good_pr_before, bad_pr, good_pr_after])
 

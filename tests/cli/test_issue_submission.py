@@ -113,3 +113,16 @@ def test_submissions_human_no_open_prs_message(cli_root, runner, sample_issue):
 
     assert result.exit_code == 0
     assert 'No open submissions available' in result.output
+
+
+def test_submissions_help_via_issue_alias_routes_to_command_help(cli_root, runner):
+    result = runner.invoke(
+        cli_root,
+        ['i', 'submissions', '--help'],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0
+    assert 'On-chain issue ID' in result.output
+    assert '--id' in result.output
+    assert '--logging.debug' not in result.output

@@ -20,6 +20,8 @@ from .helpers import (
     print_warning,
     resolve_network,
     validate_issue_id,
+    with_cli_behavior_options,
+    with_network_contract_options,
 )
 
 
@@ -31,25 +33,8 @@ from .helpers import (
     type=int,
     help='On-chain issue ID',
 )
-@click.option(
-    '--network',
-    '-n',
-    default=None,
-    type=click.Choice(['finney', 'test', 'local'], case_sensitive=False),
-    help='Network (finney/test/local)',
-)
-@click.option(
-    '--rpc-url',
-    default=None,
-    help='Subtensor RPC endpoint (overrides --network)',
-)
-@click.option(
-    '--contract',
-    default='',
-    help='Contract address (uses default if empty)',
-)
-@click.option('--verbose', '-v', is_flag=True, help='Show debug output')
-@click.option('--json', 'as_json', is_flag=True, help='Output as JSON for scripting')
+@with_cli_behavior_options(include_verbose=True, include_json=True)
+@with_network_contract_options('Contract address (uses default if empty)')
 def issues_submissions(
     issue_id: int,
     network: str | None,

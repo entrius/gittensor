@@ -3,7 +3,7 @@ from typing import List
 import bittensor as bt
 
 
-def check_uid_availability(metagraph: 'bt.metagraph.Metagraph', uid: int, vpermit_tao_limit: int) -> bool:
+def check_uid_availability(metagraph: 'bt.Metagraph', uid: int, vpermit_tao_limit: int) -> bool:
     """Return whether a UID is eligible for querying.
 
     Args:
@@ -41,4 +41,4 @@ def get_all_uids(self, exclude: List[int] = []) -> set[int]:
     # Ensure miner UID 0 is always included (subnet requirement)
     available_miner_uids.add(0)
 
-    return sorted(available_miner_uids)
+    return set(available_miner_uids)

@@ -1,6 +1,5 @@
 # Entrius 2025
 import re
-from datetime import datetime, timezone
 from typing import Dict
 
 # =============================================================================
@@ -13,7 +12,6 @@ SECONDS_PER_HOUR = 3600
 # GitHub API
 # =============================================================================
 BASE_GITHUB_API_URL = 'https://api.github.com'
-MIN_GITHUB_ACCOUNT_AGE = 180  # days
 # 1MB max file size for github api file fetches. Files exceeding this get no score.
 MAX_FILE_SIZE_BYTES = 1_000_000
 # Too many object lookups in one GraphQL query can trigger 502 errors and lose all results.
@@ -56,11 +54,11 @@ MAX_LINES_SCORED_FOR_NON_CODE_EXT = 300
 # =============================================================================
 # Repository & PR Scoring
 # =============================================================================
-PR_LOOKBACK_DAYS = 90  # how many days a merged pr will count for scoring
-DEFAULT_MERGED_PR_BASE_SCORE = 30
+PR_LOOKBACK_DAYS = 35  # rolling window for scoring
+MERGED_PR_BASE_SCORE = 30
 MIN_TOKEN_SCORE_FOR_BASE_SCORE = 5  # PRs below this get 0 base score (can still earn contribution bonus)
 MAX_CONTRIBUTION_BONUS = 30
-DEFAULT_MAX_CONTRIBUTION_SCORE_FOR_FULL_BONUS = 2000
+CONTRIBUTION_SCORE_FOR_FULL_BONUS = 2000
 
 # Boosts
 MAX_CODE_DENSITY_MULTIPLIER = 3.0
@@ -81,7 +79,7 @@ MAX_ISSUE_AGE_FOR_MAX_SCORE = 40  # days
 TIME_DECAY_GRACE_PERIOD_HOURS = 12  # hours before time decay begins
 TIME_DECAY_SIGMOID_MIDPOINT = 10  # days until 50% score loss
 TIME_DECAY_SIGMOID_STEEPNESS_SCALAR = 0.4
-TIME_DECAY_MIN_MULTIPLIER = 0.05  # 5% of score will retain through lookback days (90D)
+TIME_DECAY_MIN_MULTIPLIER = 0.05  # 5% of score will retain through lookback window
 
 # comment nodes for token scoring
 COMMENT_NODE_TYPES = frozenset(
@@ -104,17 +102,16 @@ INLINE_TEST_PATTERNS: Dict[str, re.Pattern] = {
 }
 
 # =============================================================================
-# Tiers & Collateral System
+# Eligibility Gate
 # =============================================================================
-TIER_BASED_INCENTIVE_MECHANISM_START_DATE = datetime(2025, 12, 31, 3, 45, 00, tzinfo=timezone.utc)
-DEFAULT_COLLATERAL_PERCENT = 0.20
+MIN_VALID_MERGED_PRS = 5  # minimum "valid" merged PRs (token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE) to receive score
+MIN_CREDIBILITY = 0.75  # minimum credibility ratio to receive score
+CREDIBILITY_MULLIGAN_COUNT = 1  # number of closed PRs forgiven (erased from merged+closed counts entirely)
 
-# Tier-based emission allocation splits
-TIER_EMISSION_SPLITS = {
-    'Bronze': 0.15,  # 15% of emissions
-    'Silver': 0.35,  # 35% of emissions
-    'Gold': 0.50,  # 50% of emissions
-}
+# =============================================================================
+# Collateral
+# =============================================================================
+OPEN_PR_COLLATERAL_PERCENT = 0.20
 
 # =============================================================================
 # Rewards & Emissions
@@ -125,7 +122,7 @@ RECYCLE_UID = 0
 UNIQUE_REPOS_MAX_RECYCLE = 0.8
 UNIQUE_REPOS_RECYCLE_DECAY_RATE = 0.005
 
-# Network emission scaling (total token score from tiered miners)
+# Network emission scaling (total token score from eligible miners)
 TOKEN_SCORE_MAX_RECYCLE = 0.8
 TOKEN_SCORE_RECYCLE_DECAY_RATE = 0.000012
 
@@ -145,9 +142,9 @@ MAINTAINER_ISSUE_BONUS = 0.25  # Extra bonus when issue was created by a maintai
 EXCESSIVE_PR_PENALTY_BASE_THRESHOLD = 10
 
 # Dynamic open PR threshold bonus for top contributors
-# Bonus = floor(total_unlocked_token_score / 500)
-# Example: 1500 token score across unlocked tiers / 500 = +3 bonus
-OPEN_PR_THRESHOLD_TOKEN_SCORE = 500.0  # Token score per +1 bonus (sum of all unlocked tiers)
+# Bonus = floor(total_token_score / 300)
+# Example: 900 total token score / 300 = +3 bonus
+OPEN_PR_THRESHOLD_TOKEN_SCORE = 300.0  # Token score per +1 bonus
 MAX_OPEN_PR_THRESHOLD = 30  # Maximum open PR threshold (base + bonus capped at this value)
 
 # =============================================================================
@@ -156,26 +153,3 @@ MAX_OPEN_PR_THRESHOLD = 30  # Maximum open PR threshold (base + bonus capped at 
 CONTRACT_ADDRESS = '5FWNdk8YNtNcHKrAx2krqenFrFAZG7vmsd2XN2isJSew3MrD'
 ISSUES_TREASURY_UID = 111  # UID of the smart contract neuron, if set to RECYCLE_UID then it's disabled
 ISSUES_TREASURY_EMISSION_SHARE = 0.15  # % of emissions allocated to funding issues treasury
-
-# =============================================================================
-# Merge Predictions
-# =============================================================================
-PREDICTIONS_EMISSIONS_SHARE = 0.15  # % of emissions allocated to prediction competition
-PREDICTIONS_TOP_K = 3  # only top-K miners by EMA receive prediction rewards
-PREDICTIONS_TOP_K_SHARES = [0.50, 0.35, 0.15]  # fixed reward split for top-K miners (must sum to 1.0)
-
-PREDICTIONS_EMA_BETA = 0.1  # EMA decay rate for predictions record
-PREDICTIONS_CORRECTNESS_EXPONENT = 3  # exponent on correctness to harshly punish incorrect predictions
-PREDICTIONS_TIMELINESS_EXPONENT = 1.8  # curve for early prediction bonus. higher = sharper curve. 1.0 = linear
-PREDICTIONS_MAX_TIMELINESS_BONUS = 0.75  # max bonus for earliest predictions
-PREDICTIONS_MAX_CONSENSUS_BONUS = 0.25  # max bonus for pre-convergence predictions
-PREDICTIONS_MAX_ORDER_BONUS = 0.75  # max bonus for first correct predictor (applies to merged PR only)
-PREDICTIONS_ORDER_CORRECTNESS_THRESHOLD = 0.66  # min raw correctness to qualify for order bonus
-# variance threshold for full rewards
-# if variance across predictions never exceeds this threshold, the solution must be 'obvious'
-PREDICTIONS_CONSENSUS_VARIANCE_TARGET = 0.2
-
-# Cooldown & Limits
-PREDICTIONS_COOLDOWN_SECONDS = 900  # 15 min cooldown per miner per PR re-prediction
-PREDICTIONS_MIN_VALUE = 0.0
-PREDICTIONS_MAX_VALUE = 1.0

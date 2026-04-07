@@ -1,6 +1,7 @@
 # Entrius 2025
 import base64
 import fnmatch
+import os
 import re
 import time
 from dataclasses import dataclass
@@ -26,7 +27,6 @@ from gittensor.constants import (
     MAX_FILE_SIZE_BYTES,
     MAX_FILES_PER_GRAPHQL_BATCH,
     PR_LOOKBACK_DAYS,
-    TIER_BASED_INCENTIVE_MECHANISM_START_DATE,
 )
 from gittensor.utils.models import PRInfo
 from gittensor.validator.utils.load_weights import RepositoryConfig
@@ -139,12 +139,8 @@ def make_headers(token: str) -> Dict[str, str]:
     }
 
 
-# In-process cache for GitHub /user responses, keyed by PAT.
-_GITHUB_USER_CACHE: Dict[str, Dict[str, Any]] = {}
-
-
 def get_github_user(token: str) -> Optional[Dict[str, Any]]:
-    """Fetch GitHub user data for a PAT with retry and in-process cache.
+    """Fetch GitHub user data for a PAT with retry.
 
     Args:
         token (str): Github pat
@@ -153,11 +149,6 @@ def get_github_user(token: str) -> Optional[Dict[str, Any]]:
     """
     if not token:
         return None
-
-    # Check cache first to avoid duplicate /user calls for the same PAT.
-    cached = _GITHUB_USER_CACHE.get(token)
-    if cached is not None:
-        return cached
 
     headers = make_headers(token)
 
@@ -172,7 +163,6 @@ def get_github_user(token: str) -> Optional[Dict[str, Any]]:
                     bt.logging.warning(f'Failed to parse GitHub /user JSON response: {e}')
                     return None
 
-                _GITHUB_USER_CACHE[token] = user_data
                 return user_data
 
             bt.logging.warning(
@@ -820,7 +810,7 @@ def try_add_open_or_closed_pr(
         lookback_date_filter: Date filter for lookback period
     """
     # Ignore all maintainer contributions
-    if pr_raw.get('authorAssociation') in MAINTAINER_ASSOCIATIONS:
+    if not os.environ.get('DEV_MODE') and pr_raw.get('authorAssociation') in MAINTAINER_ASSOCIATIONS:
         return
 
     if pr_state == PRState.OPEN.value:
@@ -870,7 +860,7 @@ def should_skip_merged_pr(
 
     # Skip if PR author is a maintainer
     author_association = pr_raw.get('authorAssociation')
-    if author_association in MAINTAINER_ASSOCIATIONS:
+    if not os.environ.get('DEV_MODE') and author_association in MAINTAINER_ASSOCIATIONS:
         return (
             True,
             f'Skipping PR #{pr_raw["number"]} in {repository_full_name} - author is {author_association} (has direct merge capabilities)',
@@ -936,6 +926,10 @@ def load_miners_prs(
     """
     bt.logging.info('*****Fetching PRs*****')
 
+    if not miner_eval.github_pat:
+        bt.logging.warning(f'UID {miner_eval.uid} has no github_pat, skipping PR fetch')
+        return
+
     lookback_date_filter = datetime.now(timezone.utc) - timedelta(days=PR_LOOKBACK_DAYS)
     global_user_id = base64.b64encode(f'04:User{miner_eval.github_id}'.encode()).decode()
 
@@ -983,19 +977,6 @@ def load_miners_prs(
                     repository_full_name = parse_repo_name(pr_raw['repository'])
                     pr_state = pr_raw['state']
 
-                    # Stop querying once we hit PRs older than the tier incentive start date
-                    pr_creation_time = datetime.fromisoformat(pr_raw['createdAt'].rstrip('Z')).replace(
-                        tzinfo=timezone.utc
-                    )
-
-                    if pr_creation_time < TIER_BASED_INCENTIVE_MECHANISM_START_DATE:
-                        bt.logging.info(
-                            f'Reached PR #{pr_raw["number"]} in {repository_full_name} created at {pr_creation_time}, '
-                            f'before tier incentive start date ({TIER_BASED_INCENTIVE_MECHANISM_START_DATE}). '
-                            f'Stopping PR fetch.'
-                        )
-                        return
-
                     if repository_full_name not in master_repositories:
                         bt.logging.info(f'Skipping PR #{pr_raw["number"]} in {repository_full_name} - ineligible repo')
                         continue
@@ -1005,6 +986,9 @@ def load_miners_prs(
                     # Check if repo is inactive
                     if repo_config.inactive_at is not None:
                         inactive_dt = datetime.fromisoformat(repo_config.inactive_at.rstrip('Z')).replace(
+                            tzinfo=timezone.utc
+                        )
+                        pr_creation_time = datetime.fromisoformat(pr_raw['createdAt'].rstrip('Z')).replace(
                             tzinfo=timezone.utc
                         )
                         # Skip PR if it was created after the repo became inactive
@@ -1023,7 +1007,7 @@ def load_miners_prs(
                     )
 
                     if should_skip:
-                        bt.logging.debug(skip_reason)
+                        bt.logging.debug(skip_reason or '')
                         continue
 
                     miner_eval.add_merged_pull_request(pr_raw)

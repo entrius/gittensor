@@ -8,7 +8,6 @@ from typing import Dict, List, Optional
 import bittensor as bt
 
 from gittensor.constants import NON_CODE_EXTENSIONS
-from gittensor.validator.oss_contributions.tier_config import Tier
 
 
 @dataclass
@@ -32,13 +31,12 @@ class RepositoryConfig:
         weight: Repository weight for scoring
         inactive_at: ISO timestamp when repository became inactive (None if active)
         additional_acceptable_branches: List of additional branch patterns to accept (None if only default branch)
-        tier: Repository tier (Bronze, Silver, Gold) - None if not assigned
+
     """
 
     weight: float
     inactive_at: Optional[str] = None
     additional_acceptable_branches: Optional[List[str]] = None
-    tier: Optional[Tier] = None
 
 
 @dataclass
@@ -108,16 +106,10 @@ def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
         normalized_data: Dict[str, RepositoryConfig] = {}
         for repo_name, metadata in data.items():
             try:
-                # Extract tier if present, convert to Tier enum
-                tier_str = metadata.get('tier')
-                tier = Tier(tier_str) if tier_str else None
-
-                # Create RepositoryConfig object
                 config = RepositoryConfig(
                     weight=float(metadata.get('weight', 0.01)),
                     inactive_at=metadata.get('inactive_at'),
                     additional_acceptable_branches=metadata.get('additional_acceptable_branches'),
-                    tier=tier,
                 )
                 normalized_data[repo_name.lower()] = config
             except (ValueError, TypeError) as e:

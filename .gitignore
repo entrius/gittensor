@@ -16,11 +16,8 @@ wandb
 
 *.log
 
-# Merge predictions local DB
-merge-prediction-data/
-gt-merge-preds.db
-gt-merge-preds.db-wal
-gt-merge-preds.db-shm
+# Validator data directory (contains sensitive miner PATs)
+data/
 
 CLAUDE.md
 .claude/
@@ -30,3 +27,4 @@ CLAUDE.md
 target/
 **/*.rs.bk
 *.lock
+!uv.lock

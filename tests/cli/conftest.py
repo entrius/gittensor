@@ -60,7 +60,7 @@ def _ensure_fake_bittensor():
         Wallet=_FakeWallet,
         Subtensor=_FakeSubtensor,
     )
-    sys.modules['bittensor'] = fake_bt
+    sys.modules['bittensor'] = fake_bt  # type: ignore[assignment]
     _STUBBED_BITTENSOR = True
 
 

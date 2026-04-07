@@ -2,13 +2,12 @@
 # Copyright © 2025 Entrius
 
 from collections import defaultdict
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import bittensor as bt
 
 from gittensor.classes import MinerEvaluation
 from gittensor.constants import RECYCLE_UID
-from gittensor.synapses import GitPatSynapse
 from gittensor.validator.utils.github_validation import validate_github_credentials
 
 
@@ -44,13 +43,17 @@ def detect_and_penalize_miners_sharing_github(miner_evaluations: Dict[int, Miner
     bt.logging.info(f'Total duplicate miners penalized: {duplicate_count}')
 
 
-def validate_response_and_initialize_miner_evaluation(uid: int, response: GitPatSynapse) -> MinerEvaluation:
+def validate_response_and_initialize_miner_evaluation(
+    uid: int, hotkey: str, pat: Optional[str], stale_hotkey: Optional[str] = None
+) -> MinerEvaluation:
     """
-    Validate a miner's response and initialize their evaluation object.
+    Validate a miner's stored PAT and initialize their evaluation object.
 
     Args:
         uid: The miner's unique identifier
-        response: The GitPatSynapse response from the miner (may be None if miner didn't respond)
+        hotkey: The miner's hotkey
+        pat: The miner's GitHub PAT from local storage (may be None if not stored)
+        stale_hotkey: If set, the UID has a stored PAT from this old hotkey (re-registration detected)
 
     Returns:
         MinerEvaluation: Initialized evaluation object with failure reason if validation failed
@@ -59,18 +62,26 @@ def validate_response_and_initialize_miner_evaluation(uid: int, response: GitPat
     if uid == RECYCLE_UID:
         return MinerEvaluation(uid=uid, hotkey='', failed_reason='SPECIAL CASE UID 0 - RECYCLE UID')
 
-    # Check for null response before accessing any attributes to prevent crashes
-    if not response or not response.axon:
-        return MinerEvaluation(uid=uid, hotkey='', failed_reason=f'No response provided by miner {uid}')
+    if not hotkey:
+        return MinerEvaluation(uid=uid, hotkey='', failed_reason=f'No hotkey for miner {uid}')
 
-    # Now safe to access response.axon.hotkey
-    miner_eval = MinerEvaluation(uid=uid, hotkey=response.axon.hotkey)
+    if not pat:
+        if stale_hotkey:
+            reason = (
+                f'New miner registered on UID {uid}: '
+                f'hotkey changed {stale_hotkey[:16]}... → {hotkey[:16]}... — miner must run `gitt miner post`'
+            )
+        else:
+            reason = f'No stored PAT for miner {uid} — miner must run `gitt miner post`'
+        return MinerEvaluation(uid=uid, hotkey=hotkey, failed_reason=reason)
 
-    github_id, error = validate_github_credentials(uid, response.github_access_token)
+    miner_eval = MinerEvaluation(uid=uid, hotkey=hotkey)
+
+    github_id, error = validate_github_credentials(uid, pat)
     if error:
         miner_eval.failed_reason = error
         return miner_eval
 
     miner_eval.github_id = github_id
-    miner_eval.github_pat = response.github_access_token
+    miner_eval.github_pat = pat
     return miner_eval

@@ -13,22 +13,15 @@ from typing import List, TypeVar
 import numpy as np
 
 from gittensor.classes import FileChange, Issue, Miner, MinerEvaluation, PullRequest
-from gittensor.validator.oss_contributions.tier_config import Tier
 
 from .queries import (
     BULK_UPSERT_FILE_CHANGES,
     BULK_UPSERT_ISSUES,
     BULK_UPSERT_MINER_EVALUATION,
-    BULK_UPSERT_MINER_TIER_STATS,
     BULK_UPSERT_PULL_REQUESTS,
     CLEANUP_STALE_MINER_EVALUATIONS,
-    CLEANUP_STALE_MINER_TIER_STATS,
     CLEANUP_STALE_MINERS,
-    DELETE_PREDICTIONS_FOR_ISSUE,
     SET_MINER,
-    UPSERT_PREDICTION,
-    UPSERT_PREDICTION_EMA,
-    UPSERT_SETTLED_ISSUE,
 )
 
 T = TypeVar('T')
@@ -117,7 +110,7 @@ class Repository(BaseRepository):
         """
         Remove stale evaluation data when a miner re-registers on a new uid/hotkey.
 
-        Deletes miner_evaluations, miner_tier_stats, and miners rows for the same
+        Deletes miner_evaluations and miners rows for the same
         github_id but under a different (uid, hotkey) pair, ensuring only one
         evaluation per real github user exists in the database.
 
@@ -131,7 +124,6 @@ class Repository(BaseRepository):
         eval_params = params + (evaluation.evaluation_timestamp,)
 
         self.execute_command(CLEANUP_STALE_MINER_EVALUATIONS, eval_params)
-        self.execute_command(CLEANUP_STALE_MINER_TIER_STATS, params)
         self.execute_command(CLEANUP_STALE_MINERS, params)
 
     def store_pull_requests_bulk(self, pull_requests: List[PullRequest]) -> int:
@@ -175,8 +167,6 @@ class Repository(BaseRepository):
                     pr.time_decay_multiplier,
                     pr.credibility_multiplier,
                     pr.review_quality_multiplier,
-                    pr.raw_credibility,
-                    pr.credibility_scalar,
                     pr.earned_score,
                     pr.collateral_score,
                     pr.additions,
@@ -333,8 +323,8 @@ class Repository(BaseRepository):
                 evaluation.total_merged_prs,
                 evaluation.total_prs,
                 evaluation.unique_repos_count,
-                evaluation.qualified_unique_repos_count,
-                evaluation.current_tier.value if evaluation.current_tier else None,
+                evaluation.is_eligible,
+                evaluation.credibility,
                 evaluation.total_token_score,
                 evaluation.total_structural_count,
                 evaluation.total_structural_score,
@@ -354,121 +344,3 @@ class Repository(BaseRepository):
             self.db.rollback()
             self.logger.error(f'Error in miner evaluation storage: {e}')
             return False
-
-    def set_miner_tier_stats(self, evaluation: MinerEvaluation) -> bool:
-        """
-        Insert or update miner tier stats.
-
-        Args:
-            evaluation: MinerEvaluation object containing tier stats
-
-        Returns:
-            True if successful, False otherwise
-        """
-        bronze = evaluation.stats_by_tier[Tier.BRONZE]
-        silver = evaluation.stats_by_tier[Tier.SILVER]
-        gold = evaluation.stats_by_tier[Tier.GOLD]
-
-        tier_stats_values = [
-            (
-                evaluation.uid,
-                evaluation.hotkey,
-                evaluation.github_id,
-                # Bronze tier
-                bronze.merged_count,
-                bronze.closed_count,
-                bronze.total_prs,
-                bronze.collateral_score,
-                bronze.earned_score,
-                bronze.unique_repo_contribution_count,
-                bronze.qualified_unique_repo_count,
-                bronze.token_score,
-                bronze.structural_count,
-                bronze.structural_score,
-                bronze.leaf_count,
-                bronze.leaf_score,
-                # Silver tier
-                silver.merged_count,
-                silver.closed_count,
-                silver.total_prs,
-                silver.collateral_score,
-                silver.earned_score,
-                silver.unique_repo_contribution_count,
-                silver.qualified_unique_repo_count,
-                silver.token_score,
-                silver.structural_count,
-                silver.structural_score,
-                silver.leaf_count,
-                silver.leaf_score,
-                # Gold tier
-                gold.merged_count,
-                gold.closed_count,
-                gold.total_prs,
-                gold.collateral_score,
-                gold.earned_score,
-                gold.unique_repo_contribution_count,
-                gold.qualified_unique_repo_count,
-                gold.token_score,
-                gold.structural_count,
-                gold.structural_score,
-                gold.leaf_count,
-                gold.leaf_score,
-            )
-        ]
-
-        try:
-            with self.get_cursor() as cursor:
-                from psycopg2.extras import execute_values
-
-                execute_values(cursor, BULK_UPSERT_MINER_TIER_STATS, tier_stats_values)
-                self.db.commit()
-                return True
-        except Exception as e:
-            self.db.rollback()
-            self.logger.error(f'Error in miner tier stats storage: {e}')
-            return False
-
-    # Merge Prediction Storage
-    def store_prediction(
-        self,
-        uid: int,
-        hotkey: str,
-        github_id: str,
-        issue_id: int,
-        repository: str,
-        issue_number: int,
-        pr_number: int,
-        prediction: float,
-        variance_at_prediction: float,
-        timestamp: str,
-    ) -> bool:
-        params = (
-            uid,
-            hotkey,
-            github_id,
-            issue_id,
-            repository,
-            issue_number,
-            pr_number,
-            prediction,
-            variance_at_prediction,
-            timestamp,
-        )
-        return self.set_entity(UPSERT_PREDICTION, params)
-
-    def store_prediction_ema(self, github_id: str, ema_score: float, rounds: int, updated_at: str) -> bool:
-        params = (github_id, ema_score, rounds, updated_at)
-        return self.set_entity(UPSERT_PREDICTION_EMA, params)
-
-    def store_settled_issue(
-        self,
-        issue_id: int,
-        outcome: str,
-        merged_pr_number: int | None,
-        settled_at: str,
-    ) -> bool:
-        params = (issue_id, outcome, merged_pr_number, settled_at)
-        return self.set_entity(UPSERT_SETTLED_ISSUE, params)
-
-    def delete_predictions_for_issue(self, issue_id: int) -> bool:
-        return self.execute_command(DELETE_PREDICTIONS_FOR_ISSUE, (issue_id,))

@@ -45,10 +45,11 @@ class DatabaseStorage:
 
         try:
             # Start transaction
+            assert self.db_connection is not None and self.repo is not None
             self.db_connection.autocommit = False
 
             # Store all entities using bulk methods
-            miner = Miner(miner_eval.uid, miner_eval.hotkey, miner_eval.github_id)
+            miner = Miner(miner_eval.uid, miner_eval.hotkey, miner_eval.github_id or '')
 
             result.stored_counts['miners'] = self.repo.set_miner(miner)
             result.stored_counts['merged_pull_requests'] = self.repo.store_pull_requests_bulk(
@@ -66,7 +67,6 @@ class DatabaseStorage:
             self.repo.cleanup_stale_miner_data(miner_eval)
 
             result.stored_counts['evaluations'] = 1 if self.repo.set_miner_evaluation(miner_eval) else 0
-            result.stored_counts['tier_stats'] = 1 if self.repo.set_miner_tier_stats(miner_eval) else 0
 
             # Commit transaction
             self.db_connection.commit()
@@ -74,8 +74,9 @@ class DatabaseStorage:
 
         except Exception as ex:
             # Rollback transaction
-            self.db_connection.rollback()
-            self.db_connection.autocommit = True
+            if self.db_connection is not None:
+                self.db_connection.rollback()
+                self.db_connection.autocommit = True
 
             error_msg = f'Failed to store evaluation data for UID {miner_eval.uid}: {str(ex)}'
             result.success = False
@@ -83,71 +84,6 @@ class DatabaseStorage:
             self.logger.error(error_msg)
 
         return result
-
-    def store_prediction(
-        self,
-        uid: int,
-        hotkey: str,
-        github_id: str,
-        issue_id: int,
-        repository: str,
-        issue_number: int,
-        pr_number: int,
-        prediction: float,
-        variance_at_prediction: float,
-        timestamp: str,
-    ) -> bool:
-        if not self.is_enabled():
-            return False
-        try:
-            return self.repo.store_prediction(
-                uid,
-                hotkey,
-                github_id,
-                issue_id,
-                repository,
-                issue_number,
-                pr_number,
-                prediction,
-                variance_at_prediction,
-                timestamp,
-            )
-        except Exception as e:
-            self.logger.warning(f'Postgres merge prediction write failed (non-fatal): {e}')
-            return False
-
-    def store_prediction_ema(self, github_id: str, ema_score: float, rounds: int, updated_at: str) -> bool:
-        if not self.is_enabled():
-            return False
-        try:
-            return self.repo.store_prediction_ema(github_id, ema_score, rounds, updated_at)
-        except Exception as e:
-            self.logger.warning(f'Postgres merge prediction EMA write failed (non-fatal): {e}')
-            return False
-
-    def store_settled_issue(
-        self,
-        issue_id: int,
-        outcome: str,
-        merged_pr_number: int | None,
-        settled_at: str,
-    ) -> bool:
-        if not self.is_enabled():
-            return False
-        try:
-            return self.repo.store_settled_issue(issue_id, outcome, merged_pr_number, settled_at)
-        except Exception as e:
-            self.logger.warning(f'Postgres merge settled issue write failed (non-fatal): {e}')
-            return False
-
-    def delete_predictions_for_issue(self, issue_id: int) -> bool:
-        if not self.is_enabled():
-            return False
-        try:
-            return self.repo.delete_predictions_for_issue(issue_id)
-        except Exception as e:
-            self.logger.warning(f'Postgres merge prediction delete failed (non-fatal): {e}')
-            return False
 
     def _log_storage_summary(self, counts: Dict[str, int]):
         """Log a summary of what was stored"""

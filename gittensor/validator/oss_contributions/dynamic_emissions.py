@@ -19,17 +19,15 @@ def _exponential_unlock_scalar(value: float, max_recycle: float, decay_rate: flo
 
 
 def get_network_totals(miner_evaluations: Dict[int, MinerEvaluation]) -> tuple[int, float]:
-    """Extract unique repos count and total token score from tiered miners only.
+    """Extract unique repos count and total token score from eligible miners only.
 
-    Only miners with a tier (bronze, silver, gold) are counted.
-    This excludes miners who haven't reached any tier yet.
+    Only miners who passed the eligibility gate are counted.
     """
     unique_repos: Set[str] = set()
     total_token_score = 0.0
 
     for evaluation in miner_evaluations.values():
-        # Only count contributions from miners who have achieved a tier
-        if evaluation.current_tier is not None:
+        if evaluation.is_eligible:
             total_token_score += evaluation.total_token_score
 
             if repos := evaluation.unique_repos_contributed_to:

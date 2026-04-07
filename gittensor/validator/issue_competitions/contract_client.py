@@ -137,7 +137,7 @@ class IssueCompetitionContractClient:
             if not info or 'trie_id' not in info:
                 return None
 
-            trie_id = info['trie_id']
+            trie_id = info['trie_id']  # type: ignore[call-overload]
 
             if isinstance(trie_id, str):
                 trie_id_hex = trie_id.replace('0x', '')
@@ -342,7 +342,7 @@ class IssueCompetitionContractClient:
         value = self._extract_u32_from_response(response)
         return value if value is not None else 0
 
-    def _raw_contract_read(self, method_name: str, args: dict = None) -> Optional[bytes]:
+    def _raw_contract_read(self, method_name: str, args: dict = None) -> Optional[bytes]:  # type: ignore[assignment]
         """Read from contract using raw RPC call.
 
         Returns the ink! return payload (after stripping the ContractExecResult
@@ -556,7 +556,7 @@ class IssueCompetitionContractClient:
         method_name: str,
         args: dict,
         keypair,
-        gas_limit: dict = None,
+        gas_limit: dict = None,  # type: ignore[assignment]
         value: int = 0,
     ) -> Optional[str]:
         """Execute a contract method using raw extrinsic submission."""
@@ -586,10 +586,10 @@ class IssueCompetitionContractClient:
             signer_address = keypair.ss58_address
             account_info = self.subtensor.substrate.query('System', 'Account', [signer_address])
             if hasattr(account_info, 'value'):
-                account_data = account_info.value
+                account_data = account_info.value  # type: ignore[union-attr]
             else:
                 account_data = account_info
-            free_balance = account_data.get('data', {}).get('free', 0)
+            free_balance = account_data.get('data', {}).get('free', 0)  # type: ignore[union-attr]
             if free_balance < 100_000_000:
                 bt.logging.error(f'{method_name}: insufficient balance for fees')
                 return None
@@ -725,7 +725,7 @@ class IssueCompetitionContractClient:
             # Alpha returns U64F64 fixed-point: bits field contains raw value
             # Upper 64 bits are integer part (the stake amount in raw units)
             if hasattr(alpha_result, 'value') and alpha_result.value:
-                bits = alpha_result.value.get('bits', 0)
+                bits = alpha_result.value.get('bits', 0)  # type: ignore[union-attr]
             elif isinstance(alpha_result, dict):
                 bits = alpha_result.get('bits', 0)
             else:

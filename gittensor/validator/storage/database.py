@@ -3,7 +3,7 @@ Database connection utility for validator storage operations.
 """
 
 import os
-from typing import Optional
+from typing import Any, Optional
 
 import bittensor as bt
 
@@ -16,7 +16,7 @@ except ImportError:
     bt.logging.warning('psycopg2 not installed. Database storage features will be disabled.')
 
 
-def create_database_connection() -> Optional[object]:
+def create_database_connection() -> Optional[Any]:
     """
     Create a PostgreSQL database connection using environment variables.
 

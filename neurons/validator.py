@@ -16,6 +16,7 @@
 # DEALINGS IN THE SOFTWARE.
 
 
+import os
 import time
 from functools import partial
 from typing import Dict, List, Set
@@ -25,9 +26,16 @@ import wandb
 
 from gittensor.__init__ import __version__
 from gittensor.classes import MinerEvaluation, MinerEvaluationCache
+from gittensor.validator import pat_storage
 from gittensor.validator.forward import forward
-from gittensor.validator.merge_predictions.handler import blacklist_prediction, handle_prediction, priority_prediction
-from gittensor.validator.merge_predictions.mp_storage import PredictionStorage
+from gittensor.validator.pat_handler import (
+    blacklist_pat_broadcast,
+    blacklist_pat_check,
+    handle_pat_broadcast,
+    handle_pat_check,
+    priority_pat_broadcast,
+    priority_pat_check,
+)
 from gittensor.validator.utils.config import STORE_DB_RESULTS, WANDB_PROJECT, WANDB_VALIDATOR_NAME
 from gittensor.validator.utils.storage import DatabaseStorage
 from neurons.base.validator import BaseValidatorNeuron
@@ -46,17 +54,24 @@ class Validator(BaseValidatorNeuron):
     def __init__(self, config=None):
         super(Validator, self).__init__(config=config)
 
-        # Merge predictions — SQLite storage + axon handler
-        self.mp_storage = PredictionStorage()
+        if os.environ.get('DEV_MODE'):
+            bt.logging.warning('⚠ DEV_MODE is active — maintainer PR filtering is bypassed')
+
+        # Ensure PAT storage file exists on boot
+        pat_storage.ensure_pats_file()
+
+        # Attach PAT broadcast and check handlers to the axon
         if hasattr(self, 'axon') and self.axon is not None:
             self.axon.attach(
-                forward_fn=partial(handle_prediction, self),
-                blacklist_fn=partial(blacklist_prediction, self),
-                priority_fn=partial(priority_prediction, self),
+                forward_fn=partial(handle_pat_broadcast, self),
+                blacklist_fn=partial(blacklist_pat_broadcast, self),
+                priority_fn=partial(priority_pat_broadcast, self),
             )
-            bt.logging.info('Merge predictions handler attached to axon')
-        else:
-            bt.logging.warning('Axon not available, skipping prediction handler attachment')
+            self.axon.attach(
+                forward_fn=partial(handle_pat_check, self),
+                blacklist_fn=partial(blacklist_pat_check, self),
+                priority_fn=partial(priority_pat_check, self),
+            )
 
         # Init in-memory cache for miner evaluations (fallback when GitHub API fails)
         self.evaluation_cache = MinerEvaluationCache()

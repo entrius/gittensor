@@ -30,6 +30,7 @@ get_github_graphql_query = github_api_tools.get_github_graphql_query
 get_github_id = github_api_tools.get_github_id
 get_github_account_age_days = github_api_tools.get_github_account_age_days
 get_pull_request_file_changes = github_api_tools.get_pull_request_file_changes
+get_merge_base_sha = github_api_tools.get_merge_base_sha
 find_prs_for_issue = github_api_tools.find_prs_for_issue
 execute_graphql_query = github_api_tools.execute_graphql_query
 
@@ -1448,6 +1449,199 @@ class TestFetchFileContentsWithBase:
         query_arg = mock_execute.call_args[0][0]
         assert 'base_sha:old_name.py' in query_arg
         assert 'head_sha:new_name.py' in query_arg
+
+
+# ============================================================================
+# Merge Base SHA Tests
+# ============================================================================
+
+
+class TestGetMergeBaseSha:
+    """Test suite for get_merge_base_sha using GitHub compare API."""
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    def test_returns_merge_base_sha_on_success(self, mock_get):
+        """Successful compare API call returns the merge_base_commit SHA."""
+        mock_response = Mock(status_code=200)
+        mock_response.json.return_value = {
+            'merge_base_commit': {'sha': 'abc123merge'},
+        }
+        mock_get.return_value = mock_response
+
+        result = get_merge_base_sha('owner/repo', 'base_sha', 'head_sha', 'fake_token')
+
+        assert result == 'abc123merge'
+        assert mock_get.call_count == 1
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_retries_on_failure_then_succeeds(self, mock_logging, mock_sleep, mock_get):
+        """Retries on HTTP error and succeeds on second attempt."""
+        mock_500 = Mock(status_code=500, text='Internal Server Error')
+        mock_200 = Mock(status_code=200)
+        mock_200.json.return_value = {'merge_base_commit': {'sha': 'abc123merge'}}
+
+        mock_get.side_effect = [mock_500, mock_200]
+
+        result = get_merge_base_sha('owner/repo', 'base_sha', 'head_sha', 'fake_token')
+
+        assert result == 'abc123merge'
+        assert mock_get.call_count == 2
+        assert mock_sleep.call_count == 1
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_returns_none_after_all_attempts_fail(self, mock_logging, mock_sleep, mock_get):
+        """Returns None after 3 failed attempts."""
+        mock_500 = Mock(status_code=500, text='Internal Server Error')
+        mock_get.return_value = mock_500
+
+        result = get_merge_base_sha('owner/repo', 'base_sha', 'head_sha', 'fake_token')
+
+        assert result is None
+        assert mock_get.call_count == 3
+        assert mock_sleep.call_count == 2
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_returns_none_when_merge_base_commit_missing(self, mock_logging, mock_get):
+        """Returns None when response lacks merge_base_commit field."""
+        mock_response = Mock(status_code=200)
+        mock_response.json.return_value = {'status': 'ahead'}
+        mock_get.return_value = mock_response
+
+        result = get_merge_base_sha('owner/repo', 'base_sha', 'head_sha', 'fake_token')
+
+        assert result is None
+        mock_logging.warning.assert_called()
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_retries_on_connection_error(self, mock_logging, mock_sleep, mock_get):
+        """Retries on connection errors and succeeds."""
+        import requests
+
+        mock_200 = Mock(status_code=200)
+        mock_200.json.return_value = {'merge_base_commit': {'sha': 'abc123merge'}}
+        mock_get.side_effect = [requests.exceptions.ConnectionError('refused'), mock_200]
+
+        result = get_merge_base_sha('owner/repo', 'base_sha', 'head_sha', 'fake_token')
+
+        assert result == 'abc123merge'
+        assert mock_get.call_count == 2
+        assert mock_sleep.call_count == 1
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_returns_none_after_all_connection_errors(self, mock_logging, mock_sleep, mock_get):
+        """Returns None after 3 connection errors."""
+        import requests
+
+        mock_get.side_effect = requests.exceptions.ConnectionError('refused')
+
+        result = get_merge_base_sha('owner/repo', 'base_sha', 'head_sha', 'fake_token')
+
+        assert result is None
+        assert mock_get.call_count == 3
+
+
+# ============================================================================
+# fetch_file_contents_for_pr Merge Base Integration Tests
+# ============================================================================
+
+
+class TestFetchFileContentsForPrMergeBase:
+    """Test that fetch_file_contents_for_pr resolves merge-base instead of using base_ref_oid directly."""
+
+    @patch('gittensor.validator.oss_contributions.scoring.fetch_file_contents_with_base')
+    @patch('gittensor.validator.oss_contributions.scoring.get_merge_base_sha')
+    def test_uses_merge_base_when_available(self, mock_merge_base, mock_fetch):
+        """When merge-base resolves successfully, it should be used instead of base_ref_oid."""
+        from gittensor.classes import FileChange, PRState, PullRequest
+        from gittensor.validator.oss_contributions.scoring import fetch_file_contents_for_pr
+
+        mock_merge_base.return_value = 'merge_base_sha_123'
+        mock_fetch.return_value = {}
+
+        pr = PullRequest(
+            number=1,
+            repository_full_name='owner/repo',
+            uid=0,
+            hotkey='hk',
+            github_id='1',
+            title='test',
+            author_login='user',
+            merged_at=None,
+            created_at=__import__('datetime').datetime.now(__import__('datetime').timezone.utc),
+            pr_state=PRState.MERGED,
+            base_ref_oid='base_branch_tip_sha',
+            head_ref_oid='head_sha',
+            file_changes=[
+                FileChange(
+                    pr_number=1,
+                    repository_full_name='owner/repo',
+                    filename='test.py',
+                    status='modified',
+                    changes=5,
+                    additions=3,
+                    deletions=2,
+                ),
+            ],
+        )
+
+        fetch_file_contents_for_pr(pr, 'fake_token')
+
+        mock_merge_base.assert_called_once_with('owner/repo', 'base_branch_tip_sha', 'head_sha', 'fake_token')
+        # Verify merge-base SHA was passed, not the original base_ref_oid
+        mock_fetch.assert_called_once()
+        call_args = mock_fetch.call_args
+        assert call_args[0][2] == 'merge_base_sha_123', 'Should pass merge-base SHA as base_sha'
+
+    @patch('gittensor.validator.oss_contributions.scoring.fetch_file_contents_with_base')
+    @patch('gittensor.validator.oss_contributions.scoring.get_merge_base_sha')
+    def test_falls_back_to_base_ref_oid_when_merge_base_fails(self, mock_merge_base, mock_fetch):
+        """When merge-base resolution fails, should fall back to base_ref_oid."""
+        from gittensor.classes import FileChange, PRState, PullRequest
+        from gittensor.validator.oss_contributions.scoring import fetch_file_contents_for_pr
+
+        mock_merge_base.return_value = None
+        mock_fetch.return_value = {}
+
+        pr = PullRequest(
+            number=1,
+            repository_full_name='owner/repo',
+            uid=0,
+            hotkey='hk',
+            github_id='1',
+            title='test',
+            author_login='user',
+            merged_at=None,
+            created_at=__import__('datetime').datetime.now(__import__('datetime').timezone.utc),
+            pr_state=PRState.MERGED,
+            base_ref_oid='base_branch_tip_sha',
+            head_ref_oid='head_sha',
+            file_changes=[
+                FileChange(
+                    pr_number=1,
+                    repository_full_name='owner/repo',
+                    filename='test.py',
+                    status='modified',
+                    changes=5,
+                    additions=3,
+                    deletions=2,
+                ),
+            ],
+        )
+
+        fetch_file_contents_for_pr(pr, 'fake_token')
+
+        # Should fall back to base_ref_oid
+        call_args = mock_fetch.call_args
+        assert call_args[0][2] == 'base_branch_tip_sha', 'Should fall back to base_ref_oid'
 
 
 if __name__ == '__main__':

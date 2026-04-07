@@ -14,6 +14,7 @@ from pathlib import Path
 import click
 from rich.panel import Panel
 
+from .help import StyledCommand
 from .helpers import (
     MAX_ISSUE_NUMBER,
     _is_interactive,
@@ -31,7 +32,7 @@ from .helpers import (
 )
 
 
-@click.command('register')
+@click.command('register', cls=StyledCommand)
 @click.option(
     '--repo',
     required=True,
@@ -101,21 +102,20 @@ def issue_register(
     """
     Register a new issue with a bounty (OWNER ONLY).
 
-    This command registers a GitHub issue on the smart contract
-    with a target bounty amount. Only the contract owner can
-    register new issues.
+    [dim]This command registers a GitHub issue on the smart contract with a target bounty amount.
+    Only the contract owner can register new issues.[/dim]
 
-    \b
-    Arguments:
+    [dim]Arguments:
         --repo: Repository in owner/repo format
         --issue: GitHub issue number
         --bounty: Target bounty amount in ALPHA
+    [/dim]
 
-    \b
-    Examples:
-        gitt issues register --repo latent-to/btcli --issue 144 --bounty 100
-        gitt i reg --repo tensorflow/tensorflow --issue 12345 --bounty 50
-        gitt i reg --repo owner/repo --issue 1 --bounty 10 -y
+    [dim]Examples:
+        $ gitt issues register --repo latent-to/btcli --issue 144 --bounty 100
+        $ gitt i reg --repo tensorflow/tensorflow --issue 12345 --bounty 50
+        $ gitt i reg --repo owner/repo --issue 1 --bounty 10 -y
+    [/dim]
     """
     console.print('\n[bold cyan]Register Issue for Bounty[/bold cyan]\n')
 
@@ -256,7 +256,7 @@ def issue_register(
             print_error(f'Error registering issue: {e}')
 
 
-@click.command('harvest')
+@click.command('harvest', cls=StyledCommand)
 @click.option(
     '--wallet-name',
     '--wallet.name',
@@ -293,14 +293,14 @@ def issue_harvest(wallet_name: str, wallet_hotkey: str, network: str, rpc_url: s
     """
     Manually trigger emission harvest from contract treasury.
 
-    This command is permissionless - any wallet can trigger it.
-    The contract handles emission collection and distribution internally.
+    [dim]This command is permissionless - any wallet can trigger it.
+    The contract handles emission collection and distribution internally.[/dim]
 
-    \b
-    Examples:
-        gitt harvest
-        gitt harvest --verbose
-        gitt harvest --wallet-name mywallet --wallet-hotkey mykey
+    [dim]Examples:
+        $ gitt harvest
+        $ gitt harvest --verbose
+        $ gitt harvest --wallet-name mywallet --wallet-hotkey mykey
+    [/dim]
     """
     console.print('\n[bold cyan]Manual Emission Harvest[/bold cyan]\n')
 

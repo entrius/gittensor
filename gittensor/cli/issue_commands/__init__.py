@@ -24,6 +24,7 @@ Command structure:
 import click
 
 from .admin import admin
+from .help import StyledGroup
 
 # Re-export helpers
 from .helpers import (
@@ -45,18 +46,9 @@ from .view import admin_info, issues_bounty_pool, issues_list, issues_pending_ha
 from .vote import vote
 
 
-@click.group(name='issues')
+@click.group(name='issues', cls=StyledGroup)
 def issues_group():
-    """Issue management commands.
-
-    \b
-    Commands:
-        list              List issues or view a specific issue
-        submissions       List open PR submissions for an issue
-        register          Register a new issue bounty
-        bounty-pool       View total bounty pool
-        pending-harvest   View pending emissions
-    """
+    """Manage issue bounties, submissions, and predictions."""
     pass
 
 

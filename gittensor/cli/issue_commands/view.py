@@ -18,6 +18,7 @@ import click
 from rich.panel import Panel
 from rich.table import Table
 
+from .help import StyledCommand
 from .helpers import (
     _read_contract_packed_storage,
     _read_issues_from_child_storage,
@@ -30,10 +31,12 @@ from .helpers import (
     print_network_header,
     read_issues_from_contract,
     resolve_network,
+    with_cli_behavior_options,
+    with_network_contract_options,
 )
 
 
-@click.command('list')
+@click.command('list', cls=StyledCommand)
 @click.option(
     '--id',
     'issue_id',
@@ -41,34 +44,21 @@ from .helpers import (
     type=int,
     help='View a specific issue by ID',
 )
-@click.option(
-    '--network',
-    '-n',
-    default=None,
-    type=click.Choice(['finney', 'test', 'local'], case_sensitive=False),
-    help='Network (finney/test/local)',
+@with_cli_behavior_options(
+    include_verbose=True,
+    include_json=True,
+    verbose_help='Show debug output for contract reads',
 )
-@click.option(
-    '--rpc-url',
-    default=None,
-    help='Subtensor RPC endpoint (overrides --network)',
-)
-@click.option(
-    '--contract',
-    default='',
-    help='Contract address (uses default if empty)',
-)
-@click.option('--verbose', '-v', is_flag=True, help='Show debug output for contract reads')
-@click.option('--json', 'as_json', is_flag=True, help='Output as JSON for scripting')
+@with_network_contract_options('Contract address (uses default if empty)')
 def issues_list(issue_id: int, network: str, rpc_url: str, contract: str, verbose: bool, as_json: bool):
     """List issues or view a specific issue.
 
-    \b
-    Examples:
-        gitt issues list
-        gitt i list --network test
-        gitt i list --id 1
-        gitt i list --json
+    [dim]Examples:
+        $ gitt issues list
+        $ gitt i list --network test
+        $ gitt i list --id 1
+        $ gitt i list --json
+    [/dim]
     """
     contract_addr = get_contract_address(contract)
     ws_endpoint, network_name = resolve_network(network, rpc_url)
@@ -187,33 +177,16 @@ def issues_list(issue_id: int, network: str, rpc_url: str, contract: str, verbos
         console.print('[dim]Register an issue: gitt issues register --repo owner/repo --issue 1 --bounty 100[/dim]')
 
 
-@click.command('bounty-pool')
-@click.option(
-    '--network',
-    '-n',
-    default=None,
-    type=click.Choice(['finney', 'test', 'local'], case_sensitive=False),
-    help='Network (finney/test/local)',
-)
-@click.option(
-    '--rpc-url',
-    default=None,
-    help='Subtensor RPC endpoint (overrides --network)',
-)
-@click.option(
-    '--contract',
-    default='',
-    help='Contract address (uses config if empty)',
-)
-@click.option('--verbose', '-v', is_flag=True, help='Show debug output')
-@click.option('--json', 'as_json', is_flag=True, help='Output as JSON for scripting')
+@click.command('bounty-pool', cls=StyledCommand)
+@with_cli_behavior_options(include_verbose=True, include_json=True)
+@with_network_contract_options('Contract address (uses config if empty)')
 def issues_bounty_pool(network: str, rpc_url: str, contract: str, verbose: bool, as_json: bool):
     """View total bounty pool (sum of all issue bounty amounts).
 
-    \b
-    Examples:
-        gitt issues bounty-pool
-        gitt i bounty-pool --json
+    [dim]Examples:
+        $ gitt issues bounty-pool
+        $ gitt i bounty-pool --json
+    [/dim]
     """
     contract_addr = get_contract_address(contract)
     ws_endpoint, network_name = resolve_network(network, rpc_url)
@@ -254,33 +227,16 @@ def issues_bounty_pool(network: str, rpc_url: str, contract: str, verbose: bool,
         print_error(str(e))
 
 
-@click.command('pending-harvest')
-@click.option(
-    '--network',
-    '-n',
-    default=None,
-    type=click.Choice(['finney', 'test', 'local'], case_sensitive=False),
-    help='Network (finney/test/local)',
-)
-@click.option(
-    '--rpc-url',
-    default=None,
-    help='Subtensor RPC endpoint (overrides --network)',
-)
-@click.option(
-    '--contract',
-    default='',
-    help='Contract address (uses config if empty)',
-)
-@click.option('--verbose', '-v', is_flag=True, help='Show debug output')
-@click.option('--json', 'as_json', is_flag=True, help='Output as JSON for scripting')
+@click.command('pending-harvest', cls=StyledCommand)
+@with_cli_behavior_options(include_verbose=True, include_json=True)
+@with_network_contract_options('Contract address (uses config if empty)')
 def issues_pending_harvest(network: str, rpc_url: str, contract: str, verbose: bool, as_json: bool):
     """View pending harvest (treasury stake minus allocated bounties).
 
-    \b
-    Examples:
-        gitt issues pending-harvest
-        gitt i pending-harvest --json
+    [dim]Examples:
+        $ gitt issues pending-harvest
+        $ gitt i pending-harvest --json
+    [/dim]
     """
     contract_addr = get_contract_address(contract)
     ws_endpoint, network_name = resolve_network(network, rpc_url)
@@ -338,33 +294,16 @@ def issues_pending_harvest(network: str, rpc_url: str, contract: str, verbose: b
         print_error(str(e))
 
 
-@click.command('info')
-@click.option(
-    '--network',
-    '-n',
-    default=None,
-    type=click.Choice(['finney', 'test', 'local'], case_sensitive=False),
-    help='Network (finney/test/local)',
-)
-@click.option(
-    '--rpc-url',
-    default=None,
-    help='Subtensor RPC endpoint (overrides --network)',
-)
-@click.option(
-    '--contract',
-    default='',
-    help='Contract address (uses config if empty)',
-)
-@click.option('--verbose', '-v', is_flag=True, help='Show debug output')
-@click.option('--json', 'as_json', is_flag=True, help='Output as JSON for scripting')
+@click.command('info', cls=StyledCommand)
+@with_cli_behavior_options(include_verbose=True, include_json=True)
+@with_network_contract_options('Contract address (uses config if empty)')
 def admin_info(network: str, rpc_url: str, contract: str, verbose: bool, as_json: bool):
     """View contract configuration.
 
-    \b
-    Examples:
-        gitt admin info
-        gitt a info --json
+    [dim]Examples:
+        $ gitt admin info
+        $ gitt a info --json
+    [/dim]
     """
     contract_addr = get_contract_address(contract)
     ws_endpoint, network_name = resolve_network(network, rpc_url)

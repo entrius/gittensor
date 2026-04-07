@@ -34,20 +34,22 @@ The result: a sustainable incentive layer that channels resources toward buildin
 
 ## Miners
 
-**Recommended: Deploy with Docker**
-
-> [!NOTE]
-> The port in .env must be accessible by the public.
+No miner neuron required — just register your GitHub PAT with validators using the CLI.
 
 ```bash
-# Quick start
+# Install
 git clone https://github.com/entrius/gittensor.git
 cd gittensor
-cp .env.example .env
-# Edit .env with proper values
-nano .env
+uv sync
 
-docker-compose -f docker-compose.miner.yml up -d
+# Set your GitHub PAT
+export GITTENSOR_MINER_PAT=ghp_your_token_here
+
+# Broadcast PAT to validators
+gitt miner post --wallet <name> --hotkey <hotkey>
+
+# Check which validators have your PAT stored
+gitt miner check --wallet <name> --hotkey <hotkey>
 ```
 
 See full guide **[here](https://docs.gittensor.io/miner.html)**

@@ -209,7 +209,7 @@ def issue_register(
         console.print('[dim]Submitting transaction...[/dim]')
 
         result = contract_instance.exec(
-            keypair,
+            keypair,  # type: ignore[arg-type]
             'register_issue',
             args={
                 'github_url': github_url,
@@ -243,7 +243,7 @@ def issue_register(
 
     except ImportError as e:
         print_error(f'Missing dependency - {e}')
-        console.print('[dim]Install with: pip install substrate-interface bittensor[/dim]')
+        console.print('[dim]Install with: uv sync[/dim]')
     except Exception as e:
         error_msg = str(e)
         if 'ContractReverted' in error_msg:
@@ -385,7 +385,7 @@ def issue_harvest(wallet_name: str, wallet_hotkey: str, network: str, rpc_url: s
 
     except ImportError as e:
         print_error(f'Missing dependency — {e}')
-        console.print('[dim]Install with: pip install bittensor substrate-interface[/dim]')
+        console.print('[dim]Install with: uv sync[/dim]')
     except Exception as e:
         import traceback
 

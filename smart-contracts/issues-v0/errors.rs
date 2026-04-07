@@ -20,7 +20,7 @@ pub enum Error {
     InvalidIssueNumber,
     /// Issue is not in Active status
     IssueNotActive,
-    /// Solver is not a valid miner (bronze+ tier required)
+    /// Solver is not an eligible miner
     InvalidSolver,
     /// Caller has already voted on this proposal
     AlreadyVoted,

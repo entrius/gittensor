@@ -39,7 +39,7 @@ data/
 logs/
 *.log
 
-# Documentation (not needed in container, except README.md for setup.py)
+# Documentation (not needed in container)
 docs/
 
 # Tests (not needed in production)

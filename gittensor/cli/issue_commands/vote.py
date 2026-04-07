@@ -17,6 +17,7 @@ import click
 from rich.panel import Panel
 from rich.table import Table
 
+from .help import StyledGroup
 from .helpers import (
     console,
     get_contract_address,
@@ -26,6 +27,9 @@ from .helpers import (
     resolve_network,
     validate_issue_id,
     validate_ss58_address,
+    with_cli_behavior_options,
+    with_network_contract_options,
+    with_wallet_options,
 )
 
 
@@ -56,17 +60,11 @@ def parse_pr_number(pr_input: str) -> int:
     raise ValueError(f'Cannot parse PR number from: {pr_input}')
 
 
-@click.group(name='vote')
+@click.group(name='vote', cls=StyledGroup)
 def vote():
     """Validator consensus operations.
 
     These commands are used by validators to manage issue bounty payouts.
-
-    \b
-    Commands:
-        solution   Vote for a solver on an active issue
-        cancel     Vote to cancel an issue
-        list       List whitelisted validators
     """
     pass
 
@@ -76,37 +74,8 @@ def vote():
 @click.argument('solver_hotkey', type=str)
 @click.argument('solver_coldkey', type=str)
 @click.argument('pr_number_or_url', type=str)
-@click.option(
-    '--wallet-name',
-    '--wallet.name',
-    '--wallet',
-    default='default',
-    help='Wallet name',
-)
-@click.option(
-    '--wallet-hotkey',
-    '--wallet.hotkey',
-    '--hotkey',
-    default='default',
-    help='Hotkey name',
-)
-@click.option(
-    '--network',
-    '-n',
-    default=None,
-    type=click.Choice(['finney', 'test', 'local'], case_sensitive=False),
-    help='Network (finney/test/local)',
-)
-@click.option(
-    '--rpc-url',
-    default=None,
-    help='Subtensor RPC endpoint (overrides --network)',
-)
-@click.option(
-    '--contract',
-    default='',
-    help='Contract address (uses config if empty)',
-)
+@with_wallet_options()
+@with_network_contract_options('Contract address (uses config if empty)')
 def val_vote_solution(
     issue_id: int,
     solver_hotkey: str,
@@ -120,17 +89,17 @@ def val_vote_solution(
 ):
     """Vote for a solution on an active issue (triggers auto-payout on consensus).
 
-    \b
-    Arguments:
+    [dim]Arguments:
         ISSUE_ID: On-chain issue ID to vote on
         SOLVER_HOTKEY: SS58 address of the solver's hotkey
         SOLVER_COLDKEY: SS58 address of the solver's coldkey (payout destination)
         PR_NUMBER_OR_URL: PR number or full GitHub PR URL
+    [/dim]
 
-    \b
-    Examples:
-        gitt vote solution 1 5Hxxx... 5Hyyy... 123
-        gitt vote solution 1 5Hxxx... 5Hyyy... https://github.com/.../pull/123
+    [dim]Examples:
+        $ gitt vote solution 1 5Hxxx... 5Hyyy... 123
+        $ gitt vote solution 1 5Hxxx... 5Hyyy... https://github.com/.../pull/123
+    [/dim]
     """
     contract_addr = get_contract_address(contract)
     ws_endpoint, network_name = resolve_network(network, rpc_url)
@@ -195,37 +164,8 @@ def val_vote_solution(
 @vote.command('cancel')
 @click.argument('issue_id', type=int)
 @click.argument('reason', type=str)
-@click.option(
-    '--wallet-name',
-    '--wallet.name',
-    '--wallet',
-    default='default',
-    help='Wallet name',
-)
-@click.option(
-    '--wallet-hotkey',
-    '--wallet.hotkey',
-    '--hotkey',
-    default='default',
-    help='Hotkey name',
-)
-@click.option(
-    '--network',
-    '-n',
-    default=None,
-    type=click.Choice(['finney', 'test', 'local'], case_sensitive=False),
-    help='Network (finney/test/local)',
-)
-@click.option(
-    '--rpc-url',
-    default=None,
-    help='Subtensor RPC endpoint (overrides --network)',
-)
-@click.option(
-    '--contract',
-    default='',
-    help='Contract address (uses config if empty)',
-)
+@with_wallet_options()
+@with_network_contract_options('Contract address (uses config if empty)')
 def val_vote_cancel_issue(
     issue_id: int,
     reason: str,
@@ -237,15 +177,15 @@ def val_vote_cancel_issue(
 ):
     """Vote to cancel an issue (works on Registered or Active).
 
-    \b
-    Arguments:
+    [dim]Arguments:
         ISSUE_ID: On-chain issue ID to cancel
         REASON: Reason for cancellation
+    [/dim]
 
-    \b
-    Examples:
-        gitt vote cancel 1 "External solution found"
-        gitt vote cancel 42 "Issue invalid"
+    [dim]Examples:
+        $ gitt vote cancel 1 "External solution found"
+        $ gitt vote cancel 42 "Issue invalid"
+    [/dim]
     """
     contract_addr = get_contract_address(contract)
     ws_endpoint, network_name = resolve_network(network, rpc_url)
@@ -295,32 +235,16 @@ def val_vote_cancel_issue(
 
 
 @vote.command('list')
-@click.option(
-    '--network',
-    '-n',
-    default=None,
-    type=click.Choice(['finney', 'test', 'local'], case_sensitive=False),
-    help='Network (finney/test/local)',
-)
-@click.option(
-    '--rpc-url',
-    default=None,
-    help='Subtensor RPC endpoint (overrides --network)',
-)
-@click.option(
-    '--contract',
-    default='',
-    help='Contract address (uses config if empty)',
-)
-@click.option('--json', 'as_json', is_flag=True, help='Output as JSON for scripting')
+@with_cli_behavior_options(include_json=True)
+@with_network_contract_options('Contract address (uses config if empty)')
 def vote_list_validators(network: str, rpc_url: str, contract: str, as_json: bool):
     """List whitelisted validators and consensus threshold.
 
-    \b
-    Examples:
-        gitt vote list
-        gitt vote list --network test
-        gitt vote list --json
+    [dim]Examples:
+        $ gitt vote list
+        $ gitt vote list --network test
+        $ gitt vote list --json
+    [/dim]
     """
     contract_addr = get_contract_address(contract)
     ws_endpoint, network_name = resolve_network(network, rpc_url)

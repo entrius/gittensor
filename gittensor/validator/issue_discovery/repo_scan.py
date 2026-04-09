@@ -83,7 +83,7 @@ async def scan_closed_issues(
     result: Dict[str, List[Issue]] = {}
     global_lookup_count = 0
 
-    for repo_name, repo_config in active_repos:
+    for i, (repo_name, repo_config) in enumerate(active_repos, 1):
         if global_lookup_count >= REPO_SCAN_GLOBAL_CAP:
             bt.logging.info(f'Issue discovery scan: global cap ({REPO_SCAN_GLOBAL_CAP}) reached, stopping')
             break
@@ -99,6 +99,11 @@ async def scan_closed_issues(
             min(REPO_SCAN_PER_REPO_CAP, remaining_global),
         )
         global_lookup_count += lookups_done
+
+        if i % 25 == 0:
+            bt.logging.info(
+                f'Issue discovery scan: {i}/{len(active_repos)} repos scanned, {global_lookup_count} lookups'
+            )
 
     total_issues = sum(len(issues) for issues in result.values())
     bt.logging.info(
@@ -209,6 +214,9 @@ def _fetch_closed_issues(repo_name: str, since: str, token: str) -> List[dict]:
                 headers=headers,
                 timeout=30,
             )
+            if response.status_code == 422:
+                bt.logging.debug(f'Issue scan {repo_name}: pagination limit at page {page}')
+                break
             if response.status_code != 200:
                 bt.logging.warning(f'Issue scan {repo_name} page {page}: HTTP {response.status_code}')
                 break

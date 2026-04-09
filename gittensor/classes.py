@@ -324,6 +324,7 @@ class MinerEvaluation:
     issue_credibility: float = 0.0
     is_issue_eligible: bool = False
     total_solved_issues: int = 0
+    total_valid_solved_issues: int = 0  # solved issues where solving PR has token_score >= 5
     total_closed_issues: int = 0
     total_open_issues: int = 0
 

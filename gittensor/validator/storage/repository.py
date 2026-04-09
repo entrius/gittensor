@@ -344,6 +344,7 @@ class Repository(BaseRepository):
                 evaluation.issue_credibility,
                 evaluation.is_issue_eligible,
                 evaluation.total_solved_issues,
+                evaluation.total_valid_solved_issues,
                 evaluation.total_closed_issues,
                 evaluation.total_open_issues,
             )

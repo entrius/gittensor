@@ -142,9 +142,10 @@ def score_discovered_issues(
             continue
 
         evaluation.total_solved_issues = data.solved_count
+        evaluation.total_valid_solved_issues = len(data.scored_issues)
         evaluation.total_closed_issues = data.closed_count
 
-        is_eligible, credibility, reason = check_issue_eligibility(data.solved_count, data.closed_count)
+        is_eligible, credibility, reason = check_issue_eligibility(len(data.scored_issues), data.closed_count)
         evaluation.is_issue_eligible = is_eligible
         evaluation.issue_credibility = credibility
 

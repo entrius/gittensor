@@ -12,15 +12,15 @@ RUN pip install --break-system-packages uv
 
 WORKDIR /app
 
-# Copy dependency files and README (required by hatchling build)
+# Copy dependency files first (for Docker layer caching)
 COPY pyproject.toml uv.lock README.md ./
 
-# Create venv and sync dependencies
+# Create venv and install dependencies only (no project install yet)
 ENV VENV_DIR=/opt/venv
 ENV VIRTUAL_ENV=$VENV_DIR
 ENV PATH="$VENV_DIR/bin:$PATH"
-RUN uv venv --python python3 $VENV_DIR && uv sync
+RUN uv venv --python python3 $VENV_DIR && uv sync --no-install-project
 
-# Copy application code and install
+# Copy application code and install the project
 COPY . .
-RUN uv pip install -e .
+RUN uv sync

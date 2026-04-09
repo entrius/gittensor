@@ -12,15 +12,13 @@ RUN pip install --break-system-packages uv
 
 WORKDIR /app
 
-# Copy dependency files
-COPY pyproject.toml uv.lock ./
+# Copy dependency files first (for Docker layer caching)
+COPY pyproject.toml uv.lock README.md ./
 
-# Create venv and sync dependencies
-ENV VENV_DIR=/opt/venv
-ENV VIRTUAL_ENV=$VENV_DIR
-ENV PATH="$VENV_DIR/bin:$PATH"
-RUN uv venv --python python3 $VENV_DIR && uv sync
+# Install dependencies only (no project install yet — source code not copied)
+ENV PATH="/app/.venv/bin:$PATH"
+RUN uv sync --no-install-project
 
-# Copy application code and install
+# Copy application code and install the project
 COPY . .
-RUN uv pip install -e .
+RUN uv sync

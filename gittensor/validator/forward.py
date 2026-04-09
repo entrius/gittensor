@@ -18,11 +18,17 @@ from gittensor.constants import (
 )
 from gittensor.utils.uids import get_all_uids
 from gittensor.validator.issue_competitions.forward import issue_competitions
-from gittensor.validator.issue_discovery.normalize import normalize_issue_discovery_rewards
+from gittensor.validator.issue_discovery.normalize import (
+    normalize_issue_discovery_rewards,
+)
 from gittensor.validator.issue_discovery.repo_scan import scan_closed_issues
 from gittensor.validator.issue_discovery.scoring import score_discovered_issues
 from gittensor.validator.oss_contributions.reward import get_rewards
-from gittensor.validator.utils.config import GITTENSOR_VALIDATOR_PAT, VALIDATOR_STEPS_INTERVAL, VALIDATOR_WAIT
+from gittensor.validator.utils.config import (
+    GITTENSOR_VALIDATOR_PAT,
+    VALIDATOR_STEPS_INTERVAL,
+    VALIDATOR_WAIT,
+)
 from gittensor.validator.utils.load_weights import (
     RepositoryConfig,
     load_master_repo_weights,
@@ -58,7 +64,7 @@ async def forward(self: 'Validator') -> None:
         # 1. Score OSS contributions
         oss_rewards, miner_evaluations, cached_uids = await oss_contributions(self, miner_uids, master_repositories)
 
-        # 2. Issue bounties verification (needs eligibility data from OSS scoring)
+        # 2. Issue bounties verification
         await issue_competitions(self, miner_evaluations)
 
         # 3. Score issue discovery

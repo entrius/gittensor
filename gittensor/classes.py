@@ -130,6 +130,18 @@ class Issue:
     state: Optional[str] = None  # "OPEN" or "CLOSED"
     author_association: Optional[str] = None  # e.g., "OWNER", "MEMBER", "COLLABORATOR", "CONTRIBUTOR", "NONE"
 
+    # Issue discovery fields
+    author_github_id: Optional[str] = None  # Issue author's GitHub user ID (for miner matching)
+    is_transferred: bool = False
+    updated_at: Optional[datetime] = None
+    discovery_base_score: float = 0.0
+    discovery_earned_score: float = 0.0
+    discovery_review_quality_multiplier: float = 1.0
+    discovery_repo_weight_multiplier: float = 1.0
+    discovery_time_decay_multiplier: float = 1.0
+    discovery_credibility_multiplier: float = 1.0
+    discovery_open_issue_spam_multiplier: float = 1.0
+
 
 @dataclass
 class PullRequest:
@@ -232,6 +244,8 @@ class PullRequest:
         for issue in raw_issues:
             if is_merged and not (issue.get('closedAt') and issue.get('state') == 'CLOSED'):
                 continue
+            issue_author = issue.get('author') or {}
+            author_db_id = issue_author.get('databaseId')
             issues.append(
                 Issue(
                     number=issue['number'],
@@ -240,9 +254,11 @@ class PullRequest:
                     title=issue['title'],
                     created_at=parse_github_timestamp_to_cst(issue['createdAt']) if issue.get('createdAt') else None,
                     closed_at=parse_github_timestamp_to_cst(issue['closedAt']) if issue.get('closedAt') else None,
-                    author_login=issue.get('author', {}).get('login') if issue.get('author') else None,
+                    author_login=issue_author.get('login'),
                     state=issue.get('state'),
                     author_association=issue.get('authorAssociation'),
+                    author_github_id=str(author_db_id) if author_db_id else None,
+                    updated_at=parse_github_timestamp_to_cst(issue['updatedAt']) if issue.get('updatedAt') else None,
                 )
             )
 
@@ -302,6 +318,16 @@ class MinerEvaluation:
     # Eligibility and credibility
     is_eligible: bool = False
     credibility: float = 0.0
+
+    # Issue discovery scoring
+    issue_discovery_score: float = 0.0
+    issue_token_score: float = 0.0  # sum of solving PR token_scores for scored issues
+    issue_credibility: float = 0.0
+    is_issue_eligible: bool = False
+    total_solved_issues: int = 0
+    total_valid_solved_issues: int = 0  # solved issues where solving PR has token_score >= 5
+    total_closed_issues: int = 0
+    total_open_issues: int = 0
 
     @property
     def total_prs(self) -> int:

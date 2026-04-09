@@ -33,7 +33,7 @@ def load_all_pats() -> list[dict]:
         return _read_file()
 
 
-def save_pat(uid: int, hotkey: str, pat: str) -> None:
+def save_pat(uid: int, hotkey: str, pat: str, github_id: str) -> None:
     """Upsert a PAT entry by UID. Creates the file if needed."""
     with _lock:
         entries = _read_file()
@@ -42,6 +42,7 @@ def save_pat(uid: int, hotkey: str, pat: str) -> None:
             'uid': uid,
             'hotkey': hotkey,
             'pat': pat,
+            'github_id': github_id,
             'stored_at': datetime.now(timezone.utc).isoformat(),
         }
 

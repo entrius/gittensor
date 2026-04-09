@@ -1914,6 +1914,10 @@
     "tier": "Bronze",
     "weight": 0.12
   },
+  "fx-integral/academia": {
+    "tier": "Bronze",
+    "weight": 1
+  },
   "fx-integral/metahash": {
     "tier": "Bronze",
     "weight": 0.38

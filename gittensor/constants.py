@@ -73,7 +73,6 @@ PIONEER_DIVIDEND_MAX_RATIO = 1.0  # Cap dividend at 1× pioneer's own earned_sco
 
 # Issue boosts
 MAX_ISSUE_CLOSE_WINDOW_DAYS = 1
-MAX_ISSUE_AGE_FOR_MAX_SCORE = 40  # days
 
 # Time decay (sigmoid curve)
 TIME_DECAY_GRACE_PERIOD_HOURS = 12  # hours before time decay begins
@@ -105,7 +104,7 @@ INLINE_TEST_PATTERNS: Dict[str, re.Pattern] = {
 # Eligibility Gate
 # =============================================================================
 MIN_VALID_MERGED_PRS = 5  # minimum "valid" merged PRs (token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE) to receive score
-MIN_CREDIBILITY = 0.75  # minimum credibility ratio to receive score
+MIN_CREDIBILITY = 0.90  # minimum credibility ratio to receive score
 CREDIBILITY_MULLIGAN_COUNT = 1  # number of closed PRs forgiven (erased from merged+closed counts entirely)
 
 # =============================================================================
@@ -134,9 +133,9 @@ MAINTAINER_ASSOCIATIONS = ['OWNER', 'MEMBER', 'COLLABORATOR']
 # PR Review Quality Multiplier
 REVIEW_PENALTY_RATE = 0.12  # 12% deduction per CHANGES_REQUESTED review from a maintainer
 
-# Issue multiplier bonuses
-MAX_ISSUE_AGE_BONUS = 0.75  # Max bonus for issue age (scales with sqrt of days open)
-MAINTAINER_ISSUE_BONUS = 0.25  # Extra bonus when issue was created by a maintainer
+# Issue multiplier (flat values, no age scaling)
+STANDARD_ISSUE_MULTIPLIER = 1.33  # Non-maintainer issue author
+MAINTAINER_ISSUE_MULTIPLIER = 1.66  # Issue author is OWNER/MEMBER/COLLABORATOR
 # Excessive open PRs penalty
 # Multiplier = 1.0 if open PRs <= threshold, 0.0 otherwise
 EXCESSIVE_PR_PENALTY_BASE_THRESHOLD = 10

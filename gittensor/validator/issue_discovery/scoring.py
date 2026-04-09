@@ -144,6 +144,7 @@ def score_discovered_issues(
         evaluation.total_solved_issues = data.solved_count
         evaluation.total_valid_solved_issues = len(data.scored_issues)
         evaluation.total_closed_issues = data.closed_count
+        evaluation.issue_token_score = round(data.issue_token_score, 2)
 
         is_eligible, credibility, reason = check_issue_eligibility(len(data.scored_issues), data.closed_count)
         evaluation.is_issue_eligible = is_eligible
@@ -186,12 +187,13 @@ def score_discovered_issues(
 class _DiscovererData:
     """Accumulator for a single discoverer's issue data."""
 
-    __slots__ = ('solved_count', 'closed_count', 'scored_issues')
+    __slots__ = ('solved_count', 'closed_count', 'scored_issues', 'issue_token_score')
 
     def __init__(self):
         self.solved_count: int = 0
         self.closed_count: int = 0
         self.scored_issues: List[Issue] = []
+        self.issue_token_score: float = 0.0  # sum of solving PR token_scores
 
 
 def _collect_issues_from_prs(
@@ -268,6 +270,7 @@ def _collect_issues_from_prs(
                 # credibility and spam multipliers applied in the main loop after eligibility check
 
                 data.scored_issues.append(issue)
+                data.issue_token_score += pr.token_score
 
 
 def _merge_scan_issues(

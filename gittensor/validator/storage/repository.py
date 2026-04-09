@@ -341,6 +341,7 @@ class Repository(BaseRepository):
                 evaluation.total_leaf_count,
                 evaluation.total_leaf_score,
                 evaluation.issue_discovery_score,
+                evaluation.issue_token_score,
                 evaluation.issue_credibility,
                 evaluation.is_issue_eligible,
                 evaluation.total_solved_issues,

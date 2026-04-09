@@ -321,6 +321,7 @@ class MinerEvaluation:
 
     # Issue discovery scoring
     issue_discovery_score: float = 0.0
+    issue_token_score: float = 0.0  # sum of solving PR token_scores for scored issues
     issue_credibility: float = 0.0
     is_issue_eligible: bool = False
     total_solved_issues: int = 0

@@ -123,7 +123,7 @@ INSERT INTO miner_evaluations (
     total_nodes_scored, total_open_prs, total_closed_prs, total_merged_prs, total_prs,
     unique_repos_count, is_eligible, credibility,
     total_token_score, total_structural_count, total_structural_score, total_leaf_count, total_leaf_score,
-    issue_discovery_score, issue_credibility, is_issue_eligible,
+    issue_discovery_score, issue_token_score, issue_credibility, is_issue_eligible,
     total_solved_issues, total_valid_solved_issues, total_closed_issues, total_open_issues
 ) VALUES %s
 ON CONFLICT (uid, hotkey, github_id)
@@ -146,6 +146,7 @@ DO UPDATE SET
     total_leaf_count = EXCLUDED.total_leaf_count,
     total_leaf_score = EXCLUDED.total_leaf_score,
     issue_discovery_score = EXCLUDED.issue_discovery_score,
+    issue_token_score = EXCLUDED.issue_token_score,
     issue_credibility = EXCLUDED.issue_credibility,
     is_issue_eligible = EXCLUDED.is_issue_eligible,
     total_solved_issues = EXCLUDED.total_solved_issues,

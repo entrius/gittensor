@@ -3884,6 +3884,7 @@
     "weight": 0.16
   },
   "latent-to/async-substrate-interface": {
+    "additional_acceptable_branches": ["staging"],
     "tier": "Gold",
     "weight": 24.78
   },

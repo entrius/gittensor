@@ -1,743 +1,743 @@
 {
   "404-Repo/404-base-miner-gs": {
-    "weight": 0.41
+    "weight": 0.0484
   },
   "404-Repo/404-gen-subnet": {
-    "weight": 3
+    "weight": 0.1013
   },
   "AffineFoundation/affine-cortex": {
-    "weight": 17.36
+    "weight": 0.2017
   },
   "AffineFoundation/affinetes": {
-    "weight": 15.28
+    "weight": 0.1957
   },
   "AffineFoundation/liveweb-arena": {
-    "weight": 4.87
-  },
-  "AgentOps-AI/agentops": {
-    "weight": 0.3
-  },
-  "All-Hands-AI/OpenHands": {
-    "weight": 0.5
-  },
-  "AlphaCoreBittensor/alphacore": {
-    "weight": 0.41
-  },
-  "Barbariandev/MANTIS": {
-    "weight": 0.52
-  },
-  "BerriAI/litellm": {
-    "weight": 0.5
-  },
-  "BitMind-AI/bitmind-subnet": {
-    "additional_acceptable_branches": [
-      "testnet"
-    ],
-    "weight": 3
-  },
-  "Bitsec-AI/subnet": {
-    "weight": 0.41
-  },
-  "ChutesAI/chutes": {
-    "weight": 3
-  },
-  "Cinnamon/kotaemon": {
-    "weight": 0.4
-  },
-  "ClickHouse/ClickHouse": {
-    "weight": 4.84
-  },
-  "CreativeBuilds/sn77": {
-    "weight": 0.51
-  },
-  "Datura-ai/lium-io": {
-    "weight": 2.55
-  },
-  "Desearch-ai/linkedin-dms": {
-    "weight": 5.07
-  },
-  "Desearch-ai/subnet-22": {
-    "weight": 6.15
-  },
-  "EfficientFrontier-SignalPlus/EfficientFrontier": {
-    "weight": 0.41
-  },
-  "General-Tao-Ventures/cartha-cli": {
-    "weight": 0.41
-  },
-  "General-Tao-Ventures/cartha-validator": {
-    "weight": 0.4
-  },
-  "GraphiteAI/Graphite-Subnet": {
-    "weight": 0.4
-  },
-  "Homebrew/brew": {
-    "weight": 0.15
-  },
-  "It-s-AI/llm-detection": {
-    "weight": 0.4
-  },
-  "JetBrains/kotlin": {
-    "weight": 0.26
-  },
-  "MetaMask/metamask-extension": {
-    "weight": 1.33
-  },
-  "MystenLabs/sui": {
-    "weight": 0.51
-  },
-  "OpenGradient/BitQuant-Subnet": {
-    "weight": 0.4
-  },
-  "OpenHands/OpenHands": {
-    "weight": 7.69
-  },
-  "OpenZeppelin/openzeppelin-contracts": {
-    "weight": 0.13
-  },
-  "Orpheus-AI/Zeus": {
-    "weight": 0.51
-  },
-  "PlatformNetwork/platform": {
-    "weight": 0.4
-  },
-  "RedTeamSubnet/RedTeam": {
-    "additional_acceptable_branches": [
-      "dev"
-    ],
-    "weight": 0.39
-  },
-  "SWE-agent/SWE-agent": {
-    "weight": 0.9
-  },
-  "Significant-Gravitas/AutoGPT": {
-    "additional_acceptable_branches": [
-      "dev"
-    ],
-    "weight": 0.67
-  },
-  "Stirling-Tools/Stirling-PDF": {
-    "weight": 0.81
-  },
-  "Swap-Subnet/swap-subnet": {
-    "weight": 0.34
-  },
-  "Team-Rizzo/talisman-ai": {
-    "weight": 0.59
-  },
-  "ToolJet/ToolJet": {
-    "additional_acceptable_branches": [
-      "develop"
-    ],
-    "weight": 0.63
-  },
-  "Uniswap/v4-core": {
-    "weight": 0.85
-  },
-  "Unstructured-IO/unstructured": {
-    "weight": 5.96
+    "weight": 0.1168
   },
   "afterpartyai/bittensor-conversation-genome-project": {
-    "weight": 0.51
+    "weight": 0.0532
+  },
+  "AgentOps-AI/agentops": {
+    "weight": 0.0361
+  },
+  "All-Hands-AI/OpenHands": {
+    "weight": 0.0529
+  },
+  "AlphaCoreBittensor/alphacore": {
+    "weight": 0.0481
   },
   "ansible/ansible": {
-    "weight": 0.34
+    "weight": 0.037
   },
   "ant-design/ant-design": {
     "additional_acceptable_branches": [
       "feature"
     ],
-    "weight": 1
+    "weight": 0.0715
   },
   "antoniorodr/cronboard": {
-    "weight": 0.23
+    "weight": 0.0347
   },
   "appwrite/appwrite": {
-    "weight": 0.61
+    "weight": 0.0575
   },
   "astral-sh/ruff": {
     "inactive_at": "2026-03-28T00:00:00Z",
-    "weight": 13.72
+    "weight": 0.1901
   },
   "autoppia/autoppia_iwa": {
     "additional_acceptable_branches": [
       "contribution/*"
     ],
-    "weight": 5.33
+    "weight": 0.1259
   },
   "autoppia/autoppia_web_agents_subnet": {
     "additional_acceptable_branches": [
       "dev",
       "dev-gittensor"
     ],
-    "weight": 5.79
+    "weight": 0.1321
   },
   "autoppia/autoppia_webs_demo": {
     "additional_acceptable_branches": [
       "feature/*",
       "fix/*"
     ],
-    "weight": 5.2
+    "weight": 0.1239
   },
   "aws/aws-cli": {
-    "weight": 3
+    "weight": 0.0978
   },
   "axios/axios": {
-    "weight": 0.26
+    "weight": 0.0351
   },
   "backend-developers-ltd/ComputeHorde": {
-    "weight": 0.45
+    "weight": 0.0501
   },
   "backend-developers-ltd/InfiniteHash": {
-    "weight": 0.39
+    "weight": 0.0435
+  },
+  "Barbariandev/MANTIS": {
+    "weight": 0.0546
+  },
+  "BerriAI/litellm": {
+    "weight": 0.0526
   },
   "bevyengine/bevy": {
-    "weight": 0.6
+    "weight": 0.0567
   },
   "bitcast-network/bitcast": {
-    "weight": 0.44
+    "weight": 0.0498
   },
   "bitcoin/bips": {
-    "weight": 37.4
+    "weight": 0.387
   },
   "bitcoin/bitcoin": {
-    "weight": 100
+    "weight": 1.0
   },
   "bitcoinj/bitcoinj": {
-    "weight": 32.92
+    "weight": 0.3556
   },
   "bitcoinjs/bitcoinjs-lib": {
-    "weight": 29.55
+    "weight": 0.3303
+  },
+  "BitMind-AI/bitmind-subnet": {
+    "additional_acceptable_branches": [
+      "testnet"
+    ],
+    "weight": 0.1001
   },
   "bitpay/bitcore": {
-    "weight": 3
+    "weight": 0.0967
   },
   "bitrecs/bitrecs-subnet": {
-    "weight": 0.39
+    "weight": 0.0433
+  },
+  "Bitsec-AI/subnet": {
+    "weight": 0.0478
   },
   "bitwarden/server": {
-    "weight": 3
+    "weight": 0.0956
   },
   "brave/brave-browser": {
-    "weight": 3
+    "weight": 0.0946
   },
   "browser-use/browser-use": {
-    "weight": 0.5
+    "weight": 0.0523
   },
   "byteleapai/byteleap-Miner": {
-    "weight": 0.39
+    "weight": 0.0431
   },
   "calcom/cal.com": {
-    "weight": 0.2
+    "weight": 0.0346
   },
   "chrishayuk/mcp-ragdocs": {
-    "weight": 0.3
+    "weight": 0.0359
+  },
+  "ChutesAI/chutes": {
+    "weight": 0.0989
+  },
+  "Cinnamon/kotaemon": {
+    "weight": 0.047
   },
   "cli/cli": {
-    "weight": 3
+    "weight": 0.0936
+  },
+  "ClickHouse/ClickHouse": {
+    "weight": 0.1152
   },
   "comfyanonymous/ComfyUI": {
-    "weight": 0.5
+    "weight": 0.052
   },
   "commaai/openpilot": {
-    "weight": 2.87
+    "weight": 0.0926
   },
   "conda/conda": {
     "inactive_at": "2026-02-05T00:00:00Z",
-    "weight": 3.53
+    "weight": 0.1038
   },
   "cosmos/cosmos-sdk": {
-    "weight": 2.7
+    "weight": 0.0916
+  },
+  "CreativeBuilds/sn77": {
+    "weight": 0.0542
   },
   "crewAIInc/crewAI": {
-    "weight": 0.5
+    "weight": 0.0516
   },
   "curl/curl": {
-    "weight": 0.33
+    "weight": 0.0368
+  },
+  "Datura-ai/lium-io": {
+    "weight": 0.0906
   },
   "dbeaver/dbeaver": {
-    "weight": 20
+    "weight": 0.2409
   },
   "deepset-ai/haystack": {
-    "weight": 0.6
+    "weight": 0.0564
   },
   "denoland/deno": {
-    "weight": 4.54
+    "weight": 0.1106
+  },
+  "Desearch-ai/linkedin-dms": {
+    "weight": 0.1221
+  },
+  "Desearch-ai/subnet-22": {
+    "weight": 0.1367
   },
   "django/django": {
-    "weight": 0.32
+    "weight": 0.0364
   },
   "docker/compose": {
-    "weight": 2.42
+    "weight": 0.0897
   },
   "dogecoin/dogecoin": {
-    "weight": 0.37
+    "weight": 0.0415
   },
   "dstrbtd/DistributedTraining": {
-    "weight": 0.4
+    "weight": 0.0455
+  },
+  "EfficientFrontier-SignalPlus/EfficientFrontier": {
+    "weight": 0.0476
   },
   "eigent-ai/eigent": {
-    "weight": 6.36
+    "weight": 0.1392
   },
   "entrius/allways": {
-    "weight": 53.48
+    "weight": 0.5622
   },
   "entrius/allways-ui": {
-    "weight": 26.91
+    "weight": 0.3094
   },
   "entrius/gittensor": {
-    "weight": 53.48
+    "weight": 0.482
   },
   "entrius/gittensor-ui": {
-    "weight": 26.91
+    "weight": 0.2917
   },
   "entrius/venth": {
-    "weight": 3.52,
-    "inactive_at": "2026-03-14"
+    "inactive_at": "2026-03-14",
+    "weight": 0.1025
   },
   "espressif/arduino-esp32": {
-    "weight": 6.82
+    "weight": 0.1444
   },
   "ethereum-optimism/optimism": {
-    "weight": 2.31
+    "weight": 0.0888
   },
   "ethereum/EIPs": {
-    "weight": 2.21
+    "weight": 0.0879
   },
   "ethereum/go-ethereum": {
-    "weight": 12.49
+    "weight": 0.1849
   },
   "ethers-io/ethers.js": {
-    "weight": 2.11
+    "weight": 0.087
   },
   "excalidraw/excalidraw": {
-    "weight": 0.62
+    "weight": 0.0587
   },
   "flowsurface-rs/flowsurface": {
-    "weight": 0.49
+    "weight": 0.0507
   },
   "fx-integral/metahash": {
-    "weight": 0.38
+    "weight": 0.0428
+  },
+  "General-Tao-Ventures/cartha-cli": {
+    "weight": 0.0473
+  },
+  "General-Tao-Ventures/cartha-validator": {
+    "weight": 0.0468
   },
   "ggml-org/llama.cpp": {
-    "weight": 0.12
+    "weight": 0.0338
   },
   "git/git": {
-    "weight": 2.03
+    "weight": 0.0862
   },
   "godotengine/godot": {
-    "weight": 0.65
+    "weight": 0.0607
   },
   "gopher-lab/subnet-42": {
-    "weight": 0.38
+    "weight": 0.0426
   },
   "gradients-ai/G.O.D": {
-    "weight": 1.89
+    "weight": 0.0853
   },
   "grafana/grafana": {
-    "weight": 4.73
+    "weight": 0.1136
+  },
+  "GraphiteAI/Graphite-Subnet": {
+    "weight": 0.0465
+  },
+  "Homebrew/brew": {
+    "weight": 0.0341
   },
   "hoppscotch/hoppscotch": {
     "additional_acceptable_branches": [
       "next"
     ],
-    "weight": 11.5
+    "weight": 0.1801
   },
   "huggingface/lerobot": {
-    "weight": 0.69
+    "weight": 0.0624
   },
   "huggingface/transformers": {
-    "weight": 1.82
+    "weight": 0.0845
   },
   "immich-app/immich": {
-    "weight": 0.62
+    "weight": 0.0583
   },
   "impel-intelligence/dippy-studio-bittensor-miner": {
-    "weight": 0.38
+    "weight": 0.0424
   },
   "impel-intelligence/dippy-studio-bittensor-orchestrator": {
-    "weight": 0.38
+    "weight": 0.0422
   },
   "inference-labs-inc/subnet-2": {
-    "weight": 0.38
+    "weight": 0.0419
   },
   "infiniflow/ragflow": {
-    "weight": 4.95
+    "weight": 0.1185
+  },
+  "It-s-AI/llm-detection": {
+    "weight": 0.0462
   },
   "janhq/jan": {
-    "weight": 0.96
+    "weight": 0.0704
   },
   "jellyfin/jellyfin": {
-    "weight": 0.64
+    "weight": 0.0603
   },
   "jesseduffield/lazygit": {
-    "weight": 0.29
+    "weight": 0.0356
+  },
+  "JetBrains/kotlin": {
+    "weight": 0.0352
   },
   "junegunn/fzf": {
-    "weight": 0.24
+    "weight": 0.0349
   },
   "jupyter/jupyter": {
-    "weight": 1.71
+    "weight": 0.0837
   },
   "jupyterlab/jupyterlab": {
-    "weight": 10.69
+    "weight": 0.1755
   },
   "keras-team/keras": {
-    "weight": 4.45
+    "weight": 0.1091
   },
   "labring/FastGPT": {
-    "weight": 0.7
+    "weight": 0.0629
   },
   "langchain-ai/langchain": {
-    "weight": 0.67
+    "weight": 0.0611
   },
   "langgenius/dify": {
-    "weight": 0.8
+    "weight": 0.0638
   },
   "laravel/framework": {
-    "weight": 0.19
+    "weight": 0.0344
   },
   "latent-to/async-substrate-interface": {
-    "weight": 24.78
+    "weight": 0.2764
   },
   "latent-to/bittensor": {
     "additional_acceptable_branches": [
       "staging",
       "SDKv10"
     ],
-    "weight": 43.72
+    "weight": 0.4274
   },
   "latent-to/btcli": {
     "additional_acceptable_branches": [
       "staging"
     ],
-    "weight": 21.54
+    "weight": 0.2514
   },
   "latent-to/btwallet": {
-    "weight": 23.02
+    "weight": 0.2631
   },
   "latent-to/taohash": {
-    "weight": 0.61
+    "weight": 0.0571
   },
   "leadpoet/leadpoet": {
-    "weight": 0.44
+    "weight": 0.0495
   },
   "letta-ai/letta": {
-    "weight": 1.42
+    "weight": 0.0829
   },
   "llmsresearch/paperbanana": {
-    "weight": 4.36
+    "weight": 0.1077
   },
   "louislam/uptime-kuma": {
     "additional_acceptable_branches": [
       "3.0.X"
     ],
     "inactive_at": "2026-01-26T02:52:00.000Z",
-    "weight": 0.19
+    "weight": 0.0342
   },
   "macrocosm-os/apex": {
-    "weight": 0.38
+    "weight": 0.0417
   },
   "macrocosm-os/data-universe": {
     "additional_acceptable_branches": [
       "dev"
     ],
-    "weight": 0.44
+    "weight": 0.0492
   },
   "macrocosm-os/iota": {
-    "weight": 0.35
+    "weight": 0.0385
   },
   "manifold-inc/hone": {
-    "weight": 1.39
+    "weight": 0.0821
   },
   "manifold-inc/targon": {
-    "weight": 1.36
+    "weight": 0.0814
   },
   "mark3labs/mcp-go": {
-    "weight": 0.3
+    "weight": 0.0357
   },
   "mastodon/mastodon": {
-    "weight": 0.6
+    "weight": 0.056
   },
   "medusajs/medusa": {
     "additional_acceptable_branches": [
       "develop"
     ],
-    "weight": 0.64
+    "weight": 0.0599
   },
   "mem0ai/mem0": {
-    "weight": 0.4
+    "weight": 0.0452
+  },
+  "MetaMask/metamask-extension": {
+    "weight": 0.0806
   },
   "metanova-labs/nova": {
-    "weight": 1.3
+    "weight": 0.0799
   },
   "mobiusfund/etf": {
-    "weight": 0.37
+    "weight": 0.0413
   },
   "mode-network/synth-subnet": {
-    "weight": 0.35
+    "weight": 0.0383
   },
   "modelcontextprotocol/inspector": {
-    "weight": 0.4
+    "weight": 0.045
   },
   "modelcontextprotocol/python-sdk": {
-    "weight": 0.4
+    "weight": 0.0447
   },
   "modelcontextprotocol/registry": {
-    "weight": 0.4
+    "weight": 0.0445
   },
   "modelcontextprotocol/servers": {
-    "weight": 0.5
+    "weight": 0.0513
   },
   "modelcontextprotocol/typescript-sdk": {
-    "weight": 0.4
+    "weight": 0.0442
   },
   "monero-project/monero": {
-    "weight": 1.25
+    "weight": 0.0792
   },
   "mrdoob/three.js": {
-    "weight": 1.03
+    "weight": 0.0733
+  },
+  "MystenLabs/sui": {
+    "weight": 0.0539
   },
   "neovim/neovim": {
-    "weight": 1.23
+    "weight": 0.0785
   },
   "nextcloud/android": {
-    "weight": 1.2
+    "weight": 0.0778
   },
   "nextcloud/desktop": {
-    "weight": 1.18
+    "weight": 0.0771
   },
   "nextcloud/server": {
-    "weight": 1.14
+    "weight": 0.0764
   },
   "nginx/nginx": {
-    "weight": 1.12
+    "weight": 0.0758
   },
   "nimbusdotstorage/Nimbus": {
-    "weight": 0.1
+    "weight": 0.0333
   },
   "nocodb/nocodb": {
     "additional_acceptable_branches": [
       "develop"
     ],
-    "weight": 1.1
+    "weight": 0.0751
   },
   "numinouslabs/numinous": {
-    "weight": 0.37
+    "weight": 0.0411
   },
   "ohmyzsh/ohmyzsh": {
-    "weight": 1.01
+    "weight": 0.0721
   },
   "ollama/ollama": {
-    "weight": 0.63
+    "weight": 0.059
   },
   "omegalabsinc/omegalabs-anytoany-bittensor": {
-    "weight": 0.37
+    "weight": 0.0409
   },
   "omegalabsinc/omegalabs-bittensor-subnet": {
-    "weight": 0.37
+    "weight": 0.0407
   },
   "one-covenant/basilica": {
-    "weight": 10
+    "weight": 0.1713
   },
   "one-covenant/bittensor-rs": {
-    "weight": 6.58
+    "weight": 0.1417
   },
   "one-covenant/grail": {
-    "weight": 9.4
+    "weight": 0.1672
   },
   "one-covenant/templar": {
-    "weight": 8.89
+    "weight": 0.1634
   },
   "oneoneone-io/subnet-111": {
-    "weight": 0.37
+    "weight": 0.0405
   },
   "openclaw/openclaw": {
-    "weight": 20
+    "weight": 0.2316
+  },
+  "OpenGradient/BitQuant-Subnet": {
+    "weight": 0.046
+  },
+  "OpenHands/OpenHands": {
+    "weight": 0.1532
   },
   "openprose/prose": {
-    "weight": 0.44
+    "weight": 0.049
   },
   "opentensor/subtensor": {
     "additional_acceptable_branches": [
       "devnet-ready"
     ],
-    "weight": 71.03
+    "weight": 0.6966
+  },
+  "OpenZeppelin/openzeppelin-contracts": {
+    "weight": 0.0339
+  },
+  "Orpheus-AI/Zeus": {
+    "weight": 0.0536
   },
   "oven-sh/bun": {
-    "weight": 0.68
+    "weight": 0.062
   },
   "pandas-dev/pandas": {
-    "weight": 4.63
+    "weight": 0.1121
   },
   "paperclipai/paperclip": {
-    "weight": 20
+    "weight": 0.2231
   },
   "paritytech/polkadot-sdk": {
-    "weight": 1.09
+    "weight": 0.0745
   },
   "penpot/penpot": {
-    "weight": 7.08
+    "weight": 0.1472
   },
   "phidatahq/phidata": {
-    "weight": 0.4
+    "weight": 0.044
   },
   "pi-hole/web": {
     "additional_acceptable_branches": [
       "development"
     ],
-    "weight": 1.07
+    "weight": 0.0739
+  },
+  "PlatformNetwork/platform": {
+    "weight": 0.0457
   },
   "postgres/postgres": {
-    "weight": 0.55
+    "weight": 0.0553
   },
   "pulumi/pulumi": {
     "inactive_at": "2026-03-04T17:03:48.522Z",
-    "weight": 3.73
+    "weight": 0.1051
   },
   "pyca/cryptography": {
-    "weight": 5.07,
-    "inactive_at": "2026-04-06T00:00:00Z"
+    "inactive_at": "2026-04-06T00:00:00Z",
+    "weight": 0.1203
   },
   "pydantic/pydantic-ai": {
-    "weight": 0.5
+    "weight": 0.051
   },
   "qbittensor-labs/quantum": {
-    "weight": 1.02
+    "weight": 0.0727
   },
   "qwibitai/nanoclaw": {
-    "weight": 20
+    "weight": 0.2153
   },
   "rails/rails": {
-    "weight": 0.28
+    "weight": 0.0354
   },
   "ray-project/ray": {
-    "weight": 8.44
+    "weight": 0.1599
   },
   "reboot-org/reboot-subnet": {
-    "weight": 0.37
+    "weight": 0.0402
   },
   "redis/redis": {
-    "weight": 0.32
+    "weight": 0.0363
+  },
+  "RedTeamSubnet/RedTeam": {
+    "additional_acceptable_branches": [
+      "dev"
+    ],
+    "weight": 0.0438
   },
   "resi-labs-ai/resi": {
-    "weight": 0.37
+    "weight": 0.04
   },
   "ridgesai/ridges": {
-    "weight": 0.99
+    "weight": 0.0709
   },
   "run-llama/llama_index": {
-    "weight": 7.37
+    "weight": 0.1501
   },
   "score-technologies/turbovision": {
-    "weight": 0.94
+    "weight": 0.0698
   },
   "sentient-agi/ROMA": {
-    "weight": 0.46
+    "weight": 0.0504
   },
   "shiftlayer-llc/brainplay-subnet": {
     "additional_acceptable_branches": [
       "dev"
     ],
-    "weight": 0.36
+    "weight": 0.0398
+  },
+  "Significant-Gravitas/AutoGPT": {
+    "additional_acceptable_branches": [
+      "dev"
+    ],
+    "weight": 0.0615
   },
   "smartcontractkit/chainlink": {
-    "weight": 0.93
+    "weight": 0.0693
   },
   "sportstensor/sn41": {
-    "weight": 0.53
+    "weight": 0.0549
+  },
+  "Stirling-Tools/Stirling-PDF": {
+    "weight": 0.0642
   },
   "strapi/strapi": {
-    "weight": 0.12
+    "weight": 0.0336
   },
   "supabase/supabase": {
-    "weight": 0.91
+    "weight": 0.0687
   },
   "sveltejs/svelte": {
-    "weight": 0.82
+    "weight": 0.0652
+  },
+  "Swap-Subnet/swap-subnet": {
+    "weight": 0.0372
   },
   "swarm-subnet/Langostino": {
-    "weight": 0.35
+    "weight": 0.0381
   },
   "swarm-subnet/swarm": {
-    "weight": 0.43
+    "weight": 0.0487
+  },
+  "SWE-agent/SWE-agent": {
+    "weight": 0.0682
   },
   "taofu-labs/tpn-subnet": {
     "additional_acceptable_branches": [
       "development"
     ],
-    "weight": 0.36
+    "weight": 0.0396
   },
   "taoshidev/vanta-network": {
-    "weight": 0.36
+    "weight": 0.0394
   },
   "tatsuproject/chipforge_sn84": {
-    "weight": 0.36
+    "weight": 0.0392
   },
   "tauri-apps/tauri": {
     "additional_acceptable_branches": [
       "dev"
     ],
-    "weight": 0.62
+    "weight": 0.0579
+  },
+  "Team-Rizzo/talisman-ai": {
+    "weight": 0.0556
   },
   "tensorplex-labs/dojo": {
-    "weight": 0.36
+    "weight": 0.039
   },
   "thenervelab/thebrain": {
-    "weight": 0.36
+    "weight": 0.0388
   },
   "threetau/kinitro": {
-    "weight": 0.33
+    "weight": 0.0366
   },
   "tinygrad/tinygrad": {
-    "weight": 0.87
+    "weight": 0.0677
   },
   "tmux/tmux": {
-    "weight": 0.86
+    "weight": 0.0672
+  },
+  "ToolJet/ToolJet": {
+    "additional_acceptable_branches": [
+      "develop"
+    ],
+    "weight": 0.0594
   },
   "trishoolai/trishool-subnet": {
-    "weight": 0.36
+    "weight": 0.0387
   },
   "twentyhq/twenty": {
-    "weight": 0.84
+    "weight": 0.0662
   },
   "unarbos/agcli": {
-    "weight": 20
+    "weight": 0.2083
+  },
+  "Uniswap/v4-core": {
+    "weight": 0.0667
+  },
+  "Unstructured-IO/unstructured": {
+    "weight": 0.1344
   },
   "v0idai/SN106": {
-    "weight": 0.35
+    "weight": 0.0379
   },
   "vercel/next.js": {
-    "weight": 0.83
+    "weight": 0.0657
   },
   "vidaio-subnet/vidaio-subnet": {
-    "weight": 0.35
+    "weight": 0.0377
   },
   "virattt/dexter": {
-    "weight": 5.63
+    "weight": 0.13
   },
   "vitejs/vite": {
-    "weight": 0.82
+    "weight": 0.0647
   },
   "vllm-project/vllm": {
-    "weight": 0.35
+    "weight": 0.0375
   },
   "vuejs/core": {
-    "weight": 0.12
+    "weight": 0.0335
   },
   "we-promise/sure": {
-    "weight": 5.47
+    "weight": 0.1279
   },
   "withastro/astro": {
-    "weight": 4.28
+    "weight": 0.1064
   },
   "yanez-compliance/MIID-subnet": {
-    "weight": 0.35
+    "weight": 0.0373
   },
   "zcash/zcash": {
-    "weight": 0.8
+    "weight": 0.0633
   },
   "zed-industries/zed": {
-    "weight": 8.04
+    "weight": 0.1564
   }
 }

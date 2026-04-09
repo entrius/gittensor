@@ -20,7 +20,10 @@ from .queries import (
     BULK_UPSERT_MINER_EVALUATION,
     BULK_UPSERT_PULL_REQUESTS,
     CLEANUP_STALE_MINER_EVALUATIONS,
+    CLEANUP_STALE_MINER_EVALUATIONS_BY_HOTKEY,
+    CLEANUP_STALE_MINER_TIER_STATS_BY_HOTKEY,
     CLEANUP_STALE_MINERS,
+    CLEANUP_STALE_MINERS_BY_HOTKEY,
     SET_MINER,
 )
 
@@ -123,8 +126,16 @@ class Repository(BaseRepository):
         params = (evaluation.github_id, evaluation.uid, evaluation.hotkey)
         eval_params = params + (evaluation.evaluation_timestamp,)
 
+        # Clean up when same github_id re-registers on a new uid/hotkey
         self.execute_command(CLEANUP_STALE_MINER_EVALUATIONS, eval_params)
         self.execute_command(CLEANUP_STALE_MINERS, params)
+
+        # Clean up when same (uid, hotkey) re-links to a new github_id
+        reverse_params = (evaluation.uid, evaluation.hotkey, evaluation.github_id)
+        reverse_eval_params = reverse_params + (evaluation.evaluation_timestamp,)
+        self.execute_command(CLEANUP_STALE_MINER_EVALUATIONS_BY_HOTKEY, reverse_eval_params)
+        self.execute_command(CLEANUP_STALE_MINER_TIER_STATS_BY_HOTKEY, reverse_params)
+        self.execute_command(CLEANUP_STALE_MINERS_BY_HOTKEY, reverse_params)
 
     def store_pull_requests_bulk(self, pull_requests: List[PullRequest]) -> int:
         """

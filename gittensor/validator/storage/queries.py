@@ -16,6 +16,29 @@ WHERE github_id = %s
   AND (uid != %s OR hotkey != %s)
 """
 
+# Reverse cleanup: Remove stale data when a (uid, hotkey) re-links to a new github_id
+CLEANUP_STALE_MINER_EVALUATIONS_BY_HOTKEY = """
+DELETE FROM miner_evaluations
+WHERE uid = %s AND hotkey = %s
+  AND github_id != %s
+  AND github_id != '0'
+  AND created_at <= %s
+"""
+
+CLEANUP_STALE_MINER_TIER_STATS_BY_HOTKEY = """
+DELETE FROM miner_tier_stats
+WHERE uid = %s AND hotkey = %s
+  AND github_id != %s
+  AND github_id != '0'
+"""
+
+CLEANUP_STALE_MINERS_BY_HOTKEY = """
+DELETE FROM miners
+WHERE uid = %s AND hotkey = %s
+  AND github_id != %s
+  AND github_id != '0'
+"""
+
 # Miner Queries
 SET_MINER = """
 INSERT INTO miners (uid, hotkey, github_id)

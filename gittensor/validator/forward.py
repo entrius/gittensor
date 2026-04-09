@@ -150,12 +150,21 @@ def blend_emission_pools(
     """
     sorted_uids = sorted(miner_uids)
     rewards = np.zeros(len(sorted_uids))
+    recycle_extra = 0.0
 
     # Pool 1: OSS contributions (30%)
-    rewards += oss_rewards * OSS_EMISSION_SHARE
+    oss_total = float(oss_rewards.sum())
+    if oss_total > 0:
+        rewards += oss_rewards * OSS_EMISSION_SHARE
+    else:
+        recycle_extra += OSS_EMISSION_SHARE
 
     # Pool 2: Issue discovery (30%)
-    rewards += issue_rewards * ISSUE_DISCOVERY_EMISSION_SHARE
+    issue_total = float(issue_rewards.sum())
+    if issue_total > 0:
+        rewards += issue_rewards * ISSUE_DISCOVERY_EMISSION_SHARE
+    else:
+        recycle_extra += ISSUE_DISCOVERY_EMISSION_SHARE
 
     # Pool 3: Issue treasury (15% flat to UID 111)
     if ISSUES_TREASURY_UID > 0 and ISSUES_TREASURY_UID in miner_uids:
@@ -166,9 +175,11 @@ def blend_emission_pools(
             f'{ISSUES_TREASURY_EMISSION_SHARE * 100:.0f}% of emissions'
         )
 
-    # Pool 4: Recycle (25% flat to UID 0)
+    # Pool 4: Recycle (25% + unclaimed from empty pools)
     if RECYCLE_UID in miner_uids:
         recycle_idx = sorted_uids.index(RECYCLE_UID)
-        rewards[recycle_idx] += RECYCLE_EMISSION_SHARE
+        rewards[recycle_idx] += RECYCLE_EMISSION_SHARE + recycle_extra
+        if recycle_extra > 0:
+            bt.logging.info(f'Recycling {recycle_extra * 100:.0f}% unclaimed emissions from empty pools')
 
     return rewards

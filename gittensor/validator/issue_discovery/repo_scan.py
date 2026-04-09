@@ -214,8 +214,8 @@ def _fetch_closed_issues(repo_name: str, since: str, token: str) -> List[dict]:
                 headers=headers,
                 timeout=30,
             )
-            if response.status_code == 422:
-                bt.logging.debug(f'Issue scan {repo_name}: pagination limit at page {page}')
+            if response.status_code in (404, 422):
+                bt.logging.debug(f'Issue scan {repo_name} page {page}: HTTP {response.status_code}')
                 break
             if response.status_code != 200:
                 bt.logging.warning(f'Issue scan {repo_name} page {page}: HTTP {response.status_code}')

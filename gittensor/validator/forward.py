@@ -2,20 +2,27 @@
 # Copyright © 2025 Entrius
 
 import asyncio
-from typing import TYPE_CHECKING, Dict, Tuple
+from typing import TYPE_CHECKING, Dict, Set, Tuple
 
 import bittensor as bt
 import numpy as np
 
 from gittensor.classes import MinerEvaluation
 from gittensor.constants import (
+    ISSUE_DISCOVERY_EMISSION_SHARE,
     ISSUES_TREASURY_EMISSION_SHARE,
     ISSUES_TREASURY_UID,
+    OSS_EMISSION_SHARE,
+    RECYCLE_EMISSION_SHARE,
+    RECYCLE_UID,
 )
 from gittensor.utils.uids import get_all_uids
 from gittensor.validator.issue_competitions.forward import issue_competitions
+from gittensor.validator.issue_discovery.normalize import normalize_issue_discovery_rewards
+from gittensor.validator.issue_discovery.repo_scan import scan_closed_issues
+from gittensor.validator.issue_discovery.scoring import score_discovered_issues
 from gittensor.validator.oss_contributions.reward import get_rewards
-from gittensor.validator.utils.config import VALIDATOR_STEPS_INTERVAL, VALIDATOR_WAIT
+from gittensor.validator.utils.config import GITTENSOR_VALIDATOR_PAT, VALIDATOR_STEPS_INTERVAL, VALIDATOR_WAIT
 from gittensor.validator.utils.load_weights import (
     load_master_repo_weights,
     load_programming_language_weights,
@@ -30,49 +37,85 @@ async def forward(self: 'Validator') -> None:
     """Execute the validator's forward pass.
 
     Performs the core validation cycle every VALIDATOR_STEPS_INTERVAL steps:
-    1. Score OSS contributions (pure scoring, no side effects)
-    2. Run issue bounties verification (needs eligibility data from scoring)
-    3. Build blended rewards array with treasury allocation
-    4. Update scores with blended rewards
+    1. Score OSS contributions (PR scoring)
+    2. Run issue bounties verification
+    3. Scan repos for closed issues (issue discovery data collection)
+    4. Score issue discovery
+    5. Store all evaluations to DB
+    6. Blend emission pools and update scores
 
-    Emission blending:
-    - OSS contributions: 85% (1.0 - treasury)
-    - Issue bounties treasury: 15% flat to treasury UID
+    Emission blending (hardcoded per-competition):
+    - OSS contributions: 30%
+    - Issue discovery:   30%
+    - Issue treasury:    15% (flat to UID 111)
+    - Recycle:           25% (flat to UID 0)
     """
 
     if self.step % VALIDATOR_STEPS_INTERVAL == 0:
         miner_uids = get_all_uids(self)
+        master_repositories = load_master_repo_weights()
 
-        rewards, miner_evaluations = await oss_contributions(self, miner_uids)
+        # 1. Score OSS contributions
+        oss_rewards, miner_evaluations, cached_uids = await oss_contributions(
+            self, miner_uids, master_repositories
+        )
 
+        # 2. Issue bounties verification (unchanged — needs eligibility data from OSS scoring)
         await issue_competitions(self, miner_evaluations)
 
-        # Build blended rewards array with treasury allocation
-        oss_share = 1.0 - ISSUES_TREASURY_EMISSION_SHARE
-        rewards *= oss_share
+        # 3. Scan tracked repos for miner-authored closed issues (validator PAT)
+        scan_issues: Dict[str, list] = {}
+        if GITTENSOR_VALIDATOR_PAT:
+            scan_issues = await scan_closed_issues(miner_evaluations, master_repositories, GITTENSOR_VALIDATOR_PAT)
 
+        # 4. Score issue discovery
+        score_discovered_issues(miner_evaluations, master_repositories, scan_issues)
+
+        # 5. Normalize issue discovery scores into independent pool
+        issue_rewards_dict = normalize_issue_discovery_rewards(miner_evaluations)
+
+        # 6. Store all evaluations to DB (includes issue discovery fields)
+        await self.bulk_store_evaluation(miner_evaluations, skip_uids=cached_uids)
+
+        # 7. Blend 4 emission pools into final rewards
+        sorted_uids = sorted(miner_uids)
+        rewards = np.zeros(len(sorted_uids))
+
+        # Pool 1: OSS contributions (30%)
+        rewards += oss_rewards * OSS_EMISSION_SHARE
+
+        # Pool 2: Issue discovery (30%)
+        issue_rewards = np.array([issue_rewards_dict.get(uid, 0.0) for uid in sorted_uids])
+        rewards += issue_rewards * ISSUE_DISCOVERY_EMISSION_SHARE
+
+        # Pool 3: Issue treasury (15% flat to UID 111)
         if ISSUES_TREASURY_UID > 0 and ISSUES_TREASURY_UID in miner_uids:
-            sorted_uids = sorted(miner_uids)
             treasury_idx = sorted_uids.index(ISSUES_TREASURY_UID)
-            rewards[treasury_idx] = ISSUES_TREASURY_EMISSION_SHARE
-
+            rewards[treasury_idx] += ISSUES_TREASURY_EMISSION_SHARE
             bt.logging.info(
-                f'Treasury allocation: Smart Contract UID {ISSUES_TREASURY_UID} receives '
+                f'Treasury allocation: UID {ISSUES_TREASURY_UID} receives '
                 f'{ISSUES_TREASURY_EMISSION_SHARE * 100:.0f}% of emissions'
             )
+
+        # Pool 4: Recycle (25% flat to UID 0)
+        if RECYCLE_UID in miner_uids:
+            recycle_idx = sorted_uids.index(RECYCLE_UID)
+            rewards[recycle_idx] += RECYCLE_EMISSION_SHARE
 
         self.update_scores(rewards, miner_uids)
 
     await asyncio.sleep(VALIDATOR_WAIT)
 
 
-async def oss_contributions(self: 'Validator', miner_uids: set[int]) -> Tuple[np.ndarray, Dict[int, MinerEvaluation]]:
-    """Score OSS contributions and return raw rewards + miner evaluations.
+async def oss_contributions(
+    self: 'Validator',
+    miner_uids: set[int],
+    master_repositories: Dict[str, 'RepositoryConfig'],
+) -> Tuple[np.ndarray, Dict[int, MinerEvaluation], Set[int]]:
+    """Score OSS contributions and return normalized rewards + miner evaluations + cached UIDs.
 
-    Pure scoring — no treasury allocation or weight updates. Those are
-    handled by the caller (forward()).
+    Pure scoring — no DB storage or emission blending. Those are handled by forward().
     """
-    master_repositories = load_master_repo_weights()
     programming_languages = load_programming_language_weights()
     token_config = load_token_config()
 
@@ -84,8 +127,8 @@ async def oss_contributions(self: 'Validator', miner_uids: set[int]) -> Tuple[np
     bt.logging.info(f'Token config: {tree_sitter_count} tree-sitter languages')
     bt.logging.info(f'Neurons to evaluate: {len(miner_uids)}')
 
-    rewards, miner_evaluations = await get_rewards(
+    rewards, miner_evaluations, cached_uids = await get_rewards(
         self, miner_uids, master_repositories, programming_languages, token_config
     )
 
-    return rewards, miner_evaluations
+    return rewards, miner_evaluations, cached_uids

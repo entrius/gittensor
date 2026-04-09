@@ -10,7 +10,6 @@ import numpy as np
 from gittensor.classes import MinerEvaluation
 from gittensor.utils.github_api_tools import load_miners_prs
 from gittensor.validator import pat_storage
-from gittensor.validator.oss_contributions.dynamic_emissions import apply_dynamic_emissions_using_network_contributions
 from gittensor.validator.oss_contributions.inspections import (
     detect_and_penalize_miners_sharing_github,
     validate_response_and_initialize_miner_evaluation,
@@ -76,15 +75,12 @@ async def get_rewards(
     master_repositories: Dict[str, RepositoryConfig],
     programming_languages: Dict[str, LanguageConfig],
     token_config: TokenConfig,
-) -> Tuple[np.ndarray, Dict[int, MinerEvaluation]]:
-    """
-    Args:
-        uids (set[int]): All valid miner uids in the subnet
-        master_repositories (Dict[str, RepositoryConfig]): The dict of repositories (name -> RepositoryConfig)
-        programming_languages (Dict[str, LanguageConfig]): The dict of languages (extension -> LanguageConfig)
-        token_config (TokenConfig): Token-based scoring weights configuration
+) -> Tuple[np.ndarray, Dict[int, MinerEvaluation], set]:
+    """Score OSS contributions for all miners.
+
     Returns:
-        rewards (array[int]): An array of scores for all miners in sorted fashion, miner n score = index[n]
+        Tuple of (normalized_rewards_array, miner_evaluations, cached_uids).
+        DB storage and emission blending are handled by the caller (forward.py).
     """
 
     bt.logging.info(f'UIDs: {uids}')
@@ -134,13 +130,8 @@ async def get_rewards(
     # Normalize the rewards between [0,1] — single flat pool
     normalized_rewards = normalize_rewards_linear(miner_evaluations)
 
-    # Scale rewards according to dynamic emission curve based off of miners total contributions.
-    final_rewards = apply_dynamic_emissions_using_network_contributions(normalized_rewards, miner_evaluations)
-
-    # Store miner evaluations after calculating all scores
-    await self.bulk_store_evaluation(miner_evaluations, skip_uids=cached_uids)
-
     return (
-        np.array([final_rewards.get(uid, 0.0) for uid in sorted(uids)]),
+        np.array([normalized_rewards.get(uid, 0.0) for uid in sorted(uids)]),
         miner_evaluations,
+        cached_uids,
     )

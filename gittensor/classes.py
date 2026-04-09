@@ -130,6 +130,18 @@ class Issue:
     state: Optional[str] = None  # "OPEN" or "CLOSED"
     author_association: Optional[str] = None  # e.g., "OWNER", "MEMBER", "COLLABORATOR", "CONTRIBUTOR", "NONE"
 
+    # Issue discovery fields
+    author_github_id: Optional[str] = None  # Issue author's GitHub user ID (for miner matching)
+    is_transferred: bool = False
+    updated_at: Optional[datetime] = None
+    discovery_base_score: float = 0.0
+    discovery_earned_score: float = 0.0
+    discovery_review_quality_multiplier: float = 1.0
+    discovery_repo_weight_multiplier: float = 1.0
+    discovery_time_decay_multiplier: float = 1.0
+    discovery_credibility_multiplier: float = 1.0
+    discovery_open_issue_spam_multiplier: float = 1.0
+
 
 @dataclass
 class PullRequest:
@@ -302,6 +314,14 @@ class MinerEvaluation:
     # Eligibility and credibility
     is_eligible: bool = False
     credibility: float = 0.0
+
+    # Issue discovery scoring
+    issue_discovery_score: float = 0.0
+    issue_credibility: float = 0.0
+    is_issue_eligible: bool = False
+    total_solved_issues: int = 0
+    total_closed_issues: int = 0
+    total_open_issues: int = 0
 
     @property
     def total_prs(self) -> int:

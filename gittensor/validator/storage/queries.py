@@ -75,7 +75,12 @@ DO UPDATE SET
 BULK_UPSERT_ISSUES = """
 INSERT INTO issues (
     number, pr_number, repository_full_name, title, created_at, closed_at,
-    author_login, state, author_association
+    author_login, state, author_association,
+    author_github_id, is_transferred, updated_at,
+    discovery_base_score, discovery_earned_score,
+    discovery_review_quality_multiplier, discovery_repo_weight_multiplier,
+    discovery_time_decay_multiplier, discovery_credibility_multiplier,
+    discovery_open_issue_spam_multiplier
 ) VALUES %s
 ON CONFLICT (number, pr_number, repository_full_name)
 DO UPDATE SET
@@ -83,7 +88,17 @@ DO UPDATE SET
     closed_at = EXCLUDED.closed_at,
     author_login = EXCLUDED.author_login,
     state = EXCLUDED.state,
-    author_association = EXCLUDED.author_association
+    author_association = EXCLUDED.author_association,
+    author_github_id = EXCLUDED.author_github_id,
+    is_transferred = EXCLUDED.is_transferred,
+    updated_at = EXCLUDED.updated_at,
+    discovery_base_score = EXCLUDED.discovery_base_score,
+    discovery_earned_score = EXCLUDED.discovery_earned_score,
+    discovery_review_quality_multiplier = EXCLUDED.discovery_review_quality_multiplier,
+    discovery_repo_weight_multiplier = EXCLUDED.discovery_repo_weight_multiplier,
+    discovery_time_decay_multiplier = EXCLUDED.discovery_time_decay_multiplier,
+    discovery_credibility_multiplier = EXCLUDED.discovery_credibility_multiplier,
+    discovery_open_issue_spam_multiplier = EXCLUDED.discovery_open_issue_spam_multiplier
 """
 
 # File Change Queries
@@ -107,7 +122,9 @@ INSERT INTO miner_evaluations (
     uid, hotkey, github_id, failed_reason, base_total_score, total_score, total_collateral_score,
     total_nodes_scored, total_open_prs, total_closed_prs, total_merged_prs, total_prs,
     unique_repos_count, is_eligible, credibility,
-    total_token_score, total_structural_count, total_structural_score, total_leaf_count, total_leaf_score
+    total_token_score, total_structural_count, total_structural_score, total_leaf_count, total_leaf_score,
+    issue_discovery_score, issue_credibility, is_issue_eligible,
+    total_solved_issues, total_closed_issues, total_open_issues
 ) VALUES %s
 ON CONFLICT (uid, hotkey, github_id)
 DO UPDATE SET
@@ -128,5 +145,11 @@ DO UPDATE SET
     total_structural_score = EXCLUDED.total_structural_score,
     total_leaf_count = EXCLUDED.total_leaf_count,
     total_leaf_score = EXCLUDED.total_leaf_score,
+    issue_discovery_score = EXCLUDED.issue_discovery_score,
+    issue_credibility = EXCLUDED.issue_credibility,
+    is_issue_eligible = EXCLUDED.is_issue_eligible,
+    total_solved_issues = EXCLUDED.total_solved_issues,
+    total_closed_issues = EXCLUDED.total_closed_issues,
+    total_open_issues = EXCLUDED.total_open_issues,
     updated_at = NOW()
 """

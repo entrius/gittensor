@@ -24,6 +24,7 @@ from gittensor.validator.issue_discovery.scoring import score_discovered_issues
 from gittensor.validator.oss_contributions.reward import get_rewards
 from gittensor.validator.utils.config import GITTENSOR_VALIDATOR_PAT, VALIDATOR_STEPS_INTERVAL, VALIDATOR_WAIT
 from gittensor.validator.utils.load_weights import (
+    RepositoryConfig,
     load_master_repo_weights,
     load_programming_language_weights,
     load_token_config,
@@ -56,9 +57,7 @@ async def forward(self: 'Validator') -> None:
         master_repositories = load_master_repo_weights()
 
         # 1. Score OSS contributions
-        oss_rewards, miner_evaluations, cached_uids = await oss_contributions(
-            self, miner_uids, master_repositories
-        )
+        oss_rewards, miner_evaluations, cached_uids = await oss_contributions(self, miner_uids, master_repositories)
 
         # 2. Issue bounties verification (unchanged — needs eligibility data from OSS scoring)
         await issue_competitions(self, miner_evaluations)
@@ -110,7 +109,7 @@ async def forward(self: 'Validator') -> None:
 async def oss_contributions(
     self: 'Validator',
     miner_uids: set[int],
-    master_repositories: Dict[str, 'RepositoryConfig'],
+    master_repositories: Dict[str, RepositoryConfig],
 ) -> Tuple[np.ndarray, Dict[int, MinerEvaluation], Set[int]]:
     """Score OSS contributions and return normalized rewards + miner evaluations + cached UIDs.
 

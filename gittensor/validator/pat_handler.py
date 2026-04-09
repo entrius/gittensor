@@ -58,8 +58,7 @@ async def handle_pat_broadcast(validator: 'Validator', synapse: PatBroadcastSyna
     if existing and existing.get('hotkey') == hotkey and existing.get('github_id'):
         if existing['github_id'] != github_id:
             return _reject(
-                'GitHub identity is locked for this hotkey. '
-                'Deregister and re-register to change GitHub accounts.'
+                'GitHub identity is locked for this hotkey. Deregister and re-register to change GitHub accounts.'
             )
 
     # 4. Test query against a known repo to catch org-restricted PATs

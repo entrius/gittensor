@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Tuple
 
 import bittensor as bt
 
-from gittensor.classes import Issue, MinerEvaluation, PullRequest
+from gittensor.classes import Issue, MinerEvaluation
 from gittensor.constants import (
     CREDIBILITY_MULLIGAN_COUNT,
     ISSUE_REVIEW_CLEAN_BONUS,
@@ -64,9 +64,7 @@ def calculate_issue_credibility(solved_count: int, closed_count: int) -> float:
     return solved_count / total
 
 
-def check_issue_eligibility(
-    solved_count: int, closed_count: int
-) -> Tuple[bool, float, str]:
+def check_issue_eligibility(solved_count: int, closed_count: int) -> Tuple[bool, float, str]:
     """Check if a miner passes the issue discovery eligibility gate.
 
     Returns (is_eligible, issue_credibility, reason).

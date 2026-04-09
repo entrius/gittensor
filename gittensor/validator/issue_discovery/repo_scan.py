@@ -50,9 +50,8 @@ async def scan_closed_issues(
         bt.logging.info('Issue discovery scan: no validator PAT, skipping')
         return {}
 
-    # Build miner github_id set and login→github_id mapping
+    # Build miner github_id set
     miner_github_ids: Set[str] = set()
-    miner_login_to_github_id: Dict[str, str] = {}
     for evaluation in miner_evaluations.values():
         if evaluation.github_id and evaluation.github_id != '0':
             miner_github_ids.add(evaluation.github_id)
@@ -79,9 +78,7 @@ async def scan_closed_issues(
     sorted_repos = sorted(master_repositories.items(), key=lambda x: x[1].weight, reverse=True)
 
     # Filter out inactive repos
-    active_repos = [
-        (name, config) for name, config in sorted_repos if config.inactive_at is None
-    ]
+    active_repos = [(name, config) for name, config in sorted_repos if config.inactive_at is None]
 
     result: Dict[str, List[Issue]] = {}
     global_lookup_count = 0
@@ -93,16 +90,19 @@ async def scan_closed_issues(
 
         remaining_global = REPO_SCAN_GLOBAL_CAP - global_lookup_count
         lookups_done = await _scan_repo(
-            repo_name, lookback_date, validator_pat,
-            miner_github_ids, known_issues, result,
+            repo_name,
+            lookback_date,
+            validator_pat,
+            miner_github_ids,
+            known_issues,
+            result,
             min(REPO_SCAN_PER_REPO_CAP, remaining_global),
         )
         global_lookup_count += lookups_done
 
     total_issues = sum(len(issues) for issues in result.values())
     bt.logging.info(
-        f'Issue discovery scan complete: {total_issues} issues found, '
-        f'{global_lookup_count} solver lookups used'
+        f'Issue discovery scan complete: {total_issues} issues found, {global_lookup_count} solver lookups used'
     )
 
     return result
@@ -153,7 +153,9 @@ async def _scan_repo(
         async with semaphore:
             solver_id, pr_number = await asyncio.to_thread(
                 find_solver_from_cross_references,
-                repo_name, issue_raw['number'], validator_pat,
+                repo_name,
+                issue_raw['number'],
+                validator_pat,
             )
             return issue_raw, solver_id, pr_number
 
@@ -161,10 +163,11 @@ async def _scan_repo(
     resolved = await asyncio.gather(*tasks, return_exceptions=True)
 
     for item in resolved:
-        if isinstance(item, Exception):
+        if isinstance(item, BaseException):
             bt.logging.warning(f'Solver lookup error in {repo_name}: {item}')
             continue
 
+        assert isinstance(item, tuple)
         issue_raw, solver_id, pr_number = item
         user = issue_raw.get('user') or {}
         author_github_id = str(user.get('id', ''))

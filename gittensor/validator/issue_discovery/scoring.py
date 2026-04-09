@@ -142,11 +142,11 @@ def score_discovered_issues(
             continue
 
         evaluation.total_solved_issues = data.solved_count
-        evaluation.total_valid_solved_issues = len(data.scored_issues)
+        evaluation.total_valid_solved_issues = data.valid_solved_count
         evaluation.total_closed_issues = data.closed_count
         evaluation.issue_token_score = round(data.issue_token_score, 2)
 
-        is_eligible, credibility, reason = check_issue_eligibility(len(data.scored_issues), data.closed_count)
+        is_eligible, credibility, reason = check_issue_eligibility(data.valid_solved_count, data.closed_count)
         evaluation.is_issue_eligible = is_eligible
         evaluation.issue_credibility = credibility
 
@@ -187,10 +187,11 @@ def score_discovered_issues(
 class _DiscovererData:
     """Accumulator for a single discoverer's issue data."""
 
-    __slots__ = ('solved_count', 'closed_count', 'scored_issues', 'issue_token_score')
+    __slots__ = ('solved_count', 'valid_solved_count', 'closed_count', 'scored_issues', 'issue_token_score')
 
     def __init__(self):
         self.solved_count: int = 0
+        self.valid_solved_count: int = 0  # solved where solving PR has token_score >= 5
         self.closed_count: int = 0
         self.scored_issues: List[Issue] = []
         self.issue_token_score: float = 0.0  # sum of solving PR token_scores
@@ -245,6 +246,10 @@ def _collect_issues_from_prs(
                     data.closed_count += 1
                     continue
 
+                # Count valid solved (PR quality gate only — independent of same-account/one-per-PR)
+                if pr.token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE:
+                    data.valid_solved_count += 1
+
                 # Same-account: discoverer == solver → 0 score but credibility counts
                 if discoverer_id == pr.github_id:
                     continue
@@ -255,7 +260,7 @@ def _collect_issues_from_prs(
                     continue  # Credibility already counted above, skip scoring
                 pr_scored.add(pr_key)
 
-                # Check solving PR quality gate
+                # Check solving PR quality gate for scoring
                 if pr.token_score < MIN_TOKEN_SCORE_FOR_BASE_SCORE:
                     continue
 

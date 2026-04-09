@@ -26,7 +26,7 @@ class TestEnsurePatsFile:
         assert json.loads(use_tmp_pats_file.read_text()) == []
 
     def test_does_not_overwrite_existing(self, use_tmp_pats_file):
-        pat_storage.save_pat(1, 'hotkey_1', 'ghp_abc')
+        pat_storage.save_pat(1, 'hotkey_1', 'ghp_abc', 'user_1')
         pat_storage.ensure_pats_file()
         entries = json.loads(use_tmp_pats_file.read_text())
         assert len(entries) == 1
@@ -34,7 +34,7 @@ class TestEnsurePatsFile:
 
 class TestSavePat:
     def test_save_creates_file(self, use_tmp_pats_file):
-        pat_storage.save_pat(1, 'hotkey_1', 'ghp_abc')
+        pat_storage.save_pat(1, 'hotkey_1', 'ghp_abc', 'user_1')
         assert use_tmp_pats_file.exists()
 
         entries = json.loads(use_tmp_pats_file.read_text())
@@ -42,12 +42,12 @@ class TestSavePat:
         assert entries[0]['uid'] == 1
         assert entries[0]['hotkey'] == 'hotkey_1'
         assert entries[0]['pat'] == 'ghp_abc'
+        assert entries[0]['github_id'] == 'user_1'
         assert 'stored_at' in entries[0]
-        assert 'github_id' not in entries[0]
 
     def test_save_upsert_by_uid(self):
-        pat_storage.save_pat(1, 'hotkey_1', 'ghp_old')
-        pat_storage.save_pat(1, 'hotkey_1', 'ghp_new')
+        pat_storage.save_pat(1, 'hotkey_1', 'ghp_old', 'user_1')
+        pat_storage.save_pat(1, 'hotkey_1', 'ghp_new', 'user_1')
 
         entries = pat_storage.load_all_pats()
         assert len(entries) == 1
@@ -55,8 +55,8 @@ class TestSavePat:
 
     def test_save_upsert_replaces_hotkey_on_uid(self):
         """When a new miner takes over a UID, save_pat overwrites the old entry."""
-        pat_storage.save_pat(1, 'old_hotkey', 'ghp_old')
-        pat_storage.save_pat(1, 'new_hotkey', 'ghp_new')
+        pat_storage.save_pat(1, 'old_hotkey', 'ghp_old', 'user_old')
+        pat_storage.save_pat(1, 'new_hotkey', 'ghp_new', 'user_new')
 
         entries = pat_storage.load_all_pats()
         assert len(entries) == 1
@@ -64,9 +64,9 @@ class TestSavePat:
         assert entries[0]['pat'] == 'ghp_new'
 
     def test_save_multiple_miners(self):
-        pat_storage.save_pat(1, 'hotkey_1', 'ghp_a')
-        pat_storage.save_pat(2, 'hotkey_2', 'ghp_b')
-        pat_storage.save_pat(3, 'hotkey_3', 'ghp_c')
+        pat_storage.save_pat(1, 'hotkey_1', 'ghp_a', 'user_a')
+        pat_storage.save_pat(2, 'hotkey_2', 'ghp_b', 'user_b')
+        pat_storage.save_pat(3, 'hotkey_3', 'ghp_c', 'user_c')
 
         entries = pat_storage.load_all_pats()
         assert len(entries) == 3
@@ -78,8 +78,8 @@ class TestLoadAllPats:
         assert entries == []
 
     def test_load_returns_all_entries(self):
-        pat_storage.save_pat(1, 'h1', 'p1')
-        pat_storage.save_pat(2, 'h2', 'p2')
+        pat_storage.save_pat(1, 'h1', 'p1', 'user_1')
+        pat_storage.save_pat(2, 'h2', 'p2', 'user_2')
 
         entries = pat_storage.load_all_pats()
         assert len(entries) == 2
@@ -92,7 +92,7 @@ class TestLoadAllPats:
 
 class TestGetPatByUid:
     def test_get_existing(self):
-        pat_storage.save_pat(1, 'hotkey_1', 'ghp_abc')
+        pat_storage.save_pat(1, 'hotkey_1', 'ghp_abc', 'user_1')
         entry = pat_storage.get_pat_by_uid(1)
         assert entry is not None
         assert entry['pat'] == 'ghp_abc'
@@ -104,7 +104,7 @@ class TestGetPatByUid:
 
 class TestRemovePat:
     def test_remove_existing(self):
-        pat_storage.save_pat(1, 'hotkey_1', 'ghp_abc')
+        pat_storage.save_pat(1, 'hotkey_1', 'ghp_abc', 'user_1')
         assert pat_storage.remove_pat(1) is True
         assert pat_storage.get_pat_by_uid(1) is None
 
@@ -112,8 +112,8 @@ class TestRemovePat:
         assert pat_storage.remove_pat(999) is False
 
     def test_remove_preserves_others(self):
-        pat_storage.save_pat(1, 'h1', 'p1')
-        pat_storage.save_pat(2, 'h2', 'p2')
+        pat_storage.save_pat(1, 'h1', 'p1', 'user_1')
+        pat_storage.save_pat(2, 'h2', 'p2', 'user_2')
         pat_storage.remove_pat(1)
 
         entries = pat_storage.load_all_pats()
@@ -128,7 +128,7 @@ class TestConcurrency:
 
         def write_pat(i):
             try:
-                pat_storage.save_pat(i, f'hotkey_{i}', f'ghp_{i}')
+                pat_storage.save_pat(i, f'hotkey_{i}', f'ghp_{i}', f'user_{i}')
             except Exception as e:
                 errors.append(e)
 

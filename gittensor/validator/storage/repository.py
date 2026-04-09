@@ -241,6 +241,16 @@ class Repository(BaseRepository):
                     issue.author_login,
                     issue.state,
                     issue.author_association,
+                    issue.author_github_id,
+                    issue.is_transferred,
+                    issue.updated_at,
+                    issue.discovery_base_score,
+                    issue.discovery_earned_score,
+                    issue.discovery_review_quality_multiplier,
+                    issue.discovery_repo_weight_multiplier,
+                    issue.discovery_time_decay_multiplier,
+                    issue.discovery_credibility_multiplier,
+                    issue.discovery_open_issue_spam_multiplier,
                 )
             )
 
@@ -341,6 +351,14 @@ class Repository(BaseRepository):
                 evaluation.total_structural_score,
                 evaluation.total_leaf_count,
                 evaluation.total_leaf_score,
+                evaluation.issue_discovery_score,
+                evaluation.issue_token_score,
+                evaluation.issue_credibility,
+                evaluation.is_issue_eligible,
+                evaluation.total_solved_issues,
+                evaluation.total_valid_solved_issues,
+                evaluation.total_closed_issues,
+                evaluation.total_open_issues,
             )
         ]
 

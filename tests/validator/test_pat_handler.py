@@ -108,7 +108,7 @@ class TestHandlePatBroadcast:
         assert entry['pat'] == 'ghp_valid'
         assert entry['hotkey'] == 'hotkey_1'
         assert entry['uid'] == 1
-        assert 'github_id' not in entry
+        assert entry['github_id'] == 'github_42'
 
     def test_unregistered_hotkey_rejected(self, mock_validator):
         synapse = _make_broadcast_synapse('unknown_hotkey')
@@ -137,12 +137,56 @@ class TestHandlePatBroadcast:
         assert result.accepted is False
         assert '403' in (result.rejection_reason or '')
 
+    @patch('gittensor.validator.pat_handler._test_pat_against_repo', return_value=None)
+    @patch('gittensor.validator.pat_handler.validate_github_credentials', return_value=('github_99', None))
+    def test_github_identity_change_rejected(self, mock_validate, mock_test_query, mock_validator):
+        """Same hotkey cannot switch to a different GitHub account."""
+        pat_storage.save_pat(1, 'hotkey_1', 'ghp_old', 'github_42')
+
+        synapse = _make_broadcast_synapse('hotkey_1', pat='ghp_new_account')
+        result = _run(handle_pat_broadcast(mock_validator, synapse))
+
+        assert result.accepted is False
+        assert 'locked' in (result.rejection_reason or '').lower()
+
+        # Original entry should be unchanged
+        entry = pat_storage.get_pat_by_uid(1)
+        assert entry['github_id'] == 'github_42'
+
+    @patch('gittensor.validator.pat_handler._test_pat_against_repo', return_value=None)
+    @patch('gittensor.validator.pat_handler.validate_github_credentials', return_value=('github_42', None))
+    def test_pat_rotation_same_github_accepted(self, mock_validate, mock_test_query, mock_validator):
+        """Same hotkey can rotate PATs if GitHub identity stays the same."""
+        pat_storage.save_pat(1, 'hotkey_1', 'ghp_old', 'github_42')
+
+        synapse = _make_broadcast_synapse('hotkey_1', pat='ghp_refreshed')
+        result = _run(handle_pat_broadcast(mock_validator, synapse))
+
+        assert result.accepted is True
+        entry = pat_storage.get_pat_by_uid(1)
+        assert entry['pat'] == 'ghp_refreshed'
+        assert entry['github_id'] == 'github_42'
+
+    @patch('gittensor.validator.pat_handler._test_pat_against_repo', return_value=None)
+    @patch('gittensor.validator.pat_handler.validate_github_credentials', return_value=('github_99', None))
+    def test_new_miner_on_uid_can_use_any_github(self, mock_validate, mock_test_query, mock_validator):
+        """A new hotkey on the same UID (new miner) can register any GitHub account."""
+        pat_storage.save_pat(1, 'old_hotkey', 'ghp_old', 'github_42')
+
+        synapse = _make_broadcast_synapse('hotkey_1', pat='ghp_new_miner')
+        result = _run(handle_pat_broadcast(mock_validator, synapse))
+
+        assert result.accepted is True
+        entry = pat_storage.get_pat_by_uid(1)
+        assert entry['github_id'] == 'github_99'
+        assert entry['hotkey'] == 'hotkey_1'
+
 
 class TestHandlePatCheck:
     @patch('gittensor.validator.pat_handler._test_pat_against_repo', return_value=None)
     @patch('gittensor.validator.pat_handler.validate_github_credentials', return_value=('github_42', None))
     def test_valid_pat(self, mock_validate, mock_test_query, mock_validator):
-        pat_storage.save_pat(1, 'hotkey_1', 'ghp_test')
+        pat_storage.save_pat(1, 'hotkey_1', 'ghp_test', 'github_42')
 
         synapse = _make_check_synapse('hotkey_1')
         result = _run(handle_pat_check(mock_validator, synapse))
@@ -158,7 +202,7 @@ class TestHandlePatCheck:
 
     def test_stale_pat_reports_false(self, mock_validator):
         """If a different miner now holds this UID, has_pat should be False."""
-        pat_storage.save_pat(1, 'old_hotkey', 'ghp_old')
+        pat_storage.save_pat(1, 'old_hotkey', 'ghp_old', 'github_42')
 
         synapse = _make_check_synapse('hotkey_1')
         result = _run(handle_pat_check(mock_validator, synapse))
@@ -169,7 +213,7 @@ class TestHandlePatCheck:
     @patch('gittensor.validator.pat_handler.validate_github_credentials', return_value=(None, 'PAT expired'))
     def test_stored_but_invalid_pat(self, mock_validate, mock_test_query, mock_validator):
         """PAT is stored but fails re-validation."""
-        pat_storage.save_pat(1, 'hotkey_1', 'ghp_expired')
+        pat_storage.save_pat(1, 'hotkey_1', 'ghp_expired', 'github_42')
 
         synapse = _make_check_synapse('hotkey_1')
         result = _run(handle_pat_check(mock_validator, synapse))

@@ -41,10 +41,6 @@
   "appwrite/appwrite": {
     "weight": 0.0579
   },
-  "astral-sh/ruff": {
-    "inactive_at": "2026-03-28T00:00:00Z",
-    "weight": 0.1901
-  },
   "autoppia/autoppia_iwa": {
     "additional_acceptable_branches": [
       "contribution/*"
@@ -151,10 +147,6 @@
   },
   "commaai/openpilot": {
     "weight": 0.0926
-  },
-  "conda/conda": {
-    "inactive_at": "2026-02-05T00:00:00Z",
-    "weight": 0.1038
   },
   "cosmos/cosmos-sdk": {
     "weight": 0.0916
@@ -367,13 +359,6 @@
   "llmsresearch/paperbanana": {
     "weight": 0.1077
   },
-  "louislam/uptime-kuma": {
-    "additional_acceptable_branches": [
-      "3.0.X"
-    ],
-    "inactive_at": "2026-01-26T02:52:00.000Z",
-    "weight": 0.0344
-  },
   "macrocosm-os/apex": {
     "weight": 0.0419
   },
@@ -550,14 +535,6 @@
   },
   "postgres/postgres": {
     "weight": 0.0556
-  },
-  "pulumi/pulumi": {
-    "inactive_at": "2026-03-04T17:03:48.522Z",
-    "weight": 0.1051
-  },
-  "pyca/cryptography": {
-    "inactive_at": "2026-04-06T00:00:00Z",
-    "weight": 0.1203
   },
   "pydantic/pydantic-ai": {
     "weight": 0.0513

@@ -240,6 +240,62 @@ def get_github_account_age_days(token: str) -> Optional[int]:
         return None
 
 
+def get_merge_base_sha(repository: str, base_sha: str, head_sha: str, token: str) -> Optional[str]:
+    """
+    Get the merge-base commit SHA between two refs using GitHub's compare API.
+
+    The merge-base is the common ancestor commit — the correct "before" state
+    for computing a PR's own changes via tree-diff scoring.
+
+    Args:
+        repository: Repository in format 'owner/repo'
+        base_sha: Base branch ref OID
+        head_sha: Head branch ref OID
+        token: GitHub PAT
+
+    Returns:
+        Merge-base commit SHA, or None if the request fails
+    """
+    headers = make_headers(token)
+    max_attempts = 3
+
+    for attempt in range(max_attempts):
+        try:
+            response = requests.get(
+                f'{BASE_GITHUB_API_URL}/repos/{repository}/compare/{base_sha}...{head_sha}',
+                headers=headers,
+                timeout=15,
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                merge_base = (data.get('merge_base_commit') or {}).get('sha')
+                if merge_base:
+                    return merge_base
+                bt.logging.warning(f'Compare API returned 200 but no merge_base_commit for {repository}')
+                return None
+
+            if attempt < max_attempts - 1:
+                backoff_delay = min(5 * (2 ** (attempt)), 30)
+                bt.logging.warning(
+                    f'Compare API for {repository} failed with status {response.status_code} '
+                    f'(attempt {attempt + 1}/{max_attempts}), retrying in {backoff_delay}s...'
+                )
+                time.sleep(backoff_delay)
+
+        except requests.exceptions.RequestException as e:
+            if attempt < max_attempts - 1:
+                backoff_delay = min(5 * (2 ** (attempt)), 30)
+                bt.logging.warning(
+                    f'Compare API error for {repository} (attempt {attempt + 1}/{max_attempts}): {e}, '
+                    f'retrying in {backoff_delay}s...'
+                )
+                time.sleep(backoff_delay)
+
+    bt.logging.warning(f'Compare API for {repository} failed after {max_attempts} attempts. Will use base_ref_oid.')
+    return None
+
+
 def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -> Optional[List[FileChange]]:
     """
     Get the diff for a specific PR by repository name and PR number.

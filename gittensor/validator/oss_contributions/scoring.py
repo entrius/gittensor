@@ -38,6 +38,7 @@ from gittensor.constants import (
 from gittensor.utils.github_api_tools import (
     FileContentPair,
     fetch_file_contents_with_base,
+    get_merge_base_sha,
     get_pull_request_file_changes,
     get_pull_request_maintainer_changes_requested_count,
 )
@@ -114,7 +115,16 @@ def score_pull_request(
 
 
 def fetch_file_contents_for_pr(pr: PullRequest, github_pat: str) -> Dict[str, FileContentPair]:
-    """Fetch both base and head file contents for all files in a PR using GraphQL batch fetch."""
+    """Fetch both base and head file contents for all files in a PR using GraphQL batch fetch.
+
+    Uses the merge-base commit (common ancestor) as the "before" state rather than
+    the base branch tip, so the tree-diff only scores the PR's own changes.
+
+    Returns:
+        Dict mapping filename to FileContentPair(old_content, new_content)
+        - old_content: File content before the PR (None for new files)
+        - new_content: File content after the PR (None for deleted files)
+    """
     if not pr.file_changes or not pr.head_ref_oid or not pr.base_ref_oid:
         return {}
 
@@ -125,9 +135,16 @@ def fetch_file_contents_for_pr(pr: PullRequest, github_pat: str) -> Dict[str, Fi
 
     owner, repo_name = parts
 
-    return fetch_file_contents_with_base(
-        owner, repo_name, pr.base_ref_oid, pr.head_ref_oid, pr.file_changes, github_pat
-    )
+    # Resolve merge-base to avoid scoring unrelated changes from the base branch.
+    # baseRefOid is the base branch tip, which may include commits not in this PR.
+    merge_base = get_merge_base_sha(pr.repository_full_name, pr.base_ref_oid, pr.head_ref_oid, github_pat)
+    base_sha = merge_base if merge_base else pr.base_ref_oid
+    if merge_base and merge_base != pr.base_ref_oid:
+        bt.logging.debug(
+            f'PR #{pr.number}: using merge-base {merge_base[:8]} instead of base_ref {pr.base_ref_oid[:8]}'
+        )
+
+    return fetch_file_contents_with_base(owner, repo_name, base_sha, pr.head_ref_oid, pr.file_changes, github_pat)
 
 
 def calculate_base_score(

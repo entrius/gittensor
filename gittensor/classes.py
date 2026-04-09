@@ -244,6 +244,8 @@ class PullRequest:
         for issue in raw_issues:
             if is_merged and not (issue.get('closedAt') and issue.get('state') == 'CLOSED'):
                 continue
+            issue_author = issue.get('author') or {}
+            author_db_id = issue_author.get('databaseId')
             issues.append(
                 Issue(
                     number=issue['number'],
@@ -252,9 +254,11 @@ class PullRequest:
                     title=issue['title'],
                     created_at=parse_github_timestamp_to_cst(issue['createdAt']) if issue.get('createdAt') else None,
                     closed_at=parse_github_timestamp_to_cst(issue['closedAt']) if issue.get('closedAt') else None,
-                    author_login=issue.get('author', {}).get('login') if issue.get('author') else None,
+                    author_login=issue_author.get('login'),
                     state=issue.get('state'),
                     author_association=issue.get('authorAssociation'),
+                    author_github_id=str(author_db_id) if author_db_id else None,
+                    updated_at=parse_github_timestamp_to_cst(issue['updatedAt']) if issue.get('updatedAt') else None,
                 )
             )
 

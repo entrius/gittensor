@@ -101,11 +101,32 @@ INLINE_TEST_PATTERNS: Dict[str, re.Pattern] = {
 }
 
 # =============================================================================
-# Eligibility Gate
+# Eligibility Gate (OSS Contributions)
 # =============================================================================
 MIN_VALID_MERGED_PRS = 5  # minimum "valid" merged PRs (token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE) to receive score
 MIN_CREDIBILITY = 0.90  # minimum credibility ratio to receive score
 CREDIBILITY_MULLIGAN_COUNT = 1  # number of closed PRs forgiven (erased from merged+closed counts entirely)
+
+# =============================================================================
+# Issue Discovery
+# =============================================================================
+# Eligibility gate (stricter than OSS contributions)
+MIN_VALID_SOLVED_ISSUES = 7  # minimum solved issues where solving PR has token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE
+MIN_ISSUE_CREDIBILITY = 0.80  # minimum issue credibility ratio
+
+# Review quality cliff model (different from OSS: has clean bonus + steeper penalty)
+ISSUE_REVIEW_CLEAN_BONUS = 1.1  # multiplier when 0 CHANGES_REQUESTED rounds
+ISSUE_REVIEW_PENALTY_RATE = 0.15  # per CHANGES_REQUESTED round after cliff
+
+# Open issue spam threshold
+OPEN_ISSUE_SPAM_BASE_THRESHOLD = 5  # half the PR base of 10
+OPEN_ISSUE_SPAM_TOKEN_SCORE_PER_SLOT = 300.0  # +1 allowed open issue per this much token score
+MAX_OPEN_ISSUE_THRESHOLD = 30
+
+# Repo-centric closed issue scan caps (validator PAT budget)
+REPO_SCAN_PER_REPO_CAP = 300  # max solver lookups per repo
+REPO_SCAN_GLOBAL_CAP = 1500  # max solver lookups per round
+REPO_SCAN_CONCURRENCY = 2  # concurrent solver lookup threads
 
 # =============================================================================
 # Collateral
@@ -117,13 +138,11 @@ OPEN_PR_COLLATERAL_PERCENT = 0.20
 # =============================================================================
 RECYCLE_UID = 0
 
-# Network emission scaling (unique repos)
-UNIQUE_REPOS_MAX_RECYCLE = 0.8
-UNIQUE_REPOS_RECYCLE_DECAY_RATE = 0.005
-
-# Network emission scaling (total token score from eligible miners)
-TOKEN_SCORE_MAX_RECYCLE = 0.8
-TOKEN_SCORE_RECYCLE_DECAY_RATE = 0.000012
+# Hardcoded emission splits per competition (replaces dynamic emissions)
+OSS_EMISSION_SHARE = 0.30  # 30% to OSS contributions (PR scoring)
+ISSUE_DISCOVERY_EMISSION_SHARE = 0.30  # 30% to issue discovery
+RECYCLE_EMISSION_SHARE = 0.25  # 25% to recycle UID 0
+# ISSUES_TREASURY_EMISSION_SHARE = 0.15 defined below (15% to smart contract treasury)
 
 # =============================================================================
 # Spam & Gaming Mitigation

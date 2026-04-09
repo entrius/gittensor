@@ -12,8 +12,8 @@ RUN pip install --break-system-packages uv
 
 WORKDIR /app
 
-# Copy dependency files
-COPY pyproject.toml uv.lock ./
+# Copy dependency files and README (required by hatchling build)
+COPY pyproject.toml uv.lock README.md ./
 
 # Create venv and sync dependencies
 ENV VENV_DIR=/opt/venv

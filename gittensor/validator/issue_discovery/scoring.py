@@ -154,9 +154,8 @@ def score_discovered_issues(
             bt.logging.info(f'UID {uid} issue discovery ineligible: {reason}')
             continue
 
-        # Calculate spam multiplier once per miner
-        solved_token_score = sum(i.discovery_base_score for i in data.scored_issues)
-        spam_mult = calculate_open_issue_spam_multiplier(evaluation.total_open_issues, solved_token_score)
+        # Calculate spam multiplier once per miner (uses sum of solving PR token_scores)
+        spam_mult = calculate_open_issue_spam_multiplier(evaluation.total_open_issues, data.issue_token_score)
 
         # Score each eligible issue
         total_discovery_score = 0.0

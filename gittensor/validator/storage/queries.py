@@ -25,13 +25,6 @@ WHERE uid = %s AND hotkey = %s
   AND created_at <= %s
 """
 
-CLEANUP_STALE_MINER_TIER_STATS_BY_HOTKEY = """
-DELETE FROM miner_tier_stats
-WHERE uid = %s AND hotkey = %s
-  AND github_id != %s
-  AND github_id != '0'
-"""
-
 CLEANUP_STALE_MINERS_BY_HOTKEY = """
 DELETE FROM miners
 WHERE uid = %s AND hotkey = %s

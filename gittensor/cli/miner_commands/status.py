@@ -2,9 +2,14 @@
 
 """gitt miner status — Show eligibility gate progress and PR overview."""
 
+from __future__ import annotations
+
 import json
 import os
 import sys
+from contextlib import AbstractContextManager, nullcontext
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import click
 from rich.console import Console
@@ -14,13 +19,22 @@ from gittensor.constants import (
     CREDIBILITY_MULLIGAN_COUNT,
     EXCESSIVE_PR_PENALTY_BASE_THRESHOLD,
     MIN_CREDIBILITY,
+    MIN_TOKEN_SCORE_FOR_BASE_SCORE,
     MIN_VALID_MERGED_PRS,
     PR_LOOKBACK_DAYS,
 )
 
 from .post import NETUID_DEFAULT, _error, _load_config_value, _resolve_endpoint
 
+if TYPE_CHECKING:
+    from gittensor.classes import MinerEvaluation
+
 console = Console()
+
+
+def _rich_status(message: str, json_mode: bool) -> AbstractContextManager[None]:
+    """Rich spinner in TTY mode; no-op in JSON mode (avoids duplicate branches)."""
+    return nullcontext() if json_mode else console.status(message)
 
 
 @click.command()
@@ -40,8 +54,10 @@ def miner_status(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, deta
     """Show your eligibility gate progress and PR overview.
 
     Fetches your PRs from incentivized repositories using your GitHub PAT,
-    then calculates credibility and eligibility locally. No token scoring
-    is performed — final eligibility is determined by validators.
+    then calculates credibility locally. Token-based PR scoring is not run
+    here (too heavy for CLI); the merge-count gate uses all merged PRs in the
+    lookback, while validators require enough merges each meeting a minimum
+    token score. Final eligibility is determined by validators.
 
     \b
     Examples:
@@ -54,7 +70,6 @@ def miner_status(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, deta
     from gittensor.validator.oss_contributions.credibility import calculate_credibility
     from gittensor.validator.utils.load_weights import load_master_repo_weights
 
-    # 1. Resolve PAT
     pat = pat or os.environ.get('GITTENSOR_MINER_PAT')
     if not pat:
         if json_mode:
@@ -62,11 +77,7 @@ def miner_status(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, deta
             sys.exit(1)
         pat = click.prompt('Enter your GitHub Personal Access Token', hide_input=True)
 
-    # 2. Validate PAT and get GitHub identity (single API call)
-    if not json_mode:
-        with console.status('[bold]Validating PAT...'):
-            user_data = get_github_user(pat)
-    else:
+    with _rich_status('[bold]Validating PAT...', json_mode):
         user_data = get_github_user(pat)
 
     if not user_data or not user_data.get('id'):
@@ -80,7 +91,6 @@ def miner_status(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, deta
         display = f'@{github_username}' if github_username else github_id
         console.print(f'[green]PAT valid[/green] — {display}')
 
-    # 3. Resolve wallet and network, find UID
     wallet_name = wallet_name or _load_config_value('wallet') or 'default'
     wallet_hotkey = wallet_hotkey or _load_config_value('hotkey') or 'default'
     ws_endpoint = _resolve_endpoint(network, rpc_url)
@@ -88,13 +98,9 @@ def miner_status(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, deta
     if not json_mode:
         console.print(f'[dim]Wallet: {wallet_name}/{wallet_hotkey} | Network: {ws_endpoint} | Netuid: {netuid}[/dim]')
 
-    if not json_mode:
-        with console.status('[bold]Connecting to network...'):
-            uid, hotkey_ss58 = _resolve_uid(wallet_name, wallet_hotkey, ws_endpoint, netuid, json_mode)
-    else:
+    with _rich_status('[bold]Connecting to network...', json_mode):
         uid, hotkey_ss58 = _resolve_uid(wallet_name, wallet_hotkey, ws_endpoint, netuid, json_mode)
 
-    # 4. Load master repositories and fetch PRs
     master_repositories = load_master_repo_weights()
     if not master_repositories:
         _error('Failed to load master repositories.', json_mode)
@@ -103,21 +109,18 @@ def miner_status(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, deta
     miner_eval = MinerEvaluation(uid=uid, hotkey=hotkey_ss58, github_id=github_id)
     miner_eval.github_pat = pat
 
-    if not json_mode:
-        with console.status(f'[bold]Fetching PRs across {len(master_repositories)} repos...'):
-            load_miners_prs(miner_eval, master_repositories)
-    else:
+    with _rich_status(f'[bold]Fetching PRs across {len(master_repositories)} repos...', json_mode):
         load_miners_prs(miner_eval, master_repositories)
 
     miner_eval.github_pat = None
 
-    # 5. Calculate credibility and eligibility
     credibility = calculate_credibility(miner_eval.merged_pull_requests, miner_eval.closed_pull_requests)
     merged_count = len(miner_eval.merged_pull_requests)
     credibility_pass = credibility >= MIN_CREDIBILITY
+    # Without token scoring, count all merged PRs in lookback (validators use token_score >= threshold per PR).
     merged_pass = merged_count >= MIN_VALID_MERGED_PRS
+    unique_repos = frozenset(pr.repository_full_name for pr in miner_eval.merged_pull_requests)
 
-    # 6. Output
     ctx = _StatusContext(
         uid=uid,
         github_id=github_id,
@@ -127,6 +130,7 @@ def miner_status(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, deta
         credibility=credibility,
         credibility_pass=credibility_pass,
         merged_pass=merged_pass,
+        unique_repos=unique_repos,
     )
 
     if json_mode:
@@ -135,43 +139,35 @@ def miner_status(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, deta
         _output_rich(ctx, detail)
 
 
+@dataclass(slots=True)
 class _StatusContext:
     """Holds computed status data for output rendering."""
 
-    __slots__ = (
-        'uid',
-        'github_id',
-        'github_username',
-        'network',
-        'miner_eval',
-        'credibility',
-        'credibility_pass',
-        'merged_pass',
-    )
-
-    def __init__(self, **kwargs):
-        for k, v in kwargs.items():
-            setattr(self, k, v)
+    uid: int
+    github_id: str
+    github_username: str | None
+    network: str
+    miner_eval: MinerEvaluation
+    credibility: float
+    credibility_pass: bool
+    merged_pass: bool
+    unique_repos: frozenset[str]
 
     @property
-    def merged_count(self):
+    def merged_count(self) -> int:
         return len(self.miner_eval.merged_pull_requests)
 
     @property
-    def closed_count(self):
+    def closed_count(self) -> int:
         return len(self.miner_eval.closed_pull_requests)
 
     @property
-    def open_count(self):
+    def open_count(self) -> int:
         return len(self.miner_eval.open_pull_requests)
 
     @property
-    def effective_closed(self):
+    def effective_closed(self) -> int:
         return max(0, self.closed_count - CREDIBILITY_MULLIGAN_COUNT)
-
-    @property
-    def unique_repos(self):
-        return {pr.repository_full_name for pr in self.miner_eval.merged_pull_requests}
 
 
 def _resolve_uid(wallet_name, wallet_hotkey, ws_endpoint, netuid, json_mode):
@@ -203,7 +199,6 @@ def _output_rich(ctx: _StatusContext, detail: bool):
     console.print(f'[dim]UID: {ctx.uid}  |  GitHub: {github_display}  |  Network: {ctx.network}[/dim]')
     console.print()
 
-    # Eligibility gate
     merged_icon = '[green]pass[/green]' if ctx.merged_pass else '[red]fail[/red]'
     cred_icon = '[green]pass[/green]' if ctx.credibility_pass else '[red]fail[/red]'
     mulligan_note = f', {CREDIBILITY_MULLIGAN_COUNT} mulligan' if ctx.effective_closed != ctx.closed_count else ''
@@ -216,7 +211,7 @@ def _output_rich(ctx: _StatusContext, detail: bool):
         remaining = MIN_VALID_MERGED_PRS - ctx.merged_count
         console.print(
             f'  Merged PRs:    {ctx.merged_count}/{MIN_VALID_MERGED_PRS}  {merged_icon}'
-            f'  (need {remaining} more with meaningful code changes)'
+            f'  (need {remaining} more; validators require ≥{MIN_TOKEN_SCORE_FOR_BASE_SCORE} token score each)'
         )
 
     console.print(
@@ -229,10 +224,12 @@ def _output_rich(ctx: _StatusContext, detail: bool):
     else:
         console.print('  Status:        [red]NOT ELIGIBLE[/red]')
 
-    console.print('  [dim]Note: Final eligibility depends on token scoring by validators[/dim]')
+    console.print(
+        f'  [dim]Note: Merge counts are unscored; validators apply token scoring. '
+        f'Threshold ≥{MIN_TOKEN_SCORE_FOR_BASE_SCORE} per merged PR.[/dim]'
+    )
     console.print()
 
-    # Lookback window
     console.print(f'[bold]Lookback Window ({PR_LOOKBACK_DAYS} days)[/bold]')
     console.print(f'  Merged: {ctx.merged_count}  |  Open: {ctx.open_count}  |  Closed: {ctx.closed_count}')
     if ctx.unique_repos:
@@ -269,6 +266,10 @@ def _print_pr_table(title, prs, date_col='Date'):
 
 def _output_json(ctx: _StatusContext, detail: bool):
     """Output status as JSON."""
+    note = (
+        f'Merge counts omit token scoring; validators require ≥{MIN_TOKEN_SCORE_FOR_BASE_SCORE} '
+        'token score per merged PR toward the merge gate. Final eligibility depends on validators.'
+    )
     data = {
         'uid': ctx.uid,
         'github_id': ctx.github_id,
@@ -282,7 +283,9 @@ def _output_json(ctx: _StatusContext, detail: bool):
             'required_credibility': MIN_CREDIBILITY,
             'credibility_pass': ctx.credibility_pass,
             'likely_eligible': ctx.merged_pass and ctx.credibility_pass,
-            'note': 'Final eligibility depends on token scoring by validators',
+            'min_token_score_per_merged_pr': MIN_TOKEN_SCORE_FOR_BASE_SCORE,
+            'merge_gate_uses_unscored_merges': True,
+            'note': note,
         },
         'lookback': {
             'days': PR_LOOKBACK_DAYS,

@@ -121,6 +121,11 @@ async def get_rewards(
     # If evaluation of miner was successful, store to cache, if api failure, fallback to previous successful evaluation if any
     cached_uids = self.store_or_use_cached_evaluation(miner_evaluations)
 
+    # Refresh repo weights on cached evaluations so they reflect current master_repositories.
+    # Cached evaluations retain the repo_weight_multiplier from the round they were originally
+    # scored, which becomes stale when master_repositories.json is updated between rounds.
+    _refresh_cached_repo_weights(miner_evaluations, cached_uids, master_repositories)
+
     # Adjust scores for duplicate accounts
     detect_and_penalize_miners_sharing_github(miner_evaluations)
 
@@ -135,3 +140,30 @@ async def get_rewards(
         miner_evaluations,
         cached_uids,
     )
+
+
+def _refresh_cached_repo_weights(
+    miner_evaluations: Dict[int, MinerEvaluation],
+    cached_uids: set,
+    master_repositories: Dict[str, RepositoryConfig],
+) -> None:
+    """Refresh repo_weight_multiplier on cached evaluations using current master_repositories.
+
+    When a cached evaluation is restored (GitHub API returned no PRs), the PRs inside it
+    retain the repo_weight_multiplier from the round they were originally scored. If
+    master_repositories.json has been updated since then, the cached weights are stale.
+
+    This function updates repo_weight_multiplier on every PR in cached evaluations so that
+    finalize_miner_scores() computes earned_score with up-to-date weights.
+    """
+    if not cached_uids:
+        return
+
+    for uid in cached_uids:
+        evaluation = miner_evaluations.get(uid)
+        if evaluation is None:
+            continue
+
+        for pr in evaluation.merged_pull_requests + evaluation.open_pull_requests + evaluation.closed_pull_requests:
+            repo_config = master_repositories.get(pr.repository_full_name)
+            pr.repo_weight_multiplier = round(repo_config.weight if repo_config else 0.01, 2)

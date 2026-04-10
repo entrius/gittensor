@@ -70,10 +70,8 @@ async def forward(self: 'Validator') -> None:
         # 3. Score issue discovery
         issue_rewards = await issue_discovery(miner_evaluations, master_repositories, miner_uids)
 
-        # 4. Store all evaluations to DB (includes issue discovery fields).
-        # Cached evaluations are no longer skipped because their repo weights
-        # have been refreshed to current values and must be persisted.
-        await self.bulk_store_evaluation(miner_evaluations)
+        # 4. Store all evaluations to DB (includes issue discovery fields)
+        await self.bulk_store_evaluation(miner_evaluations, skip_uids=cached_uids)
 
         # 5. Blend 4 emission pools into final rewards
         rewards = blend_emission_pools(oss_rewards, issue_rewards, miner_uids)

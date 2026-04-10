@@ -150,7 +150,7 @@ class TestHandlePatBroadcast:
         assert 'locked' in (result.rejection_reason or '').lower()
 
         # Original entry should be unchanged
-        entry = pat_storage.get_pat_by_uid(1)
+        entry = pat_storage.get_pat_by_uid(1) or {}
         assert entry['github_id'] == 'github_42'
 
     @patch('gittensor.validator.pat_handler._test_pat_against_repo', return_value=None)
@@ -163,7 +163,7 @@ class TestHandlePatBroadcast:
         result = _run(handle_pat_broadcast(mock_validator, synapse))
 
         assert result.accepted is True
-        entry = pat_storage.get_pat_by_uid(1)
+        entry = pat_storage.get_pat_by_uid(1) or {}
         assert entry['pat'] == 'ghp_refreshed'
         assert entry['github_id'] == 'github_42'
 
@@ -177,7 +177,7 @@ class TestHandlePatBroadcast:
         result = _run(handle_pat_broadcast(mock_validator, synapse))
 
         assert result.accepted is True
-        entry = pat_storage.get_pat_by_uid(1)
+        entry = pat_storage.get_pat_by_uid(1) or {}
         assert entry['github_id'] == 'github_99'
         assert entry['hotkey'] == 'hotkey_1'
 

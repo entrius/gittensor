@@ -104,7 +104,7 @@ INLINE_TEST_PATTERNS: Dict[str, re.Pattern] = {
 # Eligibility Gate (OSS Contributions)
 # =============================================================================
 MIN_VALID_MERGED_PRS = 5  # minimum "valid" merged PRs (token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE) to receive score
-MIN_CREDIBILITY = 0.90  # minimum credibility ratio to receive score
+MIN_CREDIBILITY = 0.80  # minimum credibility ratio to receive score
 CREDIBILITY_MULLIGAN_COUNT = 1  # number of closed PRs forgiven (erased from merged+closed counts entirely)
 
 # =============================================================================

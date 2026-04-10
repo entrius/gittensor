@@ -1,6 +1,6 @@
 # Entrius 2025
 
-"""Tests for gitt miner post and gitt miner check CLI commands."""
+"""Tests for gitt miner post, check, and status CLI commands."""
 
 import json
 from unittest.mock import patch
@@ -67,3 +67,16 @@ class TestMinerCheck:
         result = runner.invoke(cli, ['m', 'check', '--help'])
         assert result.exit_code == 0
         assert 'Check how many validators' in result.output
+
+
+class TestMinerStatus:
+    def test_help_text(self, runner):
+        result = runner.invoke(cli, ['miner', 'status', '--help'])
+        assert result.exit_code == 0
+        assert 'eligibility' in result.output.lower()
+        assert 'Personal Access Token' in result.output
+
+    def test_status_alias(self, runner):
+        result = runner.invoke(cli, ['m', 'status', '--help'])
+        assert result.exit_code == 0
+        assert 'eligibility' in result.output.lower()

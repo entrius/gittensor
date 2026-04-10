@@ -67,7 +67,7 @@ async def handle_pat_broadcast(validator: 'Validator', synapse: PatBroadcastSyna
         return _reject(f'PAT test query failed: {test_error}')
 
     # 5. Store PAT (github_id guaranteed non-None after validate_github_credentials success)
-    pat_storage.save_pat(uid=uid, hotkey=hotkey, pat=synapse.github_access_token, github_id=github_id or '')
+    pat_storage.save_pat(uid=uid, hotkey=hotkey, pat=synapse.github_access_token, github_id=github_id or '0')
 
     # Clear PAT from response so it isn't echoed back
     synapse.github_access_token = ''

@@ -151,6 +151,7 @@ class TestHandlePatBroadcast:
 
         # Original entry should be unchanged
         entry = pat_storage.get_pat_by_uid(1)
+        assert entry is not None
         assert entry['github_id'] == 'github_42'
 
     @patch('gittensor.validator.pat_handler._test_pat_against_repo', return_value=None)
@@ -164,6 +165,7 @@ class TestHandlePatBroadcast:
 
         assert result.accepted is True
         entry = pat_storage.get_pat_by_uid(1)
+        assert entry is not None
         assert entry['pat'] == 'ghp_refreshed'
         assert entry['github_id'] == 'github_42'
 
@@ -178,6 +180,7 @@ class TestHandlePatBroadcast:
 
         assert result.accepted is True
         entry = pat_storage.get_pat_by_uid(1)
+        assert entry is not None
         assert entry['github_id'] == 'github_99'
         assert entry['hotkey'] == 'hotkey_1'
 

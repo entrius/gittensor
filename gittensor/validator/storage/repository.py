@@ -21,7 +21,6 @@ from .queries import (
     BULK_UPSERT_PULL_REQUESTS,
     CLEANUP_STALE_MINER_EVALUATIONS,
     CLEANUP_STALE_MINER_EVALUATIONS_BY_HOTKEY,
-    CLEANUP_STALE_MINER_TIER_STATS_BY_HOTKEY,
     CLEANUP_STALE_MINERS,
     CLEANUP_STALE_MINERS_BY_HOTKEY,
     SET_MINER,
@@ -134,7 +133,6 @@ class Repository(BaseRepository):
         reverse_params = (evaluation.uid, evaluation.hotkey, evaluation.github_id)
         reverse_eval_params = reverse_params + (evaluation.evaluation_timestamp,)
         self.execute_command(CLEANUP_STALE_MINER_EVALUATIONS_BY_HOTKEY, reverse_eval_params)
-        self.execute_command(CLEANUP_STALE_MINER_TIER_STATS_BY_HOTKEY, reverse_params)
         self.execute_command(CLEANUP_STALE_MINERS_BY_HOTKEY, reverse_params)
 
     def store_pull_requests_bulk(self, pull_requests: List[PullRequest]) -> int:

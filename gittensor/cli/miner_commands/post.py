@@ -19,14 +19,14 @@ from gittensor.constants import BASE_GITHUB_API_URL
 console = Console()
 
 # Shared CLI options for wallet/network configuration
-NETUID_DEFAULT = 2
+NETUID_DEFAULT = 74
 
 
 @click.command()
 @click.option('--wallet', 'wallet_name', default=None, help='Bittensor wallet name.')
 @click.option('--hotkey', 'wallet_hotkey', default=None, help='Bittensor hotkey name.')
 @click.option('--netuid', type=int, default=NETUID_DEFAULT, help='Subnet UID.', show_default=True)
-@click.option('--network', default=None, help='Network name (local, test, finney).')
+@click.option('--network', default=None, help='Network name (local, test, finney). [default: finney]')
 @click.option('--rpc-url', default=None, help='Subtensor RPC endpoint URL (overrides --network).')
 @click.option(
     '--pat',

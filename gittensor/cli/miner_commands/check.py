@@ -19,7 +19,7 @@ console = Console()
 @click.option('--wallet', 'wallet_name', default=None, help='Bittensor wallet name.')
 @click.option('--hotkey', 'wallet_hotkey', default=None, help='Bittensor hotkey name.')
 @click.option('--netuid', type=int, default=NETUID_DEFAULT, help='Subnet UID.', show_default=True)
-@click.option('--network', default=None, help='Network name (local, test, finney).')
+@click.option('--network', default=None, help='Network name (local, test, finney). [default: finney]')
 @click.option('--rpc-url', default=None, help='Subtensor RPC endpoint URL (overrides --network).')
 @click.option('--json-output', 'json_mode', is_flag=True, default=False, help='Output results as JSON.')
 def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, json_mode):

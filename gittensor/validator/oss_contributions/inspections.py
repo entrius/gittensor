@@ -37,7 +37,7 @@ def detect_and_penalize_miners_sharing_github(miner_evaluations: Dict[int, Miner
         bt.logging.info(f'Detected UIDs {uids} sharing GitHub account')
         for uid in uids:
             bt.logging.info(f'PENALTY: Zeroing score for duplicate uid {uid}')
-            miner_evaluations[uid] = MinerEvaluation(uid=uid, hotkey=miner_evaluations[uid].hotkey)
+            miner_evaluations[uid] = MinerEvaluation(uid=uid, hotkey=miner_evaluations[uid].hotkey, github_id=miner_evaluations[uid].github_id, failed_reason='duplicate github account')
             duplicate_count += 1
 
     bt.logging.info(f'Total duplicate miners penalized: {duplicate_count}')

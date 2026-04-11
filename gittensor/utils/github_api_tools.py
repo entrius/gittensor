@@ -1261,7 +1261,8 @@ def _fetch_file_contents_batch(
     """
     file_fields = []
     for i, path in enumerate(batch_paths):
-        expression = f'{head_sha}:{path}'
+        escaped_path = path.replace('\\', '\\\\').replace('"', '\\"')
+        expression = f'{head_sha}:{escaped_path}'
         file_fields.append(
             f'file{i}: object(expression: "{expression}") {{ ... on Blob {{ text byteSize isBinary }} }}'
         )
@@ -1371,14 +1372,16 @@ def _fetch_file_contents_with_base_batch(
 
         # New files have no base version to fetch
         if fc.status != 'added':
-            base_expr = f'{base_sha}:{base_path}'
+            escaped_base = base_path.replace('\\', '\\\\').replace('"', '\\"')
+            base_expr = f'{base_sha}:{escaped_base}'
             file_fields.append(
                 f'base{i}: object(expression: "{base_expr}") {{ ... on Blob {{ text byteSize isBinary }} }}'
             )
 
         # Deleted files have no head version to fetch
         if fc.status != 'removed':
-            head_expr = f'{head_sha}:{head_path}'
+            escaped_head = head_path.replace('\\', '\\\\').replace('"', '\\"')
+            head_expr = f'{head_sha}:{escaped_head}'
             file_fields.append(
                 f'head{i}: object(expression: "{head_expr}") {{ ... on Blob {{ text byteSize isBinary }} }}'
             )

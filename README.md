@@ -32,6 +32,53 @@ The result: a sustainable incentive layer that channels resources toward buildin
 
 ---
 
+## Issue Discovery (Beta)
+
+Gittensor also rewards miners for **discovering issues** that lead to merged PRs. When you find a bug or identify a needed feature in a whitelisted repository and someone else solves it with a merged PR, you earn issue discovery rewards.
+
+### How It Works
+
+1. **Register a GitHub issue** on any whitelisted repository
+2. **Someone solves it** with a merged PR
+3. **Earn issue discovery score** based on the quality of the solving PR
+
+### Credibility System
+
+Issue discovery uses a separate credibility score from PR contributions:
+
+```
+issue_credibility = solved_issues / (solved_issues + closed_issues)
+```
+
+- **Solved issue**: Closed via a merged PR — counts toward credibility
+- **Closed issue**: Closed without a merged PR — counts against credibility
+- **Transferred issue**: Treated as failed — prevents gaming via repo transfers
+
+### Qualification Gates
+
+To be eligible for issue discovery rewards:
+- Minimum **7 valid solved issues** (solving PR must have token_score ≥ 5)
+- Minimum **80% issue credibility**
+- One credibility mulligan (mirrors OSS contribution rules)
+
+### Scoring
+
+- **Base score** = base score of the solving PR
+- **Contribution bonus** = passes through from PR quality (threshold: 2000)
+- **Review quality multiplier** = applies to both solver and discoverer equally
+- **No double dipping** = same account as PR author earns 0 discovery score (but issue still counts for credibility)
+
+### Emission Split
+
+- OSS contributions: 30%
+- **Issue discovery: 30%**
+- Issue treasury: 15%
+- Recycle: 25%
+
+See full specification in [issue_discovery/issue-discovery-rewards.md](issue_discovery/issue-discovery-rewards.md).
+
+---
+
 ## Miners
 
 No miner neuron required — just register your GitHub PAT with validators using the CLI.

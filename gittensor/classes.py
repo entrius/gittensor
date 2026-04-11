@@ -274,7 +274,7 @@ class PullRequest:
             hotkey=hotkey,
             github_id=github_id,
             title=pr_data['title'],
-            author_login=pr_data['author']['login'],
+            author_login=(pr_data.get('author') or {}).get('login', 'ghost'),
             merged_at=merged_at,
             created_at=parse_github_timestamp_to_cst(pr_data['createdAt']),
             pr_state=pr_state,

@@ -926,11 +926,13 @@ def should_skip_merged_pr(
         )
 
     # Skip if PR was merged by the same person who created it (self-merge) AND there's no approvals from a differing party
-    if pr_raw['mergedBy'] and pr_raw['author']['login'] == pr_raw['mergedBy']['login']:
+    author_login = (pr_raw.get('author') or {}).get('login')
+    merged_by_login = (pr_raw.get('mergedBy') or {}).get('login')
+    if merged_by_login and author_login and author_login == merged_by_login:
         # Check if there are any approvals from users other than the author
         reviews = pr_raw.get('reviews', {}).get('nodes', [])
         has_external_approval = any(
-            review.get('author') and review['author']['login'] != pr_raw['author']['login'] for review in reviews
+            review.get('author') and review['author']['login'] != author_login for review in reviews
         )
 
         if not has_external_approval:

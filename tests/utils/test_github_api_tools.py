@@ -888,7 +888,7 @@ class TestFindSolverFromCrossReferences:
             ]
         )
 
-        solver_id, pr_number = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
+        solver_id, pr_number, last_edited_at = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
 
         assert solver_id == 42
         assert pr_number == 14
@@ -903,7 +903,7 @@ class TestFindSolverFromCrossReferences:
             ]
         )
 
-        solver_id, pr_number = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
+        solver_id, pr_number, last_edited_at = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
 
         assert solver_id is None
         assert pr_number is None
@@ -918,7 +918,7 @@ class TestFindSolverFromCrossReferences:
             ]
         )
 
-        solver_id, pr_number = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
+        solver_id, pr_number, last_edited_at = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
 
         assert solver_id is None
         assert pr_number is None
@@ -933,7 +933,7 @@ class TestFindSolverFromCrossReferences:
             ]
         )
 
-        solver_id, pr_number = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
+        solver_id, pr_number, last_edited_at = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
 
         assert solver_id is None
         assert pr_number is None
@@ -950,7 +950,7 @@ class TestFindSolverFromCrossReferences:
             ]
         )
 
-        solver_id, pr_number = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
+        solver_id, pr_number, last_edited_at = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
 
         assert solver_id == 200
         assert pr_number == 20
@@ -973,7 +973,7 @@ class TestFindSolverFromCrossReferences:
             ]
         )
 
-        solver_id, pr_number = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
+        solver_id, pr_number, last_edited_at = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
 
         assert solver_id == 42
         assert pr_number == 14
@@ -993,7 +993,7 @@ class TestFindSolverFromCrossReferences:
             ]
         )
 
-        solver_id, pr_number = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
+        solver_id, pr_number, last_edited_at = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
 
         assert solver_id == 42
         assert pr_number == 14
@@ -1008,7 +1008,7 @@ class TestFindSolverFromCrossReferences:
             ]
         )
 
-        solver_id, pr_number = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
+        solver_id, pr_number, last_edited_at = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
 
         assert solver_id == 42
         assert pr_number == 14
@@ -1019,7 +1019,7 @@ class TestFindSolverFromCrossReferences:
         """Empty timeline nodes returns (None, None)."""
         mock_graphql.return_value = _graphql_response([])
 
-        solver_id, pr_number = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
+        solver_id, pr_number, last_edited_at = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
 
         assert solver_id is None
         assert pr_number is None
@@ -1030,7 +1030,7 @@ class TestFindSolverFromCrossReferences:
         """GraphQL query failure returns (None, None)."""
         mock_graphql.return_value = None
 
-        solver_id, pr_number = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
+        solver_id, pr_number, last_edited_at = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
 
         assert solver_id is None
         assert pr_number is None

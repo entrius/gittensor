@@ -134,6 +134,7 @@ class Issue:
     author_github_id: Optional[str] = None  # Issue author's GitHub user ID (for miner matching)
     is_transferred: bool = False
     updated_at: Optional[datetime] = None
+    last_edited_at: Optional[datetime] = None  # Track body/title edits (not closing events)
     discovery_base_score: float = 0.0
     discovery_earned_score: float = 0.0
     discovery_review_quality_multiplier: float = 1.0

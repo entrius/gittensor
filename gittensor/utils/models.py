@@ -20,3 +20,4 @@ class PRInfo(TypedDict, total=False):
     url: str
     review_count: int
     closing_numbers: List[int]
+    last_edited_at: Optional[str]  # Issue's lastEditedAt for anti-gaming check

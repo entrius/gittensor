@@ -472,6 +472,7 @@ _PR_TIMELINE_QUERY = """
 query($owner: String!, $name: String!, $issueNumber: Int!) {
   repository(owner: $owner, name: $name) {
     issue(number: $issueNumber) {
+      lastEditedAt
       timelineItems(itemTypes: [CROSS_REFERENCED_EVENT], first: 50) {
         nodes {
           ... on CrossReferencedEvent {
@@ -536,6 +537,11 @@ def _search_issue_referencing_prs_graphql(
         result.get('data', {}).get('repository', {}).get('issue', {}).get('timelineItems', {}).get('nodes', [])
     )
 
+    # Capture issue's lastEditedAt for anti-gaming check (post-merge edit detection)
+    issue_last_edited_at = (
+        result.get('data', {}).get('repository', {}).get('issue', {}).get('lastEditedAt')
+    )
+
     out: List[PRInfo] = []
     for node in timeline_nodes:
         pr = node.get('source') or {}
@@ -570,6 +576,7 @@ def _search_issue_referencing_prs_graphql(
             'url': pr.get('url') or '',
             'review_count': int(reviews.get('totalCount', 0) or 0),
             'closing_numbers': closing_numbers,
+            'last_edited_at': issue_last_edited_at,  # For anti-gaming check in issue discovery
         }
         out.append(pr_info)
 
@@ -1143,7 +1150,7 @@ def extract_pr_number_from_url(pr_url: str) -> Optional[int]:
     return int(match.group(1)) if match else None
 
 
-def find_solver_from_cross_references(repo: str, issue_number: int, token: str) -> tuple[Optional[int], Optional[int]]:
+def find_solver_from_cross_references(repo: str, issue_number: int, token: str) -> tuple[Optional[int], Optional[int], Optional[str]]:
     """Resolve solver from cross-referenced PRs on the issue timeline.
 
     This uses ``_search_issue_referencing_prs_graphql`` and then narrows to PRs
@@ -1159,14 +1166,14 @@ def find_solver_from_cross_references(repo: str, issue_number: int, token: str) 
         token: GitHub PAT used for GraphQL timeline access.
 
     Returns:
-        Tuple ``(solver_github_id, pr_number)``. Either value may be ``None``
-        when no valid closing PR is found.
+        Tuple ``(solver_github_id, pr_number, last_edited_at)``. Any value may be ``None``
+        when no valid closing PR is found or last_edited_at is not available.
     """
     prs = _search_issue_referencing_prs_graphql(repo, issue_number, token, open_only=False)
     merged = [p for p in prs if p.get('state') == 'MERGED' and issue_number in p.get('closing_numbers', [])]
     bt.logging.debug(f'Found {len(merged)} verified closing PRs via GraphQL for {repo}#{issue_number}')
     if not merged:
-        return None, None
+        return None, None, None
 
     if len(merged) > 1:
         bt.logging.warning(f'Multiple closing PRs found for {repo}#{issue_number}, selecting most recent.')
@@ -1182,7 +1189,7 @@ def find_solver_from_cross_references(repo: str, issue_number: int, token: str) 
         f'Solver via GraphQL cross-reference: PR#{best.get("number")}, '
         f'solver_id={best.get("author_id")}, merged_at={best.get("merged_at")}'
     )
-    return best.get('author_id'), best.get('number')
+    return best.get('author_id'), best.get('number'), best.get('last_edited_at')
 
 
 def find_solver_from_timeline(repo: str, issue_number: int, token: str) -> tuple:

@@ -154,15 +154,15 @@ async def _scan_repo(
     capped = unmatched[:lookup_cap]
     semaphore = asyncio.Semaphore(REPO_SCAN_CONCURRENCY)
 
-    async def _lookup(issue_raw: dict) -> Tuple[dict, Optional[int], Optional[int]]:
+    async def _lookup(issue_raw: dict) -> Tuple[dict, Optional[int], Optional[int], Optional[str]]:
         async with semaphore:
-            solver_id, pr_number = await asyncio.to_thread(
+            solver_id, pr_number, last_edited_at = await asyncio.to_thread(
                 find_solver_from_cross_references,
                 repo_name,
                 issue_raw['number'],
                 validator_pat,
             )
-            return issue_raw, solver_id, pr_number
+            return issue_raw, solver_id, pr_number, last_edited_at
 
     tasks = [_lookup(issue_raw) for issue_raw in capped]
     resolved = await asyncio.gather(*tasks, return_exceptions=True)
@@ -173,7 +173,7 @@ async def _scan_repo(
             continue
 
         assert isinstance(item, tuple)
-        issue_raw, solver_id, pr_number = item
+        issue_raw, solver_id, pr_number, last_edited_at = item
         user = issue_raw.get('user') or {}
         author_github_id = str(user.get('id', ''))
 
@@ -187,6 +187,10 @@ async def _scan_repo(
             author_github_id=author_github_id,
             state='CLOSED',
         )
+
+        # Set last_edited_at for anti-gaming check (post-merge edit detection)
+        if last_edited_at:
+            issue.last_edited_at = _parse_iso(last_edited_at)
 
         if solver_id is not None:
             # Case 2: solved by non-miner PR → positive credibility

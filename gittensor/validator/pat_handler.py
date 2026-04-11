@@ -101,6 +101,14 @@ async def priority_pat_broadcast(validator: 'Validator', synapse: PatBroadcastSy
 async def handle_pat_check(validator: 'Validator', synapse: PatCheckSynapse) -> PatCheckSynapse:
     """Check if the validator has the miner's PAT stored and re-validate it."""
     hotkey = _get_hotkey(synapse)
+
+    if hotkey not in validator.metagraph.hotkeys:
+        synapse.has_pat = False
+        synapse.pat_valid = False
+        synapse.rejection_reason = 'Hotkey not registered on subnet'
+        bt.logging.warning(f'PAT check rejected — hotkey {hotkey[:16]}... not registered')
+        return synapse
+
     uid = validator.metagraph.hotkeys.index(hotkey)
     entry = pat_storage.get_pat_by_uid(uid)
 

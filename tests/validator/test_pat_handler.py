@@ -223,3 +223,11 @@ class TestHandlePatCheck:
         assert result.has_pat is True
         assert result.pat_valid is False
         assert 'PAT expired' in (result.rejection_reason or '')
+
+    def test_unregistered_hotkey_returns_gracefully(self, mock_validator):
+        """handle_pat_check must not raise ValueError when hotkey has deregistered."""
+        synapse = _make_check_synapse('unknown_hotkey')
+        result = _run(handle_pat_check(mock_validator, synapse))
+        assert result.has_pat is False
+        assert result.pat_valid is False
+        assert result.rejection_reason == 'Hotkey not registered'

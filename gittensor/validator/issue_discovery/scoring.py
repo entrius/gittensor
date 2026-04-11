@@ -245,13 +245,15 @@ def _collect_issues_from_prs(
                     data.closed_count += 1
                     continue
 
-                # Count valid solved (PR quality gate only — independent of same-account/one-per-PR)
-                if pr.token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE:
-                    data.valid_solved_count += 1
-
                 # Same-account: discoverer == solver → 0 score but credibility counts
                 if discoverer_id == pr.github_id:
                     continue
+
+                # Count valid solved (PR quality gate only — independent of same-account/one-per-PR)
+                # NOTE: must be after same-account guard so self-solved issues don't
+                # falsely count toward the eligibility threshold for the reward pool.
+                if pr.token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE:
+                    data.valid_solved_count += 1
 
                 # One-issue-per-PR: only the first (earliest-created) issue gets scored
                 pr_key = (pr.repository_full_name, pr.number)

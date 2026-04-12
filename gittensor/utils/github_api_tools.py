@@ -1240,6 +1240,15 @@ def check_github_issue_closed(repo: str, issue_number: int, token: str) -> Optio
         return None
 
 
+def _escape_graphql_string(value: str) -> str:
+    """Escape special characters for safe interpolation into a GraphQL string literal.
+
+    Backslashes and double quotes in file paths would break the GraphQL query
+    syntax when interpolated into ``expression: "..."`` fields.
+    """
+    return value.replace('\\', '\\\\').replace('"', '\\"')
+
+
 def _fetch_file_contents_batch(
     repo_owner: str,
     repo_name: str,
@@ -1261,7 +1270,7 @@ def _fetch_file_contents_batch(
     """
     file_fields = []
     for i, path in enumerate(batch_paths):
-        expression = f'{head_sha}:{path}'
+        expression = _escape_graphql_string(f'{head_sha}:{path}')
         file_fields.append(
             f'file{i}: object(expression: "{expression}") {{ ... on Blob {{ text byteSize isBinary }} }}'
         )
@@ -1371,14 +1380,14 @@ def _fetch_file_contents_with_base_batch(
 
         # New files have no base version to fetch
         if fc.status != 'added':
-            base_expr = f'{base_sha}:{base_path}'
+            base_expr = _escape_graphql_string(f'{base_sha}:{base_path}')
             file_fields.append(
                 f'base{i}: object(expression: "{base_expr}") {{ ... on Blob {{ text byteSize isBinary }} }}'
             )
 
         # Deleted files have no head version to fetch
         if fc.status != 'removed':
-            head_expr = f'{head_sha}:{head_path}'
+            head_expr = _escape_graphql_string(f'{head_sha}:{head_path}')
             file_fields.append(
                 f'head{i}: object(expression: "{head_expr}") {{ ... on Blob {{ text byteSize isBinary }} }}'
             )

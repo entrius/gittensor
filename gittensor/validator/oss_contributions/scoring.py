@@ -168,8 +168,9 @@ def calculate_base_score(
         pr.leaf_count = scoring_result.score_breakdown.leaf_count
         pr.leaf_score = scoring_result.score_breakdown.leaf_score
 
-    # Calculate total lines changed across all files
-    total_lines = sum(f.total_lines for f in scoring_result.file_results)
+    # Calculate total lines changed across scored files (exclude deleted files which
+    # contribute 0 to token_score but would artificially deflate code_density)
+    total_lines = sum(f.total_lines for f in scoring_result.file_results if f.scoring_method != 'skipped')
 
     # Check minimum token score threshold for base score. PRs below threshold get 0 base score
     if pr.token_score < MIN_TOKEN_SCORE_FOR_BASE_SCORE:

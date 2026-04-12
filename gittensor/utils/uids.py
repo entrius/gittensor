@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 
 import bittensor as bt
 
@@ -25,7 +25,7 @@ def check_uid_availability(metagraph: 'bt.Metagraph', uid: int, vpermit_tao_limi
     return True
 
 
-def get_all_uids(self, exclude: List[int] = []) -> set[int]:
+def get_all_uids(self, exclude: Optional[List[int]] = None) -> set[int]:
     """Return all eligible miner UIDs for scoring.
 
     Args:
@@ -35,6 +35,8 @@ def get_all_uids(self, exclude: List[int] = []) -> set[int]:
         Set of miner UIDs that are serving and within the validator-permit TAO limit.
         UID ``0`` is always included.
     """
+    if exclude is None:
+        exclude = []
     # Get all available miner UIDs, excluding specified ones
     available_miner_uids = {uid for uid in range(self.metagraph.n.item()) if uid not in exclude}
 

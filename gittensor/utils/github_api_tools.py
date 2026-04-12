@@ -1071,6 +1071,9 @@ def load_miners_prs(
 
                     if should_skip:
                         bt.logging.debug(skip_reason or '')
+                        miner_eval.skipped_pr_state_updates.append(
+                            (pr_raw['number'], repository_full_name, pr_state)
+                        )
                         continue
 
                     miner_eval.add_merged_pull_request(pr_raw)

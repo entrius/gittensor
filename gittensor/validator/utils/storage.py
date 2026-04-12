@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Dict, List, Optional, Tuple
 
 import bittensor as bt
 
@@ -28,12 +28,16 @@ class DatabaseStorage:
     def is_enabled(self) -> bool:
         return self.db_connection is not None
 
-    def store_evaluation(self, miner_eval: MinerEvaluation) -> StorageResult:
+    def store_evaluation(
+        self, miner_eval: MinerEvaluation, active_repos: Optional[Tuple[str, ...]] = None
+    ) -> StorageResult:
         """
         Store all evaluation data in an optimized manner with proper error handling.
 
         Args:
             miner_eval: Complete miner evaluation with all related data
+            active_repos: Tuple of currently tracked repository names. If provided,
+                          PR records for repos not in this set are deleted.
 
         Returns:
             StorageResult with success status, errors, and counts
@@ -65,6 +69,14 @@ class DatabaseStorage:
             result.stored_counts['file_changes'] = self.repo.store_file_changes_bulk(miner_eval.get_all_file_changes())
             # Clean up stale data if this github_id was previously registered under a different uid/hotkey
             self.repo.cleanup_stale_miner_data(miner_eval)
+
+            # Clean up PR records from repositories no longer in master_repositories
+            if active_repos:
+                self.repo.cleanup_stale_pull_requests(miner_eval.uid, miner_eval.hotkey, active_repos)
+
+            # Update pr_state for PRs skipped during evaluation (e.g., merged to non-acceptable branch)
+            if miner_eval.skipped_pr_state_updates:
+                self.repo.update_skipped_pr_states(miner_eval.skipped_pr_state_updates)
 
             result.stored_counts['evaluations'] = 1 if self.repo.set_miner_evaluation(miner_eval) else 0
 

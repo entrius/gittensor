@@ -98,12 +98,18 @@ class Validator(BaseValidatorNeuron):
         bt.logging.info('load_state()')
         self.load_state()
 
-    async def bulk_store_evaluation(self, miner_evals: Dict[int, MinerEvaluation], skip_uids: Set[int] = None):
+    async def bulk_store_evaluation(
+        self,
+        miner_evals: Dict[int, MinerEvaluation],
+        skip_uids: Set[int] = None,
+        active_repos: tuple = None,
+    ):
         """Store all miner evaluations, log summary rather than per-UID.
 
         Args:
             miner_evals: Dict of UID -> MinerEvaluation to store.
             skip_uids: Set of UIDs to skip (e.g. cached evaluations that were already stored previously).
+            active_repos: Tuple of currently tracked repo names for stale PR cleanup.
         """
         if self.db_storage is None:
             return
@@ -119,7 +125,7 @@ class Validator(BaseValidatorNeuron):
                 continue
 
             try:
-                storage_result = self.db_storage.store_evaluation(evaluation)
+                storage_result = self.db_storage.store_evaluation(evaluation, active_repos=active_repos)
                 if storage_result.success:
                     successful_count += 1
                 else:

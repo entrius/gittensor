@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from inspect import cleandoc
 
+import shutil
+
 import click
 from rich import box
 from rich.console import Console
@@ -14,6 +16,18 @@ from rich.markup import escape
 from rich.padding import Padding
 from rich.panel import Panel
 from rich.table import Table
+
+# Terminal width below which plain-text output is used instead of Rich boxes.
+# 100 cols gives the 4-column options panel enough room to breathe; anything
+# narrower (including the classic 80-col standard terminal) gets plain text.
+_PLAIN_WIDTH = 100
+
+
+def _terminal_width(ctx: click.Context) -> int:
+    """Reliably resolve terminal width from Click context or the OS."""
+    if ctx.terminal_width:
+        return ctx.terminal_width
+    return shutil.get_terminal_size(fallback=(120, 24)).columns
 
 
 def _single_paragraph(text: str) -> str:
@@ -30,6 +44,58 @@ def _collect_help_rows(params: list[click.Parameter], ctx: click.Context) -> lis
             continue
         rows.append((record[0], record[1] or ''))
     return rows
+
+
+def _plain_usage(console: Console, usage: str) -> None:
+    """Plain text usage line (no markup)."""
+    console.print(usage.strip())
+    console.print()
+
+
+def _plain_options(console: Console, rows: list[tuple[str, str]], width: int) -> None:
+    """Plain text options list.
+
+    Uses an inline two-column layout when label fits; falls back to a stacked
+    layout (label on one line, description indented below) when the label would
+    push the description off-screen on narrow terminals.
+    """
+    console.print('Options:')
+    if not rows:
+        console.print('  (none)')
+        return
+    parsed = []
+    for decl, desc in rows:
+        long_names, short_alias, option_type = _parse_option_decl(decl)
+        parts = [p for p in [long_names, short_alias, option_type] if p]
+        label = ', '.join(parts) if parts else decl
+        parsed.append((label, desc))
+    # Cap the label column to at most half the usable terminal width so that
+    # descriptions are never squeezed off-screen by one very long flag name.
+    max_label = max(len(label) for label, _ in parsed)
+    left_width = min(max_label + 2, max((width - 4) // 2, 16))
+    for label, desc in parsed:
+        if not desc:
+            console.print(f'  {label}')
+        elif len(label) + 2 <= left_width:
+            console.print(f'  {label:<{left_width}}{desc}')
+        else:
+            # Label too long for inline; stack description below with indent.
+            console.print(f'  {label}')
+            console.print(f'    {desc}')
+
+
+def _plain_section(console: Console, title: str, rows: list[tuple[str, str]]) -> None:
+    """Plain text section list (e.g. Commands)."""
+    console.print(f'{title}:')
+    if not rows:
+        console.print('  (none)')
+        return
+    left_width = max(len(left) for left, _ in rows) + 2
+    for left, right in rows:
+        if right:
+            console.print(f'  {left:<{left_width}}{right}')
+        else:
+            console.print(f'  {left}')
 
 
 def _render_usage(console: Console, usage: str) -> None:
@@ -128,16 +194,24 @@ class StyledCommand(click.Command):
         return _collect_help_rows(self.get_params(ctx), ctx)
 
     def get_help(self, ctx: click.Context) -> str:
-        console = Console(width=ctx.terminal_width or 120)
+        width = _terminal_width(ctx)
+        console = Console(width=width)
 
         with console.capture() as capture:
-            _render_usage(console, self.get_usage(ctx))
-
             help_text = cleandoc(self.help or '').replace('\x08', '')
-            if help_text:
-                console.print(Padding(help_text, (0, 0, 0, 1)))
+            rows = self._help_options_rows(ctx)
 
-            console.print(_options_panel(self._help_options_rows(ctx)))
+            if width < _PLAIN_WIDTH:
+                _plain_usage(console, self.get_usage(ctx))
+                if help_text:
+                    console.print(help_text)
+                    console.print()
+                _plain_options(console, rows, width)
+            else:
+                _render_usage(console, self.get_usage(ctx))
+                if help_text:
+                    console.print(Padding(help_text, (0, 0, 0, 1)))
+                console.print(_options_panel(rows))
 
             footer = getattr(self, 'help_footer', None)
             if footer:
@@ -183,24 +257,35 @@ class StyledGroup(click.Group):
         return rows
 
     def get_help(self, ctx: click.Context) -> str:
-        console = Console(width=ctx.terminal_width or 120)
+        width = _terminal_width(ctx)
+        console = Console(width=width)
 
         with console.capture() as capture:
-            _render_usage(console, self.get_usage(ctx))
-
             help_text = cleandoc(self.help or '')
-            if help_text:
-                console.print(
-                    Padding(
-                        f'[bright_white]{escape(_single_paragraph(help_text))}[/bright_white]',
-                        (0, 0, 0, 1),
-                    )
-                )
-                console.print()
+            opt_rows = self._help_options_rows(ctx)
+            cmd_rows = self._help_commands_rows(ctx)
 
-            console.print(_options_panel(self._help_options_rows(ctx)))
-            console.print()
-            console.print(_section_panel('Commands', self._help_commands_rows(ctx)))
+            if width < _PLAIN_WIDTH:
+                _plain_usage(console, self.get_usage(ctx))
+                if help_text:
+                    console.print(_single_paragraph(help_text))
+                    console.print()
+                _plain_options(console, opt_rows, width)
+                console.print()
+                _plain_section(console, 'Commands', cmd_rows)
+            else:
+                _render_usage(console, self.get_usage(ctx))
+                if help_text:
+                    console.print(
+                        Padding(
+                            f'[bright_white]{escape(_single_paragraph(help_text))}[/bright_white]',
+                            (0, 0, 0, 1),
+                        )
+                    )
+                    console.print()
+                console.print(_options_panel(opt_rows))
+                console.print()
+                console.print(_section_panel('Commands', cmd_rows))
 
             footer = getattr(self, 'help_footer', None)
             if footer:

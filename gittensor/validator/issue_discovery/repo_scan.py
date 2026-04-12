@@ -11,6 +11,7 @@ Uses the validator PAT for all API calls. Rate-limited by per-repo and global ca
 """
 
 import asyncio
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Set, Tuple
 
@@ -201,40 +202,74 @@ async def _scan_repo(
 
 
 def _fetch_closed_issues(repo_name: str, since: str, token: str) -> List[dict]:
-    """Fetch closed issues from a repo via REST API with pagination."""
+    """Fetch closed issues from a repo via REST API with pagination and retry.
+
+    Retries transient 5xx errors and connection failures with exponential backoff,
+    matching the retry pattern used by other API functions in the codebase
+    (e.g. get_pull_request_file_changes, execute_graphql_query).
+    """
     headers = {'Authorization': f'token {token}', 'Accept': 'application/vnd.github.v3+json'}
     all_issues: List[dict] = []
     page = 1
+    max_retries = 3
 
     while True:
-        try:
-            response = requests.get(
-                f'{BASE_GITHUB_API_URL}/repos/{repo_name}/issues',
-                params={'state': 'closed', 'since': since, 'per_page': 100, 'page': page},
-                headers=headers,
-                timeout=30,
-            )
-            if response.status_code in (404, 422):
-                bt.logging.debug(f'Issue scan {repo_name} page {page}: HTTP {response.status_code}')
-                break
-            if response.status_code != 200:
-                bt.logging.warning(f'Issue scan {repo_name} page {page}: HTTP {response.status_code}')
-                break
+        last_error: Optional[str] = None
+        for attempt in range(max_retries):
+            try:
+                response = requests.get(
+                    f'{BASE_GITHUB_API_URL}/repos/{repo_name}/issues',
+                    params={'state': 'closed', 'since': since, 'per_page': 100, 'page': page},
+                    headers=headers,
+                    timeout=30,
+                )
 
-            issues = response.json()
-            if not issues:
-                break
+                if response.status_code == 200:
+                    issues = response.json()
+                    if not issues:
+                        return all_issues
+                    all_issues.extend(issues)
+                    last_error = None
+                    break  # Success, move to next page
 
-            all_issues.extend(issues)
-            page += 1
+                if response.status_code in (404, 422):
+                    bt.logging.debug(f'Issue scan {repo_name} page {page}: HTTP {response.status_code}')
+                    return all_issues
 
-            # Safety: don't paginate forever
-            if page > 100:
-                bt.logging.warning(f'Issue scan {repo_name}: hit 100-page limit')
-                break
+                # Retryable server error
+                last_error = f'HTTP {response.status_code}'
+                if response.status_code in (502, 503, 504) and attempt < max_retries - 1:
+                    backoff = min(5 * (2**attempt), 30)
+                    bt.logging.warning(
+                        f'Issue scan {repo_name} page {page}: {last_error} '
+                        f'(attempt {attempt + 1}/{max_retries}), retrying in {backoff}s...'
+                    )
+                    time.sleep(backoff)
+                    continue
 
-        except requests.RequestException as e:
-            bt.logging.warning(f'Issue scan {repo_name} page {page}: {e}')
+                bt.logging.warning(f'Issue scan {repo_name} page {page}: {last_error}')
+                return all_issues
+
+            except requests.RequestException as e:
+                last_error = str(e)
+                if attempt < max_retries - 1:
+                    backoff = min(5 * (2**attempt), 30)
+                    bt.logging.warning(
+                        f'Issue scan {repo_name} page {page}: {e} '
+                        f'(attempt {attempt + 1}/{max_retries}), retrying in {backoff}s...'
+                    )
+                    time.sleep(backoff)
+                    continue
+                bt.logging.warning(f'Issue scan {repo_name} page {page}: {last_error}')
+                return all_issues
+        else:
+            # All retries exhausted
+            bt.logging.warning(f'Issue scan {repo_name} page {page} failed after {max_retries} attempts: {last_error}')
+            return all_issues
+
+        page += 1
+        if page > 100:
+            bt.logging.warning(f'Issue scan {repo_name}: hit 100-page limit')
             break
 
     return all_issues

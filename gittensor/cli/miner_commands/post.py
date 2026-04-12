@@ -19,7 +19,7 @@ from gittensor.constants import BASE_GITHUB_API_URL
 console = Console()
 
 # Shared CLI options for wallet/network configuration
-NETUID_DEFAULT = 2
+NETUID_DEFAULT = 74
 
 
 @click.command()

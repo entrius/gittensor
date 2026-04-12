@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from math import prod
-from typing import DefaultDict, Dict, List, Optional, Set
+from typing import DefaultDict, Dict, List, Optional, Set, Tuple
 
 import bittensor as bt
 
@@ -314,6 +314,10 @@ class MinerEvaluation:
     open_pull_requests: List[PullRequest] = field(default_factory=list)
     closed_pull_requests: List[PullRequest] = field(default_factory=list)
     unique_repos_contributed_to: Set[str] = field(default_factory=set)
+
+    # PRs skipped during evaluation that still need their DB state updated
+    # Each entry is (pr_number, repository_full_name, github_state)
+    skipped_pr_state_updates: List[Tuple[int, str, str]] = field(default_factory=list)
 
     # Eligibility and credibility
     is_eligible: bool = False

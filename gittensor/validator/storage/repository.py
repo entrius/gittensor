@@ -23,7 +23,9 @@ from .queries import (
     CLEANUP_STALE_MINER_EVALUATIONS_BY_HOTKEY,
     CLEANUP_STALE_MINERS,
     CLEANUP_STALE_MINERS_BY_HOTKEY,
+    CLEANUP_STALE_PULL_REQUESTS,
     SET_MINER,
+    UPDATE_SKIPPED_PR_STATE,
 )
 
 T = TypeVar('T')
@@ -134,6 +136,37 @@ class Repository(BaseRepository):
         reverse_eval_params = reverse_params + (evaluation.evaluation_timestamp,)
         self.execute_command(CLEANUP_STALE_MINER_EVALUATIONS_BY_HOTKEY, reverse_eval_params)
         self.execute_command(CLEANUP_STALE_MINERS_BY_HOTKEY, reverse_params)
+
+    def cleanup_stale_pull_requests(self, uid: int, hotkey: str, active_repos: tuple) -> bool:
+        """
+        Delete pull request records for repositories no longer tracked in master_repositories.
+
+        When a repository is removed from tracking, existing PR records in the database
+        retain their old pr_state indefinitely. This method removes those stale records.
+
+        Args:
+            uid: Miner UID
+            hotkey: Miner hotkey
+            active_repos: Tuple of currently tracked repository full names
+        """
+        if not active_repos:
+            return False
+        placeholders = ','.join(['%s'] * len(active_repos))
+        query = CLEANUP_STALE_PULL_REQUESTS.replace('IN %s', f'IN ({placeholders})')
+        return self.execute_command(query, (uid, hotkey) + active_repos)
+
+    def update_skipped_pr_states(self, state_updates: list) -> int:
+        """
+        Update pr_state for PRs that were skipped during evaluation but have a new state on GitHub.
+
+        Args:
+            state_updates: List of (pr_number, repository_full_name, github_state) tuples
+        """
+        count = 0
+        for pr_number, repo, state in state_updates:
+            if self.execute_command(UPDATE_SKIPPED_PR_STATE, (state, pr_number, repo, state)):
+                count += 1
+        return count
 
     def store_pull_requests_bulk(self, pull_requests: List[PullRequest]) -> int:
         """

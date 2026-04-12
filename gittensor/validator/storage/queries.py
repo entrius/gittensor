@@ -16,6 +16,21 @@ WHERE github_id = %s
   AND (uid != %s OR hotkey != %s)
 """
 
+# Cleanup stale pull requests from repositories no longer in master_repositories
+CLEANUP_STALE_PULL_REQUESTS = """
+DELETE FROM pull_requests
+WHERE uid = %s AND hotkey = %s
+  AND repository_full_name NOT IN %s
+"""
+
+# Update pr_state for PRs that were skipped during evaluation but have a new state on GitHub
+UPDATE_SKIPPED_PR_STATE = """
+UPDATE pull_requests
+SET pr_state = %s, updated_at = NOW()
+WHERE number = %s AND repository_full_name = %s
+  AND pr_state != %s
+"""
+
 # Reverse cleanup: Remove stale data when a (uid, hotkey) re-links to a new github_id
 CLEANUP_STALE_MINER_EVALUATIONS_BY_HOTKEY = """
 DELETE FROM miner_evaluations

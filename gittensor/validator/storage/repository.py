@@ -166,6 +166,7 @@ class Repository(BaseRepository):
                     pr.author_login,
                     pr.merged_at,
                     pr.created_at,
+                    pr.closed_at,
                     pr.pr_state.value,  # Convert PRState enum to string
                     pr.repo_weight_multiplier,
                     pr.base_score,

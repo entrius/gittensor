@@ -189,6 +189,7 @@ class PullRequest:
     structural_score: float = 0.0
     leaf_count: int = 0
     leaf_score: float = 0.0
+    closed_at: Optional[datetime] = None  # None for MERGED/OPEN PRs
     merged_by_login: Optional[str] = None
     file_changes: Optional[List[FileChange]] = None
     issues: Optional[List[Issue]] = None
@@ -266,6 +267,7 @@ class PullRequest:
         raw_edited_at = pr_data.get('lastEditedAt')
         last_edited_at = parse_github_timestamp_to_cst(raw_edited_at) if isinstance(raw_edited_at, str) else None
         merged_at = parse_github_timestamp_to_cst(pr_data['mergedAt']) if is_merged else None
+        closed_at = parse_github_timestamp_to_cst(pr_data['closedAt']) if pr_data.get('closedAt') else None
 
         return cls(
             number=pr_data['number'],
@@ -277,6 +279,7 @@ class PullRequest:
             author_login=pr_data['author']['login'],
             merged_at=merged_at,
             created_at=parse_github_timestamp_to_cst(pr_data['createdAt']),
+            closed_at=closed_at,
             pr_state=pr_state,
             additions=pr_data['additions'],
             deletions=pr_data['deletions'],

@@ -90,6 +90,7 @@ QUERY = """
                   createdAt
                   closedAt
                   updatedAt
+                  lastEditedAt
                   author {
                     login
                     ... on User { databaseId }

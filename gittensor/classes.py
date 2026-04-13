@@ -134,6 +134,7 @@ class Issue:
     author_github_id: Optional[str] = None  # Issue author's GitHub user ID (for miner matching)
     is_transferred: bool = False
     updated_at: Optional[datetime] = None
+    last_edited_at: Optional[datetime] = None
     discovery_base_score: float = 0.0
     discovery_earned_score: float = 0.0
     discovery_review_quality_multiplier: float = 1.0
@@ -259,6 +260,7 @@ class PullRequest:
                     author_association=issue.get('authorAssociation'),
                     author_github_id=str(author_db_id) if author_db_id else None,
                     updated_at=parse_github_timestamp_to_cst(issue['updatedAt']) if issue.get('updatedAt') else None,
+                    last_edited_at=parse_github_timestamp_to_cst(issue['lastEditedAt']) if issue.get('lastEditedAt') else None,
                 )
             )
 

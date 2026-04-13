@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-from contextlib import AbstractContextManager, nullcontext
+from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 console = Console()
 
 
-def _rich_status(message: str, json_mode: bool) -> AbstractContextManager[None]:
+def _rich_status(message: str, json_mode: bool):
     """Rich spinner in TTY mode; no-op in JSON mode (avoids duplicate branches)."""
     return nullcontext() if json_mode else console.status(message)
 
@@ -139,7 +139,7 @@ def miner_status(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, deta
         _output_rich(ctx, detail)
 
 
-@dataclass(slots=True)
+@dataclass
 class _StatusContext:
     """Holds computed status data for output rendering."""
 

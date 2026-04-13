@@ -158,7 +158,7 @@ def calculate_base_score(
     token_config: TokenConfig,
     file_contents: Dict[str, FileContentPair],
 ) -> float:
-    """Calculate base score using per-category code density scaling + contribution bonus"""
+    """Calculate base score using SOURCE density scaling + contribution bonus"""
     scoring_result: PrScoringResult = calculate_token_score_from_file_changes(
         pr.file_changes or [],
         file_contents,
@@ -183,32 +183,27 @@ def calculate_base_score(
     source = scoring_result.by_category.get(ScoringCategory.SOURCE)
     source_token_score = source.score_breakdown.total_score if source and source.score_breakdown else 0.0
 
-    # Per-category density-scaled base scores, 0 if SOURCE below threshold
+    # Density-scaled base score from SOURCE category only
+    source_density = source.density if source else 0.0
     if source_token_score < MIN_TOKEN_SCORE_FOR_BASE_SCORE:
         initial_base_score = 0.0
     else:
-        initial_base_score = sum(
-            MERGED_PR_BASE_SCORE * cat_result.density for cat_result in scoring_result.by_category.values()
-        )
+        initial_base_score = MERGED_PR_BASE_SCORE * source_density
 
-    # Contribution bonus from SOURCE category only, capped at MAX_CONTRIBUTION_BONUS
-    source_score = source.total_score if source else 0.0
-    bonus_percent = min(1.0, source_score / CONTRIBUTION_SCORE_FOR_FULL_BONUS)
+    # Contribution bonus from all categories, capped at MAX_CONTRIBUTION_BONUS
+    bonus_percent = min(1.0, scoring_result.total_score / CONTRIBUTION_SCORE_FOR_FULL_BONUS)
     contribution_bonus = round(bonus_percent * MAX_CONTRIBUTION_BONUS, 2)
 
     base_score = round(initial_base_score + contribution_bonus, 2)
 
-    # Log with per-category density and bonus percentage
+    # Log with source density and bonus percentage
     threshold_note = (
         f' [below {MIN_TOKEN_SCORE_FOR_BASE_SCORE} token threshold]'
         if source_token_score < MIN_TOKEN_SCORE_FOR_BASE_SCORE
         else ''
     )
-    density_parts = ' '.join(
-        f'{cat.value}={cat_result.density:.2f}' for cat, cat_result in scoring_result.by_category.items()
-    )
     bt.logging.info(
-        f'Base score: {initial_base_score:.2f} (density: {density_parts or "none"}){threshold_note}'
+        f'Base score: {initial_base_score:.2f} (density {source_density:.2f}){threshold_note}'
         f' + {contribution_bonus} bonus ({bonus_percent * 100:.0f}% of max {MAX_CONTRIBUTION_BONUS}) = {base_score:.2f}'
     )
 

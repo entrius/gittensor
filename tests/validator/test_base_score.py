@@ -1,15 +1,14 @@
 # The MIT License (MIT)
 # Copyright © 2025 Entrius
 
-"""Integration tests for calculate_base_score - verifying per-category density
-calculation and SOURCE-only contribution bonus using real tree-sitter scoring"""
+"""Integration tests for calculate_base_score - verifying SOURCE-only density
+scaling and all-category contribution bonus using real tree-sitter scoring"""
 
 from typing import Dict, List, Optional
 
 import pytest
 
 from gittensor.classes import FileChange, PullRequest
-from gittensor.constants import MIN_TOKEN_SCORE_FOR_BASE_SCORE
 from gittensor.utils.github_api_tools import FileContentPair
 from gittensor.validator.oss_contributions.scoring import calculate_base_score
 from gittensor.validator.utils.load_weights import (
@@ -19,8 +18,6 @@ from gittensor.validator.utils.load_weights import (
     load_token_config,
 )
 from tests.validator.conftest import PRBuilder
-
-_THRESHOLD = MIN_TOKEN_SCORE_FOR_BASE_SCORE
 
 _SOURCE_CODE = """\
 def validate_input(value, min_val, max_val):
@@ -245,13 +242,13 @@ def test_adding_tests_does_not_reduce_score(
     assert score_without > 0
 
 
-def test_tests_do_not_affect_contribution_bonus(
+def test_tests_contribute_modestly(
     pr_factory: PRBuilder,
     token_config: TokenConfig,
     programming_languages: Dict[str, LanguageConfig],
 ):
-    """Adding small or large test files should produce the same modest
-    increase - the difference is only from test density, not from bonus"""
+    """Test files contribute via the contribution bonus (not density),
+    so even large test suites only produce a modest score increase"""
     source_change = _change('main.py', _SOURCE_CODE)
     source_content = _contents('main.py', _SOURCE_CODE)
     small_test_change = _change('tests/test_a.py', _TEST_CODE)
@@ -290,40 +287,13 @@ def test_tests_do_not_affect_contribution_bonus(
     assert (score_big - score_without) / score_without < 0.1
 
 
-def test_same_code_in_test_path_scores_much_lower(
-    pr_factory: PRBuilder,
-    token_config: TokenConfig,
-    programming_languages: Dict[str, LanguageConfig],
-):
-    """Identical code placed in a test directory scores much lower than
-    in a source path, because test weight is 0.05x and no contribution bonus"""
-    source_change = _change('main.py', _SOURCE_CODE)
-    source_content = _contents('main.py', _SOURCE_CODE)
-    source_as_test_change = _change('tests/test_main.py', _SOURCE_CODE)
-    source_as_test_content = _contents('tests/test_main.py', _SOURCE_CODE)
-
-    pr_src = pr_factory.merged()
-    score_as_source = _score(pr_src, [source_change], [source_content], token_config, programming_languages)
-
-    pr_test = pr_factory.merged()
-    score_as_test = _score(
-        pr_test,
-        [source_as_test_change],
-        [source_as_test_content],
-        token_config,
-        programming_languages,
-    )
-
-    assert score_as_source > (score_as_test * 10)
-
-
 def test_tests_do_not_affect_threshold(
     pr_factory: PRBuilder,
     token_config: TokenConfig,
     programming_languages: Dict[str, LanguageConfig],
 ):
-    """A PR below the token score threshold stays below even if large
-    test files are added - the threshold only checks SOURCE category"""
+    """A PR below the SOURCE token threshold stays near-zero even with
+    large test files - tests only contribute a tiny bonus, not density"""
     tiny_change = _change('tiny.py', 'x = 1\n')
     tiny_content = _contents('tiny.py', 'x = 1\n')
     big_test = _TEST_CODE + _LARGE_TEST_CODE
@@ -342,43 +312,19 @@ def test_tests_do_not_affect_threshold(
         programming_languages,
     )
 
-    assert score_tiny == score_tiny_with_tests
+    # Both below SOURCE threshold - only tiny contribution bonus
+    assert score_tiny < 1.0
+    assert score_tiny_with_tests < 1.0
 
 
-def test_adding_non_code_files_does_not_reduce_score(
+def test_non_code_contributes_modestly(
     pr_factory: PRBuilder,
     token_config: TokenConfig,
     programming_languages: Dict[str, LanguageConfig],
 ):
-    """Adding non-code files (markdown, yaml) must never lower the base score"""
-    source_change = _change('main.py', _SOURCE_CODE)
-    source_content = _contents('main.py', _SOURCE_CODE)
-    readme = '# Project\n\nSome documentation about the project\n' * 10
-    readme_change = _change('README.md', readme)
-    readme_content = _contents('README.md', readme)
-
-    pr1 = pr_factory.merged()
-    score_without = _score(pr1, [source_change], [source_content], token_config, programming_languages)
-
-    pr2 = pr_factory.merged()
-    score_with = _score(
-        pr2,
-        [source_change, readme_change],
-        [source_content, readme_content],
-        token_config,
-        programming_languages,
-    )
-
-    assert score_with > score_without
-
-
-def test_non_code_does_not_affect_contribution_bonus(
-    pr_factory: PRBuilder,
-    token_config: TokenConfig,
-    programming_languages: Dict[str, LanguageConfig],
-):
-    """Adding small or large non-code files should produce the same increase
-    because line-count density = lang_weight regardless of size"""
+    """Non-code files contribute via the contribution bonus, not density.
+    Larger non-code files score higher (more lines scored) but the overall
+    increase is modest relative to the source baseline"""
     source_change = _change('main.py', _SOURCE_CODE)
     source_content = _contents('main.py', _SOURCE_CODE)
     small_yaml = 'key: value\n' * 5
@@ -411,7 +357,9 @@ def test_non_code_does_not_affect_contribution_bonus(
 
     assert score_small > score_without
     assert score_big > score_without
-    assert score_big == score_small
+    assert score_big >= score_small
+    # Increases are modest relative to baseline
+    assert (score_big - score_without) / score_without < 0.10
 
 
 def test_source_code_scores_much_higher_than_non_code(
@@ -442,18 +390,21 @@ def test_source_code_scores_much_higher_than_non_code(
     assert score_as_source > (score_as_non_code * 10)
 
 
-def test_non_code_does_not_affect_threshold(
+def test_non_code_does_not_bypass_threshold(
     pr_factory: PRBuilder,
     token_config: TokenConfig,
     programming_languages: Dict[str, LanguageConfig],
 ):
-    """A PR below the token score threshold stays below even if large
-    non-code files are added"""
+    """A PR below the SOURCE token threshold stays far below a real PR
+    even with large non-code files - non-code only contributes via bonus"""
     tiny_change = _change('tiny.py', 'x = 1\n')
     tiny_content = _contents('tiny.py', 'x = 1\n')
     big_yaml = 'key: value\nlist:\n  - item1\n  - item2\n' * 50
     big_yaml_change = _change('config.yaml', big_yaml)
     big_yaml_content = _contents('config.yaml', big_yaml)
+
+    source_change = _change('main.py', _SOURCE_CODE)
+    source_content = _contents('main.py', _SOURCE_CODE)
 
     pr_tiny = pr_factory.merged(token_score=0.0)
     score_tiny = _score(pr_tiny, [tiny_change], [tiny_content], token_config, programming_languages)
@@ -467,7 +418,12 @@ def test_non_code_does_not_affect_threshold(
         programming_languages,
     )
 
-    assert score_tiny == score_tiny_with_yaml
+    pr_real = pr_factory.merged()
+    score_real = _score(pr_real, [source_change], [source_content], token_config, programming_languages)
+
+    # Both below SOURCE threshold - much less than a real source PR
+    assert score_tiny_with_yaml < score_real * 0.10
+    assert score_tiny < score_tiny_with_yaml
 
 
 def test_deleted_file_does_not_change_score(
@@ -523,33 +479,6 @@ def test_unsupported_file_does_not_change_score(
     assert score_without == score_with
 
 
-def test_adding_test_category_increases_score_beyond_single_cap(
-    pr_factory: PRBuilder,
-    token_config: TokenConfig,
-    programming_languages: Dict[str, LanguageConfig],
-):
-    """Each category has its own density cap, so adding a test category
-    can push the total score above what a single source category achieves"""
-    source_change = _change('main.py', _SOURCE_CODE)
-    source_content = _contents('main.py', _SOURCE_CODE)
-    test_change = _change('tests/test_main.py', _TEST_CODE)
-    test_content = _contents('tests/test_main.py', _TEST_CODE)
-
-    pr_one = pr_factory.merged()
-    score_source = _score(pr_one, [source_change], [source_content], token_config, programming_languages)
-
-    pr_two = pr_factory.merged()
-    score_both = _score(
-        pr_two,
-        [source_change, test_change],
-        [source_content, test_content],
-        token_config,
-        programming_languages,
-    )
-
-    assert score_both > score_source
-
-
 def test_verbose_formatting_decreases_score(
     pr_factory: PRBuilder,
     token_config: TokenConfig,
@@ -600,16 +529,13 @@ def test_threshold_uses_source_category_only(
     programming_languages: Dict[str, LanguageConfig],
 ):
     """Threshold check uses only SOURCE category score - substantial code
-    placed entirely in a test path gets base_score=0 because SOURCE is empty"""
+    placed entirely in a test path gets near-zero score (only tiny bonus)"""
     # Substantial code in a test directory - categorized as TEST, not SOURCE
     test_change = _change('tests/test_main.py', _SOURCE_CODE)
     test_content = _contents('tests/test_main.py', _SOURCE_CODE)
 
     pr_test_only = pr_factory.merged()
     score_test_only = _score(pr_test_only, [test_change], [test_content], token_config, programming_languages)
-
-    # SOURCE category is empty so threshold fails - base score must be 0
-    assert score_test_only == 0
 
     # Same code in a source path scores well above 0
     source_change = _change('main.py', _SOURCE_CODE)
@@ -618,7 +544,10 @@ def test_threshold_uses_source_category_only(
     pr_source = pr_factory.merged()
     score_source = _score(pr_source, [source_change], [source_content], token_config, programming_languages)
 
+    # SOURCE empty → no density score, only tiny bonus from test scores
+    assert score_test_only < 1.0
     assert score_source > 0
+    assert score_source > score_test_only * 100
 
 
 def test_below_threshold_scores_less(

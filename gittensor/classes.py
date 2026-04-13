@@ -194,6 +194,7 @@ class PullRequest:
     issues: Optional[List[Issue]] = None
     description: Optional[str] = None
     last_edited_at: Optional[datetime] = None
+    closed_at: Optional[datetime] = None  # Set for CLOSED and MERGED PRs (GitHub sets closedAt on merge too)
     head_ref_oid: Optional[str] = None
     base_ref_oid: Optional[str] = None
 
@@ -266,6 +267,7 @@ class PullRequest:
         raw_edited_at = pr_data.get('lastEditedAt')
         last_edited_at = parse_github_timestamp_to_cst(raw_edited_at) if isinstance(raw_edited_at, str) else None
         merged_at = parse_github_timestamp_to_cst(pr_data['mergedAt']) if is_merged else None
+        closed_at = parse_github_timestamp_to_cst(pr_data['closedAt']) if pr_data.get('closedAt') else None
 
         return cls(
             number=pr_data['number'],
@@ -277,6 +279,7 @@ class PullRequest:
             author_login=pr_data['author']['login'],
             merged_at=merged_at,
             created_at=parse_github_timestamp_to_cst(pr_data['createdAt']),
+            closed_at=closed_at,
             pr_state=pr_state,
             additions=pr_data['additions'],
             deletions=pr_data['deletions'],

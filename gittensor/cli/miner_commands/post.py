@@ -14,7 +14,7 @@ import requests
 from rich.console import Console
 from rich.table import Table
 
-from gittensor.constants import BASE_GITHUB_API_URL
+from gittensor.constants import BASE_GITHUB_API_URL, NETWORK_MAP
 
 console = Console()
 
@@ -234,13 +234,6 @@ def _load_config_value(key: str):
         return config.get(key)
     except (json.JSONDecodeError, OSError):
         return None
-
-
-NETWORK_MAP = {
-    'local': 'ws://127.0.0.1:9944',
-    'test': 'wss://test.finney.opentensor.ai:443/',
-    'finney': 'wss://entrypoint-finney.opentensor.ai:443/',
-}
 
 
 def _resolve_endpoint(network: str | None, rpc_url: str | None) -> str:

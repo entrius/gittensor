@@ -23,7 +23,7 @@ from rich.console import Console
 from rich.panel import Panel
 
 from gittensor.cli.issue_commands.tables import build_pr_table
-from gittensor.constants import CONTRACT_ADDRESS
+from gittensor.constants import CONTRACT_ADDRESS, NETWORK_MAP
 
 # ALPHA token conversion
 ALPHA_DECIMALS = 9
@@ -539,12 +539,6 @@ def get_contract_address(cli_value: str = '') -> str:
         return cli_value
     return os.environ.get('CONTRACT_ADDRESS') or CONTRACT_ADDRESS
 
-
-NETWORK_MAP = {
-    'finney': 'wss://entrypoint-finney.opentensor.ai:443',
-    'test': 'wss://test.finney.opentensor.ai:443',
-    'local': 'ws://127.0.0.1:9944',
-}
 
 # Reverse lookup: URL -> network name
 _URL_TO_NETWORK = {url: name for name, url in NETWORK_MAP.items()}

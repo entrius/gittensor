@@ -209,6 +209,14 @@ def _collect_issues_from_prs(
 
                 data = discoverer_data[discoverer_id]
 
+                # Anti-gaming: transferred issues count as closed, never as solved
+                if issue.is_transferred:
+                    bt.logging.info(
+                        f'Issue #{issue.number} transferred — 0 score, counts as closed'
+                    )
+                    data.closed_count += 1
+                    continue
+
                 # Classify: is this issue solved (merged PR closed it)?
                 is_solved = issue.state == 'CLOSED' and pr.merged_at is not None
 
@@ -277,6 +285,12 @@ def _merge_scan_issues(
 
         data = discoverer_data[github_id]
         for issue in issues:
+            if issue.is_transferred:
+                bt.logging.info(
+                    f'Scan issue #{issue.number} transferred — counts as closed'
+                )
+                data.closed_count += 1
+                continue
             if issue.state == 'CLOSED' and issue.closed_at:
                 # Case 2: solved by non-miner PR → positive credibility
                 data.solved_count += 1

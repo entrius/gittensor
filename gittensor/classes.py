@@ -289,6 +289,7 @@ class PullRequest:
                     author_github_id=str(author_db_id) if author_db_id else None,
                     updated_at=parse_github_timestamp_to_cst(issue['updatedAt']) if issue.get('updatedAt') else None,
                     body_or_title_edited_at=body_or_title_edited_at,
+                    is_transferred=(issue.get('stateReason') == 'TRANSFERRED'),
                 )
             )
 

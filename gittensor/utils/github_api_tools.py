@@ -86,6 +86,7 @@ QUERY = """
                   number
                   title
                   state
+                  stateReason
                   createdAt
                   closedAt
                   updatedAt

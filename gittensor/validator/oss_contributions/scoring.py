@@ -1,19 +1,24 @@
 # The MIT License (MIT)
 # Copyright © 2025 Entrius
 
-import math
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Dict, Tuple
 
 import bittensor as bt
 
-from gittensor.classes import Issue, MinerEvaluation, PrScoringResult, PRState, PullRequest
+from gittensor.classes import (
+    Issue,
+    MinerEvaluation,
+    PrScoringResult,
+    PRState,
+    PullRequest,
+    ScoringCategory,
+)
 from gittensor.constants import (
     CONTRIBUTION_SCORE_FOR_FULL_BONUS,
     EXCESSIVE_PR_PENALTY_BASE_THRESHOLD,
     MAINTAINER_ASSOCIATIONS,
     MAINTAINER_ISSUE_MULTIPLIER,
-    MAX_CODE_DENSITY_MULTIPLIER,
     MAX_CONTRIBUTION_BONUS,
     MAX_ISSUE_CLOSE_WINDOW_DAYS,
     MAX_OPEN_PR_THRESHOLD,
@@ -27,12 +32,7 @@ from gittensor.constants import (
     PIONEER_DIVIDEND_RATE_REST,
     REVIEW_PENALTY_RATE,
     SECONDS_PER_DAY,
-    SECONDS_PER_HOUR,
     STANDARD_ISSUE_MULTIPLIER,
-    TIME_DECAY_GRACE_PERIOD_HOURS,
-    TIME_DECAY_MIN_MULTIPLIER,
-    TIME_DECAY_SIGMOID_MIDPOINT,
-    TIME_DECAY_SIGMOID_STEEPNESS_SCALAR,
 )
 from gittensor.utils.github_api_tools import (
     FileContentPair,
@@ -42,6 +42,7 @@ from gittensor.utils.github_api_tools import (
     get_pull_request_maintainer_changes_requested_count,
 )
 from gittensor.validator.oss_contributions.credibility import check_eligibility
+from gittensor.validator.utils.datetime_utils import calculate_time_decay
 from gittensor.validator.utils.load_weights import LanguageConfig, RepositoryConfig, TokenConfig
 from gittensor.validator.utils.tree_sitter_scoring import calculate_token_score_from_file_changes
 
@@ -152,7 +153,7 @@ def calculate_base_score(
     token_config: TokenConfig,
     file_contents: Dict[str, FileContentPair],
 ) -> float:
-    """Calculate base score using code density scaling + contribution bonus."""
+    """Calculate base score using SOURCE density scaling + contribution bonus"""
     scoring_result: PrScoringResult = calculate_token_score_from_file_changes(
         pr.file_changes or [],
         file_contents,
@@ -160,44 +161,45 @@ def calculate_base_score(
         programming_languages,
     )
 
-    pr.total_nodes_scored = scoring_result.total_nodes_scored
     if scoring_result.score_breakdown:
         pr.token_score = scoring_result.score_breakdown.total_score
         pr.structural_count = scoring_result.score_breakdown.structural_count
         pr.structural_score = scoring_result.score_breakdown.structural_score
         pr.leaf_count = scoring_result.score_breakdown.leaf_count
         pr.leaf_score = scoring_result.score_breakdown.leaf_score
-
-    # Calculate total lines changed across all files
-    total_lines = sum(f.total_lines for f in scoring_result.file_results)
-
-    # Check minimum token score threshold for base score. PRs below threshold get 0 base score
-    if pr.token_score < MIN_TOKEN_SCORE_FOR_BASE_SCORE:
-        code_density = 0.0
-        initial_base_score = 0.0
-    elif total_lines > 0:
-        code_density = min(pr.token_score / total_lines, MAX_CODE_DENSITY_MULTIPLIER)
-        initial_base_score = MERGED_PR_BASE_SCORE * code_density
+        # Only count AST nodes (tree-diff), not line-count "nodes"
+        pr.total_nodes_scored = (
+            scoring_result.score_breakdown.structural_count + scoring_result.score_breakdown.leaf_count
+        )
     else:
-        code_density = 0.0
-        initial_base_score = 0.0
+        pr.total_nodes_scored = 0
 
-    # Calculate contribution bonus, capped
+    # Threshold uses SOURCE category score only
+    source = scoring_result.by_category.get(ScoringCategory.SOURCE)
+    source_token_score = source.score_breakdown.total_score if source and source.score_breakdown else 0.0
+
+    # Density-scaled base score from SOURCE category only
+    source_density = source.density if source else 0.0
+    if source_token_score < MIN_TOKEN_SCORE_FOR_BASE_SCORE:
+        initial_base_score = 0.0
+    else:
+        initial_base_score = MERGED_PR_BASE_SCORE * source_density
+
+    # Contribution bonus from all categories, capped at MAX_CONTRIBUTION_BONUS
     bonus_percent = min(1.0, scoring_result.total_score / CONTRIBUTION_SCORE_FOR_FULL_BONUS)
     contribution_bonus = round(bonus_percent * MAX_CONTRIBUTION_BONUS, 2)
 
-    # Final base score = density-scaled base + contribution bonus
     base_score = round(initial_base_score + contribution_bonus, 2)
 
-    # Log with note if below token threshold
+    # Log with source density and bonus percentage
     threshold_note = (
         f' [below {MIN_TOKEN_SCORE_FOR_BASE_SCORE} token threshold]'
-        if pr.token_score < MIN_TOKEN_SCORE_FOR_BASE_SCORE
+        if source_token_score < MIN_TOKEN_SCORE_FOR_BASE_SCORE
         else ''
     )
     bt.logging.info(
-        f'Base score: {initial_base_score:.2f} (density {code_density:.2f}){threshold_note} + {contribution_bonus} bonus '
-        f'({bonus_percent * 100:.0f}% of max {MAX_CONTRIBUTION_BONUS}) = {base_score:.2f}'
+        f'Base score: {initial_base_score:.2f} (density {source_density:.2f}){threshold_note}'
+        f' + {contribution_bonus} bonus ({bonus_percent * 100:.0f}% of max {MAX_CONTRIBUTION_BONUS}) = {base_score:.2f}'
     )
 
     return base_score
@@ -260,18 +262,8 @@ def calculate_pr_spam_penalty_multiplier(total_open_prs: int, total_token_score:
 
 def calculate_time_decay_multiplier(pr: PullRequest) -> float:
     """Calculate time decay multiplier for a single PR based on merge date."""
-
     assert pr.merged_at is not None, f'PR #{pr.number} has no merged_at'
-    now = datetime.now(timezone.utc)
-    hours_since_merge = (now - pr.merged_at).total_seconds() / SECONDS_PER_HOUR
-
-    # No decay for PRs merged within the grace period
-    if hours_since_merge < TIME_DECAY_GRACE_PERIOD_HOURS:
-        return 1.0
-
-    days_since_merge = hours_since_merge / 24
-    sigmoid = 1 / (1 + math.exp(TIME_DECAY_SIGMOID_STEEPNESS_SCALAR * (days_since_merge - TIME_DECAY_SIGMOID_MIDPOINT)))
-    return max(sigmoid, TIME_DECAY_MIN_MULTIPLIER)
+    return calculate_time_decay(pr.merged_at)
 
 
 def calculate_pioneer_dividends(

@@ -881,7 +881,19 @@ def try_add_open_or_closed_pr(
             bt.logging.warning(f'PR #{pr_raw["number"]} is CLOSED but missing closedAt timestamp.')
             return
 
+        created_at = pr_raw.get('createdAt')
+        if not created_at:
+            bt.logging.warning(f'PR #{pr_raw["number"]} is CLOSED but missing createdAt timestamp.')
+            return
+
         closed_dt = datetime.fromisoformat(closed_at.rstrip('Z')).replace(tzinfo=timezone.utc)
+        created_dt = datetime.fromisoformat(created_at.rstrip('Z')).replace(tzinfo=timezone.utc)
+
+        # Ignore stale PRs that were created before the scoring lookback window.
+        # This allows users to close old PRs without receiving a fresh credibility penalty.
+        if created_dt < lookback_date_filter:
+            return
+
         if closed_dt >= lookback_date_filter:
             miner_eval.add_closed_pull_request(pr_raw)
 

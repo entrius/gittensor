@@ -14,6 +14,7 @@ import requests
 from rich.console import Console
 from rich.table import Table
 
+from gittensor.cli.issue_commands.helpers import resolve_network
 from gittensor.constants import BASE_GITHUB_API_URL
 
 console = Console()
@@ -243,8 +244,6 @@ def _load_config_value(key: str):
 
 def _resolve_endpoint(network: str | None, rpc_url: str | None) -> str:
     """Resolve the subtensor endpoint from CLI args or config."""
-    from gittensor.cli.issue_commands.helpers import resolve_network
-
     endpoint, _ = resolve_network(network=network, rpc_url=rpc_url)
     return endpoint
 

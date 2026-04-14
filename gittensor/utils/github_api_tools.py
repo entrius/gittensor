@@ -36,7 +36,14 @@ QUERY = """
     query($userId: ID!, $limit: Int!, $cursor: String) {
       node(id: $userId) {
         ... on User {
-          issues(states: [OPEN]) { totalCount }
+          issues(states: [OPEN], first: 100) {
+            nodes {
+              repository {
+                nameWithOwner
+              }
+            }
+            totalCount
+          }
           pullRequests(first: $limit, states: [MERGED, OPEN, CLOSED], orderBy: {field: CREATED_AT, direction: DESC}, after: $cursor) {
             pageInfo {
               hasNextPage
@@ -1027,9 +1034,16 @@ def load_miners_prs(
                 bt.logging.warning('User not found or no pull requests')
                 break
 
-            # Extract open issue count from first page (User-level field, not paginated)
+            # Extract and scope open issue count from first page
             if cursor is None:
-                miner_eval.total_open_issues = user_data.get('issues', {}).get('totalCount', 0)
+                total_open_issues_count = 0
+                issue_nodes = user_data.get('issues', {}).get('nodes', [])
+                for issue_node in issue_nodes:
+                    repo_name = ((issue_node.get('repository') or {}).get('nameWithOwner') or '').lower()
+                    if repo_name in master_repositories:
+                        total_open_issues_count += 1
+                
+                miner_eval.total_open_issues = total_open_issues_count
 
             pr_data: Dict = user_data.get('pullRequests', {})
             prs: List = pr_data.get('nodes', [])

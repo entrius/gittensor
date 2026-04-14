@@ -45,6 +45,7 @@
     "additional_acceptable_branches": [
       "contribution/*"
     ],
+    "inactive_at": "2026-04-06T00:00:00Z",
     "weight": 0.1259
   },
   "autoppia/autoppia_web_agents_subnet": {
@@ -52,6 +53,7 @@
       "dev",
       "dev-gittensor"
     ],
+    "inactive_at": "2026-04-06T00:00:00Z",
     "weight": 0.1321
   },
   "autoppia/autoppia_webs_demo": {
@@ -59,6 +61,7 @@
       "feature/*",
       "fix/*"
     ],
+    "inactive_at": "2026-04-06T00:00:00Z",
     "weight": 0.1239
   },
   "aws/aws-cli": {
@@ -197,13 +200,13 @@
     "weight": 1.0
   },
   "entrius/allways-ui": {
-    "weight": 1.0
+    "weight": 0.88
   },
   "entrius/gittensor": {
     "weight": 1.0
   },
   "entrius/gittensor-ui": {
-    "weight": 1.0
+    "weight": 0.88
   },
   "espressif/arduino-esp32": {
     "weight": 0.1444
@@ -320,12 +323,16 @@
     "weight": 0.0615
   },
   "langgenius/dify": {
-    "weight": 0.0336
+    "weight": 0.0336,
+    "inactive_at": "2026-04-14T00:00:00Z"
   },
   "laravel/framework": {
     "weight": 0.0346
   },
   "latent-to/async-substrate-interface": {
+    "additional_acceptable_branches": [
+      "staging"
+    ],
     "weight": 0.2764
   },
   "latent-to/bittensor": {

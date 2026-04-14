@@ -209,10 +209,13 @@ def _collect_issues_from_prs(
 
                 data = discoverer_data[discoverer_id]
 
-                # Anti-gaming: transferred issues count as closed, never as solved
-                if issue.is_transferred:
+                # Anti-gaming: only explicitly COMPLETED closures count as solved.
+                # NOT_PLANNED, TRANSFERRED, and None all route to closed_count. None is
+                # effectively unreachable inside the 35-day lookback (GitHub auto-populates
+                # stateReason on close), but treating it as not-solved is the safer default.
+                if issue.state_reason != 'COMPLETED':
                     bt.logging.info(
-                        f'Issue #{issue.number} transferred — 0 score, counts as closed'
+                        f'Issue #{issue.number} state_reason={issue.state_reason} — 0 score, counts as closed'
                     )
                     data.closed_count += 1
                     continue
@@ -285,9 +288,11 @@ def _merge_scan_issues(
 
         data = discoverer_data[github_id]
         for issue in issues:
-            if issue.is_transferred:
+            # Anti-gaming: only explicitly COMPLETED closures count as solved.
+            # NOT_PLANNED, TRANSFERRED, and None all route to closed_count.
+            if issue.state_reason != 'COMPLETED':
                 bt.logging.info(
-                    f'Scan issue #{issue.number} transferred — counts as closed'
+                    f'Scan issue #{issue.number} state_reason={issue.state_reason} — counts as closed'
                 )
                 data.closed_count += 1
                 continue

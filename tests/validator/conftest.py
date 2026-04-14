@@ -137,13 +137,13 @@ class IssueBuilder:
         author_github_id: Optional[str] = '1001',
         author_login: str = 'alice',
         state: str = 'CLOSED',
-        is_transferred: bool = False,
+        state_reason: Optional[str] = 'COMPLETED',
         pr_number: int = 1,
         created_at: Optional[datetime] = None,
         closed_at: Optional[datetime] = None,
         updated_at: Optional[datetime] = None,
     ) -> Issue:
-        """Create a mock Issue with the given parameters."""
+        """Create a mock Issue with the given parameters. Defaults to COMPLETED (solved)."""
         if number is None:
             self._counter += 1
             number = self._counter
@@ -162,13 +162,25 @@ class IssueBuilder:
             author_login=author_login,
             author_github_id=author_github_id,
             state=state,
-            is_transferred=is_transferred,
+            state_reason=state_reason,
             updated_at=updated_at,
         )
 
+    def completed(self, **kwargs) -> Issue:
+        """Create a COMPLETED issue (solved)."""
+        return self.create(state_reason='COMPLETED', **kwargs)
+
     def transferred(self, **kwargs) -> Issue:
-        """Create a transferred issue."""
-        return self.create(is_transferred=True, **kwargs)
+        """Create a TRANSFERRED issue (counts as closed)."""
+        return self.create(state_reason='TRANSFERRED', **kwargs)
+
+    def not_planned(self, **kwargs) -> Issue:
+        """Create a NOT_PLANNED issue (counts as closed)."""
+        return self.create(state_reason='NOT_PLANNED', **kwargs)
+
+    def no_reason(self, **kwargs) -> Issue:
+        """Create an issue with no state_reason (legacy data — counts as closed)."""
+        return self.create(state_reason=None, **kwargs)
 
 
 @pytest.fixture

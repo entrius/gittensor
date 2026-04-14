@@ -45,21 +45,24 @@
     "additional_acceptable_branches": [
       "contribution/*"
     ],
-    "weight": 0.1259
+    "weight": 0.1259,
+    "inactive_at": "2026-04-14T17:46:26Z"
   },
   "autoppia/autoppia_web_agents_subnet": {
     "additional_acceptable_branches": [
       "dev",
       "dev-gittensor"
     ],
-    "weight": 0.1321
+    "weight": 0.1321,
+    "inactive_at": "2026-04-14T17:46:26Z"
   },
   "autoppia/autoppia_webs_demo": {
     "additional_acceptable_branches": [
       "feature/*",
       "fix/*"
     ],
-    "weight": 0.1239
+    "weight": 0.1239,
+    "inactive_at": "2026-04-14T17:46:26Z"
   },
   "aws/aws-cli": {
     "weight": 0.0978

@@ -241,27 +241,12 @@ def _load_config_value(key: str):
         return None
 
 
-NETWORK_MAP = {
-    'local': 'ws://127.0.0.1:9944',
-    'test': 'wss://test.finney.opentensor.ai:443/',
-    'finney': 'wss://entrypoint-finney.opentensor.ai:443/',
-}
-
-
 def _resolve_endpoint(network: str | None, rpc_url: str | None) -> str:
     """Resolve the subtensor endpoint from CLI args or config."""
-    if rpc_url:
-        return rpc_url
-    if network:
-        return NETWORK_MAP.get(network, network)
-    # Try config file
-    config_network = _load_config_value('network')
-    config_endpoint = _load_config_value('ws_endpoint')
-    if config_endpoint:
-        return config_endpoint
-    if config_network:
-        return NETWORK_MAP.get(config_network) or config_network
-    return NETWORK_MAP['finney']
+    from gittensor.cli.issue_commands.helpers import resolve_network
+
+    endpoint, _ = resolve_network(network=network, rpc_url=rpc_url)
+    return endpoint
 
 
 def _error(msg: str, json_mode: bool):

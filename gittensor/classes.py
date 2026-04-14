@@ -8,7 +8,7 @@ from typing import DefaultDict, Dict, List, Optional, Set
 
 import bittensor as bt
 
-from gittensor.constants import MIN_TOKEN_SCORE_FOR_BASE_SCORE
+from gittensor.constants import MAX_CODE_DENSITY_MULTIPLIER, MIN_TOKEN_SCORE_FOR_BASE_SCORE
 from gittensor.utils.utils import parse_repo_name
 
 GITHUB_DOMAIN = 'https://github.com/'
@@ -491,6 +491,14 @@ class ScoreBreakdown:
         )
 
 
+class ScoringCategory(Enum):
+    """Category of a scored file"""
+
+    SOURCE = 'source'  # Non-test code files scored via tree-diff
+    TEST = 'test'  # Test files (any scoring method)
+    NON_CODE = 'non_code'  # Everything else (line-count, skipped, binary, etc.)
+
+
 @dataclass
 class FileScoreResult:
     """Result of scoring a single file."""
@@ -503,18 +511,36 @@ class FileScoreResult:
     scoring_method: str  # 'tree-diff', 'line-count', 'skipped-*'
     breakdown: Optional[ScoreBreakdown] = None  # Only populated for tree-diff scoring
 
+    @property
+    def category(self) -> ScoringCategory:
+        if self.is_test_file:
+            return ScoringCategory.TEST
+        if self.scoring_method == 'tree-diff':
+            return ScoringCategory.SOURCE
+        return ScoringCategory.NON_CODE
+
 
 @dataclass
 class PrScoringResult:
-    """Result of scoring a pull request.
+    """Result of scoring a pull request
 
-    Contains aggregate metrics for the PR, including total score and per-file details.
+    Contains aggregate metrics for the PR, including total score, per-file details,
+    and optional per-category breakdowns.
     """
 
     total_score: float
     total_nodes_scored: int  # Total AST nodes scored across all files
+    total_lines: int  # Total lines changed across all files
     file_results: List[FileScoreResult]
     score_breakdown: Optional[ScoreBreakdown] = None  # Aggregated breakdown across all files
+    by_category: Dict[ScoringCategory, 'PrScoringResult'] = field(default_factory=dict)
+
+    @property
+    def density(self) -> float:
+        """Code density (total_score / total_lines), capped at MAX_CODE_DENSITY_MULTIPLIER"""
+        if self.total_lines <= 0:
+            return 0.0
+        return min(self.total_score / self.total_lines, MAX_CODE_DENSITY_MULTIPLIER)
 
 
 @dataclass

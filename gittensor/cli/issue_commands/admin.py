@@ -18,6 +18,7 @@ from rich.panel import Panel
 
 from .help import StyledGroup
 from .helpers import (
+    _make_contract_client,
     console,
     format_alpha,
     get_contract_address,
@@ -73,19 +74,8 @@ def admin_cancel(issue_id: int, network: str, rpc_url: str, contract: str, walle
     print_network_header(network_name, contract_addr)
 
     try:
-        import bittensor as bt
-
-        from gittensor.validator.issue_competitions.contract_client import (
-            IssueCompetitionContractClient,
-        )
-
         with console.status('[bold cyan]Connecting and reading issue...', spinner='dots'):
-            wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
-            subtensor = bt.Subtensor(network=ws_endpoint)
-            client = IssueCompetitionContractClient(
-                contract_address=contract_addr,
-                subtensor=subtensor,
-            )
+            wallet, client = _make_contract_client(contract_addr, ws_endpoint, wallet_name, wallet_hotkey)
             issue = client.get_issue(issue_id)
 
         if not issue:
@@ -148,19 +138,8 @@ def admin_payout(issue_id: int, network: str, rpc_url: str, contract: str, walle
     print_network_header(network_name, contract_addr)
 
     try:
-        import bittensor as bt
-
-        from gittensor.validator.issue_competitions.contract_client import (
-            IssueCompetitionContractClient,
-        )
-
         with console.status('[bold cyan]Connecting and reading issue...', spinner='dots'):
-            wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
-            subtensor = bt.Subtensor(network=ws_endpoint)
-            client = IssueCompetitionContractClient(
-                contract_address=contract_addr,
-                subtensor=subtensor,
-            )
+            wallet, client = _make_contract_client(contract_addr, ws_endpoint, wallet_name, wallet_hotkey)
             issue = client.get_issue(issue_id)
 
         if not issue:
@@ -227,19 +206,8 @@ def admin_set_owner(new_owner: str, network: str, rpc_url: str, contract: str, w
     )
 
     try:
-        import bittensor as bt
-
-        from gittensor.validator.issue_competitions.contract_client import (
-            IssueCompetitionContractClient,
-        )
-
         with console.status('[bold cyan]Transferring ownership...', spinner='dots'):
-            wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
-            subtensor = bt.Subtensor(network=ws_endpoint)
-            client = IssueCompetitionContractClient(
-                contract_address=contract_addr,
-                subtensor=subtensor,
-            )
+            wallet, client = _make_contract_client(contract_addr, ws_endpoint, wallet_name, wallet_hotkey)
             result = client.set_owner(new_owner, wallet)
 
         if result:
@@ -294,19 +262,8 @@ def admin_set_treasury(
     )
 
     try:
-        import bittensor as bt
-
-        from gittensor.validator.issue_competitions.contract_client import (
-            IssueCompetitionContractClient,
-        )
-
         with console.status('[bold cyan]Updating treasury hotkey...', spinner='dots'):
-            wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
-            subtensor = bt.Subtensor(network=ws_endpoint)
-            client = IssueCompetitionContractClient(
-                contract_address=contract_addr,
-                subtensor=subtensor,
-            )
+            wallet, client = _make_contract_client(contract_addr, ws_endpoint, wallet_name, wallet_hotkey)
             result = client.set_treasury_hotkey(new_treasury, wallet)
 
         if result:
@@ -362,19 +319,8 @@ def admin_add_validator(hotkey: str, network: str, rpc_url: str, contract: str, 
     )
 
     try:
-        import bittensor as bt
-
-        from gittensor.validator.issue_competitions.contract_client import (
-            IssueCompetitionContractClient,
-        )
-
         with console.status('[bold cyan]Adding validator...', spinner='dots'):
-            wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
-            subtensor = bt.Subtensor(network=ws_endpoint)
-            client = IssueCompetitionContractClient(
-                contract_address=contract_addr,
-                subtensor=subtensor,
-            )
+            wallet, client = _make_contract_client(contract_addr, ws_endpoint, wallet_name, wallet_hotkey)
             result = client.add_validator(hotkey, wallet)
 
         if result:
@@ -431,19 +377,8 @@ def admin_remove_validator(
     )
 
     try:
-        import bittensor as bt
-
-        from gittensor.validator.issue_competitions.contract_client import (
-            IssueCompetitionContractClient,
-        )
-
         with console.status('[bold cyan]Removing validator...', spinner='dots'):
-            wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
-            subtensor = bt.Subtensor(network=ws_endpoint)
-            client = IssueCompetitionContractClient(
-                contract_address=contract_addr,
-                subtensor=subtensor,
-            )
+            wallet, client = _make_contract_client(contract_addr, ws_endpoint, wallet_name, wallet_hotkey)
             result = client.remove_validator(hotkey, wallet)
 
         if result:

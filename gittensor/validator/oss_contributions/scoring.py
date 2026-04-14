@@ -1,7 +1,6 @@
 # The MIT License (MIT)
 # Copyright © 2025 Entrius
 
-import math
 from datetime import datetime, timezone
 from typing import Dict, Tuple
 
@@ -33,12 +32,7 @@ from gittensor.constants import (
     PIONEER_DIVIDEND_RATE_REST,
     REVIEW_PENALTY_RATE,
     SECONDS_PER_DAY,
-    SECONDS_PER_HOUR,
     STANDARD_ISSUE_MULTIPLIER,
-    TIME_DECAY_GRACE_PERIOD_HOURS,
-    TIME_DECAY_MIN_MULTIPLIER,
-    TIME_DECAY_SIGMOID_MIDPOINT,
-    TIME_DECAY_SIGMOID_STEEPNESS_SCALAR,
 )
 from gittensor.utils.github_api_tools import (
     FileContentPair,
@@ -48,6 +42,7 @@ from gittensor.utils.github_api_tools import (
     get_pull_request_maintainer_changes_requested_count,
 )
 from gittensor.validator.oss_contributions.credibility import check_eligibility
+from gittensor.validator.utils.datetime_utils import calculate_time_decay
 from gittensor.validator.utils.load_weights import LanguageConfig, RepositoryConfig, TokenConfig
 from gittensor.validator.utils.tree_sitter_scoring import calculate_token_score_from_file_changes
 
@@ -267,18 +262,8 @@ def calculate_pr_spam_penalty_multiplier(total_open_prs: int, total_token_score:
 
 def calculate_time_decay_multiplier(pr: PullRequest) -> float:
     """Calculate time decay multiplier for a single PR based on merge date."""
-
     assert pr.merged_at is not None, f'PR #{pr.number} has no merged_at'
-    now = datetime.now(timezone.utc)
-    hours_since_merge = (now - pr.merged_at).total_seconds() / SECONDS_PER_HOUR
-
-    # No decay for PRs merged within the grace period
-    if hours_since_merge < TIME_DECAY_GRACE_PERIOD_HOURS:
-        return 1.0
-
-    days_since_merge = hours_since_merge / 24
-    sigmoid = 1 / (1 + math.exp(TIME_DECAY_SIGMOID_STEEPNESS_SCALAR * (days_since_merge - TIME_DECAY_SIGMOID_MIDPOINT)))
-    return max(sigmoid, TIME_DECAY_MIN_MULTIPLIER)
+    return calculate_time_decay(pr.merged_at)
 
 
 def calculate_pioneer_dividends(

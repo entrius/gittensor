@@ -1,7 +1,6 @@
 # The MIT License (MIT)
 # Copyright © 2025 Entrius
 
-import math
 from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
@@ -19,12 +18,8 @@ from gittensor.constants import (
     MIN_VALID_SOLVED_ISSUES,
     OPEN_ISSUE_SPAM_BASE_THRESHOLD,
     OPEN_ISSUE_SPAM_TOKEN_SCORE_PER_SLOT,
-    SECONDS_PER_HOUR,
-    TIME_DECAY_GRACE_PERIOD_HOURS,
-    TIME_DECAY_MIN_MULTIPLIER,
-    TIME_DECAY_SIGMOID_MIDPOINT,
-    TIME_DECAY_SIGMOID_STEEPNESS_SCALAR,
 )
+from gittensor.validator.utils.datetime_utils import calculate_time_decay
 from gittensor.validator.utils.load_weights import RepositoryConfig
 
 
@@ -80,17 +75,6 @@ def check_issue_eligibility(solved_count: int, closed_count: int) -> Tuple[bool,
     return True, credibility, ''
 
 
-def _calculate_time_decay_from_merge(merged_at: datetime) -> float:
-    """Time decay anchored to a PR's merge date. Same sigmoid as OSS contributions."""
-    now = datetime.now(timezone.utc)
-    hours_since_merge = (now - merged_at).total_seconds() / SECONDS_PER_HOUR
-
-    if hours_since_merge < TIME_DECAY_GRACE_PERIOD_HOURS:
-        return 1.0
-
-    days_since_merge = hours_since_merge / 24
-    sigmoid = 1 / (1 + math.exp(TIME_DECAY_SIGMOID_STEEPNESS_SCALAR * (days_since_merge - TIME_DECAY_SIGMOID_MIDPOINT)))
-    return max(sigmoid, TIME_DECAY_MIN_MULTIPLIER)
 
 
 def score_discovered_issues(
@@ -267,7 +251,7 @@ def _collect_issues_from_prs(
                 repo_config = master_repositories.get(pr.repository_full_name)
                 issue.discovery_base_score = pr.base_score
                 issue.discovery_repo_weight_multiplier = round(repo_config.weight if repo_config else 0.01, 2)
-                issue.discovery_time_decay_multiplier = round(_calculate_time_decay_from_merge(pr.merged_at), 2)
+                issue.discovery_time_decay_multiplier = round(calculate_time_decay(pr.merged_at), 2)
                 issue.discovery_review_quality_multiplier = round(
                     calculate_issue_review_quality_multiplier(pr.changes_requested_count), 2
                 )

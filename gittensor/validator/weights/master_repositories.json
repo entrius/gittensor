@@ -197,13 +197,13 @@
     "weight": 1.0
   },
   "entrius/allways-ui": {
-    "weight": 1.0
+    "weight": 0.88
   },
   "entrius/gittensor": {
     "weight": 1.0
   },
   "entrius/gittensor-ui": {
-    "weight": 1.0
+    "weight": 0.88
   },
   "espressif/arduino-esp32": {
     "weight": 0.1444
@@ -320,12 +320,16 @@
     "weight": 0.0615
   },
   "langgenius/dify": {
-    "weight": 0.0336
+    "weight": 0.0336,
+    "inactive_at": "2026-04-14T00:00:00Z"
   },
   "laravel/framework": {
     "weight": 0.0346
   },
   "latent-to/async-substrate-interface": {
+    "additional_acceptable_branches": [
+      "staging"
+    ],
     "weight": 0.2764
   },
   "latent-to/bittensor": {

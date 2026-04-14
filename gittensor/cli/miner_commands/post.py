@@ -88,22 +88,23 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_m
         console.print(f'[dim]Wallet: {wallet_name}/{wallet_hotkey} | Network: {ws_endpoint} | Netuid: {netuid}[/dim]')
 
     # 3. Set up bittensor objects
+    def _connect():
+        w = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
+        st = bt.Subtensor(network=ws_endpoint)
+        mg = st.metagraph(netuid=netuid)
+        dd = bt.Dendrite(wallet=w)
+        return w, st, mg, dd
+
     if not json_mode:
         with console.status('[bold]Connecting to network...'):
             try:
-                wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
-                subtensor = bt.Subtensor(network=ws_endpoint)
-                metagraph = subtensor.metagraph(netuid=netuid)
-                dendrite = bt.Dendrite(wallet=wallet)
+                wallet, subtensor, metagraph, dendrite = _connect()
             except Exception as e:
                 _error(f'Failed to initialize bittensor: {e}', json_mode)
                 sys.exit(1)
     else:
         try:
-            wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
-            subtensor = bt.Subtensor(network=ws_endpoint)
-            metagraph = subtensor.metagraph(netuid=netuid)
-            dendrite = bt.Dendrite(wallet=wallet)
+            wallet, subtensor, metagraph, dendrite = _connect()
         except Exception as e:
             _error(f'Failed to initialize bittensor: {e}', json_mode)
             sys.exit(1)
@@ -128,25 +129,19 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_m
     # 5. Broadcast
     synapse = PatBroadcastSynapse(github_access_token=pat)
 
+    async def _broadcast():
+        return await dendrite(
+            axons=validator_axons,
+            synapse=synapse,
+            deserialize=False,
+            timeout=30.0,
+        )
+
     if not json_mode:
         with console.status(f'[bold]Broadcasting to {len(validator_axons)} validators...'):
-            responses = asyncio.get_event_loop().run_until_complete(
-                dendrite(
-                    axons=validator_axons,
-                    synapse=synapse,
-                    deserialize=False,
-                    timeout=30.0,
-                )
-            )
+            responses = asyncio.run(_broadcast())
     else:
-        responses = asyncio.get_event_loop().run_until_complete(
-            dendrite(
-                axons=validator_axons,
-                synapse=synapse,
-                deserialize=False,
-                timeout=30.0,
-            )
-        )
+        responses = asyncio.run(_broadcast())
 
     # 6. Collect results
     results = []

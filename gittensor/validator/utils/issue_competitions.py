@@ -3,22 +3,16 @@
 
 """Utility functions for Issue Bounties sub-mechanism."""
 
-import os
 from typing import Optional
 
 import bittensor as bt
 
-from gittensor.constants import CONTRACT_ADDRESS
+from gittensor.cli.issue_commands.helpers import get_contract_address as _get_contract_address
 
 
 def get_contract_address() -> Optional[str]:
-    """
-    Get contract address. Override via CONTRACT_ADDRESS env var for dev/testing.
-
-    Returns:
-        Contract address string (env var override or constants.py default)
-    """
-    return os.environ.get('CONTRACT_ADDRESS') or CONTRACT_ADDRESS
+    """Get contract address. CLI arg > env var > constants.py default."""
+    return _get_contract_address()
 
 
 def get_miner_coldkey(hotkey: str, subtensor: bt.Subtensor, netuid: int) -> Optional[str]:

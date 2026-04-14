@@ -14,6 +14,7 @@ import requests
 from rich.console import Console
 from rich.table import Table
 
+from gittensor.cli.issue_commands.helpers import load_config
 from gittensor.constants import BASE_GITHUB_API_URL
 
 console = Console()
@@ -229,16 +230,7 @@ def _validate_pat_locally(pat: str) -> bool:
 
 def _load_config_value(key: str):
     """Load a value from ~/.gittensor/config.json, or None."""
-    from pathlib import Path
-
-    config_file = Path.home() / '.gittensor' / 'config.json'
-    if not config_file.exists():
-        return None
-    try:
-        config = json.loads(config_file.read_text())
-        return config.get(key)
-    except (json.JSONDecodeError, OSError):
-        return None
+    return load_config().get(key)
 
 
 NETWORK_MAP = {

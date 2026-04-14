@@ -1,7 +1,7 @@
 # The MIT License (MIT)
 # Copyright © 2025 Entrius
 
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Dict, Tuple
 
 import bittensor as bt

@@ -75,8 +75,6 @@ def check_issue_eligibility(solved_count: int, closed_count: int) -> Tuple[bool,
     return True, credibility, ''
 
 
-
-
 def score_discovered_issues(
     miner_evaluations: Dict[int, MinerEvaluation],
     master_repositories: Dict[str, RepositoryConfig],

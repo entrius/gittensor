@@ -82,7 +82,7 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_m
     # 2. Resolve wallet and network
     wallet_name = wallet_name or _load_config_value('wallet') or 'default'
     wallet_hotkey = wallet_hotkey or _load_config_value('hotkey') or 'default'
-    ws_endpoint = _resolve_endpoint(network, rpc_url)
+    ws_endpoint, _ = resolve_network(network=network, rpc_url=rpc_url)
 
     if not json_mode:
         console.print(f'[dim]Wallet: {wallet_name}/{wallet_hotkey} | Network: {ws_endpoint} | Netuid: {netuid}[/dim]')
@@ -235,12 +235,6 @@ def _load_config_value(key: str):
         return config.get(key)
     except (json.JSONDecodeError, OSError):
         return None
-
-
-def _resolve_endpoint(network: str | None, rpc_url: str | None) -> str:
-    """Resolve the subtensor endpoint from CLI args or config."""
-    endpoint, _ = resolve_network(network=network, rpc_url=rpc_url)
-    return endpoint
 
 
 def _error(msg: str, json_mode: bool):

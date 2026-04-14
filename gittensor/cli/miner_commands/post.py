@@ -15,6 +15,7 @@ from rich.console import Console
 from rich.table import Table
 
 from gittensor.constants import BASE_GITHUB_API_URL
+from gittensor.utils.github_api_tools import make_headers
 
 console = Console()
 
@@ -201,7 +202,7 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_m
 
 def _validate_pat_locally(pat: str) -> bool:
     """Validate PAT mirrors the validator-side checks: user identity + GraphQL access."""
-    headers = {'Authorization': f'token {pat}', 'Accept': 'application/vnd.github.v3+json'}
+    headers = make_headers(pat)
     try:
         # Check basic auth
         user_resp = requests.get(f'{BASE_GITHUB_API_URL}/user', headers=headers, timeout=15)

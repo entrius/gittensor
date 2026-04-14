@@ -18,6 +18,7 @@ import bittensor as bt
 import requests
 
 from gittensor.classes import Issue, MinerEvaluation
+from gittensor.utils.github_api_tools import make_headers
 from gittensor.constants import (
     BASE_GITHUB_API_URL,
     PR_LOOKBACK_DAYS,
@@ -202,7 +203,7 @@ async def _scan_repo(
 
 def _fetch_closed_issues(repo_name: str, since: str, token: str) -> List[dict]:
     """Fetch closed issues from a repo via REST API with pagination."""
-    headers = {'Authorization': f'token {token}', 'Accept': 'application/vnd.github.v3+json'}
+    headers = make_headers(token)
     all_issues: List[dict] = []
     page = 1
 

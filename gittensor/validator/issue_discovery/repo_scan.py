@@ -18,6 +18,7 @@ import bittensor as bt
 import requests
 
 from gittensor.classes import Issue, MinerEvaluation
+from gittensor.validator.utils.datetime_utils import parse_iso
 from gittensor.constants import (
     BASE_GITHUB_API_URL,
     PR_LOOKBACK_DAYS,
@@ -182,7 +183,7 @@ async def _scan_repo(
             pr_number=pr_number or 0,
             repository_full_name=repo_name,
             title=issue_raw.get('title', ''),
-            created_at=_parse_iso(issue_raw.get('created_at')),
+            created_at=parse_iso(issue_raw.get('created_at')),
             author_login=user.get('login'),
             author_github_id=author_github_id,
             state='CLOSED',
@@ -190,7 +191,7 @@ async def _scan_repo(
 
         if solver_id is not None:
             # Case 2: solved by non-miner PR → positive credibility
-            issue.closed_at = _parse_iso(issue_raw.get('closed_at'))
+            issue.closed_at = parse_iso(issue_raw.get('closed_at'))
         else:
             # Case 3: closed without PR → negative credibility
             issue.closed_at = None
@@ -238,13 +239,3 @@ def _fetch_closed_issues(repo_name: str, since: str, token: str) -> List[dict]:
             break
 
     return all_issues
-
-
-def _parse_iso(value: Optional[str]) -> Optional[datetime]:
-    """Parse an ISO 8601 timestamp string to datetime."""
-    if not value:
-        return None
-    try:
-        return datetime.fromisoformat(value.replace('Z', '+00:00'))
-    except (ValueError, AttributeError):
-        return None

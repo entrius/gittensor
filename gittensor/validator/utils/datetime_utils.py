@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Optional
 
 import pytz
 
@@ -20,3 +21,13 @@ def parse_github_timestamp_to_cst(timestamp_str: str) -> datetime:
     chicago_dt = utc_dt.astimezone(CHICAGO_TZ)
 
     return chicago_dt
+
+
+def parse_iso(value: Optional[str]) -> Optional[datetime]:
+    """Parse an ISO 8601 timestamp string to datetime."""
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace('Z', '+00:00'))
+    except (ValueError, AttributeError):
+        return None

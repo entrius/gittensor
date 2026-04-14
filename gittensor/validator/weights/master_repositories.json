@@ -327,6 +327,9 @@
     "weight": 0.0346
   },
   "latent-to/async-substrate-interface": {
+    "additional_acceptable_branches": [
+      "staging"
+    ],
     "weight": 0.2764
   },
   "latent-to/bittensor": {

@@ -10,7 +10,7 @@ import click
 from rich.console import Console
 from rich.table import Table
 
-from .post import NETUID_DEFAULT, _load_config_value, _resolve_endpoint
+from .post import NETUID_DEFAULT, _error, _load_config_value, _resolve_endpoint
 
 console = Console()
 
@@ -153,11 +153,3 @@ def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, json_mode)
 
         console.print(table)
         console.print(f'\n[bold]{valid_count}/{len(results)} validators have a valid PAT stored.[/bold]')
-
-
-def _error(msg: str, json_mode: bool):
-    """Print an error message in the appropriate format."""
-    if json_mode:
-        click.echo(json.dumps({'success': False, 'error': msg}))
-    else:
-        console.print(f'[red]Error: {msg}[/red]')

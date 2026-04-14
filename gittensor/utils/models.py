@@ -3,6 +3,12 @@
 from typing import List, Optional, TypedDict
 
 
+class ClosingIssue(TypedDict):
+    """Metadata for an issue closed by a PR."""
+    number: int
+    is_transferred: bool
+
+
 class PRInfo(TypedDict, total=False):
     """GitHub PR discovery model.
 
@@ -20,3 +26,4 @@ class PRInfo(TypedDict, total=False):
     url: str
     review_count: int
     closing_numbers: List[int]
+    closing_issues: List[ClosingIssue]

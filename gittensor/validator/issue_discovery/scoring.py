@@ -232,9 +232,12 @@ def _collect_issues_from_prs(
 
                 if is_solved:
                     data.solved_count += 1
-                else:
+                elif not issue.is_transferred:
                     data.closed_count += 1
                     continue  # No score for unsolved issues
+                else:
+                    # Issue is transferred: skip from credibility counts (mulligan)
+                    continue
 
                 # Anti-gaming: post-merge edit detection
                 if issue.updated_at and pr.merged_at and issue.updated_at > pr.merged_at:
@@ -297,6 +300,6 @@ def _merge_scan_issues(
             if issue.state == 'CLOSED' and issue.closed_at:
                 # Case 2: solved by non-miner PR → positive credibility
                 data.solved_count += 1
-            else:
+            elif not issue.is_transferred:
                 # Case 3: closed without PR → negative credibility
                 data.closed_count += 1

@@ -494,7 +494,7 @@ query($owner: String!, $name: String!, $issueNumber: Int!) {
                 author { ... on User { databaseId login } }
                 baseRepository { nameWithOwner }
                 closingIssuesReferences(first: 20) {
-                  nodes { number }
+                  nodes { number isTransferred }
                 }
                 reviews(first: 1, states: APPROVED) { totalCount }
               }
@@ -563,8 +563,12 @@ def _search_issue_referencing_prs_graphql(
 
         author = pr.get('author') or {}
         reviews = pr.get('reviews') or {}
-        closing = pr.get('closingIssuesReferences', {}).get('nodes', [])
-        closing_numbers = [n.get('number') for n in closing if n.get('number') is not None]
+        closing_nodes = pr.get('closingIssuesReferences', {}).get('nodes', [])
+        closing_numbers = [n.get('number') for n in closing_nodes if n.get('number') is not None]
+        closing_issues = [
+            {'number': n.get('number'), 'is_transferred': bool(n.get('isTransferred', False))}
+            for n in closing_nodes if n.get('number') is not None
+        ]
 
         pr_info: PRInfo = {
             'number': pr_number,
@@ -577,6 +581,7 @@ def _search_issue_referencing_prs_graphql(
             'url': pr.get('url') or '',
             'review_count': int(reviews.get('totalCount', 0) or 0),
             'closing_numbers': closing_numbers,
+            'closing_issues': closing_issues,
         }
         out.append(pr_info)
 

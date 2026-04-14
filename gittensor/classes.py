@@ -238,12 +238,14 @@ class PullRequest:
         pr_state = PRState(pr_data['state'])
         is_merged = pr_state == PRState.MERGED
 
-        # Issue extraction - merged PRs only count closed issues
-        raw_issues: List[Dict] = pr_data.get('closingIssuesReferences', {}).get('nodes', [])
-        issues = []
-        for issue in raw_issues:
-            if is_merged and not (issue.get('closedAt') and issue.get('state') == 'CLOSED'):
-                continue
+        # Extract associated issues and their transferred status
+        raw_issues_list: List[Dict] = pr_data.get('closingIssuesReferences', {}).get('nodes', [])
+        # Also support the flatter PRInfo structure from search_issue_referencing_prs_graphql
+        if 'closing_issues' in pr_data:
+            raw_issues_list = pr_data['closing_issues']
+
+        issues: List[Issue] = []
+        for issue in raw_issues_list:
             issue_author = issue.get('author') or {}
             author_db_id = issue_author.get('databaseId')
             issues.append(
@@ -251,7 +253,7 @@ class PullRequest:
                     number=issue['number'],
                     pr_number=pr_data['number'],
                     repository_full_name=repository_full_name,
-                    title=issue['title'],
+                    title=issue.get('title', ''),
                     created_at=parse_github_timestamp_to_cst(issue['createdAt']) if issue.get('createdAt') else None,
                     closed_at=parse_github_timestamp_to_cst(issue['closedAt']) if issue.get('closedAt') else None,
                     author_login=issue_author.get('login'),
@@ -259,6 +261,7 @@ class PullRequest:
                     author_association=issue.get('authorAssociation'),
                     author_github_id=str(author_db_id) if author_db_id else None,
                     updated_at=parse_github_timestamp_to_cst(issue['updatedAt']) if issue.get('updatedAt') else None,
+                    is_transferred=bool(issue.get('is_transferred', issue.get('isTransferred', False))),
                 )
             )
 

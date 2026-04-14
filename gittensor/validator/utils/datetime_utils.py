@@ -1,7 +1,16 @@
-from datetime import datetime
+import math
+from datetime import datetime, timezone
 from typing import Optional
 
 import pytz
+
+from gittensor.constants import (
+    SECONDS_PER_HOUR,
+    TIME_DECAY_GRACE_PERIOD_HOURS,
+    TIME_DECAY_MIN_MULTIPLIER,
+    TIME_DECAY_SIGMOID_MIDPOINT,
+    TIME_DECAY_SIGMOID_STEEPNESS_SCALAR,
+)
 
 CHICAGO_TZ = pytz.timezone('America/Chicago')
 
@@ -31,3 +40,16 @@ def parse_iso(value: Optional[str]) -> Optional[datetime]:
         return datetime.fromisoformat(value.replace('Z', '+00:00'))
     except (ValueError, AttributeError):
         return None
+
+
+def calculate_time_decay(merged_at: datetime) -> float:
+    """Calculate sigmoid-based time decay multiplier from a merge timestamp."""
+    now = datetime.now(timezone.utc)
+    hours_since_merge = (now - merged_at).total_seconds() / SECONDS_PER_HOUR
+
+    if hours_since_merge < TIME_DECAY_GRACE_PERIOD_HOURS:
+        return 1.0
+
+    days_since_merge = hours_since_merge / 24
+    sigmoid = 1 / (1 + math.exp(TIME_DECAY_SIGMOID_STEEPNESS_SCALAR * (days_since_merge - TIME_DECAY_SIGMOID_MIDPOINT)))
+    return max(sigmoid, TIME_DECAY_MIN_MULTIPLIER)

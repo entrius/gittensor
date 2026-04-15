@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Dict, List
 
 import bittensor as bt
@@ -47,6 +48,8 @@ class DatabaseStorage:
             # Start transaction
             assert self.db_connection is not None and self.repo is not None
             self.db_connection.autocommit = False
+
+            miner_eval.evaluation_timestamp = datetime.now(timezone.utc)
 
             # Store all entities using bulk methods
             miner = Miner(miner_eval.uid, miner_eval.hotkey, miner_eval.github_id or '')

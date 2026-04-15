@@ -14,20 +14,16 @@ import requests
 from rich.console import Console
 from rich.table import Table
 
-from gittensor.cli.issue_commands.helpers import resolve_network
-from gittensor.cli.miner_commands.helpers import _get_validator_axons
+from gittensor.cli.miner_commands.helpers import (
+    NETUID_DEFAULT,
+    _error,
+    _get_validator_axons,
+    _load_config_value,
+    _resolve_endpoint,
+)
 from gittensor.constants import BASE_GITHUB_API_URL
 
 console = Console()
-
-# Shared CLI options for wallet/network configuration
-NETUID_DEFAULT = 74
-
-
-def _resolve_endpoint(network: str | None, rpc_url: str | None) -> str:
-    """Resolve miner network options to a websocket endpoint."""
-    ws_endpoint, _ = resolve_network(network=network, rpc_url=rpc_url)
-    return ws_endpoint
 
 
 @click.command()
@@ -89,7 +85,7 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_m
     # 2. Resolve wallet and network
     wallet_name = wallet_name or _load_config_value('wallet') or 'default'
     wallet_hotkey = wallet_hotkey or _load_config_value('hotkey') or 'default'
-    ws_endpoint = _resolve_endpoint(network=network, rpc_url=rpc_url)
+    ws_endpoint = _resolve_endpoint(network, rpc_url)
 
     if not json_mode:
         console.print(f'[dim]Wallet: {wallet_name}/{wallet_hotkey} | Network: {ws_endpoint} | Netuid: {netuid}[/dim]')
@@ -223,25 +219,3 @@ def _validate_pat_locally(pat: str) -> bool:
         return True
     except requests.RequestException:
         return False
-
-
-def _load_config_value(key: str):
-    """Load a value from ~/.gittensor/config.json, or None."""
-    from pathlib import Path
-
-    config_file = Path.home() / '.gittensor' / 'config.json'
-    if not config_file.exists():
-        return None
-    try:
-        config = json.loads(config_file.read_text())
-        return config.get(key)
-    except (json.JSONDecodeError, OSError):
-        return None
-
-
-def _error(msg: str, json_mode: bool):
-    """Print an error message in the appropriate format."""
-    if json_mode:
-        click.echo(json.dumps({'success': False, 'error': msg}))
-    else:
-        console.print(f'[red]Error: {msg}[/red]')

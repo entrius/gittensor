@@ -15,6 +15,8 @@ import bittensor as bt
 from substrateinterface import Keypair
 from substrateinterface.exceptions import ExtrinsicNotFound
 
+from gittensor.validator.issue_competitions.codec import compute_ink5_lazy_key, decode_issue_bytes
+
 # Bittensor uses async_substrate_interface which has its own exception type
 try:
     from async_substrate_interface.errors import ExtrinsicNotFound as AsyncExtrinsicNotFound
@@ -157,13 +159,6 @@ class IssueCompetitionContractClient:
             bt.logging.debug(f'Error getting child storage key: {e}')
             return None
 
-    def compute_ink5_lazy_key(self, root_key_hex: str, encoded_key: bytes) -> str:
-        """Compute Ink! 5 lazy mapping storage key using blake2_128concat."""
-        root_key = bytes.fromhex(root_key_hex.replace('0x', ''))
-        data = root_key + encoded_key
-        h = hashlib.blake2b(data, digest_size=16).digest()
-        return '0x' + (h + data).hex()
-
     def _read_packed_storage(self) -> Optional[dict]:
         """Read the packed root storage from the contract"""
         child_key = self._get_child_storage_key()
@@ -216,61 +211,25 @@ class IssueCompetitionContractClient:
 
         try:
             encoded_id = struct.pack('<Q', issue_id)
-            lazy_key = self.compute_ink5_lazy_key('52789899', encoded_id)
+            lazy_key = compute_ink5_lazy_key('52789899', encoded_id)
 
             val_result = self.subtensor.substrate.rpc_request('childstate_getStorage', [child_key, lazy_key, None])
             if not val_result.get('result'):
                 return None
 
             data = bytes.fromhex(val_result['result'].replace('0x', ''))
-
-            offset = 0
-            stored_id = struct.unpack_from('<Q', data, offset)[0]
-            offset += 8
-
-            github_url_hash = data[offset : offset + 32]
-            offset += 32
-
-            len_byte = data[offset]
-            if len_byte & 0x03 == 0:
-                str_len = len_byte >> 2
-                offset += 1
-            elif len_byte & 0x03 == 1:
-                str_len = (data[offset] | (data[offset + 1] << 8)) >> 2
-                offset += 2
-            else:
-                str_len = 0
-                offset += 1
-
-            repo_name = data[offset : offset + str_len].decode('utf-8', errors='replace')
-            offset += str_len
-
-            issue_number = struct.unpack_from('<I', data, offset)[0]
-            offset += 4
-
-            bounty_lo, bounty_hi = struct.unpack_from('<QQ', data, offset)
-            bounty_amount = bounty_lo + (bounty_hi << 64)
-            offset += 16
-
-            target_lo, target_hi = struct.unpack_from('<QQ', data, offset)
-            target_bounty = target_lo + (target_hi << 64)
-            offset += 16
-
-            status_byte = data[offset]
-            offset += 1
-
-            registered_at_block = struct.unpack_from('<I', data, offset)[0]
+            raw = decode_issue_bytes(data)
 
             return ContractIssue(
-                id=stored_id,
-                github_url_hash=github_url_hash,
-                repository_full_name=repo_name,
-                issue_number=issue_number,
-                bounty_amount=int(bounty_amount),
-                target_bounty=int(target_bounty),
-                status=IssueStatus(status_byte),
-                registered_at_block=registered_at_block,
-                is_fully_funded=int(bounty_amount) >= int(target_bounty),
+                id=raw['id'],
+                github_url_hash=raw['github_url_hash'],
+                repository_full_name=raw['repository_full_name'],
+                issue_number=raw['issue_number'],
+                bounty_amount=raw['bounty_amount'],
+                target_bounty=raw['target_bounty'],
+                status=IssueStatus(raw['status_byte']),
+                registered_at_block=raw['registered_at_block'],
+                is_fully_funded=raw['bounty_amount'] >= raw['target_bounty'],
             )
         except Exception as e:
             bt.logging.debug(f'Error reading issue {issue_id}: {e}')

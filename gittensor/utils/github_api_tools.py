@@ -969,6 +969,9 @@ def count_tracked_open_issues(
     if not token or not tracked_repo_names:
         return 0
 
+    # GitHub returns nameWithOwner in original case; normalize both sides.
+    tracked_lower = {name.lower() for name in tracked_repo_names}
+
     count = 0
     cursor: Optional[str] = None
     for _ in range(max_pages):
@@ -982,10 +985,12 @@ def count_tracked_open_issues(
             bt.logging.warning(f'count_tracked_open_issues: GraphQL failure for user {github_user_node_id}')
             return None
 
-        issues_block = (result.get('data') or {}).get('node', {}).get('issues') or {}
-        for node in issues_block.get('nodes') or []:
-            repo_name = ((node or {}).get('repository') or {}).get('nameWithOwner')
-            if repo_name and repo_name in tracked_repo_names:
+        # data.node can be explicitly null (deleted account, wrong id) — guard it.
+        node = ((result.get('data') or {}).get('node')) or {}
+        issues_block = node.get('issues') or {}
+        for issue_node in issues_block.get('nodes') or []:
+            repo_name = ((issue_node or {}).get('repository') or {}).get('nameWithOwner')
+            if repo_name and repo_name.lower() in tracked_lower:
                 count += 1
 
         page_info = issues_block.get('pageInfo') or {}

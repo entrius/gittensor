@@ -87,3 +87,25 @@ def test_hits_max_pages_cap_returns_partial():
     with patch('gittensor.utils.github_api_tools.execute_graphql_query', side_effect=pages):
         result = count_tracked_open_issues('tok', 'node-id', TRACKED, max_pages=cap)
         assert result == cap  # one hit per page
+
+
+def test_case_insensitive_repo_match():
+    """master_repositories is lowercased by load_master_repo_weights, but
+    GitHub returns nameWithOwner in original case. Both sides must normalize."""
+    response = _page(
+        [
+            _issue('Owner/Repo-A'),  # mixed case from GitHub
+            _issue('OWNER/REPO-B'),  # all caps
+            _issue('Other/Upstream'),  # not tracked
+        ]
+    )
+    with patch('gittensor.utils.github_api_tools.execute_graphql_query', return_value=response):
+        assert count_tracked_open_issues('tok', 'node-id', TRACKED) == 2
+
+
+def test_null_node_does_not_crash():
+    """data.node can be explicitly null (deleted account, wrong id) — must not
+    raise AttributeError on None.get('issues')."""
+    response = {'data': {'node': None}}
+    with patch('gittensor.utils.github_api_tools.execute_graphql_query', return_value=response):
+        assert count_tracked_open_issues('tok', 'node-id', TRACKED) == 0

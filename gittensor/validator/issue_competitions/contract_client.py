@@ -137,10 +137,6 @@ class IssueCompetitionContractClient:
             bt.logging.debug(f'Error getting child storage key: {e}')
             return None
 
-    def compute_ink5_lazy_key(self, root_key_hex: str, encoded_key: bytes) -> str:
-        """Compute Ink! 5 lazy mapping storage key using blake2_128concat."""
-        return compute_ink5_lazy_key(root_key_hex, encoded_key)
-
     def _read_packed_storage(self) -> Optional[dict]:
         """Read the packed root storage from the contract"""
         try:

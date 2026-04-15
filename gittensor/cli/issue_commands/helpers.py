@@ -687,20 +687,6 @@ def _read_contract_packed_storage(substrate, contract_addr: str, verbose: bool =
         return None
 
 
-def _compute_ink5_lazy_key(root_key_hex: str, encoded_key: bytes) -> str:
-    """
-    Compute Ink! 5 lazy mapping storage key using blake2_128concat.
-
-    Args:
-        root_key_hex: Hex string of the mapping root key (e.g., '52789899')
-        encoded_key: SCALE-encoded key bytes
-
-    Returns:
-        Hex-encoded storage key
-    """
-    return compute_ink5_lazy_key(root_key_hex, encoded_key)
-
-
 def _read_issues_from_child_storage(substrate, contract_addr: str, verbose: bool = False) -> List[Dict[str, Any]]:
     """
     Read all issues from contract child storage.

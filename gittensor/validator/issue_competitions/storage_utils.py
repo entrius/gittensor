@@ -1,9 +1,12 @@
 """Shared helpers for reading and decoding issue competition contract storage."""
 
 import hashlib
+import logging
 import struct
 from dataclasses import dataclass
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -188,5 +191,6 @@ def decode_issue_from_storage(data: bytes) -> Optional[DecodedIssueStorage]:
             status_byte=status_byte,
             registered_at_block=registered_at_block,
         )
-    except Exception:
+    except (IndexError, struct.error, ValueError) as e:
+        logger.debug('Failed to decode issue storage entry: %s', e)
         return None

@@ -19,13 +19,12 @@ from rich.panel import Panel
 from .help import StyledGroup
 from .helpers import (
     _make_contract_client,
+    _resolve_contract_and_network,
     console,
     format_alpha,
-    get_contract_address,
     print_error,
     print_network_header,
     print_success,
-    resolve_network,
     validate_issue_id,
     validate_ss58_address,
     with_network_contract_options,
@@ -60,11 +59,7 @@ def admin_cancel(issue_id: int, network: str, rpc_url: str, contract: str, walle
         $ gitt a cancel-issue 5 --network test
     [/dim]
     """
-    contract_addr = get_contract_address(contract)
-    ws_endpoint, network_name = resolve_network(network, rpc_url)
-
-    if not contract_addr:
-        raise click.ClickException('Contract address not configured.')
+    contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
 
     try:
         validate_issue_id(issue_id)
@@ -124,11 +119,7 @@ def admin_payout(issue_id: int, network: str, rpc_url: str, contract: str, walle
         $ gitt a payout-issue 3 --network test
     [/dim]
     """
-    contract_addr = get_contract_address(contract)
-    ws_endpoint, network_name = resolve_network(network, rpc_url)
-
-    if not contract_addr:
-        raise click.ClickException('Contract address not configured.')
+    contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
 
     try:
         validate_issue_id(issue_id)
@@ -184,11 +175,7 @@ def admin_set_owner(new_owner: str, network: str, rpc_url: str, contract: str, w
         $ gitt admin set-owner 5Hxxx...
     [/dim]
     """
-    contract_addr = get_contract_address(contract)
-    ws_endpoint, network_name = resolve_network(network, rpc_url)
-
-    if not contract_addr:
-        raise click.ClickException('Contract address not configured.')
+    contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
 
     try:
         validate_ss58_address(new_owner, 'new_owner')
@@ -240,11 +227,7 @@ def admin_set_treasury(
         $ gitt admin set-treasury 5Hxxx...
     [/dim]
     """
-    contract_addr = get_contract_address(contract)
-    ws_endpoint, network_name = resolve_network(network, rpc_url)
-
-    if not contract_addr:
-        raise click.ClickException('Contract address not configured.')
+    contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
 
     try:
         validate_ss58_address(new_treasury, 'new_treasury')
@@ -297,11 +280,7 @@ def admin_add_validator(hotkey: str, network: str, rpc_url: str, contract: str, 
         $ gitt admin add-vali 5Hxxx...
     [/dim]
     """
-    contract_addr = get_contract_address(contract)
-    ws_endpoint, network_name = resolve_network(network, rpc_url)
-
-    if not contract_addr:
-        raise click.ClickException('Contract address not configured.')
+    contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
 
     try:
         validate_ss58_address(hotkey, 'hotkey')
@@ -355,11 +334,7 @@ def admin_remove_validator(
         $ gitt admin remove-vali 5Hxxx...
     [/dim]
     """
-    contract_addr = get_contract_address(contract)
-    ws_endpoint, network_name = resolve_network(network, rpc_url)
-
-    if not contract_addr:
-        raise click.ClickException('Contract address not configured.')
+    contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
 
     try:
         validate_ss58_address(hotkey, 'hotkey')

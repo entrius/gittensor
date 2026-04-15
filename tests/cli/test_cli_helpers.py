@@ -373,8 +373,12 @@ class TestCliRegisterValidation:
     def test_register_rejects_low_bounty(self, cli_root, runner):
         with (
             patch(
-                'gittensor.cli.issue_commands.mutations.get_contract_address',
-                return_value='0x1234567890123456789012345678901234567890',
+                'gittensor.cli.issue_commands.mutations._resolve_contract_and_network',
+                return_value=(
+                    '0x1234567890123456789012345678901234567890',
+                    'wss://entrypoint-finney.opentensor.ai:443',
+                    'finney',
+                ),
             ),
             patch('gittensor.cli.issue_commands.mutations.validate_repository', return_value=('owner', 'repo')),
             patch('gittensor.cli.issue_commands.mutations.validate_github_issue', return_value={}),
@@ -389,8 +393,12 @@ class TestCliRegisterValidation:
 
     def test_register_rejects_bad_repo_format(self, cli_root, runner):
         with patch(
-            'gittensor.cli.issue_commands.mutations.get_contract_address',
-            return_value='0x1234567890123456789012345678901234567890',
+            'gittensor.cli.issue_commands.mutations._resolve_contract_and_network',
+            return_value=(
+                '0x1234567890123456789012345678901234567890',
+                'wss://entrypoint-finney.opentensor.ai:443',
+                'finney',
+            ),
         ):
             result = runner.invoke(
                 cli_root,
@@ -402,8 +410,12 @@ class TestCliRegisterValidation:
 
     def test_register_rejects_issue_zero(self, cli_root, runner):
         with patch(
-            'gittensor.cli.issue_commands.mutations.get_contract_address',
-            return_value='0x1234567890123456789012345678901234567890',
+            'gittensor.cli.issue_commands.mutations._resolve_contract_and_network',
+            return_value=(
+                '0x1234567890123456789012345678901234567890',
+                'wss://entrypoint-finney.opentensor.ai:443',
+                'finney',
+            ),
         ):
             result = runner.invoke(
                 cli_root,
@@ -417,8 +429,12 @@ class TestCliRegisterValidation:
         over_max = str(MAX_ISSUE_NUMBER + 1)
         with (
             patch(
-                'gittensor.cli.issue_commands.mutations.get_contract_address',
-                return_value='0x1234567890123456789012345678901234567890',
+                'gittensor.cli.issue_commands.mutations._resolve_contract_and_network',
+                return_value=(
+                    '0x1234567890123456789012345678901234567890',
+                    'wss://entrypoint-finney.opentensor.ai:443',
+                    'finney',
+                ),
             ),
             patch('gittensor.cli.issue_commands.mutations.validate_repository', return_value=('a', 'b')),
             patch('gittensor.cli.issue_commands.mutations.validate_github_issue', return_value={}),
@@ -437,8 +453,12 @@ class TestCliVoteValidation:
 
     def test_vote_solution_rejects_issue_id_zero(self, cli_root, runner):
         with patch(
-            'gittensor.cli.issue_commands.vote.get_contract_address',
-            return_value='0x1234567890123456789012345678901234567890',
+            'gittensor.cli.issue_commands.vote._resolve_contract_and_network',
+            return_value=(
+                '0x1234567890123456789012345678901234567890',
+                'wss://entrypoint-finney.opentensor.ai:443',
+                'finney',
+            ),
         ):
             result = runner.invoke(
                 cli_root,
@@ -457,8 +477,12 @@ class TestCliVoteValidation:
 
     def test_vote_solution_rejects_pr_zero(self, cli_root, runner):
         with patch(
-            'gittensor.cli.issue_commands.vote.get_contract_address',
-            return_value='0x1234567890123456789012345678901234567890',
+            'gittensor.cli.issue_commands.vote._resolve_contract_and_network',
+            return_value=(
+                '0x1234567890123456789012345678901234567890',
+                'wss://entrypoint-finney.opentensor.ai:443',
+                'finney',
+            ),
         ):
             result = runner.invoke(
                 cli_root,
@@ -477,8 +501,12 @@ class TestCliVoteValidation:
 
     def test_vote_solution_rejects_invalid_pr(self, cli_root, runner):
         with patch(
-            'gittensor.cli.issue_commands.vote.get_contract_address',
-            return_value='0x1234567890123456789012345678901234567890',
+            'gittensor.cli.issue_commands.vote._resolve_contract_and_network',
+            return_value=(
+                '0x1234567890123456789012345678901234567890',
+                'wss://entrypoint-finney.opentensor.ai:443',
+                'finney',
+            ),
         ):
             result = runner.invoke(
                 cli_root,
@@ -501,8 +529,12 @@ class TestCliAdminValidation:
 
     def test_admin_cancel_rejects_issue_id_zero(self, cli_root, runner):
         with patch(
-            'gittensor.cli.issue_commands.admin.get_contract_address',
-            return_value='0x1234567890123456789012345678901234567890',
+            'gittensor.cli.issue_commands.admin._resolve_contract_and_network',
+            return_value=(
+                '0x1234567890123456789012345678901234567890',
+                'wss://entrypoint-finney.opentensor.ai:443',
+                'finney',
+            ),
         ):
             result = runner.invoke(
                 cli_root,
@@ -514,8 +546,12 @@ class TestCliAdminValidation:
 
     def test_admin_payout_rejects_issue_id_zero(self, cli_root, runner):
         with patch(
-            'gittensor.cli.issue_commands.admin.get_contract_address',
-            return_value='0x1234567890123456789012345678901234567890',
+            'gittensor.cli.issue_commands.admin._resolve_contract_and_network',
+            return_value=(
+                '0x1234567890123456789012345678901234567890',
+                'wss://entrypoint-finney.opentensor.ai:443',
+                'finney',
+            ),
         ):
             result = runner.invoke(
                 cli_root,
@@ -531,8 +567,12 @@ class TestCliVoteCancelValidation:
 
     def test_vote_cancel_rejects_issue_id_zero(self, cli_root, runner):
         with patch(
-            'gittensor.cli.issue_commands.vote.get_contract_address',
-            return_value='0x1234567890123456789012345678901234567890',
+            'gittensor.cli.issue_commands.vote._resolve_contract_and_network',
+            return_value=(
+                '0x1234567890123456789012345678901234567890',
+                'wss://entrypoint-finney.opentensor.ai:443',
+                'finney',
+            ),
         ):
             result = runner.invoke(
                 cli_root,
@@ -547,7 +587,10 @@ class TestCliMissingContractConfig:
     """Ensure missing contract config exits non-zero."""
 
     def test_register_missing_contract_fails(self, cli_root, runner):
-        with patch('gittensor.cli.issue_commands.mutations.get_contract_address', return_value=''):
+        with patch(
+            'gittensor.cli.issue_commands.mutations._resolve_contract_and_network',
+            side_effect=click.ClickException('Contract address not configured.'),
+        ):
             result = runner.invoke(
                 cli_root,
                 ['issues', 'register', '--repo', 'a/b', '--issue', '1', '--bounty', '10', '-y'],
@@ -557,7 +600,10 @@ class TestCliMissingContractConfig:
         assert 'Contract address not configured' in result.output
 
     def test_vote_missing_contract_fails(self, cli_root, runner):
-        with patch('gittensor.cli.issue_commands.vote.get_contract_address', return_value=''):
+        with patch(
+            'gittensor.cli.issue_commands.vote._resolve_contract_and_network',
+            side_effect=click.ClickException('Contract address not configured.'),
+        ):
             result = runner.invoke(
                 cli_root,
                 [
@@ -574,7 +620,10 @@ class TestCliMissingContractConfig:
         assert 'Contract address not configured' in result.output
 
     def test_admin_missing_contract_fails(self, cli_root, runner):
-        with patch('gittensor.cli.issue_commands.admin.get_contract_address', return_value=''):
+        with patch(
+            'gittensor.cli.issue_commands.admin._resolve_contract_and_network',
+            side_effect=click.ClickException('Contract address not configured.'),
+        ):
             result = runner.invoke(
                 cli_root,
                 ['admin', 'cancel-issue', '1'],
@@ -584,7 +633,10 @@ class TestCliMissingContractConfig:
         assert 'Contract address not configured' in result.output
 
     def test_harvest_missing_contract_fails(self, cli_root, runner):
-        with patch('gittensor.cli.issue_commands.mutations.get_contract_address', return_value=''):
+        with patch(
+            'gittensor.cli.issue_commands.mutations._resolve_contract_and_network',
+            side_effect=click.ClickException('Contract address not configured.'),
+        ):
             result = runner.invoke(
                 cli_root,
                 ['harvest'],

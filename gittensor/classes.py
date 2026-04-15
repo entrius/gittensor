@@ -134,6 +134,7 @@ class Issue:
     author_github_id: Optional[str] = None  # Issue author's GitHub user ID (for miner matching)
     is_transferred: bool = False
     updated_at: Optional[datetime] = None
+    body_or_title_edited_at: Optional[datetime] = None
     discovery_base_score: float = 0.0
     discovery_earned_score: float = 0.0
     discovery_review_quality_multiplier: float = 1.0
@@ -250,6 +251,30 @@ class PullRequest:
                 continue
             issue_author = issue.get('author') or {}
             author_db_id = issue_author.get('databaseId')
+
+            body_edit_history = (issue.get('userContentEdits') or {}).get('nodes') or []
+            latest_body_edit_timestamp = next(
+                (edit.get('editedAt') for edit in body_edit_history if edit and edit.get('editedAt')),
+                None,
+            )
+            latest_body_edit_at = (
+                parse_github_timestamp_to_cst(latest_body_edit_timestamp) if latest_body_edit_timestamp else None
+            )
+
+            title_rename_events = (issue.get('timelineItems') or {}).get('nodes') or []
+            latest_title_rename_timestamp = next(
+                (rename.get('createdAt') for rename in title_rename_events if rename and rename.get('createdAt')),
+                None,
+            )
+            latest_title_rename_at = (
+                parse_github_timestamp_to_cst(latest_title_rename_timestamp) if latest_title_rename_timestamp else None
+            )
+
+            if latest_body_edit_at and latest_title_rename_at:
+                body_or_title_edited_at = max(latest_body_edit_at, latest_title_rename_at)
+            else:
+                body_or_title_edited_at = latest_body_edit_at or latest_title_rename_at
+
             issues.append(
                 Issue(
                     number=issue['number'],
@@ -263,6 +288,7 @@ class PullRequest:
                     author_association=issue.get('authorAssociation'),
                     author_github_id=str(author_db_id) if author_db_id else None,
                     updated_at=parse_github_timestamp_to_cst(issue['updatedAt']) if issue.get('updatedAt') else None,
+                    body_or_title_edited_at=body_or_title_edited_at,
                 )
             )
 

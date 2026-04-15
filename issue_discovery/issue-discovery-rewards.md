@@ -159,9 +159,7 @@ If an issue is edited at any point after the solving PR's **`merged_at`** timest
 
 Anchored to `merged_at` (not `created_at`) so discoverers can add clarifying context while a PR is in review without being penalized.
 
-**Edit detection (current):** Uses `updated_at` as a rough proxy. Acknowledged that `updated_at` fires on bot activity, comments, labels, etc. — accept false positives for now.
-
-**Edit detection (future):** Upgrade to timeline/events API for body-only edit detection in a later update.
+**Edit detection:** Uses GraphQL timeline events — `Issue.userContentEdits` (body edits) and `timelineItems(itemTypes: [RENAMED_TITLE_EVENT])` (title renames) — fetched inline with `closingIssuesReferences` at no extra query cost. The maximum of these two timestamps is stored as `body_or_title_edited_at` and compared against `pr.merged_at`. Bot comments, label changes, reactions, and other non-edit activity do not trigger the penalty.
 
 ### Timing / Sniping Protection
 
@@ -341,7 +339,8 @@ The existing `issues` table stores issue-to-PR relationships. Issue discovery ne
 |---|---|---|---|
 | `author_github_id` | `VARCHAR(255)` | NULL | Issue author's GitHub user ID (for miner matching) |
 | `is_transferred` | `BOOLEAN` | FALSE | Whether issue was transferred (timeline API `TransferredEvent`) |
-| `updated_at` | `TIMESTAMP` | NULL | GitHub's `updated_at` — rough proxy for edit detection |
+| `updated_at` | `TIMESTAMP` | NULL | GitHub's `updated_at` (retained for compatibility; not used for edit detection) |
+| `body_or_title_edited_at` | `TIMESTAMP` | NULL | Transient: `max(last body edit, last title rename)` from timeline events — drives post-merge edit detection |
 | `discovery_base_score` | `DECIMAL(15,6)` | 0.0 | Base score inherited from solving PR |
 | `discovery_earned_score` | `DECIMAL(15,6)` | 0.0 | Final score after all multipliers |
 | `discovery_review_quality_multiplier` | `DECIMAL(15,6)` | 1.0 | Cliff model: `1.1` clean, then `1.0 - 0.15n` |
@@ -360,7 +359,8 @@ author_github_id: Optional[str] = None
 
 # Edit/transfer detection
 is_transferred: bool = False
-updated_at: Optional[datetime] = None
+updated_at: Optional[datetime] = None  # retained for compatibility; not used for edit detection
+body_or_title_edited_at: Optional[datetime] = None  # max(last body edit, last title rename)
 
 # Discovery scoring (populated during issue scoring pipeline)
 discovery_base_score: float = 0.0
@@ -406,6 +406,5 @@ The API budget estimates assume ~256 tracked repos. If the repo list stays at 1,
 
 ## Deferred Post-Launch
 
-- **Edit detection upgrade** — current `updated_at` proxy false-positives on bot activity, comments, labels. Future: timeline/events API for body-only edits.
 - **Retroactive linking timing** — if a PR merges in cycle N and issue link appears in cycle N+3, what base score is used?
 - **Open issue spam threshold** — if deferred from v1 (option D), add once mirror ships and scoped counting is free.

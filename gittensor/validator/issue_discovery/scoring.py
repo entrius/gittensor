@@ -218,10 +218,15 @@ def _collect_issues_from_prs(
                     data.closed_count += 1
                     continue  # No score for unsolved issues
 
-                # Anti-gaming: post-merge edit detection
-                if issue.updated_at and pr.merged_at and issue.updated_at > pr.merged_at:
+                # Anti-gaming: post-merge body/title edit detection
+                # Not issue.updated_at: it fires on bot comments, labels, reactions.
+                if (
+                    issue.body_or_title_edited_at
+                    and pr.merged_at
+                    and issue.body_or_title_edited_at > pr.merged_at
+                ):
                     bt.logging.info(
-                        f'Issue #{issue.number} edited after PR #{pr.number} merge — 0 score, counts as closed'
+                        f'Issue #{issue.number} body/title edited after PR #{pr.number} merge — 0 score, counts as closed'
                     )
                     data.solved_count -= 1
                     data.closed_count += 1

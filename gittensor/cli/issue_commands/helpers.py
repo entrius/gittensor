@@ -581,6 +581,10 @@ def resolve_network(network: Optional[str] = None, rpc_url: Optional[str] = None
         name = _URL_TO_NETWORK.get(endpoint, config.get('network', 'custom'))
         return endpoint, name
 
+    config_network = config.get('network', '').lower()
+    if config_network and config_network in NETWORK_MAP:
+        return NETWORK_MAP[config_network], config_network
+
     # Default: finney (mainnet)
     return NETWORK_MAP['finney'], 'finney'
 
@@ -853,6 +857,27 @@ def _read_issues_from_child_storage(substrate, contract_addr: str, verbose: bool
     # Sort by ID
     issues.sort(key=lambda x: x['id'])
     return issues
+
+
+def _make_contract_client(contract_addr: str, ws_endpoint: str, wallet_name: str, wallet_hotkey: str):
+    """Instantiate a wallet and IssueCompetitionContractClient from CLI args.
+
+    Returns (wallet, client). Lazy-imports bittensor and the contract client so
+    that the top-level CLI remains importable without those heavy dependencies.
+    """
+    import bittensor as bt
+
+    from gittensor.validator.issue_competitions.contract_client import (
+        IssueCompetitionContractClient,
+    )
+
+    wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
+    subtensor = bt.Subtensor(network=ws_endpoint)
+    client = IssueCompetitionContractClient(
+        contract_address=contract_addr,
+        subtensor=subtensor,
+    )
+    return wallet, client
 
 
 def read_issues_from_contract(ws_endpoint: str, contract_addr: str, verbose: bool = False) -> List[Dict[str, Any]]:

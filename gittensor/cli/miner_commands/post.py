@@ -14,13 +14,16 @@ import requests
 from rich.console import Console
 from rich.table import Table
 
-from gittensor.cli.miner_commands.helpers import _get_validator_axons
-from gittensor.constants import BASE_GITHUB_API_URL, NETWORK_MAP
+from gittensor.cli.miner_commands.helpers import (
+    NETUID_DEFAULT,
+    _error,
+    _get_validator_axons,
+    _load_config_value,
+    _resolve_endpoint,
+)
+from gittensor.constants import BASE_GITHUB_API_URL
 
 console = Console()
-
-# Shared CLI options for wallet/network configuration
-NETUID_DEFAULT = 74
 
 
 @click.command()
@@ -216,41 +219,3 @@ def _validate_pat_locally(pat: str) -> bool:
         return True
     except requests.RequestException:
         return False
-
-
-def _load_config_value(key: str):
-    """Load a value from ~/.gittensor/config.json, or None."""
-    from pathlib import Path
-
-    config_file = Path.home() / '.gittensor' / 'config.json'
-    if not config_file.exists():
-        return None
-    try:
-        config = json.loads(config_file.read_text())
-        return config.get(key)
-    except (json.JSONDecodeError, OSError):
-        return None
-
-
-def _resolve_endpoint(network: str | None, rpc_url: str | None) -> str:
-    """Resolve the subtensor endpoint from CLI args or config."""
-    if rpc_url:
-        return rpc_url
-    if network:
-        return NETWORK_MAP.get(network, network)
-    # Try config file
-    config_network = _load_config_value('network')
-    config_endpoint = _load_config_value('ws_endpoint')
-    if config_endpoint:
-        return config_endpoint
-    if config_network:
-        return NETWORK_MAP.get(config_network) or config_network
-    return NETWORK_MAP['finney']
-
-
-def _error(msg: str, json_mode: bool):
-    """Print an error message in the appropriate format."""
-    if json_mode:
-        click.echo(json.dumps({'success': False, 'error': msg}))
-    else:
-        console.print(f'[red]Error: {msg}[/red]')

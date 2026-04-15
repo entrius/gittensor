@@ -73,13 +73,12 @@ def _repos() -> Dict[str, RepositoryConfig]:
 
 
 def _run(pr: PullRequest):
-    evaluations = _evaluations(pr)
-    gh_to_uid = {DISCOVERER_GH: DISCOVERER_UID, SOLVER_GH: SOLVER_UID}
-    data: Dict[str, object] = {}
     from collections import defaultdict
 
     from gittensor.validator.issue_discovery.scoring import _DiscovererData
 
+    evaluations = _evaluations(pr)
+    gh_to_uid = {DISCOVERER_GH: DISCOVERER_UID, SOLVER_GH: SOLVER_UID}
     discoverer_data = defaultdict(lambda: _DiscovererData())
     _collect_issues_from_prs(evaluations, gh_to_uid, discoverer_data, _repos())
     return discoverer_data[DISCOVERER_GH]

@@ -28,7 +28,10 @@ def _run_pr_path(issue, pr):
     discoverer_data = {issue.author_github_id: _DiscovererData()}
 
     _collect_issues_from_prs(
-        miner_evaluations, github_id_to_uid, discoverer_data, {},
+        miner_evaluations,
+        github_id_to_uid,
+        discoverer_data,
+        {},
     )
     return discoverer_data[issue.author_github_id]
 
@@ -55,7 +58,8 @@ def test_completed_issue_in_pr_path_counts_as_solved(issue_factory, pr_factory):
 
 
 def test_transferred_issue_in_pr_path_counts_as_closed_not_solved(
-    issue_factory, pr_factory,
+    issue_factory,
+    pr_factory,
 ):
     issue = issue_factory.transferred()
     data = _run_pr_path(issue, pr_factory.merged())
@@ -64,7 +68,8 @@ def test_transferred_issue_in_pr_path_counts_as_closed_not_solved(
 
 
 def test_not_planned_issue_in_pr_path_counts_as_closed_not_solved(
-    issue_factory, pr_factory,
+    issue_factory,
+    pr_factory,
 ):
     issue = issue_factory.not_planned()
     data = _run_pr_path(issue, pr_factory.merged())
@@ -73,7 +78,8 @@ def test_not_planned_issue_in_pr_path_counts_as_closed_not_solved(
 
 
 def test_issue_with_no_state_reason_in_pr_path_counts_as_closed(
-    issue_factory, pr_factory,
+    issue_factory,
+    pr_factory,
 ):
     """Legacy data path: None state_reason routes to closed_count."""
     issue = issue_factory.no_reason()

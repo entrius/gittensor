@@ -291,9 +291,7 @@ def _merge_scan_issues(
             # Anti-gaming: only explicitly COMPLETED closures count as solved.
             # NOT_PLANNED, TRANSFERRED, and None all route to closed_count.
             if issue.state_reason != 'COMPLETED':
-                bt.logging.info(
-                    f'Scan issue #{issue.number} state_reason={issue.state_reason} — counts as closed'
-                )
+                bt.logging.info(f'Scan issue #{issue.number} state_reason={issue.state_reason} — counts as closed')
                 data.closed_count += 1
                 continue
             if issue.state == 'CLOSED' and issue.closed_at:

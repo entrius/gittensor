@@ -27,24 +27,28 @@ def _make_raw(state_reason: Optional[str], number: int) -> dict:
 
 def _run_scan(monkeypatch, raw_issues):
     monkeypatch.setattr(
-        repo_scan, '_fetch_closed_issues',
+        repo_scan,
+        '_fetch_closed_issues',
         lambda repo_name, since, token: raw_issues,
     )
     monkeypatch.setattr(
-        repo_scan, 'find_solver_from_cross_references',
+        repo_scan,
+        'find_solver_from_cross_references',
         lambda repo, issue_number, token: (None, None),
     )
 
     result: dict = {}
-    asyncio.run(repo_scan._scan_repo(
-        repo_name='test/repo',
-        lookback_date='2026-01-01',
-        validator_pat='x',
-        miner_github_ids={'1001'},
-        known_issues=set(),
-        result=result,
-        lookup_cap=10,
-    ))
+    asyncio.run(
+        repo_scan._scan_repo(
+            repo_name='test/repo',
+            lookback_date='2026-01-01',
+            validator_pat='x',
+            miner_github_ids={'1001'},
+            known_issues=set(),
+            result=result,
+            lookup_cap=10,
+        )
+    )
     return result
 
 

@@ -36,7 +36,6 @@ QUERY = """
     query($userId: ID!, $limit: Int!, $cursor: String) {
       node(id: $userId) {
         ... on User {
-          issues(states: [OPEN]) { totalCount }
           pullRequests(first: $limit, states: [MERGED, OPEN, CLOSED], orderBy: {field: CREATED_AT, direction: DESC}, after: $cursor) {
             pageInfo {
               hasNextPage
@@ -942,6 +941,64 @@ def should_skip_merged_pr(
     return (False, None)
 
 
+_USER_OPEN_ISSUES_QUERY = """
+query($userId: ID!, $cursor: String) {
+  node(id: $userId) {
+    ... on User {
+      issues(states: [OPEN], first: 100, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes { repository { nameWithOwner } }
+      }
+    }
+  }
+}
+"""
+
+
+def count_tracked_open_issues(
+    token: str,
+    github_user_node_id: str,
+    tracked_repo_names: set,
+    max_pages: int = 10,
+) -> Optional[int]:
+    """Count open issues filed against tracked repos only.
+
+    Returns None on API failure so callers can fall back to 0 — a broken
+    fetch must not silently demote a miner via the spam multiplier.
+    """
+    if not token or not tracked_repo_names:
+        return 0
+
+    count = 0
+    cursor: Optional[str] = None
+    for _ in range(max_pages):
+        result = execute_graphql_query(
+            query=_USER_OPEN_ISSUES_QUERY,
+            variables={'userId': github_user_node_id, 'cursor': cursor},
+            token=token,
+            max_attempts=3,
+        )
+        if not result or 'errors' in result:
+            bt.logging.warning(f'count_tracked_open_issues: GraphQL failure for user {github_user_node_id}')
+            return None
+
+        issues_block = (result.get('data') or {}).get('node', {}).get('issues') or {}
+        for node in issues_block.get('nodes') or []:
+            repo_name = ((node or {}).get('repository') or {}).get('nameWithOwner')
+            if repo_name and repo_name in tracked_repo_names:
+                count += 1
+
+        page_info = issues_block.get('pageInfo') or {}
+        if not page_info.get('hasNextPage'):
+            return count
+        cursor = page_info.get('endCursor')
+
+    bt.logging.warning(
+        f'count_tracked_open_issues: hit {max_pages}-page cap for user {github_user_node_id}, returning partial count'
+    )
+    return count
+
+
 def load_miners_prs(
     miner_eval: MinerEvaluation, master_repositories: Dict[str, RepositoryConfig], max_prs: int = 1000
 ) -> None:
@@ -997,10 +1054,6 @@ def load_miners_prs(
             if not user_data:
                 bt.logging.warning('User not found or no pull requests')
                 break
-
-            # Extract open issue count from first page (User-level field, not paginated)
-            if cursor is None:
-                miner_eval.total_open_issues = user_data.get('issues', {}).get('totalCount', 0)
 
             pr_data: Dict = user_data.get('pullRequests', {})
             prs: List = pr_data.get('nodes', [])
@@ -1058,9 +1111,18 @@ def load_miners_prs(
     except Exception as e:
         bt.logging.error(f'Unexpected error fetching PRs via GraphQL: {e}')
 
+    # Count open issues scoped to tracked repos (anti-spam gate).
+    # Must be scoped — a global count penalises miners for unrelated personal projects.
+    scoped_count = count_tracked_open_issues(
+        miner_eval.github_pat,
+        global_user_id,
+        set(master_repositories.keys()),
+    )
+    miner_eval.total_open_issues = scoped_count if scoped_count is not None else 0
+
     bt.logging.info(
         f'Fetched {len(miner_eval.merged_pull_requests)} merged PRs, {len(miner_eval.open_pull_requests)} open PRs, '
-        f'{len(miner_eval.closed_pull_requests)} closed'
+        f'{len(miner_eval.closed_pull_requests)} closed, {miner_eval.total_open_issues} tracked-repo open issues'
     )
 
 

@@ -5,44 +5,28 @@ on:
     branches: [main, test]
 
 jobs:
-  # if PR is same repo, auto commit lint fixes
-  ruff:
+  pre-commit:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    if: github.event.pull_request.head.repo.full_name == github.repository
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.head_ref }}
           repository: ${{ github.event.pull_request.head.repo.full_name }}
 
-      - uses: astral-sh/ruff-action@v3
-        with:
-          args: "check --fix"
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
 
-      - uses: astral-sh/ruff-action@v3
-        with:
-          args: "format"
+      - name: Set up Python
+        run: uv python install 3.12
 
-      - uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: "style: auto-format with ruff"
+      - name: Install dependencies
+        run: uv sync --extra dev
 
-  # if PR is from a fork, fail lint, no autocommit
-  ruff-fork:
-    runs-on: ubuntu-latest
-    if: github.event.pull_request.head.repo.full_name != github.repository
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.head_ref }}
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
+      - name: Run pre-commit checks
+        id: pre-commit
+        run: uv run pre-commit run --all-files --show-diff-on-failure
 
-      - uses: astral-sh/ruff-action@v3
-        with:
-          args: "check"
-
-      - uses: astral-sh/ruff-action@v3
-        with:
-          args: "format --check"
+      - name: Run pyright
+        run: SKIP=pytest uv run pre-commit run --all-files --hook-stage pre-push

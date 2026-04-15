@@ -9,7 +9,6 @@ from unittest.mock import patch
 
 from gittensor.utils.github_api_tools import count_tracked_open_issues
 
-
 TRACKED = {'owner/repo-a', 'owner/repo-b'}
 
 
@@ -31,13 +30,15 @@ def _issue(repo):
 
 
 def test_counts_only_tracked_repos():
-    response = _page([
-        _issue('owner/repo-a'),
-        _issue('owner/repo-a'),
-        _issue('someone/personal-sandbox'),   # not tracked → must be excluded
-        _issue('owner/repo-b'),
-        _issue('other/upstream'),              # not tracked → must be excluded
-    ])
+    response = _page(
+        [
+            _issue('owner/repo-a'),
+            _issue('owner/repo-a'),
+            _issue('someone/personal-sandbox'),  # not tracked → must be excluded
+            _issue('owner/repo-b'),
+            _issue('other/upstream'),  # not tracked → must be excluded
+        ]
+    )
     with patch('gittensor.utils.github_api_tools.execute_graphql_query', return_value=response):
         assert count_tracked_open_issues('tok', 'node-id', TRACKED) == 3
 
@@ -82,10 +83,7 @@ def test_pagination_accumulates_across_pages():
 def test_hits_max_pages_cap_returns_partial():
     """Pathological account with huge open-issue history — return partial rather than crash."""
     cap = 2
-    pages = [
-        _page([_issue('owner/repo-a')], has_next=True, cursor=f'c{i}')
-        for i in range(cap)
-    ]
+    pages = [_page([_issue('owner/repo-a')], has_next=True, cursor=f'c{i}') for i in range(cap)]
     with patch('gittensor.utils.github_api_tools.execute_graphql_query', side_effect=pages):
         result = count_tracked_open_issues('tok', 'node-id', TRACKED, max_pages=cap)
         assert result == cap  # one hit per page

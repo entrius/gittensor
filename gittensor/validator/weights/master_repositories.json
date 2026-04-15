@@ -471,18 +471,6 @@
   "omegalabsinc/omegalabs-bittensor-subnet": {
     "weight": 0.0409
   },
-  "one-covenant/basilica": {
-    "weight": 0.1713
-  },
-  "one-covenant/bittensor-rs": {
-    "weight": 0.1417
-  },
-  "one-covenant/grail": {
-    "weight": 0.1672
-  },
-  "one-covenant/templar": {
-    "weight": 0.1634
-  },
   "oneoneone-io/subnet-111": {
     "weight": 0.0407
   },

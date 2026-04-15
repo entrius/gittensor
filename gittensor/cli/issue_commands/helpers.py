@@ -5,7 +5,6 @@
 Shared helper functions for issue commands
 """
 
-import hashlib
 import json
 import os
 import re
@@ -24,6 +23,7 @@ from rich.panel import Panel
 
 from gittensor.cli.issue_commands.tables import build_pr_table
 from gittensor.constants import CONTRACT_ADDRESS, NETWORK_MAP
+from gittensor.validator.issue_competitions.codec import compute_ink5_lazy_key, decode_issue_bytes
 
 # Default CLI config paths
 GITTENSOR_DIR = Path.home() / '.gittensor'
@@ -589,6 +589,27 @@ def resolve_network(network: Optional[str] = None, rpc_url: Optional[str] = None
     return NETWORK_MAP['finney'], 'finney'
 
 
+def _resolve_contract_and_network(
+    contract: str,
+    network: Optional[str] = None,
+    rpc_url: Optional[str] = None,
+    *,
+    missing_contract_message: str = 'Contract address not configured.',
+) -> Tuple[str, str, str]:
+    """Resolve contract address, WS endpoint, and network name from CLI options.
+
+    Combines get_contract_address and resolve_network into one call, raising
+    click.ClickException when the contract address is empty.
+
+    Returns (contract_addr, ws_endpoint, network_name).
+    """
+    contract_addr = get_contract_address(contract)
+    ws_endpoint, network_name = resolve_network(network, rpc_url)
+    if not contract_addr:
+        raise click.ClickException(missing_contract_message)
+    return contract_addr, ws_endpoint, network_name
+
+
 # ============================================================================
 # Contract storage reading helpers (shared by view and admin commands)
 # ============================================================================
@@ -708,24 +729,6 @@ def _read_contract_packed_storage(substrate, contract_addr: str, verbose: bool =
     }
 
 
-def _compute_ink5_lazy_key(root_key_hex: str, encoded_key: bytes) -> str:
-    """
-    Compute Ink! 5 lazy mapping storage key using blake2_128concat.
-
-    Args:
-        root_key_hex: Hex string of the mapping root key (e.g., '52789899')
-        encoded_key: SCALE-encoded key bytes
-
-    Returns:
-        Hex-encoded storage key
-    """
-    root_key = bytes.fromhex(root_key_hex.replace('0x', ''))
-    # Blake2_128Concat: blake2_128(root_key || encoded_key) || root_key || encoded_key
-    data = root_key + encoded_key
-    h = hashlib.blake2b(data, digest_size=16).digest()
-    return '0x' + (h + data).hex()
-
-
 def _read_issues_from_child_storage(substrate, contract_addr: str, verbose: bool = False) -> List[Dict[str, Any]]:
     """
     Read all issues from contract child storage.
@@ -781,7 +784,7 @@ def _read_issues_from_child_storage(substrate, contract_addr: str, verbose: bool
     for issue_id in range(1, next_issue_id):
         # SCALE encode u64 as little-endian 8 bytes
         encoded_id = struct.pack('<Q', issue_id)
-        lazy_key = _compute_ink5_lazy_key('52789899', encoded_id)
+        lazy_key = compute_ink5_lazy_key('52789899', encoded_id)
 
         val_result = substrate.rpc_request('childstate_getStorage', [child_key, lazy_key, None])
         if not val_result.get('result'):
@@ -792,63 +795,24 @@ def _read_issues_from_child_storage(substrate, contract_addr: str, verbose: bool
         data = bytes.fromhex(val_result['result'].replace('0x', ''))
 
         try:
-            # Decode Issue struct:
-            # id: u64 (8 bytes)
-            # github_url_hash: [u8; 32] (32 bytes)
-            # repository_full_name: String (compact len + bytes)
-            # issue_number: u32 (4 bytes)
-            # bounty_amount: u128 (16 bytes)
-            # target_bounty: u128 (16 bytes)
-            # status: IssueStatus enum (1 byte)
-            # registered_at_block: u32 (4 bytes)
-
-            offset = 0
-            stored_issue_id = struct.unpack_from('<Q', data, offset)[0]
-            offset += 8
-            offset += 32  # Skip url_hash
-
-            # String: compact-encoded length then bytes
-            len_byte = data[offset]
-            if len_byte & 0x03 == 0:
-                str_len = len_byte >> 2
-                offset += 1
-            elif len_byte & 0x03 == 1:
-                # Two-byte length
-                str_len = (data[offset] | (data[offset + 1] << 8)) >> 2
-                offset += 2
-            else:
-                str_len = 0
-                offset += 1
-
-            repo_name = data[offset : offset + str_len].decode('utf-8', errors='replace')
-            offset += str_len
-
-            issue_number = struct.unpack_from('<I', data, offset)[0]
-            offset += 4
-
-            bounty_lo, bounty_hi = struct.unpack_from('<QQ', data, offset)
-            bounty_amount = bounty_lo + (bounty_hi << 64)
-            offset += 16
-
-            target_lo, target_hi = struct.unpack_from('<QQ', data, offset)
-            target_bounty = target_lo + (target_hi << 64)
-            offset += 16
-
-            status_byte = data[offset]
+            raw = decode_issue_bytes(data)
+            status_byte = raw['status_byte']
             status = status_names[status_byte] if status_byte < len(status_names) else 'Unknown'
 
             issues.append(
                 {
-                    'id': stored_issue_id,
-                    'repository_full_name': repo_name,
-                    'issue_number': issue_number,
-                    'bounty_amount': bounty_amount,
-                    'target_bounty': target_bounty,
+                    'id': raw['id'],
+                    'repository_full_name': raw['repository_full_name'],
+                    'issue_number': raw['issue_number'],
+                    'bounty_amount': raw['bounty_amount'],
+                    'target_bounty': raw['target_bounty'],
                     'status': status,
                 }
             )
             if verbose:
-                console.print(f'[dim]Debug: Decoded issue {stored_issue_id}: {repo_name}#{issue_number}[/dim]')
+                console.print(
+                    f'[dim]Debug: Decoded issue {raw["id"]}: {raw["repository_full_name"]}#{raw["issue_number"]}[/dim]'
+                )
         except Exception as e:
             if verbose:
                 console.print(f'[dim]Debug: Failed to decode issue {issue_id}: {e}[/dim]')

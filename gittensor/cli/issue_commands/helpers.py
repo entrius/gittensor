@@ -576,6 +576,10 @@ def resolve_network(network: Optional[str] = None, rpc_url: Optional[str] = None
         name = _URL_TO_NETWORK.get(endpoint, config.get('network', 'custom'))
         return endpoint, name
 
+    config_network = config.get('network', '').lower()
+    if config_network and config_network in NETWORK_MAP:
+        return NETWORK_MAP[config_network], config_network
+
     # Default: finney (mainnet)
     return NETWORK_MAP['finney'], 'finney'
 

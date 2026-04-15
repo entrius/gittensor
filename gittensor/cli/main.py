@@ -14,7 +14,6 @@ Usage:
 
 import json
 import os
-from pathlib import Path
 
 import click
 from click.shell_completion import get_completion_class
@@ -23,12 +22,9 @@ from rich.table import Table
 
 from gittensor.cli.issue_commands import register_commands
 from gittensor.cli.issue_commands.help import StyledAliasGroup, StyledGroup
+from gittensor.cli.issue_commands.helpers import CONFIG_FILE, GITTENSOR_DIR
 
 console = Console()
-
-# Config paths
-GITTENSOR_DIR = Path.home() / '.gittensor'
-CONFIG_FILE = GITTENSOR_DIR / 'config.json'
 
 
 @click.group(cls=StyledAliasGroup)

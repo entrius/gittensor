@@ -53,7 +53,9 @@ def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, json_mode)
     if not json_mode:
         with console.status('[bold]Connecting to network...'):
             try:
-                wallet, subtensor, metagraph, dendrite = _connect_bittensor(wallet_name, wallet_hotkey, ws_endpoint, netuid)
+                wallet, subtensor, metagraph, dendrite = _connect_bittensor(
+                    wallet_name, wallet_hotkey, ws_endpoint, netuid
+                )
             except Exception as e:
                 _error(f'Failed to initialize bittensor: {e}', json_mode)
                 sys.exit(1)

@@ -58,6 +58,7 @@ def _resolve_endpoint(network: str | None, rpc_url: str | None) -> str:
 def _connect_bittensor(wallet_name: str, wallet_hotkey: str, ws_endpoint: str, netuid: int):
     """Set up and return bittensor wallet, subtensor, metagraph and dendrite."""
     import bittensor as bt
+
     w = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
     st = bt.Subtensor(network=ws_endpoint)
     mg = st.metagraph(netuid=netuid)

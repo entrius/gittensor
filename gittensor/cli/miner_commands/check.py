@@ -10,8 +10,7 @@ import click
 from rich.console import Console
 from rich.table import Table
 
-from .helpers import _get_validator_axons
-from .post import NETUID_DEFAULT, _error, _load_config_value, _resolve_endpoint
+from .helpers import NETUID_DEFAULT, _error, _get_validator_axons, _load_config_value, _resolve_endpoint
 
 console = Console()
 

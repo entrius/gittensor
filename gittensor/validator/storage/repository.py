@@ -51,6 +51,23 @@ class BaseRepository:
         finally:
             cursor.close()
 
+    def _bulk_upsert(self, query: str, values: list, error_context: str) -> int:
+        """Execute a bulk upsert via ``psycopg2.extras.execute_values``.
+
+        Returns the number of rows on success, 0 on failure.
+        """
+        from psycopg2.extras import execute_values
+
+        try:
+            with self.get_cursor() as cursor:
+                execute_values(cursor, query, values, page_size=100)
+                self.db.commit()
+                return len(values)
+        except Exception as e:
+            self.db.rollback()
+            self.logger.error(f'{error_context}: {e}')
+            return 0
+
     def execute_command(self, query: str, params: tuple = ()) -> bool:
         """
         Execute an INSERT, UPDATE, or DELETE command.
@@ -193,24 +210,7 @@ class Repository(BaseRepository):
                 )
             )
 
-        try:
-            with self.get_cursor() as cursor:
-                # Use psycopg2's execute_values for efficient bulk insert
-                from psycopg2.extras import execute_values
-
-                execute_values(
-                    cursor,
-                    BULK_UPSERT_PULL_REQUESTS.replace('VALUES %s', 'VALUES %s'),
-                    values,
-                    template=None,
-                    page_size=100,
-                )
-                self.db.commit()
-                return len(values)
-        except Exception as e:
-            self.db.rollback()
-            self.logger.error(f'Error in bulk pull request storage: {e}')
-            return 0
+        return self._bulk_upsert(BULK_UPSERT_PULL_REQUESTS, values, 'Error in bulk pull request storage')
 
     def store_issues_bulk(self, issues: List[Issue]) -> int:
         """
@@ -252,20 +252,7 @@ class Repository(BaseRepository):
                 )
             )
 
-        try:
-            with self.get_cursor() as cursor:
-                # Use psycopg2's execute_values for efficient bulk insert
-                from psycopg2.extras import execute_values
-
-                execute_values(
-                    cursor, BULK_UPSERT_ISSUES.replace('VALUES %s', 'VALUES %s'), values, template=None, page_size=100
-                )
-                self.db.commit()
-                return len(values)
-        except Exception as e:
-            self.db.rollback()
-            self.logger.error(f'Error in bulk issue storage: {e}')
-            return 0
+        return self._bulk_upsert(BULK_UPSERT_ISSUES, values, 'Error in bulk issue storage')
 
     def store_file_changes_bulk(self, file_changes: List[FileChange]) -> int:
         """
@@ -297,25 +284,8 @@ class Repository(BaseRepository):
                 )
             )
 
-        try:
-            with self.get_cursor() as cursor:
-                # Use psycopg2's execute_values for efficient bulk insert
-                from psycopg2.extras import execute_values
-
-                execute_values(
-                    cursor,
-                    BULK_UPSERT_FILE_CHANGES.replace('VALUES %s', 'VALUES %s'),
-                    values,
-                    template=None,
-                    page_size=100,
-                )
-                self.db.commit()
-                return len(values)
-        except Exception as e:
-            self.db.rollback()
-            prs = {(fc.pr_number, fc.repository_full_name) for fc in file_changes}
-            self.logger.error(f'Error in bulk file change storage: {e} | PRs: {prs}')
-            return 0
+        prs = {(fc.pr_number, fc.repository_full_name) for fc in file_changes}
+        return self._bulk_upsert(BULK_UPSERT_FILE_CHANGES, values, f'Error in bulk file change storage (PRs: {prs})')
 
     def set_miner_evaluation(self, evaluation: MinerEvaluation) -> bool:
         """
@@ -360,14 +330,4 @@ class Repository(BaseRepository):
             )
         ]
 
-        try:
-            with self.get_cursor() as cursor:
-                from psycopg2.extras import execute_values
-
-                execute_values(cursor, BULK_UPSERT_MINER_EVALUATION, eval_values)
-                self.db.commit()
-                return True
-        except Exception as e:
-            self.db.rollback()
-            self.logger.error(f'Error in miner evaluation storage: {e}')
-            return False
+        return bool(self._bulk_upsert(BULK_UPSERT_MINER_EVALUATION, eval_values, 'Error in miner evaluation storage'))

@@ -182,21 +182,6 @@ def get_github_user(token: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def get_github_username(token: str) -> Optional[str]:
-    """Get GitHub username (login) using a PAT.
-
-    Args:
-        token (str): GitHub pat
-
-    Returns:
-        Optional[str]: Username (login) string, or None if the PAT is invalid or an error occurred.
-    """
-    user_data = get_github_user(token)
-    if not user_data:
-        return None
-    return user_data.get('login')
-
-
 def get_github_id(token: str) -> Optional[str]:
     """Get GitHub numeric user id (as string) using a PAT.
 
@@ -215,32 +200,6 @@ def get_github_id(token: str) -> Optional[str]:
         return None
 
     return str(user_id)
-
-
-def get_github_account_age_days(token: str) -> Optional[int]:
-    """Get GitHub account age in days for a PAT.
-
-    Args:
-        token (str): GitHub personal access token.
-
-    Returns:
-        Optional[int]: Number of days since account creation, or None if it cannot be determined.
-    """
-    user_data = get_github_user(token)
-    if not user_data:
-        return None
-
-    created_at = user_data.get('created_at')
-    if not created_at:
-        return None
-
-    try:
-        created_dt = datetime.fromisoformat(created_at.rstrip('Z')).replace(tzinfo=timezone.utc)
-        now_dt = datetime.now(timezone.utc)
-        return (now_dt - created_dt).days
-    except Exception as e:
-        bt.logging.warning(f'Could not parse GitHub account creation date: {e}')
-        return None
 
 
 def get_merge_base_sha(repository: str, base_sha: str, head_sha: str, token: str) -> Optional[str]:

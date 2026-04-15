@@ -15,6 +15,7 @@ from rich.console import Console
 from rich.table import Table
 
 from gittensor.cli.issue_commands.helpers import resolve_network
+from gittensor.cli.miner_commands.helpers import _get_validator_axons
 from gittensor.constants import BASE_GITHUB_API_URL
 
 console = Console()
@@ -115,12 +116,7 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_m
         sys.exit(1)
 
     # 4. Find active validator axons (vtrust > 0.1 = actively participating in consensus)
-    validator_axons = []
-    validator_uids = []
-    for uid in range(metagraph.n):
-        if metagraph.validator_trust[uid] > 0.1 and metagraph.axons[uid].is_serving:
-            validator_axons.append(metagraph.axons[uid])
-            validator_uids.append(uid)
+    validator_axons, validator_uids = _get_validator_axons(metagraph)
 
     if not validator_axons:
         _error('No reachable validator axons found on the network.', json_mode)

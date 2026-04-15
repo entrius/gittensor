@@ -2,7 +2,6 @@
 import base64
 import fnmatch
 import os
-import re
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -182,21 +181,6 @@ def get_github_user(token: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def get_github_username(token: str) -> Optional[str]:
-    """Get GitHub username (login) using a PAT.
-
-    Args:
-        token (str): GitHub pat
-
-    Returns:
-        Optional[str]: Username (login) string, or None if the PAT is invalid or an error occurred.
-    """
-    user_data = get_github_user(token)
-    if not user_data:
-        return None
-    return user_data.get('login')
-
-
 def get_github_id(token: str) -> Optional[str]:
     """Get GitHub numeric user id (as string) using a PAT.
 
@@ -215,32 +199,6 @@ def get_github_id(token: str) -> Optional[str]:
         return None
 
     return str(user_id)
-
-
-def get_github_account_age_days(token: str) -> Optional[int]:
-    """Get GitHub account age in days for a PAT.
-
-    Args:
-        token (str): GitHub personal access token.
-
-    Returns:
-        Optional[int]: Number of days since account creation, or None if it cannot be determined.
-    """
-    user_data = get_github_user(token)
-    if not user_data:
-        return None
-
-    created_at = user_data.get('created_at')
-    if not created_at:
-        return None
-
-    try:
-        created_dt = datetime.fromisoformat(created_at.rstrip('Z')).replace(tzinfo=timezone.utc)
-        now_dt = datetime.now(timezone.utc)
-        return (now_dt - created_dt).days
-    except Exception as e:
-        bt.logging.warning(f'Could not parse GitHub account creation date: {e}')
-        return None
 
 
 def get_merge_base_sha(repository: str, base_sha: str, head_sha: str, token: str) -> Optional[str]:
@@ -881,7 +839,19 @@ def try_add_open_or_closed_pr(
             bt.logging.warning(f'PR #{pr_raw["number"]} is CLOSED but missing closedAt timestamp.')
             return
 
+        created_at = pr_raw.get('createdAt')
+        if not created_at:
+            bt.logging.warning(f'PR #{pr_raw["number"]} is CLOSED but missing createdAt timestamp.')
+            return
+
         closed_dt = datetime.fromisoformat(closed_at.rstrip('Z')).replace(tzinfo=timezone.utc)
+        created_dt = datetime.fromisoformat(created_at.rstrip('Z')).replace(tzinfo=timezone.utc)
+
+        # Ignore stale PRs that were created before the scoring lookback window.
+        # This allows users to close old PRs without receiving a fresh credibility penalty.
+        if created_dt < lookback_date_filter:
+            return
+
         if closed_dt >= lookback_date_filter:
             miner_eval.add_closed_pull_request(pr_raw)
 
@@ -1126,21 +1096,6 @@ def get_pr_open_times(repo: str, pr_numbers: List[int], token: str) -> Dict[int,
             bt.logging.debug(f'Error fetching PR #{pr_number} from {repo}: {e}')
 
     return result
-
-
-def extract_pr_number_from_url(pr_url: str) -> Optional[int]:
-    """Extract PR number from a GitHub PR URL.
-
-    Args:
-        pr_url: Full GitHub PR URL (e.g., https://github.com/owner/repo/pull/123)
-
-    Returns:
-        PR number as integer, or None if invalid URL
-    """
-    if not pr_url:
-        return None
-    match = re.search(r'/pull/(\d+)', pr_url)
-    return int(match.group(1)) if match else None
 
 
 def find_solver_from_cross_references(repo: str, issue_number: int, token: str) -> tuple[Optional[int], Optional[int]]:

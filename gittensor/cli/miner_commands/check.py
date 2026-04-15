@@ -10,7 +10,7 @@ import click
 from rich.console import Console
 from rich.table import Table
 
-from .post import NETUID_DEFAULT, _load_config_value, _resolve_endpoint
+from .helpers import NETUID_DEFAULT, _error, _get_validator_axons, _load_config_value, _resolve_endpoint
 
 console = Console()
 
@@ -45,22 +45,23 @@ def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, json_mode)
         console.print(f'[dim]Wallet: {wallet_name}/{wallet_hotkey} | Network: {ws_endpoint} | Netuid: {netuid}[/dim]')
 
     # 2. Set up bittensor objects
+    def _connect():
+        w = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
+        st = bt.Subtensor(network=ws_endpoint)
+        mg = st.metagraph(netuid=netuid)
+        dd = bt.Dendrite(wallet=w)
+        return w, st, mg, dd
+
     if not json_mode:
         with console.status('[bold]Connecting to network...'):
             try:
-                wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
-                subtensor = bt.Subtensor(network=ws_endpoint)
-                metagraph = subtensor.metagraph(netuid=netuid)
-                dendrite = bt.Dendrite(wallet=wallet)
+                wallet, subtensor, metagraph, dendrite = _connect()
             except Exception as e:
                 _error(f'Failed to initialize bittensor: {e}', json_mode)
                 sys.exit(1)
     else:
         try:
-            wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
-            subtensor = bt.Subtensor(network=ws_endpoint)
-            metagraph = subtensor.metagraph(netuid=netuid)
-            dendrite = bt.Dendrite(wallet=wallet)
+            wallet, subtensor, metagraph, dendrite = _connect()
         except Exception as e:
             _error(f'Failed to initialize bittensor: {e}', json_mode)
             sys.exit(1)
@@ -71,12 +72,7 @@ def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, json_mode)
         sys.exit(1)
 
     # 3. Find active validator axons (vtrust > 0.1 = actively participating in consensus)
-    validator_axons = []
-    validator_uids = []
-    for uid in range(metagraph.n):
-        if metagraph.validator_trust[uid] > 0.1 and metagraph.axons[uid].is_serving:
-            validator_axons.append(metagraph.axons[uid])
-            validator_uids.append(uid)
+    validator_axons, validator_uids = _get_validator_axons(metagraph)
 
     if not validator_axons:
         _error('No reachable validator axons found on the network.', json_mode)
@@ -85,25 +81,19 @@ def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, json_mode)
     # 4. Send check probes
     synapse = PatCheckSynapse()
 
+    async def _check():
+        return await dendrite(
+            axons=validator_axons,
+            synapse=synapse,
+            deserialize=False,
+            timeout=15.0,
+        )
+
     if not json_mode:
         with console.status(f'[bold]Checking {len(validator_axons)} validators...'):
-            responses = asyncio.get_event_loop().run_until_complete(
-                dendrite(
-                    axons=validator_axons,
-                    synapse=synapse,
-                    deserialize=False,
-                    timeout=15.0,
-                )
-            )
+            responses = asyncio.run(_check())
     else:
-        responses = asyncio.get_event_loop().run_until_complete(
-            dendrite(
-                axons=validator_axons,
-                synapse=synapse,
-                deserialize=False,
-                timeout=15.0,
-            )
-        )
+        responses = asyncio.run(_check())
 
     # 5. Collect results
     results = []
@@ -158,11 +148,3 @@ def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, json_mode)
 
         console.print(table)
         console.print(f'\n[bold]{valid_count}/{len(results)} validators have a valid PAT stored.[/bold]')
-
-
-def _error(msg: str, json_mode: bool):
-    """Print an error message in the appropriate format."""
-    if json_mode:
-        click.echo(json.dumps({'success': False, 'error': msg}))
-    else:
-        console.print(f'[red]Error: {msg}[/red]')

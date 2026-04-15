@@ -23,7 +23,11 @@ from rich.console import Console
 from rich.panel import Panel
 
 from gittensor.cli.issue_commands.tables import build_pr_table
-from gittensor.constants import CONTRACT_ADDRESS
+from gittensor.constants import CONTRACT_ADDRESS, NETWORK_MAP
+
+# Default CLI config paths
+GITTENSOR_DIR = Path.home() / '.gittensor'
+CONFIG_FILE = GITTENSOR_DIR / 'config.json'
 
 # ALPHA token conversion
 ALPHA_DECIMALS = 9
@@ -43,10 +47,6 @@ STATUS_COLORS: Dict[str, str] = {
     'Cancelled': 'dim',
 }
 
-
-# Default paths
-GITTENSOR_DIR = Path.home() / '.gittensor'
-CONFIG_FILE = GITTENSOR_DIR / 'config.json'
 
 console = Console()
 
@@ -540,12 +540,6 @@ def get_contract_address(cli_value: str = '') -> str:
     return os.environ.get('CONTRACT_ADDRESS') or CONTRACT_ADDRESS
 
 
-NETWORK_MAP = {
-    'finney': 'wss://entrypoint-finney.opentensor.ai:443',
-    'test': 'wss://test.finney.opentensor.ai:443',
-    'local': 'ws://127.0.0.1:9944',
-}
-
 # Reverse lookup: URL -> network name
 _URL_TO_NETWORK = {url: name for name, url in NETWORK_MAP.items()}
 
@@ -586,6 +580,10 @@ def resolve_network(network: Optional[str] = None, rpc_url: Optional[str] = None
         endpoint = config['ws_endpoint']
         name = _URL_TO_NETWORK.get(endpoint, config.get('network', 'custom'))
         return endpoint, name
+
+    config_network = config.get('network', '').lower()
+    if config_network and config_network in NETWORK_MAP:
+        return NETWORK_MAP[config_network], config_network
 
     # Default: finney (mainnet)
     return NETWORK_MAP['finney'], 'finney'
@@ -859,6 +857,27 @@ def _read_issues_from_child_storage(substrate, contract_addr: str, verbose: bool
     # Sort by ID
     issues.sort(key=lambda x: x['id'])
     return issues
+
+
+def _make_contract_client(contract_addr: str, ws_endpoint: str, wallet_name: str, wallet_hotkey: str):
+    """Instantiate a wallet and IssueCompetitionContractClient from CLI args.
+
+    Returns (wallet, client). Lazy-imports bittensor and the contract client so
+    that the top-level CLI remains importable without those heavy dependencies.
+    """
+    import bittensor as bt
+
+    from gittensor.validator.issue_competitions.contract_client import (
+        IssueCompetitionContractClient,
+    )
+
+    wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
+    subtensor = bt.Subtensor(network=ws_endpoint)
+    client = IssueCompetitionContractClient(
+        contract_address=contract_addr,
+        subtensor=subtensor,
+    )
+    return wallet, client
 
 
 def read_issues_from_contract(ws_endpoint: str, contract_addr: str, verbose: bool = False) -> List[Dict[str, Any]]:

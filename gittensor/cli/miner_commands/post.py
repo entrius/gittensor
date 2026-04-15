@@ -14,12 +14,16 @@ import requests
 from rich.console import Console
 from rich.table import Table
 
+from gittensor.cli.miner_commands.helpers import (
+    NETUID_DEFAULT,
+    _error,
+    _get_validator_axons,
+    _load_config_value,
+    _resolve_endpoint,
+)
 from gittensor.constants import BASE_GITHUB_API_URL
 
 console = Console()
-
-# Shared CLI options for wallet/network configuration
-NETUID_DEFAULT = 2
 
 
 @click.command()
@@ -87,22 +91,23 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_m
         console.print(f'[dim]Wallet: {wallet_name}/{wallet_hotkey} | Network: {ws_endpoint} | Netuid: {netuid}[/dim]')
 
     # 3. Set up bittensor objects
+    def _connect():
+        w = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
+        st = bt.Subtensor(network=ws_endpoint)
+        mg = st.metagraph(netuid=netuid)
+        dd = bt.Dendrite(wallet=w)
+        return w, st, mg, dd
+
     if not json_mode:
         with console.status('[bold]Connecting to network...'):
             try:
-                wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
-                subtensor = bt.Subtensor(network=ws_endpoint)
-                metagraph = subtensor.metagraph(netuid=netuid)
-                dendrite = bt.Dendrite(wallet=wallet)
+                wallet, subtensor, metagraph, dendrite = _connect()
             except Exception as e:
                 _error(f'Failed to initialize bittensor: {e}', json_mode)
                 sys.exit(1)
     else:
         try:
-            wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
-            subtensor = bt.Subtensor(network=ws_endpoint)
-            metagraph = subtensor.metagraph(netuid=netuid)
-            dendrite = bt.Dendrite(wallet=wallet)
+            wallet, subtensor, metagraph, dendrite = _connect()
         except Exception as e:
             _error(f'Failed to initialize bittensor: {e}', json_mode)
             sys.exit(1)
@@ -113,12 +118,7 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_m
         sys.exit(1)
 
     # 4. Find active validator axons (vtrust > 0.1 = actively participating in consensus)
-    validator_axons = []
-    validator_uids = []
-    for uid in range(metagraph.n):
-        if metagraph.validator_trust[uid] > 0.1 and metagraph.axons[uid].is_serving:
-            validator_axons.append(metagraph.axons[uid])
-            validator_uids.append(uid)
+    validator_axons, validator_uids = _get_validator_axons(metagraph)
 
     if not validator_axons:
         _error('No reachable validator axons found on the network.', json_mode)
@@ -127,25 +127,19 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_m
     # 5. Broadcast
     synapse = PatBroadcastSynapse(github_access_token=pat)
 
+    async def _broadcast():
+        return await dendrite(
+            axons=validator_axons,
+            synapse=synapse,
+            deserialize=False,
+            timeout=30.0,
+        )
+
     if not json_mode:
         with console.status(f'[bold]Broadcasting to {len(validator_axons)} validators...'):
-            responses = asyncio.get_event_loop().run_until_complete(
-                dendrite(
-                    axons=validator_axons,
-                    synapse=synapse,
-                    deserialize=False,
-                    timeout=30.0,
-                )
-            )
+            responses = asyncio.run(_broadcast())
     else:
-        responses = asyncio.get_event_loop().run_until_complete(
-            dendrite(
-                axons=validator_axons,
-                synapse=synapse,
-                deserialize=False,
-                timeout=30.0,
-            )
-        )
+        responses = asyncio.run(_broadcast())
 
     # 6. Collect results
     results = []
@@ -225,48 +219,3 @@ def _validate_pat_locally(pat: str) -> bool:
         return True
     except requests.RequestException:
         return False
-
-
-def _load_config_value(key: str):
-    """Load a value from ~/.gittensor/config.json, or None."""
-    from pathlib import Path
-
-    config_file = Path.home() / '.gittensor' / 'config.json'
-    if not config_file.exists():
-        return None
-    try:
-        config = json.loads(config_file.read_text())
-        return config.get(key)
-    except (json.JSONDecodeError, OSError):
-        return None
-
-
-NETWORK_MAP = {
-    'local': 'ws://127.0.0.1:9944',
-    'test': 'wss://test.finney.opentensor.ai:443/',
-    'finney': 'wss://entrypoint-finney.opentensor.ai:443/',
-}
-
-
-def _resolve_endpoint(network: str | None, rpc_url: str | None) -> str:
-    """Resolve the subtensor endpoint from CLI args or config."""
-    if rpc_url:
-        return rpc_url
-    if network:
-        return NETWORK_MAP.get(network, network)
-    # Try config file
-    config_network = _load_config_value('network')
-    config_endpoint = _load_config_value('ws_endpoint')
-    if config_endpoint:
-        return config_endpoint
-    if config_network:
-        return NETWORK_MAP.get(config_network) or config_network
-    return NETWORK_MAP['finney']
-
-
-def _error(msg: str, json_mode: bool):
-    """Print an error message in the appropriate format."""
-    if json_mode:
-        click.echo(json.dumps({'success': False, 'error': msg}))
-    else:
-        console.print(f'[red]Error: {msg}[/red]')

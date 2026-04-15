@@ -9,6 +9,15 @@ SECONDS_PER_DAY = 86400
 SECONDS_PER_HOUR = 3600
 
 # =============================================================================
+# Network
+# =============================================================================
+NETWORK_MAP = {
+    'finney': 'wss://entrypoint-finney.opentensor.ai:443',
+    'test': 'wss://test.finney.opentensor.ai:443',
+    'local': 'ws://127.0.0.1:9944',
+}
+
+# =============================================================================
 # GitHub API
 # =============================================================================
 BASE_GITHUB_API_URL = 'https://api.github.com'
@@ -104,7 +113,7 @@ INLINE_TEST_PATTERNS: Dict[str, re.Pattern] = {
 # Eligibility Gate (OSS Contributions)
 # =============================================================================
 MIN_VALID_MERGED_PRS = 5  # minimum "valid" merged PRs (token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE) to receive score
-MIN_CREDIBILITY = 0.90  # minimum credibility ratio to receive score
+MIN_CREDIBILITY = 0.80  # minimum credibility ratio to receive score
 CREDIBILITY_MULLIGAN_COUNT = 1  # number of closed PRs forgiven (erased from merged+closed counts entirely)
 
 # =============================================================================

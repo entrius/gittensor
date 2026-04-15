@@ -19,6 +19,7 @@ from rich.table import Table
 
 from .help import StyledGroup
 from .helpers import (
+    _make_contract_client,
     console,
     get_contract_address,
     print_error,
@@ -136,19 +137,8 @@ def val_vote_solution(
     )
 
     try:
-        import bittensor as bt
-
-        from gittensor.validator.issue_competitions.contract_client import (
-            IssueCompetitionContractClient,
-        )
-
         with console.status('[bold cyan]Submitting vote...', spinner='dots'):
-            wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
-            subtensor = bt.Subtensor(network=ws_endpoint)
-            client = IssueCompetitionContractClient(
-                contract_address=contract_addr,
-                subtensor=subtensor,
-            )
+            wallet, client = _make_contract_client(contract_addr, ws_endpoint, wallet_name, wallet_hotkey)
             result = client.vote_solution(issue_id, solver_hotkey, solver_coldkey, pr_number, wallet)
 
         if result:
@@ -209,19 +199,8 @@ def val_vote_cancel_issue(
     )
 
     try:
-        import bittensor as bt
-
-        from gittensor.validator.issue_competitions.contract_client import (
-            IssueCompetitionContractClient,
-        )
-
         with console.status('[bold cyan]Submitting cancel vote...', spinner='dots'):
-            wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
-            subtensor = bt.Subtensor(network=ws_endpoint)
-            client = IssueCompetitionContractClient(
-                contract_address=contract_addr,
-                subtensor=subtensor,
-            )
+            wallet, client = _make_contract_client(contract_addr, ws_endpoint, wallet_name, wallet_hotkey)
             result = client.vote_cancel_issue(issue_id, reason, wallet)
 
         if result:

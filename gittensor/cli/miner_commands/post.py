@@ -14,13 +14,20 @@ import requests
 from rich.console import Console
 from rich.table import Table
 
+from gittensor.cli.issue_commands.helpers import resolve_network
 from gittensor.cli.miner_commands.helpers import _get_validator_axons
-from gittensor.constants import BASE_GITHUB_API_URL, NETWORK_MAP
+from gittensor.constants import BASE_GITHUB_API_URL
 
 console = Console()
 
 # Shared CLI options for wallet/network configuration
 NETUID_DEFAULT = 74
+
+
+def _resolve_endpoint(network: str | None, rpc_url: str | None) -> str:
+    """Resolve miner network options to a websocket endpoint."""
+    ws_endpoint, _ = resolve_network(network=network, rpc_url=rpc_url)
+    return ws_endpoint
 
 
 @click.command()
@@ -82,7 +89,7 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_m
     # 2. Resolve wallet and network
     wallet_name = wallet_name or _load_config_value('wallet') or 'default'
     wallet_hotkey = wallet_hotkey or _load_config_value('hotkey') or 'default'
-    ws_endpoint = _resolve_endpoint(network, rpc_url)
+    ws_endpoint = _resolve_endpoint(network=network, rpc_url=rpc_url)
 
     if not json_mode:
         console.print(f'[dim]Wallet: {wallet_name}/{wallet_hotkey} | Network: {ws_endpoint} | Netuid: {netuid}[/dim]')
@@ -230,22 +237,6 @@ def _load_config_value(key: str):
         return config.get(key)
     except (json.JSONDecodeError, OSError):
         return None
-
-
-def _resolve_endpoint(network: str | None, rpc_url: str | None) -> str:
-    """Resolve the subtensor endpoint from CLI args or config."""
-    if rpc_url:
-        return rpc_url
-    if network:
-        return NETWORK_MAP.get(network, network)
-    # Try config file
-    config_network = _load_config_value('network')
-    config_endpoint = _load_config_value('ws_endpoint')
-    if config_endpoint:
-        return config_endpoint
-    if config_network:
-        return NETWORK_MAP.get(config_network) or config_network
-    return NETWORK_MAP['finney']
 
 
 def _error(msg: str, json_mode: bool):

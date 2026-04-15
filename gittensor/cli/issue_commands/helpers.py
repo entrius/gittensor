@@ -19,11 +19,15 @@ from typing import Any, Callable, ContextManager, Dict, List, Optional, Tuple, T
 
 import click
 from rich.console import Console
-from rich.panel import Panel
 
 from gittensor.cli.issue_commands.tables import build_pr_table
 from gittensor.constants import CONTRACT_ADDRESS, NETWORK_MAP
-from gittensor.validator.issue_competitions.codec import compute_ink5_lazy_key, decode_issue_bytes
+from gittensor.validator.issue_competitions.storage_utils import (
+    compute_ink5_lazy_key,
+    decode_issue_from_storage,
+    decode_packed_contract_storage,
+    get_contract_child_storage_key,
+)
 
 # Default CLI config paths
 GITTENSOR_DIR = Path.home() / '.gittensor'
@@ -182,22 +186,9 @@ def print_error(message: str) -> None:
     console.print(f'\n[red]\u2717 {message}[/red]\n', highlight=True)
 
 
-def print_hint(message: str) -> None:
-    """Print a hint message."""
-    console.print(f'\n[dim]{message}[/dim]\n', highlight=True)
-
-
 def print_warning(message: str) -> None:
     """Print a warning message."""
     console.print(f'\n[yellow]{message}[/yellow]\n', highlight=True)
-
-
-def confirm_panel(message: str, title: str):
-    console.print(Panel(message, title=title, border_style='blue'))
-
-
-def success_panel(message: str, title: str):
-    console.print(Panel(message, title=title, border_style='green'))
 
 
 def emit_error_json(message: str, error_type: str = 'cli_error') -> None:
@@ -628,16 +619,12 @@ def _get_contract_child_storage_key(substrate, contract_addr: str, verbose: bool
         Hex-encoded child storage key or None if contract doesn't exist
     """
     try:
-        contract_info = substrate.query('Contracts', 'ContractInfoOf', [contract_addr])
-        if not contract_info or not contract_info.value:
+        child_key = get_contract_child_storage_key(substrate, contract_addr)
+        if not child_key:
             if verbose:
                 console.print(f'[dim]Debug: Contract not found at {contract_addr}[/dim]')
             return None
-
-        trie_id_hex = contract_info.value['trie_id'].replace('0x', '')
-        prefix = b':child_storage:default:'
-        trie_id_bytes = bytes.fromhex(trie_id_hex)
-        return '0x' + (prefix + trie_id_bytes).hex()
+        return child_key
     except Exception as e:
         if verbose:
             console.print(f'[dim]Debug: Contract info query failed: {e}[/dim]')
@@ -659,74 +646,52 @@ def _read_contract_packed_storage(substrate, contract_addr: str, verbose: bool =
     Returns:
         Dict with owner, netuid, next_issue_id, etc. or None on error
     """
-    child_key = _get_contract_child_storage_key(substrate, contract_addr, verbose)
-    if not child_key:
+    try:
+        child_key = _get_contract_child_storage_key(substrate, contract_addr, verbose)
+        if not child_key:
+            if verbose:
+                console.print('[dim]Debug: Failed to get contract child storage key[/dim]')
+            return None
+
+        keys_result = substrate.rpc_request('childstate_getKeysPaged', [child_key, '0x', 100, None, None])
+        keys = keys_result.get('result', [])
         if verbose:
-            console.print('[dim]Debug: Failed to get contract child storage key[/dim]')
-        return None
+            console.print(f'[dim]Debug: Found {len(keys)} storage keys in contract[/dim]')
 
-    # Get all storage keys for this contract
-    keys_result = substrate.rpc_request('childstate_getKeysPaged', [child_key, '0x', 100, None, None])
-    keys = keys_result.get('result', [])
+        packed_key = next((key for key in keys if key.endswith('00000000')), None)
+        if not packed_key:
+            if verbose:
+                console.print('[dim]Debug: No packed storage key (ending in 00000000) found[/dim]')
+            return None
 
-    if verbose:
-        console.print(f'[dim]Debug: Found {len(keys)} storage keys in contract[/dim]')
+        val_result = substrate.rpc_request('childstate_getStorage', [child_key, packed_key, None])
+        raw_hex = val_result.get('result')
+        if not raw_hex:
+            if verbose:
+                console.print('[dim]Debug: Failed to read packed storage value[/dim]')
+            return None
 
-    # Find the packed storage key (ends with 00000000)
-    packed_key = None
-    for k in keys:
-        if k.endswith('00000000'):
-            packed_key = k
-            break
-
-    if not packed_key:
+        data = bytes.fromhex(raw_hex.replace('0x', ''))
         if verbose:
-            console.print('[dim]Debug: No packed storage key (ending in 00000000) found[/dim]')
-        return None
+            console.print(f'[dim]Debug: Packed storage data length = {len(data)} bytes[/dim]')
 
-    # Read the packed storage value
-    val_result = substrate.rpc_request('childstate_getStorage', [child_key, packed_key, None])
-    if not val_result.get('result'):
+        packed = decode_packed_contract_storage(data)
+        if not packed:
+            if verbose:
+                console.print(f'[dim]Debug: Packed storage too small ({len(data)} < 74 bytes)[/dim]')
+            return None
+
+        return {
+            'owner': substrate.ss58_encode(packed.owner.hex()),
+            'treasury_hotkey': substrate.ss58_encode(packed.treasury_hotkey.hex()),
+            'netuid': packed.netuid,
+            'next_issue_id': packed.next_issue_id,
+            'alpha_pool': packed.alpha_pool,
+        }
+    except Exception as e:
         if verbose:
-            console.print('[dim]Debug: Failed to read packed storage value[/dim]')
+            console.print(f'[dim]Debug: Failed to read packed storage: {e}[/dim]')
         return None
-
-    data = bytes.fromhex(val_result['result'].replace('0x', ''))
-    if verbose:
-        console.print(f'[dim]Debug: Packed storage data length = {len(data)} bytes[/dim]')
-
-    # Decode packed struct (matches IssueBountyManager in lib.rs):
-    # owner: AccountId (32 bytes)
-    # treasury_hotkey: AccountId (32 bytes)
-    # netuid: u16 (2 bytes)
-    # next_issue_id: u64 (8 bytes)
-    # alpha_pool: u128 (16 bytes)
-    # Total: 74 bytes minimum
-
-    if len(data) < 74:
-        if verbose:
-            console.print(f'[dim]Debug: Packed storage too small ({len(data)} < 74 bytes)[/dim]')
-        return None
-
-    offset = 0
-    owner = data[offset : offset + 32]
-    offset += 32
-    treasury = data[offset : offset + 32]
-    offset += 32
-    netuid = struct.unpack_from('<H', data, offset)[0]
-    offset += 2
-    next_issue_id = struct.unpack_from('<Q', data, offset)[0]
-    offset += 8
-    alpha_pool_lo, alpha_pool_hi = struct.unpack_from('<QQ', data, offset)
-    alpha_pool = alpha_pool_lo + (alpha_pool_hi << 64)
-
-    return {
-        'owner': substrate.ss58_encode(owner.hex()),
-        'treasury_hotkey': substrate.ss58_encode(treasury.hex()),
-        'netuid': netuid,
-        'next_issue_id': next_issue_id,
-        'alpha_pool': alpha_pool,
-    }
 
 
 def _read_issues_from_child_storage(substrate, contract_addr: str, verbose: bool = False) -> List[Dict[str, Any]]:
@@ -793,25 +758,27 @@ def _read_issues_from_child_storage(substrate, contract_addr: str, verbose: bool
             continue
 
         data = bytes.fromhex(val_result['result'].replace('0x', ''))
-
         try:
-            raw = decode_issue_bytes(data)
-            status_byte = raw['status_byte']
-            status = status_names[status_byte] if status_byte < len(status_names) else 'Unknown'
+            decoded = decode_issue_from_storage(data)
+            if decoded is None:
+                raise ValueError('Issue decode returned no data')
+
+            status = status_names[decoded.status_byte] if decoded.status_byte < len(status_names) else 'Unknown'
 
             issues.append(
                 {
-                    'id': raw['id'],
-                    'repository_full_name': raw['repository_full_name'],
-                    'issue_number': raw['issue_number'],
-                    'bounty_amount': raw['bounty_amount'],
-                    'target_bounty': raw['target_bounty'],
+                    'id': decoded.id,
+                    'repository_full_name': decoded.repository_full_name,
+                    'issue_number': decoded.issue_number,
+                    'bounty_amount': decoded.bounty_amount,
+                    'target_bounty': decoded.target_bounty,
                     'status': status,
                 }
             )
             if verbose:
                 console.print(
-                    f'[dim]Debug: Decoded issue {raw["id"]}: {raw["repository_full_name"]}#{raw["issue_number"]}[/dim]'
+                    f'[dim]Debug: Decoded issue {decoded.id}: '
+                    f'{decoded.repository_full_name}#{decoded.issue_number}[/dim]'
                 )
         except Exception as e:
             if verbose:

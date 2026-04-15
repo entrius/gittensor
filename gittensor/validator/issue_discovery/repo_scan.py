@@ -128,8 +128,13 @@ async def _scan_repo(
     if not closed_issues:
         return 0
 
+    # GitHub REST ``since`` filters by updated_at, not closed_at.
+    # Pre-parse the cutoff once so we can drop stale issues inside the loop.
+    lookback_dt = datetime.fromisoformat(lookback_date.replace('Z', '+00:00'))
+
     # Filter to miner-authored issues not already known
     unmatched: List[dict] = []
+    stale_count = 0
     for issue_raw in closed_issues:
         user = issue_raw.get('user') or {}
         author_id = str(user.get('id', ''))
@@ -142,8 +147,16 @@ async def _scan_repo(
         # Skip pull requests (GitHub REST /issues endpoint includes PRs)
         if 'pull_request' in issue_raw:
             continue
+        # Drop issues whose closed_at falls outside the lookback window.
+        closed_at = _parse_iso(issue_raw.get('closed_at'))
+        if closed_at is None or closed_at < lookback_dt:
+            stale_count += 1
+            continue
 
         unmatched.append(issue_raw)
+
+    if stale_count:
+        bt.logging.debug(f'{repo_name}: dropped {stale_count} issues closed before lookback window')
 
     if not unmatched:
         return 0

@@ -8,7 +8,7 @@ and miner evaluations.
 
 import logging
 from contextlib import contextmanager
-from typing import List, TypeVar
+from typing import List
 
 import numpy as np
 
@@ -25,8 +25,6 @@ from .queries import (
     CLEANUP_STALE_MINERS_BY_HOTKEY,
     SET_MINER,
 )
-
-T = TypeVar('T')
 
 
 class BaseRepository:

@@ -15,6 +15,8 @@ from gittensor.constants import (
     OSS_EMISSION_SHARE,
     RECYCLE_EMISSION_SHARE,
     RECYCLE_UID,
+    VALIDATOR_STEPS_INTERVAL,
+    VALIDATOR_WAIT,
 )
 from gittensor.utils.uids import get_all_uids
 from gittensor.validator.issue_competitions.forward import issue_competitions
@@ -24,11 +26,7 @@ from gittensor.validator.issue_discovery.normalize import (
 from gittensor.validator.issue_discovery.repo_scan import scan_closed_issues
 from gittensor.validator.issue_discovery.scoring import score_discovered_issues
 from gittensor.validator.oss_contributions.reward import get_rewards
-from gittensor.validator.utils.config import (
-    GITTENSOR_VALIDATOR_PAT,
-    VALIDATOR_STEPS_INTERVAL,
-    VALIDATOR_WAIT,
-)
+from gittensor.validator.utils.config import GITTENSOR_VALIDATOR_PAT
 from gittensor.validator.utils.load_weights import (
     RepositoryConfig,
     load_master_repo_weights,

@@ -25,6 +25,10 @@ from rich.panel import Panel
 from gittensor.cli.issue_commands.tables import build_pr_table
 from gittensor.constants import CONTRACT_ADDRESS, NETWORK_MAP
 
+# Default CLI config paths
+GITTENSOR_DIR = Path.home() / '.gittensor'
+CONFIG_FILE = GITTENSOR_DIR / 'config.json'
+
 # ALPHA token conversion
 ALPHA_DECIMALS = 9
 ALPHA_RAW_UNIT = 10**ALPHA_DECIMALS
@@ -43,10 +47,6 @@ STATUS_COLORS: Dict[str, str] = {
     'Cancelled': 'dim',
 }
 
-
-# Default paths
-GITTENSOR_DIR = Path.home() / '.gittensor'
-CONFIG_FILE = GITTENSOR_DIR / 'config.json'
 
 console = Console()
 

@@ -94,7 +94,7 @@ QUERY = """
                     ... on User { databaseId }
                   }
                   authorAssociation
-                  userContentEdits(last: 1) {
+                  userContentEdits(first: 1) {
                     nodes { editedAt }
                   }
                   timelineItems(itemTypes: [RENAMED_TITLE_EVENT], last: 1) {

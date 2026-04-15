@@ -18,14 +18,13 @@ from .help import StyledCommand
 from .helpers import (
     MAX_ISSUE_NUMBER,
     _is_interactive,
+    _resolve_contract_and_network,
     console,
     format_alpha,
-    get_contract_address,
     load_config,
     print_error,
     print_network_header,
     print_success,
-    resolve_network,
     validate_bounty_amount,
     validate_github_issue,
     validate_repository,
@@ -119,14 +118,13 @@ def issue_register(
     """
     console.print('\n[bold cyan]Register Issue for Bounty[/bold cyan]\n')
 
-    contract_addr = get_contract_address(contract)
-    ws_endpoint, network_name = resolve_network(network, rpc_url)
+    contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(
+        contract,
+        network,
+        rpc_url,
+        missing_contract_message='Contract address not configured. Run ./up.sh --issues to deploy the contract first.',
+    )
     config = load_config()
-
-    if not contract_addr:
-        raise click.ClickException(
-            'Contract address not configured. Run ./up.sh --issues to deploy the contract first.'
-        )
 
     # Validate inputs before showing summary
     try:
@@ -304,13 +302,12 @@ def issue_harvest(wallet_name: str, wallet_hotkey: str, network: str, rpc_url: s
     """
     console.print('\n[bold cyan]Manual Emission Harvest[/bold cyan]\n')
 
-    contract_addr = get_contract_address(contract)
-    ws_endpoint, network_name = resolve_network(network, rpc_url)
-
-    if not contract_addr:
-        raise click.ClickException(
-            'Contract address not configured. Set CONTRACT_ADDRESS env var or run ./up.sh --issues.'
-        )
+    contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(
+        contract,
+        network,
+        rpc_url,
+        missing_contract_message='Contract address not configured. Set CONTRACT_ADDRESS env var or run ./up.sh --issues.',
+    )
 
     print_network_header(network_name, contract_addr)
     console.print(f'[dim]Wallet: {wallet_name}/{wallet_hotkey}[/dim]\n')

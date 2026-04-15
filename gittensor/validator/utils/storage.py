@@ -85,13 +85,6 @@ class DatabaseStorage:
 
         return result
 
-    def _log_storage_summary(self, counts: Dict[str, int]):
-        """Log a summary of what was stored"""
-        self.logger.info('Storage Summary:')
-        for entity_type, count in counts.items():
-            if count > 0:
-                self.logger.info(f'  - {entity_type}: {count}')
-
     def close(self):
         if self.db_connection:
             self.db_connection.close()

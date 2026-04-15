@@ -589,6 +589,27 @@ def resolve_network(network: Optional[str] = None, rpc_url: Optional[str] = None
     return NETWORK_MAP['finney'], 'finney'
 
 
+def _resolve_contract_and_network(
+    contract: str,
+    network: Optional[str] = None,
+    rpc_url: Optional[str] = None,
+    *,
+    missing_contract_message: str = 'Contract address not configured.',
+) -> Tuple[str, str, str]:
+    """Resolve contract address, WS endpoint, and network name from CLI options.
+
+    Combines get_contract_address and resolve_network into one call, raising
+    click.ClickException when the contract address is empty.
+
+    Returns (contract_addr, ws_endpoint, network_name).
+    """
+    contract_addr = get_contract_address(contract)
+    ws_endpoint, network_name = resolve_network(network, rpc_url)
+    if not contract_addr:
+        raise click.ClickException(missing_contract_message)
+    return contract_addr, ws_endpoint, network_name
+
+
 # ============================================================================
 # Contract storage reading helpers (shared by view and admin commands)
 # ============================================================================

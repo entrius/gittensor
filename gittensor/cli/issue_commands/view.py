@@ -22,15 +22,14 @@ from .help import StyledCommand
 from .helpers import (
     _read_contract_packed_storage,
     _read_issues_from_child_storage,
+    _resolve_contract_and_network,
     colorize_status,
     console,
     emit_error_json,
     format_alpha,
-    get_contract_address,
     print_error,
     print_network_header,
     read_issues_from_contract,
-    resolve_network,
     with_cli_behavior_options,
     with_network_contract_options,
 )
@@ -60,11 +59,12 @@ def issues_list(issue_id: int, network: str, rpc_url: str, contract: str, verbos
         $ gitt i list --json
     [/dim]
     """
-    contract_addr = get_contract_address(contract)
-    ws_endpoint, network_name = resolve_network(network, rpc_url)
-
-    if not contract_addr:
-        raise click.ClickException('Contract address not configured. Set via: gitt config set contract_address <ADDR>.')
+    contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(
+        contract,
+        network,
+        rpc_url,
+        missing_contract_message='Contract address not configured. Set via: gitt config set contract_address <ADDR>.',
+    )
 
     if not as_json:
         print_network_header(network_name, contract_addr)
@@ -188,11 +188,7 @@ def issues_bounty_pool(network: str, rpc_url: str, contract: str, verbose: bool,
         $ gitt i bounty-pool --json
     [/dim]
     """
-    contract_addr = get_contract_address(contract)
-    ws_endpoint, network_name = resolve_network(network, rpc_url)
-
-    if not contract_addr:
-        raise click.ClickException('Contract address not configured.')
+    contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
 
     if not as_json:
         print_network_header(network_name, contract_addr)
@@ -238,11 +234,7 @@ def issues_pending_harvest(network: str, rpc_url: str, contract: str, verbose: b
         $ gitt i pending-harvest --json
     [/dim]
     """
-    contract_addr = get_contract_address(contract)
-    ws_endpoint, network_name = resolve_network(network, rpc_url)
-
-    if not contract_addr:
-        raise click.ClickException('Contract address not configured.')
+    contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
 
     if not as_json:
         print_network_header(network_name, contract_addr)
@@ -305,11 +297,7 @@ def admin_info(network: str, rpc_url: str, contract: str, verbose: bool, as_json
         $ gitt a info --json
     [/dim]
     """
-    contract_addr = get_contract_address(contract)
-    ws_endpoint, network_name = resolve_network(network, rpc_url)
-
-    if not contract_addr:
-        raise click.ClickException('Contract address not configured.')
+    contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
 
     if not as_json:
         print_network_header(network_name, contract_addr)

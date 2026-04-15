@@ -219,7 +219,12 @@ def _collect_issues_from_prs(
                     continue  # No score for unsolved issues
 
                 # Anti-gaming: post-merge edit detection
-                if issue.updated_at and pr.merged_at and issue.updated_at > pr.merged_at:
+                if (
+                    issue.updated_at
+                    and pr.merged_at
+                    and issue.updated_at > pr.merged_at
+                    and (not issue.closed_at or issue.updated_at > issue.closed_at)
+                ):
                     bt.logging.info(
                         f'Issue #{issue.number} edited after PR #{pr.number} merge — 0 score, counts as closed'
                     )

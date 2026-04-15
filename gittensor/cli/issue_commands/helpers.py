@@ -15,7 +15,6 @@ import urllib.error
 import urllib.request
 from contextlib import nullcontext
 from decimal import Decimal, InvalidOperation
-from pathlib import Path
 from typing import Any, Callable, ContextManager, Dict, List, Optional, Tuple, TypeVar
 
 import click
@@ -23,7 +22,7 @@ from rich.console import Console
 from rich.panel import Panel
 
 from gittensor.cli.issue_commands.tables import build_pr_table
-from gittensor.constants import CONTRACT_ADDRESS, NETWORK_MAP
+from gittensor.constants import CONFIG_FILE, CONTRACT_ADDRESS, GITTENSOR_DIR, NETWORK_MAP
 
 # ALPHA token conversion
 ALPHA_DECIMALS = 9
@@ -43,10 +42,6 @@ STATUS_COLORS: Dict[str, str] = {
     'Cancelled': 'dim',
 }
 
-
-# Default paths
-GITTENSOR_DIR = Path.home() / '.gittensor'
-CONFIG_FILE = GITTENSOR_DIR / 'config.json'
 
 console = Console()
 

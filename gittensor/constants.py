@@ -1,10 +1,14 @@
 # Entrius 2025
 import re
+from pathlib import Path
 from typing import Dict
 
 # =============================================================================
 # General
 # =============================================================================
+GITTENSOR_DIR = Path.home() / '.gittensor'
+CONFIG_FILE = GITTENSOR_DIR / 'config.json'
+
 SECONDS_PER_DAY = 86400
 SECONDS_PER_HOUR = 3600
 

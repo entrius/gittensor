@@ -19,7 +19,6 @@ from typing import Any, Callable, ContextManager, Dict, List, Optional, Tuple, T
 
 import click
 from rich.console import Console
-from rich.panel import Panel
 
 from gittensor.cli.issue_commands.tables import build_pr_table
 from gittensor.constants import CONTRACT_ADDRESS, NETWORK_MAP
@@ -187,22 +186,9 @@ def print_error(message: str) -> None:
     console.print(f'\n[red]\u2717 {message}[/red]\n', highlight=True)
 
 
-def print_hint(message: str) -> None:
-    """Print a hint message."""
-    console.print(f'\n[dim]{message}[/dim]\n', highlight=True)
-
-
 def print_warning(message: str) -> None:
     """Print a warning message."""
     console.print(f'\n[yellow]{message}[/yellow]\n', highlight=True)
-
-
-def confirm_panel(message: str, title: str):
-    console.print(Panel(message, title=title, border_style='blue'))
-
-
-def success_panel(message: str, title: str):
-    console.print(Panel(message, title=title, border_style='green'))
 
 
 def emit_error_json(message: str, error_type: str = 'cli_error') -> None:

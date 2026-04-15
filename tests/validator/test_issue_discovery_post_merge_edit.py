@@ -4,12 +4,13 @@ Benign activity (bot comments, labels) must not demote solved issues;
 real body/title edits after merge must.
 """
 
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
-from typing import Dict
+from typing import Dict, Optional
 
 from gittensor.classes import Issue, MinerEvaluation, PRState, PullRequest
 from gittensor.constants import MIN_TOKEN_SCORE_FOR_BASE_SCORE
-from gittensor.validator.issue_discovery.scoring import _collect_issues_from_prs
+from gittensor.validator.issue_discovery.scoring import _DiscovererData, _collect_issues_from_prs
 from gittensor.validator.utils.load_weights import RepositoryConfig
 
 DISCOVERER_UID = 1
@@ -17,24 +18,21 @@ SOLVER_UID = 2
 DISCOVERER_GH = '1001'
 SOLVER_GH = '2002'
 REPO = 'owner/repo'
-
-
-def _merged_at() -> datetime:
-    return datetime(2025, 1, 1, 12, 0, tzinfo=timezone.utc)
+MERGED_AT = datetime(2025, 1, 1, 12, 0, tzinfo=timezone.utc)
 
 
 def _make_issue(
     *,
-    updated_at: datetime = None,
-    body_or_title_edited_at: datetime = None,
+    updated_at: Optional[datetime] = None,
+    body_or_title_edited_at: Optional[datetime] = None,
 ) -> Issue:
     return Issue(
         number=42,
         pr_number=7,
         repository_full_name=REPO,
         title='bug',
-        created_at=_merged_at() - timedelta(days=5),
-        closed_at=_merged_at(),
+        created_at=MERGED_AT - timedelta(days=5),
+        closed_at=MERGED_AT,
         author_login='alice',
         state='CLOSED',
         author_github_id=DISCOVERER_GH,
@@ -52,8 +50,8 @@ def _make_pr(issue: Issue) -> PullRequest:
         github_id=SOLVER_GH,
         title='fix',
         author_login='bob',
-        merged_at=_merged_at(),
-        created_at=_merged_at() - timedelta(days=1),
+        merged_at=MERGED_AT,
+        created_at=MERGED_AT - timedelta(days=1),
         pr_state=PRState.MERGED,
         token_score=float(MIN_TOKEN_SCORE_FOR_BASE_SCORE) + 10.0,
         base_score=10.0,
@@ -72,14 +70,10 @@ def _repos() -> Dict[str, RepositoryConfig]:
     return {REPO: RepositoryConfig(weight=1.0)}
 
 
-def _run(pr: PullRequest):
-    from collections import defaultdict
-
-    from gittensor.validator.issue_discovery.scoring import _DiscovererData
-
+def _run(pr: PullRequest) -> _DiscovererData:
     evaluations = _evaluations(pr)
     gh_to_uid = {DISCOVERER_GH: DISCOVERER_UID, SOLVER_GH: SOLVER_UID}
-    discoverer_data = defaultdict(lambda: _DiscovererData())
+    discoverer_data: Dict[str, _DiscovererData] = defaultdict(_DiscovererData)
     _collect_issues_from_prs(evaluations, gh_to_uid, discoverer_data, _repos())
     return discoverer_data[DISCOVERER_GH]
 
@@ -87,7 +81,7 @@ def _run(pr: PullRequest):
 def test_benign_updated_at_after_merge_is_ignored():
     """Bot activity bumps updated_at but not body_or_title_edited_at → stays solved."""
     issue = _make_issue(
-        updated_at=_merged_at() + timedelta(hours=1),  # noisy bot bump
+        updated_at=MERGED_AT + timedelta(hours=1),  # noisy bot bump
         body_or_title_edited_at=None,
     )
     pr = _make_pr(issue)
@@ -101,8 +95,8 @@ def test_benign_updated_at_after_merge_is_ignored():
 def test_real_body_edit_after_merge_demotes():
     """An actual body edit after merge demotes solved → closed."""
     issue = _make_issue(
-        updated_at=_merged_at() + timedelta(hours=1),
-        body_or_title_edited_at=_merged_at() + timedelta(hours=1),
+        updated_at=MERGED_AT + timedelta(hours=1),
+        body_or_title_edited_at=MERGED_AT + timedelta(hours=1),
     )
     pr = _make_pr(issue)
     data = _run(pr)
@@ -115,7 +109,7 @@ def test_real_body_edit_after_merge_demotes():
 def test_edit_before_merge_is_ignored():
     """Body edits prior to merge are fine."""
     issue = _make_issue(
-        body_or_title_edited_at=_merged_at() - timedelta(hours=1),
+        body_or_title_edited_at=MERGED_AT - timedelta(hours=1),
     )
     pr = _make_pr(issue)
     data = _run(pr)

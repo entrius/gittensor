@@ -10,6 +10,7 @@ import click
 from rich.console import Console
 from rich.table import Table
 
+from .helpers import _get_validator_axons
 from .post import NETUID_DEFAULT, _error, _load_config_value, _resolve_endpoint
 
 console = Console()
@@ -72,12 +73,7 @@ def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, json_mode)
         sys.exit(1)
 
     # 3. Find active validator axons (vtrust > 0.1 = actively participating in consensus)
-    validator_axons = []
-    validator_uids = []
-    for uid in range(metagraph.n):
-        if metagraph.validator_trust[uid] > 0.1 and metagraph.axons[uid].is_serving:
-            validator_axons.append(metagraph.axons[uid])
-            validator_uids.append(uid)
+    validator_axons, validator_uids = _get_validator_axons(metagraph)
 
     if not validator_axons:
         _error('No reachable validator axons found on the network.', json_mode)

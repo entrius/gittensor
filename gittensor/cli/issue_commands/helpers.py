@@ -854,6 +854,27 @@ def _read_issues_from_child_storage(substrate, contract_addr: str, verbose: bool
     return issues
 
 
+def _make_contract_client(contract_addr: str, ws_endpoint: str, wallet_name: str, wallet_hotkey: str):
+    """Instantiate a wallet and IssueCompetitionContractClient from CLI args.
+
+    Returns (wallet, client). Lazy-imports bittensor and the contract client so
+    that the top-level CLI remains importable without those heavy dependencies.
+    """
+    import bittensor as bt
+
+    from gittensor.validator.issue_competitions.contract_client import (
+        IssueCompetitionContractClient,
+    )
+
+    wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
+    subtensor = bt.Subtensor(network=ws_endpoint)
+    client = IssueCompetitionContractClient(
+        contract_address=contract_addr,
+        subtensor=subtensor,
+    )
+    return wallet, client
+
+
 def read_issues_from_contract(ws_endpoint: str, contract_addr: str, verbose: bool = False) -> List[Dict[str, Any]]:
     """
     Read issues directly from the smart contract (no API dependency).

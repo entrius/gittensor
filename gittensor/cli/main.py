@@ -22,7 +22,7 @@ from rich.table import Table
 
 from gittensor.cli.issue_commands import register_commands
 from gittensor.cli.issue_commands.help import StyledAliasGroup, StyledGroup
-from gittensor.constants import CONFIG_FILE, GITTENSOR_DIR
+from gittensor.cli.issue_commands.helpers import CONFIG_FILE, GITTENSOR_DIR
 
 console = Console()
 

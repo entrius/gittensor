@@ -12,7 +12,6 @@ from gittensor.constants import MIN_TOKEN_SCORE_FOR_BASE_SCORE
 from gittensor.validator.issue_discovery.scoring import _collect_issues_from_prs
 from gittensor.validator.utils.load_weights import RepositoryConfig
 
-
 DISCOVERER_UID = 1
 SOLVER_UID = 2
 DISCOVERER_GH = '1001'

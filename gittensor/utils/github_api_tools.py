@@ -1099,21 +1099,6 @@ def get_pr_open_times(repo: str, pr_numbers: List[int], token: str) -> Dict[int,
     return result
 
 
-def extract_pr_number_from_url(pr_url: str) -> Optional[int]:
-    """Extract PR number from a GitHub PR URL.
-
-    Args:
-        pr_url: Full GitHub PR URL (e.g., https://github.com/owner/repo/pull/123)
-
-    Returns:
-        PR number as integer, or None if invalid URL
-    """
-    if not pr_url:
-        return None
-    match = re.search(r'/pull/(\d+)', pr_url)
-    return int(match.group(1)) if match else None
-
-
 def find_solver_from_cross_references(repo: str, issue_number: int, token: str) -> tuple[Optional[int], Optional[int]]:
     """Resolve solver from cross-referenced PRs on the issue timeline.
 

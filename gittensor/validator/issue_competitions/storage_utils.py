@@ -123,7 +123,9 @@ def decode_packed_contract_storage(data: bytes) -> Optional[PackedContractStorag
     )
 
 
-def read_contract_packed_storage(substrate, contract_addr: str, page_size: int = 100) -> Optional[PackedContractStorage]:
+def read_contract_packed_storage(
+    substrate, contract_addr: str, page_size: int = 100
+) -> Optional[PackedContractStorage]:
     """Read and decode packed root storage for a contract."""
     child_key = get_contract_child_storage_key(substrate, contract_addr)
     if not child_key:

@@ -8,6 +8,7 @@ and miner evaluations.
 
 import logging
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from typing import List, TypeVar
 
 import numpy as np
@@ -122,6 +123,8 @@ class Repository(BaseRepository):
         """
         if not evaluation.github_id or evaluation.github_id == '0':
             return
+
+        evaluation.evaluation_timestamp = datetime.now(timezone.utc)
 
         params = (evaluation.github_id, evaluation.uid, evaluation.hotkey)
         eval_params = params + (evaluation.evaluation_timestamp,)

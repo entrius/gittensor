@@ -17,6 +17,7 @@ from rich.panel import Panel
 from .help import StyledCommand
 from .helpers import (
     MAX_ISSUE_NUMBER,
+    NETWORK_CHOICE,
     _is_interactive,
     _resolve_contract_and_network,
     console,
@@ -54,7 +55,7 @@ from .helpers import (
     '--network',
     '-n',
     default=None,
-    type=click.Choice(['finney', 'test', 'local'], case_sensitive=False),
+    type=NETWORK_CHOICE,
     help='Network (finney/test/local)',
 )
 @click.option(
@@ -273,7 +274,7 @@ def issue_register(
     '--network',
     '-n',
     default=None,
-    type=click.Choice(['finney', 'test', 'local'], case_sensitive=False),
+    type=NETWORK_CHOICE,
     help='Network (finney/test/local)',
 )
 @click.option(

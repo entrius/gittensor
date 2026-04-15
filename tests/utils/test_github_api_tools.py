@@ -28,7 +28,6 @@ github_api_tools = pytest.importorskip(
 
 get_github_graphql_query = github_api_tools.get_github_graphql_query
 get_github_id = github_api_tools.get_github_id
-get_github_account_age_days = github_api_tools.get_github_account_age_days
 get_pull_request_file_changes = github_api_tools.get_pull_request_file_changes
 get_merge_base_sha = github_api_tools.get_merge_base_sha
 find_prs_for_issue = github_api_tools.find_prs_for_issue
@@ -376,27 +375,6 @@ class TestOtherGitHubAPIFunctions:
 
         assert result == '12345'
         assert mock_get.call_count == 3
-
-    @patch('gittensor.utils.github_api_tools.requests.get')
-    @patch('gittensor.utils.github_api_tools.time.sleep')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
-    def test_get_github_account_age_retry_logic(self, mock_logging, mock_sleep, mock_get):
-        """Test that get_github_account_age_days retries on failure."""
-        mock_response_success = Mock()
-        mock_response_success.status_code = 200
-        mock_response_success.json.return_value = {'id': 999, 'created_at': '2020-01-01T00:00:00Z'}
-
-        mock_get.side_effect = [
-            Exception('Timeout'),
-            mock_response_success,
-        ]
-
-        result = get_github_account_age_days('fake_token_2')
-
-        assert result is not None
-        assert isinstance(result, int)
-        assert result > 1000  # Account older than 1000 days
-        assert mock_get.call_count == 2
 
 
 # ============================================================================

@@ -644,3 +644,80 @@ class TestCliMissingContractConfig:
             )
         assert result.exit_code != 0
         assert 'Contract address not configured' in result.output
+
+
+class TestCliRuntimeExceptions:
+    """Ensure runtime/import failures exit non-zero for CLI commands."""
+
+    def test_admin_cancel_runtime_exception_exits_non_zero(self, cli_root, runner):
+        with (
+            patch(
+                'gittensor.cli.issue_commands.admin._resolve_contract_and_network',
+                return_value=(
+                    '0x1234567890123456789012345678901234567890',
+                    'wss://entrypoint-finney.opentensor.ai:443',
+                    'finney',
+                ),
+            ),
+            patch(
+                'gittensor.cli.issue_commands.admin._make_contract_client',
+                side_effect=RuntimeError('boom-admin'),
+            ),
+        ):
+            result = runner.invoke(
+                cli_root,
+                ['admin', 'cancel-issue', '1'],
+                catch_exceptions=False,
+            )
+        assert result.exit_code != 0
+        assert 'boom-admin' in result.output
+
+    def test_vote_solution_import_error_exits_non_zero(self, cli_root, runner):
+        with (
+            patch(
+                'gittensor.cli.issue_commands.vote._resolve_contract_and_network',
+                return_value=(
+                    '0x1234567890123456789012345678901234567890',
+                    'wss://entrypoint-finney.opentensor.ai:443',
+                    'finney',
+                ),
+            ),
+            patch(
+                'gittensor.cli.issue_commands.vote._make_contract_client',
+                side_effect=ImportError('missing-dep'),
+            ),
+        ):
+            result = runner.invoke(
+                cli_root,
+                [
+                    'vote',
+                    'solution',
+                    '1',
+                    '5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY',
+                    '5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY',
+                    '1',
+                ],
+                catch_exceptions=False,
+            )
+        assert result.exit_code != 0
+        assert 'Missing dependency' in result.output
+
+    def test_harvest_runtime_exception_exits_non_zero(self, cli_root, runner):
+        with (
+            patch(
+                'gittensor.cli.issue_commands.mutations._resolve_contract_and_network',
+                return_value=(
+                    '0x1234567890123456789012345678901234567890',
+                    'wss://entrypoint-finney.opentensor.ai:443',
+                    'finney',
+                ),
+            ),
+            patch('bittensor.Wallet', side_effect=RuntimeError('boom-harvest')),
+        ):
+            result = runner.invoke(
+                cli_root,
+                ['harvest'],
+                catch_exceptions=False,
+            )
+        assert result.exit_code != 0
+        assert 'boom-harvest' in result.output

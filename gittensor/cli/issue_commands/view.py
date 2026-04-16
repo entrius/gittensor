@@ -221,6 +221,7 @@ def issues_bounty_pool(network: str, rpc_url: str, contract: str, verbose: bool,
         console.print(f'[dim]Sum of bounty amounts from {len(issues)} issue(s)[/dim]')
     except Exception as e:
         print_error(str(e))
+        raise SystemExit(1)
 
 
 @click.command('pending-harvest', cls=StyledCommand)
@@ -282,8 +283,10 @@ def issues_pending_harvest(network: str, rpc_url: str, contract: str, verbose: b
         console.print(f'[green]Pending Harvest:[/green] {format_alpha(pending_harvest, 4)} ALPHA')
     except ImportError as e:
         print_error(f'Missing dependency — {e}')
+        raise SystemExit(1)
     except Exception as e:
         print_error(str(e))
+        raise SystemExit(1)
 
 
 @click.command('info', cls=StyledCommand)
@@ -329,3 +332,4 @@ def admin_info(network: str, rpc_url: str, contract: str, verbose: bool, as_json
             console.print('[dim]Try running with --verbose to see debug details.[/dim]')
     except Exception as e:
         print_error(str(e))
+        raise SystemExit(1)

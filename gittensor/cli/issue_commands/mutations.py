@@ -243,6 +243,7 @@ def issue_register(
     except ImportError as e:
         print_error(f'Missing dependency - {e}')
         console.print('[dim]Install with: uv sync[/dim]')
+        raise SystemExit(1)
     except Exception as e:
         error_msg = str(e)
         if 'ContractReverted' in error_msg:
@@ -253,6 +254,7 @@ def issue_register(
             console.print('  \u2022 Caller is not the contract owner')
         else:
             print_error(f'Error registering issue: {e}')
+        raise SystemExit(1)
 
 
 @click.command('harvest', cls=StyledCommand)
@@ -384,6 +386,7 @@ def issue_harvest(wallet_name: str, wallet_hotkey: str, network: str, rpc_url: s
     except ImportError as e:
         print_error(f'Missing dependency — {e}')
         console.print('[dim]Install with: uv sync[/dim]')
+        raise SystemExit(1)
     except Exception as e:
         import traceback
 
@@ -392,3 +395,4 @@ def issue_harvest(wallet_name: str, wallet_hotkey: str, network: str, rpc_url: s
             console.print(f'[dim]Full traceback:\n{traceback.format_exc()}[/dim]')
         else:
             console.print('[dim]Run with --verbose for full traceback.[/dim]')
+        raise SystemExit(1)

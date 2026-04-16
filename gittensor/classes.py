@@ -479,19 +479,9 @@ class ScoreBreakdown:
         return self.structural_added_count + self.leaf_added_count
 
     @property
-    def added_score(self) -> float:
-        """Total score from additions."""
-        return self.structural_added_score + self.leaf_added_score
-
-    @property
     def deleted_count(self) -> int:
         """Total deleted nodes (structural + leaf)."""
         return self.structural_deleted_count + self.leaf_deleted_count
-
-    @property
-    def deleted_score(self) -> float:
-        """Total score from deletions."""
-        return self.structural_deleted_score + self.leaf_deleted_score
 
     def with_weight(self, weight: float) -> 'ScoreBreakdown':
         """Return new ScoreBreakdown with scores multiplied by weight (counts unchanged)."""

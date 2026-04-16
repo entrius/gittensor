@@ -124,9 +124,7 @@ class Validator(BaseValidatorNeuron):
                     successful_count += 1
                 else:
                     failed_uids.append(uid)
-                    bt.logging.warning(f'Storage partially failed for UID {uid}:')
-                    for error in storage_result.errors:
-                        bt.logging.warning(f'  - {error}')
+                    self._log_storage_partial_failure(uid, storage_result.errors)
             except Exception as e:
                 failed_uids.append(uid)
                 bt.logging.error(f'Error storing evaluation for UID {uid}: {e}')
@@ -151,12 +149,17 @@ class Validator(BaseValidatorNeuron):
                 if storage_result.success:
                     bt.logging.success(f'Successfully stored validation results for UID {uid} to DB.')
                 else:
-                    bt.logging.warning(f'Storage partially failed for UID {uid}:')
-                    for error in storage_result.errors:
-                        bt.logging.warning(f'  - {error}')
+                    self._log_storage_partial_failure(uid, storage_result.errors)
 
             except Exception as e:
                 bt.logging.error(f'Error when attempting to store miners evaluation for uid {uid}: {e}')
+
+    @staticmethod
+    def _log_storage_partial_failure(uid: int, errors: List[str]):
+        """Log storage errors for a single miner evaluation attempt."""
+        bt.logging.warning(f'Storage partially failed for UID {uid}:')
+        for error in errors:
+            bt.logging.warning(f'  - {error}')
 
     def store_or_use_cached_evaluation(self, miner_evaluations: Dict[int, MinerEvaluation]) -> Set[int]:
         """

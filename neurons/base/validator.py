@@ -184,12 +184,7 @@ class BaseValidatorNeuron(BaseNeuron):
         """
         Stops the validator's operations that are running in the background thread.
         """
-        if self.is_running:
-            bt.logging.debug('Stopping validator in background thread.')
-            self.should_exit = True
-            self.thread.join(5)
-            self.is_running = False
-            bt.logging.debug('Stopped')
+        self._stop_background_thread()
 
     def __enter__(self):
         self.run_in_background_thread()
@@ -208,6 +203,10 @@ class BaseValidatorNeuron(BaseNeuron):
             traceback: A traceback object encoding the stack trace.
                        None if the context was exited without an exception.
         """
+        self._stop_background_thread()
+
+    def _stop_background_thread(self):
+        """Gracefully stop validator when running in a background thread."""
         if self.is_running:
             bt.logging.debug('Stopping validator in background thread.')
             self.should_exit = True

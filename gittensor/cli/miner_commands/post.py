@@ -21,6 +21,7 @@ from gittensor.cli.miner_commands.helpers import (
     _get_validator_axons,
     _load_config_value,
     _resolve_endpoint,
+    _status,
 )
 from gittensor.constants import BASE_GITHUB_API_URL, GITHUB_HTTP_TIMEOUT_SECONDS, GRAPHQL_VIEWER_QUERY
 
@@ -68,10 +69,7 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_m
         pat = click.prompt('Enter your GitHub Personal Access Token', hide_input=True)
 
     # 1b. Validate PAT locally
-    if not json_mode:
-        with console.status('[bold]Validating PAT...'):
-            pat_valid = _validate_pat_locally(pat)
-    else:
+    with _status('[bold]Validating PAT...', json_mode):
         pat_valid = _validate_pat_locally(pat)
 
     if not pat_valid:
@@ -90,18 +88,11 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_m
         console.print(f'[dim]Wallet: {wallet_name}/{wallet_hotkey} | Network: {ws_endpoint} | Netuid: {netuid}[/dim]')
 
     # 3. Set up bittensor objects
-    if not json_mode:
-        with console.status('[bold]Connecting to network...'):
-            try:
-                wallet, subtensor, metagraph, dendrite = _connect_bittensor(
-                    wallet_name, wallet_hotkey, ws_endpoint, netuid
-                )
-            except Exception as e:
-                _error(f'Failed to initialize bittensor: {e}', json_mode)
-                sys.exit(1)
-    else:
+    with _status('[bold]Connecting to network...', json_mode):
         try:
-            wallet, subtensor, metagraph, dendrite = _connect_bittensor(wallet_name, wallet_hotkey, ws_endpoint, netuid)
+            wallet, subtensor, metagraph, dendrite = _connect_bittensor(
+                wallet_name, wallet_hotkey, ws_endpoint, netuid
+            )
         except Exception as e:
             _error(f'Failed to initialize bittensor: {e}', json_mode)
             sys.exit(1)
@@ -129,10 +120,7 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_m
             timeout=30.0,
         )
 
-    if not json_mode:
-        with console.status(f'[bold]Broadcasting to {len(validator_axons)} validators...'):
-            responses = asyncio.run(_broadcast())
-    else:
+    with _status(f'[bold]Broadcasting to {len(validator_axons)} validators...', json_mode):
         responses = asyncio.run(_broadcast())
 
     # 6. Collect results

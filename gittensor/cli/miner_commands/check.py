@@ -17,6 +17,7 @@ from .helpers import (
     _get_validator_axons,
     _load_config_value,
     _resolve_endpoint,
+    _status,
 )
 
 console = Console()
@@ -50,18 +51,11 @@ def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, json_mode)
         console.print(f'[dim]Wallet: {wallet_name}/{wallet_hotkey} | Network: {ws_endpoint} | Netuid: {netuid}[/dim]')
 
     # 2. Set up bittensor objects
-    if not json_mode:
-        with console.status('[bold]Connecting to network...'):
-            try:
-                wallet, subtensor, metagraph, dendrite = _connect_bittensor(
-                    wallet_name, wallet_hotkey, ws_endpoint, netuid
-                )
-            except Exception as e:
-                _error(f'Failed to initialize bittensor: {e}', json_mode)
-                sys.exit(1)
-    else:
+    with _status('[bold]Connecting to network...', json_mode):
         try:
-            wallet, subtensor, metagraph, dendrite = _connect_bittensor(wallet_name, wallet_hotkey, ws_endpoint, netuid)
+            wallet, subtensor, metagraph, dendrite = _connect_bittensor(
+                wallet_name, wallet_hotkey, ws_endpoint, netuid
+            )
         except Exception as e:
             _error(f'Failed to initialize bittensor: {e}', json_mode)
             sys.exit(1)
@@ -89,10 +83,7 @@ def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, json_mode)
             timeout=15.0,
         )
 
-    if not json_mode:
-        with console.status(f'[bold]Checking {len(validator_axons)} validators...'):
-            responses = asyncio.run(_check())
-    else:
+    with _status(f'[bold]Checking {len(validator_axons)} validators...', json_mode):
         responses = asyncio.run(_check())
 
     # 5. Collect results

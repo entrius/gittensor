@@ -30,9 +30,6 @@ class Miner:
     hotkey: str
     github_id: str
 
-    def __str__(self) -> str:
-        return f'Miner(uid={self.uid}, hotkey={self.hotkey[:8]}..., github_id={self.github_id})'
-
 
 @dataclass
 class FileChange:

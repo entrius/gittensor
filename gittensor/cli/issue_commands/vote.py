@@ -142,8 +142,10 @@ def val_vote_solution(
             print_error('Vote failed.')
     except ImportError as e:
         print_error(f'Missing dependency \u2014 {e}')
+        raise SystemExit(1)
     except Exception as e:
         print_error(str(e))
+        raise SystemExit(1)
 
 
 @vote.command('cancel')
@@ -200,8 +202,10 @@ def val_vote_cancel_issue(
             print_error('Cancel vote failed.')
     except ImportError as e:
         print_error(f'Missing dependency \u2014 {e}')
+        raise SystemExit(1)
     except Exception as e:
         print_error(str(e))
+        raise SystemExit(1)
 
 
 @vote.command('list')
@@ -269,5 +273,7 @@ def vote_list_validators(network: str, rpc_url: str, contract: str, as_json: boo
 
     except ImportError as e:
         print_error(f'Missing dependency \u2014 {e}')
+        raise SystemExit(1)
     except Exception as e:
         print_error(str(e))
+        raise SystemExit(1)

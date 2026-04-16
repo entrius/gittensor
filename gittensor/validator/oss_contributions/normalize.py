@@ -3,6 +3,7 @@ from typing import Dict
 import bittensor as bt
 
 from gittensor.classes import MinerEvaluation
+from gittensor.validator.utils.reward_normalization import normalize_reward_ratios
 
 
 def normalize_rewards_linear(miner_evaluations: Dict[int, MinerEvaluation]) -> Dict[int, float]:
@@ -30,6 +31,4 @@ def normalize_rewards_linear(miner_evaluations: Dict[int, MinerEvaluation]) -> D
         bt.logging.info('All scores are zero, returning original scores')
         return rewards
 
-    normalized = {uid: score / total for uid, score in rewards.items()}
-
-    return normalized
+    return normalize_reward_ratios(rewards)

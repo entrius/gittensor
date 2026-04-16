@@ -6,6 +6,7 @@ from typing import Dict
 import bittensor as bt
 
 from gittensor.classes import MinerEvaluation
+from gittensor.validator.utils.reward_normalization import normalize_reward_ratios
 
 
 def normalize_issue_discovery_rewards(miner_evaluations: Dict[int, MinerEvaluation]) -> Dict[int, float]:
@@ -27,7 +28,7 @@ def normalize_issue_discovery_rewards(miner_evaluations: Dict[int, MinerEvaluati
         bt.logging.info('Issue discovery: all scores are zero, returning empty rewards')
         return rewards
 
-    normalized = {uid: score / total for uid, score in rewards.items()}
+    normalized = normalize_reward_ratios(rewards)
 
     bt.logging.info(f'Issue discovery: normalized {nonzero_count} miners with scores > 0')
 

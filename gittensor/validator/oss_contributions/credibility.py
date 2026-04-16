@@ -6,11 +6,11 @@ from typing import TYPE_CHECKING, List, Tuple
 import bittensor as bt
 
 from gittensor.constants import (
-    CREDIBILITY_MULLIGAN_COUNT,
     MIN_CREDIBILITY,
     MIN_TOKEN_SCORE_FOR_BASE_SCORE,
     MIN_VALID_MERGED_PRS,
 )
+from gittensor.validator.utils.credibility_math import mulligan_success_ratio
 
 if TYPE_CHECKING:
     from gittensor.classes import PullRequest
@@ -24,14 +24,7 @@ def calculate_credibility(merged_prs: List['PullRequest'], closed_prs: List['Pul
 
     Returns credibility in [0.0, 1.0], or 0.0 if no attempts after mulligan.
     """
-    merged_count = len(merged_prs)
-    closed_count = max(0, len(closed_prs) - CREDIBILITY_MULLIGAN_COUNT)
-    total_attempts = merged_count + closed_count
-
-    if total_attempts == 0:
-        return 0.0
-
-    return merged_count / total_attempts
+    return mulligan_success_ratio(len(merged_prs), len(closed_prs))
 
 
 def check_eligibility(merged_prs: List['PullRequest'], closed_prs: List['PullRequest']) -> Tuple[bool, float, str]:

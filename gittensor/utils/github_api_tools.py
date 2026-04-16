@@ -94,12 +94,28 @@ QUERY = """
                     ... on User { databaseId }
                   }
                   authorAssociation
+                  userContentEdits(first: 1) {
+                    nodes { editedAt }
+                  }
+                  timelineItems(itemTypes: [RENAMED_TITLE_EVENT], last: 1) {
+                    nodes {
+                      ... on RenamedTitleEvent { createdAt }
+                    }
+                  }
                 }
               }
               reviews(first: 3, states: APPROVED) {
                 nodes {
                   author {
                     login
+                  }
+                }
+              }
+              timelineItems(itemTypes: [LABELED_EVENT], last: 1) {
+                nodes {
+                  ... on LabeledEvent {
+                    label { name }
+                    createdAt
                   }
                 }
               }

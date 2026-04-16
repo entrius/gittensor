@@ -41,7 +41,7 @@ def _run_scan(monkeypatch, raw_issues):
     asyncio.run(
         repo_scan._scan_repo(
             repo_name='test/repo',
-            lookback_date='2026-01-01',
+            lookback_date='2026-01-01T00:00:00Z',
             validator_pat='x',
             miner_github_ids={'1001'},
             known_issues=set(),

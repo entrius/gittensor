@@ -1,4 +1,5 @@
 import math
+import warnings
 from datetime import datetime, timezone
 
 import pytz
@@ -30,10 +31,17 @@ def parse_github_iso_to_utc(timestamp_str: str) -> datetime:
 
 
 def parse_github_timestamp_to_cst(timestamp_str: str) -> datetime:
+    """Deprecated: prefer ``parse_github_iso_to_utc``.
+
+    The Chicago timezone conversion is a no-op for the downstream arithmetic
+    (subtraction, comparison) used across the codebase, and the wrapper plus
+    the ``pytz`` dependency will be removed in a future release.
     """
-    Parse GitHub's ISO format timestamp and convert to Chicago timezone.
-    GitHub returns timestamps like: 2024-01-15T10:30:00Z
-    """
+    warnings.warn(
+        'parse_github_timestamp_to_cst is deprecated; use parse_github_iso_to_utc instead.',
+        DeprecationWarning,
+        stacklevel=2,
+    )
     return parse_github_iso_to_utc(timestamp_str).astimezone(CHICAGO_TZ)
 
 

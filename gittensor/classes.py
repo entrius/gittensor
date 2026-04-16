@@ -224,7 +224,7 @@ class PullRequest:
     @classmethod
     def from_graphql_response(cls, pr_data: dict, uid: int, hotkey: str, github_id: Optional[str]) -> 'PullRequest':
         """Create PullRequest from GraphQL API response for any PR state."""
-        from gittensor.validator.utils.datetime_utils import parse_github_timestamp_to_cst
+        from gittensor.validator.utils.datetime_utils import parse_github_iso_to_utc
 
         repository_full_name = parse_repo_name(pr_data['repository'])
         pr_state = PRState(pr_data['state'])
@@ -245,7 +245,7 @@ class PullRequest:
                 None,
             )
             latest_body_edit_at = (
-                parse_github_timestamp_to_cst(latest_body_edit_timestamp) if latest_body_edit_timestamp else None
+                parse_github_iso_to_utc(latest_body_edit_timestamp) if latest_body_edit_timestamp else None
             )
 
             title_rename_events = (issue.get('timelineItems') or {}).get('nodes') or []
@@ -254,7 +254,7 @@ class PullRequest:
                 None,
             )
             latest_title_rename_at = (
-                parse_github_timestamp_to_cst(latest_title_rename_timestamp) if latest_title_rename_timestamp else None
+                parse_github_iso_to_utc(latest_title_rename_timestamp) if latest_title_rename_timestamp else None
             )
 
             if latest_body_edit_at and latest_title_rename_at:
@@ -268,21 +268,21 @@ class PullRequest:
                     pr_number=pr_data['number'],
                     repository_full_name=repository_full_name,
                     title=issue['title'],
-                    created_at=parse_github_timestamp_to_cst(issue['createdAt']) if issue.get('createdAt') else None,
-                    closed_at=parse_github_timestamp_to_cst(issue['closedAt']) if issue.get('closedAt') else None,
+                    created_at=parse_github_iso_to_utc(issue['createdAt']) if issue.get('createdAt') else None,
+                    closed_at=parse_github_iso_to_utc(issue['closedAt']) if issue.get('closedAt') else None,
                     author_login=issue_author.get('login'),
                     state=issue.get('state'),
                     author_association=issue.get('authorAssociation'),
                     author_github_id=str(author_db_id) if author_db_id else None,
-                    updated_at=parse_github_timestamp_to_cst(issue['updatedAt']) if issue.get('updatedAt') else None,
+                    updated_at=parse_github_iso_to_utc(issue['updatedAt']) if issue.get('updatedAt') else None,
                     body_or_title_edited_at=body_or_title_edited_at,
                 )
             )
 
         description: str = pr_data.get('bodyText', '')
         raw_edited_at = pr_data.get('lastEditedAt')
-        last_edited_at = parse_github_timestamp_to_cst(raw_edited_at) if isinstance(raw_edited_at, str) else None
-        merged_at = parse_github_timestamp_to_cst(pr_data['mergedAt']) if is_merged else None
+        last_edited_at = parse_github_iso_to_utc(raw_edited_at) if isinstance(raw_edited_at, str) else None
+        merged_at = parse_github_iso_to_utc(pr_data['mergedAt']) if is_merged else None
 
         # Extract last label from timeline events
         timeline_nodes = pr_data.get('timelineItems', {}).get('nodes', [])
@@ -297,7 +297,7 @@ class PullRequest:
             title=pr_data['title'],
             author_login=pr_data['author']['login'],
             merged_at=merged_at,
-            created_at=parse_github_timestamp_to_cst(pr_data['createdAt']),
+            created_at=parse_github_iso_to_utc(pr_data['createdAt']),
             pr_state=pr_state,
             additions=pr_data['additions'],
             deletions=pr_data['deletions'],

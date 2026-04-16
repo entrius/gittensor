@@ -55,6 +55,17 @@ def _resolve_endpoint(network: str | None, rpc_url: str | None) -> str:
     return NETWORK_MAP['finney']
 
 
+def _connect_bittensor(wallet_name: str, wallet_hotkey: str, ws_endpoint: str, netuid: int):
+    """Set up and return bittensor wallet, subtensor, metagraph and dendrite."""
+    import bittensor as bt
+
+    w = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
+    st = bt.Subtensor(network=ws_endpoint)
+    mg = st.metagraph(netuid=netuid)
+    dd = bt.Dendrite(wallet=w)
+    return w, st, mg, dd
+
+
 def _error(msg: str, json_mode: bool) -> None:
     """Print an error message in the appropriate format."""
     if json_mode:

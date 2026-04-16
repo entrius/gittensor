@@ -17,6 +17,11 @@ console = Console()
 NETUID_DEFAULT = 74
 
 
+def _load_config_value(key: str):
+    """Backward-compatible alias for :func:`gittensor.cli.paths.load_config_value`."""
+    return load_config_value(key)
+
+
 def _get_validator_axons(metagraph) -> tuple[list, list]:
     """Return (axons, uids) for all active validators (vtrust > 0.1, serving)."""
     axons = []

@@ -57,8 +57,6 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_m
         gitt miner post --wallet alice --hotkey default
         gitt miner post --wallet alice --hotkey default --network test
     """
-    from gittensor.synapses import PatBroadcastSynapse
-
     # 1. Load and validate PAT locally (flag > env var > interactive prompt)
     pat = pat or os.environ.get('GITTENSOR_MINER_PAT')
     if not pat:
@@ -119,6 +117,8 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_m
         sys.exit(1)
 
     # 5. Broadcast
+    from gittensor.synapses import PatBroadcastSynapse
+
     synapse = PatBroadcastSynapse(github_access_token=pat)
 
     async def _broadcast():

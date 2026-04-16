@@ -21,7 +21,7 @@ import click
 from rich.console import Console
 
 from gittensor.cli.issue_commands.tables import build_pr_table
-from gittensor.constants import NETWORK_MAP
+from gittensor.constants import BASE_GITHUB_API_URL, NETWORK_MAP
 from gittensor.validator.issue_competitions.storage_utils import (
     compute_ink5_lazy_key,
     decode_issue_from_storage,
@@ -384,7 +384,7 @@ def validate_repository(repo: str, verify_exists: bool = True) -> Tuple[str, str
     owner, repo_name = repo.split('/', 1)
 
     if verify_exists:
-        url = f'https://api.github.com/repos/{owner}/{repo_name}'
+        url = f'{BASE_GITHUB_API_URL}/repos/{owner}/{repo_name}'
         try:
             req = urllib.request.Request(url, headers={'User-Agent': 'gittensor-cli'})
             urllib.request.urlopen(req, timeout=GITHUB_API_TIMEOUT)
@@ -408,7 +408,7 @@ def validate_github_issue(owner: str, repo: str, issue_number: int) -> Optional[
     Returns the issue JSON data on success, or None if verification was skipped
     due to network issues.  Raises click.BadParameter on validation failure.
     """
-    url = f'https://api.github.com/repos/{owner}/{repo}/issues/{issue_number}'
+    url = f'{BASE_GITHUB_API_URL}/repos/{owner}/{repo}/issues/{issue_number}'
     try:
         req = urllib.request.Request(url, headers={'User-Agent': 'gittensor-cli'})
         resp = urllib.request.urlopen(req, timeout=GITHUB_API_TIMEOUT)

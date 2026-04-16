@@ -7,11 +7,11 @@ from __future__ import annotations
 import json
 import sys
 from contextlib import nullcontext
-from pathlib import Path
 
 import click
 from rich.console import Console
 
+from gittensor.cli.paths import load_config_value
 from gittensor.constants import NETWORK_MAP
 
 console = Console()
@@ -31,15 +31,8 @@ def _get_validator_axons(metagraph) -> tuple[list, list]:
 
 
 def _load_config_value(key: str):
-    """Load a value from ~/.gittensor/config.json, or None."""
-    config_file = Path.home() / '.gittensor' / 'config.json'
-    if not config_file.exists():
-        return None
-    try:
-        config = json.loads(config_file.read_text())
-        return config.get(key)
-    except (json.JSONDecodeError, OSError):
-        return None
+    """Backward-compatible wrapper around shared CLI config lookup."""
+    return load_config_value(key)
 
 
 def _resolve_endpoint(network: str | None, rpc_url: str | None) -> str:

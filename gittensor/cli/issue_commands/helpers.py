@@ -14,13 +14,13 @@ import urllib.error
 import urllib.request
 from contextlib import nullcontext
 from decimal import Decimal, InvalidOperation
-from pathlib import Path
 from typing import Any, Callable, ContextManager, Dict, List, Optional, Tuple, TypeVar
 
 import click
 from rich.console import Console
 
 from gittensor.cli.issue_commands.tables import build_pr_table
+from gittensor.cli.paths import CONFIG_FILE, GITTENSOR_DIR
 from gittensor.constants import NETWORK_MAP
 from gittensor.validator.issue_competitions.storage_utils import (
     compute_ink5_lazy_key,
@@ -28,10 +28,6 @@ from gittensor.validator.issue_competitions.storage_utils import (
     decode_packed_contract_storage,
     get_contract_child_storage_key,
 )
-
-# Default CLI config paths
-GITTENSOR_DIR = Path.home() / '.gittensor'
-CONFIG_FILE = GITTENSOR_DIR / 'config.json'
 
 # ALPHA token conversion
 ALPHA_DECIMALS = 9
@@ -56,6 +52,7 @@ console = Console()
 
 CommandFunc = TypeVar('CommandFunc', bound=Callable[..., Any])
 NETWORK_CHOICE = click.Choice(['finney', 'test', 'local'], case_sensitive=False)
+__all__ = ['CONFIG_FILE', 'GITTENSOR_DIR']
 
 
 def apply_click_options(*decorators: Callable[[CommandFunc], CommandFunc]) -> Callable[[CommandFunc], CommandFunc]:

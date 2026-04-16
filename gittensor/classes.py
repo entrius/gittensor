@@ -35,19 +35,6 @@ class Miner:
 
 
 @dataclass
-class Repository:
-    """Repository information"""
-
-    name: str
-    owner: str
-    weight: float
-
-    @property
-    def full_name(self) -> str:
-        return f'{self.owner}/{self.name}'
-
-
-@dataclass
 class FileChange:
     """Represents a single file change in a PR"""
 
@@ -629,12 +616,6 @@ class MinerEvaluationCache:
         bt.logging.debug(f'Cache hit for UID {uid} (cached at {cached.cached_at.isoformat()})')
 
         return deepcopy(cached.evaluation)
-
-    def invalidate(self, uid: int) -> None:
-        """Remove a cached evaluation for a specific UID."""
-        if uid in self._cache:
-            del self._cache[uid]
-            bt.logging.debug(f'Invalidated cache for UID {uid}')
 
     def create_lightweight_copy(self, evaluation: 'MinerEvaluation') -> 'MinerEvaluation':
         """Create a memory-efficient copy, stripping file patches."""

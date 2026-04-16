@@ -157,6 +157,7 @@ async def priority_pat_check(validator: 'Validator', synapse: PatCheckSynapse) -
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+
 def _test_pat_against_repo(pat: str) -> Optional[str]:
     """Run a test GraphQL call to verify the PAT has the access scoring requires.
 

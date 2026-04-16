@@ -103,6 +103,14 @@ QUERY = """
                   }
                 }
               }
+              timelineItems(itemTypes: [LABELED_EVENT], last: 1) {
+                nodes {
+                  ... on LabeledEvent {
+                    label { name }
+                    createdAt
+                  }
+                }
+              }
             }
           }
         }

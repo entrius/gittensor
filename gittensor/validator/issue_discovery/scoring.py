@@ -107,7 +107,7 @@ def score_discovered_issues(
 
     # Phase 2: Merge in scan issues (from repo-centric closed scan)
     if scan_issues:
-        _merge_scan_issues(scan_issues, github_id_to_uid, discoverer_data)
+        _merge_scan_issues(scan_issues, github_id_to_uid, discoverer_data, miner_evaluations)
 
     if not discoverer_data:
         bt.logging.info('No issue discovery data found')
@@ -264,6 +264,7 @@ def _merge_scan_issues(
     scan_issues: Dict[str, List[Issue]],
     github_id_to_uid: Dict[str, int],
     discoverer_data: Dict[str, _DiscovererData],
+    miner_evaluations: Dict[int, MinerEvaluation],
 ) -> None:
     """Merge repo-scan results into discoverer data.
 
@@ -275,8 +276,16 @@ def _merge_scan_issues(
         if github_id not in github_id_to_uid:
             continue
 
+        uid = github_id_to_uid[github_id]
+        evaluation = miner_evaluations.get(uid)
+        hotkey = evaluation.hotkey if evaluation else None
+
         data = discoverer_data[github_id]
         for issue in issues:
+            issue.uid = uid
+            issue.hotkey = hotkey
+            issue.github_id = github_id
+
             if issue.state == 'CLOSED' and issue.closed_at:
                 # Case 2: solved by non-miner PR → positive credibility
                 data.solved_count += 1

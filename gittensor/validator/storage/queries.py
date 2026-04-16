@@ -93,7 +93,8 @@ DO UPDATE SET
 # Issue Queries
 BULK_UPSERT_ISSUES = """
 INSERT INTO issues (
-    number, pr_number, repository_full_name, title, created_at, closed_at,
+    number, pr_number, repository_full_name, uid, hotkey, github_id,
+    title, created_at, closed_at,
     author_login, state, author_association,
     author_github_id, is_transferred, updated_at,
     discovery_base_score, discovery_earned_score,
@@ -103,6 +104,9 @@ INSERT INTO issues (
 ) VALUES %s
 ON CONFLICT (number, pr_number, repository_full_name)
 DO UPDATE SET
+    uid = EXCLUDED.uid,
+    hotkey = EXCLUDED.hotkey,
+    github_id = EXCLUDED.github_id,
     title = EXCLUDED.title,
     closed_at = EXCLUDED.closed_at,
     author_login = EXCLUDED.author_login,

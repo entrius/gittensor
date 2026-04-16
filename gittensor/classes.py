@@ -130,6 +130,11 @@ class Issue:
     state: Optional[str] = None  # "OPEN" or "CLOSED"
     author_association: Optional[str] = None  # e.g., "OWNER", "MEMBER", "COLLABORATOR", "CONTRIBUTOR", "NONE"
 
+    # Miner linkage (solver identity — mirrors pull_requests table for direct queries)
+    uid: Optional[int] = None
+    hotkey: Optional[str] = None
+    github_id: Optional[str] = None
+
     # Issue discovery fields
     author_github_id: Optional[str] = None  # Issue author's GitHub user ID (for miner matching)
     is_transferred: bool = False
@@ -286,6 +291,9 @@ class PullRequest:
                     author_login=issue_author.get('login'),
                     state=issue.get('state'),
                     author_association=issue.get('authorAssociation'),
+                    uid=uid,
+                    hotkey=hotkey,
+                    github_id=github_id,
                     author_github_id=str(author_db_id) if author_db_id else None,
                     updated_at=parse_github_timestamp_to_cst(issue['updatedAt']) if issue.get('updatedAt') else None,
                     body_or_title_edited_at=body_or_title_edited_at,

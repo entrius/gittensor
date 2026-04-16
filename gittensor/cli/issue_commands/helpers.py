@@ -14,12 +14,17 @@ import urllib.error
 import urllib.request
 from contextlib import nullcontext
 from decimal import Decimal, InvalidOperation
-from pathlib import Path
 from typing import Any, Callable, ContextManager, Dict, List, Optional, Tuple, TypeVar
 
 import click
 from rich.console import Console
 
+from gittensor.cli.endpoint_resolution import (
+    CONFIG_FILE,
+    GITTENSOR_DIR,
+    load_config,
+    resolve_network,
+)
 from gittensor.cli.issue_commands.tables import build_pr_table
 from gittensor.constants import NETWORK_MAP
 from gittensor.validator.issue_competitions.storage_utils import (
@@ -28,10 +33,6 @@ from gittensor.validator.issue_competitions.storage_utils import (
     decode_packed_contract_storage,
     get_contract_child_storage_key,
 )
-
-# Default CLI config paths
-GITTENSOR_DIR = Path.home() / '.gittensor'
-CONFIG_FILE = GITTENSOR_DIR / 'config.json'
 
 # ALPHA token conversion
 ALPHA_DECIMALS = 9
@@ -484,38 +485,6 @@ def validate_ss58_address(address: str, param_name: str = 'address') -> str:
     return address
 
 
-def load_config() -> Dict[str, Any]:
-    """
-    Load configuration from ~/.gittensor/config.json.
-
-    Priority:
-    1. CLI arguments (highest - handled by callers)
-    2. ~/.gittensor/config.json
-    3. Defaults
-
-    Config file format:
-        {
-            "contract_address": "5Cxxx...",
-            "ws_endpoint": "wss://entrypoint-finney.opentensor.ai:443",
-            "network": "finney",
-            "wallet": "default",
-            "hotkey": "default"
-        }
-
-    Manage via: gitt config <key> <value>
-
-    Returns:
-        Dict with all config keys
-    """
-    if CONFIG_FILE.exists():
-        try:
-            with open(CONFIG_FILE, 'r') as f:
-                return json.load(f)
-        except (json.JSONDecodeError, IOError):
-            pass
-    return {}
-
-
 def get_contract_address(cli_value: str = '') -> str:
     """
     Get contract address. CLI arg > env var > constants.py default.
@@ -531,55 +500,6 @@ def get_contract_address(cli_value: str = '') -> str:
     if cli_value:
         return cli_value
     return _get_contract_address()
-
-
-# Reverse lookup: URL -> network name
-_URL_TO_NETWORK = {url: name for name, url in NETWORK_MAP.items()}
-
-
-def resolve_network(network: Optional[str] = None, rpc_url: Optional[str] = None) -> tuple:
-    """
-    Resolve --network and --rpc-url into (endpoint, network_name).
-
-    Priority:
-        1. --rpc-url (explicit URL always wins)
-        2. --network (mapped to known endpoint)
-        3. Config file ws_endpoint / network
-        4. Default: finney (mainnet)
-
-    Args:
-        network: Network name from --network option (test/finney/local)
-        rpc_url: Explicit RPC URL from --rpc-url option
-
-    Returns:
-        Tuple of (ws_endpoint, network_name)
-    """
-    # --rpc-url takes highest priority
-    if rpc_url:
-        name = _URL_TO_NETWORK.get(rpc_url, 'custom')
-        return rpc_url, name
-
-    # --network maps to a known endpoint
-    if network:
-        key = network.lower()
-        if key in NETWORK_MAP:
-            return NETWORK_MAP[key], key
-        # Treat unknown network value as a custom URL
-        return network, 'custom'
-
-    # Fall back to config file
-    config = load_config()
-    if config.get('ws_endpoint'):
-        endpoint = config['ws_endpoint']
-        name = _URL_TO_NETWORK.get(endpoint, config.get('network', 'custom'))
-        return endpoint, name
-
-    config_network = config.get('network', '').lower()
-    if config_network and config_network in NETWORK_MAP:
-        return NETWORK_MAP[config_network], config_network
-
-    # Default: finney (mainnet)
-    return NETWORK_MAP['finney'], 'finney'
 
 
 def _resolve_contract_and_network(

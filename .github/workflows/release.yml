@@ -1,0 +1,79 @@
+name: Release (promote test → main)
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run — show what would happen, do not push'
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      dry_run:
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: test
+
+      - name: Verify main is ancestor of test
+        run: |
+          git fetch origin main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor origin/main origin/test; then
+            echo "::error::main is not an ancestor of test. Reconcile manually before promoting."
+            exit 1
+          fi
+          ahead=$(git rev-list --count origin/main..origin/test)
+          echo "main is behind test by $ahead commit(s). Ready to fast-forward."
+          echo "AHEAD=$ahead" >> $GITHUB_ENV
+
+      - name: Tag release
+        run: |
+          TAG="release-$(date -u +%Y%m%d-%H%M%S)"
+          git tag "$TAG" origin/test
+          echo "TAG=$TAG" >> $GITHUB_ENV
+
+      - name: Fast-forward main → test
+        if: ${{ !inputs.dry_run }}
+        run: |
+          git push origin "refs/remotes/origin/test:refs/heads/main"
+          git push origin "$TAG"
+          echo "::notice::Promoted $AHEAD commits to main. Tagged $TAG."
+
+      - name: Notify Discord
+        if: ${{ !inputs.dry_run && env.DISCORD_WEBHOOK != '' }}
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        run: |
+          repo="${{ github.repository }}"
+          sha=$(git rev-parse origin/test)
+          short_sha="${sha:0:7}"
+          compare_url="https://github.com/${repo}/compare/${TAG}...main"
+          tag_url="https://github.com/${repo}/releases/tag/${TAG}"
+          payload=$(jq -n \
+            --arg content "🚀 **${repo}** released \`${TAG}\` — promoted **${AHEAD}** commit(s) to \`main\` (\`${short_sha}\`)." \
+            --arg tag "$tag_url" \
+            --arg cmp "$compare_url" \
+            '{content: $content, embeds: [{title: "View tag", url: $tag}, {title: "Diff", url: $cmp}]}')
+          curl -sS -H "Content-Type: application/json" -X POST -d "$payload" "$DISCORD_WEBHOOK"
+
+      - name: Dry run summary
+        if: ${{ inputs.dry_run }}
+        run: |
+          echo "DRY RUN — would fast-forward main to $(git rev-parse origin/test)"
+          echo "Tag would be: $TAG"
+          git log --oneline origin/main..origin/test | head -50

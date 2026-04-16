@@ -21,6 +21,7 @@ import click
 from rich.console import Console
 
 from gittensor.cli.issue_commands.tables import build_pr_table
+from gittensor.cli.paths import CONFIG_FILE, GITTENSOR_DIR
 from gittensor.constants import NETWORK_MAP
 from gittensor.validator.issue_competitions.storage_utils import (
     compute_ink5_lazy_key,
@@ -28,10 +29,6 @@ from gittensor.validator.issue_competitions.storage_utils import (
     decode_packed_contract_storage,
     get_contract_child_storage_key,
 )
-
-# Default CLI config paths
-GITTENSOR_DIR = Path.home() / '.gittensor'
-CONFIG_FILE = GITTENSOR_DIR / 'config.json'
 
 # ALPHA token conversion
 ALPHA_DECIMALS = 9

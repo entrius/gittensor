@@ -77,9 +77,9 @@ def mock_response_502():
 class TestGraphQLRetryLogic:
     """Test suite for GraphQL request retry logic in get_github_graphql_query."""
 
-    @patch('gittensor.utils.github_api_tools.requests.post')
-    @patch('gittensor.utils.github_api_tools.time.sleep')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
+    @patch('gittensor.utils.github_api.graphql.requests.post')
+    @patch('gittensor.utils.github_api.graphql.time.sleep')
+    @patch('gittensor.utils.github_api.graphql.bt.logging')
     def test_retry_on_502_then_success(self, mock_logging, mock_sleep, mock_post, graphql_params):
         """Test that function retries on 502 Bad Gateway and succeeds on third attempt."""
         mock_response_502 = Mock(status_code=502, text='<html><title>502 Bad Gateway</title></html>')
@@ -99,9 +99,9 @@ class TestGraphQLRetryLogic:
         # Verify exponential backoff: 5s, 10s
         mock_sleep.assert_has_calls([call(5), call(10)])
 
-    @patch('gittensor.utils.github_api_tools.requests.post')
-    @patch('gittensor.utils.github_api_tools.time.sleep')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
+    @patch('gittensor.utils.github_api.graphql.requests.post')
+    @patch('gittensor.utils.github_api.graphql.time.sleep')
+    @patch('gittensor.utils.github_api.graphql.bt.logging')
     def test_502_halves_page_size_on_retry(self, mock_logging, mock_sleep, mock_post, graphql_params):
         """Test that 502 errors cause the page size (limit) to be halved on each retry."""
         mock_response_502 = Mock(status_code=502, text='502 Bad Gateway')
@@ -118,9 +118,9 @@ class TestGraphQLRetryLogic:
         limits = [c.kwargs['json']['variables']['limit'] for c in mock_post.call_args_list]
         assert limits == [100, 50, 25]
 
-    @patch('gittensor.utils.github_api_tools.requests.post')
-    @patch('gittensor.utils.github_api_tools.time.sleep')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
+    @patch('gittensor.utils.github_api.graphql.requests.post')
+    @patch('gittensor.utils.github_api.graphql.time.sleep')
+    @patch('gittensor.utils.github_api.graphql.bt.logging')
     def test_page_size_floors_at_10(self, mock_logging, mock_sleep, mock_post, graphql_params):
         """Test that page size never drops below 10 even after many 502s."""
         mock_response_502 = Mock(status_code=502, text='502 Bad Gateway')
@@ -132,9 +132,9 @@ class TestGraphQLRetryLogic:
         limits = [c.kwargs['json']['variables']['limit'] for c in mock_post.call_args_list]
         assert limits == [100, 50, 25, 12, 10, 10, 10, 10]
 
-    @patch('gittensor.utils.github_api_tools.requests.post')
-    @patch('gittensor.utils.github_api_tools.time.sleep')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
+    @patch('gittensor.utils.github_api.graphql.requests.post')
+    @patch('gittensor.utils.github_api.graphql.time.sleep')
+    @patch('gittensor.utils.github_api.graphql.bt.logging')
     def test_non_5xx_does_not_reduce_page_size(self, mock_logging, mock_sleep, mock_post, graphql_params):
         """Test that non-5xx errors (e.g. 401) do not reduce page size."""
         mock_response_401 = Mock(status_code=401, text='Unauthorized')
@@ -150,9 +150,9 @@ class TestGraphQLRetryLogic:
         limits = [c.kwargs['json']['variables']['limit'] for c in mock_post.call_args_list]
         assert limits == [100, 100, 100], 'Page size should stay at 100 for non-5xx errors'
 
-    @patch('gittensor.utils.github_api_tools.requests.post')
-    @patch('gittensor.utils.github_api_tools.time.sleep')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
+    @patch('gittensor.utils.github_api.graphql.requests.post')
+    @patch('gittensor.utils.github_api.graphql.time.sleep')
+    @patch('gittensor.utils.github_api.graphql.bt.logging')
     def test_503_and_504_also_reduce_page_size(self, mock_logging, mock_sleep, mock_post, graphql_params):
         """Test that 503 and 504 errors also trigger page size reduction."""
         mock_response_503 = Mock(status_code=503, text='Service Unavailable')
@@ -169,9 +169,9 @@ class TestGraphQLRetryLogic:
         limits = [c.kwargs['json']['variables']['limit'] for c in mock_post.call_args_list]
         assert limits == [100, 50, 25]
 
-    @patch('gittensor.utils.github_api_tools.requests.post')
-    @patch('gittensor.utils.github_api_tools.time.sleep')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
+    @patch('gittensor.utils.github_api.graphql.requests.post')
+    @patch('gittensor.utils.github_api.graphql.time.sleep')
+    @patch('gittensor.utils.github_api.graphql.bt.logging')
     def test_small_initial_limit_not_reduced_below_10(self, mock_logging, mock_sleep, mock_post):
         """Test that a small initial limit (e.g. 15) floors correctly at 10."""
         mock_response_502 = Mock(status_code=502, text='502 Bad Gateway')
@@ -195,9 +195,9 @@ class TestGraphQLRetryLogic:
         limits = [c.kwargs['json']['variables']['limit'] for c in mock_post.call_args_list]
         assert limits == [15, 10, 10]
 
-    @patch('gittensor.utils.github_api_tools.requests.post')
-    @patch('gittensor.utils.github_api_tools.time.sleep')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
+    @patch('gittensor.utils.github_api.graphql.requests.post')
+    @patch('gittensor.utils.github_api.graphql.time.sleep')
+    @patch('gittensor.utils.github_api.graphql.bt.logging')
     def test_gives_up_after_eight_attempts(self, mock_logging, mock_sleep, mock_post, graphql_params):
         """Test that function gives up after 8 failed attempts."""
         mock_response_502 = Mock(status_code=502, text='<html><title>502 Bad Gateway</title></html>')
@@ -210,9 +210,9 @@ class TestGraphQLRetryLogic:
         assert result.response is None
         mock_logging.error.assert_called()
 
-    @patch('gittensor.utils.github_api_tools.requests.post')
-    @patch('gittensor.utils.github_api_tools.time.sleep')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
+    @patch('gittensor.utils.github_api.graphql.requests.post')
+    @patch('gittensor.utils.github_api.graphql.time.sleep')
+    @patch('gittensor.utils.github_api.graphql.bt.logging')
     def test_retry_on_503_service_unavailable(self, mock_logging, mock_sleep, mock_post, graphql_params):
         """Test that function retries on 503 Service Unavailable."""
         mock_response_503 = Mock(status_code=503, text='Service Unavailable')
@@ -228,9 +228,9 @@ class TestGraphQLRetryLogic:
         assert mock_sleep.call_count == 1, 'Should sleep once'
         assert result.response is not None
 
-    @patch('gittensor.utils.github_api_tools.requests.post')
-    @patch('gittensor.utils.github_api_tools.time.sleep')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
+    @patch('gittensor.utils.github_api.graphql.requests.post')
+    @patch('gittensor.utils.github_api.graphql.time.sleep')
+    @patch('gittensor.utils.github_api.graphql.bt.logging')
     def test_retry_on_504_gateway_timeout(self, mock_logging, mock_sleep, mock_post, graphql_params):
         """Test that function retries on 504 Gateway Timeout."""
         mock_response_504 = Mock(status_code=504, text='Gateway Timeout')
@@ -245,9 +245,9 @@ class TestGraphQLRetryLogic:
         assert mock_post.call_count == 2, 'Should retry once after 504'
         assert result.response is not None
 
-    @patch('gittensor.utils.github_api_tools.requests.post')
-    @patch('gittensor.utils.github_api_tools.time.sleep')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
+    @patch('gittensor.utils.github_api.graphql.requests.post')
+    @patch('gittensor.utils.github_api.graphql.time.sleep')
+    @patch('gittensor.utils.github_api.graphql.bt.logging')
     def test_retry_on_401_unauthorized(self, mock_logging, mock_sleep, mock_post, graphql_params):
         """Test that function retries on 401 Unauthorized (all non-200 responses are retried)."""
         mock_response_401 = Mock(status_code=401, text='Unauthorized')
@@ -263,9 +263,9 @@ class TestGraphQLRetryLogic:
         assert mock_sleep.call_count == 1, 'Should sleep once'
         assert result.response is not None
 
-    @patch('gittensor.utils.github_api_tools.requests.post')
-    @patch('gittensor.utils.github_api_tools.time.sleep')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
+    @patch('gittensor.utils.github_api.graphql.requests.post')
+    @patch('gittensor.utils.github_api.graphql.time.sleep')
+    @patch('gittensor.utils.github_api.graphql.bt.logging')
     def test_retry_on_404_not_found(self, mock_logging, mock_sleep, mock_post, graphql_params):
         """Test that function retries on 404 Not Found (all non-200 responses are retried)."""
         mock_response_404 = Mock(status_code=404, text='Not Found')
@@ -280,9 +280,9 @@ class TestGraphQLRetryLogic:
         assert mock_post.call_count == 2, 'Should retry on 404'
         assert mock_sleep.call_count == 1, 'Should sleep once'
 
-    @patch('gittensor.utils.github_api_tools.requests.post')
-    @patch('gittensor.utils.github_api_tools.time.sleep')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
+    @patch('gittensor.utils.github_api.graphql.requests.post')
+    @patch('gittensor.utils.github_api.graphql.time.sleep')
+    @patch('gittensor.utils.github_api.graphql.bt.logging')
     def test_retry_on_connection_error(self, mock_logging, mock_sleep, mock_post, graphql_params):
         """Test that function retries on connection errors."""
         import requests
@@ -304,9 +304,9 @@ class TestGraphQLRetryLogic:
         # Verify exponential backoff: 5s, 10s
         mock_sleep.assert_has_calls([call(5), call(10)])
 
-    @patch('gittensor.utils.github_api_tools.requests.post')
-    @patch('gittensor.utils.github_api_tools.time.sleep')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
+    @patch('gittensor.utils.github_api.graphql.requests.post')
+    @patch('gittensor.utils.github_api.graphql.time.sleep')
+    @patch('gittensor.utils.github_api.graphql.bt.logging')
     def test_gives_up_after_eight_connection_errors(self, mock_logging, mock_sleep, mock_post, graphql_params):
         """Test that function gives up after 8 connection errors."""
         import requests
@@ -318,8 +318,8 @@ class TestGraphQLRetryLogic:
         assert mock_post.call_count == 8, 'Should try 8 times before giving up'
         assert result.response is None
 
-    @patch('gittensor.utils.github_api_tools.requests.post')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
+    @patch('gittensor.utils.github_api.graphql.requests.post')
+    @patch('gittensor.utils.github_api.graphql.bt.logging')
     def test_successful_request_no_retry(self, mock_logging, mock_post, graphql_params):
         """Test that successful requests don't trigger retry logic."""
         mock_response_200 = Mock(status_code=200)
@@ -332,9 +332,9 @@ class TestGraphQLRetryLogic:
         assert result.response is not None
         assert result.response.status_code == 200
 
-    @patch('gittensor.utils.github_api_tools.requests.post')
-    @patch('gittensor.utils.github_api_tools.time.sleep')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
+    @patch('gittensor.utils.github_api.graphql.requests.post')
+    @patch('gittensor.utils.github_api.graphql.time.sleep')
+    @patch('gittensor.utils.github_api.graphql.bt.logging')
     def test_exponential_backoff_timing(self, mock_logging, mock_sleep, mock_post, graphql_params):
         """Test that exponential backoff uses correct delays: 5s, 10s, 20s, 30s (capped), 30s, 30s, 30s."""
         mock_response_500 = Mock(status_code=500, text='Internal Server Error')
@@ -356,9 +356,9 @@ class TestGraphQLRetryLogic:
 class TestOtherGitHubAPIFunctions:
     """Test suite for other GitHub API functions with existing retry logic."""
 
-    @patch('gittensor.utils.github_api_tools.requests.get')
-    @patch('gittensor.utils.github_api_tools.time.sleep')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
+    @patch('gittensor.utils.github_api.rest.requests.get')
+    @patch('gittensor.utils.github_api.rest.time.sleep')
+    @patch('gittensor.utils.github_api.rest.bt.logging')
     def test_get_github_id_retry_logic(self, mock_logging, mock_sleep, mock_get):
         """Test that get_github_id retries on failure."""
         mock_response_success = Mock()
@@ -385,7 +385,7 @@ class TestOtherGitHubAPIFunctions:
 class TestFileChangesRetryLogic:
     """Test suite for retry logic in get_pull_request_file_changes."""
 
-    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api.rest.requests.get')
     def test_successful_request_no_retry(self, mock_get):
         """Test that a successful request returns file changes without retrying."""
         mock_response = Mock(status_code=200)
@@ -407,9 +407,9 @@ class TestFileChangesRetryLogic:
         assert result is not None
         assert len(result) == 1
 
-    @patch('gittensor.utils.github_api_tools.requests.get')
-    @patch('gittensor.utils.github_api_tools.time.sleep')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
+    @patch('gittensor.utils.github_api.rest.requests.get')
+    @patch('gittensor.utils.github_api.rest.time.sleep')
+    @patch('gittensor.utils.github_api.rest.bt.logging')
     def test_retry_on_502_then_success(self, mock_logging, mock_sleep, mock_get):
         """Test that 502 triggers retry and succeeds on second attempt."""
         mock_502 = Mock(status_code=502, text='Bad Gateway')
@@ -426,9 +426,9 @@ class TestFileChangesRetryLogic:
         assert mock_sleep.call_count == 1
         assert len(result) == 1
 
-    @patch('gittensor.utils.github_api_tools.requests.get')
-    @patch('gittensor.utils.github_api_tools.time.sleep')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
+    @patch('gittensor.utils.github_api.rest.requests.get')
+    @patch('gittensor.utils.github_api.rest.time.sleep')
+    @patch('gittensor.utils.github_api.rest.bt.logging')
     def test_gives_up_after_three_attempts(self, mock_logging, mock_sleep, mock_get):
         """Test that function gives up after 3 failed attempts and returns empty list."""
         mock_500 = Mock(status_code=500, text='Internal Server Error')
@@ -441,9 +441,9 @@ class TestFileChangesRetryLogic:
         assert result == []
         mock_logging.error.assert_called()
 
-    @patch('gittensor.utils.github_api_tools.requests.get')
-    @patch('gittensor.utils.github_api_tools.time.sleep')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
+    @patch('gittensor.utils.github_api.rest.requests.get')
+    @patch('gittensor.utils.github_api.rest.time.sleep')
+    @patch('gittensor.utils.github_api.rest.bt.logging')
     def test_retry_on_connection_error_then_success(self, mock_logging, mock_sleep, mock_get):
         """Test that connection errors trigger retry."""
         import requests
@@ -459,9 +459,9 @@ class TestFileChangesRetryLogic:
         assert mock_sleep.call_count == 1
         assert result == []
 
-    @patch('gittensor.utils.github_api_tools.requests.get')
-    @patch('gittensor.utils.github_api_tools.time.sleep')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
+    @patch('gittensor.utils.github_api.rest.requests.get')
+    @patch('gittensor.utils.github_api.rest.time.sleep')
+    @patch('gittensor.utils.github_api.rest.bt.logging')
     def test_gives_up_after_three_connection_errors(self, mock_logging, mock_sleep, mock_get):
         """Test that function gives up after 3 connection errors."""
         import requests
@@ -474,9 +474,9 @@ class TestFileChangesRetryLogic:
         assert result == []
         mock_logging.error.assert_called()
 
-    @patch('gittensor.utils.github_api_tools.requests.get')
-    @patch('gittensor.utils.github_api_tools.time.sleep')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
+    @patch('gittensor.utils.github_api.rest.requests.get')
+    @patch('gittensor.utils.github_api.rest.time.sleep')
+    @patch('gittensor.utils.github_api.rest.bt.logging')
     def test_exponential_backoff_timing(self, mock_logging, mock_sleep, mock_get):
         """Test that backoff delays are 5s, 10s for 3 attempts (no sleep after last attempt)."""
         mock_500 = Mock(status_code=500, text='Internal Server Error')
@@ -487,9 +487,9 @@ class TestFileChangesRetryLogic:
         mock_sleep.assert_has_calls([call(5), call(10)])
         assert mock_sleep.call_count == 2, 'Should sleep between attempts but not after the last one'
 
-    @patch('gittensor.utils.github_api_tools.requests.get')
-    @patch('gittensor.utils.github_api_tools.time.sleep')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
+    @patch('gittensor.utils.github_api.rest.requests.get')
+    @patch('gittensor.utils.github_api.rest.time.sleep')
+    @patch('gittensor.utils.github_api.rest.bt.logging')
     def test_no_sleep_after_final_http_error(self, mock_logging, mock_sleep, mock_get):
         """Verify no unnecessary sleep occurs after the final failed HTTP attempt."""
         mock_403 = Mock(status_code=403, text='Forbidden')
@@ -500,9 +500,9 @@ class TestFileChangesRetryLogic:
         assert mock_get.call_count == 3, 'Should try exactly 3 times'
         assert mock_sleep.call_count == 2, 'Should only sleep between retries, not after the last attempt'
 
-    @patch('gittensor.utils.github_api_tools.requests.get')
-    @patch('gittensor.utils.github_api_tools.time.sleep')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
+    @patch('gittensor.utils.github_api.rest.requests.get')
+    @patch('gittensor.utils.github_api.rest.time.sleep')
+    @patch('gittensor.utils.github_api.rest.bt.logging')
     def test_no_sleep_after_final_connection_error(self, mock_logging, mock_sleep, mock_get):
         """Verify no unnecessary sleep occurs after the final failed connection attempt."""
         import requests
@@ -538,7 +538,7 @@ def _make_file_diffs(count: int, start: int = 0) -> list:
 class TestFileChangesPagination:
     """Test suite for pagination in get_pull_request_file_changes."""
 
-    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api.rest.requests.get')
     def test_passes_per_page_param(self, mock_get):
         """Verify per_page=100 is sent to fetch more than the default 30 files."""
         mock_response = Mock(status_code=200)
@@ -553,7 +553,7 @@ class TestFileChangesPagination:
         assert kwargs['params']['per_page'] == 100
         assert kwargs['params']['page'] == 1
 
-    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api.rest.requests.get')
     def test_paginates_when_first_page_is_full(self, mock_get):
         """Fetch two pages when the first page returns exactly per_page files."""
         page1 = _make_file_diffs(100, start=0)
@@ -573,7 +573,7 @@ class TestFileChangesPagination:
         assert mock_get.call_args_list[0][1]['params'] == {'per_page': 100, 'page': 1}
         assert mock_get.call_args_list[1][1]['params'] == {'per_page': 100, 'page': 2}
 
-    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api.rest.requests.get')
     def test_three_pages(self, mock_get):
         """Aggregate files across three pages for a large PR."""
         mock_pages = []
@@ -590,7 +590,7 @@ class TestFileChangesPagination:
         assert len(result) == 250
         assert mock_get.call_count == 3
 
-    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api.rest.requests.get')
     def test_exactly_100_files_fetches_second_page(self, mock_get):
         """When first page has exactly 100 files, a second request confirms no more pages."""
         mock_page1 = Mock(status_code=200)
@@ -605,7 +605,7 @@ class TestFileChangesPagination:
         assert len(result) == 100
         assert mock_get.call_count == 2
 
-    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api.rest.requests.get')
     def test_empty_first_page_returns_empty_list(self, mock_get):
         """PR with zero changed files returns an empty list on the first page."""
         mock_response = Mock(status_code=200)
@@ -617,9 +617,9 @@ class TestFileChangesPagination:
         assert result == []
         assert mock_get.call_count == 1
 
-    @patch('gittensor.utils.github_api_tools.requests.get')
-    @patch('gittensor.utils.github_api_tools.time.sleep')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
+    @patch('gittensor.utils.github_api.rest.requests.get')
+    @patch('gittensor.utils.github_api.rest.time.sleep')
+    @patch('gittensor.utils.github_api.rest.bt.logging')
     def test_retry_resets_pagination_on_mid_page_failure(self, mock_logging, mock_sleep, mock_get):
         """When page 2 fails with 502, the retry restarts from page 1 with halved per_page."""
         page1 = _make_file_diffs(100, start=0)
@@ -647,9 +647,9 @@ class TestFileChangesPagination:
         # Verify retry restarted from page 1 with halved per_page
         assert mock_get.call_args_list[2][1]['params'] == {'per_page': 50, 'page': 1}
 
-    @patch('gittensor.utils.github_api_tools.requests.get')
-    @patch('gittensor.utils.github_api_tools.time.sleep')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
+    @patch('gittensor.utils.github_api.rest.requests.get')
+    @patch('gittensor.utils.github_api.rest.time.sleep')
+    @patch('gittensor.utils.github_api.rest.bt.logging')
     def test_5xx_halves_page_size_on_retry(self, mock_logging, mock_sleep, mock_get):
         """502/503/504 errors halve per_page (floor 10) to work around large-payload failures."""
         mock_502 = Mock(status_code=502, text='Bad Gateway')
@@ -667,9 +667,9 @@ class TestFileChangesPagination:
         assert params[1]['per_page'] == 50
         assert params[2]['per_page'] == 25
 
-    @patch('gittensor.utils.github_api_tools.requests.get')
-    @patch('gittensor.utils.github_api_tools.time.sleep')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
+    @patch('gittensor.utils.github_api.rest.requests.get')
+    @patch('gittensor.utils.github_api.rest.time.sleep')
+    @patch('gittensor.utils.github_api.rest.bt.logging')
     def test_page_size_floors_at_10(self, mock_logging, mock_sleep, mock_get):
         """Page size never drops below 10 even after repeated 5xx errors."""
         mock_502 = Mock(status_code=502, text='Bad Gateway')
@@ -681,9 +681,9 @@ class TestFileChangesPagination:
         params = [c[1]['params']['per_page'] for c in mock_get.call_args_list]
         assert params == [100, 50, 25]
 
-    @patch('gittensor.utils.github_api_tools.requests.get')
-    @patch('gittensor.utils.github_api_tools.time.sleep')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
+    @patch('gittensor.utils.github_api.rest.requests.get')
+    @patch('gittensor.utils.github_api.rest.time.sleep')
+    @patch('gittensor.utils.github_api.rest.bt.logging')
     def test_non_5xx_does_not_reduce_page_size(self, mock_logging, mock_sleep, mock_get):
         """Non-5xx errors (e.g. 403) do not reduce page size."""
         mock_403 = Mock(status_code=403, text='Forbidden')
@@ -698,9 +698,9 @@ class TestFileChangesPagination:
         params = [c[1]['params']['per_page'] for c in mock_get.call_args_list]
         assert params == [100, 100], 'Page size should stay at 100 for non-5xx errors'
 
-    @patch('gittensor.utils.github_api_tools.requests.get')
-    @patch('gittensor.utils.github_api_tools.time.sleep')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
+    @patch('gittensor.utils.github_api.rest.requests.get')
+    @patch('gittensor.utils.github_api.rest.time.sleep')
+    @patch('gittensor.utils.github_api.rest.bt.logging')
     def test_all_pages_fail_returns_empty_list(self, mock_logging, mock_sleep, mock_get):
         """If every attempt fails on the first page, return empty list."""
         mock_get.return_value = Mock(status_code=500, text='Internal Server Error')
@@ -720,9 +720,9 @@ class TestFileChangesPagination:
 class TestExecuteGraphQLQueryRetryLogic:
     """Test suite for retry logic in execute_graphql_query."""
 
-    @patch('gittensor.utils.github_api_tools.requests.post')
-    @patch('gittensor.utils.github_api_tools.time.sleep')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
+    @patch('gittensor.utils.github_api.graphql.requests.post')
+    @patch('gittensor.utils.github_api.graphql.time.sleep')
+    @patch('gittensor.utils.github_api.graphql.bt.logging')
     def test_exception_backoff_capped_at_30s(self, mock_logging, mock_sleep, mock_post):
         """Test that exception handler backoff delay is capped at 30 seconds."""
         import requests
@@ -743,8 +743,8 @@ class TestExecuteGraphQLQueryRetryLogic:
 # ============================================================================
 
 
-@patch('gittensor.utils.github_api_tools._search_issue_referencing_prs_rest')
-@patch('gittensor.utils.github_api_tools._search_issue_referencing_prs_graphql')
+@patch('gittensor.utils.github_api.issue_pr_search._search_issue_referencing_prs_rest')
+@patch('gittensor.utils.github_api.issue_pr_search._search_issue_referencing_prs_graphql')
 def test_find_prs_prefers_graphql_when_results_found(mock_graphql, mock_rest):
     graphql_prs = [{'number': 101, 'state': 'OPEN'}]
     mock_graphql.return_value = graphql_prs
@@ -756,8 +756,8 @@ def test_find_prs_prefers_graphql_when_results_found(mock_graphql, mock_rest):
     mock_rest.assert_not_called()
 
 
-@patch('gittensor.utils.github_api_tools._search_issue_referencing_prs_rest')
-@patch('gittensor.utils.github_api_tools._search_issue_referencing_prs_graphql')
+@patch('gittensor.utils.github_api.issue_pr_search._search_issue_referencing_prs_rest')
+@patch('gittensor.utils.github_api.issue_pr_search._search_issue_referencing_prs_graphql')
 def test_find_prs_falls_back_to_authenticated_rest_when_graphql_empty(mock_graphql, mock_rest):
     mock_graphql.return_value = []
     rest_prs = [{'number': 102, 'state': 'OPEN'}]
@@ -770,8 +770,8 @@ def test_find_prs_falls_back_to_authenticated_rest_when_graphql_empty(mock_graph
     mock_rest.assert_called_once_with('owner/repo', 12, token='fake_token', state='open')
 
 
-@patch('gittensor.utils.github_api_tools._search_issue_referencing_prs_rest')
-@patch('gittensor.utils.github_api_tools._search_issue_referencing_prs_graphql')
+@patch('gittensor.utils.github_api.issue_pr_search._search_issue_referencing_prs_rest')
+@patch('gittensor.utils.github_api.issue_pr_search._search_issue_referencing_prs_graphql')
 def test_find_prs_falls_back_to_unauthenticated_rest_when_auth_paths_empty(mock_graphql, mock_rest):
     mock_graphql.return_value = []
     unauth_prs = [{'number': 103, 'state': 'OPEN'}]
@@ -785,8 +785,8 @@ def test_find_prs_falls_back_to_unauthenticated_rest_when_auth_paths_empty(mock_
     assert mock_rest.call_args_list[1].kwargs == {'token': None, 'state': 'open'}
 
 
-@patch('gittensor.utils.github_api_tools._search_issue_referencing_prs_rest')
-@patch('gittensor.utils.github_api_tools._search_issue_referencing_prs_graphql')
+@patch('gittensor.utils.github_api.issue_pr_search._search_issue_referencing_prs_rest')
+@patch('gittensor.utils.github_api.issue_pr_search._search_issue_referencing_prs_graphql')
 def test_find_prs_uses_all_state_for_non_open_only(mock_graphql, mock_rest):
     mock_graphql.return_value = []
     mock_rest.side_effect = [[], []]
@@ -799,8 +799,8 @@ def test_find_prs_uses_all_state_for_non_open_only(mock_graphql, mock_rest):
     assert mock_rest.call_args_list[1].kwargs == {'token': None, 'state': 'all'}
 
 
-@patch('gittensor.utils.github_api_tools._search_issue_referencing_prs_rest')
-@patch('gittensor.utils.github_api_tools._search_issue_referencing_prs_graphql')
+@patch('gittensor.utils.github_api.issue_pr_search._search_issue_referencing_prs_rest')
+@patch('gittensor.utils.github_api.issue_pr_search._search_issue_referencing_prs_graphql')
 def test_find_prs_without_token_only_uses_unauth_rest(mock_graphql, mock_rest):
     unauth_prs = [{'number': 104, 'state': 'OPEN'}]
     mock_rest.return_value = unauth_prs
@@ -856,8 +856,8 @@ def _pr_node(
 class TestFindSolverFromCrossReferences:
     """Test suite for find_solver_from_cross_references (GraphQL-based solver detection)."""
 
-    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
+    @patch('gittensor.utils.github_api.graphql.execute_graphql_query')
+    @patch('gittensor.utils.github_api.graphql.bt.logging')
     def test_single_merged_pr_closing_issue(self, mock_logging, mock_graphql):
         """Single merged PR with closing reference returns correct solver."""
         mock_graphql.return_value = _graphql_response(
@@ -871,8 +871,8 @@ class TestFindSolverFromCrossReferences:
         assert solver_id == 42
         assert pr_number == 14
 
-    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
+    @patch('gittensor.utils.github_api.graphql.execute_graphql_query')
+    @patch('gittensor.utils.github_api.graphql.bt.logging')
     def test_unmerged_pr_is_filtered_out(self, mock_logging, mock_graphql):
         """Unmerged PRs are ignored even if they have closing references."""
         mock_graphql.return_value = _graphql_response(
@@ -886,8 +886,8 @@ class TestFindSolverFromCrossReferences:
         assert solver_id is None
         assert pr_number is None
 
-    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
+    @patch('gittensor.utils.github_api.graphql.execute_graphql_query')
+    @patch('gittensor.utils.github_api.graphql.bt.logging')
     def test_pr_from_different_repo_is_filtered_out(self, mock_logging, mock_graphql):
         """PRs targeting a different base repo are rejected (prevents cross-repo gaming)."""
         mock_graphql.return_value = _graphql_response(
@@ -901,8 +901,8 @@ class TestFindSolverFromCrossReferences:
         assert solver_id is None
         assert pr_number is None
 
-    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
+    @patch('gittensor.utils.github_api.graphql.execute_graphql_query')
+    @patch('gittensor.utils.github_api.graphql.bt.logging')
     def test_pr_mentioning_but_not_closing_issue_is_filtered_out(self, mock_logging, mock_graphql):
         """PRs that mention the issue but don't have it in closingIssuesReferences are ignored."""
         mock_graphql.return_value = _graphql_response(
@@ -916,8 +916,8 @@ class TestFindSolverFromCrossReferences:
         assert solver_id is None
         assert pr_number is None
 
-    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
+    @patch('gittensor.utils.github_api.graphql.execute_graphql_query')
+    @patch('gittensor.utils.github_api.graphql.bt.logging')
     def test_multiple_candidates_picks_most_recent(self, mock_logging, mock_graphql):
         """When multiple merged PRs close the issue, the most recently merged one is selected."""
         mock_graphql.return_value = _graphql_response(
@@ -934,8 +934,8 @@ class TestFindSolverFromCrossReferences:
         assert pr_number == 20
         mock_logging.warning.assert_called()  # Should warn about multiple candidates
 
-    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
+    @patch('gittensor.utils.github_api.graphql.execute_graphql_query')
+    @patch('gittensor.utils.github_api.graphql.bt.logging')
     def test_mixed_valid_and_invalid_candidates(self, mock_logging, mock_graphql):
         """Only valid candidates survive all filters (merged + same repo + closing ref)."""
         mock_graphql.return_value = _graphql_response(
@@ -956,8 +956,8 @@ class TestFindSolverFromCrossReferences:
         assert solver_id == 42
         assert pr_number == 14
 
-    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
+    @patch('gittensor.utils.github_api.graphql.execute_graphql_query')
+    @patch('gittensor.utils.github_api.graphql.bt.logging')
     def test_fork_pr_targeting_main_repo_is_accepted(self, mock_logging, mock_graphql):
         """PRs from forks that target the main repo (baseRepository matches) are accepted."""
         mock_graphql.return_value = _graphql_response(
@@ -976,8 +976,8 @@ class TestFindSolverFromCrossReferences:
         assert solver_id == 42
         assert pr_number == 14
 
-    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
+    @patch('gittensor.utils.github_api.graphql.execute_graphql_query')
+    @patch('gittensor.utils.github_api.graphql.bt.logging')
     def test_base_repo_check_is_case_insensitive(self, mock_logging, mock_graphql):
         """Base repo comparison is case-insensitive (GitHub repos are case-insensitive)."""
         mock_graphql.return_value = _graphql_response(
@@ -991,8 +991,8 @@ class TestFindSolverFromCrossReferences:
         assert solver_id == 42
         assert pr_number == 14
 
-    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
+    @patch('gittensor.utils.github_api.graphql.execute_graphql_query')
+    @patch('gittensor.utils.github_api.graphql.bt.logging')
     def test_no_cross_references_returns_none(self, mock_logging, mock_graphql):
         """Empty timeline nodes returns (None, None)."""
         mock_graphql.return_value = _graphql_response([])
@@ -1002,8 +1002,8 @@ class TestFindSolverFromCrossReferences:
         assert solver_id is None
         assert pr_number is None
 
-    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
+    @patch('gittensor.utils.github_api.graphql.execute_graphql_query')
+    @patch('gittensor.utils.github_api.graphql.bt.logging')
     def test_graphql_query_failure_returns_none(self, mock_logging, mock_graphql):
         """GraphQL query failure returns (None, None)."""
         mock_graphql.return_value = None
@@ -1017,8 +1017,8 @@ class TestFindSolverFromCrossReferences:
 class TestFindSolverFromTimeline:
     """Test that find_solver_from_timeline delegates to cross-references."""
 
-    @patch('gittensor.utils.github_api_tools.find_solver_from_cross_references')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
+    @patch('gittensor.utils.github_api.issue_pr_search.find_solver_from_cross_references')
+    @patch('gittensor.utils.github_api.graphql.bt.logging')
     def test_delegates_to_cross_references(self, mock_logging, mock_cross_ref):
         """find_solver_from_timeline delegates directly to find_solver_from_cross_references."""
         mock_cross_ref.return_value = (42, 14)
@@ -1108,8 +1108,8 @@ def _make_graphql_response(pr_nodes):
 class TestLoadMinersPrsErrorResilience:
     """Test that a single bad PR doesn't abort fetching for the entire miner."""
 
-    @patch('gittensor.utils.github_api_tools.get_github_graphql_query')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
+    @patch('gittensor.utils.github_api.graphql.get_github_graphql_query')
+    @patch('gittensor.utils.github_api.graphql.bt.logging')
     def test_null_closing_issues_skips_bad_pr_continues_rest(self, mock_logging, mock_graphql_query):
         """Simulate a banned/reinstated repo returning null for closingIssuesReferences.
 
@@ -1182,14 +1182,14 @@ def _make_file_change(filename: str, status: str = 'modified', previous_filename
 class TestFetchFileContentsBatch:
     """Tests for batch-size limiting in fetch_file_contents_batch."""
 
-    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api.graphql.execute_graphql_query')
     def test_empty_paths_returns_empty_dict(self, mock_execute):
         """No GraphQL call should be made when file_paths is empty."""
         result = fetch_file_contents_batch('owner', 'repo', 'abc123', [], 'token')
         assert result == {}
         mock_execute.assert_not_called()
 
-    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api.graphql.execute_graphql_query')
     def test_single_batch_under_limit(self, mock_execute):
         """Files under the batch limit should be fetched in a single GraphQL request."""
         paths = [f'src/file{i}.py' for i in range(5)]
@@ -1204,8 +1204,8 @@ class TestFetchFileContentsBatch:
         for i, path in enumerate(paths):
             assert result[path] == f'content_{i}'
 
-    @patch('gittensor.utils.github_api_tools.MAX_FILES_PER_GRAPHQL_BATCH', 3)
-    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api.file_contents.MAX_FILES_PER_GRAPHQL_BATCH', 3)
+    @patch('gittensor.utils.github_api.graphql.execute_graphql_query')
     def test_multiple_batches_splits_correctly(self, mock_execute):
         """Files exceeding the batch limit should be split into multiple GraphQL requests."""
         paths = [f'src/file{i}.py' for i in range(7)]
@@ -1227,9 +1227,9 @@ class TestFetchFileContentsBatch:
         assert mock_execute.call_count == 3
         assert len(result) == 7
 
-    @patch('gittensor.utils.github_api_tools.MAX_FILES_PER_GRAPHQL_BATCH', 3)
-    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
+    @patch('gittensor.utils.github_api.file_contents.MAX_FILES_PER_GRAPHQL_BATCH', 3)
+    @patch('gittensor.utils.github_api.graphql.execute_graphql_query')
+    @patch('gittensor.utils.github_api.graphql.bt.logging')
     def test_failed_batch_returns_none_without_losing_other_batches(self, mock_logging, mock_execute):
         """A failed batch should return None for its files but not affect other batches."""
         paths = [f'file{i}.py' for i in range(6)]
@@ -1252,7 +1252,7 @@ class TestFetchFileContentsBatch:
         assert result['file4.py'] is None
         assert result['file5.py'] is None
 
-    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api.graphql.execute_graphql_query')
     def test_binary_and_oversized_files_return_none(self, mock_execute):
         """Binary files and files exceeding MAX_FILE_SIZE_BYTES should return None."""
         paths = ['normal.py', 'binary.bin', 'huge.py']
@@ -1272,8 +1272,8 @@ class TestFetchFileContentsBatch:
         assert result['binary.bin'] is None
         assert result['huge.py'] is None
 
-    @patch('gittensor.utils.github_api_tools.MAX_FILES_PER_GRAPHQL_BATCH', 50)
-    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api.file_contents.MAX_FILES_PER_GRAPHQL_BATCH', 50)
+    @patch('gittensor.utils.github_api.graphql.execute_graphql_query')
     def test_exactly_batch_size_uses_single_request(self, mock_execute):
         """Exactly MAX_FILES_PER_GRAPHQL_BATCH files should use a single request."""
         paths = [f'file{i}.py' for i in range(50)]
@@ -1290,14 +1290,14 @@ class TestFetchFileContentsBatch:
 class TestFetchFileContentsWithBase:
     """Tests for batch-size limiting in fetch_file_contents_with_base."""
 
-    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api.graphql.execute_graphql_query')
     def test_empty_file_changes_returns_empty_dict(self, mock_execute):
         """No GraphQL call should be made when file_changes is empty."""
         result = fetch_file_contents_with_base('owner', 'repo', 'base', 'head', [], 'token')
         assert result == {}
         mock_execute.assert_not_called()
 
-    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api.graphql.execute_graphql_query')
     def test_single_batch_fetches_base_and_head(self, mock_execute):
         """Modified files should have both old and new content fetched."""
         changes = [_make_file_change('app.py', status='modified')]
@@ -1316,7 +1316,7 @@ class TestFetchFileContentsWithBase:
         assert result['app.py'].old_content == 'old code'
         assert result['app.py'].new_content == 'new code'
 
-    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api.graphql.execute_graphql_query')
     def test_added_file_has_no_old_content(self, mock_execute):
         """Newly added files should only fetch head content, not base."""
         changes = [_make_file_change('new_file.py', status='added')]
@@ -1333,7 +1333,7 @@ class TestFetchFileContentsWithBase:
         assert result['new_file.py'].old_content is None
         assert result['new_file.py'].new_content == 'brand new'
 
-    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api.graphql.execute_graphql_query')
     def test_removed_file_has_no_new_content(self, mock_execute):
         """Deleted files should only fetch base content, not head."""
         changes = [_make_file_change('old_file.py', status='removed')]
@@ -1350,8 +1350,8 @@ class TestFetchFileContentsWithBase:
         assert result['old_file.py'].old_content == 'deleted code'
         assert result['old_file.py'].new_content is None
 
-    @patch('gittensor.utils.github_api_tools.MAX_FILES_PER_GRAPHQL_BATCH', 2)
-    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api.file_contents.MAX_FILES_PER_GRAPHQL_BATCH', 2)
+    @patch('gittensor.utils.github_api.graphql.execute_graphql_query')
     def test_multiple_batches_splits_file_changes(self, mock_execute):
         """File changes exceeding the batch limit should be split into multiple requests."""
         changes = [_make_file_change(f'file{i}.py') for i in range(5)]
@@ -1375,9 +1375,9 @@ class TestFetchFileContentsWithBase:
         assert mock_execute.call_count == 3
         assert len(result) == 5
 
-    @patch('gittensor.utils.github_api_tools.MAX_FILES_PER_GRAPHQL_BATCH', 2)
-    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
+    @patch('gittensor.utils.github_api.file_contents.MAX_FILES_PER_GRAPHQL_BATCH', 2)
+    @patch('gittensor.utils.github_api.graphql.execute_graphql_query')
+    @patch('gittensor.utils.github_api.graphql.bt.logging')
     def test_failed_batch_isolates_failure(self, mock_logging, mock_execute):
         """A failed batch should return None pairs without affecting other batches."""
         changes = [_make_file_change(f'f{i}.py') for i in range(4)]
@@ -1406,7 +1406,7 @@ class TestFetchFileContentsWithBase:
         assert result['f2.py'].old_content is None
         assert result['f2.py'].new_content is None
 
-    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api.graphql.execute_graphql_query')
     def test_renamed_file_fetches_from_previous_filename(self, mock_execute):
         """Renamed files should fetch base content from the previous filename."""
         changes = [_make_file_change('new_name.py', status='renamed', previous_filename='old_name.py')]
@@ -1437,7 +1437,7 @@ class TestFetchFileContentsWithBase:
 class TestGetMergeBaseSha:
     """Test suite for get_merge_base_sha using GitHub compare API."""
 
-    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api.rest.requests.get')
     def test_returns_merge_base_sha_on_success(self, mock_get):
         """Successful compare API call returns the merge_base_commit SHA."""
         mock_response = Mock(status_code=200)
@@ -1451,9 +1451,9 @@ class TestGetMergeBaseSha:
         assert result == 'abc123merge'
         assert mock_get.call_count == 1
 
-    @patch('gittensor.utils.github_api_tools.requests.get')
-    @patch('gittensor.utils.github_api_tools.time.sleep')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
+    @patch('gittensor.utils.github_api.rest.requests.get')
+    @patch('gittensor.utils.github_api.rest.time.sleep')
+    @patch('gittensor.utils.github_api.rest.bt.logging')
     def test_retries_on_failure_then_succeeds(self, mock_logging, mock_sleep, mock_get):
         """Retries on HTTP error and succeeds on second attempt."""
         mock_500 = Mock(status_code=500, text='Internal Server Error')
@@ -1468,9 +1468,9 @@ class TestGetMergeBaseSha:
         assert mock_get.call_count == 2
         assert mock_sleep.call_count == 1
 
-    @patch('gittensor.utils.github_api_tools.requests.get')
-    @patch('gittensor.utils.github_api_tools.time.sleep')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
+    @patch('gittensor.utils.github_api.rest.requests.get')
+    @patch('gittensor.utils.github_api.rest.time.sleep')
+    @patch('gittensor.utils.github_api.rest.bt.logging')
     def test_returns_none_after_all_attempts_fail(self, mock_logging, mock_sleep, mock_get):
         """Returns None after 3 failed attempts."""
         mock_500 = Mock(status_code=500, text='Internal Server Error')
@@ -1482,8 +1482,8 @@ class TestGetMergeBaseSha:
         assert mock_get.call_count == 3
         assert mock_sleep.call_count == 2
 
-    @patch('gittensor.utils.github_api_tools.requests.get')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
+    @patch('gittensor.utils.github_api.rest.requests.get')
+    @patch('gittensor.utils.github_api.rest.bt.logging')
     def test_returns_none_when_merge_base_commit_missing(self, mock_logging, mock_get):
         """Returns None when response lacks merge_base_commit field."""
         mock_response = Mock(status_code=200)
@@ -1495,9 +1495,9 @@ class TestGetMergeBaseSha:
         assert result is None
         mock_logging.warning.assert_called()
 
-    @patch('gittensor.utils.github_api_tools.requests.get')
-    @patch('gittensor.utils.github_api_tools.time.sleep')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
+    @patch('gittensor.utils.github_api.rest.requests.get')
+    @patch('gittensor.utils.github_api.rest.time.sleep')
+    @patch('gittensor.utils.github_api.rest.bt.logging')
     def test_retries_on_connection_error(self, mock_logging, mock_sleep, mock_get):
         """Retries on connection errors and succeeds."""
         import requests
@@ -1512,9 +1512,9 @@ class TestGetMergeBaseSha:
         assert mock_get.call_count == 2
         assert mock_sleep.call_count == 1
 
-    @patch('gittensor.utils.github_api_tools.requests.get')
-    @patch('gittensor.utils.github_api_tools.time.sleep')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
+    @patch('gittensor.utils.github_api.rest.requests.get')
+    @patch('gittensor.utils.github_api.rest.time.sleep')
+    @patch('gittensor.utils.github_api.rest.bt.logging')
     def test_returns_none_after_all_connection_errors(self, mock_logging, mock_sleep, mock_get):
         """Returns None after 3 connection errors."""
         import requests

@@ -153,12 +153,12 @@ class TestReviewQualityMultiplierOnPullRequest:
 class TestGetPullRequestMaintainerChangesRequestedCount:
     """Tests for the GitHub API function that counts CHANGES_REQUESTED reviews from maintainers."""
 
-    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api.rest.requests.get')
     def test_no_reviews_returns_zero(self, mock_get):
         mock_get.return_value = Mock(status_code=200, **{'json.return_value': []})
         assert get_pull_request_maintainer_changes_requested_count('owner/repo', 1, 'token') == 0
 
-    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api.rest.requests.get')
     def test_counts_changes_requested_from_maintainers(self, mock_get):
         reviews = [_make_review('CHANGES_REQUESTED', assoc) for assoc in MAINTAINER_ASSOCIATIONS]
         mock_get.return_value = Mock(status_code=200, **{'json.return_value': reviews})
@@ -166,7 +166,7 @@ class TestGetPullRequestMaintainerChangesRequestedCount:
             MAINTAINER_ASSOCIATIONS
         )
 
-    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api.rest.requests.get')
     def test_ignores_non_maintainer_changes_requested(self, mock_get):
         reviews = [
             _make_review('CHANGES_REQUESTED', 'CONTRIBUTOR'),
@@ -176,7 +176,7 @@ class TestGetPullRequestMaintainerChangesRequestedCount:
         mock_get.return_value = Mock(status_code=200, **{'json.return_value': reviews})
         assert get_pull_request_maintainer_changes_requested_count('owner/repo', 1, 'token') == 1
 
-    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api.rest.requests.get')
     def test_ignores_non_changes_requested_states(self, mock_get):
         reviews = [
             _make_review('APPROVED', 'OWNER'),
@@ -187,7 +187,7 @@ class TestGetPullRequestMaintainerChangesRequestedCount:
         mock_get.return_value = Mock(status_code=200, **{'json.return_value': reviews})
         assert get_pull_request_maintainer_changes_requested_count('owner/repo', 1, 'token') == 1
 
-    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api.rest.requests.get')
     def test_multiple_reviews_from_same_maintainer_count_separately(self, mock_get):
         reviews = [
             _make_review('CHANGES_REQUESTED', 'OWNER'),
@@ -197,23 +197,23 @@ class TestGetPullRequestMaintainerChangesRequestedCount:
         mock_get.return_value = Mock(status_code=200, **{'json.return_value': reviews})
         assert get_pull_request_maintainer_changes_requested_count('owner/repo', 1, 'token') == 3
 
-    @patch('gittensor.utils.github_api_tools.requests.get')
-    @patch('gittensor.utils.github_api_tools.time.sleep')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
+    @patch('gittensor.utils.github_api.rest.requests.get')
+    @patch('gittensor.utils.github_api.rest.time.sleep')
+    @patch('gittensor.utils.github_api.rest.bt.logging')
     def test_api_error_returns_zero(self, mock_logging, mock_sleep, mock_get):
         """Fail-safe: any non-200 response returns 0 (no penalty applied)."""
         mock_get.return_value = Mock(status_code=500)
         assert get_pull_request_maintainer_changes_requested_count('owner/repo', 1, 'token') == 0
 
-    @patch('gittensor.utils.github_api_tools.requests.get')
-    @patch('gittensor.utils.github_api_tools.time.sleep')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
+    @patch('gittensor.utils.github_api.rest.requests.get')
+    @patch('gittensor.utils.github_api.rest.time.sleep')
+    @patch('gittensor.utils.github_api.rest.bt.logging')
     def test_request_exception_returns_zero(self, mock_logging, mock_sleep, mock_get):
         """Fail-safe: network errors return 0 (no penalty applied)."""
         mock_get.side_effect = requests.exceptions.RequestException('timeout')
         assert get_pull_request_maintainer_changes_requested_count('owner/repo', 1, 'token') == 0
 
-    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api.rest.requests.get')
     def test_uses_per_page_100_and_page_param(self, mock_get):
         """Ensures pagination parameters are sent on each request."""
         mock_get.return_value = Mock(status_code=200, **{'json.return_value': []})
@@ -222,7 +222,7 @@ class TestGetPullRequestMaintainerChangesRequestedCount:
         assert kwargs.get('params', {}).get('per_page') == 100
         assert kwargs.get('params', {}).get('page') == 1
 
-    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api.rest.requests.get')
     def test_paginates_across_multiple_pages(self, mock_get):
         """Fetches all pages when reviews exceed per_page and accumulates counts."""
         page1 = [_make_review('CHANGES_REQUESTED', 'OWNER')] * 100  # full page
@@ -241,9 +241,9 @@ class TestGetPullRequestMaintainerChangesRequestedCount:
         assert mock_get.call_args_list[0][1]['params']['page'] == 1
         assert mock_get.call_args_list[1][1]['params']['page'] == 2
 
-    @patch('gittensor.utils.github_api_tools.requests.get')
-    @patch('gittensor.utils.github_api_tools.time.sleep')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
+    @patch('gittensor.utils.github_api.rest.requests.get')
+    @patch('gittensor.utils.github_api.rest.time.sleep')
+    @patch('gittensor.utils.github_api.rest.bt.logging')
     def test_pagination_resets_on_retry(self, mock_logging, mock_sleep, mock_get):
         """On failure mid-pagination, retries from page 1."""
         page1 = [_make_review('CHANGES_REQUESTED', 'OWNER')] * 100
@@ -258,7 +258,7 @@ class TestGetPullRequestMaintainerChangesRequestedCount:
         result = get_pull_request_maintainer_changes_requested_count('owner/repo', 1, 'token')
         assert result == 101
 
-    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api.rest.requests.get')
     def test_contributor_association_not_counted(self, mock_get):
         """CONTRIBUTOR is not in MAINTAINER_ASSOCIATIONS and should not be counted."""
         reviews = [

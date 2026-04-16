@@ -6,6 +6,7 @@ from typing import Dict
 import bittensor as bt
 
 from gittensor.classes import MinerEvaluation
+from gittensor.validator.score_normalization import normalize_linear_scores
 
 
 def normalize_issue_discovery_rewards(miner_evaluations: Dict[int, MinerEvaluation]) -> Dict[int, float]:
@@ -23,12 +24,10 @@ def normalize_issue_discovery_rewards(miner_evaluations: Dict[int, MinerEvaluati
             nonzero_count += 1
 
     total = sum(rewards.values())
-    if total <= 0:
-        bt.logging.info('Issue discovery: all scores are zero, returning empty rewards')
-        return rewards
-
-    normalized = {uid: score / total for uid, score in rewards.items()}
-
-    bt.logging.info(f'Issue discovery: normalized {nonzero_count} miners with scores > 0')
-
-    return normalized
+    out = normalize_linear_scores(
+        rewards,
+        all_zero_log='Issue discovery: all scores are zero, returning empty rewards',
+    )
+    if total > 0:
+        bt.logging.info(f'Issue discovery: normalized {nonzero_count} miners with scores > 0')
+    return out

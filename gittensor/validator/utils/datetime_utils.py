@@ -10,6 +10,7 @@ from gittensor.constants import (
     TIME_DECAY_SIGMOID_MIDPOINT,
     TIME_DECAY_SIGMOID_STEEPNESS_SCALAR,
 )
+from gittensor.utils.github_iso_time import parse_github_utc_iso
 
 CHICAGO_TZ = pytz.timezone('America/Chicago')
 
@@ -19,16 +20,8 @@ def parse_github_timestamp_to_cst(timestamp_str: str) -> datetime:
     Parse GitHub's ISO format timestamp and convert to Chicago timezone.
     GitHub returns timestamps like: 2024-01-15T10:30:00Z
     """
-    # Parse the UTC timestamp
-    utc_dt = datetime.fromisoformat(timestamp_str.rstrip('Z'))
-
-    # Add UTC timezone info
-    utc_dt = pytz.utc.localize(utc_dt)
-
-    # Convert to Chicago timezone
-    chicago_dt = utc_dt.astimezone(CHICAGO_TZ)
-
-    return chicago_dt
+    utc_dt = parse_github_utc_iso(timestamp_str)
+    return utc_dt.astimezone(CHICAGO_TZ)
 
 
 def calculate_time_decay(merged_at: datetime) -> float:

@@ -7,8 +7,6 @@ from typing import Optional
 
 import bittensor as bt
 
-from gittensor.utils.utils import get_contract_address  # noqa: F401
-
 
 def get_miner_coldkey(hotkey: str, subtensor: bt.Subtensor, netuid: int) -> Optional[str]:
     """

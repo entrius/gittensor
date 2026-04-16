@@ -19,6 +19,7 @@ from rich.table import Table
 
 from .help import StyledGroup
 from .helpers import (
+    _handle_command_error,
     _make_contract_client,
     _resolve_contract_and_network,
     console,
@@ -140,12 +141,8 @@ def val_vote_solution(
             print_success('Solution vote submitted!')
         else:
             print_error('Vote failed.')
-    except ImportError as e:
-        print_error(f'Missing dependency \u2014 {e}')
-        raise SystemExit(1)
     except Exception as e:
-        print_error(str(e))
-        raise SystemExit(1)
+        _handle_command_error(e)
 
 
 @vote.command('cancel')
@@ -200,12 +197,8 @@ def val_vote_cancel_issue(
             print_success('Cancel vote submitted!')
         else:
             print_error('Cancel vote failed.')
-    except ImportError as e:
-        print_error(f'Missing dependency \u2014 {e}')
-        raise SystemExit(1)
     except Exception as e:
-        print_error(str(e))
-        raise SystemExit(1)
+        _handle_command_error(e)
 
 
 @vote.command('list')
@@ -271,9 +264,5 @@ def vote_list_validators(network: str, rpc_url: str, contract: str, as_json: boo
             console.print('[yellow]No validators whitelisted.[/yellow]')
             console.print('[dim]Add validators with: gitt admin add-vali <HOTKEY>[/dim]')
 
-    except ImportError as e:
-        print_error(f'Missing dependency \u2014 {e}')
-        raise SystemExit(1)
     except Exception as e:
-        print_error(str(e))
-        raise SystemExit(1)
+        _handle_command_error(e)

@@ -222,6 +222,15 @@ def handle_exception(as_json: bool, message: str, error_type: str = 'cli_error')
     raise SystemExit(1)
 
 
+def _handle_command_error(e: Exception) -> None:
+    """Print a terminal error message and exit. Gives a tailored message for missing dependencies."""
+    if isinstance(e, ImportError):
+        print_error(f'Missing dependency — {e}')
+    else:
+        print_error(str(e))
+    raise SystemExit(1)
+
+
 def loading_context(message: str, as_json: bool, spinner: str = 'dots', color='cyan') -> ContextManager[Any]:
     """Return a spinner context in human mode, or a no-op context in JSON mode."""
     return (

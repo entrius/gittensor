@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from contextlib import nullcontext
 from pathlib import Path
 
@@ -78,3 +79,19 @@ def _error(msg: str, json_mode: bool) -> None:
         click.echo(json.dumps({'success': False, 'error': msg}))
     else:
         console.print(f'[red]Error: {msg}[/red]')
+
+
+def _require_registered(wallet, metagraph, netuid: int, json_mode: bool) -> None:
+    """Exit with error if wallet hotkey is not registered on the subnet."""
+    if wallet.hotkey.ss58_address not in metagraph.hotkeys:
+        _error(f'Hotkey {wallet.hotkey.ss58_address[:16]}... is not registered on subnet {netuid}.', json_mode)
+        sys.exit(1)
+
+
+def _require_validator_axons(metagraph, json_mode: bool) -> tuple[list, list]:
+    """Return validator (axons, uids), or exit with error if none found."""
+    validator_axons, validator_uids = _get_validator_axons(metagraph)
+    if not validator_axons:
+        _error('No reachable validator axons found on the network.', json_mode)
+        sys.exit(1)
+    return validator_axons, validator_uids

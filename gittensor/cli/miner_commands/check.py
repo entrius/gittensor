@@ -14,8 +14,9 @@ from .helpers import (
     NETUID_DEFAULT,
     _connect_bittensor,
     _error,
-    _get_validator_axons,
     _load_config_value,
+    _require_registered,
+    _require_validator_axons,
     _resolve_endpoint,
     _status,
 )
@@ -59,16 +60,10 @@ def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, json_mode)
             sys.exit(1)
 
     # Verify miner is registered
-    if wallet.hotkey.ss58_address not in metagraph.hotkeys:
-        _error(f'Hotkey {wallet.hotkey.ss58_address[:16]}... is not registered on subnet {netuid}.', json_mode)
-        sys.exit(1)
+    _require_registered(wallet, metagraph, netuid, json_mode)
 
     # 3. Find active validator axons (vtrust > 0.1 = actively participating in consensus)
-    validator_axons, validator_uids = _get_validator_axons(metagraph)
-
-    if not validator_axons:
-        _error('No reachable validator axons found on the network.', json_mode)
-        sys.exit(1)
+    validator_axons, validator_uids = _require_validator_axons(metagraph, json_mode)
 
     # 4. Send check probes
     synapse = PatCheckSynapse()

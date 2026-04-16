@@ -19,12 +19,12 @@ from rich.table import Table
 
 from .help import StyledGroup
 from .helpers import (
+    _make_contract_client,
+    _resolve_contract_and_network,
     console,
-    get_contract_address,
     print_error,
     print_network_header,
     print_success,
-    resolve_network,
     validate_issue_id,
     validate_ss58_address,
     with_cli_behavior_options,
@@ -101,11 +101,7 @@ def val_vote_solution(
         $ gitt vote solution 1 5Hxxx... 5Hyyy... https://github.com/.../pull/123
     [/dim]
     """
-    contract_addr = get_contract_address(contract)
-    ws_endpoint, network_name = resolve_network(network, rpc_url)
-
-    if not contract_addr:
-        raise click.ClickException('Contract address not configured.')
+    contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
 
     try:
         validate_issue_id(issue_id)
@@ -136,19 +132,8 @@ def val_vote_solution(
     )
 
     try:
-        import bittensor as bt
-
-        from gittensor.validator.issue_competitions.contract_client import (
-            IssueCompetitionContractClient,
-        )
-
         with console.status('[bold cyan]Submitting vote...', spinner='dots'):
-            wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
-            subtensor = bt.Subtensor(network=ws_endpoint)
-            client = IssueCompetitionContractClient(
-                contract_address=contract_addr,
-                subtensor=subtensor,
-            )
+            wallet, client = _make_contract_client(contract_addr, ws_endpoint, wallet_name, wallet_hotkey)
             result = client.vote_solution(issue_id, solver_hotkey, solver_coldkey, pr_number, wallet)
 
         if result:
@@ -187,11 +172,7 @@ def val_vote_cancel_issue(
         $ gitt vote cancel 42 "Issue invalid"
     [/dim]
     """
-    contract_addr = get_contract_address(contract)
-    ws_endpoint, network_name = resolve_network(network, rpc_url)
-
-    if not contract_addr:
-        raise click.ClickException('Contract address not configured.')
+    contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
 
     try:
         validate_issue_id(issue_id)
@@ -209,19 +190,8 @@ def val_vote_cancel_issue(
     )
 
     try:
-        import bittensor as bt
-
-        from gittensor.validator.issue_competitions.contract_client import (
-            IssueCompetitionContractClient,
-        )
-
         with console.status('[bold cyan]Submitting cancel vote...', spinner='dots'):
-            wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
-            subtensor = bt.Subtensor(network=ws_endpoint)
-            client = IssueCompetitionContractClient(
-                contract_address=contract_addr,
-                subtensor=subtensor,
-            )
+            wallet, client = _make_contract_client(contract_addr, ws_endpoint, wallet_name, wallet_hotkey)
             result = client.vote_cancel_issue(issue_id, reason, wallet)
 
         if result:
@@ -246,11 +216,7 @@ def vote_list_validators(network: str, rpc_url: str, contract: str, as_json: boo
         $ gitt vote list --json
     [/dim]
     """
-    contract_addr = get_contract_address(contract)
-    ws_endpoint, network_name = resolve_network(network, rpc_url)
-
-    if not contract_addr:
-        raise click.ClickException('Contract address not configured.')
+    contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
 
     if not as_json:
         print_network_header(network_name, contract_addr)

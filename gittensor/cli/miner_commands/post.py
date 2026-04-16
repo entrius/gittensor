@@ -14,13 +14,17 @@ import requests
 from rich.console import Console
 from rich.table import Table
 
-from gittensor.cli.miner_commands.helpers import _get_validator_axons
-from gittensor.constants import BASE_GITHUB_API_URL, NETWORK_MAP
+from gittensor.cli.miner_commands.helpers import (
+    NETUID_DEFAULT,
+    _connect_bittensor,
+    _error,
+    _get_validator_axons,
+    _load_config_value,
+    _resolve_endpoint,
+)
+from gittensor.constants import BASE_GITHUB_API_URL
 
 console = Console()
-
-# Shared CLI options for wallet/network configuration
-NETUID_DEFAULT = 74
 
 
 @click.command()
@@ -53,8 +57,6 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_m
         gitt miner post --wallet alice --hotkey default
         gitt miner post --wallet alice --hotkey default --network test
     """
-    import bittensor as bt
-
     from gittensor.synapses import PatBroadcastSynapse
 
     # 1. Load and validate PAT locally (flag > env var > interactive prompt)
@@ -88,23 +90,18 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_m
         console.print(f'[dim]Wallet: {wallet_name}/{wallet_hotkey} | Network: {ws_endpoint} | Netuid: {netuid}[/dim]')
 
     # 3. Set up bittensor objects
-    def _connect():
-        w = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
-        st = bt.Subtensor(network=ws_endpoint)
-        mg = st.metagraph(netuid=netuid)
-        dd = bt.Dendrite(wallet=w)
-        return w, st, mg, dd
-
     if not json_mode:
         with console.status('[bold]Connecting to network...'):
             try:
-                wallet, subtensor, metagraph, dendrite = _connect()
+                wallet, subtensor, metagraph, dendrite = _connect_bittensor(
+                    wallet_name, wallet_hotkey, ws_endpoint, netuid
+                )
             except Exception as e:
                 _error(f'Failed to initialize bittensor: {e}', json_mode)
                 sys.exit(1)
     else:
         try:
-            wallet, subtensor, metagraph, dendrite = _connect()
+            wallet, subtensor, metagraph, dendrite = _connect_bittensor(wallet_name, wallet_hotkey, ws_endpoint, netuid)
         except Exception as e:
             _error(f'Failed to initialize bittensor: {e}', json_mode)
             sys.exit(1)
@@ -216,41 +213,3 @@ def _validate_pat_locally(pat: str) -> bool:
         return True
     except requests.RequestException:
         return False
-
-
-def _load_config_value(key: str):
-    """Load a value from ~/.gittensor/config.json, or None."""
-    from pathlib import Path
-
-    config_file = Path.home() / '.gittensor' / 'config.json'
-    if not config_file.exists():
-        return None
-    try:
-        config = json.loads(config_file.read_text())
-        return config.get(key)
-    except (json.JSONDecodeError, OSError):
-        return None
-
-
-def _resolve_endpoint(network: str | None, rpc_url: str | None) -> str:
-    """Resolve the subtensor endpoint from CLI args or config."""
-    if rpc_url:
-        return rpc_url
-    if network:
-        return NETWORK_MAP.get(network, network)
-    # Try config file
-    config_network = _load_config_value('network')
-    config_endpoint = _load_config_value('ws_endpoint')
-    if config_endpoint:
-        return config_endpoint
-    if config_network:
-        return NETWORK_MAP.get(config_network) or config_network
-    return NETWORK_MAP['finney']
-
-
-def _error(msg: str, json_mode: bool):
-    """Print an error message in the appropriate format."""
-    if json_mode:
-        click.echo(json.dumps({'success': False, 'error': msg}))
-    else:
-        console.print(f'[red]Error: {msg}[/red]')

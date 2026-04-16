@@ -134,6 +134,7 @@ class Issue:
     author_github_id: Optional[str] = None  # Issue author's GitHub user ID (for miner matching)
     is_transferred: bool = False
     updated_at: Optional[datetime] = None
+    body_or_title_edited_at: Optional[datetime] = None
     discovery_base_score: float = 0.0
     discovery_earned_score: float = 0.0
     discovery_review_quality_multiplier: float = 1.0
@@ -173,6 +174,8 @@ class PullRequest:
     time_decay_multiplier: float = 1.0
     credibility_multiplier: float = 1.0
     review_quality_multiplier: float = 1.0  # Penalty for CHANGES_REQUESTED reviews from maintainers
+    label_multiplier: float = 1.0  # Multiplier based on PR label (feature, bug, enhancement, refactor)
+    label: Optional[str] = None  # Last label set on the PR
     changes_requested_count: int = 0  # Number of maintainer CHANGES_REQUESTED reviews
     earned_score: float = 0.0
     collateral_score: float = 0.0  # For OPEN PRs: potential_score * collateral_percent
@@ -184,6 +187,7 @@ class PullRequest:
     total_nodes_scored: int = 0  # Total AST nodes scored for this PR
 
     # Token scoring breakdown (after test weight applied)
+    code_density: float = 0.0
     token_score: float = 0.0
     structural_count: int = 0
     structural_score: float = 0.0
@@ -213,6 +217,7 @@ class PullRequest:
         multipliers = {
             'repo': self.repo_weight_multiplier,
             'issue': self.issue_multiplier,
+            'label': self.label_multiplier,
             'spam': self.open_pr_spam_multiplier,
             'decay': self.time_decay_multiplier,
             'cred': self.credibility_multiplier,
@@ -246,6 +251,30 @@ class PullRequest:
                 continue
             issue_author = issue.get('author') or {}
             author_db_id = issue_author.get('databaseId')
+
+            body_edit_history = (issue.get('userContentEdits') or {}).get('nodes') or []
+            latest_body_edit_timestamp = next(
+                (edit.get('editedAt') for edit in body_edit_history if edit and edit.get('editedAt')),
+                None,
+            )
+            latest_body_edit_at = (
+                parse_github_timestamp_to_cst(latest_body_edit_timestamp) if latest_body_edit_timestamp else None
+            )
+
+            title_rename_events = (issue.get('timelineItems') or {}).get('nodes') or []
+            latest_title_rename_timestamp = next(
+                (rename.get('createdAt') for rename in title_rename_events if rename and rename.get('createdAt')),
+                None,
+            )
+            latest_title_rename_at = (
+                parse_github_timestamp_to_cst(latest_title_rename_timestamp) if latest_title_rename_timestamp else None
+            )
+
+            if latest_body_edit_at and latest_title_rename_at:
+                body_or_title_edited_at = max(latest_body_edit_at, latest_title_rename_at)
+            else:
+                body_or_title_edited_at = latest_body_edit_at or latest_title_rename_at
+
             issues.append(
                 Issue(
                     number=issue['number'],
@@ -259,6 +288,7 @@ class PullRequest:
                     author_association=issue.get('authorAssociation'),
                     author_github_id=str(author_db_id) if author_db_id else None,
                     updated_at=parse_github_timestamp_to_cst(issue['updatedAt']) if issue.get('updatedAt') else None,
+                    body_or_title_edited_at=body_or_title_edited_at,
                 )
             )
 
@@ -266,6 +296,10 @@ class PullRequest:
         raw_edited_at = pr_data.get('lastEditedAt')
         last_edited_at = parse_github_timestamp_to_cst(raw_edited_at) if isinstance(raw_edited_at, str) else None
         merged_at = parse_github_timestamp_to_cst(pr_data['mergedAt']) if is_merged else None
+
+        # Extract last label from timeline events
+        timeline_nodes = pr_data.get('timelineItems', {}).get('nodes', [])
+        label = timeline_nodes[0]['label']['name'].lower() if timeline_nodes else None
 
         return cls(
             number=pr_data['number'],
@@ -287,6 +321,7 @@ class PullRequest:
             last_edited_at=last_edited_at,
             head_ref_oid=pr_data.get('headRefOid'),
             base_ref_oid=pr_data.get('baseRefOid'),
+            label=label,
         )
 
 

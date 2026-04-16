@@ -15,6 +15,13 @@ import bittensor as bt
 from substrateinterface import Keypair
 from substrateinterface.exceptions import ExtrinsicNotFound
 
+from gittensor.validator.issue_competitions.storage_utils import (
+    compute_ink5_lazy_key,
+    decode_issue_from_storage,
+    get_contract_child_storage_key,
+    read_contract_packed_storage,
+)
+
 # Bittensor uses async_substrate_interface which has its own exception type
 try:
     from async_substrate_interface.errors import ExtrinsicNotFound as AsyncExtrinsicNotFound
@@ -125,84 +132,20 @@ class IssueCompetitionContractClient:
     def _get_child_storage_key(self) -> Optional[str]:
         """Get the child storage key for the contract's trie."""
         try:
-            contract_info = self.subtensor.substrate.query('Contracts', 'ContractInfoOf', [self.contract_address])
-            if not contract_info:
-                return None
-
-            if hasattr(contract_info, 'value'):
-                info = contract_info.value
-            else:
-                info = contract_info
-
-            if not info or 'trie_id' not in info:
-                return None
-
-            trie_id = info['trie_id']  # type: ignore[call-overload]
-
-            if isinstance(trie_id, str):
-                trie_id_hex = trie_id.replace('0x', '')
-                trie_id_bytes = bytes.fromhex(trie_id_hex)
-            elif isinstance(trie_id, (tuple, list)):
-                if len(trie_id) == 1 and isinstance(trie_id[0], (tuple, list)):
-                    trie_id = trie_id[0]
-                trie_id_bytes = bytes(trie_id)
-            elif isinstance(trie_id, bytes):
-                trie_id_bytes = trie_id
-            else:
-                return None
-
-            prefix = b':child_storage:default:'
-            return '0x' + (prefix + trie_id_bytes).hex()
+            return get_contract_child_storage_key(self.subtensor.substrate, self.contract_address)
         except Exception as e:
             bt.logging.debug(f'Error getting child storage key: {e}')
             return None
 
-    def compute_ink5_lazy_key(self, root_key_hex: str, encoded_key: bytes) -> str:
-        """Compute Ink! 5 lazy mapping storage key using blake2_128concat."""
-        root_key = bytes.fromhex(root_key_hex.replace('0x', ''))
-        data = root_key + encoded_key
-        h = hashlib.blake2b(data, digest_size=16).digest()
-        return '0x' + (h + data).hex()
-
     def _read_packed_storage(self) -> Optional[dict]:
         """Read the packed root storage from the contract"""
-        child_key = self._get_child_storage_key()
-        if not child_key:
-            return None
-
         try:
-            keys_result = self.subtensor.substrate.rpc_request(
-                'childstate_getKeysPaged', [child_key, '0x', 10, None, None]
-            )
-            keys = keys_result.get('result', [])
-
-            packed_key = None
-            for k in keys:
-                if k.endswith('00000000'):
-                    packed_key = k
-                    break
-
-            if not packed_key:
+            packed = read_contract_packed_storage(self.subtensor.substrate, self.contract_address, page_size=10)
+            if not packed:
                 return None
-
-            val_result = self.subtensor.substrate.rpc_request('childstate_getStorage', [child_key, packed_key, None])
-            if not val_result.get('result'):
-                return None
-
-            data = bytes.fromhex(val_result['result'].replace('0x', ''))
-
-            # owner (32) + treasury (32) + netuid (2) + next_issue_id (8)
-            if len(data) < 74:
-                return None
-
-            offset = 64  # Skip owner + treasury
-            netuid = struct.unpack_from('<H', data, offset)[0]
-            offset += 2
-            next_issue_id = struct.unpack_from('<Q', data, offset)[0]
-
             return {
-                'netuid': netuid,
-                'next_issue_id': next_issue_id,
+                'netuid': packed.netuid,
+                'next_issue_id': packed.next_issue_id,
             }
         except Exception as e:
             bt.logging.debug(f'Error reading packed storage: {e}')
@@ -216,61 +159,27 @@ class IssueCompetitionContractClient:
 
         try:
             encoded_id = struct.pack('<Q', issue_id)
-            lazy_key = self.compute_ink5_lazy_key('52789899', encoded_id)
+            lazy_key = compute_ink5_lazy_key('52789899', encoded_id)
 
             val_result = self.subtensor.substrate.rpc_request('childstate_getStorage', [child_key, lazy_key, None])
             if not val_result.get('result'):
                 return None
 
             data = bytes.fromhex(val_result['result'].replace('0x', ''))
-
-            offset = 0
-            stored_id = struct.unpack_from('<Q', data, offset)[0]
-            offset += 8
-
-            github_url_hash = data[offset : offset + 32]
-            offset += 32
-
-            len_byte = data[offset]
-            if len_byte & 0x03 == 0:
-                str_len = len_byte >> 2
-                offset += 1
-            elif len_byte & 0x03 == 1:
-                str_len = (data[offset] | (data[offset + 1] << 8)) >> 2
-                offset += 2
-            else:
-                str_len = 0
-                offset += 1
-
-            repo_name = data[offset : offset + str_len].decode('utf-8', errors='replace')
-            offset += str_len
-
-            issue_number = struct.unpack_from('<I', data, offset)[0]
-            offset += 4
-
-            bounty_lo, bounty_hi = struct.unpack_from('<QQ', data, offset)
-            bounty_amount = bounty_lo + (bounty_hi << 64)
-            offset += 16
-
-            target_lo, target_hi = struct.unpack_from('<QQ', data, offset)
-            target_bounty = target_lo + (target_hi << 64)
-            offset += 16
-
-            status_byte = data[offset]
-            offset += 1
-
-            registered_at_block = struct.unpack_from('<I', data, offset)[0]
+            decoded_issue = decode_issue_from_storage(data)
+            if decoded_issue is None:
+                return None
 
             return ContractIssue(
-                id=stored_id,
-                github_url_hash=github_url_hash,
-                repository_full_name=repo_name,
-                issue_number=issue_number,
-                bounty_amount=int(bounty_amount),
-                target_bounty=int(target_bounty),
-                status=IssueStatus(status_byte),
-                registered_at_block=registered_at_block,
-                is_fully_funded=int(bounty_amount) >= int(target_bounty),
+                id=decoded_issue.id,
+                github_url_hash=decoded_issue.github_url_hash,
+                repository_full_name=decoded_issue.repository_full_name,
+                issue_number=decoded_issue.issue_number,
+                bounty_amount=decoded_issue.bounty_amount,
+                target_bounty=decoded_issue.target_bounty,
+                status=IssueStatus(decoded_issue.status_byte),
+                registered_at_block=decoded_issue.registered_at_block,
+                is_fully_funded=decoded_issue.bounty_amount >= decoded_issue.target_bounty,
             )
         except Exception as e:
             bt.logging.debug(f'Error reading issue {issue_id}: {e}')
@@ -675,47 +584,19 @@ class IssueCompetitionContractClient:
             Total stake amount (0 if no stake found)
         """
         try:
-            # Read contract's packed storage to get treasury_hotkey, owner, and netuid
-            child_key = self._get_child_storage_key()
-            if not child_key:
-                bt.logging.debug('Cannot get treasury stake: no child storage key')
+            packed = read_contract_packed_storage(self.subtensor.substrate, self.contract_address, page_size=10)
+            if not packed:
+                bt.logging.debug('Cannot get treasury stake: packed storage unavailable')
                 return 0
-
-            # Get packed storage key (ends with 00000000)
-            keys_result = self.subtensor.substrate.rpc_request(
-                'childstate_getKeysPaged', [child_key, '0x', 10, None, None]
-            )
-            keys = keys_result.get('result', [])
-            packed_key = next((k for k in keys if k.endswith('00000000')), None)
-            if not packed_key:
-                bt.logging.debug('Cannot get treasury stake: no packed storage key')
-                return 0
-
-            # Read packed storage
-            val_result = self.subtensor.substrate.rpc_request('childstate_getStorage', [child_key, packed_key, None])
-            if not val_result.get('result'):
-                bt.logging.debug('Cannot get treasury stake: no packed storage value')
-                return 0
-
-            data = bytes.fromhex(val_result['result'].replace('0x', ''))
-            if len(data) < 74:  # Need at least owner(32) + treasury(32) + netuid(2) + next_id(8)
-                bt.logging.debug('Cannot get treasury stake: packed storage too small')
-                return 0
-
-            # Extract owner (coldkey), treasury_hotkey, and netuid from packed storage
-            # Layout: owner(32) + treasury(32) + netuid(2) + next_issue_id(8) + alpha_pool(16)
-            owner = data[0:32]
-            treasury_hotkey = data[32:64]
-            netuid = struct.unpack_from('<H', data, 64)[0]
 
             # Convert to SS58 addresses
-            owner_ss58 = self.subtensor.substrate.ss58_encode(owner.hex())
-            treasury_ss58 = self.subtensor.substrate.ss58_encode(treasury_hotkey.hex())
+            owner_ss58 = self.subtensor.substrate.ss58_encode(packed.owner.hex())
+            treasury_ss58 = self.subtensor.substrate.ss58_encode(packed.treasury_hotkey.hex())
 
             # Query SubtensorModule::Alpha directly
             # Alpha storage: (hotkey, coldkey, netuid) -> U64F64 stake amount
             alpha_result = self.subtensor.substrate.query(
-                'SubtensorModule', 'Alpha', [treasury_ss58, owner_ss58, netuid]
+                'SubtensorModule', 'Alpha', [treasury_ss58, owner_ss58, packed.netuid]
             )
 
             if not alpha_result:

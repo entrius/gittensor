@@ -2,7 +2,6 @@
 import base64
 import fnmatch
 import os
-import re
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -95,12 +94,28 @@ QUERY = """
                     ... on User { databaseId }
                   }
                   authorAssociation
+                  userContentEdits(first: 1) {
+                    nodes { editedAt }
+                  }
+                  timelineItems(itemTypes: [RENAMED_TITLE_EVENT], last: 1) {
+                    nodes {
+                      ... on RenamedTitleEvent { createdAt }
+                    }
+                  }
                 }
               }
               reviews(first: 3, states: APPROVED) {
                 nodes {
                   author {
                     login
+                  }
+                }
+              }
+              timelineItems(itemTypes: [LABELED_EVENT], last: 1) {
+                nodes {
+                  ... on LabeledEvent {
+                    label { name }
+                    createdAt
                   }
                 }
               }
@@ -1062,56 +1077,6 @@ def load_miners_prs(
         f'Fetched {len(miner_eval.merged_pull_requests)} merged PRs, {len(miner_eval.open_pull_requests)} open PRs, '
         f'{len(miner_eval.closed_pull_requests)} closed'
     )
-
-
-def get_pr_open_times(repo: str, pr_numbers: List[int], token: str) -> Dict[int, datetime]:
-    """Fetch PR creation dates from GitHub API.
-
-    Args:
-        repo: Repository full name (e.g., 'owner/repo')
-        pr_numbers: List of PR numbers to fetch
-        token: GitHub PAT for authentication
-
-    Returns:
-        Dict mapping pr_number to created_at datetime (UTC). PRs that fail
-        to fetch are omitted from the result.
-    """
-    headers = make_headers(token)
-    result: Dict[int, datetime] = {}
-
-    for pr_number in pr_numbers:
-        try:
-            response = requests.get(
-                f'{BASE_GITHUB_API_URL}/repos/{repo}/pulls/{pr_number}',
-                headers=headers,
-                timeout=15,
-            )
-            if response.status_code == 200:
-                data = response.json()
-                created_at = data.get('created_at')
-                if created_at:
-                    result[pr_number] = datetime.fromisoformat(created_at.rstrip('Z')).replace(tzinfo=timezone.utc)
-            else:
-                bt.logging.debug(f'Failed to fetch PR #{pr_number} from {repo}: status {response.status_code}')
-        except requests.exceptions.RequestException as e:
-            bt.logging.debug(f'Error fetching PR #{pr_number} from {repo}: {e}')
-
-    return result
-
-
-def extract_pr_number_from_url(pr_url: str) -> Optional[int]:
-    """Extract PR number from a GitHub PR URL.
-
-    Args:
-        pr_url: Full GitHub PR URL (e.g., https://github.com/owner/repo/pull/123)
-
-    Returns:
-        PR number as integer, or None if invalid URL
-    """
-    if not pr_url:
-        return None
-    match = re.search(r'/pull/(\d+)', pr_url)
-    return int(match.group(1)) if match else None
 
 
 def find_solver_from_cross_references(repo: str, issue_number: int, token: str) -> tuple[Optional[int], Optional[int]]:

@@ -10,7 +10,14 @@ import click
 from rich.console import Console
 from rich.table import Table
 
-from .helpers import NETUID_DEFAULT, _error, _get_validator_axons, _load_config_value, _resolve_endpoint
+from .helpers import (
+    NETUID_DEFAULT,
+    _connect_bittensor,
+    _error,
+    _get_validator_axons,
+    _load_config_value,
+    _resolve_endpoint,
+)
 
 console = Console()
 
@@ -32,8 +39,6 @@ def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, json_mode)
         gitt miner check --wallet alice --hotkey default
         gitt miner check --wallet alice --hotkey default --network test
     """
-    import bittensor as bt
-
     from gittensor.synapses import PatCheckSynapse
 
     # 1. Resolve wallet and network
@@ -45,23 +50,18 @@ def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, json_mode)
         console.print(f'[dim]Wallet: {wallet_name}/{wallet_hotkey} | Network: {ws_endpoint} | Netuid: {netuid}[/dim]')
 
     # 2. Set up bittensor objects
-    def _connect():
-        w = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
-        st = bt.Subtensor(network=ws_endpoint)
-        mg = st.metagraph(netuid=netuid)
-        dd = bt.Dendrite(wallet=w)
-        return w, st, mg, dd
-
     if not json_mode:
         with console.status('[bold]Connecting to network...'):
             try:
-                wallet, subtensor, metagraph, dendrite = _connect()
+                wallet, subtensor, metagraph, dendrite = _connect_bittensor(
+                    wallet_name, wallet_hotkey, ws_endpoint, netuid
+                )
             except Exception as e:
                 _error(f'Failed to initialize bittensor: {e}', json_mode)
                 sys.exit(1)
     else:
         try:
-            wallet, subtensor, metagraph, dendrite = _connect()
+            wallet, subtensor, metagraph, dendrite = _connect_bittensor(wallet_name, wallet_hotkey, ws_endpoint, netuid)
         except Exception as e:
             _error(f'Failed to initialize bittensor: {e}', json_mode)
             sys.exit(1)

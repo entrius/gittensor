@@ -220,28 +220,3 @@ def load_token_config() -> TokenConfig:
     )
 
     return config
-
-
-def get_supported_extensions() -> List[str]:
-    """
-    Get a list of file extensions supported by tree-sitter scoring.
-
-    Returns:
-        List[str]: List of supported file extensions (without dots).
-    """
-    config = load_token_config()
-    return [
-        ext
-        for ext, lang_config in config.language_configs.items()
-        if lang_config.language is not None and ext not in NON_CODE_EXTENSIONS
-    ]
-
-
-def get_documentation_extensions() -> List[str]:
-    """
-    Get a list of file extensions that use line-count scoring.
-
-    Returns:
-        List[str]: List of documentation/config file extensions (without dots).
-    """
-    return list(NON_CODE_EXTENSIONS)

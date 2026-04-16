@@ -1,29 +1,5 @@
 from typing import List
 
-import bittensor as bt
-
-
-def check_uid_availability(metagraph: 'bt.Metagraph', uid: int, vpermit_tao_limit: int) -> bool:
-    """Return whether a UID is eligible for querying.
-
-    Args:
-        metagraph: Metagraph containing axon and stake state.
-        uid: UID to check.
-        vpermit_tao_limit: Maximum allowed stake for validator-permit UIDs.
-
-    Returns:
-        True if the UID is serving and within the validator-permit stake limit.
-    """
-    # Filter non serving axons.
-    if not metagraph.axons[uid].is_serving:
-        return False
-    # Filter validator permit > 1024 stake.
-    if metagraph.validator_permit[uid]:
-        if metagraph.S[uid] > vpermit_tao_limit:
-            return False
-    # Available otherwise.
-    return True
-
 
 def get_all_uids(self, exclude: List[int] = []) -> set[int]:
     """Return all eligible miner UIDs for scoring.

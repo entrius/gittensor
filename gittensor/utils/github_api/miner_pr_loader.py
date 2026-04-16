@@ -9,11 +9,11 @@ import bittensor as bt
 from gittensor.classes import MinerEvaluation, PRState
 from gittensor.constants import MAINTAINER_ASSOCIATIONS, PR_LOOKBACK_DAYS
 from gittensor.utils.github_api.rest import branch_matches_pattern
-
-from . import graphql as gh_graphql
 from gittensor.utils.github_iso_time import parse_github_utc_iso
 from gittensor.utils.utils import parse_repo_name
 from gittensor.validator.utils.load_weights import RepositoryConfig
+
+from . import graphql as gh_graphql
 
 
 def try_add_open_or_closed_pr(

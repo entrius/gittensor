@@ -14,14 +14,13 @@ import urllib.error
 import urllib.request
 from contextlib import nullcontext
 from decimal import Decimal, InvalidOperation
-from pathlib import Path
 from typing import Any, Callable, ContextManager, Dict, List, Optional, Tuple, TypeVar
 
 import click
 from rich.console import Console
 
 from gittensor.cli.issue_commands.tables import build_pr_table
-from gittensor.cli.paths import CONFIG_FILE, GITTENSOR_DIR
+from gittensor.cli.paths import CONFIG_FILE
 from gittensor.constants import NETWORK_MAP
 from gittensor.validator.issue_competitions.storage_utils import (
     compute_ink5_lazy_key,

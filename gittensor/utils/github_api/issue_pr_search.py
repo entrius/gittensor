@@ -7,9 +7,9 @@ import requests
 
 from gittensor.constants import BASE_GITHUB_API_URL
 from gittensor.utils.github_api.rest import make_headers
+from gittensor.utils.models import PRInfo
 
 from . import graphql as gh_graphql
-from gittensor.utils.models import PRInfo
 
 # GraphQL fragment used by both issue submissions and solver detection.
 _PR_TIMELINE_QUERY = """

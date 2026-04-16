@@ -28,6 +28,7 @@ from gittensor.constants import (
     PR_LOOKBACK_DAYS,
 )
 from gittensor.utils.models import PRInfo
+from gittensor.validator.utils.datetime_utils import parse_github_iso_to_utc
 from gittensor.validator.utils.load_weights import RepositoryConfig
 
 # core github graphql query
@@ -860,8 +861,8 @@ def try_add_open_or_closed_pr(
             bt.logging.warning(f'PR #{pr_raw["number"]} is CLOSED but missing createdAt timestamp.')
             return
 
-        closed_dt = datetime.fromisoformat(closed_at.rstrip('Z')).replace(tzinfo=timezone.utc)
-        created_dt = datetime.fromisoformat(created_at.rstrip('Z')).replace(tzinfo=timezone.utc)
+        closed_dt = parse_github_iso_to_utc(closed_at)
+        created_dt = parse_github_iso_to_utc(created_at)
 
         # Ignore stale PRs that were created before the scoring lookback window.
         # This allows users to close old PRs without receiving a fresh credibility penalty.
@@ -894,7 +895,7 @@ def should_skip_merged_pr(
     if not pr_raw['mergedAt']:
         return (True, f'PR #{pr_raw["number"]} is MERGED, but missing a mergedAt timestamp. Skipping...')
 
-    merged_dt = datetime.fromisoformat(pr_raw['mergedAt'].rstrip('Z')).replace(tzinfo=timezone.utc)
+    merged_dt = parse_github_iso_to_utc(pr_raw['mergedAt'])
 
     # Filter by lookback window
     if merged_dt < lookback_date_filter:
@@ -1034,12 +1035,8 @@ def load_miners_prs(
 
                     # Check if repo is inactive
                     if repo_config.inactive_at is not None:
-                        inactive_dt = datetime.fromisoformat(repo_config.inactive_at.rstrip('Z')).replace(
-                            tzinfo=timezone.utc
-                        )
-                        pr_creation_time = datetime.fromisoformat(pr_raw['createdAt'].rstrip('Z')).replace(
-                            tzinfo=timezone.utc
-                        )
+                        inactive_dt = parse_github_iso_to_utc(repo_config.inactive_at)
+                        pr_creation_time = parse_github_iso_to_utc(pr_raw['createdAt'])
                         # Skip PR if it was created after the repo became inactive
                         if pr_creation_time >= inactive_dt:
                             bt.logging.info(

@@ -26,6 +26,7 @@ from gittensor.constants import (
     REPO_SCAN_PER_REPO_CAP,
 )
 from gittensor.utils.github_api_tools import find_solver_from_cross_references
+from gittensor.validator.utils.datetime_utils import parse_github_iso_to_utc
 from gittensor.validator.utils.load_weights import RepositoryConfig
 
 
@@ -241,10 +242,10 @@ def _fetch_closed_issues(repo_name: str, since: str, token: str) -> List[dict]:
 
 
 def _parse_iso(value: Optional[str]) -> Optional[datetime]:
-    """Parse an ISO 8601 timestamp string to datetime."""
+    """Parse an ISO 8601 timestamp string to UTC datetime."""
     if not value:
         return None
     try:
-        return datetime.fromisoformat(value.replace('Z', '+00:00'))
+        return parse_github_iso_to_utc(value)
     except (ValueError, AttributeError):
         return None

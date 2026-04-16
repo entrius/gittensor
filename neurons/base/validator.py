@@ -180,17 +180,6 @@ class BaseValidatorNeuron(BaseNeuron):
             self.is_running = True
             bt.logging.debug('Started')
 
-    def stop_run_thread(self):
-        """
-        Stops the validator's operations that are running in the background thread.
-        """
-        if self.is_running:
-            bt.logging.debug('Stopping validator in background thread.')
-            self.should_exit = True
-            self.thread.join(5)
-            self.is_running = False
-            bt.logging.debug('Stopped')
-
     def __enter__(self):
         self.run_in_background_thread()
         return self

@@ -466,19 +466,9 @@ class ScoreBreakdown:
         return self.structural_added_count + self.leaf_added_count
 
     @property
-    def added_score(self) -> float:
-        """Total score from additions."""
-        return self.structural_added_score + self.leaf_added_score
-
-    @property
     def deleted_count(self) -> int:
         """Total deleted nodes (structural + leaf)."""
         return self.structural_deleted_count + self.leaf_deleted_count
-
-    @property
-    def deleted_score(self) -> float:
-        """Total score from deletions."""
-        return self.structural_deleted_score + self.leaf_deleted_score
 
     def with_weight(self, weight: float) -> 'ScoreBreakdown':
         """Return new ScoreBreakdown with scores multiplied by weight (counts unchanged)."""
@@ -626,11 +616,6 @@ class MinerEvaluationCache:
         bt.logging.debug(f'Cache hit for UID {uid} (cached at {cached.cached_at.isoformat()})')
 
         return deepcopy(cached.evaluation)
-
-    def clear(self) -> None:
-        """Clear all cached evaluations."""
-        self._cache.clear()
-        bt.logging.info('Cleared evaluation cache')
 
     def create_lightweight_copy(self, evaluation: 'MinerEvaluation') -> 'MinerEvaluation':
         """Create a memory-efficient copy, stripping file patches."""

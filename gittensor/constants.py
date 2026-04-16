@@ -78,8 +78,8 @@ MAX_CODE_DENSITY_MULTIPLIER = 1.5
 LABEL_MULTIPLIERS: dict[str, float] = {
     'feature': 1.50,
     'bug': 1.25,
-    'enhancement': 1.15,
-    'refactor': 1.05,
+    'enhancement': 1.10,
+    'refactor': 1.00,
 }
 
 # Pioneer dividend — rewards the first quality contributor to each repository

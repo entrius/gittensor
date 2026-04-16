@@ -16,6 +16,7 @@ from rich.table import Table
 
 from gittensor.cli.miner_commands.helpers import (
     NETUID_DEFAULT,
+    _connect_bittensor,
     _error,
     _get_validator_axons,
     _load_config_value,
@@ -56,8 +57,6 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_m
         gitt miner post --wallet alice --hotkey default
         gitt miner post --wallet alice --hotkey default --network test
     """
-    import bittensor as bt
-
     from gittensor.synapses import PatBroadcastSynapse
 
     # 1. Load and validate PAT locally (flag > env var > interactive prompt)
@@ -91,23 +90,18 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_m
         console.print(f'[dim]Wallet: {wallet_name}/{wallet_hotkey} | Network: {ws_endpoint} | Netuid: {netuid}[/dim]')
 
     # 3. Set up bittensor objects
-    def _connect():
-        w = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
-        st = bt.Subtensor(network=ws_endpoint)
-        mg = st.metagraph(netuid=netuid)
-        dd = bt.Dendrite(wallet=w)
-        return w, st, mg, dd
-
     if not json_mode:
         with console.status('[bold]Connecting to network...'):
             try:
-                wallet, subtensor, metagraph, dendrite = _connect()
+                wallet, subtensor, metagraph, dendrite = _connect_bittensor(
+                    wallet_name, wallet_hotkey, ws_endpoint, netuid
+                )
             except Exception as e:
                 _error(f'Failed to initialize bittensor: {e}', json_mode)
                 sys.exit(1)
     else:
         try:
-            wallet, subtensor, metagraph, dendrite = _connect()
+            wallet, subtensor, metagraph, dendrite = _connect_bittensor(wallet_name, wallet_hotkey, ws_endpoint, netuid)
         except Exception as e:
             _error(f'Failed to initialize bittensor: {e}', json_mode)
             sys.exit(1)

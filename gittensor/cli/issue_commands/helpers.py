@@ -21,7 +21,7 @@ import click
 from rich.console import Console
 
 from gittensor.cli.issue_commands.tables import build_pr_table
-from gittensor.constants import CONTRACT_ADDRESS, NETWORK_MAP
+from gittensor.constants import NETWORK_MAP
 from gittensor.validator.issue_competitions.storage_utils import (
     compute_ink5_lazy_key,
     decode_issue_from_storage,
@@ -526,9 +526,11 @@ def get_contract_address(cli_value: str = '') -> str:
     Returns:
         Contract address string
     """
+    from gittensor.utils.utils import get_contract_address as _get_contract_address
+
     if cli_value:
         return cli_value
-    return os.environ.get('CONTRACT_ADDRESS') or CONTRACT_ADDRESS
+    return _get_contract_address()
 
 
 # Reverse lookup: URL -> network name

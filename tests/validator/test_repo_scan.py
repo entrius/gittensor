@@ -44,7 +44,9 @@ def _run_scan(issues: List[dict], lookback_date: str) -> Dict[str, List[Issue]]:
     result: Dict[str, List[Issue]] = {}
     with (
         patch('gittensor.validator.issue_discovery.repo_scan._fetch_closed_issues', return_value=issues),
-        patch('gittensor.validator.issue_discovery.repo_scan.find_solver_from_cross_references', return_value=(None, None)),
+        patch(
+            'gittensor.validator.issue_discovery.repo_scan.find_solver_from_cross_references', return_value=(None, None)
+        ),
     ):
         _run(_scan_repo(REPO, lookback_date, TOKEN, {MINER_GH_ID}, set(), result, 100))
     return result
@@ -56,7 +58,9 @@ def test_stale_issue_filtered_recent_passes():
     lookback = _iso(now - timedelta(days=35))
 
     issues = [
-        _make_issue(1, MINER_GH_ID, closed_at=_iso(now - timedelta(days=730)), updated_at=_iso(now - timedelta(days=1))),
+        _make_issue(
+            1, MINER_GH_ID, closed_at=_iso(now - timedelta(days=730)), updated_at=_iso(now - timedelta(days=1))
+        ),
         _make_issue(2, MINER_GH_ID, closed_at=_iso(now - timedelta(days=3))),
     ]
     result = _run_scan(issues, lookback)

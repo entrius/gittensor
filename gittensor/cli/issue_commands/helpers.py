@@ -287,34 +287,6 @@ def print_issue_submission_table(
     console.print(f'Showing {len(pull_requests)} submissions{suffix}')
 
 
-def resolve_netuid_from_contract(ws_endpoint: str, contract_addr: str) -> Optional[int]:
-    """Read the subnet netuid stored in the on-chain contract."""
-    # Keep this import local so CLI help can render without optional chain deps installed.
-    from substrateinterface import SubstrateInterface
-
-    substrate = SubstrateInterface(url=ws_endpoint)
-    packed = _read_contract_packed_storage(substrate, contract_addr)
-    if packed and packed.get('netuid') is not None:
-        return int(packed['netuid'])
-    return None
-
-
-def verify_miner_registration(ws_endpoint: str, contract_addr: str, hotkey_ss58: str) -> bool:
-    """Return whether the hotkey is registered on the subnet configured by the contract netuid."""
-    import bittensor as bt
-
-    netuid = resolve_netuid_from_contract(ws_endpoint, contract_addr)
-    if netuid is None:
-        return False
-
-    subtensor = bt.Subtensor(network=ws_endpoint)
-    try:
-        return bool(subtensor.is_hotkey_registered(netuid=netuid, hotkey_ss58=hotkey_ss58))
-    except TypeError:
-        # API compatibility fallback across bittensor versions.
-        return bool(subtensor.is_hotkey_registered(hotkey_ss58, netuid))
-
-
 # ---------------------------------------------------------------------------
 # Input validation
 # ---------------------------------------------------------------------------

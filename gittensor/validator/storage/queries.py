@@ -47,11 +47,11 @@ INSERT INTO pull_requests (
     merged_at, pr_created_at, pr_state,
     repo_weight_multiplier, base_score, issue_multiplier,
     open_pr_spam_multiplier, pioneer_dividend, pioneer_rank, time_decay_multiplier,
-    credibility_multiplier, review_quality_multiplier,
+    credibility_multiplier, review_quality_multiplier, label_multiplier, label,
     earned_score, collateral_score,
     additions, deletions, commits, total_nodes_scored,
     merged_by_login, description, last_edited_at,
-    token_score, structural_count, structural_score, leaf_count, leaf_score
+    code_density, token_score, structural_count, structural_score, leaf_count, leaf_score
 ) VALUES %s
 ON CONFLICT (number, repository_full_name)
 DO UPDATE SET
@@ -70,6 +70,8 @@ DO UPDATE SET
     time_decay_multiplier = EXCLUDED.time_decay_multiplier,
     credibility_multiplier = EXCLUDED.credibility_multiplier,
     review_quality_multiplier = EXCLUDED.review_quality_multiplier,
+    label_multiplier = EXCLUDED.label_multiplier,
+    label = EXCLUDED.label,
     earned_score = EXCLUDED.earned_score,
     collateral_score = EXCLUDED.collateral_score,
     additions = EXCLUDED.additions,
@@ -79,6 +81,7 @@ DO UPDATE SET
     merged_by_login = EXCLUDED.merged_by_login,
     description = EXCLUDED.description,
     last_edited_at = EXCLUDED.last_edited_at,
+    code_density = EXCLUDED.code_density,
     token_score = EXCLUDED.token_score,
     structural_count = EXCLUDED.structural_count,
     structural_score = EXCLUDED.structural_score,

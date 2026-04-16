@@ -120,11 +120,6 @@ class IssueCompetitionContractClient:
 
         bt.logging.debug(f'Contract client initialized: {self.contract_address}')
 
-    @staticmethod
-    def hash_url(url: str) -> bytes:
-        """Hash a URL for deduplication."""
-        return hashlib.sha256(url.encode()).digest()
-
     # =========================================================================
     # Query Functions (Read-only)
     # =========================================================================
@@ -211,10 +206,6 @@ class IssueCompetitionContractClient:
         except Exception as e:
             bt.logging.error(f'Error fetching issues by status: {e}')
             return []
-
-    def get_available_issues(self) -> List[ContractIssue]:
-        """Query contract for issues with status=Active."""
-        return self.get_issues_by_status(IssueStatus.ACTIVE)
 
     def get_issue(self, issue_id: int) -> Optional[ContractIssue]:
         """Get a specific issue by ID."""

@@ -96,8 +96,10 @@ def admin_cancel(issue_id: int, network: str, rpc_url: str, contract: str, walle
             print_error('Cancellation failed.')
     except ImportError as e:
         print_error(f'Missing dependency \u2014 {e}')
+        raise SystemExit(1)
     except Exception as e:
         print_error(str(e))
+        raise SystemExit(1)
 
 
 @admin.command('payout-issue')
@@ -156,8 +158,10 @@ def admin_payout(issue_id: int, network: str, rpc_url: str, contract: str, walle
             print_error('Payout failed.')
     except ImportError as e:
         print_error(f'Missing dependency \u2014 {e}')
+        raise SystemExit(1)
     except Exception as e:
         print_error(str(e))
+        raise SystemExit(1)
 
 
 @admin.command('set-owner')
@@ -203,8 +207,10 @@ def admin_set_owner(new_owner: str, network: str, rpc_url: str, contract: str, w
             print_error('Ownership transfer failed.')
     except ImportError as e:
         print_error(f'Missing dependency \u2014 {e}')
+        raise SystemExit(1)
     except Exception as e:
         print_error(str(e))
+        raise SystemExit(1)
 
 
 @admin.command('set-treasury')
@@ -258,8 +264,10 @@ def admin_set_treasury(
             print_error('Treasury hotkey update failed.')
     except ImportError as e:
         print_error(f'Missing dependency \u2014 {e}')
+        raise SystemExit(1)
     except Exception as e:
         print_error(str(e))
+        raise SystemExit(1)
 
 
 @admin.command('add-vali')
@@ -311,8 +319,10 @@ def admin_add_validator(hotkey: str, network: str, rpc_url: str, contract: str, 
             console.print('  \u2022 Validator is already whitelisted')
     except ImportError as e:
         print_error(f'Missing dependency \u2014 {e}')
+        raise SystemExit(1)
     except Exception as e:
         print_error(str(e))
+        raise SystemExit(1)
 
 
 @admin.command('remove-vali')
@@ -365,5 +375,7 @@ def admin_remove_validator(
             console.print('  \u2022 Validator is not in the whitelist')
     except ImportError as e:
         print_error(f'Missing dependency \u2014 {e}')
+        raise SystemExit(1)
     except Exception as e:
         print_error(str(e))
+        raise SystemExit(1)

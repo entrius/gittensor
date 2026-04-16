@@ -28,6 +28,7 @@ from gittensor.constants import (
     PR_LOOKBACK_DAYS,
 )
 from gittensor.utils.models import PRInfo
+from gittensor.validator.utils.datetime_utils import parse_github_iso_to_utc
 from gittensor.validator.utils.load_weights import RepositoryConfig
 
 # core github graphql query
@@ -860,8 +861,8 @@ def try_add_open_or_closed_pr(
             bt.logging.warning(f'PR #{pr_raw["number"]} is CLOSED but missing createdAt timestamp.')
             return
 
-        closed_dt = datetime.fromisoformat(closed_at.rstrip('Z')).replace(tzinfo=timezone.utc)
-        created_dt = datetime.fromisoformat(created_at.rstrip('Z')).replace(tzinfo=timezone.utc)
+        closed_dt = parse_github_iso_to_utc(closed_at)
+        created_dt = parse_github_iso_to_utc(created_at)
 
         # Ignore stale PRs that were created before the scoring lookback window.
         # This allows users to close old PRs without receiving a fresh credibility penalty.
@@ -894,7 +895,7 @@ def should_skip_merged_pr(
     if not pr_raw['mergedAt']:
         return (True, f'PR #{pr_raw["number"]} is MERGED, but missing a mergedAt timestamp. Skipping...')
 
-    merged_dt = datetime.fromisoformat(pr_raw['mergedAt'].rstrip('Z')).replace(tzinfo=timezone.utc)
+    merged_dt = parse_github_iso_to_utc(pr_raw['mergedAt'])
 
     # Filter by lookback window
     if merged_dt < lookback_date_filter:
@@ -1034,12 +1035,8 @@ def load_miners_prs(
 
                     # Check if repo is inactive
                     if repo_config.inactive_at is not None:
-                        inactive_dt = datetime.fromisoformat(repo_config.inactive_at.rstrip('Z')).replace(
-                            tzinfo=timezone.utc
-                        )
-                        pr_creation_time = datetime.fromisoformat(pr_raw['createdAt'].rstrip('Z')).replace(
-                            tzinfo=timezone.utc
-                        )
+                        inactive_dt = parse_github_iso_to_utc(repo_config.inactive_at)
+                        pr_creation_time = parse_github_iso_to_utc(pr_raw['createdAt'])
                         # Skip PR if it was created after the repo became inactive
                         if pr_creation_time >= inactive_dt:
                             bt.logging.info(
@@ -1174,100 +1171,6 @@ def check_github_issue_closed(repo: str, issue_number: int, token: str) -> Optio
     except Exception as e:
         bt.logging.error(f'Error checking GitHub issue {repo}#{issue_number}: {e}')
         return None
-
-
-def _fetch_file_contents_batch(
-    repo_owner: str,
-    repo_name: str,
-    head_sha: str,
-    batch_paths: List[str],
-    token: str,
-) -> Dict[str, Optional[str]]:
-    """Fetch file contents for a single batch of paths in one GraphQL request.
-
-    Args:
-        repo_owner: Repository owner
-        repo_name: Repository name
-        head_sha: The commit SHA to fetch files at
-        batch_paths: File paths for this batch
-        token: GitHub PAT for authentication
-
-    Returns:
-        Dict mapping file paths to their contents (None if binary, deleted, or too large)
-    """
-    file_fields = []
-    for i, path in enumerate(batch_paths):
-        expression = f'{head_sha}:{path}'
-        file_fields.append(
-            f'file{i}: object(expression: "{expression}") {{ ... on Blob {{ text byteSize isBinary }} }}'
-        )
-
-    query = f"""
-        query($owner: String!, $name: String!) {{
-            repository(owner: $owner, name: $name) {{
-                {' '.join(file_fields)}
-            }}
-        }}
-    """
-
-    variables = {'owner': repo_owner, 'name': repo_name}
-
-    data = execute_graphql_query(query, variables, token)
-    if data is None:
-        bt.logging.warning(f'Failed to fetch file contents for {repo_owner}/{repo_name}')
-        return {path: None for path in batch_paths}
-
-    if 'errors' in data:
-        bt.logging.warning(f'GraphQL errors fetching files: {data["errors"]}')
-
-    repo_data = data.get('data', {}).get('repository', {})
-    results: Dict[str, Optional[str]] = {}
-
-    for i, path in enumerate(batch_paths):
-        file_data = repo_data.get(f'file{i}')
-
-        if file_data is None:
-            results[path] = None
-        elif file_data.get('isBinary'):
-            results[path] = None
-        elif file_data.get('byteSize', 0) > MAX_FILE_SIZE_BYTES:
-            results[path] = None
-        else:
-            results[path] = file_data.get('text')
-
-    return results
-
-
-def fetch_file_contents_batch(
-    repo_owner: str,
-    repo_name: str,
-    head_sha: str,
-    file_paths: List[str],
-    token: str,
-) -> Dict[str, Optional[str]]:
-    """Fetch file contents in batched GraphQL requests so large PRs don't hit complexity limits.
-
-    Args:
-        repo_owner: Repository owner
-        repo_name: Repository name
-        head_sha: The commit SHA to fetch files at
-        file_paths: List of file paths to fetch
-        token: GitHub PAT for authentication
-
-    Returns:
-        Dict mapping file paths to their contents (None if binary, deleted, or too large)
-    """
-    if not file_paths:
-        return {}
-
-    results: Dict[str, Optional[str]] = {}
-
-    for batch_start in range(0, len(file_paths), MAX_FILES_PER_GRAPHQL_BATCH):
-        batch_paths = file_paths[batch_start : batch_start + MAX_FILES_PER_GRAPHQL_BATCH]
-        batch_results = _fetch_file_contents_batch(repo_owner, repo_name, head_sha, batch_paths, token)
-        results.update(batch_results)
-
-    return results
 
 
 @dataclass

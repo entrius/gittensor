@@ -64,6 +64,21 @@ Apply appropriate labels to help categorize and track your contribution:
 - `refactor` - Code refactoring without functionality changes
 - `documentation` - Documentation updates
 
+## Contribution Scope
+
+### Out of Scope
+
+The following directories are **not accepting external contributions**:
+
+- `smart-contracts/` — All ink!/Rust smart contracts
+- Any other Rust crates in this repository
+
+Changes to these directories will be closed without review. If you have questions or suggestions related to the smart contracts, open a discussion or issue instead.
+
+### In Scope
+
+Contributions are welcome for the Python codebase, including the validator, miner, CLI, and associated tests.
+
 ## Code Standards
 
 ### Quality Expectations

@@ -14,9 +14,11 @@ from .helpers import (
     NETUID_DEFAULT,
     _connect_bittensor,
     _error,
-    _get_validator_axons,
     _load_config_value,
+    _require_registered,
+    _require_validator_axons,
     _resolve_endpoint,
+    _status,
 )
 
 console = Console()
@@ -50,16 +52,7 @@ def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, json_mode)
         console.print(f'[dim]Wallet: {wallet_name}/{wallet_hotkey} | Network: {ws_endpoint} | Netuid: {netuid}[/dim]')
 
     # 2. Set up bittensor objects
-    if not json_mode:
-        with console.status('[bold]Connecting to network...'):
-            try:
-                wallet, subtensor, metagraph, dendrite = _connect_bittensor(
-                    wallet_name, wallet_hotkey, ws_endpoint, netuid
-                )
-            except Exception as e:
-                _error(f'Failed to initialize bittensor: {e}', json_mode)
-                sys.exit(1)
-    else:
+    with _status('[bold]Connecting to network...', json_mode):
         try:
             wallet, subtensor, metagraph, dendrite = _connect_bittensor(wallet_name, wallet_hotkey, ws_endpoint, netuid)
         except Exception as e:
@@ -67,16 +60,10 @@ def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, json_mode)
             sys.exit(1)
 
     # Verify miner is registered
-    if wallet.hotkey.ss58_address not in metagraph.hotkeys:
-        _error(f'Hotkey {wallet.hotkey.ss58_address[:16]}... is not registered on subnet {netuid}.', json_mode)
-        sys.exit(1)
+    _require_registered(wallet, metagraph, netuid, json_mode)
 
     # 3. Find active validator axons (vtrust > 0.1 = actively participating in consensus)
-    validator_axons, validator_uids = _get_validator_axons(metagraph)
-
-    if not validator_axons:
-        _error('No reachable validator axons found on the network.', json_mode)
-        sys.exit(1)
+    validator_axons, validator_uids = _require_validator_axons(metagraph, json_mode)
 
     # 4. Send check probes
     synapse = PatCheckSynapse()
@@ -89,10 +76,7 @@ def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, json_mode)
             timeout=15.0,
         )
 
-    if not json_mode:
-        with console.status(f'[bold]Checking {len(validator_axons)} validators...'):
-            responses = asyncio.run(_check())
-    else:
+    with _status(f'[bold]Checking {len(validator_axons)} validators...', json_mode):
         responses = asyncio.run(_check())
 
     # 5. Collect results

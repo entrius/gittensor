@@ -9,7 +9,6 @@ import bittensor as bt
 
 from gittensor.classes import Issue, MinerEvaluation
 from gittensor.constants import (
-    CREDIBILITY_MULLIGAN_COUNT,
     ISSUE_REVIEW_CLEAN_BONUS,
     ISSUE_REVIEW_PENALTY_RATE,
     MAX_OPEN_ISSUE_THRESHOLD,
@@ -19,6 +18,7 @@ from gittensor.constants import (
     OPEN_ISSUE_SPAM_BASE_THRESHOLD,
     OPEN_ISSUE_SPAM_TOKEN_SCORE_PER_SLOT,
 )
+from gittensor.validator.utils.credibility import check_eligibility_gate, credibility_with_mulligan
 from gittensor.validator.utils.datetime_utils import calculate_time_decay
 from gittensor.validator.utils.load_weights import RepositoryConfig
 
@@ -52,11 +52,7 @@ def calculate_issue_credibility(solved_count: int, closed_count: int) -> float:
 
     credibility = solved / (solved + max(0, closed - mulligan))
     """
-    adjusted_closed = max(0, closed_count - CREDIBILITY_MULLIGAN_COUNT)
-    total = solved_count + adjusted_closed
-    if total == 0:
-        return 0.0
-    return solved_count / total
+    return credibility_with_mulligan(solved_count, closed_count)
 
 
 def check_issue_eligibility(solved_count: int, closed_count: int) -> Tuple[bool, float, str]:
@@ -64,15 +60,7 @@ def check_issue_eligibility(solved_count: int, closed_count: int) -> Tuple[bool,
 
     Returns (is_eligible, issue_credibility, reason).
     """
-    credibility = calculate_issue_credibility(solved_count, closed_count)
-
-    if solved_count < MIN_VALID_SOLVED_ISSUES:
-        return False, credibility, f'{solved_count}/{MIN_VALID_SOLVED_ISSUES} valid solved issues'
-
-    if credibility < MIN_ISSUE_CREDIBILITY:
-        return False, credibility, f'Issue credibility {credibility:.2f} < {MIN_ISSUE_CREDIBILITY}'
-
-    return True, credibility, ''
+    return check_eligibility_gate(solved_count, closed_count, MIN_VALID_SOLVED_ISSUES, MIN_ISSUE_CREDIBILITY)
 
 
 def score_discovered_issues(

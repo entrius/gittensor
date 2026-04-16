@@ -22,7 +22,7 @@ from gittensor.cli.miner_commands.helpers import (
     _load_config_value,
     _resolve_endpoint,
 )
-from gittensor.constants import BASE_GITHUB_API_URL
+from gittensor.constants import BASE_GITHUB_API_URL, GITHUB_HTTP_TIMEOUT_SECONDS, GRAPHQL_VIEWER_QUERY
 
 console = Console()
 
@@ -192,17 +192,17 @@ def _validate_pat_locally(pat: str) -> bool:
     headers = {'Authorization': f'token {pat}', 'Accept': 'application/vnd.github.v3+json'}
     try:
         # Check basic auth
-        user_resp = requests.get(f'{BASE_GITHUB_API_URL}/user', headers=headers, timeout=15)
+        user_resp = requests.get(f'{BASE_GITHUB_API_URL}/user', headers=headers, timeout=GITHUB_HTTP_TIMEOUT_SECONDS)
         if user_resp.status_code != 200:
             return False
 
         # Check GraphQL access (same test the validator runs during PAT broadcast)
-        gql_headers = {'Authorization': f'bearer {pat}', 'Accept': 'application/json'}
+        gql_headers = {'Authorization': f'Bearer {pat}', 'Accept': 'application/json'}
         gql_resp = requests.post(
             f'{BASE_GITHUB_API_URL}/graphql',
-            json={'query': '{ viewer { login } }'},
+            json={'query': GRAPHQL_VIEWER_QUERY},
             headers=gql_headers,
-            timeout=15,
+            timeout=GITHUB_HTTP_TIMEOUT_SECONDS,
         )
         if gql_resp.status_code != 200:
             console.print(

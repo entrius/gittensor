@@ -21,6 +21,8 @@ NETWORK_MAP = {
 # GitHub API
 # =============================================================================
 BASE_GITHUB_API_URL = 'https://api.github.com'
+GITHUB_HTTP_TIMEOUT_SECONDS = 15
+GRAPHQL_VIEWER_QUERY = '{ viewer { login } }'
 # 1MB max file size for github api file fetches. Files exceeding this get no score.
 MAX_FILE_SIZE_BYTES = 1_000_000
 # Too many object lookups in one GraphQL query can trigger 502 errors and lose all results.

@@ -21,8 +21,9 @@ from gittensor.cli.miner_commands.helpers import (
     _get_validator_axons,
     _load_config_value,
     _resolve_endpoint,
+    _status,
 )
-from gittensor.constants import BASE_GITHUB_API_URL
+from gittensor.constants import BASE_GITHUB_API_URL, GITHUB_HTTP_TIMEOUT_SECONDS, GRAPHQL_VIEWER_QUERY
 
 console = Console()
 
@@ -68,10 +69,7 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_m
         pat = click.prompt('Enter your GitHub Personal Access Token', hide_input=True)
 
     # 1b. Validate PAT locally
-    if not json_mode:
-        with console.status('[bold]Validating PAT...'):
-            pat_valid = _validate_pat_locally(pat)
-    else:
+    with _status('[bold]Validating PAT...', json_mode):
         pat_valid = _validate_pat_locally(pat)
 
     if not pat_valid:
@@ -90,16 +88,7 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_m
         console.print(f'[dim]Wallet: {wallet_name}/{wallet_hotkey} | Network: {ws_endpoint} | Netuid: {netuid}[/dim]')
 
     # 3. Set up bittensor objects
-    if not json_mode:
-        with console.status('[bold]Connecting to network...'):
-            try:
-                wallet, subtensor, metagraph, dendrite = _connect_bittensor(
-                    wallet_name, wallet_hotkey, ws_endpoint, netuid
-                )
-            except Exception as e:
-                _error(f'Failed to initialize bittensor: {e}', json_mode)
-                sys.exit(1)
-    else:
+    with _status('[bold]Connecting to network...', json_mode):
         try:
             wallet, subtensor, metagraph, dendrite = _connect_bittensor(wallet_name, wallet_hotkey, ws_endpoint, netuid)
         except Exception as e:
@@ -129,10 +118,7 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_m
             timeout=30.0,
         )
 
-    if not json_mode:
-        with console.status(f'[bold]Broadcasting to {len(validator_axons)} validators...'):
-            responses = asyncio.run(_broadcast())
-    else:
+    with _status(f'[bold]Broadcasting to {len(validator_axons)} validators...', json_mode):
         responses = asyncio.run(_broadcast())
 
     # 6. Collect results
@@ -192,17 +178,17 @@ def _validate_pat_locally(pat: str) -> bool:
     headers = {'Authorization': f'token {pat}', 'Accept': 'application/vnd.github.v3+json'}
     try:
         # Check basic auth
-        user_resp = requests.get(f'{BASE_GITHUB_API_URL}/user', headers=headers, timeout=15)
+        user_resp = requests.get(f'{BASE_GITHUB_API_URL}/user', headers=headers, timeout=GITHUB_HTTP_TIMEOUT_SECONDS)
         if user_resp.status_code != 200:
             return False
 
         # Check GraphQL access (same test the validator runs during PAT broadcast)
-        gql_headers = {'Authorization': f'bearer {pat}', 'Accept': 'application/json'}
+        gql_headers = {'Authorization': f'Bearer {pat}', 'Accept': 'application/json'}
         gql_resp = requests.post(
             f'{BASE_GITHUB_API_URL}/graphql',
-            json={'query': '{ viewer { login } }'},
+            json={'query': GRAPHQL_VIEWER_QUERY},
             headers=gql_headers,
-            timeout=15,
+            timeout=GITHUB_HTTP_TIMEOUT_SECONDS,
         )
         if gql_resp.status_code != 200:
             console.print(

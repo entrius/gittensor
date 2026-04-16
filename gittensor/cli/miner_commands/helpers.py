@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import nullcontext
 from pathlib import Path
 
 import click
@@ -64,6 +65,11 @@ def _connect_bittensor(wallet_name: str, wallet_hotkey: str, ws_endpoint: str, n
     mg = st.metagraph(netuid=netuid)
     dd = bt.Dendrite(wallet=w)
     return w, st, mg, dd
+
+
+def _status(message: str, json_mode: bool):
+    """Rich spinner in TTY mode, no-op in JSON mode."""
+    return nullcontext() if json_mode else console.status(message)
 
 
 def _error(msg: str, json_mode: bool) -> None:

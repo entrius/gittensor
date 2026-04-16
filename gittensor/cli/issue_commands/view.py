@@ -20,6 +20,7 @@ from rich.table import Table
 
 from .help import StyledCommand
 from .helpers import (
+    _handle_command_error,
     _read_contract_packed_storage,
     _read_issues_from_child_storage,
     _resolve_contract_and_network,
@@ -281,12 +282,8 @@ def issues_pending_harvest(network: str, rpc_url: str, contract: str, verbose: b
         console.print(f'[green]Treasury Stake:[/green] {format_alpha(treasury_stake, 4)} ALPHA')
         console.print(f'[green]Allocated to Bounties:[/green] {format_alpha(total_bounty_pool, 4)} ALPHA')
         console.print(f'[green]Pending Harvest:[/green] {format_alpha(pending_harvest, 4)} ALPHA')
-    except ImportError as e:
-        print_error(f'Missing dependency — {e}')
-        raise SystemExit(1)
     except Exception as e:
-        print_error(str(e))
-        raise SystemExit(1)
+        _handle_command_error(e)
 
 
 @click.command('info', cls=StyledCommand)

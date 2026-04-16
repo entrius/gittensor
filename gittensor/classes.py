@@ -646,11 +646,6 @@ class MinerEvaluationCache:
             del self._cache[uid]
             bt.logging.debug(f'Invalidated cache for UID {uid}')
 
-    def clear(self) -> None:
-        """Clear all cached evaluations."""
-        self._cache.clear()
-        bt.logging.info('Cleared evaluation cache')
-
     def create_lightweight_copy(self, evaluation: 'MinerEvaluation') -> 'MinerEvaluation':
         """Create a memory-efficient copy, stripping file patches."""
         light_eval = deepcopy(evaluation)

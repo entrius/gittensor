@@ -64,21 +64,19 @@ class TestCalculateReviewQualityMultiplier:
         """Verify expected values across the penalty range."""
         expected = {
             0: 1.00,
-            1: 0.88,
-            2: 0.76,
-            3: 0.64,
-            4: 0.52,
-            5: 0.40,
-            6: 0.28,
-            7: 0.16,
-            8: 0.04,
+            1: 0.85,
+            2: 0.70,
+            3: 0.55,
+            4: 0.40,
+            5: 0.25,
+            6: 0.10,
         }
         for n, mult in expected.items():
             assert calculate_review_quality_multiplier(n) == pytest.approx(mult, abs=1e-9), f'n={n}'
 
     def test_floor_at_zero(self):
         """Multiplier must not go below 0.0 for extreme counts."""
-        assert calculate_review_quality_multiplier(9) == 0.0
+        assert calculate_review_quality_multiplier(7) == 0.0
 
     def test_large_count_stays_at_zero(self):
         assert calculate_review_quality_multiplier(100) == 0.0
@@ -118,7 +116,7 @@ class TestReviewQualityMultiplierOnPullRequest:
         pr.review_quality_multiplier = calculate_review_quality_multiplier(1)
         score_one_review = pr.calculate_final_earned_score()
 
-        assert score_one_review == pytest.approx(score_no_penalty * 0.88)
+        assert score_one_review == pytest.approx(score_no_penalty * 0.85)
 
     def test_zero_multiplier_zeroes_earned_score(self, builder):
         pr = builder.create(state=PRState.MERGED)
@@ -141,10 +139,10 @@ class TestReviewQualityMultiplierOnPullRequest:
         pr.open_pr_spam_multiplier = 1.0
         pr.time_decay_multiplier = 1.0
         pr.credibility_multiplier = 1.0
-        pr.review_quality_multiplier = calculate_review_quality_multiplier(3)  # 0.64
+        pr.review_quality_multiplier = calculate_review_quality_multiplier(3)  # 0.55
 
         earned = pr.calculate_final_earned_score()
-        assert earned == pytest.approx(80.0 * 0.64)
+        assert earned == pytest.approx(80.0 * 0.55)
 
 
 # ============================================================================

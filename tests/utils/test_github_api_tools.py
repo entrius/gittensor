@@ -26,12 +26,16 @@ github_api_tools = pytest.importorskip(
     'gittensor.utils.github_api_tools', reason='Requires gittensor package with all dependencies'
 )
 
+# Safe after the importorskip above: github_api_tools transitively imports gittensor.constants.
+from gittensor.constants import MAINTAINER_ASSOCIATIONS  # noqa: E402
+
 get_github_graphql_query = github_api_tools.get_github_graphql_query
 get_github_id = github_api_tools.get_github_id
 get_pull_request_file_changes = github_api_tools.get_pull_request_file_changes
 get_merge_base_sha = github_api_tools.get_merge_base_sha
 find_prs_for_issue = github_api_tools.find_prs_for_issue
 execute_graphql_query = github_api_tools.execute_graphql_query
+should_exclude_maintainer_pr = github_api_tools.should_exclude_maintainer_pr
 
 
 # ============================================================================
@@ -1511,6 +1515,37 @@ class TestFetchFileContentsForPrMergeBase:
         # Should fall back to base_ref_oid
         call_args = mock_fetch.call_args
         assert call_args[0][2] == 'base_branch_tip_sha', 'Should fall back to base_ref_oid'
+
+
+# ============================================================================
+# Maintainer-author exclusion tests
+# ============================================================================
+
+
+class TestShouldExcludeMaintainerPr:
+    """Test suite for should_exclude_maintainer_pr."""
+
+    @pytest.fixture(autouse=True)
+    def _clear_dev_mode(self, monkeypatch):
+        monkeypatch.delenv('DEV_MODE', raising=False)
+
+    @pytest.mark.parametrize('association', MAINTAINER_ASSOCIATIONS)
+    def test_maintainer_associations_are_excluded(self, association):
+        assert should_exclude_maintainer_pr(association) is True
+
+    @pytest.mark.parametrize('association', ['CONTRIBUTOR', 'FIRST_TIME_CONTRIBUTOR', 'NONE', 'MANNEQUIN', '', None])
+    def test_non_maintainer_associations_are_not_excluded(self, association):
+        assert should_exclude_maintainer_pr(association) is False
+
+    @pytest.mark.parametrize('association', MAINTAINER_ASSOCIATIONS)
+    def test_dev_mode_bypasses_exclusion(self, association, monkeypatch):
+        monkeypatch.setenv('DEV_MODE', '1')
+        assert should_exclude_maintainer_pr(association) is False
+
+    def test_empty_dev_mode_does_not_bypass(self, monkeypatch):
+        """An empty DEV_MODE env var is falsy and must not bypass the check."""
+        monkeypatch.setenv('DEV_MODE', '')
+        assert should_exclude_maintainer_pr('OWNER') is True
 
 
 if __name__ == '__main__':

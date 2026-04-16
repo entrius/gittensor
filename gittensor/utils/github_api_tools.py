@@ -828,6 +828,18 @@ def _has_resource_limit_errors(data: Dict) -> bool:
     return any(isinstance(e, dict) and e.get('type') == 'RESOURCE_LIMITS_EXCEEDED' for e in errors)
 
 
+def should_exclude_maintainer_pr(author_association: Optional[str]) -> bool:
+    """Return True when a PR should be excluded from scoring due to a maintainer author.
+
+    Maintainers can merge directly, so their PRs aren't valid scoring targets.
+    DEV_MODE bypasses the check so local testing works against repos where
+    contributors are predominantly maintainers.
+    """
+    if os.environ.get('DEV_MODE'):
+        return False
+    return author_association in MAINTAINER_ASSOCIATIONS
+
+
 def try_add_open_or_closed_pr(
     miner_eval: MinerEvaluation,
     pr_raw: Dict,
@@ -843,8 +855,7 @@ def try_add_open_or_closed_pr(
         pr_state: GitHub PR state (OPEN, CLOSED, MERGED)
         lookback_date_filter: Date filter for lookback period
     """
-    # Ignore all maintainer contributions
-    if not os.environ.get('DEV_MODE') and pr_raw.get('authorAssociation') in MAINTAINER_ASSOCIATIONS:
+    if should_exclude_maintainer_pr(pr_raw.get('authorAssociation')):
         return
 
     if pr_state == PRState.OPEN.value:
@@ -904,9 +915,8 @@ def should_skip_merged_pr(
             f'Skipping PR #{pr_raw["number"]} in {repository_full_name} - merged before {PR_LOOKBACK_DAYS}-day lookback window',
         )
 
-    # Skip if PR author is a maintainer
     author_association = pr_raw.get('authorAssociation')
-    if not os.environ.get('DEV_MODE') and author_association in MAINTAINER_ASSOCIATIONS:
+    if should_exclude_maintainer_pr(author_association):
         return (
             True,
             f'Skipping PR #{pr_raw["number"]} in {repository_full_name} - author is {author_association} (has direct merge capabilities)',

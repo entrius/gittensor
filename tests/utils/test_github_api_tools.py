@@ -1520,7 +1520,7 @@ class TestFetchFileContentsForPrMergeBase:
 _log_rate_limit = github_api_tools._log_rate_limit
 
 
-def _make_rate_limit_response(remaining: str | None, limit: str = '5000', reset: str = '9999999999') -> Mock:
+def _make_rate_limit_response(remaining: Optional[str], limit: str = '5000', reset: str = '9999999999') -> Mock:
     """Build a mock response with GitHub rate-limit headers."""
     response = Mock()
     headers: dict = {}

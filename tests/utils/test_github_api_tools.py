@@ -32,6 +32,7 @@ get_pull_request_file_changes = github_api_tools.get_pull_request_file_changes
 get_merge_base_sha = github_api_tools.get_merge_base_sha
 find_prs_for_issue = github_api_tools.find_prs_for_issue
 execute_graphql_query = github_api_tools.execute_graphql_query
+count_tracked_open_issues = github_api_tools._count_tracked_open_issues
 
 
 # ============================================================================
@@ -1154,6 +1155,51 @@ class TestLoadMinersPrsErrorResilience:
         # Verify the warning was logged for the bad PR
         warning_calls = [str(c) for c in mock_logging.warning.call_args_list]
         assert any('PR #2' in w for w in warning_calls), f'Expected a warning about PR #2, got: {warning_calls}'
+
+
+class TestTrackedOpenIssueCounting:
+    """Tests for tracked-repo open issue counting used in spam multiplier."""
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    def test_counts_only_tracked_repositories(self, mock_execute):
+        tracked = {'tracked/repo-a', 'tracked/repo-b'}
+        mock_execute.side_effect = [
+            {
+                'data': {
+                    'node': {
+                        'issues': {
+                            'pageInfo': {'hasNextPage': True, 'endCursor': 'next'},
+                            'nodes': [
+                                {'repository': {'nameWithOwner': 'tracked/repo-a'}},
+                                {'repository': {'nameWithOwner': 'other/repo'}},
+                            ],
+                        }
+                    }
+                }
+            },
+            {
+                'data': {
+                    'node': {
+                        'issues': {
+                            'pageInfo': {'hasNextPage': False, 'endCursor': None},
+                            'nodes': [
+                                {'repository': {'nameWithOwner': 'tracked/repo-b'}},
+                            ],
+                        }
+                    }
+                }
+            },
+        ]
+
+        count = count_tracked_open_issues('fake_pat', 'user_node_id', tracked)
+
+        assert count == 2
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    def test_returns_zero_when_issue_query_fails(self, mock_execute):
+        mock_execute.return_value = None
+        count = count_tracked_open_issues('fake_pat', 'user_node_id', {'tracked/repo-a'})
+        assert count == 0
 
 
 # ============================================================================

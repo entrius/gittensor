@@ -128,6 +128,26 @@ QUERY = """
     }
     """
 
+OPEN_ISSUES_QUERY = """
+    query($userId: ID!, $limit: Int!, $cursor: String) {
+      node(id: $userId) {
+        ... on User {
+          issues(first: $limit, states: [OPEN], orderBy: {field: CREATED_AT, direction: DESC}, after: $cursor) {
+            pageInfo {
+              hasNextPage
+              endCursor
+            }
+            nodes {
+              repository {
+                nameWithOwner
+              }
+            }
+          }
+        }
+      }
+    }
+    """
+
 
 def branch_matches_pattern(branch_name: str, patterns: List[str]) -> bool:
     """Check if a branch name matches any pattern in the list.
@@ -987,6 +1007,11 @@ def load_miners_prs(
 
     cursor = None
     current_page_size: Optional[int] = None  # None = let get_github_graphql_query choose default
+    miner_eval.total_open_issues = _count_tracked_open_issues(
+        miner_eval.github_pat,
+        global_user_id,
+        set(master_repositories.keys()),
+    )
 
     try:
         while len(miner_eval.merged_pull_requests) < max_prs:
@@ -1019,10 +1044,6 @@ def load_miners_prs(
             if not user_data:
                 bt.logging.warning('User not found or no pull requests')
                 break
-
-            # Extract open issue count from first page (User-level field, not paginated)
-            if cursor is None:
-                miner_eval.total_open_issues = user_data.get('issues', {}).get('totalCount', 0)
 
             pr_data: Dict = user_data.get('pullRequests', {})
             prs: List = pr_data.get('nodes', [])
@@ -1080,6 +1101,47 @@ def load_miners_prs(
         f'Fetched {len(miner_eval.merged_pull_requests)} merged PRs, {len(miner_eval.open_pull_requests)} open PRs, '
         f'{len(miner_eval.closed_pull_requests)} closed'
     )
+
+
+def _count_tracked_open_issues(token: str, global_user_id: str, tracked_repos: set[str]) -> int:
+    """Count miner-authored open issues restricted to tracked repositories."""
+    if not token or not global_user_id or not tracked_repos:
+        return 0
+
+    cursor: Optional[str] = None
+    tracked_open_issue_count = 0
+    max_pages = 100  # Safety cap: 10k open issues at 100/page.
+
+    for _ in range(max_pages):
+        data = execute_graphql_query(
+            query=OPEN_ISSUES_QUERY,
+            variables={'userId': global_user_id, 'limit': 100, 'cursor': cursor},
+            token=token,
+            max_attempts=3,
+        )
+
+        if not data:
+            bt.logging.warning('Failed to fetch open issues for tracked-repo spam multiplier; defaulting to 0')
+            return 0
+
+        user_data = data.get('data', {}).get('node', {})
+        issues_data = user_data.get('issues', {})
+        issue_nodes = issues_data.get('nodes', [])
+        page_info = issues_data.get('pageInfo', {})
+
+        for issue in issue_nodes:
+            repo = (issue.get('repository') or {}).get('nameWithOwner')
+            if repo in tracked_repos:
+                tracked_open_issue_count += 1
+
+        if not page_info.get('hasNextPage'):
+            break
+
+        cursor = page_info.get('endCursor')
+        if not cursor:
+            break
+
+    return tracked_open_issue_count
 
 
 def find_solver_from_cross_references(repo: str, issue_number: int, token: str) -> tuple[Optional[int], Optional[int]]:

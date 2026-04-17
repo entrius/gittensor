@@ -1028,7 +1028,7 @@ class TestFindSolverFromTimeline:
 
         assert solver_id == 42
         assert pr_number == 14
-        mock_cross_ref.assert_called_once_with('owner/repo', 12, 'fake_token')
+        mock_cross_ref.assert_called_once_with('owner/repo', 12, 'fake_token', raise_on_api_failure=False)
 
 
 class TestCheckGithubIssueClosed:

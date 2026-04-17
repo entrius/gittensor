@@ -1188,9 +1188,12 @@ def find_solver_from_timeline(
         (solver_github_id, pr_number) — either may be None if not found.
     """
     bt.logging.debug(f'Finding solver for {repo}#{issue_number}')
-    if raise_on_api_failure:
-        return find_solver_from_cross_references(repo, issue_number, token, raise_on_api_failure=True)
-    return find_solver_from_cross_references(repo, issue_number, token)
+    return find_solver_from_cross_references(
+        repo,
+        issue_number,
+        token,
+        raise_on_api_failure=raise_on_api_failure,
+    )
 
 
 def check_github_issue_closed(repo: str, issue_number: int, token: str) -> Optional[Dict[str, Any]]:

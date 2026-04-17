@@ -15,6 +15,7 @@ from gittensor.classes import (
 from gittensor.constants import (
     COMMENT_NODE_TYPES,
     DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT,
+    DELETION_SCORE_WEIGHT,
     INLINE_TEST_EXTENSIONS,
     INLINE_TEST_PATTERNS,
     MAX_FILE_SIZE_BYTES,
@@ -227,6 +228,9 @@ def score_tree_diff(
             breakdown.leaf_deleted_count += count
             breakdown.leaf_deleted_score += weight * count
 
+    breakdown.structural_deleted_score *= DELETION_SCORE_WEIGHT
+    breakdown.leaf_deleted_score *= DELETION_SCORE_WEIGHT
+
     return breakdown
 
 
@@ -253,6 +257,8 @@ def calculate_token_score_from_file_changes(
             total_score=0.0,
             total_nodes_scored=0,
             total_lines=0,
+            total_additions=0,
+            total_deletions=0,
             file_results=[],
         )
 
@@ -263,11 +269,15 @@ def calculate_token_score_from_file_changes(
     cat_score: Dict[ScoringCategory, float] = {}
     cat_nodes: Dict[ScoringCategory, int] = {}
     cat_lines: Dict[ScoringCategory, int] = {}
+    cat_additions: Dict[ScoringCategory, int] = {}
+    cat_deletions: Dict[ScoringCategory, int] = {}
     cat_breakdowns: Dict[ScoringCategory, List[ScoreBreakdown]] = {}
 
     total_score = 0.0
     total_nodes = 0
     total_lines = 0
+    total_additions = 0
+    total_deletions = 0
     all_breakdowns: List[ScoreBreakdown] = []
 
     for file in file_changes:
@@ -366,9 +376,13 @@ def calculate_token_score_from_file_changes(
         cat_score[cat] = cat_score.get(cat, 0.0) + file_result.score
         cat_nodes[cat] = cat_nodes.get(cat, 0) + file_result.nodes_scored
         cat_lines[cat] = cat_lines.get(cat, 0) + file_result.total_lines
+        cat_additions[cat] = cat_additions.get(cat, 0) + file.additions
+        cat_deletions[cat] = cat_deletions.get(cat, 0) + file.deletions
         total_score += file_result.score
         total_nodes += file_result.nodes_scored
         total_lines += file_result.total_lines
+        total_additions += file.additions
+        total_deletions += file.deletions
         if file_result.breakdown is not None:
             cat_breakdowns.setdefault(cat, []).append(file_result.breakdown)
             all_breakdowns.append(file_result.breakdown)
@@ -381,6 +395,8 @@ def calculate_token_score_from_file_changes(
             total_score=cat_score[cat],
             total_nodes_scored=cat_nodes[cat],
             total_lines=cat_lines[cat],
+            total_additions=cat_additions.get(cat, 0),
+            total_deletions=cat_deletions.get(cat, 0),
             file_results=cat_files[cat],
             score_breakdown=sum(bd, start=ScoreBreakdown()) if bd else None,
         )
@@ -389,6 +405,8 @@ def calculate_token_score_from_file_changes(
         total_score=total_score,
         total_nodes_scored=total_nodes,
         total_lines=total_lines,
+        total_additions=total_additions,
+        total_deletions=total_deletions,
         file_results=file_results,
         score_breakdown=sum(all_breakdowns, start=ScoreBreakdown()) if all_breakdowns else None,
         by_category=by_category,

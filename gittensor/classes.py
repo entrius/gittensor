@@ -331,6 +331,7 @@ class MinerEvaluation:
     total_leaf_count: int = 0
     total_leaf_score: float = 0.0
     failed_reason: Optional[str] = None
+    github_pr_fetch_failed: bool = False
     evaluation_timestamp: Optional[datetime] = None
     merged_pull_requests: List[PullRequest] = field(default_factory=list)
     open_pull_requests: List[PullRequest] = field(default_factory=list)

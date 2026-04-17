@@ -18,6 +18,7 @@ from rich.panel import Panel
 
 from .help import StyledGroup
 from .helpers import (
+    _handle_command_error,
     _make_contract_client,
     _resolve_contract_and_network,
     console,
@@ -94,12 +95,8 @@ def admin_cancel(issue_id: int, network: str, rpc_url: str, contract: str, walle
             print_success(f'Issue {issue_id} cancelled successfully!')
         else:
             print_error('Cancellation failed.')
-    except ImportError as e:
-        print_error(f'Missing dependency \u2014 {e}')
-        raise SystemExit(1)
     except Exception as e:
-        print_error(str(e))
-        raise SystemExit(1)
+        _handle_command_error(e)
 
 
 @admin.command('payout-issue')
@@ -156,12 +153,8 @@ def admin_payout(issue_id: int, network: str, rpc_url: str, contract: str, walle
             print_success(f'Payout successful! Amount: {format_alpha(result, 4)} ALPHA')
         else:
             print_error('Payout failed.')
-    except ImportError as e:
-        print_error(f'Missing dependency \u2014 {e}')
-        raise SystemExit(1)
     except Exception as e:
-        print_error(str(e))
-        raise SystemExit(1)
+        _handle_command_error(e)
 
 
 @admin.command('set-owner')
@@ -205,12 +198,8 @@ def admin_set_owner(new_owner: str, network: str, rpc_url: str, contract: str, w
             print_success(f'Ownership transferred to {new_owner}!')
         else:
             print_error('Ownership transfer failed.')
-    except ImportError as e:
-        print_error(f'Missing dependency \u2014 {e}')
-        raise SystemExit(1)
     except Exception as e:
-        print_error(str(e))
-        raise SystemExit(1)
+        _handle_command_error(e)
 
 
 @admin.command('set-treasury')
@@ -262,12 +251,8 @@ def admin_set_treasury(
             )
         else:
             print_error('Treasury hotkey update failed.')
-    except ImportError as e:
-        print_error(f'Missing dependency \u2014 {e}')
-        raise SystemExit(1)
     except Exception as e:
-        print_error(str(e))
-        raise SystemExit(1)
+        _handle_command_error(e)
 
 
 @admin.command('add-vali')
@@ -317,12 +302,8 @@ def admin_add_validator(hotkey: str, network: str, rpc_url: str, contract: str, 
             console.print('[yellow]Possible reasons:[/yellow]')
             console.print('  \u2022 Caller is not the contract owner')
             console.print('  \u2022 Validator is already whitelisted')
-    except ImportError as e:
-        print_error(f'Missing dependency \u2014 {e}')
-        raise SystemExit(1)
     except Exception as e:
-        print_error(str(e))
-        raise SystemExit(1)
+        _handle_command_error(e)
 
 
 @admin.command('remove-vali')
@@ -373,9 +354,5 @@ def admin_remove_validator(
             console.print('[yellow]Possible reasons:[/yellow]')
             console.print('  \u2022 Caller is not the contract owner')
             console.print('  \u2022 Validator is not in the whitelist')
-    except ImportError as e:
-        print_error(f'Missing dependency \u2014 {e}')
-        raise SystemExit(1)
     except Exception as e:
-        print_error(str(e))
-        raise SystemExit(1)
+        _handle_command_error(e)

@@ -15,6 +15,7 @@ import numpy as np
 
 try:
     import psycopg2
+
     _DB_TRANSIENT_ERRORS = (psycopg2.OperationalError, psycopg2.InterfaceError)
 except ImportError:  # pragma: no cover
     _DB_TRANSIENT_ERRORS = (Exception,)  # type: ignore[assignment]
@@ -71,6 +72,7 @@ class BaseRepository:
         Returns:
             True if successful, False otherwise
         """
+
         def _run() -> bool:
             with self.get_cursor() as cursor:
                 cursor.execute(query, params)
@@ -102,8 +104,7 @@ class BaseRepository:
                 if attempt < _DB_MAX_RETRIES:
                     delay = _DB_RETRY_DELAYS[attempt]
                     self.logger.warning(
-                        f'Transient DB error (attempt {attempt + 1}/{_DB_MAX_RETRIES + 1}), '
-                        f'retrying in {delay}s: {e}'
+                        f'Transient DB error (attempt {attempt + 1}/{_DB_MAX_RETRIES + 1}), retrying in {delay}s: {e}'
                     )
                     time.sleep(delay)
                 else:
@@ -227,6 +228,7 @@ class Repository(BaseRepository):
 
         def _run() -> int:
             from psycopg2.extras import execute_values
+
             with self.get_cursor() as cursor:
                 execute_values(
                     cursor,
@@ -282,6 +284,7 @@ class Repository(BaseRepository):
 
         def _run() -> int:
             from psycopg2.extras import execute_values
+
             with self.get_cursor() as cursor:
                 execute_values(
                     cursor, BULK_UPSERT_ISSUES.replace('VALUES %s', 'VALUES %s'), values, template=None, page_size=100
@@ -325,6 +328,7 @@ class Repository(BaseRepository):
 
         def _run() -> int:
             from psycopg2.extras import execute_values
+
             with self.get_cursor() as cursor:
                 execute_values(
                     cursor,
@@ -386,6 +390,7 @@ class Repository(BaseRepository):
 
         def _run() -> bool:
             from psycopg2.extras import execute_values
+
             with self.get_cursor() as cursor:
                 execute_values(cursor, BULK_UPSERT_MINER_EVALUATION, eval_values)
                 self.db.commit()

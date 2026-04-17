@@ -12,6 +12,7 @@ import pytest
 # Minimal stub so the module imports without a real DB or bittensor
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def base_repo():
     """Return a BaseRepository instance with a mock DB connection."""
@@ -26,8 +27,8 @@ def base_repo():
 # _execute_with_retry
 # ---------------------------------------------------------------------------
 
-class TestExecuteWithRetry:
 
+class TestExecuteWithRetry:
     def test_returns_value_on_first_success(self, base_repo):
         """Operation succeeds immediately — no retries, correct return value."""
         result = base_repo._execute_with_retry(lambda: 42, default=0)
@@ -115,6 +116,7 @@ class TestExecuteWithRetry:
 
     def test_rollback_called_on_non_transient_failure(self, base_repo):
         """DB rollback is invoked once on a non-transient failure."""
+
         def _op():
             raise RuntimeError('logic error')
 
@@ -144,8 +146,8 @@ class TestExecuteWithRetry:
 # execute_command (delegates to _execute_with_retry)
 # ---------------------------------------------------------------------------
 
-class TestExecuteCommand:
 
+class TestExecuteCommand:
     @patch('gittensor.validator.storage.repository.time.sleep')
     def test_retries_on_operational_error(self, mock_sleep, base_repo):
         """execute_command retries when psycopg2.OperationalError is raised."""

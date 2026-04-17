@@ -26,8 +26,8 @@ from .helpers import (
     print_error,
     print_network_header,
     print_success,
-    validate_issue_id,
-    validate_ss58_address,
+    require_valid_issue_id,
+    require_valid_ss58,
     with_network_contract_options,
     with_wallet_options,
 )
@@ -62,10 +62,7 @@ def admin_cancel(issue_id: int, network: str, rpc_url: str, contract: str, walle
     """
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
 
-    try:
-        validate_issue_id(issue_id)
-    except click.BadParameter as e:
-        raise click.ClickException(str(e))
+    require_valid_issue_id(issue_id)
 
     print_network_header(network_name, contract_addr)
 
@@ -120,10 +117,7 @@ def admin_payout(issue_id: int, network: str, rpc_url: str, contract: str, walle
     """
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
 
-    try:
-        validate_issue_id(issue_id)
-    except click.BadParameter as e:
-        raise click.ClickException(str(e))
+    require_valid_issue_id(issue_id)
 
     print_network_header(network_name, contract_addr)
 
@@ -174,10 +168,7 @@ def admin_set_owner(new_owner: str, network: str, rpc_url: str, contract: str, w
     """
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
 
-    try:
-        validate_ss58_address(new_owner, 'new_owner')
-    except click.BadParameter as e:
-        raise click.ClickException(str(e))
+    require_valid_ss58(new_owner, 'new_owner')
 
     print_network_header(network_name, contract_addr)
 
@@ -224,10 +215,7 @@ def admin_set_treasury(
     """
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
 
-    try:
-        validate_ss58_address(new_treasury, 'new_treasury')
-    except click.BadParameter as e:
-        raise click.ClickException(str(e))
+    require_valid_ss58(new_treasury, 'new_treasury')
 
     print_network_header(network_name, contract_addr)
 
@@ -275,10 +263,7 @@ def admin_add_validator(hotkey: str, network: str, rpc_url: str, contract: str, 
     """
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
 
-    try:
-        validate_ss58_address(hotkey, 'hotkey')
-    except click.BadParameter as e:
-        raise click.ClickException(str(e))
+    require_valid_ss58(hotkey, 'hotkey')
 
     print_network_header(network_name, contract_addr)
 
@@ -327,10 +312,7 @@ def admin_remove_validator(
     """
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
 
-    try:
-        validate_ss58_address(hotkey, 'hotkey')
-    except click.BadParameter as e:
-        raise click.ClickException(str(e))
+    require_valid_ss58(hotkey, 'hotkey')
 
     print_network_header(network_name, contract_addr)
 

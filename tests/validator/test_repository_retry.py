@@ -4,10 +4,9 @@
 
 """Unit tests for DB retry logic in BaseRepository._execute_with_retry."""
 
-from unittest.mock import MagicMock, Mock, call, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Minimal stub so the module imports without a real DB or bittensor

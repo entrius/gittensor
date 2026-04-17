@@ -11,18 +11,13 @@ import time
 from contextlib import contextmanager
 from typing import Callable, List, TypeVar
 
+import numpy as np
+
 try:
     import psycopg2
     _DB_TRANSIENT_ERRORS = (psycopg2.OperationalError, psycopg2.InterfaceError)
 except ImportError:  # pragma: no cover
     _DB_TRANSIENT_ERRORS = (Exception,)  # type: ignore[assignment]
-
-_DB_MAX_RETRIES = 3
-_DB_RETRY_DELAYS = (1, 2, 4)
-
-_T = TypeVar('_T')
-
-import numpy as np
 
 from gittensor.classes import FileChange, Issue, Miner, MinerEvaluation, PullRequest
 
@@ -37,6 +32,10 @@ from .queries import (
     CLEANUP_STALE_MINERS_BY_HOTKEY,
     SET_MINER,
 )
+
+_DB_MAX_RETRIES = 3
+_DB_RETRY_DELAYS = (1, 2, 4)
+_T = TypeVar('_T')
 
 
 class BaseRepository:

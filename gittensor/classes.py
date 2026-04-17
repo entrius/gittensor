@@ -161,7 +161,7 @@ class PullRequest:
     time_decay_multiplier: float = 1.0
     credibility_multiplier: float = 1.0
     review_quality_multiplier: float = 1.0  # Penalty for CHANGES_REQUESTED reviews from maintainers
-    label_multiplier: float = 1.0  # Multiplier based on PR label (feature, bug, enhancement, refactor)
+    label_multiplier: float = 1.0  # Multiplier based on PR label (matched via keyword substring search)
     label: Optional[str] = None  # Last label set on the PR
     changes_requested_count: int = 0  # Number of maintainer CHANGES_REQUESTED reviews
     earned_score: float = 0.0

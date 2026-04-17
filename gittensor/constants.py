@@ -74,13 +74,14 @@ CONTRIBUTION_SCORE_FOR_FULL_BONUS = 1500
 # Boosts
 MAX_CODE_DENSITY_MULTIPLIER = 1.5
 
-# Label multipliers — applied based on the last label set on the PR (requires triage+ access)
-LABEL_MULTIPLIERS: dict[str, float] = {
-    'feature': 1.50,
-    'bug': 1.25,
-    'enhancement': 1.10,
-    'refactor': 1.00,
-}
+# Label multipliers - applied based on the last label set on the PR (requires triage+ access)
+# Each entry is (keywords, multiplier); first keyword match wins, so order by priority
+LABEL_MULTIPLIERS: tuple[tuple[tuple[str, ...], float], ...] = (
+    (('feature', 'feat'), 1.50),
+    (('bug', 'fix', 'crash', 'regress', 'security', 'perf'), 1.25),
+    (('enh', 'improve', 'perf'), 1.10),
+    (('refact', 'cleanup', 'polish', 'debt', 'chore'), 1.00),
+)
 
 # Pioneer dividend — rewards the first quality contributor to each repository
 # Rates applied per follower position (1st follower pays most, diminishing after)

@@ -368,6 +368,10 @@ class MinerEvaluation:
     def total_closed_prs(self) -> int:
         return len(self.closed_pull_requests)
 
+    @property
+    def should_use_cache_fallback(self) -> bool:
+        return self.github_pr_fetch_failed and self.total_prs == 0
+
     def get_all_issues(self) -> List[Issue]:
         """Aggregate all issues from all pull requests (merged, open, closed)."""
         all_issues = []

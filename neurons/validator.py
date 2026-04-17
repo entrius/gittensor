@@ -156,22 +156,17 @@ class Validator(BaseValidatorNeuron):
             if miner_eval.failed_reason is not None:
                 continue
 
-            # Store successful (non-failed-fetch) evals with PRs.
-            if miner_eval.total_prs > 0 and not miner_eval.github_pr_fetch_failed:
-                self.evaluation_cache.store(miner_eval)
-                continue
-
-            # Legitimate 0-PR users should not reuse stale cache.
             if not miner_eval.github_pr_fetch_failed:
+                if miner_eval.total_prs > 0:
+                    self.evaluation_cache.store(miner_eval)
                 continue
 
-            if miner_eval.total_prs > 0:
+            if not miner_eval.should_use_cache_fallback:
                 bt.logging.warning(
                     f'UID {uid}: GitHub fetch failed after partial PR load; skipping cache store/fallback this round'
                 )
                 continue
 
-            # Fetch failed and no PRs loaded; try cache fallback.
             cached_eval = self.evaluation_cache.get(uid, miner_eval.hotkey, miner_eval.github_id)
             if cached_eval is not None:
                 bt.logging.info(

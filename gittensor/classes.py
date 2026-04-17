@@ -8,7 +8,7 @@ from typing import DefaultDict, Dict, List, Optional, Set
 
 import bittensor as bt
 
-from gittensor.constants import MAX_CODE_DENSITY_MULTIPLIER, MIN_TOKEN_SCORE_FOR_BASE_SCORE
+from gittensor.constants import DELETION_SCORE_WEIGHT, MAX_CODE_DENSITY_MULTIPLIER, MIN_TOKEN_SCORE_FOR_BASE_SCORE
 from gittensor.utils.utils import parse_repo_name
 
 GITHUB_DOMAIN = 'https://github.com/'
@@ -551,6 +551,8 @@ class PrScoringResult:
     total_score: float
     total_nodes_scored: int  # Total AST nodes scored across all files
     total_lines: int  # Total lines changed across all files
+    total_additions: int  # Total added lines across all files
+    total_deletions: int  # Total deleted lines across all files
     file_results: List[FileScoreResult]
     score_breakdown: Optional[ScoreBreakdown] = None  # Aggregated breakdown across all files
     by_category: Dict[ScoringCategory, 'PrScoringResult'] = field(default_factory=dict)
@@ -558,9 +560,10 @@ class PrScoringResult:
     @property
     def density(self) -> float:
         """Code density (total_score / total_lines), capped at MAX_CODE_DENSITY_MULTIPLIER"""
-        if self.total_lines <= 0:
+        effective_lines = self.total_additions + self.total_deletions * DELETION_SCORE_WEIGHT
+        if effective_lines < 1.0:
             return 0.0
-        return min(self.total_score / self.total_lines, MAX_CODE_DENSITY_MULTIPLIER)
+        return min(self.total_score / effective_lines, MAX_CODE_DENSITY_MULTIPLIER)
 
 
 @dataclass

@@ -61,6 +61,8 @@ def _pr_result(total_score: float, total_lines: int) -> PrScoringResult:
         total_score=total_score,
         total_nodes_scored=0,
         total_lines=total_lines,
+        total_additions=total_lines,
+        total_deletions=0,
         file_results=[],
     )
 

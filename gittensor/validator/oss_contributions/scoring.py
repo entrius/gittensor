@@ -287,6 +287,8 @@ def calculate_pioneer_dividends(
     repo_contributions: Dict[str, Dict[int, Tuple[datetime, int, float]]] = {}
 
     for evaluation in miner_evaluations.values():
+        if not evaluation.is_eligible:
+            continue
         for pr in evaluation.merged_pull_requests:
             if not pr.is_pioneer_eligible():
                 continue
@@ -327,7 +329,13 @@ def calculate_pioneer_dividends(
 
         pioneer_uid = sorted_uids[0][0]
         pioneer_pr_number = sorted_uids[0][1][1]
-        pioneer_pr = next(pr for pr in pr_index[repo][pioneer_uid] if pr.number == pioneer_pr_number)
+        pioneer_pr = next(
+            (pr for pr in pr_index[repo][pioneer_uid] if pr.number == pioneer_pr_number),
+            None,
+        )
+        if pioneer_pr is None:
+            bt.logging.warning(f'Pioneer PR #{pioneer_pr_number} not found in index for {repo}')
+            continue
         max_dividend = pioneer_pr.earned_score * PIONEER_DIVIDEND_MAX_RATIO
         capped = min(dividend, max_dividend)
         pioneer_pr.pioneer_dividend = round(capped, 2)

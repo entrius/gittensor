@@ -1005,6 +1005,7 @@ def load_miners_prs(
 
             if not result.response:
                 bt.logging.warning('No response from github, breaking fetch loop...')
+                miner_eval.github_fetch_failed = True
                 break
 
             data: Dict = result.response.json()
@@ -1014,11 +1015,13 @@ def load_miners_prs(
                 non_resource_errors = [e for e in data['errors'] if e.get('type') != 'RESOURCE_LIMITS_EXCEEDED']
                 if non_resource_errors:
                     bt.logging.error(f'GraphQL errors: {non_resource_errors}')
+                    miner_eval.github_fetch_failed = True
                     break
 
             user_data: Dict = data.get('data', {}).get('node')
             if not user_data:
                 bt.logging.warning('User not found or no pull requests')
+                miner_eval.github_fetch_failed = True
                 break
 
             # Extract open issue count from first page (User-level field, not paginated)

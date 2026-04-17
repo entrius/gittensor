@@ -490,22 +490,9 @@ def _resolve_pr_state(raw_state: str, merged: bool = False) -> str:
 
 
 def _search_issue_referencing_prs_graphql(
-    repo: str,
-    issue_number: int,
-    token: str,
-    open_only: bool = False,
-    raise_on_api_failure: bool = False,
+    repo: str, issue_number: int, token: str, open_only: bool = False, raise_on_api_failure: bool = False
 ) -> List[PRInfo]:
-    """Fetch PRs that reference an issue via GraphQL issue timeline cross-references.
-
-    Args:
-        repo: Repository full name (owner/repo).
-        issue_number: GitHub issue number.
-        token: GitHub PAT.
-        open_only: If True, return only open PRs.
-        raise_on_api_failure: If True, raise RuntimeError when GraphQL
-            request/response shape indicates lookup failure.
-    """
+    """Fetch PRs that reference an issue via GraphQL issue timeline cross-references."""
     if not token:
         return []
     if issue_number < 1 or '/' not in repo:
@@ -1112,10 +1099,7 @@ def load_miners_prs(
 
 
 def find_solver_from_cross_references(
-    repo: str,
-    issue_number: int,
-    token: str,
-    raise_on_api_failure: bool = False,
+    repo: str, issue_number: int, token: str, raise_on_api_failure: bool = False
 ) -> tuple[Optional[int], Optional[int]]:
     """Resolve solver from cross-referenced PRs on the issue timeline.
 
@@ -1126,23 +1110,12 @@ def find_solver_from_cross_references(
 
     If multiple candidates exist, the most recent ``merged_at`` is selected.
 
-    Args:
-        repo: Repository full name (``owner/repo``).
-        issue_number: GitHub issue number.
-        token: GitHub PAT used for GraphQL timeline access.
-        raise_on_api_failure: If True, raise RuntimeError when GraphQL
-            lookup fails instead of returning (None, None).
-
     Returns:
         Tuple ``(solver_github_id, pr_number)``. Either value may be ``None``
         when no valid closing PR is found.
     """
     prs = _search_issue_referencing_prs_graphql(
-        repo,
-        issue_number,
-        token,
-        open_only=False,
-        raise_on_api_failure=raise_on_api_failure,
+        repo, issue_number, token, open_only=False, raise_on_api_failure=raise_on_api_failure
     )
     merged = [p for p in prs if p.get('state') == 'MERGED' and issue_number in p.get('closing_numbers', [])]
     bt.logging.debug(f'Found {len(merged)} verified closing PRs via GraphQL for {repo}#{issue_number}')
@@ -1167,33 +1140,18 @@ def find_solver_from_cross_references(
 
 
 def find_solver_from_timeline(
-    repo: str,
-    issue_number: int,
-    token: str,
-    raise_on_api_failure: bool = False,
+    repo: str, issue_number: int, token: str, raise_on_api_failure: bool = False
 ) -> tuple[Optional[int], Optional[int]]:
     """Find the PR author who closed an issue.
 
     Uses GraphQL cross-reference analysis to find merged PRs that close the
     issue, with baseRepository validation and closingIssuesReferences check.
 
-    Args:
-        repo: Repository full name (owner/repo).
-        issue_number: GitHub issue number.
-        token: GitHub PAT used for GraphQL timeline access.
-        raise_on_api_failure: If True, raise RuntimeError when GraphQL
-            lookup fails.
-
     Returns:
         (solver_github_id, pr_number) — either may be None if not found.
     """
     bt.logging.debug(f'Finding solver for {repo}#{issue_number}')
-    return find_solver_from_cross_references(
-        repo,
-        issue_number,
-        token,
-        raise_on_api_failure=raise_on_api_failure,
-    )
+    return find_solver_from_cross_references(repo, issue_number, token, raise_on_api_failure=raise_on_api_failure)
 
 
 def check_github_issue_closed(repo: str, issue_number: int, token: str) -> Optional[Dict[str, Any]]:
@@ -1205,13 +1163,7 @@ def check_github_issue_closed(repo: str, issue_number: int, token: str) -> Optio
         token: GitHub PAT for authentication
 
     Returns:
-        Dict with:
-          - is_closed (bool)
-          - solver_github_id (Optional[int])
-          - pr_number (Optional[int])
-          - solver_lookup_failed (bool): True when solver lookup failed due
-            GitHub API/GraphQL failure and voting should be skipped.
-        Returns None on issue state API error.
+        Dict with 'is_closed', 'solver_github_id', 'pr_number', 'solver_lookup_failed' or None on error
     """
     headers = make_headers(token)
 
@@ -1233,12 +1185,7 @@ def check_github_issue_closed(repo: str, issue_number: int, token: str) -> Optio
 
         solver_lookup_failed = False
         try:
-            solver_github_id, pr_number = find_solver_from_timeline(
-                repo,
-                issue_number,
-                token,
-                raise_on_api_failure=True,
-            )
+            solver_github_id, pr_number = find_solver_from_timeline(repo, issue_number, token, True)
         except RuntimeError as lookup_error:
             bt.logging.warning(f'Solver lookup failed for {repo}#{issue_number}: {lookup_error}')
             solver_lookup_failed = True

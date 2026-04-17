@@ -354,6 +354,33 @@ class IssueCompetitionContractClient:
     # Transaction Functions (Write)
     # =========================================================================
 
+    def _exec_tx_bool(
+        self,
+        method_name: str,
+        args: dict,
+        keypair,
+        label: str,
+        gas_limit: dict = None,  # type: ignore[assignment]
+    ) -> bool:
+        """Execute a contract transaction and return True on success."""
+        try:
+            bt.logging.info(label)
+            tx_hash = self._exec_contract_raw(
+                method_name=method_name,
+                args=args,
+                keypair=keypair,
+                gas_limit=gas_limit,
+            )
+            if tx_hash:
+                bt.logging.info(f'{label} — ok ({tx_hash})')
+                return True
+            else:
+                bt.logging.error(f'{label} — failed')
+                return False
+        except Exception as e:
+            bt.logging.error(f'{label} — {e}')
+            return False
+
     def vote_solution(
         self,
         issue_id: int,
@@ -379,31 +406,17 @@ class IssueCompetitionContractClient:
         Returns:
             True if vote succeeded
         """
-        try:
-            bt.logging.info(f'Voting solution for issue {issue_id}: solver={solver_hotkey[:8]}... PR#{pr_number}')
-
-            keypair = wallet.hotkey
-            tx_hash = self._exec_contract_raw(
-                method_name='vote_solution',
-                args={
-                    'issue_id': issue_id,
-                    'solver_hotkey': solver_hotkey,
-                    'solver_coldkey': solver_coldkey,
-                    'pr_number': pr_number,
-                },
-                keypair=keypair,
-            )
-
-            if tx_hash:
-                bt.logging.info(f'Vote solution succeeded: {tx_hash}')
-                return True
-            else:
-                bt.logging.error('Vote solution failed')
-                return False
-
-        except Exception as e:
-            bt.logging.error(f'Error voting solution: {e}')
-            return False
+        return self._exec_tx_bool(
+            method_name='vote_solution',
+            args={
+                'issue_id': issue_id,
+                'solver_hotkey': solver_hotkey,
+                'solver_coldkey': solver_coldkey,
+                'pr_number': pr_number,
+            },
+            keypair=wallet.hotkey,
+            label=f'Voting solution for issue {issue_id}: solver={solver_hotkey[:8]}... PR#{pr_number}',
+        )
 
     def vote_cancel_issue(
         self,
@@ -422,30 +435,13 @@ class IssueCompetitionContractClient:
         Returns:
             True if vote succeeded
         """
-        try:
-            reason_hash = hashlib.sha256(reason.encode()).digest()
-            bt.logging.info(f'Voting cancel for issue {issue_id}: {reason}')
-
-            keypair = wallet.hotkey
-            tx_hash = self._exec_contract_raw(
-                method_name='vote_cancel_issue',
-                args={
-                    'issue_id': issue_id,
-                    'reason_hash': reason_hash,
-                },
-                keypair=keypair,
-            )
-
-            if tx_hash:
-                bt.logging.info(f'Vote cancel issue succeeded: {tx_hash}')
-                return True
-            else:
-                bt.logging.error('Vote cancel issue failed')
-                return False
-
-        except Exception as e:
-            bt.logging.error(f'Error voting cancel issue: {e}')
-            return False
+        reason_hash = hashlib.sha256(reason.encode()).digest()
+        return self._exec_tx_bool(
+            method_name='vote_cancel_issue',
+            args={'issue_id': issue_id, 'reason_hash': reason_hash},
+            keypair=wallet.hotkey,
+            label=f'Voting cancel for issue {issue_id}: {reason}',
+        )
 
     # =========================================================================
     # Raw Extrinsic Execution (Ink! 5 Workaround)
@@ -698,29 +694,13 @@ class IssueCompetitionContractClient:
         Returns:
             True if cancellation succeeded
         """
-        try:
-            bt.logging.info(f'Cancelling issue {issue_id}')
-
-            keypair = wallet.coldkey
-            tx_hash = self._exec_contract_raw(
-                method_name='cancel_issue',
-                args={
-                    'issue_id': issue_id,
-                },
-                keypair=keypair,
-                gas_limit=DEFAULT_GAS_LIMIT,
-            )
-
-            if tx_hash:
-                bt.logging.info(f'Issue {issue_id} cancelled: {tx_hash}')
-                return True
-            else:
-                bt.logging.error(f'Failed to cancel issue {issue_id}')
-                return False
-
-        except Exception as e:
-            bt.logging.error(f'Error cancelling issue: {e}')
-            return False
+        return self._exec_tx_bool(
+            method_name='cancel_issue',
+            args={'issue_id': issue_id},
+            keypair=wallet.coldkey,
+            label=f'Cancelling issue {issue_id}',
+            gas_limit=DEFAULT_GAS_LIMIT,
+        )
 
     def set_owner(
         self,
@@ -739,29 +719,13 @@ class IssueCompetitionContractClient:
         Returns:
             True if ownership transfer succeeded
         """
-        try:
-            bt.logging.info(f'Transferring ownership to {new_owner}')
-
-            keypair = wallet.coldkey
-            tx_hash = self._exec_contract_raw(
-                method_name='set_owner',
-                args={
-                    'new_owner': new_owner,
-                },
-                keypair=keypair,
-                gas_limit=DEFAULT_GAS_LIMIT,
-            )
-
-            if tx_hash:
-                bt.logging.info(f'Ownership transferred: {tx_hash}')
-                return True
-            else:
-                bt.logging.error('Failed to transfer ownership')
-                return False
-
-        except Exception as e:
-            bt.logging.error(f'Error transferring ownership: {e}')
-            return False
+        return self._exec_tx_bool(
+            method_name='set_owner',
+            args={'new_owner': new_owner},
+            keypair=wallet.coldkey,
+            label=f'Transferring ownership to {new_owner}',
+            gas_limit=DEFAULT_GAS_LIMIT,
+        )
 
     def add_validator(
         self,
@@ -777,29 +741,13 @@ class IssueCompetitionContractClient:
         Returns:
             True if addition succeeded
         """
-        try:
-            bt.logging.info(f'Adding validator {hotkey}')
-
-            keypair = wallet.coldkey
-            tx_hash = self._exec_contract_raw(
-                method_name='add_validator',
-                args={
-                    'hotkey': hotkey,
-                },
-                keypair=keypair,
-                gas_limit=DEFAULT_GAS_LIMIT,
-            )
-
-            if tx_hash:
-                bt.logging.info(f'Validator added: {tx_hash}')
-                return True
-            else:
-                bt.logging.error('Failed to add validator')
-                return False
-
-        except Exception as e:
-            bt.logging.error(f'Error adding validator: {e}')
-            return False
+        return self._exec_tx_bool(
+            method_name='add_validator',
+            args={'hotkey': hotkey},
+            keypair=wallet.coldkey,
+            label=f'Adding validator {hotkey}',
+            gas_limit=DEFAULT_GAS_LIMIT,
+        )
 
     def remove_validator(
         self,
@@ -815,29 +763,13 @@ class IssueCompetitionContractClient:
         Returns:
             True if removal succeeded
         """
-        try:
-            bt.logging.info(f'Removing validator {hotkey}')
-
-            keypair = wallet.coldkey
-            tx_hash = self._exec_contract_raw(
-                method_name='remove_validator',
-                args={
-                    'hotkey': hotkey,
-                },
-                keypair=keypair,
-                gas_limit=DEFAULT_GAS_LIMIT,
-            )
-
-            if tx_hash:
-                bt.logging.info(f'Validator removed: {tx_hash}')
-                return True
-            else:
-                bt.logging.error('Failed to remove validator')
-                return False
-
-        except Exception as e:
-            bt.logging.error(f'Error removing validator: {e}')
-            return False
+        return self._exec_tx_bool(
+            method_name='remove_validator',
+            args={'hotkey': hotkey},
+            keypair=wallet.coldkey,
+            label=f'Removing validator {hotkey}',
+            gas_limit=DEFAULT_GAS_LIMIT,
+        )
 
     def get_validators(self) -> List[str]:
         """Query the list of whitelisted validator hotkeys.
@@ -910,26 +842,10 @@ class IssueCompetitionContractClient:
         Returns:
             True if treasury hotkey change succeeded
         """
-        try:
-            bt.logging.info(f'Setting treasury hotkey to {new_hotkey}')
-
-            keypair = wallet.coldkey
-            tx_hash = self._exec_contract_raw(
-                method_name='set_treasury_hotkey',
-                args={
-                    'new_hotkey': new_hotkey,
-                },
-                keypair=keypair,
-                gas_limit=DEFAULT_GAS_LIMIT,
-            )
-
-            if tx_hash:
-                bt.logging.info(f'Treasury hotkey updated: {tx_hash}')
-                return True
-            else:
-                bt.logging.error('Failed to set treasury hotkey')
-                return False
-
-        except Exception as e:
-            bt.logging.error(f'Error setting treasury hotkey: {e}')
-            return False
+        return self._exec_tx_bool(
+            method_name='set_treasury_hotkey',
+            args={'new_hotkey': new_hotkey},
+            keypair=wallet.coldkey,
+            label=f'Setting treasury hotkey to {new_hotkey}',
+            gas_limit=DEFAULT_GAS_LIMIT,
+        )

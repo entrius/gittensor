@@ -40,7 +40,6 @@ from gittensor.utils.github_api_tools import (
     fetch_file_contents_with_base,
     get_merge_base_sha,
     get_pull_request_file_changes,
-    get_pull_request_maintainer_changes_requested_count,
 )
 from gittensor.validator.oss_contributions.credibility import check_eligibility
 from gittensor.validator.utils.datetime_utils import calculate_time_decay
@@ -102,12 +101,6 @@ def score_pull_request(
     file_contents = fetch_file_contents_for_pr(pr, miner_eval.github_pat)
 
     pr.base_score = calculate_base_score(pr, programming_languages, token_config, file_contents)
-
-    # Fetch review data before multiplier calculation (only for merged PRs)
-    if pr.pr_state == PRState.MERGED:
-        pr.changes_requested_count = get_pull_request_maintainer_changes_requested_count(
-            pr.repository_full_name, pr.number, miner_eval.github_pat
-        )
 
     calculate_pr_multipliers(pr, miner_eval, master_repositories)
 

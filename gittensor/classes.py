@@ -119,7 +119,7 @@ class Issue:
 
     # Issue discovery fields
     author_github_id: Optional[str] = None  # Issue author's GitHub user ID (for miner matching)
-    is_transferred: bool = False
+    state_reason: Optional[str] = None  # "COMPLETED", "NOT_PLANNED", "TRANSFERRED", or None (legacy)
     updated_at: Optional[datetime] = None
     body_or_title_edited_at: Optional[datetime] = None
     discovery_base_score: float = 0.0
@@ -129,6 +129,11 @@ class Issue:
     discovery_time_decay_multiplier: float = 1.0
     discovery_credibility_multiplier: float = 1.0
     discovery_open_issue_spam_multiplier: float = 1.0
+
+    @property
+    def is_transferred(self) -> bool:
+        """Convenience accessor. Prefer gating on `state_reason` directly in new code."""
+        return self.state_reason == 'TRANSFERRED'
 
 
 @dataclass
@@ -276,6 +281,7 @@ class PullRequest:
                     author_github_id=str(author_db_id) if author_db_id else None,
                     updated_at=parse_github_timestamp_to_cst(issue['updatedAt']) if issue.get('updatedAt') else None,
                     body_or_title_edited_at=body_or_title_edited_at,
+                    state_reason=issue.get('stateReason'),
                 )
             )
 

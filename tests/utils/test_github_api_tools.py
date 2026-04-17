@@ -32,6 +32,7 @@ get_pull_request_file_changes = github_api_tools.get_pull_request_file_changes
 get_merge_base_sha = github_api_tools.get_merge_base_sha
 find_prs_for_issue = github_api_tools.find_prs_for_issue
 execute_graphql_query = github_api_tools.execute_graphql_query
+check_github_issue_closed = github_api_tools.check_github_issue_closed
 
 
 # ============================================================================
@@ -1028,6 +1029,48 @@ class TestFindSolverFromTimeline:
         assert solver_id == 42
         assert pr_number == 14
         mock_cross_ref.assert_called_once_with('owner/repo', 12, 'fake_token')
+
+
+class TestCheckGithubIssueClosed:
+    """Test issue state checks keep API failures distinct from no-solver cases."""
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_graphql_failure_sets_solver_lookup_failed(self, mock_logging, mock_get, mock_graphql):
+        issue_response = Mock()
+        issue_response.status_code = 200
+        issue_response.json.return_value = {'state': 'closed'}
+        mock_get.return_value = issue_response
+        mock_graphql.return_value = None
+
+        result = check_github_issue_closed('owner/repo', 12, 'fake_token')
+
+        assert result == {
+            'is_closed': True,
+            'solver_github_id': None,
+            'pr_number': None,
+            'solver_lookup_failed': True,
+        }
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_closed_issue_with_no_solver_keeps_lookup_failed_false(self, mock_logging, mock_get, mock_graphql):
+        issue_response = Mock()
+        issue_response.status_code = 200
+        issue_response.json.return_value = {'state': 'closed'}
+        mock_get.return_value = issue_response
+        mock_graphql.return_value = _graphql_response([])
+
+        result = check_github_issue_closed('owner/repo', 12, 'fake_token')
+
+        assert result == {
+            'is_closed': True,
+            'solver_github_id': None,
+            'pr_number': None,
+            'solver_lookup_failed': False,
+        }
 
 
 # ============================================================================

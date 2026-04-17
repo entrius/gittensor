@@ -1199,6 +1199,52 @@ class TestLoadMinersPrsErrorResilience:
         assert any('PR #2' in w for w in warning_calls), f'Expected a warning about PR #2, got: {warning_calls}'
 
 
+class TestLoadMinersPrsFetchFailureSignal:
+    """Tests for explicit fetch-failure signaling in load_miners_prs."""
+
+    @patch('gittensor.utils.github_api_tools.get_github_graphql_query')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_empty_pr_list_keeps_fetch_failed_false(self, mock_logging, mock_graphql_query):
+        from gittensor.classes import MinerEvaluation
+        from gittensor.utils.github_api_tools import GraphQLPageResult
+
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            'data': {
+                'node': {
+                    'issues': {'totalCount': 0},
+                    'pullRequests': {
+                        'pageInfo': {'hasNextPage': False, 'endCursor': None},
+                        'nodes': [],
+                    },
+                }
+            }
+        }
+        mock_graphql_query.return_value = GraphQLPageResult(response=mock_response, page_size=100)
+
+        miner_eval = MinerEvaluation(uid=74, hotkey='test_hotkey', github_id='12345', github_pat='fake_pat')
+
+        load_miners_prs(miner_eval, {})
+
+        assert miner_eval.github_pr_fetch_failed is False
+        assert miner_eval.total_prs == 0
+
+    @patch('gittensor.utils.github_api_tools.get_github_graphql_query')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_no_graphql_response_sets_fetch_failed_true(self, mock_logging, mock_graphql_query):
+        from gittensor.classes import MinerEvaluation
+        from gittensor.utils.github_api_tools import GraphQLPageResult
+
+        mock_graphql_query.return_value = GraphQLPageResult(response=None, page_size=100)
+
+        miner_eval = MinerEvaluation(uid=74, hotkey='test_hotkey', github_id='12345', github_pat='fake_pat')
+
+        load_miners_prs(miner_eval, {})
+
+        assert miner_eval.github_pr_fetch_failed is True
+
+
 # ============================================================================
 # GraphQL Batch-Size Limit Tests
 # ============================================================================

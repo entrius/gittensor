@@ -18,6 +18,7 @@ from rich.panel import Panel
 
 from .help import StyledGroup
 from .helpers import (
+    _handle_command_error,
     _make_contract_client,
     _resolve_contract_and_network,
     console,
@@ -25,8 +26,8 @@ from .helpers import (
     print_error,
     print_network_header,
     print_success,
-    validate_issue_id,
-    validate_ss58_address,
+    require_valid_issue_id,
+    require_valid_ss58,
     with_network_contract_options,
     with_wallet_options,
 )
@@ -61,10 +62,7 @@ def admin_cancel(issue_id: int, network: str, rpc_url: str, contract: str, walle
     """
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
 
-    try:
-        validate_issue_id(issue_id)
-    except click.BadParameter as e:
-        raise click.ClickException(str(e))
+    require_valid_issue_id(issue_id)
 
     print_network_header(network_name, contract_addr)
 
@@ -94,12 +92,8 @@ def admin_cancel(issue_id: int, network: str, rpc_url: str, contract: str, walle
             print_success(f'Issue {issue_id} cancelled successfully!')
         else:
             print_error('Cancellation failed.')
-    except ImportError as e:
-        print_error(f'Missing dependency \u2014 {e}')
-        raise SystemExit(1)
     except Exception as e:
-        print_error(str(e))
-        raise SystemExit(1)
+        _handle_command_error(e)
 
 
 @admin.command('payout-issue')
@@ -123,10 +117,7 @@ def admin_payout(issue_id: int, network: str, rpc_url: str, contract: str, walle
     """
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
 
-    try:
-        validate_issue_id(issue_id)
-    except click.BadParameter as e:
-        raise click.ClickException(str(e))
+    require_valid_issue_id(issue_id)
 
     print_network_header(network_name, contract_addr)
 
@@ -156,12 +147,8 @@ def admin_payout(issue_id: int, network: str, rpc_url: str, contract: str, walle
             print_success(f'Payout successful! Amount: {format_alpha(result, 4)} ALPHA')
         else:
             print_error('Payout failed.')
-    except ImportError as e:
-        print_error(f'Missing dependency \u2014 {e}')
-        raise SystemExit(1)
     except Exception as e:
-        print_error(str(e))
-        raise SystemExit(1)
+        _handle_command_error(e)
 
 
 @admin.command('set-owner')
@@ -181,10 +168,7 @@ def admin_set_owner(new_owner: str, network: str, rpc_url: str, contract: str, w
     """
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
 
-    try:
-        validate_ss58_address(new_owner, 'new_owner')
-    except click.BadParameter as e:
-        raise click.ClickException(str(e))
+    require_valid_ss58(new_owner, 'new_owner')
 
     print_network_header(network_name, contract_addr)
 
@@ -205,12 +189,8 @@ def admin_set_owner(new_owner: str, network: str, rpc_url: str, contract: str, w
             print_success(f'Ownership transferred to {new_owner}!')
         else:
             print_error('Ownership transfer failed.')
-    except ImportError as e:
-        print_error(f'Missing dependency \u2014 {e}')
-        raise SystemExit(1)
     except Exception as e:
-        print_error(str(e))
-        raise SystemExit(1)
+        _handle_command_error(e)
 
 
 @admin.command('set-treasury')
@@ -235,10 +215,7 @@ def admin_set_treasury(
     """
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
 
-    try:
-        validate_ss58_address(new_treasury, 'new_treasury')
-    except click.BadParameter as e:
-        raise click.ClickException(str(e))
+    require_valid_ss58(new_treasury, 'new_treasury')
 
     print_network_header(network_name, contract_addr)
 
@@ -262,12 +239,8 @@ def admin_set_treasury(
             )
         else:
             print_error('Treasury hotkey update failed.')
-    except ImportError as e:
-        print_error(f'Missing dependency \u2014 {e}')
-        raise SystemExit(1)
     except Exception as e:
-        print_error(str(e))
-        raise SystemExit(1)
+        _handle_command_error(e)
 
 
 @admin.command('add-vali')
@@ -290,10 +263,7 @@ def admin_add_validator(hotkey: str, network: str, rpc_url: str, contract: str, 
     """
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
 
-    try:
-        validate_ss58_address(hotkey, 'hotkey')
-    except click.BadParameter as e:
-        raise click.ClickException(str(e))
+    require_valid_ss58(hotkey, 'hotkey')
 
     print_network_header(network_name, contract_addr)
 
@@ -317,12 +287,8 @@ def admin_add_validator(hotkey: str, network: str, rpc_url: str, contract: str, 
             console.print('[yellow]Possible reasons:[/yellow]')
             console.print('  \u2022 Caller is not the contract owner')
             console.print('  \u2022 Validator is already whitelisted')
-    except ImportError as e:
-        print_error(f'Missing dependency \u2014 {e}')
-        raise SystemExit(1)
     except Exception as e:
-        print_error(str(e))
-        raise SystemExit(1)
+        _handle_command_error(e)
 
 
 @admin.command('remove-vali')
@@ -346,10 +312,7 @@ def admin_remove_validator(
     """
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
 
-    try:
-        validate_ss58_address(hotkey, 'hotkey')
-    except click.BadParameter as e:
-        raise click.ClickException(str(e))
+    require_valid_ss58(hotkey, 'hotkey')
 
     print_network_header(network_name, contract_addr)
 
@@ -373,9 +336,5 @@ def admin_remove_validator(
             console.print('[yellow]Possible reasons:[/yellow]')
             console.print('  \u2022 Caller is not the contract owner')
             console.print('  \u2022 Validator is not in the whitelist')
-    except ImportError as e:
-        print_error(f'Missing dependency \u2014 {e}')
-        raise SystemExit(1)
     except Exception as e:
-        print_error(str(e))
-        raise SystemExit(1)
+        _handle_command_error(e)

@@ -22,6 +22,7 @@ from gittensor.classes import (
 )
 from gittensor.constants import (
     BASE_GITHUB_API_URL,
+    GITHUB_HTTP_TIMEOUT_SECONDS,
     MAINTAINER_ASSOCIATIONS,
     MAX_FILE_SIZE_BYTES,
     MAX_FILES_PER_GRAPHQL_BATCH,
@@ -87,6 +88,7 @@ QUERY = """
                   number
                   title
                   state
+                  stateReason
                   createdAt
                   closedAt
                   updatedAt
@@ -158,6 +160,11 @@ def make_headers(token: str) -> Dict[str, str]:
     }
 
 
+def make_graphql_headers(token: str) -> Dict[str, str]:
+    """Build GitHub GraphQL headers for a PAT."""
+    return {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
+
+
 def get_github_user(token: str) -> Optional[Dict[str, Any]]:
     """Fetch GitHub user data for a PAT with retry.
 
@@ -174,7 +181,7 @@ def get_github_user(token: str) -> Optional[Dict[str, Any]]:
     # Retry logic for timeout issues
     for attempt in range(6):
         try:
-            response = requests.get(f'{BASE_GITHUB_API_URL}/user', headers=headers, timeout=30)
+            response = requests.get(f'{BASE_GITHUB_API_URL}/user', headers=headers, timeout=GITHUB_HTTP_TIMEOUT_SECONDS)
             if response.status_code == 200:
                 try:
                     user_data: Dict[str, Any] = response.json()
@@ -666,7 +673,7 @@ def execute_graphql_query(
     Returns:
         Parsed JSON response data, or None if all attempts failed
     """
-    headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
+    headers = make_graphql_headers(token)
 
     for attempt in range(max_attempts):
         try:
@@ -743,7 +750,7 @@ def get_github_graphql_query(
     """
 
     max_attempts = 8
-    headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
+    headers = make_graphql_headers(token)
     limit = page_size if page_size is not None else min(100, max_prs - merged_pr_count)
 
     for attempt in range(max_attempts):

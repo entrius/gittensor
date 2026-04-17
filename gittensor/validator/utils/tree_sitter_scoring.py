@@ -338,10 +338,14 @@ def calculate_token_score_from_file_changes(
                 lang_config = programming_languages.get(ext)
                 lang_weight = lang_config.weight if lang_config else 1.0
 
-                # For non-test files in inline-test languages, check if the current
-                # file contains inline tests and downweight the entire file if so
+                # For non-test files in inline-test languages, apply test weight
+                # only when the PR itself introduced the inline tests. If the old
+                # content already contained tests, the test module is pre-existing
+                # and the tree-diff only captures actual changes — keep full weight.
                 if not is_test_file and ext in INLINE_TEST_EXTENSIONS:
-                    if has_inline_tests(new_content, ext):
+                    new_has_tests = has_inline_tests(new_content, ext)
+                    old_has_tests = has_inline_tests(old_content, ext) if old_content else False
+                    if new_has_tests and not old_has_tests:
                         is_test_file = True
                         file_weight = TEST_FILE_CONTRIBUTION_WEIGHT
 

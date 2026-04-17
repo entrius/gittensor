@@ -9,7 +9,7 @@ and miner evaluations.
 import logging
 import time
 from contextlib import contextmanager
-from typing import Any, Callable, List, TypeVar
+from typing import Callable, List, TypeVar
 
 try:
     import psycopg2
@@ -226,9 +226,8 @@ class Repository(BaseRepository):
                 )
             )
 
-        from psycopg2.extras import execute_values
-
         def _run() -> int:
+            from psycopg2.extras import execute_values
             with self.get_cursor() as cursor:
                 execute_values(
                     cursor,
@@ -282,9 +281,8 @@ class Repository(BaseRepository):
                 )
             )
 
-        from psycopg2.extras import execute_values
-
         def _run() -> int:
+            from psycopg2.extras import execute_values
             with self.get_cursor() as cursor:
                 execute_values(
                     cursor, BULK_UPSERT_ISSUES.replace('VALUES %s', 'VALUES %s'), values, template=None, page_size=100
@@ -324,10 +322,10 @@ class Repository(BaseRepository):
                 )
             )
 
-        from psycopg2.extras import execute_values
         prs = {(fc.pr_number, fc.repository_full_name) for fc in file_changes}
 
         def _run() -> int:
+            from psycopg2.extras import execute_values
             with self.get_cursor() as cursor:
                 execute_values(
                     cursor,
@@ -387,9 +385,8 @@ class Repository(BaseRepository):
             )
         ]
 
-        from psycopg2.extras import execute_values
-
         def _run() -> bool:
+            from psycopg2.extras import execute_values
             with self.get_cursor() as cursor:
                 execute_values(cursor, BULK_UPSERT_MINER_EVALUATION, eval_values)
                 self.db.commit()

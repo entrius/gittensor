@@ -1513,5 +1513,103 @@ class TestFetchFileContentsForPrMergeBase:
         assert call_args[0][2] == 'base_branch_tip_sha', 'Should fall back to base_ref_oid'
 
 
+# ============================================================================
+# Rate Limit Observability Tests
+# ============================================================================
+
+_log_rate_limit = github_api_tools._log_rate_limit
+
+
+def _make_rate_limit_response(remaining: str | None, limit: str = '5000', reset: str = '9999999999') -> Mock:
+    """Build a mock response with GitHub rate-limit headers."""
+    response = Mock()
+    headers: dict = {}
+    if remaining is not None:
+        headers['X-RateLimit-Remaining'] = remaining
+    if limit is not None:
+        headers['X-RateLimit-Limit'] = limit
+    if reset is not None:
+        headers['X-RateLimit-Reset'] = reset
+    response.headers = Mock()
+    response.headers.get = lambda key, default=None: headers.get(key, default)
+    return response
+
+
+class TestLogRateLimit:
+    """Tests for _log_rate_limit helper."""
+
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_debug_log_when_remaining_is_high(self, mock_logging):
+        """Logs at debug level when remaining is above the low threshold."""
+        response = _make_rate_limit_response(remaining='4000')
+        _log_rate_limit(response, 'test')
+        mock_logging.debug.assert_called_once()
+        mock_logging.warning.assert_not_called()
+        assert '4000/5000' in mock_logging.debug.call_args[0][0]
+
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_warning_log_when_remaining_is_low(self, mock_logging):
+        """Logs at warning level when remaining is below _LOW_RATE_LIMIT_THRESHOLD."""
+        response = _make_rate_limit_response(remaining='50')
+        _log_rate_limit(response, 'test')
+        mock_logging.warning.assert_called_once()
+        mock_logging.debug.assert_not_called()
+        assert '50/5000' in mock_logging.warning.call_args[0][0]
+
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_warning_at_exact_threshold_minus_one(self, mock_logging):
+        """Remaining of 199 (below 200 threshold) triggers a warning."""
+        response = _make_rate_limit_response(remaining='199')
+        _log_rate_limit(response)
+        mock_logging.warning.assert_called_once()
+
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_debug_at_exact_threshold(self, mock_logging):
+        """Remaining of exactly 200 (threshold) does not trigger a warning."""
+        response = _make_rate_limit_response(remaining='200')
+        _log_rate_limit(response)
+        mock_logging.debug.assert_called_once()
+        mock_logging.warning.assert_not_called()
+
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_no_log_when_header_absent(self, mock_logging):
+        """No log is emitted when the X-RateLimit-Remaining header is missing."""
+        response = _make_rate_limit_response(remaining=None)
+        _log_rate_limit(response, 'test')
+        mock_logging.debug.assert_not_called()
+        mock_logging.warning.assert_not_called()
+
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_no_log_when_header_is_mock(self, mock_logging):
+        """No crash or log when response.headers.get returns a non-string (e.g. Mock)."""
+        response = Mock()  # headers.get returns a Mock — mirrors test fixtures
+        _log_rate_limit(response, 'test')
+        mock_logging.debug.assert_not_called()
+        mock_logging.warning.assert_not_called()
+
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_context_label_included_in_message(self, mock_logging):
+        """Context label appears in the log message."""
+        response = _make_rate_limit_response(remaining='1000')
+        _log_rate_limit(response, 'my-context')
+        msg = mock_logging.debug.call_args[0][0]
+        assert '[my-context]' in msg
+
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_reset_time_included_in_message(self, mock_logging):
+        """Reset time is included in the log message when header is present."""
+        response = _make_rate_limit_response(remaining='1000', reset='1000000000')
+        _log_rate_limit(response)
+        msg = mock_logging.debug.call_args[0][0]
+        assert 'resets at' in msg
+
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_invalid_reset_header_does_not_raise(self, mock_logging):
+        """A non-numeric reset header is handled gracefully without raising."""
+        response = _make_rate_limit_response(remaining='1000', reset='not-a-timestamp')
+        _log_rate_limit(response)  # should not raise
+        mock_logging.debug.assert_called_once()
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

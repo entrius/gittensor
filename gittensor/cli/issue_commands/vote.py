@@ -26,6 +26,7 @@ from .helpers import (
     print_error,
     print_network_header,
     print_success,
+    require_valid_issue_id,
     validate_issue_id,
     validate_ss58_address,
     with_cli_behavior_options,
@@ -173,10 +174,7 @@ def val_vote_cancel_issue(
     """
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
 
-    try:
-        validate_issue_id(issue_id)
-    except click.BadParameter as e:
-        raise click.ClickException(str(e))
+    require_valid_issue_id(issue_id)
 
     print_network_header(network_name, contract_addr)
 

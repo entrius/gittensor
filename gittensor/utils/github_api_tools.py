@@ -164,6 +164,35 @@ def make_graphql_headers(token: str) -> Dict[str, str]:
     return {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
 
 
+_LOW_RATE_LIMIT_THRESHOLD = 200
+
+
+def _log_rate_limit(response: requests.Response, context: str = '') -> None:
+    """Log GitHub API rate limit from response headers; warn when quota is low."""
+    remaining = response.headers.get('X-RateLimit-Remaining')
+    limit = response.headers.get('X-RateLimit-Limit')
+    reset = response.headers.get('X-RateLimit-Reset')
+    if remaining is None:
+        return
+    try:
+        remaining_int = int(remaining)
+    except (ValueError, TypeError):
+        return
+    reset_str = ''
+    if reset:
+        try:
+            reset_dt = datetime.fromtimestamp(int(reset), tz=timezone.utc)
+            reset_str = f', resets at {reset_dt.strftime("%H:%M:%S UTC")}'
+        except (ValueError, OSError):
+            pass
+    label = f' [{context}]' if context else ''
+    msg = f'GitHub rate limit{label}: {remaining}/{limit} remaining{reset_str}'
+    if remaining_int < _LOW_RATE_LIMIT_THRESHOLD:
+        bt.logging.warning(msg)
+    else:
+        bt.logging.debug(msg)
+
+
 def get_github_user(token: str) -> Optional[Dict[str, Any]]:
     """Fetch GitHub user data for a PAT with retry.
 
@@ -182,6 +211,7 @@ def get_github_user(token: str) -> Optional[Dict[str, Any]]:
         try:
             response = requests.get(f'{BASE_GITHUB_API_URL}/user', headers=headers, timeout=GITHUB_HTTP_TIMEOUT_SECONDS)
             if response.status_code == 200:
+                _log_rate_limit(response, '/user')
                 try:
                     user_data: Dict[str, Any] = response.json()
                 except Exception as e:  # pragma: no cover
@@ -252,6 +282,7 @@ def get_merge_base_sha(repository: str, base_sha: str, head_sha: str, token: str
             )
 
             if response.status_code == 200:
+                _log_rate_limit(response, f'compare/{repository}')
                 data = response.json()
                 merge_base = (data.get('merge_base_commit') or {}).get('sha')
                 if merge_base:
@@ -315,6 +346,7 @@ def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -
             )
 
             if response.status_code == 200:
+                _log_rate_limit(response, f'PR#{pr_number} files/{repository}')
                 file_diffs = response.json()
                 all_file_diffs.extend(file_diffs)
 
@@ -399,6 +431,7 @@ def get_pull_request_maintainer_changes_requested_count(repository: str, pr_numb
                 timeout=15,
             )
             if response.status_code == 200:
+                _log_rate_limit(response, f'PR#{pr_number} reviews/{repository}')
                 reviews = response.json()
                 all_reviews.extend(reviews)
 
@@ -684,6 +717,7 @@ def execute_graphql_query(
             )
 
             if response.status_code == 200:
+                _log_rate_limit(response, 'graphql')
                 return response.json()
 
             # Retry on failure
@@ -767,6 +801,7 @@ def get_github_graphql_query(
             )
 
             if response.status_code == 200:
+                _log_rate_limit(response, 'graphql/prs')
                 # Check for RESOURCE_LIMITS_EXCEEDED in response body (GitHub returns 200 with errors)
                 try:
                     data = response.json()
@@ -1161,6 +1196,7 @@ def check_github_issue_closed(repo: str, issue_number: int, token: str) -> Optio
             bt.logging.warning(f'GitHub API error for {repo}#{issue_number}: {response.status_code}')
             return None
 
+        _log_rate_limit(response, f'issues/{repo}#{issue_number}')
         data = response.json()
 
         if data.get('state') != 'closed':

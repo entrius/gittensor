@@ -4,28 +4,54 @@ on:
   pull_request:
     branches: [main, test]
 
+env:
+  PYTHON_VERSION: "3.12"
+
 jobs:
+  # If PR is from the same repo, auto-commit lint fixes
   pre-commit:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    if: github.event.pull_request.head.repo.full_name == github.repository
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.head_ref }}
           repository: ${{ github.event.pull_request.head.repo.full_name }}
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
+      - uses: astral-sh/setup-uv@v4
+      - run: uv python install ${{ env.PYTHON_VERSION }}
+      - run: uv sync --extra dev
 
-      - name: Set up Python
-        run: uv python install 3.12
+      - name: Run pre-commit with auto-fixes
+        run: uv run pre-commit run --all-files || true
 
-      - name: Install dependencies
-        run: uv sync --extra dev
+      - uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "style: auto-format with pre-commit"
+
+      - name: Re-run pre-commit to verify clean
+        run: uv run pre-commit run --all-files
+
+      - name: Run pyright
+        run: SKIP=pytest uv run pre-commit run --all-files --hook-stage pre-push
+
+  # If PR is from a fork, fail on any diff
+  pre-commit-fork:
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.head.repo.full_name != github.repository
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+
+      - uses: astral-sh/setup-uv@v4
+      - run: uv python install ${{ env.PYTHON_VERSION }}
+      - run: uv sync --extra dev
 
       - name: Run pre-commit checks
-        id: pre-commit
         run: uv run pre-commit run --all-files --show-diff-on-failure
 
       - name: Run pyright

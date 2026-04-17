@@ -200,6 +200,7 @@ async def _scan_repo(
             author_login=user.get('login'),
             author_github_id=author_github_id,
             state='CLOSED',
+            state_reason=(issue_raw.get('state_reason') or '').upper() or None,
         )
 
         if solver_id is not None:

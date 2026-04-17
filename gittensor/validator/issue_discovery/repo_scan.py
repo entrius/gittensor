@@ -114,6 +114,44 @@ async def scan_closed_issues(
     return result
 
 
+def _extract_state_reason(issue_raw: dict) -> Optional[str]:
+    """Normalize REST ``state_reason`` to uppercase or None for legacy data."""
+    raw = issue_raw.get('state_reason')
+    if not raw:
+        return None
+    return raw.upper()
+
+
+def _build_scan_issue(
+    issue_raw: dict,
+    repo_name: str,
+    pr_number: int = 0,
+    closed_at: Optional[datetime] = None,
+) -> Tuple[str, Issue]:
+    """Build an Issue object from REST data and return (author_github_id, issue).
+
+    Centralises the conversion from raw REST dict to Issue so both the solver-lookup
+    path and the direct-classification path share the same construction logic.
+    """
+    user = issue_raw.get('user') or {}
+    author_github_id = str(user.get('id', ''))
+
+    issue = Issue(
+        number=issue_raw['number'],
+        pr_number=pr_number,
+        repository_full_name=repo_name,
+        title=issue_raw.get('title', ''),
+        created_at=_parse_iso(issue_raw.get('created_at')),
+        closed_at=closed_at,
+        author_login=user.get('login'),
+        author_github_id=author_github_id,
+        state='CLOSED',
+        state_reason=_extract_state_reason(issue_raw),
+    )
+
+    return author_github_id, issue
+
+
 async def _scan_repo(
     repo_name: str,
     lookback_date: str,
@@ -133,9 +171,16 @@ async def _scan_repo(
     # Pre-parse the cutoff once so we can drop stale issues inside the loop.
     lookback_dt = datetime.fromisoformat(lookback_date.replace('Z', '+00:00'))
 
-    # Filter to miner-authored issues not already known
-    unmatched: List[dict] = []
+    # -------------------------------------------------------------------
+    # Phase 1: filter to miner-authored issues not already known, then
+    # partition by state_reason.  Non-COMPLETED issues always route to
+    # closed_count downstream (regardless of solver), so performing an
+    # expensive GraphQL solver lookup for them wastes the global budget.
+    # -------------------------------------------------------------------
+    completed_unmatched: List[dict] = []
+    non_completed_unmatched: List[dict] = []
     stale_count = 0
+
     for issue_raw in closed_issues:
         user = issue_raw.get('user') or {}
         author_id = str(user.get('id', ''))
@@ -154,18 +199,50 @@ async def _scan_repo(
             stale_count += 1
             continue
 
-        unmatched.append(issue_raw)
+        state_reason = _extract_state_reason(issue_raw)
+        if state_reason == 'COMPLETED':
+            completed_unmatched.append(issue_raw)
+        else:
+            non_completed_unmatched.append(issue_raw)
 
     if stale_count:
         bt.logging.debug(f'{repo_name}: dropped {stale_count} issues closed before lookback window')
 
-    if not unmatched:
+    total_unmatched = len(completed_unmatched) + len(non_completed_unmatched)
+    if total_unmatched == 0:
         return 0
 
-    bt.logging.info(f'{repo_name}: {len(unmatched)} unmatched miner-authored closed issues')
+    # -------------------------------------------------------------------
+    # Phase 2: classify non-COMPLETED issues directly (no solver needed).
+    # These always end up as closed_count in _merge_scan_issues, so we
+    # can skip the GraphQL call entirely and save the budget.
+    # -------------------------------------------------------------------
+    for issue_raw in non_completed_unmatched:
+        author_github_id, issue = _build_scan_issue(issue_raw, repo_name, closed_at=None)
+        result.setdefault(author_github_id, []).append(issue)
 
-    # Resolve unmatched issues with solver lookups (capped)
-    capped = unmatched[:lookup_cap]
+    if non_completed_unmatched:
+        bt.logging.info(
+            f'{repo_name}: classified {len(non_completed_unmatched)} non-COMPLETED issues directly '
+            f'(saved {len(non_completed_unmatched)} solver lookups)'
+        )
+
+    if not completed_unmatched:
+        bt.logging.debug(f'{repo_name}: {total_unmatched} unmatched issues, 0 COMPLETED — no lookups needed')
+        return 0
+
+    bt.logging.info(
+        f'{repo_name}: {len(completed_unmatched)} COMPLETED issues need solver lookup '
+        f'(out of {total_unmatched} total unmatched)'
+    )
+
+    # -------------------------------------------------------------------
+    # Phase 3: resolve COMPLETED issues with solver lookups (capped).
+    # Only these issues need the expensive GraphQL call to distinguish
+    # "solved by non-miner PR" (positive cred) from "closed without PR"
+    # (negative cred).
+    # -------------------------------------------------------------------
+    capped = completed_unmatched[:lookup_cap]
     semaphore = asyncio.Semaphore(REPO_SCAN_CONCURRENCY)
 
     async def _lookup(issue_raw: dict) -> Tuple[dict, Optional[int], Optional[int]]:
@@ -188,28 +265,17 @@ async def _scan_repo(
 
         assert isinstance(item, tuple)
         issue_raw, solver_id, pr_number = item
-        user = issue_raw.get('user') or {}
-        author_github_id = str(user.get('id', ''))
-
-        issue = Issue(
-            number=issue_raw['number'],
-            pr_number=pr_number or 0,
-            repository_full_name=repo_name,
-            title=issue_raw.get('title', ''),
-            created_at=_parse_iso(issue_raw.get('created_at')),
-            author_login=user.get('login'),
-            author_github_id=author_github_id,
-            state='CLOSED',
-            state_reason=(issue_raw.get('state_reason') or '').upper() or None,
-        )
 
         if solver_id is not None:
             # Case 2: solved by non-miner PR → positive credibility
-            issue.closed_at = _parse_iso(issue_raw.get('closed_at'))
+            closed_at_dt = _parse_iso(issue_raw.get('closed_at'))
         else:
             # Case 3: closed without PR → negative credibility
-            issue.closed_at = None
+            closed_at_dt = None
 
+        author_github_id, issue = _build_scan_issue(
+            issue_raw, repo_name, pr_number=pr_number or 0, closed_at=closed_at_dt
+        )
         result.setdefault(author_github_id, []).append(issue)
 
     return len(capped)

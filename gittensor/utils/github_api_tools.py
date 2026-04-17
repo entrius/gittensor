@@ -1210,37 +1210,40 @@ def _fetch_file_contents_with_base_batch(
         Dict mapping file paths to FileContentPair (old_content, new_content)
     """
     file_fields = []
+    var_declarations = []
+    variables: Dict[str, str] = {'owner': repo_owner, 'name': repo_name}
+
     for i, fc in enumerate(batch_changes):
-        # Renames need the old path for the base version
         base_path = fc.previous_filename if fc.previous_filename else fc.filename
         head_path = fc.filename
 
-        # New files have no base version to fetch
         if fc.status != 'added':
-            base_expr = f'{base_sha}:{base_path}'
+            var_name = f'base{i}'
+            var_declarations.append(f'${var_name}: String!')
+            variables[var_name] = f'{base_sha}:{base_path}'
             file_fields.append(
-                f'base{i}: object(expression: "{base_expr}") {{ ... on Blob {{ text byteSize isBinary }} }}'
+                f'{var_name}: object(expression: ${var_name}) {{ ... on Blob {{ text byteSize isBinary }} }}'
             )
 
-        # Deleted files have no head version to fetch
         if fc.status != 'removed':
-            head_expr = f'{head_sha}:{head_path}'
+            var_name = f'head{i}'
+            var_declarations.append(f'${var_name}: String!')
+            variables[var_name] = f'{head_sha}:{head_path}'
             file_fields.append(
-                f'head{i}: object(expression: "{head_expr}") {{ ... on Blob {{ text byteSize isBinary }} }}'
+                f'{var_name}: object(expression: ${var_name}) {{ ... on Blob {{ text byteSize isBinary }} }}'
             )
 
     if not file_fields:
         return {}
 
+    extra_vars = ', '.join(var_declarations)
     query = f"""
-        query($owner: String!, $name: String!) {{
+        query($owner: String!, $name: String!, {extra_vars}) {{
             repository(owner: $owner, name: $name) {{
                 {' '.join(file_fields)}
             }}
         }}
     """
-
-    variables = {'owner': repo_owner, 'name': repo_name}
 
     data = execute_graphql_query(query, variables, token)
     if data is None:

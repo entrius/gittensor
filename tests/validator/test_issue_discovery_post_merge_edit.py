@@ -35,6 +35,7 @@ def _make_issue(
         closed_at=MERGED_AT,
         author_login='alice',
         state='CLOSED',
+        state_reason='COMPLETED',
         author_github_id=DISCOVERER_GH,
         updated_at=updated_at,
         body_or_title_edited_at=body_or_title_edited_at,

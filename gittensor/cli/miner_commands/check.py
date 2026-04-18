@@ -120,6 +120,7 @@ def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, json_mode)
         click.echo(
             json.dumps(
                 {
+                    'success': valid_count > 0,
                     'total_validators': len(results),
                     'valid': valid_count,
                     'invalid': len(results) - valid_count - no_response_count,

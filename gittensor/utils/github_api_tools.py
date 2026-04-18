@@ -1198,6 +1198,25 @@ class FileContentPair:
     new_content: Optional[str]  # None for deleted files
 
 
+def _escape_graphql_string(value: str) -> str:
+    """Escape special characters for safe interpolation inside a GraphQL double-quoted string.
+
+    File paths may legitimately contain backslashes, double quotes, or newlines,
+    all of which break the ``object(expression: "...")`` syntax if unescaped.
+    """
+    return value.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n').replace('\r', '\\r')
+
+
+def _build_blob_field(alias: str, sha: str, path: str) -> str:
+    """Build a GraphQL ``object(expression: ...)`` field for fetching blob content.
+
+    Escapes the ``sha:path`` expression so that special characters in file paths
+    cannot break out of the GraphQL string literal or corrupt the query.
+    """
+    escaped_expr = _escape_graphql_string(f'{sha}:{path}')
+    return f'{alias}: object(expression: "{escaped_expr}") {{ ... on Blob {{ text byteSize isBinary }} }}'
+
+
 def _fetch_file_contents_with_base_batch(
     repo_owner: str,
     repo_name: str,
@@ -1227,17 +1246,11 @@ def _fetch_file_contents_with_base_batch(
 
         # New files have no base version to fetch
         if fc.status != 'added':
-            base_expr = f'{base_sha}:{base_path}'
-            file_fields.append(
-                f'base{i}: object(expression: "{base_expr}") {{ ... on Blob {{ text byteSize isBinary }} }}'
-            )
+            file_fields.append(_build_blob_field(f'base{i}', base_sha, base_path))
 
         # Deleted files have no head version to fetch
         if fc.status != 'removed':
-            head_expr = f'{head_sha}:{head_path}'
-            file_fields.append(
-                f'head{i}: object(expression: "{head_expr}") {{ ... on Blob {{ text byteSize isBinary }} }}'
-            )
+            file_fields.append(_build_blob_field(f'head{i}', head_sha, head_path))
 
     if not file_fields:
         return {}

@@ -1559,5 +1559,59 @@ class TestFetchFileContentsForPrMergeBase:
         assert call_args[0][2] == 'base_branch_tip_sha', 'Should fall back to base_ref_oid'
 
 
+# ============================================================================
+# GraphQL Expression Escaping Tests
+# ============================================================================
+
+_escape_graphql_string = github_api_tools._escape_graphql_string
+_build_blob_field = github_api_tools._build_blob_field
+
+
+class TestEscapeGraphQLString:
+    """Test suite for _escape_graphql_string to prevent query-breakage from file paths."""
+
+    def test_plain_path_unchanged(self):
+        assert _escape_graphql_string('src/main.py') == 'src/main.py'
+
+    def test_escapes_double_quotes(self):
+        assert _escape_graphql_string('file"name.py') == 'file\\"name.py'
+
+    def test_escapes_backslashes(self):
+        assert _escape_graphql_string('path\\to\\file.py') == 'path\\\\to\\\\file.py'
+
+    def test_escapes_newlines(self):
+        assert _escape_graphql_string('line1\nline2') == 'line1\\nline2'
+
+    def test_escapes_carriage_returns(self):
+        assert _escape_graphql_string('line1\rline2') == 'line1\\rline2'
+
+    def test_escapes_combined_special_chars(self):
+        result = _escape_graphql_string('dir\\file"name\n.py')
+        assert result == 'dir\\\\file\\"name\\n.py'
+
+    def test_empty_string(self):
+        assert _escape_graphql_string('') == ''
+
+
+class TestBuildBlobField:
+    """Test suite for _build_blob_field GraphQL expression builder."""
+
+    def test_builds_correct_field_for_normal_path(self):
+        result = _build_blob_field('base0', 'abc123', 'src/main.py')
+        assert result == 'base0: object(expression: "abc123:src/main.py") { ... on Blob { text byteSize isBinary } }'
+
+    def test_escapes_quotes_in_path(self):
+        result = _build_blob_field('head0', 'abc123', 'file"with"quotes.py')
+        assert '"abc123:file\\"with\\"quotes.py"' in result
+
+    def test_escapes_backslash_in_path(self):
+        result = _build_blob_field('base1', 'abc123', 'windows\\path\\file.py')
+        assert '"abc123:windows\\\\path\\\\file.py"' in result
+
+    def test_alias_preserved(self):
+        result = _build_blob_field('head42', 'sha', 'f.py')
+        assert result.startswith('head42: object')
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

@@ -107,15 +107,15 @@ def miner_status(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json
 
     # 5. Fetch PRs using the existing pipeline
     with _status('[bold]Fetching pull requests...', json_mode):
-        try:
-            from gittensor.classes import MinerEvaluation
+	try:
             from gittensor.utils.github_api_tools import load_miners_prs
+            from gittensor.classes import MinerEvaluation
+            from gittensor.validator.utils.load_weights import load_master_repo_weights
 
+            master_repositories = load_master_repo_weights()
             miner_eval = MinerEvaluation(uid=uid, hotkey=wallet.hotkey.ss58_address, github_id=github_login)
-            load_miners_prs(
-                miner_evaluations={uid: miner_eval},
-                github_pats={uid: pat},
-            )
+            miner_eval.github_pat = pat
+            load_miners_prs(miner_eval, master_repositories)
         except Exception as e:
             _error(f'Failed to fetch pull requests: {e}', json_mode)
             sys.exit(1)

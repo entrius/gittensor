@@ -294,6 +294,8 @@ class PullRequest:
         timeline_nodes = pr_data.get('timelineItems', {}).get('nodes', [])
         label = timeline_nodes[0]['label']['name'].lower() if timeline_nodes else None
 
+        author_login = pr_data.get('author', {}).get('login') if pr_data.get('author') else None
+
         return cls(
             number=pr_data['number'],
             repository_full_name=repository_full_name,
@@ -301,7 +303,7 @@ class PullRequest:
             hotkey=hotkey,
             github_id=github_id,
             title=pr_data['title'],
-            author_login=pr_data['author']['login'],
+            author_login=author_login,
             merged_at=merged_at,
             created_at=parse_github_timestamp_to_cst(pr_data['createdAt']),
             pr_state=pr_state,

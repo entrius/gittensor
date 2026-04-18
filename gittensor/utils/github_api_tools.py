@@ -1199,20 +1199,10 @@ class FileContentPair:
 
 
 def _escape_graphql_string(value: str) -> str:
-    """Escape special characters for safe interpolation inside a GraphQL double-quoted string.
-
-    File paths may legitimately contain backslashes, double quotes, or newlines,
-    all of which break the ``object(expression: "...")`` syntax if unescaped.
-    """
     return value.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n').replace('\r', '\\r')
 
 
 def _build_blob_field(alias: str, sha: str, path: str) -> str:
-    """Build a GraphQL ``object(expression: ...)`` field for fetching blob content.
-
-    Escapes the ``sha:path`` expression so that special characters in file paths
-    cannot break out of the GraphQL string literal or corrupt the query.
-    """
     escaped_expr = _escape_graphql_string(f'{sha}:{path}')
     return f'{alias}: object(expression: "{escaped_expr}") {{ ... on Blob {{ text byteSize isBinary }} }}'
 

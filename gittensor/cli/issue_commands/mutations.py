@@ -18,6 +18,7 @@ from .help import StyledCommand
 from .helpers import (
     MAX_ISSUE_NUMBER,
     NETWORK_CHOICE,
+    _handle_command_error,
     _is_interactive,
     _resolve_contract_and_network,
     console,
@@ -240,11 +241,9 @@ def issue_register(
         console.print(f'[cyan]Transaction Hash:[/cyan] {result.extrinsic_hash}')
         console.print('[dim]Issue will be visible once bounty is funded via harvest_emissions()[/dim]')
 
-    except ImportError as e:
-        print_error(f'Missing dependency - {e}')
-        console.print('[dim]Install with: uv sync[/dim]')
-        raise SystemExit(1)
     except Exception as e:
+        if isinstance(e, ImportError):
+            _handle_command_error(e)
         error_msg = str(e)
         if 'ContractReverted' in error_msg:
             print_error('Contract rejected the request')
@@ -253,8 +252,7 @@ def issue_register(
             console.print('  \u2022 Bounty too low (minimum 10 ALPHA)')
             console.print('  \u2022 Caller is not the contract owner')
         else:
-            print_error(f'Error registering issue: {e}')
-        raise SystemExit(1)
+            _handle_command_error(e)
 
 
 @click.command('harvest', cls=StyledCommand)
@@ -383,16 +381,11 @@ def issue_harvest(wallet_name: str, wallet_hotkey: str, network: str, rpc_url: s
             print_error('Harvest returned None — check logs for details.')
             console.print('[dim]Run with --verbose for more information.[/dim]')
 
-    except ImportError as e:
-        print_error(f'Missing dependency — {e}')
-        console.print('[dim]Install with: uv sync[/dim]')
-        raise SystemExit(1)
     except Exception as e:
-        import traceback
-
-        print_error(f'{type(e).__name__}: {e}')
         if verbose:
+            import traceback
+
+            print_error(f'{type(e).__name__}: {e}')
             console.print(f'[dim]Full traceback:\n{traceback.format_exc()}[/dim]')
-        else:
-            console.print('[dim]Run with --verbose for full traceback.[/dim]')
-        raise SystemExit(1)
+            raise SystemExit(1)
+        _handle_command_error(e)

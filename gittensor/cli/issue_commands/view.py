@@ -28,7 +28,6 @@ from .helpers import (
     console,
     emit_error_json,
     format_alpha,
-    print_error,
     print_network_header,
     read_issues_from_contract,
     with_cli_behavior_options,
@@ -221,8 +220,7 @@ def issues_bounty_pool(network: str, rpc_url: str, contract: str, verbose: bool,
         )
         console.print(f'[dim]Sum of bounty amounts from {len(issues)} issue(s)[/dim]')
     except Exception as e:
-        print_error(str(e))
-        raise SystemExit(1)
+        _handle_command_error(e)
 
 
 @click.command('pending-harvest', cls=StyledCommand)
@@ -328,5 +326,4 @@ def admin_info(network: str, rpc_url: str, contract: str, verbose: bool, as_json
             console.print('[yellow]Could not read contract configuration.[/yellow]')
             console.print('[dim]Try running with --verbose to see debug details.[/dim]')
     except Exception as e:
-        print_error(str(e))
-        raise SystemExit(1)
+        _handle_command_error(e)

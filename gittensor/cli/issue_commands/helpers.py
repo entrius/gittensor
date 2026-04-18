@@ -224,8 +224,11 @@ def handle_exception(as_json: bool, message: str, error_type: str = 'cli_error')
 
 def _handle_command_error(e: Exception) -> None:
     """Print a terminal error message and exit. Gives a tailored message for missing dependencies."""
+    if isinstance(e, click.exceptions.Exit):
+        raise
     if isinstance(e, ImportError):
         print_error(f'Missing dependency — {e}')
+        console.print('[dim]Install with: uv sync[/dim]')
     else:
         print_error(str(e))
     raise SystemExit(1)

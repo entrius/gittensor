@@ -465,6 +465,30 @@ def validate_ss58_address(address: str, param_name: str = 'address') -> str:
     return address
 
 
+def require_valid_issue_id(value: int, param_name: str = 'issue_id') -> int:
+    """Validate an issue ID, raising ClickException on failure.
+
+    Returns:
+        The validated issue ID.
+    """
+    try:
+        return validate_issue_id(value, param_name)
+    except click.BadParameter as e:
+        raise click.ClickException(str(e))
+
+
+def require_valid_ss58(address: str, param_name: str = 'address') -> str:
+    """Validate an SS58 address, raising ClickException on failure.
+
+    Returns:
+        The validated SS58 address string.
+    """
+    try:
+        return validate_ss58_address(address, param_name)
+    except click.BadParameter as e:
+        raise click.ClickException(str(e))
+
+
 def load_config() -> Dict[str, Any]:
     """
     Load configuration from ~/.gittensor/config.json.

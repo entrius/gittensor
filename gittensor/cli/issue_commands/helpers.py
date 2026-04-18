@@ -204,12 +204,12 @@ def emit_error_json(message: str, error_type: str = 'cli_error') -> None:
     click.echo(json.dumps(payload), err=False)
 
 
-def emit_json(payload: Any, pretty: bool = True) -> None:
+def emit_json(payload: Any, pretty: bool = True, default: Optional[Callable] = str) -> None:
     """Emit a machine-readable JSON payload to stdout."""
     if pretty:
-        output = json.dumps(payload, indent=2, ensure_ascii=False)
+        output = json.dumps(payload, indent=2, ensure_ascii=False, default=default)
     else:
-        output = json.dumps(payload, separators=(',', ':'), ensure_ascii=False)
+        output = json.dumps(payload, separators=(',', ':'), ensure_ascii=False, default=default)
     click.echo(output, err=False)
 
 

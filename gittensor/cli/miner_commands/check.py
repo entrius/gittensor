@@ -132,3 +132,6 @@ def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, json_mode)
 
         console.print(table)
         console.print(f'\n[bold]{valid_count}/{len(results)} validators have a valid PAT stored.[/bold]')
+
+    if valid_count == 0:
+        sys.exit(1)

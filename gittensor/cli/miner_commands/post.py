@@ -164,7 +164,10 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_m
             table.add_row(str(r['uid']), r['hotkey'], status, r.get('rejection_reason') or '')
 
         console.print(table)
-        console.print(f'\n[bold]{accepted_count}/{len(results)} validators accepted your PAT.[/bold]')
+        console.print(f'\n[bold]{valid_count}/{len(results)} validators have a valid PAT stored.[/bold]')
+
+    if valid_count == 0:
+        sys.exit(1)
 
 
 def _validate_pat_locally(pat: str) -> bool:

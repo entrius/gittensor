@@ -222,6 +222,14 @@ def calculate_review_quality_multiplier(changes_requested_count: int) -> float:
     return multiplier
 
 
+def _get_label_multiplier(label: str) -> float:
+    """Match a PR label against known keywords using substring search"""
+    for keywords, multiplier in LABEL_MULTIPLIERS:
+        if any(kw in label for kw in keywords):
+            return multiplier
+    return 1.0
+
+
 def calculate_pr_multipliers(
     pr: PullRequest, miner_eval: MinerEvaluation, master_repositories: Dict[str, RepositoryConfig]
 ) -> None:
@@ -231,7 +239,7 @@ def calculate_pr_multipliers(
 
     pr.repo_weight_multiplier = round(repo_config.weight if repo_config else 0.01, 2)
     pr.issue_multiplier = round(calculate_issue_multiplier(pr), 2)
-    pr.label_multiplier = LABEL_MULTIPLIERS.get(pr.label, 1.0) if pr.label else 1.0
+    pr.label_multiplier = _get_label_multiplier(pr.label) if pr.label else 1.0
 
     if is_merged:
         # Spam multiplier is recalculated in finalize_miner_scores with total token score

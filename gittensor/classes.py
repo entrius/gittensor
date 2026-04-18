@@ -337,6 +337,7 @@ class MinerEvaluation:
     total_leaf_count: int = 0
     total_leaf_score: float = 0.0
     failed_reason: Optional[str] = None
+    github_pr_fetch_failed: bool = False
     evaluation_timestamp: Optional[datetime] = None
     merged_pull_requests: List[PullRequest] = field(default_factory=list)
     open_pull_requests: List[PullRequest] = field(default_factory=list)
@@ -372,6 +373,10 @@ class MinerEvaluation:
     @property
     def total_closed_prs(self) -> int:
         return len(self.closed_pull_requests)
+
+    @property
+    def should_use_cache_fallback(self) -> bool:
+        return self.github_pr_fetch_failed and self.total_prs == 0
 
     def get_all_issues(self) -> List[Issue]:
         """Aggregate all issues from all pull requests (merged, open, closed)."""

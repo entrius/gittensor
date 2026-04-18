@@ -978,6 +978,7 @@ def load_miners_prs(
         max_prs: Maximum merged PRs to fetch
     """
     bt.logging.info('*****Fetching PRs*****')
+    miner_eval.github_pr_fetch_failed = False
 
     if not miner_eval.github_pat:
         bt.logging.warning(f'UID {miner_eval.uid} has no github_pat, skipping PR fetch')
@@ -1005,20 +1006,28 @@ def load_miners_prs(
 
             if not result.response:
                 bt.logging.warning('No response from github, breaking fetch loop...')
+                miner_eval.github_pr_fetch_failed = True
                 break
 
-            data: Dict = result.response.json()
+            try:
+                data: Dict = result.response.json()
+            except Exception as e:
+                bt.logging.error(f'Failed to parse GraphQL JSON response: {e}')
+                miner_eval.github_pr_fetch_failed = True
+                break
 
             # Resource limit errors are already handled in get_github_graphql_query; break on others
             if 'errors' in data:
                 non_resource_errors = [e for e in data['errors'] if e.get('type') != 'RESOURCE_LIMITS_EXCEEDED']
                 if non_resource_errors:
                     bt.logging.error(f'GraphQL errors: {non_resource_errors}')
+                    miner_eval.github_pr_fetch_failed = True
                     break
 
             user_data: Dict = data.get('data', {}).get('node')
             if not user_data:
                 bt.logging.warning('User not found or no pull requests')
+                miner_eval.github_pr_fetch_failed = True
                 break
 
             # Extract open issue count from first page (User-level field, not paginated)
@@ -1076,6 +1085,7 @@ def load_miners_prs(
 
     except Exception as e:
         bt.logging.error(f'Unexpected error fetching PRs via GraphQL: {e}')
+        miner_eval.github_pr_fetch_failed = True
 
     bt.logging.info(
         f'Fetched {len(miner_eval.merged_pull_requests)} merged PRs, {len(miner_eval.open_pull_requests)} open PRs, '

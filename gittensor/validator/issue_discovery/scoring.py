@@ -190,6 +190,9 @@ def _collect_issues_from_prs(
     """
     # Track which PRs have already awarded a discovery score (one-issue-per-PR rule)
     pr_scored: set = set()  # (repo, pr_number)
+    # Track which issues have already been counted for each discoverer to prevent
+    # double-counting credibility when the same issue appears in multiple miners' PRs
+    issue_counted: set = set()  # (discoverer_id, repo, issue_number)
 
     for uid, evaluation in miner_evaluations.items():
         for pr in evaluation.merged_pull_requests:
@@ -206,6 +209,13 @@ def _collect_issues_from_prs(
                 discoverer_id = issue.author_github_id
                 if not discoverer_id or discoverer_id not in github_id_to_uid:
                     continue
+
+                # Skip if we've already counted this issue for this discoverer —
+                # the same issue can appear in multiple miners' closingIssuesReferences
+                issue_key = (discoverer_id, issue.repository_full_name, issue.number)
+                if issue_key in issue_counted:
+                    continue
+                issue_counted.add(issue_key)
 
                 data = discoverer_data[discoverer_id]
 

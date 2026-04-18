@@ -290,9 +290,11 @@ class PullRequest:
         last_edited_at = parse_github_timestamp_to_cst(raw_edited_at) if isinstance(raw_edited_at, str) else None
         merged_at = parse_github_timestamp_to_cst(pr_data['mergedAt']) if is_merged else None
 
-        # Extract last label from timeline events
+        # Extract last label from timeline events; guard against deleted labels
+        # (GitHub returns {"label": null} when the label was deleted from the repo)
         timeline_nodes = pr_data.get('timelineItems', {}).get('nodes', [])
-        label = timeline_nodes[0]['label']['name'].lower() if timeline_nodes else None
+        first_label = timeline_nodes[0].get('label') if timeline_nodes else None
+        label = first_label['name'].lower() if first_label else None
 
         return cls(
             number=pr_data['number'],

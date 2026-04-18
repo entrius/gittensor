@@ -35,7 +35,7 @@ class TestMinerPost:
         result = runner.invoke(cli, ['miner', 'post', '--pat', 'ghp_test123', '--wallet', 'test', '--hotkey', 'test'])
         assert result.exit_code != 0
         assert 'invalid' in result.output.lower() or 'expired' in result.output.lower()
-        mock_validate.assert_called_once_with('ghp_test123')
+        mock_validate.assert_called_once_with('ghp_test123', json_mode=False)
 
     @patch('gittensor.cli.miner_commands.post._validate_pat_locally', return_value=False)
     def test_invalid_pat_exits(self, mock_validate, runner, monkeypatch):
@@ -54,6 +54,19 @@ class TestMinerPost:
         result = runner.invoke(cli, ['m', 'post', '--help'])
         assert result.exit_code == 0
         assert 'Broadcast your GitHub PAT' in result.output
+
+    def test_json_mode_keeps_stdout_clean_when_graphql_check_fails(self, runner, monkeypatch):
+        user_resp = type('Resp', (), {'status_code': 200})()
+        gql_resp = type('Resp', (), {'status_code': 403})()
+        monkeypatch.setattr('gittensor.cli.miner_commands.post.requests.get', lambda *args, **kwargs: user_resp)
+        monkeypatch.setattr('gittensor.cli.miner_commands.post.requests.post', lambda *args, **kwargs: gql_resp)
+
+        result = runner.invoke(cli, ['miner', 'post', '--json-output', '--pat', 'ghp_test123', '--wallet', 'test', '--hotkey', 'test'])
+
+        assert result.exit_code != 0
+        output = json.loads(result.output)
+        assert output['success'] is False
+        assert 'invalid or expired' in output['error'].lower()
 
 
 class TestMinerCheck:

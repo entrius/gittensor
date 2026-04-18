@@ -72,7 +72,7 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_m
 
     # 1b. Validate PAT locally
     with _status('[bold]Validating PAT...', json_mode):
-        pat_valid = _validate_pat_locally(pat)
+        pat_valid = _validate_pat_locally(pat, json_mode=json_mode)
 
     if not pat_valid:
         _error('GitHub PAT is invalid or expired. Check your GITTENSOR_MINER_PAT.', json_mode)
@@ -167,7 +167,7 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_m
         console.print(f'\n[bold]{accepted_count}/{len(results)} validators accepted your PAT.[/bold]')
 
 
-def _validate_pat_locally(pat: str) -> bool:
+def _validate_pat_locally(pat: str, json_mode: bool = False) -> bool:
     """Validate PAT mirrors the validator-side checks: user identity + GraphQL access."""
     headers = {'Authorization': f'token {pat}', 'Accept': 'application/vnd.github.v3+json'}
     try:
@@ -185,9 +185,10 @@ def _validate_pat_locally(pat: str) -> bool:
             timeout=GITHUB_HTTP_TIMEOUT_SECONDS,
         )
         if gql_resp.status_code != 200:
-            console.print(
-                '[red]PAT lacks GraphQL API access. Fine-grained PATs need "Public Repositories (read-only)" permission.[/red]'
-            )
+            if not json_mode:
+                console.print(
+                    '[red]PAT lacks GraphQL API access. Fine-grained PATs need "Public Repositories (read-only)" permission.[/red]'
+                )
             return False
 
         return True

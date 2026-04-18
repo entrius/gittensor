@@ -223,3 +223,11 @@ class TestHandlePatCheck:
         assert result.has_pat is True
         assert result.pat_valid is False
         assert 'PAT expired' in (result.rejection_reason or '')
+
+    def test_unregistered_hotkey_rejected(self, mock_validator):
+        """handle_pat_check returns has_pat=False when hotkey is not in metagraph."""
+        synapse = _make_check_synapse('unknown_hotkey')
+        result = _run(handle_pat_check(mock_validator, synapse))
+        assert result.has_pat is False
+        assert result.pat_valid is False
+        assert 'not registered' in (result.rejection_reason or '')

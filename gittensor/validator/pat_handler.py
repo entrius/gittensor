@@ -22,7 +22,8 @@ if TYPE_CHECKING:
 
 def _get_hotkey(synapse: bt.Synapse) -> str:
     """Extract the caller's hotkey from a synapse, raising if missing."""
-    assert synapse.dendrite is not None and synapse.dendrite.hotkey is not None
+    if synapse.dendrite is None or synapse.dendrite.hotkey is None:
+        raise ValueError('Synapse dendrite or hotkey is missing')
     return synapse.dendrite.hotkey
 
 
@@ -101,6 +102,13 @@ async def priority_pat_broadcast(validator: 'Validator', synapse: PatBroadcastSy
 async def handle_pat_check(validator: 'Validator', synapse: PatCheckSynapse) -> PatCheckSynapse:
     """Check if the validator has the miner's PAT stored and re-validate it."""
     hotkey = _get_hotkey(synapse)
+
+    if hotkey not in validator.metagraph.hotkeys:
+        synapse.has_pat = False
+        synapse.pat_valid = False
+        synapse.rejection_reason = 'Hotkey not registered on subnet'
+        return synapse
+
     uid = validator.metagraph.hotkeys.index(hotkey)
     entry = pat_storage.get_pat_by_uid(uid)
 

@@ -28,7 +28,7 @@ console = Console()
 
 
 @click.group(cls=StyledAliasGroup)
-@click.version_option(version='3.2.0', prog_name='gittensor')
+@click.version_option(version='5.0.0', prog_name='gittensor')
 def cli():
     """Gittensor CLI - Manage issue bounties and validator operations"""
     pass

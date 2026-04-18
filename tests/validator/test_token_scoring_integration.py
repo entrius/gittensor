@@ -220,6 +220,30 @@ const createUser = (id: number, name: string): User => ({
         print(f'  Leaf: -{breakdown.leaf_deleted_count} = {breakdown.leaf_score:.2f}')
         print(f'  Total: {breakdown.total_score:.2f}')
 
+    def test_deletions_score_less_than_additions(self, weights):
+        """
+        Test that deleting code scores less than adding the same code.
+
+        Deletions are discounted by DELETION_SCORE_WEIGHT to reflect
+        that removing code requires less effort than writing it.
+        """
+        code = """class Calculator:
+    def add(self, a, b):
+        return a + b
+
+    def subtract(self, a, b):
+        return a - b
+"""
+        addition_breakdown = score_tree_diff(None, code, 'py', weights)
+        deletion_breakdown = score_tree_diff(code, None, 'py', weights)
+
+        assert addition_breakdown.total_score > 0
+        assert deletion_breakdown.total_score > 0
+        assert deletion_breakdown.total_score < addition_breakdown.total_score, (
+            f'Deletion score ({deletion_breakdown.total_score:.2f}) should be less than '
+            f'addition score ({addition_breakdown.total_score:.2f})'
+        )
+
     def test_unsupported_language_returns_empty(self, weights):
         """
         Test that unsupported file extensions return empty breakdown.

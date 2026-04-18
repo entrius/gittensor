@@ -11,7 +11,6 @@ Commands:
     gitt admin info
 """
 
-import json as json_mod
 from decimal import Decimal
 
 import click
@@ -27,6 +26,7 @@ from .helpers import (
     colorize_status,
     console,
     emit_error_json,
+    emit_json,
     format_alpha,
     print_error,
     print_network_header,
@@ -83,9 +83,9 @@ def issues_list(issue_id: int, network: str, rpc_url: str, contract: str, verbos
             if issue is None:
                 emit_error_json(f'Issue {issue_id} not found on-chain.', error_type='not_found')
                 raise SystemExit(1)
-            console.print(json_mod.dumps(issue, indent=2, default=str))
+            emit_json(issue)
         else:
-            console.print(json_mod.dumps(issues, indent=2, default=str))
+            emit_json(issues)
         return
 
     # Single issue detail view
@@ -204,15 +204,12 @@ def issues_bounty_pool(network: str, rpc_url: str, contract: str, verbose: bool,
         total_bounty_pool = sum(issue.get('bounty_amount', 0) for issue in issues)
 
         if as_json:
-            console.print(
-                json_mod.dumps(
-                    {
-                        'total_bounty_pool_raw': total_bounty_pool,
-                        'total_bounty_pool_alpha': format_alpha(total_bounty_pool, 4),
-                        'issue_count': len(issues),
-                    },
-                    indent=2,
-                )
+            emit_json(
+                {
+                    'total_bounty_pool_raw': total_bounty_pool,
+                    'total_bounty_pool_alpha': format_alpha(total_bounty_pool, 4),
+                    'issue_count': len(issues),
+                }
             )
             return
 
@@ -264,18 +261,15 @@ def issues_pending_harvest(network: str, rpc_url: str, contract: str, verbose: b
         pending_harvest = max(0, treasury_stake - total_bounty_pool)
 
         if as_json:
-            console.print(
-                json_mod.dumps(
-                    {
-                        'treasury_stake_raw': treasury_stake,
-                        'treasury_stake_alpha': format_alpha(treasury_stake, 4),
-                        'allocated_bounties_raw': total_bounty_pool,
-                        'allocated_bounties_alpha': format_alpha(total_bounty_pool, 4),
-                        'pending_harvest_raw': pending_harvest,
-                        'pending_harvest_alpha': format_alpha(pending_harvest, 4),
-                    },
-                    indent=2,
-                )
+            emit_json(
+                {
+                    'treasury_stake_raw': treasury_stake,
+                    'treasury_stake_alpha': format_alpha(treasury_stake, 4),
+                    'allocated_bounties_raw': total_bounty_pool,
+                    'allocated_bounties_alpha': format_alpha(total_bounty_pool, 4),
+                    'pending_harvest_raw': pending_harvest,
+                    'pending_harvest_alpha': format_alpha(pending_harvest, 4),
+                }
             )
             return
 
@@ -311,7 +305,7 @@ def admin_info(network: str, rpc_url: str, contract: str, verbose: bool, as_json
 
         if packed:
             if as_json:
-                console.print(json_mod.dumps(packed, indent=2, default=str))
+                emit_json(packed)
                 return
 
             console.print(

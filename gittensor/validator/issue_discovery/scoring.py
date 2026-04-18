@@ -190,6 +190,7 @@ def _collect_issues_from_prs(
     """
     # Track which PRs have already awarded a discovery score (one-issue-per-PR rule)
     pr_scored: set = set()  # (repo, pr_number)
+    seen_issues: set = set()  # (repo, issue_number)
 
     for uid, evaluation in miner_evaluations.items():
         for pr in evaluation.merged_pull_requests:
@@ -206,6 +207,11 @@ def _collect_issues_from_prs(
                 discoverer_id = issue.author_github_id
                 if not discoverer_id or discoverer_id not in github_id_to_uid:
                     continue
+
+                issue_key = (issue.repository_full_name, issue.number)
+                if issue_key in seen_issues:
+                    continue
+                seen_issues.add(issue_key)
 
                 data = discoverer_data[discoverer_id]
 

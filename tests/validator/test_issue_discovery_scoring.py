@@ -88,6 +88,29 @@ def test_issue_with_no_state_reason_in_pr_path_counts_as_closed(
     assert data.solved_count == 0
 
 
+def test_duplicate_issue_referenced_by_multiple_prs_counts_once(issue_factory, pr_factory):
+    issue_a = issue_factory.completed(number=42, repository_full_name='test/repo', author_github_id='1001')
+    issue_b = issue_factory.completed(number=42, repository_full_name='test/repo', author_github_id='1001')
+
+    pr_one = pr_factory.merged(number=10, uid=2, repo='test/repo')
+    pr_one.issues = [issue_a]
+    pr_two = pr_factory.merged(number=20, uid=3, repo='test/repo')
+    pr_two.issues = [issue_b]
+
+    miner_evaluations = {
+        2: MinerEvaluation(uid=2, hotkey='hotkey_2', github_id='2', merged_pull_requests=[pr_one]),
+        3: MinerEvaluation(uid=3, hotkey='hotkey_3', github_id='3', merged_pull_requests=[pr_two]),
+    }
+    discoverer_data = {'1001': _DiscovererData()}
+
+    _collect_issues_from_prs(miner_evaluations, {'1001': 1}, discoverer_data, {})
+
+    data = discoverer_data['1001']
+    assert data.solved_count == 1
+    assert data.valid_solved_count == 1
+    assert len(data.scored_issues) == 1
+
+
 # ---------------------------------------------------------------------------
 # Scan path (_merge_scan_issues)
 # ---------------------------------------------------------------------------

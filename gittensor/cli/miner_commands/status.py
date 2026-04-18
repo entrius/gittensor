@@ -108,8 +108,8 @@ def miner_status(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json
     # 5. Fetch PRs using the existing pipeline
     with _status('[bold]Fetching pull requests...', json_mode):
         try:
-            from gittensor.utils.github_api_tools import load_miners_prs
             from gittensor.classes import MinerEvaluation
+            from gittensor.utils.github_api_tools import load_miners_prs
 
             miner_eval = MinerEvaluation(uid=uid, hotkey=wallet.hotkey.ss58_address, github_id=github_login)
             load_miners_prs(
@@ -163,19 +163,23 @@ def miner_status(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json
             },
         }
         if detail:
-            result['pull_requests'] = [
-                {'number': pr.number, 'repo': pr.repository_full_name, 'title': pr.title, 'state': 'merged'}
-                for pr in miner_eval.merged_pull_requests
-            ] + [
-                {'number': pr.number, 'repo': pr.repository_full_name, 'title': pr.title, 'state': 'open'}
-                for pr in miner_eval.open_pull_requests
-            ] + [
-                {'number': pr.number, 'repo': pr.repository_full_name, 'title': pr.title, 'state': 'closed'}
-                for pr in miner_eval.closed_pull_requests
-            ]
+            result['pull_requests'] = (
+                [
+                    {'number': pr.number, 'repo': pr.repository_full_name, 'title': pr.title, 'state': 'merged'}
+                    for pr in miner_eval.merged_pull_requests
+                ]
+                + [
+                    {'number': pr.number, 'repo': pr.repository_full_name, 'title': pr.title, 'state': 'open'}
+                    for pr in miner_eval.open_pull_requests
+                ]
+                + [
+                    {'number': pr.number, 'repo': pr.repository_full_name, 'title': pr.title, 'state': 'closed'}
+                    for pr in miner_eval.closed_pull_requests
+                ]
+            )
         click.echo(json.dumps(result, indent=2))
     else:
-        console.print(f'\n[bold]Miner Status[/bold]')
+        console.print('\n[bold]Miner Status[/bold]')
         console.print(f'UID: {uid}  |  GitHub: @{github_login}  |  Network: {ws_endpoint}\n')
 
         gate_table = Table(title='Eligibility Gate')
@@ -203,8 +207,10 @@ def miner_status(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json
         if likely_eligible:
             console.print('[dim]Note: Final eligibility depends on token scoring by validators.[/dim]')
 
-        console.print(f'\n[bold]Lookback Window[/bold]')
-        console.print(f'Merged: {merged_count}  |  Open: {open_count}  |  Closed: {closed_count}  |  Unique repos: {unique_repos}')
+        console.print('\n[bold]Lookback Window[/bold]')
+        console.print(
+            f'Merged: {merged_count}  |  Open: {open_count}  |  Closed: {closed_count}  |  Unique repos: {unique_repos}'
+        )
 
         if detail and miner_eval.merged_pull_requests:
             pr_table = Table(title='Merged Pull Requests')

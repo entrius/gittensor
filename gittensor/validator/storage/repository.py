@@ -7,6 +7,7 @@ and miner evaluations.
 """
 
 import logging
+import time
 from contextlib import contextmanager
 from typing import List
 
@@ -25,6 +26,17 @@ from .queries import (
     CLEANUP_STALE_MINERS_BY_HOTKEY,
     SET_MINER,
 )
+
+try:
+    from psycopg2 import InterfaceError, OperationalError
+
+    TRANSIENT_DB_ERRORS = (OperationalError, InterfaceError)
+except Exception:  # pragma: no cover - fallback for environments without psycopg2
+    TRANSIENT_DB_ERRORS = ()
+
+TRANSIENT_DB_ERROR_NAMES = {'OperationalError', 'InterfaceError'}
+MAX_DB_RETRIES = 3
+DB_RETRY_BASE_DELAY_SECONDS = 0.5
 
 
 class BaseRepository:
@@ -49,6 +61,34 @@ class BaseRepository:
         finally:
             cursor.close()
 
+    def _is_transient_db_error(self, error: Exception) -> bool:
+        if TRANSIENT_DB_ERRORS and isinstance(error, TRANSIENT_DB_ERRORS):
+            return True
+        return error.__class__.__name__ in TRANSIENT_DB_ERROR_NAMES
+
+    def _run_with_retry(self, operation, error_context: str, failure_value):
+        for attempt in range(1, MAX_DB_RETRIES + 1):
+            try:
+                result = operation()
+                self.db.commit()
+                return result
+            except Exception as e:
+                self.db.rollback()
+                is_retryable = self._is_transient_db_error(e)
+                has_retry_left = attempt < MAX_DB_RETRIES
+
+                if is_retryable and has_retry_left:
+                    delay = DB_RETRY_BASE_DELAY_SECONDS * (2 ** (attempt - 1))
+                    self.logger.warning(
+                        f'{error_context}: transient database error on attempt {attempt}/{MAX_DB_RETRIES}: {e}. '
+                        f'Retrying in {delay:.1f}s'
+                    )
+                    time.sleep(delay)
+                    continue
+
+                self.logger.error(f'{error_context}: {e}')
+                return failure_value
+
     def execute_command(self, query: str, params: tuple = ()) -> bool:
         """
         Execute an INSERT, UPDATE, or DELETE command.
@@ -60,15 +100,13 @@ class BaseRepository:
         Returns:
             True if successful, False otherwise
         """
-        try:
+
+        def operation():
             with self.get_cursor() as cursor:
                 cursor.execute(query, params)
-                self.db.commit()
                 return True
-        except Exception as e:
-            self.db.rollback()
-            self.logger.error(f'Error executing command: {e}')
-            return False
+
+        return self._run_with_retry(operation, 'Error executing command', False)
 
     def set_entity(self, query: str, params: tuple) -> bool:
         """
@@ -194,7 +232,7 @@ class Repository(BaseRepository):
                 )
             )
 
-        try:
+        def operation():
             with self.get_cursor() as cursor:
                 # Use psycopg2's execute_values for efficient bulk insert
                 from psycopg2.extras import execute_values
@@ -206,12 +244,9 @@ class Repository(BaseRepository):
                     template=None,
                     page_size=100,
                 )
-                self.db.commit()
                 return len(values)
-        except Exception as e:
-            self.db.rollback()
-            self.logger.error(f'Error in bulk pull request storage: {e}')
-            return 0
+
+        return self._run_with_retry(operation, 'Error in bulk pull request storage', 0)
 
     def store_issues_bulk(self, issues: List[Issue]) -> int:
         """
@@ -253,7 +288,7 @@ class Repository(BaseRepository):
                 )
             )
 
-        try:
+        def operation():
             with self.get_cursor() as cursor:
                 # Use psycopg2's execute_values for efficient bulk insert
                 from psycopg2.extras import execute_values
@@ -261,12 +296,9 @@ class Repository(BaseRepository):
                 execute_values(
                     cursor, BULK_UPSERT_ISSUES.replace('VALUES %s', 'VALUES %s'), values, template=None, page_size=100
                 )
-                self.db.commit()
                 return len(values)
-        except Exception as e:
-            self.db.rollback()
-            self.logger.error(f'Error in bulk issue storage: {e}')
-            return 0
+
+        return self._run_with_retry(operation, 'Error in bulk issue storage', 0)
 
     def store_file_changes_bulk(self, file_changes: List[FileChange]) -> int:
         """
@@ -298,7 +330,9 @@ class Repository(BaseRepository):
                 )
             )
 
-        try:
+        prs = {(fc.pr_number, fc.repository_full_name) for fc in file_changes}
+
+        def operation():
             with self.get_cursor() as cursor:
                 # Use psycopg2's execute_values for efficient bulk insert
                 from psycopg2.extras import execute_values
@@ -310,13 +344,9 @@ class Repository(BaseRepository):
                     template=None,
                     page_size=100,
                 )
-                self.db.commit()
                 return len(values)
-        except Exception as e:
-            self.db.rollback()
-            prs = {(fc.pr_number, fc.repository_full_name) for fc in file_changes}
-            self.logger.error(f'Error in bulk file change storage: {e} | PRs: {prs}')
-            return 0
+
+        return self._run_with_retry(operation, f'Error in bulk file change storage | PRs: {prs}', 0)
 
     def set_miner_evaluation(self, evaluation: MinerEvaluation) -> bool:
         """
@@ -361,14 +391,11 @@ class Repository(BaseRepository):
             )
         ]
 
-        try:
+        def operation():
             with self.get_cursor() as cursor:
                 from psycopg2.extras import execute_values
 
                 execute_values(cursor, BULK_UPSERT_MINER_EVALUATION, eval_values)
-                self.db.commit()
                 return True
-        except Exception as e:
-            self.db.rollback()
-            self.logger.error(f'Error in miner evaluation storage: {e}')
-            return False
+
+        return self._run_with_retry(operation, 'Error in miner evaluation storage', False)

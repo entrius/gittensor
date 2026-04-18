@@ -204,15 +204,12 @@ def issues_bounty_pool(network: str, rpc_url: str, contract: str, verbose: bool,
         total_bounty_pool = sum(issue.get('bounty_amount', 0) for issue in issues)
 
         if as_json:
-            console.print(
-                json_mod.dumps(
-                    {
-                        'total_bounty_pool_raw': total_bounty_pool,
-                        'total_bounty_pool_alpha': format_alpha(total_bounty_pool, 4),
-                        'issue_count': len(issues),
-                    },
-                    indent=2,
-                )
+            emit_json(
+                {
+                    'total_bounty_pool_raw': total_bounty_pool,
+                    'total_bounty_pool_alpha': format_alpha(total_bounty_pool, 4),
+                    'issue_count': len(issues),
+                }
             )
             return
 

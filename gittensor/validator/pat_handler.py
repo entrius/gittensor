@@ -143,6 +143,7 @@ async def priority_pat_check(validator: 'Validator', synapse: PatCheckSynapse) -
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+
 async def _blacklist_handler(validator: 'Validator', synapse: bt.Synapse) -> Tuple[bool, str]:
     """Shared blacklist logic: reject unregistered hotkeys."""
     hotkey = _get_hotkey(synapse)
@@ -158,6 +159,7 @@ async def _priority_handler(validator: 'Validator', synapse: bt.Synapse) -> floa
         return 0.0
     uid = validator.metagraph.hotkeys.index(hotkey)
     return float(validator.metagraph.S[uid])
+
 
 def _test_pat_against_repo(pat: str) -> Optional[str]:
     """Run a test GraphQL call to verify the PAT has the access scoring requires.

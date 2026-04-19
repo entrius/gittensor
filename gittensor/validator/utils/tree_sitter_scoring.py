@@ -230,6 +230,97 @@ def score_tree_diff(
     return breakdown
 
 
+def _score_non_code_file(
+    file: 'FileChange',
+    ext: str,
+    programming_languages: Dict[str, LanguageConfig],
+    file_weight: float,
+    is_test_file: bool,
+) -> FileScoreResult:
+    """Score a non-code file (docs, config, etc.) using line-count heuristic."""
+    lines_to_score = min(file.changes, MAX_LINES_SCORED_FOR_NON_CODE_EXT)
+    lang_config = programming_languages.get(ext)
+    lang_weight = lang_config.weight if lang_config else DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT
+    return FileScoreResult(
+        filename=file.short_name,
+        score=lang_weight * lines_to_score * file_weight,
+        nodes_scored=lines_to_score,
+        total_lines=file.changes,
+        is_test_file=is_test_file,
+        scoring_method='line-count',
+    )
+
+
+def _score_code_file(
+    file: 'FileChange',
+    ext: str,
+    content_pair: Optional[FileContentPair],
+    weights: TokenConfig,
+    programming_languages: Dict[str, LanguageConfig],
+    file_weight: float,
+    is_test_file: bool,
+) -> FileScoreResult:
+    """Score a code file via tree-sitter AST diff, or return a zero-score result when skipped."""
+    if content_pair is None or content_pair.new_content is None:
+        bt.logging.debug(f'  │   {file.short_name}: skipped (binary or fetch failed)')
+        return FileScoreResult(
+            filename=file.short_name,
+            score=0.0,
+            nodes_scored=0,
+            total_lines=file.changes,
+            is_test_file=is_test_file,
+            scoring_method='skipped-binary',
+        )
+
+    if len(content_pair.new_content.encode('utf-8')) > MAX_FILE_SIZE_BYTES:
+        bt.logging.debug(f'  │   {file.short_name}: skipped (file too large, >{MAX_FILE_SIZE_BYTES} bytes)')
+        return FileScoreResult(
+            filename=file.short_name,
+            score=0.0,
+            nodes_scored=0,
+            total_lines=file.changes,
+            is_test_file=is_test_file,
+            scoring_method='skipped-large',
+        )
+
+    if not weights.supports_tree_sitter(ext):
+        bt.logging.debug(f'  │   {file.short_name}: skipped (extension .{ext} not supported)')
+        return FileScoreResult(
+            filename=file.short_name,
+            score=0.0,
+            nodes_scored=0,
+            total_lines=file.changes,
+            is_test_file=is_test_file,
+            scoring_method='skipped-unsupported',
+        )
+
+    # Tree diff scoring — compare old and new ASTs
+    file_breakdown = score_tree_diff(content_pair.old_content, content_pair.new_content, ext, weights)
+
+    lang_config = programming_languages.get(ext)
+    lang_weight = lang_config.weight if lang_config else 1.0
+
+    # For non-test files in inline-test languages, check if the current
+    # file contains inline tests and downweight the entire file if so
+    if not is_test_file and ext in INLINE_TEST_EXTENSIONS:
+        if has_inline_tests(content_pair.new_content, ext):
+            is_test_file = True
+            file_weight = TEST_FILE_CONTRIBUTION_WEIGHT
+
+    file_breakdown = file_breakdown.with_weight(lang_weight * file_weight)
+    nodes_scored = file_breakdown.added_count + file_breakdown.deleted_count
+
+    return FileScoreResult(
+        filename=file.short_name,
+        score=file_breakdown.total_score,
+        nodes_scored=nodes_scored,
+        total_lines=file.changes,
+        is_test_file=is_test_file,
+        scoring_method='tree-diff',
+        breakdown=file_breakdown,
+    )
+
+
 def calculate_token_score_from_file_changes(
     file_changes: List['FileChange'],
     file_contents: Dict[str, FileContentPair],
@@ -285,79 +376,10 @@ def calculate_token_score_from_file_changes(
                 scoring_method='skipped',
             )
         elif ext in NON_CODE_EXTENSIONS:
-            lines_to_score = min(file.changes, MAX_LINES_SCORED_FOR_NON_CODE_EXT)
-            lang_config = programming_languages.get(ext)
-            lang_weight = lang_config.weight if lang_config else DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT
-            file_result = FileScoreResult(
-                filename=file.short_name,
-                score=lang_weight * lines_to_score * file_weight,
-                nodes_scored=lines_to_score,
-                total_lines=file.changes,
-                is_test_file=is_test_file,
-                scoring_method='line-count',
-            )
+            file_result = _score_non_code_file(file, ext, programming_languages, file_weight, is_test_file)
         else:
             content_pair = file_contents.get(file.filename)
-
-            if content_pair is None or content_pair.new_content is None:
-                bt.logging.debug(f'  │   {file.short_name}: skipped (binary or fetch failed)')
-                file_result = FileScoreResult(
-                    filename=file.short_name,
-                    score=0.0,
-                    nodes_scored=0,
-                    total_lines=file.changes,
-                    is_test_file=is_test_file,
-                    scoring_method='skipped-binary',
-                )
-            elif len(content_pair.new_content.encode('utf-8')) > MAX_FILE_SIZE_BYTES:
-                bt.logging.debug(f'  │   {file.short_name}: skipped (file too large, >{MAX_FILE_SIZE_BYTES} bytes)')
-                file_result = FileScoreResult(
-                    filename=file.short_name,
-                    score=0.0,
-                    nodes_scored=0,
-                    total_lines=file.changes,
-                    is_test_file=is_test_file,
-                    scoring_method='skipped-large',
-                )
-            elif not weights.supports_tree_sitter(ext):
-                bt.logging.debug(f'  │   {file.short_name}: skipped (extension .{ext} not supported)')
-                file_result = FileScoreResult(
-                    filename=file.short_name,
-                    score=0.0,
-                    nodes_scored=0,
-                    total_lines=file.changes,
-                    is_test_file=is_test_file,
-                    scoring_method='skipped-unsupported',
-                )
-            else:
-                # Tree diff scoring - compare old and new ASTs
-                old_content = content_pair.old_content
-                new_content = content_pair.new_content
-                file_breakdown = score_tree_diff(old_content, new_content, ext, weights)
-
-                lang_config = programming_languages.get(ext)
-                lang_weight = lang_config.weight if lang_config else 1.0
-
-                # For non-test files in inline-test languages, check if the current
-                # file contains inline tests and downweight the entire file if so
-                if not is_test_file and ext in INLINE_TEST_EXTENSIONS:
-                    if has_inline_tests(new_content, ext):
-                        is_test_file = True
-                        file_weight = TEST_FILE_CONTRIBUTION_WEIGHT
-
-                combined_weight = lang_weight * file_weight
-                file_breakdown = file_breakdown.with_weight(combined_weight)
-                nodes_scored = file_breakdown.added_count + file_breakdown.deleted_count
-
-                file_result = FileScoreResult(
-                    filename=file.short_name,
-                    score=file_breakdown.total_score,
-                    nodes_scored=nodes_scored,
-                    total_lines=file.changes,
-                    is_test_file=is_test_file,
-                    scoring_method='tree-diff',
-                    breakdown=file_breakdown,
-                )
+            file_result = _score_code_file(file, ext, content_pair, weights, programming_languages, file_weight, is_test_file)
 
         # Accumulate into results and per-category totals
         file_results.append(file_result)

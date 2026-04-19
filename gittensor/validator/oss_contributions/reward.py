@@ -126,7 +126,8 @@ async def get_rewards(
 
     # Remove penalized UIDs from cached_uids so their zeroed score is written to DB
     penalized_uids = {
-        uid for uid, evaluation in miner_evaluations.items()
+        uid
+        for uid, evaluation in miner_evaluations.items()
         if evaluation.total_score == 0.0 and evaluation.failed_reason is None and uid in cached_uids
     }
     cached_uids -= penalized_uids

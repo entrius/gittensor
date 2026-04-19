@@ -20,7 +20,7 @@ import argparse
 import asyncio
 import copy
 import threading
-from traceback import format_exception, print_exception
+from traceback import format_exception
 from typing import List, Union
 
 import bittensor as bt

@@ -305,7 +305,7 @@ def calculate_pioneer_dividends(
                 else:
                     repo_contributions[repo][pr.uid] = (earliest_at, earliest_num, new_total)
 
-    for repo, uid_entries in repo_contributions.items():
+    for repo, uid_entries in sorted(repo_contributions.items()):
         sorted_uids = sorted(uid_entries.items(), key=lambda x: (x[1][0], x[1][1]))
 
         for rank_pos, (uid, _) in enumerate(sorted_uids):

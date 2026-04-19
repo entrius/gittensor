@@ -76,21 +76,29 @@ async def handle_pat_broadcast(validator: 'Validator', synapse: PatBroadcastSyna
     return synapse
 
 
-async def blacklist_pat_broadcast(validator: 'Validator', synapse: PatBroadcastSynapse) -> Tuple[bool, str]:
-    """Reject PAT broadcasts from unregistered hotkeys."""
+def _blacklist_unregistered_hotkey(validator: 'Validator', synapse: bt.Synapse) -> Tuple[bool, str]:
     hotkey = _get_hotkey(synapse)
     if hotkey not in validator.metagraph.hotkeys:
         return True, f'Hotkey {hotkey[:16]}... not registered'
     return False, 'Hotkey recognized'
 
 
-async def priority_pat_broadcast(validator: 'Validator', synapse: PatBroadcastSynapse) -> float:
-    """Prioritize PAT broadcasts by stake."""
+def _priority_for_hotkey(validator: 'Validator', synapse: bt.Synapse) -> float:
     hotkey = _get_hotkey(synapse)
     if hotkey not in validator.metagraph.hotkeys:
         return 0.0
     uid = validator.metagraph.hotkeys.index(hotkey)
     return float(validator.metagraph.S[uid])
+
+
+async def blacklist_pat_broadcast(validator: 'Validator', synapse: PatBroadcastSynapse) -> Tuple[bool, str]:
+    """Reject PAT broadcasts from unregistered hotkeys."""
+    return _blacklist_unregistered_hotkey(validator, synapse)
+
+
+async def priority_pat_broadcast(validator: 'Validator', synapse: PatBroadcastSynapse) -> float:
+    """Prioritize PAT broadcasts by stake."""
+    return _priority_for_hotkey(validator, synapse)
 
 
 # ---------------------------------------------------------------------------
@@ -138,19 +146,12 @@ async def handle_pat_check(validator: 'Validator', synapse: PatCheckSynapse) -> 
 
 async def blacklist_pat_check(validator: 'Validator', synapse: PatCheckSynapse) -> Tuple[bool, str]:
     """Reject PAT checks from unregistered hotkeys."""
-    hotkey = _get_hotkey(synapse)
-    if hotkey not in validator.metagraph.hotkeys:
-        return True, f'Hotkey {hotkey[:16]}... not registered'
-    return False, 'Hotkey recognized'
+    return _blacklist_unregistered_hotkey(validator, synapse)
 
 
 async def priority_pat_check(validator: 'Validator', synapse: PatCheckSynapse) -> float:
     """Prioritize PAT checks by stake."""
-    hotkey = _get_hotkey(synapse)
-    if hotkey not in validator.metagraph.hotkeys:
-        return 0.0
-    uid = validator.metagraph.hotkeys.index(hotkey)
-    return float(validator.metagraph.S[uid])
+    return _priority_for_hotkey(validator, synapse)
 
 
 # ---------------------------------------------------------------------------

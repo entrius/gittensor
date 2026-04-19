@@ -1,6 +1,7 @@
 # Entrius 2025
 import base64
 import fnmatch
+import json
 import os
 import time
 from dataclasses import dataclass
@@ -1227,16 +1228,16 @@ def _fetch_file_contents_with_base_batch(
 
         # New files have no base version to fetch
         if fc.status != 'added':
-            base_expr = f'{base_sha}:{base_path}'
+            base_expr = json.dumps(f'{base_sha}:{base_path}')
             file_fields.append(
-                f'base{i}: object(expression: "{base_expr}") {{ ... on Blob {{ text byteSize isBinary }} }}'
+                f'base{i}: object(expression: {base_expr}) {{ ... on Blob {{ text byteSize isBinary }} }}'
             )
 
         # Deleted files have no head version to fetch
         if fc.status != 'removed':
-            head_expr = f'{head_sha}:{head_path}'
+            head_expr = json.dumps(f'{head_sha}:{head_path}')
             file_fields.append(
-                f'head{i}: object(expression: "{head_expr}") {{ ... on Blob {{ text byteSize isBinary }} }}'
+                f'head{i}: object(expression: {head_expr}) {{ ... on Blob {{ text byteSize isBinary }} }}'
             )
 
     if not file_fields:

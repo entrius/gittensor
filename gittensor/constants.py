@@ -92,6 +92,7 @@ PIONEER_DIVIDEND_MAX_RATIO = 1.0  # Cap dividend at 1× pioneer's own earned_sco
 
 # Issue boosts
 MAX_ISSUE_CLOSE_WINDOW_DAYS = 1
+MIN_ISSUE_AGE_HOURS = 24  # minimum hours between issue creation and PR creation to qualify for issue bonus
 
 # Time decay (sigmoid curve)
 TIME_DECAY_GRACE_PERIOD_HOURS = 12  # hours before time decay begins

@@ -24,6 +24,7 @@ from gittensor.constants import (
     MAX_ISSUE_CLOSE_WINDOW_DAYS,
     MAX_OPEN_PR_THRESHOLD,
     MERGED_PR_BASE_SCORE,
+    MIN_ISSUE_AGE_HOURS,
     MIN_TOKEN_SCORE_FOR_BASE_SCORE,
     OPEN_PR_COLLATERAL_PERCENT,
     OPEN_PR_THRESHOLD_TOKEN_SCORE,
@@ -474,6 +475,15 @@ def is_valid_issue(issue: Issue, pr: PullRequest) -> bool:
     if issue.created_at and pr.created_at and issue.created_at > pr.created_at:
         bt.logging.warning(f'Skipping issue #{issue.number} - Issue was created after PR was created')
         return False
+
+    if issue.created_at and pr.created_at:
+        gap_hours = (pr.created_at - issue.created_at).total_seconds() / 3600
+        if gap_hours < MIN_ISSUE_AGE_HOURS:
+            bt.logging.warning(
+                f'Skipping issue #{issue.number} - Issue too new when PR was created '
+                f'(gap: {gap_hours:.1f}h < {MIN_ISSUE_AGE_HOURS}h)'
+            )
+            return False
 
     if is_merged and pr.merged_at:
         if pr.last_edited_at and pr.last_edited_at > pr.merged_at:

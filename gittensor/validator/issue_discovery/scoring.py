@@ -13,6 +13,7 @@ from gittensor.constants import (
     ISSUE_REVIEW_CLEAN_BONUS,
     ISSUE_REVIEW_PENALTY_RATE,
     MAX_OPEN_ISSUE_THRESHOLD,
+    MIN_ISSUE_AGE_HOURS,
     MIN_ISSUE_CREDIBILITY,
     MIN_TOKEN_SCORE_FOR_BASE_SCORE,
     MIN_VALID_SOLVED_ISSUES,
@@ -246,6 +247,17 @@ def _collect_issues_from_prs(
                 # Same-account: discoverer == solver → 0 score but credibility counts
                 if discoverer_id == pr.github_id:
                     continue
+
+                # Minimum issue age: skip discovery score if issue was too new when PR was created.
+                # Prevents creating an issue and immediately solving it to farm discovery bonuses.
+                if issue.created_at and pr.created_at:
+                    gap_hours = (pr.created_at - issue.created_at).total_seconds() / 3600
+                    if gap_hours < MIN_ISSUE_AGE_HOURS:
+                        bt.logging.info(
+                            f'Issue #{issue.number} skipped for discovery — too new when PR was created '
+                            f'(gap: {gap_hours:.1f}h < {MIN_ISSUE_AGE_HOURS}h)'
+                        )
+                        continue
 
                 # One-issue-per-PR: only the first (earliest-created) issue gets scored
                 pr_key = (pr.repository_full_name, pr.number)

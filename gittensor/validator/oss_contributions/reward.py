@@ -121,8 +121,10 @@ async def get_rewards(
     # If evaluation of miner was successful, store to cache, if api failure, fallback to previous successful evaluation if any
     cached_uids = self.store_or_use_cached_evaluation(miner_evaluations)
 
-    # Adjust scores for duplicate accounts
-    detect_and_penalize_miners_sharing_github(miner_evaluations)
+    # Adjust scores for duplicate accounts; returns penalized UIDs so they are
+    # removed from cached_uids and their zeroed scores are written to DB.
+    penalized_uids = detect_and_penalize_miners_sharing_github(miner_evaluations)
+    cached_uids -= penalized_uids
 
     # Finalize scores: apply eligibility gate, credibility, pioneer dividends, collateral
     finalize_miner_scores(miner_evaluations)

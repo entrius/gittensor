@@ -223,3 +223,18 @@ class TestHandlePatCheck:
         assert result.has_pat is True
         assert result.pat_valid is False
         assert 'PAT expired' in (result.rejection_reason or '')
+
+    def test_unregistered_hotkey_does_not_raise(self, mock_validator):
+        """Regression: hotkey deregistered between blacklist and handler must not crash.
+
+        Simulates the race where blacklist_pat_check passes but the metagraph resyncs
+        before handle_pat_check runs. Previously raised ValueError on .index().
+        """
+        mock_validator.metagraph.hotkeys = []
+
+        synapse = _make_check_synapse('hotkey_1')
+        result = _run(handle_pat_check(mock_validator, synapse))
+
+        assert result.has_pat is False
+        assert result.pat_valid is False
+        assert 'not registered' in (result.rejection_reason or '').lower()

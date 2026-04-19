@@ -20,7 +20,7 @@ import argparse
 import asyncio
 import copy
 import threading
-from traceback import print_exception
+from traceback import format_exception, print_exception
 from typing import List, Union
 
 import bittensor as bt
@@ -165,7 +165,7 @@ class BaseValidatorNeuron(BaseNeuron):
         # In case of unforeseen errors, the validator will log the error and continue operations.
         except Exception as err:
             bt.logging.error(f'Error during validation: {str(err)}')
-            bt.logging.debug(str(print_exception(type(err), err, err.__traceback__)))
+            bt.logging.debug(''.join(format_exception(type(err), err, err.__traceback__)))
 
     def run_in_background_thread(self):
         """
@@ -195,7 +195,7 @@ class BaseValidatorNeuron(BaseNeuron):
         self.run_in_background_thread()
         return self
 
-    def __exit__(self, exc_type, exc_value, traceback):
+    def __exit__(self, exc_type, exc_value, exc_tb):
         """
         Stops the validator's background operations upon exiting the context.
         This method facilitates the use of the validator in a 'with' statement.
@@ -205,15 +205,10 @@ class BaseValidatorNeuron(BaseNeuron):
                       None if the context was exited without an exception.
             exc_value: The instance of the exception that caused the context to be exited.
                        None if the context was exited without an exception.
-            traceback: A traceback object encoding the stack trace.
+            exc_tb: A traceback object encoding the stack trace.
                        None if the context was exited without an exception.
         """
-        if self.is_running:
-            bt.logging.debug('Stopping validator in background thread.')
-            self.should_exit = True
-            self.thread.join(5)
-            self.is_running = False
-            bt.logging.debug('Stopped')
+        self.stop_run_thread()
 
     def set_weights(self):
         """

@@ -107,6 +107,12 @@ async def issue_competitions(
                     f'Issue closed on GitHub: {issue_label} | solver_github_id={solver_github_id}, pr_number={pr_number}'
                 )
 
+                if github_state.get('solver_lookup_failed'):
+                    bt.logging.warning(
+                        f'Solver lookup failed (API/rate-limit error) for {issue_label} — skipping vote, will retry next round'
+                    )
+                    continue
+
                 if not solver_github_id:
                     bt.logging.info(f'No identifiable solver, voting cancel: {issue_label}')
                     success = contract_client.vote_cancel_issue(

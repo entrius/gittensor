@@ -492,8 +492,13 @@ def _resolve_pr_state(raw_state: str, merged: bool = False) -> str:
 
 def _search_issue_referencing_prs_graphql(
     repo: str, issue_number: int, token: str, open_only: bool = False
-) -> List[PRInfo]:
-    """Fetch PRs that reference an issue via GraphQL issue timeline cross-references."""
+) -> Optional[List[PRInfo]]:
+    """Fetch PRs that reference an issue via GraphQL issue timeline cross-references.
+
+    Returns None when the GraphQL query itself fails (API error / rate limit),
+    so callers can distinguish a transient lookup failure from a genuine empty result.
+    Returns [] when the query succeeds but no matching PRs are found.
+    """
     if not token:
         return []
     if issue_number < 1 or '/' not in repo:
@@ -512,7 +517,7 @@ def _search_issue_referencing_prs_graphql(
     )
     if not result:
         bt.logging.warning(f'GraphQL cross-reference query failed for {repo}#{issue_number}')
-        return []
+        return None  # signals API failure, not "no PRs found"
 
     timeline_nodes = (
         result.get('data', {}).get('repository', {}).get('issue', {}).get('timelineItems', {}).get('nodes', [])
@@ -1093,7 +1098,9 @@ def load_miners_prs(
     )
 
 
-def find_solver_from_cross_references(repo: str, issue_number: int, token: str) -> tuple[Optional[int], Optional[int]]:
+def find_solver_from_cross_references(
+    repo: str, issue_number: int, token: str
+) -> tuple[Optional[int], Optional[int], bool]:
     """Resolve solver from cross-referenced PRs on the issue timeline.
 
     This uses ``_search_issue_referencing_prs_graphql`` and then narrows to PRs
@@ -1109,14 +1116,17 @@ def find_solver_from_cross_references(repo: str, issue_number: int, token: str) 
         token: GitHub PAT used for GraphQL timeline access.
 
     Returns:
-        Tuple ``(solver_github_id, pr_number)``. Either value may be ``None``
-        when no valid closing PR is found.
+        Tuple ``(solver_github_id, pr_number, lookup_failed)``.
+        ``lookup_failed`` is True when the GraphQL query itself failed (API error /
+        rate limit) — callers should skip voting rather than treating it as no-solver.
     """
     prs = _search_issue_referencing_prs_graphql(repo, issue_number, token, open_only=False)
+    if prs is None:
+        return None, None, True  # API failure — not the same as "no solver"
     merged = [p for p in prs if p.get('state') == 'MERGED' and issue_number in p.get('closing_numbers', [])]
     bt.logging.debug(f'Found {len(merged)} verified closing PRs via GraphQL for {repo}#{issue_number}')
     if not merged:
-        return None, None
+        return None, None, False
 
     if len(merged) > 1:
         bt.logging.warning(f'Multiple closing PRs found for {repo}#{issue_number}, selecting most recent.')
@@ -1132,7 +1142,7 @@ def find_solver_from_cross_references(repo: str, issue_number: int, token: str) 
         f'Solver via GraphQL cross-reference: PR#{best.get("number")}, '
         f'solver_id={best.get("author_id")}, merged_at={best.get("merged_at")}'
     )
-    return best.get('author_id'), best.get('number')
+    return best.get('author_id'), best.get('number'), False
 
 
 def find_solver_from_timeline(repo: str, issue_number: int, token: str) -> tuple:
@@ -1142,7 +1152,8 @@ def find_solver_from_timeline(repo: str, issue_number: int, token: str) -> tuple
     issue, with baseRepository validation and closingIssuesReferences check.
 
     Returns:
-        (solver_github_id, pr_number) — either may be None if not found.
+        (solver_github_id, pr_number, lookup_failed) — lookup_failed is True when
+        the GraphQL query failed due to API errors rather than a genuine no-solver result.
     """
     bt.logging.debug(f'Finding solver for {repo}#{issue_number}')
     return find_solver_from_cross_references(repo, issue_number, token)
@@ -1177,12 +1188,13 @@ def check_github_issue_closed(repo: str, issue_number: int, token: str) -> Optio
         if data.get('state') != 'closed':
             return {'is_closed': False}
 
-        solver_github_id, pr_number = find_solver_from_timeline(repo, issue_number, token)
+        solver_github_id, pr_number, lookup_failed = find_solver_from_timeline(repo, issue_number, token)
 
         return {
             'is_closed': True,
             'solver_github_id': solver_github_id,
             'pr_number': pr_number,
+            'solver_lookup_failed': lookup_failed,
         }
 
     except Exception as e:

@@ -292,7 +292,8 @@ class PullRequest:
 
         # Extract last label from timeline events
         timeline_nodes = pr_data.get('timelineItems', {}).get('nodes', [])
-        label = timeline_nodes[0]['label']['name'].lower() if timeline_nodes else None
+        label_node = timeline_nodes[0].get('label') if timeline_nodes and timeline_nodes[0] else None
+        label = label_node['name'].lower() if label_node else None
 
         return cls(
             number=pr_data['number'],

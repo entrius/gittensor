@@ -20,6 +20,82 @@ if TYPE_CHECKING:
     from neurons.base.validator import BaseValidatorNeuron
 
 
+def _process_active_issue(
+    issue,
+    issue_label: str,
+    eligible_miners: Dict[str, str],
+    contract_client: IssueCompetitionContractClient,
+    subtensor,
+    netuid: int,
+    wallet,
+) -> tuple[str, str]:
+    """Process a single active bounty issue. Returns (action, detail).
+
+    action is one of 'vote', 'cancel', 'skip', 'error'.
+    """
+    github_state = check_github_issue_closed(issue.repository_full_name, issue.issue_number, GITTENSOR_VALIDATOR_PAT)
+
+    if github_state is None:
+        bt.logging.warning(f'Could not check GitHub state for {issue_label}')
+        return 'skip', 'github_check_failed'
+
+    if not github_state.get('is_closed'):
+        bt.logging.info(f'Issue still open on GitHub: {issue_label}')
+        return 'skip', 'still_open'
+
+    solver_github_id = github_state.get('solver_github_id')
+    pr_number = github_state.get('pr_number')
+    bt.logging.info(
+        f'Issue closed on GitHub: {issue_label} | solver_github_id={solver_github_id}, pr_number={pr_number}'
+    )
+
+    if not solver_github_id:
+        bt.logging.info(f'No identifiable solver, voting cancel: {issue_label}')
+        success = contract_client.vote_cancel_issue(
+            issue_id=issue.id,
+            reason='Issue closed without identifiable solver',
+            wallet=wallet,
+        )
+        if success:
+            bt.logging.info(f'Voted cancel (no solver): {issue_label}')
+        return ('cancel', 'no_solver') if success else ('error', 'cancel_vote_failed')
+
+    miner_hotkey = eligible_miners.get(str(solver_github_id))
+    if not miner_hotkey:
+        bt.logging.info(f'Solver {solver_github_id} not in eligible miners, voting cancel: {issue_label}')
+        success = contract_client.vote_cancel_issue(
+            issue_id=issue.id,
+            reason=f'Issue closed externally (not by eligible miner, solver: {solver_github_id})',
+            wallet=wallet,
+        )
+        if success:
+            bt.logging.info(f'Voted cancel (solver {solver_github_id} not eligible): {issue_label}')
+        return ('cancel', 'solver_ineligible') if success else ('error', 'cancel_vote_failed')
+
+    miner_coldkey = get_miner_coldkey(miner_hotkey, subtensor, netuid)
+    if not miner_coldkey:
+        bt.logging.warning(
+            f'Could not get coldkey for hotkey {miner_hotkey} (solver {solver_github_id}): {issue_label}'
+        )
+        return 'skip', 'no_coldkey'
+
+    bt.logging.info(
+        f'Voting solution: {issue_label} | PR#{pr_number}, solver={solver_github_id}, hotkey={miner_hotkey[:12]}...'
+    )
+    success = contract_client.vote_solution(
+        issue_id=issue.id,
+        solver_hotkey=miner_hotkey,
+        solver_coldkey=miner_coldkey,
+        pr_number=pr_number or 0,
+        wallet=wallet,
+    )
+    if success:
+        bt.logging.success(f'Voted solution for {issue_label}: hotkey={miner_hotkey[:12]}..., PR#{pr_number}')
+        return 'vote', 'solution_cast'
+    bt.logging.warning(f'Vote solution call failed: {issue_label}')
+    return 'error', f'vote_failed_{issue_label}'
+
+
 async def issue_competitions(
     self: 'BaseValidatorNeuron',
     miner_evaluations: Dict[int, MinerEvaluation],
@@ -86,78 +162,23 @@ async def issue_competitions(
             issue_label = (
                 f'{issue.repository_full_name}#{issue.issue_number} (id={issue.id}, bounty={bounty_display:.2f} ALPHA)'
             )
+            bt.logging.info(f'--- Processing issue: {issue_label} ---')
             try:
-                bt.logging.info(f'--- Processing issue: {issue_label} ---')
-
-                github_state = check_github_issue_closed(
-                    issue.repository_full_name, issue.issue_number, GITTENSOR_VALIDATOR_PAT
+                action, detail = _process_active_issue(
+                    issue,
+                    issue_label,
+                    eligible_miners,
+                    contract_client,
+                    self.subtensor,
+                    self.config.netuid,
+                    self.wallet,  # type: ignore[attr-defined]
                 )
-
-                if github_state is None:
-                    bt.logging.warning(f'Could not check GitHub state for {issue_label}')
-                    continue
-
-                if not github_state.get('is_closed'):
-                    bt.logging.info(f'Issue still open on GitHub: {issue_label}')
-                    continue
-
-                solver_github_id = github_state.get('solver_github_id')
-                pr_number = github_state.get('pr_number')
-                bt.logging.info(
-                    f'Issue closed on GitHub: {issue_label} | solver_github_id={solver_github_id}, pr_number={pr_number}'
-                )
-
-                if not solver_github_id:
-                    bt.logging.info(f'No identifiable solver, voting cancel: {issue_label}')
-                    success = contract_client.vote_cancel_issue(
-                        issue_id=issue.id,
-                        reason='Issue closed without identifiable solver',
-                        wallet=self.wallet,
-                    )
-                    if success:
-                        cancels_cast += 1
-                        bt.logging.info(f'Voted cancel (no solver): {issue_label}')
-                    continue
-
-                miner_hotkey = eligible_miners.get(str(solver_github_id))
-                if not miner_hotkey:
-                    bt.logging.info(f'Solver {solver_github_id} not in eligible miners, voting cancel: {issue_label}')
-                    success = contract_client.vote_cancel_issue(
-                        issue_id=issue.id,
-                        reason=f'Issue closed externally (not by eligible miner, solver: {solver_github_id})',
-                        wallet=self.wallet,
-                    )
-                    if success:
-                        cancels_cast += 1
-                        bt.logging.info(f'Voted cancel (solver {solver_github_id} not eligible): {issue_label}')
-                    continue
-
-                miner_coldkey = get_miner_coldkey(miner_hotkey, self.subtensor, self.config.netuid)  # type: ignore[attr-defined]
-                if not miner_coldkey:
-                    bt.logging.warning(
-                        f'Could not get coldkey for hotkey {miner_hotkey} (solver {solver_github_id}): {issue_label}'
-                    )
-                    continue
-
-                bt.logging.info(
-                    f'Voting solution: {issue_label} | PR#{pr_number}, solver={solver_github_id}, hotkey={miner_hotkey[:12]}...'
-                )
-                success = contract_client.vote_solution(
-                    issue_id=issue.id,
-                    solver_hotkey=miner_hotkey,
-                    solver_coldkey=miner_coldkey,
-                    pr_number=pr_number or 0,
-                    wallet=self.wallet,
-                )
-                if success:
+                if action == 'vote':
                     votes_cast += 1
-                    bt.logging.success(
-                        f'Voted solution for {issue_label}: hotkey={miner_hotkey[:12]}..., PR#{pr_number}'
-                    )
-                else:
-                    bt.logging.warning(f'Vote solution call failed: {issue_label}')
-                    errors.append(f'Vote failed for {issue_label}')
-
+                elif action == 'cancel':
+                    cancels_cast += 1
+                elif action == 'error':
+                    errors.append(detail)
             except Exception as e:
                 bt.logging.error(f'Error processing {issue_label}: {e}')
                 errors.append(f'{issue_label}: {str(e)}')

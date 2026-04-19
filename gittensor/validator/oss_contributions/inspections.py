@@ -11,7 +11,7 @@ from gittensor.constants import RECYCLE_UID
 from gittensor.validator.utils.github_validation import validate_github_credentials
 
 
-def detect_and_penalize_miners_sharing_github(miner_evaluations: Dict[int, MinerEvaluation]):
+def detect_and_penalize_miners_sharing_github(miner_evaluations: Dict[int, MinerEvaluation]) -> set[int]:
     """
     Detects miners that used the same github, duplicated across multiple uids.
     Will then penalize detected 'duplicate miners' with a score of 0.0.
@@ -19,6 +19,9 @@ def detect_and_penalize_miners_sharing_github(miner_evaluations: Dict[int, Miner
 
     Args:
         miner_evaluations (Dict[int, MinerEvaluation]): Mapping of miner UID to their MinerEvaluation.
+
+    Returns:
+        Set of penalized UIDs.
     """
 
     bt.logging.info('Now checking for duplicate users across miners...')
@@ -29,7 +32,7 @@ def detect_and_penalize_miners_sharing_github(miner_evaluations: Dict[int, Miner
         if evaluation.github_id and evaluation.github_id != '0':
             github_id_to_uids[evaluation.github_id].append(uid)
 
-    duplicate_count = 0
+    penalized_uids: set[int] = set()
     for _, uids in github_id_to_uids.items():
         if len(uids) <= 1:
             continue
@@ -38,9 +41,10 @@ def detect_and_penalize_miners_sharing_github(miner_evaluations: Dict[int, Miner
         for uid in uids:
             bt.logging.info(f'PENALTY: Zeroing score for duplicate uid {uid}')
             miner_evaluations[uid] = MinerEvaluation(uid=uid, hotkey=miner_evaluations[uid].hotkey)
-            duplicate_count += 1
+            penalized_uids.add(uid)
 
-    bt.logging.info(f'Total duplicate miners penalized: {duplicate_count}')
+    bt.logging.info(f'Total duplicate miners penalized: {len(penalized_uids)}')
+    return penalized_uids
 
 
 def validate_response_and_initialize_miner_evaluation(

@@ -124,6 +124,14 @@ async def get_rewards(
     # Adjust scores for duplicate accounts
     detect_and_penalize_miners_sharing_github(miner_evaluations)
 
+    # Remove penalized UIDs from cached_uids so their zeroed score is written to DB
+    penalized_uids = {
+        uid
+        for uid, evaluation in miner_evaluations.items()
+        if evaluation.total_score == 0.0 and evaluation.failed_reason is None and uid in cached_uids
+    }
+    cached_uids -= penalized_uids
+
     # Finalize scores: apply eligibility gate, credibility, pioneer dividends, collateral
     finalize_miner_scores(miner_evaluations)
 

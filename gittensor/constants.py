@@ -90,11 +90,11 @@ LABEL_MULTIPLIERS: dict[str, float] = {
     'improve': 1.10,
     'perf': 1.10,
     # refactors
-    'refactor': 1.00,
-    'cleanup': 1.00,
-    'polish': 1.00,
-    'debt': 1.00,
-    'chore': 1.00,
+    'refactor': 0.5,
+    'cleanup': 0.5,
+    'polish': 0.5,
+    'debt': 0.5,
+    'chore': 0.5,
 }
 
 # Pioneer dividend — rewards the first quality contributor to each repository

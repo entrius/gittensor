@@ -8,7 +8,7 @@ from typing import DefaultDict, Dict, List, Optional, Set
 
 import bittensor as bt
 
-from gittensor.constants import MAX_CODE_DENSITY_MULTIPLIER, MIN_TOKEN_SCORE_FOR_BASE_SCORE
+from gittensor.constants import MAINTAINER_ASSOCIATIONS, MAX_CODE_DENSITY_MULTIPLIER, MIN_TOKEN_SCORE_FOR_BASE_SCORE
 from gittensor.utils.utils import parse_repo_name
 
 GITHUB_DOMAIN = 'https://github.com/'
@@ -290,9 +290,17 @@ class PullRequest:
         last_edited_at = parse_github_timestamp_to_cst(raw_edited_at) if isinstance(raw_edited_at, str) else None
         merged_at = parse_github_timestamp_to_cst(pr_data['mergedAt']) if is_merged else None
 
+        changes_requested_count = 0
+        if is_merged:
+            cr_reviews = pr_data.get('changesRequestedReviews', {}).get('nodes', [])
+            changes_requested_count = sum(
+                1 for r in cr_reviews if r.get('authorAssociation') in MAINTAINER_ASSOCIATIONS
+            )
+
         # Extract last label from timeline events
         timeline_nodes = pr_data.get('timelineItems', {}).get('nodes', [])
-        label = timeline_nodes[0]['label']['name'].lower() if timeline_nodes else None
+        label_node = timeline_nodes[0].get('label') if timeline_nodes and timeline_nodes[0] else None
+        label = label_node['name'].lower() if label_node else None
 
         return cls(
             number=pr_data['number'],
@@ -315,6 +323,7 @@ class PullRequest:
             head_ref_oid=pr_data.get('headRefOid'),
             base_ref_oid=pr_data.get('baseRefOid'),
             label=label,
+            changes_requested_count=changes_requested_count,
         )
 
 

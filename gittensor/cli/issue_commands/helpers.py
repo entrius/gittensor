@@ -27,6 +27,7 @@ from gittensor.validator.issue_competitions.storage_utils import (
     decode_issue_from_storage,
     decode_packed_contract_storage,
     get_contract_child_storage_key,
+    read_contract_packed_storage_bytes,
 )
 
 # Default CLI config paths
@@ -654,38 +655,25 @@ def _read_contract_packed_storage(substrate, contract_addr: str, verbose: bool =
         Dict with owner, netuid, next_issue_id, etc. or None on error
     """
     try:
-        child_key = _get_contract_child_storage_key(substrate, contract_addr, verbose)
+        child_key = get_contract_child_storage_key(substrate, contract_addr)
         if not child_key:
             if verbose:
                 console.print('[dim]Debug: Failed to get contract child storage key[/dim]')
             return None
 
-        keys_result = substrate.rpc_request('childstate_getKeysPaged', [child_key, '0x', 100, None, None])
-        keys = keys_result.get('result', [])
-        if verbose:
-            console.print(f'[dim]Debug: Found {len(keys)} storage keys in contract[/dim]')
-
-        packed_key = next((key for key in keys if key.endswith('00000000')), None)
-        if not packed_key:
+        packed_bytes = read_contract_packed_storage_bytes(substrate, child_key)
+        if not packed_bytes:
             if verbose:
-                console.print('[dim]Debug: No packed storage key (ending in 00000000) found[/dim]')
+                console.print('[dim]Debug: No packed storage bytes returned[/dim]')
             return None
 
-        val_result = substrate.rpc_request('childstate_getStorage', [child_key, packed_key, None])
-        raw_hex = val_result.get('result')
-        if not raw_hex:
-            if verbose:
-                console.print('[dim]Debug: Failed to read packed storage value[/dim]')
-            return None
-
-        data = bytes.fromhex(raw_hex.replace('0x', ''))
         if verbose:
-            console.print(f'[dim]Debug: Packed storage data length = {len(data)} bytes[/dim]')
+            console.print(f'[dim]Debug: Packed storage data length = {len(packed_bytes)} bytes[/dim]')
 
-        packed = decode_packed_contract_storage(data)
+        packed = decode_packed_contract_storage(packed_bytes)
         if not packed:
             if verbose:
-                console.print(f'[dim]Debug: Packed storage too small ({len(data)} < 74 bytes)[/dim]')
+                console.print(f'[dim]Debug: Packed storage too small ({len(packed_bytes)} < 74 bytes)[/dim]')
             return None
 
         return {

@@ -8,6 +8,7 @@ from unittest.mock import patch
 import pytest
 from click.testing import CliRunner
 
+from gittensor import __version__
 from gittensor.cli.main import cli
 
 
@@ -67,3 +68,10 @@ class TestMinerCheck:
         result = runner.invoke(cli, ['m', 'check', '--help'])
         assert result.exit_code == 0
         assert 'Check how many validators' in result.output
+
+
+class TestCliVersion:
+    def test_version_matches_package_version(self, runner):
+        result = runner.invoke(cli, ['--version'])
+        assert result.exit_code == 0
+        assert result.output == f'gittensor, version {__version__}\n'

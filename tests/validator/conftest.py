@@ -14,7 +14,7 @@ from typing import List, Optional
 
 import pytest
 
-from gittensor.classes import PRState, PullRequest
+from gittensor.classes import Issue, PRState, PullRequest
 
 # ============================================================================
 # PR Factory Fixture
@@ -117,6 +117,76 @@ class PRBuilder:
 def pr_factory() -> PRBuilder:
     """Factory fixture for creating mock PRs."""
     return PRBuilder()
+
+
+# ============================================================================
+# Issue Factory Fixture
+# ============================================================================
+
+
+@dataclass
+class IssueBuilder:
+    """Builder for creating mock Issues with sensible defaults."""
+
+    _counter: int = 0
+
+    def create(
+        self,
+        number: Optional[int] = None,
+        repository_full_name: str = 'test/repo',
+        author_github_id: Optional[str] = '1001',
+        author_login: str = 'alice',
+        state: str = 'CLOSED',
+        state_reason: Optional[str] = 'COMPLETED',
+        pr_number: int = 1,
+        created_at: Optional[datetime] = None,
+        closed_at: Optional[datetime] = None,
+        updated_at: Optional[datetime] = None,
+    ) -> Issue:
+        """Create a mock Issue with the given parameters. Defaults to COMPLETED (solved)."""
+        if number is None:
+            self._counter += 1
+            number = self._counter
+        if created_at is None:
+            created_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        if closed_at is None:
+            closed_at = datetime(2026, 1, 2, tzinfo=timezone.utc)
+
+        return Issue(
+            number=number,
+            pr_number=pr_number,
+            repository_full_name=repository_full_name,
+            title=f'Test issue #{number}',
+            created_at=created_at,
+            closed_at=closed_at,
+            author_login=author_login,
+            author_github_id=author_github_id,
+            state=state,
+            state_reason=state_reason,
+            updated_at=updated_at,
+        )
+
+    def completed(self, **kwargs) -> Issue:
+        """Create a COMPLETED issue (solved)."""
+        return self.create(state_reason='COMPLETED', **kwargs)
+
+    def transferred(self, **kwargs) -> Issue:
+        """Create a TRANSFERRED issue (counts as closed)."""
+        return self.create(state_reason='TRANSFERRED', **kwargs)
+
+    def not_planned(self, **kwargs) -> Issue:
+        """Create a NOT_PLANNED issue (counts as closed)."""
+        return self.create(state_reason='NOT_PLANNED', **kwargs)
+
+    def no_reason(self, **kwargs) -> Issue:
+        """Create an issue with no state_reason (legacy data — counts as closed)."""
+        return self.create(state_reason=None, **kwargs)
+
+
+@pytest.fixture
+def issue_factory() -> IssueBuilder:
+    """Factory fixture for creating mock Issues."""
+    return IssueBuilder()
 
 
 # ============================================================================

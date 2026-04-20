@@ -8,7 +8,7 @@ from typing import DefaultDict, Dict, List, Optional, Set
 
 import bittensor as bt
 
-from gittensor.constants import MAX_CODE_DENSITY_MULTIPLIER, MIN_TOKEN_SCORE_FOR_BASE_SCORE
+from gittensor.constants import MAINTAINER_ASSOCIATIONS, MAX_CODE_DENSITY_MULTIPLIER, MIN_TOKEN_SCORE_FOR_BASE_SCORE
 from gittensor.utils.utils import parse_repo_name
 
 GITHUB_DOMAIN = 'https://github.com/'
@@ -32,19 +32,6 @@ class Miner:
 
     def __str__(self) -> str:
         return f'Miner(uid={self.uid}, hotkey={self.hotkey[:8]}..., github_id={self.github_id})'
-
-
-@dataclass
-class Repository:
-    """Repository information"""
-
-    name: str
-    owner: str
-    weight: float
-
-    @property
-    def full_name(self) -> str:
-        return f'{self.owner}/{self.name}'
 
 
 @dataclass
@@ -132,8 +119,9 @@ class Issue:
 
     # Issue discovery fields
     author_github_id: Optional[str] = None  # Issue author's GitHub user ID (for miner matching)
-    is_transferred: bool = False
+    state_reason: Optional[str] = None  # "COMPLETED", "NOT_PLANNED", "TRANSFERRED", or None (legacy)
     updated_at: Optional[datetime] = None
+    body_or_title_edited_at: Optional[datetime] = None
     discovery_base_score: float = 0.0
     discovery_earned_score: float = 0.0
     discovery_review_quality_multiplier: float = 1.0
@@ -141,6 +129,11 @@ class Issue:
     discovery_time_decay_multiplier: float = 1.0
     discovery_credibility_multiplier: float = 1.0
     discovery_open_issue_spam_multiplier: float = 1.0
+
+    @property
+    def is_transferred(self) -> bool:
+        """Convenience accessor. Prefer gating on `state_reason` directly in new code."""
+        return self.state_reason == 'TRANSFERRED'
 
 
 @dataclass
@@ -173,6 +166,8 @@ class PullRequest:
     time_decay_multiplier: float = 1.0
     credibility_multiplier: float = 1.0
     review_quality_multiplier: float = 1.0  # Penalty for CHANGES_REQUESTED reviews from maintainers
+    label_multiplier: float = 1.0  # Multiplier based on PR label (feature, bug, enhancement, refactor)
+    label: Optional[str] = None  # Last label set on the PR
     changes_requested_count: int = 0  # Number of maintainer CHANGES_REQUESTED reviews
     earned_score: float = 0.0
     collateral_score: float = 0.0  # For OPEN PRs: potential_score * collateral_percent
@@ -184,6 +179,7 @@ class PullRequest:
     total_nodes_scored: int = 0  # Total AST nodes scored for this PR
 
     # Token scoring breakdown (after test weight applied)
+    code_density: float = 0.0
     token_score: float = 0.0
     structural_count: int = 0
     structural_score: float = 0.0
@@ -213,6 +209,7 @@ class PullRequest:
         multipliers = {
             'repo': self.repo_weight_multiplier,
             'issue': self.issue_multiplier,
+            'label': self.label_multiplier,
             'spam': self.open_pr_spam_multiplier,
             'decay': self.time_decay_multiplier,
             'cred': self.credibility_multiplier,
@@ -246,6 +243,30 @@ class PullRequest:
                 continue
             issue_author = issue.get('author') or {}
             author_db_id = issue_author.get('databaseId')
+
+            body_edit_history = (issue.get('userContentEdits') or {}).get('nodes') or []
+            latest_body_edit_timestamp = next(
+                (edit.get('editedAt') for edit in body_edit_history if edit and edit.get('editedAt')),
+                None,
+            )
+            latest_body_edit_at = (
+                parse_github_timestamp_to_cst(latest_body_edit_timestamp) if latest_body_edit_timestamp else None
+            )
+
+            title_rename_events = (issue.get('timelineItems') or {}).get('nodes') or []
+            latest_title_rename_timestamp = next(
+                (rename.get('createdAt') for rename in title_rename_events if rename and rename.get('createdAt')),
+                None,
+            )
+            latest_title_rename_at = (
+                parse_github_timestamp_to_cst(latest_title_rename_timestamp) if latest_title_rename_timestamp else None
+            )
+
+            if latest_body_edit_at and latest_title_rename_at:
+                body_or_title_edited_at = max(latest_body_edit_at, latest_title_rename_at)
+            else:
+                body_or_title_edited_at = latest_body_edit_at or latest_title_rename_at
+
             issues.append(
                 Issue(
                     number=issue['number'],
@@ -259,6 +280,8 @@ class PullRequest:
                     author_association=issue.get('authorAssociation'),
                     author_github_id=str(author_db_id) if author_db_id else None,
                     updated_at=parse_github_timestamp_to_cst(issue['updatedAt']) if issue.get('updatedAt') else None,
+                    body_or_title_edited_at=body_or_title_edited_at,
+                    state_reason=issue.get('stateReason'),
                 )
             )
 
@@ -266,6 +289,17 @@ class PullRequest:
         raw_edited_at = pr_data.get('lastEditedAt')
         last_edited_at = parse_github_timestamp_to_cst(raw_edited_at) if isinstance(raw_edited_at, str) else None
         merged_at = parse_github_timestamp_to_cst(pr_data['mergedAt']) if is_merged else None
+
+        changes_requested_count = 0
+        if is_merged:
+            cr_reviews = pr_data.get('changesRequestedReviews', {}).get('nodes', [])
+            changes_requested_count = sum(
+                1 for r in cr_reviews if r.get('authorAssociation') in MAINTAINER_ASSOCIATIONS
+            )
+
+        # Extract last label from timeline events
+        timeline_nodes = pr_data.get('timelineItems', {}).get('nodes', [])
+        label = timeline_nodes[0]['label']['name'].lower() if timeline_nodes else None
 
         return cls(
             number=pr_data['number'],
@@ -287,6 +321,8 @@ class PullRequest:
             last_edited_at=last_edited_at,
             head_ref_oid=pr_data.get('headRefOid'),
             base_ref_oid=pr_data.get('baseRefOid'),
+            label=label,
+            changes_requested_count=changes_requested_count,
         )
 
 
@@ -309,6 +345,7 @@ class MinerEvaluation:
     total_leaf_count: int = 0
     total_leaf_score: float = 0.0
     failed_reason: Optional[str] = None
+    github_pr_fetch_failed: bool = False
     evaluation_timestamp: Optional[datetime] = None
     merged_pull_requests: List[PullRequest] = field(default_factory=list)
     open_pull_requests: List[PullRequest] = field(default_factory=list)
@@ -344,6 +381,10 @@ class MinerEvaluation:
     @property
     def total_closed_prs(self) -> int:
         return len(self.closed_pull_requests)
+
+    @property
+    def should_use_cache_fallback(self) -> bool:
+        return self.github_pr_fetch_failed and self.total_prs == 0
 
     def get_all_issues(self) -> List[Issue]:
         """Aggregate all issues from all pull requests (merged, open, closed)."""
@@ -444,19 +485,9 @@ class ScoreBreakdown:
         return self.structural_added_count + self.leaf_added_count
 
     @property
-    def added_score(self) -> float:
-        """Total score from additions."""
-        return self.structural_added_score + self.leaf_added_score
-
-    @property
     def deleted_count(self) -> int:
         """Total deleted nodes (structural + leaf)."""
         return self.structural_deleted_count + self.leaf_deleted_count
-
-    @property
-    def deleted_score(self) -> float:
-        """Total score from deletions."""
-        return self.structural_deleted_score + self.leaf_deleted_score
 
     def with_weight(self, weight: float) -> 'ScoreBreakdown':
         """Return new ScoreBreakdown with scores multiplied by weight (counts unchanged)."""
@@ -604,17 +635,6 @@ class MinerEvaluationCache:
         bt.logging.debug(f'Cache hit for UID {uid} (cached at {cached.cached_at.isoformat()})')
 
         return deepcopy(cached.evaluation)
-
-    def invalidate(self, uid: int) -> None:
-        """Remove a cached evaluation for a specific UID."""
-        if uid in self._cache:
-            del self._cache[uid]
-            bt.logging.debug(f'Invalidated cache for UID {uid}')
-
-    def clear(self) -> None:
-        """Clear all cached evaluations."""
-        self._cache.clear()
-        bt.logging.info('Cleared evaluation cache')
 
     def create_lightweight_copy(self, evaluation: 'MinerEvaluation') -> 'MinerEvaluation':
         """Create a memory-efficient copy, stripping file patches."""

@@ -209,6 +209,17 @@ def _collect_issues_from_prs(
 
                 data = discoverer_data[discoverer_id]
 
+                # Anti-gaming: only explicitly COMPLETED closures count as solved.
+                # NOT_PLANNED, TRANSFERRED, and None all route to closed_count. None is
+                # effectively unreachable inside the 35-day lookback (GitHub auto-populates
+                # stateReason on close), but treating it as not-solved is the safer default.
+                if issue.state_reason != 'COMPLETED':
+                    bt.logging.info(
+                        f'Issue #{issue.number} state_reason={issue.state_reason} — 0 score, counts as closed'
+                    )
+                    data.closed_count += 1
+                    continue
+
                 # Classify: is this issue solved (merged PR closed it)?
                 is_solved = issue.state == 'CLOSED' and pr.merged_at is not None
 
@@ -218,10 +229,11 @@ def _collect_issues_from_prs(
                     data.closed_count += 1
                     continue  # No score for unsolved issues
 
-                # Anti-gaming: post-merge edit detection
-                if issue.updated_at and pr.merged_at and issue.updated_at > pr.merged_at:
+                # Anti-gaming: post-merge body/title edit detection
+                # Not issue.updated_at: it fires on bot comments, labels, reactions.
+                if issue.body_or_title_edited_at and pr.merged_at and issue.body_or_title_edited_at > pr.merged_at:
                     bt.logging.info(
-                        f'Issue #{issue.number} edited after PR #{pr.number} merge — 0 score, counts as closed'
+                        f'Issue #{issue.number} body/title edited after PR #{pr.number} merge — 0 score, counts as closed'
                     )
                     data.solved_count -= 1
                     data.closed_count += 1
@@ -276,6 +288,12 @@ def _merge_scan_issues(
 
         data = discoverer_data[github_id]
         for issue in issues:
+            # Anti-gaming: only explicitly COMPLETED closures count as solved.
+            # NOT_PLANNED, TRANSFERRED, and None all route to closed_count.
+            if issue.state_reason != 'COMPLETED':
+                bt.logging.info(f'Scan issue #{issue.number} state_reason={issue.state_reason} — counts as closed')
+                data.closed_count += 1
+                continue
             if issue.state == 'CLOSED' and issue.closed_at:
                 # Case 2: solved by non-miner PR → positive credibility
                 data.solved_count += 1

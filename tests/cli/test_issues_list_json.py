@@ -21,8 +21,10 @@ FAKE_ISSUES = [
 def test_issues_list_json_missing_issue_returns_structured_error(cli_root, runner):
     """Requesting a nonexistent issue ID must return a structured JSON error with non-zero exit."""
     with (
-        patch('gittensor.cli.issue_commands.view.get_contract_address', return_value='5Fakeaddr'),
-        patch('gittensor.cli.issue_commands.view.resolve_network', return_value=('ws://x', 'test')),
+        patch(
+            'gittensor.cli.issue_commands.view._resolve_contract_and_network',
+            return_value=('5Fakeaddr', 'ws://x', 'test'),
+        ),
         patch('gittensor.cli.issue_commands.view.read_issues_from_contract', return_value=FAKE_ISSUES),
     ):
         result = runner.invoke(cli_root, ['issues', 'list', '--json', '--id', '999'], catch_exceptions=False)

@@ -17,6 +17,7 @@ from gittensor.classes import (
 from gittensor.constants import (
     CONTRIBUTION_SCORE_FOR_FULL_BONUS,
     EXCESSIVE_PR_PENALTY_BASE_THRESHOLD,
+    LABEL_MULTIPLIERS,
     MAINTAINER_ASSOCIATIONS,
     MAINTAINER_ISSUE_MULTIPLIER,
     MAX_CONTRIBUTION_BONUS,
@@ -39,7 +40,6 @@ from gittensor.utils.github_api_tools import (
     fetch_file_contents_with_base,
     get_merge_base_sha,
     get_pull_request_file_changes,
-    get_pull_request_maintainer_changes_requested_count,
 )
 from gittensor.validator.oss_contributions.credibility import check_eligibility
 from gittensor.validator.utils.datetime_utils import calculate_time_decay
@@ -101,12 +101,6 @@ def score_pull_request(
     file_contents = fetch_file_contents_for_pr(pr, miner_eval.github_pat)
 
     pr.base_score = calculate_base_score(pr, programming_languages, token_config, file_contents)
-
-    # Fetch review data before multiplier calculation (only for merged PRs)
-    if pr.pr_state == PRState.MERGED:
-        pr.changes_requested_count = get_pull_request_maintainer_changes_requested_count(
-            pr.repository_full_name, pr.number, miner_eval.github_pat
-        )
 
     calculate_pr_multipliers(pr, miner_eval, master_repositories)
 
@@ -180,6 +174,8 @@ def calculate_base_score(
 
     # Density-scaled base score from SOURCE category only
     source_density = source.density if source else 0.0
+    pr.code_density = round(source_density, 2)
+
     if source_token_score < MIN_TOKEN_SCORE_FOR_BASE_SCORE:
         initial_base_score = 0.0
     else:
@@ -228,6 +224,7 @@ def calculate_pr_multipliers(
 
     pr.repo_weight_multiplier = round(repo_config.weight if repo_config else 0.01, 2)
     pr.issue_multiplier = round(calculate_issue_multiplier(pr), 2)
+    pr.label_multiplier = LABEL_MULTIPLIERS.get(pr.label, 1.0) if pr.label else 1.0
 
     if is_merged:
         # Spam multiplier is recalculated in finalize_miner_scores with total token score

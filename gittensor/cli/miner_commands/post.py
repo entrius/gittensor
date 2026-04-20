@@ -14,13 +14,20 @@ import requests
 from rich.console import Console
 from rich.table import Table
 
-from gittensor.cli.miner_commands.helpers import _get_validator_axons
-from gittensor.constants import BASE_GITHUB_API_URL, NETWORK_MAP
+from gittensor.cli.miner_commands.helpers import (
+    NETUID_DEFAULT,
+    _connect_bittensor,
+    _error,
+    _load_config_value,
+    _print,
+    _require_registered,
+    _require_validator_axons,
+    _resolve_endpoint,
+    _status,
+)
+from gittensor.constants import BASE_GITHUB_API_URL, GITHUB_HTTP_TIMEOUT_SECONDS, GRAPHQL_VIEWER_QUERY
 
 console = Console()
-
-# Shared CLI options for wallet/network configuration
-NETUID_DEFAULT = 74
 
 
 @click.command()
@@ -53,8 +60,6 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_m
         gitt miner post --wallet alice --hotkey default
         gitt miner post --wallet alice --hotkey default --network test
     """
-    import bittensor as bt
-
     from gittensor.synapses import PatBroadcastSynapse
 
     # 1. Load and validate PAT locally (flag > env var > interactive prompt)
@@ -66,60 +71,35 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_m
         pat = click.prompt('Enter your GitHub Personal Access Token', hide_input=True)
 
     # 1b. Validate PAT locally
-    if not json_mode:
-        with console.status('[bold]Validating PAT...'):
-            pat_valid = _validate_pat_locally(pat)
-    else:
+    with _status('[bold]Validating PAT...', json_mode):
         pat_valid = _validate_pat_locally(pat)
 
     if not pat_valid:
         _error('GitHub PAT is invalid or expired. Check your GITTENSOR_MINER_PAT.', json_mode)
         sys.exit(1)
 
-    if not json_mode:
-        console.print('[green]PAT is valid.[/green]')
+    _print('[green]PAT is valid.[/green]', json_mode)
 
     # 2. Resolve wallet and network
     wallet_name = wallet_name or _load_config_value('wallet') or 'default'
     wallet_hotkey = wallet_hotkey or _load_config_value('hotkey') or 'default'
     ws_endpoint = _resolve_endpoint(network, rpc_url)
 
-    if not json_mode:
-        console.print(f'[dim]Wallet: {wallet_name}/{wallet_hotkey} | Network: {ws_endpoint} | Netuid: {netuid}[/dim]')
+    _print(f'[dim]Wallet: {wallet_name}/{wallet_hotkey} | Network: {ws_endpoint} | Netuid: {netuid}[/dim]', json_mode)
 
     # 3. Set up bittensor objects
-    def _connect():
-        w = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
-        st = bt.Subtensor(network=ws_endpoint)
-        mg = st.metagraph(netuid=netuid)
-        dd = bt.Dendrite(wallet=w)
-        return w, st, mg, dd
-
-    if not json_mode:
-        with console.status('[bold]Connecting to network...'):
-            try:
-                wallet, subtensor, metagraph, dendrite = _connect()
-            except Exception as e:
-                _error(f'Failed to initialize bittensor: {e}', json_mode)
-                sys.exit(1)
-    else:
+    with _status('[bold]Connecting to network...', json_mode):
         try:
-            wallet, subtensor, metagraph, dendrite = _connect()
+            wallet, subtensor, metagraph, dendrite = _connect_bittensor(wallet_name, wallet_hotkey, ws_endpoint, netuid)
         except Exception as e:
             _error(f'Failed to initialize bittensor: {e}', json_mode)
             sys.exit(1)
 
     # Verify miner is registered
-    if wallet.hotkey.ss58_address not in metagraph.hotkeys:
-        _error(f'Hotkey {wallet.hotkey.ss58_address[:16]}... is not registered on subnet {netuid}.', json_mode)
-        sys.exit(1)
+    _require_registered(wallet, metagraph, netuid, json_mode)
 
     # 4. Find active validator axons (vtrust > 0.1 = actively participating in consensus)
-    validator_axons, validator_uids = _get_validator_axons(metagraph)
-
-    if not validator_axons:
-        _error('No reachable validator axons found on the network.', json_mode)
-        sys.exit(1)
+    validator_axons, validator_uids = _require_validator_axons(metagraph, json_mode)
 
     # 5. Broadcast
     synapse = PatBroadcastSynapse(github_access_token=pat)
@@ -132,10 +112,7 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_m
             timeout=30.0,
         )
 
-    if not json_mode:
-        with console.status(f'[bold]Broadcasting to {len(validator_axons)} validators...'):
-            responses = asyncio.run(_broadcast())
-    else:
+    with _status(f'[bold]Broadcasting to {len(validator_axons)} validators...', json_mode):
         responses = asyncio.run(_broadcast())
 
     # 6. Collect results
@@ -195,17 +172,17 @@ def _validate_pat_locally(pat: str) -> bool:
     headers = {'Authorization': f'token {pat}', 'Accept': 'application/vnd.github.v3+json'}
     try:
         # Check basic auth
-        user_resp = requests.get(f'{BASE_GITHUB_API_URL}/user', headers=headers, timeout=15)
+        user_resp = requests.get(f'{BASE_GITHUB_API_URL}/user', headers=headers, timeout=GITHUB_HTTP_TIMEOUT_SECONDS)
         if user_resp.status_code != 200:
             return False
 
         # Check GraphQL access (same test the validator runs during PAT broadcast)
-        gql_headers = {'Authorization': f'bearer {pat}', 'Accept': 'application/json'}
+        gql_headers = {'Authorization': f'Bearer {pat}', 'Accept': 'application/json'}
         gql_resp = requests.post(
             f'{BASE_GITHUB_API_URL}/graphql',
-            json={'query': '{ viewer { login } }'},
+            json={'query': GRAPHQL_VIEWER_QUERY},
             headers=gql_headers,
-            timeout=15,
+            timeout=GITHUB_HTTP_TIMEOUT_SECONDS,
         )
         if gql_resp.status_code != 200:
             console.print(
@@ -216,41 +193,3 @@ def _validate_pat_locally(pat: str) -> bool:
         return True
     except requests.RequestException:
         return False
-
-
-def _load_config_value(key: str):
-    """Load a value from ~/.gittensor/config.json, or None."""
-    from pathlib import Path
-
-    config_file = Path.home() / '.gittensor' / 'config.json'
-    if not config_file.exists():
-        return None
-    try:
-        config = json.loads(config_file.read_text())
-        return config.get(key)
-    except (json.JSONDecodeError, OSError):
-        return None
-
-
-def _resolve_endpoint(network: str | None, rpc_url: str | None) -> str:
-    """Resolve the subtensor endpoint from CLI args or config."""
-    if rpc_url:
-        return rpc_url
-    if network:
-        return NETWORK_MAP.get(network, network)
-    # Try config file
-    config_network = _load_config_value('network')
-    config_endpoint = _load_config_value('ws_endpoint')
-    if config_endpoint:
-        return config_endpoint
-    if config_network:
-        return NETWORK_MAP.get(config_network) or config_network
-    return NETWORK_MAP['finney']
-
-
-def _error(msg: str, json_mode: bool):
-    """Print an error message in the appropriate format."""
-    if json_mode:
-        click.echo(json.dumps({'success': False, 'error': msg}))
-    else:
-        console.print(f'[red]Error: {msg}[/red]')

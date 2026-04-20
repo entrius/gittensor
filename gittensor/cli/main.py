@@ -13,20 +13,18 @@ Usage:
 """
 
 import json
-from pathlib import Path
+import os
 
 import click
+from click.shell_completion import get_completion_class
 from rich.console import Console
 from rich.table import Table
 
 from gittensor.cli.issue_commands import register_commands
 from gittensor.cli.issue_commands.help import StyledAliasGroup, StyledGroup
+from gittensor.cli.issue_commands.helpers import CONFIG_FILE, GITTENSOR_DIR
 
 console = Console()
-
-# Config paths
-GITTENSOR_DIR = Path.home() / '.gittensor'
-CONFIG_FILE = GITTENSOR_DIR / 'config.json'
 
 
 @click.group(cls=StyledAliasGroup)
@@ -121,6 +119,38 @@ def config_set(key: str, value: str):
         console.print(f'[green]Updated {key}:[/green] {old_value} → {value}')
     else:
         console.print(f'[green]Set {key}:[/green] {value}')
+
+
+def _detect_shell():
+    """Detect the current shell from the SHELL environment variable"""
+    shell_path = os.environ.get('SHELL', '')
+    shell_name = os.path.basename(shell_path)
+    if shell_name in ('bash', 'zsh', 'fish'):
+        return shell_name
+    return None
+
+
+@cli.command('completion')
+@click.argument('shell', type=click.Choice(['bash', 'zsh', 'fish']), default=None, required=False)
+def completion(shell):
+    """Generate shell completion script
+
+    Install completions:
+        bash:  eval "$(gitt completion bash)"
+        zsh:   eval "$(gitt completion zsh)"
+        fish:  gitt completion fish | source
+
+    If shell is omitted, auto-detects from the SHELL environment variable.
+    """
+    if shell is None:
+        shell = _detect_shell()
+        if shell is None:
+            raise click.UsageError('Cannot detect shell. Please specify one of: bash, zsh, fish')
+    cls = get_completion_class(shell)
+    if cls is None:
+        raise click.UsageError(f'Unsupported shell: {shell}')
+    comp = cls(cli, ctx_args={}, prog_name='gitt', complete_var='_GITT_COMPLETE')
+    click.echo(comp.source())
 
 
 # Register config group

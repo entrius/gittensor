@@ -10,14 +10,13 @@ import os
 import re
 import struct
 import sys
-import urllib.error
-import urllib.request
 from contextlib import nullcontext
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Callable, ContextManager, Dict, List, Optional, Tuple, TypeVar
 
 import click
+import requests
 from rich.console import Console
 
 from gittensor.cli.issue_commands.tables import build_pr_table
@@ -348,30 +347,6 @@ def validate_bounty_amount(bounty: str) -> int:
     return raw
 
 
-class _GitHubNotFound(Exception):
-    """Signals a 404 from _github_api_get so callers can raise context-specific errors."""
-
-
-def _github_api_get(url: str, check_name: str) -> Optional[Dict[str, Any]]:
-    """GET a GitHub API URL and return parsed JSON.
-
-    Raises _GitHubNotFound on 404. Warns and returns None on other HTTP errors
-    or network failures.
-    """
-    try:
-        req = urllib.request.Request(url, headers={'User-Agent': 'gittensor-cli'})
-        resp = urllib.request.urlopen(req, timeout=GITHUB_API_TIMEOUT)
-        return json.loads(resp.read().decode())
-    except urllib.error.HTTPError as e:
-        if e.code == 404:
-            raise _GitHubNotFound() from e
-        console.print(f'[yellow]Warning: GitHub API returned {e.code} — skipping {check_name}[/yellow]')
-        return None
-    except (urllib.error.URLError, OSError):
-        console.print(f'[yellow]Warning: Could not reach GitHub API — skipping {check_name}[/yellow]')
-        return None
-
-
 def validate_repository(repo: str, verify_exists: bool = True) -> Tuple[str, str]:
     """Validate owner/repo format and optionally verify it exists on GitHub.
 
@@ -391,12 +366,22 @@ def validate_repository(repo: str, verify_exists: bool = True) -> Tuple[str, str
 
     if verify_exists:
         try:
-            _github_api_get(f'https://api.github.com/repos/{owner}/{repo_name}', 'existence check')
-        except _GitHubNotFound:
-            raise click.BadParameter(
-                f"Repository '{owner}/{repo_name}' not found on GitHub",
-                param_hint='--repo',
+            resp = requests.get(
+                f'https://api.github.com/repos/{owner}/{repo_name}',
+                headers={'User-Agent': 'gittensor-cli'},
+                timeout=GITHUB_API_TIMEOUT,
             )
+            if resp.status_code == 404:
+                raise click.BadParameter(
+                    f"Repository '{owner}/{repo_name}' not found on GitHub",
+                    param_hint='--repo',
+                )
+            if not resp.ok:
+                console.print(
+                    f'[yellow]Warning: GitHub API returned {resp.status_code} — skipping existence check[/yellow]'
+                )
+        except requests.RequestException:
+            console.print('[yellow]Warning: Could not reach GitHub API — skipping existence check[/yellow]')
 
     return owner, repo_name
 
@@ -408,17 +393,25 @@ def validate_github_issue(owner: str, repo: str, issue_number: int) -> Optional[
     due to network issues.  Raises click.BadParameter on validation failure.
     """
     try:
-        data = _github_api_get(
+        resp = requests.get(
             f'https://api.github.com/repos/{owner}/{repo}/issues/{issue_number}',
-            'issue check',
+            headers={'User-Agent': 'gittensor-cli'},
+            timeout=GITHUB_API_TIMEOUT,
         )
-    except _GitHubNotFound:
+    except requests.RequestException:
+        console.print('[yellow]Warning: Could not reach GitHub API — skipping issue check[/yellow]')
+        return None
+
+    if resp.status_code == 404:
         raise click.BadParameter(
             f'Issue #{issue_number} not found in {owner}/{repo}',
             param_hint='--issue',
         )
-    if data is None:
+    if not resp.ok:
+        console.print(f'[yellow]Warning: GitHub API returned {resp.status_code} — skipping issue check[/yellow]')
         return None
+
+    data = resp.json()
 
     if 'pull_request' in data:
         raise click.BadParameter(

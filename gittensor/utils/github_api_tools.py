@@ -5,6 +5,7 @@ import os
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from math import ceil
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from gittensor.utils.utils import parse_repo_name
@@ -27,14 +28,18 @@ from gittensor.constants import (
     MAX_FILE_SIZE_BYTES,
     MAX_FILES_PER_GRAPHQL_BATCH,
     PR_LOOKBACK_DAYS,
+    REVIEW_PENALTY_RATE,
 )
 from gittensor.utils.models import PRInfo
 from gittensor.validator.utils.datetime_utils import parse_github_iso_to_utc
 from gittensor.validator.utils.load_weights import RepositoryConfig
 
+# Beyond this many CHANGES_REQUESTED reviews the quality multiplier is already 0
+_MAX_CHANGES_REQUESTED_REVIEWS = ceil(1 / REVIEW_PENALTY_RATE)
+
 # core github graphql query
 QUERY = """
-    query($userId: ID!, $limit: Int!, $cursor: String) {
+    query($userId: ID!, $limit: Int!, $cursor: String, $maxChangesRequestedReviews: Int!) {
       node(id: $userId) {
         ... on User {
           issues(states: [OPEN]) { totalCount }
@@ -112,6 +117,11 @@ QUERY = """
                   author {
                     login
                   }
+                }
+              }
+              changesRequestedReviews: reviews(first: $maxChangesRequestedReviews, states: CHANGES_REQUESTED) {
+                nodes {
+                  authorAssociation
                 }
               }
               timelineItems(itemTypes: [LABELED_EVENT], last: 1) {
@@ -367,88 +377,6 @@ def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -
     return []
 
 
-def get_pull_request_maintainer_changes_requested_count(repository: str, pr_number: int, token: str) -> int:
-    """
-    Count CHANGES_REQUESTED reviews from maintainers for a PR.
-
-    Paginates with per_page=100 (GitHub max) to fetch ALL reviews.
-    Uses retry logic with exponential backoff for transient failures.
-    On error, returns 0 (fail-safe: no penalty applied).
-
-    Args:
-        repository (str): Repository in format 'owner/repo'
-        pr_number (int): PR number
-        token (str): Github pat
-    Returns:
-        int: Number of CHANGES_REQUESTED reviews from maintainers
-    """
-    max_attempts = 3
-    per_page = 100
-    headers = make_headers(token)
-
-    all_reviews: list = []
-    page = 1
-    attempt = 0
-    last_error = None
-
-    while attempt < max_attempts:
-        try:
-            response = requests.get(
-                f'{BASE_GITHUB_API_URL}/repos/{repository}/pulls/{pr_number}/reviews',
-                headers=headers,
-                params={'per_page': per_page, 'page': page},
-                timeout=15,
-            )
-            if response.status_code == 200:
-                reviews = response.json()
-                all_reviews.extend(reviews)
-
-                if len(reviews) < per_page:
-                    return sum(
-                        1
-                        for review in all_reviews
-                        if review.get('state') == 'CHANGES_REQUESTED'
-                        and review.get('author_association') in MAINTAINER_ASSOCIATIONS
-                    )
-
-                page += 1
-                continue
-
-            # Request failed — prepare retry
-            last_error = f'status {response.status_code}'
-            all_reviews = []
-            page = 1
-            attempt += 1
-
-            if attempt < max_attempts:
-                backoff_delay = min(5 * (2 ** (attempt - 1)), 30)
-                bt.logging.warning(
-                    f'Reviews request for PR #{pr_number} in {repository} failed with status {response.status_code} '
-                    f'(attempt {attempt}/{max_attempts}), retrying in {backoff_delay}s...'
-                )
-                time.sleep(backoff_delay)
-
-        except requests.exceptions.RequestException as e:
-            last_error = str(e)
-            all_reviews = []
-            page = 1
-            attempt += 1
-
-            if attempt < max_attempts:
-                backoff_delay = min(5 * (2 ** (attempt - 1)), 30)
-                bt.logging.warning(
-                    f'Reviews request error for PR #{pr_number} in {repository} '
-                    f'(attempt {attempt}/{max_attempts}): {e}, retrying in {backoff_delay}s...'
-                )
-                time.sleep(backoff_delay)
-
-    bt.logging.error(
-        f'Reviews request for PR #{pr_number} in {repository} failed after {max_attempts} attempts: {last_error}. '
-        f'Defaulting to 0 (no penalty).'
-    )
-    return 0
-
-
 # GraphQL fragment used by both issue submissions and solver detection.
 _PR_TIMELINE_QUERY = """
 query($owner: String!, $name: String!, $issueNumber: Int!) {
@@ -492,7 +420,7 @@ def _resolve_pr_state(raw_state: str, merged: bool = False) -> str:
 
 def _search_issue_referencing_prs_graphql(
     repo: str, issue_number: int, token: str, open_only: bool = False
-) -> List[PRInfo]:
+) -> Optional[List[PRInfo]]:
     """Fetch PRs that reference an issue via GraphQL issue timeline cross-references."""
     if not token:
         return []
@@ -510,13 +438,21 @@ def _search_issue_referencing_prs_graphql(
         token=token,
         max_attempts=3,
     )
-    if not result:
+    if result is None:
         bt.logging.warning(f'GraphQL cross-reference query failed for {repo}#{issue_number}')
-        return []
+        return None
 
-    timeline_nodes = (
-        result.get('data', {}).get('repository', {}).get('issue', {}).get('timelineItems', {}).get('nodes', [])
-    )
+    errors = result.get('errors')
+    if errors:
+        bt.logging.warning(f'GraphQL cross-reference query returned errors for {repo}#{issue_number}: {errors}')
+        return None
+
+    issue_data = result.get('data', {}).get('repository', {}).get('issue')
+    if issue_data is None:
+        bt.logging.warning(f'GraphQL cross-reference response missing issue data for {repo}#{issue_number}')
+        return None
+
+    timeline_nodes = issue_data.get('timelineItems', {}).get('nodes', [])
 
     out: List[PRInfo] = []
     for node in timeline_nodes:
@@ -758,6 +694,7 @@ def get_github_graphql_query(
             'userId': global_user_id,
             'limit': limit,
             'cursor': cursor,
+            'maxChangesRequestedReviews': _MAX_CHANGES_REQUESTED_REVIEWS,
         }
         try:
             response = requests.post(
@@ -1093,7 +1030,9 @@ def load_miners_prs(
     )
 
 
-def find_solver_from_cross_references(repo: str, issue_number: int, token: str) -> tuple[Optional[int], Optional[int]]:
+def find_solver_from_cross_references(
+    repo: str, issue_number: int, token: str
+) -> Optional[tuple[Optional[int], Optional[int]]]:
     """Resolve solver from cross-referenced PRs on the issue timeline.
 
     This uses ``_search_issue_referencing_prs_graphql`` and then narrows to PRs
@@ -1103,16 +1042,15 @@ def find_solver_from_cross_references(repo: str, issue_number: int, token: str) 
 
     If multiple candidates exist, the most recent ``merged_at`` is selected.
 
-    Args:
-        repo: Repository full name (``owner/repo``).
-        issue_number: GitHub issue number.
-        token: GitHub PAT used for GraphQL timeline access.
-
     Returns:
-        Tuple ``(solver_github_id, pr_number)``. Either value may be ``None``
-        when no valid closing PR is found.
+        ``None`` when lookup fails and should be retried later. Otherwise a
+        tuple ``(solver_github_id, pr_number)`` where either value may be
+        ``None`` when no valid closing PR is found.
     """
     prs = _search_issue_referencing_prs_graphql(repo, issue_number, token, open_only=False)
+    if prs is None:
+        return None
+
     merged = [p for p in prs if p.get('state') == 'MERGED' and issue_number in p.get('closing_numbers', [])]
     bt.logging.debug(f'Found {len(merged)} verified closing PRs via GraphQL for {repo}#{issue_number}')
     if not merged:
@@ -1135,14 +1073,17 @@ def find_solver_from_cross_references(repo: str, issue_number: int, token: str) 
     return best.get('author_id'), best.get('number')
 
 
-def find_solver_from_timeline(repo: str, issue_number: int, token: str) -> tuple:
+def find_solver_from_timeline(
+    repo: str, issue_number: int, token: str
+) -> Optional[tuple[Optional[int], Optional[int]]]:
     """Find the PR author who closed an issue.
 
     Uses GraphQL cross-reference analysis to find merged PRs that close the
     issue, with baseRepository validation and closingIssuesReferences check.
 
     Returns:
-        (solver_github_id, pr_number) — either may be None if not found.
+        ``None`` when lookup fails and should be retried later. Otherwise
+        ``(solver_github_id, pr_number)`` where either may be None if not found.
     """
     bt.logging.debug(f'Finding solver for {repo}#{issue_number}')
     return find_solver_from_cross_references(repo, issue_number, token)
@@ -1157,7 +1098,7 @@ def check_github_issue_closed(repo: str, issue_number: int, token: str) -> Optio
         token: GitHub PAT for authentication
 
     Returns:
-        Dict with 'is_closed', 'solver_github_id', 'pr_number' or None on error
+        Dict with 'is_closed', 'solver_github_id', 'pr_number', 'solver_lookup_failed' or None on error
     """
     headers = make_headers(token)
 
@@ -1177,12 +1118,21 @@ def check_github_issue_closed(repo: str, issue_number: int, token: str) -> Optio
         if data.get('state') != 'closed':
             return {'is_closed': False}
 
-        solver_github_id, pr_number = find_solver_from_timeline(repo, issue_number, token)
+        solver_lookup = find_solver_from_timeline(repo, issue_number, token)
+        if solver_lookup is None:
+            bt.logging.warning(f'Solver lookup failed for {repo}#{issue_number}')
+            solver_lookup_failed = True
+            solver_github_id = None
+            pr_number = None
+        else:
+            solver_lookup_failed = False
+            solver_github_id, pr_number = solver_lookup
 
         return {
             'is_closed': True,
             'solver_github_id': solver_github_id,
             'pr_number': pr_number,
+            'solver_lookup_failed': solver_lookup_failed,
         }
 
     except Exception as e:

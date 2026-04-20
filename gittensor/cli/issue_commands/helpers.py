@@ -44,6 +44,37 @@ STATUS_COLORS: Dict[str, str] = {
 }
 
 
+class _GitHubNotFound(Exception):
+    """Sentinel raised when a GitHub resource returns 404."""
+    pass
+
+
+def _github_api_get(url: str, check_name: str) -> Optional[Dict[str, Any]]:
+    """Make a GitHub API GET request with standardized error handling.
+
+    Args:
+        url: GitHub API URL to fetch
+        check_name: Descriptive name for error messages (e.g. "repository", "issue")
+
+    Returns:
+        Parsed JSON response on success
+
+    Raises:
+        _GitHubNotFound: When resource returns 404
+        Exception: On other HTTP/network errors (caller handles)
+    """
+    try:
+        req = urllib.request.Request(url, headers={'User-Agent': 'gittensor-cli'})
+        resp = urllib.request.urlopen(req, timeout=GITHUB_API_TIMEOUT)
+        return json.loads(resp.read().decode())
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            raise _GitHubNotFound(f'{check_name} not found on GitHub')
+        raise
+    except (urllib.error.URLError, OSError) as e:
+        raise Exception(f'Failed to reach GitHub API: {e}')
+
+
 # Default paths
 GITTENSOR_DIR = Path.home() / '.gittensor'
 CONFIG_FILE = GITTENSOR_DIR / 'config.json'
@@ -395,18 +426,14 @@ def validate_repository(repo: str, verify_exists: bool = True) -> Tuple[str, str
     if verify_exists:
         url = f'https://api.github.com/repos/{owner}/{repo_name}'
         try:
-            req = urllib.request.Request(url, headers={'User-Agent': 'gittensor-cli'})
-            urllib.request.urlopen(req, timeout=GITHUB_API_TIMEOUT)
-        except urllib.error.HTTPError as e:
-            if e.code == 404:
-                raise click.BadParameter(
-                    f"Repository '{owner}/{repo_name}' not found on GitHub",
-                    param_hint='--repo',
-                )
-            # Non-404 HTTP errors: warn but don't block
-            console.print(f'[yellow]Warning: GitHub API returned {e.code} — skipping existence check[/yellow]')
-        except (urllib.error.URLError, OSError):
-            console.print('[yellow]Warning: Could not reach GitHub API — skipping existence check[/yellow]')
+            _github_api_get(url, f"Repository '{owner}/{repo_name}'")
+        except _GitHubNotFound:
+            raise click.BadParameter(
+                f"Repository '{owner}/{repo_name}' not found on GitHub",
+                param_hint='--repo',
+            )
+        except Exception as e:
+            console.print(f'[yellow]Warning: {e} — skipping existence check[/yellow]')
 
     return owner, repo_name
 
@@ -419,19 +446,14 @@ def validate_github_issue(owner: str, repo: str, issue_number: int) -> Optional[
     """
     url = f'https://api.github.com/repos/{owner}/{repo}/issues/{issue_number}'
     try:
-        req = urllib.request.Request(url, headers={'User-Agent': 'gittensor-cli'})
-        resp = urllib.request.urlopen(req, timeout=GITHUB_API_TIMEOUT)
-        data = json.loads(resp.read().decode())
-    except urllib.error.HTTPError as e:
-        if e.code == 404:
-            raise click.BadParameter(
-                f'Issue #{issue_number} not found in {owner}/{repo}',
-                param_hint='--issue',
-            )
-        console.print(f'[yellow]Warning: GitHub API returned {e.code} — skipping issue check[/yellow]')
-        return None
-    except (urllib.error.URLError, OSError):
-        console.print('[yellow]Warning: Could not reach GitHub API — skipping issue check[/yellow]')
+        data = _github_api_get(url, f'Issue #{issue_number}')
+    except _GitHubNotFound:
+        raise click.BadParameter(
+            f'Issue #{issue_number} not found in {owner}/{repo}',
+            param_hint='--issue',
+        )
+    except Exception as e:
+        console.print(f'[yellow]Warning: {e} — skipping issue check[/yellow]')
         return None
 
     if 'pull_request' in data:

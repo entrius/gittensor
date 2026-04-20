@@ -20,6 +20,7 @@ from click.shell_completion import get_completion_class
 from rich.console import Console
 from rich.table import Table
 
+from gittensor import __version__
 from gittensor.cli.issue_commands import register_commands
 from gittensor.cli.issue_commands.help import StyledAliasGroup, StyledGroup
 from gittensor.cli.issue_commands.helpers import CONFIG_FILE, GITTENSOR_DIR
@@ -28,7 +29,7 @@ console = Console()
 
 
 @click.group(cls=StyledAliasGroup)
-@click.version_option(version='3.2.0', prog_name='gittensor')
+@click.version_option(version=__version__, prog_name='gittensor')
 def cli():
     """Gittensor CLI - Manage issue bounties and validator operations"""
     pass

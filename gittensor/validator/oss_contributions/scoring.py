@@ -477,6 +477,12 @@ def is_valid_issue(issue: Issue, pr: PullRequest) -> bool:
             bt.logging.warning(f'Skipping issue #{issue.number} - Issue state not CLOSED (state: {issue.state})')
             return False
 
+        if issue.state_reason != 'COMPLETED':
+            bt.logging.warning(
+                f'Skipping issue #{issue.number} - state_reason={issue.state_reason}, only COMPLETED grants multiplier'
+            )
+            return False
+
         if issue.closed_at and pr.merged_at:
             days_diff = abs((issue.closed_at - pr.merged_at).total_seconds()) / SECONDS_PER_DAY
             if days_diff > MAX_ISSUE_CLOSE_WINDOW_DAYS:
@@ -499,7 +505,7 @@ def calculate_open_pr_collateral_score(pr: PullRequest) -> float:
 
     Collateral = base_score * applicable_multipliers * OPEN_PR_COLLATERAL_PERCENT
 
-    Applicable multipliers: repo_weight, issue
+    Applicable multipliers: repo_weight, issue, label
     NOT applicable: time_decay (merge-based), credibility_multiplier (merge-based),
                     open_pr_spam (not for collateral)
     """
@@ -508,6 +514,7 @@ def calculate_open_pr_collateral_score(pr: PullRequest) -> float:
     multipliers = {
         'repo_weight': pr.repo_weight_multiplier,
         'issue': pr.issue_multiplier,
+        'label': pr.label_multiplier,
     }
 
     potential_score = pr.base_score * prod(multipliers.values())

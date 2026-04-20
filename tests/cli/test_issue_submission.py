@@ -24,7 +24,15 @@ def test_submissions_json_schema_is_stable(cli_root, runner, sample_issue, sampl
     assert '\x1b[' not in result.output
 
     payload = json.loads(result.output)
-    assert set(payload.keys()) == {'issue_id', 'repository', 'issue_number', 'submission_count', 'submissions'}
+    assert set(payload.keys()) == {
+        'success',
+        'issue_id',
+        'repository',
+        'issue_number',
+        'submission_count',
+        'submissions',
+    }
+    assert payload['success'] is True
     assert payload['issue_id'] == 42
     assert payload['repository'] == 'entrius/gittensor'
     assert payload['issue_number'] == 223

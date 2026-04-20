@@ -8,7 +8,12 @@ from typing import DefaultDict, Dict, List, Optional, Set
 
 import bittensor as bt
 
-from gittensor.constants import MAINTAINER_ASSOCIATIONS, MAX_CODE_DENSITY_MULTIPLIER, MIN_TOKEN_SCORE_FOR_BASE_SCORE
+from gittensor.constants import (
+    LABEL_MULTIPLIERS,
+    MAINTAINER_ASSOCIATIONS,
+    MAX_CODE_DENSITY_MULTIPLIER,
+    MIN_TOKEN_SCORE_FOR_BASE_SCORE,
+)
 from gittensor.utils.utils import parse_repo_name
 
 GITHUB_DOMAIN = 'https://github.com/'
@@ -166,7 +171,7 @@ class PullRequest:
     time_decay_multiplier: float = 1.0
     credibility_multiplier: float = 1.0
     review_quality_multiplier: float = 1.0  # Penalty for CHANGES_REQUESTED reviews from maintainers
-    label_multiplier: float = 1.0  # Multiplier based on PR label (feature, bug, enhancement, refactor)
+    label_multiplier: float = 1.0  # Multiplier based on PR label (exact match against known labels)
     label: Optional[str] = None  # Last label set on the PR
     changes_requested_count: int = 0  # Number of maintainer CHANGES_REQUESTED reviews
     earned_score: float = 0.0
@@ -297,10 +302,14 @@ class PullRequest:
                 1 for r in cr_reviews if r.get('authorAssociation') in MAINTAINER_ASSOCIATIONS
             )
 
-        # Extract last label from timeline events
-        timeline_nodes = pr_data.get('timelineItems', {}).get('nodes', [])
-        label_node = timeline_nodes[0].get('label') if timeline_nodes and timeline_nodes[0] else None
-        label = label_node['name'].lower() if label_node else None
+        current = {(n.get('name') or '').lower() for n in (pr_data.get('labels') or {}).get('nodes') or [] if n}
+        label: Optional[str] = None
+        if not current.isdisjoint(LABEL_MULTIPLIERS):
+            for event in reversed((pr_data.get('timelineItems') or {}).get('nodes') or []):
+                name = ((event or {}).get('label') or {}).get('name', '').lower()
+                if name in current and name in LABEL_MULTIPLIERS:
+                    label = name
+                    break
 
         return cls(
             number=pr_data['number'],

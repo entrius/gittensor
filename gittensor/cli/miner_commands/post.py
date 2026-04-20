@@ -26,6 +26,7 @@ from gittensor.cli.miner_commands.helpers import (
     _status,
 )
 from gittensor.constants import BASE_GITHUB_API_URL, GITHUB_HTTP_TIMEOUT_SECONDS, GRAPHQL_VIEWER_QUERY
+from gittensor.utils.github_api_tools import make_graphql_headers, make_headers
 
 console = Console()
 
@@ -169,19 +170,17 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_m
 
 def _validate_pat_locally(pat: str) -> bool:
     """Validate PAT mirrors the validator-side checks: user identity + GraphQL access."""
-    headers = {'Authorization': f'token {pat}', 'Accept': 'application/vnd.github.v3+json'}
     try:
         # Check basic auth
-        user_resp = requests.get(f'{BASE_GITHUB_API_URL}/user', headers=headers, timeout=GITHUB_HTTP_TIMEOUT_SECONDS)
+        user_resp = requests.get(f'{BASE_GITHUB_API_URL}/user', headers=make_headers(pat), timeout=GITHUB_HTTP_TIMEOUT_SECONDS)
         if user_resp.status_code != 200:
             return False
 
         # Check GraphQL access (same test the validator runs during PAT broadcast)
-        gql_headers = {'Authorization': f'Bearer {pat}', 'Accept': 'application/json'}
         gql_resp = requests.post(
             f'{BASE_GITHUB_API_URL}/graphql',
             json={'query': GRAPHQL_VIEWER_QUERY},
-            headers=gql_headers,
+            headers=make_graphql_headers(pat),
             timeout=GITHUB_HTTP_TIMEOUT_SECONDS,
         )
         if gql_resp.status_code != 200:

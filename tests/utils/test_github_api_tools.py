@@ -1006,13 +1006,11 @@ class TestFindSolverFromCrossReferences:
     @patch('gittensor.utils.github_api_tools.execute_graphql_query')
     @patch('gittensor.utils.github_api_tools.bt.logging')
     def test_graphql_query_failure_returns_none(self, mock_logging, mock_graphql):
-        """GraphQL query failure returns (None, None)."""
-        mock_graphql.return_value = None
-
-        solver_id, pr_number = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
-
-        assert solver_id is None
-        assert pr_number is None
+        """GraphQL query failures return the lookup-failure sentinel."""
+        for graphql_response in (None, {'errors': [{'message': 'rate limited'}]}):
+            mock_graphql.return_value = graphql_response
+            result = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
+            assert result is None
 
 
 class TestFindSolverFromTimeline:
@@ -1028,7 +1026,7 @@ class TestFindSolverFromTimeline:
 
         assert solver_id == 42
         assert pr_number == 14
-        mock_cross_ref.assert_called_once_with('owner/repo', 12, 'fake_token', raise_on_api_failure=False)
+        mock_cross_ref.assert_called_once_with('owner/repo', 12, 'fake_token')
 
 
 class TestCheckGithubIssueClosed:

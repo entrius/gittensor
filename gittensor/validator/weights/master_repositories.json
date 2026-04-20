@@ -565,6 +565,7 @@
     "weight": 0.1501
   },
   "sbt/sbt": {
+    "inactive_at": "2026-04-18T00:00:00Z",
     "weight": 0.1001
   },
   "score-technologies/turbovision": {

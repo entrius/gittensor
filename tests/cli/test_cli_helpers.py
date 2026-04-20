@@ -25,6 +25,7 @@ from gittensor.cli.issue_commands.helpers import (
     MAX_ISSUE_NUMBER,
     STATUS_COLORS,
     colorize_status,
+    emit_json,
     format_alpha,
     validate_bounty_amount,
     validate_github_issue,
@@ -721,3 +722,20 @@ class TestCliRuntimeExceptions:
             )
         assert result.exit_code != 0
         assert 'boom-harvest' in result.output
+
+
+class TestEmitJson:
+    @pytest.mark.parametrize(
+        'value',
+        [
+            Decimal('10.5'),
+            __import__('datetime').datetime(2026, 1, 1, 12, 0, 0),
+            __import__('datetime').date(2026, 1, 1),
+        ],
+        ids=['Decimal', 'datetime', 'date'],
+    )
+    def test_non_native_types_serialized_via_default(self, value, capsys):
+        emit_json({'field': value})
+        captured = capsys.readouterr()
+        parsed = json.loads(captured.out)
+        assert parsed['field'] == str(value)

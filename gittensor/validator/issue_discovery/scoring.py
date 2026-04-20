@@ -297,6 +297,7 @@ def _merge_scan_issues(
             if issue.state == 'CLOSED' and issue.closed_at:
                 # Case 2: solved by non-miner PR → positive credibility
                 data.solved_count += 1
+                data.valid_solved_count += 1
             else:
                 # Case 3: closed without PR → negative credibility
                 data.closed_count += 1

@@ -19,6 +19,7 @@ from gittensor.cli.miner_commands.helpers import (
     _connect_bittensor,
     _error,
     _load_config_value,
+    _print,
     _require_registered,
     _require_validator_axons,
     _resolve_endpoint,
@@ -77,16 +78,14 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_m
         _error('GitHub PAT is invalid or expired. Check your GITTENSOR_MINER_PAT.', json_mode)
         sys.exit(1)
 
-    if not json_mode:
-        console.print('[green]PAT is valid.[/green]')
+    _print('[green]PAT is valid.[/green]', json_mode)
 
     # 2. Resolve wallet and network
     wallet_name = wallet_name or _load_config_value('wallet') or 'default'
     wallet_hotkey = wallet_hotkey or _load_config_value('hotkey') or 'default'
     ws_endpoint = _resolve_endpoint(network, rpc_url)
 
-    if not json_mode:
-        console.print(f'[dim]Wallet: {wallet_name}/{wallet_hotkey} | Network: {ws_endpoint} | Netuid: {netuid}[/dim]')
+    _print(f'[dim]Wallet: {wallet_name}/{wallet_hotkey} | Network: {ws_endpoint} | Netuid: {netuid}[/dim]', json_mode)
 
     # 3. Set up bittensor objects
     with _status('[bold]Connecting to network...', json_mode):

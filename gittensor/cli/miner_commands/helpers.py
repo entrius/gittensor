@@ -73,6 +73,12 @@ def _status(message: str, json_mode: bool):
     return nullcontext() if json_mode else console.status(message)
 
 
+def _print(message: str, json_mode: bool) -> None:
+    """Print a message in TTY mode; no-op in JSON mode."""
+    if not json_mode:
+        console.print(message)
+
+
 def _error(msg: str, json_mode: bool) -> None:
     """Print an error message in the appropriate format."""
     if json_mode:

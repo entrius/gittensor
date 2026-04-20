@@ -119,7 +119,7 @@ class Issue:
 
     # Issue discovery fields
     author_github_id: Optional[str] = None  # Issue author's GitHub user ID (for miner matching)
-    is_transferred: bool = False
+    state_reason: Optional[str] = None  # "COMPLETED", "NOT_PLANNED", "TRANSFERRED", or None (legacy)
     updated_at: Optional[datetime] = None
     body_or_title_edited_at: Optional[datetime] = None
     discovery_base_score: float = 0.0
@@ -129,6 +129,11 @@ class Issue:
     discovery_time_decay_multiplier: float = 1.0
     discovery_credibility_multiplier: float = 1.0
     discovery_open_issue_spam_multiplier: float = 1.0
+
+    @property
+    def is_transferred(self) -> bool:
+        """Convenience accessor. Prefer gating on `state_reason` directly in new code."""
+        return self.state_reason == 'TRANSFERRED'
 
 
 @dataclass
@@ -276,6 +281,7 @@ class PullRequest:
                     author_github_id=str(author_db_id) if author_db_id else None,
                     updated_at=parse_github_timestamp_to_cst(issue['updatedAt']) if issue.get('updatedAt') else None,
                     body_or_title_edited_at=body_or_title_edited_at,
+                    state_reason=issue.get('stateReason'),
                 )
             )
 
@@ -331,6 +337,7 @@ class MinerEvaluation:
     total_leaf_count: int = 0
     total_leaf_score: float = 0.0
     failed_reason: Optional[str] = None
+    github_pr_fetch_failed: bool = False
     evaluation_timestamp: Optional[datetime] = None
     merged_pull_requests: List[PullRequest] = field(default_factory=list)
     open_pull_requests: List[PullRequest] = field(default_factory=list)
@@ -366,6 +373,10 @@ class MinerEvaluation:
     @property
     def total_closed_prs(self) -> int:
         return len(self.closed_pull_requests)
+
+    @property
+    def should_use_cache_fallback(self) -> bool:
+        return self.github_pr_fetch_failed and self.total_prs == 0
 
     def get_all_issues(self) -> List[Issue]:
         """Aggregate all issues from all pull requests (merged, open, closed)."""

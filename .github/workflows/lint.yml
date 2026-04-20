@@ -4,9 +4,12 @@ on:
   pull_request:
     branches: [main, test]
 
+env:
+  PYTHON_VERSION: "3.12"
+
 jobs:
-  # if PR is same repo, auto commit lint fixes
-  ruff:
+  # If PR is from the same repo, auto-commit lint fixes
+  pre-commit:
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -17,20 +20,25 @@ jobs:
           ref: ${{ github.head_ref }}
           repository: ${{ github.event.pull_request.head.repo.full_name }}
 
-      - uses: astral-sh/ruff-action@v3
-        with:
-          args: "check --fix"
+      - uses: astral-sh/setup-uv@v4
+      - run: uv python install ${{ env.PYTHON_VERSION }}
+      - run: uv sync --extra dev
 
-      - uses: astral-sh/ruff-action@v3
-        with:
-          args: "format"
+      - name: Run pre-commit with auto-fixes
+        run: uv run pre-commit run --all-files || true
 
       - uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "style: auto-format with ruff"
+          commit_message: "style: auto-format with pre-commit"
 
-  # if PR is from a fork, fail lint, no autocommit
-  ruff-fork:
+      - name: Re-run pre-commit to verify clean
+        run: uv run pre-commit run --all-files
+
+      - name: Run pyright
+        run: SKIP=pytest uv run pre-commit run --all-files --hook-stage pre-push
+
+  # If PR is from a fork, fail on any diff
+  pre-commit-fork:
     runs-on: ubuntu-latest
     if: github.event.pull_request.head.repo.full_name != github.repository
     steps:
@@ -39,10 +47,12 @@ jobs:
           ref: ${{ github.head_ref }}
           repository: ${{ github.event.pull_request.head.repo.full_name }}
 
-      - uses: astral-sh/ruff-action@v3
-        with:
-          args: "check"
+      - uses: astral-sh/setup-uv@v4
+      - run: uv python install ${{ env.PYTHON_VERSION }}
+      - run: uv sync --extra dev
 
-      - uses: astral-sh/ruff-action@v3
-        with:
-          args: "format --check"
+      - name: Run pre-commit checks
+        run: uv run pre-commit run --all-files --show-diff-on-failure
+
+      - name: Run pyright
+        run: SKIP=pytest uv run pre-commit run --all-files --hook-stage pre-push

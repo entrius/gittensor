@@ -222,6 +222,15 @@ def handle_exception(as_json: bool, message: str, error_type: str = 'cli_error')
     raise SystemExit(1)
 
 
+def _handle_command_error(e: Exception) -> None:
+    """Print a terminal error message and exit. Gives a tailored message for missing dependencies."""
+    if isinstance(e, ImportError):
+        print_error(f'Missing dependency — {e}')
+    else:
+        print_error(str(e))
+    raise SystemExit(1)
+
+
 def loading_context(message: str, as_json: bool, spinner: str = 'dots', color='cyan') -> ContextManager[Any]:
     """Return a spinner context in human mode, or a no-op context in JSON mode."""
     return (
@@ -454,6 +463,30 @@ def validate_ss58_address(address: str, param_name: str = 'address') -> str:
         )
 
     return address
+
+
+def require_valid_issue_id(value: int, param_name: str = 'issue_id') -> int:
+    """Validate an issue ID, raising ClickException on failure.
+
+    Returns:
+        The validated issue ID.
+    """
+    try:
+        return validate_issue_id(value, param_name)
+    except click.BadParameter as e:
+        raise click.ClickException(str(e))
+
+
+def require_valid_ss58(address: str, param_name: str = 'address') -> str:
+    """Validate an SS58 address, raising ClickException on failure.
+
+    Returns:
+        The validated SS58 address string.
+    """
+    try:
+        return validate_ss58_address(address, param_name)
+    except click.BadParameter as e:
+        raise click.ClickException(str(e))
 
 
 def load_config() -> Dict[str, Any]:

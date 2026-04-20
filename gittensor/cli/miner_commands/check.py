@@ -15,6 +15,7 @@ from .helpers import (
     _connect_bittensor,
     _error,
     _load_config_value,
+    _print,
     _require_registered,
     _require_validator_axons,
     _resolve_endpoint,
@@ -48,8 +49,7 @@ def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, json_mode)
     wallet_hotkey = wallet_hotkey or _load_config_value('hotkey') or 'default'
     ws_endpoint = _resolve_endpoint(network, rpc_url)
 
-    if not json_mode:
-        console.print(f'[dim]Wallet: {wallet_name}/{wallet_hotkey} | Network: {ws_endpoint} | Netuid: {netuid}[/dim]')
+    _print(f'[dim]Wallet: {wallet_name}/{wallet_hotkey} | Network: {ws_endpoint} | Netuid: {netuid}[/dim]', json_mode)
 
     # 2. Set up bittensor objects
     with _status('[bold]Connecting to network...', json_mode):
@@ -103,6 +103,7 @@ def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, json_mode)
         click.echo(
             json.dumps(
                 {
+                    'success': valid_count > 0,
                     'total_validators': len(results),
                     'valid': valid_count,
                     'invalid': len(results) - valid_count - no_response_count,

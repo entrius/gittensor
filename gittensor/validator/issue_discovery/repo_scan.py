@@ -168,14 +168,17 @@ async def _scan_repo(
     capped = unmatched[:lookup_cap]
     semaphore = asyncio.Semaphore(REPO_SCAN_CONCURRENCY)
 
-    async def _lookup(issue_raw: dict) -> Tuple[dict, Optional[int], Optional[int]]:
+    async def _lookup(issue_raw: dict) -> Optional[Tuple[dict, Optional[int], Optional[int]]]:
         async with semaphore:
-            solver_id, pr_number = await asyncio.to_thread(
+            solver_lookup = await asyncio.to_thread(
                 find_solver_from_cross_references,
                 repo_name,
                 issue_raw['number'],
                 validator_pat,
             )
+            if solver_lookup is None:
+                return None
+            solver_id, pr_number = solver_lookup
             return issue_raw, solver_id, pr_number
 
     tasks = [_lookup(issue_raw) for issue_raw in capped]
@@ -184,6 +187,10 @@ async def _scan_repo(
     for item in resolved:
         if isinstance(item, BaseException):
             bt.logging.warning(f'Solver lookup error in {repo_name}: {item}')
+            continue
+
+        if item is None:
+            bt.logging.warning(f'Solver lookup failed in {repo_name}, skipping issue for retry')
             continue
 
         assert isinstance(item, tuple)

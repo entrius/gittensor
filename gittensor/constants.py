@@ -79,7 +79,7 @@ LABEL_MULTIPLIERS: dict[str, float] = {
     'feature': 1.50,
     'bug': 1.25,
     'enhancement': 1.10,
-    'refactor': 1.00,
+    'refactor': 0.5,
 }
 
 # Pioneer dividend — rewards the first quality contributor to each repository

@@ -3,7 +3,7 @@
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar
 
 import bittensor as bt
 
@@ -83,99 +83,104 @@ def _get_weights_dir() -> Path:
     return Path(__file__).parent.parent / 'weights'
 
 
-def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
+_T = TypeVar('_T')
+
+
+def _load_json_file(filename: str, label: str) -> Any:
+    """Open a JSON file from the weights directory and return its parsed content.
+
+    Logs an error and re-raises on ``FileNotFoundError`` or ``json.JSONDecodeError``.
     """
-    Load repository weights from the local JSON file.
+    weights_file = _get_weights_dir() / filename
+    try:
+        with open(weights_file, 'r') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        bt.logging.error(f'{label.title()} weights file not found: {weights_file}')
+        raise
+    except json.JSONDecodeError as e:
+        bt.logging.error(f'Invalid JSON in {label} weights file {weights_file}: {e}')
+        raise
+
+
+def _load_json_weights(
+    filename: str,
+    parse_entry: Callable[[str, Any], Tuple[str, _T]],
+    label: str,
+) -> Dict[str, _T]:
+    """Load a JSON weights dict and parse each entry via *parse_entry*.
+
+    ``parse_entry(key, value)`` returns ``(normalised_key, parsed_object)``.
+    If it raises ``ValueError`` or ``TypeError`` the entry is logged and skipped.
+
+    Returns empty dict on any file-level or structural error.
+    """
+    try:
+        data = _load_json_file(filename, label)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+    except Exception as e:
+        bt.logging.error(f'Unexpected error loading {label} weights: {e}')
+        return {}
+
+    if not isinstance(data, dict):
+        bt.logging.error(f'Expected dict from {_get_weights_dir() / filename}, got {type(data)}')
+        return {}
+
+    result: Dict[str, _T] = {}
+    for key, value in data.items():
+        try:
+            norm_key, parsed = parse_entry(key, value)
+            result[norm_key] = parsed
+        except (ValueError, TypeError) as e:
+            bt.logging.warning(f'Could not parse {label} config for {key}: {e}')
+
+    bt.logging.debug(f'Successfully loaded {len(result)} {label} entries from {_get_weights_dir() / filename}')
+    return result
+
+
+def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
+    """Load repository weights from the local JSON file.
+
     Normalizes repository names to lowercase for case-insensitive matching.
 
     Returns:
-        Dictionary mapping normalized (lowercase) fullName (str) to RepositoryConfig object.
+        Dictionary mapping normalized (lowercase) fullName to RepositoryConfig.
         Returns empty dict on error.
     """
-    weights_file = _get_weights_dir() / 'master_repositories.json'
 
-    try:
-        with open(weights_file, 'r') as f:
-            data = json.load(f)
+    def _parse_repo(name: str, metadata: Any) -> Tuple[str, RepositoryConfig]:
+        try:
+            config = RepositoryConfig(
+                weight=float(metadata.get('weight', 0.01)),
+                inactive_at=metadata.get('inactive_at'),
+                additional_acceptable_branches=metadata.get('additional_acceptable_branches'),
+            )
+        except (ValueError, TypeError) as e:
+            bt.logging.warning(f'Could not parse config for {name}: {e}, using defaults')
+            config = RepositoryConfig(weight=float(metadata.get('weight', 0.01)))
+        return name.lower(), config
 
-        if not isinstance(data, dict):
-            bt.logging.error(f'Expected dict from {weights_file}, got {type(data)}')
-            return {}
-
-        # Parse JSON data into RepositoryConfig objects
-        normalized_data: Dict[str, RepositoryConfig] = {}
-        for repo_name, metadata in data.items():
-            try:
-                config = RepositoryConfig(
-                    weight=float(metadata.get('weight', 0.01)),
-                    inactive_at=metadata.get('inactive_at'),
-                    additional_acceptable_branches=metadata.get('additional_acceptable_branches'),
-                )
-                normalized_data[repo_name.lower()] = config
-            except (ValueError, TypeError) as e:
-                bt.logging.warning(f'Could not parse config for {repo_name}: {e}, using defaults')
-                # Create config with defaults if parsing fails
-                normalized_data[repo_name.lower()] = RepositoryConfig(weight=float(metadata.get('weight', 0.01)))
-
-        bt.logging.debug(f'Successfully loaded {len(normalized_data)} repository entries from {weights_file}')
-        return normalized_data
-
-    except FileNotFoundError:
-        bt.logging.error(f'Weights file not found: {weights_file}')
-        return {}
-    except json.JSONDecodeError as e:
-        bt.logging.error(f'Failed to parse JSON from {weights_file}: {e}')
-        return {}
-    except Exception as e:
-        bt.logging.error(f'Unexpected error loading repository weights: {e}')
-        return {}
+    return _load_json_weights('master_repositories.json', _parse_repo, 'repository')
 
 
 def load_programming_language_weights() -> Dict[str, LanguageConfig]:
-    """
-    Load programming language weights from the local JSON file.
+    """Load programming language weights from the local JSON file.
 
     Returns:
-        Dictionary mapping extension (str) to LanguageConfig object.
+        Dictionary mapping extension to LanguageConfig.
         Returns empty dict on error.
     """
-    weights_file = _get_weights_dir() / 'programming_languages.json'
 
-    try:
-        with open(weights_file, 'r') as f:
-            data = json.load(f)
+    def _parse_lang(extension: str, config: Any) -> Tuple[str, LanguageConfig]:
+        if isinstance(config, dict):
+            return extension, LanguageConfig(
+                weight=float(config.get('weight', 1.0)),
+                language=config.get('language'),
+            )
+        return extension, LanguageConfig(weight=float(config))
 
-        if not isinstance(data, dict):
-            bt.logging.error(f'Expected dict from {weights_file}, got {type(data)}')
-            return {}
-
-        result: Dict[str, LanguageConfig] = {}
-        for extension, config in data.items():
-            try:
-                if isinstance(config, dict):
-                    result[extension] = LanguageConfig(
-                        weight=float(config.get('weight', 1.0)),
-                        language=config.get('language'),
-                    )
-                else:
-                    # Backwards compatibility: handle plain float values
-                    result[extension] = LanguageConfig(weight=float(config))
-            except (ValueError, TypeError) as e:
-                bt.logging.warning(f'Could not parse config for {extension}: {config} - {e}')
-                continue
-
-        bt.logging.debug(f'Successfully loaded {len(result)} language entries from {weights_file}')
-        return result
-
-    except FileNotFoundError:
-        bt.logging.error(f'Weights file not found: {weights_file}')
-        return {}
-    except json.JSONDecodeError as e:
-        bt.logging.error(f'Failed to parse JSON from {weights_file}: {e}')
-        return {}
-    except Exception as e:
-        bt.logging.error(f'Unexpected error loading language weights: {e}')
-        return {}
+    return _load_json_weights('programming_languages.json', _parse_lang, 'language')
 
 
 def load_token_config() -> TokenConfig:
@@ -186,26 +191,16 @@ def load_token_config() -> TokenConfig:
 
     Returns:
         TokenConfig with all scoring configuration loaded.
-    """
-    weights_file = _get_weights_dir() / 'token_weights.json'
 
-    try:
-        with open(weights_file, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-    except FileNotFoundError:
-        bt.logging.error(f'Token weights file not found: {weights_file}')
-        raise
-    except json.JSONDecodeError as e:
-        bt.logging.error(f'Invalid JSON in token weights file: {e}')
-        raise
+    Raises:
+        FileNotFoundError: If token_weights.json is missing.
+        json.JSONDecodeError: If token_weights.json contains invalid JSON.
+    """
+    data = _load_json_file('token_weights.json', 'token')
 
     structural_bonus = dict(data.get('structural_bonus', {}))
     leaf_tokens = dict(data.get('leaf_tokens', {}))
-
-    # Load language configurations (includes tree-sitter language mapping)
     language_configs = load_programming_language_weights()
-
-    # Count languages with tree-sitter support
     tree_sitter_count = sum(1 for c in language_configs.values() if c.language is not None)
 
     config = TokenConfig(
@@ -218,5 +213,4 @@ def load_token_config() -> TokenConfig:
         f'Loaded token config: {len(structural_bonus)} structural, '
         f'{len(leaf_tokens)} leaf, {tree_sitter_count} tree-sitter languages'
     )
-
     return config

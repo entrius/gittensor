@@ -8,7 +8,12 @@ from typing import DefaultDict, Dict, List, Optional, Set
 
 import bittensor as bt
 
-from gittensor.constants import MAINTAINER_ASSOCIATIONS, MAX_CODE_DENSITY_MULTIPLIER, MIN_TOKEN_SCORE_FOR_BASE_SCORE
+from gittensor.constants import (
+    LABEL_MULTIPLIERS,
+    MAINTAINER_ASSOCIATIONS,
+    MAX_CODE_DENSITY_MULTIPLIER,
+    MIN_TOKEN_SCORE_FOR_BASE_SCORE,
+)
 from gittensor.utils.utils import parse_repo_name
 
 GITHUB_DOMAIN = 'https://github.com/'
@@ -297,10 +302,15 @@ class PullRequest:
                 1 for r in cr_reviews if r.get('authorAssociation') in MAINTAINER_ASSOCIATIONS
             )
 
-        # Extract last label from timeline events
-        timeline_nodes = pr_data.get('timelineItems', {}).get('nodes', [])
-        label_node = timeline_nodes[0].get('label') if timeline_nodes and timeline_nodes[0] else None
-        label = label_node['name'].lower() if label_node else None
+        # Pick the last LABELED_EVENT whose label is still applied and in
+        # LABEL_MULTIPLIERS, so workflow labels (lgtm, size:*, topic:*) added
+        # after the scoring label don't mask it.
+        current = {(n.get('name') or '').lower() for n in (pr_data.get('labels') or {}).get('nodes') or [] if n}
+        label: Optional[str] = None
+        for event in (pr_data.get('timelineItems') or {}).get('nodes') or []:
+            name = ((event or {}).get('label') or {}).get('name', '').lower()
+            if name in current and name in LABEL_MULTIPLIERS:
+                label = name
 
         return cls(
             number=pr_data['number'],

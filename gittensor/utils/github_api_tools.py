@@ -124,10 +124,10 @@ QUERY = """
                   authorAssociation
                 }
               }
-              labels(first: 20) {
+              labels(first: 5) {
                 nodes { name }
               }
-              timelineItems(itemTypes: [LABELED_EVENT], last: 20) {
+              timelineItems(itemTypes: [LABELED_EVENT], last: 5) {
                 nodes {
                   ... on LabeledEvent {
                     label { name }

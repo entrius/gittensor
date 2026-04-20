@@ -302,15 +302,14 @@ class PullRequest:
                 1 for r in cr_reviews if r.get('authorAssociation') in MAINTAINER_ASSOCIATIONS
             )
 
-        # Pick the last LABELED_EVENT whose label is still applied and in
-        # LABEL_MULTIPLIERS, so workflow labels (lgtm, size:*, topic:*) added
-        # after the scoring label don't mask it.
         current = {(n.get('name') or '').lower() for n in (pr_data.get('labels') or {}).get('nodes') or [] if n}
         label: Optional[str] = None
-        for event in (pr_data.get('timelineItems') or {}).get('nodes') or []:
-            name = ((event or {}).get('label') or {}).get('name', '').lower()
-            if name in current and name in LABEL_MULTIPLIERS:
-                label = name
+        if not current.isdisjoint(LABEL_MULTIPLIERS):
+            for event in reversed((pr_data.get('timelineItems') or {}).get('nodes') or []):
+                name = ((event or {}).get('label') or {}).get('name', '').lower()
+                if name in current and name in LABEL_MULTIPLIERS:
+                    label = name
+                    break
 
         return cls(
             number=pr_data['number'],

@@ -99,23 +99,30 @@ def read_contract_packed_storage_bytes(substrate, child_key: str, page_size: int
     return bytes.fromhex(raw_hex.replace('0x', ''))
 
 
+# owner (32) + treasury hotkey (32) + netuid (2) + next_issue_id (8) + alpha_pool (16)
+_PACKED_CONTRACT_STORAGE_SIZE = 32 + 32 + 2 + 8 + 16
+
+
 def decode_packed_contract_storage(data: bytes) -> Optional[PackedContractStorage]:
     """Decode packed root storage bytes into typed fields."""
-    # owner (32) + treasury hotkey (32) + netuid (2) + next_issue_id (8) + alpha_pool (16)
-    if len(data) < 74:
+    if len(data) < _PACKED_CONTRACT_STORAGE_SIZE:
         return None
 
-    offset = 0
-    owner = data[offset : offset + 32]
-    offset += 32
-    treasury_hotkey = data[offset : offset + 32]
-    offset += 32
-    netuid = struct.unpack_from('<H', data, offset)[0]
-    offset += 2
-    next_issue_id = struct.unpack_from('<Q', data, offset)[0]
-    offset += 8
-    alpha_pool_lo, alpha_pool_hi = struct.unpack_from('<QQ', data, offset)
-    alpha_pool = alpha_pool_lo + (alpha_pool_hi << 64)
+    try:
+        offset = 0
+        owner = data[offset : offset + 32]
+        offset += 32
+        treasury_hotkey = data[offset : offset + 32]
+        offset += 32
+        netuid = struct.unpack_from('<H', data, offset)[0]
+        offset += 2
+        next_issue_id = struct.unpack_from('<Q', data, offset)[0]
+        offset += 8
+        alpha_pool_lo, alpha_pool_hi = struct.unpack_from('<QQ', data, offset)
+        alpha_pool = alpha_pool_lo + (alpha_pool_hi << 64)
+    except (struct.error, IndexError) as e:
+        logger.debug('Failed to decode packed contract storage: %s', e)
+        return None
 
     return PackedContractStorage(
         owner=owner,

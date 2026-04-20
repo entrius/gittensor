@@ -100,6 +100,11 @@ def test_decode_packed_contract_storage_rejects_short_bytes():
     assert decode_packed_contract_storage(b'\x00' * 73) is None
 
 
+def test_decode_packed_contract_storage_rejects_truncated_alpha_pool():
+    # Regression for #622: 74..89 used to pass the guard and crash in unpack_from.
+    assert decode_packed_contract_storage(b'\x00' * 89) is None
+
+
 def test_decode_issue_from_storage_single_byte_string_length():
     data = _build_issue_bytes(
         issue_id=5,

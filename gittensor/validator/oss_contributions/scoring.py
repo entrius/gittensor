@@ -515,6 +515,7 @@ def calculate_open_pr_collateral_score(pr: PullRequest) -> float:
     multipliers = {
         'repo_weight': pr.repo_weight_multiplier,
         'issue': pr.issue_multiplier,
+        'label': pr.label_multiplier,
     }
 
     potential_score = pr.base_score * prod(multipliers.values())

@@ -1,5 +1,7 @@
 import struct
 
+import pytest
+
 from gittensor.validator.issue_competitions.storage_utils import (
     compute_ink5_lazy_key,
     decode_issue_from_storage,
@@ -103,6 +105,33 @@ def test_decode_packed_contract_storage_rejects_short_bytes():
 def test_decode_packed_contract_storage_rejects_truncated_alpha_pool():
     # Regression for #622: 74..89 used to pass the guard and crash in unpack_from.
     assert decode_packed_contract_storage(b'\x00' * 89) is None
+
+
+@pytest.mark.parametrize('length', [0, 74, 80, 89])
+def test_decode_packed_contract_storage_rejects_any_short_buffer(length):
+    # A few boundary lengths from the #622 window (74..89) plus the empty case.
+    assert decode_packed_contract_storage(b'\x00' * length) is None
+
+
+def test_decode_packed_contract_storage_handles_maximum_field_values():
+    # Exercises the full 128-bit alpha_pool reconstruction (lo + (hi << 64)).
+    max_u16 = 0xFFFF
+    max_u64 = 0xFFFFFFFFFFFFFFFF
+    max_u128 = (1 << 128) - 1
+    data = (
+        b'\xab' * 32
+        + b'\xcd' * 32
+        + struct.pack('<H', max_u16)
+        + struct.pack('<Q', max_u64)
+        + struct.pack('<QQ', max_u64, max_u64)
+    )
+
+    decoded = decode_packed_contract_storage(data)
+
+    assert decoded is not None
+    assert decoded.netuid == max_u16
+    assert decoded.next_issue_id == max_u64
+    assert decoded.alpha_pool == max_u128
 
 
 def test_decode_issue_from_storage_single_byte_string_length():

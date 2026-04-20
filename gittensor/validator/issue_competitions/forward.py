@@ -103,9 +103,15 @@ async def issue_competitions(
 
                 solver_github_id = github_state.get('solver_github_id')
                 pr_number = github_state.get('pr_number')
+                solver_lookup_failed = bool(github_state.get('solver_lookup_failed'))
                 bt.logging.info(
-                    f'Issue closed on GitHub: {issue_label} | solver_github_id={solver_github_id}, pr_number={pr_number}'
+                    f'Issue closed on GitHub: {issue_label} | solver_github_id={solver_github_id}, '
+                    f'pr_number={pr_number}, solver_lookup_failed={solver_lookup_failed}'
                 )
+
+                if solver_lookup_failed:
+                    bt.logging.warning(f'Skipping issue due to solver lookup failure: {issue_label}')
+                    continue
 
                 if not solver_github_id:
                     bt.logging.info(f'No identifiable solver, voting cancel: {issue_label}')

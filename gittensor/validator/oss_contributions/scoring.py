@@ -43,7 +43,7 @@ from gittensor.utils.github_api_tools import (
 )
 from gittensor.validator.oss_contributions.credibility import check_eligibility
 from gittensor.validator.utils.datetime_utils import calculate_time_decay
-from gittensor.validator.utils.load_weights import LanguageConfig, RepositoryConfig, TokenConfig
+from gittensor.validator.utils.load_weights import LanguageConfig, RepositoryConfig, TokenConfig, resolve_repo_weight
 from gittensor.validator.utils.tree_sitter_scoring import calculate_token_score_from_file_changes
 
 
@@ -222,7 +222,7 @@ def calculate_pr_multipliers(
     is_merged = pr.pr_state == PRState.MERGED
     repo_config = master_repositories.get(pr.repository_full_name)
 
-    pr.repo_weight_multiplier = round(repo_config.weight if repo_config else 0.01, 2)
+    pr.repo_weight_multiplier = resolve_repo_weight(repo_config)
     pr.issue_multiplier = round(calculate_issue_multiplier(pr), 2)
     pr.label_multiplier = LABEL_MULTIPLIERS.get(pr.label, 1.0) if pr.label else 1.0
 

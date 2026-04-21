@@ -17,6 +17,7 @@ from gittensor.validator.utils.load_weights import (
     load_master_repo_weights,
     load_programming_language_weights,
     load_token_config,
+    resolve_repo_weight,
 )
 
 
@@ -158,6 +159,37 @@ class TestBannedOrganizations:
                 active_banned.append(repo_name)
 
         assert len(active_banned) == 0, f'Found {len(active_banned)} active repos from banned orgs: {active_banned}'
+
+
+class TestResolveRepoWeight:
+    """Tests for resolve_repo_weight — full-precision repo weight lookup."""
+
+    def test_none_returns_default(self):
+        assert resolve_repo_weight(None) == 0.01
+
+    @pytest.mark.parametrize(
+        'weight',
+        [
+            0.0349,
+            0.0351,
+            0.0346,
+            0.0450,
+            0.4274,
+            1.0,
+        ],
+    )
+    def test_preserves_full_precision(self, weight):
+        """Previously `round(weight, 2)` truncated to 2 decimals — now full precision is preserved."""
+        config = RepositoryConfig(weight=weight)
+        assert resolve_repo_weight(config) == weight
+
+    def test_live_master_repo_precision(self):
+        """Live check: cronboard (0.0349) and fzf (0.0351) should no longer collapse to 0.03/0.04."""
+        repos = load_master_repo_weights()
+        if 'antoniorodr/cronboard' in repos:
+            assert resolve_repo_weight(repos['antoniorodr/cronboard']) == pytest.approx(0.0349, abs=1e-9)
+        if 'junegunn/fzf' in repos:
+            assert resolve_repo_weight(repos['junegunn/fzf']) == pytest.approx(0.0351, abs=1e-9)
 
 
 if __name__ == '__main__':

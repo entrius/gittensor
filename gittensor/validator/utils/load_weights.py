@@ -39,6 +39,12 @@ class RepositoryConfig:
     additional_acceptable_branches: Optional[List[str]] = None
 
 
+def resolve_repo_weight(repo_config: Optional[RepositoryConfig]) -> float:
+    if repo_config is None:
+        return 0.01
+    return repo_config.weight
+
+
 @dataclass
 class TokenConfig:
     """Configuration for token-based scoring weights.

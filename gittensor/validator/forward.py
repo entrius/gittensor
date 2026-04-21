@@ -174,6 +174,8 @@ def blend_emission_pools(
             f'Treasury allocation: UID {ISSUES_TREASURY_UID} receives '
             f'{ISSUES_TREASURY_EMISSION_SHARE * 100:.0f}% of emissions'
         )
+    else:
+        recycle_extra += ISSUES_TREASURY_EMISSION_SHARE
 
     # Pool 4: Recycle (25% + unclaimed from empty pools)
     if RECYCLE_UID in miner_uids:

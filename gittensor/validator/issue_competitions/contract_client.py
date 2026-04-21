@@ -116,7 +116,7 @@ class IssueCompetitionContractClient:
         except ValueError:
             raise
         except Exception as e:
-            bt.logging.warning(f'Could not verify contract at {self.contract_address}: {e}')
+            raise ValueError(f'Could not verify contract at {self.contract_address}: {e}') from e
 
         bt.logging.debug(f'Contract client initialized: {self.contract_address}')
 

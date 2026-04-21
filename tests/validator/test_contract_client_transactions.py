@@ -71,6 +71,38 @@ def wallet():
     return w
 
 
+def test_init_verifies_contract_exists():
+    subtensor = MagicMock()
+    subtensor.substrate.query.return_value = SimpleNamespace(value={'trie_id': '0x01'})
+
+    client = IssueCompetitionContractClient(contract_address='5FakeContract', subtensor=subtensor)
+
+    assert client.contract_address == '5FakeContract'
+    assert client.subtensor is subtensor
+    subtensor.substrate.query.assert_called_once_with('Contracts', 'ContractInfoOf', ['5FakeContract'])
+
+
+def test_init_raises_when_contract_missing():
+    subtensor = MagicMock()
+    subtensor.substrate.query.return_value = SimpleNamespace(value=None)
+
+    with pytest.raises(ValueError) as exc_info:
+        IssueCompetitionContractClient(contract_address='5FakeContract', subtensor=subtensor)
+
+    assert 'No contract found at 5FakeContract' in str(exc_info.value)
+
+
+def test_init_raises_when_contract_cannot_be_verified():
+    subtensor = MagicMock()
+    subtensor.substrate.query.side_effect = RuntimeError('rpc down')
+
+    with pytest.raises(ValueError) as exc_info:
+        IssueCompetitionContractClient(contract_address='5FakeContract', subtensor=subtensor)
+
+    assert 'Could not verify contract at 5FakeContract' in str(exc_info.value)
+    assert 'rpc down' in str(exc_info.value)
+
+
 @pytest.mark.parametrize(
     'method, kwargs_fn, contract_method, expected_args, uses_hotkey, has_gas', METHOD_TABLE, ids=_IDS
 )

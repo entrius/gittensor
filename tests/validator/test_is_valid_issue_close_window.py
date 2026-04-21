@@ -43,9 +43,7 @@ def test_issue_closed_at_merge_is_valid(pr_factory, issue_factory):
 def test_issue_closed_shortly_after_merge_is_valid(pr_factory, issue_factory):
     """GitHub auto-close can lag merge by a few seconds."""
     now = datetime.now(timezone.utc)
-    pr, issue = _make_pr_and_issue(
-        pr_factory, issue_factory, merged_at=now, closed_at=now + timedelta(seconds=5)
-    )
+    pr, issue = _make_pr_and_issue(pr_factory, issue_factory, merged_at=now, closed_at=now + timedelta(seconds=5))
     assert is_valid_issue(issue, pr) is True
 
 
@@ -88,7 +86,5 @@ def test_issue_closed_beyond_skew_buffer_is_rejected(pr_factory, issue_factory):
 def test_issue_closed_23h_before_merge_is_rejected(pr_factory, issue_factory):
     """Exploit documented in the bug report: legit issue closed ~23h earlier."""
     now = datetime.now(timezone.utc)
-    pr, issue = _make_pr_and_issue(
-        pr_factory, issue_factory, merged_at=now, closed_at=now - timedelta(hours=23)
-    )
+    pr, issue = _make_pr_and_issue(pr_factory, issue_factory, merged_at=now, closed_at=now - timedelta(hours=23))
     assert is_valid_issue(issue, pr) is False

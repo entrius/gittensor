@@ -1,5 +1,6 @@
 # The MIT License (MIT)
 # Copyright © 2025 Entrius
+import re
 from collections import Counter
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
 
@@ -80,10 +81,8 @@ def parse_code(content: str, language: str) -> Optional[Tree]:
         return None
 
 
-# Type alias for node signatures
-# Structural: ("structural", node_type)
-# Leaf: ("leaf", node_type, text)
-NodeSignature = Union[Tuple[str, str], Tuple[str, str, str]]
+# Type alias for node signatures; trailing bool flags inline-test-block membership.
+NodeSignature = Union[Tuple[str, str, bool], Tuple[str, str, str, bool]]
 
 
 def is_comment_node(node: Node) -> bool:
@@ -94,46 +93,24 @@ def is_comment_node(node: Node) -> bool:
 def collect_node_signatures(
     tree: Tree,
     weights: TokenConfig,
+    test_ranges: Optional[List[Tuple[int, int]]] = None,
 ) -> Counter[NodeSignature]:
-    """
-    Collect node signatures from an AST for tree diff comparison.
-
-    Walks the tree and collects signatures for:
-    - Structural nodes: ("structural", node_type) - captures structure without content
-    - Leaf nodes: ("leaf", node_type, text) - captures content for meaningful tokens
-
-    Comments are skipped entirely (score 0).
-
-    Args:
-        tree: Parsed tree-sitter AST
-        weights: TokenConfig instance with structural_bonus definitions
-
-    Returns:
-        Counter of node signatures (multiset for handling duplicates)
-    """
+    """Collect node signatures (tagged by inline-test-block membership) for tree diff."""
     signatures: Counter[NodeSignature] = Counter()
 
+    def in_test(line: int) -> bool:
+        return bool(test_ranges) and any(s <= line <= e for s, e in test_ranges)
+
     def walk_node(node: Node) -> None:
-        # Skip comments entirely
         if is_comment_node(node):
             return
-
         node_type = node.type
-
-        # Check if this is a structural node (has structural bonus)
+        is_t = in_test(node.start_point[0])
         if weights.get_structural_weight(node_type) > 0:
-            # Structural signature: only type matters (not content)
-            signatures[('structural', node_type)] += 1
-
-        # Check if this is a leaf node
-        if node.child_count == 0:
-            # Skip comment types at leaf level too
-            if node_type not in COMMENT_NODE_TYPES:
-                # Leaf signature: type + text content
-                text = node.text.decode('utf-8') if node.text else ''
-                signatures[('leaf', node_type, text)] += 1
-
-        # Recurse into children
+            signatures[('structural', node_type, is_t)] += 1
+        if node.child_count == 0 and node_type not in COMMENT_NODE_TYPES:
+            text = node.text.decode('utf-8') if node.text else ''
+            signatures[('leaf', node_type, text, is_t)] += 1
         for child in node.children:
             walk_node(child)
 
@@ -154,6 +131,83 @@ def has_inline_tests(content: str, extension: str) -> bool:
     if pattern is None:
         return False
     return pattern.search(content) is not None
+
+
+_INNER_CFG_TEST = re.compile(r'^\s*#!\[cfg\(test\)\]', re.MULTILINE)
+
+
+def _inline_test_line_ranges(content: Optional[str], extension: str) -> List[Tuple[int, int]]:
+    if not content or extension not in INLINE_TEST_EXTENSIONS:
+        return []
+    pattern = INLINE_TEST_PATTERNS.get(extension)
+    if pattern is None:
+        return []
+    lines = content.split('\n')
+    n = len(lines)
+    if _INNER_CFG_TEST.search(content):
+        return [(0, n - 1)]
+    ranges: List[Tuple[int, int]] = []
+    i = 0
+    while i < n:
+        if pattern.match(lines[i]):
+            j = i
+            while j < n and j - i < 6 and '{' not in lines[j]:
+                j += 1
+            if j < n and '{' in lines[j]:
+                depth = lines[j].count('{') - lines[j].count('}')
+                end = j
+                while depth > 0 and end + 1 < n:
+                    end += 1
+                    depth += lines[end].count('{') - lines[end].count('}')
+                ranges.append((i, end))
+                i = end + 1
+                continue
+        i += 1
+    return ranges
+
+
+def _score_tree_diff_split(
+    old_content: Optional[str],
+    new_content: Optional[str],
+    extension: str,
+    weights: TokenConfig,
+) -> Tuple[ScoreBreakdown, ScoreBreakdown]:
+    prod_bd = ScoreBreakdown()
+    test_bd = ScoreBreakdown()
+    language = weights.get_language(extension)
+    if not language:
+        return prod_bd, test_bd
+    old_sigs: Counter[NodeSignature] = Counter()
+    new_sigs: Counter[NodeSignature] = Counter()
+    if old_content:
+        old_tree = parse_code(old_content, language)
+        if old_tree:
+            old_sigs = collect_node_signatures(old_tree, weights, _inline_test_line_ranges(old_content, extension))
+    if new_content:
+        new_tree = parse_code(new_content, language)
+        if new_tree:
+            new_sigs = collect_node_signatures(new_tree, weights, _inline_test_line_ranges(new_content, extension))
+    for sig, count in (new_sigs - old_sigs).items():
+        bd = test_bd if sig[-1] else prod_bd
+        if sig[0] == 'structural':
+            w = weights.get_structural_weight(sig[1])
+            bd.structural_added_count += count
+            bd.structural_added_score += w * count
+        else:
+            w = weights.get_leaf_weight(sig[1])
+            bd.leaf_added_count += count
+            bd.leaf_added_score += w * count
+    for sig, count in (old_sigs - new_sigs).items():
+        bd = test_bd if sig[-1] else prod_bd
+        if sig[0] == 'structural':
+            w = weights.get_structural_weight(sig[1])
+            bd.structural_deleted_count += count
+            bd.structural_deleted_score += w * count
+        else:
+            w = weights.get_leaf_weight(sig[1])
+            bd.leaf_deleted_count += count
+            bd.leaf_deleted_score += w * count
+    return prod_bd, test_bd
 
 
 def score_tree_diff(
@@ -330,34 +384,68 @@ def calculate_token_score_from_file_changes(
                     scoring_method='skipped-unsupported',
                 )
             else:
-                # Tree diff scoring - compare old and new ASTs
                 old_content = content_pair.old_content
                 new_content = content_pair.new_content
-                file_breakdown = score_tree_diff(old_content, new_content, ext, weights)
-
                 lang_config = programming_languages.get(ext)
                 lang_weight = lang_config.weight if lang_config else 1.0
-
-                # For non-test files in inline-test languages, check if the current
-                # file contains inline tests and downweight the entire file if so
-                if not is_test_file and ext in INLINE_TEST_EXTENSIONS:
-                    if has_inline_tests(new_content, ext):
-                        is_test_file = True
-                        file_weight = TEST_FILE_CONTRIBUTION_WEIGHT
-
-                combined_weight = lang_weight * file_weight
-                file_breakdown = file_breakdown.with_weight(combined_weight)
-                nodes_scored = file_breakdown.added_count + file_breakdown.deleted_count
-
-                file_result = FileScoreResult(
-                    filename=file.short_name,
-                    score=file_breakdown.total_score,
-                    nodes_scored=nodes_scored,
-                    total_lines=file.changes,
-                    is_test_file=is_test_file,
-                    scoring_method='tree-diff',
-                    breakdown=file_breakdown,
-                )
+                if not is_test_file and ext in INLINE_TEST_EXTENSIONS and (
+                    has_inline_tests(new_content or '', ext) or has_inline_tests(old_content or '', ext)
+                ):
+                    prod_bd, test_bd = _score_tree_diff_split(old_content, new_content, ext, weights)
+                    prod_bd = prod_bd.with_weight(lang_weight)
+                    test_bd = test_bd.with_weight(lang_weight * TEST_FILE_CONTRIBUTION_WEIGHT)
+                    pn = prod_bd.added_count + prod_bd.deleted_count
+                    tn = test_bd.added_count + test_bd.deleted_count
+                    tot = pn + tn
+                    if tot > 0:
+                        p_lines = round(file.changes * pn / tot)
+                        t_lines = file.changes - p_lines
+                        for bd, nc, ln, is_t in ((prod_bd, pn, p_lines, False), (test_bd, tn, t_lines, True)):
+                            if nc == 0:
+                                continue
+                            fr = FileScoreResult(
+                                filename=file.short_name,
+                                score=bd.total_score,
+                                nodes_scored=nc,
+                                total_lines=ln,
+                                is_test_file=is_t,
+                                scoring_method='tree-diff',
+                                breakdown=bd,
+                            )
+                            file_results.append(fr)
+                            cat = fr.category
+                            cat_files.setdefault(cat, []).append(fr)
+                            cat_score[cat] = cat_score.get(cat, 0.0) + fr.score
+                            cat_nodes[cat] = cat_nodes.get(cat, 0) + fr.nodes_scored
+                            cat_lines[cat] = cat_lines.get(cat, 0) + fr.total_lines
+                            total_score += fr.score
+                            total_nodes += fr.nodes_scored
+                            total_lines += fr.total_lines
+                            cat_breakdowns.setdefault(cat, []).append(bd)
+                            all_breakdowns.append(bd)
+                        continue
+                    file_result = FileScoreResult(
+                        filename=file.short_name,
+                        score=0.0,
+                        nodes_scored=0,
+                        total_lines=file.changes,
+                        is_test_file=False,
+                        scoring_method='tree-diff',
+                    )
+                else:
+                    file_breakdown = score_tree_diff(old_content, new_content, ext, weights)
+                    combined_weight = lang_weight * file_weight
+                    file_breakdown = file_breakdown.with_weight(combined_weight)
+                    nodes_scored = file_breakdown.added_count + file_breakdown.deleted_count
+                    file_result = FileScoreResult(
+                        filename=file.short_name,
+                        score=file_breakdown.total_score,
+                        nodes_scored=nodes_scored,
+                        total_lines=file.changes,
+                        is_test_file=is_test_file,
+                        scoring_method='tree-diff',
+                        breakdown=file_breakdown,
+                    )
 
         # Accumulate into results and per-category totals
         file_results.append(file_result)

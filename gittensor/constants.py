@@ -108,7 +108,6 @@ PIONEER_DIVIDEND_MAX_RATIO = 1.0  # Cap dividend at 1× pioneer's own earned_sco
 
 # Issue boosts
 MAX_ISSUE_CLOSE_WINDOW_DAYS = 1
-ISSUE_CLOSE_CLOCK_SKEW_SECONDS = 60  # tolerance for issue.closed_at < pr.merged_at caused by GitHub clock skew
 
 # Time decay (sigmoid curve)
 TIME_DECAY_GRACE_PERIOD_HOURS = 12  # hours before time decay begins

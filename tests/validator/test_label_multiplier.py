@@ -64,11 +64,25 @@ def _parse(current, timeline):
         (['Bug'], ['Bug'], 'bug'),
         # Null label node (PR #553 — deleted repo label)
         (['feature'], [None, 'feature'], 'feature'),
-        (['feature'], [None], None),
+        (['feature'], [None], 'feature'),
         # Remove-and-replace: feature removed, bug added
         (['bug'], ['feature', 'bug'], 'bug'),
         # Only scoring label was removed
         (['lgtm'], ['feature'], None),
+        # Timeline truncated: scoring label in current but not in last-5 events (#646)
+        (
+            ['bug', 'size:s', 'area:test', 'priority:low', 'status:triaged'],
+            ['size:s', 'area:test', 'priority:low', 'status:triaged', 'lgtm'],
+            'bug',
+        ),
+        # Timeline truncated: penalty label still applied via fallback
+        (['refactor', 'size:M', 'lgtm'], ['size:M', 'lgtm'], 'refactor'),
+        # Timeline truncated: multiple scoring labels both truncated — highest multiplier wins
+        (['feature', 'bug'], [], 'feature'),
+        # Timeline partially truncated: one scoring label in timeline wins over truncated one
+        (['feature', 'bug'], ['bug'], 'bug'),
+        # Empty timeline with scoring label in current
+        (['enhancement'], [], 'enhancement'),
     ],
 )
 def test_label_extraction(current, timeline, expected):

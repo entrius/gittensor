@@ -304,12 +304,16 @@ class PullRequest:
 
         current = {(n.get('name') or '').lower() for n in (pr_data.get('labels') or {}).get('nodes') or [] if n}
         label: Optional[str] = None
-        if not current.isdisjoint(LABEL_MULTIPLIERS):
+        scoring_labels = current & LABEL_MULTIPLIERS.keys()
+        if scoring_labels:
             for event in reversed((pr_data.get('timelineItems') or {}).get('nodes') or []):
                 name = ((event or {}).get('label') or {}).get('name', '').lower()
-                if name in current and name in LABEL_MULTIPLIERS:
+                if name in scoring_labels:
                     label = name
                     break
+            if label is None:
+                # Timeline truncated — fall back to highest-multiplier currently-applied label
+                label = max(scoring_labels, key=lambda n: (LABEL_MULTIPLIERS[n], n))
 
         return cls(
             number=pr_data['number'],

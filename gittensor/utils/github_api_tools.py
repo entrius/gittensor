@@ -463,7 +463,7 @@ def _search_issue_referencing_prs_graphql(
         if not pr:
             continue
 
-        base_repo = pr.get('baseRepository', {}).get('nameWithOwner', '')
+        base_repo = (pr.get('baseRepository') or {}).get('nameWithOwner', '')
         if base_repo.lower() != repo.lower():
             continue
 

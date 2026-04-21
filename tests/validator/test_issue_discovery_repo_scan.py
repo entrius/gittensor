@@ -83,3 +83,61 @@ def test_scan_repo_sets_state_reason_none_when_missing(monkeypatch):
     assert '1001' in result
     assert result['1001'][0].state_reason is None
     assert result['1001'][0].is_transferred is False
+
+
+def test_scan_repo_treats_non_miner_solver_as_case_2(monkeypatch):
+    monkeypatch.setattr(
+        repo_scan,
+        '_fetch_closed_issues',
+        lambda repo_name, since, token: [_make_raw('completed', 46)],
+    )
+    monkeypatch.setattr(
+        repo_scan,
+        'find_solver_from_cross_references',
+        lambda repo, issue_number, token: (2002, 99),
+    )
+
+    result: dict = {}
+    asyncio.get_event_loop().run_until_complete(
+        repo_scan._scan_repo(
+            repo_name='test/repo',
+            lookback_date='2026-01-01T00:00:00Z',
+            validator_pat='x',
+            miner_github_ids={'1001'},
+            known_issues=set(),
+            result=result,
+            lookup_cap=10,
+        )
+    )
+
+    assert result['1001'][0].closed_at is not None
+    assert result['1001'][0].pr_number == 99
+
+
+def test_scan_repo_treats_miner_solver_as_case_3(monkeypatch):
+    monkeypatch.setattr(
+        repo_scan,
+        '_fetch_closed_issues',
+        lambda repo_name, since, token: [_make_raw('completed', 47)],
+    )
+    monkeypatch.setattr(
+        repo_scan,
+        'find_solver_from_cross_references',
+        lambda repo, issue_number, token: (1001, 100),
+    )
+
+    result: dict = {}
+    asyncio.get_event_loop().run_until_complete(
+        repo_scan._scan_repo(
+            repo_name='test/repo',
+            lookback_date='2026-01-01T00:00:00Z',
+            validator_pat='x',
+            miner_github_ids={'1001'},
+            known_issues=set(),
+            result=result,
+            lookup_cap=10,
+        )
+    )
+
+    assert result['1001'][0].closed_at is None
+    assert result['1001'][0].pr_number == 100

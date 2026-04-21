@@ -210,7 +210,7 @@ async def _scan_repo(
             state_reason=(issue_raw.get('state_reason') or '').upper() or None,
         )
 
-        if solver_id is not None:
+        if solver_id is not None and str(solver_id) not in miner_github_ids:
             # Case 2: solved by non-miner PR → positive credibility
             issue.closed_at = _parse_iso(issue_raw.get('closed_at'))
         else:

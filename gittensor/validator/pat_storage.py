@@ -65,6 +65,15 @@ def get_pat_by_uid(uid: int) -> Optional[dict]:
         return None
 
 
+def get_pat_by_github_id(github_id: str) -> Optional[dict]:
+    """Look up a single PAT entry by GitHub ID. Returns None if not found."""
+    with _lock:
+        for entry in _read_file():
+            if entry.get('github_id') == github_id:
+                return entry
+        return None
+
+
 def remove_pat(uid: int) -> bool:
     """Remove a PAT entry by UID. Returns True if an entry was removed."""
     with _lock:

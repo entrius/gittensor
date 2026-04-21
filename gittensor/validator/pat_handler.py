@@ -61,6 +61,22 @@ async def handle_pat_broadcast(validator: 'Validator', synapse: PatBroadcastSyna
                 'GitHub identity is locked for this hotkey. Deregister and re-register to change GitHub accounts.'
             )
 
+    # 3b. Enforce one active miner per GitHub account across the subnet
+    existing_github = pat_storage.get_pat_by_github_id(github_id or '0')
+    if existing_github and (
+        existing_github.get('uid') != uid or existing_github.get('hotkey') != hotkey
+    ):
+        existing_hotkey = existing_github.get('hotkey')
+        existing_uid = existing_github.get('uid')
+        if existing_hotkey in validator.metagraph.hotkeys:
+            live_uid = validator.metagraph.hotkeys.index(existing_hotkey)
+            if live_uid == existing_uid:
+                return _reject('GitHub identity is already registered to another active miner')
+
+        # Stale entry: old hotkey is gone or moved to a different UID, so reclaim it.
+        if existing_uid is not None:
+            pat_storage.remove_pat(existing_uid)
+
     # 4. Test query against a known repo to catch org-restricted PATs
     test_error = _test_pat_against_repo(synapse.github_access_token)
     if test_error:

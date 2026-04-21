@@ -83,9 +83,9 @@ def issues_list(issue_id: int, network: str, rpc_url: str, contract: str, verbos
             if issue is None:
                 emit_error_json(f'Issue {issue_id} not found on-chain.', error_type='not_found')
                 raise SystemExit(1)
-            emit_json(issue)
+            emit_json({'success': True, 'issue': issue})
         else:
-            emit_json(issues)
+            emit_json({'success': True, 'issue_count': len(issues), 'issues': issues})
         return
 
     # Single issue detail view
@@ -206,6 +206,7 @@ def issues_bounty_pool(network: str, rpc_url: str, contract: str, verbose: bool,
         if as_json:
             emit_json(
                 {
+                    'success': True,
                     'total_bounty_pool_raw': total_bounty_pool,
                     'total_bounty_pool_alpha': format_alpha(total_bounty_pool, 4),
                     'issue_count': len(issues),
@@ -263,6 +264,7 @@ def issues_pending_harvest(network: str, rpc_url: str, contract: str, verbose: b
         if as_json:
             emit_json(
                 {
+                    'success': True,
                     'treasury_stake_raw': treasury_stake,
                     'treasury_stake_alpha': format_alpha(treasury_stake, 4),
                     'allocated_bounties_raw': total_bounty_pool,
@@ -305,7 +307,7 @@ def admin_info(network: str, rpc_url: str, contract: str, verbose: bool, as_json
 
         if packed:
             if as_json:
-                emit_json(packed)
+                emit_json({'success': True, **packed})
                 return
 
             console.print(

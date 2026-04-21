@@ -108,13 +108,6 @@ def add_args(cls, parser):
         default=False,
     )
 
-    parser.add_argument(
-        '--wandb.project',
-        type=str,
-        default='gittensor-validators',
-        help='Wandb project to log to.',
-    )
-
 
 def add_validator_args(cls, parser):
     """Add validator specific arguments to the parser."""
@@ -141,13 +134,6 @@ def add_validator_args(cls, parser):
     )
 
     parser.add_argument(
-        '--neuron.sample_size',
-        type=int,
-        help='The number of miners to query in a single step.',
-        default=50,
-    )
-
-    parser.add_argument(
         '--neuron.disable_set_weights',
         action='store_true',
         help='Disables setting weights.',
@@ -169,27 +155,6 @@ def add_validator_args(cls, parser):
         #   be blacklisted by the firewall of serving peers on the network.
         help='Set this flag to not attempt to serve an Axon.',
         default=False,
-    )
-
-    parser.add_argument(
-        '--neuron.vpermit_tao_limit',
-        type=int,
-        help='The maximum number of TAO allowed to query a validator with a vpermit.',
-        default=4096,
-    )
-
-    parser.add_argument(
-        '--wandb.project_name',
-        type=str,
-        help='The name of the project where you are sending the new run.',
-        default='template-validators',
-    )
-
-    parser.add_argument(
-        '--wandb.entity',
-        type=str,
-        help='The name of the project where you are sending the new run.',
-        default='opentensor-dev',
     )
 
 

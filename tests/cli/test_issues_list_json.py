@@ -6,6 +6,8 @@
 import json
 from unittest.mock import patch
 
+import click
+
 FAKE_ISSUES = [
     {
         'id': 1,
@@ -35,3 +37,24 @@ def test_issues_list_json_missing_issue_returns_structured_error(cli_root, runne
     assert payload['success'] is False
     assert payload['error']['type'] == 'not_found'
     assert '999' in payload['error']['message']
+
+
+def test_issues_list_json_contract_read_failure_returns_structured_error(cli_root, runner):
+    with (
+        patch(
+            'gittensor.cli.issue_commands.view._resolve_contract_and_network',
+            return_value=('5Fakeaddr', 'ws://x', 'test'),
+        ),
+        patch(
+            'gittensor.cli.issue_commands.view.read_issues_from_contract',
+            side_effect=click.ClickException('Error reading from contract: node down'),
+        ),
+    ):
+        result = runner.invoke(cli_root, ['issues', 'list', '--json'], catch_exceptions=False)
+
+    assert result.exit_code != 0
+
+    payload = json.loads(result.output)
+    assert payload['success'] is False
+    assert payload['error']['type'] == 'contract_read_error'
+    assert 'node down' in payload['error']['message']

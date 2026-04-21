@@ -70,8 +70,14 @@ def issues_list(issue_id: int, network: str, rpc_url: str, contract: str, verbos
     if not as_json:
         print_network_header(network_name, contract_addr)
 
-    with console.status('[bold cyan]Reading issues from contract...', spinner='dots'):
-        issues = read_issues_from_contract(ws_endpoint, contract_addr, verbose)
+    try:
+        with console.status('[bold cyan]Reading issues from contract...', spinner='dots'):
+            issues = read_issues_from_contract(ws_endpoint, contract_addr, verbose)
+    except click.ClickException as e:
+        if as_json:
+            emit_error_json(str(e), error_type='contract_read_error')
+            raise SystemExit(1)
+        _handle_command_error(e)
 
     if as_json:
         # Enrich with human-readable ALPHA amounts for JSON consumers

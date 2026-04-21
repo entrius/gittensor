@@ -6,6 +6,8 @@
 import json
 from unittest.mock import patch
 
+import click
+
 
 def test_submissions_json_schema_is_stable(cli_root, runner, sample_issue, sample_prs):
     with (
@@ -91,6 +93,28 @@ def test_submissions_json_missing_contract_returns_config_error(cli_root, runner
     assert payload['success'] is False
     assert payload['error']['type'] == 'config_error'
     assert 'Contract address not configured' in payload['error']['message']
+
+
+def test_submissions_json_contract_read_failure_returns_structured_error(cli_root, runner):
+    with (
+        patch('gittensor.cli.issue_commands.submissions.get_contract_address', return_value='0xabc'),
+        patch('gittensor.cli.issue_commands.submissions.resolve_network', return_value=('ws://x', 'test')),
+        patch(
+            'gittensor.cli.issue_commands.submissions.fetch_issue_from_contract',
+            side_effect=click.ClickException('Error reading from contract: node down'),
+        ),
+    ):
+        result = runner.invoke(
+            cli_root,
+            ['issues', 'submissions', '--id', '42', '--json'],
+            catch_exceptions=False,
+        )
+
+    assert result.exit_code != 0
+    payload = json.loads(result.output)
+    assert payload['success'] is False
+    assert payload['error']['type'] == 'cli_error'
+    assert 'node down' in payload['error']['message']
 
 
 def test_submissions_json_invalid_issue_id_returns_bad_parameter(cli_root, runner):

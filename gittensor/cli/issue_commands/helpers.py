@@ -843,14 +843,11 @@ def read_issues_from_contract(ws_endpoint: str, contract_addr: str, verbose: boo
         return _read_issues_from_child_storage(substrate, contract_addr, verbose)
 
     except ImportError as e:
-        console.print(f'[yellow]Cannot read from contract: {e}[/yellow]')
-        console.print('[dim]Install with: uv sync[/dim]')
-        return []
+        raise click.ClickException(f'Cannot read from contract: {e}. Install with: uv sync')
     except Exception as e:
         if verbose:
             console.print(f'[dim]Debug: Connection/read error: {e}[/dim]')
-        console.print(f'[yellow]Error reading from contract: {e}[/yellow]')
-        return []
+        raise click.ClickException(f'Error reading from contract: {e}')
 
 
 def fetch_issue_from_contract(

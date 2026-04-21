@@ -253,8 +253,16 @@ class TestValidateGitHubIssue:
     def test_closed_issue_warns_and_returns_data(self):
         """Issue #210 Task 3: closed → warn 'Issue #{number} is already closed.', do not reject."""
         issue_data = {'state': 'closed', 'number': 42, 'title': 'Test'}
-        mock_resp = type('Resp', (), {'read': lambda self: json.dumps(issue_data).encode()})()
-        with patch('urllib.request.urlopen', return_value=mock_resp):
+        mock_resp = type(
+            'Resp',
+            (),
+            {
+                'status_code': 200,
+                'ok': True,
+                'json': lambda self: issue_data,
+            },
+        )()
+        with patch('gittensor.cli.issue_commands.helpers.requests.get', return_value=mock_resp):
             with patch('gittensor.cli.issue_commands.helpers.console.print') as mock_print:
                 result = validate_github_issue('owner', 'repo', 42)
         assert result == issue_data

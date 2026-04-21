@@ -1076,22 +1076,6 @@ def find_solver_from_cross_references(
     return best.get('author_id'), best.get('number')
 
 
-def find_solver_from_timeline(
-    repo: str, issue_number: int, token: str
-) -> Optional[tuple[Optional[int], Optional[int]]]:
-    """Find the PR author who closed an issue.
-
-    Uses GraphQL cross-reference analysis to find merged PRs that close the
-    issue, with baseRepository validation and closingIssuesReferences check.
-
-    Returns:
-        ``None`` when lookup fails and should be retried later. Otherwise
-        ``(solver_github_id, pr_number)`` where either may be None if not found.
-    """
-    bt.logging.debug(f'Finding solver for {repo}#{issue_number}')
-    return find_solver_from_cross_references(repo, issue_number, token)
-
-
 def check_github_issue_closed(repo: str, issue_number: int, token: str) -> Optional[Dict[str, Any]]:
     """Check if a GitHub issue is closed and get the solving PR info.
 
@@ -1121,7 +1105,8 @@ def check_github_issue_closed(repo: str, issue_number: int, token: str) -> Optio
         if data.get('state') != 'closed':
             return {'is_closed': False}
 
-        solver_lookup = find_solver_from_timeline(repo, issue_number, token)
+        bt.logging.debug(f'Finding solver for {repo}#{issue_number}')
+        solver_lookup = find_solver_from_cross_references(repo, issue_number, token)
         if solver_lookup is None:
             bt.logging.warning(f'Solver lookup failed for {repo}#{issue_number}')
             solver_lookup_failed = True

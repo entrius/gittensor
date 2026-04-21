@@ -129,14 +129,14 @@ def issue_register(
 
     # Validate inputs before showing summary
     try:
-        owner, repo_name = validate_repository(repo)
+        owner, repo_name = validate_repository(repo, require_verified_exists=True)
         bounty_amount = validate_bounty_amount(bounty)
         if issue_number < 1 or issue_number > MAX_ISSUE_NUMBER:
             raise click.BadParameter(
                 f'Issue number must be between 1 and {MAX_ISSUE_NUMBER} (got {issue_number})',
                 param_hint='--issue',
             )
-        validate_github_issue(owner, repo_name, issue_number)
+        validate_github_issue(owner, repo_name, issue_number, require_verified_exists=True)
     except click.BadParameter as e:
         raise click.ClickException(str(e))
 

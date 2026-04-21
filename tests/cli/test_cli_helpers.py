@@ -213,6 +213,23 @@ class TestValidateRepository:
             validate_repository('no-slash', verify_exists=False)
         assert exc_info.value.param_hint == '--repo'
 
+    def test_require_verified_exists_rejects_skipped_api_check(self):
+        mock_resp = type(
+            'Resp',
+            (),
+            {
+                'status_code': 500,
+                'ok': False,
+            },
+        )()
+        with (
+            patch('gittensor.cli.issue_commands.helpers.requests.get', return_value=mock_resp),
+            pytest.raises(click.BadParameter) as exc_info,
+        ):
+            validate_repository('owner/repo', require_verified_exists=True)
+        assert exc_info.value.param_hint == '--repo'
+        assert 'Could not verify repository' in str(exc_info.value)
+
 
 # =============================================================================
 # validate_issue_id
@@ -269,6 +286,23 @@ class TestValidateGitHubIssue:
         mock_print.assert_called_once()
         call_args = mock_print.call_args[0][0]
         assert 'Issue #42 is already closed' in call_args
+
+    def test_require_verified_exists_rejects_skipped_issue_check(self):
+        mock_resp = type(
+            'Resp',
+            (),
+            {
+                'status_code': 503,
+                'ok': False,
+            },
+        )()
+        with (
+            patch('gittensor.cli.issue_commands.helpers.requests.get', return_value=mock_resp),
+            pytest.raises(click.BadParameter) as exc_info,
+        ):
+            validate_github_issue('owner', 'repo', 42, require_verified_exists=True)
+        assert exc_info.value.param_hint == '--issue'
+        assert 'Could not verify issue #42' in str(exc_info.value)
 
 
 # =============================================================================
@@ -455,6 +489,53 @@ class TestCliRegisterValidation:
             )
         assert result.exit_code != 0
         assert 'between' in result.output or over_max in result.output or 'issue' in result.output.lower()
+
+    def test_register_fails_closed_when_repo_verification_is_skipped(self, cli_root, runner):
+        with (
+            patch(
+                'gittensor.cli.issue_commands.mutations._resolve_contract_and_network',
+                return_value=(
+                    '0x1234567890123456789012345678901234567890',
+                    'wss://entrypoint-finney.opentensor.ai:443',
+                    'finney',
+                ),
+            ),
+            patch(
+                'gittensor.cli.issue_commands.mutations.validate_repository',
+                side_effect=click.BadParameter('Could not verify repository', param_hint='--repo'),
+            ),
+        ):
+            result = runner.invoke(
+                cli_root,
+                ['issues', 'register', '--repo', 'owner/repo', '--issue', '1', '--bounty', '10', '-y'],
+                catch_exceptions=False,
+            )
+        assert result.exit_code != 0
+        assert 'Could not verify repository' in result.output
+
+    def test_register_fails_closed_when_issue_verification_is_skipped(self, cli_root, runner):
+        with (
+            patch(
+                'gittensor.cli.issue_commands.mutations._resolve_contract_and_network',
+                return_value=(
+                    '0x1234567890123456789012345678901234567890',
+                    'wss://entrypoint-finney.opentensor.ai:443',
+                    'finney',
+                ),
+            ),
+            patch('gittensor.cli.issue_commands.mutations.validate_repository', return_value=('owner', 'repo')),
+            patch(
+                'gittensor.cli.issue_commands.mutations.validate_github_issue',
+                side_effect=click.BadParameter('Could not verify issue', param_hint='--issue'),
+            ),
+        ):
+            result = runner.invoke(
+                cli_root,
+                ['issues', 'register', '--repo', 'owner/repo', '--issue', '1', '--bounty', '10', '-y'],
+                catch_exceptions=False,
+            )
+        assert result.exit_code != 0
+        assert 'Could not verify issue' in result.output
 
 
 class TestCliVoteValidation:

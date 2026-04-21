@@ -347,7 +347,11 @@ def validate_bounty_amount(bounty: str) -> int:
     return raw
 
 
-def validate_repository(repo: str, verify_exists: bool = True) -> Tuple[str, str]:
+def validate_repository(
+    repo: str,
+    verify_exists: bool = True,
+    require_verified_exists: bool = False,
+) -> Tuple[str, str]:
     """Validate owner/repo format and optionally verify it exists on GitHub.
 
     Returns (owner, repo_name) on success.
@@ -377,16 +381,33 @@ def validate_repository(repo: str, verify_exists: bool = True) -> Tuple[str, str
                     param_hint='--repo',
                 )
             if not resp.ok:
+                if require_verified_exists:
+                    raise click.BadParameter(
+                        f"Could not verify repository '{owner}/{repo_name}' on GitHub "
+                        f'(status {resp.status_code}). Try again when GitHub is reachable.',
+                        param_hint='--repo',
+                    )
                 console.print(
                     f'[yellow]Warning: GitHub API returned {resp.status_code} — skipping existence check[/yellow]'
                 )
         except requests.RequestException:
+            if require_verified_exists:
+                raise click.BadParameter(
+                    f"Could not verify repository '{owner}/{repo_name}' on GitHub. "
+                    'Try again when GitHub is reachable.',
+                    param_hint='--repo',
+                )
             console.print('[yellow]Warning: Could not reach GitHub API — skipping existence check[/yellow]')
 
     return owner, repo_name
 
 
-def validate_github_issue(owner: str, repo: str, issue_number: int) -> Optional[Dict[str, Any]]:
+def validate_github_issue(
+    owner: str,
+    repo: str,
+    issue_number: int,
+    require_verified_exists: bool = False,
+) -> Optional[Dict[str, Any]]:
     """Verify a GitHub issue exists, is open, and is not a pull request.
 
     Returns the issue JSON data on success, or None if verification was skipped
@@ -399,6 +420,12 @@ def validate_github_issue(owner: str, repo: str, issue_number: int) -> Optional[
             timeout=GITHUB_API_TIMEOUT,
         )
     except requests.RequestException:
+        if require_verified_exists:
+            raise click.BadParameter(
+                f'Could not verify issue #{issue_number} in {owner}/{repo} on GitHub. '
+                'Try again when GitHub is reachable.',
+                param_hint='--issue',
+            )
         console.print('[yellow]Warning: Could not reach GitHub API — skipping issue check[/yellow]')
         return None
 
@@ -408,6 +435,12 @@ def validate_github_issue(owner: str, repo: str, issue_number: int) -> Optional[
             param_hint='--issue',
         )
     if not resp.ok:
+        if require_verified_exists:
+            raise click.BadParameter(
+                f'Could not verify issue #{issue_number} in {owner}/{repo} on GitHub '
+                f'(status {resp.status_code}). Try again when GitHub is reachable.',
+                param_hint='--issue',
+            )
         console.print(f'[yellow]Warning: GitHub API returned {resp.status_code} — skipping issue check[/yellow]')
         return None
 

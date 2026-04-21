@@ -169,22 +169,14 @@ class TestResolveRepoWeight:
 
     @pytest.mark.parametrize(
         'weight',
-        [
-            0.0349,
-            0.0351,
-            0.0346,
-            0.0450,
-            0.4274,
-            1.0,
-        ],
+        [0.0349, 0.0351, 0.0487, 0.1025, 0.2017, 1.0],
     )
     def test_preserves_full_precision(self, weight):
-        """Previously `round(weight, 2)` truncated to 2 decimals — now full precision is preserved."""
         config = RepositoryConfig(weight=weight)
         assert resolve_repo_weight(config) == weight
 
     def test_live_master_repo_precision(self):
-        """Live check: cronboard (0.0349) and fzf (0.0351) should no longer collapse to 0.03/0.04."""
+        """cronboard (0.0349) and fzf (0.0351) must not collapse to 0.03/0.04."""
         repos = load_master_repo_weights()
         if 'antoniorodr/cronboard' in repos:
             assert resolve_repo_weight(repos['antoniorodr/cronboard']) == pytest.approx(0.0349, abs=1e-9)

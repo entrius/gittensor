@@ -388,8 +388,10 @@ def calculate_token_score_from_file_changes(
                 new_content = content_pair.new_content
                 lang_config = programming_languages.get(ext)
                 lang_weight = lang_config.weight if lang_config else 1.0
-                if not is_test_file and ext in INLINE_TEST_EXTENSIONS and (
-                    has_inline_tests(new_content or '', ext) or has_inline_tests(old_content or '', ext)
+                if (
+                    not is_test_file
+                    and ext in INLINE_TEST_EXTENSIONS
+                    and (has_inline_tests(new_content or '', ext) or has_inline_tests(old_content or '', ext))
                 ):
                     prod_bd, test_bd = _score_tree_diff_split(old_content, new_content, ext, weights)
                     prod_bd = prod_bd.with_weight(lang_weight)

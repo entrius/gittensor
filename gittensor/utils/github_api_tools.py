@@ -1043,7 +1043,7 @@ def find_solver_from_cross_references(
     - merged, and
     - explicitly closing ``issue_number``.
 
-    If multiple candidates exist, the most recent ``merged_at`` is selected.
+    If multiple candidates exist, the earliest ``merged_at`` is selected.
 
     Returns:
         ``None`` when lookup fails and should be retried later. Otherwise a
@@ -1060,14 +1060,14 @@ def find_solver_from_cross_references(
         return None, None
 
     if len(merged) > 1:
-        bt.logging.warning(f'Multiple closing PRs found for {repo}#{issue_number}, selecting most recent.')
+        bt.logging.warning(f'Multiple closing PRs found for {repo}#{issue_number}, selecting earliest.')
         for candidate in merged:
             bt.logging.debug(
                 f'  PR#{candidate.get("number")}, solver_id={candidate.get("author_id")}, '
                 f'merged_at={candidate.get("merged_at")}'
             )
 
-    merged.sort(key=lambda p: p.get('merged_at') or '', reverse=True)
+    merged.sort(key=lambda p: (p.get('merged_at') or '', p.get('number') or 0))
     best = merged[0]
     bt.logging.debug(
         f'Solver via GraphQL cross-reference: PR#{best.get("number")}, '

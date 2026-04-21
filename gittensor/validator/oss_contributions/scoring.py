@@ -17,6 +17,7 @@ from gittensor.classes import (
 from gittensor.constants import (
     CONTRIBUTION_SCORE_FOR_FULL_BONUS,
     EXCESSIVE_PR_PENALTY_BASE_THRESHOLD,
+    ISSUE_CLOSE_CLOCK_SKEW_SECONDS,
     LABEL_MULTIPLIERS,
     MAINTAINER_ASSOCIATIONS,
     MAINTAINER_ISSUE_MULTIPLIER,
@@ -484,10 +485,17 @@ def is_valid_issue(issue: Issue, pr: PullRequest) -> bool:
             return False
 
         if issue.closed_at and pr.merged_at:
-            days_diff = abs((issue.closed_at - pr.merged_at).total_seconds()) / SECONDS_PER_DAY
-            if days_diff > MAX_ISSUE_CLOSE_WINDOW_DAYS:
+            # Directional: issue must close at or shortly after pr.merged_at.
+            # A small negative buffer absorbs clock skew on GitHub's
+            # merge-and-auto-close path. Rejecting the "issue closed well
+            # before PR merged" case prevents a PR from inheriting the
+            # multiplier of an issue that was actually closed by unrelated work.
+            delta_seconds = (issue.closed_at - pr.merged_at).total_seconds()
+            delta_days = delta_seconds / SECONDS_PER_DAY
+            if delta_seconds < -ISSUE_CLOSE_CLOCK_SKEW_SECONDS or delta_days > MAX_ISSUE_CLOSE_WINDOW_DAYS:
                 bt.logging.warning(
-                    f'Skipping issue #{issue.number} - Issue closed {days_diff:.1f}d from merge (max: {MAX_ISSUE_CLOSE_WINDOW_DAYS})'
+                    f'Skipping issue #{issue.number} - Issue closed {delta_days:+.2f}d from merge '
+                    f'(allowed: [-{ISSUE_CLOSE_CLOCK_SKEW_SECONDS}s, {MAX_ISSUE_CLOSE_WINDOW_DAYS}d])'
                 )
                 return False
 

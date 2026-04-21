@@ -40,7 +40,7 @@ class TestIsValidIssueStateReasonGate:
         issue = issue_factory.create(
             author_login='other_user',
             created_at=now - timedelta(days=5),
-            closed_at=now - timedelta(hours=1),
+            closed_at=now,
             state='CLOSED',
             state_reason=state_reason,
         )

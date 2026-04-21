@@ -29,6 +29,15 @@ class DatabaseStorage:
     def is_enabled(self) -> bool:
         return self.db_connection is not None
 
+    @staticmethod
+    def _validate_stored_count(name: str, stored_count: int | bool, expected_count: int) -> str | None:
+        """Return an error string when a storage helper failed for non-empty input."""
+        if expected_count == 0:
+            return None
+        if isinstance(stored_count, bool):
+            return None if stored_count else f'Failed to store {name}'
+        return None if stored_count == expected_count else f'Failed to store all {name}: stored {stored_count}/{expected_count}'
+
     def store_evaluation(self, miner_eval: MinerEvaluation) -> StorageResult:
         """
         Store all evaluation data in an optimized manner with proper error handling.
@@ -70,6 +79,27 @@ class DatabaseStorage:
             self.repo.cleanup_stale_miner_data(miner_eval)
 
             result.stored_counts['evaluations'] = 1 if self.repo.set_miner_evaluation(miner_eval) else 0
+
+            validation_errors = [
+                self._validate_stored_count('miner', result.stored_counts['miners'], 1),
+                self._validate_stored_count(
+                    'merged pull requests', result.stored_counts['merged_pull_requests'], len(miner_eval.merged_pull_requests)
+                ),
+                self._validate_stored_count(
+                    'open pull requests', result.stored_counts['open_pull_requests'], len(miner_eval.open_pull_requests)
+                ),
+                self._validate_stored_count(
+                    'closed pull requests', result.stored_counts['closed_pull_requests'], len(miner_eval.closed_pull_requests)
+                ),
+                self._validate_stored_count('issues', result.stored_counts['issues'], len(miner_eval.get_all_issues())),
+                self._validate_stored_count(
+                    'file changes', result.stored_counts['file_changes'], len(miner_eval.get_all_file_changes())
+                ),
+                self._validate_stored_count('evaluation', result.stored_counts['evaluations'], 1),
+            ]
+            validation_errors = [error for error in validation_errors if error]
+            if validation_errors:
+                raise RuntimeError('; '.join(validation_errors))
 
             # Commit transaction
             self.db_connection.commit()

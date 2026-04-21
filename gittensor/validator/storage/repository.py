@@ -37,6 +37,10 @@ class BaseRepository:
         self.db = db_connection
         self.logger = logging.getLogger(self.__class__.__name__)
 
+    def _manages_own_transaction(self) -> bool:
+        """Return True when repository methods should commit/rollback directly."""
+        return bool(getattr(self.db, 'autocommit', True))
+
     @contextmanager
     def get_cursor(self):
         """
@@ -63,10 +67,12 @@ class BaseRepository:
         try:
             with self.get_cursor() as cursor:
                 cursor.execute(query, params)
-                self.db.commit()
+                if self._manages_own_transaction():
+                    self.db.commit()
                 return True
         except Exception as e:
-            self.db.rollback()
+            if self._manages_own_transaction():
+                self.db.rollback()
             self.logger.error(f'Error executing command: {e}')
             return False
 
@@ -206,10 +212,12 @@ class Repository(BaseRepository):
                     template=None,
                     page_size=100,
                 )
-                self.db.commit()
+                if self._manages_own_transaction():
+                    self.db.commit()
                 return len(values)
         except Exception as e:
-            self.db.rollback()
+            if self._manages_own_transaction():
+                self.db.rollback()
             self.logger.error(f'Error in bulk pull request storage: {e}')
             return 0
 
@@ -261,10 +269,12 @@ class Repository(BaseRepository):
                 execute_values(
                     cursor, BULK_UPSERT_ISSUES.replace('VALUES %s', 'VALUES %s'), values, template=None, page_size=100
                 )
-                self.db.commit()
+                if self._manages_own_transaction():
+                    self.db.commit()
                 return len(values)
         except Exception as e:
-            self.db.rollback()
+            if self._manages_own_transaction():
+                self.db.rollback()
             self.logger.error(f'Error in bulk issue storage: {e}')
             return 0
 
@@ -310,10 +320,12 @@ class Repository(BaseRepository):
                     template=None,
                     page_size=100,
                 )
-                self.db.commit()
+                if self._manages_own_transaction():
+                    self.db.commit()
                 return len(values)
         except Exception as e:
-            self.db.rollback()
+            if self._manages_own_transaction():
+                self.db.rollback()
             prs = {(fc.pr_number, fc.repository_full_name) for fc in file_changes}
             self.logger.error(f'Error in bulk file change storage: {e} | PRs: {prs}')
             return 0
@@ -366,9 +378,11 @@ class Repository(BaseRepository):
                 from psycopg2.extras import execute_values
 
                 execute_values(cursor, BULK_UPSERT_MINER_EVALUATION, eval_values)
-                self.db.commit()
+                if self._manages_own_transaction():
+                    self.db.commit()
                 return True
         except Exception as e:
-            self.db.rollback()
+            if self._manages_own_transaction():
+                self.db.rollback()
             self.logger.error(f'Error in miner evaluation storage: {e}')
             return False

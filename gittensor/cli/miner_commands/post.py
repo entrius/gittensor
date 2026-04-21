@@ -139,7 +139,7 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_m
         click.echo(
             json.dumps(
                 {
-                    'success': accepted_count > 0,
+                    'success': True,
                     'total_validators': len(results),
                     'accepted': accepted_count,
                     'rejected': len(results) - accepted_count,

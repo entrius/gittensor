@@ -88,7 +88,11 @@ QUERY = """
               mergedBy {
                 login
               }
-              closingIssuesReferences(first: 3) {
+              closingIssuesReferences(first: 20) {
+                pageInfo {
+                  hasNextPage
+                  endCursor
+                }
                 nodes {
                   number
                   title
@@ -141,6 +145,98 @@ QUERY = """
       }
     }
     """
+
+_PR_CLOSING_ISSUES_PAGE_QUERY = """
+query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      closingIssuesReferences(first: 50, after: $cursor) {
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+        nodes {
+          number
+          title
+          state
+          stateReason
+          createdAt
+          closedAt
+          updatedAt
+          author {
+            login
+            ... on User { databaseId }
+          }
+          authorAssociation
+          userContentEdits(first: 1) {
+            nodes { editedAt }
+          }
+          timelineItems(itemTypes: [RENAMED_TITLE_EVENT], last: 1) {
+            nodes {
+              ... on RenamedTitleEvent { createdAt }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
+
+def _hydrate_all_closing_issues_for_pr(pr_raw: Dict[str, Any], token: str) -> Dict[str, Any]:
+    """Fetch all closing issue references for a PR when the first page is truncated."""
+    closing_refs = pr_raw.get('closingIssuesReferences') or {}
+    page_info = closing_refs.get('pageInfo') or {}
+    if not page_info.get('hasNextPage'):
+        return pr_raw
+
+    owner = ((pr_raw.get('repository') or {}).get('owner') or {}).get('login')
+    name = (pr_raw.get('repository') or {}).get('name')
+    pr_number = pr_raw.get('number')
+    if not owner or not name or not pr_number:
+        return pr_raw
+
+    all_nodes = list(closing_refs.get('nodes') or [])
+    cursor = page_info.get('endCursor')
+    seen_cursors = set()
+
+    while True:
+        if not cursor:
+            break
+        if cursor in seen_cursors:
+            bt.logging.warning(
+                f'Repeated cursor while paginating closing issues for PR #{pr_number} in {owner}/{name}; stopping to avoid infinite loop'
+            )
+            break
+        seen_cursors.add(cursor)
+
+        result = execute_graphql_query(
+            query=_PR_CLOSING_ISSUES_PAGE_QUERY,
+            variables={'owner': owner, 'name': name, 'number': int(pr_number), 'cursor': cursor},
+            token=token,
+            max_attempts=3,
+        )
+        if not result or result.get('errors'):
+            bt.logging.warning(f'Failed to paginate closing issues for PR #{pr_number} in {owner}/{name}')
+            break
+
+        closing_page = (
+            (result.get('data') or {})
+            .get('repository', {})
+            .get('pullRequest', {})
+            .get('closingIssuesReferences', {})
+        )
+        new_nodes = closing_page.get('nodes') or []
+        all_nodes.extend(new_nodes)
+
+        next_page_info = closing_page.get('pageInfo') or {}
+        if not next_page_info.get('hasNextPage'):
+            break
+        cursor = next_page_info.get('endCursor')
+
+    pr_raw['closingIssuesReferences'] = {'nodes': all_nodes, 'pageInfo': {'hasNextPage': False, 'endCursor': None}}
+    return pr_raw
 
 
 def branch_matches_pattern(branch_name: str, patterns: List[str]) -> bool:
@@ -1012,7 +1108,8 @@ def load_miners_prs(
                         bt.logging.debug(skip_reason or '')
                         continue
 
-                    miner_eval.add_merged_pull_request(pr_raw)
+                    hydrated_pr_raw = _hydrate_all_closing_issues_for_pr(pr_raw, miner_eval.github_pat)
+                    miner_eval.add_merged_pull_request(hydrated_pr_raw)
 
                 except Exception as e:
                     pr_number = pr_raw.get('number', '?')

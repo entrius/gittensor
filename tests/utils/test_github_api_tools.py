@@ -33,6 +33,8 @@ get_merge_base_sha = github_api_tools.get_merge_base_sha
 find_prs_for_issue = github_api_tools.find_prs_for_issue
 execute_graphql_query = github_api_tools.execute_graphql_query
 check_github_issue_closed = github_api_tools.check_github_issue_closed
+QUERY = github_api_tools.QUERY
+hydrate_all_closing_issues_for_pr = github_api_tools._hydrate_all_closing_issues_for_pr
 
 
 # ============================================================================
@@ -1125,6 +1127,125 @@ def _make_pr_node(
         'closingIssuesReferences': closing_issues_refs,
         'reviews': {'nodes': [{'author': {'login': 'reviewer'}}]},
     }
+
+
+def test_main_pr_query_fetches_more_than_three_closing_issue_references():
+    """Regression test: prevent truncating PR closing issues to only 3 entries."""
+    assert 'closingIssuesReferences(first: 20)' in QUERY
+    assert 'pageInfo {' in QUERY
+
+
+@patch('gittensor.utils.github_api_tools.execute_graphql_query')
+def test_hydrate_all_closing_issues_for_pr_fetches_remaining_pages(mock_execute):
+    pr_raw = {
+        'number': 77,
+        'repository': {'owner': {'login': 'entrius'}, 'name': 'gittensor'},
+        'closingIssuesReferences': {
+            'nodes': [{'number': 1}, {'number': 2}],
+            'pageInfo': {'hasNextPage': True, 'endCursor': 'cursor-1'},
+        },
+    }
+    mock_execute.return_value = {
+        'data': {
+            'repository': {
+                'pullRequest': {
+                    'closingIssuesReferences': {
+                        'nodes': [{'number': 3}, {'number': 4}],
+                        'pageInfo': {'hasNextPage': False, 'endCursor': None},
+                    }
+                }
+            }
+        }
+    }
+
+    hydrated = hydrate_all_closing_issues_for_pr(pr_raw, token='fake')
+
+    assert [issue['number'] for issue in hydrated['closingIssuesReferences']['nodes']] == [1, 2, 3, 4]
+    assert mock_execute.call_count == 1
+
+
+@patch('gittensor.utils.github_api_tools.execute_graphql_query')
+def test_hydrate_all_closing_issues_for_pr_fetches_all_pages_without_fixed_cap(mock_execute):
+    pr_raw = {
+        'number': 77,
+        'repository': {'owner': {'login': 'entrius'}, 'name': 'gittensor'},
+        'closingIssuesReferences': {
+            'nodes': [{'number': 1}],
+            'pageInfo': {'hasNextPage': True, 'endCursor': 'cursor-1'},
+        },
+    }
+
+    side_effect_pages = []
+    for i in range(2, 15):
+        has_next = i < 14
+        end_cursor = f'cursor-{i}' if has_next else None
+        side_effect_pages.append(
+            {
+                'data': {
+                    'repository': {
+                        'pullRequest': {
+                            'closingIssuesReferences': {
+                                'nodes': [{'number': i}],
+                                'pageInfo': {'hasNextPage': has_next, 'endCursor': end_cursor},
+                            }
+                        }
+                    }
+                }
+            }
+        )
+
+    mock_execute.side_effect = side_effect_pages
+
+    hydrated = hydrate_all_closing_issues_for_pr(pr_raw, token='fake')
+
+    assert [issue['number'] for issue in hydrated['closingIssuesReferences']['nodes']] == list(range(1, 15))
+    assert mock_execute.call_count == 13
+
+
+@patch('gittensor.utils.github_api_tools.execute_graphql_query')
+def test_hydrate_all_closing_issues_for_pr_stops_on_repeated_cursor(mock_execute):
+    pr_raw = {
+        'number': 77,
+        'repository': {'owner': {'login': 'entrius'}, 'name': 'gittensor'},
+        'closingIssuesReferences': {
+            'nodes': [{'number': 1}],
+            'pageInfo': {'hasNextPage': True, 'endCursor': 'cursor-1'},
+        },
+    }
+    mock_execute.return_value = {
+        'data': {
+            'repository': {
+                'pullRequest': {
+                    'closingIssuesReferences': {
+                        'nodes': [{'number': 2}],
+                        'pageInfo': {'hasNextPage': True, 'endCursor': 'cursor-1'},
+                    }
+                }
+            }
+        }
+    }
+
+    hydrated = hydrate_all_closing_issues_for_pr(pr_raw, token='fake')
+
+    assert [issue['number'] for issue in hydrated['closingIssuesReferences']['nodes']] == [1, 2]
+    assert mock_execute.call_count == 1
+
+
+@patch('gittensor.utils.github_api_tools.execute_graphql_query')
+def test_hydrate_all_closing_issues_for_pr_skips_when_single_page(mock_execute):
+    pr_raw = {
+        'number': 77,
+        'repository': {'owner': {'login': 'entrius'}, 'name': 'gittensor'},
+        'closingIssuesReferences': {
+            'nodes': [{'number': 1}, {'number': 2}],
+            'pageInfo': {'hasNextPage': False, 'endCursor': None},
+        },
+    }
+
+    hydrated = hydrate_all_closing_issues_for_pr(pr_raw, token='fake')
+
+    assert [issue['number'] for issue in hydrated['closingIssuesReferences']['nodes']] == [1, 2]
+    mock_execute.assert_not_called()
 
 
 def _make_graphql_response(pr_nodes):

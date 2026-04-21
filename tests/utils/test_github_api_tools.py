@@ -919,6 +919,19 @@ class TestFindSolverFromCrossReferences:
 
     @patch('gittensor.utils.github_api_tools.execute_graphql_query')
     @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_null_closing_issues_references_is_handled(self, mock_logging, mock_graphql):
+        """Null closingIssuesReferences should be treated as empty and not crash parsing."""
+        null_closing_node = _pr_node(number=14, user_id=42, closing_issues=[12])
+        null_closing_node['source']['closingIssuesReferences'] = None
+        mock_graphql.return_value = _graphql_response([null_closing_node])
+
+        solver_id, pr_number = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
+
+        assert solver_id is None
+        assert pr_number is None
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
     def test_multiple_candidates_picks_most_recent(self, mock_logging, mock_graphql):
         """When multiple merged PRs close the issue, the most recently merged one is selected."""
         mock_graphql.return_value = _graphql_response(

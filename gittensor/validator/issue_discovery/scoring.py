@@ -20,7 +20,7 @@ from gittensor.constants import (
     OPEN_ISSUE_SPAM_TOKEN_SCORE_PER_SLOT,
 )
 from gittensor.validator.utils.datetime_utils import calculate_time_decay
-from gittensor.validator.utils.load_weights import RepositoryConfig
+from gittensor.validator.utils.load_weights import RepositoryConfig, resolve_repo_weight
 
 
 def calculate_issue_review_quality_multiplier(changes_requested_count: int) -> float:
@@ -192,6 +192,20 @@ def _collect_issues_from_prs(
     """
     # Track which PRs have already awarded a discovery score (one-issue-per-PR rule)
     pr_scored: set = set()  # (repo, pr_number)
+    # Dedup across PRs: canonical solver per issue is the earliest-merged PR (tie-break:
+    # smaller PR number). Only the canonical PR drives counts/scoring; others skip below.
+    canonical: Dict[Tuple[str, int], Tuple[datetime, int]] = {}
+    for _ev in miner_evaluations.values():
+        for _pr in _ev.merged_pull_requests:
+            if not _pr.issues or not _pr.merged_at:
+                continue
+            for _issue in _pr.issues:
+                if not _issue.author_github_id:
+                    continue
+                _key = (_pr.repository_full_name, _issue.number)
+                _marker = (_pr.merged_at, _pr.number)
+                if _key not in canonical or _marker < canonical[_key]:
+                    canonical[_key] = _marker
 
     for uid, evaluation in miner_evaluations.items():
         for pr in evaluation.merged_pull_requests:
@@ -207,6 +221,9 @@ def _collect_issues_from_prs(
             for issue in sorted_issues:
                 discoverer_id = issue.author_github_id
                 if not discoverer_id or discoverer_id not in github_id_to_uid:
+                    continue
+
+                if canonical.get((pr.repository_full_name, issue.number)) != (pr.merged_at, pr.number):
                     continue
 
                 data = discoverer_data[discoverer_id]
@@ -262,7 +279,7 @@ def _collect_issues_from_prs(
                 # Populate discovery scoring fields
                 repo_config = master_repositories.get(pr.repository_full_name)
                 issue.discovery_base_score = pr.base_score
-                issue.discovery_repo_weight_multiplier = round(repo_config.weight if repo_config else 0.01, 2)
+                issue.discovery_repo_weight_multiplier = resolve_repo_weight(repo_config)
                 issue.discovery_time_decay_multiplier = round(calculate_time_decay(pr.merged_at), 2)
                 issue.discovery_review_quality_multiplier = round(
                     calculate_issue_review_quality_multiplier(pr.changes_requested_count), 2

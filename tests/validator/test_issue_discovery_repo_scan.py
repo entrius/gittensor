@@ -38,7 +38,7 @@ def _run_scan(monkeypatch, raw_issues):
     )
 
     result: dict = {}
-    asyncio.get_event_loop().run_until_complete(
+    asyncio.run(
         repo_scan._scan_repo(
             repo_name='test/repo',
             lookback_date='2026-01-01T00:00:00Z',

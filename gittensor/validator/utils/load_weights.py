@@ -7,7 +7,7 @@ from typing import Dict, List, Optional
 
 import bittensor as bt
 
-from gittensor.constants import NON_CODE_EXTENSIONS
+from gittensor.constants import DEFAULT_REPO_WEIGHT, NON_CODE_EXTENSIONS
 
 
 @dataclass
@@ -37,6 +37,13 @@ class RepositoryConfig:
     weight: float
     inactive_at: Optional[str] = None
     additional_acceptable_branches: Optional[List[str]] = None
+
+
+def resolve_repo_weight(repo_config: Optional[RepositoryConfig]) -> float:
+    """Return the repo weight preserving full JSON precision, or the default for unknown repos."""
+    if repo_config is None:
+        return DEFAULT_REPO_WEIGHT
+    return repo_config.weight
 
 
 @dataclass

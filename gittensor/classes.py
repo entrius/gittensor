@@ -8,7 +8,12 @@ from typing import DefaultDict, Dict, List, Optional, Set
 
 import bittensor as bt
 
-from gittensor.constants import MAINTAINER_ASSOCIATIONS, MAX_CODE_DENSITY_MULTIPLIER, MIN_TOKEN_SCORE_FOR_BASE_SCORE
+from gittensor.constants import (
+    LABEL_MULTIPLIERS,
+    MAINTAINER_ASSOCIATIONS,
+    MAX_CODE_DENSITY_MULTIPLIER,
+    MIN_TOKEN_SCORE_FOR_BASE_SCORE,
+)
 from gittensor.utils.utils import parse_repo_name
 
 GITHUB_DOMAIN = 'https://github.com/'
@@ -297,10 +302,18 @@ class PullRequest:
                 1 for r in cr_reviews if r.get('authorAssociation') in MAINTAINER_ASSOCIATIONS
             )
 
-        # Extract last label from timeline events
-        timeline_nodes = pr_data.get('timelineItems', {}).get('nodes', [])
-        label_node = timeline_nodes[0].get('label') if timeline_nodes and timeline_nodes[0] else None
-        label = label_node['name'].lower() if label_node else None
+        current = {(n.get('name') or '').lower() for n in (pr_data.get('labels') or {}).get('nodes') or [] if n}
+        label: Optional[str] = None
+        scoring_labels = current & LABEL_MULTIPLIERS.keys()
+        if scoring_labels:
+            for event in reversed((pr_data.get('timelineItems') or {}).get('nodes') or []):
+                name = ((event or {}).get('label') or {}).get('name', '').lower()
+                if name in scoring_labels:
+                    label = name
+                    break
+            if label is None:
+                # Timeline truncated — fall back to highest-multiplier currently-applied label
+                label = max(scoring_labels, key=lambda n: (LABEL_MULTIPLIERS[n], n))
 
         return cls(
             number=pr_data['number'],

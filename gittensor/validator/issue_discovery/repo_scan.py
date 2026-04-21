@@ -78,13 +78,10 @@ async def scan_closed_issues(
     # Sort repos by weight descending (high-value repos first)
     sorted_repos = sorted(master_repositories.items(), key=lambda x: x[1].weight, reverse=True)
 
-    # Filter out inactive repos
-    active_repos = [(name, config) for name, config in sorted_repos if config.inactive_at is None]
-
     result: Dict[str, List[Issue]] = {}
     global_lookup_count = 0
 
-    for i, (repo_name, repo_config) in enumerate(active_repos, 1):
+    for i, (repo_name, repo_config) in enumerate(sorted_repos, 1):
         if global_lookup_count >= REPO_SCAN_GLOBAL_CAP:
             bt.logging.info(f'Issue discovery scan: global cap ({REPO_SCAN_GLOBAL_CAP}) reached, stopping')
             break
@@ -92,6 +89,7 @@ async def scan_closed_issues(
         remaining_global = REPO_SCAN_GLOBAL_CAP - global_lookup_count
         lookups_done = await _scan_repo(
             repo_name,
+            repo_config,
             lookback_date,
             validator_pat,
             miner_github_ids,
@@ -103,7 +101,7 @@ async def scan_closed_issues(
 
         if i % 25 == 0:
             bt.logging.info(
-                f'Issue discovery scan: {i}/{len(active_repos)} repos scanned, {global_lookup_count} lookups'
+                f'Issue discovery scan: {i}/{len(sorted_repos)} repos scanned, {global_lookup_count} lookups'
             )
 
     total_issues = sum(len(issues) for issues in result.values())
@@ -116,6 +114,7 @@ async def scan_closed_issues(
 
 async def _scan_repo(
     repo_name: str,
+    repo_config: RepositoryConfig,
     lookback_date: str,
     validator_pat: str,
     miner_github_ids: Set[str],
@@ -132,10 +131,12 @@ async def _scan_repo(
     # GitHub REST ``since`` filters by updated_at, not closed_at.
     # Pre-parse the cutoff once so we can drop stale issues inside the loop.
     lookback_dt = datetime.fromisoformat(lookback_date.replace('Z', '+00:00'))
+    inactive_dt = parse_github_iso_to_utc(repo_config.inactive_at) if repo_config.inactive_at else None
 
     # Filter to miner-authored issues not already known
     unmatched: List[dict] = []
     stale_count = 0
+    inactive_count = 0
     for issue_raw in closed_issues:
         user = issue_raw.get('user') or {}
         author_id = str(user.get('id', ''))
@@ -153,11 +154,16 @@ async def _scan_repo(
         if closed_at is None or closed_at < lookback_dt:
             stale_count += 1
             continue
+        if inactive_dt is not None and closed_at >= inactive_dt:
+            inactive_count += 1
+            continue
 
         unmatched.append(issue_raw)
 
     if stale_count:
         bt.logging.debug(f'{repo_name}: dropped {stale_count} issues closed before lookback window')
+    if inactive_count:
+        bt.logging.debug(f'{repo_name}: dropped {inactive_count} issues closed after repo inactivity')
 
     if not unmatched:
         return 0

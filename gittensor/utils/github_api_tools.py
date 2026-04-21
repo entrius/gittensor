@@ -477,7 +477,7 @@ def _search_issue_referencing_prs_graphql(
 
         author = pr.get('author') or {}
         reviews = pr.get('reviews') or {}
-        closing = pr.get('closingIssuesReferences', {}).get('nodes', [])
+        closing = (pr.get('closingIssuesReferences') or {}).get('nodes', [])
         closing_numbers = [n.get('number') for n in closing if n.get('number') is not None]
 
         pr_info: PRInfo = {

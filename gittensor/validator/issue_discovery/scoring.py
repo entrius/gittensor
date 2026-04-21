@@ -190,6 +190,20 @@ def _collect_issues_from_prs(
     """
     # Track which PRs have already awarded a discovery score (one-issue-per-PR rule)
     pr_scored: set = set()  # (repo, pr_number)
+    # Dedup across PRs: canonical solver per issue is the earliest-merged PR (tie-break:
+    # smaller PR number). Only the canonical PR drives counts/scoring; others skip below.
+    canonical: Dict[Tuple[str, int], Tuple[datetime, int]] = {}
+    for _ev in miner_evaluations.values():
+        for _pr in _ev.merged_pull_requests:
+            if not _pr.issues or not _pr.merged_at:
+                continue
+            for _issue in _pr.issues:
+                if not _issue.author_github_id:
+                    continue
+                _key = (_pr.repository_full_name, _issue.number)
+                _marker = (_pr.merged_at, _pr.number)
+                if _key not in canonical or _marker < canonical[_key]:
+                    canonical[_key] = _marker
 
     for uid, evaluation in miner_evaluations.items():
         for pr in evaluation.merged_pull_requests:
@@ -205,6 +219,9 @@ def _collect_issues_from_prs(
             for issue in sorted_issues:
                 discoverer_id = issue.author_github_id
                 if not discoverer_id or discoverer_id not in github_id_to_uid:
+                    continue
+
+                if canonical.get((pr.repository_full_name, issue.number)) != (pr.merged_at, pr.number):
                     continue
 
                 data = discoverer_data[discoverer_id]
@@ -297,6 +314,7 @@ def _merge_scan_issues(
             if issue.state == 'CLOSED' and issue.closed_at:
                 # Case 2: solved by non-miner PR → positive credibility
                 data.solved_count += 1
+                data.valid_solved_count += 1
             else:
                 # Case 3: closed without PR → negative credibility
                 data.closed_count += 1

@@ -7,11 +7,14 @@ Solved classification requires state_reason == 'COMPLETED'. Any other value
 (NOT_PLANNED, TRANSFERRED, None) routes to closed_count.
 """
 
+import pytest
+
 from gittensor.classes import MinerEvaluation
 from gittensor.validator.issue_discovery.scoring import (
     _collect_issues_from_prs,
     _DiscovererData,
     _merge_scan_issues,
+    check_issue_eligibility,
 )
 
 
@@ -120,3 +123,30 @@ def test_scan_issue_with_no_state_reason_counts_as_closed(issue_factory):
     data = _run_scan_path(issue)
     assert data.closed_count == 1
     assert data.solved_count == 0
+
+
+# ---------------------------------------------------------------------------
+# check_issue_eligibility: credibility uses total solved, gate uses valid solved
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    'solved_count,valid_solved_count,closed_count,expected_credibility,expected_eligible',
+    [
+        # Issue #642 example: 10 total solved, 7 valid, 2 closed
+        # Credibility uses total (10), eligibility gate uses valid (7)
+        (10, 7, 2, pytest.approx(10 / 11, abs=1e-3), True),
+        # Valid count below threshold → not eligible regardless of credibility
+        (10, 6, 2, pytest.approx(10 / 11, abs=1e-3), False),
+        # Zero solved → credibility 0, not eligible
+        (0, 0, 2, 0.0, False),
+        # All solved counts equal (no low-token solvers) → fix is no-op for this case
+        (7, 7, 2, pytest.approx(7 / 8, abs=1e-3), True),
+    ],
+)
+def test_check_issue_eligibility_uses_total_for_credibility_valid_for_gate(
+    solved_count, valid_solved_count, closed_count, expected_credibility, expected_eligible
+):
+    is_eligible, credibility, _ = check_issue_eligibility(solved_count, valid_solved_count, closed_count)
+    assert credibility == expected_credibility
+    assert is_eligible is expected_eligible

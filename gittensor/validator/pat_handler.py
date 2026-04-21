@@ -9,12 +9,10 @@ Miners check if a validator has their PAT via PatCheckSynapse.
 from typing import TYPE_CHECKING, Optional, Tuple
 
 import bittensor as bt
-import requests
 
-from gittensor.constants import BASE_GITHUB_API_URL, GITHUB_HTTP_TIMEOUT_SECONDS, GRAPHQL_VIEWER_QUERY
 from gittensor.synapses import PatBroadcastSynapse, PatCheckSynapse
 from gittensor.validator import pat_storage
-from gittensor.validator.utils.github_validation import validate_github_credentials
+from gittensor.validator.utils.github_validation import validate_github_credentials, validate_github_repo_access
 
 if TYPE_CHECKING:
     from neurons.validator import Validator
@@ -164,19 +162,4 @@ def _test_pat_against_repo(pat: str) -> Optional[str]:
     Scoring uses the GraphQL API to fetch miner PRs, so this mirrors the real path.
     Returns an error string on failure, None on success.
     """
-    headers = {'Authorization': f'Bearer {pat}', 'Accept': 'application/json'}
-    try:
-        response = requests.post(
-            f'{BASE_GITHUB_API_URL}/graphql',
-            json={'query': GRAPHQL_VIEWER_QUERY},
-            headers=headers,
-            timeout=GITHUB_HTTP_TIMEOUT_SECONDS,
-        )
-        if response.status_code != 200:
-            return f'GitHub GraphQL API returned {response.status_code}'
-        data = response.json()
-        if 'errors' in data:
-            return f'GraphQL error: {data["errors"][0].get("message", "unknown")}'
-        return None
-    except requests.RequestException as e:
-        return str(e)
+    return validate_github_repo_access(pat)

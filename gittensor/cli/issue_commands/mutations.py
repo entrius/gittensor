@@ -197,7 +197,7 @@ def issue_register(
         )
         if not contract_metadata.exists():
             console.print(f'[red]Error: Contract metadata not found at {contract_metadata}[/red]')
-            return
+            raise SystemExit(1)
 
         contract_instance = ContractInstance.create_from_address(
             contract_address=contract_addr,

@@ -817,7 +817,6 @@ def test_find_prs_without_token_only_uses_unauth_rest(mock_graphql, mock_rest):
 # Solver Detection Tests
 # ============================================================================
 
-find_solver_from_timeline = github_api_tools.find_solver_from_timeline
 find_solver_from_cross_references = github_api_tools.find_solver_from_cross_references
 
 
@@ -1011,22 +1010,6 @@ class TestFindSolverFromCrossReferences:
             mock_graphql.return_value = graphql_response
             result = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
             assert result is None
-
-
-class TestFindSolverFromTimeline:
-    """Test that find_solver_from_timeline delegates to cross-references."""
-
-    @patch('gittensor.utils.github_api_tools.find_solver_from_cross_references')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
-    def test_delegates_to_cross_references(self, mock_logging, mock_cross_ref):
-        """find_solver_from_timeline delegates directly to find_solver_from_cross_references."""
-        mock_cross_ref.return_value = (42, 14)
-
-        solver_id, pr_number = find_solver_from_timeline('owner/repo', 12, 'fake_token')
-
-        assert solver_id == 42
-        assert pr_number == 14
-        mock_cross_ref.assert_called_once_with('owner/repo', 12, 'fake_token')
 
 
 class TestCheckGithubIssueClosed:

@@ -32,7 +32,13 @@ console = Console()
 @click.option('--network', default=None, help='Network name (local, test, finney).')
 @click.option('--rpc-url', default=None, help='Subtensor RPC endpoint URL (overrides --network).')
 @click.option('--json-output', 'json_mode', is_flag=True, default=False, help='Output results as JSON.')
-def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, json_mode):
+@click.option(
+    '--ignore-vtrust',
+    is_flag=True,
+    default=False,
+    help='Probe all serving validators regardless of validator_trust. Useful on testnets where consensus has not yet assigned vtrust scores.',
+)
+def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, json_mode, ignore_vtrust):
     """Check how many validators have your PAT stored.
 
     Sends a lightweight probe to each validator — no PAT is transmitted.
@@ -62,8 +68,9 @@ def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, json_mode)
     # Verify miner is registered
     _require_registered(wallet, metagraph, netuid, json_mode)
 
-    # 3. Find active validator axons (vtrust > 0.1 = actively participating in consensus)
-    validator_axons, validator_uids = _require_validator_axons(metagraph, json_mode)
+    # 3. Find active validator axons (vtrust > 0.1 by default, see --ignore-vtrust)
+    min_vtrust = -1.0 if ignore_vtrust else 0.1
+    validator_axons, validator_uids = _require_validator_axons(metagraph, json_mode, min_vtrust=min_vtrust)
 
     # 4. Send check probes
     synapse = PatCheckSynapse()

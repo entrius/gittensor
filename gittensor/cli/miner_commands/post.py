@@ -43,7 +43,13 @@ console = Console()
     help='GitHub Personal Access Token. If not provided, falls back to GITTENSOR_MINER_PAT env var or interactive prompt.',
 )
 @click.option('--json-output', 'json_mode', is_flag=True, default=False, help='Output results as JSON.')
-def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_mode):
+@click.option(
+    '--ignore-vtrust',
+    is_flag=True,
+    default=False,
+    help='Broadcast to all serving validators regardless of validator_trust. Useful on testnets where consensus has not yet assigned vtrust scores.',
+)
+def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_mode, ignore_vtrust):
     """Broadcast your GitHub PAT to all validators on the network.
 
     Validators will validate your PAT (test GitHub API access, check account age),
@@ -99,8 +105,9 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_m
     # Verify miner is registered
     _require_registered(wallet, metagraph, netuid, json_mode)
 
-    # 4. Find active validator axons (vtrust > 0.1 = actively participating in consensus)
-    validator_axons, validator_uids = _require_validator_axons(metagraph, json_mode)
+    # 4. Find active validator axons (vtrust > 0.1 by default, see --ignore-vtrust)
+    min_vtrust = -1.0 if ignore_vtrust else 0.1
+    validator_axons, validator_uids = _require_validator_axons(metagraph, json_mode, min_vtrust=min_vtrust)
 
     # 5. Broadcast
     synapse = PatBroadcastSynapse(github_access_token=pat)

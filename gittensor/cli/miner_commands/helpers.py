@@ -19,12 +19,18 @@ console = Console()
 NETUID_DEFAULT = 74
 
 
-def _get_validator_axons(metagraph) -> tuple[list, list]:
-    """Return (axons, uids) for all active validators (vtrust > 0.1, serving)."""
+def _get_validator_axons(metagraph, min_vtrust: float = 0.1) -> tuple[list, list]:
+    """Return (axons, uids) for serving validators with vtrust > min_vtrust.
+
+    The default threshold (0.1) matches mainnet behavior where active
+    validators have established consensus. Pass a negative value (e.g.
+    -1.0) to disable the filter entirely — useful on testnets where
+    consensus has not yet assigned vtrust scores to any UID.
+    """
     axons = []
     uids = []
     for uid in range(metagraph.n):
-        if metagraph.validator_trust[uid] > 0.1 and metagraph.axons[uid].is_serving:
+        if metagraph.validator_trust[uid] > min_vtrust and metagraph.axons[uid].is_serving:
             axons.append(metagraph.axons[uid])
             uids.append(uid)
     return axons, uids
@@ -94,9 +100,9 @@ def _require_registered(wallet, metagraph, netuid: int, json_mode: bool) -> None
         sys.exit(1)
 
 
-def _require_validator_axons(metagraph, json_mode: bool) -> tuple[list, list]:
+def _require_validator_axons(metagraph, json_mode: bool, min_vtrust: float = 0.1) -> tuple[list, list]:
     """Return validator (axons, uids), or exit with error if none found."""
-    validator_axons, validator_uids = _get_validator_axons(metagraph)
+    validator_axons, validator_uids = _get_validator_axons(metagraph, min_vtrust=min_vtrust)
     if not validator_axons:
         _error('No reachable validator axons found on the network.', json_mode)
         sys.exit(1)

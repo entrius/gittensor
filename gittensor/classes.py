@@ -329,7 +329,7 @@ class PullRequest:
             additions=pr_data['additions'],
             deletions=pr_data['deletions'],
             commits=pr_data.get('commits', {}).get('totalCount', 0),
-            merged_by_login=pr_data.get('mergedBy', {}).get('login') if is_merged else None,
+            merged_by_login=(pr_data.get('mergedBy') or {}).get('login') if is_merged else None,
             issues=issues if issues else None,
             description=description,
             last_edited_at=last_edited_at,

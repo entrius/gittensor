@@ -36,7 +36,11 @@ console = Console()
 @click.option('--hotkey', 'wallet_hotkey', default=None, help='Bittensor hotkey name.')
 @click.option('--netuid', type=int, default=NETUID_DEFAULT, help='Subnet UID.', show_default=True)
 @click.option('--network', default=None, help='Network name (local, test, finney).')
-@click.option('--rpc-url', default=None, help='Subtensor RPC endpoint URL (overrides --network).')
+@click.option(
+    '--rpc-url',
+    default=None,
+    help='Subtensor WebSocket endpoint (wss:// or ws://), overrides --network.',
+)
 @click.option(
     '--pat',
     default=None,

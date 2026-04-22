@@ -429,11 +429,11 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
 
 def calculate_issue_multiplier(pr: PullRequest) -> float:
     """
-    Calculate PR score multiplier based on the first valid linked issue.
+    Calculate PR score multiplier from the best valid linked issue.
 
-    Returns a flat multiplier: MAINTAINER_ISSUE_MULTIPLIER (1.66) if the issue author
-    is a maintainer (OWNER/MEMBER/COLLABORATOR), otherwise STANDARD_ISSUE_MULTIPLIER (1.33).
-    Returns 1.0 if no valid linked issues.
+    Returns a flat multiplier: MAINTAINER_ISSUE_MULTIPLIER (1.66) if any valid issue
+    author is a maintainer (OWNER/MEMBER/COLLABORATOR), otherwise
+    STANDARD_ISSUE_MULTIPLIER (1.33). Returns 1.0 if no valid linked issues.
     """
     if not pr.issues:
         bt.logging.info(f'PR #{pr.number} - Contains no linked issues')
@@ -444,7 +444,12 @@ def calculate_issue_multiplier(pr: PullRequest) -> float:
         bt.logging.info(f'PR #{pr.number} - Solved no valid issues')
         return 1.0
 
-    issue = valid_issues[0]
+    # Prefer a maintainer-authored valid issue if one exists, so the multiplier
+    # doesn't depend on GraphQL closingIssuesReferences ordering.
+    issue = next(
+        (i for i in valid_issues if i.author_association in MAINTAINER_ASSOCIATIONS),
+        valid_issues[0],
+    )
     is_maintainer = issue.author_association in MAINTAINER_ASSOCIATIONS if issue.author_association else False
     multiplier = MAINTAINER_ISSUE_MULTIPLIER if is_maintainer else STANDARD_ISSUE_MULTIPLIER
     label = 'maintainer' if is_maintainer else 'standard'

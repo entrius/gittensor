@@ -49,7 +49,7 @@ def resolve_network(
     config = load_config()
     if config.get('ws_endpoint'):
         endpoint = config['ws_endpoint']
-        name = _URL_TO_NETWORK.get(endpoint, config.get('network', 'custom'))
+        name = _URL_TO_NETWORK.get(endpoint, config.get('network') or 'custom')
         return endpoint, name
 
     config_network = config.get('network', '').lower()

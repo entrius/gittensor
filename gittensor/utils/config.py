@@ -22,8 +22,6 @@ from typing import Any
 
 import bittensor as bt
 
-from gittensor.utils.logging import setup_events_logger
-
 
 def check_config(cls, config: Any):
     r"""Checks/validates the config namespace object."""
@@ -42,11 +40,6 @@ def check_config(cls, config: Any):
     config.neuron.full_path = os.path.expanduser(full_path)
     if not os.path.exists(config.neuron.full_path):
         os.makedirs(config.neuron.full_path, exist_ok=True)
-
-    if not config.neuron.dont_save_events:
-        # Add custom event logger for the events.
-        events_logger = setup_events_logger(config.neuron.full_path, config.neuron.events_retention_size)
-        bt.logging.register_primary_logger(events_logger.name)
 
 
 def add_args(cls, parser):

@@ -422,7 +422,11 @@ def _resolve_pr_state(raw_state: str, merged: bool = False) -> str:
 
 
 def _search_issue_referencing_prs_graphql(
-    repo: str, issue_number: int, token: str, open_only: bool = False
+    repo: str,
+    issue_number: int,
+    token: str,
+    open_only: bool = False,
+    session: Optional[requests.Session] = None,
 ) -> Optional[List[PRInfo]]:
     """Fetch PRs that reference an issue via GraphQL issue timeline cross-references."""
     if not token:
@@ -440,6 +444,7 @@ def _search_issue_referencing_prs_graphql(
         variables={'owner': owner, 'name': name, 'issueNumber': issue_number},
         token=token,
         max_attempts=3,
+        session=session,
     )
     if result is None:
         bt.logging.warning(f'GraphQL cross-reference query failed for {repo}#{issue_number}')
@@ -598,6 +603,7 @@ def execute_graphql_query(
     token: str,
     max_attempts: int = 8,
     timeout: int = 30,
+    session: Optional[requests.Session] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     Execute a GraphQL query with retry logic and backoff.
@@ -608,15 +614,17 @@ def execute_graphql_query(
         token: GitHub PAT for authentication
         max_attempts: Maximum retry attempts (default 6)
         timeout: Request timeout in seconds (default 30)
+        session: Optional pooled requests.Session to reuse connections across calls
 
     Returns:
         Parsed JSON response data, or None if all attempts failed
     """
     headers = make_graphql_headers(token)
+    http = session if session is not None else requests
 
     for attempt in range(max_attempts):
         try:
-            response = requests.post(
+            response = http.post(
                 f'{BASE_GITHUB_API_URL}/graphql',
                 headers=headers,
                 json={'query': query, 'variables': variables},
@@ -1034,7 +1042,10 @@ def load_miners_prs(
 
 
 def find_solver_from_cross_references(
-    repo: str, issue_number: int, token: str
+    repo: str,
+    issue_number: int,
+    token: str,
+    session: Optional[requests.Session] = None,
 ) -> Optional[tuple[Optional[int], Optional[int]]]:
     """Resolve solver from cross-referenced PRs on the issue timeline.
 
@@ -1050,7 +1061,7 @@ def find_solver_from_cross_references(
         tuple ``(solver_github_id, pr_number)`` where either value may be
         ``None`` when no valid closing PR is found.
     """
-    prs = _search_issue_referencing_prs_graphql(repo, issue_number, token, open_only=False)
+    prs = _search_issue_referencing_prs_graphql(repo, issue_number, token, open_only=False, session=session)
     if prs is None:
         return None
 

@@ -1583,5 +1583,48 @@ class TestFetchFileContentsForPrMergeBase:
         assert call_args[0][2] == 'base_branch_tip_sha', 'Should fall back to base_ref_oid'
 
 
+# ============================================================================
+# Session Pooling Tests
+# ============================================================================
+
+
+class TestExecuteGraphQLQuerySessionPooling:
+    """Verify execute_graphql_query reuses a pooled Session when one is supplied."""
+
+    @patch('gittensor.utils.github_api_tools.requests.post')
+    def test_uses_session_post_when_session_provided(self, mock_requests_post):
+        mock_session = Mock(spec=['post'])
+        mock_session.post.return_value = Mock(status_code=200, json=Mock(return_value={'data': {}}))
+
+        result = execute_graphql_query('query {}', {}, 'fake_token', session=mock_session)
+
+        assert result == {'data': {}}
+        mock_session.post.assert_called_once()
+        mock_requests_post.assert_not_called()
+
+    @patch('gittensor.utils.github_api_tools.requests.post')
+    def test_falls_back_to_requests_post_when_no_session(self, mock_requests_post):
+        mock_requests_post.return_value = Mock(status_code=200, json=Mock(return_value={'data': {}}))
+
+        result = execute_graphql_query('query {}', {}, 'fake_token')
+
+        assert result == {'data': {}}
+        mock_requests_post.assert_called_once()
+
+
+class TestFindSolverSessionPooling:
+    """Verify find_solver_from_cross_references threads the session to the GraphQL layer."""
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    def test_session_is_forwarded_to_execute_graphql_query(self, mock_graphql):
+        mock_graphql.return_value = _graphql_response([])
+        mock_session = Mock(spec=['post', 'get'])
+
+        find_solver_from_cross_references('owner/repo', 12, 'fake_token', session=mock_session)
+
+        assert mock_graphql.call_count == 1
+        assert mock_graphql.call_args.kwargs.get('session') is mock_session
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

@@ -29,12 +29,12 @@ def _run_scan(monkeypatch, raw_issues):
     monkeypatch.setattr(
         repo_scan,
         '_fetch_closed_issues',
-        lambda repo_name, since, token: raw_issues,
+        lambda repo_name, since, token, session=None: raw_issues,
     )
     monkeypatch.setattr(
         repo_scan,
         'find_solver_from_cross_references',
-        lambda repo, issue_number, token: (None, None),
+        lambda repo, issue_number, token, session=None: (None, None),
     )
 
     result: dict = {}

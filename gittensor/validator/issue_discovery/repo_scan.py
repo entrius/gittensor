@@ -11,6 +11,7 @@ Uses the validator PAT for all API calls. Rate-limited by per-repo and global ca
 """
 
 import asyncio
+import threading
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Set, Tuple
 
@@ -28,6 +29,33 @@ from gittensor.constants import (
 from gittensor.utils.github_api_tools import find_solver_from_cross_references
 from gittensor.validator.utils.datetime_utils import parse_github_iso_to_utc
 from gittensor.validator.utils.load_weights import RepositoryConfig
+
+# Thread-local Session for solver lookups dispatched via asyncio.to_thread.
+# requests.Session is not thread-safe (cookie jar and redirect state can race),
+# so each worker thread maintains its own pooled Session.
+#
+# Lifetime: sessions persist for the worker thread's lifetime (until process
+# exit). REPO_SCAN_CONCURRENCY only bounds simultaneous in-flight lookups,
+# not the set of threads scheduled over time: the asyncio default executor is
+# shared process-wide and may spread our lookups across any of its threads,
+# so the session count is bounded by ThreadPoolExecutor's max_workers
+# (default min(32, os.cpu_count() + 4)). urllib3 self-manages stale keepalive
+# connections on each Session (bounded per-host pool, LRU eviction, lazy
+# reopen on dead socket), so there is no unbounded accumulation. This is an
+# intentional operational trade-off: scoping sessions per round would lose
+# intra-round TLS reuse (the primary win here) with no practical benefit
+# given the bounded footprint.
+_solver_session_local = threading.local()
+
+
+def _find_solver_in_worker(
+    repo_name: str, issue_number: int, token: str
+) -> Optional[Tuple[Optional[int], Optional[int]]]:
+    session = getattr(_solver_session_local, 'session', None)
+    if session is None:
+        session = requests.Session()
+        _solver_session_local.session = session
+    return find_solver_from_cross_references(repo_name, issue_number, token, session=session)
 
 
 async def scan_closed_issues(
@@ -84,27 +112,30 @@ async def scan_closed_issues(
     result: Dict[str, List[Issue]] = {}
     global_lookup_count = 0
 
-    for i, (repo_name, repo_config) in enumerate(active_repos, 1):
-        if global_lookup_count >= REPO_SCAN_GLOBAL_CAP:
-            bt.logging.info(f'Issue discovery scan: global cap ({REPO_SCAN_GLOBAL_CAP}) reached, stopping')
-            break
+    # Pool TCP/TLS connections across all REST and GraphQL calls in this round
+    with requests.Session() as session:
+        for i, (repo_name, repo_config) in enumerate(active_repos, 1):
+            if global_lookup_count >= REPO_SCAN_GLOBAL_CAP:
+                bt.logging.info(f'Issue discovery scan: global cap ({REPO_SCAN_GLOBAL_CAP}) reached, stopping')
+                break
 
-        remaining_global = REPO_SCAN_GLOBAL_CAP - global_lookup_count
-        lookups_done = await _scan_repo(
-            repo_name,
-            lookback_date,
-            validator_pat,
-            miner_github_ids,
-            known_issues,
-            result,
-            min(REPO_SCAN_PER_REPO_CAP, remaining_global),
-        )
-        global_lookup_count += lookups_done
-
-        if i % 25 == 0:
-            bt.logging.info(
-                f'Issue discovery scan: {i}/{len(active_repos)} repos scanned, {global_lookup_count} lookups'
+            remaining_global = REPO_SCAN_GLOBAL_CAP - global_lookup_count
+            lookups_done = await _scan_repo(
+                repo_name,
+                lookback_date,
+                validator_pat,
+                miner_github_ids,
+                known_issues,
+                result,
+                min(REPO_SCAN_PER_REPO_CAP, remaining_global),
+                session=session,
             )
+            global_lookup_count += lookups_done
+
+            if i % 25 == 0:
+                bt.logging.info(
+                    f'Issue discovery scan: {i}/{len(active_repos)} repos scanned, {global_lookup_count} lookups'
+                )
 
     total_issues = sum(len(issues) for issues in result.values())
     bt.logging.info(
@@ -122,10 +153,11 @@ async def _scan_repo(
     known_issues: Set[Tuple[str, int]],
     result: Dict[str, List[Issue]],
     lookup_cap: int,
+    session: Optional[requests.Session] = None,
 ) -> int:
     """Scan a single repo's closed issues. Returns number of solver lookups performed."""
 
-    closed_issues = _fetch_closed_issues(repo_name, lookback_date, validator_pat)
+    closed_issues = _fetch_closed_issues(repo_name, lookback_date, validator_pat, session=session)
     if not closed_issues:
         return 0
 
@@ -171,7 +203,7 @@ async def _scan_repo(
     async def _lookup(issue_raw: dict) -> Optional[Tuple[dict, Optional[int], Optional[int]]]:
         async with semaphore:
             solver_lookup = await asyncio.to_thread(
-                find_solver_from_cross_references,
+                _find_solver_in_worker,
                 repo_name,
                 issue_raw['number'],
                 validator_pat,
@@ -222,15 +254,21 @@ async def _scan_repo(
     return len(capped)
 
 
-def _fetch_closed_issues(repo_name: str, since: str, token: str) -> List[dict]:
+def _fetch_closed_issues(
+    repo_name: str,
+    since: str,
+    token: str,
+    session: Optional[requests.Session] = None,
+) -> List[dict]:
     """Fetch closed issues from a repo via REST API with pagination."""
     headers = {'Authorization': f'token {token}', 'Accept': 'application/vnd.github.v3+json'}
+    http = session if session is not None else requests
     all_issues: List[dict] = []
     page = 1
 
     while True:
         try:
-            response = requests.get(
+            response = http.get(
                 f'{BASE_GITHUB_API_URL}/repos/{repo_name}/issues',
                 params={'state': 'closed', 'since': since, 'per_page': 100, 'page': page},
                 headers=headers,

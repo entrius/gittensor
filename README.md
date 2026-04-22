@@ -52,6 +52,8 @@ gitt miner post --wallet <name> --hotkey <hotkey>
 gitt miner check --wallet <name> --hotkey <hotkey>
 ```
 
+`--rpc-url` and the optional `ws_endpoint` field in `~/.gittensor/config.json` must be WebSocket URLs (`wss://` or `ws://`).
+
 See full guide **[here](https://docs.gittensor.io/miner.html)**
 
 ## Validators

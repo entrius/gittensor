@@ -45,13 +45,27 @@ def _load_config_value(key: str):
 def _resolve_endpoint(network: str | None, rpc_url: str | None) -> str:
     """Resolve the subtensor endpoint from CLI args or config."""
     if rpc_url:
-        return rpc_url
+        u = rpc_url.strip()
+        if u and not (u.startswith('ws://') or u.startswith('wss://')):
+            raise ValueError(
+                '`--rpc-url` must be a WebSocket URL (ws:// or wss://). '
+                f'Example: wss://entrypoint-finney.opentensor.ai:443 (got {u!r}).'
+            )
+        if u:
+            return u
     if network:
         return NETWORK_MAP.get(network.lower(), network)
     config_network = _load_config_value('network')
     config_endpoint = _load_config_value('ws_endpoint')
     if config_endpoint:
-        return config_endpoint
+        u = config_endpoint.strip()
+        if u and not (u.startswith('ws://') or u.startswith('wss://')):
+            raise ValueError(
+                '`ws_endpoint` in ~/.gittensor/config.json must use ws:// or wss://. '
+                f'Example: wss://entrypoint-finney.opentensor.ai:443 (got {u!r}).'
+            )
+        if u:
+            return u
     if config_network:
         return NETWORK_MAP.get(config_network.lower()) or config_network
     return NETWORK_MAP['finney']

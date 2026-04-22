@@ -52,6 +52,8 @@ gitt miner post --wallet <name> --hotkey <hotkey>
 gitt miner check --wallet <name> --hotkey <hotkey>
 ```
 
+Use the hotkey **file name** under `~/.bittensor/wallets/<wallet>/hotkeys/` (for example `default`), or the hotkey **SS58 address** if it matches a key on disk.
+
 See full guide **[here](https://docs.gittensor.io/miner.html)**
 
 ## Validators

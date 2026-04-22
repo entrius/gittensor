@@ -57,11 +57,54 @@ def _resolve_endpoint(network: str | None, rpc_url: str | None) -> str:
     return NETWORK_MAP['finney']
 
 
+def _resolve_wallet_hotkey_name(wallet_name: str, hotkey_spec: str) -> str:
+    """Resolve CLI --hotkey to a wallet hotkey *file name*.
+
+    Bittensor stores keys as ``~/.bittensor/wallets/<wallet>/hotkeys/<name>``.
+    Users often paste the SS58 address instead of the key name; map that when possible.
+    """
+    hdir = Path.home() / '.bittensor' / 'wallets' / wallet_name / 'hotkeys'
+    if not hdir.is_dir():
+        return hotkey_spec
+    direct = hdir / hotkey_spec
+    if direct.is_file():
+        return hotkey_spec
+
+    import bittensor as bt
+
+    matches: list[str] = []
+    for p in sorted(hdir.iterdir()):
+        if not p.is_file() or p.name.endswith('pub.txt'):
+            continue
+        try:
+            w = bt.Wallet(name=wallet_name, hotkey=p.name)
+            if w.hotkey.ss58_address == hotkey_spec:
+                matches.append(p.name)
+        except Exception:
+            continue
+
+    if len(matches) > 1:
+        raise ValueError(f'Multiple hotkey files match SS58 {hotkey_spec}: {matches}')
+    if len(matches) == 1:
+        return matches[0]
+
+    available = sorted(
+        p.name for p in hdir.iterdir() if p.is_file() and not p.name.endswith('pub.txt')
+    )
+    raise ValueError(
+        f"No hotkey file {hotkey_spec!r} under wallet {wallet_name!r} "
+        f'({hdir}). Use the key name (filename), not the SS58, unless that address '
+        f'matches a local hotkey file. Available names: {", ".join(available) or "(none)"}'
+    )
+
+
 def _connect_bittensor(wallet_name: str, wallet_hotkey: str, ws_endpoint: str, netuid: int):
     """Set up and return bittensor wallet, subtensor, metagraph and dendrite."""
     import bittensor as bt
 
-    w = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
+    resolved_hotkey = _resolve_wallet_hotkey_name(wallet_name, wallet_hotkey)
+    w = bt.Wallet(name=wallet_name, hotkey=resolved_hotkey)
+    _ = w.hotkey.ss58_address  # load before Dendrite so failures do not construct a half-initialized dendrite
     st = bt.Subtensor(network=ws_endpoint)
     mg = st.metagraph(netuid=netuid)
     dd = bt.Dendrite(wallet=w)

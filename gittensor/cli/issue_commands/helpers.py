@@ -123,7 +123,7 @@ def with_cli_behavior_options(
     include_yes: bool = False,
     verbose_help: str = 'Show debug output',
     json_help: str = 'Output as JSON for scripting',
-    yes_help: str = 'Skip confirmation prompt (non-interactive/CI)',
+    yes_help: str = 'Skip confirmation prompt (non-interactive/CI). Alias: --no-prompt (btcli-compatible).',
 ) -> Callable[[CommandFunc], CommandFunc]:
     """Add common CLI behavior options such as verbose, JSON, and confirmation controls."""
     decorators: list[Callable[[CommandFunc], CommandFunc]] = []
@@ -150,7 +150,9 @@ def with_cli_behavior_options(
         decorators.append(
             click.option(
                 '--yes',
+                '--no-prompt',
                 '-y',
+                'yes',
                 is_flag=True,
                 help=yes_help,
             )

@@ -34,7 +34,7 @@ The result: a sustainable incentive layer that channels resources toward buildin
 
 ## Miners
 
-No miner neuron required — just register your GitHub PAT with validators using the CLI.
+No miner neuron required — just register your GitHub PAT with validators using the CLI. The `--wallet` value must be an existing coldkey name under `~/.bittensor/wallets/` (create keys with `btcli` if needed).
 
 ```bash
 # Install

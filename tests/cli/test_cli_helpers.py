@@ -27,6 +27,7 @@ from gittensor.cli.issue_commands.helpers import (
     colorize_status,
     emit_json,
     format_alpha,
+    resolve_network,
     validate_bounty_amount,
     validate_github_issue,
     validate_issue_id,
@@ -34,6 +35,44 @@ from gittensor.cli.issue_commands.helpers import (
     validate_ss58_address,
 )
 from gittensor.cli.issue_commands.vote import parse_pr_number
+from gittensor.cli.miner_commands.helpers import _resolve_endpoint
+
+# =============================================================================
+# resolve_network / miner _resolve_endpoint
+# =============================================================================
+
+
+class TestResolveNetwork:
+    def test_known_network(self):
+        url, name = resolve_network('test', None)
+        assert name == 'test'
+        assert 'test.finney' in url or url.startswith('wss://')
+
+    def test_unknown_network_typo_raises(self):
+        with pytest.raises(click.ClickException, match='Unknown network'):
+            resolve_network('finny', None)
+
+    def test_custom_wss_accepted(self):
+        ep = 'wss://example.com/custom/ws'
+        url, name = resolve_network(ep, None)
+        assert url == ep
+        assert name == 'custom'
+
+    def test_rpc_url_unvalidated_even_if_network_typo(self):
+        url, name = resolve_network('finny', 'wss://override.example/ws')
+        assert url == 'wss://override.example/ws'
+        assert name == 'custom'
+
+
+class TestMinerResolveEndpoint:
+    def test_unknown_network_typo_raises(self):
+        with pytest.raises(click.ClickException, match='Unknown network'):
+            _resolve_endpoint('finny', None)
+
+    def test_custom_https_accepted(self):
+        ep = 'https://rpc.example.com'
+        assert _resolve_endpoint(ep, None) == ep
+
 
 # =============================================================================
 # format_alpha

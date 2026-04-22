@@ -13,6 +13,7 @@ import click
 from rich.console import Console
 
 from gittensor.constants import NETWORK_MAP
+from gittensor.utils.network import looks_like_chain_endpoint
 
 console = Console()
 
@@ -47,7 +48,16 @@ def _resolve_endpoint(network: str | None, rpc_url: str | None) -> str:
     if rpc_url:
         return rpc_url
     if network:
-        return NETWORK_MAP.get(network.lower(), network)
+        key = network.lower()
+        if key in NETWORK_MAP:
+            return NETWORK_MAP[key]
+        stripped = network.strip()
+        if looks_like_chain_endpoint(stripped):
+            return stripped
+        valid = ', '.join(sorted(NETWORK_MAP))
+        raise click.ClickException(
+            f'Unknown network {network!r}. Use one of: {valid}, or pass a full endpoint URL (e.g. wss://...).'
+        )
     config_network = _load_config_value('network')
     config_endpoint = _load_config_value('ws_endpoint')
     if config_endpoint:

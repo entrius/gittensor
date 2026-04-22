@@ -21,6 +21,7 @@ from rich.console import Console
 
 from gittensor.cli.issue_commands.tables import build_pr_table
 from gittensor.constants import NETWORK_MAP
+from gittensor.utils.network import looks_like_chain_endpoint
 from gittensor.validator.issue_competitions.storage_utils import (
     compute_ink5_lazy_key,
     decode_issue_from_storage,
@@ -350,8 +351,9 @@ def validate_bounty_amount(bounty: str) -> int:
 def validate_repository(repo: str, verify_exists: bool = True) -> Tuple[str, str]:
     """Validate owner/repo format and optionally verify it exists on GitHub.
 
-    Returns (owner, repo_name) on success.
-    Raises click.BadParameter on failure.
+    Returns (owner, repo_name) parsed from the stripped input. Callers that need
+    the full ``owner/repo`` string (e.g. URLs, chain payloads) should use
+    ``f"{owner}/{repo_name}"`` so it matches what was validated.
     """
     repo = repo.strip()
 
@@ -560,8 +562,9 @@ def resolve_network(network: Optional[str] = None, rpc_url: Optional[str] = None
         4. Default: finney (mainnet)
 
     Args:
-        network: Network name from --network option (test/finney/local)
-        rpc_url: Explicit RPC URL from --rpc-url option
+        network: Built-in name (``finney`` / ``test`` / ``local``) or a full
+            WebSocket/HTTP endpoint URL. Other strings raise ``ClickException``.
+        rpc_url: Explicit RPC URL from --rpc-url option (always accepted as-is).
 
     Returns:
         Tuple of (ws_endpoint, network_name)
@@ -571,13 +574,18 @@ def resolve_network(network: Optional[str] = None, rpc_url: Optional[str] = None
         name = _URL_TO_NETWORK.get(rpc_url, 'custom')
         return rpc_url, name
 
-    # --network maps to a known endpoint
+    # --network maps to a known endpoint, or must be an explicit endpoint URL
     if network:
         key = network.lower()
         if key in NETWORK_MAP:
             return NETWORK_MAP[key], key
-        # Treat unknown network value as a custom URL
-        return network, 'custom'
+        stripped = network.strip()
+        if looks_like_chain_endpoint(stripped):
+            return stripped, 'custom'
+        valid = ', '.join(sorted(NETWORK_MAP))
+        raise click.ClickException(
+            f'Unknown network {network!r}. Use one of: {valid}, or pass a full endpoint URL (e.g. wss://...).'
+        )
 
     # Fall back to config file
     config = load_config()

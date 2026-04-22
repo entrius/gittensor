@@ -55,7 +55,7 @@ def check_config(cls, config: Any):
             config.neuron.name,
         )
     )
-    print('full path:', full_path)
+    bt.logging.debug(f'full path: {full_path}')
     config.neuron.full_path = os.path.expanduser(full_path)
     if not os.path.exists(config.neuron.full_path):
         os.makedirs(config.neuron.full_path, exist_ok=True)
@@ -176,20 +176,6 @@ def add_validator_args(cls, parser):
         type=int,
         help='The maximum number of TAO allowed to query a validator with a vpermit.',
         default=4096,
-    )
-
-    parser.add_argument(
-        '--wandb.project_name',
-        type=str,
-        help='The name of the project where you are sending the new run.',
-        default='template-validators',
-    )
-
-    parser.add_argument(
-        '--wandb.entity',
-        type=str,
-        help='The name of the project where you are sending the new run.',
-        default='opentensor-dev',
     )
 
 

@@ -22,6 +22,7 @@ from .helpers import (
     _handle_command_error,
     _make_contract_client,
     _resolve_contract_and_network,
+    confirm_or_abort,
     console,
     print_error,
     print_network_header,
@@ -78,6 +79,7 @@ def vote():
 @click.argument('pr_number_or_url', type=str)
 @with_wallet_options()
 @with_network_contract_options('Contract address (uses config if empty)')
+@with_cli_behavior_options(include_yes=True)
 def val_vote_solution(
     issue_id: int,
     solver_hotkey: str,
@@ -88,6 +90,7 @@ def val_vote_solution(
     network: str,
     rpc_url: str,
     contract: str,
+    yes: bool,
 ):
     """Vote for a solution on an active issue (triggers auto-payout on consensus).
 
@@ -133,6 +136,9 @@ def val_vote_solution(
         )
     )
 
+    if not confirm_or_abort(f'Vote that {solver_hotkey} solved issue {issue_id} via PR #{pr_number}?', yes):
+        return
+
     try:
         with console.status('[bold cyan]Submitting vote...', spinner='dots'):
             wallet, client = _make_contract_client(contract_addr, ws_endpoint, wallet_name, wallet_hotkey)
@@ -151,6 +157,7 @@ def val_vote_solution(
 @click.argument('reason', type=str)
 @with_wallet_options()
 @with_network_contract_options('Contract address (uses config if empty)')
+@with_cli_behavior_options(include_yes=True)
 def val_vote_cancel_issue(
     issue_id: int,
     reason: str,
@@ -159,6 +166,7 @@ def val_vote_cancel_issue(
     network: str,
     rpc_url: str,
     contract: str,
+    yes: bool,
 ):
     """Vote to cancel an issue (works on Registered or Active).
 
@@ -185,6 +193,9 @@ def val_vote_cancel_issue(
             border_style='yellow',
         )
     )
+
+    if not confirm_or_abort(f'Vote to cancel issue {issue_id}?', yes):
+        return
 
     try:
         with console.status('[bold cyan]Submitting cancel vote...', spinner='dots'):

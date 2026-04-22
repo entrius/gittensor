@@ -251,6 +251,21 @@ def _is_interactive() -> bool:
     return getattr(sys.stdin, 'isatty', lambda: False)()
 
 
+def confirm_or_abort(prompt: str, yes: bool, default: bool = False) -> bool:
+    """Prompt for confirmation before a destructive operation.
+
+    Returns True if the caller should proceed. Returns False (and prints a
+    cancellation message) if the user declines. `yes` and non-TTY input both
+    skip the prompt and proceed.
+    """
+    if yes or not _is_interactive():
+        return True
+    if click.confirm(f'\n{prompt}', default=default):
+        return True
+    console.print('[yellow]Cancelled.[/yellow]')
+    return False
+
+
 def get_github_pat() -> Optional[str]:
     """Return GITTENSOR_MINER_PAT from environment, or None."""
     return os.environ.get('GITTENSOR_MINER_PAT') or None

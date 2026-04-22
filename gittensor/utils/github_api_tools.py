@@ -377,7 +377,7 @@ def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -
     bt.logging.error(
         f'File changes request for PR #{pr_number} in {repository} failed after {max_attempts} attempts: {last_error}'
     )
-    return []
+    return None
 
 
 # GraphQL fragment used by both issue submissions and solver detection.
@@ -1136,6 +1136,10 @@ class FileContentPair:
     new_content: Optional[str]  # None for deleted files
 
 
+def _empty_file_content_pairs(batch_changes: List['FileChangeType']) -> Dict[str, FileContentPair]:
+    return {fc.filename: FileContentPair(None, None) for fc in batch_changes}
+
+
 def _fetch_file_contents_with_base_batch(
     repo_owner: str,
     repo_name: str,
@@ -1143,7 +1147,7 @@ def _fetch_file_contents_with_base_batch(
     head_sha: str,
     batch_changes: List['FileChangeType'],
     token: str,
-) -> Dict[str, FileContentPair]:
+) -> tuple[Dict[str, FileContentPair], bool]:
     """Fetch base and head file contents for a single batch of file changes.
 
     Args:
@@ -1155,7 +1159,7 @@ def _fetch_file_contents_with_base_batch(
         token: GitHub PAT for authentication
 
     Returns:
-        Dict mapping file paths to FileContentPair (old_content, new_content)
+        Tuple of (file-content dict, fetch_failed flag).
     """
     file_fields = []
     for i, fc in enumerate(batch_changes):
@@ -1178,7 +1182,7 @@ def _fetch_file_contents_with_base_batch(
             )
 
     if not file_fields:
-        return {}
+        return {}, False
 
     query = f"""
         query($owner: String!, $name: String!) {{
@@ -1193,12 +1197,17 @@ def _fetch_file_contents_with_base_batch(
     data = execute_graphql_query(query, variables, token)
     if data is None:
         bt.logging.warning(f'Failed to fetch file contents for {repo_owner}/{repo_name}')
-        return {fc.filename: FileContentPair(None, None) for fc in batch_changes}
+        return _empty_file_content_pairs(batch_changes), True
 
     if 'errors' in data:
         bt.logging.warning(f'GraphQL errors fetching files: {data["errors"]}')
 
-    repo_data = data.get('data', {}).get('repository', {})
+    data_payload = data.get('data')
+    repo_data = data_payload.get('repository') if isinstance(data_payload, dict) else None
+    if repo_data is None:
+        bt.logging.warning(f'GraphQL response missing repository data for {repo_owner}/{repo_name}')
+        return _empty_file_content_pairs(batch_changes), True
+
     results: Dict[str, FileContentPair] = {}
 
     for i, fc in enumerate(batch_changes):
@@ -1219,7 +1228,7 @@ def _fetch_file_contents_with_base_batch(
 
         results[fc.filename] = FileContentPair(old_content=old_content, new_content=new_content)
 
-    return results
+    return results, False
 
 
 def fetch_file_contents_with_base(
@@ -1229,7 +1238,7 @@ def fetch_file_contents_with_base(
     head_sha: str,
     file_changes: List['FileChangeType'],
     token: str,
-) -> Dict[str, FileContentPair]:
+) -> tuple[Dict[str, FileContentPair], bool]:
     """Fetch old and new versions of files in batches so large PRs don't hit complexity limits.
 
     Args:
@@ -1241,16 +1250,20 @@ def fetch_file_contents_with_base(
         token: GitHub PAT for authentication
 
     Returns:
-        Dict mapping file paths to FileContentPair (old_content, new_content)
+        Tuple of (file-content dict, fetch_failed flag).
     """
     if not file_changes:
-        return {}
+        return {}, False
 
     results: Dict[str, FileContentPair] = {}
+    fetch_failed = False
 
     for batch_start in range(0, len(file_changes), MAX_FILES_PER_GRAPHQL_BATCH):
         batch = file_changes[batch_start : batch_start + MAX_FILES_PER_GRAPHQL_BATCH]
-        batch_results = _fetch_file_contents_with_base_batch(repo_owner, repo_name, base_sha, head_sha, batch, token)
+        batch_results, batch_failed = _fetch_file_contents_with_base_batch(
+            repo_owner, repo_name, base_sha, head_sha, batch, token
+        )
         results.update(batch_results)
+        fetch_failed = fetch_failed or batch_failed
 
-    return results
+    return results, fetch_failed

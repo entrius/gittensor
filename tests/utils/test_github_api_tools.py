@@ -431,7 +431,7 @@ class TestFileChangesRetryLogic:
     @patch('gittensor.utils.github_api_tools.time.sleep')
     @patch('gittensor.utils.github_api_tools.bt.logging')
     def test_gives_up_after_three_attempts(self, mock_logging, mock_sleep, mock_get):
-        """Test that function gives up after 3 failed attempts and returns empty list."""
+        """Test that function gives up after 3 failed attempts and returns None."""
         mock_500 = Mock(status_code=500, text='Internal Server Error')
         mock_get.return_value = mock_500
 
@@ -439,7 +439,7 @@ class TestFileChangesRetryLogic:
 
         assert mock_get.call_count == 3
         assert mock_sleep.call_count == 2, 'Should sleep between attempts but not after the last one'
-        assert result == []
+        assert result is None
         mock_logging.error.assert_called()
 
     @patch('gittensor.utils.github_api_tools.requests.get')
@@ -472,7 +472,7 @@ class TestFileChangesRetryLogic:
         result = get_pull_request_file_changes('owner/repo', 1, 'fake_token')
 
         assert mock_get.call_count == 3
-        assert result == []
+        assert result is None
         mock_logging.error.assert_called()
 
     @patch('gittensor.utils.github_api_tools.requests.get')
@@ -702,13 +702,13 @@ class TestFileChangesPagination:
     @patch('gittensor.utils.github_api_tools.requests.get')
     @patch('gittensor.utils.github_api_tools.time.sleep')
     @patch('gittensor.utils.github_api_tools.bt.logging')
-    def test_all_pages_fail_returns_empty_list(self, mock_logging, mock_sleep, mock_get):
-        """If every attempt fails on the first page, return empty list."""
+    def test_all_pages_fail_returns_none(self, mock_logging, mock_sleep, mock_get):
+        """If every attempt fails on the first page, return None."""
         mock_get.return_value = Mock(status_code=500, text='Internal Server Error')
 
         result = get_pull_request_file_changes('owner/repo', 1, 'fake_token')
 
-        assert result == []
+        assert result is None
         assert mock_get.call_count == 3
         mock_logging.error.assert_called()
 
@@ -1254,8 +1254,9 @@ class TestFetchFileContentsWithBase:
     @patch('gittensor.utils.github_api_tools.execute_graphql_query')
     def test_empty_file_changes_returns_empty_dict(self, mock_execute):
         """No GraphQL call should be made when file_changes is empty."""
-        result = fetch_file_contents_with_base('owner', 'repo', 'base', 'head', [], 'token')
+        result, fetch_failed = fetch_file_contents_with_base('owner', 'repo', 'base', 'head', [], 'token')
         assert result == {}
+        assert fetch_failed is False
         mock_execute.assert_not_called()
 
     @patch('gittensor.utils.github_api_tools.execute_graphql_query')
@@ -1271,8 +1272,9 @@ class TestFetchFileContentsWithBase:
             }
         }
 
-        result = fetch_file_contents_with_base('owner', 'repo', 'base_sha', 'head_sha', changes, 'token')
+        result, fetch_failed = fetch_file_contents_with_base('owner', 'repo', 'base_sha', 'head_sha', changes, 'token')
 
+        assert fetch_failed is False
         assert len(result) == 1
         assert result['app.py'].old_content == 'old code'
         assert result['app.py'].new_content == 'new code'
@@ -1289,7 +1291,7 @@ class TestFetchFileContentsWithBase:
             }
         }
 
-        result = fetch_file_contents_with_base('owner', 'repo', 'base', 'head', changes, 'token')
+        result, _ = fetch_file_contents_with_base('owner', 'repo', 'base', 'head', changes, 'token')
 
         assert result['new_file.py'].old_content is None
         assert result['new_file.py'].new_content == 'brand new'
@@ -1306,7 +1308,7 @@ class TestFetchFileContentsWithBase:
             }
         }
 
-        result = fetch_file_contents_with_base('owner', 'repo', 'base', 'head', changes, 'token')
+        result, _ = fetch_file_contents_with_base('owner', 'repo', 'base', 'head', changes, 'token')
 
         assert result['old_file.py'].old_content == 'deleted code'
         assert result['old_file.py'].new_content is None
@@ -1330,10 +1332,11 @@ class TestFetchFileContentsWithBase:
 
         mock_execute.side_effect = mock_side_effect
 
-        result = fetch_file_contents_with_base('owner', 'repo', 'base', 'head', changes, 'token')
+        result, fetch_failed = fetch_file_contents_with_base('owner', 'repo', 'base', 'head', changes, 'token')
 
         # 5 files / batch size 2 = 3 batches (2 + 2 + 1)
         assert mock_execute.call_count == 3
+        assert fetch_failed is False
         assert len(result) == 5
 
     @patch('gittensor.utils.github_api_tools.MAX_FILES_PER_GRAPHQL_BATCH', 2)
@@ -1357,8 +1360,9 @@ class TestFetchFileContentsWithBase:
             None,  # second batch fails
         ]
 
-        result = fetch_file_contents_with_base('owner', 'repo', 'base', 'head', changes, 'token')
+        result, fetch_failed = fetch_file_contents_with_base('owner', 'repo', 'base', 'head', changes, 'token')
 
+        assert fetch_failed is True
         assert len(result) == 4
         # First batch succeeded
         assert result['f0.py'].old_content == 'old_0'
@@ -1366,6 +1370,45 @@ class TestFetchFileContentsWithBase:
         # Second batch failed — None pairs
         assert result['f2.py'].old_content is None
         assert result['f2.py'].new_content is None
+
+    @patch('gittensor.utils.github_api_tools.MAX_FILES_PER_GRAPHQL_BATCH', 2)
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_failed_batch_sets_fetch_failed_true(self, mock_logging, mock_execute):
+        changes = [_make_file_change(f'f{i}.py') for i in range(4)]
+
+        mock_execute.side_effect = [
+            {
+                'data': {
+                    'repository': {
+                        'base0': _make_blob_response('old_0'),
+                        'head0': _make_blob_response('new_0'),
+                        'base1': _make_blob_response('old_1'),
+                        'head1': _make_blob_response('new_1'),
+                    }
+                }
+            },
+            None,
+        ]
+
+        result, fetch_failed = fetch_file_contents_with_base('owner', 'repo', 'base', 'head', changes, 'token')
+
+        assert fetch_failed is True
+        assert len(result) == 4
+        assert result['f2.py'].old_content is None
+        assert result['f2.py'].new_content is None
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_errors_with_missing_data_sets_fetch_failed_true(self, mock_logging, mock_execute):
+        changes = [_make_file_change('main.py', status='modified')]
+        mock_execute.return_value = {'data': None, 'errors': [{'type': 'RATE_LIMITED', 'message': 'too many'}]}
+
+        result, fetch_failed = fetch_file_contents_with_base('owner', 'repo', 'base', 'head', changes, 'token')
+
+        assert fetch_failed is True
+        assert result['main.py'].old_content is None
+        assert result['main.py'].new_content is None
 
     @patch('gittensor.utils.github_api_tools.execute_graphql_query')
     def test_renamed_file_fetches_from_previous_filename(self, mock_execute):
@@ -1380,7 +1423,7 @@ class TestFetchFileContentsWithBase:
             }
         }
 
-        result = fetch_file_contents_with_base('owner', 'repo', 'base_sha', 'head_sha', changes, 'token')
+        result, _ = fetch_file_contents_with_base('owner', 'repo', 'base_sha', 'head_sha', changes, 'token')
 
         assert result['new_name.py'].old_content == 'original'
         assert result['new_name.py'].new_content == 'updated'
@@ -1504,7 +1547,7 @@ class TestFetchFileContentsForPrMergeBase:
         from gittensor.validator.oss_contributions.scoring import fetch_file_contents_for_pr
 
         mock_merge_base.return_value = 'merge_base_sha_123'
-        mock_fetch.return_value = {}
+        mock_fetch.return_value = ({}, False)
 
         pr = PullRequest(
             number=1,
@@ -1548,7 +1591,7 @@ class TestFetchFileContentsForPrMergeBase:
         from gittensor.validator.oss_contributions.scoring import fetch_file_contents_for_pr
 
         mock_merge_base.return_value = None
-        mock_fetch.return_value = {}
+        mock_fetch.return_value = ({}, False)
 
         pr = PullRequest(
             number=1,
@@ -1581,6 +1624,46 @@ class TestFetchFileContentsForPrMergeBase:
         # Should fall back to base_ref_oid
         call_args = mock_fetch.call_args
         assert call_args[0][2] == 'base_branch_tip_sha', 'Should fall back to base_ref_oid'
+
+    @patch('gittensor.validator.oss_contributions.scoring.fetch_file_contents_with_base')
+    @patch('gittensor.validator.oss_contributions.scoring.get_merge_base_sha')
+    def test_returns_fetch_failed_flag(self, mock_merge_base, mock_fetch):
+        from gittensor.classes import FileChange, PRState, PullRequest
+        from gittensor.validator.oss_contributions.scoring import fetch_file_contents_for_pr
+
+        mock_merge_base.return_value = None
+        mock_fetch.return_value = ({'test.py': FileContentPair(None, None)}, True)
+
+        pr = PullRequest(
+            number=1,
+            repository_full_name='owner/repo',
+            uid=0,
+            hotkey='hk',
+            github_id='1',
+            title='test',
+            author_login='user',
+            merged_at=None,
+            created_at=__import__('datetime').datetime.now(__import__('datetime').timezone.utc),
+            pr_state=PRState.MERGED,
+            base_ref_oid='base_branch_tip_sha',
+            head_ref_oid='head_sha',
+            file_changes=[
+                FileChange(
+                    pr_number=1,
+                    repository_full_name='owner/repo',
+                    filename='test.py',
+                    status='modified',
+                    changes=5,
+                    additions=3,
+                    deletions=2,
+                ),
+            ],
+        )
+
+        result, fetch_failed = fetch_file_contents_for_pr(pr, 'fake_token')
+
+        assert fetch_failed is True
+        assert result['test.py'].new_content is None
 
 
 if __name__ == '__main__':

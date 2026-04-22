@@ -92,13 +92,21 @@ def score_pull_request(
     # Only fetch file changes from GitHub if not already loaded (they are preloaded for testing only)
     if not pr.file_changes:
         file_changes = get_pull_request_file_changes(pr.repository_full_name, pr.number, miner_eval.github_pat)
+        if file_changes is None:
+            bt.logging.warning(f'PR #{pr.number}: file-changes fetch failed for {pr.repository_full_name}, skipping')
+            return
         if not file_changes:
             bt.logging.warning('No file changes found.')
             return
         pr.set_file_changes(file_changes)
 
     # Fetch full file contents for token-based scoring
-    file_contents = fetch_file_contents_for_pr(pr, miner_eval.github_pat)
+    file_contents, fetch_failed = fetch_file_contents_for_pr(pr, miner_eval.github_pat)
+    if fetch_failed:
+        bt.logging.warning(
+            f'PR #{pr.number}: GraphQL file-content fetch failed for {pr.repository_full_name}, skipping'
+        )
+        return
 
     pr.base_score = calculate_base_score(pr, programming_languages, token_config, file_contents)
 
@@ -108,24 +116,27 @@ def score_pull_request(
         miner_eval.unique_repos_contributed_to.add(pr.repository_full_name)
 
 
-def fetch_file_contents_for_pr(pr: PullRequest, github_pat: str) -> Dict[str, FileContentPair]:
+def fetch_file_contents_for_pr(
+    pr: PullRequest,
+    github_pat: str,
+) -> Tuple[Dict[str, FileContentPair], bool]:
     """Fetch both base and head file contents for all files in a PR using GraphQL batch fetch.
 
     Uses the merge-base commit (common ancestor) as the "before" state rather than
     the base branch tip, so the tree-diff only scores the PR's own changes.
 
     Returns:
-        Dict mapping filename to FileContentPair(old_content, new_content)
+        Tuple of (file-content dict, fetch_failed flag).
         - old_content: File content before the PR (None for new files)
         - new_content: File content after the PR (None for deleted files)
     """
     if not pr.file_changes or not pr.head_ref_oid or not pr.base_ref_oid:
-        return {}
+        return {}, False
 
     parts = pr.repository_full_name.split('/')
     if len(parts) != 2:
         bt.logging.warning(f'Invalid repository name format: {pr.repository_full_name}')
-        return {}
+        return {}, False
 
     owner, repo_name = parts
 
@@ -138,7 +149,10 @@ def fetch_file_contents_for_pr(pr: PullRequest, github_pat: str) -> Dict[str, Fi
             f'PR #{pr.number}: using merge-base {merge_base[:8]} instead of base_ref {pr.base_ref_oid[:8]}'
         )
 
-    return fetch_file_contents_with_base(owner, repo_name, base_sha, pr.head_ref_oid, pr.file_changes, github_pat)
+    file_contents, fetch_failed = fetch_file_contents_with_base(
+        owner, repo_name, base_sha, pr.head_ref_oid, pr.file_changes, github_pat
+    )
+    return file_contents, fetch_failed
 
 
 def calculate_base_score(

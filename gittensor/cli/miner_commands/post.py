@@ -31,6 +31,34 @@ from gittensor.utils.github_api_tools import make_graphql_headers, make_headers
 console = Console()
 
 
+def _build_broadcast_results(validator_uids, validator_axons, responses):
+    """Build result rows without silently truncating on partial response lists."""
+    expected = len(validator_uids)
+    actual = len(responses)
+    missing_count = max(0, expected - actual)
+
+    results = []
+    for idx, (uid, axon) in enumerate(zip(validator_uids, validator_axons)):
+        resp = responses[idx] if idx < actual else None
+        accepted = getattr(resp, 'accepted', None)
+        reason = getattr(resp, 'rejection_reason', None)
+        status_code = getattr(resp.dendrite, 'status_code', None) if hasattr(resp, 'dendrite') else None
+        if resp is None and not reason:
+            reason = 'No response received from validator.'
+
+        results.append(
+            {
+                'uid': uid,
+                'hotkey': axon.hotkey[:16] + '...',
+                'accepted': accepted,
+                'rejection_reason': reason,
+                'status_code': status_code,
+            }
+        )
+
+    return results, missing_count
+
+
 @click.command()
 @click.option('--wallet', 'wallet_name', default=None, help='Bittensor wallet name.')
 @click.option('--hotkey', 'wallet_hotkey', default=None, help='Bittensor hotkey name.')
@@ -117,20 +145,7 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_m
         responses = asyncio.run(_broadcast())
 
     # 6. Collect results
-    results = []
-    for uid, axon, resp in zip(validator_uids, validator_axons, responses):
-        accepted = getattr(resp, 'accepted', None)
-        reason = getattr(resp, 'rejection_reason', None)
-        status_code = getattr(resp.dendrite, 'status_code', None) if hasattr(resp, 'dendrite') else None
-        results.append(
-            {
-                'uid': uid,
-                'hotkey': axon.hotkey[:16] + '...',
-                'accepted': accepted,
-                'rejection_reason': reason,
-                'status_code': status_code,
-            }
-        )
+    results, missing_count = _build_broadcast_results(validator_uids, validator_axons, responses)
 
     accepted_count = sum(1 for r in results if r['accepted'] is True)
 
@@ -139,16 +154,21 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_m
         click.echo(
             json.dumps(
                 {
-                    'success': accepted_count > 0,
+                    'success': accepted_count > 0 and missing_count == 0,
                     'total_validators': len(results),
                     'accepted': accepted_count,
                     'rejected': len(results) - accepted_count,
+                    'no_response': missing_count,
                     'results': results,
                 },
                 indent=2,
             )
         )
     else:
+        if missing_count > 0:
+            console.print(
+                f'[yellow]Warning: no response from {missing_count}/{len(results)} validators.[/yellow]'
+            )
         table = Table(title='PAT Broadcast Results')
         table.add_column('UID', style='cyan', justify='right')
         table.add_column('Validator', style='dim')

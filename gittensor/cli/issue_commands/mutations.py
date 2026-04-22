@@ -140,11 +140,14 @@ def issue_register(
     except click.BadParameter as e:
         raise click.ClickException(str(e))
 
-    github_url = f'https://github.com/{repo}/issues/{issue_number}'
+    # validate_repository strips internally but does not return the full string; rebuild
+    # so URLs and on-chain repository_full_name match what was validated.
+    repository_full_name = f'{owner}/{repo_name}'
+    github_url = f'https://github.com/{repository_full_name}/issues/{issue_number}'
 
     console.print(
         Panel(
-            f'[cyan]Repository:[/cyan] {repo}\n'
+            f'[cyan]Repository:[/cyan] {repository_full_name}\n'
             f'[cyan]Issue Number:[/cyan] #{issue_number}\n'
             f'[cyan]GitHub URL:[/cyan] {github_url}\n'
             f'[cyan]Target Bounty:[/cyan] {format_alpha(bounty_amount, 2)} ALPHA\n'
@@ -212,19 +215,24 @@ def issue_register(
             'register_issue',
             args={
                 'github_url': github_url,
-                'repository_full_name': repo,
+                'repository_full_name': repository_full_name,
                 'issue_number': issue_number,
                 'target_bounty': bounty_amount,
             },
             gas_limit={'ref_time': 10_000_000_000, 'proof_size': 1_000_000},
         )
 
-        # Check if transaction was successful
-        if hasattr(result, 'is_success') and not result.is_success:
+        # Be conservative: only explicit success is treated as success.
+        tx_success = getattr(result, 'is_success', None)
+        if tx_success is not True:
             error_info = getattr(result, 'error_message', None)
             is_revert = error_info and isinstance(error_info, dict) and error_info.get('name') == 'ContractReverted'
 
-            if is_revert:
+            if tx_success is None:
+                print_error('Could not verify transaction success from contract response.')
+                if error_info:
+                    console.print(f'[yellow]Details:[/yellow] {error_info}')
+            elif is_revert:
                 print_error('Contract rejected the request')
                 console.print('[yellow]Possible reasons:[/yellow]')
                 console.print('  \u2022 Issue already registered (same repo + issue number)')
@@ -232,9 +240,13 @@ def issue_register(
                 console.print('  \u2022 Caller is not the contract owner')
             elif error_info:
                 print_error(str(error_info))
+            else:
+                print_error('Transaction failed.')
 
-            console.print(f'[cyan]Transaction Hash:[/cyan] {result.extrinsic_hash}')
-            return
+            tx_hash = getattr(result, 'extrinsic_hash', None)
+            if tx_hash:
+                console.print(f'[cyan]Transaction Hash:[/cyan] {tx_hash}')
+            raise SystemExit(1)
 
         print_success('Issue registered successfully!')
         console.print(f'[cyan]Transaction Hash:[/cyan] {result.extrinsic_hash}')

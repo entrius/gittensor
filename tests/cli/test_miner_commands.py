@@ -3,13 +3,16 @@
 """Tests for gitt miner post and gitt miner check CLI commands."""
 
 import json
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 from click.testing import CliRunner
 
 from gittensor import __version__
+from gittensor.cli.miner_commands.check import _build_check_results
 from gittensor.cli.main import cli
+from gittensor.cli.miner_commands.post import _build_broadcast_results
 
 
 @pytest.fixture
@@ -75,3 +78,38 @@ class TestCliVersion:
         result = runner.invoke(cli, ['--version'])
         assert result.exit_code == 0
         assert result.output == f'gittensor, version {__version__}\n'
+
+
+class TestMinerResponseAlignment:
+    def test_build_broadcast_results_keeps_all_validators(self):
+        validator_uids = [1, 2, 3]
+        validator_axons = [
+            SimpleNamespace(hotkey='hk1' * 16),
+            SimpleNamespace(hotkey='hk2' * 16),
+            SimpleNamespace(hotkey='hk3' * 16),
+        ]
+        responses = [SimpleNamespace(accepted=True, rejection_reason=None, dendrite=SimpleNamespace(status_code=200))]
+
+        results, missing = _build_broadcast_results(validator_uids, validator_axons, responses)
+
+        assert len(results) == 3
+        assert missing == 2
+        assert results[0]['accepted'] is True
+        assert results[1]['accepted'] is None
+        assert results[1]['rejection_reason'] == 'No response received from validator.'
+
+    def test_build_check_results_keeps_all_validators(self):
+        validator_uids = [10, 11]
+        validator_axons = [
+            SimpleNamespace(hotkey='hk10' * 12),
+            SimpleNamespace(hotkey='hk11' * 12),
+        ]
+        responses = [SimpleNamespace(has_pat=True, pat_valid=True, rejection_reason=None)]
+
+        results, missing = _build_check_results(validator_uids, validator_axons, responses)
+
+        assert len(results) == 2
+        assert missing == 1
+        assert results[0]['pat_valid'] is True
+        assert results[1]['has_pat'] is None
+        assert results[1]['rejection_reason'] == 'No response received from validator.'

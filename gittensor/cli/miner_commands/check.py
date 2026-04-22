@@ -25,6 +25,33 @@ from .helpers import (
 console = Console()
 
 
+def _build_check_results(validator_uids, validator_axons, responses):
+    """Build result rows without truncation when responses are partial."""
+    expected = len(validator_uids)
+    actual = len(responses)
+    missing_count = max(0, expected - actual)
+
+    results = []
+    for idx, (uid, axon) in enumerate(zip(validator_uids, validator_axons)):
+        resp = responses[idx] if idx < actual else None
+        has_pat = getattr(resp, 'has_pat', None)
+        pat_valid = getattr(resp, 'pat_valid', None)
+        reason = getattr(resp, 'rejection_reason', None)
+        if resp is None and not reason:
+            reason = 'No response received from validator.'
+        results.append(
+            {
+                'uid': uid,
+                'hotkey': axon.hotkey[:16] + '...',
+                'has_pat': has_pat,
+                'pat_valid': pat_valid,
+                'rejection_reason': reason,
+            }
+        )
+
+    return results, missing_count
+
+
 @click.command()
 @click.option('--wallet', 'wallet_name', default=None, help='Bittensor wallet name.')
 @click.option('--hotkey', 'wallet_hotkey', default=None, help='Bittensor hotkey name.')
@@ -80,20 +107,7 @@ def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, json_mode)
         responses = asyncio.run(_check())
 
     # 5. Collect results
-    results = []
-    for uid, axon, resp in zip(validator_uids, validator_axons, responses):
-        has_pat = getattr(resp, 'has_pat', None)
-        pat_valid = getattr(resp, 'pat_valid', None)
-        reason = getattr(resp, 'rejection_reason', None)
-        results.append(
-            {
-                'uid': uid,
-                'hotkey': axon.hotkey[:16] + '...',
-                'has_pat': has_pat,
-                'pat_valid': pat_valid,
-                'rejection_reason': reason,
-            }
-        )
+    results, missing_count = _build_check_results(validator_uids, validator_axons, responses)
 
     valid_count = sum(1 for r in results if r['pat_valid'] is True)
     no_response_count = sum(1 for r in results if r['has_pat'] is None)
@@ -103,17 +117,22 @@ def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, json_mode)
         click.echo(
             json.dumps(
                 {
-                    'success': valid_count > 0,
+                    'success': valid_count > 0 and missing_count == 0,
                     'total_validators': len(results),
                     'valid': valid_count,
                     'invalid': len(results) - valid_count - no_response_count,
                     'no_response': no_response_count,
+                    'missing_responses': missing_count,
                     'results': results,
                 },
                 indent=2,
             )
         )
     else:
+        if missing_count > 0:
+            console.print(
+                f'[yellow]Warning: no response from {missing_count}/{len(results)} validators.[/yellow]'
+            )
         table = Table(title='PAT Check Results')
         table.add_column('UID', style='cyan', justify='right')
         table.add_column('Validator', style='dim')

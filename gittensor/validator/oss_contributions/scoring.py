@@ -489,10 +489,10 @@ def is_valid_issue(issue: Issue, pr: PullRequest) -> bool:
             return False
 
         if issue.closed_at and pr.merged_at:
-            days_diff = abs((issue.closed_at - pr.merged_at).total_seconds()) / SECONDS_PER_DAY
-            if days_diff > MAX_ISSUE_CLOSE_WINDOW_DAYS:
+            days_diff = (issue.closed_at - pr.merged_at).total_seconds() / SECONDS_PER_DAY
+            if days_diff > MAX_ISSUE_CLOSE_WINDOW_DAYS or days_diff < 0:
                 bt.logging.warning(
-                    f'Skipping issue #{issue.number} - Issue closed {days_diff:.1f}d from merge (max: {MAX_ISSUE_CLOSE_WINDOW_DAYS})'
+                    f'Skipping issue #{issue.number} - Issue closed {days_diff:+.2f}d from merge (max: {MAX_ISSUE_CLOSE_WINDOW_DAYS})'
                 )
                 return False
 

@@ -375,13 +375,17 @@ def issue_harvest(wallet_name: str, wallet_hotkey: str, network: str, rpc_url: s
                 console.print(f'[cyan]Transaction hash:[/cyan] {result.get("tx_hash", "N/A")}')
                 print_error(result.get('error', 'Unknown'))
                 console.print('[dim]Check proxy permissions: contract needs NonCritical proxy.[/dim]')
-            elif result.get('status') == 'failed':
+                raise SystemExit(1)
+            elif result.get('status') in {'failed', 'error'}:
                 print_error(f'Harvest failed: {result.get("error", "Unknown error")}')
+                raise SystemExit(1)
             else:
                 console.print(f'\n[yellow]Harvest result: {result}[/yellow]')
+                raise SystemExit(1)
         else:
             print_error('Harvest returned None — check logs for details.')
             console.print('[dim]Run with --verbose for more information.[/dim]')
+            raise SystemExit(1)
 
     except ImportError as e:
         print_error(f'Missing dependency — {e}')

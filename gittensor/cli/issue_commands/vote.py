@@ -142,6 +142,7 @@ def val_vote_solution(
             print_success('Solution vote submitted!')
         else:
             print_error('Vote failed.')
+            raise SystemExit(1)
     except Exception as e:
         _handle_command_error(e)
 
@@ -195,6 +196,7 @@ def val_vote_cancel_issue(
             print_success('Cancel vote submitted!')
         else:
             print_error('Cancel vote failed.')
+            raise SystemExit(1)
     except Exception as e:
         _handle_command_error(e)
 

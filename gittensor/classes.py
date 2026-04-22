@@ -8,7 +8,12 @@ from typing import DefaultDict, Dict, List, Optional, Set
 
 import bittensor as bt
 
-from gittensor.constants import MAX_CODE_DENSITY_MULTIPLIER, MIN_TOKEN_SCORE_FOR_BASE_SCORE
+from gittensor.constants import (
+    LABEL_MULTIPLIERS,
+    MAINTAINER_ASSOCIATIONS,
+    MAX_CODE_DENSITY_MULTIPLIER,
+    MIN_TOKEN_SCORE_FOR_BASE_SCORE,
+)
 from gittensor.utils.utils import parse_repo_name
 
 GITHUB_DOMAIN = 'https://github.com/'
@@ -166,7 +171,7 @@ class PullRequest:
     time_decay_multiplier: float = 1.0
     credibility_multiplier: float = 1.0
     review_quality_multiplier: float = 1.0  # Penalty for CHANGES_REQUESTED reviews from maintainers
-    label_multiplier: float = 1.0  # Multiplier based on PR label (feature, bug, enhancement, refactor)
+    label_multiplier: float = 1.0  # Multiplier based on PR label (exact match against known labels)
     label: Optional[str] = None  # Last label set on the PR
     changes_requested_count: int = 0  # Number of maintainer CHANGES_REQUESTED reviews
     earned_score: float = 0.0
@@ -290,9 +295,25 @@ class PullRequest:
         last_edited_at = parse_github_timestamp_to_cst(raw_edited_at) if isinstance(raw_edited_at, str) else None
         merged_at = parse_github_timestamp_to_cst(pr_data['mergedAt']) if is_merged else None
 
-        # Extract last label from timeline events
-        timeline_nodes = pr_data.get('timelineItems', {}).get('nodes', [])
-        label = timeline_nodes[0]['label']['name'].lower() if timeline_nodes else None
+        changes_requested_count = 0
+        if is_merged:
+            cr_reviews = pr_data.get('changesRequestedReviews', {}).get('nodes', [])
+            changes_requested_count = sum(
+                1 for r in cr_reviews if r.get('authorAssociation') in MAINTAINER_ASSOCIATIONS
+            )
+
+        current = {(n.get('name') or '').lower() for n in (pr_data.get('labels') or {}).get('nodes') or [] if n}
+        label: Optional[str] = None
+        scoring_labels = current & LABEL_MULTIPLIERS.keys()
+        if scoring_labels:
+            for event in reversed((pr_data.get('timelineItems') or {}).get('nodes') or []):
+                name = ((event or {}).get('label') or {}).get('name', '').lower()
+                if name in scoring_labels:
+                    label = name
+                    break
+            if label is None:
+                # Timeline truncated — fall back to highest-multiplier currently-applied label
+                label = max(scoring_labels, key=lambda n: (LABEL_MULTIPLIERS[n], n))
 
         return cls(
             number=pr_data['number'],
@@ -315,6 +336,7 @@ class PullRequest:
             head_ref_oid=pr_data.get('headRefOid'),
             base_ref_oid=pr_data.get('baseRefOid'),
             label=label,
+            changes_requested_count=changes_requested_count,
         )
 
 

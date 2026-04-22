@@ -10,14 +10,13 @@ import os
 import re
 import struct
 import sys
-import urllib.error
-import urllib.request
 from contextlib import nullcontext
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Callable, ContextManager, Dict, List, Optional, Tuple, TypeVar
 
 import click
+import requests
 from rich.console import Console
 
 from gittensor.cli.issue_commands.tables import build_pr_table
@@ -27,6 +26,7 @@ from gittensor.validator.issue_competitions.storage_utils import (
     decode_issue_from_storage,
     decode_packed_contract_storage,
     get_contract_child_storage_key,
+    read_contract_packed_storage_bytes,
 )
 
 # Default CLI config paths
@@ -204,12 +204,12 @@ def emit_error_json(message: str, error_type: str = 'cli_error') -> None:
     click.echo(json.dumps(payload), err=False)
 
 
-def emit_json(payload: Any, pretty: bool = True) -> None:
+def emit_json(payload: Any, pretty: bool = True, default: Optional[Callable] = str) -> None:
     """Emit a machine-readable JSON payload to stdout."""
     if pretty:
-        output = json.dumps(payload, indent=2, ensure_ascii=False)
+        output = json.dumps(payload, indent=2, ensure_ascii=False, default=default)
     else:
-        output = json.dumps(payload, separators=(',', ':'), ensure_ascii=False)
+        output = json.dumps(payload, separators=(',', ':'), ensure_ascii=False, default=default)
     click.echo(output, err=False)
 
 
@@ -380,19 +380,22 @@ def validate_repository(repo: str, verify_exists: bool = True) -> Tuple[str, str
     owner, repo_name = repo.split('/', 1)
 
     if verify_exists:
-        url = f'https://api.github.com/repos/{owner}/{repo_name}'
         try:
-            req = urllib.request.Request(url, headers={'User-Agent': 'gittensor-cli'})
-            urllib.request.urlopen(req, timeout=GITHUB_API_TIMEOUT)
-        except urllib.error.HTTPError as e:
-            if e.code == 404:
+            resp = requests.get(
+                f'https://api.github.com/repos/{owner}/{repo_name}',
+                headers={'User-Agent': 'gittensor-cli'},
+                timeout=GITHUB_API_TIMEOUT,
+            )
+            if resp.status_code == 404:
                 raise click.BadParameter(
                     f"Repository '{owner}/{repo_name}' not found on GitHub",
                     param_hint='--repo',
                 )
-            # Non-404 HTTP errors: warn but don't block
-            console.print(f'[yellow]Warning: GitHub API returned {e.code} — skipping existence check[/yellow]')
-        except (urllib.error.URLError, OSError):
+            if not resp.ok:
+                console.print(
+                    f'[yellow]Warning: GitHub API returned {resp.status_code} — skipping existence check[/yellow]'
+                )
+        except requests.RequestException:
             console.print('[yellow]Warning: Could not reach GitHub API — skipping existence check[/yellow]')
 
     return owner, repo_name
@@ -404,22 +407,26 @@ def validate_github_issue(owner: str, repo: str, issue_number: int) -> Optional[
     Returns the issue JSON data on success, or None if verification was skipped
     due to network issues.  Raises click.BadParameter on validation failure.
     """
-    url = f'https://api.github.com/repos/{owner}/{repo}/issues/{issue_number}'
     try:
-        req = urllib.request.Request(url, headers={'User-Agent': 'gittensor-cli'})
-        resp = urllib.request.urlopen(req, timeout=GITHUB_API_TIMEOUT)
-        data = json.loads(resp.read().decode())
-    except urllib.error.HTTPError as e:
-        if e.code == 404:
-            raise click.BadParameter(
-                f'Issue #{issue_number} not found in {owner}/{repo}',
-                param_hint='--issue',
-            )
-        console.print(f'[yellow]Warning: GitHub API returned {e.code} — skipping issue check[/yellow]')
-        return None
-    except (urllib.error.URLError, OSError):
+        resp = requests.get(
+            f'https://api.github.com/repos/{owner}/{repo}/issues/{issue_number}',
+            headers={'User-Agent': 'gittensor-cli'},
+            timeout=GITHUB_API_TIMEOUT,
+        )
+    except requests.RequestException:
         console.print('[yellow]Warning: Could not reach GitHub API — skipping issue check[/yellow]')
         return None
+
+    if resp.status_code == 404:
+        raise click.BadParameter(
+            f'Issue #{issue_number} not found in {owner}/{repo}',
+            param_hint='--issue',
+        )
+    if not resp.ok:
+        console.print(f'[yellow]Warning: GitHub API returned {resp.status_code} — skipping issue check[/yellow]')
+        return None
+
+    data = resp.json()
 
     if 'pull_request' in data:
         raise click.BadParameter(
@@ -669,38 +676,25 @@ def _read_contract_packed_storage(substrate, contract_addr: str, verbose: bool =
         Dict with owner, netuid, next_issue_id, etc. or None on error
     """
     try:
-        child_key = _get_contract_child_storage_key(substrate, contract_addr, verbose)
+        child_key = get_contract_child_storage_key(substrate, contract_addr)
         if not child_key:
             if verbose:
                 console.print('[dim]Debug: Failed to get contract child storage key[/dim]')
             return None
 
-        keys_result = substrate.rpc_request('childstate_getKeysPaged', [child_key, '0x', 100, None, None])
-        keys = keys_result.get('result', [])
-        if verbose:
-            console.print(f'[dim]Debug: Found {len(keys)} storage keys in contract[/dim]')
-
-        packed_key = next((key for key in keys if key.endswith('00000000')), None)
-        if not packed_key:
+        packed_bytes = read_contract_packed_storage_bytes(substrate, child_key)
+        if not packed_bytes:
             if verbose:
-                console.print('[dim]Debug: No packed storage key (ending in 00000000) found[/dim]')
+                console.print('[dim]Debug: No packed storage bytes returned[/dim]')
             return None
 
-        val_result = substrate.rpc_request('childstate_getStorage', [child_key, packed_key, None])
-        raw_hex = val_result.get('result')
-        if not raw_hex:
-            if verbose:
-                console.print('[dim]Debug: Failed to read packed storage value[/dim]')
-            return None
-
-        data = bytes.fromhex(raw_hex.replace('0x', ''))
         if verbose:
-            console.print(f'[dim]Debug: Packed storage data length = {len(data)} bytes[/dim]')
+            console.print(f'[dim]Debug: Packed storage data length = {len(packed_bytes)} bytes[/dim]')
 
-        packed = decode_packed_contract_storage(data)
+        packed = decode_packed_contract_storage(packed_bytes)
         if not packed:
             if verbose:
-                console.print(f'[dim]Debug: Packed storage too small ({len(data)} < 74 bytes)[/dim]')
+                console.print(f'[dim]Debug: Packed storage too small ({len(packed_bytes)} < 74 bytes)[/dim]')
             return None
 
         return {

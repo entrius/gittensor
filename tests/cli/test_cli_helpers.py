@@ -25,6 +25,7 @@ from gittensor.cli.issue_commands.helpers import (
     MAX_ISSUE_NUMBER,
     STATUS_COLORS,
     colorize_status,
+    emit_json,
     format_alpha,
     validate_bounty_amount,
     validate_github_issue,
@@ -252,8 +253,16 @@ class TestValidateGitHubIssue:
     def test_closed_issue_warns_and_returns_data(self):
         """Issue #210 Task 3: closed → warn 'Issue #{number} is already closed.', do not reject."""
         issue_data = {'state': 'closed', 'number': 42, 'title': 'Test'}
-        mock_resp = type('Resp', (), {'read': lambda self: json.dumps(issue_data).encode()})()
-        with patch('urllib.request.urlopen', return_value=mock_resp):
+        mock_resp = type(
+            'Resp',
+            (),
+            {
+                'status_code': 200,
+                'ok': True,
+                'json': lambda self: issue_data,
+            },
+        )()
+        with patch('gittensor.cli.issue_commands.helpers.requests.get', return_value=mock_resp):
             with patch('gittensor.cli.issue_commands.helpers.console.print') as mock_print:
                 result = validate_github_issue('owner', 'repo', 42)
         assert result == issue_data
@@ -721,3 +730,20 @@ class TestCliRuntimeExceptions:
             )
         assert result.exit_code != 0
         assert 'boom-harvest' in result.output
+
+
+class TestEmitJson:
+    @pytest.mark.parametrize(
+        'value',
+        [
+            Decimal('10.5'),
+            __import__('datetime').datetime(2026, 1, 1, 12, 0, 0),
+            __import__('datetime').date(2026, 1, 1),
+        ],
+        ids=['Decimal', 'datetime', 'date'],
+    )
+    def test_non_native_types_serialized_via_default(self, value, capsys):
+        emit_json({'field': value})
+        captured = capsys.readouterr()
+        parsed = json.loads(captured.out)
+        assert parsed['field'] == str(value)

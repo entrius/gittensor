@@ -65,6 +65,7 @@ MAX_LINES_SCORED_FOR_NON_CODE_EXT = 300
 # =============================================================================
 # Repository & PR Scoring
 # =============================================================================
+DEFAULT_REPO_WEIGHT = 0.01  # fallback weight for repos not in master_repositories.json
 PR_LOOKBACK_DAYS = 35  # rolling window for scoring
 MERGED_PR_BASE_SCORE = 25
 MIN_TOKEN_SCORE_FOR_BASE_SCORE = 5  # PRs below this get 0 base score
@@ -74,12 +75,27 @@ CONTRIBUTION_SCORE_FOR_FULL_BONUS = 1500
 # Boosts
 MAX_CODE_DENSITY_MULTIPLIER = 1.5
 
-# Label multipliers — applied based on the last label set on the PR (requires triage+ access)
+# Label multipliers - applied based on the last label set on the PR (requires triage+ access)
 LABEL_MULTIPLIERS: dict[str, float] = {
+    # features
     'feature': 1.50,
+    'feat': 1.50,
+    # bug fixes
     'bug': 1.25,
+    'fix': 1.25,
+    'crash': 1.25,
+    'regression': 1.25,
+    'security': 1.25,
+    # enhancements
     'enhancement': 1.10,
-    'refactor': 1.00,
+    'improve': 1.10,
+    'perf': 1.10,
+    # refactors
+    'refactor': 0.5,
+    'cleanup': 0.5,
+    'polish': 0.5,
+    'debt': 0.5,
+    'chore': 0.5,
 }
 
 # Pioneer dividend — rewards the first quality contributor to each repository

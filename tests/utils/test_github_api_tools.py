@@ -32,6 +32,7 @@ get_pull_request_file_changes = github_api_tools.get_pull_request_file_changes
 get_merge_base_sha = github_api_tools.get_merge_base_sha
 find_prs_for_issue = github_api_tools.find_prs_for_issue
 execute_graphql_query = github_api_tools.execute_graphql_query
+check_github_issue_closed = github_api_tools.check_github_issue_closed
 
 
 # ============================================================================
@@ -816,7 +817,6 @@ def test_find_prs_without_token_only_uses_unauth_rest(mock_graphql, mock_rest):
 # Solver Detection Tests
 # ============================================================================
 
-find_solver_from_timeline = github_api_tools.find_solver_from_timeline
 find_solver_from_cross_references = github_api_tools.find_solver_from_cross_references
 
 
@@ -1005,29 +1005,53 @@ class TestFindSolverFromCrossReferences:
     @patch('gittensor.utils.github_api_tools.execute_graphql_query')
     @patch('gittensor.utils.github_api_tools.bt.logging')
     def test_graphql_query_failure_returns_none(self, mock_logging, mock_graphql):
-        """GraphQL query failure returns (None, None)."""
+        """GraphQL query failures return the lookup-failure sentinel."""
+        for graphql_response in (None, {'errors': [{'message': 'rate limited'}]}):
+            mock_graphql.return_value = graphql_response
+            result = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
+            assert result is None
+
+
+class TestCheckGithubIssueClosed:
+    """Test issue state checks keep API failures distinct from no-solver cases."""
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_graphql_failure_sets_solver_lookup_failed(self, mock_logging, mock_get, mock_graphql):
+        issue_response = Mock()
+        issue_response.status_code = 200
+        issue_response.json.return_value = {'state': 'closed'}
+        mock_get.return_value = issue_response
         mock_graphql.return_value = None
 
-        solver_id, pr_number = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
+        result = check_github_issue_closed('owner/repo', 12, 'fake_token')
 
-        assert solver_id is None
-        assert pr_number is None
+        assert result == {
+            'is_closed': True,
+            'solver_github_id': None,
+            'pr_number': None,
+            'solver_lookup_failed': True,
+        }
 
-
-class TestFindSolverFromTimeline:
-    """Test that find_solver_from_timeline delegates to cross-references."""
-
-    @patch('gittensor.utils.github_api_tools.find_solver_from_cross_references')
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api_tools.requests.get')
     @patch('gittensor.utils.github_api_tools.bt.logging')
-    def test_delegates_to_cross_references(self, mock_logging, mock_cross_ref):
-        """find_solver_from_timeline delegates directly to find_solver_from_cross_references."""
-        mock_cross_ref.return_value = (42, 14)
+    def test_closed_issue_with_no_solver_keeps_lookup_failed_false(self, mock_logging, mock_get, mock_graphql):
+        issue_response = Mock()
+        issue_response.status_code = 200
+        issue_response.json.return_value = {'state': 'closed'}
+        mock_get.return_value = issue_response
+        mock_graphql.return_value = _graphql_response([])
 
-        solver_id, pr_number = find_solver_from_timeline('owner/repo', 12, 'fake_token')
+        result = check_github_issue_closed('owner/repo', 12, 'fake_token')
 
-        assert solver_id == 42
-        assert pr_number == 14
-        mock_cross_ref.assert_called_once_with('owner/repo', 12, 'fake_token')
+        assert result == {
+            'is_closed': True,
+            'solver_github_id': None,
+            'pr_number': None,
+            'solver_lookup_failed': False,
+        }
 
 
 # ============================================================================

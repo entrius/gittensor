@@ -102,6 +102,7 @@ def issues_submissions(
             for pr in pull_requests
         ]
         payload = {
+            'success': True,
             'issue_id': issue_id,
             'repository': repo_name,
             'issue_number': issue_number,

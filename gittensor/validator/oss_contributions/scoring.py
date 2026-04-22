@@ -40,11 +40,10 @@ from gittensor.utils.github_api_tools import (
     fetch_file_contents_with_base,
     get_merge_base_sha,
     get_pull_request_file_changes,
-    get_pull_request_maintainer_changes_requested_count,
 )
 from gittensor.validator.oss_contributions.credibility import check_eligibility
 from gittensor.validator.utils.datetime_utils import calculate_time_decay
-from gittensor.validator.utils.load_weights import LanguageConfig, RepositoryConfig, TokenConfig
+from gittensor.validator.utils.load_weights import LanguageConfig, RepositoryConfig, TokenConfig, resolve_repo_weight
 from gittensor.validator.utils.tree_sitter_scoring import calculate_token_score_from_file_changes
 
 
@@ -102,12 +101,6 @@ def score_pull_request(
     file_contents = fetch_file_contents_for_pr(pr, miner_eval.github_pat)
 
     pr.base_score = calculate_base_score(pr, programming_languages, token_config, file_contents)
-
-    # Fetch review data before multiplier calculation (only for merged PRs)
-    if pr.pr_state == PRState.MERGED:
-        pr.changes_requested_count = get_pull_request_maintainer_changes_requested_count(
-            pr.repository_full_name, pr.number, miner_eval.github_pat
-        )
 
     calculate_pr_multipliers(pr, miner_eval, master_repositories)
 
@@ -229,7 +222,7 @@ def calculate_pr_multipliers(
     is_merged = pr.pr_state == PRState.MERGED
     repo_config = master_repositories.get(pr.repository_full_name)
 
-    pr.repo_weight_multiplier = round(repo_config.weight if repo_config else 0.01, 2)
+    pr.repo_weight_multiplier = resolve_repo_weight(repo_config)
     pr.issue_multiplier = round(calculate_issue_multiplier(pr), 2)
     pr.label_multiplier = LABEL_MULTIPLIERS.get(pr.label, 1.0) if pr.label else 1.0
 
@@ -436,11 +429,11 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
 
 def calculate_issue_multiplier(pr: PullRequest) -> float:
     """
-    Calculate PR score multiplier based on the first valid linked issue.
+    Calculate PR score multiplier from the best valid linked issue.
 
-    Returns a flat multiplier: MAINTAINER_ISSUE_MULTIPLIER (1.66) if the issue author
-    is a maintainer (OWNER/MEMBER/COLLABORATOR), otherwise STANDARD_ISSUE_MULTIPLIER (1.33).
-    Returns 1.0 if no valid linked issues.
+    Returns a flat multiplier: MAINTAINER_ISSUE_MULTIPLIER (1.66) if any valid issue
+    author is a maintainer (OWNER/MEMBER/COLLABORATOR), otherwise
+    STANDARD_ISSUE_MULTIPLIER (1.33). Returns 1.0 if no valid linked issues.
     """
     if not pr.issues:
         bt.logging.info(f'PR #{pr.number} - Contains no linked issues')
@@ -451,12 +444,28 @@ def calculate_issue_multiplier(pr: PullRequest) -> float:
         bt.logging.info(f'PR #{pr.number} - Solved no valid issues')
         return 1.0
 
-    issue = valid_issues[0]
+    # Prefer a maintainer-authored valid issue if one exists, so the multiplier
+    # doesn't depend on GraphQL closingIssuesReferences ordering.
+    issue = next(
+        (i for i in valid_issues if i.author_association in MAINTAINER_ASSOCIATIONS),
+        valid_issues[0],
+    )
     is_maintainer = issue.author_association in MAINTAINER_ASSOCIATIONS if issue.author_association else False
     multiplier = MAINTAINER_ISSUE_MULTIPLIER if is_maintainer else STANDARD_ISSUE_MULTIPLIER
     label = 'maintainer' if is_maintainer else 'standard'
     bt.logging.info(f'Issue #{issue.number} - {label} issue | multiplier: {multiplier}')
     return multiplier
+
+
+def _is_completed_when_closed(issue: Issue) -> bool:
+    if issue.state != 'CLOSED':
+        return True
+    if issue.state_reason != 'COMPLETED':
+        bt.logging.warning(
+            f'Skipping issue #{issue.number} - state_reason={issue.state_reason}, only COMPLETED grants multiplier'
+        )
+        return False
+    return True
 
 
 def is_valid_issue(issue: Issue, pr: PullRequest) -> bool:
@@ -475,6 +484,9 @@ def is_valid_issue(issue: Issue, pr: PullRequest) -> bool:
         bt.logging.warning(f'Skipping issue #{issue.number} - Issue was created after PR was created')
         return False
 
+    if not _is_completed_when_closed(issue):
+        return False
+
     if is_merged and pr.merged_at:
         if pr.last_edited_at and pr.last_edited_at > pr.merged_at:
             bt.logging.warning(f'Skipping issue #{issue.number} - PR was edited after merge')
@@ -485,10 +497,10 @@ def is_valid_issue(issue: Issue, pr: PullRequest) -> bool:
             return False
 
         if issue.closed_at and pr.merged_at:
-            days_diff = abs((issue.closed_at - pr.merged_at).total_seconds()) / SECONDS_PER_DAY
-            if days_diff > MAX_ISSUE_CLOSE_WINDOW_DAYS:
+            days_diff = (issue.closed_at - pr.merged_at).total_seconds() / SECONDS_PER_DAY
+            if days_diff > MAX_ISSUE_CLOSE_WINDOW_DAYS or days_diff < 0:
                 bt.logging.warning(
-                    f'Skipping issue #{issue.number} - Issue closed {days_diff:.1f}d from merge (max: {MAX_ISSUE_CLOSE_WINDOW_DAYS})'
+                    f'Skipping issue #{issue.number} - Issue closed {days_diff:+.2f}d from merge (max: {MAX_ISSUE_CLOSE_WINDOW_DAYS})'
                 )
                 return False
 
@@ -506,7 +518,7 @@ def calculate_open_pr_collateral_score(pr: PullRequest) -> float:
 
     Collateral = base_score * applicable_multipliers * OPEN_PR_COLLATERAL_PERCENT
 
-    Applicable multipliers: repo_weight, issue
+    Applicable multipliers: repo_weight, issue, label
     NOT applicable: time_decay (merge-based), credibility_multiplier (merge-based),
                     open_pr_spam (not for collateral)
     """
@@ -515,6 +527,7 @@ def calculate_open_pr_collateral_score(pr: PullRequest) -> float:
     multipliers = {
         'repo_weight': pr.repo_weight_multiplier,
         'issue': pr.issue_multiplier,
+        'label': pr.label_multiplier,
     }
 
     potential_score = pr.base_score * prod(multipliers.values())

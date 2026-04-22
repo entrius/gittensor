@@ -18,28 +18,11 @@
 
 import argparse
 import os
-import subprocess
 from typing import Any
 
 import bittensor as bt
 
 from gittensor.utils.logging import setup_events_logger
-
-
-def is_cuda_available():
-    try:
-        output = subprocess.check_output(['nvidia-smi', '-L'], stderr=subprocess.STDOUT)
-        if 'NVIDIA' in output.decode('utf-8'):
-            return 'cuda'
-    except Exception:
-        pass
-    try:
-        output = subprocess.check_output(['nvcc', '--version']).decode('utf-8')
-        if 'release' in output:
-            return 'cuda'
-    except Exception:
-        pass
-    return 'cpu'
 
 
 def check_config(cls, config: Any):
@@ -72,13 +55,6 @@ def add_args(cls, parser):
     """
 
     parser.add_argument('--netuid', type=int, help='Subnet netuid', default=1)
-
-    parser.add_argument(
-        '--neuron.device',
-        type=str,
-        help='Device to run on.',
-        default=is_cuda_available(),
-    )
 
     parser.add_argument(
         '--neuron.epoch_length',

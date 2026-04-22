@@ -68,9 +68,6 @@ class BaseNeuron(ABC):
         # Set up logging with the provided configuration.
         bt.logging.set_config(config=self.config.logging)
 
-        # If a gpu is required, set the device to cuda:N (e.g. cuda:0)
-        self.device = self.config.neuron.device
-
         # Log the configuration for reference.
         # bt.logging.info(self.config)
 

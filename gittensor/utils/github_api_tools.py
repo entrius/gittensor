@@ -1198,8 +1198,7 @@ def _fetch_file_contents_with_base_batch(
         return {fc.filename: FileContentPair(None, None) for fc in batch_changes}
 
     if 'errors' in data:
-        ctx = f' (PR #{pr_number})' if pr_number else ''
-        bt.logging.warning(f'GraphQL errors fetching files for {repo_owner}/{repo_name}{ctx}: {data["errors"]}')
+        bt.logging.warning(f'GraphQL errors fetching files: {data["errors"]}')
 
     repo_data = data.get('data', {}).get('repository', {})
     results: Dict[str, FileContentPair] = {}

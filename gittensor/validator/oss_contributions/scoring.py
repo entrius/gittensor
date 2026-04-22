@@ -138,7 +138,9 @@ def fetch_file_contents_for_pr(pr: PullRequest, github_pat: str) -> Dict[str, Fi
             f'PR #{pr.number}: using merge-base {merge_base[:8]} instead of base_ref {pr.base_ref_oid[:8]}'
         )
 
-    return fetch_file_contents_with_base(owner, repo_name, base_sha, pr.head_ref_oid, pr.file_changes, github_pat)
+    return fetch_file_contents_with_base(
+        owner, repo_name, base_sha, pr.head_ref_oid, pr.file_changes, github_pat, pr_number=pr.number
+    )
 
 
 def calculate_base_score(

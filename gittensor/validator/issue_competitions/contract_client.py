@@ -9,7 +9,7 @@ import struct
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import bittensor as bt
 from substrateinterface import Keypair
@@ -218,28 +218,17 @@ class IssueCompetitionContractClient:
     def get_alpha_pool(self) -> int:
         """Get the current alpha pool balance."""
         try:
-            value = self._read_contract_u128('get_alpha_pool')
-            return value
+            return self._read_contract_numeric('get_alpha_pool', self._extract_u128_from_response)
         except Exception as e:
             bt.logging.error(f'Error fetching alpha pool: {e}')
             return 0
 
-    def _read_contract_u128(self, method_name: str) -> int:
-        """Read a u128 value from a no-arg contract method."""
+    def _read_contract_numeric(self, method_name: str, extractor: Callable[[bytes], Optional[int]]) -> int:
+        """Read a numeric value from a no-arg contract method via ``extractor``."""
         response = self._raw_contract_read(method_name)
         if response is None:
             return 0
-
-        value = self._extract_u128_from_response(response)
-        return value if value is not None else 0
-
-    def _read_contract_u32(self, method_name: str) -> int:
-        """Read a u32 value from a no-arg contract method."""
-        response = self._raw_contract_read(method_name)
-        if response is None:
-            return 0
-
-        value = self._extract_u32_from_response(response)
+        value = extractor(response)
         return value if value is not None else 0
 
     def _raw_contract_read(self, method_name: str, args: dict = None) -> Optional[bytes]:  # type: ignore[assignment]
@@ -612,8 +601,7 @@ class IssueCompetitionContractClient:
     def get_last_harvest_block(self) -> int:
         """Query the block number of the last harvest."""
         try:
-            value = self._read_contract_u32('get_last_harvest_block')
-            return value
+            return self._read_contract_numeric('get_last_harvest_block', self._extract_u32_from_response)
         except Exception as e:
             bt.logging.error(f'Error fetching last harvest block: {e}')
             return 0

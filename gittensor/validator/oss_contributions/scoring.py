@@ -452,6 +452,17 @@ def calculate_issue_multiplier(pr: PullRequest) -> float:
     return multiplier
 
 
+def _is_completed_when_closed(issue: Issue) -> bool:
+    if issue.state != 'CLOSED':
+        return True
+    if issue.state_reason != 'COMPLETED':
+        bt.logging.warning(
+            f'Skipping issue #{issue.number} - state_reason={issue.state_reason}, only COMPLETED grants multiplier'
+        )
+        return False
+    return True
+
+
 def is_valid_issue(issue: Issue, pr: PullRequest) -> bool:
     """Check if issue is valid for bonus calculation (works for both merged and open PRs)."""
     is_merged = pr.pr_state == PRState.MERGED
@@ -468,6 +479,9 @@ def is_valid_issue(issue: Issue, pr: PullRequest) -> bool:
         bt.logging.warning(f'Skipping issue #{issue.number} - Issue was created after PR was created')
         return False
 
+    if not _is_completed_when_closed(issue):
+        return False
+
     if is_merged and pr.merged_at:
         if pr.last_edited_at and pr.last_edited_at > pr.merged_at:
             bt.logging.warning(f'Skipping issue #{issue.number} - PR was edited after merge')
@@ -475,12 +489,6 @@ def is_valid_issue(issue: Issue, pr: PullRequest) -> bool:
 
         if issue.state and issue.state != 'CLOSED':
             bt.logging.warning(f'Skipping issue #{issue.number} - Issue state not CLOSED (state: {issue.state})')
-            return False
-
-        if issue.state_reason != 'COMPLETED':
-            bt.logging.warning(
-                f'Skipping issue #{issue.number} - state_reason={issue.state_reason}, only COMPLETED grants multiplier'
-            )
             return False
 
         if issue.closed_at and pr.merged_at:

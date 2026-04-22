@@ -57,11 +57,30 @@ def _resolve_endpoint(network: str | None, rpc_url: str | None) -> str:
     return NETWORK_MAP['finney']
 
 
+def _require_wallet_directory(wallet_name: str) -> None:
+    """Raise if the coldkey wallet directory is missing (clearer than downstream bittensor errors)."""
+    wallets_root = Path.home() / '.bittensor' / 'wallets'
+    coldkey_dir = wallets_root / wallet_name
+    if coldkey_dir.is_dir():
+        return
+    hint = ''
+    if wallets_root.is_dir():
+        names = sorted(p.name for p in wallets_root.iterdir() if p.is_dir())[:20]
+        if names:
+            hint = f" Known coldkey names: {', '.join(names)}."
+    raise ValueError(
+        f'Wallet {wallet_name!r} not found at {coldkey_dir}. '
+        f'Create a coldkey (for example with btcli) or pass the correct --wallet.{hint}'
+    )
+
+
 def _connect_bittensor(wallet_name: str, wallet_hotkey: str, ws_endpoint: str, netuid: int):
     """Set up and return bittensor wallet, subtensor, metagraph and dendrite."""
     import bittensor as bt
 
+    _require_wallet_directory(wallet_name)
     w = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
+    _ = w.hotkey.ss58_address  # load before Dendrite so failures do not construct a half-initialized dendrite
     st = bt.Subtensor(network=ws_endpoint)
     mg = st.metagraph(netuid=netuid)
     dd = bt.Dendrite(wallet=w)

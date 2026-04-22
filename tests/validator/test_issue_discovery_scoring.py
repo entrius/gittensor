@@ -99,6 +99,7 @@ def test_completed_scan_issue_with_closed_at_counts_as_solved(issue_factory):
     issue = issue_factory.completed()
     data = _run_scan_path(issue)
     assert data.solved_count == 1
+    assert data.valid_solved_count == 0
     assert data.closed_count == 0
 
 

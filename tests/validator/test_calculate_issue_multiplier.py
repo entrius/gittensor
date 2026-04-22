@@ -29,7 +29,7 @@ def _make_valid_pair(pr_factory, issue_factory):
         number=100,
         author_login='regular_user',
         created_at=now - timedelta(days=5),
-        closed_at=now - timedelta(hours=1),
+        closed_at=now + timedelta(hours=1),
     )
     standard_issue.author_association = 'CONTRIBUTOR'
 
@@ -37,7 +37,7 @@ def _make_valid_pair(pr_factory, issue_factory):
         number=200,
         author_login='maintainer_user',
         created_at=now - timedelta(days=4),
-        closed_at=now - timedelta(hours=1),
+        closed_at=now + timedelta(hours=1),
     )
     maintainer_issue.author_association = 'OWNER'
 
@@ -67,7 +67,7 @@ def test_standard_multiplier_when_no_maintainer_issue(pr_factory, issue_factory)
     issue = issue_factory.create(
         author_login='regular_user',
         created_at=now - timedelta(days=5),
-        closed_at=now - timedelta(hours=1),
+        closed_at=now + timedelta(hours=1),
     )
     issue.author_association = 'CONTRIBUTOR'
     pr.issues = [issue]

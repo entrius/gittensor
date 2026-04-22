@@ -315,6 +315,8 @@ class PullRequest:
                 # Timeline truncated — fall back to highest-multiplier currently-applied label
                 label = max(scoring_labels, key=lambda n: (LABEL_MULTIPLIERS[n], n))
 
+        author = pr_data.get('author') or {}
+
         return cls(
             number=pr_data['number'],
             repository_full_name=repository_full_name,
@@ -322,7 +324,7 @@ class PullRequest:
             hotkey=hotkey,
             github_id=github_id,
             title=pr_data['title'],
-            author_login=pr_data['author']['login'],
+            author_login=author.get('login') or 'ghost',
             merged_at=merged_at,
             created_at=parse_github_timestamp_to_cst(pr_data['createdAt']),
             pr_state=pr_state,

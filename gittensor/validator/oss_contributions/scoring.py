@@ -347,20 +347,28 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
         bt.logging.info(f'UID {uid}')
         bt.logging.info('=' * 50)
 
-        # Process open PRs for collateral
+        # Process open PRs for collateral (legacy + mirror — both paths contribute)
         for pr in evaluation.open_pull_requests:
             pr.collateral_score = calculate_open_pr_collateral_score(pr)
             evaluation.total_collateral_score += pr.collateral_score
+        for scored in evaluation.mirror_open_prs:
+            scored.collateral_score = calculate_open_pr_collateral_score(scored)
+            evaluation.total_collateral_score += scored.collateral_score
 
-        has_contributions = len(evaluation.merged_pull_requests) > 0 or len(evaluation.closed_pull_requests) > 0
+        has_contributions = (
+            evaluation.total_merged_prs > 0 or evaluation.total_closed_prs > 0
+        )
 
         if not has_contributions:
             bt.logging.info('No merged or closed PRs - skipping evaluation')
             continue
 
-        # Check eligibility gate (credibility with mulligan + min valid PRs)
+        # Check eligibility gate across both paths. check_eligibility only touches
+        # token_score on each PR; ScoredMirrorPR has the same field, so combining
+        # the lists works without adapting types.
         is_eligible, credibility, reason = check_eligibility(
-            evaluation.merged_pull_requests, evaluation.closed_pull_requests
+            evaluation.merged_pull_requests + evaluation.mirror_merged_prs,
+            evaluation.closed_pull_requests + evaluation.mirror_closed_prs,
         )
         evaluation.is_eligible = is_eligible
         evaluation.credibility = credibility
@@ -369,44 +377,72 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
             bt.logging.info(f'UID {uid} ineligible: {reason} — score set to 0')
             continue
 
-        # Calculate spam multiplier once per miner using total token score
-        # We need to compute total_token_score first from all merged PRs
-        preliminary_token_score = sum(pr.token_score for pr in evaluation.merged_pull_requests)
+        # Calculate spam multiplier once per miner using combined total token score
+        preliminary_token_score = (
+            sum(pr.token_score for pr in evaluation.merged_pull_requests)
+            + sum(s.token_score for s in evaluation.mirror_merged_prs)
+        )
         spam_multiplier = calculate_pr_spam_penalty_multiplier(evaluation.total_open_prs, preliminary_token_score)
 
-        # Process merged PRs
+        # Process merged PRs — legacy path
         for pr in evaluation.merged_pull_requests:
             pr.open_pr_spam_multiplier = spam_multiplier
-
-            # Apply linear credibility multiplier (k=1)
             pr.credibility_multiplier = round(credibility, 2)
-
             pr.calculate_final_earned_score()
 
-            # Aggregate token scoring breakdown
             evaluation.total_token_score += pr.token_score
             evaluation.total_structural_count += pr.structural_count
             evaluation.total_structural_score += pr.structural_score
             evaluation.total_leaf_count += pr.leaf_count
             evaluation.total_leaf_score += pr.leaf_score
 
-    # Phase 2: Calculate pioneer dividends from follower earned_scores
+        # Process merged PRs — mirror path (parallel loop; identical math, different
+        # container type. Deletes cleanly on flip-day once legacy loop is removed).
+        for scored in evaluation.mirror_merged_prs:
+            scored.open_pr_spam_multiplier = spam_multiplier
+            scored.credibility_multiplier = round(credibility, 2)
+            scored.calculate_final_earned_score()
+
+            evaluation.total_token_score += scored.token_score
+            evaluation.total_structural_count += scored.structural_count
+            evaluation.total_structural_score += scored.structural_score
+            evaluation.total_leaf_count += scored.leaf_count
+            evaluation.total_leaf_score += scored.leaf_score
+
+    # Phase 2: Calculate pioneer dividends from follower earned_scores.
+    # Each path operates on its own list — a repo is mirror or legacy, never both,
+    # so the two pioneer functions never contend over the same repo.
+    # Lazy import of mirror pioneer to break a circular import (mirror/scoring.py
+    # imports calculate_review_quality_multiplier from here).
+    from gittensor.validator.oss_contributions.mirror.scoring import (
+        calculate_mirror_pioneer_dividends,
+    )
+
     calculate_pioneer_dividends(miner_evaluations)
+    calculate_mirror_pioneer_dividends(miner_evaluations)
 
     # Phase 3: Aggregate totals (including dividends), collateral, logging
     for uid, evaluation in miner_evaluations.items():
         if not evaluation:
             continue
 
-        has_contributions = len(evaluation.merged_pull_requests) > 0 or len(evaluation.closed_pull_requests) > 0
+        has_contributions = (
+            evaluation.total_merged_prs > 0 or evaluation.total_closed_prs > 0
+        )
         if not has_contributions:
             continue
 
-        # Aggregate scores (earned_score now includes pioneer_dividend from Phase 2)
+        # Aggregate scores (earned_score now includes pioneer_dividend from Phase 2).
+        # Both paths contribute — ScoredMirrorPR has the same base_score /
+        # earned_score / total_nodes_scored fields as PullRequest.
         for pr in evaluation.merged_pull_requests:
             evaluation.base_total_score += pr.base_score
             evaluation.total_score += pr.earned_score
             evaluation.total_nodes_scored += pr.total_nodes_scored
+        for scored in evaluation.mirror_merged_prs:
+            evaluation.base_total_score += scored.base_score
+            evaluation.total_score += scored.earned_score
+            evaluation.total_nodes_scored += scored.total_nodes_scored
 
         # Apply collateral deduction
         earned_score = evaluation.total_score

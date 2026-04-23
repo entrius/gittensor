@@ -414,19 +414,50 @@ class MinerEvaluation:
         return self.github_pr_fetch_failed and self.total_prs == 0
 
     def get_all_issues(self) -> List[Issue]:
-        """Aggregate all issues from all pull requests (merged, open, closed)."""
+        """Aggregate all issues from all pull requests (merged, open, closed).
+
+        Legacy PRs contribute their already-populated ``issues`` field directly;
+        mirror PRs contribute their ``pr.linked_issues`` adapted into legacy Issue
+        shape via ``mirror.adapters.mirror_linked_issue_to_legacy_issue``.
+        """
+        # Lazy import — mirror.adapters imports from classes.py (for Issue /
+        # FileChange), so importing it at module load would loop back here.
+        from gittensor.validator.oss_contributions.mirror.adapters import (
+            mirror_linked_issue_to_legacy_issue,
+        )
+
         all_issues = []
         for pr in self.merged_pull_requests + self.open_pull_requests + self.closed_pull_requests:
             if pr.issues:
                 all_issues.extend(pr.issues)
+        for scored in self.mirror_merged_prs + self.mirror_open_prs + self.mirror_closed_prs:
+            for li in scored.pr.linked_issues:
+                all_issues.append(
+                    mirror_linked_issue_to_legacy_issue(li, scored.pr.pr_number, scored.pr.repo_full_name)
+                )
         return all_issues
 
     def get_all_file_changes(self) -> List[FileChange]:
-        """Aggregate all file changes from all PR diffs (merged, open, closed)."""
+        """Aggregate all file changes from all PR diffs (merged, open, closed).
+
+        Mirror PRs carry their fetched files on ``ScoredMirrorPR.files``; the
+        adapter converts each MirrorFile into the legacy FileChange shape for
+        DB storage.
+        """
+        from gittensor.validator.oss_contributions.mirror.adapters import (
+            mirror_files_to_legacy,
+        )
+
         all_file_changes = []
         for pr in self.merged_pull_requests + self.open_pull_requests + self.closed_pull_requests:
             if pr.file_changes:
                 all_file_changes.extend(pr.file_changes)
+        for scored in self.mirror_merged_prs + self.mirror_open_prs + self.mirror_closed_prs:
+            if scored.files:
+                file_changes, _ = mirror_files_to_legacy(
+                    scored.pr.repo_full_name, scored.pr.pr_number, scored.files
+                )
+                all_file_changes.extend(file_changes)
         return all_file_changes
 
     def add_merged_pull_request(self, raw_pr: Dict):

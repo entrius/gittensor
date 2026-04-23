@@ -20,6 +20,9 @@ scoring_module = pytest.importorskip(
     'gittensor.validator.oss_contributions.mirror.scoring',
     reason='Requires gittensor mirror subpackage',
 )
+adapters_module = pytest.importorskip(
+    'gittensor.validator.oss_contributions.mirror.adapters',
+)
 mirror_models = pytest.importorskip('gittensor.utils.mirror.models')
 scored_pr_module = pytest.importorskip(
     'gittensor.validator.oss_contributions.mirror.scored_pr'
@@ -27,7 +30,7 @@ scored_pr_module = pytest.importorskip(
 load_weights = pytest.importorskip('gittensor.validator.utils.load_weights')
 
 _should_skip_merged_mirror_pr = scoring_module._should_skip_merged_mirror_pr
-_convert_mirror_files = scoring_module._convert_mirror_files
+_convert_mirror_files = adapters_module.mirror_files_to_legacy
 _calculate_pr_multipliers = scoring_module._calculate_pr_multipliers
 _resolve_maintainer_set_label = scoring_module._resolve_maintainer_set_label
 _calculate_issue_multiplier = scoring_module._calculate_issue_multiplier

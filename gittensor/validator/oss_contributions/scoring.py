@@ -138,7 +138,9 @@ def fetch_file_contents_for_pr(pr: PullRequest, github_pat: str) -> Dict[str, Fi
             f'PR #{pr.number}: using merge-base {merge_base[:8]} instead of base_ref {pr.base_ref_oid[:8]}'
         )
 
-    return fetch_file_contents_with_base(owner, repo_name, base_sha, pr.head_ref_oid, pr.file_changes, github_pat)
+    return fetch_file_contents_with_base(
+        owner, repo_name, base_sha, pr.head_ref_oid, pr.file_changes, github_pat, pr_number=pr.number
+    )
 
 
 def calculate_base_score(
@@ -429,11 +431,11 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
 
 def calculate_issue_multiplier(pr: PullRequest) -> float:
     """
-    Calculate PR score multiplier based on the first valid linked issue.
+    Calculate PR score multiplier from the best valid linked issue.
 
-    Returns a flat multiplier: MAINTAINER_ISSUE_MULTIPLIER (1.66) if the issue author
-    is a maintainer (OWNER/MEMBER/COLLABORATOR), otherwise STANDARD_ISSUE_MULTIPLIER (1.33).
-    Returns 1.0 if no valid linked issues.
+    Returns a flat multiplier: MAINTAINER_ISSUE_MULTIPLIER (1.66) if any valid issue
+    author is a maintainer (OWNER/MEMBER/COLLABORATOR), otherwise
+    STANDARD_ISSUE_MULTIPLIER (1.33). Returns 1.0 if no valid linked issues.
     """
     if not pr.issues:
         bt.logging.info(f'PR #{pr.number} - Contains no linked issues')
@@ -444,12 +446,28 @@ def calculate_issue_multiplier(pr: PullRequest) -> float:
         bt.logging.info(f'PR #{pr.number} - Solved no valid issues')
         return 1.0
 
-    issue = valid_issues[0]
+    # Prefer a maintainer-authored valid issue if one exists, so the multiplier
+    # doesn't depend on GraphQL closingIssuesReferences ordering.
+    issue = next(
+        (i for i in valid_issues if i.author_association in MAINTAINER_ASSOCIATIONS),
+        valid_issues[0],
+    )
     is_maintainer = issue.author_association in MAINTAINER_ASSOCIATIONS if issue.author_association else False
     multiplier = MAINTAINER_ISSUE_MULTIPLIER if is_maintainer else STANDARD_ISSUE_MULTIPLIER
     label = 'maintainer' if is_maintainer else 'standard'
     bt.logging.info(f'Issue #{issue.number} - {label} issue | multiplier: {multiplier}')
     return multiplier
+
+
+def _is_completed_when_closed(issue: Issue) -> bool:
+    if issue.state != 'CLOSED':
+        return True
+    if issue.state_reason != 'COMPLETED':
+        bt.logging.warning(
+            f'Skipping issue #{issue.number} - state_reason={issue.state_reason}, only COMPLETED grants multiplier'
+        )
+        return False
+    return True
 
 
 def is_valid_issue(issue: Issue, pr: PullRequest) -> bool:
@@ -468,6 +486,9 @@ def is_valid_issue(issue: Issue, pr: PullRequest) -> bool:
         bt.logging.warning(f'Skipping issue #{issue.number} - Issue was created after PR was created')
         return False
 
+    if not _is_completed_when_closed(issue):
+        return False
+
     if is_merged and pr.merged_at:
         if pr.last_edited_at and pr.last_edited_at > pr.merged_at:
             bt.logging.warning(f'Skipping issue #{issue.number} - PR was edited after merge')
@@ -475,12 +496,6 @@ def is_valid_issue(issue: Issue, pr: PullRequest) -> bool:
 
         if issue.state and issue.state != 'CLOSED':
             bt.logging.warning(f'Skipping issue #{issue.number} - Issue state not CLOSED (state: {issue.state})')
-            return False
-
-        if issue.state_reason != 'COMPLETED':
-            bt.logging.warning(
-                f'Skipping issue #{issue.number} - state_reason={issue.state_reason}, only COMPLETED grants multiplier'
-            )
             return False
 
         if issue.closed_at and pr.merged_at:

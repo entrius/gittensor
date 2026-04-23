@@ -49,7 +49,9 @@ def admin():
 @with_wallet_options()
 @with_network_contract_options('Contract address (uses config if empty)')
 @with_cli_behavior_options(include_yes=True)
-def admin_cancel(issue_id: int, network: str, rpc_url: str, contract: str, wallet_name: str, wallet_hotkey: str, yes: bool = False):
+def admin_cancel(
+    issue_id: int, network: str, rpc_url: str, contract: str, wallet_name: str, wallet_hotkey: str, yes: bool = False
+):
     """Cancel an issue (owner only).
 
     [dim]Immediately cancels an issue without validator consensus. Bounty funds are returned to the alpha pool.[/dim]
@@ -105,7 +107,9 @@ def admin_cancel(issue_id: int, network: str, rpc_url: str, contract: str, walle
 @with_wallet_options()
 @with_network_contract_options('Contract address (uses config if empty)')
 @with_cli_behavior_options(include_yes=True)
-def admin_payout(issue_id: int, network: str, rpc_url: str, contract: str, wallet_name: str, wallet_hotkey: str, yes: bool = False):
+def admin_payout(
+    issue_id: int, network: str, rpc_url: str, contract: str, wallet_name: str, wallet_hotkey: str, yes: bool = False
+):
     """Manual payout fallback (owner only).
 
     [dim]Pays out a completed issue bounty to the solver.
@@ -163,7 +167,9 @@ def admin_payout(issue_id: int, network: str, rpc_url: str, contract: str, walle
 @with_wallet_options()
 @with_network_contract_options('Contract address')
 @with_cli_behavior_options(include_yes=True)
-def admin_set_owner(new_owner: str, network: str, rpc_url: str, contract: str, wallet_name: str, wallet_hotkey: str, yes: bool = False):
+def admin_set_owner(
+    new_owner: str, network: str, rpc_url: str, contract: str, wallet_name: str, wallet_hotkey: str, yes: bool = False
+):
     """Transfer contract ownership (owner only).
 
     [dim]Arguments:
@@ -174,7 +180,9 @@ def admin_set_owner(new_owner: str, network: str, rpc_url: str, contract: str, w
         $ gitt admin set-owner 5Hxxx...
     [/dim]
     """
-    console.print('[red bold]WARNING: Ownership transfer is irreversible. A wrong address permanently bricks the contract.[/red bold]')
+    console.print(
+        '[red bold]WARNING: Ownership transfer is irreversible. A wrong address permanently bricks the contract.[/red bold]'
+    )
     confirm_or_abort(f'Transfer ownership to {new_owner}?', yes)
 
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
@@ -210,7 +218,13 @@ def admin_set_owner(new_owner: str, network: str, rpc_url: str, contract: str, w
 @with_network_contract_options('Contract address')
 @with_cli_behavior_options(include_yes=True)
 def admin_set_treasury(
-    new_treasury: str, network: str, rpc_url: str, contract: str, wallet_name: str, wallet_hotkey: str, yes: bool = False
+    new_treasury: str,
+    network: str,
+    rpc_url: str,
+    contract: str,
+    wallet_name: str,
+    wallet_hotkey: str,
+    yes: bool = False,
 ):
     """Change treasury hotkey (owner only).
 
@@ -262,7 +276,9 @@ def admin_set_treasury(
 @with_wallet_options()
 @with_network_contract_options('Contract address')
 @with_cli_behavior_options(include_yes=True)
-def admin_add_validator(hotkey: str, network: str, rpc_url: str, contract: str, wallet_name: str, wallet_hotkey: str, yes: bool = False):
+def admin_add_validator(
+    hotkey: str, network: str, rpc_url: str, contract: str, wallet_name: str, wallet_hotkey: str, yes: bool = False
+):
     """Add a validator to the voting whitelist (owner only).
 
     [dim]Whitelisted validators can vote on solutions and issue cancellations.

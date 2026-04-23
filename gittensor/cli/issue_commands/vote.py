@@ -21,6 +21,7 @@ from .helpers import (
     _handle_command_error,
     _make_contract_client,
     _resolve_contract_and_network,
+    confirm_or_abort,
     console,
     emit_json,
     print_error,
@@ -29,7 +30,6 @@ from .helpers import (
     require_valid_issue_id,
     validate_issue_id,
     validate_ss58_address,
-    confirm_or_abort,
     with_cli_behavior_options,
     with_network_contract_options,
     with_wallet_options,
@@ -70,6 +70,7 @@ def vote():
     These commands are used by validators to manage issue bounty payouts.
     """
     pass
+
 
 @vote.command('solution')
 @click.argument('issue_id', type=int)

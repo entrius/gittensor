@@ -279,7 +279,7 @@ def issues_pending_harvest(network: str, rpc_url: str, contract: str, verbose: b
         console.print(f'[green]Allocated to Bounties:[/green] {format_alpha(total_bounty_pool, 4)} ALPHA')
         console.print(f'[green]Pending Harvest:[/green] {format_alpha(pending_harvest, 4)} ALPHA')
     except Exception as e:
-        _handle_command_error(e)
+        handle_exception(as_json=as_json, message=str(e))
 
 
 @click.command('info', cls=StyledCommand)

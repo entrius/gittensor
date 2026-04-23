@@ -4,9 +4,15 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from math import prod
-from typing import DefaultDict, Dict, List, Optional, Set
+from typing import TYPE_CHECKING, DefaultDict, Dict, List, Optional, Set
 
 import bittensor as bt
+
+if TYPE_CHECKING:
+    # Forward-reference only — avoids importing the mirror subpackage at runtime
+    # and prevents accidental coupling. The mirror_* lists below are typed as
+    # strings to defer resolution.
+    from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredMirrorPR
 
 from gittensor.constants import (
     LABEL_MULTIPLIERS,
@@ -364,6 +370,13 @@ class MinerEvaluation:
     merged_pull_requests: List[PullRequest] = field(default_factory=list)
     open_pull_requests: List[PullRequest] = field(default_factory=list)
     closed_pull_requests: List[PullRequest] = field(default_factory=list)
+
+    # Populated by gittensor.validator.oss_contributions.mirror.combine.combine
+    # when the mirror scoring path runs. Empty for legacy-only evaluations.
+    mirror_merged_prs: List['ScoredMirrorPR'] = field(default_factory=list)
+    mirror_open_prs: List['ScoredMirrorPR'] = field(default_factory=list)
+    mirror_closed_prs: List['ScoredMirrorPR'] = field(default_factory=list)
+
     unique_repos_contributed_to: Set[str] = field(default_factory=set)
 
     # Eligibility and credibility
@@ -386,15 +399,15 @@ class MinerEvaluation:
 
     @property
     def total_merged_prs(self) -> int:
-        return len(self.merged_pull_requests)
+        return len(self.merged_pull_requests) + len(self.mirror_merged_prs)
 
     @property
     def total_open_prs(self) -> int:
-        return len(self.open_pull_requests)
+        return len(self.open_pull_requests) + len(self.mirror_open_prs)
 
     @property
     def total_closed_prs(self) -> int:
-        return len(self.closed_pull_requests)
+        return len(self.closed_pull_requests) + len(self.mirror_closed_prs)
 
     @property
     def should_use_cache_fallback(self) -> bool:

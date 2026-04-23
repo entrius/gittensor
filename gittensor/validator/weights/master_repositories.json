@@ -200,13 +200,13 @@
     "weight": 1.0
   },
   "entrius/allways-ui": {
-    "weight": 0.5
+    "weight": 0.88
   },
   "entrius/gittensor": {
     "weight": 1.0
   },
   "entrius/gittensor-ui": {
-    "weight": 0.5
+    "weight": 0.74
   },
   "espressif/arduino-esp32": {
     "weight": 0.1444
@@ -475,7 +475,7 @@
     "weight": 0.0407
   },
   "openclaw/openclaw": {
-    "weight": 0.2316
+    "weight": 0.6
   },
   "OpenGradient/BitQuant-Subnet": {
     "weight": 0.0462

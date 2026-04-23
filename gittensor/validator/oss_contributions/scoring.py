@@ -65,7 +65,9 @@ def score_miner_prs(
     pr_groups = [
         ('MERGED', miner_eval.merged_pull_requests),
         ('OPEN', miner_eval.open_pull_requests),
-        ('CLOSED', miner_eval.closed_pull_requests),
+        # CLOSED PRs are intentionally excluded: base_score is never used in
+        # reward calculation (only len(closed_prs) matters for credibility).
+        # Skipping them saves 2-3 GitHub API calls per closed PR.
     ]
 
     for label, prs in pr_groups:

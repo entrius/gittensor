@@ -248,7 +248,10 @@ def _collect_issues_from_prs(
 
                 # Anti-gaming: post-merge body/title edit detection
                 # Not issue.updated_at: it fires on bot comments, labels, reactions.
-                if issue.body_or_title_edited_at and pr.merged_at and issue.body_or_title_edited_at > pr.merged_at:
+                # Use closed_at as the anchor when available — edits between merged_at and
+                # closed_at are part of the normal auto-close flow, not post-merge gaming.
+                edit_anchor = issue.closed_at if issue.closed_at and issue.closed_at >= pr.merged_at else pr.merged_at
+                if issue.body_or_title_edited_at and issue.body_or_title_edited_at > edit_anchor:
                     bt.logging.info(
                         f'Issue #{issue.number} body/title edited after PR #{pr.number} merge — 0 score, counts as closed'
                     )

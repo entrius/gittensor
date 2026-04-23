@@ -25,6 +25,7 @@ METHODS_WE_USE = [
     'get_last_harvest_block',
     'harvest_emissions',
     'payout_bounty',
+    'settle_bounties_batch',
     'get_alpha_pool',
     'get_issue',
     'get_issues_by_status',
@@ -47,6 +48,12 @@ def get_type_string(type_id: int, types: list) -> str:
                 if type_def['array'].get('len') == 32:
                     return 'array32'
                 return 'array'
+            if 'sequence' in type_def:
+                seq_type_id = type_def['sequence'].get('type')
+                elem_type = get_type_string(seq_type_id, types)
+                if elem_type == 'u64':
+                    return 'vec_u64'
+                return f'vec_{elem_type}'
             if 'composite' in type_def:
                 if path and 'AccountId' in path[-1]:
                     return 'AccountId'

@@ -550,6 +550,16 @@ class IssueCompetitionContractClient:
                     encoded += bytes(value)
                 else:
                     raise ValueError(f'Unknown array format: {type(value)}')
+            elif type_def == 'vec_u64':
+                if not isinstance(value, list):
+                    raise ValueError(f'Expected list for vec_u64, got {type(value)}')
+                length = len(value)
+                # SCALE compact encoding for small vector lengths (< 2**6)
+                if length >= 1 << 6:
+                    raise ValueError('vec_u64 length too large for current encoder')
+                encoded += bytes([length << 2])
+                for item in value:
+                    encoded += struct.pack('<Q', int(item))
             else:
                 raise ValueError(f'Unsupported type: {type_def} for arg {arg_name}')
 
@@ -679,6 +689,32 @@ class IssueCompetitionContractClient:
         except Exception as e:
             bt.logging.error(f'Error paying out bounty: {e}')
             return None
+
+    def settle_bounties_batch(
+        self,
+        issue_ids: List[int],
+        wallet: bt.Wallet,
+    ) -> bool:
+        """Settle multiple completed bounties in one on-chain transaction.
+
+        Args:
+            issue_ids: Completed issue IDs to settle
+            wallet: Owner wallet for signing (uses coldkey)
+
+        Returns:
+            True if batch settlement extrinsic succeeded
+        """
+        if not issue_ids:
+            bt.logging.warning('settle_bounties_batch called with empty issue list')
+            return False
+
+        return self._exec_tx_bool(
+            method_name='settle_bounties_batch',
+            args={'issue_ids': [int(issue_id) for issue_id in issue_ids]},
+            keypair=wallet.coldkey,
+            label=f'Settling {len(issue_ids)} bounties in batch',
+            gas_limit=DEFAULT_GAS_LIMIT,
+        )
 
     def cancel_issue(
         self,

@@ -50,6 +50,14 @@ METHOD_TABLE = [
         False,
         True,
     ),
+    (
+        'settle_bounties_batch',
+        lambda w: dict(issue_ids=[1, 2, 3], wallet=w),
+        'settle_bounties_batch',
+        {'issue_ids': [1, 2, 3]},
+        False,
+        True,
+    ),
 ]
 _IDS = [row[0] for row in METHOD_TABLE]
 

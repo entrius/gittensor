@@ -1861,3 +1861,66 @@ fn failed_payout_funds_not_recycled_by_harvest() {
         "bounty_amount must survive harvest for retry via payout_bounty"
     );
 }
+
+// ============================================================================
+// Batch Settlement Tests
+// ============================================================================
+
+#[ink::test]
+fn settle_bounties_batch_fails_for_non_owner() {
+    let mut contract = create_default_contract();
+    set_caller(account(4));
+    let result = contract.settle_bounties_batch(vec![1, 2, 3]);
+    assert_eq!(result, Err(crate::Error::NotOwner));
+}
+
+#[ink::test]
+fn settle_bounties_batch_counts_skipped_issues() {
+    let mut contract = create_default_contract();
+    set_caller(account(1));
+
+    let id1 = contract
+        .register_issue(
+            String::from("https://github.com/org/repo/issues/1"),
+            String::from("org/repo"),
+            1,
+            MIN_BOUNTY,
+        )
+        .unwrap();
+
+    let id2 = contract
+        .register_issue(
+            String::from("https://github.com/org/repo/issues/2"),
+            String::from("org/repo"),
+            2,
+            MIN_BOUNTY,
+        )
+        .unwrap();
+
+    // id1: completed but already paid (bounty_amount = 0) -> skipped
+    if let Some(mut issue) = contract.issues.get(id1) {
+        issue.status = crate::IssueStatus::Completed;
+        issue.bounty_amount = 0;
+        issue.solver_coldkey = Some(account(5));
+        contract.issues.insert(id1, &issue);
+    }
+
+    // id2: active (not completed) -> skipped
+    if let Some(mut issue) = contract.issues.get(id2) {
+        issue.status = crate::IssueStatus::Active;
+        issue.bounty_amount = MIN_BOUNTY;
+        issue.solver_coldkey = Some(account(5));
+        contract.issues.insert(id2, &issue);
+    }
+
+    // 999: non-existent -> skipped
+    let result = contract
+        .settle_bounties_batch(vec![id1, id2, 999])
+        .expect("owner call should succeed");
+
+    assert_eq!(result.requested, 3);
+    assert_eq!(result.settled, 0);
+    assert_eq!(result.failed, 0);
+    assert_eq!(result.skipped, 3);
+    assert_eq!(result.total_paid, 0);
+}

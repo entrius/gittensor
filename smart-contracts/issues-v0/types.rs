@@ -117,6 +117,22 @@ pub struct HarvestResult {
     pub recycled: u128,
 }
 
+/// Result of settle_bounties_batch()
+#[derive(Debug, Clone, PartialEq, Eq, Encode, Decode, Default)]
+#[cfg_attr(feature = "std", derive(scale_info::TypeInfo))]
+pub struct BatchSettlementResult {
+    /// Number of issue IDs requested for settlement
+    pub requested: u32,
+    /// Number of issues successfully paid out
+    pub settled: u32,
+    /// Number of issues skipped due to invalid state/input
+    pub skipped: u32,
+    /// Number of payout transfer failures
+    pub failed: u32,
+    /// Sum of successfully paid-out bounty amounts
+    pub total_paid: u128,
+}
+
 /// Contract configuration returned by get_config()
 #[derive(Debug, Clone, Encode, Decode)]
 #[cfg_attr(feature = "std", derive(scale_info::TypeInfo))]

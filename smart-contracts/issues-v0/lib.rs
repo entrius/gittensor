@@ -570,6 +570,90 @@ mod issue_bounty_manager {
             Ok(result)
         }
 
+        /// Batch-settle multiple completed bounties in a single contract call.
+        ///
+        /// This reduces on-chain overhead compared to submitting one extrinsic
+        /// per issue payout. The method is best-effort:
+        /// - invalid/skipped issues are counted and continue
+        /// - payout failures are counted and continue
+        /// - successful payouts zero each issue's bounty_amount
+        #[ink(message)]
+        pub fn settle_bounties_batch(
+            &mut self,
+            issue_ids: Vec<u64>,
+        ) -> Result<BatchSettlementResult, Error> {
+            if self.env().caller() != self.owner {
+                return Err(Error::NotOwner);
+            }
+
+            let requested = u32::try_from(issue_ids.len()).unwrap_or(u32::MAX);
+            let mut settled: u32 = 0;
+            let mut skipped: u32 = 0;
+            let mut failed: u32 = 0;
+            let mut total_paid: Balance = 0;
+
+            for issue_id in issue_ids {
+                let issue = match self.issues.get(issue_id) {
+                    Some(issue) => issue,
+                    None => {
+                        skipped = skipped.saturating_add(1);
+                        continue;
+                    }
+                };
+
+                if issue.status != IssueStatus::Completed {
+                    skipped = skipped.saturating_add(1);
+                    continue;
+                }
+
+                if issue.bounty_amount == 0 {
+                    skipped = skipped.saturating_add(1);
+                    continue;
+                }
+
+                let solver_coldkey = match issue.solver_coldkey {
+                    Some(coldkey) => coldkey,
+                    None => {
+                        skipped = skipped.saturating_add(1);
+                        continue;
+                    }
+                };
+
+                let payout = issue.bounty_amount;
+                if self
+                    .execute_payout_internal(issue_id, solver_coldkey, payout)
+                    .is_ok()
+                {
+                    if let Some(mut stored_issue) = self.issues.get(issue_id) {
+                        stored_issue.bounty_amount = 0;
+                        self.issues.insert(issue_id, &stored_issue);
+                    }
+                    settled = settled.saturating_add(1);
+                    total_paid = total_paid.saturating_add(payout);
+                } else {
+                    failed = failed.saturating_add(1);
+                }
+            }
+
+            let result = BatchSettlementResult {
+                requested,
+                settled,
+                skipped,
+                failed,
+                total_paid,
+            };
+
+            self.env().emit_event(BatchSettlementExecuted {
+                requested: result.requested,
+                settled: result.settled,
+                skipped: result.skipped,
+                failed: result.failed,
+                total_paid: result.total_paid,
+            });
+
+            Ok(result)
+        }
+
         // ========================================================================
         // Query Functions
         // ========================================================================

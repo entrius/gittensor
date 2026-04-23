@@ -13,6 +13,7 @@
     "get_last_harvest_block": "99eee47d",
     "harvest_emissions": "44237deb",
     "payout_bounty": "d38906bc",
+    "settle_bounties_batch": "c19617bc",
     "get_alpha_pool": "9b84c72a",
     "get_issue": "f56df897",
     "get_issues_by_status": "e4870d63"
@@ -102,6 +103,12 @@
       [
         "issue_id",
         "u64"
+      ]
+    ],
+    "settle_bounties_batch": [
+      [
+        "issue_ids",
+        "vec_u64"
       ]
     ],
     "get_alpha_pool": [],

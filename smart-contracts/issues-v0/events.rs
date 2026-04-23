@@ -57,6 +57,16 @@ pub struct BountyPaidOut {
     pub amount: u128,
 }
 
+/// Event emitted after a batched settlement execution.
+#[ink::event]
+pub struct BatchSettlementExecuted {
+    pub requested: u32,
+    pub settled: u32,
+    pub skipped: u32,
+    pub failed: u32,
+    pub total_paid: u128,
+}
+
 /// Event emitted when harvest fails due to recycling error
 #[ink::event]
 pub struct HarvestFailed {

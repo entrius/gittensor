@@ -14,6 +14,22 @@ Usage:
 
 import json
 import os
+import sys
+
+# Stub heavy imports during shell completion so tab-completion stays fast.
+if os.environ.get('_GITT_COMPLETE'):
+    import types as _types
+
+    class _Stub(_types.ModuleType):
+        def __getattr__(self, _name):
+            return self
+
+        def __call__(self, *_a, **_kw):
+            return self
+
+    _stub = _Stub('_gitt_completion_stub')
+    for _pkg in ('bittensor', 'requests'):
+        sys.modules[_pkg] = _stub
 
 import click
 from click.shell_completion import get_completion_class

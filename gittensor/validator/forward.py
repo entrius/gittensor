@@ -2,6 +2,8 @@
 # Copyright © 2025 Entrius
 
 import asyncio
+import json
+import time
 from typing import TYPE_CHECKING, Dict, Set, Tuple
 
 import bittensor as bt
@@ -58,25 +60,57 @@ async def forward(self: 'Validator') -> None:
     """
 
     if self.step % VALIDATOR_STEPS_INTERVAL == 0:
+        round_t0 = time.perf_counter()
+
+        t0 = time.perf_counter()
         miner_uids = get_all_uids(self)
         master_repositories = load_master_repo_weights()
+        setup_ms = (time.perf_counter() - t0) * 1000.0
 
         # 1. Score OSS contributions
+        t0 = time.perf_counter()
         oss_rewards, miner_evaluations, cached_uids = await oss_contributions(self, miner_uids, master_repositories)
+        oss_ms = (time.perf_counter() - t0) * 1000.0
 
         # 2. Issue bounties verification
+        t0 = time.perf_counter()
         await issue_competitions(self, miner_evaluations)
+        issue_competitions_ms = (time.perf_counter() - t0) * 1000.0
 
         # 3. Score issue discovery
-        issue_rewards = await issue_discovery(miner_evaluations, master_repositories, miner_uids)
+        t0 = time.perf_counter()
+        issue_rewards, issue_discovery_detail = await issue_discovery(
+            miner_evaluations, master_repositories, miner_uids
+        )
+        issue_discovery_ms = (time.perf_counter() - t0) * 1000.0
 
         # 4. Store all evaluations to DB (includes issue discovery fields)
+        t0 = time.perf_counter()
         await self.bulk_store_evaluation(miner_evaluations, skip_uids=cached_uids)
+        db_store_ms = (time.perf_counter() - t0) * 1000.0
 
         # 5. Blend 4 emission pools into final rewards
+        t0 = time.perf_counter()
         rewards = blend_emission_pools(oss_rewards, issue_rewards, miner_uids)
-
         self.update_scores(rewards, miner_uids)
+        blend_and_scores_ms = (time.perf_counter() - t0) * 1000.0
+
+        round_total_ms = (time.perf_counter() - round_t0) * 1000.0
+        timing_payload: Dict[str, float | int] = {
+            'step': int(self.step),
+            'miner_count': len(miner_uids),
+            'repo_count': len(master_repositories),
+            'cached_uid_count': len(cached_uids),
+            'round_total_ms': round_total_ms,
+            'setup_ms': setup_ms,
+            'oss_contributions_ms': oss_ms,
+            'issue_competitions_ms': issue_competitions_ms,
+            'issue_discovery_ms': issue_discovery_ms,
+            'db_store_ms': db_store_ms,
+            'blend_and_scores_ms': blend_and_scores_ms,
+        }
+        timing_payload.update(issue_discovery_detail)
+        bt.logging.info(f'validator_round_timing {json.dumps(timing_payload, sort_keys=True)}')
 
     await asyncio.sleep(VALIDATOR_WAIT)
 
@@ -112,28 +146,38 @@ async def issue_discovery(
     miner_evaluations: Dict[int, MinerEvaluation],
     master_repositories: Dict[str, RepositoryConfig],
     miner_uids: set[int],
-) -> np.ndarray:
-    """Score issue discovery and return normalized rewards array.
+) -> Tuple[np.ndarray, Dict[str, float]]:
+    """Score issue discovery; return rewards and per-subphase timing (milliseconds).
 
     1. Scan tracked repos for miner-authored closed issues (validator PAT)
     2. Score issue discovery using PR-linked issues + scan results
     3. Normalize into independent pool
 
-    Returns numpy array of normalized issue discovery rewards (sorted by UID).
+    Returns:
+        Tuple of (rewards array sorted by UID, timing detail in milliseconds for bottleneck logs).
     """
+    detail: Dict[str, float] = {}
+
     # Scan tracked repos for closed issues not linked to miner PRs
     scan_issues: Dict[str, list] = {}
+    t0 = time.perf_counter()
     if GITTENSOR_VALIDATOR_PAT:
         scan_issues = await scan_closed_issues(miner_evaluations, master_repositories, GITTENSOR_VALIDATOR_PAT)
+    detail['issue_discovery_scan_ms'] = (time.perf_counter() - t0) * 1000.0
 
     # Score issue discovery
+    t0 = time.perf_counter()
     score_discovered_issues(miner_evaluations, master_repositories, scan_issues)
+    detail['issue_discovery_score_ms'] = (time.perf_counter() - t0) * 1000.0
 
     # Normalize into independent pool
+    t0 = time.perf_counter()
     issue_rewards_dict = normalize_issue_discovery_rewards(miner_evaluations)
+    detail['issue_discovery_normalize_ms'] = (time.perf_counter() - t0) * 1000.0
 
     sorted_uids = sorted(miner_uids)
-    return np.array([issue_rewards_dict.get(uid, 0.0) for uid in sorted_uids])
+    rewards = np.array([issue_rewards_dict.get(uid, 0.0) for uid in sorted_uids])
+    return rewards, detail
 
 
 def blend_emission_pools(

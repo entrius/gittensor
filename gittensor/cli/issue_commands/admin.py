@@ -21,6 +21,7 @@ from .helpers import (
     _handle_command_error,
     _make_contract_client,
     _resolve_contract_and_network,
+    confirm_or_abort,
     console,
     format_alpha,
     print_error,
@@ -28,6 +29,7 @@ from .helpers import (
     print_success,
     require_valid_issue_id,
     require_valid_ss58,
+    with_cli_behavior_options,
     with_network_contract_options,
     with_wallet_options,
 )
@@ -46,7 +48,8 @@ def admin():
 @click.argument('issue_id', type=int)
 @with_wallet_options()
 @with_network_contract_options('Contract address (uses config if empty)')
-def admin_cancel(issue_id: int, network: str, rpc_url: str, contract: str, wallet_name: str, wallet_hotkey: str):
+@with_cli_behavior_options(include_yes=True)
+def admin_cancel(issue_id: int, network: str, rpc_url: str, contract: str, wallet_name: str, wallet_hotkey: str, yes: bool = False):
     """Cancel an issue (owner only).
 
     [dim]Immediately cancels an issue without validator consensus. Bounty funds are returned to the alpha pool.[/dim]
@@ -60,6 +63,7 @@ def admin_cancel(issue_id: int, network: str, rpc_url: str, contract: str, walle
         $ gitt a cancel-issue 5 --network test
     [/dim]
     """
+    confirm_or_abort(f'Cancel issue #{issue_id}? This cannot be undone.', yes)
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
 
     require_valid_issue_id(issue_id)
@@ -100,7 +104,8 @@ def admin_cancel(issue_id: int, network: str, rpc_url: str, contract: str, walle
 @click.argument('issue_id', type=int)
 @with_wallet_options()
 @with_network_contract_options('Contract address (uses config if empty)')
-def admin_payout(issue_id: int, network: str, rpc_url: str, contract: str, wallet_name: str, wallet_hotkey: str):
+@with_cli_behavior_options(include_yes=True)
+def admin_payout(issue_id: int, network: str, rpc_url: str, contract: str, wallet_name: str, wallet_hotkey: str, yes: bool = False):
     """Manual payout fallback (owner only).
 
     [dim]Pays out a completed issue bounty to the solver.
@@ -115,6 +120,8 @@ def admin_payout(issue_id: int, network: str, rpc_url: str, contract: str, walle
         $ gitt a payout-issue 3 --network test
     [/dim]
     """
+    confirm_or_abort(f'Pay out bounty for issue #{issue_id}?', yes)
+
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
 
     require_valid_issue_id(issue_id)
@@ -155,7 +162,8 @@ def admin_payout(issue_id: int, network: str, rpc_url: str, contract: str, walle
 @click.argument('new_owner', type=str)
 @with_wallet_options()
 @with_network_contract_options('Contract address')
-def admin_set_owner(new_owner: str, network: str, rpc_url: str, contract: str, wallet_name: str, wallet_hotkey: str):
+@with_cli_behavior_options(include_yes=True)
+def admin_set_owner(new_owner: str, network: str, rpc_url: str, contract: str, wallet_name: str, wallet_hotkey: str, yes: bool = False):
     """Transfer contract ownership (owner only).
 
     [dim]Arguments:
@@ -166,6 +174,9 @@ def admin_set_owner(new_owner: str, network: str, rpc_url: str, contract: str, w
         $ gitt admin set-owner 5Hxxx...
     [/dim]
     """
+    console.print('[red bold]WARNING: Ownership transfer is irreversible. A wrong address permanently bricks the contract.[/red bold]')
+    confirm_or_abort(f'Transfer ownership to {new_owner}?', yes)
+
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
 
     require_valid_ss58(new_owner, 'new_owner')
@@ -197,8 +208,9 @@ def admin_set_owner(new_owner: str, network: str, rpc_url: str, contract: str, w
 @click.argument('new_treasury', type=str)
 @with_wallet_options()
 @with_network_contract_options('Contract address')
+@with_cli_behavior_options(include_yes=True)
 def admin_set_treasury(
-    new_treasury: str, network: str, rpc_url: str, contract: str, wallet_name: str, wallet_hotkey: str
+    new_treasury: str, network: str, rpc_url: str, contract: str, wallet_name: str, wallet_hotkey: str, yes: bool = False
 ):
     """Change treasury hotkey (owner only).
 
@@ -213,6 +225,8 @@ def admin_set_treasury(
         $ gitt admin set-treasury 5Hxxx...
     [/dim]
     """
+    confirm_or_abort(f'Change treasury hotkey to {new_treasury}?', yes)
+
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
 
     require_valid_ss58(new_treasury, 'new_treasury')
@@ -247,7 +261,8 @@ def admin_set_treasury(
 @click.argument('hotkey', type=str)
 @with_wallet_options()
 @with_network_contract_options('Contract address')
-def admin_add_validator(hotkey: str, network: str, rpc_url: str, contract: str, wallet_name: str, wallet_hotkey: str):
+@with_cli_behavior_options(include_yes=True)
+def admin_add_validator(hotkey: str, network: str, rpc_url: str, contract: str, wallet_name: str, wallet_hotkey: str, yes: bool = False):
     """Add a validator to the voting whitelist (owner only).
 
     [dim]Whitelisted validators can vote on solutions and issue cancellations.
@@ -261,7 +276,9 @@ def admin_add_validator(hotkey: str, network: str, rpc_url: str, contract: str, 
         $ gitt admin add-vali 5Hxxx...
     [/dim]
     """
-    contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
+    confirm_or_abort(f'Add validator {hotkey} to whitelist?', yes)
+
+    contract_addr, ws_endpoint
 
     require_valid_ss58(hotkey, 'hotkey')
 
@@ -295,8 +312,9 @@ def admin_add_validator(hotkey: str, network: str, rpc_url: str, contract: str, 
 @click.argument('hotkey', type=str)
 @with_wallet_options()
 @with_network_contract_options('Contract address')
+@with_cli_behavior_options(include_yes=True)
 def admin_remove_validator(
-    hotkey: str, network: str, rpc_url: str, contract: str, wallet_name: str, wallet_hotkey: str
+    hotkey: str, network: str, rpc_url: str, contract: str, wallet_name: str, wallet_hotkey: str, yes: bool = False
 ):
     """Remove a validator from the voting whitelist (owner only).
 
@@ -310,6 +328,8 @@ def admin_remove_validator(
         $ gitt admin remove-vali 5Hxxx...
     [/dim]
     """
+    confirm_or_abort(f'Remove validator {hotkey} from whitelist?', yes)
+
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
 
     require_valid_ss58(hotkey, 'hotkey')

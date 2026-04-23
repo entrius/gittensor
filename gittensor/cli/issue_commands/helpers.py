@@ -158,6 +158,15 @@ def with_cli_behavior_options(
 
     return apply_click_options(*decorators)
 
+def confirm_or_abort(prompt: str, yes: bool) -> None:
+    """Show a y/n confirmation prompt unless --yes was passed or stdin is not a TTY."""
+    import sys
+
+    if yes or not sys.stdin.isatty():
+        return
+    if not click.confirm(prompt, default=False):
+        raise SystemExit(0)
+
 
 def format_alpha(raw_amount: int, decimals: int = 2) -> str:
     """Format raw token amount (9-decimal) as human-readable ALPHA string.

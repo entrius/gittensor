@@ -29,6 +29,7 @@ from .helpers import (
     require_valid_issue_id,
     validate_issue_id,
     validate_ss58_address,
+    confirm_or_abort,
     with_cli_behavior_options,
     with_network_contract_options,
     with_wallet_options,
@@ -70,7 +71,6 @@ def vote():
     """
     pass
 
-
 @vote.command('solution')
 @click.argument('issue_id', type=int)
 @click.argument('solver_hotkey', type=str)
@@ -78,6 +78,7 @@ def vote():
 @click.argument('pr_number_or_url', type=str)
 @with_wallet_options()
 @with_network_contract_options('Contract address (uses config if empty)')
+@with_cli_behavior_options(include_yes=True)
 def val_vote_solution(
     issue_id: int,
     solver_hotkey: str,
@@ -88,6 +89,7 @@ def val_vote_solution(
     network: str,
     rpc_url: str,
     contract: str,
+    yes: bool = False,
 ):
     """Vote for a solution on an active issue (triggers auto-payout on consensus).
 
@@ -103,6 +105,8 @@ def val_vote_solution(
         $ gitt vote solution 1 5Hxxx... 5Hyyy... https://github.com/.../pull/123
     [/dim]
     """
+    confirm_or_abort(f'Vote solution for issue #{issue_id}?', yes)
+
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
 
     try:
@@ -151,6 +155,7 @@ def val_vote_solution(
 @click.argument('reason', type=str)
 @with_wallet_options()
 @with_network_contract_options('Contract address (uses config if empty)')
+@with_cli_behavior_options(include_yes=True)
 def val_vote_cancel_issue(
     issue_id: int,
     reason: str,
@@ -159,6 +164,7 @@ def val_vote_cancel_issue(
     network: str,
     rpc_url: str,
     contract: str,
+    yes: bool = False,
 ):
     """Vote to cancel an issue (works on Registered or Active).
 
@@ -172,7 +178,9 @@ def val_vote_cancel_issue(
         $ gitt vote cancel 42 "Issue invalid"
     [/dim]
     """
-    contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
+    confirm_or_abort(f'Vote to cancel issue #{issue_id}?', yes)
+
+    contract_addr, ws_endpoint
 
     require_valid_issue_id(issue_id)
 

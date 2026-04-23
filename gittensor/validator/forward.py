@@ -21,6 +21,7 @@ from gittensor.validator.issue_competitions.forward import issue_competitions
 from gittensor.validator.issue_discovery.normalize import (
     normalize_issue_discovery_rewards,
 )
+from gittensor.validator.issue_discovery.mirror_scan import run_mirror_issue_discovery
 from gittensor.validator.issue_discovery.repo_scan import scan_closed_issues
 from gittensor.validator.issue_discovery.scoring import score_discovered_issues
 from gittensor.validator.oss_contributions.reward import get_rewards
@@ -115,19 +116,36 @@ async def issue_discovery(
 ) -> np.ndarray:
     """Score issue discovery and return normalized rewards array.
 
-    1. Scan tracked repos for miner-authored closed issues (validator PAT)
-    2. Score issue discovery using PR-linked issues + scan results
-    3. Normalize into independent pool
+    Per-repo routing:
+    - Mirror-enabled repos → authoritative path via run_mirror_issue_discovery
+      (uses MirrorClient.get_miner_issues + solved_by_pr / solving_pr inline).
+    - Legacy repos         → PAT-based scan + score_discovered_issues.
+
+    Both paths populate the same MinerEvaluation issue-discovery fields; the
+    mirror path accumulates on top of whatever the legacy path produced for
+    the same miner (each issue is scoped to exactly one path's repo, so there's
+    no double-counting).
 
     Returns numpy array of normalized issue discovery rewards (sorted by UID).
     """
-    # Scan tracked repos for closed issues not linked to miner PRs
-    scan_issues: Dict[str, list] = {}
-    if GITTENSOR_VALIDATOR_PAT:
-        scan_issues = await scan_closed_issues(miner_evaluations, master_repositories, GITTENSOR_VALIDATOR_PAT)
+    mirror_repos: Dict[str, RepositoryConfig] = {
+        name: cfg for name, cfg in master_repositories.items() if cfg.mirror_enabled
+    }
+    legacy_repos: Dict[str, RepositoryConfig] = {
+        name: cfg for name, cfg in master_repositories.items() if not cfg.mirror_enabled
+    }
 
-    # Score issue discovery
-    score_discovered_issues(miner_evaluations, master_repositories, scan_issues)
+    # Legacy path — keeps running on non-mirror repos during the transition so
+    # issue discovery isn't lost wholesale when not every repo is flipped yet.
+    if legacy_repos:
+        scan_issues: Dict[str, list] = {}
+        if GITTENSOR_VALIDATOR_PAT:
+            scan_issues = await scan_closed_issues(miner_evaluations, legacy_repos, GITTENSOR_VALIDATOR_PAT)
+        score_discovered_issues(miner_evaluations, legacy_repos, scan_issues)
+
+    # Mirror path — no PAT needed; public CF-rate-limited endpoints.
+    if mirror_repos:
+        await run_mirror_issue_discovery(miner_evaluations, mirror_repos)
 
     # Normalize into independent pool
     issue_rewards_dict = normalize_issue_discovery_rewards(miner_evaluations)

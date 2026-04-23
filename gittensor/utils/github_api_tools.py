@@ -238,7 +238,9 @@ def get_github_id(token: str) -> Optional[str]:
     return str(user_id)
 
 
-def get_merge_base_sha(repository: str, base_sha: str, head_sha: str, token: str) -> Optional[str]:
+def get_merge_base_sha(
+    repository: str, base_sha: str, head_sha: str, token: str, pr_number: Optional[int] = None
+) -> Optional[str]:
     """
     Get the merge-base commit SHA between two refs using GitHub's compare API.
 
@@ -250,12 +252,14 @@ def get_merge_base_sha(repository: str, base_sha: str, head_sha: str, token: str
         base_sha: Base branch ref OID
         head_sha: Head branch ref OID
         token: GitHub PAT
+        pr_number: Optional PR number, included in warning logs for traceability
 
     Returns:
         Merge-base commit SHA, or None if the request fails
     """
     headers = make_headers(token)
     max_attempts = 3
+    ctx = f' (PR #{pr_number})' if pr_number else ''
 
     for attempt in range(max_attempts):
         try:
@@ -270,13 +274,13 @@ def get_merge_base_sha(repository: str, base_sha: str, head_sha: str, token: str
                 merge_base = (data.get('merge_base_commit') or {}).get('sha')
                 if merge_base:
                     return merge_base
-                bt.logging.warning(f'Compare API returned 200 but no merge_base_commit for {repository}')
+                bt.logging.warning(f'Compare API returned 200 but no merge_base_commit for {repository}{ctx}')
                 return None
 
             if attempt < max_attempts - 1:
                 backoff_delay = min(5 * (2 ** (attempt)), 30)
                 bt.logging.warning(
-                    f'Compare API for {repository} failed with status {response.status_code} '
+                    f'Compare API for {repository}{ctx} failed with status {response.status_code} '
                     f'(attempt {attempt + 1}/{max_attempts}), retrying in {backoff_delay}s...'
                 )
                 time.sleep(backoff_delay)
@@ -285,12 +289,14 @@ def get_merge_base_sha(repository: str, base_sha: str, head_sha: str, token: str
             if attempt < max_attempts - 1:
                 backoff_delay = min(5 * (2 ** (attempt)), 30)
                 bt.logging.warning(
-                    f'Compare API error for {repository} (attempt {attempt + 1}/{max_attempts}): {e}, '
+                    f'Compare API error for {repository}{ctx} (attempt {attempt + 1}/{max_attempts}): {e}, '
                     f'retrying in {backoff_delay}s...'
                 )
                 time.sleep(backoff_delay)
 
-    bt.logging.warning(f'Compare API for {repository} failed after {max_attempts} attempts. Will use base_ref_oid.')
+    bt.logging.warning(
+        f'Compare API for {repository}{ctx} failed after {max_attempts} attempts. Will use base_ref_oid.'
+    )
     return None
 
 

@@ -1487,6 +1487,35 @@ class TestGetMergeBaseSha:
         assert result is None
         assert mock_get.call_count == 3
 
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_warning_includes_pr_number_when_provided(self, mock_logging, mock_sleep, mock_get):
+        """pr_number context is threaded into warning logs so failures are attributable to a PR."""
+        mock_500 = Mock(status_code=500, text='Internal Server Error')
+        mock_get.return_value = mock_500
+
+        result = get_merge_base_sha('owner/repo', 'base_sha', 'head_sha', 'fake_token', pr_number=42)
+
+        assert result is None
+        warning_messages = [call.args[0] for call in mock_logging.warning.call_args_list]
+        assert warning_messages, 'expected at least one warning to be emitted'
+        assert all('PR #42' in msg for msg in warning_messages), warning_messages
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_warning_omits_pr_number_when_absent(self, mock_logging, mock_get):
+        """Warning text remains unchanged for callers that don't supply pr_number."""
+        mock_response = Mock(status_code=200)
+        mock_response.json.return_value = {'status': 'ahead'}
+        mock_get.return_value = mock_response
+
+        get_merge_base_sha('owner/repo', 'base_sha', 'head_sha', 'fake_token')
+
+        warning_messages = [call.args[0] for call in mock_logging.warning.call_args_list]
+        assert warning_messages
+        assert all('PR #' not in msg for msg in warning_messages), warning_messages
+
 
 # ============================================================================
 # fetch_file_contents_for_pr Merge Base Integration Tests
@@ -1534,7 +1563,9 @@ class TestFetchFileContentsForPrMergeBase:
 
         fetch_file_contents_for_pr(pr, 'fake_token')
 
-        mock_merge_base.assert_called_once_with('owner/repo', 'base_branch_tip_sha', 'head_sha', 'fake_token')
+        mock_merge_base.assert_called_once_with(
+            'owner/repo', 'base_branch_tip_sha', 'head_sha', 'fake_token', pr_number=1
+        )
         # Verify merge-base SHA was passed, not the original base_ref_oid
         mock_fetch.assert_called_once()
         call_args = mock_fetch.call_args

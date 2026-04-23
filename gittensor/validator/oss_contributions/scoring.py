@@ -131,7 +131,9 @@ def fetch_file_contents_for_pr(pr: PullRequest, github_pat: str) -> Dict[str, Fi
 
     # Resolve merge-base to avoid scoring unrelated changes from the base branch.
     # baseRefOid is the base branch tip, which may include commits not in this PR.
-    merge_base = get_merge_base_sha(pr.repository_full_name, pr.base_ref_oid, pr.head_ref_oid, github_pat)
+    merge_base = get_merge_base_sha(
+        pr.repository_full_name, pr.base_ref_oid, pr.head_ref_oid, github_pat, pr_number=pr.number
+    )
     base_sha = merge_base if merge_base else pr.base_ref_oid
     if merge_base and merge_base != pr.base_ref_oid:
         bt.logging.debug(

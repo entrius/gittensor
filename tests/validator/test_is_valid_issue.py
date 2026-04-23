@@ -75,3 +75,47 @@ class TestIsValidIssueCloseWindow:
         )
 
         assert is_valid_issue(issue, pr) is expected
+
+
+class TestIsValidIssueOpenPRCollateral:
+    @pytest.mark.parametrize(
+        'state_reason,expected',
+        [
+            ('COMPLETED', True),
+            ('NOT_PLANNED', False),
+            ('TRANSFERRED', False),
+            ('DUPLICATE', False),
+            (None, False),
+        ],
+    )
+    def test_open_pr_rejects_closed_issue_when_not_completed(self, pr_factory, issue_factory, state_reason, expected):
+        now = datetime.now(timezone.utc)
+        pr = pr_factory.open()
+        pr.author_login = 'miner_user'
+        pr.created_at = now
+
+        issue = issue_factory.create(
+            author_login='other_user',
+            created_at=now - timedelta(days=5),
+            closed_at=now - timedelta(hours=1),
+            state='CLOSED',
+            state_reason=state_reason,
+        )
+
+        assert is_valid_issue(issue, pr) is expected
+
+    def test_open_pr_accepts_open_issue(self, pr_factory, issue_factory):
+        now = datetime.now(timezone.utc)
+        pr = pr_factory.open()
+        pr.author_login = 'miner_user'
+        pr.created_at = now
+
+        issue = issue_factory.create(
+            author_login='other_user',
+            created_at=now - timedelta(days=5),
+            closed_at=None,
+            state='OPEN',
+            state_reason=None,
+        )
+
+        assert is_valid_issue(issue, pr) is True

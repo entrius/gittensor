@@ -13,6 +13,7 @@ Commands:
 
 from decimal import Decimal
 
+import sys
 import click
 from rich.panel import Panel
 from rich.table import Table
@@ -110,7 +111,8 @@ def issues_list(issue_id: int, network: str, rpc_url: str, contract: str, verbos
                 )
             )
         else:
-            console.print(f'[yellow]Issue {issue_id} not found.[/yellow]')
+            print_error(f'Issue {issue_id} not found on-chain.')
+            sys.exit(1)
         return
 
     # Table view of all issues

@@ -96,6 +96,8 @@ def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, json_mode)
         )
 
     valid_count = sum(1 for r in results if r['pat_valid'] is True)
+    no_pat_count = sum(1 for r in results if r['has_pat'] is False)
+    invalid_pat_count = sum(1 for r in results if r['pat_valid'] is False and r['has_pat'] is True)
     no_response_count = sum(1 for r in results if r['has_pat'] is None)
 
     # 6. Display results
@@ -106,7 +108,8 @@ def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, json_mode)
                     'success': valid_count > 0,
                     'total_validators': len(results),
                     'valid': valid_count,
-                    'invalid': len(results) - valid_count - no_response_count,
+                    'no_pat': no_pat_count,
+                    'invalid_pat': invalid_pat_count,
                     'no_response': no_response_count,
                     'results': results,
                 },

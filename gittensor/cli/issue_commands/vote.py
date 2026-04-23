@@ -23,6 +23,7 @@ from .helpers import (
     _resolve_contract_and_network,
     console,
     emit_json,
+    handle_exception,
     print_error,
     print_network_header,
     print_success,
@@ -263,4 +264,4 @@ def vote_list_validators(network: str, rpc_url: str, contract: str, as_json: boo
             console.print('[dim]Add validators with: gitt admin add-vali <HOTKEY>[/dim]')
 
     except Exception as e:
-        _handle_command_error(e)
+        handle_exception(as_json=as_json, message=str(e))

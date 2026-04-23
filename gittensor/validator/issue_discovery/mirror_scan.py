@@ -253,7 +253,9 @@ def _score_miner_mirror_issues(
     evaluation.total_closed_issues += closed_count
     evaluation.issue_token_score = round(issue_token_score, 2)
 
-    is_eligible, credibility, reason = check_issue_eligibility(valid_solved_count, closed_count)
+    is_eligible, credibility, reason = check_issue_eligibility(
+        solved_count, valid_solved_count, closed_count
+    )
     evaluation.is_issue_eligible = is_eligible or evaluation.is_issue_eligible
     evaluation.issue_credibility = max(evaluation.issue_credibility, credibility)
 

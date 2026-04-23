@@ -200,16 +200,20 @@
     "weight": 0.1392
   },
   "entrius/allways": {
-    "weight": 1.0
+    "weight": 1.0,
+    "mirror_enabled": true
   },
   "entrius/allways-ui": {
-    "weight": 0.88
+    "weight": 0.88,
+    "mirror_enabled": true
   },
   "entrius/gittensor": {
-    "weight": 1.0
+    "weight": 1.0,
+    "mirror_enabled": true
   },
   "entrius/gittensor-ui": {
-    "weight": 0.74
+    "weight": 0.74,
+    "mirror_enabled": true
   },
   "espressif/arduino-esp32": {
     "weight": 0.1444

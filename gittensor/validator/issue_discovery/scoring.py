@@ -59,15 +59,15 @@ def calculate_issue_credibility(solved_count: int, closed_count: int) -> float:
     return solved_count / total
 
 
-def check_issue_eligibility(solved_count: int, closed_count: int) -> Tuple[bool, float, str]:
+def check_issue_eligibility(solved_count: int, valid_solved_count: int, closed_count: int) -> Tuple[bool, float, str]:
     """Check if a miner passes the issue discovery eligibility gate.
 
     Returns (is_eligible, issue_credibility, reason).
     """
     credibility = calculate_issue_credibility(solved_count, closed_count)
 
-    if solved_count < MIN_VALID_SOLVED_ISSUES:
-        return False, credibility, f'{solved_count}/{MIN_VALID_SOLVED_ISSUES} valid solved issues'
+    if valid_solved_count < MIN_VALID_SOLVED_ISSUES:
+        return False, credibility, f'{valid_solved_count}/{MIN_VALID_SOLVED_ISSUES} valid solved issues'
 
     if credibility < MIN_ISSUE_CREDIBILITY:
         return False, credibility, f'Issue credibility {credibility:.2f} < {MIN_ISSUE_CREDIBILITY}'
@@ -128,7 +128,9 @@ def score_discovered_issues(
         evaluation.total_closed_issues = data.closed_count
         evaluation.issue_token_score = round(data.issue_token_score, 2)
 
-        is_eligible, credibility, reason = check_issue_eligibility(data.valid_solved_count, data.closed_count)
+        is_eligible, credibility, reason = check_issue_eligibility(
+            data.solved_count, data.valid_solved_count, data.closed_count
+        )
         evaluation.is_issue_eligible = is_eligible
         evaluation.issue_credibility = credibility
 
@@ -312,9 +314,8 @@ def _merge_scan_issues(
                 data.closed_count += 1
                 continue
             if issue.state == 'CLOSED' and issue.closed_at:
-                # Case 2: solved by non-miner PR → positive credibility
+                # Case 2: solved by non-miner PR → positive credibility only
                 data.solved_count += 1
-                data.valid_solved_count += 1
             else:
                 # Case 3: closed without PR → negative credibility
                 data.closed_count += 1

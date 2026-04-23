@@ -1,19 +1,23 @@
-"""Adapters from mirror response types into legacy ``FileChange`` / ``Issue``.
+"""Adapters from mirror response types into legacy ``FileChange`` / ``Issue`` /
+``PullRequest``.
 
-Two boundaries need this:
+Three boundaries need this:
 - Token-scoring infra in ``gittensor.validator.utils.tree_sitter_scoring`` expects
   ``List[FileChange]`` + ``Dict[str, FileContentPair]`` — see
   ``score_mirror_miner_prs``.
 - Storage layer (``MinerEvaluation.get_all_file_changes``,
   ``MinerEvaluation.get_all_issues``) writes per-PR rows to the analytics DB
   using the legacy types.
+- Storage layer's ``store_pull_requests_bulk`` writes per-PR rows for analytics;
+  ScoredMirrorPR carries the same scoring fields as PullRequest but on a
+  composition wrapper, so we flatten it into a PullRequest for that bulk insert.
 
 When the legacy types are retired on flip-day this whole module goes away.
 """
 
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
-from gittensor.classes import FileChange, Issue
+from gittensor.classes import FileChange, Issue, PRState, PullRequest
 from gittensor.utils.github_api_tools import FileContentPair
 from gittensor.utils.mirror.models import MirrorFile, MirrorLinkedIssue
 
@@ -75,4 +79,82 @@ def mirror_linked_issue_to_legacy_issue(
         state_reason=li.state_reason,
         updated_at=li.updated_at,
         body_or_title_edited_at=None,
+    )
+
+
+def mirror_scored_pr_to_legacy_pull_request(
+    scored,
+    uid: int,
+    hotkey: str,
+    github_id: Optional[str],
+) -> PullRequest:
+    """Adapt a ``ScoredMirrorPR`` into a legacy ``PullRequest`` for storage.
+
+    ScoredMirrorPR carries identical scoring fields (multipliers, base_score,
+    earned_score, token breakdown) but raw response data lives on the nested
+    ``.pr`` attribute. uid / hotkey / github_id come from the parent
+    ``MinerEvaluation`` since ScoredMirrorPR doesn't carry miner identity.
+
+    Mirror has different field names for a few raw values:
+    - ``pr.pr_number`` → ``PullRequest.number``
+    - ``pr.repo_full_name`` → ``PullRequest.repository_full_name``
+    - ``pr.commits_count`` → ``PullRequest.commits``
+    - ``pr.body`` → ``PullRequest.description``
+    - ``pr.head_sha`` → ``PullRequest.head_ref_oid``
+    - ``pr.base_sha`` → ``PullRequest.base_ref_oid``
+    - state string ``MERGED|OPEN|CLOSED`` → ``PRState`` enum
+
+    ``file_changes`` and ``issues`` are left as None on the resulting PullRequest
+    — those are written to the DB through ``get_all_file_changes`` / ``get_all_issues``
+    which already adapt mirror data via the other helpers above.
+
+    Type-annotated as ``scored`` only because importing ``ScoredMirrorPR`` from
+    here creates a circular import (scoring.py imports adapters.py for
+    mirror_files_to_legacy). Caller is expected to pass a ScoredMirrorPR.
+    """
+    pr = scored.pr
+    return PullRequest(
+        number=pr.pr_number,
+        repository_full_name=pr.repo_full_name,
+        uid=uid,
+        hotkey=hotkey,
+        github_id=github_id,
+        title=pr.title,
+        author_login=pr.author_login,
+        merged_at=pr.merged_at,
+        created_at=pr.created_at,
+        pr_state=PRState(pr.state),
+        repo_weight_multiplier=scored.repo_weight_multiplier,
+        base_score=scored.base_score,
+        issue_multiplier=scored.issue_multiplier,
+        open_pr_spam_multiplier=scored.open_pr_spam_multiplier,
+        pioneer_dividend=scored.pioneer_dividend,
+        pioneer_rank=scored.pioneer_rank,
+        time_decay_multiplier=scored.time_decay_multiplier,
+        credibility_multiplier=scored.credibility_multiplier,
+        review_quality_multiplier=scored.review_quality_multiplier,
+        label_multiplier=scored.label_multiplier,
+        label=scored.label,
+        # Mirror's review_summary surfaces the maintainer-only count directly;
+        # legacy PullRequest.changes_requested_count holds the same scoring input.
+        changes_requested_count=pr.review_summary.maintainer_changes_requested_count,
+        earned_score=scored.earned_score,
+        collateral_score=scored.collateral_score,
+        additions=pr.additions,
+        deletions=pr.deletions,
+        commits=pr.commits_count,
+        total_nodes_scored=scored.total_nodes_scored,
+        code_density=scored.code_density,
+        token_score=scored.token_score,
+        structural_count=scored.structural_count,
+        structural_score=scored.structural_score,
+        leaf_count=scored.leaf_count,
+        leaf_score=scored.leaf_score,
+        merged_by_login=pr.merged_by_login,
+        file_changes=None,  # written separately via get_all_file_changes
+        issues=None,        # written separately via get_all_issues
+        description=pr.body,
+        last_edited_at=pr.last_edited_at,
+        head_ref_oid=pr.head_sha,
+        base_ref_oid=pr.base_sha,
     )

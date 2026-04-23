@@ -1143,6 +1143,7 @@ def _fetch_file_contents_with_base_batch(
     head_sha: str,
     batch_changes: List['FileChangeType'],
     token: str,
+    pr_number: Optional[int] = None,
 ) -> Dict[str, FileContentPair]:
     """Fetch base and head file contents for a single batch of file changes.
 
@@ -1192,7 +1193,8 @@ def _fetch_file_contents_with_base_batch(
 
     data = execute_graphql_query(query, variables, token)
     if data is None:
-        bt.logging.warning(f'Failed to fetch file contents for {repo_owner}/{repo_name}')
+        ctx = f' (PR #{pr_number})' if pr_number else ''
+        bt.logging.warning(f'Failed to fetch file contents for {repo_owner}/{repo_name}{ctx}')
         return {fc.filename: FileContentPair(None, None) for fc in batch_changes}
 
     if 'errors' in data:
@@ -1229,6 +1231,7 @@ def fetch_file_contents_with_base(
     head_sha: str,
     file_changes: List['FileChangeType'],
     token: str,
+    pr_number: Optional[int] = None,
 ) -> Dict[str, FileContentPair]:
     """Fetch old and new versions of files in batches so large PRs don't hit complexity limits.
 
@@ -1250,7 +1253,9 @@ def fetch_file_contents_with_base(
 
     for batch_start in range(0, len(file_changes), MAX_FILES_PER_GRAPHQL_BATCH):
         batch = file_changes[batch_start : batch_start + MAX_FILES_PER_GRAPHQL_BATCH]
-        batch_results = _fetch_file_contents_with_base_batch(repo_owner, repo_name, base_sha, head_sha, batch, token)
+        batch_results = _fetch_file_contents_with_base_batch(
+            repo_owner, repo_name, base_sha, head_sha, batch, token, pr_number=pr_number
+        )
         results.update(batch_results)
 
     return results

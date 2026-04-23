@@ -71,20 +71,6 @@ def add_args(cls, parser):
     )
 
     parser.add_argument(
-        '--neuron.events_retention_size',
-        type=str,
-        help='Events retention size.',
-        default=2 * 1024 * 1024 * 1024,  # 2 GB
-    )
-
-    parser.add_argument(
-        '--neuron.dont_save_events',
-        action='store_true',
-        help='If set, we dont save events to a log file.',
-        default=False,
-    )
-
-    parser.add_argument(
         '--wandb.project',
         type=str,
         default='gittensor-validators',

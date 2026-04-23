@@ -4,7 +4,7 @@ Mirror analogue of ``gittensor.validator.oss_contributions.scoring``. Scope:
 - Compute base_score for each PR via the existing token-scoring infra
 - Compute per-PR multipliers: repo_weight, time_decay, review_quality, label, issue
 - Skip merged PRs that fail the eligibility gate (anti-gaming: edited_after_merge,
-  base_ref check, self-merge w/o external approval)
+  base_ref / head_ref acceptable-branches check, self-merge w/o external approval)
 - Aggregate token-scoring outputs onto the MirrorMinerEvaluation
 
 Out of scope (handled in commit 6 with the routing wiring):

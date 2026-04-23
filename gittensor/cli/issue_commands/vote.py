@@ -10,7 +10,6 @@ Commands:
     gitt vote list
 """
 
-import json as json_mod
 import re
 
 import click
@@ -23,6 +22,7 @@ from .helpers import (
     _make_contract_client,
     _resolve_contract_and_network,
     console,
+    emit_json,
     print_error,
     print_network_header,
     print_success,
@@ -235,15 +235,13 @@ def vote_list_validators(network: str, rpc_url: str, contract: str, as_json: boo
         required = (n // 2) + 1
 
         if as_json:
-            console.print(
-                json_mod.dumps(
-                    {
-                        'validators': validators,
-                        'count': n,
-                        'consensus_threshold': required,
-                    },
-                    indent=2,
-                )
+            emit_json(
+                {
+                    'success': True,
+                    'validators': validators,
+                    'count': n,
+                    'consensus_threshold': required,
+                }
             )
             return
 

@@ -1,12 +1,9 @@
 {
-  "BerriAI/litellm": {
-    "weight": 0.0529
-  },
   "bevyengine/bevy": {
     "weight": 0.0571
   },
-  "calcom/cal.com": {
-    "weight": 0.0347
+  "dbeaver/dbeaver": {
+    "weight": 0.2409
   },
   "denoland/deno": {
     "weight": 0.1106
@@ -23,9 +20,6 @@
   "entrius/gittensor-ui": {
     "weight": 1.0
   },
-  "ggml-org/llama.cpp": {
-    "weight": 0.0339
-  },
   "godotengine/godot": {
     "weight": 0.0611
   },
@@ -40,9 +34,6 @@
   },
   "infiniflow/ragflow": {
     "weight": 0.1185
-  },
-  "langgenius/dify": {
-    "weight": 0.0336
   },
   "latent-to/async-substrate-interface": {
     "weight": 0.2764
@@ -63,14 +54,14 @@
   "latent-to/btwallet": {
     "weight": 0.2631
   },
-  "latent-to/taohash": {
-    "weight": 0.0575
-  },
-  "mastodon/mastodon": {
-    "weight": 0.0564
+  "llmsresearch/paperbanana": {
+    "weight": 0.1077
   },
   "neovim/neovim": {
     "weight": 0.0785
+  },
+  "NousResearch/hermes-agent": {
+    "weight": 0.0529
   },
   "ollama/ollama": {
     "weight": 0.0594
@@ -84,11 +75,14 @@
   "pandas-dev/pandas": {
     "weight": 0.1121
   },
+  "paperclipai/paperclip": {
+    "weight": 0.2231
+  },
   "ray-project/ray": {
     "weight": 0.1599
   },
-  "redis/redis": {
-    "weight": 0.0364
+  "sbt/sbt": {
+    "weight": 0.1001
   },
   "tauri-apps/tauri": {
     "additional_acceptable_branches": [
@@ -96,14 +90,20 @@
     ],
     "weight": 0.0583
   },
+  "unarbos/agcli": {
+    "weight": 0.2083
+  },
+  "unarbos/arbos": {
+    "weight": 0.2083
+  },
+  "unarbos/distil": {
+    "weight": 0.2083
+  },
+  "unarbos/tau": {
+    "weight": 0.2083
+  },
   "vercel/next.js": {
     "weight": 0.0657
-  },
-  "vllm-project/vllm": {
-    "weight": 0.0377
-  },
-  "vuejs/core": {
-    "weight": 0.0335
   },
   "zed-industries/zed": {
     "weight": 0.1564

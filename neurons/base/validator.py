@@ -209,12 +209,7 @@ class BaseValidatorNeuron(BaseNeuron):
             traceback: A traceback object encoding the stack trace.
                        None if the context was exited without an exception.
         """
-        if self.is_running:
-            bt.logging.debug('Stopping validator in background thread.')
-            self.should_exit = True
-            self.thread.join(5)
-            self.is_running = False
-            bt.logging.debug('Stopped')
+        self.stop_run_thread()
 
     def set_weights(self):
         """

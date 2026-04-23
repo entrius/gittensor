@@ -413,7 +413,7 @@ def validate_repository(
                 )
         except requests.RequestException as exc:
             if require_verified_exists:
-                detail = 'timeout' if isinstance(exc, requests.Timeout) else 'network error'
+                detail = type(exc).__name__
                 _raise_github_verification_required(
                     f"repository '{owner}/{repo_name}'",
                     detail,
@@ -446,7 +446,7 @@ def validate_github_issue(
         )
     except requests.RequestException as exc:
         if require_verified_exists:
-            detail = 'timeout' if isinstance(exc, requests.Timeout) else 'network error'
+            detail = type(exc).__name__
             _raise_github_verification_required(
                 f'issue #{issue_number} in {owner}/{repo}',
                 detail,

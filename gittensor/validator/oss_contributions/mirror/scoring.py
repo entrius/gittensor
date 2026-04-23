@@ -36,7 +36,7 @@ from gittensor.constants import (
     SECONDS_PER_DAY,
     STANDARD_ISSUE_MULTIPLIER,
 )
-from gittensor.utils.github_api_tools import FileContentPair
+from gittensor.utils.github_api_tools import FileContentPair, branch_matches_pattern
 from gittensor.utils.mirror.client import MirrorClient, MirrorRequestError
 from gittensor.utils.mirror.models import MirrorFile, MirrorLinkedIssue, MirrorPullRequest
 from gittensor.validator.oss_contributions.mirror.adapters import mirror_files_to_legacy
@@ -171,20 +171,24 @@ def _should_skip_merged_mirror_pr(
 ) -> Tuple[bool, Optional[str]]:
     """Mirror-side eligibility gate for MERGED PRs.
 
-    Replicates legacy ``should_skip_merged_pr`` checks where mirror data permits:
+    At parity with legacy ``should_skip_merged_pr``:
     - mergedAt presence (mirror always sets this for MERGED PRs but verify defensively)
     - PR not edited after merge (mirror precomputes ``edited_after_merge``)
     - Author not a maintainer (already filtered at load time, but recheck for safety)
     - Self-merge: skip unless review_summary.approved_count > 0
       (GitHub forbids self-approval, so any approval count > 0 implies external approval)
-    - base_ref check: ONLY enforced when the repo config has explicit
-      ``additional_acceptable_branches``. Without that AND without the default branch
-      from mirror, we can't safely reject a base_ref. Risk is low because mirror only
-      tracks merges that GitHub itself accepted to a real branch.
+    - base_ref check: if an acceptable set can be built (default_branch and/or
+      additional_acceptable_branches), reject PRs whose base_ref doesn't match it.
+      Supports wildcards via ``branch_matches_pattern`` (e.g. ``*-dev``).
+    - head_ref check: reject PRs whose source branch is itself in the acceptable
+      set (blocks e.g. ``staging -> main`` when both acceptable). Only applies
+      to same-repo PRs — fork branch names are arbitrary.
 
-    head_ref check (preventing "staging→main" cross-acceptable-branch merges) is
-    NOT enforced — mirror response doesn't carry head_ref. This is a known gap;
-    can be addressed by adding head_ref to the mirror entity later.
+    When the mirror response is missing a field (older data predating the
+    schema additions), the affected check falls through rather than
+    false-positive-blocking. Concretely: missing ``head_ref`` or
+    ``head_repo_full_name`` skips the head_ref check; missing ``default_branch``
+    narrows the acceptable set to ``additional_acceptable_branches`` only.
     """
     pr = scored.pr
 
@@ -203,13 +207,31 @@ def _should_skip_merged_mirror_pr(
             return True, f'PR #{pr.pr_number} self-merged without external approval'
 
     additional = repo_config.additional_acceptable_branches or []
-    if additional and pr.base_ref not in additional:
-        # Repo config declared explicit acceptable branches and this isn't one of them.
-        # Without the default-branch info from mirror we have to allow other base_refs
-        # when the repo doesn't pin a list — this branch only fires when a list IS set.
+    acceptable = ([pr.default_branch] if pr.default_branch else []) + additional
+
+    # base_ref check — only enforce when we have an acceptable set to compare against.
+    if acceptable and not branch_matches_pattern(pr.base_ref or '', acceptable):
         return True, (
             f'PR #{pr.pr_number} merged to {pr.base_ref!r} not in '
-            f'additional_acceptable_branches={additional}'
+            f'acceptable branches={acceptable}'
+        )
+
+    # head_ref check — block PRs whose source branch is itself an acceptable
+    # branch. Only applies to same-repo PRs: fork branch names are arbitrary.
+    # Falls through when head_ref or head_repo_full_name is missing (older data).
+    is_same_repo = (
+        pr.head_repo_full_name is not None
+        and pr.head_repo_full_name == pr.repo_full_name
+    )
+    if (
+        additional
+        and pr.head_ref
+        and is_same_repo
+        and branch_matches_pattern(pr.head_ref, acceptable)
+    ):
+        return True, (
+            f'PR #{pr.pr_number} source branch {pr.head_ref!r} is itself in '
+            f'acceptable branches — merging between acceptable branches not allowed'
         )
 
     return False, None

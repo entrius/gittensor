@@ -125,6 +125,9 @@ class MirrorPullRequest:
     hours_since_merge: Optional[float]
     merged_by_login: Optional[str]
     base_ref: Optional[str]
+    head_ref: Optional[str]
+    head_repo_full_name: Optional[str]
+    default_branch: Optional[str]
     head_sha: Optional[str]
     base_sha: Optional[str]
     merge_base_sha: Optional[str]
@@ -155,6 +158,9 @@ class MirrorPullRequest:
             hours_since_merge=data.get('hours_since_merge'),
             merged_by_login=data.get('merged_by_login'),
             base_ref=data.get('base_ref'),
+            head_ref=data.get('head_ref'),
+            head_repo_full_name=data.get('head_repo_full_name'),
+            default_branch=data.get('default_branch'),
             head_sha=data.get('head_sha'),
             base_sha=data.get('base_sha'),
             merge_base_sha=data.get('merge_base_sha'),

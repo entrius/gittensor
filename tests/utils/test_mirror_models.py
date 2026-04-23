@@ -99,6 +99,9 @@ def pull_request_dict(review_summary_dict, linked_issue_dict):
         'hours_since_merge': 73.16,
         'merged_by_login': 'anderdc',
         'base_ref': 'test',
+        'head_ref': 'feature-branch',
+        'head_repo_full_name': 'entrius/gittensor-ui',
+        'default_branch': 'main',
         'head_sha': 'aaa',
         'base_sha': 'bbb',
         'merge_base_sha': 'ccc',
@@ -306,6 +309,22 @@ class TestMirrorPullRequest:
         pull_request_dict['author_github_id'] = 218712309
         pr = MirrorPullRequest.from_dict(pull_request_dict)
         assert pr.author_github_id == '218712309'
+
+    def test_parity_fields_parsed(self, pull_request_dict):
+        pr = MirrorPullRequest.from_dict(pull_request_dict)
+        assert pr.head_ref == 'feature-branch'
+        assert pr.head_repo_full_name == 'entrius/gittensor-ui'
+        assert pr.default_branch == 'main'
+
+    def test_parity_fields_default_to_none_when_missing(self, pull_request_dict):
+        # Older mirror responses (pre-schema) may omit these keys entirely;
+        # from_dict should not raise and should yield None.
+        for key in ('head_ref', 'head_repo_full_name', 'default_branch'):
+            pull_request_dict.pop(key, None)
+        pr = MirrorPullRequest.from_dict(pull_request_dict)
+        assert pr.head_ref is None
+        assert pr.head_repo_full_name is None
+        assert pr.default_branch is None
 
 
 # ============================================================================

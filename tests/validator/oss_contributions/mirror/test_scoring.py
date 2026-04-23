@@ -49,7 +49,10 @@ def _pr(
     author_login: str = 'bittoby',
     merged_by_login: str | None = 'anderdc',
     author_association: str = 'CONTRIBUTOR',
-    base_ref: str = 'test',
+    base_ref: str = 'main',
+    head_ref: str | None = 'feature/foo',
+    head_repo_full_name: str | None = 'entrius/gittensor-ui',
+    default_branch: str | None = 'main',
     approved_count: int = 1,
     labels: list | None = None,
     linked_issues: list | None = None,
@@ -70,6 +73,9 @@ def _pr(
         'hours_since_merge': 1.0 if state == 'MERGED' else None,
         'merged_by_login': merged_by_login if state == 'MERGED' else None,
         'base_ref': base_ref,
+        'head_ref': head_ref,
+        'head_repo_full_name': head_repo_full_name,
+        'default_branch': default_branch,
         'head_sha': 'h', 'base_sha': 'b', 'merge_base_sha': 'mb',
         'additions': 1, 'deletions': 0, 'commits_count': 1,
         'scoring_data_stored': True,
@@ -148,12 +154,108 @@ class TestEligibilityGate:
         assert skip is True
         assert "merged to 'feature/foo'" in reason
 
-    def test_no_additional_branches_accepts_any_base_ref(self):
-        # Without an explicit list and without default-branch info from mirror,
-        # we accept any base_ref (documented as a known gap).
-        scored = ScoredMirrorPR(pr=_pr(base_ref='whatever'))
+    def test_default_branch_matches_without_additional(self):
+        # With default_branch='main' and no additional, acceptable=['main'];
+        # base_ref='main' passes.
+        scored = ScoredMirrorPR(pr=_pr(base_ref='main', default_branch='main'))
         skip, reason = _should_skip_merged_mirror_pr(scored, _config(additional_branches=None))
         assert skip is False
+
+    def test_base_ref_mismatches_default_branch_blocks(self):
+        # Closes the prior gap: with default_branch known and no additional,
+        # a non-matching base_ref is now rejected (legacy parity).
+        scored = ScoredMirrorPR(pr=_pr(base_ref='whatever', default_branch='main'))
+        skip, reason = _should_skip_merged_mirror_pr(scored, _config(additional_branches=None))
+        assert skip is True
+        assert "merged to 'whatever'" in reason
+
+    def test_no_default_branch_no_additional_accepts_any_base_ref(self):
+        # When BOTH default_branch and additional are missing (older mirror rows
+        # predating default_branch exposure), there's no acceptable set to
+        # check against — fall through rather than false-positive.
+        scored = ScoredMirrorPR(pr=_pr(base_ref='whatever', default_branch=None))
+        skip, reason = _should_skip_merged_mirror_pr(scored, _config(additional_branches=None))
+        assert skip is False
+
+    def test_head_ref_in_additional_blocks_same_repo(self):
+        scored = ScoredMirrorPR(pr=_pr(
+            base_ref='main', head_ref='test',
+            head_repo_full_name='entrius/gittensor-ui',
+        ))
+        skip, reason = _should_skip_merged_mirror_pr(
+            scored, _config(additional_branches=['test', 'staging']),
+        )
+        assert skip is True
+        assert "source branch 'test'" in reason
+
+    def test_head_ref_in_additional_passes_for_fork(self):
+        # Fork PR whose head branch happens to collide with an acceptable
+        # branch — fork branch names are arbitrary, legacy skips this case
+        # and so do we.
+        scored = ScoredMirrorPR(pr=_pr(
+            base_ref='main', head_ref='test',
+            head_repo_full_name='outsider/fork',
+        ))
+        skip, reason = _should_skip_merged_mirror_pr(
+            scored, _config(additional_branches=['test']),
+        )
+        assert skip is False
+
+    def test_null_head_ref_skips_check(self):
+        scored = ScoredMirrorPR(pr=_pr(
+            base_ref='main', head_ref=None,
+            head_repo_full_name='entrius/gittensor-ui',
+        ))
+        skip, reason = _should_skip_merged_mirror_pr(
+            scored, _config(additional_branches=['main']),
+        )
+        assert skip is False
+
+    def test_null_head_repo_full_name_skips_check(self):
+        # Pre-schema mirror rows may have NULL head_repo_full_name — we can't
+        # distinguish same-repo from fork, so fall through conservatively.
+        scored = ScoredMirrorPR(pr=_pr(
+            base_ref='main', head_ref='test',
+            head_repo_full_name=None,
+        ))
+        skip, reason = _should_skip_merged_mirror_pr(
+            scored, _config(additional_branches=['test']),
+        )
+        assert skip is False
+
+    def test_wildcard_head_ref_match_blocks(self):
+        # Parity with legacy: wildcard patterns in additional_acceptable_branches
+        # match against head_ref too.
+        scored = ScoredMirrorPR(pr=_pr(
+            base_ref='main', head_ref='3.0-dev',
+            head_repo_full_name='entrius/gittensor-ui',
+        ))
+        skip, reason = _should_skip_merged_mirror_pr(
+            scored, _config(additional_branches=['*-dev']),
+        )
+        assert skip is True
+        assert "source branch '3.0-dev'" in reason
+
+    def test_wildcard_base_ref_match_passes(self):
+        scored = ScoredMirrorPR(pr=_pr(base_ref='3.0-dev'))
+        skip, reason = _should_skip_merged_mirror_pr(
+            scored, _config(additional_branches=['*-dev']),
+        )
+        assert skip is False
+
+    def test_default_branch_as_head_blocks_cross_branch_merge(self):
+        # staging <- main merge with additional=['staging'], default_branch='main':
+        # acceptable=['main','staging'], head_ref='main' matches → block.
+        # Closes the default-branch-not-in-acceptable gap.
+        scored = ScoredMirrorPR(pr=_pr(
+            base_ref='staging', head_ref='main',
+            head_repo_full_name='entrius/gittensor-ui', default_branch='main',
+        ))
+        skip, reason = _should_skip_merged_mirror_pr(
+            scored, _config(additional_branches=['staging']),
+        )
+        assert skip is True
+        assert "source branch 'main'" in reason
 
 
 # ============================================================================

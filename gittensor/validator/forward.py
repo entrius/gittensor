@@ -61,15 +61,21 @@ async def forward(self: 'Validator') -> None:
     if self.step % VALIDATOR_STEPS_INTERVAL == 0:
         miner_uids = get_all_uids(self)
         master_repositories = load_master_repo_weights()
+        programming_languages = load_programming_language_weights()
+        token_config = load_token_config()
 
         # 1. Score OSS contributions
-        oss_rewards, miner_evaluations, cached_uids = await oss_contributions(self, miner_uids, master_repositories)
+        oss_rewards, miner_evaluations, cached_uids = await oss_contributions(
+            self, miner_uids, master_repositories, programming_languages, token_config
+        )
 
         # 2. Issue bounties verification
         await issue_competitions(self, miner_evaluations)
 
         # 3. Score issue discovery
-        issue_rewards = await issue_discovery(miner_evaluations, master_repositories, miner_uids)
+        issue_rewards = await issue_discovery(
+            miner_evaluations, master_repositories, programming_languages, token_config, miner_uids
+        )
 
         # 4. Store all evaluations to DB (includes issue discovery fields)
         await self.bulk_store_evaluation(miner_evaluations, skip_uids=cached_uids)
@@ -86,14 +92,13 @@ async def oss_contributions(
     self: 'Validator',
     miner_uids: set[int],
     master_repositories: Dict[str, RepositoryConfig],
+    programming_languages: Dict,
+    token_config,
 ) -> Tuple[np.ndarray, Dict[int, MinerEvaluation], Set[int]]:
     """Score OSS contributions and return normalized rewards + miner evaluations + cached UIDs.
 
     Pure scoring — no DB storage or emission blending. Those are handled by forward().
     """
-    programming_languages = load_programming_language_weights()
-    token_config = load_token_config()
-
     tree_sitter_count = sum(1 for c in token_config.language_configs.values() if c.language is not None)
 
     bt.logging.info('***** Starting scoring round *****')
@@ -112,13 +117,16 @@ async def oss_contributions(
 async def issue_discovery(
     miner_evaluations: Dict[int, MinerEvaluation],
     master_repositories: Dict[str, RepositoryConfig],
+    programming_languages: Dict,
+    token_config,
     miner_uids: set[int],
 ) -> np.ndarray:
     """Score issue discovery and return normalized rewards array.
 
     Per-repo routing:
     - Mirror-enabled repos → authoritative path via run_mirror_issue_discovery
-      (uses MirrorClient.get_miner_issues + solved_by_pr / solving_pr inline).
+      (uses MirrorClient.get_miner_issues + solved_by_pr / solving_pr inline;
+      real token-scored base_score via a cross-miner solving-PR cache).
     - Legacy repos         → PAT-based scan + score_discovered_issues.
 
     Both paths populate the same MinerEvaluation issue-discovery fields; the
@@ -143,9 +151,13 @@ async def issue_discovery(
             scan_issues = await scan_closed_issues(miner_evaluations, legacy_repos, GITTENSOR_VALIDATOR_PAT)
         score_discovered_issues(miner_evaluations, legacy_repos, scan_issues)
 
-    # Mirror path — no PAT needed; public CF-rate-limited endpoints.
+    # Mirror path — no PAT needed; public CF-rate-limited endpoints. Real
+    # base_score comes from the solving PR's files + token scoring, cached
+    # across miners to avoid redundant fetches for shared solving PRs.
     if mirror_repos:
-        await run_mirror_issue_discovery(miner_evaluations, mirror_repos)
+        await run_mirror_issue_discovery(
+            miner_evaluations, mirror_repos, programming_languages, token_config
+        )
 
     # Normalize into independent pool
     issue_rewards_dict = normalize_issue_discovery_rewards(miner_evaluations)

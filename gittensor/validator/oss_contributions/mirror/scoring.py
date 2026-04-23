@@ -18,6 +18,7 @@ no None-checks because mirror always populates them.
 """
 
 import os
+from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
 import bittensor as bt
@@ -229,15 +230,38 @@ def _fetch_pr_files(pr: MirrorPullRequest, client: MirrorClient) -> List[MirrorF
 # ============================================================================
 
 
-def _calculate_base_score(
-    scored: ScoredMirrorPR,
+@dataclass
+class BaseScoreResult:
+    """Result of computing the base score for a PR's file diff.
+
+    Used by both the OSS scoring path (to populate ``ScoredMirrorPR`` fields)
+    and the issue discovery path (to produce ``discovery_base_score`` for a
+    solving PR that wasn't scored by OSS, typically a non-miner solving PR).
+    """
+
+    base_score: float
+    token_score: float
+    structural_count: int
+    structural_score: float
+    leaf_count: int
+    leaf_score: float
+    total_nodes_scored: int
+    code_density: float
+
+
+def calculate_base_score_for_pr_files(
     file_changes: List[FileChange],
     file_contents: Dict[str, FileContentPair],
     programming_languages: Dict[str, LanguageConfig],
     token_config: TokenConfig,
-) -> float:
-    """Same base-score formula as legacy ``calculate_base_score`` — density-scaled
-    SOURCE token score plus cross-category contribution bonus."""
+) -> BaseScoreResult:
+    """Density-scaled SOURCE token score plus cross-category contribution bonus.
+
+    Same formula as legacy ``calculate_base_score`` / mirror OSS scoring.
+    Returns a ``BaseScoreResult`` the caller copies onto whatever container
+    they're populating (e.g. ``ScoredMirrorPR`` for OSS, ``Issue`` discovery
+    fields for issue discovery).
+    """
     scoring_result: PrScoringResult = calculate_token_score_from_file_changes(
         file_changes,
         file_contents,
@@ -246,22 +270,24 @@ def _calculate_base_score(
     )
 
     if scoring_result.score_breakdown:
-        scored.token_score = scoring_result.score_breakdown.total_score
-        scored.structural_count = scoring_result.score_breakdown.structural_count
-        scored.structural_score = scoring_result.score_breakdown.structural_score
-        scored.leaf_count = scoring_result.score_breakdown.leaf_count
-        scored.leaf_score = scoring_result.score_breakdown.leaf_score
-        scored.total_nodes_scored = (
-            scoring_result.score_breakdown.structural_count
-            + scoring_result.score_breakdown.leaf_count
-        )
+        token_score = scoring_result.score_breakdown.total_score
+        structural_count = scoring_result.score_breakdown.structural_count
+        structural_score = scoring_result.score_breakdown.structural_score
+        leaf_count = scoring_result.score_breakdown.leaf_count
+        leaf_score = scoring_result.score_breakdown.leaf_score
+        total_nodes_scored = structural_count + leaf_count
     else:
-        scored.total_nodes_scored = 0
+        token_score = 0.0
+        structural_count = 0
+        structural_score = 0.0
+        leaf_count = 0
+        leaf_score = 0.0
+        total_nodes_scored = 0
 
     source = scoring_result.by_category.get(ScoringCategory.SOURCE)
     source_token_score = source.score_breakdown.total_score if source and source.score_breakdown else 0.0
     source_density = source.density if source else 0.0
-    scored.code_density = round(source_density, 2)
+    code_density = round(source_density, 2)
 
     if source_token_score < MIN_TOKEN_SCORE_FOR_BASE_SCORE:
         initial_base_score = 0.0
@@ -283,7 +309,37 @@ def _calculate_base_score(
         f' = {base_score:.2f}'
     )
 
-    return base_score
+    return BaseScoreResult(
+        base_score=base_score,
+        token_score=token_score,
+        structural_count=structural_count,
+        structural_score=structural_score,
+        leaf_count=leaf_count,
+        leaf_score=leaf_score,
+        total_nodes_scored=total_nodes_scored,
+        code_density=code_density,
+    )
+
+
+def _calculate_base_score(
+    scored: ScoredMirrorPR,
+    file_changes: List[FileChange],
+    file_contents: Dict[str, FileContentPair],
+    programming_languages: Dict[str, LanguageConfig],
+    token_config: TokenConfig,
+) -> float:
+    """Thin wrapper: run the shared helper and copy fields onto ScoredMirrorPR."""
+    result = calculate_base_score_for_pr_files(
+        file_changes, file_contents, programming_languages, token_config
+    )
+    scored.token_score = result.token_score
+    scored.structural_count = result.structural_count
+    scored.structural_score = result.structural_score
+    scored.leaf_count = result.leaf_count
+    scored.leaf_score = result.leaf_score
+    scored.total_nodes_scored = result.total_nodes_scored
+    scored.code_density = result.code_density
+    return result.base_score
 
 
 # ============================================================================

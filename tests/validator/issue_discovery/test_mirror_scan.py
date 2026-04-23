@@ -17,14 +17,66 @@ mirror_models = pytest.importorskip('gittensor.utils.mirror.models')
 mirror_client_mod = pytest.importorskip('gittensor.utils.mirror.client')
 classes = pytest.importorskip('gittensor.classes')
 load_weights = pytest.importorskip('gittensor.validator.utils.load_weights')
+scored_pr_module = pytest.importorskip(
+    'gittensor.validator.oss_contributions.mirror.scored_pr'
+)
 
 run_mirror_issue_discovery = mirror_scan_module.run_mirror_issue_discovery
 _classify_issue = mirror_scan_module._classify_issue
+_build_solving_pr_cache = mirror_scan_module._build_solving_pr_cache
+CachedSolvingPR = mirror_scan_module.CachedSolvingPR
 MirrorIssue = mirror_models.MirrorIssue
 MirrorIssuesResponse = mirror_models.MirrorIssuesResponse
+MirrorPullRequest = mirror_models.MirrorPullRequest
+MirrorPullRequestFilesResponse = mirror_models.MirrorPullRequestFilesResponse
 MirrorRequestError = mirror_client_mod.MirrorRequestError
 MinerEvaluation = classes.MinerEvaluation
 RepositoryConfig = load_weights.RepositoryConfig
+TokenConfig = load_weights.TokenConfig
+ScoredMirrorPR = scored_pr_module.ScoredMirrorPR
+
+
+# Representative defaults for the plumbed-through token scoring args. The
+# tests below populate the cache directly for cache-hit paths, so these are
+# only used on cache-miss fetches (and even then MirrorPullRequestFilesResponse
+# is mocked so no real token scoring math runs).
+_EMPTY_LANGS = {}
+_EMPTY_TOKEN_CONFIG = TokenConfig()
+
+
+def _scored_mirror_pr(repo: str, pr_number: int, token_score: float = 100.0, base_score: float = 42.0) -> ScoredMirrorPR:
+    """Build a ScoredMirrorPR for cache pre-population in tests."""
+    pr = MirrorPullRequest.from_dict({
+        'repo_full_name': repo, 'pr_number': pr_number,
+        'title': 't', 'body': 'b', 'state': 'MERGED',
+        'author_github_id': '1', 'author_login': 'a',
+        'author_association': 'CONTRIBUTOR',
+        'created_at': '2026-04-10T00:00:00Z',
+        'closed_at': '2026-04-18T10:00:00Z',
+        'merged_at': '2026-04-18T10:00:00Z',
+        'last_edited_at': None,
+        'edited_after_merge': False, 'hours_since_merge': 1.0,
+        'merged_by_login': 'm',
+        'base_ref': 'test',
+        'head_sha': 'h', 'base_sha': 'b', 'merge_base_sha': 'mb',
+        'additions': 1, 'deletions': 0, 'commits_count': 1,
+        'scoring_data_stored': True,
+        'review_summary': {'maintainer_changes_requested_count': 0},
+        'labels': [], 'linked_issues': [],
+    })
+    scored = ScoredMirrorPR(pr=pr)
+    scored.token_score = token_score
+    scored.base_score = base_score
+    return scored
+
+
+def _empty_files_response(repo: str, pr_number: int) -> MirrorPullRequestFilesResponse:
+    return MirrorPullRequestFilesResponse.from_dict({
+        'repo_full_name': repo, 'pr_number': pr_number,
+        'head_sha': 'h', 'base_sha': 'b', 'merge_base_sha': 'mb',
+        'scoring_data_stored': True,
+        'files': [],
+    })
 
 
 def _issue_dict(
@@ -142,16 +194,24 @@ class TestClassifyIssue:
 
 
 class TestRunMirrorIssueDiscovery:
+    """End-to-end integration tests. Tests that expect a solving PR to be
+    scorable pre-populate a ScoredMirrorPR on some miner's mirror_merged_prs
+    so the cross-miner cache catches it — mimicking the real run order where
+    OSS scoring populates these slots before issue discovery runs."""
+
     def test_no_mirror_repos_short_circuits(self):
         client = Mock()
-        _run(run_mirror_issue_discovery({}, {}, client=client))
+        _run(run_mirror_issue_discovery({}, {}, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, client=client))
         client.get_miner_issues.assert_not_called()
 
     def test_miner_without_github_id_skipped(self):
         client = Mock()
         client.get_miner_issues.return_value = _response([_issue_dict()])
         eval_ = _eval(github_id=None)
-        _run(run_mirror_issue_discovery({1: eval_}, _mirror_repos('entrius/gittensor-ui'), client=client))
+        _run(run_mirror_issue_discovery(
+            {1: eval_}, _mirror_repos('entrius/gittensor-ui'),
+            _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, client=client,
+        ))
         client.get_miner_issues.assert_not_called()
         assert eval_.total_solved_issues == 0
 
@@ -159,11 +219,18 @@ class TestRunMirrorIssueDiscovery:
         client = Mock()
         client.get_miner_issues.return_value = _response([_issue_dict()])
         eval_ = _eval()
+        # Pre-seed the solving PR into another miner's mirror_merged_prs so the cache hits
+        seed_eval = MinerEvaluation(uid=2, hotkey='hk2', github_id='seed')
+        seed_eval.mirror_merged_prs = [_scored_mirror_pr('entrius/gittensor-ui', 100)]
+
         _run(run_mirror_issue_discovery(
-            {1: eval_}, _mirror_repos('entrius/gittensor-ui'), client=client
+            {1: eval_, 2: seed_eval}, _mirror_repos('entrius/gittensor-ui'),
+            _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, client=client,
         ))
         assert eval_.total_solved_issues == 1
         assert eval_.total_valid_solved_issues == 1
+        # No fetch needed — everything came from the cache
+        client.get_pr_files.assert_not_called()
 
     def test_self_issue_counts_credibility_but_no_score(self):
         # author_github_id == solving_pr.author_github_id
@@ -172,8 +239,12 @@ class TestRunMirrorIssueDiscovery:
             _issue_dict(author_github_id='SELF', solving_pr_author='SELF'),
         ])
         eval_ = _eval()
+        # Seed cache so cache-miss fetch isn't triggered
+        eval_.mirror_merged_prs = [_scored_mirror_pr('entrius/gittensor-ui', 100)]
+
         _run(run_mirror_issue_discovery(
-            {1: eval_}, _mirror_repos('entrius/gittensor-ui'), client=client
+            {1: eval_}, _mirror_repos('entrius/gittensor-ui'),
+            _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, client=client,
         ))
         assert eval_.total_solved_issues == 1  # credibility counts
         # But no discovery_earned_score because self-solve
@@ -186,7 +257,8 @@ class TestRunMirrorIssueDiscovery:
         ])
         eval_ = _eval()
         _run(run_mirror_issue_discovery(
-            {1: eval_}, _mirror_repos('entrius/gittensor-ui'), client=client
+            {1: eval_}, _mirror_repos('entrius/gittensor-ui'),
+            _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, client=client,
         ))
         assert eval_.total_solved_issues == 0
         assert eval_.total_closed_issues == 1
@@ -198,20 +270,21 @@ class TestRunMirrorIssueDiscovery:
         ])
         eval_ = _eval()
         _run(run_mirror_issue_discovery(
-            {1: eval_}, _mirror_repos('entrius/gittensor-ui'), client=client
+            {1: eval_}, _mirror_repos('entrius/gittensor-ui'),
+            _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, client=client,
         ))
         assert eval_.total_solved_issues == 0
         assert eval_.total_closed_issues == 0
 
     def test_non_mirror_enabled_repo_filtered_out(self):
         client = Mock()
-        # Response contains an issue in a repo not in the enabled set
         client.get_miner_issues.return_value = _response([
             _issue_dict(repo='foo/not-enabled'),
         ])
         eval_ = _eval()
         _run(run_mirror_issue_discovery(
-            {1: eval_}, _mirror_repos('entrius/gittensor-ui'), client=client
+            {1: eval_}, _mirror_repos('entrius/gittensor-ui'),
+            _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, client=client,
         ))
         assert eval_.total_solved_issues == 0
 
@@ -227,8 +300,131 @@ class TestRunMirrorIssueDiscovery:
 
         failing = MinerEvaluation(uid=1, hotkey='hk1', github_id='fails')
         working = MinerEvaluation(uid=2, hotkey='hk2', github_id='works')
+        # Seed cache so working miner's solving PR is scoreable
+        working.mirror_merged_prs = [_scored_mirror_pr('entrius/gittensor-ui', 100)]
+
         _run(run_mirror_issue_discovery(
-            {1: failing, 2: working}, _mirror_repos('entrius/gittensor-ui'), client=client
+            {1: failing, 2: working}, _mirror_repos('entrius/gittensor-ui'),
+            _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, client=client,
         ))
         assert failing.total_solved_issues == 0
         assert working.total_solved_issues == 1
+
+
+# ============================================================================
+# Cache behavior
+# ============================================================================
+
+
+class TestSolvingPrCache:
+    def test_build_cache_from_multiple_miners(self):
+        e1 = MinerEvaluation(uid=1, hotkey='hk1', github_id='g1')
+        e1.mirror_merged_prs = [_scored_mirror_pr('foo/a', 1, token_score=50, base_score=10)]
+        e2 = MinerEvaluation(uid=2, hotkey='hk2', github_id='g2')
+        e2.mirror_merged_prs = [_scored_mirror_pr('foo/b', 2, token_score=80, base_score=20)]
+
+        cache = _build_solving_pr_cache({1: e1, 2: e2})
+        assert cache[('foo/a', 1)].token_score == 50
+        assert cache[('foo/a', 1)].base_score == 10
+        assert cache[('foo/b', 2)].token_score == 80
+        assert cache[('foo/b', 2)].base_score == 20
+
+    def test_cache_first_occurrence_wins_on_duplicate(self):
+        # If the same (repo, pr_number) somehow appears in two miners' lists
+        # (shouldn't happen in practice but defensively tested), first wins.
+        e1 = MinerEvaluation(uid=1, hotkey='hk1', github_id='g1')
+        e1.mirror_merged_prs = [_scored_mirror_pr('foo/a', 1, token_score=50)]
+        e2 = MinerEvaluation(uid=2, hotkey='hk2', github_id='g2')
+        e2.mirror_merged_prs = [_scored_mirror_pr('foo/a', 1, token_score=99)]
+
+        cache = _build_solving_pr_cache({1: e1, 2: e2})
+        assert cache[('foo/a', 1)].token_score == 50  # first wins
+
+    def test_cache_hit_reuses_base_score_no_fetch(self):
+        """A solving PR already in cache must not trigger a get_pr_files call."""
+        client = Mock()
+        client.get_miner_issues.return_value = _response([_issue_dict()])
+        eval_ = _eval()
+        # Seed cache via a second miner's mirror_merged_prs
+        seed = MinerEvaluation(uid=2, hotkey='hk2', github_id='seed')
+        seed.mirror_merged_prs = [_scored_mirror_pr('entrius/gittensor-ui', 100, base_score=42.0)]
+
+        _run(run_mirror_issue_discovery(
+            {1: eval_, 2: seed}, _mirror_repos('entrius/gittensor-ui'),
+            _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, client=client,
+        ))
+
+        client.get_pr_files.assert_not_called()
+        # The cached token_score (100) flowed into issue_token_score
+        assert eval_.issue_token_score == 100.0
+        # And the issue counted toward valid_solved (token_score >= MIN threshold)
+        assert eval_.total_valid_solved_issues == 1
+
+    def test_cache_miss_fetches_and_writes_back(self):
+        """A solving PR NOT in cache triggers one get_pr_files call."""
+        client = Mock()
+        client.get_miner_issues.return_value = _response([_issue_dict()])
+        client.get_pr_files.return_value = _empty_files_response('entrius/gittensor-ui', 100)
+
+        eval_ = _eval()
+        _run(run_mirror_issue_discovery(
+            {1: eval_}, _mirror_repos('entrius/gittensor-ui'),
+            _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, client=client,
+        ))
+
+        assert client.get_pr_files.call_count == 1
+        # Empty files → base_score 0 → no discovery score awarded; but issue still counted
+        assert eval_.total_solved_issues == 1
+
+    def test_cross_miner_cache_dedup(self):
+        """Same non-miner solving PR closes issues for two miners → one fetch total."""
+        client = Mock()
+        client.get_miner_issues.return_value = _response([_issue_dict()])
+        client.get_pr_files.return_value = _empty_files_response('entrius/gittensor-ui', 100)
+
+        e1 = _eval(uid=1, github_id='g1')
+        e2 = _eval(uid=2, github_id='g2')
+        _run(run_mirror_issue_discovery(
+            {1: e1, 2: e2}, _mirror_repos('entrius/gittensor-ui'),
+            _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, client=client,
+        ))
+
+        # Both miners saw the same solving PR, but only one get_pr_files call fired
+        assert client.get_pr_files.call_count == 1
+
+    def test_fetch_failure_skips_scoring_for_that_issue(self):
+        """MirrorRequestError on get_pr_files leaves the issue in solved_count
+        but no discovery_earned_score is produced."""
+        client = Mock()
+        client.get_miner_issues.return_value = _response([_issue_dict()])
+        client.get_pr_files.side_effect = MirrorRequestError('files fetch failed')
+
+        eval_ = _eval()
+        _run(run_mirror_issue_discovery(
+            {1: eval_}, _mirror_repos('entrius/gittensor-ui'),
+            _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, client=client,
+        ))
+
+        # Solved counts went up from _classify_issue before the fetch failed
+        assert eval_.total_solved_issues == 1
+        # But no discovery_earned_score — we don't reward unverifiable PRs
+        assert eval_.issue_discovery_score == 0
+
+    def test_token_score_below_threshold_counts_credibility_only(self):
+        """Cached solving PR has token_score < MIN_TOKEN_SCORE_FOR_BASE_SCORE.
+        total_solved_issues increments (credibility), but total_valid_solved_issues
+        does not, and no discovery_earned_score is produced."""
+        client = Mock()
+        client.get_miner_issues.return_value = _response([_issue_dict()])
+        eval_ = _eval()
+        # Token score 2 is below the threshold (5)
+        eval_.mirror_merged_prs = [_scored_mirror_pr('entrius/gittensor-ui', 100, token_score=2.0)]
+
+        _run(run_mirror_issue_discovery(
+            {1: eval_}, _mirror_repos('entrius/gittensor-ui'),
+            _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, client=client,
+        ))
+
+        assert eval_.total_solved_issues == 1  # credibility
+        assert eval_.total_valid_solved_issues == 0  # below gate
+        assert eval_.issue_discovery_score == 0

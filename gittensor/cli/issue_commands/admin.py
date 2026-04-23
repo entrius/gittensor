@@ -294,7 +294,7 @@ def admin_add_validator(
     """
     confirm_or_abort(f'Add validator {hotkey} to whitelist?', yes)
 
-    contract_addr, ws_endpoint
+    contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
 
     require_valid_ss58(hotkey, 'hotkey')
 

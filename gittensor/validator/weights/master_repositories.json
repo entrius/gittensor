@@ -456,6 +456,9 @@
     ],
     "weight": 0.0751
   },
+  "nousresearch/hermes-agent": {
+    "weight": 0.59
+  },
   "numinouslabs/numinous": {
     "weight": 0.0413
   },

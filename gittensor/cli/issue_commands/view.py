@@ -11,9 +11,9 @@ Commands:
     gitt admin info
 """
 
+import sys
 from decimal import Decimal
 
-import sys
 import click
 from rich.panel import Panel
 from rich.table import Table

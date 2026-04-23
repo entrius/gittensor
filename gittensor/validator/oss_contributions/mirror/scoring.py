@@ -1,0 +1,438 @@
+"""Per-PR scoring for the mirror path.
+
+Mirror analogue of ``gittensor.validator.oss_contributions.scoring``. Scope:
+- Compute base_score for each PR via the existing token-scoring infra
+- Compute per-PR multipliers: repo_weight, time_decay, review_quality, label, issue
+- Skip merged PRs that fail the eligibility gate (anti-gaming: edited_after_merge,
+  base_ref check, self-merge w/o external approval)
+- Aggregate token-scoring outputs onto the MirrorMinerEvaluation
+
+Out of scope (handled in commit 6 with the routing wiring):
+- Cross-path totals: spam_multiplier, credibility_multiplier
+- Cross-miner: pioneer_dividends
+- Final earned_score composition (depends on credibility + spam being set)
+
+The MirrorPullRequest's anti-gaming fields (`edited_after_merge`, label
+`actor_association`, `state_reason`, `is_transferred`) are read directly —
+no None-checks because mirror always populates them.
+"""
+
+import os
+from typing import Dict, List, Optional, Tuple
+
+import bittensor as bt
+
+from gittensor.classes import FileChange, PrScoringResult, ScoringCategory
+from gittensor.constants import (
+    CONTRIBUTION_SCORE_FOR_FULL_BONUS,
+    LABEL_MULTIPLIERS,
+    MAINTAINER_ASSOCIATIONS,
+    MAINTAINER_ISSUE_MULTIPLIER,
+    MAX_CONTRIBUTION_BONUS,
+    MAX_ISSUE_CLOSE_WINDOW_DAYS,
+    MERGED_PR_BASE_SCORE,
+    MIN_TOKEN_SCORE_FOR_BASE_SCORE,
+    SECONDS_PER_DAY,
+    STANDARD_ISSUE_MULTIPLIER,
+)
+from gittensor.utils.github_api_tools import FileContentPair
+from gittensor.utils.mirror.client import MirrorClient, MirrorRequestError
+from gittensor.utils.mirror.models import MirrorFile, MirrorLinkedIssue, MirrorPullRequest
+from gittensor.validator.oss_contributions.mirror.evaluation import MirrorMinerEvaluation
+from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredMirrorPR
+from gittensor.validator.oss_contributions.scoring import (
+    calculate_review_quality_multiplier,
+)
+from gittensor.validator.utils.datetime_utils import calculate_time_decay
+from gittensor.validator.utils.load_weights import (
+    LanguageConfig,
+    RepositoryConfig,
+    TokenConfig,
+    resolve_repo_weight,
+)
+from gittensor.validator.utils.tree_sitter_scoring import calculate_token_score_from_file_changes
+
+
+# ============================================================================
+# Entry point
+# ============================================================================
+
+
+def score_mirror_miner_prs(
+    mirror_eval: MirrorMinerEvaluation,
+    mirror_repos: Dict[str, RepositoryConfig],
+    programming_languages: Dict[str, LanguageConfig],
+    token_config: TokenConfig,
+    client: Optional[MirrorClient] = None,
+) -> None:
+    """Score all PRs in a MirrorMinerEvaluation.
+
+    Mutates the eval: per-PR sets base_score + multipliers; aggregates token
+    outputs onto the eval; tracks unique repos.
+    """
+    bt.logging.info('')
+    bt.logging.info('-' * 50)
+    bt.logging.info(
+        f'Scoring (mirror) UID {mirror_eval.uid}: '
+        f'{len(mirror_eval.merged_prs)} merged | '
+        f'{len(mirror_eval.open_prs)} open | '
+        f'{len(mirror_eval.closed_prs)} closed'
+    )
+    bt.logging.info('-' * 50)
+
+    client = client or MirrorClient()
+
+    pr_groups = [
+        ('MERGED', mirror_eval.merged_prs),
+        ('OPEN', mirror_eval.open_prs),
+        ('CLOSED', mirror_eval.closed_prs),
+    ]
+
+    for label, scored_prs in pr_groups:
+        for i, scored in enumerate(scored_prs, start=1):
+            bt.logging.info(
+                f'\n[{i}/{len(scored_prs)}] {label} PR #{scored.pr.pr_number} '
+                f'in {scored.pr.repo_full_name}'
+            )
+            score_mirror_pr(scored, mirror_eval, mirror_repos, programming_languages, token_config, client)
+
+
+# ============================================================================
+# Per-PR scoring
+# ============================================================================
+
+
+def score_mirror_pr(
+    scored: ScoredMirrorPR,
+    mirror_eval: MirrorMinerEvaluation,
+    mirror_repos: Dict[str, RepositoryConfig],
+    programming_languages: Dict[str, LanguageConfig],
+    token_config: TokenConfig,
+    client: MirrorClient,
+) -> None:
+    """Score a single mirror PR. Populates ScoredMirrorPR scoring fields in place."""
+    pr = scored.pr
+    repo_config = mirror_repos.get(pr.repo_full_name)
+    if not repo_config:
+        bt.logging.warning(f'{pr.repo_full_name} not in mirror_repos. Skipping...')
+        return
+
+    # Eligibility gate for MERGED PRs (matches legacy should_skip_merged_pr behavior
+    # to the extent mirror data allows — see _should_skip_merged_mirror_pr docstring).
+    if pr.state == 'MERGED':
+        should_skip, reason = _should_skip_merged_mirror_pr(scored, repo_config)
+        if should_skip:
+            bt.logging.debug(reason or '')
+            return
+
+    # Fetch file contents via the mirror's lazy /pulls/.../files endpoint.
+    try:
+        files = _fetch_pr_files(pr, client)
+    except MirrorRequestError as e:
+        bt.logging.warning(f'Mirror file fetch failed for PR #{pr.pr_number}: {e}')
+        return
+    scored.files = files
+
+    if not files:
+        bt.logging.warning(f'No files returned for PR #{pr.pr_number}')
+        return
+
+    file_changes, file_contents = _convert_mirror_files(pr.repo_full_name, pr.pr_number, files)
+
+    scored.base_score = _calculate_base_score(
+        scored, file_changes, file_contents, programming_languages, token_config
+    )
+
+    _calculate_pr_multipliers(scored, repo_config)
+
+    if pr.state == 'MERGED':
+        mirror_eval.unique_repos_contributed_to.add(pr.repo_full_name)
+        # Aggregate token-scoring outputs onto the eval (legacy parity: only merged
+        # PRs' token outputs roll up into miner-level totals).
+        mirror_eval.total_token_score += scored.token_score
+        mirror_eval.total_nodes_scored += scored.total_nodes_scored
+        mirror_eval.total_structural_count += scored.structural_count
+        mirror_eval.total_structural_score += scored.structural_score
+        mirror_eval.total_leaf_count += scored.leaf_count
+        mirror_eval.total_leaf_score += scored.leaf_score
+
+
+# ============================================================================
+# Eligibility gate (MERGED PRs)
+# ============================================================================
+
+
+def _should_skip_merged_mirror_pr(
+    scored: ScoredMirrorPR, repo_config: RepositoryConfig
+) -> Tuple[bool, Optional[str]]:
+    """Mirror-side eligibility gate for MERGED PRs.
+
+    Replicates legacy ``should_skip_merged_pr`` checks where mirror data permits:
+    - mergedAt presence (mirror always sets this for MERGED PRs but verify defensively)
+    - PR not edited after merge (mirror precomputes ``edited_after_merge``)
+    - Author not a maintainer (already filtered at load time, but recheck for safety)
+    - Self-merge: skip unless review_summary.approved_count > 0
+      (GitHub forbids self-approval, so any approval count > 0 implies external approval)
+    - base_ref check: ONLY enforced when the repo config has explicit
+      ``additional_acceptable_branches``. Without that AND without the default branch
+      from mirror, we can't safely reject a base_ref. Risk is low because mirror only
+      tracks merges that GitHub itself accepted to a real branch.
+
+    head_ref check (preventing "staging→main" cross-acceptable-branch merges) is
+    NOT enforced — mirror response doesn't carry head_ref. This is a known gap;
+    can be addressed by adding head_ref to the mirror entity later.
+    """
+    pr = scored.pr
+
+    if pr.merged_at is None:
+        return True, f'PR #{pr.pr_number} is MERGED but missing merged_at'
+
+    if pr.edited_after_merge:
+        return True, f'PR #{pr.pr_number} edited after merge — anti-gaming gate'
+
+    # Defensive recheck — load already drops these (with DEV_MODE bypass)
+    if not os.environ.get('DEV_MODE') and pr.author_association in MAINTAINER_ASSOCIATIONS:
+        return True, f'PR #{pr.pr_number} author is {pr.author_association}'
+
+    if pr.merged_by_login and pr.merged_by_login == pr.author_login:
+        if pr.review_summary.approved_count == 0:
+            return True, f'PR #{pr.pr_number} self-merged without external approval'
+
+    additional = repo_config.additional_acceptable_branches or []
+    if additional and pr.base_ref not in additional:
+        # Repo config declared explicit acceptable branches and this isn't one of them.
+        # Without the default-branch info from mirror we have to allow other base_refs
+        # when the repo doesn't pin a list — this branch only fires when a list IS set.
+        return True, (
+            f'PR #{pr.pr_number} merged to {pr.base_ref!r} not in '
+            f'additional_acceptable_branches={additional}'
+        )
+
+    return False, None
+
+
+# ============================================================================
+# File adapter (MirrorFile → FileChange + FileContentPair)
+# ============================================================================
+
+
+def _fetch_pr_files(pr: MirrorPullRequest, client: MirrorClient) -> List[MirrorFile]:
+    response = client.get_pr_files(pr.repo_full_name, pr.pr_number)
+    return response.files
+
+
+def _convert_mirror_files(
+    repo_full_name: str, pr_number: int, files: List[MirrorFile]
+) -> Tuple[List[FileChange], Dict[str, FileContentPair]]:
+    """Translate MirrorFile entries into the legacy shapes the token scorer expects."""
+    file_changes: List[FileChange] = []
+    file_contents: Dict[str, FileContentPair] = {}
+
+    for f in files:
+        file_changes.append(
+            FileChange(
+                pr_number=pr_number,
+                repository_full_name=repo_full_name,
+                filename=f.filename,
+                changes=f.changes,
+                additions=f.additions,
+                deletions=f.deletions,
+                status=f.status,
+                patch=None,  # mirror doesn't return patch text; tree-diff only needs head/base content
+                previous_filename=f.previous_filename,
+            )
+        )
+        file_contents[f.filename] = FileContentPair(
+            old_content=f.base_content,
+            new_content=f.head_content,
+        )
+
+    return file_changes, file_contents
+
+
+# ============================================================================
+# Base score
+# ============================================================================
+
+
+def _calculate_base_score(
+    scored: ScoredMirrorPR,
+    file_changes: List[FileChange],
+    file_contents: Dict[str, FileContentPair],
+    programming_languages: Dict[str, LanguageConfig],
+    token_config: TokenConfig,
+) -> float:
+    """Same base-score formula as legacy ``calculate_base_score`` — density-scaled
+    SOURCE token score plus cross-category contribution bonus."""
+    scoring_result: PrScoringResult = calculate_token_score_from_file_changes(
+        file_changes,
+        file_contents,
+        token_config,
+        programming_languages,
+    )
+
+    if scoring_result.score_breakdown:
+        scored.token_score = scoring_result.score_breakdown.total_score
+        scored.structural_count = scoring_result.score_breakdown.structural_count
+        scored.structural_score = scoring_result.score_breakdown.structural_score
+        scored.leaf_count = scoring_result.score_breakdown.leaf_count
+        scored.leaf_score = scoring_result.score_breakdown.leaf_score
+        scored.total_nodes_scored = (
+            scoring_result.score_breakdown.structural_count
+            + scoring_result.score_breakdown.leaf_count
+        )
+    else:
+        scored.total_nodes_scored = 0
+
+    source = scoring_result.by_category.get(ScoringCategory.SOURCE)
+    source_token_score = source.score_breakdown.total_score if source and source.score_breakdown else 0.0
+    source_density = source.density if source else 0.0
+    scored.code_density = round(source_density, 2)
+
+    if source_token_score < MIN_TOKEN_SCORE_FOR_BASE_SCORE:
+        initial_base_score = 0.0
+    else:
+        initial_base_score = MERGED_PR_BASE_SCORE * source_density
+
+    bonus_percent = min(1.0, scoring_result.total_score / CONTRIBUTION_SCORE_FOR_FULL_BONUS)
+    contribution_bonus = round(bonus_percent * MAX_CONTRIBUTION_BONUS, 2)
+    base_score = round(initial_base_score + contribution_bonus, 2)
+
+    threshold_note = (
+        f' [below {MIN_TOKEN_SCORE_FOR_BASE_SCORE} token threshold]'
+        if source_token_score < MIN_TOKEN_SCORE_FOR_BASE_SCORE
+        else ''
+    )
+    bt.logging.info(
+        f'Base score: {initial_base_score:.2f} (density {source_density:.2f}){threshold_note}'
+        f' + {contribution_bonus} bonus ({bonus_percent * 100:.0f}% of max {MAX_CONTRIBUTION_BONUS})'
+        f' = {base_score:.2f}'
+    )
+
+    return base_score
+
+
+# ============================================================================
+# Per-PR multipliers
+# ============================================================================
+
+
+def _calculate_pr_multipliers(scored: ScoredMirrorPR, repo_config: RepositoryConfig) -> None:
+    """Compute repo_weight, time_decay, review_quality, label, issue multipliers.
+
+    Spam and credibility multipliers are deferred to the cross-path finalize step
+    (commit 6) — they depend on combined counts across both legacy and mirror paths.
+    """
+    pr = scored.pr
+    is_merged = pr.state == 'MERGED'
+
+    scored.repo_weight_multiplier = resolve_repo_weight(repo_config)
+
+    chosen_label = _resolve_maintainer_set_label(pr)
+    scored.label = chosen_label
+    scored.label_multiplier = LABEL_MULTIPLIERS.get(chosen_label, 1.0) if chosen_label else 1.0
+
+    scored.issue_multiplier = round(_calculate_issue_multiplier(scored), 2)
+
+    if is_merged:
+        scored.open_pr_spam_multiplier = 1.0  # finalized later with combined open-PR count
+        scored.time_decay_multiplier = round(calculate_time_decay(pr.merged_at), 2)
+        scored.review_quality_multiplier = round(
+            calculate_review_quality_multiplier(pr.review_summary.maintainer_changes_requested_count),
+            2,
+        )
+    else:
+        scored.open_pr_spam_multiplier = 1.0
+        scored.time_decay_multiplier = 1.0
+        scored.credibility_multiplier = 1.0
+        scored.review_quality_multiplier = 1.0
+
+
+def _resolve_maintainer_set_label(pr: MirrorPullRequest) -> Optional[str]:
+    """Pick the highest-multiplier currently-applied label that was set by a maintainer.
+
+    Mirror gives us actor attribution per label, so we can directly require the
+    label to have been applied by an OWNER/MEMBER/COLLABORATOR. Labels with null
+    actor_association (backfilled events) are ignored to be conservative.
+    """
+    candidates = [
+        label
+        for label in pr.labels
+        if label.actor_association in MAINTAINER_ASSOCIATIONS
+        and (label.name or '').lower() in LABEL_MULTIPLIERS
+    ]
+    if not candidates:
+        return None
+    # Highest multiplier wins; tie-broken by label name for deterministic output
+    best = max(candidates, key=lambda label: (LABEL_MULTIPLIERS[label.name.lower()], label.name.lower()))
+    return best.name.lower()
+
+
+# ============================================================================
+# Issue multiplier (uses inline linked_issues)
+# ============================================================================
+
+
+def _calculate_issue_multiplier(scored: ScoredMirrorPR) -> float:
+    pr = scored.pr
+    if not pr.linked_issues:
+        bt.logging.info(f'PR #{pr.pr_number} - Contains no linked issues')
+        return 1.0
+
+    valid = [li for li in pr.linked_issues if _is_valid_linked_issue(li, pr)]
+    if not valid:
+        bt.logging.info(f'PR #{pr.pr_number} - Solved no valid linked issues')
+        return 1.0
+
+    issue = valid[0]
+    is_maintainer = issue.author_association in MAINTAINER_ASSOCIATIONS if issue.author_association else False
+    multiplier = MAINTAINER_ISSUE_MULTIPLIER if is_maintainer else STANDARD_ISSUE_MULTIPLIER
+    label = 'maintainer' if is_maintainer else 'standard'
+    bt.logging.info(f'Linked issue #{issue.number} - {label} | multiplier: {multiplier}')
+    return multiplier
+
+
+def _is_valid_linked_issue(li: MirrorLinkedIssue, pr: MirrorPullRequest) -> bool:
+    """Anti-gaming gates for issue → PR multiplier credit."""
+    if li.is_transferred:
+        bt.logging.warning(f'Skipping linked issue #{li.number} - transferred')
+        return False
+
+    if li.author_github_id is None:
+        bt.logging.warning(f'Skipping linked issue #{li.number} - missing author_github_id')
+        return False
+
+    if li.author_github_id == pr.author_github_id:
+        bt.logging.warning(f'Skipping linked issue #{li.number} - same author as PR (self-issue)')
+        return False
+
+    if li.created_at and li.created_at > pr.created_at:
+        bt.logging.warning(f'Skipping linked issue #{li.number} - created after PR')
+        return False
+
+    is_merged = pr.state == 'MERGED'
+    if is_merged and pr.merged_at:
+        if pr.edited_after_merge:
+            bt.logging.warning(f'Skipping linked issue #{li.number} - PR edited after merge')
+            return False
+
+        if li.state != 'CLOSED':
+            bt.logging.warning(f'Skipping linked issue #{li.number} - state {li.state} (need CLOSED)')
+            return False
+
+        if li.state_reason != 'COMPLETED':
+            bt.logging.warning(
+                f'Skipping linked issue #{li.number} - state_reason={li.state_reason} (need COMPLETED)'
+            )
+            return False
+
+        if li.closed_at:
+            days_diff = abs((li.closed_at - pr.merged_at).total_seconds()) / SECONDS_PER_DAY
+            if days_diff > MAX_ISSUE_CLOSE_WINDOW_DAYS:
+                bt.logging.warning(
+                    f'Skipping linked issue #{li.number} - closed {days_diff:.1f}d from merge '
+                    f'(max {MAX_ISSUE_CLOSE_WINDOW_DAYS})'
+                )
+                return False
+
+    return True

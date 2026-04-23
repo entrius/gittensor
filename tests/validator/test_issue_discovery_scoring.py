@@ -7,8 +7,9 @@ Solved classification requires state_reason == 'COMPLETED'. Any other value
 (NOT_PLANNED, TRANSFERRED, None) routes to closed_count.
 """
 
-import pytest
 from datetime import datetime, timezone
+
+import pytest
 
 from gittensor.classes import MinerEvaluation
 from gittensor.validator.issue_discovery.scoring import (
@@ -152,6 +153,8 @@ def test_check_issue_eligibility_uses_total_for_credibility_valid_for_gate(
     is_eligible, credibility, _ = check_issue_eligibility(solved_count, valid_solved_count, closed_count)
     assert credibility == expected_credibility
     assert is_eligible is expected_eligible
+
+
 def test_same_issue_in_multiple_prs_credits_once(issue_factory, pr_factory):
     """Same issue referenced by multiple merged PRs counts once per discoverer."""
     issue = issue_factory.completed()

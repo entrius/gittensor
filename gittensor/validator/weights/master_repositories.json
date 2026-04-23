@@ -121,6 +121,9 @@
   "brave/brave-browser": {
     "weight": 0.0946
   },
+  "browser-use/browser-harness": {
+    "weight": 0.1
+  },
   "browser-use/browser-use": {
     "weight": 0.0526
   },

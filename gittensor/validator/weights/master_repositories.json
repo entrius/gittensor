@@ -436,6 +436,9 @@
     "weight": 0.0542
   },
   "neovim/neovim": {
+    "additional_acceptable_branches": [
+      "release-0.12"
+    ],
     "weight": 0.0785
   },
   "nextcloud/android": {

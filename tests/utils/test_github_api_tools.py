@@ -458,7 +458,7 @@ class TestFileChangesRetryLogic:
 
         assert mock_get.call_count == 2
         assert mock_sleep.call_count == 1
-        assert result ==[]
+        assert result == []
 
     @patch('gittensor.utils.github_api_tools.requests.get')
     @patch('gittensor.utils.github_api_tools.time.sleep')
@@ -615,7 +615,7 @@ class TestFileChangesPagination:
 
         result = get_pull_request_file_changes('owner/repo', 1, 'fake_token')
 
-        assert result is None
+        assert result == []
         assert mock_get.call_count == 1
 
     @patch('gittensor.utils.github_api_tools.requests.get')
@@ -794,7 +794,7 @@ def test_find_prs_uses_all_state_for_non_open_only(mock_graphql, mock_rest):
 
     result = find_prs_for_issue('owner/repo', 12, open_only=False, token='fake_token')
 
-    assert result is None
+    assert result == []
     assert mock_rest.call_count == 2
     assert mock_rest.call_args_list[0].kwargs == {'token': 'fake_token', 'state': 'all'}
     assert mock_rest.call_args_list[1].kwargs == {'token': None, 'state': 'all'}

@@ -38,6 +38,7 @@ _calculate_pr_multipliers = scoring_module._calculate_pr_multipliers
 _resolve_maintainer_set_label = scoring_module._resolve_maintainer_set_label
 _calculate_issue_multiplier = scoring_module._calculate_issue_multiplier
 _is_valid_linked_issue = scoring_module._is_valid_linked_issue
+score_mirror_pr = scoring_module.score_mirror_pr
 
 ScoredMirrorPR = scored_pr_module.ScoredMirrorPR
 MirrorPullRequest = mirror_models.MirrorPullRequest
@@ -263,6 +264,31 @@ class TestEligibilityGate:
         )
         assert skip is True
         assert "source branch 'main'" in reason
+
+
+# ============================================================================
+# scoring_data_stored gate
+# ============================================================================
+
+
+class TestScoringDataStoredGate:
+    def test_skips_fetch_when_flag_false(self):
+        scored = ScoredMirrorPR(pr=_pr(state='CLOSED'))
+        scored.pr.scoring_data_stored = False
+        client = Mock()
+
+        score_mirror_pr(
+            scored,
+            mirror_eval=Mock(),
+            mirror_repos={scored.pr.repo_full_name: _config()},
+            programming_languages={},
+            token_config=Mock(),
+            client=client,
+        )
+
+        client.get_pr_files.assert_not_called()
+        assert scored.files is None
+        assert scored.base_score == 0.0
 
 
 # ============================================================================

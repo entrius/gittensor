@@ -136,6 +136,11 @@ def score_mirror_pr(
     # mirror_eval.merged_prs contains only eligibility-passed PRs — legacy parity
     # with load_miners_prs which applies should_skip_merged_pr pre-append.
 
+    # Mirror signals it has no stored files for this PR (pending backfill, in-flight
+    # file job, etc.) — skip the round trip.
+    if not pr.scoring_data_stored:
+        return
+
     # Fetch file contents via the mirror's lazy /pulls/.../files endpoint.
     try:
         files = _fetch_pr_files(pr, client)

@@ -134,6 +134,13 @@ QUERY = """
                   }
                 }
               }
+              closedEvents: timelineItems(itemTypes: [CLOSED_EVENT], last: 3) {
+                nodes {
+                  ... on ClosedEvent {
+                    createdAt
+                  }
+                }
+              }
             }
           }
         }
@@ -756,6 +763,23 @@ def _has_resource_limit_errors(data: Dict) -> bool:
     return any(isinstance(e, dict) and e.get('type') == 'RESOURCE_LIMITS_EXCEEDED' for e in errors)
 
 
+def _has_closed_event_within_lookback(pr_raw: Dict, lookback_date_filter: datetime) -> bool:
+    """Return True if the PR has any ClosedEvent with `createdAt >= lookback_date_filter`.
+
+    GitHub clears `closedAt` when a PR is reopened, so a snapshot of the current
+    state cannot tell us whether an OPEN PR was previously closed within the
+    scoring window. The `closedEvents` timeline preserves that history.
+    """
+    closed_events = pr_raw.get('closedEvents') or {}
+    for node in closed_events.get('nodes') or []:
+        created_at = node.get('createdAt')
+        if not created_at:
+            continue
+        if parse_github_iso_to_utc(created_at) >= lookback_date_filter:
+            return True
+    return False
+
+
 def try_add_open_or_closed_pr(
     miner_eval: MinerEvaluation,
     pr_raw: Dict,
@@ -776,7 +800,19 @@ def try_add_open_or_closed_pr(
         return
 
     if pr_state == PRState.OPEN.value:
+        # A PR currently OPEN may have been closed and reopened within the lookback
+        # window. Consult CLOSED_EVENT timeline to catch reopens the state snapshot
+        # hides (see L815 carve-out for the symmetric stale-PR case below).
+        created_at = pr_raw.get('createdAt')
+        if created_at:
+            created_dt = parse_github_iso_to_utc(created_at)
+            if created_dt >= lookback_date_filter and _has_closed_event_within_lookback(
+                pr_raw, lookback_date_filter
+            ):
+                miner_eval.add_closed_pull_request(pr_raw)
+                return
         miner_eval.add_open_pull_request(pr_raw)
+        return
 
     if pr_state == PRState.CLOSED.value:
         closed_at = pr_raw.get('closedAt')

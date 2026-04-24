@@ -33,6 +33,7 @@ get_merge_base_sha = github_api_tools.get_merge_base_sha
 find_prs_for_issue = github_api_tools.find_prs_for_issue
 execute_graphql_query = github_api_tools.execute_graphql_query
 check_github_issue_closed = github_api_tools.check_github_issue_closed
+try_add_open_or_closed_pr = github_api_tools.try_add_open_or_closed_pr
 
 
 # ============================================================================
@@ -1581,6 +1582,123 @@ class TestFetchFileContentsForPrMergeBase:
         # Should fall back to base_ref_oid
         call_args = mock_fetch.call_args
         assert call_args[0][2] == 'base_branch_tip_sha', 'Should fall back to base_ref_oid'
+
+
+class TestTryAddOpenOrClosedPr:
+    """Tests for try_add_open_or_closed_pr routing, including the reopen-bypass fix (#767)."""
+
+    NOW = datetime(2026, 4, 24, 12, 0, 0, tzinfo=timezone.utc)
+    LOOKBACK_DAYS = 35
+
+    def _lookback_cutoff(self):
+        return self.NOW - timedelta(days=self.LOOKBACK_DAYS)
+
+    def _iso(self, offset_days: int) -> str:
+        return (self.NOW + timedelta(days=offset_days)).isoformat().replace('+00:00', 'Z')
+
+    def _make_raw_pr(
+        self,
+        state: str = 'OPEN',
+        created_offset_days: int = -10,
+        closed_at_offset_days: Optional[int] = None,
+        closed_event_offsets: Optional[list] = None,
+    ) -> Dict:
+        closed_events_nodes = [
+            {'createdAt': self._iso(offset)} for offset in (closed_event_offsets or [])
+        ]
+        return {
+            'number': 1,
+            'title': 'PR',
+            'state': state,
+            'merged': state == 'MERGED',
+            'mergedAt': None,
+            'createdAt': self._iso(created_offset_days),
+            'closedAt': self._iso(closed_at_offset_days) if closed_at_offset_days is not None else None,
+            'lastEditedAt': None,
+            'bodyText': '',
+            'additions': 50,
+            'deletions': 5,
+            'commits': {'totalCount': 1},
+            'repository': {
+                'name': 'gittensor', 'owner': {'login': 'entrius'},
+                'defaultBranchRef': {'name': 'main'},
+            },
+            'headRepository': {'name': 'gittensor', 'owner': {'login': 'test_user'}},
+            'baseRefName': 'main', 'baseRefOid': 'abc',
+            'headRefName': 'feat', 'headRefOid': 'def',
+            'author': {'login': 'test_user'},
+            'authorAssociation': 'CONTRIBUTOR',
+            'mergedBy': None,
+            'closingIssuesReferences': {'nodes': []},
+            'reviews': {'nodes': []},
+            'closedEvents': {'nodes': closed_events_nodes},
+        }
+
+    def _make_eval(self):
+        from gittensor.classes import MinerEvaluation
+        return MinerEvaluation(uid=1, hotkey='h', github_id='gh', github_pat='pat')
+
+    def test_open_with_no_closed_events_routes_to_open(self):
+        """OPEN PR that has never been closed → open_pull_requests."""
+        ev = self._make_eval()
+        raw = self._make_raw_pr(state='OPEN', created_offset_days=-10, closed_event_offsets=[])
+        try_add_open_or_closed_pr(ev, raw, 'OPEN', self._lookback_cutoff())
+        assert len(ev.open_pull_requests) == 1
+        assert len(ev.closed_pull_requests) == 0
+
+    def test_open_with_closed_event_inside_lookback_routes_to_closed(self):
+        """OPEN PR closed 3 days ago then reopened → closed_pull_requests (fixes #767 bypass)."""
+        ev = self._make_eval()
+        raw = self._make_raw_pr(state='OPEN', created_offset_days=-20, closed_event_offsets=[-3])
+        try_add_open_or_closed_pr(ev, raw, 'OPEN', self._lookback_cutoff())
+        assert len(ev.closed_pull_requests) == 1
+        assert len(ev.open_pull_requests) == 0
+
+    def test_open_with_closed_event_outside_lookback_routes_to_open(self):
+        """OPEN PR whose only closure is older than lookback → open_pull_requests."""
+        ev = self._make_eval()
+        raw = self._make_raw_pr(state='OPEN', created_offset_days=-20, closed_event_offsets=[-40])
+        try_add_open_or_closed_pr(ev, raw, 'OPEN', self._lookback_cutoff())
+        assert len(ev.open_pull_requests) == 1
+        assert len(ev.closed_pull_requests) == 0
+
+    def test_open_created_before_lookback_preserves_carveout(self):
+        """OPEN PR created before lookback with recent closure → open_pull_requests (L815 carve-out)."""
+        ev = self._make_eval()
+        raw = self._make_raw_pr(state='OPEN', created_offset_days=-50, closed_event_offsets=[-5])
+        try_add_open_or_closed_pr(ev, raw, 'OPEN', self._lookback_cutoff())
+        assert len(ev.open_pull_requests) == 1
+        assert len(ev.closed_pull_requests) == 0
+
+    def test_open_with_multiple_closures_any_inside_lookback_routes_to_closed(self):
+        """OPEN PR with mixed closures; one inside lookback is enough to flag it."""
+        ev = self._make_eval()
+        raw = self._make_raw_pr(
+            state='OPEN', created_offset_days=-30, closed_event_offsets=[-29, -10]
+        )
+        try_add_open_or_closed_pr(ev, raw, 'OPEN', self._lookback_cutoff())
+        assert len(ev.closed_pull_requests) == 1
+        assert len(ev.open_pull_requests) == 0
+
+    def test_closed_inside_lookback_routes_to_closed(self):
+        """CLOSED PR with closedAt inside lookback → closed_pull_requests (existing behavior)."""
+        ev = self._make_eval()
+        raw = self._make_raw_pr(
+            state='CLOSED', created_offset_days=-20, closed_at_offset_days=-3
+        )
+        try_add_open_or_closed_pr(ev, raw, 'CLOSED', self._lookback_cutoff())
+        assert len(ev.closed_pull_requests) == 1
+        assert len(ev.open_pull_requests) == 0
+
+    def test_closed_created_before_lookback_preserves_carveout(self):
+        """CLOSED PR created before lookback → skipped (existing carve-out)."""
+        ev = self._make_eval()
+        raw = self._make_raw_pr(
+            state='CLOSED', created_offset_days=-50, closed_at_offset_days=-3
+        )
+        try_add_open_or_closed_pr(ev, raw, 'CLOSED', self._lookback_cutoff())
+        assert len(ev.closed_pull_requests) == 0
+        assert len(ev.open_pull_requests) == 0
 
 
 if __name__ == '__main__':

@@ -814,6 +814,186 @@ def test_find_prs_without_token_only_uses_unauth_rest(mock_graphql, mock_rest):
 
 
 # ============================================================================
+# REST PR Search Filtering Tests
+# ============================================================================
+
+_pr_references_issue = github_api_tools._pr_references_issue
+_search_issue_referencing_prs_rest = github_api_tools._search_issue_referencing_prs_rest
+
+
+class TestPrReferencesIssue:
+    """Reference-detection predicate for the REST PR search filter."""
+
+    @pytest.mark.parametrize(
+        'title, body, expected, label',
+        [
+            ('', 'Fixes #42', True, 'bare-fixes'),
+            ('fix #42: crash', '', True, 'bare-title'),
+            ('', '(#42).', True, 'bare-parens'),
+            ('', 'See #421 and also #42 for context', True, 'scans-past-longer-number'),
+            ('', 'Closes #421', False, 'longer-number'),
+            ('Bump foo 3.42 -> 3.43', '42% faster', False, 'version-and-percent'),
+            ('', '##42 typo', False, 'double-hash'),
+            ('', 'abc#42', False, 'word-prefix'),
+            ('', 'Resolves #042', False, 'leading-zero'),
+            ('', '#42abc', False, 'trailing-word-char'),
+            ('', '', False, 'empty'),
+        ],
+    )
+    def test_bare_and_negative_cases(self, title, body, expected, label):
+        assert _pr_references_issue(title, body, 42, 'owner/repo') is expected, label
+
+    @pytest.mark.parametrize(
+        'haystack, expected, label',
+        [
+            ('See owner/repo#42 for follow-up', True, 'qualified-same-repo'),
+            ('Closes Owner/Repo#42', True, 'qualified-mixed-case'),
+            ('See other/project#42 for context', False, 'qualified-other-repo'),
+            ('tracked in foo-owner/repo#42', False, 'qualified-hyphen-suffix-owner'),
+            ('see https://github.com/owner/repo/issues/42', True, 'url-https-issues'),
+            ('see https://github.com/owner/repo/pull/42', True, 'url-pull'),
+            ('https://github.com/Owner/Repo/issues/42#issuecomment-123', True, 'url-anchor-mixed-case'),
+            ('see github.com/owner/repo/issues/42', True, 'url-bare-domain'),
+            ('https://www.github.com/owner/repo/issues/42', True, 'url-www-host'),
+            ('https://m.github.com/owner/repo/pull/42', True, 'url-mobile-host'),
+            ('https://github.com/other/repo/issues/42', False, 'url-other-repo'),
+            ('https://github.com/owner/repo/issues/421', False, 'url-longer-number'),
+            ('https://fakegithub.com/owner/repo/issues/42', False, 'url-fake-host'),
+            ('https://sub.github.com/owner/repo/issues/42', False, 'url-other-subdomain'),
+            ('see sub-github.com/owner/repo/issues/42', False, 'url-hyphen-prefix-host'),
+        ],
+    )
+    def test_qualified_and_url_forms(self, haystack, expected, label):
+        assert _pr_references_issue('', haystack, 42, 'owner/repo') is expected, label
+
+
+class TestRestPrSearchFiltering:
+    """Item-level filtering in _search_issue_referencing_prs_rest."""
+
+    @staticmethod
+    def _search_response(items):
+        resp = Mock()
+        resp.status_code = 200
+        resp.json.return_value = {'items': items}
+        resp.raise_for_status = Mock()
+        return resp
+
+    @staticmethod
+    def _item(
+        number, title: str = '', body: Optional[str] = '', login: str = 'alice', uid: int = 7, state: str = 'open'
+    ):
+        return {
+            'number': number,
+            'title': title,
+            'body': body,
+            'user': {'login': login, 'id': uid},
+            'created_at': '2026-02-01T10:00:00Z',
+            'state': state,
+            'html_url': f'https://github.com/owner/repo/pull/{number}',
+        }
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    def test_drops_bare_number_false_positives(self, mock_get):
+        """The classic bug-report cases — bare number matches that aren't real refs."""
+        mock_get.return_value = self._search_response(
+            [
+                self._item(101, title='Fix crash', body='Fixes #42'),
+                self._item(102, title='Bump foo 3.42 -> 3.43', body='42% faster'),
+                self._item(103, title='', body='Closes #421'),
+                self._item(104, title='', body='see (#42). '),
+                self._item(105, title='', body='abc#42'),
+            ]
+        )
+
+        result = _search_issue_referencing_prs_rest('owner/repo', 42, token='t', state='open')
+
+        assert [pr['number'] for pr in result] == [101, 104]
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    def test_keeps_same_repo_qualified_reference(self, mock_get):
+        """`owner/repo#42` referencing this repo's issue must be kept."""
+        mock_get.return_value = self._search_response(
+            [
+                self._item(151, title='Follow-up to owner/repo#42', body=''),
+                self._item(152, title='', body='Tracking other/project#42'),
+            ]
+        )
+
+        result = _search_issue_referencing_prs_rest('owner/repo', 42, token='t', state='open')
+
+        assert [pr['number'] for pr in result] == [151]
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    def test_drops_url_to_different_repo(self, mock_get):
+        """A URL to other/repo's issue 42 textually contains '42' but isn't a ref to ours."""
+        mock_get.return_value = self._search_response(
+            [
+                self._item(161, title='', body='see https://github.com/owner/repo/issues/42'),
+                self._item(162, title='', body='related: https://github.com/other/repo/issues/42'),
+                self._item(163, title='', body='phish: https://fakegithub.com/owner/repo/issues/42'),
+            ]
+        )
+
+        result = _search_issue_referencing_prs_rest('owner/repo', 42, token='t', state='open')
+
+        assert [pr['number'] for pr in result] == [161]
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    def test_handles_null_body(self, mock_get):
+        """body=None does not crash; title-only match still succeeds."""
+        mock_get.return_value = self._search_response([self._item(201, title='Resolves #42 on startup', body=None)])
+
+        result = _search_issue_referencing_prs_rest('owner/repo', 42, token=None, state='open')
+
+        assert len(result) == 1
+        assert result[0]['number'] == 201
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    def test_item_without_number_skipped(self, mock_get):
+        mock_get.return_value = self._search_response(
+            [
+                {'number': None, 'title': 'Fixes #42', 'body': '', 'user': {}},
+                self._item(401, title='', body='Closes #42'),
+            ]
+        )
+
+        result = _search_issue_referencing_prs_rest('owner/repo', 42, token='t', state='open')
+
+        assert [pr['number'] for pr in result] == [401]
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    def test_retry_on_network_error_still_fires_after_filter_added(self, mock_sleep, mock_get):
+        """Adding the filter must not regress the existing retry/backoff behavior."""
+        import requests as _requests
+
+        good = self._search_response([self._item(501, title='Fixes #42', body='')])
+        mock_get.side_effect = [_requests.exceptions.ConnectionError('boom'), good]
+
+        result = _search_issue_referencing_prs_rest('owner/repo', 42, token='t', state='open')
+
+        assert [pr['number'] for pr in result] == [501]
+        assert mock_get.call_count == 2
+        mock_sleep.assert_called_once_with(2)
+
+    @patch('gittensor.utils.github_api_tools._search_issue_referencing_prs_graphql')
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    def test_cascade_surfaces_filtered_rest_output(self, mock_get, mock_graphql):
+        """find_prs_for_issue returns the filtered REST output when GraphQL is empty."""
+        mock_graphql.return_value = []
+        mock_get.return_value = self._search_response(
+            [
+                self._item(601, title='Unrelated perf bump 3.42', body=''),
+                self._item(602, title='', body='Fixes #42'),
+            ]
+        )
+
+        result = find_prs_for_issue('owner/repo', 42, open_only=True, token='t')
+
+        assert [pr['number'] for pr in result] == [602]
+
+
+# ============================================================================
 # Solver Detection Tests
 # ============================================================================
 

@@ -1,12 +1,14 @@
 # Entrius 2025
 import base64
 import fnmatch
+import functools
 import os
+import re
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from math import ceil
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Pattern
 
 from gittensor.utils.utils import parse_repo_name
 
@@ -479,6 +481,32 @@ def _search_issue_referencing_prs_graphql(
     return out
 
 
+@functools.lru_cache(maxsize=256)
+def _build_reference_pattern(issue_number: int, repo: str) -> Pattern[str]:
+    """Compile a regex matching GitHub references to ``repo#issue_number``."""
+    n = issue_number
+    repo_re = re.escape(repo)
+    # Lookbehinds exclude '-' because GitHub owner names may contain hyphens.
+    pattern = (
+        rf'(?<![\w#])#{n}(?!\w)'
+        rf'|(?<![\w-]){repo_re}#{n}(?!\w)'
+        rf'|https?://(?:www\.|m\.)?github\.com/{repo_re}/(?:issues|pull)/{n}(?!\w)'
+        rf'|(?<![\w.-])github\.com/{repo_re}/(?:issues|pull)/{n}(?!\w)'
+    )
+    return re.compile(pattern, re.IGNORECASE)
+
+
+def _pr_references_issue(title: str, body: Optional[str], issue_number: int, repo: str) -> bool:
+    """Return True if title/body references ``repo#issue_number``.
+
+    Matches bare ``#N``, qualified ``owner/repo#N``, and ``github.com/<repo>/
+    (issues|pull)/N`` URLs (incl. ``www.``/``m.`` redirect hosts). Cross-repo
+    references and ``fakegithub.com`` / ``sub.github.com`` lookalikes are rejected.
+    """
+    haystack = f'{title or ""}\n{body or ""}'
+    return _build_reference_pattern(issue_number, repo).search(haystack) is not None
+
+
 def _search_issue_referencing_prs_rest(
     repo: str, issue_number: int, token: Optional[str] = None, state: str = 'open'
 ) -> List[PRInfo]:
@@ -505,14 +533,20 @@ def _search_issue_referencing_prs_rest(
             resp.raise_for_status()
 
             out: List[PRInfo] = []
+            dropped = 0
             for item in resp.json().get('items', []):
                 number = item.get('number')
                 if number is None:
                     continue
+                title = item.get('title') or ''
+                body = item.get('body') or ''
+                if not _pr_references_issue(title, body, issue_number, repo):
+                    dropped += 1
+                    continue
                 user = item.get('user') or {}
                 pr_info: PRInfo = {
                     'number': number,
-                    'title': item.get('title') or '',
+                    'title': title,
                     'author_login': user.get('login') or 'ghost',
                     'author_id': user.get('id'),
                     'created_at': item.get('created_at') or '',
@@ -523,6 +557,11 @@ def _search_issue_referencing_prs_rest(
                     'closing_numbers': [],
                 }
                 out.append(pr_info)
+            if dropped:
+                bt.logging.debug(
+                    f'REST PR search for {repo}#{issue_number} dropped {dropped} '
+                    f'item(s) lacking a verified reference to {repo}#{issue_number}'
+                )
             return out
 
         except requests.exceptions.RequestException as e:

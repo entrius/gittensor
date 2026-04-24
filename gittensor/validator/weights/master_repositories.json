@@ -152,6 +152,10 @@
     "weight": 0.0926
   },
   "cosmos/cosmos-sdk": {
+    "additional_acceptable_branches": [
+      "release/v0.54.x",
+      "release/v0.53.x"
+    ],
     "weight": 0.0916
   },
   "CreativeBuilds/sn77": {
@@ -303,6 +307,9 @@
     "weight": 0.0704
   },
   "jellyfin/jellyfin": {
+    "additional_acceptable_branches": [
+      "release-10.11.z"
+    ],
     "weight": 0.0607
   },
   "jesseduffield/lazygit": {

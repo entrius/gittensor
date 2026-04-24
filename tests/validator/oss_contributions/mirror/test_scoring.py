@@ -1,10 +1,13 @@
 """Unit tests for mirror per-PR scoring helpers.
 
 Focuses on the scoring logic that's mirror-specific:
-- Eligibility gate (_should_skip_merged_mirror_pr): edited_after_merge gate,
-  self-merge w/o approval, base_ref check
+- Eligibility gate (_should_skip_merged_mirror_pr): self-merge w/o approval,
+  base_ref / head_ref / default_branch checks. Note: edited_after_merge is
+  NOT a PR-level gate (legacy parity) — it only invalidates the issue bonus,
+  tested in TestLinkedIssueValidity below.
 - Label resolution: highest-multiplier maintainer-set label, ignores backfilled
-- Issue multiplier: anti-gaming gates (state_reason, is_transferred, self-issue)
+- Issue multiplier: anti-gaming gates (state_reason, is_transferred, self-issue,
+  edited_after_merge)
 - _convert_mirror_files: MirrorFile → FileChange + FileContentPair adapter
 
 Token-scoring base_score is exercised indirectly via the existing legacy tests
@@ -112,11 +115,15 @@ class TestEligibilityGate:
         assert skip is False
         assert reason is None
 
-    def test_edited_after_merge_blocks(self):
+    def test_edited_after_merge_does_not_block_pr_score(self):
+        """Legacy parity: edited_after_merge gates only the issue bonus
+        (see _is_valid_linked_issue), not the whole PR's base score. A miner
+        editing a typo in their PR description after merge should still earn
+        their base score + non-issue multipliers."""
         scored = ScoredMirrorPR(pr=_pr(edited_after_merge=True))
         skip, reason = _should_skip_merged_mirror_pr(scored, _config())
-        assert skip is True
-        assert 'edited after merge' in reason
+        assert skip is False
+        assert reason is None
 
     def test_maintainer_author_blocks(self, monkeypatch):
         monkeypatch.delenv('DEV_MODE', raising=False)

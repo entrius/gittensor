@@ -3,8 +3,10 @@
 Mirror analogue of ``gittensor.validator.oss_contributions.scoring``. Scope:
 - Compute base_score for each PR via the existing token-scoring infra
 - Compute per-PR multipliers: repo_weight, time_decay, review_quality, label, issue
-- Skip merged PRs that fail the eligibility gate (anti-gaming: edited_after_merge,
-  base_ref / head_ref acceptable-branches check, self-merge w/o external approval)
+- Skip merged PRs that fail the eligibility gate (base_ref / head_ref
+  acceptable-branches check, self-merge w/o external approval, maintainer
+  author block). ``edited_after_merge`` is NOT a PR-level gate — it gates only
+  the issue bonus multiplier (``_is_valid_linked_issue``), matching legacy.
 - Aggregate token-scoring outputs onto the MirrorMinerEvaluation
 
 Out of scope (handled in commit 6 with the routing wiring):
@@ -173,7 +175,6 @@ def _should_skip_merged_mirror_pr(
 
     At parity with legacy ``should_skip_merged_pr``:
     - mergedAt presence (mirror always sets this for MERGED PRs but verify defensively)
-    - PR not edited after merge (mirror precomputes ``edited_after_merge``)
     - Author not a maintainer (already filtered at load time, but recheck for safety)
     - Self-merge: skip unless review_summary.approved_count > 0
       (GitHub forbids self-approval, so any approval count > 0 implies external approval)
@@ -183,6 +184,12 @@ def _should_skip_merged_mirror_pr(
     - head_ref check: reject PRs whose source branch is itself in the acceptable
       set (blocks e.g. ``staging -> main`` when both acceptable). Only applies
       to same-repo PRs — fork branch names are arbitrary.
+
+    Note on ``edited_after_merge``: mirror surfaces this anti-gaming flag, but
+    legacy gates only the issue bonus on it (see ``_is_valid_linked_issue``),
+    not the whole PR. Mirror matches that surgical scope — a post-merge PR
+    body/title edit invalidates the issue multiplier but the PR's base score
+    and other multipliers still apply.
 
     When the mirror response is missing a field (older data predating the
     schema additions), the affected check falls through rather than
@@ -194,9 +201,6 @@ def _should_skip_merged_mirror_pr(
 
     if pr.merged_at is None:
         return True, f'PR #{pr.pr_number} is MERGED but missing merged_at'
-
-    if pr.edited_after_merge:
-        return True, f'PR #{pr.pr_number} edited after merge — anti-gaming gate'
 
     # Defensive recheck — load already drops these (with DEV_MODE bypass)
     if not os.environ.get('DEV_MODE') and pr.author_association in MAINTAINER_ASSOCIATIONS:

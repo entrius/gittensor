@@ -257,6 +257,9 @@
     "weight": 0.0853
   },
   "grafana/grafana": {
+    "additional_acceptable_branches": [
+      "release-13.0.2"
+    ],
     "weight": 0.1136
   },
   "GraphiteAI/Graphite-Subnet": {

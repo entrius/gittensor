@@ -1,12 +1,14 @@
 # Entrius 2025
 import base64
 import fnmatch
+import functools
 import os
+import re
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from math import ceil
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Pattern
 
 from gittensor.utils.utils import parse_repo_name
 
@@ -479,6 +481,109 @@ def _search_issue_referencing_prs_graphql(
     return out
 
 
+# GitHub closing-keyword grammar accepted by the auto-close machinery.
+# Source: https://docs.github.com/en/issues/tracking-your-work-with-issues/linking-a-pull-request-to-an-issue
+_CLOSING_KEYWORDS_RE = r'(?:close[sd]?|fix(?:es|ed)?|resolve[sd]?)'
+
+
+@functools.lru_cache(maxsize=256)
+def _build_reference_pattern(issue_number: int, repo: str) -> Pattern[str]:
+    """Compile a regex matching GitHub-rendered references to ``repo#issue_number``.
+
+    Cached so the REST-search per-item filter does not recompile per call.
+
+    Trailing ``(?!\\w)`` rejects ``#42abc`` / ``#42_foo``; preceding lookbehinds
+    reject ``abc#42`` / ``##42``. The URL form is split in two so legitimate
+    ``www.``/``m.`` GitHub redirect hosts are kept while ``fakegithub.com`` /
+    ``sub.github.com`` lookalikes are rejected.
+    """
+    n = issue_number
+    repo_re = re.escape(repo)
+    pattern = (
+        rf'(?<![\w#])#{n}(?!\w)'  # bare:        #42
+        rf'|(?<!\w){repo_re}#{n}(?!\w)'  # qualified:   owner/repo#42
+        rf'|https?://(?:www\.|m\.)?github\.com/{repo_re}/(?:issues|pull)/{n}(?!\w)'  # URL+protocol
+        rf'|(?<![\w.])github\.com/{repo_re}/(?:issues|pull)/{n}(?!\w)'  # URL bare-host
+    )
+    return re.compile(pattern, re.IGNORECASE)
+
+
+def _pr_references_issue(title: str, body: Optional[str], issue_number: int, repo: str) -> bool:
+    """Return True if a PR's title/body actually references ``repo#issue_number``.
+
+    GitHub's REST search matches bare numeric tokens, so a query for ``42``
+    returns PRs containing ``#42``, ``#421``, ``42%``, or ``3.42``. This
+    predicate keeps only the GitHub-rendered reference forms that point at
+    the searched repo's issue:
+
+    - Bare hash:        ``#42`` (in-repo shorthand)
+    - Qualified:        ``owner/repo#42`` (cross-repo form pointing at this repo)
+    - URL with proto:   ``https://github.com/<repo>/issues/42`` (also ``www.``/``m.`` hosts)
+    - URL bare-domain:  ``github.com/<repo>/issues/42`` (no protocol)
+
+    References pointing at OTHER repositories — ``other/project#42`` or URLs
+    to different owners — are rejected. The host-prefix is boundary-guarded
+    so ``fakegithub.com`` / ``sub.github.com`` lookalikes do not match, while
+    GitHub's own ``www.github.com`` / ``m.github.com`` redirect hosts do.
+    """
+    haystack = f'{title or ""}\n{body or ""}'
+    if not haystack.strip():
+        return False
+    return _build_reference_pattern(issue_number, repo).search(haystack) is not None
+
+
+@functools.lru_cache(maxsize=256)
+def _build_closing_pattern(repo: str) -> Pattern[str]:
+    """Compile a regex matching GitHub closing-keyword references in ``repo``.
+
+    Cached identically to ``_build_reference_pattern``. The match emits one
+    capture group containing the bare issue number, populated by whichever of
+    the three reference forms (bare ``#N`` / qualified ``owner/repo#N`` / URL)
+    fired.
+    """
+    repo_re = re.escape(repo)
+    pattern = (
+        rf'\b{_CLOSING_KEYWORDS_RE}\s*:?\s*'
+        rf'(?:'
+        rf'#(\d+)(?!\w)'
+        rf'|{repo_re}#(\d+)(?!\w)'
+        rf'|https?://(?:www\.|m\.)?github\.com/{repo_re}/(?:issues|pull)/(\d+)(?!\w)'
+        rf')'
+    )
+    return re.compile(pattern, re.IGNORECASE)
+
+
+def _extract_closing_issue_numbers(text: str, repo: str) -> List[int]:
+    """Extract deduplicated issue numbers closed by ``Closes #N`` / ``Fixes ...`` syntax.
+
+    GraphQL search results carry ``closingIssuesReferences`` metadata, but the REST
+    fallback returns no such field. CLI consumers like ``submissions.py`` derive a
+    ``closes_issue`` flag from ``closing_numbers``; an empty list silently misreports
+    every REST-fallback PR as non-closing. This extractor restores parity by parsing
+    the same closing-keyword grammar GitHub itself recognizes:
+
+    - Closes/closed/close, fix/fixes/fixed, resolve/resolves/resolved
+    - Followed by an optional ``:`` and one of: ``#N``, ``owner/repo#N``, or
+      a ``github.com/<repo>/(issues|pull)/N`` URL pointing at this repo
+
+    Cross-repo closing references (``Closes other/project#42``) are deliberately
+    ignored — they would close a different project's issue, not this repo's.
+    """
+    if not text:
+        return []
+    seen: set = set()
+    out: List[int] = []
+    for match in _build_closing_pattern(repo).finditer(text):
+        for group in match.groups():
+            if group:
+                n = int(group)
+                if n not in seen:
+                    seen.add(n)
+                    out.append(n)
+                break
+    return out
+
+
 def _search_issue_referencing_prs_rest(
     repo: str, issue_number: int, token: Optional[str] = None, state: str = 'open'
 ) -> List[PRInfo]:
@@ -505,14 +610,20 @@ def _search_issue_referencing_prs_rest(
             resp.raise_for_status()
 
             out: List[PRInfo] = []
+            dropped = 0
             for item in resp.json().get('items', []):
                 number = item.get('number')
                 if number is None:
                     continue
+                title = item.get('title') or ''
+                body = item.get('body') or ''
+                if not _pr_references_issue(title, body, issue_number, repo):
+                    dropped += 1
+                    continue
                 user = item.get('user') or {}
                 pr_info: PRInfo = {
                     'number': number,
-                    'title': item.get('title') or '',
+                    'title': title,
                     'author_login': user.get('login') or 'ghost',
                     'author_id': user.get('id'),
                     'created_at': item.get('created_at') or '',
@@ -520,9 +631,14 @@ def _search_issue_referencing_prs_rest(
                     'state': _resolve_pr_state(item.get('state', 'open')),
                     'url': item.get('html_url') or '',
                     'review_count': 0,
-                    'closing_numbers': [],
+                    'closing_numbers': _extract_closing_issue_numbers(f'{title}\n{body}', repo),
                 }
                 out.append(pr_info)
+            if dropped:
+                bt.logging.debug(
+                    f'REST PR search for {repo}#{issue_number} dropped {dropped} '
+                    f'item(s) lacking a verified reference to {repo}#{issue_number}'
+                )
             return out
 
         except requests.exceptions.RequestException as e:

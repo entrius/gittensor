@@ -322,8 +322,9 @@ def admin_info(network: str, rpc_url: str, contract: str, verbose: bool, as_json
             msg = 'Could not read contract configuration.'
             if as_json:
                 emit_error_json(msg, error_type='read_failed')
-                raise SystemExit(1)
-            console.print(f'[yellow]{msg}[/yellow]')
-            console.print('[dim]Try running with --verbose to see debug details.[/dim]')
+            else:
+                console.print(f'[yellow]{msg}[/yellow]')
+                console.print('[dim]Try running with --verbose to see debug details.[/dim]')
+            raise SystemExit(1)
     except Exception as e:
         handle_exception(as_json=as_json, message=str(e))

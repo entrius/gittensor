@@ -104,7 +104,13 @@ class BaseValidatorNeuron(BaseNeuron):
 
     async def concurrent_forward(self):
         coroutines = [self.forward() for _ in range(self.config.neuron.num_concurrent_forwards)]
-        await asyncio.gather(*coroutines)
+        # return_exceptions=True so one forward's failure does not cancel its siblings
+        # and discard their already-completed work.
+        results = await asyncio.gather(*coroutines, return_exceptions=True)
+        for i, result in enumerate(results):
+            if isinstance(result, BaseException):
+                bt.logging.error(f'concurrent_forward[{i}] raised: {result}')
+                bt.logging.debug(str(print_exception(type(result), result, result.__traceback__)))
 
     def run(self):
         """

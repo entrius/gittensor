@@ -243,6 +243,8 @@ class Repository(BaseRepository):
                     issue.author_github_id,
                     issue.is_transferred,
                     issue.updated_at,
+                    issue.state_reason,
+                    issue.body_or_title_edited_at,
                     issue.discovery_base_score,
                     issue.discovery_earned_score,
                     issue.discovery_review_quality_multiplier,

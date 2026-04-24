@@ -2,7 +2,7 @@
 # Copyright © 2025 Entrius
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Dict, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, Optional, Set, Tuple
 
 import bittensor as bt
 import numpy as np
@@ -75,11 +75,11 @@ async def get_rewards(
     master_repositories: Dict[str, RepositoryConfig],
     programming_languages: Dict[str, LanguageConfig],
     token_config: TokenConfig,
-) -> Tuple[np.ndarray, Dict[int, MinerEvaluation], set]:
+) -> Tuple[np.ndarray, Dict[int, MinerEvaluation], Set[int], Set[int]]:
     """Score OSS contributions for all miners.
 
     Returns:
-        Tuple of (normalized_rewards_array, miner_evaluations, cached_uids).
+        Tuple of (normalized_rewards_array, miner_evaluations, cached_uids, penalized_uids).
         DB storage and emission blending are handled by the caller (forward.py).
     """
 
@@ -136,4 +136,5 @@ async def get_rewards(
         np.array([normalized_rewards.get(uid, 0.0) for uid in sorted(uids)]),
         miner_evaluations,
         cached_uids,
+        penalized_uids,
     )

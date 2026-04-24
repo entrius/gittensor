@@ -72,7 +72,9 @@ class DatabaseStorage:
                 miner_eval.closed_pull_requests + _adapt_mirror(miner_eval.mirror_closed_prs), commit=False
             )
             result.stored_counts['issues'] = self.repo.store_issues_bulk(miner_eval.get_all_issues(), commit=False)
-            result.stored_counts['file_changes'] = self.repo.store_file_changes_bulk(miner_eval.get_all_file_changes(), commit=False)
+            result.stored_counts['file_changes'] = self.repo.store_file_changes_bulk(
+                miner_eval.get_all_file_changes(), commit=False
+            )
             self.repo.cleanup_stale_miner_data(miner_eval)
             result.stored_counts['evaluations'] = 1 if self.repo.set_miner_evaluation(miner_eval, commit=False) else 0
 

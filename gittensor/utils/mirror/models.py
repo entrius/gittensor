@@ -278,7 +278,6 @@ class MirrorFile:
     deletions: int
     changes: int
     is_binary: bool
-    byte_size: int
     head_content: Optional[str]
     base_content: Optional[str]
 
@@ -292,7 +291,6 @@ class MirrorFile:
             deletions=int(data.get('deletions', 0)),
             changes=int(data.get('changes', 0)),
             is_binary=bool(data.get('is_binary', False)),
-            byte_size=int(data.get('byte_size', 0)),
             head_content=data.get('head_content'),
             base_content=data.get('base_content'),
         )

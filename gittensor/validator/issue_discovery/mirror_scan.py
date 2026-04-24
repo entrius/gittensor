@@ -97,10 +97,13 @@ async def run_mirror_issue_discovery(
     this cycle — the cross-miner solving-PR cache is built by walking every
     miner's populated ``mirror_merged_prs``.
     """
-    bt.logging.info('**Scoring issue discovery (mirror)**')
+    bt.logging.info('')
+    bt.logging.info('=' * 50)
+    bt.logging.info(f'Issue discovery (mirror) | {len(mirror_repos)} mirror-enabled repo(s)')
+    bt.logging.info('=' * 50)
 
     if not mirror_repos:
-        bt.logging.info('No mirror-enabled repos — mirror issue discovery skipped')
+        bt.logging.info('No mirror-enabled repos — issue discovery skipped')
         return
 
     client = client or MirrorClient()
@@ -110,25 +113,40 @@ async def run_mirror_issue_discovery(
     solving_pr_cache: Dict[Tuple[str, int], CachedSolvingPR] = _build_solving_pr_cache(
         miner_evaluations
     )
+    bt.logging.info(
+        f'Cross-miner solving-PR cache: {len(solving_pr_cache)} entries from '
+        f'{sum(len(ev.mirror_merged_prs) for ev in miner_evaluations.values())} scored mirror PRs'
+    )
+
+    processed = 0
+    skipped_no_gh = 0
+    skipped_failed = 0
+    fetch_errors = 0
+    no_issues = 0
 
     for uid, evaluation in miner_evaluations.items():
         if not evaluation.github_id or evaluation.github_id == '0':
+            skipped_no_gh += 1
             continue
         if evaluation.failed_reason is not None:
+            skipped_failed += 1
             continue
 
         try:
             response = client.get_miner_issues(evaluation.github_id, since=lookback_date)
         except MirrorRequestError as e:
             bt.logging.warning(
-                f'UID {uid} mirror issue fetch failed: {e} — issue discovery skipped for this miner'
+                f'├─ UID {uid}: mirror issue fetch failed ({e}) — skipped this miner'
             )
+            fetch_errors += 1
             continue
 
         filtered = [i for i in response.issues if i.repo_full_name in enabled_names]
         if not filtered:
+            no_issues += 1
             continue
 
+        processed += 1
         _score_miner_mirror_issues(
             evaluation,
             filtered,
@@ -138,6 +156,12 @@ async def run_mirror_issue_discovery(
             programming_languages,
             token_config,
         )
+
+    bt.logging.info('')
+    bt.logging.info(
+        f'Issue discovery complete | {processed} processed | {no_issues} no mirror issues | '
+        f'{fetch_errors} fetch errors | {skipped_no_gh} no github_id | {skipped_failed} prior OSS failure'
+    )
 
 
 def _build_solving_pr_cache(
@@ -260,7 +284,10 @@ def _score_miner_mirror_issues(
     evaluation.issue_credibility = max(evaluation.issue_credibility, credibility)
 
     if not is_eligible:
-        bt.logging.info(f'UID {evaluation.uid} mirror issue discovery ineligible: {reason}')
+        bt.logging.info(
+            f'├─ UID {evaluation.uid}: ineligible ({reason}) | '
+            f'{solved_count} solved ({valid_solved_count} valid) | {closed_count} closed'
+        )
         return
 
     spam_mult = calculate_open_issue_spam_multiplier(evaluation.total_open_issues, issue_token_score)
@@ -285,8 +312,10 @@ def _score_miner_mirror_issues(
     )
 
     bt.logging.info(
-        f'UID {evaluation.uid} mirror issue discovery: {solved_count} solved, {closed_count} closed, '
-        f'credibility={credibility:.2f}, mirror_score={total_discovery_score:.2f}'
+        f'├─ UID {evaluation.uid}: {solved_count} solved ({valid_solved_count} valid) | '
+        f'{closed_count} closed | {len(scored_issues)} scored | '
+        f'credibility={credibility:.2f} | spam_mult={spam_mult:.1f} | '
+        f'mirror_score={total_discovery_score:.2f}'
     )
 
 

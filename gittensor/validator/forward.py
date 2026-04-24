@@ -18,15 +18,12 @@ from gittensor.constants import (
 )
 from gittensor.utils.uids import get_all_uids
 from gittensor.validator.issue_competitions.forward import issue_competitions
+from gittensor.validator.issue_discovery.mirror_scan import run_mirror_issue_discovery
 from gittensor.validator.issue_discovery.normalize import (
     normalize_issue_discovery_rewards,
 )
-from gittensor.validator.issue_discovery.mirror_scan import run_mirror_issue_discovery
-from gittensor.validator.issue_discovery.repo_scan import scan_closed_issues
-from gittensor.validator.issue_discovery.scoring import score_discovered_issues
 from gittensor.validator.oss_contributions.reward import get_rewards
 from gittensor.validator.utils.config import (
-    GITTENSOR_VALIDATOR_PAT,
     VALIDATOR_STEPS_INTERVAL,
     VALIDATOR_WAIT,
 )
@@ -45,9 +42,9 @@ async def forward(self: 'Validator') -> None:
     """Execute the validator's forward pass.
 
     Performs the core validation cycle every VALIDATOR_STEPS_INTERVAL steps:
-    1. Score OSS contributions (PR scoring)
+    1. Score OSS contributions (PR scoring — mirror path + legacy PAT path)
     2. Run issue bounties verification
-    3. Score issue discovery (repo scan + scoring)
+    3. Score issue discovery (mirror-only; non-mirror repos skip)
     4. Store all evaluations to DB
     5. Blend emission pools and update scores
 
@@ -123,41 +120,25 @@ async def issue_discovery(
 ) -> np.ndarray:
     """Score issue discovery and return normalized rewards array.
 
-    Per-repo routing:
-    - Mirror-enabled repos → authoritative path via run_mirror_issue_discovery
-      (uses MirrorClient.get_miner_issues + solved_by_pr / solving_pr inline;
-      real token-scored base_score via a cross-miner solving-PR cache).
-    - Legacy repos         → PAT-based scan + score_discovered_issues.
-
-    Both paths populate the same MinerEvaluation issue-discovery fields; the
-    mirror path accumulates on top of whatever the legacy path produced for
-    the same miner (each issue is scoped to exactly one path's repo, so there's
-    no double-counting).
+    Mirror-only path: uses ``MirrorClient.get_miner_issues`` with authoritative
+    ``solved_by_pr`` + inline ``solving_pr`` data, and a cross-miner cache of
+    already-scored solving PRs so the base_score reflects real token scoring.
+    The legacy timeline-scraping path has been removed — it produced unreliable
+    solver attribution on busy issues, and non-mirror repos are deliberately
+    left out of issue discovery entirely until their mirror_enabled flag flips.
 
     Returns numpy array of normalized issue discovery rewards (sorted by UID).
     """
     mirror_repos: Dict[str, RepositoryConfig] = {
         name: cfg for name, cfg in master_repositories.items() if cfg.mirror_enabled
     }
-    legacy_repos: Dict[str, RepositoryConfig] = {
-        name: cfg for name, cfg in master_repositories.items() if not cfg.mirror_enabled
-    }
 
-    # Legacy path — keeps running on non-mirror repos during the transition so
-    # issue discovery isn't lost wholesale when not every repo is flipped yet.
-    if legacy_repos:
-        scan_issues: Dict[str, list] = {}
-        if GITTENSOR_VALIDATOR_PAT:
-            scan_issues = await scan_closed_issues(miner_evaluations, legacy_repos, GITTENSOR_VALIDATOR_PAT)
-        score_discovered_issues(miner_evaluations, legacy_repos, scan_issues)
-
-    # Mirror path — no PAT needed; public CF-rate-limited endpoints. Real
-    # base_score comes from the solving PR's files + token scoring, cached
-    # across miners to avoid redundant fetches for shared solving PRs.
     if mirror_repos:
         await run_mirror_issue_discovery(
             miner_evaluations, mirror_repos, programming_languages, token_config
         )
+    else:
+        bt.logging.info('No mirror-enabled repos — issue discovery skipped for this round')
 
     # Normalize into independent pool
     issue_rewards_dict = normalize_issue_discovery_rewards(miner_evaluations)

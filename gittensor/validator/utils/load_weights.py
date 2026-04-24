@@ -112,6 +112,15 @@ def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
         # Parse JSON data into RepositoryConfig objects
         normalized_data: Dict[str, RepositoryConfig] = {}
         for repo_name, metadata in data.items():
+            if not isinstance(metadata, dict):
+                if isinstance(metadata, (int, float)):
+                    # Back-compat: plain numeric weight
+                    normalized_data[repo_name.lower()] = RepositoryConfig(weight=float(metadata))
+                else:
+                    bt.logging.warning(
+                        f'Skipping repo {repo_name}: expected dict config, got {type(metadata).__name__}'
+                    )
+                continue
             try:
                 config = RepositoryConfig(
                     weight=float(metadata.get('weight', 0.01)),
@@ -121,8 +130,7 @@ def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
                 normalized_data[repo_name.lower()] = config
             except (ValueError, TypeError) as e:
                 bt.logging.warning(f'Could not parse config for {repo_name}: {e}, using defaults')
-                # Create config with defaults if parsing fails
-                normalized_data[repo_name.lower()] = RepositoryConfig(weight=float(metadata.get('weight', 0.01)))
+                normalized_data[repo_name.lower()] = RepositoryConfig()
 
         bt.logging.debug(f'Successfully loaded {len(normalized_data)} repository entries from {weights_file}')
         return normalized_data

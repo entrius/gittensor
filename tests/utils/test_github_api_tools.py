@@ -439,7 +439,7 @@ class TestFileChangesRetryLogic:
 
         assert mock_get.call_count == 3
         assert mock_sleep.call_count == 2, 'Should sleep between attempts but not after the last one'
-        assert result == []
+        assert result is None
         mock_logging.error.assert_called()
 
     @patch('gittensor.utils.github_api_tools.requests.get')
@@ -472,7 +472,7 @@ class TestFileChangesRetryLogic:
         result = get_pull_request_file_changes('owner/repo', 1, 'fake_token')
 
         assert mock_get.call_count == 3
-        assert result == []
+        assert result is None
         mock_logging.error.assert_called()
 
     @patch('gittensor.utils.github_api_tools.requests.get')
@@ -708,7 +708,7 @@ class TestFileChangesPagination:
 
         result = get_pull_request_file_changes('owner/repo', 1, 'fake_token')
 
-        assert result == []
+        assert result is None
         assert mock_get.call_count == 3
         mock_logging.error.assert_called()
 

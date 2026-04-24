@@ -359,7 +359,7 @@ def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -
     bt.logging.error(
         f'File changes request for PR #{pr_number} in {repository} failed after {max_attempts} attempts: {last_error}'
     )
-    return []
+    return None
 
 
 # GraphQL fragment used by both issue submissions and solver detection.

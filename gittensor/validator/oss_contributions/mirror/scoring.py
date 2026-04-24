@@ -128,13 +128,10 @@ def score_mirror_pr(
         bt.logging.warning(f'{pr.repo_full_name} not in mirror_repos. Skipping...')
         return
 
-    # Eligibility gate for MERGED PRs (matches legacy should_skip_merged_pr behavior
-    # to the extent mirror data allows — see _should_skip_merged_mirror_pr docstring).
-    if pr.state == 'MERGED':
-        should_skip, reason = _should_skip_merged_mirror_pr(scored, repo_config)
-        if should_skip:
-            bt.logging.debug(reason or '')
-            return
+    # Eligibility gate for MERGED PRs already ran at LOAD time (see
+    # load_mirror_miner_prs → _should_skip_merged_mirror_pr). By this point
+    # mirror_eval.merged_prs contains only eligibility-passed PRs — legacy parity
+    # with load_miners_prs which applies should_skip_merged_pr pre-append.
 
     # Fetch file contents via the mirror's lazy /pulls/.../files endpoint.
     try:
@@ -440,7 +437,12 @@ def _calculate_issue_multiplier(scored: ScoredMirrorPR) -> float:
         bt.logging.info(f'PR #{pr.pr_number} - Solved no valid linked issues')
         return 1.0
 
-    issue = valid[0]
+    # Legacy parity (PR #673): prefer a maintainer-authored valid issue so the
+    # multiplier doesn't depend on mirror response ordering of linked_issues.
+    issue = next(
+        (li for li in valid if li.author_association in MAINTAINER_ASSOCIATIONS),
+        valid[0],
+    )
     is_maintainer = issue.author_association in MAINTAINER_ASSOCIATIONS if issue.author_association else False
     multiplier = MAINTAINER_ISSUE_MULTIPLIER if is_maintainer else STANDARD_ISSUE_MULTIPLIER
     label = 'maintainer' if is_maintainer else 'standard'
@@ -449,7 +451,20 @@ def _calculate_issue_multiplier(scored: ScoredMirrorPR) -> float:
 
 
 def _is_valid_linked_issue(li: MirrorLinkedIssue, pr: MirrorPullRequest) -> bool:
-    """Anti-gaming gates for issue → PR multiplier credit."""
+    """Anti-gaming gates for issue → PR multiplier credit.
+
+    Mirrors legacy ``is_valid_issue`` semantics:
+    - Reject transferred issues (mirror-only — legacy has no signal)
+    - Missing author / self-issue (uses github_id for immutability)
+    - Issue created after the PR
+    - Any CLOSED issue must have state_reason=COMPLETED (regardless of PR state;
+      matches legacy's ``_is_completed_when_closed``). NOT_PLANNED / reopened
+      closures never grant a multiplier.
+    - Additional MERGED-PR-only gates: edited_after_merge, issue must be CLOSED,
+      close-timing window vs. merge (rejects BOTH too-far-after AND too-far-before
+      semantically — negative days means the issue closed before the PR merged,
+      which means the PR wasn't the solver).
+    """
     if li.is_transferred:
         bt.logging.warning(f'Skipping linked issue #{li.number} - transferred')
         return False
@@ -466,6 +481,15 @@ def _is_valid_linked_issue(li: MirrorLinkedIssue, pr: MirrorPullRequest) -> bool
         bt.logging.warning(f'Skipping linked issue #{li.number} - created after PR')
         return False
 
+    # Legacy parity: state_reason check applies regardless of PR state. Legacy's
+    # _is_completed_when_closed returns True for OPEN issues, False for CLOSED
+    # issues with non-COMPLETED state_reason. Applies to OPEN-PR collateral too.
+    if li.state == 'CLOSED' and li.state_reason != 'COMPLETED':
+        bt.logging.warning(
+            f'Skipping linked issue #{li.number} - state_reason={li.state_reason} (need COMPLETED)'
+        )
+        return False
+
     is_merged = pr.state == 'MERGED'
     if is_merged and pr.merged_at:
         if pr.edited_after_merge:
@@ -476,17 +500,14 @@ def _is_valid_linked_issue(li: MirrorLinkedIssue, pr: MirrorPullRequest) -> bool
             bt.logging.warning(f'Skipping linked issue #{li.number} - state {li.state} (need CLOSED)')
             return False
 
-        if li.state_reason != 'COMPLETED':
-            bt.logging.warning(
-                f'Skipping linked issue #{li.number} - state_reason={li.state_reason} (need COMPLETED)'
-            )
-            return False
-
         if li.closed_at:
-            days_diff = abs((li.closed_at - pr.merged_at).total_seconds()) / SECONDS_PER_DAY
-            if days_diff > MAX_ISSUE_CLOSE_WINDOW_DAYS:
+            # Signed days diff (matches legacy). Negative means the issue was
+            # closed BEFORE the PR merged — in that case the PR cannot be what
+            # closed the issue, so it's not a valid solver.
+            days_diff = (li.closed_at - pr.merged_at).total_seconds() / SECONDS_PER_DAY
+            if days_diff > MAX_ISSUE_CLOSE_WINDOW_DAYS or days_diff < 0:
                 bt.logging.warning(
-                    f'Skipping linked issue #{li.number} - closed {days_diff:.1f}d from merge '
+                    f'Skipping linked issue #{li.number} - closed {days_diff:+.2f}d from merge '
                     f'(max {MAX_ISSUE_CLOSE_WINDOW_DAYS})'
                 )
                 return False

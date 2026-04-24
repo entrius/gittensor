@@ -26,6 +26,7 @@ from gittensor.utils.mirror.client import MirrorClient, MirrorRequestError
 from gittensor.utils.mirror.models import MirrorPullRequest
 from gittensor.validator.oss_contributions.mirror.evaluation import MirrorMinerEvaluation
 from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredMirrorPR
+from gittensor.validator.oss_contributions.mirror.scoring import _should_skip_merged_mirror_pr
 from gittensor.validator.utils.datetime_utils import parse_github_iso_to_utc
 from gittensor.validator.utils.load_weights import RepositoryConfig
 
@@ -119,8 +120,15 @@ def _maybe_add_pr(
             return
         mirror_eval.closed_prs.append(ScoredMirrorPR(pr=pr))
     elif pr.state == 'MERGED':
-        # Defer merge-eligibility checks (mergedAt presence, base_ref, etc.) to
-        # the scoring layer, matching how legacy load defers to should_skip_merged_pr.
-        mirror_eval.merged_prs.append(ScoredMirrorPR(pr=pr))
+        # Apply the merge-eligibility gate at LOAD time (matches legacy parity —
+        # should_skip_merged_pr runs inside load_miners_prs before adding). If we
+        # deferred to scoring, rejected PRs would remain in mirror_merged_prs and
+        # inflate the merged_count used in check_eligibility, distorting credibility.
+        candidate = ScoredMirrorPR(pr=pr)
+        should_skip, reason = _should_skip_merged_mirror_pr(candidate, repo_config)
+        if should_skip:
+            bt.logging.debug(reason or '')
+            return
+        mirror_eval.merged_prs.append(candidate)
     else:
         bt.logging.warning(f'Unknown PR state {pr.state!r} for PR #{pr.pr_number}')

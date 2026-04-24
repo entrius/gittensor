@@ -492,6 +492,78 @@ class TestLinkedIssueValidity:
         li = MirrorLinkedIssue.from_dict(_linked_issue(closed_at='2026-04-12T00:00:00Z'))
         assert _is_valid_linked_issue(li, scored.pr) is False
 
+    def test_issue_closed_before_pr_merged_blocks(self):
+        """Legacy parity: issue.closed_at < pr.merged_at → negative days_diff → reject.
+        If the issue was closed before the PR merged, the PR wasn't what solved it."""
+        # _pr default merged_at = 2026-04-18. Issue closed 2026-04-17 (1 day earlier).
+        scored = ScoredMirrorPR(pr=_pr())
+        li = MirrorLinkedIssue.from_dict(_linked_issue(closed_at='2026-04-17T00:00:00Z'))
+        assert _is_valid_linked_issue(li, scored.pr) is False
+
+    def test_closed_issue_not_planned_blocks_open_pr_too(self):
+        """Legacy parity: CLOSED issue with state_reason != COMPLETED is rejected
+        regardless of PR state. Matters for OPEN PR collateral scoring."""
+        scored = ScoredMirrorPR(pr=_pr(state='OPEN'))  # OPEN PR
+        li = MirrorLinkedIssue.from_dict(_linked_issue(state='CLOSED', state_reason='NOT_PLANNED'))
+        assert _is_valid_linked_issue(li, scored.pr) is False
+
+    def test_open_issue_on_open_pr_still_valid(self):
+        """An OPEN issue linked to an OPEN PR should still be valid (state_reason only
+        gates CLOSED issues)."""
+        scored = ScoredMirrorPR(pr=_pr(state='OPEN'))
+        li = MirrorLinkedIssue.from_dict(
+            _linked_issue(state='OPEN', state_reason=None, closed_at=None)
+        )
+        assert _is_valid_linked_issue(li, scored.pr) is True
+
+
+class TestIssueMultiplierPreference:
+    def test_prefer_maintainer_authored_when_multiple_valid(self):
+        """Legacy parity (PR #673): the issue multiplier should pick a
+        maintainer-authored valid issue regardless of response ordering."""
+        from gittensor.constants import MAINTAINER_ISSUE_MULTIPLIER
+
+        # Non-maintainer issue listed first, maintainer-authored issue second
+        non_maint = _linked_issue(number=1, author_association='CONTRIBUTOR', author_github_id='111')
+        maint = _linked_issue(number=2, author_association='OWNER', author_github_id='222')
+        scored = ScoredMirrorPR(pr=_pr(linked_issues=[non_maint, maint]))
+        assert _calculate_issue_multiplier(scored) == MAINTAINER_ISSUE_MULTIPLIER
+
+    def test_falls_back_to_first_when_no_maintainer_authored(self):
+        from gittensor.constants import STANDARD_ISSUE_MULTIPLIER
+
+        issue_a = _linked_issue(number=1, author_association='CONTRIBUTOR', author_github_id='111')
+        issue_b = _linked_issue(number=2, author_association='CONTRIBUTOR', author_github_id='222')
+        scored = ScoredMirrorPR(pr=_pr(linked_issues=[issue_a, issue_b]))
+        assert _calculate_issue_multiplier(scored) == STANDARD_ISSUE_MULTIPLIER
+
+
+class TestCollateralScoreAcceptsScoredMirrorPR:
+    """Regression test for the crash where calculate_open_pr_collateral_score accessed
+    pr.number which doesn't exist on ScoredMirrorPR. The .number property now proxies
+    to pr.pr_number so duck-typing works."""
+
+    def test_collateral_computed_without_crash(self):
+        from gittensor.validator.oss_contributions.scoring import calculate_open_pr_collateral_score
+
+        scored = ScoredMirrorPR(pr=_pr(state='OPEN'))
+        scored.base_score = 25.0
+        scored.repo_weight_multiplier = 0.5
+        scored.issue_multiplier = 1.0
+        scored.label_multiplier = 1.0
+
+        # Must not raise AttributeError on .number
+        result = calculate_open_pr_collateral_score(scored)
+        assert result >= 0.0
+
+    def test_number_property_proxies_to_pr_pr_number(self):
+        scored = ScoredMirrorPR(pr=_pr())
+        assert scored.number == scored.pr.pr_number == 100
+
+    def test_repository_full_name_property_proxies(self):
+        scored = ScoredMirrorPR(pr=_pr())
+        assert scored.repository_full_name == scored.pr.repo_full_name == 'entrius/gittensor-ui'
+
     def test_open_pr_skips_merge_only_gates(self):
         # OPEN PR shouldn't apply the merge-only gates
         scored = ScoredMirrorPR(pr=_pr(state='OPEN'))

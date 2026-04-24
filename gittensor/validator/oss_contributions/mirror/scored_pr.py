@@ -57,6 +57,19 @@ class ScoredMirrorPR:
     # Files fetched lazily via MirrorClient.get_pr_files for eligible PRs
     files: Optional[List[MirrorFile]] = None
 
+    @property
+    def number(self) -> int:
+        """Alias for ``self.pr.pr_number`` — enables duck-typing with legacy
+        PullRequest so source-agnostic functions (e.g. ``calculate_open_pr_collateral_score``)
+        accept a ScoredMirrorPR without modification."""
+        return self.pr.pr_number
+
+    @property
+    def repository_full_name(self) -> str:
+        """Alias for ``self.pr.repo_full_name`` — matches legacy PullRequest
+        attribute name for duck-typing purposes."""
+        return self.pr.repo_full_name
+
     def is_pioneer_eligible(self) -> bool:
         """Pioneer-eligible iff merged AND meets the minimum token-score gate.
 

@@ -35,6 +35,12 @@ def _pr_dict(
     author_association: str = 'CONTRIBUTOR',
     created_at: str = '2026-04-15T00:00:00Z',
     merged_at: str | None = '2026-04-18T10:00:00Z',
+    author_login: str = 'bittoby',
+    merged_by_login: str | None = 'anderdc',
+    approved_count: int = 1,
+    base_ref: str = 'main',
+    head_ref: str = 'feature/foo',
+    default_branch: str = 'main',
 ):
     return {
         'repo_full_name': repo,
@@ -43,7 +49,7 @@ def _pr_dict(
         'body': 'b',
         'state': state,
         'author_github_id': '218712309',
-        'author_login': 'bittoby',
+        'author_login': author_login,
         'author_association': author_association,
         'created_at': created_at,
         'closed_at': merged_at if state in ('CLOSED', 'MERGED') else None,
@@ -51,12 +57,20 @@ def _pr_dict(
         'last_edited_at': None,
         'edited_after_merge': False,
         'hours_since_merge': 1.0 if state == 'MERGED' else None,
-        'merged_by_login': 'anderdc' if state == 'MERGED' else None,
-        'base_ref': 'test',
+        'merged_by_login': merged_by_login if state == 'MERGED' else None,
+        'base_ref': base_ref,
+        'head_ref': head_ref,
+        'head_repo_full_name': repo,  # same-repo PR; fork cases set explicitly
+        'default_branch': default_branch,
         'head_sha': 'h', 'base_sha': 'b', 'merge_base_sha': 'mb',
         'additions': 1, 'deletions': 0, 'commits_count': 1,
         'scoring_data_stored': True,
-        'review_summary': {'maintainer_changes_requested_count': 0},
+        'review_summary': {
+            'maintainer_changes_requested_count': 0,
+            'changes_requested_count': 0,
+            'approved_count': approved_count,
+            'commented_count': 0,
+        },
         'labels': [],
         'linked_issues': [],
     }
@@ -217,6 +231,50 @@ class TestStaleClosedPR:
 # ============================================================================
 # Error paths
 # ============================================================================
+
+
+class TestEligibilityGateAtLoadTime:
+    """Legacy parity: should_skip_merged_pr gates MERGED PRs at load (pre-append),
+    not at score time — otherwise rejected PRs inflate check_eligibility's
+    merged_count and distort credibility calculation."""
+
+    def test_self_merge_without_approval_not_added(self, monkeypatch):
+        monkeypatch.delenv('DEV_MODE', raising=False)
+        client = Mock()
+        client.get_miner_pulls.return_value = _build_response([
+            _pr_dict(1, author_login='alice', merged_by_login='alice', approved_count=0),
+            _pr_dict(2),  # clean
+        ])
+        eval_ = _eval()
+        load_mirror_miner_prs(eval_, _mirror_repos('entrius/gittensor-ui'), client=client)
+
+        # Rejected PR never enters the merged list (matches legacy behavior)
+        assert len(eval_.merged_prs) == 1
+        assert eval_.merged_prs[0].pr.pr_number == 2
+
+    def test_base_ref_mismatch_not_added(self):
+        client = Mock()
+        client.get_miner_pulls.return_value = _build_response([
+            _pr_dict(1, base_ref='random-branch', default_branch='main'),
+            _pr_dict(2),  # base_ref=main matches default
+        ])
+        eval_ = _eval()
+        load_mirror_miner_prs(eval_, _mirror_repos('entrius/gittensor-ui'), client=client)
+
+        assert len(eval_.merged_prs) == 1
+        assert eval_.merged_prs[0].pr.pr_number == 2
+
+    def test_merged_pr_missing_merged_at_not_added(self):
+        client = Mock()
+        client.get_miner_pulls.return_value = _build_response([
+            _pr_dict(1, merged_at=None),  # MERGED state but no merged_at — data corruption
+            _pr_dict(2),
+        ])
+        eval_ = _eval()
+        load_mirror_miner_prs(eval_, _mirror_repos('entrius/gittensor-ui'), client=client)
+
+        assert len(eval_.merged_prs) == 1
+        assert eval_.merged_prs[0].pr.pr_number == 2
 
 
 class TestErrorPaths:

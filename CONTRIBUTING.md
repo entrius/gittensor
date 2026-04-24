@@ -65,6 +65,17 @@ For security vulnerabilities, **do not create a public issue**. Report them priv
 - When making your changes, ask yourself: will this raise the value of the repository?
 - Ensure ALL tests pass, the PR will not be accepted if there are failing tests
 
+#### CLI Changes
+
+Any PR that changes CLI output (new commands, altered output shape, changed formatting, new flags that change what gets printed, modified error messages) **must include before-and-after evidence** in the PR description:
+
+- Before and after **screenshots** of the terminal running the affected command(s), _or_
+- A short **screen recording** showing the old and new behavior
+
+This applies to any `gittensor/cli/**` change that affects what the user sees. Non-output-affecting CLI changes (internal refactors, argument parsing that doesn't surface in output, type annotations) are exempt.
+
+PRs missing this evidence will be returned for updates before review.
+
 ### 3. Submit Pull Request
 
 1. Push your branch to the repository

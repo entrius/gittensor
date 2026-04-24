@@ -13,6 +13,7 @@ from gittensor.constants import (
     MAINTAINER_ASSOCIATIONS,
     MAX_CODE_DENSITY_MULTIPLIER,
     MIN_TOKEN_SCORE_FOR_BASE_SCORE,
+    IssueStateReason,
 )
 from gittensor.utils.utils import parse_repo_name
 
@@ -124,7 +125,7 @@ class Issue:
 
     # Issue discovery fields
     author_github_id: Optional[str] = None  # Issue author's GitHub user ID (for miner matching)
-    state_reason: Optional[str] = None  # "COMPLETED", "NOT_PLANNED", "TRANSFERRED", or None (legacy)
+    state_reason: Optional[str] = None  # IssueStateReason values, or None (legacy)
     updated_at: Optional[datetime] = None
     body_or_title_edited_at: Optional[datetime] = None
     discovery_base_score: float = 0.0
@@ -138,7 +139,7 @@ class Issue:
     @property
     def is_transferred(self) -> bool:
         """Convenience accessor. Prefer gating on `state_reason` directly in new code."""
-        return self.state_reason == 'TRANSFERRED'
+        return self.state_reason == IssueStateReason.TRANSFERRED
 
 
 @dataclass

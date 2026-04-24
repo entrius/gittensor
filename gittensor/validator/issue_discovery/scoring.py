@@ -18,6 +18,7 @@ from gittensor.constants import (
     MIN_VALID_SOLVED_ISSUES,
     OPEN_ISSUE_SPAM_BASE_THRESHOLD,
     OPEN_ISSUE_SPAM_TOKEN_SCORE_PER_SLOT,
+    IssueStateReason,
 )
 from gittensor.validator.utils.datetime_utils import calculate_time_decay
 from gittensor.validator.utils.load_weights import RepositoryConfig, resolve_repo_weight
@@ -232,7 +233,7 @@ def _collect_issues_from_prs(
                 # NOT_PLANNED, TRANSFERRED, and None all route to closed_count. None is
                 # effectively unreachable inside the 35-day lookback (GitHub auto-populates
                 # stateReason on close), but treating it as not-solved is the safer default.
-                if issue.state_reason != 'COMPLETED':
+                if issue.state_reason != IssueStateReason.COMPLETED:
                     bt.logging.info(
                         f'Issue #{issue.number} state_reason={issue.state_reason} — 0 score, counts as closed'
                     )
@@ -309,7 +310,7 @@ def _merge_scan_issues(
         for issue in issues:
             # Anti-gaming: only explicitly COMPLETED closures count as solved.
             # NOT_PLANNED, TRANSFERRED, and None all route to closed_count.
-            if issue.state_reason != 'COMPLETED':
+            if issue.state_reason != IssueStateReason.COMPLETED:
                 bt.logging.info(f'Scan issue #{issue.number} state_reason={issue.state_reason} — counts as closed')
                 data.closed_count += 1
                 continue

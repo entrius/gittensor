@@ -24,6 +24,7 @@ from gittensor.constants import (
     REPO_SCAN_CONCURRENCY,
     REPO_SCAN_GLOBAL_CAP,
     REPO_SCAN_PER_REPO_CAP,
+    normalize_issue_state_reason,
 )
 from gittensor.utils.github_api_tools import find_solver_from_cross_references
 from gittensor.validator.utils.datetime_utils import parse_github_iso_to_utc
@@ -207,7 +208,7 @@ async def _scan_repo(
             author_login=user.get('login'),
             author_github_id=author_github_id,
             state='CLOSED',
-            state_reason=(issue_raw.get('state_reason') or '').upper() or None,
+            state_reason=normalize_issue_state_reason(issue_raw.get('state_reason')),
         )
 
         if solver_id is not None:

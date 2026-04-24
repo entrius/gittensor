@@ -1,6 +1,7 @@
 # Entrius 2025
 import re
-from typing import Dict
+from enum import StrEnum
+from typing import Dict, Optional
 
 # =============================================================================
 # General
@@ -27,6 +28,24 @@ GRAPHQL_VIEWER_QUERY = '{ viewer { login } }'
 MAX_FILE_SIZE_BYTES = 1_000_000
 # Too many object lookups in one GraphQL query can trigger 502 errors and lose all results.
 MAX_FILES_PER_GRAPHQL_BATCH = 50
+
+# GitHub REST / GraphQL `stateReason` for closed issues (stable string contract)
+class IssueStateReason(StrEnum):
+    COMPLETED = "COMPLETED"
+    NOT_PLANNED = "NOT_PLANNED"
+    TRANSFERRED = "TRANSFERRED"
+
+
+def normalize_issue_state_reason(value: Optional[str]) -> Optional[str]:
+    """Uppercase `state_reason`; return canonical value for known reasons, else pass-through."""
+    t = (value or "").upper() or None
+    if t is None:
+        return None
+    try:
+        return IssueStateReason(t).value
+    except ValueError:
+        return t
+
 
 # =============================================================================
 # Language & File Scoring

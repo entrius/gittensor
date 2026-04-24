@@ -34,6 +34,7 @@ from gittensor.constants import (
     REVIEW_PENALTY_RATE,
     SECONDS_PER_DAY,
     STANDARD_ISSUE_MULTIPLIER,
+    IssueStateReason,
 )
 from gittensor.utils.github_api_tools import (
     FileContentPair,
@@ -462,9 +463,9 @@ def calculate_issue_multiplier(pr: PullRequest) -> float:
 def _is_completed_when_closed(issue: Issue) -> bool:
     if issue.state != 'CLOSED':
         return True
-    if issue.state_reason != 'COMPLETED':
+    if issue.state_reason != IssueStateReason.COMPLETED:
         bt.logging.warning(
-            f'Skipping issue #{issue.number} - state_reason={issue.state_reason}, only COMPLETED grants multiplier'
+            f'Skipping issue #{issue.number} - state_reason={issue.state_reason}, only {IssueStateReason.COMPLETED} grants multiplier'
         )
         return False
     return True

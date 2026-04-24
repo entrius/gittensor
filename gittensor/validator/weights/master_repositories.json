@@ -400,6 +400,10 @@
     "weight": 0.0455
   },
   "MetaMask/metamask-extension": {
+    "additional_acceptable_branches": [
+      "release/13.28.0",
+      "release/13.29.0"
+    ],
     "weight": 0.0806
   },
   "metanova-labs/nova": {

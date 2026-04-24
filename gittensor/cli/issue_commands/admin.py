@@ -78,7 +78,7 @@ def admin_cancel(
 
         if not issue:
             print_error(f'Issue {issue_id} not found on contract.')
-            return
+            raise SystemExit(1)
 
         console.print(
             Panel(
@@ -100,6 +100,7 @@ def admin_cancel(
             print_success(f'Issue {issue_id} cancelled successfully!')
         else:
             print_error('Cancellation failed.')
+            raise SystemExit(1)
     except Exception as e:
         _handle_command_error(e)
 
@@ -139,7 +140,7 @@ def admin_payout(
 
         if not issue:
             print_error(f'Issue {issue_id} not found on contract.')
-            return
+            raise SystemExit(1)
 
         console.print(
             Panel(
@@ -161,6 +162,7 @@ def admin_payout(
             print_success(f'Payout successful! Amount: {format_alpha(result, 4)} ALPHA')
         else:
             print_error('Payout failed.')
+            raise SystemExit(1)
     except Exception as e:
         _handle_command_error(e)
 
@@ -210,6 +212,7 @@ def admin_set_owner(
             print_success(f'Ownership transferred to {new_owner}!')
         else:
             print_error('Ownership transfer failed.')
+            raise SystemExit(1)
     except Exception as e:
         _handle_command_error(e)
 
@@ -266,6 +269,7 @@ def admin_set_treasury(
             )
         else:
             print_error('Treasury hotkey update failed.')
+            raise SystemExit(1)
     except Exception as e:
         _handle_command_error(e)
 
@@ -320,6 +324,7 @@ def admin_add_validator(
             console.print('[yellow]Possible reasons:[/yellow]')
             console.print('  \u2022 Caller is not the contract owner')
             console.print('  \u2022 Validator is already whitelisted')
+            raise SystemExit(1)
     except Exception as e:
         _handle_command_error(e)
 
@@ -373,5 +378,6 @@ def admin_remove_validator(
             console.print('[yellow]Possible reasons:[/yellow]')
             console.print('  \u2022 Caller is not the contract owner')
             console.print('  \u2022 Validator is not in the whitelist')
+            raise SystemExit(1)
     except Exception as e:
         _handle_command_error(e)

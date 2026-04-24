@@ -5,14 +5,13 @@ the mirror path. The mirror returns one bundle per PR (with all scoring
 inputs inlined), so loading is a single HTTP call regardless of how many
 mirror-enabled repos the miner has touched.
 
-Filtering applied at load time:
+Filtering applied at load time (legacy parity):
 - Repo not in mirror_repos: dropped (mirror returns all tracked repos)
-- Repo inactive at PR creation time: dropped
-- PR author is a maintainer (OWNER/MEMBER/COLLABORATOR): dropped (matches legacy)
-- CLOSED PRs created before the lookback window: dropped (matches legacy)
-
-All other eligibility (base_ref check, edited_after_merge anti-gaming, etc.)
-is enforced during scoring, not loading.
+- PR created after repo became inactive: dropped
+- PR author is a maintainer (OWNER/MEMBER/COLLABORATOR): silently dropped
+- CLOSED PRs created before the lookback window: dropped
+- MERGED PRs that fail ``_should_skip_merged_mirror_pr`` (base_ref, head_ref,
+  self-merge w/o approval, etc.): dropped
 """
 
 import os
@@ -92,23 +91,21 @@ def _maybe_add_pr(
         )
         return
 
-    # Skip if the repo was deactivated before this PR was created
+    # Skip PR if it was created after the repo became inactive (legacy parity)
     if repo_config.inactive_at is not None:
         inactive_dt = parse_github_iso_to_utc(repo_config.inactive_at)
         if pr.created_at >= inactive_dt:
             bt.logging.info(
                 f'Skipping mirror PR #{pr.pr_number} in {pr.repo_full_name} - '
-                f'created after repo became inactive'
+                f'PR was created after repo became inactive '
+                f'(created: {pr.created_at.isoformat()}, inactive: {inactive_dt.isoformat()})'
             )
             return
 
-    # Skip maintainer-authored PRs (consistent with legacy load behavior).
-    # DEV_MODE bypasses this so local testing can score maintainer PRs.
+    # Silent maintainer skip (matches legacy try_add_open_or_closed_pr — would
+    # generate one log line per maintainer-merged PR otherwise, which is the
+    # noisiest single skip reason).
     if not os.environ.get('DEV_MODE') and pr.author_association in MAINTAINER_ASSOCIATIONS:
-        bt.logging.info(
-            f'Skipping mirror PR #{pr.pr_number} in {pr.repo_full_name} - '
-            f'author is {pr.author_association}'
-        )
         return
 
     if pr.state == 'OPEN':

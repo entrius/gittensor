@@ -17,9 +17,10 @@ Anti-gaming gates (all applied):
 - not issue.is_transferred
 - issue.author_github_id != solving_pr.author_github_id (anti-self-issue)
 
-One-issue-per-PR rule and "solver-is-also-discoverer" credibility-only gate
-mirror the legacy behavior in
-``gittensor.validator.issue_discovery.scoring._collect_issues_from_prs``.
+Same-account ("solver is also discoverer") gives credibility only — no
+discovery score. One-issue-per-PR rule prevents a single solving PR from
+generating multiple discovery scores when it closes more than one issue;
+the earliest-created qualifying issue wins.
 
 Base-score resolution uses a per-cycle cross-miner cache. Most solving PRs on
 mirror-enabled repos will be miners' own PRs that OSS scoring already tokenized;

@@ -3,20 +3,23 @@
 Mirror analogue of ``gittensor.validator.oss_contributions.scoring``. Scope:
 - Compute base_score for each PR via the existing token-scoring infra
 - Compute per-PR multipliers: repo_weight, time_decay, review_quality, label, issue
-- Skip merged PRs that fail the eligibility gate (base_ref / head_ref
-  acceptable-branches check, self-merge w/o external approval, maintainer
-  author block). ``edited_after_merge`` is NOT a PR-level gate — it gates only
-  the issue bonus multiplier (``_is_valid_linked_issue``), matching legacy.
-- Aggregate token-scoring outputs onto the MirrorMinerEvaluation
+- ``calculate_mirror_pioneer_dividends`` walks ``mirror_merged_prs`` across
+  miners with the same per-repo earliest-merged ranking as legacy
+- The eligibility gate (``_should_skip_merged_mirror_pr``) is exported and
+  used at LOAD time by ``mirror.load._maybe_add_pr`` — rejected PRs never
+  enter ``mirror_merged_prs`` (matches legacy ``should_skip_merged_pr`` flow)
 
-Out of scope (handled in commit 6 with the routing wiring):
-- Cross-path totals: spam_multiplier, credibility_multiplier
-- Cross-miner: pioneer_dividends
-- Final earned_score composition (depends on credibility + spam being set)
+Cross-path concerns handled by ``finalize_miner_scores`` in the legacy
+scoring module, which walks both ``merged_pull_requests`` and
+``mirror_merged_prs``: spam_multiplier, credibility_multiplier, final
+earned_score composition, and base/earned/nodes aggregation.
 
-The MirrorPullRequest's anti-gaming fields (`edited_after_merge`, label
-`actor_association`, `state_reason`, `is_transferred`) are read directly —
-no None-checks because mirror always populates them.
+Anti-gaming notes:
+- ``edited_after_merge`` is NOT a PR-level gate — it gates only the issue
+  bonus multiplier in ``_is_valid_linked_issue``, matching legacy
+  ``is_valid_issue``.
+- Mirror's ``actor_association`` per label lets ``_resolve_maintainer_set_label``
+  require maintainer-applied labels; legacy can't do this and accepts any-applier.
 """
 
 import os
@@ -373,8 +376,8 @@ def _calculate_base_score(
 def _calculate_pr_multipliers(scored: ScoredMirrorPR, repo_config: RepositoryConfig) -> None:
     """Compute repo_weight, time_decay, review_quality, label, issue multipliers.
 
-    Spam and credibility multipliers are deferred to the cross-path finalize step
-    (commit 6) — they depend on combined counts across both legacy and mirror paths.
+    Spam and credibility multipliers are deferred to ``finalize_miner_scores``
+    — they depend on counts combined across both legacy and mirror paths.
     """
     pr = scored.pr
     is_merged = pr.state == 'MERGED'

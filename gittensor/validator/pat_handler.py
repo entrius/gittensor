@@ -26,6 +26,19 @@ def _get_hotkey(synapse: bt.Synapse) -> str:
     return synapse.dendrite.hotkey
 
 
+def _uid_for_hotkey(validator: 'Validator', hotkey: str) -> Optional[int]:
+    """Map hotkey to subnet UID in one operation.
+
+    The metagraph can be resynced on another thread between a naive ``in`` check and
+    ``.index()``; a single :meth:`list.index` avoids that TOCTOU and is sufficient
+    when we only need the current snapshot.
+    """
+    try:
+        return validator.metagraph.hotkeys.index(hotkey)
+    except ValueError:
+        return None
+
+
 # ---------------------------------------------------------------------------
 # PatBroadcastSynapse handlers
 # ---------------------------------------------------------------------------
@@ -43,10 +56,9 @@ async def handle_pat_broadcast(validator: 'Validator', synapse: PatBroadcastSyna
         return synapse
 
     # 1. Verify hotkey is registered on the subnet
-    if hotkey not in validator.metagraph.hotkeys:
+    uid = _uid_for_hotkey(validator, hotkey)
+    if uid is None:
         return _reject('Hotkey not registered on subnet')
-
-    uid = validator.metagraph.hotkeys.index(hotkey)
 
     # 2. Validate PAT (checks it works, extracts github_id, verifies account age)
     github_id, error = validate_github_credentials(uid, synapse.github_access_token)
@@ -87,9 +99,9 @@ async def blacklist_pat_broadcast(validator: 'Validator', synapse: PatBroadcastS
 async def priority_pat_broadcast(validator: 'Validator', synapse: PatBroadcastSynapse) -> float:
     """Prioritize PAT broadcasts by stake."""
     hotkey = _get_hotkey(synapse)
-    if hotkey not in validator.metagraph.hotkeys:
+    uid = _uid_for_hotkey(validator, hotkey)
+    if uid is None:
         return 0.0
-    uid = validator.metagraph.hotkeys.index(hotkey)
     return float(validator.metagraph.S[uid])
 
 
@@ -101,7 +113,15 @@ async def priority_pat_broadcast(validator: 'Validator', synapse: PatBroadcastSy
 async def handle_pat_check(validator: 'Validator', synapse: PatCheckSynapse) -> PatCheckSynapse:
     """Check if the validator has the miner's PAT stored and re-validate it."""
     hotkey = _get_hotkey(synapse)
-    uid = validator.metagraph.hotkeys.index(hotkey)
+    uid = _uid_for_hotkey(validator, hotkey)
+    if uid is None:
+        synapse.has_pat = False
+        synapse.pat_valid = False
+        synapse.rejection_reason = 'Hotkey not registered on subnet'
+        bt.logging.warning(
+            f'PAT check rejected — hotkey {hotkey[:16]}... not in metagraph (race or deregistered)'
+        )
+        return synapse
     entry = pat_storage.get_pat_by_uid(uid)
 
     bt.logging.info(f'PAT check request — UID: {uid}, hotkey: {hotkey[:16]}...')
@@ -147,9 +167,9 @@ async def blacklist_pat_check(validator: 'Validator', synapse: PatCheckSynapse) 
 async def priority_pat_check(validator: 'Validator', synapse: PatCheckSynapse) -> float:
     """Prioritize PAT checks by stake."""
     hotkey = _get_hotkey(synapse)
-    if hotkey not in validator.metagraph.hotkeys:
+    uid = _uid_for_hotkey(validator, hotkey)
+    if uid is None:
         return 0.0
-    uid = validator.metagraph.hotkeys.index(hotkey)
     return float(validator.metagraph.S[uid])
 
 

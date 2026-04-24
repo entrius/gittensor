@@ -19,7 +19,6 @@ from rich.table import Table
 
 from .help import StyledCommand
 from .helpers import (
-    _handle_command_error,
     _read_contract_packed_storage,
     _read_issues_from_child_storage,
     _resolve_contract_and_network,
@@ -28,7 +27,7 @@ from .helpers import (
     emit_error_json,
     emit_json,
     format_alpha,
-    print_error,
+    handle_exception,
     print_network_header,
     read_issues_from_contract,
     with_cli_behavior_options,
@@ -83,9 +82,9 @@ def issues_list(issue_id: int, network: str, rpc_url: str, contract: str, verbos
             if issue is None:
                 emit_error_json(f'Issue {issue_id} not found on-chain.', error_type='not_found')
                 raise SystemExit(1)
-            emit_json(issue)
+            emit_json({'success': True, 'issue': issue})
         else:
-            emit_json(issues)
+            emit_json({'success': True, 'issue_count': len(issues), 'issues': issues})
         return
 
     # Single issue detail view
@@ -206,6 +205,7 @@ def issues_bounty_pool(network: str, rpc_url: str, contract: str, verbose: bool,
         if as_json:
             emit_json(
                 {
+                    'success': True,
                     'total_bounty_pool_raw': total_bounty_pool,
                     'total_bounty_pool_alpha': format_alpha(total_bounty_pool, 4),
                     'issue_count': len(issues),
@@ -218,8 +218,7 @@ def issues_bounty_pool(network: str, rpc_url: str, contract: str, verbose: bool,
         )
         console.print(f'[dim]Sum of bounty amounts from {len(issues)} issue(s)[/dim]')
     except Exception as e:
-        print_error(str(e))
-        raise SystemExit(1)
+        handle_exception(as_json=as_json, message=str(e))
 
 
 @click.command('pending-harvest', cls=StyledCommand)
@@ -263,6 +262,7 @@ def issues_pending_harvest(network: str, rpc_url: str, contract: str, verbose: b
         if as_json:
             emit_json(
                 {
+                    'success': True,
                     'treasury_stake_raw': treasury_stake,
                     'treasury_stake_alpha': format_alpha(treasury_stake, 4),
                     'allocated_bounties_raw': total_bounty_pool,
@@ -277,7 +277,7 @@ def issues_pending_harvest(network: str, rpc_url: str, contract: str, verbose: b
         console.print(f'[green]Allocated to Bounties:[/green] {format_alpha(total_bounty_pool, 4)} ALPHA')
         console.print(f'[green]Pending Harvest:[/green] {format_alpha(pending_harvest, 4)} ALPHA')
     except Exception as e:
-        _handle_command_error(e)
+        handle_exception(as_json=as_json, message=str(e))
 
 
 @click.command('info', cls=StyledCommand)
@@ -305,7 +305,7 @@ def admin_info(network: str, rpc_url: str, contract: str, verbose: bool, as_json
 
         if packed:
             if as_json:
-                emit_json(packed)
+                emit_json({'success': True, **packed})
                 return
 
             console.print(
@@ -319,8 +319,11 @@ def admin_info(network: str, rpc_url: str, contract: str, verbose: bool, as_json
                 )
             )
         else:
-            console.print('[yellow]Could not read contract configuration.[/yellow]')
+            msg = 'Could not read contract configuration.'
+            if as_json:
+                emit_error_json(msg, error_type='read_failed')
+                raise SystemExit(1)
+            console.print(f'[yellow]{msg}[/yellow]')
             console.print('[dim]Try running with --verbose to see debug details.[/dim]')
     except Exception as e:
-        print_error(str(e))
-        raise SystemExit(1)
+        handle_exception(as_json=as_json, message=str(e))

@@ -178,13 +178,14 @@ def make_graphql_headers(token: str) -> Dict[str, str]:
     return {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
 
 
-def get_github_user(token: str) -> Optional[Dict[str, Any]]:
-    """Fetch GitHub user data for a PAT with retry.
+def get_github_id(token: str) -> Optional[str]:
+    """Get GitHub numeric user id (as string) using a PAT.
 
     Args:
-        token (str): Github pat
+        token (str): GitHub personal access token.
+
     Returns:
-        Optional[Dict[str, Any]]: Parsed JSON user object on success, or None on failure.
+        Optional[str]: Numeric user id as a string, or None if it cannot be determined.
     """
     if not token:
         return None
@@ -202,7 +203,8 @@ def get_github_user(token: str) -> Optional[Dict[str, Any]]:
                     bt.logging.warning(f'Failed to parse GitHub /user JSON response: {e}')
                     return None
 
-                return user_data
+                user_id = user_data.get('id')
+                return str(user_id) if user_id is not None else None
 
             bt.logging.warning(
                 f'GitHub /user request failed with status {response.status_code} (attempt {attempt + 1}/6)'
@@ -216,26 +218,6 @@ def get_github_user(token: str) -> Optional[Dict[str, Any]]:
                 time.sleep(2)
 
     return None
-
-
-def get_github_id(token: str) -> Optional[str]:
-    """Get GitHub numeric user id (as string) using a PAT.
-
-    Args:
-        token (str): GitHub personal access token.
-
-    Returns:
-        Optional[str]: Numeric user id as a string, or None if it cannot be determined.
-    """
-    user_data = get_github_user(token)
-    if not user_data:
-        return None
-
-    user_id = user_data.get('id')
-    if user_id is None:
-        return None
-
-    return str(user_id)
 
 
 def get_merge_base_sha(repository: str, base_sha: str, head_sha: str, token: str) -> Optional[str]:
@@ -1076,22 +1058,6 @@ def find_solver_from_cross_references(
     return best.get('author_id'), best.get('number')
 
 
-def find_solver_from_timeline(
-    repo: str, issue_number: int, token: str
-) -> Optional[tuple[Optional[int], Optional[int]]]:
-    """Find the PR author who closed an issue.
-
-    Uses GraphQL cross-reference analysis to find merged PRs that close the
-    issue, with baseRepository validation and closingIssuesReferences check.
-
-    Returns:
-        ``None`` when lookup fails and should be retried later. Otherwise
-        ``(solver_github_id, pr_number)`` where either may be None if not found.
-    """
-    bt.logging.debug(f'Finding solver for {repo}#{issue_number}')
-    return find_solver_from_cross_references(repo, issue_number, token)
-
-
 def check_github_issue_closed(repo: str, issue_number: int, token: str) -> Optional[Dict[str, Any]]:
     """Check if a GitHub issue is closed and get the solving PR info.
 
@@ -1121,7 +1087,8 @@ def check_github_issue_closed(repo: str, issue_number: int, token: str) -> Optio
         if data.get('state') != 'closed':
             return {'is_closed': False}
 
-        solver_lookup = find_solver_from_timeline(repo, issue_number, token)
+        bt.logging.debug(f'Finding solver for {repo}#{issue_number}')
+        solver_lookup = find_solver_from_cross_references(repo, issue_number, token)
         if solver_lookup is None:
             bt.logging.warning(f'Solver lookup failed for {repo}#{issue_number}')
             solver_lookup_failed = True
@@ -1158,6 +1125,7 @@ def _fetch_file_contents_with_base_batch(
     head_sha: str,
     batch_changes: List['FileChangeType'],
     token: str,
+    pr_number: Optional[int] = None,
 ) -> Dict[str, FileContentPair]:
     """Fetch base and head file contents for a single batch of file changes.
 
@@ -1207,7 +1175,8 @@ def _fetch_file_contents_with_base_batch(
 
     data = execute_graphql_query(query, variables, token)
     if data is None:
-        bt.logging.warning(f'Failed to fetch file contents for {repo_owner}/{repo_name}')
+        ctx = f' (PR #{pr_number})' if pr_number else ''
+        bt.logging.warning(f'Failed to fetch file contents for {repo_owner}/{repo_name}{ctx}')
         return {fc.filename: FileContentPair(None, None) for fc in batch_changes}
 
     if 'errors' in data:
@@ -1244,6 +1213,7 @@ def fetch_file_contents_with_base(
     head_sha: str,
     file_changes: List['FileChangeType'],
     token: str,
+    pr_number: Optional[int] = None,
 ) -> Dict[str, FileContentPair]:
     """Fetch old and new versions of files in batches so large PRs don't hit complexity limits.
 
@@ -1265,7 +1235,9 @@ def fetch_file_contents_with_base(
 
     for batch_start in range(0, len(file_changes), MAX_FILES_PER_GRAPHQL_BATCH):
         batch = file_changes[batch_start : batch_start + MAX_FILES_PER_GRAPHQL_BATCH]
-        batch_results = _fetch_file_contents_with_base_batch(repo_owner, repo_name, base_sha, head_sha, batch, token)
+        batch_results = _fetch_file_contents_with_base_batch(
+            repo_owner, repo_name, base_sha, head_sha, batch, token, pr_number=pr_number
+        )
         results.update(batch_results)
 
     return results

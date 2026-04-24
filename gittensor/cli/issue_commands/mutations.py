@@ -127,16 +127,20 @@ def issue_register(
     )
     config = load_config()
 
-    # Validate inputs before showing summary
+    # Validate inputs before showing summary. The register path is owner-only
+    # and spends real ALPHA, so both GitHub probes run in strict mode: any
+    # warn-and-skip branch (network error, 5xx, 403, rate-limit) is promoted
+    # to a click.BadParameter abort so we never submit register_issue on-chain
+    # against a repository or issue we failed to verify.
     try:
-        owner, repo_name = validate_repository(repo)
+        owner, repo_name = validate_repository(repo, require_verified_exists=True)
         bounty_amount = validate_bounty_amount(bounty)
         if issue_number < 1 or issue_number > MAX_ISSUE_NUMBER:
             raise click.BadParameter(
                 f'Issue number must be between 1 and {MAX_ISSUE_NUMBER} (got {issue_number})',
                 param_hint='--issue',
             )
-        validate_github_issue(owner, repo_name, issue_number)
+        validate_github_issue(owner, repo_name, issue_number, require_verified_exists=True)
     except click.BadParameter as e:
         raise click.ClickException(str(e))
 
@@ -375,13 +379,17 @@ def issue_harvest(wallet_name: str, wallet_hotkey: str, network: str, rpc_url: s
                 console.print(f'[cyan]Transaction hash:[/cyan] {result.get("tx_hash", "N/A")}')
                 print_error(result.get('error', 'Unknown'))
                 console.print('[dim]Check proxy permissions: contract needs NonCritical proxy.[/dim]')
-            elif result.get('status') == 'failed':
+                raise SystemExit(1)
+            elif result.get('status') in {'failed', 'error'}:
                 print_error(f'Harvest failed: {result.get("error", "Unknown error")}')
+                raise SystemExit(1)
             else:
                 console.print(f'\n[yellow]Harvest result: {result}[/yellow]')
+                raise SystemExit(1)
         else:
             print_error('Harvest returned None — check logs for details.')
             console.print('[dim]Run with --verbose for more information.[/dim]')
+            raise SystemExit(1)
 
     except ImportError as e:
         print_error(f'Missing dependency — {e}')

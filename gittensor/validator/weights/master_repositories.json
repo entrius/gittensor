@@ -121,6 +121,9 @@
   "brave/brave-browser": {
     "weight": 0.0946
   },
+  "browser-use/browser-harness": {
+    "weight": 0.1
+  },
   "browser-use/browser-use": {
     "weight": 0.0526
   },
@@ -200,13 +203,13 @@
     "weight": 1.0
   },
   "entrius/allways-ui": {
-    "weight": 0.88
+    "weight": 0.5
   },
   "entrius/gittensor": {
     "weight": 1.0
   },
   "entrius/gittensor-ui": {
-    "weight": 0.74
+    "weight": 0.5
   },
   "espressif/arduino-esp32": {
     "weight": 0.1444
@@ -456,6 +459,9 @@
     ],
     "weight": 0.0751
   },
+  "nousresearch/hermes-agent": {
+    "weight": 0.59
+  },
   "numinouslabs/numinous": {
     "weight": 0.0413
   },
@@ -475,7 +481,7 @@
     "weight": 0.0407
   },
   "openclaw/openclaw": {
-    "weight": 0.2316
+    "weight": 0.8
   },
   "OpenGradient/BitQuant-Subnet": {
     "weight": 0.0462

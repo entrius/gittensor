@@ -10,14 +10,13 @@ import os
 import re
 import struct
 import sys
-import urllib.error
-import urllib.request
 from contextlib import nullcontext
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Callable, ContextManager, Dict, List, Optional, Tuple, TypeVar
 
 import click
+import requests
 from rich.console import Console
 
 from gittensor.cli.issue_commands.tables import build_pr_table
@@ -124,7 +123,7 @@ def with_cli_behavior_options(
     include_yes: bool = False,
     verbose_help: str = 'Show debug output',
     json_help: str = 'Output as JSON for scripting',
-    yes_help: str = 'Skip confirmation prompt (non-interactive/CI)',
+    yes_help: str = 'Skip confirmation prompt (non-interactive/CI). Alias: --no-prompt (btcli-compatible).',
 ) -> Callable[[CommandFunc], CommandFunc]:
     """Add common CLI behavior options such as verbose, JSON, and confirmation controls."""
     decorators: list[Callable[[CommandFunc], CommandFunc]] = []
@@ -151,7 +150,9 @@ def with_cli_behavior_options(
         decorators.append(
             click.option(
                 '--yes',
+                '--no-prompt',
                 '-y',
+                'yes',
                 is_flag=True,
                 help=yes_help,
             )
@@ -252,6 +253,21 @@ def _is_interactive() -> bool:
     return getattr(sys.stdin, 'isatty', lambda: False)()
 
 
+def confirm_or_abort(prompt: str, yes: bool, default: bool = False) -> bool:
+    """Prompt for confirmation before a destructive operation.
+
+    Returns True if the caller should proceed. Returns False (and prints a
+    cancellation message) if the user declines. `yes` and non-TTY input both
+    skip the prompt and proceed.
+    """
+    if yes or not _is_interactive():
+        return True
+    if click.confirm(f'\n{prompt}', default=default):
+        return True
+    console.print('[yellow]Cancelled.[/yellow]')
+    return False
+
+
 def get_github_pat() -> Optional[str]:
     """Return GITTENSOR_MINER_PAT from environment, or None."""
     return os.environ.get('GITTENSOR_MINER_PAT') or None
@@ -348,12 +364,37 @@ def validate_bounty_amount(bounty: str) -> int:
     return raw
 
 
-def validate_repository(repo: str, verify_exists: bool = True) -> Tuple[str, str]:
+def _raise_github_verification_required(
+    check: str,
+    detail: str,
+    *,
+    param_hint: str,
+) -> None:
+    """Raise BadParameter when a GitHub existence probe could not complete.
+
+    Used by the strict variants of validate_repository and validate_github_issue
+    so mutation commands never fall through to on-chain writes on transient failures.
+    """
+    raise click.BadParameter(
+        f'Could not verify {check} on GitHub ({detail}). Try again when GitHub is reachable.',
+        param_hint=param_hint,
+    )
+
+
+def validate_repository(
+    repo: str,
+    verify_exists: bool = True,
+    *,
+    require_verified_exists: bool = False,
+) -> Tuple[str, str]:
     """Validate owner/repo format and optionally verify it exists on GitHub.
 
-    Returns (owner, repo_name) on success.
-    Raises click.BadParameter on failure.
+    Returns (owner, repo_name) on success. Raises click.BadParameter on failure.
+    Pass require_verified_exists=True to abort on transient GitHub errors instead
+    of warning and continuing; requires verify_exists=True.
     """
+    if require_verified_exists and not verify_exists:
+        raise ValueError('require_verified_exists requires verify_exists=True')
     repo = repo.strip()
 
     if not REPO_PATTERN.match(repo):
@@ -366,46 +407,87 @@ def validate_repository(repo: str, verify_exists: bool = True) -> Tuple[str, str
     owner, repo_name = repo.split('/', 1)
 
     if verify_exists:
-        url = f'https://api.github.com/repos/{owner}/{repo_name}'
         try:
-            req = urllib.request.Request(url, headers={'User-Agent': 'gittensor-cli'})
-            urllib.request.urlopen(req, timeout=GITHUB_API_TIMEOUT)
-        except urllib.error.HTTPError as e:
-            if e.code == 404:
+            resp = requests.get(
+                f'https://api.github.com/repos/{owner}/{repo_name}',
+                headers={'User-Agent': 'gittensor-cli'},
+                timeout=GITHUB_API_TIMEOUT,
+            )
+            if resp.status_code == 404:
                 raise click.BadParameter(
                     f"Repository '{owner}/{repo_name}' not found on GitHub",
                     param_hint='--repo',
                 )
-            # Non-404 HTTP errors: warn but don't block
-            console.print(f'[yellow]Warning: GitHub API returned {e.code} — skipping existence check[/yellow]')
-        except (urllib.error.URLError, OSError):
+            if not resp.ok:
+                if require_verified_exists:
+                    _raise_github_verification_required(
+                        f"repository '{owner}/{repo_name}'",
+                        f'status {resp.status_code}',
+                        param_hint='--repo',
+                    )
+                console.print(
+                    f'[yellow]Warning: GitHub API returned {resp.status_code} — skipping existence check[/yellow]'
+                )
+        except requests.RequestException as exc:
+            if require_verified_exists:
+                detail = type(exc).__name__
+                _raise_github_verification_required(
+                    f"repository '{owner}/{repo_name}'",
+                    detail,
+                    param_hint='--repo',
+                )
             console.print('[yellow]Warning: Could not reach GitHub API — skipping existence check[/yellow]')
 
     return owner, repo_name
 
 
-def validate_github_issue(owner: str, repo: str, issue_number: int) -> Optional[Dict[str, Any]]:
+def validate_github_issue(
+    owner: str,
+    repo: str,
+    issue_number: int,
+    *,
+    require_verified_exists: bool = False,
+) -> Optional[Dict[str, Any]]:
     """Verify a GitHub issue exists, is open, and is not a pull request.
 
     Returns the issue JSON data on success, or None if verification was skipped
-    due to network issues.  Raises click.BadParameter on validation failure.
+    due to network issues. Raises click.BadParameter on validation failure.
+    Pass require_verified_exists=True to abort on transient errors instead of
+    warning and continuing.
     """
-    url = f'https://api.github.com/repos/{owner}/{repo}/issues/{issue_number}'
     try:
-        req = urllib.request.Request(url, headers={'User-Agent': 'gittensor-cli'})
-        resp = urllib.request.urlopen(req, timeout=GITHUB_API_TIMEOUT)
-        data = json.loads(resp.read().decode())
-    except urllib.error.HTTPError as e:
-        if e.code == 404:
-            raise click.BadParameter(
-                f'Issue #{issue_number} not found in {owner}/{repo}',
+        resp = requests.get(
+            f'https://api.github.com/repos/{owner}/{repo}/issues/{issue_number}',
+            headers={'User-Agent': 'gittensor-cli'},
+            timeout=GITHUB_API_TIMEOUT,
+        )
+    except requests.RequestException as exc:
+        if require_verified_exists:
+            detail = type(exc).__name__
+            _raise_github_verification_required(
+                f'issue #{issue_number} in {owner}/{repo}',
+                detail,
                 param_hint='--issue',
             )
-        console.print(f'[yellow]Warning: GitHub API returned {e.code} — skipping issue check[/yellow]')
-        return None
-    except (urllib.error.URLError, OSError):
         console.print('[yellow]Warning: Could not reach GitHub API — skipping issue check[/yellow]')
         return None
+
+    if resp.status_code == 404:
+        raise click.BadParameter(
+            f'Issue #{issue_number} not found in {owner}/{repo}',
+            param_hint='--issue',
+        )
+    if not resp.ok:
+        if require_verified_exists:
+            _raise_github_verification_required(
+                f'issue #{issue_number} in {owner}/{repo}',
+                f'status {resp.status_code}',
+                param_hint='--issue',
+            )
+        console.print(f'[yellow]Warning: GitHub API returned {resp.status_code} — skipping issue check[/yellow]')
+        return None
+
+    data = resp.json()
 
     if 'pull_request' in data:
         raise click.BadParameter(

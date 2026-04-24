@@ -37,7 +37,7 @@ def _make_issue(number: int, author_id: str, closed_at: Optional[str], updated_a
 
 
 def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    return asyncio.run(coro)
 
 
 def _run_scan(issues: List[dict], lookback_date: str) -> Dict[str, List[Issue]]:

@@ -10,7 +10,6 @@ Commands:
     gitt vote list
 """
 
-import json as json_mod
 import re
 
 import click
@@ -22,7 +21,10 @@ from .helpers import (
     _handle_command_error,
     _make_contract_client,
     _resolve_contract_and_network,
+    confirm_or_abort,
     console,
+    emit_json,
+    handle_exception,
     print_error,
     print_network_header,
     print_success,
@@ -78,6 +80,7 @@ def vote():
 @click.argument('pr_number_or_url', type=str)
 @with_wallet_options()
 @with_network_contract_options('Contract address (uses config if empty)')
+@with_cli_behavior_options(include_yes=True)
 def val_vote_solution(
     issue_id: int,
     solver_hotkey: str,
@@ -88,6 +91,7 @@ def val_vote_solution(
     network: str,
     rpc_url: str,
     contract: str,
+    yes: bool,
 ):
     """Vote for a solution on an active issue (triggers auto-payout on consensus).
 
@@ -133,6 +137,9 @@ def val_vote_solution(
         )
     )
 
+    if not confirm_or_abort(f'Vote that {solver_hotkey} solved issue {issue_id} via PR #{pr_number}?', yes):
+        return
+
     try:
         with console.status('[bold cyan]Submitting vote...', spinner='dots'):
             wallet, client = _make_contract_client(contract_addr, ws_endpoint, wallet_name, wallet_hotkey)
@@ -142,6 +149,7 @@ def val_vote_solution(
             print_success('Solution vote submitted!')
         else:
             print_error('Vote failed.')
+            raise SystemExit(1)
     except Exception as e:
         _handle_command_error(e)
 
@@ -151,6 +159,7 @@ def val_vote_solution(
 @click.argument('reason', type=str)
 @with_wallet_options()
 @with_network_contract_options('Contract address (uses config if empty)')
+@with_cli_behavior_options(include_yes=True)
 def val_vote_cancel_issue(
     issue_id: int,
     reason: str,
@@ -159,6 +168,7 @@ def val_vote_cancel_issue(
     network: str,
     rpc_url: str,
     contract: str,
+    yes: bool,
 ):
     """Vote to cancel an issue (works on Registered or Active).
 
@@ -186,6 +196,9 @@ def val_vote_cancel_issue(
         )
     )
 
+    if not confirm_or_abort(f'Vote to cancel issue {issue_id}?', yes):
+        return
+
     try:
         with console.status('[bold cyan]Submitting cancel vote...', spinner='dots'):
             wallet, client = _make_contract_client(contract_addr, ws_endpoint, wallet_name, wallet_hotkey)
@@ -195,6 +208,7 @@ def val_vote_cancel_issue(
             print_success('Cancel vote submitted!')
         else:
             print_error('Cancel vote failed.')
+            raise SystemExit(1)
     except Exception as e:
         _handle_command_error(e)
 
@@ -235,15 +249,13 @@ def vote_list_validators(network: str, rpc_url: str, contract: str, as_json: boo
         required = (n // 2) + 1
 
         if as_json:
-            console.print(
-                json_mod.dumps(
-                    {
-                        'validators': validators,
-                        'count': n,
-                        'consensus_threshold': required,
-                    },
-                    indent=2,
-                )
+            emit_json(
+                {
+                    'success': True,
+                    'validators': validators,
+                    'count': n,
+                    'consensus_threshold': required,
+                }
             )
             return
 
@@ -263,4 +275,4 @@ def vote_list_validators(network: str, rpc_url: str, contract: str, as_json: boo
             console.print('[dim]Add validators with: gitt admin add-vali <HOTKEY>[/dim]')
 
     except Exception as e:
-        _handle_command_error(e)
+        handle_exception(as_json=as_json, message=str(e))

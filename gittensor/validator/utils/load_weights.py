@@ -1,13 +1,38 @@
 # The MIT License (MIT)
 # Copyright © 2025 Entrius
 import json
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import bittensor as bt
 
 from gittensor.constants import DEFAULT_REPO_WEIGHT, NON_CODE_EXTENSIONS
+
+
+def _clamp_weight(value: Any, default: float, *, source: str) -> float:
+    """Coerce a JSON-sourced weight and reject negative / non-finite values.
+
+    A single out-of-range weight can invert scoring for an entire repo, language,
+    or token type; this guard substitutes the per-site default and logs the
+    offending source so operators can trace a bad chore(weights) edit.
+
+    `value` is typed Any because it is parsed from JSON and may be any Python
+    type (dict, list, str, bool, number, None); TypeError/ValueError are caught
+    below, so passing a non-convertible value is runtime-safe.
+    """
+    if value is None:
+        return default
+    try:
+        weight = float(value)
+    except (TypeError, ValueError):
+        bt.logging.warning(f'Non-numeric weight for {source} (got {value!r}), defaulting to {default}')
+        return default
+    if not math.isfinite(weight) or weight < 0:
+        bt.logging.warning(f'Rejecting out-of-range weight {weight} for {source}, defaulting to {default}')
+        return default
+    return weight
 
 
 @dataclass
@@ -114,7 +139,7 @@ def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
         for repo_name, metadata in data.items():
             try:
                 config = RepositoryConfig(
-                    weight=float(metadata.get('weight', 0.01)),
+                    weight=_clamp_weight(metadata.get('weight'), DEFAULT_REPO_WEIGHT, source=f'repo:{repo_name}'),
                     inactive_at=metadata.get('inactive_at'),
                     additional_acceptable_branches=metadata.get('additional_acceptable_branches'),
                 )
@@ -122,7 +147,9 @@ def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
             except (ValueError, TypeError) as e:
                 bt.logging.warning(f'Could not parse config for {repo_name}: {e}, using defaults')
                 # Create config with defaults if parsing fails
-                normalized_data[repo_name.lower()] = RepositoryConfig(weight=float(metadata.get('weight', 0.01)))
+                normalized_data[repo_name.lower()] = RepositoryConfig(
+                    weight=_clamp_weight(metadata.get('weight'), DEFAULT_REPO_WEIGHT, source=f'repo:{repo_name}'),
+                )
 
         bt.logging.debug(f'Successfully loaded {len(normalized_data)} repository entries from {weights_file}')
         return normalized_data
@@ -161,12 +188,14 @@ def load_programming_language_weights() -> Dict[str, LanguageConfig]:
             try:
                 if isinstance(config, dict):
                     result[extension] = LanguageConfig(
-                        weight=float(config.get('weight', 1.0)),
+                        weight=_clamp_weight(config.get('weight'), 1.0, source=f'language:{extension}'),
                         language=config.get('language'),
                     )
                 else:
                     # Backwards compatibility: handle plain float values
-                    result[extension] = LanguageConfig(weight=float(config))
+                    result[extension] = LanguageConfig(
+                        weight=_clamp_weight(config, 1.0, source=f'language:{extension}'),
+                    )
             except (ValueError, TypeError) as e:
                 bt.logging.warning(f'Could not parse config for {extension}: {config} - {e}')
                 continue
@@ -206,8 +235,14 @@ def load_token_config() -> TokenConfig:
         bt.logging.error(f'Invalid JSON in token weights file: {e}')
         raise
 
-    structural_bonus = dict(data.get('structural_bonus', {}))
-    leaf_tokens = dict(data.get('leaf_tokens', {}))
+    structural_bonus = {
+        node_type: _clamp_weight(weight, 0.0, source=f'structural_bonus:{node_type}')
+        for node_type, weight in data.get('structural_bonus', {}).items()
+    }
+    leaf_tokens = {
+        node_type: _clamp_weight(weight, 0.0, source=f'leaf_tokens:{node_type}')
+        for node_type, weight in data.get('leaf_tokens', {}).items()
+    }
 
     # Load language configurations (includes tree-sitter language mapping)
     language_configs = load_programming_language_weights()

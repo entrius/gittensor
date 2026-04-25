@@ -501,3 +501,107 @@ class TestCacheStats:
         assert stats.fetch_failures == 1
         # Failed lookups are NOT cached (so a retry is possible)
         assert cache == {}
+
+
+class TestOpenIssueSpamSourceIsMirror:
+    """The open-issue spam multiplier should source its count from mirror's
+    response, NOT evaluation.total_open_issues which only legacy fills.
+    Otherwise an all-mirror miner gets a free pass on the spam gate."""
+
+    def test_all_mirror_miner_with_many_open_issues_trips_spam(self):
+        """Miner with no legacy load (total_open_issues stays 0) but many open
+        issues in the mirror response should still trip the spam multiplier."""
+        # 6 open issues (above OPEN_ISSUE_SPAM_BASE_THRESHOLD=5 with 0 token bonus).
+        # All open + same-account so they don't get scored either way — point is
+        # the spam gate triggers based on mirror data, not legacy total_open_issues.
+        open_issues = [
+            _issue_dict(
+                issue_number=200 + i,
+                state='OPEN',
+                state_reason=None,
+                solved_by_pr=None,
+            )
+            for i in range(6)
+        ]
+        # Plus a few solved issues so the miner has some scoreable work + valid count.
+        solved_issues = [
+            _issue_dict(issue_number=300 + i, author_github_id=f'discoverer{i}')
+            for i in range(8)
+        ]
+        client = Mock()
+        client.get_miner_issues.return_value = _response(open_issues + solved_issues)
+
+        eval_ = _eval()
+        # Pre-seed cache with high-token solving PR so issues clear valid gate
+        eval_.mirror_merged_prs = [_scored_mirror_pr('entrius/gittensor-ui', 100, token_score=100.0)]
+        # Critical: total_open_issues stays at default 0 (legacy load never ran)
+        assert eval_.total_open_issues == 0
+
+        _run(run_mirror_issue_discovery(
+            {1: eval_}, _mirror_repos('entrius/gittensor-ui'),
+            _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, client=client,
+        ))
+
+        # 6 open issues > threshold (5) → spam_mult=0 → all scored issues earn 0
+        assert eval_.issue_discovery_score == 0
+
+    def test_all_mirror_miner_below_threshold_passes_spam(self):
+        """Same miner, fewer open issues, spam gate doesn't trip."""
+        # Only 2 open issues (well under threshold 5)
+        open_issues = [
+            _issue_dict(
+                issue_number=200 + i,
+                state='OPEN',
+                state_reason=None,
+                solved_by_pr=None,
+            )
+            for i in range(2)
+        ]
+        solved_issues = [
+            _issue_dict(issue_number=300 + i, author_github_id=f'discoverer{i}')
+            for i in range(8)
+        ]
+        client = Mock()
+        client.get_miner_issues.return_value = _response(open_issues + solved_issues)
+
+        eval_ = _eval()
+        eval_.mirror_merged_prs = [_scored_mirror_pr('entrius/gittensor-ui', 100, token_score=100.0)]
+
+        _run(run_mirror_issue_discovery(
+            {1: eval_}, _mirror_repos('entrius/gittensor-ui'),
+            _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, client=client,
+        ))
+
+        # Below threshold → spam_mult=1.0 → discovery score is non-zero
+        assert eval_.issue_discovery_score > 0
+
+    def test_legacy_total_open_issues_value_is_ignored(self):
+        """Confirms mirror_scan does NOT read evaluation.total_open_issues. Setting
+        it to a huge value should NOT trip the spam gate when mirror's count is low."""
+        open_issues = [
+            _issue_dict(
+                issue_number=200 + i,
+                state='OPEN',
+                state_reason=None,
+                solved_by_pr=None,
+            )
+            for i in range(2)  # only 2 open in mirror — below threshold
+        ]
+        solved_issues = [
+            _issue_dict(issue_number=300 + i, author_github_id=f'discoverer{i}')
+            for i in range(8)
+        ]
+        client = Mock()
+        client.get_miner_issues.return_value = _response(open_issues + solved_issues)
+
+        eval_ = _eval()
+        eval_.total_open_issues = 999  # legacy says 999 — should be ignored
+        eval_.mirror_merged_prs = [_scored_mirror_pr('entrius/gittensor-ui', 100, token_score=100.0)]
+
+        _run(run_mirror_issue_discovery(
+            {1: eval_}, _mirror_repos('entrius/gittensor-ui'),
+            _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, client=client,
+        ))
+
+        # Mirror's count of 2 (under threshold) wins; spam doesn't trip
+        assert eval_.issue_discovery_score > 0

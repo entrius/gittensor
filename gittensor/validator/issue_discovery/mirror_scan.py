@@ -163,6 +163,13 @@ async def run_mirror_issue_discovery(
             no_issues += 1
             continue
 
+        # Count this miner's currently-open issues across mirror-enabled repos
+        # (within the lookback window). Used as the spam-multiplier signal —
+        # we explicitly DON'T fall back to evaluation.total_open_issues because
+        # that field is set only by legacy's GraphQL load and would be 0 for
+        # any miner whose config is entirely mirror-enabled, defeating the gate.
+        open_issue_count = sum(1 for i in filtered if i.state == 'OPEN')
+
         processed += 1
         _score_miner_mirror_issues(
             evaluation,
@@ -173,6 +180,7 @@ async def run_mirror_issue_discovery(
             client,
             programming_languages,
             token_config,
+            open_issue_count=open_issue_count,
         )
 
     bt.logging.info('')
@@ -218,8 +226,14 @@ def _score_miner_mirror_issues(
     client: MirrorClient,
     programming_languages: Dict[str, LanguageConfig],
     token_config: TokenConfig,
+    open_issue_count: int,
 ) -> None:
-    """Classify + score one miner's mirror issues, populate MinerEvaluation fields."""
+    """Classify + score one miner's mirror issues, populate MinerEvaluation fields.
+
+    ``open_issue_count`` is the miner's currently-OPEN issue count across
+    mirror-enabled repos within the lookback window — the source-of-truth
+    for the open-issue spam multiplier on the mirror path.
+    """
     solved_count = 0
     valid_solved_count = 0
     closed_count = 0
@@ -328,11 +342,15 @@ def _score_miner_mirror_issues(
     if not is_eligible:
         bt.logging.info(
             f'├─ UID {evaluation.uid}: ineligible ({reason}) | '
-            f'{solved_count} solved ({valid_solved_count} valid) | {closed_count} closed'
+            f'{solved_count} solved ({valid_solved_count} valid) | {closed_count} closed | '
+            f'{open_issue_count} open'
         )
         return
 
-    spam_mult = calculate_open_issue_spam_multiplier(evaluation.total_open_issues, issue_token_score)
+    # Spam signal sourced from mirror's own data (open_issue_count above) —
+    # NOT evaluation.total_open_issues which only legacy's GraphQL load fills.
+    # An all-mirror miner would have total_open_issues=0 and never trip the gate.
+    spam_mult = calculate_open_issue_spam_multiplier(open_issue_count, issue_token_score)
 
     total_discovery_score = 0.0
     for issue in scored_issues:
@@ -355,7 +373,7 @@ def _score_miner_mirror_issues(
 
     bt.logging.info(
         f'├─ UID {evaluation.uid}: {solved_count} solved ({valid_solved_count} valid) | '
-        f'{closed_count} closed | {len(scored_issues)} scored | '
+        f'{closed_count} closed | {open_issue_count} open | {len(scored_issues)} scored | '
         f'credibility={credibility:.2f} | spam_mult={spam_mult:.1f} | '
         f'mirror_score={total_discovery_score:.2f}'
     )

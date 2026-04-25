@@ -204,7 +204,7 @@
     "mirror_enabled": true
   },
   "entrius/allways-ui": {
-    "weight": 0.88,
+    "weight": 0.5,
     "mirror_enabled": true
   },
   "entrius/gittensor": {
@@ -212,7 +212,7 @@
     "mirror_enabled": true
   },
   "entrius/gittensor-ui": {
-    "weight": 0.74,
+    "weight": 0.5,
     "mirror_enabled": true
   },
   "espressif/arduino-esp32": {

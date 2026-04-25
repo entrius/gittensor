@@ -428,3 +428,76 @@ class TestSolvingPrCache:
         assert eval_.total_solved_issues == 1  # credibility
         assert eval_.total_valid_solved_issues == 0  # below gate
         assert eval_.issue_discovery_score == 0
+
+
+class TestCacheStats:
+    """Verify the _CacheStats counter accurately tracks hits / misses /
+    fetch failures across the mix of resolution paths."""
+
+    def test_stats_dataclass_defaults_zero(self):
+        from gittensor.validator.issue_discovery.mirror_scan import _CacheStats
+        s = _CacheStats()
+        assert s.hits == 0 and s.misses == 0 and s.fetch_failures == 0
+
+    def test_resolve_increments_hit_on_cache_lookup(self):
+        from gittensor.validator.issue_discovery.mirror_scan import (
+            _CacheStats,
+            _resolve_solving_pr_score,
+            CachedSolvingPR,
+        )
+        client = Mock()
+        cache = {('entrius/gittensor-ui', 100): CachedSolvingPR(base_score=42.0, token_score=50.0)}
+        stats = _CacheStats()
+
+        issue = MirrorIssue.from_dict(_issue_dict())
+        result = _resolve_solving_pr_score(
+            issue, issue.solving_pr, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG
+        )
+
+        assert result.base_score == 42.0
+        assert stats.hits == 1
+        assert stats.misses == 0
+        client.get_pr_files.assert_not_called()
+
+    def test_resolve_increments_miss_on_fetch_success(self):
+        from gittensor.validator.issue_discovery.mirror_scan import (
+            _CacheStats,
+            _resolve_solving_pr_score,
+        )
+        client = Mock()
+        client.get_pr_files.return_value = _empty_files_response('entrius/gittensor-ui', 100)
+        cache = {}
+        stats = _CacheStats()
+
+        issue = MirrorIssue.from_dict(_issue_dict())
+        _resolve_solving_pr_score(
+            issue, issue.solving_pr, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG
+        )
+
+        assert stats.hits == 0
+        assert stats.misses == 1
+        assert stats.fetch_failures == 0
+        # Fetched result is now cached for future lookups
+        assert ('entrius/gittensor-ui', 100) in cache
+
+    def test_resolve_increments_fetch_failures_on_request_error(self):
+        from gittensor.validator.issue_discovery.mirror_scan import (
+            _CacheStats,
+            _resolve_solving_pr_score,
+        )
+        client = Mock()
+        client.get_pr_files.side_effect = MirrorRequestError('boom')
+        cache = {}
+        stats = _CacheStats()
+
+        issue = MirrorIssue.from_dict(_issue_dict())
+        result = _resolve_solving_pr_score(
+            issue, issue.solving_pr, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG
+        )
+
+        assert result is None
+        assert stats.hits == 0
+        assert stats.misses == 1
+        assert stats.fetch_failures == 1
+        # Failed lookups are NOT cached (so a retry is possible)
+        assert cache == {}

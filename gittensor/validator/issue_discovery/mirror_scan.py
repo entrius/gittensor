@@ -80,6 +80,21 @@ class CachedSolvingPR:
     token_score: float
 
 
+@dataclass
+class _CacheStats:
+    """Per-cycle counters for the solving-PR cache.
+
+    Tracked at the module level so end-of-phase logging can report observable
+    metrics: cache hits (free), misses (triggered a fetch), and fetch failures
+    (issue not scored). Helps tune cache effectiveness and surface mirror
+    flakiness without scraping logs for individual fetch warnings.
+    """
+
+    hits: int = 0
+    misses: int = 0
+    fetch_failures: int = 0
+
+
 async def run_mirror_issue_discovery(
     miner_evaluations: Dict[int, MinerEvaluation],
     mirror_repos: Dict[str, RepositoryConfig],
@@ -114,6 +129,7 @@ async def run_mirror_issue_discovery(
     solving_pr_cache: Dict[Tuple[str, int], CachedSolvingPR] = _build_solving_pr_cache(
         miner_evaluations
     )
+    cache_stats = _CacheStats()
     bt.logging.info(
         f'Cross-miner solving-PR cache: {len(solving_pr_cache)} entries from '
         f'{sum(len(ev.mirror_merged_prs) for ev in miner_evaluations.values())} scored mirror PRs'
@@ -153,6 +169,7 @@ async def run_mirror_issue_discovery(
             filtered,
             mirror_repos,
             solving_pr_cache,
+            cache_stats,
             client,
             programming_languages,
             token_config,
@@ -162,6 +179,11 @@ async def run_mirror_issue_discovery(
     bt.logging.info(
         f'Issue discovery complete | {processed} processed | {no_issues} no mirror issues | '
         f'{fetch_errors} fetch errors | {skipped_no_gh} no github_id | {skipped_failed} prior OSS failure'
+    )
+    bt.logging.info(
+        f'Solving-PR cache: {cache_stats.hits} hits | {cache_stats.misses} misses '
+        f'({cache_stats.misses - cache_stats.fetch_failures} fetched OK, '
+        f'{cache_stats.fetch_failures} fetch failures)'
     )
 
 
@@ -192,6 +214,7 @@ def _score_miner_mirror_issues(
     issues: List[MirrorIssue],
     mirror_repos: Dict[str, RepositoryConfig],
     solving_pr_cache: Dict[Tuple[str, int], CachedSolvingPR],
+    cache_stats: _CacheStats,
     client: MirrorClient,
     programming_languages: Dict[str, LanguageConfig],
     token_config: TokenConfig,
@@ -232,12 +255,17 @@ def _score_miner_mirror_issues(
 
         # Resolve real base_score + token_score for the solving PR (cache or fetch)
         cached = _resolve_solving_pr_score(
-            issue, solving_pr, solving_pr_cache, client, programming_languages, token_config
+            issue, solving_pr, solving_pr_cache, cache_stats,
+            client, programming_languages, token_config,
         )
         if cached is None:
             # Fetch failed — issue still counts for solved/credibility but not scored.
             # Can't apply the valid-solved gate without a real token_score, so be
             # conservative and don't increment valid_solved_count.
+            bt.logging.debug(
+                f'  issue #{issue.issue_number} ({issue.repo_full_name}): solver score unavailable '
+                f'(fetch failed) — credibility only'
+            )
             continue
 
         # Valid-solved gate (legacy parity): solving PR must meet the token threshold.
@@ -246,11 +274,19 @@ def _score_miner_mirror_issues(
 
         # Same-account: discoverer == solver gets credibility only, no score
         if issue.author_github_id == solving_pr.author_github_id:
+            bt.logging.debug(
+                f'  issue #{issue.issue_number} ({issue.repo_full_name}): same-account '
+                f'(discoverer == solver {issue.author_github_id}) — credibility only'
+            )
             continue
 
         pr_key = (issue.repo_full_name, solving_pr.pr_number)
         if pr_key in pr_scored_keys:
-            continue  # one-issue-per-PR (credibility already incremented above)
+            bt.logging.debug(
+                f'  issue #{issue.issue_number} ({issue.repo_full_name}): one-issue-per-PR '
+                f'(PR #{solving_pr.pr_number} already scored an earlier issue) — credibility only'
+            )
+            continue
         pr_scored_keys.add(pr_key)
 
         repo_config = mirror_repos.get(issue.repo_full_name)
@@ -260,6 +296,11 @@ def _score_miner_mirror_issues(
         # Quality gate — matches legacy issue-discovery behavior: below-threshold
         # solving PRs add credibility only, no discovery score.
         if cached.token_score < MIN_TOKEN_SCORE_FOR_BASE_SCORE:
+            bt.logging.debug(
+                f'  issue #{issue.issue_number} ({issue.repo_full_name}): solving PR '
+                f'#{solving_pr.pr_number} token_score {cached.token_score:.2f} < '
+                f'{MIN_TOKEN_SCORE_FOR_BASE_SCORE} — credibility only'
+            )
             continue
 
         adapted = _mirror_issue_for_scoring(
@@ -324,6 +365,7 @@ def _resolve_solving_pr_score(
     issue: MirrorIssue,
     solving_pr: MirrorSolvingPR,
     cache: Dict[Tuple[str, int], CachedSolvingPR],
+    cache_stats: _CacheStats,
     client: MirrorClient,
     programming_languages: Dict[str, LanguageConfig],
     token_config: TokenConfig,
@@ -336,11 +378,14 @@ def _resolve_solving_pr_score(
     """
     key = (issue.repo_full_name, solving_pr.pr_number)
     if key in cache:
+        cache_stats.hits += 1
         return cache[key]
 
+    cache_stats.misses += 1
     try:
         files_response = client.get_pr_files(issue.repo_full_name, solving_pr.pr_number)
     except MirrorRequestError as e:
+        cache_stats.fetch_failures += 1
         bt.logging.warning(
             f'Mirror file fetch failed for solving PR #{solving_pr.pr_number} '
             f'({issue.repo_full_name}): {e} — issue #{issue.issue_number} not scored'
@@ -364,27 +409,53 @@ def _classify_issue(issue: MirrorIssue) -> str:
     'ignore' = issue is open / transferred / has no scorable meaning at all.
     'not-solved-closed' = counts against credibility (closed but not solved).
     'solved' = counts toward solved metrics.
+
+    Per-issue debug logs explain each classification so operators can debug
+    "why didn't UID X get credit for issue Y?" without guessing.
     """
     if issue.is_transferred:
+        bt.logging.debug(f'  issue #{issue.issue_number} ({issue.repo_full_name}): ignore (transferred)')
         return 'ignore'
 
     if issue.state != 'CLOSED':
+        bt.logging.debug(
+            f'  issue #{issue.issue_number} ({issue.repo_full_name}): ignore (state {issue.state}, not CLOSED)'
+        )
         return 'ignore'
 
     if issue.state_reason != 'COMPLETED':
+        bt.logging.debug(
+            f'  issue #{issue.issue_number} ({issue.repo_full_name}): closed-not-solved '
+            f'(state_reason={issue.state_reason}, need COMPLETED)'
+        )
         return 'not-solved-closed'
 
     if not issue.solved_by_pr or not issue.solving_pr:
+        bt.logging.debug(
+            f'  issue #{issue.issue_number} ({issue.repo_full_name}): closed-not-solved '
+            f'(no solving PR linked)'
+        )
         return 'not-solved-closed'
 
     sp = issue.solving_pr
     if sp.state != 'MERGED':
+        bt.logging.debug(
+            f'  issue #{issue.issue_number} ({issue.repo_full_name}): closed-not-solved '
+            f'(solving PR #{sp.pr_number} state={sp.state}, not MERGED)'
+        )
         return 'not-solved-closed'
 
     if sp.edited_after_merge:
+        bt.logging.debug(
+            f'  issue #{issue.issue_number} ({issue.repo_full_name}): closed-not-solved '
+            f'(solving PR #{sp.pr_number} edited after merge — anti-spec-rewrite gate)'
+        )
         return 'not-solved-closed'
 
     if not issue.author_github_id:
+        bt.logging.debug(
+            f'  issue #{issue.issue_number} ({issue.repo_full_name}): ignore (missing author_github_id)'
+        )
         return 'ignore'
 
     return 'solved'

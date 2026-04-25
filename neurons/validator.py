@@ -139,25 +139,6 @@ class Validator(BaseValidatorNeuron):
         if failed_uids:
             bt.logging.warning(f'Failed to store {len(failed_uids)} UIDs: {failed_uids}')
 
-    async def store_evaluation(self, uid: int, miner_eval: MinerEvaluation):
-        """
-        Stores the miner eval if DB storage is enabled via STORE_DB_RESULTS=true in .env.
-        """
-
-        if self.db_storage is not None:
-            try:
-                storage_result = self.db_storage.store_evaluation(miner_eval)
-
-                if storage_result.success:
-                    bt.logging.success(f'Successfully stored validation results for UID {uid} to DB.')
-                else:
-                    bt.logging.warning(f'Storage partially failed for UID {uid}:')
-                    for error in storage_result.errors:
-                        bt.logging.warning(f'  - {error}')
-
-            except Exception as e:
-                bt.logging.error(f'Error when attempting to store miners evaluation for uid {uid}: {e}')
-
     def store_or_use_cached_evaluation(self, miner_evaluations: Dict[int, MinerEvaluation]) -> Set[int]:
         """
         Handle evaluation cache: store successful evals, fallback to cache for GitHub failures.
@@ -175,16 +156,21 @@ class Validator(BaseValidatorNeuron):
             if miner_eval.failed_reason is not None:
                 continue
 
-            # Successful evaluation with PRs - store to cache
-            if miner_eval.total_prs > 0:
-                self.evaluation_cache.store(miner_eval)
+            if not miner_eval.github_pr_fetch_failed:
+                if miner_eval.total_prs > 0:
+                    self.evaluation_cache.store(miner_eval)
                 continue
 
-            # if failure, try cache fallback
+            if not miner_eval.should_use_cache_fallback:
+                bt.logging.warning(
+                    f'UID {uid}: GitHub fetch failed after partial PR load; skipping cache store/fallback this round'
+                )
+                continue
+
             cached_eval = self.evaluation_cache.get(uid, miner_eval.hotkey, miner_eval.github_id)
             if cached_eval is not None:
                 bt.logging.info(
-                    f'UID {uid}: GitHub returned no PRs, using cached evaluation '
+                    f'UID {uid}: GitHub fetch failed, using cached evaluation '
                     f'(merged={cached_eval.total_merged_prs}, open={cached_eval.total_open_prs}, '
                     f'closed={cached_eval.total_closed_prs})'
                 )

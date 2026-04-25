@@ -1,19 +1,25 @@
 # The MIT License (MIT)
 # Copyright © 2025 Entrius
 
-import math
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Dict, Tuple
 
 import bittensor as bt
 
-from gittensor.classes import Issue, MinerEvaluation, PrScoringResult, PRState, PullRequest
+from gittensor.classes import (
+    Issue,
+    MinerEvaluation,
+    PrScoringResult,
+    PRState,
+    PullRequest,
+    ScoringCategory,
+)
 from gittensor.constants import (
     CONTRIBUTION_SCORE_FOR_FULL_BONUS,
     EXCESSIVE_PR_PENALTY_BASE_THRESHOLD,
+    LABEL_MULTIPLIERS,
     MAINTAINER_ASSOCIATIONS,
     MAINTAINER_ISSUE_MULTIPLIER,
-    MAX_CODE_DENSITY_MULTIPLIER,
     MAX_CONTRIBUTION_BONUS,
     MAX_ISSUE_CLOSE_WINDOW_DAYS,
     MAX_OPEN_PR_THRESHOLD,
@@ -27,22 +33,17 @@ from gittensor.constants import (
     PIONEER_DIVIDEND_RATE_REST,
     REVIEW_PENALTY_RATE,
     SECONDS_PER_DAY,
-    SECONDS_PER_HOUR,
     STANDARD_ISSUE_MULTIPLIER,
-    TIME_DECAY_GRACE_PERIOD_HOURS,
-    TIME_DECAY_MIN_MULTIPLIER,
-    TIME_DECAY_SIGMOID_MIDPOINT,
-    TIME_DECAY_SIGMOID_STEEPNESS_SCALAR,
 )
 from gittensor.utils.github_api_tools import (
     FileContentPair,
     fetch_file_contents_with_base,
     get_merge_base_sha,
     get_pull_request_file_changes,
-    get_pull_request_maintainer_changes_requested_count,
 )
 from gittensor.validator.oss_contributions.credibility import check_eligibility
-from gittensor.validator.utils.load_weights import LanguageConfig, RepositoryConfig, TokenConfig
+from gittensor.validator.utils.datetime_utils import calculate_time_decay
+from gittensor.validator.utils.load_weights import LanguageConfig, RepositoryConfig, TokenConfig, resolve_repo_weight
 from gittensor.validator.utils.tree_sitter_scoring import calculate_token_score_from_file_changes
 
 
@@ -101,12 +102,6 @@ def score_pull_request(
 
     pr.base_score = calculate_base_score(pr, programming_languages, token_config, file_contents)
 
-    # Fetch review data before multiplier calculation (only for merged PRs)
-    if pr.pr_state == PRState.MERGED:
-        pr.changes_requested_count = get_pull_request_maintainer_changes_requested_count(
-            pr.repository_full_name, pr.number, miner_eval.github_pat
-        )
-
     calculate_pr_multipliers(pr, miner_eval, master_repositories)
 
     if pr.pr_state == PRState.MERGED:
@@ -143,7 +138,9 @@ def fetch_file_contents_for_pr(pr: PullRequest, github_pat: str) -> Dict[str, Fi
             f'PR #{pr.number}: using merge-base {merge_base[:8]} instead of base_ref {pr.base_ref_oid[:8]}'
         )
 
-    return fetch_file_contents_with_base(owner, repo_name, base_sha, pr.head_ref_oid, pr.file_changes, github_pat)
+    return fetch_file_contents_with_base(
+        owner, repo_name, base_sha, pr.head_ref_oid, pr.file_changes, github_pat, pr_number=pr.number
+    )
 
 
 def calculate_base_score(
@@ -152,7 +149,7 @@ def calculate_base_score(
     token_config: TokenConfig,
     file_contents: Dict[str, FileContentPair],
 ) -> float:
-    """Calculate base score using code density scaling + contribution bonus."""
+    """Calculate base score using SOURCE density scaling + contribution bonus"""
     scoring_result: PrScoringResult = calculate_token_score_from_file_changes(
         pr.file_changes or [],
         file_contents,
@@ -160,44 +157,47 @@ def calculate_base_score(
         programming_languages,
     )
 
-    pr.total_nodes_scored = scoring_result.total_nodes_scored
     if scoring_result.score_breakdown:
         pr.token_score = scoring_result.score_breakdown.total_score
         pr.structural_count = scoring_result.score_breakdown.structural_count
         pr.structural_score = scoring_result.score_breakdown.structural_score
         pr.leaf_count = scoring_result.score_breakdown.leaf_count
         pr.leaf_score = scoring_result.score_breakdown.leaf_score
-
-    # Calculate total lines changed across all files
-    total_lines = sum(f.total_lines for f in scoring_result.file_results)
-
-    # Check minimum token score threshold for base score. PRs below threshold get 0 base score
-    if pr.token_score < MIN_TOKEN_SCORE_FOR_BASE_SCORE:
-        code_density = 0.0
-        initial_base_score = 0.0
-    elif total_lines > 0:
-        code_density = min(pr.token_score / total_lines, MAX_CODE_DENSITY_MULTIPLIER)
-        initial_base_score = MERGED_PR_BASE_SCORE * code_density
+        # Only count AST nodes (tree-diff), not line-count "nodes"
+        pr.total_nodes_scored = (
+            scoring_result.score_breakdown.structural_count + scoring_result.score_breakdown.leaf_count
+        )
     else:
-        code_density = 0.0
-        initial_base_score = 0.0
+        pr.total_nodes_scored = 0
 
-    # Calculate contribution bonus, capped
+    # Threshold uses SOURCE category score only
+    source = scoring_result.by_category.get(ScoringCategory.SOURCE)
+    source_token_score = source.score_breakdown.total_score if source and source.score_breakdown else 0.0
+
+    # Density-scaled base score from SOURCE category only
+    source_density = source.density if source else 0.0
+    pr.code_density = round(source_density, 2)
+
+    if source_token_score < MIN_TOKEN_SCORE_FOR_BASE_SCORE:
+        initial_base_score = 0.0
+    else:
+        initial_base_score = MERGED_PR_BASE_SCORE * source_density
+
+    # Contribution bonus from all categories, capped at MAX_CONTRIBUTION_BONUS
     bonus_percent = min(1.0, scoring_result.total_score / CONTRIBUTION_SCORE_FOR_FULL_BONUS)
     contribution_bonus = round(bonus_percent * MAX_CONTRIBUTION_BONUS, 2)
 
-    # Final base score = density-scaled base + contribution bonus
     base_score = round(initial_base_score + contribution_bonus, 2)
 
-    # Log with note if below token threshold
+    # Log with source density and bonus percentage
     threshold_note = (
         f' [below {MIN_TOKEN_SCORE_FOR_BASE_SCORE} token threshold]'
-        if pr.token_score < MIN_TOKEN_SCORE_FOR_BASE_SCORE
+        if source_token_score < MIN_TOKEN_SCORE_FOR_BASE_SCORE
         else ''
     )
     bt.logging.info(
-        f'Base score: {initial_base_score:.2f} (density {code_density:.2f}){threshold_note} + {contribution_bonus} bonus '
-        f'({bonus_percent * 100:.0f}% of max {MAX_CONTRIBUTION_BONUS}) = {base_score:.2f}'
+        f'Base score: {initial_base_score:.2f} (density {source_density:.2f}){threshold_note}'
+        f' + {contribution_bonus} bonus ({bonus_percent * 100:.0f}% of max {MAX_CONTRIBUTION_BONUS}) = {base_score:.2f}'
     )
 
     return base_score
@@ -224,8 +224,9 @@ def calculate_pr_multipliers(
     is_merged = pr.pr_state == PRState.MERGED
     repo_config = master_repositories.get(pr.repository_full_name)
 
-    pr.repo_weight_multiplier = round(repo_config.weight if repo_config else 0.01, 2)
+    pr.repo_weight_multiplier = resolve_repo_weight(repo_config)
     pr.issue_multiplier = round(calculate_issue_multiplier(pr), 2)
+    pr.label_multiplier = LABEL_MULTIPLIERS.get(pr.label, 1.0) if pr.label else 1.0
 
     if is_merged:
         # Spam multiplier is recalculated in finalize_miner_scores with total token score
@@ -260,18 +261,8 @@ def calculate_pr_spam_penalty_multiplier(total_open_prs: int, total_token_score:
 
 def calculate_time_decay_multiplier(pr: PullRequest) -> float:
     """Calculate time decay multiplier for a single PR based on merge date."""
-
     assert pr.merged_at is not None, f'PR #{pr.number} has no merged_at'
-    now = datetime.now(timezone.utc)
-    hours_since_merge = (now - pr.merged_at).total_seconds() / SECONDS_PER_HOUR
-
-    # No decay for PRs merged within the grace period
-    if hours_since_merge < TIME_DECAY_GRACE_PERIOD_HOURS:
-        return 1.0
-
-    days_since_merge = hours_since_merge / 24
-    sigmoid = 1 / (1 + math.exp(TIME_DECAY_SIGMOID_STEEPNESS_SCALAR * (days_since_merge - TIME_DECAY_SIGMOID_MIDPOINT)))
-    return max(sigmoid, TIME_DECAY_MIN_MULTIPLIER)
+    return calculate_time_decay(pr.merged_at)
 
 
 def calculate_pioneer_dividends(
@@ -440,11 +431,11 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
 
 def calculate_issue_multiplier(pr: PullRequest) -> float:
     """
-    Calculate PR score multiplier based on the first valid linked issue.
+    Calculate PR score multiplier from the best valid linked issue.
 
-    Returns a flat multiplier: MAINTAINER_ISSUE_MULTIPLIER (1.66) if the issue author
-    is a maintainer (OWNER/MEMBER/COLLABORATOR), otherwise STANDARD_ISSUE_MULTIPLIER (1.33).
-    Returns 1.0 if no valid linked issues.
+    Returns a flat multiplier: MAINTAINER_ISSUE_MULTIPLIER (1.66) if any valid issue
+    author is a maintainer (OWNER/MEMBER/COLLABORATOR), otherwise
+    STANDARD_ISSUE_MULTIPLIER (1.33). Returns 1.0 if no valid linked issues.
     """
     if not pr.issues:
         bt.logging.info(f'PR #{pr.number} - Contains no linked issues')
@@ -455,12 +446,28 @@ def calculate_issue_multiplier(pr: PullRequest) -> float:
         bt.logging.info(f'PR #{pr.number} - Solved no valid issues')
         return 1.0
 
-    issue = valid_issues[0]
+    # Prefer a maintainer-authored valid issue if one exists, so the multiplier
+    # doesn't depend on GraphQL closingIssuesReferences ordering.
+    issue = next(
+        (i for i in valid_issues if i.author_association in MAINTAINER_ASSOCIATIONS),
+        valid_issues[0],
+    )
     is_maintainer = issue.author_association in MAINTAINER_ASSOCIATIONS if issue.author_association else False
     multiplier = MAINTAINER_ISSUE_MULTIPLIER if is_maintainer else STANDARD_ISSUE_MULTIPLIER
     label = 'maintainer' if is_maintainer else 'standard'
     bt.logging.info(f'Issue #{issue.number} - {label} issue | multiplier: {multiplier}')
     return multiplier
+
+
+def _is_completed_when_closed(issue: Issue) -> bool:
+    if issue.state != 'CLOSED':
+        return True
+    if issue.state_reason != 'COMPLETED':
+        bt.logging.warning(
+            f'Skipping issue #{issue.number} - state_reason={issue.state_reason}, only COMPLETED grants multiplier'
+        )
+        return False
+    return True
 
 
 def is_valid_issue(issue: Issue, pr: PullRequest) -> bool:
@@ -479,6 +486,9 @@ def is_valid_issue(issue: Issue, pr: PullRequest) -> bool:
         bt.logging.warning(f'Skipping issue #{issue.number} - Issue was created after PR was created')
         return False
 
+    if not _is_completed_when_closed(issue):
+        return False
+
     if is_merged and pr.merged_at:
         if pr.last_edited_at and pr.last_edited_at > pr.merged_at:
             bt.logging.warning(f'Skipping issue #{issue.number} - PR was edited after merge')
@@ -489,10 +499,10 @@ def is_valid_issue(issue: Issue, pr: PullRequest) -> bool:
             return False
 
         if issue.closed_at and pr.merged_at:
-            days_diff = abs((issue.closed_at - pr.merged_at).total_seconds()) / SECONDS_PER_DAY
-            if days_diff > MAX_ISSUE_CLOSE_WINDOW_DAYS:
+            days_diff = (issue.closed_at - pr.merged_at).total_seconds() / SECONDS_PER_DAY
+            if days_diff > MAX_ISSUE_CLOSE_WINDOW_DAYS or days_diff < 0:
                 bt.logging.warning(
-                    f'Skipping issue #{issue.number} - Issue closed {days_diff:.1f}d from merge (max: {MAX_ISSUE_CLOSE_WINDOW_DAYS})'
+                    f'Skipping issue #{issue.number} - Issue closed {days_diff:+.2f}d from merge (max: {MAX_ISSUE_CLOSE_WINDOW_DAYS})'
                 )
                 return False
 
@@ -510,7 +520,7 @@ def calculate_open_pr_collateral_score(pr: PullRequest) -> float:
 
     Collateral = base_score * applicable_multipliers * OPEN_PR_COLLATERAL_PERCENT
 
-    Applicable multipliers: repo_weight, issue
+    Applicable multipliers: repo_weight, issue, label
     NOT applicable: time_decay (merge-based), credibility_multiplier (merge-based),
                     open_pr_spam (not for collateral)
     """
@@ -519,6 +529,7 @@ def calculate_open_pr_collateral_score(pr: PullRequest) -> float:
     multipliers = {
         'repo_weight': pr.repo_weight_multiplier,
         'issue': pr.issue_multiplier,
+        'label': pr.label_multiplier,
     }
 
     potential_score = pr.base_score * prod(multipliers.values())

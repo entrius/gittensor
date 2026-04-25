@@ -17,15 +17,15 @@ from rich.panel import Panel
 from .help import StyledCommand
 from .helpers import (
     MAX_ISSUE_NUMBER,
+    NETWORK_CHOICE,
     _is_interactive,
+    _resolve_contract_and_network,
     console,
     format_alpha,
-    get_contract_address,
     load_config,
     print_error,
     print_network_header,
     print_success,
-    resolve_network,
     validate_bounty_amount,
     validate_github_issue,
     validate_repository,
@@ -55,7 +55,7 @@ from .helpers import (
     '--network',
     '-n',
     default=None,
-    type=click.Choice(['finney', 'test', 'local'], case_sensitive=False),
+    type=NETWORK_CHOICE,
     help='Network (finney/test/local)',
 )
 @click.option(
@@ -119,25 +119,28 @@ def issue_register(
     """
     console.print('\n[bold cyan]Register Issue for Bounty[/bold cyan]\n')
 
-    contract_addr = get_contract_address(contract)
-    ws_endpoint, network_name = resolve_network(network, rpc_url)
+    contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(
+        contract,
+        network,
+        rpc_url,
+        missing_contract_message='Contract address not configured. Run ./up.sh --issues to deploy the contract first.',
+    )
     config = load_config()
 
-    if not contract_addr:
-        raise click.ClickException(
-            'Contract address not configured. Run ./up.sh --issues to deploy the contract first.'
-        )
-
-    # Validate inputs before showing summary
+    # Validate inputs before showing summary. The register path is owner-only
+    # and spends real ALPHA, so both GitHub probes run in strict mode: any
+    # warn-and-skip branch (network error, 5xx, 403, rate-limit) is promoted
+    # to a click.BadParameter abort so we never submit register_issue on-chain
+    # against a repository or issue we failed to verify.
     try:
-        owner, repo_name = validate_repository(repo)
+        owner, repo_name = validate_repository(repo, require_verified_exists=True)
         bounty_amount = validate_bounty_amount(bounty)
         if issue_number < 1 or issue_number > MAX_ISSUE_NUMBER:
             raise click.BadParameter(
                 f'Issue number must be between 1 and {MAX_ISSUE_NUMBER} (got {issue_number})',
                 param_hint='--issue',
             )
-        validate_github_issue(owner, repo_name, issue_number)
+        validate_github_issue(owner, repo_name, issue_number, require_verified_exists=True)
     except click.BadParameter as e:
         raise click.ClickException(str(e))
 
@@ -244,6 +247,7 @@ def issue_register(
     except ImportError as e:
         print_error(f'Missing dependency - {e}')
         console.print('[dim]Install with: uv sync[/dim]')
+        raise SystemExit(1)
     except Exception as e:
         error_msg = str(e)
         if 'ContractReverted' in error_msg:
@@ -254,6 +258,7 @@ def issue_register(
             console.print('  \u2022 Caller is not the contract owner')
         else:
             print_error(f'Error registering issue: {e}')
+        raise SystemExit(1)
 
 
 @click.command('harvest', cls=StyledCommand)
@@ -275,7 +280,7 @@ def issue_register(
     '--network',
     '-n',
     default=None,
-    type=click.Choice(['finney', 'test', 'local'], case_sensitive=False),
+    type=NETWORK_CHOICE,
     help='Network (finney/test/local)',
 )
 @click.option(
@@ -304,13 +309,12 @@ def issue_harvest(wallet_name: str, wallet_hotkey: str, network: str, rpc_url: s
     """
     console.print('\n[bold cyan]Manual Emission Harvest[/bold cyan]\n')
 
-    contract_addr = get_contract_address(contract)
-    ws_endpoint, network_name = resolve_network(network, rpc_url)
-
-    if not contract_addr:
-        raise click.ClickException(
-            'Contract address not configured. Set CONTRACT_ADDRESS env var or run ./up.sh --issues.'
-        )
+    contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(
+        contract,
+        network,
+        rpc_url,
+        missing_contract_message='Contract address not configured. Set CONTRACT_ADDRESS env var or run ./up.sh --issues.',
+    )
 
     print_network_header(network_name, contract_addr)
     console.print(f'[dim]Wallet: {wallet_name}/{wallet_hotkey}[/dim]\n')
@@ -375,17 +379,22 @@ def issue_harvest(wallet_name: str, wallet_hotkey: str, network: str, rpc_url: s
                 console.print(f'[cyan]Transaction hash:[/cyan] {result.get("tx_hash", "N/A")}')
                 print_error(result.get('error', 'Unknown'))
                 console.print('[dim]Check proxy permissions: contract needs NonCritical proxy.[/dim]')
-            elif result.get('status') == 'failed':
+                raise SystemExit(1)
+            elif result.get('status') in {'failed', 'error'}:
                 print_error(f'Harvest failed: {result.get("error", "Unknown error")}')
+                raise SystemExit(1)
             else:
                 console.print(f'\n[yellow]Harvest result: {result}[/yellow]')
+                raise SystemExit(1)
         else:
             print_error('Harvest returned None — check logs for details.')
             console.print('[dim]Run with --verbose for more information.[/dim]')
+            raise SystemExit(1)
 
     except ImportError as e:
         print_error(f'Missing dependency — {e}')
         console.print('[dim]Install with: uv sync[/dim]')
+        raise SystemExit(1)
     except Exception as e:
         import traceback
 
@@ -394,3 +403,4 @@ def issue_harvest(wallet_name: str, wallet_hotkey: str, network: str, rpc_url: s
             console.print(f'[dim]Full traceback:\n{traceback.format_exc()}[/dim]')
         else:
             console.print('[dim]Run with --verbose for full traceback.[/dim]')
+        raise SystemExit(1)

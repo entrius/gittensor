@@ -7,7 +7,7 @@ from typing import Dict, List, Optional
 
 import bittensor as bt
 
-from gittensor.constants import NON_CODE_EXTENSIONS
+from gittensor.constants import DEFAULT_REPO_WEIGHT, NON_CODE_EXTENSIONS
 
 
 @dataclass
@@ -37,6 +37,13 @@ class RepositoryConfig:
     weight: float
     inactive_at: Optional[str] = None
     additional_acceptable_branches: Optional[List[str]] = None
+
+
+def resolve_repo_weight(repo_config: Optional[RepositoryConfig]) -> float:
+    """Return the repo weight preserving full JSON precision, or the default for unknown repos."""
+    if repo_config is None:
+        return DEFAULT_REPO_WEIGHT
+    return repo_config.weight
 
 
 @dataclass
@@ -220,28 +227,3 @@ def load_token_config() -> TokenConfig:
     )
 
     return config
-
-
-def get_supported_extensions() -> List[str]:
-    """
-    Get a list of file extensions supported by tree-sitter scoring.
-
-    Returns:
-        List[str]: List of supported file extensions (without dots).
-    """
-    config = load_token_config()
-    return [
-        ext
-        for ext, lang_config in config.language_configs.items()
-        if lang_config.language is not None and ext not in NON_CODE_EXTENSIONS
-    ]
-
-
-def get_documentation_extensions() -> List[str]:
-    """
-    Get a list of file extensions that use line-count scoring.
-
-    Returns:
-        List[str]: List of documentation/config file extensions (without dots).
-    """
-    return list(NON_CODE_EXTENSIONS)

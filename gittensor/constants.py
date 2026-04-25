@@ -9,9 +9,20 @@ SECONDS_PER_DAY = 86400
 SECONDS_PER_HOUR = 3600
 
 # =============================================================================
+# Network
+# =============================================================================
+NETWORK_MAP = {
+    'finney': 'wss://entrypoint-finney.opentensor.ai:443',
+    'test': 'wss://test.finney.opentensor.ai:443',
+    'local': 'ws://127.0.0.1:9944',
+}
+
+# =============================================================================
 # GitHub API
 # =============================================================================
 BASE_GITHUB_API_URL = 'https://api.github.com'
+GITHUB_HTTP_TIMEOUT_SECONDS = 15
+GRAPHQL_VIEWER_QUERY = '{ viewer { login } }'
 # 1MB max file size for github api file fetches. Files exceeding this get no score.
 MAX_FILE_SIZE_BYTES = 1_000_000
 # Too many object lookups in one GraphQL query can trigger 502 errors and lose all results.
@@ -54,14 +65,38 @@ MAX_LINES_SCORED_FOR_NON_CODE_EXT = 300
 # =============================================================================
 # Repository & PR Scoring
 # =============================================================================
+DEFAULT_REPO_WEIGHT = 0.01  # fallback weight for repos not in master_repositories.json
 PR_LOOKBACK_DAYS = 35  # rolling window for scoring
-MERGED_PR_BASE_SCORE = 30
-MIN_TOKEN_SCORE_FOR_BASE_SCORE = 5  # PRs below this get 0 base score (can still earn contribution bonus)
-MAX_CONTRIBUTION_BONUS = 30
-CONTRIBUTION_SCORE_FOR_FULL_BONUS = 2000
+MERGED_PR_BASE_SCORE = 25
+MIN_TOKEN_SCORE_FOR_BASE_SCORE = 5  # PRs below this get 0 base score
+MAX_CONTRIBUTION_BONUS = 25
+CONTRIBUTION_SCORE_FOR_FULL_BONUS = 1500
 
 # Boosts
-MAX_CODE_DENSITY_MULTIPLIER = 3.0
+MAX_CODE_DENSITY_MULTIPLIER = 1.5
+
+# Label multipliers - applied based on the last label set on the PR (requires triage+ access)
+LABEL_MULTIPLIERS: dict[str, float] = {
+    # features
+    'feature': 1.50,
+    'feat': 1.50,
+    # bug fixes
+    'bug': 1.25,
+    'fix': 1.25,
+    'crash': 1.25,
+    'regression': 1.25,
+    'security': 1.25,
+    # enhancements
+    'enhancement': 1.10,
+    'improve': 1.10,
+    'perf': 1.10,
+    # refactors
+    'refactor': 0.5,
+    'cleanup': 0.5,
+    'polish': 0.5,
+    'debt': 0.5,
+    'chore': 0.5,
+}
 
 # Pioneer dividend — rewards the first quality contributor to each repository
 # Rates applied per follower position (1st follower pays most, diminishing after)
@@ -150,7 +185,7 @@ RECYCLE_EMISSION_SHARE = 0.25  # 25% to recycle UID 0
 MAINTAINER_ASSOCIATIONS = ['OWNER', 'MEMBER', 'COLLABORATOR']
 
 # PR Review Quality Multiplier
-REVIEW_PENALTY_RATE = 0.12  # 12% deduction per CHANGES_REQUESTED review from a maintainer
+REVIEW_PENALTY_RATE = 0.15  # 15% deduction per CHANGES_REQUESTED review from a maintainer
 
 # Issue multiplier (flat values, no age scaling)
 STANDARD_ISSUE_MULTIPLIER = 1.33  # Non-maintainer issue author

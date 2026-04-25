@@ -8,7 +8,7 @@ and miner evaluations.
 
 import logging
 from contextlib import contextmanager
-from typing import List, TypeVar
+from typing import List
 
 import numpy as np
 
@@ -25,8 +25,6 @@ from .queries import (
     CLEANUP_STALE_MINERS_BY_HOTKEY,
     SET_MINER,
 )
-
-T = TypeVar('T')
 
 
 class BaseRepository:
@@ -176,6 +174,8 @@ class Repository(BaseRepository):
                     pr.time_decay_multiplier,
                     pr.credibility_multiplier,
                     pr.review_quality_multiplier,
+                    pr.label_multiplier,
+                    pr.label,
                     pr.earned_score,
                     pr.collateral_score,
                     pr.additions,
@@ -185,6 +185,7 @@ class Repository(BaseRepository):
                     pr.merged_by_login,
                     pr.description,
                     pr.last_edited_at,
+                    pr.code_density,
                     pr.token_score,
                     pr.structural_count,
                     pr.structural_score,

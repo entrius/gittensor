@@ -14,12 +14,21 @@ import requests
 from rich.console import Console
 from rich.table import Table
 
-from gittensor.constants import BASE_GITHUB_API_URL
+from gittensor.cli.miner_commands.helpers import (
+    NETUID_DEFAULT,
+    _connect_bittensor,
+    _error,
+    _load_config_value,
+    _print,
+    _require_registered,
+    _require_validator_axons,
+    _resolve_endpoint,
+    _status,
+)
+from gittensor.constants import BASE_GITHUB_API_URL, GITHUB_HTTP_TIMEOUT_SECONDS, GRAPHQL_VIEWER_QUERY
+from gittensor.utils.github_api_tools import make_graphql_headers, make_headers
 
 console = Console()
-
-# Shared CLI options for wallet/network configuration
-NETUID_DEFAULT = 2
 
 
 @click.command()
@@ -52,8 +61,6 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_m
         gitt miner post --wallet alice --hotkey default
         gitt miner post --wallet alice --hotkey default --network test
     """
-    import bittensor as bt
-
     from gittensor.synapses import PatBroadcastSynapse
 
     # 1. Load and validate PAT locally (flag > env var > interactive prompt)
@@ -65,87 +72,49 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_m
         pat = click.prompt('Enter your GitHub Personal Access Token', hide_input=True)
 
     # 1b. Validate PAT locally
-    if not json_mode:
-        with console.status('[bold]Validating PAT...'):
-            pat_valid = _validate_pat_locally(pat)
-    else:
+    with _status('[bold]Validating PAT...', json_mode):
         pat_valid = _validate_pat_locally(pat)
 
     if not pat_valid:
         _error('GitHub PAT is invalid or expired. Check your GITTENSOR_MINER_PAT.', json_mode)
         sys.exit(1)
 
-    if not json_mode:
-        console.print('[green]PAT is valid.[/green]')
+    _print('[green]PAT is valid.[/green]', json_mode)
 
     # 2. Resolve wallet and network
     wallet_name = wallet_name or _load_config_value('wallet') or 'default'
     wallet_hotkey = wallet_hotkey or _load_config_value('hotkey') or 'default'
     ws_endpoint = _resolve_endpoint(network, rpc_url)
 
-    if not json_mode:
-        console.print(f'[dim]Wallet: {wallet_name}/{wallet_hotkey} | Network: {ws_endpoint} | Netuid: {netuid}[/dim]')
+    _print(f'[dim]Wallet: {wallet_name}/{wallet_hotkey} | Network: {ws_endpoint} | Netuid: {netuid}[/dim]', json_mode)
 
     # 3. Set up bittensor objects
-    if not json_mode:
-        with console.status('[bold]Connecting to network...'):
-            try:
-                wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
-                subtensor = bt.Subtensor(network=ws_endpoint)
-                metagraph = subtensor.metagraph(netuid=netuid)
-                dendrite = bt.Dendrite(wallet=wallet)
-            except Exception as e:
-                _error(f'Failed to initialize bittensor: {e}', json_mode)
-                sys.exit(1)
-    else:
+    with _status('[bold]Connecting to network...', json_mode):
         try:
-            wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
-            subtensor = bt.Subtensor(network=ws_endpoint)
-            metagraph = subtensor.metagraph(netuid=netuid)
-            dendrite = bt.Dendrite(wallet=wallet)
+            wallet, subtensor, metagraph, dendrite = _connect_bittensor(wallet_name, wallet_hotkey, ws_endpoint, netuid)
         except Exception as e:
             _error(f'Failed to initialize bittensor: {e}', json_mode)
             sys.exit(1)
 
     # Verify miner is registered
-    if wallet.hotkey.ss58_address not in metagraph.hotkeys:
-        _error(f'Hotkey {wallet.hotkey.ss58_address[:16]}... is not registered on subnet {netuid}.', json_mode)
-        sys.exit(1)
+    _require_registered(wallet, metagraph, netuid, json_mode)
 
     # 4. Find active validator axons (vtrust > 0.1 = actively participating in consensus)
-    validator_axons = []
-    validator_uids = []
-    for uid in range(metagraph.n):
-        if metagraph.validator_trust[uid] > 0.1 and metagraph.axons[uid].is_serving:
-            validator_axons.append(metagraph.axons[uid])
-            validator_uids.append(uid)
-
-    if not validator_axons:
-        _error('No reachable validator axons found on the network.', json_mode)
-        sys.exit(1)
+    validator_axons, validator_uids = _require_validator_axons(metagraph, json_mode)
 
     # 5. Broadcast
     synapse = PatBroadcastSynapse(github_access_token=pat)
 
-    if not json_mode:
-        with console.status(f'[bold]Broadcasting to {len(validator_axons)} validators...'):
-            responses = asyncio.get_event_loop().run_until_complete(
-                dendrite(
-                    axons=validator_axons,
-                    synapse=synapse,
-                    deserialize=False,
-                    timeout=30.0,
-                )
-            )
-    else:
-        responses = asyncio.get_event_loop().run_until_complete(
-            dendrite(
-                axons=validator_axons,
-                synapse=synapse,
-                deserialize=False,
-                timeout=30.0,
-            )
+    async def _broadcast():
+        return await dendrite(
+            axons=validator_axons,
+            synapse=synapse,
+            deserialize=False,
+            timeout=30.0,
         )
+
+    with _status(f'[bold]Broadcasting to {len(validator_axons)} validators...', json_mode):
+        responses = asyncio.run(_broadcast())
 
     # 6. Collect results
     results = []
@@ -201,20 +170,20 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_m
 
 def _validate_pat_locally(pat: str) -> bool:
     """Validate PAT mirrors the validator-side checks: user identity + GraphQL access."""
-    headers = {'Authorization': f'token {pat}', 'Accept': 'application/vnd.github.v3+json'}
     try:
         # Check basic auth
-        user_resp = requests.get(f'{BASE_GITHUB_API_URL}/user', headers=headers, timeout=15)
+        user_resp = requests.get(
+            f'{BASE_GITHUB_API_URL}/user', headers=make_headers(pat), timeout=GITHUB_HTTP_TIMEOUT_SECONDS
+        )
         if user_resp.status_code != 200:
             return False
 
         # Check GraphQL access (same test the validator runs during PAT broadcast)
-        gql_headers = {'Authorization': f'bearer {pat}', 'Accept': 'application/json'}
         gql_resp = requests.post(
             f'{BASE_GITHUB_API_URL}/graphql',
-            json={'query': '{ viewer { login } }'},
-            headers=gql_headers,
-            timeout=15,
+            json={'query': GRAPHQL_VIEWER_QUERY},
+            headers=make_graphql_headers(pat),
+            timeout=GITHUB_HTTP_TIMEOUT_SECONDS,
         )
         if gql_resp.status_code != 200:
             console.print(
@@ -225,48 +194,3 @@ def _validate_pat_locally(pat: str) -> bool:
         return True
     except requests.RequestException:
         return False
-
-
-def _load_config_value(key: str):
-    """Load a value from ~/.gittensor/config.json, or None."""
-    from pathlib import Path
-
-    config_file = Path.home() / '.gittensor' / 'config.json'
-    if not config_file.exists():
-        return None
-    try:
-        config = json.loads(config_file.read_text())
-        return config.get(key)
-    except (json.JSONDecodeError, OSError):
-        return None
-
-
-NETWORK_MAP = {
-    'local': 'ws://127.0.0.1:9944',
-    'test': 'wss://test.finney.opentensor.ai:443/',
-    'finney': 'wss://entrypoint-finney.opentensor.ai:443/',
-}
-
-
-def _resolve_endpoint(network: str | None, rpc_url: str | None) -> str:
-    """Resolve the subtensor endpoint from CLI args or config."""
-    if rpc_url:
-        return rpc_url
-    if network:
-        return NETWORK_MAP.get(network, network)
-    # Try config file
-    config_network = _load_config_value('network')
-    config_endpoint = _load_config_value('ws_endpoint')
-    if config_endpoint:
-        return config_endpoint
-    if config_network:
-        return NETWORK_MAP.get(config_network) or config_network
-    return NETWORK_MAP['finney']
-
-
-def _error(msg: str, json_mode: bool):
-    """Print an error message in the appropriate format."""
-    if json_mode:
-        click.echo(json.dumps({'success': False, 'error': msg}))
-    else:
-        console.print(f'[red]Error: {msg}[/red]')

@@ -11,7 +11,6 @@ Commands:
     gitt admin info
 """
 
-import json as json_mod
 from decimal import Decimal
 
 import click
@@ -22,15 +21,15 @@ from .help import StyledCommand
 from .helpers import (
     _read_contract_packed_storage,
     _read_issues_from_child_storage,
+    _resolve_contract_and_network,
     colorize_status,
     console,
     emit_error_json,
+    emit_json,
     format_alpha,
-    get_contract_address,
-    print_error,
+    handle_exception,
     print_network_header,
     read_issues_from_contract,
-    resolve_network,
     with_cli_behavior_options,
     with_network_contract_options,
 )
@@ -60,11 +59,12 @@ def issues_list(issue_id: int, network: str, rpc_url: str, contract: str, verbos
         $ gitt i list --json
     [/dim]
     """
-    contract_addr = get_contract_address(contract)
-    ws_endpoint, network_name = resolve_network(network, rpc_url)
-
-    if not contract_addr:
-        raise click.ClickException('Contract address not configured. Set via: gitt config set contract_address <ADDR>.')
+    contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(
+        contract,
+        network,
+        rpc_url,
+        missing_contract_message='Contract address not configured. Set via: gitt config set contract_address <ADDR>.',
+    )
 
     if not as_json:
         print_network_header(network_name, contract_addr)
@@ -82,9 +82,9 @@ def issues_list(issue_id: int, network: str, rpc_url: str, contract: str, verbos
             if issue is None:
                 emit_error_json(f'Issue {issue_id} not found on-chain.', error_type='not_found')
                 raise SystemExit(1)
-            console.print(json_mod.dumps(issue, indent=2, default=str))
+            emit_json({'success': True, 'issue': issue})
         else:
-            console.print(json_mod.dumps(issues, indent=2, default=str))
+            emit_json({'success': True, 'issue_count': len(issues), 'issues': issues})
         return
 
     # Single issue detail view
@@ -188,11 +188,7 @@ def issues_bounty_pool(network: str, rpc_url: str, contract: str, verbose: bool,
         $ gitt i bounty-pool --json
     [/dim]
     """
-    contract_addr = get_contract_address(contract)
-    ws_endpoint, network_name = resolve_network(network, rpc_url)
-
-    if not contract_addr:
-        raise click.ClickException('Contract address not configured.')
+    contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
 
     if not as_json:
         print_network_header(network_name, contract_addr)
@@ -207,15 +203,13 @@ def issues_bounty_pool(network: str, rpc_url: str, contract: str, verbose: bool,
         total_bounty_pool = sum(issue.get('bounty_amount', 0) for issue in issues)
 
         if as_json:
-            console.print(
-                json_mod.dumps(
-                    {
-                        'total_bounty_pool_raw': total_bounty_pool,
-                        'total_bounty_pool_alpha': format_alpha(total_bounty_pool, 4),
-                        'issue_count': len(issues),
-                    },
-                    indent=2,
-                )
+            emit_json(
+                {
+                    'success': True,
+                    'total_bounty_pool_raw': total_bounty_pool,
+                    'total_bounty_pool_alpha': format_alpha(total_bounty_pool, 4),
+                    'issue_count': len(issues),
+                }
             )
             return
 
@@ -224,7 +218,7 @@ def issues_bounty_pool(network: str, rpc_url: str, contract: str, verbose: bool,
         )
         console.print(f'[dim]Sum of bounty amounts from {len(issues)} issue(s)[/dim]')
     except Exception as e:
-        print_error(str(e))
+        handle_exception(as_json=as_json, message=str(e))
 
 
 @click.command('pending-harvest', cls=StyledCommand)
@@ -238,11 +232,7 @@ def issues_pending_harvest(network: str, rpc_url: str, contract: str, verbose: b
         $ gitt i pending-harvest --json
     [/dim]
     """
-    contract_addr = get_contract_address(contract)
-    ws_endpoint, network_name = resolve_network(network, rpc_url)
-
-    if not contract_addr:
-        raise click.ClickException('Contract address not configured.')
+    contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
 
     if not as_json:
         print_network_header(network_name, contract_addr)
@@ -270,28 +260,24 @@ def issues_pending_harvest(network: str, rpc_url: str, contract: str, verbose: b
         pending_harvest = max(0, treasury_stake - total_bounty_pool)
 
         if as_json:
-            console.print(
-                json_mod.dumps(
-                    {
-                        'treasury_stake_raw': treasury_stake,
-                        'treasury_stake_alpha': format_alpha(treasury_stake, 4),
-                        'allocated_bounties_raw': total_bounty_pool,
-                        'allocated_bounties_alpha': format_alpha(total_bounty_pool, 4),
-                        'pending_harvest_raw': pending_harvest,
-                        'pending_harvest_alpha': format_alpha(pending_harvest, 4),
-                    },
-                    indent=2,
-                )
+            emit_json(
+                {
+                    'success': True,
+                    'treasury_stake_raw': treasury_stake,
+                    'treasury_stake_alpha': format_alpha(treasury_stake, 4),
+                    'allocated_bounties_raw': total_bounty_pool,
+                    'allocated_bounties_alpha': format_alpha(total_bounty_pool, 4),
+                    'pending_harvest_raw': pending_harvest,
+                    'pending_harvest_alpha': format_alpha(pending_harvest, 4),
+                }
             )
             return
 
         console.print(f'[green]Treasury Stake:[/green] {format_alpha(treasury_stake, 4)} ALPHA')
         console.print(f'[green]Allocated to Bounties:[/green] {format_alpha(total_bounty_pool, 4)} ALPHA')
         console.print(f'[green]Pending Harvest:[/green] {format_alpha(pending_harvest, 4)} ALPHA')
-    except ImportError as e:
-        print_error(f'Missing dependency — {e}')
     except Exception as e:
-        print_error(str(e))
+        handle_exception(as_json=as_json, message=str(e))
 
 
 @click.command('info', cls=StyledCommand)
@@ -305,11 +291,7 @@ def admin_info(network: str, rpc_url: str, contract: str, verbose: bool, as_json
         $ gitt a info --json
     [/dim]
     """
-    contract_addr = get_contract_address(contract)
-    ws_endpoint, network_name = resolve_network(network, rpc_url)
-
-    if not contract_addr:
-        raise click.ClickException('Contract address not configured.')
+    contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
 
     if not as_json:
         print_network_header(network_name, contract_addr)
@@ -323,7 +305,7 @@ def admin_info(network: str, rpc_url: str, contract: str, verbose: bool, as_json
 
         if packed:
             if as_json:
-                console.print(json_mod.dumps(packed, indent=2, default=str))
+                emit_json({'success': True, **packed})
                 return
 
             console.print(
@@ -337,7 +319,11 @@ def admin_info(network: str, rpc_url: str, contract: str, verbose: bool, as_json
                 )
             )
         else:
-            console.print('[yellow]Could not read contract configuration.[/yellow]')
+            msg = 'Could not read contract configuration.'
+            if as_json:
+                emit_error_json(msg, error_type='read_failed')
+                raise SystemExit(1)
+            console.print(f'[yellow]{msg}[/yellow]')
             console.print('[dim]Try running with --verbose to see debug details.[/dim]')
     except Exception as e:
-        print_error(str(e))
+        handle_exception(as_json=as_json, message=str(e))

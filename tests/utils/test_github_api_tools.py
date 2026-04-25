@@ -28,11 +28,11 @@ github_api_tools = pytest.importorskip(
 
 get_github_graphql_query = github_api_tools.get_github_graphql_query
 get_github_id = github_api_tools.get_github_id
-get_github_account_age_days = github_api_tools.get_github_account_age_days
 get_pull_request_file_changes = github_api_tools.get_pull_request_file_changes
 get_merge_base_sha = github_api_tools.get_merge_base_sha
 find_prs_for_issue = github_api_tools.find_prs_for_issue
 execute_graphql_query = github_api_tools.execute_graphql_query
+check_github_issue_closed = github_api_tools.check_github_issue_closed
 
 
 # ============================================================================
@@ -376,27 +376,6 @@ class TestOtherGitHubAPIFunctions:
 
         assert result == '12345'
         assert mock_get.call_count == 3
-
-    @patch('gittensor.utils.github_api_tools.requests.get')
-    @patch('gittensor.utils.github_api_tools.time.sleep')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
-    def test_get_github_account_age_retry_logic(self, mock_logging, mock_sleep, mock_get):
-        """Test that get_github_account_age_days retries on failure."""
-        mock_response_success = Mock()
-        mock_response_success.status_code = 200
-        mock_response_success.json.return_value = {'id': 999, 'created_at': '2020-01-01T00:00:00Z'}
-
-        mock_get.side_effect = [
-            Exception('Timeout'),
-            mock_response_success,
-        ]
-
-        result = get_github_account_age_days('fake_token_2')
-
-        assert result is not None
-        assert isinstance(result, int)
-        assert result > 1000  # Account older than 1000 days
-        assert mock_get.call_count == 2
 
 
 # ============================================================================
@@ -838,7 +817,6 @@ def test_find_prs_without_token_only_uses_unauth_rest(mock_graphql, mock_rest):
 # Solver Detection Tests
 # ============================================================================
 
-find_solver_from_timeline = github_api_tools.find_solver_from_timeline
 find_solver_from_cross_references = github_api_tools.find_solver_from_cross_references
 
 
@@ -1027,29 +1005,53 @@ class TestFindSolverFromCrossReferences:
     @patch('gittensor.utils.github_api_tools.execute_graphql_query')
     @patch('gittensor.utils.github_api_tools.bt.logging')
     def test_graphql_query_failure_returns_none(self, mock_logging, mock_graphql):
-        """GraphQL query failure returns (None, None)."""
+        """GraphQL query failures return the lookup-failure sentinel."""
+        for graphql_response in (None, {'errors': [{'message': 'rate limited'}]}):
+            mock_graphql.return_value = graphql_response
+            result = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
+            assert result is None
+
+
+class TestCheckGithubIssueClosed:
+    """Test issue state checks keep API failures distinct from no-solver cases."""
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_graphql_failure_sets_solver_lookup_failed(self, mock_logging, mock_get, mock_graphql):
+        issue_response = Mock()
+        issue_response.status_code = 200
+        issue_response.json.return_value = {'state': 'closed'}
+        mock_get.return_value = issue_response
         mock_graphql.return_value = None
 
-        solver_id, pr_number = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
+        result = check_github_issue_closed('owner/repo', 12, 'fake_token')
 
-        assert solver_id is None
-        assert pr_number is None
+        assert result == {
+            'is_closed': True,
+            'solver_github_id': None,
+            'pr_number': None,
+            'solver_lookup_failed': True,
+        }
 
-
-class TestFindSolverFromTimeline:
-    """Test that find_solver_from_timeline delegates to cross-references."""
-
-    @patch('gittensor.utils.github_api_tools.find_solver_from_cross_references')
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api_tools.requests.get')
     @patch('gittensor.utils.github_api_tools.bt.logging')
-    def test_delegates_to_cross_references(self, mock_logging, mock_cross_ref):
-        """find_solver_from_timeline delegates directly to find_solver_from_cross_references."""
-        mock_cross_ref.return_value = (42, 14)
+    def test_closed_issue_with_no_solver_keeps_lookup_failed_false(self, mock_logging, mock_get, mock_graphql):
+        issue_response = Mock()
+        issue_response.status_code = 200
+        issue_response.json.return_value = {'state': 'closed'}
+        mock_get.return_value = issue_response
+        mock_graphql.return_value = _graphql_response([])
 
-        solver_id, pr_number = find_solver_from_timeline('owner/repo', 12, 'fake_token')
+        result = check_github_issue_closed('owner/repo', 12, 'fake_token')
 
-        assert solver_id == 42
-        assert pr_number == 14
-        mock_cross_ref.assert_called_once_with('owner/repo', 12, 'fake_token')
+        assert result == {
+            'is_closed': True,
+            'solver_github_id': None,
+            'pr_number': None,
+            'solver_lookup_failed': False,
+        }
 
 
 # ============================================================================
@@ -1178,11 +1180,56 @@ class TestLoadMinersPrsErrorResilience:
         assert any('PR #2' in w for w in warning_calls), f'Expected a warning about PR #2, got: {warning_calls}'
 
 
+class TestLoadMinersPrsFetchFailureSignal:
+    """Tests for explicit fetch-failure signaling in load_miners_prs."""
+
+    @patch('gittensor.utils.github_api_tools.get_github_graphql_query')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_empty_pr_list_keeps_fetch_failed_false(self, mock_logging, mock_graphql_query):
+        from gittensor.classes import MinerEvaluation
+        from gittensor.utils.github_api_tools import GraphQLPageResult
+
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            'data': {
+                'node': {
+                    'issues': {'totalCount': 0},
+                    'pullRequests': {
+                        'pageInfo': {'hasNextPage': False, 'endCursor': None},
+                        'nodes': [],
+                    },
+                }
+            }
+        }
+        mock_graphql_query.return_value = GraphQLPageResult(response=mock_response, page_size=100)
+
+        miner_eval = MinerEvaluation(uid=74, hotkey='test_hotkey', github_id='12345', github_pat='fake_pat')
+
+        load_miners_prs(miner_eval, {})
+
+        assert miner_eval.github_pr_fetch_failed is False
+        assert miner_eval.total_prs == 0
+
+    @patch('gittensor.utils.github_api_tools.get_github_graphql_query')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_no_graphql_response_sets_fetch_failed_true(self, mock_logging, mock_graphql_query):
+        from gittensor.classes import MinerEvaluation
+        from gittensor.utils.github_api_tools import GraphQLPageResult
+
+        mock_graphql_query.return_value = GraphQLPageResult(response=None, page_size=100)
+
+        miner_eval = MinerEvaluation(uid=74, hotkey='test_hotkey', github_id='12345', github_pat='fake_pat')
+
+        load_miners_prs(miner_eval, {})
+
+        assert miner_eval.github_pr_fetch_failed is True
+
+
 # ============================================================================
 # GraphQL Batch-Size Limit Tests
 # ============================================================================
 
-fetch_file_contents_batch = github_api_tools.fetch_file_contents_batch
 fetch_file_contents_with_base = github_api_tools.fetch_file_contents_with_base
 FileContentPair = github_api_tools.FileContentPair
 
@@ -1199,114 +1246,6 @@ def _make_file_change(filename: str, status: str = 'modified', previous_filename
     change.status = status
     change.previous_filename = previous_filename
     return change
-
-
-class TestFetchFileContentsBatch:
-    """Tests for batch-size limiting in fetch_file_contents_batch."""
-
-    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
-    def test_empty_paths_returns_empty_dict(self, mock_execute):
-        """No GraphQL call should be made when file_paths is empty."""
-        result = fetch_file_contents_batch('owner', 'repo', 'abc123', [], 'token')
-        assert result == {}
-        mock_execute.assert_not_called()
-
-    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
-    def test_single_batch_under_limit(self, mock_execute):
-        """Files under the batch limit should be fetched in a single GraphQL request."""
-        paths = [f'src/file{i}.py' for i in range(5)]
-        mock_execute.return_value = {
-            'data': {'repository': {f'file{i}': _make_blob_response(f'content_{i}') for i in range(5)}}
-        }
-
-        result = fetch_file_contents_batch('owner', 'repo', 'sha1', paths, 'token')
-
-        assert mock_execute.call_count == 1
-        assert len(result) == 5
-        for i, path in enumerate(paths):
-            assert result[path] == f'content_{i}'
-
-    @patch('gittensor.utils.github_api_tools.MAX_FILES_PER_GRAPHQL_BATCH', 3)
-    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
-    def test_multiple_batches_splits_correctly(self, mock_execute):
-        """Files exceeding the batch limit should be split into multiple GraphQL requests."""
-        paths = [f'src/file{i}.py' for i in range(7)]
-
-        def mock_query_side_effect(query, variables, token):
-            # Count how many file aliases are in the query
-            file_count = query.count('object(expression:')
-            return {
-                'data': {
-                    'repository': {f'file{i}': _make_blob_response(f'batch_content_{i}') for i in range(file_count)}
-                }
-            }
-
-        mock_execute.side_effect = mock_query_side_effect
-
-        result = fetch_file_contents_batch('owner', 'repo', 'sha1', paths, 'token')
-
-        # 7 files / batch size 3 = 3 batches (3 + 3 + 1)
-        assert mock_execute.call_count == 3
-        assert len(result) == 7
-
-    @patch('gittensor.utils.github_api_tools.MAX_FILES_PER_GRAPHQL_BATCH', 3)
-    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
-    def test_failed_batch_returns_none_without_losing_other_batches(self, mock_logging, mock_execute):
-        """A failed batch should return None for its files but not affect other batches."""
-        paths = [f'file{i}.py' for i in range(6)]
-
-        # First batch succeeds, second batch fails
-        mock_execute.side_effect = [
-            {'data': {'repository': {f'file{i}': _make_blob_response(f'ok_{i}') for i in range(3)}}},
-            None,  # second batch fails
-        ]
-
-        result = fetch_file_contents_batch('owner', 'repo', 'sha1', paths, 'token')
-
-        assert len(result) == 6
-        # First batch files have content
-        assert result['file0.py'] == 'ok_0'
-        assert result['file1.py'] == 'ok_1'
-        assert result['file2.py'] == 'ok_2'
-        # Second batch files are None due to failure
-        assert result['file3.py'] is None
-        assert result['file4.py'] is None
-        assert result['file5.py'] is None
-
-    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
-    def test_binary_and_oversized_files_return_none(self, mock_execute):
-        """Binary files and files exceeding MAX_FILE_SIZE_BYTES should return None."""
-        paths = ['normal.py', 'binary.bin', 'huge.py']
-        mock_execute.return_value = {
-            'data': {
-                'repository': {
-                    'file0': _make_blob_response('print("hello")'),
-                    'file1': {'text': None, 'byteSize': 100, 'isBinary': True},
-                    'file2': {'text': 'x' * 100, 'byteSize': 2_000_000, 'isBinary': False},
-                }
-            }
-        }
-
-        result = fetch_file_contents_batch('owner', 'repo', 'sha1', paths, 'token')
-
-        assert result['normal.py'] == 'print("hello")'
-        assert result['binary.bin'] is None
-        assert result['huge.py'] is None
-
-    @patch('gittensor.utils.github_api_tools.MAX_FILES_PER_GRAPHQL_BATCH', 50)
-    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
-    def test_exactly_batch_size_uses_single_request(self, mock_execute):
-        """Exactly MAX_FILES_PER_GRAPHQL_BATCH files should use a single request."""
-        paths = [f'file{i}.py' for i in range(50)]
-        mock_execute.return_value = {
-            'data': {'repository': {f'file{i}': _make_blob_response(f'c{i}') for i in range(50)}}
-        }
-
-        result = fetch_file_contents_batch('owner', 'repo', 'sha1', paths, 'token')
-
-        assert mock_execute.call_count == 1
-        assert len(result) == 50
 
 
 class TestFetchFileContentsWithBase:

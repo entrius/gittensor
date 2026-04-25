@@ -1,5 +1,32 @@
 # Gittensor Contributor Guide
 
+## Development Setup
+
+1. Install dependencies:
+   ```bash
+   uv sync --extra dev
+   ```
+
+2. Install git hooks:
+   ```bash
+   uv run pre-commit install --install-hooks
+   ```
+
+   This installs pre-commit and pre-push hooks. Ruff lint/format runs on every
+   commit; pyright and pytest run before push.
+
+3. Run all checks manually:
+   ```bash
+   uv run pre-commit run --all-files                        # pre-commit hooks
+   uv run pre-commit run --all-files --hook-stage pre-push  # pre-push hooks
+   ```
+
+4. To skip hooks for WIP commits or pushes:
+   ```bash
+   git commit --no-verify -m "WIP: ..."
+   git push --no-verify
+   ```
+
 ## Getting Started
 
 Before contributing, please:
@@ -63,6 +90,21 @@ Apply appropriate labels to help categorize and track your contribution:
 - `enhancement` - Improvements to existing features
 - `refactor` - Code refactoring without functionality changes
 - `documentation` - Documentation updates
+
+## Contribution Scope
+
+### Out of Scope
+
+The following directories are **not accepting external contributions**:
+
+- `smart-contracts/` — All ink!/Rust smart contracts
+- Any other Rust crates in this repository
+
+Changes to these directories will be closed without review. If you have questions or suggestions related to the smart contracts, open a discussion or issue instead.
+
+### In Scope
+
+Contributions are welcome for the Python codebase, including the validator, miner, CLI, and associated tests.
 
 ## Code Standards
 

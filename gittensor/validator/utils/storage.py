@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Dict, List
 
 import bittensor as bt
@@ -48,6 +49,8 @@ class DatabaseStorage:
             assert self.db_connection is not None and self.repo is not None
             self.db_connection.autocommit = False
 
+            miner_eval.evaluation_timestamp = datetime.now(timezone.utc)
+
             # Store all entities using bulk methods
             miner = Miner(miner_eval.uid, miner_eval.hotkey, miner_eval.github_id or '')
 
@@ -84,13 +87,6 @@ class DatabaseStorage:
             self.logger.error(error_msg)
 
         return result
-
-    def _log_storage_summary(self, counts: Dict[str, int]):
-        """Log a summary of what was stored"""
-        self.logger.info('Storage Summary:')
-        for entity_type, count in counts.items():
-            if count > 0:
-                self.logger.info(f'  - {entity_type}: {count}')
 
     def close(self):
         if self.db_connection:

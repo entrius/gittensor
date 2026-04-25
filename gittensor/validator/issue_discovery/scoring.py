@@ -1,7 +1,6 @@
 # The MIT License (MIT)
 # Copyright © 2025 Entrius
 
-import math
 from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
@@ -19,13 +18,9 @@ from gittensor.constants import (
     MIN_VALID_SOLVED_ISSUES,
     OPEN_ISSUE_SPAM_BASE_THRESHOLD,
     OPEN_ISSUE_SPAM_TOKEN_SCORE_PER_SLOT,
-    SECONDS_PER_HOUR,
-    TIME_DECAY_GRACE_PERIOD_HOURS,
-    TIME_DECAY_MIN_MULTIPLIER,
-    TIME_DECAY_SIGMOID_MIDPOINT,
-    TIME_DECAY_SIGMOID_STEEPNESS_SCALAR,
 )
-from gittensor.validator.utils.load_weights import RepositoryConfig
+from gittensor.validator.utils.datetime_utils import calculate_time_decay
+from gittensor.validator.utils.load_weights import RepositoryConfig, resolve_repo_weight
 
 
 def calculate_issue_review_quality_multiplier(changes_requested_count: int) -> float:
@@ -64,33 +59,20 @@ def calculate_issue_credibility(solved_count: int, closed_count: int) -> float:
     return solved_count / total
 
 
-def check_issue_eligibility(solved_count: int, closed_count: int) -> Tuple[bool, float, str]:
+def check_issue_eligibility(solved_count: int, valid_solved_count: int, closed_count: int) -> Tuple[bool, float, str]:
     """Check if a miner passes the issue discovery eligibility gate.
 
     Returns (is_eligible, issue_credibility, reason).
     """
     credibility = calculate_issue_credibility(solved_count, closed_count)
 
-    if solved_count < MIN_VALID_SOLVED_ISSUES:
-        return False, credibility, f'{solved_count}/{MIN_VALID_SOLVED_ISSUES} valid solved issues'
+    if valid_solved_count < MIN_VALID_SOLVED_ISSUES:
+        return False, credibility, f'{valid_solved_count}/{MIN_VALID_SOLVED_ISSUES} valid solved issues'
 
     if credibility < MIN_ISSUE_CREDIBILITY:
         return False, credibility, f'Issue credibility {credibility:.2f} < {MIN_ISSUE_CREDIBILITY}'
 
     return True, credibility, ''
-
-
-def _calculate_time_decay_from_merge(merged_at: datetime) -> float:
-    """Time decay anchored to a PR's merge date. Same sigmoid as OSS contributions."""
-    now = datetime.now(timezone.utc)
-    hours_since_merge = (now - merged_at).total_seconds() / SECONDS_PER_HOUR
-
-    if hours_since_merge < TIME_DECAY_GRACE_PERIOD_HOURS:
-        return 1.0
-
-    days_since_merge = hours_since_merge / 24
-    sigmoid = 1 / (1 + math.exp(TIME_DECAY_SIGMOID_STEEPNESS_SCALAR * (days_since_merge - TIME_DECAY_SIGMOID_MIDPOINT)))
-    return max(sigmoid, TIME_DECAY_MIN_MULTIPLIER)
 
 
 def score_discovered_issues(
@@ -146,7 +128,9 @@ def score_discovered_issues(
         evaluation.total_closed_issues = data.closed_count
         evaluation.issue_token_score = round(data.issue_token_score, 2)
 
-        is_eligible, credibility, reason = check_issue_eligibility(data.valid_solved_count, data.closed_count)
+        is_eligible, credibility, reason = check_issue_eligibility(
+            data.solved_count, data.valid_solved_count, data.closed_count
+        )
         evaluation.is_issue_eligible = is_eligible
         evaluation.issue_credibility = credibility
 
@@ -208,6 +192,20 @@ def _collect_issues_from_prs(
     """
     # Track which PRs have already awarded a discovery score (one-issue-per-PR rule)
     pr_scored: set = set()  # (repo, pr_number)
+    # Dedup across PRs: canonical solver per issue is the earliest-merged PR (tie-break:
+    # smaller PR number). Only the canonical PR drives counts/scoring; others skip below.
+    canonical: Dict[Tuple[str, int], Tuple[datetime, int]] = {}
+    for _ev in miner_evaluations.values():
+        for _pr in _ev.merged_pull_requests:
+            if not _pr.issues or not _pr.merged_at:
+                continue
+            for _issue in _pr.issues:
+                if not _issue.author_github_id:
+                    continue
+                _key = (_pr.repository_full_name, _issue.number)
+                _marker = (_pr.merged_at, _pr.number)
+                if _key not in canonical or _marker < canonical[_key]:
+                    canonical[_key] = _marker
 
     for uid, evaluation in miner_evaluations.items():
         for pr in evaluation.merged_pull_requests:
@@ -225,7 +223,21 @@ def _collect_issues_from_prs(
                 if not discoverer_id or discoverer_id not in github_id_to_uid:
                     continue
 
+                if canonical.get((pr.repository_full_name, issue.number)) != (pr.merged_at, pr.number):
+                    continue
+
                 data = discoverer_data[discoverer_id]
+
+                # Anti-gaming: only explicitly COMPLETED closures count as solved.
+                # NOT_PLANNED, TRANSFERRED, and None all route to closed_count. None is
+                # effectively unreachable inside the 35-day lookback (GitHub auto-populates
+                # stateReason on close), but treating it as not-solved is the safer default.
+                if issue.state_reason != 'COMPLETED':
+                    bt.logging.info(
+                        f'Issue #{issue.number} state_reason={issue.state_reason} — 0 score, counts as closed'
+                    )
+                    data.closed_count += 1
+                    continue
 
                 # Classify: is this issue solved (merged PR closed it)?
                 is_solved = issue.state == 'CLOSED' and pr.merged_at is not None
@@ -236,10 +248,11 @@ def _collect_issues_from_prs(
                     data.closed_count += 1
                     continue  # No score for unsolved issues
 
-                # Anti-gaming: post-merge edit detection
-                if issue.updated_at and pr.merged_at and issue.updated_at > pr.merged_at:
+                # Anti-gaming: post-merge body/title edit detection
+                # Not issue.updated_at: it fires on bot comments, labels, reactions.
+                if issue.body_or_title_edited_at and pr.merged_at and issue.body_or_title_edited_at > pr.merged_at:
                     bt.logging.info(
-                        f'Issue #{issue.number} edited after PR #{pr.number} merge — 0 score, counts as closed'
+                        f'Issue #{issue.number} body/title edited after PR #{pr.number} merge — 0 score, counts as closed'
                     )
                     data.solved_count -= 1
                     data.closed_count += 1
@@ -266,8 +279,8 @@ def _collect_issues_from_prs(
                 # Populate discovery scoring fields
                 repo_config = master_repositories.get(pr.repository_full_name)
                 issue.discovery_base_score = pr.base_score
-                issue.discovery_repo_weight_multiplier = round(repo_config.weight if repo_config else 0.01, 2)
-                issue.discovery_time_decay_multiplier = round(_calculate_time_decay_from_merge(pr.merged_at), 2)
+                issue.discovery_repo_weight_multiplier = resolve_repo_weight(repo_config)
+                issue.discovery_time_decay_multiplier = round(calculate_time_decay(pr.merged_at), 2)
                 issue.discovery_review_quality_multiplier = round(
                     calculate_issue_review_quality_multiplier(pr.changes_requested_count), 2
                 )
@@ -294,8 +307,14 @@ def _merge_scan_issues(
 
         data = discoverer_data[github_id]
         for issue in issues:
+            # Anti-gaming: only explicitly COMPLETED closures count as solved.
+            # NOT_PLANNED, TRANSFERRED, and None all route to closed_count.
+            if issue.state_reason != 'COMPLETED':
+                bt.logging.info(f'Scan issue #{issue.number} state_reason={issue.state_reason} — counts as closed')
+                data.closed_count += 1
+                continue
             if issue.state == 'CLOSED' and issue.closed_at:
-                # Case 2: solved by non-miner PR → positive credibility
+                # Case 2: solved by non-miner PR → positive credibility only
                 data.solved_count += 1
             else:
                 # Case 3: closed without PR → negative credibility

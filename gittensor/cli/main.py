@@ -13,24 +13,39 @@ Usage:
 """
 
 import json
-from pathlib import Path
+import os
+import sys
+
+# Stub heavy imports during shell completion so tab-completion stays fast.
+if os.environ.get('_GITT_COMPLETE'):
+    import types as _types
+
+    class _Stub(_types.ModuleType):
+        def __getattr__(self, _name):
+            return self
+
+        def __call__(self, *_a, **_kw):
+            return self
+
+    _stub = _Stub('_gitt_completion_stub')
+    for _pkg in ('bittensor', 'requests'):
+        sys.modules[_pkg] = _stub
 
 import click
+from click.shell_completion import get_completion_class
 from rich.console import Console
 from rich.table import Table
 
+from gittensor import __version__
 from gittensor.cli.issue_commands import register_commands
 from gittensor.cli.issue_commands.help import StyledAliasGroup, StyledGroup
+from gittensor.cli.issue_commands.helpers import CONFIG_FILE, GITTENSOR_DIR
 
 console = Console()
 
-# Config paths
-GITTENSOR_DIR = Path.home() / '.gittensor'
-CONFIG_FILE = GITTENSOR_DIR / 'config.json'
-
 
 @click.group(cls=StyledAliasGroup)
-@click.version_option(version='3.2.0', prog_name='gittensor')
+@click.version_option(version=__version__, prog_name='gittensor')
 def cli():
     """Gittensor CLI - Manage issue bounties and validator operations"""
     pass
@@ -121,6 +136,38 @@ def config_set(key: str, value: str):
         console.print(f'[green]Updated {key}:[/green] {old_value} → {value}')
     else:
         console.print(f'[green]Set {key}:[/green] {value}')
+
+
+def _detect_shell():
+    """Detect the current shell from the SHELL environment variable"""
+    shell_path = os.environ.get('SHELL', '')
+    shell_name = os.path.basename(shell_path)
+    if shell_name in ('bash', 'zsh', 'fish'):
+        return shell_name
+    return None
+
+
+@cli.command('completion')
+@click.argument('shell', type=click.Choice(['bash', 'zsh', 'fish']), default=None, required=False)
+def completion(shell):
+    """Generate shell completion script
+
+    Install completions:
+        bash:  eval "$(gitt completion bash)"
+        zsh:   eval "$(gitt completion zsh)"
+        fish:  gitt completion fish | source
+
+    If shell is omitted, auto-detects from the SHELL environment variable.
+    """
+    if shell is None:
+        shell = _detect_shell()
+        if shell is None:
+            raise click.UsageError('Cannot detect shell. Please specify one of: bash, zsh, fish')
+    cls = get_completion_class(shell)
+    if cls is None:
+        raise click.UsageError(f'Unsupported shell: {shell}')
+    comp = cls(cli, ctx_args={}, prog_name='gitt', complete_var='_GITT_COMPLETE')
+    click.echo(comp.source())
 
 
 # Register config group

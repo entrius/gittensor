@@ -27,6 +27,7 @@ dev = [
     "pytest==9.0.0",
     "pyright",
     "ruff==0.14.10",
+    "pre-commit>=4.0",
 ]
 debug = [
     "debugpy==1.8.11",

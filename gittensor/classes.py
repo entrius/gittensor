@@ -237,6 +237,8 @@ class PullRequest:
         from gittensor.validator.utils.datetime_utils import parse_github_timestamp_to_cst
 
         repository_full_name = parse_repo_name(pr_data['repository'])
+        if repository_full_name is None:
+            raise ValueError(f'PR #{pr_data.get("number")} has null repository owner — skipping')
         pr_state = PRState(pr_data['state'])
         is_merged = pr_state == PRState.MERGED
 
@@ -418,23 +420,22 @@ class MinerEvaluation:
 
     def add_merged_pull_request(self, raw_pr: Dict):
         """Add a merged pull request that will be factored into scoring."""
-        bt.logging.info(
-            f"Accepting MERGED PR #{raw_pr['number']} in {parse_repo_name(raw_pr['repository'])} -> '{raw_pr['baseRefName']}'"
-        )
+        repo_name = parse_repo_name(raw_pr['repository']) or '<unknown>'
+        bt.logging.info(f"Accepting MERGED PR #{raw_pr['number']} in {repo_name} -> '{raw_pr['baseRefName']}'")
         self.merged_pull_requests.append(
             PullRequest.from_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id)
         )
 
     def add_open_pull_request(self, raw_pr: Dict):
         """Add an open pull request that will be factored into scoring."""
-        bt.logging.info(f'Counting OPEN PR #{raw_pr["number"]} in {parse_repo_name(raw_pr["repository"])}')
+        repo_name = parse_repo_name(raw_pr['repository']) or '<unknown>'
+        bt.logging.info(f'Counting OPEN PR #{raw_pr["number"]} in {repo_name}')
         self.open_pull_requests.append(PullRequest.from_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id))
 
     def add_closed_pull_request(self, raw_pr: Dict):
         """Add a closed pull request that will be factored into scoring."""
-        bt.logging.info(
-            f'CLOSED PR #{raw_pr["number"]} in {parse_repo_name(raw_pr["repository"])} counting towards credibility'
-        )
+        repo_name = parse_repo_name(raw_pr['repository']) or '<unknown>'
+        bt.logging.info(f'CLOSED PR #{raw_pr["number"]} in {repo_name} counting towards credibility')
         self.closed_pull_requests.append(
             PullRequest.from_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id)
         )

@@ -3,12 +3,17 @@ GitTensor Utilities
 """
 
 import os
-from typing import Dict
+from typing import Dict, Optional
 
 
-def parse_repo_name(repo_data: Dict):
-    """Normalizes and converts repository name from dict"""
-    return f'{repo_data["owner"]["login"]}/{repo_data["name"]}'.lower()
+def parse_repo_name(repo_data: Dict) -> Optional[str]:
+    """Normalizes and converts repository name from dict.
+
+    Returns None if owner is missing (e.g. deleted fork-owner account).
+    """
+    owner = (repo_data.get('owner') or {}).get('login')
+    name = repo_data.get('name')
+    return f'{owner}/{name}'.lower() if owner and name else None
 
 
 def get_contract_address() -> str:

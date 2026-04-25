@@ -866,7 +866,7 @@ def should_skip_merged_pr(
     # This check ONLY applies to internal PRs (same repository), as fork branch names are arbitrary.
     # Supports wildcard patterns (e.g., '*-dev' matches '3.0-dev', '3.1-dev', etc.)
     head_repo = pr_raw.get('headRepository')
-    if head_repo and parse_repo_name(head_repo) == repository_full_name:
+    if head_repo and (parse_repo_name(head_repo) or '') == repository_full_name:
         if branch_matches_pattern(head_ref, acceptable_branches):
             return (
                 True,
@@ -963,6 +963,11 @@ def load_miners_prs(
             for pr_raw in prs:
                 try:
                     repository_full_name = parse_repo_name(pr_raw['repository'])
+                    if repository_full_name is None:
+                        bt.logging.warning(
+                            f'Skipping PR #{pr_raw.get("number")} — repository owner is null (deleted account)'
+                        )
+                        continue
                     pr_state = pr_raw['state']
 
                     if repository_full_name not in master_repositories:

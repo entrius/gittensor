@@ -130,7 +130,7 @@ def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
                 normalized_data[repo_name.lower()] = config
             except (ValueError, TypeError) as e:
                 bt.logging.warning(f'Could not parse config for {repo_name}: {e}, using defaults')
-                normalized_data[repo_name.lower()] = RepositoryConfig()
+                normalized_data[repo_name.lower()] = RepositoryConfig(weight=0.01)
 
         bt.logging.debug(f'Successfully loaded {len(normalized_data)} repository entries from {weights_file}')
         return normalized_data

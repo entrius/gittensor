@@ -76,9 +76,6 @@ class TestCombinePopulated:
         mirror_eval.merged_prs = [_scored(1), _scored(2)]
         mirror_eval.open_prs = [_scored(3, state='OPEN')]
         mirror_eval.closed_prs = [_scored(4, state='CLOSED')]
-        mirror_eval.total_token_score = 200.0
-        mirror_eval.total_nodes_scored = 75
-        mirror_eval.total_collateral_score = 3.0
         mirror_eval.unique_repos_contributed_to = {'entrius/gittensor-ui', 'entrius/allways'}
         return legacy, mirror_eval
 
@@ -89,12 +86,15 @@ class TestCombinePopulated:
         assert result.mirror_open_prs is mirror_eval.open_prs
         assert result.mirror_closed_prs is mirror_eval.closed_prs
 
-    def test_counters_summed(self):
+    def test_counters_left_alone(self):
+        """combine() does NOT touch token/nodes/collateral counters — those
+        are aggregated from per-PR fields by finalize_miner_scores."""
         legacy, mirror_eval = self._setup()
         result = combine(legacy, mirror_eval)
-        assert result.total_token_score == 300.0
-        assert result.total_nodes_scored == 125
-        assert result.total_collateral_score == 8.0
+        # Legacy values pre-combine should pass through unchanged
+        assert result.total_token_score == 100.0
+        assert result.total_nodes_scored == 50
+        assert result.total_collateral_score == 5.0
 
     def test_unique_repos_unioned(self):
         legacy, mirror_eval = self._setup()

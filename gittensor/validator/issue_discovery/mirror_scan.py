@@ -328,16 +328,19 @@ def _score_miner_mirror_issues(
         # for the open-issue spam multiplier threshold calc.
         issue_token_score += cached.token_score
 
+    # All issue-discovery fields are now mirror-only writers (legacy issue
+    # discovery has been removed), so simple assignment — no need to merge
+    # with prior values.
     evaluation.total_solved_issues = solved_count
     evaluation.total_valid_solved_issues = valid_solved_count
-    evaluation.total_closed_issues += closed_count
+    evaluation.total_closed_issues = closed_count
     evaluation.issue_token_score = round(issue_token_score, 2)
 
     is_eligible, credibility, reason = check_issue_eligibility(
         solved_count, valid_solved_count, closed_count
     )
-    evaluation.is_issue_eligible = is_eligible or evaluation.is_issue_eligible
-    evaluation.issue_credibility = max(evaluation.issue_credibility, credibility)
+    evaluation.is_issue_eligible = is_eligible
+    evaluation.issue_credibility = credibility
 
     if not is_eligible:
         bt.logging.info(
@@ -367,9 +370,7 @@ def _score_miner_mirror_issues(
         )
         total_discovery_score += issue.discovery_earned_score
 
-    evaluation.issue_discovery_score = round(
-        evaluation.issue_discovery_score + total_discovery_score, 2
-    )
+    evaluation.issue_discovery_score = round(total_discovery_score, 2)
 
     bt.logging.info(
         f'├─ UID {evaluation.uid}: {solved_count} solved ({valid_solved_count} valid) | '

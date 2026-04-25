@@ -57,16 +57,6 @@ class TestDefaults:
         assert eval_.open_prs == []
         assert eval_.closed_prs == []
 
-    def test_aggregate_counters_start_zero(self):
-        eval_ = MirrorMinerEvaluation(uid=1, hotkey='hk')
-        assert eval_.total_token_score == 0.0
-        assert eval_.total_nodes_scored == 0
-        assert eval_.total_structural_count == 0
-        assert eval_.total_structural_score == 0.0
-        assert eval_.total_leaf_count == 0
-        assert eval_.total_leaf_score == 0.0
-        assert eval_.total_collateral_score == 0.0
-
     def test_unique_repos_starts_empty(self):
         eval_ = MirrorMinerEvaluation(uid=1, hotkey='hk')
         assert eval_.unique_repos_contributed_to == set()

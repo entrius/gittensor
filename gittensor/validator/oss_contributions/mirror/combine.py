@@ -1,8 +1,14 @@
 """Merge a `MirrorMinerEvaluation` into the legacy `MinerEvaluation`.
 
-Single explicit join point between the two scoring paths. Mirror PR lists go
-into `mirror_*` slots; aggregate counters sum into legacy_eval's totals; the
-unique-repos set is unioned; `github_pr_fetch_failed` is OR'd.
+Single explicit join point between the two scoring paths:
+- Mirror PR lists land in the ``mirror_*`` slots on the MinerEvaluation
+- ``unique_repos_contributed_to`` is unioned
+- ``github_pr_fetch_failed`` is OR'd
+
+Per-PR scoring breakdowns (token_score, nodes_scored, base_score, earned_score,
+collateral_score) live on each ScoredMirrorPR — they get aggregated into
+MinerEvaluation totals by ``finalize_miner_scores`` walking both paths' lists,
+not at combine time.
 
 Returning the same `MinerEvaluation` (mutated in place) keeps downstream
 signatures unchanged. On delete-day this whole module goes away — at that
@@ -19,14 +25,6 @@ def combine(legacy_eval: MinerEvaluation, mirror_eval: MirrorMinerEvaluation) ->
     legacy_eval.mirror_merged_prs = mirror_eval.merged_prs
     legacy_eval.mirror_open_prs = mirror_eval.open_prs
     legacy_eval.mirror_closed_prs = mirror_eval.closed_prs
-
-    legacy_eval.total_token_score += mirror_eval.total_token_score
-    legacy_eval.total_nodes_scored += mirror_eval.total_nodes_scored
-    legacy_eval.total_structural_count += mirror_eval.total_structural_count
-    legacy_eval.total_structural_score += mirror_eval.total_structural_score
-    legacy_eval.total_leaf_count += mirror_eval.total_leaf_count
-    legacy_eval.total_leaf_score += mirror_eval.total_leaf_score
-    legacy_eval.total_collateral_score += mirror_eval.total_collateral_score
 
     legacy_eval.unique_repos_contributed_to |= mirror_eval.unique_repos_contributed_to
     legacy_eval.unique_repos_count = len(legacy_eval.unique_repos_contributed_to)

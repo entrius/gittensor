@@ -28,20 +28,18 @@ class MirrorMinerEvaluation:
     open_prs: List[ScoredMirrorPR] = field(default_factory=list)
     closed_prs: List[ScoredMirrorPR] = field(default_factory=list)
 
-    # Aggregate counters — rolled into MinerEvaluation totals at combine time.
-    total_token_score: float = 0.0
-    total_nodes_scored: int = 0
-    total_structural_count: int = 0
-    total_structural_score: float = 0.0
-    total_leaf_count: int = 0
-    total_leaf_score: float = 0.0
-    total_collateral_score: float = 0.0
-
-    # Set-union into MinerEvaluation.unique_repos_contributed_to at combine time.
+    # Set-union into MinerEvaluation.unique_repos_contributed_to at combine
+    # time. Populated by score_mirror_pr as it processes each MERGED PR.
     unique_repos_contributed_to: Set[str] = field(default_factory=set)
 
-    # OR'd into MinerEvaluation.github_pr_fetch_failed at combine time.
+    # OR'd into MinerEvaluation.github_pr_fetch_failed at combine time. Set
+    # by load_mirror_miner_prs when MirrorClient raises MirrorRequestError.
     fetch_failed: bool = False
+
+    # Per-PR token-scoring breakdowns (token_score, nodes_scored, structural_*,
+    # leaf_*) and collateral_score live on each ScoredMirrorPR and are aggregated
+    # into MinerEvaluation totals during finalize_miner_scores — not at combine
+    # time and not on this container.
 
     @property
     def total_merged_prs(self) -> int:

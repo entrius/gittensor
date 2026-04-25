@@ -192,102 +192,101 @@ def _collect_issues_from_prs(
     """
     # Track which PRs have already awarded a discovery score (one-issue-per-PR rule)
     pr_scored: set = set()  # (repo, pr_number)
-    # Dedup across PRs: canonical solver per issue is the earliest-merged PR (tie-break:
-    # smaller PR number). Only the canonical PR drives counts/scoring; others skip below.
-    canonical: Dict[Tuple[str, int], Tuple[datetime, int]] = {}
-    for _ev in miner_evaluations.values():
-        for _pr in _ev.merged_pull_requests:
-            if not _pr.issues or not _pr.merged_at:
-                continue
-            for _issue in _pr.issues:
-                if not _issue.author_github_id:
-                    continue
-                _key = (_pr.repository_full_name, _issue.number)
-                _marker = (_pr.merged_at, _pr.number)
-                if _key not in canonical or _marker < canonical[_key]:
-                    canonical[_key] = _marker
 
+    # Single-pass canonical map: use setdefault-style ordering so the earliest-merged
+    # PR (tie-break: smaller PR number) wins without a separate pre-pass.
+    # Key: (repo, issue_number) → (merged_at, pr_number, uid)
+    canonical: Dict[Tuple[str, int], Tuple[datetime, int, int]] = {}
+
+    # Collect all (uid, pr, issue) triples first so canonical is fully populated
+    # before any discoverer_data is mutated — two-phase commit within one loop.
+    candidates = []
     for uid, evaluation in miner_evaluations.items():
         for pr in evaluation.merged_pull_requests:
             if not pr.issues or not pr.merged_at:
                 continue
-
-            # Sort issues by creation date (earliest first) for one-issue-per-PR selection
             sorted_issues = sorted(
                 [i for i in pr.issues if i.author_github_id],
                 key=lambda i: i.created_at or datetime.max.replace(tzinfo=timezone.utc),
             )
-
             for issue in sorted_issues:
-                discoverer_id = issue.author_github_id
-                if not discoverer_id or discoverer_id not in github_id_to_uid:
+                if not issue.author_github_id:
                     continue
+                key = (pr.repository_full_name, issue.number)
+                marker = (pr.merged_at, pr.number, uid)
+                if key not in canonical or marker < canonical[key]:
+                    canonical[key] = marker
+                candidates.append((uid, pr, issue))
 
-                if canonical.get((pr.repository_full_name, issue.number)) != (pr.merged_at, pr.number):
-                    continue
+    # Phase 2: consume candidates now that canonical is fully built
+    for uid, pr, issue in candidates:
+        discoverer_id = issue.author_github_id
+        if not discoverer_id or discoverer_id not in github_id_to_uid:
+            continue
 
-                data = discoverer_data[discoverer_id]
+        if canonical.get((pr.repository_full_name, issue.number)) != (pr.merged_at, pr.number, uid):
+            continue
 
-                # Anti-gaming: only explicitly COMPLETED closures count as solved.
-                # NOT_PLANNED, TRANSFERRED, and None all route to closed_count. None is
-                # effectively unreachable inside the 35-day lookback (GitHub auto-populates
-                # stateReason on close), but treating it as not-solved is the safer default.
-                if issue.state_reason != 'COMPLETED':
-                    bt.logging.info(
-                        f'Issue #{issue.number} state_reason={issue.state_reason} — 0 score, counts as closed'
-                    )
-                    data.closed_count += 1
-                    continue
+        data = discoverer_data[discoverer_id]
 
-                # Classify: is this issue solved (merged PR closed it)?
-                is_solved = issue.state == 'CLOSED' and pr.merged_at is not None
+        # Anti-gaming: only explicitly COMPLETED closures count as solved.
+        # NOT_PLANNED, TRANSFERRED, and None all route to closed_count. None is
+        # effectively unreachable inside the 35-day lookback (GitHub auto-populates
+        # stateReason on close), but treating it as not-solved is the safer default.
+        if issue.state_reason != 'COMPLETED':
+            bt.logging.info(f'Issue #{issue.number} state_reason={issue.state_reason} — 0 score, counts as closed')
+            data.closed_count += 1
+            continue
 
-                if is_solved:
-                    data.solved_count += 1
-                else:
-                    data.closed_count += 1
-                    continue  # No score for unsolved issues
+        # Classify: is this issue solved (merged PR closed it)?
+        is_solved = issue.state == 'CLOSED' and pr.merged_at is not None
 
-                # Anti-gaming: post-merge body/title edit detection
-                # Not issue.updated_at: it fires on bot comments, labels, reactions.
-                if issue.body_or_title_edited_at and pr.merged_at and issue.body_or_title_edited_at > pr.merged_at:
-                    bt.logging.info(
-                        f'Issue #{issue.number} body/title edited after PR #{pr.number} merge — 0 score, counts as closed'
-                    )
-                    data.solved_count -= 1
-                    data.closed_count += 1
-                    continue
+        if is_solved:
+            data.solved_count += 1
+        else:
+            data.closed_count += 1
+            continue  # No score for unsolved issues
 
-                # Count valid solved (PR quality gate only — independent of same-account/one-per-PR)
-                if pr.token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE:
-                    data.valid_solved_count += 1
+        # Anti-gaming: post-merge body/title edit detection
+        # Not issue.updated_at: it fires on bot comments, labels, reactions.
+        if issue.body_or_title_edited_at and pr.merged_at and issue.body_or_title_edited_at > pr.merged_at:
+            bt.logging.info(
+                f'Issue #{issue.number} body/title edited after PR #{pr.number} merge — 0 score, counts as closed'
+            )
+            data.solved_count -= 1
+            data.closed_count += 1
+            continue
 
-                # Same-account: discoverer == solver → 0 score but credibility counts
-                if discoverer_id == pr.github_id:
-                    continue
+        # Count valid solved (PR quality gate only — independent of same-account/one-per-PR)
+        if pr.token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE:
+            data.valid_solved_count += 1
 
-                # One-issue-per-PR: only the first (earliest-created) issue gets scored
-                pr_key = (pr.repository_full_name, pr.number)
-                if pr_key in pr_scored:
-                    continue  # Credibility already counted above, skip scoring
-                pr_scored.add(pr_key)
+        # Same-account: discoverer == solver → 0 score but credibility counts
+        if discoverer_id == pr.github_id:
+            continue
 
-                # Check solving PR quality gate for scoring
-                if pr.token_score < MIN_TOKEN_SCORE_FOR_BASE_SCORE:
-                    continue
+        # One-issue-per-PR: only the first (earliest-created) issue gets scored
+        pr_key = (pr.repository_full_name, pr.number)
+        if pr_key in pr_scored:
+            continue  # Credibility already counted above, skip scoring
+        pr_scored.add(pr_key)
 
-                # Populate discovery scoring fields
-                repo_config = master_repositories.get(pr.repository_full_name)
-                issue.discovery_base_score = pr.base_score
-                issue.discovery_repo_weight_multiplier = resolve_repo_weight(repo_config)
-                issue.discovery_time_decay_multiplier = round(calculate_time_decay(pr.merged_at), 2)
-                issue.discovery_review_quality_multiplier = round(
-                    calculate_issue_review_quality_multiplier(pr.changes_requested_count), 2
-                )
-                # credibility and spam multipliers applied in the main loop after eligibility check
+        # Check solving PR quality gate for scoring
+        if pr.token_score < MIN_TOKEN_SCORE_FOR_BASE_SCORE:
+            continue
 
-                data.scored_issues.append(issue)
-                data.issue_token_score += pr.token_score
+        # Populate discovery scoring fields
+        repo_config = master_repositories.get(pr.repository_full_name)
+        issue.discovery_base_score = pr.base_score
+        issue.discovery_repo_weight_multiplier = resolve_repo_weight(repo_config)
+        issue.discovery_time_decay_multiplier = round(calculate_time_decay(pr.merged_at), 2)
+        issue.discovery_review_quality_multiplier = round(
+            calculate_issue_review_quality_multiplier(pr.changes_requested_count), 2
+        )
+        # credibility and spam multipliers applied in the main loop after eligibility check
+
+        data.scored_issues.append(issue)
+        data.issue_token_score += pr.token_score
 
 
 def _merge_scan_issues(

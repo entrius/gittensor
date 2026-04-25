@@ -15,9 +15,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-models = pytest.importorskip(
-    'gittensor.utils.mirror.models', reason='Requires gittensor package'
-)
+models = pytest.importorskip('gittensor.utils.mirror.models', reason='Requires gittensor package')
 
 
 MirrorFile = models.MirrorFile

@@ -357,9 +357,7 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
             scored.collateral_score = calculate_open_pr_collateral_score(scored)
             evaluation.total_collateral_score += scored.collateral_score
 
-        has_contributions = (
-            evaluation.total_merged_prs > 0 or evaluation.total_closed_prs > 0
-        )
+        has_contributions = evaluation.total_merged_prs > 0 or evaluation.total_closed_prs > 0
 
         if not has_contributions:
             bt.logging.info('No merged or closed PRs - skipping evaluation')
@@ -380,9 +378,8 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
             continue
 
         # Calculate spam multiplier once per miner using combined total token score
-        preliminary_token_score = (
-            sum(pr.token_score for pr in evaluation.merged_pull_requests)
-            + sum(s.token_score for s in evaluation.mirror_merged_prs)
+        preliminary_token_score = sum(pr.token_score for pr in evaluation.merged_pull_requests) + sum(
+            s.token_score for s in evaluation.mirror_merged_prs
         )
         spam_multiplier = calculate_pr_spam_penalty_multiplier(evaluation.total_open_prs, preliminary_token_score)
 
@@ -428,9 +425,7 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
         if not evaluation:
             continue
 
-        has_contributions = (
-            evaluation.total_merged_prs > 0 or evaluation.total_closed_prs > 0
-        )
+        has_contributions = evaluation.total_merged_prs > 0 or evaluation.total_closed_prs > 0
         if not has_contributions:
             continue
 

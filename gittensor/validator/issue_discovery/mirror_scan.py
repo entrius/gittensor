@@ -126,9 +126,7 @@ async def run_mirror_issue_discovery(
     lookback_date = datetime.now(timezone.utc) - timedelta(days=PR_LOOKBACK_DAYS)
     enabled_names: Set[str] = set(mirror_repos.keys())
 
-    solving_pr_cache: Dict[Tuple[str, int], CachedSolvingPR] = _build_solving_pr_cache(
-        miner_evaluations
-    )
+    solving_pr_cache: Dict[Tuple[str, int], CachedSolvingPR] = _build_solving_pr_cache(miner_evaluations)
     cache_stats = _CacheStats()
     bt.logging.info(
         f'Cross-miner solving-PR cache: {len(solving_pr_cache)} entries from '
@@ -152,9 +150,7 @@ async def run_mirror_issue_discovery(
         try:
             response = client.get_miner_issues(evaluation.github_id, since=lookback_date)
         except MirrorRequestError as e:
-            bt.logging.warning(
-                f'├─ UID {uid}: mirror issue fetch failed ({e}) — skipped this miner'
-            )
+            bt.logging.warning(f'├─ UID {uid}: mirror issue fetch failed ({e}) — skipped this miner')
             fetch_errors += 1
             continue
 
@@ -269,8 +265,13 @@ def _score_miner_mirror_issues(
 
         # Resolve real base_score + token_score for the solving PR (cache or fetch)
         cached = _resolve_solving_pr_score(
-            issue, solving_pr, solving_pr_cache, cache_stats,
-            client, programming_languages, token_config,
+            issue,
+            solving_pr,
+            solving_pr_cache,
+            cache_stats,
+            client,
+            programming_languages,
+            token_config,
         )
         if cached is None:
             # Fetch failed — issue still counts for solved/credibility but not scored.
@@ -317,9 +318,7 @@ def _score_miner_mirror_issues(
             )
             continue
 
-        adapted = _mirror_issue_for_scoring(
-            issue, solving_pr, repo_config, base_score=cached.base_score
-        )
+        adapted = _mirror_issue_for_scoring(issue, solving_pr, repo_config, base_score=cached.base_score)
         if adapted is None:
             continue
 
@@ -336,9 +335,7 @@ def _score_miner_mirror_issues(
     evaluation.total_closed_issues = closed_count
     evaluation.issue_token_score = round(issue_token_score, 2)
 
-    is_eligible, credibility, reason = check_issue_eligibility(
-        solved_count, valid_solved_count, closed_count
-    )
+    is_eligible, credibility, reason = check_issue_eligibility(solved_count, valid_solved_count, closed_count)
     evaluation.is_issue_eligible = is_eligible
     evaluation.issue_credibility = credibility
 
@@ -414,9 +411,7 @@ def _resolve_solving_pr_score(
     file_changes, file_contents = mirror_files_to_legacy(
         issue.repo_full_name, solving_pr.pr_number, files_response.files
     )
-    result = calculate_base_score_for_pr_files(
-        file_changes, file_contents, programming_languages, token_config
-    )
+    result = calculate_base_score_for_pr_files(file_changes, file_contents, programming_languages, token_config)
     cached = CachedSolvingPR(base_score=result.base_score, token_score=result.token_score)
     cache[key] = cached
     return cached
@@ -451,8 +446,7 @@ def _classify_issue(issue: MirrorIssue) -> str:
 
     if not issue.solved_by_pr or not issue.solving_pr:
         bt.logging.debug(
-            f'  issue #{issue.issue_number} ({issue.repo_full_name}): closed-not-solved '
-            f'(no solving PR linked)'
+            f'  issue #{issue.issue_number} ({issue.repo_full_name}): closed-not-solved (no solving PR linked)'
         )
         return 'not-solved-closed'
 
@@ -472,9 +466,7 @@ def _classify_issue(issue: MirrorIssue) -> str:
         return 'not-solved-closed'
 
     if not issue.author_github_id:
-        bt.logging.debug(
-            f'  issue #{issue.issue_number} ({issue.repo_full_name}): ignore (missing author_github_id)'
-        )
+        bt.logging.debug(f'  issue #{issue.issue_number} ({issue.repo_full_name}): ignore (missing author_github_id)')
         return 'ignore'
 
     return 'solved'
@@ -516,9 +508,7 @@ def _mirror_issue_for_scoring(
     adapted.discovery_repo_weight_multiplier = resolve_repo_weight(repo_config)
     adapted.discovery_time_decay_multiplier = round(calculate_time_decay(solving_pr.merged_at), 2)
     adapted.discovery_review_quality_multiplier = round(
-        calculate_issue_review_quality_multiplier(
-            solving_pr.review_summary.maintainer_changes_requested_count
-        ),
+        calculate_issue_review_quality_multiplier(solving_pr.review_summary.maintainer_changes_requested_count),
         2,
     )
 

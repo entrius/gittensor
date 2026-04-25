@@ -170,9 +170,7 @@ class MirrorPullRequest:
             scoring_data_stored=bool(data.get('scoring_data_stored', False)),
             review_summary=MirrorReviewSummary.from_dict(data.get('review_summary') or {}),
             labels=[MirrorLabel.from_dict(label) for label in data.get('labels') or []],
-            linked_issues=[
-                MirrorLinkedIssue.from_dict(issue) for issue in data.get('linked_issues') or []
-            ],
+            linked_issues=[MirrorLinkedIssue.from_dict(issue) for issue in data.get('linked_issues') or []],
         )
 
 
@@ -311,9 +309,7 @@ class MirrorPullRequestsResponse:
             github_id=str(data['github_id']),
             since=_parse_dt(data.get('since')),
             generated_at=_parse_dt(data.get('generated_at')),
-            pull_requests=[
-                MirrorPullRequest.from_dict(pr) for pr in data.get('pull_requests') or []
-            ],
+            pull_requests=[MirrorPullRequest.from_dict(pr) for pr in data.get('pull_requests') or []],
         )
 
 

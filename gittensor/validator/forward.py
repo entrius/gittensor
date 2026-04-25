@@ -134,9 +134,7 @@ async def issue_discovery(
     }
 
     if mirror_repos:
-        await run_mirror_issue_discovery(
-            miner_evaluations, mirror_repos, programming_languages, token_config
-        )
+        await run_mirror_issue_discovery(miner_evaluations, mirror_repos, programming_languages, token_config)
     else:
         bt.logging.info('No mirror-enabled repos — issue discovery skipped for this round')
 

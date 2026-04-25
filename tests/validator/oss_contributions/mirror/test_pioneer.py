@@ -4,16 +4,10 @@ Parallels tests/validator/test_pioneer_dividend.py but walks mirror_merged_prs
 with ScoredMirrorPR shape.
 """
 
-from datetime import datetime, timezone
-
 import pytest
 
-scoring_module = pytest.importorskip(
-    'gittensor.validator.oss_contributions.mirror.scoring'
-)
-scored_pr_module = pytest.importorskip(
-    'gittensor.validator.oss_contributions.mirror.scored_pr'
-)
+scoring_module = pytest.importorskip('gittensor.validator.oss_contributions.mirror.scoring')
+scored_pr_module = pytest.importorskip('gittensor.validator.oss_contributions.mirror.scored_pr')
 mirror_models = pytest.importorskip('gittensor.utils.mirror.models')
 classes = pytest.importorskip('gittensor.classes')
 
@@ -30,23 +24,36 @@ def _scored(
     earned_score: float = 10.0,
     token_score: float = 100.0,
 ) -> ScoredMirrorPR:
-    pr = MirrorPullRequest.from_dict({
-        'repo_full_name': repo, 'pr_number': pr_number,
-        'title': 't', 'body': 'b',
-        'state': 'MERGED',
-        'author_github_id': '1', 'author_login': 'a',
-        'author_association': 'CONTRIBUTOR',
-        'created_at': '2026-04-10T00:00:00Z',
-        'closed_at': merged_at, 'merged_at': merged_at, 'last_edited_at': None,
-        'edited_after_merge': False,
-        'hours_since_merge': 1.0, 'merged_by_login': 'm',
-        'base_ref': 'test',
-        'head_sha': 'h', 'base_sha': 'b', 'merge_base_sha': 'mb',
-        'additions': 1, 'deletions': 0, 'commits_count': 1,
-        'scoring_data_stored': True,
-        'review_summary': {'maintainer_changes_requested_count': 0},
-        'labels': [], 'linked_issues': [],
-    })
+    pr = MirrorPullRequest.from_dict(
+        {
+            'repo_full_name': repo,
+            'pr_number': pr_number,
+            'title': 't',
+            'body': 'b',
+            'state': 'MERGED',
+            'author_github_id': '1',
+            'author_login': 'a',
+            'author_association': 'CONTRIBUTOR',
+            'created_at': '2026-04-10T00:00:00Z',
+            'closed_at': merged_at,
+            'merged_at': merged_at,
+            'last_edited_at': None,
+            'edited_after_merge': False,
+            'hours_since_merge': 1.0,
+            'merged_by_login': 'm',
+            'base_ref': 'test',
+            'head_sha': 'h',
+            'base_sha': 'b',
+            'merge_base_sha': 'mb',
+            'additions': 1,
+            'deletions': 0,
+            'commits_count': 1,
+            'scoring_data_stored': True,
+            'review_summary': {'maintainer_changes_requested_count': 0},
+            'labels': [],
+            'linked_issues': [],
+        }
+    )
     scored = ScoredMirrorPR(pr=pr)
     scored.token_score = token_score
     scored.earned_score = earned_score

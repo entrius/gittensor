@@ -6,8 +6,6 @@ timeline-scraping internals that were removed along with scan_closed_issues
 and score_discovered_issues.
 """
 
-from typing import Tuple
-
 import pytest
 
 from gittensor.validator.issue_discovery.scoring import check_issue_eligibility

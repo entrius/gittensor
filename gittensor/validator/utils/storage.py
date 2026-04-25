@@ -65,9 +65,7 @@ class DatabaseStorage:
 
             def _adapt_mirror(scored_list):
                 return [
-                    mirror_scored_pr_to_legacy_pull_request(
-                        s, miner_eval.uid, miner_eval.hotkey, miner_eval.github_id
-                    )
+                    mirror_scored_pr_to_legacy_pull_request(s, miner_eval.uid, miner_eval.hotkey, miner_eval.github_id)
                     for s in scored_list
                 ]
 

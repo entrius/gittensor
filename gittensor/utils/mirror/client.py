@@ -107,9 +107,7 @@ class MirrorClient:
 
             # 4xx except 429 are not retryable — fail fast so callers see the real error.
             if 400 <= response.status_code < 500 and response.status_code != 429:
-                raise MirrorRequestError(
-                    f'Mirror GET {path} returned {response.status_code}: {response.text[:200]}'
-                )
+                raise MirrorRequestError(f'Mirror GET {path} returned {response.status_code}: {response.text[:200]}')
 
             last_error = f'status {response.status_code}: {response.text[:200]}'
             if attempt < self.max_attempts - 1:
@@ -120,6 +118,4 @@ class MirrorClient:
                 )
                 time.sleep(backoff)
 
-        raise MirrorRequestError(
-            f'Mirror GET {path} failed after {self.max_attempts} attempts: {last_error}'
-        )
+        raise MirrorRequestError(f'Mirror GET {path} failed after {self.max_attempts} attempts: {last_error}')

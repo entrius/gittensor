@@ -53,9 +53,7 @@ def mirror_files_to_legacy(
     return file_changes, file_contents
 
 
-def mirror_linked_issue_to_legacy_issue(
-    li: MirrorLinkedIssue, pr_number: int, repo_full_name: str
-) -> Issue:
+def mirror_linked_issue_to_legacy_issue(li: MirrorLinkedIssue, pr_number: int, repo_full_name: str) -> Issue:
     """Adapt a MirrorLinkedIssue into a legacy Issue for storage.
 
     Mirror doesn't carry ``author_login`` on linked issues (only ``author_github_id``),
@@ -152,7 +150,7 @@ def mirror_scored_pr_to_legacy_pull_request(
         leaf_score=scored.leaf_score,
         merged_by_login=pr.merged_by_login,
         file_changes=None,  # written separately via get_all_file_changes
-        issues=None,        # written separately via get_all_issues
+        issues=None,  # written separately via get_all_issues
         description=pr.body,
         last_edited_at=pr.last_edited_at,
         head_ref_oid=pr.head_sha,

@@ -62,9 +62,7 @@ def calculate_issue_credibility(solved_count: int, closed_count: int) -> float:
     return solved_count / total
 
 
-def check_issue_eligibility(
-    solved_count: int, valid_solved_count: int, closed_count: int
-) -> Tuple[bool, float, str]:
+def check_issue_eligibility(solved_count: int, valid_solved_count: int, closed_count: int) -> Tuple[bool, float, str]:
     """Check if a miner passes the issue discovery eligibility gate.
 
     Credibility uses total solved / total attempts (with mulligan).

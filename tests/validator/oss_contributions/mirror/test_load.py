@@ -14,9 +14,7 @@ load_module = pytest.importorskip(
     'gittensor.validator.oss_contributions.mirror.load',
     reason='Requires gittensor mirror subpackage',
 )
-mirror_eval_module = pytest.importorskip(
-    'gittensor.validator.oss_contributions.mirror.evaluation'
-)
+mirror_eval_module = pytest.importorskip('gittensor.validator.oss_contributions.mirror.evaluation')
 mirror_models = pytest.importorskip('gittensor.utils.mirror.models')
 mirror_client_mod = pytest.importorskip('gittensor.utils.mirror.client')
 load_weights = pytest.importorskip('gittensor.validator.utils.load_weights')
@@ -62,8 +60,12 @@ def _pr_dict(
         'head_ref': head_ref,
         'head_repo_full_name': repo,  # same-repo PR; fork cases set explicitly
         'default_branch': default_branch,
-        'head_sha': 'h', 'base_sha': 'b', 'merge_base_sha': 'mb',
-        'additions': 1, 'deletions': 0, 'commits_count': 1,
+        'head_sha': 'h',
+        'base_sha': 'b',
+        'merge_base_sha': 'mb',
+        'additions': 1,
+        'deletions': 0,
+        'commits_count': 1,
         'scoring_data_stored': True,
         'review_summary': {
             'maintainer_changes_requested_count': 0,
@@ -77,12 +79,14 @@ def _pr_dict(
 
 
 def _build_response(prs: list) -> MirrorPullRequestsResponse:
-    return MirrorPullRequestsResponse.from_dict({
-        'github_id': '218712309',
-        'since': '2026-03-15T00:00:00Z',
-        'generated_at': '2026-04-21T00:00:00Z',
-        'pull_requests': prs,
-    })
+    return MirrorPullRequestsResponse.from_dict(
+        {
+            'github_id': '218712309',
+            'since': '2026-03-15T00:00:00Z',
+            'generated_at': '2026-04-21T00:00:00Z',
+            'pull_requests': prs,
+        }
+    )
 
 
 def _mirror_repos(*names: str) -> dict:
@@ -101,11 +105,13 @@ def _eval(github_id: str | None = '218712309') -> MirrorMinerEvaluation:
 class TestBucketing:
     def test_buckets_by_state(self):
         client = Mock()
-        client.get_miner_pulls.return_value = _build_response([
-            _pr_dict(1, state='MERGED'),
-            _pr_dict(2, state='OPEN', merged_at=None),
-            _pr_dict(3, state='CLOSED', merged_at=None),
-        ])
+        client.get_miner_pulls.return_value = _build_response(
+            [
+                _pr_dict(1, state='MERGED'),
+                _pr_dict(2, state='OPEN', merged_at=None),
+                _pr_dict(3, state='CLOSED', merged_at=None),
+            ]
+        )
         eval_ = _eval()
         load_mirror_miner_prs(eval_, _mirror_repos('entrius/gittensor-ui'), client=client)
 
@@ -119,10 +125,12 @@ class TestBucketing:
     def test_unknown_state_skipped_with_warning(self):
         # State not OPEN/CLOSED/MERGED — shouldn't crash, just skip
         client = Mock()
-        client.get_miner_pulls.return_value = _build_response([
-            _pr_dict(1, state='MERGED'),
-            _pr_dict(2, state='WEIRD'),
-        ])
+        client.get_miner_pulls.return_value = _build_response(
+            [
+                _pr_dict(1, state='MERGED'),
+                _pr_dict(2, state='WEIRD'),
+            ]
+        )
         eval_ = _eval()
         load_mirror_miner_prs(eval_, _mirror_repos('entrius/gittensor-ui'), client=client)
 
@@ -138,10 +146,12 @@ class TestBucketing:
 class TestRepoFiltering:
     def test_repo_not_in_config_dropped(self):
         client = Mock()
-        client.get_miner_pulls.return_value = _build_response([
-            _pr_dict(1, repo='entrius/gittensor-ui'),
-            _pr_dict(2, repo='entrius/some-untracked-repo'),
-        ])
+        client.get_miner_pulls.return_value = _build_response(
+            [
+                _pr_dict(1, repo='entrius/gittensor-ui'),
+                _pr_dict(2, repo='entrius/some-untracked-repo'),
+            ]
+        )
         eval_ = _eval()
         # Only one repo enabled in config — the second PR should be dropped
         load_mirror_miner_prs(eval_, _mirror_repos('entrius/gittensor-ui'), client=client)
@@ -160,10 +170,12 @@ class TestMaintainerSkip:
     def test_maintainer_authors_dropped(self, association, monkeypatch):
         monkeypatch.delenv('DEV_MODE', raising=False)
         client = Mock()
-        client.get_miner_pulls.return_value = _build_response([
-            _pr_dict(1, author_association=association),
-            _pr_dict(2, author_association='CONTRIBUTOR'),
-        ])
+        client.get_miner_pulls.return_value = _build_response(
+            [
+                _pr_dict(1, author_association=association),
+                _pr_dict(2, author_association='CONTRIBUTOR'),
+            ]
+        )
         eval_ = _eval()
         load_mirror_miner_prs(eval_, _mirror_repos('entrius/gittensor-ui'), client=client)
 
@@ -173,9 +185,11 @@ class TestMaintainerSkip:
     def test_dev_mode_bypasses_maintainer_skip(self, monkeypatch):
         monkeypatch.setenv('DEV_MODE', '1')
         client = Mock()
-        client.get_miner_pulls.return_value = _build_response([
-            _pr_dict(1, author_association='OWNER'),
-        ])
+        client.get_miner_pulls.return_value = _build_response(
+            [
+                _pr_dict(1, author_association='OWNER'),
+            ]
+        )
         eval_ = _eval()
         load_mirror_miner_prs(eval_, _mirror_repos('entrius/gittensor-ui'), client=client)
 
@@ -190,12 +204,14 @@ class TestMaintainerSkip:
 class TestInactiveRepo:
     def test_pr_created_after_inactive_at_dropped(self):
         client = Mock()
-        client.get_miner_pulls.return_value = _build_response([
-            # Created on 2026-04-15, repo became inactive on 2026-04-10 → drop
-            _pr_dict(1, created_at='2026-04-15T00:00:00Z'),
-            # Created on 2026-04-05 (before inactive_at) → keep
-            _pr_dict(2, created_at='2026-04-05T00:00:00Z'),
-        ])
+        client.get_miner_pulls.return_value = _build_response(
+            [
+                # Created on 2026-04-15, repo became inactive on 2026-04-10 → drop
+                _pr_dict(1, created_at='2026-04-15T00:00:00Z'),
+                # Created on 2026-04-05 (before inactive_at) → keep
+                _pr_dict(2, created_at='2026-04-05T00:00:00Z'),
+            ]
+        )
         repos = {
             'entrius/gittensor-ui': RepositoryConfig(
                 weight=0.5,
@@ -217,10 +233,12 @@ class TestStaleClosedPR:
         recent = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
 
         client = Mock()
-        client.get_miner_pulls.return_value = _build_response([
-            _pr_dict(1, state='CLOSED', merged_at=None, created_at=old),
-            _pr_dict(2, state='CLOSED', merged_at=None, created_at=recent),
-        ])
+        client.get_miner_pulls.return_value = _build_response(
+            [
+                _pr_dict(1, state='CLOSED', merged_at=None, created_at=old),
+                _pr_dict(2, state='CLOSED', merged_at=None, created_at=recent),
+            ]
+        )
         eval_ = _eval()
         load_mirror_miner_prs(eval_, _mirror_repos('entrius/gittensor-ui'), client=client)
 
@@ -241,10 +259,12 @@ class TestEligibilityGateAtLoadTime:
     def test_self_merge_without_approval_not_added(self, monkeypatch):
         monkeypatch.delenv('DEV_MODE', raising=False)
         client = Mock()
-        client.get_miner_pulls.return_value = _build_response([
-            _pr_dict(1, author_login='alice', merged_by_login='alice', approved_count=0),
-            _pr_dict(2),  # clean
-        ])
+        client.get_miner_pulls.return_value = _build_response(
+            [
+                _pr_dict(1, author_login='alice', merged_by_login='alice', approved_count=0),
+                _pr_dict(2),  # clean
+            ]
+        )
         eval_ = _eval()
         load_mirror_miner_prs(eval_, _mirror_repos('entrius/gittensor-ui'), client=client)
 
@@ -254,10 +274,12 @@ class TestEligibilityGateAtLoadTime:
 
     def test_base_ref_mismatch_not_added(self):
         client = Mock()
-        client.get_miner_pulls.return_value = _build_response([
-            _pr_dict(1, base_ref='random-branch', default_branch='main'),
-            _pr_dict(2),  # base_ref=main matches default
-        ])
+        client.get_miner_pulls.return_value = _build_response(
+            [
+                _pr_dict(1, base_ref='random-branch', default_branch='main'),
+                _pr_dict(2),  # base_ref=main matches default
+            ]
+        )
         eval_ = _eval()
         load_mirror_miner_prs(eval_, _mirror_repos('entrius/gittensor-ui'), client=client)
 
@@ -266,10 +288,12 @@ class TestEligibilityGateAtLoadTime:
 
     def test_merged_pr_missing_merged_at_not_added(self):
         client = Mock()
-        client.get_miner_pulls.return_value = _build_response([
-            _pr_dict(1, merged_at=None),  # MERGED state but no merged_at — data corruption
-            _pr_dict(2),
-        ])
+        client.get_miner_pulls.return_value = _build_response(
+            [
+                _pr_dict(1, merged_at=None),  # MERGED state but no merged_at — data corruption
+                _pr_dict(2),
+            ]
+        )
         eval_ = _eval()
         load_mirror_miner_prs(eval_, _mirror_repos('entrius/gittensor-ui'), client=client)
 
@@ -315,10 +339,12 @@ class TestErrorPaths:
         monkeypatch.setattr(load_mod, '_maybe_add_pr', flaky)
 
         client = Mock()
-        client.get_miner_pulls.return_value = _build_response([
-            _pr_dict(1, state='MERGED'),
-            _pr_dict(2, state='MERGED'),
-        ])
+        client.get_miner_pulls.return_value = _build_response(
+            [
+                _pr_dict(1, state='MERGED'),
+                _pr_dict(2, state='MERGED'),
+            ]
+        )
         eval_ = _eval()
         load_mirror_miner_prs(eval_, _mirror_repos('entrius/gittensor-ui'), client=client)
         # First PR raised → skipped; second PR still added

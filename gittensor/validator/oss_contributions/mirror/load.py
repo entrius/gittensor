@@ -86,9 +86,7 @@ def _maybe_add_pr(
 
     repo_config = mirror_repos.get(pr.repo_full_name) or mirror_repos.get(pr.repo_full_name.lower())
     if repo_config is None:
-        bt.logging.info(
-            f'Skipping mirror PR #{pr.pr_number} in {pr.repo_full_name} - not in mirror_repos'
-        )
+        bt.logging.info(f'Skipping mirror PR #{pr.pr_number} in {pr.repo_full_name} - not in mirror_repos')
         return
 
     # Skip PR if it was created after the repo became inactive (legacy parity)

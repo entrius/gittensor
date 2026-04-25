@@ -19,12 +19,8 @@ from unittest.mock import Mock, call, patch
 import pytest
 import requests
 
-mirror_client_module = pytest.importorskip(
-    'gittensor.utils.mirror.client', reason='Requires gittensor package'
-)
-mirror_models = pytest.importorskip(
-    'gittensor.utils.mirror.models', reason='Requires gittensor package'
-)
+mirror_client_module = pytest.importorskip('gittensor.utils.mirror.client', reason='Requires gittensor package')
+mirror_models = pytest.importorskip('gittensor.utils.mirror.models', reason='Requires gittensor package')
 
 MirrorClient = mirror_client_module.MirrorClient
 MirrorRequestError = mirror_client_module.MirrorRequestError
@@ -155,9 +151,7 @@ class TestUrlConstruction:
         client = _make_client(session)
 
         # 2026-03-15 06:30 in UTC-6 == 2026-03-15 12:30 UTC
-        non_utc = datetime(
-            2026, 3, 15, 6, 30, 0, tzinfo=timezone(timedelta(hours=-6))
-        )
+        non_utc = datetime(2026, 3, 15, 6, 30, 0, tzinfo=timezone(timedelta(hours=-6)))
         client.get_miner_pulls('218712309', since=non_utc)
 
         params = session.get.call_args.kwargs['params']

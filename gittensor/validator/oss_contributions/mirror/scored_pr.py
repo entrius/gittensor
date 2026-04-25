@@ -10,7 +10,7 @@ dataclass so downstream math (``calculate_final_earned_score``,
 ``is_pioneer_eligible``) translates cleanly.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from math import prod
 from typing import List, Optional
 

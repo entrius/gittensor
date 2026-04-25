@@ -22,25 +22,36 @@ MirrorPullRequest = mirror_models.MirrorPullRequest
 
 
 def _make_scored_pr(state: str = 'MERGED') -> ScoredMirrorPR:
-    pr = MirrorPullRequest.from_dict({
-        'repo_full_name': 'entrius/gittensor-ui',
-        'pr_number': 1,
-        'title': 't', 'body': 'b',
-        'state': state,
-        'author_github_id': '1', 'author_login': 'a',
-        'author_association': 'CONTRIBUTOR',
-        'created_at': '2026-04-01T00:00:00Z',
-        'closed_at': None, 'merged_at': None, 'last_edited_at': None,
-        'edited_after_merge': False,
-        'hours_since_merge': None,
-        'merged_by_login': None,
-        'base_ref': 'test',
-        'head_sha': 'h', 'base_sha': 'b', 'merge_base_sha': 'mb',
-        'additions': 1, 'deletions': 0, 'commits_count': 1,
-        'scoring_data_stored': True,
-        'review_summary': {'maintainer_changes_requested_count': 0},
-        'labels': [], 'linked_issues': [],
-    })
+    pr = MirrorPullRequest.from_dict(
+        {
+            'repo_full_name': 'entrius/gittensor-ui',
+            'pr_number': 1,
+            'title': 't',
+            'body': 'b',
+            'state': state,
+            'author_github_id': '1',
+            'author_login': 'a',
+            'author_association': 'CONTRIBUTOR',
+            'created_at': '2026-04-01T00:00:00Z',
+            'closed_at': None,
+            'merged_at': None,
+            'last_edited_at': None,
+            'edited_after_merge': False,
+            'hours_since_merge': None,
+            'merged_by_login': None,
+            'base_ref': 'test',
+            'head_sha': 'h',
+            'base_sha': 'b',
+            'merge_base_sha': 'mb',
+            'additions': 1,
+            'deletions': 0,
+            'commits_count': 1,
+            'scoring_data_stored': True,
+            'review_summary': {'maintainer_changes_requested_count': 0},
+            'labels': [],
+            'linked_issues': [],
+        }
+    )
     return ScoredMirrorPR(pr=pr)
 
 

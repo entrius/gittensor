@@ -11,9 +11,7 @@ import pytest
 
 classes = pytest.importorskip('gittensor.classes')
 mirror_models = pytest.importorskip('gittensor.utils.mirror.models')
-scored_pr_module = pytest.importorskip(
-    'gittensor.validator.oss_contributions.mirror.scored_pr'
-)
+scored_pr_module = pytest.importorskip('gittensor.validator.oss_contributions.mirror.scored_pr')
 
 MinerEvaluation = classes.MinerEvaluation
 FileChange = classes.FileChange
@@ -24,45 +22,67 @@ ScoredMirrorPR = scored_pr_module.ScoredMirrorPR
 
 
 def _mirror_pr_with_files_and_issue():
-    pr = MirrorPullRequest.from_dict({
-        'repo_full_name': 'entrius/gittensor-ui',
-        'pr_number': 100, 'title': 't', 'body': 'b',
-        'state': 'MERGED',
-        'author_github_id': '218712309', 'author_login': 'a',
-        'author_association': 'CONTRIBUTOR',
-        'created_at': '2026-04-15T00:00:00Z',
-        'closed_at': '2026-04-18T10:00:00Z',
-        'merged_at': '2026-04-18T10:00:00Z',
-        'last_edited_at': None,
-        'edited_after_merge': False,
-        'hours_since_merge': 1.0, 'merged_by_login': 'm',
-        'base_ref': 'test',
-        'head_sha': 'h', 'base_sha': 'b', 'merge_base_sha': 'mb',
-        'additions': 1, 'deletions': 0, 'commits_count': 1,
-        'scoring_data_stored': True,
-        'review_summary': {'maintainer_changes_requested_count': 0},
-        'labels': [],
-        'linked_issues': [{
-            'number': 50, 'title': 'bug',
-            'state': 'CLOSED', 'state_reason': 'COMPLETED',
-            'author_github_id': '999', 'author_association': 'CONTRIBUTOR',
-            'created_at': '2026-04-01T00:00:00Z',
+    pr = MirrorPullRequest.from_dict(
+        {
+            'repo_full_name': 'entrius/gittensor-ui',
+            'pr_number': 100,
+            'title': 't',
+            'body': 'b',
+            'state': 'MERGED',
+            'author_github_id': '218712309',
+            'author_login': 'a',
+            'author_association': 'CONTRIBUTOR',
+            'created_at': '2026-04-15T00:00:00Z',
             'closed_at': '2026-04-18T10:00:00Z',
-            'updated_at': '2026-04-18T10:00:00Z',
-            'is_transferred': False,
-            'solved_by_pr': 100,
+            'merged_at': '2026-04-18T10:00:00Z',
+            'last_edited_at': None,
+            'edited_after_merge': False,
+            'hours_since_merge': 1.0,
+            'merged_by_login': 'm',
+            'base_ref': 'test',
+            'head_sha': 'h',
+            'base_sha': 'b',
+            'merge_base_sha': 'mb',
+            'additions': 1,
+            'deletions': 0,
+            'commits_count': 1,
+            'scoring_data_stored': True,
+            'review_summary': {'maintainer_changes_requested_count': 0},
             'labels': [],
-        }],
-    })
+            'linked_issues': [
+                {
+                    'number': 50,
+                    'title': 'bug',
+                    'state': 'CLOSED',
+                    'state_reason': 'COMPLETED',
+                    'author_github_id': '999',
+                    'author_association': 'CONTRIBUTOR',
+                    'created_at': '2026-04-01T00:00:00Z',
+                    'closed_at': '2026-04-18T10:00:00Z',
+                    'updated_at': '2026-04-18T10:00:00Z',
+                    'is_transferred': False,
+                    'solved_by_pr': 100,
+                    'labels': [],
+                }
+            ],
+        }
+    )
     scored = ScoredMirrorPR(pr=pr)
     scored.files = [
-        MirrorFile.from_dict({
-            'filename': 'src/x.py', 'previous_filename': None,
-            'status': 'modified',
-            'additions': 1, 'deletions': 1, 'changes': 2,
-            'is_binary': False, 'byte_size': 100,
-            'head_content': 'new', 'base_content': 'old',
-        }),
+        MirrorFile.from_dict(
+            {
+                'filename': 'src/x.py',
+                'previous_filename': None,
+                'status': 'modified',
+                'additions': 1,
+                'deletions': 1,
+                'changes': 2,
+                'is_binary': False,
+                'byte_size': 100,
+                'head_content': 'new',
+                'base_content': 'old',
+            }
+        ),
     ]
     return scored
 
@@ -86,9 +106,9 @@ class TestGetAllIssuesWalksMirror:
         eval_.mirror_merged_prs = [_mirror_pr_with_files_and_issue()]
         # Sprinkle a legacy issue on a fake legacy PR-like object via a minimal stub
         # — legacy path iterates pr.issues, so we just attach a list.
-        legacy_pr_stub = type('Stub', (), {'issues': [
-            Issue(number=10, pr_number=5, repository_full_name='foo/bar', title='legacy')
-        ]})()
+        legacy_pr_stub = type(
+            'Stub', (), {'issues': [Issue(number=10, pr_number=5, repository_full_name='foo/bar', title='legacy')]}
+        )()
         eval_.merged_pull_requests = [legacy_pr_stub]
 
         issues = eval_.get_all_issues()

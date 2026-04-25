@@ -14,9 +14,7 @@ storage_module = pytest.importorskip(
 )
 classes = pytest.importorskip('gittensor.classes')
 mirror_models = pytest.importorskip('gittensor.utils.mirror.models')
-scored_pr_module = pytest.importorskip(
-    'gittensor.validator.oss_contributions.mirror.scored_pr'
-)
+scored_pr_module = pytest.importorskip('gittensor.validator.oss_contributions.mirror.scored_pr')
 
 DatabaseStorage = storage_module.DatabaseStorage
 MinerEvaluation = classes.MinerEvaluation
@@ -28,11 +26,14 @@ ScoredMirrorPR = scored_pr_module.ScoredMirrorPR
 
 def _legacy_pr(number: int, state: PRState = PRState.MERGED) -> PullRequest:
     from datetime import datetime, timezone
+
     now = datetime.now(timezone.utc)
     return PullRequest(
         number=number,
         repository_full_name='legacy/repo',
-        uid=1, hotkey='hk', github_id='123',
+        uid=1,
+        hotkey='hk',
+        github_id='123',
         title=f'legacy {number}',
         author_login='alice',
         merged_at=now if state == PRState.MERGED else None,
@@ -42,27 +43,39 @@ def _legacy_pr(number: int, state: PRState = PRState.MERGED) -> PullRequest:
 
 
 def _mirror_scored(number: int, state: str = 'MERGED') -> ScoredMirrorPR:
-    pr = MirrorPullRequest.from_dict({
-        'repo_full_name': 'entrius/gittensor-ui', 'pr_number': number,
-        'title': f'mirror {number}', 'body': 'b',
-        'state': state,
-        'author_github_id': '1', 'author_login': 'a',
-        'author_association': 'CONTRIBUTOR',
-        'created_at': '2026-04-15T00:00:00Z',
-        'closed_at': '2026-04-18T10:00:00Z' if state in ('CLOSED', 'MERGED') else None,
-        'merged_at': '2026-04-18T10:00:00Z' if state == 'MERGED' else None,
-        'last_edited_at': None,
-        'edited_after_merge': False,
-        'hours_since_merge': 1.0 if state == 'MERGED' else None,
-        'merged_by_login': 'm' if state == 'MERGED' else None,
-        'base_ref': 'main', 'head_ref': 'feature',
-        'head_repo_full_name': 'entrius/gittensor-ui', 'default_branch': 'main',
-        'head_sha': 'h', 'base_sha': 'b', 'merge_base_sha': 'mb',
-        'additions': 1, 'deletions': 0, 'commits_count': 1,
-        'scoring_data_stored': True,
-        'review_summary': {'maintainer_changes_requested_count': 0},
-        'labels': [], 'linked_issues': [],
-    })
+    pr = MirrorPullRequest.from_dict(
+        {
+            'repo_full_name': 'entrius/gittensor-ui',
+            'pr_number': number,
+            'title': f'mirror {number}',
+            'body': 'b',
+            'state': state,
+            'author_github_id': '1',
+            'author_login': 'a',
+            'author_association': 'CONTRIBUTOR',
+            'created_at': '2026-04-15T00:00:00Z',
+            'closed_at': '2026-04-18T10:00:00Z' if state in ('CLOSED', 'MERGED') else None,
+            'merged_at': '2026-04-18T10:00:00Z' if state == 'MERGED' else None,
+            'last_edited_at': None,
+            'edited_after_merge': False,
+            'hours_since_merge': 1.0 if state == 'MERGED' else None,
+            'merged_by_login': 'm' if state == 'MERGED' else None,
+            'base_ref': 'main',
+            'head_ref': 'feature',
+            'head_repo_full_name': 'entrius/gittensor-ui',
+            'default_branch': 'main',
+            'head_sha': 'h',
+            'base_sha': 'b',
+            'merge_base_sha': 'mb',
+            'additions': 1,
+            'deletions': 0,
+            'commits_count': 1,
+            'scoring_data_stored': True,
+            'review_summary': {'maintainer_changes_requested_count': 0},
+            'labels': [],
+            'linked_issues': [],
+        }
+    )
     return ScoredMirrorPR(pr=pr)
 
 

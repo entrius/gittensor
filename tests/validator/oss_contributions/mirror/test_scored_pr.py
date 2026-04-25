@@ -6,8 +6,6 @@ Covers:
 - calculate_final_earned_score multiplies base by every multiplier
 """
 
-from datetime import datetime, timezone
-
 import pytest
 
 scored_pr_module = pytest.importorskip(
@@ -22,30 +20,36 @@ MirrorReviewSummary = mirror_models.MirrorReviewSummary
 
 
 def _make_pr(state: str = 'MERGED', merged_at_iso: str | None = '2026-04-18T10:00:00Z') -> MirrorPullRequest:
-    return MirrorPullRequest.from_dict({
-        'repo_full_name': 'entrius/gittensor-ui',
-        'pr_number': 100,
-        'title': 't',
-        'body': 'b',
-        'state': state,
-        'author_github_id': '1',
-        'author_login': 'a',
-        'author_association': 'CONTRIBUTOR',
-        'created_at': '2026-04-01T00:00:00Z',
-        'closed_at': merged_at_iso,
-        'merged_at': merged_at_iso,
-        'last_edited_at': None,
-        'edited_after_merge': False,
-        'hours_since_merge': 1.0,
-        'merged_by_login': 'm',
-        'base_ref': 'test',
-        'head_sha': 'h', 'base_sha': 'b', 'merge_base_sha': 'mb',
-        'additions': 1, 'deletions': 0, 'commits_count': 1,
-        'scoring_data_stored': True,
-        'review_summary': {'maintainer_changes_requested_count': 0},
-        'labels': [],
-        'linked_issues': [],
-    })
+    return MirrorPullRequest.from_dict(
+        {
+            'repo_full_name': 'entrius/gittensor-ui',
+            'pr_number': 100,
+            'title': 't',
+            'body': 'b',
+            'state': state,
+            'author_github_id': '1',
+            'author_login': 'a',
+            'author_association': 'CONTRIBUTOR',
+            'created_at': '2026-04-01T00:00:00Z',
+            'closed_at': merged_at_iso,
+            'merged_at': merged_at_iso,
+            'last_edited_at': None,
+            'edited_after_merge': False,
+            'hours_since_merge': 1.0,
+            'merged_by_login': 'm',
+            'base_ref': 'test',
+            'head_sha': 'h',
+            'base_sha': 'b',
+            'merge_base_sha': 'mb',
+            'additions': 1,
+            'deletions': 0,
+            'commits_count': 1,
+            'scoring_data_stored': True,
+            'review_summary': {'maintainer_changes_requested_count': 0},
+            'labels': [],
+            'linked_issues': [],
+        }
+    )
 
 
 class TestComposition:

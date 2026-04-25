@@ -42,9 +42,13 @@ class TestResultShape:
         )
         # Verify every documented field is present
         for field_name in [
-            'base_score', 'token_score',
-            'structural_count', 'structural_score',
-            'leaf_count', 'leaf_score',
-            'total_nodes_scored', 'code_density',
+            'base_score',
+            'token_score',
+            'structural_count',
+            'structural_score',
+            'leaf_count',
+            'leaf_score',
+            'total_nodes_scored',
+            'code_density',
         ]:
             assert hasattr(result, field_name), f'missing {field_name}'

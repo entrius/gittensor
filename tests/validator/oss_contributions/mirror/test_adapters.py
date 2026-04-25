@@ -10,9 +10,7 @@ adapters = pytest.importorskip(
 )
 mirror_models = pytest.importorskip('gittensor.utils.mirror.models')
 classes = pytest.importorskip('gittensor.classes')
-scored_pr_module = pytest.importorskip(
-    'gittensor.validator.oss_contributions.mirror.scored_pr'
-)
+scored_pr_module = pytest.importorskip('gittensor.validator.oss_contributions.mirror.scored_pr')
 
 mirror_files_to_legacy = adapters.mirror_files_to_legacy
 mirror_linked_issue_to_legacy_issue = adapters.mirror_linked_issue_to_legacy_issue
@@ -29,11 +27,16 @@ ScoredMirrorPR = scored_pr_module.ScoredMirrorPR
 
 def _mirror_file(**overrides):
     base = {
-        'filename': 'src/foo.py', 'previous_filename': None,
+        'filename': 'src/foo.py',
+        'previous_filename': None,
         'status': 'modified',
-        'additions': 5, 'deletions': 2, 'changes': 7,
-        'is_binary': False, 'byte_size': 100,
-        'head_content': 'new', 'base_content': 'old',
+        'additions': 5,
+        'deletions': 2,
+        'changes': 7,
+        'is_binary': False,
+        'byte_size': 100,
+        'head_content': 'new',
+        'base_content': 'old',
     }
     base.update(overrides)
     return MirrorFile.from_dict(base)
@@ -41,9 +44,12 @@ def _mirror_file(**overrides):
 
 def _linked_issue(**overrides):
     base = {
-        'number': 42, 'title': 'test issue',
-        'state': 'CLOSED', 'state_reason': 'COMPLETED',
-        'author_github_id': '123', 'author_association': 'CONTRIBUTOR',
+        'number': 42,
+        'title': 'test issue',
+        'state': 'CLOSED',
+        'state_reason': 'COMPLETED',
+        'author_github_id': '123',
+        'author_association': 'CONTRIBUTOR',
         'created_at': '2026-04-01T00:00:00Z',
         'closed_at': '2026-04-10T00:00:00Z',
         'updated_at': '2026-04-10T00:00:00Z',
@@ -115,32 +121,39 @@ def _make_mirror_pr(
     base_sha: str = 'def',
     maintainer_changes_requested: int = 0,
 ):
-    return MirrorPullRequest.from_dict({
-        'repo_full_name': repo,
-        'pr_number': pr_number,
-        'title': 'A PR title',
-        'body': body,
-        'state': state,
-        'author_github_id': '218712309',
-        'author_login': 'bittoby',
-        'author_association': 'CONTRIBUTOR',
-        'created_at': '2026-04-15T00:00:00Z',
-        'closed_at': '2026-04-18T10:00:00Z' if state in ('CLOSED', 'MERGED') else None,
-        'merged_at': '2026-04-18T10:00:00Z' if state == 'MERGED' else None,
-        'last_edited_at': '2026-04-17T00:00:00Z',
-        'edited_after_merge': False,
-        'hours_since_merge': 1.0 if state == 'MERGED' else None,
-        'merged_by_login': 'anderdc' if state == 'MERGED' else None,
-        'base_ref': 'main',
-        'head_ref': 'feature/foo',
-        'head_repo_full_name': repo,
-        'default_branch': 'main',
-        'head_sha': head_sha, 'base_sha': base_sha, 'merge_base_sha': 'mb',
-        'additions': additions, 'deletions': deletions, 'commits_count': commits_count,
-        'scoring_data_stored': True,
-        'review_summary': {'maintainer_changes_requested_count': maintainer_changes_requested},
-        'labels': [], 'linked_issues': [],
-    })
+    return MirrorPullRequest.from_dict(
+        {
+            'repo_full_name': repo,
+            'pr_number': pr_number,
+            'title': 'A PR title',
+            'body': body,
+            'state': state,
+            'author_github_id': '218712309',
+            'author_login': 'bittoby',
+            'author_association': 'CONTRIBUTOR',
+            'created_at': '2026-04-15T00:00:00Z',
+            'closed_at': '2026-04-18T10:00:00Z' if state in ('CLOSED', 'MERGED') else None,
+            'merged_at': '2026-04-18T10:00:00Z' if state == 'MERGED' else None,
+            'last_edited_at': '2026-04-17T00:00:00Z',
+            'edited_after_merge': False,
+            'hours_since_merge': 1.0 if state == 'MERGED' else None,
+            'merged_by_login': 'anderdc' if state == 'MERGED' else None,
+            'base_ref': 'main',
+            'head_ref': 'feature/foo',
+            'head_repo_full_name': repo,
+            'default_branch': 'main',
+            'head_sha': head_sha,
+            'base_sha': base_sha,
+            'merge_base_sha': 'mb',
+            'additions': additions,
+            'deletions': deletions,
+            'commits_count': commits_count,
+            'scoring_data_stored': True,
+            'review_summary': {'maintainer_changes_requested_count': maintainer_changes_requested},
+            'labels': [],
+            'linked_issues': [],
+        }
+    )
 
 
 class TestMirrorScoredPrToLegacyPullRequest:
@@ -169,9 +182,7 @@ class TestMirrorScoredPrToLegacyPullRequest:
         scored.leaf_score = 50.0
         scored.total_nodes_scored = 30
 
-        adapted = mirror_scored_pr_to_legacy_pull_request(
-            scored, uid=42, hotkey='hk-abc', github_id='218712309'
-        )
+        adapted = mirror_scored_pr_to_legacy_pull_request(scored, uid=42, hotkey='hk-abc', github_id='218712309')
 
         assert isinstance(adapted, PullRequest)
         # Field-name remappings

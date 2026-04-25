@@ -14,7 +14,6 @@ Token-scoring base_score is exercised indirectly via the existing legacy tests
 (same calculate_token_score_from_file_changes infra).
 """
 
-from datetime import datetime, timedelta, timezone
 from unittest.mock import Mock
 
 import pytest
@@ -27,9 +26,7 @@ adapters_module = pytest.importorskip(
     'gittensor.validator.oss_contributions.mirror.adapters',
 )
 mirror_models = pytest.importorskip('gittensor.utils.mirror.models')
-scored_pr_module = pytest.importorskip(
-    'gittensor.validator.oss_contributions.mirror.scored_pr'
-)
+scored_pr_module = pytest.importorskip('gittensor.validator.oss_contributions.mirror.scored_pr')
 load_weights = pytest.importorskip('gittensor.validator.utils.load_weights')
 
 _should_skip_merged_mirror_pr = scoring_module._should_skip_merged_mirror_pr
@@ -61,42 +58,47 @@ def _pr(
     labels: list | None = None,
     linked_issues: list | None = None,
 ) -> MirrorPullRequest:
-    return MirrorPullRequest.from_dict({
-        'repo_full_name': 'entrius/gittensor-ui',
-        'pr_number': 100,
-        'title': 't', 'body': 'b',
-        'state': state,
-        'author_github_id': '218712309',
-        'author_login': author_login,
-        'author_association': author_association,
-        'created_at': '2026-04-15T00:00:00Z',
-        'closed_at': '2026-04-18T10:00:00Z' if state in ('CLOSED', 'MERGED') else None,
-        'merged_at': '2026-04-18T10:00:00Z' if state == 'MERGED' else None,
-        'last_edited_at': None,
-        'edited_after_merge': edited_after_merge,
-        'hours_since_merge': 1.0 if state == 'MERGED' else None,
-        'merged_by_login': merged_by_login if state == 'MERGED' else None,
-        'base_ref': base_ref,
-        'head_ref': head_ref,
-        'head_repo_full_name': head_repo_full_name,
-        'default_branch': default_branch,
-        'head_sha': 'h', 'base_sha': 'b', 'merge_base_sha': 'mb',
-        'additions': 1, 'deletions': 0, 'commits_count': 1,
-        'scoring_data_stored': True,
-        'review_summary': {
-            'maintainer_changes_requested_count': 0,
-            'changes_requested_count': 0,
-            'approved_count': approved_count,
-            'commented_count': 0,
-        },
-        'labels': labels or [],
-        'linked_issues': linked_issues or [],
-    })
+    return MirrorPullRequest.from_dict(
+        {
+            'repo_full_name': 'entrius/gittensor-ui',
+            'pr_number': 100,
+            'title': 't',
+            'body': 'b',
+            'state': state,
+            'author_github_id': '218712309',
+            'author_login': author_login,
+            'author_association': author_association,
+            'created_at': '2026-04-15T00:00:00Z',
+            'closed_at': '2026-04-18T10:00:00Z' if state in ('CLOSED', 'MERGED') else None,
+            'merged_at': '2026-04-18T10:00:00Z' if state == 'MERGED' else None,
+            'last_edited_at': None,
+            'edited_after_merge': edited_after_merge,
+            'hours_since_merge': 1.0 if state == 'MERGED' else None,
+            'merged_by_login': merged_by_login if state == 'MERGED' else None,
+            'base_ref': base_ref,
+            'head_ref': head_ref,
+            'head_repo_full_name': head_repo_full_name,
+            'default_branch': default_branch,
+            'head_sha': 'h',
+            'base_sha': 'b',
+            'merge_base_sha': 'mb',
+            'additions': 1,
+            'deletions': 0,
+            'commits_count': 1,
+            'scoring_data_stored': True,
+            'review_summary': {
+                'maintainer_changes_requested_count': 0,
+                'changes_requested_count': 0,
+                'approved_count': approved_count,
+                'commented_count': 0,
+            },
+            'labels': labels or [],
+            'linked_issues': linked_issues or [],
+        }
+    )
 
 
-def _config(
-    weight: float = 0.5, additional_branches: list | None = None
-) -> RepositoryConfig:
+def _config(weight: float = 0.5, additional_branches: list | None = None) -> RepositoryConfig:
     return RepositoryConfig(
         weight=weight,
         mirror_enabled=True,
@@ -186,12 +188,16 @@ class TestEligibilityGate:
         assert skip is False
 
     def test_head_ref_in_additional_blocks_same_repo(self):
-        scored = ScoredMirrorPR(pr=_pr(
-            base_ref='main', head_ref='test',
-            head_repo_full_name='entrius/gittensor-ui',
-        ))
+        scored = ScoredMirrorPR(
+            pr=_pr(
+                base_ref='main',
+                head_ref='test',
+                head_repo_full_name='entrius/gittensor-ui',
+            )
+        )
         skip, reason = _should_skip_merged_mirror_pr(
-            scored, _config(additional_branches=['test', 'staging']),
+            scored,
+            _config(additional_branches=['test', 'staging']),
         )
         assert skip is True
         assert "source branch 'test'" in reason
@@ -200,46 +206,62 @@ class TestEligibilityGate:
         # Fork PR whose head branch happens to collide with an acceptable
         # branch — fork branch names are arbitrary, legacy skips this case
         # and so do we.
-        scored = ScoredMirrorPR(pr=_pr(
-            base_ref='main', head_ref='test',
-            head_repo_full_name='outsider/fork',
-        ))
+        scored = ScoredMirrorPR(
+            pr=_pr(
+                base_ref='main',
+                head_ref='test',
+                head_repo_full_name='outsider/fork',
+            )
+        )
         skip, reason = _should_skip_merged_mirror_pr(
-            scored, _config(additional_branches=['test']),
+            scored,
+            _config(additional_branches=['test']),
         )
         assert skip is False
 
     def test_null_head_ref_skips_check(self):
-        scored = ScoredMirrorPR(pr=_pr(
-            base_ref='main', head_ref=None,
-            head_repo_full_name='entrius/gittensor-ui',
-        ))
+        scored = ScoredMirrorPR(
+            pr=_pr(
+                base_ref='main',
+                head_ref=None,
+                head_repo_full_name='entrius/gittensor-ui',
+            )
+        )
         skip, reason = _should_skip_merged_mirror_pr(
-            scored, _config(additional_branches=['main']),
+            scored,
+            _config(additional_branches=['main']),
         )
         assert skip is False
 
     def test_null_head_repo_full_name_skips_check(self):
         # Pre-schema mirror rows may have NULL head_repo_full_name — we can't
         # distinguish same-repo from fork, so fall through conservatively.
-        scored = ScoredMirrorPR(pr=_pr(
-            base_ref='main', head_ref='test',
-            head_repo_full_name=None,
-        ))
+        scored = ScoredMirrorPR(
+            pr=_pr(
+                base_ref='main',
+                head_ref='test',
+                head_repo_full_name=None,
+            )
+        )
         skip, reason = _should_skip_merged_mirror_pr(
-            scored, _config(additional_branches=['test']),
+            scored,
+            _config(additional_branches=['test']),
         )
         assert skip is False
 
     def test_wildcard_head_ref_match_blocks(self):
         # Parity with legacy: wildcard patterns in additional_acceptable_branches
         # match against head_ref too.
-        scored = ScoredMirrorPR(pr=_pr(
-            base_ref='main', head_ref='3.0-dev',
-            head_repo_full_name='entrius/gittensor-ui',
-        ))
+        scored = ScoredMirrorPR(
+            pr=_pr(
+                base_ref='main',
+                head_ref='3.0-dev',
+                head_repo_full_name='entrius/gittensor-ui',
+            )
+        )
         skip, reason = _should_skip_merged_mirror_pr(
-            scored, _config(additional_branches=['*-dev']),
+            scored,
+            _config(additional_branches=['*-dev']),
         )
         assert skip is True
         assert "source branch '3.0-dev'" in reason
@@ -247,7 +269,8 @@ class TestEligibilityGate:
     def test_wildcard_base_ref_match_passes(self):
         scored = ScoredMirrorPR(pr=_pr(base_ref='3.0-dev'))
         skip, reason = _should_skip_merged_mirror_pr(
-            scored, _config(additional_branches=['*-dev']),
+            scored,
+            _config(additional_branches=['*-dev']),
         )
         assert skip is False
 
@@ -255,12 +278,17 @@ class TestEligibilityGate:
         # staging <- main merge with additional=['staging'], default_branch='main':
         # acceptable=['main','staging'], head_ref='main' matches → block.
         # Closes the default-branch-not-in-acceptable gap.
-        scored = ScoredMirrorPR(pr=_pr(
-            base_ref='staging', head_ref='main',
-            head_repo_full_name='entrius/gittensor-ui', default_branch='main',
-        ))
+        scored = ScoredMirrorPR(
+            pr=_pr(
+                base_ref='staging',
+                head_ref='main',
+                head_repo_full_name='entrius/gittensor-ui',
+                default_branch='main',
+            )
+        )
         skip, reason = _should_skip_merged_mirror_pr(
-            scored, _config(additional_branches=['staging']),
+            scored,
+            _config(additional_branches=['staging']),
         )
         assert skip is True
         assert "source branch 'main'" in reason
@@ -299,13 +327,20 @@ class TestScoringDataStoredGate:
 class TestConvertMirrorFiles:
     def test_translates_basic_fields(self):
         files = [
-            MirrorFile.from_dict({
-                'filename': 'src/foo.py', 'previous_filename': None,
-                'status': 'modified',
-                'additions': 5, 'deletions': 2, 'changes': 7,
-                'is_binary': False, 'byte_size': 100,
-                'head_content': 'new', 'base_content': 'old',
-            }),
+            MirrorFile.from_dict(
+                {
+                    'filename': 'src/foo.py',
+                    'previous_filename': None,
+                    'status': 'modified',
+                    'additions': 5,
+                    'deletions': 2,
+                    'changes': 7,
+                    'is_binary': False,
+                    'byte_size': 100,
+                    'head_content': 'new',
+                    'base_content': 'old',
+                }
+            ),
         ]
         file_changes, file_contents = _convert_mirror_files('owner/repo', 42, files)
 
@@ -323,13 +358,20 @@ class TestConvertMirrorFiles:
 
     def test_added_file_has_null_old(self):
         files = [
-            MirrorFile.from_dict({
-                'filename': 'new.py', 'previous_filename': None,
-                'status': 'added',
-                'additions': 10, 'deletions': 0, 'changes': 10,
-                'is_binary': False, 'byte_size': 100,
-                'head_content': 'new', 'base_content': None,
-            }),
+            MirrorFile.from_dict(
+                {
+                    'filename': 'new.py',
+                    'previous_filename': None,
+                    'status': 'added',
+                    'additions': 10,
+                    'deletions': 0,
+                    'changes': 10,
+                    'is_binary': False,
+                    'byte_size': 100,
+                    'head_content': 'new',
+                    'base_content': None,
+                }
+            ),
         ]
         _, file_contents = _convert_mirror_files('o/r', 1, files)
         assert file_contents['new.py'].old_content is None
@@ -337,13 +379,20 @@ class TestConvertMirrorFiles:
 
     def test_renamed_file_carries_previous_filename(self):
         files = [
-            MirrorFile.from_dict({
-                'filename': 'new_name.py', 'previous_filename': 'old_name.py',
-                'status': 'renamed',
-                'additions': 0, 'deletions': 0, 'changes': 0,
-                'is_binary': False, 'byte_size': 100,
-                'head_content': 'x', 'base_content': 'x',
-            }),
+            MirrorFile.from_dict(
+                {
+                    'filename': 'new_name.py',
+                    'previous_filename': 'old_name.py',
+                    'status': 'renamed',
+                    'additions': 0,
+                    'deletions': 0,
+                    'changes': 0,
+                    'is_binary': False,
+                    'byte_size': 100,
+                    'head_content': 'x',
+                    'base_content': 'x',
+                }
+            ),
         ]
         file_changes, _ = _convert_mirror_files('o/r', 1, files)
         assert file_changes[0].previous_filename == 'old_name.py'
@@ -369,6 +418,7 @@ class TestLabelResolution:
 
     def test_non_maintainer_label_ignored(self):
         from gittensor.constants import LABEL_MULTIPLIERS
+
         scoring_label = next(iter(LABEL_MULTIPLIERS.keys()))
         labels = [
             {'name': scoring_label, 'actor_github_id': '1', 'actor_association': 'CONTRIBUTOR'},
@@ -378,6 +428,7 @@ class TestLabelResolution:
 
     def test_null_actor_association_ignored(self):
         from gittensor.constants import LABEL_MULTIPLIERS
+
         scoring_label = next(iter(LABEL_MULTIPLIERS.keys()))
         labels = [
             {'name': scoring_label, 'actor_github_id': None, 'actor_association': None},
@@ -387,6 +438,7 @@ class TestLabelResolution:
 
     def test_maintainer_set_scoring_label_returned(self):
         from gittensor.constants import LABEL_MULTIPLIERS
+
         scoring_label = next(iter(LABEL_MULTIPLIERS.keys()))
         labels = [
             {'name': scoring_label, 'actor_github_id': '1', 'actor_association': 'COLLABORATOR'},
@@ -396,6 +448,7 @@ class TestLabelResolution:
 
     def test_highest_multiplier_wins(self):
         from gittensor.constants import LABEL_MULTIPLIERS
+
         scoring_labels = list(LABEL_MULTIPLIERS.keys())
         if len(scoring_labels) < 2:
             pytest.skip('Need at least 2 scoring labels for this test')
@@ -451,11 +504,13 @@ class TestIssueMultiplier:
 
     def test_valid_standard_issue(self):
         from gittensor.constants import STANDARD_ISSUE_MULTIPLIER
+
         scored = ScoredMirrorPR(pr=_pr(linked_issues=[_linked_issue()]))
         assert _calculate_issue_multiplier(scored) == STANDARD_ISSUE_MULTIPLIER
 
     def test_maintainer_authored_issue_gets_maintainer_multiplier(self):
         from gittensor.constants import MAINTAINER_ISSUE_MULTIPLIER
+
         scored = ScoredMirrorPR(pr=_pr(linked_issues=[_linked_issue(author_association='OWNER')]))
         assert _calculate_issue_multiplier(scored) == MAINTAINER_ISSUE_MULTIPLIER
 
@@ -465,6 +520,7 @@ class TestIssueMultiplier:
         valid = _linked_issue(number=51, author_github_id='888')
         scored = ScoredMirrorPR(pr=_pr(linked_issues=[invalid, valid]))
         from gittensor.constants import STANDARD_ISSUE_MULTIPLIER
+
         assert _calculate_issue_multiplier(scored) == STANDARD_ISSUE_MULTIPLIER
 
 
@@ -537,9 +593,7 @@ class TestLinkedIssueValidity:
         """An OPEN issue linked to an OPEN PR should still be valid (state_reason only
         gates CLOSED issues)."""
         scored = ScoredMirrorPR(pr=_pr(state='OPEN'))
-        li = MirrorLinkedIssue.from_dict(
-            _linked_issue(state='OPEN', state_reason=None, closed_at=None)
-        )
+        li = MirrorLinkedIssue.from_dict(_linked_issue(state='OPEN', state_reason=None, closed_at=None))
         assert _is_valid_linked_issue(li, scored.pr) is True
 
 
@@ -593,9 +647,7 @@ class TestCollateralScoreAcceptsScoredMirrorPR:
     def test_open_pr_skips_merge_only_gates(self):
         # OPEN PR shouldn't apply the merge-only gates
         scored = ScoredMirrorPR(pr=_pr(state='OPEN'))
-        li = MirrorLinkedIssue.from_dict(
-            _linked_issue(state='OPEN', state_reason=None, closed_at=None)
-        )
+        li = MirrorLinkedIssue.from_dict(_linked_issue(state='OPEN', state_reason=None, closed_at=None))
         # Author check still applies — set different authors
         # The issue with state=OPEN/state_reason=None should still pass for an OPEN PR
         assert _is_valid_linked_issue(li, scored.pr) is True
@@ -609,6 +661,7 @@ class TestCollateralScoreAcceptsScoredMirrorPR:
 class TestPrMultipliers:
     def test_merged_pr_populates_all_multipliers(self):
         from gittensor.constants import LABEL_MULTIPLIERS
+
         scoring_label = next(iter(LABEL_MULTIPLIERS.keys()))
         labels = [{'name': scoring_label, 'actor_github_id': '1', 'actor_association': 'OWNER'}]
 

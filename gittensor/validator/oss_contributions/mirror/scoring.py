@@ -24,7 +24,16 @@ Anti-gaming notes:
 
 import os
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+
+# Imported only for type hints / pioneer function signature. At runtime
+# calculate_mirror_pioneer_dividends reads miner_evaluations[uid].mirror_merged_prs.
+from typing import (
+    TYPE_CHECKING,  # noqa: E402
+    Dict,
+    List,
+    Optional,
+    Tuple,
+)
 
 import bittensor as bt
 
@@ -58,10 +67,6 @@ from gittensor.validator.utils.load_weights import (
     resolve_repo_weight,
 )
 from gittensor.validator.utils.tree_sitter_scoring import calculate_token_score_from_file_changes
-
-# Imported only for type hints / pioneer function signature. At runtime
-# calculate_mirror_pioneer_dividends reads miner_evaluations[uid].mirror_merged_prs.
-from typing import TYPE_CHECKING  # noqa: E402
 
 if TYPE_CHECKING:
     from gittensor.classes import MinerEvaluation
@@ -105,8 +110,7 @@ def score_mirror_miner_prs(
     for label, scored_prs in pr_groups:
         for i, scored in enumerate(scored_prs, start=1):
             bt.logging.info(
-                f'\n[{i}/{len(scored_prs)}] {label} PR #{scored.pr.pr_number} '
-                f'in {scored.pr.repo_full_name}'
+                f'\n[{i}/{len(scored_prs)}] {label} PR #{scored.pr.pr_number} in {scored.pr.repo_full_name}'
             )
             score_mirror_pr(scored, mirror_eval, mirror_repos, programming_languages, token_config, client)
 
@@ -155,9 +159,7 @@ def score_mirror_pr(
 
     file_changes, file_contents = mirror_files_to_legacy(pr.repo_full_name, pr.pr_number, files)
 
-    scored.base_score = _calculate_base_score(
-        scored, file_changes, file_contents, programming_languages, token_config
-    )
+    scored.base_score = _calculate_base_score(scored, file_changes, file_contents, programming_languages, token_config)
 
     _calculate_pr_multipliers(scored, repo_config)
 
@@ -173,9 +175,7 @@ def score_mirror_pr(
 # ============================================================================
 
 
-def _should_skip_merged_mirror_pr(
-    scored: ScoredMirrorPR, repo_config: RepositoryConfig
-) -> Tuple[bool, Optional[str]]:
+def _should_skip_merged_mirror_pr(scored: ScoredMirrorPR, repo_config: RepositoryConfig) -> Tuple[bool, Optional[str]]:
     """Mirror-side eligibility gate for MERGED PRs.
 
     At parity with legacy ``should_skip_merged_pr``:
@@ -220,24 +220,13 @@ def _should_skip_merged_mirror_pr(
 
     # base_ref check — only enforce when we have an acceptable set to compare against.
     if acceptable and not branch_matches_pattern(pr.base_ref or '', acceptable):
-        return True, (
-            f'PR #{pr.pr_number} merged to {pr.base_ref!r} not in '
-            f'acceptable branches={acceptable}'
-        )
+        return True, (f'PR #{pr.pr_number} merged to {pr.base_ref!r} not in acceptable branches={acceptable}')
 
     # head_ref check — block PRs whose source branch is itself an acceptable
     # branch. Only applies to same-repo PRs: fork branch names are arbitrary.
     # Falls through when head_ref or head_repo_full_name is missing (older data).
-    is_same_repo = (
-        pr.head_repo_full_name is not None
-        and pr.head_repo_full_name == pr.repo_full_name
-    )
-    if (
-        additional
-        and pr.head_ref
-        and is_same_repo
-        and branch_matches_pattern(pr.head_ref, acceptable)
-    ):
+    is_same_repo = pr.head_repo_full_name is not None and pr.head_repo_full_name == pr.repo_full_name
+    if additional and pr.head_ref and is_same_repo and branch_matches_pattern(pr.head_ref, acceptable):
         return True, (
             f'PR #{pr.pr_number} source branch {pr.head_ref!r} is itself in '
             f'acceptable branches — merging between acceptable branches not allowed'
@@ -360,9 +349,7 @@ def _calculate_base_score(
     token_config: TokenConfig,
 ) -> float:
     """Thin wrapper: run the shared helper and copy fields onto ScoredMirrorPR."""
-    result = calculate_base_score_for_pr_files(
-        file_changes, file_contents, programming_languages, token_config
-    )
+    result = calculate_base_score_for_pr_files(file_changes, file_contents, programming_languages, token_config)
     scored.token_score = result.token_score
     scored.structural_count = result.structural_count
     scored.structural_score = result.structural_score
@@ -419,8 +406,7 @@ def _resolve_maintainer_set_label(pr: MirrorPullRequest) -> Optional[str]:
     candidates = [
         label
         for label in pr.labels
-        if label.actor_association in MAINTAINER_ASSOCIATIONS
-        and (label.name or '').lower() in LABEL_MULTIPLIERS
+        if label.actor_association in MAINTAINER_ASSOCIATIONS and (label.name or '').lower() in LABEL_MULTIPLIERS
     ]
     if not candidates:
         return None
@@ -493,9 +479,7 @@ def _is_valid_linked_issue(li: MirrorLinkedIssue, pr: MirrorPullRequest) -> bool
     # _is_completed_when_closed returns True for OPEN issues, False for CLOSED
     # issues with non-COMPLETED state_reason. Applies to OPEN-PR collateral too.
     if li.state == 'CLOSED' and li.state_reason != 'COMPLETED':
-        bt.logging.warning(
-            f'Skipping linked issue #{li.number} - state_reason={li.state_reason} (need COMPLETED)'
-        )
+        bt.logging.warning(f'Skipping linked issue #{li.number} - state_reason={li.state_reason} (need COMPLETED)')
         return False
 
     is_merged = pr.state == 'MERGED'
@@ -540,13 +524,13 @@ def calculate_mirror_pioneer_dividends(miner_evaluations: Dict[int, 'MinerEvalua
 
     Must be called AFTER all earned_scores have been computed on mirror PRs.
     """
+
     from gittensor.constants import (
         PIONEER_DIVIDEND_MAX_RATIO,
         PIONEER_DIVIDEND_RATE_1ST,
         PIONEER_DIVIDEND_RATE_2ND,
         PIONEER_DIVIDEND_RATE_REST,
     )
-    from datetime import datetime
 
     pr_index: Dict[str, Dict[int, list]] = {}
     repo_contributions: Dict[str, Dict[int, tuple]] = {}
@@ -562,9 +546,7 @@ def calculate_mirror_pioneer_dividends(miner_evaluations: Dict[int, 'MinerEvalua
 
             current = repo_contributions.setdefault(repo, {}).get(uid)
             if current is None:
-                repo_contributions[repo][uid] = (
-                    scored.pr.merged_at, scored.pr.pr_number, scored.earned_score
-                )
+                repo_contributions[repo][uid] = (scored.pr.merged_at, scored.pr.pr_number, scored.earned_score)
             else:
                 earliest_at, earliest_num, total_score = current
                 new_total = total_score + scored.earned_score
@@ -597,9 +579,7 @@ def calculate_mirror_pioneer_dividends(miner_evaluations: Dict[int, 'MinerEvalua
 
         pioneer_uid = sorted_uids[0][0]
         pioneer_pr_number = sorted_uids[0][1][1]
-        pioneer_scored = next(
-            s for s in pr_index[repo][pioneer_uid] if s.pr.pr_number == pioneer_pr_number
-        )
+        pioneer_scored = next(s for s in pr_index[repo][pioneer_uid] if s.pr.pr_number == pioneer_pr_number)
         max_dividend = pioneer_scored.earned_score * PIONEER_DIVIDEND_MAX_RATIO
         capped = min(dividend, max_dividend)
         pioneer_scored.pioneer_dividend = round(capped, 2)

@@ -144,11 +144,13 @@ class TestRepositoryConfigMirrorFlag:
 
         fake_weights_dir = tmp_path
         (fake_weights_dir / 'master_repositories.json').write_text(
-            json.dumps({
-                'foo/mirror-repo':  {'weight': 0.5, 'mirror_enabled': True},
-                'foo/legacy-repo':  {'weight': 0.3},
-                'foo/explicit-off': {'weight': 0.2, 'mirror_enabled': False},
-            })
+            json.dumps(
+                {
+                    'foo/mirror-repo': {'weight': 0.5, 'mirror_enabled': True},
+                    'foo/legacy-repo': {'weight': 0.3},
+                    'foo/explicit-off': {'weight': 0.2, 'mirror_enabled': False},
+                }
+            )
         )
         monkeypatch.setattr(lw, '_get_weights_dir', lambda: fake_weights_dir)
 

@@ -454,9 +454,7 @@ class MinerEvaluation:
                 all_file_changes.extend(pr.file_changes)
         for scored in self.mirror_merged_prs + self.mirror_open_prs + self.mirror_closed_prs:
             if scored.files:
-                file_changes, _ = mirror_files_to_legacy(
-                    scored.pr.repo_full_name, scored.pr.pr_number, scored.files
-                )
+                file_changes, _ = mirror_files_to_legacy(scored.pr.repo_full_name, scored.pr.pr_number, scored.files)
                 all_file_changes.extend(file_changes)
         return all_file_changes
 

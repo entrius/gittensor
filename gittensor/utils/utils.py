@@ -14,4 +14,6 @@ def mask_secret(secret: str, length: int = 5) -> str:
 
 def parse_repo_name(repo_data: Dict):
     """Normalizes and converts repository name from dict"""
-    return f'{repo_data["owner"]["login"]}/{repo_data["name"]}'.lower()
+    owner = repo_data.get("owner")
+    owner_login = owner.get("login") if owner else "deleted-user"
+    return f'{owner_login}/{repo_data["name"]}'.lower()

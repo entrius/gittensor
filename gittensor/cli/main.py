@@ -92,6 +92,38 @@ def show_config():
         console.print(f'[red]Error reading config: {e}[/red]')
 
 
+@config_group.command('get')
+@click.argument('key', type=str)
+def config_get(key: str):
+    """Print a single configuration value.
+
+    [dim]Reads `~/.gittensor/config.json` and prints the value for KEY to
+    stdout with no styling, so the output is safe to capture in shell
+    scripts. Exits non-zero if the config file is missing or KEY is unset.[/dim]
+
+    [dim]Examples:
+        $ gitt config get wallet
+        $ WALLET=$(gitt config get wallet)
+    [/dim]
+    """
+    if not CONFIG_FILE.exists():
+        console.print('[red]Error: No config file found at ~/.gittensor/config.json[/red]')
+        raise SystemExit(1)
+
+    try:
+        config = json.loads(CONFIG_FILE.read_text())
+    except json.JSONDecodeError:
+        console.print('[red]Error: Invalid JSON in config file[/red]')
+        raise SystemExit(1)
+
+    if key not in config:
+        console.print(f'[red]Error: Key {key!r} is not set in config[/red]')
+        raise SystemExit(1)
+
+    # click.echo writes plain text to stdout — script-friendly, no Rich styling.
+    click.echo(str(config[key]))
+
+
 @config_group.command('set')
 @click.argument('key', type=str)
 @click.argument('value', type=str)

@@ -138,6 +138,39 @@ def config_set(key: str, value: str):
         console.print(f'[green]Set {key}:[/green] {value}')
 
 
+@config_group.command('unset')
+@click.argument('key', type=str)
+def config_unset(key: str):
+    """Remove a configuration value.
+
+    [dim]Deletes KEY from `~/.gittensor/config.json`. Exits non-zero if the
+    config file is missing, the JSON is invalid, or KEY is not set, so
+    shell scripts can detect the missing key.[/dim]
+
+    [dim]Examples:
+        $ gitt config unset wallet
+        $ gitt config unset contract_address
+    [/dim]
+    """
+    if not CONFIG_FILE.exists():
+        console.print('[red]Error: No config file found at ~/.gittensor/config.json[/red]')
+        raise SystemExit(1)
+
+    try:
+        config = json.loads(CONFIG_FILE.read_text())
+    except json.JSONDecodeError:
+        console.print('[red]Error: Invalid JSON in config file[/red]')
+        raise SystemExit(1)
+
+    if key not in config:
+        console.print(f'[red]Error: Key {key!r} is not set in config[/red]')
+        raise SystemExit(1)
+
+    old_value = config.pop(key)
+    CONFIG_FILE.write_text(json.dumps(config, indent=2))
+    console.print(f'[green]Unset {key}:[/green] {old_value}')
+
+
 def _detect_shell():
     """Detect the current shell from the SHELL environment variable"""
     shell_path = os.environ.get('SHELL', '')

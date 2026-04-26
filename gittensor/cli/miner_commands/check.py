@@ -16,6 +16,8 @@ from .helpers import (
     _connect_bittensor,
     _error,
     _load_config_value,
+    _pat_check_aggregate_counts,
+    _pat_check_row_category,
     _print,
     _require_registered,
     _require_validator_axons,
@@ -24,6 +26,13 @@ from .helpers import (
 )
 
 console = Console()
+
+_PAT_CHECK_STATUS_MARKUP = {
+    'valid': '[green]✓ valid[/green]',
+    'no_pat': '[red]✗ no PAT[/red]',
+    'invalid_pat': '[red]✗ invalid[/red]',
+    'no_response': '[yellow]— no response[/yellow]',
+}
 
 
 @click.command()
@@ -96,8 +105,8 @@ def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, json_mode)
             }
         )
 
-    valid_count = sum(1 for r in results if r['pat_valid'] is True)
-    no_response_count = sum(1 for r in results if r['has_pat'] is None)
+    counts = _pat_check_aggregate_counts(results)
+    valid_count = counts['valid']
 
     # 6. Display results
     if json_mode:
@@ -106,9 +115,7 @@ def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, json_mode)
                 {
                     'success': valid_count > 0,
                     'total_validators': len(results),
-                    'valid': valid_count,
-                    'invalid': len(results) - valid_count - no_response_count,
-                    'no_response': no_response_count,
+                    **counts,
                     'results': results,
                 },
                 indent=2,
@@ -122,14 +129,8 @@ def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, json_mode)
         table.add_column('Reason', style='dim')
 
         for r in results:
-            if r['pat_valid'] is True:
-                status = '[green]✓ valid[/green]'
-            elif r['has_pat'] is False:
-                status = '[red]✗ no PAT[/red]'
-            elif r['pat_valid'] is False:
-                status = '[red]✗ invalid[/red]'
-            else:
-                status = '[yellow]— no response[/yellow]'
+            category = _pat_check_row_category(r)
+            status = _PAT_CHECK_STATUS_MARKUP[category]
             table.add_row(str(r['uid']), r['hotkey'], status, r.get('rejection_reason') or '')
 
         console.print(table)

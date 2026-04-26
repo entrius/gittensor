@@ -14,6 +14,8 @@ from rich.console import Console
 
 from gittensor.constants import NETWORK_MAP
 
+NETWORK_CHOICE = click.Choice(['finney', 'test', 'local'], case_sensitive=False)
+
 console = Console()
 
 NETUID_DEFAULT = 74
@@ -43,17 +45,33 @@ def _load_config_value(key: str):
 
 
 def _resolve_endpoint(network: str | None, rpc_url: str | None) -> str:
-    """Resolve the subtensor endpoint from CLI args or config."""
+    """Resolve the subtensor endpoint from CLI args or config.
+
+    Raises click.BadParameter if network is not a recognised name and is not
+    a WebSocket URL (i.e. does not start with 'ws://' or 'wss://').
+    """
     if rpc_url:
         return rpc_url
     if network:
-        return NETWORK_MAP.get(network.lower(), network)
+        endpoint = NETWORK_MAP.get(network.lower())
+        if endpoint is None and not network.startswith(('ws://', 'wss://')):
+            raise click.BadParameter(
+                f"'{network}' is not a recognised network name. Use one of: finney, test, local — or pass a WebSocket URL via --rpc-url.",
+                param_hint="'--network'",
+            )
+        return endpoint or network
     config_network = _load_config_value('network')
     config_endpoint = _load_config_value('ws_endpoint')
     if config_endpoint:
         return config_endpoint
     if config_network:
-        return NETWORK_MAP.get(config_network.lower()) or config_network
+        endpoint = NETWORK_MAP.get(config_network.lower())
+        if endpoint is None and not config_network.startswith(('ws://', 'wss://')):
+            raise click.BadParameter(
+                f"Config network '{config_network}' is not recognised. Use one of: finney, test, local — or set ws_endpoint instead.",
+                param_hint="'--network'",
+            )
+        return endpoint or config_network
     return NETWORK_MAP['finney']
 
 

@@ -10,7 +10,11 @@ from click.testing import CliRunner
 
 from gittensor import __version__
 from gittensor.cli.main import cli
-from gittensor.cli.miner_commands.helpers import _pat_check_aggregate_counts
+from gittensor.cli.miner_commands.helpers import (
+    _pat_check_aggregate_counts,
+    _pat_post_aggregate_counts,
+    _pat_post_row_category,
+)
 
 
 @pytest.fixture
@@ -92,3 +96,48 @@ class TestPatCheckAggregateCounts:
             'invalid_pat': 1,
             'no_response': 1,
         }
+
+
+class TestPatPostRowCategory:
+    def test_accepted_true_returns_accepted(self):
+        assert _pat_post_row_category({'accepted': True}) == 'accepted'
+
+    def test_accepted_false_returns_rejected(self):
+        assert _pat_post_row_category({'accepted': False}) == 'rejected'
+
+    def test_accepted_none_returns_no_response(self):
+        assert _pat_post_row_category({'accepted': None}) == 'no_response'
+
+    def test_missing_accepted_key_returns_no_response(self):
+        assert _pat_post_row_category({}) == 'no_response'
+
+
+class TestPatPostAggregateCounts:
+    def test_splits_accepted_rejected_and_no_response(self):
+        results = [
+            {'accepted': True},
+            {'accepted': True},
+            {'accepted': False},
+            {'accepted': None},
+            {'accepted': None},
+        ]
+        assert _pat_post_aggregate_counts(results) == {
+            'accepted': 2,
+            'rejected': 1,
+            'no_response': 2,
+        }
+
+    def test_empty_results_returns_zero_counts(self):
+        assert _pat_post_aggregate_counts([]) == {
+            'accepted': 0,
+            'rejected': 0,
+            'no_response': 0,
+        }
+
+    def test_no_response_is_not_collapsed_into_rejected(self):
+        """Regression: JSON output previously reported `rejected = total - accepted`,
+        silently bucketing no_response into rejected. Counts must stay distinct."""
+        results = [{'accepted': False}, {'accepted': None}]
+        counts = _pat_post_aggregate_counts(results)
+        assert counts['rejected'] == 1
+        assert counts['no_response'] == 1

@@ -125,3 +125,22 @@ def _pat_check_aggregate_counts(results: list[dict[str, Any]]) -> dict[str, int]
         'invalid_pat': counts['invalid_pat'],
         'no_response': counts['no_response'],
     }
+
+
+def _pat_post_row_category(row: dict[str, Any]) -> str:
+    """Classify a PAT broadcast row; must match `miner post` table rendering order."""
+    if row.get('accepted') is True:
+        return 'accepted'
+    if row.get('accepted') is False:
+        return 'rejected'
+    return 'no_response'
+
+
+def _pat_post_aggregate_counts(results: list[dict[str, Any]]) -> dict[str, int]:
+    """Count PAT broadcast rows by status for JSON summaries."""
+    counts = Counter(_pat_post_row_category(r) for r in results)
+    return {
+        'accepted': counts['accepted'],
+        'rejected': counts['rejected'],
+        'no_response': counts['no_response'],
+    }

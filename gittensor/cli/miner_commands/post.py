@@ -19,6 +19,8 @@ from gittensor.cli.miner_commands.helpers import (
     _connect_bittensor,
     _error,
     _load_config_value,
+    _pat_post_aggregate_counts,
+    _pat_post_row_category,
     _print,
     _require_registered,
     _require_validator_axons,
@@ -29,6 +31,12 @@ from gittensor.constants import BASE_GITHUB_API_URL, GITHUB_HTTP_TIMEOUT_SECONDS
 from gittensor.utils.github_api_tools import make_graphql_headers, make_headers
 
 console = Console()
+
+_PAT_POST_STATUS_MARKUP = {
+    'accepted': '[green]✓[/green]',
+    'rejected': '[red]✗[/red]',
+    'no_response': '[yellow]—[/yellow]',
+}
 
 
 @click.command()
@@ -132,7 +140,8 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_m
             }
         )
 
-    accepted_count = sum(1 for r in results if r['accepted'] is True)
+    counts = _pat_post_aggregate_counts(results)
+    accepted_count = counts['accepted']
 
     # 7. Display results
     if json_mode:
@@ -141,8 +150,7 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_m
                 {
                     'success': accepted_count > 0,
                     'total_validators': len(results),
-                    'accepted': accepted_count,
-                    'rejected': len(results) - accepted_count,
+                    **counts,
                     'results': results,
                 },
                 indent=2,
@@ -156,12 +164,8 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_m
         table.add_column('Reason', style='dim')
 
         for r in results:
-            if r['accepted'] is True:
-                status = '[green]✓[/green]'
-            elif r['accepted'] is False:
-                status = '[red]✗[/red]'
-            else:
-                status = '[yellow]—[/yellow]'
+            category = _pat_post_row_category(r)
+            status = _PAT_POST_STATUS_MARKUP[category]
             table.add_row(str(r['uid']), r['hotkey'], status, r.get('rejection_reason') or '')
 
         console.print(table)

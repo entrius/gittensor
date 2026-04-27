@@ -5,6 +5,8 @@ inject it into load_mirror_miner_prs, and assert the resulting bucketing + filte
 on the MirrorMinerEvaluation.
 """
 
+from __future__ import annotations
+
 from datetime import datetime, timedelta, timezone
 from unittest.mock import Mock
 

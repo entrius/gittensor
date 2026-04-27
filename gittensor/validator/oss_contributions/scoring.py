@@ -2,7 +2,7 @@
 # Copyright © 2025 Entrius
 
 from datetime import datetime
-from typing import Dict, Tuple
+from typing import TYPE_CHECKING, Dict, Tuple, Union
 
 import bittensor as bt
 
@@ -12,6 +12,9 @@ from gittensor.classes import (
     PRState,
     PullRequest,
 )
+
+if TYPE_CHECKING:
+    from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredMirrorPR
 from gittensor.constants import (
     EXCESSIVE_PR_PENALTY_BASE_THRESHOLD,
     LABEL_MULTIPLIERS,
@@ -481,7 +484,9 @@ def is_valid_issue(issue: Issue, pr: PullRequest) -> bool:
 # =============================================================================
 
 
-def calculate_open_pr_collateral_score(pr: PullRequest) -> float:
+def calculate_open_pr_collateral_score(
+    pr: Union[PullRequest, 'ScoredMirrorPR'],
+) -> float:  # TODO: drop Union on legacy delete day
     """
     Calculate collateral score for an open PR.
 

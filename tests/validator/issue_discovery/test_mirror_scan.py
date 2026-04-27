@@ -4,7 +4,10 @@ Focus: anti-gaming gates fire correctly, bucketing between solved / closed /
 ignored, and the per-miner MinerEvaluation issue fields get populated.
 """
 
+from __future__ import annotations
+
 import asyncio
+from typing import Optional
 from unittest.mock import Mock
 
 import pytest
@@ -99,10 +102,10 @@ def _empty_files_response(repo: str, pr_number: int) -> MirrorPullRequestFilesRe
 def _issue_dict(
     issue_number: int = 50,
     state: str = 'CLOSED',
-    state_reason: str | None = 'COMPLETED',
-    author_github_id: str = '999',
+    state_reason: Optional[str] = 'COMPLETED',
+    author_github_id: Optional[str] = '999',
     is_transferred: bool = False,
-    solved_by_pr: int | None = 100,
+    solved_by_pr: Optional[int] = 100,
     solving_pr_state: str = 'MERGED',
     solving_pr_author: str = '218712309',
     solving_pr_edited_after_merge: bool = False,
@@ -154,7 +157,7 @@ def _response(issue_dicts: list) -> MirrorIssuesResponse:
     )
 
 
-def _eval(uid=1, github_id='999'):
+def _eval(uid: int = 1, github_id: Optional[str] = '999'):
     return MinerEvaluation(uid=uid, hotkey='hk', github_id=github_id)
 
 
@@ -552,10 +555,12 @@ class TestCacheStats:
         stats = _CacheStats()
 
         issue = MirrorIssue.from_dict(_issue_dict())
+        assert issue.solving_pr is not None
         result = _resolve_solving_pr_score(
             issue, issue.solving_pr, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG
         )
 
+        assert result is not None
         assert result.base_score == 42.0
         assert stats.hits == 1
         assert stats.misses == 0

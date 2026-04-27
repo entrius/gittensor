@@ -14,6 +14,8 @@ Token-scoring base_score is exercised indirectly via the existing legacy tests
 (same calculate_token_score_from_file_changes infra).
 """
 
+from __future__ import annotations
+
 from unittest.mock import Mock
 
 import pytest
@@ -477,7 +479,7 @@ def _linked_issue(
     is_transferred: bool = False,
     author_github_id: str | None = '999',
     created_at: str = '2026-04-10T00:00:00Z',
-    closed_at: str = '2026-04-18T10:00:00Z',
+    closed_at: str | None = '2026-04-18T10:00:00Z',
     author_association: str | None = 'CONTRIBUTOR',
     number: int = 50,
 ):

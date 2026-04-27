@@ -6,6 +6,8 @@ Covers:
 - calculate_final_earned_score multiplies base by every multiplier
 """
 
+from __future__ import annotations
+
 import pytest
 
 scored_pr_module = pytest.importorskip(

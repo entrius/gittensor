@@ -358,6 +358,7 @@ def _calculate_pr_multipliers(scored: ScoredMirrorPR, repo_config: RepositoryCon
     scored.issue_multiplier = round(_calculate_issue_multiplier(scored), 2)
 
     if is_merged:
+        assert pr.merged_at is not None, f'MERGED PR #{pr.pr_number} missing merged_at'
         scored.open_pr_spam_multiplier = 1.0  # finalized later with combined open-PR count
         scored.time_decay_multiplier = round(calculate_time_decay(pr.merged_at), 2)
         scored.review_quality_multiplier = round(

@@ -163,6 +163,16 @@ def _test_pat_against_repo(pat: str) -> Optional[str]:
 
     Scoring uses the GraphQL API to fetch miner PRs, so this mirrors the real path.
     Returns an error string on failure, None on success.
+
+    The PAT is considered valid only when:
+      1. The HTTP response is 200.
+      2. The body has no non-empty `errors` list.
+      3. The `data.viewer` payload is non-null. A fine-grained PAT that
+         authenticates but lacks the `Public Repositories (read-only)` scope
+         responds with `{"data": {"viewer": null}}` — HTTP 200, no `errors`
+         key — which would otherwise be silently accepted and only surface
+         a round later when scoring drops the miner with
+         `"No Github id found for miner X's PAT"`.
     """
     headers = {'Authorization': f'Bearer {pat}', 'Accept': 'application/json'}
     try:
@@ -175,8 +185,20 @@ def _test_pat_against_repo(pat: str) -> Optional[str]:
         if response.status_code != 200:
             return f'GitHub GraphQL API returned {response.status_code}'
         data = response.json()
-        if 'errors' in data:
-            return f'GraphQL error: {data["errors"][0].get("message", "unknown")}'
+        # Truthy check — covers both `[]` (empty list returned by some
+        # upstream proxies, which is "no errors") and `None`. Avoids the
+        # IndexError that `data["errors"][0]` would raise on `[]`.
+        errors = data.get('errors')
+        if errors:
+            first = errors[0] if isinstance(errors[0], dict) else {}
+            return f'GraphQL error: {first.get("message", "unknown")}'
+        viewer = (data.get('data') or {}).get('viewer')
+        if viewer is None:
+            return (
+                'PAT lacks GraphQL viewer access. Fine-grained PATs need '
+                '"Public Repositories (read-only)" permission; classic PATs '
+                'need the read:user scope.'
+            )
         return None
     except requests.RequestException as e:
         return str(e)

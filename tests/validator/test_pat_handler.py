@@ -11,6 +11,7 @@ from bittensor.core.synapse import TerminalInfo
 from gittensor.synapses import PatBroadcastSynapse, PatCheckSynapse
 from gittensor.validator import pat_storage
 from gittensor.validator.pat_handler import (
+    _test_pat_against_repo,
     blacklist_pat_broadcast,
     blacklist_pat_check,
     handle_pat_broadcast,
@@ -223,3 +224,72 @@ class TestHandlePatCheck:
         assert result.has_pat is True
         assert result.pat_valid is False
         assert 'PAT expired' in (result.rejection_reason or '')
+
+
+# ---------------------------------------------------------------------------
+# _test_pat_against_repo unit tests (regressions for #751)
+# ---------------------------------------------------------------------------
+
+
+def _mock_graphql_response(status_code: int, body: dict) -> MagicMock:
+    """Build a fake `requests.Response` for `requests.post` patches."""
+    resp = MagicMock()
+    resp.status_code = status_code
+    resp.json.return_value = body
+    return resp
+
+
+class TestTestPatAgainstRepo:
+    """Direct unit tests for the GraphQL probe used by PAT broadcast/check."""
+
+    @patch('gittensor.validator.pat_handler.requests.post')
+    def test_accepts_pat_when_viewer_has_login(self, mock_post):
+        mock_post.return_value = _mock_graphql_response(
+            200, {'data': {'viewer': {'login': 'alice'}}}
+        )
+        assert _test_pat_against_repo('ghp_ok') is None
+
+    @patch('gittensor.validator.pat_handler.requests.post')
+    def test_rejects_pat_when_viewer_is_null(self, mock_post):
+        # Fine-grained PAT without `Public Repositories (read-only)` permission:
+        # GitHub returns HTTP 200 with `data.viewer == null` and no `errors` key.
+        mock_post.return_value = _mock_graphql_response(
+            200, {'data': {'viewer': None}}
+        )
+        result = _test_pat_against_repo('ghp_no_scope')
+        assert result is not None
+        assert 'viewer' in result.lower()
+
+    @patch('gittensor.validator.pat_handler.requests.post')
+    def test_rejects_pat_when_data_is_missing(self, mock_post):
+        # Defensive: if the response shape is unexpected, treat as invalid
+        # rather than silently accepting.
+        mock_post.return_value = _mock_graphql_response(200, {})
+        assert _test_pat_against_repo('ghp_weird') is not None
+
+    @patch('gittensor.validator.pat_handler.requests.post')
+    def test_treats_empty_errors_list_as_no_error(self, mock_post):
+        # Some upstream proxies respond with `errors: []`. The previous
+        # implementation reached `data["errors"][0]` and raised IndexError.
+        mock_post.return_value = _mock_graphql_response(
+            200, {'data': {'viewer': {'login': 'bob'}}, 'errors': []}
+        )
+        # Should NOT raise IndexError, and should accept the PAT because the
+        # viewer is populated.
+        assert _test_pat_against_repo('ghp_empty_errors') is None
+
+    @patch('gittensor.validator.pat_handler.requests.post')
+    def test_surfaces_first_error_message(self, mock_post):
+        mock_post.return_value = _mock_graphql_response(
+            200, {'errors': [{'message': 'API rate limit exceeded'}]}
+        )
+        result = _test_pat_against_repo('ghp_throttled')
+        assert result is not None
+        assert 'API rate limit exceeded' in result
+
+    @patch('gittensor.validator.pat_handler.requests.post')
+    def test_rejects_non_200_status(self, mock_post):
+        mock_post.return_value = _mock_graphql_response(401, {})
+        result = _test_pat_against_repo('ghp_unauth')
+        assert result is not None
+        assert '401' in result

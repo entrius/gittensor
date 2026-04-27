@@ -35,6 +35,8 @@ GITTENSOR_MIRROR_DEFAULT_URL = 'https://mirror.gittensor.io'
 # File endpoint returns head/base blob contents; allow more time than plain GitHub calls.
 MIRROR_HTTP_TIMEOUT_SECONDS = 30
 MIRROR_MAX_ATTEMPTS = 3
+# Cloudflare rate limit is 50 req/10s per IP. 200ms floor = 5 req/s = 10x safety margin.
+MIRROR_MIN_REQUEST_INTERVAL_SECONDS = 0.2
 
 # =============================================================================
 # Language & File Scoring

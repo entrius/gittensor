@@ -5,6 +5,7 @@ per IP) and one admin backfill endpoint (not used by the validator). This
 client only covers the scoring-hot-path read endpoints.
 """
 
+import threading
 import time
 from datetime import datetime, timezone
 from typing import Optional
@@ -16,6 +17,7 @@ from gittensor.constants import (
     GITTENSOR_MIRROR_DEFAULT_URL,
     MIRROR_HTTP_TIMEOUT_SECONDS,
     MIRROR_MAX_ATTEMPTS,
+    MIRROR_MIN_REQUEST_INTERVAL_SECONDS,
 )
 from gittensor.utils.mirror.models import (
     MirrorIssuesResponse,
@@ -37,11 +39,15 @@ class MirrorClient:
         timeout: int = MIRROR_HTTP_TIMEOUT_SECONDS,
         max_attempts: int = MIRROR_MAX_ATTEMPTS,
         session: Optional[requests.Session] = None,
+        min_request_interval: float = MIRROR_MIN_REQUEST_INTERVAL_SECONDS,
     ):
         self.base_url = GITTENSOR_MIRROR_DEFAULT_URL.rstrip('/')
         self.timeout = timeout
         self.max_attempts = max_attempts
         self.session = session or requests.Session()
+        self._min_request_interval = min_request_interval
+        self._last_request_at: float = 0.0
+        self._throttle_lock = threading.Lock()
 
     def get_miner_pulls(
         self,
@@ -84,9 +90,22 @@ class MirrorClient:
         data = self._get(path)
         return MirrorPullRequestFilesResponse.from_dict(data)
 
+    def _throttle(self) -> None:
+        """Enforce a minimum interval between outgoing requests.
+
+        Uses a lock so concurrent callers don't both read a stale
+        _last_request_at and skip the sleep.
+        """
+        with self._throttle_lock:
+            elapsed = time.monotonic() - self._last_request_at
+            if elapsed < self._min_request_interval:
+                time.sleep(self._min_request_interval - elapsed)
+            self._last_request_at = time.monotonic()
+
     def _get(self, path: str, params: Optional[dict] = None) -> dict:
         url = f'{self.base_url}{path}'
         last_error: Optional[str] = None
+        self._throttle()
 
         for attempt in range(self.max_attempts):
             try:

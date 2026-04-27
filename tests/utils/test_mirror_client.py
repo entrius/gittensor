@@ -48,6 +48,7 @@ def _err(status: int, body: str = 'error') -> Mock:
 
 def _make_client(session: Mock, **kwargs) -> MirrorClient:
     """Build a client wired to a mock session, defaults suitable for tests."""
+    kwargs.setdefault('min_request_interval', 0)
     return MirrorClient(session=session, **kwargs)
 
 
@@ -335,3 +336,57 @@ class TestConstructorDefaults:
 
         client = MirrorClient()
         assert client.max_attempts == MIRROR_MAX_ATTEMPTS
+
+    def test_default_min_request_interval_from_constants(self):
+        from gittensor.constants import MIRROR_MIN_REQUEST_INTERVAL_SECONDS
+
+        client = MirrorClient()
+        assert client._min_request_interval == MIRROR_MIN_REQUEST_INTERVAL_SECONDS
+
+
+# ============================================================================
+# Throttle behaviour
+# ============================================================================
+
+
+class TestThrottle:
+    def test_rapid_consecutive_calls_are_spaced(self):
+        """_throttle() sleeps when less than min_request_interval has elapsed."""
+        session = Mock()
+        client = _make_client(session, min_request_interval=0.05)
+
+        with patch('gittensor.utils.mirror.client.time') as mock_time:
+            mock_time.sleep = Mock()
+
+            # First throttle: 100s since epoch → no sleep; sets _last_request_at=100.0
+            mock_time.monotonic.return_value = 100.0
+            client._throttle()
+            mock_time.sleep.assert_not_called()
+            assert client._last_request_at == 100.0
+
+            # Second throttle: only 0.01s elapsed (< 0.05) → sleep for remaining 0.04s
+            mock_time.monotonic.return_value = 100.01
+            client._throttle()
+            mock_time.sleep.assert_called_once()
+            sleep_arg = mock_time.sleep.call_args[0][0]
+            assert abs(sleep_arg - 0.04) < 0.001
+
+    def test_zero_interval_never_sleeps(self):
+        """min_request_interval=0 disables throttling — no sleep between calls."""
+        session = Mock()
+        session.get.return_value = _ok(
+            {
+                'github_id': '1',
+                'since': '2026-03-15T00:00:00Z',
+                'generated_at': '2026-04-21T00:00:00Z',
+                'pull_requests': [],
+            }
+        )
+        client = _make_client(session, min_request_interval=0)
+
+        with patch('gittensor.utils.mirror.client.time') as mock_time:
+            mock_time.monotonic.return_value = 0.0
+            mock_time.sleep = Mock()
+            client.get_miner_pulls('1')
+            client.get_miner_pulls('1')
+            mock_time.sleep.assert_not_called()

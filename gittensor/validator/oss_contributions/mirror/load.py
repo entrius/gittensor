@@ -59,7 +59,11 @@ def load_mirror_miner_prs(
     try:
         response = client.get_miner_pulls(mirror_eval.github_id, since=lookback_date)
     except MirrorRequestError as e:
-        bt.logging.error(f'Mirror fetch failed for UID {mirror_eval.uid}: {e}')
+        bt.logging.error(
+            f'Mirror PR fetch failed for UID {mirror_eval.uid} '
+            f'(hotkey {mirror_eval.hotkey[:8]}): {e}. '
+            f'Mirror-enabled repo scores will be 0 this round for this miner.'
+        )
         mirror_eval.fetch_failed = True
         return
 

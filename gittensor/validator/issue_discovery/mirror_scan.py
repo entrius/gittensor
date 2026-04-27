@@ -150,7 +150,10 @@ async def run_mirror_issue_discovery(
         try:
             response = client.get_miner_issues(evaluation.github_id, since=lookback_date)
         except MirrorRequestError as e:
-            bt.logging.warning(f'├─ UID {uid}: mirror issue fetch failed ({e}) — skipped this miner')
+            bt.logging.error(
+                f'├─ UID {uid}: mirror issue fetch failed ({e}). '
+                f'Issue discovery score will be 0 for this miner this round.'
+            )
             fetch_errors += 1
             continue
 
@@ -189,6 +192,15 @@ async def run_mirror_issue_discovery(
         f'({cache_stats.misses - cache_stats.fetch_failures} fetched OK, '
         f'{cache_stats.fetch_failures} fetch failures)'
     )
+
+    if fetch_errors > 0:
+        total_eligible = processed + fetch_errors + no_issues
+        if total_eligible >= 5 and fetch_errors / total_eligible >= 0.5:
+            bt.logging.error(
+                f'High mirror issue-fetch failure rate: {fetch_errors}/{total_eligible} eligible miners '
+                f'failed ({fetch_errors / total_eligible:.0%}). Mirror service may be unavailable — '
+                f'issue discovery scores are 0 for all affected miners this round.'
+            )
 
 
 def _build_solving_pr_cache(

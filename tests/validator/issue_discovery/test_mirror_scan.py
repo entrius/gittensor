@@ -682,3 +682,63 @@ class TestOpenIssueSpamSourceIsMirror:
         # Below threshold → spam_mult=1.0 → discovery score is non-zero
         assert eval_.issue_discovery_score > 0
         assert eval_.total_open_issues == 2
+
+
+# ============================================================================
+# Aggregate outage detection
+# ============================================================================
+
+
+class TestAggregateOutageDetection:
+    """Verify that a high fetch-failure rate triggers an error-level outage alert."""
+
+    def _run_with_patched_bt(self, evals, side_effect):
+        from unittest.mock import patch
+
+        client = Mock()
+        client.get_miner_issues.side_effect = side_effect
+        with patch('gittensor.validator.issue_discovery.mirror_scan.bt') as mock_bt:
+            _run(
+                run_mirror_issue_discovery(
+                    evals,
+                    _mirror_repos('entrius/gittensor-ui'),
+                    _EMPTY_LANGS,
+                    _EMPTY_TOKEN_CONFIG,
+                    client=client,
+                )
+            )
+        return mock_bt.logging.error.call_args_list
+
+    def _outage_logged(self, calls):
+        return any('Mirror service may be unavailable' in c.args[0] for c in calls)
+
+    def test_total_failure_across_ten_miners_logs_outage(self):
+        evals = {i: _eval(uid=i, github_id=f'g{i}') for i in range(10)}
+        calls = self._run_with_patched_bt(evals, MirrorRequestError('service unavailable'))
+        assert self._outage_logged(calls)
+
+    def test_majority_failure_at_boundary_logs_outage(self):
+        # 5 fail, 5 succeed (exactly 50%) — threshold is >= 0.5 so this fires
+        def _side(github_id, since=None):
+            return MirrorRequestError('boom') if github_id < 'g5' else _response([])
+
+        evals = {i: _eval(uid=i, github_id=f'g{i}') for i in range(10)}
+        calls = self._run_with_patched_bt(evals, lambda gid, since=None: (_ for _ in ()).throw(MirrorRequestError('boom')) if gid < 'g5' else _response([]))
+        assert self._outage_logged(calls)
+
+    def test_low_failure_rate_does_not_log_outage(self):
+        # 2 out of 10 fail = 20% — below threshold
+        def _side(github_id, since=None):
+            if github_id in ('g0', 'g1'):
+                raise MirrorRequestError('boom')
+            return _response([])
+
+        evals = {i: _eval(uid=i, github_id=f'g{i}') for i in range(10)}
+        calls = self._run_with_patched_bt(evals, _side)
+        assert not self._outage_logged(calls)
+
+    def test_small_population_guard_suppresses_alert(self):
+        # Only 3 miners — total_eligible < 5 guard prevents false positive
+        evals = {i: _eval(uid=i, github_id=f'g{i}') for i in range(3)}
+        calls = self._run_with_patched_bt(evals, MirrorRequestError('boom'))
+        assert not self._outage_logged(calls)

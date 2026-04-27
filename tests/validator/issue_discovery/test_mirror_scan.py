@@ -723,7 +723,10 @@ class TestAggregateOutageDetection:
             return MirrorRequestError('boom') if github_id < 'g5' else _response([])
 
         evals = {i: _eval(uid=i, github_id=f'g{i}') for i in range(10)}
-        calls = self._run_with_patched_bt(evals, lambda gid, since=None: (_ for _ in ()).throw(MirrorRequestError('boom')) if gid < 'g5' else _response([]))
+        calls = self._run_with_patched_bt(
+            evals,
+            lambda gid, since=None: (_ for _ in ()).throw(MirrorRequestError('boom')) if gid < 'g5' else _response([]),
+        )
         assert self._outage_logged(calls)
 
     def test_low_failure_rate_does_not_log_outage(self):

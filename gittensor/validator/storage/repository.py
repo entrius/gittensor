@@ -117,6 +117,11 @@ class Repository(BaseRepository):
         Args:
             evaluation: The current MinerEvaluation being stored
         """
+        # Skip cleanup for penalized / pre-validation-failed evals — running it
+        # for a penalized eval whose github_id is preserved would tug stale rows
+        # between two duplicate-share UIDs, removing each other's records.
+        if evaluation.failed_reason is not None:
+            return
         if not evaluation.github_id or evaluation.github_id == '0':
             return
 

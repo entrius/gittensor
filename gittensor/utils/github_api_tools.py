@@ -42,7 +42,6 @@ QUERY = """
     query($userId: ID!, $limit: Int!, $cursor: String, $maxChangesRequestedReviews: Int!) {
       node(id: $userId) {
         ... on User {
-          issues(states: [OPEN]) { totalCount }
           pullRequests(first: $limit, states: [MERGED, OPEN, CLOSED], orderBy: {field: CREATED_AT, direction: DESC}, after: $cursor) {
             pageInfo {
               hasNextPage
@@ -951,10 +950,6 @@ def load_miners_prs(
                 bt.logging.warning('User not found or no pull requests')
                 miner_eval.github_pr_fetch_failed = True
                 break
-
-            # Extract open issue count from first page (User-level field, not paginated)
-            if cursor is None:
-                miner_eval.total_open_issues = user_data.get('issues', {}).get('totalCount', 0)
 
             pr_data: Dict = user_data.get('pullRequests', {})
             prs: List = pr_data.get('nodes', [])

@@ -11,6 +11,7 @@ dataclass so downstream math (``calculate_final_earned_score``,
 """
 
 from dataclasses import dataclass
+from datetime import datetime
 from math import prod
 from typing import List, Optional
 
@@ -69,6 +70,12 @@ class ScoredMirrorPR:
         """Alias for ``self.pr.repo_full_name`` — matches legacy PullRequest
         attribute name for duck-typing purposes."""
         return self.pr.repo_full_name
+
+    @property
+    def merged_at(self) -> Optional[datetime]:
+        """Alias for ``self.pr.merged_at`` — matches legacy PullRequest attribute
+        name so the unified pioneer-dividend walk treats both types identically."""
+        return self.pr.merged_at
 
     def is_pioneer_eligible(self) -> bool:
         """Pioneer-eligible iff merged AND meets the minimum token-score gate.

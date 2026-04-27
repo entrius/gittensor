@@ -160,10 +160,10 @@ async def run_mirror_issue_discovery(
             continue
 
         # Count this miner's currently-open issues across mirror-enabled repos
-        # (within the lookback window). Used as the spam-multiplier signal —
-        # we explicitly DON'T fall back to evaluation.total_open_issues because
-        # that field is set only by legacy's GraphQL load and would be 0 for
-        # any miner whose config is entirely mirror-enabled, defeating the gate.
+        # (within the lookback window). Used as the spam-multiplier signal and
+        # also written to evaluation.total_open_issues so the DB row reflects
+        # mirror-scoped state (the legacy GraphQL global open-issue count was
+        # never the right signal for the gate).
         open_issue_count = sum(1 for i in filtered if i.state == 'OPEN')
 
         processed += 1
@@ -333,6 +333,7 @@ def _score_miner_mirror_issues(
     evaluation.total_solved_issues = solved_count
     evaluation.total_valid_solved_issues = valid_solved_count
     evaluation.total_closed_issues = closed_count
+    evaluation.total_open_issues = open_issue_count
     evaluation.issue_token_score = round(issue_token_score, 2)
 
     is_eligible, credibility, reason = check_issue_eligibility(solved_count, valid_solved_count, closed_count)
@@ -347,9 +348,6 @@ def _score_miner_mirror_issues(
         )
         return
 
-    # Spam signal sourced from mirror's own data (open_issue_count above) —
-    # NOT evaluation.total_open_issues which only legacy's GraphQL load fills.
-    # An all-mirror miner would have total_open_issues=0 and never trip the gate.
     spam_mult = calculate_open_issue_spam_multiplier(open_issue_count, issue_token_score)
 
     total_discovery_score = 0.0

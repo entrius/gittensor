@@ -1,17 +1,18 @@
-"""Unit tests for calculate_mirror_pioneer_dividends.
+"""Unit tests for the unified ``calculate_pioneer_dividends`` exercising
+``mirror_merged_prs`` (ScoredMirrorPR shape).
 
-Parallels tests/validator/test_pioneer_dividend.py but walks mirror_merged_prs
-with ScoredMirrorPR shape.
+Parallels tests/validator/test_pioneer_dividend.py, which exercises the same
+function over legacy ``merged_pull_requests``.
 """
 
 import pytest
 
-scoring_module = pytest.importorskip('gittensor.validator.oss_contributions.mirror.scoring')
+pioneer_module = pytest.importorskip('gittensor.validator.oss_contributions.scoring')
 scored_pr_module = pytest.importorskip('gittensor.validator.oss_contributions.mirror.scored_pr')
 mirror_models = pytest.importorskip('gittensor.utils.mirror.models')
 classes = pytest.importorskip('gittensor.classes')
 
-calculate_mirror_pioneer_dividends = scoring_module.calculate_mirror_pioneer_dividends
+calculate_pioneer_dividends = pioneer_module.calculate_pioneer_dividends
 ScoredMirrorPR = scored_pr_module.ScoredMirrorPR
 MirrorPullRequest = mirror_models.MirrorPullRequest
 MinerEvaluation = classes.MinerEvaluation
@@ -74,7 +75,7 @@ class TestMirrorPioneer:
             1: _eval_with(1, [uid1_pr]),
             2: _eval_with(2, [uid2_pr]),
         }
-        calculate_mirror_pioneer_dividends(miner_evals)
+        calculate_pioneer_dividends(miner_evals)
 
         assert uid1_pr.pioneer_rank == 1
         assert uid2_pr.pioneer_rank == 2
@@ -86,7 +87,7 @@ class TestMirrorPioneer:
             1: _eval_with(1, [pioneer_pr]),
             2: _eval_with(2, [follower_pr]),
         }
-        calculate_mirror_pioneer_dividends(miner_evals)
+        calculate_pioneer_dividends(miner_evals)
 
         # Pioneer dividend is some positive value (rate varies by position)
         assert pioneer_pr.pioneer_dividend > 0
@@ -102,7 +103,7 @@ class TestMirrorPioneer:
             1: _eval_with(1, [low_score]),
             2: _eval_with(2, [high_score]),
         }
-        calculate_mirror_pioneer_dividends(miner_evals)
+        calculate_pioneer_dividends(miner_evals)
 
         # low_score didn't participate; high_score is the only/pioneer
         assert low_score.pioneer_rank == 0  # default, never touched
@@ -114,18 +115,18 @@ class TestMirrorPioneer:
         repo_b_uid1 = _scored(pr_number=2, repo='foo/b', merged_at='2026-04-20T00:00:00Z')
         miner_evals = {1: _eval_with(1, [repo_a_uid1, repo_b_uid1])}
 
-        calculate_mirror_pioneer_dividends(miner_evals)
+        calculate_pioneer_dividends(miner_evals)
 
         # Single miner on each repo — each is their own pioneer (rank 1)
         assert repo_a_uid1.pioneer_rank == 1
         assert repo_b_uid1.pioneer_rank == 1
 
     def test_empty_evaluations_no_crash(self):
-        calculate_mirror_pioneer_dividends({})  # should not raise
+        calculate_pioneer_dividends({})  # should not raise
 
     def test_no_pioneer_eligible_prs_no_dividend(self):
         pr = _scored(pr_number=1, token_score=0.0)
         miner_evals = {1: _eval_with(1, [pr])}
-        calculate_mirror_pioneer_dividends(miner_evals)
+        calculate_pioneer_dividends(miner_evals)
         assert pr.pioneer_dividend == 0.0
         assert pr.pioneer_rank == 0

@@ -3,16 +3,14 @@
 Mirror analogue of ``gittensor.validator.oss_contributions.scoring``. Scope:
 - Compute base_score for each PR via the existing token-scoring infra
 - Compute per-PR multipliers: repo_weight, time_decay, review_quality, label, issue
-- ``calculate_mirror_pioneer_dividends`` walks ``mirror_merged_prs`` across
-  miners with the same per-repo earliest-merged ranking as legacy
 - The eligibility gate (``_should_skip_merged_mirror_pr``) is exported and
   used at LOAD time by ``mirror.load._maybe_add_pr`` — rejected PRs never
   enter ``mirror_merged_prs`` (matches legacy ``should_skip_merged_pr`` flow)
 
 Cross-path concerns handled by ``finalize_miner_scores`` in the legacy
 scoring module, which walks both ``merged_pull_requests`` and
-``mirror_merged_prs``: spam_multiplier, credibility_multiplier, final
-earned_score composition, and base/earned/nodes aggregation.
+``mirror_merged_prs``: spam_multiplier, credibility_multiplier, pioneer
+dividends, final earned_score composition, and base/earned/nodes aggregation.
 
 Anti-gaming notes:
 - ``edited_after_merge`` is NOT a PR-level gate — it gates only the issue
@@ -24,16 +22,7 @@ Anti-gaming notes:
 
 import os
 from dataclasses import dataclass
-
-# Imported only for type hints / pioneer function signature. At runtime
-# calculate_mirror_pioneer_dividends reads miner_evaluations[uid].mirror_merged_prs.
-from typing import (
-    TYPE_CHECKING,  # noqa: E402
-    Dict,
-    List,
-    Optional,
-    Tuple,
-)
+from typing import Dict, List, Optional, Tuple
 
 import bittensor as bt
 
@@ -52,7 +41,7 @@ from gittensor.constants import (
 )
 from gittensor.utils.github_api_tools import FileContentPair, branch_matches_pattern
 from gittensor.utils.mirror.client import MirrorClient, MirrorRequestError
-from gittensor.utils.mirror.models import MirrorFile, MirrorLinkedIssue, MirrorPullRequest
+from gittensor.utils.mirror.models import MirrorLinkedIssue, MirrorPullRequest
 from gittensor.validator.oss_contributions.mirror.adapters import mirror_files_to_legacy
 from gittensor.validator.oss_contributions.mirror.evaluation import MirrorMinerEvaluation
 from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredMirrorPR
@@ -67,10 +56,6 @@ from gittensor.validator.utils.load_weights import (
     resolve_repo_weight,
 )
 from gittensor.validator.utils.tree_sitter_scoring import calculate_token_score_from_file_changes
-
-if TYPE_CHECKING:
-    from gittensor.classes import MinerEvaluation
-
 
 # ============================================================================
 # Entry point
@@ -147,7 +132,7 @@ def score_mirror_pr(
 
     # Fetch file contents via the mirror's lazy /pulls/.../files endpoint.
     try:
-        files = _fetch_pr_files(pr, client)
+        files = client.get_pr_files(pr.repo_full_name, pr.pr_number).files
     except MirrorRequestError as e:
         bt.logging.warning(f'Mirror file fetch failed for PR #{pr.pr_number}: {e}')
         return
@@ -233,16 +218,6 @@ def _should_skip_merged_mirror_pr(scored: ScoredMirrorPR, repo_config: Repositor
         )
 
     return False, None
-
-
-# ============================================================================
-# File adapter (MirrorFile → FileChange + FileContentPair)
-# ============================================================================
-
-
-def _fetch_pr_files(pr: MirrorPullRequest, client: MirrorClient) -> List[MirrorFile]:
-    response = client.get_pr_files(pr.repo_full_name, pr.pr_number)
-    return response.files
 
 
 # ============================================================================
@@ -421,6 +396,13 @@ def _resolve_maintainer_set_label(pr: MirrorPullRequest) -> Optional[str]:
 
 
 def _calculate_issue_multiplier(scored: ScoredMirrorPR) -> float:
+    """Mirror analogue of ``calculate_issue_multiplier`` in legacy scoring.py.
+
+    Kept separate (vs. unifying with the legacy version) because ``Issue`` and
+    ``MirrorLinkedIssue`` differ on attribute names and the underlying validators
+    apply different anti-gaming gates. See the legacy docstring for the full
+    rationale.
+    """
     pr = scored.pr
     if not pr.linked_issues:
         bt.logging.info(f'PR #{pr.pr_number} - Contains no linked issues')
@@ -507,86 +489,3 @@ def _is_valid_linked_issue(li: MirrorLinkedIssue, pr: MirrorPullRequest) -> bool
     return True
 
 
-# ============================================================================
-# Pioneer dividends (mirror-only analogue — legacy version can't walk
-# ScoredMirrorPR because attribute names differ: pr_number vs number,
-# repo_full_name vs repository_full_name).
-# ============================================================================
-
-
-def calculate_mirror_pioneer_dividends(miner_evaluations: Dict[int, 'MinerEvaluation']) -> None:
-    """Determine pioneers among mirror_merged_prs and set pioneer_rank + pioneer_dividend.
-
-    Same logic as legacy ``calculate_pioneer_dividends``, but walks each
-    MinerEvaluation's ``mirror_merged_prs`` list using ScoredMirrorPR's
-    attribute names. Mirror-enabled repos never overlap with legacy-path repos,
-    so each repo's pioneer is determined entirely within one path.
-
-    Must be called AFTER all earned_scores have been computed on mirror PRs.
-    """
-
-    from gittensor.constants import (
-        PIONEER_DIVIDEND_MAX_RATIO,
-        PIONEER_DIVIDEND_RATE_1ST,
-        PIONEER_DIVIDEND_RATE_2ND,
-        PIONEER_DIVIDEND_RATE_REST,
-    )
-
-    pr_index: Dict[str, Dict[int, list]] = {}
-    repo_contributions: Dict[str, Dict[int, tuple]] = {}
-
-    for evaluation in miner_evaluations.values():
-        for scored in evaluation.mirror_merged_prs:
-            if not scored.is_pioneer_eligible():
-                continue
-            assert scored.pr.merged_at is not None
-            repo = scored.pr.repo_full_name
-            uid = evaluation.uid
-            pr_index.setdefault(repo, {}).setdefault(uid, []).append(scored)
-
-            current = repo_contributions.setdefault(repo, {}).get(uid)
-            if current is None:
-                repo_contributions[repo][uid] = (scored.pr.merged_at, scored.pr.pr_number, scored.earned_score)
-            else:
-                earliest_at, earliest_num, total_score = current
-                new_total = total_score + scored.earned_score
-                if scored.pr.merged_at < earliest_at or (
-                    scored.pr.merged_at == earliest_at and scored.pr.pr_number < earliest_num
-                ):
-                    repo_contributions[repo][uid] = (scored.pr.merged_at, scored.pr.pr_number, new_total)
-                else:
-                    repo_contributions[repo][uid] = (earliest_at, earliest_num, new_total)
-
-    for repo, uid_entries in repo_contributions.items():
-        sorted_uids = sorted(uid_entries.items(), key=lambda x: (x[1][0], x[1][1]))
-
-        for rank_pos, (uid, _) in enumerate(sorted_uids):
-            for scored in pr_index[repo][uid]:
-                scored.pioneer_rank = rank_pos + 1
-
-        dividend = 0.0
-        for pos, (_, entry) in enumerate(sorted_uids[1:]):
-            follower_earned = entry[2]
-            if pos == 0:
-                dividend += follower_earned * PIONEER_DIVIDEND_RATE_1ST
-            elif pos == 1:
-                dividend += follower_earned * PIONEER_DIVIDEND_RATE_2ND
-            else:
-                dividend += follower_earned * PIONEER_DIVIDEND_RATE_REST
-
-        if dividend <= 0:
-            continue
-
-        pioneer_uid = sorted_uids[0][0]
-        pioneer_pr_number = sorted_uids[0][1][1]
-        pioneer_scored = next(s for s in pr_index[repo][pioneer_uid] if s.pr.pr_number == pioneer_pr_number)
-        max_dividend = pioneer_scored.earned_score * PIONEER_DIVIDEND_MAX_RATIO
-        capped = min(dividend, max_dividend)
-        pioneer_scored.pioneer_dividend = round(capped, 2)
-        pioneer_scored.earned_score = round(pioneer_scored.earned_score + pioneer_scored.pioneer_dividend, 2)
-
-        cap_note = f' (capped from {dividend:.2f})' if capped < dividend else ''
-        bt.logging.info(
-            f'Mirror pioneer dividend | repo={repo} pioneer=uid {pioneer_uid} '
-            f'followers={len(sorted_uids) - 1} dividend={capped:.2f}{cap_note}'
-        )

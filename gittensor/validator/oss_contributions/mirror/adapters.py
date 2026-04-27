@@ -20,6 +20,7 @@ from typing import Dict, List, Optional, Tuple
 from gittensor.classes import FileChange, Issue, PRState, PullRequest
 from gittensor.utils.github_api_tools import FileContentPair
 from gittensor.utils.mirror.models import MirrorFile, MirrorLinkedIssue
+from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredMirrorPR
 
 
 def mirror_files_to_legacy(
@@ -81,7 +82,7 @@ def mirror_linked_issue_to_legacy_issue(li: MirrorLinkedIssue, pr_number: int, r
 
 
 def mirror_scored_pr_to_legacy_pull_request(
-    scored,
+    scored: ScoredMirrorPR,
     uid: int,
     hotkey: str,
     github_id: Optional[str],
@@ -105,10 +106,6 @@ def mirror_scored_pr_to_legacy_pull_request(
     ``file_changes`` and ``issues`` are left as None on the resulting PullRequest
     — those are written to the DB through ``get_all_file_changes`` / ``get_all_issues``
     which already adapt mirror data via the other helpers above.
-
-    Type-annotated as ``scored`` only because importing ``ScoredMirrorPR`` from
-    here creates a circular import (scoring.py imports adapters.py for
-    mirror_files_to_legacy). Caller is expected to pass a ScoredMirrorPR.
     """
     pr = scored.pr
     return PullRequest(

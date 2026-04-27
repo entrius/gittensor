@@ -43,8 +43,8 @@ async def forward(self: 'Validator') -> None:
 
     Performs the core validation cycle every VALIDATOR_STEPS_INTERVAL steps:
     1. Score OSS contributions (PR scoring — mirror path + legacy PAT path)
-    2. Run issue bounties verification
-    3. Score issue discovery (mirror-only; non-mirror repos skip)
+    2. Score issue discovery (mirror-only; non-mirror repos skip)
+    3. Run issue bounties verification
     4. Store all evaluations to DB
     5. Blend emission pools and update scores
 
@@ -66,13 +66,13 @@ async def forward(self: 'Validator') -> None:
             self, miner_uids, master_repositories, programming_languages, token_config
         )
 
-        # 2. Issue bounties verification
-        await issue_competitions(self, miner_evaluations)
-
-        # 3. Score issue discovery
+        # 2. Score issue discovery
         issue_rewards = await issue_discovery(
             miner_evaluations, master_repositories, programming_languages, token_config, miner_uids
         )
+
+        # 3. Issue bounties verification
+        await issue_competitions(self, miner_evaluations)
 
         # 4. Store all evaluations to DB (includes issue discovery fields)
         await self.bulk_store_evaluation(miner_evaluations, skip_uids=cached_uids)

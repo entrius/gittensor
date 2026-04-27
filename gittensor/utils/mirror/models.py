@@ -13,11 +13,10 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import List, Optional
 
-from gittensor.validator.utils.datetime_utils import parse_github_iso_to_utc
-
-
-def _parse_dt(value: Optional[str]) -> Optional[datetime]:
-    return parse_github_iso_to_utc(value) if value else None
+from gittensor.validator.utils.datetime_utils import (
+    parse_github_iso_to_utc,
+    parse_optional_github_iso_to_utc,
+)
 
 
 @dataclass
@@ -84,16 +83,20 @@ class MirrorLinkedIssue:
 
     @classmethod
     def from_dict(cls, data: dict) -> 'MirrorLinkedIssue':
+        # Mirror sometimes serializes github_id as int; coerce to match the
+        # str-typed field so downstream `==` comparisons with author_github_id
+        # from MirrorPullRequest don't silently mismatch on type.
+        author_github_id = data.get('author_github_id')
         return cls(
             number=data['number'],
             title=data.get('title', ''),
             state=data['state'],
             state_reason=data.get('state_reason'),
-            author_github_id=data.get('author_github_id'),
+            author_github_id=str(author_github_id) if author_github_id is not None else None,
             author_association=data.get('author_association'),
-            created_at=_parse_dt(data.get('created_at')),
-            closed_at=_parse_dt(data.get('closed_at')),
-            updated_at=_parse_dt(data.get('updated_at')),
+            created_at=parse_optional_github_iso_to_utc(data.get('created_at')),
+            closed_at=parse_optional_github_iso_to_utc(data.get('closed_at')),
+            updated_at=parse_optional_github_iso_to_utc(data.get('updated_at')),
             is_transferred=bool(data.get('is_transferred', False)),
             solved_by_pr=data.get('solved_by_pr'),
             labels=[MirrorLabel.from_dict(label) for label in data.get('labels') or []],
@@ -151,9 +154,9 @@ class MirrorPullRequest:
             author_login=data.get('author_login', ''),
             author_association=data.get('author_association'),
             created_at=parse_github_iso_to_utc(data['created_at']),
-            closed_at=_parse_dt(data.get('closed_at')),
-            merged_at=_parse_dt(data.get('merged_at')),
-            last_edited_at=_parse_dt(data.get('last_edited_at')),
+            closed_at=parse_optional_github_iso_to_utc(data.get('closed_at')),
+            merged_at=parse_optional_github_iso_to_utc(data.get('merged_at')),
+            last_edited_at=parse_optional_github_iso_to_utc(data.get('last_edited_at')),
             edited_after_merge=bool(data.get('edited_after_merge', False)),
             hours_since_merge=data.get('hours_since_merge'),
             merged_by_login=data.get('merged_by_login'),
@@ -200,7 +203,7 @@ class MirrorSolvingPR:
             pr_number=data['pr_number'],
             author_github_id=str(data['author_github_id']),
             state=data['state'],
-            merged_at=_parse_dt(data.get('merged_at')),
+            merged_at=parse_optional_github_iso_to_utc(data.get('merged_at')),
             hours_since_merge=data.get('hours_since_merge'),
             edited_after_merge=bool(data.get('edited_after_merge', False)),
             head_sha=data.get('head_sha'),
@@ -240,19 +243,20 @@ class MirrorIssue:
     @classmethod
     def from_dict(cls, data: dict) -> 'MirrorIssue':
         solving_pr_raw = data.get('solving_pr')
+        author_github_id = data.get('author_github_id')
         return cls(
             repo_full_name=data['repo_full_name'],
             issue_number=data['issue_number'],
             title=data.get('title', ''),
             state=data['state'],
             state_reason=data.get('state_reason'),
-            author_github_id=_maybe_str(data.get('author_github_id')),
+            author_github_id=str(author_github_id) if author_github_id is not None else None,
             author_login=data.get('author_login'),
             author_association=data.get('author_association'),
-            created_at=_parse_dt(data.get('created_at')),
-            closed_at=_parse_dt(data.get('closed_at')),
-            updated_at=_parse_dt(data.get('updated_at')),
-            last_edited_at=_parse_dt(data.get('last_edited_at')),
+            created_at=parse_optional_github_iso_to_utc(data.get('created_at')),
+            closed_at=parse_optional_github_iso_to_utc(data.get('closed_at')),
+            updated_at=parse_optional_github_iso_to_utc(data.get('updated_at')),
+            last_edited_at=parse_optional_github_iso_to_utc(data.get('last_edited_at')),
             is_transferred=bool(data.get('is_transferred', False)),
             solved_by_pr=data.get('solved_by_pr'),
             labels=[MirrorLabel.from_dict(label) for label in data.get('labels') or []],
@@ -307,8 +311,8 @@ class MirrorPullRequestsResponse:
     def from_dict(cls, data: dict) -> 'MirrorPullRequestsResponse':
         return cls(
             github_id=str(data['github_id']),
-            since=_parse_dt(data.get('since')),
-            generated_at=_parse_dt(data.get('generated_at')),
+            since=parse_optional_github_iso_to_utc(data.get('since')),
+            generated_at=parse_optional_github_iso_to_utc(data.get('generated_at')),
             pull_requests=[MirrorPullRequest.from_dict(pr) for pr in data.get('pull_requests') or []],
         )
 
@@ -326,8 +330,8 @@ class MirrorIssuesResponse:
     def from_dict(cls, data: dict) -> 'MirrorIssuesResponse':
         return cls(
             github_id=str(data['github_id']),
-            since=_parse_dt(data.get('since')),
-            generated_at=_parse_dt(data.get('generated_at')),
+            since=parse_optional_github_iso_to_utc(data.get('since')),
+            generated_at=parse_optional_github_iso_to_utc(data.get('generated_at')),
             issues=[MirrorIssue.from_dict(issue) for issue in data.get('issues') or []],
         )
 
@@ -357,5 +361,3 @@ class MirrorPullRequestFilesResponse:
         )
 
 
-def _maybe_str(value) -> Optional[str]:
-    return str(value) if value is not None else None

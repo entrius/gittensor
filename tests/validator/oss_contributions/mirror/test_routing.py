@@ -68,10 +68,12 @@ def test_partitions_and_calls_both_paths():
         mock_legacy_load.assert_called_once()
         legacy_repos_passed = mock_legacy_load.call_args.args[1]
         assert set(legacy_repos_passed.keys()) == {'other/legacy-repo', 'third/legacy-repo'}
+        mock_legacy_score.assert_called_once()
 
         mock_mirror_load.assert_called_once()
         mirror_repos_passed = mock_mirror_load.call_args.args[1]
         assert set(mirror_repos_passed.keys()) == {'entrius/gittensor-ui', 'entrius/allways'}
+        mock_mirror_score.assert_called_once()
 
         mock_combine.assert_called_once()
         assert result.github_pat is None

@@ -74,7 +74,7 @@ Any PR that changes CLI output (new commands, altered output shape, changed form
 
 This applies to any `gittensor/cli/**` change that affects what the user sees. Non-output-affecting CLI changes (internal refactors, argument parsing that doesn't surface in output, type annotations) are exempt.
 
-PRs missing this evidence will be returned for updates before review.
+PRs missing this evidence may be closed without review, or returned for updates at the maintainers' discretion.
 
 ### 3. Submit Pull Request
 

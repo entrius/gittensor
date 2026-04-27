@@ -487,5 +487,3 @@ def _is_valid_linked_issue(li: MirrorLinkedIssue, pr: MirrorPullRequest) -> bool
                 return False
 
     return True
-
-

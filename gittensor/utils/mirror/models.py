@@ -359,5 +359,3 @@ class MirrorPullRequestFilesResponse:
             scoring_data_stored=bool(data.get('scoring_data_stored', False)),
             files=[MirrorFile.from_dict(f) for f in data.get('files') or []],
         )
-
-

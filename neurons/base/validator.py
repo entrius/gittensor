@@ -288,19 +288,29 @@ class BaseValidatorNeuron(BaseNeuron):
             return
 
         bt.logging.info('Metagraph updated, re-syncing hotkeys, dendrite pool and moving averages')
-        # Zero out all hotkeys that have been replaced.
-        for uid, hotkey in enumerate(self.hotkeys):
-            if hotkey != self.metagraph.hotkeys[uid]:
+        # Zero out all hotkeys that have been replaced. Cap iteration at the
+        # shorter of old/new — on shrinkage self.metagraph.hotkeys is smaller
+        # than self.hotkeys and indexing past its end would IndexError.
+        shared_len = min(len(self.hotkeys), len(self.metagraph.hotkeys))
+        for uid in range(shared_len):
+            if self.hotkeys[uid] != self.metagraph.hotkeys[uid]:
                 self.scores[uid] = 0  # hotkey has been replaced
 
-        # Check to see if the metagraph has changed size.
-        # If so, we need to add new hotkeys and moving averages.
+        # Resize the moving-average score array symmetrically — both grow and
+        # shrink. Shrinkage is rare (chain reset, governance UID removal,
+        # stale subtensor) but leaves self.scores stuck at the old length and
+        # the validator unable to set weights until restart.
         if len(self.hotkeys) < len(self.metagraph.hotkeys):
             # Update the size of the moving average scores.
             new_moving_average = np.zeros((self.metagraph.n))
             min_len = min(len(self.hotkeys), len(self.scores))
             new_moving_average[:min_len] = self.scores[:min_len]
             self.scores = new_moving_average
+        elif len(self.hotkeys) > len(self.metagraph.hotkeys):
+            # .copy() so downstream in-place mutations on self.scores don't
+            # alias the larger original buffer through a numpy view.
+            self.scores = self.scores[: self.metagraph.n].copy()
+            bt.logging.info(f'Metagraph shrank from {len(self.hotkeys)} to {self.metagraph.n}; truncated scores')
 
         # Update the hotkeys.
         self.hotkeys = copy.deepcopy(self.metagraph.hotkeys)

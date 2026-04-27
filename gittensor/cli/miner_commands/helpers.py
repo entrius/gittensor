@@ -40,7 +40,14 @@ def _load_config_value(key: str):
     try:
         config = json.loads(config_file.read_text())
         return config.get(key)
-    except (json.JSONDecodeError, OSError):
+    except json.JSONDecodeError as e:
+        console.print(
+            f'\n[red]✗ Config file at {config_file} is not valid JSON ({e}). '
+            f'Inspect or remove the file before re-running. '
+            f'Refusing to fall through to defaults to avoid silently retargeting the wrong network/contract.[/red]\n'
+        )
+        sys.exit(1)
+    except OSError:
         return None
 
 

@@ -976,6 +976,59 @@ class TestCliRuntimeExceptions:
         assert 'boom-harvest' in result.output
 
 
+class TestLoadConfigCorruption:
+    """C7 — load_config must not silently fall through to defaults on corrupt JSON.
+
+    A silent {} return retargets every CLI command at finney mainnet + the hardcoded
+    contract address; operators running validator/admin commands non-interactively
+    (e.g. `gitt vote solution`) can miss the panel showing the resolved network.
+    """
+
+    def test_load_config_aborts_on_invalid_json(self, tmp_path, monkeypatch):
+        from gittensor.cli.issue_commands import helpers as issue_helpers
+
+        bad_config = tmp_path / 'config.json'
+        bad_config.write_text('{ "network": "test"')  # truncated, not valid JSON
+
+        monkeypatch.setattr(issue_helpers, 'CONFIG_FILE', bad_config)
+
+        with pytest.raises(SystemExit) as exc_info:
+            issue_helpers.load_config()
+        assert exc_info.value.code == 1
+
+    def test_load_config_returns_empty_when_file_missing(self, tmp_path, monkeypatch):
+        from gittensor.cli.issue_commands import helpers as issue_helpers
+
+        missing = tmp_path / 'does_not_exist.json'
+        monkeypatch.setattr(issue_helpers, 'CONFIG_FILE', missing)
+
+        assert issue_helpers.load_config() == {}
+
+    def test_load_config_returns_parsed_dict_when_valid(self, tmp_path, monkeypatch):
+        from gittensor.cli.issue_commands import helpers as issue_helpers
+
+        good = tmp_path / 'config.json'
+        good.write_text(json.dumps({'network': 'test', 'wallet': 'alice'}))
+
+        monkeypatch.setattr(issue_helpers, 'CONFIG_FILE', good)
+
+        assert issue_helpers.load_config() == {'network': 'test', 'wallet': 'alice'}
+
+    def test_miner_load_config_value_aborts_on_invalid_json(self, tmp_path, monkeypatch):
+        from gittensor.cli.miner_commands import helpers as miner_helpers
+
+        fake_home = tmp_path
+        config_dir = fake_home / '.gittensor'
+        config_dir.mkdir()
+        (config_dir / 'config.json').write_text('not json')
+
+        monkeypatch.setattr(miner_helpers.Path, 'home', staticmethod(lambda: fake_home))
+
+        with pytest.raises(SystemExit) as exc_info:
+            miner_helpers._load_config_value('network')
+        assert exc_info.value.code == 1
+
+
 class TestEmitJson:
     @pytest.mark.parametrize(
         'value',

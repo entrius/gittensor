@@ -599,7 +599,14 @@ def load_config() -> Dict[str, Any]:
         try:
             with open(CONFIG_FILE, 'r') as f:
                 return json.load(f)
-        except (json.JSONDecodeError, IOError):
+        except json.JSONDecodeError as e:
+            print_error(
+                f'Config file at {CONFIG_FILE} is not valid JSON ({e}). '
+                f'Inspect or remove the file before re-running. '
+                f'Refusing to fall through to defaults to avoid silently retargeting the wrong network/contract.'
+            )
+            raise SystemExit(1)
+        except IOError:
             pass
     return {}
 

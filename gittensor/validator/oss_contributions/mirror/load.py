@@ -44,7 +44,6 @@ def load_mirror_miner_prs(
     """
 
     bt.logging.info('*****Fetching PRs from mirror*****')
-    mirror_eval.fetch_failed = False
 
     if not mirror_eval.github_id:
         bt.logging.warning(f'UID {mirror_eval.uid} has no github_id, skipping mirror fetch')

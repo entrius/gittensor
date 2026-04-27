@@ -110,7 +110,6 @@ class TestCombinePopulated:
             'entrius/gittensor-ui',
             'entrius/allways',
         }
-        assert result.unique_repos_count == 3
 
     def test_aggregate_pr_count_properties_sum_both_paths(self):
         legacy, mirror_eval = self._setup()

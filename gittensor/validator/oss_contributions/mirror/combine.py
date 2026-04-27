@@ -27,7 +27,6 @@ def combine(legacy_eval: MinerEvaluation, mirror_eval: MirrorMinerEvaluation) ->
     legacy_eval.mirror_closed_prs = mirror_eval.closed_prs
 
     legacy_eval.unique_repos_contributed_to |= mirror_eval.unique_repos_contributed_to
-    legacy_eval.unique_repos_count = len(legacy_eval.unique_repos_contributed_to)
 
     legacy_eval.github_pr_fetch_failed = legacy_eval.github_pr_fetch_failed or mirror_eval.fetch_failed
 

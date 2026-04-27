@@ -327,9 +327,7 @@ class MirrorPullRequestsResponse:
                 pull_requests.append(MirrorPullRequest.from_dict(raw))
             except Exception as e:
                 identifier = (
-                    f'{raw.get("repo_full_name", "?")}#{raw.get("pr_number", "?")}'
-                    if isinstance(raw, dict)
-                    else '?'
+                    f'{raw.get("repo_full_name", "?")}#{raw.get("pr_number", "?")}' if isinstance(raw, dict) else '?'
                 )
                 bt.logging.warning(f'Skipping malformed mirror PR {identifier}: {e}')
         return cls(
@@ -357,9 +355,7 @@ class MirrorIssuesResponse:
                 issues.append(MirrorIssue.from_dict(raw))
             except Exception as e:
                 identifier = (
-                    f'{raw.get("repo_full_name", "?")}#{raw.get("issue_number", "?")}'
-                    if isinstance(raw, dict)
-                    else '?'
+                    f'{raw.get("repo_full_name", "?")}#{raw.get("issue_number", "?")}' if isinstance(raw, dict) else '?'
                 )
                 bt.logging.warning(f'Skipping malformed mirror issue {identifier}: {e}')
         return cls(

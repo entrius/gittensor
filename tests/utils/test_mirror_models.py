@@ -12,6 +12,7 @@ Covers from_dict parsing for each response dataclass:
 """
 
 from datetime import datetime, timezone
+from unittest.mock import patch
 
 import pytest
 
@@ -225,6 +226,17 @@ class TestMirrorReviewSummary:
         rs = MirrorReviewSummary.from_dict({})
         assert rs.maintainer_changes_requested_count == 0
         assert rs.changes_requested_count == 0
+
+    @patch('gittensor.utils.mirror.models.bt.logging')
+    def test_warns_when_maintainer_changes_requested_count_absent(self, mock_logging):
+        MirrorReviewSummary.from_dict({'changes_requested_count': 1})
+        mock_logging.warning.assert_called_once()
+        assert 'maintainer_changes_requested_count' in mock_logging.warning.call_args[0][0]
+
+    @patch('gittensor.utils.mirror.models.bt.logging')
+    def test_no_warn_when_field_present_even_if_zero(self, mock_logging):
+        MirrorReviewSummary.from_dict({'maintainer_changes_requested_count': 0})
+        mock_logging.warning.assert_not_called()
 
 
 # ============================================================================
@@ -456,6 +468,20 @@ class TestMirrorPullRequestsResponse:
         resp = MirrorPullRequestsResponse.from_dict(payload)
         assert resp.pull_requests == []
 
+    @patch('gittensor.utils.mirror.models.bt.logging')
+    def test_malformed_pr_skipped_others_parsed(self, mock_logging, pull_request_dict):
+        bad = {'pr_number': 999}  # missing required keys
+        payload = {
+            'github_id': '218712309',
+            'since': '2026-03-15T00:00:00Z',
+            'generated_at': '2026-04-21T15:00:00Z',
+            'pull_requests': [bad, pull_request_dict],
+        }
+        resp = MirrorPullRequestsResponse.from_dict(payload)
+        assert len(resp.pull_requests) == 1
+        assert resp.pull_requests[0].pr_number == 518
+        mock_logging.warning.assert_called()
+
 
 class TestMirrorIssuesResponse:
     def test_parses_response_envelope(self, issue_dict):
@@ -469,6 +495,20 @@ class TestMirrorIssuesResponse:
         assert resp.github_id == '170233626'
         assert len(resp.issues) == 1
         assert resp.issues[0].issue_number == 487
+
+    @patch('gittensor.utils.mirror.models.bt.logging')
+    def test_malformed_issue_skipped_others_parsed(self, mock_logging, issue_dict):
+        bad = {'issue_number': 1}  # missing required keys
+        payload = {
+            'github_id': '170233626',
+            'since': '2026-03-15T00:00:00Z',
+            'generated_at': '2026-04-21T15:00:00Z',
+            'issues': [bad, issue_dict],
+        }
+        resp = MirrorIssuesResponse.from_dict(payload)
+        assert len(resp.issues) == 1
+        assert resp.issues[0].issue_number == 487
+        mock_logging.warning.assert_called()
 
 
 class TestMirrorPullRequestFilesResponse:
@@ -513,3 +553,20 @@ class TestMirrorPullRequestFilesResponse:
         }
         resp = MirrorPullRequestFilesResponse.from_dict(payload)
         assert resp.repo_full_name == 'entrius/allways'
+
+    @patch('gittensor.utils.mirror.models.bt.logging')
+    def test_malformed_file_skipped_others_parsed(self, mock_logging, file_dict):
+        bad = {'previous_filename': None}  # missing required keys
+        payload = {
+            'repo_full_name': 'entrius/gittensor-ui',
+            'pr_number': 518,
+            'head_sha': 'h',
+            'base_sha': 'b',
+            'merge_base_sha': 'mb',
+            'scoring_data_stored': True,
+            'files': [bad, file_dict],
+        }
+        resp = MirrorPullRequestFilesResponse.from_dict(payload)
+        assert len(resp.files) == 1
+        assert resp.files[0].filename == 'src/components/MinerCard.tsx'
+        mock_logging.warning.assert_called()

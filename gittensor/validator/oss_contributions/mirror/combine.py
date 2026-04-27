@@ -10,17 +10,16 @@ collateral_score) live on each ScoredMirrorPR — they get aggregated into
 MinerEvaluation totals by ``finalize_miner_scores`` walking both paths' lists,
 not at combine time.
 
-Returning the same `MinerEvaluation` (mutated in place) keeps downstream
-signatures unchanged. On delete-day this whole module goes away — at that
-point `MirrorMinerEvaluation` becomes the canonical container.
+Mutates legacy_eval in place. On delete-day this whole module goes away — at
+that point `MirrorMinerEvaluation` becomes the canonical container.
 """
 
 from gittensor.classes import MinerEvaluation
 from gittensor.validator.oss_contributions.mirror.evaluation import MirrorMinerEvaluation
 
 
-def combine(legacy_eval: MinerEvaluation, mirror_eval: MirrorMinerEvaluation) -> MinerEvaluation:
-    """Roll mirror_eval into legacy_eval, returning the merged MinerEvaluation."""
+def combine(legacy_eval: MinerEvaluation, mirror_eval: MirrorMinerEvaluation) -> None:
+    """Roll mirror_eval into legacy_eval. Mutates legacy_eval in place."""
 
     legacy_eval.mirror_merged_prs = mirror_eval.merged_prs
     legacy_eval.mirror_open_prs = mirror_eval.open_prs
@@ -29,5 +28,3 @@ def combine(legacy_eval: MinerEvaluation, mirror_eval: MirrorMinerEvaluation) ->
     legacy_eval.unique_repos_contributed_to |= mirror_eval.unique_repos_contributed_to
 
     legacy_eval.github_pr_fetch_failed = legacy_eval.github_pr_fetch_failed or mirror_eval.fetch_failed
-
-    return legacy_eval

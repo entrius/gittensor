@@ -62,11 +62,10 @@ class TestCombineEmpty:
     def test_combine_empty_eval_does_not_change_legacy(self):
         legacy = MinerEvaluation(uid=1, hotkey='hk')
         mirror_eval = MirrorMinerEvaluation(uid=1, hotkey='hk')
-        result = combine(legacy, mirror_eval)
-        assert result is legacy
-        assert result.mirror_merged_prs == []
-        assert result.total_token_score == 0.0
-        assert result.unique_repos_count == 0
+        assert combine(legacy, mirror_eval) is None
+        assert legacy.mirror_merged_prs == []
+        assert legacy.total_token_score == 0.0
+        assert legacy.unique_repos_count == 0
 
 
 class TestCombinePopulated:
@@ -87,25 +86,25 @@ class TestCombinePopulated:
 
     def test_lists_transferred_to_mirror_slots(self):
         legacy, mirror_eval = self._setup()
-        result = combine(legacy, mirror_eval)
-        assert result.mirror_merged_prs is mirror_eval.merged_prs
-        assert result.mirror_open_prs is mirror_eval.open_prs
-        assert result.mirror_closed_prs is mirror_eval.closed_prs
+        combine(legacy, mirror_eval)
+        assert legacy.mirror_merged_prs is mirror_eval.merged_prs
+        assert legacy.mirror_open_prs is mirror_eval.open_prs
+        assert legacy.mirror_closed_prs is mirror_eval.closed_prs
 
     def test_counters_left_alone(self):
         """combine() does NOT touch token/nodes/collateral counters — those
         are aggregated from per-PR fields by finalize_miner_scores."""
         legacy, mirror_eval = self._setup()
-        result = combine(legacy, mirror_eval)
+        combine(legacy, mirror_eval)
         # Legacy values pre-combine should pass through unchanged
-        assert result.total_token_score == 100.0
-        assert result.total_nodes_scored == 50
-        assert result.total_collateral_score == 5.0
+        assert legacy.total_token_score == 100.0
+        assert legacy.total_nodes_scored == 50
+        assert legacy.total_collateral_score == 5.0
 
     def test_unique_repos_unioned(self):
         legacy, mirror_eval = self._setup()
-        result = combine(legacy, mirror_eval)
-        assert result.unique_repos_contributed_to == {
+        combine(legacy, mirror_eval)
+        assert legacy.unique_repos_contributed_to == {
             'foo/legacy-repo',
             'entrius/gittensor-ui',
             'entrius/allways',
@@ -118,13 +117,13 @@ class TestCombinePopulated:
         legacy.merged_pull_requests = ['legacy_pr_1', 'legacy_pr_2']  # placeholder objects fine for len()
         legacy.open_pull_requests = ['legacy_open_1']
 
-        result = combine(legacy, mirror_eval)
+        combine(legacy, mirror_eval)
         # total_merged: 2 legacy + 2 mirror = 4
-        assert result.total_merged_prs == 4
+        assert legacy.total_merged_prs == 4
         # total_open: 1 legacy + 1 mirror = 2
-        assert result.total_open_prs == 2
+        assert legacy.total_open_prs == 2
         # total_closed: 0 legacy + 1 mirror = 1
-        assert result.total_closed_prs == 1
+        assert legacy.total_closed_prs == 1
 
 
 class TestCombineFetchFailed:
@@ -132,24 +131,24 @@ class TestCombineFetchFailed:
         legacy = MinerEvaluation(uid=1, hotkey='hk')
         legacy.github_pr_fetch_failed = True
         mirror_eval = MirrorMinerEvaluation(uid=1, hotkey='hk')
-        result = combine(legacy, mirror_eval)
-        assert result.github_pr_fetch_failed is True
+        combine(legacy, mirror_eval)
+        assert legacy.github_pr_fetch_failed is True
 
     def test_mirror_failed_only(self):
         legacy = MinerEvaluation(uid=1, hotkey='hk')
         mirror_eval = MirrorMinerEvaluation(uid=1, hotkey='hk', fetch_failed=True)
-        result = combine(legacy, mirror_eval)
-        assert result.github_pr_fetch_failed is True
+        combine(legacy, mirror_eval)
+        assert legacy.github_pr_fetch_failed is True
 
     def test_both_failed(self):
         legacy = MinerEvaluation(uid=1, hotkey='hk')
         legacy.github_pr_fetch_failed = True
         mirror_eval = MirrorMinerEvaluation(uid=1, hotkey='hk', fetch_failed=True)
-        result = combine(legacy, mirror_eval)
-        assert result.github_pr_fetch_failed is True
+        combine(legacy, mirror_eval)
+        assert legacy.github_pr_fetch_failed is True
 
     def test_neither_failed(self):
         legacy = MinerEvaluation(uid=1, hotkey='hk')
         mirror_eval = MirrorMinerEvaluation(uid=1, hotkey='hk')
-        result = combine(legacy, mirror_eval)
-        assert result.github_pr_fetch_failed is False
+        combine(legacy, mirror_eval)
+        assert legacy.github_pr_fetch_failed is False

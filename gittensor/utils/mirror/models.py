@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import List, Optional
 
+import bittensor as bt
+
 from gittensor.validator.utils.datetime_utils import (
     parse_github_iso_to_utc,
     parse_optional_github_iso_to_utc,
@@ -56,6 +58,11 @@ class MirrorReviewSummary:
 
     @classmethod
     def from_dict(cls, data: dict) -> 'MirrorReviewSummary':
+        if 'maintainer_changes_requested_count' not in data:
+            bt.logging.warning(
+                'MirrorReviewSummary missing maintainer_changes_requested_count — '
+                'defaulting to 0 (review penalty/clean-bonus may be miscalculated)'
+            )
         return cls(
             maintainer_changes_requested_count=data.get('maintainer_changes_requested_count', 0),
             changes_requested_count=data.get('changes_requested_count', 0),
@@ -314,11 +321,22 @@ class MirrorPullRequestsResponse:
 
     @classmethod
     def from_dict(cls, data: dict) -> 'MirrorPullRequestsResponse':
+        pull_requests: List[MirrorPullRequest] = []
+        for raw in data.get('pull_requests') or []:
+            try:
+                pull_requests.append(MirrorPullRequest.from_dict(raw))
+            except Exception as e:
+                identifier = (
+                    f'{raw.get("repo_full_name", "?")}#{raw.get("pr_number", "?")}'
+                    if isinstance(raw, dict)
+                    else '?'
+                )
+                bt.logging.warning(f'Skipping malformed mirror PR {identifier}: {e}')
         return cls(
             github_id=str(data['github_id']),
             since=parse_optional_github_iso_to_utc(data.get('since')),
             generated_at=parse_optional_github_iso_to_utc(data.get('generated_at')),
-            pull_requests=[MirrorPullRequest.from_dict(pr) for pr in data.get('pull_requests') or []],
+            pull_requests=pull_requests,
         )
 
 
@@ -333,11 +351,22 @@ class MirrorIssuesResponse:
 
     @classmethod
     def from_dict(cls, data: dict) -> 'MirrorIssuesResponse':
+        issues: List[MirrorIssue] = []
+        for raw in data.get('issues') or []:
+            try:
+                issues.append(MirrorIssue.from_dict(raw))
+            except Exception as e:
+                identifier = (
+                    f'{raw.get("repo_full_name", "?")}#{raw.get("issue_number", "?")}'
+                    if isinstance(raw, dict)
+                    else '?'
+                )
+                bt.logging.warning(f'Skipping malformed mirror issue {identifier}: {e}')
         return cls(
             github_id=str(data['github_id']),
             since=parse_optional_github_iso_to_utc(data.get('since')),
             generated_at=parse_optional_github_iso_to_utc(data.get('generated_at')),
-            issues=[MirrorIssue.from_dict(issue) for issue in data.get('issues') or []],
+            issues=issues,
         )
 
 
@@ -355,6 +384,13 @@ class MirrorPullRequestFilesResponse:
 
     @classmethod
     def from_dict(cls, data: dict) -> 'MirrorPullRequestFilesResponse':
+        files: List[MirrorFile] = []
+        for raw in data.get('files') or []:
+            try:
+                files.append(MirrorFile.from_dict(raw))
+            except Exception as e:
+                filename = raw.get('filename', '?') if isinstance(raw, dict) else '?'
+                bt.logging.warning(f'Skipping malformed mirror file {filename}: {e}')
         return cls(
             repo_full_name=data['repo_full_name'].lower(),
             pr_number=int(data['pr_number']),
@@ -362,5 +398,5 @@ class MirrorPullRequestFilesResponse:
             base_sha=data.get('base_sha'),
             merge_base_sha=data.get('merge_base_sha'),
             scoring_data_stored=bool(data.get('scoring_data_stored', False)),
-            files=[MirrorFile.from_dict(f) for f in data.get('files') or []],
+            files=files,
         )

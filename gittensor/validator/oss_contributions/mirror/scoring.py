@@ -196,7 +196,7 @@ def _should_skip_merged_mirror_pr(scored: ScoredMirrorPR, repo_config: Repositor
     if not os.environ.get('DEV_MODE') and pr.author_association in MAINTAINER_ASSOCIATIONS:
         return True, f'PR #{pr.pr_number} author is {pr.author_association}'
 
-    if pr.merged_by_login and pr.merged_by_login == pr.author_login:
+    if pr.merged_by_login and pr.merged_by_login.lower() == pr.author_login.lower():
         if pr.review_summary.approved_count == 0:
             return True, f'PR #{pr.pr_number} self-merged without external approval'
 

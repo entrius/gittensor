@@ -404,6 +404,16 @@ class TestSolvingPrCache:
         cache = _build_solving_pr_cache({1: e1, 2: e2})
         assert cache[('foo/a', 1)].token_score == 50  # first wins
 
+    def test_below_threshold_prs_excluded_from_cache(self):
+        e1 = MinerEvaluation(uid=1, hotkey='hk1', github_id='g1')
+        e1.mirror_merged_prs = [
+            _scored_mirror_pr('foo/poisoned', 1, token_score=0.0, base_score=0.0),
+            _scored_mirror_pr('foo/healthy', 2, token_score=50, base_score=10),
+        ]
+        cache = _build_solving_pr_cache({1: e1})
+        assert ('foo/poisoned', 1) not in cache
+        assert ('foo/healthy', 2) in cache
+
     def test_cache_hit_reuses_base_score_no_fetch(self):
         """A solving PR already in cache must not trigger a get_pr_files call."""
         client = Mock()
@@ -495,14 +505,15 @@ class TestSolvingPrCache:
         assert eval_.issue_discovery_score == 0
 
     def test_token_score_below_threshold_counts_credibility_only(self):
-        """Cached solving PR has token_score < MIN_TOKEN_SCORE_FOR_BASE_SCORE.
+        """Solving PR tokenizes to below MIN_TOKEN_SCORE_FOR_BASE_SCORE.
         total_solved_issues increments (credibility), but total_valid_solved_issues
-        does not, and no discovery_earned_score is produced."""
+        does not, and no discovery_earned_score is produced. Below-threshold PRs
+        are excluded from the pre-cache, so this exercises the fresh-fetch path
+        that re-tokenizes to 0 with empty files + empty token config."""
         client = Mock()
         client.get_miner_issues.return_value = _response([_issue_dict()])
+        client.get_pr_files.return_value = _empty_files_response('entrius/gittensor-ui', 100)
         eval_ = _eval()
-        # Token score 2 is below the threshold (5)
-        eval_.mirror_merged_prs = [_scored_mirror_pr('entrius/gittensor-ui', 100, token_score=2.0)]
 
         _run(
             run_mirror_issue_discovery(

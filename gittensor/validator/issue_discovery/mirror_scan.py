@@ -203,6 +203,8 @@ def _build_solving_pr_cache(
     cache: Dict[Tuple[str, int], CachedSolvingPR] = {}
     for evaluation in miner_evaluations.values():
         for scored in evaluation.mirror_merged_prs:
+            if scored.token_score < MIN_TOKEN_SCORE_FOR_BASE_SCORE:
+                continue
             key = (scored.pr.repo_full_name, scored.pr.pr_number)
             if key in cache:
                 continue  # first miner wins — values are the same PR's fields

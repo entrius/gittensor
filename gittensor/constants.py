@@ -27,6 +27,9 @@ GRAPHQL_VIEWER_QUERY = '{ viewer { login } }'
 MAX_FILE_SIZE_BYTES = 1_000_000
 # Too many object lookups in one GraphQL query can trigger 502 errors and lose all results.
 MAX_FILES_PER_GRAPHQL_BATCH = 50
+# On-disk ETag cache for GitHub REST GETs - 304 responses do not consume rate quota.
+ETAG_CACHE_TTL_DAYS = 30
+ETAG_CACHE_DEFAULT_PATH = '~/.gittensor/cache/github_etag'
 
 # =============================================================================
 # das-github-mirror (https://mirror.gittensor.io)

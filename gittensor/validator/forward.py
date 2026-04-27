@@ -16,6 +16,7 @@ from gittensor.constants import (
     RECYCLE_EMISSION_SHARE,
     RECYCLE_UID,
 )
+from gittensor.utils.github_etag_cache import snapshot_and_reset as snapshot_etag_cache
 from gittensor.utils.uids import get_all_uids
 from gittensor.validator.issue_competitions.forward import issue_competitions
 from gittensor.validator.issue_discovery.mirror_scan import run_mirror_issue_discovery
@@ -81,6 +82,11 @@ async def forward(self: 'Validator') -> None:
         rewards = blend_emission_pools(oss_rewards, issue_rewards, miner_uids)
 
         self.update_scores(rewards, miner_uids)
+
+        hits, misses = snapshot_etag_cache()
+        total = hits + misses
+        if total:
+            bt.logging.info(f'etag cache: hits={hits} misses={misses} hit_rate={hits / total:.1%}')
 
     await asyncio.sleep(VALIDATOR_WAIT)
 

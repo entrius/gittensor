@@ -1583,5 +1583,149 @@ class TestFetchFileContentsForPrMergeBase:
         assert call_args[0][2] == 'base_branch_tip_sha', 'Should fall back to base_ref_oid'
 
 
+# ============================================================================
+# cached_github_get / ETag cache integration
+# ============================================================================
+
+
+class TestCachedGithubGet:
+    """Covers the cache-aware GET wrapper in github_api_tools.cached_github_get."""
+
+    def _resp(self, status_code=200, body=b'{"ok":true}', etag=None, content_type='application/json'):
+        headers = {}
+        if etag is not None:
+            headers['ETag'] = etag
+        if content_type is not None:
+            headers['Content-Type'] = content_type
+        r = Mock()
+        r.status_code = status_code
+        r.headers = headers
+        r.content = body
+        r.url = 'https://api.github.com/x'
+        r.json.return_value = {'ok': True} if body == b'{"ok":true}' else {}
+        return r
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    def test_first_call_stores_etag_no_conditional_header_sent(self, mock_get):
+        mock_get.return_value = self._resp(200, etag='W/"v1"')
+        resp = github_api_tools.cached_github_get(
+            'https://api.github.com/x', {'Authorization': 'token x'}, params={'a': 1}, timeout=5
+        )
+
+        assert resp.status_code == 200
+        mock_get.assert_called_once()
+        sent_headers = mock_get.call_args.kwargs['headers']
+        assert 'If-None-Match' not in sent_headers
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    def test_second_call_sends_if_none_match_and_serves_cached_body_on_304(self, mock_get):
+        first = self._resp(200, body=b'{"v":1}', etag='W/"v1"')
+        not_modified = Mock(status_code=304, headers={}, url='https://api.github.com/x')
+        mock_get.side_effect = [first, not_modified]
+
+        github_api_tools.cached_github_get('https://api.github.com/x', {}, params={'a': 1})
+        resp2 = github_api_tools.cached_github_get('https://api.github.com/x', {}, params={'a': 1})
+
+        assert mock_get.call_count == 2
+        second_headers = mock_get.call_args_list[1].kwargs['headers']
+        assert second_headers.get('If-None-Match') == 'W/"v1"'
+
+        assert resp2.status_code == 200
+        assert resp2.content == b'{"v":1}'
+        assert resp2.headers.get('X-Gittensor-Cache') == 'hit'
+        assert resp2.json() == {'v': 1}
+
+        from gittensor.utils.github_etag_cache import snapshot_and_reset
+
+        hits, misses = snapshot_and_reset()
+        assert hits == 1 and misses == 1
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    def test_200_without_etag_is_not_cached(self, mock_get):
+        mock_get.side_effect = [self._resp(200, etag=None), self._resp(200, etag=None)]
+
+        github_api_tools.cached_github_get('https://api.github.com/x', {})
+        github_api_tools.cached_github_get('https://api.github.com/x', {})
+
+        for c in mock_get.call_args_list:
+            assert 'If-None-Match' not in c.kwargs['headers']
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    def test_500_falls_through_and_does_not_poison_cache(self, mock_get):
+        server_error = Mock(status_code=500, headers={}, url='https://api.github.com/x', content=b'boom')
+        server_error.json.side_effect = ValueError
+        mock_get.side_effect = [server_error, self._resp(200, etag='W/"v1"')]
+
+        resp = github_api_tools.cached_github_get('https://api.github.com/x', {})
+        assert resp.status_code == 500
+
+        github_api_tools.cached_github_get('https://api.github.com/x', {})
+        for c in mock_get.call_args_list:
+            assert 'If-None-Match' not in c.kwargs['headers']
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    def test_cached_entry_replaced_when_server_returns_200_with_new_etag(self, mock_get):
+        # Resource changed between rounds: cached W/"v1" but server now returns 200 + W/"v2".
+        # Wrapper must (a) return the fresh body unmodified, (b) not flag it as a cache hit,
+        # (c) update the stored entry so the next If-None-Match uses the new etag.
+        first = self._resp(200, body=b'{"v":1}', etag='W/"v1"')
+        changed = self._resp(200, body=b'{"v":2}', etag='W/"v2"')
+        revalidated = Mock(status_code=304, headers={}, url='https://api.github.com/x')
+        mock_get.side_effect = [first, changed, revalidated]
+
+        github_api_tools.cached_github_get('https://api.github.com/x', {})
+
+        resp_changed = github_api_tools.cached_github_get('https://api.github.com/x', {})
+        assert resp_changed.content == b'{"v":2}'
+        assert 'X-Gittensor-Cache' not in resp_changed.headers
+
+        resp_after = github_api_tools.cached_github_get('https://api.github.com/x', {})
+        assert mock_get.call_args_list[1].kwargs['headers'].get('If-None-Match') == 'W/"v1"'
+        assert mock_get.call_args_list[2].kwargs['headers'].get('If-None-Match') == 'W/"v2"'
+        assert resp_after.headers.get('X-Gittensor-Cache') == 'hit'
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    def test_caller_headers_not_mutated(self, mock_get):
+        first = self._resp(200, body=b'{}', etag='W/"v1"')
+        not_modified = Mock(status_code=304, headers={}, url='https://api.github.com/x')
+        mock_get.side_effect = [first, not_modified]
+
+        caller_headers = {'Authorization': 'token x'}
+        github_api_tools.cached_github_get('https://api.github.com/x', caller_headers)
+        github_api_tools.cached_github_get('https://api.github.com/x', caller_headers)
+
+        assert caller_headers == {'Authorization': 'token x'}
+
+
+class TestSynthesize304Response:
+    """Direct unit tests for the synthesized-from-cache Response builder."""
+
+    def test_constructs_response_with_body_and_headers(self):
+        resp = github_api_tools._synthesize_304_response('https://api.github.com/x', b'{"hi":1}', 'application/json')
+
+        assert resp.status_code == 200
+        assert resp.content == b'{"hi":1}'
+        assert resp.json() == {'hi': 1}
+        assert resp.text == '{"hi":1}'
+        assert resp.url == 'https://api.github.com/x'
+        assert resp.headers['X-Gittensor-Cache'] == 'hit'
+        assert resp.headers['Content-Type'] == 'application/json'
+
+    def test_omits_content_type_when_none(self):
+        resp = github_api_tools._synthesize_304_response('https://x', b'data', None)
+
+        assert resp.status_code == 200
+        assert resp.content == b'data'
+        assert resp.headers.get('X-Gittensor-Cache') == 'hit'
+        assert 'Content-Type' not in resp.headers
+
+    def test_headers_are_case_insensitive(self):
+        resp = github_api_tools._synthesize_304_response('https://x', b'', 'text/plain')
+
+        # Real requests.Response uses CaseInsensitiveDict; verify cached responses behave the same.
+        assert resp.headers['x-gittensor-cache'] == 'hit'
+        assert resp.headers['CONTENT-TYPE'] == 'text/plain'
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

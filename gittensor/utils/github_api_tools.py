@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 
 import bittensor as bt
 import requests
+from requests.structures import CaseInsensitiveDict
 
 from gittensor.classes import (
     FileChange,
@@ -30,6 +31,7 @@ from gittensor.constants import (
     PR_LOOKBACK_DAYS,
     REVIEW_PENALTY_RATE,
 )
+from gittensor.utils.github_etag_cache import build_request_key, get_default_cache, record_hit, record_miss
 from gittensor.utils.models import PRInfo
 from gittensor.validator.utils.datetime_utils import parse_github_iso_to_utc
 from gittensor.validator.utils.load_weights import RepositoryConfig
@@ -177,6 +179,53 @@ def make_graphql_headers(token: str) -> Dict[str, str]:
     return {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
 
 
+def _synthesize_304_response(url: str, body: bytes, content_type: Optional[str]) -> requests.Response:
+    """Build a Response-shaped object from cached body for a 304 hit."""
+    resp = requests.Response()
+    resp.status_code = 200
+    resp.url = url
+    resp._content = body
+    resp.encoding = 'utf-8'
+    headers = CaseInsensitiveDict({'X-Gittensor-Cache': 'hit'})
+    if content_type:
+        headers['Content-Type'] = content_type
+    resp.headers = headers
+    return resp
+
+
+def cached_github_get(
+    url: str,
+    headers: Dict[str, str],
+    params: Optional[Dict[str, Any]] = None,
+    timeout: int = GITHUB_HTTP_TIMEOUT_SECONDS,
+) -> requests.Response:
+    """GET wrapped in the on-disk ETag cache - 304 returns a Response from cache."""
+    cache = get_default_cache()
+    cache_key = build_request_key(url, params)
+    cached = cache.lookup(cache_key)
+
+    if cached is not None:
+        request_headers = dict(headers)
+        request_headers['If-None-Match'] = cached.etag
+    else:
+        request_headers = headers
+
+    response = requests.get(url, headers=request_headers, params=params, timeout=timeout)
+
+    if cached is not None and response.status_code == 304:
+        record_hit()
+        return _synthesize_304_response(response.url or url, cached.body, cached.content_type)
+
+    record_miss()
+
+    if response.status_code == 200:
+        etag = response.headers.get('ETag')
+        if isinstance(etag, str) and etag:
+            cache.store(cache_key, etag, response.content, response.headers.get('Content-Type'))
+
+    return response
+
+
 def get_github_id(token: str) -> Optional[str]:
     """Get GitHub numeric user id (as string) using a PAT.
 
@@ -240,7 +289,7 @@ def get_merge_base_sha(repository: str, base_sha: str, head_sha: str, token: str
 
     for attempt in range(max_attempts):
         try:
-            response = requests.get(
+            response = cached_github_get(
                 f'{BASE_GITHUB_API_URL}/repos/{repository}/compare/{base_sha}...{head_sha}',
                 headers=headers,
                 timeout=15,
@@ -302,7 +351,7 @@ def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -
 
     while attempt < max_attempts:
         try:
-            response = requests.get(
+            response = cached_github_get(
                 f'{BASE_GITHUB_API_URL}/repos/{repository}/pulls/{pr_number}/files',
                 headers=headers,
                 params={'per_page': per_page, 'page': page},
@@ -495,7 +544,7 @@ def _search_issue_referencing_prs_rest(
     max_attempts = 3
     for attempt in range(max_attempts):
         try:
-            resp = requests.get(
+            resp = cached_github_get(
                 f'{BASE_GITHUB_API_URL}/search/issues',
                 params={'q': f'repo:{repo} type:pr{state_clause} {issue_number} in:title,body', 'per_page': '50'},
                 headers=headers,
@@ -1067,7 +1116,7 @@ def check_github_issue_closed(repo: str, issue_number: int, token: str) -> Optio
     headers = make_headers(token)
 
     try:
-        response = requests.get(
+        response = cached_github_get(
             f'{BASE_GITHUB_API_URL}/repos/{repo}/issues/{issue_number}',
             headers=headers,
             timeout=15,

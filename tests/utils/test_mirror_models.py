@@ -324,6 +324,21 @@ class TestMirrorPullRequest:
         assert pr.head_repo_full_name is None
         assert pr.default_branch is None
 
+    def test_repo_names_lowercased_at_parse(self, pull_request_dict):
+        # Mirror responses may carry GitHub's canonical mixed-case names; we
+        # normalize at the boundary so every downstream lookup against the
+        # lowercased mirror_repos dict matches without per-site .lower() calls.
+        pull_request_dict['repo_full_name'] = 'Entrius/AllWays'
+        pull_request_dict['head_repo_full_name'] = 'Forker/AllWays'
+        pr = MirrorPullRequest.from_dict(pull_request_dict)
+        assert pr.repo_full_name == 'entrius/allways'
+        assert pr.head_repo_full_name == 'forker/allways'
+
+    def test_head_repo_full_name_none_preserved(self, pull_request_dict):
+        pull_request_dict['head_repo_full_name'] = None
+        pr = MirrorPullRequest.from_dict(pull_request_dict)
+        assert pr.head_repo_full_name is None
+
 
 # ============================================================================
 # MirrorSolvingPR
@@ -368,6 +383,11 @@ class TestMirrorIssue:
         del issue_dict['solving_pr']
         issue = MirrorIssue.from_dict(issue_dict)
         assert issue.solving_pr is None
+
+    def test_repo_full_name_lowercased_at_parse(self, issue_dict):
+        issue_dict['repo_full_name'] = 'Entrius/AllWays'
+        issue = MirrorIssue.from_dict(issue_dict)
+        assert issue.repo_full_name == 'entrius/allways'
 
 
 # ============================================================================
@@ -480,3 +500,16 @@ class TestMirrorPullRequestFilesResponse:
         }
         resp = MirrorPullRequestFilesResponse.from_dict(payload)
         assert resp.files == []
+
+    def test_repo_full_name_lowercased_at_parse(self, file_dict):
+        payload = {
+            'repo_full_name': 'Entrius/AllWays',
+            'pr_number': 518,
+            'head_sha': 'h',
+            'base_sha': 'b',
+            'merge_base_sha': 'mb',
+            'scoring_data_stored': True,
+            'files': [file_dict],
+        }
+        resp = MirrorPullRequestFilesResponse.from_dict(payload)
+        assert resp.repo_full_name == 'entrius/allways'

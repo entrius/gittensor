@@ -144,8 +144,13 @@ class MirrorPullRequest:
 
     @classmethod
     def from_dict(cls, data: dict) -> 'MirrorPullRequest':
+        # Repo names normalized to lowercase here so every downstream comparison
+        # (mirror_repos lookups, head==base same-repo check, unique-repo set
+        # union with the legacy lowercased path) is case-correct without each
+        # call site re-applying .lower().
+        head_repo = data.get('head_repo_full_name')
         return cls(
-            repo_full_name=data['repo_full_name'],
+            repo_full_name=data['repo_full_name'].lower(),
             pr_number=data['pr_number'],
             title=data.get('title', ''),
             body=data.get('body'),
@@ -162,7 +167,7 @@ class MirrorPullRequest:
             merged_by_login=data.get('merged_by_login'),
             base_ref=data.get('base_ref'),
             head_ref=data.get('head_ref'),
-            head_repo_full_name=data.get('head_repo_full_name'),
+            head_repo_full_name=head_repo.lower() if head_repo else None,
             default_branch=data.get('default_branch'),
             head_sha=data.get('head_sha'),
             base_sha=data.get('base_sha'),
@@ -245,7 +250,7 @@ class MirrorIssue:
         solving_pr_raw = data.get('solving_pr')
         author_github_id = data.get('author_github_id')
         return cls(
-            repo_full_name=data['repo_full_name'],
+            repo_full_name=data['repo_full_name'].lower(),
             issue_number=data['issue_number'],
             title=data.get('title', ''),
             state=data['state'],
@@ -351,7 +356,7 @@ class MirrorPullRequestFilesResponse:
     @classmethod
     def from_dict(cls, data: dict) -> 'MirrorPullRequestFilesResponse':
         return cls(
-            repo_full_name=data['repo_full_name'],
+            repo_full_name=data['repo_full_name'].lower(),
             pr_number=int(data['pr_number']),
             head_sha=data.get('head_sha'),
             base_sha=data.get('base_sha'),

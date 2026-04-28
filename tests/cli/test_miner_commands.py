@@ -10,6 +10,7 @@ from click.testing import CliRunner
 
 from gittensor import __version__
 from gittensor.cli.main import cli
+from gittensor.cli.miner_commands.helpers import _pat_check_aggregate_counts
 
 
 @pytest.fixture
@@ -75,3 +76,19 @@ class TestCliVersion:
         result = runner.invoke(cli, ['--version'])
         assert result.exit_code == 0
         assert result.output == f'gittensor, version {__version__}\n'
+
+
+class TestPatCheckAggregateCounts:
+    def test_splits_valid_no_pat_invalid_and_no_response(self):
+        results = [
+            {'pat_valid': True, 'has_pat': True},
+            {'pat_valid': False, 'has_pat': False},
+            {'pat_valid': False, 'has_pat': True},
+            {'pat_valid': None, 'has_pat': None},
+        ]
+        assert _pat_check_aggregate_counts(results) == {
+            'valid': 1,
+            'no_pat': 1,
+            'invalid_pat': 1,
+            'no_response': 1,
+        }

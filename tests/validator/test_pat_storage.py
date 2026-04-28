@@ -121,6 +121,33 @@ class TestRemovePat:
         assert entries[0]['uid'] == 2
 
 
+class TestCorruptFileRefusesToOverwrite:
+    """Regression tests for #781: corrupt PATS_FILE must not be silently overwritten."""
+
+    def test_save_pat_raises_when_file_is_corrupt(self, use_tmp_pats_file):
+        use_tmp_pats_file.write_text('{not valid json')
+        with pytest.raises(json.JSONDecodeError):
+            pat_storage.save_pat(1, 'hotkey_1', 'ghp_abc', 'user_1')
+
+    def test_save_pat_does_not_overwrite_corrupt_file_contents(self, use_tmp_pats_file):
+        """The on-disk corrupt bytes must remain intact after a refused save."""
+        corrupt_payload = '{"foo'
+        use_tmp_pats_file.write_text(corrupt_payload)
+        with pytest.raises(json.JSONDecodeError):
+            pat_storage.save_pat(1, 'hotkey_1', 'ghp_abc', 'user_1')
+        assert use_tmp_pats_file.read_text() == corrupt_payload
+
+    def test_remove_pat_raises_when_file_is_corrupt(self, use_tmp_pats_file):
+        use_tmp_pats_file.write_text('garbage')
+        with pytest.raises(json.JSONDecodeError):
+            pat_storage.remove_pat(1)
+
+    def test_load_all_pats_still_returns_empty_for_corrupt_file(self, use_tmp_pats_file):
+        """Read path keeps the historical graceful-degradation contract."""
+        use_tmp_pats_file.write_text('garbage')
+        assert pat_storage.load_all_pats() == []
+
+
 class TestConcurrency:
     def test_concurrent_writes(self):
         """Multiple threads writing simultaneously should not corrupt the file."""

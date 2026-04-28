@@ -117,13 +117,22 @@ def config_set(key: str, value: str):
     # Ensure config directory exists
     GITTENSOR_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Load existing config or start fresh
+    # Load existing config or start fresh. If the file exists but is unparsable,
+    # refuse to overwrite — silently writing only the new key would destroy
+    # every other configured value (network, contract_address, ws_endpoint, …)
+    # and quietly retarget downstream commands at finney mainnet defaults.
+    # Same refuse-to-overwrite invariant as #781 (PATs file) and the read-side
+    # equivalent fixed in #817.
     config = {}
     if CONFIG_FILE.exists():
         try:
             config = json.loads(CONFIG_FILE.read_text())
-        except json.JSONDecodeError:
-            console.print('[yellow]Warning: Existing config was invalid, starting fresh[/yellow]')
+        except json.JSONDecodeError as e:
+            console.print(
+                f'[red]Error: Existing config file at {CONFIG_FILE} is not valid JSON ({e}).\n'
+                f'Refusing to overwrite — inspect or remove the file before re-running.[/red]'
+            )
+            raise SystemExit(1)
 
     # Set the value
     old_value = config.get(key)

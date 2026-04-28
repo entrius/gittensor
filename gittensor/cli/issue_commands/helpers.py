@@ -696,31 +696,6 @@ def _resolve_contract_and_network(
 # ============================================================================
 
 
-def _get_contract_child_storage_key(substrate, contract_addr: str, verbose: bool = False) -> Optional[str]:
-    """
-    Get the child storage key for a contract's trie.
-
-    Args:
-        substrate: SubstrateInterface instance
-        contract_addr: Contract address
-        verbose: If True, print debug output
-
-    Returns:
-        Hex-encoded child storage key or None if contract doesn't exist
-    """
-    try:
-        child_key = get_contract_child_storage_key(substrate, contract_addr)
-        if not child_key:
-            if verbose:
-                console.print(f'[dim]Debug: Contract not found at {contract_addr}[/dim]')
-            return None
-        return child_key
-    except Exception as e:
-        if verbose:
-            console.print(f'[dim]Debug: Contract info query failed: {e}[/dim]')
-        return None
-
-
 def _read_contract_packed_storage(substrate, contract_addr: str, verbose: bool = False) -> Optional[Dict[str, Any]]:
     """
     Read the packed root storage from a contract using childstate RPC
@@ -785,10 +760,16 @@ def _read_issues_from_child_storage(substrate, contract_addr: str, verbose: bool
     Returns:
         List of issue dictionaries
     """
-    child_key = _get_contract_child_storage_key(substrate, contract_addr, verbose)
+    try:
+        child_key = get_contract_child_storage_key(substrate, contract_addr)
+    except Exception as e:
+        if verbose:
+            console.print(f'[dim]Debug: Contract info query failed: {e}[/dim]')
+        child_key = None
+
     if not child_key:
         if verbose:
-            console.print('[dim]Debug: Cannot read issues - no child storage key[/dim]')
+            console.print(f'[dim]Debug: Cannot read issues - no child storage key for {contract_addr}[/dim]')
         return []
 
     # First, read packed storage to get next_issue_id

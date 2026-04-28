@@ -9,12 +9,10 @@ import bittensor as bt
 
 from gittensor.classes import MinerEvaluation
 from gittensor.utils.github_api_tools import check_github_issue_closed
+from gittensor.utils.utils import get_contract_address
 from gittensor.validator.issue_competitions.contract_client import IssueCompetitionContractClient, IssueStatus
 from gittensor.validator.utils.config import GITTENSOR_VALIDATOR_PAT
-from gittensor.validator.utils.issue_competitions import (
-    get_contract_address,
-    get_miner_coldkey,
-)
+from gittensor.validator.utils.issue_competitions import get_miner_coldkey
 
 if TYPE_CHECKING:
     from neurons.base.validator import BaseValidatorNeuron

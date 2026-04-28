@@ -97,11 +97,6 @@ class BaseNeuron(ABC):
         )
         self.step = 0
 
-    def _reconnect_subtensor(self):
-        """Recreate subtensor connection when WebSocket goes stale."""
-        bt.logging.info('Reconnecting subtensor...')
-        self.subtensor = bt.Subtensor(config=self.config)
-
     @abstractmethod
     async def forward(self, synapse: bt.Synapse) -> bt.Synapse: ...
 
@@ -143,7 +138,8 @@ class BaseNeuron(ABC):
                     f'WebSocket connection closed during check_registered (attempt {attempt + 1}/{max_retries}): {e}'
                 )
                 if attempt < max_retries - 1:
-                    self._reconnect_subtensor()
+                    bt.logging.info('Reconnecting subtensor...')
+                    self.subtensor = bt.Subtensor(config=self.config)
                     time.sleep(2**attempt)  # Exponential backoff: 1s, 2s, 4s
                 else:
                     raise

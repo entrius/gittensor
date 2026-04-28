@@ -124,14 +124,6 @@ class IssueCompetitionContractClient:
     # Query Functions (Read-only)
     # =========================================================================
 
-    def _get_child_storage_key(self) -> Optional[str]:
-        """Get the child storage key for the contract's trie."""
-        try:
-            return get_contract_child_storage_key(self.subtensor.substrate, self.contract_address)
-        except Exception as e:
-            bt.logging.debug(f'Error getting child storage key: {e}')
-            return None
-
     def _read_packed_storage(self) -> Optional[dict]:
         """Read the packed root storage from the contract"""
         try:
@@ -148,7 +140,11 @@ class IssueCompetitionContractClient:
 
     def read_issue_from_child_storage(self, issue_id: int) -> Optional[ContractIssue]:
         """Read a single issue from contract child storage."""
-        child_key = self._get_child_storage_key()
+        try:
+            child_key = get_contract_child_storage_key(self.subtensor.substrate, self.contract_address)
+        except Exception as e:
+            bt.logging.debug(f'Error getting child storage key: {e}')
+            return None
         if not child_key:
             return None
 

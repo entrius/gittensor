@@ -1,7 +1,7 @@
 # The MIT License (MIT)
 # Copyright © 2025 Entrius
 
-from typing import TYPE_CHECKING, List, Tuple
+from typing import TYPE_CHECKING, Sequence, Tuple, Union
 
 import bittensor as bt
 
@@ -14,9 +14,13 @@ from gittensor.constants import (
 
 if TYPE_CHECKING:
     from gittensor.classes import PullRequest
+    from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredMirrorPR
+
+# TODO: collapse to Sequence[ScoredMirrorPR] on legacy delete day
+PrLike = Union['PullRequest', 'ScoredMirrorPR']
 
 
-def calculate_credibility(merged_prs: List['PullRequest'], closed_prs: List['PullRequest']) -> float:
+def calculate_credibility(merged_prs: Sequence[PrLike], closed_prs: Sequence[PrLike]) -> float:
     """Calculate flat credibility ratio with mulligan applied.
 
     Mulligan: up to CREDIBILITY_MULLIGAN_COUNT closed PRs are erased entirely —
@@ -34,7 +38,7 @@ def calculate_credibility(merged_prs: List['PullRequest'], closed_prs: List['Pul
     return merged_count / total_attempts
 
 
-def check_eligibility(merged_prs: List['PullRequest'], closed_prs: List['PullRequest']) -> Tuple[bool, float, str]:
+def check_eligibility(merged_prs: Sequence[PrLike], closed_prs: Sequence[PrLike]) -> Tuple[bool, float, str]:
     """Check if a miner passes the eligibility gate.
 
     Gate requires:

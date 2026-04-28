@@ -134,3 +134,9 @@ def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, json_mode)
 
         console.print(table)
         console.print(f'\n[bold]{valid_count}/{len(results)} validators have a valid PAT stored.[/bold]')
+
+    # Exit non-zero when no validator reports a valid stored PAT so shell
+    # pipelines / CI can detect the logical failure (matches the JSON `success`
+    # field and the family fixed in #707 / #724).
+    if valid_count == 0:
+        sys.exit(1)

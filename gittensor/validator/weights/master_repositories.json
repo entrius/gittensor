@@ -265,6 +265,9 @@
     "weight": 0.0853
   },
   "grafana/grafana": {
+    "additional_acceptable_branches": [
+      "release-13.0.2"
+    ],
     "weight": 0.1136
   },
   "GraphiteAI/Graphite-Subnet": {
@@ -411,6 +414,10 @@
     "weight": 0.0455
   },
   "MetaMask/metamask-extension": {
+    "additional_acceptable_branches": [
+      "release/13.28.0",
+      "release/13.29.0"
+    ],
     "weight": 0.0806
   },
   "metanova-labs/nova": {
@@ -447,6 +454,9 @@
     "weight": 0.0542
   },
   "neovim/neovim": {
+    "additional_acceptable_branches": [
+      "release-0.12"
+    ],
     "weight": 0.0785
   },
   "nextcloud/android": {

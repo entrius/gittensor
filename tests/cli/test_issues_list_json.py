@@ -35,3 +35,19 @@ def test_issues_list_json_missing_issue_returns_structured_error(cli_root, runne
     assert payload['success'] is False
     assert payload['error']['type'] == 'not_found'
     assert '999' in payload['error']['message']
+
+
+def test_issues_list_human_missing_issue_exits_non_zero(cli_root, runner):
+    """Human mode must exit non-zero for missing --id, matching JSON semantics."""
+    with (
+        patch(
+            'gittensor.cli.issue_commands.view._resolve_contract_and_network',
+            return_value=('5Fakeaddr', 'ws://x', 'test'),
+        ),
+        patch('gittensor.cli.issue_commands.view.read_issues_from_contract', return_value=FAKE_ISSUES),
+    ):
+        result = runner.invoke(cli_root, ['issues', 'list', '--id', '999'], catch_exceptions=False)
+
+    assert result.exit_code != 0
+    assert '999' in result.output
+    assert 'not found' in result.output.lower()

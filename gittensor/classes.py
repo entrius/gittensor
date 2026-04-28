@@ -4,9 +4,15 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from math import prod
-from typing import DefaultDict, Dict, List, Optional, Set
+from typing import TYPE_CHECKING, DefaultDict, Dict, List, Optional, Set
 
 import bittensor as bt
+
+if TYPE_CHECKING:
+    # Forward-reference only — avoids importing the mirror subpackage at runtime
+    # and prevents accidental coupling. The mirror_* lists below are typed as
+    # strings to defer resolution.
+    from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredMirrorPR
 
 from gittensor.constants import (
     LABEL_MULTIPLIERS,
@@ -366,6 +372,13 @@ class MinerEvaluation:
     merged_pull_requests: List[PullRequest] = field(default_factory=list)
     open_pull_requests: List[PullRequest] = field(default_factory=list)
     closed_pull_requests: List[PullRequest] = field(default_factory=list)
+
+    # Populated by gittensor.validator.oss_contributions.mirror.combine.combine
+    # when the mirror scoring path runs. Empty for legacy-only evaluations.
+    mirror_merged_prs: List['ScoredMirrorPR'] = field(default_factory=list)
+    mirror_open_prs: List['ScoredMirrorPR'] = field(default_factory=list)
+    mirror_closed_prs: List['ScoredMirrorPR'] = field(default_factory=list)
+
     unique_repos_contributed_to: Set[str] = field(default_factory=set)
 
     # Eligibility and credibility
@@ -380,7 +393,7 @@ class MinerEvaluation:
     total_solved_issues: int = 0
     total_valid_solved_issues: int = 0  # solved issues where solving PR has token_score >= 5
     total_closed_issues: int = 0
-    total_open_issues: int = 0
+    total_open_issues: int = 0  # mirror-tracked open issues in lookback window (set by mirror_scan)
 
     @property
     def total_prs(self) -> int:
@@ -388,34 +401,63 @@ class MinerEvaluation:
 
     @property
     def total_merged_prs(self) -> int:
-        return len(self.merged_pull_requests)
+        return len(self.merged_pull_requests) + len(self.mirror_merged_prs)
 
     @property
     def total_open_prs(self) -> int:
-        return len(self.open_pull_requests)
+        return len(self.open_pull_requests) + len(self.mirror_open_prs)
 
     @property
     def total_closed_prs(self) -> int:
-        return len(self.closed_pull_requests)
+        return len(self.closed_pull_requests) + len(self.mirror_closed_prs)
 
     @property
     def should_use_cache_fallback(self) -> bool:
         return self.github_pr_fetch_failed and self.total_prs == 0
 
     def get_all_issues(self) -> List[Issue]:
-        """Aggregate all issues from all pull requests (merged, open, closed)."""
+        """Aggregate all issues from all pull requests (merged, open, closed).
+
+        Legacy PRs contribute their already-populated ``issues`` field directly;
+        mirror PRs contribute their ``pr.linked_issues`` adapted into legacy Issue
+        shape via ``mirror.adapters.mirror_linked_issue_to_legacy_issue``.
+        """
+        # Lazy import — mirror.adapters imports from classes.py (for Issue /
+        # FileChange), so importing it at module load would loop back here.
+        from gittensor.validator.oss_contributions.mirror.adapters import (
+            mirror_linked_issue_to_legacy_issue,
+        )
+
         all_issues = []
         for pr in self.merged_pull_requests + self.open_pull_requests + self.closed_pull_requests:
             if pr.issues:
                 all_issues.extend(pr.issues)
+        for scored in self.mirror_merged_prs + self.mirror_open_prs + self.mirror_closed_prs:
+            for li in scored.pr.linked_issues:
+                all_issues.append(
+                    mirror_linked_issue_to_legacy_issue(li, scored.pr.pr_number, scored.pr.repo_full_name)
+                )
         return all_issues
 
     def get_all_file_changes(self) -> List[FileChange]:
-        """Aggregate all file changes from all PR diffs (merged, open, closed)."""
+        """Aggregate all file changes from all PR diffs (merged, open, closed).
+
+        Mirror PRs carry their fetched files on ``ScoredMirrorPR.files``; the
+        adapter converts each MirrorFile into the legacy FileChange shape for
+        DB storage.
+        """
+        from gittensor.validator.oss_contributions.mirror.adapters import (
+            mirror_files_to_legacy,
+        )
+
         all_file_changes = []
         for pr in self.merged_pull_requests + self.open_pull_requests + self.closed_pull_requests:
             if pr.file_changes:
                 all_file_changes.extend(pr.file_changes)
+        for scored in self.mirror_merged_prs + self.mirror_open_prs + self.mirror_closed_prs:
+            if scored.files:
+                file_changes, _ = mirror_files_to_legacy(scored.pr.repo_full_name, scored.pr.pr_number, scored.files)
+                all_file_changes.extend(file_changes)
         return all_file_changes
 
     def add_merged_pull_request(self, raw_pr: Dict):

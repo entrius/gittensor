@@ -285,12 +285,19 @@ def _score_miner_mirror_issues(
             )
             continue
 
+        is_self_solved = issue.author_github_id == solving_pr.author_github_id
+
         # Valid-solved gate (legacy parity): solving PR must meet the token threshold.
-        if cached.token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE:
+        # Self-issues are excluded — the gate exists to verify the miner did real
+        # cross-account discovery work, and a self-filed-and-self-solved issue is
+        # not evidence of that. Without this exclusion, a miner with 6 real
+        # cross-account discoveries plus a single self-filed-and-self-solved issue
+        # would clear MIN_VALID_SOLVED_ISSUES (= 7) on padding rather than work.
+        if not is_self_solved and cached.token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE:
             valid_solved_count += 1
 
         # Same-account: discoverer == solver gets credibility only, no score
-        if issue.author_github_id == solving_pr.author_github_id:
+        if is_self_solved:
             bt.logging.debug(
                 f'  issue #{issue.issue_number} ({issue.repo_full_name}): same-account '
                 f'(discoverer == solver {issue.author_github_id}) — credibility only'

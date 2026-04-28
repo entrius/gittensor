@@ -288,8 +288,53 @@ class TestRunMirrorIssueDiscovery:
             )
         )
         assert eval_.total_solved_issues == 1  # credibility counts
-        # But no discovery_earned_score because self-solve
+        # Self-issues must NOT count as "valid solved" — the gate measures
+        # cross-account discovery work, not self-engagement.
+        assert eval_.total_valid_solved_issues == 0
+        # And no discovery_earned_score because self-solve
         assert eval_.issue_discovery_score == 0
+
+    def test_self_issues_do_not_pad_valid_solved_gate(self):
+        """Anti-gaming: self-filed-and-self-solved issues must not push a miner
+        past MIN_VALID_SOLVED_ISSUES. With six legitimate cross-account valid
+        solves plus one self-issue solve, the gate should still fail because
+        only the six cross-account solves count toward the threshold."""
+        cross_issues = [
+            _issue_dict(
+                issue_number=10 + i,
+                author_github_id=f'OTHER{i}',
+                solving_pr_author='SELF',
+                solved_by_pr=200 + i,
+            )
+            for i in range(6)
+        ]
+        self_issue = _issue_dict(
+            issue_number=99,
+            author_github_id='SELF',
+            solving_pr_author='SELF',
+            solved_by_pr=300,
+        )
+        client = Mock()
+        client.get_miner_issues.return_value = _response(cross_issues + [self_issue])
+
+        eval_ = _eval(github_id='SELF')
+        # Pre-seed all seven solving PRs into the cache with token_score above the threshold.
+        eval_.mirror_merged_prs = [
+            _scored_mirror_pr('entrius/gittensor-ui', 200 + i, token_score=100.0) for i in range(6)
+        ] + [_scored_mirror_pr('entrius/gittensor-ui', 300, token_score=100.0)]
+
+        _run(
+            run_mirror_issue_discovery(
+                {1: eval_},
+                _mirror_repos('entrius/gittensor-ui'),
+                _EMPTY_LANGS,
+                _EMPTY_TOKEN_CONFIG,
+                client=client,
+            )
+        )
+        assert eval_.total_solved_issues == 7  # credibility counts both cross- and self-solves
+        assert eval_.total_valid_solved_issues == 6  # only cross-account solves count
+        assert eval_.is_issue_eligible is False  # 6 < MIN_VALID_SOLVED_ISSUES=7
 
     def test_not_planned_bumps_closed_count(self):
         client = Mock()

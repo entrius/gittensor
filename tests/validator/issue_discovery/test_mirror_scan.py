@@ -25,6 +25,7 @@ scored_pr_module = pytest.importorskip('gittensor.validator.oss_contributions.mi
 run_mirror_issue_discovery = mirror_scan_module.run_mirror_issue_discovery
 _classify_issue = mirror_scan_module._classify_issue
 _build_solving_pr_cache = mirror_scan_module._build_solving_pr_cache
+_MinerBatch = mirror_scan_module._MinerBatch
 CachedSolvingPR = mirror_scan_module.CachedSolvingPR
 MirrorIssue = mirror_models.MirrorIssue
 MirrorIssuesResponse = mirror_models.MirrorIssuesResponse
@@ -110,6 +111,7 @@ def _issue_dict(
     solving_pr_author: str = '218712309',
     solving_pr_edited_after_merge: bool = False,
     repo: str = 'entrius/gittensor-ui',
+    created_at: str = '2026-04-01T00:00:00Z',
 ) -> dict:
     sp = None
     if solved_by_pr:
@@ -135,7 +137,7 @@ def _issue_dict(
         'author_github_id': author_github_id,
         'author_login': 'discoverer',
         'author_association': 'CONTRIBUTOR',
-        'created_at': '2026-04-01T00:00:00Z',
+        'created_at': created_at,
         'closed_at': '2026-04-18T10:00:00Z' if state == 'CLOSED' else None,
         'updated_at': '2026-04-18T10:00:00Z',
         'last_edited_at': None,
@@ -682,3 +684,290 @@ class TestOpenIssueSpamSourceIsMirror:
         # Below threshold → spam_mult=1.0 → discovery score is non-zero
         assert eval_.issue_discovery_score > 0
         assert eval_.total_open_issues == 2
+
+
+class TestCrossMinerOneIssuePerPr:
+    """Regression tests for the cross-miner one-issue-per-PR rule.
+
+    A single solving PR closing issues authored by multiple miners must award
+    discovery score to at most one of them — the earliest-created qualifying
+    issue across all miners — with the rest counted as credibility-only. This
+    matches the rule documented at the top of ``mirror_scan`` and the legacy
+    pre-#796 behavior in ``_collect_issues_from_prs``.
+    """
+
+    def test_canonical_picks_earliest_created_across_miners(self):
+        """``_build_canonical_pr_owners`` keys (repo, pr_number) to the
+        earliest-created qualifying issue across all miners' fetches."""
+        from gittensor.validator.issue_discovery.mirror_scan import _build_canonical_pr_owners
+
+        e_a = _eval(uid=1, github_id='A')
+        e_b = _eval(uid=2, github_id='B')
+
+        a_issue = MirrorIssue.from_dict(
+            _issue_dict(
+                issue_number=50,
+                author_github_id='A',
+                solving_pr_author='SOLVER',
+                created_at='2026-04-01T00:00:00Z',
+            )
+        )
+        b_issue = MirrorIssue.from_dict(
+            _issue_dict(
+                issue_number=51,
+                author_github_id='B',
+                solving_pr_author='SOLVER',
+                created_at='2026-04-05T00:00:00Z',
+            )
+        )
+
+        canonical = _build_canonical_pr_owners(
+            [_MinerBatch(e_a, [a_issue], 0, 0), _MinerBatch(e_b, [b_issue], 0, 0)]
+        )
+
+        # Earlier-created issue (#50, uid 1) wins canonical for PR 100
+        owner = canonical[('entrius/gittensor-ui', 100)]
+        assert owner[1] == 50
+        assert owner[2] == 1
+
+    def test_canonical_tie_break_lower_issue_number(self):
+        """Identical ``created_at`` across miners → lower issue_number wins."""
+        from gittensor.validator.issue_discovery.mirror_scan import _build_canonical_pr_owners
+
+        # uid 2 first in iteration order, but uid 1's lower issue_number must win.
+        e_a = _eval(uid=2, github_id='A')
+        e_b = _eval(uid=1, github_id='B')
+
+        a_issue = MirrorIssue.from_dict(
+            _issue_dict(
+                issue_number=51,
+                author_github_id='A',
+                solving_pr_author='SOLVER',
+                created_at='2026-04-01T00:00:00Z',
+            )
+        )
+        b_issue = MirrorIssue.from_dict(
+            _issue_dict(
+                issue_number=50,
+                author_github_id='B',
+                solving_pr_author='SOLVER',
+                created_at='2026-04-01T00:00:00Z',
+            )
+        )
+
+        canonical = _build_canonical_pr_owners(
+            [_MinerBatch(e_a, [a_issue], 0, 0), _MinerBatch(e_b, [b_issue], 0, 0)]
+        )
+
+        owner = canonical[('entrius/gittensor-ui', 100)]
+        assert owner[1] == 50  # lower issue_number wins
+        assert owner[2] == 1  # ... which is uid 1 (e_b)
+
+    def test_canonical_excludes_same_account(self):
+        """Same-account issues never claim canonical ownership of a PR slot,
+        leaving non-same-account siblings on the same PR free to score."""
+        from gittensor.validator.issue_discovery.mirror_scan import _build_canonical_pr_owners
+
+        e_a = _eval(uid=1, github_id='A')
+        e_b = _eval(uid=2, github_id='B')
+
+        # A's issue is same-account (author == solver) and earlier — must be excluded.
+        a_issue = MirrorIssue.from_dict(
+            _issue_dict(
+                issue_number=50,
+                author_github_id='A',
+                solving_pr_author='A',
+                created_at='2026-04-01T00:00:00Z',
+            )
+        )
+        b_issue = MirrorIssue.from_dict(
+            _issue_dict(
+                issue_number=51,
+                author_github_id='B',
+                solving_pr_author='SOLVER',
+                created_at='2026-04-05T00:00:00Z',
+            )
+        )
+
+        canonical = _build_canonical_pr_owners(
+            [_MinerBatch(e_a, [a_issue], 0, 0), _MinerBatch(e_b, [b_issue], 0, 0)]
+        )
+
+        owner = canonical[('entrius/gittensor-ui', 100)]
+        assert owner[1] == 51  # B's issue claims canonical
+        assert owner[2] == 2
+
+    def test_two_miners_shared_pr_only_earliest_scores(self):
+        """End-to-end: two miners each with 7 valid solved issues clearing
+        the eligibility gate, one solving PR shared between them. The
+        earlier-created issue's miner pockets the shared PR's contribution;
+        the later one gets credibility only.
+        """
+        client = Mock()
+
+        # 6 unique-PR issues + 1 shared-PR issue per miner. A's #50 is earlier
+        # (April 1) than B's #51 (April 5), so A is canonical for PR 100.
+        a_issues = [_issue_dict(issue_number=10 + i, author_github_id='A', solved_by_pr=200 + i) for i in range(6)]
+        a_issues.append(
+            _issue_dict(
+                issue_number=50,
+                author_github_id='A',
+                solved_by_pr=100,
+                solving_pr_author='SOLVER',
+                created_at='2026-04-01T00:00:00Z',
+            )
+        )
+        b_issues = [_issue_dict(issue_number=20 + i, author_github_id='B', solved_by_pr=300 + i) for i in range(6)]
+        b_issues.append(
+            _issue_dict(
+                issue_number=51,
+                author_github_id='B',
+                solved_by_pr=100,
+                solving_pr_author='SOLVER',
+                created_at='2026-04-05T00:00:00Z',
+            )
+        )
+
+        def _per_miner(github_id, since=None):
+            return _response(a_issues if github_id == 'A' else b_issues)
+
+        client.get_miner_issues.side_effect = _per_miner
+
+        e_a = _eval(uid=1, github_id='A')
+        e_b = _eval(uid=2, github_id='B')
+
+        # Pre-seed cross-miner solving-PR cache so no fetches are needed.
+        seed = MinerEvaluation(uid=99, hotkey='hkS', github_id='SEED')
+        seed.mirror_merged_prs = [
+            _scored_mirror_pr('entrius/gittensor-ui', pr_number)
+            for pr_number in [100] + list(range(200, 206)) + list(range(300, 306))
+        ]
+
+        _run(
+            run_mirror_issue_discovery(
+                {1: e_a, 2: e_b, 99: seed},
+                _mirror_repos('entrius/gittensor-ui'),
+                _EMPTY_LANGS,
+                _EMPTY_TOKEN_CONFIG,
+                client=client,
+            )
+        )
+
+        # Both miners count the shared-PR issue toward credibility.
+        assert e_a.total_solved_issues == 7
+        assert e_b.total_solved_issues == 7
+        assert e_a.total_valid_solved_issues == 7
+        assert e_b.total_valid_solved_issues == 7
+        assert e_a.is_issue_eligible
+        assert e_b.is_issue_eligible
+
+        # ``issue_token_score`` accumulates only over SCORED PRs (default
+        # ``_scored_mirror_pr`` token_score is 100.0), so this is the
+        # deterministic, time-decay-independent check: A has 7 scored, B has
+        # 6 (shared PR 100 is canonical for A only and credibility-only for B).
+        assert e_a.issue_token_score == 700.0
+        assert e_b.issue_token_score == 600.0
+        # All solving PRs share identical scoring inputs at this issue mix, so
+        # the discovery_score ratio collapses to 7:6.
+        assert e_a.issue_discovery_score > e_b.issue_discovery_score > 0
+        assert e_a.issue_discovery_score / e_b.issue_discovery_score == pytest.approx(7 / 6, rel=1e-2)
+
+    def test_within_miner_one_issue_per_pr_still_holds(self):
+        """One miner authoring two issues both closed by the same PR — the
+        earlier-created issue scores; the later one is credibility-only.
+        Preserves the original within-miner one-issue-per-PR semantics now
+        that the rule is enforced via the cross-miner canonical map."""
+        client = Mock()
+
+        miner_issues = [
+            _issue_dict(issue_number=10 + i, author_github_id='999', solved_by_pr=200 + i) for i in range(6)
+        ]
+        miner_issues.extend(
+            [
+                _issue_dict(
+                    issue_number=50,
+                    author_github_id='999',
+                    solved_by_pr=100,
+                    solving_pr_author='SOLVER',
+                    created_at='2026-04-01T00:00:00Z',
+                ),
+                _issue_dict(
+                    issue_number=51,
+                    author_github_id='999',
+                    solved_by_pr=100,
+                    solving_pr_author='SOLVER',
+                    created_at='2026-04-05T00:00:00Z',
+                ),
+            ]
+        )
+
+        client.get_miner_issues.return_value = _response(miner_issues)
+        eval_ = _eval(uid=1, github_id='999')
+
+        seed = MinerEvaluation(uid=99, hotkey='hkS', github_id='SEED')
+        seed.mirror_merged_prs = [
+            _scored_mirror_pr('entrius/gittensor-ui', pr_number) for pr_number in [100] + list(range(200, 206))
+        ]
+
+        _run(
+            run_mirror_issue_discovery(
+                {1: eval_, 99: seed},
+                _mirror_repos('entrius/gittensor-ui'),
+                _EMPTY_LANGS,
+                _EMPTY_TOKEN_CONFIG,
+                client=client,
+            )
+        )
+
+        # 8 solved (both shared-PR issues counted for credibility), eligible.
+        assert eval_.total_solved_issues == 8
+        assert eval_.total_valid_solved_issues == 8
+        assert eval_.is_issue_eligible
+        # ``issue_token_score`` only accumulates over SCORED PRs (default
+        # ``_scored_mirror_pr`` token_score is 100.0). 7 distinct scoring PRs
+        # ⇒ 700.0; the later PR-100 issue is credibility-only and contributes
+        # no token_score, so this would be 800.0 if the within-miner rule had
+        # broken alongside the cross-miner one.
+        assert eval_.issue_token_score == 700.0
+        assert eval_.issue_discovery_score > 0
+
+    def test_different_solving_prs_both_miners_score(self):
+        """Two miners' issues closed by completely disjoint solving PRs —
+        no cross-miner canonical contention; both miners score normally."""
+        client = Mock()
+
+        a_issues = [_issue_dict(issue_number=10 + i, author_github_id='A', solved_by_pr=200 + i) for i in range(7)]
+        b_issues = [_issue_dict(issue_number=20 + i, author_github_id='B', solved_by_pr=300 + i) for i in range(7)]
+
+        def _per_miner(github_id, since=None):
+            return _response(a_issues if github_id == 'A' else b_issues)
+
+        client.get_miner_issues.side_effect = _per_miner
+
+        e_a = _eval(uid=1, github_id='A')
+        e_b = _eval(uid=2, github_id='B')
+
+        seed = MinerEvaluation(uid=99, hotkey='hkS', github_id='SEED')
+        seed.mirror_merged_prs = [
+            _scored_mirror_pr('entrius/gittensor-ui', pr_number)
+            for pr_number in list(range(200, 207)) + list(range(300, 307))
+        ]
+
+        _run(
+            run_mirror_issue_discovery(
+                {1: e_a, 2: e_b, 99: seed},
+                _mirror_repos('entrius/gittensor-ui'),
+                _EMPTY_LANGS,
+                _EMPTY_TOKEN_CONFIG,
+                client=client,
+            )
+        )
+
+        # Identical issue mix and disjoint PRs → identical scores. Both miners
+        # score all 7 of their issues (no canonical contention).
+        assert e_a.total_solved_issues == 7
+        assert e_b.total_solved_issues == 7
+        assert e_a.issue_token_score == 700.0
+        assert e_b.issue_token_score == 700.0
+        assert e_a.issue_discovery_score == e_b.issue_discovery_score
+        assert e_a.issue_discovery_score > 0

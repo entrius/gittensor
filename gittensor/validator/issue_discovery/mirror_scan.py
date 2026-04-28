@@ -18,9 +18,10 @@ Anti-gaming gates (all applied):
 - issue.author_github_id != solving_pr.author_github_id (anti-self-issue)
 
 Same-account ("solver is also discoverer") gives credibility only — no
-discovery score. One-issue-per-PR rule prevents a single solving PR from
-generating multiple discovery scores when it closes more than one issue;
-the earliest-created qualifying issue wins.
+discovery score. One-issue-per-PR rule is round-global: a single solving PR
+awards at most one discovery score across the entire validator round, even
+when it closes issues authored by different miners. The earliest-created
+qualifying issue across all miners wins; the rest are credibility only.
 
 Base-score resolution uses a per-cycle cross-miner cache. Most solving PRs on
 mirror-enabled repos will be miners' own PRs that OSS scoring already tokenized;
@@ -32,7 +33,7 @@ the cache so sibling discoveries benefit.
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, NamedTuple, Optional, Set, Tuple
 
 import bittensor as bt
 
@@ -95,6 +96,24 @@ class _CacheStats:
     fetch_failures: int = 0
 
 
+class _MinerBatch(NamedTuple):
+    """Phase-1 partition of one miner's mirror issues by ``_classify_issue``.
+
+    Splitting on classification at fetch time means phase 2's two consumers
+    (``_build_canonical_pr_owners`` + ``_score_miner_mirror_issues``) operate on
+    already-filtered solved-only lists — no re-classification, no per-issue
+    string comparisons in the scoring loop, and 'ignore' issues drop out.
+    ``closed_count`` is the tallied count of 'not-solved-closed' issues that
+    feed credibility math directly; the 'ignore' bucket is intentionally
+    discarded since nothing downstream needs it.
+    """
+
+    evaluation: MinerEvaluation
+    solved_issues: List[MirrorIssue]
+    closed_count: int
+    open_issue_count: int
+
+
 async def run_mirror_issue_discovery(
     miner_evaluations: Dict[int, MinerEvaluation],
     mirror_repos: Dict[str, RepositoryConfig],
@@ -133,12 +152,16 @@ async def run_mirror_issue_discovery(
         f'{sum(len(ev.mirror_merged_prs) for ev in miner_evaluations.values())} scored mirror PRs'
     )
 
-    processed = 0
     skipped_no_gh = 0
     skipped_failed = 0
     fetch_errors = 0
     no_issues = 0
 
+    # Phase 1: fetch each miner's issues and partition by classification. The
+    # one-issue-per-PR rule is round-global, so scoring is deferred until every
+    # miner's batch is in hand. Partitioning here means ``_classify_issue`` runs
+    # exactly once per issue; both phase-2 consumers iterate solved-only lists.
+    pending: List[_MinerBatch] = []
     for uid, evaluation in miner_evaluations.items():
         if not evaluation.github_id or evaluation.github_id == '0':
             skipped_no_gh += 1
@@ -165,23 +188,33 @@ async def run_mirror_issue_discovery(
         # mirror-scoped state (the legacy GraphQL global open-issue count was
         # never the right signal for the gate).
         open_issue_count = sum(1 for i in filtered if i.state == 'OPEN')
+        solved_issues: List[MirrorIssue] = []
+        closed_count = 0
+        for issue in filtered:
+            classification = _classify_issue(issue)
+            if classification == 'solved':
+                solved_issues.append(issue)
+            elif classification == 'not-solved-closed':
+                closed_count += 1
+            # 'ignore' — dropped; nothing downstream consumes them
+        pending.append(_MinerBatch(evaluation, solved_issues, closed_count, open_issue_count))
 
-        processed += 1
+    canonical_pr_owners = _build_canonical_pr_owners(pending)
+    for batch in pending:
         _score_miner_mirror_issues(
-            evaluation,
-            filtered,
+            batch,
             mirror_repos,
             solving_pr_cache,
             cache_stats,
             client,
             programming_languages,
             token_config,
-            open_issue_count=open_issue_count,
+            canonical_pr_owners=canonical_pr_owners,
         )
 
     bt.logging.info('')
     bt.logging.info(
-        f'Issue discovery complete | {processed} processed | {no_issues} no mirror issues | '
+        f'Issue discovery complete | {len(pending)} processed | {no_issues} no mirror issues | '
         f'{fetch_errors} fetch errors | {skipped_no_gh} no github_id | {skipped_failed} prior OSS failure'
     )
     bt.logging.info(
@@ -189,6 +222,36 @@ async def run_mirror_issue_discovery(
         f'({cache_stats.misses - cache_stats.fetch_failures} fetched OK, '
         f'{cache_stats.fetch_failures} fetch failures)'
     )
+
+
+def _build_canonical_pr_owners(
+    pending: List[_MinerBatch],
+) -> Dict[Tuple[str, int], Tuple[datetime, int, int]]:
+    """Cross-miner one-issue-per-PR resolution (legacy parity, pre-#796).
+
+    Returns ``(repo, pr_number) -> (created_at, issue_number, uid)`` for the
+    earliest-created qualifying issue across all miners. Same-account issues
+    (discoverer == solver) are excluded — they never claim the slot, mirroring
+    legacy ``pr_scored.add`` ordering. ``_score_miner_mirror_issues`` matches
+    issue markers against this map to gate scoring vs. credibility-only.
+
+    Iterates ``batch.solved_issues`` directly — partitioning in phase 1
+    eliminates the classification re-check.
+    """
+    canonical: Dict[Tuple[str, int], Tuple[datetime, int, int]] = {}
+    far_future = datetime.max.replace(tzinfo=timezone.utc)
+    for batch in pending:
+        for issue in batch.solved_issues:
+            sp = issue.solving_pr
+            assert sp is not None  # phase-1 partition guarantees a solving_pr
+            if issue.author_github_id == sp.author_github_id:
+                continue
+            key = (issue.repo_full_name, sp.pr_number)
+            marker = (issue.created_at or far_future, issue.issue_number, batch.evaluation.uid)
+            existing = canonical.get(key)
+            if existing is None or marker < existing:
+                canonical[key] = marker
+    return canonical
 
 
 def _build_solving_pr_cache(
@@ -216,51 +279,43 @@ def _build_solving_pr_cache(
 
 
 def _score_miner_mirror_issues(
-    evaluation: MinerEvaluation,
-    issues: List[MirrorIssue],
+    batch: _MinerBatch,
     mirror_repos: Dict[str, RepositoryConfig],
     solving_pr_cache: Dict[Tuple[str, int], CachedSolvingPR],
     cache_stats: _CacheStats,
     client: MirrorClient,
     programming_languages: Dict[str, LanguageConfig],
     token_config: TokenConfig,
-    open_issue_count: int,
+    canonical_pr_owners: Dict[Tuple[str, int], Tuple[datetime, int, int]],
 ) -> None:
-    """Classify + score one miner's mirror issues, populate MinerEvaluation fields.
+    """Score one miner's solved issues, populate MinerEvaluation fields.
 
-    ``open_issue_count`` is the miner's currently-OPEN issue count across
-    mirror-enabled repos within the lookback window — the source-of-truth
-    for the open-issue spam multiplier on the mirror path.
+    ``batch`` carries the phase-1 partition: ``solved_issues`` is the iteration
+    target, ``closed_count`` and ``open_issue_count`` flow straight into the
+    evaluation, and ``evaluation`` is the destination.
+
+    ``canonical_pr_owners`` enforces the cross-miner one-issue-per-PR rule:
+    only the marker-matching issue scores, siblings count for credibility.
     """
+    evaluation = batch.evaluation
     solved_count = 0
     valid_solved_count = 0
-    closed_count = 0
     issue_token_score = 0.0
     scored_issues: List[Issue] = []
-
-    # One-issue-per-PR: the earliest-created issue a PR closes gets the score;
-    # later issues closed by the same PR add credibility only.
-    pr_scored_keys: Set[Tuple[str, int]] = set()
+    far_future = datetime.max.replace(tzinfo=timezone.utc)
 
     issues_sorted = sorted(
-        issues,
+        batch.solved_issues,
         key=lambda i: (
             i.repo_full_name,
             i.solved_by_pr or 0,
-            i.created_at or datetime.max.replace(tzinfo=timezone.utc),
+            i.created_at or far_future,
         ),
     )
 
     for issue in issues_sorted:
-        classification = _classify_issue(issue)
-        if classification == 'not-solved-closed':
-            closed_count += 1
-            continue
-        if classification == 'ignore':
-            continue
-
-        # classification == 'solved'
-        assert issue.solving_pr is not None  # _classify_issue guarantees
+        # Phase-1 partition guarantees every issue here is 'solved'.
+        assert issue.solving_pr is not None
         solving_pr = issue.solving_pr
 
         solved_count += 1
@@ -298,13 +353,13 @@ def _score_miner_mirror_issues(
             continue
 
         pr_key = (issue.repo_full_name, solving_pr.pr_number)
-        if pr_key in pr_scored_keys:
+        own_marker = (issue.created_at or far_future, issue.issue_number, evaluation.uid)
+        if canonical_pr_owners.get(pr_key) != own_marker:
             bt.logging.debug(
                 f'  issue #{issue.issue_number} ({issue.repo_full_name}): one-issue-per-PR '
-                f'(PR #{solving_pr.pr_number} already scored an earlier issue) — credibility only'
+                f'(PR #{solving_pr.pr_number} canonical owner is a different issue) — credibility only'
             )
             continue
-        pr_scored_keys.add(pr_key)
 
         repo_config = mirror_repos.get(issue.repo_full_name)
         if repo_config is None:
@@ -334,23 +389,23 @@ def _score_miner_mirror_issues(
     # with prior values.
     evaluation.total_solved_issues = solved_count
     evaluation.total_valid_solved_issues = valid_solved_count
-    evaluation.total_closed_issues = closed_count
-    evaluation.total_open_issues = open_issue_count
+    evaluation.total_closed_issues = batch.closed_count
+    evaluation.total_open_issues = batch.open_issue_count
     evaluation.issue_token_score = round(issue_token_score, 2)
 
-    is_eligible, credibility, reason = check_issue_eligibility(solved_count, valid_solved_count, closed_count)
+    is_eligible, credibility, reason = check_issue_eligibility(solved_count, valid_solved_count, batch.closed_count)
     evaluation.is_issue_eligible = is_eligible
     evaluation.issue_credibility = credibility
 
     if not is_eligible:
         bt.logging.info(
             f'├─ UID {evaluation.uid}: ineligible ({reason}) | '
-            f'{solved_count} solved ({valid_solved_count} valid) | {closed_count} closed | '
-            f'{open_issue_count} open'
+            f'{solved_count} solved ({valid_solved_count} valid) | {batch.closed_count} closed | '
+            f'{batch.open_issue_count} open'
         )
         return
 
-    spam_mult = calculate_open_issue_spam_multiplier(open_issue_count, issue_token_score)
+    spam_mult = calculate_open_issue_spam_multiplier(batch.open_issue_count, issue_token_score)
 
     total_discovery_score = 0.0
     for issue in scored_issues:
@@ -371,7 +426,7 @@ def _score_miner_mirror_issues(
 
     bt.logging.info(
         f'├─ UID {evaluation.uid}: {solved_count} solved ({valid_solved_count} valid) | '
-        f'{closed_count} closed | {open_issue_count} open | {len(scored_issues)} scored | '
+        f'{batch.closed_count} closed | {batch.open_issue_count} open | {len(scored_issues)} scored | '
         f'credibility={credibility:.2f} | spam_mult={spam_mult:.1f} | '
         f'mirror_score={total_discovery_score:.2f}'
     )

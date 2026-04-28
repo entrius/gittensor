@@ -1,5 +1,6 @@
 import math
 from datetime import datetime, timezone
+from typing import Optional
 
 import pytz
 
@@ -27,6 +28,15 @@ def parse_github_iso_to_utc(timestamp_str: str) -> datetime:
     if dt.tzinfo is None:
         return dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc)
+
+
+def parse_optional_github_iso_to_utc(value: Optional[str]) -> Optional[datetime]:
+    """``parse_github_iso_to_utc`` lifted to handle ``Optional[str]`` inputs.
+
+    Returns ``None`` when the input is falsy (``None`` or empty string), letting
+    callers feed ``data.get(...)`` straight through without per-site None-checks.
+    """
+    return parse_github_iso_to_utc(value) if value else None
 
 
 def parse_github_timestamp_to_cst(timestamp_str: str) -> datetime:

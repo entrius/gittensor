@@ -124,13 +124,23 @@ def config_set(key: str, value: str):
     # Ensure config directory exists
     GITTENSOR_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Load existing config or start fresh
+    # Load existing config or start fresh.
+    # On JSONDecodeError refuse to overwrite — the file may contain values the
+    # operator still relies on (network, contract_address, ws_endpoint, hotkey).
+    # Silently writing a fresh single-key config would erase those and fall
+    # through to mainnet defaults on the next read. Mirrors load_config's
+    # read-side fix (PR #817 / #816).
     config = {}
     if CONFIG_FILE.exists():
         try:
             config = json.loads(CONFIG_FILE.read_text())
-        except json.JSONDecodeError:
-            console.print('[yellow]Warning: Existing config was invalid, starting fresh[/yellow]')
+        except json.JSONDecodeError as e:
+            console.print(
+                f'[red]Error: Config file at {CONFIG_FILE} is not valid JSON ({e}).[/red]\n'
+                f'[red]Refusing to overwrite — inspect or move the file aside before retrying[/red]\n'
+                f'[red]so previously-configured keys (network, contract_address, ws_endpoint, ...) are not lost.[/red]'
+            )
+            raise SystemExit(1)
 
     # Set the value
     old_value = config.get(key)

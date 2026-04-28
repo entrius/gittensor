@@ -2,11 +2,17 @@
 # Copyright © 2025 Entrius
 
 """
-Tests for `gitt config set` key whitelist.
+Tests for `gitt config set`.
 
-Validates that only recognised CONFIG_KEYS are accepted by `gitt config set`,
-preventing typos like `wallet_name` from silently writing a dead entry that
-downstream commands (which read by canonical key name) will ignore.
+Covers two related guarantees:
+
+1. **Key whitelist (PR #813):** only recognised CONFIG_KEYS are accepted, so
+   typos like `wallet_name` cannot silently shadow the canonical names.
+2. **Corrupt-file refusal (PR #817 / issue #845):** a JSONDecodeError on the
+   existing config file aborts non-zero instead of clobbering the file with a
+   fresh single-key config. Operator's `network`, `contract_address`,
+   `ws_endpoint`, and `hotkey` would otherwise silently disappear and the next
+   `gitt issues ...` would fall through to finney mainnet.
 """
 
 import json
@@ -99,3 +105,57 @@ class TestConfigSetWhitelist:
         assert result.exit_code == 0, result.output
         assert 'alice' in result.output and 'bob' in result.output
         assert _read(config_file) == {'wallet': 'bob'}
+
+
+class TestConfigSetCorruption:
+    """`gitt config set` must not destroy other keys when the file is corrupt."""
+
+    def test_corrupt_config_aborts_with_nonzero_exit(self, temp_config_dir):
+        config_dir, config_file = temp_config_dir
+        config_dir.mkdir(parents=True)
+        # Truncated JSON — simulates an interrupted write or manual edit.
+        config_file.write_text('{"network": "test"')
+
+        runner = CliRunner()
+        result = runner.invoke(config_group, ['set', 'hotkey', 'default'])
+
+        assert result.exit_code != 0
+        assert 'not valid JSON' in result.output
+        assert 'Refusing to overwrite' in result.output
+
+    def test_corrupt_config_preserves_existing_file(self, temp_config_dir):
+        """The whole point: the bad file is left alone, not clobbered."""
+        config_dir, config_file = temp_config_dir
+        config_dir.mkdir(parents=True)
+        original_bytes = b'{"network": "test"'
+        config_file.write_bytes(original_bytes)
+
+        runner = CliRunner()
+        runner.invoke(config_group, ['set', 'hotkey', 'default'])
+
+        # Byte-for-byte identical: the operator can recover the values they
+        # had configured before the corruption.
+        assert config_file.read_bytes() == original_bytes
+
+    def test_valid_config_still_round_trips(self, temp_config_dir):
+        """Non-corrupt files must still merge new keys without loss."""
+        config_dir, config_file = temp_config_dir
+        config_dir.mkdir(parents=True)
+        config_file.write_text(json.dumps({'network': 'test', 'wallet': 'alice'}))
+
+        runner = CliRunner()
+        result = runner.invoke(config_group, ['set', 'hotkey', 'default'])
+
+        assert result.exit_code == 0, result.output
+        assert _read(config_file) == {'network': 'test', 'wallet': 'alice', 'hotkey': 'default'}
+
+    def test_missing_config_creates_fresh(self, temp_config_dir):
+        """First-run case: no existing file is fine — write a fresh one."""
+        _, config_file = temp_config_dir
+        assert not config_file.exists()
+
+        runner = CliRunner()
+        result = runner.invoke(config_group, ['set', 'wallet', 'alice'])
+
+        assert result.exit_code == 0, result.output
+        assert _read(config_file) == {'wallet': 'alice'}

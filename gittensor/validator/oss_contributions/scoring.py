@@ -2,29 +2,26 @@
 # Copyright © 2025 Entrius
 
 from datetime import datetime
-from typing import Dict, Tuple
+from typing import TYPE_CHECKING, Dict, Tuple, Union
 
 import bittensor as bt
 
 from gittensor.classes import (
     Issue,
     MinerEvaluation,
-    PrScoringResult,
     PRState,
     PullRequest,
-    ScoringCategory,
 )
+
+if TYPE_CHECKING:
+    from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredMirrorPR
 from gittensor.constants import (
-    CONTRIBUTION_SCORE_FOR_FULL_BONUS,
     EXCESSIVE_PR_PENALTY_BASE_THRESHOLD,
     LABEL_MULTIPLIERS,
     MAINTAINER_ASSOCIATIONS,
     MAINTAINER_ISSUE_MULTIPLIER,
-    MAX_CONTRIBUTION_BONUS,
     MAX_ISSUE_CLOSE_WINDOW_DAYS,
     MAX_OPEN_PR_THRESHOLD,
-    MERGED_PR_BASE_SCORE,
-    MIN_TOKEN_SCORE_FOR_BASE_SCORE,
     OPEN_PR_COLLATERAL_PERCENT,
     OPEN_PR_THRESHOLD_TOKEN_SCORE,
     PIONEER_DIVIDEND_MAX_RATIO,
@@ -44,7 +41,6 @@ from gittensor.utils.github_api_tools import (
 from gittensor.validator.oss_contributions.credibility import check_eligibility
 from gittensor.validator.utils.datetime_utils import calculate_time_decay
 from gittensor.validator.utils.load_weights import LanguageConfig, RepositoryConfig, TokenConfig, resolve_repo_weight
-from gittensor.validator.utils.tree_sitter_scoring import calculate_token_score_from_file_changes
 
 
 def score_miner_prs(
@@ -149,58 +145,25 @@ def calculate_base_score(
     token_config: TokenConfig,
     file_contents: Dict[str, FileContentPair],
 ) -> float:
-    """Calculate base score using SOURCE density scaling + contribution bonus"""
-    scoring_result: PrScoringResult = calculate_token_score_from_file_changes(
-        pr.file_changes or [],
-        file_contents,
-        token_config,
-        programming_languages,
+    """Run the shared base-score formula and copy fields onto the legacy PullRequest.
+
+    Lazy import of the mirror helper avoids a legacy↔mirror cycle (mirror/scoring.py
+    imports calculate_review_quality_multiplier from this module). On flip-day this
+    whole legacy module deletes; the helper stays put in mirror.
+    """
+    from gittensor.validator.oss_contributions.mirror.scoring import calculate_base_score_for_pr_files
+
+    result = calculate_base_score_for_pr_files(
+        pr.file_changes or [], file_contents, programming_languages, token_config
     )
-
-    if scoring_result.score_breakdown:
-        pr.token_score = scoring_result.score_breakdown.total_score
-        pr.structural_count = scoring_result.score_breakdown.structural_count
-        pr.structural_score = scoring_result.score_breakdown.structural_score
-        pr.leaf_count = scoring_result.score_breakdown.leaf_count
-        pr.leaf_score = scoring_result.score_breakdown.leaf_score
-        # Only count AST nodes (tree-diff), not line-count "nodes"
-        pr.total_nodes_scored = (
-            scoring_result.score_breakdown.structural_count + scoring_result.score_breakdown.leaf_count
-        )
-    else:
-        pr.total_nodes_scored = 0
-
-    # Threshold uses SOURCE category score only
-    source = scoring_result.by_category.get(ScoringCategory.SOURCE)
-    source_token_score = source.score_breakdown.total_score if source and source.score_breakdown else 0.0
-
-    # Density-scaled base score from SOURCE category only
-    source_density = source.density if source else 0.0
-    pr.code_density = round(source_density, 2)
-
-    if source_token_score < MIN_TOKEN_SCORE_FOR_BASE_SCORE:
-        initial_base_score = 0.0
-    else:
-        initial_base_score = MERGED_PR_BASE_SCORE * source_density
-
-    # Contribution bonus from all categories, capped at MAX_CONTRIBUTION_BONUS
-    bonus_percent = min(1.0, scoring_result.total_score / CONTRIBUTION_SCORE_FOR_FULL_BONUS)
-    contribution_bonus = round(bonus_percent * MAX_CONTRIBUTION_BONUS, 2)
-
-    base_score = round(initial_base_score + contribution_bonus, 2)
-
-    # Log with source density and bonus percentage
-    threshold_note = (
-        f' [below {MIN_TOKEN_SCORE_FOR_BASE_SCORE} token threshold]'
-        if source_token_score < MIN_TOKEN_SCORE_FOR_BASE_SCORE
-        else ''
-    )
-    bt.logging.info(
-        f'Base score: {initial_base_score:.2f} (density {source_density:.2f}){threshold_note}'
-        f' + {contribution_bonus} bonus ({bonus_percent * 100:.0f}% of max {MAX_CONTRIBUTION_BONUS}) = {base_score:.2f}'
-    )
-
-    return base_score
+    pr.token_score = result.token_score
+    pr.structural_count = result.structural_count
+    pr.structural_score = result.structural_score
+    pr.leaf_count = result.leaf_count
+    pr.leaf_score = result.leaf_score
+    pr.total_nodes_scored = result.total_nodes_scored
+    pr.code_density = result.code_density
+    return result.base_score
 
 
 def calculate_review_quality_multiplier(changes_requested_count: int) -> float:
@@ -231,7 +194,8 @@ def calculate_pr_multipliers(
     if is_merged:
         # Spam multiplier is recalculated in finalize_miner_scores with total token score
         pr.open_pr_spam_multiplier = 1.0
-        pr.time_decay_multiplier = round(calculate_time_decay_multiplier(pr), 2)
+        assert pr.merged_at is not None, f'PR #{pr.number} has no merged_at'
+        pr.time_decay_multiplier = round(calculate_time_decay(pr.merged_at), 2)
         pr.review_quality_multiplier = round(calculate_review_quality_multiplier(pr.changes_requested_count), 2)
     else:
         pr.open_pr_spam_multiplier = 1.0
@@ -259,12 +223,6 @@ def calculate_pr_spam_penalty_multiplier(total_open_prs: int, total_token_score:
     return 1.0 if total_open_prs <= threshold else 0.0
 
 
-def calculate_time_decay_multiplier(pr: PullRequest) -> float:
-    """Calculate time decay multiplier for a single PR based on merge date."""
-    assert pr.merged_at is not None, f'PR #{pr.number} has no merged_at'
-    return calculate_time_decay(pr.merged_at)
-
-
 def calculate_pioneer_dividends(
     miner_evaluations: Dict[int, MinerEvaluation],
 ) -> None:
@@ -276,29 +234,33 @@ def calculate_pioneer_dividends(
     multiplier), using per-position rates (30%/20%/10%). The dividend uses the
     follower's multipliers, not the pioneer's — so it reflects follower quality.
 
+    Walks both legacy ``merged_pull_requests`` and mirror ``mirror_merged_prs``;
+    a repo is mirror-enabled or legacy, never both, so the per-repo grouping
+    sees a single path's PRs only.
+
     Must be called AFTER all earned_scores have been computed.
     """
     pr_index: Dict[str, Dict[int, list]] = {}
     repo_contributions: Dict[str, Dict[int, Tuple[datetime, int, float]]] = {}
 
-    for evaluation in miner_evaluations.values():
-        for pr in evaluation.merged_pull_requests:
+    for uid, evaluation in miner_evaluations.items():
+        for pr in evaluation.merged_pull_requests + evaluation.mirror_merged_prs:
             if not pr.is_pioneer_eligible():
                 continue
             assert pr.merged_at is not None
             repo = pr.repository_full_name
-            pr_index.setdefault(repo, {}).setdefault(pr.uid, []).append(pr)
+            pr_index.setdefault(repo, {}).setdefault(uid, []).append(pr)
 
-            current = repo_contributions.setdefault(repo, {}).get(pr.uid)
+            current = repo_contributions.setdefault(repo, {}).get(uid)
             if current is None:
-                repo_contributions[repo][pr.uid] = (pr.merged_at, pr.number, pr.earned_score)
+                repo_contributions[repo][uid] = (pr.merged_at, pr.number, pr.earned_score)
             else:
                 earliest_at, earliest_num, total_score = current
                 new_total = total_score + pr.earned_score
                 if pr.merged_at < earliest_at or (pr.merged_at == earliest_at and pr.number < earliest_num):
-                    repo_contributions[repo][pr.uid] = (pr.merged_at, pr.number, new_total)
+                    repo_contributions[repo][uid] = (pr.merged_at, pr.number, new_total)
                 else:
-                    repo_contributions[repo][pr.uid] = (earliest_at, earliest_num, new_total)
+                    repo_contributions[repo][uid] = (earliest_at, earliest_num, new_total)
 
     for repo, uid_entries in repo_contributions.items():
         sorted_uids = sorted(uid_entries.items(), key=lambda x: (x[1][0], x[1][1]))
@@ -349,20 +311,23 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
         bt.logging.info(f'UID {uid}')
         bt.logging.info('=' * 50)
 
-        # Process open PRs for collateral
-        for pr in evaluation.open_pull_requests:
+        # Process open PRs for collateral (legacy + mirror — both paths contribute)
+        for pr in evaluation.open_pull_requests + evaluation.mirror_open_prs:
             pr.collateral_score = calculate_open_pr_collateral_score(pr)
             evaluation.total_collateral_score += pr.collateral_score
 
-        has_contributions = len(evaluation.merged_pull_requests) > 0 or len(evaluation.closed_pull_requests) > 0
+        has_contributions = evaluation.total_merged_prs > 0 or evaluation.total_closed_prs > 0
 
         if not has_contributions:
             bt.logging.info('No merged or closed PRs - skipping evaluation')
             continue
 
-        # Check eligibility gate (credibility with mulligan + min valid PRs)
+        # Check eligibility gate across both paths. check_eligibility only touches
+        # token_score on each PR; ScoredMirrorPR has the same field, so combining
+        # the lists works without adapting types.
         is_eligible, credibility, reason = check_eligibility(
-            evaluation.merged_pull_requests, evaluation.closed_pull_requests
+            evaluation.merged_pull_requests + evaluation.mirror_merged_prs,
+            evaluation.closed_pull_requests + evaluation.mirror_closed_prs,
         )
         evaluation.is_eligible = is_eligible
         evaluation.credibility = credibility
@@ -371,21 +336,16 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
             bt.logging.info(f'UID {uid} ineligible: {reason} — score set to 0')
             continue
 
-        # Calculate spam multiplier once per miner using total token score
-        # We need to compute total_token_score first from all merged PRs
-        preliminary_token_score = sum(pr.token_score for pr in evaluation.merged_pull_requests)
+        # Calculate spam multiplier once per miner using combined total token score
+        merged_prs = evaluation.merged_pull_requests + evaluation.mirror_merged_prs
+        preliminary_token_score = sum(pr.token_score for pr in merged_prs)
         spam_multiplier = calculate_pr_spam_penalty_multiplier(evaluation.total_open_prs, preliminary_token_score)
 
-        # Process merged PRs
-        for pr in evaluation.merged_pull_requests:
+        for pr in merged_prs:
             pr.open_pr_spam_multiplier = spam_multiplier
-
-            # Apply linear credibility multiplier (k=1)
             pr.credibility_multiplier = round(credibility, 2)
-
             pr.calculate_final_earned_score()
 
-            # Aggregate token scoring breakdown
             evaluation.total_token_score += pr.token_score
             evaluation.total_structural_count += pr.structural_count
             evaluation.total_structural_score += pr.structural_score
@@ -393,6 +353,7 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
             evaluation.total_leaf_score += pr.leaf_score
 
     # Phase 2: Calculate pioneer dividends from follower earned_scores
+    # (walks legacy + mirror merged PRs in one pass).
     calculate_pioneer_dividends(miner_evaluations)
 
     # Phase 3: Aggregate totals (including dividends), collateral, logging
@@ -400,12 +361,13 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
         if not evaluation:
             continue
 
-        has_contributions = len(evaluation.merged_pull_requests) > 0 or len(evaluation.closed_pull_requests) > 0
+        has_contributions = evaluation.total_merged_prs > 0 or evaluation.total_closed_prs > 0
         if not has_contributions:
             continue
 
-        # Aggregate scores (earned_score now includes pioneer_dividend from Phase 2)
-        for pr in evaluation.merged_pull_requests:
+        # Aggregate scores (earned_score now includes pioneer_dividend from Phase 2).
+        # ScoredMirrorPR shares base_score / earned_score / total_nodes_scored with PullRequest.
+        for pr in evaluation.merged_pull_requests + evaluation.mirror_merged_prs:
             evaluation.base_total_score += pr.base_score
             evaluation.total_score += pr.earned_score
             evaluation.total_nodes_scored += pr.total_nodes_scored
@@ -436,6 +398,14 @@ def calculate_issue_multiplier(pr: PullRequest) -> float:
     Returns a flat multiplier: MAINTAINER_ISSUE_MULTIPLIER (1.66) if any valid issue
     author is a maintainer (OWNER/MEMBER/COLLABORATOR), otherwise
     STANDARD_ISSUE_MULTIPLIER (1.33). Returns 1.0 if no valid linked issues.
+
+    Mirror has a near-identical ``_calculate_issue_multiplier`` in mirror/scoring.py.
+    Kept separate intentionally: ``Issue`` and ``MirrorLinkedIssue`` differ on field
+    names (``issues`` / ``number`` vs ``linked_issues`` / ``pr_number``) and the
+    validators (``is_valid_issue`` vs ``_is_valid_linked_issue``) apply different
+    anti-gaming gates (transferred check, edited_after_merge source, github_id-based
+    self-issue check). Unifying would require accessor adapters that cost more than
+    the duplicate saves.
     """
     if not pr.issues:
         bt.logging.info(f'PR #{pr.number} - Contains no linked issues')
@@ -514,7 +484,9 @@ def is_valid_issue(issue: Issue, pr: PullRequest) -> bool:
 # =============================================================================
 
 
-def calculate_open_pr_collateral_score(pr: PullRequest) -> float:
+def calculate_open_pr_collateral_score(
+    pr: Union[PullRequest, 'ScoredMirrorPR'],
+) -> float:  # TODO: drop Union on legacy delete day
     """
     Calculate collateral score for an open PR.
 

@@ -42,7 +42,6 @@ QUERY = """
     query($userId: ID!, $limit: Int!, $cursor: String, $maxChangesRequestedReviews: Int!) {
       node(id: $userId) {
         ... on User {
-          issues(states: [OPEN]) { totalCount }
           pullRequests(first: $limit, states: [MERGED, OPEN, CLOSED], orderBy: {field: CREATED_AT, direction: DESC}, after: $cursor) {
             pageInfo {
               hasNextPage
@@ -178,13 +177,14 @@ def make_graphql_headers(token: str) -> Dict[str, str]:
     return {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
 
 
-def get_github_user(token: str) -> Optional[Dict[str, Any]]:
-    """Fetch GitHub user data for a PAT with retry.
+def get_github_id(token: str) -> Optional[str]:
+    """Get GitHub numeric user id (as string) using a PAT.
 
     Args:
-        token (str): Github pat
+        token (str): GitHub personal access token.
+
     Returns:
-        Optional[Dict[str, Any]]: Parsed JSON user object on success, or None on failure.
+        Optional[str]: Numeric user id as a string, or None if it cannot be determined.
     """
     if not token:
         return None
@@ -202,7 +202,8 @@ def get_github_user(token: str) -> Optional[Dict[str, Any]]:
                     bt.logging.warning(f'Failed to parse GitHub /user JSON response: {e}')
                     return None
 
-                return user_data
+                user_id = user_data.get('id')
+                return str(user_id) if user_id is not None else None
 
             bt.logging.warning(
                 f'GitHub /user request failed with status {response.status_code} (attempt {attempt + 1}/6)'
@@ -216,26 +217,6 @@ def get_github_user(token: str) -> Optional[Dict[str, Any]]:
                 time.sleep(2)
 
     return None
-
-
-def get_github_id(token: str) -> Optional[str]:
-    """Get GitHub numeric user id (as string) using a PAT.
-
-    Args:
-        token (str): GitHub personal access token.
-
-    Returns:
-        Optional[str]: Numeric user id as a string, or None if it cannot be determined.
-    """
-    user_data = get_github_user(token)
-    if not user_data:
-        return None
-
-    user_id = user_data.get('id')
-    if user_id is None:
-        return None
-
-    return str(user_id)
 
 
 def get_merge_base_sha(repository: str, base_sha: str, head_sha: str, token: str) -> Optional[str]:
@@ -970,10 +951,6 @@ def load_miners_prs(
                 miner_eval.github_pr_fetch_failed = True
                 break
 
-            # Extract open issue count from first page (User-level field, not paginated)
-            if cursor is None:
-                miner_eval.total_open_issues = user_data.get('issues', {}).get('totalCount', 0)
-
             pr_data: Dict = user_data.get('pullRequests', {})
             prs: List = pr_data.get('nodes', [])
             page_info: Dict = pr_data.get('pageInfo', {})
@@ -1043,7 +1020,11 @@ def find_solver_from_cross_references(
     - merged, and
     - explicitly closing ``issue_number``.
 
-    If multiple candidates exist, the most recent ``merged_at`` is selected.
+    If multiple candidates exist, the earliest ``merged_at`` is selected, since
+    GitHub closes an issue on the first merged PR that triggers the close; later
+    PRs declaring "Closes #X" in their body still appear in the timeline with
+    ``closingIssuesReferences`` populated even though they did not actually
+    close the issue. PR ``number`` is used as a deterministic tiebreaker.
 
     Returns:
         ``None`` when lookup fails and should be retried later. Otherwise a
@@ -1060,14 +1041,14 @@ def find_solver_from_cross_references(
         return None, None
 
     if len(merged) > 1:
-        bt.logging.warning(f'Multiple closing PRs found for {repo}#{issue_number}, selecting most recent.')
+        bt.logging.warning(f'Multiple closing PRs found for {repo}#{issue_number}, selecting earliest-merged.')
         for candidate in merged:
             bt.logging.debug(
                 f'  PR#{candidate.get("number")}, solver_id={candidate.get("author_id")}, '
                 f'merged_at={candidate.get("merged_at")}'
             )
 
-    merged.sort(key=lambda p: p.get('merged_at') or '', reverse=True)
+    merged.sort(key=lambda p: (p.get('merged_at') or '', p.get('number') or 0))
     best = merged[0]
     bt.logging.debug(
         f'Solver via GraphQL cross-reference: PR#{best.get("number")}, '

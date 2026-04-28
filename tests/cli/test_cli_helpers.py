@@ -11,6 +11,7 @@ invocation with validation (no live network).
 
 import json
 from decimal import Decimal
+from typing import Any, Dict, Optional
 from unittest.mock import patch
 
 import click
@@ -272,6 +273,150 @@ class TestValidateGitHubIssue:
 
 
 # =============================================================================
+# require_verified_exists — strict verification for mutation paths
+# =============================================================================
+
+
+def _fake_response(status_code: int, payload: Optional[Dict[str, Any]] = None):
+    """Build a minimal object that looks like ``requests.Response`` for the helpers."""
+    return type(
+        'Resp',
+        (),
+        {
+            'status_code': status_code,
+            'ok': 200 <= status_code < 300,
+            'json': lambda self: payload or {},
+        },
+    )()
+
+
+class TestRequireVerifiedExistsGitHubIssue:
+    """When register passes ``require_verified_exists=True``, any branch that
+    would otherwise warn-and-skip must raise ``click.BadParameter`` instead,
+    so an outage or 5xx cannot put a bounty on-chain for an unverified issue.
+    """
+
+    def test_503_raises_bad_parameter(self):
+        with patch(
+            'gittensor.cli.issue_commands.helpers.requests.get',
+            return_value=_fake_response(503),
+        ):
+            with pytest.raises(click.BadParameter) as exc_info:
+                validate_github_issue('owner', 'repo', 42, require_verified_exists=True)
+        msg = str(exc_info.value)
+        assert 'Could not verify' in msg
+        assert '#42' in msg
+        assert 'owner/repo' in msg
+        assert '503' in msg
+        assert exc_info.value.param_hint == '--issue'
+
+    def test_403_raises_bad_parameter(self):
+        with patch(
+            'gittensor.cli.issue_commands.helpers.requests.get',
+            return_value=_fake_response(403),
+        ):
+            with pytest.raises(click.BadParameter) as exc_info:
+                validate_github_issue('owner', 'repo', 7, require_verified_exists=True)
+        assert '403' in str(exc_info.value)
+        assert exc_info.value.param_hint == '--issue'
+
+    def test_request_exception_raises_bad_parameter(self):
+        import requests as _requests
+
+        with patch(
+            'gittensor.cli.issue_commands.helpers.requests.get',
+            side_effect=_requests.ConnectionError('boom'),
+        ):
+            with pytest.raises(click.BadParameter) as exc_info:
+                validate_github_issue('owner', 'repo', 99, require_verified_exists=True)
+        msg = str(exc_info.value)
+        assert 'Could not verify' in msg
+        assert 'ConnectionError' in msg
+        assert exc_info.value.param_hint == '--issue'
+
+    def test_503_without_flag_still_returns_none(self):
+        """Back-compat: read-only callers that do not opt in keep warn-and-skip."""
+        with patch(
+            'gittensor.cli.issue_commands.helpers.requests.get',
+            return_value=_fake_response(503),
+        ):
+            with patch('gittensor.cli.issue_commands.helpers.console.print'):
+                result = validate_github_issue('owner', 'repo', 42)
+        assert result is None
+
+    def test_404_still_raises_not_found_even_with_flag(self):
+        """A definitive 404 keeps its dedicated message; the flag only widens
+        the warn-and-skip branches, it does not suppress real rejections."""
+        with patch(
+            'gittensor.cli.issue_commands.helpers.requests.get',
+            return_value=_fake_response(404),
+        ):
+            with pytest.raises(click.BadParameter) as exc_info:
+                validate_github_issue('owner', 'repo', 42, require_verified_exists=True)
+        assert 'not found' in str(exc_info.value)
+
+    def test_happy_path_with_flag_returns_data(self):
+        """The flag must not affect the success path."""
+        payload = {'state': 'open', 'number': 42, 'title': 'Real issue'}
+        with patch(
+            'gittensor.cli.issue_commands.helpers.requests.get',
+            return_value=_fake_response(200, payload),
+        ):
+            data = validate_github_issue('owner', 'repo', 42, require_verified_exists=True)
+        assert data == payload
+
+
+class TestRequireVerifiedExistsRepository:
+    """Same contract for ``validate_repository`` — register's first probe."""
+
+    def test_503_raises_bad_parameter(self):
+        with patch(
+            'gittensor.cli.issue_commands.helpers.requests.get',
+            return_value=_fake_response(503),
+        ):
+            with pytest.raises(click.BadParameter) as exc_info:
+                validate_repository('owner/repo', require_verified_exists=True)
+        msg = str(exc_info.value)
+        assert 'Could not verify' in msg
+        assert "'owner/repo'" in msg
+        assert '503' in msg
+        assert exc_info.value.param_hint == '--repo'
+
+    def test_request_exception_raises_bad_parameter(self):
+        import requests as _requests
+
+        with patch(
+            'gittensor.cli.issue_commands.helpers.requests.get',
+            side_effect=_requests.Timeout('timed out'),
+        ):
+            with pytest.raises(click.BadParameter) as exc_info:
+                validate_repository('owner/repo', require_verified_exists=True)
+        assert 'Could not verify' in str(exc_info.value)
+        assert 'Timeout' in str(exc_info.value)
+        assert exc_info.value.param_hint == '--repo'
+
+    def test_503_without_flag_just_warns(self):
+        with patch(
+            'gittensor.cli.issue_commands.helpers.requests.get',
+            return_value=_fake_response(503),
+        ):
+            with patch('gittensor.cli.issue_commands.helpers.console.print') as mock_print:
+                owner, name = validate_repository('owner/repo')
+        assert owner == 'owner'
+        assert name == 'repo'
+        mock_print.assert_called_once()
+
+    def test_404_still_raises_not_found_even_with_flag(self):
+        with patch(
+            'gittensor.cli.issue_commands.helpers.requests.get',
+            return_value=_fake_response(404),
+        ):
+            with pytest.raises(click.BadParameter) as exc_info:
+                validate_repository('ghost/missing', require_verified_exists=True)
+        assert 'not found' in str(exc_info.value)
+
+
+# =============================================================================
 # validate_ss58_address
 # =============================================================================
 
@@ -455,6 +600,78 @@ class TestCliRegisterValidation:
             )
         assert result.exit_code != 0
         assert 'between' in result.output or over_max in result.output or 'issue' in result.output.lower()
+
+    def test_register_aborts_on_github_503_before_contract_call(self, cli_root, runner):
+        """A 5xx from GitHub during register must abort with a non-zero exit
+        and must NOT reach the contract ``register_issue`` exec path.
+        """
+        import gittensor.cli.issue_commands.mutations as mut
+
+        exec_was_called = {'value': False}
+
+        class _Sentinel:
+            def exec(self, *_args, **_kwargs):
+                exec_was_called['value'] = True
+                raise AssertionError('register_issue must not be submitted on a GitHub skip')
+
+        with (
+            patch(
+                'gittensor.cli.issue_commands.mutations._resolve_contract_and_network',
+                return_value=(
+                    '0x1234567890123456789012345678901234567890',
+                    'wss://entrypoint-finney.opentensor.ai:443',
+                    'finney',
+                ),
+            ),
+            patch(
+                'gittensor.cli.issue_commands.helpers.requests.get',
+                return_value=_fake_response(503),
+            ),
+            patch.object(mut, 'Path'),
+        ):
+            result = runner.invoke(
+                cli_root,
+                ['issues', 'register', '--repo', 'owner/repo', '--issue', '1', '--bounty', '10', '-y'],
+                catch_exceptions=False,
+            )
+
+        assert result.exit_code != 0
+        assert exec_was_called['value'] is False
+        assert 'Could not verify' in result.output
+        assert '503' in result.output
+
+    def test_register_aborts_on_github_network_error_before_contract_call(self, cli_root, runner):
+        """A ``requests.RequestException`` during register must also abort
+        with a non-zero exit before any on-chain write is attempted.
+        """
+        import requests as _requests
+
+        import gittensor.cli.issue_commands.mutations as mut
+
+        with (
+            patch(
+                'gittensor.cli.issue_commands.mutations._resolve_contract_and_network',
+                return_value=(
+                    '0x1234567890123456789012345678901234567890',
+                    'wss://entrypoint-finney.opentensor.ai:443',
+                    'finney',
+                ),
+            ),
+            patch(
+                'gittensor.cli.issue_commands.helpers.requests.get',
+                side_effect=_requests.ConnectionError('no route to host'),
+            ),
+            patch.object(mut, 'Path'),
+        ):
+            result = runner.invoke(
+                cli_root,
+                ['issues', 'register', '--repo', 'owner/repo', '--issue', '1', '--bounty', '10', '-y'],
+                catch_exceptions=False,
+            )
+
+        assert result.exit_code != 0
+        assert 'Could not verify' in result.output
+        assert 'ConnectionError' in result.output
 
 
 class TestCliVoteValidation:
@@ -653,6 +870,33 @@ class TestCliMissingContractConfig:
             )
         assert result.exit_code != 0
         assert 'Contract address not configured' in result.output
+
+
+class TestCliRegisterLogicalFailures:
+    """Ensure logical failure branches in `issues register` exit non-zero."""
+
+    def test_register_exits_non_zero_when_contract_metadata_missing(self, cli_root, runner):
+        with (
+            patch(
+                'gittensor.cli.issue_commands.mutations._resolve_contract_and_network',
+                return_value=(
+                    '0x1234567890123456789012345678901234567890',
+                    'wss://entrypoint-finney.opentensor.ai:443',
+                    'finney',
+                ),
+            ),
+            patch('gittensor.cli.issue_commands.mutations.validate_repository', return_value=('owner', 'repo')),
+            patch('gittensor.cli.issue_commands.mutations.validate_github_issue', return_value={}),
+            patch('substrateinterface.SubstrateInterface'),
+            patch('bittensor.Wallet'),
+        ):
+            result = runner.invoke(
+                cli_root,
+                ['issues', 'register', '--repo', 'owner/repo', '--issue', '1', '--bounty', '10', '-y'],
+                catch_exceptions=False,
+            )
+        assert result.exit_code != 0
+        assert 'Contract metadata not found' in result.output
 
 
 class TestCliRuntimeExceptions:

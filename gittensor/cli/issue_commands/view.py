@@ -24,7 +24,6 @@ from .helpers import (
     _resolve_contract_and_network,
     colorize_status,
     console,
-    emit_error_json,
     emit_json,
     format_alpha,
     handle_exception,
@@ -80,8 +79,7 @@ def issues_list(issue_id: int, network: str, rpc_url: str, contract: str, verbos
         if issue_id is not None:
             issue = next((i for i in issues if i['id'] == issue_id), None)
             if issue is None:
-                emit_error_json(f'Issue {issue_id} not found on-chain.', error_type='not_found')
-                raise SystemExit(1)
+                handle_exception(as_json, f'Issue {issue_id} not found on-chain.', 'not_found')
             emit_json({'success': True, 'issue': issue})
         else:
             emit_json({'success': True, 'issue_count': len(issues), 'issues': issues})
@@ -109,7 +107,7 @@ def issues_list(issue_id: int, network: str, rpc_url: str, contract: str, verbos
                 )
             )
         else:
-            console.print(f'[yellow]Issue {issue_id} not found.[/yellow]')
+            handle_exception(as_json, f'Issue {issue_id} not found on-chain.', 'not_found')
         return
 
     # Table view of all issues
@@ -321,9 +319,9 @@ def admin_info(network: str, rpc_url: str, contract: str, verbose: bool, as_json
         else:
             msg = 'Could not read contract configuration.'
             if as_json:
-                emit_error_json(msg, error_type='read_failed')
-                raise SystemExit(1)
+                handle_exception(as_json=as_json, message=msg, error_type='read_failed')
             console.print(f'[yellow]{msg}[/yellow]')
             console.print('[dim]Try running with --verbose to see debug details.[/dim]')
+            raise SystemExit(1)
     except Exception as e:
         handle_exception(as_json=as_json, message=str(e))

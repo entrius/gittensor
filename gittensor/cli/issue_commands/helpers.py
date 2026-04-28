@@ -123,7 +123,7 @@ def with_cli_behavior_options(
     include_yes: bool = False,
     verbose_help: str = 'Show debug output',
     json_help: str = 'Output as JSON for scripting',
-    yes_help: str = 'Skip confirmation prompt (non-interactive/CI)',
+    yes_help: str = 'Skip confirmation prompt (non-interactive/CI). Alias: --no-prompt (btcli-compatible).',
 ) -> Callable[[CommandFunc], CommandFunc]:
     """Add common CLI behavior options such as verbose, JSON, and confirmation controls."""
     decorators: list[Callable[[CommandFunc], CommandFunc]] = []
@@ -150,7 +150,9 @@ def with_cli_behavior_options(
         decorators.append(
             click.option(
                 '--yes',
+                '--no-prompt',
                 '-y',
+                'yes',
                 is_flag=True,
                 help=yes_help,
             )
@@ -251,6 +253,21 @@ def _is_interactive() -> bool:
     return getattr(sys.stdin, 'isatty', lambda: False)()
 
 
+def confirm_or_abort(prompt: str, yes: bool, default: bool = False) -> bool:
+    """Prompt for confirmation before a destructive operation.
+
+    Returns True if the caller should proceed. Returns False (and prints a
+    cancellation message) if the user declines. `yes` and non-TTY input both
+    skip the prompt and proceed.
+    """
+    if yes or not _is_interactive():
+        return True
+    if click.confirm(f'\n{prompt}', default=default):
+        return True
+    console.print('[yellow]Cancelled.[/yellow]')
+    return False
+
+
 def get_github_pat() -> Optional[str]:
     """Return GITTENSOR_MINER_PAT from environment, or None."""
     return os.environ.get('GITTENSOR_MINER_PAT') or None
@@ -347,12 +364,37 @@ def validate_bounty_amount(bounty: str) -> int:
     return raw
 
 
-def validate_repository(repo: str, verify_exists: bool = True) -> Tuple[str, str]:
+def _raise_github_verification_required(
+    check: str,
+    detail: str,
+    *,
+    param_hint: str,
+) -> None:
+    """Raise BadParameter when a GitHub existence probe could not complete.
+
+    Used by the strict variants of validate_repository and validate_github_issue
+    so mutation commands never fall through to on-chain writes on transient failures.
+    """
+    raise click.BadParameter(
+        f'Could not verify {check} on GitHub ({detail}). Try again when GitHub is reachable.',
+        param_hint=param_hint,
+    )
+
+
+def validate_repository(
+    repo: str,
+    verify_exists: bool = True,
+    *,
+    require_verified_exists: bool = False,
+) -> Tuple[str, str]:
     """Validate owner/repo format and optionally verify it exists on GitHub.
 
-    Returns (owner, repo_name) on success.
-    Raises click.BadParameter on failure.
+    Returns (owner, repo_name) on success. Raises click.BadParameter on failure.
+    Pass require_verified_exists=True to abort on transient GitHub errors instead
+    of warning and continuing; requires verify_exists=True.
     """
+    if require_verified_exists and not verify_exists:
+        raise ValueError('require_verified_exists requires verify_exists=True')
     repo = repo.strip()
 
     if not REPO_PATTERN.match(repo):
@@ -377,20 +419,41 @@ def validate_repository(repo: str, verify_exists: bool = True) -> Tuple[str, str
                     param_hint='--repo',
                 )
             if not resp.ok:
+                if require_verified_exists:
+                    _raise_github_verification_required(
+                        f"repository '{owner}/{repo_name}'",
+                        f'status {resp.status_code}',
+                        param_hint='--repo',
+                    )
                 console.print(
                     f'[yellow]Warning: GitHub API returned {resp.status_code} — skipping existence check[/yellow]'
                 )
-        except requests.RequestException:
+        except requests.RequestException as exc:
+            if require_verified_exists:
+                detail = type(exc).__name__
+                _raise_github_verification_required(
+                    f"repository '{owner}/{repo_name}'",
+                    detail,
+                    param_hint='--repo',
+                )
             console.print('[yellow]Warning: Could not reach GitHub API — skipping existence check[/yellow]')
 
     return owner, repo_name
 
 
-def validate_github_issue(owner: str, repo: str, issue_number: int) -> Optional[Dict[str, Any]]:
+def validate_github_issue(
+    owner: str,
+    repo: str,
+    issue_number: int,
+    *,
+    require_verified_exists: bool = False,
+) -> Optional[Dict[str, Any]]:
     """Verify a GitHub issue exists, is open, and is not a pull request.
 
     Returns the issue JSON data on success, or None if verification was skipped
-    due to network issues.  Raises click.BadParameter on validation failure.
+    due to network issues. Raises click.BadParameter on validation failure.
+    Pass require_verified_exists=True to abort on transient errors instead of
+    warning and continuing.
     """
     try:
         resp = requests.get(
@@ -398,7 +461,14 @@ def validate_github_issue(owner: str, repo: str, issue_number: int) -> Optional[
             headers={'User-Agent': 'gittensor-cli'},
             timeout=GITHUB_API_TIMEOUT,
         )
-    except requests.RequestException:
+    except requests.RequestException as exc:
+        if require_verified_exists:
+            detail = type(exc).__name__
+            _raise_github_verification_required(
+                f'issue #{issue_number} in {owner}/{repo}',
+                detail,
+                param_hint='--issue',
+            )
         console.print('[yellow]Warning: Could not reach GitHub API — skipping issue check[/yellow]')
         return None
 
@@ -408,6 +478,12 @@ def validate_github_issue(owner: str, repo: str, issue_number: int) -> Optional[
             param_hint='--issue',
         )
     if not resp.ok:
+        if require_verified_exists:
+            _raise_github_verification_required(
+                f'issue #{issue_number} in {owner}/{repo}',
+                f'status {resp.status_code}',
+                param_hint='--issue',
+            )
         console.print(f'[yellow]Warning: GitHub API returned {resp.status_code} — skipping issue check[/yellow]')
         return None
 

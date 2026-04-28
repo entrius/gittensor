@@ -80,6 +80,9 @@ class FileChange:
         test_dir_patterns = [
             r'(^|/)tests?/',
             r'(^|/)__tests?__/',
+            r'(^|/)androidtest[a-z]*/',
+            r'(^|/)integrationtest/',
+            r'(^|/)e2e/',
         ]
         if any(re.search(pattern, filename_lower) for pattern in test_dir_patterns):
             return True
@@ -92,6 +95,8 @@ class FileChange:
             r'\.test\.[^.]+$',
             r'\.tests\.[^.]+$',
             r'\.spec\.[^.]+$',
+            r'\.e2e-spec\.[^.]+$',
+            r'\.e2e-test\.[^.]+$',
             r'^test\.[^.]+$',
             r'^tests\.[^.]+$',
         ]

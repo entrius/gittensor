@@ -6,8 +6,10 @@ from __future__ import annotations
 
 import json
 import sys
+from collections import Counter
 from contextlib import nullcontext
 from pathlib import Path
+from typing import Any
 
 import click
 from rich.console import Console
@@ -101,3 +103,25 @@ def _require_validator_axons(metagraph, json_mode: bool) -> tuple[list, list]:
         _error('No reachable validator axons found on the network.', json_mode)
         sys.exit(1)
     return validator_axons, validator_uids
+
+
+def _pat_check_row_category(row: dict[str, Any]) -> str:
+    """Classify a PAT probe row; must match `miner check` table rendering order."""
+    if row.get('pat_valid') is True:
+        return 'valid'
+    if row.get('has_pat') is False:
+        return 'no_pat'
+    if row.get('has_pat') is True and row.get('pat_valid') is False:
+        return 'invalid_pat'
+    return 'no_response'
+
+
+def _pat_check_aggregate_counts(results: list[dict[str, Any]]) -> dict[str, int]:
+    """Count PAT check rows by status for JSON summaries."""
+    counts = Counter(_pat_check_row_category(r) for r in results)
+    return {
+        'valid': counts['valid'],
+        'no_pat': counts['no_pat'],
+        'invalid_pat': counts['invalid_pat'],
+        'no_response': counts['no_response'],
+    }

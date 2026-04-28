@@ -114,6 +114,52 @@ class TestLoadMasterRepositories:
         for repo_name in repos.keys():
             assert repo_name == repo_name.lower(), f'{repo_name} should be lowercase'
 
+    def test_mirror_enabled_field_present_on_live_configs(self):
+        """Live master_repositories.json entries load with a bool mirror_enabled."""
+        repos = load_master_repo_weights()
+        for repo_name, config in repos.items():
+            assert isinstance(config.mirror_enabled, bool), (
+                f'{repo_name} mirror_enabled should be bool, got {type(config.mirror_enabled)}'
+            )
+
+
+class TestRepositoryConfigMirrorFlag:
+    """Dataclass-level tests for the mirror_enabled field + its JSON parsing."""
+
+    def test_mirror_enabled_default_false(self):
+        """RepositoryConfig constructor defaults mirror_enabled to False."""
+        config = RepositoryConfig(weight=0.5)
+        assert config.mirror_enabled is False
+
+    def test_mirror_enabled_explicit_true(self):
+        """RepositoryConfig accepts mirror_enabled=True."""
+        config = RepositoryConfig(weight=0.5, mirror_enabled=True)
+        assert config.mirror_enabled is True
+
+    def test_loader_parses_mirror_enabled_true(self, tmp_path, monkeypatch):
+        """load_master_repo_weights() parses mirror_enabled:true from JSON."""
+        import json
+
+        from gittensor.validator.utils import load_weights as lw
+
+        fake_weights_dir = tmp_path
+        (fake_weights_dir / 'master_repositories.json').write_text(
+            json.dumps(
+                {
+                    'foo/mirror-repo': {'weight': 0.5, 'mirror_enabled': True},
+                    'foo/legacy-repo': {'weight': 0.3},
+                    'foo/explicit-off': {'weight': 0.2, 'mirror_enabled': False},
+                }
+            )
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: fake_weights_dir)
+
+        repos = lw.load_master_repo_weights()
+
+        assert repos['foo/mirror-repo'].mirror_enabled is True
+        assert repos['foo/legacy-repo'].mirror_enabled is False
+        assert repos['foo/explicit-off'].mirror_enabled is False
+
 
 class TestBannedOrganizations:
     """Tests ensuring banned organizations are not active in the repository list.

@@ -29,6 +29,14 @@ MAX_FILE_SIZE_BYTES = 1_000_000
 MAX_FILES_PER_GRAPHQL_BATCH = 50
 
 # =============================================================================
+# das-github-mirror (https://mirror.gittensor.io)
+# =============================================================================
+GITTENSOR_MIRROR_DEFAULT_URL = 'https://mirror.gittensor.io'
+# File endpoint returns head/base blob contents; allow more time than plain GitHub calls.
+MIRROR_HTTP_TIMEOUT_SECONDS = 30
+MIRROR_MAX_ATTEMPTS = 3
+
+# =============================================================================
 # Language & File Scoring
 # =============================================================================
 DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT = 0.12

@@ -158,8 +158,15 @@ def admin_payout(
         with console.status('[bold cyan]Submitting payout...', spinner='dots'):
             result = client.payout_bounty(issue_id, wallet)
 
-        if result:
-            print_success(f'Payout successful! Amount: {format_alpha(result, 4)} ALPHA')
+        # `result is None` means the on-chain extrinsic failed. `result == 0`
+        # means the transaction succeeded but the contract client lost track
+        # of the payout amount (e.g. an RPC flake during the pre-payout
+        # get_issue inside payout_bounty). In that case we still report
+        # success — using the bounty we already read at line 139 — instead of
+        # mis-labelling a successful payout as a failure.
+        if result is not None:
+            paid_amount = result if result > 0 else issue.bounty_amount
+            print_success(f'Payout successful! Amount: {format_alpha(paid_amount, 4)} ALPHA')
         else:
             print_error('Payout failed.')
             raise SystemExit(1)

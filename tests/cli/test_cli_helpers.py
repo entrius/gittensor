@@ -12,7 +12,7 @@ invocation with validation (no live network).
 import json
 from decimal import Decimal
 from typing import Any, Dict, Optional
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import click
 import pytest
@@ -786,6 +786,79 @@ class TestCliAdminValidation:
             )
         assert result.exit_code != 0
         assert 'between' in result.output or '1' in result.output
+
+
+class TestAdminPayoutSuccessWithUnknownAmount:
+    """Regression tests for #844: `gitt admin payout-issue` must report the
+    on-chain success even when `payout_bounty` returns 0 because its internal
+    pre-payout `get_issue` lost the bounty amount (RPC flake).
+    """
+
+    @staticmethod
+    def _patched_run(cli_root, runner, payout_return):
+        """Drive `gitt admin payout-issue 1 -y` with a stubbed contract client
+        whose `get_issue` returns a 42-ALPHA bounty and whose `payout_bounty`
+        returns ``payout_return``.
+        """
+        ALPHA_RAW_42 = 42 * 10**9
+        fake_issue = MagicMock()
+        fake_issue.repository_full_name = 'owner/repo'
+        fake_issue.issue_number = 7
+        fake_issue.status.name = 'Active'
+        fake_issue.bounty_amount = ALPHA_RAW_42
+        fake_client = MagicMock()
+        fake_client.get_issue.return_value = fake_issue
+        fake_client.payout_bounty.return_value = payout_return
+        fake_wallet = MagicMock()
+
+        with (
+            patch(
+                'gittensor.cli.issue_commands.admin._resolve_contract_and_network',
+                return_value=(
+                    '0x1234567890123456789012345678901234567890',
+                    'wss://entrypoint-finney.opentensor.ai:443',
+                    'finney',
+                ),
+            ),
+            patch(
+                'gittensor.cli.issue_commands.admin._make_contract_client',
+                return_value=(fake_wallet, fake_client),
+            ),
+        ):
+            return runner.invoke(
+                cli_root,
+                ['admin', 'payout-issue', '1', '-y'],
+                catch_exceptions=False,
+            )
+
+    def test_payout_returning_zero_is_treated_as_success_with_local_amount(
+        self, cli_root, runner
+    ):
+        """`payout_bounty` returns 0 (success but unknown amount) — CLI must
+        report success and use the locally-known bounty for the message."""
+        result = self._patched_run(cli_root, runner, payout_return=0)
+
+        assert result.exit_code == 0
+        assert 'Payout successful' in result.output
+        assert '42.0000' in result.output  # bounty resolved from local issue
+
+    def test_payout_returning_none_is_treated_as_failure(self, cli_root, runner):
+        """`payout_bounty` returning None (extrinsic failed) must still exit
+        non-zero with the Payout failed message — the existing contract."""
+        result = self._patched_run(cli_root, runner, payout_return=None)
+
+        assert result.exit_code != 0
+        assert 'Payout failed' in result.output
+
+    def test_payout_returning_positive_int_uses_that_amount(self, cli_root, runner):
+        """When `payout_bounty` returns a positive amount, prefer it over the
+        locally-known bounty (forward-compatible with future re-read logic)."""
+        ALPHA_RAW_99 = 99 * 10**9
+        result = self._patched_run(cli_root, runner, payout_return=ALPHA_RAW_99)
+
+        assert result.exit_code == 0
+        assert 'Payout successful' in result.output
+        assert '99.0000' in result.output
 
 
 class TestCliVoteCancelValidation:

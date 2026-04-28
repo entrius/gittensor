@@ -1,26 +1,29 @@
 # The MIT License (MIT)
 # Copyright © 2025 Entrius
 
-from collections import defaultdict
-from datetime import datetime, timezone
-from typing import Dict, List, Optional, Tuple
+"""Shared issue-discovery scoring helpers.
 
-import bittensor as bt
+The legacy timeline-scraping path (``score_discovered_issues``,
+``_collect_issues_from_prs``, ``_merge_scan_issues``, ``scan_closed_issues``)
+has been removed — unreliable solver detection was the original motivator for
+migrating issue discovery to the mirror. The functions here are the math-only
+helpers still used by the mirror path (``issue_discovery.mirror_scan``): the
+review-quality multiplier, open-issue spam threshold, credibility formula, and
+eligibility gate.
+"""
 
-from gittensor.classes import Issue, MinerEvaluation
+from typing import Tuple
+
 from gittensor.constants import (
     CREDIBILITY_MULLIGAN_COUNT,
     ISSUE_REVIEW_CLEAN_BONUS,
     ISSUE_REVIEW_PENALTY_RATE,
     MAX_OPEN_ISSUE_THRESHOLD,
     MIN_ISSUE_CREDIBILITY,
-    MIN_TOKEN_SCORE_FOR_BASE_SCORE,
     MIN_VALID_SOLVED_ISSUES,
     OPEN_ISSUE_SPAM_BASE_THRESHOLD,
     OPEN_ISSUE_SPAM_TOKEN_SCORE_PER_SLOT,
 )
-from gittensor.validator.utils.datetime_utils import calculate_time_decay
-from gittensor.validator.utils.load_weights import RepositoryConfig, resolve_repo_weight
 
 
 def calculate_issue_review_quality_multiplier(changes_requested_count: int) -> float:
@@ -61,6 +64,10 @@ def calculate_issue_credibility(solved_count: int, closed_count: int) -> float:
 
 def check_issue_eligibility(solved_count: int, valid_solved_count: int, closed_count: int) -> Tuple[bool, float, str]:
     """Check if a miner passes the issue discovery eligibility gate.
+
+    Credibility uses total solved / total attempts (with mulligan).
+    The gate uses ``valid_solved_count`` (solving PR meets token threshold)
+    so low-quality solves don't carry the miner past the minimum.
 
     Returns (is_eligible, issue_credibility, reason).
     """

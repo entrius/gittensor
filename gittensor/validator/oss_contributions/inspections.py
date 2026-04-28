@@ -29,22 +29,72 @@ def detect_and_penalize_miners_sharing_github(miner_evaluations: Dict[int, Miner
     github_id_to_uids: Dict[str, List[int]] = defaultdict(list)
 
     for uid, evaluation in miner_evaluations.items():
+        # Skip already-failed evals (pre-validation failures, prior penalty) so
+        # collation is idempotent and doesn't double-penalize.
+        if evaluation.failed_reason is not None:
+            continue
         if evaluation.github_id and evaluation.github_id != '0':
             github_id_to_uids[evaluation.github_id].append(uid)
 
     penalized_uids: Set[int] = set()
-    for _, uids in github_id_to_uids.items():
+    for github_id, uids in github_id_to_uids.items():
         if len(uids) <= 1:
             continue
 
-        bt.logging.info(f'Detected UIDs {uids} sharing GitHub account')
+        bt.logging.info(f'Detected UIDs {uids} sharing GitHub account {github_id}')
         for uid in uids:
+            others = [u for u in uids if u != uid]
+            reason = f'Penalized: GitHub account {github_id} shared with UID(s) {others}'
             bt.logging.info(f'PENALTY: Zeroing score for duplicate uid {uid}')
-            miner_evaluations[uid] = MinerEvaluation(uid=uid, hotkey=miner_evaluations[uid].hotkey)
+            _zero_for_duplicate_penalty(miner_evaluations[uid], reason)
             penalized_uids.add(uid)
 
     bt.logging.info(f'Total duplicate miners penalized: {len(penalized_uids)}')
     return penalized_uids
+
+
+def _zero_for_duplicate_penalty(eval_: MinerEvaluation, reason: str) -> None:
+    """Zero score-bearing state on a MinerEvaluation while preserving identity.
+
+    uid / hotkey / github_id stay set so the penalty remains attributable in DB
+    rows and logs. ``failed_reason`` is set so downstream skip-on-failure paths
+    (issue_discovery, evaluation cache, repository cleanup) treat the miner as
+    non-scoring this round without needing per-site penalty awareness.
+
+    NOTE: when adding new score-bearing fields to MinerEvaluation, update this
+    function so the penalty stays comprehensive — a forgotten field would let
+    a penalized miner retain partial credit in that dimension.
+    """
+    eval_.failed_reason = reason
+    # OSS contribution state
+    eval_.merged_pull_requests = []
+    eval_.open_pull_requests = []
+    eval_.closed_pull_requests = []
+    eval_.mirror_merged_prs = []
+    eval_.mirror_open_prs = []
+    eval_.mirror_closed_prs = []
+    eval_.unique_repos_contributed_to = set()
+    eval_.unique_repos_count = 0
+    eval_.is_eligible = False
+    eval_.credibility = 0.0
+    eval_.total_score = 0.0
+    eval_.base_total_score = 0.0
+    eval_.total_token_score = 0.0
+    eval_.total_structural_count = 0
+    eval_.total_structural_score = 0.0
+    eval_.total_leaf_count = 0
+    eval_.total_leaf_score = 0.0
+    eval_.total_nodes_scored = 0
+    eval_.total_collateral_score = 0.0
+    # Issue discovery state — penalty applies to ALL pools
+    eval_.issue_discovery_score = 0.0
+    eval_.issue_token_score = 0.0
+    eval_.issue_credibility = 0.0
+    eval_.is_issue_eligible = False
+    eval_.total_solved_issues = 0
+    eval_.total_valid_solved_issues = 0
+    eval_.total_closed_issues = 0
+    eval_.total_open_issues = 0
 
 
 def validate_response_and_initialize_miner_evaluation(

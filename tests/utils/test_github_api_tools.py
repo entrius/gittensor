@@ -918,8 +918,11 @@ class TestFindSolverFromCrossReferences:
 
     @patch('gittensor.utils.github_api_tools.execute_graphql_query')
     @patch('gittensor.utils.github_api_tools.bt.logging')
-    def test_multiple_candidates_picks_most_recent(self, mock_logging, mock_graphql):
-        """When multiple merged PRs close the issue, the most recently merged one is selected."""
+    def test_multiple_candidates_picks_earliest_merged(self, mock_logging, mock_graphql):
+        """When multiple merged PRs declare the same closing reference, the earliest-merged one
+        is selected — GitHub closes the issue on the first merge; later PRs that put
+        'Closes #X' in their body still appear in closingIssuesReferences but did not
+        actually close the issue, so they must not capture solver attribution."""
         mock_graphql.return_value = _graphql_response(
             [
                 _pr_node(number=10, user_id=100, merged_at='2025-01-01T00:00:00Z', closing_issues=[12]),
@@ -930,8 +933,8 @@ class TestFindSolverFromCrossReferences:
 
         solver_id, pr_number = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
 
-        assert solver_id == 200
-        assert pr_number == 20
+        assert solver_id == 100
+        assert pr_number == 10
         mock_logging.warning.assert_called()  # Should warn about multiple candidates
 
     @patch('gittensor.utils.github_api_tools.execute_graphql_query')

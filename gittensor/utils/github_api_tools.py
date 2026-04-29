@@ -175,7 +175,11 @@ def make_headers(token: str) -> Dict[str, str]:
 
 def make_graphql_headers(token: str) -> Dict[str, str]:
     """Build GitHub GraphQL headers for a PAT."""
-    return {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
+    return {
+        'Authorization': f'Bearer {token}',
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+    }
 
 
 def make_anonymous_headers() -> Dict[str, str]:

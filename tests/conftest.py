@@ -40,7 +40,8 @@ def _forward_github_sessions(monkeypatch):
 
     def _forwarding_get_session(token):
         session = _ForwardingSession()
-        session.headers.update(github_api_tools.make_headers(token))
+        headers = github_api_tools.make_headers(token) if token else github_api_tools.make_anonymous_headers()
+        session.headers.update(headers)
         return session
 
     monkeypatch.setattr(github_api_tools, 'get_session', _forwarding_get_session)

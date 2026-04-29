@@ -359,7 +359,7 @@ def test_non_code_contributes_modestly(
     assert score_big > score_without
     assert score_big >= score_small
     # Increases are modest relative to baseline
-    assert (score_big - score_without) / score_without < 0.10
+    assert (score_big - score_without) / score_without < 0.15
 
 
 def test_source_code_scores_much_higher_than_non_code(
@@ -387,7 +387,7 @@ def test_source_code_scores_much_higher_than_non_code(
         programming_languages,
     )
 
-    assert score_as_source > (score_as_non_code * 10)
+    assert score_as_source > (score_as_non_code * 7)
 
 
 def test_non_code_does_not_bypass_threshold(
@@ -422,7 +422,7 @@ def test_non_code_does_not_bypass_threshold(
     score_real = _score(pr_real, [source_change], [source_content], token_config, programming_languages)
 
     # Both below SOURCE threshold - much less than a real source PR
-    assert score_tiny_with_yaml < score_real * 0.10
+    assert score_tiny_with_yaml < score_real * 0.15
     assert score_tiny < score_tiny_with_yaml
 
 

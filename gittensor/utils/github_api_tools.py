@@ -5,10 +5,11 @@ import functools
 import os
 import re
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from math import ceil
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Pattern
+from typing import TYPE_CHECKING, Any, Dict, Iterator, List, Optional, Pattern
 
 from gittensor.utils.utils import parse_repo_name
 
@@ -176,7 +177,51 @@ def make_headers(token: str) -> Dict[str, str]:
 
 def make_graphql_headers(token: str) -> Dict[str, str]:
     """Build GitHub GraphQL headers for a PAT."""
-    return {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
+    return {
+        'Authorization': f'Bearer {token}',
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+    }
+
+
+def make_anonymous_headers() -> Dict[str, str]:
+    """Build GitHub HTTP headers for unauthenticated calls."""
+    return {'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'gittensor-cli'}
+
+
+_session_cache: Optional[Dict[str, requests.Session]] = None
+
+
+@contextmanager
+def session_scope() -> Iterator[None]:
+    """Share requests.Session per PAT within the scope; close all on exit. Not re-entrant."""
+    global _session_cache
+    if _session_cache is not None:
+        raise RuntimeError('session_scope is not re-entrant')
+    _session_cache = {}
+    try:
+        yield
+    finally:
+        cache = _session_cache
+        _session_cache = None
+        for s in cache.values():
+            s.close()
+
+
+def _build_session(token: str) -> requests.Session:
+    session = requests.Session()
+    session.headers.update(make_headers(token) if token else make_anonymous_headers())
+    return session
+
+
+def get_session(token: str) -> requests.Session:
+    """Return a requests.Session for the given PAT, reusing one within a session_scope() and allocating fresh otherwise."""
+    if _session_cache is None:
+        return _build_session(token)
+    key = token or ''
+    if key not in _session_cache:
+        _session_cache[key] = _build_session(token)
+    return _session_cache[key]
 
 
 def get_github_id(token: str) -> Optional[str]:
@@ -191,12 +236,12 @@ def get_github_id(token: str) -> Optional[str]:
     if not token:
         return None
 
-    headers = make_headers(token)
+    session = get_session(token)
 
     # Retry logic for timeout issues
     for attempt in range(6):
         try:
-            response = requests.get(f'{BASE_GITHUB_API_URL}/user', headers=headers, timeout=GITHUB_HTTP_TIMEOUT_SECONDS)
+            response = session.get(f'{BASE_GITHUB_API_URL}/user', timeout=GITHUB_HTTP_TIMEOUT_SECONDS)
             if response.status_code == 200:
                 try:
                     user_data: Dict[str, Any] = response.json()
@@ -237,14 +282,13 @@ def get_merge_base_sha(repository: str, base_sha: str, head_sha: str, token: str
     Returns:
         Merge-base commit SHA, or None if the request fails
     """
-    headers = make_headers(token)
+    session = get_session(token)
     max_attempts = 3
 
     for attempt in range(max_attempts):
         try:
-            response = requests.get(
+            response = session.get(
                 f'{BASE_GITHUB_API_URL}/repos/{repository}/compare/{base_sha}...{head_sha}',
-                headers=headers,
                 timeout=15,
             )
 
@@ -295,7 +339,7 @@ def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -
     """
     max_attempts = 3
     per_page = 100
-    headers = make_headers(token)
+    session = get_session(token)
 
     all_file_diffs: list = []
     page = 1
@@ -304,9 +348,8 @@ def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -
 
     while attempt < max_attempts:
         try:
-            response = requests.get(
+            response = session.get(
                 f'{BASE_GITHUB_API_URL}/repos/{repository}/pulls/{pr_number}/files',
-                headers=headers,
                 params={'per_page': per_page, 'page': page},
                 timeout=15,
             )
@@ -513,20 +556,15 @@ def _search_issue_referencing_prs_rest(
     if issue_number < 1:
         return []
 
-    if token:
-        headers = make_headers(token)
-    else:
-        headers = {'Accept': 'application/vnd.github.v3+json'}
-    headers.setdefault('User-Agent', 'gittensor-cli')
+    session = get_session(token or '')
 
     state_clause = f' state:{state}' if state != 'all' else ''
     max_attempts = 3
     for attempt in range(max_attempts):
         try:
-            resp = requests.get(
+            resp = session.get(
                 f'{BASE_GITHUB_API_URL}/search/issues',
                 params={'q': f'repo:{repo} type:pr{state_clause} {issue_number} in:title,body', 'per_page': '50'},
-                headers=headers,
                 timeout=10,
             )
             resp.raise_for_status()
@@ -632,11 +670,12 @@ def execute_graphql_query(
     Returns:
         Parsed JSON response data, or None if all attempts failed
     """
+    session = get_session(token)
     headers = make_graphql_headers(token)
 
     for attempt in range(max_attempts):
         try:
-            response = requests.post(
+            response = session.post(
                 f'{BASE_GITHUB_API_URL}/graphql',
                 headers=headers,
                 json={'query': query, 'variables': variables},
@@ -709,6 +748,7 @@ def get_github_graphql_query(
     """
 
     max_attempts = 8
+    session = get_session(token)
     headers = make_graphql_headers(token)
     limit = page_size if page_size is not None else min(100, max_prs - merged_pr_count)
 
@@ -720,7 +760,7 @@ def get_github_graphql_query(
             'maxChangesRequestedReviews': _MAX_CHANGES_REQUESTED_REVIEWS,
         }
         try:
-            response = requests.post(
+            response = session.post(
                 f'{BASE_GITHUB_API_URL}/graphql',
                 headers=headers,
                 json={'query': QUERY, 'variables': variables},
@@ -1107,12 +1147,11 @@ def check_github_issue_closed(repo: str, issue_number: int, token: str) -> Optio
     Returns:
         Dict with 'is_closed', 'solver_github_id', 'pr_number', 'solver_lookup_failed' or None on error
     """
-    headers = make_headers(token)
+    session = get_session(token)
 
     try:
-        response = requests.get(
+        response = session.get(
             f'{BASE_GITHUB_API_URL}/repos/{repo}/issues/{issue_number}',
-            headers=headers,
             timeout=15,
         )
 

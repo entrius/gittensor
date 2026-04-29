@@ -8,7 +8,8 @@ import bittensor as bt
 import numpy as np
 
 from gittensor.classes import MinerEvaluation
-from gittensor.utils.github_api_tools import load_miners_prs
+from gittensor.utils.github_api_tools import load_miners_prs, session_scope
+from gittensor.utils.mirror.client import MirrorClient
 from gittensor.validator import pat_storage
 from gittensor.validator.oss_contributions.inspections import (
     detect_and_penalize_miners_sharing_github,
@@ -73,8 +74,9 @@ async def evaluate_miners_pull_requests(
     }
 
     if legacy_repos:
-        load_miners_prs(miner_eval, legacy_repos)
-        score_miner_prs(miner_eval, legacy_repos, programming_languages, token_config)
+        with session_scope():
+            load_miners_prs(miner_eval, legacy_repos)
+            score_miner_prs(miner_eval, legacy_repos, programming_languages, token_config)
 
     if mirror_repos:
         mirror_eval = MirrorMinerEvaluation(
@@ -82,8 +84,9 @@ async def evaluate_miners_pull_requests(
             hotkey=miner_eval.hotkey,
             github_id=miner_eval.github_id,
         )
-        load_mirror_miner_prs(mirror_eval, mirror_repos)
-        score_mirror_miner_prs(mirror_eval, mirror_repos, programming_languages, token_config)
+        with MirrorClient() as mirror_client:
+            load_mirror_miner_prs(mirror_eval, mirror_repos, client=mirror_client)
+            score_mirror_miner_prs(mirror_eval, mirror_repos, programming_languages, token_config, client=mirror_client)
         combine(miner_eval, mirror_eval)
 
     # Clear PAT after scoring to avoid storing sensitive data in memory

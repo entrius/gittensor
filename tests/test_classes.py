@@ -6,13 +6,30 @@ from gittensor.classes import FileChange, PullRequest
 def _file_change(filename: str) -> FileChange:
     return FileChange(
         pr_number=0,
-        repository_full_name='mastodon/mastodon',
+        repository_full_name='example/repo',
         filename=filename,
         changes=10,
         additions=10,
         deletions=0,
         status='added',
     )
+
+
+@pytest.mark.parametrize(
+    'filename',
+    [
+        'app/src/androidTest/java/com/owncloud/android/UploadIT.java',
+        'app/src/androidTest/java/com/owncloud/android/AbstractIT.java',
+        'app/src/androidTest/java/com/nextcloud/client/ActivitiesFragmentIT.kt',
+        'app/src/androidTestGeneric/java/com/example/FooIT.java',
+        'app/src/androidTestGplay/java/com/example/BarIT.kt',
+        'app/src/androidTest/java/com/example/HelperUtils.kt',
+        'src/integrationTest/java/com/example/FooIT.java',
+        'src/integrationTest/kotlin/com/example/HelperKt.kt',
+    ],
+)
+def test_is_test_file_detects_gradle_test_source_sets(filename):
+    assert _file_change(filename).is_test_file() is True
 
 
 @pytest.mark.parametrize(
@@ -60,17 +77,24 @@ def test_is_test_file_detects_spec_directory(filename):
     [
         # Lookalikes that must NOT trip the new patterns.
         # Filename "spec" prefix without trailing underscore-dot.
+        'app/build.gradle.kts',
+        'src/main/java/com/example/Bar.java',
+        'docs/androidtest.md',
+        'tools/androidtestutils.py',
         'app/models/specification.rb',
         'src/spectrum.rb',
+        'lib/spectrum.rb',
         'app/models/respec.rb',
         'lib/aspec.rb',
         'lib/inspector.rb',
         'src/spec.rb',
         'src/spec.js',
+        'config/spec.rb',
         # Pre-existing patterns must continue to reject ordinary source.
         'app/models/account.rb',
         'lib/foo.rb',
         'src/main.py',
+        'src/foo/bar.py',
     ],
 )
 def test_is_test_file_rejects_non_test_lookalikes(filename):
@@ -79,6 +103,7 @@ def test_is_test_file_rejects_non_test_lookalikes(filename):
 
 def test_is_test_file_preserves_existing_test_conventions():
     assert _file_change('tests/test_foo.py').is_test_file() is True
+    assert _file_change('src/tests/test_foo.py').is_test_file() is True
     assert _file_change('src/__tests__/foo.test.js').is_test_file() is True
     assert _file_change('pkg/foo_test.go').is_test_file() is True
     assert _file_change('app/foo_tests.rb').is_test_file() is True

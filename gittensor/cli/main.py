@@ -18,10 +18,7 @@ import sys
 
 # Stub heavy imports during shell completion and --help so tab-completion stays
 # fast and bittensor's argparse doesn't hijack click's help output.
-_is_completion = bool(os.environ.get('_GITT_COMPLETE'))
-_is_help_only = any(arg in ('-h', '--help') for arg in sys.argv[1:])
-
-if _is_completion or _is_help_only:
+if os.environ.get('_GITT_COMPLETE') or any(arg in ('-h', '--help') for arg in sys.argv[1:]):
     import types as _types
 
     class _Stub(_types.ModuleType):

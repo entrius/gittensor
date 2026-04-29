@@ -872,6 +872,33 @@ class TestCliMissingContractConfig:
         assert 'Contract address not configured' in result.output
 
 
+class TestCliRegisterLogicalFailures:
+    """Ensure logical failure branches in `issues register` exit non-zero."""
+
+    def test_register_exits_non_zero_when_contract_metadata_missing(self, cli_root, runner):
+        with (
+            patch(
+                'gittensor.cli.issue_commands.mutations._resolve_contract_and_network',
+                return_value=(
+                    '0x1234567890123456789012345678901234567890',
+                    'wss://entrypoint-finney.opentensor.ai:443',
+                    'finney',
+                ),
+            ),
+            patch('gittensor.cli.issue_commands.mutations.validate_repository', return_value=('owner', 'repo')),
+            patch('gittensor.cli.issue_commands.mutations.validate_github_issue', return_value={}),
+            patch('substrateinterface.SubstrateInterface'),
+            patch('bittensor.Wallet'),
+        ):
+            result = runner.invoke(
+                cli_root,
+                ['issues', 'register', '--repo', 'owner/repo', '--issue', '1', '--bounty', '10', '-y'],
+                catch_exceptions=False,
+            )
+        assert result.exit_code != 0
+        assert 'Contract metadata not found' in result.output
+
+
 class TestCliRuntimeExceptions:
     """Ensure runtime/import failures exit non-zero for CLI commands."""
 

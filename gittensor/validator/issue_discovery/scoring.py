@@ -14,6 +14,8 @@ eligibility gate.
 
 from typing import Tuple
 
+import bittensor as bt
+
 from gittensor.constants import (
     CREDIBILITY_MULLIGAN_COUNT,
     ISSUE_REVIEW_CLEAN_BONUS,
@@ -35,8 +37,14 @@ def calculate_issue_review_quality_multiplier(changes_requested_count: int) -> f
     7+ rounds → 0.0
     """
     if changes_requested_count == 0:
-        return ISSUE_REVIEW_CLEAN_BONUS
-    return max(0.0, 1.0 - ISSUE_REVIEW_PENALTY_RATE * changes_requested_count)
+        multiplier = ISSUE_REVIEW_CLEAN_BONUS
+    else:
+        multiplier = max(0.0, 1.0 - ISSUE_REVIEW_PENALTY_RATE * changes_requested_count)
+    bt.logging.info(
+        f'{changes_requested_count} solving-PR CHANGES_REQUESTED review(s) → '
+        f'issue_review_quality_multiplier={multiplier:.2f}'
+    )
+    return multiplier
 
 
 def calculate_open_issue_spam_multiplier(total_open_issues: int, solved_token_score: float) -> float:

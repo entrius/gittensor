@@ -43,6 +43,15 @@ class MirrorClient:
         self.max_attempts = max_attempts
         self.session = session or requests.Session()
 
+    def close(self) -> None:
+        self.session.close()
+
+    def __enter__(self) -> 'MirrorClient':
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()
+
     def get_miner_pulls(
         self,
         github_id: str,

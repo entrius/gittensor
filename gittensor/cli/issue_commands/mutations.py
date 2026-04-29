@@ -200,8 +200,8 @@ def issue_register(
             / 'issue_bounty_manager.contract'
         )
         if not contract_metadata.exists():
-            console.print(f'[red]Error: Contract metadata not found at {contract_metadata}[/red]')
-            return
+            print_error(f'Contract metadata not found at {contract_metadata}')
+            raise SystemExit(1)
 
         contract_instance = ContractInstance.create_from_address(
             contract_address=contract_addr,
@@ -238,7 +238,7 @@ def issue_register(
                 print_error(str(error_info))
 
             console.print(f'[cyan]Transaction Hash:[/cyan] {result.extrinsic_hash}')
-            return
+            raise SystemExit(1)
 
         print_success('Issue registered successfully!')
         console.print(f'[cyan]Transaction Hash:[/cyan] {result.extrinsic_hash}')

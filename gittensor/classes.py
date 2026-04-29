@@ -45,36 +45,6 @@ class Miner:
         return f'Miner(uid={self.uid}, hotkey={self.hotkey[:8]}..., github_id={self.github_id})'
 
 
-_TEST_DIR_PATTERNS = (
-    re.compile(r'(^|/)tests?/'),
-    re.compile(r'(^|/)__tests?__/'),
-    re.compile(r'(^|/)androidtest[a-z]*/'),
-    re.compile(r'(^|/)integrationtest/'),
-    re.compile(r'(^|/)spec/'),
-)
-
-_TEST_BASENAME_PATTERNS = (
-    re.compile(r'^test_'),
-    re.compile(r'^spec_'),
-    re.compile(r'_test\.[^.]+$'),
-    re.compile(r'_tests\.[^.]+$'),
-    re.compile(r'_spec\.[^.]+$'),
-    re.compile(r'\.test\.[^.]+$'),
-    re.compile(r'\.tests\.[^.]+$'),
-    re.compile(r'\.spec\.[^.]+$'),
-    re.compile(r'^test\.[^.]+$'),
-    re.compile(r'^tests\.[^.]+$'),
-)
-
-
-def _matches_test_dir_pattern(path_lower: str) -> bool:
-    return any(pattern.search(path_lower) for pattern in _TEST_DIR_PATTERNS)
-
-
-def _matches_test_basename_pattern(basename_lower: str) -> bool:
-    return any(pattern.search(basename_lower) for pattern in _TEST_BASENAME_PATTERNS)
-
-
 @dataclass
 class FileChange:
     """Represents a single file change in a PR"""
@@ -106,9 +76,31 @@ class FileChange:
     def is_test_file(self) -> bool:
         filename_lower = self.filename.lower()
         basename = filename_lower.split('/')[-1]
-        if _matches_test_dir_pattern(filename_lower):
+
+        test_dir_patterns = [
+            r'(^|/)tests?/',
+            r'(^|/)__tests?__/',
+            r'(^|/)androidtest[a-z]*/',
+            r'(^|/)integrationtest/',
+            r'(^|/)spec/',
+        ]
+        if any(re.search(pattern, filename_lower) for pattern in test_dir_patterns):
             return True
-        return _matches_test_basename_pattern(basename)
+
+        test_patterns = [
+            r'^test_',
+            r'^spec_',
+            r'_test\.[^.]+$',
+            r'_tests\.[^.]+$',
+            r'_spec\.[^.]+$',
+            r'\.test\.[^.]+$',
+            r'\.tests\.[^.]+$',
+            r'\.spec\.[^.]+$',
+            r'^test\.[^.]+$',
+            r'^tests\.[^.]+$',
+        ]
+
+        return any(re.search(pattern, basename) for pattern in test_patterns)
 
     @classmethod
     def from_github_response(cls, pr_number: int, repository_full_name: str, file_diff: DefaultDict) -> 'FileChange':

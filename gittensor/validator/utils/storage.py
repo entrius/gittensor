@@ -78,6 +78,12 @@ class DatabaseStorage:
             result.stored_counts['closed_pull_requests'] = self.repo.store_pull_requests_bulk(
                 miner_eval.closed_pull_requests + _adapt_mirror(miner_eval.mirror_closed_prs)
             )
+            # Refresh stale-OPEN rows for PRs that closed after their creation aged
+            # out of the lookback window. Reuses the same UPSERT; scoring columns
+            # land at their default-zero values, which is correct for a closed PR.
+            result.stored_counts['stale_closed_pull_requests'] = self.repo.store_pull_requests_bulk(
+                miner_eval.stale_closed_pull_requests
+            )
             result.stored_counts['issues'] = self.repo.store_issues_bulk(miner_eval.get_all_issues())
             result.stored_counts['file_changes'] = self.repo.store_file_changes_bulk(miner_eval.get_all_file_changes())
             # Clean up stale data if this github_id was previously registered under a different uid/hotkey

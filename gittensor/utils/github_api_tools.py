@@ -832,9 +832,11 @@ def try_add_open_or_closed_pr(
         closed_dt = parse_github_iso_to_utc(closed_at)
         created_dt = parse_github_iso_to_utc(created_at)
 
-        # Ignore stale PRs that were created before the scoring lookback window.
-        # This allows users to close old PRs without receiving a fresh credibility penalty.
+        # PRs created before the scoring lookback window are excluded from
+        # credibility math (#406) but still need their pull_requests row
+        # refreshed so an earlier OPEN scan doesn't leave a phantom row.
         if created_dt < lookback_date_filter:
+            miner_eval.add_stale_closed_pull_request(pr_raw)
             return
 
         if closed_dt >= lookback_date_filter:

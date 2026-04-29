@@ -33,6 +33,7 @@ get_merge_base_sha = github_api_tools.get_merge_base_sha
 find_prs_for_issue = github_api_tools.find_prs_for_issue
 execute_graphql_query = github_api_tools.execute_graphql_query
 check_github_issue_closed = github_api_tools.check_github_issue_closed
+try_add_open_or_closed_pr = github_api_tools.try_add_open_or_closed_pr
 
 
 # ============================================================================
@@ -1664,6 +1665,66 @@ class TestSessionScope:
                 _real_get_session('tokenA')
 
         assert github_api_tools._session_cache is None
+
+
+class TestTryAddOpenOrClosedPR:
+    """Routing checks for try_add_open_or_closed_pr.
+
+    The early-return for CLOSED PRs created before the lookback window keeps
+    them out of credibility/scoring math (#406) but must still hand the row to
+    storage, otherwise an earlier OPEN scan leaves a phantom row.
+    """
+
+    @staticmethod
+    def _eval():
+        from gittensor.classes import MinerEvaluation
+
+        return MinerEvaluation(uid=1, hotkey='5Hotkey', github_id='123')
+
+    @staticmethod
+    def _closed_pr_raw(created_at: str, closed_at: str) -> Dict:
+        return {
+            'number': 42,
+            'repository': {'owner': {'login': 'grafana'}, 'name': 'grafana'},
+            'state': 'CLOSED',
+            'closingIssuesReferences': {'nodes': []},
+            'bodyText': '',
+            'lastEditedAt': None,
+            'mergedAt': None,
+            'closedAt': closed_at,
+            'timelineItems': {'nodes': []},
+            'title': 'closed without merge',
+            'author': {'login': 'miner'},
+            'authorAssociation': 'CONTRIBUTOR',
+            'createdAt': created_at,
+            'additions': 1,
+            'deletions': 1,
+            'commits': {'totalCount': 1},
+            'headRefOid': 'abc',
+            'baseRefOid': 'def',
+        }
+
+    def test_stale_closed_routes_to_log_only_bucket(self):
+        miner_eval = self._eval()
+        lookback = datetime(2026, 3, 25, tzinfo=timezone.utc)
+        pr_raw = self._closed_pr_raw(created_at='2026-03-07T00:00:00Z', closed_at='2026-04-23T00:00:00Z')
+
+        github_api_tools.try_add_open_or_closed_pr(miner_eval, pr_raw, 'CLOSED', lookback)
+
+        assert len(miner_eval.stale_closed_pull_requests) == 1
+        assert miner_eval.stale_closed_pull_requests[0].number == 42
+        assert miner_eval.closed_pull_requests == []
+        assert miner_eval.total_closed_prs == 0
+
+    def test_in_window_closed_routes_to_scored_bucket(self):
+        miner_eval = self._eval()
+        lookback = datetime(2026, 3, 25, tzinfo=timezone.utc)
+        pr_raw = self._closed_pr_raw(created_at='2026-04-01T00:00:00Z', closed_at='2026-04-20T00:00:00Z')
+
+        github_api_tools.try_add_open_or_closed_pr(miner_eval, pr_raw, 'CLOSED', lookback)
+
+        assert len(miner_eval.closed_pull_requests) == 1
+        assert miner_eval.stale_closed_pull_requests == []
 
 
 if __name__ == '__main__':

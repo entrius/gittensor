@@ -371,6 +371,12 @@ class MinerEvaluation:
     open_pull_requests: List[PullRequest] = field(default_factory=list)
     closed_pull_requests: List[PullRequest] = field(default_factory=list)
 
+    # CLOSED PRs created before the scoring lookback window. Not factored into
+    # scoring, eligibility, credibility, or the total_*_prs counts (preserves
+    # #406 intent). Only used to refresh the pull_requests row pr_state so an
+    # earlier OPEN scan doesn't leave a phantom row on the dashboard.
+    stale_closed_pull_requests: List[PullRequest] = field(default_factory=list)
+
     # Populated by gittensor.validator.oss_contributions.mirror.combine.combine
     # when the mirror scoring path runs. Empty for legacy-only evaluations.
     mirror_merged_prs: List['ScoredMirrorPR'] = field(default_factory=list)
@@ -478,6 +484,16 @@ class MinerEvaluation:
             f'CLOSED PR #{raw_pr["number"]} in {parse_repo_name(raw_pr["repository"])} counting towards credibility'
         )
         self.closed_pull_requests.append(
+            PullRequest.from_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id)
+        )
+
+    def add_stale_closed_pull_request(self, raw_pr: Dict):
+        """Track a CLOSED PR outside the scoring lookback window so its
+        pull_requests row is refreshed to its real GitHub state. Not factored
+        into scoring or credibility — preserves the #406 fix that prevents a
+        fresh credibility penalty when miners close old backlog PRs.
+        """
+        self.stale_closed_pull_requests.append(
             PullRequest.from_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id)
         )
 

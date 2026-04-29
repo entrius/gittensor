@@ -918,8 +918,11 @@ class TestFindSolverFromCrossReferences:
 
     @patch('gittensor.utils.github_api_tools.execute_graphql_query')
     @patch('gittensor.utils.github_api_tools.bt.logging')
-    def test_multiple_candidates_picks_most_recent(self, mock_logging, mock_graphql):
-        """When multiple merged PRs close the issue, the most recently merged one is selected."""
+    def test_multiple_candidates_picks_earliest_merged(self, mock_logging, mock_graphql):
+        """When multiple merged PRs declare the same closing reference, the earliest-merged one
+        is selected — GitHub closes the issue on the first merge; later PRs that put
+        'Closes #X' in their body still appear in closingIssuesReferences but did not
+        actually close the issue, so they must not capture solver attribution."""
         mock_graphql.return_value = _graphql_response(
             [
                 _pr_node(number=10, user_id=100, merged_at='2025-01-01T00:00:00Z', closing_issues=[12]),
@@ -930,8 +933,8 @@ class TestFindSolverFromCrossReferences:
 
         solver_id, pr_number = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
 
-        assert solver_id == 200
-        assert pr_number == 20
+        assert solver_id == 100
+        assert pr_number == 10
         mock_logging.warning.assert_called()  # Should warn about multiple candidates
 
     @patch('gittensor.utils.github_api_tools.execute_graphql_query')
@@ -1581,6 +1584,86 @@ class TestFetchFileContentsForPrMergeBase:
         # Should fall back to base_ref_oid
         call_args = mock_fetch.call_args
         assert call_args[0][2] == 'base_branch_tip_sha', 'Should fall back to base_ref_oid'
+
+
+# ============================================================================
+# session_scope tests
+# ============================================================================
+
+
+# Bind to the unpatched implementations at import time so the autouse forwarding
+# fixture in tests/conftest.py (which swaps out github_api_tools.get_session) does
+# not interfere with these tests of the real caching behavior.
+_real_session_scope = github_api_tools.session_scope
+_real_get_session = github_api_tools.get_session
+
+
+class TestSessionScope:
+    """Direct tests for session_scope cache lifecycle."""
+
+    def test_same_session_reused_for_same_token_in_scope(self):
+        with _real_session_scope():
+            s1 = _real_get_session('tokenA')
+            s2 = _real_get_session('tokenA')
+        assert s1 is s2
+
+    def test_distinct_sessions_per_token(self):
+        with _real_session_scope():
+            s_a = _real_get_session('tokenA')
+            s_b = _real_get_session('tokenB')
+            s_anon = _real_get_session('')
+        assert s_a is not s_b
+        assert s_a is not s_anon
+        assert s_b is not s_anon
+
+    def test_outside_scope_returns_fresh_session(self):
+        s1 = _real_get_session('tokenA')
+        s2 = _real_get_session('tokenA')
+        try:
+            assert s1 is not s2
+        finally:
+            s1.close()
+            s2.close()
+
+    def test_re_entrance_raises(self):
+        with _real_session_scope():
+            with pytest.raises(RuntimeError, match='not re-entrant'):
+                with _real_session_scope():
+                    pass
+
+    def test_sessions_closed_on_exit(self, monkeypatch):
+        built: list = []
+
+        def fake_build_session(token):
+            session = Mock()
+            session.headers = {}
+            built.append(session)
+            return session
+
+        monkeypatch.setattr(github_api_tools, '_build_session', fake_build_session)
+
+        with _real_session_scope():
+            _real_get_session('tokenA')
+            _real_get_session('tokenB')
+
+        assert len(built) == 2
+        for session in built:
+            session.close.assert_called_once()
+
+    def test_cache_cleared_on_exit_even_when_close_raises(self, monkeypatch):
+        def fake_build_session(token):
+            session = Mock()
+            session.headers = {}
+            session.close.side_effect = RuntimeError('boom')
+            return session
+
+        monkeypatch.setattr(github_api_tools, '_build_session', fake_build_session)
+
+        with pytest.raises(RuntimeError):
+            with _real_session_scope():
+                _real_get_session('tokenA')
+
+        assert github_api_tools._session_cache is None
 
 
 if __name__ == '__main__':

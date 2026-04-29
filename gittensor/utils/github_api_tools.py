@@ -202,8 +202,15 @@ def session_scope() -> Iterator[None]:
     finally:
         cache = _session_cache
         _session_cache = None
+        first_exc: Optional[Exception] = None
         for s in cache.values():
-            s.close()
+            try:
+                s.close()
+            except Exception as exc:
+                if first_exc is None:
+                    first_exc = exc
+        if first_exc is not None:
+            raise first_exc
 
 
 def _build_session(token: str) -> requests.Session:

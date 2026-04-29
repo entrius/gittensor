@@ -1645,6 +1645,28 @@ class TestSessionScope:
 
         assert github_api_tools._session_cache is None
 
+    def test_all_sessions_closed_even_when_first_close_raises(self, monkeypatch):
+        built: list = []
+
+        def fake_build_session(token):
+            session = Mock()
+            session.headers = {}
+            built.append(session)
+            return session
+
+        monkeypatch.setattr(github_api_tools, '_build_session', fake_build_session)
+
+        with pytest.raises(RuntimeError, match='first boom'):
+            with _real_session_scope():
+                _real_get_session('tokenA')
+                _real_get_session('tokenB')
+                built[0].close.side_effect = RuntimeError('first boom')
+
+        assert len(built) == 2
+        built[0].close.assert_called_once()
+        built[1].close.assert_called_once()
+        assert github_api_tools._session_cache is None
+
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

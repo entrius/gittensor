@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     # Forward-reference only — avoids importing the mirror subpackage at runtime
     # and prevents accidental coupling. The mirror_* lists below are typed as
     # strings to defer resolution.
+    from gittensor.utils.mirror.models import MirrorLinkedIssue, MirrorPullRequest
     from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredMirrorPR
 
 from gittensor.constants import (
@@ -708,6 +709,9 @@ class MinerEvaluationCache:
         cached.merged_pull_requests = [_pr_for_cache(pr) for pr in evaluation.merged_pull_requests]
         cached.open_pull_requests = [_pr_for_cache(pr) for pr in evaluation.open_pull_requests]
         cached.closed_pull_requests = [_pr_for_cache(pr) for pr in evaluation.closed_pull_requests]
+        cached.mirror_merged_prs = [_scored_mirror_pr_for_cache(s) for s in evaluation.mirror_merged_prs]
+        cached.mirror_open_prs = [_scored_mirror_pr_for_cache(s) for s in evaluation.mirror_open_prs]
+        cached.mirror_closed_prs = [_scored_mirror_pr_for_cache(s) for s in evaluation.mirror_closed_prs]
         return cached
 
     @staticmethod
@@ -720,6 +724,9 @@ class MinerEvaluationCache:
         copy_eval.merged_pull_requests = [_pr_with_fresh_issues(pr) for pr in cached_eval.merged_pull_requests]
         copy_eval.open_pull_requests = [_pr_with_fresh_issues(pr) for pr in cached_eval.open_pull_requests]
         copy_eval.closed_pull_requests = [_pr_with_fresh_issues(pr) for pr in cached_eval.closed_pull_requests]
+        copy_eval.mirror_merged_prs = [_scored_mirror_pr_isolated(s) for s in cached_eval.mirror_merged_prs]
+        copy_eval.mirror_open_prs = [_scored_mirror_pr_isolated(s) for s in cached_eval.mirror_open_prs]
+        copy_eval.mirror_closed_prs = [_scored_mirror_pr_isolated(s) for s in cached_eval.mirror_closed_prs]
         return copy_eval
 
 
@@ -735,3 +742,30 @@ def _pr_with_fresh_issues(pr: 'PullRequest') -> 'PullRequest':
     if pr.issues is not None:
         pr_copy.issues = [copy.copy(issue) for issue in pr.issues]
     return pr_copy
+
+
+def _mirror_linked_issue_copy(issue: 'MirrorLinkedIssue') -> 'MirrorLinkedIssue':
+    issue_copy = copy.copy(issue)
+    issue_copy.labels = [copy.copy(label) for label in issue.labels]
+    return issue_copy
+
+
+def _mirror_pr_copy(pr: 'MirrorPullRequest') -> 'MirrorPullRequest':
+    pr_copy = copy.copy(pr)
+    pr_copy.review_summary = copy.copy(pr.review_summary)
+    pr_copy.labels = [copy.copy(label) for label in pr.labels]
+    pr_copy.linked_issues = [_mirror_linked_issue_copy(li) for li in pr.linked_issues]
+    return pr_copy
+
+
+def _scored_mirror_pr_for_cache(scored: 'ScoredMirrorPR') -> 'ScoredMirrorPR':
+    scored_copy = copy.copy(scored)
+    scored_copy.pr = _mirror_pr_copy(scored.pr)
+    scored_copy.files = None
+    return scored_copy
+
+
+def _scored_mirror_pr_isolated(scored: 'ScoredMirrorPR') -> 'ScoredMirrorPR':
+    scored_copy = copy.copy(scored)
+    scored_copy.pr = _mirror_pr_copy(scored.pr)
+    return scored_copy

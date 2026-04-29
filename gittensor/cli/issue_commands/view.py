@@ -29,6 +29,7 @@ from .helpers import (
     handle_exception,
     print_network_header,
     read_issues_from_contract,
+    validate_issue_id,
     with_cli_behavior_options,
     with_network_contract_options,
 )
@@ -58,6 +59,15 @@ def issues_list(issue_id: int, network: str, rpc_url: str, contract: str, verbos
         $ gitt i list --json
     [/dim]
     """
+    # Range-check --id at parse time so we don't waste an RPC round-trip on
+    # 0 / negatives / out-of-u32 values, and so the error matches every
+    # other command that takes an issue ID. See #210, #854.
+    if issue_id is not None:
+        try:
+            validate_issue_id(issue_id, 'id')
+        except click.BadParameter as e:
+            handle_exception(as_json, str(e), 'bad_parameter')
+
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(
         contract,
         network,

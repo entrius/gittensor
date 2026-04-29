@@ -82,14 +82,16 @@ def score_pull_request(
 
     repo_config = master_repositories.get(pr.repository_full_name)
     if not repo_config:
-        bt.logging.warning(f'{pr.repository_full_name} not in master repositories. Skipping...')
+        bt.logging.warning(
+            f'PR #{pr.number} in {pr.repository_full_name}: repo not in master repositories. Skipping...'
+        )
         return
 
     # Only fetch file changes from GitHub if not already loaded (they are preloaded for testing only)
     if not pr.file_changes:
         file_changes = get_pull_request_file_changes(pr.repository_full_name, pr.number, miner_eval.github_pat)
         if not file_changes:
-            bt.logging.warning('No file changes found.')
+            bt.logging.warning(f'No file changes found for PR #{pr.number} in {pr.repository_full_name}.')
             return
         pr.set_file_changes(file_changes)
 
@@ -120,7 +122,7 @@ def fetch_file_contents_for_pr(pr: PullRequest, github_pat: str) -> Dict[str, Fi
 
     parts = pr.repository_full_name.split('/')
     if len(parts) != 2:
-        bt.logging.warning(f'Invalid repository name format: {pr.repository_full_name}')
+        bt.logging.warning(f'Invalid repository name format for PR #{pr.number}: {pr.repository_full_name!r}')
         return {}
 
     owner, repo_name = parts
@@ -432,12 +434,13 @@ def calculate_issue_multiplier(pr: PullRequest) -> float:
     return multiplier
 
 
-def _is_completed_when_closed(issue: Issue) -> bool:
+def _is_completed_when_closed(issue: Issue, pr_ctx: Optional[str] = None) -> bool:
     if issue.state != 'CLOSED':
         return True
     if issue.state_reason != 'COMPLETED':
+        ctx = f' ({pr_ctx})' if pr_ctx else ''
         bt.logging.warning(
-            f'Skipping issue #{issue.number} - state_reason={issue.state_reason}, only COMPLETED grants multiplier'
+            f'Skipping issue #{issue.number}{ctx} - state_reason={issue.state_reason}, only COMPLETED grants multiplier'
         )
         return False
     return True
@@ -447,35 +450,46 @@ def is_valid_issue(issue: Issue, pr: PullRequest) -> bool:
     """Check if issue is valid for bonus calculation (works for both merged and open PRs)."""
     is_merged = pr.pr_state == PRState.MERGED
 
+    # PR-side identifier appended to every skip warning so a single skipped
+    # issue in a noisy multi-miner round can be traced back to its owning PR
+    # without cross-referencing the surrounding `calculate_issue_multiplier`
+    # log line. Mirror parity with `_is_valid_linked_issue` skip warnings.
+    pr_ctx = f'PR #{pr.number} in {pr.repository_full_name}'
+
     if not issue.author_login:
-        bt.logging.warning(f'Skipping issue #{issue.number} - Issue is missing author information')
+        bt.logging.warning(f'Skipping issue #{issue.number} ({pr_ctx}) - Issue is missing author information')
         return False
 
     if issue.author_login == pr.author_login:
-        bt.logging.warning(f'Skipping issue #{issue.number} - Issue has same author as PR (self-created issue)')
+        bt.logging.warning(
+            f'Skipping issue #{issue.number} ({pr_ctx}) - Issue has same author as PR (self-created issue)'
+        )
         return False
 
     if issue.created_at and pr.created_at and issue.created_at > pr.created_at:
-        bt.logging.warning(f'Skipping issue #{issue.number} - Issue was created after PR was created')
+        bt.logging.warning(f'Skipping issue #{issue.number} ({pr_ctx}) - Issue was created after PR was created')
         return False
 
-    if not _is_completed_when_closed(issue):
+    if not _is_completed_when_closed(issue, pr_ctx):
         return False
 
     if is_merged and pr.merged_at:
         if pr.last_edited_at and pr.last_edited_at > pr.merged_at:
-            bt.logging.warning(f'Skipping issue #{issue.number} - PR was edited after merge')
+            bt.logging.warning(f'Skipping issue #{issue.number} ({pr_ctx}) - PR was edited after merge')
             return False
 
         if issue.state and issue.state != 'CLOSED':
-            bt.logging.warning(f'Skipping issue #{issue.number} - Issue state not CLOSED (state: {issue.state})')
+            bt.logging.warning(
+                f'Skipping issue #{issue.number} ({pr_ctx}) - Issue state not CLOSED (state: {issue.state})'
+            )
             return False
 
         if issue.closed_at and pr.merged_at:
             days_diff = (issue.closed_at - pr.merged_at).total_seconds() / SECONDS_PER_DAY
             if days_diff > MAX_ISSUE_CLOSE_WINDOW_DAYS or days_diff < 0:
                 bt.logging.warning(
-                    f'Skipping issue #{issue.number} - Issue closed {days_diff:+.2f}d from merge (max: {MAX_ISSUE_CLOSE_WINDOW_DAYS})'
+                    f'Skipping issue #{issue.number} ({pr_ctx}) - Issue closed {days_diff:+.2f}d from merge '
+                    f'(max: {MAX_ISSUE_CLOSE_WINDOW_DAYS})'
                 )
                 return False
 

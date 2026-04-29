@@ -16,7 +16,7 @@ Token-scoring base_score is exercised indirectly via the existing legacy tests
 
 from __future__ import annotations
 
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -597,6 +597,34 @@ class TestLinkedIssueValidity:
         scored = ScoredMirrorPR(pr=_pr(state='OPEN'))
         li = MirrorLinkedIssue.from_dict(_linked_issue(state='OPEN', state_reason=None, closed_at=None))
         assert _is_valid_linked_issue(li, scored.pr) is True
+
+
+class TestLinkedIssueSkipWarningsCarryPRContext:
+    """Each skip warning in `_is_valid_linked_issue` must include the PR number
+    and repository so a single skipped issue in a noisy multi-miner round can
+    be traced back without cross-referencing the surrounding multiplier log
+    line. Mirror parity with `is_valid_issue` skip warnings."""
+
+    def _assert_warning_has_pr_context(self, mock_logging, pr):
+        warning_calls = list(mock_logging.warning.call_args_list)
+        assert warning_calls, 'expected at least one warning'
+        msg = warning_calls[-1].args[0]
+        assert f'PR #{pr.pr_number}' in msg, msg
+        assert pr.repo_full_name in msg, msg
+
+    @patch('gittensor.validator.oss_contributions.mirror.scoring.bt.logging')
+    def test_self_authored_warning_includes_pr_context(self, mock_logging):
+        scored = ScoredMirrorPR(pr=_pr())
+        li = MirrorLinkedIssue.from_dict(_linked_issue(author_github_id='218712309'))
+        assert _is_valid_linked_issue(li, scored.pr) is False
+        self._assert_warning_has_pr_context(mock_logging, scored.pr)
+
+    @patch('gittensor.validator.oss_contributions.mirror.scoring.bt.logging')
+    def test_close_window_warning_includes_pr_context(self, mock_logging):
+        scored = ScoredMirrorPR(pr=_pr())
+        li = MirrorLinkedIssue.from_dict(_linked_issue(closed_at='2026-04-12T00:00:00Z'))
+        assert _is_valid_linked_issue(li, scored.pr) is False
+        self._assert_warning_has_pr_context(mock_logging, scored.pr)
 
 
 class TestIssueMultiplierPreference:

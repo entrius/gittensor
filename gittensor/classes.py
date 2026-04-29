@@ -1,5 +1,5 @@
+import copy
 import re
-from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -659,7 +659,7 @@ class MinerEvaluationCache:
         if not evaluation.hotkey or not evaluation.github_id or evaluation.github_id == '0':
             return
 
-        cached_eval = self.create_lightweight_copy(evaluation)
+        cached_eval = self._build_cache_entry(evaluation)
 
         self._cache[evaluation.uid] = CachedEvaluation(
             hotkey=evaluation.hotkey,
@@ -694,17 +694,44 @@ class MinerEvaluationCache:
 
         bt.logging.debug(f'Cache hit for UID {uid} (cached at {cached.cached_at.isoformat()})')
 
-        return deepcopy(cached.evaluation)
+        return self._isolate_for_downstream(cached.evaluation)
 
-    def create_lightweight_copy(self, evaluation: 'MinerEvaluation') -> 'MinerEvaluation':
-        """Create a memory-efficient copy, stripping file patches."""
-        light_eval = deepcopy(evaluation)
+    @staticmethod
+    def _build_cache_entry(evaluation: 'MinerEvaluation') -> 'MinerEvaluation':
+        # Cached evaluations feed only the GitHub-fetch-failure fallback path
+        # (issue_competitions + issue discovery scoring), which never reads
+        # file_changes. Drop them at store time to save memory and avoid
+        # copying thousands of FileChange objects per miner.
+        cached = copy.copy(evaluation)
+        cached.github_pat = None
+        cached.unique_repos_contributed_to = set(evaluation.unique_repos_contributed_to)
+        cached.merged_pull_requests = [_pr_for_cache(pr) for pr in evaluation.merged_pull_requests]
+        cached.open_pull_requests = [_pr_for_cache(pr) for pr in evaluation.open_pull_requests]
+        cached.closed_pull_requests = [_pr_for_cache(pr) for pr in evaluation.closed_pull_requests]
+        return cached
 
-        for pr in light_eval.merged_pull_requests + light_eval.open_pull_requests + light_eval.closed_pull_requests:
-            if pr.file_changes:
-                for fc in pr.file_changes:
-                    fc.patch = None
+    @staticmethod
+    def _isolate_for_downstream(cached_eval: 'MinerEvaluation') -> 'MinerEvaluation':
+        # Downstream scoring mutates top-level scalar fields on MinerEvaluation
+        # and discovery_* fields on Issue. Everything else (PR metadata) is
+        # read-only on the cache-fallback path, so we can share it.
+        copy_eval = copy.copy(cached_eval)
+        copy_eval.unique_repos_contributed_to = set(cached_eval.unique_repos_contributed_to)
+        copy_eval.merged_pull_requests = [_pr_with_fresh_issues(pr) for pr in cached_eval.merged_pull_requests]
+        copy_eval.open_pull_requests = [_pr_with_fresh_issues(pr) for pr in cached_eval.open_pull_requests]
+        copy_eval.closed_pull_requests = [_pr_with_fresh_issues(pr) for pr in cached_eval.closed_pull_requests]
+        return copy_eval
 
-        light_eval.github_pat = None
 
-        return light_eval
+def _pr_for_cache(pr: 'PullRequest') -> 'PullRequest':
+    pr_copy = copy.copy(pr)
+    pr_copy.file_changes = None
+    pr_copy.issues = [copy.copy(issue) for issue in pr.issues] if pr.issues else None
+    return pr_copy
+
+
+def _pr_with_fresh_issues(pr: 'PullRequest') -> 'PullRequest':
+    pr_copy = copy.copy(pr)
+    if pr.issues is not None:
+        pr_copy.issues = [copy.copy(issue) for issue in pr.issues]
+    return pr_copy

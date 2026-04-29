@@ -7,12 +7,14 @@ Command structure:
     gitt miner (alias: m)     - Miner management commands
         post                     Broadcast GitHub PAT to validators
         check                    Check how many validators have your PAT
+        status                   Check eligibility-gate progress locally
 """
 
 import click
 
 from .check import miner_check
 from .post import miner_post
+from .status import miner_status
 
 
 @click.group(name='miner')
@@ -23,12 +25,14 @@ def miner_group():
     Commands:
         post     Broadcast your GitHub PAT to validators
         check    Check how many validators have your PAT stored
+        status   Check eligibility-gate progress without waiting for the validator
     """
     pass
 
 
 miner_group.add_command(miner_post, name='post')
 miner_group.add_command(miner_check, name='check')
+miner_group.add_command(miner_status, name='status')
 
 
 def register_miner_commands(cli):

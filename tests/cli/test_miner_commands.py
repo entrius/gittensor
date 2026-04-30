@@ -12,11 +12,8 @@ from click.testing import CliRunner
 from gittensor import __version__
 from gittensor.cli.main import cli
 from gittensor.cli.miner_commands.helpers import (
-    DEFAULT_MIN_VALIDATOR_STAKE,
-    DEFAULT_MIN_VALIDATOR_VTRUST,
     _get_validator_axons,
     _pat_check_aggregate_counts,
-    _resolve_validator_filters,
 )
 
 
@@ -132,26 +129,6 @@ class TestValidatorAxonFilter:
         mg = _fake_metagraph([(0.99, False, 1_000.0)])
         _, _, excluded = _get_validator_axons(mg, min_vtrust=0.25, min_stake=15_000.0)
         assert len(excluded[0]['reasons']) == 2
-
-    def test_resolve_filters_uses_defaults(self, tmp_path, monkeypatch):
-        monkeypatch.setattr('pathlib.Path.home', lambda: tmp_path)
-        vtrust, stake = _resolve_validator_filters(None, None)
-        assert vtrust == DEFAULT_MIN_VALIDATOR_VTRUST
-        assert stake == DEFAULT_MIN_VALIDATOR_STAKE
-
-    def test_resolve_filters_cli_overrides_config(self, tmp_path, monkeypatch):
-        monkeypatch.setattr('pathlib.Path.home', lambda: tmp_path)
-        cfg_dir = tmp_path / '.gittensor'
-        cfg_dir.mkdir()
-        (cfg_dir / 'config.json').write_text(json.dumps({'min_validator_vtrust': 0.5, 'min_validator_stake': 30_000}))
-        # CLI flag wins over config
-        vtrust, stake = _resolve_validator_filters(0.4, 20_000.0)
-        assert vtrust == 0.4
-        assert stake == 20_000.0
-        # Without CLI flag, config wins over default
-        vtrust, stake = _resolve_validator_filters(None, None)
-        assert vtrust == 0.5
-        assert stake == 30_000.0
 
 
 class TestPatCheckAggregateCounts:

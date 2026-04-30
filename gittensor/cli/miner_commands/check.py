@@ -24,7 +24,6 @@ from .helpers import (
     _require_registered,
     _require_validator_axons,
     _resolve_endpoint,
-    _resolve_validator_filters,
     _status,
 )
 
@@ -47,14 +46,16 @@ _PAT_CHECK_STATUS_MARKUP = {
 @click.option(
     '--min-vtrust',
     type=float,
-    default=None,
-    help=f'Minimum validator_trust to probe. Default {DEFAULT_MIN_VALIDATOR_VTRUST}.',
+    default=DEFAULT_MIN_VALIDATOR_VTRUST,
+    show_default=True,
+    help='Minimum validator_trust to probe.',
 )
 @click.option(
     '--min-stake',
     type=float,
-    default=None,
-    help=f'Minimum validator stake (α) to probe. Default {DEFAULT_MIN_VALIDATOR_STAKE:,.0f}.',
+    default=DEFAULT_MIN_VALIDATOR_STAKE,
+    show_default=True,
+    help='Minimum validator stake (α) to probe.',
 )
 @click.option('--json-output', 'json_mode', is_flag=True, default=False, help='Output results as JSON.')
 def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, min_vtrust, min_stake, json_mode):
@@ -88,9 +89,8 @@ def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, min_vtrust
     _require_registered(wallet, metagraph, netuid, json_mode)
 
     # 3. Find active validator axons (vtrust + serving + stake threshold)
-    resolved_vtrust, resolved_stake = _resolve_validator_filters(min_vtrust, min_stake)
     validator_axons, validator_uids, excluded = _require_validator_axons(
-        metagraph, json_mode, min_vtrust=resolved_vtrust, min_stake=resolved_stake
+        metagraph, json_mode, min_vtrust=min_vtrust, min_stake=min_stake
     )
 
     # 4. Send check probes

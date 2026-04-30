@@ -141,17 +141,6 @@ def _require_validator_axons(
     return validator_axons, validator_uids, excluded
 
 
-def _resolve_validator_filters(min_vtrust: float | None, min_stake: float | None) -> tuple[float, float]:
-    """Resolve filter thresholds: CLI flag > config file > default."""
-    resolved_vtrust = min_vtrust if min_vtrust is not None else _load_config_value('min_validator_vtrust')
-    if resolved_vtrust is None:
-        resolved_vtrust = DEFAULT_MIN_VALIDATOR_VTRUST
-    resolved_stake = min_stake if min_stake is not None else _load_config_value('min_validator_stake')
-    if resolved_stake is None:
-        resolved_stake = DEFAULT_MIN_VALIDATOR_STAKE
-    return float(resolved_vtrust), float(resolved_stake)
-
-
 def _render_skipped_validators(excluded: list[dict], json_mode: bool) -> None:
     """Print a 'Skipped Validators' table when any high-vtrust UIDs were filtered."""
     if json_mode or not excluded:

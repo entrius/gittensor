@@ -193,11 +193,6 @@ class TestRepositoryConfigTrustedLabelPipeline:
         config = RepositoryConfig(weight=0.5)
         assert config.trusted_label_pipeline is False
 
-    def test_trusted_label_pipeline_explicit_true(self):
-        """RepositoryConfig accepts trusted_label_pipeline=True."""
-        config = RepositoryConfig(weight=0.5, trusted_label_pipeline=True)
-        assert config.trusted_label_pipeline is True
-
     def test_loader_parses_trusted_label_pipeline_true(self, tmp_path, monkeypatch):
         """load_master_repo_weights() parses trusted_label_pipeline:true from JSON."""
         import json

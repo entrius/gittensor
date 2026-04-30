@@ -34,13 +34,10 @@ class RepositoryConfig:
         mirror_enabled: When True, fetch this repo's data from the das-github-mirror
             service instead of via per-miner PATs. Defaults to False so existing
             entries keep their current PAT-based behavior.
-        trusted_label_pipeline: When True, scoring labels apply regardless of who
-            (or what) attached them — including GitHub Apps that lack rows in
-            ``contributor_repo_roles`` and therefore surface as
-            ``actor_association=NULL``. Only set this on repos whose labels are
-            authoritative (entrius-controlled, gated by an internal worker, etc.);
-            most community repos run attacker-controllable auto-labelers and
-            must keep this off so the maintainer-association gate applies.
+        trusted_label_pipeline: When True, scoring labels count regardless of
+            actor — including GitHub Apps that surface as ``actor_association=NULL``.
+            Defaults to False; only enable on repos with an authoritative label
+            pipeline. See ``_resolve_maintainer_set_label`` for the threat model.
 
     """
 

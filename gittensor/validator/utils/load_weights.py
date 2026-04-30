@@ -34,6 +34,9 @@ class RepositoryConfig:
         mirror_enabled: When True, fetch this repo's data from the das-github-mirror
             service instead of via per-miner PATs. Defaults to False so existing
             entries keep their current PAT-based behavior.
+        trusted_label_pipeline: When True, mirror scoring trusts scoring labels
+            regardless of actor association. Defaults to False so community repos
+            keep the maintainer-association gate.
 
     """
 
@@ -41,6 +44,27 @@ class RepositoryConfig:
     inactive_at: Optional[str] = None
     additional_acceptable_branches: Optional[List[str]] = None
     mirror_enabled: bool = False
+    trusted_label_pipeline: bool = False
+
+    @classmethod
+    def from_metadata(cls, metadata: dict) -> 'RepositoryConfig':
+        """Parse a master_repositories.json entry into a typed config."""
+        if not isinstance(metadata, dict):
+            raise TypeError(f'repository metadata must be dict, got {type(metadata)}')
+        return cls(
+            weight=float(metadata.get('weight', DEFAULT_REPO_WEIGHT)),
+            inactive_at=metadata.get('inactive_at'),
+            additional_acceptable_branches=metadata.get('additional_acceptable_branches'),
+            mirror_enabled=_metadata_bool(metadata, 'mirror_enabled'),
+            trusted_label_pipeline=_metadata_bool(metadata, 'trusted_label_pipeline'),
+        )
+
+
+def _metadata_bool(metadata: dict, key: str) -> bool:
+    value = metadata.get(key, False)
+    if isinstance(value, bool):
+        return value
+    raise TypeError(f'{key} must be bool, got {type(value)}')
 
 
 def resolve_repo_weight(repo_config: Optional[RepositoryConfig]) -> float:
@@ -117,17 +141,18 @@ def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
         normalized_data: Dict[str, RepositoryConfig] = {}
         for repo_name, metadata in data.items():
             try:
-                config = RepositoryConfig(
-                    weight=float(metadata.get('weight', 0.01)),
-                    inactive_at=metadata.get('inactive_at'),
-                    additional_acceptable_branches=metadata.get('additional_acceptable_branches'),
-                    mirror_enabled=bool(metadata.get('mirror_enabled', False)),
-                )
+                config = RepositoryConfig.from_metadata(metadata)
                 normalized_data[repo_name.lower()] = config
             except (ValueError, TypeError) as e:
                 bt.logging.warning(f'Could not parse config for {repo_name}: {e}, using defaults')
                 # Create config with defaults if parsing fails
-                normalized_data[repo_name.lower()] = RepositoryConfig(weight=float(metadata.get('weight', 0.01)))
+                weight = DEFAULT_REPO_WEIGHT
+                if isinstance(metadata, dict):
+                    try:
+                        weight = float(metadata.get('weight', DEFAULT_REPO_WEIGHT))
+                    except (ValueError, TypeError):
+                        pass
+                normalized_data[repo_name.lower()] = RepositoryConfig(weight=weight)
 
         bt.logging.debug(f'Successfully loaded {len(normalized_data)} repository entries from {weights_file}')
         return normalized_data

@@ -16,8 +16,8 @@ Anti-gaming notes:
 - ``edited_after_merge`` is NOT a PR-level gate — it gates only the issue
   bonus multiplier in ``_is_valid_linked_issue``, matching legacy
   ``is_valid_issue``.
-- Mirror's ``actor_association`` per label lets ``_resolve_maintainer_set_label``
-  require maintainer-applied labels; legacy can't do this and accepts any-applier.
+- Mirror's ``actor_association`` per label lets ``_resolve_trusted_scoring_label``
+  require maintainer-applied labels unless a repo opts into its trusted label pipeline.
 """
 
 import os
@@ -351,7 +351,7 @@ def _calculate_pr_multipliers(scored: ScoredMirrorPR, repo_config: RepositoryCon
 
     scored.repo_weight_multiplier = resolve_repo_weight(repo_config)
 
-    chosen_label = _resolve_maintainer_set_label(pr)
+    chosen_label = _resolve_trusted_scoring_label(pr, repo_config)
     scored.label = chosen_label
     scored.label_multiplier = LABEL_MULTIPLIERS.get(chosen_label, 1.0) if chosen_label else 1.0
 
@@ -372,21 +372,22 @@ def _calculate_pr_multipliers(scored: ScoredMirrorPR, repo_config: RepositoryCon
         scored.review_quality_multiplier = 1.0
 
 
-def _resolve_maintainer_set_label(pr: MirrorPullRequest) -> Optional[str]:
-    """Pick the highest-multiplier currently-applied label that was set by a maintainer.
+def _resolve_trusted_scoring_label(pr: MirrorPullRequest, repo_config: RepositoryConfig) -> Optional[str]:
+    """Pick the highest-multiplier currently-applied scoring label from a trusted actor.
 
-    Mirror gives us actor attribution per label, so we can directly require the
-    label to have been applied by an OWNER/MEMBER/COLLABORATOR. Labels with null
-    actor_association (backfilled events) are ignored to be conservative.
+    By default, mirror labels must come from OWNER/MEMBER/COLLABORATOR actors.
+    Repos with trusted_label_pipeline=True may use bot/App labelers whose mirror
+    events have null actor_association, so any scoring label on those repos counts.
     """
+    trust_any_actor = repo_config.trusted_label_pipeline
     candidates = [
         label
         for label in pr.labels
-        if label.actor_association in MAINTAINER_ASSOCIATIONS and (label.name or '').lower() in LABEL_MULTIPLIERS
+        if (label.name or '').lower() in LABEL_MULTIPLIERS
+        and (trust_any_actor or label.actor_association in MAINTAINER_ASSOCIATIONS)
     ]
     if not candidates:
         return None
-    # Highest multiplier wins; tie-broken by label name for deterministic output
     best = max(candidates, key=lambda label: (LABEL_MULTIPLIERS[label.name.lower()], label.name.lower()))
     return best.name.lower()
 

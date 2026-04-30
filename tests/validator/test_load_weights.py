@@ -122,9 +122,24 @@ class TestLoadMasterRepositories:
                 f'{repo_name} mirror_enabled should be bool, got {type(config.mirror_enabled)}'
             )
 
+    def test_trusted_label_pipeline_field_present_on_live_configs(self):
+        """Live master_repositories.json entries load with a bool trusted_label_pipeline."""
+        repos = load_master_repo_weights()
+        for repo_name, config in repos.items():
+            assert isinstance(config.trusted_label_pipeline, bool), (
+                f'{repo_name} trusted_label_pipeline should be bool, got {type(config.trusted_label_pipeline)}'
+            )
+
+    def test_entrius_repos_enable_trusted_label_pipeline(self):
+        repos = load_master_repo_weights()
+        entrius_repos = {name: config for name, config in repos.items() if name.startswith('entrius/')}
+        assert entrius_repos, 'expected entrius/* entries in master_repositories.json'
+        for repo_name, config in entrius_repos.items():
+            assert config.trusted_label_pipeline is True, f'{repo_name} must trust its label pipeline'
+
 
 class TestRepositoryConfigMirrorFlag:
-    """Dataclass-level tests for the mirror_enabled field + its JSON parsing."""
+    """Dataclass-level tests for mirror/trusted-label flags + JSON parsing."""
 
     def test_mirror_enabled_default_false(self):
         """RepositoryConfig constructor defaults mirror_enabled to False."""
@@ -135,6 +150,14 @@ class TestRepositoryConfigMirrorFlag:
         """RepositoryConfig accepts mirror_enabled=True."""
         config = RepositoryConfig(weight=0.5, mirror_enabled=True)
         assert config.mirror_enabled is True
+
+    def test_trusted_label_pipeline_default_false(self):
+        config = RepositoryConfig(weight=0.5)
+        assert config.trusted_label_pipeline is False
+
+    def test_trusted_label_pipeline_explicit_true(self):
+        config = RepositoryConfig(weight=0.5, trusted_label_pipeline=True)
+        assert config.trusted_label_pipeline is True
 
     def test_loader_parses_mirror_enabled_true(self, tmp_path, monkeypatch):
         """load_master_repo_weights() parses mirror_enabled:true from JSON."""
@@ -159,6 +182,45 @@ class TestRepositoryConfigMirrorFlag:
         assert repos['foo/mirror-repo'].mirror_enabled is True
         assert repos['foo/legacy-repo'].mirror_enabled is False
         assert repos['foo/explicit-off'].mirror_enabled is False
+
+    def test_loader_parses_trusted_label_pipeline_true(self, tmp_path, monkeypatch):
+        import json
+
+        from gittensor.validator.utils import load_weights as lw
+
+        fake_weights_dir = tmp_path
+        (fake_weights_dir / 'master_repositories.json').write_text(
+            json.dumps(
+                {
+                    'foo/trusted-repo': {'weight': 0.5, 'trusted_label_pipeline': True},
+                    'foo/untrusted-repo': {'weight': 0.3},
+                    'foo/explicit-off': {'weight': 0.2, 'trusted_label_pipeline': False},
+                }
+            )
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: fake_weights_dir)
+
+        repos = lw.load_master_repo_weights()
+
+        assert repos['foo/trusted-repo'].trusted_label_pipeline is True
+        assert repos['foo/untrusted-repo'].trusted_label_pipeline is False
+        assert repos['foo/explicit-off'].trusted_label_pipeline is False
+
+    def test_string_bool_does_not_enable_trusted_label_pipeline(self, tmp_path, monkeypatch):
+        """Pin _metadata_bool strictness: a JSON typo like "false" must not enable trust."""
+        import json
+
+        from gittensor.validator.utils import load_weights as lw
+
+        fake_weights_dir = tmp_path
+        (fake_weights_dir / 'master_repositories.json').write_text(
+            json.dumps({'foo/bad-bool': {'weight': 0.5, 'trusted_label_pipeline': 'false'}})
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: fake_weights_dir)
+
+        repos = lw.load_master_repo_weights()
+
+        assert repos['foo/bad-bool'].trusted_label_pipeline is False
 
 
 class TestBannedOrganizations:

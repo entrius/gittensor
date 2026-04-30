@@ -205,19 +205,28 @@
   },
   "entrius/allways": {
     "weight": 1.0,
-    "mirror_enabled": true
+    "mirror_enabled": true,
+    "trusted_label_pipeline": true
   },
   "entrius/allways-ui": {
     "weight": 0.5,
-    "mirror_enabled": true
+    "mirror_enabled": true,
+    "trusted_label_pipeline": true
+  },
+  "entrius/das-github-mirror": {
+    "weight": 0.2,
+    "mirror_enabled": true,
+    "trusted_label_pipeline": true
   },
   "entrius/gittensor": {
     "weight": 1.0,
-    "mirror_enabled": true
+    "mirror_enabled": true,
+    "trusted_label_pipeline": true
   },
   "entrius/gittensor-ui": {
     "weight": 0.5,
-    "mirror_enabled": true
+    "mirror_enabled": true,
+    "trusted_label_pipeline": true
   },
   "espressif/arduino-esp32": {
     "weight": 0.1444

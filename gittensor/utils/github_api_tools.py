@@ -38,6 +38,15 @@ from gittensor.validator.utils.load_weights import RepositoryConfig
 # Beyond this many CHANGES_REQUESTED reviews the quality multiplier is already 0
 _MAX_CHANGES_REQUESTED_REVIEWS = ceil(1 / REVIEW_PENALTY_RATE)
 
+_GRAPHQL_PAT_AUTH_SCOPE_FAILED_REASON = 'GitHub GraphQL PAT auth/scope failure'
+_GRAPHQL_PAT_AUTH_SCOPE_ERROR_MARKERS = (
+    'resource not accessible by personal access token',
+    'bad credentials',
+    'requires authentication',
+    'not have the required scopes',
+    'not been granted the required scopes',
+)
+
 # core github graphql query
 QUERY = """
     query($userId: ID!, $limit: Int!, $cursor: String, $maxChangesRequestedReviews: Int!) {
@@ -723,6 +732,18 @@ def _has_resource_limit_errors(data: Dict) -> bool:
     return any(isinstance(e, dict) and e.get('type') == 'RESOURCE_LIMITS_EXCEEDED' for e in errors)
 
 
+def _graphql_pat_auth_scope_error_message(errors: List[Dict]) -> Optional[str]:
+    """Return the first GraphQL PAT auth/scope error message, if present."""
+    for error in errors:
+        if not isinstance(error, dict):
+            continue
+        message = str(error.get('message') or '')
+        normalized = message.lower()
+        if any(marker in normalized for marker in _GRAPHQL_PAT_AUTH_SCOPE_ERROR_MARKERS):
+            return message
+    return None
+
+
 def try_add_open_or_closed_pr(
     miner_eval: MinerEvaluation,
     pr_raw: Dict,
@@ -908,7 +929,12 @@ def load_miners_prs(
             if 'errors' in data:
                 non_resource_errors = [e for e in data['errors'] if e.get('type') != 'RESOURCE_LIMITS_EXCEEDED']
                 if non_resource_errors:
-                    bt.logging.error(f'GraphQL errors: {non_resource_errors}')
+                    auth_scope_error = _graphql_pat_auth_scope_error_message(non_resource_errors)
+                    if auth_scope_error:
+                        bt.logging.error(f'GraphQL PAT auth/scope failure: {auth_scope_error}')
+                        miner_eval.failed_reason = _GRAPHQL_PAT_AUTH_SCOPE_FAILED_REASON
+                    else:
+                        bt.logging.error(f'GraphQL errors: {non_resource_errors}')
                     miner_eval.github_pr_fetch_failed = True
                     break
 

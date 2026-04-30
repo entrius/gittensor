@@ -2,8 +2,10 @@
 
 from datetime import datetime, timezone
 from typing import cast
+from unittest.mock import Mock, patch
 
 from gittensor.classes import FileChange, Issue, MinerEvaluation, MinerEvaluationCache, PRState, PullRequest
+from gittensor.utils.github_api_tools import GraphQLPageResult, load_miners_prs
 from gittensor.utils.mirror.models import MirrorFile, MirrorPullRequest, MirrorReviewSummary
 from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredMirrorPR
 from neurons.validator import Validator
@@ -87,6 +89,30 @@ class TestStoreOrUseCachedEvaluation:
         cached_eval = validator.evaluation_cache.get(uid=1, hotkey='hotkey_1', github_id='12345')
         assert cached_eval is not None
         assert cached_eval.total_prs == 2
+
+    @patch('gittensor.utils.github_api_tools.get_github_graphql_query')
+    def test_graphql_pat_scope_failure_does_not_use_cache(self, mock_graphql_query):
+        validator = _DummyValidator()
+        validator.evaluation_cache.store(_build_eval(uid=1, merged_prs=1, fetch_failed=False))
+
+        response = Mock()
+        response.json.return_value = {
+            'errors': [{'message': 'Resource not accessible by personal access token'}],
+            'data': None,
+        }
+        mock_graphql_query.return_value = GraphQLPageResult(response=response, page_size=100)
+
+        current_eval = MinerEvaluation(uid=1, hotkey='hotkey_1', github_id='12345', github_pat='bad_scope_pat')
+        load_miners_prs(current_eval, {})
+        miner_evaluations = {1: current_eval}
+
+        cached_uids = Validator.store_or_use_cached_evaluation(cast(Validator, validator), miner_evaluations)
+
+        assert current_eval.github_pr_fetch_failed is True
+        assert current_eval.failed_reason == 'GitHub GraphQL PAT auth/scope failure'
+        assert cached_uids == set()
+        assert miner_evaluations[1] is current_eval
+        assert miner_evaluations[1].total_prs == 0
 
 
 class TestMirrorFailureCacheFallback:

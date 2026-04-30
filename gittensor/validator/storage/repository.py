@@ -209,7 +209,7 @@ class Repository(BaseRepository):
                     BULK_UPSERT_PULL_REQUESTS.replace('VALUES %s', 'VALUES %s'),
                     values,
                     template=None,
-                    page_size=100,
+                    page_size=1000,
                 )
                 self.db.commit()
                 return len(values)
@@ -264,7 +264,7 @@ class Repository(BaseRepository):
                 from psycopg2.extras import execute_values
 
                 execute_values(
-                    cursor, BULK_UPSERT_ISSUES.replace('VALUES %s', 'VALUES %s'), values, template=None, page_size=100
+                    cursor, BULK_UPSERT_ISSUES.replace('VALUES %s', 'VALUES %s'), values, template=None, page_size=1000
                 )
                 self.db.commit()
                 return len(values)
@@ -308,12 +308,15 @@ class Repository(BaseRepository):
                 # Use psycopg2's execute_values for efficient bulk insert
                 from psycopg2.extras import execute_values
 
+                # file_changes carries the variable-size patch column, so we keep
+                # page_size lower than the PR/issue bulk paths to bound the per-batch
+                # SQL string size when patches are large.
                 execute_values(
                     cursor,
                     BULK_UPSERT_FILE_CHANGES.replace('VALUES %s', 'VALUES %s'),
                     values,
                     template=None,
-                    page_size=100,
+                    page_size=200,
                 )
                 self.db.commit()
                 return len(values)

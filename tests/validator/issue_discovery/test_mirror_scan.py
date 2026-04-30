@@ -109,6 +109,7 @@ def _issue_dict(
     solving_pr_state: str = 'MERGED',
     solving_pr_author: str = '218712309',
     solving_pr_edited_after_merge: bool = False,
+    last_edited_at: Optional[str] = None,
     repo: str = 'entrius/gittensor-ui',
 ) -> dict:
     sp = None
@@ -138,7 +139,7 @@ def _issue_dict(
         'created_at': '2026-04-01T00:00:00Z',
         'closed_at': '2026-04-18T10:00:00Z' if state == 'CLOSED' else None,
         'updated_at': '2026-04-18T10:00:00Z',
-        'last_edited_at': None,
+        'last_edited_at': last_edited_at,
         'is_transferred': is_transferred,
         'solved_by_pr': solved_by_pr,
         'labels': [],
@@ -206,6 +207,23 @@ class TestClassifyIssue:
     def test_solving_pr_edited_after_merge_counts_as_closed(self):
         issue = MirrorIssue.from_dict(_issue_dict(solving_pr_edited_after_merge=True))
         assert _classify_issue(issue) == 'not-solved-closed'
+
+    def test_issue_edited_after_solving_pr_merge_counts_as_closed(self):
+        # Anti-spec-rewrite: miner can't author a vague issue, then rewrite the
+        # body after a third party's PR merges to retroactively claim discovery
+        # credit for a fix they didn't anticipate.
+        issue = MirrorIssue.from_dict(_issue_dict(last_edited_at='2026-04-18T10:00:01Z'))
+        assert _classify_issue(issue) == 'not-solved-closed'
+
+    def test_issue_edited_before_solving_pr_merge_is_solved(self):
+        # Pre-merge edits are legitimate (sharpening the spec while the PR is
+        # being written) and must NOT trip the gate.
+        issue = MirrorIssue.from_dict(_issue_dict(last_edited_at='2026-04-17T10:00:00Z'))
+        assert _classify_issue(issue) == 'solved'
+
+    def test_issue_never_edited_is_solved(self):
+        issue = MirrorIssue.from_dict(_issue_dict(last_edited_at=None))
+        assert _classify_issue(issue) == 'solved'
 
     def test_missing_author_ignored(self):
         issue = MirrorIssue.from_dict(_issue_dict(author_github_id=None))

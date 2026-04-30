@@ -20,9 +20,7 @@ class StorageResult:
 
 class DatabaseStorage:
     def __init__(self):
-        # Instantiate the database connections
         self.db_connection = create_database_connection()
-        # Initialize repository
         self.repo = Repository(self.db_connection) if self.db_connection else None
         self.logger = bt.logging
 
@@ -45,20 +43,15 @@ class DatabaseStorage:
         result = StorageResult(success=True, errors=[], stored_counts={})
 
         try:
-            # Start transaction
             assert self.db_connection is not None and self.repo is not None
             self.db_connection.autocommit = False
 
             miner_eval.evaluation_timestamp = datetime.now(timezone.utc)
 
-            # Store all entities using bulk methods
             miner = Miner(miner_eval.uid, miner_eval.hotkey, miner_eval.github_id or '')
 
-            result.stored_counts['miners'] = self.repo.set_miner(miner)
+            result.stored_counts['miners'] = self.repo.set_miner(miner, commit=False)
 
-            # Combine legacy + mirror PR lists for storage. Mirror PRs are adapted
-            # into the legacy PullRequest shape via mirror_scored_pr_to_legacy_pull_request
-            # so the bulk-insert SQL is unchanged.
             from gittensor.validator.oss_contributions.mirror.adapters import (
                 mirror_scored_pr_to_legacy_pull_request,
             )
@@ -70,27 +63,25 @@ class DatabaseStorage:
                 ]
 
             result.stored_counts['merged_pull_requests'] = self.repo.store_pull_requests_bulk(
-                miner_eval.merged_pull_requests + _adapt_mirror(miner_eval.mirror_merged_prs)
+                miner_eval.merged_pull_requests + _adapt_mirror(miner_eval.mirror_merged_prs), commit=False
             )
             result.stored_counts['open_pull_requests'] = self.repo.store_pull_requests_bulk(
-                miner_eval.open_pull_requests + _adapt_mirror(miner_eval.mirror_open_prs)
+                miner_eval.open_pull_requests + _adapt_mirror(miner_eval.mirror_open_prs), commit=False
             )
             result.stored_counts['closed_pull_requests'] = self.repo.store_pull_requests_bulk(
-                miner_eval.closed_pull_requests + _adapt_mirror(miner_eval.mirror_closed_prs)
+                miner_eval.closed_pull_requests + _adapt_mirror(miner_eval.mirror_closed_prs), commit=False
             )
-            result.stored_counts['issues'] = self.repo.store_issues_bulk(miner_eval.get_all_issues())
-            result.stored_counts['file_changes'] = self.repo.store_file_changes_bulk(miner_eval.get_all_file_changes())
-            # Clean up stale data if this github_id was previously registered under a different uid/hotkey
-            self.repo.cleanup_stale_miner_data(miner_eval)
+            result.stored_counts['issues'] = self.repo.store_issues_bulk(miner_eval.get_all_issues(), commit=False)
+            result.stored_counts['file_changes'] = self.repo.store_file_changes_bulk(
+                miner_eval.get_all_file_changes(), commit=False
+            )
+            self.repo.cleanup_stale_miner_data(miner_eval, commit=False)
+            result.stored_counts['evaluations'] = 1 if self.repo.set_miner_evaluation(miner_eval, commit=False) else 0
 
-            result.stored_counts['evaluations'] = 1 if self.repo.set_miner_evaluation(miner_eval) else 0
-
-            # Commit transaction
             self.db_connection.commit()
             self.db_connection.autocommit = True
 
         except Exception as ex:
-            # Rollback transaction
             if self.db_connection is not None:
                 self.db_connection.rollback()
                 self.db_connection.autocommit = True

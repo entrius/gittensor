@@ -111,7 +111,7 @@ class Repository(BaseRepository):
         params = (miner.uid, miner.hotkey, miner.github_id)
         return self.set_entity(SET_MINER, params, commit=commit)
 
-    def cleanup_stale_miner_data(self, evaluation: MinerEvaluation) -> None:
+    def cleanup_stale_miner_data(self, evaluation: MinerEvaluation, commit: bool = True) -> None:
         """
         Remove stale evaluation data when a miner re-registers on a new uid/hotkey.
 
@@ -134,14 +134,14 @@ class Repository(BaseRepository):
         eval_params = params + (evaluation.evaluation_timestamp,)
 
         # Clean up when same github_id re-registers on a new uid/hotkey
-        self.execute_command(CLEANUP_STALE_MINER_EVALUATIONS, eval_params)
-        self.execute_command(CLEANUP_STALE_MINERS, params)
+        self.execute_command(CLEANUP_STALE_MINER_EVALUATIONS, eval_params, commit=commit)
+        self.execute_command(CLEANUP_STALE_MINERS, params, commit=commit)
 
         # Clean up when same (uid, hotkey) re-links to a new github_id
         reverse_params = (evaluation.uid, evaluation.hotkey, evaluation.github_id)
         reverse_eval_params = reverse_params + (evaluation.evaluation_timestamp,)
-        self.execute_command(CLEANUP_STALE_MINER_EVALUATIONS_BY_HOTKEY, reverse_eval_params)
-        self.execute_command(CLEANUP_STALE_MINERS_BY_HOTKEY, reverse_params)
+        self.execute_command(CLEANUP_STALE_MINER_EVALUATIONS_BY_HOTKEY, reverse_eval_params, commit=commit)
+        self.execute_command(CLEANUP_STALE_MINERS_BY_HOTKEY, reverse_params, commit=commit)
 
     def store_pull_requests_bulk(self, pull_requests: List[PullRequest], commit: bool = True) -> int:
         """

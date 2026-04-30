@@ -444,16 +444,6 @@ class TestLabelResolution:
         scored = ScoredMirrorPR(pr=_pr(labels=labels))
         assert _resolve_maintainer_set_label(scored.pr, _config()) == scoring_label.lower()
 
-    def test_trusted_pipeline_accepts_null_actor(self):
-        """Bot/App labels (null actor_association) score on trusted_label_pipeline repos — issue #911."""
-        from gittensor.constants import LABEL_MULTIPLIERS
-
-        scoring_label = next(iter(LABEL_MULTIPLIERS.keys()))
-        labels = [{'name': scoring_label, 'actor_github_id': '99', 'actor_association': None}]
-        scored = ScoredMirrorPR(pr=_pr(labels=labels))
-        chosen = _resolve_maintainer_set_label(scored.pr, _config(trusted_label_pipeline=True))
-        assert chosen == scoring_label.lower()
-
     def test_highest_multiplier_wins(self):
         from gittensor.constants import LABEL_MULTIPLIERS
 

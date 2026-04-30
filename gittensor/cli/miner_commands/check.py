@@ -11,6 +11,8 @@ from rich.console import Console
 from rich.table import Table
 
 from .helpers import (
+    DEFAULT_MIN_VALIDATOR_STAKE,
+    DEFAULT_MIN_VALIDATOR_VTRUST,
     NETUID_DEFAULT,
     _connect_bittensor,
     _error,
@@ -18,9 +20,11 @@ from .helpers import (
     _pat_check_aggregate_counts,
     _pat_check_row_category,
     _print,
+    _render_skipped_validators,
     _require_registered,
     _require_validator_axons,
     _resolve_endpoint,
+    _resolve_validator_filters,
     _status,
 )
 
@@ -40,8 +44,20 @@ _PAT_CHECK_STATUS_MARKUP = {
 @click.option('--netuid', type=int, default=NETUID_DEFAULT, help='Subnet UID.', show_default=True)
 @click.option('--network', default=None, help='Network name (local, test, finney).')
 @click.option('--rpc-url', default=None, help='Subtensor RPC endpoint URL (overrides --network).')
+@click.option(
+    '--min-vtrust',
+    type=float,
+    default=None,
+    help=f'Minimum validator_trust to probe. Default {DEFAULT_MIN_VALIDATOR_VTRUST}.',
+)
+@click.option(
+    '--min-stake',
+    type=float,
+    default=None,
+    help=f'Minimum validator stake (α) to probe. Default {DEFAULT_MIN_VALIDATOR_STAKE:,.0f}.',
+)
 @click.option('--json-output', 'json_mode', is_flag=True, default=False, help='Output results as JSON.')
-def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, json_mode):
+def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, min_vtrust, min_stake, json_mode):
     """Check how many validators have your PAT stored.
 
     Sends a lightweight probe to each validator — no PAT is transmitted.
@@ -71,8 +87,11 @@ def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, json_mode)
     # Verify miner is registered
     _require_registered(wallet, metagraph, netuid, json_mode)
 
-    # 3. Find active validator axons (vtrust > 0.1 = actively participating in consensus)
-    validator_axons, validator_uids = _require_validator_axons(metagraph, json_mode)
+    # 3. Find active validator axons (vtrust + serving + stake threshold)
+    resolved_vtrust, resolved_stake = _resolve_validator_filters(min_vtrust, min_stake)
+    validator_axons, validator_uids, excluded = _require_validator_axons(
+        metagraph, json_mode, min_vtrust=resolved_vtrust, min_stake=resolved_stake
+    )
 
     # 4. Send check probes
     synapse = PatCheckSynapse()
@@ -115,6 +134,7 @@ def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, json_mode)
                     'success': valid_count > 0,
                     'total_validators': len(results),
                     **counts,
+                    'skipped': excluded,
                     'results': results,
                 },
                 indent=2,
@@ -134,3 +154,4 @@ def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, json_mode)
 
         console.print(table)
         console.print(f'\n[bold]{valid_count}/{len(results)} validators have a valid PAT stored.[/bold]')
+        _render_skipped_validators(excluded, json_mode)

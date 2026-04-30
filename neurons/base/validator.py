@@ -19,6 +19,8 @@
 import argparse
 import asyncio
 import copy
+import signal
+import sys
 import threading
 from traceback import print_exception
 from typing import List, Union
@@ -78,6 +80,15 @@ class BaseValidatorNeuron(BaseNeuron):
         self.is_running: bool = False
         self.thread: Union[threading.Thread, None] = None
         self.lock = asyncio.Lock()
+
+        # Bug 2: route SIGTERM (docker/systemd/k8s stop) through the same
+        # cleanup path as Ctrl-C; otherwise Python's default raises SystemExit
+        # which bypasses both `except` clauses in run().
+        signal.signal(signal.SIGTERM, self._handle_sigterm)
+
+    @staticmethod
+    def _handle_sigterm(signum, frame):
+        raise KeyboardInterrupt('SIGTERM received')
 
     def serve_axon(self):
         """Serve axon to enable external connections."""
@@ -159,9 +170,12 @@ class BaseValidatorNeuron(BaseNeuron):
 
         # If someone intentionally stops the validator, it'll safely terminate operations.
         except KeyboardInterrupt:
-            self.axon.stop()
+            # Bug 1: only stop axon if it was actually started — with axon_off=True,
+            # self.axon is never assigned and the bare call would raise AttributeError.
+            if not self.config.neuron.axon_off and hasattr(self, 'axon'):
+                self.axon.stop()
             bt.logging.success('Validator killed by keyboard interrupt.')
-            exit()
+            sys.exit(0)
 
         # In case of unforeseen errors, the validator will log the error and continue operations.
         except Exception as err:
@@ -185,10 +199,15 @@ class BaseValidatorNeuron(BaseNeuron):
         """
         Stops the validator's operations that are running in the background thread.
         """
-        if self.is_running:
+        if self.is_running and self.thread is not None:
             bt.logging.debug('Stopping validator in background thread.')
             self.should_exit = True
             self.thread.join(5)
+            # Bug 3: thread.join(timeout) returns regardless of whether the
+            # thread actually exited. Surface a warning so a stuck thread
+            # is observable instead of silently leaking past is_running=False.
+            if self.thread.is_alive():
+                bt.logging.warning('Validator thread did not exit within 5s — may still be running')
             self.is_running = False
             bt.logging.debug('Stopped')
 

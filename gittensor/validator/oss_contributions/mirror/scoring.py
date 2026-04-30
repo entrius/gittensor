@@ -93,11 +93,17 @@ def score_mirror_miner_prs(
     ]
 
     for label, scored_prs in pr_groups:
+        scored_merged_prs: List[ScoredMirrorPR] = []
         for i, scored in enumerate(scored_prs, start=1):
             bt.logging.info(
                 f'\n[{i}/{len(scored_prs)}] {label} PR #{scored.pr.pr_number} in {scored.pr.repo_full_name}'
             )
-            score_mirror_pr(scored, mirror_eval, mirror_repos, programming_languages, token_config, client)
+            was_scored = score_mirror_pr(scored, mirror_eval, mirror_repos, programming_languages, token_config, client)
+            if label == 'MERGED' and was_scored:
+                scored_merged_prs.append(scored)
+
+        if label == 'MERGED':
+            scored_prs[:] = scored_merged_prs
 
 
 # ============================================================================
@@ -112,13 +118,13 @@ def score_mirror_pr(
     programming_languages: Dict[str, LanguageConfig],
     token_config: TokenConfig,
     client: MirrorClient,
-) -> None:
-    """Score a single mirror PR. Populates ScoredMirrorPR scoring fields in place."""
+) -> bool:
+    """Score a single mirror PR. Returns True when scoring fields were populated."""
     pr = scored.pr
     repo_config = mirror_repos.get(pr.repo_full_name)
     if not repo_config:
         bt.logging.warning(f'{pr.repo_full_name} not in mirror_repos. Skipping...')
-        return
+        return False
 
     # Eligibility gate for MERGED PRs already ran at LOAD time (see
     # load_mirror_miner_prs → _should_skip_merged_mirror_pr). By this point
@@ -128,19 +134,19 @@ def score_mirror_pr(
     # Mirror signals it has no stored files for this PR (pending backfill, in-flight
     # file job, etc.) — skip the round trip.
     if not pr.scoring_data_stored:
-        return
+        return False
 
     # Fetch file contents via the mirror's lazy /pulls/.../files endpoint.
     try:
         files = client.get_pr_files(pr.repo_full_name, pr.pr_number).files
     except MirrorRequestError as e:
         bt.logging.warning(f'Mirror file fetch failed for PR #{pr.pr_number}: {e}')
-        return
+        return False
     scored.files = files
 
     if not files:
         bt.logging.warning(f'No files returned for PR #{pr.pr_number}')
-        return
+        return False
 
     file_changes, file_contents = mirror_files_to_legacy(pr.repo_full_name, pr.pr_number, files)
 
@@ -153,6 +159,8 @@ def score_mirror_pr(
         # Token totals are aggregated later in finalize_miner_scores (legacy parity
         # — score sets per-PR state, finalize rolls up eval-level totals across
         # both paths).
+
+    return True
 
 
 # ============================================================================

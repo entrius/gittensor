@@ -85,7 +85,9 @@ def _scored_mirror_pr(
     return scored
 
 
-def _empty_files_response(repo: str, pr_number: int) -> MirrorPullRequestFilesResponse:
+def _empty_files_response(
+    repo: str, pr_number: int, scoring_data_stored: bool = True
+) -> MirrorPullRequestFilesResponse:
     return MirrorPullRequestFilesResponse.from_dict(
         {
             'repo_full_name': repo,
@@ -93,7 +95,7 @@ def _empty_files_response(repo: str, pr_number: int) -> MirrorPullRequestFilesRe
             'head_sha': 'h',
             'base_sha': 'b',
             'merge_base_sha': 'mb',
-            'scoring_data_stored': True,
+            'scoring_data_stored': scoring_data_stored,
             'files': [],
         }
     )
@@ -608,6 +610,57 @@ class TestCacheStats:
         assert stats.fetch_failures == 1
         # Failed lookups are NOT cached (so a retry is possible)
         assert cache == {}
+
+    def test_resolve_skips_caching_when_scoring_data_unavailable(self):
+        from gittensor.validator.issue_discovery.mirror_scan import (
+            _CacheStats,
+            _resolve_solving_pr_score,
+        )
+
+        client = Mock()
+        client.get_pr_files.return_value = _empty_files_response('entrius/gittensor-ui', 100, scoring_data_stored=False)
+        cache = {}
+        stats = _CacheStats()
+
+        issue = MirrorIssue.from_dict(_issue_dict())
+        assert issue.solving_pr is not None
+        result = _resolve_solving_pr_score(
+            issue, issue.solving_pr, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG
+        )
+
+        assert result is None
+        assert cache == {}
+        assert stats.hits == 0
+        assert stats.misses == 1
+        assert stats.fetch_failures == 1
+
+    def test_unavailable_scoring_data_does_not_poison_cross_miner_cache(self):
+        from gittensor.validator.issue_discovery.mirror_scan import (
+            _CacheStats,
+            _resolve_solving_pr_score,
+        )
+
+        client = Mock()
+        client.get_pr_files.return_value = _empty_files_response('entrius/gittensor-ui', 100, scoring_data_stored=False)
+        cache = {}
+        stats = _CacheStats()
+
+        first_issue = MirrorIssue.from_dict(_issue_dict(issue_number=51))
+        second_issue = MirrorIssue.from_dict(_issue_dict(issue_number=52))
+        assert first_issue.solving_pr is not None and second_issue.solving_pr is not None
+
+        first = _resolve_solving_pr_score(
+            first_issue, first_issue.solving_pr, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG
+        )
+        second = _resolve_solving_pr_score(
+            second_issue, second_issue.solving_pr, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG
+        )
+
+        assert first is None and second is None
+        assert cache == {}
+        assert stats.misses == 2
+        assert stats.fetch_failures == 2
+        assert client.get_pr_files.call_count == 2
 
 
 class TestOpenIssueSpamSourceIsMirror:

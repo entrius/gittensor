@@ -3,12 +3,13 @@ import base64
 import fnmatch
 import os
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from math import ceil
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, Iterator, List, Optional
 
-from gittensor.utils.utils import parse_repo_name
+from gittensor.utils.utils import backoff_seconds, parse_repo_name
 
 if TYPE_CHECKING:
     from gittensor.classes import FileChange as FileChangeType
@@ -174,7 +175,51 @@ def make_headers(token: str) -> Dict[str, str]:
 
 def make_graphql_headers(token: str) -> Dict[str, str]:
     """Build GitHub GraphQL headers for a PAT."""
-    return {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
+    return {
+        'Authorization': f'Bearer {token}',
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+    }
+
+
+def make_anonymous_headers() -> Dict[str, str]:
+    """Build GitHub HTTP headers for unauthenticated calls."""
+    return {'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'gittensor-cli'}
+
+
+_session_cache: Optional[Dict[str, requests.Session]] = None
+
+
+@contextmanager
+def session_scope() -> Iterator[None]:
+    """Share requests.Session per PAT within the scope; close all on exit. Not re-entrant."""
+    global _session_cache
+    if _session_cache is not None:
+        raise RuntimeError('session_scope is not re-entrant')
+    _session_cache = {}
+    try:
+        yield
+    finally:
+        cache = _session_cache
+        _session_cache = None
+        for s in cache.values():
+            s.close()
+
+
+def _build_session(token: str) -> requests.Session:
+    session = requests.Session()
+    session.headers.update(make_headers(token) if token else make_anonymous_headers())
+    return session
+
+
+def get_session(token: str) -> requests.Session:
+    """Return a requests.Session for the given PAT, reusing one within a session_scope() and allocating fresh otherwise."""
+    if _session_cache is None:
+        return _build_session(token)
+    key = token or ''
+    if key not in _session_cache:
+        _session_cache[key] = _build_session(token)
+    return _session_cache[key]
 
 
 def get_github_id(token: str) -> Optional[str]:
@@ -189,12 +234,12 @@ def get_github_id(token: str) -> Optional[str]:
     if not token:
         return None
 
-    headers = make_headers(token)
+    session = get_session(token)
 
     # Retry logic for timeout issues
     for attempt in range(6):
         try:
-            response = requests.get(f'{BASE_GITHUB_API_URL}/user', headers=headers, timeout=GITHUB_HTTP_TIMEOUT_SECONDS)
+            response = session.get(f'{BASE_GITHUB_API_URL}/user', timeout=GITHUB_HTTP_TIMEOUT_SECONDS)
             if response.status_code == 200:
                 try:
                     user_data: Dict[str, Any] = response.json()
@@ -235,14 +280,13 @@ def get_merge_base_sha(repository: str, base_sha: str, head_sha: str, token: str
     Returns:
         Merge-base commit SHA, or None if the request fails
     """
-    headers = make_headers(token)
+    session = get_session(token)
     max_attempts = 3
 
     for attempt in range(max_attempts):
         try:
-            response = requests.get(
+            response = session.get(
                 f'{BASE_GITHUB_API_URL}/repos/{repository}/compare/{base_sha}...{head_sha}',
-                headers=headers,
                 timeout=15,
             )
 
@@ -255,7 +299,7 @@ def get_merge_base_sha(repository: str, base_sha: str, head_sha: str, token: str
                 return None
 
             if attempt < max_attempts - 1:
-                backoff_delay = min(5 * (2 ** (attempt)), 30)
+                backoff_delay = backoff_seconds(attempt)
                 bt.logging.warning(
                     f'Compare API for {repository} failed with status {response.status_code} '
                     f'(attempt {attempt + 1}/{max_attempts}), retrying in {backoff_delay}s...'
@@ -264,7 +308,7 @@ def get_merge_base_sha(repository: str, base_sha: str, head_sha: str, token: str
 
         except requests.exceptions.RequestException as e:
             if attempt < max_attempts - 1:
-                backoff_delay = min(5 * (2 ** (attempt)), 30)
+                backoff_delay = backoff_seconds(attempt)
                 bt.logging.warning(
                     f'Compare API error for {repository} (attempt {attempt + 1}/{max_attempts}): {e}, '
                     f'retrying in {backoff_delay}s...'
@@ -293,7 +337,7 @@ def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -
     """
     max_attempts = 3
     per_page = 100
-    headers = make_headers(token)
+    session = get_session(token)
 
     all_file_diffs: list = []
     page = 1
@@ -302,9 +346,8 @@ def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -
 
     while attempt < max_attempts:
         try:
-            response = requests.get(
+            response = session.get(
                 f'{BASE_GITHUB_API_URL}/repos/{repository}/pulls/{pr_number}/files',
-                headers=headers,
                 params={'per_page': per_page, 'page': page},
                 timeout=15,
             )
@@ -334,7 +377,7 @@ def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -
             attempt += 1
 
             if attempt < max_attempts:
-                backoff_delay = min(5 * (2 ** (attempt - 1)), 30)
+                backoff_delay = backoff_seconds(attempt - 1)
                 bt.logging.warning(
                     f'File changes request for PR #{pr_number} in {repository} failed with {last_error} '
                     f'(attempt {attempt}/{max_attempts}), per_page={per_page}, retrying in {backoff_delay}s...'
@@ -348,7 +391,7 @@ def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -
             attempt += 1
 
             if attempt < max_attempts:
-                backoff_delay = min(5 * (2 ** (attempt - 1)), 30)
+                backoff_delay = backoff_seconds(attempt - 1)
                 bt.logging.warning(
                     f'File changes request error for PR #{pr_number} in {repository} '
                     f'(attempt {attempt}/{max_attempts}): {e}, retrying in {backoff_delay}s...'
@@ -478,97 +521,19 @@ def _search_issue_referencing_prs_graphql(
     return out
 
 
-def _search_issue_referencing_prs_rest(
-    repo: str, issue_number: int, token: Optional[str] = None, state: str = 'open'
-) -> List[PRInfo]:
-    """Search PRs via GitHub REST search API."""
-    if issue_number < 1:
-        return []
-
-    if token:
-        headers = make_headers(token)
-    else:
-        headers = {'Accept': 'application/vnd.github.v3+json'}
-    headers.setdefault('User-Agent', 'gittensor-cli')
-
-    state_clause = f' state:{state}' if state != 'all' else ''
-    max_attempts = 3
-    for attempt in range(max_attempts):
-        try:
-            resp = requests.get(
-                f'{BASE_GITHUB_API_URL}/search/issues',
-                params={'q': f'repo:{repo} type:pr{state_clause} {issue_number} in:title,body', 'per_page': '50'},
-                headers=headers,
-                timeout=10,
-            )
-            resp.raise_for_status()
-
-            out: List[PRInfo] = []
-            for item in resp.json().get('items', []):
-                number = item.get('number')
-                if number is None:
-                    continue
-                user = item.get('user') or {}
-                pr_info: PRInfo = {
-                    'number': number,
-                    'title': item.get('title') or '',
-                    'author_login': user.get('login') or 'ghost',
-                    'author_id': user.get('id'),
-                    'created_at': item.get('created_at') or '',
-                    'merged_at': None,
-                    'state': _resolve_pr_state(item.get('state', 'open')),
-                    'url': item.get('html_url') or '',
-                    'review_count': 0,
-                    'closing_numbers': [],
-                }
-                out.append(pr_info)
-            return out
-
-        except requests.exceptions.RequestException as e:
-            if attempt < max_attempts - 1:
-                backoff = 2 * (attempt + 1)
-                bt.logging.warning(
-                    f'REST search failed for {repo}#{issue_number} (attempt {attempt + 1}/{max_attempts}): {e}, '
-                    f'retrying in {backoff}s...'
-                )
-                time.sleep(backoff)
-            else:
-                raise
-
-    return []
-
-
 def find_prs_for_issue(
     repo: str,
     issue_number: int,
     open_only: bool = True,
     token: Optional[str] = None,
 ) -> List[PRInfo]:
-    """Cascading PR discovery: GraphQL -> authenticated REST -> unauthenticated REST."""
-    rest_state = 'open' if open_only else 'all'
-
+    """Find PRs that reference an issue via GraphQL cross-reference data."""
     if token:
         try:
             prs = _search_issue_referencing_prs_graphql(repo, issue_number, token, open_only=open_only)
-            if prs:
-                return prs
+            return prs or []
         except Exception as exc:
             bt.logging.debug(f'GraphQL PR fetch failed for {repo}#{issue_number}: {exc}')
-
-    if token:
-        try:
-            prs = _search_issue_referencing_prs_rest(repo, issue_number, token=token, state=rest_state)
-            if prs:
-                return prs
-        except Exception as exc:
-            bt.logging.debug(f'Authenticated REST search failed for {repo}#{issue_number}: {exc}')
-
-    try:
-        prs = _search_issue_referencing_prs_rest(repo, issue_number, token=None, state=rest_state)
-        if prs:
-            return prs
-    except Exception as exc:
-        bt.logging.debug(f'Unauthenticated REST search failed for {repo}#{issue_number}: {exc}')
 
     return []
 
@@ -593,11 +558,12 @@ def execute_graphql_query(
     Returns:
         Parsed JSON response data, or None if all attempts failed
     """
+    session = get_session(token)
     headers = make_graphql_headers(token)
 
     for attempt in range(max_attempts):
         try:
-            response = requests.post(
+            response = session.post(
                 f'{BASE_GITHUB_API_URL}/graphql',
                 headers=headers,
                 json={'query': query, 'variables': variables},
@@ -609,7 +575,7 @@ def execute_graphql_query(
 
             # Retry on failure
             if attempt < (max_attempts - 1):
-                backoff_delay = min(5 * (2**attempt), 30)  # max of 30 second wait between retries
+                backoff_delay = backoff_seconds(attempt)
                 bt.logging.warning(
                     f'GraphQL request failed with status {response.status_code} '
                     f'(attempt {attempt + 1}/{max_attempts}), retrying in {backoff_delay}s...'
@@ -623,7 +589,7 @@ def execute_graphql_query(
 
         except requests.exceptions.RequestException as e:
             if attempt < (max_attempts - 1):
-                backoff_delay = min(5 * (2**attempt), 30)
+                backoff_delay = backoff_seconds(attempt)
                 bt.logging.warning(
                     f'GraphQL request exception (attempt {attempt + 1}/{max_attempts}), '
                     f'retrying in {backoff_delay}s: {e}'
@@ -670,6 +636,7 @@ def get_github_graphql_query(
     """
 
     max_attempts = 8
+    session = get_session(token)
     headers = make_graphql_headers(token)
     limit = page_size if page_size is not None else min(100, max_prs - merged_pr_count)
 
@@ -681,7 +648,7 @@ def get_github_graphql_query(
             'maxChangesRequestedReviews': _MAX_CHANGES_REQUESTED_REVIEWS,
         }
         try:
-            response = requests.post(
+            response = session.post(
                 f'{BASE_GITHUB_API_URL}/graphql',
                 headers=headers,
                 json={'query': QUERY, 'variables': variables},
@@ -699,7 +666,7 @@ def get_github_graphql_query(
                     if attempt < (max_attempts - 1):
                         old_limit = limit
                         limit = max(limit // 2, 10)
-                        backoff_delay = min(2 * (2**attempt), 15)
+                        backoff_delay = backoff_seconds(attempt, base=2, cap=15)
                         bt.logging.warning(
                             f'GraphQL RESOURCE_LIMITS_EXCEEDED (attempt {attempt + 1}/{max_attempts}), '
                             f'page size {old_limit} -> {limit}, retrying in {backoff_delay}s...'
@@ -716,7 +683,7 @@ def get_github_graphql_query(
 
             # HTTP error - log and retry
             if attempt < (max_attempts - 1):
-                backoff_delay = min(5 * (2**attempt), 30)
+                backoff_delay = backoff_seconds(attempt)
                 if response.status_code in (502, 503, 504):
                     limit = max(limit // 2, 10)
                     bt.logging.warning(
@@ -736,7 +703,7 @@ def get_github_graphql_query(
 
         except requests.exceptions.RequestException as e:
             if attempt < (max_attempts - 1):
-                backoff_delay = min(5 * (2**attempt), 30)
+                backoff_delay = backoff_seconds(attempt)
                 bt.logging.warning(
                     f'GraphQL request connection error (attempt {attempt + 1}/{max_attempts}): {e}, retrying in {backoff_delay}s...'
                 )
@@ -1068,12 +1035,11 @@ def check_github_issue_closed(repo: str, issue_number: int, token: str) -> Optio
     Returns:
         Dict with 'is_closed', 'solver_github_id', 'pr_number', 'solver_lookup_failed' or None on error
     """
-    headers = make_headers(token)
+    session = get_session(token)
 
     try:
-        response = requests.get(
+        response = session.get(
             f'{BASE_GITHUB_API_URL}/repos/{repo}/issues/{issue_number}',
-            headers=headers,
             timeout=15,
         )
 

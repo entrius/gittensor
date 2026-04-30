@@ -175,8 +175,11 @@ def _test_pat_against_repo(pat: str) -> Optional[str]:
         if response.status_code != 200:
             return f'GitHub GraphQL API returned {response.status_code}'
         data = response.json()
-        if 'errors' in data:
-            return f'GraphQL error: {data["errors"][0].get("message", "unknown")}'
+        errors = data.get('errors')
+        if errors:
+            return f'GraphQL error: {errors[0].get("message", "unknown")}'
+        if (data.get('data') or {}).get('viewer') is None:
+            return "Fine-grained PATs need 'Public Repositories (read-only)' permission"
         return None
     except requests.RequestException as e:
         return str(e)

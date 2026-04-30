@@ -62,7 +62,7 @@ async def forward(self: 'Validator') -> None:
         token_config = load_token_config()
 
         # 1. Score OSS contributions
-        oss_rewards, miner_evaluations, cached_uids = await oss_contributions(
+        oss_rewards, miner_evaluations, cached_uids, penalized_uids = await oss_contributions(
             self, miner_uids, master_repositories, programming_languages, token_config
         )
 
@@ -80,7 +80,7 @@ async def forward(self: 'Validator') -> None:
         # 5. Blend 4 emission pools into final rewards
         rewards = blend_emission_pools(oss_rewards, issue_rewards, miner_uids)
 
-        self.update_scores(rewards, miner_uids)
+        self.update_scores(rewards, miner_uids, blacklisted_uids=sorted(penalized_uids))
 
     await asyncio.sleep(VALIDATOR_WAIT)
 
@@ -91,8 +91,8 @@ async def oss_contributions(
     master_repositories: Dict[str, RepositoryConfig],
     programming_languages: Dict,
     token_config,
-) -> Tuple[np.ndarray, Dict[int, MinerEvaluation], Set[int]]:
-    """Score OSS contributions and return normalized rewards + miner evaluations + cached UIDs.
+) -> Tuple[np.ndarray, Dict[int, MinerEvaluation], Set[int], Set[int]]:
+    """Score OSS contributions and return normalized rewards + miner evaluations + cached UIDs + penalized UIDs.
 
     Pure scoring — no DB storage or emission blending. Those are handled by forward().
     """
@@ -104,11 +104,11 @@ async def oss_contributions(
     bt.logging.info(f'Token config: {tree_sitter_count} tree-sitter languages')
     bt.logging.info(f'Neurons to evaluate: {len(miner_uids)}')
 
-    rewards, miner_evaluations, cached_uids = await get_rewards(
+    rewards, miner_evaluations, cached_uids, penalized_uids = await get_rewards(
         self, miner_uids, master_repositories, programming_languages, token_config
     )
 
-    return rewards, miner_evaluations, cached_uids
+    return rewards, miner_evaluations, cached_uids, penalized_uids
 
 
 async def issue_discovery(

@@ -281,7 +281,7 @@ def fetch_open_issue_pull_requests(
     """Fetch open PR submissions for a GitHub issue."""
     token = get_github_pat() or ''
     if not token and not as_json:
-        print_warning('No GitHub token (GITTENSOR_MINER_PAT) found; using unauthenticated requests (lower rate limits)')
+        print_warning('No GitHub token found; set GITTENSOR_MINER_PAT to fetch GitHub issue submissions')
 
     try:
         from gittensor.utils.github_api_tools import find_prs_for_issue

@@ -12,6 +12,7 @@ Covers from_dict parsing for each response dataclass:
 """
 
 from datetime import datetime, timezone
+from copy import deepcopy
 from unittest.mock import patch
 
 import pytest
@@ -481,6 +482,50 @@ class TestMirrorPullRequestsResponse:
         assert len(resp.pull_requests) == 1
         assert resp.pull_requests[0].pr_number == 518
         mock_logging.warning.assert_called()
+
+    @patch('gittensor.utils.mirror.models.bt.logging')
+    def test_malformed_linked_issue_skipped_parent_pr_kept(
+        self, mock_logging, pull_request_dict
+    ):
+        payload = {
+            'github_id': '218712309',
+            'since': '2026-03-15T00:00:00Z',
+            'generated_at': '2026-04-21T15:00:00Z',
+            'pull_requests': [
+                {
+                    **deepcopy(pull_request_dict),
+                    'linked_issues': [{'number': 7, 'title': 'bad child'}],
+                }
+            ],
+        }
+        resp = MirrorPullRequestsResponse.from_dict(payload)
+        assert len(resp.pull_requests) == 1
+        assert resp.pull_requests[0].pr_number == 518
+        assert resp.pull_requests[0].linked_issues == []
+        mock_logging.warning.assert_called_once()
+        assert 'Skipping malformed mirror linked issue 7' in mock_logging.warning.call_args[0][0]
+
+    @patch('gittensor.utils.mirror.models.bt.logging')
+    def test_malformed_pr_label_skipped_parent_pr_kept(
+        self, mock_logging, pull_request_dict
+    ):
+        payload = {
+            'github_id': '218712309',
+            'since': '2026-03-15T00:00:00Z',
+            'generated_at': '2026-04-21T15:00:00Z',
+            'pull_requests': [
+                {
+                    **deepcopy(pull_request_dict),
+                    'labels': [{'actor_github_id': '61125407'}],
+                }
+            ],
+        }
+        resp = MirrorPullRequestsResponse.from_dict(payload)
+        assert len(resp.pull_requests) == 1
+        assert resp.pull_requests[0].pr_number == 518
+        assert resp.pull_requests[0].labels == []
+        mock_logging.warning.assert_called_once()
+        assert 'Skipping malformed mirror label ?' in mock_logging.warning.call_args[0][0]
 
 
 class TestMirrorIssuesResponse:

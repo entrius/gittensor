@@ -21,6 +21,34 @@ from gittensor.validator.utils.datetime_utils import (
 )
 
 
+def _parse_mirror_labels(raw_labels: list[dict], parent_identifier: str) -> list['MirrorLabel']:
+    labels: list[MirrorLabel] = []
+    for raw in raw_labels or []:
+        try:
+            labels.append(MirrorLabel.from_dict(raw))
+        except Exception as e:
+            name = raw.get('name', '?') if isinstance(raw, dict) else '?'
+            bt.logging.warning(
+                f'Skipping malformed mirror label {name} on {parent_identifier}: {e}'
+            )
+    return labels
+
+
+def _parse_mirror_linked_issues(
+    raw_issues: list[dict], pr_identifier: str
+) -> list['MirrorLinkedIssue']:
+    linked_issues: list[MirrorLinkedIssue] = []
+    for raw in raw_issues or []:
+        try:
+            linked_issues.append(MirrorLinkedIssue.from_dict(raw))
+        except Exception as e:
+            identifier = raw.get('number', '?') if isinstance(raw, dict) else '?'
+            bt.logging.warning(
+                f'Skipping malformed mirror linked issue {identifier} on {pr_identifier}: {e}'
+            )
+    return linked_issues
+
+
 @dataclass
 class MirrorLabel:
     """A label applied to a PR or issue, with the actor who applied it.
@@ -94,6 +122,7 @@ class MirrorLinkedIssue:
         # str-typed field so downstream `==` comparisons with author_github_id
         # from MirrorPullRequest don't silently mismatch on type.
         author_github_id = data.get('author_github_id')
+        issue_identifier = f'linked issue {data.get("number", "?")}'
         return cls(
             number=data['number'],
             title=data.get('title', ''),
@@ -106,7 +135,7 @@ class MirrorLinkedIssue:
             updated_at=parse_optional_github_iso_to_utc(data.get('updated_at')),
             is_transferred=bool(data.get('is_transferred', False)),
             solved_by_pr=data.get('solved_by_pr'),
-            labels=[MirrorLabel.from_dict(label) for label in data.get('labels') or []],
+            labels=_parse_mirror_labels(data.get('labels') or [], issue_identifier),
         )
 
 
@@ -156,6 +185,7 @@ class MirrorPullRequest:
         # union with the legacy lowercased path) is case-correct without each
         # call site re-applying .lower().
         head_repo = data.get('head_repo_full_name')
+        pr_identifier = f'{data.get("repo_full_name", "?")}#{data.get("pr_number", "?")}'
         return cls(
             repo_full_name=data['repo_full_name'].lower(),
             pr_number=data['pr_number'],
@@ -184,8 +214,10 @@ class MirrorPullRequest:
             commits_count=int(data.get('commits_count', 0)),
             scoring_data_stored=bool(data.get('scoring_data_stored', False)),
             review_summary=MirrorReviewSummary.from_dict(data.get('review_summary') or {}),
-            labels=[MirrorLabel.from_dict(label) for label in data.get('labels') or []],
-            linked_issues=[MirrorLinkedIssue.from_dict(issue) for issue in data.get('linked_issues') or []],
+            labels=_parse_mirror_labels(data.get('labels') or [], pr_identifier),
+            linked_issues=_parse_mirror_linked_issues(
+                data.get('linked_issues') or [], pr_identifier
+            ),
         )
 
 

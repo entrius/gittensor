@@ -93,15 +93,21 @@ def show_config():
         console.print(f'[red]Error reading config: {e}[/red]')
 
 
+CONFIG_KEYS = ('wallet', 'hotkey', 'network', 'contract_address', 'ws_endpoint')
+
+
 @config_group.command('set')
-@click.argument('key', type=str)
+@click.argument('key', type=click.Choice(CONFIG_KEYS, case_sensitive=False))
 @click.argument('value', type=str)
 def config_set(key: str, value: str):
     """Set a configuration value.
 
-    [dim]Use this command to override values stored in `~/.gittensor/config.json`.[/dim]
+    [dim]Use this command to override values stored in `~/.gittensor/config.json`.
+    KEY must be one of the recognised settings — unknown keys are rejected so a
+    typo (for example `wallet_name`) cannot silently write a dead entry that
+    downstream commands will ignore.[/dim]
 
-    [dim]Common keys:
+    [dim]Recognised keys:
         wallet              Wallet name
         hotkey              Hotkey name
         contract_address    Contract address
@@ -115,6 +121,7 @@ def config_set(key: str, value: str):
         $ gitt config set network local
     [/dim]
     """
+    key = key.lower()
     # Ensure config directory exists
     GITTENSOR_DIR.mkdir(parents=True, exist_ok=True)
 

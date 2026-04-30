@@ -521,92 +521,19 @@ def _search_issue_referencing_prs_graphql(
     return out
 
 
-def _search_issue_referencing_prs_rest(
-    repo: str, issue_number: int, token: Optional[str] = None, state: str = 'open'
-) -> List[PRInfo]:
-    """Search PRs via GitHub REST search API."""
-    if issue_number < 1:
-        return []
-
-    session = get_session(token or '')
-
-    state_clause = f' state:{state}' if state != 'all' else ''
-    max_attempts = 3
-    for attempt in range(max_attempts):
-        try:
-            resp = session.get(
-                f'{BASE_GITHUB_API_URL}/search/issues',
-                params={'q': f'repo:{repo} type:pr{state_clause} {issue_number} in:title,body', 'per_page': '50'},
-                timeout=10,
-            )
-            resp.raise_for_status()
-
-            out: List[PRInfo] = []
-            for item in resp.json().get('items', []):
-                number = item.get('number')
-                if number is None:
-                    continue
-                user = item.get('user') or {}
-                pr_info: PRInfo = {
-                    'number': number,
-                    'title': item.get('title') or '',
-                    'author_login': user.get('login') or 'ghost',
-                    'author_id': user.get('id'),
-                    'created_at': item.get('created_at') or '',
-                    'merged_at': None,
-                    'state': _resolve_pr_state(item.get('state', 'open')),
-                    'url': item.get('html_url') or '',
-                    'review_count': 0,
-                    'closing_numbers': [],
-                }
-                out.append(pr_info)
-            return out
-
-        except requests.exceptions.RequestException as e:
-            if attempt < max_attempts - 1:
-                backoff = 2 * (attempt + 1)
-                bt.logging.warning(
-                    f'REST search failed for {repo}#{issue_number} (attempt {attempt + 1}/{max_attempts}): {e}, '
-                    f'retrying in {backoff}s...'
-                )
-                time.sleep(backoff)
-            else:
-                raise
-
-    return []
-
-
 def find_prs_for_issue(
     repo: str,
     issue_number: int,
     open_only: bool = True,
     token: Optional[str] = None,
 ) -> List[PRInfo]:
-    """Cascading PR discovery: GraphQL -> authenticated REST -> unauthenticated REST."""
-    rest_state = 'open' if open_only else 'all'
-
+    """Find PRs that reference an issue via GraphQL cross-reference data."""
     if token:
         try:
             prs = _search_issue_referencing_prs_graphql(repo, issue_number, token, open_only=open_only)
-            if prs:
-                return prs
+            return prs or []
         except Exception as exc:
             bt.logging.debug(f'GraphQL PR fetch failed for {repo}#{issue_number}: {exc}')
-
-    if token:
-        try:
-            prs = _search_issue_referencing_prs_rest(repo, issue_number, token=token, state=rest_state)
-            if prs:
-                return prs
-        except Exception as exc:
-            bt.logging.debug(f'Authenticated REST search failed for {repo}#{issue_number}: {exc}')
-
-    try:
-        prs = _search_issue_referencing_prs_rest(repo, issue_number, token=None, state=rest_state)
-        if prs:
-            return prs
-    except Exception as exc:
-        bt.logging.debug(f'Unauthenticated REST search failed for {repo}#{issue_number}: {exc}')
 
     return []
 

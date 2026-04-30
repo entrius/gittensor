@@ -122,6 +122,25 @@ class TestLoadMasterRepositories:
                 f'{repo_name} mirror_enabled should be bool, got {type(config.mirror_enabled)}'
             )
 
+    def test_trusted_label_pipeline_field_present_on_live_configs(self):
+        """Live master_repositories.json entries load with a bool trusted_label_pipeline."""
+        repos = load_master_repo_weights()
+        for repo_name, config in repos.items():
+            assert isinstance(config.trusted_label_pipeline, bool), (
+                f'{repo_name} trusted_label_pipeline should be bool, got {type(config.trusted_label_pipeline)}'
+            )
+
+    def test_entrius_repos_have_trusted_label_pipeline(self):
+        """All entrius/* entries opt into trusted_label_pipeline (issue #911)."""
+        repos = load_master_repo_weights()
+        entrius_repos = {name: cfg for name, cfg in repos.items() if name.startswith('entrius/')}
+        assert entrius_repos, 'expected entrius/* entries in master_repositories.json'
+        for repo_name, config in entrius_repos.items():
+            assert config.trusted_label_pipeline is True, (
+                f'{repo_name} must have trusted_label_pipeline=true so the agentic-maintainer '
+                f'labeling worker is honored at scoring time'
+            )
+
 
 class TestRepositoryConfigMirrorFlag:
     """Dataclass-level tests for the mirror_enabled field + its JSON parsing."""
@@ -159,6 +178,49 @@ class TestRepositoryConfigMirrorFlag:
         assert repos['foo/mirror-repo'].mirror_enabled is True
         assert repos['foo/legacy-repo'].mirror_enabled is False
         assert repos['foo/explicit-off'].mirror_enabled is False
+
+
+class TestRepositoryConfigTrustedLabelPipeline:
+    """Dataclass + JSON-parsing tests for trusted_label_pipeline (issue #911)."""
+
+    def test_trusted_label_pipeline_default_false(self):
+        """RepositoryConfig constructor defaults trusted_label_pipeline to False.
+
+        Default-off is the safety property: community repos with
+        attacker-controlled auto-labelers (release-drafter, actions/labeler)
+        keep the maintainer-association gate in place.
+        """
+        config = RepositoryConfig(weight=0.5)
+        assert config.trusted_label_pipeline is False
+
+    def test_trusted_label_pipeline_explicit_true(self):
+        """RepositoryConfig accepts trusted_label_pipeline=True."""
+        config = RepositoryConfig(weight=0.5, trusted_label_pipeline=True)
+        assert config.trusted_label_pipeline is True
+
+    def test_loader_parses_trusted_label_pipeline_true(self, tmp_path, monkeypatch):
+        """load_master_repo_weights() parses trusted_label_pipeline:true from JSON."""
+        import json
+
+        from gittensor.validator.utils import load_weights as lw
+
+        fake_weights_dir = tmp_path
+        (fake_weights_dir / 'master_repositories.json').write_text(
+            json.dumps(
+                {
+                    'foo/trusted': {'weight': 0.5, 'trusted_label_pipeline': True},
+                    'foo/untrusted': {'weight': 0.3},
+                    'foo/explicit-off': {'weight': 0.2, 'trusted_label_pipeline': False},
+                }
+            )
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: fake_weights_dir)
+
+        repos = lw.load_master_repo_weights()
+
+        assert repos['foo/trusted'].trusted_label_pipeline is True
+        assert repos['foo/untrusted'].trusted_label_pipeline is False
+        assert repos['foo/explicit-off'].trusted_label_pipeline is False
 
 
 class TestBannedOrganizations:

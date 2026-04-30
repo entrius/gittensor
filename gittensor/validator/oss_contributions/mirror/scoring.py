@@ -41,7 +41,7 @@ from gittensor.constants import (
 )
 from gittensor.utils.github_api_tools import FileContentPair, branch_matches_pattern
 from gittensor.utils.mirror.client import MirrorClient, MirrorRequestError
-from gittensor.utils.mirror.models import MirrorLinkedIssue, MirrorPullRequest
+from gittensor.utils.mirror.models import MirrorLabel, MirrorLinkedIssue, MirrorPullRequest
 from gittensor.validator.oss_contributions.mirror.adapters import mirror_files_to_legacy
 from gittensor.validator.oss_contributions.mirror.evaluation import MirrorMinerEvaluation
 from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredMirrorPR
@@ -351,7 +351,7 @@ def _calculate_pr_multipliers(scored: ScoredMirrorPR, repo_config: RepositoryCon
 
     scored.repo_weight_multiplier = resolve_repo_weight(repo_config)
 
-    chosen_label = _resolve_maintainer_set_label(pr)
+    chosen_label = _resolve_maintainer_set_label(pr, repo_config)
     scored.label = chosen_label
     scored.label_multiplier = LABEL_MULTIPLIERS.get(chosen_label, 1.0) if chosen_label else 1.0
 
@@ -372,17 +372,31 @@ def _calculate_pr_multipliers(scored: ScoredMirrorPR, repo_config: RepositoryCon
         scored.review_quality_multiplier = 1.0
 
 
-def _resolve_maintainer_set_label(pr: MirrorPullRequest) -> Optional[str]:
-    """Pick the highest-multiplier currently-applied label that was set by a maintainer.
+def _label_actor_trusted(label: MirrorLabel, repo_config: RepositoryConfig) -> bool:
+    """Whether ``label``'s actor is trusted to set scoring labels on this repo.
 
-    Mirror gives us actor attribution per label, so we can directly require the
-    label to have been applied by an OWNER/MEMBER/COLLABORATOR. Labels with null
-    actor_association (backfilled events) are ignored to be conservative.
+    Default: actor must be in ``MAINTAINER_ASSOCIATIONS``. Repos opted into
+    ``trusted_label_pipeline`` accept any actor — including GitHub-App actors
+    that surface as ``actor_association=NULL`` because they lack a row in
+    ``contributor_repo_roles``. Only flip ``trusted_label_pipeline`` on for
+    repos whose label pipeline is authoritative (entrius-controlled, gated by
+    an internal worker); community repos run attacker-controllable
+    auto-labelers (release-drafter, actions/labeler) so the maintainer gate
+    must stay in place. See issue #911.
+    """
+    if repo_config.trusted_label_pipeline:
+        return True
+    return label.actor_association in MAINTAINER_ASSOCIATIONS
+
+
+def _resolve_maintainer_set_label(pr: MirrorPullRequest, repo_config: RepositoryConfig) -> Optional[str]:
+    """Pick the highest-multiplier currently-applied scoring label whose actor
+    is trusted per :func:`_label_actor_trusted`. Ties broken by label name.
     """
     candidates = [
         label
         for label in pr.labels
-        if label.actor_association in MAINTAINER_ASSOCIATIONS and (label.name or '').lower() in LABEL_MULTIPLIERS
+        if (label.name or '').lower() in LABEL_MULTIPLIERS and _label_actor_trusted(label, repo_config)
     ]
     if not candidates:
         return None

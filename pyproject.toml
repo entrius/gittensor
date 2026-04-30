@@ -12,7 +12,7 @@ dependencies = [
     "bittensor-wallet==4.0.0",
     "click",
     "levenshtein==0.27.3",
-    "psycopg2-binary==2.9.10",
+    "psycopg[binary]>=3.2",
     "python-dotenv==1.2.1",
     "pytz==2025.2",
     "rich",

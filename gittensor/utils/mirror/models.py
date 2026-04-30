@@ -28,24 +28,18 @@ def _parse_mirror_labels(raw_labels: list[dict], parent_identifier: str) -> list
             labels.append(MirrorLabel.from_dict(raw))
         except Exception as e:
             name = raw.get('name', '?') if isinstance(raw, dict) else '?'
-            bt.logging.warning(
-                f'Skipping malformed mirror label {name} on {parent_identifier}: {e}'
-            )
+            bt.logging.warning(f'Skipping malformed mirror label {name} on {parent_identifier}: {e}')
     return labels
 
 
-def _parse_mirror_linked_issues(
-    raw_issues: list[dict], pr_identifier: str
-) -> list['MirrorLinkedIssue']:
+def _parse_mirror_linked_issues(raw_issues: list[dict], pr_identifier: str) -> list['MirrorLinkedIssue']:
     linked_issues: list[MirrorLinkedIssue] = []
     for raw in raw_issues or []:
         try:
             linked_issues.append(MirrorLinkedIssue.from_dict(raw))
         except Exception as e:
             identifier = raw.get('number', '?') if isinstance(raw, dict) else '?'
-            bt.logging.warning(
-                f'Skipping malformed mirror linked issue {identifier} on {pr_identifier}: {e}'
-            )
+            bt.logging.warning(f'Skipping malformed mirror linked issue {identifier} on {pr_identifier}: {e}')
     return linked_issues
 
 
@@ -215,9 +209,7 @@ class MirrorPullRequest:
             scoring_data_stored=bool(data.get('scoring_data_stored', False)),
             review_summary=MirrorReviewSummary.from_dict(data.get('review_summary') or {}),
             labels=_parse_mirror_labels(data.get('labels') or [], pr_identifier),
-            linked_issues=_parse_mirror_linked_issues(
-                data.get('linked_issues') or [], pr_identifier
-            ),
+            linked_issues=_parse_mirror_linked_issues(data.get('linked_issues') or [], pr_identifier),
         )
 
 

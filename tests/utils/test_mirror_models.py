@@ -11,8 +11,8 @@ Covers from_dict parsing for each response dataclass:
 - Nested shapes (labels, linked_issues, solving_pr)
 """
 
-from datetime import datetime, timezone
 from copy import deepcopy
+from datetime import datetime, timezone
 from unittest.mock import patch
 
 import pytest
@@ -484,9 +484,7 @@ class TestMirrorPullRequestsResponse:
         mock_logging.warning.assert_called()
 
     @patch('gittensor.utils.mirror.models.bt.logging')
-    def test_malformed_linked_issue_skipped_parent_pr_kept(
-        self, mock_logging, pull_request_dict
-    ):
+    def test_malformed_linked_issue_skipped_parent_pr_kept(self, mock_logging, pull_request_dict):
         payload = {
             'github_id': '218712309',
             'since': '2026-03-15T00:00:00Z',
@@ -506,9 +504,7 @@ class TestMirrorPullRequestsResponse:
         assert 'Skipping malformed mirror linked issue 7' in mock_logging.warning.call_args[0][0]
 
     @patch('gittensor.utils.mirror.models.bt.logging')
-    def test_malformed_pr_label_skipped_parent_pr_kept(
-        self, mock_logging, pull_request_dict
-    ):
+    def test_malformed_pr_label_skipped_parent_pr_kept(self, mock_logging, pull_request_dict):
         payload = {
             'github_id': '218712309',
             'since': '2026-03-15T00:00:00Z',

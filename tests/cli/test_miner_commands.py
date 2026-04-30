@@ -74,6 +74,57 @@ class TestMinerPost:
         assert result.exit_code == 0
         assert 'Broadcast your GitHub PAT' in result.output
 
+    def test_json_envelope_counts_sum_to_total_validators(self, runner, monkeypatch):
+        monkeypatch.delenv('GITTENSOR_MINER_PAT', raising=False)
+        metagraph = _fake_metagraph(
+            [
+                (0.9, True, 50_000.0),
+                (0.8, True, 40_000.0),
+                (0.7, True, 30_000.0),
+            ]
+        )
+        metagraph.hotkeys = ['5MinerHotkey']
+        wallet = SimpleNamespace(hotkey=SimpleNamespace(ss58_address='5MinerHotkey'))
+        responses = [
+            SimpleNamespace(accepted=True, rejection_reason=None, dendrite=SimpleNamespace(status_code=200)),
+            SimpleNamespace(accepted=False, rejection_reason='denied', dendrite=SimpleNamespace(status_code=403)),
+            SimpleNamespace(accepted=None, rejection_reason=None, dendrite=SimpleNamespace(status_code=None)),
+        ]
+
+        class FakeDendrite:
+            async def __call__(self, **kwargs):
+                return responses
+
+        with (
+            patch('gittensor.cli.miner_commands.post._validate_pat_locally', return_value=True),
+            patch(
+                'gittensor.cli.miner_commands.post._connect_bittensor',
+                return_value=(wallet, object(), metagraph, FakeDendrite()),
+            ),
+        ):
+            result = runner.invoke(
+                cli,
+                [
+                    'miner',
+                    'post',
+                    '--json-output',
+                    '--pat',
+                    'ghp_test123',
+                    '--wallet',
+                    'test',
+                    '--hotkey',
+                    'test',
+                ],
+            )
+
+        assert result.exit_code == 0, result.output
+        output = json.loads(result.output)
+        assert output['total_validators'] == 3
+        assert output['accepted'] == 1
+        assert output['rejected'] == 1
+        assert output['no_response'] == 1
+        assert output['accepted'] + output['rejected'] + output['no_response'] == output['total_validators']
+
 
 class TestMinerCheck:
     def test_help_text(self, runner):

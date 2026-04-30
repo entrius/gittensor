@@ -170,8 +170,6 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, min_vt
                     'success': accepted_count > 0,
                     'total_validators': len(results),
                     **counts,
-                    'accepted': accepted_count,
-                    'rejected': len(results) - accepted_count,
                     'skipped': excluded,
                     'results': results,
                 },

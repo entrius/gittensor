@@ -12,12 +12,10 @@ from click.testing import CliRunner
 from gittensor import __version__
 from gittensor.cli.main import cli
 from gittensor.cli.miner_commands.helpers import (
+    _get_validator_axons,
     _pat_check_aggregate_counts,
     _pat_post_aggregate_counts,
     _pat_post_row_category,
-)
-    _get_validator_axons,
-    _pat_check_aggregate_counts,
 )
 
 

@@ -939,6 +939,23 @@ class TestFindSolverFromCrossReferences:
 
     @patch('gittensor.utils.github_api_tools.execute_graphql_query')
     @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_mixed_precision_merged_at_sorts_by_real_time(self, mock_logging, mock_graphql):
+        """Sub-second and second-precision ISO strings at the same instant must compare equal,
+        so the deterministic pr_number tiebreaker decides — not lexical '.000Z' vs 'Z' order."""
+        mock_graphql.return_value = _graphql_response(
+            [
+                _pr_node(number=20, user_id=200, merged_at='2025-01-01T00:00:00.000Z', closing_issues=[12]),
+                _pr_node(number=10, user_id=100, merged_at='2025-01-01T00:00:00Z', closing_issues=[12]),
+            ]
+        )
+
+        solver_id, pr_number = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
+
+        assert solver_id == 100
+        assert pr_number == 10
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
     def test_mixed_valid_and_invalid_candidates(self, mock_logging, mock_graphql):
         """Only valid candidates survive all filters (merged + same repo + closing ref)."""
         mock_graphql.return_value = _graphql_response(

@@ -1088,7 +1088,16 @@ def find_solver_from_cross_references(
                 f'merged_at={candidate.get("merged_at")}'
             )
 
-    merged.sort(key=lambda p: (p.get('merged_at') or '', p.get('number') or 0))
+    # Parse merged_at to a datetime before sorting: lexicographic ISO-8601
+    # comparison breaks when GraphQL mixes second and sub-second precision
+    # ('2025-01-01T00:00:00.000Z' < '2025-01-01T00:00:00Z' as strings).
+    _min_dt = datetime.min.replace(tzinfo=timezone.utc)
+    merged.sort(
+        key=lambda p: (
+            parse_github_iso_to_utc(p['merged_at']) if p.get('merged_at') else _min_dt,
+            p.get('number') or 0,
+        )
+    )
     best = merged[0]
     bt.logging.debug(
         f'Solver via GraphQL cross-reference: PR#{best.get("number")}, '

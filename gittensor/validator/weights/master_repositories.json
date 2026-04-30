@@ -152,6 +152,10 @@
     "weight": 0.0926
   },
   "cosmos/cosmos-sdk": {
+    "additional_acceptable_branches": [
+      "release/v0.54.x",
+      "release/v0.53.x"
+    ],
     "weight": 0.0916
   },
   "CreativeBuilds/sn77": {
@@ -200,16 +204,20 @@
     "weight": 0.1392
   },
   "entrius/allways": {
-    "weight": 1.0
+    "weight": 1.0,
+    "mirror_enabled": true
   },
   "entrius/allways-ui": {
-    "weight": 0.5
+    "weight": 0.5,
+    "mirror_enabled": true
   },
   "entrius/gittensor": {
-    "weight": 1.0
+    "weight": 1.0,
+    "mirror_enabled": true
   },
   "entrius/gittensor-ui": {
-    "weight": 0.5
+    "weight": 0.5,
+    "mirror_enabled": true
   },
   "espressif/arduino-esp32": {
     "weight": 0.1444
@@ -257,6 +265,9 @@
     "weight": 0.0853
   },
   "grafana/grafana": {
+    "additional_acceptable_branches": [
+      "release-13.0.2"
+    ],
     "weight": 0.1136
   },
   "GraphiteAI/Graphite-Subnet": {
@@ -299,6 +310,9 @@
     "weight": 0.0704
   },
   "jellyfin/jellyfin": {
+    "additional_acceptable_branches": [
+      "release-10.11.z"
+    ],
     "weight": 0.0607
   },
   "jesseduffield/lazygit": {
@@ -314,12 +328,18 @@
     "weight": 0.0837
   },
   "jupyterlab/jupyterlab": {
+    "additional_acceptable_branches": [
+      "4.5.x"
+    ],
     "weight": 0.1755
   },
   "keras-team/keras": {
     "weight": 0.1091
   },
   "labring/FastGPT": {
+    "additional_acceptable_branches": [
+      "v4.14.x"
+    ],
     "weight": 0.0633
   },
   "langchain-ai/langchain": {
@@ -400,6 +420,10 @@
     "weight": 0.0455
   },
   "MetaMask/metamask-extension": {
+    "additional_acceptable_branches": [
+      "release/13.28.0",
+      "release/13.29.0"
+    ],
     "weight": 0.0806
   },
   "metanova-labs/nova": {
@@ -427,6 +451,9 @@
     "weight": 0.0445
   },
   "monero-project/monero": {
+    "additional_acceptable_branches": [
+      "release-v0.18"
+    ],
     "weight": 0.0792
   },
   "mrdoob/three.js": {
@@ -436,15 +463,27 @@
     "weight": 0.0542
   },
   "neovim/neovim": {
+    "additional_acceptable_branches": [
+      "release-0.12"
+    ],
     "weight": 0.0785
   },
   "nextcloud/android": {
     "weight": 0.0778
   },
   "nextcloud/desktop": {
+    "additional_acceptable_branches": [
+      "stable-33.0",
+      "stable-4.0"
+    ],
     "weight": 0.0771
   },
   "nextcloud/server": {
+    "additional_acceptable_branches": [
+      "stable33",
+      "stable32",
+      "stable31"
+    ],
     "weight": 0.0764
   },
   "nginx/nginx": {
@@ -713,6 +752,9 @@
     "weight": 0.0638
   },
   "zed-industries/zed": {
+    "additional_acceptable_branches": [
+      "v0.234.x"
+    ],
     "weight": 0.1564
   }
 }

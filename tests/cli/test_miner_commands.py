@@ -3,6 +3,7 @@
 """Tests for gitt miner post and gitt miner check CLI commands."""
 
 import json
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -15,6 +16,20 @@ from gittensor.cli.miner_commands.helpers import (
     _pat_post_aggregate_counts,
     _pat_post_row_category,
 )
+    _get_validator_axons,
+    _pat_check_aggregate_counts,
+)
+
+
+def _fake_metagraph(rows: list[tuple[float, bool, float]]):
+    """Build a metagraph stub from (vtrust, serving, stake) per UID."""
+    n = len(rows)
+    return SimpleNamespace(
+        n=n,
+        validator_trust=[vt for vt, _, _ in rows],
+        S=[stake for _, _, stake in rows],
+        axons=[SimpleNamespace(is_serving=serving, hotkey=f'5Hk{i:02d}') for i, (_, serving, _) in enumerate(rows)],
+    )
 
 
 @pytest.fixture
@@ -80,6 +95,44 @@ class TestCliVersion:
         result = runner.invoke(cli, ['--version'])
         assert result.exit_code == 0
         assert result.output == f'gittensor, version {__version__}\n'
+
+
+class TestValidatorAxonFilter:
+    def test_passes_when_all_thresholds_met(self):
+        mg = _fake_metagraph([(0.9, True, 50_000.0)])
+        axons, uids, excluded = _get_validator_axons(mg, min_vtrust=0.25, min_stake=15_000.0)
+        assert uids == [0]
+        assert len(axons) == 1
+        assert excluded == []
+
+    def test_silently_drops_below_vtrust(self):
+        # Sub-vtrust UIDs are not validators — never surfaced in `excluded`.
+        mg = _fake_metagraph([(0.1, True, 100_000.0)])
+        axons, uids, excluded = _get_validator_axons(mg, min_vtrust=0.25, min_stake=15_000.0)
+        assert uids == []
+        assert axons == []
+        assert excluded == []
+
+    def test_excludes_when_not_serving(self):
+        mg = _fake_metagraph([(0.99, False, 100_000.0)])
+        _, uids, excluded = _get_validator_axons(mg, min_vtrust=0.25, min_stake=15_000.0)
+        assert uids == []
+        assert len(excluded) == 1
+        assert excluded[0]['uid'] == 0
+        assert excluded[0]['reasons'] == ['not serving an axon']
+
+    def test_excludes_when_below_stake_threshold(self):
+        mg = _fake_metagraph([(0.99, True, 1_630.0)])
+        _, uids, excluded = _get_validator_axons(mg, min_vtrust=0.25, min_stake=15_000.0)
+        assert uids == []
+        assert len(excluded) == 1
+        assert excluded[0]['uid'] == 0
+        assert 'stake 1,630 α below 15,000 α threshold' in excluded[0]['reasons'][0]
+
+    def test_combines_reasons_when_both_fail(self):
+        mg = _fake_metagraph([(0.99, False, 1_000.0)])
+        _, _, excluded = _get_validator_axons(mg, min_vtrust=0.25, min_stake=15_000.0)
+        assert len(excluded[0]['reasons']) == 2
 
 
 class TestPatCheckAggregateCounts:

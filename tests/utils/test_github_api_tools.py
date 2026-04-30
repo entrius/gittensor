@@ -744,9 +744,8 @@ class TestExecuteGraphQLQueryRetryLogic:
 # ============================================================================
 
 
-@patch('gittensor.utils.github_api_tools._search_issue_referencing_prs_rest')
 @patch('gittensor.utils.github_api_tools._search_issue_referencing_prs_graphql')
-def test_find_prs_prefers_graphql_when_results_found(mock_graphql, mock_rest):
+def test_find_prs_returns_graphql_results(mock_graphql):
     graphql_prs = [{'number': 101, 'state': 'OPEN'}]
     mock_graphql.return_value = graphql_prs
 
@@ -754,63 +753,44 @@ def test_find_prs_prefers_graphql_when_results_found(mock_graphql, mock_rest):
 
     assert result == graphql_prs
     mock_graphql.assert_called_once_with('owner/repo', 12, 'fake_token', open_only=True)
-    mock_rest.assert_not_called()
 
 
-@patch('gittensor.utils.github_api_tools._search_issue_referencing_prs_rest')
 @patch('gittensor.utils.github_api_tools._search_issue_referencing_prs_graphql')
-def test_find_prs_falls_back_to_authenticated_rest_when_graphql_empty(mock_graphql, mock_rest):
+def test_find_prs_returns_empty_when_graphql_empty(mock_graphql):
     mock_graphql.return_value = []
-    rest_prs = [{'number': 102, 'state': 'OPEN'}]
-    mock_rest.side_effect = [rest_prs]
 
     result = find_prs_for_issue('owner/repo', 12, open_only=True, token='fake_token')
 
-    assert result == rest_prs
+    assert result == []
     mock_graphql.assert_called_once_with('owner/repo', 12, 'fake_token', open_only=True)
-    mock_rest.assert_called_once_with('owner/repo', 12, token='fake_token', state='open')
 
 
-@patch('gittensor.utils.github_api_tools._search_issue_referencing_prs_rest')
 @patch('gittensor.utils.github_api_tools._search_issue_referencing_prs_graphql')
-def test_find_prs_falls_back_to_unauthenticated_rest_when_auth_paths_empty(mock_graphql, mock_rest):
-    mock_graphql.return_value = []
-    unauth_prs = [{'number': 103, 'state': 'OPEN'}]
-    mock_rest.side_effect = [[], unauth_prs]
+def test_find_prs_returns_empty_when_graphql_errors(mock_graphql):
+    mock_graphql.side_effect = RuntimeError('boom')
 
     result = find_prs_for_issue('owner/repo', 12, open_only=True, token='fake_token')
 
-    assert result == unauth_prs
-    assert mock_rest.call_count == 2
-    assert mock_rest.call_args_list[0].kwargs == {'token': 'fake_token', 'state': 'open'}
-    assert mock_rest.call_args_list[1].kwargs == {'token': None, 'state': 'open'}
+    assert result == []
+    mock_graphql.assert_called_once_with('owner/repo', 12, 'fake_token', open_only=True)
 
 
-@patch('gittensor.utils.github_api_tools._search_issue_referencing_prs_rest')
 @patch('gittensor.utils.github_api_tools._search_issue_referencing_prs_graphql')
-def test_find_prs_uses_all_state_for_non_open_only(mock_graphql, mock_rest):
+def test_find_prs_passes_open_only_false_to_graphql(mock_graphql):
     mock_graphql.return_value = []
-    mock_rest.side_effect = [[], []]
 
     result = find_prs_for_issue('owner/repo', 12, open_only=False, token='fake_token')
 
     assert result == []
-    assert mock_rest.call_count == 2
-    assert mock_rest.call_args_list[0].kwargs == {'token': 'fake_token', 'state': 'all'}
-    assert mock_rest.call_args_list[1].kwargs == {'token': None, 'state': 'all'}
+    mock_graphql.assert_called_once_with('owner/repo', 12, 'fake_token', open_only=False)
 
 
-@patch('gittensor.utils.github_api_tools._search_issue_referencing_prs_rest')
 @patch('gittensor.utils.github_api_tools._search_issue_referencing_prs_graphql')
-def test_find_prs_without_token_only_uses_unauth_rest(mock_graphql, mock_rest):
-    unauth_prs = [{'number': 104, 'state': 'OPEN'}]
-    mock_rest.return_value = unauth_prs
-
+def test_find_prs_without_token_returns_empty(mock_graphql):
     result = find_prs_for_issue('owner/repo', 12, open_only=True, token=None)
 
-    assert result == unauth_prs
+    assert result == []
     mock_graphql.assert_not_called()
-    mock_rest.assert_called_once_with('owner/repo', 12, token=None, state='open')
 
 
 # ============================================================================
@@ -918,8 +898,11 @@ class TestFindSolverFromCrossReferences:
 
     @patch('gittensor.utils.github_api_tools.execute_graphql_query')
     @patch('gittensor.utils.github_api_tools.bt.logging')
-    def test_multiple_candidates_picks_most_recent(self, mock_logging, mock_graphql):
-        """When multiple merged PRs close the issue, the most recently merged one is selected."""
+    def test_multiple_candidates_picks_earliest_merged(self, mock_logging, mock_graphql):
+        """When multiple merged PRs declare the same closing reference, the earliest-merged one
+        is selected — GitHub closes the issue on the first merge; later PRs that put
+        'Closes #X' in their body still appear in closingIssuesReferences but did not
+        actually close the issue, so they must not capture solver attribution."""
         mock_graphql.return_value = _graphql_response(
             [
                 _pr_node(number=10, user_id=100, merged_at='2025-01-01T00:00:00Z', closing_issues=[12]),
@@ -930,8 +913,8 @@ class TestFindSolverFromCrossReferences:
 
         solver_id, pr_number = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
 
-        assert solver_id == 200
-        assert pr_number == 20
+        assert solver_id == 100
+        assert pr_number == 10
         mock_logging.warning.assert_called()  # Should warn about multiple candidates
 
     @patch('gittensor.utils.github_api_tools.execute_graphql_query')
@@ -1581,6 +1564,86 @@ class TestFetchFileContentsForPrMergeBase:
         # Should fall back to base_ref_oid
         call_args = mock_fetch.call_args
         assert call_args[0][2] == 'base_branch_tip_sha', 'Should fall back to base_ref_oid'
+
+
+# ============================================================================
+# session_scope tests
+# ============================================================================
+
+
+# Bind to the unpatched implementations at import time so the autouse forwarding
+# fixture in tests/conftest.py (which swaps out github_api_tools.get_session) does
+# not interfere with these tests of the real caching behavior.
+_real_session_scope = github_api_tools.session_scope
+_real_get_session = github_api_tools.get_session
+
+
+class TestSessionScope:
+    """Direct tests for session_scope cache lifecycle."""
+
+    def test_same_session_reused_for_same_token_in_scope(self):
+        with _real_session_scope():
+            s1 = _real_get_session('tokenA')
+            s2 = _real_get_session('tokenA')
+        assert s1 is s2
+
+    def test_distinct_sessions_per_token(self):
+        with _real_session_scope():
+            s_a = _real_get_session('tokenA')
+            s_b = _real_get_session('tokenB')
+            s_anon = _real_get_session('')
+        assert s_a is not s_b
+        assert s_a is not s_anon
+        assert s_b is not s_anon
+
+    def test_outside_scope_returns_fresh_session(self):
+        s1 = _real_get_session('tokenA')
+        s2 = _real_get_session('tokenA')
+        try:
+            assert s1 is not s2
+        finally:
+            s1.close()
+            s2.close()
+
+    def test_re_entrance_raises(self):
+        with _real_session_scope():
+            with pytest.raises(RuntimeError, match='not re-entrant'):
+                with _real_session_scope():
+                    pass
+
+    def test_sessions_closed_on_exit(self, monkeypatch):
+        built: list = []
+
+        def fake_build_session(token):
+            session = Mock()
+            session.headers = {}
+            built.append(session)
+            return session
+
+        monkeypatch.setattr(github_api_tools, '_build_session', fake_build_session)
+
+        with _real_session_scope():
+            _real_get_session('tokenA')
+            _real_get_session('tokenB')
+
+        assert len(built) == 2
+        for session in built:
+            session.close.assert_called_once()
+
+    def test_cache_cleared_on_exit_even_when_close_raises(self, monkeypatch):
+        def fake_build_session(token):
+            session = Mock()
+            session.headers = {}
+            session.close.side_effect = RuntimeError('boom')
+            return session
+
+        monkeypatch.setattr(github_api_tools, '_build_session', fake_build_session)
+
+        with pytest.raises(RuntimeError):
+            with _real_session_scope():
+                _real_get_session('tokenA')
+
+        assert github_api_tools._session_cache is None
 
 
 if __name__ == '__main__':

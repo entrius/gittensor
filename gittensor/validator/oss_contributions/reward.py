@@ -2,18 +2,23 @@
 # Copyright © 2025 Entrius
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Dict, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, Optional, Set, Tuple
 
 import bittensor as bt
 import numpy as np
 
 from gittensor.classes import MinerEvaluation
-from gittensor.utils.github_api_tools import load_miners_prs
+from gittensor.utils.github_api_tools import load_miners_prs, session_scope
+from gittensor.utils.mirror.client import MirrorClient
 from gittensor.validator import pat_storage
 from gittensor.validator.oss_contributions.inspections import (
     detect_and_penalize_miners_sharing_github,
     validate_response_and_initialize_miner_evaluation,
 )
+from gittensor.validator.oss_contributions.mirror.combine import combine
+from gittensor.validator.oss_contributions.mirror.evaluation import MirrorMinerEvaluation
+from gittensor.validator.oss_contributions.mirror.load import load_mirror_miner_prs
+from gittensor.validator.oss_contributions.mirror.scoring import score_mirror_miner_prs
 from gittensor.validator.oss_contributions.normalize import normalize_rewards_linear
 from gittensor.validator.oss_contributions.scoring import (
     finalize_miner_scores,
@@ -58,9 +63,31 @@ async def evaluate_miners_pull_requests(
         bt.logging.info(f'UID {uid} not being evaluated: {miner_eval.failed_reason}')
         return miner_eval
 
-    load_miners_prs(miner_eval, master_repositories)
+    # Partition repos by source: legacy (PAT) vs mirror (das-github-mirror).
+    # Each path is a closed loop that populates its own slots on the miner_eval;
+    # combine() merges the mirror scratch container into the returned MinerEvaluation.
+    legacy_repos: Dict[str, RepositoryConfig] = {
+        name: cfg for name, cfg in master_repositories.items() if not cfg.mirror_enabled
+    }
+    mirror_repos: Dict[str, RepositoryConfig] = {
+        name: cfg for name, cfg in master_repositories.items() if cfg.mirror_enabled
+    }
 
-    score_miner_prs(miner_eval, master_repositories, programming_languages, token_config)
+    if legacy_repos:
+        with session_scope():
+            load_miners_prs(miner_eval, legacy_repos)
+            score_miner_prs(miner_eval, legacy_repos, programming_languages, token_config)
+
+    if mirror_repos:
+        mirror_eval = MirrorMinerEvaluation(
+            uid=miner_eval.uid,
+            hotkey=miner_eval.hotkey,
+            github_id=miner_eval.github_id,
+        )
+        with MirrorClient() as mirror_client:
+            load_mirror_miner_prs(mirror_eval, mirror_repos, client=mirror_client)
+            score_mirror_miner_prs(mirror_eval, mirror_repos, programming_languages, token_config, client=mirror_client)
+        combine(miner_eval, mirror_eval)
 
     # Clear PAT after scoring to avoid storing sensitive data in memory
     miner_eval.github_pat = None
@@ -75,11 +102,11 @@ async def get_rewards(
     master_repositories: Dict[str, RepositoryConfig],
     programming_languages: Dict[str, LanguageConfig],
     token_config: TokenConfig,
-) -> Tuple[np.ndarray, Dict[int, MinerEvaluation], set]:
+) -> Tuple[np.ndarray, Dict[int, MinerEvaluation], Set[int], Set[int]]:
     """Score OSS contributions for all miners.
 
     Returns:
-        Tuple of (normalized_rewards_array, miner_evaluations, cached_uids).
+        Tuple of (normalized_rewards_array, miner_evaluations, cached_uids, penalized_uids).
         DB storage and emission blending are handled by the caller (forward.py).
     """
 
@@ -136,4 +163,5 @@ async def get_rewards(
         np.array([normalized_rewards.get(uid, 0.0) for uid in sorted(uids)]),
         miner_evaluations,
         cached_uids,
+        penalized_uids,
     )

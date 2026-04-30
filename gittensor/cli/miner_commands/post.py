@@ -15,6 +15,8 @@ from rich.console import Console
 from rich.table import Table
 
 from gittensor.cli.miner_commands.helpers import (
+    DEFAULT_MIN_VALIDATOR_STAKE,
+    DEFAULT_MIN_VALIDATOR_VTRUST,
     NETUID_DEFAULT,
     _connect_bittensor,
     _error,
@@ -22,6 +24,7 @@ from gittensor.cli.miner_commands.helpers import (
     _pat_post_aggregate_counts,
     _pat_post_row_category,
     _print,
+    _render_skipped_validators,
     _require_registered,
     _require_validator_axons,
     _resolve_endpoint,
@@ -50,8 +53,22 @@ _PAT_POST_STATUS_MARKUP = {
     default=None,
     help='GitHub Personal Access Token. If not provided, falls back to GITTENSOR_MINER_PAT env var or interactive prompt.',
 )
+@click.option(
+    '--min-vtrust',
+    type=float,
+    default=DEFAULT_MIN_VALIDATOR_VTRUST,
+    show_default=True,
+    help='Minimum validator_trust to broadcast to.',
+)
+@click.option(
+    '--min-stake',
+    type=float,
+    default=DEFAULT_MIN_VALIDATOR_STAKE,
+    show_default=True,
+    help='Minimum validator stake (α) to broadcast to.',
+)
 @click.option('--json-output', 'json_mode', is_flag=True, default=False, help='Output results as JSON.')
-def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_mode):
+def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, min_vtrust, min_stake, json_mode):
     """Broadcast your GitHub PAT to all validators on the network.
 
     Validators will validate your PAT (test GitHub API access, check account age),
@@ -107,8 +124,10 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_m
     # Verify miner is registered
     _require_registered(wallet, metagraph, netuid, json_mode)
 
-    # 4. Find active validator axons (vtrust > 0.1 = actively participating in consensus)
-    validator_axons, validator_uids = _require_validator_axons(metagraph, json_mode)
+    # 4. Find active validator axons (vtrust + serving + stake threshold)
+    validator_axons, validator_uids, excluded = _require_validator_axons(
+        metagraph, json_mode, min_vtrust=min_vtrust, min_stake=min_stake
+    )
 
     # 5. Broadcast
     synapse = PatBroadcastSynapse(github_access_token=pat)
@@ -151,6 +170,9 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_m
                     'success': accepted_count > 0,
                     'total_validators': len(results),
                     **counts,
+                    'accepted': accepted_count,
+                    'rejected': len(results) - accepted_count,
+                    'skipped': excluded,
                     'results': results,
                 },
                 indent=2,
@@ -170,6 +192,7 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_m
 
         console.print(table)
         console.print(f'\n[bold]{accepted_count}/{len(results)} validators accepted your PAT.[/bold]')
+        _render_skipped_validators(excluded, json_mode)
 
 
 def _validate_pat_locally(pat: str) -> bool:

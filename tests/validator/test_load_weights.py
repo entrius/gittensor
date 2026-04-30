@@ -161,6 +161,128 @@ class TestRepositoryConfigMirrorFlag:
         assert repos['foo/explicit-off'].mirror_enabled is False
 
 
+class TestLoadMasterRepoWeightsMalformedEntries:
+    """Per-entry malformed values must not collapse the whole loader to {}.
+
+    The companion loader load_programming_language_weights already isolates
+    malformed entries. This class pins down the same contract for
+    load_master_repo_weights so a single bad chunk of master_repositories.json
+    cannot zero-out an entire scoring round.
+    """
+
+    @staticmethod
+    def _write_master_repos(tmp_path, payload):
+        import json
+
+        (tmp_path / 'master_repositories.json').write_text(json.dumps(payload))
+
+    def test_non_dict_entry_isolated_other_entries_load(self, tmp_path, monkeypatch):
+        """A non-dict entry (e.g. list) is skipped; well-formed siblings still load."""
+        from gittensor.validator.utils import load_weights as lw
+
+        self._write_master_repos(
+            tmp_path,
+            {
+                'foo/good-one': {'weight': 0.5, 'mirror_enabled': True},
+                'foo/bad-list': ['not', 'a', 'dict'],
+                'foo/good-two': {'weight': 0.25},
+            },
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: tmp_path)
+
+        repos = lw.load_master_repo_weights()
+
+        assert 'foo/good-one' in repos
+        assert 'foo/good-two' in repos
+        assert 'foo/bad-list' not in repos
+        assert repos['foo/good-one'].weight == 0.5
+        assert repos['foo/good-one'].mirror_enabled is True
+        assert repos['foo/good-two'].weight == 0.25
+
+    def test_plain_float_entry_back_compat(self, tmp_path, monkeypatch):
+        """Plain-float weight loads as RepositoryConfig with default flags.
+
+        Mirrors the back-compat path already accepted by
+        load_programming_language_weights().
+        """
+        from gittensor.validator.utils import load_weights as lw
+
+        self._write_master_repos(
+            tmp_path,
+            {
+                'foo/dict-form': {'weight': 0.5},
+                'foo/legacy-float': 0.42,
+            },
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: tmp_path)
+
+        repos = lw.load_master_repo_weights()
+
+        assert repos['foo/legacy-float'].weight == 0.42
+        assert repos['foo/legacy-float'].mirror_enabled is False
+        assert repos['foo/legacy-float'].inactive_at is None
+
+    def test_unparseable_weight_skipped_others_survive(self, tmp_path, monkeypatch):
+        """A non-numeric weight in a dict entry is skipped, not promoted to default."""
+        from gittensor.validator.utils import load_weights as lw
+
+        self._write_master_repos(
+            tmp_path,
+            {
+                'foo/good': {'weight': 0.5},
+                'foo/bad-weight': {'weight': 'not-a-number'},
+                'foo/good-two': {'weight': 0.1},
+            },
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: tmp_path)
+
+        repos = lw.load_master_repo_weights()
+
+        assert 'foo/good' in repos
+        assert 'foo/good-two' in repos
+        assert 'foo/bad-weight' not in repos
+
+    def test_string_entry_isolated(self, tmp_path, monkeypatch):
+        """String values are not float-coercible and must skip cleanly."""
+        from gittensor.validator.utils import load_weights as lw
+
+        self._write_master_repos(
+            tmp_path,
+            {
+                'foo/good': {'weight': 0.5},
+                'foo/bad-string': 'oops',
+            },
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: tmp_path)
+
+        repos = lw.load_master_repo_weights()
+
+        assert 'foo/good' in repos
+        assert 'foo/bad-string' not in repos
+        assert len(repos) == 1
+
+    def test_only_malformed_entries_returns_empty_dict_not_outer_except(self, tmp_path, monkeypatch):
+        """All-malformed JSON yields {} via the per-entry skip path, not the outer except.
+
+        Regression: previously an AttributeError on the first non-dict entry escaped
+        through to the outer ``except Exception`` block, so a payload with one bad
+        entry plus many good ones returned {} for the *whole* file.
+        """
+        from gittensor.validator.utils import load_weights as lw
+
+        self._write_master_repos(
+            tmp_path,
+            {
+                'foo/bad-list': ['x'],
+                'foo/bad-string': 'x',
+            },
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: tmp_path)
+
+        repos = lw.load_master_repo_weights()
+        assert repos == {}
+
+
 class TestBannedOrganizations:
     """Tests ensuring banned organizations are not active in the repository list.
 

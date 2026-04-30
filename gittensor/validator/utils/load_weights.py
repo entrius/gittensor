@@ -113,21 +113,29 @@ def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
             bt.logging.error(f'Expected dict from {weights_file}, got {type(data)}')
             return {}
 
-        # Parse JSON data into RepositoryConfig objects
+        # Parse JSON data into RepositoryConfig objects.
+        # Companion loader load_programming_language_weights() also accepts a
+        # plain-float weight for back-compat; mirror that here so a malformed
+        # entry (or one written in the legacy short form) is isolated rather
+        # than collapsing the whole loader to {}.
         normalized_data: Dict[str, RepositoryConfig] = {}
         for repo_name, metadata in data.items():
             try:
-                config = RepositoryConfig(
-                    weight=float(metadata.get('weight', 0.01)),
-                    inactive_at=metadata.get('inactive_at'),
-                    additional_acceptable_branches=metadata.get('additional_acceptable_branches'),
-                    mirror_enabled=bool(metadata.get('mirror_enabled', False)),
-                )
+                if isinstance(metadata, dict):
+                    config = RepositoryConfig(
+                        weight=float(metadata.get('weight', 0.01)),
+                        inactive_at=metadata.get('inactive_at'),
+                        additional_acceptable_branches=metadata.get('additional_acceptable_branches'),
+                        mirror_enabled=bool(metadata.get('mirror_enabled', False)),
+                    )
+                else:
+                    # Plain-float weight: matches the back-compat path in
+                    # load_programming_language_weights().
+                    config = RepositoryConfig(weight=float(metadata))
                 normalized_data[repo_name.lower()] = config
             except (ValueError, TypeError) as e:
-                bt.logging.warning(f'Could not parse config for {repo_name}: {e}, using defaults')
-                # Create config with defaults if parsing fails
-                normalized_data[repo_name.lower()] = RepositoryConfig(weight=float(metadata.get('weight', 0.01)))
+                bt.logging.warning(f'Could not parse config for {repo_name}: {metadata!r} - {e}; skipping entry')
+                continue
 
         bt.logging.debug(f'Successfully loaded {len(normalized_data)} repository entries from {weights_file}')
         return normalized_data

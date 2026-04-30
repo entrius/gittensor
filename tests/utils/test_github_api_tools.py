@@ -431,7 +431,7 @@ class TestFileChangesRetryLogic:
     @patch('gittensor.utils.github_api_tools.time.sleep')
     @patch('gittensor.utils.github_api_tools.bt.logging')
     def test_gives_up_after_three_attempts(self, mock_logging, mock_sleep, mock_get):
-        """Test that function gives up after 3 failed attempts and returns empty list."""
+        """Test that function gives up after 3 failed attempts and returns None."""
         mock_500 = Mock(status_code=500, text='Internal Server Error')
         mock_get.return_value = mock_500
 
@@ -439,7 +439,7 @@ class TestFileChangesRetryLogic:
 
         assert mock_get.call_count == 3
         assert mock_sleep.call_count == 2, 'Should sleep between attempts but not after the last one'
-        assert result == []
+        assert result is None
         mock_logging.error.assert_called()
 
     @patch('gittensor.utils.github_api_tools.requests.get')
@@ -472,7 +472,7 @@ class TestFileChangesRetryLogic:
         result = get_pull_request_file_changes('owner/repo', 1, 'fake_token')
 
         assert mock_get.call_count == 3
-        assert result == []
+        assert result is None
         mock_logging.error.assert_called()
 
     @patch('gittensor.utils.github_api_tools.requests.get')
@@ -702,13 +702,13 @@ class TestFileChangesPagination:
     @patch('gittensor.utils.github_api_tools.requests.get')
     @patch('gittensor.utils.github_api_tools.time.sleep')
     @patch('gittensor.utils.github_api_tools.bt.logging')
-    def test_all_pages_fail_returns_empty_list(self, mock_logging, mock_sleep, mock_get):
-        """If every attempt fails on the first page, return empty list."""
+    def test_all_pages_fail_returns_none(self, mock_logging, mock_sleep, mock_get):
+        """If every attempt fails on the first page, return None to signal fetch failure."""
         mock_get.return_value = Mock(status_code=500, text='Internal Server Error')
 
         result = get_pull_request_file_changes('owner/repo', 1, 'fake_token')
 
-        assert result == []
+        assert result is None
         assert mock_get.call_count == 3
         mock_logging.error.assert_called()
 

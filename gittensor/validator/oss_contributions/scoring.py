@@ -88,6 +88,12 @@ def score_pull_request(
     # Only fetch file changes from GitHub if not already loaded (they are preloaded for testing only)
     if not pr.file_changes:
         file_changes = get_pull_request_file_changes(pr.repository_full_name, pr.number, miner_eval.github_pat)
+        if file_changes is None:
+            # Retry-exhausted GitHub failure — flag the round as incomplete so the
+            # validator can fall back to cached scores instead of silently zeroing.
+            miner_eval.github_pr_fetch_failed = True
+            bt.logging.warning(f'PR #{pr.number} file fetch failed; marking round incomplete.')
+            return
         if not file_changes:
             bt.logging.warning('No file changes found.')
             return

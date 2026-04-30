@@ -20,7 +20,7 @@ import requests
 from rich.console import Console
 
 from gittensor.cli.issue_commands.tables import build_pr_table
-from gittensor.constants import NETWORK_MAP
+from gittensor.constants import BASE_GITHUB_API_URL, NETWORK_MAP
 from gittensor.validator.issue_competitions.storage_utils import (
     compute_ink5_lazy_key,
     decode_issue_from_storage,
@@ -409,7 +409,7 @@ def validate_repository(
     if verify_exists:
         try:
             resp = requests.get(
-                f'https://api.github.com/repos/{owner}/{repo_name}',
+                f'{BASE_GITHUB_API_URL}/repos/{owner}/{repo_name}',
                 headers={'User-Agent': 'gittensor-cli'},
                 timeout=GITHUB_API_TIMEOUT,
             )
@@ -457,7 +457,7 @@ def validate_github_issue(
     """
     try:
         resp = requests.get(
-            f'https://api.github.com/repos/{owner}/{repo}/issues/{issue_number}',
+            f'{BASE_GITHUB_API_URL}/repos/{owner}/{repo}/issues/{issue_number}',
             headers={'User-Agent': 'gittensor-cli'},
             timeout=GITHUB_API_TIMEOUT,
         )

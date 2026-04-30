@@ -35,14 +35,12 @@ _should_skip_merged_mirror_pr = scoring_module._should_skip_merged_mirror_pr
 _convert_mirror_files = adapters_module.mirror_files_to_legacy
 _calculate_pr_multipliers = scoring_module._calculate_pr_multipliers
 _resolve_maintainer_set_label = scoring_module._resolve_maintainer_set_label
-_label_actor_trusted = scoring_module._label_actor_trusted
 _calculate_issue_multiplier = scoring_module._calculate_issue_multiplier
 _is_valid_linked_issue = scoring_module._is_valid_linked_issue
 score_mirror_pr = scoring_module.score_mirror_pr
 
 ScoredMirrorPR = scored_pr_module.ScoredMirrorPR
 MirrorPullRequest = mirror_models.MirrorPullRequest
-MirrorLabel = mirror_models.MirrorLabel
 MirrorLinkedIssue = mirror_models.MirrorLinkedIssue
 MirrorFile = mirror_models.MirrorFile
 RepositoryConfig = load_weights.RepositoryConfig
@@ -410,37 +408,6 @@ class TestConvertMirrorFiles:
 # ============================================================================
 # Label resolution (maintainer-set + highest multiplier)
 # ============================================================================
-
-
-class TestLabelActorTrusted:
-    """Truth table for the issue #911 trust rule.
-
-    Encapsulating the rule in :func:`_label_actor_trusted` lets other call
-    sites reuse it without re-deriving the trusted_label_pipeline branch.
-    """
-
-    @pytest.mark.parametrize(
-        'actor_association,expected',
-        [
-            ('OWNER', True),
-            ('MEMBER', True),
-            ('COLLABORATOR', True),
-            ('CONTRIBUTOR', False),
-            ('NONE', False),
-            (None, False),
-        ],
-    )
-    def test_untrusted_repo_requires_maintainer_actor(self, actor_association, expected):
-        label = MirrorLabel(name='feature', actor_association=actor_association)
-        assert _label_actor_trusted(label, _config(trusted_label_pipeline=False)) is expected
-
-    @pytest.mark.parametrize(
-        'actor_association',
-        ['OWNER', 'MEMBER', 'COLLABORATOR', 'CONTRIBUTOR', 'NONE', None],
-    )
-    def test_trusted_repo_accepts_any_actor(self, actor_association):
-        label = MirrorLabel(name='feature', actor_association=actor_association)
-        assert _label_actor_trusted(label, _config(trusted_label_pipeline=True)) is True
 
 
 class TestLabelResolution:

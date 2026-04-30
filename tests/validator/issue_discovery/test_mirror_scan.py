@@ -350,6 +350,57 @@ class TestRunMirrorIssueDiscovery:
         )
         assert eval_.total_solved_issues == 0
 
+    def test_missing_created_at_is_dropped_not_treated_as_newest(self):
+        """Mirror issues with created_at=None must be quarantined, not silently
+        sorted to the newest bucket via a datetime.max sentinel — that path
+        previously bypassed the lookback window and let stale/corrupt mirror
+        data leak into discovery scoring."""
+        malformed = _issue_dict(issue_number=42)
+        malformed['created_at'] = None  # simulate corrupt mirror payload
+        healthy = _issue_dict(issue_number=43)
+
+        client = Mock()
+        client.get_miner_issues.return_value = _response([malformed, healthy])
+        eval_ = _eval()
+        eval_.mirror_merged_prs = [_scored_mirror_pr('entrius/gittensor-ui', 100)]
+
+        _run(
+            run_mirror_issue_discovery(
+                {1: eval_},
+                _mirror_repos('entrius/gittensor-ui'),
+                _EMPTY_LANGS,
+                _EMPTY_TOKEN_CONFIG,
+                client=client,
+            )
+        )
+
+        # Only the healthy issue counted; malformed was excluded entirely
+        assert eval_.total_solved_issues == 1
+        assert eval_.total_valid_solved_issues == 1
+
+    def test_only_malformed_issues_yields_no_processing(self):
+        """If every issue is malformed, the miner falls into the no-issues
+        bucket — no zeroed evaluation row is produced."""
+        malformed = _issue_dict(issue_number=42)
+        malformed['created_at'] = None
+
+        client = Mock()
+        client.get_miner_issues.return_value = _response([malformed])
+        eval_ = _eval()
+
+        _run(
+            run_mirror_issue_discovery(
+                {1: eval_},
+                _mirror_repos('entrius/gittensor-ui'),
+                _EMPTY_LANGS,
+                _EMPTY_TOKEN_CONFIG,
+                client=client,
+            )
+        )
+
+        assert eval_.total_solved_issues == 0
+        assert eval_.total_open_issues == 0
+
     def test_mirror_request_error_does_not_abort_other_miners(self):
         client = Mock()
 

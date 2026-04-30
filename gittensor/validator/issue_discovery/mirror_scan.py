@@ -138,6 +138,7 @@ async def run_mirror_issue_discovery(
     skipped_failed = 0
     fetch_errors = 0
     no_issues = 0
+    malformed_issues = 0
 
     for uid, evaluation in miner_evaluations.items():
         if not evaluation.github_id or evaluation.github_id == '0':
@@ -154,7 +155,20 @@ async def run_mirror_issue_discovery(
             fetch_errors += 1
             continue
 
-        filtered = [i for i in response.issues if i.repo_full_name in enabled_names]
+        filtered = []
+        for issue in response.issues:
+            if issue.repo_full_name not in enabled_names:
+                continue
+            # Quarantine malformed issues with no created_at — without it we can't
+            # apply the lookback window, time decay, or one-issue-per-PR ordering,
+            # so treat as bad mirror data rather than letting it score.
+            if issue.created_at is None:
+                bt.logging.warning(
+                    f'Mirror issue {issue.repo_full_name}#{issue.issue_number} missing created_at — skipping'
+                )
+                malformed_issues += 1
+                continue
+            filtered.append(issue)
         if not filtered:
             no_issues += 1
             continue
@@ -182,7 +196,8 @@ async def run_mirror_issue_discovery(
     bt.logging.info('')
     bt.logging.info(
         f'Issue discovery complete | {processed} processed | {no_issues} no mirror issues | '
-        f'{fetch_errors} fetch errors | {skipped_no_gh} no github_id | {skipped_failed} prior OSS failure'
+        f'{fetch_errors} fetch errors | {skipped_no_gh} no github_id | {skipped_failed} prior OSS failure | '
+        f'{malformed_issues} malformed (missing created_at)'
     )
     bt.logging.info(
         f'Solving-PR cache: {cache_stats.hits} hits | {cache_stats.misses} misses '
@@ -242,13 +257,11 @@ def _score_miner_mirror_issues(
     # later issues closed by the same PR add credibility only.
     pr_scored_keys: Set[Tuple[str, int]] = set()
 
+    # created_at is guaranteed non-None here — run_mirror_issue_discovery
+    # filters out malformed issues with missing created_at before this runs.
     issues_sorted = sorted(
         issues,
-        key=lambda i: (
-            i.repo_full_name,
-            i.solved_by_pr or 0,
-            i.created_at or datetime.max.replace(tzinfo=timezone.utc),
-        ),
+        key=lambda i: (i.repo_full_name, i.solved_by_pr or 0, i.created_at),
     )
 
     for issue in issues_sorted:

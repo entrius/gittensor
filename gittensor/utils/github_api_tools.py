@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from math import ceil
 from typing import TYPE_CHECKING, Any, Dict, Iterator, List, Optional
 
-from gittensor.utils.utils import parse_repo_name
+from gittensor.utils.utils import backoff_seconds, parse_repo_name
 
 if TYPE_CHECKING:
     from gittensor.classes import FileChange as FileChangeType
@@ -299,7 +299,7 @@ def get_merge_base_sha(repository: str, base_sha: str, head_sha: str, token: str
                 return None
 
             if attempt < max_attempts - 1:
-                backoff_delay = min(5 * (2 ** (attempt)), 30)
+                backoff_delay = backoff_seconds(attempt)
                 bt.logging.warning(
                     f'Compare API for {repository} failed with status {response.status_code} '
                     f'(attempt {attempt + 1}/{max_attempts}), retrying in {backoff_delay}s...'
@@ -308,7 +308,7 @@ def get_merge_base_sha(repository: str, base_sha: str, head_sha: str, token: str
 
         except requests.exceptions.RequestException as e:
             if attempt < max_attempts - 1:
-                backoff_delay = min(5 * (2 ** (attempt)), 30)
+                backoff_delay = backoff_seconds(attempt)
                 bt.logging.warning(
                     f'Compare API error for {repository} (attempt {attempt + 1}/{max_attempts}): {e}, '
                     f'retrying in {backoff_delay}s...'
@@ -377,7 +377,7 @@ def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -
             attempt += 1
 
             if attempt < max_attempts:
-                backoff_delay = min(5 * (2 ** (attempt - 1)), 30)
+                backoff_delay = backoff_seconds(attempt - 1)
                 bt.logging.warning(
                     f'File changes request for PR #{pr_number} in {repository} failed with {last_error} '
                     f'(attempt {attempt}/{max_attempts}), per_page={per_page}, retrying in {backoff_delay}s...'
@@ -391,7 +391,7 @@ def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -
             attempt += 1
 
             if attempt < max_attempts:
-                backoff_delay = min(5 * (2 ** (attempt - 1)), 30)
+                backoff_delay = backoff_seconds(attempt - 1)
                 bt.logging.warning(
                     f'File changes request error for PR #{pr_number} in {repository} '
                     f'(attempt {attempt}/{max_attempts}): {e}, retrying in {backoff_delay}s...'
@@ -575,7 +575,7 @@ def execute_graphql_query(
 
             # Retry on failure
             if attempt < (max_attempts - 1):
-                backoff_delay = min(5 * (2**attempt), 30)  # max of 30 second wait between retries
+                backoff_delay = backoff_seconds(attempt)
                 bt.logging.warning(
                     f'GraphQL request failed with status {response.status_code} '
                     f'(attempt {attempt + 1}/{max_attempts}), retrying in {backoff_delay}s...'
@@ -589,7 +589,7 @@ def execute_graphql_query(
 
         except requests.exceptions.RequestException as e:
             if attempt < (max_attempts - 1):
-                backoff_delay = min(5 * (2**attempt), 30)
+                backoff_delay = backoff_seconds(attempt)
                 bt.logging.warning(
                     f'GraphQL request exception (attempt {attempt + 1}/{max_attempts}), '
                     f'retrying in {backoff_delay}s: {e}'
@@ -666,7 +666,7 @@ def get_github_graphql_query(
                     if attempt < (max_attempts - 1):
                         old_limit = limit
                         limit = max(limit // 2, 10)
-                        backoff_delay = min(2 * (2**attempt), 15)
+                        backoff_delay = backoff_seconds(attempt, base=2, cap=15)
                         bt.logging.warning(
                             f'GraphQL RESOURCE_LIMITS_EXCEEDED (attempt {attempt + 1}/{max_attempts}), '
                             f'page size {old_limit} -> {limit}, retrying in {backoff_delay}s...'
@@ -683,7 +683,7 @@ def get_github_graphql_query(
 
             # HTTP error - log and retry
             if attempt < (max_attempts - 1):
-                backoff_delay = min(5 * (2**attempt), 30)
+                backoff_delay = backoff_seconds(attempt)
                 if response.status_code in (502, 503, 504):
                     limit = max(limit // 2, 10)
                     bt.logging.warning(
@@ -703,7 +703,7 @@ def get_github_graphql_query(
 
         except requests.exceptions.RequestException as e:
             if attempt < (max_attempts - 1):
-                backoff_delay = min(5 * (2**attempt), 30)
+                backoff_delay = backoff_seconds(attempt)
                 bt.logging.warning(
                     f'GraphQL request connection error (attempt {attempt + 1}/{max_attempts}): {e}, retrying in {backoff_delay}s...'
                 )

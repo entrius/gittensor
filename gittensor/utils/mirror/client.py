@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import bittensor as bt
+import msgspec
 import requests
 
 from gittensor.constants import (
@@ -112,7 +113,7 @@ class MirrorClient:
                 continue
 
             if 200 <= response.status_code < 300:
-                return response.json()
+                return msgspec.json.decode(response.content)
 
             # 4xx except 429 are not retryable — fail fast so callers see the real error.
             if 400 <= response.status_code < 500 and response.status_code != 429:

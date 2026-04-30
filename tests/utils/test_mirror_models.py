@@ -11,9 +11,11 @@ Covers from_dict parsing for each response dataclass:
 - Nested shapes (labels, linked_issues, solving_pr)
 """
 
+import json
 from datetime import datetime, timezone
 from unittest.mock import patch
 
+import msgspec
 import pytest
 
 models = pytest.importorskip('gittensor.utils.mirror.models', reason='Requires gittensor package')
@@ -569,4 +571,50 @@ class TestMirrorPullRequestFilesResponse:
         resp = MirrorPullRequestFilesResponse.from_dict(payload)
         assert len(resp.files) == 1
         assert resp.files[0].filename == 'src/components/MinerCard.tsx'
+        mock_logging.warning.assert_called()
+
+
+# ============================================================================
+# Production decode path: msgspec.json.decode(bytes) -> from_dict
+# ============================================================================
+
+
+class TestEndToEndDecode:
+    def test_bytes_round_trip_normalizes_nested_fields(self, pull_request_dict):
+        """The MirrorClient path is bytes -> msgspec.json.decode -> from_dict.
+        Confirms __post_init__ normalizations (repo lowercasing, int->str
+        github_id) fire through the full nested decode, not just leaf-class tests.
+        """
+        pull_request_dict['repo_full_name'] = 'Entrius/AllWays'
+        pull_request_dict['author_github_id'] = 218712309  # int from mirror
+        pull_request_dict['linked_issues'][0]['author_github_id'] = 170233626
+        payload = {
+            'github_id': '218712309',
+            'since': '2026-03-15T00:00:00Z',
+            'generated_at': '2026-04-21T15:00:00Z',
+            'pull_requests': [pull_request_dict],
+        }
+        decoded = msgspec.json.decode(json.dumps(payload).encode())
+        resp = MirrorPullRequestsResponse.from_dict(decoded)
+        pr = resp.pull_requests[0]
+        assert pr.repo_full_name == 'entrius/allways'
+        assert pr.author_github_id == '218712309'
+        assert pr.linked_issues[0].author_github_id == '170233626'
+
+    @patch('gittensor.utils.mirror.models.bt.logging')
+    def test_wrong_typed_pr_field_triggers_skip(self, mock_logging, pull_request_dict):
+        """Schema drift (wrong type) for a required field is caught per-item
+        and the rest of the response decodes - the 'fail loudly' guarantee
+        the rewrite trades silent None-spreading for.
+        """
+        bad = {**pull_request_dict, 'pr_number': 'not-an-int'}
+        payload = {
+            'github_id': '218712309',
+            'since': '2026-03-15T00:00:00Z',
+            'generated_at': '2026-04-21T15:00:00Z',
+            'pull_requests': [bad, pull_request_dict],
+        }
+        resp = MirrorPullRequestsResponse.from_dict(payload)
+        assert len(resp.pull_requests) == 1
+        assert resp.pull_requests[0].pr_number == 518
         mock_logging.warning.assert_called()

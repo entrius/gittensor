@@ -36,8 +36,11 @@ MirrorPullRequestFilesResponse = mirror_models.MirrorPullRequestFilesResponse
 
 def _ok(json_body: dict) -> Mock:
     """Build a 2xx response mock returning the given JSON."""
+    import json as _json
+
     response = Mock(status_code=200)
     response.json.return_value = json_body
+    response.content = _json.dumps(json_body).encode()
     return response
 
 

@@ -10,6 +10,7 @@ from gittensor.constants import (
     MIN_CREDIBILITY,
     MIN_TOKEN_SCORE_FOR_BASE_SCORE,
     MIN_VALID_MERGED_PRS,
+    TOKEN_SCORE_EPSILON,
 )
 
 if TYPE_CHECKING:
@@ -53,7 +54,9 @@ def check_eligibility(merged_prs: Sequence[PrLike], closed_prs: Sequence[PrLike]
     credibility = calculate_credibility(merged_prs, closed_prs)
 
     # Count valid merged PRs (token_score >= threshold)
-    valid_merged_count = sum(1 for pr in merged_prs if pr.token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE)
+    valid_merged_count = sum(
+        1 for pr in merged_prs if pr.token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE - TOKEN_SCORE_EPSILON
+    )
 
     if valid_merged_count < MIN_VALID_MERGED_PRS:
         reason = f'{valid_merged_count}/{MIN_VALID_MERGED_PRS} valid merged PRs (need {MIN_VALID_MERGED_PRS})'

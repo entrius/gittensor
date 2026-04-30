@@ -40,6 +40,7 @@ from gittensor.classes import Issue, MinerEvaluation
 from gittensor.constants import (
     MIN_TOKEN_SCORE_FOR_BASE_SCORE,
     PR_LOOKBACK_DAYS,
+    TOKEN_SCORE_EPSILON,
 )
 from gittensor.utils.mirror.client import MirrorClient, MirrorRequestError
 from gittensor.utils.mirror.models import MirrorIssue, MirrorSolvingPR
@@ -203,7 +204,7 @@ def _build_solving_pr_cache(
     cache: Dict[Tuple[str, int], CachedSolvingPR] = {}
     for evaluation in miner_evaluations.values():
         for scored in evaluation.mirror_merged_prs:
-            if scored.token_score < MIN_TOKEN_SCORE_FOR_BASE_SCORE:
+            if scored.token_score < MIN_TOKEN_SCORE_FOR_BASE_SCORE - TOKEN_SCORE_EPSILON:
                 continue
             key = (scored.pr.repo_full_name, scored.pr.pr_number)
             if key in cache:
@@ -286,7 +287,7 @@ def _score_miner_mirror_issues(
             continue
 
         # Valid-solved gate (legacy parity): solving PR must meet the token threshold.
-        if cached.token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE:
+        if cached.token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE - TOKEN_SCORE_EPSILON:
             valid_solved_count += 1
 
         # Same-account: discoverer == solver gets credibility only, no score
@@ -312,7 +313,7 @@ def _score_miner_mirror_issues(
 
         # Quality gate — matches legacy issue-discovery behavior: below-threshold
         # solving PRs add credibility only, no discovery score.
-        if cached.token_score < MIN_TOKEN_SCORE_FOR_BASE_SCORE:
+        if cached.token_score < MIN_TOKEN_SCORE_FOR_BASE_SCORE - TOKEN_SCORE_EPSILON:
             bt.logging.debug(
                 f'  issue #{issue.issue_number} ({issue.repo_full_name}): solving PR '
                 f'#{solving_pr.pr_number} token_score {cached.token_score:.2f} < '

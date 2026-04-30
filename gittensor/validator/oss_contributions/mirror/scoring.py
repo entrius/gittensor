@@ -38,6 +38,7 @@ from gittensor.constants import (
     MIN_TOKEN_SCORE_FOR_BASE_SCORE,
     SECONDS_PER_DAY,
     STANDARD_ISSUE_MULTIPLIER,
+    TOKEN_SCORE_EPSILON,
 )
 from gittensor.utils.github_api_tools import FileContentPair, branch_matches_pattern
 from gittensor.utils.mirror.client import MirrorClient, MirrorRequestError
@@ -284,7 +285,7 @@ def calculate_base_score_for_pr_files(
     source_density = source.density if source else 0.0
     code_density = round(source_density, 2)
 
-    if source_token_score < MIN_TOKEN_SCORE_FOR_BASE_SCORE:
+    if source_token_score < MIN_TOKEN_SCORE_FOR_BASE_SCORE - TOKEN_SCORE_EPSILON:
         initial_base_score = 0.0
     else:
         initial_base_score = MERGED_PR_BASE_SCORE * source_density
@@ -295,7 +296,7 @@ def calculate_base_score_for_pr_files(
 
     threshold_note = (
         f' [below {MIN_TOKEN_SCORE_FOR_BASE_SCORE} token threshold]'
-        if source_token_score < MIN_TOKEN_SCORE_FOR_BASE_SCORE
+        if source_token_score < MIN_TOKEN_SCORE_FOR_BASE_SCORE - TOKEN_SCORE_EPSILON
         else ''
     )
     bt.logging.info(

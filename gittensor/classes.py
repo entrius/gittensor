@@ -19,6 +19,7 @@ from gittensor.constants import (
     MAINTAINER_ASSOCIATIONS,
     MAX_CODE_DENSITY_MULTIPLIER,
     MIN_TOKEN_SCORE_FOR_BASE_SCORE,
+    TOKEN_SCORE_EPSILON,
 )
 from gittensor.utils.utils import parse_repo_name
 
@@ -217,7 +218,7 @@ class PullRequest:
 
         A PR is eligible if it is merged and meets the minimum token score quality gate.
         """
-        return self.merged_at is not None and self.token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE
+        return self.merged_at is not None and self.token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE - TOKEN_SCORE_EPSILON
 
     def calculate_final_earned_score(self) -> float:
         """Combine base score with all multipliers. Pioneer dividend is added separately after."""

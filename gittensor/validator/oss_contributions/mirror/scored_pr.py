@@ -17,7 +17,7 @@ from typing import List, Optional
 
 import bittensor as bt
 
-from gittensor.constants import MIN_TOKEN_SCORE_FOR_BASE_SCORE
+from gittensor.constants import MIN_TOKEN_SCORE_FOR_BASE_SCORE, TOKEN_SCORE_EPSILON
 from gittensor.utils.mirror.models import MirrorFile, MirrorPullRequest
 
 
@@ -83,7 +83,9 @@ class ScoredMirrorPR:
         Mirrors `PullRequest.is_pioneer_eligible` so the legacy pioneer math
         functions can be reused unchanged.
         """
-        return self.pr.merged_at is not None and self.token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE
+        return (
+            self.pr.merged_at is not None and self.token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE - TOKEN_SCORE_EPSILON
+        )
 
     def calculate_final_earned_score(self) -> float:
         """Combine base score with all multipliers. Pioneer dividend is added separately after."""

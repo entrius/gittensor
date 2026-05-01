@@ -81,7 +81,7 @@ MAX_CONTRIBUTION_BONUS = 25
 CONTRIBUTION_SCORE_FOR_FULL_BONUS = 1500
 
 # Boosts
-MAX_CODE_DENSITY_MULTIPLIER = 1.5
+MAX_CODE_DENSITY_MULTIPLIER = 1.15
 
 # Label multipliers - applied based on the last label set on the PR (requires triage+ access)
 LABEL_MULTIPLIERS: dict[str, float] = {

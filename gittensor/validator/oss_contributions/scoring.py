@@ -2,7 +2,7 @@
 # Copyright © 2025 Entrius
 
 from datetime import datetime
-from typing import TYPE_CHECKING, Dict, Tuple, Union
+from typing import TYPE_CHECKING, Dict, Optional, Tuple, Union
 
 import bittensor as bt
 
@@ -166,15 +166,16 @@ def calculate_base_score(
     return result.base_score
 
 
-def calculate_review_quality_multiplier(changes_requested_count: int) -> float:
+def calculate_review_quality_multiplier(changes_requested_count: int, pr_number: Optional[int] = None) -> float:
     """Calculate the review quality multiplier based on maintainer CHANGES_REQUESTED reviews.
 
     Formula: max(0.0, 1.0 - REVIEW_PENALTY_RATE × N)
     """
     multiplier = max(0.0, 1.0 - REVIEW_PENALTY_RATE * changes_requested_count)
     if changes_requested_count > 0:
+        ctx = f' (PR #{pr_number})' if pr_number else ''
         bt.logging.info(
-            f'{changes_requested_count} maintainer CHANGES_REQUESTED review(s) → '
+            f'{changes_requested_count} maintainer CHANGES_REQUESTED review(s){ctx} → '
             f'review_quality_multiplier={multiplier:.2f}'
         )
     return multiplier
@@ -196,7 +197,9 @@ def calculate_pr_multipliers(
         pr.open_pr_spam_multiplier = 1.0
         assert pr.merged_at is not None, f'PR #{pr.number} has no merged_at'
         pr.time_decay_multiplier = round(calculate_time_decay(pr.merged_at), 2)
-        pr.review_quality_multiplier = round(calculate_review_quality_multiplier(pr.changes_requested_count), 2)
+        pr.review_quality_multiplier = round(
+            calculate_review_quality_multiplier(pr.changes_requested_count, pr.number), 2
+        )
     else:
         pr.open_pr_spam_multiplier = 1.0
         pr.time_decay_multiplier = 1.0

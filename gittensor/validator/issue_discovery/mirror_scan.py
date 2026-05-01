@@ -12,6 +12,8 @@ emission blending / normalization doesn't change.
 Anti-gaming gates (all applied):
 - solved_by_pr must be populated
 - solving_pr.state == 'MERGED'
+- solving_pr.merged_at is not None (anti-corruption — matches the OSS
+  mirror path's defensive gate)
 - not solving_pr.edited_after_merge
 - issue.last_edited_at <= solving_pr.merged_at (anti-spec-rewrite)
 - issue.state_reason == 'COMPLETED' (not NOT_PLANNED, not null)
@@ -456,6 +458,19 @@ def _classify_issue(issue: MirrorIssue) -> str:
         bt.logging.debug(
             f'  issue #{issue.issue_number} ({issue.repo_full_name}): closed-not-solved '
             f'(solving PR #{sp.pr_number} state={sp.state}, not MERGED)'
+        )
+        return 'not-solved-closed'
+
+    # Data corruption: state==MERGED but merged_at missing. Mirror's OSS path
+    # treats this same shape as a hard skip (oss_contributions/mirror/scoring.py
+    # rejects with "MERGED but missing merged_at"); apply the same gate here so
+    # an unscoreable record can't inflate total_valid_solved_issues past the
+    # eligibility floor — _mirror_issue_for_scoring would later drop it for the
+    # same reason, but only after the counter was already incremented.
+    if sp.merged_at is None:
+        bt.logging.debug(
+            f'  issue #{issue.issue_number} ({issue.repo_full_name}): closed-not-solved '
+            f'(solving PR #{sp.pr_number} MERGED but missing merged_at — data corruption)'
         )
         return 'not-solved-closed'
 

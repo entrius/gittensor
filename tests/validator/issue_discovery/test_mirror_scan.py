@@ -204,6 +204,16 @@ class TestClassifyIssue:
         issue = MirrorIssue.from_dict(_issue_dict(solving_pr_state='OPEN'))
         assert _classify_issue(issue) == 'not-solved-closed'
 
+    def test_solving_pr_merged_with_null_merged_at_counts_as_closed(self):
+        # Data corruption: state==MERGED but merged_at missing. Without this
+        # gate, _mirror_issue_for_scoring drops the record but the counter has
+        # already incremented, letting one corrupted row carry a miner past
+        # MIN_VALID_SOLVED_ISSUES. Mirrors the OSS mirror scoring gate.
+        raw = _issue_dict()
+        raw['solving_pr']['merged_at'] = None
+        issue = MirrorIssue.from_dict(raw)
+        assert _classify_issue(issue) == 'not-solved-closed'
+
     def test_solving_pr_edited_after_merge_counts_as_closed(self):
         issue = MirrorIssue.from_dict(_issue_dict(solving_pr_edited_after_merge=True))
         assert _classify_issue(issue) == 'not-solved-closed'
@@ -367,6 +377,67 @@ class TestRunMirrorIssueDiscovery:
             )
         )
         assert eval_.total_solved_issues == 0
+
+    def test_merged_pr_missing_merged_at_does_not_inflate_valid_solved(self):
+        """Regression for the eligibility-gate inflation bug.
+
+        A solving PR reported as MERGED but with merged_at=null is structurally
+        unscoreable (time decay needs merged_at). Before the gate fix, such an
+        issue still bumped solved_count and valid_solved_count before being
+        dropped by _mirror_issue_for_scoring — letting one corrupted record
+        flip a miner from 6 valid solveds (ineligible) to 7 (eligible) and
+        produce a non-zero discovery score from the other six.
+        """
+        from gittensor.constants import MIN_VALID_SOLVED_ISSUES
+
+        # Build (MIN_VALID_SOLVED_ISSUES - 1) clean solveds so the miner is
+        # exactly one short of the gate.
+        valid_count = MIN_VALID_SOLVED_ISSUES - 1
+        valid_issues = [
+            _issue_dict(
+                issue_number=300 + i,
+                solved_by_pr=400 + i,
+                author_github_id=f'discoverer{i}',
+            )
+            for i in range(valid_count)
+        ]
+        # One MERGED-but-missing-merged_at corrupted record. Without the gate
+        # this would push valid_solved_count to MIN_VALID_SOLVED_ISSUES and
+        # flip eligibility.
+        corrupted = _issue_dict(
+            issue_number=500,
+            solved_by_pr=600,
+            author_github_id='discovererC',
+        )
+        corrupted['solving_pr']['merged_at'] = None
+
+        client = Mock()
+        client.get_miner_issues.return_value = _response(valid_issues + [corrupted])
+
+        eval_ = _eval()
+        # Pre-seed every solving PR (including the corrupted one's) so the
+        # cache hits and valid_solved gating depends purely on classification.
+        eval_.mirror_merged_prs = [
+            _scored_mirror_pr('entrius/gittensor-ui', 400 + i, token_score=100.0) for i in range(valid_count)
+        ] + [_scored_mirror_pr('entrius/gittensor-ui', 600, token_score=100.0)]
+
+        _run(
+            run_mirror_issue_discovery(
+                {1: eval_},
+                _mirror_repos('entrius/gittensor-ui'),
+                _EMPTY_LANGS,
+                _EMPTY_TOKEN_CONFIG,
+                client=client,
+            )
+        )
+
+        # Corrupted record bucketed as closed-not-solved, not solved.
+        assert eval_.total_solved_issues == valid_count
+        assert eval_.total_valid_solved_issues == valid_count
+        assert eval_.total_closed_issues == 1
+        # Stays one short of the eligibility floor.
+        assert eval_.is_issue_eligible is False
+        assert eval_.issue_discovery_score == 0
 
     def test_mirror_request_error_does_not_abort_other_miners(self):
         client = Mock()

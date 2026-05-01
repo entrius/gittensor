@@ -305,12 +305,8 @@ class PullRequest:
         last_edited_at = parse_github_timestamp_to_cst(raw_edited_at) if isinstance(raw_edited_at, str) else None
         merged_at = parse_github_timestamp_to_cst(pr_data['mergedAt']) if is_merged else None
 
-        changes_requested_count = 0
-        if is_merged:
-            cr_reviews = pr_data.get('changesRequestedReviews', {}).get('nodes', [])
-            changes_requested_count = sum(
-                1 for r in cr_reviews if r.get('authorAssociation') in MAINTAINER_ASSOCIATIONS
-            )
+        cr_reviews = (pr_data.get('changesRequestedReviews') or {}).get('nodes') or []
+        changes_requested_count = sum(1 for r in cr_reviews if r.get('authorAssociation') in MAINTAINER_ASSOCIATIONS)
 
         current = {(n.get('name') or '').lower() for n in (pr_data.get('labels') or {}).get('nodes') or [] if n}
         label: Optional[str] = None

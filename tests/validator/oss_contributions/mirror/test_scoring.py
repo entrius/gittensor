@@ -57,6 +57,7 @@ def _pr(
     head_repo_full_name: str | None = 'entrius/gittensor-ui',
     default_branch: str | None = 'main',
     approved_count: int = 1,
+    maintainer_changes_requested_count: int = 0,
     labels: list | None = None,
     linked_issues: list | None = None,
 ) -> MirrorPullRequest:
@@ -89,7 +90,7 @@ def _pr(
             'commits_count': 1,
             'scoring_data_stored': True,
             'review_summary': {
-                'maintainer_changes_requested_count': 0,
+                'maintainer_changes_requested_count': maintainer_changes_requested_count,
                 'changes_requested_count': 0,
                 'approved_count': approved_count,
                 'commented_count': 0,
@@ -654,6 +655,25 @@ class TestCollateralScoreAcceptsScoredMirrorPR:
         # The issue with state=OPEN/state_reason=None should still pass for an OPEN PR
         assert _is_valid_linked_issue(li, scored.pr) is True
 
+    def test_open_mirror_pr_review_iterations_increase_collateral(self):
+        from gittensor.validator.oss_contributions.scoring import calculate_open_pr_collateral_score
+
+        clean = ScoredMirrorPR(pr=_pr(state='OPEN', maintainer_changes_requested_count=0))
+        clean.base_score = 100.0
+        clean.repo_weight_multiplier = 1.0
+        clean.issue_multiplier = 1.0
+        clean.label_multiplier = 1.0
+
+        reviewed = ScoredMirrorPR(pr=_pr(state='OPEN', maintainer_changes_requested_count=3))
+        reviewed.base_score = 100.0
+        reviewed.repo_weight_multiplier = 1.0
+        reviewed.issue_multiplier = 1.0
+        reviewed.label_multiplier = 1.0
+
+        assert calculate_open_pr_collateral_score(reviewed) == pytest.approx(
+            calculate_open_pr_collateral_score(clean) * 1.45
+        )
+
 
 # ============================================================================
 # Multiplier composition (smoke test that all multipliers populate)
@@ -684,7 +704,7 @@ class TestPrMultipliers:
         _calculate_pr_multipliers(scored, _config(weight=0.5))
 
         assert scored.repo_weight_multiplier == 0.5
-        # Time decay / review quality / credibility are merge-only — kept neutral here
+        # Time decay / review quality / credibility are merge-only — kept neutral here.
         assert scored.time_decay_multiplier == 1.0
         assert scored.credibility_multiplier == 1.0
         assert scored.review_quality_multiplier == 1.0

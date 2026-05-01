@@ -194,6 +194,8 @@ MAINTAINER_ASSOCIATIONS = ['OWNER', 'MEMBER', 'COLLABORATOR']
 
 # PR Review Quality Multiplier
 REVIEW_PENALTY_RATE = 0.15  # 15% deduction per CHANGES_REQUESTED review from a maintainer
+OPEN_PR_REVIEW_COLLATERAL_RATE = REVIEW_PENALTY_RATE  # Same per-review step, but increases open PR collateral
+MAX_OPEN_PR_REVIEW_COLLATERAL_MULTIPLIER = 2.0  # Cap open PR collateral growth from review iterations
 
 # Issue multiplier (flat values, no age scaling)
 STANDARD_ISSUE_MULTIPLIER = 1.33  # Non-maintainer issue author

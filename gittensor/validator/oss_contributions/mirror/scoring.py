@@ -16,7 +16,7 @@ Anti-gaming notes:
 - ``edited_after_merge`` is NOT a PR-level gate — it gates only the issue
   bonus multiplier in ``_is_valid_linked_issue``, matching legacy
   ``is_valid_issue``.
-- Mirror's ``actor_association`` per label lets ``_resolve_maintainer_set_label``
+- Mirror's ``actor_association`` per label lets ``_resolve_trusted_scoring_label``
   require maintainer-applied labels; legacy can't do this and accepts any-applier.
 """
 
@@ -351,7 +351,7 @@ def _calculate_pr_multipliers(scored: ScoredMirrorPR, repo_config: RepositoryCon
 
     scored.repo_weight_multiplier = resolve_repo_weight(repo_config)
 
-    chosen_label = _resolve_maintainer_set_label(pr, repo_config)
+    chosen_label = _resolve_trusted_scoring_label(pr, repo_config)
     scored.label = chosen_label
     scored.label_multiplier = LABEL_MULTIPLIERS.get(chosen_label, 1.0) if chosen_label else 1.0
 
@@ -372,7 +372,7 @@ def _calculate_pr_multipliers(scored: ScoredMirrorPR, repo_config: RepositoryCon
         scored.review_quality_multiplier = 1.0
 
 
-def _resolve_maintainer_set_label(pr: MirrorPullRequest, repo_config: RepositoryConfig) -> Optional[str]:
+def _resolve_trusted_scoring_label(pr: MirrorPullRequest, repo_config: RepositoryConfig) -> Optional[str]:
     """Pick the highest-multiplier currently-applied scoring label whose actor is trusted.
 
     By default the actor must be in ``MAINTAINER_ASSOCIATIONS``. Repos opted into

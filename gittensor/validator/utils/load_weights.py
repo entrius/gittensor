@@ -37,7 +37,7 @@ class RepositoryConfig:
         trusted_label_pipeline: When True, scoring labels count regardless of
             actor — including GitHub Apps that surface as ``actor_association=NULL``.
             Defaults to False; only enable on repos with an authoritative label
-            pipeline. See ``_resolve_maintainer_set_label`` for the threat model.
+            pipeline. See ``_resolve_trusted_scoring_label`` for the threat model.
 
     """
 

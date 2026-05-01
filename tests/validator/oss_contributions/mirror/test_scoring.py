@@ -34,7 +34,7 @@ load_weights = pytest.importorskip('gittensor.validator.utils.load_weights')
 _should_skip_merged_mirror_pr = scoring_module._should_skip_merged_mirror_pr
 _convert_mirror_files = adapters_module.mirror_files_to_legacy
 _calculate_pr_multipliers = scoring_module._calculate_pr_multipliers
-_resolve_maintainer_set_label = scoring_module._resolve_maintainer_set_label
+_resolve_trusted_scoring_label = scoring_module._resolve_trusted_scoring_label
 _calculate_issue_multiplier = scoring_module._calculate_issue_multiplier
 _is_valid_linked_issue = scoring_module._is_valid_linked_issue
 score_mirror_pr = scoring_module.score_mirror_pr
@@ -413,12 +413,12 @@ class TestConvertMirrorFiles:
 class TestLabelResolution:
     def test_no_labels_returns_none(self):
         scored = ScoredMirrorPR(pr=_pr(labels=[]))
-        assert _resolve_maintainer_set_label(scored.pr, _config()) is None
+        assert _resolve_trusted_scoring_label(scored.pr, _config()) is None
 
     def test_non_scoring_labels_ignored(self):
         labels = [{'name': 'random', 'actor_github_id': '1', 'actor_association': 'OWNER'}]
         scored = ScoredMirrorPR(pr=_pr(labels=labels))
-        assert _resolve_maintainer_set_label(scored.pr, _config()) is None
+        assert _resolve_trusted_scoring_label(scored.pr, _config()) is None
 
     def test_non_maintainer_label_ignored(self):
         from gittensor.constants import LABEL_MULTIPLIERS
@@ -426,7 +426,7 @@ class TestLabelResolution:
         scoring_label = next(iter(LABEL_MULTIPLIERS.keys()))
         labels = [{'name': scoring_label, 'actor_github_id': '1', 'actor_association': 'CONTRIBUTOR'}]
         scored = ScoredMirrorPR(pr=_pr(labels=labels))
-        assert _resolve_maintainer_set_label(scored.pr, _config()) is None
+        assert _resolve_trusted_scoring_label(scored.pr, _config()) is None
 
     def test_null_actor_association_ignored_on_untrusted_repo(self):
         from gittensor.constants import LABEL_MULTIPLIERS
@@ -434,7 +434,7 @@ class TestLabelResolution:
         scoring_label = next(iter(LABEL_MULTIPLIERS.keys()))
         labels = [{'name': scoring_label, 'actor_github_id': None, 'actor_association': None}]
         scored = ScoredMirrorPR(pr=_pr(labels=labels))
-        assert _resolve_maintainer_set_label(scored.pr, _config()) is None
+        assert _resolve_trusted_scoring_label(scored.pr, _config()) is None
 
     def test_maintainer_set_scoring_label_returned(self):
         from gittensor.constants import LABEL_MULTIPLIERS
@@ -442,7 +442,7 @@ class TestLabelResolution:
         scoring_label = next(iter(LABEL_MULTIPLIERS.keys()))
         labels = [{'name': scoring_label, 'actor_github_id': '1', 'actor_association': 'COLLABORATOR'}]
         scored = ScoredMirrorPR(pr=_pr(labels=labels))
-        assert _resolve_maintainer_set_label(scored.pr, _config()) == scoring_label.lower()
+        assert _resolve_trusted_scoring_label(scored.pr, _config()) == scoring_label.lower()
 
     def test_highest_multiplier_wins(self):
         from gittensor.constants import LABEL_MULTIPLIERS
@@ -457,7 +457,7 @@ class TestLabelResolution:
             {'name': b, 'actor_github_id': '1', 'actor_association': 'OWNER'},
         ]
         scored = ScoredMirrorPR(pr=_pr(labels=labels))
-        chosen = _resolve_maintainer_set_label(scored.pr, _config())
+        chosen = _resolve_trusted_scoring_label(scored.pr, _config())
         expected = max([a, b], key=lambda n: (LABEL_MULTIPLIERS[n], n)).lower()
         assert chosen == expected
 

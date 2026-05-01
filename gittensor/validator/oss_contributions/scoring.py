@@ -24,7 +24,6 @@ from gittensor.constants import (
     MAX_OPEN_PR_REVIEW_COLLATERAL_MULTIPLIER,
     MAX_OPEN_PR_THRESHOLD,
     OPEN_PR_COLLATERAL_PERCENT,
-    OPEN_PR_REVIEW_COLLATERAL_RATE,
     OPEN_PR_THRESHOLD_TOKEN_SCORE,
     PIONEER_DIVIDEND_MAX_RATIO,
     PIONEER_DIVIDEND_RATE_1ST,
@@ -188,11 +187,11 @@ def calculate_review_collateral_multiplier(changes_requested_count: int, pr_numb
 
     Unlike ``review_quality_multiplier`` for earned scores, this increases
     collateral so non-merge-ready open PRs reserve more score instead of less.
-    Formula: min(MAX_OPEN_PR_REVIEW_COLLATERAL_MULTIPLIER, 1.0 + OPEN_PR_REVIEW_COLLATERAL_RATE × N)
+    Formula: min(MAX_OPEN_PR_REVIEW_COLLATERAL_MULTIPLIER, 1.0 + REVIEW_PENALTY_RATE × N)
     """
     multiplier = min(
         MAX_OPEN_PR_REVIEW_COLLATERAL_MULTIPLIER,
-        1.0 + OPEN_PR_REVIEW_COLLATERAL_RATE * changes_requested_count,
+        1.0 + REVIEW_PENALTY_RATE * changes_requested_count,
     )
     if changes_requested_count > 0:
         ctx = f' (PR #{pr_number})' if pr_number else ''

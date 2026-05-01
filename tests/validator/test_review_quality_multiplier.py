@@ -18,7 +18,6 @@ from gittensor.classes import MinerEvaluation, PRState, PullRequest
 from gittensor.constants import (
     MAX_OPEN_PR_REVIEW_COLLATERAL_MULTIPLIER,
     OPEN_PR_COLLATERAL_PERCENT,
-    OPEN_PR_REVIEW_COLLATERAL_RATE,
     REVIEW_PENALTY_RATE,
 )
 from gittensor.utils.github_api_tools import _MAX_CHANGES_REQUESTED_REVIEWS
@@ -92,7 +91,7 @@ class TestCalculateReviewCollateralMultiplier:
         assert calculate_review_collateral_multiplier(0) == 1.0
 
     def test_one_review_increases_collateral_multiplier(self):
-        assert calculate_review_collateral_multiplier(1) == pytest.approx(1.0 + OPEN_PR_REVIEW_COLLATERAL_RATE)
+        assert calculate_review_collateral_multiplier(1) == pytest.approx(1.0 + REVIEW_PENALTY_RATE)
 
     def test_table_values(self):
         expected = {
@@ -283,7 +282,7 @@ class TestReviewCollateralThroughScoringPipeline:
 def test_max_changes_requested_reviews_covers_review_multipliers():
     # Tripwire: the GraphQL fetch cap must stay aligned with every review-count-based multiplier.
     penalty_cap = ceil(1 / REVIEW_PENALTY_RATE)
-    collateral_cap = ceil((MAX_OPEN_PR_REVIEW_COLLATERAL_MULTIPLIER - 1.0) / OPEN_PR_REVIEW_COLLATERAL_RATE)
+    collateral_cap = ceil((MAX_OPEN_PR_REVIEW_COLLATERAL_MULTIPLIER - 1.0) / REVIEW_PENALTY_RATE)
 
     assert _MAX_CHANGES_REQUESTED_REVIEWS == max(penalty_cap, collateral_cap)
     assert calculate_review_quality_multiplier(_MAX_CHANGES_REQUESTED_REVIEWS) == 0.0

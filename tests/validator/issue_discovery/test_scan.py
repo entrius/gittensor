@@ -928,8 +928,48 @@ class TestCacheStats:
 
 class TestOpenIssueSpamSourceIsMirror:
     """The open-issue spam multiplier sources its count from mirror's response,
-    and mirror_scan also writes that count to evaluation.total_open_issues so
+    and scan also writes that count to evaluation.total_open_issues so
     the DB row reflects mirror-scoped state."""
+
+    def test_old_open_issues_outside_scoring_window_still_trip_spam(self):
+        """Scoring stays lookback-bounded, but open-issue load is current."""
+        solved_issues = [_issue_dict(issue_number=300 + i, author_github_id=f'discoverer{i}') for i in range(8)]
+        old_open_issues = [
+            _issue_dict(
+                issue_number=200 + i,
+                state='OPEN',
+                state_reason=None,
+                solved_by_pr=None,
+                created_at='2026-01-01T00:00:00Z',
+            )
+            for i in range(6)
+        ]
+        client = Mock()
+        client.get_miner_issues.side_effect = [
+            _response(solved_issues),  # lookback-bounded scoring response
+            _response(old_open_issues),  # current/open-count response
+        ]
+
+        eval_ = _eval()
+        eval_.merged_prs = [_scored_mirror_pr('entrius/gittensor-ui', 100, token_score=100.0)]
+
+        _run(
+            run_issue_discovery(
+                {1: eval_},
+                _mirror_repos('entrius/gittensor-ui'),
+                _EMPTY_LANGS,
+                _EMPTY_TOKEN_CONFIG,
+                client=client,
+            )
+        )
+
+        assert eval_.total_open_issues == 6
+        assert eval_.issue_discovery_score == 0
+        assert client.get_miner_issues.call_count == 2
+        scoring_since = client.get_miner_issues.call_args_list[0].kwargs['since']
+        open_count_call = client.get_miner_issues.call_args_list[1]
+        assert scoring_since is not None
+        assert open_count_call.kwargs.get('since') is None
 
     def test_all_mirror_miner_with_many_open_issues_trips_spam(self):
         """6 open issues in mirror response trips the spam multiplier."""
@@ -963,7 +1003,7 @@ class TestOpenIssueSpamSourceIsMirror:
 
         # 6 open issues > threshold (5) → spam_mult=0 → all scored issues earn 0
         assert eval_.issue_discovery_score == 0
-        # mirror_scan now records the mirror-scoped open count
+        # scan records the mirror-scoped open count
         assert eval_.total_open_issues == 6
 
     def test_all_mirror_miner_below_threshold_passes_spam(self):

@@ -247,11 +247,16 @@ def calculate_pioneer_dividends(
     repo_contributions: Dict[str, Dict[int, Tuple[datetime, int, float]]] = {}
 
     for uid, evaluation in miner_evaluations.items():
+        seen_prs: set = set()  # (repo, pr_number) — guard against legacy+mirror double-count
         for pr in evaluation.merged_pull_requests + evaluation.mirror_merged_prs:
             if not pr.is_pioneer_eligible():
                 continue
             assert pr.merged_at is not None
             repo = pr.repository_full_name
+            pr_key = (repo, pr.number)
+            if pr_key in seen_prs:
+                continue
+            seen_prs.add(pr_key)
             pr_index.setdefault(repo, {}).setdefault(uid, []).append(pr)
 
             current = repo_contributions.setdefault(repo, {}).get(uid)

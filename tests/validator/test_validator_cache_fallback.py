@@ -29,10 +29,16 @@ def _make_pr(uid: int) -> PullRequest:
     )
 
 
-def _build_eval(uid: int, merged_prs: int, fetch_failed: bool) -> MinerEvaluation:
+def _build_eval(
+    uid: int,
+    merged_prs: int,
+    fetch_failed: bool,
+    mirror_pr_fetch_failed: bool = False,
+) -> MinerEvaluation:
     eval_ = MinerEvaluation(uid=uid, hotkey='hotkey_1', github_id='12345')
     eval_.merged_pull_requests = [_make_pr(uid) for _ in range(merged_prs)]
     eval_.github_pr_fetch_failed = fetch_failed
+    eval_.mirror_pr_fetch_failed = mirror_pr_fetch_failed
     return eval_
 
 
@@ -79,3 +85,27 @@ class TestStoreOrUseCachedEvaluation:
         cached_eval = validator.evaluation_cache.get(uid=1, hotkey='hotkey_1', github_id='12345')
         assert cached_eval is not None
         assert cached_eval.total_prs == 2
+
+
+class TestMirrorFailureCacheFallback:
+    """A mirror outage routes the miner through the cache-fallback path so the
+    evaluation is a coherent one-round-stale snapshot rather than a fresh-legacy +
+    zeroed-mirror hybrid where cross-PR multipliers recompute over a partial view."""
+
+    def test_mirror_failure_with_legacy_success_swaps_to_cached_eval(self):
+        validator = _DummyValidator()
+        validator.evaluation_cache.store(_build_eval(uid=1, merged_prs=2, fetch_failed=False))
+
+        current_eval = _build_eval(
+            uid=1,
+            merged_prs=1,
+            fetch_failed=True,
+            mirror_pr_fetch_failed=True,
+        )
+        miner_evaluations = {1: current_eval}
+
+        cached_uids = Validator.store_or_use_cached_evaluation(cast(Validator, validator), miner_evaluations)
+
+        assert cached_uids == {1}
+        assert miner_evaluations[1] is not current_eval
+        assert miner_evaluations[1].total_prs == 2

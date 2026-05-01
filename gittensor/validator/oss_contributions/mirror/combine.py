@@ -4,6 +4,9 @@ Single explicit join point between the two scoring paths:
 - Mirror PR lists land in the ``mirror_*`` slots on the MinerEvaluation
 - ``unique_repos_contributed_to`` is unioned
 - ``github_pr_fetch_failed`` is OR'd
+- ``mirror_pr_fetch_failed`` is materialized so the validator can tell
+  a complete mirror outage apart from a legacy partial-pagination failure
+  when deciding cache fallback strategy
 
 Per-PR scoring breakdowns (token_score, nodes_scored, base_score, earned_score,
 collateral_score) live on each ScoredMirrorPR — they get aggregated into
@@ -27,4 +30,5 @@ def combine(legacy_eval: MinerEvaluation, mirror_eval: MirrorMinerEvaluation) ->
 
     legacy_eval.unique_repos_contributed_to |= mirror_eval.unique_repos_contributed_to
 
+    legacy_eval.mirror_pr_fetch_failed = mirror_eval.fetch_failed
     legacy_eval.github_pr_fetch_failed = legacy_eval.github_pr_fetch_failed or mirror_eval.fetch_failed

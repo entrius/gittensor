@@ -133,12 +133,14 @@ class TestCombineFetchFailed:
         mirror_eval = MirrorMinerEvaluation(uid=1, hotkey='hk')
         combine(legacy, mirror_eval)
         assert legacy.github_pr_fetch_failed is True
+        assert legacy.mirror_pr_fetch_failed is False
 
     def test_mirror_failed_only(self):
         legacy = MinerEvaluation(uid=1, hotkey='hk')
         mirror_eval = MirrorMinerEvaluation(uid=1, hotkey='hk', fetch_failed=True)
         combine(legacy, mirror_eval)
         assert legacy.github_pr_fetch_failed is True
+        assert legacy.mirror_pr_fetch_failed is True
 
     def test_both_failed(self):
         legacy = MinerEvaluation(uid=1, hotkey='hk')
@@ -146,9 +148,11 @@ class TestCombineFetchFailed:
         mirror_eval = MirrorMinerEvaluation(uid=1, hotkey='hk', fetch_failed=True)
         combine(legacy, mirror_eval)
         assert legacy.github_pr_fetch_failed is True
+        assert legacy.mirror_pr_fetch_failed is True
 
     def test_neither_failed(self):
         legacy = MinerEvaluation(uid=1, hotkey='hk')
         mirror_eval = MirrorMinerEvaluation(uid=1, hotkey='hk')
         combine(legacy, mirror_eval)
         assert legacy.github_pr_fetch_failed is False
+        assert legacy.mirror_pr_fetch_failed is False

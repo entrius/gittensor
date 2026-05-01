@@ -34,14 +34,9 @@ class DecodedIssueStorage:
     registered_at_block: int
 
 
-def _get_contract_info_value(contract_info):
-    """Normalize substrate contract info wrapper values."""
-    return contract_info.value if hasattr(contract_info, 'value') else contract_info
-
-
 def _extract_trie_id_bytes(contract_info) -> Optional[bytes]:
     """Extract contract trie ID bytes from substrate contract info."""
-    info = _get_contract_info_value(contract_info)
+    info = contract_info.value if hasattr(contract_info, 'value') else contract_info
     if not info or 'trie_id' not in info:
         return None
 

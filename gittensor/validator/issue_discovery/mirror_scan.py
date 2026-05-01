@@ -13,6 +13,7 @@ Anti-gaming gates (all applied):
 - solved_by_pr must be populated
 - solving_pr.state == 'MERGED'
 - not solving_pr.edited_after_merge
+- issue.last_edited_at <= solving_pr.merged_at (anti-spec-rewrite)
 - issue.state_reason == 'COMPLETED' (not NOT_PLANNED, not null)
 - not issue.is_transferred
 - issue.author_github_id != solving_pr.author_github_id (anti-self-issue)
@@ -470,6 +471,13 @@ def _classify_issue(issue: MirrorIssue) -> str:
         bt.logging.debug(
             f'  issue #{issue.issue_number} ({issue.repo_full_name}): closed-not-solved '
             f'(solving PR #{sp.pr_number} edited after merge — anti-spec-rewrite gate)'
+        )
+        return 'not-solved-closed'
+
+    if issue.last_edited_at is not None and sp.merged_at is not None and issue.last_edited_at > sp.merged_at:
+        bt.logging.debug(
+            f'  issue #{issue.issue_number} ({issue.repo_full_name}): closed-not-solved '
+            f'(issue body/title edited after solving PR #{sp.pr_number} merge — anti-spec-rewrite gate)'
         )
         return 'not-solved-closed'
 

@@ -25,6 +25,7 @@ from .helpers import (
     colorize_status,
     console,
     emit_json,
+    loading_context,
     format_alpha,
     handle_exception,
     print_network_header,
@@ -67,8 +68,7 @@ def issues_list(issue_id: int, network: str, rpc_url: str, contract: str, verbos
 
     if not as_json:
         print_network_header(network_name, contract_addr)
-
-    with console.status('[bold cyan]Reading issues from contract...', spinner='dots'):
+    with loading_context('Reading issues from contract...', as_json):
         issues = read_issues_from_contract(ws_endpoint, contract_addr, verbose)
 
     if as_json:
@@ -194,7 +194,7 @@ def issues_bounty_pool(network: str, rpc_url: str, contract: str, verbose: bool,
     try:
         from substrateinterface import SubstrateInterface
 
-        with console.status('[bold cyan]Reading contract storage...', spinner='dots'):
+        with loading_context('Reading contract storage...', as_json):
             substrate = SubstrateInterface(url=ws_endpoint)
             issues = _read_issues_from_child_storage(substrate, contract_addr, verbose)
 
@@ -243,7 +243,7 @@ def issues_pending_harvest(network: str, rpc_url: str, contract: str, verbose: b
             IssueCompetitionContractClient,
         )
 
-        with console.status('[bold cyan]Reading treasury and contract data...', spinner='dots'):
+        with loading_context('Reading treasury and contract data...', as_json):
             subtensor = bt.Subtensor(network=ws_endpoint)
             client = IssueCompetitionContractClient(
                 contract_address=contract_addr,
@@ -297,7 +297,7 @@ def admin_info(network: str, rpc_url: str, contract: str, verbose: bool, as_json
     try:
         from substrateinterface import SubstrateInterface
 
-        with console.status('[bold cyan]Reading contract configuration...', spinner='dots'):
+        with loading_context('Reading contract configuration...', as_json):
             substrate = SubstrateInterface(url=ws_endpoint)
             packed = _read_contract_packed_storage(substrate, contract_addr, verbose)
 

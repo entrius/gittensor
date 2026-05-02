@@ -25,6 +25,7 @@ from .helpers import (
     console,
     emit_json,
     handle_exception,
+    loading_context,
     print_error,
     print_network_header,
     print_success,
@@ -237,7 +238,7 @@ def vote_list_validators(network: str, rpc_url: str, contract: str, as_json: boo
             IssueCompetitionContractClient,
         )
 
-        with console.status('[bold cyan]Reading validator whitelist...', spinner='dots'):
+        with loading_context('Reading validator whitelist...', as_json):
             subtensor = bt.Subtensor(network=ws_endpoint)
             client = IssueCompetitionContractClient(
                 contract_address=contract_addr,

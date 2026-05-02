@@ -178,25 +178,37 @@ class TestCacheIsolation:
         assert cached_issues is not None
         assert cached_issues[0].discovery_earned_score == 0.0
 
+    def test_get_returns_isolated_legacy_pr_top_level_copies(self):
+        cache = MinerEvaluationCache()
+        cache.store(self._eval_with_issue())
 
-def _make_mirror_pr_with_file_blob(blob: str, pr_number: int = 7) -> ScoredMirrorPR:
+        first = cache.get(uid=1, hotkey='hotkey_1', github_id='12345')
+        assert first is not None
+        first.merged_pull_requests[0].earned_score = 999.0
+
+        second = cache.get(uid=1, hotkey='hotkey_1', github_id='12345')
+        assert second is not None
+        assert second.merged_pull_requests[0].earned_score == 0.0
+
+
+def _make_mirror_pr(pr_number: int = 7, state: str = 'MERGED') -> ScoredMirrorPR:
     now = datetime.now(timezone.utc)
     pr = MirrorPullRequest(
         repo_full_name='owner/repo',
         pr_number=pr_number,
         title='cached mirror pr',
         body=None,
-        state='MERGED',
+        state=state,
         author_github_id='12345',
         author_login='miner',
         author_association='CONTRIBUTOR',
         created_at=now,
-        closed_at=None,
-        merged_at=now,
+        closed_at=now if state in {'MERGED', 'CLOSED'} else None,
+        merged_at=now if state == 'MERGED' else None,
         last_edited_at=None,
         edited_after_merge=False,
-        hours_since_merge=0.0,
-        merged_by_login='maintainer',
+        hours_since_merge=0.0 if state == 'MERGED' else None,
+        merged_by_login='maintainer' if state == 'MERGED' else None,
         base_ref='main',
         head_ref='feature',
         head_repo_full_name='owner/repo',
@@ -210,7 +222,11 @@ def _make_mirror_pr_with_file_blob(blob: str, pr_number: int = 7) -> ScoredMirro
         scoring_data_stored=True,
         review_summary=MirrorReviewSummary(),
     )
-    scored = ScoredMirrorPR(pr=pr, base_score=8.0, token_score=12.0)
+    return ScoredMirrorPR(pr=pr, base_score=8.0, token_score=12.0)
+
+
+def _make_mirror_pr_with_file_blob(blob: str, pr_number: int = 7) -> ScoredMirrorPR:
+    scored = _make_mirror_pr(pr_number=pr_number)
     scored.files = [
         MirrorFile(
             filename='src/lib.py',
@@ -243,3 +259,39 @@ class TestMirrorCacheIsolation:
         assert cached is not None
         assert cached.github_pat is None
         assert cached.mirror_merged_prs[0].files is None
+
+    def test_get_returns_isolated_mirror_merged_scoring_fields(self):
+        cache = MinerEvaluationCache()
+        source = MinerEvaluation(uid=1, hotkey='hotkey_1', github_id='12345')
+        source.mirror_merged_prs = [_make_mirror_pr(state='MERGED')]
+        cache.store(source)
+
+        first = cache.get(uid=1, hotkey='hotkey_1', github_id='12345')
+        assert first is not None
+        first.mirror_merged_prs[0].earned_score = 999.0
+        first.mirror_merged_prs[0].open_pr_spam_multiplier = 0.25
+        first.mirror_merged_prs[0].credibility_multiplier = 0.5
+        first.mirror_merged_prs[0].pioneer_rank = 1
+        first.mirror_merged_prs[0].pioneer_dividend = 12.0
+
+        second = cache.get(uid=1, hotkey='hotkey_1', github_id='12345')
+        assert second is not None
+        assert second.mirror_merged_prs[0].earned_score == 0.0
+        assert second.mirror_merged_prs[0].open_pr_spam_multiplier == 1.0
+        assert second.mirror_merged_prs[0].credibility_multiplier == 1.0
+        assert second.mirror_merged_prs[0].pioneer_rank == 0
+        assert second.mirror_merged_prs[0].pioneer_dividend == 0.0
+
+    def test_get_returns_isolated_mirror_open_collateral_score(self):
+        cache = MinerEvaluationCache()
+        source = MinerEvaluation(uid=1, hotkey='hotkey_1', github_id='12345')
+        source.mirror_open_prs = [_make_mirror_pr(state='OPEN')]
+        cache.store(source)
+
+        first = cache.get(uid=1, hotkey='hotkey_1', github_id='12345')
+        assert first is not None
+        first.mirror_open_prs[0].collateral_score = 999.0
+
+        second = cache.get(uid=1, hotkey='hotkey_1', github_id='12345')
+        assert second is not None
+        assert second.mirror_open_prs[0].collateral_score == 0.0

@@ -723,6 +723,9 @@ class MinerEvaluationCache:
         copy_eval.merged_pull_requests = [_pr_with_fresh_issues(pr) for pr in cached_eval.merged_pull_requests]
         copy_eval.open_pull_requests = [_pr_with_fresh_issues(pr) for pr in cached_eval.open_pull_requests]
         copy_eval.closed_pull_requests = [_pr_with_fresh_issues(pr) for pr in cached_eval.closed_pull_requests]
+        copy_eval.mirror_merged_prs = [copy.copy(s) for s in cached_eval.mirror_merged_prs]
+        copy_eval.mirror_open_prs = [copy.copy(s) for s in cached_eval.mirror_open_prs]
+        copy_eval.mirror_closed_prs = [copy.copy(s) for s in cached_eval.mirror_closed_prs]
         return copy_eval
 
 

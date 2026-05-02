@@ -459,6 +459,13 @@ def _classify_issue(issue: MirrorIssue) -> str:
         )
         return 'not-solved-closed'
 
+    if not sp.merged_at:
+        bt.logging.debug(
+            f'  issue #{issue.issue_number} ({issue.repo_full_name}): closed-not-solved '
+            f'(solving PR #{sp.pr_number} state=MERGED but merged_at is null — data corruption)'
+        )
+        return 'not-solved-closed'
+
     if sp.edited_after_merge:
         bt.logging.debug(
             f'  issue #{issue.issue_number} ({issue.repo_full_name}): closed-not-solved '

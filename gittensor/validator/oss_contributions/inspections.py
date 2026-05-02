@@ -131,9 +131,15 @@ def validate_response_and_initialize_miner_evaluation(
 
     miner_eval = MinerEvaluation(uid=uid, hotkey=hotkey)
 
-    github_id, error = validate_github_credentials(uid, pat)
+    github_id, error, is_transient = validate_github_credentials(uid, pat)
     if error:
-        miner_eval.failed_reason = error
+        if is_transient:
+            # Transient GitHub API failure — don't set failed_reason so
+            # store_or_use_cached_evaluation can fall back to cached data.
+            miner_eval.github_pr_fetch_failed = True
+            miner_eval.should_use_cache_fallback = True
+        else:
+            miner_eval.failed_reason = error
         return miner_eval
 
     miner_eval.github_id = github_id

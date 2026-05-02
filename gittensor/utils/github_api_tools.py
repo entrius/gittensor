@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from math import ceil
-from typing import TYPE_CHECKING, Any, Dict, Iterator, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, Iterator, List, Optional, Tuple
 
 from gittensor.utils.utils import backoff_seconds, parse_repo_name
 
@@ -222,17 +222,20 @@ def get_session(token: str) -> requests.Session:
     return _session_cache[key]
 
 
-def get_github_id(token: str) -> Optional[str]:
+def get_github_id(token: str) -> Tuple[Optional[str], bool]:
     """Get GitHub numeric user id (as string) using a PAT.
 
     Args:
         token (str): GitHub personal access token.
 
     Returns:
-        Optional[str]: Numeric user id as a string, or None if it cannot be determined.
+        Tuple[Optional[str], bool]: (user_id, is_transient_failure).
+        user_id is the numeric GitHub user id as string, or None on failure.
+        is_transient_failure is True when the failure is due to network/5xx/parse
+        errors (not an invalid PAT), so callers can use cached data as fallback.
     """
     if not token:
-        return None
+        return None, False
 
     session = get_session(token)
 
@@ -245,10 +248,10 @@ def get_github_id(token: str) -> Optional[str]:
                     user_data: Dict[str, Any] = response.json()
                 except Exception as e:  # pragma: no cover
                     bt.logging.warning(f'Failed to parse GitHub /user JSON response: {e}')
-                    return None
+                    return None, True
 
                 user_id = user_data.get('id')
-                return str(user_id) if user_id is not None else None
+                return (str(user_id), False) if user_id is not None else (None, False)
 
             bt.logging.warning(
                 f'GitHub /user request failed with status {response.status_code} (attempt {attempt + 1}/6)'
@@ -261,7 +264,7 @@ def get_github_id(token: str) -> Optional[str]:
             if attempt < 5:  # Don't sleep on last attempt
                 time.sleep(2)
 
-    return None
+    return None, True
 
 
 def get_merge_base_sha(repository: str, base_sha: str, head_sha: str, token: str) -> Optional[str]:

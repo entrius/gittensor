@@ -185,6 +185,11 @@ from gittensor.cli.miner_commands import register_miner_commands  # noqa: E402
 
 register_miner_commands(cli)
 
+# Register doctor command
+from gittensor.cli.doctor import doctor  # noqa: E402
+
+cli.add_command(doctor)
+
 
 # Register issue commands with new flat structure
 register_commands(cli)

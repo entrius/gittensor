@@ -366,6 +366,10 @@ class MinerEvaluation:
     total_leaf_score: float = 0.0
     failed_reason: Optional[str] = None
     github_pr_fetch_failed: bool = False
+    # Mirror-source-specific fetch flag set by mirror.combine.combine alongside
+    # the OR into github_pr_fetch_failed. Lets the validator tell a complete
+    # mirror outage apart from a legacy partial-pagination failure.
+    mirror_pr_fetch_failed: bool = False
     evaluation_timestamp: Optional[datetime] = None
     merged_pull_requests: List[PullRequest] = field(default_factory=list)
     open_pull_requests: List[PullRequest] = field(default_factory=list)
@@ -704,6 +708,9 @@ class MinerEvaluationCache:
         cached.merged_pull_requests = [_pr_for_cache(pr) for pr in evaluation.merged_pull_requests]
         cached.open_pull_requests = [_pr_for_cache(pr) for pr in evaluation.open_pull_requests]
         cached.closed_pull_requests = [_pr_for_cache(pr) for pr in evaluation.closed_pull_requests]
+        cached.mirror_merged_prs = [_scored_mirror_pr_for_cache(pr) for pr in evaluation.mirror_merged_prs]
+        cached.mirror_open_prs = [_scored_mirror_pr_for_cache(pr) for pr in evaluation.mirror_open_prs]
+        cached.mirror_closed_prs = [_scored_mirror_pr_for_cache(pr) for pr in evaluation.mirror_closed_prs]
         return cached
 
     @staticmethod
@@ -731,3 +738,9 @@ def _pr_with_fresh_issues(pr: 'PullRequest') -> 'PullRequest':
     if pr.issues is not None:
         pr_copy.issues = [copy.copy(issue) for issue in pr.issues]
     return pr_copy
+
+
+def _scored_mirror_pr_for_cache(scored: 'ScoredMirrorPR') -> 'ScoredMirrorPR':
+    scored_copy = copy.copy(scored)
+    scored_copy.files = None
+    return scored_copy

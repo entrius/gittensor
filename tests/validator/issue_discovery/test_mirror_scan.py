@@ -205,6 +205,13 @@ class TestClassifyIssue:
         issue = MirrorIssue.from_dict(_issue_dict(solving_pr_state='OPEN'))
         assert _classify_issue(issue) == 'not-solved-closed'
 
+    def test_solving_pr_merged_with_null_merged_at_counts_as_closed(self):
+        # MERGED + null merged_at is unscoreable; gate it before the counters bump.
+        raw = _issue_dict()
+        raw['solving_pr']['merged_at'] = None
+        issue = MirrorIssue.from_dict(raw)
+        assert _classify_issue(issue) == 'not-solved-closed'
+
     def test_solving_pr_edited_after_merge_counts_as_closed(self):
         issue = MirrorIssue.from_dict(_issue_dict(solving_pr_edited_after_merge=True))
         assert _classify_issue(issue) == 'not-solved-closed'
@@ -368,6 +375,31 @@ class TestRunMirrorIssueDiscovery:
             )
         )
         assert eval_.total_solved_issues == 0
+
+    def test_merged_pr_missing_merged_at_does_not_inflate_solved(self):
+        # Regression: a corrupted record (MERGED + null merged_at) must bucket
+        # as closed-not-solved, never bumping the solved counters that gate
+        # MIN_VALID_SOLVED_ISSUES eligibility.
+        raw = _issue_dict()
+        raw['solving_pr']['merged_at'] = None
+
+        client = Mock()
+        client.get_miner_issues.return_value = _response([raw])
+        eval_ = _eval()
+
+        _run(
+            run_mirror_issue_discovery(
+                {1: eval_},
+                _mirror_repos('entrius/gittensor-ui'),
+                _EMPTY_LANGS,
+                _EMPTY_TOKEN_CONFIG,
+                client=client,
+            )
+        )
+
+        assert eval_.total_solved_issues == 0
+        assert eval_.total_valid_solved_issues == 0
+        assert eval_.total_closed_issues == 1
 
     def test_mirror_request_error_does_not_abort_other_miners(self):
         client = Mock()

@@ -12,6 +12,7 @@ emission blending / normalization doesn't change.
 Anti-gaming gates (all applied):
 - solved_by_pr must be populated
 - solving_pr.state == 'MERGED'
+- solving_pr.merged_at is not None (anti-corruption)
 - not solving_pr.edited_after_merge
 - issue.last_edited_at <= solving_pr.merged_at (anti-spec-rewrite)
 - issue.state_reason == 'COMPLETED' (not NOT_PLANNED, not null)
@@ -493,6 +494,15 @@ def _classify_issue(issue: MirrorIssue) -> str:
         bt.logging.debug(
             f'  issue #{issue.issue_number} ({issue.repo_full_name}): closed-not-solved '
             f'(solving PR #{sp.pr_number} state={sp.state}, not MERGED)'
+        )
+        return 'not-solved-closed'
+
+    # Reject MERGED PRs with null merged_at — unscoreable and would otherwise
+    # inflate total_valid_solved_issues past the eligibility floor.
+    if sp.merged_at is None:
+        bt.logging.debug(
+            f'  issue #{issue.issue_number} ({issue.repo_full_name}): closed-not-solved '
+            f'(solving PR #{sp.pr_number} MERGED but missing merged_at)'
         )
         return 'not-solved-closed'
 

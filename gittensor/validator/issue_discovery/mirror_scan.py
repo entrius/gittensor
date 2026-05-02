@@ -97,6 +97,21 @@ class _CacheStats:
     fetch_failures: int = 0
 
 
+@dataclass
+class MirrorIssueDiscoveryResult:
+    """Fetch coverage for the mirror issue-discovery phase."""
+
+    attempted_fetches: int = 0
+    successful_fetches: int = 0
+    fetch_errors: int = 0
+
+    @property
+    def reward_coverage(self) -> float:
+        if self.attempted_fetches == 0:
+            return 1.0
+        return self.successful_fetches / self.attempted_fetches
+
+
 _FAR_FUTURE = datetime.max.replace(tzinfo=timezone.utc)
 
 
@@ -106,7 +121,7 @@ async def run_mirror_issue_discovery(
     programming_languages: Dict[str, LanguageConfig],
     token_config: TokenConfig,
     client: Optional[MirrorClient] = None,
-) -> None:
+) -> MirrorIssueDiscoveryResult:
     """Score issue discovery for mirror-enabled repos. Mutates miner_evaluations.
 
     For each miner, fetches their authored issues via the mirror and classifies
@@ -125,7 +140,7 @@ async def run_mirror_issue_discovery(
 
     if not mirror_repos:
         bt.logging.info('No mirror-enabled repos — issue discovery skipped')
-        return
+        return MirrorIssueDiscoveryResult()
 
     client = client or MirrorClient()
     lookback_date = datetime.now(timezone.utc) - timedelta(days=PR_LOOKBACK_DAYS)
@@ -140,8 +155,8 @@ async def run_mirror_issue_discovery(
 
     skipped_no_gh = 0
     skipped_failed = 0
-    fetch_errors = 0
     no_issues = 0
+    result = MirrorIssueDiscoveryResult()
 
     # Phase 1: fetch each miner's issues.  The one-issue-per-PR rule is round-
     # global, so scoring is deferred until every miner's batch is in hand.
@@ -154,13 +169,15 @@ async def run_mirror_issue_discovery(
             skipped_failed += 1
             continue
 
+        result.attempted_fetches += 1
         try:
             response = client.get_miner_issues(evaluation.github_id, since=lookback_date)
         except MirrorRequestError as e:
             bt.logging.warning(f'├─ UID {uid}: mirror issue fetch failed ({e}) — skipped this miner')
-            fetch_errors += 1
+            result.fetch_errors += 1
             continue
 
+        result.successful_fetches += 1
         filtered = [i for i in response.issues if i.repo_full_name in enabled_names]
         if not filtered:
             no_issues += 1
@@ -192,13 +209,14 @@ async def run_mirror_issue_discovery(
     bt.logging.info('')
     bt.logging.info(
         f'Issue discovery complete | {len(pending)} processed | {no_issues} no mirror issues | '
-        f'{fetch_errors} fetch errors | {skipped_no_gh} no github_id | {skipped_failed} prior OSS failure'
+        f'{result.fetch_errors} fetch errors | {skipped_no_gh} no github_id | {skipped_failed} prior OSS failure'
     )
     bt.logging.info(
         f'Solving-PR cache: {cache_stats.hits} hits | {cache_stats.misses} misses '
         f'({cache_stats.misses - cache_stats.fetch_failures} fetched OK, '
         f'{cache_stats.fetch_failures} fetch failures)'
     )
+    return result
 
 
 def _build_canonical_pr_owners(

@@ -384,7 +384,7 @@ class TestRunMirrorIssueDiscovery:
         # Seed cache so working miner's solving PR is scoreable
         working.mirror_merged_prs = [_scored_mirror_pr('entrius/gittensor-ui', 100)]
 
-        _run(
+        result = _run(
             run_mirror_issue_discovery(
                 {1: failing, 2: working},
                 _mirror_repos('entrius/gittensor-ui'),
@@ -395,6 +395,10 @@ class TestRunMirrorIssueDiscovery:
         )
         assert failing.total_solved_issues == 0
         assert working.total_solved_issues == 1
+        assert result.attempted_fetches == 2
+        assert result.successful_fetches == 1
+        assert result.fetch_errors == 1
+        assert result.reward_coverage == 0.5
 
 
 # ============================================================================

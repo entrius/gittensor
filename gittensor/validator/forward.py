@@ -132,14 +132,16 @@ async def issue_discovery(
     mirror_repos: Dict[str, RepositoryConfig] = {
         name: cfg for name, cfg in master_repositories.items() if cfg.mirror_enabled
     }
+    reward_coverage = 1.0
 
     if mirror_repos:
-        await run_mirror_issue_discovery(miner_evaluations, mirror_repos, programming_languages, token_config)
+        result = await run_mirror_issue_discovery(miner_evaluations, mirror_repos, programming_languages, token_config)
+        reward_coverage = result.reward_coverage
     else:
         bt.logging.info('No mirror-enabled repos — issue discovery skipped for this round')
 
     # Normalize into independent pool
-    issue_rewards_dict = normalize_issue_discovery_rewards(miner_evaluations)
+    issue_rewards_dict = normalize_issue_discovery_rewards(miner_evaluations, reward_coverage=reward_coverage)
 
     sorted_uids = sorted(miner_uids)
     return np.array([issue_rewards_dict.get(uid, 0.0) for uid in sorted_uids])
@@ -172,6 +174,10 @@ def blend_emission_pools(
     issue_total = float(issue_rewards.sum())
     if issue_total > 0:
         rewards += issue_rewards * ISSUE_DISCOVERY_EMISSION_SHARE
+        recycled_issue_share = max(0.0, 1.0 - min(issue_total, 1.0)) * ISSUE_DISCOVERY_EMISSION_SHARE
+        if recycled_issue_share > 1e-12:
+            recycle_extra += recycled_issue_share
+            bt.logging.info(f'Recycling {recycled_issue_share * 100:.1f}% unavailable issue-discovery emissions')
     else:
         recycle_extra += ISSUE_DISCOVERY_EMISSION_SHARE
 

@@ -423,8 +423,9 @@ query($owner: String!, $name: String!, $issueNumber: Int!) {
                 createdAt
                 author { ... on User { databaseId login } }
                 baseRepository { nameWithOwner }
-                closingIssuesReferences(first: 20) {
+                closingIssuesReferences(first: 100) {
                   nodes { number }
+                  pageInfo { hasNextPage }
                 }
                 reviews(first: 1, states: APPROVED) { totalCount }
               }
@@ -501,8 +502,14 @@ def _search_issue_referencing_prs_graphql(
 
         author = pr.get('author') or {}
         reviews = pr.get('reviews') or {}
-        closing = pr.get('closingIssuesReferences', {}).get('nodes', [])
+        closing_ref = pr.get('closingIssuesReferences', {})
+        closing = closing_ref.get('nodes', [])
         closing_numbers = [n.get('number') for n in closing if n.get('number') is not None]
+        if closing_ref.get('pageInfo', {}).get('hasNextPage'):
+            bt.logging.warning(
+                f'PR #{pr_number} closes more than 100 issues — '
+                f'closingIssuesReferences truncated; solver lookup may miss issue references beyond position 100'
+            )
 
         pr_info: PRInfo = {
             'number': pr_number,

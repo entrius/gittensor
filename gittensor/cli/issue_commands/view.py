@@ -196,7 +196,11 @@ def issues_bounty_pool(network: str, rpc_url: str, contract: str, verbose: bool,
 
         with console.status('[bold cyan]Reading contract storage...', spinner='dots'):
             substrate = SubstrateInterface(url=ws_endpoint)
-            issues = _read_issues_from_child_storage(substrate, contract_addr, verbose)
+            issues, decode_errors = _read_issues_from_child_storage(substrate, contract_addr, verbose)
+            if decode_errors > 0:
+                console.print(
+                    f'[yellow]WARNING: storage decoder reported {decode_errors} failure(s); results may be incomplete[/yellow]'
+                )
 
         total_bounty_pool = sum(issue.get('bounty_amount', 0) for issue in issues)
 
@@ -252,7 +256,11 @@ def issues_pending_harvest(network: str, rpc_url: str, contract: str, verbose: b
             treasury_stake = client.get_treasury_stake()
 
             substrate = SubstrateInterface(url=ws_endpoint)
-            issues = _read_issues_from_child_storage(substrate, contract_addr, verbose)
+            issues, decode_errors = _read_issues_from_child_storage(substrate, contract_addr, verbose)
+            if decode_errors > 0:
+                console.print(
+                    f'[yellow]WARNING: storage decoder reported {decode_errors} failure(s); results may be incomplete[/yellow]'
+                )
             total_bounty_pool = sum(issue.get('bounty_amount', 0) for issue in issues)
 
         pending_harvest = max(0, treasury_stake - total_bounty_pool)

@@ -746,7 +746,9 @@ def _read_contract_packed_storage(substrate, contract_addr: str, verbose: bool =
         return None
 
 
-def _read_issues_from_child_storage(substrate, contract_addr: str, verbose: bool = False) -> List[Dict[str, Any]]:
+def _read_issues_from_child_storage(
+    substrate, contract_addr: str, verbose: bool = False
+) -> Tuple[List[Dict[str, Any]], int]:
     """
     Read all issues from contract child storage.
 
@@ -770,14 +772,14 @@ def _read_issues_from_child_storage(substrate, contract_addr: str, verbose: bool
     if not child_key:
         if verbose:
             console.print(f'[dim]Debug: Cannot read issues - no child storage key for {contract_addr}[/dim]')
-        return []
+        return [], 0
 
     # First, read packed storage to get next_issue_id
     packed_storage = _read_contract_packed_storage(substrate, contract_addr, verbose)
     if not packed_storage:
         if verbose:
             console.print('[dim]Debug: Cannot read issues - packed storage read failed[/dim]')
-        return []
+        return [], 0
 
     next_issue_id = packed_storage.get('next_issue_id', 1)
     if verbose:
@@ -788,15 +790,16 @@ def _read_issues_from_child_storage(substrate, contract_addr: str, verbose: bool
     if next_issue_id > MAX_REASONABLE_ISSUE_ID:
         console.print(f'[yellow]Warning: next_issue_id ({next_issue_id}) is unreasonably large.[/yellow]')
         console.print('[yellow]This may indicate a storage format mismatch. Check contract version.[/yellow]')
-        return []
+        return [], 0
 
     # If next_issue_id is 1, no issues have been registered yet
     if next_issue_id <= 1:
         if verbose:
             console.print('[dim]Debug: No issues registered (next_issue_id <= 1)[/dim]')
-        return []
+        return [], 0
 
     issues = []
+    decode_errors = 0
     status_names = ['Registered', 'Active', 'Completed', 'Cancelled']
 
     # Iterate through all issue IDs (1 to next_issue_id - 1)
@@ -839,13 +842,14 @@ def _read_issues_from_child_storage(substrate, contract_addr: str, verbose: bool
                     f'{decoded.repository_full_name}#{decoded.issue_number}[/dim]'
                 )
         except Exception as e:
+            decode_errors += 1
             if verbose:
                 console.print(f'[dim]Debug: Failed to decode issue {issue_id}: {e}[/dim]')
             continue
 
     # Sort by ID
     issues.sort(key=lambda x: x['id'])
-    return issues
+    return issues, decode_errors
 
 
 def _make_contract_client(contract_addr: str, ws_endpoint: str, wallet_name: str, wallet_hotkey: str):
@@ -897,7 +901,12 @@ def read_issues_from_contract(ws_endpoint: str, contract_addr: str, verbose: boo
             console.print('[dim]Debug: Connected successfully[/dim]')
 
         # Read issues directly from child storage
-        return _read_issues_from_child_storage(substrate, contract_addr, verbose)
+        issues, decode_errors = _read_issues_from_child_storage(substrate, contract_addr, verbose)
+        if decode_errors > 0:
+            console.print(
+                f'[yellow]WARNING: storage decoder reported {decode_errors} failure(s); results may be incomplete[/yellow]'
+            )
+        return issues
 
     except ImportError as e:
         console.print(f'[yellow]Cannot read from contract: {e}[/yellow]')

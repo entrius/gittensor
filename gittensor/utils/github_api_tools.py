@@ -287,7 +287,7 @@ def get_merge_base_sha(repository: str, base_sha: str, head_sha: str, token: str
         try:
             response = session.get(
                 f'{BASE_GITHUB_API_URL}/repos/{repository}/compare/{base_sha}...{head_sha}',
-                timeout=15,
+                timeout=GITHUB_HTTP_TIMEOUT_SECONDS,
             )
 
             if response.status_code == 200:
@@ -349,7 +349,7 @@ def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -
             response = session.get(
                 f'{BASE_GITHUB_API_URL}/repos/{repository}/pulls/{pr_number}/files',
                 params={'per_page': per_page, 'page': page},
-                timeout=15,
+                timeout=GITHUB_HTTP_TIMEOUT_SECONDS,
             )
 
             if response.status_code == 200:
@@ -1040,7 +1040,7 @@ def check_github_issue_closed(repo: str, issue_number: int, token: str) -> Optio
     try:
         response = session.get(
             f'{BASE_GITHUB_API_URL}/repos/{repo}/issues/{issue_number}',
-            timeout=15,
+            timeout=GITHUB_HTTP_TIMEOUT_SECONDS,
         )
 
         if response.status_code != 200:

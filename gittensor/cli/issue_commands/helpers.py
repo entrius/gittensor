@@ -22,6 +22,7 @@ from rich.console import Console
 from gittensor.cli.issue_commands.tables import build_pr_table
 from gittensor.constants import NETWORK_MAP
 from gittensor.validator.issue_competitions.storage_utils import (
+    ISSUES_MAPPING_ROOT_KEY,
     compute_ink5_lazy_key,
     decode_issue_from_storage,
     decode_packed_contract_storage,
@@ -807,7 +808,7 @@ def _read_issues_from_child_storage(substrate, contract_addr: str, verbose: bool
     for issue_id in range(1, next_issue_id):
         # SCALE encode u64 as little-endian 8 bytes
         encoded_id = struct.pack('<Q', issue_id)
-        lazy_key = compute_ink5_lazy_key('52789899', encoded_id)
+        lazy_key = compute_ink5_lazy_key(ISSUES_MAPPING_ROOT_KEY, encoded_id)
 
         val_result = substrate.rpc_request('childstate_getStorage', [child_key, lazy_key, None])
         if not val_result.get('result'):

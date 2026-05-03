@@ -16,6 +16,7 @@ from substrateinterface import Keypair
 from substrateinterface.exceptions import ExtrinsicNotFound
 
 from gittensor.validator.issue_competitions.storage_utils import (
+    ISSUES_MAPPING_ROOT_KEY,
     compute_ink5_lazy_key,
     decode_issue_from_storage,
     get_contract_child_storage_key,
@@ -154,7 +155,7 @@ class IssueCompetitionContractClient:
 
         try:
             encoded_id = struct.pack('<Q', issue_id)
-            lazy_key = compute_ink5_lazy_key('52789899', encoded_id)
+            lazy_key = compute_ink5_lazy_key(ISSUES_MAPPING_ROOT_KEY, encoded_id)
 
             val_result = self.subtensor.substrate.rpc_request('childstate_getStorage', [child_key, lazy_key, None])
             if not val_result.get('result'):

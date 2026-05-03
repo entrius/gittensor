@@ -268,18 +268,13 @@ def confirm_or_abort(prompt: str, yes: bool, default: bool = False) -> bool:
     return False
 
 
-def get_github_pat() -> Optional[str]:
-    """Return GITTENSOR_MINER_PAT from environment, or None."""
-    return os.environ.get('GITTENSOR_MINER_PAT') or None
-
-
 def fetch_open_issue_pull_requests(
     repository_full_name: str,
     issue_number: int,
     as_json: bool,
 ) -> list:
     """Fetch open PR submissions for a GitHub issue."""
-    token = get_github_pat() or ''
+    token = os.environ.get('GITTENSOR_MINER_PAT') or ''
     if not token and not as_json:
         print_warning('No GitHub token found; set GITTENSOR_MINER_PAT to fetch GitHub issue submissions')
 

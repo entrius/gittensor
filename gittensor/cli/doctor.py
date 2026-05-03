@@ -139,11 +139,12 @@ def doctor(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat):
             _make_contract_client,
             _resolve_contract_and_network,
         )
+        from gittensor.validator.issue_competitions.contract_client import IssueStatus
 
         contract = _load_config_value('contract') or ''
         contract_addr, ws_ep, network_name = _resolve_contract_and_network(contract, network, rpc_url)
         _, client = _make_contract_client(contract_addr, ws_ep, wallet_name, wallet_hotkey)
-        issues = client.get_issues_by_status(None)
+        issues = client.get_issues_by_status(IssueStatus.ACTIVE)
         _check('Contract reachable', True, f'{contract_addr[:12]}... ({len(issues)} issues)')
     except Exception as e:
         if not _check('Contract reachable', False, str(e)):

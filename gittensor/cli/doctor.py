@@ -66,7 +66,7 @@ def doctor(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat):
     try:
         import bittensor as bt
 
-        wallet = bt.wallet(name=wallet_name, hotkey=wallet_hotkey)
+        wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
         coldkey_path = wallet.coldkeypub_file.path
         hotkey_addr = wallet.hotkey.ss58_address
         if not _check('Coldkey readable', os.path.exists(coldkey_path), coldkey_path):
@@ -85,7 +85,7 @@ def doctor(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat):
     try:
         import bittensor as bt
 
-        subtensor = bt.subtensor(network=ws_endpoint)
+        subtensor = bt.Subtensor(network=ws_endpoint)
         block = subtensor.get_current_block()
         _check('Subtensor reachable', True, f'{ws_endpoint} (block {block:,})')
 

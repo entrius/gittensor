@@ -16,6 +16,7 @@ Token-scoring base_score is exercised indirectly via the existing legacy tests
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import Mock
 
 import pytest
@@ -312,13 +313,15 @@ class TestScoringDataStoredGate:
         scored.pr.scoring_data_stored = False
         client = Mock()
 
-        score_mirror_pr(
-            scored,
-            mirror_eval=Mock(),
-            mirror_repos={scored.pr.repo_full_name: _config()},
-            programming_languages={},
-            token_config=Mock(),
-            client=client,
+        asyncio.run(
+            score_mirror_pr(
+                scored,
+                mirror_eval=Mock(),
+                mirror_repos={scored.pr.repo_full_name: _config()},
+                programming_languages={},
+                token_config=Mock(),
+                client=client,
+            )
         )
 
         client.get_pr_files.assert_not_called()

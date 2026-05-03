@@ -84,9 +84,13 @@ async def evaluate_miners_pull_requests(
             hotkey=miner_eval.hotkey,
             github_id=miner_eval.github_id,
         )
+        import asyncio
+
         with MirrorClient() as mirror_client:
-            load_mirror_miner_prs(mirror_eval, mirror_repos, client=mirror_client)
-            score_mirror_miner_prs(mirror_eval, mirror_repos, programming_languages, token_config, client=mirror_client)
+            await asyncio.to_thread(load_mirror_miner_prs, mirror_eval, mirror_repos, client=mirror_client)
+            await score_mirror_miner_prs(
+                mirror_eval, mirror_repos, programming_languages, token_config, client=mirror_client
+            )
         combine(miner_eval, mirror_eval)
 
     # Clear PAT after scoring to avoid storing sensitive data in memory

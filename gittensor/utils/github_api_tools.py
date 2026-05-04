@@ -423,8 +423,9 @@ query($owner: String!, $name: String!, $issueNumber: Int!) {
                 createdAt
                 author { ... on User { databaseId login } }
                 baseRepository { nameWithOwner }
-                closingIssuesReferences(first: 20) {
+                closingIssuesReferences(first: 100) {
                   nodes { number }
+                  pageInfo { hasNextPage }
                 }
                 reviews(first: 1, states: APPROVED) { totalCount }
               }
@@ -501,8 +502,14 @@ def _search_issue_referencing_prs_graphql(
 
         author = pr.get('author') or {}
         reviews = pr.get('reviews') or {}
-        closing = pr.get('closingIssuesReferences', {}).get('nodes', [])
-        closing_numbers = [n.get('number') for n in closing if n.get('number') is not None]
+        closing = pr.get('closingIssuesReferences', {})
+        closing_numbers = [n.get('number') for n in closing.get('nodes', []) if n.get('number') is not None]
+        if closing.get('pageInfo', {}).get('hasNextPage'):
+            import bittensor as bt
+            bt.logging.warning(
+                f'PR #{pr_number} closingIssuesReferences exceeds 100 — '
+                f'some closing references were truncated and may cause solver lookup to fail'
+            )
 
         pr_info: PRInfo = {
             'number': pr_number,

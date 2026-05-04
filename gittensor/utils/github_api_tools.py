@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from math import ceil
 from typing import TYPE_CHECKING, Any, Dict, Iterator, List, Optional
 
-from gittensor.utils.utils import parse_repo_name
+from gittensor.utils.utils import backoff_seconds, parse_repo_name
 
 if TYPE_CHECKING:
     from gittensor.classes import FileChange as FileChangeType
@@ -299,7 +299,7 @@ def get_merge_base_sha(repository: str, base_sha: str, head_sha: str, token: str
                 return None
 
             if attempt < max_attempts - 1:
-                backoff_delay = min(5 * (2 ** (attempt)), 30)
+                backoff_delay = backoff_seconds(attempt)
                 bt.logging.warning(
                     f'Compare API for {repository} failed with status {response.status_code} '
                     f'(attempt {attempt + 1}/{max_attempts}), retrying in {backoff_delay}s...'
@@ -308,7 +308,7 @@ def get_merge_base_sha(repository: str, base_sha: str, head_sha: str, token: str
 
         except requests.exceptions.RequestException as e:
             if attempt < max_attempts - 1:
-                backoff_delay = min(5 * (2 ** (attempt)), 30)
+                backoff_delay = backoff_seconds(attempt)
                 bt.logging.warning(
                     f'Compare API error for {repository} (attempt {attempt + 1}/{max_attempts}): {e}, '
                     f'retrying in {backoff_delay}s...'
@@ -377,7 +377,7 @@ def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -
             attempt += 1
 
             if attempt < max_attempts:
-                backoff_delay = min(5 * (2 ** (attempt - 1)), 30)
+                backoff_delay = backoff_seconds(attempt - 1)
                 bt.logging.warning(
                     f'File changes request for PR #{pr_number} in {repository} failed with {last_error} '
                     f'(attempt {attempt}/{max_attempts}), per_page={per_page}, retrying in {backoff_delay}s...'
@@ -391,7 +391,7 @@ def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -
             attempt += 1
 
             if attempt < max_attempts:
-                backoff_delay = min(5 * (2 ** (attempt - 1)), 30)
+                backoff_delay = backoff_seconds(attempt - 1)
                 bt.logging.warning(
                     f'File changes request error for PR #{pr_number} in {repository} '
                     f'(attempt {attempt}/{max_attempts}): {e}, retrying in {backoff_delay}s...'
@@ -521,92 +521,19 @@ def _search_issue_referencing_prs_graphql(
     return out
 
 
-def _search_issue_referencing_prs_rest(
-    repo: str, issue_number: int, token: Optional[str] = None, state: str = 'open'
-) -> List[PRInfo]:
-    """Search PRs via GitHub REST search API."""
-    if issue_number < 1:
-        return []
-
-    session = get_session(token or '')
-
-    state_clause = f' state:{state}' if state != 'all' else ''
-    max_attempts = 3
-    for attempt in range(max_attempts):
-        try:
-            resp = session.get(
-                f'{BASE_GITHUB_API_URL}/search/issues',
-                params={'q': f'repo:{repo} type:pr{state_clause} {issue_number} in:title,body', 'per_page': '50'},
-                timeout=10,
-            )
-            resp.raise_for_status()
-
-            out: List[PRInfo] = []
-            for item in resp.json().get('items', []):
-                number = item.get('number')
-                if number is None:
-                    continue
-                user = item.get('user') or {}
-                pr_info: PRInfo = {
-                    'number': number,
-                    'title': item.get('title') or '',
-                    'author_login': user.get('login') or 'ghost',
-                    'author_id': user.get('id'),
-                    'created_at': item.get('created_at') or '',
-                    'merged_at': None,
-                    'state': _resolve_pr_state(item.get('state', 'open')),
-                    'url': item.get('html_url') or '',
-                    'review_count': 0,
-                    'closing_numbers': [],
-                }
-                out.append(pr_info)
-            return out
-
-        except requests.exceptions.RequestException as e:
-            if attempt < max_attempts - 1:
-                backoff = 2 * (attempt + 1)
-                bt.logging.warning(
-                    f'REST search failed for {repo}#{issue_number} (attempt {attempt + 1}/{max_attempts}): {e}, '
-                    f'retrying in {backoff}s...'
-                )
-                time.sleep(backoff)
-            else:
-                raise
-
-    return []
-
-
 def find_prs_for_issue(
     repo: str,
     issue_number: int,
     open_only: bool = True,
     token: Optional[str] = None,
 ) -> List[PRInfo]:
-    """Cascading PR discovery: GraphQL -> authenticated REST -> unauthenticated REST."""
-    rest_state = 'open' if open_only else 'all'
-
+    """Find PRs that reference an issue via GraphQL cross-reference data."""
     if token:
         try:
             prs = _search_issue_referencing_prs_graphql(repo, issue_number, token, open_only=open_only)
-            if prs:
-                return prs
+            return prs or []
         except Exception as exc:
             bt.logging.debug(f'GraphQL PR fetch failed for {repo}#{issue_number}: {exc}')
-
-    if token:
-        try:
-            prs = _search_issue_referencing_prs_rest(repo, issue_number, token=token, state=rest_state)
-            if prs:
-                return prs
-        except Exception as exc:
-            bt.logging.debug(f'Authenticated REST search failed for {repo}#{issue_number}: {exc}')
-
-    try:
-        prs = _search_issue_referencing_prs_rest(repo, issue_number, token=None, state=rest_state)
-        if prs:
-            return prs
-    except Exception as exc:
-        bt.logging.debug(f'Unauthenticated REST search failed for {repo}#{issue_number}: {exc}')
 
     return []
 
@@ -648,7 +575,7 @@ def execute_graphql_query(
 
             # Retry on failure
             if attempt < (max_attempts - 1):
-                backoff_delay = min(5 * (2**attempt), 30)  # max of 30 second wait between retries
+                backoff_delay = backoff_seconds(attempt)
                 bt.logging.warning(
                     f'GraphQL request failed with status {response.status_code} '
                     f'(attempt {attempt + 1}/{max_attempts}), retrying in {backoff_delay}s...'
@@ -662,7 +589,7 @@ def execute_graphql_query(
 
         except requests.exceptions.RequestException as e:
             if attempt < (max_attempts - 1):
-                backoff_delay = min(5 * (2**attempt), 30)
+                backoff_delay = backoff_seconds(attempt)
                 bt.logging.warning(
                     f'GraphQL request exception (attempt {attempt + 1}/{max_attempts}), '
                     f'retrying in {backoff_delay}s: {e}'
@@ -739,7 +666,7 @@ def get_github_graphql_query(
                     if attempt < (max_attempts - 1):
                         old_limit = limit
                         limit = max(limit // 2, 10)
-                        backoff_delay = min(2 * (2**attempt), 15)
+                        backoff_delay = backoff_seconds(attempt, base=2, cap=15)
                         bt.logging.warning(
                             f'GraphQL RESOURCE_LIMITS_EXCEEDED (attempt {attempt + 1}/{max_attempts}), '
                             f'page size {old_limit} -> {limit}, retrying in {backoff_delay}s...'
@@ -756,7 +683,7 @@ def get_github_graphql_query(
 
             # HTTP error - log and retry
             if attempt < (max_attempts - 1):
-                backoff_delay = min(5 * (2**attempt), 30)
+                backoff_delay = backoff_seconds(attempt)
                 if response.status_code in (502, 503, 504):
                     limit = max(limit // 2, 10)
                     bt.logging.warning(
@@ -776,7 +703,7 @@ def get_github_graphql_query(
 
         except requests.exceptions.RequestException as e:
             if attempt < (max_attempts - 1):
-                backoff_delay = min(5 * (2**attempt), 30)
+                backoff_delay = backoff_seconds(attempt)
                 bt.logging.warning(
                     f'GraphQL request connection error (attempt {attempt + 1}/{max_attempts}): {e}, retrying in {backoff_delay}s...'
                 )
@@ -832,9 +759,9 @@ def try_add_open_or_closed_pr(
         closed_dt = parse_github_iso_to_utc(closed_at)
         created_dt = parse_github_iso_to_utc(created_at)
 
-        # Ignore stale PRs that were created before the scoring lookback window.
         # This allows users to close old PRs without receiving a fresh credibility penalty.
         if created_dt < lookback_date_filter:
+            miner_eval.add_stale_closed_pull_request(pr_raw)
             return
 
         if closed_dt >= lookback_date_filter:

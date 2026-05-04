@@ -744,9 +744,8 @@ class TestExecuteGraphQLQueryRetryLogic:
 # ============================================================================
 
 
-@patch('gittensor.utils.github_api_tools._search_issue_referencing_prs_rest')
 @patch('gittensor.utils.github_api_tools._search_issue_referencing_prs_graphql')
-def test_find_prs_prefers_graphql_when_results_found(mock_graphql, mock_rest):
+def test_find_prs_returns_graphql_results(mock_graphql):
     graphql_prs = [{'number': 101, 'state': 'OPEN'}]
     mock_graphql.return_value = graphql_prs
 
@@ -754,63 +753,44 @@ def test_find_prs_prefers_graphql_when_results_found(mock_graphql, mock_rest):
 
     assert result == graphql_prs
     mock_graphql.assert_called_once_with('owner/repo', 12, 'fake_token', open_only=True)
-    mock_rest.assert_not_called()
 
 
-@patch('gittensor.utils.github_api_tools._search_issue_referencing_prs_rest')
 @patch('gittensor.utils.github_api_tools._search_issue_referencing_prs_graphql')
-def test_find_prs_falls_back_to_authenticated_rest_when_graphql_empty(mock_graphql, mock_rest):
+def test_find_prs_returns_empty_when_graphql_empty(mock_graphql):
     mock_graphql.return_value = []
-    rest_prs = [{'number': 102, 'state': 'OPEN'}]
-    mock_rest.side_effect = [rest_prs]
 
     result = find_prs_for_issue('owner/repo', 12, open_only=True, token='fake_token')
 
-    assert result == rest_prs
+    assert result == []
     mock_graphql.assert_called_once_with('owner/repo', 12, 'fake_token', open_only=True)
-    mock_rest.assert_called_once_with('owner/repo', 12, token='fake_token', state='open')
 
 
-@patch('gittensor.utils.github_api_tools._search_issue_referencing_prs_rest')
 @patch('gittensor.utils.github_api_tools._search_issue_referencing_prs_graphql')
-def test_find_prs_falls_back_to_unauthenticated_rest_when_auth_paths_empty(mock_graphql, mock_rest):
-    mock_graphql.return_value = []
-    unauth_prs = [{'number': 103, 'state': 'OPEN'}]
-    mock_rest.side_effect = [[], unauth_prs]
+def test_find_prs_returns_empty_when_graphql_errors(mock_graphql):
+    mock_graphql.side_effect = RuntimeError('boom')
 
     result = find_prs_for_issue('owner/repo', 12, open_only=True, token='fake_token')
 
-    assert result == unauth_prs
-    assert mock_rest.call_count == 2
-    assert mock_rest.call_args_list[0].kwargs == {'token': 'fake_token', 'state': 'open'}
-    assert mock_rest.call_args_list[1].kwargs == {'token': None, 'state': 'open'}
+    assert result == []
+    mock_graphql.assert_called_once_with('owner/repo', 12, 'fake_token', open_only=True)
 
 
-@patch('gittensor.utils.github_api_tools._search_issue_referencing_prs_rest')
 @patch('gittensor.utils.github_api_tools._search_issue_referencing_prs_graphql')
-def test_find_prs_uses_all_state_for_non_open_only(mock_graphql, mock_rest):
+def test_find_prs_passes_open_only_false_to_graphql(mock_graphql):
     mock_graphql.return_value = []
-    mock_rest.side_effect = [[], []]
 
     result = find_prs_for_issue('owner/repo', 12, open_only=False, token='fake_token')
 
     assert result == []
-    assert mock_rest.call_count == 2
-    assert mock_rest.call_args_list[0].kwargs == {'token': 'fake_token', 'state': 'all'}
-    assert mock_rest.call_args_list[1].kwargs == {'token': None, 'state': 'all'}
+    mock_graphql.assert_called_once_with('owner/repo', 12, 'fake_token', open_only=False)
 
 
-@patch('gittensor.utils.github_api_tools._search_issue_referencing_prs_rest')
 @patch('gittensor.utils.github_api_tools._search_issue_referencing_prs_graphql')
-def test_find_prs_without_token_only_uses_unauth_rest(mock_graphql, mock_rest):
-    unauth_prs = [{'number': 104, 'state': 'OPEN'}]
-    mock_rest.return_value = unauth_prs
-
+def test_find_prs_without_token_returns_empty(mock_graphql):
     result = find_prs_for_issue('owner/repo', 12, open_only=True, token=None)
 
-    assert result == unauth_prs
+    assert result == []
     mock_graphql.assert_not_called()
-    mock_rest.assert_called_once_with('owner/repo', 12, token=None, state='open')
 
 
 # ============================================================================

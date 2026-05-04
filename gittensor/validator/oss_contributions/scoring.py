@@ -21,6 +21,7 @@ from gittensor.constants import (
     MAINTAINER_ASSOCIATIONS,
     MAINTAINER_ISSUE_MULTIPLIER,
     MAX_ISSUE_CLOSE_WINDOW_DAYS,
+    MAX_OPEN_PR_REVIEW_COLLATERAL_MULTIPLIER,
     MAX_OPEN_PR_THRESHOLD,
     OPEN_PR_COLLATERAL_PERCENT,
     OPEN_PR_THRESHOLD_TOKEN_SCORE,
@@ -177,6 +178,26 @@ def calculate_review_quality_multiplier(changes_requested_count: int, pr_number:
         bt.logging.info(
             f'{changes_requested_count} maintainer CHANGES_REQUESTED review(s){ctx} → '
             f'review_quality_multiplier={multiplier:.2f}'
+        )
+    return multiplier
+
+
+def calculate_review_collateral_multiplier(changes_requested_count: int, pr_number: Optional[int] = None) -> float:
+    """Calculate the open-PR collateral multiplier from maintainer CHANGES_REQUESTED reviews.
+
+    Unlike ``review_quality_multiplier`` for earned scores, this increases
+    collateral so non-merge-ready open PRs reserve more score instead of less.
+    Formula: min(MAX_OPEN_PR_REVIEW_COLLATERAL_MULTIPLIER, 1.0 + REVIEW_PENALTY_RATE × N)
+    """
+    multiplier = min(
+        MAX_OPEN_PR_REVIEW_COLLATERAL_MULTIPLIER,
+        1.0 + REVIEW_PENALTY_RATE * changes_requested_count,
+    )
+    if changes_requested_count > 0:
+        ctx = f' (PR #{pr_number})' if pr_number else ''
+        bt.logging.info(
+            f'{changes_requested_count} maintainer CHANGES_REQUESTED review(s){ctx} → '
+            f'review_collateral_multiplier={multiplier:.2f}'
         )
     return multiplier
 
@@ -495,7 +516,7 @@ def calculate_open_pr_collateral_score(
 
     Collateral = base_score * applicable_multipliers * OPEN_PR_COLLATERAL_PERCENT
 
-    Applicable multipliers: repo_weight, issue, label
+    Applicable multipliers: repo_weight, issue, label, review_collateral
     NOT applicable: time_decay (merge-based), credibility_multiplier (merge-based),
                     open_pr_spam (not for collateral)
     """
@@ -505,6 +526,7 @@ def calculate_open_pr_collateral_score(
         'repo_weight': pr.repo_weight_multiplier,
         'issue': pr.issue_multiplier,
         'label': pr.label_multiplier,
+        'review_collateral': calculate_review_collateral_multiplier(pr.changes_requested_count, pr.number),
     }
 
     potential_score = pr.base_score * prod(multipliers.values())

@@ -249,9 +249,6 @@
   "flowsurface-rs/flowsurface": {
     "weight": 0.051
   },
-  "fx-integral/metahash": {
-    "weight": 0.0431
-  },
   "General-Tao-Ventures/cartha-cli": {
     "weight": 0.0476
   },
@@ -696,9 +693,6 @@
   },
   "thenervelab/thebrain": {
     "weight": 0.039
-  },
-  "threetau/kinitro": {
-    "weight": 0.0368
   },
   "tinygrad/tinygrad": {
     "weight": 0.0677

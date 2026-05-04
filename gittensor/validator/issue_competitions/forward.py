@@ -139,8 +139,19 @@ async def issue_competitions(
                 miner_coldkey = get_miner_coldkey(miner_hotkey, self.subtensor, self.config.netuid)  # type: ignore[attr-defined]
                 if not miner_coldkey:
                     bt.logging.warning(
-                        f'Could not get coldkey for hotkey {miner_hotkey} (solver {solver_github_id}): {issue_label}'
+                        f'Could not get coldkey for hotkey {miner_hotkey} (solver {solver_github_id}): '
+                        f'voting cancel to avoid stuck ACTIVE state — {issue_label}'
                     )
+                    success = contract_client.vote_cancel_issue(
+                        issue_id=issue.id,
+                        reason=f'Coldkey resolution failed for eligible solver {solver_github_id} (hotkey {miner_hotkey[:16]}...)',
+                        wallet=self.wallet,
+                    )
+                    if success:
+                        cancels_cast += 1
+                        bt.logging.info(f'Voted cancel (coldkey lookup failed): {issue_label}')
+                    else:
+                        errors.append(f'Cancel vote failed after coldkey lookup failure for {issue_label}')
                     continue
 
                 bt.logging.info(

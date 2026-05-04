@@ -82,8 +82,8 @@ def parse_code(content: str, language: str) -> Optional[Tree]:
 
 # Type alias for node signatures
 # Structural: ("structural", node_type)
-# Leaf: ("leaf", node_type, text)
-NodeSignature = Union[Tuple[str, str], Tuple[str, str, str]]
+# Leaf: ("leaf", node_type, text_bytes)
+NodeSignature = Union[Tuple[str, str], Tuple[str, str, bytes]]
 
 
 def collect_node_signatures(
@@ -95,7 +95,7 @@ def collect_node_signatures(
 
     Walks the tree and collects signatures for:
     - Structural nodes: ("structural", node_type) - captures structure without content
-    - Leaf nodes: ("leaf", node_type, text) - captures content for meaningful tokens
+    - Leaf nodes: ("leaf", node_type, text_bytes) - captures content for meaningful tokens
 
     Comments are skipped entirely (score 0).
 
@@ -107,33 +107,28 @@ def collect_node_signatures(
         Counter of node signatures (multiset for handling duplicates)
     """
     signatures: Counter[NodeSignature] = Counter()
+    cursor = tree.walk()
 
-    def walk_node(node: Node) -> None:
-        # Skip comments entirely
-        if node.type in COMMENT_NODE_TYPES:
-            return
-
+    while True:
+        node: Node = cursor.node  # type: ignore[assignment]
         node_type = node.type
 
-        # Check if this is a structural node (has structural bonus)
-        if weights.get_structural_weight(node_type) > 0:
-            # Structural signature: only type matters (not content)
-            signatures[('structural', node_type)] += 1
+        if node_type not in COMMENT_NODE_TYPES:
+            if weights.get_structural_weight(node_type) > 0:
+                signatures[('structural', node_type)] += 1
+            if node.child_count == 0:
+                signatures[('leaf', node_type, node.text or b'')] += 1
+            if cursor.goto_first_child():
+                continue
 
-        # Check if this is a leaf node
-        if node.child_count == 0:
-            # Skip comment types at leaf level too
-            if node_type not in COMMENT_NODE_TYPES:
-                # Leaf signature: type + text content
-                text = node.text.decode('utf-8') if node.text else ''
-                signatures[('leaf', node_type, text)] += 1
+        if cursor.goto_next_sibling():
+            continue
 
-        # Recurse into children
-        for child in node.children:
-            walk_node(child)
-
-    walk_node(tree.root_node)
-    return signatures
+        while cursor.goto_parent():
+            if cursor.goto_next_sibling():
+                break
+        else:
+            return signatures
 
 
 def has_inline_tests(content: str, extension: str) -> bool:

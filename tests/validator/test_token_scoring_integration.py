@@ -14,8 +14,10 @@ Run tests:
 
 import pytest
 
-from gittensor.validator.utils.load_weights import TokenConfig, load_token_config
-from gittensor.validator.utils.tree_sitter_scoring import score_tree_diff
+from gittensor.classes import FileChange
+from gittensor.utils.github_api_tools import FileContentPair
+from gittensor.validator.utils.load_weights import TokenConfig, load_programming_language_weights, load_token_config
+from gittensor.validator.utils.tree_sitter_scoring import calculate_token_score_from_file_changes, score_tree_diff
 
 
 class TestTreeDiffScoring:
@@ -24,6 +26,43 @@ class TestTreeDiffScoring:
     @pytest.fixture
     def weights(self) -> TokenConfig:
         return load_token_config()
+
+    @pytest.mark.parametrize(
+        'filename,old_content,new_content',
+        [
+            (
+                'Dockerfile',
+                'FROM python:3.12-slim\n',
+                'FROM python:3.12-slim\nRUN pip install uv\nCOPY . /app\n',
+            ),
+            (
+                'Makefile',
+                'test:\n\tpytest\n',
+                'test:\n\tpytest\n\nlint:\n\truff check\n',
+            ),
+        ],
+    )
+    def test_configured_extensionless_files_reach_tree_diff(self, weights, filename, old_content, new_content):
+        file_change = FileChange(
+            pr_number=1,
+            repository_full_name='test/repo',
+            filename=filename,
+            changes=3,
+            additions=2,
+            deletions=1,
+            status='modified',
+        )
+        result = calculate_token_score_from_file_changes(
+            [file_change],
+            {filename: FileContentPair(old_content=old_content, new_content=new_content)},
+            weights,
+            load_programming_language_weights(),
+        )
+
+        file_result = result.file_results[0]
+        assert file_change.file_extension == filename.lower()
+        assert file_result.scoring_method == 'tree-diff'
+        assert file_result.nodes_scored > 0
 
     def test_new_file_scores_all_nodes(self, weights):
         """

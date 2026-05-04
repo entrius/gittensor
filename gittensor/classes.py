@@ -23,6 +23,7 @@ from gittensor.constants import (
 from gittensor.utils.utils import parse_repo_name
 
 GITHUB_DOMAIN = 'https://github.com/'
+_EXTENSIONLESS_FILE_EXTENSIONS = {'dockerfile', 'makefile'}
 
 
 class PRState(Enum):
@@ -71,7 +72,10 @@ class FileChange:
 
     def _calculate_file_extension(self) -> str:
         basename = self.filename.split('/')[-1]
-        return basename.split('.')[-1].lower() if '.' in basename else ''
+        if '.' in basename:
+            return basename.split('.')[-1].lower()
+        basename_lower = basename.lower()
+        return basename_lower if basename_lower in _EXTENSIONLESS_FILE_EXTENSIONS else ''
 
     def is_test_file(self) -> bool:
         filename_lower = self.filename.lower()

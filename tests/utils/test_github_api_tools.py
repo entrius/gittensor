@@ -1004,7 +1004,7 @@ class TestCheckGithubIssueClosed:
     def test_graphql_failure_sets_solver_lookup_failed(self, mock_logging, mock_get, mock_graphql):
         issue_response = Mock()
         issue_response.status_code = 200
-        issue_response.json.return_value = {'state': 'closed'}
+        issue_response.json.return_value = {'state': 'closed', 'state_reason': 'completed'}
         mock_get.return_value = issue_response
         mock_graphql.return_value = None
 
@@ -1023,7 +1023,7 @@ class TestCheckGithubIssueClosed:
     def test_closed_issue_with_no_solver_keeps_lookup_failed_false(self, mock_logging, mock_get, mock_graphql):
         issue_response = Mock()
         issue_response.status_code = 200
-        issue_response.json.return_value = {'state': 'closed'}
+        issue_response.json.return_value = {'state': 'closed', 'state_reason': 'completed'}
         mock_get.return_value = issue_response
         mock_graphql.return_value = _graphql_response([])
 
@@ -1035,6 +1035,35 @@ class TestCheckGithubIssueClosed:
             'pr_number': None,
             'solver_lookup_failed': False,
         }
+
+    @pytest.mark.parametrize(
+        'issue_payload',
+        [
+            {'state': 'closed', 'state_reason': 'not_planned'},
+            {'state': 'closed', 'state_reason': 'duplicate'},
+            {'state': 'closed', 'state_reason': 'transferred'},
+            {'state': 'closed', 'state_reason': None},
+            {'state': 'closed'},
+        ],
+    )
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_non_completed_closed_issue_skips_solver_lookup(self, mock_logging, mock_get, mock_graphql, issue_payload):
+        issue_response = Mock()
+        issue_response.status_code = 200
+        issue_response.json.return_value = issue_payload
+        mock_get.return_value = issue_response
+
+        result = check_github_issue_closed('owner/repo', 12, 'fake_token')
+
+        assert result == {
+            'is_closed': True,
+            'solver_github_id': None,
+            'pr_number': None,
+            'solver_lookup_failed': False,
+        }
+        mock_graphql.assert_not_called()
 
 
 # ============================================================================

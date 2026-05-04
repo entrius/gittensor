@@ -102,9 +102,11 @@ async def issue_competitions(
                 solver_github_id = github_state.get('solver_github_id')
                 pr_number = github_state.get('pr_number')
                 solver_lookup_failed = bool(github_state.get('solver_lookup_failed'))
+                state_reason = github_state.get('state_reason')
                 bt.logging.info(
-                    f'Issue closed on GitHub: {issue_label} | solver_github_id={solver_github_id}, '
-                    f'pr_number={pr_number}, solver_lookup_failed={solver_lookup_failed}'
+                    f'Issue closed on GitHub: {issue_label} | state_reason={state_reason}, '
+                    f'solver_github_id={solver_github_id}, pr_number={pr_number}, '
+                    f'solver_lookup_failed={solver_lookup_failed}'
                 )
 
                 if solver_lookup_failed:
@@ -112,10 +114,14 @@ async def issue_competitions(
                     continue
 
                 if not solver_github_id:
-                    bt.logging.info(f'No identifiable solver, voting cancel: {issue_label}')
+                    if state_reason and state_reason != 'completed':
+                        cancel_reason = f'Issue closed as {state_reason} on GitHub'
+                    else:
+                        cancel_reason = 'Issue closed without identifiable solver'
+                    bt.logging.info(f'No identifiable solver, voting cancel: {issue_label} | reason={cancel_reason}')
                     success = contract_client.vote_cancel_issue(
                         issue_id=issue.id,
-                        reason='Issue closed without identifiable solver',
+                        reason=cancel_reason,
                         wallet=self.wallet,
                     )
                     if success:

@@ -1033,7 +1033,8 @@ def check_github_issue_closed(repo: str, issue_number: int, token: str) -> Optio
         token: GitHub PAT for authentication
 
     Returns:
-        Dict with 'is_closed', 'solver_github_id', 'pr_number', 'solver_lookup_failed' or None on error
+        Dict with 'is_closed', 'state_reason', 'solver_github_id', 'pr_number',
+        'solver_lookup_failed' or None on error
     """
     session = get_session(token)
 
@@ -1050,15 +1051,19 @@ def check_github_issue_closed(repo: str, issue_number: int, token: str) -> Optio
         data = response.json()
 
         if data.get('state') != 'closed':
-            return {'is_closed': False}
+            return {'is_closed': False, 'state_reason': None}
 
-        state_reason = data.get('state_reason')
-        if not isinstance(state_reason, str) or state_reason.strip().lower() != 'completed':
-            bt.logging.info(
-                f'Issue closed on GitHub but not completed: {repo}#{issue_number} state_reason={state_reason}'
+        raw_state_reason = data.get('state_reason')
+        normalized_state_reason = raw_state_reason.strip().lower() if isinstance(raw_state_reason, str) else None
+        if normalized_state_reason != 'completed':
+            # Default-deny: caller routes this to vote_cancel, not retry.
+            # solver_lookup_failed=False because we never attempted a lookup.
+            bt.logging.warning(
+                f'Issue closed on GitHub but not completed: {repo}#{issue_number} state_reason={raw_state_reason}'
             )
             return {
                 'is_closed': True,
+                'state_reason': normalized_state_reason,
                 'solver_github_id': None,
                 'pr_number': None,
                 'solver_lookup_failed': False,
@@ -1077,6 +1082,7 @@ def check_github_issue_closed(repo: str, issue_number: int, token: str) -> Optio
 
         return {
             'is_closed': True,
+            'state_reason': normalized_state_reason,
             'solver_github_id': solver_github_id,
             'pr_number': pr_number,
             'solver_lookup_failed': solver_lookup_failed,

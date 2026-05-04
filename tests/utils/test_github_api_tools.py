@@ -1012,6 +1012,7 @@ class TestCheckGithubIssueClosed:
 
         assert result == {
             'is_closed': True,
+            'state_reason': 'completed',
             'solver_github_id': None,
             'pr_number': None,
             'solver_lookup_failed': True,
@@ -1031,25 +1032,43 @@ class TestCheckGithubIssueClosed:
 
         assert result == {
             'is_closed': True,
+            'state_reason': 'completed',
             'solver_github_id': None,
             'pr_number': None,
             'solver_lookup_failed': False,
         }
 
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_open_issue_returns_state_reason_none(self, mock_logging, mock_get, mock_graphql):
+        issue_response = Mock()
+        issue_response.status_code = 200
+        issue_response.json.return_value = {'state': 'open', 'state_reason': 'reopened'}
+        mock_get.return_value = issue_response
+
+        result = check_github_issue_closed('owner/repo', 12, 'fake_token')
+
+        assert result == {'is_closed': False, 'state_reason': None}
+        mock_graphql.assert_not_called()
+
     @pytest.mark.parametrize(
-        'issue_payload',
+        ('issue_payload', 'expected_state_reason'),
         [
-            {'state': 'closed', 'state_reason': 'not_planned'},
-            {'state': 'closed', 'state_reason': 'duplicate'},
-            {'state': 'closed', 'state_reason': 'transferred'},
-            {'state': 'closed', 'state_reason': None},
-            {'state': 'closed'},
+            ({'state': 'closed', 'state_reason': 'not_planned'}, 'not_planned'),
+            ({'state': 'closed', 'state_reason': 'duplicate'}, 'duplicate'),
+            ({'state': 'closed', 'state_reason': 'NOT_PLANNED'}, 'not_planned'),
+            ({'state': 'closed', 'state_reason': '  COMPLETED_LATER  '}, 'completed_later'),
+            ({'state': 'closed', 'state_reason': None}, None),
+            ({'state': 'closed'}, None),
         ],
     )
     @patch('gittensor.utils.github_api_tools.execute_graphql_query')
     @patch('gittensor.utils.github_api_tools.requests.get')
     @patch('gittensor.utils.github_api_tools.bt.logging')
-    def test_non_completed_closed_issue_skips_solver_lookup(self, mock_logging, mock_get, mock_graphql, issue_payload):
+    def test_non_completed_closed_issue_skips_solver_lookup(
+        self, mock_logging, mock_get, mock_graphql, issue_payload, expected_state_reason
+    ):
         issue_response = Mock()
         issue_response.status_code = 200
         issue_response.json.return_value = issue_payload
@@ -1059,6 +1078,7 @@ class TestCheckGithubIssueClosed:
 
         assert result == {
             'is_closed': True,
+            'state_reason': expected_state_reason,
             'solver_github_id': None,
             'pr_number': None,
             'solver_lookup_failed': False,

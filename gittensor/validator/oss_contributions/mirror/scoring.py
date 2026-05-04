@@ -203,6 +203,12 @@ def _should_skip_merged_mirror_pr(scored: ScoredMirrorPR, repo_config: Repositor
     additional = repo_config.additional_acceptable_branches or []
     acceptable = ([pr.default_branch] if pr.default_branch else []) + additional
 
+    # Fall back to 'main' when both default_branch and additional are missing
+    # to match legacy behaviour (should_skip_merged_pr falls back to 'main'
+    # when GraphQL omits defaultBranchRef).
+    if not acceptable:
+        acceptable = ['main']
+
     # base_ref check — only enforce when we have an acceptable set to compare against.
     if acceptable and not branch_matches_pattern(pr.base_ref or '', acceptable):
         return True, (f'PR #{pr.pr_number} merged to {pr.base_ref!r} not in acceptable branches={acceptable}')
@@ -211,7 +217,7 @@ def _should_skip_merged_mirror_pr(scored: ScoredMirrorPR, repo_config: Repositor
     # branch. Only applies to same-repo PRs: fork branch names are arbitrary.
     # Falls through when head_ref or head_repo_full_name is missing (older data).
     is_same_repo = pr.head_repo_full_name is not None and pr.head_repo_full_name == pr.repo_full_name
-    if additional and pr.head_ref and is_same_repo and branch_matches_pattern(pr.head_ref, acceptable):
+    if acceptable and pr.head_ref and is_same_repo and branch_matches_pattern(pr.head_ref, acceptable):
         return True, (
             f'PR #{pr.pr_number} source branch {pr.head_ref!r} is itself in '
             f'acceptable branches — merging between acceptable branches not allowed'

@@ -33,7 +33,7 @@ from gittensor.cli.miner_commands.helpers import (
 from gittensor.constants import BASE_GITHUB_API_URL, GITHUB_HTTP_TIMEOUT_SECONDS, GRAPHQL_VIEWER_QUERY
 from gittensor.utils.github_api_tools import make_graphql_headers, make_headers
 
-console = Console()
+console = Console(stderr=True)
 
 _PAT_POST_STATUS_MARKUP = {
     'accepted': '[green]✓[/green]',

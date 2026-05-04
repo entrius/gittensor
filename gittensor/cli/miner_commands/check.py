@@ -27,7 +27,7 @@ from .helpers import (
     _status,
 )
 
-console = Console()
+console = Console(stderr=True)
 
 _PAT_CHECK_STATUS_MARKUP = {
     'valid': '[green]✓ valid[/green]',

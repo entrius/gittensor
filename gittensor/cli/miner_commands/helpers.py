@@ -17,7 +17,7 @@ from rich.table import Table
 
 from gittensor.constants import NETWORK_MAP
 
-console = Console()
+console = Console(stderr=True)
 
 NETUID_DEFAULT = 74
 DEFAULT_MIN_VALIDATOR_VTRUST = 0.25

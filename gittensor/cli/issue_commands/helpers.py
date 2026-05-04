@@ -52,7 +52,11 @@ STATUS_COLORS: Dict[str, str] = {
 }
 
 
-console = Console()
+# All human-facing output (warnings, tables, spinners, etc.) goes to stderr so
+# that JSON payloads emitted via ``emit_json`` (stdout) stay clean.
+# This follows the same convention as ``gh``, ``kubectl`` and similar CLIs.
+console = Console(stderr=True)
+stderr_console = Console(stderr=True)
 
 CommandFunc = TypeVar('CommandFunc', bound=Callable[..., Any])
 NETWORK_CHOICE = click.Choice(['finney', 'test', 'local'], case_sensitive=False)

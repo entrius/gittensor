@@ -1,5 +1,5 @@
+import copy
 import re
-from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -80,6 +80,9 @@ class FileChange:
         test_dir_patterns = [
             r'(^|/)tests?/',
             r'(^|/)__tests?__/',
+            r'(^|/)androidtest[a-z]*/',
+            r'(^|/)integrationtest/',
+            r'(^|/)spec/',
         ]
         if any(re.search(pattern, filename_lower) for pattern in test_dir_patterns):
             return True
@@ -89,6 +92,7 @@ class FileChange:
             r'^spec_',
             r'_test\.[^.]+$',
             r'_tests\.[^.]+$',
+            r'_spec\.[^.]+$',
             r'\.test\.[^.]+$',
             r'\.tests\.[^.]+$',
             r'\.spec\.[^.]+$',
@@ -301,12 +305,8 @@ class PullRequest:
         last_edited_at = parse_github_timestamp_to_cst(raw_edited_at) if isinstance(raw_edited_at, str) else None
         merged_at = parse_github_timestamp_to_cst(pr_data['mergedAt']) if is_merged else None
 
-        changes_requested_count = 0
-        if is_merged:
-            cr_reviews = pr_data.get('changesRequestedReviews', {}).get('nodes', [])
-            changes_requested_count = sum(
-                1 for r in cr_reviews if r.get('authorAssociation') in MAINTAINER_ASSOCIATIONS
-            )
+        cr_reviews = (pr_data.get('changesRequestedReviews') or {}).get('nodes') or []
+        changes_requested_count = sum(1 for r in cr_reviews if r.get('authorAssociation') in MAINTAINER_ASSOCIATIONS)
 
         current = {(n.get('name') or '').lower() for n in (pr_data.get('labels') or {}).get('nodes') or [] if n}
         label: Optional[str] = None
@@ -366,10 +366,15 @@ class MinerEvaluation:
     total_leaf_score: float = 0.0
     failed_reason: Optional[str] = None
     github_pr_fetch_failed: bool = False
+    # Mirror-source-specific fetch flag set by mirror.combine.combine alongside
+    # the OR into github_pr_fetch_failed. Lets the validator tell a complete
+    # mirror outage apart from a legacy partial-pagination failure.
+    mirror_pr_fetch_failed: bool = False
     evaluation_timestamp: Optional[datetime] = None
     merged_pull_requests: List[PullRequest] = field(default_factory=list)
     open_pull_requests: List[PullRequest] = field(default_factory=list)
     closed_pull_requests: List[PullRequest] = field(default_factory=list)
+    stale_closed_pull_requests: List[PullRequest] = field(default_factory=list)
 
     # Populated by gittensor.validator.oss_contributions.mirror.combine.combine
     # when the mirror scoring path runs. Empty for legacy-only evaluations.
@@ -478,6 +483,13 @@ class MinerEvaluation:
             f'CLOSED PR #{raw_pr["number"]} in {parse_repo_name(raw_pr["repository"])} counting towards credibility'
         )
         self.closed_pull_requests.append(
+            PullRequest.from_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id)
+        )
+
+    def add_stale_closed_pull_request(self, raw_pr: Dict):
+        """Track a stale CLOSED PR so storage can refresh its pull_requests row."""
+        bt.logging.info(f'Stale CLOSED PR #{raw_pr["number"]} in {parse_repo_name(raw_pr["repository"])}')
+        self.stale_closed_pull_requests.append(
             PullRequest.from_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id)
         )
 
@@ -655,7 +667,7 @@ class MinerEvaluationCache:
         if not evaluation.hotkey or not evaluation.github_id or evaluation.github_id == '0':
             return
 
-        cached_eval = self.create_lightweight_copy(evaluation)
+        cached_eval = self._build_cache_entry(evaluation)
 
         self._cache[evaluation.uid] = CachedEvaluation(
             hotkey=evaluation.hotkey,
@@ -690,17 +702,53 @@ class MinerEvaluationCache:
 
         bt.logging.debug(f'Cache hit for UID {uid} (cached at {cached.cached_at.isoformat()})')
 
-        return deepcopy(cached.evaluation)
+        return self._isolate_for_downstream(cached.evaluation)
 
-    def create_lightweight_copy(self, evaluation: 'MinerEvaluation') -> 'MinerEvaluation':
-        """Create a memory-efficient copy, stripping file patches."""
-        light_eval = deepcopy(evaluation)
+    @staticmethod
+    def _build_cache_entry(evaluation: 'MinerEvaluation') -> 'MinerEvaluation':
+        # Cached evaluations feed only the GitHub-fetch-failure fallback path
+        # (issue_competitions + issue discovery scoring), which never reads
+        # file_changes. Drop them at store time to save memory and avoid
+        # copying thousands of FileChange objects per miner.
+        cached = copy.copy(evaluation)
+        cached.github_pat = None
+        cached.unique_repos_contributed_to = set(evaluation.unique_repos_contributed_to)
+        cached.merged_pull_requests = [_pr_for_cache(pr) for pr in evaluation.merged_pull_requests]
+        cached.open_pull_requests = [_pr_for_cache(pr) for pr in evaluation.open_pull_requests]
+        cached.closed_pull_requests = [_pr_for_cache(pr) for pr in evaluation.closed_pull_requests]
+        cached.mirror_merged_prs = [_scored_mirror_pr_for_cache(pr) for pr in evaluation.mirror_merged_prs]
+        cached.mirror_open_prs = [_scored_mirror_pr_for_cache(pr) for pr in evaluation.mirror_open_prs]
+        cached.mirror_closed_prs = [_scored_mirror_pr_for_cache(pr) for pr in evaluation.mirror_closed_prs]
+        return cached
 
-        for pr in light_eval.merged_pull_requests + light_eval.open_pull_requests + light_eval.closed_pull_requests:
-            if pr.file_changes:
-                for fc in pr.file_changes:
-                    fc.patch = None
+    @staticmethod
+    def _isolate_for_downstream(cached_eval: 'MinerEvaluation') -> 'MinerEvaluation':
+        # Downstream scoring mutates top-level scalar fields on MinerEvaluation
+        # and discovery_* fields on Issue. Everything else (PR metadata) is
+        # read-only on the cache-fallback path, so we can share it.
+        copy_eval = copy.copy(cached_eval)
+        copy_eval.unique_repos_contributed_to = set(cached_eval.unique_repos_contributed_to)
+        copy_eval.merged_pull_requests = [_pr_with_fresh_issues(pr) for pr in cached_eval.merged_pull_requests]
+        copy_eval.open_pull_requests = [_pr_with_fresh_issues(pr) for pr in cached_eval.open_pull_requests]
+        copy_eval.closed_pull_requests = [_pr_with_fresh_issues(pr) for pr in cached_eval.closed_pull_requests]
+        return copy_eval
 
-        light_eval.github_pat = None
 
-        return light_eval
+def _pr_for_cache(pr: 'PullRequest') -> 'PullRequest':
+    pr_copy = copy.copy(pr)
+    pr_copy.file_changes = None
+    pr_copy.issues = [copy.copy(issue) for issue in pr.issues] if pr.issues else None
+    return pr_copy
+
+
+def _pr_with_fresh_issues(pr: 'PullRequest') -> 'PullRequest':
+    pr_copy = copy.copy(pr)
+    if pr.issues is not None:
+        pr_copy.issues = [copy.copy(issue) for issue in pr.issues]
+    return pr_copy
+
+
+def _scored_mirror_pr_for_cache(scored: 'ScoredMirrorPR') -> 'ScoredMirrorPR':
+    scored_copy = copy.copy(scored)
+    scored_copy.files = None
+    return scored_copy

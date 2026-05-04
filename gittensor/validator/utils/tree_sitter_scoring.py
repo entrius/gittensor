@@ -113,10 +113,15 @@ def collect_node_signatures(
     """
     signatures: Counter[NodeSignature] = Counter()
 
-    def walk_node(node: Node) -> None:
-        # Skip comments entirely
+    # Iterative DFS to avoid Python's recursion limit on deeply nested ASTs
+    # (e.g. long chained method calls, deeply nested data literals).
+    stack: List[Node] = [tree.root_node]
+    while stack:
+        node = stack.pop()
+
+        # Skip comments entirely (and their subtrees)
         if is_comment_node(node):
-            return
+            continue
 
         node_type = node.type
 
@@ -127,17 +132,12 @@ def collect_node_signatures(
 
         # Check if this is a leaf node
         if node.child_count == 0:
-            # Skip comment types at leaf level too
-            if node_type not in COMMENT_NODE_TYPES:
-                # Leaf signature: type + text content
-                text = node.text.decode('utf-8') if node.text else ''
-                signatures[('leaf', node_type, text)] += 1
+            # Leaf signature: type + text content
+            text = node.text.decode('utf-8') if node.text else ''
+            signatures[('leaf', node_type, text)] += 1
+        else:
+            stack.extend(node.children)
 
-        # Recurse into children
-        for child in node.children:
-            walk_node(child)
-
-    walk_node(tree.root_node)
     return signatures
 
 

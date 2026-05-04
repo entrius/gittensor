@@ -628,6 +628,86 @@ class TestCacheStats:
         # Failed lookups are NOT cached (so a retry is possible)
         assert cache == {}
 
+    def test_resolve_treats_unavailable_scoring_data_as_failure(self):
+        # scoring_data_stored=False is data-availability noise, not a real
+        # zero score. Same handling as MirrorRequestError: increment
+        # fetch_failures, return None, leave cache empty so a sibling miner's
+        # later lookup can retry within the cycle.
+        from gittensor.validator.issue_discovery.mirror_scan import (
+            _CacheStats,
+            _resolve_solving_pr_score,
+        )
+
+        client = Mock()
+        client.get_pr_files.return_value = MirrorPullRequestFilesResponse.from_dict(
+            {
+                'repo_full_name': 'entrius/gittensor-ui',
+                'pr_number': 100,
+                'head_sha': 'h',
+                'base_sha': 'b',
+                'merge_base_sha': 'mb',
+                'scoring_data_stored': False,
+                'files': [],
+            }
+        )
+        cache = {}
+        stats = _CacheStats()
+
+        issue = MirrorIssue.from_dict(_issue_dict())
+        result = _resolve_solving_pr_score(
+            issue, issue.solving_pr, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG
+        )
+
+        assert result is None
+        assert stats.misses == 1
+        assert stats.fetch_failures == 1
+        assert cache == {}
+
+    def test_unavailable_scoring_data_is_not_cached_across_sibling_lookups(self):
+        # Acceptance for issue #836: a single scoring_data_stored=False response
+        # feeding two issues that share the same solving PR (i.e. across two
+        # miners discovering the same PR) results in two misses, two fetch
+        # failures, and an empty cache. Without the fix, the first call would
+        # cache base_score=0 / token_score=0, the second would be a "hit" on
+        # that fabricated zero, and fetch_failures would never increment.
+        from gittensor.validator.issue_discovery.mirror_scan import (
+            _CacheStats,
+            _resolve_solving_pr_score,
+        )
+
+        client = Mock()
+        client.get_pr_files.return_value = MirrorPullRequestFilesResponse.from_dict(
+            {
+                'repo_full_name': 'entrius/gittensor-ui',
+                'pr_number': 100,
+                'head_sha': 'h',
+                'base_sha': 'b',
+                'merge_base_sha': 'mb',
+                'scoring_data_stored': False,
+                'files': [],
+            }
+        )
+        cache = {}
+        stats = _CacheStats()
+
+        issue_a = MirrorIssue.from_dict(_issue_dict(issue_number=50))
+        issue_b = MirrorIssue.from_dict(_issue_dict(issue_number=51))
+
+        result_a = _resolve_solving_pr_score(
+            issue_a, issue_a.solving_pr, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG
+        )
+        result_b = _resolve_solving_pr_score(
+            issue_b, issue_b.solving_pr, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG
+        )
+
+        assert result_a is None
+        assert result_b is None
+        assert stats.hits == 0
+        assert stats.misses == 2
+        assert stats.fetch_failures == 2
+        assert cache == {}
+        assert client.get_pr_files.call_count == 2
+
 
 class TestOpenIssueSpamSourceIsMirror:
     """The open-issue spam multiplier sources its count from mirror's response,

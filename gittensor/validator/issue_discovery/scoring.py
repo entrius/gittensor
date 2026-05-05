@@ -74,7 +74,7 @@ def check_issue_eligibility(solved_count: int, valid_solved_count: int, closed_c
     """Check if a miner passes the issue discovery eligibility gate.
 
     Credibility uses total solved / total attempts (with mulligan).
-    The gate uses ``valid_solved_count`` (solving PR meets token threshold)
+    The gate uses ``valid_solved_count`` (solving PR meets SOURCE token threshold)
     so low-quality solves don't carry the miner past the minimum.
 
     Returns (is_eligible, issue_credibility, reason).

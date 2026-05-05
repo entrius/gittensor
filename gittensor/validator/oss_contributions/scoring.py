@@ -158,6 +158,7 @@ def calculate_base_score(
         pr.file_changes or [], file_contents, programming_languages, token_config
     )
     pr.token_score = result.token_score
+    pr.source_token_score = result.source_token_score
     pr.structural_count = result.structural_count
     pr.structural_score = result.structural_score
     pr.leaf_count = result.leaf_count
@@ -346,9 +347,9 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
             bt.logging.info('No merged or closed PRs - skipping evaluation')
             continue
 
-        # Check eligibility gate across both paths. check_eligibility only touches
-        # token_score on each PR; ScoredMirrorPR has the same field, so combining
-        # the lists works without adapting types.
+        # Check eligibility gate across both paths. check_eligibility uses the
+        # SOURCE-quality token score when present, falling back to token_score
+        # for older/test objects, so combining the lists works without adapting types.
         is_eligible, credibility, reason = check_eligibility(
             evaluation.merged_pull_requests + evaluation.mirror_merged_prs,
             evaluation.closed_pull_requests + evaluation.mirror_closed_prs,

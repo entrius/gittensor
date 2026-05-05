@@ -2,7 +2,7 @@
 
 Covers:
 - Composition: raw response data accessed via .pr.<field>; scoring fields default neutrally
-- is_pioneer_eligible respects merged + token_score gate
+- is_pioneer_eligible respects merged + SOURCE token_score gate
 - calculate_final_earned_score multiplies base by every multiplier
 """
 
@@ -95,6 +95,12 @@ class TestPioneerEligible:
         scored = ScoredMirrorPR(pr=_make_pr())
         scored.token_score = 5.0  # equals MIN_TOKEN_SCORE_FOR_BASE_SCORE
         assert scored.is_pioneer_eligible() is True
+
+    def test_source_quality_below_threshold_not_eligible(self):
+        scored = ScoredMirrorPR(pr=_make_pr())
+        scored.token_score = 5.0
+        scored.source_token_score = 0.0
+        assert scored.is_pioneer_eligible() is False
 
     def test_merged_above_threshold_eligible(self):
         scored = ScoredMirrorPR(pr=_make_pr())

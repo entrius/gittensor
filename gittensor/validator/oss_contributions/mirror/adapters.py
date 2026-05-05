@@ -141,6 +141,7 @@ def mirror_scored_pr_to_legacy_pull_request(
         total_nodes_scored=scored.total_nodes_scored,
         code_density=scored.code_density,
         token_score=scored.token_score,
+        source_token_score=scored.source_token_score,
         structural_count=scored.structural_count,
         structural_score=scored.structural_score,
         leaf_count=scored.leaf_count,

@@ -20,6 +20,17 @@ if TYPE_CHECKING:
 PrLike = Union['PullRequest', 'ScoredMirrorPR']
 
 
+def source_quality_token_score(pr: object) -> float:
+    """SOURCE-only score for quality gates, falling back when absent or unset."""
+    source_token_score = getattr(pr, 'source_token_score', None)
+    token_score = getattr(pr, 'token_score')
+    return float(token_score if source_token_score is None else source_token_score)
+
+
+def meets_token_quality_gate(pr: object) -> bool:
+    return source_quality_token_score(pr) >= MIN_TOKEN_SCORE_FOR_BASE_SCORE
+
+
 def calculate_credibility(merged_prs: Sequence[PrLike], closed_prs: Sequence[PrLike]) -> float:
     """Calculate flat credibility ratio with mulligan applied.
 
@@ -42,7 +53,7 @@ def check_eligibility(merged_prs: Sequence[PrLike], closed_prs: Sequence[PrLike]
     """Check if a miner passes the eligibility gate.
 
     Gate requires:
-    1. At least MIN_VALID_MERGED_PRS merged PRs with token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE
+    1. At least MIN_VALID_MERGED_PRS merged PRs with SOURCE token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE
        (after mulligan — if a closed PR was "valid", it no longer counts toward the minimum)
     2. At least MIN_CREDIBILITY credibility (after mulligan)
 
@@ -52,8 +63,8 @@ def check_eligibility(merged_prs: Sequence[PrLike], closed_prs: Sequence[PrLike]
     """
     credibility = calculate_credibility(merged_prs, closed_prs)
 
-    # Count valid merged PRs (token_score >= threshold)
-    valid_merged_count = sum(1 for pr in merged_prs if pr.token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE)
+    # Count valid merged PRs (SOURCE token_score >= threshold)
+    valid_merged_count = sum(1 for pr in merged_prs if meets_token_quality_gate(pr))
 
     if valid_merged_count < MIN_VALID_MERGED_PRS:
         reason = f'{valid_merged_count}/{MIN_VALID_MERGED_PRS} valid merged PRs (need {MIN_VALID_MERGED_PRS})'

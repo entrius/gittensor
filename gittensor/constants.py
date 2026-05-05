@@ -146,7 +146,8 @@ INLINE_TEST_PATTERNS: Dict[str, re.Pattern] = {
 # =============================================================================
 # Eligibility Gate (OSS Contributions)
 # =============================================================================
-MIN_VALID_MERGED_PRS = 5  # minimum "valid" merged PRs (token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE) to receive score
+# Minimum "valid" merged PRs with SOURCE token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE
+MIN_VALID_MERGED_PRS = 5
 MIN_CREDIBILITY = 0.80  # minimum credibility ratio to receive score
 CREDIBILITY_MULLIGAN_COUNT = 1  # number of closed PRs forgiven (erased from merged+closed counts entirely)
 
@@ -154,7 +155,8 @@ CREDIBILITY_MULLIGAN_COUNT = 1  # number of closed PRs forgiven (erased from mer
 # Issue Discovery
 # =============================================================================
 # Eligibility gate (stricter than OSS contributions)
-MIN_VALID_SOLVED_ISSUES = 7  # minimum solved issues where solving PR has token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE
+# Minimum solved issues where solving PR has SOURCE token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE
+MIN_VALID_SOLVED_ISSUES = 7
 MIN_ISSUE_CREDIBILITY = 0.80  # minimum issue credibility ratio
 
 # Review quality cliff model (different from OSS: has clean bonus + steeper penalty)

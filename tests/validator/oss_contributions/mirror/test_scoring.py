@@ -680,18 +680,15 @@ class TestCollateralScoreAcceptsScoredMirrorPR:
 
 class TestPrMultipliers:
     def test_merged_pr_populates_all_multipliers(self):
-        from gittensor.constants import LABEL_MULTIPLIERS
-
-        scoring_label = next(iter(LABEL_MULTIPLIERS.keys()))
-        labels = [{'name': scoring_label, 'actor_github_id': '1', 'actor_association': 'OWNER'}]
+        labels = [{'name': _SCORING_LABEL, 'actor_github_id': '1', 'actor_association': 'OWNER'}]
 
         scored = ScoredMirrorPR(pr=_pr(labels=labels))
         scored.token_score = 100.0  # for completeness
         _calculate_pr_multipliers(scored, _config(weight=0.7, additional_branches=['test']))
 
         assert scored.repo_weight_multiplier == 0.7
-        assert scored.label == scoring_label.lower()
-        assert scored.label_multiplier == LABEL_MULTIPLIERS[scoring_label.lower()]
+        assert scored.label == _SCORING_LABEL.lower()
+        assert scored.label_multiplier == _SCORING_MULT
         assert 0.0 <= scored.time_decay_multiplier <= 1.0
         assert scored.review_quality_multiplier == 1.0  # 0 maintainer changes_requested
         assert scored.issue_multiplier == 1.0  # no linked_issues

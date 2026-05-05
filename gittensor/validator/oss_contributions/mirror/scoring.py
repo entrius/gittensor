@@ -29,7 +29,6 @@ import bittensor as bt
 from gittensor.classes import FileChange, PrScoringResult, ScoringCategory
 from gittensor.constants import (
     CONTRIBUTION_SCORE_FOR_FULL_BONUS,
-    LABEL_MULTIPLIERS,
     MAINTAINER_ASSOCIATIONS,
     MAINTAINER_ISSUE_MULTIPLIER,
     MAX_CONTRIBUTION_BONUS,
@@ -53,6 +52,7 @@ from gittensor.validator.utils.load_weights import (
     LanguageConfig,
     RepositoryConfig,
     TokenConfig,
+    resolve_label_multiplier,
     resolve_repo_weight,
 )
 from gittensor.validator.utils.tree_sitter_scoring import calculate_token_score_from_file_changes
@@ -353,7 +353,11 @@ def _calculate_pr_multipliers(scored: ScoredMirrorPR, repo_config: RepositoryCon
 
     chosen_label = _resolve_trusted_scoring_label(pr, repo_config)
     scored.label = chosen_label
-    scored.label_multiplier = LABEL_MULTIPLIERS.get(chosen_label, 1.0) if chosen_label else 1.0
+    if chosen_label:
+        mult = resolve_label_multiplier(chosen_label, repo_config)
+        scored.label_multiplier = mult if mult is not None else repo_config.default_label_multiplier
+    else:
+        scored.label_multiplier = repo_config.default_label_multiplier
 
     scored.issue_multiplier = round(_calculate_issue_multiplier(scored), 2)
 
@@ -386,13 +390,16 @@ def _resolve_trusted_scoring_label(pr: MirrorPullRequest, repo_config: Repositor
     candidates = [
         label
         for label in pr.labels
-        if (label.name or '').lower() in LABEL_MULTIPLIERS
+        if resolve_label_multiplier((label.name or '').lower(), repo_config) is not None
         and (trusted or label.actor_association in MAINTAINER_ASSOCIATIONS)
     ]
     if not candidates:
         return None
     # Highest multiplier wins; tie-broken by label name for deterministic output
-    best = max(candidates, key=lambda label: (LABEL_MULTIPLIERS[label.name.lower()], label.name.lower()))
+    best = max(
+        candidates,
+        key=lambda lbl: (resolve_label_multiplier(lbl.name.lower(), repo_config) or 0.0, lbl.name.lower()),
+    )
     return best.name.lower()
 
 

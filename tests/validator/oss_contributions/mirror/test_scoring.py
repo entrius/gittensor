@@ -101,16 +101,23 @@ def _pr(
     )
 
 
+_SCORING_LABEL = 'feature'
+_SCORING_MULT = 1.5
+_DEFAULT_LABEL_MULTIPLIERS = {_SCORING_LABEL: _SCORING_MULT, 'bug': 1.25}
+
+
 def _config(
     weight: float = 0.5,
     additional_branches: list | None = None,
     trusted_label_pipeline: bool = False,
+    label_multipliers: dict | None = None,
 ) -> RepositoryConfig:
     return RepositoryConfig(
         weight=weight,
         mirror_enabled=True,
         additional_acceptable_branches=additional_branches,
         trusted_label_pipeline=trusted_label_pipeline,
+        label_multipliers=_DEFAULT_LABEL_MULTIPLIERS if label_multipliers is None else label_multipliers,
     )
 
 
@@ -422,59 +429,38 @@ class TestLabelResolution:
         assert _resolve_trusted_scoring_label(scored.pr, _config()) is None
 
     def test_non_maintainer_label_ignored(self):
-        from gittensor.constants import LABEL_MULTIPLIERS
-
-        scoring_label = next(iter(LABEL_MULTIPLIERS.keys()))
-        labels = [{'name': scoring_label, 'actor_github_id': '1', 'actor_association': 'CONTRIBUTOR'}]
+        labels = [{'name': _SCORING_LABEL, 'actor_github_id': '1', 'actor_association': 'CONTRIBUTOR'}]
         scored = ScoredMirrorPR(pr=_pr(labels=labels))
         assert _resolve_trusted_scoring_label(scored.pr, _config()) is None
 
     def test_null_actor_association_ignored_on_untrusted_repo(self):
-        from gittensor.constants import LABEL_MULTIPLIERS
-
-        scoring_label = next(iter(LABEL_MULTIPLIERS.keys()))
-        labels = [{'name': scoring_label, 'actor_github_id': None, 'actor_association': None}]
+        labels = [{'name': _SCORING_LABEL, 'actor_github_id': None, 'actor_association': None}]
         scored = ScoredMirrorPR(pr=_pr(labels=labels))
         assert _resolve_trusted_scoring_label(scored.pr, _config()) is None
 
     def test_maintainer_set_scoring_label_returned(self):
-        from gittensor.constants import LABEL_MULTIPLIERS
-
-        scoring_label = next(iter(LABEL_MULTIPLIERS.keys()))
-        labels = [{'name': scoring_label, 'actor_github_id': '1', 'actor_association': 'COLLABORATOR'}]
+        labels = [{'name': _SCORING_LABEL, 'actor_github_id': '1', 'actor_association': 'COLLABORATOR'}]
         scored = ScoredMirrorPR(pr=_pr(labels=labels))
-        assert _resolve_trusted_scoring_label(scored.pr, _config()) == scoring_label.lower()
+        assert _resolve_trusted_scoring_label(scored.pr, _config()) == _SCORING_LABEL.lower()
 
     def test_highest_multiplier_wins(self):
-        from gittensor.constants import LABEL_MULTIPLIERS
-
-        scoring_labels = list(LABEL_MULTIPLIERS.keys())
-        if len(scoring_labels) < 2:
-            pytest.skip('Need at least 2 scoring labels for this test')
-
-        a, b = scoring_labels[0], scoring_labels[1]
+        a, b = 'feature', 'bug'
+        config = _config(label_multipliers={a: 1.5, b: 1.25})
         labels = [
             {'name': a, 'actor_github_id': '1', 'actor_association': 'OWNER'},
             {'name': b, 'actor_github_id': '1', 'actor_association': 'OWNER'},
         ]
         scored = ScoredMirrorPR(pr=_pr(labels=labels))
-        chosen = _resolve_trusted_scoring_label(scored.pr, _config())
-        expected = max([a, b], key=lambda n: (LABEL_MULTIPLIERS[n], n)).lower()
-        assert chosen == expected
+        chosen = _resolve_trusted_scoring_label(scored.pr, config)
+        assert chosen == 'feature'
 
     def test_calculate_multipliers_threads_trusted_flag(self):
         """End-to-end issue #911 path: _calculate_pr_multipliers honors trusted_label_pipeline."""
-        from gittensor.constants import LABEL_MULTIPLIERS
-
-        scoring_label = next((name for name, mult in LABEL_MULTIPLIERS.items() if mult != 1.0), None)
-        if scoring_label is None:
-            pytest.skip('Need at least one non-1.0x label for this test')
-
-        labels = [{'name': scoring_label, 'actor_github_id': '99', 'actor_association': None}]
+        labels = [{'name': _SCORING_LABEL, 'actor_github_id': '99', 'actor_association': None}]
 
         scored_trusted = ScoredMirrorPR(pr=_pr(labels=labels))
         _calculate_pr_multipliers(scored_trusted, _config(trusted_label_pipeline=True))
-        assert scored_trusted.label_multiplier == LABEL_MULTIPLIERS[scoring_label]
+        assert scored_trusted.label_multiplier == _SCORING_MULT
 
         scored_untrusted = ScoredMirrorPR(pr=_pr(labels=labels))
         _calculate_pr_multipliers(scored_untrusted, _config(trusted_label_pipeline=False))

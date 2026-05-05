@@ -2,12 +2,17 @@
 # Copyright © 2025 Entrius
 import json
 from dataclasses import dataclass, field
+from fnmatch import fnmatch
 from pathlib import Path
 from typing import Dict, List, Optional
 
 import bittensor as bt
 
 from gittensor.constants import DEFAULT_REPO_WEIGHT, NON_CODE_EXTENSIONS
+
+_LABEL_MULTIPLIER_MIN = 0.0
+_LABEL_MULTIPLIER_MAX = 20.0
+_LABEL_MULTIPLIERS_MAX_ENTRIES = 10
 
 
 @dataclass
@@ -38,7 +43,13 @@ class RepositoryConfig:
             actor — including GitHub Apps that surface as ``actor_association=NULL``.
             Defaults to False; only enable on repos with an authoritative label
             pipeline. See ``_resolve_trusted_scoring_label`` for the threat model.
-
+        label_multipliers: Per-repo label-to-multiplier mapping. Keys support
+            fnmatch wildcards (e.g. ``"type/*"``, ``"*-dev"``). Each value must
+            be in [0.0, 20.0]; at most 10 entries. When None no label scoring
+            applies and ``default_label_multiplier`` is used for all PRs.
+        default_label_multiplier: Multiplier applied when no label on the PR
+            matches any pattern in ``label_multipliers``. Must be in [0.0, 20.0].
+            Defaults to 1.0 (neutral).
     """
 
     weight: float
@@ -46,6 +57,8 @@ class RepositoryConfig:
     additional_acceptable_branches: Optional[List[str]] = None
     mirror_enabled: bool = False
     trusted_label_pipeline: bool = False
+    label_multipliers: Optional[Dict[str, float]] = None
+    default_label_multiplier: float = 1.0
 
 
 def resolve_repo_weight(repo_config: Optional[RepositoryConfig]) -> float:
@@ -53,6 +66,22 @@ def resolve_repo_weight(repo_config: Optional[RepositoryConfig]) -> float:
     if repo_config is None:
         return DEFAULT_REPO_WEIGHT
     return repo_config.weight
+
+
+def resolve_label_multiplier(label: str, repo_config: Optional[RepositoryConfig]) -> Optional[float]:
+    """Return the per-repo multiplier for *label* using fnmatch pattern matching.
+
+    Patterns and label are compared in lowercase. Returns ``None`` when no
+    pattern matches — callers should then fall back to
+    ``repo_config.default_label_multiplier`` (or 1.0 if config is absent).
+    """
+    if repo_config is None or not repo_config.label_multipliers:
+        return None
+    label_lower = label.lower()
+    for pattern, multiplier in repo_config.label_multipliers.items():
+        if fnmatch(label_lower, pattern.lower()):
+            return multiplier
+    return None
 
 
 @dataclass
@@ -122,12 +151,46 @@ def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
         normalized_data: Dict[str, RepositoryConfig] = {}
         for repo_name, metadata in data.items():
             try:
+                raw_lm = metadata.get('label_multipliers')
+                label_multipliers: Optional[Dict[str, float]] = None
+                if raw_lm is not None:
+                    if not isinstance(raw_lm, dict):
+                        bt.logging.warning(f'{repo_name}: label_multipliers must be a dict, ignoring')
+                    elif len(raw_lm) > _LABEL_MULTIPLIERS_MAX_ENTRIES:
+                        bt.logging.warning(
+                            f'{repo_name}: label_multipliers has {len(raw_lm)} entries '
+                            f'(max {_LABEL_MULTIPLIERS_MAX_ENTRIES}), ignoring'
+                        )
+                    else:
+                        validated: Dict[str, float] = {}
+                        for k, v in raw_lm.items():
+                            fv = float(v)
+                            if not (_LABEL_MULTIPLIER_MIN <= fv <= _LABEL_MULTIPLIER_MAX):
+                                bt.logging.warning(
+                                    f'{repo_name}: label_multipliers["{k}"]={fv} out of '
+                                    f'[{_LABEL_MULTIPLIER_MIN}, {_LABEL_MULTIPLIER_MAX}], skipping entry'
+                                )
+                            else:
+                                validated[k] = fv
+                        label_multipliers = validated or None
+
+                raw_default = metadata.get('default_label_multiplier', 1.0)
+                default_label_multiplier = float(raw_default)
+                if not (_LABEL_MULTIPLIER_MIN <= default_label_multiplier <= _LABEL_MULTIPLIER_MAX):
+                    bt.logging.warning(
+                        f'{repo_name}: default_label_multiplier={default_label_multiplier} out of '
+                        f'[{_LABEL_MULTIPLIER_MIN}, {_LABEL_MULTIPLIER_MAX}], resetting to 1.0'
+                    )
+                    default_label_multiplier = 1.0
+
                 config = RepositoryConfig(
                     weight=float(metadata.get('weight', 0.01)),
                     inactive_at=metadata.get('inactive_at'),
                     additional_acceptable_branches=metadata.get('additional_acceptable_branches'),
                     mirror_enabled=bool(metadata.get('mirror_enabled', False)),
                     trusted_label_pipeline=bool(metadata.get('trusted_label_pipeline', False)),
+                    label_multipliers=label_multipliers,
+                    default_label_multiplier=default_label_multiplier,
                 )
                 normalized_data[repo_name.lower()] = config
             except (ValueError, TypeError) as e:

@@ -17,7 +17,6 @@ if TYPE_CHECKING:
     from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredMirrorPR
 from gittensor.constants import (
     EXCESSIVE_PR_PENALTY_BASE_THRESHOLD,
-    LABEL_MULTIPLIERS,
     MAINTAINER_ASSOCIATIONS,
     MAINTAINER_ISSUE_MULTIPLIER,
     MAX_ISSUE_CLOSE_WINDOW_DAYS,
@@ -41,7 +40,13 @@ from gittensor.utils.github_api_tools import (
 )
 from gittensor.validator.oss_contributions.credibility import check_eligibility
 from gittensor.validator.utils.datetime_utils import calculate_time_decay
-from gittensor.validator.utils.load_weights import LanguageConfig, RepositoryConfig, TokenConfig, resolve_repo_weight
+from gittensor.validator.utils.load_weights import (
+    LanguageConfig,
+    RepositoryConfig,
+    TokenConfig,
+    resolve_label_multiplier,
+    resolve_repo_weight,
+)
 
 
 def score_miner_prs(
@@ -202,6 +207,39 @@ def calculate_review_collateral_multiplier(changes_requested_count: int, pr_numb
     return multiplier
 
 
+def _resolve_label(
+    label_candidate: Optional[str],
+    current_labels: frozenset,
+    repo_config: Optional[RepositoryConfig],
+) -> tuple:
+    """Resolve the scoring label and its multiplier from per-repo config.
+
+    Tries *label_candidate* (the last timeline-applied current label) first.
+    Falls back to the highest-multiplier matching label from *current_labels*.
+    Returns ``(None, default_label_multiplier)`` when nothing matches.
+    """
+    default_mult = repo_config.default_label_multiplier if repo_config else 1.0
+
+    if label_candidate:
+        mult = resolve_label_multiplier(label_candidate, repo_config)
+        if mult is not None:
+            return label_candidate, mult
+
+    best_label: Optional[str] = None
+    best_mult: Optional[float] = None
+    for lbl in current_labels:
+        mult = resolve_label_multiplier(lbl, repo_config)
+        if mult is not None:
+            if best_mult is None or mult > best_mult or (mult == best_mult and lbl < (best_label or '')):
+                best_label = lbl
+                best_mult = mult
+
+    if best_label is not None:
+        return best_label, best_mult
+
+    return None, default_mult
+
+
 def calculate_pr_multipliers(
     pr: PullRequest, miner_eval: MinerEvaluation, master_repositories: Dict[str, RepositoryConfig]
 ) -> None:
@@ -211,7 +249,7 @@ def calculate_pr_multipliers(
 
     pr.repo_weight_multiplier = resolve_repo_weight(repo_config)
     pr.issue_multiplier = round(calculate_issue_multiplier(pr), 2)
-    pr.label_multiplier = LABEL_MULTIPLIERS.get(pr.label, 1.0) if pr.label else 1.0
+    pr.label, pr.label_multiplier = _resolve_label(pr.label, pr.current_labels, repo_config)
 
     if is_merged:
         # Spam multiplier is recalculated in finalize_miner_scores with total token score

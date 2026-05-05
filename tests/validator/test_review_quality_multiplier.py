@@ -249,7 +249,7 @@ class TestReviewCollateralMultiplierOnOpenPRCollateral:
 
 
 def _make_repo_config() -> dict:
-    return {'test/repo': RepositoryConfig(weight=1.0)}
+    return {'test/repo': RepositoryConfig(weight=1.0, label_multipliers={'fix': 1.25})}
 
 
 def _make_eval() -> MinerEvaluation:

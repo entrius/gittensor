@@ -22,6 +22,7 @@ from gittensor.utils.mirror.models import (
     MirrorPullRequestFilesResponse,
     MirrorPullRequestsResponse,
 )
+from gittensor.utils.utils import backoff_seconds
 
 
 class MirrorRequestError(RuntimeError):
@@ -119,7 +120,7 @@ class MirrorClient:
             except requests.RequestException as e:
                 last_error = f'request exception: {e}'
                 if attempt < self.max_attempts - 1:
-                    backoff = min(5 * (2**attempt), 30)
+                    backoff = backoff_seconds(attempt)
                     bt.logging.warning(
                         f'Mirror GET {path} raised {e} '
                         f'(attempt {attempt + 1}/{self.max_attempts}), retrying in {backoff}s...'
@@ -149,7 +150,7 @@ class MirrorClient:
 
             last_error = f'status {response.status_code}: {_body_preview(response)}'
             if attempt < self.max_attempts - 1:
-                backoff = min(5 * (2**attempt), 30)
+                backoff = backoff_seconds(attempt)
                 bt.logging.warning(
                     f'Mirror GET {path} failed ({last_error}) '
                     f'(attempt {attempt + 1}/{self.max_attempts}), retrying in {backoff}s...'

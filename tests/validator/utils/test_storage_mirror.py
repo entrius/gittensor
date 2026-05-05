@@ -164,3 +164,61 @@ class TestStoreEvaluationCombinesBothLists:
         assert len(merged_arg) == 1
         assert merged_arg[0].number == 100
         assert isinstance(merged_arg[0], PullRequest)
+
+    def test_stale_closed_prs_are_stored_separately(self):
+        storage, mock_repo = _make_storage_with_mock_repo()
+
+        eval_ = MinerEvaluation(uid=1, hotkey='hk', github_id='123')
+        eval_.stale_closed_pull_requests = [_legacy_pr(7, state=PRState.CLOSED)]
+
+        storage.store_evaluation(eval_)
+
+        stale_call = mock_repo.store_pull_requests_bulk.call_args_list[3]
+        stale_arg = stale_call.args[0]
+        assert len(stale_arg) == 1
+        assert stale_arg[0].number == 7
+        assert stale_arg[0].pr_state == PRState.CLOSED
+        assert eval_.total_closed_prs == 0
+
+
+def test_cleanup_stale_called_with_commit_false():
+    """cleanup_stale_miner_data must be called with commit=False inside the transaction.
+
+    Regression test for #749: cleanup_stale_miner_data was called without
+    commit=False, causing its four execute_command calls to commit the
+    in-flight transaction prematurely.
+    """
+    storage, mock_repo = _make_storage_with_mock_repo()
+    eval_obj = MinerEvaluation(uid=1, hotkey='hk', github_id='gh1')
+    eval_obj.mirror_merged_prs = []
+    eval_obj.mirror_open_prs = []
+    eval_obj.mirror_closed_prs = []
+
+    with patch(
+        'gittensor.validator.oss_contributions.mirror.adapters.mirror_scored_pr_to_legacy_pull_request',
+        side_effect=lambda s, *a, **kw: s,
+    ):
+        storage.store_evaluation(eval_obj)
+
+    mock_repo.cleanup_stale_miner_data.assert_called_once_with(eval_obj, commit=False)
+
+
+def test_failure_after_cleanup_triggers_rollback():
+    """A failure between cleanup and set_miner_evaluation must rollback the entire transaction."""
+    storage, mock_repo = _make_storage_with_mock_repo()
+    mock_repo.set_miner_evaluation.side_effect = RuntimeError('DB write failed')
+
+    eval_obj = MinerEvaluation(uid=1, hotkey='hk', github_id='gh1')
+    eval_obj.mirror_merged_prs = []
+    eval_obj.mirror_open_prs = []
+    eval_obj.mirror_closed_prs = []
+
+    with patch(
+        'gittensor.validator.oss_contributions.mirror.adapters.mirror_scored_pr_to_legacy_pull_request',
+        side_effect=lambda s, *a, **kw: s,
+    ):
+        result = storage.store_evaluation(eval_obj)
+
+    assert result.success is False
+    storage.db_connection.rollback.assert_called_once()
+    storage.db_connection.commit.assert_not_called()

@@ -20,7 +20,7 @@ import requests
 from rich.console import Console
 
 from gittensor.cli.issue_commands.tables import build_pr_table
-from gittensor.constants import BASE_GITHUB_API_URL, NETWORK_MAP
+from gittensor.constants import BASE_GITHUB_API_URL, MAX_ISSUE_ID, NETWORK_MAP
 from gittensor.validator.issue_competitions.storage_utils import (
     ISSUES_MAPPING_ROOT_KEY,
     compute_ink5_lazy_key,
@@ -39,7 +39,6 @@ ALPHA_DECIMALS = 9
 ALPHA_RAW_UNIT = 10**ALPHA_DECIMALS
 MIN_BOUNTY_ALPHA = 10
 MAX_BOUNTY_ALPHA = 100_000_000
-MAX_ISSUE_ID = 1_000_000
 MAX_ISSUE_NUMBER = 2**32 - 1
 REPO_PATTERN = re.compile(r'^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$')
 GITHUB_API_TIMEOUT = 10

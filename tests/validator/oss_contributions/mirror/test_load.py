@@ -332,11 +332,11 @@ class TestErrorPaths:
         call_count = {'n': 0}
         original = load_mod._maybe_add_pr
 
-        def flaky(eval_, pr, repos, lookback):
+        def flaky(eval_, pr, repos, lookback, registration_cutoff=None):
             call_count['n'] += 1
             if call_count['n'] == 1:
                 raise RuntimeError('synthetic failure on first PR')
-            original(eval_, pr, repos, lookback)
+            original(eval_, pr, repos, lookback, registration_cutoff=registration_cutoff)
 
         monkeypatch.setattr(load_mod, '_maybe_add_pr', flaky)
 
@@ -353,3 +353,70 @@ class TestErrorPaths:
         assert len(eval_.merged_prs) == 1
         assert eval_.merged_prs[0].pr.pr_number == 2
         assert eval_.fetch_failed is False  # per-PR errors don't poison the whole batch
+
+
+class TestRegistrationCutoffGate:
+    def test_merged_before_cutoff_skipped(self):
+        client = Mock()
+        client.get_miner_pulls.return_value = _build_response(
+            [
+                _pr_dict(1, state='MERGED', merged_at='2026-04-10T00:00:00Z'),
+                _pr_dict(2, state='MERGED', merged_at='2026-04-25T00:00:00Z'),
+            ]
+        )
+        cutoff = datetime(2026, 4, 20, tzinfo=timezone.utc)
+        eval_ = _eval()
+        load_mirror_miner_prs(eval_, _mirror_repos('entrius/gittensor-ui'), client=client, registration_cutoff=cutoff)
+
+        assert len(eval_.merged_prs) == 1
+        assert eval_.merged_prs[0].pr.pr_number == 2
+
+    def test_merged_at_cutoff_kept(self):
+        client = Mock()
+        client.get_miner_pulls.return_value = _build_response(
+            [
+                _pr_dict(1, state='MERGED', merged_at='2026-04-10T00:00:00Z'),
+            ]
+        )
+        cutoff = datetime(2026, 4, 10, tzinfo=timezone.utc)
+        eval_ = _eval()
+        load_mirror_miner_prs(eval_, _mirror_repos('entrius/gittensor-ui'), client=client, registration_cutoff=cutoff)
+
+        assert len(eval_.merged_prs) == 1
+        assert eval_.merged_prs[0].pr.pr_number == 1
+
+    def test_closed_before_cutoff_skipped(self):
+        recent_create = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+        client = Mock()
+        client.get_miner_pulls.return_value = _build_response(
+            [
+                _pr_dict(
+                    1,
+                    state='CLOSED',
+                    merged_at=None,
+                    created_at=recent_create,
+                ),
+            ]
+        )
+        # Override closed_at to before cutoff (mirror dict sets closed_at=merged_at;
+        # for state=CLOSED with merged_at=None, closed_at is None — so set it explicitly)
+        prs = client.get_miner_pulls.return_value.pull_requests
+        prs[0].closed_at = datetime(2026, 4, 10, tzinfo=timezone.utc)
+
+        cutoff = datetime(2026, 4, 20, tzinfo=timezone.utc)
+        eval_ = _eval()
+        load_mirror_miner_prs(eval_, _mirror_repos('entrius/gittensor-ui'), client=client, registration_cutoff=cutoff)
+
+        assert len(eval_.closed_prs) == 0
+
+    def test_no_cutoff_does_not_skip(self):
+        client = Mock()
+        client.get_miner_pulls.return_value = _build_response(
+            [
+                _pr_dict(1, state='MERGED', merged_at='2026-04-10T00:00:00Z'),
+            ]
+        )
+        eval_ = _eval()
+        load_mirror_miner_prs(eval_, _mirror_repos('entrius/gittensor-ui'), client=client)
+
+        assert len(eval_.merged_prs) == 1

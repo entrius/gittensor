@@ -2,6 +2,7 @@
 # Copyright © 2025 Entrius
 from __future__ import annotations
 
+from datetime import datetime
 from typing import TYPE_CHECKING, Dict, Optional, Set, Tuple
 
 import bittensor as bt
@@ -39,6 +40,7 @@ async def evaluate_miners_pull_requests(
     programming_languages: Dict[str, LanguageConfig],
     token_config: TokenConfig,
     stale_hotkey: Optional[str] = None,
+    registration_cutoff: Optional[datetime] = None,
 ) -> MinerEvaluation:
     """
     Entry point from taking a miners response -> Get PRs -> Score PRs
@@ -51,6 +53,7 @@ async def evaluate_miners_pull_requests(
         programming_languages: The programming languages and their weights
         token_config: Token-based scoring weights configuration
         stale_hotkey: If set, the UID has a stored PAT from this old hotkey (re-registration detected)
+        registration_cutoff: If set, skip merged/closed PRs whose effective timestamp predates this cutoff
 
     Returns:
         MinerEvaluation: The object containing scores, valid_prs, etc.
@@ -75,7 +78,7 @@ async def evaluate_miners_pull_requests(
 
     if legacy_repos:
         with session_scope():
-            load_miners_prs(miner_eval, legacy_repos)
+            load_miners_prs(miner_eval, legacy_repos, registration_cutoff=registration_cutoff)
             score_miner_prs(miner_eval, legacy_repos, programming_languages, token_config)
 
     if mirror_repos:
@@ -85,7 +88,9 @@ async def evaluate_miners_pull_requests(
             github_id=miner_eval.github_id,
         )
         with MirrorClient() as mirror_client:
-            load_mirror_miner_prs(mirror_eval, mirror_repos, client=mirror_client)
+            load_mirror_miner_prs(
+                mirror_eval, mirror_repos, client=mirror_client, registration_cutoff=registration_cutoff
+            )
             score_mirror_miner_prs(mirror_eval, mirror_repos, programming_languages, token_config, client=mirror_client)
         combine(miner_eval, mirror_eval)
 
@@ -133,6 +138,8 @@ async def get_rewards(
             else:
                 stale_hotkey = pat_entry.get('hotkey')
 
+        registration_cutoff = pat_storage.get_registration_cutoff(uid, hotkey)
+
         # Calculate score
         miner_evaluation = await evaluate_miners_pull_requests(
             uid,
@@ -142,6 +149,7 @@ async def get_rewards(
             programming_languages,
             token_config,
             stale_hotkey=stale_hotkey,
+            registration_cutoff=registration_cutoff,
         )
         miner_evaluations[uid] = miner_evaluation
 

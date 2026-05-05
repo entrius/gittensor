@@ -4,9 +4,11 @@
 
 import json
 import threading
+from datetime import datetime, timedelta
 
 import pytest
 
+from gittensor.constants import REGISTRATION_GRACE_DAYS
 from gittensor.validator import pat_storage
 
 
@@ -141,3 +143,124 @@ class TestConcurrency:
         assert not errors
         entries = pat_storage.load_all_pats()
         assert len(entries) == 20
+
+
+class TestFirstRegisteredAt:
+    def test_new_entry_stamps_first_registered_at(self):
+        pat_storage.save_pat(1, 'hotkey_1', 'ghp', 'user_1')
+        entry = pat_storage.get_pat_by_uid(1)
+        assert entry is not None
+        assert 'first_registered_at' in entry
+        assert entry['first_registered_at'] == entry['stored_at']
+
+    def test_re_broadcast_preserves_first_registered_at(self, use_tmp_pats_file):
+        initial = [
+            {
+                'uid': 1,
+                'hotkey': 'hotkey_1',
+                'pat': 'ghp_old',
+                'github_id': 'user_1',
+                'stored_at': '2026-01-01T00:00:00+00:00',
+                'first_registered_at': '2026-01-01T00:00:00+00:00',
+            }
+        ]
+        use_tmp_pats_file.write_text(json.dumps(initial))
+
+        pat_storage.save_pat(1, 'hotkey_1', 'ghp_new', 'user_1')
+
+        entry = pat_storage.get_pat_by_uid(1)
+        assert entry['first_registered_at'] == '2026-01-01T00:00:00+00:00'
+        assert entry['pat'] == 'ghp_new'
+        assert entry['stored_at'] != '2026-01-01T00:00:00+00:00'
+
+    def test_legacy_entry_grandfathered_on_re_broadcast(self, use_tmp_pats_file):
+        legacy = [
+            {
+                'uid': 1,
+                'hotkey': 'hotkey_1',
+                'pat': 'ghp_old',
+                'github_id': 'user_1',
+                'stored_at': '2020-01-01T00:00:00+00:00',
+            }
+        ]
+        use_tmp_pats_file.write_text(json.dumps(legacy))
+
+        pat_storage.save_pat(1, 'hotkey_1', 'ghp_new', 'user_1')
+
+        entry = pat_storage.get_pat_by_uid(1)
+        assert 'first_registered_at' not in entry
+        assert entry['pat'] == 'ghp_new'
+
+    def test_hotkey_change_resets_first_registered_at(self, use_tmp_pats_file):
+        initial = [
+            {
+                'uid': 1,
+                'hotkey': 'old_hotkey',
+                'pat': 'ghp_old',
+                'github_id': 'user_old',
+                'stored_at': '2020-01-01T00:00:00+00:00',
+                'first_registered_at': '2020-01-01T00:00:00+00:00',
+            }
+        ]
+        use_tmp_pats_file.write_text(json.dumps(initial))
+
+        pat_storage.save_pat(1, 'new_hotkey', 'ghp_new', 'user_new')
+
+        entry = pat_storage.get_pat_by_uid(1)
+        assert entry['first_registered_at'] != '2020-01-01T00:00:00+00:00'
+        assert entry['first_registered_at'] == entry['stored_at']
+
+
+class TestGetRegistrationCutoff:
+    def test_no_entry(self):
+        assert pat_storage.get_registration_cutoff(1, 'hotkey_1') is None
+
+    def test_hotkey_mismatch(self):
+        pat_storage.save_pat(1, 'old_hotkey', 'ghp', 'user_1')
+        assert pat_storage.get_registration_cutoff(1, 'different_hotkey') is None
+
+    def test_legacy_entry_no_field(self, use_tmp_pats_file):
+        legacy = [
+            {
+                'uid': 1,
+                'hotkey': 'hotkey_1',
+                'pat': 'ghp',
+                'github_id': 'user_1',
+                'stored_at': '2020-01-01T00:00:00+00:00',
+            }
+        ]
+        use_tmp_pats_file.write_text(json.dumps(legacy))
+        assert pat_storage.get_registration_cutoff(1, 'hotkey_1') is None
+
+    def test_returns_first_registered_minus_grace(self, use_tmp_pats_file):
+        first_reg = '2026-04-01T00:00:00+00:00'
+        entry = [
+            {
+                'uid': 1,
+                'hotkey': 'hotkey_1',
+                'pat': 'ghp',
+                'github_id': 'user_1',
+                'stored_at': first_reg,
+                'first_registered_at': first_reg,
+            }
+        ]
+        use_tmp_pats_file.write_text(json.dumps(entry))
+
+        cutoff = pat_storage.get_registration_cutoff(1, 'hotkey_1')
+
+        assert cutoff is not None
+        expected = datetime.fromisoformat(first_reg) - timedelta(days=REGISTRATION_GRACE_DAYS)
+        assert cutoff == expected
+
+    def test_malformed_iso_returns_none(self, use_tmp_pats_file):
+        bad = [
+            {
+                'uid': 1,
+                'hotkey': 'hotkey_1',
+                'pat': 'ghp',
+                'github_id': 'user_1',
+                'first_registered_at': 'not-a-date',
+            }
+        ]
+        use_tmp_pats_file.write_text(json.dumps(bad))
+        assert pat_storage.get_registration_cutoff(1, 'hotkey_1') is None

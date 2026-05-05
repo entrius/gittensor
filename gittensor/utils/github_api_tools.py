@@ -728,6 +728,7 @@ def try_add_open_or_closed_pr(
     pr_raw: Dict,
     pr_state: str,
     lookback_date_filter: datetime,
+    registration_cutoff: Optional[datetime] = None,
 ) -> None:
     """
     Attempts to add an OPEN or CLOSED PR to miner_eval if eligible.
@@ -737,6 +738,7 @@ def try_add_open_or_closed_pr(
         pr_raw: Raw PR data from GraphQL
         pr_state: GitHub PR state (OPEN, CLOSED, MERGED)
         lookback_date_filter: Date filter for lookback period
+        registration_cutoff: Skip closed PRs whose closed_at is earlier than this cutoff
     """
     # Ignore all maintainer contributions
     if not os.environ.get('DEV_MODE') and pr_raw.get('authorAssociation') in MAINTAINER_ASSOCIATIONS:
@@ -764,6 +766,9 @@ def try_add_open_or_closed_pr(
         if created_dt < lookback_date_filter:
             return
 
+        if registration_cutoff is not None and closed_dt < registration_cutoff:
+            return
+
         if closed_dt >= lookback_date_filter:
             miner_eval.add_closed_pull_request(pr_raw)
 
@@ -773,6 +778,7 @@ def should_skip_merged_pr(
     repository_full_name: str,
     repo_config: RepositoryConfig,
     lookback_date_filter: datetime,
+    registration_cutoff: Optional[datetime] = None,
 ) -> tuple[bool, Optional[str]]:
     """
     Validate a merged PR against all eligibility criteria.
@@ -782,6 +788,7 @@ def should_skip_merged_pr(
         repository_full_name (str): Full repository name (owner/repo)
         repo_config (RepositoryConfig): Repository configuration
         lookback_date_filter (datetime): Date filter for lookback period
+        registration_cutoff (Optional[datetime]): Skip merged PRs whose merged_at is earlier than this cutoff
 
     Returns:
         tuple[bool, Optional[str]]: (should_skip, skip_reason) - True if PR should be skipped with reason
@@ -797,6 +804,12 @@ def should_skip_merged_pr(
         return (
             True,
             f'Skipping PR #{pr_raw["number"]} in {repository_full_name} - merged before {PR_LOOKBACK_DAYS}-day lookback window',
+        )
+
+    if registration_cutoff is not None and merged_dt < registration_cutoff:
+        return (
+            True,
+            f'Skipping PR #{pr_raw["number"]} in {repository_full_name} - merged before miner registration on this validator',
         )
 
     # Skip if PR author is a maintainer
@@ -854,7 +867,10 @@ def should_skip_merged_pr(
 
 
 def load_miners_prs(
-    miner_eval: MinerEvaluation, master_repositories: Dict[str, RepositoryConfig], max_prs: int = 1000
+    miner_eval: MinerEvaluation,
+    master_repositories: Dict[str, RepositoryConfig],
+    max_prs: int = 1000,
+    registration_cutoff: Optional[datetime] = None,
 ) -> None:
     """
     Fetches user PRs via GraphQL API and categorize them by state.
@@ -864,6 +880,7 @@ def load_miners_prs(
         miner_eval: The MinerEvaluation object containing github details + more
         master_repositories: Repository metadata (name -> RepositoryConfig)
         max_prs: Maximum merged PRs to fetch
+        registration_cutoff: Skip PRs (merged or closed) whose effective timestamp predates this cutoff
     """
     bt.logging.info('*****Fetching PRs*****')
     miner_eval.github_pr_fetch_failed = False
@@ -945,11 +962,17 @@ def load_miners_prs(
                             continue
 
                     if pr_state in (PRState.OPEN.value, PRState.CLOSED.value):
-                        try_add_open_or_closed_pr(miner_eval, pr_raw, pr_state, lookback_date_filter)
+                        try_add_open_or_closed_pr(
+                            miner_eval, pr_raw, pr_state, lookback_date_filter, registration_cutoff=registration_cutoff
+                        )
                         continue
 
                     should_skip, skip_reason = should_skip_merged_pr(
-                        pr_raw, repository_full_name, repo_config, lookback_date_filter
+                        pr_raw,
+                        repository_full_name,
+                        repo_config,
+                        lookback_date_filter,
+                        registration_cutoff=registration_cutoff,
                     )
 
                     if should_skip:

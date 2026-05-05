@@ -34,6 +34,7 @@ def load_mirror_miner_prs(
     mirror_eval: MirrorMinerEvaluation,
     mirror_repos: Dict[str, RepositoryConfig],
     client: Optional[MirrorClient] = None,
+    registration_cutoff: Optional[datetime] = None,
 ) -> None:
     """Populate mirror_eval with PRs fetched from the mirror service.
 
@@ -41,6 +42,7 @@ def load_mirror_miner_prs(
         mirror_eval: container to populate; must already have github_id set
         mirror_repos: repo configs to filter against (only mirror_enabled entries)
         client: optional MirrorClient for dependency injection in tests
+        registration_cutoff: skip merged/closed PRs whose effective timestamp predates this cutoff
     """
 
     bt.logging.info('*****Fetching PRs from mirror*****')
@@ -65,7 +67,7 @@ def load_mirror_miner_prs(
 
     for pr in response.pull_requests:
         try:
-            _maybe_add_pr(mirror_eval, pr, mirror_repos, lookback_date)
+            _maybe_add_pr(mirror_eval, pr, mirror_repos, lookback_date, registration_cutoff=registration_cutoff)
         except Exception as e:
             bt.logging.warning(f'Error processing mirror PR #{pr.pr_number} ({pr.repo_full_name}): {e}')
 
@@ -80,6 +82,7 @@ def _maybe_add_pr(
     pr: MirrorPullRequest,
     mirror_repos: Dict[str, RepositoryConfig],
     lookback_date: datetime,
+    registration_cutoff: Optional[datetime] = None,
 ) -> None:
     """Apply load-time filters and bucket pr by state if it passes."""
 
@@ -112,12 +115,19 @@ def _maybe_add_pr(
         # closing an old PR shouldn't trigger a fresh credibility penalty).
         if pr.created_at < lookback_date:
             return
+        if registration_cutoff is not None and pr.closed_at is not None and pr.closed_at < registration_cutoff:
+            return
         mirror_eval.closed_prs.append(ScoredMirrorPR(pr=pr))
     elif pr.state == 'MERGED':
         # Apply the merge-eligibility gate at LOAD time (matches legacy parity —
         # should_skip_merged_pr runs inside load_miners_prs before adding). If we
         # deferred to scoring, rejected PRs would remain in mirror_merged_prs and
         # inflate the merged_count used in check_eligibility, distorting credibility.
+        if registration_cutoff is not None and pr.merged_at is not None and pr.merged_at < registration_cutoff:
+            bt.logging.debug(
+                f'Skipping mirror PR #{pr.pr_number} in {pr.repo_full_name} - merged before miner registration on this validator'
+            )
+            return
         candidate = ScoredMirrorPR(pr=pr)
         should_skip, reason = _should_skip_merged_mirror_pr(candidate, repo_config)
         if should_skip:

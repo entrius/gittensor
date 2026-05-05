@@ -75,6 +75,7 @@ MAX_LINES_SCORED_FOR_NON_CODE_EXT = 300
 # =============================================================================
 DEFAULT_REPO_WEIGHT = 0.01  # fallback weight for repos not in master_repositories.json
 PR_LOOKBACK_DAYS = 35  # rolling window for scoring
+REGISTRATION_GRACE_DAYS = 7
 MERGED_PR_BASE_SCORE = 25
 MIN_TOKEN_SCORE_FOR_BASE_SCORE = 5  # PRs below this get 0 base score
 MAX_CONTRIBUTION_BONUS = 25

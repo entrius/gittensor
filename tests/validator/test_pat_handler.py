@@ -185,6 +185,17 @@ class TestHandlePatBroadcast:
         assert entry['github_id'] == 'github_99'
         assert entry['hotkey'] == 'hotkey_1'
 
+    @patch('gittensor.validator.pat_handler._test_pat_against_repo', return_value=None)
+    @patch('gittensor.validator.pat_handler.validate_github_credentials', return_value=('github_42', None))
+    def test_first_broadcast_stamps_first_registered_at(self, mock_validate, mock_test_query, mock_validator):
+        synapse = _make_broadcast_synapse('hotkey_1', pat='ghp_valid')
+        _run(handle_pat_broadcast(mock_validator, synapse))
+
+        entry = pat_storage.get_pat_by_uid(1)
+        assert entry is not None
+        assert 'first_registered_at' in entry
+        assert entry['first_registered_at'] == entry['stored_at']
+
 
 class TestHandlePatCheck:
     @patch('gittensor.validator.pat_handler._test_pat_against_repo', return_value=None)

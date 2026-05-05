@@ -1646,5 +1646,124 @@ class TestSessionScope:
         assert github_api_tools._session_cache is None
 
 
+class TestRegistrationCutoffMergedGate:
+    @staticmethod
+    def _merged_pr(merged_at: str = '2026-04-15T00:00:00Z') -> Dict:
+        return {
+            'number': 42,
+            'mergedAt': merged_at,
+            'authorAssociation': 'CONTRIBUTOR',
+            'mergedBy': {'login': 'maintainer'},
+            'author': {'login': 'contributor'},
+            'reviews': {'nodes': []},
+            'repository': {
+                'name': 'foo',
+                'owner': {'login': 'owner'},
+                'defaultBranchRef': {'name': 'main'},
+            },
+            'baseRefName': 'main',
+            'headRefName': 'feature/bar',
+            'headRepository': {'name': 'foo', 'owner': {'login': 'fork-user'}},
+        }
+
+    @staticmethod
+    def _repo_config():
+        from gittensor.validator.utils.load_weights import RepositoryConfig
+
+        return RepositoryConfig(weight=0.5)
+
+    def test_no_cutoff_does_not_skip(self):
+        lookback = datetime(2026, 3, 15, tzinfo=timezone.utc)
+        pr = self._merged_pr(merged_at='2026-04-15T00:00:00Z')
+
+        should_skip, _ = github_api_tools.should_skip_merged_pr(pr, 'owner/foo', self._repo_config(), lookback)
+
+        assert should_skip is False
+
+    def test_merged_before_cutoff_skipped(self):
+        lookback = datetime(2026, 3, 15, tzinfo=timezone.utc)
+        cutoff = datetime(2026, 4, 20, tzinfo=timezone.utc)
+        pr = self._merged_pr(merged_at='2026-04-10T00:00:00Z')
+
+        should_skip, reason = github_api_tools.should_skip_merged_pr(
+            pr, 'owner/foo', self._repo_config(), lookback, registration_cutoff=cutoff
+        )
+
+        assert should_skip is True
+        assert 'registration' in (reason or '').lower()
+
+    def test_merged_at_cutoff_not_skipped(self):
+        lookback = datetime(2026, 3, 15, tzinfo=timezone.utc)
+        cutoff = datetime(2026, 4, 10, tzinfo=timezone.utc)
+        pr = self._merged_pr(merged_at='2026-04-10T00:00:00Z')
+
+        should_skip, _ = github_api_tools.should_skip_merged_pr(
+            pr, 'owner/foo', self._repo_config(), lookback, registration_cutoff=cutoff
+        )
+
+        assert should_skip is False
+
+    def test_merged_after_cutoff_not_skipped(self):
+        lookback = datetime(2026, 3, 15, tzinfo=timezone.utc)
+        cutoff = datetime(2026, 4, 1, tzinfo=timezone.utc)
+        pr = self._merged_pr(merged_at='2026-04-15T00:00:00Z')
+
+        should_skip, _ = github_api_tools.should_skip_merged_pr(
+            pr, 'owner/foo', self._repo_config(), lookback, registration_cutoff=cutoff
+        )
+
+        assert should_skip is False
+
+
+class TestRegistrationCutoffClosedGate:
+    @staticmethod
+    def _closed_pr(closed_at: str, created_at: str) -> Dict:
+        return {
+            'number': 7,
+            'closedAt': closed_at,
+            'createdAt': created_at,
+            'authorAssociation': 'CONTRIBUTOR',
+        }
+
+    def test_no_cutoff_added(self):
+        miner_eval = Mock()
+        lookback = datetime(2026, 3, 15, tzinfo=timezone.utc)
+        pr = self._closed_pr(closed_at='2026-04-10T00:00:00Z', created_at='2026-04-05T00:00:00Z')
+
+        github_api_tools.try_add_open_or_closed_pr(miner_eval, pr, 'CLOSED', lookback)
+
+        miner_eval.add_closed_pull_request.assert_called_once()
+
+    def test_closed_before_cutoff_skipped(self):
+        miner_eval = Mock()
+        lookback = datetime(2026, 3, 15, tzinfo=timezone.utc)
+        cutoff = datetime(2026, 4, 20, tzinfo=timezone.utc)
+        pr = self._closed_pr(closed_at='2026-04-10T00:00:00Z', created_at='2026-04-05T00:00:00Z')
+
+        github_api_tools.try_add_open_or_closed_pr(miner_eval, pr, 'CLOSED', lookback, registration_cutoff=cutoff)
+
+        miner_eval.add_closed_pull_request.assert_not_called()
+
+    def test_closed_at_cutoff_kept(self):
+        miner_eval = Mock()
+        lookback = datetime(2026, 3, 15, tzinfo=timezone.utc)
+        cutoff = datetime(2026, 4, 10, tzinfo=timezone.utc)
+        pr = self._closed_pr(closed_at='2026-04-10T00:00:00Z', created_at='2026-04-05T00:00:00Z')
+
+        github_api_tools.try_add_open_or_closed_pr(miner_eval, pr, 'CLOSED', lookback, registration_cutoff=cutoff)
+
+        miner_eval.add_closed_pull_request.assert_called_once()
+
+    def test_open_pr_unaffected_by_cutoff(self):
+        miner_eval = Mock()
+        lookback = datetime(2026, 3, 15, tzinfo=timezone.utc)
+        cutoff = datetime(2026, 4, 20, tzinfo=timezone.utc)
+        pr = {'number': 9, 'authorAssociation': 'CONTRIBUTOR'}
+
+        github_api_tools.try_add_open_or_closed_pr(miner_eval, pr, 'OPEN', lookback, registration_cutoff=cutoff)
+
+        miner_eval.add_open_pull_request.assert_called_once()
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

@@ -11,9 +11,11 @@ import json
 import os
 import tempfile
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
+
+from gittensor.constants import REGISTRATION_GRACE_DAYS
 
 PATS_FILE = Path(__file__).resolve().parents[2] / 'data' / 'miner_pats.json'
 
@@ -37,14 +39,25 @@ def save_pat(uid: int, hotkey: str, pat: str, github_id: str) -> None:
     """Upsert a PAT entry by UID. Creates the file if needed."""
     with _lock:
         entries = _read_file()
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        prior = next((e for e in entries if e.get('uid') == uid), None)
+
+        first_registered_at: Optional[str]
+        if prior is not None and prior.get('hotkey') == hotkey:
+            first_registered_at = prior.get('first_registered_at') if 'first_registered_at' in prior else None
+        else:
+            first_registered_at = now_iso
 
         entry = {
             'uid': uid,
             'hotkey': hotkey,
             'pat': pat,
             'github_id': github_id,
-            'stored_at': datetime.now(timezone.utc).isoformat(),
+            'stored_at': now_iso,
         }
+        if first_registered_at is not None:
+            entry['first_registered_at'] = first_registered_at
 
         for i, existing in enumerate(entries):
             if existing.get('uid') == uid:
@@ -54,6 +67,21 @@ def save_pat(uid: int, hotkey: str, pat: str, github_id: str) -> None:
             entries.append(entry)
 
         _write_file(entries)
+
+
+def get_registration_cutoff(uid: int, hotkey: str) -> Optional[datetime]:
+    """Return the registration scoring cutoff for this miner, or None when no gate applies."""
+    entry = get_pat_by_uid(uid)
+    if entry is None or entry.get('hotkey') != hotkey:
+        return None
+    raw = entry.get('first_registered_at')
+    if not raw:
+        return None
+    try:
+        first_registered_at = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    return first_registered_at - timedelta(days=REGISTRATION_GRACE_DAYS)
 
 
 def get_pat_by_uid(uid: int) -> Optional[dict]:

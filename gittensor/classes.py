@@ -305,12 +305,8 @@ class PullRequest:
         last_edited_at = parse_github_timestamp_to_cst(raw_edited_at) if isinstance(raw_edited_at, str) else None
         merged_at = parse_github_timestamp_to_cst(pr_data['mergedAt']) if is_merged else None
 
-        changes_requested_count = 0
-        if is_merged:
-            cr_reviews = pr_data.get('changesRequestedReviews', {}).get('nodes', [])
-            changes_requested_count = sum(
-                1 for r in cr_reviews if r.get('authorAssociation') in MAINTAINER_ASSOCIATIONS
-            )
+        cr_reviews = (pr_data.get('changesRequestedReviews') or {}).get('nodes') or []
+        changes_requested_count = sum(1 for r in cr_reviews if r.get('authorAssociation') in MAINTAINER_ASSOCIATIONS)
 
         current = {(n.get('name') or '').lower() for n in (pr_data.get('labels') or {}).get('nodes') or [] if n}
         label: Optional[str] = None
@@ -370,10 +366,15 @@ class MinerEvaluation:
     total_leaf_score: float = 0.0
     failed_reason: Optional[str] = None
     github_pr_fetch_failed: bool = False
+    # Mirror-source-specific fetch flag set by mirror.combine.combine alongside
+    # the OR into github_pr_fetch_failed. Lets the validator tell a complete
+    # mirror outage apart from a legacy partial-pagination failure.
+    mirror_pr_fetch_failed: bool = False
     evaluation_timestamp: Optional[datetime] = None
     merged_pull_requests: List[PullRequest] = field(default_factory=list)
     open_pull_requests: List[PullRequest] = field(default_factory=list)
     closed_pull_requests: List[PullRequest] = field(default_factory=list)
+    stale_closed_pull_requests: List[PullRequest] = field(default_factory=list)
 
     # Populated by gittensor.validator.oss_contributions.mirror.combine.combine
     # when the mirror scoring path runs. Empty for legacy-only evaluations.
@@ -482,6 +483,13 @@ class MinerEvaluation:
             f'CLOSED PR #{raw_pr["number"]} in {parse_repo_name(raw_pr["repository"])} counting towards credibility'
         )
         self.closed_pull_requests.append(
+            PullRequest.from_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id)
+        )
+
+    def add_stale_closed_pull_request(self, raw_pr: Dict):
+        """Track a stale CLOSED PR so storage can refresh its pull_requests row."""
+        bt.logging.info(f'Stale CLOSED PR #{raw_pr["number"]} in {parse_repo_name(raw_pr["repository"])}')
+        self.stale_closed_pull_requests.append(
             PullRequest.from_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id)
         )
 
@@ -708,6 +716,9 @@ class MinerEvaluationCache:
         cached.merged_pull_requests = [_pr_for_cache(pr) for pr in evaluation.merged_pull_requests]
         cached.open_pull_requests = [_pr_for_cache(pr) for pr in evaluation.open_pull_requests]
         cached.closed_pull_requests = [_pr_for_cache(pr) for pr in evaluation.closed_pull_requests]
+        cached.mirror_merged_prs = [_scored_mirror_pr_for_cache(pr) for pr in evaluation.mirror_merged_prs]
+        cached.mirror_open_prs = [_scored_mirror_pr_for_cache(pr) for pr in evaluation.mirror_open_prs]
+        cached.mirror_closed_prs = [_scored_mirror_pr_for_cache(pr) for pr in evaluation.mirror_closed_prs]
         return cached
 
     @staticmethod
@@ -735,3 +746,9 @@ def _pr_with_fresh_issues(pr: 'PullRequest') -> 'PullRequest':
     if pr.issues is not None:
         pr_copy.issues = [copy.copy(issue) for issue in pr.issues]
     return pr_copy
+
+
+def _scored_mirror_pr_for_cache(scored: 'ScoredMirrorPR') -> 'ScoredMirrorPR':
+    scored_copy = copy.copy(scored)
+    scored_copy.files = None
+    return scored_copy

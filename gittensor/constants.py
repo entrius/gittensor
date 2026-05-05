@@ -81,7 +81,7 @@ MAX_CONTRIBUTION_BONUS = 25
 CONTRIBUTION_SCORE_FOR_FULL_BONUS = 1500
 
 # Boosts
-MAX_CODE_DENSITY_MULTIPLIER = 1.5
+MAX_CODE_DENSITY_MULTIPLIER = 1.15
 
 # Label multipliers - applied based on the last label set on the PR (requires triage+ access)
 LABEL_MULTIPLIERS: dict[str, float] = {
@@ -194,6 +194,7 @@ MAINTAINER_ASSOCIATIONS = ['OWNER', 'MEMBER', 'COLLABORATOR']
 
 # PR Review Quality Multiplier
 REVIEW_PENALTY_RATE = 0.15  # 15% deduction per CHANGES_REQUESTED review from a maintainer
+MAX_OPEN_PR_REVIEW_COLLATERAL_MULTIPLIER = 2.0  # Cap open PR collateral growth from review iterations
 
 # Issue multiplier (flat values, no age scaling)
 STANDARD_ISSUE_MULTIPLIER = 1.33  # Non-maintainer issue author

@@ -16,8 +16,9 @@ import json
 import os
 import sys
 
-# Stub heavy imports during shell completion so tab-completion stays fast.
-if os.environ.get('_GITT_COMPLETE'):
+# Stub heavy imports during shell completion and --help so tab-completion stays
+# fast and bittensor's argparse doesn't hijack click's help output.
+if os.environ.get('_GITT_COMPLETE') or any(arg in ('-h', '--help') for arg in sys.argv[1:]):
     import types as _types
 
     class _Stub(_types.ModuleType):
@@ -27,7 +28,7 @@ if os.environ.get('_GITT_COMPLETE'):
         def __call__(self, *_a, **_kw):
             return self
 
-    _stub = _Stub('_gitt_completion_stub')
+    _stub = _Stub('_gitt_cli_stub')
     for _pkg in ('bittensor', 'requests'):
         sys.modules[_pkg] = _stub
 
@@ -92,15 +93,21 @@ def show_config():
         console.print(f'[red]Error reading config: {e}[/red]')
 
 
+CONFIG_KEYS = ('wallet', 'hotkey', 'network', 'contract_address', 'ws_endpoint')
+
+
 @config_group.command('set')
-@click.argument('key', type=str)
+@click.argument('key', type=click.Choice(CONFIG_KEYS, case_sensitive=False))
 @click.argument('value', type=str)
 def config_set(key: str, value: str):
     """Set a configuration value.
 
-    [dim]Use this command to override values stored in `~/.gittensor/config.json`.[/dim]
+    [dim]Use this command to override values stored in `~/.gittensor/config.json`.
+    KEY must be one of the recognised settings — unknown keys are rejected so a
+    typo (for example `wallet_name`) cannot silently write a dead entry that
+    downstream commands will ignore.[/dim]
 
-    [dim]Common keys:
+    [dim]Recognised keys:
         wallet              Wallet name
         hotkey              Hotkey name
         contract_address    Contract address
@@ -114,6 +121,7 @@ def config_set(key: str, value: str):
         $ gitt config set network local
     [/dim]
     """
+    key = key.lower()
     # Ensure config directory exists
     GITTENSOR_DIR.mkdir(parents=True, exist_ok=True)
 

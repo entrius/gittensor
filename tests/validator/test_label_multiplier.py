@@ -279,16 +279,14 @@ def _load_from_dict(repo_dict: dict):
 
 def test_load_rejects_more_than_10_entries():
     lm = {f'label-{i}': 1.0 for i in range(11)}
-    repos = load_result = _load_from_dict({'owner/repo': {'weight': 1.0, 'label_multipliers': lm}})
+    repos = _load_from_dict({'owner/repo': {'weight': 1.0, 'label_multipliers': lm}})
     config = repos.get('owner/repo')
     assert config is not None
     assert config.label_multipliers is None
 
 
 def test_load_skips_out_of_range_entry():
-    repos = _load_from_dict(
-        {'owner/repo': {'weight': 1.0, 'label_multipliers': {'bug': 25.0, 'feature': 1.5}}}
-    )
+    repos = _load_from_dict({'owner/repo': {'weight': 1.0, 'label_multipliers': {'bug': 25.0, 'feature': 1.5}}})
     config = repos.get('owner/repo')
     assert config is not None
     assert config.label_multipliers is not None

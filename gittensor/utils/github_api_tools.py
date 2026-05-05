@@ -319,7 +319,7 @@ def get_merge_base_sha(repository: str, base_sha: str, head_sha: str, token: str
     return None
 
 
-def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -> Optional[List[FileChange]]:
+def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -> List[FileChange]:
     """
     Get the diff for a specific PR by repository name and PR number.
 
@@ -333,7 +333,7 @@ def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -
         pr_number (int): PR number
         token (str): Github pat
     Returns:
-        List[FileChanges]: List object with file changes or None if error
+        List[FileChanges]: List object with file changes or empty list if error
     """
     max_attempts = 3
     per_page = 100
@@ -759,9 +759,9 @@ def try_add_open_or_closed_pr(
         closed_dt = parse_github_iso_to_utc(closed_at)
         created_dt = parse_github_iso_to_utc(created_at)
 
-        # Ignore stale PRs that were created before the scoring lookback window.
         # This allows users to close old PRs without receiving a fresh credibility penalty.
         if created_dt < lookback_date_filter:
+            miner_eval.add_stale_closed_pull_request(pr_raw)
             return
 
         if closed_dt >= lookback_date_filter:

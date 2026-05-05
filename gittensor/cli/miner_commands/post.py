@@ -194,7 +194,7 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, min_vt
         _render_skipped_validators(excluded, json_mode)
 
 
-def _validate_pat_locally(pat: str) -> Optional[str]:
+def _validate_pat_locally(pat: str) -> str | None:
     """Validate PAT mirrors the validator-side checks: user identity + GraphQL access.
 
     Returns the GitHub login on success, or None if the PAT is invalid.
@@ -206,7 +206,7 @@ def _validate_pat_locally(pat: str) -> Optional[str]:
         )
         if user_resp.status_code != 200:
             return None
-        login: Optional[str] = user_resp.json().get('login') or None
+        login: str | None = user_resp.json().get('login') or None
 
         # Check GraphQL access (same test the validator runs during PAT broadcast)
         gql_resp = requests.post(

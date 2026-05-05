@@ -702,6 +702,39 @@ class TestOpenIssueSpamSourceIsMirror:
         assert eval_.issue_discovery_score > 0
         assert eval_.total_open_issues == 2
 
+    def test_transferred_open_issues_do_not_count_for_spam_or_audit(self):
+        """Transferred issues are ignored by scoring and by the open-issue count."""
+        open_issues = [
+            _issue_dict(
+                issue_number=200 + i,
+                state='OPEN',
+                state_reason=None,
+                solved_by_pr=None,
+                is_transferred=(i >= 5),
+            )
+            for i in range(8)
+        ]
+        solved_issues = [_issue_dict(issue_number=300 + i, author_github_id=f'discoverer{i}') for i in range(8)]
+        client = Mock()
+        client.get_miner_issues.return_value = _response(open_issues + solved_issues)
+
+        eval_ = _eval()
+        eval_.mirror_merged_prs = [_scored_mirror_pr('entrius/gittensor-ui', 100, token_score=100.0)]
+
+        _run(
+            run_mirror_issue_discovery(
+                {1: eval_},
+                _mirror_repos('entrius/gittensor-ui'),
+                _EMPTY_LANGS,
+                _EMPTY_TOKEN_CONFIG,
+                client=client,
+            )
+        )
+
+        # Only the 5 non-transferred open issues count, so spam stays below/at threshold.
+        assert eval_.issue_discovery_score > 0
+        assert eval_.total_open_issues == 5
+
 
 class TestCrossMinerOneIssuePerPr:
     """Regression tests for the cross-miner one-issue-per-PR rule.

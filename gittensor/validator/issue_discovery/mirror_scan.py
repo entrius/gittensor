@@ -171,7 +171,7 @@ async def run_mirror_issue_discovery(
         # also written to evaluation.total_open_issues so the DB row reflects
         # mirror-scoped state (the legacy GraphQL global open-issue count was
         # never the right signal for the gate).
-        open_issue_count = sum(1 for i in filtered if i.state == 'OPEN')
+        open_issue_count = sum(1 for i in filtered if i.state == 'OPEN' and not i.is_transferred)
         pending.append((evaluation, filtered, open_issue_count))
 
     canonical_pr_owners = _build_canonical_pr_owners(pending)

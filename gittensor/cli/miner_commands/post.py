@@ -98,10 +98,16 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, min_vt
 
     # 1b. Validate PAT locally
     with _status('[bold]Validating PAT...', json_mode):
-        pat_valid = _validate_pat_locally(pat)
+        pat_valid, pat_error_code, pat_error_message = _validate_pat_locally(pat)
 
     if not pat_valid:
-        _error('GitHub PAT is invalid or expired. Check your GITTENSOR_MINER_PAT.', json_mode)
+        _error(
+            pat_error_message
+            if pat_error_message is not None
+            else 'GitHub PAT is invalid or expired. Check your GITTENSOR_MINER_PAT.',
+            json_mode,
+            error_code=pat_error_code,
+        )
         sys.exit(1)
 
     _print('[green]PAT is valid.[/green]', json_mode)
@@ -193,29 +199,45 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, min_vt
         _render_skipped_validators(excluded, json_mode)
 
 
-def _validate_pat_locally(pat: str) -> bool:
+def _validate_pat_locally(pat: str) -> tuple[bool, str | None, str | None]:
     """Validate PAT mirrors the validator-side checks: user identity + GraphQL access."""
     try:
         # Check basic auth
         user_resp = requests.get(
             f'{BASE_GITHUB_API_URL}/user', headers=make_headers(pat), timeout=GITHUB_HTTP_TIMEOUT_SECONDS
         )
-        if user_resp.status_code != 200:
-            return False
+    except requests.RequestException as exc:
+        return False, 'github_network_error', f'Failed to reach GitHub API: {exc}. Check your network and retry.'
 
-        # Check GraphQL access (same test the validator runs during PAT broadcast)
+    if user_resp.status_code == 200:
+        pass
+    elif user_resp.status_code == 401:
+        return False, 'pat_invalid', 'GitHub PAT is invalid or expired. Rotate your token at github.com/settings/tokens.'
+    elif user_resp.status_code == 429:
+        return False, 'github_rate_limited', 'GitHub API rate limit reached. Retry after the reset time.'
+    elif user_resp.status_code == 403:
+        if user_resp.headers.get('x-ratelimit-remaining') == '0' or 'rate limit' in user_resp.text.lower():
+            return False, 'github_rate_limited', 'GitHub API rate limit reached. Retry after the reset time.'
+        return False, 'pat_invalid', 'GitHub PAT is invalid or expired. Rotate your token at github.com/settings/tokens.'
+    elif user_resp.status_code == 408 or 500 <= user_resp.status_code < 600:
+        return False, 'github_unavailable', f'GitHub API is currently unavailable (HTTP {user_resp.status_code}). Retry in a few minutes.'
+    else:
+        return False, 'pat_invalid', 'GitHub PAT is invalid or expired. Rotate your token at github.com/settings/tokens.'
+
+    try:
         gql_resp = requests.post(
             f'{BASE_GITHUB_API_URL}/graphql',
             json={'query': GRAPHQL_VIEWER_QUERY},
             headers=make_graphql_headers(pat),
             timeout=GITHUB_HTTP_TIMEOUT_SECONDS,
         )
-        if gql_resp.status_code != 200:
-            console.print(
-                '[red]PAT lacks GraphQL API access. Fine-grained PATs need "Public Repositories (read-only)" permission.[/red]'
-            )
-            return False
+    except requests.RequestException as exc:
+        return False, 'github_network_error', f'Failed to reach GitHub API: {exc}. Check your network and retry.'
 
-        return True
-    except requests.RequestException:
-        return False
+    if gql_resp.status_code != 200:
+        console.print(
+            '[red]PAT lacks GraphQL API access. Fine-grained PATs need "Public Repositories (read-only)" permission.[/red]'
+        )
+        return False, 'pat_invalid', 'PAT lacks GraphQL API access. Fine-grained PATs need "Public Repositories (read-only)" permission.'
+
+    return True, None, None

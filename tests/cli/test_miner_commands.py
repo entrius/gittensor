@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
+import requests
 from click.testing import CliRunner
 
 from gittensor import __version__
@@ -48,7 +49,7 @@ class TestMinerPost:
         output = json.loads(result.output)
         assert output['success'] is False
 
-    @patch('gittensor.cli.miner_commands.post._validate_pat_locally', return_value=False)
+    @patch('gittensor.cli.miner_commands.post._validate_pat_locally', return_value=(False, 'pat_invalid', 'GitHub PAT is invalid or expired. Rotate your token at github.com/settings/tokens.'))
     def test_pat_flag_used(self, mock_validate, runner, monkeypatch):
         monkeypatch.delenv('GITTENSOR_MINER_PAT', raising=False)
         result = runner.invoke(cli, ['miner', 'post', '--pat', 'ghp_test123', '--wallet', 'test', '--hotkey', 'test'])
@@ -56,12 +57,70 @@ class TestMinerPost:
         assert 'invalid' in result.output.lower() or 'expired' in result.output.lower()
         mock_validate.assert_called_once_with('ghp_test123')
 
-    @patch('gittensor.cli.miner_commands.post._validate_pat_locally', return_value=False)
+    @patch('gittensor.cli.miner_commands.post._validate_pat_locally', return_value=(False, 'pat_invalid', 'GitHub PAT is invalid or expired. Rotate your token at github.com/settings/tokens.'))
     def test_invalid_pat_exits(self, mock_validate, runner, monkeypatch):
         monkeypatch.setenv('GITTENSOR_MINER_PAT', 'ghp_invalid')
         result = runner.invoke(cli, ['miner', 'post', '--wallet', 'test', '--hotkey', 'test'])
         assert result.exit_code != 0
         assert 'invalid' in result.output.lower() or 'expired' in result.output.lower()
+
+    @patch('gittensor.cli.miner_commands.post.requests.post')
+    @patch('gittensor.cli.miner_commands.post.requests.get')
+    def test_user_endpoint_401_maps_to_pat_invalid(self, mock_get, mock_post, runner, monkeypatch):
+        mock_get.return_value = SimpleNamespace(status_code=401, headers={}, text='')
+        mock_post.return_value = SimpleNamespace(status_code=200)
+        result = runner.invoke(
+            cli,
+            ['miner', 'post', '--json-output', '--pat', 'ghp_test123', '--wallet', 'test', '--hotkey', 'test'],
+        )
+        assert result.exit_code != 0
+        output = json.loads(result.output)
+        assert output['error_code'] == 'pat_invalid'
+        assert 'invalid' in output['error'].lower() or 'expired' in output['error'].lower()
+        mock_post.assert_not_called()
+
+    @patch('gittensor.cli.miner_commands.post.requests.post')
+    @patch('gittensor.cli.miner_commands.post.requests.get')
+    def test_user_endpoint_500_maps_to_github_unavailable(self, mock_get, mock_post, runner, monkeypatch):
+        mock_get.return_value = SimpleNamespace(status_code=500, headers={}, text='')
+        mock_post.return_value = SimpleNamespace(status_code=200)
+        result = runner.invoke(
+            cli,
+            ['miner', 'post', '--json-output', '--pat', 'ghp_test123', '--wallet', 'test', '--hotkey', 'test'],
+        )
+        assert result.exit_code != 0
+        output = json.loads(result.output)
+        assert output['error_code'] == 'github_unavailable'
+        assert 'http 500' in output['error'].lower()
+        mock_post.assert_not_called()
+
+    @patch('gittensor.cli.miner_commands.post.requests.post')
+    @patch('gittensor.cli.miner_commands.post.requests.get')
+    def test_user_endpoint_403_rate_limit_maps_to_github_rate_limited(self, mock_get, mock_post, runner, monkeypatch):
+        mock_get.return_value = SimpleNamespace(status_code=403, headers={'x-ratelimit-remaining': '0'}, text='API rate limit exceeded')
+        mock_post.return_value = SimpleNamespace(status_code=200)
+        result = runner.invoke(
+            cli,
+            ['miner', 'post', '--json-output', '--pat', 'ghp_test123', '--wallet', 'test', '--hotkey', 'test'],
+        )
+        assert result.exit_code != 0
+        output = json.loads(result.output)
+        assert output['error_code'] == 'github_rate_limited'
+        assert 'rate limit' in output['error'].lower()
+        mock_post.assert_not_called()
+
+    @patch('gittensor.cli.miner_commands.post.requests.post')
+    @patch('gittensor.cli.miner_commands.post.requests.get', side_effect=requests.Timeout('timed out'))
+    def test_user_endpoint_timeout_maps_to_github_network_error(self, mock_get, mock_post, runner, monkeypatch):
+        result = runner.invoke(
+            cli,
+            ['miner', 'post', '--json-output', '--pat', 'ghp_test123', '--wallet', 'test', '--hotkey', 'test'],
+        )
+        assert result.exit_code != 0
+        output = json.loads(result.output)
+        assert output['error_code'] == 'github_network_error'
+        assert 'timed out' in output['error'].lower()
+        mock_post.assert_not_called()
 
     def test_help_text(self, runner):
         result = runner.invoke(cli, ['miner', 'post', '--help'])
@@ -96,7 +155,7 @@ class TestMinerPost:
                 return responses
 
         with (
-            patch('gittensor.cli.miner_commands.post._validate_pat_locally', return_value=True),
+            patch('gittensor.cli.miner_commands.post._validate_pat_locally', return_value=(True, None, None)),
             patch(
                 'gittensor.cli.miner_commands.post._connect_bittensor',
                 return_value=(wallet, object(), metagraph, FakeDendrite()),

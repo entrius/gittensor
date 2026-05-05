@@ -13,6 +13,7 @@ existing isolation pattern in ``issue_discovery/mirror_scan.py``.
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from typing import Dict, Set
 from unittest.mock import AsyncMock
@@ -39,8 +40,7 @@ class _StubValidator:
         return set()
 
 
-@pytest.mark.asyncio
-async def test_per_miner_exception_does_not_abort_round(monkeypatch):
+def test_per_miner_exception_does_not_abort_round(monkeypatch):
     """A single miner raising in evaluate_miners_pull_requests must not stop
     the loop; every other UID must still be evaluated and the round must
     return normally."""
@@ -65,12 +65,14 @@ async def test_per_miner_exception_does_not_abort_round(monkeypatch):
         lambda evals: {uid: 0.0 for uid in evals},
     )
 
-    rewards, evaluations, cached_uids, penalized_uids = await reward_module.get_rewards(
-        validator,
-        uids,
-        master_repositories={},
-        programming_languages={},
-        token_config=SimpleNamespace(),
+    rewards, evaluations, cached_uids, penalized_uids = asyncio.run(
+        reward_module.get_rewards(
+            validator,
+            uids,
+            master_repositories={},
+            programming_languages={},
+            token_config=SimpleNamespace(),
+        )
     )
 
     assert set(evaluations.keys()) == uids, 'every UID must be present after the round'
@@ -85,8 +87,7 @@ async def test_per_miner_exception_does_not_abort_round(monkeypatch):
     assert penalized_uids == set()
 
 
-@pytest.mark.asyncio
-async def test_failed_reason_records_exception_class_and_message(monkeypatch):
+def test_failed_reason_records_exception_class_and_message(monkeypatch):
     """The substituted MinerEvaluation must capture both the exception class
     name and its message so post-hoc DB inspection can identify the vector."""
 
@@ -100,12 +101,14 @@ async def test_failed_reason_records_exception_class_and_message(monkeypatch):
     monkeypatch.setattr(reward_module, 'finalize_miner_scores', lambda evals: None)
     monkeypatch.setattr(reward_module, 'normalize_rewards_linear', lambda evals: {7: 0.0})
 
-    _, evaluations, _, _ = await reward_module.get_rewards(
-        validator,
-        {7},
-        master_repositories={},
-        programming_languages={},
-        token_config=SimpleNamespace(),
+    _, evaluations, _, _ = asyncio.run(
+        reward_module.get_rewards(
+            validator,
+            {7},
+            master_repositories={},
+            programming_languages={},
+            token_config=SimpleNamespace(),
+        )
     )
 
     failed = evaluations[7]

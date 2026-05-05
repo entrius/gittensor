@@ -50,6 +50,10 @@ from gittensor.validator.issue_discovery.scoring import (
     calculate_open_issue_spam_multiplier,
     check_issue_eligibility,
 )
+from gittensor.validator.oss_contributions.credibility import (
+    meets_token_quality_gate,
+    source_quality_token_score,
+)
 from gittensor.validator.oss_contributions.mirror.adapters import mirror_files_to_legacy
 from gittensor.validator.oss_contributions.mirror.scoring import (
     calculate_base_score_for_pr_files,
@@ -80,6 +84,7 @@ class CachedSolvingPR:
 
     base_score: float
     token_score: float
+    source_token_score: Optional[float] = None
 
 
 @dataclass
@@ -241,7 +246,7 @@ def _build_solving_pr_cache(
     cache: Dict[Tuple[str, int], CachedSolvingPR] = {}
     for evaluation in miner_evaluations.values():
         for scored in evaluation.mirror_merged_prs:
-            if scored.token_score < MIN_TOKEN_SCORE_FOR_BASE_SCORE:
+            if not meets_token_quality_gate(scored):
                 continue
             key = (scored.pr.repo_full_name, scored.pr.pr_number)
             if key in cache:
@@ -249,6 +254,7 @@ def _build_solving_pr_cache(
             cache[key] = CachedSolvingPR(
                 base_score=scored.base_score,
                 token_score=scored.token_score,
+                source_token_score=scored.source_token_score,
             )
     return cache
 
@@ -315,7 +321,7 @@ def _score_miner_mirror_issues(
         )
         if cached is None:
             # Fetch failed — issue still counts for solved/credibility but not scored.
-            # Can't apply the valid-solved gate without a real token_score, so be
+            # Can't apply the valid-solved gate without real score data, so be
             # conservative and don't increment valid_solved_count.
             bt.logging.debug(
                 f'  issue #{issue.issue_number} ({issue.repo_full_name}): solver score unavailable '
@@ -323,8 +329,8 @@ def _score_miner_mirror_issues(
             )
             continue
 
-        # Valid-solved gate (legacy parity): solving PR must meet the token threshold.
-        if cached.token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE:
+        # Valid-solved gate (legacy parity): solving PR must meet the SOURCE token threshold.
+        if meets_token_quality_gate(cached):
             valid_solved_count += 1
 
         # Same-account: discoverer == solver gets credibility only, no score
@@ -350,10 +356,11 @@ def _score_miner_mirror_issues(
 
         # Quality gate — matches legacy issue-discovery behavior: below-threshold
         # solving PRs add credibility only, no discovery score.
-        if cached.token_score < MIN_TOKEN_SCORE_FOR_BASE_SCORE:
+        if not meets_token_quality_gate(cached):
+            gate_score = source_quality_token_score(cached)
             bt.logging.debug(
                 f'  issue #{issue.issue_number} ({issue.repo_full_name}): solving PR '
-                f'#{solving_pr.pr_number} token_score {cached.token_score:.2f} < '
+                f'#{solving_pr.pr_number} source_token_score {gate_score:.2f} < '
                 f'{MIN_TOKEN_SCORE_FOR_BASE_SCORE} — credibility only'
             )
             continue
@@ -450,7 +457,11 @@ def _resolve_solving_pr_score(
         issue.repo_full_name, solving_pr.pr_number, files_response.files
     )
     result = calculate_base_score_for_pr_files(file_changes, file_contents, programming_languages, token_config)
-    cached = CachedSolvingPR(base_score=result.base_score, token_score=result.token_score)
+    cached = CachedSolvingPR(
+        base_score=result.base_score,
+        token_score=result.token_score,
+        source_token_score=result.source_token_score,
+    )
     cache[key] = cached
     return cached
 

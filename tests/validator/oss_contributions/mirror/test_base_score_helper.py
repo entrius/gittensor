@@ -26,6 +26,7 @@ class TestEmptyInput:
         assert isinstance(result, BaseScoreResult)
         assert result.base_score == 0.0
         assert result.token_score == 0.0
+        assert result.source_token_score == 0.0
         assert result.total_nodes_scored == 0
         assert result.structural_count == 0
         assert result.leaf_count == 0
@@ -44,6 +45,7 @@ class TestResultShape:
         for field_name in [
             'base_score',
             'token_score',
+            'source_token_score',
             'structural_count',
             'structural_score',
             'leaf_count',

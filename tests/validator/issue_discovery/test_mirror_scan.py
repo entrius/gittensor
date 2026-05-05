@@ -436,6 +436,16 @@ class TestSolvingPrCache:
         assert ('foo/poisoned', 1) not in cache
         assert ('foo/healthy', 2) in cache
 
+    def test_source_quality_below_threshold_prs_excluded_from_cache(self):
+        e1 = MinerEvaluation(uid=1, hotkey='hk1', github_id='g1')
+        test_only = _scored_mirror_pr('foo/test-only', 1, token_score=50.0, base_score=0.5)
+        test_only.source_token_score = 0.0
+        e1.mirror_merged_prs = [test_only]
+
+        cache = _build_solving_pr_cache({1: e1})
+
+        assert ('foo/test-only', 1) not in cache
+
     def test_cache_hit_reuses_base_score_no_fetch(self):
         """A solving PR already in cache must not trigger a get_pr_files call."""
         client = Mock()
@@ -458,7 +468,7 @@ class TestSolvingPrCache:
         client.get_pr_files.assert_not_called()
         # The cached token_score (100) flowed into issue_token_score
         assert eval_.issue_token_score == 100.0
-        # And the issue counted toward valid_solved (token_score >= MIN threshold)
+        # And the issue counted toward valid_solved (SOURCE-quality score >= MIN threshold)
         assert eval_.total_valid_solved_issues == 1
 
     def test_cache_miss_fetches_and_writes_back(self):
@@ -549,6 +559,55 @@ class TestSolvingPrCache:
 
         assert eval_.total_solved_issues == 1  # credibility
         assert eval_.total_valid_solved_issues == 0  # below gate
+        assert eval_.issue_discovery_score == 0
+
+    def test_fetched_test_only_solving_pr_counts_credibility_only(self):
+        """A large TEST-only solving PR can have aggregate token_score above the
+        threshold, but SOURCE quality is still below the valid-solved gate."""
+        test_code = '\n'.join(
+            f'def test_alpha_{i}():\n    value = {i}\n    adjusted = value + 1\n    assert adjusted == {i + 1}\n'
+            for i in range(80)
+        )
+        lines = len(test_code.splitlines())
+        client = Mock()
+        client.get_miner_issues.return_value = _response([_issue_dict()])
+        client.get_pr_files.return_value = MirrorPullRequestFilesResponse.from_dict(
+            {
+                'repo_full_name': 'entrius/gittensor-ui',
+                'pr_number': 100,
+                'head_sha': 'h',
+                'base_sha': 'b',
+                'merge_base_sha': 'mb',
+                'scoring_data_stored': True,
+                'files': [
+                    {
+                        'filename': 'tests/test_alpha.py',
+                        'previous_filename': None,
+                        'status': 'added',
+                        'additions': lines,
+                        'deletions': 0,
+                        'changes': lines,
+                        'is_binary': False,
+                        'head_content': test_code,
+                        'base_content': None,
+                    }
+                ],
+            }
+        )
+        eval_ = _eval()
+
+        _run(
+            run_mirror_issue_discovery(
+                {1: eval_},
+                _mirror_repos('entrius/gittensor-ui'),
+                load_weights.load_programming_language_weights(),
+                load_weights.load_token_config(),
+                client=client,
+            )
+        )
+
+        assert eval_.total_solved_issues == 1
+        assert eval_.total_valid_solved_issues == 0
         assert eval_.issue_discovery_score == 0
 
 

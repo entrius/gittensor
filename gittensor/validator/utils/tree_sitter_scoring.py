@@ -329,14 +329,10 @@ def calculate_token_score_from_file_changes(
                 # Tree diff scoring - compare old and new ASTs
                 new_content = content_pair.new_content
                 new_bytes = new_content.encode('utf-8')
-                old_bytes = (
-                    content_pair.old_content.encode('utf-8') if content_pair.old_content else None
-                )
+                old_bytes = content_pair.old_content.encode('utf-8') if content_pair.old_content else None
 
                 if len(new_bytes) > MAX_FILE_SIZE_BYTES:
-                    bt.logging.debug(
-                        f'  │   {file.short_name}: skipped (file too large, >{MAX_FILE_SIZE_BYTES} bytes)'
-                    )
+                    bt.logging.debug(f'  │   {file.short_name}: skipped (file too large, >{MAX_FILE_SIZE_BYTES} bytes)')
                     file_result = FileScoreResult(
                         filename=file.short_name,
                         score=0.0,

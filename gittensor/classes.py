@@ -258,6 +258,16 @@ class PullRequest:
         for issue in raw_issues:
             if is_merged and not (issue.get('closedAt') and issue.get('state') == 'CLOSED'):
                 continue
+            # Reject cross-repo `closes ownerB/repoB#N` references: GitHub computes
+            # authorAssociation against the issue's repo, so a maintainer of repo B
+            # would otherwise grant the maintainer multiplier on a PR in repo A.
+            issue_repo = (issue.get('repository') or {}).get('nameWithOwner', '').lower()
+            if issue_repo and issue_repo != repository_full_name:
+                bt.logging.warning(
+                    f'Skipping issue #{issue.get("number")} - cross-repo link '
+                    f'(issue in {issue_repo}, PR in {repository_full_name})'
+                )
+                continue
             issue_author = issue.get('author') or {}
             author_db_id = issue_author.get('databaseId')
 

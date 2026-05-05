@@ -165,6 +165,21 @@ class TestStoreEvaluationCombinesBothLists:
         assert merged_arg[0].number == 100
         assert isinstance(merged_arg[0], PullRequest)
 
+    def test_stale_closed_prs_are_stored_separately(self):
+        storage, mock_repo = _make_storage_with_mock_repo()
+
+        eval_ = MinerEvaluation(uid=1, hotkey='hk', github_id='123')
+        eval_.stale_closed_pull_requests = [_legacy_pr(7, state=PRState.CLOSED)]
+
+        storage.store_evaluation(eval_)
+
+        stale_call = mock_repo.store_pull_requests_bulk.call_args_list[3]
+        stale_arg = stale_call.args[0]
+        assert len(stale_arg) == 1
+        assert stale_arg[0].number == 7
+        assert stale_arg[0].pr_state == PRState.CLOSED
+        assert eval_.total_closed_prs == 0
+
 
 def test_cleanup_stale_called_with_commit_false():
     """cleanup_stale_miner_data must be called with commit=False inside the transaction.

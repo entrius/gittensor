@@ -34,6 +34,10 @@ class RepositoryConfig:
         mirror_enabled: When True, fetch this repo's data from the das-github-mirror
             service instead of via per-miner PATs. Defaults to False so existing
             entries keep their current PAT-based behavior.
+        trusted_label_pipeline: When True, scoring labels count regardless of
+            actor — including GitHub Apps that surface as ``actor_association=NULL``.
+            Defaults to False; only enable on repos with an authoritative label
+            pipeline. See ``_resolve_trusted_scoring_label`` for the threat model.
 
     """
 
@@ -41,6 +45,7 @@ class RepositoryConfig:
     inactive_at: Optional[str] = None
     additional_acceptable_branches: Optional[List[str]] = None
     mirror_enabled: bool = False
+    trusted_label_pipeline: bool = False
 
 
 def resolve_repo_weight(repo_config: Optional[RepositoryConfig]) -> float:
@@ -122,6 +127,7 @@ def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
                     inactive_at=metadata.get('inactive_at'),
                     additional_acceptable_branches=metadata.get('additional_acceptable_branches'),
                     mirror_enabled=bool(metadata.get('mirror_enabled', False)),
+                    trusted_label_pipeline=bool(metadata.get('trusted_label_pipeline', False)),
                 )
                 normalized_data[repo_name.lower()] = config
             except (ValueError, TypeError) as e:

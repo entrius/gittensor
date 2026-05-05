@@ -281,7 +281,7 @@ def fetch_open_issue_pull_requests(
     """Fetch open PR submissions for a GitHub issue."""
     token = get_github_pat() or ''
     if not token and not as_json:
-        print_warning('No GitHub token (GITTENSOR_MINER_PAT) found; using unauthenticated requests (lower rate limits)')
+        print_warning('No GitHub token found; set GITTENSOR_MINER_PAT to fetch GitHub issue submissions')
 
     try:
         from gittensor.utils.github_api_tools import find_prs_for_issue
@@ -784,8 +784,7 @@ def _read_issues_from_child_storage(substrate, contract_addr: str, verbose: bool
         console.print(f'[dim]Debug: next_issue_id from contract = {next_issue_id}[/dim]')
 
     # Sanity check: next_issue_id should be reasonable (< 1 million for any real deployment)
-    MAX_REASONABLE_ISSUE_ID = 1_000_000
-    if next_issue_id > MAX_REASONABLE_ISSUE_ID:
+    if next_issue_id > MAX_ISSUE_ID:
         console.print(f'[yellow]Warning: next_issue_id ({next_issue_id}) is unreasonably large.[/yellow]')
         console.print('[yellow]This may indicate a storage format mismatch. Check contract version.[/yellow]')
         return []

@@ -72,6 +72,12 @@ class ScoredMirrorPR:
         return self.pr.repo_full_name
 
     @property
+    def changes_requested_count(self) -> int:
+        """Alias for the maintainer-only CHANGES_REQUESTED count used by
+        source-agnostic scoring helpers."""
+        return self.pr.review_summary.maintainer_changes_requested_count
+
+    @property
     def merged_at(self) -> Optional[datetime]:
         """Alias for ``self.pr.merged_at`` — matches legacy PullRequest attribute
         name so the unified pioneer-dividend walk treats both types identically."""

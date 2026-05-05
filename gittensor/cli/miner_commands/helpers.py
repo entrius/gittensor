@@ -136,7 +136,18 @@ def _require_validator_axons(
         metagraph, min_vtrust=min_vtrust, min_stake=min_stake
     )
     if not validator_axons:
-        _error('No reachable validator axons found on the network.', json_mode)
+        # Surface why validators were excluded instead of a generic message
+        if excluded:
+            reasons = '; '.join(
+                f'UID {e.get("uid","?")} — {", ".join(e.get("reasons",[]))}'
+                for e in excluded
+            )
+            _error(
+                f'No reachable validator axons found. All candidates were excluded: {reasons}',
+                json_mode,
+            )
+        else:
+            _error('No reachable validator axons found on the network.', json_mode)
         sys.exit(1)
     return validator_axons, validator_uids, excluded
 

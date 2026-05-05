@@ -133,17 +133,24 @@ async def get_rewards(
             else:
                 stale_hotkey = pat_entry.get('hotkey')
 
-        # Calculate score
-        miner_evaluation = await evaluate_miners_pull_requests(
-            uid,
-            hotkey,
-            pat,
-            master_repositories,
-            programming_languages,
-            token_config,
-            stale_hotkey=stale_hotkey,
-        )
-        miner_evaluations[uid] = miner_evaluation
+        try:
+            # Calculate score — isolate per-miner exceptions so one
+            # crashing miner doesn't abort the entire scoring round.
+            miner_evaluation = await evaluate_miners_pull_requests(
+                uid,
+                hotkey,
+                pat,
+                master_repositories,
+                programming_languages,
+                token_config,
+                stale_hotkey=stale_hotkey,
+            )
+            miner_evaluations[uid] = miner_evaluation
+        except Exception as e:
+            bt.logging.error(
+                f'Per-miner scoring failed for UID {uid} (hotkey {hotkey}): {e}'
+            )
+            # Continue scoring remaining miners
 
     # If evaluation of miner was successful, store to cache, if api failure, fallback to previous successful evaluation if any
     cached_uids = self.store_or_use_cached_evaluation(miner_evaluations)

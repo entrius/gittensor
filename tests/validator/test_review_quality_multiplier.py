@@ -260,7 +260,8 @@ class TestReviewCollateralThroughScoringPipeline:
     def test_open_pr_collateral_uses_collateral_review_multiplier(self, builder):
         pr = builder.create(state=PRState.OPEN, repo='test/repo')
         pr.base_score = 80.0
-        pr.label = 'fix'
+        pr.label_timeline_order = ('fix',)
+        pr.current_labels = frozenset({'fix'})
         pr.changes_requested_count = 3
 
         calculate_pr_multipliers(pr, _make_eval(), _make_repo_config())

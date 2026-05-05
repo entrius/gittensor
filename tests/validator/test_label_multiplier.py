@@ -56,7 +56,7 @@ def _pr_payload(current, timeline):
 def _parse(current, timeline, config=_LEGACY_CONFIG):
     """Construct a PR and run label resolution with *config*, return resolved label."""
     pr = PullRequest.from_graphql_response(_pr_payload(current, timeline), uid=0, hotkey='hk', github_id='gh')
-    resolved_label, _ = _resolve_label(pr.label, pr.current_labels, config)
+    resolved_label, _ = _resolve_label(pr.label_timeline_order, pr.current_labels, config)
     return resolved_label
 
 
@@ -111,7 +111,7 @@ def test_missing_labels_key_does_not_crash():
     payload = _pr_payload([], ['feature'])
     del payload['labels']
     pr = PullRequest.from_graphql_response(payload, uid=0, hotkey='hk', github_id='gh')
-    resolved, _ = _resolve_label(pr.label, pr.current_labels, _LEGACY_CONFIG)
+    resolved, _ = _resolve_label(pr.label_timeline_order, pr.current_labels, _LEGACY_CONFIG)
     assert resolved is None
 
 
@@ -180,36 +180,48 @@ def test_resolve_label_multiplier_first_match_wins():
 # ============================================================================
 
 
-def test_resolve_label_uses_candidate_first():
+def test_resolve_label_uses_timeline_order_first():
     config = RepositoryConfig(weight=1.0, label_multipliers={'bug': 1.25, 'feature': 1.5})
-    label, mult = _resolve_label('bug', frozenset({'bug', 'feature'}), config)
+    # 'bug' was applied last in timeline even though 'feature' has higher multiplier
+    label, mult = _resolve_label(('bug', 'feature'), frozenset({'bug', 'feature'}), config)
     assert label == 'bug'
     assert mult == 1.25
 
 
-def test_resolve_label_falls_back_when_candidate_unmatched():
+def test_resolve_label_skips_unmatched_timeline_entries():
     config = RepositoryConfig(weight=1.0, label_multipliers={'bug': 1.25})
-    label, mult = _resolve_label('lgtm', frozenset({'lgtm', 'bug'}), config)
+    # 'lgtm' is first in timeline order but doesn't match; 'bug' is next and does
+    label, mult = _resolve_label(('lgtm', 'bug'), frozenset({'lgtm', 'bug'}), config)
     assert label == 'bug'
     assert mult == 1.25
 
 
-def test_resolve_label_highest_multiplier_wins_from_current():
+def test_resolve_label_non_scoring_last_then_multiple_scoring_picks_last_applied():
+    """Key gap test: non-scoring label last + multiple scoring labels — last-applied scoring wins."""
+    config = RepositoryConfig(weight=1.0, label_multipliers={'feature': 1.5, 'bug': 1.25})
+    # Timeline (most recent first): lgtm, bug, feature — bug was applied after feature
+    label, mult = _resolve_label(('lgtm', 'bug', 'feature'), frozenset({'lgtm', 'bug', 'feature'}), config)
+    assert label == 'bug'  # not 'feature' (higher mult) — last-applied scoring label wins
+    assert mult == 1.25
+
+
+def test_resolve_label_highest_multiplier_wins_from_truncated_current():
     config = RepositoryConfig(weight=1.0, label_multipliers={'bug': 1.25, 'feature': 1.5})
-    label, mult = _resolve_label(None, frozenset({'bug', 'feature'}), config)
+    # Empty timeline (all truncated) — fall back to highest multiplier
+    label, mult = _resolve_label((), frozenset({'bug', 'feature'}), config)
     assert label == 'feature'
     assert mult == 1.5
 
 
 def test_resolve_label_returns_default_when_no_match():
     config = RepositoryConfig(weight=1.0, label_multipliers={'bug': 1.25}, default_label_multiplier=0.8)
-    label, mult = _resolve_label(None, frozenset({'lgtm'}), config)
+    label, mult = _resolve_label((), frozenset({'lgtm'}), config)
     assert label is None
     assert mult == 0.8
 
 
 def test_resolve_label_default_mult_when_no_config():
-    label, mult = _resolve_label(None, frozenset({'feature'}), None)
+    label, mult = _resolve_label((), frozenset({'feature'}), None)
     assert label is None
     assert mult == 1.0
 
@@ -245,7 +257,7 @@ def test_label_multipliers_within_entry_limit(count):
 @pytest.mark.parametrize('default', [0.0, 1.0, 5.0, 20.0])
 def test_default_label_multiplier_valid(default):
     config = RepositoryConfig(weight=1.0, default_label_multiplier=default)
-    _, mult = _resolve_label(None, frozenset(), config)
+    _, mult = _resolve_label((), frozenset(), config)
     assert mult == default
 
 
@@ -352,6 +364,6 @@ def test_load_accepts_valid_config():
 def test_e2e_wildcard_matching(label_multipliers, current, timeline, expected_label, expected_mult):
     config = RepositoryConfig(weight=1.0, label_multipliers=label_multipliers)
     pr = PullRequest.from_graphql_response(_pr_payload(current, timeline), uid=0, hotkey='hk', github_id='gh')
-    resolved_label, resolved_mult = _resolve_label(pr.label, pr.current_labels, config)
+    resolved_label, resolved_mult = _resolve_label(pr.label_timeline_order, pr.current_labels, config)
     assert resolved_label == expected_label
     assert resolved_mult == pytest.approx(expected_mult)

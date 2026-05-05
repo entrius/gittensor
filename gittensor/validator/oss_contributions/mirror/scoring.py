@@ -353,11 +353,11 @@ def _calculate_pr_multipliers(scored: ScoredMirrorPR, repo_config: RepositoryCon
 
     chosen_label = _resolve_trusted_scoring_label(pr, repo_config)
     scored.label = chosen_label
-    if chosen_label:
-        mult = resolve_label_multiplier(chosen_label, repo_config)
-        scored.label_multiplier = mult if mult is not None else repo_config.default_label_multiplier
-    else:
-        scored.label_multiplier = repo_config.default_label_multiplier
+    scored.label_multiplier = (
+        resolve_label_multiplier(chosen_label, repo_config)
+        if chosen_label
+        else repo_config.default_label_multiplier
+    )
 
     scored.issue_multiplier = round(_calculate_issue_multiplier(scored), 2)
 

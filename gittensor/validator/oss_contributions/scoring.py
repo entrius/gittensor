@@ -208,29 +208,33 @@ def calculate_review_collateral_multiplier(changes_requested_count: int, pr_numb
 
 
 def _resolve_label(
-    label_candidate: Optional[str],
+    timeline_order: tuple,
     current_labels: frozenset,
     repo_config: Optional[RepositoryConfig],
 ) -> tuple:
     """Resolve the scoring label and its multiplier from per-repo config.
 
-    Tries *label_candidate* (the last timeline-applied current label) first.
-    Falls back to the highest-multiplier matching label from *current_labels*.
-    Returns ``(None, default_label_multiplier)`` when nothing matches.
+    Tries labels in *timeline_order* (most recently applied first) and returns
+    the first that matches a per-repo pattern — preserving the last-applied-
+    scoring-label semantics of the original global-table approach.
+
+    Falls back to the highest-multiplier matching label from *current_labels*
+    for labels absent from the timeline (truncated history). Returns
+    ``(None, default_label_multiplier)`` when nothing matches at all.
     """
     default_mult = repo_config.default_label_multiplier if repo_config else 1.0
 
-    if label_candidate:
-        mult = resolve_label_multiplier(label_candidate, repo_config)
+    for lbl in timeline_order:
+        mult = resolve_label_multiplier(lbl, repo_config)
         if mult is not None:
-            return label_candidate, mult
+            return lbl, mult
 
     best_label: Optional[str] = None
     best_mult: Optional[float] = None
     for lbl in current_labels:
         mult = resolve_label_multiplier(lbl, repo_config)
         if mult is not None:
-            if best_mult is None or mult > best_mult or (mult == best_mult and lbl < (best_label or '')):
+            if best_mult is None or mult > best_mult or (mult == best_mult and lbl < best_label):
                 best_label = lbl
                 best_mult = mult
 
@@ -249,7 +253,7 @@ def calculate_pr_multipliers(
 
     pr.repo_weight_multiplier = resolve_repo_weight(repo_config)
     pr.issue_multiplier = round(calculate_issue_multiplier(pr), 2)
-    pr.label, pr.label_multiplier = _resolve_label(pr.label, pr.current_labels, repo_config)
+    pr.label, pr.label_multiplier = _resolve_label(pr.label_timeline_order, pr.current_labels, repo_config)
 
     if is_merged:
         # Spam multiplier is recalculated in finalize_miner_scores with total token score

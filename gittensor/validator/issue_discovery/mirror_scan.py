@@ -33,7 +33,7 @@ the cache so sibling discoveries benefit.
 """
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Set, Tuple
 
 import bittensor as bt
@@ -54,7 +54,7 @@ from gittensor.validator.oss_contributions.mirror.adapters import mirror_files_t
 from gittensor.validator.oss_contributions.mirror.scoring import (
     calculate_base_score_for_pr_files,
 )
-from gittensor.validator.utils.datetime_utils import calculate_time_decay
+from gittensor.validator.utils.datetime_utils import calculate_time_decay, lookback_cutoff
 from gittensor.validator.utils.load_weights import (
     LanguageConfig,
     RepositoryConfig,
@@ -128,7 +128,7 @@ async def run_mirror_issue_discovery(
         return
 
     client = client or MirrorClient()
-    lookback_date = datetime.now(timezone.utc) - timedelta(days=PR_LOOKBACK_DAYS)
+    lookback_date = lookback_cutoff(PR_LOOKBACK_DAYS)
     enabled_names: Set[str] = set(mirror_repos.keys())
 
     solving_pr_cache: Dict[Tuple[str, int], CachedSolvingPR] = _build_solving_pr_cache(miner_evaluations)

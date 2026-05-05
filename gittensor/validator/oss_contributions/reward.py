@@ -2,6 +2,7 @@
 # Copyright © 2025 Entrius
 from __future__ import annotations
 
+from traceback import print_exception
 from typing import TYPE_CHECKING, Dict, Optional, Set, Tuple
 
 import bittensor as bt
@@ -133,16 +134,27 @@ async def get_rewards(
             else:
                 stale_hotkey = pat_entry.get('hotkey')
 
-        # Calculate score
-        miner_evaluation = await evaluate_miners_pull_requests(
-            uid,
-            hotkey,
-            pat,
-            master_repositories,
-            programming_languages,
-            token_config,
-            stale_hotkey=stale_hotkey,
-        )
+        # Calculate score. Per-miner try/except so one miner's crash cannot
+        # abort the whole round — issue_discovery's mirror_scan loop already
+        # has the same isolation; this brings the OSS path to parity.
+        try:
+            miner_evaluation = await evaluate_miners_pull_requests(
+                uid,
+                hotkey,
+                pat,
+                master_repositories,
+                programming_languages,
+                token_config,
+                stale_hotkey=stale_hotkey,
+            )
+        except Exception as e:
+            bt.logging.error(f'UID {uid}: evaluation crashed — {type(e).__name__}: {e}')
+            bt.logging.debug(str(print_exception(type(e), e, e.__traceback__)))
+            miner_evaluation = MinerEvaluation(
+                uid=uid,
+                hotkey=hotkey,
+                failed_reason=f'Evaluation crashed: {type(e).__name__}: {e}',
+            )
         miner_evaluations[uid] = miner_evaluation
 
     # If evaluation of miner was successful, store to cache, if api failure, fallback to previous successful evaluation if any

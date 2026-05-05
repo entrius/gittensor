@@ -919,7 +919,7 @@ requires-dist = [
     { name = "fastapi", marker = "extra == 'debug'", specifier = "==0.110.1" },
     { name = "levenshtein", specifier = "==0.27.3" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=4.0" },
-    { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
+    { name = "psycopg", extras = ["binary"], specifier = "==3.3.3" },
     { name = "pyright", marker = "extra == 'dev'" },
     { name = "pytest", marker = "extra == 'dev'", specifier = "==9.0.0" },
     { name = "python-dotenv", specifier = "==1.2.1" },

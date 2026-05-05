@@ -16,11 +16,6 @@ from rich.panel import Panel
 from rich.table import Table
 
 
-def _single_paragraph(text: str) -> str:
-    """Collapse multiline help text into a single paragraph."""
-    return ' '.join(text.split())
-
-
 def _collect_help_rows(params: list[click.Parameter], ctx: click.Context) -> list[tuple[str, str]]:
     """Collect Click help records for parameters."""
     rows: list[tuple[str, str]] = []
@@ -192,7 +187,7 @@ class StyledGroup(click.Group):
             if help_text:
                 console.print(
                     Padding(
-                        f'[bright_white]{escape(_single_paragraph(help_text))}[/bright_white]',
+                        f'[bright_white]{escape(" ".join(help_text.split()))}[/bright_white]',
                         (0, 0, 0, 1),
                     )
                 )

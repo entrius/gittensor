@@ -247,7 +247,7 @@ def vote_list_validators(network: str, rpc_url: str, contract: str, as_json: boo
             validators = client.get_validators()
 
         n = len(validators)
-        required = (n // 2) + 1
+        required = (n // 2) + 1 if n > 0 else 0
 
         if as_json:
             emit_json(

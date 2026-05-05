@@ -14,6 +14,8 @@ from gittensor.cli.main import cli
 from gittensor.cli.miner_commands.helpers import (
     _get_validator_axons,
     _pat_check_aggregate_counts,
+    _pat_post_aggregate_counts,
+    _pat_post_row_category,
 )
 
 
@@ -71,6 +73,57 @@ class TestMinerPost:
         result = runner.invoke(cli, ['m', 'post', '--help'])
         assert result.exit_code == 0
         assert 'Broadcast your GitHub PAT' in result.output
+
+    def test_json_envelope_counts_sum_to_total_validators(self, runner, monkeypatch):
+        monkeypatch.delenv('GITTENSOR_MINER_PAT', raising=False)
+        metagraph = _fake_metagraph(
+            [
+                (0.9, True, 50_000.0),
+                (0.8, True, 40_000.0),
+                (0.7, True, 30_000.0),
+            ]
+        )
+        metagraph.hotkeys = ['5MinerHotkey']
+        wallet = SimpleNamespace(hotkey=SimpleNamespace(ss58_address='5MinerHotkey'))
+        responses = [
+            SimpleNamespace(accepted=True, rejection_reason=None, dendrite=SimpleNamespace(status_code=200)),
+            SimpleNamespace(accepted=False, rejection_reason='denied', dendrite=SimpleNamespace(status_code=403)),
+            SimpleNamespace(accepted=None, rejection_reason=None, dendrite=SimpleNamespace(status_code=None)),
+        ]
+
+        class FakeDendrite:
+            async def __call__(self, **kwargs):
+                return responses
+
+        with (
+            patch('gittensor.cli.miner_commands.post._validate_pat_locally', return_value=True),
+            patch(
+                'gittensor.cli.miner_commands.post._connect_bittensor',
+                return_value=(wallet, object(), metagraph, FakeDendrite()),
+            ),
+        ):
+            result = runner.invoke(
+                cli,
+                [
+                    'miner',
+                    'post',
+                    '--json-output',
+                    '--pat',
+                    'ghp_test123',
+                    '--wallet',
+                    'test',
+                    '--hotkey',
+                    'test',
+                ],
+            )
+
+        assert result.exit_code == 0, result.output
+        output = json.loads(result.output)
+        assert output['total_validators'] == 3
+        assert output['accepted'] == 1
+        assert output['rejected'] == 1
+        assert output['no_response'] == 1
+        assert output['accepted'] + output['rejected'] + output['no_response'] == output['total_validators']
 
 
 class TestMinerCheck:
@@ -145,3 +198,48 @@ class TestPatCheckAggregateCounts:
             'invalid_pat': 1,
             'no_response': 1,
         }
+
+
+class TestPatPostRowCategory:
+    def test_accepted_true_returns_accepted(self):
+        assert _pat_post_row_category({'accepted': True}) == 'accepted'
+
+    def test_accepted_false_returns_rejected(self):
+        assert _pat_post_row_category({'accepted': False}) == 'rejected'
+
+    def test_accepted_none_returns_no_response(self):
+        assert _pat_post_row_category({'accepted': None}) == 'no_response'
+
+    def test_missing_accepted_key_returns_no_response(self):
+        assert _pat_post_row_category({}) == 'no_response'
+
+
+class TestPatPostAggregateCounts:
+    def test_splits_accepted_rejected_and_no_response(self):
+        results = [
+            {'accepted': True},
+            {'accepted': True},
+            {'accepted': False},
+            {'accepted': None},
+            {'accepted': None},
+        ]
+        assert _pat_post_aggregate_counts(results) == {
+            'accepted': 2,
+            'rejected': 1,
+            'no_response': 2,
+        }
+
+    def test_empty_results_returns_zero_counts(self):
+        assert _pat_post_aggregate_counts([]) == {
+            'accepted': 0,
+            'rejected': 0,
+            'no_response': 0,
+        }
+
+    def test_no_response_is_not_collapsed_into_rejected(self):
+        """Regression: JSON output previously reported `rejected = total - accepted`,
+        silently bucketing no_response into rejected. Counts must stay distinct."""
+        results = [{'accepted': False}, {'accepted': None}]
+        counts = _pat_post_aggregate_counts(results)
+        assert counts['rejected'] == 1
+        assert counts['no_response'] == 1

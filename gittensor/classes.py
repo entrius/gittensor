@@ -87,6 +87,7 @@ class FileChange:
             r'(^|/)androidtest[a-z]*/',
             r'(^|/)integrationtest/',
             r'(^|/)spec/',
+            r'\.tests?/',  # .NET MyProject.Tests/FooTests.cs
         ]
         if any(re.search(pattern, filename_lower) for pattern in test_dir_patterns):
             return True
@@ -102,6 +103,7 @@ class FileChange:
             r'\.spec\.[^.]+$',
             r'^test\.[^.]+$',
             r'^tests\.[^.]+$',
+            r'^conftest\.py$',
         ]
 
         return any(re.search(pattern, basename) for pattern in test_patterns)

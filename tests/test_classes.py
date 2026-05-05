@@ -88,6 +88,30 @@ def test_file_extension_handles_configured_extensionless_filenames(filename, exp
     assert _file_change(filename).file_extension == expected
 
 
+@pytest.mark.parametrize(
+    'filename',
+    [
+        'src/MyProject.Tests/AccountServiceTests.cs',
+        'src/MyProject.Tests/AccountServiceTest.cs',
+    ],
+)
+def test_is_test_file_detects_dotnet_dotted_tests_directory(filename):
+    assert _file_change(filename).is_test_file() is True
+
+
+@pytest.mark.parametrize(
+    'filename',
+    [
+        'conftest.py',
+        'tests/conftest.py',
+        'project/conftest.py',
+        'project/sub/package/conftest.py',
+    ],
+)
+def test_is_test_file_detects_conftest_at_any_depth(filename):
+    assert _file_change(filename).is_test_file() is True
+
+
 def test_pull_request_handles_deleted_label_event():
     pr_data = {
         'number': 42,

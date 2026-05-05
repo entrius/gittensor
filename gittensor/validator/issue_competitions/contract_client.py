@@ -266,10 +266,8 @@ class IssueCompetitionContractClient:
             storage_limit = b'\x00'
 
             data_len = len(input_data)
-            if data_len < 64:
-                compact_len = bytes([data_len << 2])
-            else:
-                compact_len = bytes([(data_len << 2) | 1, data_len >> 6])
+            # SCALE compact encode: for data < 64 bytes, single byte suffices
+            compact_len = bytes([data_len << 2])
 
             call_params = origin + dest + value + gas_limit + storage_limit + compact_len + input_data
 
@@ -531,6 +529,8 @@ class IssueCompetitionContractClient:
             elif type_def == 'u64':
                 encoded += struct.pack('<Q', value)
             elif type_def == 'u128':
+                # NOTE: u128 is only used by register_issue, which bypasses
+                # _encode_args via a different execution path (CLI mutations).
                 encoded += struct.pack('<QQ', value & 0xFFFFFFFFFFFFFFFF, value >> 64)
             elif type_def == 'AccountId':
                 if isinstance(value, str):

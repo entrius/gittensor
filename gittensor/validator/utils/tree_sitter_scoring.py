@@ -58,12 +58,12 @@ def get_parser(language: str) -> Optional[Parser]:
         return None
 
 
-def parse_code(content: str, language: str) -> Optional[Tree]:
+def parse_code(content: Union[str, bytes], language: str) -> Optional[Tree]:
     """
     Parse source code into a tree-sitter AST.
 
     Args:
-        content: Source code as string
+        content: Source code as string or pre-encoded bytes
         language: Tree-sitter language name
 
     Returns:
@@ -74,7 +74,8 @@ def parse_code(content: str, language: str) -> Optional[Tree]:
         return None
 
     try:
-        return parser.parse(content.encode('utf-8'))
+        data = content.encode('utf-8') if isinstance(content, str) else content
+        return parser.parse(data)
     except Exception as e:
         bt.logging.debug(f'Failed to parse code: {e}')
         return None

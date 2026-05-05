@@ -98,13 +98,13 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, min_vt
 
     # 1b. Validate PAT locally
     with _status('[bold]Validating PAT...', json_mode):
-        pat_valid = _validate_pat_locally(pat)
+        github_login = _validate_pat_locally(pat)
 
-    if not pat_valid:
+    if github_login is None:
         _error('GitHub PAT is invalid or expired. Check your GITTENSOR_MINER_PAT.', json_mode)
         sys.exit(1)
 
-    _print('[green]PAT is valid.[/green]', json_mode)
+    _print(f'[green]PAT is valid.[/green] GitHub account: [bold]@{github_login}[/bold]', json_mode)
 
     # 2. Resolve wallet and network
     wallet_name = wallet_name or _load_config_value('wallet') or 'default'
@@ -168,6 +168,7 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, min_vt
             json.dumps(
                 {
                     'success': accepted_count > 0,
+                    'github_login': github_login,
                     'total_validators': len(results),
                     **counts,
                     'skipped': excluded,
@@ -193,15 +194,19 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, min_vt
         _render_skipped_validators(excluded, json_mode)
 
 
-def _validate_pat_locally(pat: str) -> bool:
-    """Validate PAT mirrors the validator-side checks: user identity + GraphQL access."""
+def _validate_pat_locally(pat: str) -> Optional[str]:
+    """Validate PAT mirrors the validator-side checks: user identity + GraphQL access.
+
+    Returns the GitHub login on success, or None if the PAT is invalid.
+    """
     try:
-        # Check basic auth
+        # Check basic auth and extract login
         user_resp = requests.get(
             f'{BASE_GITHUB_API_URL}/user', headers=make_headers(pat), timeout=GITHUB_HTTP_TIMEOUT_SECONDS
         )
         if user_resp.status_code != 200:
-            return False
+            return None
+        login: Optional[str] = user_resp.json().get('login') or None
 
         # Check GraphQL access (same test the validator runs during PAT broadcast)
         gql_resp = requests.post(
@@ -214,8 +219,8 @@ def _validate_pat_locally(pat: str) -> bool:
             console.print(
                 '[red]PAT lacks GraphQL API access. Fine-grained PATs need "Public Repositories (read-only)" permission.[/red]'
             )
-            return False
+            return None
 
-        return True
+        return login
     except requests.RequestException:
-        return False
+        return None

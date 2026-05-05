@@ -909,6 +909,8 @@ def load_miners_prs(
                 non_resource_errors = [e for e in data['errors'] if e.get('type') != 'RESOURCE_LIMITS_EXCEEDED']
                 if non_resource_errors:
                     bt.logging.error(f'GraphQL errors: {non_resource_errors}')
+                    message = str(non_resource_errors[0].get('message') or 'unknown')[:200]
+                    miner_eval.failed_reason = f'GitHub GraphQL error: {message}'
                     miner_eval.github_pr_fetch_failed = True
                     break
 

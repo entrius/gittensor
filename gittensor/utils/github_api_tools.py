@@ -328,7 +328,7 @@ def get_merge_base_sha(repository: str, base_sha: str, head_sha: str, token: str
     return None
 
 
-def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -> Optional[List[FileChange]]:
+def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -> List[FileChange]:
     """
     Get the diff for a specific PR by repository name and PR number.
 
@@ -342,7 +342,7 @@ def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -
         pr_number (int): PR number
         token (str): Github pat
     Returns:
-        List[FileChanges]: List object with file changes or None if error
+        List[FileChanges]: List object with file changes or empty list if error
     """
     max_attempts = 3
     per_page = 100

@@ -268,8 +268,10 @@ class IssueCompetitionContractClient:
             data_len = len(input_data)
             if data_len < 64:
                 compact_len = bytes([data_len << 2])
+            elif data_len < 16384:
+                compact_len = struct.pack('<H', (data_len << 2) | 1)
             else:
-                compact_len = bytes([(data_len << 2) | 1, data_len >> 6])
+                raise ValueError(f'input_data too large for 2-byte compact: {data_len}')
 
             call_params = origin + dest + value + gas_limit + storage_limit + compact_len + input_data
 
@@ -530,8 +532,6 @@ class IssueCompetitionContractClient:
                 encoded += struct.pack('<I', value)
             elif type_def == 'u64':
                 encoded += struct.pack('<Q', value)
-            elif type_def == 'u128':
-                encoded += struct.pack('<QQ', value & 0xFFFFFFFFFFFFFFFF, value >> 64)
             elif type_def == 'AccountId':
                 if isinstance(value, str):
                     encoded += bytes.fromhex(self.subtensor.substrate.ss58_decode(value))

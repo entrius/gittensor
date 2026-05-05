@@ -91,13 +91,13 @@ class TestStoreOrUseCachedEvaluation:
         assert cached_eval.total_prs == 2
 
     @patch('gittensor.utils.github_api_tools.get_github_graphql_query')
-    def test_graphql_pat_scope_failure_does_not_use_cache(self, mock_graphql_query):
+    def test_graphql_error_does_not_use_cache(self, mock_graphql_query):
         validator = _DummyValidator()
         validator.evaluation_cache.store(_build_eval(uid=1, merged_prs=1, fetch_failed=False))
 
         response = Mock()
         response.json.return_value = {
-            'errors': [{'message': 'Resource not accessible by personal access token'}],
+            'errors': [{'message': 'Something went wrong'}],
             'data': None,
         }
         mock_graphql_query.return_value = GraphQLPageResult(response=response, page_size=100)
@@ -109,7 +109,7 @@ class TestStoreOrUseCachedEvaluation:
         cached_uids = Validator.store_or_use_cached_evaluation(cast(Validator, validator), miner_evaluations)
 
         assert current_eval.github_pr_fetch_failed is True
-        assert current_eval.failed_reason == 'GitHub GraphQL PAT auth/scope failure'
+        assert current_eval.failed_reason == 'GitHub GraphQL error: Something went wrong'
         assert cached_uids == set()
         assert miner_evaluations[1] is current_eval
         assert miner_evaluations[1].total_prs == 0

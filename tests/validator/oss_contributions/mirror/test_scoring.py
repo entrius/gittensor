@@ -34,7 +34,7 @@ load_weights = pytest.importorskip('gittensor.validator.utils.load_weights')
 _should_skip_merged_mirror_pr = scoring_module._should_skip_merged_mirror_pr
 _convert_mirror_files = adapters_module.mirror_files_to_legacy
 _calculate_pr_multipliers = scoring_module._calculate_pr_multipliers
-_resolve_maintainer_set_label = scoring_module._resolve_maintainer_set_label
+_resolve_trusted_scoring_label = scoring_module._resolve_trusted_scoring_label
 _calculate_issue_multiplier = scoring_module._calculate_issue_multiplier
 _is_valid_linked_issue = scoring_module._is_valid_linked_issue
 score_mirror_pr = scoring_module.score_mirror_pr
@@ -57,6 +57,7 @@ def _pr(
     head_repo_full_name: str | None = 'entrius/gittensor-ui',
     default_branch: str | None = 'main',
     approved_count: int = 1,
+    maintainer_changes_requested_count: int = 0,
     labels: list | None = None,
     linked_issues: list | None = None,
 ) -> MirrorPullRequest:
@@ -89,7 +90,7 @@ def _pr(
             'commits_count': 1,
             'scoring_data_stored': True,
             'review_summary': {
-                'maintainer_changes_requested_count': 0,
+                'maintainer_changes_requested_count': maintainer_changes_requested_count,
                 'changes_requested_count': 0,
                 'approved_count': approved_count,
                 'commented_count': 0,
@@ -100,11 +101,16 @@ def _pr(
     )
 
 
-def _config(weight: float = 0.5, additional_branches: list | None = None) -> RepositoryConfig:
+def _config(
+    weight: float = 0.5,
+    additional_branches: list | None = None,
+    trusted_label_pipeline: bool = False,
+) -> RepositoryConfig:
     return RepositoryConfig(
         weight=weight,
         mirror_enabled=True,
         additional_acceptable_branches=additional_branches,
+        trusted_label_pipeline=trusted_label_pipeline,
     )
 
 
@@ -408,45 +414,36 @@ class TestConvertMirrorFiles:
 class TestLabelResolution:
     def test_no_labels_returns_none(self):
         scored = ScoredMirrorPR(pr=_pr(labels=[]))
-        assert _resolve_maintainer_set_label(scored.pr) is None
+        assert _resolve_trusted_scoring_label(scored.pr, _config()) is None
 
     def test_non_scoring_labels_ignored(self):
-        # 'enhancement' is in LABEL_MULTIPLIERS, 'random' typically isn't
-        labels = [
-            {'name': 'random', 'actor_github_id': '1', 'actor_association': 'OWNER'},
-        ]
+        labels = [{'name': 'random', 'actor_github_id': '1', 'actor_association': 'OWNER'}]
         scored = ScoredMirrorPR(pr=_pr(labels=labels))
-        assert _resolve_maintainer_set_label(scored.pr) is None
+        assert _resolve_trusted_scoring_label(scored.pr, _config()) is None
 
     def test_non_maintainer_label_ignored(self):
         from gittensor.constants import LABEL_MULTIPLIERS
 
         scoring_label = next(iter(LABEL_MULTIPLIERS.keys()))
-        labels = [
-            {'name': scoring_label, 'actor_github_id': '1', 'actor_association': 'CONTRIBUTOR'},
-        ]
+        labels = [{'name': scoring_label, 'actor_github_id': '1', 'actor_association': 'CONTRIBUTOR'}]
         scored = ScoredMirrorPR(pr=_pr(labels=labels))
-        assert _resolve_maintainer_set_label(scored.pr) is None
+        assert _resolve_trusted_scoring_label(scored.pr, _config()) is None
 
-    def test_null_actor_association_ignored(self):
+    def test_null_actor_association_ignored_on_untrusted_repo(self):
         from gittensor.constants import LABEL_MULTIPLIERS
 
         scoring_label = next(iter(LABEL_MULTIPLIERS.keys()))
-        labels = [
-            {'name': scoring_label, 'actor_github_id': None, 'actor_association': None},
-        ]
+        labels = [{'name': scoring_label, 'actor_github_id': None, 'actor_association': None}]
         scored = ScoredMirrorPR(pr=_pr(labels=labels))
-        assert _resolve_maintainer_set_label(scored.pr) is None
+        assert _resolve_trusted_scoring_label(scored.pr, _config()) is None
 
     def test_maintainer_set_scoring_label_returned(self):
         from gittensor.constants import LABEL_MULTIPLIERS
 
         scoring_label = next(iter(LABEL_MULTIPLIERS.keys()))
-        labels = [
-            {'name': scoring_label, 'actor_github_id': '1', 'actor_association': 'COLLABORATOR'},
-        ]
+        labels = [{'name': scoring_label, 'actor_github_id': '1', 'actor_association': 'COLLABORATOR'}]
         scored = ScoredMirrorPR(pr=_pr(labels=labels))
-        assert _resolve_maintainer_set_label(scored.pr) == scoring_label.lower()
+        assert _resolve_trusted_scoring_label(scored.pr, _config()) == scoring_label.lower()
 
     def test_highest_multiplier_wins(self):
         from gittensor.constants import LABEL_MULTIPLIERS
@@ -455,17 +452,33 @@ class TestLabelResolution:
         if len(scoring_labels) < 2:
             pytest.skip('Need at least 2 scoring labels for this test')
 
-        # Pick two different scoring labels
         a, b = scoring_labels[0], scoring_labels[1]
         labels = [
             {'name': a, 'actor_github_id': '1', 'actor_association': 'OWNER'},
             {'name': b, 'actor_github_id': '1', 'actor_association': 'OWNER'},
         ]
         scored = ScoredMirrorPR(pr=_pr(labels=labels))
-        chosen = _resolve_maintainer_set_label(scored.pr)
-        # Whichever label has the higher LABEL_MULTIPLIERS value should win
+        chosen = _resolve_trusted_scoring_label(scored.pr, _config())
         expected = max([a, b], key=lambda n: (LABEL_MULTIPLIERS[n], n)).lower()
         assert chosen == expected
+
+    def test_calculate_multipliers_threads_trusted_flag(self):
+        """End-to-end issue #911 path: _calculate_pr_multipliers honors trusted_label_pipeline."""
+        from gittensor.constants import LABEL_MULTIPLIERS
+
+        scoring_label = next((name for name, mult in LABEL_MULTIPLIERS.items() if mult != 1.0), None)
+        if scoring_label is None:
+            pytest.skip('Need at least one non-1.0x label for this test')
+
+        labels = [{'name': scoring_label, 'actor_github_id': '99', 'actor_association': None}]
+
+        scored_trusted = ScoredMirrorPR(pr=_pr(labels=labels))
+        _calculate_pr_multipliers(scored_trusted, _config(trusted_label_pipeline=True))
+        assert scored_trusted.label_multiplier == LABEL_MULTIPLIERS[scoring_label]
+
+        scored_untrusted = ScoredMirrorPR(pr=_pr(labels=labels))
+        _calculate_pr_multipliers(scored_untrusted, _config(trusted_label_pipeline=False))
+        assert scored_untrusted.label_multiplier == 1.0
 
 
 # ============================================================================
@@ -654,6 +667,25 @@ class TestCollateralScoreAcceptsScoredMirrorPR:
         # The issue with state=OPEN/state_reason=None should still pass for an OPEN PR
         assert _is_valid_linked_issue(li, scored.pr) is True
 
+    def test_open_mirror_pr_review_iterations_increase_collateral(self):
+        from gittensor.validator.oss_contributions.scoring import calculate_open_pr_collateral_score
+
+        clean = ScoredMirrorPR(pr=_pr(state='OPEN', maintainer_changes_requested_count=0))
+        clean.base_score = 100.0
+        clean.repo_weight_multiplier = 1.0
+        clean.issue_multiplier = 1.0
+        clean.label_multiplier = 1.0
+
+        reviewed = ScoredMirrorPR(pr=_pr(state='OPEN', maintainer_changes_requested_count=3))
+        reviewed.base_score = 100.0
+        reviewed.repo_weight_multiplier = 1.0
+        reviewed.issue_multiplier = 1.0
+        reviewed.label_multiplier = 1.0
+
+        assert calculate_open_pr_collateral_score(reviewed) == pytest.approx(
+            calculate_open_pr_collateral_score(clean) * 1.45
+        )
+
 
 # ============================================================================
 # Multiplier composition (smoke test that all multipliers populate)
@@ -684,7 +716,7 @@ class TestPrMultipliers:
         _calculate_pr_multipliers(scored, _config(weight=0.5))
 
         assert scored.repo_weight_multiplier == 0.5
-        # Time decay / review quality / credibility are merge-only — kept neutral here
+        # Time decay / review quality / credibility are merge-only — kept neutral here.
         assert scored.time_decay_multiplier == 1.0
         assert scored.credibility_multiplier == 1.0
         assert scored.review_quality_multiplier == 1.0

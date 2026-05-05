@@ -169,6 +169,7 @@ class TestFirstRegisteredAt:
         pat_storage.save_pat(1, 'hotkey_1', 'ghp_new', 'user_1')
 
         entry = pat_storage.get_pat_by_uid(1)
+        assert entry is not None
         assert entry['first_registered_at'] == '2026-01-01T00:00:00+00:00'
         assert entry['pat'] == 'ghp_new'
         assert entry['stored_at'] != '2026-01-01T00:00:00+00:00'
@@ -188,6 +189,7 @@ class TestFirstRegisteredAt:
         pat_storage.save_pat(1, 'hotkey_1', 'ghp_new', 'user_1')
 
         entry = pat_storage.get_pat_by_uid(1)
+        assert entry is not None
         assert 'first_registered_at' not in entry
         assert entry['pat'] == 'ghp_new'
 
@@ -207,6 +209,7 @@ class TestFirstRegisteredAt:
         pat_storage.save_pat(1, 'new_hotkey', 'ghp_new', 'user_new')
 
         entry = pat_storage.get_pat_by_uid(1)
+        assert entry is not None
         assert entry['first_registered_at'] != '2020-01-01T00:00:00+00:00'
         assert entry['first_registered_at'] == entry['stored_at']
 

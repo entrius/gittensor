@@ -208,10 +208,10 @@ def calculate_review_collateral_multiplier(changes_requested_count: int, pr_numb
 
 
 def _resolve_label(
-    timeline_order: tuple,
-    current_labels: frozenset,
+    timeline_order: tuple[str, ...],
+    current_labels: frozenset[str],
     repo_config: Optional[RepositoryConfig],
-) -> tuple:
+) -> tuple[Optional[str], float]:
     """Resolve the scoring label and its multiplier from per-repo config.
 
     Tries labels in *timeline_order* (most recently applied first) and returns
@@ -229,17 +229,15 @@ def _resolve_label(
         if mult is not None:
             return lbl, mult
 
-    best_label: Optional[str] = None
-    best_mult: Optional[float] = None
+    best: Optional[tuple[str, float]] = None
     for lbl in current_labels:
         mult = resolve_label_multiplier(lbl, repo_config)
         if mult is not None:
-            if best_mult is None or mult > best_mult or (mult == best_mult and lbl < best_label):
-                best_label = lbl
-                best_mult = mult
+            if best is None or mult > best[1] or (mult == best[1] and lbl < best[0]):
+                best = (lbl, mult)
 
-    if best_label is not None:
-        return best_label, best_mult
+    if best is not None:
+        return best
 
     return None, default_mult
 

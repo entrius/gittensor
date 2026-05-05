@@ -421,27 +421,32 @@ class TestConvertMirrorFiles:
 class TestLabelResolution:
     def test_no_labels_returns_none(self):
         scored = ScoredMirrorPR(pr=_pr(labels=[]))
-        assert _resolve_trusted_scoring_label(scored.pr, _config()) is None
+        label, _ = _resolve_trusted_scoring_label(scored.pr, _config())
+        assert label is None
 
     def test_non_scoring_labels_ignored(self):
         labels = [{'name': 'random', 'actor_github_id': '1', 'actor_association': 'OWNER'}]
         scored = ScoredMirrorPR(pr=_pr(labels=labels))
-        assert _resolve_trusted_scoring_label(scored.pr, _config()) is None
+        label, _ = _resolve_trusted_scoring_label(scored.pr, _config())
+        assert label is None
 
     def test_non_maintainer_label_ignored(self):
         labels = [{'name': _SCORING_LABEL, 'actor_github_id': '1', 'actor_association': 'CONTRIBUTOR'}]
         scored = ScoredMirrorPR(pr=_pr(labels=labels))
-        assert _resolve_trusted_scoring_label(scored.pr, _config()) is None
+        label, _ = _resolve_trusted_scoring_label(scored.pr, _config())
+        assert label is None
 
     def test_null_actor_association_ignored_on_untrusted_repo(self):
         labels = [{'name': _SCORING_LABEL, 'actor_github_id': None, 'actor_association': None}]
         scored = ScoredMirrorPR(pr=_pr(labels=labels))
-        assert _resolve_trusted_scoring_label(scored.pr, _config()) is None
+        label, _ = _resolve_trusted_scoring_label(scored.pr, _config())
+        assert label is None
 
     def test_maintainer_set_scoring_label_returned(self):
         labels = [{'name': _SCORING_LABEL, 'actor_github_id': '1', 'actor_association': 'COLLABORATOR'}]
         scored = ScoredMirrorPR(pr=_pr(labels=labels))
-        assert _resolve_trusted_scoring_label(scored.pr, _config()) == _SCORING_LABEL.lower()
+        label, _ = _resolve_trusted_scoring_label(scored.pr, _config())
+        assert label == _SCORING_LABEL.lower()
 
     def test_highest_multiplier_wins(self):
         a, b = 'feature', 'bug'
@@ -451,7 +456,7 @@ class TestLabelResolution:
             {'name': b, 'actor_github_id': '1', 'actor_association': 'OWNER'},
         ]
         scored = ScoredMirrorPR(pr=_pr(labels=labels))
-        chosen = _resolve_trusted_scoring_label(scored.pr, config)
+        chosen, _ = _resolve_trusted_scoring_label(scored.pr, config)
         assert chosen == 'feature'
 
     def test_calculate_multipliers_threads_trusted_flag(self):

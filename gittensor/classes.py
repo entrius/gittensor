@@ -184,11 +184,11 @@ class PullRequest:
     review_quality_multiplier: float = 1.0  # Penalty for CHANGES_REQUESTED reviews from maintainers
     label_multiplier: float = 1.0  # Multiplier resolved from per-repo label_multipliers config
     label: Optional[str] = None  # Resolved scoring label (set during scoring, stored in DB)
-    current_labels: frozenset = field(default_factory=frozenset)  # All currently-applied labels (lowercased)
+    current_labels: frozenset[str] = field(default_factory=frozenset)  # All currently-applied labels (lowercased)
     # Current labels ordered by last application (most recent first) from timeline scan.
     # Subset of current_labels that appeared in timelineItems; labels absent from the timeline
     # (truncated) are not included here and fall back to highest-multiplier selection.
-    label_timeline_order: tuple = field(default_factory=tuple)
+    label_timeline_order: tuple[str, ...] = field(default_factory=tuple)
     changes_requested_count: int = 0  # Number of maintainer CHANGES_REQUESTED reviews
     earned_score: float = 0.0
     collateral_score: float = 0.0  # For OPEN PRs: potential_score * collateral_percent
@@ -319,7 +319,6 @@ class PullRequest:
         )
         # Collect all currently-applied labels in reverse-timeline order (most recently applied first).
         # Per-repo multiplier resolution happens later in calculate_pr_multipliers which has repo config.
-        label: Optional[str] = None
         timeline_ordered: list = []
         if current:
             seen: set = set()
@@ -328,7 +327,6 @@ class PullRequest:
                 if name and name in current and name not in seen:
                     seen.add(name)
                     timeline_ordered.append(name)
-            label = timeline_ordered[0] if timeline_ordered else None
 
         return cls(
             number=pr_data['number'],
@@ -350,7 +348,6 @@ class PullRequest:
             last_edited_at=last_edited_at,
             head_ref_oid=pr_data.get('headRefOid'),
             base_ref_oid=pr_data.get('baseRefOid'),
-            label=label,
             current_labels=current,
             label_timeline_order=tuple(timeline_ordered),
             changes_requested_count=changes_requested_count,

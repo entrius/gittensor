@@ -351,13 +351,9 @@ def _calculate_pr_multipliers(scored: ScoredMirrorPR, repo_config: RepositoryCon
 
     scored.repo_weight_multiplier = resolve_repo_weight(repo_config)
 
-    chosen_label = _resolve_trusted_scoring_label(pr, repo_config)
+    chosen_label, label_multiplier = _resolve_trusted_scoring_label(pr, repo_config)
     scored.label = chosen_label
-    scored.label_multiplier = (
-        resolve_label_multiplier(chosen_label, repo_config)
-        if chosen_label
-        else repo_config.default_label_multiplier
-    )
+    scored.label_multiplier = label_multiplier
 
     scored.issue_multiplier = round(_calculate_issue_multiplier(scored), 2)
 
@@ -376,8 +372,11 @@ def _calculate_pr_multipliers(scored: ScoredMirrorPR, repo_config: RepositoryCon
         scored.review_quality_multiplier = 1.0
 
 
-def _resolve_trusted_scoring_label(pr: MirrorPullRequest, repo_config: RepositoryConfig) -> Optional[str]:
+def _resolve_trusted_scoring_label(pr: MirrorPullRequest, repo_config: RepositoryConfig) -> tuple[Optional[str], float]:
     """Pick the highest-multiplier currently-applied scoring label whose actor is trusted.
+
+    Returns ``(label_name, multiplier)``. Returns ``(None, default_label_multiplier)``
+    when no trusted scoring label is present.
 
     By default the actor must be in ``MAINTAINER_ASSOCIATIONS``. Repos opted into
     ``trusted_label_pipeline`` accept any actor — including GitHub-App actors that
@@ -387,20 +386,17 @@ def _resolve_trusted_scoring_label(pr: MirrorPullRequest, repo_config: Repositor
     auto-labelers (release-drafter, actions/labeler) and must keep the gate.
     """
     trusted = repo_config.trusted_label_pipeline
-    candidates = [
-        label
-        for label in pr.labels
-        if resolve_label_multiplier((label.name or '').lower(), repo_config) is not None
-        and (trusted or label.actor_association in MAINTAINER_ASSOCIATIONS)
-    ]
+    candidates: list[tuple[str, float]] = []
+    for label in pr.labels:
+        if not (trusted or label.actor_association in MAINTAINER_ASSOCIATIONS):
+            continue
+        mult = resolve_label_multiplier((label.name or '').lower(), repo_config)
+        if mult is not None:
+            candidates.append(((label.name or '').lower(), mult))
     if not candidates:
-        return None
+        return None, repo_config.default_label_multiplier
     # Highest multiplier wins; tie-broken by label name for deterministic output
-    best = max(
-        candidates,
-        key=lambda lbl: (resolve_label_multiplier(lbl.name.lower(), repo_config) or 0.0, lbl.name.lower()),
-    )
-    return best.name.lower()
+    return max(candidates, key=lambda t: (t[1], t[0]))
 
 
 # ============================================================================

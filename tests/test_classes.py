@@ -75,32 +75,12 @@ def test_is_test_file_preserves_existing_test_conventions():
 @pytest.mark.parametrize(
     'filename',
     [
-        'app/src/main/java/com/example/FooTest.java',
-        'app/src/main/java/com/example/FooTests.java',
-        'app/src/main/kotlin/com/example/FooTest.kt',
-        'app/src/main/kotlin/com/example/FooTests.kt',
-        'MyApp/Tests/FooTests.swift',
-        'MyApp/Tests/FooTest.swift',
         'src/MyProject.Tests/AccountServiceTests.cs',
         'src/MyProject.Tests/AccountServiceTest.cs',
-        'core/src/main/scala/com/example/FooTest.scala',
     ],
 )
-def test_is_test_file_detects_pascalcase_compiled_language_tests(filename):
+def test_is_test_file_detects_dotnet_dotted_tests_directory(filename):
     assert _file_change(filename).is_test_file() is True
-
-
-@pytest.mark.parametrize(
-    'filename',
-    [
-        'docs/latest.md',
-        'src/main/kotlin/com/example/Latest.kt',
-        'app/src/main/java/com/example/Manifest.java',
-        'src/styles/contest.css',
-    ],
-)
-def test_is_test_file_rejects_pascalcase_lookalikes(filename):
-    assert _file_change(filename).is_test_file() is False
 
 
 @pytest.mark.parametrize(

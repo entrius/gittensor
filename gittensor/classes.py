@@ -76,11 +76,6 @@ class FileChange:
     def is_test_file(self) -> bool:
         filename_lower = self.filename.lower()
         basename = filename_lower.split('/')[-1]
-        basename_original = self.filename.split('/')[-1]
-
-        # pytest fixture file — applies project-wide regardless of directory
-        if basename == 'conftest.py':
-            return True
 
         test_dir_patterns = [
             r'(^|/)tests?/',
@@ -88,6 +83,7 @@ class FileChange:
             r'(^|/)androidtest[a-z]*/',
             r'(^|/)integrationtest/',
             r'(^|/)spec/',
+            r'\.tests?/',  # .NET MyProject.Tests/FooTests.cs
         ]
         if any(re.search(pattern, filename_lower) for pattern in test_dir_patterns):
             return True
@@ -103,16 +99,10 @@ class FileChange:
             r'\.spec\.[^.]+$',
             r'^test\.[^.]+$',
             r'^tests\.[^.]+$',
+            r'^conftest\.py$',
         ]
 
-        if any(re.search(pattern, basename) for pattern in test_patterns):
-            return True
-
-        # PascalCase test conventions in compiled languages: `FooTest.kt`,
-        # `FooTests.swift`, `AccountServiceTests.cs`. The capital `T` boundary
-        # is what lets us distinguish these from incidental endings like
-        # `Latest.kt`, so we match against the original-case basename.
-        return bool(re.search(r'[A-Z][A-Za-z0-9]*Tests?\.(swift|kt|java|cs|scala)$', basename_original))
+        return any(re.search(pattern, basename) for pattern in test_patterns)
 
     @classmethod
     def from_github_response(cls, pr_number: int, repository_full_name: str, file_diff: DefaultDict) -> 'FileChange':

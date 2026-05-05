@@ -48,7 +48,7 @@ class TestMinerPost:
         output = json.loads(result.output)
         assert output['success'] is False
 
-    @patch('gittensor.cli.miner_commands.post._validate_pat_locally', return_value=False)
+    @patch('gittensor.cli.miner_commands.post._validate_pat_locally', return_value=None)
     def test_pat_flag_used(self, mock_validate, runner, monkeypatch):
         monkeypatch.delenv('GITTENSOR_MINER_PAT', raising=False)
         result = runner.invoke(cli, ['miner', 'post', '--pat', 'ghp_test123', '--wallet', 'test', '--hotkey', 'test'])
@@ -56,7 +56,7 @@ class TestMinerPost:
         assert 'invalid' in result.output.lower() or 'expired' in result.output.lower()
         mock_validate.assert_called_once_with('ghp_test123')
 
-    @patch('gittensor.cli.miner_commands.post._validate_pat_locally', return_value=False)
+    @patch('gittensor.cli.miner_commands.post._validate_pat_locally', return_value=None)
     def test_invalid_pat_exits(self, mock_validate, runner, monkeypatch):
         monkeypatch.setenv('GITTENSOR_MINER_PAT', 'ghp_invalid')
         result = runner.invoke(cli, ['miner', 'post', '--wallet', 'test', '--hotkey', 'test'])
@@ -96,7 +96,7 @@ class TestMinerPost:
                 return responses
 
         with (
-            patch('gittensor.cli.miner_commands.post._validate_pat_locally', return_value=True),
+            patch('gittensor.cli.miner_commands.post._validate_pat_locally', return_value='testuser'),
             patch(
                 'gittensor.cli.miner_commands.post._connect_bittensor',
                 return_value=(wallet, object(), metagraph, FakeDendrite()),

@@ -15,6 +15,7 @@ import bittensor as bt
 from substrateinterface import Keypair
 from substrateinterface.exceptions import ExtrinsicNotFound
 
+from gittensor.constants import MAX_ISSUE_ID
 from gittensor.validator.issue_competitions.storage_utils import (
     compute_ink5_lazy_key,
     decode_issue_from_storage,
@@ -191,8 +192,7 @@ class IssueCompetitionContractClient:
             if next_issue_id <= 1:
                 return []
 
-            MAX_REASONABLE_ISSUE_ID = 1_000_000
-            if next_issue_id > MAX_REASONABLE_ISSUE_ID:
+            if next_issue_id > MAX_ISSUE_ID:
                 bt.logging.warning(f'next_issue_id ({next_issue_id}) unreasonably large')
                 return []
 

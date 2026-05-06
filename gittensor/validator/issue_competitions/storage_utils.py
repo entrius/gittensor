@@ -36,13 +36,13 @@ class DecodedIssueStorage:
 
 def _extract_trie_id_bytes(contract_info) -> Optional[bytes]:
     """Extract contract trie ID bytes from substrate contract info."""
-    info = contract_info.value if hasattr(contract_info, "value") else contract_info
-    if not info or "trie_id" not in info:
+    info = contract_info.value if hasattr(contract_info, 'value') else contract_info
+    if not info or 'trie_id' not in info:
         return None
 
-    trie_id = info["trie_id"]  # type: ignore[call-overload]
+    trie_id = info['trie_id']  # type: ignore[call-overload]
     if isinstance(trie_id, str):
-        return bytes.fromhex(trie_id.replace("0x", ""))
+        return bytes.fromhex(trie_id.replace('0x', ''))
     if isinstance(trie_id, (tuple, list)):
         if len(trie_id) == 1 and isinstance(trie_id[0], (tuple, list)):
             trie_id = trie_id[0]
@@ -54,7 +54,7 @@ def _extract_trie_id_bytes(contract_info) -> Optional[bytes]:
 
 def get_contract_child_storage_key(substrate, contract_addr: str) -> Optional[str]:
     """Build the child storage key prefix for a deployed contract."""
-    contract_info = substrate.query("Contracts", "ContractInfoOf", [contract_addr])
+    contract_info = substrate.query('Contracts', 'ContractInfoOf', [contract_addr])
     if not contract_info:
         return None
 
@@ -62,19 +62,19 @@ def get_contract_child_storage_key(substrate, contract_addr: str) -> Optional[st
     if trie_id_bytes is None:
         return None
 
-    prefix = b":child_storage:default:"
-    return "0x" + (prefix + trie_id_bytes).hex()
+    prefix = b':child_storage:default:'
+    return '0x' + (prefix + trie_id_bytes).hex()
 
 
 def compute_ink5_lazy_key(root_key_hex: str, encoded_key: bytes) -> str:
     """Compute Ink! 5 mapping key using blake2_128concat."""
-    root_key = bytes.fromhex(root_key_hex.replace("0x", ""))
+    root_key = bytes.fromhex(root_key_hex.replace('0x', ''))
     data = root_key + encoded_key
     h = hashlib.blake2b(data, digest_size=16).digest()
-    return "0x" + (h + data).hex()
+    return '0x' + (h + data).hex()
 
 
-_PACKED_ROOT_STORAGE_KEY = compute_ink5_lazy_key("00000000", b"")
+_PACKED_ROOT_STORAGE_KEY = compute_ink5_lazy_key('00000000', b'')
 
 # owner (32) + treasury hotkey (32) + netuid (2) + next_issue_id (8) + alpha_pool (16)
 _PACKED_CONTRACT_STORAGE_SIZE = 32 + 32 + 2 + 8 + 16
@@ -82,13 +82,11 @@ _PACKED_CONTRACT_STORAGE_SIZE = 32 + 32 + 2 + 8 + 16
 
 def read_contract_packed_storage_bytes(substrate, child_key: str) -> Optional[bytes]:
     """Read packed root storage bytes from contract child storage."""
-    val_result = substrate.rpc_request(
-        "childstate_getStorage", [child_key, _PACKED_ROOT_STORAGE_KEY, None]
-    )
-    raw_hex = val_result.get("result")
+    val_result = substrate.rpc_request('childstate_getStorage', [child_key, _PACKED_ROOT_STORAGE_KEY, None])
+    raw_hex = val_result.get('result')
     if not raw_hex:
         return None
-    return bytes.fromhex(raw_hex.replace("0x", ""))
+    return bytes.fromhex(raw_hex.replace('0x', ''))
 
 
 def decode_packed_contract_storage(data: bytes) -> Optional[PackedContractStorage]:
@@ -102,14 +100,14 @@ def decode_packed_contract_storage(data: bytes) -> Optional[PackedContractStorag
         offset += 32
         treasury_hotkey = data[offset : offset + 32]
         offset += 32
-        netuid = struct.unpack_from("<H", data, offset)[0]
+        netuid = struct.unpack_from('<H', data, offset)[0]
         offset += 2
-        next_issue_id = struct.unpack_from("<Q", data, offset)[0]
+        next_issue_id = struct.unpack_from('<Q', data, offset)[0]
         offset += 8
-        alpha_pool_lo, alpha_pool_hi = struct.unpack_from("<QQ", data, offset)
+        alpha_pool_lo, alpha_pool_hi = struct.unpack_from('<QQ', data, offset)
         alpha_pool = alpha_pool_lo + (alpha_pool_hi << 64)
     except (struct.error, IndexError) as e:
-        logger.debug("Failed to decode packed contract storage: %s", e)
+        logger.debug('Failed to decode packed contract storage: %s', e)
         return None
 
     return PackedContractStorage(
@@ -121,9 +119,7 @@ def decode_packed_contract_storage(data: bytes) -> Optional[PackedContractStorag
     )
 
 
-def read_contract_packed_storage(
-    substrate, contract_addr: str
-) -> Optional[PackedContractStorage]:
+def read_contract_packed_storage(substrate, contract_addr: str) -> Optional[PackedContractStorage]:
     """Read and decode packed root storage for a contract."""
     child_key = get_contract_child_storage_key(substrate, contract_addr)
     if not child_key:
@@ -140,7 +136,7 @@ def decode_issue_from_storage(data: bytes) -> Optional[DecodedIssueStorage]:
     """Decode one issue mapping value from contract child storage."""
     try:
         offset = 0
-        stored_issue_id = struct.unpack_from("<Q", data, offset)[0]
+        stored_issue_id = struct.unpack_from('<Q', data, offset)[0]
         offset += 8
 
         github_url_hash = data[offset : offset + 32]
@@ -157,24 +153,24 @@ def decode_issue_from_storage(data: bytes) -> Optional[DecodedIssueStorage]:
             str_len = 0
             offset += 1
 
-        repo_name = data[offset : offset + str_len].decode("utf-8", errors="replace")
+        repo_name = data[offset : offset + str_len].decode('utf-8', errors='replace')
         offset += str_len
 
-        issue_number = struct.unpack_from("<I", data, offset)[0]
+        issue_number = struct.unpack_from('<I', data, offset)[0]
         offset += 4
 
-        bounty_lo, bounty_hi = struct.unpack_from("<QQ", data, offset)
+        bounty_lo, bounty_hi = struct.unpack_from('<QQ', data, offset)
         bounty_amount = bounty_lo + (bounty_hi << 64)
         offset += 16
 
-        target_lo, target_hi = struct.unpack_from("<QQ", data, offset)
+        target_lo, target_hi = struct.unpack_from('<QQ', data, offset)
         target_bounty = target_lo + (target_hi << 64)
         offset += 16
 
         status_byte = data[offset]
         offset += 1
 
-        registered_at_block = struct.unpack_from("<I", data, offset)[0]
+        registered_at_block = struct.unpack_from('<I', data, offset)[0]
 
         return DecodedIssueStorage(
             id=stored_issue_id,
@@ -187,5 +183,5 @@ def decode_issue_from_storage(data: bytes) -> Optional[DecodedIssueStorage]:
             registered_at_block=registered_at_block,
         )
     except (IndexError, struct.error, ValueError) as e:
-        logger.debug("Failed to decode issue storage entry: %s", e)
+        logger.debug('Failed to decode issue storage entry: %s', e)
         return None

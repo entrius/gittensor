@@ -96,6 +96,71 @@ def test_is_test_file_detects_conftest_at_any_depth(filename):
     assert _file_change(filename).is_test_file() is True
 
 
+def _issue_node(number: int, name_with_owner=None):
+    node = {
+        'number': number,
+        'title': f'Issue #{number}',
+        'state': 'CLOSED',
+        'stateReason': 'COMPLETED',
+        'createdAt': '2026-04-01T00:00:00Z',
+        'closedAt': '2026-04-16T00:00:00Z',
+        'updatedAt': '2026-04-16T00:00:00Z',
+        'author': {'login': 'maintainer_b', 'databaseId': 999},
+        'authorAssociation': 'OWNER',
+        'userContentEdits': {'nodes': []},
+        'timelineItems': {'nodes': []},
+    }
+    if name_with_owner is not None:
+        node['repository'] = {'nameWithOwner': name_with_owner}
+    return node
+
+
+def _pr_data_with_issues(issue_nodes):
+    return {
+        'number': 42,
+        'repository': {'owner': {'login': 'entrius'}, 'name': 'gittensor'},
+        'state': 'MERGED',
+        'closingIssuesReferences': {'nodes': issue_nodes},
+        'bodyText': 'fixes things',
+        'lastEditedAt': None,
+        'mergedAt': '2026-04-16T00:00:00Z',
+        'timelineItems': {'nodes': []},
+        'title': 'fix: things',
+        'author': {'login': 'miner'},
+        'authorAssociation': 'CONTRIBUTOR',
+        'createdAt': '2026-04-15T00:00:00Z',
+        'additions': 3,
+        'deletions': 1,
+        'commits': {'totalCount': 1},
+        'headRefOid': 'abc123',
+        'baseRefOid': 'def456',
+    }
+
+
+def test_pull_request_skips_cross_repo_closing_issue_references():
+    pr_data = _pr_data_with_issues(
+        [
+            _issue_node(1, 'entrius/gittensor'),
+            _issue_node(2, 'entrius/other-repo'),
+            _issue_node(3, 'ENTRIUS/Gittensor'),
+        ]
+    )
+
+    pr = PullRequest.from_graphql_response(pr_data, uid=1, hotkey='5Hotkey', github_id='123')
+
+    assert pr.issues is not None
+    assert sorted(i.number for i in pr.issues) == [1, 3]
+
+
+def test_pull_request_keeps_issue_when_repository_field_missing():
+    pr_data = _pr_data_with_issues([_issue_node(7)])
+
+    pr = PullRequest.from_graphql_response(pr_data, uid=1, hotkey='5Hotkey', github_id='123')
+
+    assert pr.issues is not None
+    assert [i.number for i in pr.issues] == [7]
+
+
 def test_pull_request_handles_deleted_label_event():
     pr_data = {
         'number': 42,

@@ -97,6 +97,7 @@ QUERY = """
                   createdAt
                   closedAt
                   updatedAt
+                  repository { nameWithOwner }
                   author {
                     login
                     ... on User { databaseId }

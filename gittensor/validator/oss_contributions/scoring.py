@@ -158,6 +158,7 @@ def calculate_base_score(
         pr.file_changes or [], file_contents, programming_languages, token_config
     )
     pr.token_score = result.token_score
+    pr.source_token_score = result.source_token_score
     pr.structural_count = result.structural_count
     pr.structural_score = result.structural_score
     pr.leaf_count = result.leaf_count

@@ -197,6 +197,7 @@ class PullRequest:
 
     # Token scoring breakdown (after test weight applied)
     code_density: float = 0.0
+    source_token_score: float = 0.0  # SOURCE-only token score for eligibility gates
     token_score: float = 0.0
     structural_count: int = 0
     structural_score: float = 0.0
@@ -219,7 +220,8 @@ class PullRequest:
 
         A PR is eligible if it is merged and meets the minimum token score quality gate.
         """
-        return self.merged_at is not None and self.token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE
+        effective_score = self.source_token_score if self.source_token_score > 0 else self.token_score
+        return self.merged_at is not None and effective_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE
 
     def calculate_final_earned_score(self) -> float:
         """Combine base score with all multipliers. Pioneer dividend is added separately after."""

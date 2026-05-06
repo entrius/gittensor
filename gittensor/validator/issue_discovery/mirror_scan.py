@@ -80,6 +80,7 @@ class CachedSolvingPR:
 
     base_score: float
     token_score: float
+    source_token_score: float = 0.0
 
 
 @dataclass
@@ -241,7 +242,8 @@ def _build_solving_pr_cache(
     cache: Dict[Tuple[str, int], CachedSolvingPR] = {}
     for evaluation in miner_evaluations.values():
         for scored in evaluation.mirror_merged_prs:
-            if scored.token_score < MIN_TOKEN_SCORE_FOR_BASE_SCORE:
+            effective_score = scored.source_token_score if scored.source_token_score > 0 else scored.token_score
+            if effective_score < MIN_TOKEN_SCORE_FOR_BASE_SCORE:
                 continue
             key = (scored.pr.repo_full_name, scored.pr.pr_number)
             if key in cache:
@@ -249,6 +251,7 @@ def _build_solving_pr_cache(
             cache[key] = CachedSolvingPR(
                 base_score=scored.base_score,
                 token_score=scored.token_score,
+                source_token_score=scored.source_token_score,
             )
     return cache
 
@@ -323,8 +326,9 @@ def _score_miner_mirror_issues(
             )
             continue
 
-        # Valid-solved gate (legacy parity): solving PR must meet the token threshold.
-        if cached.token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE:
+        # Valid-solved gate (legacy parity): solving PR must meet the SOURCE token threshold.
+        effective_token_score = cached.source_token_score if cached.source_token_score > 0 else cached.token_score
+        if effective_token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE:
             valid_solved_count += 1
 
         # Same-account: discoverer == solver gets credibility only, no score
@@ -350,10 +354,10 @@ def _score_miner_mirror_issues(
 
         # Quality gate — matches legacy issue-discovery behavior: below-threshold
         # solving PRs add credibility only, no discovery score.
-        if cached.token_score < MIN_TOKEN_SCORE_FOR_BASE_SCORE:
+        if effective_token_score < MIN_TOKEN_SCORE_FOR_BASE_SCORE:
             bt.logging.debug(
                 f'  issue #{issue.issue_number} ({issue.repo_full_name}): solving PR '
-                f'#{solving_pr.pr_number} token_score {cached.token_score:.2f} < '
+                f'#{solving_pr.pr_number} source_token_score {effective_token_score:.2f} < '
                 f'{MIN_TOKEN_SCORE_FOR_BASE_SCORE} — credibility only'
             )
             continue
@@ -365,7 +369,7 @@ def _score_miner_mirror_issues(
         scored_issues.append(adapted)
         # Legacy parity: issue_token_score accumulates per-solving-PR token scores
         # for the open-issue spam multiplier threshold calc.
-        issue_token_score += cached.token_score
+        issue_token_score += effective_token_score
 
     # All issue-discovery fields are now mirror-only writers (legacy issue
     # discovery has been removed), so simple assignment — no need to merge
@@ -450,7 +454,11 @@ def _resolve_solving_pr_score(
         issue.repo_full_name, solving_pr.pr_number, files_response.files
     )
     result = calculate_base_score_for_pr_files(file_changes, file_contents, programming_languages, token_config)
-    cached = CachedSolvingPR(base_score=result.base_score, token_score=result.token_score)
+    cached = CachedSolvingPR(
+        base_score=result.base_score,
+        token_score=result.token_score,
+        source_token_score=result.source_token_score,
+    )
     cache[key] = cached
     return cached
 

@@ -52,8 +52,11 @@ def check_eligibility(merged_prs: Sequence[PrLike], closed_prs: Sequence[PrLike]
     """
     credibility = calculate_credibility(merged_prs, closed_prs)
 
-    # Count valid merged PRs (token_score >= threshold)
-    valid_merged_count = sum(1 for pr in merged_prs if pr.token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE)
+    # Count valid merged PRs (source_token_score with fallback to token_score >= threshold)
+    valid_merged_count = sum(
+        1 for pr in merged_prs
+        if (pr.source_token_score if pr.source_token_score > 0 else pr.token_score) >= MIN_TOKEN_SCORE_FOR_BASE_SCORE
+    )
 
     if valid_merged_count < MIN_VALID_MERGED_PRS:
         reason = f'{valid_merged_count}/{MIN_VALID_MERGED_PRS} valid merged PRs (need {MIN_VALID_MERGED_PRS})'

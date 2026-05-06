@@ -235,13 +235,14 @@ class BaseScoreResult:
     """
 
     base_score: float
+    source_token_score: float = 0.0
     token_score: float
-    structural_count: int
-    structural_score: float
-    leaf_count: int
-    leaf_score: float
-    total_nodes_scored: int
-    code_density: float
+    structural_count: int = 0
+    structural_score: float = 0.0
+    leaf_count: int = 0
+    leaf_score: float = 0.0
+    total_nodes_scored: int = 0
+    code_density: float = 0.0
 
 
 def calculate_base_score_for_pr_files(
@@ -306,6 +307,7 @@ def calculate_base_score_for_pr_files(
 
     return BaseScoreResult(
         base_score=base_score,
+        source_token_score=source_token_score,
         token_score=token_score,
         structural_count=structural_count,
         structural_score=structural_score,
@@ -326,6 +328,7 @@ def _calculate_base_score(
     """Thin wrapper: run the shared helper and copy fields onto ScoredMirrorPR."""
     result = calculate_base_score_for_pr_files(file_changes, file_contents, programming_languages, token_config)
     scored.token_score = result.token_score
+    scored.source_token_score = result.source_token_score
     scored.structural_count = result.structural_count
     scored.structural_score = result.structural_score
     scored.leaf_count = result.leaf_count

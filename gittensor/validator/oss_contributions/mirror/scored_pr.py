@@ -49,6 +49,7 @@ class ScoredMirrorPR:
     # Token scoring breakdown (populated when files are tokenized)
     code_density: float = 0.0
     token_score: float = 0.0
+    source_token_score: float = 0.0
     structural_count: int = 0
     structural_score: float = 0.0
     leaf_count: int = 0
@@ -89,7 +90,8 @@ class ScoredMirrorPR:
         Mirrors `PullRequest.is_pioneer_eligible` so the legacy pioneer math
         functions can be reused unchanged.
         """
-        return self.pr.merged_at is not None and self.token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE
+        effective_score = self.source_token_score if self.source_token_score > 0 else self.token_score
+        return self.pr.merged_at is not None and effective_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE
 
     def calculate_final_earned_score(self) -> float:
         """Combine base score with all multipliers. Pioneer dividend is added separately after."""

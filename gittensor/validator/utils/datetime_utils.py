@@ -1,5 +1,5 @@
 import math
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import pytz
@@ -45,6 +45,19 @@ def parse_github_timestamp_to_cst(timestamp_str: str) -> datetime:
     GitHub returns timestamps like: 2024-01-15T10:30:00Z
     """
     return parse_github_iso_to_utc(timestamp_str).astimezone(CHICAGO_TZ)
+
+
+def lookback_cutoff(lookback_days: int) -> datetime:
+    """Return the lookback cutoff floored to 00:00:00 UTC.
+
+    Quantising to the start of the UTC day ensures that multiple validators
+    computing ``datetime.now()`` at different wall-clock times within the same
+    UTC day all arrive at the *identical* cutoff, eliminating the discrete
+    include/exclude flip described in #1003.
+    """
+    now = datetime.now(timezone.utc)
+    raw = now - timedelta(days=lookback_days)
+    return raw.replace(hour=0, minute=0, second=0, microsecond=0)
 
 
 def calculate_time_decay(merged_at: datetime) -> float:

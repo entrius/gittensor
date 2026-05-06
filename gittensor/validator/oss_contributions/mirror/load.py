@@ -26,7 +26,7 @@ from gittensor.utils.mirror.models import MirrorPullRequest
 from gittensor.validator.oss_contributions.mirror.evaluation import MirrorMinerEvaluation
 from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredMirrorPR
 from gittensor.validator.oss_contributions.mirror.scoring import _should_skip_merged_mirror_pr
-from gittensor.validator.utils.datetime_utils import parse_github_iso_to_utc
+from gittensor.validator.utils.datetime_utils import lookback_cutoff, parse_github_iso_to_utc
 from gittensor.validator.utils.load_weights import RepositoryConfig
 
 
@@ -54,7 +54,7 @@ def load_mirror_miner_prs(
         return
 
     client = client or MirrorClient()
-    lookback_date = datetime.now(timezone.utc) - timedelta(days=PR_LOOKBACK_DAYS)
+    lookback_date = lookback_cutoff(PR_LOOKBACK_DAYS)
 
     try:
         response = client.get_miner_pulls(mirror_eval.github_id, since=lookback_date)

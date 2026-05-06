@@ -32,7 +32,7 @@ from gittensor.constants import (
     REVIEW_PENALTY_RATE,
 )
 from gittensor.utils.models import PRInfo
-from gittensor.validator.utils.datetime_utils import parse_github_iso_to_utc
+from gittensor.validator.utils.datetime_utils import lookback_cutoff, parse_github_iso_to_utc
 from gittensor.validator.utils.load_weights import RepositoryConfig
 
 # Beyond this many CHANGES_REQUESTED reviews the quality multiplier is already 0
@@ -872,7 +872,7 @@ def load_miners_prs(
         bt.logging.warning(f'UID {miner_eval.uid} has no github_pat, skipping PR fetch')
         return
 
-    lookback_date_filter = datetime.now(timezone.utc) - timedelta(days=PR_LOOKBACK_DAYS)
+    lookback_date_filter = lookback_cutoff(PR_LOOKBACK_DAYS)
     global_user_id = base64.b64encode(f'04:User{miner_eval.github_id}'.encode()).decode()
 
     cursor = None

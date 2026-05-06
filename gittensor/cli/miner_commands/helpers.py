@@ -109,10 +109,13 @@ def _print(message: str, json_mode: bool) -> None:
         console.print(message)
 
 
-def _error(msg: str, json_mode: bool) -> None:
+def _error(msg: str, json_mode: bool, error_code: str | None = None) -> None:
     """Print an error message in the appropriate format."""
     if json_mode:
-        click.echo(json.dumps({'success': False, 'error': msg}))
+        payload = {'success': False, 'error': msg}
+        if error_code is not None:
+            payload['error_code'] = error_code
+        click.echo(json.dumps(payload))
     else:
         console.print(f'[red]Error: {msg}[/red]')
 

@@ -8,6 +8,7 @@ import asyncio
 import json
 import os
 import sys
+from dataclasses import dataclass
 
 import click
 import requests
@@ -31,15 +32,32 @@ from gittensor.cli.miner_commands.helpers import (
     _status,
 )
 from gittensor.constants import BASE_GITHUB_API_URL, GITHUB_HTTP_TIMEOUT_SECONDS, GRAPHQL_VIEWER_QUERY
-from gittensor.utils.github_api_tools import make_graphql_headers, make_headers
+from gittensor.utils.github_api_tools import _is_rate_limited_response, make_graphql_headers, make_headers
 
 console = Console()
+
+_INVALID_PAT_MESSAGE = 'GitHub PAT is invalid or expired. Check your GITTENSOR_MINER_PAT.'
 
 _PAT_POST_STATUS_MARKUP = {
     'accepted': '[green]✓[/green]',
     'rejected': '[red]✗[/red]',
     'no_response': '[yellow]—[/yellow]',
 }
+
+
+@dataclass(frozen=True)
+class PatValidationResult:
+    is_valid: bool
+    error_code: str | None = None
+    error_message: str | None = None
+
+    @classmethod
+    def valid(cls) -> 'PatValidationResult':
+        return cls(is_valid=True)
+
+    @classmethod
+    def failed(cls, error_code: str | None, error_message: str) -> 'PatValidationResult':
+        return cls(is_valid=False, error_code=error_code, error_message=error_message)
 
 
 @click.command()
@@ -98,10 +116,14 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, min_vt
 
     # 1b. Validate PAT locally
     with _status('[bold]Validating PAT...', json_mode):
-        pat_valid = _validate_pat_locally(pat)
+        pat_validation = _validate_pat_locally(pat)
 
-    if not pat_valid:
-        _error('GitHub PAT is invalid or expired. Check your GITTENSOR_MINER_PAT.', json_mode)
+    if not pat_validation.is_valid:
+        _error(
+            pat_validation.error_message or _INVALID_PAT_MESSAGE,
+            json_mode,
+            error_code=pat_validation.error_code,
+        )
         sys.exit(1)
 
     _print('[green]PAT is valid.[/green]', json_mode)
@@ -193,16 +215,23 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, min_vt
         _render_skipped_validators(excluded, json_mode)
 
 
-def _validate_pat_locally(pat: str) -> bool:
+def _validate_pat_locally(pat: str) -> PatValidationResult:
     """Validate PAT mirrors the validator-side checks: user identity + GraphQL access."""
     try:
         # Check basic auth
         user_resp = requests.get(
             f'{BASE_GITHUB_API_URL}/user', headers=make_headers(pat), timeout=GITHUB_HTTP_TIMEOUT_SECONDS
         )
-        if user_resp.status_code != 200:
-            return False
+    except requests.RequestException as e:
+        return PatValidationResult.failed(
+            'github_network_error',
+            f'Failed to reach GitHub API: {e}. Check your network and retry.',
+        )
 
+    if user_resp.status_code != 200:
+        return _classify_user_lookup_failure(user_resp)
+
+    try:
         # Check GraphQL access (same test the validator runs during PAT broadcast)
         gql_resp = requests.post(
             f'{BASE_GITHUB_API_URL}/graphql',
@@ -214,8 +243,23 @@ def _validate_pat_locally(pat: str) -> bool:
             console.print(
                 '[red]PAT lacks GraphQL API access. Fine-grained PATs need "Public Repositories (read-only)" permission.[/red]'
             )
-            return False
+            return PatValidationResult.failed(None, _INVALID_PAT_MESSAGE)
 
-        return True
+        return PatValidationResult.valid()
     except requests.RequestException:
-        return False
+        return PatValidationResult.failed(None, _INVALID_PAT_MESSAGE)
+
+
+def _classify_user_lookup_failure(response: requests.Response) -> PatValidationResult:
+    status_code = response.status_code
+    if _is_rate_limited_response(response):
+        return PatValidationResult.failed(
+            'github_rate_limited',
+            'GitHub API rate limit reached. Retry later.',
+        )
+    if status_code == 408 or 500 <= status_code <= 599:
+        return PatValidationResult.failed(
+            'github_unavailable',
+            f'GitHub API is currently unavailable (HTTP {status_code}). Retry in a few minutes.',
+        )
+    return PatValidationResult.failed('pat_invalid', _INVALID_PAT_MESSAGE)

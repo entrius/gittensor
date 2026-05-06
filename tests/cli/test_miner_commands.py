@@ -4,9 +4,11 @@
 
 import json
 from types import SimpleNamespace
+from typing import Optional
 from unittest.mock import patch
 
 import pytest
+import requests
 from click.testing import CliRunner
 
 from gittensor import __version__
@@ -17,6 +19,7 @@ from gittensor.cli.miner_commands.helpers import (
     _pat_post_aggregate_counts,
     _pat_post_row_category,
 )
+from gittensor.cli.miner_commands.post import PatValidationResult, _validate_pat_locally
 
 
 def _fake_metagraph(rows: list[tuple[float, bool, float]]):
@@ -27,6 +30,20 @@ def _fake_metagraph(rows: list[tuple[float, bool, float]]):
         validator_trust=[vt for vt, _, _ in rows],
         S=[stake for _, _, stake in rows],
         axons=[SimpleNamespace(is_serving=serving, hotkey=f'5Hk{i:02d}') for i, (_, serving, _) in enumerate(rows)],
+    )
+
+
+def _response(status_code: int, *, headers: Optional[dict] = None, body: bytes = b'{}') -> requests.Response:
+    response = requests.Response()
+    response.status_code = status_code
+    response.headers.update(headers or {})
+    response._content = body
+    return response
+
+
+def _invalid_pat_result() -> PatValidationResult:
+    return PatValidationResult.failed(
+        'pat_invalid', 'GitHub PAT is invalid or expired. Check your GITTENSOR_MINER_PAT.'
     )
 
 
@@ -48,7 +65,7 @@ class TestMinerPost:
         output = json.loads(result.output)
         assert output['success'] is False
 
-    @patch('gittensor.cli.miner_commands.post._validate_pat_locally', return_value=False)
+    @patch('gittensor.cli.miner_commands.post._validate_pat_locally', return_value=_invalid_pat_result())
     def test_pat_flag_used(self, mock_validate, runner, monkeypatch):
         monkeypatch.delenv('GITTENSOR_MINER_PAT', raising=False)
         result = runner.invoke(cli, ['miner', 'post', '--pat', 'ghp_test123', '--wallet', 'test', '--hotkey', 'test'])
@@ -56,12 +73,111 @@ class TestMinerPost:
         assert 'invalid' in result.output.lower() or 'expired' in result.output.lower()
         mock_validate.assert_called_once_with('ghp_test123')
 
-    @patch('gittensor.cli.miner_commands.post._validate_pat_locally', return_value=False)
+    @patch('gittensor.cli.miner_commands.post._validate_pat_locally', return_value=_invalid_pat_result())
     def test_invalid_pat_exits(self, mock_validate, runner, monkeypatch):
         monkeypatch.setenv('GITTENSOR_MINER_PAT', 'ghp_invalid')
         result = runner.invoke(cli, ['miner', 'post', '--wallet', 'test', '--hotkey', 'test'])
         assert result.exit_code != 0
         assert 'invalid' in result.output.lower() or 'expired' in result.output.lower()
+
+    def test_local_pat_validation_classifies_invalid_user_auth(self):
+        with patch('gittensor.cli.miner_commands.post.requests.get', return_value=_response(401)):
+            result = _validate_pat_locally('ghp_invalid')
+
+        assert result.is_valid is False
+        assert result.error_code == 'pat_invalid'
+        assert result.error_message is not None
+        assert 'invalid or expired' in result.error_message
+
+    def test_local_pat_validation_classifies_github_unavailable(self):
+        with patch('gittensor.cli.miner_commands.post.requests.get', return_value=_response(500)):
+            result = _validate_pat_locally('ghp_valid')
+
+        assert result.is_valid is False
+        assert result.error_code == 'github_unavailable'
+        assert result.error_message is not None
+        assert 'HTTP 500' in result.error_message
+
+    def test_local_pat_validation_classifies_github_timeout_status(self):
+        with patch('gittensor.cli.miner_commands.post.requests.get', return_value=_response(408)):
+            result = _validate_pat_locally('ghp_valid')
+
+        assert result.is_valid is False
+        assert result.error_code == 'github_unavailable'
+        assert result.error_message is not None
+        assert 'HTTP 408' in result.error_message
+
+    def test_local_pat_validation_classifies_rate_limit_status(self):
+        with patch('gittensor.cli.miner_commands.post.requests.get', return_value=_response(429)):
+            result = _validate_pat_locally('ghp_valid')
+
+        assert result.is_valid is False
+        assert result.error_code == 'github_rate_limited'
+
+    def test_local_pat_validation_classifies_rate_limited_403(self):
+        response = _response(403, headers={'x-ratelimit-remaining': '0'})
+        with patch('gittensor.cli.miner_commands.post.requests.get', return_value=response):
+            result = _validate_pat_locally('ghp_valid')
+
+        assert result.is_valid is False
+        assert result.error_code == 'github_rate_limited'
+
+    def test_local_pat_validation_classifies_network_error(self):
+        with patch('gittensor.cli.miner_commands.post.requests.get', side_effect=requests.Timeout('timed out')):
+            result = _validate_pat_locally('ghp_valid')
+
+        assert result.is_valid is False
+        assert result.error_code == 'github_network_error'
+        assert result.error_message is not None
+        assert 'timed out' in result.error_message
+
+    def test_local_pat_validation_keeps_graphql_permission_behavior(self):
+        with (
+            patch('gittensor.cli.miner_commands.post.requests.get', return_value=_response(200)),
+            patch('gittensor.cli.miner_commands.post.requests.post', return_value=_response(403)),
+        ):
+            result = _validate_pat_locally('ghp_no_graphql_access')
+
+        assert result.is_valid is False
+        assert result.error_code is None
+        assert result.error_message is not None
+        assert 'invalid or expired' in result.error_message
+
+    def test_local_pat_validation_keeps_graphql_network_error_behavior(self):
+        with (
+            patch('gittensor.cli.miner_commands.post.requests.get', return_value=_response(200)),
+            patch('gittensor.cli.miner_commands.post.requests.post', side_effect=requests.Timeout('timed out')),
+        ):
+            result = _validate_pat_locally('ghp_valid')
+
+        assert result.is_valid is False
+        assert result.error_code is None
+        assert result.error_message is not None
+        assert 'invalid or expired' in result.error_message
+
+    def test_json_mode_includes_error_code_for_local_network_failure(self, runner, monkeypatch):
+        monkeypatch.delenv('GITTENSOR_MINER_PAT', raising=False)
+        with patch('gittensor.cli.miner_commands.post.requests.get', side_effect=requests.Timeout('timed out')):
+            result = runner.invoke(
+                cli,
+                [
+                    'miner',
+                    'post',
+                    '--json-output',
+                    '--pat',
+                    'ghp_validToken',
+                    '--wallet',
+                    'alice',
+                    '--hotkey',
+                    'default',
+                ],
+            )
+
+        assert result.exit_code != 0
+        output = json.loads(result.output)
+        assert output['success'] is False
+        assert output['error_code'] == 'github_network_error'
+        assert 'timed out' in output['error']
 
     def test_help_text(self, runner):
         result = runner.invoke(cli, ['miner', 'post', '--help'])
@@ -96,7 +212,7 @@ class TestMinerPost:
                 return responses
 
         with (
-            patch('gittensor.cli.miner_commands.post._validate_pat_locally', return_value=True),
+            patch('gittensor.cli.miner_commands.post._validate_pat_locally', return_value=PatValidationResult.valid()),
             patch(
                 'gittensor.cli.miner_commands.post._connect_bittensor',
                 return_value=(wallet, object(), metagraph, FakeDendrite()),

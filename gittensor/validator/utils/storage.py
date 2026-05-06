@@ -27,6 +27,44 @@ class DatabaseStorage:
     def is_enabled(self) -> bool:
         return self.db_connection is not None
 
+    def store_miner_evaluation(self, miner_eval: MinerEvaluation) -> StorageResult:
+        """
+        Store only the miner identity and aggregate evaluation row.
+
+        Used when cached OSS fallback supplied already-stored PR data, but a
+        later scoring phase refreshed top-level fields such as issue discovery.
+        """
+        if not self.is_enabled():
+            return StorageResult(success=False, errors=['Database storage not enabled'], stored_counts={})
+
+        result = StorageResult(success=True, errors=[], stored_counts={})
+
+        try:
+            assert self.db_connection is not None and self.repo is not None
+            self.db_connection.autocommit = False
+
+            miner_eval.evaluation_timestamp = datetime.now(timezone.utc)
+
+            miner = Miner(miner_eval.uid, miner_eval.hotkey, miner_eval.github_id or '')
+            result.stored_counts['miners'] = self.repo.set_miner(miner, commit=False)
+            self.repo.cleanup_stale_miner_data(miner_eval, commit=False)
+            result.stored_counts['evaluations'] = 1 if self.repo.set_miner_evaluation(miner_eval, commit=False) else 0
+
+            self.db_connection.commit()
+            self.db_connection.autocommit = True
+
+        except Exception as ex:
+            if self.db_connection is not None:
+                self.db_connection.rollback()
+                self.db_connection.autocommit = True
+
+            error_msg = f'Failed to store miner evaluation row for UID {miner_eval.uid}: {str(ex)}'
+            result.success = False
+            result.errors.append(error_msg)
+            self.logger.error(error_msg)
+
+        return result
+
     def store_evaluation(self, miner_eval: MinerEvaluation) -> StorageResult:
         """
         Store all evaluation data in an optimized manner with proper error handling.

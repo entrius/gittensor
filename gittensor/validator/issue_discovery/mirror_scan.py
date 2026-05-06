@@ -106,7 +106,7 @@ async def run_mirror_issue_discovery(
     programming_languages: Dict[str, LanguageConfig],
     token_config: TokenConfig,
     client: Optional[MirrorClient] = None,
-) -> None:
+) -> Set[int]:
     """Score issue discovery for mirror-enabled repos. Mutates miner_evaluations.
 
     For each miner, fetches their authored issues via the mirror and classifies
@@ -117,6 +117,10 @@ async def run_mirror_issue_discovery(
     Depends on OSS scoring (``score_mirror_miner_prs``) having already run for
     this cycle — the cross-miner solving-PR cache is built by walking every
     miner's populated ``mirror_merged_prs``.
+
+    Returns the UIDs whose mirror issue fetch completed successfully. These
+    evaluations contain current issue-discovery fields even when the miner has
+    zero qualifying issues, so cached OSS fallback must not skip their DB row.
     """
     bt.logging.info('')
     bt.logging.info('=' * 50)
@@ -125,7 +129,7 @@ async def run_mirror_issue_discovery(
 
     if not mirror_repos:
         bt.logging.info('No mirror-enabled repos — issue discovery skipped')
-        return
+        return set()
 
     client = client or MirrorClient()
     lookback_date = datetime.now(timezone.utc) - timedelta(days=PR_LOOKBACK_DAYS)
@@ -142,6 +146,7 @@ async def run_mirror_issue_discovery(
     skipped_failed = 0
     fetch_errors = 0
     no_issues = 0
+    refreshed_uids: Set[int] = set()
 
     # Phase 1: fetch each miner's issues.  The one-issue-per-PR rule is round-
     # global, so scoring is deferred until every miner's batch is in hand.
@@ -161,8 +166,10 @@ async def run_mirror_issue_discovery(
             fetch_errors += 1
             continue
 
+        refreshed_uids.add(uid)
         filtered = [i for i in response.issues if i.repo_full_name in enabled_names]
         if not filtered:
+            _clear_issue_discovery_fields(evaluation)
             no_issues += 1
             continue
 
@@ -199,6 +206,18 @@ async def run_mirror_issue_discovery(
         f'({cache_stats.misses - cache_stats.fetch_failures} fetched OK, '
         f'{cache_stats.fetch_failures} fetch failures)'
     )
+    return refreshed_uids
+
+
+def _clear_issue_discovery_fields(evaluation: MinerEvaluation) -> None:
+    evaluation.total_solved_issues = 0
+    evaluation.total_valid_solved_issues = 0
+    evaluation.total_closed_issues = 0
+    evaluation.total_open_issues = 0
+    evaluation.issue_token_score = 0.0
+    evaluation.issue_credibility = 0.0
+    evaluation.is_issue_eligible = False
+    evaluation.issue_discovery_score = 0.0
 
 
 def _build_canonical_pr_owners(
@@ -274,6 +293,8 @@ def _score_miner_mirror_issues(
     ``canonical_pr_owners`` enforces the cross-miner one-issue-per-PR rule:
     only the marker-matching issue scores, siblings count for credibility.
     """
+    _clear_issue_discovery_fields(evaluation)
+
     solved_count = 0
     valid_solved_count = 0
     closed_count = 0

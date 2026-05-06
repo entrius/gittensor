@@ -98,30 +98,49 @@ class Validator(BaseValidatorNeuron):
         bt.logging.info('load_state()')
         self.load_state()
 
-    async def bulk_store_evaluation(self, miner_evals: Dict[int, MinerEvaluation], skip_uids: Set[int] = None):
+    async def bulk_store_evaluation(
+        self,
+        miner_evals: Dict[int, MinerEvaluation],
+        skip_uids: Set[int] = None,
+        evaluation_only_uids: Set[int] = None,
+    ):
         """Store all miner evaluations, log summary rather than per-UID.
 
         Args:
             miner_evals: Dict of UID -> MinerEvaluation to store.
             skip_uids: Set of UIDs to skip (e.g. cached evaluations that were already stored previously).
+            evaluation_only_uids: Cached UIDs whose aggregate evaluation row should be refreshed
+                without re-storing cached PR and file-change payloads.
         """
         if self.db_storage is None:
             return
 
         skip_uids = skip_uids or set()
+        evaluation_only_uids = evaluation_only_uids or set()
         successful_count = 0
+        evaluation_only_count = 0
         skipped_count = 0
         failed_uids: List[int] = []
 
         for uid, evaluation in miner_evals.items():
             if uid in skip_uids:
-                skipped_count += 1
-                continue
+                if uid not in evaluation_only_uids:
+                    skipped_count += 1
+                    continue
 
             try:
-                storage_result = self.db_storage.store_evaluation(evaluation)
+                if uid in skip_uids:
+                    storage_result = self.db_storage.store_miner_evaluation(evaluation)
+                    evaluation_only_store = True
+                else:
+                    storage_result = self.db_storage.store_evaluation(evaluation)
+                    evaluation_only_store = False
+
                 if storage_result.success:
-                    successful_count += 1
+                    if evaluation_only_store:
+                        evaluation_only_count += 1
+                    else:
+                        successful_count += 1
                 else:
                     failed_uids.append(uid)
                     bt.logging.warning(f'Storage partially failed for UID {uid}:')
@@ -134,6 +153,8 @@ class Validator(BaseValidatorNeuron):
         # Summary logging
         if successful_count > 0:
             bt.logging.success(f'Stored validation results for {successful_count} UIDs to DB')
+        if evaluation_only_count > 0:
+            bt.logging.success(f'Stored refreshed evaluation rows for {evaluation_only_count} cached UIDs to DB')
         if skipped_count > 0:
             bt.logging.info(f'Skipped {skipped_count} UIDs (cached evaluations)')
         if failed_uids:

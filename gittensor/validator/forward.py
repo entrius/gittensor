@@ -67,7 +67,7 @@ async def forward(self: 'Validator') -> None:
         )
 
         # 2. Score issue discovery
-        issue_rewards = await issue_discovery(
+        issue_rewards, issue_refreshed_uids = await issue_discovery(
             miner_evaluations, master_repositories, programming_languages, token_config, miner_uids
         )
 
@@ -75,7 +75,12 @@ async def forward(self: 'Validator') -> None:
         await issue_competitions(self, miner_evaluations)
 
         # 4. Store all evaluations to DB (includes issue discovery fields)
-        await self.bulk_store_evaluation(miner_evaluations, skip_uids=cached_uids)
+        evaluation_only_uids = issue_refreshed_cached_uids(cached_uids, issue_refreshed_uids)
+        await self.bulk_store_evaluation(
+            miner_evaluations,
+            skip_uids=cached_uids,
+            evaluation_only_uids=evaluation_only_uids,
+        )
 
         # 5. Blend 4 emission pools into final rewards
         rewards = blend_emission_pools(oss_rewards, issue_rewards, miner_uids)
@@ -117,7 +122,7 @@ async def issue_discovery(
     programming_languages: Dict,
     token_config,
     miner_uids: set[int],
-) -> np.ndarray:
+) -> Tuple[np.ndarray, Set[int]]:
     """Score issue discovery and return normalized rewards array.
 
     Mirror-only path: uses ``MirrorClient.get_miner_issues`` with authoritative
@@ -127,14 +132,18 @@ async def issue_discovery(
     solver attribution on busy issues, and non-mirror repos are deliberately
     left out of issue discovery entirely until their mirror_enabled flag flips.
 
-    Returns numpy array of normalized issue discovery rewards (sorted by UID).
+    Returns normalized issue discovery rewards (sorted by UID) plus UIDs whose
+    issue-discovery fields were refreshed from a successful mirror fetch.
     """
     mirror_repos: Dict[str, RepositoryConfig] = {
         name: cfg for name, cfg in master_repositories.items() if cfg.mirror_enabled
     }
 
+    refreshed_uids: Set[int] = set()
     if mirror_repos:
-        await run_mirror_issue_discovery(miner_evaluations, mirror_repos, programming_languages, token_config)
+        refreshed_uids = await run_mirror_issue_discovery(
+            miner_evaluations, mirror_repos, programming_languages, token_config
+        )
     else:
         bt.logging.info('No mirror-enabled repos — issue discovery skipped for this round')
 
@@ -142,7 +151,12 @@ async def issue_discovery(
     issue_rewards_dict = normalize_issue_discovery_rewards(miner_evaluations)
 
     sorted_uids = sorted(miner_uids)
-    return np.array([issue_rewards_dict.get(uid, 0.0) for uid in sorted_uids])
+    return np.array([issue_rewards_dict.get(uid, 0.0) for uid in sorted_uids]), refreshed_uids
+
+
+def issue_refreshed_cached_uids(cached_uids: Set[int], issue_refreshed_uids: Set[int]) -> Set[int]:
+    """Return cached fallback UIDs that need an evaluation-row refresh."""
+    return cached_uids & issue_refreshed_uids
 
 
 def blend_emission_pools(

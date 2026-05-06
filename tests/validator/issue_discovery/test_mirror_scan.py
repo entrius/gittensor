@@ -244,8 +244,9 @@ class TestRunMirrorIssueDiscovery:
 
     def test_no_mirror_repos_short_circuits(self):
         client = Mock()
-        _run(run_mirror_issue_discovery({}, {}, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, client=client))
+        refreshed = _run(run_mirror_issue_discovery({}, {}, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, client=client))
         client.get_miner_issues.assert_not_called()
+        assert refreshed == set()
 
     def test_miner_without_github_id_skipped(self):
         client = Mock()
@@ -358,7 +359,16 @@ class TestRunMirrorIssueDiscovery:
             ]
         )
         eval_ = _eval()
-        _run(
+        eval_.issue_discovery_score = 99.0
+        eval_.issue_token_score = 88.0
+        eval_.issue_credibility = 0.5
+        eval_.is_issue_eligible = True
+        eval_.total_solved_issues = 7
+        eval_.total_valid_solved_issues = 7
+        eval_.total_closed_issues = 2
+        eval_.total_open_issues = 3
+
+        refreshed = _run(
             run_mirror_issue_discovery(
                 {1: eval_},
                 _mirror_repos('entrius/gittensor-ui'),
@@ -367,7 +377,32 @@ class TestRunMirrorIssueDiscovery:
                 client=client,
             )
         )
+        assert refreshed == {1}
         assert eval_.total_solved_issues == 0
+        assert eval_.total_valid_solved_issues == 0
+        assert eval_.total_closed_issues == 0
+        assert eval_.total_open_issues == 0
+        assert eval_.issue_discovery_score == 0.0
+        assert eval_.issue_token_score == 0.0
+        assert eval_.issue_credibility == 0.0
+        assert eval_.is_issue_eligible is False
+
+    def test_successful_empty_issue_fetch_marks_uid_refreshed(self):
+        client = Mock()
+        client.get_miner_issues.return_value = _response([])
+        eval_ = _eval()
+
+        refreshed = _run(
+            run_mirror_issue_discovery(
+                {1: eval_},
+                _mirror_repos('entrius/gittensor-ui'),
+                _EMPTY_LANGS,
+                _EMPTY_TOKEN_CONFIG,
+                client=client,
+            )
+        )
+
+        assert refreshed == {1}
 
     def test_mirror_request_error_does_not_abort_other_miners(self):
         client = Mock()
@@ -384,7 +419,7 @@ class TestRunMirrorIssueDiscovery:
         # Seed cache so working miner's solving PR is scoreable
         working.mirror_merged_prs = [_scored_mirror_pr('entrius/gittensor-ui', 100)]
 
-        _run(
+        refreshed = _run(
             run_mirror_issue_discovery(
                 {1: failing, 2: working},
                 _mirror_repos('entrius/gittensor-ui'),
@@ -393,6 +428,7 @@ class TestRunMirrorIssueDiscovery:
                 client=client,
             )
         )
+        assert refreshed == {2}
         assert failing.total_solved_issues == 0
         assert working.total_solved_issues == 1
 

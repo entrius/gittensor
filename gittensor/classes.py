@@ -15,7 +15,6 @@ if TYPE_CHECKING:
     from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredMirrorPR
 
 from gittensor.constants import (
-    LABEL_MULTIPLIERS,
     MAINTAINER_ASSOCIATIONS,
     MAX_CODE_DENSITY_MULTIPLIER,
     MIN_TOKEN_SCORE_FOR_BASE_SCORE,
@@ -83,6 +82,7 @@ class FileChange:
             r'(^|/)androidtest[a-z]*/',
             r'(^|/)integrationtest/',
             r'(^|/)spec/',
+            r'\.tests?/',  # .NET MyProject.Tests/FooTests.cs
         ]
         if any(re.search(pattern, filename_lower) for pattern in test_dir_patterns):
             return True
@@ -98,6 +98,7 @@ class FileChange:
             r'\.spec\.[^.]+$',
             r'^test\.[^.]+$',
             r'^tests\.[^.]+$',
+            r'^conftest\.py$',
         ]
 
         return any(re.search(pattern, basename) for pattern in test_patterns)
@@ -181,8 +182,10 @@ class PullRequest:
     time_decay_multiplier: float = 1.0
     credibility_multiplier: float = 1.0
     review_quality_multiplier: float = 1.0  # Penalty for CHANGES_REQUESTED reviews from maintainers
-    label_multiplier: float = 1.0  # Multiplier based on PR label (exact match against known labels)
-    label: Optional[str] = None  # Last label set on the PR
+    label_multiplier: float = 1.0  # Multiplier resolved from repository label config
+    label: Optional[str] = None  # Resolved scoring label, set during scoring
+    current_labels: frozenset[str] = field(default_factory=frozenset)
+    label_timeline_order: tuple[str, ...] = field(default_factory=tuple)  # Newest current labels first
     changes_requested_count: int = 0  # Number of maintainer CHANGES_REQUESTED reviews
     earned_score: float = 0.0
     collateral_score: float = 0.0  # For OPEN PRs: potential_score * collateral_percent
@@ -305,25 +308,22 @@ class PullRequest:
         last_edited_at = parse_github_timestamp_to_cst(raw_edited_at) if isinstance(raw_edited_at, str) else None
         merged_at = parse_github_timestamp_to_cst(pr_data['mergedAt']) if is_merged else None
 
-        changes_requested_count = 0
-        if is_merged:
-            cr_reviews = pr_data.get('changesRequestedReviews', {}).get('nodes', [])
-            changes_requested_count = sum(
-                1 for r in cr_reviews if r.get('authorAssociation') in MAINTAINER_ASSOCIATIONS
-            )
+        cr_reviews = (pr_data.get('changesRequestedReviews') or {}).get('nodes') or []
+        changes_requested_count = sum(1 for r in cr_reviews if r.get('authorAssociation') in MAINTAINER_ASSOCIATIONS)
 
-        current = {(n.get('name') or '').lower() for n in (pr_data.get('labels') or {}).get('nodes') or [] if n}
-        label: Optional[str] = None
-        scoring_labels = current & LABEL_MULTIPLIERS.keys()
-        if scoring_labels:
+        current = frozenset(
+            (n.get('name') or '').lower()
+            for n in (pr_data.get('labels') or {}).get('nodes') or []
+            if n and n.get('name')
+        )
+        timeline_ordered: list[str] = []
+        if current:
+            seen: set[str] = set()
             for event in reversed((pr_data.get('timelineItems') or {}).get('nodes') or []):
                 name = ((event or {}).get('label') or {}).get('name', '').lower()
-                if name in scoring_labels:
-                    label = name
-                    break
-            if label is None:
-                # Timeline truncated — fall back to highest-multiplier currently-applied label
-                label = max(scoring_labels, key=lambda n: (LABEL_MULTIPLIERS[n], n))
+                if name and name in current and name not in seen:
+                    seen.add(name)
+                    timeline_ordered.append(name)
 
         return cls(
             number=pr_data['number'],
@@ -345,7 +345,8 @@ class PullRequest:
             last_edited_at=last_edited_at,
             head_ref_oid=pr_data.get('headRefOid'),
             base_ref_oid=pr_data.get('baseRefOid'),
-            label=label,
+            current_labels=current,
+            label_timeline_order=tuple(timeline_ordered),
             changes_requested_count=changes_requested_count,
         )
 
@@ -370,10 +371,15 @@ class MinerEvaluation:
     total_leaf_score: float = 0.0
     failed_reason: Optional[str] = None
     github_pr_fetch_failed: bool = False
+    # Mirror-source-specific fetch flag set by mirror.combine.combine alongside
+    # the OR into github_pr_fetch_failed. Lets the validator tell a complete
+    # mirror outage apart from a legacy partial-pagination failure.
+    mirror_pr_fetch_failed: bool = False
     evaluation_timestamp: Optional[datetime] = None
     merged_pull_requests: List[PullRequest] = field(default_factory=list)
     open_pull_requests: List[PullRequest] = field(default_factory=list)
     closed_pull_requests: List[PullRequest] = field(default_factory=list)
+    stale_closed_pull_requests: List[PullRequest] = field(default_factory=list)
 
     # Populated by gittensor.validator.oss_contributions.mirror.combine.combine
     # when the mirror scoring path runs. Empty for legacy-only evaluations.
@@ -482,6 +488,13 @@ class MinerEvaluation:
             f'CLOSED PR #{raw_pr["number"]} in {parse_repo_name(raw_pr["repository"])} counting towards credibility'
         )
         self.closed_pull_requests.append(
+            PullRequest.from_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id)
+        )
+
+    def add_stale_closed_pull_request(self, raw_pr: Dict):
+        """Track a stale CLOSED PR so storage can refresh its pull_requests row."""
+        bt.logging.info(f'Stale CLOSED PR #{raw_pr["number"]} in {parse_repo_name(raw_pr["repository"])}')
+        self.stale_closed_pull_requests.append(
             PullRequest.from_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id)
         )
 
@@ -708,6 +721,9 @@ class MinerEvaluationCache:
         cached.merged_pull_requests = [_pr_for_cache(pr) for pr in evaluation.merged_pull_requests]
         cached.open_pull_requests = [_pr_for_cache(pr) for pr in evaluation.open_pull_requests]
         cached.closed_pull_requests = [_pr_for_cache(pr) for pr in evaluation.closed_pull_requests]
+        cached.mirror_merged_prs = [_scored_mirror_pr_for_cache(pr) for pr in evaluation.mirror_merged_prs]
+        cached.mirror_open_prs = [_scored_mirror_pr_for_cache(pr) for pr in evaluation.mirror_open_prs]
+        cached.mirror_closed_prs = [_scored_mirror_pr_for_cache(pr) for pr in evaluation.mirror_closed_prs]
         return cached
 
     @staticmethod
@@ -735,3 +751,9 @@ def _pr_with_fresh_issues(pr: 'PullRequest') -> 'PullRequest':
     if pr.issues is not None:
         pr_copy.issues = [copy.copy(issue) for issue in pr.issues]
     return pr_copy
+
+
+def _scored_mirror_pr_for_cache(scored: 'ScoredMirrorPR') -> 'ScoredMirrorPR':
+    scored_copy = copy.copy(scored)
+    scored_copy.files = None
+    return scored_copy

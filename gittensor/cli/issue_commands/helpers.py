@@ -632,8 +632,9 @@ def resolve_network(network: Optional[str] = None, rpc_url: Optional[str] = None
     Priority:
         1. --rpc-url (explicit URL always wins)
         2. --network (mapped to known endpoint)
-        3. Config file ws_endpoint / network
-        4. Default: finney (mainnet)
+        3. Config file `network` (when set to a known network)
+        4. Config file `ws_endpoint` (custom URL fallback)
+        5. Default: finney (mainnet)
 
     Args:
         network: Network name from --network option (test/finney/local)
@@ -655,16 +656,19 @@ def resolve_network(network: Optional[str] = None, rpc_url: Optional[str] = None
         # Treat unknown network value as a custom URL
         return network, 'custom'
 
-    # Fall back to config file
+    # Fall back to config file. Prefer an explicit, recognized `network` over
+    # `ws_endpoint`: a stale dev `ws_endpoint` (e.g. localhost) shouldn't silently
+    # override a user who set `network: finney` to point at mainnet.
     config = load_config()
-    if config.get('ws_endpoint'):
-        endpoint = config['ws_endpoint']
-        name = _URL_TO_NETWORK.get(endpoint, config.get('network', 'custom'))
-        return endpoint, name
 
     config_network = config.get('network', '').lower()
     if config_network and config_network in NETWORK_MAP:
         return NETWORK_MAP[config_network], config_network
+
+    if config.get('ws_endpoint'):
+        endpoint = config['ws_endpoint']
+        name = _URL_TO_NETWORK.get(endpoint, config.get('network', 'custom'))
+        return endpoint, name
 
     # Default: finney (mainnet)
     return NETWORK_MAP['finney'], 'finney'
@@ -784,8 +788,7 @@ def _read_issues_from_child_storage(substrate, contract_addr: str, verbose: bool
         console.print(f'[dim]Debug: next_issue_id from contract = {next_issue_id}[/dim]')
 
     # Sanity check: next_issue_id should be reasonable (< 1 million for any real deployment)
-    MAX_REASONABLE_ISSUE_ID = 1_000_000
-    if next_issue_id > MAX_REASONABLE_ISSUE_ID:
+    if next_issue_id > MAX_ISSUE_ID:
         console.print(f'[yellow]Warning: next_issue_id ({next_issue_id}) is unreasonably large.[/yellow]')
         console.print('[yellow]This may indicate a storage format mismatch. Check contract version.[/yellow]')
         return []

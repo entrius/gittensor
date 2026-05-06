@@ -815,8 +815,21 @@ def _graphql_response(nodes):
     }
 
 
+def _closing_issue_node(number, repo='owner/repo'):
+    node = {'number': number}
+    if repo is not None:
+        node['repository'] = {'nameWithOwner': repo}
+    return node
+
+
 def _pr_node(
-    number, merged=True, merged_at='2025-06-01T00:00:00Z', user_id=42, base_repo='owner/repo', closing_issues=None
+    number,
+    merged=True,
+    merged_at='2025-06-01T00:00:00Z',
+    user_id=42,
+    base_repo='owner/repo',
+    closing_issues=None,
+    closing_repo='owner/repo',
 ):
     """Helper to build a single cross-referenced PR node."""
     return {
@@ -827,7 +840,7 @@ def _pr_node(
             'author': {'databaseId': user_id},
             'baseRepository': {'nameWithOwner': base_repo},
             'closingIssuesReferences': {
-                'nodes': [{'number': n} for n in (closing_issues or [])],
+                'nodes': [_closing_issue_node(n, closing_repo) for n in (closing_issues or [])],
             },
         },
     }
@@ -895,6 +908,36 @@ class TestFindSolverFromCrossReferences:
 
         assert solver_id is None
         assert pr_number is None
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_cross_repo_closing_issue_number_collision_is_filtered_out(self, mock_logging, mock_graphql):
+        """A PR closing another repo's same-numbered issue must not solve this bounty issue."""
+        mock_graphql.return_value = _graphql_response(
+            [
+                _pr_node(number=14, user_id=42, closing_issues=[12], closing_repo='other/repo'),
+            ]
+        )
+
+        solver_id, pr_number = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
+
+        assert solver_id is None
+        assert pr_number is None
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_closing_issue_repo_check_is_case_insensitive(self, mock_logging, mock_graphql):
+        """GitHub repository names are case-insensitive when validating closing refs."""
+        mock_graphql.return_value = _graphql_response(
+            [
+                _pr_node(number=14, user_id=42, closing_issues=[12], closing_repo='Owner/Repo'),
+            ]
+        )
+
+        solver_id, pr_number = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
+
+        assert solver_id == 42
+        assert pr_number == 14
 
     @patch('gittensor.utils.github_api_tools.execute_graphql_query')
     @patch('gittensor.utils.github_api_tools.bt.logging')

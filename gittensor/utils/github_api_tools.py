@@ -319,7 +319,7 @@ def get_merge_base_sha(repository: str, base_sha: str, head_sha: str, token: str
     return None
 
 
-def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -> Optional[List[FileChange]]:
+def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -> List[FileChange]:
     """
     Get the diff for a specific PR by repository name and PR number.
 
@@ -333,7 +333,7 @@ def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -
         pr_number (int): PR number
         token (str): Github pat
     Returns:
-        List[FileChanges]: List object with file changes or None if error
+        List[FileChanges]: List object with file changes or empty list if error
     """
     max_attempts = 3
     per_page = 100
@@ -909,6 +909,8 @@ def load_miners_prs(
                 non_resource_errors = [e for e in data['errors'] if e.get('type') != 'RESOURCE_LIMITS_EXCEEDED']
                 if non_resource_errors:
                     bt.logging.error(f'GraphQL errors: {non_resource_errors}')
+                    message = str(non_resource_errors[0].get('message') or 'unknown')[:200]
+                    miner_eval.failed_reason = f'GitHub GraphQL error: {message}'
                     miner_eval.github_pr_fetch_failed = True
                     break
 

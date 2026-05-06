@@ -30,6 +30,13 @@ class MirrorRequestError(RuntimeError):
     exhausts all retries on transient failures."""
 
 
+def _body_preview(response: requests.Response) -> str:
+    text = getattr(response, 'text', '')
+    if not isinstance(text, str):
+        text = str(text)
+    return text[:200]
+
+
 class MirrorClient:
     """Client for https://mirror.gittensor.io scoring endpoints."""
 
@@ -66,7 +73,10 @@ class MirrorClient:
         path = f'/api/v1/miners/{github_id}/pulls'
         params = {'since': since.astimezone(timezone.utc).isoformat()} if since else None
         data = self._get(path, params=params)
-        return MirrorPullRequestsResponse.from_dict(data)
+        try:
+            return MirrorPullRequestsResponse.from_dict(data)
+        except Exception as e:
+            raise MirrorRequestError(f'Mirror GET {path} returned invalid mirror response: {e}') from e
 
     def get_miner_issues(
         self,
@@ -78,7 +88,10 @@ class MirrorClient:
         path = f'/api/v1/miners/{github_id}/issues'
         params = {'since': since.astimezone(timezone.utc).isoformat()} if since else None
         data = self._get(path, params=params)
-        return MirrorIssuesResponse.from_dict(data)
+        try:
+            return MirrorIssuesResponse.from_dict(data)
+        except Exception as e:
+            raise MirrorRequestError(f'Mirror GET {path} returned invalid mirror response: {e}') from e
 
     def get_pr_files(
         self,
@@ -92,7 +105,10 @@ class MirrorClient:
         """
         path = f'/api/v1/pulls/{repo_full_name}/{pr_number}/files'
         data = self._get(path)
-        return MirrorPullRequestFilesResponse.from_dict(data)
+        try:
+            return MirrorPullRequestFilesResponse.from_dict(data)
+        except Exception as e:
+            raise MirrorRequestError(f'Mirror GET {path} returned invalid mirror response: {e}') from e
 
     def _get(self, path: str, params: Optional[dict] = None) -> dict:
         url = f'{self.base_url}{path}'
@@ -113,13 +129,26 @@ class MirrorClient:
                 continue
 
             if 200 <= response.status_code < 300:
-                return response.json()
+                try:
+                    return response.json()
+                except ValueError as e:
+                    last_error = f'invalid JSON: {e}; body={_body_preview(response)!r}'
+                    if attempt < self.max_attempts - 1:
+                        backoff = backoff_seconds(attempt)
+                        bt.logging.warning(
+                            f'Mirror GET {path} failed ({last_error}) '
+                            f'(attempt {attempt + 1}/{self.max_attempts}), retrying in {backoff}s...'
+                        )
+                        time.sleep(backoff)
+                    continue
 
             # 4xx except 429 are not retryable — fail fast so callers see the real error.
             if 400 <= response.status_code < 500 and response.status_code != 429:
-                raise MirrorRequestError(f'Mirror GET {path} returned {response.status_code}: {response.text[:200]}')
+                raise MirrorRequestError(
+                    f'Mirror GET {path} returned {response.status_code}: {_body_preview(response)}'
+                )
 
-            last_error = f'status {response.status_code}: {response.text[:200]}'
+            last_error = f'status {response.status_code}: {_body_preview(response)}'
             if attempt < self.max_attempts - 1:
                 backoff = backoff_seconds(attempt)
                 bt.logging.warning(

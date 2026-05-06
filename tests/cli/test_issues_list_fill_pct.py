@@ -54,22 +54,21 @@ class TestFillPercent:
         result = _fill_percent(bounty, target)
         assert result == pytest.approx(expected, rel=1e-12)
 
-    def test_panel_and_table_paths_agree(self):
-        """Same on-chain values must produce the same fill_pct regardless of render mode.
+    def test_panel_and_table_paths_agree_at_rounding_boundary(self):
+        """At a rounding-boundary ratio, the helper produces the Decimal-correct value.
 
-        Pre-fix, the Panel path used `bounty / target * 100` (raw float) and the
-        table path used `Decimal(bounty) / Decimal(target) * 100`. For ratios like
-        1/3 those produced visibly different rendered strings. This test pins the
-        invariant that both paths now agree.
+        Pre-fix, the Panel path used `bounty / target * 100` (raw float). For
+        bounty=23, target=80 that yields 28.749999999999996 (binary-float artifact),
+        which renders as "28.7%" at :.1f. The Decimal helper yields exactly 28.75,
+        which renders as "28.8%". This pins the helper to the Decimal-correct value
+        so the Panel path no longer drifts off by a tenth at rounding boundaries.
         """
-        bounty, target = 1, 3
-        # Both render paths now call _fill_percent — assert the value the helper
-        # returns is the value rendered.
+        bounty, target = 23, 80
         unified = _fill_percent(bounty, target)
-        # 1/3 in float64 is 0.3333333333333333; * 100 is 33.33333333333333.
-        # Decimal version yields the same float (since float() collapses precision back).
-        # The point is they are ONE value, not two.
-        assert unified == pytest.approx(100.0 / 3, rel=1e-12)
+        # Helper returns the exact Decimal value: 28.75, not the binary-float 28.749999...
+        assert unified == 28.75
+        # The pre-fix Panel formula would have given 28.749999999999996 here.
+        assert (bounty / target * 100) != unified
 
 
 # ==========================================================================
@@ -82,15 +81,20 @@ FAKE_ISSUES = [
         'id': 1,
         'repository_full_name': 'owner/repo',
         'issue_number': 10,
-        'bounty_amount': 1,
-        'target_bounty': 3,
+        # 23/80 is a rounding-boundary case: the pre-fix Panel formula
+        # `bounty / target * 100` produces 28.749999999999996 (binary-float artifact)
+        # which renders as "28.7%" at :.1f, while the Decimal helper produces
+        # exactly 28.75 which renders as "28.8%". This makes the Panel-mode
+        # assertion below fail against the pre-fix code, demonstrating the bug.
+        'bounty_amount': 23,
+        'target_bounty': 80,
         'status': 'Active',
     },
 ]
 
 
 def test_table_mode_renders_helper_value(cli_root, runner):
-    """Table view must use _fill_percent — '33%' for bounty=1, target=3."""
+    """Table view uses _fill_percent — '29%' for bounty=23, target=80 (28.75 → :.0f)."""
     with (
         patch(
             'gittensor.cli.issue_commands.view._resolve_contract_and_network',
@@ -101,12 +105,19 @@ def test_table_mode_renders_helper_value(cli_root, runner):
         result = runner.invoke(cli_root, ['issues', 'list'], catch_exceptions=False)
 
     assert result.exit_code == 0
-    # Table mode formats with {:.0f}% — for 1/3 ratio that's "33%".
-    assert '33%' in result.output
+    # Table mode formats with {:.0f}% — 28.75 rounds to "29".
+    assert '29%' in result.output
 
 
 def test_panel_mode_renders_helper_value(cli_root, runner):
-    """Single-issue Panel view must use _fill_percent — '33.3%' for bounty=1, target=3."""
+    """Single-issue Panel view must use _fill_percent — '28.8%' for bounty=23, target=80.
+
+    This is the load-bearing regression assertion. Pre-fix, the Panel path computed
+    `23 / 80 * 100 = 28.749999999999996` (binary-float artifact) which renders as
+    "28.7%" at :.1f. The Decimal helper computes 28.75 exactly, which renders as
+    "28.8%". Asserting "28.8%" present AND "28.7%" absent fails against the
+    pre-fix code and passes against the unified helper.
+    """
     with (
         patch(
             'gittensor.cli.issue_commands.view._resolve_contract_and_network',
@@ -117,15 +128,16 @@ def test_panel_mode_renders_helper_value(cli_root, runner):
         result = runner.invoke(cli_root, ['issues', 'list', '--id', '1'], catch_exceptions=False)
 
     assert result.exit_code == 0
-    # Panel mode formats with {:.1f}% — for 1/3 ratio that's "33.3%".
-    assert '33.3%' in result.output
+    assert '28.8%' in result.output
+    assert '28.7%' not in result.output
 
 
 def test_panel_and_table_agree_on_same_data(cli_root, runner):
-    """For the same on-chain issue, table and Panel must agree to their shared decimal places.
+    """Table and Panel must render the same on-chain value coherently.
 
-    Table renders to 0 decimal places, Panel renders to 1 decimal place. After truncating
-    to the table's precision, both must show the same integer percentage.
+    Table renders 28.75 at :.0f as "29"; Panel renders 28.75 at :.1f as "28.8".
+    Pre-fix, the Panel path's binary-float artifact rendered "28.7" — under the
+    unified helper, both views agree at the table's rounded integer "29".
     """
     with (
         patch(
@@ -139,10 +151,8 @@ def test_panel_and_table_agree_on_same_data(cli_root, runner):
 
     assert table_result.exit_code == 0
     assert panel_result.exit_code == 0
-    # Both must contain "33" as the integer percentage; pre-fix this could diverge for ratios
-    # where binary float vs Decimal disagree at the rounding boundary.
-    assert '33' in table_result.output
-    assert '33' in panel_result.output
+    assert '29%' in table_result.output
+    assert '28.8%' in panel_result.output
 
 
 def test_json_mode_unaffected_by_fill_pct_change(cli_root, runner):
@@ -162,5 +172,5 @@ def test_json_mode_unaffected_by_fill_pct_change(cli_root, runner):
     payload = json.loads(result.output)
     assert payload['success'] is True
     issue = payload['issues'][0]
-    assert issue['bounty_amount'] == 1
-    assert issue['target_bounty'] == 3
+    assert issue['bounty_amount'] == 23
+    assert issue['target_bounty'] == 80

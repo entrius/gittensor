@@ -2,6 +2,7 @@
 # Copyright © 2025 Entrius
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Dict, Optional, Set, Tuple
 
 import bittensor as bt
@@ -84,7 +85,6 @@ async def evaluate_miners_pull_requests(
             hotkey=miner_eval.hotkey,
             github_id=miner_eval.github_id,
         )
-        import asyncio
 
         with MirrorClient() as mirror_client:
             await asyncio.to_thread(load_mirror_miner_prs, mirror_eval, mirror_repos, client=mirror_client)

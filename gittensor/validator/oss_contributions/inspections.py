@@ -8,7 +8,7 @@ import bittensor as bt
 
 from gittensor.classes import MinerEvaluation
 from gittensor.constants import RECYCLE_UID
-from gittensor.validator.utils.github_validation import validate_github_credentials
+from gittensor.validator.utils.github_validation import validate_github_credentials_result
 
 
 def detect_and_penalize_miners_sharing_github(miner_evaluations: Dict[int, MinerEvaluation]) -> Set[int]:
@@ -98,7 +98,11 @@ def _zero_for_duplicate_penalty(eval_: MinerEvaluation, reason: str) -> None:
 
 
 def validate_response_and_initialize_miner_evaluation(
-    uid: int, hotkey: str, pat: Optional[str], stale_hotkey: Optional[str] = None
+    uid: int,
+    hotkey: str,
+    pat: Optional[str],
+    stale_hotkey: Optional[str] = None,
+    stored_github_id: Optional[str] = None,
 ) -> MinerEvaluation:
     """
     Validate a miner's stored PAT and initialize their evaluation object.
@@ -108,6 +112,8 @@ def validate_response_and_initialize_miner_evaluation(
         hotkey: The miner's hotkey
         pat: The miner's GitHub PAT from local storage (may be None if not stored)
         stale_hotkey: If set, the UID has a stored PAT from this old hotkey (re-registration detected)
+        stored_github_id: GitHub id pinned when the PAT was accepted; used only
+            to allow cache fallback if GitHub /user is transiently unavailable.
 
     Returns:
         MinerEvaluation: Initialized evaluation object with failure reason if validation failed
@@ -131,11 +137,15 @@ def validate_response_and_initialize_miner_evaluation(
 
     miner_eval = MinerEvaluation(uid=uid, hotkey=hotkey)
 
-    github_id, error = validate_github_credentials(uid, pat)
-    if error:
-        miner_eval.failed_reason = error
+    validation = validate_github_credentials_result(uid, pat, stored_github_id=stored_github_id)
+    if validation.error:
+        miner_eval.failed_reason = validation.error
         return miner_eval
 
-    miner_eval.github_id = github_id
+    miner_eval.github_id = validation.github_id
+    if validation.transient_failure:
+        miner_eval.github_pr_fetch_failed = True
+        return miner_eval
+
     miner_eval.github_pat = pat
     return miner_eval

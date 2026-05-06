@@ -17,10 +17,10 @@ if TYPE_CHECKING:
     from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredMirrorPR
 from gittensor.constants import (
     EXCESSIVE_PR_PENALTY_BASE_THRESHOLD,
-    LABEL_MULTIPLIERS,
     MAINTAINER_ASSOCIATIONS,
     MAINTAINER_ISSUE_MULTIPLIER,
     MAX_ISSUE_CLOSE_WINDOW_DAYS,
+    MAX_OPEN_PR_REVIEW_COLLATERAL_MULTIPLIER,
     MAX_OPEN_PR_THRESHOLD,
     OPEN_PR_COLLATERAL_PERCENT,
     OPEN_PR_THRESHOLD_TOKEN_SCORE,
@@ -39,6 +39,7 @@ from gittensor.utils.github_api_tools import (
     get_pull_request_file_changes,
 )
 from gittensor.validator.oss_contributions.credibility import check_eligibility
+from gittensor.validator.oss_contributions.label_resolution import resolve_legacy_label_multiplier
 from gittensor.validator.utils.datetime_utils import calculate_time_decay
 from gittensor.validator.utils.load_weights import LanguageConfig, RepositoryConfig, TokenConfig, resolve_repo_weight
 
@@ -181,6 +182,26 @@ def calculate_review_quality_multiplier(changes_requested_count: int, pr_number:
     return multiplier
 
 
+def calculate_review_collateral_multiplier(changes_requested_count: int, pr_number: Optional[int] = None) -> float:
+    """Calculate the open-PR collateral multiplier from maintainer CHANGES_REQUESTED reviews.
+
+    Unlike ``review_quality_multiplier`` for earned scores, this increases
+    collateral so non-merge-ready open PRs reserve more score instead of less.
+    Formula: min(MAX_OPEN_PR_REVIEW_COLLATERAL_MULTIPLIER, 1.0 + REVIEW_PENALTY_RATE × N)
+    """
+    multiplier = min(
+        MAX_OPEN_PR_REVIEW_COLLATERAL_MULTIPLIER,
+        1.0 + REVIEW_PENALTY_RATE * changes_requested_count,
+    )
+    if changes_requested_count > 0:
+        ctx = f' (PR #{pr_number})' if pr_number else ''
+        bt.logging.info(
+            f'{changes_requested_count} maintainer CHANGES_REQUESTED review(s){ctx} → '
+            f'review_collateral_multiplier={multiplier:.2f}'
+        )
+    return multiplier
+
+
 def calculate_pr_multipliers(
     pr: PullRequest, miner_eval: MinerEvaluation, master_repositories: Dict[str, RepositoryConfig]
 ) -> None:
@@ -190,7 +211,11 @@ def calculate_pr_multipliers(
 
     pr.repo_weight_multiplier = resolve_repo_weight(repo_config)
     pr.issue_multiplier = round(calculate_issue_multiplier(pr), 2)
-    pr.label_multiplier = LABEL_MULTIPLIERS.get(pr.label, 1.0) if pr.label else 1.0
+    pr.label, pr.label_multiplier = resolve_legacy_label_multiplier(
+        pr.label_timeline_order,
+        pr.current_labels,
+        repo_config,
+    )
 
     if is_merged:
         # Spam multiplier is recalculated in finalize_miner_scores with total token score
@@ -495,7 +520,7 @@ def calculate_open_pr_collateral_score(
 
     Collateral = base_score * applicable_multipliers * OPEN_PR_COLLATERAL_PERCENT
 
-    Applicable multipliers: repo_weight, issue, label
+    Applicable multipliers: repo_weight, issue, label, review_collateral
     NOT applicable: time_decay (merge-based), credibility_multiplier (merge-based),
                     open_pr_spam (not for collateral)
     """
@@ -505,6 +530,7 @@ def calculate_open_pr_collateral_score(
         'repo_weight': pr.repo_weight_multiplier,
         'issue': pr.issue_multiplier,
         'label': pr.label_multiplier,
+        'review_collateral': calculate_review_collateral_multiplier(pr.changes_requested_count, pr.number),
     }
 
     potential_score = pr.base_score * prod(multipliers.values())

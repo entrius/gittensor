@@ -12,11 +12,9 @@ dataclass so downstream math (``calculate_final_earned_score``,
 
 from dataclasses import dataclass
 from datetime import datetime
-from math import prod
 from typing import List, Optional
 
-import bittensor as bt
-
+from gittensor.classes import _apply_score_multipliers
 from gittensor.constants import MIN_TOKEN_SCORE_FOR_BASE_SCORE
 from gittensor.utils.mirror.models import MirrorFile, MirrorPullRequest
 
@@ -72,6 +70,12 @@ class ScoredMirrorPR:
         return self.pr.repo_full_name
 
     @property
+    def changes_requested_count(self) -> int:
+        """Alias for the maintainer-only CHANGES_REQUESTED count used by
+        source-agnostic scoring helpers."""
+        return self.pr.review_summary.maintainer_changes_requested_count
+
+    @property
     def merged_at(self) -> Optional[datetime]:
         """Alias for ``self.pr.merged_at`` — matches legacy PullRequest attribute
         name so the unified pioneer-dividend walk treats both types identically."""
@@ -96,13 +100,6 @@ class ScoredMirrorPR:
             'cred': self.credibility_multiplier,
             'review': self.review_quality_multiplier,
         }
-
-        self.earned_score = self.base_score * prod(multipliers.values())
-
-        mult_str = ' × '.join(f'{k}={v:.2f}' for k, v in multipliers.items())
-        bt.logging.info(
-            f'├─ {self.pr.state} PR #{self.pr.pr_number} ({self.pr.repo_full_name}) → {self.earned_score:.2f}'
-        )
-        bt.logging.info(f'│  └─ {self.base_score:.2f} × {mult_str}')
-
+        label = f'{self.pr.state} PR #{self.pr.pr_number} ({self.pr.repo_full_name})'
+        self.earned_score = _apply_score_multipliers(self.base_score, multipliers, label)
         return self.earned_score

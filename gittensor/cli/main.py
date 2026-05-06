@@ -16,8 +16,9 @@ import json
 import os
 import sys
 
-# Stub heavy imports during shell completion so tab-completion stays fast.
-if os.environ.get('_GITT_COMPLETE'):
+# Stub heavy imports during shell completion and --help so tab-completion stays
+# fast and bittensor's argparse doesn't hijack click's help output.
+if os.environ.get('_GITT_COMPLETE') or any(arg in ('-h', '--help') for arg in sys.argv[1:]):
     import types as _types
 
     class _Stub(_types.ModuleType):
@@ -27,7 +28,7 @@ if os.environ.get('_GITT_COMPLETE'):
         def __call__(self, *_a, **_kw):
             return self
 
-    _stub = _Stub('_gitt_completion_stub')
+    _stub = _Stub('_gitt_cli_stub')
     for _pkg in ('bittensor', 'requests'):
         sys.modules[_pkg] = _stub
 

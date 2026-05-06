@@ -81,6 +81,7 @@ class TestCombinePopulated:
         mirror_eval.merged_prs = [_scored(1), _scored(2)]
         mirror_eval.open_prs = [_scored(3, state='OPEN')]
         mirror_eval.closed_prs = [_scored(4, state='CLOSED')]
+        mirror_eval.stale_closed_prs = [_scored(5, state='CLOSED')]
         mirror_eval.unique_repos_contributed_to = {'entrius/gittensor-ui', 'entrius/allways'}
         return legacy, mirror_eval
 
@@ -90,6 +91,7 @@ class TestCombinePopulated:
         assert legacy.mirror_merged_prs is mirror_eval.merged_prs
         assert legacy.mirror_open_prs is mirror_eval.open_prs
         assert legacy.mirror_closed_prs is mirror_eval.closed_prs
+        assert legacy.mirror_stale_closed_prs is mirror_eval.stale_closed_prs
 
     def test_counters_left_alone(self):
         """combine() does NOT touch token/nodes/collateral counters — those

@@ -27,6 +27,9 @@ class MirrorMinerEvaluation:
     merged_prs: List[ScoredMirrorPR] = field(default_factory=list)
     open_prs: List[ScoredMirrorPR] = field(default_factory=list)
     closed_prs: List[ScoredMirrorPR] = field(default_factory=list)
+    # Storage-only: persisted to flip pr_state OPEN→CLOSED, excluded from
+    # scoring. Mirror parity for stale_closed_pull_requests (see #769).
+    stale_closed_prs: List[ScoredMirrorPR] = field(default_factory=list)
 
     # Set-union into MinerEvaluation.unique_repos_contributed_to at combine
     # time. Populated by score_mirror_pr as it processes each MERGED PR.

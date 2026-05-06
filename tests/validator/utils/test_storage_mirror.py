@@ -165,19 +165,26 @@ class TestStoreEvaluationCombinesBothLists:
         assert merged_arg[0].number == 100
         assert isinstance(merged_arg[0], PullRequest)
 
-    def test_stale_closed_prs_are_stored_separately(self):
+    def test_stale_closed_lists_concatenated(self):
+        """Legacy + mirror stale-closed flow into call_args[3] adapted as
+        PullRequest; don't inflate total_closed_prs. Mirror parity for #769."""
         storage, mock_repo = _make_storage_with_mock_repo()
 
         eval_ = MinerEvaluation(uid=1, hotkey='hk', github_id='123')
         eval_.stale_closed_pull_requests = [_legacy_pr(7, state=PRState.CLOSED)]
+        eval_.mirror_stale_closed_prs = [_mirror_scored(207, state='CLOSED')]
 
         storage.store_evaluation(eval_)
 
-        stale_call = mock_repo.store_pull_requests_bulk.call_args_list[3]
-        stale_arg = stale_call.args[0]
-        assert len(stale_arg) == 1
+        stale_arg = mock_repo.store_pull_requests_bulk.call_args_list[3].args[0]
+        assert len(stale_arg) == 2
+        for pr in stale_arg:
+            assert isinstance(pr, PullRequest)
+        # legacy first (order preserved by + concatenation)
         assert stale_arg[0].number == 7
-        assert stale_arg[0].pr_state == PRState.CLOSED
+        assert stale_arg[1].number == 207
+        assert stale_arg[1].pr_state == PRState.CLOSED
+        assert stale_arg[1].uid == 1
         assert eval_.total_closed_prs == 0
 
 

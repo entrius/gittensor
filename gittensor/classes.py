@@ -383,6 +383,8 @@ class MinerEvaluation:
     mirror_merged_prs: List['ScoredMirrorPR'] = field(default_factory=list)
     mirror_open_prs: List['ScoredMirrorPR'] = field(default_factory=list)
     mirror_closed_prs: List['ScoredMirrorPR'] = field(default_factory=list)
+    # Mirror counterpart to ``stale_closed_pull_requests`` (see #769).
+    mirror_stale_closed_prs: List['ScoredMirrorPR'] = field(default_factory=list)
 
     unique_repos_contributed_to: Set[str] = field(default_factory=set)
 

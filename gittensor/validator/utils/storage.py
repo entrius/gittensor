@@ -62,18 +62,21 @@ class DatabaseStorage:
                     for s in scored_list
                 ]
 
-            result.stored_counts['merged_pull_requests'] = self.repo.store_pull_requests_bulk(
-                miner_eval.merged_pull_requests + _adapt_mirror(miner_eval.mirror_merged_prs), commit=False
-            )
-            result.stored_counts['open_pull_requests'] = self.repo.store_pull_requests_bulk(
-                miner_eval.open_pull_requests + _adapt_mirror(miner_eval.mirror_open_prs), commit=False
-            )
-            result.stored_counts['closed_pull_requests'] = self.repo.store_pull_requests_bulk(
-                miner_eval.closed_pull_requests + _adapt_mirror(miner_eval.mirror_closed_prs), commit=False
-            )
-            result.stored_counts['stale_closed_pull_requests'] = self.repo.store_pull_requests_bulk(
-                miner_eval.stale_closed_pull_requests, commit=False
-            )
+            # Order is observed by tests via call_args_list[0..3].
+            pr_buckets = [
+                ('merged_pull_requests', miner_eval.merged_pull_requests, miner_eval.mirror_merged_prs),
+                ('open_pull_requests', miner_eval.open_pull_requests, miner_eval.mirror_open_prs),
+                ('closed_pull_requests', miner_eval.closed_pull_requests, miner_eval.mirror_closed_prs),
+                (
+                    'stale_closed_pull_requests',
+                    miner_eval.stale_closed_pull_requests,
+                    miner_eval.mirror_stale_closed_prs,
+                ),
+            ]
+            for key, legacy, mirror in pr_buckets:
+                result.stored_counts[key] = self.repo.store_pull_requests_bulk(
+                    legacy + _adapt_mirror(mirror), commit=False
+                )
             result.stored_counts['issues'] = self.repo.store_issues_bulk(miner_eval.get_all_issues(), commit=False)
             result.stored_counts['file_changes'] = self.repo.store_file_changes_bulk(
                 miner_eval.get_all_file_changes(), commit=False

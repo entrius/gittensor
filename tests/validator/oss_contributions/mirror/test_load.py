@@ -230,8 +230,9 @@ class TestInactiveRepo:
 
 
 class TestStaleClosedPR:
-    def test_closed_pr_created_before_lookback_dropped(self):
-        # Lookback is 35 days before "now"; a CLOSED PR created 50 days ago should drop
+    def test_stale_closed_pr_routed_to_storage_only_bucket(self):
+        # Pre-lookback CLOSED skips scoring but lands in stale_closed_prs for
+        # the pr_state OPEN→CLOSED refresh. Mirror parity for #769.
         old = (datetime.now(timezone.utc) - timedelta(days=50)).isoformat().replace('+00:00', 'Z')
         recent = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
 
@@ -247,6 +248,9 @@ class TestStaleClosedPR:
 
         assert len(eval_.closed_prs) == 1
         assert eval_.closed_prs[0].pr.pr_number == 2
+        assert len(eval_.stale_closed_prs) == 1
+        assert eval_.stale_closed_prs[0].pr.pr_number == 1
+        assert eval_.total_closed_prs == 1  # scoring bucket only
 
 
 # ============================================================================

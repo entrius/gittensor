@@ -9,7 +9,8 @@ Filtering applied at load time (legacy parity):
 - Repo not in mirror_repos: dropped (mirror returns all tracked repos)
 - PR created after repo became inactive: dropped
 - PR author is a maintainer (OWNER/MEMBER/COLLABORATOR): silently dropped
-- CLOSED PRs created before the lookback window: dropped
+- CLOSED PRs created before the lookback window: routed to ``stale_closed_prs``
+  (storage-only, excluded from scoring; flips OPEN→CLOSED. See #769.)
 - MERGED PRs that fail ``_should_skip_merged_mirror_pr`` (base_ref, head_ref,
   self-merge w/o approval, etc.): dropped
 """
@@ -71,7 +72,8 @@ def load_mirror_miner_prs(
 
     bt.logging.info(
         f'Mirror fetched {len(mirror_eval.merged_prs)} merged, '
-        f'{len(mirror_eval.open_prs)} open, {len(mirror_eval.closed_prs)} closed'
+        f'{len(mirror_eval.open_prs)} open, {len(mirror_eval.closed_prs)} closed, '
+        f'{len(mirror_eval.stale_closed_prs)} stale-closed (storage-only)'
     )
 
 
@@ -108,9 +110,10 @@ def _maybe_add_pr(
     if pr.state == 'OPEN':
         mirror_eval.open_prs.append(ScoredMirrorPR(pr=pr))
     elif pr.state == 'CLOSED':
-        # Skip stale CLOSED PRs created before the lookback window (legacy parity:
-        # closing an old PR shouldn't trigger a fresh credibility penalty).
         if pr.created_at < lookback_date:
+            # Stale: skip scoring (no fresh credibility penalty for an old close)
+            # but persist to flip pr_state OPEN→CLOSED. See #769.
+            mirror_eval.stale_closed_prs.append(ScoredMirrorPR(pr=pr))
             return
         mirror_eval.closed_prs.append(ScoredMirrorPR(pr=pr))
     elif pr.state == 'MERGED':

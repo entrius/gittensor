@@ -27,6 +27,7 @@ def combine(legacy_eval: MinerEvaluation, mirror_eval: MirrorMinerEvaluation) ->
     legacy_eval.mirror_merged_prs = mirror_eval.merged_prs
     legacy_eval.mirror_open_prs = mirror_eval.open_prs
     legacy_eval.mirror_closed_prs = mirror_eval.closed_prs
+    legacy_eval.mirror_stale_closed_prs = mirror_eval.stale_closed_prs
 
     legacy_eval.unique_repos_contributed_to |= mirror_eval.unique_repos_contributed_to
 

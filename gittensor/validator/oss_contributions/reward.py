@@ -153,15 +153,15 @@ async def get_rewards(
         # has the same isolation; this brings the OSS path to parity.
         try:
             miner_evaluation = await evaluate_miners_pull_requests(
-              uid,
-              hotkey,
-              pat,
-              master_repositories,
-              programming_languages,
-              token_config,
-              stale_hotkey=stale_hotkey,
-              stored_github_id=stored_github_id,
-          )
+                uid,
+                hotkey,
+                pat,
+                master_repositories,
+                programming_languages,
+                token_config,
+                stale_hotkey=stale_hotkey,
+                stored_github_id=stored_github_id,
+            )
         except Exception as e:
             bt.logging.error(f'UID {uid}: evaluation crashed — {type(e).__name__}: {e}')
             bt.logging.debug(str(print_exception(type(e), e, e.__traceback__)))

@@ -1,5 +1,6 @@
 # The MIT License (MIT)
 # Copyright © 2025 Entrius
+import fnmatch
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -8,6 +9,41 @@ from typing import Dict, List, Optional
 import bittensor as bt
 
 from gittensor.constants import DEFAULT_REPO_WEIGHT, NON_CODE_EXTENSIONS
+
+# Default when ``default_label_multiplier`` is omitted from master_repositories.json
+DEFAULT_LABEL_MULTIPLIER = 1.0
+
+
+def max_multiplier_for_label(label_name: str, label_multipliers: Dict[str, float]) -> Optional[float]:
+    """Return the highest multiplier among ``label_multipliers`` keys that match ``label_name``.
+
+    Keys use the same ``fnmatch`` wildcard semantics as ``additional_acceptable_branches``
+    (see ``branch_matches_pattern``). ``label_name`` is matched case-insensitively.
+    """
+    label_lower = label_name.lower()
+    best: Optional[float] = None
+    for pattern, mult in label_multipliers.items():
+        if fnmatch.fnmatch(label_lower, (pattern or '').lower()):
+            if best is None or mult > best:
+                best = mult
+    return best
+
+
+def resolve_label_multiplier(repo_config: Optional['RepositoryConfig'], chosen_label: Optional[str]) -> float:
+    """Label multiplier for a PR given the repo config and the resolved scoring label (if any).
+
+    When ``label_multipliers`` is empty or missing, every PR uses ``default_label_multiplier``.
+    When labels exist but none match a configured pattern, the resolved label is ``None`` and
+    this returns ``default_label_multiplier`` as well.
+    """
+    default_m = repo_config.default_label_multiplier if repo_config else DEFAULT_LABEL_MULTIPLIER
+    if not repo_config or not chosen_label:
+        return default_m
+    lm = repo_config.label_multipliers
+    if not lm:
+        return default_m
+    matched = max_multiplier_for_label(chosen_label, lm)
+    return matched if matched is not None else default_m
 
 
 @dataclass
@@ -38,6 +74,12 @@ class RepositoryConfig:
             actor — including GitHub Apps that surface as ``actor_association=NULL``.
             Defaults to False; only enable on repos with an authoritative label
             pipeline. See ``_resolve_trusted_scoring_label`` for the threat model.
+        label_multipliers: Optional mapping of wildcard label patterns to multipliers.
+            When omitted or empty, PR labels do not affect scoring (every PR uses
+            ``default_label_multiplier``). Pattern syntax matches
+            ``additional_acceptable_branches`` (``fnmatch``).
+        default_label_multiplier: Multiplier applied when no configured pattern
+            matches, or when the PR has no scoring label. Defaults to 1.0.
 
     """
 
@@ -46,6 +88,8 @@ class RepositoryConfig:
     additional_acceptable_branches: Optional[List[str]] = None
     mirror_enabled: bool = False
     trusted_label_pipeline: bool = False
+    label_multipliers: Optional[Dict[str, float]] = None
+    default_label_multiplier: float = DEFAULT_LABEL_MULTIPLIER
 
 
 def resolve_repo_weight(repo_config: Optional[RepositoryConfig]) -> float:
@@ -122,12 +166,22 @@ def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
         normalized_data: Dict[str, RepositoryConfig] = {}
         for repo_name, metadata in data.items():
             try:
+                raw_lm = metadata.get('label_multipliers')
+                label_multipliers: Optional[Dict[str, float]] = None
+                if isinstance(raw_lm, dict) and raw_lm:
+                    label_multipliers = {str(k): float(v) for k, v in raw_lm.items()}
+
+                dlm_raw = metadata.get('default_label_multiplier')
+                default_label_multiplier = float(dlm_raw) if dlm_raw is not None else DEFAULT_LABEL_MULTIPLIER
+
                 config = RepositoryConfig(
                     weight=float(metadata.get('weight', 0.01)),
                     inactive_at=metadata.get('inactive_at'),
                     additional_acceptable_branches=metadata.get('additional_acceptable_branches'),
                     mirror_enabled=bool(metadata.get('mirror_enabled', False)),
                     trusted_label_pipeline=bool(metadata.get('trusted_label_pipeline', False)),
+                    label_multipliers=label_multipliers,
+                    default_label_multiplier=default_label_multiplier,
                 )
                 normalized_data[repo_name.lower()] = config
             except (ValueError, TypeError) as e:

@@ -15,12 +15,12 @@ if TYPE_CHECKING:
     from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredMirrorPR
 
 from gittensor.constants import (
-    LABEL_MULTIPLIERS,
     MAINTAINER_ASSOCIATIONS,
     MAX_CODE_DENSITY_MULTIPLIER,
     MIN_TOKEN_SCORE_FOR_BASE_SCORE,
 )
 from gittensor.utils.utils import parse_repo_name
+from gittensor.validator.utils.load_weights import RepositoryConfig, max_multiplier_for_label
 
 GITHUB_DOMAIN = 'https://github.com/'
 
@@ -183,7 +183,7 @@ class PullRequest:
     time_decay_multiplier: float = 1.0
     credibility_multiplier: float = 1.0
     review_quality_multiplier: float = 1.0  # Penalty for CHANGES_REQUESTED reviews from maintainers
-    label_multiplier: float = 1.0  # Multiplier based on PR label (exact match against known labels)
+    label_multiplier: float = 1.0  # Multiplier from repo ``label_multipliers`` / ``default_label_multiplier``
     label: Optional[str] = None  # Last label set on the PR
     changes_requested_count: int = 0  # Number of maintainer CHANGES_REQUESTED reviews
     earned_score: float = 0.0
@@ -244,7 +244,14 @@ class PullRequest:
         return self.earned_score
 
     @classmethod
-    def from_graphql_response(cls, pr_data: dict, uid: int, hotkey: str, github_id: Optional[str]) -> 'PullRequest':
+    def from_graphql_response(
+        cls,
+        pr_data: dict,
+        uid: int,
+        hotkey: str,
+        github_id: Optional[str],
+        repo_config: Optional[RepositoryConfig] = None,
+    ) -> 'PullRequest':
         """Create PullRequest from GraphQL API response for any PR state."""
         from gittensor.validator.utils.datetime_utils import parse_github_timestamp_to_cst
 
@@ -312,7 +319,8 @@ class PullRequest:
 
         current = {(n.get('name') or '').lower() for n in (pr_data.get('labels') or {}).get('nodes') or [] if n}
         label: Optional[str] = None
-        scoring_labels = current & LABEL_MULTIPLIERS.keys()
+        lm = (repo_config.label_multipliers or {}) if repo_config else {}
+        scoring_labels = {n for n in current if lm and max_multiplier_for_label(n, lm) is not None}
         if scoring_labels:
             for event in reversed((pr_data.get('timelineItems') or {}).get('nodes') or []):
                 name = ((event or {}).get('label') or {}).get('name', '').lower()
@@ -321,7 +329,11 @@ class PullRequest:
                     break
             if label is None:
                 # Timeline truncated — fall back to highest-multiplier currently-applied label
-                label = max(scoring_labels, key=lambda n: (LABEL_MULTIPLIERS[n], n))
+                def _label_tiebreak(name: str) -> tuple[float, str]:
+                    m = max_multiplier_for_label(name, lm)
+                    return (m if m is not None else float('-inf'), name)
+
+                label = max(scoring_labels, key=_label_tiebreak)
 
         return cls(
             number=pr_data['number'],
@@ -465,34 +477,36 @@ class MinerEvaluation:
                 all_file_changes.extend(file_changes)
         return all_file_changes
 
-    def add_merged_pull_request(self, raw_pr: Dict):
+    def add_merged_pull_request(self, raw_pr: Dict, repo_config: Optional[RepositoryConfig] = None):
         """Add a merged pull request that will be factored into scoring."""
         bt.logging.info(
             f"Accepting MERGED PR #{raw_pr['number']} in {parse_repo_name(raw_pr['repository'])} -> '{raw_pr['baseRefName']}'"
         )
         self.merged_pull_requests.append(
-            PullRequest.from_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id)
+            PullRequest.from_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id, repo_config)
         )
 
-    def add_open_pull_request(self, raw_pr: Dict):
+    def add_open_pull_request(self, raw_pr: Dict, repo_config: Optional[RepositoryConfig] = None):
         """Add an open pull request that will be factored into scoring."""
         bt.logging.info(f'Counting OPEN PR #{raw_pr["number"]} in {parse_repo_name(raw_pr["repository"])}')
-        self.open_pull_requests.append(PullRequest.from_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id))
+        self.open_pull_requests.append(
+            PullRequest.from_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id, repo_config)
+        )
 
-    def add_closed_pull_request(self, raw_pr: Dict):
+    def add_closed_pull_request(self, raw_pr: Dict, repo_config: Optional[RepositoryConfig] = None):
         """Add a closed pull request that will be factored into scoring."""
         bt.logging.info(
             f'CLOSED PR #{raw_pr["number"]} in {parse_repo_name(raw_pr["repository"])} counting towards credibility'
         )
         self.closed_pull_requests.append(
-            PullRequest.from_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id)
+            PullRequest.from_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id, repo_config)
         )
 
-    def add_stale_closed_pull_request(self, raw_pr: Dict):
+    def add_stale_closed_pull_request(self, raw_pr: Dict, repo_config: Optional[RepositoryConfig] = None):
         """Track a stale CLOSED PR so storage can refresh its pull_requests row."""
         bt.logging.info(f'Stale CLOSED PR #{raw_pr["number"]} in {parse_repo_name(raw_pr["repository"])}')
         self.stale_closed_pull_requests.append(
-            PullRequest.from_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id)
+            PullRequest.from_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id, repo_config)
         )
 
 

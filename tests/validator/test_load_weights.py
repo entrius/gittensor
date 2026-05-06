@@ -218,6 +218,36 @@ class TestRepositoryConfigTrustedLabelPipeline:
         assert repos['foo/explicit-off'].trusted_label_pipeline is False
 
 
+class TestRepositoryConfigLabelFields:
+    """JSON parsing for per-repo ``label_multipliers`` / ``default_label_multiplier``."""
+
+    def test_loader_parses_label_multipliers_and_default(self, tmp_path, monkeypatch):
+        import json
+
+        from gittensor.validator.utils import load_weights as lw
+
+        (tmp_path / 'master_repositories.json').write_text(
+            json.dumps(
+                {
+                    'org/r1': {
+                        'weight': 0.1,
+                        'label_multipliers': {'kind/*': 1.2, 'bug': 1.25},
+                        'default_label_multiplier': 0.9,
+                    },
+                    'org/r2': {'weight': 0.2},
+                }
+            )
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: tmp_path)
+
+        repos = lw.load_master_repo_weights()
+
+        assert repos['org/r1'].label_multipliers == {'kind/*': 1.2, 'bug': 1.25}
+        assert repos['org/r1'].default_label_multiplier == pytest.approx(0.9)
+        assert repos['org/r2'].label_multipliers is None
+        assert repos['org/r2'].default_label_multiplier == 1.0
+
+
 class TestBannedOrganizations:
     """Tests ensuring banned organizations are not active in the repository list.
 

@@ -17,7 +17,6 @@ if TYPE_CHECKING:
     from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredMirrorPR
 from gittensor.constants import (
     EXCESSIVE_PR_PENALTY_BASE_THRESHOLD,
-    LABEL_MULTIPLIERS,
     MAINTAINER_ASSOCIATIONS,
     MAINTAINER_ISSUE_MULTIPLIER,
     MAX_ISSUE_CLOSE_WINDOW_DAYS,
@@ -41,7 +40,13 @@ from gittensor.utils.github_api_tools import (
 )
 from gittensor.validator.oss_contributions.credibility import check_eligibility
 from gittensor.validator.utils.datetime_utils import calculate_time_decay
-from gittensor.validator.utils.load_weights import LanguageConfig, RepositoryConfig, TokenConfig, resolve_repo_weight
+from gittensor.validator.utils.load_weights import (
+    LanguageConfig,
+    RepositoryConfig,
+    TokenConfig,
+    resolve_label_multiplier,
+    resolve_repo_weight,
+)
 
 
 def score_miner_prs(
@@ -211,7 +216,7 @@ def calculate_pr_multipliers(
 
     pr.repo_weight_multiplier = resolve_repo_weight(repo_config)
     pr.issue_multiplier = round(calculate_issue_multiplier(pr), 2)
-    pr.label_multiplier = LABEL_MULTIPLIERS.get(pr.label, 1.0) if pr.label else 1.0
+    pr.label_multiplier = resolve_label_multiplier(repo_config, pr.label)
 
     if is_merged:
         # Spam multiplier is recalculated in finalize_miner_scores with total token score

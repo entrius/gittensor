@@ -728,6 +728,7 @@ def try_add_open_or_closed_pr(
     pr_raw: Dict,
     pr_state: str,
     lookback_date_filter: datetime,
+    repo_config: Optional[RepositoryConfig] = None,
 ) -> None:
     """
     Attempts to add an OPEN or CLOSED PR to miner_eval if eligible.
@@ -743,7 +744,7 @@ def try_add_open_or_closed_pr(
         return
 
     if pr_state == PRState.OPEN.value:
-        miner_eval.add_open_pull_request(pr_raw)
+        miner_eval.add_open_pull_request(pr_raw, repo_config)
 
     if pr_state == PRState.CLOSED.value:
         closed_at = pr_raw.get('closedAt')
@@ -761,11 +762,11 @@ def try_add_open_or_closed_pr(
 
         # This allows users to close old PRs without receiving a fresh credibility penalty.
         if created_dt < lookback_date_filter:
-            miner_eval.add_stale_closed_pull_request(pr_raw)
+            miner_eval.add_stale_closed_pull_request(pr_raw, repo_config)
             return
 
         if closed_dt >= lookback_date_filter:
-            miner_eval.add_closed_pull_request(pr_raw)
+            miner_eval.add_closed_pull_request(pr_raw, repo_config)
 
 
 def should_skip_merged_pr(
@@ -947,7 +948,7 @@ def load_miners_prs(
                             continue
 
                     if pr_state in (PRState.OPEN.value, PRState.CLOSED.value):
-                        try_add_open_or_closed_pr(miner_eval, pr_raw, pr_state, lookback_date_filter)
+                        try_add_open_or_closed_pr(miner_eval, pr_raw, pr_state, lookback_date_filter, repo_config)
                         continue
 
                     should_skip, skip_reason = should_skip_merged_pr(
@@ -958,7 +959,7 @@ def load_miners_prs(
                         bt.logging.debug(skip_reason or '')
                         continue
 
-                    miner_eval.add_merged_pull_request(pr_raw)
+                    miner_eval.add_merged_pull_request(pr_raw, repo_config)
 
                 except Exception as e:
                     pr_number = pr_raw.get('number', '?')

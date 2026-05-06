@@ -601,6 +601,16 @@ def execute_graphql_query(
     return None
 
 
+def _graphql_response_body_preview(response: requests.Response, max_chars: int = 200) -> str:
+    """Return a compact preview for malformed GraphQL response bodies."""
+    try:
+        body = response.text or ''
+    except Exception as exc:
+        return f'<response body unavailable: {exc}>'
+
+    return ' '.join(body.split())[:max_chars]
+
+
 @dataclass
 class GraphQLPageResult:
     """Result of a paginated GraphQL query."""
@@ -659,8 +669,25 @@ def get_github_graphql_query(
                 # Check for RESOURCE_LIMITS_EXCEEDED in response body (GitHub returns 200 with errors)
                 try:
                     data = response.json()
-                except Exception:
-                    return GraphQLPageResult(response=response, page_size=limit)
+                except Exception as e:
+                    # Malformed 2xx body (HTML error page from a proxy, truncated JSON, ...)
+                    # is a transient transport failure - retry within this loop instead of
+                    # surfacing the bad response to the caller.
+                    preview = _graphql_response_body_preview(response)
+                    if attempt < (max_attempts - 1):
+                        backoff_delay = backoff_seconds(attempt)
+                        bt.logging.warning(
+                            f'GraphQL 200 response with malformed JSON '
+                            f'(attempt {attempt + 1}/{max_attempts}): {e}; body preview: {preview!r}; '
+                            f'retrying in {backoff_delay}s...'
+                        )
+                        time.sleep(backoff_delay)
+                        continue
+                    bt.logging.error(
+                        f'GraphQL 200 response with malformed JSON after {max_attempts} attempts: '
+                        f'{e}; body preview: {preview!r}'
+                    )
+                    return GraphQLPageResult(response=None, page_size=limit)
 
                 if _has_resource_limit_errors(data):
                     if attempt < (max_attempts - 1):

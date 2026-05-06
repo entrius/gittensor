@@ -348,6 +348,45 @@ class TestGraphQLRetryLogic:
         mock_sleep.assert_has_calls(expected_delays)
         assert mock_sleep.call_count == 7, 'Should sleep 7 times for 8 attempts'
 
+    @patch('gittensor.utils.github_api_tools.requests.post')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_malformed_200_then_success_retries(self, mock_logging, mock_sleep, mock_post, graphql_params):
+        """Malformed JSON on a 200 response should be retried, not surfaced to the caller."""
+        bad_response = Mock(status_code=200, text='<html>bad gateway</html>')
+        bad_response.json.side_effect = ValueError('Expecting value')
+
+        good_response = Mock(status_code=200)
+        good_response.json.return_value = {'data': {}}
+
+        mock_post.side_effect = [bad_response, good_response]
+
+        result = get_github_graphql_query(**graphql_params)
+
+        assert mock_post.call_count == 2, 'Should retry once after malformed JSON'
+        assert mock_sleep.call_count == 1, 'Should sleep once between retries'
+        assert result.response is good_response, 'Should return the good response on retry success'
+        mock_sleep.assert_has_calls([call(5)])
+        mock_logging.warning.assert_called()
+
+    @patch('gittensor.utils.github_api_tools.requests.post')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_persistent_malformed_200_returns_none_after_max_attempts(
+        self, mock_logging, mock_sleep, mock_post, graphql_params
+    ):
+        """If every attempt returns a malformed 200, the function exhausts retries and returns response=None."""
+        bad_response = Mock(status_code=200, text='<html>bad gateway</html>')
+        bad_response.json.side_effect = ValueError('Expecting value')
+        mock_post.return_value = bad_response
+
+        result = get_github_graphql_query(**graphql_params)
+
+        assert mock_post.call_count == 8, 'Should try exactly 8 times'
+        assert mock_sleep.call_count == 7, 'Should sleep 7 times between attempts'
+        assert result.response is None, 'Should not surface the malformed response to the caller'
+        mock_logging.error.assert_called()
+
 
 # ============================================================================
 # Other GitHub API Functions Tests
@@ -1227,6 +1266,37 @@ class TestLoadMinersPrsFetchFailureSignal:
 
         assert miner_eval.github_pr_fetch_failed is True
         assert miner_eval.failed_reason == 'GitHub GraphQL error: Something went wrong'
+
+    @patch('gittensor.utils.github_api_tools.requests.post')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_malformed_200_recovery_does_not_set_fetch_failed(self, mock_logging, mock_sleep, mock_post):
+        """A transient malformed 200 followed by a valid 200 should not mark the miner as failed."""
+        from gittensor.classes import MinerEvaluation
+
+        bad_response = Mock(status_code=200, text='<html>bad gateway</html>')
+        bad_response.json.side_effect = ValueError('Expecting value')
+
+        good_response = Mock(status_code=200)
+        good_response.json.return_value = {
+            'data': {
+                'node': {
+                    'issues': {'totalCount': 0},
+                    'pullRequests': {
+                        'pageInfo': {'hasNextPage': False, 'endCursor': None},
+                        'nodes': [],
+                    },
+                }
+            }
+        }
+        mock_post.side_effect = [bad_response, good_response]
+
+        miner_eval = MinerEvaluation(uid=1, hotkey='hk', github_id='123', github_pat='token')
+
+        load_miners_prs(miner_eval, {}, max_prs=10)
+
+        assert miner_eval.github_pr_fetch_failed is False
+        assert mock_post.call_count == 2, 'Helper should retry the malformed 200 internally'
 
 
 # ============================================================================

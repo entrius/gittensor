@@ -15,14 +15,11 @@ if TYPE_CHECKING:
     from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredMirrorPR
 
 from gittensor.constants import (
-    LABEL_MULTIPLIERS,
     MAINTAINER_ASSOCIATIONS,
     MAX_CODE_DENSITY_MULTIPLIER,
     MIN_TOKEN_SCORE_FOR_BASE_SCORE,
 )
 from gittensor.utils.utils import parse_repo_name
-
-GITHUB_DOMAIN = 'https://github.com/'
 
 
 class PRState(Enum):
@@ -83,6 +80,7 @@ class FileChange:
             r'(^|/)androidtest[a-z]*/',
             r'(^|/)integrationtest/',
             r'(^|/)spec/',
+            r'\.tests?/',  # .NET MyProject.Tests/FooTests.cs
         ]
         if any(re.search(pattern, filename_lower) for pattern in test_dir_patterns):
             return True
@@ -98,6 +96,7 @@ class FileChange:
             r'\.spec\.[^.]+$',
             r'^test\.[^.]+$',
             r'^tests\.[^.]+$',
+            r'^conftest\.py$',
         ]
 
         return any(re.search(pattern, basename) for pattern in test_patterns)
@@ -181,8 +180,10 @@ class PullRequest:
     time_decay_multiplier: float = 1.0
     credibility_multiplier: float = 1.0
     review_quality_multiplier: float = 1.0  # Penalty for CHANGES_REQUESTED reviews from maintainers
-    label_multiplier: float = 1.0  # Multiplier based on PR label (exact match against known labels)
-    label: Optional[str] = None  # Last label set on the PR
+    label_multiplier: float = 1.0  # Multiplier resolved from repository label config
+    label: Optional[str] = None  # Resolved scoring label, set during scoring
+    current_labels: frozenset[str] = field(default_factory=frozenset)
+    label_timeline_order: tuple[str, ...] = field(default_factory=tuple)  # Newest current labels first
     changes_requested_count: int = 0  # Number of maintainer CHANGES_REQUESTED reviews
     earned_score: float = 0.0
     collateral_score: float = 0.0  # For OPEN PRs: potential_score * collateral_percent
@@ -308,18 +309,19 @@ class PullRequest:
         cr_reviews = (pr_data.get('changesRequestedReviews') or {}).get('nodes') or []
         changes_requested_count = sum(1 for r in cr_reviews if r.get('authorAssociation') in MAINTAINER_ASSOCIATIONS)
 
-        current = {(n.get('name') or '').lower() for n in (pr_data.get('labels') or {}).get('nodes') or [] if n}
-        label: Optional[str] = None
-        scoring_labels = current & LABEL_MULTIPLIERS.keys()
-        if scoring_labels:
+        current = frozenset(
+            (n.get('name') or '').lower()
+            for n in (pr_data.get('labels') or {}).get('nodes') or []
+            if n and n.get('name')
+        )
+        timeline_ordered: list[str] = []
+        if current:
+            seen: set[str] = set()
             for event in reversed((pr_data.get('timelineItems') or {}).get('nodes') or []):
                 name = ((event or {}).get('label') or {}).get('name', '').lower()
-                if name in scoring_labels:
-                    label = name
-                    break
-            if label is None:
-                # Timeline truncated — fall back to highest-multiplier currently-applied label
-                label = max(scoring_labels, key=lambda n: (LABEL_MULTIPLIERS[n], n))
+                if name and name in current and name not in seen:
+                    seen.add(name)
+                    timeline_ordered.append(name)
 
         return cls(
             number=pr_data['number'],
@@ -341,7 +343,8 @@ class PullRequest:
             last_edited_at=last_edited_at,
             head_ref_oid=pr_data.get('headRefOid'),
             base_ref_oid=pr_data.get('baseRefOid'),
-            label=label,
+            current_labels=current,
+            label_timeline_order=tuple(timeline_ordered),
             changes_requested_count=changes_requested_count,
         )
 

@@ -52,7 +52,17 @@ INSERT INTO pull_requests (
     additions, deletions, commits, total_nodes_scored,
     merged_by_login, description, last_edited_at,
     code_density, token_score, structural_count, structural_score, leaf_count, leaf_score
-) VALUES %s
+) VALUES (
+    %s, %s, %s, %s, %s, %s, %s,
+    %s, %s, %s,
+    %s, %s, %s,
+    %s, %s, %s, %s,
+    %s, %s, %s, %s,
+    %s, %s,
+    %s, %s, %s, %s,
+    %s, %s, %s,
+    %s, %s, %s, %s, %s, %s
+)
 ON CONFLICT (number, repository_full_name)
 DO UPDATE SET
     uid = EXCLUDED.uid,
@@ -100,7 +110,15 @@ INSERT INTO issues (
     discovery_review_quality_multiplier, discovery_repo_weight_multiplier,
     discovery_time_decay_multiplier, discovery_credibility_multiplier,
     discovery_open_issue_spam_multiplier
-) VALUES %s
+) VALUES (
+    %s, %s, %s, %s, %s, %s,
+    %s, %s, %s,
+    %s, %s, %s,
+    %s, %s,
+    %s, %s,
+    %s, %s,
+    %s
+)
 ON CONFLICT (number, pr_number, repository_full_name)
 DO UPDATE SET
     title = EXCLUDED.title,
@@ -124,7 +142,7 @@ DO UPDATE SET
 BULK_UPSERT_FILE_CHANGES = """
 INSERT INTO file_changes (
     pr_number, repository_full_name, filename, changes, additions, deletions, status, patch, file_extension
-) VALUES %s
+) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
 ON CONFLICT (pr_number, repository_full_name, filename)
 DO UPDATE SET
     changes = EXCLUDED.changes,
@@ -144,7 +162,14 @@ INSERT INTO miner_evaluations (
     total_token_score, total_structural_count, total_structural_score, total_leaf_count, total_leaf_score,
     issue_discovery_score, issue_token_score, issue_credibility, is_issue_eligible,
     total_solved_issues, total_valid_solved_issues, total_closed_issues, total_open_issues
-) VALUES %s
+) VALUES (
+    %s, %s, %s, %s, %s, %s, %s,
+    %s, %s, %s, %s, %s,
+    %s, %s, %s,
+    %s, %s, %s, %s, %s,
+    %s, %s, %s, %s,
+    %s, %s, %s, %s
+)
 ON CONFLICT (uid, hotkey, github_id)
 DO UPDATE SET
     failed_reason = EXCLUDED.failed_reason,

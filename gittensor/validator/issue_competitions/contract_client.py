@@ -135,7 +135,7 @@ class IssueCompetitionContractClient:
     def _read_packed_storage(self) -> Optional[dict]:
         """Read the packed root storage from the contract"""
         try:
-            packed = read_contract_packed_storage(self.subtensor.substrate, self.contract_address, page_size=10)
+            packed = read_contract_packed_storage(self.subtensor.substrate, self.contract_address)
             if not packed:
                 return None
             return {
@@ -571,7 +571,7 @@ class IssueCompetitionContractClient:
             Total stake amount (0 if no stake found)
         """
         try:
-            packed = read_contract_packed_storage(self.subtensor.substrate, self.contract_address, page_size=10)
+            packed = read_contract_packed_storage(self.subtensor.substrate, self.contract_address)
             if not packed:
                 bt.logging.debug('Cannot get treasury stake: packed storage unavailable')
                 return 0

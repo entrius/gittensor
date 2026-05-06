@@ -15,6 +15,7 @@ storage_module = pytest.importorskip(
 classes = pytest.importorskip('gittensor.classes')
 mirror_models = pytest.importorskip('gittensor.utils.mirror.models')
 scored_pr_module = pytest.importorskip('gittensor.validator.oss_contributions.mirror.scored_pr')
+repository_module = pytest.importorskip('gittensor.validator.storage.repository')
 
 DatabaseStorage = storage_module.DatabaseStorage
 MinerEvaluation = classes.MinerEvaluation
@@ -22,6 +23,7 @@ PullRequest = classes.PullRequest
 PRState = classes.PRState
 MirrorPullRequest = mirror_models.MirrorPullRequest
 ScoredMirrorPR = scored_pr_module.ScoredMirrorPR
+Repository = repository_module.Repository
 
 
 def _legacy_pr(number: int, state: PRState = PRState.MERGED) -> PullRequest:
@@ -83,15 +85,28 @@ def _make_storage_with_mock_repo():
     """Build a DatabaseStorage with a mock DB connection + repo, bypassing __init__."""
     with patch.object(storage_module, 'create_database_connection', return_value=MagicMock()):
         with patch.object(storage_module, 'Repository') as mock_repo_cls:
+
+            def _store_bulk(items, commit=True):
+                return len(items)
+
             mock_repo = MagicMock()
-            mock_repo.set_miner.return_value = 1
-            mock_repo.store_pull_requests_bulk.return_value = 0  # actual count irrelevant
-            mock_repo.store_issues_bulk.return_value = 0
-            mock_repo.store_file_changes_bulk.return_value = 0
+            mock_repo.set_miner.return_value = True
+            mock_repo.store_pull_requests_bulk.side_effect = _store_bulk
+            mock_repo.store_issues_bulk.side_effect = _store_bulk
+            mock_repo.store_file_changes_bulk.side_effect = _store_bulk
+            mock_repo.cleanup_stale_miner_data.return_value = True
             mock_repo.set_miner_evaluation.return_value = True
             mock_repo_cls.return_value = mock_repo
             storage = DatabaseStorage()
             return storage, mock_repo
+
+
+def _empty_evaluation():
+    eval_obj = MinerEvaluation(uid=1, hotkey='hk', github_id='gh1')
+    eval_obj.mirror_merged_prs = []
+    eval_obj.mirror_open_prs = []
+    eval_obj.mirror_closed_prs = []
+    return eval_obj
 
 
 class TestStoreEvaluationCombinesBothLists:
@@ -208,10 +223,7 @@ def test_failure_after_cleanup_triggers_rollback():
     storage, mock_repo = _make_storage_with_mock_repo()
     mock_repo.set_miner_evaluation.side_effect = RuntimeError('DB write failed')
 
-    eval_obj = MinerEvaluation(uid=1, hotkey='hk', github_id='gh1')
-    eval_obj.mirror_merged_prs = []
-    eval_obj.mirror_open_prs = []
-    eval_obj.mirror_closed_prs = []
+    eval_obj = _empty_evaluation()
 
     with patch(
         'gittensor.validator.oss_contributions.mirror.adapters.mirror_scored_pr_to_legacy_pull_request',
@@ -222,3 +234,83 @@ def test_failure_after_cleanup_triggers_rollback():
     assert result.success is False
     storage.db_connection.rollback.assert_called_once()
     storage.db_connection.commit.assert_not_called()
+
+
+def test_required_write_false_triggers_rollback():
+    """A False repository result must fail the outer transaction even without an exception."""
+    storage, mock_repo = _make_storage_with_mock_repo()
+    mock_repo.set_miner.return_value = False
+
+    result = storage.store_evaluation(_empty_evaluation())
+
+    assert result.success is False
+    assert 'miner write failed' in result.errors[0]
+    storage.db_connection.rollback.assert_called_once()
+    storage.db_connection.commit.assert_not_called()
+    mock_repo.store_pull_requests_bulk.assert_not_called()
+
+
+def test_non_empty_bulk_return_zero_triggers_rollback():
+    """A non-empty bulk write returning 0 is a repository-level failure sentinel."""
+    storage, mock_repo = _make_storage_with_mock_repo()
+    mock_repo.store_pull_requests_bulk.side_effect = lambda _items, commit=True: 0
+
+    eval_obj = _empty_evaluation()
+    eval_obj.merged_pull_requests = [_legacy_pr(1)]
+
+    result = storage.store_evaluation(eval_obj)
+
+    assert result.success is False
+    assert 'merged pull requests bulk write failed' in result.errors[0]
+    storage.db_connection.rollback.assert_called_once()
+    storage.db_connection.commit.assert_not_called()
+    mock_repo.set_miner_evaluation.assert_not_called()
+
+
+def test_empty_bulk_return_zero_still_commits():
+    """Empty bulk inputs legitimately return 0 and should not poison the transaction."""
+    storage, _mock_repo = _make_storage_with_mock_repo()
+
+    result = storage.store_evaluation(_empty_evaluation())
+
+    assert result.success is True
+    storage.db_connection.commit.assert_called_once()
+    storage.db_connection.rollback.assert_not_called()
+
+
+def test_cleanup_false_triggers_rollback():
+    """cleanup_stale_miner_data failures are part of the same transaction."""
+    storage, mock_repo = _make_storage_with_mock_repo()
+    mock_repo.cleanup_stale_miner_data.return_value = False
+
+    result = storage.store_evaluation(_empty_evaluation())
+
+    assert result.success is False
+    assert 'stale miner cleanup write failed' in result.errors[0]
+    storage.db_connection.rollback.assert_called_once()
+    storage.db_connection.commit.assert_not_called()
+    mock_repo.set_miner_evaluation.assert_not_called()
+
+
+def test_evaluation_false_triggers_rollback():
+    """set_miner_evaluation returning False should rollback instead of committing success."""
+    storage, mock_repo = _make_storage_with_mock_repo()
+    mock_repo.set_miner_evaluation.return_value = False
+
+    result = storage.store_evaluation(_empty_evaluation())
+
+    assert result.success is False
+    assert 'miner evaluation write failed' in result.errors[0]
+    storage.db_connection.rollback.assert_called_once()
+    storage.db_connection.commit.assert_not_called()
+
+
+def test_cleanup_stale_returns_false_when_command_fails():
+    """Repository cleanup should surface execute_command failures to the outer storage flow."""
+    repo = Repository(MagicMock())
+    repo.execute_command = MagicMock(side_effect=[True, False, True, True])
+    eval_obj = _empty_evaluation()
+    eval_obj.evaluation_timestamp = object()
+
+    assert repo.cleanup_stale_miner_data(eval_obj, commit=False) is False
+    assert repo.execute_command.call_count == 4

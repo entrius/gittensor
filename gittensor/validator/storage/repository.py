@@ -111,7 +111,7 @@ class Repository(BaseRepository):
         params = (miner.uid, miner.hotkey, miner.github_id)
         return self.set_entity(SET_MINER, params, commit=commit)
 
-    def cleanup_stale_miner_data(self, evaluation: MinerEvaluation, commit: bool = True) -> None:
+    def cleanup_stale_miner_data(self, evaluation: MinerEvaluation, commit: bool = True) -> bool:
         """
         Remove stale evaluation data when a miner re-registers on a new uid/hotkey.
 
@@ -121,27 +121,31 @@ class Repository(BaseRepository):
 
         Args:
             evaluation: The current MinerEvaluation being stored
+
+        Returns:
+            True if cleanup was skipped or every cleanup statement succeeded, False otherwise.
         """
         # Skip cleanup for penalized / pre-validation-failed evals — running it
         # for a penalized eval whose github_id is preserved would tug stale rows
         # between two duplicate-share UIDs, removing each other's records.
         if evaluation.failed_reason is not None:
-            return
+            return True
         if not evaluation.github_id or evaluation.github_id == '0':
-            return
+            return True
 
         params = (evaluation.github_id, evaluation.uid, evaluation.hotkey)
         eval_params = params + (evaluation.evaluation_timestamp,)
 
-        # Clean up when same github_id re-registers on a new uid/hotkey
-        self.execute_command(CLEANUP_STALE_MINER_EVALUATIONS, eval_params, commit=commit)
-        self.execute_command(CLEANUP_STALE_MINERS, params, commit=commit)
-
-        # Clean up when same (uid, hotkey) re-links to a new github_id
         reverse_params = (evaluation.uid, evaluation.hotkey, evaluation.github_id)
         reverse_eval_params = reverse_params + (evaluation.evaluation_timestamp,)
-        self.execute_command(CLEANUP_STALE_MINER_EVALUATIONS_BY_HOTKEY, reverse_eval_params, commit=commit)
-        self.execute_command(CLEANUP_STALE_MINERS_BY_HOTKEY, reverse_params, commit=commit)
+
+        cleanup_results = [
+            self.execute_command(CLEANUP_STALE_MINER_EVALUATIONS, eval_params, commit=commit),
+            self.execute_command(CLEANUP_STALE_MINERS, params, commit=commit),
+            self.execute_command(CLEANUP_STALE_MINER_EVALUATIONS_BY_HOTKEY, reverse_eval_params, commit=commit),
+            self.execute_command(CLEANUP_STALE_MINERS_BY_HOTKEY, reverse_params, commit=commit),
+        ]
+        return all(cleanup_results)
 
     def store_pull_requests_bulk(self, pull_requests: List[PullRequest], commit: bool = True) -> int:
         """

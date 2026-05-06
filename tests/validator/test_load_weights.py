@@ -8,6 +8,8 @@ Run tests:
     pytest tests/validator/test_load_weights.py -v
 """
 
+import json
+
 import pytest
 
 from gittensor.validator.utils.load_weights import (
@@ -19,6 +21,13 @@ from gittensor.validator.utils.load_weights import (
     load_token_config,
     resolve_repo_weight,
 )
+
+
+def _live_master_repo_metadata():
+    from gittensor.validator.utils import load_weights as lw
+
+    with open(lw._get_weights_dir() / 'master_repositories.json', 'r') as f:
+        return sorted(json.load(f).items())
 
 
 class TestLoadTokenWeights:
@@ -216,6 +225,67 @@ class TestRepositoryConfigTrustedLabelPipeline:
         assert repos['foo/trusted'].trusted_label_pipeline is True
         assert repos['foo/untrusted'].trusted_label_pipeline is False
         assert repos['foo/explicit-off'].trusted_label_pipeline is False
+
+
+class TestRepositoryConfigLabelMultipliers:
+    """Dataclass + JSON-parsing tests for per-repo label multiplier config."""
+
+    def test_label_multiplier_defaults(self):
+        config = RepositoryConfig(weight=0.5)
+
+        assert config.label_multipliers is None
+        assert config.default_label_multiplier == pytest.approx(1.0)
+
+    def test_loader_parses_label_multiplier_config(self, tmp_path, monkeypatch):
+        from gittensor.validator.utils import load_weights as lw
+
+        fake_weights_dir = tmp_path
+        (fake_weights_dir / 'master_repositories.json').write_text(
+            json.dumps(
+                {
+                    'foo/labeled': {
+                        'weight': 0.5,
+                        'label_multipliers': {'kind/*': 1.5, 'type:bug': 1.25},
+                        'default_label_multiplier': 0.8,
+                    },
+                    'foo/defaults': {'weight': 0.3},
+                }
+            )
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: fake_weights_dir)
+
+        repos = lw.load_master_repo_weights()
+
+        assert repos['foo/labeled'].label_multipliers == {'kind/*': 1.5, 'type:bug': 1.25}
+        assert repos['foo/labeled'].default_label_multiplier == pytest.approx(0.8)
+        assert repos['foo/defaults'].label_multipliers is None
+        assert repos['foo/defaults'].default_label_multiplier == pytest.approx(1.0)
+
+    @pytest.mark.parametrize('repo_name,metadata', _live_master_repo_metadata())
+    def test_live_label_multiplier_maps_are_bounded(self, repo_name, metadata):
+        label_multipliers = metadata.get('label_multipliers')
+        if label_multipliers is None:
+            return
+
+        assert isinstance(label_multipliers, dict), f'{repo_name} label_multipliers must be a dict'
+        assert len(label_multipliers) <= 10, f'{repo_name} label_multipliers has too many entries'
+
+    @pytest.mark.parametrize('repo_name,metadata', _live_master_repo_metadata())
+    def test_live_label_multiplier_values_are_in_range(self, repo_name, metadata):
+        for pattern, multiplier in (metadata.get('label_multipliers') or {}).items():
+            assert isinstance(pattern, str), f'{repo_name} label_multipliers keys must be strings'
+            assert 0.0 <= float(multiplier) <= 20.0, (
+                f'{repo_name} label_multipliers[{pattern!r}] must be within [0.0, 20.0]'
+            )
+
+    @pytest.mark.parametrize('repo_name,metadata', _live_master_repo_metadata())
+    def test_live_default_label_multiplier_values_are_in_range(self, repo_name, metadata):
+        if 'default_label_multiplier' not in metadata:
+            return
+
+        assert 0.0 <= float(metadata['default_label_multiplier']) <= 20.0, (
+            f'{repo_name} default_label_multiplier must be within [0.0, 20.0]'
+        )
 
 
 class TestBannedOrganizations:

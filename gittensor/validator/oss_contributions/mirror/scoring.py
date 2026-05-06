@@ -29,7 +29,6 @@ import bittensor as bt
 from gittensor.classes import FileChange, PrScoringResult, ScoringCategory
 from gittensor.constants import (
     CONTRIBUTION_SCORE_FOR_FULL_BONUS,
-    LABEL_MULTIPLIERS,
     MAINTAINER_ASSOCIATIONS,
     MAINTAINER_ISSUE_MULTIPLIER,
     MAX_CONTRIBUTION_BONUS,
@@ -42,6 +41,7 @@ from gittensor.constants import (
 from gittensor.utils.github_api_tools import FileContentPair, branch_matches_pattern
 from gittensor.utils.mirror.client import MirrorClient, MirrorRequestError
 from gittensor.utils.mirror.models import MirrorLinkedIssue, MirrorPullRequest
+from gittensor.validator.oss_contributions.label_resolution import resolve_highest_label_multiplier
 from gittensor.validator.oss_contributions.mirror.adapters import mirror_files_to_legacy
 from gittensor.validator.oss_contributions.mirror.evaluation import MirrorMinerEvaluation
 from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredMirrorPR
@@ -354,9 +354,9 @@ def _calculate_pr_multipliers(scored: ScoredMirrorPR, repo_config: RepositoryCon
 
     scored.repo_weight_multiplier = resolve_repo_weight(repo_config)
 
-    chosen_label = _resolve_trusted_scoring_label(pr, repo_config)
+    chosen_label, label_multiplier = _resolve_trusted_scoring_label(pr, repo_config)
     scored.label = chosen_label
-    scored.label_multiplier = LABEL_MULTIPLIERS.get(chosen_label, 1.0) if chosen_label else 1.0
+    scored.label_multiplier = label_multiplier
 
     scored.issue_multiplier = round(_calculate_issue_multiplier(scored), 2)
 
@@ -375,8 +375,11 @@ def _calculate_pr_multipliers(scored: ScoredMirrorPR, repo_config: RepositoryCon
         scored.review_quality_multiplier = 1.0
 
 
-def _resolve_trusted_scoring_label(pr: MirrorPullRequest, repo_config: RepositoryConfig) -> Optional[str]:
+def _resolve_trusted_scoring_label(pr: MirrorPullRequest, repo_config: RepositoryConfig) -> tuple[Optional[str], float]:
     """Pick the highest-multiplier currently-applied scoring label whose actor is trusted.
+
+    Returns ``(label_name, multiplier)``. Returns ``(None, default_multiplier)``
+    when no trusted label matches this repository's label config.
 
     By default the actor must be in ``MAINTAINER_ASSOCIATIONS``. Repos opted into
     ``trusted_label_pipeline`` accept any actor — including GitHub-App actors that
@@ -386,17 +389,12 @@ def _resolve_trusted_scoring_label(pr: MirrorPullRequest, repo_config: Repositor
     auto-labelers (release-drafter, actions/labeler) and must keep the gate.
     """
     trusted = repo_config.trusted_label_pipeline
-    candidates = [
-        label
+    candidate_names = [
+        (label.name or '').lower()
         for label in pr.labels
-        if (label.name or '').lower() in LABEL_MULTIPLIERS
-        and (trusted or label.actor_association in MAINTAINER_ASSOCIATIONS)
+        if label.name and (trusted or label.actor_association in MAINTAINER_ASSOCIATIONS)
     ]
-    if not candidates:
-        return None
-    # Highest multiplier wins; tie-broken by label name for deterministic output
-    best = max(candidates, key=lambda label: (LABEL_MULTIPLIERS[label.name.lower()], label.name.lower()))
-    return best.name.lower()
+    return resolve_highest_label_multiplier(candidate_names, repo_config)
 
 
 # ============================================================================

@@ -1279,6 +1279,26 @@ class TestLoadMinersPrsFetchFailureSignal:
 
         assert miner_eval.github_pr_fetch_failed is True
 
+    @patch('gittensor.utils.github_api_tools.get_github_graphql_query')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_graphql_error_sets_failed_reason(self, mock_logging, mock_graphql_query):
+        from gittensor.classes import MinerEvaluation
+        from gittensor.utils.github_api_tools import GraphQLPageResult
+
+        mock_response = Mock()
+        mock_response.json.return_value = {
+            'errors': [{'message': 'Something went wrong'}],
+            'data': None,
+        }
+        mock_graphql_query.return_value = GraphQLPageResult(response=mock_response, page_size=100)
+
+        miner_eval = MinerEvaluation(uid=74, hotkey='test_hotkey', github_id='12345', github_pat='fake_pat')
+
+        load_miners_prs(miner_eval, {})
+
+        assert miner_eval.github_pr_fetch_failed is True
+        assert miner_eval.failed_reason == 'GitHub GraphQL error: Something went wrong'
+
 
 # ============================================================================
 # GraphQL Batch-Size Limit Tests

@@ -345,7 +345,7 @@ def get_merge_base_sha(repository: str, base_sha: str, head_sha: str, token: str
         try:
             response = session.get(
                 f'{BASE_GITHUB_API_URL}/repos/{repository}/compare/{base_sha}...{head_sha}',
-                timeout=15,
+                timeout=GITHUB_HTTP_TIMEOUT_SECONDS,
             )
 
             if response.status_code == 200:
@@ -407,7 +407,7 @@ def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -
             response = session.get(
                 f'{BASE_GITHUB_API_URL}/repos/{repository}/pulls/{pr_number}/files',
                 params={'per_page': per_page, 'page': page},
-                timeout=15,
+                timeout=GITHUB_HTTP_TIMEOUT_SECONDS,
             )
 
             if response.status_code == 200:
@@ -967,6 +967,8 @@ def load_miners_prs(
                 non_resource_errors = [e for e in data['errors'] if e.get('type') != 'RESOURCE_LIMITS_EXCEEDED']
                 if non_resource_errors:
                     bt.logging.error(f'GraphQL errors: {non_resource_errors}')
+                    message = str(non_resource_errors[0].get('message') or 'unknown')[:200]
+                    miner_eval.failed_reason = f'GitHub GraphQL error: {message}'
                     miner_eval.github_pr_fetch_failed = True
                     break
 
@@ -1098,7 +1100,7 @@ def check_github_issue_closed(repo: str, issue_number: int, token: str) -> Optio
     try:
         response = session.get(
             f'{BASE_GITHUB_API_URL}/repos/{repo}/issues/{issue_number}',
-            timeout=15,
+            timeout=GITHUB_HTTP_TIMEOUT_SECONDS,
         )
 
         if response.status_code != 200:

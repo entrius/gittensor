@@ -207,15 +207,7 @@ class Repository(BaseRepository):
 
         try:
             with self.get_cursor() as cursor:
-                from psycopg2.extras import execute_values
-
-                execute_values(
-                    cursor,
-                    BULK_UPSERT_PULL_REQUESTS.replace('VALUES %s', 'VALUES %s'),
-                    values,
-                    template=None,
-                    page_size=100,
-                )
+                cursor.executemany(BULK_UPSERT_PULL_REQUESTS, values)
                 if commit:
                     self.db.commit()
                 return len(values)
@@ -268,15 +260,7 @@ class Repository(BaseRepository):
 
         try:
             with self.get_cursor() as cursor:
-                from psycopg2.extras import execute_values
-
-                execute_values(
-                    cursor,
-                    BULK_UPSERT_ISSUES.replace('VALUES %s', 'VALUES %s'),
-                    values,
-                    template=None,
-                    page_size=100,
-                )
+                cursor.executemany(BULK_UPSERT_ISSUES, values)
                 if commit:
                     self.db.commit()
                 return len(values)
@@ -319,15 +303,7 @@ class Repository(BaseRepository):
 
         try:
             with self.get_cursor() as cursor:
-                from psycopg2.extras import execute_values
-
-                execute_values(
-                    cursor,
-                    BULK_UPSERT_FILE_CHANGES.replace('VALUES %s', 'VALUES %s'),
-                    values,
-                    template=None,
-                    page_size=100,
-                )
+                cursor.executemany(BULK_UPSERT_FILE_CHANGES, values)
                 if commit:
                     self.db.commit()
                 return len(values)
@@ -384,9 +360,7 @@ class Repository(BaseRepository):
 
         try:
             with self.get_cursor() as cursor:
-                from psycopg2.extras import execute_values
-
-                execute_values(cursor, BULK_UPSERT_MINER_EVALUATION, eval_values)
+                cursor.executemany(BULK_UPSERT_MINER_EVALUATION, eval_values)
                 if commit:
                     self.db.commit()
                 return True

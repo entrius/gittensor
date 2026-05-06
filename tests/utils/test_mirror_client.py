@@ -46,6 +46,13 @@ def _err(status: int, body: str = 'error') -> Mock:
     return Mock(status_code=status, text=body)
 
 
+def _invalid_json(body: str = '<html>bad gateway</html>') -> Mock:
+    """Build a 2xx response mock whose body is not valid JSON."""
+    response = Mock(status_code=200, text=body)
+    response.json.side_effect = ValueError('Expecting value')
+    return response
+
+
 def _make_client(session: Mock, **kwargs) -> MirrorClient:
     """Build a client wired to a mock session, defaults suitable for tests."""
     return MirrorClient(session=session, **kwargs)
@@ -193,6 +200,22 @@ class TestResponseParsing:
         assert isinstance(result, MirrorPullRequestFilesResponse)
         assert result.repo_full_name == 'entrius/gittensor-ui'
 
+    @pytest.mark.parametrize(
+        ('method_name', 'args'),
+        [
+            ('get_miner_pulls', ('218712309',)),
+            ('get_miner_issues', ('218712309',)),
+            ('get_pr_files', ('entrius/gittensor-ui', 518)),
+        ],
+    )
+    def test_top_level_schema_parse_error_wrapped_as_mirror_request_error(self, method_name, args):
+        session = Mock()
+        session.get.return_value = _ok({'error': 'upstream unavailable'})
+        client = _make_client(session)
+
+        with pytest.raises(MirrorRequestError, match='invalid mirror response'):
+            getattr(client, method_name)(*args)
+
 
 # ============================================================================
 # Retry behavior
@@ -257,6 +280,20 @@ class TestRetryBehavior:
         assert session.get.call_count == 2
         mock_sleep.assert_called_once_with(5)
 
+    def test_invalid_2xx_json_retries_then_succeeds(self, _log, mock_sleep):
+        session = Mock()
+        session.get.side_effect = [
+            _invalid_json(),
+            _ok(_minimal_pulls_payload()),
+        ]
+        client = _make_client(session)
+
+        result = client.get_miner_pulls('218712309')
+
+        assert isinstance(result, MirrorPullRequestsResponse)
+        assert session.get.call_count == 2
+        mock_sleep.assert_called_once_with(5)
+
     def test_max_attempts_exhausted_raises(self, _log, mock_sleep):
         session = Mock()
         session.get.return_value = _err(503, 'unavailable')
@@ -278,6 +315,20 @@ class TestRetryBehavior:
             client.get_miner_pulls('218712309')
 
         assert session.get.call_count == 3
+
+    def test_max_attempts_exhausted_on_invalid_2xx_json(self, _log, mock_sleep):
+        session = Mock()
+        session.get.return_value = _invalid_json('not-json')
+        client = _make_client(session, max_attempts=3)
+
+        with pytest.raises(MirrorRequestError) as exc_info:
+            client.get_miner_pulls('218712309')
+
+        assert 'after 3 attempts' in str(exc_info.value)
+        assert 'invalid JSON' in str(exc_info.value)
+        assert 'not-json' in str(exc_info.value)
+        assert session.get.call_count == 3
+        assert mock_sleep.call_count == 2
 
 
 @patch('gittensor.utils.mirror.client.time.sleep')

@@ -145,11 +145,6 @@ OPEN_ISSUE_SPAM_BASE_THRESHOLD = 5  # half the PR base of 10
 OPEN_ISSUE_SPAM_TOKEN_SCORE_PER_SLOT = 300.0  # +1 allowed open issue per this much token score
 MAX_OPEN_ISSUE_THRESHOLD = 30
 
-# Repo-centric closed issue scan caps (validator PAT budget)
-REPO_SCAN_PER_REPO_CAP = 300  # max solver lookups per repo
-REPO_SCAN_GLOBAL_CAP = 1500  # max solver lookups per round
-REPO_SCAN_CONCURRENCY = 2  # concurrent solver lookup threads
-
 # =============================================================================
 # Collateral
 # =============================================================================
@@ -194,3 +189,4 @@ MAX_OPEN_PR_THRESHOLD = 30  # Maximum open PR threshold (base + bonus capped at 
 CONTRACT_ADDRESS = '5FWNdk8YNtNcHKrAx2krqenFrFAZG7vmsd2XN2isJSew3MrD'
 ISSUES_TREASURY_UID = 111  # UID of the smart contract neuron, if set to RECYCLE_UID then it's disabled
 ISSUES_TREASURY_EMISSION_SHARE = 0.15  # % of emissions allocated to funding issues treasury
+MAX_ISSUE_ID = 1_000_000  # sanity-check upper bound for any real deployment

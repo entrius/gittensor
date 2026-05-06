@@ -21,8 +21,6 @@ from gittensor.constants import (
 )
 from gittensor.utils.utils import parse_repo_name
 
-GITHUB_DOMAIN = 'https://github.com/'
-
 
 class PRState(Enum):
     """PR state for scoring"""

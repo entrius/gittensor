@@ -144,7 +144,16 @@ def score_mirror_pr(
 
     file_changes, file_contents = mirror_files_to_legacy(pr.repo_full_name, pr.pr_number, files)
 
-    scored.base_score = _calculate_base_score(scored, file_changes, file_contents, programming_languages, token_config)
+    result = calculate_base_score_for_pr_files(file_changes, file_contents, programming_languages, token_config)
+    scored.token_score = result.token_score
+    scored.source_token_score = result.source_token_score
+    scored.structural_count = result.structural_count
+    scored.structural_score = result.structural_score
+    scored.leaf_count = result.leaf_count
+    scored.leaf_score = result.leaf_score
+    scored.total_nodes_scored = result.total_nodes_scored
+    scored.code_density = result.code_density
+    scored.base_score = result.base_score
 
     _calculate_pr_multipliers(scored, repo_config)
 
@@ -316,26 +325,6 @@ def calculate_base_score_for_pr_files(
         total_nodes_scored=total_nodes_scored,
         code_density=code_density,
     )
-
-
-def _calculate_base_score(
-    scored: ScoredMirrorPR,
-    file_changes: List[FileChange],
-    file_contents: Dict[str, FileContentPair],
-    programming_languages: Dict[str, LanguageConfig],
-    token_config: TokenConfig,
-) -> float:
-    """Thin wrapper: run the shared helper and copy fields onto ScoredMirrorPR."""
-    result = calculate_base_score_for_pr_files(file_changes, file_contents, programming_languages, token_config)
-    scored.token_score = result.token_score
-    scored.source_token_score = result.source_token_score
-    scored.structural_count = result.structural_count
-    scored.structural_score = result.structural_score
-    scored.leaf_count = result.leaf_count
-    scored.leaf_score = result.leaf_score
-    scored.total_nodes_scored = result.total_nodes_scored
-    scored.code_density = result.code_density
-    return result.base_score
 
 
 # ============================================================================

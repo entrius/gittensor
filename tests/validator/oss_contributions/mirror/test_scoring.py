@@ -215,6 +215,24 @@ class TestEligibilityGate:
         assert skip is True
         assert "source branch 'test'" in reason
 
+    def test_head_ref_in_default_branch_blocks_same_repo_without_additional(self):
+        # Regression: even when additional_acceptable_branches is empty, head_ref
+        # must still be checked against acceptable=['default_branch'].
+        scored = ScoredMirrorPR(
+            pr=_pr(
+                base_ref='main',
+                head_ref='main',
+                head_repo_full_name='entrius/gittensor-ui',
+                default_branch='main',
+            )
+        )
+        skip, reason = _should_skip_merged_mirror_pr(
+            scored,
+            _config(additional_branches=None),
+        )
+        assert skip is True
+        assert "source branch 'main'" in reason
+
     def test_head_ref_in_additional_passes_for_fork(self):
         # Fork PR whose head branch happens to collide with an acceptable
         # branch — fork branch names are arbitrary, legacy skips this case

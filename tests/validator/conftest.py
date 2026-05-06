@@ -54,6 +54,7 @@ class PRBuilder:
         repo: Optional[str] = None,
         unique_repo: bool = False,
         token_score: float = 10.0,
+        source_token_score: Optional[float] = None,
         uid: int = 0,
         merged_at: Optional[datetime] = None,
     ) -> PullRequest:
@@ -81,6 +82,7 @@ class PRBuilder:
             earned_score=earned_score,
             collateral_score=collateral_score,
             token_score=token_score,
+            source_token_score=source_token_score,
         )
 
     def merged(self, **kwargs) -> PullRequest:

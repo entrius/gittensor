@@ -164,6 +164,7 @@ class TestMirrorScoredPrToLegacyPullRequest:
         scored.base_score = 30.5
         scored.earned_score = 25.0
         scored.token_score = 100.0
+        scored.source_token_score = 12.5
         scored.repo_weight_multiplier = 0.7
         scored.label_multiplier = 1.5
         scored.label = 'enhancement'
@@ -208,6 +209,7 @@ class TestMirrorScoredPrToLegacyPullRequest:
         assert adapted.base_score == 30.5
         assert adapted.earned_score == 25.0
         assert adapted.token_score == 100.0
+        assert adapted.source_token_score == 12.5
         assert adapted.repo_weight_multiplier == 0.7
         assert adapted.label_multiplier == 1.5
         assert adapted.label == 'enhancement'

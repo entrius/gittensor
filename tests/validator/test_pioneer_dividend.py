@@ -46,8 +46,12 @@ class TestPioneerEligibility:
         assert not pr.is_pioneer_eligible()
 
     def test_ineligible_when_source_quality_score_below_threshold(self, builder):
-        pr = builder.create(state=PRState.MERGED, uid=1, token_score=MIN_TOKEN_SCORE_FOR_BASE_SCORE)
-        pr.source_token_score = 0.0
+        pr = builder.create(
+            state=PRState.MERGED,
+            uid=1,
+            token_score=MIN_TOKEN_SCORE_FOR_BASE_SCORE,
+            source_token_score=0.0,
+        )
         assert not pr.is_pioneer_eligible()
 
     def test_ineligible_when_open(self, builder):

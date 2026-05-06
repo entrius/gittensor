@@ -46,7 +46,11 @@ _EMPTY_TOKEN_CONFIG = TokenConfig()
 
 
 def _scored_mirror_pr(
-    repo: str, pr_number: int, token_score: float = 100.0, base_score: float = 42.0
+    repo: str,
+    pr_number: int,
+    token_score: float = 100.0,
+    base_score: float = 42.0,
+    source_token_score: float | None = None,
 ) -> ScoredMirrorPR:
     """Build a ScoredMirrorPR for cache pre-population in tests."""
     pr = MirrorPullRequest.from_dict(
@@ -81,6 +85,7 @@ def _scored_mirror_pr(
     )
     scored = ScoredMirrorPR(pr=pr)
     scored.token_score = token_score
+    scored.source_token_score = source_token_score
     scored.base_score = base_score
     return scored
 
@@ -405,15 +410,17 @@ class TestRunMirrorIssueDiscovery:
 class TestSolvingPrCache:
     def test_build_cache_from_multiple_miners(self):
         e1 = MinerEvaluation(uid=1, hotkey='hk1', github_id='g1')
-        e1.mirror_merged_prs = [_scored_mirror_pr('foo/a', 1, token_score=50, base_score=10)]
+        e1.mirror_merged_prs = [_scored_mirror_pr('foo/a', 1, token_score=50, base_score=10, source_token_score=12)]
         e2 = MinerEvaluation(uid=2, hotkey='hk2', github_id='g2')
-        e2.mirror_merged_prs = [_scored_mirror_pr('foo/b', 2, token_score=80, base_score=20)]
+        e2.mirror_merged_prs = [_scored_mirror_pr('foo/b', 2, token_score=80, base_score=20, source_token_score=34)]
 
         cache = _build_solving_pr_cache({1: e1, 2: e2})
         assert cache[('foo/a', 1)].token_score == 50
         assert cache[('foo/a', 1)].base_score == 10
+        assert cache[('foo/a', 1)].source_token_score == 12
         assert cache[('foo/b', 2)].token_score == 80
         assert cache[('foo/b', 2)].base_score == 20
+        assert cache[('foo/b', 2)].source_token_score == 34
 
     def test_cache_first_occurrence_wins_on_duplicate(self):
         # If the same (repo, pr_number) somehow appears in two miners' lists

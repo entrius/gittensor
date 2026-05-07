@@ -1126,10 +1126,13 @@ def _make_pr_node(
     default_branch='main',
     closing_issues_refs=None,
     head_repository=None,
+    changes_requested_reviews=None,
 ):
     """Build a single PR node matching the GraphQL QUERY schema."""
     if closing_issues_refs is None:
         closing_issues_refs = {'nodes': []}
+    if changes_requested_reviews is None:
+        changes_requested_reviews = {'nodes': []}
     return {
         'title': f'PR #{number}',
         'number': number,
@@ -1161,7 +1164,7 @@ def _make_pr_node(
         'mergedBy': {'login': 'maintainer'} if state == 'MERGED' else None,
         'closingIssuesReferences': closing_issues_refs,
         'reviews': {'nodes': [{'author': {'login': 'reviewer'}}]},
-        'changesRequestedReviews': {'nodes': []},
+        'changesRequestedReviews': changes_requested_reviews,
     }
 
 
@@ -1233,6 +1236,147 @@ class TestLoadMinersPrsErrorResilience:
         # Verify the warning was logged for the bad PR
         warning_calls = [str(c) for c in mock_logging.warning.call_args_list]
         assert any('PR #2' in w for w in warning_calls), f'Expected a warning about PR #2, got: {warning_calls}'
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api_tools.get_github_graphql_query')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_full_non_maintainer_review_window_fetches_later_maintainer_review(
+        self, mock_logging, mock_graphql_query, mock_execute_graphql
+    ):
+        """Non-maintainer reviews in the inline cap must not hide later maintainer reviews."""
+        from gittensor.classes import MinerEvaluation
+        from gittensor.utils.github_api_tools import _MAX_CHANGES_REQUESTED_REVIEWS
+        from gittensor.validator.utils.load_weights import RepositoryConfig
+
+        now = datetime.now(timezone.utc)
+        recent = (now - timedelta(days=5)).strftime('%Y-%m-%dT%H:%M:%SZ')
+        recent_merge = (now - timedelta(days=4)).strftime('%Y-%m-%dT%H:%M:%SZ')
+        pr = _make_pr_node(
+            7,
+            'goodorg',
+            'goodrepo',
+            created_at=recent,
+            merged_at=recent_merge,
+            changes_requested_reviews={
+                'nodes': [{'authorAssociation': 'CONTRIBUTOR'} for _ in range(_MAX_CHANGES_REQUESTED_REVIEWS)],
+                'pageInfo': {'hasNextPage': True, 'endCursor': 'review-cursor-1'},
+            },
+        )
+        mock_graphql_query.return_value = _make_graphql_response([pr])
+        mock_execute_graphql.return_value = {
+            'data': {
+                'repository': {
+                    'pullRequest': {
+                        'changesRequestedReviews': {
+                            'nodes': [{'authorAssociation': 'OWNER'}],
+                            'pageInfo': {'hasNextPage': False, 'endCursor': None},
+                        }
+                    }
+                }
+            }
+        }
+
+        master_repos = {'goodorg/goodrepo': RepositoryConfig(weight=1.0)}
+        miner_eval = MinerEvaluation(uid=74, hotkey='test_hotkey', github_id='12345', github_pat='fake_pat')
+
+        load_miners_prs(miner_eval, master_repos)
+
+        assert len(miner_eval.merged_pull_requests) == 1
+        assert miner_eval.merged_pull_requests[0].changes_requested_count == 1
+        mock_execute_graphql.assert_called_once()
+        query_arg, variables_arg, token_arg = mock_execute_graphql.call_args.args[:3]
+        assert 'reviews(first: $limit, states: CHANGES_REQUESTED, after: $cursor)' in query_arg
+        assert variables_arg == {
+            'owner': 'goodorg',
+            'name': 'goodrepo',
+            'pullNumber': 7,
+            'cursor': 'review-cursor-1',
+            'limit': 100,
+        }
+        assert token_arg == 'fake_pat'
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api_tools.get_github_graphql_query')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_inline_maintainer_review_cap_does_not_fetch_extra_pages(
+        self, mock_logging, mock_graphql_query, mock_execute_graphql
+    ):
+        """A full maintainer window already saturates scoring, so no follow-up is needed."""
+        from gittensor.classes import MinerEvaluation
+        from gittensor.utils.github_api_tools import _MAX_CHANGES_REQUESTED_REVIEWS
+        from gittensor.validator.utils.load_weights import RepositoryConfig
+
+        now = datetime.now(timezone.utc)
+        recent = (now - timedelta(days=5)).strftime('%Y-%m-%dT%H:%M:%SZ')
+        recent_merge = (now - timedelta(days=4)).strftime('%Y-%m-%dT%H:%M:%SZ')
+        pr = _make_pr_node(
+            8,
+            'goodorg',
+            'goodrepo',
+            created_at=recent,
+            merged_at=recent_merge,
+            changes_requested_reviews={
+                'nodes': [{'authorAssociation': 'OWNER'} for _ in range(_MAX_CHANGES_REQUESTED_REVIEWS)],
+                'pageInfo': {'hasNextPage': True, 'endCursor': 'review-cursor-1'},
+            },
+        )
+        mock_graphql_query.return_value = _make_graphql_response([pr])
+
+        master_repos = {'goodorg/goodrepo': RepositoryConfig(weight=1.0)}
+        miner_eval = MinerEvaluation(uid=74, hotkey='test_hotkey', github_id='12345', github_pat='fake_pat')
+
+        load_miners_prs(miner_eval, master_repos)
+
+        assert len(miner_eval.merged_pull_requests) == 1
+        assert miner_eval.merged_pull_requests[0].changes_requested_count == _MAX_CHANGES_REQUESTED_REVIEWS
+        mock_execute_graphql.assert_not_called()
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api_tools.get_github_graphql_query')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_open_pr_review_window_fetches_later_maintainer_review(
+        self, mock_logging, mock_graphql_query, mock_execute_graphql
+    ):
+        """Open PR collateral uses the same maintainer count source."""
+        from gittensor.classes import MinerEvaluation
+        from gittensor.utils.github_api_tools import _MAX_CHANGES_REQUESTED_REVIEWS
+        from gittensor.validator.utils.load_weights import RepositoryConfig
+
+        now = datetime.now(timezone.utc)
+        recent = (now - timedelta(days=5)).strftime('%Y-%m-%dT%H:%M:%SZ')
+        pr = _make_pr_node(
+            9,
+            'goodorg',
+            'goodrepo',
+            state='OPEN',
+            created_at=recent,
+            changes_requested_reviews={
+                'nodes': [{'authorAssociation': 'CONTRIBUTOR'} for _ in range(_MAX_CHANGES_REQUESTED_REVIEWS)],
+                'pageInfo': {'hasNextPage': True, 'endCursor': 'review-cursor-1'},
+            },
+        )
+        mock_graphql_query.return_value = _make_graphql_response([pr])
+        mock_execute_graphql.return_value = {
+            'data': {
+                'repository': {
+                    'pullRequest': {
+                        'changesRequestedReviews': {
+                            'nodes': [{'authorAssociation': 'COLLABORATOR'}],
+                            'pageInfo': {'hasNextPage': False, 'endCursor': None},
+                        }
+                    }
+                }
+            }
+        }
+
+        master_repos = {'goodorg/goodrepo': RepositoryConfig(weight=1.0)}
+        miner_eval = MinerEvaluation(uid=74, hotkey='test_hotkey', github_id='12345', github_pat='fake_pat')
+
+        load_miners_prs(miner_eval, master_repos)
+
+        assert len(miner_eval.open_pull_requests) == 1
+        assert miner_eval.open_pull_requests[0].changes_requested_count == 1
+        mock_execute_graphql.assert_called_once()
 
 
 class TestLoadMinersPrsFetchFailureSignal:

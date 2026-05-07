@@ -1069,14 +1069,20 @@ class TestFindSolverFromCrossReferences:
 class TestCheckGithubIssueClosed:
     """Test issue state checks keep API failures distinct from no-solver cases."""
 
-    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
-    @patch('gittensor.utils.github_api_tools.requests.get')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
-    def test_graphql_failure_sets_solver_lookup_failed(self, mock_logging, mock_get, mock_graphql):
+    def _mock_issue_response(self, mock_get_session, issue_json):
         issue_response = Mock()
         issue_response.status_code = 200
-        issue_response.json.return_value = {'state': 'closed'}
-        mock_get.return_value = issue_response
+        issue_response.json.return_value = issue_json
+        session = Mock()
+        session.get.return_value = issue_response
+        mock_get_session.return_value = session
+        return session
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api_tools.get_session')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_graphql_failure_sets_solver_lookup_failed(self, mock_logging, mock_get_session, mock_graphql):
+        self._mock_issue_response(mock_get_session, {'state': 'closed', 'state_reason': 'completed'})
         mock_graphql.return_value = None
 
         result = check_github_issue_closed('owner/repo', 12, 'fake_token')
@@ -1089,13 +1095,10 @@ class TestCheckGithubIssueClosed:
         }
 
     @patch('gittensor.utils.github_api_tools.execute_graphql_query')
-    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.get_session')
     @patch('gittensor.utils.github_api_tools.bt.logging')
-    def test_closed_issue_with_no_solver_keeps_lookup_failed_false(self, mock_logging, mock_get, mock_graphql):
-        issue_response = Mock()
-        issue_response.status_code = 200
-        issue_response.json.return_value = {'state': 'closed'}
-        mock_get.return_value = issue_response
+    def test_closed_issue_with_no_solver_keeps_lookup_failed_false(self, mock_logging, mock_get_session, mock_graphql):
+        self._mock_issue_response(mock_get_session, {'state': 'closed', 'state_reason': 'completed'})
         mock_graphql.return_value = _graphql_response([])
 
         result = check_github_issue_closed('owner/repo', 12, 'fake_token')
@@ -1106,6 +1109,41 @@ class TestCheckGithubIssueClosed:
             'pr_number': None,
             'solver_lookup_failed': False,
         }
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api_tools.get_session')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    @pytest.mark.parametrize('state_reason', ['not_planned', 'duplicate', None])
+    def test_non_completed_closed_issue_skips_solver_lookup(
+        self, mock_logging, mock_get_session, mock_graphql, state_reason
+    ):
+        self._mock_issue_response(mock_get_session, {'state': 'closed', 'state_reason': state_reason})
+
+        result = check_github_issue_closed('owner/repo', 12, 'fake_token')
+
+        assert result == {
+            'is_closed': True,
+            'solver_github_id': None,
+            'pr_number': None,
+            'solver_lookup_failed': False,
+        }
+        mock_graphql.assert_not_called()
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api_tools.get_session')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_missing_state_reason_skips_solver_lookup(self, mock_logging, mock_get_session, mock_graphql):
+        self._mock_issue_response(mock_get_session, {'state': 'closed'})
+
+        result = check_github_issue_closed('owner/repo', 12, 'fake_token')
+
+        assert result == {
+            'is_closed': True,
+            'solver_github_id': None,
+            'pr_number': None,
+            'solver_lookup_failed': False,
+        }
+        mock_graphql.assert_not_called()
 
 
 # ============================================================================

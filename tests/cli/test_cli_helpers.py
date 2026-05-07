@@ -28,6 +28,7 @@ from gittensor.cli.issue_commands.helpers import (
     colorize_status,
     emit_json,
     format_alpha,
+    resolve_network,
     validate_bounty_amount,
     validate_github_issue,
     validate_issue_id,
@@ -414,6 +415,51 @@ class TestRequireVerifiedExistsRepository:
             with pytest.raises(click.BadParameter) as exc_info:
                 validate_repository('ghost/missing', require_verified_exists=True)
         assert 'not found' in str(exc_info.value)
+
+
+# =============================================================================
+# resolve_network
+# =============================================================================
+
+
+class TestResolveNetwork:
+    CUSTOM_ENDPOINT = 'wss://custom.example.invalid'
+
+    @pytest.mark.parametrize('network_value', [None, 123])
+    def test_non_string_config_network_uses_ws_endpoint_fallback(self, network_value):
+        config = {'network': network_value, 'ws_endpoint': self.CUSTOM_ENDPOINT}
+
+        with patch('gittensor.cli.issue_commands.helpers.load_config', return_value=config):
+            endpoint, network_name = resolve_network()
+
+        assert endpoint == self.CUSTOM_ENDPOINT
+        assert network_name == 'custom'
+
+    def test_boolean_config_network_without_ws_endpoint_falls_back_to_finney(self):
+        with patch('gittensor.cli.issue_commands.helpers.load_config', return_value={'network': False}):
+            endpoint, network_name = resolve_network()
+
+        assert network_name == 'finney'
+        assert endpoint
+
+    def test_ws_endpoint_without_config_network_uses_custom_name(self):
+        with patch(
+            'gittensor.cli.issue_commands.helpers.load_config',
+            return_value={'ws_endpoint': self.CUSTOM_ENDPOINT},
+        ):
+            endpoint, network_name = resolve_network()
+
+        assert endpoint == self.CUSTOM_ENDPOINT
+        assert network_name == 'custom'
+
+    def test_valid_config_network_still_takes_priority_over_ws_endpoint(self):
+        config = {'network': 'test', 'ws_endpoint': self.CUSTOM_ENDPOINT}
+
+        with patch('gittensor.cli.issue_commands.helpers.load_config', return_value=config):
+            endpoint, network_name = resolve_network()
+
+        assert network_name == 'test'
+        assert endpoint != self.CUSTOM_ENDPOINT
 
 
 # =============================================================================

@@ -472,11 +472,15 @@ def is_valid_issue(issue: Issue, pr: PullRequest) -> bool:
     """Check if issue is valid for bonus calculation (works for both merged and open PRs)."""
     is_merged = pr.pr_state == PRState.MERGED
 
-    if not issue.author_login:
+    if not issue.author_github_id and not issue.author_login:
         bt.logging.warning(f'Skipping issue #{issue.number} - Issue is missing author information')
         return False
 
-    if issue.author_login == pr.author_login:
+    if issue.author_github_id and pr.github_id and pr.github_id != '0':
+        if issue.author_github_id == pr.github_id:
+            bt.logging.warning(f'Skipping issue #{issue.number} - Issue has same author as PR (self-created issue)')
+            return False
+    elif issue.author_login == pr.author_login:
         bt.logging.warning(f'Skipping issue #{issue.number} - Issue has same author as PR (self-created issue)')
         return False
 

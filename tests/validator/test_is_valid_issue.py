@@ -77,6 +77,59 @@ class TestIsValidIssueCloseWindow:
         assert is_valid_issue(issue, pr) is expected
 
 
+class TestIsValidIssueSelfAuthorGate:
+    def test_rejects_same_github_id_when_logins_differ(self, pr_factory, issue_factory):
+        now = datetime.now(timezone.utc)
+        pr = pr_factory.merged(merged_at=now, uid=42)
+        pr.author_login = 'renamed_miner'
+        pr.github_id = '12345'
+        pr.created_at = now - timedelta(days=1)
+        pr.last_edited_at = None
+
+        issue = issue_factory.create(
+            author_github_id='12345',
+            author_login='old_miner_login',
+            created_at=now - timedelta(days=5),
+            closed_at=now,
+        )
+
+        assert is_valid_issue(issue, pr) is False
+
+    def test_missing_github_ids_falls_back_to_login_check(self, pr_factory, issue_factory):
+        now = datetime.now(timezone.utc)
+        pr = pr_factory.merged(merged_at=now)
+        pr.author_login = 'miner_user'
+        pr.github_id = None
+        pr.created_at = now - timedelta(days=1)
+        pr.last_edited_at = None
+
+        issue = issue_factory.create(
+            author_github_id=None,
+            author_login='miner_user',
+            created_at=now - timedelta(days=5),
+            closed_at=now,
+        )
+
+        assert is_valid_issue(issue, pr) is False
+
+    def test_different_github_ids_allow_otherwise_valid_issue(self, pr_factory, issue_factory):
+        now = datetime.now(timezone.utc)
+        pr = pr_factory.merged(merged_at=now)
+        pr.author_login = 'same_visible_login'
+        pr.github_id = '12345'
+        pr.created_at = now - timedelta(days=1)
+        pr.last_edited_at = None
+
+        issue = issue_factory.create(
+            author_github_id='67890',
+            author_login='same_visible_login',
+            created_at=now - timedelta(days=5),
+            closed_at=now,
+        )
+
+        assert is_valid_issue(issue, pr) is True
+
+
 class TestIsValidIssueOpenPRCollateral:
     @pytest.mark.parametrize(
         'state_reason,expected',

@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import List, Optional
 
-from gittensor.classes import _apply_score_multipliers
+from gittensor.classes import _apply_score_multipliers, _build_earned_score_multipliers
 from gittensor.constants import MIN_TOKEN_SCORE_FOR_BASE_SCORE
 from gittensor.utils.mirror.models import MirrorFile, MirrorPullRequest
 
@@ -91,15 +91,7 @@ class ScoredMirrorPR:
 
     def calculate_final_earned_score(self) -> float:
         """Combine base score with all multipliers. Pioneer dividend is added separately after."""
-        multipliers = {
-            'repo': self.repo_weight_multiplier,
-            'issue': self.issue_multiplier,
-            'label': self.label_multiplier,
-            'spam': self.open_pr_spam_multiplier,
-            'decay': self.time_decay_multiplier,
-            'cred': self.credibility_multiplier,
-            'review': self.review_quality_multiplier,
-        }
+        multipliers = _build_earned_score_multipliers(self)
         label = f'{self.pr.state} PR #{self.pr.pr_number} ({self.pr.repo_full_name})'
         self.earned_score = _apply_score_multipliers(self.base_score, multipliers, label)
         return self.earned_score

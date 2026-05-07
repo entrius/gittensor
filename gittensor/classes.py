@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from math import prod
-from typing import TYPE_CHECKING, DefaultDict, Dict, List, Optional, Set
+from typing import TYPE_CHECKING, Any, DefaultDict, Dict, List, Optional, Set
 
 import bittensor as bt
 
@@ -29,6 +29,20 @@ def _apply_score_multipliers(base_score: float, multipliers: Dict[str, float], p
     bt.logging.info(f'├─ {pr_label} → {earned:.2f}')
     bt.logging.info(f'│  └─ {base_score:.2f} × {mult_str}')
     return earned
+
+
+def _build_earned_score_multipliers(pr: Any) -> Dict[str, float]:
+    """Build standard earned-score multipliers from a duck-typed PR-like object."""
+
+    return {
+        'repo': pr.repo_weight_multiplier,
+        'issue': pr.issue_multiplier,
+        'label': pr.label_multiplier,
+        'spam': pr.open_pr_spam_multiplier,
+        'decay': pr.time_decay_multiplier,
+        'cred': pr.credibility_multiplier,
+        'review': pr.review_quality_multiplier,
+    }
 
 
 class PRState(Enum):
@@ -231,15 +245,7 @@ class PullRequest:
 
     def calculate_final_earned_score(self) -> float:
         """Combine base score with all multipliers. Pioneer dividend is added separately after."""
-        multipliers = {
-            'repo': self.repo_weight_multiplier,
-            'issue': self.issue_multiplier,
-            'label': self.label_multiplier,
-            'spam': self.open_pr_spam_multiplier,
-            'decay': self.time_decay_multiplier,
-            'cred': self.credibility_multiplier,
-            'review': self.review_quality_multiplier,
-        }
+        multipliers = _build_earned_score_multipliers(self)
         label = f'{self.pr_state.value} PR #{self.number} ({self.repository_full_name})'
         self.earned_score = _apply_score_multipliers(self.base_score, multipliers, label)
         return self.earned_score

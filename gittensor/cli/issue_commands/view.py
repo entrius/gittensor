@@ -125,7 +125,15 @@ def issues_list(
         if issue:
             bounty_raw = issue.get('bounty_amount', 0)
             target_raw = issue.get('target_bounty', 0)
-            fill_pct = _fill_percent(bounty_raw, target_raw)
+            try:
+                bounty_val = int(bounty_raw) if bounty_raw else 0
+            except (TypeError, ValueError):
+                bounty_val = 0
+            try:
+                target_val = int(target_raw) if target_raw else 0
+            except (TypeError, ValueError):
+                target_val = 0
+            fill_pct = _fill_percent(bounty_val, target_val)
             console.print(
                 Panel(
                     f'[cyan]ID:[/cyan] {issue["id"]}\n'

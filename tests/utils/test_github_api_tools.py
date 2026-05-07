@@ -36,6 +36,16 @@ check_github_issue_closed = github_api_tools.check_github_issue_closed
 
 
 # ============================================================================
+# GraphQL Query Shape Tests
+# ============================================================================
+
+
+def test_pull_request_query_fetches_enough_current_labels_for_fallback():
+    assert 'labels(first: 50)' in github_api_tools.QUERY
+    assert 'labels(first: 5)' not in github_api_tools.QUERY
+
+
+# ============================================================================
 # Fixtures
 # ============================================================================
 

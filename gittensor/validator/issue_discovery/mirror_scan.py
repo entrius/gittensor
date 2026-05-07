@@ -156,6 +156,7 @@ async def run_mirror_issue_discovery(
 
         try:
             response = client.get_miner_issues(evaluation.github_id, since=lookback_date)
+            open_issue_count = _fetch_current_open_issue_count(client, evaluation.github_id, enabled_names)
         except MirrorRequestError as e:
             bt.logging.warning(f'├─ UID {uid}: mirror issue fetch failed ({e}) — skipped this miner')
             fetch_errors += 1
@@ -163,15 +164,10 @@ async def run_mirror_issue_discovery(
 
         filtered = [i for i in response.issues if i.repo_full_name in enabled_names]
         if not filtered:
+            evaluation.total_open_issues = open_issue_count
             no_issues += 1
             continue
 
-        # Count this miner's currently-open issues across mirror-enabled repos
-        # (within the lookback window). Used as the spam-multiplier signal and
-        # also written to evaluation.total_open_issues so the DB row reflects
-        # mirror-scoped state (the legacy GraphQL global open-issue count was
-        # never the right signal for the gate).
-        open_issue_count = sum(1 for i in filtered if i.state == 'OPEN')
         pending.append((evaluation, filtered, open_issue_count))
 
     canonical_pr_owners = _build_canonical_pr_owners(pending)
@@ -199,6 +195,12 @@ async def run_mirror_issue_discovery(
         f'({cache_stats.misses - cache_stats.fetch_failures} fetched OK, '
         f'{cache_stats.fetch_failures} fetch failures)'
     )
+
+
+def _fetch_current_open_issue_count(client: MirrorClient, github_id: str, enabled_names: Set[str]) -> int:
+    """Return current open issues in mirror-enabled repos, independent of scoring lookback."""
+    response = client.get_miner_issues(github_id)
+    return sum(1 for issue in response.issues if issue.repo_full_name in enabled_names and issue.state == 'OPEN')
 
 
 def _build_canonical_pr_owners(
@@ -268,8 +270,8 @@ def _score_miner_mirror_issues(
     """Classify + score one miner's mirror issues, populate MinerEvaluation fields.
 
     ``open_issue_count`` is the miner's currently-OPEN issue count across
-    mirror-enabled repos within the lookback window — the source-of-truth
-    for the open-issue spam multiplier on the mirror path.
+    mirror-enabled repos, independent of the scoring lookback window — the
+    source-of-truth for the open-issue spam multiplier on the mirror path.
 
     ``canonical_pr_owners`` enforces the cross-miner one-issue-per-PR rule:
     only the marker-matching issue scores, siblings count for credibility.

@@ -630,9 +630,48 @@ class TestCacheStats:
 
 
 class TestOpenIssueSpamSourceIsMirror:
-    """The open-issue spam multiplier sources its count from mirror's response,
-    and mirror_scan also writes that count to evaluation.total_open_issues so
-    the DB row reflects mirror-scoped state."""
+    """The open-issue spam multiplier sources its count from mirror's current
+    open issues, and mirror_scan also writes that count to
+    evaluation.total_open_issues so the DB row reflects mirror-scoped state."""
+
+    def test_open_issue_count_uses_current_issues_not_scoring_lookback(self):
+        """Older still-open issues absent from the lookback scoring response
+        still trip the spam multiplier when present in the current response."""
+        solved_issues = [_issue_dict(issue_number=300 + i, author_github_id=f'discoverer{i}') for i in range(8)]
+        older_open_issues = [
+            _issue_dict(
+                issue_number=200 + i,
+                state='OPEN',
+                state_reason=None,
+                solved_by_pr=None,
+                created_at='2026-01-01T00:00:00Z',
+            )
+            for i in range(6)
+        ]
+        client = Mock()
+
+        def _per_miner(github_id, since=None):
+            if since is None:
+                return _response(older_open_issues)
+            return _response(solved_issues)
+
+        client.get_miner_issues.side_effect = _per_miner
+
+        eval_ = _eval()
+        eval_.mirror_merged_prs = [_scored_mirror_pr('entrius/gittensor-ui', 100, token_score=100.0)]
+
+        _run(
+            run_mirror_issue_discovery(
+                {1: eval_},
+                _mirror_repos('entrius/gittensor-ui'),
+                _EMPTY_LANGS,
+                _EMPTY_TOKEN_CONFIG,
+                client=client,
+            )
+        )
+
+        assert eval_.total_open_issues == 6
+        assert eval_.issue_discovery_score == 0
 
     def test_all_mirror_miner_with_many_open_issues_trips_spam(self):
         """6 open issues in mirror response trips the spam multiplier."""

@@ -35,6 +35,18 @@ from .helpers import (
 )
 
 
+def _fill_percent(bounty: int, target: int) -> float:
+    """Compute bounty fill percentage with Decimal precision.
+
+    Returns 0.0 when target is non-positive, matching the existing fallback.
+    Both render paths (Panel single-issue view and table all-issues view) call
+    this so the same on-chain values render identically regardless of mode.
+    """
+    if target <= 0:
+        return 0.0
+    return float(Decimal(bounty) / Decimal(target) * 100)
+
+
 @click.command('list', cls=StyledCommand)
 @click.option(
     '--id',
@@ -113,7 +125,7 @@ def issues_list(
         if issue:
             bounty_raw = issue.get('bounty_amount', 0)
             target_raw = issue.get('target_bounty', 0)
-            fill_pct = (bounty_raw / target_raw * 100) if target_raw > 0 else 0
+            fill_pct = _fill_percent(bounty_raw, target_raw)
             console.print(
                 Panel(
                     f'[cyan]ID:[/cyan] {issue["id"]}\n'
@@ -168,7 +180,7 @@ def issues_list(
             target_str = format_alpha(target_val, 1) if target_val else '0.0'
 
             if target_val > 0:
-                fill_pct = float(Decimal(bounty_val) / Decimal(target_val) * 100)
+                fill_pct = _fill_percent(bounty_val, target_val)
                 if fill_pct >= 100:
                     bounty_display = f'{bounty_str} (100%)'
                 elif bounty_val > 0:

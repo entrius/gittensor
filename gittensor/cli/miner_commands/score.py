@@ -8,17 +8,21 @@ Stubs axon, wallet, subtensor and DB.
 from __future__ import annotations
 
 import dataclasses
+import json
+import os
 import sys
-from datetime import datetime
+from contextlib import contextmanager
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Dict, NoReturn, Optional, Set, Tuple, cast
-from unittest.mock import patch
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from types import SimpleNamespace
+from typing import TYPE_CHECKING, Any, Dict, Iterator, NoReturn, Optional, Set, Tuple, cast
 
 import click
 from rich.console import Console
 from rich.table import Table
 
-from gittensor.cli.issue_commands.helpers import emit_json, get_github_pat
+from gittensor.cli.issue_commands.helpers import emit_json
 from gittensor.cli.miner_commands.helpers import _error
 
 if TYPE_CHECKING:
@@ -36,7 +40,7 @@ def _die(msg: str, json_mode: bool) -> NoReturn:
 
 
 def _resolve_pat(cli_pat: Optional[str], json_mode: bool) -> str:
-    pat = cli_pat or get_github_pat()
+    pat = cli_pat or os.environ.get('GITTENSOR_MINER_PAT')
     if not pat:
         _die('--pat flag or GITTENSOR_MINER_PAT environment variable is required.', json_mode)
     return pat
@@ -46,33 +50,14 @@ def _round(x: float) -> float:
     return round(x, 4)
 
 
-class _SparseHotkeys:
-    def __init__(self, uid: int, hotkey: str):
-        self._data = {uid: hotkey}
-
-    def __getitem__(self, key: int) -> str:
-        return self._data.get(key, '__unused__')
-
-
-class _StubMetagraph:
-    def __init__(self, uid: int, hotkey: str):
-        self.hotkeys = _SparseHotkeys(uid, hotkey)
-
-
 class _StubValidator:
     """Stub `self` with no tensor, wallet, axon, wandb, and DB connection."""
 
     def __init__(self, uid: int, hotkey: str):
-        self.metagraph = _StubMetagraph(uid, hotkey)
+        self.metagraph = SimpleNamespace(hotkeys={uid: hotkey})
 
     def store_or_use_cached_evaluation(self, miner_evaluations: Dict) -> Set[int]:
         return set()
-
-    async def bulk_store_evaluation(self, miner_evaluations: Dict, skip_uids: Set[int]) -> None:
-        return
-
-    def update_scores(self, rewards, miner_uids, blacklisted_uids=None) -> None:
-        return
 
 
 _PR_SKIP: frozenset = frozenset({'file_changes', 'issues'})
@@ -96,20 +81,18 @@ _EVAL_SKIP: frozenset = frozenset(
 _EVAL_PROPERTIES: Tuple[str, ...] = ('total_merged_prs', 'total_open_prs', 'total_closed_prs', 'total_prs')
 
 
-def _jsonable(value: Any) -> Any:
-    if isinstance(value, Enum):
-        return value.value
-    if isinstance(value, datetime):
-        return value.isoformat()
-    if isinstance(value, (set, frozenset)):
-        return sorted(value)
-    return value
-
-
 def _project(obj: Any, skip: frozenset = frozenset(), extra_properties: Tuple[str, ...] = ()) -> Dict[str, Any]:
-    """Shallow-project a dataclass into a JSON-friendly dict."""
-    out = {f.name: _jsonable(getattr(obj, f.name)) for f in dataclasses.fields(obj) if f.name not in skip}
-    out.update({p: _jsonable(getattr(obj, p)) for p in extra_properties})
+    """Shallow-project a dataclass into a JSON-friendly dict.
+
+    Coerces Enum -> .value so DB-shape keys carry the underlying string;
+    datetime/set fall through to emit_json's default=str at serialize time.
+    """
+
+    def _coerce(v: Any) -> Any:
+        return v.value if isinstance(v, Enum) else v
+
+    out = {f.name: _coerce(getattr(obj, f.name)) for f in dataclasses.fields(obj) if f.name not in skip}
+    out.update({p: _coerce(getattr(obj, p)) for p in extra_properties})
     return out
 
 
@@ -210,6 +193,22 @@ def _render_table(payload: Dict[str, Any]) -> None:
         console.print(pr_table)
 
 
+@contextmanager
+def _override_pats_file(snapshot: list) -> Iterator[None]:
+    """Point pat_storage at a tempfile holding our injected PAT snapshot."""
+    from gittensor.validator import pat_storage
+
+    original = pat_storage.PATS_FILE
+    with TemporaryDirectory() as tmp:
+        fake = Path(tmp) / 'miner_pats.json'
+        fake.write_text(json.dumps(snapshot))
+        pat_storage.PATS_FILE = fake
+        try:
+            yield
+        finally:
+            pat_storage.PATS_FILE = original
+
+
 def _apply_log_level(level: str) -> None:
     """Configure bittensor's logger. The dev tool bypasses BaseNeuron, which is
     where production normally calls `bt.logging.set_config`, so the level stays
@@ -221,7 +220,13 @@ def _apply_log_level(level: str) -> None:
 
 
 def _drain_logs() -> None:
-    """Stop log production and wait for the async stderr writer to drain."""
+    """Stop log production and wait for the async stderr writer to drain.
+
+    bittensor logs through a queue consumed by a background worker thread.
+    `queue.empty()` only tells us nothing more is *enqueued*; the worker may
+    still be inside `write()` for the last record. The grace tick covers that
+    race so the final lines aren't truncated by a fast process exit.
+    """
     import time
 
     import bittensor as bt
@@ -232,7 +237,7 @@ def _drain_logs() -> None:
         deadline = time.monotonic() + 2.0
         while not queue.empty() and time.monotonic() < deadline:
             time.sleep(0.05)
-        time.sleep(0.1)  # grace tick: queue empty != worker finished writing
+        time.sleep(0.1)
     sys.stderr.flush()
     sys.stdout.flush()
 
@@ -292,10 +297,7 @@ def score_command(pat: Optional[str], log_level: str, json_mode: bool) -> None:
     pat_snapshot = [{'uid': _DEV_UID, 'hotkey': _DEV_HOTKEY, 'pat': resolved_pat}]
 
     async def _run() -> Dict[str, Any]:
-        with patch(
-            'gittensor.validator.oss_contributions.reward.pat_storage.load_all_pats',
-            return_value=pat_snapshot,
-        ):
+        with _override_pats_file(pat_snapshot):
             oss_rewards, miner_evaluations, _, _ = await oss_contributions(
                 stub, miner_uids, master_repositories, programming_languages, token_config
             )

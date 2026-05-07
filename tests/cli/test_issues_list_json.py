@@ -55,6 +55,87 @@ def test_issues_list_human_missing_issue_exits_non_zero(cli_root, runner):
     assert 'not found' in result.output.lower()
 
 
+def test_issues_list_human_id_normalizes_string_amounts(cli_root, runner):
+    """Single issue view should handle string numeric bounty fields like table view."""
+    issues = [
+        {
+            'id': 1,
+            'repository_full_name': 'owner/repo',
+            'issue_number': 10,
+            'bounty_amount': '500000000',
+            'target_bounty': '1000000000',
+            'status': 'Active',
+        },
+    ]
+
+    with (
+        patch(
+            'gittensor.cli.issue_commands.view._resolve_contract_and_network',
+            return_value=('5Fakeaddr', 'ws://x', 'test'),
+        ),
+        patch('gittensor.cli.issue_commands.view.read_issues_from_contract', return_value=issues),
+    ):
+        result = runner.invoke(cli_root, ['issues', 'list', '--id', '1'], catch_exceptions=False)
+
+    assert result.exit_code == 0
+    assert '0.5000 ALPHA' in result.output
+    assert '1.0000 ALPHA' in result.output
+    assert '50.0%' in result.output
+
+
+def test_issues_list_human_id_handles_invalid_amounts(cli_root, runner):
+    """Single issue view should not crash on malformed decoded bounty fields."""
+    issues = [
+        {
+            'id': 1,
+            'repository_full_name': 'owner/repo',
+            'issue_number': 10,
+            'bounty_amount': 'bad',
+            'target_bounty': None,
+            'status': 'Active',
+        },
+    ]
+
+    with (
+        patch(
+            'gittensor.cli.issue_commands.view._resolve_contract_and_network',
+            return_value=('5Fakeaddr', 'ws://x', 'test'),
+        ),
+        patch('gittensor.cli.issue_commands.view.read_issues_from_contract', return_value=issues),
+    ):
+        result = runner.invoke(cli_root, ['issues', 'list', '--id', '1'], catch_exceptions=False)
+
+    assert result.exit_code == 0
+    assert '0.0000 ALPHA' in result.output
+    assert '0.0%' in result.output
+
+
+def test_issues_list_human_table_normalizes_string_amounts(cli_root, runner):
+    """Table view should share the same normalized amount semantics as --id."""
+    issues = [
+        {
+            'id': 1,
+            'repository_full_name': 'owner/repo',
+            'issue_number': 10,
+            'bounty_amount': '500000000',
+            'target_bounty': '1000000000',
+            'status': 'Active',
+        },
+    ]
+
+    with (
+        patch(
+            'gittensor.cli.issue_commands.view._resolve_contract_and_network',
+            return_value=('5Fakeaddr', 'ws://x', 'test'),
+        ),
+        patch('gittensor.cli.issue_commands.view.read_issues_from_contract', return_value=issues),
+    ):
+        result = runner.invoke(cli_root, ['issues', 'list'], catch_exceptions=False)
+
+    assert result.exit_code == 0
+    assert '0.5/1.0 (50%)' in result.output
+
+
 @pytest.mark.parametrize('bad_id', ['0', '-1', '1000000', '99999999999999'])
 def test_issues_list_rejects_invalid_id_human(cli_root, runner, bad_id):
     """Out-of-range --id must be rejected at parse time without any contract read."""

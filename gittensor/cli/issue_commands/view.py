@@ -35,6 +35,21 @@ from .helpers import (
 )
 
 
+def _as_int_amount(value) -> int:
+    """Normalize decoded on-chain amount values for display."""
+    try:
+        return int(value) if value else 0
+    except (TypeError, ValueError):
+        return 0
+
+
+def _fill_percent(bounty: int, target: int) -> float:
+    """Compute bounty fill percentage with Decimal precision."""
+    if target <= 0:
+        return 0.0
+    return float(Decimal(bounty) / Decimal(target) * 100)
+
+
 @click.command('list', cls=StyledCommand)
 @click.option(
     '--id',
@@ -111,16 +126,16 @@ def issues_list(
         issue = next((i for i in issues if i['id'] == issue_id), None)
 
         if issue:
-            bounty_raw = issue.get('bounty_amount', 0)
-            target_raw = issue.get('target_bounty', 0)
-            fill_pct = (bounty_raw / target_raw * 100) if target_raw > 0 else 0
+            bounty_val = _as_int_amount(issue.get('bounty_amount', 0))
+            target_val = _as_int_amount(issue.get('target_bounty', 0))
+            fill_pct = _fill_percent(bounty_val, target_val)
             console.print(
                 Panel(
                     f'[cyan]ID:[/cyan] {issue["id"]}\n'
                     f'[cyan]Repository:[/cyan] {issue["repository_full_name"]}\n'
                     f'[cyan]Issue Number:[/cyan] #{issue["issue_number"]}\n'
-                    f'[cyan]Bounty Amount:[/cyan] {format_alpha(bounty_raw, 4)} ALPHA\n'
-                    f'[cyan]Target Bounty:[/cyan] {format_alpha(target_raw, 4)} ALPHA\n'
+                    f'[cyan]Bounty Amount:[/cyan] {format_alpha(bounty_val, 4)} ALPHA\n'
+                    f'[cyan]Target Bounty:[/cyan] {format_alpha(target_val, 4)} ALPHA\n'
                     f'[cyan]Fill %:[/cyan] {fill_pct:.1f}%\n'
                     f'[cyan]Status:[/cyan] {colorize_status(str(issue["status"]))}',
                     title=f'Issue #{issue_id}',
@@ -154,21 +169,14 @@ def issues_list(
             target_raw = issue.get('target_bounty', 0)
             status = issue.get('status', 'unknown')
 
-            # Keep list rendering resilient to unexpected storage payload shapes.
-            try:
-                bounty_val = int(bounty_raw) if bounty_raw else 0
-            except (TypeError, ValueError):
-                bounty_val = 0
-            try:
-                target_val = int(target_raw) if target_raw else 0
-            except (TypeError, ValueError):
-                target_val = 0
+            bounty_val = _as_int_amount(bounty_raw)
+            target_val = _as_int_amount(target_raw)
 
             bounty_str = format_alpha(bounty_val, 1) if bounty_val else '0.0'
             target_str = format_alpha(target_val, 1) if target_val else '0.0'
 
             if target_val > 0:
-                fill_pct = float(Decimal(bounty_val) / Decimal(target_val) * 100)
+                fill_pct = _fill_percent(bounty_val, target_val)
                 if fill_pct >= 100:
                     bounty_display = f'{bounty_str} (100%)'
                 elif bounty_val > 0:

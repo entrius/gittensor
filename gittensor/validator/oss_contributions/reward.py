@@ -2,6 +2,7 @@
 # Copyright © 2025 Entrius
 from __future__ import annotations
 
+import asyncio
 from traceback import print_exception
 from typing import TYPE_CHECKING, Dict, Optional, Set, Tuple
 
@@ -97,9 +98,12 @@ async def evaluate_miners_pull_requests(
             hotkey=miner_eval.hotkey,
             github_id=miner_eval.github_id,
         )
+
         with MirrorClient() as mirror_client:
-            load_mirror_miner_prs(mirror_eval, mirror_repos, client=mirror_client)
-            score_mirror_miner_prs(mirror_eval, mirror_repos, programming_languages, token_config, client=mirror_client)
+            await asyncio.to_thread(load_mirror_miner_prs, mirror_eval, mirror_repos, client=mirror_client)
+            await score_mirror_miner_prs(
+                mirror_eval, mirror_repos, programming_languages, token_config, client=mirror_client
+            )
         combine(miner_eval, mirror_eval)
 
     # Clear PAT after scoring to avoid storing sensitive data in memory

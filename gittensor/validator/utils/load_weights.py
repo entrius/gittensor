@@ -1,6 +1,7 @@
 # The MIT License (MIT)
 # Copyright © 2025 Entrius
 import json
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -59,6 +60,17 @@ def resolve_repo_weight(repo_config: Optional[RepositoryConfig]) -> float:
     if repo_config is None:
         return DEFAULT_REPO_WEIGHT
     return repo_config.weight
+
+
+def _validate_label_multiplier(value: float, repo_name: str, key: str, default: float = 1.0) -> float:
+    """Validate a label multiplier value. Returns the validated value or default with a warning."""
+    if not math.isfinite(value) or value < 0:
+        bt.logging.warning(
+            f'Invalid {key} for {repo_name}: {value!r}. '
+            f'Must be a non-negative finite number. Falling back to {default}.'
+        )
+        return default
+    return value
 
 
 @dataclass
@@ -135,11 +147,20 @@ def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
                     mirror_enabled=bool(metadata.get('mirror_enabled', False)),
                     trusted_label_pipeline=bool(metadata.get('trusted_label_pipeline', False)),
                     label_multipliers=(
-                        {str(label): float(multiplier) for label, multiplier in metadata['label_multipliers'].items()}
+                        {
+                            str(label): _validate_label_multiplier(
+                                float(multiplier), repo_name, f'label_multipliers.{label}'
+                            )
+                            for label, multiplier in metadata['label_multipliers'].items()
+                        }
                         if metadata.get('label_multipliers') is not None
                         else None
                     ),
-                    default_label_multiplier=float(metadata.get('default_label_multiplier', 1.0)),
+                    default_label_multiplier=_validate_label_multiplier(
+                        float(metadata.get('default_label_multiplier', 1.0)),
+                        repo_name,
+                        'default_label_multiplier',
+                    ),
                 )
                 normalized_data[repo_name.lower()] = config
             except (ValueError, TypeError) as e:

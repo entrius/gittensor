@@ -21,6 +21,21 @@ from gittensor.validator.utils.datetime_utils import (
 )
 
 
+def _parse_bool(value, field_name: str, default: bool = False) -> bool:
+    """Parse mirror boolean fields without treating non-empty strings as true."""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized == 'true':
+            return True
+        if normalized == 'false':
+            return False
+    raise ValueError(f'{field_name} must be a boolean, got {value!r}')
+
+
 @dataclass
 class MirrorLabel:
     """A label applied to a PR or issue, with the actor who applied it.
@@ -104,7 +119,7 @@ class MirrorLinkedIssue:
             created_at=parse_optional_github_iso_to_utc(data.get('created_at')),
             closed_at=parse_optional_github_iso_to_utc(data.get('closed_at')),
             updated_at=parse_optional_github_iso_to_utc(data.get('updated_at')),
-            is_transferred=bool(data.get('is_transferred', False)),
+            is_transferred=_parse_bool(data.get('is_transferred'), 'is_transferred'),
             solved_by_pr=data.get('solved_by_pr'),
             labels=[MirrorLabel.from_dict(label) for label in data.get('labels') or []],
         )
@@ -169,7 +184,7 @@ class MirrorPullRequest:
             closed_at=parse_optional_github_iso_to_utc(data.get('closed_at')),
             merged_at=parse_optional_github_iso_to_utc(data.get('merged_at')),
             last_edited_at=parse_optional_github_iso_to_utc(data.get('last_edited_at')),
-            edited_after_merge=bool(data.get('edited_after_merge', False)),
+            edited_after_merge=_parse_bool(data.get('edited_after_merge'), 'edited_after_merge'),
             hours_since_merge=data.get('hours_since_merge'),
             merged_by_login=data.get('merged_by_login'),
             base_ref=data.get('base_ref'),
@@ -182,7 +197,7 @@ class MirrorPullRequest:
             additions=int(data.get('additions', 0)),
             deletions=int(data.get('deletions', 0)),
             commits_count=int(data.get('commits_count', 0)),
-            scoring_data_stored=bool(data.get('scoring_data_stored', False)),
+            scoring_data_stored=_parse_bool(data.get('scoring_data_stored'), 'scoring_data_stored'),
             review_summary=MirrorReviewSummary.from_dict(data.get('review_summary') or {}),
             labels=[MirrorLabel.from_dict(label) for label in data.get('labels') or []],
             linked_issues=[MirrorLinkedIssue.from_dict(issue) for issue in data.get('linked_issues') or []],
@@ -217,7 +232,7 @@ class MirrorSolvingPR:
             state=data['state'],
             merged_at=parse_optional_github_iso_to_utc(data.get('merged_at')),
             hours_since_merge=data.get('hours_since_merge'),
-            edited_after_merge=bool(data.get('edited_after_merge', False)),
+            edited_after_merge=_parse_bool(data.get('edited_after_merge'), 'edited_after_merge'),
             head_sha=data.get('head_sha'),
             base_sha=data.get('base_sha'),
             merge_base_sha=data.get('merge_base_sha'),
@@ -269,7 +284,7 @@ class MirrorIssue:
             closed_at=parse_optional_github_iso_to_utc(data.get('closed_at')),
             updated_at=parse_optional_github_iso_to_utc(data.get('updated_at')),
             last_edited_at=parse_optional_github_iso_to_utc(data.get('last_edited_at')),
-            is_transferred=bool(data.get('is_transferred', False)),
+            is_transferred=_parse_bool(data.get('is_transferred'), 'is_transferred'),
             solved_by_pr=data.get('solved_by_pr'),
             labels=[MirrorLabel.from_dict(label) for label in data.get('labels') or []],
             solving_pr=MirrorSolvingPR.from_dict(solving_pr_raw) if solving_pr_raw else None,
@@ -304,7 +319,7 @@ class MirrorFile:
             additions=int(data.get('additions', 0)),
             deletions=int(data.get('deletions', 0)),
             changes=int(data.get('changes', 0)),
-            is_binary=bool(data.get('is_binary', False)),
+            is_binary=_parse_bool(data.get('is_binary'), 'is_binary'),
             head_content=data.get('head_content'),
             base_content=data.get('base_content'),
         )
@@ -393,6 +408,6 @@ class MirrorPullRequestFilesResponse:
             head_sha=data.get('head_sha'),
             base_sha=data.get('base_sha'),
             merge_base_sha=data.get('merge_base_sha'),
-            scoring_data_stored=bool(data.get('scoring_data_stored', False)),
+            scoring_data_stored=_parse_bool(data.get('scoring_data_stored'), 'scoring_data_stored'),
             files=files,
         )

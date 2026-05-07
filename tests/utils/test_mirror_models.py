@@ -272,6 +272,16 @@ class TestMirrorLinkedIssue:
         li = MirrorLinkedIssue.from_dict(linked_issue_dict)
         assert li.labels == []
 
+    def test_string_false_is_transferred_parses_false(self, linked_issue_dict):
+        linked_issue_dict['is_transferred'] = 'false'
+        li = MirrorLinkedIssue.from_dict(linked_issue_dict)
+        assert li.is_transferred is False
+
+    def test_invalid_is_transferred_rejected(self, linked_issue_dict):
+        linked_issue_dict['is_transferred'] = 'nope'
+        with pytest.raises(ValueError, match='is_transferred'):
+            MirrorLinkedIssue.from_dict(linked_issue_dict)
+
 
 # ============================================================================
 # MirrorPullRequest
@@ -351,6 +361,18 @@ class TestMirrorPullRequest:
         pr = MirrorPullRequest.from_dict(pull_request_dict)
         assert pr.head_repo_full_name is None
 
+    def test_string_false_booleans_parse_false(self, pull_request_dict):
+        pull_request_dict['edited_after_merge'] = 'false'
+        pull_request_dict['scoring_data_stored'] = 'false'
+        pr = MirrorPullRequest.from_dict(pull_request_dict)
+        assert pr.edited_after_merge is False
+        assert pr.scoring_data_stored is False
+
+    def test_invalid_scoring_data_stored_rejected(self, pull_request_dict):
+        pull_request_dict['scoring_data_stored'] = 'unknown'
+        with pytest.raises(ValueError, match='scoring_data_stored'):
+            MirrorPullRequest.from_dict(pull_request_dict)
+
 
 # ============================================================================
 # MirrorSolvingPR
@@ -367,6 +389,11 @@ class TestMirrorSolvingPR:
         assert sp.review_summary.maintainer_changes_requested_count == 1
         # solving_pr omits the other review counts; defaults kick in
         assert sp.review_summary.approved_count == 0
+
+    def test_string_false_edited_after_merge_parses_false(self, solving_pr_dict):
+        solving_pr_dict['edited_after_merge'] = 'false'
+        sp = MirrorSolvingPR.from_dict(solving_pr_dict)
+        assert sp.edited_after_merge is False
 
 
 # ============================================================================
@@ -400,6 +427,11 @@ class TestMirrorIssue:
         issue_dict['repo_full_name'] = 'Entrius/AllWays'
         issue = MirrorIssue.from_dict(issue_dict)
         assert issue.repo_full_name == 'entrius/allways'
+
+    def test_string_false_is_transferred_parses_false(self, issue_dict):
+        issue_dict['is_transferred'] = 'false'
+        issue = MirrorIssue.from_dict(issue_dict)
+        assert issue.is_transferred is False
 
 
 # ============================================================================
@@ -436,6 +468,11 @@ class TestMirrorFile:
         file_dict['previous_filename'] = 'src/old/MinerCard.tsx'
         f = MirrorFile.from_dict(file_dict)
         assert f.previous_filename == 'src/old/MinerCard.tsx'
+
+    def test_string_false_is_binary_parses_false(self, file_dict):
+        file_dict['is_binary'] = 'false'
+        f = MirrorFile.from_dict(file_dict)
+        assert f.is_binary is False
 
 
 # ============================================================================
@@ -540,6 +577,19 @@ class TestMirrorPullRequestFilesResponse:
         }
         resp = MirrorPullRequestFilesResponse.from_dict(payload)
         assert resp.files == []
+
+    def test_string_false_scoring_data_stored_parses_false(self):
+        payload = {
+            'repo_full_name': 'entrius/gittensor-ui',
+            'pr_number': 518,
+            'head_sha': 'h',
+            'base_sha': 'b',
+            'merge_base_sha': 'mb',
+            'scoring_data_stored': 'false',
+            'files': [],
+        }
+        resp = MirrorPullRequestFilesResponse.from_dict(payload)
+        assert resp.scoring_data_stored is False
 
     def test_repo_full_name_lowercased_at_parse(self, file_dict):
         payload = {

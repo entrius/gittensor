@@ -17,6 +17,14 @@ FAKE_ISSUES = [
         'target_bounty': 100_000_000_000,
         'status': 'Active',
     },
+    {
+        'id': 2,
+        'repository_full_name': 'other/repo',
+        'issue_number': 11,
+        'bounty_amount': 25_000_000_000,
+        'target_bounty': 100_000_000_000,
+        'status': 'Active',
+    },
 ]
 
 
@@ -77,4 +85,63 @@ def test_issues_list_rejects_invalid_id_json(cli_root, runner, bad_id):
     assert payload['success'] is False
     assert payload['error']['type'] == 'bad_parameter'
     assert 'between 1 and 999999' in payload['error']['message']
+    mock_read.assert_not_called()
+
+
+def test_issues_list_repo_filter_strips_whitespace_json(cli_root, runner):
+    """A valid --repo pasted with whitespace should still match the repository."""
+    with (
+        patch(
+            'gittensor.cli.issue_commands.view._resolve_contract_and_network',
+            return_value=('5Fakeaddr', 'ws://x', 'test'),
+        ),
+        patch('gittensor.cli.issue_commands.view.read_issues_from_contract', return_value=FAKE_ISSUES),
+    ):
+        result = runner.invoke(cli_root, ['issues', 'list', '--json', '--repo', '  owner/repo  '], catch_exceptions=False)
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload['success'] is True
+    assert payload['issue_count'] == 1
+    assert payload['issues'][0]['repository_full_name'] == 'owner/repo'
+
+
+def test_issues_list_repo_filter_strips_whitespace_human(cli_root, runner):
+    """Human table mode should use the same normalized --repo filter."""
+    with (
+        patch(
+            'gittensor.cli.issue_commands.view._resolve_contract_and_network',
+            return_value=('5Fakeaddr', 'ws://x', 'test'),
+        ),
+        patch('gittensor.cli.issue_commands.view.read_issues_from_contract', return_value=FAKE_ISSUES),
+    ):
+        result = runner.invoke(cli_root, ['issues', 'list', '--repo', '  owner/repo  '], catch_exceptions=False)
+
+    assert result.exit_code == 0
+    assert 'owner/repo' in result.output
+    assert 'other/repo' not in result.output
+
+
+@pytest.mark.parametrize('bad_repo', ['ownerrepo', 'owner//repo', 'https://github.com/owner/repo'])
+def test_issues_list_rejects_invalid_repo_human(cli_root, runner, bad_repo):
+    """Malformed --repo values must fail before contract reads."""
+    with patch('gittensor.cli.issue_commands.view.read_issues_from_contract') as mock_read:
+        result = runner.invoke(cli_root, ['issues', 'list', '--repo', bad_repo], catch_exceptions=False)
+
+    assert result.exit_code != 0
+    assert 'owner/repo format' in result.output
+    mock_read.assert_not_called()
+
+
+@pytest.mark.parametrize('bad_repo', ['ownerrepo', 'owner//repo', 'https://github.com/owner/repo'])
+def test_issues_list_rejects_invalid_repo_json(cli_root, runner, bad_repo):
+    """JSON mode should report invalid --repo as a structured bad_parameter error."""
+    with patch('gittensor.cli.issue_commands.view.read_issues_from_contract') as mock_read:
+        result = runner.invoke(cli_root, ['issues', 'list', '--json', '--repo', bad_repo], catch_exceptions=False)
+
+    assert result.exit_code != 0
+    payload = json.loads(result.output)
+    assert payload['success'] is False
+    assert payload['error']['type'] == 'bad_parameter'
+    assert 'owner/repo format' in payload['error']['message']
     mock_read.assert_not_called()

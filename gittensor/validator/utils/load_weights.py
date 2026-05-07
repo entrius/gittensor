@@ -1,6 +1,7 @@
 # The MIT License (MIT)
 # Copyright © 2025 Entrius
 import json
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -105,6 +106,42 @@ def _get_weights_dir() -> Path:
     return Path(__file__).parent.parent / 'weights'
 
 
+def _load_non_negative_finite_float(value: object, default: float, source: str) -> float:
+    """Coerce a config multiplier, falling back when the value can poison scoring."""
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as e:
+        bt.logging.warning(f'Could not parse {source}: {value!r} - {e}; using default {default}')
+        return default
+
+    if not math.isfinite(parsed) or parsed < 0:
+        bt.logging.warning(f'Rejecting out-of-range {source}: {value!r}; using default {default}')
+        return default
+
+    return parsed
+
+
+def _load_label_multipliers(repo_name: str, metadata: dict) -> Optional[Dict[str, float]]:
+    raw_multipliers = metadata.get('label_multipliers')
+    if raw_multipliers is None:
+        return None
+    if not isinstance(raw_multipliers, dict):
+        bt.logging.warning(
+            f'Could not parse label_multipliers for {repo_name}: expected dict, '
+            f'got {type(raw_multipliers).__name__}; using defaults'
+        )
+        return None
+
+    return {
+        str(label): _load_non_negative_finite_float(
+            multiplier,
+            1.0,
+            f'label_multipliers[{label!r}] for {repo_name}',
+        )
+        for label, multiplier in raw_multipliers.items()
+    }
+
+
 def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
     """
     Load repository weights from the local JSON file.
@@ -134,12 +171,12 @@ def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
                     additional_acceptable_branches=metadata.get('additional_acceptable_branches'),
                     mirror_enabled=bool(metadata.get('mirror_enabled', False)),
                     trusted_label_pipeline=bool(metadata.get('trusted_label_pipeline', False)),
-                    label_multipliers=(
-                        {str(label): float(multiplier) for label, multiplier in metadata['label_multipliers'].items()}
-                        if metadata.get('label_multipliers') is not None
-                        else None
+                    label_multipliers=_load_label_multipliers(repo_name, metadata),
+                    default_label_multiplier=_load_non_negative_finite_float(
+                        metadata.get('default_label_multiplier', 1.0),
+                        1.0,
+                        f'default_label_multiplier for {repo_name}',
                     ),
-                    default_label_multiplier=float(metadata.get('default_label_multiplier', 1.0)),
                 )
                 normalized_data[repo_name.lower()] = config
             except (ValueError, TypeError) as e:

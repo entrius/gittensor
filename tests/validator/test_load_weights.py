@@ -230,6 +230,15 @@ class TestRepositoryConfigTrustedLabelPipeline:
 class TestRepositoryConfigLabelMultipliers:
     """Dataclass + JSON-parsing tests for per-repo label multiplier config."""
 
+    def _load_repos_from_metadata(self, tmp_path, monkeypatch, metadata):
+        from gittensor.validator.utils import load_weights as lw
+
+        fake_weights_dir = tmp_path
+        (fake_weights_dir / 'master_repositories.json').write_text(json.dumps(metadata))
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: fake_weights_dir)
+
+        return lw.load_master_repo_weights()
+
     def test_label_multiplier_defaults(self):
         config = RepositoryConfig(weight=0.5)
 
@@ -260,6 +269,68 @@ class TestRepositoryConfigLabelMultipliers:
         assert repos['foo/labeled'].default_label_multiplier == pytest.approx(0.8)
         assert repos['foo/defaults'].label_multipliers is None
         assert repos['foo/defaults'].default_label_multiplier == pytest.approx(1.0)
+
+    @pytest.mark.parametrize('bad_multiplier', [-1.0, 'NaN', 'inf'])
+    def test_loader_rejects_bad_label_multiplier_values(self, tmp_path, monkeypatch, bad_multiplier):
+        from gittensor.validator.utils import load_weights as lw
+
+        warnings: list[str] = []
+        monkeypatch.setattr(lw.bt.logging, 'warning', warnings.append)
+
+        repos = self._load_repos_from_metadata(
+            tmp_path,
+            monkeypatch,
+            {
+                'foo/labeled': {
+                    'weight': 0.5,
+                    'label_multipliers': {'feature': bad_multiplier, 'bug': 1.25},
+                    'default_label_multiplier': 0.8,
+                },
+            },
+        )
+
+        assert repos['foo/labeled'].label_multipliers == {'feature': 1.0, 'bug': 1.25}
+        assert repos['foo/labeled'].default_label_multiplier == pytest.approx(0.8)
+        assert any('foo/labeled' in warning and 'feature' in warning for warning in warnings)
+
+    @pytest.mark.parametrize('bad_default', [-1.0, 'NaN', 'inf'])
+    def test_loader_rejects_bad_default_label_multiplier_values(self, tmp_path, monkeypatch, bad_default):
+        from gittensor.validator.utils import load_weights as lw
+
+        warnings: list[str] = []
+        monkeypatch.setattr(lw.bt.logging, 'warning', warnings.append)
+
+        repos = self._load_repos_from_metadata(
+            tmp_path,
+            monkeypatch,
+            {
+                'foo/labeled': {
+                    'weight': 0.5,
+                    'label_multipliers': {'feature': 1.5},
+                    'default_label_multiplier': bad_default,
+                },
+            },
+        )
+
+        assert repos['foo/labeled'].label_multipliers == {'feature': 1.5}
+        assert repos['foo/labeled'].default_label_multiplier == pytest.approx(1.0)
+        assert any('foo/labeled' in warning and 'default_label_multiplier' in warning for warning in warnings)
+
+    def test_loader_preserves_zero_label_multiplier_values(self, tmp_path, monkeypatch):
+        repos = self._load_repos_from_metadata(
+            tmp_path,
+            monkeypatch,
+            {
+                'foo/labeled': {
+                    'weight': 0.5,
+                    'label_multipliers': {'feature': 0.0},
+                    'default_label_multiplier': 0.0,
+                },
+            },
+        )
+
+        assert repos['foo/labeled'].label_multipliers == {'feature': 0.0}
+        assert repos['foo/labeled'].default_label_multiplier == pytest.approx(0.0)
 
     @pytest.mark.parametrize('repo_name,metadata', _live_master_repo_metadata())
     def test_live_label_multiplier_maps_are_bounded(self, repo_name, metadata):

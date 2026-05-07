@@ -38,6 +38,7 @@ from gittensor.validator.utils.load_weights import RepositoryConfig
 
 # Beyond this many CHANGES_REQUESTED reviews the quality multiplier is already 0
 _MAX_CHANGES_REQUESTED_REVIEWS = ceil(1 / REVIEW_PENALTY_RATE)
+_CHANGES_REQUESTED_REVIEWS_PAGE_SIZE = 100
 
 
 class GitHubIdentityStatus(Enum):
@@ -137,6 +138,10 @@ QUERY = """
                 nodes {
                   authorAssociation
                 }
+                pageInfo {
+                  hasNextPage
+                  endCursor
+                }
               }
               labels(first: 5) {
                 nodes { name }
@@ -149,6 +154,24 @@ QUERY = """
                   }
                 }
               }
+            }
+          }
+        }
+      }
+    }
+    """
+
+_CHANGES_REQUESTED_REVIEWS_QUERY = """
+    query($owner: String!, $name: String!, $pullNumber: Int!, $cursor: String, $limit: Int!) {
+      repository(owner: $owner, name: $name) {
+        pullRequest(number: $pullNumber) {
+          changesRequestedReviews: reviews(first: $limit, states: CHANGES_REQUESTED, after: $cursor) {
+            nodes {
+              authorAssociation
+            }
+            pageInfo {
+              hasNextPage
+              endCursor
             }
           }
         }
@@ -781,11 +804,81 @@ def _has_resource_limit_errors(data: Dict) -> bool:
     return any(isinstance(e, dict) and e.get('type') == 'RESOURCE_LIMITS_EXCEEDED' for e in errors)
 
 
+def _count_maintainer_changes_requested_nodes(nodes: List[Dict]) -> int:
+    return sum(1 for review in nodes if review.get('authorAssociation') in MAINTAINER_ASSOCIATIONS)
+
+
+def _complete_changes_requested_reviews_if_needed(pr_raw: Dict, token: Optional[str]) -> None:
+    """Fetch later CHANGES_REQUESTED pages only when the inline capped window is ambiguous."""
+    if not token:
+        return
+
+    reviews = pr_raw.get('changesRequestedReviews')
+    if not isinstance(reviews, dict):
+        return
+
+    nodes = reviews.get('nodes')
+    if not isinstance(nodes, list):
+        return
+
+    maintainer_count = _count_maintainer_changes_requested_nodes(nodes)
+    page_info = reviews.get('pageInfo') or {}
+    cursor = page_info.get('endCursor')
+    has_next_page = bool(page_info.get('hasNextPage'))
+
+    if maintainer_count >= _MAX_CHANGES_REQUESTED_REVIEWS or not (has_next_page and cursor):
+        return
+
+    repository = pr_raw.get('repository') or {}
+    owner = (repository.get('owner') or {}).get('login')
+    name = repository.get('name')
+    pull_number = pr_raw.get('number')
+    if not (owner and name and pull_number):
+        return
+
+    while has_next_page and cursor and maintainer_count < _MAX_CHANGES_REQUESTED_REVIEWS:
+        data = execute_graphql_query(
+            _CHANGES_REQUESTED_REVIEWS_QUERY,
+            {
+                'owner': owner,
+                'name': name,
+                'pullNumber': pull_number,
+                'cursor': cursor,
+                'limit': _CHANGES_REQUESTED_REVIEWS_PAGE_SIZE,
+            },
+            token,
+            max_attempts=3,
+        )
+        if not data or data.get('errors'):
+            bt.logging.warning(
+                f'Could not complete CHANGES_REQUESTED review pages for PR #{pull_number} in {owner}/{name}'
+            )
+            return
+
+        next_reviews = (((data.get('data') or {}).get('repository') or {}).get('pullRequest') or {}).get(
+            'changesRequestedReviews'
+        )
+        if not isinstance(next_reviews, dict):
+            return
+
+        next_nodes = next_reviews.get('nodes') or []
+        if not isinstance(next_nodes, list):
+            return
+
+        nodes.extend(next_nodes)
+        maintainer_count += _count_maintainer_changes_requested_nodes(next_nodes)
+        next_page_info = next_reviews.get('pageInfo') or {}
+        next_cursor = next_page_info.get('endCursor')
+        has_next_page = bool(next_page_info.get('hasNextPage')) and next_cursor != cursor
+        cursor = next_cursor
+
+
 def try_add_open_or_closed_pr(
     miner_eval: MinerEvaluation,
     pr_raw: Dict,
     pr_state: str,
     lookback_date_filter: datetime,
+    token: Optional[str] = None,
 ) -> None:
     """
     Attempts to add an OPEN or CLOSED PR to miner_eval if eligible.
@@ -795,12 +888,14 @@ def try_add_open_or_closed_pr(
         pr_raw: Raw PR data from GraphQL
         pr_state: GitHub PR state (OPEN, CLOSED, MERGED)
         lookback_date_filter: Date filter for lookback period
+        token: GitHub PAT used for follow-up review-page completion when needed
     """
     # Ignore all maintainer contributions
     if not os.environ.get('DEV_MODE') and pr_raw.get('authorAssociation') in MAINTAINER_ASSOCIATIONS:
         return
 
     if pr_state == PRState.OPEN.value:
+        _complete_changes_requested_reviews_if_needed(pr_raw, token)
         miner_eval.add_open_pull_request(pr_raw)
 
     if pr_state == PRState.CLOSED.value:
@@ -1005,7 +1100,9 @@ def load_miners_prs(
                             continue
 
                     if pr_state in (PRState.OPEN.value, PRState.CLOSED.value):
-                        try_add_open_or_closed_pr(miner_eval, pr_raw, pr_state, lookback_date_filter)
+                        try_add_open_or_closed_pr(
+                            miner_eval, pr_raw, pr_state, lookback_date_filter, token=miner_eval.github_pat
+                        )
                         continue
 
                     should_skip, skip_reason = should_skip_merged_pr(
@@ -1016,6 +1113,7 @@ def load_miners_prs(
                         bt.logging.debug(skip_reason or '')
                         continue
 
+                    _complete_changes_requested_reviews_if_needed(pr_raw, miner_eval.github_pat)
                     miner_eval.add_merged_pull_request(pr_raw)
 
                 except Exception as e:

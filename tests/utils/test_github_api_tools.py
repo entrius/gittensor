@@ -1161,6 +1161,7 @@ def _make_pr_node(
         'mergedBy': {'login': 'maintainer'} if state == 'MERGED' else None,
         'closingIssuesReferences': closing_issues_refs,
         'reviews': {'nodes': [{'author': {'login': 'reviewer'}}]},
+        'changesRequestedReviews': {'nodes': []},
     }
 
 

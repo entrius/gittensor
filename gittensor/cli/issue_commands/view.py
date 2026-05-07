@@ -30,6 +30,7 @@ from .helpers import (
     print_network_header,
     read_issues_from_contract,
     validate_issue_id,
+    validate_repository,
     with_cli_behavior_options,
     with_network_contract_options,
 )
@@ -85,6 +86,14 @@ def issues_list(
             validate_issue_id(issue_id, 'id')
         except click.BadParameter as e:
             handle_exception(as_json, str(e), 'bad_parameter')
+
+    # Validate and normalize repo_filter
+    if repo_filter:
+        try:
+            repo_filter = validate_repository(repo_filter, verify_exists=False)
+        except click.BadParameter as e:
+            handle_exception(as_json, str(e), 'bad_parameter')
+            return
 
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(
         contract,

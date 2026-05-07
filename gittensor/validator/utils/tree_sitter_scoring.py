@@ -86,11 +86,6 @@ def parse_code(content: str, language: str) -> Optional[Tree]:
 NodeSignature = Union[Tuple[str, str], Tuple[str, str, str]]
 
 
-def is_comment_node(node: Node) -> bool:
-    """Check if a node is a comment."""
-    return node.type in COMMENT_NODE_TYPES
-
-
 def collect_node_signatures(
     tree: Tree,
     weights: TokenConfig,
@@ -115,7 +110,7 @@ def collect_node_signatures(
 
     def walk_node(node: Node) -> None:
         # Skip comments entirely
-        if is_comment_node(node):
+        if node.type in COMMENT_NODE_TYPES:
             return
 
         node_type = node.type

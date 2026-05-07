@@ -20,8 +20,9 @@ import requests
 from rich.console import Console
 
 from gittensor.cli.issue_commands.tables import build_pr_table
-from gittensor.constants import NETWORK_MAP
+from gittensor.constants import BASE_GITHUB_API_URL, MAX_ISSUE_ID, NETWORK_MAP
 from gittensor.validator.issue_competitions.storage_utils import (
+    ISSUES_MAPPING_ROOT_KEY,
     compute_ink5_lazy_key,
     decode_issue_from_storage,
     decode_packed_contract_storage,
@@ -38,7 +39,6 @@ ALPHA_DECIMALS = 9
 ALPHA_RAW_UNIT = 10**ALPHA_DECIMALS
 MIN_BOUNTY_ALPHA = 10
 MAX_BOUNTY_ALPHA = 100_000_000
-MAX_ISSUE_ID = 1_000_000
 MAX_ISSUE_NUMBER = 2**32 - 1
 REPO_PATTERN = re.compile(r'^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$')
 GITHUB_API_TIMEOUT = 10
@@ -268,18 +268,13 @@ def confirm_or_abort(prompt: str, yes: bool, default: bool = False) -> bool:
     return False
 
 
-def get_github_pat() -> Optional[str]:
-    """Return GITTENSOR_MINER_PAT from environment, or None."""
-    return os.environ.get('GITTENSOR_MINER_PAT') or None
-
-
 def fetch_open_issue_pull_requests(
     repository_full_name: str,
     issue_number: int,
     as_json: bool,
 ) -> list:
     """Fetch open PR submissions for a GitHub issue."""
-    token = get_github_pat() or ''
+    token = os.environ.get('GITTENSOR_MINER_PAT') or ''
     if not token and not as_json:
         print_warning('No GitHub token found; set GITTENSOR_MINER_PAT to fetch GitHub issue submissions')
 
@@ -409,7 +404,7 @@ def validate_repository(
     if verify_exists:
         try:
             resp = requests.get(
-                f'https://api.github.com/repos/{owner}/{repo_name}',
+                f'{BASE_GITHUB_API_URL}/repos/{owner}/{repo_name}',
                 headers={'User-Agent': 'gittensor-cli'},
                 timeout=GITHUB_API_TIMEOUT,
             )
@@ -457,7 +452,7 @@ def validate_github_issue(
     """
     try:
         resp = requests.get(
-            f'https://api.github.com/repos/{owner}/{repo}/issues/{issue_number}',
+            f'{BASE_GITHUB_API_URL}/repos/{owner}/{repo}/issues/{issue_number}',
             headers={'User-Agent': 'gittensor-cli'},
             timeout=GITHUB_API_TIMEOUT,
         )
@@ -810,7 +805,7 @@ def _read_issues_from_child_storage(substrate, contract_addr: str, verbose: bool
     for issue_id in range(1, next_issue_id):
         # SCALE encode u64 as little-endian 8 bytes
         encoded_id = struct.pack('<Q', issue_id)
-        lazy_key = compute_ink5_lazy_key('52789899', encoded_id)
+        lazy_key = compute_ink5_lazy_key(ISSUES_MAPPING_ROOT_KEY, encoded_id)
 
         val_result = substrate.rpc_request('childstate_getStorage', [child_key, lazy_key, None])
         if not val_result.get('result'):

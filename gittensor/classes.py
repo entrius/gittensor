@@ -21,7 +21,14 @@ from gittensor.constants import (
 )
 from gittensor.utils.utils import parse_repo_name
 
-GITHUB_DOMAIN = 'https://github.com/'
+
+def _apply_score_multipliers(base_score: float, multipliers: Dict[str, float], pr_label: str) -> float:
+    """Compute earned score and emit the standard scoring log lines."""
+    earned = base_score * prod(multipliers.values())
+    mult_str = ' × '.join(f'{k}={v:.2f}' for k, v in multipliers.items())
+    bt.logging.info(f'├─ {pr_label} → {earned:.2f}')
+    bt.logging.info(f'│  └─ {base_score:.2f} × {mult_str}')
+    return earned
 
 
 class PRState(Enum):
@@ -233,15 +240,8 @@ class PullRequest:
             'cred': self.credibility_multiplier,
             'review': self.review_quality_multiplier,
         }
-
-        self.earned_score = self.base_score * prod(multipliers.values())
-
-        mult_str = ' × '.join(f'{k}={v:.2f}' for k, v in multipliers.items())
-        bt.logging.info(
-            f'├─ {self.pr_state.value} PR #{self.number} ({self.repository_full_name}) → {self.earned_score:.2f}'
-        )
-        bt.logging.info(f'│  └─ {self.base_score:.2f} × {mult_str}')
-
+        label = f'{self.pr_state.value} PR #{self.number} ({self.repository_full_name})'
+        self.earned_score = _apply_score_multipliers(self.base_score, multipliers, label)
         return self.earned_score
 
     @classmethod

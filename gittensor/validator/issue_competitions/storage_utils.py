@@ -8,6 +8,9 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+# ink! mapping selector for the issues storage map (matches the contract's storage layout).
+ISSUES_MAPPING_ROOT_KEY = '52789899'
+
 
 @dataclass
 class PackedContractStorage:

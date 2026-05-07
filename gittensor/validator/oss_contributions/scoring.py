@@ -263,13 +263,14 @@ def calculate_pioneer_dividends(
     follower's multipliers, not the pioneer's — so it reflects follower quality.
 
     Walks both legacy ``merged_pull_requests`` and mirror ``mirror_merged_prs``;
-    a repo is mirror-enabled or legacy, never both, so the per-repo grouping
-    sees a single path's PRs only.
+    if a PR appears in both paths during migration/fallback overlap, it counts
+    once by ``(uid, repository_full_name, pr_number)``.
 
     Must be called AFTER all earned_scores have been computed.
     """
     pr_index: Dict[str, Dict[int, list]] = {}
     repo_contributions: Dict[str, Dict[int, Tuple[datetime, int, float]]] = {}
+    seen_pr_keys: set[Tuple[int, str, int]] = set()
 
     for uid, evaluation in miner_evaluations.items():
         for pr in evaluation.merged_pull_requests + evaluation.mirror_merged_prs:
@@ -277,6 +278,11 @@ def calculate_pioneer_dividends(
                 continue
             assert pr.merged_at is not None
             repo = pr.repository_full_name
+            pr_key = (uid, repo, pr.number)
+            if pr_key in seen_pr_keys:
+                continue
+            seen_pr_keys.add(pr_key)
+
             pr_index.setdefault(repo, {}).setdefault(uid, []).append(pr)
 
             current = repo_contributions.setdefault(repo, {}).get(uid)

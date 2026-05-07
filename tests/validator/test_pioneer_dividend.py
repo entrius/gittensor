@@ -229,3 +229,60 @@ class TestPioneerDividendCalculation:
 
         # Ineligible follower doesn't count
         assert pioneer_pr.pioneer_dividend == 0.0
+
+
+# ==========================================================================
+# TestPioneerDedupLegacyMirror
+# ==========================================================================
+
+
+class TestPioneerDedupLegacyMirror:
+    """Regression tests for duplicate legacy+mirror PR deduplication in pioneer scoring."""
+
+    def _make_eval(self, uid, merged_prs=None, mirror_prs=None):
+        eval_ = MinerEvaluation(uid=uid, hotkey=f'hotkey_{uid}')
+        eval_.merged_pull_requests = merged_prs or []
+        eval_.mirror_merged_prs = mirror_prs or []
+        return eval_
+
+    def test_duplicate_follower_pr_does_not_inflate_uncapped_dividend(self, builder):
+        """Same follower PR in both paths must count once when the cap would not hide inflation."""
+        now = datetime.now(timezone.utc)
+        pioneer_pr = builder.create(
+            state=PRState.MERGED,
+            uid=1,
+            repo='test/repo',
+            number=1,
+            merged_at=now - timedelta(days=5),
+            earned_score=1000.0,
+        )
+        follower_pr = builder.create(
+            state=PRState.MERGED,
+            uid=2,
+            repo='test/repo',
+            number=2,
+            merged_at=now - timedelta(days=1),
+            earned_score=200.0,
+        )
+        mirror_duplicate = builder.create(
+            state=PRState.MERGED,
+            uid=2,
+            repo='test/repo',
+            number=2,
+            merged_at=now - timedelta(days=1),
+            earned_score=200.0,
+        )
+
+        evals = {
+            1: self._make_eval(1, merged_prs=[pioneer_pr]),
+            2: self._make_eval(2, merged_prs=[follower_pr], mirror_prs=[mirror_duplicate]),
+        }
+
+        calculate_pioneer_dividends(evals)
+
+        expected_dividend = 200.0 * PIONEER_DIVIDEND_RATE_1ST
+        assert pioneer_pr.pioneer_dividend == round(expected_dividend, 2)
+        assert pioneer_pr.earned_score == round(1000.0 + expected_dividend, 2)
+        assert pioneer_pr.pioneer_rank == 1
+        assert follower_pr.pioneer_rank == 2
+        assert mirror_duplicate.pioneer_rank == 0

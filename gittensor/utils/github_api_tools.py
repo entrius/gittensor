@@ -664,6 +664,7 @@ class GraphQLPageResult:
     """Result of a paginated GraphQL query."""
 
     response: Optional[requests.Response]
+    data: Optional[Dict[str, Any]]  # parsed JSON, None on failure
     page_size: int  # actual page size used (may have been reduced on retry)
 
 
@@ -718,7 +719,7 @@ def get_github_graphql_query(
                 try:
                     data = response.json()
                 except Exception:
-                    return GraphQLPageResult(response=response, page_size=limit)
+                    return GraphQLPageResult(response=response, data=None, page_size=limit)
 
                 if _has_resource_limit_errors(data):
                     if attempt < (max_attempts - 1):
@@ -735,9 +736,9 @@ def get_github_graphql_query(
                         bt.logging.error(
                             f'GraphQL RESOURCE_LIMITS_EXCEEDED at page size {limit} after {max_attempts} attempts'
                         )
-                        return GraphQLPageResult(response=None, page_size=limit)
+                        return GraphQLPageResult(response=None, data=None, page_size=limit)
 
-                return GraphQLPageResult(response=response, page_size=limit)
+                return GraphQLPageResult(response=response, data=data, page_size=limit)
 
             # HTTP error - log and retry
             if attempt < (max_attempts - 1):
@@ -955,12 +956,15 @@ def load_miners_prs(
                 miner_eval.github_pr_fetch_failed = True
                 break
 
-            try:
-                data: Dict = result.response.json()
-            except Exception as e:
-                bt.logging.error(f'Failed to parse GraphQL JSON response: {e}')
-                miner_eval.github_pr_fetch_failed = True
-                break
+            if result.data is None:
+                try:
+                    data: Dict = result.response.json()
+                except Exception as e:
+                    bt.logging.error(f'Failed to parse GraphQL JSON response: {e}')
+                    miner_eval.github_pr_fetch_failed = True
+                    break
+            else:
+                data: Dict = result.data
 
             # Resource limit errors are already handled in get_github_graphql_query; break on others
             if 'errors' in data:

@@ -663,7 +663,7 @@ def execute_graphql_query(
 class GraphQLPageResult:
     """Result of a paginated GraphQL query."""
 
-    response: Optional[requests.Response]
+    data: Optional[Dict[str, Any]]
     page_size: int  # actual page size used (may have been reduced on retry)
 
 
@@ -717,8 +717,9 @@ def get_github_graphql_query(
                 # Check for RESOURCE_LIMITS_EXCEEDED in response body (GitHub returns 200 with errors)
                 try:
                     data = response.json()
-                except Exception:
-                    return GraphQLPageResult(response=response, page_size=limit)
+                except Exception as e:
+                    bt.logging.error(f'Failed to parse GraphQL JSON response: {e}')
+                    return GraphQLPageResult(data=None, page_size=limit)
 
                 if _has_resource_limit_errors(data):
                     if attempt < (max_attempts - 1):
@@ -735,9 +736,9 @@ def get_github_graphql_query(
                         bt.logging.error(
                             f'GraphQL RESOURCE_LIMITS_EXCEEDED at page size {limit} after {max_attempts} attempts'
                         )
-                        return GraphQLPageResult(response=None, page_size=limit)
+                        return GraphQLPageResult(data=None, page_size=limit)
 
-                return GraphQLPageResult(response=response, page_size=limit)
+                return GraphQLPageResult(data=data, page_size=limit)
 
             # HTTP error - log and retry
             if attempt < (max_attempts - 1):
@@ -768,9 +769,9 @@ def get_github_graphql_query(
                 time.sleep(backoff_delay)
             else:
                 bt.logging.error(f'GraphQL request failed after {max_attempts} attempts: {e}')
-                return GraphQLPageResult(response=None, page_size=limit)
+                return GraphQLPageResult(data=None, page_size=limit)
 
-    return GraphQLPageResult(response=None, page_size=limit)
+    return GraphQLPageResult(data=None, page_size=limit)
 
 
 def _has_resource_limit_errors(data: Dict) -> bool:
@@ -950,17 +951,12 @@ def load_miners_prs(
             # Carry reduced page size forward for subsequent pages
             current_page_size = result.page_size
 
-            if not result.response:
+            if result.data is None:
                 bt.logging.warning('No response from github, breaking fetch loop...')
                 miner_eval.github_pr_fetch_failed = True
                 break
 
-            try:
-                data: Dict = result.response.json()
-            except Exception as e:
-                bt.logging.error(f'Failed to parse GraphQL JSON response: {e}')
-                miner_eval.github_pr_fetch_failed = True
-                break
+            data: Dict = result.data
 
             # Resource limit errors are already handled in get_github_graphql_query; break on others
             if 'errors' in data:

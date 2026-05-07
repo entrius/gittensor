@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 from typing import cast
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 from gittensor.classes import FileChange, Issue, MinerEvaluation, MinerEvaluationCache, PRState, PullRequest
 from gittensor.utils.github_api_tools import GraphQLPageResult, load_miners_prs
@@ -95,12 +95,13 @@ class TestStoreOrUseCachedEvaluation:
         validator = _DummyValidator()
         validator.evaluation_cache.store(_build_eval(uid=1, merged_prs=1, fetch_failed=False))
 
-        response = Mock()
-        response.json.return_value = {
-            'errors': [{'message': 'Something went wrong'}],
-            'data': None,
-        }
-        mock_graphql_query.return_value = GraphQLPageResult(response=response, page_size=100)
+        mock_graphql_query.return_value = GraphQLPageResult(
+            data={
+                'errors': [{'message': 'Something went wrong'}],
+                'data': None,
+            },
+            page_size=100,
+        )
 
         current_eval = MinerEvaluation(uid=1, hotkey='hotkey_1', github_id='12345', github_pat='bad_scope_pat')
         load_miners_prs(current_eval, {})

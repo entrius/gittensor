@@ -71,6 +71,15 @@ class TestSavePat:
         entries = pat_storage.load_all_pats()
         assert len(entries) == 3
 
+    def test_save_rejects_corrupt_existing_file(self, use_tmp_pats_file):
+        corrupt_content = 'not json{{{'
+        use_tmp_pats_file.write_text(corrupt_content)
+
+        with pytest.raises(pat_storage.PatStorageError):
+            pat_storage.save_pat(1, 'hotkey_1', 'ghp_abc', 'user_1')
+
+        assert use_tmp_pats_file.read_text() == corrupt_content
+
 
 class TestLoadAllPats:
     def test_load_empty_when_no_file(self):
@@ -119,6 +128,15 @@ class TestRemovePat:
         entries = pat_storage.load_all_pats()
         assert len(entries) == 1
         assert entries[0]['uid'] == 2
+
+    def test_remove_rejects_corrupt_existing_file(self, use_tmp_pats_file):
+        corrupt_content = 'not json{{{'
+        use_tmp_pats_file.write_text(corrupt_content)
+
+        with pytest.raises(pat_storage.PatStorageError):
+            pat_storage.remove_pat(1)
+
+        assert use_tmp_pats_file.read_text() == corrupt_content
 
 
 class TestConcurrency:

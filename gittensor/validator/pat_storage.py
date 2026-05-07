@@ -20,6 +20,10 @@ PATS_FILE = Path(__file__).resolve().parents[2] / 'data' / 'miner_pats.json'
 _lock = threading.Lock()
 
 
+class PatStorageError(RuntimeError):
+    """Raised when stored PAT data cannot be safely modified."""
+
+
 def ensure_pats_file() -> None:
     """Create the PATs file with an empty list if it doesn't exist. Called on validator boot."""
     with _lock:
@@ -36,7 +40,7 @@ def load_all_pats() -> list[dict]:
 def save_pat(uid: int, hotkey: str, pat: str, github_id: str) -> None:
     """Upsert a PAT entry by UID. Creates the file if needed."""
     with _lock:
-        entries = _read_file()
+        entries = _read_file(strict=True)
 
         entry = {
             'uid': uid,
@@ -68,7 +72,7 @@ def get_pat_by_uid(uid: int) -> Optional[dict]:
 def remove_pat(uid: int) -> bool:
     """Remove a PAT entry by UID. Returns True if an entry was removed."""
     with _lock:
-        entries = _read_file()
+        entries = _read_file(strict=True)
         filtered = [e for e in entries if e.get('uid') != uid]
         if len(filtered) == len(entries):
             return False
@@ -76,13 +80,15 @@ def remove_pat(uid: int) -> bool:
         return True
 
 
-def _read_file() -> list[dict]:
+def _read_file(strict: bool = False) -> list[dict]:
     """Read and parse the JSON file. Must be called while holding _lock."""
     if not PATS_FILE.exists():
         return []
     try:
         return json.loads(PATS_FILE.read_text())
-    except (json.JSONDecodeError, OSError):
+    except (json.JSONDecodeError, OSError) as exc:
+        if strict:
+            raise PatStorageError(f'Cannot safely read PAT storage file {PATS_FILE}: {exc}') from exc
         return []
 
 

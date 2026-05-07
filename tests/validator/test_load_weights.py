@@ -203,18 +203,20 @@ class TestRepositoryConfigTrustedLabelPipeline:
         assert config.trusted_label_pipeline is False
 
     def test_loader_parses_trusted_label_pipeline_true(self, tmp_path, monkeypatch):
-        """load_master_repo_weights() parses trusted_label_pipeline:true from JSON."""
-        import json
-
+        """load_master_repo_weights() parses real JSON booleans for repository flags."""
         from gittensor.validator.utils import load_weights as lw
 
         fake_weights_dir = tmp_path
         (fake_weights_dir / 'master_repositories.json').write_text(
             json.dumps(
                 {
-                    'foo/trusted': {'weight': 0.5, 'trusted_label_pipeline': True},
+                    'foo/trusted': {'weight': 0.5, 'trusted_label_pipeline': True, 'mirror_enabled': True},
                     'foo/untrusted': {'weight': 0.3},
-                    'foo/explicit-off': {'weight': 0.2, 'trusted_label_pipeline': False},
+                    'foo/explicit-off': {
+                        'weight': 0.2,
+                        'trusted_label_pipeline': False,
+                        'mirror_enabled': False,
+                    },
                 }
             )
         )
@@ -225,6 +227,39 @@ class TestRepositoryConfigTrustedLabelPipeline:
         assert repos['foo/trusted'].trusted_label_pipeline is True
         assert repos['foo/untrusted'].trusted_label_pipeline is False
         assert repos['foo/explicit-off'].trusted_label_pipeline is False
+        assert repos['foo/trusted'].mirror_enabled is True
+        assert repos['foo/untrusted'].mirror_enabled is False
+        assert repos['foo/explicit-off'].mirror_enabled is False
+
+    def test_loader_rejects_string_boolean_repository_flags(self, tmp_path, monkeypatch):
+        """String booleans must not opt repositories into mirror/trusted label behavior."""
+        from gittensor.validator.utils import load_weights as lw
+
+        fake_weights_dir = tmp_path
+        (fake_weights_dir / 'master_repositories.json').write_text(
+            json.dumps(
+                {
+                    'foo/string-false': {
+                        'weight': 0.5,
+                        'trusted_label_pipeline': 'false',
+                        'mirror_enabled': 'false',
+                    },
+                    'foo/string-true': {
+                        'weight': 0.5,
+                        'trusted_label_pipeline': 'true',
+                        'mirror_enabled': 'true',
+                    },
+                }
+            )
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: fake_weights_dir)
+
+        repos = lw.load_master_repo_weights()
+
+        assert repos['foo/string-false'].trusted_label_pipeline is False
+        assert repos['foo/string-false'].mirror_enabled is False
+        assert repos['foo/string-true'].trusted_label_pipeline is False
+        assert repos['foo/string-true'].mirror_enabled is False
 
 
 class TestRepositoryConfigLabelMultipliers:

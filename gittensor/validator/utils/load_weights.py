@@ -105,6 +105,18 @@ def _get_weights_dir() -> Path:
     return Path(__file__).parent.parent / 'weights'
 
 
+def _parse_bool_config(metadata: dict, field: str, repo_name: str, default: bool = False) -> bool:
+    """Parse an optional JSON boolean field without truthy string coercion."""
+    value = metadata.get(field, default)
+    if isinstance(value, bool):
+        return value
+
+    bt.logging.warning(
+        f'Invalid boolean value for {repo_name}.{field}: {value!r}; using default {default}'
+    )
+    return default
+
+
 def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
     """
     Load repository weights from the local JSON file.
@@ -132,8 +144,8 @@ def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
                     weight=float(metadata.get('weight', 0.01)),
                     inactive_at=metadata.get('inactive_at'),
                     additional_acceptable_branches=metadata.get('additional_acceptable_branches'),
-                    mirror_enabled=bool(metadata.get('mirror_enabled', False)),
-                    trusted_label_pipeline=bool(metadata.get('trusted_label_pipeline', False)),
+                    mirror_enabled=_parse_bool_config(metadata, 'mirror_enabled', repo_name),
+                    trusted_label_pipeline=_parse_bool_config(metadata, 'trusted_label_pipeline', repo_name),
                     label_multipliers=(
                         {str(label): float(multiplier) for label, multiplier in metadata['label_multipliers'].items()}
                         if metadata.get('label_multipliers') is not None

@@ -656,13 +656,14 @@ def resolve_network(network: Optional[str] = None, rpc_url: Optional[str] = None
     # override a user who set `network: finney` to point at mainnet.
     config = load_config()
 
-    config_network = config.get('network', '').lower()
+    raw_network = config.get('network', '')
+    config_network = raw_network.lower() if isinstance(raw_network, str) else ''
     if config_network and config_network in NETWORK_MAP:
         return NETWORK_MAP[config_network], config_network
 
     if config.get('ws_endpoint'):
         endpoint = config['ws_endpoint']
-        name = _URL_TO_NETWORK.get(endpoint, config.get('network', 'custom'))
+        name = _URL_TO_NETWORK.get(endpoint, raw_network if isinstance(raw_network, str) else 'custom')
         return endpoint, name
 
     # Default: finney (mainnet)

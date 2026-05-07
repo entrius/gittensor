@@ -11,7 +11,7 @@ from https://mirror.gittensor.io/api/v1/*.
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, List, Optional
 
 import bittensor as bt
 
@@ -19,6 +19,10 @@ from gittensor.validator.utils.datetime_utils import (
     parse_github_iso_to_utc,
     parse_optional_github_iso_to_utc,
 )
+
+
+def _int_or_zero(value: Any) -> int:
+    return int(value or 0)
 
 
 @dataclass
@@ -179,9 +183,9 @@ class MirrorPullRequest:
             head_sha=data.get('head_sha'),
             base_sha=data.get('base_sha'),
             merge_base_sha=data.get('merge_base_sha'),
-            additions=int(data.get('additions', 0)),
-            deletions=int(data.get('deletions', 0)),
-            commits_count=int(data.get('commits_count', 0)),
+            additions=_int_or_zero(data.get('additions')),
+            deletions=_int_or_zero(data.get('deletions')),
+            commits_count=_int_or_zero(data.get('commits_count')),
             scoring_data_stored=bool(data.get('scoring_data_stored', False)),
             review_summary=MirrorReviewSummary.from_dict(data.get('review_summary') or {}),
             labels=[MirrorLabel.from_dict(label) for label in data.get('labels') or []],
@@ -301,9 +305,9 @@ class MirrorFile:
             filename=data['filename'],
             previous_filename=data.get('previous_filename'),
             status=data['status'],
-            additions=int(data.get('additions', 0)),
-            deletions=int(data.get('deletions', 0)),
-            changes=int(data.get('changes', 0)),
+            additions=_int_or_zero(data.get('additions')),
+            deletions=_int_or_zero(data.get('deletions')),
+            changes=_int_or_zero(data.get('changes')),
             is_binary=bool(data.get('is_binary', False)),
             head_content=data.get('head_content'),
             base_content=data.get('base_content'),

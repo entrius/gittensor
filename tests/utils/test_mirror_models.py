@@ -351,6 +351,38 @@ class TestMirrorPullRequest:
         pr = MirrorPullRequest.from_dict(pull_request_dict)
         assert pr.head_repo_full_name is None
 
+    def test_null_numeric_fields_default_to_zero(self, pull_request_dict):
+        pull_request_dict['additions'] = None
+        pull_request_dict['deletions'] = None
+        pull_request_dict['commits_count'] = None
+
+        pr = MirrorPullRequest.from_dict(pull_request_dict)
+
+        assert pr.additions == 0
+        assert pr.deletions == 0
+        assert pr.commits_count == 0
+
+    def test_missing_numeric_fields_default_to_zero(self, pull_request_dict):
+        for key in ('additions', 'deletions', 'commits_count'):
+            pull_request_dict.pop(key)
+
+        pr = MirrorPullRequest.from_dict(pull_request_dict)
+
+        assert pr.additions == 0
+        assert pr.deletions == 0
+        assert pr.commits_count == 0
+
+    def test_numeric_string_fields_parse_normally(self, pull_request_dict):
+        pull_request_dict['additions'] = '12'
+        pull_request_dict['deletions'] = '3'
+        pull_request_dict['commits_count'] = '4'
+
+        pr = MirrorPullRequest.from_dict(pull_request_dict)
+
+        assert pr.additions == 12
+        assert pr.deletions == 3
+        assert pr.commits_count == 4
+
 
 # ============================================================================
 # MirrorSolvingPR
@@ -436,6 +468,17 @@ class TestMirrorFile:
         file_dict['previous_filename'] = 'src/old/MinerCard.tsx'
         f = MirrorFile.from_dict(file_dict)
         assert f.previous_filename == 'src/old/MinerCard.tsx'
+
+    def test_null_numeric_fields_default_to_zero(self, file_dict):
+        file_dict['additions'] = None
+        file_dict['deletions'] = None
+        file_dict['changes'] = None
+
+        f = MirrorFile.from_dict(file_dict)
+
+        assert f.additions == 0
+        assert f.deletions == 0
+        assert f.changes == 0
 
 
 # ============================================================================

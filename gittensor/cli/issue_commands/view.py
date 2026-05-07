@@ -29,6 +29,7 @@ from .helpers import (
     handle_exception,
     print_network_header,
     read_issues_from_contract,
+    validate_issue_id,
     with_cli_behavior_options,
     with_network_contract_options,
 )
@@ -42,13 +43,22 @@ from .helpers import (
     type=int,
     help='View a specific issue by ID',
 )
+@click.option(
+    '--repo',
+    'repo_filter',
+    default=None,
+    type=str,
+    help='Filter issues to a specific repository (owner/name).',
+)
 @with_cli_behavior_options(
     include_verbose=True,
     include_json=True,
     verbose_help='Show debug output for contract reads',
 )
 @with_network_contract_options('Contract address (uses default if empty)')
-def issues_list(issue_id: int, network: str, rpc_url: str, contract: str, verbose: bool, as_json: bool):
+def issues_list(
+    issue_id: int, repo_filter: str, network: str, rpc_url: str, contract: str, verbose: bool, as_json: bool
+):
     """List issues or view a specific issue.
 
     [dim]Examples:
@@ -58,6 +68,12 @@ def issues_list(issue_id: int, network: str, rpc_url: str, contract: str, verbos
         $ gitt i list --json
     [/dim]
     """
+    if issue_id is not None:
+        try:
+            validate_issue_id(issue_id, 'id')
+        except click.BadParameter as e:
+            handle_exception(as_json, str(e), 'bad_parameter')
+
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(
         contract,
         network,
@@ -76,6 +92,11 @@ def issues_list(issue_id: int, network: str, rpc_url: str, contract: str, verbos
         for issue in issues:
             issue['bounty_alpha'] = format_alpha(issue.get('bounty_amount', 0), 4)
             issue['target_alpha'] = format_alpha(issue.get('target_bounty', 0), 4)
+
+        # Apply --repo filter before rendering (--id takes precedence)
+        if repo_filter and issue_id is None:
+            issues = [i for i in issues if i.get('repository_full_name', '').lower() == repo_filter.lower()]
+
         if issue_id is not None:
             issue = next((i for i in issues if i['id'] == issue_id), None)
             if issue is None:
@@ -109,6 +130,10 @@ def issues_list(issue_id: int, network: str, rpc_url: str, contract: str, verbos
         else:
             handle_exception(as_json, f'Issue {issue_id} not found on-chain.', 'not_found')
         return
+
+    # Apply --repo filter before table render (--id takes precedence)
+    if repo_filter and issue_id is None:
+        issues = [i for i in issues if i.get('repository_full_name', '').lower() == repo_filter.lower()]
 
     # Table view of all issues
     console.print('[bold cyan]Available Issues[/bold cyan]\n')

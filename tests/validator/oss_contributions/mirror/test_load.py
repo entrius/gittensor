@@ -24,6 +24,7 @@ load_weights = pytest.importorskip('gittensor.validator.utils.load_weights')
 load_mirror_miner_prs = load_module.load_mirror_miner_prs
 MirrorMinerEvaluation = mirror_eval_module.MirrorMinerEvaluation
 MirrorPullRequestsResponse = mirror_models.MirrorPullRequestsResponse
+MirrorClient = mirror_client_mod.MirrorClient
 MirrorRequestError = mirror_client_mod.MirrorRequestError
 RepositoryConfig = load_weights.RepositoryConfig
 
@@ -322,6 +323,19 @@ class TestErrorPaths:
         client.get_miner_pulls.side_effect = MirrorRequestError('boom')
         eval_ = _eval()
         load_mirror_miner_prs(eval_, _mirror_repos('entrius/gittensor-ui'), client=client)
+        assert eval_.fetch_failed is True
+        assert eval_.merged_prs == []
+
+    def test_malformed_2xx_json_sets_fetch_failed(self):
+        response = Mock(status_code=200, text='<html>bad gateway</html>')
+        response.json.side_effect = ValueError('Expecting value')
+        session = Mock()
+        session.get.return_value = response
+        client = MirrorClient(session=session, max_attempts=1)
+
+        eval_ = _eval()
+        load_mirror_miner_prs(eval_, _mirror_repos('entrius/gittensor-ui'), client=client)
+
         assert eval_.fetch_failed is True
         assert eval_.merged_prs == []
 

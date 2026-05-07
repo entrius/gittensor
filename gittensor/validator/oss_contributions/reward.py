@@ -40,6 +40,7 @@ async def evaluate_miners_pull_requests(
     programming_languages: Dict[str, LanguageConfig],
     token_config: TokenConfig,
     stale_hotkey: Optional[str] = None,
+    stored_github_id: Optional[str] = None,
     registration_cutoff: Optional[datetime] = None,
 ) -> MinerEvaluation:
     """
@@ -53,6 +54,7 @@ async def evaluate_miners_pull_requests(
         programming_languages: The programming languages and their weights
         token_config: Token-based scoring weights configuration
         stale_hotkey: If set, the UID has a stored PAT from this old hotkey (re-registration detected)
+        stored_github_id: GitHub id recorded when the stored PAT was accepted
         registration_cutoff: If set, skip merged/closed PRs whose effective timestamp predates this cutoff
 
     Returns:
@@ -61,9 +63,19 @@ async def evaluate_miners_pull_requests(
 
     bt.logging.info(f'******* Reward function called for UID: {uid} *******')
 
-    miner_eval = validate_response_and_initialize_miner_evaluation(uid, hotkey, pat, stale_hotkey=stale_hotkey)
+    miner_eval = validate_response_and_initialize_miner_evaluation(
+        uid,
+        hotkey,
+        pat,
+        stale_hotkey=stale_hotkey,
+        stored_github_id=stored_github_id,
+    )
     if miner_eval.failed_reason is not None:
         bt.logging.info(f'UID {uid} not being evaluated: {miner_eval.failed_reason}')
+        return miner_eval
+
+    if miner_eval.github_pr_fetch_failed:
+        bt.logging.warning(f'UID {uid}: GitHub identity lookup failed transiently; deferring to cache fallback')
         return miner_eval
 
     # Partition repos by source: legacy (PAT) vs mirror (das-github-mirror).
@@ -132,9 +144,11 @@ async def get_rewards(
         pat_entry = pat_by_uid.get(uid)
         pat = None
         stale_hotkey = None
+        stored_github_id = None
         if pat_entry:
             if pat_entry.get('hotkey') == hotkey:
                 pat = pat_entry['pat']
+                stored_github_id = pat_entry.get('github_id')
             else:
                 stale_hotkey = pat_entry.get('hotkey')
 
@@ -149,6 +163,7 @@ async def get_rewards(
             programming_languages,
             token_config,
             stale_hotkey=stale_hotkey,
+            stored_github_id=stored_github_id,
             registration_cutoff=registration_cutoff,
         )
         miner_evaluations[uid] = miner_evaluation

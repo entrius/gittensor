@@ -35,16 +35,13 @@ from .helpers import (
 )
 
 
-def _as_int_amount(value) -> int:
-    """Normalize decoded on-chain amount values for display."""
-    try:
-        return int(value) if value else 0
-    except (TypeError, ValueError):
-        return 0
-
-
 def _fill_percent(bounty: int, target: int) -> float:
-    """Compute bounty fill percentage with Decimal precision."""
+    """Compute bounty fill percentage with Decimal precision.
+
+    Returns 0.0 when target is non-positive, matching the existing fallback.
+    Both render paths (Panel single-issue view and table all-issues view) call
+    this so the same on-chain values render identically regardless of mode.
+    """
     if target <= 0:
         return 0.0
     return float(Decimal(bounty) / Decimal(target) * 100)
@@ -126,9 +123,9 @@ def issues_list(
         issue = next((i for i in issues if i['id'] == issue_id), None)
 
         if issue:
-            bounty_val = _as_int_amount(issue.get('bounty_amount', 0))
-            target_val = _as_int_amount(issue.get('target_bounty', 0))
-            fill_pct = _fill_percent(bounty_val, target_val)
+            bounty_raw = issue.get('bounty_amount', 0)
+            target_raw = issue.get('target_bounty', 0)
+            fill_pct = _fill_percent(bounty_raw, target_raw)
             console.print(
                 Panel(
                     f'[cyan]ID:[/cyan] {issue["id"]}\n'

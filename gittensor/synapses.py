@@ -8,7 +8,7 @@ class PatBroadcastSynapse(bt.Synapse):
     """Miner-initiated push synapse to broadcast their GitHub PAT to validators.
 
     The miner sets github_access_token on the request. The validator validates the PAT
-    (checks it works, extracts GitHub ID, verifies account age, runs a test query)
+    (checks it works, extracts GitHub ID, runs a test query)
     and responds with accepted/rejection_reason.
     """
 

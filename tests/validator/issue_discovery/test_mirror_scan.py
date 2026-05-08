@@ -656,8 +656,8 @@ class TestCacheStats:
         stats = _CacheStats()
 
         issue = MirrorIssue.from_dict(_issue_dict())
-        result = _resolve_solving_pr_score(
-            issue, issue.solving_pr, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG
+        result = asyncio.run(
+            _resolve_solving_pr_score(issue, issue.solving_pr, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG)
         )
 
         assert result is None
@@ -695,11 +695,15 @@ class TestCacheStats:
         issue_a = MirrorIssue.from_dict(_issue_dict(issue_number=50))
         issue_b = MirrorIssue.from_dict(_issue_dict(issue_number=51))
 
-        result_a = _resolve_solving_pr_score(
-            issue_a, issue_a.solving_pr, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG
+        result_a = asyncio.run(
+            _resolve_solving_pr_score(
+                issue_a, issue_a.solving_pr, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG
+            )
         )
-        result_b = _resolve_solving_pr_score(
-            issue_b, issue_b.solving_pr, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG
+        result_b = asyncio.run(
+            _resolve_solving_pr_score(
+                issue_b, issue_b.solving_pr, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG
+            )
         )
 
         assert result_a is None

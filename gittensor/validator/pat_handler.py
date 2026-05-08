@@ -14,7 +14,7 @@ import requests
 from gittensor.constants import BASE_GITHUB_API_URL, GITHUB_HTTP_TIMEOUT_SECONDS, GRAPHQL_VIEWER_QUERY
 from gittensor.synapses import PatBroadcastSynapse, PatCheckSynapse
 from gittensor.validator import pat_storage
-from gittensor.validator.utils.github_validation import validate_github_credentials
+from gittensor.validator.utils.github_validation import validate_github_credentials_result
 
 if TYPE_CHECKING:
     from neurons.validator import Validator
@@ -24,6 +24,10 @@ def _get_hotkey(synapse: bt.Synapse) -> str:
     """Extract the caller's hotkey from a synapse, raising if missing."""
     assert synapse.dendrite is not None and synapse.dendrite.hotkey is not None
     return synapse.dendrite.hotkey
+
+
+def _github_identity_retry_message(action: str) -> str:
+    return f'GitHub API temporarily unavailable; retry the {action} in a few minutes.'
 
 
 # ---------------------------------------------------------------------------
@@ -48,10 +52,14 @@ async def handle_pat_broadcast(validator: 'Validator', synapse: PatBroadcastSyna
 
     uid = validator.metagraph.hotkeys.index(hotkey)
 
-    # 2. Validate PAT (checks it works, extracts github_id, verifies account age)
-    github_id, error = validate_github_credentials(uid, synapse.github_access_token)
-    if error:
-        return _reject(error)
+    # 2. Validate PAT (checks it works and extracts github_id)
+    validation = validate_github_credentials_result(uid, synapse.github_access_token)
+    if validation.transient_failure:
+        return _reject(_github_identity_retry_message('broadcast'))
+    if validation.error:
+        return _reject(validation.error)
+
+    github_id = validation.github_id
 
     # 3. Enforce GitHub identity pinning — same hotkey cannot switch GitHub accounts
     existing = pat_storage.get_pat_by_uid(uid)
@@ -66,7 +74,7 @@ async def handle_pat_broadcast(validator: 'Validator', synapse: PatBroadcastSyna
     if test_error:
         return _reject(f'PAT test query failed: {test_error}')
 
-    # 5. Store PAT (github_id guaranteed non-None after validate_github_credentials success)
+    # 5. Store PAT (github_id guaranteed non-None after validate_github_credentials_result success)
     pat_storage.save_pat(uid=uid, hotkey=hotkey, pat=synapse.github_access_token, github_id=github_id or '0')
 
     # Clear PAT from response so it isn't echoed back
@@ -117,11 +125,16 @@ async def handle_pat_check(validator: 'Validator', synapse: PatCheckSynapse) -> 
     synapse.has_pat = True
 
     # Re-validate the stored PAT
-    _, error = validate_github_credentials(uid, entry['pat'])
-    if error:
+    validation = validate_github_credentials_result(uid, entry['pat'], stored_github_id=entry.get('github_id'))
+    if validation.transient_failure:
+        synapse.pat_valid = None
+        synapse.rejection_reason = _github_identity_retry_message('check')
+        bt.logging.warning(f'PAT check result — UID: {uid}: GitHub identity lookup temporarily unavailable')
+        return synapse
+    if validation.error:
         synapse.pat_valid = False
-        synapse.rejection_reason = error
-        bt.logging.warning(f'PAT check result — UID: {uid}: validation failed: {error}')
+        synapse.rejection_reason = validation.error
+        bt.logging.warning(f'PAT check result — UID: {uid}: validation failed: {validation.error}')
         return synapse
 
     test_error = _test_pat_against_repo(entry['pat'])

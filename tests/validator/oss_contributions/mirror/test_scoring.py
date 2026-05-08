@@ -108,6 +108,8 @@ def _config(
     trusted_label_pipeline: bool = False,
     label_multipliers: dict | None = None,
     default_label_multiplier: float = 1.0,
+    fixed_base_score: float | None = None,
+    eligibility_mode: bool = True,
 ) -> RepositoryConfig:
     return RepositoryConfig(
         weight=weight,
@@ -116,6 +118,8 @@ def _config(
         trusted_label_pipeline=trusted_label_pipeline,
         label_multipliers=label_multipliers,
         default_label_multiplier=default_label_multiplier,
+        fixed_base_score=fixed_base_score,
+        eligibility_mode=eligibility_mode,
     )
 
 
@@ -333,10 +337,162 @@ class TestScoringDataStoredGate:
         assert scored.files is None
         assert scored.base_score == 0.0
 
+    def test_fixed_base_score_does_not_require_stored_file_data(self):
+        scored = ScoredMirrorPR(pr=_pr())
+        scored.pr.scoring_data_stored = False
+        mirror_eval = Mock(unique_repos_contributed_to=set())
+        client = Mock()
+
+        asyncio.run(
+            score_mirror_pr(
+                scored,
+                mirror_eval=mirror_eval,
+                mirror_repos={scored.pr.repo_full_name: _config(fixed_base_score=12.5)},
+                programming_languages={},
+                token_config=Mock(),
+                client=client,
+            )
+        )
+
+        client.get_pr_files.assert_not_called()
+        assert scored.base_score == pytest.approx(12.5)
+        assert scored.repo_weight_multiplier == pytest.approx(0.5)
+        assert scored.pr.repo_full_name in mirror_eval.unique_repos_contributed_to
+
+
+class TestFixedBaseScore:
+    def test_fixed_base_score_replaces_base_only(self, monkeypatch):
+        scored = ScoredMirrorPR(pr=_pr())
+        client = Mock()
+        client.get_pr_files.return_value = Mock(files=[MirrorFile.from_dict(_file_data('src/small.py', 'x = 1\n'))])
+        monkeypatch.setattr(
+            scoring_module,
+            'calculate_base_score_for_pr_files',
+            Mock(
+                return_value=scoring_module.BaseScoreResult(
+                    base_score=0.25,
+                    token_score=9.0,
+                    structural_count=1,
+                    structural_score=2.0,
+                    leaf_count=3,
+                    leaf_score=7.0,
+                    total_nodes_scored=4,
+                    code_density=1.0,
+                )
+            ),
+        )
+
+        asyncio.run(
+            score_mirror_pr(
+                scored,
+                mirror_eval=Mock(unique_repos_contributed_to=set()),
+                mirror_repos={scored.pr.repo_full_name: _config(fixed_base_score=1.0)},
+                programming_languages={},
+                token_config=Mock(),
+                client=client,
+            )
+        )
+
+        assert scored.base_score == pytest.approx(1.0)
+        assert scored.token_score == pytest.approx(9.0)
+        assert scored.total_nodes_scored == 4
+
+    def test_fixed_base_score_can_outscore_larger_non_fixed_pr_with_same_multiplier(self, monkeypatch):
+        fixed = ScoredMirrorPR(pr=_pr())
+        non_fixed = ScoredMirrorPR(pr=_pr())
+        non_fixed.pr.repo_full_name = 'entrius/other'
+
+        client = Mock()
+        client.get_pr_files.return_value = Mock(files=[MirrorFile.from_dict(_file_data('src/file.py', 'x = 1\n'))])
+        monkeypatch.setattr(
+            scoring_module,
+            'calculate_base_score_for_pr_files',
+            Mock(
+                side_effect=[
+                    scoring_module.BaseScoreResult(0.05, 1.0, 0, 0.0, 1, 1.0, 1, 1.0),
+                    scoring_module.BaseScoreResult(0.75, 100.0, 10, 50.0, 50, 50.0, 60, 1.0),
+                ]
+            ),
+        )
+
+        asyncio.run(
+            score_mirror_pr(
+                fixed,
+                mirror_eval=Mock(unique_repos_contributed_to=set()),
+                mirror_repos={fixed.pr.repo_full_name: _config(fixed_base_score=1.0)},
+                programming_languages={},
+                token_config=Mock(),
+                client=client,
+            )
+        )
+        asyncio.run(
+            score_mirror_pr(
+                non_fixed,
+                mirror_eval=Mock(unique_repos_contributed_to=set()),
+                mirror_repos={non_fixed.pr.repo_full_name: _config()},
+                programming_languages={},
+                token_config=Mock(),
+                client=client,
+            )
+        )
+
+        fixed.calculate_final_earned_score()
+        non_fixed.calculate_final_earned_score()
+
+        assert fixed.earned_score > non_fixed.earned_score
+        assert fixed.base_score == pytest.approx(1.0)
+        assert non_fixed.base_score == pytest.approx(0.75)
+
+
+class TestEligibilityMode:
+    def test_low_credibility_miner_earns_only_from_eligibility_mode_false_mirror_repos(self):
+        from gittensor.classes import MinerEvaluation
+        from gittensor.validator.oss_contributions.scoring import finalize_miner_scores
+
+        bypassed = ScoredMirrorPR(pr=_pr())
+        bypassed.pr.repo_full_name = 'entrius/bypass'
+        bypassed.base_score = 10.0
+        bypassed.token_score = 0.0
+        bypassed.eligibility_mode = False
+
+        gated = ScoredMirrorPR(pr=_pr())
+        gated.pr.repo_full_name = 'entrius/gated'
+        gated.base_score = 100.0
+        gated.token_score = 0.0
+        gated.eligibility_mode = True
+
+        evaluation = MinerEvaluation(uid=1, hotkey='hk', github_id='gid')
+        evaluation.mirror_merged_prs = [bypassed, gated]
+        evaluation.mirror_closed_prs = [ScoredMirrorPR(pr=_pr(state='CLOSED')) for _ in range(100)]
+
+        finalize_miner_scores({1: evaluation})
+
+        assert evaluation.is_eligible is False
+        assert evaluation.credibility < 0.8
+        assert bypassed.earned_score == pytest.approx(10.0)
+        assert bypassed.credibility_multiplier == pytest.approx(1.0)
+        assert gated.earned_score == 0.0
+        assert evaluation.total_score == pytest.approx(10.0)
+
 
 # ============================================================================
 # File adapter
 # ============================================================================
+
+
+def _file_data(filename: str, content: str) -> dict:
+    return {
+        'filename': filename,
+        'previous_filename': None,
+        'status': 'modified',
+        'additions': 1,
+        'deletions': 0,
+        'changes': 1,
+        'is_binary': False,
+        'byte_size': len(content),
+        'head_content': content,
+        'base_content': '',
+    }
 
 
 class TestConvertMirrorFiles:

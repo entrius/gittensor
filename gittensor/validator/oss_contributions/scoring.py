@@ -360,18 +360,29 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
         evaluation.is_eligible = is_eligible
         evaluation.credibility = credibility
 
+        merged_prs = evaluation.merged_pull_requests + evaluation.mirror_merged_prs
+        scorable_prs = merged_prs
+        credibility_multiplier = round(credibility, 2)
+
         if not is_eligible:
-            bt.logging.info(f'UID {uid} ineligible: {reason} — score set to 0')
-            continue
+            scorable_prs = [pr for pr in evaluation.mirror_merged_prs if not pr.eligibility_mode]
+            if not scorable_prs:
+                bt.logging.info(f'UID {uid} ineligible: {reason} — score set to 0')
+                continue
+
+            bt.logging.info(
+                f'UID {uid} ineligible: {reason} — scoring {len(scorable_prs)} '
+                'mirror PR(s) with eligibility_mode=false'
+            )
+            credibility_multiplier = 1.0
 
         # Calculate spam multiplier once per miner using combined total token score
-        merged_prs = evaluation.merged_pull_requests + evaluation.mirror_merged_prs
-        preliminary_token_score = sum(pr.token_score for pr in merged_prs)
+        preliminary_token_score = sum(pr.token_score for pr in scorable_prs)
         spam_multiplier = calculate_pr_spam_penalty_multiplier(evaluation.total_open_prs, preliminary_token_score)
 
-        for pr in merged_prs:
+        for pr in scorable_prs:
             pr.open_pr_spam_multiplier = spam_multiplier
-            pr.credibility_multiplier = round(credibility, 2)
+            pr.credibility_multiplier = credibility_multiplier
             pr.calculate_final_earned_score()
 
             evaluation.total_token_score += pr.token_score

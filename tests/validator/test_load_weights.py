@@ -288,6 +288,62 @@ class TestRepositoryConfigLabelMultipliers:
         )
 
 
+class TestRepositoryConfigMirrorScoringFields:
+    """Dataclass + JSON parsing tests for mirror-only scoring config."""
+
+    def test_defaults_preserve_existing_behavior(self):
+        config = RepositoryConfig(weight=0.5)
+
+        assert config.fixed_base_score is None
+        assert config.eligibility_mode is True
+
+    def test_loader_parses_fixed_base_score_and_eligibility_mode(self, tmp_path, monkeypatch):
+        from gittensor.validator.utils import load_weights as lw
+
+        fake_weights_dir = tmp_path
+        (fake_weights_dir / 'master_repositories.json').write_text(
+            json.dumps(
+                {
+                    'foo/custom': {
+                        'weight': 0.5,
+                        'fixed_base_score': 42.5,
+                        'eligibility_mode': False,
+                    },
+                    'foo/defaults': {'weight': 0.3},
+                }
+            )
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: fake_weights_dir)
+
+        repos = lw.load_master_repo_weights()
+
+        assert repos['foo/custom'].fixed_base_score == pytest.approx(42.5)
+        assert repos['foo/custom'].eligibility_mode is False
+        assert repos['foo/defaults'].fixed_base_score is None
+        assert repos['foo/defaults'].eligibility_mode is True
+
+    @pytest.mark.parametrize(
+        'raw,expected',
+        [
+            (-1.0, 0.0),
+            (101.0, 100.0),
+            ('25.5', 25.5),
+        ],
+    )
+    def test_loader_clamps_fixed_base_score(self, raw, expected, tmp_path, monkeypatch):
+        from gittensor.validator.utils import load_weights as lw
+
+        fake_weights_dir = tmp_path
+        (fake_weights_dir / 'master_repositories.json').write_text(
+            json.dumps({'foo/repo': {'weight': 0.5, 'fixed_base_score': raw}})
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: fake_weights_dir)
+
+        repos = lw.load_master_repo_weights()
+
+        assert repos['foo/repo'].fixed_base_score == pytest.approx(expected)
+
+
 class TestBannedOrganizations:
     """Tests ensuring banned organizations are not active in the repository list.
 

@@ -127,8 +127,10 @@ async def score_mirror_pr(
     # with load_miners_prs which applies should_skip_merged_pr pre-append.
 
     # Mirror signals it has no stored files for this PR (pending backfill, in-flight
-    # file job, etc.) — skip the round trip.
+    # file job, etc.) — skip the round trip unless the repo has a fixed base.
     if not pr.scoring_data_stored:
+        if repo_config.fixed_base_score is not None:
+            _apply_fixed_base_score(scored, mirror_eval, repo_config)
         return
 
     # Fetch file contents via the mirror's lazy /pulls/.../files endpoint.
@@ -136,11 +138,15 @@ async def score_mirror_pr(
         files = (await asyncio.to_thread(client.get_pr_files, pr.repo_full_name, pr.pr_number)).files
     except MirrorRequestError as e:
         bt.logging.warning(f'Mirror file fetch failed for PR #{pr.pr_number}: {e}')
+        if repo_config.fixed_base_score is not None:
+            _apply_fixed_base_score(scored, mirror_eval, repo_config)
         return
     scored.files = files
 
     if not files:
         bt.logging.warning(f'No files returned for PR #{pr.pr_number}')
+        if repo_config.fixed_base_score is not None:
+            _apply_fixed_base_score(scored, mirror_eval, repo_config)
         return
 
     file_changes, file_contents = mirror_files_to_legacy(pr.repo_full_name, pr.pr_number, files)
@@ -153,7 +159,7 @@ async def score_mirror_pr(
     scored.leaf_score = result.leaf_score
     scored.total_nodes_scored = result.total_nodes_scored
     scored.code_density = result.code_density
-    scored.base_score = result.base_score
+    scored.base_score = repo_config.fixed_base_score if repo_config.fixed_base_score is not None else result.base_score
 
     _calculate_pr_multipliers(scored, repo_config)
 
@@ -162,6 +168,18 @@ async def score_mirror_pr(
         # Token totals are aggregated later in finalize_miner_scores (legacy parity
         # — score sets per-PR state, finalize rolls up eval-level totals across
         # both paths).
+
+
+def _apply_fixed_base_score(
+    scored: ScoredMirrorPR,
+    mirror_eval: MirrorMinerEvaluation,
+    repo_config: RepositoryConfig,
+) -> None:
+    assert repo_config.fixed_base_score is not None
+    scored.base_score = repo_config.fixed_base_score
+    _calculate_pr_multipliers(scored, repo_config)
+    if scored.pr.state == 'MERGED':
+        mirror_eval.unique_repos_contributed_to.add(scored.pr.repo_full_name)
 
 
 # ============================================================================
@@ -339,6 +357,7 @@ def _calculate_pr_multipliers(scored: ScoredMirrorPR, repo_config: RepositoryCon
     pr = scored.pr
     is_merged = pr.state == 'MERGED'
 
+    scored.eligibility_mode = repo_config.eligibility_mode
     scored.repo_weight_multiplier = resolve_repo_weight(repo_config)
 
     chosen_label, label_multiplier = _resolve_trusted_scoring_label(pr, repo_config)

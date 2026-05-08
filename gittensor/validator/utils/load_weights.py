@@ -42,7 +42,10 @@ class RepositoryConfig:
             same fnmatch wildcard syntax as ``additional_acceptable_branches``.
         default_label_multiplier: Multiplier used when no configured label
             pattern matches. Defaults to neutral scoring.
-
+        fixed_base_score: Mirror-only base score override. When set, mirror
+            scoring uses this as the PR base score before downstream multipliers.
+        eligibility_mode: Mirror-only flag. When False, merged PRs in this repo
+            may earn even if the miner fails the global eligibility gate.
     """
 
     weight: float
@@ -52,6 +55,8 @@ class RepositoryConfig:
     trusted_label_pipeline: bool = False
     label_multipliers: Optional[Dict[str, float]] = None
     default_label_multiplier: float = 1.0
+    fixed_base_score: Optional[float] = None
+    eligibility_mode: bool = True
 
 
 def resolve_repo_weight(repo_config: Optional[RepositoryConfig]) -> float:
@@ -59,6 +64,12 @@ def resolve_repo_weight(repo_config: Optional[RepositoryConfig]) -> float:
     if repo_config is None:
         return DEFAULT_REPO_WEIGHT
     return repo_config.weight
+
+
+def _clamp_fixed_base_score(value: object) -> Optional[float]:
+    if value is None:
+        return None
+    return min(100.0, max(0.0, float(value)))
 
 
 @dataclass
@@ -140,6 +151,8 @@ def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
                         else None
                     ),
                     default_label_multiplier=float(metadata.get('default_label_multiplier', 1.0)),
+                    fixed_base_score=_clamp_fixed_base_score(metadata.get('fixed_base_score')),
+                    eligibility_mode=bool(metadata.get('eligibility_mode', True)),
                 )
                 normalized_data[repo_name.lower()] = config
             except (ValueError, TypeError) as e:

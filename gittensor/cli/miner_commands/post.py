@@ -11,6 +11,7 @@ import sys
 
 import click
 import requests
+from rich.console import Console
 from rich.table import Table
 
 from gittensor.cli.miner_commands.helpers import (
@@ -28,11 +29,11 @@ from gittensor.cli.miner_commands.helpers import (
     _require_validator_axons,
     _resolve_endpoint,
     _status,
-    console,
-    err_console,
 )
 from gittensor.constants import BASE_GITHUB_API_URL, GITHUB_HTTP_TIMEOUT_SECONDS, GRAPHQL_VIEWER_QUERY
 from gittensor.utils.github_api_tools import make_graphql_headers, make_headers
+
+console = Console()
 
 _PAT_POST_STATUS_MARKUP = {
     'accepted': '[green]✓[/green]',
@@ -70,7 +71,7 @@ _PAT_POST_STATUS_MARKUP = {
 def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, min_vtrust, min_stake, json_mode):
     """Broadcast your GitHub PAT to all validators on the network.
 
-    Validators will validate your PAT (test GitHub API access),
+    Validators will validate your PAT (test GitHub API access, check account age),
     then store it locally for use during scoring rounds.
 
     \b
@@ -96,24 +97,24 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, min_vt
         pat = click.prompt('Enter your GitHub Personal Access Token', hide_input=True)
 
     # 1b. Validate PAT locally
-    with _status('[bold]Validating PAT...'):
-        github_login = _validate_pat_locally(pat)
+    with _status('[bold]Validating PAT...', json_mode):
+        pat_error = _validate_pat_locally(pat)
 
-    if github_login is None:
-        _error('GitHub PAT is invalid or expired. Check your GITTENSOR_MINER_PAT.', json_mode)
+    if pat_error:
+        _error(pat_error, json_mode)
         sys.exit(1)
 
-    _print(f'[green]PAT is valid.[/green] GitHub account: [bold]@{github_login}[/bold]')
+    _print('[green]PAT is valid.[/green]', json_mode)
 
     # 2. Resolve wallet and network
     wallet_name = wallet_name or _load_config_value('wallet') or 'default'
     wallet_hotkey = wallet_hotkey or _load_config_value('hotkey') or 'default'
     ws_endpoint = _resolve_endpoint(network, rpc_url)
 
-    _print(f'[dim]Wallet: {wallet_name}/{wallet_hotkey} | Network: {ws_endpoint} | Netuid: {netuid}[/dim]')
+    _print(f'[dim]Wallet: {wallet_name}/{wallet_hotkey} | Network: {ws_endpoint} | Netuid: {netuid}[/dim]', json_mode)
 
     # 3. Set up bittensor objects
-    with _status('[bold]Connecting to network...'):
+    with _status('[bold]Connecting to network...', json_mode):
         try:
             wallet, subtensor, metagraph, dendrite = _connect_bittensor(wallet_name, wallet_hotkey, ws_endpoint, netuid)
         except Exception as e:
@@ -139,7 +140,7 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, min_vt
             timeout=30.0,
         )
 
-    with _status(f'[bold]Broadcasting to {len(validator_axons)} validators...'):
+    with _status(f'[bold]Broadcasting to {len(validator_axons)} validators...', json_mode):
         responses = asyncio.run(_broadcast())
 
     # 6. Collect results
@@ -167,7 +168,6 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, min_vt
             json.dumps(
                 {
                     'success': accepted_count > 0,
-                    'github_login': github_login,
                     'total_validators': len(results),
                     **counts,
                     'skipped': excluded,
@@ -193,21 +193,26 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, min_vt
         _render_skipped_validators(excluded, json_mode)
 
 
-def _validate_pat_locally(pat: str) -> str | None:
+def _validate_pat_locally(pat: str) -> Optional[str]:
     """Validate PAT mirrors the validator-side checks: user identity + GraphQL access.
 
-    Returns the GitHub login on success, or None if the PAT is invalid.
+    Returns None on success, or an error message string on failure.
     """
     try:
-        # Check basic auth and extract login
         user_resp = requests.get(
             f'{BASE_GITHUB_API_URL}/user', headers=make_headers(pat), timeout=GITHUB_HTTP_TIMEOUT_SECONDS
         )
+        if user_resp.status_code == 401:
+            return 'GitHub PAT is invalid or expired. Check your GITTENSOR_MINER_PAT.'
+        if user_resp.status_code == 403:
+            return 'GitHub API rate limit exceeded or PAT lacks access. Wait and try again, or generate a new PAT with public_repo scope.'
+        if user_resp.status_code == 429:
+            return 'GitHub API rate limited. Wait a few minutes and try again.'
+        if user_resp.status_code >= 500:
+            return f'GitHub API server error (HTTP {user_resp.status_code}). Try again later.'
         if user_resp.status_code != 200:
-            return None
-        login: str | None = user_resp.json().get('login') or None
+            return f'GitHub API returned unexpected status {user_resp.status_code}. Check your PAT and try again.'
 
-        # Check GraphQL access (same test the validator runs during PAT broadcast)
         gql_resp = requests.post(
             f'{BASE_GITHUB_API_URL}/graphql',
             json={'query': GRAPHQL_VIEWER_QUERY},
@@ -215,11 +220,12 @@ def _validate_pat_locally(pat: str) -> str | None:
             timeout=GITHUB_HTTP_TIMEOUT_SECONDS,
         )
         if gql_resp.status_code != 200:
-            err_console.print(
-                '[red]PAT lacks GraphQL API access. Fine-grained PATs need "Public Repositories (read-only)" permission.[/red]'
-            )
-            return None
+            return 'PAT lacks GraphQL API access. Fine-grained PATs need "Public Repositories (read-only)" permission.'
 
-        return login
-    except requests.RequestException:
         return None
+    except requests.ConnectionError:
+        return 'Could not connect to GitHub API. Check your internet connection.'
+    except requests.Timeout:
+        return 'GitHub API timed out. Try again later.'
+    except requests.RequestException as e:
+        return f'GitHub API request failed: {e}'

@@ -30,6 +30,7 @@ from .helpers import (
     print_network_header,
     read_issues_from_contract,
     validate_issue_id,
+    validate_repository,
     with_cli_behavior_options,
     with_network_contract_options,
 )
@@ -71,6 +72,18 @@ def issues_list(
     if issue_id is not None:
         try:
             validate_issue_id(issue_id, 'id')
+        except click.BadParameter as e:
+            handle_exception(as_json, str(e), 'bad_parameter')
+
+    # Normalize and validate the --repo filter before any contract reads so
+    # malformed input is rejected up-front and whitespace-padded valid input
+    # still matches `repository_full_name` from the contract. validate_repository
+    # strips whitespace, enforces owner/name format, and raises
+    # click.BadParameter on bad input — same contract used by mutating commands.
+    if repo_filter is not None:
+        try:
+            owner, repo_name = validate_repository(repo_filter, verify_exists=False)
+            repo_filter = f'{owner}/{repo_name}'
         except click.BadParameter as e:
             handle_exception(as_json, str(e), 'bad_parameter')
 

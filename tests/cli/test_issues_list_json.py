@@ -78,3 +78,98 @@ def test_issues_list_rejects_invalid_id_json(cli_root, runner, bad_id):
     assert payload['error']['type'] == 'bad_parameter'
     assert 'between 1 and 999999' in payload['error']['message']
     mock_read.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# --repo filter validation (regression for #1061)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize('bad_repo', ['ownerrepo', 'owner//repo', 'owner/', '/repo', 'owner repo'])
+def test_issues_list_rejects_malformed_repo_filter_json(cli_root, runner, bad_repo):
+    """Malformed --repo input must fail validation up-front before any contract read."""
+    with patch('gittensor.cli.issue_commands.view.read_issues_from_contract') as mock_read:
+        result = runner.invoke(
+            cli_root, ['issues', 'list', '--json', '--repo', bad_repo], catch_exceptions=False
+        )
+
+    assert result.exit_code != 0
+    payload = json.loads(result.output)
+    assert payload['success'] is False
+    assert payload['error']['type'] == 'bad_parameter'
+    mock_read.assert_not_called()
+
+
+@pytest.mark.parametrize('bad_repo', ['ownerrepo', 'owner//repo'])
+def test_issues_list_rejects_malformed_repo_filter_human(cli_root, runner, bad_repo):
+    """Human-mode --repo malformed input must also exit non-zero before contract read."""
+    with patch('gittensor.cli.issue_commands.view.read_issues_from_contract') as mock_read:
+        result = runner.invoke(cli_root, ['issues', 'list', '--repo', bad_repo], catch_exceptions=False)
+
+    assert result.exit_code != 0
+    mock_read.assert_not_called()
+
+
+def test_issues_list_repo_filter_strips_whitespace_json(cli_root, runner):
+    """Whitespace-padded valid --repo input must trim and match contract repository_full_name."""
+    with (
+        patch(
+            'gittensor.cli.issue_commands.view._resolve_contract_and_network',
+            return_value=('5Fakeaddr', 'ws://x', 'test'),
+        ),
+        patch('gittensor.cli.issue_commands.view.read_issues_from_contract', return_value=FAKE_ISSUES),
+    ):
+        result = runner.invoke(
+            cli_root,
+            ['issues', 'list', '--json', '--repo', '  owner/repo  '],
+            catch_exceptions=False,
+        )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload['success'] is True
+    assert payload['issue_count'] == 1
+    assert payload['issues'][0]['repository_full_name'] == 'owner/repo'
+
+
+def test_issues_list_repo_filter_case_insensitive_json(cli_root, runner):
+    """--repo filter should match contract entries regardless of case (preserved existing behavior)."""
+    with (
+        patch(
+            'gittensor.cli.issue_commands.view._resolve_contract_and_network',
+            return_value=('5Fakeaddr', 'ws://x', 'test'),
+        ),
+        patch('gittensor.cli.issue_commands.view.read_issues_from_contract', return_value=FAKE_ISSUES),
+    ):
+        result = runner.invoke(
+            cli_root,
+            ['issues', 'list', '--json', '--repo', 'OWNER/REPO'],
+            catch_exceptions=False,
+        )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload['success'] is True
+    assert payload['issue_count'] == 1
+
+
+def test_issues_list_repo_filter_no_match_returns_empty_json(cli_root, runner):
+    """Valid but non-matching --repo input returns empty list, not all issues."""
+    with (
+        patch(
+            'gittensor.cli.issue_commands.view._resolve_contract_and_network',
+            return_value=('5Fakeaddr', 'ws://x', 'test'),
+        ),
+        patch('gittensor.cli.issue_commands.view.read_issues_from_contract', return_value=FAKE_ISSUES),
+    ):
+        result = runner.invoke(
+            cli_root,
+            ['issues', 'list', '--json', '--repo', 'other/repo'],
+            catch_exceptions=False,
+        )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload['success'] is True
+    assert payload['issue_count'] == 0
+    assert payload['issues'] == []

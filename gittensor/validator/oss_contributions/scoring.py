@@ -350,28 +350,50 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
             bt.logging.info('No merged or closed PRs - skipping evaluation')
             continue
 
-        # Check eligibility gate across both paths. check_eligibility only touches
-        # token_score on each PR; ScoredMirrorPR has the same field, so combining
-        # the lists works without adapting types.
+        merged_prs = evaluation.merged_pull_requests + evaluation.mirror_merged_prs
+        gated_mirror_merged_prs = [pr for pr in evaluation.mirror_merged_prs if getattr(pr, 'eligibility_mode', True)]
+        gated_mirror_closed_prs = [pr for pr in evaluation.mirror_closed_prs if getattr(pr, 'eligibility_mode', True)]
+        eligibility_disabled_mirror_prs = [
+            pr for pr in evaluation.mirror_merged_prs if not getattr(pr, 'eligibility_mode', True)
+        ]
+
+        # Check the global eligibility gate for the gated portfolio only.
+        # eligibility_mode=False mirror PRs must not unlock rewards from repos
+        # where the gate still applies.
+        gated_merged_prs = evaluation.merged_pull_requests + gated_mirror_merged_prs
+        gated_closed_prs = evaluation.closed_pull_requests + gated_mirror_closed_prs
         is_eligible, credibility, reason = check_eligibility(
-            evaluation.merged_pull_requests + evaluation.mirror_merged_prs,
-            evaluation.closed_pull_requests + evaluation.mirror_closed_prs,
+            gated_merged_prs,
+            gated_closed_prs,
         )
         evaluation.is_eligible = is_eligible
         evaluation.credibility = credibility
 
         if not is_eligible:
-            bt.logging.info(f'UID {uid} ineligible: {reason} — score set to 0')
-            continue
+            if not eligibility_disabled_mirror_prs:
+                bt.logging.info(f'UID {uid} ineligible: {reason} — score set to 0')
+                continue
+            bt.logging.info(
+                f'UID {uid} ineligible: {reason} — scoring '
+                f'{len(eligibility_disabled_mirror_prs)} eligibility-disabled mirror PR(s) only'
+            )
 
-        # Calculate spam multiplier once per miner using combined total token score
-        merged_prs = evaluation.merged_pull_requests + evaluation.mirror_merged_prs
-        preliminary_token_score = sum(pr.token_score for pr in merged_prs)
-        spam_multiplier = calculate_pr_spam_penalty_multiplier(evaluation.total_open_prs, preliminary_token_score)
+        scoreable_prs = merged_prs if is_eligible else eligibility_disabled_mirror_prs
 
-        for pr in merged_prs:
-            pr.open_pr_spam_multiplier = spam_multiplier
-            pr.credibility_multiplier = round(credibility, 2)
+        # Keep eligibility-enabled repo rewards independent from opt-out repos.
+        gated_open_pr_count = len(evaluation.open_pull_requests) + sum(
+            1 for pr in evaluation.mirror_open_prs if getattr(pr, 'eligibility_mode', True)
+        )
+        gated_token_score = sum(pr.token_score for pr in gated_merged_prs)
+        gated_spam_multiplier = calculate_pr_spam_penalty_multiplier(gated_open_pr_count, gated_token_score)
+
+        opt_out_token_score = sum(pr.token_score for pr in eligibility_disabled_mirror_prs)
+        opt_out_spam_multiplier = calculate_pr_spam_penalty_multiplier(evaluation.total_open_prs, opt_out_token_score)
+
+        for pr in scoreable_prs:
+            eligibility_mode = getattr(pr, 'eligibility_mode', True)
+            pr.open_pr_spam_multiplier = gated_spam_multiplier if eligibility_mode else opt_out_spam_multiplier
+            pr.credibility_multiplier = round(credibility, 2) if eligibility_mode else 1.0
             pr.calculate_final_earned_score()
 
             evaluation.total_token_score += pr.token_score

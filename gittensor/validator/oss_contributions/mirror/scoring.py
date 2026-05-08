@@ -121,6 +121,8 @@ async def score_mirror_pr(
         bt.logging.warning(f'{pr.repo_full_name} not in mirror_repos. Skipping...')
         return
 
+    scored.eligibility_mode = repo_config.eligibility_mode
+
     # Eligibility gate for MERGED PRs already ran at LOAD time (see
     # load_mirror_miner_prs → _should_skip_merged_mirror_pr). By this point
     # mirror_eval.merged_prs contains only eligibility-passed PRs — legacy parity
@@ -153,7 +155,7 @@ async def score_mirror_pr(
     scored.leaf_score = result.leaf_score
     scored.total_nodes_scored = result.total_nodes_scored
     scored.code_density = result.code_density
-    scored.base_score = result.base_score
+    scored.base_score = repo_config.fixed_base_score if repo_config.fixed_base_score is not None else result.base_score
 
     _calculate_pr_multipliers(scored, repo_config)
 

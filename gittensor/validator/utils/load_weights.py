@@ -1,9 +1,10 @@
 # The MIT License (MIT)
 # Copyright © 2025 Entrius
 import json
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import bittensor as bt
 
@@ -42,6 +43,11 @@ class RepositoryConfig:
             same fnmatch wildcard syntax as ``additional_acceptable_branches``.
         default_label_multiplier: Multiplier used when no configured label
             pattern matches. Defaults to neutral scoring.
+        fixed_base_score: Optional base score override for mirror-scored PRs.
+            Clamped to [0.0, 100.0] at load time.
+        eligibility_mode: When True, the global miner eligibility gate applies.
+            When False, mirror PRs in this repo may earn even if the miner fails
+            that gate. Defaults to True.
 
     """
 
@@ -52,6 +58,8 @@ class RepositoryConfig:
     trusted_label_pipeline: bool = False
     label_multipliers: Optional[Dict[str, float]] = None
     default_label_multiplier: float = 1.0
+    fixed_base_score: Optional[float] = None
+    eligibility_mode: bool = True
 
 
 def resolve_repo_weight(repo_config: Optional[RepositoryConfig]) -> float:
@@ -59,6 +67,24 @@ def resolve_repo_weight(repo_config: Optional[RepositoryConfig]) -> float:
     if repo_config is None:
         return DEFAULT_REPO_WEIGHT
     return repo_config.weight
+
+
+def _parse_fixed_base_score(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    score = float(value)
+    if math.isnan(score):
+        raise ValueError('fixed_base_score cannot be NaN')
+    return max(0.0, min(100.0, score))
+
+
+def _parse_eligibility_mode(metadata: Dict[str, Any]) -> bool:
+    if 'eligibility_mode' not in metadata:
+        return True
+    value = metadata['eligibility_mode']
+    if not isinstance(value, bool):
+        raise ValueError('eligibility_mode must be a bool')
+    return value
 
 
 @dataclass
@@ -140,6 +166,8 @@ def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
                         else None
                     ),
                     default_label_multiplier=float(metadata.get('default_label_multiplier', 1.0)),
+                    fixed_base_score=_parse_fixed_base_score(metadata.get('fixed_base_score')),
+                    eligibility_mode=_parse_eligibility_mode(metadata),
                 )
                 normalized_data[repo_name.lower()] = config
             except (ValueError, TypeError) as e:

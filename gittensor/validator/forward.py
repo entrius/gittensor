@@ -71,6 +71,9 @@ async def forward(self: 'Validator') -> None:
             miner_evaluations, master_repositories, programming_languages, token_config, miner_uids
         )
 
+        # cached UIDs now have fresh issue-discovery fields — persist them
+        cached_uids.clear()
+
         # 3. Issue bounties verification
         await issue_competitions(self, miner_evaluations)
 

@@ -138,7 +138,7 @@ QUERY = """
                   authorAssociation
                 }
               }
-              labels(first: 5) {
+              labels(first: 100) {
                 nodes { name }
               }
               timelineItems(itemTypes: [LABELED_EVENT], last: 5) {

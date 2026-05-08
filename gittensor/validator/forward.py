@@ -176,13 +176,25 @@ def blend_emission_pools(
         recycle_extra += ISSUE_DISCOVERY_EMISSION_SHARE
 
     # Pool 3: Issue treasury (15% flat to UID 111)
-    if ISSUES_TREASURY_UID > 0 and ISSUES_TREASURY_UID in miner_uids:
+    # Treasury is considered "active" only when its UID is set to a non-recycle
+    # neuron AND that neuron is currently in the metagraph. When inactive
+    # (disabled via ISSUES_TREASURY_UID == RECYCLE_UID, or temporarily missing
+    # because the neuron is deregistered), the share recycles like Pools 1 and
+    # 2 do — otherwise the validator emits only ~85% of weight while the
+    # docstring claims 100%.
+    treasury_active = (
+        ISSUES_TREASURY_UID != RECYCLE_UID
+        and ISSUES_TREASURY_UID in miner_uids
+    )
+    if treasury_active:
         treasury_idx = sorted_uids.index(ISSUES_TREASURY_UID)
         rewards[treasury_idx] += ISSUES_TREASURY_EMISSION_SHARE
         bt.logging.info(
             f'Treasury allocation: UID {ISSUES_TREASURY_UID} receives '
             f'{ISSUES_TREASURY_EMISSION_SHARE * 100:.0f}% of emissions'
         )
+    else:
+        recycle_extra += ISSUES_TREASURY_EMISSION_SHARE
 
     # Pool 4: Recycle (25% + unclaimed from empty pools)
     if RECYCLE_UID in miner_uids:

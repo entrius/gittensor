@@ -32,6 +32,7 @@ require no HTTP. Non-miner-solved PRs (cache misses) trigger
 the cache so sibling discoveries benefit.
 """
 
+import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Set, Tuple
@@ -155,7 +156,7 @@ async def run_mirror_issue_discovery(
             continue
 
         try:
-            response = client.get_miner_issues(evaluation.github_id, since=lookback_date)
+            response = await asyncio.to_thread(client.get_miner_issues, evaluation.github_id, since=lookback_date)
         except MirrorRequestError as e:
             bt.logging.warning(f'├─ UID {uid}: mirror issue fetch failed ({e}) — skipped this miner')
             fetch_errors += 1
@@ -176,7 +177,7 @@ async def run_mirror_issue_discovery(
 
     canonical_pr_owners = _build_canonical_pr_owners(pending)
     for evaluation, filtered, open_issue_count in pending:
-        _score_miner_mirror_issues(
+        await _score_miner_mirror_issues(
             evaluation,
             filtered,
             mirror_repos,
@@ -253,7 +254,7 @@ def _build_solving_pr_cache(
     return cache
 
 
-def _score_miner_mirror_issues(
+async def _score_miner_mirror_issues(
     evaluation: MinerEvaluation,
     issues: List[MirrorIssue],
     mirror_repos: Dict[str, RepositoryConfig],
@@ -304,7 +305,7 @@ def _score_miner_mirror_issues(
         solved_count += 1
 
         # Resolve real base_score + token_score for the solving PR (cache or fetch)
-        cached = _resolve_solving_pr_score(
+        cached = await _resolve_solving_pr_score(
             issue,
             solving_pr,
             solving_pr_cache,
@@ -415,7 +416,7 @@ def _score_miner_mirror_issues(
     )
 
 
-def _resolve_solving_pr_score(
+async def _resolve_solving_pr_score(
     issue: MirrorIssue,
     solving_pr: MirrorSolvingPR,
     cache: Dict[Tuple[str, int], CachedSolvingPR],
@@ -437,7 +438,7 @@ def _resolve_solving_pr_score(
 
     cache_stats.misses += 1
     try:
-        files_response = client.get_pr_files(issue.repo_full_name, solving_pr.pr_number)
+        files_response = await asyncio.to_thread(client.get_pr_files, issue.repo_full_name, solving_pr.pr_number)
     except MirrorRequestError as e:
         cache_stats.fetch_failures += 1
         bt.logging.warning(

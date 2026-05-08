@@ -360,18 +360,27 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
         evaluation.is_eligible = is_eligible
         evaluation.credibility = credibility
 
-        if not is_eligible:
-            bt.logging.info(f'UID {uid} ineligible: {reason} — score set to 0')
-            continue
-
         # Calculate spam multiplier once per miner using combined total token score
         merged_prs = evaluation.merged_pull_requests + evaluation.mirror_merged_prs
+        bypass_eligible_prs = [
+            pr for pr in evaluation.mirror_merged_prs if not getattr(pr, 'eligibility_mode', True)
+        ]
+        if not is_eligible:
+            if not bypass_eligible_prs:
+                bt.logging.info(f'UID {uid} ineligible: {reason} — score set to 0')
+                continue
+            bt.logging.info(
+                f'UID {uid} ineligible: {reason} — scoring {len(bypass_eligible_prs)} '
+                'mirror PR(s) from eligibility-disabled repos only'
+            )
+
         preliminary_token_score = sum(pr.token_score for pr in merged_prs)
         spam_multiplier = calculate_pr_spam_penalty_multiplier(evaluation.total_open_prs, preliminary_token_score)
 
-        for pr in merged_prs:
+        scoreable_prs = merged_prs if is_eligible else bypass_eligible_prs
+        for pr in scoreable_prs:
             pr.open_pr_spam_multiplier = spam_multiplier
-            pr.credibility_multiplier = round(credibility, 2)
+            pr.credibility_multiplier = round(credibility, 2) if is_eligible else 1.0
             pr.calculate_final_earned_score()
 
             evaluation.total_token_score += pr.token_score

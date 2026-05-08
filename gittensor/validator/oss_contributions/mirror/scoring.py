@@ -153,7 +153,10 @@ async def score_mirror_pr(
     scored.leaf_score = result.leaf_score
     scored.total_nodes_scored = result.total_nodes_scored
     scored.code_density = result.code_density
-    scored.base_score = result.base_score
+    scored.base_score = (
+        repo_config.fixed_base_score if repo_config.fixed_base_score is not None else result.base_score
+    )
+    scored.eligibility_mode = repo_config.eligibility_mode
 
     _calculate_pr_multipliers(scored, repo_config)
 

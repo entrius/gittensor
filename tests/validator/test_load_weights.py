@@ -139,6 +139,17 @@ class TestLoadMasterRepositories:
                 f'{repo_name} trusted_label_pipeline should be bool, got {type(config.trusted_label_pipeline)}'
             )
 
+    def test_new_scoring_fields_have_defaults_on_live_configs(self):
+        """Live entries without repo-level overrides preserve existing behavior."""
+        repos = load_master_repo_weights()
+        for repo_name, config in repos.items():
+            assert config.fixed_base_score is None or 0.0 <= config.fixed_base_score <= 100.0, (
+                f'{repo_name} fixed_base_score should be None or clamped into range'
+            )
+            assert isinstance(config.eligibility_mode, bool), (
+                f'{repo_name} eligibility_mode should be bool, got {type(config.eligibility_mode)}'
+            )
+
     def test_entrius_repos_have_trusted_label_pipeline(self):
         """All entrius/* entries opt into trusted_label_pipeline (issue #911)."""
         repos = load_master_repo_weights()
@@ -286,6 +297,61 @@ class TestRepositoryConfigLabelMultipliers:
         assert 0.0 <= float(metadata['default_label_multiplier']) <= 20.0, (
             f'{repo_name} default_label_multiplier must be within [0.0, 20.0]'
         )
+
+
+class TestRepositoryConfigScoringOverrides:
+    """Dataclass + JSON-parsing tests for per-repo mirror scoring overrides."""
+
+    def test_defaults_preserve_existing_behavior(self):
+        config = RepositoryConfig(weight=0.5)
+
+        assert config.fixed_base_score is None
+        assert config.eligibility_mode is True
+
+    def test_loader_parses_new_scoring_fields(self, tmp_path, monkeypatch):
+        from gittensor.validator.utils import load_weights as lw
+
+        fake_weights_dir = tmp_path
+        (fake_weights_dir / 'master_repositories.json').write_text(
+            json.dumps(
+                {
+                    'foo/defaults': {'weight': 0.3},
+                    'foo/overrides': {
+                        'weight': 0.5,
+                        'fixed_base_score': 42.5,
+                        'eligibility_mode': False,
+                    },
+                }
+            )
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: fake_weights_dir)
+
+        repos = lw.load_master_repo_weights()
+
+        assert repos['foo/defaults'].fixed_base_score is None
+        assert repos['foo/defaults'].eligibility_mode is True
+        assert repos['foo/overrides'].fixed_base_score == pytest.approx(42.5)
+        assert repos['foo/overrides'].eligibility_mode is False
+
+    @pytest.mark.parametrize(
+        'raw,expected',
+        [
+            (-5.0, 0.0),
+            (250.0, 100.0),
+        ],
+    )
+    def test_loader_clamps_fixed_base_score(self, tmp_path, monkeypatch, raw, expected):
+        from gittensor.validator.utils import load_weights as lw
+
+        fake_weights_dir = tmp_path
+        (fake_weights_dir / 'master_repositories.json').write_text(
+            json.dumps({'foo/repo': {'weight': 0.5, 'fixed_base_score': raw}})
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: fake_weights_dir)
+
+        repos = lw.load_master_repo_weights()
+
+        assert repos['foo/repo'].fixed_base_score == pytest.approx(expected)
 
 
 class TestBannedOrganizations:

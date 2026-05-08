@@ -61,11 +61,13 @@ def _pr(
     maintainer_changes_requested_count: int = 0,
     labels: list | None = None,
     linked_issues: list | None = None,
+    repo_full_name: str = 'entrius/gittensor-ui',
+    pr_number: int = 100,
 ) -> MirrorPullRequest:
     return MirrorPullRequest.from_dict(
         {
-            'repo_full_name': 'entrius/gittensor-ui',
-            'pr_number': 100,
+            'repo_full_name': repo_full_name,
+            'pr_number': pr_number,
             'title': 't',
             'body': 'b',
             'state': state,
@@ -108,6 +110,8 @@ def _config(
     trusted_label_pipeline: bool = False,
     label_multipliers: dict | None = None,
     default_label_multiplier: float = 1.0,
+    fixed_base_score: float | None = None,
+    eligibility_mode: bool = True,
 ) -> RepositoryConfig:
     return RepositoryConfig(
         weight=weight,
@@ -116,6 +120,8 @@ def _config(
         trusted_label_pipeline=trusted_label_pipeline,
         label_multipliers=label_multipliers,
         default_label_multiplier=default_label_multiplier,
+        fixed_base_score=fixed_base_score,
+        eligibility_mode=eligibility_mode,
     )
 
 
@@ -332,6 +338,105 @@ class TestScoringDataStoredGate:
         client.get_pr_files.assert_not_called()
         assert scored.files is None
         assert scored.base_score == 0.0
+
+
+class TestRepositoryScoringOverrides:
+    def test_fixed_base_score_replaces_token_derived_base_but_keeps_multipliers(self, monkeypatch):
+        labels = [{'name': 'feature', 'actor_github_id': '1', 'actor_association': 'OWNER'}]
+        small = ScoredMirrorPR(pr=_pr(labels=labels, pr_number=1))
+        large = ScoredMirrorPR(pr=_pr(labels=labels, pr_number=2, repo_full_name='entrius/other-repo'))
+        client = Mock()
+        client.get_pr_files.return_value.files = [
+            MirrorFile.from_dict(
+                {
+                    'filename': 'src/foo.py',
+                    'previous_filename': None,
+                    'status': 'modified',
+                    'additions': 1,
+                    'deletions': 0,
+                    'changes': 1,
+                    'is_binary': False,
+                    'byte_size': 10,
+                    'head_content': 'x = 1\n',
+                    'base_content': '',
+                }
+            )
+        ]
+        results = iter(
+            [
+                scoring_module.BaseScoreResult(0.01, 1.0, 1, 1.0, 0, 0.0, 1, 1.0),
+                scoring_module.BaseScoreResult(0.5, 100.0, 10, 50.0, 10, 50.0, 20, 1.0),
+            ]
+        )
+        monkeypatch.setattr(scoring_module, 'calculate_base_score_for_pr_files', lambda *args: next(results))
+        repo_config = _config(fixed_base_score=1.0, label_multipliers={'feature': 1.5})
+        normal_config = _config(label_multipliers={'feature': 1.5})
+
+        asyncio.run(
+            score_mirror_pr(
+                small,
+                mirror_eval=Mock(),
+                mirror_repos={small.pr.repo_full_name: repo_config, large.pr.repo_full_name: normal_config},
+                programming_languages={},
+                token_config=Mock(),
+                client=client,
+            )
+        )
+        asyncio.run(
+            score_mirror_pr(
+                large,
+                mirror_eval=Mock(),
+                mirror_repos={small.pr.repo_full_name: repo_config, large.pr.repo_full_name: normal_config},
+                programming_languages={},
+                token_config=Mock(),
+                client=client,
+            )
+        )
+
+        assert small.base_score == pytest.approx(1.0)
+        assert small.token_score == pytest.approx(1.0)
+        assert small.label_multiplier == pytest.approx(1.5)
+        assert small.eligibility_mode is True
+        assert large.base_score == pytest.approx(0.5)
+        assert small.calculate_final_earned_score() > large.calculate_final_earned_score()
+
+    def test_score_mirror_pr_copies_repo_eligibility_mode(self, monkeypatch):
+        scored = ScoredMirrorPR(pr=_pr())
+        client = Mock()
+        client.get_pr_files.return_value.files = [
+            MirrorFile.from_dict(
+                {
+                    'filename': 'src/foo.py',
+                    'previous_filename': None,
+                    'status': 'modified',
+                    'additions': 1,
+                    'deletions': 0,
+                    'changes': 1,
+                    'is_binary': False,
+                    'byte_size': 10,
+                    'head_content': 'x = 1\n',
+                    'base_content': '',
+                }
+            )
+        ]
+        monkeypatch.setattr(
+            scoring_module,
+            'calculate_base_score_for_pr_files',
+            lambda *args: scoring_module.BaseScoreResult(10.0, 10.0, 1, 5.0, 1, 5.0, 2, 1.0),
+        )
+
+        asyncio.run(
+            score_mirror_pr(
+                scored,
+                mirror_eval=Mock(),
+                mirror_repos={scored.pr.repo_full_name: _config(eligibility_mode=False)},
+                programming_languages={},
+                token_config=Mock(),
+                client=client,
+            )
+        )
+
+        assert scored.eligibility_mode is False
 
 
 # ============================================================================
@@ -758,3 +863,36 @@ class TestPrMultipliers:
         assert scored.time_decay_multiplier == 1.0
         assert scored.credibility_multiplier == 1.0
         assert scored.review_quality_multiplier == 1.0
+
+
+class TestEligibilityModeFinalize:
+    def test_ineligible_miner_earns_only_from_eligibility_disabled_mirror_repos(self):
+        from gittensor.classes import MinerEvaluation
+        from gittensor.validator.oss_contributions.scoring import finalize_miner_scores
+
+        ungated = ScoredMirrorPR(pr=_pr(repo_full_name='entrius/ungated', pr_number=1))
+        ungated.base_score = 10.0
+        ungated.token_score = 10.0
+        ungated.eligibility_mode = False
+
+        gated = ScoredMirrorPR(pr=_pr(repo_full_name='entrius/gated', pr_number=2))
+        gated.base_score = 20.0
+        gated.token_score = 20.0
+        gated.eligibility_mode = True
+
+        eval_ = MinerEvaluation(uid=1, hotkey='hk')
+        eval_.mirror_merged_prs = [ungated, gated]
+        eval_.mirror_closed_prs = [
+            ScoredMirrorPR(pr=_pr(state='CLOSED', repo_full_name='entrius/closed', pr_number=100 + i))
+            for i in range(10)
+        ]
+        eval_.unique_repos_contributed_to = {'entrius/ungated', 'entrius/gated'}
+
+        finalize_miner_scores({1: eval_})
+
+        assert eval_.is_eligible is False
+        assert eval_.credibility < 0.8
+        assert ungated.earned_score == pytest.approx(10.0)
+        assert ungated.credibility_multiplier == pytest.approx(1.0)
+        assert gated.earned_score == pytest.approx(0.0)
+        assert eval_.total_score == pytest.approx(10.0)

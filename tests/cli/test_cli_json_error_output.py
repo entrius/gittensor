@@ -45,7 +45,7 @@ def test_cli_commands_emit_json_on_exception(cli_root, runner, argv):
         result = runner.invoke(cli_root, argv, catch_exceptions=False)
 
     assert result.exit_code == 1
-    payload = json.loads(result.output)
+    payload = json.loads(result.stdout)
     assert payload['success'] is False
     assert FORCED_MESSAGE in payload['error']['message']
 
@@ -63,7 +63,7 @@ def test_admin_info_emits_json_on_soft_read_failure(cli_root, runner):
         result = runner.invoke(cli_root, ['admin', 'info', '--json'], catch_exceptions=False)
 
     assert result.exit_code == 1
-    payload = json.loads(result.output)
+    payload = json.loads(result.stdout)
     assert payload['success'] is False
     assert payload['error']['type'] == 'read_failed'
 

@@ -24,7 +24,9 @@ from .helpers import (
     confirm_or_abort,
     console,
     emit_json,
+    err_console,
     handle_exception,
+    loading_context,
     print_error,
     print_network_header,
     print_success,
@@ -126,7 +128,7 @@ def val_vote_solution(
 
     print_network_header(network_name, contract_addr)
 
-    console.print(
+    err_console.print(
         Panel(
             f'[cyan]Issue ID:[/cyan] {issue_id}\n'
             f'[cyan]Solver Hotkey:[/cyan] {solver_hotkey}\n'
@@ -141,7 +143,7 @@ def val_vote_solution(
         return
 
     try:
-        with console.status('[bold cyan]Submitting vote...', spinner='dots'):
+        with err_console.status('[bold cyan]Submitting vote...', spinner='dots'):
             wallet, client = _make_contract_client(contract_addr, ws_endpoint, wallet_name, wallet_hotkey)
             result = client.vote_solution(issue_id, solver_hotkey, solver_coldkey, pr_number, wallet)
 
@@ -188,7 +190,7 @@ def val_vote_cancel_issue(
 
     print_network_header(network_name, contract_addr)
 
-    console.print(
+    err_console.print(
         Panel(
             f'[cyan]Issue ID:[/cyan] {issue_id}\n[cyan]Reason:[/cyan] {reason}',
             title='Vote Cancel Issue',
@@ -200,7 +202,7 @@ def val_vote_cancel_issue(
         return
 
     try:
-        with console.status('[bold cyan]Submitting cancel vote...', spinner='dots'):
+        with err_console.status('[bold cyan]Submitting cancel vote...', spinner='dots'):
             wallet, client = _make_contract_client(contract_addr, ws_endpoint, wallet_name, wallet_hotkey)
             result = client.vote_cancel_issue(issue_id, reason, wallet)
 
@@ -227,8 +229,7 @@ def vote_list_validators(network: str, rpc_url: str, contract: str, as_json: boo
     """
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
 
-    if not as_json:
-        print_network_header(network_name, contract_addr)
+    print_network_header(network_name, contract_addr)
 
     try:
         import bittensor as bt
@@ -237,7 +238,7 @@ def vote_list_validators(network: str, rpc_url: str, contract: str, as_json: boo
             IssueCompetitionContractClient,
         )
 
-        with console.status('[bold cyan]Reading validator whitelist...', spinner='dots'):
+        with loading_context('Reading validator whitelist...', as_json):
             subtensor = bt.Subtensor(network=ws_endpoint)
             client = IssueCompetitionContractClient(
                 contract_address=contract_addr,
@@ -271,8 +272,8 @@ def vote_list_validators(network: str, rpc_url: str, contract: str, as_json: boo
             console.print(f'\n[green]Validators:[/green] {n}')
             console.print(f'[green]Consensus threshold:[/green] {required} of {n} votes required')
         else:
-            console.print('[yellow]No validators whitelisted.[/yellow]')
-            console.print('[dim]Add validators with: gitt admin add-vali <HOTKEY>[/dim]')
+            err_console.print('[yellow]No validators whitelisted.[/yellow]')
+            err_console.print('[dim]Add validators with: gitt admin add-vali <HOTKEY>[/dim]')
 
     except Exception as e:
         handle_exception(as_json=as_json, message=str(e))

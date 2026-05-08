@@ -45,7 +45,7 @@ class TestMinerPost:
         monkeypatch.delenv('GITTENSOR_MINER_PAT', raising=False)
         result = runner.invoke(cli, ['miner', 'post', '--json-output', '--wallet', 'test', '--hotkey', 'test'])
         assert result.exit_code != 0
-        output = json.loads(result.output)
+        output = json.loads(result.stdout)
         assert output['success'] is False
 
     @patch('gittensor.cli.miner_commands.post._validate_pat_locally', return_value=False)
@@ -118,7 +118,7 @@ class TestMinerPost:
             )
 
         assert result.exit_code == 0, result.output
-        output = json.loads(result.output)
+        output = json.loads(result.stdout)
         assert output['total_validators'] == 3
         assert output['accepted'] == 1
         assert output['rejected'] == 1

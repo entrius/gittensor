@@ -124,7 +124,7 @@ class MirrorPullRequest:
     title: str
     body: Optional[str]
     state: str
-    author_github_id: str
+    author_github_id: Optional[str]
     author_login: str
     author_association: Optional[str]
     created_at: datetime
@@ -162,7 +162,7 @@ class MirrorPullRequest:
             title=data.get('title', ''),
             body=data.get('body'),
             state=data['state'],
-            author_github_id=str(data['author_github_id']),
+            author_github_id=str(data['author_github_id']) if data.get('author_github_id') is not None else None,
             author_login=data.get('author_login', ''),
             author_association=data.get('author_association'),
             created_at=parse_github_iso_to_utc(data['created_at']),
@@ -198,7 +198,7 @@ class MirrorSolvingPR:
     """
 
     pr_number: int
-    author_github_id: str
+    author_github_id: Optional[str]
     state: str
     merged_at: Optional[datetime]
     hours_since_merge: Optional[float]
@@ -213,7 +213,7 @@ class MirrorSolvingPR:
     def from_dict(cls, data: dict) -> 'MirrorSolvingPR':
         return cls(
             pr_number=data['pr_number'],
-            author_github_id=str(data['author_github_id']),
+            author_github_id=str(data['author_github_id']) if data.get('author_github_id') is not None else None,
             state=data['state'],
             merged_at=parse_optional_github_iso_to_utc(data.get('merged_at')),
             hours_since_merge=data.get('hours_since_merge'),

@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import sys
 from collections import Counter
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
@@ -17,7 +18,6 @@ from rich.table import Table
 from gittensor.constants import NETWORK_MAP
 
 console = Console()
-err_console = Console(stderr=True)
 
 NETUID_DEFAULT = 74
 DEFAULT_MIN_VALIDATOR_VTRUST = 0.25
@@ -98,14 +98,15 @@ def _connect_bittensor(wallet_name: str, wallet_hotkey: str, ws_endpoint: str, n
     return w, st, mg, dd
 
 
-def _status(message: str):
-    """Rich spinner bound to stderr so it never pollutes JSON stdout."""
-    return err_console.status(message)
+def _status(message: str, json_mode: bool):
+    """Rich spinner in TTY mode, no-op in JSON mode."""
+    return nullcontext() if json_mode else console.status(message)
 
 
-def _print(message: str) -> None:
-    """Print a status/info message to stderr (safe under --json-output)."""
-    err_console.print(message)
+def _print(message: str, json_mode: bool) -> None:
+    """Print a message in TTY mode; no-op in JSON mode."""
+    if not json_mode:
+        console.print(message)
 
 
 def _error(msg: str, json_mode: bool) -> None:
@@ -113,7 +114,7 @@ def _error(msg: str, json_mode: bool) -> None:
     if json_mode:
         click.echo(json.dumps({'success': False, 'error': msg}))
     else:
-        err_console.print(f'[red]Error: {msg}[/red]')
+        console.print(f'[red]Error: {msg}[/red]')
 
 
 def _require_registered(wallet, metagraph, netuid: int, json_mode: bool) -> None:
@@ -137,14 +138,15 @@ def _require_validator_axons(
     if not validator_axons:
         if excluded:
             msg = (
-                f'No validators passed --min-vtrust={min_vtrust:g} / '
-                f'--min-stake={min_stake:,.0f} α; all {len(excluded)} candidate(s) excluded.'
+                f'No validators passed --min-vtrust={min_vtrust} / --min-stake={min_stake:,.0f} α; '
+                f'all {len(excluded)} candidate(s) excluded.'
             )
             if json_mode:
-                click.echo(json.dumps({'success': False, 'error': msg, 'skipped': excluded}))
+                _render_skipped_validators(excluded, json_mode)
+                click.echo(json.dumps({'success': False, 'error': msg, 'skipped': excluded}, indent=2))
             else:
                 _render_skipped_validators(excluded, json_mode)
-                console.print(f'[red]Error: {msg}[/red]')
+                _error(msg, json_mode)
         else:
             _error('No reachable validator axons found on the network.', json_mode)
         sys.exit(1)

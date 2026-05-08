@@ -53,6 +53,7 @@ STATUS_COLORS: Dict[str, str] = {
 
 
 console = Console()
+err_console = Console(stderr=True)
 
 CommandFunc = TypeVar('CommandFunc', bound=Callable[..., Any])
 NETWORK_CHOICE = click.Choice(['finney', 'test', 'local'], case_sensitive=False)
@@ -179,18 +180,18 @@ def colorize_status(status: str) -> str:
 
 
 def print_success(message: str) -> None:
-    """Print a standardized success message."""
-    console.print(f'\n[green]\u2713 {message}[/green]\n', highlight=True)
+    """Print a success status message to stderr."""
+    err_console.print(f'\n[green]\u2713 {message}[/green]\n', highlight=True)
 
 
 def print_error(message: str) -> None:
     """Print a standardized error message."""
-    console.print(f'\n[red]\u2717 {message}[/red]\n', highlight=True)
+    err_console.print(f'\n[red]\u2717 {message}[/red]\n', highlight=True)
 
 
 def print_warning(message: str) -> None:
     """Print a warning message."""
-    console.print(f'\n[yellow]{message}[/yellow]\n', highlight=True)
+    err_console.print(f'\n[yellow]{message}[/yellow]\n', highlight=True)
 
 
 def emit_error_json(message: str, error_type: str = 'cli_error') -> None:
@@ -238,14 +239,14 @@ def loading_context(message: str, as_json: bool, spinner: str = 'dots', color='c
     return (
         nullcontext()
         if as_json
-        else console.status(f'[{color}]{message}[/{color}]', spinner=spinner, spinner_style=color)
+        else err_console.status(f'[{color}]{message}[/{color}]', spinner=spinner, spinner_style=color)
     )
 
 
 def print_network_header(network_name: str, contract_addr: str) -> None:
-    """Print a one-line network and contract context header."""
+    """Print a one-line network and contract context header to stderr."""
     short = f'{contract_addr[:12]}...{contract_addr[-6:]}' if len(contract_addr) > 20 else contract_addr
-    console.print(f'Network: {network_name} \u2022 Contract: {short}')
+    err_console.print(f'Network: {network_name} \u2022 Contract: {short}')
 
 
 def _is_interactive() -> bool:
@@ -264,7 +265,7 @@ def confirm_or_abort(prompt: str, yes: bool, default: bool = False) -> bool:
         return True
     if click.confirm(f'\n{prompt}', default=default):
         return True
-    console.print('[yellow]Cancelled.[/yellow]')
+    err_console.print('[yellow]Cancelled.[/yellow]')
     return False
 
 
@@ -420,7 +421,7 @@ def validate_repository(
                         f'status {resp.status_code}',
                         param_hint='--repo',
                     )
-                console.print(
+                err_console.print(
                     f'[yellow]Warning: GitHub API returned {resp.status_code} — skipping existence check[/yellow]'
                 )
         except requests.RequestException as exc:
@@ -431,7 +432,7 @@ def validate_repository(
                     detail,
                     param_hint='--repo',
                 )
-            console.print('[yellow]Warning: Could not reach GitHub API — skipping existence check[/yellow]')
+            err_console.print('[yellow]Warning: Could not reach GitHub API — skipping existence check[/yellow]')
 
     return owner, repo_name
 
@@ -464,7 +465,7 @@ def validate_github_issue(
                 detail,
                 param_hint='--issue',
             )
-        console.print('[yellow]Warning: Could not reach GitHub API — skipping issue check[/yellow]')
+        err_console.print('[yellow]Warning: Could not reach GitHub API — skipping issue check[/yellow]')
         return None
 
     if resp.status_code == 404:
@@ -479,7 +480,7 @@ def validate_github_issue(
                 f'status {resp.status_code}',
                 param_hint='--issue',
             )
-        console.print(f'[yellow]Warning: GitHub API returned {resp.status_code} — skipping issue check[/yellow]')
+        err_console.print(f'[yellow]Warning: GitHub API returned {resp.status_code} — skipping issue check[/yellow]')
         return None
 
     data = resp.json()
@@ -493,9 +494,9 @@ def validate_github_issue(
     state = data.get('state', 'unknown')
     if state != 'open':
         if state == 'closed':
-            console.print(f'[yellow]Warning: Issue #{issue_number} is already closed.[/yellow]')
+            err_console.print(f'[yellow]Warning: Issue #{issue_number} is already closed.[/yellow]')
         else:
-            console.print(f'[yellow]Warning: Issue #{issue_number} is {state}.[/yellow]')
+            err_console.print(f'[yellow]Warning: Issue #{issue_number} is {state}.[/yellow]')
 
     return data
 
@@ -714,22 +715,22 @@ def _read_contract_packed_storage(substrate, contract_addr: str, verbose: bool =
         child_key = get_contract_child_storage_key(substrate, contract_addr)
         if not child_key:
             if verbose:
-                console.print('[dim]Debug: Failed to get contract child storage key[/dim]')
+                err_console.print('[dim]Debug: Failed to get contract child storage key[/dim]')
             return None
 
         packed_bytes = read_contract_packed_storage_bytes(substrate, child_key)
         if not packed_bytes:
             if verbose:
-                console.print('[dim]Debug: No packed storage bytes returned[/dim]')
+                err_console.print('[dim]Debug: No packed storage bytes returned[/dim]')
             return None
 
         if verbose:
-            console.print(f'[dim]Debug: Packed storage data length = {len(packed_bytes)} bytes[/dim]')
+            err_console.print(f'[dim]Debug: Packed storage data length = {len(packed_bytes)} bytes[/dim]')
 
         packed = decode_packed_contract_storage(packed_bytes)
         if not packed:
             if verbose:
-                console.print(f'[dim]Debug: Packed storage too small ({len(packed_bytes)} < 74 bytes)[/dim]')
+                err_console.print(f'[dim]Debug: Packed storage too small ({len(packed_bytes)} < 74 bytes)[/dim]')
             return None
 
         return {
@@ -741,7 +742,7 @@ def _read_contract_packed_storage(substrate, contract_addr: str, verbose: bool =
         }
     except Exception as e:
         if verbose:
-            console.print(f'[dim]Debug: Failed to read packed storage: {e}[/dim]')
+            err_console.print(f'[dim]Debug: Failed to read packed storage: {e}[/dim]')
         return None
 
 
@@ -763,35 +764,35 @@ def _read_issues_from_child_storage(substrate, contract_addr: str, verbose: bool
         child_key = get_contract_child_storage_key(substrate, contract_addr)
     except Exception as e:
         if verbose:
-            console.print(f'[dim]Debug: Contract info query failed: {e}[/dim]')
+            err_console.print(f'[dim]Debug: Contract info query failed: {e}[/dim]')
         child_key = None
 
     if not child_key:
         if verbose:
-            console.print(f'[dim]Debug: Cannot read issues - no child storage key for {contract_addr}[/dim]')
+            err_console.print(f'[dim]Debug: Cannot read issues - no child storage key for {contract_addr}[/dim]')
         return []
 
     # First, read packed storage to get next_issue_id
     packed_storage = _read_contract_packed_storage(substrate, contract_addr, verbose)
     if not packed_storage:
         if verbose:
-            console.print('[dim]Debug: Cannot read issues - packed storage read failed[/dim]')
+            err_console.print('[dim]Debug: Cannot read issues - packed storage read failed[/dim]')
         return []
 
     next_issue_id = packed_storage.get('next_issue_id', 1)
     if verbose:
-        console.print(f'[dim]Debug: next_issue_id from contract = {next_issue_id}[/dim]')
+        err_console.print(f'[dim]Debug: next_issue_id from contract = {next_issue_id}[/dim]')
 
     # Sanity check: next_issue_id should be reasonable (< 1 million for any real deployment)
     if next_issue_id > MAX_ISSUE_ID:
-        console.print(f'[yellow]Warning: next_issue_id ({next_issue_id}) is unreasonably large.[/yellow]')
-        console.print('[yellow]This may indicate a storage format mismatch. Check contract version.[/yellow]')
+        err_console.print(f'[yellow]Warning: next_issue_id ({next_issue_id}) is unreasonably large.[/yellow]')
+        err_console.print('[yellow]This may indicate a storage format mismatch. Check contract version.[/yellow]')
         return []
 
     # If next_issue_id is 1, no issues have been registered yet
     if next_issue_id <= 1:
         if verbose:
-            console.print('[dim]Debug: No issues registered (next_issue_id <= 1)[/dim]')
+            err_console.print('[dim]Debug: No issues registered (next_issue_id <= 1)[/dim]')
         return []
 
     issues = []
@@ -800,7 +801,7 @@ def _read_issues_from_child_storage(substrate, contract_addr: str, verbose: bool
     # Iterate through all issue IDs (1 to next_issue_id - 1)
     # Issues mapping root key is '52789899'
     if verbose:
-        console.print(f'[dim]Debug: Reading issues 1 to {next_issue_id - 1} using mapping key 52789899[/dim]')
+        err_console.print(f'[dim]Debug: Reading issues 1 to {next_issue_id - 1} using mapping key 52789899[/dim]')
 
     for issue_id in range(1, next_issue_id):
         # SCALE encode u64 as little-endian 8 bytes
@@ -810,7 +811,9 @@ def _read_issues_from_child_storage(substrate, contract_addr: str, verbose: bool
         val_result = substrate.rpc_request('childstate_getStorage', [child_key, lazy_key, None])
         if not val_result.get('result'):
             if verbose:
-                console.print(f'[dim]Debug: No storage found for issue_id={issue_id} (key={lazy_key[:20]}...)[/dim]')
+                err_console.print(
+                    f'[dim]Debug: No storage found for issue_id={issue_id} (key={lazy_key[:20]}...)[/dim]'
+                )
             continue
 
         data = bytes.fromhex(val_result['result'].replace('0x', ''))
@@ -832,13 +835,13 @@ def _read_issues_from_child_storage(substrate, contract_addr: str, verbose: bool
                 }
             )
             if verbose:
-                console.print(
+                err_console.print(
                     f'[dim]Debug: Decoded issue {decoded.id}: '
                     f'{decoded.repository_full_name}#{decoded.issue_number}[/dim]'
                 )
         except Exception as e:
             if verbose:
-                console.print(f'[dim]Debug: Failed to decode issue {issue_id}: {e}[/dim]')
+                err_console.print(f'[dim]Debug: Failed to decode issue {issue_id}: {e}[/dim]')
             continue
 
     # Sort by ID
@@ -886,25 +889,25 @@ def read_issues_from_contract(ws_endpoint: str, contract_addr: str, verbose: boo
         from substrateinterface import SubstrateInterface
 
         if verbose:
-            console.print(f'[dim]Debug: Connecting to {ws_endpoint}...[/dim]')
+            err_console.print(f'[dim]Debug: Connecting to {ws_endpoint}...[/dim]')
 
         # Connect to subtensor
         substrate = SubstrateInterface(url=ws_endpoint)
 
         if verbose:
-            console.print('[dim]Debug: Connected successfully[/dim]')
+            err_console.print('[dim]Debug: Connected successfully[/dim]')
 
         # Read issues directly from child storage
         return _read_issues_from_child_storage(substrate, contract_addr, verbose)
 
     except ImportError as e:
-        console.print(f'[yellow]Cannot read from contract: {e}[/yellow]')
-        console.print('[dim]Install with: uv sync[/dim]')
+        err_console.print(f'[yellow]Cannot read from contract: {e}[/yellow]')
+        err_console.print('[dim]Install with: uv sync[/dim]')
         return []
     except Exception as e:
         if verbose:
-            console.print(f'[dim]Debug: Connection/read error: {e}[/dim]')
-        console.print(f'[yellow]Error reading from contract: {e}[/yellow]')
+            err_console.print(f'[dim]Debug: Connection/read error: {e}[/dim]')
+        err_console.print(f'[yellow]Error reading from contract: {e}[/yellow]')
         return []
 
 

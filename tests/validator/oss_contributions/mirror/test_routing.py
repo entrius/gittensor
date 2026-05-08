@@ -8,6 +8,7 @@ Verifies that:
 """
 
 import asyncio
+from threading import Event, get_ident
 from unittest.mock import patch
 
 import pytest
@@ -111,6 +112,62 @@ def test_all_legacy_repos_skips_mirror_path():
         mock_mirror_load.assert_not_called()
         mock_mirror_score.assert_not_called()
         mock_combine.assert_not_called()
+
+
+def test_legacy_scoring_yields_to_event_loop():
+    """Blocking legacy GitHub scoring should not starve sibling async tasks."""
+    configs = {
+        'a/legacy': RepositoryConfig(weight=0.5, mirror_enabled=False),
+    }
+    sibling_ran = Event()
+    observations = {
+        'load_saw_sibling': False,
+        'loop_thread': None,
+        'load_thread': None,
+        'score_thread': None,
+    }
+
+    def blocking_legacy_load(_miner_eval, _repos):
+        observations['load_thread'] = get_ident()
+        observations['load_saw_sibling'] = sibling_ran.wait(timeout=1.0)
+
+    def legacy_score(_miner_eval, _repos, _languages, _token_config):
+        observations['score_thread'] = get_ident()
+
+    async def run_with_sibling():
+        observations['loop_thread'] = get_ident()
+
+        async def sibling_task():
+            await asyncio.sleep(0.05)
+            sibling_ran.set()
+
+        task = asyncio.create_task(sibling_task())
+        result = await evaluate_miners_pull_requests(
+            uid=1,
+            hotkey='hk',
+            pat='fake-pat',
+            master_repositories=configs,
+            programming_languages={},
+            token_config=TokenConfig(),
+        )
+        await task
+        return result
+
+    with (
+        patch.object(reward_module, 'validate_response_and_initialize_miner_evaluation') as mock_init,
+        patch.object(reward_module, 'load_miners_prs', side_effect=blocking_legacy_load),
+        patch.object(reward_module, 'score_miner_prs', side_effect=legacy_score),
+        patch.object(reward_module, 'load_mirror_miner_prs') as mock_mirror_load,
+    ):
+        mock_init.return_value = _make_miner_eval()
+
+        result = _run(run_with_sibling())
+
+        assert observations['load_saw_sibling'] is True
+        assert observations['load_thread'] != observations['loop_thread']
+        assert observations['score_thread'] == observations['load_thread']
+        assert result.github_pat is None
+        mock_mirror_load.assert_not_called()
 
 
 def test_all_mirror_repos_skips_legacy_path():

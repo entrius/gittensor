@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from threading import Lock
 from typing import TYPE_CHECKING, Dict, Optional, Set, Tuple
 
 import bittensor as bt
@@ -30,6 +31,24 @@ from gittensor.validator.utils.load_weights import LanguageConfig, RepositoryCon
 # NOTE: there was a circular import error, needed this if to resolve it
 if TYPE_CHECKING:
     from neurons.validator import Validator
+
+
+_legacy_scoring_lock = Lock()
+
+
+def _run_legacy_miner_scoring(
+    miner_eval: MinerEvaluation,
+    legacy_repos: Dict[str, RepositoryConfig],
+    programming_languages: Dict[str, LanguageConfig],
+    token_config: TokenConfig,
+) -> None:
+    """Run blocking legacy GitHub scoring inside one scoped session cache."""
+    # session_scope uses a module-level cache. Keep legacy scopes serialized even
+    # if an operator configures concurrent validator forwards.
+    with _legacy_scoring_lock:
+        with session_scope():
+            load_miners_prs(miner_eval, legacy_repos)
+            score_miner_prs(miner_eval, legacy_repos, programming_languages, token_config)
 
 
 async def evaluate_miners_pull_requests(
@@ -87,9 +106,13 @@ async def evaluate_miners_pull_requests(
     }
 
     if legacy_repos:
-        with session_scope():
-            load_miners_prs(miner_eval, legacy_repos)
-            score_miner_prs(miner_eval, legacy_repos, programming_languages, token_config)
+        await asyncio.to_thread(
+            _run_legacy_miner_scoring,
+            miner_eval,
+            legacy_repos,
+            programming_languages,
+            token_config,
+        )
 
     if mirror_repos:
         mirror_eval = MirrorMinerEvaluation(

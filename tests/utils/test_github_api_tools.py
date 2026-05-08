@@ -27,6 +27,7 @@ github_api_tools = pytest.importorskip(
 )
 
 get_github_graphql_query = github_api_tools.get_github_graphql_query
+get_github_identity = github_api_tools.get_github_identity
 get_github_id = github_api_tools.get_github_id
 get_pull_request_file_changes = github_api_tools.get_pull_request_file_changes
 get_merge_base_sha = github_api_tools.get_merge_base_sha
@@ -376,6 +377,76 @@ class TestOtherGitHubAPIFunctions:
 
         assert result == '12345'
         assert mock_get.call_count == 3
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_get_github_identity_marks_5xx_as_transient(self, mock_logging, mock_sleep, mock_get):
+        mock_response = Mock(status_code=500)
+        mock_get.return_value = mock_response
+
+        result = get_github_identity('fake_token')
+
+        assert result.github_id is None
+        assert result.status is github_api_tools.GitHubIdentityStatus.TRANSIENT_FAILURE
+        assert mock_get.call_count == 6
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_get_github_identity_marks_rate_limit_as_transient(self, mock_logging, mock_sleep, mock_get):
+        mock_response = Mock(status_code=429)
+        mock_get.return_value = mock_response
+
+        result = get_github_identity('fake_token')
+
+        assert result.github_id is None
+        assert result.status is github_api_tools.GitHubIdentityStatus.TRANSIENT_FAILURE
+        assert mock_get.call_count == 6
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_get_github_identity_marks_403_rate_limit_as_transient(self, mock_logging, mock_sleep, mock_get):
+        mock_response = Mock(status_code=403)
+        mock_response.headers = {'x-ratelimit-remaining': '0'}
+        mock_get.return_value = mock_response
+
+        result = get_github_identity('fake_token')
+
+        assert result.github_id is None
+        assert result.status is github_api_tools.GitHubIdentityStatus.TRANSIENT_FAILURE
+        assert mock_get.call_count == 6
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_get_github_identity_fails_closed_on_auth_status(self, mock_logging, mock_sleep, mock_get):
+        mock_response = Mock(status_code=403)
+        mock_response.headers = {}
+        mock_response.json.return_value = {'message': 'Resource not accessible by personal access token'}
+        mock_get.return_value = mock_response
+
+        result = get_github_identity('fake_token')
+
+        assert result.github_id is None
+        assert result.status is github_api_tools.GitHubIdentityStatus.INVALID_AUTH
+        assert mock_get.call_count == 1
+        mock_sleep.assert_not_called()
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_get_github_identity_marks_bad_json_as_transient(self, mock_logging, mock_sleep, mock_get):
+        mock_response = Mock(status_code=200)
+        mock_response.json.side_effect = ValueError('bad json')
+        mock_get.return_value = mock_response
+
+        result = get_github_identity('fake_token')
+
+        assert result.github_id is None
+        assert result.status is github_api_tools.GitHubIdentityStatus.TRANSIENT_FAILURE
+        assert mock_get.call_count == 6
 
 
 # ============================================================================
@@ -1207,6 +1278,26 @@ class TestLoadMinersPrsFetchFailureSignal:
         load_miners_prs(miner_eval, {})
 
         assert miner_eval.github_pr_fetch_failed is True
+
+    @patch('gittensor.utils.github_api_tools.get_github_graphql_query')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_graphql_error_sets_failed_reason(self, mock_logging, mock_graphql_query):
+        from gittensor.classes import MinerEvaluation
+        from gittensor.utils.github_api_tools import GraphQLPageResult
+
+        mock_response = Mock()
+        mock_response.json.return_value = {
+            'errors': [{'message': 'Something went wrong'}],
+            'data': None,
+        }
+        mock_graphql_query.return_value = GraphQLPageResult(response=mock_response, page_size=100)
+
+        miner_eval = MinerEvaluation(uid=74, hotkey='test_hotkey', github_id='12345', github_pat='fake_pat')
+
+        load_miners_prs(miner_eval, {})
+
+        assert miner_eval.github_pr_fetch_failed is True
+        assert miner_eval.failed_reason == 'GitHub GraphQL error: Something went wrong'
 
 
 # ============================================================================

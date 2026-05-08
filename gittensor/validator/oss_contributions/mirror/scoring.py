@@ -20,6 +20,7 @@ Anti-gaming notes:
   require maintainer-applied labels; legacy can't do this and accepts any-applier.
 """
 
+import asyncio
 import os
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
@@ -62,7 +63,7 @@ from gittensor.validator.utils.tree_sitter_scoring import calculate_token_score_
 # ============================================================================
 
 
-def score_mirror_miner_prs(
+async def score_mirror_miner_prs(
     mirror_eval: MirrorMinerEvaluation,
     mirror_repos: Dict[str, RepositoryConfig],
     programming_languages: Dict[str, LanguageConfig],
@@ -97,7 +98,7 @@ def score_mirror_miner_prs(
             bt.logging.info(
                 f'\n[{i}/{len(scored_prs)}] {label} PR #{scored.pr.pr_number} in {scored.pr.repo_full_name}'
             )
-            score_mirror_pr(scored, mirror_eval, mirror_repos, programming_languages, token_config, client)
+            await score_mirror_pr(scored, mirror_eval, mirror_repos, programming_languages, token_config, client)
 
 
 # ============================================================================
@@ -105,7 +106,7 @@ def score_mirror_miner_prs(
 # ============================================================================
 
 
-def score_mirror_pr(
+async def score_mirror_pr(
     scored: ScoredMirrorPR,
     mirror_eval: MirrorMinerEvaluation,
     mirror_repos: Dict[str, RepositoryConfig],
@@ -132,7 +133,7 @@ def score_mirror_pr(
 
     # Fetch file contents via the mirror's lazy /pulls/.../files endpoint.
     try:
-        files = client.get_pr_files(pr.repo_full_name, pr.pr_number).files
+        files = (await asyncio.to_thread(client.get_pr_files, pr.repo_full_name, pr.pr_number)).files
     except MirrorRequestError as e:
         bt.logging.warning(f'Mirror file fetch failed for PR #{pr.pr_number}: {e}')
         return

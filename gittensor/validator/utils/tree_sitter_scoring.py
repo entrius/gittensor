@@ -279,7 +279,7 @@ def calculate_token_score_from_file_changes(
                 is_test_file=is_test_file,
                 scoring_method='skipped',
             )
-        elif ext in NON_CODE_EXTENSIONS:
+        elif not ext or ext in NON_CODE_EXTENSIONS:
             lines_to_score = min(file.changes, MAX_LINES_SCORED_FOR_NON_CODE_EXT)
             lang_config = programming_languages.get(ext)
             lang_weight = lang_config.weight if lang_config else DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT

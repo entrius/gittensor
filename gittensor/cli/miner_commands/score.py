@@ -60,8 +60,6 @@ class _StubValidator:
         return set()
 
 
-_PR_SKIP: frozenset = frozenset({'file_changes', 'issues'})
-
 _EVAL_SKIP: frozenset = frozenset(
     {
         'github_pat',  # secret - must never appear in serialized output
@@ -96,36 +94,20 @@ def _project(obj: Any, skip: frozenset = frozenset(), extra_properties: Tuple[st
     return out
 
 
-def _serialize_pr(pr, source: str) -> Dict[str, Any]:
-    payload = _project(pr, skip=_PR_SKIP)
-    payload['source'] = source  # synthetic, not in DB; flags legacy vs mirror scoring path
+def _serialize_pr(scored) -> Dict[str, Any]:
+    """Flatten a ScoredMirrorPR into a JSON-friendly dict, lifting raw fields off .pr."""
+    payload = _project(scored, skip=frozenset({'pr', 'files'}))
+    payload['repository_full_name'] = scored.pr.repo_full_name
+    payload['number'] = scored.pr.pr_number
+    payload['pr_state'] = scored.pr.state
     return payload
 
 
 def _serialize_evaluation(miner_eval) -> Dict[str, Any]:
-    from gittensor.validator.oss_contributions.mirror.adapters import (
-        mirror_scored_pr_to_legacy_pull_request,
-    )
-
-    def _legacy(prs):
-        return [_serialize_pr(pr, 'legacy') for pr in prs]
-
-    def _mirror(scored_list):
-        return [
-            _serialize_pr(
-                mirror_scored_pr_to_legacy_pull_request(s, miner_eval.uid, miner_eval.hotkey, miner_eval.github_id),
-                'mirror',
-            )
-            for s in scored_list
-        ]
-
     payload = _project(miner_eval, skip=_EVAL_SKIP, extra_properties=_EVAL_PROPERTIES)
-    for key, legacy_list, mirror_list in (
-        ('merged_pull_requests', miner_eval.merged_pull_requests, miner_eval.mirror_merged_prs),
-        ('open_pull_requests', miner_eval.open_pull_requests, miner_eval.mirror_open_prs),
-        ('closed_pull_requests', miner_eval.closed_pull_requests, miner_eval.mirror_closed_prs),
-    ):
-        payload[key] = _legacy(legacy_list) + _mirror(mirror_list)
+    payload['merged_pull_requests'] = [_serialize_pr(s) for s in miner_eval.mirror_merged_prs]
+    payload['open_pull_requests'] = [_serialize_pr(s) for s in miner_eval.mirror_open_prs]
+    payload['closed_pull_requests'] = [_serialize_pr(s) for s in miner_eval.mirror_closed_prs]
     return payload
 
 
@@ -170,7 +152,6 @@ def _render_table(payload: Dict[str, Any]) -> None:
     pr_table = Table(title='Per-PR breakdown', show_lines=False)
     pr_table.add_column('Repo#PR', style='cyan')
     pr_table.add_column('State', style='magenta')
-    pr_table.add_column('Source')
     pr_table.add_column('Base', justify='right')
     pr_table.add_column('Earned', justify='right')
     pr_table.add_column('Token', justify='right')
@@ -181,7 +162,6 @@ def _render_table(payload: Dict[str, Any]) -> None:
             pr_table.add_row(
                 f'{pr["repository_full_name"]}#{pr["number"]}',
                 pr['pr_state'],
-                pr['source'],
                 f'{pr["base_score"]:.2f}',
                 f'{pr["earned_score"]:.2f}',
                 f'{pr["token_score"]:.2f}',
@@ -293,6 +273,9 @@ def score_command(pat: Optional[str], log_level: str, json_mode: bool) -> None:
             master_repositories = load_master_repo_weights()
             programming_languages = load_programming_language_weights()
             token_config = load_token_config()
+
+    # Drop non-mirror repos so reward.py never hits its legacy/PAT branch here.
+    master_repositories = {name: cfg for name, cfg in master_repositories.items() if cfg.mirror_enabled}
 
     pat_snapshot = [{'uid': _DEV_UID, 'hotkey': _DEV_HOTKEY, 'pat': resolved_pat}]
 

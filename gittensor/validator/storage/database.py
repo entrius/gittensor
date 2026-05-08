@@ -8,12 +8,12 @@ from typing import Any, Optional
 import bittensor as bt
 
 try:
-    import psycopg2
+    import psycopg
 
     POSTGRES_AVAILABLE = True
 except ImportError:
     POSTGRES_AVAILABLE = False
-    bt.logging.warning('psycopg2 not installed. Database storage features will be disabled.')
+    bt.logging.warning('psycopg not installed. Database storage features will be disabled.')
 
 
 def create_database_connection() -> Optional[Any]:
@@ -24,7 +24,7 @@ def create_database_connection() -> Optional[Any]:
         Database connection if successful, None otherwise
     """
     if not POSTGRES_AVAILABLE:
-        bt.logging.error('Cannot create database connection: psycopg2 not installed')
+        bt.logging.error('Cannot create database connection: psycopg not installed')
         return None
 
     try:
@@ -33,15 +33,17 @@ def create_database_connection() -> Optional[Any]:
             'port': int(os.getenv('DB_PORT', 5432)),
             'user': os.getenv('DB_USER', 'postgres'),
             'password': os.getenv('DB_PASSWORD', ''),
-            'database': os.getenv('DB_NAME', 'gittensor_validator'),
+            'dbname': os.getenv('DB_NAME', 'gittensor_validator'),
         }
 
-        connection = psycopg2.connect(**db_config)
+        connection = psycopg.connect(**db_config)
         connection.autocommit = False
+        # Always prepare statements; bulk insert paths benefit immediately
+        connection.prepare_threshold = 0
         bt.logging.success('Successfully connected to PostgreSQL database for validation result storage')
         return connection
 
-    except psycopg2.Error as e:
+    except psycopg.Error as e:
         bt.logging.error(f'Failed to connect to database: {e}')
         return None
     except Exception as e:

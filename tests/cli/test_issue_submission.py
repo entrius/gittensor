@@ -21,9 +21,9 @@ def test_submissions_json_schema_is_stable(cli_root, runner, sample_issue, sampl
         )
 
     assert result.exit_code == 0
-    assert '\x1b[' not in result.output
+    assert '\x1b[' not in result.stdout
 
-    payload = json.loads(result.output)
+    payload = json.loads(result.stdout)
     assert set(payload.keys()) == {
         'success',
         'issue_id',
@@ -73,7 +73,7 @@ def test_submissions_json_handles_missing_closing_numbers(cli_root, runner, samp
         )
 
     assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json.loads(result.stdout)
     assert payload['submission_count'] == 1
     assert payload['submissions'][0]['closes_issue'] is False
 
@@ -87,7 +87,7 @@ def test_submissions_json_missing_contract_returns_config_error(cli_root, runner
         )
 
     assert result.exit_code != 0
-    payload = json.loads(result.output)
+    payload = json.loads(result.stdout)
     assert payload['success'] is False
     assert payload['error']['type'] == 'config_error'
     assert 'Contract address not configured' in payload['error']['message']
@@ -101,7 +101,7 @@ def test_submissions_json_invalid_issue_id_returns_bad_parameter(cli_root, runne
             catch_exceptions=False,
         )
         assert result.exit_code != 0
-        payload = json.loads(result.output)
+        payload = json.loads(result.stdout)
         assert payload['success'] is False
         assert payload['error']['type'] == 'bad_parameter'
 

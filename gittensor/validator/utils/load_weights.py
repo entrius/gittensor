@@ -42,6 +42,12 @@ class RepositoryConfig:
             same fnmatch wildcard syntax as ``additional_acceptable_branches``.
         default_label_multiplier: Multiplier used when no configured label
             pattern matches. Defaults to neutral scoring.
+        fixed_base_score: Optional fixed base score override for mirror-scored
+            PRs in this repo. When set, replaces the token-derived base score
+            after clamping into ``[0.0, 100.0]``.
+        eligibility_mode: Mirror-only eligibility toggle. ``True`` keeps the
+            global miner eligibility gate; ``False`` lets this repo's merged
+            PRs earn without passing that gate.
 
     """
 
@@ -52,6 +58,27 @@ class RepositoryConfig:
     trusted_label_pipeline: bool = False
     label_multipliers: Optional[Dict[str, float]] = None
     default_label_multiplier: float = 1.0
+    fixed_base_score: Optional[float] = None
+    eligibility_mode: bool = True
+
+
+def _parse_optional_fixed_base_score(raw_value: object) -> Optional[float]:
+    """Parse and clamp a per-repo fixed base score override."""
+    if raw_value is None:
+        return None
+    if isinstance(raw_value, bool):
+        raise TypeError('fixed_base_score must be numeric, not bool')
+    return min(100.0, max(0.0, float(raw_value)))
+
+
+def _parse_bool_config(metadata: dict, key: str, default: bool) -> bool:
+    """Parse a strict bool config field, preserving the default when absent."""
+    if key not in metadata:
+        return default
+    raw_value = metadata[key]
+    if isinstance(raw_value, bool):
+        return raw_value
+    raise TypeError(f'{key} must be bool, got {type(raw_value).__name__}')
 
 
 def resolve_repo_weight(repo_config: Optional[RepositoryConfig]) -> float:
@@ -140,6 +167,8 @@ def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
                         else None
                     ),
                     default_label_multiplier=float(metadata.get('default_label_multiplier', 1.0)),
+                    fixed_base_score=_parse_optional_fixed_base_score(metadata.get('fixed_base_score')),
+                    eligibility_mode=_parse_bool_config(metadata, 'eligibility_mode', True),
                 )
                 normalized_data[repo_name.lower()] = config
             except (ValueError, TypeError) as e:

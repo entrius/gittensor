@@ -120,6 +120,7 @@ async def score_mirror_pr(
     if not repo_config:
         bt.logging.warning(f'{pr.repo_full_name} not in mirror_repos. Skipping...')
         return
+    scored.eligibility_mode = repo_config.eligibility_mode
 
     # Eligibility gate for MERGED PRs already ran at LOAD time (see
     # load_mirror_miner_prs → _should_skip_merged_mirror_pr). By this point
@@ -153,7 +154,14 @@ async def score_mirror_pr(
     scored.leaf_score = result.leaf_score
     scored.total_nodes_scored = result.total_nodes_scored
     scored.code_density = result.code_density
-    scored.base_score = result.base_score
+    if repo_config.fixed_base_score is not None:
+        bt.logging.info(
+            f'Fixed base score override: {repo_config.fixed_base_score:.2f} '
+            f'(replacing token-derived {result.base_score:.2f})'
+        )
+        scored.base_score = repo_config.fixed_base_score
+    else:
+        scored.base_score = result.base_score
 
     _calculate_pr_multipliers(scored, repo_config)
 

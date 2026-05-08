@@ -39,6 +39,7 @@ _resolve_trusted_scoring_label = scoring_module._resolve_trusted_scoring_label
 _calculate_issue_multiplier = scoring_module._calculate_issue_multiplier
 _is_valid_linked_issue = scoring_module._is_valid_linked_issue
 score_mirror_pr = scoring_module.score_mirror_pr
+BaseScoreResult = scoring_module.BaseScoreResult
 
 ScoredMirrorPR = scored_pr_module.ScoredMirrorPR
 MirrorPullRequest = mirror_models.MirrorPullRequest
@@ -108,6 +109,8 @@ def _config(
     trusted_label_pipeline: bool = False,
     label_multipliers: dict | None = None,
     default_label_multiplier: float = 1.0,
+    fixed_base_score: float | None = None,
+    eligibility_mode: bool = True,
 ) -> RepositoryConfig:
     return RepositoryConfig(
         weight=weight,
@@ -116,6 +119,8 @@ def _config(
         trusted_label_pipeline=trusted_label_pipeline,
         label_multipliers=label_multipliers,
         default_label_multiplier=default_label_multiplier,
+        fixed_base_score=fixed_base_score,
+        eligibility_mode=eligibility_mode,
     )
 
 
@@ -332,6 +337,147 @@ class TestScoringDataStoredGate:
         client.get_pr_files.assert_not_called()
         assert scored.files is None
         assert scored.base_score == 0.0
+
+
+# ============================================================================
+# Per-repo mirror overrides
+# ============================================================================
+
+
+class TestRepoOverrides:
+    def test_fixed_base_score_replaces_computed_base_and_can_outscore_non_fixed_repo(self, monkeypatch):
+        fixed_scored = ScoredMirrorPR(
+            pr=_pr(labels=[{'name': 'feature', 'actor_association': 'MEMBER'}]),
+        )
+        dynamic_scored = ScoredMirrorPR(
+            pr=_pr(labels=[{'name': 'feature', 'actor_association': 'MEMBER'}]),
+        )
+        fake_client = Mock()
+        fake_client.get_pr_files.return_value = Mock(files=['stub'])
+
+        monkeypatch.setattr(scoring_module, 'mirror_files_to_legacy', lambda *_args, **_kwargs: ([], {}))
+        monkeypatch.setattr(
+            scoring_module,
+            'calculate_base_score_for_pr_files',
+            Mock(
+                side_effect=[
+                    BaseScoreResult(
+                        base_score=0.25,
+                        token_score=6.0,
+                        structural_count=0,
+                        structural_score=0.0,
+                        leaf_count=0,
+                        leaf_score=0.0,
+                        total_nodes_scored=0,
+                        code_density=0.1,
+                    ),
+                    BaseScoreResult(
+                        base_score=0.9,
+                        token_score=60.0,
+                        structural_count=0,
+                        structural_score=0.0,
+                        leaf_count=0,
+                        leaf_score=0.0,
+                        total_nodes_scored=0,
+                        code_density=1.5,
+                    ),
+                ]
+            ),
+        )
+
+        asyncio.run(
+            score_mirror_pr(
+                fixed_scored,
+                mirror_eval=Mock(),
+                mirror_repos={fixed_scored.pr.repo_full_name: _config(fixed_base_score=1.0, label_multipliers={'feature': 1.5})},
+                programming_languages={},
+                token_config=Mock(),
+                client=fake_client,
+            )
+        )
+        asyncio.run(
+            score_mirror_pr(
+                dynamic_scored,
+                mirror_eval=Mock(),
+                mirror_repos={dynamic_scored.pr.repo_full_name: _config(label_multipliers={'feature': 1.5})},
+                programming_languages={},
+                token_config=Mock(),
+                client=fake_client,
+            )
+        )
+
+        fixed_scored.calculate_final_earned_score()
+        dynamic_scored.calculate_final_earned_score()
+
+        assert fixed_scored.base_score == pytest.approx(1.0)
+        assert dynamic_scored.base_score == pytest.approx(0.9)
+        assert fixed_scored.earned_score > dynamic_scored.earned_score
+
+    def test_absent_override_fields_match_explicit_defaults(self, monkeypatch):
+        implicit = ScoredMirrorPR(pr=_pr())
+        explicit = ScoredMirrorPR(pr=_pr())
+        fake_client = Mock()
+        fake_client.get_pr_files.return_value = Mock(files=['stub'])
+
+        monkeypatch.setattr(scoring_module, 'mirror_files_to_legacy', lambda *_args, **_kwargs: ([], {}))
+        monkeypatch.setattr(
+            scoring_module,
+            'calculate_base_score_for_pr_files',
+            Mock(
+                side_effect=[
+                    BaseScoreResult(
+                        base_score=0.75,
+                        token_score=10.0,
+                        structural_count=1,
+                        structural_score=1.0,
+                        leaf_count=1,
+                        leaf_score=1.0,
+                        total_nodes_scored=2,
+                        code_density=0.2,
+                    ),
+                    BaseScoreResult(
+                        base_score=0.75,
+                        token_score=10.0,
+                        structural_count=1,
+                        structural_score=1.0,
+                        leaf_count=1,
+                        leaf_score=1.0,
+                        total_nodes_scored=2,
+                        code_density=0.2,
+                    ),
+                ]
+            ),
+        )
+
+        asyncio.run(
+            score_mirror_pr(
+                implicit,
+                mirror_eval=Mock(),
+                mirror_repos={implicit.pr.repo_full_name: _config()},
+                programming_languages={},
+                token_config=Mock(),
+                client=fake_client,
+            )
+        )
+        asyncio.run(
+            score_mirror_pr(
+                explicit,
+                mirror_eval=Mock(),
+                mirror_repos={explicit.pr.repo_full_name: _config(fixed_base_score=None, eligibility_mode=True)},
+                programming_languages={},
+                token_config=Mock(),
+                client=fake_client,
+            )
+        )
+
+        assert implicit.base_score == explicit.base_score
+        assert implicit.repo_weight_multiplier == explicit.repo_weight_multiplier
+        assert implicit.label_multiplier == explicit.label_multiplier
+        assert implicit.issue_multiplier == explicit.issue_multiplier
+        assert implicit.time_decay_multiplier == explicit.time_decay_multiplier
+        assert implicit.review_quality_multiplier == explicit.review_quality_multiplier
+        assert implicit.eligibility_mode is True
+        assert explicit.eligibility_mode is True
 
 
 # ============================================================================

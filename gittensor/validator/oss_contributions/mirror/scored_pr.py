@@ -34,6 +34,8 @@ class ScoredMirrorPR:
     review_quality_multiplier: float = 1.0
     label_multiplier: float = 1.0
     label: Optional[str] = None
+    eligibility_mode: bool = True
+    reward_eligible: bool = True
 
     # Pioneer attribution (per-repo, populated post per-PR scoring)
     pioneer_dividend: float = 0.0

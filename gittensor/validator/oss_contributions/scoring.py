@@ -273,6 +273,8 @@ def calculate_pioneer_dividends(
 
     for uid, evaluation in miner_evaluations.items():
         for pr in evaluation.merged_pull_requests + evaluation.mirror_merged_prs:
+            if getattr(pr, 'reward_eligible', True) is False:
+                continue
             if not pr.is_pioneer_eligible():
                 continue
             assert pr.merged_at is not None
@@ -325,6 +327,84 @@ def calculate_pioneer_dividends(
         )
 
 
+def _split_mirror_prs_by_eligibility_mode(prs):
+    """Partition mirror PRs into gated vs ungated repo buckets."""
+    gated = []
+    ungated = []
+    for pr in prs:
+        if getattr(pr, 'eligibility_mode', True):
+            gated.append(pr)
+        else:
+            ungated.append(pr)
+    return gated, ungated
+
+
+def _has_ungated_mirror_override(evaluation: MinerEvaluation) -> bool:
+    """True when any mirror repo in this eval opts out of the global eligibility gate."""
+    mirror_prs = evaluation.mirror_merged_prs + evaluation.mirror_open_prs + evaluation.mirror_closed_prs
+    return any(not getattr(pr, 'eligibility_mode', True) for pr in mirror_prs)
+
+
+def _accumulate_scored_pr_totals(evaluation: MinerEvaluation, prs) -> None:
+    """Accumulate token/structure totals for PRs that actually participate in reward."""
+    for pr in prs:
+        evaluation.total_token_score += pr.token_score
+        evaluation.total_structural_count += pr.structural_count
+        evaluation.total_structural_score += pr.structural_score
+        evaluation.total_leaf_count += pr.leaf_count
+        evaluation.total_leaf_score += pr.leaf_score
+
+
+def _finalize_with_mirror_eligibility_mode(uid: int, evaluation: MinerEvaluation) -> None:
+    """Finalize an evaluation containing mirror repos with eligibility_mode=False.
+
+    Gated repos keep the legacy behavior, but they are evaluated only against
+    the gated subset of the miner's portfolio so ungated repos cannot unlock
+    score on gated repos in the same round. Ungated mirror repos still use the
+    normal multiplier pipeline, except they bypass the global credibility gate.
+    """
+    gated_mirror_merged, ungated_mirror_merged = _split_mirror_prs_by_eligibility_mode(evaluation.mirror_merged_prs)
+    gated_mirror_closed, _ = _split_mirror_prs_by_eligibility_mode(evaluation.mirror_closed_prs)
+    gated_mirror_open, ungated_mirror_open = _split_mirror_prs_by_eligibility_mode(evaluation.mirror_open_prs)
+
+    for pr in evaluation.open_pull_requests + evaluation.mirror_open_prs:
+        pr.collateral_score = calculate_open_pr_collateral_score(pr)
+
+    gated_merged_prs = evaluation.merged_pull_requests + gated_mirror_merged
+    gated_closed_prs = evaluation.closed_pull_requests + gated_mirror_closed
+    gated_open_prs = evaluation.open_pull_requests + gated_mirror_open
+
+    is_eligible, credibility, reason = check_eligibility(gated_merged_prs, gated_closed_prs)
+    evaluation.is_eligible = is_eligible
+    evaluation.credibility = credibility
+
+    for pr in gated_merged_prs:
+        setattr(pr, 'reward_eligible', is_eligible)
+    for pr in ungated_mirror_merged:
+        pr.reward_eligible = True
+
+    if not is_eligible:
+        bt.logging.info(f'UID {uid} gated repos ineligible: {reason}')
+
+    if is_eligible and gated_merged_prs:
+        gated_token_score = sum(pr.token_score for pr in gated_merged_prs)
+        gated_spam_multiplier = calculate_pr_spam_penalty_multiplier(len(gated_open_prs), gated_token_score)
+        for pr in gated_merged_prs:
+            pr.open_pr_spam_multiplier = gated_spam_multiplier
+            pr.credibility_multiplier = round(credibility, 2)
+            pr.calculate_final_earned_score()
+        _accumulate_scored_pr_totals(evaluation, gated_merged_prs)
+
+    if ungated_mirror_merged:
+        ungated_token_score = sum(pr.token_score for pr in ungated_mirror_merged)
+        ungated_spam_multiplier = calculate_pr_spam_penalty_multiplier(len(ungated_mirror_open), ungated_token_score)
+        for pr in ungated_mirror_merged:
+            pr.open_pr_spam_multiplier = ungated_spam_multiplier
+            pr.credibility_multiplier = 1.0
+            pr.calculate_final_earned_score()
+        _accumulate_scored_pr_totals(evaluation, ungated_mirror_merged)
+
+
 def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None:
     """Finalize all miner scores: compute earned_scores, then apply pioneer dividends, then collateral."""
     bt.logging.info('**Finalizing miner scores**')
@@ -339,16 +419,20 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
         bt.logging.info(f'UID {uid}')
         bt.logging.info('=' * 50)
 
-        # Process open PRs for collateral (legacy + mirror — both paths contribute)
-        for pr in evaluation.open_pull_requests + evaluation.mirror_open_prs:
-            pr.collateral_score = calculate_open_pr_collateral_score(pr)
-            evaluation.total_collateral_score += pr.collateral_score
-
         has_contributions = evaluation.total_merged_prs > 0 or evaluation.total_closed_prs > 0
 
         if not has_contributions:
             bt.logging.info('No merged or closed PRs - skipping evaluation')
             continue
+
+        if _has_ungated_mirror_override(evaluation):
+            _finalize_with_mirror_eligibility_mode(uid, evaluation)
+            continue
+
+        # Process open PRs for collateral (legacy + mirror — both paths contribute)
+        for pr in evaluation.open_pull_requests + evaluation.mirror_open_prs:
+            pr.collateral_score = calculate_open_pr_collateral_score(pr)
+            evaluation.total_collateral_score += pr.collateral_score
 
         # Check eligibility gate across both paths. check_eligibility only touches
         # token_score on each PR; ScoredMirrorPR has the same field, so combining
@@ -391,6 +475,40 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
 
         has_contributions = evaluation.total_merged_prs > 0 or evaluation.total_closed_prs > 0
         if not has_contributions:
+            continue
+
+        if _has_ungated_mirror_override(evaluation):
+            gated_mirror_merged, ungated_mirror_merged = _split_mirror_prs_by_eligibility_mode(
+                evaluation.mirror_merged_prs
+            )
+            gated_mirror_open, ungated_mirror_open = _split_mirror_prs_by_eligibility_mode(evaluation.mirror_open_prs)
+
+            gated_merged_prs = evaluation.merged_pull_requests + gated_mirror_merged
+            for pr in gated_merged_prs + ungated_mirror_merged:
+                evaluation.base_total_score += pr.base_score
+                evaluation.total_nodes_scored += pr.total_nodes_scored
+
+            gated_earned_score = sum(pr.earned_score for pr in gated_merged_prs)
+            ungated_earned_score = sum(pr.earned_score for pr in ungated_mirror_merged)
+            gated_collateral = sum(pr.collateral_score for pr in evaluation.open_pull_requests + gated_mirror_open)
+            ungated_collateral = sum(pr.collateral_score for pr in ungated_mirror_open)
+
+            gross_score = gated_earned_score + ungated_earned_score
+            evaluation.total_collateral_score = gated_collateral + ungated_collateral
+            evaluation.total_score = max(0.0, gated_earned_score - gated_collateral) + max(
+                0.0, ungated_earned_score - ungated_collateral
+            )
+            evaluation.unique_repos_count = len(evaluation.unique_repos_contributed_to)
+
+            bt.logging.info('')
+            bt.logging.info('Summary:')
+            bt.logging.info(
+                f'├─ Score: {gross_score:.2f} - {evaluation.total_collateral_score:.2f} collateral = {evaluation.total_score:.2f}'
+            )
+            bt.logging.info(
+                f'├─ PRs: {evaluation.total_merged_prs} merged | {evaluation.total_open_prs} open | {evaluation.total_closed_prs} closed'
+            )
+            bt.logging.info(f'└─ Eligible: {evaluation.is_eligible} | Credibility: {evaluation.credibility:.2f}')
             continue
 
         # Aggregate scores (earned_score now includes pioneer_dividend from Phase 2).

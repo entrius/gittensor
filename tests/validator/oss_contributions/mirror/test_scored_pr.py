@@ -76,6 +76,8 @@ class TestComposition:
         assert scored.base_score == 0.0
         assert scored.earned_score == 0.0
         assert scored.token_score == 0.0
+        assert scored.eligibility_mode is True
+        assert scored.reward_eligible is True
         assert scored.pioneer_rank == 0
         assert scored.files is None
 

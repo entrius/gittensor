@@ -73,6 +73,7 @@ def _zero_for_duplicate_penalty(eval_: MinerEvaluation, reason: str) -> None:
     eval_.mirror_merged_prs = []
     eval_.mirror_open_prs = []
     eval_.mirror_closed_prs = []
+    eval_.stale_closed_pull_requests = []
     eval_.unique_repos_contributed_to = set()
     eval_.unique_repos_count = 0
     eval_.is_eligible = False

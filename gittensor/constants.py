@@ -155,8 +155,8 @@ RECYCLE_UID = 0
 
 # Hardcoded emission splits per competition (replaces dynamic emissions)
 OSS_EMISSION_SHARE = 0.30  # 30% to OSS contributions (PR scoring)
-ISSUE_DISCOVERY_EMISSION_SHARE = 0.30  # 30% to issue discovery
-RECYCLE_EMISSION_SHARE = 0.25  # 25% to recycle UID 0
+ISSUE_DISCOVERY_EMISSION_SHARE = 0.10  # 10% to issue discovery
+RECYCLE_EMISSION_SHARE = 0.45  # 45% to recycle UID 0
 # ISSUES_TREASURY_EMISSION_SHARE = 0.15 defined below (15% to smart contract treasury)
 
 # =============================================================================

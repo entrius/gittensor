@@ -7,12 +7,14 @@ Command structure:
     gitt miner (alias: m)     - Miner management commands
         post                     Broadcast GitHub PAT to validators
         check                    Check how many validators have your PAT
+        score                    Score GitHub entities through the production pipeline
 """
 
 import click
 
 from .check import miner_check
 from .post import miner_post
+from .score import score_command
 
 
 @click.group(name='miner')
@@ -23,12 +25,14 @@ def miner_group():
     Commands:
         post     Broadcast your GitHub PAT to validators
         check    Check how many validators have your PAT stored
+        score    Run the validator scoring pipeline end-to-end for a single miner
     """
     pass
 
 
 miner_group.add_command(miner_post, name='post')
 miner_group.add_command(miner_check, name='check')
+miner_group.add_command(score_command, name='score')
 
 
 def register_miner_commands(cli):

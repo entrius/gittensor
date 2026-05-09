@@ -32,7 +32,7 @@ def _fake_metagraph(rows: list[tuple[float, bool, float]]):
 
 @pytest.fixture
 def runner():
-    return CliRunner(mix_stderr=False)
+    return CliRunner()
 
 
 class TestMinerPost:

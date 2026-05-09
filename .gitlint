@@ -1,0 +1,24 @@
+[general]
+# Ignore merge commits
+ignore=body-is-missing,title-trailing-punctuation,title-must-not-contain-word-bug
+# Verbose mode shows more details
+verbose=2
+
+[title-max-length]
+line-length=72
+
+[title-min-length]
+min-length=10
+
+[title-match-regex]
+# Must start with semantic prefix: fix:, feat:, refactor:, perf:, cli:, test:, style:, docs:, chore:
+regex = ^(fix|feat|refactor|perf|cli|test|style|docs|chore): .+\(\#\d+\)$
+
+[body-max-line-length]
+line-length=100
+
+[body-min-length]
+min-length=20
+
+[body-changed-file-mention]
+files=.*

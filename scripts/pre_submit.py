@@ -82,12 +82,41 @@ def check_commit_style():
     commits = out.strip().split("\n")
     ok = True
     for c in commits[:5]:
-        prefix_ok = any(c.startswith(p) for p in ["fix:", "feat:", "refactor:", "perf:", "cli:", "test:", "style:", "docs:", "chore:"])
+        prefix_ok = any(c.startswith(p) for p in ["fix:", "feat:", "refactor:", "perf:", "cli:", "test:", "style:", "docs:"])
         if not prefix_ok and not c.startswith("Merge "):
             ok = False
             print(f"  ❌ Commit: '{c[:60]}' — tanpa prefix semantic")
     if ok:
         print(f"  ✅ Commit messages: semantic prefix style")
+    return ok
+
+def check_gitlint():
+    code, out, err = run(["gitlint", "--commits", "test..HEAD"], 10)
+    ok = code == 0
+    if ok:
+        print(f"  ✅ gitlint: pass")
+    else:
+        for line in out.split("\n")[:8]:
+            print(f"  ❌ {line}")
+    return ok
+
+def check_yamllint():
+    yaml_files = []
+    code, out, _ = run(["git", "diff", "--name-only", "test..."], 10)
+    for f in (out.strip().split("\n") if out else []):
+        if f.endswith((".yaml", ".yml")) and os.path.exists(f):
+            yaml_files.append(f)
+    if not yaml_files:
+        print(f"  ⏭️  yamllint: no YAML files changed")
+        return True
+    ok = True
+    for f in yaml_files:
+        code, out, err = run(["yamllint", f], 10)
+        if code != 0:
+            ok = False
+            print(f"  ❌ {f}: {out[:100] if out else err[:100]}")
+    if ok:
+        print(f"  ✅ yamllint: {len(yaml_files)} file(s) pass")
     return ok
 
 def main():
@@ -98,9 +127,11 @@ def main():
     checks = [
         ("Branch naming", check_branch),
         ("Commit style", check_commit_style),
+        ("gitlint", check_gitlint),
         ("ruff check", check_ruff),
         ("ruff format", check_ruff_format),
         ("pyright", check_pyright),
+        ("yamllint", check_yamllint),
         ("PR size", check_pr_size),
     ]
 

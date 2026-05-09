@@ -98,23 +98,38 @@ opencode/
 | 6 | **Label** | 0.25–1.5x | `feature`=1.5x, `enhancement`=1.25x, `bug`=1.1x, `refactor`=0.25x, default=1.0x. **HINDARI `refactor`!** |
 | 7 | **Code Density** | 0.0–1.5x | `min(token_score / total_lines, 1.5)`. Makin banyak token bermakna (fungsi, class) makin baik |
 
+### Analisis PR Merged (20 terakhir)
+| Aspek | Temuan |
+|-------|--------|
+| Prefix terbanyak | `fix:` (12/20 = 60%) |
+| Label terbanyak | `bug` (9/20), `enhancement` (7/20) |
+| Body style | Concise, `## Summary` + bullet points |
+| Checklist | Sering di-skip oleh kontributor top |
+| Top merger | anderdc (4), seroperson/plind-junior/bitloi/aliang/Tet-9/MkDev11 (2 each) |
+
 ### Label Prioritasku → entrius/gittensor
-| Prefix Judul | Label Auto | Multiplier | Rekomendasi |
-|-------------|------------|------------|-------------|
-| `feat:` | enhancement | **1.25x** | ✅ PALING AMAN — tertinggi untuk bug fix |
-| `fix:` | bug | **1.1x** | ✅ BAIK — untuk bug fix |
-| `chore:` | refactor | **0.25x** | ❌ HINDARI — hancurkan score |
-| `refactor:` | refactor | **0.25x** | ❌ HINDARI — hancurkan score |
+| Prefix Judul | Label Auto | Multiplier | Tingkat Merge | Rekomendasi |
+|-------------|------------|------------|---------------|-------------|
+| `fix:` | bug | **1.1x** | **60%** | ✅ PALING AMAN — paling sering di-merge |
+| `feat:` | enhancement | **1.25x** | 10% | ✅ BAIK — multiplier tertinggi |
+| `refactor:` | refactor | **0.25x** | 10% | ⚠️ HANYA untuk refactor besar |
+| `chore:` | refactor | **0.25x** | 10% | ❌ HINDARI — hancurkan score |
+| `perf:` | enhancement | **1.25x** | 5% | ✅ untuk performance fix |
+| `cli:` | enhancement | **1.25x** | 5% | ✅ untuk CLI changes |
+
+**Kesimpulan:** `fix:` adalah pilihan terbaik — multiplier 1.1x + 60% chance merge.  
+**Hindari `chore:`** (0.25x multiplier — bunuh score).
 
 ### Checklist Sebelum Submit PR
 - [ ] Issue direference dengan `Closes #N` atau `Fixes #N` (Issue Bonus ≥ 1.33x)
-- [ ] Judul pakai `feat:` atau `fix:`, jangan `chore:` (Label ≥ 1.1x)
+- [ ] Judul pakai `fix:` (paling sering di-merge) atau `feat:` (multiplier tinggi). **Jangan `chore:`**
 - [ ] Branch dari `test`, target `test`
-- [ ] Template body lengkap (Summary, Related Issues, Type of Change, Testing, Checklist)
+- [ ] Body: `## Summary` + bullet point perubahan + `Fixes #N` (template opsional, lihat gaya kontributor top)
 - [ ] Reviewer: landyndev, anderdc
 - [ ] CLI change → screenshot before-after (exit-code-only exempted)
 - [ ] Tidak ada CHANGES_REQUESTED → Review Quality tetap 1.0
 - [ ] Semua PR dalam 1-2 hari agar Time Decay seragam
+- [ ] Cek dengan `python3 scripts/pr_quality_check.py` sebelum submit
 
 ### Time Decay System
 Formula: `f(t) = 1 / (1 + e^(0.0161 × (t - 297.4)))` (t = jam sejak create)

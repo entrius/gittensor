@@ -153,3 +153,6 @@ def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, min_vtrust
         console.print(table)
         console.print(f'\n[bold]{valid_count}/{len(results)} validators have a valid PAT stored.[/bold]')
         _render_skipped_validators(excluded, json_mode)
+
+    if valid_count == 0:
+        sys.exit(1)

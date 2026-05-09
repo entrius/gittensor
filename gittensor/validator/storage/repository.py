@@ -23,6 +23,7 @@ from .queries import (
     CLEANUP_STALE_MINER_EVALUATIONS_BY_HOTKEY,
     CLEANUP_STALE_MINERS,
     CLEANUP_STALE_MINERS_BY_HOTKEY,
+    REFRESH_STALE_PR_STATES,
     SET_MINER,
 )
 
@@ -215,6 +216,28 @@ class Repository(BaseRepository):
             if commit:
                 self.db.rollback()
             self.logger.error(f'Error in bulk pull request storage: {e}')
+            return 0
+
+    def refresh_stale_pr_states(self, pull_requests: List[PullRequest], commit: bool = True) -> int:
+        """Update pr_state to CLOSED for stale PRs without touching scoring columns.
+
+        Uses a targeted UPDATE so previously-computed scores (earned_score, base_score,
+        credibility_multiplier, etc.) are preserved on rows that were already scored.
+        Only rows currently stored as non-CLOSED are affected.
+        """
+        if not pull_requests:
+            return 0
+        values = [(pr.number, pr.repository_full_name) for pr in pull_requests]
+        try:
+            with self.get_cursor() as cursor:
+                cursor.executemany(REFRESH_STALE_PR_STATES, values)
+                if commit:
+                    self.db.commit()
+                return len(values)
+        except Exception as e:
+            if commit:
+                self.db.rollback()
+            self.logger.error(f'Error refreshing stale PR states: {e}')
             return 0
 
     def store_issues_bulk(self, issues: List[Issue], commit: bool = True) -> int:

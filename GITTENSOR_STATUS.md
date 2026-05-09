@@ -155,15 +155,46 @@ Fixes #<N>
 ```
 **Tidak perlu:** Type of Change, Checklist, atau template formal lain.
 
+### Gaya Commit Message
+```
+fix: <description> (#N)              — bug fix, dengan ref issue
+feat: <description> (#N)            — fitur baru
+test: <description>                  — tambah test
+style: auto-format with pre-commit   — formatting (separate commit)
+```
+1 commit = 1 perubahan logis. Pisahkan formatting/style di commit terpisah.
+
+### Gaya Branch Naming
+```
+fix/<N>-<slug>    — contoh: fix/842-miner-check-exit-code
+feat/<N>-<slug>   — contoh: feat/1004-show-github-user
+```
+Branch dari `test`, target PR ke `test`.
+
+### Optimasi Issue Bonus (1.33x → 1.66x)
+Cek dulu apakah issue dibuat oleh maintainer:
+```bash
+python3 scripts/issue_checker.py <issue_number>
+```
+Kalau iya → Issue Bonus 1.66x 🏆. Kalau bukan → 1.33x ✅.
+Cari maintainer issues: `python3 scripts/issue_checker.py --suggest`
+
+### Optimasi Review Quality (cegah CHANGES_REQUESTED)
+1. Self-review kode sebelum commit
+2. Jalankan `python3 scripts/pre_submit.py` sebelum push
+3. Pastikan ruff, pyright, pytest lulus
+4. PR kecil (< 100 lines, 1-4 files) lebih cepat direview
+5. Satu issue = satu PR. Jangan campur multiple issues
+
 ### Checklist Sebelum Submit PR
-- [ ] Issue di-link dengan `Fixes #N` (untuk Issue Bonus 1.33x)
-- [ ] Judul pakai `fix:` (paling sering di-merge) atau `feat:` (multiplier tinggi). **Jangan `chore:`**
-- [ ] Branch dari `test`, target `test`
-- [ ] Body: `## Summary` + bullet point + `Fixes #N` + `## Test plan` (gaya anderdc)
+- [ ] Cek issue author: `python3 scripts/issue_checker.py <N>` (target 1.66x)
+- [ ] Judul pakai `fix:` (paling sering di-merge / 60%) atau `feat:` (multiplier 1.25x). **Jangan `chore:`**
+- [ ] Branch dari `test`, target `test` — nama: `fix/<N>-<slug>`
+- [ ] Commit: 1 perubahan logis per commit, prefix semantic
+- [ ] Body: `## Summary` + bullet point + `Fixes #N` + `## Test plan`
 - [ ] Reviewer: landyndev, anderdc
 - [ ] CLI change → screenshot before-after (exit-code-only exempted)
-- [ ] Tidak ada CHANGES_REQUESTED → Review Quality tetap 1.0
-- [ ] Semua PR dalam 1-2 hari agar Time Decay seragam
+- [ ] Cek pre-submit: `python3 scripts/pre_submit.py`
 - [ ] Generate body: `python3 scripts/pr_body_builder.py --issue N --title "fix: ..." --bullets "..." --tests "..."`
 - [ ] Cek kualitas: `python3 scripts/pr_quality_check.py`
 

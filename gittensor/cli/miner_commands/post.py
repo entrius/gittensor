@@ -191,6 +191,9 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, min_vt
         console.print(f'\n[bold]{accepted_count}/{len(results)} validators accepted your PAT.[/bold]')
         _render_skipped_validators(excluded, json_mode)
 
+    if accepted_count == 0:
+        sys.exit(1)
+
 
 def _validate_pat_locally(pat: str) -> bool:
     """Validate PAT mirrors the validator-side checks: user identity + GraphQL access."""

@@ -299,7 +299,10 @@ def calculate_token_score_from_file_changes(
                     is_test_file=is_test_file,
                     scoring_method='skipped-binary',
                 )
-            elif len(content_pair.new_content.encode('utf-8')) > MAX_FILE_SIZE_BYTES:
+            elif len(content_pair.new_content.encode('utf-8')) > MAX_FILE_SIZE_BYTES or (
+                content_pair.old_content is not None
+                and len(content_pair.old_content.encode('utf-8')) > MAX_FILE_SIZE_BYTES
+            ):
                 bt.logging.debug(f'  │   {file.short_name}: skipped (file too large, >{MAX_FILE_SIZE_BYTES} bytes)')
                 file_result = FileScoreResult(
                     filename=file.short_name,

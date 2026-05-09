@@ -32,14 +32,16 @@ def _fake_metagraph(rows: list[tuple[float, bool, float]]):
 
 @pytest.fixture
 def runner():
-    return CliRunner()
+    return CliRunner(mix_stderr=False)
 
 
 class TestMinerPost:
-    def test_no_pat_prompts_interactively(self, runner, monkeypatch):
+    @patch('gittensor.cli.miner_commands.post.click.prompt', return_value='ghp_fake')
+    @patch('gittensor.cli.miner_commands.post._validate_pat_locally', return_value=None)
+    def test_no_pat_prompts_interactively(self, mock_validate, mock_prompt, runner, monkeypatch):
         monkeypatch.delenv('GITTENSOR_MINER_PAT', raising=False)
-        result = runner.invoke(cli, ['miner', 'post', '--wallet', 'test', '--hotkey', 'test'], input='')
-        assert 'Enter your GitHub Personal Access Token' in result.output
+        runner.invoke(cli, ['miner', 'post', '--wallet', 'test', '--hotkey', 'test'])
+        mock_prompt.assert_called_once_with('Enter your GitHub Personal Access Token', hide_input=True)
 
     def test_no_pat_json_mode_exits(self, runner, monkeypatch):
         monkeypatch.delenv('GITTENSOR_MINER_PAT', raising=False)
@@ -53,7 +55,7 @@ class TestMinerPost:
         monkeypatch.delenv('GITTENSOR_MINER_PAT', raising=False)
         result = runner.invoke(cli, ['miner', 'post', '--pat', 'ghp_test123', '--wallet', 'test', '--hotkey', 'test'])
         assert result.exit_code != 0
-        assert 'invalid' in result.output.lower() or 'expired' in result.output.lower()
+        assert 'invalid' in result.stderr.lower() or 'expired' in result.stderr.lower()
         mock_validate.assert_called_once_with('ghp_test123')
 
     @patch('gittensor.cli.miner_commands.post._validate_pat_locally', return_value=None)
@@ -61,7 +63,7 @@ class TestMinerPost:
         monkeypatch.setenv('GITTENSOR_MINER_PAT', 'ghp_invalid')
         result = runner.invoke(cli, ['miner', 'post', '--wallet', 'test', '--hotkey', 'test'])
         assert result.exit_code != 0
-        assert 'invalid' in result.output.lower() or 'expired' in result.output.lower()
+        assert 'invalid' in result.stderr.lower() or 'expired' in result.stderr.lower()
 
     def test_help_text(self, runner):
         result = runner.invoke(cli, ['miner', 'post', '--help'])
@@ -119,6 +121,7 @@ class TestMinerPost:
 
         assert result.exit_code == 0, result.output
         output = json.loads(result.stdout)
+        assert output['github_login'] == 'testuser'
         assert output['total_validators'] == 3
         assert output['accepted'] == 1
         assert output['rejected'] == 1

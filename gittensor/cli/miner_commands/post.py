@@ -96,14 +96,14 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, min_vt
         pat = click.prompt('Enter your GitHub Personal Access Token', hide_input=True)
 
     # 1b. Validate PAT locally
-    with _status('[bold]Validating PAT...', json_mode):
+    with _status('[bold]Validating PAT...'):
         github_login = _validate_pat_locally(pat)
 
     if github_login is None:
         _error('GitHub PAT is invalid or expired. Check your GITTENSOR_MINER_PAT.', json_mode)
         sys.exit(1)
 
-    _print(f'[green]PAT is valid.[/green] GitHub account: [bold]@{github_login}[/bold]', json_mode)
+    _print(f'[green]PAT is valid.[/green] GitHub account: [bold]@{github_login}[/bold]')
 
     # 2. Resolve wallet and network
     wallet_name = wallet_name or _load_config_value('wallet') or 'default'

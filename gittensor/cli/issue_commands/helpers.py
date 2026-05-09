@@ -234,7 +234,7 @@ def _handle_command_error(e: Exception) -> None:
     raise SystemExit(1)
 
 
-def loading_context(message: str, as_json: bool, spinner: str = 'dots', color='cyan') -> ContextManager[Any]:
+def loading_context(message: str, as_json: bool, spinner: str = 'dots', color: str = 'cyan') -> ContextManager[Any]:
     """Return a spinner context in human mode, or a no-op context in JSON mode."""
     return (
         nullcontext()

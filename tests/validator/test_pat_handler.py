@@ -3,12 +3,14 @@
 """Tests for PAT broadcast and check handlers."""
 
 import asyncio
+from typing import Optional
 from unittest.mock import MagicMock, patch
 
 import pytest
 from bittensor.core.synapse import TerminalInfo
 
 from gittensor.synapses import PatBroadcastSynapse, PatCheckSynapse
+from gittensor.utils.github_api_tools import GitHubIdentityResult, GitHubIdentityStatus
 from gittensor.validator import pat_storage
 from gittensor.validator.pat_handler import (
     _test_pat_against_repo,
@@ -17,6 +19,16 @@ from gittensor.validator.pat_handler import (
     handle_pat_broadcast,
     handle_pat_check,
 )
+from gittensor.validator.utils.github_validation import GitHubCredentialValidation
+
+
+def _validation(
+    github_id: Optional[str] = 'github_42',
+    error: Optional[str] = None,
+    transient_failure: bool = False,
+) -> GitHubCredentialValidation:
+    """Build a GitHubCredentialValidation for mocking validate_github_credentials_result."""
+    return GitHubCredentialValidation(github_id, error, transient_failure=transient_failure)
 
 
 def _run(coro):
@@ -188,7 +200,7 @@ class TestHandlePatBroadcast:
 
 class TestHandlePatCheck:
     @patch('gittensor.validator.pat_handler._test_pat_against_repo', return_value=None)
-    @patch('gittensor.validator.pat_handler.validate_github_credentials', return_value=('github_42', None))
+    @patch('gittensor.validator.pat_handler.validate_github_credentials_result', return_value=_validation())
     def test_valid_pat(self, mock_validate, mock_test_query, mock_validator):
         pat_storage.save_pat(1, 'hotkey_1', 'ghp_test', 'github_42')
 
@@ -214,7 +226,10 @@ class TestHandlePatCheck:
         assert result.pat_valid is False
 
     @patch('gittensor.validator.pat_handler._test_pat_against_repo', return_value=None)
-    @patch('gittensor.validator.pat_handler.validate_github_credentials', return_value=(None, 'PAT expired'))
+    @patch(
+        'gittensor.validator.pat_handler.validate_github_credentials_result',
+        return_value=_validation(None, 'PAT expired'),
+    )
     def test_stored_but_invalid_pat(self, mock_validate, mock_test_query, mock_validator):
         """PAT is stored but fails re-validation."""
         pat_storage.save_pat(1, 'hotkey_1', 'ghp_expired', 'github_42')
@@ -224,6 +239,25 @@ class TestHandlePatCheck:
         assert result.has_pat is True
         assert result.pat_valid is False
         assert 'PAT expired' in (result.rejection_reason or '')
+
+    @patch('gittensor.validator.pat_handler._test_pat_against_repo')
+    @patch(
+        'gittensor.validator.utils.github_validation.get_github_identity',
+        return_value=GitHubIdentityResult(None, GitHubIdentityStatus.TRANSIENT_FAILURE),
+    )
+    def test_transient_identity_lookup_reports_inconclusive(self, mock_get_identity, mock_test_query, mock_validator):
+        """Transient GitHub /user failures must surface as pat_valid=None, not False (issue #1106)."""
+        pat_storage.save_pat(1, 'hotkey_1', 'ghp_stored', 'github_42')
+
+        synapse = _make_check_synapse('hotkey_1')
+        result = _run(handle_pat_check(mock_validator, synapse))
+
+        assert result.has_pat is True
+        assert result.pat_valid is None
+        assert result.rejection_reason == (
+            'GitHub API temporarily unavailable; please retry the PAT check in a few minutes.'
+        )
+        mock_test_query.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

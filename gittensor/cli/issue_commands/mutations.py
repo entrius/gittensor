@@ -21,6 +21,7 @@ from .helpers import (
     _is_interactive,
     _resolve_contract_and_network,
     console,
+    err_console,
     format_alpha,
     load_config,
     print_error,
@@ -30,6 +31,14 @@ from .helpers import (
     validate_github_issue,
     validate_repository,
 )
+
+
+def _print_register_revert_hints() -> None:
+    print_error('Contract rejected the request')
+    err_console.print('[yellow]Possible reasons:[/yellow]')
+    err_console.print('  • Issue already registered (same repo + issue number)')
+    err_console.print('  • Bounty too low (minimum 10 ALPHA)')
+    err_console.print('  • Caller is not the contract owner')
 
 
 @click.command('register', cls=StyledCommand)
@@ -117,7 +126,7 @@ def issue_register(
         $ gitt i reg --repo owner/repo --issue 1 --bounty 10 -y
     [/dim]
     """
-    console.print('\n[bold cyan]Register Issue for Bounty[/bold cyan]\n')
+    err_console.print('\n[bold cyan]Register Issue for Bounty[/bold cyan]\n')
 
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(
         contract,
@@ -146,7 +155,7 @@ def issue_register(
 
     github_url = f'https://github.com/{repo}/issues/{issue_number}'
 
-    console.print(
+    err_console.print(
         Panel(
             f'[cyan]Repository:[/cyan] {repo}\n'
             f'[cyan]Issue Number:[/cyan] #{issue_number}\n'
@@ -162,7 +171,7 @@ def issue_register(
 
     skip_confirm = yes or not _is_interactive()
     if not skip_confirm and not click.confirm('\nProceed with registration?', default=True):
-        console.print('[yellow]Registration cancelled.[/yellow]')
+        err_console.print('[yellow]Registration cancelled.[/yellow]')
         return
 
     try:
@@ -170,7 +179,7 @@ def issue_register(
         from substrateinterface import Keypair, SubstrateInterface
         from substrateinterface.contracts import ContractInstance
 
-        with console.status('[bold cyan]Connecting to network...', spinner='dots'):
+        with err_console.status('[bold cyan]Connecting to network...', spinner='dots'):
             substrate = SubstrateInterface(url=ws_endpoint)
 
         # CLI flags override config; fall back to config if not explicitly supplied
@@ -179,11 +188,11 @@ def issue_register(
 
         # For local development, check config first, then fall back to //Alice
         if network_name.lower() == 'local' and effective_wallet == 'default' and effective_hotkey == 'default':
-            console.print('[dim]Using //Alice for local development (no config set)...[/dim]')
+            err_console.print('[dim]Using //Alice for local development (no config set)...[/dim]')
             keypair = Keypair.create_from_uri('//Alice')
         else:
             # Load wallet from config or CLI args
-            console.print(f'[dim]Loading wallet {effective_wallet}/{effective_hotkey}...[/dim]')
+            err_console.print(f'[dim]Loading wallet {effective_wallet}/{effective_hotkey}...[/dim]')
             wallet = bt.Wallet(name=effective_wallet, hotkey=effective_hotkey)
             # Use COLDKEY for owner-only operations (register_issue requires owner)
             # Contract owner is set to deployer's coldkey during contract instantiation
@@ -209,7 +218,7 @@ def issue_register(
             substrate=substrate,
         )
 
-        console.print('[dim]Submitting transaction...[/dim]')
+        err_console.print('[dim]Submitting transaction...[/dim]')
 
         result = contract_instance.exec(
             keypair,  # type: ignore[arg-type]
@@ -229,11 +238,7 @@ def issue_register(
             is_revert = error_info and isinstance(error_info, dict) and error_info.get('name') == 'ContractReverted'
 
             if is_revert:
-                print_error('Contract rejected the request')
-                console.print('[yellow]Possible reasons:[/yellow]')
-                console.print('  \u2022 Issue already registered (same repo + issue number)')
-                console.print('  \u2022 Bounty too low (minimum 10 ALPHA)')
-                console.print('  \u2022 Caller is not the contract owner')
+                _print_register_revert_hints()
             elif error_info:
                 print_error(str(error_info))
 
@@ -242,20 +247,16 @@ def issue_register(
 
         print_success('Issue registered successfully!')
         console.print(f'[cyan]Transaction Hash:[/cyan] {result.extrinsic_hash}')
-        console.print('[dim]Issue will be visible once bounty is funded via harvest_emissions()[/dim]')
+        err_console.print('[dim]Issue will be visible once bounty is funded via harvest_emissions()[/dim]')
 
     except ImportError as e:
         print_error(f'Missing dependency - {e}')
-        console.print('[dim]Install with: uv sync[/dim]')
+        err_console.print('[dim]Install with: uv sync[/dim]')
         raise SystemExit(1)
     except Exception as e:
         error_msg = str(e)
         if 'ContractReverted' in error_msg:
-            print_error('Contract rejected the request')
-            console.print('[yellow]Possible reasons:[/yellow]')
-            console.print('  \u2022 Issue already registered (same repo + issue number)')
-            console.print('  \u2022 Bounty too low (minimum 10 ALPHA)')
-            console.print('  \u2022 Caller is not the contract owner')
+            _print_register_revert_hints()
         else:
             print_error(f'Error registering issue: {e}')
         raise SystemExit(1)
@@ -307,7 +308,7 @@ def issue_harvest(wallet_name: str, wallet_hotkey: str, network: str, rpc_url: s
         $ gitt harvest --wallet-name mywallet --wallet-hotkey mykey
     [/dim]
     """
-    console.print('\n[bold cyan]Manual Emission Harvest[/bold cyan]\n')
+    err_console.print('\n[bold cyan]Manual Emission Harvest[/bold cyan]\n')
 
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(
         contract,
@@ -317,7 +318,7 @@ def issue_harvest(wallet_name: str, wallet_hotkey: str, network: str, rpc_url: s
     )
 
     print_network_header(network_name, contract_addr)
-    console.print(f'[dim]Wallet: {wallet_name}/{wallet_hotkey}[/dim]\n')
+    err_console.print(f'[dim]Wallet: {wallet_name}/{wallet_hotkey}[/dim]\n')
 
     try:
         import bittensor as bt
@@ -326,23 +327,23 @@ def issue_harvest(wallet_name: str, wallet_hotkey: str, network: str, rpc_url: s
             IssueCompetitionContractClient,
         )
 
-        with console.status('[bold cyan]Loading wallet...', spinner='dots'):
+        with err_console.status('[bold cyan]Loading wallet...', spinner='dots'):
             wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
             hotkey_addr = wallet.hotkey.ss58_address
-        console.print(f'[green]Hotkey address:[/green] {hotkey_addr}')
+        err_console.print(f'[green]Hotkey address:[/green] {hotkey_addr}')
 
-        with console.status('[bold cyan]Connecting to network...', spinner='dots'):
+        with err_console.status('[bold cyan]Connecting to network...', spinner='dots'):
             subtensor = bt.Subtensor(network=ws_endpoint)
 
         # Show wallet balance (informational only)
         if verbose:
             try:
                 balance = subtensor.get_balance(hotkey_addr)
-                console.print(f'[dim]Wallet balance: {balance}[/dim]')
+                err_console.print(f'[dim]Wallet balance: {balance}[/dim]')
             except Exception as e:
-                console.print(f'[dim]Could not fetch balance: {e}[/dim]')
+                err_console.print(f'[dim]Could not fetch balance: {e}[/dim]')
 
-        with console.status('[bold cyan]Initializing contract client...', spinner='dots'):
+        with err_console.status('[bold cyan]Initializing contract client...', spinner='dots'):
             client = IssueCompetitionContractClient(
                 contract_address=contract_addr,
                 subtensor=subtensor,
@@ -350,57 +351,57 @@ def issue_harvest(wallet_name: str, wallet_hotkey: str, network: str, rpc_url: s
 
         if verbose:
             # Show contract state
-            console.print('[dim]Reading contract state...[/dim]')
+            err_console.print('[dim]Reading contract state...[/dim]')
             try:
                 alpha_pool = client.get_alpha_pool()
                 pending = client.get_treasury_stake()
                 last_harvest = client.get_last_harvest_block()
                 current_block = subtensor.get_current_block()
 
-                console.print(f'[dim]Alpha pool: {format_alpha(alpha_pool, 4)} ALPHA[/dim]')
-                console.print(f'[dim]Treasury stake: {format_alpha(pending, 4)} ALPHA[/dim]')
-                console.print(f'[dim]Last harvest block: {last_harvest}[/dim]')
-                console.print(f'[dim]Current block: {current_block}[/dim]')
+                err_console.print(f'[dim]Alpha pool: {format_alpha(alpha_pool, 4)} ALPHA[/dim]')
+                err_console.print(f'[dim]Treasury stake: {format_alpha(pending, 4)} ALPHA[/dim]')
+                err_console.print(f'[dim]Last harvest block: {last_harvest}[/dim]')
+                err_console.print(f'[dim]Current block: {current_block}[/dim]')
                 if last_harvest > 0:
-                    console.print(f'[dim]Blocks since harvest: {current_block - last_harvest}[/dim]')
+                    err_console.print(f'[dim]Blocks since harvest: {current_block - last_harvest}[/dim]')
             except Exception as e:
-                console.print(f'[yellow]Warning: Could not read contract state: {e}[/yellow]')
+                err_console.print(f'[yellow]Warning: Could not read contract state: {e}[/yellow]')
 
-        with console.status('[bold cyan]Calling harvest_emissions()...', spinner='dots'):
+        with err_console.status('[bold cyan]Calling harvest_emissions()...', spinner='dots'):
             result = client.harvest_emissions(wallet)
 
         if result:
             if result.get('status') == 'success':
                 print_success('Harvest succeeded!')
                 console.print(f'[cyan]Transaction hash:[/cyan] {result.get("tx_hash", "N/A")}')
-                console.print('[dim]Treasury stake processed. Excess emissions recycled if any.[/dim]')
+                err_console.print('[dim]Treasury stake processed. Excess emissions recycled if any.[/dim]')
             elif result.get('status') == 'partial':
-                console.print('\n[yellow]Harvest completed but recycling failed[/yellow]')
+                err_console.print('\n[yellow]Harvest completed but recycling failed[/yellow]')
                 console.print(f'[cyan]Transaction hash:[/cyan] {result.get("tx_hash", "N/A")}')
                 print_error(result.get('error', 'Unknown'))
-                console.print('[dim]Check proxy permissions: contract needs NonCritical proxy.[/dim]')
+                err_console.print('[dim]Check proxy permissions: contract needs NonCritical proxy.[/dim]')
                 raise SystemExit(1)
             elif result.get('status') in {'failed', 'error'}:
                 print_error(f'Harvest failed: {result.get("error", "Unknown error")}')
                 raise SystemExit(1)
             else:
-                console.print(f'\n[yellow]Harvest result: {result}[/yellow]')
+                err_console.print(f'\n[yellow]Harvest result: {result}[/yellow]')
                 raise SystemExit(1)
         else:
             print_error('Harvest returned None — check logs for details.')
-            console.print('[dim]Run with --verbose for more information.[/dim]')
+            err_console.print('[dim]Run with --verbose for more information.[/dim]')
             raise SystemExit(1)
 
     except ImportError as e:
         print_error(f'Missing dependency — {e}')
-        console.print('[dim]Install with: uv sync[/dim]')
+        err_console.print('[dim]Install with: uv sync[/dim]')
         raise SystemExit(1)
     except Exception as e:
         import traceback
 
         print_error(f'{type(e).__name__}: {e}')
         if verbose:
-            console.print(f'[dim]Full traceback:\n{traceback.format_exc()}[/dim]')
+            err_console.print(f'[dim]Full traceback:\n{traceback.format_exc()}[/dim]')
         else:
-            console.print('[dim]Run with --verbose for full traceback.[/dim]')
+            err_console.print('[dim]Run with --verbose for full traceback.[/dim]')
         raise SystemExit(1)

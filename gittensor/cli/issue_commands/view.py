@@ -25,8 +25,10 @@ from .helpers import (
     colorize_status,
     console,
     emit_json,
+    err_console,
     format_alpha,
     handle_exception,
+    loading_context,
     print_network_header,
     read_issues_from_contract,
     validate_issue_id,
@@ -93,10 +95,9 @@ def issues_list(
         missing_contract_message='Contract address not configured. Set via: gitt config set contract_address <ADDR>.',
     )
 
-    if not as_json:
-        print_network_header(network_name, contract_addr)
+    print_network_header(network_name, contract_addr)
 
-    with console.status('[bold cyan]Reading issues from contract...', spinner='dots'):
+    with loading_context('Reading issues from contract...', as_json):
         issues = read_issues_from_contract(ws_endpoint, contract_addr, verbose)
 
     if as_json:
@@ -148,7 +149,7 @@ def issues_list(
         issues = [i for i in issues if i.get('repository_full_name', '').lower() == repo_filter.lower()]
 
     # Table view of all issues
-    console.print('[bold cyan]Available Issues[/bold cyan]\n')
+    err_console.print('[bold cyan]Available Issues[/bold cyan]\n')
 
     table = Table(show_header=True, header_style='bold magenta')
     table.add_column('ID', style='cyan', justify='right')
@@ -205,11 +206,11 @@ def issues_list(
                 colorize_status(status),
             )
         console.print(table)
-        console.print(f'\n[dim]Showing {len(issues)} issue(s)[/dim]')
-        console.print('[dim]Bounty Pool shows: filled/target (percentage)[/dim]')
+        err_console.print(f'\n[dim]Showing {len(issues)} issue(s)[/dim]')
+        err_console.print('[dim]Bounty Pool shows: filled/target (percentage)[/dim]')
     else:
-        console.print('[yellow]No issues found.[/yellow]')
-        console.print('[dim]Register an issue: gitt issues register --repo owner/repo --issue 1 --bounty 100[/dim]')
+        err_console.print('[yellow]No issues found.[/yellow]')
+        err_console.print('[dim]Register an issue: gitt issues register --repo owner/repo --issue 1 --bounty 100[/dim]')
 
 
 @click.command('bounty-pool', cls=StyledCommand)
@@ -225,13 +226,12 @@ def issues_bounty_pool(network: str, rpc_url: str, contract: str, verbose: bool,
     """
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
 
-    if not as_json:
-        print_network_header(network_name, contract_addr)
+    print_network_header(network_name, contract_addr)
 
     try:
         from substrateinterface import SubstrateInterface
 
-        with console.status('[bold cyan]Reading contract storage...', spinner='dots'):
+        with loading_context('Reading contract storage...', as_json):
             substrate = SubstrateInterface(url=ws_endpoint)
             issues = _read_issues_from_child_storage(substrate, contract_addr, verbose)
 
@@ -251,7 +251,7 @@ def issues_bounty_pool(network: str, rpc_url: str, contract: str, verbose: bool,
         console.print(
             f'[green]Issue Bounty Pool:[/green] {format_alpha(total_bounty_pool, 4)} ALPHA ({total_bounty_pool} raw)'
         )
-        console.print(f'[dim]Sum of bounty amounts from {len(issues)} issue(s)[/dim]')
+        err_console.print(f'[dim]Sum of bounty amounts from {len(issues)} issue(s)[/dim]')
     except Exception as e:
         handle_exception(as_json=as_json, message=str(e))
 
@@ -269,8 +269,7 @@ def issues_pending_harvest(network: str, rpc_url: str, contract: str, verbose: b
     """
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
 
-    if not as_json:
-        print_network_header(network_name, contract_addr)
+    print_network_header(network_name, contract_addr)
 
     try:
         import bittensor as bt
@@ -280,7 +279,7 @@ def issues_pending_harvest(network: str, rpc_url: str, contract: str, verbose: b
             IssueCompetitionContractClient,
         )
 
-        with console.status('[bold cyan]Reading treasury and contract data...', spinner='dots'):
+        with loading_context('Reading treasury and contract data...', as_json):
             subtensor = bt.Subtensor(network=ws_endpoint)
             client = IssueCompetitionContractClient(
                 contract_address=contract_addr,
@@ -328,13 +327,12 @@ def admin_info(network: str, rpc_url: str, contract: str, verbose: bool, as_json
     """
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
 
-    if not as_json:
-        print_network_header(network_name, contract_addr)
+    print_network_header(network_name, contract_addr)
 
     try:
         from substrateinterface import SubstrateInterface
 
-        with console.status('[bold cyan]Reading contract configuration...', spinner='dots'):
+        with loading_context('Reading contract configuration...', as_json):
             substrate = SubstrateInterface(url=ws_endpoint)
             packed = _read_contract_packed_storage(substrate, contract_addr, verbose)
 
@@ -357,8 +355,8 @@ def admin_info(network: str, rpc_url: str, contract: str, verbose: bool, as_json
             msg = 'Could not read contract configuration.'
             if as_json:
                 handle_exception(as_json=as_json, message=msg, error_type='read_failed')
-            console.print(f'[yellow]{msg}[/yellow]')
-            console.print('[dim]Try running with --verbose to see debug details.[/dim]')
+            err_console.print(f'[yellow]{msg}[/yellow]')
+            err_console.print('[dim]Try running with --verbose to see debug details.[/dim]')
             raise SystemExit(1)
     except Exception as e:
         handle_exception(as_json=as_json, message=str(e))

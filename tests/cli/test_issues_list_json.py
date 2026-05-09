@@ -33,7 +33,7 @@ def test_issues_list_json_missing_issue_returns_structured_error(cli_root, runne
 
     assert result.exit_code != 0
 
-    payload = json.loads(result.output)
+    payload = json.loads(result.stdout)
     assert payload['success'] is False
     assert payload['error']['type'] == 'not_found'
     assert '999' in payload['error']['message']

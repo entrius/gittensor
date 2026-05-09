@@ -97,13 +97,13 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, min_vt
 
     # 1b. Validate PAT locally
     with _status('[bold]Validating PAT...'):
-        pat_valid = _validate_pat_locally(pat)
+        pat_valid, github_login = _validate_pat_locally(pat)
 
     if not pat_valid:
         _error('GitHub PAT is invalid or expired. Check your GITTENSOR_MINER_PAT.', json_mode)
         sys.exit(1)
 
-    _print('[green]PAT is valid.[/green]')
+    _print(f'[green]PAT is valid for GitHub user: {github_login}[/green]')
 
     # 2. Resolve wallet and network
     wallet_name = wallet_name or _load_config_value('wallet') or 'default'
@@ -192,7 +192,7 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, min_vt
         _render_skipped_validators(excluded, json_mode)
 
 
-def _validate_pat_locally(pat: str) -> bool:
+def _validate_pat_locally(pat: str) -> tuple[bool, str]:
     """Validate PAT mirrors the validator-side checks: user identity + GraphQL access."""
     try:
         # Check basic auth
@@ -200,7 +200,9 @@ def _validate_pat_locally(pat: str) -> bool:
             f'{BASE_GITHUB_API_URL}/user', headers=make_headers(pat), timeout=GITHUB_HTTP_TIMEOUT_SECONDS
         )
         if user_resp.status_code != 200:
-            return False
+            return False, ''
+        user_data = user_resp.json()
+        github_login = user_data.get('login', 'unknown')
 
         # Check GraphQL access (same test the validator runs during PAT broadcast)
         gql_resp = requests.post(
@@ -213,8 +215,8 @@ def _validate_pat_locally(pat: str) -> bool:
             err_console.print(
                 '[red]PAT lacks GraphQL API access. Fine-grained PATs need "Public Repositories (read-only)" permission.[/red]'
             )
-            return False
+            return False, ''
 
-        return True
+        return True, github_login
     except requests.RequestException:
-        return False
+        return False, ''

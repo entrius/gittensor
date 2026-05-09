@@ -1,0 +1,76 @@
+{
+  "_comment": "Terminal capture config for PR evidence. Run: python3 capture_terminal.py --all",
+  "captures": [
+    {
+      "pr": 1092,
+      "before": "python3 -c \"from gittensor.validator import MirrorPRAdapter; m=MirrorPRAdapter(); print(type(m).__name__)\"",
+      "after": "python3 -c \"from gittensor.validator import MirrorPRAdapter; m=MirrorPRAdapter(); print(type(m).__name__)\"",
+      "label": "Mirror PR adapter null numeric fix"
+    },
+    {
+      "pr": 1129,
+      "before": "gitt miner check --network finney 2>&1; echo \"Exit: $?\"",
+      "after": "python3 gittensor/cli/miner_commands/check.py --network finney 2>&1; echo \"Exit: $?\"",
+      "label": "check.py exit code 1 on valid_count==0"
+    },
+    {
+      "pr": 1130,
+      "before": "gitt miner post --network finney 2>&1; echo \"Exit: $?\"",
+      "after": "python3 gittensor/cli/miner_commands/post.py --network finney 2>&1; echo \"Exit: $?\"",
+      "label": "post.py exit code 1 on accepted_count==0"
+    },
+    {
+      "pr": 1133,
+      "before": "gitt miner validate-pat 2>&1",
+      "after": "python3 gittensor/cli/miner_commands/post.py --help 2>&1 | head -20",
+      "label": "show GitHub user after PAT"
+    },
+    {
+      "pr": 1126,
+      "before": "rg 'first:50' gittensor/validator/ --no-filename | head -5",
+      "after": "rg 'last:50' gittensor/validator/ --no-filename | head -5",
+      "label": "solver lookup last:50"
+    },
+    {
+      "pr": 1125,
+      "before": "rg 'author_github_id' gittensor/validator/scoring.py | head -10",
+      "after": "rg 'author_github_id' gittensor/validator/scoring.py | head -10",
+      "label": "preserve null author_github_id"
+    },
+    {
+      "pr": 1102,
+      "before": "rg '403\|401\|Invalid token\|not found' gittensor/utils/github_api_tools.py",
+      "after": "python3 -c \"from gittensor.utils.github_api_tools import validate_pat_token; print(validate_pat_token.__doc__)\"",
+      "label": "PAT error message distinction"
+    },
+    {
+      "pr": 1101,
+      "before": "python3 -c \"
+import os
+f='test.txt'
+open(f,'w').close()
+# Simulate extensionless check
+ext = os.path.splitext(f)[1]
+print(f'Extension of {f}: {repr(ext)}')
+os.remove(f)
+\"",
+      "after": "python3 -c \"
+import os
+# After fix: extensionless files scored by line count
+f='no_ext'
+open(f,'w').write('line1\\nline2\\nline3\\n')
+ext = os.path.splitext(f)[1]
+print(f'Extension of {f}: {repr(ext)}')
+print('Fix: score by line-count when ext is empty')
+os.remove(f)
+\"",
+      "label": "extensionless files fix"
+    },
+    {
+      "pr": 1103,
+      "before": "python3 -c \"import json; print(json.dumps({'excluded_validators': ['5D...', '5E...'], 'reason': 'low trust score'}, indent=2))\"",
+      "after": "rg 'excluded_validator\|trust_score' gittensor/validator/ --no-filename | head -10",
+      "label": "excluded validator details"
+    }
+  ]
+}

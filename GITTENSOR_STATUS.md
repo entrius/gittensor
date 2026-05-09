@@ -140,20 +140,38 @@ Ciri khas: **teknis, langsung ke inti, test plan spesifik dengan file path, tanp
 **Kesimpulan:** `fix:` adalah pilihan terbaik — multiplier 1.1x + 60% chance merge.  
 **Hindari `chore:`** (0.25x multiplier — bunuh score).
 
-### Gaya Body PR Wajib (Gaya Top Merged)
+### Gaya Body PR Wajib (Gaya Anderdc v2)
 ```markdown
 ## Summary
-- <perubahan, detail teknis, alasan>
+- <perubahan, detail teknis>
+
+## Root Cause
+<analisis teknis: kenapa bug terjadi, kode apa yg salah, bagaimana dampaknya>
+
+## Impact
+<apa yg rusak: error message, user experience, validator behavior>
 
 ## Related Issues
 Fixes #<N>
 
 ## Test plan
 - [x] ruff check / ruff format --check clean
-- [x] pyright clean
-- [x] pytest tests/... — N pass
+- [x] pyright clean (0 errors / 0 warnings)
+- [x] pytest tests/path/test_file.py — N/N pass
+- [x] <live verification: command yg dijalankan + hasilnya>
+
+- [ ] Post-merge: confirm fix resolves #N in production
 ```
-**Tidak perlu:** Type of Change, Checklist, atau template formal lain.
+**Struktur (gaya anderdc):**
+| Section | Wajib? | Isi |
+|---------|--------|-----|
+| `## Summary` | ✅ | Bullet point perubahan teknis |
+| `## Root Cause` | ✅ | WHY bug terjadi (kode, heuristic, dll) |
+| `## Impact` | ✅ | Apa yg rusak, siapa terpengaruh |
+| `## Related Issues` | ✅ | `Fixes #N` untuk Issue Bonus |
+| `## Test plan` | ✅ | Test spesifik + pass count + live verification |
+| `### Why` | ⚠️ | Hanya untuk perubahan kompleks (konteks) |
+| Post-merge checklist | ✅ | `- [ ] Post-merge: confirm...` |
 
 ### Gaya Commit Message
 ```

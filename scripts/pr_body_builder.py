@@ -1,97 +1,121 @@
 #!/usr/bin/env python3
 """
-PR Body Builder — Gaya Top Merged PRs (anderdc, MkDev11, plind-junior, dll)
+PR Body Builder v2 — Gaya Anderdc (Top Maintainer)
 
-Cara pakai:
-  python3 scripts/pr_body_builder.py --issue 123 --summary "Fix null pointer in X" \\
-    --bullets "Bullet 1" "Bullet 2" --test "pytest tests/x.py"
+Contoh:
+  python3 scripts/pr_body_builder.py --issue 123 \\
+    --title "fix: deskripsi (#123)" \\
+    --root-cause "penyebab teknis bug" \\
+    --impact "apa yang rusak" \\
+    --solution "perubahan 1" "perubahan 2" \\
+    --tests "ruff check" "pytest tests/cli/ - 10/10 pass" \\
+    --live-verif "gitt miner check --network finney - returns correct exit code"
 """
 import argparse, subprocess, sys
 
-TEMPLATE = """## Summary
+def build(issue: int, title: str, root_cause: str, impact: str, solution: list[str],
+          tests: list[str], live_verif: list[str] = None, why: str = "") -> str:
+    parts = []
 
-{bullets}
+    # Summary
+    sol = "\n".join(f"- {s}" for s in solution)
+    summary = f"## Summary\n\n{sol}"
+    parts.append(summary)
 
-## Related Issues
+    # Root Cause (untuk bug)
+    if root_cause:
+        parts.append(f"\n## Root Cause\n\n{root_cause}")
 
-Fixes #{issue}
+    # Impact
+    if impact:
+        parts.append(f"\n## Impact\n\n{impact}")
 
-## Test plan
+    # Why (konteks)
+    if why:
+        parts.append(f"\n### Why\n\n{why}")
 
-{tests}"""
+    # Related Issues
+    parts.append(f"\n## Related Issues\n\nFixes #{issue}")
 
-def build(issue: int, summary: str, bullets: list[str], tests: list[str], detail: str = "") -> str:
-    b = "\n".join(f"- {line}" for line in bullets)
-    t = "\n".join(f"- [x] {line}" for line in tests)
+    # Test plan
+    t = "\n".join(f"- [x] {t}" for t in tests)
+    parts.append(f"\n## Test plan\n\n{t}")
 
-    body = f"""## Summary
+    # Live verification
+    if live_verif:
+        lv = "\n".join(f"- [x] {v}" for v in live_verif)
+        parts.append(f"\n### Live verification\n\n{lv}")
 
-{b}
-"""
+    # Post-merge
+    parts.append(f"\n- [ ] Post-merge: confirm fix resolves #{issue} in production")
 
-    if detail:
-        body += f"""\n### Why
+    return "".join(parts)
 
-{detail}
-"""
-
-    body += f"""
-## Related Issues
-
-Fixes #{issue}
-
-## Test plan
-
-{t}"""
-
-    return body
-
-def create_pr(title: str, body: str, head: str, dry_run: bool = False):
+def update_pr_body(pr_num: int, body: str, dry_run: bool = False):
     if dry_run:
         print("=== DRY RUN ===")
-        print(f"Title: {title}")
-        print(f"Head: {head}")
-        print(f"Body:\n{body}")
+        print(f"Body untuk PR #{pr_num}:\n{body}")
         return
-
-    r = subprocess.run([
-        "gh", "pr", "create",
-        "--repo", "entrius/gittensor",
-        "--base", "test",
-        "--head", f"alpurkan17:{head}",
-        "--title", title,
-        "--body", body,
-    ], capture_output=True, text=True, timeout=30)
+    r = subprocess.run(
+        ["gh", "api", "--method", "PATCH", f"repos/entrius/gittensor/pulls/{pr_num}",
+         "-f", f"body={body}"],
+        capture_output=True, text=True, timeout=15
+    )
     if r.returncode == 0:
-        print(f"✅ PR created: {r.stdout.strip()}")
+        print(f"✅ PR #{pr_num} body updated")
     else:
         print(f"❌ Error: {r.stderr}")
-        sys.exit(1)
 
-def parse_bullets(text: str) -> list[str]:
-    return [l.strip().lstrip("- ") for l in text.strip().split("\n") if l.strip()]
+def generate_upgrade(pr_num: int, issue_num: int, description: str, has_cli: bool = False):
+    """Generate enhanced body untuk PR existing yang perlu di-upgrade."""
+    return build(
+        issue=issue_num,
+        title="",
+        root_cause=description,
+        impact="",
+        solution=[description],
+        tests=["ruff check", "ruff format --check", "pyright"],
+        live_verif=(["Screenshot before-after terlampir"] if has_cli else []),
+    )
 
 if __name__ == "__main__":
-    p = argparse.ArgumentParser(description="PR Body Builder — gaya top merged PRs")
+    p = argparse.ArgumentParser(description="PR Body Builder v2 — gaya anderdc")
     p.add_argument("--issue", type=int, required=True, help="Issue number")
-    p.add_argument("--title", required=True, help="PR title (fix:/feat: prefix)")
-    p.add_argument("--bullets", nargs="+", required=True, help="Bullet points perubahan")
-    p.add_argument("--tests", nargs="+", default=["ruff check", "ruff format --check"], help="Test plan items")
-    p.add_argument("--detail", default="", help="Detail/Why section (opsional)")
-    p.add_argument("--head", default=None, help="Branch head (default: auto dari issue)")
-    p.add_argument("--dry-run", action="store_true", help="Preview only, no submit")
+    p.add_argument("--title", required=True, help="PR title")
+    p.add_argument("--root-cause", default="", help="Root cause analysis")
+    p.add_argument("--impact", default="", help="Impact of the bug")
+    p.add_argument("--solution", nargs="+", required=True, help="Changes made")
+    p.add_argument("--why", default="", help="Background context")
+    p.add_argument("--tests", nargs="+", default=["ruff check"], help="Test plan items")
+    p.add_argument("--live-verif", nargs="*", default=[], help="Live verification commands")
+    p.add_argument("--dry-run", action="store_true", help="Preview only")
+    p.add_argument("--update-pr", type=int, default=None, help="Update existing PR body")
     args = p.parse_args()
 
-    head = args.head or f"fix/{args.issue}-auto"
-    body = build(args.issue, args.bullets[0] if args.bullets else "", args.bullets, args.tests, args.detail)
+    body = build(
+        issue=args.issue, title=args.title,
+        root_cause=args.root_cause, impact=args.impact,
+        solution=args.solution, tests=args.tests,
+        live_verif=args.live_verif, why=args.why,
+    )
 
-    if args.dry_run:
-        create_pr(args.title, body, head, dry_run=True)
+    if args.update_pr:
+        update_pr_body(args.update_pr, body, args.dry_run)
     else:
-        print(f"Body PR untuk #{args.issue}:")
+        print(f"\nBody PR untuk #{args.issue}:\n")
         print(body)
-        ok = input("\nSubmit PR? (y/N): ").strip().lower()
-        if ok == "y":
-            create_pr(args.title, body, head)
-        else:
-            print("Dibatalkan.")
+        print(f"\n{'─' * 60}")
+        if not args.dry_run:
+            ok = input("\nSubmit PR? (y/N): ").strip().lower()
+            if ok == "y":
+                r = subprocess.run([
+                    "gh", "pr", "create", "--repo", "entrius/gittensor",
+                    "--base", "test", "--head", f"alpurkan17:{args.title.split()[0].replace(':','')}-{args.issue}",
+                    "--title", args.title, "--body", body,
+                ], capture_output=True, text=True, timeout=30)
+                if r.returncode == 0:
+                    print(f"✅ {r.stdout.strip()}")
+                else:
+                    print(f"❌ {r.stderr}")
+            else:
+                print("Dibatalkan.")

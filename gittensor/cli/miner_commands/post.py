@@ -47,12 +47,13 @@ _PAT_POST_STATUS_MARKUP = {
 @dataclass(frozen=True)
 class PatValidationResult:
     is_valid: bool
+    github_login: str | None = None
     error_code: str | None = None
     error_message: str | None = None
 
     @classmethod
-    def valid(cls) -> 'PatValidationResult':
-        return cls(is_valid=True)
+    def valid(cls, github_login: str | None = None) -> 'PatValidationResult':
+        return cls(is_valid=True, github_login=github_login)
 
     @classmethod
     def failed(cls, error_code: str | None, error_message: str) -> 'PatValidationResult':
@@ -125,7 +126,8 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, min_vt
         )
         sys.exit(1)
 
-    _print('[green]PAT is valid.[/green]')
+    github_login = pat_validation.github_login
+    _print(f'[green]PAT is valid.[/green] GitHub account: [bold]@{github_login}[/bold]')
 
     # 2. Resolve wallet and network
     wallet_name = wallet_name or _load_config_value('wallet') or 'default'
@@ -189,6 +191,7 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, min_vt
             json.dumps(
                 {
                     'success': accepted_count > 0,
+                    'github_login': github_login,
                     'total_validators': len(results),
                     **counts,
                     'skipped': excluded,
@@ -217,7 +220,7 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, min_vt
 def _validate_pat_locally(pat: str) -> PatValidationResult:
     """Validate PAT mirrors the validator-side checks: user identity + GraphQL access."""
     try:
-        # Check basic auth
+        # Check basic auth and extract login
         user_resp = requests.get(
             f'{BASE_GITHUB_API_URL}/user', headers=make_headers(pat), timeout=GITHUB_HTTP_TIMEOUT_SECONDS
         )
@@ -229,6 +232,8 @@ def _validate_pat_locally(pat: str) -> PatValidationResult:
 
     if user_resp.status_code != 200:
         return _classify_user_lookup_failure(user_resp)
+
+    login: str | None = user_resp.json().get('login') or None
 
     try:
         # Check GraphQL access (same test the validator runs during PAT broadcast)
@@ -244,7 +249,7 @@ def _validate_pat_locally(pat: str) -> PatValidationResult:
             )
             return PatValidationResult.failed(None, _INVALID_PAT_MESSAGE)
 
-        return PatValidationResult.valid()
+        return PatValidationResult.valid(github_login=login)
     except requests.RequestException:
         return PatValidationResult.failed(None, _INVALID_PAT_MESSAGE)
 

@@ -3,6 +3,7 @@
 
 """Issue bounties forward pass — harvest, verify, and vote on active issues."""
 
+from collections import Counter
 from typing import TYPE_CHECKING, Dict
 
 import bittensor as bt
@@ -61,11 +62,32 @@ async def issue_competitions(
         if harvest_result and harvest_result.get('status') == 'success':
             bt.logging.success(f'Harvested emissions! Extrinsic: {harvest_result.get("tx_hash", "")}')
 
-        # Build mapping of github_id->hotkey for eligible miners only
-        eligible_miners = {
-            eval.github_id: eval.hotkey
+        # Build mapping of github_id->hotkey for eligible miners only.
+        # Defensive (#895): if two MinerEvaluation entries share the same
+        # github_id (upstream duplicate-account penalty may not fire within
+        # a single round, leaving multiple eligible entries with the same
+        # identity), the prior dict comprehension silently kept whichever
+        # hotkey iterated last and the validator could vote-pay the wrong
+        # miner. Detect the collision and exclude every colliding github_id
+        # from this round so the bounty falls through to vote_cancel rather
+        # than mis-pay.
+        eligible_pairs = [
+            (eval.github_id, eval.hotkey)
             for eval in miner_evaluations.values()
             if eval.github_id and eval.github_id != '0' and eval.is_eligible
+        ]
+        github_id_counts = Counter(gid for gid, _ in eligible_pairs)
+        duplicate_github_ids = {gid for gid, count in github_id_counts.items() if count > 1}
+        if duplicate_github_ids:
+            bt.logging.warning(
+                f'Issue bounties: {len(duplicate_github_ids)} github_id(s) have multiple eligible miners '
+                f'this round; excluding them from bounty voting to avoid mis-pay. '
+                f'Affected github_ids: {sorted(duplicate_github_ids)}'
+            )
+        eligible_miners = {
+            github_id: hotkey
+            for github_id, hotkey in eligible_pairs
+            if github_id not in duplicate_github_ids
         }
         bt.logging.info(f'Issue bounties: {len(eligible_miners)} eligible miners out of {len(miner_evaluations)} total')
         for github_id, hotkey in eligible_miners.items():

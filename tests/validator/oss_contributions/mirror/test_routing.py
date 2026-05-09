@@ -171,3 +171,30 @@ def test_failed_init_short_circuits():
         assert result is me
         mock_legacy_load.assert_not_called()
         mock_mirror_load.assert_not_called()
+
+
+def test_identity_fetch_failure_short_circuits_to_cache_fallback():
+    """Transient /user failure should not fetch legacy or mirror PRs."""
+    me = _make_miner_eval(github_id='12345')
+    me.github_pr_fetch_failed = True
+
+    with (
+        patch.object(reward_module, 'validate_response_and_initialize_miner_evaluation', return_value=me),
+        patch.object(reward_module, 'load_miners_prs') as mock_legacy_load,
+        patch.object(reward_module, 'load_mirror_miner_prs') as mock_mirror_load,
+    ):
+        result = _run(
+            evaluate_miners_pull_requests(
+                uid=1,
+                hotkey='hk',
+                pat='fake-pat',
+                master_repositories=_configs(),
+                programming_languages={},
+                token_config=TokenConfig(),
+            )
+        )
+
+        assert result is me
+        assert result.should_use_cache_fallback is True
+        mock_legacy_load.assert_not_called()
+        mock_mirror_load.assert_not_called()

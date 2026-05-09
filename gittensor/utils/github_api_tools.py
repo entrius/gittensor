@@ -6,6 +6,7 @@ import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from enum import Enum
 from math import ceil
 from typing import TYPE_CHECKING, Any, Dict, Iterator, List, Optional
 
@@ -37,6 +38,19 @@ from gittensor.validator.utils.load_weights import RepositoryConfig
 
 # Beyond this many CHANGES_REQUESTED reviews the quality multiplier is already 0
 _MAX_CHANGES_REQUESTED_REVIEWS = ceil(1 / REVIEW_PENALTY_RATE)
+
+
+class GitHubIdentityStatus(Enum):
+    VALID = 'VALID'
+    INVALID_AUTH = 'INVALID_AUTH'
+    TRANSIENT_FAILURE = 'TRANSIENT_FAILURE'
+
+
+@dataclass(frozen=True)
+class GitHubIdentityResult:
+    github_id: Optional[str]
+    status: GitHubIdentityStatus
+
 
 # core github graphql query
 QUERY = """
@@ -222,17 +236,33 @@ def get_session(token: str) -> requests.Session:
     return _session_cache[key]
 
 
-def get_github_id(token: str) -> Optional[str]:
-    """Get GitHub numeric user id (as string) using a PAT.
+def _is_rate_limited_response(response: requests.Response) -> bool:
+    if response.status_code == 429:
+        return True
+    if response.status_code != 403:
+        return False
+    if response.headers.get('x-ratelimit-remaining') == '0':
+        return True
+    try:
+        message = str(response.json().get('message', '')).lower()
+    except Exception:
+        message = getattr(response, 'text', '').lower()
+    return 'rate limit' in message
+
+
+def get_github_identity(token: str) -> GitHubIdentityResult:
+    """Get GitHub numeric user id and whether lookup failure is cacheable.
 
     Args:
         token (str): GitHub personal access token.
 
     Returns:
-        Optional[str]: Numeric user id as a string, or None if it cannot be determined.
+        GitHubIdentityResult: Numeric user id on success, invalid auth for
+            permanent auth failures, or transient failure when GitHub/user JSON
+            could not be reached after retries.
     """
     if not token:
-        return None
+        return GitHubIdentityResult(None, GitHubIdentityStatus.INVALID_AUTH)
 
     session = get_session(token)
 
@@ -243,12 +273,35 @@ def get_github_id(token: str) -> Optional[str]:
             if response.status_code == 200:
                 try:
                     user_data: Dict[str, Any] = response.json()
-                except Exception as e:  # pragma: no cover
+                except Exception as e:
                     bt.logging.warning(f'Failed to parse GitHub /user JSON response: {e}')
-                    return None
+                    if attempt < 5:
+                        time.sleep(2)
+                        continue
+                    return GitHubIdentityResult(None, GitHubIdentityStatus.TRANSIENT_FAILURE)
 
                 user_id = user_data.get('id')
-                return str(user_id) if user_id is not None else None
+                if user_id is not None:
+                    return GitHubIdentityResult(str(user_id), GitHubIdentityStatus.VALID)
+
+                bt.logging.warning(f'GitHub /user response missing id (attempt {attempt + 1}/6)')
+                if attempt < 5:
+                    time.sleep(2)
+                    continue
+                return GitHubIdentityResult(None, GitHubIdentityStatus.TRANSIENT_FAILURE)
+
+            if response.status_code == 408 or _is_rate_limited_response(response):
+                bt.logging.warning(
+                    f'GitHub /user request failed with status {response.status_code} (attempt {attempt + 1}/6)'
+                )
+                if attempt < 5:
+                    time.sleep(2)
+                    continue
+                return GitHubIdentityResult(None, GitHubIdentityStatus.TRANSIENT_FAILURE)
+
+            if 400 <= response.status_code < 500:
+                bt.logging.warning(f'GitHub /user auth failed with status {response.status_code}')
+                return GitHubIdentityResult(None, GitHubIdentityStatus.INVALID_AUTH)
 
             bt.logging.warning(
                 f'GitHub /user request failed with status {response.status_code} (attempt {attempt + 1}/6)'
@@ -261,7 +314,12 @@ def get_github_id(token: str) -> Optional[str]:
             if attempt < 5:  # Don't sleep on last attempt
                 time.sleep(2)
 
-    return None
+    return GitHubIdentityResult(None, GitHubIdentityStatus.TRANSIENT_FAILURE)
+
+
+def get_github_id(token: str) -> Optional[str]:
+    """Get GitHub numeric user id (as string) using a PAT."""
+    return get_github_identity(token).github_id
 
 
 def get_merge_base_sha(repository: str, base_sha: str, head_sha: str, token: str) -> Optional[str]:
@@ -287,7 +345,7 @@ def get_merge_base_sha(repository: str, base_sha: str, head_sha: str, token: str
         try:
             response = session.get(
                 f'{BASE_GITHUB_API_URL}/repos/{repository}/compare/{base_sha}...{head_sha}',
-                timeout=15,
+                timeout=GITHUB_HTTP_TIMEOUT_SECONDS,
             )
 
             if response.status_code == 200:
@@ -319,7 +377,7 @@ def get_merge_base_sha(repository: str, base_sha: str, head_sha: str, token: str
     return None
 
 
-def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -> Optional[List[FileChange]]:
+def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -> List[FileChange]:
     """
     Get the diff for a specific PR by repository name and PR number.
 
@@ -333,7 +391,7 @@ def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -
         pr_number (int): PR number
         token (str): Github pat
     Returns:
-        List[FileChanges]: List object with file changes or None if error
+        List[FileChanges]: List object with file changes or empty list if error
     """
     max_attempts = 3
     per_page = 100
@@ -349,7 +407,7 @@ def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -
             response = session.get(
                 f'{BASE_GITHUB_API_URL}/repos/{repository}/pulls/{pr_number}/files',
                 params={'per_page': per_page, 'page': page},
-                timeout=15,
+                timeout=GITHUB_HTTP_TIMEOUT_SECONDS,
             )
 
             if response.status_code == 200:
@@ -909,6 +967,8 @@ def load_miners_prs(
                 non_resource_errors = [e for e in data['errors'] if e.get('type') != 'RESOURCE_LIMITS_EXCEEDED']
                 if non_resource_errors:
                     bt.logging.error(f'GraphQL errors: {non_resource_errors}')
+                    message = str(non_resource_errors[0].get('message') or 'unknown')[:200]
+                    miner_eval.failed_reason = f'GitHub GraphQL error: {message}'
                     miner_eval.github_pr_fetch_failed = True
                     break
 
@@ -1040,7 +1100,7 @@ def check_github_issue_closed(repo: str, issue_number: int, token: str) -> Optio
     try:
         response = session.get(
             f'{BASE_GITHUB_API_URL}/repos/{repo}/issues/{issue_number}',
-            timeout=15,
+            timeout=GITHUB_HTTP_TIMEOUT_SECONDS,
         )
 
         if response.status_code != 200:
@@ -1051,6 +1111,18 @@ def check_github_issue_closed(repo: str, issue_number: int, token: str) -> Optio
 
         if data.get('state') != 'closed':
             return {'is_closed': False}
+
+        state_reason = data.get('state_reason')
+        if not isinstance(state_reason, str) or state_reason.strip().lower() != 'completed':
+            bt.logging.info(
+                f'Issue closed on GitHub but not completed: {repo}#{issue_number} state_reason={state_reason}'
+            )
+            return {
+                'is_closed': True,
+                'solver_github_id': None,
+                'pr_number': None,
+                'solver_lookup_failed': False,
+            }
 
         bt.logging.debug(f'Finding solver for {repo}#{issue_number}')
         solver_lookup = find_solver_from_cross_references(repo, issue_number, token)

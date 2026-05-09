@@ -11,7 +11,6 @@ import sys
 
 import click
 import requests
-from rich.console import Console
 from rich.table import Table
 
 from gittensor.cli.miner_commands.helpers import (
@@ -29,11 +28,11 @@ from gittensor.cli.miner_commands.helpers import (
     _require_validator_axons,
     _resolve_endpoint,
     _status,
+    console,
+    err_console,
 )
 from gittensor.constants import BASE_GITHUB_API_URL, GITHUB_HTTP_TIMEOUT_SECONDS, GRAPHQL_VIEWER_QUERY
 from gittensor.utils.github_api_tools import make_graphql_headers, make_headers
-
-console = Console()
 
 _PAT_POST_STATUS_MARKUP = {
     'accepted': '[green]✓[/green]',
@@ -97,24 +96,24 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, min_vt
         pat = click.prompt('Enter your GitHub Personal Access Token', hide_input=True)
 
     # 1b. Validate PAT locally
-    with _status('[bold]Validating PAT...', json_mode):
+    with _status('[bold]Validating PAT...'):
         pat_valid = _validate_pat_locally(pat)
 
     if not pat_valid:
         _error('GitHub PAT is invalid or expired. Check your GITTENSOR_MINER_PAT.', json_mode)
         sys.exit(1)
 
-    _print('[green]PAT is valid.[/green]', json_mode)
+    _print('[green]PAT is valid.[/green]')
 
     # 2. Resolve wallet and network
     wallet_name = wallet_name or _load_config_value('wallet') or 'default'
     wallet_hotkey = wallet_hotkey or _load_config_value('hotkey') or 'default'
     ws_endpoint = _resolve_endpoint(network, rpc_url)
 
-    _print(f'[dim]Wallet: {wallet_name}/{wallet_hotkey} | Network: {ws_endpoint} | Netuid: {netuid}[/dim]', json_mode)
+    _print(f'[dim]Wallet: {wallet_name}/{wallet_hotkey} | Network: {ws_endpoint} | Netuid: {netuid}[/dim]')
 
     # 3. Set up bittensor objects
-    with _status('[bold]Connecting to network...', json_mode):
+    with _status('[bold]Connecting to network...'):
         try:
             wallet, subtensor, metagraph, dendrite = _connect_bittensor(wallet_name, wallet_hotkey, ws_endpoint, netuid)
         except Exception as e:
@@ -140,7 +139,7 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, min_vt
             timeout=30.0,
         )
 
-    with _status(f'[bold]Broadcasting to {len(validator_axons)} validators...', json_mode):
+    with _status(f'[bold]Broadcasting to {len(validator_axons)} validators...'):
         responses = asyncio.run(_broadcast())
 
     # 6. Collect results
@@ -211,7 +210,7 @@ def _validate_pat_locally(pat: str) -> bool:
             timeout=GITHUB_HTTP_TIMEOUT_SECONDS,
         )
         if gql_resp.status_code != 200:
-            console.print(
+            err_console.print(
                 '[red]PAT lacks GraphQL API access. Fine-grained PATs need "Public Repositories (read-only)" permission.[/red]'
             )
             return False

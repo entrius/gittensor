@@ -6,6 +6,8 @@
 import json
 from unittest.mock import patch
 
+import pytest
+
 FAKE_ISSUES = [
     {
         'id': 1,
@@ -31,7 +33,7 @@ def test_issues_list_json_missing_issue_returns_structured_error(cli_root, runne
 
     assert result.exit_code != 0
 
-    payload = json.loads(result.output)
+    payload = json.loads(result.stdout)
     assert payload['success'] is False
     assert payload['error']['type'] == 'not_found'
     assert '999' in payload['error']['message']
@@ -51,3 +53,28 @@ def test_issues_list_human_missing_issue_exits_non_zero(cli_root, runner):
     assert result.exit_code != 0
     assert '999' in result.output
     assert 'not found' in result.output.lower()
+
+
+@pytest.mark.parametrize('bad_id', ['0', '-1', '1000000', '99999999999999'])
+def test_issues_list_rejects_invalid_id_human(cli_root, runner, bad_id):
+    """Out-of-range --id must be rejected at parse time without any contract read."""
+    with patch('gittensor.cli.issue_commands.view.read_issues_from_contract') as mock_read:
+        result = runner.invoke(cli_root, ['issues', 'list', '--id', bad_id], catch_exceptions=False)
+
+    assert result.exit_code != 0
+    assert 'between 1 and 999999' in result.output
+    mock_read.assert_not_called()
+
+
+@pytest.mark.parametrize('bad_id', ['0', '-1', '1000000'])
+def test_issues_list_rejects_invalid_id_json(cli_root, runner, bad_id):
+    """JSON mode must emit a structured bad_parameter error consistent with `submissions --id`."""
+    with patch('gittensor.cli.issue_commands.view.read_issues_from_contract') as mock_read:
+        result = runner.invoke(cli_root, ['issues', 'list', '--json', '--id', bad_id], catch_exceptions=False)
+
+    assert result.exit_code != 0
+    payload = json.loads(result.output)
+    assert payload['success'] is False
+    assert payload['error']['type'] == 'bad_parameter'
+    assert 'between 1 and 999999' in payload['error']['message']
+    mock_read.assert_not_called()

@@ -103,9 +103,29 @@ opencode/
 |-------|--------|
 | Prefix terbanyak | `fix:` (12/20 = 60%) |
 | Label terbanyak | `bug` (9/20), `enhancement` (7/20) |
-| Body style | Concise, `## Summary` + bullet points |
-| Checklist | Sering di-skip oleh kontributor top |
+| Body style | `## Summary` + bullet points, **tanpa checklist template** |
+| Test plan | `## Test plan` dengan `- [x]` items (ruff, pyright, pytest paths) |
+| `Fixes #N` | Dipakai oleh kontributor eksternal (MkDev11, plind-junior, dll) |
 | Top merger | anderdc (4), seroperson/plind-junior/bitloi/aliang/Tet-9/MkDev11 (2 each) |
+
+### Gaya Anderdc (Maintainer — Paling Sering Merge)
+
+```markdown
+## Summary
+- Perubahan 1: detail teknis dengan `code ref`
+- Perubahan 2: alasan dan dampak
+
+## Related Issues
+Fixes #N
+
+## Test plan
+- [x] ruff check / ruff format --check clean
+- [x] pyricht clean (0 errors / 0 warnings)
+- [x] pytest tests/path/test_file.py — N pass
+- [ ] Reviewer: optional check
+```
+
+Ciri khas: **teknis, langsung ke inti, test plan spesifik dengan file path, tanpa formal checklist.**
 
 ### Label Prioritasku → entrius/gittensor
 | Prefix Judul | Label Auto | Multiplier | Tingkat Merge | Rekomendasi |
@@ -120,16 +140,32 @@ opencode/
 **Kesimpulan:** `fix:` adalah pilihan terbaik — multiplier 1.1x + 60% chance merge.  
 **Hindari `chore:`** (0.25x multiplier — bunuh score).
 
+### Gaya Body PR Wajib (Gaya Top Merged)
+```markdown
+## Summary
+- <perubahan, detail teknis, alasan>
+
+## Related Issues
+Fixes #<N>
+
+## Test plan
+- [x] ruff check / ruff format --check clean
+- [x] pyright clean
+- [x] pytest tests/... — N pass
+```
+**Tidak perlu:** Type of Change, Checklist, atau template formal lain.
+
 ### Checklist Sebelum Submit PR
-- [ ] Issue direference dengan `Closes #N` atau `Fixes #N` (Issue Bonus ≥ 1.33x)
+- [ ] Issue di-link dengan `Fixes #N` (untuk Issue Bonus 1.33x)
 - [ ] Judul pakai `fix:` (paling sering di-merge) atau `feat:` (multiplier tinggi). **Jangan `chore:`**
 - [ ] Branch dari `test`, target `test`
-- [ ] Body: `## Summary` + bullet point perubahan + `Fixes #N` (template opsional, lihat gaya kontributor top)
+- [ ] Body: `## Summary` + bullet point + `Fixes #N` + `## Test plan` (gaya anderdc)
 - [ ] Reviewer: landyndev, anderdc
 - [ ] CLI change → screenshot before-after (exit-code-only exempted)
 - [ ] Tidak ada CHANGES_REQUESTED → Review Quality tetap 1.0
 - [ ] Semua PR dalam 1-2 hari agar Time Decay seragam
-- [ ] Cek dengan `python3 scripts/pr_quality_check.py` sebelum submit
+- [ ] Generate body: `python3 scripts/pr_body_builder.py --issue N --title "fix: ..." --bullets "..." --tests "..."`
+- [ ] Cek kualitas: `python3 scripts/pr_quality_check.py`
 
 ### Time Decay System
 Formula: `f(t) = 1 / (1 + e^(0.0161 × (t - 297.4)))` (t = jam sejak create)

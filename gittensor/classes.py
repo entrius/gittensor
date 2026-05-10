@@ -380,6 +380,7 @@ class MinerEvaluation:
     open_pull_requests: List[PullRequest] = field(default_factory=list)
     closed_pull_requests: List[PullRequest] = field(default_factory=list)
     stale_closed_pull_requests: List[PullRequest] = field(default_factory=list)
+    stale_merged_pull_requests: List[PullRequest] = field(default_factory=list)
 
     # Populated by gittensor.validator.oss_contributions.mirror.combine.combine
     # when the mirror scoring path runs. Empty for legacy-only evaluations.
@@ -495,6 +496,13 @@ class MinerEvaluation:
         """Track a stale CLOSED PR so storage can refresh its pull_requests row."""
         bt.logging.info(f'Stale CLOSED PR #{raw_pr["number"]} in {parse_repo_name(raw_pr["repository"])}')
         self.stale_closed_pull_requests.append(
+            PullRequest.from_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id)
+        )
+
+    def add_stale_merged_pull_request(self, raw_pr: Dict):
+        """Track a stale MERGED PR so storage can refresh its pull_requests row."""
+        bt.logging.info(f'Stale MERGED PR #{raw_pr["number"]} in {parse_repo_name(raw_pr["repository"])}')
+        self.stale_merged_pull_requests.append(
             PullRequest.from_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id)
         )
 

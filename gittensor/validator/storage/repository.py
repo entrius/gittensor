@@ -23,6 +23,7 @@ from .queries import (
     CLEANUP_STALE_MINER_EVALUATIONS_BY_HOTKEY,
     CLEANUP_STALE_MINERS,
     CLEANUP_STALE_MINERS_BY_HOTKEY,
+    REFRESH_STALE_MERGED_PR_STATE,
     REFRESH_STALE_PR_STATES,
     SET_MINER,
 )
@@ -216,6 +217,30 @@ class Repository(BaseRepository):
             if commit:
                 self.db.rollback()
             self.logger.error(f'Error in bulk pull request storage: {e}')
+            return 0
+
+    def refresh_stale_merged_pr_states(self, pull_requests: List[PullRequest], commit: bool = True) -> int:
+        """Targeted UPDATE-only refresh of pr_state/merged_at on existing rows.
+
+        Skips rows already at pr_state='MERGED' so historical scoring fields are
+        preserved; rows that don't exist are silent no-ops (never inserts).
+        """
+        eligible = [pr for pr in pull_requests if pr.merged_at is not None]
+        if not eligible:
+            return 0
+
+        values = [(pr.merged_at, pr.number, pr.repository_full_name) for pr in eligible]
+
+        try:
+            with self.get_cursor() as cursor:
+                cursor.executemany(REFRESH_STALE_MERGED_PR_STATE, values)
+                if commit:
+                    self.db.commit()
+                return len(values)
+        except Exception as e:
+            if commit:
+                self.db.rollback()
+            self.logger.error(f'Error refreshing stale merged PR states: {e}')
             return 0
 
     def refresh_stale_pr_states(self, pull_requests: List[PullRequest], commit: bool = True) -> int:

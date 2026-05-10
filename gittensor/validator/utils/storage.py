@@ -74,6 +74,9 @@ class DatabaseStorage:
                 result.stored_counts['stale_closed_pull_requests'] = self.repo.refresh_stale_pr_states(
                     miner_eval.stale_closed_pull_requests, commit=False
                 )
+                result.stored_counts['stale_merged_pull_requests'] = self.repo.refresh_stale_merged_pr_states(
+                    miner_eval.stale_merged_pull_requests, commit=False
+                )
                 result.stored_counts['issues'] = self.repo.store_issues_bulk(miner_eval.get_all_issues(), commit=False)
                 result.stored_counts['file_changes'] = self.repo.store_file_changes_bulk(
                     miner_eval.get_all_file_changes(), commit=False

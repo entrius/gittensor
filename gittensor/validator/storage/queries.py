@@ -100,6 +100,22 @@ DO UPDATE SET
     updated_at = NOW()
 """
 
+# Targeted UPDATE that syncs pr_state to MERGED on existing rows whose PR
+# merged outside the lookback window. The pr_state guard keeps it idempotent
+# and preserves historical scoring fields on rows already captured as MERGED.
+REFRESH_STALE_MERGED_PR_STATE = """
+UPDATE pull_requests
+SET
+    pr_state = 'MERGED',
+    merged_at = %s,
+    collateral_score = 0.0,
+    updated_at = NOW()
+WHERE
+    number = %s
+    AND repository_full_name = %s
+    AND pr_state != 'MERGED'
+"""
+
 # Targeted state-only refresh for stale-closed PRs (avoids overwriting scored columns)
 REFRESH_STALE_PR_STATES = """
 UPDATE pull_requests

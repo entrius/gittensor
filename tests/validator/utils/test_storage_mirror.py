@@ -86,6 +86,7 @@ def _make_storage_with_mock_repo():
             mock_repo = MagicMock()
             mock_repo.set_miner.return_value = 1
             mock_repo.store_pull_requests_bulk.return_value = 0  # actual count irrelevant
+            mock_repo.refresh_stale_merged_pr_states.return_value = 0
             mock_repo.refresh_stale_pr_states.return_value = 0
             mock_repo.store_issues_bulk.return_value = 0
             mock_repo.store_file_changes_bulk.return_value = 0
@@ -185,6 +186,52 @@ class TestStoreEvaluationCombinesBothLists:
         # Verify the stale PR did not leak into store_pull_requests_bulk
         for call in mock_repo.store_pull_requests_bulk.call_args_list:
             assert not any(pr.number == 7 for pr in call.args[0])
+
+    def test_stale_merged_prs_use_targeted_refresh_path(self):
+        """Stale-MERGED PRs route to ``refresh_stale_merged_pr_states`` (a
+        targeted UPDATE) rather than the full ``store_pull_requests_bulk``
+        upsert, so historical scoring fields on already-MERGED rows are not
+        clobbered with dataclass defaults.
+        """
+        storage, mock_repo = _make_storage_with_mock_repo()
+
+        eval_ = MinerEvaluation(uid=1, hotkey='hk', github_id='123')
+        eval_.stale_merged_pull_requests = [_legacy_pr(7629, state=PRState.MERGED)]
+
+        storage.store_evaluation(eval_)
+
+        # Targeted refresh, not a bulk upsert.
+        mock_repo.refresh_stale_merged_pr_states.assert_called_once()
+        refresh_arg = mock_repo.refresh_stale_merged_pr_states.call_args.args[0]
+        assert len(refresh_arg) == 1
+        assert refresh_arg[0].number == 7629
+        assert refresh_arg[0].pr_state == PRState.MERGED
+        assert refresh_arg[0].merged_at is not None
+
+        # Stale-merged storage must not inflate scoring totals.
+        assert eval_.total_merged_prs == 0
+        assert eval_.total_prs == 0
+
+        # And it must not be passed to the bulk upsert path
+        # (3 calls: merged, open, closed). Stale-closed PRs go through
+        # refresh_stale_pr_states, not the bulk upsert.
+        assert mock_repo.store_pull_requests_bulk.call_count == 3
+        for call in mock_repo.store_pull_requests_bulk.call_args_list:
+            assert call.args[0] == [] or call.args[0][0].number != 7629
+
+    def test_empty_stale_merged_list_still_invokes_refresh(self):
+        """Even with no stale-merged PRs, the refresh call happens (returns 0)
+        so the storage transaction shape stays predictable across rounds.
+        """
+        storage, mock_repo = _make_storage_with_mock_repo()
+
+        eval_ = MinerEvaluation(uid=1, hotkey='hk', github_id='123')
+        # stale_merged_pull_requests left empty by default
+
+        storage.store_evaluation(eval_)
+
+        mock_repo.refresh_stale_merged_pr_states.assert_called_once()
+        assert mock_repo.refresh_stale_merged_pr_states.call_args.args[0] == []
 
 
 def test_cleanup_stale_called_with_commit_false():

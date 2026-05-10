@@ -826,6 +826,21 @@ def try_add_open_or_closed_pr(
             miner_eval.add_closed_pull_request(pr_raw)
 
 
+def _maybe_add_stale_merged_pr(
+    miner_eval: MinerEvaluation,
+    pr_raw: Dict,
+    lookback_date_filter: datetime,
+) -> None:
+    """Capture merged PRs whose mergedAt predates the lookback window so storage
+    can sync the previously-stored OPEN row (parallel to #769's stale-CLOSED path).
+    """
+    merged_at = pr_raw.get('mergedAt')
+    if not merged_at:
+        return
+    if parse_github_iso_to_utc(merged_at) < lookback_date_filter:
+        miner_eval.add_stale_merged_pull_request(pr_raw)
+
+
 def should_skip_merged_pr(
     pr_raw: Dict,
     repository_full_name: str,
@@ -1013,6 +1028,7 @@ def load_miners_prs(
                     )
 
                     if should_skip:
+                        _maybe_add_stale_merged_pr(miner_eval, pr_raw, lookback_date_filter)
                         bt.logging.debug(skip_reason or '')
                         continue
 

@@ -71,7 +71,7 @@ class DatabaseStorage:
                 result.stored_counts['closed_pull_requests'] = self.repo.store_pull_requests_bulk(
                     miner_eval.closed_pull_requests + _adapt_mirror(miner_eval.mirror_closed_prs), commit=False
                 )
-                result.stored_counts['stale_closed_pull_requests'] = self.repo.store_pull_requests_bulk(
+                result.stored_counts['stale_closed_pull_requests'] = self.repo.refresh_stale_pr_states(
                     miner_eval.stale_closed_pull_requests, commit=False
                 )
                 result.stored_counts['issues'] = self.repo.store_issues_bulk(miner_eval.get_all_issues(), commit=False)

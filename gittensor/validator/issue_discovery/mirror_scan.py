@@ -447,6 +447,15 @@ async def _resolve_solving_pr_score(
         )
         return None
 
+    if not files_response.scoring_data_stored:
+        cache_stats.fetch_failures += 1
+        bt.logging.warning(
+            f'Mirror scoring data unavailable for solving PR #{solving_pr.pr_number} '
+            f'({issue.repo_full_name}): scoring_data_stored=False — '
+            f'issue #{issue.issue_number} not scored'
+        )
+        return None
+
     file_changes, file_contents = mirror_files_to_legacy(
         issue.repo_full_name, solving_pr.pr_number, files_response.files
     )

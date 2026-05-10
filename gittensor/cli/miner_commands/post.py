@@ -70,7 +70,7 @@ _PAT_POST_STATUS_MARKUP = {
 def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, min_vtrust, min_stake, json_mode):
     """Broadcast your GitHub PAT to all validators on the network.
 
-    Validators will validate your PAT (test GitHub API access, check account age),
+    Validators will validate your PAT (test GitHub API access),
     then store it locally for use during scoring rounds.
 
     \b

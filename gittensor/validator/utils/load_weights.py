@@ -1,9 +1,10 @@
 # The MIT License (MIT)
 # Copyright © 2025 Entrius
 import json
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import bittensor as bt
 
@@ -42,6 +43,10 @@ class RepositoryConfig:
             same fnmatch wildcard syntax as ``additional_acceptable_branches``.
         default_label_multiplier: Multiplier used when no configured label
             pattern matches. Defaults to neutral scoring.
+        fixed_base_score: Mirror-only replacement for token-derived PR base
+            score. When present in JSON, clamped to [0.0, 100.0] at load time.
+        eligibility_mode: Mirror-only flag controlling whether the miner-wide
+            eligibility gate applies to PRs in this repo.
 
     """
 
@@ -52,6 +57,8 @@ class RepositoryConfig:
     trusted_label_pipeline: bool = False
     label_multipliers: Optional[Dict[str, float]] = None
     default_label_multiplier: float = 1.0
+    fixed_base_score: Optional[float] = None
+    eligibility_mode: bool = True
 
 
 def resolve_repo_weight(repo_config: Optional[RepositoryConfig]) -> float:
@@ -59,6 +66,35 @@ def resolve_repo_weight(repo_config: Optional[RepositoryConfig]) -> float:
     if repo_config is None:
         return DEFAULT_REPO_WEIGHT
     return repo_config.weight
+
+
+def _parse_fixed_base_score(value: Any, repo_name: str) -> Optional[float]:
+    if value is None:
+        return None
+
+    try:
+        score = float(value)
+    except (TypeError, ValueError):
+        bt.logging.warning(f'Ignoring invalid fixed_base_score for {repo_name}: {value!r}')
+        return None
+
+    if math.isnan(score):
+        bt.logging.warning(f'Ignoring NaN fixed_base_score for {repo_name}')
+        return None
+
+    return max(0.0, min(100.0, score))
+
+
+def _parse_eligibility_mode(metadata: Dict[str, Any], repo_name: str) -> bool:
+    if 'eligibility_mode' not in metadata:
+        return True
+
+    value = metadata['eligibility_mode']
+    if not isinstance(value, bool):
+        bt.logging.warning(f'Ignoring non-bool eligibility_mode for {repo_name}: {value!r}')
+        return True
+
+    return value
 
 
 @dataclass
@@ -140,6 +176,8 @@ def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
                         else None
                     ),
                     default_label_multiplier=float(metadata.get('default_label_multiplier', 1.0)),
+                    fixed_base_score=_parse_fixed_base_score(metadata.get('fixed_base_score'), repo_name),
+                    eligibility_mode=_parse_eligibility_mode(metadata, repo_name),
                 )
                 normalized_data[repo_name.lower()] = config
             except (ValueError, TypeError) as e:

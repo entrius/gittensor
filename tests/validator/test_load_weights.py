@@ -288,6 +288,72 @@ class TestRepositoryConfigLabelMultipliers:
         )
 
 
+class TestRepositoryConfigMirrorScoringFields:
+    """Dataclass + JSON parsing tests for mirror-only scoring fields."""
+
+    def test_mirror_scoring_field_defaults(self):
+        config = RepositoryConfig(weight=0.5)
+
+        assert config.fixed_base_score is None
+        assert config.eligibility_mode is True
+
+    def test_loader_parses_mirror_scoring_fields(self, tmp_path, monkeypatch):
+        from gittensor.validator.utils import load_weights as lw
+
+        fake_weights_dir = tmp_path
+        (fake_weights_dir / 'master_repositories.json').write_text(
+            json.dumps(
+                {
+                    'foo/fixed': {
+                        'weight': 0.5,
+                        'fixed_base_score': 12.5,
+                        'eligibility_mode': False,
+                    },
+                    'foo/defaults': {'weight': 0.3},
+                    'foo/low-clamp': {'weight': 0.2, 'fixed_base_score': -10},
+                    'foo/high-clamp': {'weight': 0.2, 'fixed_base_score': 150},
+                }
+            )
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: fake_weights_dir)
+
+        repos = lw.load_master_repo_weights()
+
+        assert repos['foo/fixed'].fixed_base_score == pytest.approx(12.5)
+        assert repos['foo/fixed'].eligibility_mode is False
+        assert repos['foo/defaults'].fixed_base_score is None
+        assert repos['foo/defaults'].eligibility_mode is True
+        assert repos['foo/low-clamp'].fixed_base_score == pytest.approx(0.0)
+        assert repos['foo/high-clamp'].fixed_base_score == pytest.approx(100.0)
+
+    def test_invalid_mirror_scoring_fields_fall_back_without_dropping_repo(self, tmp_path, monkeypatch):
+        from gittensor.validator.utils import load_weights as lw
+
+        fake_weights_dir = tmp_path
+        (fake_weights_dir / 'master_repositories.json').write_text(
+            json.dumps(
+                {
+                    'foo/repo': {
+                        'weight': 0.5,
+                        'mirror_enabled': True,
+                        'default_label_multiplier': 0.8,
+                        'fixed_base_score': 'not-a-number',
+                        'eligibility_mode': 'false',
+                    }
+                }
+            )
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: fake_weights_dir)
+
+        repos = lw.load_master_repo_weights()
+
+        assert repos['foo/repo'].weight == pytest.approx(0.5)
+        assert repos['foo/repo'].mirror_enabled is True
+        assert repos['foo/repo'].default_label_multiplier == pytest.approx(0.8)
+        assert repos['foo/repo'].fixed_base_score is None
+        assert repos['foo/repo'].eligibility_mode is True
+
+
 class TestBannedOrganizations:
     """Tests ensuring banned organizations are not active in the repository list.
 

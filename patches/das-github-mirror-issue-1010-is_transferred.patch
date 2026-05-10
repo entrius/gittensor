@@ -1,0 +1,95 @@
+diff --git a/packages/das/src/webhook/github-fetcher.service.ts b/packages/das/src/webhook/github-fetcher.service.ts
+index 98c8de4..79a04f3 100644
+--- a/packages/das/src/webhook/github-fetcher.service.ts
++++ b/packages/das/src/webhook/github-fetcher.service.ts
+@@ -867,7 +867,7 @@ export class GitHubFetcherService implements OnModuleInit {
+               authorAssociation
+               labels(first: 10) { nodes { name } }
+               timelineItems(
+-                itemTypes: [LABELED_EVENT, UNLABELED_EVENT]
++                itemTypes: [LABELED_EVENT, UNLABELED_EVENT, TRANSFERRED_EVENT]
+                 first: 30
+               ) {
+                 nodes {
+@@ -888,6 +888,9 @@ export class GitHubFetcherService implements OnModuleInit {
+                       ... on User { databaseId }
+                     }
+                   }
++                  ... on TransferredEvent {
++                    createdAt
++                  }
+                 }
+               }
+             }
+@@ -931,27 +934,34 @@ export class GitHubFetcherService implements OnModuleInit {
+           break;
+         }
+ 
+-        await this.issueRepo.upsert(
+-          {
+-            repoFullName,
+-            issueNumber: issue.number,
+-            authorGithubId: String(issue.author?.databaseId ?? ""),
+-            authorLogin: issue.author?.login ?? null,
+-            authorAssociation: issue.authorAssociation ?? null,
+-            title: issue.title,
+-            state: issue.state, // OPEN / CLOSED
+-            stateReason: issue.stateReason ?? null,
+-            createdAt: issue.createdAt,
+-            closedAt: issue.closedAt ?? null,
+-            updatedAt: issue.updatedAt ?? null,
+-            lastEditedAt: issue.lastEditedAt ?? null,
+-            labels: (issue.labels?.nodes ?? []).map(
+-              (l: { name: string }) => l.name,
+-            ),
+-          },
+-          ["repoFullName", "issueNumber"],
++        const timelineNodes: any[] = issue.timelineItems?.nodes ?? [];
++        const isTransferred = timelineNodes.some(
++          (n) => n?.__typename === "TransferredEvent",
+         );
+ 
++        const row: Partial<Issue> = {
++          repoFullName,
++          issueNumber: issue.number,
++          authorGithubId: String(issue.author?.databaseId ?? ""),
++          authorLogin: issue.author?.login ?? null,
++          authorAssociation: issue.authorAssociation ?? null,
++          title: issue.title,
++          state: issue.state, // OPEN / CLOSED
++          stateReason: issue.stateReason ?? null,
++          createdAt: issue.createdAt,
++          closedAt: issue.closedAt ?? null,
++          updatedAt: issue.updatedAt ?? null,
++          lastEditedAt: issue.lastEditedAt ?? null,
++          labels: (issue.labels?.nodes ?? []).map(
++            (l: { name: string }) => l.name,
++          ),
++        };
++        if (isTransferred) {
++          row.isTransferred = true;
++        }
++
++        await this.issueRepo.upsert(row, ["repoFullName", "issueNumber"]);
++
+         // Upsert label events for this issue
+         await this.saveLabelTimelineEvents(
+           repoFullName,
+diff --git a/packages/das/src/webhook/handlers/issue.handler.ts b/packages/das/src/webhook/handlers/issue.handler.ts
+index 98f9090..a032453 100644
+--- a/packages/das/src/webhook/handlers/issue.handler.ts
++++ b/packages/das/src/webhook/handlers/issue.handler.ts
+@@ -43,6 +43,13 @@ export class IssueHandler {
+       data.lastEditedAt = issue.updated_at ?? null;
+     }
+ 
++    // Transferred issues must flip is_transferred so downstream validators
++    // (gittensor mirror path) can ignore them for anti-gaming. Omit the field
++    // on all other actions so prior true / DB default is not clobbered.
++    if (payload.action === "transferred") {
++      data.isTransferred = true;
++    }
++
+     await this.issueRepo.upsert(data, ["repoFullName", "issueNumber"]);
+ 
+     await this.repoRepo.update(repoFullName, {

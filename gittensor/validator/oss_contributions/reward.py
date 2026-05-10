@@ -2,7 +2,7 @@
 # Copyright © 2025 Entrius
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 import bittensor as bt
 import numpy as np
@@ -20,10 +20,7 @@ from gittensor.validator.oss_contributions.scoring import (
     score_miner_prs,
 )
 from gittensor.validator.utils.load_weights import LanguageConfig, RepositoryConfig, TokenConfig
-
-# NOTE: there was a circular import error, needed this if to resolve it
-if TYPE_CHECKING:
-    from neurons.validator import Validator
+from gittensor.validator.validator_protocol import ValidatorWorkflowProtocol
 
 
 async def evaluate_miners_pull_requests(
@@ -70,7 +67,7 @@ async def evaluate_miners_pull_requests(
 
 
 async def get_rewards(
-    self: Validator,
+    self: ValidatorWorkflowProtocol,
     uids: set[int],
     master_repositories: Dict[str, RepositoryConfig],
     programming_languages: Dict[str, LanguageConfig],

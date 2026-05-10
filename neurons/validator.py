@@ -36,7 +36,12 @@ from gittensor.validator.pat_handler import (
     priority_pat_broadcast,
     priority_pat_check,
 )
-from gittensor.validator.utils.config import STORE_DB_RESULTS, WANDB_PROJECT, WANDB_VALIDATOR_NAME
+from gittensor.validator.utils.config import (
+    STORE_DB_RESULTS,
+    WANDB_PROJECT,
+    WANDB_VALIDATOR_NAME,
+    log_validator_runtime_settings,
+)
 from gittensor.validator.utils.storage import DatabaseStorage
 from neurons.base.validator import BaseValidatorNeuron
 
@@ -53,6 +58,7 @@ class Validator(BaseValidatorNeuron):
 
     def __init__(self, config=None):
         super(Validator, self).__init__(config=config)
+        log_validator_runtime_settings()
 
         if os.environ.get('DEV_MODE'):
             bt.logging.warning('⚠ DEV_MODE is active — maintainer PR filtering is bypassed')

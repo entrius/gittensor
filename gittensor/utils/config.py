@@ -16,6 +16,15 @@
 # OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 # DEALINGS IN THE SOFTWARE.
 
+"""Neuron configuration: argparse helpers and ``bt.Config`` for miners and validators.
+
+Use this module when building the Bittensor ``Config`` from CLI flags (wallet, subtensor,
+logging, ``--neuron.*``, WandB project name on the parser).
+
+Validator-only environment variables (GitHub PAT, ``STORE_DB_RESULTS``, default WandB project
+for the validator *process*) are read in ``gittensor.validator.utils.config`` instead.
+"""
+
 import argparse
 import os
 import subprocess

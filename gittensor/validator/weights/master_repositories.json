@@ -20,9 +20,6 @@
   "AgentOps-AI/agentops": {
     "weight": 0.0363
   },
-  "All-Hands-AI/OpenHands": {
-    "weight": 0.0532
-  },
   "AlphaCoreBittensor/alphacore": {
     "weight": 0.0484
   },
@@ -118,7 +115,7 @@
   "byteleapai/byteleap-Miner": {
     "weight": 0.0433
   },
-  "calcom/cal.com": {
+  "calcom/cal.diy": {
     "weight": 0.0347
   },
   "ChutesAI/chutes": {

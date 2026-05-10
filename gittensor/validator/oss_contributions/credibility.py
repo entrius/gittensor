@@ -1,7 +1,7 @@
 # The MIT License (MIT)
 # Copyright © 2025 Entrius
 
-from typing import TYPE_CHECKING, Sequence, Tuple, Union
+from typing import TYPE_CHECKING, Optional, Sequence, Tuple, Union
 
 import bittensor as bt
 
@@ -38,13 +38,21 @@ def calculate_credibility(merged_prs: Sequence[PrLike], closed_prs: Sequence[PrL
     return merged_count / total_attempts
 
 
-def check_eligibility(merged_prs: Sequence[PrLike], closed_prs: Sequence[PrLike]) -> Tuple[bool, float, str]:
+def check_eligibility(
+    merged_prs: Sequence[PrLike],
+    closed_prs: Sequence[PrLike],
+    min_valid_merged_prs: int = MIN_VALID_MERGED_PRS,
+    min_credibility: float = MIN_CREDIBILITY,
+) -> Tuple[bool, float, str]:
     """Check if a miner passes the eligibility gate.
 
     Gate requires:
-    1. At least MIN_VALID_MERGED_PRS merged PRs with token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE
+    1. At least min_valid_merged_prs merged PRs with token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE
        (after mulligan — if a closed PR was "valid", it no longer counts toward the minimum)
-    2. At least MIN_CREDIBILITY credibility (after mulligan)
+    2. At least min_credibility credibility (after mulligan)
+
+    Both thresholds can be overridden per-repo via RepositoryConfig; defaults
+    come from the global constants (MIN_VALID_MERGED_PRS, MIN_CREDIBILITY).
 
     Returns:
         (is_eligible, credibility, reason)
@@ -55,13 +63,13 @@ def check_eligibility(merged_prs: Sequence[PrLike], closed_prs: Sequence[PrLike]
     # Count valid merged PRs (token_score >= threshold)
     valid_merged_count = sum(1 for pr in merged_prs if pr.token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE)
 
-    if valid_merged_count < MIN_VALID_MERGED_PRS:
-        reason = f'{valid_merged_count}/{MIN_VALID_MERGED_PRS} valid merged PRs (need {MIN_VALID_MERGED_PRS})'
+    if valid_merged_count < min_valid_merged_prs:
+        reason = f'{valid_merged_count}/{min_valid_merged_prs} valid merged PRs (need {min_valid_merged_prs})'
         bt.logging.info(f'Ineligible: {reason}')
         return False, credibility, reason
 
-    if credibility < MIN_CREDIBILITY:
-        reason = f'Credibility {credibility:.2f} < {MIN_CREDIBILITY} minimum'
+    if credibility < min_credibility:
+        reason = f'Credibility {credibility:.2f} < {min_credibility} minimum'
         bt.logging.info(f'Ineligible: {reason}')
         return False, credibility, reason
 

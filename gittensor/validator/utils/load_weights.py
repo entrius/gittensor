@@ -42,6 +42,15 @@ class RepositoryConfig:
             same fnmatch wildcard syntax as ``additional_acceptable_branches``.
         default_label_multiplier: Multiplier used when no configured label
             pattern matches. Defaults to neutral scoring.
+        base_score_override: Optional fixed base score to use instead of
+            computing from AST tokens. When set, all PRs merged to this repo
+            receive this base score regardless of diff size.
+        min_valid_merged_prs_override: Optional per-repo override for the
+            minimum valid merged PRs eligibility gate. Overrides the global
+            MIN_VALID_MERGED_PRS constant for miners contributing to this repo.
+        min_credibility_override: Optional per-repo override for the minimum
+            credibility eligibility gate. Overrides the global MIN_CREDIBILITY
+            constant for miners contributing to this repo.
 
     """
 
@@ -52,6 +61,9 @@ class RepositoryConfig:
     trusted_label_pipeline: bool = False
     label_multipliers: Optional[Dict[str, float]] = None
     default_label_multiplier: float = 1.0
+    base_score_override: Optional[float] = None
+    min_valid_merged_prs_override: Optional[int] = None
+    min_credibility_override: Optional[float] = None
 
 
 def resolve_repo_weight(repo_config: Optional[RepositoryConfig]) -> float:

@@ -258,10 +258,15 @@ def calculate_base_score_for_pr_files(
     file_contents: Dict[str, FileContentPair],
     programming_languages: Dict[str, LanguageConfig],
     token_config: TokenConfig,
+    base_score_override: Optional[float] = None,
 ) -> BaseScoreResult:
     """Density-scaled SOURCE token score plus cross-category contribution bonus.
 
     Same formula as legacy ``calculate_base_score`` / mirror OSS scoring.
+    When ``base_score_override`` is set (from a per-repo RepositoryConfig),
+    it replaces the computed base_score entirely — useful for repos whose
+    policy prefers a fixed base score across all merged PRs.
+
     Returns a ``BaseScoreResult`` the caller copies onto whatever container
     they're populating (e.g. ``ScoredMirrorPR`` for OSS, ``Issue`` discovery
     fields for issue discovery).
@@ -287,6 +292,23 @@ def calculate_base_score_for_pr_files(
         leaf_count = 0
         leaf_score = 0.0
         total_nodes_scored = 0
+
+    if base_score_override is not None:
+        base_score = round(base_score_override, 2)
+        source = scoring_result.by_category.get(ScoringCategory.SOURCE)
+        source_density = source.density if source else 0.0
+        code_density = round(source_density, 2)
+        bt.logging.info(f'Base score: {base_score} (override, skipping AST computation)')
+        return BaseScoreResult(
+            base_score=base_score,
+            token_score=token_score,
+            structural_count=structural_count,
+            structural_score=structural_score,
+            leaf_count=leaf_count,
+            leaf_score=leaf_score,
+            total_nodes_scored=total_nodes_scored,
+            code_density=code_density,
+        )
 
     source = scoring_result.by_category.get(ScoringCategory.SOURCE)
     source_token_score = source.score_breakdown.total_score if source and source.score_breakdown else 0.0

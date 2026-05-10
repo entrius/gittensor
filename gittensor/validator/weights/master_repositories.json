@@ -226,7 +226,10 @@
       "bug": 1.1,
       "enhancement": 1.25,
       "refactor": 0.25
-    }
+    },
+    "base_score_override": null,
+    "min_valid_merged_prs_override": null,
+    "min_credibility_override": null
   },
   "entrius/gittensor-ui": {
     "weight": 0.5,

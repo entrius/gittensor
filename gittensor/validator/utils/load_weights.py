@@ -42,6 +42,10 @@ class RepositoryConfig:
             same fnmatch wildcard syntax as ``additional_acceptable_branches``.
         default_label_multiplier: Multiplier used when no configured label
             pattern matches. Defaults to neutral scoring.
+        fixed_base_score: Mirror-only override for the PR base score. Expected
+            to be within [0.0, 100.0]; range is enforced by the live-config test.
+        eligibility_mode: Mirror-only flag controlling whether the global miner
+            eligibility gate applies to PRs in this repo.
 
     """
 
@@ -52,6 +56,8 @@ class RepositoryConfig:
     trusted_label_pipeline: bool = False
     label_multipliers: Optional[Dict[str, float]] = None
     default_label_multiplier: float = 1.0
+    fixed_base_score: Optional[float] = None
+    eligibility_mode: bool = True
 
 
 def resolve_repo_weight(repo_config: Optional[RepositoryConfig]) -> float:
@@ -140,6 +146,8 @@ def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
                         else None
                     ),
                     default_label_multiplier=float(metadata.get('default_label_multiplier', 1.0)),
+                    fixed_base_score=metadata.get('fixed_base_score'),
+                    eligibility_mode=metadata.get('eligibility_mode', True),
                 )
                 normalized_data[repo_name.lower()] = config
             except (ValueError, TypeError) as e:

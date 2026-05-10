@@ -14,7 +14,7 @@ import requests
 from gittensor.constants import BASE_GITHUB_API_URL, GITHUB_HTTP_TIMEOUT_SECONDS, GRAPHQL_VIEWER_QUERY
 from gittensor.synapses import PatBroadcastSynapse, PatCheckSynapse
 from gittensor.validator import pat_storage
-from gittensor.validator.utils.github_validation import validate_github_credentials
+from gittensor.validator.utils.github_validation import validate_github_credentials_result
 
 if TYPE_CHECKING:
     from neurons.validator import Validator
@@ -48,10 +48,11 @@ async def handle_pat_broadcast(validator: 'Validator', synapse: PatBroadcastSyna
 
     uid = validator.metagraph.hotkeys.index(hotkey)
 
-    # 2. Validate PAT (checks it works, extracts github_id)
-    github_id, error = validate_github_credentials(uid, synapse.github_access_token)
-    if error:
-        return _reject(error)
+    # 2. Validate PAT using result type (distinguishes transient failures from invalid PATs)
+    validation = validate_github_credentials_result(uid, synapse.github_access_token)
+    if validation.error:
+        return _reject(validation.error)
+    github_id = validation.github_id
 
     # 3. Enforce GitHub identity pinning — same hotkey cannot switch GitHub accounts
     existing = pat_storage.get_pat_by_uid(uid)
@@ -116,12 +117,17 @@ async def handle_pat_check(validator: 'Validator', synapse: PatCheckSynapse) -> 
 
     synapse.has_pat = True
 
-    # Re-validate the stored PAT
-    _, error = validate_github_credentials(uid, entry['pat'])
-    if error:
+    # Re-validate the stored PAT using result type
+    validation = validate_github_credentials_result(uid, entry['pat'], stored_github_id=entry.get('github_id'))
+    if validation.error and not validation.transient_failure:
         synapse.pat_valid = False
-        synapse.rejection_reason = error
-        bt.logging.warning(f'PAT check result — UID: {uid}: validation failed: {error}')
+        synapse.rejection_reason = validation.error
+        bt.logging.warning(f'PAT check result — UID: {uid}: validation failed: {validation.error}')
+        return synapse
+    elif validation.transient_failure:
+        # GitHub is flaky; keep the existing stored identity
+        synapse.pat_valid = True
+        bt.logging.info(f'PAT check result — UID: {uid}: transient GitHub failure, keeping existing identity')
         return synapse
 
     test_error = _test_pat_against_repo(entry['pat'])

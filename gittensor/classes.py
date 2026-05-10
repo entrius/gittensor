@@ -15,13 +15,12 @@ if TYPE_CHECKING:
     from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredMirrorPR
 
 from gittensor.constants import (
+    EXTENSIONLESS_FILE_EXTENSIONS,
     MAINTAINER_ASSOCIATIONS,
     MAX_CODE_DENSITY_MULTIPLIER,
     MIN_TOKEN_SCORE_FOR_BASE_SCORE,
 )
 from gittensor.utils.utils import parse_repo_name
-
-_EXTENSIONLESS_FILE_EXTENSIONS = {'dockerfile', 'makefile'}
 
 
 def _apply_score_multipliers(base_score: float, multipliers: Dict[str, float], pr_label: str) -> float:
@@ -82,7 +81,7 @@ class FileChange:
         if '.' in basename:
             return basename.split('.')[-1].lower()
         basename_lower = basename.lower()
-        return basename_lower if basename_lower in _EXTENSIONLESS_FILE_EXTENSIONS else ''
+        return basename_lower if basename_lower in EXTENSIONLESS_FILE_EXTENSIONS else ''
 
     def is_test_file(self) -> bool:
         filename_lower = self.filename.lower()

@@ -73,6 +73,22 @@ def test_is_test_file_preserves_existing_test_conventions():
 
 
 @pytest.mark.parametrize(
+    'filename,expected',
+    [
+        ('Dockerfile', 'dockerfile'),
+        ('dockerfile', 'dockerfile'),
+        ('ops/Dockerfile', 'dockerfile'),
+        ('Makefile', 'makefile'),
+        ('makefile', 'makefile'),
+        ('build.mk', 'mk'),
+        ('README', ''),
+    ],
+)
+def test_file_extension_handles_configured_extensionless_filenames(filename, expected):
+    assert _file_change(filename).file_extension == expected
+
+
+@pytest.mark.parametrize(
     'filename',
     [
         'src/MyProject.Tests/AccountServiceTests.cs',

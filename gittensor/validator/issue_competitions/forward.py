@@ -9,12 +9,10 @@ import bittensor as bt
 
 from gittensor.classes import MinerEvaluation
 from gittensor.utils.github_api_tools import check_github_issue_closed
+from gittensor.utils.utils import get_contract_address
 from gittensor.validator.issue_competitions.contract_client import IssueCompetitionContractClient, IssueStatus
 from gittensor.validator.utils.config import GITTENSOR_VALIDATOR_PAT
-from gittensor.validator.utils.issue_competitions import (
-    get_contract_address,
-    get_miner_coldkey,
-)
+from gittensor.validator.utils.issue_competitions import get_miner_coldkey
 
 if TYPE_CHECKING:
     from neurons.base.validator import BaseValidatorNeuron
@@ -138,7 +136,7 @@ async def issue_competitions(
                         bt.logging.info(f'Voted cancel (solver {solver_github_id} not eligible): {issue_label}')
                     continue
 
-                miner_coldkey = get_miner_coldkey(miner_hotkey, self.subtensor, self.config.netuid)  # type: ignore[attr-defined]
+                miner_coldkey = get_miner_coldkey(miner_hotkey, self.subtensor)
                 if not miner_coldkey:
                     bt.logging.warning(
                         f'Could not get coldkey for hotkey {miner_hotkey} (solver {solver_github_id}): {issue_label}'

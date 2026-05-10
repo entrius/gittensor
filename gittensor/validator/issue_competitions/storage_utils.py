@@ -8,6 +8,9 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+# ink! mapping selector for the issues storage map (matches the contract's storage layout).
+ISSUES_MAPPING_ROOT_KEY = '52789899'
+
 
 @dataclass
 class PackedContractStorage:
@@ -34,14 +37,9 @@ class DecodedIssueStorage:
     registered_at_block: int
 
 
-def _get_contract_info_value(contract_info):
-    """Normalize substrate contract info wrapper values."""
-    return contract_info.value if hasattr(contract_info, 'value') else contract_info
-
-
 def _extract_trie_id_bytes(contract_info) -> Optional[bytes]:
     """Extract contract trie ID bytes from substrate contract info."""
-    info = _get_contract_info_value(contract_info)
+    info = contract_info.value if hasattr(contract_info, 'value') else contract_info
     if not info or 'trie_id' not in info:
         return None
 
@@ -79,28 +77,19 @@ def compute_ink5_lazy_key(root_key_hex: str, encoded_key: bytes) -> str:
     return '0x' + (h + data).hex()
 
 
-def find_packed_storage_key(substrate, child_key: str, page_size: int = 100) -> Optional[str]:
-    """Find the packed root storage key (suffix 00000000)."""
-    keys_result = substrate.rpc_request('childstate_getKeysPaged', [child_key, '0x', page_size, None, None])
-    keys = keys_result.get('result', [])
-    return next((key for key in keys if key.endswith('00000000')), None)
+_PACKED_ROOT_STORAGE_KEY = compute_ink5_lazy_key('00000000', b'')
+
+# owner (32) + treasury hotkey (32) + netuid (2) + next_issue_id (8) + alpha_pool (16)
+_PACKED_CONTRACT_STORAGE_SIZE = 32 + 32 + 2 + 8 + 16
 
 
-def read_contract_packed_storage_bytes(substrate, child_key: str, page_size: int = 100) -> Optional[bytes]:
+def read_contract_packed_storage_bytes(substrate, child_key: str) -> Optional[bytes]:
     """Read packed root storage bytes from contract child storage."""
-    packed_key = find_packed_storage_key(substrate, child_key, page_size=page_size)
-    if not packed_key:
-        return None
-
-    val_result = substrate.rpc_request('childstate_getStorage', [child_key, packed_key, None])
+    val_result = substrate.rpc_request('childstate_getStorage', [child_key, _PACKED_ROOT_STORAGE_KEY, None])
     raw_hex = val_result.get('result')
     if not raw_hex:
         return None
     return bytes.fromhex(raw_hex.replace('0x', ''))
-
-
-# owner (32) + treasury hotkey (32) + netuid (2) + next_issue_id (8) + alpha_pool (16)
-_PACKED_CONTRACT_STORAGE_SIZE = 32 + 32 + 2 + 8 + 16
 
 
 def decode_packed_contract_storage(data: bytes) -> Optional[PackedContractStorage]:
@@ -133,15 +122,13 @@ def decode_packed_contract_storage(data: bytes) -> Optional[PackedContractStorag
     )
 
 
-def read_contract_packed_storage(
-    substrate, contract_addr: str, page_size: int = 100
-) -> Optional[PackedContractStorage]:
+def read_contract_packed_storage(substrate, contract_addr: str) -> Optional[PackedContractStorage]:
     """Read and decode packed root storage for a contract."""
     child_key = get_contract_child_storage_key(substrate, contract_addr)
     if not child_key:
         return None
 
-    packed_bytes = read_contract_packed_storage_bytes(substrate, child_key, page_size=page_size)
+    packed_bytes = read_contract_packed_storage_bytes(substrate, child_key)
     if not packed_bytes:
         return None
 

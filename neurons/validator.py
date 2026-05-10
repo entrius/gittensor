@@ -24,7 +24,7 @@ from typing import Dict, List, Set
 import bittensor as bt
 import wandb
 
-from gittensor.__init__ import __version__
+from gittensor import __version__
 from gittensor.classes import MinerEvaluation, MinerEvaluationCache
 from gittensor.validator import pat_storage
 from gittensor.validator.forward import forward
@@ -150,6 +150,9 @@ class Validator(BaseValidatorNeuron):
         Handle evaluation cache: store successful evals, fallback to cache for GitHub failures.
 
         Mutates the passed dict, replacing failed evaluations with cached ones if available.
+        A mirror-only fetch failure also routes through the cache-fallback path so the miner
+        is evaluated against a coherent one-round-stale snapshot instead of a fresh-legacy +
+        zeroed-mirror view where cross-PR multipliers would recompute over a partial state.
 
         Returns:
             Set of UIDs that were restored from cache (should be skipped during DB storage
@@ -167,7 +170,9 @@ class Validator(BaseValidatorNeuron):
                     self.evaluation_cache.store(miner_eval)
                 continue
 
-            if not miner_eval.should_use_cache_fallback:
+            # Legacy partial-pagination failure with no mirror outage: the current eval
+            # holds a truncated legacy PR list that would be misleading to cache or swap out.
+            if not miner_eval.should_use_cache_fallback and not miner_eval.mirror_pr_fetch_failed:
                 bt.logging.warning(
                     f'UID {uid}: GitHub fetch failed after partial PR load; skipping cache store/fallback this round'
                 )

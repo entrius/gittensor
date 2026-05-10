@@ -27,28 +27,9 @@ for the validator *process*) are read in ``gittensor.validator.utils.config`` in
 
 import argparse
 import os
-import subprocess
 from typing import Any
 
 import bittensor as bt
-
-from gittensor.utils.logging import setup_events_logger
-
-
-def is_cuda_available():
-    try:
-        output = subprocess.check_output(['nvidia-smi', '-L'], stderr=subprocess.STDOUT)
-        if 'NVIDIA' in output.decode('utf-8'):
-            return 'cuda'
-    except Exception:
-        pass
-    try:
-        output = subprocess.check_output(['nvcc', '--version']).decode('utf-8')
-        if 'release' in output:
-            return 'cuda'
-    except Exception:
-        pass
-    return 'cpu'
 
 
 def check_config(cls, config: Any):
@@ -64,15 +45,10 @@ def check_config(cls, config: Any):
             config.neuron.name,
         )
     )
-    print('full path:', full_path)
+    bt.logging.debug(f'Neuron full path: {full_path}')
     config.neuron.full_path = os.path.expanduser(full_path)
     if not os.path.exists(config.neuron.full_path):
         os.makedirs(config.neuron.full_path, exist_ok=True)
-
-    if not config.neuron.dont_save_events:
-        # Add custom event logger for the events.
-        events_logger = setup_events_logger(config.neuron.full_path, config.neuron.events_retention_size)
-        bt.logging.register_primary_logger(events_logger.name)
 
 
 def add_args(cls, parser):
@@ -86,7 +62,7 @@ def add_args(cls, parser):
         '--neuron.device',
         type=str,
         help='Device to run on.',
-        default=is_cuda_available(),
+        default='cpu',
     )
 
     parser.add_argument(
@@ -100,20 +76,6 @@ def add_args(cls, parser):
         '--mock',
         action='store_true',
         help='Mock neuron and all network components.',
-        default=False,
-    )
-
-    parser.add_argument(
-        '--neuron.events_retention_size',
-        type=str,
-        help='Events retention size.',
-        default=2 * 1024 * 1024 * 1024,  # 2 GB
-    )
-
-    parser.add_argument(
-        '--neuron.dont_save_events',
-        action='store_true',
-        help='If set, we dont save events to a log file.',
         default=False,
     )
 

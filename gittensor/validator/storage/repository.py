@@ -23,6 +23,7 @@ from .queries import (
     CLEANUP_STALE_MINER_EVALUATIONS_BY_HOTKEY,
     CLEANUP_STALE_MINERS,
     CLEANUP_STALE_MINERS_BY_HOTKEY,
+    REFRESH_STALE_PR_STATES,
     SET_MINER,
 )
 
@@ -49,13 +50,14 @@ class BaseRepository:
         finally:
             cursor.close()
 
-    def execute_command(self, query: str, params: tuple = ()) -> bool:
+    def execute_command(self, query: str, params: tuple = (), commit: bool = True) -> bool:
         """
         Execute an INSERT, UPDATE, or DELETE command.
 
         Args:
             query: SQL command string
             params: Query parameters tuple
+            commit: Whether to commit after execution (default True)
 
         Returns:
             True if successful, False otherwise
@@ -63,25 +65,28 @@ class BaseRepository:
         try:
             with self.get_cursor() as cursor:
                 cursor.execute(query, params)
-                self.db.commit()
+                if commit:
+                    self.db.commit()
                 return True
         except Exception as e:
-            self.db.rollback()
+            if commit:
+                self.db.rollback()
             self.logger.error(f'Error executing command: {e}')
             return False
 
-    def set_entity(self, query: str, params: tuple) -> bool:
+    def set_entity(self, query: str, params: tuple, commit: bool = True) -> bool:
         """
         Insert or update an entity using the provided query.
 
         Args:
             query: SQL INSERT/UPDATE query with ON DUPLICATE KEY UPDATE
             params: Query parameters tuple
+            commit: Whether to commit after execution (default True)
 
         Returns:
             True if successful, False otherwise
         """
-        return self.execute_command(query, params)
+        return self.execute_command(query, params, commit=commit)
 
 
 class Repository(BaseRepository):
@@ -93,20 +98,21 @@ class Repository(BaseRepository):
     def __init__(self, db_connection):
         super().__init__(db_connection)
 
-    def set_miner(self, miner: Miner) -> bool:
+    def set_miner(self, miner: Miner, commit: bool = True) -> bool:
         """
         Insert a miner (ignore conflicts)
 
         Args:
             miner: Miner object to store
+            commit: Whether to commit after execution (default True)
 
         Returns:
             True if successful, False otherwise
         """
         params = (miner.uid, miner.hotkey, miner.github_id)
-        return self.set_entity(SET_MINER, params)
+        return self.set_entity(SET_MINER, params, commit=commit)
 
-    def cleanup_stale_miner_data(self, evaluation: MinerEvaluation) -> None:
+    def cleanup_stale_miner_data(self, evaluation: MinerEvaluation, commit: bool = True) -> None:
         """
         Remove stale evaluation data when a miner re-registers on a new uid/hotkey.
 
@@ -117,6 +123,11 @@ class Repository(BaseRepository):
         Args:
             evaluation: The current MinerEvaluation being stored
         """
+        # Skip cleanup for penalized / pre-validation-failed evals — running it
+        # for a penalized eval whose github_id is preserved would tug stale rows
+        # between two duplicate-share UIDs, removing each other's records.
+        if evaluation.failed_reason is not None:
+            return
         if not evaluation.github_id or evaluation.github_id == '0':
             return
 
@@ -124,21 +135,22 @@ class Repository(BaseRepository):
         eval_params = params + (evaluation.evaluation_timestamp,)
 
         # Clean up when same github_id re-registers on a new uid/hotkey
-        self.execute_command(CLEANUP_STALE_MINER_EVALUATIONS, eval_params)
-        self.execute_command(CLEANUP_STALE_MINERS, params)
+        self.execute_command(CLEANUP_STALE_MINER_EVALUATIONS, eval_params, commit=commit)
+        self.execute_command(CLEANUP_STALE_MINERS, params, commit=commit)
 
         # Clean up when same (uid, hotkey) re-links to a new github_id
         reverse_params = (evaluation.uid, evaluation.hotkey, evaluation.github_id)
         reverse_eval_params = reverse_params + (evaluation.evaluation_timestamp,)
-        self.execute_command(CLEANUP_STALE_MINER_EVALUATIONS_BY_HOTKEY, reverse_eval_params)
-        self.execute_command(CLEANUP_STALE_MINERS_BY_HOTKEY, reverse_params)
+        self.execute_command(CLEANUP_STALE_MINER_EVALUATIONS_BY_HOTKEY, reverse_eval_params, commit=commit)
+        self.execute_command(CLEANUP_STALE_MINERS_BY_HOTKEY, reverse_params, commit=commit)
 
-    def store_pull_requests_bulk(self, pull_requests: List[PullRequest]) -> int:
+    def store_pull_requests_bulk(self, pull_requests: List[PullRequest], commit: bool = True) -> int:
         """
         Bulk insert/update pull requests with efficient SQL conflict resolution
 
         Args:
             pull_requests: List of PullRequest objects to store
+            commit: Whether to commit after execution (default True)
 
         Returns:
             Count of successfully stored pull requests
@@ -196,29 +208,45 @@ class Repository(BaseRepository):
 
         try:
             with self.get_cursor() as cursor:
-                # Use psycopg2's execute_values for efficient bulk insert
-                from psycopg2.extras import execute_values
-
-                execute_values(
-                    cursor,
-                    BULK_UPSERT_PULL_REQUESTS.replace('VALUES %s', 'VALUES %s'),
-                    values,
-                    template=None,
-                    page_size=100,
-                )
-                self.db.commit()
+                cursor.executemany(BULK_UPSERT_PULL_REQUESTS, values)
+                if commit:
+                    self.db.commit()
                 return len(values)
         except Exception as e:
-            self.db.rollback()
+            if commit:
+                self.db.rollback()
             self.logger.error(f'Error in bulk pull request storage: {e}')
             return 0
 
-    def store_issues_bulk(self, issues: List[Issue]) -> int:
+    def refresh_stale_pr_states(self, pull_requests: List[PullRequest], commit: bool = True) -> int:
+        """Update pr_state to CLOSED for stale PRs without touching scoring columns.
+
+        Uses a targeted UPDATE so previously-computed scores (earned_score, base_score,
+        credibility_multiplier, etc.) are preserved on rows that were already scored.
+        Only rows currently stored as non-CLOSED are affected.
+        """
+        if not pull_requests:
+            return 0
+        values = [(pr.number, pr.repository_full_name) for pr in pull_requests]
+        try:
+            with self.get_cursor() as cursor:
+                cursor.executemany(REFRESH_STALE_PR_STATES, values)
+                if commit:
+                    self.db.commit()
+                return len(values)
+        except Exception as e:
+            if commit:
+                self.db.rollback()
+            self.logger.error(f'Error refreshing stale PR states: {e}')
+            return 0
+
+    def store_issues_bulk(self, issues: List[Issue], commit: bool = True) -> int:
         """
         Bulk insert/update issues with efficient SQL conflict resolution
 
         Args:
             issues: List of Issue objects to store
+            commit: Whether to commit after execution (default True)
 
         Returns:
             Count of successfully stored issues
@@ -255,25 +283,23 @@ class Repository(BaseRepository):
 
         try:
             with self.get_cursor() as cursor:
-                # Use psycopg2's execute_values for efficient bulk insert
-                from psycopg2.extras import execute_values
-
-                execute_values(
-                    cursor, BULK_UPSERT_ISSUES.replace('VALUES %s', 'VALUES %s'), values, template=None, page_size=100
-                )
-                self.db.commit()
+                cursor.executemany(BULK_UPSERT_ISSUES, values)
+                if commit:
+                    self.db.commit()
                 return len(values)
         except Exception as e:
-            self.db.rollback()
+            if commit:
+                self.db.rollback()
             self.logger.error(f'Error in bulk issue storage: {e}')
             return 0
 
-    def store_file_changes_bulk(self, file_changes: List[FileChange]) -> int:
+    def store_file_changes_bulk(self, file_changes: List[FileChange], commit: bool = True) -> int:
         """
         Bulk insert/update file changes with efficient SQL conflict resolution
 
         Args:
             file_changes: List of FileChange objects to store (must include pr_number and repository_full_name)
+            commit: Whether to commit after execution (default True)
 
         Returns:
             Count of successfully stored file changes
@@ -300,30 +326,24 @@ class Repository(BaseRepository):
 
         try:
             with self.get_cursor() as cursor:
-                # Use psycopg2's execute_values for efficient bulk insert
-                from psycopg2.extras import execute_values
-
-                execute_values(
-                    cursor,
-                    BULK_UPSERT_FILE_CHANGES.replace('VALUES %s', 'VALUES %s'),
-                    values,
-                    template=None,
-                    page_size=100,
-                )
-                self.db.commit()
+                cursor.executemany(BULK_UPSERT_FILE_CHANGES, values)
+                if commit:
+                    self.db.commit()
                 return len(values)
         except Exception as e:
-            self.db.rollback()
+            if commit:
+                self.db.rollback()
             prs = {(fc.pr_number, fc.repository_full_name) for fc in file_changes}
             self.logger.error(f'Error in bulk file change storage: {e} | PRs: {prs}')
             return 0
 
-    def set_miner_evaluation(self, evaluation: MinerEvaluation) -> bool:
+    def set_miner_evaluation(self, evaluation: MinerEvaluation, commit: bool = True) -> bool:
         """
         Insert or update a miner evaluation.
 
         Args:
             evaluation: MinerEvaluation object to store
+            commit: Whether to commit after execution (default True)
 
         Returns:
             True if successful, False otherwise
@@ -363,12 +383,12 @@ class Repository(BaseRepository):
 
         try:
             with self.get_cursor() as cursor:
-                from psycopg2.extras import execute_values
-
-                execute_values(cursor, BULK_UPSERT_MINER_EVALUATION, eval_values)
-                self.db.commit()
+                cursor.executemany(BULK_UPSERT_MINER_EVALUATION, eval_values)
+                if commit:
+                    self.db.commit()
                 return True
         except Exception as e:
-            self.db.rollback()
+            if commit:
+                self.db.rollback()
             self.logger.error(f'Error in miner evaluation storage: {e}')
             return False

@@ -7,17 +7,14 @@ from typing import Optional
 
 import bittensor as bt
 
-from gittensor.utils.utils import get_contract_address  # noqa: F401
 
-
-def get_miner_coldkey(hotkey: str, subtensor: bt.Subtensor, netuid: int) -> Optional[str]:
+def get_miner_coldkey(hotkey: str, subtensor: bt.Subtensor) -> Optional[str]:
     """
     Get the coldkey for a miner's hotkey.
 
     Args:
         hotkey: Miner's hotkey address
         subtensor: Bittensor subtensor instance
-        netuid: Network UID
 
     Returns:
         Coldkey address or None

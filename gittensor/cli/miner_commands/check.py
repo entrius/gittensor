@@ -7,22 +7,32 @@ import json
 import sys
 
 import click
-from rich.console import Console
 from rich.table import Table
 
 from .helpers import (
+    DEFAULT_MIN_VALIDATOR_STAKE,
+    DEFAULT_MIN_VALIDATOR_VTRUST,
     NETUID_DEFAULT,
     _connect_bittensor,
     _error,
     _load_config_value,
+    _pat_check_aggregate_counts,
+    _pat_check_row_category,
     _print,
+    _render_skipped_validators,
     _require_registered,
     _require_validator_axons,
     _resolve_endpoint,
     _status,
+    console,
 )
 
-console = Console()
+_PAT_CHECK_STATUS_MARKUP = {
+    'valid': '[green]✓ valid[/green]',
+    'no_pat': '[red]✗ no PAT[/red]',
+    'invalid_pat': '[red]✗ invalid[/red]',
+    'no_response': '[yellow]— no response[/yellow]',
+}
 
 
 @click.command()
@@ -31,8 +41,22 @@ console = Console()
 @click.option('--netuid', type=int, default=NETUID_DEFAULT, help='Subnet UID.', show_default=True)
 @click.option('--network', default=None, help='Network name (local, test, finney).')
 @click.option('--rpc-url', default=None, help='Subtensor RPC endpoint URL (overrides --network).')
+@click.option(
+    '--min-vtrust',
+    type=float,
+    default=DEFAULT_MIN_VALIDATOR_VTRUST,
+    show_default=True,
+    help='Minimum validator_trust to probe.',
+)
+@click.option(
+    '--min-stake',
+    type=float,
+    default=DEFAULT_MIN_VALIDATOR_STAKE,
+    show_default=True,
+    help='Minimum validator stake (α) to probe.',
+)
 @click.option('--json-output', 'json_mode', is_flag=True, default=False, help='Output results as JSON.')
-def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, json_mode):
+def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, min_vtrust, min_stake, json_mode):
     """Check how many validators have your PAT stored.
 
     Sends a lightweight probe to each validator — no PAT is transmitted.
@@ -49,10 +73,10 @@ def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, json_mode)
     wallet_hotkey = wallet_hotkey or _load_config_value('hotkey') or 'default'
     ws_endpoint = _resolve_endpoint(network, rpc_url)
 
-    _print(f'[dim]Wallet: {wallet_name}/{wallet_hotkey} | Network: {ws_endpoint} | Netuid: {netuid}[/dim]', json_mode)
+    _print(f'[dim]Wallet: {wallet_name}/{wallet_hotkey} | Network: {ws_endpoint} | Netuid: {netuid}[/dim]')
 
     # 2. Set up bittensor objects
-    with _status('[bold]Connecting to network...', json_mode):
+    with _status('[bold]Connecting to network...'):
         try:
             wallet, subtensor, metagraph, dendrite = _connect_bittensor(wallet_name, wallet_hotkey, ws_endpoint, netuid)
         except Exception as e:
@@ -62,8 +86,10 @@ def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, json_mode)
     # Verify miner is registered
     _require_registered(wallet, metagraph, netuid, json_mode)
 
-    # 3. Find active validator axons (vtrust > 0.1 = actively participating in consensus)
-    validator_axons, validator_uids = _require_validator_axons(metagraph, json_mode)
+    # 3. Find active validator axons (vtrust + serving + stake threshold)
+    validator_axons, validator_uids, excluded = _require_validator_axons(
+        metagraph, json_mode, min_vtrust=min_vtrust, min_stake=min_stake
+    )
 
     # 4. Send check probes
     synapse = PatCheckSynapse()
@@ -76,7 +102,7 @@ def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, json_mode)
             timeout=15.0,
         )
 
-    with _status(f'[bold]Checking {len(validator_axons)} validators...', json_mode):
+    with _status(f'[bold]Checking {len(validator_axons)} validators...'):
         responses = asyncio.run(_check())
 
     # 5. Collect results
@@ -95,8 +121,8 @@ def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, json_mode)
             }
         )
 
-    valid_count = sum(1 for r in results if r['pat_valid'] is True)
-    no_response_count = sum(1 for r in results if r['has_pat'] is None)
+    counts = _pat_check_aggregate_counts(results)
+    valid_count = counts['valid']
 
     # 6. Display results
     if json_mode:
@@ -105,9 +131,8 @@ def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, json_mode)
                 {
                     'success': valid_count > 0,
                     'total_validators': len(results),
-                    'valid': valid_count,
-                    'invalid': len(results) - valid_count - no_response_count,
-                    'no_response': no_response_count,
+                    **counts,
+                    'skipped': excluded,
                     'results': results,
                 },
                 indent=2,
@@ -121,15 +146,10 @@ def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, json_mode)
         table.add_column('Reason', style='dim')
 
         for r in results:
-            if r['pat_valid'] is True:
-                status = '[green]✓ valid[/green]'
-            elif r['has_pat'] is False:
-                status = '[red]✗ no PAT[/red]'
-            elif r['pat_valid'] is False:
-                status = '[red]✗ invalid[/red]'
-            else:
-                status = '[yellow]— no response[/yellow]'
+            category = _pat_check_row_category(r)
+            status = _PAT_CHECK_STATUS_MARKUP[category]
             table.add_row(str(r['uid']), r['hotkey'], status, r.get('rejection_reason') or '')
 
         console.print(table)
         console.print(f'\n[bold]{valid_count}/{len(results)} validators have a valid PAT stored.[/bold]')
+        _render_skipped_validators(excluded, json_mode)

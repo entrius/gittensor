@@ -7,7 +7,7 @@ from typing import Dict, List, Optional
 
 import bittensor as bt
 
-from gittensor.constants import NON_CODE_EXTENSIONS
+from gittensor.constants import DEFAULT_REPO_WEIGHT, NON_CODE_EXTENSIONS
 
 
 @dataclass
@@ -31,12 +31,34 @@ class RepositoryConfig:
         weight: Repository weight for scoring
         inactive_at: ISO timestamp when repository became inactive (None if active)
         additional_acceptable_branches: List of additional branch patterns to accept (None if only default branch)
+        mirror_enabled: When True, fetch this repo's data from the das-github-mirror
+            service instead of via per-miner PATs. Defaults to False so existing
+            entries keep their current PAT-based behavior.
+        trusted_label_pipeline: When True, scoring labels count regardless of
+            actor — including GitHub Apps that surface as ``actor_association=NULL``.
+            Defaults to False; only enable on repos with an authoritative label
+            pipeline. See ``_resolve_trusted_scoring_label`` for the threat model.
+        label_multipliers: Per-repo label pattern multipliers. Keys support the
+            same fnmatch wildcard syntax as ``additional_acceptable_branches``.
+        default_label_multiplier: Multiplier used when no configured label
+            pattern matches. Defaults to neutral scoring.
 
     """
 
     weight: float
     inactive_at: Optional[str] = None
     additional_acceptable_branches: Optional[List[str]] = None
+    mirror_enabled: bool = False
+    trusted_label_pipeline: bool = False
+    label_multipliers: Optional[Dict[str, float]] = None
+    default_label_multiplier: float = 1.0
+
+
+def resolve_repo_weight(repo_config: Optional[RepositoryConfig]) -> float:
+    """Return the repo weight preserving full JSON precision, or the default for unknown repos."""
+    if repo_config is None:
+        return DEFAULT_REPO_WEIGHT
+    return repo_config.weight
 
 
 @dataclass
@@ -110,6 +132,14 @@ def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
                     weight=float(metadata.get('weight', 0.01)),
                     inactive_at=metadata.get('inactive_at'),
                     additional_acceptable_branches=metadata.get('additional_acceptable_branches'),
+                    mirror_enabled=bool(metadata.get('mirror_enabled', False)),
+                    trusted_label_pipeline=bool(metadata.get('trusted_label_pipeline', False)),
+                    label_multipliers=(
+                        {str(label): float(multiplier) for label, multiplier in metadata['label_multipliers'].items()}
+                        if metadata.get('label_multipliers') is not None
+                        else None
+                    ),
+                    default_label_multiplier=float(metadata.get('default_label_multiplier', 1.0)),
                 )
                 normalized_data[repo_name.lower()] = config
             except (ValueError, TypeError) as e:

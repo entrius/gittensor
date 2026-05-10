@@ -30,9 +30,7 @@
     "weight": 0.0372
   },
   "ant-design/ant-design": {
-    "additional_acceptable_branches": [
-      "feature"
-    ],
+    "additional_acceptable_branches": ["feature"],
     "weight": 0.0715
   },
   "antoniorodr/cronboard": {
@@ -42,25 +40,17 @@
     "weight": 0.0579
   },
   "autoppia/autoppia_iwa": {
-    "additional_acceptable_branches": [
-      "contribution/*"
-    ],
+    "additional_acceptable_branches": ["contribution/*"],
     "inactive_at": "2026-04-06T00:00:00Z",
     "weight": 0.1259
   },
   "autoppia/autoppia_web_agents_subnet": {
-    "additional_acceptable_branches": [
-      "dev",
-      "dev-gittensor"
-    ],
+    "additional_acceptable_branches": ["dev", "dev-gittensor"],
     "inactive_at": "2026-04-06T00:00:00Z",
     "weight": 0.1321
   },
   "autoppia/autoppia_webs_demo": {
-    "additional_acceptable_branches": [
-      "feature/*",
-      "fix/*"
-    ],
+    "additional_acceptable_branches": ["feature/*", "fix/*"],
     "inactive_at": "2026-04-06T00:00:00Z",
     "weight": 0.1239
   },
@@ -101,9 +91,7 @@
     "weight": 0.2917
   },
   "BitMind-AI/bitmind-subnet": {
-    "additional_acceptable_branches": [
-      "testnet"
-    ],
+    "additional_acceptable_branches": ["testnet"],
     "weight": 0.1013
   },
   "bitpay/bitcore": {
@@ -120,6 +108,9 @@
   },
   "brave/brave-browser": {
     "weight": 0.0946
+  },
+  "browser-use/browser-harness": {
+    "weight": 0.1
   },
   "browser-use/browser-use": {
     "weight": 0.0526
@@ -149,6 +140,7 @@
     "weight": 0.0926
   },
   "cosmos/cosmos-sdk": {
+    "additional_acceptable_branches": ["release/v0.54.x", "release/v0.53.x"],
     "weight": 0.0916
   },
   "CreativeBuilds/sn77": {
@@ -197,16 +189,58 @@
     "weight": 0.1392
   },
   "entrius/allways": {
-    "weight": 1.0
+    "weight": 1.0,
+    "mirror_enabled": true,
+    "trusted_label_pipeline": true,
+    "label_multipliers": {
+      "bug": 1.25,
+      "enhancement": 1.0,
+      "refactor": 0.25
+    }
   },
   "entrius/allways-ui": {
-    "weight": 0.88
+    "weight": 0.5,
+    "mirror_enabled": true,
+    "trusted_label_pipeline": true,
+    "label_multipliers": {
+      "feature": 1.25,
+      "bug": 1.1,
+      "enhancement": 1.0,
+      "refactor": 0.5
+    }
+  },
+  "entrius/das-github-mirror": {
+    "weight": 0.2,
+    "mirror_enabled": true,
+    "trusted_label_pipeline": true,
+    "label_multipliers": {
+      "feature": 1.5,
+      "bug": 1.25,
+      "enhancement": 1.1,
+      "refactor": 0.5
+    }
   },
   "entrius/gittensor": {
-    "weight": 1.0
+    "weight": 1.0,
+    "mirror_enabled": true,
+    "trusted_label_pipeline": true,
+    "label_multipliers": {
+      "feature": 1.5,
+      "bug": 1.1,
+      "enhancement": 1.25,
+      "refactor": 0.25
+    }
   },
   "entrius/gittensor-ui": {
-    "weight": 0.74
+    "weight": 0.5,
+    "mirror_enabled": true,
+    "trusted_label_pipeline": true,
+    "label_multipliers": {
+      "feature": 1.25,
+      "bug": 1.1,
+      "enhancement": 1.0,
+      "refactor": 0.5
+    }
   },
   "espressif/arduino-esp32": {
     "weight": 0.1444
@@ -228,9 +262,6 @@
   },
   "flowsurface-rs/flowsurface": {
     "weight": 0.051
-  },
-  "fx-integral/metahash": {
-    "weight": 0.0431
   },
   "General-Tao-Ventures/cartha-cli": {
     "weight": 0.0476
@@ -254,6 +285,7 @@
     "weight": 0.0853
   },
   "grafana/grafana": {
+    "additional_acceptable_branches": ["release-13.0.2"],
     "weight": 0.1136
   },
   "GraphiteAI/Graphite-Subnet": {
@@ -263,9 +295,7 @@
     "weight": 0.0342
   },
   "hoppscotch/hoppscotch": {
-    "additional_acceptable_branches": [
-      "next"
-    ],
+    "additional_acceptable_branches": ["next"],
     "weight": 0.1801
   },
   "huggingface/lerobot": {
@@ -296,6 +326,7 @@
     "weight": 0.0704
   },
   "jellyfin/jellyfin": {
+    "additional_acceptable_branches": ["release-10.11.z"],
     "weight": 0.0607
   },
   "jesseduffield/lazygit": {
@@ -311,12 +342,14 @@
     "weight": 0.0837
   },
   "jupyterlab/jupyterlab": {
+    "additional_acceptable_branches": ["4.5.x"],
     "weight": 0.1755
   },
   "keras-team/keras": {
     "weight": 0.1091
   },
   "labring/FastGPT": {
+    "additional_acceptable_branches": ["v4.14.x"],
     "weight": 0.0633
   },
   "langchain-ai/langchain": {
@@ -330,22 +363,15 @@
     "weight": 0.0346
   },
   "latent-to/async-substrate-interface": {
-    "additional_acceptable_branches": [
-      "staging"
-    ],
+    "additional_acceptable_branches": ["staging"],
     "weight": 0.2764
   },
   "latent-to/bittensor": {
-    "additional_acceptable_branches": [
-      "staging",
-      "SDKv10"
-    ],
+    "additional_acceptable_branches": ["staging", "SDKv10"],
     "weight": 0.3556
   },
   "latent-to/btcli": {
-    "additional_acceptable_branches": [
-      "staging"
-    ],
+    "additional_acceptable_branches": ["staging"],
     "weight": 0.2514
   },
   "latent-to/btwallet": {
@@ -367,9 +393,7 @@
     "weight": 0.0419
   },
   "macrocosm-os/data-universe": {
-    "additional_acceptable_branches": [
-      "dev"
-    ],
+    "additional_acceptable_branches": ["dev"],
     "weight": 0.0495
   },
   "macrocosm-os/iota": {
@@ -388,15 +412,14 @@
     "weight": 0.0564
   },
   "medusajs/medusa": {
-    "additional_acceptable_branches": [
-      "develop"
-    ],
+    "additional_acceptable_branches": ["develop"],
     "weight": 0.0603
   },
   "mem0ai/mem0": {
     "weight": 0.0455
   },
   "MetaMask/metamask-extension": {
+    "additional_acceptable_branches": ["release/13.28.0", "release/13.29.0"],
     "weight": 0.0806
   },
   "metanova-labs/nova": {
@@ -424,6 +447,7 @@
     "weight": 0.0445
   },
   "monero-project/monero": {
+    "additional_acceptable_branches": ["release-v0.18"],
     "weight": 0.0792
   },
   "mrdoob/three.js": {
@@ -433,15 +457,18 @@
     "weight": 0.0542
   },
   "neovim/neovim": {
+    "additional_acceptable_branches": ["release-0.12"],
     "weight": 0.0785
   },
   "nextcloud/android": {
     "weight": 0.0778
   },
   "nextcloud/desktop": {
+    "additional_acceptable_branches": ["stable-33.0", "stable-4.0"],
     "weight": 0.0771
   },
   "nextcloud/server": {
+    "additional_acceptable_branches": ["stable33", "stable32", "stable31"],
     "weight": 0.0764
   },
   "nginx/nginx": {
@@ -451,10 +478,11 @@
     "weight": 0.0333
   },
   "nocodb/nocodb": {
-    "additional_acceptable_branches": [
-      "develop"
-    ],
+    "additional_acceptable_branches": ["develop"],
     "weight": 0.0751
+  },
+  "nousresearch/hermes-agent": {
+    "weight": 0.59
   },
   "numinouslabs/numinous": {
     "weight": 0.0413
@@ -475,7 +503,7 @@
     "weight": 0.0407
   },
   "openclaw/openclaw": {
-    "weight": 0.2316
+    "weight": 0.8
   },
   "OpenGradient/BitQuant-Subnet": {
     "weight": 0.0462
@@ -487,9 +515,7 @@
     "weight": 0.0492
   },
   "opentensor/subtensor": {
-    "additional_acceptable_branches": [
-      "devnet-ready"
-    ],
+    "additional_acceptable_branches": ["devnet-ready"],
     "weight": 0.387
   },
   "OpenZeppelin/openzeppelin-contracts": {
@@ -517,9 +543,7 @@
     "weight": 0.0442
   },
   "pi-hole/web": {
-    "additional_acceptable_branches": [
-      "development"
-    ],
+    "additional_acceptable_branches": ["development"],
     "weight": 0.0739
   },
   "PlatformNetwork/platform": {
@@ -550,9 +574,7 @@
     "weight": 0.0364
   },
   "RedTeamSubnet/RedTeam": {
-    "additional_acceptable_branches": [
-      "dev"
-    ],
+    "additional_acceptable_branches": ["dev"],
     "weight": 0.044
   },
   "resi-labs-ai/resi": {
@@ -575,15 +597,11 @@
     "weight": 0.0507
   },
   "shiftlayer-llc/brainplay-subnet": {
-    "additional_acceptable_branches": [
-      "dev"
-    ],
+    "additional_acceptable_branches": ["dev"],
     "weight": 0.04
   },
   "Significant-Gravitas/AutoGPT": {
-    "additional_acceptable_branches": [
-      "dev"
-    ],
+    "additional_acceptable_branches": ["dev"],
     "weight": 0.062
   },
   "smartcontractkit/chainlink": {
@@ -617,9 +635,7 @@
     "weight": 0.0682
   },
   "taofu-labs/tpn-subnet": {
-    "additional_acceptable_branches": [
-      "development"
-    ],
+    "additional_acceptable_branches": ["development"],
     "weight": 0.0398
   },
   "taoshidev/vanta-network": {
@@ -629,9 +645,7 @@
     "weight": 0.0394
   },
   "tauri-apps/tauri": {
-    "additional_acceptable_branches": [
-      "dev"
-    ],
+    "additional_acceptable_branches": ["dev"],
     "weight": 0.0583
   },
   "Team-Rizzo/talisman-ai": {
@@ -643,9 +657,6 @@
   "thenervelab/thebrain": {
     "weight": 0.039
   },
-  "threetau/kinitro": {
-    "weight": 0.0368
-  },
   "tinygrad/tinygrad": {
     "weight": 0.0677
   },
@@ -653,9 +664,7 @@
     "weight": 0.0672
   },
   "ToolJet/ToolJet": {
-    "additional_acceptable_branches": [
-      "develop"
-    ],
+    "additional_acceptable_branches": ["develop"],
     "weight": 0.0599
   },
   "trishoolai/trishool-subnet": {
@@ -707,6 +716,7 @@
     "weight": 0.0638
   },
   "zed-industries/zed": {
+    "additional_acceptable_branches": ["v0.234.x"],
     "weight": 0.1564
   }
 }

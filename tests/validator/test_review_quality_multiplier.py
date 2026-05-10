@@ -14,10 +14,20 @@ from math import ceil
 
 import pytest
 
-from gittensor.classes import PRState, PullRequest
-from gittensor.constants import REVIEW_PENALTY_RATE
+from gittensor.classes import MinerEvaluation, PRState, PullRequest
+from gittensor.constants import (
+    MAX_OPEN_PR_REVIEW_COLLATERAL_MULTIPLIER,
+    OPEN_PR_COLLATERAL_PERCENT,
+    REVIEW_PENALTY_RATE,
+)
 from gittensor.utils.github_api_tools import _MAX_CHANGES_REQUESTED_REVIEWS
-from gittensor.validator.oss_contributions.scoring import calculate_review_quality_multiplier
+from gittensor.validator.oss_contributions.scoring import (
+    calculate_open_pr_collateral_score,
+    calculate_pr_multipliers,
+    calculate_review_collateral_multiplier,
+    calculate_review_quality_multiplier,
+)
+from gittensor.validator.utils.load_weights import RepositoryConfig
 from tests.validator.conftest import PRBuilder
 
 # ============================================================================
@@ -72,6 +82,30 @@ class TestCalculateReviewQualityMultiplier:
 
     def test_returns_float(self):
         assert isinstance(calculate_review_quality_multiplier(0), float)
+
+
+class TestCalculateReviewCollateralMultiplier:
+    """Tests for the collateral-only review multiplier for OPEN PRs."""
+
+    def test_no_reviews_returns_one(self):
+        assert calculate_review_collateral_multiplier(0) == 1.0
+
+    def test_one_review_increases_collateral_multiplier(self):
+        assert calculate_review_collateral_multiplier(1) == pytest.approx(1.0 + REVIEW_PENALTY_RATE)
+
+    def test_table_values(self):
+        expected = {
+            0: 1.00,
+            1: 1.15,
+            2: 1.30,
+            3: 1.45,
+        }
+        for n, mult in expected.items():
+            assert calculate_review_collateral_multiplier(n) == pytest.approx(mult, abs=1e-9), f'n={n}'
+
+    def test_caps_at_two(self):
+        assert calculate_review_collateral_multiplier(7) == pytest.approx(2.0)
+        assert calculate_review_collateral_multiplier(100) == pytest.approx(2.0)
 
 
 # ============================================================================
@@ -171,17 +205,91 @@ class TestChangesRequestedCountFromGraphQL:
         pr = PullRequest.from_graphql_response(pr_data, uid=1, hotkey='hk', github_id='123')
         assert pr.changes_requested_count == 2
 
-    def test_non_merged_pr_does_not_parse_reviews(self):
-        pr_data = _make_graphql_pr('OPEN', [{'authorAssociation': 'OWNER'}])
+    def test_open_pr_also_counts_maintainer_reviews(self):
+        pr_data = _make_graphql_pr(
+            'OPEN',
+            [
+                {'authorAssociation': 'OWNER'},
+                {'authorAssociation': 'CONTRIBUTOR'},
+                {'authorAssociation': 'MEMBER'},
+            ],
+        )
         pr = PullRequest.from_graphql_response(pr_data, uid=1, hotkey='hk', github_id='123')
-        assert pr.changes_requested_count == 0
+        assert pr.changes_requested_count == 2
 
 
-def test_max_changes_requested_reviews_matches_penalty_rate():
-    # Tripwire: the GraphQL fetch cap must stay aligned with REVIEW_PENALTY_RATE so that any
-    # review beyond the cap is already forced to a 0.0 multiplier by calculate_review_quality_multiplier
-    assert _MAX_CHANGES_REQUESTED_REVIEWS == ceil(1 / REVIEW_PENALTY_RATE)
+class TestReviewCollateralMultiplierOnOpenPRCollateral:
+    def _prepare_open_pr(self, builder):
+        pr = builder.create(state=PRState.OPEN)
+        pr.base_score = 100.0
+        pr.repo_weight_multiplier = 1.0
+        pr.issue_multiplier = 1.0
+        pr.label_multiplier = 1.0
+        pr.changes_requested_count = 0
+        return pr
+
+    def test_clean_open_pr_collateral_unchanged(self, builder):
+        pr = self._prepare_open_pr(builder)
+        baseline = calculate_open_pr_collateral_score(pr)
+        pr.changes_requested_count = 0
+        assert calculate_open_pr_collateral_score(pr) == pytest.approx(baseline)
+
+    def test_open_pr_with_changes_requested_increases_collateral(self, builder):
+        pr = self._prepare_open_pr(builder)
+        baseline = calculate_open_pr_collateral_score(pr)
+        pr.changes_requested_count = 3
+        adjusted = calculate_open_pr_collateral_score(pr)
+        assert adjusted == pytest.approx(baseline * 1.45)
+
+    def test_open_pr_review_collateral_multiplier_caps_at_two(self, builder):
+        pr = self._prepare_open_pr(builder)
+        baseline = calculate_open_pr_collateral_score(pr)
+        pr.changes_requested_count = 100
+        assert calculate_open_pr_collateral_score(pr) == pytest.approx(baseline * 2.0)
+
+
+def _make_repo_config() -> dict:
+    return {'test/repo': RepositoryConfig(weight=1.0, label_multipliers={'fix': 1.25})}
+
+
+def _make_eval() -> MinerEvaluation:
+    return MinerEvaluation(uid=0, hotkey='hk', github_id='1')
+
+
+class TestReviewCollateralThroughScoringPipeline:
+    def test_open_pr_collateral_uses_collateral_review_multiplier(self, builder):
+        pr = builder.create(state=PRState.OPEN, repo='test/repo')
+        pr.base_score = 80.0
+        pr.current_labels = frozenset({'fix'})
+        pr.label_timeline_order = ('fix',)
+        pr.changes_requested_count = 3
+
+        calculate_pr_multipliers(pr, _make_eval(), _make_repo_config())
+
+        assert pr.label_multiplier == pytest.approx(1.25)
+
+        collateral_projection = (
+            pr.base_score
+            * pr.repo_weight_multiplier
+            * pr.issue_multiplier
+            * pr.label_multiplier
+            * calculate_review_collateral_multiplier(pr.changes_requested_count)
+        )
+        expected_collateral = collateral_projection * OPEN_PR_COLLATERAL_PERCENT
+
+        assert calculate_open_pr_collateral_score(pr) == pytest.approx(expected_collateral)
+
+
+def test_max_changes_requested_reviews_covers_review_multipliers():
+    # Tripwire: the GraphQL fetch cap must stay aligned with every review-count-based multiplier.
+    penalty_cap = ceil(1 / REVIEW_PENALTY_RATE)
+    collateral_cap = ceil((MAX_OPEN_PR_REVIEW_COLLATERAL_MULTIPLIER - 1.0) / REVIEW_PENALTY_RATE)
+
+    assert _MAX_CHANGES_REQUESTED_REVIEWS == max(penalty_cap, collateral_cap)
     assert calculate_review_quality_multiplier(_MAX_CHANGES_REQUESTED_REVIEWS) == 0.0
+    assert calculate_review_collateral_multiplier(_MAX_CHANGES_REQUESTED_REVIEWS) == pytest.approx(
+        MAX_OPEN_PR_REVIEW_COLLATERAL_MULTIPLIER
+    )
 
 
 if __name__ == '__main__':

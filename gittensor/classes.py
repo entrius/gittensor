@@ -1,22 +1,34 @@
+import copy
 import re
-from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from math import prod
-from typing import DefaultDict, Dict, List, Optional, Set
+from typing import TYPE_CHECKING, DefaultDict, Dict, List, Optional, Set
 
 import bittensor as bt
 
+if TYPE_CHECKING:
+    # Forward-reference only — avoids importing the mirror subpackage at runtime
+    # and prevents accidental coupling. The mirror_* lists below are typed as
+    # strings to defer resolution.
+    from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredMirrorPR
+
 from gittensor.constants import (
-    LABEL_MULTIPLIERS,
     MAINTAINER_ASSOCIATIONS,
     MAX_CODE_DENSITY_MULTIPLIER,
     MIN_TOKEN_SCORE_FOR_BASE_SCORE,
 )
 from gittensor.utils.utils import parse_repo_name
 
-GITHUB_DOMAIN = 'https://github.com/'
+
+def _apply_score_multipliers(base_score: float, multipliers: Dict[str, float], pr_label: str) -> float:
+    """Compute earned score and emit the standard scoring log lines."""
+    earned = base_score * prod(multipliers.values())
+    mult_str = ' × '.join(f'{k}={v:.2f}' for k, v in multipliers.items())
+    bt.logging.info(f'├─ {pr_label} → {earned:.2f}')
+    bt.logging.info(f'│  └─ {base_score:.2f} × {mult_str}')
+    return earned
 
 
 class PRState(Enum):
@@ -74,6 +86,10 @@ class FileChange:
         test_dir_patterns = [
             r'(^|/)tests?/',
             r'(^|/)__tests?__/',
+            r'(^|/)androidtest[a-z]*/',
+            r'(^|/)integrationtest/',
+            r'(^|/)spec/',
+            r'\.tests?/',  # .NET MyProject.Tests/FooTests.cs
         ]
         if any(re.search(pattern, filename_lower) for pattern in test_dir_patterns):
             return True
@@ -83,11 +99,13 @@ class FileChange:
             r'^spec_',
             r'_test\.[^.]+$',
             r'_tests\.[^.]+$',
+            r'_spec\.[^.]+$',
             r'\.test\.[^.]+$',
             r'\.tests\.[^.]+$',
             r'\.spec\.[^.]+$',
             r'^test\.[^.]+$',
             r'^tests\.[^.]+$',
+            r'^conftest\.py$',
         ]
 
         return any(re.search(pattern, basename) for pattern in test_patterns)
@@ -171,8 +189,10 @@ class PullRequest:
     time_decay_multiplier: float = 1.0
     credibility_multiplier: float = 1.0
     review_quality_multiplier: float = 1.0  # Penalty for CHANGES_REQUESTED reviews from maintainers
-    label_multiplier: float = 1.0  # Multiplier based on PR label (exact match against known labels)
-    label: Optional[str] = None  # Last label set on the PR
+    label_multiplier: float = 1.0  # Multiplier resolved from repository label config
+    label: Optional[str] = None  # Resolved scoring label, set during scoring
+    current_labels: frozenset[str] = field(default_factory=frozenset)
+    label_timeline_order: tuple[str, ...] = field(default_factory=tuple)  # Newest current labels first
     changes_requested_count: int = 0  # Number of maintainer CHANGES_REQUESTED reviews
     earned_score: float = 0.0
     collateral_score: float = 0.0  # For OPEN PRs: potential_score * collateral_percent
@@ -220,15 +240,8 @@ class PullRequest:
             'cred': self.credibility_multiplier,
             'review': self.review_quality_multiplier,
         }
-
-        self.earned_score = self.base_score * prod(multipliers.values())
-
-        mult_str = ' × '.join(f'{k}={v:.2f}' for k, v in multipliers.items())
-        bt.logging.info(
-            f'├─ {self.pr_state.value} PR #{self.number} ({self.repository_full_name}) → {self.earned_score:.2f}'
-        )
-        bt.logging.info(f'│  └─ {self.base_score:.2f} × {mult_str}')
-
+        label = f'{self.pr_state.value} PR #{self.number} ({self.repository_full_name})'
+        self.earned_score = _apply_score_multipliers(self.base_score, multipliers, label)
         return self.earned_score
 
     @classmethod
@@ -295,21 +308,22 @@ class PullRequest:
         last_edited_at = parse_github_timestamp_to_cst(raw_edited_at) if isinstance(raw_edited_at, str) else None
         merged_at = parse_github_timestamp_to_cst(pr_data['mergedAt']) if is_merged else None
 
-        changes_requested_count = 0
-        if is_merged:
-            cr_reviews = pr_data.get('changesRequestedReviews', {}).get('nodes', [])
-            changes_requested_count = sum(
-                1 for r in cr_reviews if r.get('authorAssociation') in MAINTAINER_ASSOCIATIONS
-            )
+        cr_reviews = (pr_data.get('changesRequestedReviews') or {}).get('nodes') or []
+        changes_requested_count = sum(1 for r in cr_reviews if r.get('authorAssociation') in MAINTAINER_ASSOCIATIONS)
 
-        current = {(n.get('name') or '').lower() for n in (pr_data.get('labels') or {}).get('nodes') or [] if n}
-        label: Optional[str] = None
-        if not current.isdisjoint(LABEL_MULTIPLIERS):
+        current = frozenset(
+            (n.get('name') or '').lower()
+            for n in (pr_data.get('labels') or {}).get('nodes') or []
+            if n and n.get('name')
+        )
+        timeline_ordered: list[str] = []
+        if current:
+            seen: set[str] = set()
             for event in reversed((pr_data.get('timelineItems') or {}).get('nodes') or []):
                 name = ((event or {}).get('label') or {}).get('name', '').lower()
-                if name in current and name in LABEL_MULTIPLIERS:
-                    label = name
-                    break
+                if name and name in current and name not in seen:
+                    seen.add(name)
+                    timeline_ordered.append(name)
 
         return cls(
             number=pr_data['number'],
@@ -331,7 +345,8 @@ class PullRequest:
             last_edited_at=last_edited_at,
             head_ref_oid=pr_data.get('headRefOid'),
             base_ref_oid=pr_data.get('baseRefOid'),
-            label=label,
+            current_labels=current,
+            label_timeline_order=tuple(timeline_ordered),
             changes_requested_count=changes_requested_count,
         )
 
@@ -356,10 +371,22 @@ class MinerEvaluation:
     total_leaf_score: float = 0.0
     failed_reason: Optional[str] = None
     github_pr_fetch_failed: bool = False
+    # Mirror-source-specific fetch flag set by mirror.combine.combine alongside
+    # the OR into github_pr_fetch_failed. Lets the validator tell a complete
+    # mirror outage apart from a legacy partial-pagination failure.
+    mirror_pr_fetch_failed: bool = False
     evaluation_timestamp: Optional[datetime] = None
     merged_pull_requests: List[PullRequest] = field(default_factory=list)
     open_pull_requests: List[PullRequest] = field(default_factory=list)
     closed_pull_requests: List[PullRequest] = field(default_factory=list)
+    stale_closed_pull_requests: List[PullRequest] = field(default_factory=list)
+
+    # Populated by gittensor.validator.oss_contributions.mirror.combine.combine
+    # when the mirror scoring path runs. Empty for legacy-only evaluations.
+    mirror_merged_prs: List['ScoredMirrorPR'] = field(default_factory=list)
+    mirror_open_prs: List['ScoredMirrorPR'] = field(default_factory=list)
+    mirror_closed_prs: List['ScoredMirrorPR'] = field(default_factory=list)
+
     unique_repos_contributed_to: Set[str] = field(default_factory=set)
 
     # Eligibility and credibility
@@ -374,7 +401,7 @@ class MinerEvaluation:
     total_solved_issues: int = 0
     total_valid_solved_issues: int = 0  # solved issues where solving PR has token_score >= 5
     total_closed_issues: int = 0
-    total_open_issues: int = 0
+    total_open_issues: int = 0  # mirror-tracked open issues in lookback window (set by mirror_scan)
 
     @property
     def total_prs(self) -> int:
@@ -382,34 +409,63 @@ class MinerEvaluation:
 
     @property
     def total_merged_prs(self) -> int:
-        return len(self.merged_pull_requests)
+        return len(self.merged_pull_requests) + len(self.mirror_merged_prs)
 
     @property
     def total_open_prs(self) -> int:
-        return len(self.open_pull_requests)
+        return len(self.open_pull_requests) + len(self.mirror_open_prs)
 
     @property
     def total_closed_prs(self) -> int:
-        return len(self.closed_pull_requests)
+        return len(self.closed_pull_requests) + len(self.mirror_closed_prs)
 
     @property
     def should_use_cache_fallback(self) -> bool:
         return self.github_pr_fetch_failed and self.total_prs == 0
 
     def get_all_issues(self) -> List[Issue]:
-        """Aggregate all issues from all pull requests (merged, open, closed)."""
+        """Aggregate all issues from all pull requests (merged, open, closed).
+
+        Legacy PRs contribute their already-populated ``issues`` field directly;
+        mirror PRs contribute their ``pr.linked_issues`` adapted into legacy Issue
+        shape via ``mirror.adapters.mirror_linked_issue_to_legacy_issue``.
+        """
+        # Lazy import — mirror.adapters imports from classes.py (for Issue /
+        # FileChange), so importing it at module load would loop back here.
+        from gittensor.validator.oss_contributions.mirror.adapters import (
+            mirror_linked_issue_to_legacy_issue,
+        )
+
         all_issues = []
         for pr in self.merged_pull_requests + self.open_pull_requests + self.closed_pull_requests:
             if pr.issues:
                 all_issues.extend(pr.issues)
+        for scored in self.mirror_merged_prs + self.mirror_open_prs + self.mirror_closed_prs:
+            for li in scored.pr.linked_issues:
+                all_issues.append(
+                    mirror_linked_issue_to_legacy_issue(li, scored.pr.pr_number, scored.pr.repo_full_name)
+                )
         return all_issues
 
     def get_all_file_changes(self) -> List[FileChange]:
-        """Aggregate all file changes from all PR diffs (merged, open, closed)."""
+        """Aggregate all file changes from all PR diffs (merged, open, closed).
+
+        Mirror PRs carry their fetched files on ``ScoredMirrorPR.files``; the
+        adapter converts each MirrorFile into the legacy FileChange shape for
+        DB storage.
+        """
+        from gittensor.validator.oss_contributions.mirror.adapters import (
+            mirror_files_to_legacy,
+        )
+
         all_file_changes = []
         for pr in self.merged_pull_requests + self.open_pull_requests + self.closed_pull_requests:
             if pr.file_changes:
                 all_file_changes.extend(pr.file_changes)
+        for scored in self.mirror_merged_prs + self.mirror_open_prs + self.mirror_closed_prs:
+            if scored.files:
+                file_changes, _ = mirror_files_to_legacy(scored.pr.repo_full_name, scored.pr.pr_number, scored.files)
+                all_file_changes.extend(file_changes)
         return all_file_changes
 
     def add_merged_pull_request(self, raw_pr: Dict):
@@ -432,6 +488,13 @@ class MinerEvaluation:
             f'CLOSED PR #{raw_pr["number"]} in {parse_repo_name(raw_pr["repository"])} counting towards credibility'
         )
         self.closed_pull_requests.append(
+            PullRequest.from_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id)
+        )
+
+    def add_stale_closed_pull_request(self, raw_pr: Dict):
+        """Track a stale CLOSED PR so storage can refresh its pull_requests row."""
+        bt.logging.info(f'Stale CLOSED PR #{raw_pr["number"]} in {parse_repo_name(raw_pr["repository"])}')
+        self.stale_closed_pull_requests.append(
             PullRequest.from_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id)
         )
 
@@ -609,7 +672,7 @@ class MinerEvaluationCache:
         if not evaluation.hotkey or not evaluation.github_id or evaluation.github_id == '0':
             return
 
-        cached_eval = self.create_lightweight_copy(evaluation)
+        cached_eval = self._build_cache_entry(evaluation)
 
         self._cache[evaluation.uid] = CachedEvaluation(
             hotkey=evaluation.hotkey,
@@ -644,17 +707,53 @@ class MinerEvaluationCache:
 
         bt.logging.debug(f'Cache hit for UID {uid} (cached at {cached.cached_at.isoformat()})')
 
-        return deepcopy(cached.evaluation)
+        return self._isolate_for_downstream(cached.evaluation)
 
-    def create_lightweight_copy(self, evaluation: 'MinerEvaluation') -> 'MinerEvaluation':
-        """Create a memory-efficient copy, stripping file patches."""
-        light_eval = deepcopy(evaluation)
+    @staticmethod
+    def _build_cache_entry(evaluation: 'MinerEvaluation') -> 'MinerEvaluation':
+        # Cached evaluations feed only the GitHub-fetch-failure fallback path
+        # (issue_competitions + issue discovery scoring), which never reads
+        # file_changes. Drop them at store time to save memory and avoid
+        # copying thousands of FileChange objects per miner.
+        cached = copy.copy(evaluation)
+        cached.github_pat = None
+        cached.unique_repos_contributed_to = set(evaluation.unique_repos_contributed_to)
+        cached.merged_pull_requests = [_pr_for_cache(pr) for pr in evaluation.merged_pull_requests]
+        cached.open_pull_requests = [_pr_for_cache(pr) for pr in evaluation.open_pull_requests]
+        cached.closed_pull_requests = [_pr_for_cache(pr) for pr in evaluation.closed_pull_requests]
+        cached.mirror_merged_prs = [_scored_mirror_pr_for_cache(pr) for pr in evaluation.mirror_merged_prs]
+        cached.mirror_open_prs = [_scored_mirror_pr_for_cache(pr) for pr in evaluation.mirror_open_prs]
+        cached.mirror_closed_prs = [_scored_mirror_pr_for_cache(pr) for pr in evaluation.mirror_closed_prs]
+        return cached
 
-        for pr in light_eval.merged_pull_requests + light_eval.open_pull_requests + light_eval.closed_pull_requests:
-            if pr.file_changes:
-                for fc in pr.file_changes:
-                    fc.patch = None
+    @staticmethod
+    def _isolate_for_downstream(cached_eval: 'MinerEvaluation') -> 'MinerEvaluation':
+        # Downstream scoring mutates top-level scalar fields on MinerEvaluation
+        # and discovery_* fields on Issue. Everything else (PR metadata) is
+        # read-only on the cache-fallback path, so we can share it.
+        copy_eval = copy.copy(cached_eval)
+        copy_eval.unique_repos_contributed_to = set(cached_eval.unique_repos_contributed_to)
+        copy_eval.merged_pull_requests = [_pr_with_fresh_issues(pr) for pr in cached_eval.merged_pull_requests]
+        copy_eval.open_pull_requests = [_pr_with_fresh_issues(pr) for pr in cached_eval.open_pull_requests]
+        copy_eval.closed_pull_requests = [_pr_with_fresh_issues(pr) for pr in cached_eval.closed_pull_requests]
+        return copy_eval
 
-        light_eval.github_pat = None
 
-        return light_eval
+def _pr_for_cache(pr: 'PullRequest') -> 'PullRequest':
+    pr_copy = copy.copy(pr)
+    pr_copy.file_changes = None
+    pr_copy.issues = [copy.copy(issue) for issue in pr.issues] if pr.issues else None
+    return pr_copy
+
+
+def _pr_with_fresh_issues(pr: 'PullRequest') -> 'PullRequest':
+    pr_copy = copy.copy(pr)
+    if pr.issues is not None:
+        pr_copy.issues = [copy.copy(issue) for issue in pr.issues]
+    return pr_copy
+
+
+def _scored_mirror_pr_for_cache(scored: 'ScoredMirrorPR') -> 'ScoredMirrorPR':
+    scored_copy = copy.copy(scored)
+    scored_copy.files = None
+    return scored_copy

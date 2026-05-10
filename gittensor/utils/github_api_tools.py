@@ -3,12 +3,14 @@ import base64
 import fnmatch
 import os
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from enum import Enum
 from math import ceil
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, Iterator, List, Optional
 
-from gittensor.utils.utils import parse_repo_name
+from gittensor.utils.utils import backoff_seconds, parse_repo_name
 
 if TYPE_CHECKING:
     from gittensor.classes import FileChange as FileChangeType
@@ -37,12 +39,24 @@ from gittensor.validator.utils.load_weights import RepositoryConfig
 # Beyond this many CHANGES_REQUESTED reviews the quality multiplier is already 0
 _MAX_CHANGES_REQUESTED_REVIEWS = ceil(1 / REVIEW_PENALTY_RATE)
 
+
+class GitHubIdentityStatus(Enum):
+    VALID = 'VALID'
+    INVALID_AUTH = 'INVALID_AUTH'
+    TRANSIENT_FAILURE = 'TRANSIENT_FAILURE'
+
+
+@dataclass(frozen=True)
+class GitHubIdentityResult:
+    github_id: Optional[str]
+    status: GitHubIdentityStatus
+
+
 # core github graphql query
 QUERY = """
     query($userId: ID!, $limit: Int!, $cursor: String, $maxChangesRequestedReviews: Int!) {
       node(id: $userId) {
         ... on User {
-          issues(states: [OPEN]) { totalCount }
           pullRequests(first: $limit, states: [MERGED, OPEN, CLOSED], orderBy: {field: CREATED_AT, direction: DESC}, after: $cursor) {
             pageInfo {
               hasNextPage
@@ -175,34 +189,119 @@ def make_headers(token: str) -> Dict[str, str]:
 
 def make_graphql_headers(token: str) -> Dict[str, str]:
     """Build GitHub GraphQL headers for a PAT."""
-    return {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
+    return {
+        'Authorization': f'Bearer {token}',
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+    }
 
 
-def get_github_user(token: str) -> Optional[Dict[str, Any]]:
-    """Fetch GitHub user data for a PAT with retry.
+def make_anonymous_headers() -> Dict[str, str]:
+    """Build GitHub HTTP headers for unauthenticated calls."""
+    return {'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'gittensor-cli'}
+
+
+_session_cache: Optional[Dict[str, requests.Session]] = None
+
+
+@contextmanager
+def session_scope() -> Iterator[None]:
+    """Share requests.Session per PAT within the scope; close all on exit. Not re-entrant."""
+    global _session_cache
+    if _session_cache is not None:
+        raise RuntimeError('session_scope is not re-entrant')
+    _session_cache = {}
+    try:
+        yield
+    finally:
+        cache = _session_cache
+        _session_cache = None
+        for s in cache.values():
+            s.close()
+
+
+def _build_session(token: str) -> requests.Session:
+    session = requests.Session()
+    session.headers.update(make_headers(token) if token else make_anonymous_headers())
+    return session
+
+
+def get_session(token: str) -> requests.Session:
+    """Return a requests.Session for the given PAT, reusing one within a session_scope() and allocating fresh otherwise."""
+    if _session_cache is None:
+        return _build_session(token)
+    key = token or ''
+    if key not in _session_cache:
+        _session_cache[key] = _build_session(token)
+    return _session_cache[key]
+
+
+def _is_rate_limited_response(response: requests.Response) -> bool:
+    if response.status_code == 429:
+        return True
+    if response.status_code != 403:
+        return False
+    if response.headers.get('x-ratelimit-remaining') == '0':
+        return True
+    try:
+        message = str(response.json().get('message', '')).lower()
+    except Exception:
+        message = getattr(response, 'text', '').lower()
+    return 'rate limit' in message
+
+
+def get_github_identity(token: str) -> GitHubIdentityResult:
+    """Get GitHub numeric user id and whether lookup failure is cacheable.
 
     Args:
-        token (str): Github pat
+        token (str): GitHub personal access token.
+
     Returns:
-        Optional[Dict[str, Any]]: Parsed JSON user object on success, or None on failure.
+        GitHubIdentityResult: Numeric user id on success, invalid auth for
+            permanent auth failures, or transient failure when GitHub/user JSON
+            could not be reached after retries.
     """
     if not token:
-        return None
+        return GitHubIdentityResult(None, GitHubIdentityStatus.INVALID_AUTH)
 
-    headers = make_headers(token)
+    session = get_session(token)
 
     # Retry logic for timeout issues
     for attempt in range(6):
         try:
-            response = requests.get(f'{BASE_GITHUB_API_URL}/user', headers=headers, timeout=GITHUB_HTTP_TIMEOUT_SECONDS)
+            response = session.get(f'{BASE_GITHUB_API_URL}/user', timeout=GITHUB_HTTP_TIMEOUT_SECONDS)
             if response.status_code == 200:
                 try:
                     user_data: Dict[str, Any] = response.json()
-                except Exception as e:  # pragma: no cover
+                except Exception as e:
                     bt.logging.warning(f'Failed to parse GitHub /user JSON response: {e}')
-                    return None
+                    if attempt < 5:
+                        time.sleep(2)
+                        continue
+                    return GitHubIdentityResult(None, GitHubIdentityStatus.TRANSIENT_FAILURE)
 
-                return user_data
+                user_id = user_data.get('id')
+                if user_id is not None:
+                    return GitHubIdentityResult(str(user_id), GitHubIdentityStatus.VALID)
+
+                bt.logging.warning(f'GitHub /user response missing id (attempt {attempt + 1}/6)')
+                if attempt < 5:
+                    time.sleep(2)
+                    continue
+                return GitHubIdentityResult(None, GitHubIdentityStatus.TRANSIENT_FAILURE)
+
+            if response.status_code == 408 or _is_rate_limited_response(response):
+                bt.logging.warning(
+                    f'GitHub /user request failed with status {response.status_code} (attempt {attempt + 1}/6)'
+                )
+                if attempt < 5:
+                    time.sleep(2)
+                    continue
+                return GitHubIdentityResult(None, GitHubIdentityStatus.TRANSIENT_FAILURE)
+
+            if 400 <= response.status_code < 500:
+                bt.logging.warning(f'GitHub /user auth failed with status {response.status_code}')
+                return GitHubIdentityResult(None, GitHubIdentityStatus.INVALID_AUTH)
 
             bt.logging.warning(
                 f'GitHub /user request failed with status {response.status_code} (attempt {attempt + 1}/6)'
@@ -215,27 +314,12 @@ def get_github_user(token: str) -> Optional[Dict[str, Any]]:
             if attempt < 5:  # Don't sleep on last attempt
                 time.sleep(2)
 
-    return None
+    return GitHubIdentityResult(None, GitHubIdentityStatus.TRANSIENT_FAILURE)
 
 
 def get_github_id(token: str) -> Optional[str]:
-    """Get GitHub numeric user id (as string) using a PAT.
-
-    Args:
-        token (str): GitHub personal access token.
-
-    Returns:
-        Optional[str]: Numeric user id as a string, or None if it cannot be determined.
-    """
-    user_data = get_github_user(token)
-    if not user_data:
-        return None
-
-    user_id = user_data.get('id')
-    if user_id is None:
-        return None
-
-    return str(user_id)
+    """Get GitHub numeric user id (as string) using a PAT."""
+    return get_github_identity(token).github_id
 
 
 def get_merge_base_sha(repository: str, base_sha: str, head_sha: str, token: str) -> Optional[str]:
@@ -254,15 +338,14 @@ def get_merge_base_sha(repository: str, base_sha: str, head_sha: str, token: str
     Returns:
         Merge-base commit SHA, or None if the request fails
     """
-    headers = make_headers(token)
+    session = get_session(token)
     max_attempts = 3
 
     for attempt in range(max_attempts):
         try:
-            response = requests.get(
+            response = session.get(
                 f'{BASE_GITHUB_API_URL}/repos/{repository}/compare/{base_sha}...{head_sha}',
-                headers=headers,
-                timeout=15,
+                timeout=GITHUB_HTTP_TIMEOUT_SECONDS,
             )
 
             if response.status_code == 200:
@@ -274,7 +357,7 @@ def get_merge_base_sha(repository: str, base_sha: str, head_sha: str, token: str
                 return None
 
             if attempt < max_attempts - 1:
-                backoff_delay = min(5 * (2 ** (attempt)), 30)
+                backoff_delay = backoff_seconds(attempt)
                 bt.logging.warning(
                     f'Compare API for {repository} failed with status {response.status_code} '
                     f'(attempt {attempt + 1}/{max_attempts}), retrying in {backoff_delay}s...'
@@ -283,7 +366,7 @@ def get_merge_base_sha(repository: str, base_sha: str, head_sha: str, token: str
 
         except requests.exceptions.RequestException as e:
             if attempt < max_attempts - 1:
-                backoff_delay = min(5 * (2 ** (attempt)), 30)
+                backoff_delay = backoff_seconds(attempt)
                 bt.logging.warning(
                     f'Compare API error for {repository} (attempt {attempt + 1}/{max_attempts}): {e}, '
                     f'retrying in {backoff_delay}s...'
@@ -294,7 +377,7 @@ def get_merge_base_sha(repository: str, base_sha: str, head_sha: str, token: str
     return None
 
 
-def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -> Optional[List[FileChange]]:
+def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -> List[FileChange]:
     """
     Get the diff for a specific PR by repository name and PR number.
 
@@ -308,11 +391,11 @@ def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -
         pr_number (int): PR number
         token (str): Github pat
     Returns:
-        List[FileChanges]: List object with file changes or None if error
+        List[FileChanges]: List object with file changes or empty list if error
     """
     max_attempts = 3
     per_page = 100
-    headers = make_headers(token)
+    session = get_session(token)
 
     all_file_diffs: list = []
     page = 1
@@ -321,11 +404,10 @@ def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -
 
     while attempt < max_attempts:
         try:
-            response = requests.get(
+            response = session.get(
                 f'{BASE_GITHUB_API_URL}/repos/{repository}/pulls/{pr_number}/files',
-                headers=headers,
                 params={'per_page': per_page, 'page': page},
-                timeout=15,
+                timeout=GITHUB_HTTP_TIMEOUT_SECONDS,
             )
 
             if response.status_code == 200:
@@ -353,7 +435,7 @@ def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -
             attempt += 1
 
             if attempt < max_attempts:
-                backoff_delay = min(5 * (2 ** (attempt - 1)), 30)
+                backoff_delay = backoff_seconds(attempt - 1)
                 bt.logging.warning(
                     f'File changes request for PR #{pr_number} in {repository} failed with {last_error} '
                     f'(attempt {attempt}/{max_attempts}), per_page={per_page}, retrying in {backoff_delay}s...'
@@ -367,7 +449,7 @@ def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -
             attempt += 1
 
             if attempt < max_attempts:
-                backoff_delay = min(5 * (2 ** (attempt - 1)), 30)
+                backoff_delay = backoff_seconds(attempt - 1)
                 bt.logging.warning(
                     f'File changes request error for PR #{pr_number} in {repository} '
                     f'(attempt {attempt}/{max_attempts}): {e}, retrying in {backoff_delay}s...'
@@ -385,7 +467,7 @@ _PR_TIMELINE_QUERY = """
 query($owner: String!, $name: String!, $issueNumber: Int!) {
   repository(owner: $owner, name: $name) {
     issue(number: $issueNumber) {
-      timelineItems(itemTypes: [CROSS_REFERENCED_EVENT], first: 50) {
+      timelineItems(itemTypes: [CROSS_REFERENCED_EVENT], last: 50) {
         nodes {
           ... on CrossReferencedEvent {
             source {
@@ -497,97 +579,19 @@ def _search_issue_referencing_prs_graphql(
     return out
 
 
-def _search_issue_referencing_prs_rest(
-    repo: str, issue_number: int, token: Optional[str] = None, state: str = 'open'
-) -> List[PRInfo]:
-    """Search PRs via GitHub REST search API."""
-    if issue_number < 1:
-        return []
-
-    if token:
-        headers = make_headers(token)
-    else:
-        headers = {'Accept': 'application/vnd.github.v3+json'}
-    headers.setdefault('User-Agent', 'gittensor-cli')
-
-    state_clause = f' state:{state}' if state != 'all' else ''
-    max_attempts = 3
-    for attempt in range(max_attempts):
-        try:
-            resp = requests.get(
-                f'{BASE_GITHUB_API_URL}/search/issues',
-                params={'q': f'repo:{repo} type:pr{state_clause} {issue_number} in:title,body', 'per_page': '50'},
-                headers=headers,
-                timeout=10,
-            )
-            resp.raise_for_status()
-
-            out: List[PRInfo] = []
-            for item in resp.json().get('items', []):
-                number = item.get('number')
-                if number is None:
-                    continue
-                user = item.get('user') or {}
-                pr_info: PRInfo = {
-                    'number': number,
-                    'title': item.get('title') or '',
-                    'author_login': user.get('login') or 'ghost',
-                    'author_id': user.get('id'),
-                    'created_at': item.get('created_at') or '',
-                    'merged_at': None,
-                    'state': _resolve_pr_state(item.get('state', 'open')),
-                    'url': item.get('html_url') or '',
-                    'review_count': 0,
-                    'closing_numbers': [],
-                }
-                out.append(pr_info)
-            return out
-
-        except requests.exceptions.RequestException as e:
-            if attempt < max_attempts - 1:
-                backoff = 2 * (attempt + 1)
-                bt.logging.warning(
-                    f'REST search failed for {repo}#{issue_number} (attempt {attempt + 1}/{max_attempts}): {e}, '
-                    f'retrying in {backoff}s...'
-                )
-                time.sleep(backoff)
-            else:
-                raise
-
-    return []
-
-
 def find_prs_for_issue(
     repo: str,
     issue_number: int,
     open_only: bool = True,
     token: Optional[str] = None,
 ) -> List[PRInfo]:
-    """Cascading PR discovery: GraphQL -> authenticated REST -> unauthenticated REST."""
-    rest_state = 'open' if open_only else 'all'
-
+    """Find PRs that reference an issue via GraphQL cross-reference data."""
     if token:
         try:
             prs = _search_issue_referencing_prs_graphql(repo, issue_number, token, open_only=open_only)
-            if prs:
-                return prs
+            return prs or []
         except Exception as exc:
             bt.logging.debug(f'GraphQL PR fetch failed for {repo}#{issue_number}: {exc}')
-
-    if token:
-        try:
-            prs = _search_issue_referencing_prs_rest(repo, issue_number, token=token, state=rest_state)
-            if prs:
-                return prs
-        except Exception as exc:
-            bt.logging.debug(f'Authenticated REST search failed for {repo}#{issue_number}: {exc}')
-
-    try:
-        prs = _search_issue_referencing_prs_rest(repo, issue_number, token=None, state=rest_state)
-        if prs:
-            return prs
-    except Exception as exc:
-        bt.logging.debug(f'Unauthenticated REST search failed for {repo}#{issue_number}: {exc}')
 
     return []
 
@@ -612,11 +616,12 @@ def execute_graphql_query(
     Returns:
         Parsed JSON response data, or None if all attempts failed
     """
+    session = get_session(token)
     headers = make_graphql_headers(token)
 
     for attempt in range(max_attempts):
         try:
-            response = requests.post(
+            response = session.post(
                 f'{BASE_GITHUB_API_URL}/graphql',
                 headers=headers,
                 json={'query': query, 'variables': variables},
@@ -628,7 +633,7 @@ def execute_graphql_query(
 
             # Retry on failure
             if attempt < (max_attempts - 1):
-                backoff_delay = min(5 * (2**attempt), 30)  # max of 30 second wait between retries
+                backoff_delay = backoff_seconds(attempt)
                 bt.logging.warning(
                     f'GraphQL request failed with status {response.status_code} '
                     f'(attempt {attempt + 1}/{max_attempts}), retrying in {backoff_delay}s...'
@@ -642,7 +647,7 @@ def execute_graphql_query(
 
         except requests.exceptions.RequestException as e:
             if attempt < (max_attempts - 1):
-                backoff_delay = min(5 * (2**attempt), 30)
+                backoff_delay = backoff_seconds(attempt)
                 bt.logging.warning(
                     f'GraphQL request exception (attempt {attempt + 1}/{max_attempts}), '
                     f'retrying in {backoff_delay}s: {e}'
@@ -689,6 +694,7 @@ def get_github_graphql_query(
     """
 
     max_attempts = 8
+    session = get_session(token)
     headers = make_graphql_headers(token)
     limit = page_size if page_size is not None else min(100, max_prs - merged_pr_count)
 
@@ -700,7 +706,7 @@ def get_github_graphql_query(
             'maxChangesRequestedReviews': _MAX_CHANGES_REQUESTED_REVIEWS,
         }
         try:
-            response = requests.post(
+            response = session.post(
                 f'{BASE_GITHUB_API_URL}/graphql',
                 headers=headers,
                 json={'query': QUERY, 'variables': variables},
@@ -718,7 +724,7 @@ def get_github_graphql_query(
                     if attempt < (max_attempts - 1):
                         old_limit = limit
                         limit = max(limit // 2, 10)
-                        backoff_delay = min(2 * (2**attempt), 15)
+                        backoff_delay = backoff_seconds(attempt, base=2, cap=15)
                         bt.logging.warning(
                             f'GraphQL RESOURCE_LIMITS_EXCEEDED (attempt {attempt + 1}/{max_attempts}), '
                             f'page size {old_limit} -> {limit}, retrying in {backoff_delay}s...'
@@ -735,7 +741,7 @@ def get_github_graphql_query(
 
             # HTTP error - log and retry
             if attempt < (max_attempts - 1):
-                backoff_delay = min(5 * (2**attempt), 30)
+                backoff_delay = backoff_seconds(attempt)
                 if response.status_code in (502, 503, 504):
                     limit = max(limit // 2, 10)
                     bt.logging.warning(
@@ -755,7 +761,7 @@ def get_github_graphql_query(
 
         except requests.exceptions.RequestException as e:
             if attempt < (max_attempts - 1):
-                backoff_delay = min(5 * (2**attempt), 30)
+                backoff_delay = backoff_seconds(attempt)
                 bt.logging.warning(
                     f'GraphQL request connection error (attempt {attempt + 1}/{max_attempts}): {e}, retrying in {backoff_delay}s...'
                 )
@@ -811,9 +817,9 @@ def try_add_open_or_closed_pr(
         closed_dt = parse_github_iso_to_utc(closed_at)
         created_dt = parse_github_iso_to_utc(created_at)
 
-        # Ignore stale PRs that were created before the scoring lookback window.
         # This allows users to close old PRs without receiving a fresh credibility penalty.
         if created_dt < lookback_date_filter:
+            miner_eval.add_stale_closed_pull_request(pr_raw)
             return
 
         if closed_dt >= lookback_date_filter:
@@ -961,6 +967,8 @@ def load_miners_prs(
                 non_resource_errors = [e for e in data['errors'] if e.get('type') != 'RESOURCE_LIMITS_EXCEEDED']
                 if non_resource_errors:
                     bt.logging.error(f'GraphQL errors: {non_resource_errors}')
+                    message = str(non_resource_errors[0].get('message') or 'unknown')[:200]
+                    miner_eval.failed_reason = f'GitHub GraphQL error: {message}'
                     miner_eval.github_pr_fetch_failed = True
                     break
 
@@ -969,10 +977,6 @@ def load_miners_prs(
                 bt.logging.warning('User not found or no pull requests')
                 miner_eval.github_pr_fetch_failed = True
                 break
-
-            # Extract open issue count from first page (User-level field, not paginated)
-            if cursor is None:
-                miner_eval.total_open_issues = user_data.get('issues', {}).get('totalCount', 0)
 
             pr_data: Dict = user_data.get('pullRequests', {})
             prs: List = pr_data.get('nodes', [])
@@ -1043,7 +1047,11 @@ def find_solver_from_cross_references(
     - merged, and
     - explicitly closing ``issue_number``.
 
-    If multiple candidates exist, the most recent ``merged_at`` is selected.
+    If multiple candidates exist, the earliest ``merged_at`` is selected, since
+    GitHub closes an issue on the first merged PR that triggers the close; later
+    PRs declaring "Closes #X" in their body still appear in the timeline with
+    ``closingIssuesReferences`` populated even though they did not actually
+    close the issue. PR ``number`` is used as a deterministic tiebreaker.
 
     Returns:
         ``None`` when lookup fails and should be retried later. Otherwise a
@@ -1060,36 +1068,20 @@ def find_solver_from_cross_references(
         return None, None
 
     if len(merged) > 1:
-        bt.logging.warning(f'Multiple closing PRs found for {repo}#{issue_number}, selecting most recent.')
+        bt.logging.warning(f'Multiple closing PRs found for {repo}#{issue_number}, selecting earliest-merged.')
         for candidate in merged:
             bt.logging.debug(
                 f'  PR#{candidate.get("number")}, solver_id={candidate.get("author_id")}, '
                 f'merged_at={candidate.get("merged_at")}'
             )
 
-    merged.sort(key=lambda p: p.get('merged_at') or '', reverse=True)
+    merged.sort(key=lambda p: (p.get('merged_at') or '', p.get('number') or 0))
     best = merged[0]
     bt.logging.debug(
         f'Solver via GraphQL cross-reference: PR#{best.get("number")}, '
         f'solver_id={best.get("author_id")}, merged_at={best.get("merged_at")}'
     )
     return best.get('author_id'), best.get('number')
-
-
-def find_solver_from_timeline(
-    repo: str, issue_number: int, token: str
-) -> Optional[tuple[Optional[int], Optional[int]]]:
-    """Find the PR author who closed an issue.
-
-    Uses GraphQL cross-reference analysis to find merged PRs that close the
-    issue, with baseRepository validation and closingIssuesReferences check.
-
-    Returns:
-        ``None`` when lookup fails and should be retried later. Otherwise
-        ``(solver_github_id, pr_number)`` where either may be None if not found.
-    """
-    bt.logging.debug(f'Finding solver for {repo}#{issue_number}')
-    return find_solver_from_cross_references(repo, issue_number, token)
 
 
 def check_github_issue_closed(repo: str, issue_number: int, token: str) -> Optional[Dict[str, Any]]:
@@ -1103,13 +1095,12 @@ def check_github_issue_closed(repo: str, issue_number: int, token: str) -> Optio
     Returns:
         Dict with 'is_closed', 'solver_github_id', 'pr_number', 'solver_lookup_failed' or None on error
     """
-    headers = make_headers(token)
+    session = get_session(token)
 
     try:
-        response = requests.get(
+        response = session.get(
             f'{BASE_GITHUB_API_URL}/repos/{repo}/issues/{issue_number}',
-            headers=headers,
-            timeout=15,
+            timeout=GITHUB_HTTP_TIMEOUT_SECONDS,
         )
 
         if response.status_code != 200:
@@ -1121,7 +1112,20 @@ def check_github_issue_closed(repo: str, issue_number: int, token: str) -> Optio
         if data.get('state') != 'closed':
             return {'is_closed': False}
 
-        solver_lookup = find_solver_from_timeline(repo, issue_number, token)
+        state_reason = data.get('state_reason')
+        if not isinstance(state_reason, str) or state_reason.strip().lower() != 'completed':
+            bt.logging.info(
+                f'Issue closed on GitHub but not completed: {repo}#{issue_number} state_reason={state_reason}'
+            )
+            return {
+                'is_closed': True,
+                'solver_github_id': None,
+                'pr_number': None,
+                'solver_lookup_failed': False,
+            }
+
+        bt.logging.debug(f'Finding solver for {repo}#{issue_number}')
+        solver_lookup = find_solver_from_cross_references(repo, issue_number, token)
         if solver_lookup is None:
             bt.logging.warning(f'Solver lookup failed for {repo}#{issue_number}')
             solver_lookup_failed = True
@@ -1158,6 +1162,7 @@ def _fetch_file_contents_with_base_batch(
     head_sha: str,
     batch_changes: List['FileChangeType'],
     token: str,
+    pr_number: Optional[int] = None,
 ) -> Dict[str, FileContentPair]:
     """Fetch base and head file contents for a single batch of file changes.
 
@@ -1207,7 +1212,8 @@ def _fetch_file_contents_with_base_batch(
 
     data = execute_graphql_query(query, variables, token)
     if data is None:
-        bt.logging.warning(f'Failed to fetch file contents for {repo_owner}/{repo_name}')
+        ctx = f' (PR #{pr_number})' if pr_number else ''
+        bt.logging.warning(f'Failed to fetch file contents for {repo_owner}/{repo_name}{ctx}')
         return {fc.filename: FileContentPair(None, None) for fc in batch_changes}
 
     if 'errors' in data:
@@ -1244,6 +1250,7 @@ def fetch_file_contents_with_base(
     head_sha: str,
     file_changes: List['FileChangeType'],
     token: str,
+    pr_number: Optional[int] = None,
 ) -> Dict[str, FileContentPair]:
     """Fetch old and new versions of files in batches so large PRs don't hit complexity limits.
 
@@ -1265,7 +1272,9 @@ def fetch_file_contents_with_base(
 
     for batch_start in range(0, len(file_changes), MAX_FILES_PER_GRAPHQL_BATCH):
         batch = file_changes[batch_start : batch_start + MAX_FILES_PER_GRAPHQL_BATCH]
-        batch_results = _fetch_file_contents_with_base_batch(repo_owner, repo_name, base_sha, head_sha, batch, token)
+        batch_results = _fetch_file_contents_with_base_batch(
+            repo_owner, repo_name, base_sha, head_sha, batch, token, pr_number=pr_number
+        )
         results.update(batch_results)
 
     return results

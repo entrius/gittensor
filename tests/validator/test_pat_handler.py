@@ -11,6 +11,7 @@ from bittensor.core.synapse import TerminalInfo
 from gittensor.synapses import PatBroadcastSynapse, PatCheckSynapse
 from gittensor.validator import pat_storage
 from gittensor.validator.pat_handler import (
+    _test_pat_against_repo,
     blacklist_pat_broadcast,
     blacklist_pat_check,
     handle_pat_broadcast,
@@ -20,7 +21,7 @@ from gittensor.validator.pat_handler import (
 
 def _run(coro):
     """Run an async function synchronously."""
-    return asyncio.get_event_loop().run_until_complete(coro)
+    return asyncio.run(coro)
 
 
 @pytest.fixture(autouse=True)
@@ -223,3 +224,61 @@ class TestHandlePatCheck:
         assert result.has_pat is True
         assert result.pat_valid is False
         assert 'PAT expired' in (result.rejection_reason or '')
+
+
+# ---------------------------------------------------------------------------
+# _test_pat_against_repo tests
+# ---------------------------------------------------------------------------
+
+
+def _mock_post_response(status_code: int = 200, payload=None):
+    resp = MagicMock()
+    resp.status_code = status_code
+    resp.json.return_value = payload if payload is not None else {}
+    return resp
+
+
+class TestPatAgainstRepo:
+    @patch('gittensor.validator.pat_handler.requests.post')
+    def test_valid_viewer_returns_none(self, mock_post):
+        mock_post.return_value = _mock_post_response(200, {'data': {'viewer': {'login': 'someone'}}})
+        assert _test_pat_against_repo('ghp_valid') is None
+
+    @patch('gittensor.validator.pat_handler.requests.post')
+    def test_non_200_returns_status_error(self, mock_post):
+        mock_post.return_value = _mock_post_response(401)
+        result = _test_pat_against_repo('ghp_bad')
+        assert result is not None
+        assert '401' in result
+
+    @patch('gittensor.validator.pat_handler.requests.post')
+    def test_errors_field_returns_message(self, mock_post):
+        mock_post.return_value = _mock_post_response(200, {'errors': [{'message': 'Bad credentials'}]})
+        result = _test_pat_against_repo('ghp_bad')
+        assert result is not None
+        assert 'Bad credentials' in result
+
+    @patch('gittensor.validator.pat_handler.requests.post')
+    def test_empty_errors_list_does_not_crash(self, mock_post):
+        """Some proxies return {"errors": []}; must not raise IndexError."""
+        mock_post.return_value = _mock_post_response(200, {'data': None, 'errors': []})
+        # Should not raise, and since viewer is not present, should reject with scope msg
+        result = _test_pat_against_repo('ghp_proxy')
+        assert result is not None
+        assert 'Public Repositories (read-only)' in result
+
+    @patch('gittensor.validator.pat_handler.requests.post')
+    def test_viewer_null_rejected_with_scope_message(self, mock_post):
+        """Fine-grained PAT without read access returns viewer:null; must be rejected."""
+        mock_post.return_value = _mock_post_response(200, {'data': {'viewer': None}})
+        result = _test_pat_against_repo('ghp_scopeless')
+        assert result is not None
+        assert 'Public Repositories (read-only)' in result
+
+    @patch('gittensor.validator.pat_handler.requests.post')
+    def test_data_null_rejected_with_scope_message(self, mock_post):
+        """Proxy-shaped {"data": null} response must not crash and must be rejected."""
+        mock_post.return_value = _mock_post_response(200, {'data': None})
+        result = _test_pat_against_repo('ghp_nulldata')
+        assert result is not None
+        assert 'Public Repositories (read-only)' in result

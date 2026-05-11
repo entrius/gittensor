@@ -40,9 +40,43 @@ from gittensor import __version__
 from gittensor.cli.issue_commands import register_commands
 from gittensor.cli.issue_commands.help import StyledAliasGroup, StyledGroup
 from gittensor.cli.issue_commands.helpers import CONFIG_FILE, GITTENSOR_DIR, console, err_console
+from gittensor.cli.json_output import click_error_type, emit_error_json, wants_json_output
 
 
-@click.group(cls=StyledAliasGroup)
+class JsonAwareAliasGroup(StyledAliasGroup):
+    """Root group that rewrites Click parse errors into the canonical JSON
+    envelope when `--json` is in argv; otherwise Click's default rendering."""
+
+    def main(self, args=None, prog_name=None, complete_var=None, standalone_mode=True, **extra):
+        json_mode = wants_json_output(args if args is not None else sys.argv[1:])
+        try:
+            return super().main(
+                args=args,
+                prog_name=prog_name,
+                complete_var=complete_var,
+                standalone_mode=False,
+                **extra,
+            )
+        except click.ClickException as exc:
+            if not standalone_mode:
+                raise
+            if json_mode:
+                emit_error_json(exc.format_message(), error_type=click_error_type(exc))
+            else:
+                exc.show()
+            sys.exit(exc.exit_code)
+        except click.exceptions.Abort:
+            if not standalone_mode:
+                raise
+            click.echo('Aborted!', err=True)
+            sys.exit(1)
+        except click.exceptions.Exit as exc:
+            if not standalone_mode:
+                raise
+            sys.exit(exc.exit_code)
+
+
+@click.group(cls=JsonAwareAliasGroup)
 @click.version_option(version=__version__, prog_name='gittensor')
 def cli():
     """Gittensor CLI - Manage issue bounties and validator operations"""

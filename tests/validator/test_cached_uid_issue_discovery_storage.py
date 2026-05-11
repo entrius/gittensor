@@ -17,22 +17,28 @@ from datetime import datetime, timezone
 from typing import cast
 from unittest.mock import Mock
 
-from gittensor.classes import MinerEvaluation, MinerEvaluationCache, PullRequest, PRState
+from gittensor.classes import MinerEvaluation, MinerEvaluationCache, PRState, PullRequest
 from neurons.validator import Validator
 
 
 def _make_pr(uid, hotkey='h1', github_id='12345'):
     now = datetime.now(timezone.utc)
     return PullRequest(
-        number=1, repository_full_name='owner/repo', uid=uid,
-        hotkey=hotkey, github_id=github_id, title='pr',
-        author_login='miner', merged_at=now, created_at=now,
-        pr_state=PRState.MERGED, file_changes=[],
+        number=1,
+        repository_full_name='owner/repo',
+        uid=uid,
+        hotkey=hotkey,
+        github_id=github_id,
+        title='pr',
+        author_login='miner',
+        merged_at=now,
+        created_at=now,
+        pr_state=PRState.MERGED,
+        file_changes=[],
     )
 
 
 class TestCachedUidIssueDiscoveryStorage:
-
     def test_bug_1052_cached_uid_issue_discovery_fields_survive_db_store(self):
         """After issue discovery mutates a cached evaluation, the
         issue-discovery fields should be present when bulk_store_evaluation
@@ -51,9 +57,7 @@ class TestCachedUidIssueDiscoveryStorage:
         failed_eval.mirror_pr_fetch_failed = True
 
         miner_evaluations = {1: failed_eval}
-        cached_uids = Validator.store_or_use_cached_evaluation(
-            cast(Validator, validator), miner_evaluations
-        )
+        cached_uids = Validator.store_or_use_cached_evaluation(cast(Validator, validator), miner_evaluations)
 
         assert 1 in cached_uids
 
@@ -78,7 +82,7 @@ class TestCachedUidIssueDiscoveryStorage:
 
         mock_bulk_store(miner_evaluations)
 
-        assert 1 in stored_uids, "Cached UID must be passed to bulk_store_evaluation"
+        assert 1 in stored_uids, 'Cached UID must be passed to bulk_store_evaluation'
         assert stored_evals[1].issue_discovery_score == 3.5
         assert stored_evals[1].issue_token_score == 100.0
         assert stored_evals[1].issue_credibility == 0.85
@@ -104,9 +108,7 @@ class TestCachedUidIssueDiscoveryStorage:
         failed_eval.mirror_pr_fetch_failed = True
 
         miner_evaluations = {1: failed_eval}
-        cached_uids = Validator.store_or_use_cached_evaluation(
-            cast(Validator, validator), miner_evaluations
-        )
+        cached_uids = Validator.store_or_use_cached_evaluation(cast(Validator, validator), miner_evaluations)
 
         miner_evaluations[1].issue_discovery_score = 3.5
         miner_evaluations[1].total_solved_issues = 2
@@ -124,6 +126,6 @@ class TestCachedUidIssueDiscoveryStorage:
         mock_bulk_store_skip(miner_evaluations, skip_uids=cached_uids)
 
         assert 1 not in stored_uids, (
-            "Bug confirmed: skip_uids=cached_uids skips the UID entirely, "
-            "losing issue_discovery_score=3.5 and total_solved_issues=2"
+            'Bug confirmed: skip_uids=cached_uids skips the UID entirely, '
+            'losing issue_discovery_score=3.5 and total_solved_issues=2'
         )

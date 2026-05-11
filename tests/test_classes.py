@@ -96,6 +96,22 @@ def test_is_test_file_detects_conftest_at_any_depth(filename):
     assert _file_change(filename).is_test_file() is True
 
 
+@pytest.mark.parametrize(
+    ('filename', 'expected_extension'),
+    [
+        ('Dockerfile', 'dockerfile'),
+        ('dockerfile', 'dockerfile'),
+        ('services/api/Dockerfile', 'dockerfile'),
+        ('Makefile', 'makefile'),
+        ('makefile', 'makefile'),
+        ('build.mk', 'mk'),
+        ('README', ''),
+    ],
+)
+def test_file_extension_normalizes_configured_extensionless_filenames(filename, expected_extension):
+    assert _file_change(filename).file_extension == expected_extension
+
+
 def test_pull_request_handles_deleted_label_event():
     pr_data = {
         'number': 42,

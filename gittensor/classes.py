@@ -21,6 +21,11 @@ from gittensor.constants import (
 )
 from gittensor.utils.utils import parse_repo_name
 
+CONFIGURED_EXTENSIONLESS_FILENAMES = {
+    'dockerfile': 'dockerfile',
+    'makefile': 'makefile',
+}
+
 
 def _apply_score_multipliers(base_score: float, multipliers: Dict[str, float], pr_label: str) -> float:
     """Compute earned score and emit the standard scoring log lines."""
@@ -77,7 +82,9 @@ class FileChange:
 
     def _calculate_file_extension(self) -> str:
         basename = self.filename.split('/')[-1]
-        return basename.split('.')[-1].lower() if '.' in basename else ''
+        if '.' in basename:
+            return basename.split('.')[-1].lower()
+        return CONFIGURED_EXTENSIONLESS_FILENAMES.get(basename.lower(), '')
 
     def is_test_file(self) -> bool:
         filename_lower = self.filename.lower()

@@ -116,9 +116,9 @@ class TestGraphQLRetryLogic:
         result = get_github_graphql_query(**graphql_params)
 
         assert result.response.status_code == 200
-        # Initial limit=100, halved to 50 after first 502, halved to 25 after second 502
+        # Initial limit=50, halved to 25 after first 502, halved to 12 after second 502
         limits = [c.kwargs['json']['variables']['limit'] for c in mock_post.call_args_list]
-        assert limits == [100, 50, 25]
+        assert limits == [50, 25, 12]
 
     @patch('gittensor.utils.github_api_tools.requests.post')
     @patch('gittensor.utils.github_api_tools.time.sleep')
@@ -130,9 +130,9 @@ class TestGraphQLRetryLogic:
 
         get_github_graphql_query(**graphql_params)
 
-        # 100 -> 50 -> 25 -> 12 -> 10 -> 10 -> 10 -> 10
+        # 50 -> 25 -> 12 -> 10 -> 10 -> 10 -> 10 -> 10
         limits = [c.kwargs['json']['variables']['limit'] for c in mock_post.call_args_list]
-        assert limits == [100, 50, 25, 12, 10, 10, 10, 10]
+        assert limits == [50, 25, 12, 10, 10, 10, 10, 10]
 
     @patch('gittensor.utils.github_api_tools.requests.post')
     @patch('gittensor.utils.github_api_tools.time.sleep')
@@ -150,7 +150,7 @@ class TestGraphQLRetryLogic:
 
         assert result.response.status_code == 200
         limits = [c.kwargs['json']['variables']['limit'] for c in mock_post.call_args_list]
-        assert limits == [100, 100, 100], 'Page size should stay at 100 for non-5xx errors'
+        assert limits == [50, 50, 50], 'Page size should stay at the initial default for non-5xx errors'
 
     @patch('gittensor.utils.github_api_tools.requests.post')
     @patch('gittensor.utils.github_api_tools.time.sleep')
@@ -169,7 +169,7 @@ class TestGraphQLRetryLogic:
 
         assert result.response.status_code == 200
         limits = [c.kwargs['json']['variables']['limit'] for c in mock_post.call_args_list]
-        assert limits == [100, 50, 25]
+        assert limits == [50, 25, 12]
 
     @patch('gittensor.utils.github_api_tools.requests.post')
     @patch('gittensor.utils.github_api_tools.time.sleep')
@@ -193,7 +193,7 @@ class TestGraphQLRetryLogic:
         result = get_github_graphql_query(**params)
 
         assert result.response.status_code == 200
-        # Initial limit = min(100, 100-85) = 15, halved to 10, stays at 10
+        # Initial limit = min(50, 100-85) = 15, halved to 10, stays at 10
         limits = [c.kwargs['json']['variables']['limit'] for c in mock_post.call_args_list]
         assert limits == [15, 10, 10]
 

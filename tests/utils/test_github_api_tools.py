@@ -95,8 +95,7 @@ class TestGraphQLRetryLogic:
 
         assert mock_post.call_count == 3, 'Should retry 3 times total'
         assert mock_sleep.call_count == 2, 'Should sleep twice between retries'
-        assert result.response is not None
-        assert result.response.status_code == 200
+        assert result.data is not None
 
         # Verify exponential backoff: 5s, 10s
         mock_sleep.assert_has_calls([call(5), call(10)])
@@ -115,7 +114,7 @@ class TestGraphQLRetryLogic:
 
         result = get_github_graphql_query(**graphql_params)
 
-        assert result.response.status_code == 200
+        assert result.data is not None
         # Initial limit=100, halved to 50 after first 502, halved to 25 after second 502
         limits = [c.kwargs['json']['variables']['limit'] for c in mock_post.call_args_list]
         assert limits == [100, 50, 25]
@@ -148,7 +147,7 @@ class TestGraphQLRetryLogic:
 
         result = get_github_graphql_query(**graphql_params)
 
-        assert result.response.status_code == 200
+        assert result.data is not None
         limits = [c.kwargs['json']['variables']['limit'] for c in mock_post.call_args_list]
         assert limits == [100, 100, 100], 'Page size should stay at 100 for non-5xx errors'
 
@@ -167,7 +166,7 @@ class TestGraphQLRetryLogic:
 
         result = get_github_graphql_query(**graphql_params)
 
-        assert result.response.status_code == 200
+        assert result.data is not None
         limits = [c.kwargs['json']['variables']['limit'] for c in mock_post.call_args_list]
         assert limits == [100, 50, 25]
 
@@ -192,7 +191,7 @@ class TestGraphQLRetryLogic:
         }
         result = get_github_graphql_query(**params)
 
-        assert result.response.status_code == 200
+        assert result.data is not None
         # Initial limit = min(100, 100-85) = 15, halved to 10, stays at 10
         limits = [c.kwargs['json']['variables']['limit'] for c in mock_post.call_args_list]
         assert limits == [15, 10, 10]
@@ -209,7 +208,7 @@ class TestGraphQLRetryLogic:
 
         assert mock_post.call_count == 8, 'Should try exactly 8 times'
         assert mock_sleep.call_count == 7, 'Should sleep 7 times between attempts'
-        assert result.response is None
+        assert result.data is None
         mock_logging.error.assert_called()
 
     @patch('gittensor.utils.github_api_tools.requests.post')
@@ -228,7 +227,7 @@ class TestGraphQLRetryLogic:
 
         assert mock_post.call_count == 2, 'Should retry once after 503'
         assert mock_sleep.call_count == 1, 'Should sleep once'
-        assert result.response is not None
+        assert result.data is not None
 
     @patch('gittensor.utils.github_api_tools.requests.post')
     @patch('gittensor.utils.github_api_tools.time.sleep')
@@ -245,7 +244,7 @@ class TestGraphQLRetryLogic:
         result = get_github_graphql_query(**graphql_params)
 
         assert mock_post.call_count == 2, 'Should retry once after 504'
-        assert result.response is not None
+        assert result.data is not None
 
     @patch('gittensor.utils.github_api_tools.requests.post')
     @patch('gittensor.utils.github_api_tools.time.sleep')
@@ -263,7 +262,7 @@ class TestGraphQLRetryLogic:
 
         assert mock_post.call_count == 2, 'Should retry on 401'
         assert mock_sleep.call_count == 1, 'Should sleep once'
-        assert result.response is not None
+        assert result.data is not None
 
     @patch('gittensor.utils.github_api_tools.requests.post')
     @patch('gittensor.utils.github_api_tools.time.sleep')
@@ -301,7 +300,7 @@ class TestGraphQLRetryLogic:
 
         assert mock_post.call_count == 3, 'Should retry after connection errors'
         assert mock_sleep.call_count == 2, 'Should sleep twice'
-        assert result.response is not None
+        assert result.data is not None
 
         # Verify exponential backoff: 5s, 10s
         mock_sleep.assert_has_calls([call(5), call(10)])
@@ -318,7 +317,7 @@ class TestGraphQLRetryLogic:
         result = get_github_graphql_query(**graphql_params)
 
         assert mock_post.call_count == 8, 'Should try 8 times before giving up'
-        assert result.response is None
+        assert result.data is None
 
     @patch('gittensor.utils.github_api_tools.requests.post')
     @patch('gittensor.utils.github_api_tools.bt.logging')
@@ -331,8 +330,7 @@ class TestGraphQLRetryLogic:
         result = get_github_graphql_query(**graphql_params)
 
         assert mock_post.call_count == 1, 'Should only call once on success'
-        assert result.response is not None
-        assert result.response.status_code == 200
+        assert result.data is not None
 
     @patch('gittensor.utils.github_api_tools.requests.post')
     @patch('gittensor.utils.github_api_tools.time.sleep')
@@ -1237,22 +1235,12 @@ def _make_pr_node(
 
 
 def _make_graphql_response(pr_nodes):
-    """Wrap PR nodes in the full GraphQL response structure."""
-    mock_response = Mock()
-    mock_response.status_code = 200
-    mock_response.json.return_value = {
-        'data': {
-            'node': {
-                'pullRequests': {
-                    'pageInfo': {'hasNextPage': False, 'endCursor': None},
-                    'nodes': pr_nodes,
-                }
-            }
-        }
-    }
     from gittensor.utils.github_api_tools import GraphQLPageResult
 
-    return GraphQLPageResult(response=mock_response, page_size=100)
+    payload = {
+        'data': {'node': {'pullRequests': {'pageInfo': {'hasNextPage': False, 'endCursor': None}, 'nodes': pr_nodes}}}
+    }
+    return GraphQLPageResult(data=payload, page_size=100)
 
 
 class TestLoadMinersPrsErrorResilience:
@@ -1315,20 +1303,15 @@ class TestLoadMinersPrsFetchFailureSignal:
         from gittensor.classes import MinerEvaluation
         from gittensor.utils.github_api_tools import GraphQLPageResult
 
-        mock_response = Mock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
+        empty_data = {
             'data': {
                 'node': {
                     'issues': {'totalCount': 0},
-                    'pullRequests': {
-                        'pageInfo': {'hasNextPage': False, 'endCursor': None},
-                        'nodes': [],
-                    },
+                    'pullRequests': {'pageInfo': {'hasNextPage': False, 'endCursor': None}, 'nodes': []},
                 }
             }
         }
-        mock_graphql_query.return_value = GraphQLPageResult(response=mock_response, page_size=100)
+        mock_graphql_query.return_value = GraphQLPageResult(data=empty_data, page_size=100)
 
         miner_eval = MinerEvaluation(uid=74, hotkey='test_hotkey', github_id='12345', github_pat='fake_pat')
 
@@ -1343,7 +1326,7 @@ class TestLoadMinersPrsFetchFailureSignal:
         from gittensor.classes import MinerEvaluation
         from gittensor.utils.github_api_tools import GraphQLPageResult
 
-        mock_graphql_query.return_value = GraphQLPageResult(response=None, page_size=100)
+        mock_graphql_query.return_value = GraphQLPageResult(data=None, page_size=100)
 
         miner_eval = MinerEvaluation(uid=74, hotkey='test_hotkey', github_id='12345', github_pat='fake_pat')
 
@@ -1357,12 +1340,8 @@ class TestLoadMinersPrsFetchFailureSignal:
         from gittensor.classes import MinerEvaluation
         from gittensor.utils.github_api_tools import GraphQLPageResult
 
-        mock_response = Mock()
-        mock_response.json.return_value = {
-            'errors': [{'message': 'Something went wrong'}],
-            'data': None,
-        }
-        mock_graphql_query.return_value = GraphQLPageResult(response=mock_response, page_size=100)
+        err_data = {'errors': [{'message': 'Something went wrong'}], 'data': None}
+        mock_graphql_query.return_value = GraphQLPageResult(data=err_data, page_size=100)
 
         miner_eval = MinerEvaluation(uid=74, hotkey='test_hotkey', github_id='12345', github_pat='fake_pat')
 

@@ -65,8 +65,7 @@ def issues_submissions(
     if not contract_addr:
         handle_exception(as_json, 'Contract address not configured.', 'config_error')
 
-    if not as_json:
-        print_network_header(network_name, contract_addr)
+    print_network_header(network_name, contract_addr)
 
     try:
         with loading_context('Fetching issue from contract...', as_json):

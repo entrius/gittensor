@@ -706,9 +706,6 @@
   "we-promise/sure": {
     "weight": 0.1279
   },
-  "withastro/astro": {
-    "weight": 0.1064
-  },
   "yanez-compliance/MIID-subnet": {
     "weight": 0.0375
   },

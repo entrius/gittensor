@@ -10,8 +10,6 @@ Covers:
 - review_quality_multiplier field on PullRequest and its effect on earned_score
 """
 
-from math import ceil
-
 import pytest
 
 from gittensor.classes import MinerEvaluation, PRState, PullRequest
@@ -281,11 +279,9 @@ class TestReviewCollateralThroughScoringPipeline:
 
 
 def test_max_changes_requested_reviews_covers_review_multipliers():
-    # Tripwire: the GraphQL fetch cap must stay aligned with every review-count-based multiplier.
-    penalty_cap = ceil(1 / REVIEW_PENALTY_RATE)
-    collateral_cap = ceil((MAX_OPEN_PR_REVIEW_COLLATERAL_MULTIPLIER - 1.0) / REVIEW_PENALTY_RATE)
-
-    assert _MAX_CHANGES_REQUESTED_REVIEWS == max(penalty_cap, collateral_cap)
+    # Tripwire: the GraphQL fetch cap must be large enough that non-maintainer
+    # CHANGES_REQUESTED reviews cannot shadow maintainer reviews.
+    assert _MAX_CHANGES_REQUESTED_REVIEWS >= 100
     assert calculate_review_quality_multiplier(_MAX_CHANGES_REQUESTED_REVIEWS) == 0.0
     assert calculate_review_collateral_multiplier(_MAX_CHANGES_REQUESTED_REVIEWS) == pytest.approx(
         MAX_OPEN_PR_REVIEW_COLLATERAL_MULTIPLIER

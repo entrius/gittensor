@@ -7,7 +7,6 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from math import ceil
 from typing import TYPE_CHECKING, Any, Dict, Iterator, List, Optional
 
 from gittensor.utils.utils import backoff_seconds, parse_repo_name
@@ -30,7 +29,6 @@ from gittensor.constants import (
     MAX_FILE_SIZE_BYTES,
     MAX_FILES_PER_GRAPHQL_BATCH,
     PR_LOOKBACK_DAYS,
-    REVIEW_PENALTY_RATE,
 )
 from gittensor.utils.models import PRInfo
 from gittensor.validator.utils.datetime_utils import parse_github_iso_to_utc

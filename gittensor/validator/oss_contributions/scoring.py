@@ -17,7 +17,6 @@ if TYPE_CHECKING:
     from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredMirrorPR
 from gittensor.constants import (
     EXCESSIVE_PR_PENALTY_BASE_THRESHOLD,
-    LABEL_MULTIPLIERS,
     MAINTAINER_ASSOCIATIONS,
     MAINTAINER_ISSUE_MULTIPLIER,
     MAX_ISSUE_CLOSE_WINDOW_DAYS,
@@ -40,6 +39,7 @@ from gittensor.utils.github_api_tools import (
     get_pull_request_file_changes,
 )
 from gittensor.validator.oss_contributions.credibility import check_eligibility
+from gittensor.validator.oss_contributions.label_resolution import resolve_legacy_label_multiplier
 from gittensor.validator.utils.datetime_utils import calculate_time_decay
 from gittensor.validator.utils.load_weights import LanguageConfig, RepositoryConfig, TokenConfig, resolve_repo_weight
 
@@ -211,7 +211,11 @@ def calculate_pr_multipliers(
 
     pr.repo_weight_multiplier = resolve_repo_weight(repo_config)
     pr.issue_multiplier = round(calculate_issue_multiplier(pr), 2)
-    pr.label_multiplier = LABEL_MULTIPLIERS.get(pr.label, 1.0) if pr.label else 1.0
+    pr.label, pr.label_multiplier = resolve_legacy_label_multiplier(
+        pr.label_timeline_order,
+        pr.current_labels,
+        repo_config,
+    )
 
     if is_merged:
         # Spam multiplier is recalculated in finalize_miner_scores with total token score
@@ -321,9 +325,23 @@ def calculate_pioneer_dividends(
         )
 
 
-def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None:
+def _pr_bypasses_eligibility(
+    pr: Union[PullRequest, 'ScoredMirrorPR'],
+    master_repositories: Dict[str, RepositoryConfig],
+) -> bool:
+    if isinstance(pr, PullRequest):
+        return False
+    repo_config = master_repositories.get(pr.repository_full_name)
+    return repo_config is not None and not repo_config.eligibility_mode
+
+
+def finalize_miner_scores(
+    miner_evaluations: Dict[int, MinerEvaluation],
+    master_repositories: Optional[Dict[str, RepositoryConfig]] = None,
+) -> None:
     """Finalize all miner scores: compute earned_scores, then apply pioneer dividends, then collateral."""
     bt.logging.info('**Finalizing miner scores**')
+    master_repositories = master_repositories or {}
 
     # Phase 1: Compute all earned_scores (base × multipliers) for every miner
     for uid, evaluation in miner_evaluations.items():
@@ -335,39 +353,82 @@ def finalize_miner_scores(miner_evaluations: Dict[int, MinerEvaluation]) -> None
         bt.logging.info(f'UID {uid}')
         bt.logging.info('=' * 50)
 
-        # Process open PRs for collateral (legacy + mirror — both paths contribute)
-        for pr in evaluation.open_pull_requests + evaluation.mirror_open_prs:
+        # Compute collateral on each open PR; defer accumulation so eligibility-disabled
+        # mirror repos don't reduce gated repo rewards (and vice versa).
+        open_prs = evaluation.open_pull_requests + evaluation.mirror_open_prs
+        for pr in open_prs:
             pr.collateral_score = calculate_open_pr_collateral_score(pr)
-            evaluation.total_collateral_score += pr.collateral_score
 
         has_contributions = evaluation.total_merged_prs > 0 or evaluation.total_closed_prs > 0
 
         if not has_contributions:
+            evaluation.total_collateral_score += sum(pr.collateral_score for pr in open_prs)
             bt.logging.info('No merged or closed PRs - skipping evaluation')
             continue
 
-        # Check eligibility gate across both paths. check_eligibility only touches
-        # token_score on each PR; ScoredMirrorPR has the same field, so combining
-        # the lists works without adapting types.
+        gated_mirror_open_prs = [
+            pr for pr in evaluation.mirror_open_prs if not _pr_bypasses_eligibility(pr, master_repositories)
+        ]
+        bypass_mirror_open_prs = [
+            pr for pr in evaluation.mirror_open_prs if _pr_bypasses_eligibility(pr, master_repositories)
+        ]
+        gated_mirror_merged_prs = [
+            pr for pr in evaluation.mirror_merged_prs if not _pr_bypasses_eligibility(pr, master_repositories)
+        ]
+        gated_mirror_closed_prs = [
+            pr for pr in evaluation.mirror_closed_prs if not _pr_bypasses_eligibility(pr, master_repositories)
+        ]
+        bypass_merged_prs = [
+            pr for pr in evaluation.mirror_merged_prs if _pr_bypasses_eligibility(pr, master_repositories)
+        ]
+
+        # Check eligibility for the gated portfolio only. eligibility_mode=false
+        # PRs must neither unlock nor penalize repos where the gate still applies.
         is_eligible, credibility, reason = check_eligibility(
-            evaluation.merged_pull_requests + evaluation.mirror_merged_prs,
-            evaluation.closed_pull_requests + evaluation.mirror_closed_prs,
+            evaluation.merged_pull_requests + gated_mirror_merged_prs,
+            evaluation.closed_pull_requests + gated_mirror_closed_prs,
         )
         evaluation.is_eligible = is_eligible
         evaluation.credibility = credibility
 
-        if not is_eligible:
+        gated_merged_prs = evaluation.merged_pull_requests + gated_mirror_merged_prs
+        scorable_prs: list[Union[PullRequest, 'ScoredMirrorPR']] = []
+        if is_eligible:
+            scorable_prs.extend(gated_merged_prs)
+        elif bypass_merged_prs:
+            bt.logging.info(
+                f'UID {uid} ineligible: {reason} — scoring '
+                f'{len(bypass_merged_prs)} mirror PR(s) from eligibility_mode=false repos'
+            )
+        else:
             bt.logging.info(f'UID {uid} ineligible: {reason} — score set to 0')
+            evaluation.total_collateral_score += sum(pr.collateral_score for pr in evaluation.open_pull_requests)
+            evaluation.total_collateral_score += sum(pr.collateral_score for pr in gated_mirror_open_prs)
             continue
+        scorable_prs.extend(bypass_merged_prs)
 
-        # Calculate spam multiplier once per miner using combined total token score
-        merged_prs = evaluation.merged_pull_requests + evaluation.mirror_merged_prs
-        preliminary_token_score = sum(pr.token_score for pr in merged_prs)
-        spam_multiplier = calculate_pr_spam_penalty_multiplier(evaluation.total_open_prs, preliminary_token_score)
+        # Keep gated repo spam math independent from eligibility-disabled repos.
+        gated_open_prs = evaluation.open_pull_requests + gated_mirror_open_prs
+        gated_token_score = sum(pr.token_score for pr in gated_merged_prs)
+        gated_spam_multiplier = calculate_pr_spam_penalty_multiplier(len(gated_open_prs), gated_token_score)
 
-        for pr in merged_prs:
-            pr.open_pr_spam_multiplier = spam_multiplier
-            pr.credibility_multiplier = round(credibility, 2)
+        # Bypass spam math intentionally uses total_open_prs (one-way isolation): gated
+        # open PRs penalize bypass earnings so eligibility-disabled repos can't be used
+        # as a spam-vector escape hatch.
+        bypass_token_score = sum(pr.token_score for pr in bypass_merged_prs)
+        bypass_spam_multiplier = calculate_pr_spam_penalty_multiplier(evaluation.total_open_prs, bypass_token_score)
+
+        if is_eligible:
+            evaluation.total_collateral_score += sum(pr.collateral_score for pr in gated_open_prs)
+        if bypass_merged_prs:
+            evaluation.total_collateral_score += sum(pr.collateral_score for pr in bypass_mirror_open_prs)
+
+        credibility_multiplier = round(credibility, 2)
+
+        for pr in scorable_prs:
+            bypasses_gate = _pr_bypasses_eligibility(pr, master_repositories)
+            pr.open_pr_spam_multiplier = bypass_spam_multiplier if bypasses_gate else gated_spam_multiplier
+            pr.credibility_multiplier = 1.0 if bypasses_gate else credibility_multiplier
             pr.calculate_final_earned_score()
 
             evaluation.total_token_score += pr.token_score

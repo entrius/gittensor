@@ -14,8 +14,10 @@ Run tests:
 
 import pytest
 
-from gittensor.validator.utils.load_weights import TokenConfig, load_token_config
-from gittensor.validator.utils.tree_sitter_scoring import score_tree_diff
+from gittensor.classes import FileChange
+from gittensor.utils.github_api_tools import FileContentPair
+from gittensor.validator.utils.load_weights import TokenConfig, load_programming_language_weights, load_token_config
+from gittensor.validator.utils.tree_sitter_scoring import calculate_token_score_from_file_changes, score_tree_diff
 
 
 class TestTreeDiffScoring:
@@ -24,6 +26,43 @@ class TestTreeDiffScoring:
     @pytest.fixture
     def weights(self) -> TokenConfig:
         return load_token_config()
+
+    @pytest.mark.parametrize(
+        'filename,old_content,new_content',
+        [
+            (
+                'Dockerfile',
+                'FROM python:3.12-slim\n',
+                'FROM python:3.12-slim\nRUN pip install uv\nCOPY . /app\n',
+            ),
+            (
+                'Makefile',
+                'test:\n\tpytest\n',
+                'test:\n\tpytest\n\nlint:\n\truff check\n',
+            ),
+        ],
+    )
+    def test_configured_extensionless_files_reach_tree_diff(self, weights, filename, old_content, new_content):
+        file_change = FileChange(
+            pr_number=1,
+            repository_full_name='test/repo',
+            filename=filename,
+            changes=3,
+            additions=2,
+            deletions=1,
+            status='modified',
+        )
+        result = calculate_token_score_from_file_changes(
+            [file_change],
+            {filename: FileContentPair(old_content=old_content, new_content=new_content)},
+            weights,
+            load_programming_language_weights(),
+        )
+
+        file_result = result.file_results[0]
+        assert file_change.file_extension == filename.lower()
+        assert file_result.scoring_method == 'tree-diff'
+        assert file_result.nodes_scored > 0
 
     def test_new_file_scores_all_nodes(self, weights):
         """
@@ -230,6 +269,268 @@ const createUser = (id: number, name: string): User => ({
         assert breakdown.total_score == 0, 'Unsupported language should score zero'
         assert breakdown.added_count == 0
         assert breakdown.deleted_count == 0
+
+    # ------------------------------------------------------------------
+    # Golden-value regression tests
+    #
+    # These pin the exact ScoreBreakdown produced for a small set of stable
+    # fixtures, so any change in tree-sitter grammar output, TokenConfig
+    # weights, the scoring algorithm, or comment-exclusion behavior is
+    # caught here. If one of these fails, identify which of the above
+    # changed and update the expected values intentionally.
+    # ------------------------------------------------------------------
+
+    def test_pinned_python_simple_function(self, weights):
+        breakdown = score_tree_diff(None, 'def foo():\n    return 1\n', 'py', weights)
+
+        assert breakdown.structural_added_count == 2
+        assert breakdown.leaf_added_count == 7
+        assert breakdown.structural_deleted_count == 0
+        assert breakdown.leaf_deleted_count == 0
+        assert breakdown.structural_score == pytest.approx(2.35, abs=1e-6)
+        assert breakdown.leaf_score == pytest.approx(0.10, abs=1e-6)
+        assert breakdown.total_score == pytest.approx(2.45, abs=1e-6)
+
+    def test_pinned_python_empty_file(self, weights):
+        breakdown = score_tree_diff(None, '', 'py', weights)
+
+        assert breakdown.structural_added_count == 0
+        assert breakdown.leaf_added_count == 0
+        assert breakdown.total_score == 0.0
+
+    def test_pinned_python_only_comments(self, weights):
+        """Comment-only content scores zero (the walker skips comment subtrees)."""
+        content = '# just a comment\n# and another\n'
+        breakdown = score_tree_diff(None, content, 'py', weights)
+
+        assert breakdown.structural_added_count == 0
+        assert breakdown.leaf_added_count == 0
+        assert breakdown.total_score == 0.0
+
+    def test_pinned_python_rename_identifier(self, weights):
+        """Renaming an identifier produces one leaf-add and one leaf-delete; structure unchanged."""
+        breakdown = score_tree_diff(
+            'def foo():\n    return 1\n',
+            'def bar():\n    return 1\n',
+            'py',
+            weights,
+        )
+
+        assert breakdown.structural_added_count == 0
+        assert breakdown.structural_deleted_count == 0
+        assert breakdown.leaf_added_count == 1
+        assert breakdown.leaf_deleted_count == 1
+        assert breakdown.structural_score == pytest.approx(0.0, abs=1e-6)
+        assert breakdown.leaf_score == pytest.approx(0.14, abs=1e-6)
+        assert breakdown.total_score == pytest.approx(0.14, abs=1e-6)
+
+    def test_pinned_python_add_statement(self, weights):
+        """Adding `x = 1` and changing the return introduces structural + leaf additions."""
+        breakdown = score_tree_diff(
+            'def foo():\n    return 1\n',
+            'def foo():\n    x = 1\n    return x\n',
+            'py',
+            weights,
+        )
+
+        assert breakdown.structural_added_count == 1
+        assert breakdown.structural_deleted_count == 0
+        assert breakdown.leaf_added_count == 3
+        assert breakdown.leaf_deleted_count == 0
+        assert breakdown.structural_score == pytest.approx(0.20, abs=1e-6)
+        assert breakdown.leaf_score == pytest.approx(0.14, abs=1e-6)
+        assert breakdown.total_score == pytest.approx(0.34, abs=1e-6)
+
+    def test_pinned_python_deleted_file_mirrors_new_file(self, weights):
+        """Deleting a file produces the same counts/score as adding it."""
+        src = 'def foo():\n    return 1\n'
+        added = score_tree_diff(None, src, 'py', weights)
+        deleted = score_tree_diff(src, None, 'py', weights)
+
+        assert deleted.structural_added_count == 0
+        assert deleted.leaf_added_count == 0
+        assert deleted.structural_deleted_count == added.structural_added_count
+        assert deleted.leaf_deleted_count == added.leaf_added_count
+        assert deleted.total_score == pytest.approx(added.total_score, abs=1e-6)
+
+    def test_pinned_python_identical_files_score_zero(self, weights):
+        src = 'def foo():\n    return 1\n'
+        breakdown = score_tree_diff(src, src, 'py', weights)
+
+        assert breakdown.structural_added_count == 0
+        assert breakdown.leaf_added_count == 0
+        assert breakdown.structural_deleted_count == 0
+        assert breakdown.leaf_deleted_count == 0
+        assert breakdown.total_score == 0.0
+
+    def test_pinned_rust_simple_function(self, weights):
+        """Rust function has no structural-bonus node type but produces leaf signatures."""
+        content = 'fn add(a: i32, b: i32) -> i32 { a + b }\n'
+        breakdown = score_tree_diff(None, content, 'rs', weights)
+
+        assert breakdown.structural_added_count == 0
+        assert breakdown.leaf_added_count == 18
+        assert breakdown.structural_score == pytest.approx(0.0, abs=1e-6)
+        assert breakdown.leaf_score == pytest.approx(0.35, abs=1e-6)
+        assert breakdown.total_score == pytest.approx(0.35, abs=1e-6)
+
+    def test_pinned_bash_unweighted_leaves(self, weights):
+        """Bash 'word' nodes produce leaf signatures but carry zero leaf weight - score zero."""
+        breakdown = score_tree_diff(None, 'echo hello\necho world\n', 'sh', weights)
+
+        assert breakdown.leaf_added_count == 4
+        assert breakdown.total_score == 0.0
+
+    def test_pinned_rust_struct_with_impl(self, weights):
+        """Rust struct + impl with multiple methods, match, let, generics."""
+        content = """//! Module-level doc.
+use std::collections::HashMap;
+
+pub struct Counter {
+    map: HashMap<String, u64>,
+}
+
+impl Counter {
+    pub fn new() -> Self {
+        Self { map: HashMap::new() }
+    }
+
+    pub fn add(&mut self, key: String) -> u64 {
+        let count = self.map.entry(key).or_insert(0);
+        *count += 1;
+        *count
+    }
+
+    pub fn get(&self, key: &str) -> u64 {
+        match self.map.get(key) {
+            Some(&n) => n,
+            None => 0,
+        }
+    }
+}
+"""
+        breakdown = score_tree_diff(None, content, 'rs', weights)
+
+        assert breakdown.structural_added_count == 7
+        assert breakdown.leaf_added_count == 123
+        assert breakdown.structural_score == pytest.approx(4.45, abs=1e-6)
+        assert breakdown.leaf_score == pytest.approx(3.56, abs=1e-6)
+        assert breakdown.total_score == pytest.approx(8.01, abs=1e-6)
+
+    def test_pinned_rust_add_impl_method(self, weights):
+        """Adding a new impl block with one method produces incremental structural + leaf adds."""
+        old = """pub struct Counter {
+    map: std::collections::HashMap<String, u64>,
+}
+
+impl Counter {
+    pub fn new() -> Self {
+        Self { map: std::collections::HashMap::new() }
+    }
+}
+"""
+        new = (
+            old
+            + """
+impl Counter {
+    pub fn remove(&mut self, key: &str) -> Option<u64> {
+        self.map.remove(key)
+    }
+}
+"""
+        )
+        breakdown = score_tree_diff(old, new, 'rs', weights)
+
+        assert breakdown.structural_added_count == 2
+        assert breakdown.structural_deleted_count == 0
+        assert breakdown.leaf_added_count == 32
+        assert breakdown.leaf_deleted_count == 0
+        assert breakdown.total_score == pytest.approx(3.25, abs=1e-6)
+
+    def test_pinned_typescript_interface_class(self, weights):
+        """TypeScript interface + class with map field, methods, and conditional logic."""
+        content = """interface User {
+    id: number;
+    name: string;
+}
+
+class UserRegistry {
+    private users: Map<number, User> = new Map();
+
+    addUser(user: User): boolean {
+        if (this.users.has(user.id)) {
+            return false;
+        }
+        this.users.set(user.id, user);
+        return true;
+    }
+
+    findById(id: number): User | undefined {
+        return this.users.get(id);
+    }
+}
+"""
+        breakdown = score_tree_diff(None, content, 'ts', weights)
+
+        assert breakdown.structural_added_count == 12
+        assert breakdown.leaf_added_count == 97
+        assert breakdown.structural_score == pytest.approx(11.70, abs=1e-6)
+        assert breakdown.leaf_score == pytest.approx(3.17, abs=1e-6)
+        assert breakdown.total_score == pytest.approx(14.87, abs=1e-6)
+
+    def test_pinned_typescript_method_rename(self, weights):
+        """Renaming methods produces only leaf-level diffs (structure preserved)."""
+        old = """class Registry {
+    addUser(id: number): boolean { return true; }
+    findById(id: number): number { return id; }
+}
+"""
+        new = """class Registry {
+    register(id: number): boolean { return true; }
+    lookup(id: number): number { return id; }
+}
+"""
+        breakdown = score_tree_diff(old, new, 'ts', weights)
+
+        assert breakdown.structural_added_count == 0
+        assert breakdown.structural_deleted_count == 0
+        assert breakdown.leaf_added_count == 2
+        assert breakdown.leaf_deleted_count == 2
+        assert breakdown.structural_score == pytest.approx(0.0, abs=1e-6)
+        assert breakdown.leaf_score == pytest.approx(0.28, abs=1e-6)
+        assert breakdown.total_score == pytest.approx(0.28, abs=1e-6)
+
+    def test_pinned_python_control_flow(self, weights):
+        """Python with rich control flow (for / if / elif / else / try / except / with /
+        raise / return / augmented_assignment) exercises many structural-bonus node
+        types in a single fixture.
+        """
+        content = """def process(items):
+    results = []
+    for item in items:
+        if item < 0:
+            continue
+        elif item == 0:
+            results.append(None)
+        else:
+            try:
+                with open(f"item_{item}.txt") as f:
+                    results.append(f.read())
+            except FileNotFoundError:
+                results.append("missing")
+            except OSError as e:
+                raise RuntimeError(f"io error: {e}") from e
+    return results
+"""
+        breakdown = score_tree_diff(None, content, 'py', weights)
+
+        assert breakdown.structural_added_count == 22
+        assert breakdown.leaf_added_count == 90
+        assert breakdown.structural_deleted_count == 0
+        assert breakdown.leaf_deleted_count == 0
+        assert breakdown.structural_score == pytest.approx(8.00, abs=1e-6)
+        assert breakdown.leaf_score == pytest.approx(1.99, abs=1e-6)
+        assert breakdown.total_score == pytest.approx(9.99, abs=1e-6)
 
 
 if __name__ == '__main__':

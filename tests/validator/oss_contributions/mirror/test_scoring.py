@@ -16,6 +16,7 @@ Token-scoring base_score is exercised indirectly via the existing legacy tests
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import Mock
 
 import pytest
@@ -105,12 +106,20 @@ def _config(
     weight: float = 0.5,
     additional_branches: list | None = None,
     trusted_label_pipeline: bool = False,
+    label_multipliers: dict | None = None,
+    default_label_multiplier: float = 1.0,
+    fixed_base_score: float | None = None,
+    eligibility_mode: bool = True,
 ) -> RepositoryConfig:
     return RepositoryConfig(
         weight=weight,
         mirror_enabled=True,
         additional_acceptable_branches=additional_branches,
         trusted_label_pipeline=trusted_label_pipeline,
+        label_multipliers=label_multipliers,
+        default_label_multiplier=default_label_multiplier,
+        fixed_base_score=fixed_base_score,
+        eligibility_mode=eligibility_mode,
     )
 
 
@@ -187,11 +196,17 @@ class TestEligibilityGate:
         assert skip is True
         assert "merged to 'whatever'" in reason
 
-    def test_no_default_branch_no_additional_accepts_any_base_ref(self):
-        # When BOTH default_branch and additional are missing (older mirror rows
-        # predating default_branch exposure), there's no acceptable set to
-        # check against — fall through rather than false-positive.
+    def test_no_default_branch_no_additional_blocks_non_main_base_ref(self):
+        # Legacy parity: if default_branch is missing, fallback to 'main' so
+        # non-main base refs are still rejected.
         scored = ScoredMirrorPR(pr=_pr(base_ref='whatever', default_branch=None))
+        skip, reason = _should_skip_merged_mirror_pr(scored, _config(additional_branches=None))
+        assert skip is True
+        assert "merged to 'whatever'" in reason
+
+    def test_no_default_branch_no_additional_allows_main_base_ref(self):
+        # Fallback default branch is 'main' when mirror omits default_branch.
+        scored = ScoredMirrorPR(pr=_pr(base_ref='main', default_branch=None))
         skip, reason = _should_skip_merged_mirror_pr(scored, _config(additional_branches=None))
         assert skip is False
 
@@ -209,6 +224,24 @@ class TestEligibilityGate:
         )
         assert skip is True
         assert "source branch 'test'" in reason
+
+    def test_head_ref_in_default_branch_blocks_same_repo_without_additional(self):
+        # Regression: even when additional_acceptable_branches is empty, head_ref
+        # must still be checked against acceptable=['default_branch'].
+        scored = ScoredMirrorPR(
+            pr=_pr(
+                base_ref='main',
+                head_ref='main',
+                head_repo_full_name='entrius/gittensor-ui',
+                default_branch='main',
+            )
+        )
+        skip, reason = _should_skip_merged_mirror_pr(
+            scored,
+            _config(additional_branches=None),
+        )
+        assert skip is True
+        assert "source branch 'main'" in reason
 
     def test_head_ref_in_additional_passes_for_fork(self):
         # Fork PR whose head branch happens to collide with an acceptable
@@ -313,18 +346,172 @@ class TestScoringDataStoredGate:
         scored.pr.scoring_data_stored = False
         client = Mock()
 
-        score_mirror_pr(
-            scored,
-            mirror_eval=Mock(),
-            mirror_repos={scored.pr.repo_full_name: _config()},
-            programming_languages={},
-            token_config=Mock(),
-            client=client,
+        asyncio.run(
+            score_mirror_pr(
+                scored,
+                mirror_eval=Mock(),
+                mirror_repos={scored.pr.repo_full_name: _config()},
+                programming_languages={},
+                token_config=Mock(),
+                client=client,
+            )
         )
 
         client.get_pr_files.assert_not_called()
         assert scored.files is None
         assert scored.base_score == 0.0
+
+    def test_fixed_base_score_scores_without_stored_files(self):
+        scored = ScoredMirrorPR(pr=_pr())
+        scored.pr.scoring_data_stored = False
+        client = Mock()
+
+        asyncio.run(
+            score_mirror_pr(
+                scored,
+                mirror_eval=Mock(),
+                mirror_repos={scored.pr.repo_full_name: _config(fixed_base_score=7.5)},
+                programming_languages={},
+                token_config=Mock(),
+                client=client,
+            )
+        )
+
+        client.get_pr_files.assert_not_called()
+        assert scored.base_score == pytest.approx(7.5)
+        assert scored.repo_weight_multiplier == pytest.approx(0.5)
+
+
+class TestFixedBaseScore:
+    def test_fixed_base_replaces_token_base_but_keeps_token_breakdown_and_multipliers(self, monkeypatch):
+        scored = ScoredMirrorPR(
+            pr=_pr(labels=[{'name': 'feature', 'actor_github_id': '1', 'actor_association': 'OWNER'}])
+        )
+        client = Mock()
+        client.get_pr_files.return_value.files = [
+            MirrorFile.from_dict(
+                {
+                    'filename': 'src/foo.py',
+                    'previous_filename': None,
+                    'status': 'modified',
+                    'additions': 1,
+                    'deletions': 0,
+                    'changes': 1,
+                    'is_binary': False,
+                    'byte_size': 10,
+                    'head_content': 'new',
+                    'base_content': 'old',
+                }
+            )
+        ]
+        monkeypatch.setattr(
+            scoring_module,
+            'calculate_base_score_for_pr_files',
+            lambda *args, **kwargs: scoring_module.BaseScoreResult(
+                base_score=99.0,
+                token_score=42.0,
+                structural_count=2,
+                structural_score=20.0,
+                leaf_count=3,
+                leaf_score=22.0,
+                total_nodes_scored=5,
+                code_density=0.9,
+            ),
+        )
+
+        asyncio.run(
+            score_mirror_pr(
+                scored,
+                mirror_eval=Mock(),
+                mirror_repos={
+                    scored.pr.repo_full_name: _config(
+                        weight=1.0,
+                        fixed_base_score=1.0,
+                        label_multipliers={'feature': 2.0},
+                    )
+                },
+                programming_languages={},
+                token_config=Mock(),
+                client=client,
+            )
+        )
+
+        assert scored.base_score == pytest.approx(1.0)
+        assert scored.token_score == pytest.approx(42.0)
+        assert scored.total_nodes_scored == 5
+        assert scored.label_multiplier == pytest.approx(2.0)
+        assert scored.calculate_final_earned_score() == pytest.approx(
+            scored.base_score
+            * scored.repo_weight_multiplier
+            * scored.issue_multiplier
+            * scored.label_multiplier
+            * scored.open_pr_spam_multiplier
+            * scored.time_decay_multiplier
+            * scored.credibility_multiplier
+            * scored.review_quality_multiplier
+        )
+
+    def test_fixed_small_diff_outscores_nonfixed_large_diff_with_same_label(self, monkeypatch):
+        """Deliverable #5: a small-diff PR in a fixed_base_score repo outscores a
+        large-diff PR in a non-fixed repo when both share the same label multiplier."""
+        fixed = ScoredMirrorPR(
+            pr=_pr(labels=[{'name': 'feature', 'actor_github_id': '1', 'actor_association': 'OWNER'}])
+        )
+        fixed.pr.pr_number = 101
+        plain = ScoredMirrorPR(
+            pr=_pr(labels=[{'name': 'feature', 'actor_github_id': '1', 'actor_association': 'OWNER'}])
+        )
+        plain.pr.repo_full_name = 'entrius/plain'
+        plain.pr.head_repo_full_name = 'entrius/plain'
+        plain.pr.pr_number = 102
+        client = Mock()
+        client.get_pr_files.return_value.files = [
+            MirrorFile.from_dict(
+                {
+                    'filename': 'src/foo.py',
+                    'previous_filename': None,
+                    'status': 'modified',
+                    'additions': 500,
+                    'deletions': 0,
+                    'changes': 500,
+                    'is_binary': False,
+                    'byte_size': 10,
+                    'head_content': 'new',
+                    'base_content': 'old',
+                }
+            )
+        ]
+        monkeypatch.setattr(
+            scoring_module,
+            'calculate_base_score_for_pr_files',
+            lambda *args, **kwargs: scoring_module.BaseScoreResult(
+                base_score=0.25,
+                token_score=100.0,
+                structural_count=1,
+                structural_score=100.0,
+                leaf_count=0,
+                leaf_score=0.0,
+                total_nodes_scored=1,
+                code_density=0.01,
+            ),
+        )
+        repos = {
+            fixed.pr.repo_full_name: _config(
+                weight=1.0,
+                fixed_base_score=1.0,
+                label_multipliers={'feature': 1.5},
+            )
+        }
+
+        asyncio.run(score_mirror_pr(fixed, Mock(), repos, {}, Mock(), client))
+        repos[plain.pr.repo_full_name] = _config(weight=1.0, label_multipliers={'feature': 1.5})
+        asyncio.run(score_mirror_pr(plain, Mock(), repos, {}, Mock(), client))
+
+        assert fixed.base_score == pytest.approx(1.0)
+        assert plain.base_score == pytest.approx(0.25)
+        assert fixed.label_multiplier == pytest.approx(1.5)
+        assert plain.label_multiplier == pytest.approx(1.5)
+        assert fixed.calculate_final_earned_score() > plain.calculate_final_earned_score()
 
 
 # ============================================================================
@@ -414,71 +601,102 @@ class TestConvertMirrorFiles:
 class TestLabelResolution:
     def test_no_labels_returns_none(self):
         scored = ScoredMirrorPR(pr=_pr(labels=[]))
-        assert _resolve_trusted_scoring_label(scored.pr, _config()) is None
+        label, multiplier = _resolve_trusted_scoring_label(
+            scored.pr,
+            _config(label_multipliers={'feature': 1.5}, default_label_multiplier=0.8),
+        )
+        assert label is None
+        assert multiplier == pytest.approx(0.8)
 
     def test_non_scoring_labels_ignored(self):
         labels = [{'name': 'random', 'actor_github_id': '1', 'actor_association': 'OWNER'}]
         scored = ScoredMirrorPR(pr=_pr(labels=labels))
-        assert _resolve_trusted_scoring_label(scored.pr, _config()) is None
+        label, multiplier = _resolve_trusted_scoring_label(
+            scored.pr,
+            _config(label_multipliers={'feature': 1.5}, default_label_multiplier=0.8),
+        )
+        assert label is None
+        assert multiplier == pytest.approx(0.8)
 
     def test_non_maintainer_label_ignored(self):
-        from gittensor.constants import LABEL_MULTIPLIERS
-
-        scoring_label = next(iter(LABEL_MULTIPLIERS.keys()))
-        labels = [{'name': scoring_label, 'actor_github_id': '1', 'actor_association': 'CONTRIBUTOR'}]
+        labels = [{'name': 'feature', 'actor_github_id': '1', 'actor_association': 'CONTRIBUTOR'}]
         scored = ScoredMirrorPR(pr=_pr(labels=labels))
-        assert _resolve_trusted_scoring_label(scored.pr, _config()) is None
+        label, multiplier = _resolve_trusted_scoring_label(
+            scored.pr,
+            _config(label_multipliers={'feature': 1.5}),
+        )
+        assert label is None
+        assert multiplier == pytest.approx(1.0)
 
     def test_null_actor_association_ignored_on_untrusted_repo(self):
-        from gittensor.constants import LABEL_MULTIPLIERS
-
-        scoring_label = next(iter(LABEL_MULTIPLIERS.keys()))
-        labels = [{'name': scoring_label, 'actor_github_id': None, 'actor_association': None}]
+        labels = [{'name': 'feature', 'actor_github_id': None, 'actor_association': None}]
         scored = ScoredMirrorPR(pr=_pr(labels=labels))
-        assert _resolve_trusted_scoring_label(scored.pr, _config()) is None
+        label, multiplier = _resolve_trusted_scoring_label(
+            scored.pr,
+            _config(label_multipliers={'feature': 1.5}),
+        )
+        assert label is None
+        assert multiplier == pytest.approx(1.0)
 
     def test_maintainer_set_scoring_label_returned(self):
-        from gittensor.constants import LABEL_MULTIPLIERS
-
-        scoring_label = next(iter(LABEL_MULTIPLIERS.keys()))
-        labels = [{'name': scoring_label, 'actor_github_id': '1', 'actor_association': 'COLLABORATOR'}]
+        labels = [{'name': 'feature', 'actor_github_id': '1', 'actor_association': 'COLLABORATOR'}]
         scored = ScoredMirrorPR(pr=_pr(labels=labels))
-        assert _resolve_trusted_scoring_label(scored.pr, _config()) == scoring_label.lower()
+        label, multiplier = _resolve_trusted_scoring_label(
+            scored.pr,
+            _config(label_multipliers={'feature': 1.5}),
+        )
+        assert label == 'feature'
+        assert multiplier == pytest.approx(1.5)
 
     def test_highest_multiplier_wins(self):
-        from gittensor.constants import LABEL_MULTIPLIERS
-
-        scoring_labels = list(LABEL_MULTIPLIERS.keys())
-        if len(scoring_labels) < 2:
-            pytest.skip('Need at least 2 scoring labels for this test')
-
-        a, b = scoring_labels[0], scoring_labels[1]
         labels = [
-            {'name': a, 'actor_github_id': '1', 'actor_association': 'OWNER'},
-            {'name': b, 'actor_github_id': '1', 'actor_association': 'OWNER'},
+            {'name': 'feature', 'actor_github_id': '1', 'actor_association': 'OWNER'},
+            {'name': 'bug', 'actor_github_id': '1', 'actor_association': 'OWNER'},
         ]
         scored = ScoredMirrorPR(pr=_pr(labels=labels))
-        chosen = _resolve_trusted_scoring_label(scored.pr, _config())
-        expected = max([a, b], key=lambda n: (LABEL_MULTIPLIERS[n], n)).lower()
-        assert chosen == expected
+        label, multiplier = _resolve_trusted_scoring_label(
+            scored.pr,
+            _config(label_multipliers={'feature': 1.5, 'bug': 1.25}),
+        )
+        assert label == 'feature'
+        assert multiplier == pytest.approx(1.5)
+
+    def test_wildcard_label_pattern_matches(self):
+        labels = [{'name': 'kind/bug-fix', 'actor_github_id': '1', 'actor_association': 'OWNER'}]
+        scored = ScoredMirrorPR(pr=_pr(labels=labels))
+        label, multiplier = _resolve_trusted_scoring_label(
+            scored.pr,
+            _config(label_multipliers={'kind/*': 1.25}),
+        )
+        assert label == 'kind/bug-fix'
+        assert multiplier == pytest.approx(1.25)
+
+    def test_old_global_label_ignored_without_repo_label_config(self):
+        labels = [{'name': 'feature', 'actor_github_id': '1', 'actor_association': 'OWNER'}]
+        scored = ScoredMirrorPR(pr=_pr(labels=labels))
+        _calculate_pr_multipliers(scored, _config(default_label_multiplier=0.8))
+        assert scored.label is None
+        assert scored.label_multiplier == pytest.approx(0.8)
 
     def test_calculate_multipliers_threads_trusted_flag(self):
         """End-to-end issue #911 path: _calculate_pr_multipliers honors trusted_label_pipeline."""
-        from gittensor.constants import LABEL_MULTIPLIERS
-
-        scoring_label = next((name for name, mult in LABEL_MULTIPLIERS.items() if mult != 1.0), None)
-        if scoring_label is None:
-            pytest.skip('Need at least one non-1.0x label for this test')
-
-        labels = [{'name': scoring_label, 'actor_github_id': '99', 'actor_association': None}]
+        labels = [{'name': 'feature', 'actor_github_id': '99', 'actor_association': None}]
 
         scored_trusted = ScoredMirrorPR(pr=_pr(labels=labels))
-        _calculate_pr_multipliers(scored_trusted, _config(trusted_label_pipeline=True))
-        assert scored_trusted.label_multiplier == LABEL_MULTIPLIERS[scoring_label]
+        _calculate_pr_multipliers(
+            scored_trusted,
+            _config(trusted_label_pipeline=True, label_multipliers={'feature': 1.5}),
+        )
+        assert scored_trusted.label == 'feature'
+        assert scored_trusted.label_multiplier == pytest.approx(1.5)
 
         scored_untrusted = ScoredMirrorPR(pr=_pr(labels=labels))
-        _calculate_pr_multipliers(scored_untrusted, _config(trusted_label_pipeline=False))
-        assert scored_untrusted.label_multiplier == 1.0
+        _calculate_pr_multipliers(
+            scored_untrusted,
+            _config(trusted_label_pipeline=False, label_multipliers={'feature': 1.5}),
+        )
+        assert scored_untrusted.label is None
+        assert scored_untrusted.label_multiplier == pytest.approx(1.0)
 
 
 # ============================================================================
@@ -694,18 +912,18 @@ class TestCollateralScoreAcceptsScoredMirrorPR:
 
 class TestPrMultipliers:
     def test_merged_pr_populates_all_multipliers(self):
-        from gittensor.constants import LABEL_MULTIPLIERS
-
-        scoring_label = next(iter(LABEL_MULTIPLIERS.keys()))
-        labels = [{'name': scoring_label, 'actor_github_id': '1', 'actor_association': 'OWNER'}]
+        labels = [{'name': 'feature', 'actor_github_id': '1', 'actor_association': 'OWNER'}]
 
         scored = ScoredMirrorPR(pr=_pr(labels=labels))
         scored.token_score = 100.0  # for completeness
-        _calculate_pr_multipliers(scored, _config(weight=0.7, additional_branches=['test']))
+        _calculate_pr_multipliers(
+            scored,
+            _config(weight=0.7, additional_branches=['test'], label_multipliers={'feature': 1.5}),
+        )
 
         assert scored.repo_weight_multiplier == 0.7
-        assert scored.label == scoring_label.lower()
-        assert scored.label_multiplier == LABEL_MULTIPLIERS[scoring_label.lower()]
+        assert scored.label == 'feature'
+        assert scored.label_multiplier == pytest.approx(1.5)
         assert 0.0 <= scored.time_decay_multiplier <= 1.0
         assert scored.review_quality_multiplier == 1.0  # 0 maintainer changes_requested
         assert scored.issue_multiplier == 1.0  # no linked_issues

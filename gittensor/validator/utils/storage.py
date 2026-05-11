@@ -50,8 +50,6 @@ class DatabaseStorage:
 
             miner = Miner(miner_eval.uid, miner_eval.hotkey, miner_eval.github_id or '')
 
-            result.stored_counts['miners'] = self.repo.set_miner(miner, commit=False)
-
             from gittensor.validator.oss_contributions.mirror.adapters import (
                 mirror_scored_pr_to_legacy_pull_request,
             )
@@ -62,24 +60,28 @@ class DatabaseStorage:
                     for s in scored_list
                 ]
 
-            result.stored_counts['merged_pull_requests'] = self.repo.store_pull_requests_bulk(
-                miner_eval.merged_pull_requests + _adapt_mirror(miner_eval.mirror_merged_prs), commit=False
-            )
-            result.stored_counts['open_pull_requests'] = self.repo.store_pull_requests_bulk(
-                miner_eval.open_pull_requests + _adapt_mirror(miner_eval.mirror_open_prs), commit=False
-            )
-            result.stored_counts['closed_pull_requests'] = self.repo.store_pull_requests_bulk(
-                miner_eval.closed_pull_requests + _adapt_mirror(miner_eval.mirror_closed_prs), commit=False
-            )
-            result.stored_counts['stale_closed_pull_requests'] = self.repo.store_pull_requests_bulk(
-                miner_eval.stale_closed_pull_requests, commit=False
-            )
-            result.stored_counts['issues'] = self.repo.store_issues_bulk(miner_eval.get_all_issues(), commit=False)
-            result.stored_counts['file_changes'] = self.repo.store_file_changes_bulk(
-                miner_eval.get_all_file_changes(), commit=False
-            )
-            self.repo.cleanup_stale_miner_data(miner_eval, commit=False)
-            result.stored_counts['evaluations'] = 1 if self.repo.set_miner_evaluation(miner_eval, commit=False) else 0
+            with self.db_connection.pipeline():
+                result.stored_counts['miners'] = self.repo.set_miner(miner, commit=False)
+                result.stored_counts['merged_pull_requests'] = self.repo.store_pull_requests_bulk(
+                    miner_eval.merged_pull_requests + _adapt_mirror(miner_eval.mirror_merged_prs), commit=False
+                )
+                result.stored_counts['open_pull_requests'] = self.repo.store_pull_requests_bulk(
+                    miner_eval.open_pull_requests + _adapt_mirror(miner_eval.mirror_open_prs), commit=False
+                )
+                result.stored_counts['closed_pull_requests'] = self.repo.store_pull_requests_bulk(
+                    miner_eval.closed_pull_requests + _adapt_mirror(miner_eval.mirror_closed_prs), commit=False
+                )
+                result.stored_counts['stale_closed_pull_requests'] = self.repo.refresh_stale_pr_states(
+                    miner_eval.stale_closed_pull_requests, commit=False
+                )
+                result.stored_counts['issues'] = self.repo.store_issues_bulk(miner_eval.get_all_issues(), commit=False)
+                result.stored_counts['file_changes'] = self.repo.store_file_changes_bulk(
+                    miner_eval.get_all_file_changes(), commit=False
+                )
+                self.repo.cleanup_stale_miner_data(miner_eval, commit=False)
+                result.stored_counts['evaluations'] = (
+                    1 if self.repo.set_miner_evaluation(miner_eval, commit=False) else 0
+                )
 
             self.db_connection.commit()
             self.db_connection.autocommit = True

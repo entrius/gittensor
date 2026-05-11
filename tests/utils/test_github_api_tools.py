@@ -27,6 +27,7 @@ github_api_tools = pytest.importorskip(
 )
 
 get_github_graphql_query = github_api_tools.get_github_graphql_query
+get_github_identity = github_api_tools.get_github_identity
 get_github_id = github_api_tools.get_github_id
 get_pull_request_file_changes = github_api_tools.get_pull_request_file_changes
 get_merge_base_sha = github_api_tools.get_merge_base_sha
@@ -376,6 +377,76 @@ class TestOtherGitHubAPIFunctions:
 
         assert result == '12345'
         assert mock_get.call_count == 3
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_get_github_identity_marks_5xx_as_transient(self, mock_logging, mock_sleep, mock_get):
+        mock_response = Mock(status_code=500)
+        mock_get.return_value = mock_response
+
+        result = get_github_identity('fake_token')
+
+        assert result.github_id is None
+        assert result.status is github_api_tools.GitHubIdentityStatus.TRANSIENT_FAILURE
+        assert mock_get.call_count == 6
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_get_github_identity_marks_rate_limit_as_transient(self, mock_logging, mock_sleep, mock_get):
+        mock_response = Mock(status_code=429)
+        mock_get.return_value = mock_response
+
+        result = get_github_identity('fake_token')
+
+        assert result.github_id is None
+        assert result.status is github_api_tools.GitHubIdentityStatus.TRANSIENT_FAILURE
+        assert mock_get.call_count == 6
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_get_github_identity_marks_403_rate_limit_as_transient(self, mock_logging, mock_sleep, mock_get):
+        mock_response = Mock(status_code=403)
+        mock_response.headers = {'x-ratelimit-remaining': '0'}
+        mock_get.return_value = mock_response
+
+        result = get_github_identity('fake_token')
+
+        assert result.github_id is None
+        assert result.status is github_api_tools.GitHubIdentityStatus.TRANSIENT_FAILURE
+        assert mock_get.call_count == 6
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_get_github_identity_fails_closed_on_auth_status(self, mock_logging, mock_sleep, mock_get):
+        mock_response = Mock(status_code=403)
+        mock_response.headers = {}
+        mock_response.json.return_value = {'message': 'Resource not accessible by personal access token'}
+        mock_get.return_value = mock_response
+
+        result = get_github_identity('fake_token')
+
+        assert result.github_id is None
+        assert result.status is github_api_tools.GitHubIdentityStatus.INVALID_AUTH
+        assert mock_get.call_count == 1
+        mock_sleep.assert_not_called()
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_get_github_identity_marks_bad_json_as_transient(self, mock_logging, mock_sleep, mock_get):
+        mock_response = Mock(status_code=200)
+        mock_response.json.side_effect = ValueError('bad json')
+        mock_get.return_value = mock_response
+
+        result = get_github_identity('fake_token')
+
+        assert result.github_id is None
+        assert result.status is github_api_tools.GitHubIdentityStatus.TRANSIENT_FAILURE
+        assert mock_get.call_count == 6
 
 
 # ============================================================================
@@ -1047,7 +1118,7 @@ class TestCheckGithubIssueClosed:
     def test_graphql_failure_sets_solver_lookup_failed(self, mock_logging, mock_get, mock_graphql):
         issue_response = Mock()
         issue_response.status_code = 200
-        issue_response.json.return_value = {'state': 'closed'}
+        issue_response.json.return_value = {'state': 'closed', 'state_reason': 'completed'}
         mock_get.return_value = issue_response
         mock_graphql.return_value = None
 
@@ -1066,7 +1137,7 @@ class TestCheckGithubIssueClosed:
     def test_closed_issue_with_no_solver_keeps_lookup_failed_false(self, mock_logging, mock_get, mock_graphql):
         issue_response = Mock()
         issue_response.status_code = 200
-        issue_response.json.return_value = {'state': 'closed'}
+        issue_response.json.return_value = {'state': 'closed', 'state_reason': 'completed'}
         mock_get.return_value = issue_response
         mock_graphql.return_value = _graphql_response([])
 
@@ -1078,6 +1149,35 @@ class TestCheckGithubIssueClosed:
             'pr_number': None,
             'solver_lookup_failed': False,
         }
+
+    @pytest.mark.parametrize(
+        'issue_payload',
+        [
+            {'state': 'closed', 'state_reason': 'not_planned'},
+            {'state': 'closed', 'state_reason': 'duplicate'},
+            {'state': 'closed', 'state_reason': 'transferred'},
+            {'state': 'closed', 'state_reason': None},
+            {'state': 'closed'},
+        ],
+    )
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_non_completed_closed_issue_skips_solver_lookup(self, mock_logging, mock_get, mock_graphql, issue_payload):
+        issue_response = Mock()
+        issue_response.status_code = 200
+        issue_response.json.return_value = issue_payload
+        mock_get.return_value = issue_response
+
+        result = check_github_issue_closed('owner/repo', 12, 'fake_token')
+
+        assert result == {
+            'is_closed': True,
+            'solver_github_id': None,
+            'pr_number': None,
+            'solver_lookup_failed': False,
+        }
+        mock_graphql.assert_not_called()
 
 
 # ============================================================================

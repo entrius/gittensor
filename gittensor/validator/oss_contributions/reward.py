@@ -2,6 +2,7 @@
 # Copyright © 2025 Entrius
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Dict, Optional, Set, Tuple
 
 import bittensor as bt
@@ -39,6 +40,7 @@ async def evaluate_miners_pull_requests(
     programming_languages: Dict[str, LanguageConfig],
     token_config: TokenConfig,
     stale_hotkey: Optional[str] = None,
+    stored_github_id: Optional[str] = None,
 ) -> MinerEvaluation:
     """
     Entry point from taking a miners response -> Get PRs -> Score PRs
@@ -51,6 +53,7 @@ async def evaluate_miners_pull_requests(
         programming_languages: The programming languages and their weights
         token_config: Token-based scoring weights configuration
         stale_hotkey: If set, the UID has a stored PAT from this old hotkey (re-registration detected)
+        stored_github_id: GitHub id recorded when the stored PAT was accepted
 
     Returns:
         MinerEvaluation: The object containing scores, valid_prs, etc.
@@ -58,9 +61,19 @@ async def evaluate_miners_pull_requests(
 
     bt.logging.info(f'******* Reward function called for UID: {uid} *******')
 
-    miner_eval = validate_response_and_initialize_miner_evaluation(uid, hotkey, pat, stale_hotkey=stale_hotkey)
+    miner_eval = validate_response_and_initialize_miner_evaluation(
+        uid,
+        hotkey,
+        pat,
+        stale_hotkey=stale_hotkey,
+        stored_github_id=stored_github_id,
+    )
     if miner_eval.failed_reason is not None:
         bt.logging.info(f'UID {uid} not being evaluated: {miner_eval.failed_reason}')
+        return miner_eval
+
+    if miner_eval.github_pr_fetch_failed:
+        bt.logging.warning(f'UID {uid}: GitHub identity lookup failed transiently; deferring to cache fallback')
         return miner_eval
 
     # Partition repos by source: legacy (PAT) vs mirror (das-github-mirror).
@@ -84,9 +97,12 @@ async def evaluate_miners_pull_requests(
             hotkey=miner_eval.hotkey,
             github_id=miner_eval.github_id,
         )
+
         with MirrorClient() as mirror_client:
-            load_mirror_miner_prs(mirror_eval, mirror_repos, client=mirror_client)
-            score_mirror_miner_prs(mirror_eval, mirror_repos, programming_languages, token_config, client=mirror_client)
+            await asyncio.to_thread(load_mirror_miner_prs, mirror_eval, mirror_repos, client=mirror_client)
+            await score_mirror_miner_prs(
+                mirror_eval, mirror_repos, programming_languages, token_config, client=mirror_client
+            )
         combine(miner_eval, mirror_eval)
 
     # Clear PAT after scoring to avoid storing sensitive data in memory
@@ -127,9 +143,11 @@ async def get_rewards(
         pat_entry = pat_by_uid.get(uid)
         pat = None
         stale_hotkey = None
+        stored_github_id = None
         if pat_entry:
             if pat_entry.get('hotkey') == hotkey:
                 pat = pat_entry['pat']
+                stored_github_id = pat_entry.get('github_id')
             else:
                 stale_hotkey = pat_entry.get('hotkey')
 
@@ -142,6 +160,7 @@ async def get_rewards(
             programming_languages,
             token_config,
             stale_hotkey=stale_hotkey,
+            stored_github_id=stored_github_id,
         )
         miner_evaluations[uid] = miner_evaluation
 
@@ -154,7 +173,7 @@ async def get_rewards(
     cached_uids -= penalized_uids
 
     # Finalize scores: apply eligibility gate, credibility, pioneer dividends, collateral
-    finalize_miner_scores(miner_evaluations)
+    finalize_miner_scores(miner_evaluations, master_repositories)
 
     # Normalize the rewards between [0,1] — single flat pool
     normalized_rewards = normalize_rewards_linear(miner_evaluations)

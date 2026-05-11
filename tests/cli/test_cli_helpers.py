@@ -264,7 +264,7 @@ class TestValidateGitHubIssue:
             },
         )()
         with patch('gittensor.cli.issue_commands.helpers.requests.get', return_value=mock_resp):
-            with patch('gittensor.cli.issue_commands.helpers.console.print') as mock_print:
+            with patch('gittensor.cli.issue_commands.helpers.err_console.print') as mock_print:
                 result = validate_github_issue('owner', 'repo', 42)
         assert result == issue_data
         mock_print.assert_called_once()
@@ -340,7 +340,7 @@ class TestRequireVerifiedExistsGitHubIssue:
             'gittensor.cli.issue_commands.helpers.requests.get',
             return_value=_fake_response(503),
         ):
-            with patch('gittensor.cli.issue_commands.helpers.console.print'):
+            with patch('gittensor.cli.issue_commands.helpers.err_console.print'):
                 result = validate_github_issue('owner', 'repo', 42)
         assert result is None
 
@@ -400,7 +400,7 @@ class TestRequireVerifiedExistsRepository:
             'gittensor.cli.issue_commands.helpers.requests.get',
             return_value=_fake_response(503),
         ):
-            with patch('gittensor.cli.issue_commands.helpers.console.print') as mock_print:
+            with patch('gittensor.cli.issue_commands.helpers.err_console.print') as mock_print:
                 owner, name = validate_repository('owner/repo')
         assert owner == 'owner'
         assert name == 'repo'

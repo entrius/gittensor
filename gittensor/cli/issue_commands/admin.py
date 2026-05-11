@@ -22,7 +22,7 @@ from .helpers import (
     _make_contract_client,
     _resolve_contract_and_network,
     confirm_or_abort,
-    console,
+    err_console,
     format_alpha,
     print_error,
     print_network_header,
@@ -72,7 +72,7 @@ def admin_cancel(
     print_network_header(network_name, contract_addr)
 
     try:
-        with console.status('[bold cyan]Connecting and reading issue...', spinner='dots'):
+        with err_console.status('[bold cyan]Connecting and reading issue...', spinner='dots'):
             wallet, client = _make_contract_client(contract_addr, ws_endpoint, wallet_name, wallet_hotkey)
             issue = client.get_issue(issue_id)
 
@@ -80,7 +80,7 @@ def admin_cancel(
             print_error(f'Issue {issue_id} not found on contract.')
             raise SystemExit(1)
 
-        console.print(
+        err_console.print(
             Panel(
                 f'[cyan]Issue:[/cyan] {issue.repository_full_name}#{issue.issue_number}\n'
                 f'[cyan]Status:[/cyan] {issue.status.name}\n'
@@ -93,7 +93,7 @@ def admin_cancel(
         if not confirm_or_abort(f'Cancel issue {issue_id}? This returns the bounty to the alpha pool.', yes):
             return
 
-        with console.status('[bold cyan]Submitting cancellation...', spinner='dots'):
+        with err_console.status('[bold cyan]Submitting cancellation...', spinner='dots'):
             result = client.cancel_issue(issue_id, wallet)
 
         if result:
@@ -134,7 +134,7 @@ def admin_payout(
     print_network_header(network_name, contract_addr)
 
     try:
-        with console.status('[bold cyan]Connecting and reading issue...', spinner='dots'):
+        with err_console.status('[bold cyan]Connecting and reading issue...', spinner='dots'):
             wallet, client = _make_contract_client(contract_addr, ws_endpoint, wallet_name, wallet_hotkey)
             issue = client.get_issue(issue_id)
 
@@ -142,7 +142,7 @@ def admin_payout(
             print_error(f'Issue {issue_id} not found on contract.')
             raise SystemExit(1)
 
-        console.print(
+        err_console.print(
             Panel(
                 f'[cyan]Issue:[/cyan] {issue.repository_full_name}#{issue.issue_number}\n'
                 f'[cyan]Status:[/cyan] {issue.status.name}\n'
@@ -155,7 +155,7 @@ def admin_payout(
         if not confirm_or_abort(f'Pay out issue {issue_id}?', yes):
             return
 
-        with console.status('[bold cyan]Submitting payout...', spinner='dots'):
+        with err_console.status('[bold cyan]Submitting payout...', spinner='dots'):
             result = client.payout_bounty(issue_id, wallet)
 
         if result:
@@ -191,7 +191,7 @@ def admin_set_owner(
 
     print_network_header(network_name, contract_addr)
 
-    console.print(
+    err_console.print(
         Panel(
             f'[cyan]New Owner:[/cyan] {new_owner}\n'
             '[bold red]This transfer is IRREVERSIBLE. A mistyped address makes the contract unrecoverable.[/bold red]',
@@ -204,7 +204,7 @@ def admin_set_owner(
         return
 
     try:
-        with console.status('[bold cyan]Transferring ownership...', spinner='dots'):
+        with err_console.status('[bold cyan]Transferring ownership...', spinner='dots'):
             wallet, client = _make_contract_client(contract_addr, ws_endpoint, wallet_name, wallet_hotkey)
             result = client.set_owner(new_owner, wallet)
 
@@ -244,7 +244,7 @@ def admin_set_treasury(
 
     print_network_header(network_name, contract_addr)
 
-    console.print(
+    err_console.print(
         Panel(
             f'[cyan]New Treasury:[/cyan] {new_treasury}',
             title='Change Treasury Hotkey',
@@ -258,13 +258,13 @@ def admin_set_treasury(
         return
 
     try:
-        with console.status('[bold cyan]Updating treasury hotkey...', spinner='dots'):
+        with err_console.status('[bold cyan]Updating treasury hotkey...', spinner='dots'):
             wallet, client = _make_contract_client(contract_addr, ws_endpoint, wallet_name, wallet_hotkey)
             result = client.set_treasury_hotkey(new_treasury, wallet)
 
         if result:
             print_success(f'Treasury hotkey updated to {new_treasury}!')
-            console.print(
+            err_console.print(
                 '[dim]Note: Issue bounty amounts have been reset. Run harvest to re-fund from new treasury.[/dim]'
             )
         else:
@@ -301,7 +301,7 @@ def admin_add_validator(
 
     print_network_header(network_name, contract_addr)
 
-    console.print(
+    err_console.print(
         Panel(
             f'[cyan]Validator Hotkey:[/cyan] {hotkey}',
             title='Add Validator',
@@ -313,7 +313,7 @@ def admin_add_validator(
         return
 
     try:
-        with console.status('[bold cyan]Adding validator...', spinner='dots'):
+        with err_console.status('[bold cyan]Adding validator...', spinner='dots'):
             wallet, client = _make_contract_client(contract_addr, ws_endpoint, wallet_name, wallet_hotkey)
             result = client.add_validator(hotkey, wallet)
 
@@ -321,9 +321,9 @@ def admin_add_validator(
             print_success(f'Validator {hotkey} added to whitelist!')
         else:
             print_error('Failed to add validator.')
-            console.print('[yellow]Possible reasons:[/yellow]')
-            console.print('  \u2022 Caller is not the contract owner')
-            console.print('  \u2022 Validator is already whitelisted')
+            err_console.print('[yellow]Possible reasons:[/yellow]')
+            err_console.print('  \u2022 Caller is not the contract owner')
+            err_console.print('  \u2022 Validator is already whitelisted')
             raise SystemExit(1)
     except Exception as e:
         _handle_command_error(e)
@@ -355,7 +355,7 @@ def admin_remove_validator(
 
     print_network_header(network_name, contract_addr)
 
-    console.print(
+    err_console.print(
         Panel(
             f'[cyan]Validator Hotkey:[/cyan] {hotkey}',
             title='Remove Validator',
@@ -367,7 +367,7 @@ def admin_remove_validator(
         return
 
     try:
-        with console.status('[bold cyan]Removing validator...', spinner='dots'):
+        with err_console.status('[bold cyan]Removing validator...', spinner='dots'):
             wallet, client = _make_contract_client(contract_addr, ws_endpoint, wallet_name, wallet_hotkey)
             result = client.remove_validator(hotkey, wallet)
 
@@ -375,9 +375,9 @@ def admin_remove_validator(
             print_success(f'Validator {hotkey} removed from whitelist!')
         else:
             print_error('Failed to remove validator.')
-            console.print('[yellow]Possible reasons:[/yellow]')
-            console.print('  \u2022 Caller is not the contract owner')
-            console.print('  \u2022 Validator is not in the whitelist')
+            err_console.print('[yellow]Possible reasons:[/yellow]')
+            err_console.print('  \u2022 Caller is not the contract owner')
+            err_console.print('  \u2022 Validator is not in the whitelist')
             raise SystemExit(1)
     except Exception as e:
         _handle_command_error(e)

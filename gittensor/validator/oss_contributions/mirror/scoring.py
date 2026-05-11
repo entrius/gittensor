@@ -20,6 +20,7 @@ Anti-gaming notes:
   require maintainer-applied labels; legacy can't do this and accepts any-applier.
 """
 
+import asyncio
 import os
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
@@ -29,7 +30,6 @@ import bittensor as bt
 from gittensor.classes import FileChange, PrScoringResult, ScoringCategory
 from gittensor.constants import (
     CONTRIBUTION_SCORE_FOR_FULL_BONUS,
-    LABEL_MULTIPLIERS,
     MAINTAINER_ASSOCIATIONS,
     MAINTAINER_ISSUE_MULTIPLIER,
     MAX_CONTRIBUTION_BONUS,
@@ -42,6 +42,7 @@ from gittensor.constants import (
 from gittensor.utils.github_api_tools import FileContentPair, branch_matches_pattern
 from gittensor.utils.mirror.client import MirrorClient, MirrorRequestError
 from gittensor.utils.mirror.models import MirrorLinkedIssue, MirrorPullRequest
+from gittensor.validator.oss_contributions.label_resolution import resolve_highest_label_multiplier
 from gittensor.validator.oss_contributions.mirror.adapters import mirror_files_to_legacy
 from gittensor.validator.oss_contributions.mirror.evaluation import MirrorMinerEvaluation
 from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredMirrorPR
@@ -62,7 +63,7 @@ from gittensor.validator.utils.tree_sitter_scoring import calculate_token_score_
 # ============================================================================
 
 
-def score_mirror_miner_prs(
+async def score_mirror_miner_prs(
     mirror_eval: MirrorMinerEvaluation,
     mirror_repos: Dict[str, RepositoryConfig],
     programming_languages: Dict[str, LanguageConfig],
@@ -97,7 +98,7 @@ def score_mirror_miner_prs(
             bt.logging.info(
                 f'\n[{i}/{len(scored_prs)}] {label} PR #{scored.pr.pr_number} in {scored.pr.repo_full_name}'
             )
-            score_mirror_pr(scored, mirror_eval, mirror_repos, programming_languages, token_config, client)
+            await score_mirror_pr(scored, mirror_eval, mirror_repos, programming_languages, token_config, client)
 
 
 # ============================================================================
@@ -105,7 +106,7 @@ def score_mirror_miner_prs(
 # ============================================================================
 
 
-def score_mirror_pr(
+async def score_mirror_pr(
     scored: ScoredMirrorPR,
     mirror_eval: MirrorMinerEvaluation,
     mirror_repos: Dict[str, RepositoryConfig],
@@ -125,26 +126,45 @@ def score_mirror_pr(
     # mirror_eval.merged_prs contains only eligibility-passed PRs — legacy parity
     # with load_miners_prs which applies should_skip_merged_pr pre-append.
 
+    has_fixed_base = repo_config.fixed_base_score is not None
+
     # Mirror signals it has no stored files for this PR (pending backfill, in-flight
-    # file job, etc.) — skip the round trip.
-    if not pr.scoring_data_stored:
+    # file job, etc.) — skip the round trip unless the repo explicitly supplies
+    # a fixed base score.
+    if not pr.scoring_data_stored and not has_fixed_base:
         return
 
     # Fetch file contents via the mirror's lazy /pulls/.../files endpoint.
-    try:
-        files = client.get_pr_files(pr.repo_full_name, pr.pr_number).files
-    except MirrorRequestError as e:
-        bt.logging.warning(f'Mirror file fetch failed for PR #{pr.pr_number}: {e}')
-        return
-    scored.files = files
+    if pr.scoring_data_stored:
+        try:
+            files = (await asyncio.to_thread(client.get_pr_files, pr.repo_full_name, pr.pr_number)).files
+        except MirrorRequestError as e:
+            bt.logging.warning(f'Mirror file fetch failed for PR #{pr.pr_number}: {e}')
+            if not has_fixed_base:
+                return
+            files = []
+        scored.files = files
 
-    if not files:
-        bt.logging.warning(f'No files returned for PR #{pr.pr_number}')
-        return
+        if files:
+            file_changes, file_contents = mirror_files_to_legacy(pr.repo_full_name, pr.pr_number, files)
 
-    file_changes, file_contents = mirror_files_to_legacy(pr.repo_full_name, pr.pr_number, files)
+            result = calculate_base_score_for_pr_files(file_changes, file_contents, programming_languages, token_config)
+            scored.token_score = result.token_score
+            scored.structural_count = result.structural_count
+            scored.structural_score = result.structural_score
+            scored.leaf_count = result.leaf_count
+            scored.leaf_score = result.leaf_score
+            scored.total_nodes_scored = result.total_nodes_scored
+            scored.code_density = result.code_density
+            scored.base_score = result.base_score
+        elif not has_fixed_base:
+            bt.logging.warning(f'No files returned for PR #{pr.pr_number}')
+            return
 
-    scored.base_score = _calculate_base_score(scored, file_changes, file_contents, programming_languages, token_config)
+    if repo_config.fixed_base_score is not None:
+        # Only the base score is overridden. Token fields stay token-derived so
+        # eligibility, pioneer, and reporting gates keep their evidence signal.
+        scored.base_score = repo_config.fixed_base_score
 
     _calculate_pr_multipliers(scored, repo_config)
 
@@ -182,10 +202,10 @@ def _should_skip_merged_mirror_pr(scored: ScoredMirrorPR, repo_config: Repositor
     and other multipliers still apply.
 
     When the mirror response is missing a field (older data predating the
-    schema additions), the affected check falls through rather than
-    false-positive-blocking. Concretely: missing ``head_ref`` or
-    ``head_repo_full_name`` skips the head_ref check; missing ``default_branch``
-    narrows the acceptable set to ``additional_acceptable_branches`` only.
+    schema additions), some checks fall through rather than false-positive-
+    blocking. Concretely: missing ``head_ref`` or ``head_repo_full_name`` skips
+    the head_ref check. Missing ``default_branch`` falls back to ``main``
+    (legacy parity with GraphQL path).
     """
     pr = scored.pr
 
@@ -201,17 +221,18 @@ def _should_skip_merged_mirror_pr(scored: ScoredMirrorPR, repo_config: Repositor
             return True, f'PR #{pr.pr_number} self-merged without external approval'
 
     additional = repo_config.additional_acceptable_branches or []
-    acceptable = ([pr.default_branch] if pr.default_branch else []) + additional
+    default_branch = pr.default_branch or 'main'
+    acceptable = [default_branch] + additional
 
-    # base_ref check — only enforce when we have an acceptable set to compare against.
-    if acceptable and not branch_matches_pattern(pr.base_ref or '', acceptable):
+    # base_ref check.
+    if not branch_matches_pattern(pr.base_ref or '', acceptable):
         return True, (f'PR #{pr.pr_number} merged to {pr.base_ref!r} not in acceptable branches={acceptable}')
 
     # head_ref check — block PRs whose source branch is itself an acceptable
     # branch. Only applies to same-repo PRs: fork branch names are arbitrary.
     # Falls through when head_ref or head_repo_full_name is missing (older data).
     is_same_repo = pr.head_repo_full_name is not None and pr.head_repo_full_name == pr.repo_full_name
-    if additional and pr.head_ref and is_same_repo and branch_matches_pattern(pr.head_ref, acceptable):
+    if acceptable and pr.head_ref and is_same_repo and branch_matches_pattern(pr.head_ref, acceptable):
         return True, (
             f'PR #{pr.pr_number} source branch {pr.head_ref!r} is itself in '
             f'acceptable branches — merging between acceptable branches not allowed'
@@ -316,25 +337,6 @@ def calculate_base_score_for_pr_files(
     )
 
 
-def _calculate_base_score(
-    scored: ScoredMirrorPR,
-    file_changes: List[FileChange],
-    file_contents: Dict[str, FileContentPair],
-    programming_languages: Dict[str, LanguageConfig],
-    token_config: TokenConfig,
-) -> float:
-    """Thin wrapper: run the shared helper and copy fields onto ScoredMirrorPR."""
-    result = calculate_base_score_for_pr_files(file_changes, file_contents, programming_languages, token_config)
-    scored.token_score = result.token_score
-    scored.structural_count = result.structural_count
-    scored.structural_score = result.structural_score
-    scored.leaf_count = result.leaf_count
-    scored.leaf_score = result.leaf_score
-    scored.total_nodes_scored = result.total_nodes_scored
-    scored.code_density = result.code_density
-    return result.base_score
-
-
 # ============================================================================
 # Per-PR multipliers
 # ============================================================================
@@ -351,9 +353,9 @@ def _calculate_pr_multipliers(scored: ScoredMirrorPR, repo_config: RepositoryCon
 
     scored.repo_weight_multiplier = resolve_repo_weight(repo_config)
 
-    chosen_label = _resolve_trusted_scoring_label(pr, repo_config)
+    chosen_label, label_multiplier = _resolve_trusted_scoring_label(pr, repo_config)
     scored.label = chosen_label
-    scored.label_multiplier = LABEL_MULTIPLIERS.get(chosen_label, 1.0) if chosen_label else 1.0
+    scored.label_multiplier = label_multiplier
 
     scored.issue_multiplier = round(_calculate_issue_multiplier(scored), 2)
 
@@ -372,8 +374,11 @@ def _calculate_pr_multipliers(scored: ScoredMirrorPR, repo_config: RepositoryCon
         scored.review_quality_multiplier = 1.0
 
 
-def _resolve_trusted_scoring_label(pr: MirrorPullRequest, repo_config: RepositoryConfig) -> Optional[str]:
+def _resolve_trusted_scoring_label(pr: MirrorPullRequest, repo_config: RepositoryConfig) -> tuple[Optional[str], float]:
     """Pick the highest-multiplier currently-applied scoring label whose actor is trusted.
+
+    Returns ``(label_name, multiplier)``. Returns ``(None, default_multiplier)``
+    when no trusted label matches this repository's label config.
 
     By default the actor must be in ``MAINTAINER_ASSOCIATIONS``. Repos opted into
     ``trusted_label_pipeline`` accept any actor — including GitHub-App actors that
@@ -383,17 +388,12 @@ def _resolve_trusted_scoring_label(pr: MirrorPullRequest, repo_config: Repositor
     auto-labelers (release-drafter, actions/labeler) and must keep the gate.
     """
     trusted = repo_config.trusted_label_pipeline
-    candidates = [
-        label
+    candidate_names = [
+        (label.name or '').lower()
         for label in pr.labels
-        if (label.name or '').lower() in LABEL_MULTIPLIERS
-        and (trusted or label.actor_association in MAINTAINER_ASSOCIATIONS)
+        if label.name and (trusted or label.actor_association in MAINTAINER_ASSOCIATIONS)
     ]
-    if not candidates:
-        return None
-    # Highest multiplier wins; tie-broken by label name for deterministic output
-    best = max(candidates, key=lambda label: (LABEL_MULTIPLIERS[label.name.lower()], label.name.lower()))
-    return best.name.lower()
+    return resolve_highest_label_multiplier(candidate_names, repo_config)
 
 
 # ============================================================================

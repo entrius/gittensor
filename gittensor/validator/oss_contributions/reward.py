@@ -173,7 +173,7 @@ async def get_rewards(
     cached_uids -= penalized_uids
 
     # Finalize scores: apply eligibility gate, credibility, pioneer dividends, collateral
-    finalize_miner_scores(miner_evaluations)
+    finalize_miner_scores(miner_evaluations, master_repositories)
 
     # Normalize the rewards between [0,1] — single flat pool
     normalized_rewards = normalize_rewards_linear(miner_evaluations)

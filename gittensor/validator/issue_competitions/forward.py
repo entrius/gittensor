@@ -61,12 +61,23 @@ async def issue_competitions(
         if harvest_result and harvest_result.get('status') == 'success':
             bt.logging.success(f'Harvested emissions! Extrinsic: {harvest_result.get("tx_hash", "")}')
 
-        # Build mapping of github_id->hotkey for eligible miners only
-        eligible_miners = {
-            eval.github_id: eval.hotkey
-            for eval in miner_evaluations.values()
-            if eval.github_id and eval.github_id != '0' and eval.is_eligible
-        }
+        # Build mapping of github_id->hotkey for eligible miners only.
+        # If two eligible miners share the same github_id (duplicate account), the
+        # duplicate penalty in detect_and_penalize_miners_sharing_github should have
+        # already zeroed their scores — but log a warning if it still occurs so that
+        # bounty votes are not silently misdirected.
+        eligible_miners: dict[str, str] = {}
+        for eval_ in miner_evaluations.values():
+            if not eval_.github_id or eval_.github_id == '0' or not eval_.is_eligible:
+                continue
+            if eval_.github_id in eligible_miners:
+                existing_hotkey = eligible_miners[eval_.github_id]
+                bt.logging.warning(
+                    f'Duplicate github_id {eval_.github_id}: '
+                    f'hotkey {eval_.hotkey[:12]}... overwrites hotkey {existing_hotkey[:12]}... '
+                    f'in eligible_miners. Both miners should have been penalized.'
+                )
+            eligible_miners[eval_.github_id] = eval_.hotkey
         bt.logging.info(f'Issue bounties: {len(eligible_miners)} eligible miners out of {len(miner_evaluations)} total')
         for github_id, hotkey in eligible_miners.items():
             bt.logging.info(f'  Eligible miner: github_id={github_id}, hotkey={hotkey[:12]}...')

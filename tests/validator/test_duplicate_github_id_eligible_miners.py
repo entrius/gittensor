@@ -131,4 +131,3 @@ class TestDuplicateGithubIdInEligibleMiners:
             ),
         ):
             _run(issue_competitions(cast(Any, validator), miner_evaluations))
-

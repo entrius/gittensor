@@ -1,29 +1,36 @@
 # Entrius 2025
 
+import asyncio
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import cast
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from gittensor.classes import FileChange, Issue, MinerEvaluation, MinerEvaluationCache, PRState, PullRequest
 from gittensor.utils.github_api_tools import GraphQLPageResult, load_miners_prs
 from gittensor.utils.mirror.models import MirrorFile, MirrorPullRequest, MirrorReviewSummary
 from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredMirrorPR
+from gittensor.validator.oss_contributions.reward import get_rewards
 from neurons.validator import Validator
 
 
 class _DummyValidator:
     def __init__(self):
         self.evaluation_cache = MinerEvaluationCache()
+        self.metagraph = SimpleNamespace(hotkeys=[])
+
+    def store_or_use_cached_evaluation(self, miner_evaluations):
+        return Validator.store_or_use_cached_evaluation(cast(Validator, self), miner_evaluations)
 
 
-def _make_pr(uid: int) -> PullRequest:
+def _make_pr(uid: int, hotkey: str = 'hotkey_1', github_id: str = '12345') -> PullRequest:
     now = datetime.now(timezone.utc)
     return PullRequest(
         number=1,
         repository_full_name='owner/repo',
         uid=uid,
-        hotkey='hotkey_1',
-        github_id='12345',
+        hotkey=hotkey,
+        github_id=github_id,
         title='cached pr',
         author_login='miner',
         merged_at=now,
@@ -38,9 +45,11 @@ def _build_eval(
     merged_prs: int,
     fetch_failed: bool,
     mirror_pr_fetch_failed: bool = False,
+    hotkey: str = 'hotkey_1',
+    github_id: str = '12345',
 ) -> MinerEvaluation:
-    eval_ = MinerEvaluation(uid=uid, hotkey='hotkey_1', github_id='12345')
-    eval_.merged_pull_requests = [_make_pr(uid) for _ in range(merged_prs)]
+    eval_ = MinerEvaluation(uid=uid, hotkey=hotkey, github_id=github_id)
+    eval_.merged_pull_requests = [_make_pr(uid, hotkey=hotkey, github_id=github_id) for _ in range(merged_prs)]
     eval_.github_pr_fetch_failed = fetch_failed
     eval_.mirror_pr_fetch_failed = mirror_pr_fetch_failed
     return eval_
@@ -113,6 +122,73 @@ class TestStoreOrUseCachedEvaluation:
         assert cached_uids == set()
         assert miner_evaluations[1] is current_eval
         assert miner_evaluations[1].total_prs == 0
+
+    def test_duplicate_penalty_evicts_pre_penalty_cache_entries(self):
+        validator = _DummyValidator()
+        validator.metagraph = SimpleNamespace(hotkeys=['unused', 'hotkey_1', 'hotkey_2'])
+        shared_github_id = 'shared-gh'
+
+        evaluations = {
+            1: _build_eval(
+                uid=1,
+                merged_prs=1,
+                fetch_failed=False,
+                hotkey='hotkey_1',
+                github_id=shared_github_id,
+            ),
+            2: _build_eval(
+                uid=2,
+                merged_prs=1,
+                fetch_failed=False,
+                hotkey='hotkey_2',
+                github_id=shared_github_id,
+            ),
+        }
+
+        async def evaluate(uid, *_args, **_kwargs):
+            return evaluations[uid]
+
+        with (
+            patch(
+                'gittensor.validator.oss_contributions.reward.pat_storage.load_all_pats',
+                return_value=[
+                    {'uid': 1, 'hotkey': 'hotkey_1', 'pat': 'pat_1'},
+                    {'uid': 2, 'hotkey': 'hotkey_2', 'pat': 'pat_2'},
+                ],
+            ),
+            patch(
+                'gittensor.validator.oss_contributions.reward.evaluate_miners_pull_requests',
+                new=AsyncMock(side_effect=evaluate),
+            ),
+        ):
+            _, _, cached_uids, penalized_uids = asyncio.run(
+                get_rewards(
+                    cast(Validator, validator),
+                    {1, 2},
+                    {},
+                    {},
+                    Mock(),
+                )
+            )
+
+        assert cached_uids == set()
+        assert penalized_uids == {1, 2}
+        assert validator.evaluation_cache.get(1, 'hotkey_1', shared_github_id) is None
+        assert validator.evaluation_cache.get(2, 'hotkey_2', shared_github_id) is None
+
+        future_eval = _build_eval(
+            uid=1,
+            merged_prs=0,
+            fetch_failed=True,
+            hotkey='hotkey_1',
+            github_id=shared_github_id,
+        )
+        future_evaluations = {1: future_eval}
+
+        future_cached_uids = Validator.store_or_use_cached_evaluation(cast(Validator, validator), future_evaluations)
+
+        assert future_cached_uids == set()
+        assert future_evaluations[1] is future_eval
 
 
 class TestMirrorFailureCacheFallback:

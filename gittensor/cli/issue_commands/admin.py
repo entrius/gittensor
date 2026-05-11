@@ -24,6 +24,7 @@ from .helpers import (
     confirm_or_abort,
     err_console,
     format_alpha,
+    loading_context,
     print_error,
     print_network_header,
     print_success,
@@ -72,7 +73,7 @@ def admin_cancel(
     print_network_header(network_name, contract_addr)
 
     try:
-        with err_console.status('[bold cyan]Connecting and reading issue...', spinner='dots'):
+        with loading_context('Connecting and reading issue...', as_json=False):
             wallet, client = _make_contract_client(contract_addr, ws_endpoint, wallet_name, wallet_hotkey)
             issue = client.get_issue(issue_id)
 
@@ -93,7 +94,7 @@ def admin_cancel(
         if not confirm_or_abort(f'Cancel issue {issue_id}? This returns the bounty to the alpha pool.', yes):
             return
 
-        with err_console.status('[bold cyan]Submitting cancellation...', spinner='dots'):
+        with loading_context('Submitting cancellation...', as_json=False):
             result = client.cancel_issue(issue_id, wallet)
 
         if result:
@@ -134,7 +135,7 @@ def admin_payout(
     print_network_header(network_name, contract_addr)
 
     try:
-        with err_console.status('[bold cyan]Connecting and reading issue...', spinner='dots'):
+        with loading_context('Connecting and reading issue...', as_json=False):
             wallet, client = _make_contract_client(contract_addr, ws_endpoint, wallet_name, wallet_hotkey)
             issue = client.get_issue(issue_id)
 
@@ -155,7 +156,7 @@ def admin_payout(
         if not confirm_or_abort(f'Pay out issue {issue_id}?', yes):
             return
 
-        with err_console.status('[bold cyan]Submitting payout...', spinner='dots'):
+        with loading_context('Submitting payout...', as_json=False):
             result = client.payout_bounty(issue_id, wallet)
 
         if result:
@@ -204,7 +205,7 @@ def admin_set_owner(
         return
 
     try:
-        with err_console.status('[bold cyan]Transferring ownership...', spinner='dots'):
+        with loading_context('Transferring ownership...', as_json=False):
             wallet, client = _make_contract_client(contract_addr, ws_endpoint, wallet_name, wallet_hotkey)
             result = client.set_owner(new_owner, wallet)
 
@@ -258,7 +259,7 @@ def admin_set_treasury(
         return
 
     try:
-        with err_console.status('[bold cyan]Updating treasury hotkey...', spinner='dots'):
+        with loading_context('Updating treasury hotkey...', as_json=False):
             wallet, client = _make_contract_client(contract_addr, ws_endpoint, wallet_name, wallet_hotkey)
             result = client.set_treasury_hotkey(new_treasury, wallet)
 
@@ -313,7 +314,7 @@ def admin_add_validator(
         return
 
     try:
-        with err_console.status('[bold cyan]Adding validator...', spinner='dots'):
+        with loading_context('Adding validator...', as_json=False):
             wallet, client = _make_contract_client(contract_addr, ws_endpoint, wallet_name, wallet_hotkey)
             result = client.add_validator(hotkey, wallet)
 
@@ -367,7 +368,7 @@ def admin_remove_validator(
         return
 
     try:
-        with err_console.status('[bold cyan]Removing validator...', spinner='dots'):
+        with loading_context('Removing validator...', as_json=False):
             wallet, client = _make_contract_client(contract_addr, ws_endpoint, wallet_name, wallet_hotkey)
             result = client.remove_validator(hotkey, wallet)
 

@@ -24,6 +24,7 @@ from .helpers import (
     err_console,
     format_alpha,
     load_config,
+    loading_context,
     print_error,
     print_network_header,
     print_success,
@@ -179,7 +180,7 @@ def issue_register(
         from substrateinterface import Keypair, SubstrateInterface
         from substrateinterface.contracts import ContractInstance
 
-        with err_console.status('[bold cyan]Connecting to network...', spinner='dots'):
+        with loading_context('Connecting to network...', as_json=False):
             substrate = SubstrateInterface(url=ws_endpoint)
 
         # CLI flags override config; fall back to config if not explicitly supplied
@@ -327,12 +328,12 @@ def issue_harvest(wallet_name: str, wallet_hotkey: str, network: str, rpc_url: s
             IssueCompetitionContractClient,
         )
 
-        with err_console.status('[bold cyan]Loading wallet...', spinner='dots'):
+        with loading_context('Loading wallet...', as_json=False):
             wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
             hotkey_addr = wallet.hotkey.ss58_address
         err_console.print(f'[green]Hotkey address:[/green] {hotkey_addr}')
 
-        with err_console.status('[bold cyan]Connecting to network...', spinner='dots'):
+        with loading_context('Connecting to network...', as_json=False):
             subtensor = bt.Subtensor(network=ws_endpoint)
 
         # Show wallet balance (informational only)
@@ -343,7 +344,7 @@ def issue_harvest(wallet_name: str, wallet_hotkey: str, network: str, rpc_url: s
             except Exception as e:
                 err_console.print(f'[dim]Could not fetch balance: {e}[/dim]')
 
-        with err_console.status('[bold cyan]Initializing contract client...', spinner='dots'):
+        with loading_context('Initializing contract client...', as_json=False):
             client = IssueCompetitionContractClient(
                 contract_address=contract_addr,
                 subtensor=subtensor,
@@ -367,7 +368,7 @@ def issue_harvest(wallet_name: str, wallet_hotkey: str, network: str, rpc_url: s
             except Exception as e:
                 err_console.print(f'[yellow]Warning: Could not read contract state: {e}[/yellow]')
 
-        with err_console.status('[bold cyan]Calling harvest_emissions()...', spinner='dots'):
+        with loading_context('Calling harvest_emissions()...', as_json=False):
             result = client.harvest_emissions(wallet)
 
         if result:

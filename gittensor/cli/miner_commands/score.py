@@ -22,6 +22,7 @@ import click
 from rich.console import Console
 from rich.table import Table
 
+from gittensor.cli.issue_commands.helpers import loading_context
 from gittensor.cli.json_output import emit_json
 from gittensor.cli.miner_commands.helpers import _error
 
@@ -269,7 +270,7 @@ def score_command(pat: Optional[str], log_level: str, json_mode: bool) -> None:
         programming_languages = load_programming_language_weights()
         token_config = load_token_config()
     else:
-        with console.status('[bold cyan]Loading weights', spinner='dots'):
+        with loading_context('Loading weights', as_json=True):
             master_repositories = load_master_repo_weights()
             programming_languages = load_programming_language_weights()
             token_config = load_token_config()

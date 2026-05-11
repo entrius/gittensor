@@ -143,7 +143,7 @@ def val_vote_solution(
         return
 
     try:
-        with err_console.status('[bold cyan]Submitting vote...', spinner='dots'):
+        with loading_context('Submitting vote...', as_json=False):
             wallet, client = _make_contract_client(contract_addr, ws_endpoint, wallet_name, wallet_hotkey)
             result = client.vote_solution(issue_id, solver_hotkey, solver_coldkey, pr_number, wallet)
 
@@ -202,7 +202,7 @@ def val_vote_cancel_issue(
         return
 
     try:
-        with err_console.status('[bold cyan]Submitting cancel vote...', spinner='dots'):
+        with loading_context('Submitting cancel vote...', as_json=False):
             wallet, client = _make_contract_client(contract_addr, ws_endpoint, wallet_name, wallet_hotkey)
             result = client.vote_cancel_issue(issue_id, reason, wallet)
 

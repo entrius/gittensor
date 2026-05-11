@@ -146,7 +146,7 @@ def _require_validator_axons(
                 click.echo(json.dumps({'success': False, 'error': msg, 'skipped': excluded}, indent=2))
             else:
                 _render_skipped_validators(excluded, json_mode)
-                _error(msg, json_mode)
+                console.print(f'[red]Error: {msg}[/red]')
         else:
             _error('No reachable validator axons found on the network.', json_mode)
         sys.exit(1)

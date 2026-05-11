@@ -192,11 +192,17 @@ class TestEligibilityGate:
         assert skip is True
         assert "merged to 'whatever'" in reason
 
-    def test_no_default_branch_no_additional_accepts_any_base_ref(self):
-        # When BOTH default_branch and additional are missing (older mirror rows
-        # predating default_branch exposure), there's no acceptable set to
-        # check against — fall through rather than false-positive.
+    def test_no_default_branch_no_additional_blocks_non_main_base_ref(self):
+        # Legacy parity: if default_branch is missing, fallback to 'main' so
+        # non-main base refs are still rejected.
         scored = ScoredMirrorPR(pr=_pr(base_ref='whatever', default_branch=None))
+        skip, reason = _should_skip_merged_mirror_pr(scored, _config(additional_branches=None))
+        assert skip is True
+        assert "merged to 'whatever'" in reason
+
+    def test_no_default_branch_no_additional_allows_main_base_ref(self):
+        # Fallback default branch is 'main' when mirror omits default_branch.
+        scored = ScoredMirrorPR(pr=_pr(base_ref='main', default_branch=None))
         skip, reason = _should_skip_merged_mirror_pr(scored, _config(additional_branches=None))
         assert skip is False
 

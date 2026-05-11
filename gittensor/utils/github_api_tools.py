@@ -37,7 +37,7 @@ from gittensor.validator.utils.datetime_utils import parse_github_iso_to_utc
 from gittensor.validator.utils.load_weights import RepositoryConfig
 
 # Beyond this many CHANGES_REQUESTED reviews the quality multiplier is already 0
-_MAX_CHANGES_REQUESTED_REVIEWS = ceil(1 / REVIEW_PENALTY_RATE)
+_MAX_CHANGES_REQUESTED_REVIEWS = 100
 
 
 class GitHubIdentityStatus(Enum):

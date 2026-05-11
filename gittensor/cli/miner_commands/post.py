@@ -29,7 +29,6 @@ from gittensor.cli.miner_commands.helpers import (
     _resolve_endpoint,
     _status,
     console,
-    err_console,
 )
 from gittensor.constants import BASE_GITHUB_API_URL, GITHUB_HTTP_TIMEOUT_SECONDS, GRAPHQL_VIEWER_QUERY
 from gittensor.utils.github_api_tools import make_graphql_headers, make_headers
@@ -97,10 +96,16 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, min_vt
 
     # 1b. Validate PAT locally
     with _status('[bold]Validating PAT...'):
-        github_login = _validate_pat_locally(pat)
+        result = _validate_pat_locally(pat)
 
+    github_login = result['login']
     if github_login is None:
-        _error('GitHub PAT is invalid or expired. Check your GITTENSOR_MINER_PAT.', json_mode)
+        if json_mode:
+            click.echo(
+                json.dumps({'success': False, 'error_code': result['error_code'], 'error': result['error_message']})
+            )
+        else:
+            _error(result['error_message'], json_mode)
         sys.exit(1)
 
     _print(f'[green]PAT is valid.[/green] GitHub account: [bold]@{github_login}[/bold]')
@@ -193,10 +198,10 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, min_vt
         _render_skipped_validators(excluded, json_mode)
 
 
-def _validate_pat_locally(pat: str) -> str | None:
+def _validate_pat_locally(pat: str) -> dict:
     """Validate PAT mirrors the validator-side checks: user identity + GraphQL access.
 
-    Returns the GitHub login on success, or None if the PAT is invalid.
+    Returns a dict with keys: login (str|None), error_code (str|None), error_message (str|None).
     """
     try:
         # Check basic auth and extract login
@@ -204,7 +209,31 @@ def _validate_pat_locally(pat: str) -> str | None:
             f'{BASE_GITHUB_API_URL}/user', headers=make_headers(pat), timeout=GITHUB_HTTP_TIMEOUT_SECONDS
         )
         if user_resp.status_code != 200:
-            return None
+            code = user_resp.status_code
+            if code == 401:
+                return {
+                    'login': None,
+                    'error_code': 'pat_invalid',
+                    'error_message': 'GitHub PAT is invalid or expired. Check your GITTENSOR_MINER_PAT.',
+                }
+            if code == 429 or (code == 403 and 'rate limit' in user_resp.text.lower()):
+                return {
+                    'login': None,
+                    'error_code': 'github_rate_limited',
+                    'error_message': 'GitHub API rate limited. Wait and retry.',
+                }
+            if code in (502, 503, 504) or code >= 500:
+                return {
+                    'login': None,
+                    'error_code': 'github_unavailable',
+                    'error_message': f'GitHub API is unavailable (status {code}). Try again later.',
+                }
+            return {
+                'login': None,
+                'error_code': 'github_api_error',
+                'error_message': f'GitHub API returned status {code}.',
+            }
+
         login: str | None = user_resp.json().get('login') or None
 
         # Check GraphQL access (same test the validator runs during PAT broadcast)
@@ -215,11 +244,28 @@ def _validate_pat_locally(pat: str) -> str | None:
             timeout=GITHUB_HTTP_TIMEOUT_SECONDS,
         )
         if gql_resp.status_code != 200:
-            err_console.print(
-                '[red]PAT lacks GraphQL API access. Fine-grained PATs need "Public Repositories (read-only)" permission.[/red]'
-            )
-            return None
+            return {
+                'login': None,
+                'error_code': 'pat_no_graphql',
+                'error_message': 'PAT lacks GraphQL API access. Fine-grained PATs need "Public Repositories (read-only)" permission.',
+            }
 
-        return login
-    except requests.RequestException:
-        return None
+        return {'login': login, 'error_code': None, 'error_message': None}
+    except requests.Timeout:
+        return {
+            'login': None,
+            'error_code': 'github_timeout',
+            'error_message': 'Failed to reach GitHub API: timed out. Check your network and retry.',
+        }
+    except requests.ConnectionError:
+        return {
+            'login': None,
+            'error_code': 'github_connection_error',
+            'error_message': 'Failed to connect to GitHub API. Check your network and retry.',
+        }
+    except requests.RequestException as e:
+        return {
+            'login': None,
+            'error_code': 'github_network_error',
+            'error_message': f'Failed to reach GitHub API: {e}. Check your network and retry.',
+        }

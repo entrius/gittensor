@@ -155,13 +155,59 @@ def check_body_format(issue: int = None) -> dict:
     if not has_validation: missing.append("## Validation")
     return {"ok": False, "msg": "Body format ❌ missing: " + ", ".join(missing), "fatal": False}
 
+def _run_script(script_name: str, args: list, timeout=30) -> dict:
+    script = os.path.join(os.path.dirname(__file__), script_name)
+    if not os.path.exists(script):
+        script = os.path.join(os.path.dirname(__file__), "scripts", script_name)
+    if not os.path.exists(script):
+        return {"ok": True, "msg": f"{script_name} tidak ditemukan (skip)", "fatal": False}
+    r = run([sys.executable, script, "--json"] + args, timeout=timeout)
+    if not r.stdout.strip():
+        return {"ok": True, "msg": f"{script_name} skip (error)", "fatal": False}
+    try:
+        return json.loads(r.stdout)
+    except json.JSONDecodeError:
+        return {"ok": True, "msg": f"{script_name} parse error (skip)", "fatal": False}
+
+def check_conflict(branch: str = "") -> dict:
+    args = []
+    if branch:
+        args += ["--branch", branch]
+    result = _run_script("pr_conflict_check.py", args, timeout=30)
+    ok = result.get("ok", True)
+    msg = result.get("msg", "Conflict check skip")
+    return {"ok": ok, "msg": f"Conflict: {msg}", "fatal": result.get("fatal", False)}
+
+def check_duplicate(issue: int) -> dict:
+    if not issue:
+        return {"ok": True, "msg": "Duplicate check: no issue (skip)", "fatal": False}
+    script = os.path.join(os.path.dirname(__file__), "pr_dup_detect.py")
+    if not os.path.exists(script):
+        script = os.path.join(os.path.dirname(__file__), "scripts", "pr_dup_detect.py")
+    if not os.path.exists(script):
+        return {"ok": True, "msg": "Duplicate: tool tidak ditemukan (skip)", "fatal": False}
+    r = run([sys.executable, script, "--issue", str(issue), "--json"], timeout=15)
+    if not r.stdout.strip():
+        return {"ok": True, "msg": "Duplicate check: error (skip)", "fatal": False}
+    try:
+        result = json.loads(r.stdout)
+        our_prs = result.get("our_prs", [])
+        ok = not our_prs
+        msg = result.get("msg", "")
+        return {"ok": ok, "msg": f"Duplicate: {msg}", "fatal": False}
+    except json.JSONDecodeError:
+        return {"ok": True, "msg": "Duplicate: parse error (skip)", "fatal": False}
+
 def run_gate(issue: int, prefix: str, title: str = "", branch: str = "", desc: str = "") -> list:
     checks = []
     checks.append(check_label_prefix(prefix, title, branch))
     if issue:
         checks.append(check_scoring(issue, prefix))
         checks.append(check_merge_prob(issue))
+        checks.append(check_duplicate(issue))
     checks.append(check_diff_quality())
+    if branch or True:
+        checks.append(check_conflict(branch))
     checks.append(check_body_format(issue))
     return checks
 

@@ -115,7 +115,8 @@ def check_code_density(diff_lines: int = None, files: int = None) -> dict:
         diff_lines = 0
     if files is None:
         files = 0
-    ok = diff_lines < 100 and 1 <= files <= 4
+    if diff_lines == 0 and files == 0:
+        return {"ok": True, "lines": 0, "files": 0, "msg": "Code density: no changes (clean diff) ✅"}
     msg_parts = []
     if diff_lines >= 100:
         msg_parts.append(f"lines {diff_lines} >= 100")

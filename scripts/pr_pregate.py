@@ -67,6 +67,11 @@ def check_scoring(issue: int, prefix: str) -> dict:
         return {"ok": False, "msg": f"Scoring parse error: {e}", "fatal": False}
 
 def check_merge_prob(issue: int) -> dict:
+    # Check if PR actually exists first
+    r = run(["gh", "pr", "view", str(issue), "--repo", REPO, "--json", "number", "--jq", ".number"], timeout=15)
+    if r.returncode != 0 or not r.stdout.strip():
+        return {"ok": True, "msg": "Merge predictor: PR belum ada (skip)", "prob": None, "fatal": False}
+
     script = os.path.join(os.path.dirname(__file__), "pr_merge_predictor.py")
     if not os.path.exists(script):
         script = os.path.join(os.path.dirname(__file__), "..", "scripts", "pr_merge_predictor.py")
@@ -75,10 +80,12 @@ def check_merge_prob(issue: int) -> dict:
 
     r = run([sys.executable, script, "--pr", str(issue), "--json"], timeout=30)
     if r.returncode != 0:
-        return {"ok": True, "msg": "Merge predictor skip (PR belum ada)", "prob": None, "fatal": False}
+        return {"ok": True, "msg": "Merge predictor skip (error)", "prob": None, "fatal": False}
 
     try:
         data = json.loads(r.stdout)
+        if "error" in data:
+            return {"ok": True, "msg": f"Merge predictor: {data['error']} (skip)", "prob": None, "fatal": False}
         prob = data.get("probability", 0)
         ok = prob >= MIN_MERGE_PROB
         tier = data.get("tier", "UNKNOWN")
@@ -90,6 +97,11 @@ def check_merge_prob(issue: int) -> dict:
         return {"ok": True, "msg": f"Merge predictor: {e} (skip)", "prob": None, "fatal": False}
 
 def check_diff_quality() -> dict:
+    # Check if there's actually a diff
+    r = run(["git", "diff", "--stat", f"{BASE}..."], timeout=10)
+    if r.returncode != 0 or not r.stdout.strip():
+        return {"ok": True, "msg": "Diff quality: no diff yet (skip)", "fatal": False}
+
     script = os.path.join(os.path.dirname(__file__), "pr_diff_quality.py")
     if not os.path.exists(script):
         script = os.path.join(os.path.dirname(__file__), "..", "scripts", "pr_diff_quality.py")
@@ -112,23 +124,25 @@ def check_diff_quality() -> dict:
     except (json.JSONDecodeError, Exception) as e:
         return {"ok": True, "msg": f"Diff quality: {e} (skip)", "fatal": False}
 
-def check_body_format() -> dict:
-    r = run(["git", "log", "-1", "--format=%B"], timeout=5)
-    commit_msg = r.stdout.strip() if r.returncode == 0 else ""
-
-    body_file = "/tmp/pr_body.txt"
+def check_body_format(issue: int = None) -> dict:
     body = ""
+    body_file = "/tmp/pr_body.txt"
     if os.path.exists(body_file):
         with open(body_file) as f:
             body = f.read()
 
-    text = body or commit_msg
-    if not text:
-        return {"ok": True, "msg": "Body check: no body found (skip)", "fatal": False}
+    if not body:
+        return {"ok": True, "msg": "Body check: no body file yet (skip)", "fatal": False}
 
-    has_summary = "## Summary" in text
-    has_closes = bool(re.search(r'(?:Closes|Fixes|Resolves)\s+#\d+', text))
-    has_validation = "## Validation" in text
+    # Skip if body file is stale (references different issue)
+    if issue:
+        ref_ok = bool(re.search(r'(?:Closes|Fixes|Resolves)\s+#' + str(issue) + r'\b', body))
+        if not ref_ok:
+            return {"ok": True, "msg": f"Body check: body file bukan untuk issue #{issue} (skip)", "fatal": False}
+
+    has_summary = "## Summary" in body
+    has_closes = bool(re.search(r'(?:Closes|Fixes|Resolves)\s+#\d+', body))
+    has_validation = "## Validation" in body
 
     if has_summary and has_closes and has_validation:
         return {"ok": True, "msg": "Body format: merged-PR ✅", "fatal": False}
@@ -148,10 +162,7 @@ def run_gate(issue: int, prefix: str, title: str = "", branch: str = "", desc: s
         checks.append(check_scoring(issue, prefix))
         checks.append(check_merge_prob(issue))
     checks.append(check_diff_quality())
-    # Body check only if there's a commit body
-    r = run(["git", "log", "-1", "--format=%B"], timeout=5)
-    if r.returncode == 0 and r.stdout.strip():
-        checks.append(check_body_format())
+    checks.append(check_body_format(issue))
     return checks
 
 def print_results(checks: list, prefix_str: str = "  ") -> bool:

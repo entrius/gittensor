@@ -141,7 +141,10 @@ def parse_diffstat(text):
 def predict_from_pr(pr_num, json_output=False):
     data = get_pr_data(pr_num)
     if not data:
-        return {"pr": pr_num, "error": "not found"}
+        result = {"pr": pr_num, "error": "not found"}
+        if json_output:
+            print(json.dumps(result))
+        return result
 
     title = data.get("title", "")
     labels = [l["name"] for l in data.get("labels", [])]

@@ -1329,6 +1329,46 @@ class TestLoadMinersPrsFetchFailureSignal:
         assert miner_eval.failed_reason == 'GitHub GraphQL error: Something went wrong'
 
 
+class TestLoadMinersPrsAdaptivePageSize:
+    """Tests for per-miner remembered GraphQL page size in load_miners_prs."""
+
+    @patch('gittensor.utils.github_api_tools.get_github_graphql_query')
+    def test_seeds_first_request_with_last_good_page_size(self, mock_graphql_query):
+        from gittensor.classes import MinerEvaluation
+        from gittensor.utils import github_api_tools
+        from gittensor.utils.github_api_tools import GraphQLPageResult
+
+        # Ensure a clean slate for this test.
+        with github_api_tools._LAST_GOOD_PR_PAGE_SIZE_LOCK:
+            github_api_tools._LAST_GOOD_PR_PAGE_SIZE_BY_GITHUB_ID.clear()
+            github_api_tools._LAST_GOOD_PR_PAGE_SIZE_BY_GITHUB_ID['12345'] = 25
+
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            'data': {
+                'node': {
+                    'pullRequests': {
+                        'pageInfo': {'hasNextPage': False, 'endCursor': None},
+                        'nodes': [],
+                    }
+                }
+            }
+        }
+        mock_graphql_query.return_value = GraphQLPageResult(response=mock_response, page_size=25)
+
+        miner_eval = MinerEvaluation(uid=74, hotkey='test_hotkey', github_id='12345', github_pat='fake_pat')
+
+        load_miners_prs(miner_eval, {})
+
+        assert mock_graphql_query.call_count == 1
+        assert mock_graphql_query.call_args.kwargs['page_size'] == 25
+
+        # The successful page should be persisted back into the cache.
+        with github_api_tools._LAST_GOOD_PR_PAGE_SIZE_LOCK:
+            assert github_api_tools._LAST_GOOD_PR_PAGE_SIZE_BY_GITHUB_ID.get('12345') == 25
+
+
 # ============================================================================
 # GraphQL Batch-Size Limit Tests
 # ============================================================================

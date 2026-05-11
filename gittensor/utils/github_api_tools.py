@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from math import ceil
+from threading import Lock
 from typing import TYPE_CHECKING, Any, Dict, Iterator, List, Optional
 
 from gittensor.utils.utils import backoff_seconds, parse_repo_name
@@ -667,6 +668,33 @@ class GraphQLPageResult:
     page_size: int  # actual page size used (may have been reduced on retry)
 
 
+# Per-miner "last known good" GraphQL page size.
+#
+# GitHub GraphQL can terminate requests that exceed ~10s processing time. We already
+# mitigate by halving page size on 5xx and RESOURCE_LIMITS_EXCEEDED, but starting at
+# 100 on the first page can reliably time out for miners with heavy PR histories.
+# Remembering the last successful page size per miner makes the first request more
+# likely to succeed and avoids wasting multiple retry cycles each scoring run.
+_LAST_GOOD_PR_PAGE_SIZE_BY_GITHUB_ID: Dict[str, int] = {}
+_LAST_GOOD_PR_PAGE_SIZE_LOCK = Lock()
+
+
+def _get_last_good_pr_page_size(github_id: Optional[str]) -> Optional[int]:
+    if not github_id:
+        return None
+    with _LAST_GOOD_PR_PAGE_SIZE_LOCK:
+        return _LAST_GOOD_PR_PAGE_SIZE_BY_GITHUB_ID.get(str(github_id))
+
+
+def _set_last_good_pr_page_size(github_id: Optional[str], page_size: int) -> None:
+    if not github_id:
+        return
+    if page_size <= 0:
+        return
+    with _LAST_GOOD_PR_PAGE_SIZE_LOCK:
+        _LAST_GOOD_PR_PAGE_SIZE_BY_GITHUB_ID[str(github_id)] = page_size
+
+
 def get_github_graphql_query(
     token: str,
     global_user_id: str,
@@ -934,7 +962,9 @@ def load_miners_prs(
     global_user_id = base64.b64encode(f'04:User{miner_eval.github_id}'.encode()).decode()
 
     cursor = None
-    current_page_size: Optional[int] = None  # None = let get_github_graphql_query choose default
+    # Seed initial page size from previous successful runs for this miner.
+    # If absent, let get_github_graphql_query choose the default (up to 100).
+    current_page_size: Optional[int] = _get_last_good_pr_page_size(miner_eval.github_id)
 
     try:
         while len(miner_eval.merged_pull_requests) < max_prs:
@@ -977,6 +1007,9 @@ def load_miners_prs(
                 bt.logging.warning('User not found or no pull requests')
                 miner_eval.github_pr_fetch_failed = True
                 break
+
+            # Successful, usable page: remember for next scoring cycles.
+            _set_last_good_pr_page_size(miner_eval.github_id, current_page_size)
 
             pr_data: Dict = user_data.get('pullRequests', {})
             prs: List = pr_data.get('nodes', [])

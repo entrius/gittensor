@@ -1,8 +1,7 @@
 # The MIT License (MIT)
 # Copyright © 2025 Entrius
 
-import asyncio
-from typing import TYPE_CHECKING, Dict, Set, Tuple
+from typing import TYPE_CHECKING, Dict
 
 import bittensor as bt
 import numpy as np
@@ -22,10 +21,8 @@ from gittensor.validator.issue_discovery.mirror_scan import run_mirror_issue_dis
 from gittensor.validator.issue_discovery.normalize import (
     normalize_issue_discovery_rewards,
 )
-from gittensor.validator.oss_contributions.reward import get_rewards
 from gittensor.validator.utils.config import (
     VALIDATOR_STEPS_INTERVAL,
-    VALIDATOR_WAIT,
 )
 from gittensor.validator.utils.load_weights import (
     RepositoryConfig,
@@ -77,41 +74,9 @@ async def forward(self: 'Validator') -> None:
         # 4. Store all evaluations to DB (includes issue discovery fields)
         # cached_uids may have received fresh issue discovery data — persist it
         has_mirror_repos = any(cfg.mirror_enabled for cfg in master_repositories.values())
-        await self.bulk_store_evaluation(
-            miner_evaluations,
-            skip_uids=None if has_mirror_repos else cached_uids,
-        )
-
-        # 5. Blend 4 emission pools into final rewards
-        rewards = blend_emission_pools(oss_rewards, issue_rewards, miner_uids)
-
-        self.update_scores(rewards, miner_uids, blacklisted_uids=sorted(penalized_uids))
-
-    await asyncio.sleep(VALIDATOR_WAIT)
-
-
-async def oss_contributions(
-    self: 'Validator',
-    miner_uids: set[int],
-    master_repositories: Dict[str, RepositoryConfig],
-    programming_languages: Dict,
-    token_config,
-) -> Tuple[np.ndarray, Dict[int, MinerEvaluation], Set[int], Set[int]]:
-    """Score OSS contributions and return normalized rewards + miner evaluations + cached UIDs + penalized UIDs.
-
-    Pure scoring — no DB storage or emission blending. Those are handled by forward().
-    """
-    tree_sitter_count = sum(1 for c in token_config.language_configs.values() if c.language is not None)
-
-    bt.logging.info('***** Starting scoring round *****')
-    bt.logging.info(f'Total Repositories loaded: {len(master_repositories)}')
-    bt.logging.info(f'Total Languages loaded: {len(programming_languages)}')
-    bt.logging.info(f'Token config: {tree_sitter_count} tree-sitter languages')
-    bt.logging.info(f'Neurons to evaluate: {len(miner_uids)}')
-
-    rewards, miner_evaluations, cached_uids, penalized_uids = await get_rewards(
-        self, miner_uids, master_repositories, programming_languages, token_config
-    )
+        if has_mirror_repos:
+            cached_uids = set()
+        await self.bulk_store_evaluation(miner_evaluations, skip_uids=cached_uids)
 
     return rewards, miner_evaluations, cached_uids, penalized_uids
 

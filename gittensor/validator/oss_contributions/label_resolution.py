@@ -37,24 +37,12 @@ def resolve_legacy_label_multiplier(
     the fallback mirrors the current-label behavior by choosing the highest
     multiplier, then the label name for deterministic ties.
     """
-    default_multiplier = get_default_label_multiplier(repo_config)
-
     for label in label_timeline_order:
         multiplier = get_label_multiplier(label, repo_config)
         if multiplier is not None:
             return label, multiplier
 
-    candidates = []
-    for label in current_labels:
-        multiplier = get_label_multiplier(label, repo_config)
-        if multiplier is not None:
-            candidates.append((label, multiplier))
-
-    if not candidates:
-        return None, default_multiplier
-
-    label, multiplier = max(candidates, key=lambda candidate: (candidate[1], candidate[0]))
-    return label, multiplier
+    return resolve_highest_label_multiplier(current_labels, repo_config)
 
 
 def resolve_highest_label_multiplier(

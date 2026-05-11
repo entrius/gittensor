@@ -23,6 +23,7 @@ from .queries import (
     CLEANUP_STALE_MINER_EVALUATIONS_BY_HOTKEY,
     CLEANUP_STALE_MINERS,
     CLEANUP_STALE_MINERS_BY_HOTKEY,
+    REFRESH_STALE_MERGED_STATES,
     REFRESH_STALE_PR_STATES,
     SET_MINER,
 )
@@ -238,6 +239,31 @@ class Repository(BaseRepository):
             if commit:
                 self.db.rollback()
             self.logger.error(f'Error refreshing stale PR states: {e}')
+            return 0
+
+    def refresh_stale_merged_states(self, pull_requests: List[PullRequest], commit: bool = True) -> int:
+        """Update pr_state to MERGED for stale merged PRs outside the lookback window.
+
+        Uses a targeted UPDATE so previously-computed scores are preserved.
+        Only rows currently stored as non-MERGED are affected; non-existent rows
+        and already-MERGED rows are safe no-ops.
+        """
+        if not pull_requests:
+            return 0
+        values = []
+        for pr in pull_requests:
+            merged_at_str = pr.merged_at.isoformat() if pr.merged_at else None
+            values.append((merged_at_str, pr.number, pr.repository_full_name))
+        try:
+            with self.get_cursor() as cursor:
+                cursor.executemany(REFRESH_STALE_MERGED_STATES, values)
+                if commit:
+                    self.db.commit()
+                return len(values)
+        except Exception as e:
+            if commit:
+                self.db.rollback()
+            self.logger.error(f'Error refreshing stale merged PR states: {e}')
             return 0
 
     def store_issues_bulk(self, issues: List[Issue], commit: bool = True) -> int:

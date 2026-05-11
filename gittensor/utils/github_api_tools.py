@@ -1013,6 +1013,12 @@ def load_miners_prs(
                     )
 
                     if should_skip:
+                        # Route lookback-skipped merged PRs to stale state refresh so
+                        # they are not silently dropped (fixes phantom OPEN rows from
+                        # out-of-window merged PRs — issue #1070).
+                        merged_at_str = pr_raw.get('mergedAt')
+                        if merged_at_str and parse_github_iso_to_utc(merged_at_str) < lookback_date_filter:
+                            miner_eval.add_stale_merged_pull_request(pr_raw)
                         bt.logging.debug(skip_reason or '')
                         continue
 

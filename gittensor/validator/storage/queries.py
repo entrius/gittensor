@@ -110,6 +110,20 @@ UPDATE pull_requests
    AND pr_state            != 'CLOSED'
 """
 
+# Targeted state-only refresh for stale-merged PRs outside the lookback window.
+# Only updates rows that are not already MERGED, so previously-scored rows are
+# preserved and non-existent rows are no-ops.  merged_at is also refreshed so
+# the miner dashboard reflects the real GitHub state.
+REFRESH_STALE_MERGED_STATES = """
+UPDATE pull_requests
+   SET pr_state   = 'MERGED',
+       merged_at  = %s,
+       updated_at = NOW()
+ WHERE number               = %s
+   AND repository_full_name = %s
+   AND pr_state            != 'MERGED'
+"""
+
 # Issue Queries
 BULK_UPSERT_ISSUES = """
 INSERT INTO issues (

@@ -159,6 +159,7 @@ async def run_mirror_issue_discovery(
             response = await asyncio.to_thread(client.get_miner_issues, evaluation.github_id, since=lookback_date)
         except MirrorRequestError as e:
             bt.logging.warning(f'├─ UID {uid}: mirror issue fetch failed ({e}) — skipped this miner')
+            evaluation.mirror_issue_fetch_failed = True
             fetch_errors += 1
             continue
 

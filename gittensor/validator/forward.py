@@ -71,6 +71,24 @@ async def forward(self: 'Validator') -> None:
             miner_evaluations, master_repositories, programming_languages, token_config, miner_uids
         )
 
+        # 2b. Restore issue discovery scores from cache for miners whose mirror
+        #     fetch failed.  The cache preserves previous-round scores when the
+        #     current eval has 0.0 (see MinerEvaluationCache.store).
+        for uid, evaluation in miner_evaluations.items():
+            if evaluation.mirror_issue_fetch_failed:
+                cached = self.evaluation_cache.get(uid, evaluation.hotkey, evaluation.github_id or '0')
+                if cached is not None and cached.issue_discovery_score > 0:
+                    evaluation.issue_discovery_score = cached.issue_discovery_score
+                    evaluation.issue_token_score = cached.issue_token_score
+                    evaluation.issue_credibility = cached.issue_credibility
+                    evaluation.is_issue_eligible = cached.is_issue_eligible
+                    evaluation.total_solved_issues = cached.total_solved_issues
+                    evaluation.total_valid_solved_issues = cached.total_valid_solved_issues
+                    evaluation.total_closed_issues = cached.total_closed_issues
+                    evaluation.total_open_issues = cached.total_open_issues
+            else:
+                self.evaluation_cache.update_issue_discovery_scores(uid, evaluation)
+
         # 3. Issue bounties verification
         await issue_competitions(self, miner_evaluations)
 

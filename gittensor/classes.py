@@ -379,6 +379,7 @@ class MinerEvaluation:
     # the OR into github_pr_fetch_failed. Lets the validator tell a complete
     # mirror outage apart from a legacy partial-pagination failure.
     mirror_pr_fetch_failed: bool = False
+    mirror_issue_fetch_failed: bool = False
     evaluation_timestamp: Optional[datetime] = None
     merged_pull_requests: List[PullRequest] = field(default_factory=list)
     open_pull_requests: List[PullRequest] = field(default_factory=list)
@@ -678,6 +679,21 @@ class MinerEvaluationCache:
 
         cached_eval = self._build_cache_entry(evaluation)
 
+        # Preserve previous issue discovery scores: cache is stored before
+        # issue discovery runs (step 1 of forward()), so the current eval has
+        # issue_discovery_score = 0.0.  Carry forward the last known scores so
+        # miners whose mirror issue fetch fails later still get credit.
+        prev = self._cache.get(evaluation.uid)
+        if prev is not None and cached_eval.issue_discovery_score == 0.0 and prev.evaluation.issue_discovery_score > 0.0:
+            cached_eval.issue_discovery_score = prev.evaluation.issue_discovery_score
+            cached_eval.issue_token_score = prev.evaluation.issue_token_score
+            cached_eval.issue_credibility = prev.evaluation.issue_credibility
+            cached_eval.is_issue_eligible = prev.evaluation.is_issue_eligible
+            cached_eval.total_solved_issues = prev.evaluation.total_solved_issues
+            cached_eval.total_valid_solved_issues = prev.evaluation.total_valid_solved_issues
+            cached_eval.total_closed_issues = prev.evaluation.total_closed_issues
+            cached_eval.total_open_issues = prev.evaluation.total_open_issues
+
         self._cache[evaluation.uid] = CachedEvaluation(
             hotkey=evaluation.hotkey,
             github_id=evaluation.github_id,
@@ -686,6 +702,19 @@ class MinerEvaluationCache:
         )
 
         bt.logging.debug(f'Cached successful evaluation for UID {evaluation.uid}')
+
+    def update_issue_discovery_scores(self, uid: int, evaluation: 'MinerEvaluation') -> None:
+        """Refresh issue discovery scores for the cached entry after discovery runs."""
+        cached = self._cache.get(uid)
+        if cached is not None:
+            cached.evaluation.issue_discovery_score = evaluation.issue_discovery_score
+            cached.evaluation.issue_token_score = evaluation.issue_token_score
+            cached.evaluation.issue_credibility = evaluation.issue_credibility
+            cached.evaluation.is_issue_eligible = evaluation.is_issue_eligible
+            cached.evaluation.total_solved_issues = evaluation.total_solved_issues
+            cached.evaluation.total_valid_solved_issues = evaluation.total_valid_solved_issues
+            cached.evaluation.total_closed_issues = evaluation.total_closed_issues
+            cached.evaluation.total_open_issues = evaluation.total_open_issues
 
     def get(self, uid: int, hotkey: str, github_id: str) -> Optional['MinerEvaluation']:
         """

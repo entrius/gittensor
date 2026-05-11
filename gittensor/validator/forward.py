@@ -75,6 +75,10 @@ async def forward(self: 'Validator') -> None:
         await issue_competitions(self, miner_evaluations)
 
         # 4. Store all evaluations to DB (includes issue discovery fields)
+        # cached_uids may have received fresh issue discovery data — persist it
+        has_mirror_repos = any(cfg.mirror_enabled for cfg in master_repositories.values())
+        if has_mirror_repos:
+            cached_uids = set()
         await self.bulk_store_evaluation(miner_evaluations, skip_uids=cached_uids)
 
         # 5. Blend 4 emission pools into final rewards

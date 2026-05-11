@@ -73,10 +73,10 @@ def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, min_vtrust
     wallet_hotkey = wallet_hotkey or _load_config_value('hotkey') or 'default'
     ws_endpoint = _resolve_endpoint(network, rpc_url)
 
-    _print(f'[dim]Wallet: {wallet_name}/{wallet_hotkey} | Network: {ws_endpoint} | Netuid: {netuid}[/dim]')
+    _print(f'[dim]Wallet: {wallet_name}/{wallet_hotkey} | Network: {ws_endpoint} | Netuid: {netuid}[/dim]', json_mode)
 
     # 2. Set up bittensor objects
-    with _status('[bold]Connecting to network...'):
+    with _status('[bold]Connecting to network...', json_mode):
         try:
             wallet, subtensor, metagraph, dendrite = _connect_bittensor(wallet_name, wallet_hotkey, ws_endpoint, netuid)
         except Exception as e:
@@ -102,7 +102,7 @@ def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, min_vtrust
             timeout=15.0,
         )
 
-    with _status(f'[bold]Checking {len(validator_axons)} validators...'):
+    with _status(f'[bold]Checking {len(validator_axons)} validators...', json_mode):
         responses = asyncio.run(_check())
 
     # 5. Collect results

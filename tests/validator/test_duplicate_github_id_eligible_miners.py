@@ -8,14 +8,13 @@ the dict comprehension silently overwrites the first with the second,
 potentially misdirecting bounty votes.
 """
 
+import asyncio
+from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 from gittensor.classes import MinerEvaluation
 from gittensor.validator.issue_competitions.forward import issue_competitions
-
-import asyncio
-from types import SimpleNamespace
-from typing import Any, cast
 
 
 def _run(coro):
@@ -41,7 +40,6 @@ def _make_eval(uid, hotkey, github_id, is_eligible=True):
 
 
 class TestDuplicateGithubIdInEligibleMiners:
-
     def test_duplicate_github_id_logs_warning(self):
         """When two eligible miners share a github_id, the second overwrites
         the first but a warning is logged to make the overwrite visible."""
@@ -67,8 +65,7 @@ class TestDuplicateGithubIdInEligibleMiners:
                 _run(issue_competitions(cast(Any, validator), miner_evaluations))
 
                 warning_calls = [
-                    call for call in mock_bt.logging.warning.call_args_list
-                    if 'Duplicate github_id' in str(call)
+                    call for call in mock_bt.logging.warning.call_args_list if 'Duplicate github_id' in str(call)
                 ]
                 assert len(warning_calls) == 1, (
                     f'Expected 1 warning about duplicate github_id, got {len(warning_calls)}'
@@ -99,8 +96,7 @@ class TestDuplicateGithubIdInEligibleMiners:
                 _run(issue_competitions(cast(Any, validator), miner_evaluations))
 
                 warning_calls = [
-                    call for call in mock_bt.logging.warning.call_args_list
-                    if 'Duplicate github_id' in str(call)
+                    call for call in mock_bt.logging.warning.call_args_list if 'Duplicate github_id' in str(call)
                 ]
                 assert len(warning_calls) == 0
 
@@ -135,3 +131,4 @@ class TestDuplicateGithubIdInEligibleMiners:
             ),
         ):
             _run(issue_competitions(cast(Any, validator), miner_evaluations))
+

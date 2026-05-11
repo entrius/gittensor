@@ -104,10 +104,13 @@ class TestStoreOrUseCachedEvaluation:
         validator = _DummyValidator()
         validator.evaluation_cache.store(_build_eval(uid=1, merged_prs=1, fetch_failed=False))
 
-        mock_graphql_query.return_value = GraphQLPageResult(data={
-            'errors': [{'message': 'Something went wrong'}],
-            'data': None,
-        }, page_size=100)
+        mock_graphql_query.return_value = GraphQLPageResult(
+            data={
+                'errors': [{'message': 'Something went wrong'}],
+                'data': None,
+            },
+            page_size=100,
+        )
 
         current_eval = MinerEvaluation(uid=1, hotkey='hotkey_1', github_id='12345', github_pat='bad_scope_pat')
         load_miners_prs(current_eval, {})

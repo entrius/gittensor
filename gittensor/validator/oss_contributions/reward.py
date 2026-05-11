@@ -171,6 +171,9 @@ async def get_rewards(
     # removed from cached_uids and their zeroed scores are written to DB.
     penalized_uids = detect_and_penalize_miners_sharing_github(miner_evaluations)
     cached_uids -= penalized_uids
+    # The cache store path ran before the penalty. Drop those snapshots so a
+    # future fetch failure cannot restore pre-penalty PR scores.
+    self.evaluation_cache.evict_many(penalized_uids)
 
     # Finalize scores: apply eligibility gate, credibility, pioneer dividends, collateral
     finalize_miner_scores(miner_evaluations, master_repositories)

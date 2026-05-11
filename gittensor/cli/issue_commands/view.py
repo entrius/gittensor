@@ -19,7 +19,6 @@ from rich.table import Table
 
 from .help import StyledCommand
 from .helpers import (
-    MAX_ISSUE_ID,
     _read_contract_packed_storage,
     _read_issues_from_child_storage,
     _resolve_contract_and_network,
@@ -35,6 +34,7 @@ from .helpers import (
     with_cli_behavior_options,
     with_network_contract_options,
 )
+from .types import CONTRACT_ISSUE, REPO
 
 
 def _fill_percent(bounty: int, target: int) -> float:
@@ -54,14 +54,14 @@ def _fill_percent(bounty: int, target: int) -> float:
     '--id',
     'issue_id',
     default=None,
-    type=click.IntRange(1, MAX_ISSUE_ID - 1),
+    type=CONTRACT_ISSUE,
     help='View a specific issue by ID',
 )
 @click.option(
     '--repo',
     'repo_filter',
     default=None,
-    type=str,
+    type=REPO,
     help='Filter issues to a specific repository (owner/name).',
 )
 @with_cli_behavior_options(

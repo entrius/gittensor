@@ -534,15 +534,6 @@ def validate_ss58_address(address: str, param_name: str = 'address') -> str:
     return address
 
 
-def ss58_callback(ctx: click.Context, param: click.Parameter, value: str) -> str:
-    """Click callback that validates an SS58 address at parse time.
-
-    Uses the parameter's own name as the hint so error messages name the
-    actual argument the user mistyped.
-    """
-    return validate_ss58_address(value, param.name or 'address')
-
-
 def load_config() -> Dict[str, Any]:
     """
     Load configuration from ~/.gittensor/config.json.

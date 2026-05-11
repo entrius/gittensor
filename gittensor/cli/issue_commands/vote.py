@@ -18,7 +18,6 @@ from rich.table import Table
 
 from .help import StyledGroup
 from .helpers import (
-    MAX_ISSUE_ID,
     _handle_command_error,
     _make_contract_client,
     _resolve_contract_and_network,
@@ -31,11 +30,11 @@ from .helpers import (
     print_error,
     print_network_header,
     print_success,
-    ss58_callback,
     with_cli_behavior_options,
     with_network_contract_options,
     with_wallet_options,
 )
+from .types import CONTRACT_ISSUE, SS58
 
 
 def parse_pr_number(pr_input: str) -> int:
@@ -75,9 +74,9 @@ def vote():
 
 
 @vote.command('solution')
-@click.argument('issue_id', type=click.IntRange(1, MAX_ISSUE_ID - 1))
-@click.argument('solver_hotkey', type=str, callback=ss58_callback)
-@click.argument('solver_coldkey', type=str, callback=ss58_callback)
+@click.argument('issue_id', type=CONTRACT_ISSUE)
+@click.argument('solver_hotkey', type=SS58)
+@click.argument('solver_coldkey', type=SS58)
 @click.argument('pr_number_or_url', type=str)
 @with_wallet_options()
 @with_network_contract_options('Contract address (uses config if empty)')
@@ -153,7 +152,7 @@ def val_vote_solution(
 
 
 @vote.command('cancel')
-@click.argument('issue_id', type=click.IntRange(1, MAX_ISSUE_ID - 1))
+@click.argument('issue_id', type=CONTRACT_ISSUE)
 @click.argument('reason', type=str)
 @with_wallet_options()
 @with_network_contract_options('Contract address (uses config if empty)')

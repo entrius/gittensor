@@ -16,7 +16,6 @@ from rich.panel import Panel
 
 from .help import StyledCommand
 from .helpers import (
-    MAX_ISSUE_NUMBER,
     NETWORK_CHOICE,
     _is_interactive,
     _resolve_contract_and_network,
@@ -31,6 +30,7 @@ from .helpers import (
     validate_github_issue,
     validate_repository,
 )
+from .types import GITHUB_ISSUE, REPO
 
 
 def _print_register_revert_hints() -> None:
@@ -42,7 +42,6 @@ def _print_register_revert_hints() -> None:
 
 
 def _bounty_callback(ctx: click.Context, param: click.Parameter, value: str) -> int:
-    """Click callback: parse the --bounty string into raw ALPHA units."""
     return validate_bounty_amount(value)
 
 
@@ -50,13 +49,14 @@ def _bounty_callback(ctx: click.Context, param: click.Parameter, value: str) -> 
 @click.option(
     '--repo',
     required=True,
+    type=REPO,
     help='Repository in owner/repo format (e.g., latent-to/btcli)',
 )
 @click.option(
     '--issue',
     'issue_number',
     required=True,
-    type=click.IntRange(1, MAX_ISSUE_NUMBER),
+    type=GITHUB_ISSUE,
     help='GitHub issue number',
 )
 @click.option(

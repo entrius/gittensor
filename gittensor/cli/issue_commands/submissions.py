@@ -9,7 +9,6 @@ import click
 
 from .help import StyledCommand
 from .helpers import (
-    MAX_ISSUE_ID,
     emit_json,
     fetch_issue_from_contract,
     fetch_open_issue_pull_requests,
@@ -23,6 +22,7 @@ from .helpers import (
     with_cli_behavior_options,
     with_network_contract_options,
 )
+from .types import CONTRACT_ISSUE
 
 
 @click.command('submissions', cls=StyledCommand)
@@ -30,7 +30,7 @@ from .helpers import (
     '--id',
     'issue_id',
     required=True,
-    type=click.IntRange(1, MAX_ISSUE_ID - 1),
+    type=CONTRACT_ISSUE,
     help='On-chain issue ID',
 )
 @with_cli_behavior_options(include_verbose=True, include_json=True)

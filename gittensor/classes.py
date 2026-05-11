@@ -721,6 +721,12 @@ class MinerEvaluationCache:
 
         return self._isolate_for_downstream(cached.evaluation)
 
+    def evict_many(self, uids: Set[int]) -> None:
+        """Remove cached evaluations for all provided UIDs."""
+        for uid in uids:
+            if self._cache.pop(uid, None) is not None:
+                bt.logging.debug(f'Evicted cached evaluation for UID {uid}')
+
     @staticmethod
     def _build_cache_entry(evaluation: 'MinerEvaluation') -> 'MinerEvaluation':
         # Cached evaluations feed only the GitHub-fetch-failure fallback path

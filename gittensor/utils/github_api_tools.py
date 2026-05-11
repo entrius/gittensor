@@ -111,6 +111,7 @@ QUERY = """
                   createdAt
                   closedAt
                   updatedAt
+                  repository { nameWithOwner }
                   author {
                     login
                     ... on User { databaseId }
@@ -482,7 +483,10 @@ query($owner: String!, $name: String!, $issueNumber: Int!) {
                 author { ... on User { databaseId login } }
                 baseRepository { nameWithOwner }
                 closingIssuesReferences(first: 20) {
-                  nodes { number }
+                  nodes {
+                    number
+                    repository { nameWithOwner }
+                  }
                 }
                 reviews(first: 1, states: APPROVED) { totalCount }
               }
@@ -503,6 +507,20 @@ def _resolve_pr_state(raw_state: str, merged: bool = False) -> str:
     return (raw_state or '').upper() or 'OPEN'
 
 
+def _closing_issue_numbers_for_repo(closing_ref: Optional[Dict[str, Any]], repo: str) -> List[int]:
+    """Return only closing issue numbers whose GraphQL repository matches ``repo``."""
+    target_repo = repo.lower()
+    closing_numbers: List[int] = []
+    for node in (closing_ref or {}).get('nodes') or []:
+        if not node:
+            continue
+        issue_number = node.get('number')
+        issue_repo = ((node.get('repository') or {}).get('nameWithOwner') or '').lower()
+        if issue_number is not None and issue_repo == target_repo:
+            closing_numbers.append(issue_number)
+    return closing_numbers
+
+
 def _search_issue_referencing_prs_graphql(
     repo: str, issue_number: int, token: str, open_only: bool = False
 ) -> Optional[List[PRInfo]]:
@@ -516,6 +534,7 @@ def _search_issue_referencing_prs_graphql(
     name = name.strip()
     if not owner or not name:
         return []
+    target_repo = f'{owner}/{name}'.lower()
 
     result = execute_graphql_query(
         query=_PR_TIMELINE_QUERY,
@@ -546,7 +565,7 @@ def _search_issue_referencing_prs_graphql(
             continue
 
         base_repo = pr.get('baseRepository', {}).get('nameWithOwner', '')
-        if base_repo.lower() != repo.lower():
+        if base_repo.lower() != target_repo:
             continue
 
         pr_number = pr.get('number')
@@ -559,8 +578,7 @@ def _search_issue_referencing_prs_graphql(
 
         author = pr.get('author') or {}
         reviews = pr.get('reviews') or {}
-        closing = pr.get('closingIssuesReferences', {}).get('nodes', [])
-        closing_numbers = [n.get('number') for n in closing if n.get('number') is not None]
+        closing_numbers = _closing_issue_numbers_for_repo(pr.get('closingIssuesReferences'), target_repo)
 
         pr_info: PRInfo = {
             'number': pr_number,
@@ -696,7 +714,7 @@ def get_github_graphql_query(
     max_attempts = 8
     session = get_session(token)
     headers = make_graphql_headers(token)
-    limit = page_size if page_size is not None else min(100, max_prs - merged_pr_count)
+    limit = page_size if page_size is not None else min(50, max_prs - merged_pr_count)
 
     for attempt in range(max_attempts):
         variables = {

@@ -167,13 +167,17 @@ async def run_mirror_issue_discovery(
             no_issues += 1
             continue
 
-        # Count this miner's currently-open issues across mirror-enabled repos
-        # (within the lookback window). Used as the spam-multiplier signal and
-        # also written to evaluation.total_open_issues so the DB row reflects
-        # mirror-scoped state (the legacy GraphQL global open-issue count was
-        # never the right signal for the gate).
-        open_issue_count = sum(1 for i in filtered if i.state == 'OPEN')
-        pending.append((evaluation, filtered, open_issue_count))
+        # Count this miner's total open issues across mirror-enabled repos
+        # without the lookback window, so old open issues correctly trigger
+        # the spam multiplier.  The lookback filter above is for scoring;
+        # the spam gate needs the miner's true open-issue load.
+        try:
+            all_response = await asyncio.to_thread(client.get_miner_issues, evaluation.github_id)
+            all_filtered = [i for i in all_response.issues if i.repo_full_name in enabled_names]
+            total_open = sum(1 for i in all_filtered if i.state == 'OPEN')
+        except MirrorRequestError:
+            total_open = sum(1 for i in filtered if i.state == 'OPEN')
+        pending.append((evaluation, filtered, total_open))
 
     canonical_pr_owners = _build_canonical_pr_owners(pending)
     for evaluation, filtered, open_issue_count in pending:

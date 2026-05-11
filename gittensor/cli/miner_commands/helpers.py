@@ -114,7 +114,7 @@ def _error(msg: str, json_mode: bool) -> None:
     if json_mode:
         click.echo(json.dumps({'success': False, 'error': msg}))
     else:
-        console.print(f'[red]Error: {msg}[/red]')
+        Console(stderr=True).print(f'[red]Error: {msg}[/red]')
 
 
 def _require_registered(wallet, metagraph, netuid: int, json_mode: bool) -> None:

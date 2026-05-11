@@ -263,6 +263,14 @@ class PullRequest:
         for issue in raw_issues:
             if is_merged and not (issue.get('closedAt') and issue.get('state') == 'CLOSED'):
                 continue
+            issue_repo = ((issue.get('repository') or {}).get('nameWithOwner') or '').lower()
+            if issue_repo and issue_repo != repository_full_name:
+                bt.logging.warning(
+                    f'Skipping issue #{issue.get("number")} - cross-repo link '
+                    f'(issue in {issue_repo}, PR in {repository_full_name})'
+                )
+                continue
+            issue_repository_full_name = issue_repo or repository_full_name
             issue_author = issue.get('author') or {}
             author_db_id = issue_author.get('databaseId')
 
@@ -293,7 +301,7 @@ class PullRequest:
                 Issue(
                     number=issue['number'],
                     pr_number=pr_data['number'],
-                    repository_full_name=repository_full_name,
+                    repository_full_name=issue_repository_full_name,
                     title=issue['title'],
                     created_at=parse_github_timestamp_to_cst(issue['createdAt']) if issue.get('createdAt') else None,
                     closed_at=parse_github_timestamp_to_cst(issue['closedAt']) if issue.get('closedAt') else None,

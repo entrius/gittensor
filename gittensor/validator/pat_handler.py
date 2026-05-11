@@ -48,7 +48,7 @@ async def handle_pat_broadcast(validator: 'Validator', synapse: PatBroadcastSyna
 
     uid = validator.metagraph.hotkeys.index(hotkey)
 
-    # 2. Validate PAT (checks it works, extracts github_id, verifies account age)
+    # 2. Validate PAT (checks it works, extracts github_id)
     github_id, error = validate_github_credentials(uid, synapse.github_access_token)
     if error:
         return _reject(error)

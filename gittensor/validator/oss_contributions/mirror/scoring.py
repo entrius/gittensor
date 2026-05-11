@@ -202,10 +202,10 @@ def _should_skip_merged_mirror_pr(scored: ScoredMirrorPR, repo_config: Repositor
     and other multipliers still apply.
 
     When the mirror response is missing a field (older data predating the
-    schema additions), the affected check falls through rather than
-    false-positive-blocking. Concretely: missing ``head_ref`` or
-    ``head_repo_full_name`` skips the head_ref check; missing ``default_branch``
-    narrows the acceptable set to ``additional_acceptable_branches`` only.
+    schema additions), some checks fall through rather than false-positive-
+    blocking. Concretely: missing ``head_ref`` or ``head_repo_full_name`` skips
+    the head_ref check. Missing ``default_branch`` falls back to ``main``
+    (legacy parity with GraphQL path).
     """
     pr = scored.pr
 
@@ -221,10 +221,11 @@ def _should_skip_merged_mirror_pr(scored: ScoredMirrorPR, repo_config: Repositor
             return True, f'PR #{pr.pr_number} self-merged without external approval'
 
     additional = repo_config.additional_acceptable_branches or []
-    acceptable = ([pr.default_branch] if pr.default_branch else []) + additional
+    default_branch = pr.default_branch or 'main'
+    acceptable = [default_branch] + additional
 
-    # base_ref check — only enforce when we have an acceptable set to compare against.
-    if acceptable and not branch_matches_pattern(pr.base_ref or '', acceptable):
+    # base_ref check.
+    if not branch_matches_pattern(pr.base_ref or '', acceptable):
         return True, (f'PR #{pr.pr_number} merged to {pr.base_ref!r} not in acceptable branches={acceptable}')
 
     # head_ref check — block PRs whose source branch is itself an acceptable

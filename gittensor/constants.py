@@ -69,6 +69,7 @@ NON_CODE_EXTENSIONS = [
     'erb',
 ]
 MAX_LINES_SCORED_FOR_NON_CODE_EXT = 300
+EXTENSIONLESS_FILE_EXTENSIONS = {'dockerfile', 'makefile'}
 
 # =============================================================================
 # Repository & PR Scoring

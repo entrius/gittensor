@@ -468,7 +468,7 @@ _PR_TIMELINE_QUERY = """
 query($owner: String!, $name: String!, $issueNumber: Int!) {
   repository(owner: $owner, name: $name) {
     issue(number: $issueNumber) {
-      timelineItems(itemTypes: [CROSS_REFERENCED_EVENT], first: 50) {
+      timelineItems(itemTypes: [CROSS_REFERENCED_EVENT], last: 50) {
         nodes {
           ... on CrossReferencedEvent {
             source {

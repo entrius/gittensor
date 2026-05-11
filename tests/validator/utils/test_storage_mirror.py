@@ -86,6 +86,7 @@ def _make_storage_with_mock_repo():
             mock_repo = MagicMock()
             mock_repo.set_miner.return_value = 1
             mock_repo.store_pull_requests_bulk.return_value = 0  # actual count irrelevant
+            mock_repo.refresh_stale_pr_states.return_value = 0
             mock_repo.store_issues_bulk.return_value = 0
             mock_repo.store_file_changes_bulk.return_value = 0
             mock_repo.set_miner_evaluation.return_value = True
@@ -173,12 +174,17 @@ class TestStoreEvaluationCombinesBothLists:
 
         storage.store_evaluation(eval_)
 
-        stale_call = mock_repo.store_pull_requests_bulk.call_args_list[3]
-        stale_arg = stale_call.args[0]
+        # Stale PRs must go through refresh_stale_pr_states (targeted UPDATE), not the
+        # full-column UPSERT, so previously-scored rows are not overwritten with defaults.
+        mock_repo.refresh_stale_pr_states.assert_called_once()
+        stale_arg = mock_repo.refresh_stale_pr_states.call_args.args[0]
         assert len(stale_arg) == 1
         assert stale_arg[0].number == 7
         assert stale_arg[0].pr_state == PRState.CLOSED
         assert eval_.total_closed_prs == 0
+        # Verify the stale PR did not leak into store_pull_requests_bulk
+        for call in mock_repo.store_pull_requests_bulk.call_args_list:
+            assert not any(pr.number == 7 for pr in call.args[0])
 
 
 def test_cleanup_stale_called_with_commit_false():

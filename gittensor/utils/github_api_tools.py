@@ -482,7 +482,10 @@ query($owner: String!, $name: String!, $issueNumber: Int!) {
                 author { ... on User { databaseId login } }
                 baseRepository { nameWithOwner }
                 closingIssuesReferences(first: 20) {
-                  nodes { number }
+                  nodes {
+                    number
+                    repository { nameWithOwner }
+                  }
                 }
                 reviews(first: 1, states: APPROVED) { totalCount }
               }
@@ -560,7 +563,13 @@ def _search_issue_referencing_prs_graphql(
         author = pr.get('author') or {}
         reviews = pr.get('reviews') or {}
         closing = pr.get('closingIssuesReferences', {}).get('nodes', [])
-        closing_numbers = [n.get('number') for n in closing if n.get('number') is not None]
+        closing_numbers = []
+        for n in closing:
+            if n.get('number') is not None:
+                node_repo = (n.get('repository') or {}).get('nameWithOwner', '')
+                if node_repo and node_repo.lower() != repo.lower():
+                    continue
+                closing_numbers.append(n.get('number'))
 
         pr_info: PRInfo = {
             'number': pr_number,

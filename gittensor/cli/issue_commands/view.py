@@ -19,6 +19,7 @@ from rich.table import Table
 
 from .help import StyledCommand
 from .helpers import (
+    MAX_ISSUE_ID,
     _read_contract_packed_storage,
     _read_issues_from_child_storage,
     _resolve_contract_and_network,
@@ -31,7 +32,6 @@ from .helpers import (
     loading_context,
     print_network_header,
     read_issues_from_contract,
-    validate_issue_id,
     with_cli_behavior_options,
     with_network_contract_options,
 )
@@ -54,7 +54,7 @@ def _fill_percent(bounty: int, target: int) -> float:
     '--id',
     'issue_id',
     default=None,
-    type=int,
+    type=click.IntRange(1, MAX_ISSUE_ID - 1),
     help='View a specific issue by ID',
 )
 @click.option(
@@ -82,12 +82,6 @@ def issues_list(
         $ gitt i list --json
     [/dim]
     """
-    if issue_id is not None:
-        try:
-            validate_issue_id(issue_id, 'id')
-        except click.BadParameter as e:
-            handle_exception(as_json, str(e), 'bad_parameter')
-
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(
         contract,
         network,

@@ -18,6 +18,7 @@ from rich.table import Table
 
 from .help import StyledGroup
 from .helpers import (
+    MAX_ISSUE_ID,
     _handle_command_error,
     _make_contract_client,
     _resolve_contract_and_network,
@@ -30,9 +31,7 @@ from .helpers import (
     print_error,
     print_network_header,
     print_success,
-    require_valid_issue_id,
-    validate_issue_id,
-    validate_ss58_address,
+    ss58_callback,
     with_cli_behavior_options,
     with_network_contract_options,
     with_wallet_options,
@@ -76,9 +75,9 @@ def vote():
 
 
 @vote.command('solution')
-@click.argument('issue_id', type=int)
-@click.argument('solver_hotkey', type=str)
-@click.argument('solver_coldkey', type=str)
+@click.argument('issue_id', type=click.IntRange(1, MAX_ISSUE_ID - 1))
+@click.argument('solver_hotkey', type=str, callback=ss58_callback)
+@click.argument('solver_coldkey', type=str, callback=ss58_callback)
 @click.argument('pr_number_or_url', type=str)
 @with_wallet_options()
 @with_network_contract_options('Contract address (uses config if empty)')
@@ -112,9 +111,6 @@ def val_vote_solution(
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
 
     try:
-        validate_issue_id(issue_id)
-        validate_ss58_address(solver_hotkey, 'solver_hotkey')
-        validate_ss58_address(solver_coldkey, 'solver_coldkey')
         pr_number = parse_pr_number(pr_number_or_url)
         if pr_number < 1:
             raise click.BadParameter(
@@ -157,7 +153,7 @@ def val_vote_solution(
 
 
 @vote.command('cancel')
-@click.argument('issue_id', type=int)
+@click.argument('issue_id', type=click.IntRange(1, MAX_ISSUE_ID - 1))
 @click.argument('reason', type=str)
 @with_wallet_options()
 @with_network_contract_options('Contract address (uses config if empty)')
@@ -185,8 +181,6 @@ def val_vote_cancel_issue(
     [/dim]
     """
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
-
-    require_valid_issue_id(issue_id)
 
     print_network_header(network_name, contract_addr)
 

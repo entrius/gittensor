@@ -56,7 +56,11 @@ _PAT_CHECK_STATUS_MARKUP = {
     help='Minimum validator stake (α) to probe.',
 )
 @click.option('--json-output', 'json_mode', is_flag=True, default=False, help='Output results as JSON.')
-def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, min_vtrust, min_stake, json_mode):
+@click.option('--watch', is_flag=True, default=False, help='Continuously re-check until Ctrl+C.')
+@click.option('--interval', type=int, default=10, show_default=True, help='Seconds between checks in watch mode.')
+def miner_check(
+    wallet_name, wallet_hotkey, netuid, network, rpc_url, min_vtrust, min_stake, json_mode, watch, interval
+):
     """Check how many validators have your PAT stored.
 
     Sends a lightweight probe to each validator — no PAT is transmitted.
@@ -102,54 +106,74 @@ def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, min_vtrust
             timeout=15.0,
         )
 
-    with _status(f'[bold]Checking {len(validator_axons)} validators...'):
-        responses = asyncio.run(_check())
+    def _display():
+        with _status(f'[bold]Checking {len(validator_axons)} validators...'):
+            responses = asyncio.run(_check())
 
-    # 5. Collect results
-    results = []
-    for uid, axon, resp in zip(validator_uids, validator_axons, responses):
-        has_pat = getattr(resp, 'has_pat', None)
-        pat_valid = getattr(resp, 'pat_valid', None)
-        reason = getattr(resp, 'rejection_reason', None)
-        results.append(
-            {
-                'uid': uid,
-                'hotkey': axon.hotkey[:16] + '...',
-                'has_pat': has_pat,
-                'pat_valid': pat_valid,
-                'rejection_reason': reason,
-            }
-        )
-
-    counts = _pat_check_aggregate_counts(results)
-    valid_count = counts['valid']
-
-    # 6. Display results
-    if json_mode:
-        click.echo(
-            json.dumps(
+        # Collect results
+        results = []
+        for uid, axon, resp in zip(validator_uids, validator_axons, responses):
+            has_pat = getattr(resp, 'has_pat', None)
+            pat_valid = getattr(resp, 'pat_valid', None)
+            reason = getattr(resp, 'rejection_reason', None)
+            results.append(
                 {
-                    'success': valid_count > 0,
-                    'total_validators': len(results),
-                    **counts,
-                    'skipped': excluded,
-                    'results': results,
-                },
-                indent=2,
+                    'uid': uid,
+                    'hotkey': axon.hotkey[:16] + '...',
+                    'has_pat': has_pat,
+                    'pat_valid': pat_valid,
+                    'rejection_reason': reason,
+                }
             )
-        )
-    else:
-        table = Table(title='PAT Check Results')
-        table.add_column('UID', style='cyan', justify='right')
-        table.add_column('Validator', style='dim')
-        table.add_column('Status', justify='center')
-        table.add_column('Reason', style='dim')
 
-        for r in results:
-            category = _pat_check_row_category(r)
-            status = _PAT_CHECK_STATUS_MARKUP[category]
-            table.add_row(str(r['uid']), r['hotkey'], status, r.get('rejection_reason') or '')
+        counts = _pat_check_aggregate_counts(results)
+        valid_count = counts['valid']
 
-        console.print(table)
-        console.print(f'\n[bold]{valid_count}/{len(results)} validators have a valid PAT stored.[/bold]')
-        _render_skipped_validators(excluded, json_mode)
+        if json_mode:
+            click.echo(
+                json.dumps(
+                    {
+                        'success': valid_count > 0,
+                        'total_validators': len(results),
+                        **counts,
+                        'skipped': excluded,
+                        'results': results,
+                    },
+                    indent=2,
+                )
+            )
+        else:
+            table = Table(title='PAT Check Results')
+            table.add_column('UID', style='cyan', justify='right')
+            table.add_column('Validator', style='dim')
+            table.add_column('Status', justify='center')
+            table.add_column('Reason', style='dim')
+
+            for r in results:
+                category = _pat_check_row_category(r)
+                status = _PAT_CHECK_STATUS_MARKUP[category]
+                table.add_row(str(r['uid']), r['hotkey'], status, r.get('rejection_reason') or '')
+
+            console.print(table)
+            console.print(f'\n[bold]{valid_count}/{len(results)} validators have a valid PAT stored.[/bold]')
+            _render_skipped_validators(excluded, json_mode)
+
+        return valid_count
+
+    _display()
+
+    if watch and not json_mode:
+        import time
+
+        try:
+            while True:
+                time.sleep(interval)
+                # Refresh metagraph for latest validator state
+                metagraph = subtensor.metagraph(netuid=netuid)
+                validator_axons, validator_uids, excluded = _require_validator_axons(
+                    metagraph, json_mode, min_vtrust=min_vtrust, min_stake=min_stake
+                )
+                console.print('[dim]── refresh ──[/dim]')
+                _display()
+        except KeyboardInterrupt:
+            console.print('[dim]Stopped.[/dim]')

@@ -17,6 +17,8 @@ import click
 from rich.panel import Panel
 from rich.table import Table
 
+from gittensor.cli.json_output import emit_json
+
 from .help import StyledCommand
 from .helpers import (
     _read_contract_packed_storage,
@@ -24,7 +26,6 @@ from .helpers import (
     _resolve_contract_and_network,
     colorize_status,
     console,
-    emit_json,
     err_console,
     format_alpha,
     handle_exception,

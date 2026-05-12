@@ -26,7 +26,6 @@ from gittensor.cli.issue_commands.helpers import (
     MAX_ISSUE_NUMBER,
     STATUS_COLORS,
     colorize_status,
-    emit_json,
     format_alpha,
     validate_bounty_amount,
     validate_github_issue,
@@ -35,6 +34,7 @@ from gittensor.cli.issue_commands.helpers import (
     validate_ss58_address,
 )
 from gittensor.cli.issue_commands.vote import parse_pr_number
+from gittensor.cli.json_output import emit_json
 
 # =============================================================================
 # format_alpha

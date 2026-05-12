@@ -16,6 +16,8 @@ import click
 from rich.panel import Panel
 from rich.table import Table
 
+from gittensor.cli.json_output import emit_json
+
 from .help import StyledGroup
 from .helpers import (
     _handle_command_error,
@@ -23,7 +25,6 @@ from .helpers import (
     _resolve_contract_and_network,
     confirm_or_abort,
     console,
-    emit_json,
     err_console,
     handle_exception,
     loading_context,

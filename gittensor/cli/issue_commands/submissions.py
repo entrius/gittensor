@@ -7,11 +7,10 @@ from __future__ import annotations
 
 import click
 
-from gittensor.cli.json_output import click_error_type
+from gittensor.cli.json_output import click_error_type, emit_json
 
 from .help import StyledCommand
 from .helpers import (
-    emit_json,
     fetch_issue_from_contract,
     fetch_open_issue_pull_requests,
     get_contract_address,

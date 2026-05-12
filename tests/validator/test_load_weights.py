@@ -131,6 +131,44 @@ class TestLoadMasterRepositories:
                 f'{repo_name} trusted_label_pipeline should be bool, got {type(config.trusted_label_pipeline)}'
             )
 
+    def test_live_emission_shares_are_bounded(self):
+        repos = load_master_repo_weights()
+        total = sum(config.emission_share for config in repos.values())
+
+        assert 0.0 <= total <= 1.0
+        for repo_name, config in repos.items():
+            assert 0.0 <= config.emission_share <= 1.0, f'{repo_name} emission_share must be within [0, 1]'
+            assert 0.0 <= config.issue_discovery_share <= 1.0, (
+                f'{repo_name} issue_discovery_share must be within [0, 1]'
+            )
+
+    def test_loader_rejects_emission_share_sum_over_one(self, tmp_path, monkeypatch):
+        from gittensor.validator.utils import load_weights as lw
+
+        fake_weights_dir = tmp_path
+        (fake_weights_dir / 'master_repositories.json').write_text(
+            json.dumps(
+                {
+                    'foo/a': {'emission_share': 0.7},
+                    'foo/b': {'emission_share': 0.4},
+                }
+            )
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: fake_weights_dir)
+
+        with pytest.raises(ValueError, match='total repository emission_share'):
+            lw.load_master_repo_weights()
+
+    def test_loader_rejects_emission_share_out_of_range(self, tmp_path, monkeypatch):
+        from gittensor.validator.utils import load_weights as lw
+
+        fake_weights_dir = tmp_path
+        (fake_weights_dir / 'master_repositories.json').write_text(json.dumps({'foo/a': {'emission_share': 1.1}}))
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: fake_weights_dir)
+
+        with pytest.raises(ValueError, match='emission_share must be within'):
+            lw.load_master_repo_weights()
+
     def test_entrius_repos_have_trusted_label_pipeline(self):
         """All entrius/* entries opt into trusted_label_pipeline (issue #911)."""
         repos = load_master_repo_weights()
@@ -341,7 +379,7 @@ class TestBannedOrganizations:
 
 
 class TestResolveRepoWeight:
-    """Tests for resolve_repo_weight — full-precision repo weight lookup."""
+    """Tests for the legacy repo-weight lookup alias."""
 
     def test_none_returns_default(self):
         assert resolve_repo_weight(None) == 0.01

@@ -283,7 +283,7 @@ def score_command(pat: Optional[str], log_level: str, json_mode: bool) -> None:
             issue_rewards = await issue_discovery(
                 miner_evaluations, master_repositories, programming_languages, token_config, miner_uids
             )
-        rewards = blend_emission_pools(oss_rewards, issue_rewards, miner_uids)
+        rewards = blend_emission_pools(miner_uids, miner_evaluations, master_repositories)
 
         return {
             'success': True,

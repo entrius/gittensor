@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import click
 
+from gittensor.cli.json_output import click_error_type
+
 from .help import StyledCommand
 from .helpers import (
     emit_json,
@@ -83,7 +85,7 @@ def issues_submissions(
             as_json=as_json,
         )
     except click.ClickException as e:
-        handle_exception(as_json, str(e), 'click_exception')
+        handle_exception(as_json, str(e), click_error_type(e))
 
     if as_json:
         submissions = [

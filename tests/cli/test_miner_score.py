@@ -173,7 +173,7 @@ class TestScoreCommand:
         ):
             result = runner.invoke(
                 cli,
-                ['miner', 'score', '--json-output'],
+                ['miner', 'score', '--json'],
                 env={'GITTENSOR_MINER_PAT': 'ghp_dummy'},
             )
         assert result.exit_code == 0, result.output
@@ -193,7 +193,7 @@ class TestScoreCommand:
         with _multi_patch(_patch_pipeline(uid=_DEV_UID, miner_evaluation=evaluation)):
             result = runner.invoke(
                 cli,
-                ['miner', 'score', '--pat', 'ghp_should_not_leak', '--json-output'],
+                ['miner', 'score', '--pat', 'ghp_should_not_leak', '--json'],
                 env={},
             )
         assert result.exit_code == 0, result.output
@@ -218,7 +218,7 @@ class TestScoreCommand:
         with _multi_patch(_patch_pipeline(uid=_DEV_UID, miner_evaluation=evaluation)):
             result = runner.invoke(
                 cli,
-                ['miner', 'score', '--json-output'],
+                ['miner', 'score', '--json'],
                 env={'GITTENSOR_MINER_PAT': 'ghp_dummy'},
             )
         assert result.exit_code == 0, result.output
@@ -252,7 +252,7 @@ class TestScoreCommand:
         with _multi_patch(_patch_pipeline(uid=_DEV_UID, miner_evaluation=evaluation)):
             result = runner.invoke(
                 cli,
-                ['miner', 'score', '--json-output'],
+                ['miner', 'score', '--json'],
                 env={'GITTENSOR_MINER_PAT': 'ghp_dummy'},
             )
         assert result.exit_code == 0, result.output

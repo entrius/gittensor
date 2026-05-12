@@ -9,7 +9,9 @@ import pytest
 from bittensor.core.synapse import TerminalInfo
 
 from gittensor.synapses import PatBroadcastSynapse, PatCheckSynapse
+from gittensor.utils.github_api_tools import GitHubIdentityResult, GitHubIdentityStatus
 from gittensor.validator import pat_storage
+from gittensor.validator.utils.github_validation import GitHubCredentialValidation
 from gittensor.validator.pat_handler import (
     _test_pat_against_repo,
     blacklist_pat_broadcast,
@@ -93,7 +95,10 @@ class TestBlacklistPatCheck:
 
 class TestHandlePatBroadcast:
     @patch('gittensor.validator.pat_handler._test_pat_against_repo', return_value=None)
-    @patch('gittensor.validator.pat_handler.validate_github_credentials', return_value=('github_42', None))
+    @patch(
+        'gittensor.validator.pat_handler.validate_github_credentials_result',
+        return_value=GitHubCredentialValidation('github_42', None),
+    )
     def test_valid_pat_accepted(self, mock_validate, mock_test_query, mock_validator):
         synapse = _make_broadcast_synapse('hotkey_1', pat='ghp_valid')
         result = _run(handle_pat_broadcast(mock_validator, synapse))
@@ -118,7 +123,10 @@ class TestHandlePatBroadcast:
         assert result.accepted is False
         assert 'not registered' in (result.rejection_reason or '')
 
-    @patch('gittensor.validator.pat_handler.validate_github_credentials', return_value=(None, 'PAT invalid'))
+    @patch(
+        'gittensor.validator.pat_handler.validate_github_credentials_result',
+        return_value=GitHubCredentialValidation(None, 'PAT invalid'),
+    )
     def test_invalid_pat_rejected(self, mock_validate, mock_validator):
         synapse = _make_broadcast_synapse('hotkey_1', pat='ghp_bad')
         result = _run(handle_pat_broadcast(mock_validator, synapse))
@@ -130,7 +138,10 @@ class TestHandlePatBroadcast:
         assert pat_storage.get_pat_by_uid(1) is None
 
     @patch('gittensor.validator.pat_handler._test_pat_against_repo', return_value='GitHub API returned 403')
-    @patch('gittensor.validator.pat_handler.validate_github_credentials', return_value=('github_42', None))
+    @patch(
+        'gittensor.validator.pat_handler.validate_github_credentials_result',
+        return_value=GitHubCredentialValidation('github_42', None),
+    )
     def test_test_query_failure_rejected(self, mock_validate, mock_test_query, mock_validator):
         synapse = _make_broadcast_synapse('hotkey_1')
         result = _run(handle_pat_broadcast(mock_validator, synapse))
@@ -139,7 +150,10 @@ class TestHandlePatBroadcast:
         assert '403' in (result.rejection_reason or '')
 
     @patch('gittensor.validator.pat_handler._test_pat_against_repo', return_value=None)
-    @patch('gittensor.validator.pat_handler.validate_github_credentials', return_value=('github_99', None))
+    @patch(
+        'gittensor.validator.pat_handler.validate_github_credentials_result',
+        return_value=GitHubCredentialValidation('github_99', None),
+    )
     def test_github_identity_change_rejected(self, mock_validate, mock_test_query, mock_validator):
         """Same hotkey cannot switch to a different GitHub account."""
         pat_storage.save_pat(1, 'hotkey_1', 'ghp_old', 'github_42')
@@ -156,7 +170,10 @@ class TestHandlePatBroadcast:
         assert entry['github_id'] == 'github_42'
 
     @patch('gittensor.validator.pat_handler._test_pat_against_repo', return_value=None)
-    @patch('gittensor.validator.pat_handler.validate_github_credentials', return_value=('github_42', None))
+    @patch(
+        'gittensor.validator.pat_handler.validate_github_credentials_result',
+        return_value=GitHubCredentialValidation('github_42', None),
+    )
     def test_pat_rotation_same_github_accepted(self, mock_validate, mock_test_query, mock_validator):
         """Same hotkey can rotate PATs if GitHub identity stays the same."""
         pat_storage.save_pat(1, 'hotkey_1', 'ghp_old', 'github_42')
@@ -171,7 +188,10 @@ class TestHandlePatBroadcast:
         assert entry['github_id'] == 'github_42'
 
     @patch('gittensor.validator.pat_handler._test_pat_against_repo', return_value=None)
-    @patch('gittensor.validator.pat_handler.validate_github_credentials', return_value=('github_99', None))
+    @patch(
+        'gittensor.validator.pat_handler.validate_github_credentials_result',
+        return_value=GitHubCredentialValidation('github_99', None),
+    )
     def test_new_miner_on_uid_can_use_any_github(self, mock_validate, mock_test_query, mock_validator):
         """A new hotkey on the same UID (new miner) can register any GitHub account."""
         pat_storage.save_pat(1, 'old_hotkey', 'ghp_old', 'github_42')
@@ -185,10 +205,27 @@ class TestHandlePatBroadcast:
         assert entry['github_id'] == 'github_99'
         assert entry['hotkey'] == 'hotkey_1'
 
+    @patch(
+        'gittensor.validator.utils.github_validation.get_github_identity',
+        return_value=GitHubIdentityResult(None, GitHubIdentityStatus.TRANSIENT_FAILURE),
+    )
+    def test_transient_github_user_lookup_rejects_with_retry_message(self, mock_identity, mock_validator):
+        """Transient /user failure must not surface as invalid PAT or raw validation wording."""
+        synapse = _make_broadcast_synapse('hotkey_1', pat='ghp_ok')
+        result = _run(handle_pat_broadcast(mock_validator, synapse))
+
+        assert result.accepted is False
+        assert result.rejection_reason == 'GitHub API temporarily unavailable; retry the broadcast in a few minutes.'
+        assert 'Could not validate Github id' not in (result.rejection_reason or '')
+        assert pat_storage.get_pat_by_uid(1) is None
+
 
 class TestHandlePatCheck:
     @patch('gittensor.validator.pat_handler._test_pat_against_repo', return_value=None)
-    @patch('gittensor.validator.pat_handler.validate_github_credentials', return_value=('github_42', None))
+    @patch(
+        'gittensor.validator.pat_handler.validate_github_credentials_result',
+        return_value=GitHubCredentialValidation('github_42', None),
+    )
     def test_valid_pat(self, mock_validate, mock_test_query, mock_validator):
         pat_storage.save_pat(1, 'hotkey_1', 'ghp_test', 'github_42')
 
@@ -214,7 +251,10 @@ class TestHandlePatCheck:
         assert result.pat_valid is False
 
     @patch('gittensor.validator.pat_handler._test_pat_against_repo', return_value=None)
-    @patch('gittensor.validator.pat_handler.validate_github_credentials', return_value=(None, 'PAT expired'))
+    @patch(
+        'gittensor.validator.pat_handler.validate_github_credentials_result',
+        return_value=GitHubCredentialValidation(None, 'PAT expired'),
+    )
     def test_stored_but_invalid_pat(self, mock_validate, mock_test_query, mock_validator):
         """PAT is stored but fails re-validation."""
         pat_storage.save_pat(1, 'hotkey_1', 'ghp_expired', 'github_42')
@@ -224,6 +264,22 @@ class TestHandlePatCheck:
         assert result.has_pat is True
         assert result.pat_valid is False
         assert 'PAT expired' in (result.rejection_reason or '')
+
+    @patch(
+        'gittensor.validator.utils.github_validation.get_github_identity',
+        return_value=GitHubIdentityResult(None, GitHubIdentityStatus.TRANSIENT_FAILURE),
+    )
+    def test_transient_github_user_lookup_is_inconclusive_not_invalid(self, mock_identity, mock_validator):
+        """Transient /user must not mark stored PAT invalid; CLI maps pat_valid=None to no_response."""
+        pat_storage.save_pat(1, 'hotkey_1', 'ghp_stored', 'github_42')
+
+        synapse = _make_check_synapse('hotkey_1')
+        result = _run(handle_pat_check(mock_validator, synapse))
+
+        assert result.has_pat is True
+        assert result.pat_valid is None
+        assert result.rejection_reason == 'GitHub API temporarily unavailable; retry the check in a few minutes.'
+        assert 'Could not validate Github id' not in (result.rejection_reason or '')
 
 
 # ---------------------------------------------------------------------------

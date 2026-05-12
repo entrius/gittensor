@@ -26,8 +26,11 @@ from typing import Any, Callable
 def ttl_cache(maxsize: int = 128, typed: bool = False, ttl: int = -1):
     """
     Decorator that creates a cache of the most recently used function calls with a time-to-live (TTL) feature.
-    The cache evicts the least recently used entries if the cache exceeds the `maxsize` or if an entry has
-    been in the cache longer than the `ttl` period.
+    The cache rotates keys every *ttl* seconds — calls during the same *ttl* window share a cache slot,
+    calls in the next window force a fresh function call. Entries are evicted by LRU when the pool exceeds
+    *maxsize*; an entry whose TTL has elapsed is **not** actively removed and can persist in the pool for
+    up to *maxsize × ttl* seconds before LRU eviction reaches it. For TTL-aligned eviction with no stale
+    retention, use ``maxsize=1``.
 
     Args:
         maxsize (int): Maximum size of the cache. Once the cache grows to this size, subsequent entries

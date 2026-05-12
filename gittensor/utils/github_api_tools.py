@@ -714,7 +714,7 @@ def get_github_graphql_query(
     max_attempts = 8
     session = get_session(token)
     headers = make_graphql_headers(token)
-    limit = page_size if page_size is not None else min(100, max_prs - merged_pr_count)
+    limit = page_size if page_size is not None else min(50, max_prs - merged_pr_count)
 
     for attempt in range(max_attempts):
         variables = {

@@ -52,5 +52,6 @@ def test_detected_duplicates_wipe_prior_ema_via_update_scores():
 
     assert validator.scores[1] == 0.0
     assert validator.scores[2] == 0.0
-    assert validator.scores[0] > 0.0
-    assert np.isclose(validator.scores.sum(), 1.0)
+    # UID 0's score must remain at its natural EMA value (0.9 * 0.1 = 0.09),
+    # not inflated by renormalization. set_weights handles L1-normalization.
+    assert np.isclose(validator.scores[0], 0.09)

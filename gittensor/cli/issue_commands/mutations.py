@@ -16,7 +16,8 @@ from rich.panel import Panel
 
 from .help import StyledCommand
 from .helpers import (
-    MAX_ISSUE_NUMBER,
+    BountyAlphaParam,
+    GITHUB_ISSUE_NUMBER_TYPE,
     NETWORK_CHOICE,
     _is_interactive,
     _resolve_contract_and_network,
@@ -27,7 +28,6 @@ from .helpers import (
     print_error,
     print_network_header,
     print_success,
-    validate_bounty_amount,
     validate_github_issue,
     validate_repository,
 )
@@ -51,13 +51,13 @@ def _print_register_revert_hints() -> None:
     '--issue',
     'issue_number',
     required=True,
-    type=int,
-    help='GitHub issue number',
+    type=GITHUB_ISSUE_NUMBER_TYPE,
+    help='GitHub issue number (1–4294967295)',
 )
 @click.option(
     '--bounty',
     required=True,
-    type=str,
+    type=BountyAlphaParam(),
     help='Bounty amount in ALPHA (e.g. 10 or 10.5)',
 )
 @click.option(
@@ -100,7 +100,7 @@ def _print_register_revert_hints() -> None:
 def issue_register(
     repo: str,
     issue_number: int,
-    bounty: str,
+    bounty: int,
     network: str,
     rpc_url: str,
     contract: str,
@@ -128,6 +128,15 @@ def issue_register(
     """
     err_console.print('\n[bold cyan]Register Issue for Bounty[/bold cyan]\n')
 
+    # Validate inputs before touching chain config. Bounty and GitHub issue
+    # number are already checked at Click parse time; repo/issue still need
+    # strict GitHub verification before any RPC work.
+    try:
+        owner, repo_name = validate_repository(repo, require_verified_exists=True)
+        validate_github_issue(owner, repo_name, issue_number, require_verified_exists=True)
+    except click.BadParameter as e:
+        raise click.ClickException(str(e))
+
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(
         contract,
         network,
@@ -136,23 +145,6 @@ def issue_register(
     )
     config = load_config()
 
-    # Validate inputs before showing summary. The register path is owner-only
-    # and spends real ALPHA, so both GitHub probes run in strict mode: any
-    # warn-and-skip branch (network error, 5xx, 403, rate-limit) is promoted
-    # to a click.BadParameter abort so we never submit register_issue on-chain
-    # against a repository or issue we failed to verify.
-    try:
-        owner, repo_name = validate_repository(repo, require_verified_exists=True)
-        bounty_amount = validate_bounty_amount(bounty)
-        if issue_number < 1 or issue_number > MAX_ISSUE_NUMBER:
-            raise click.BadParameter(
-                f'Issue number must be between 1 and {MAX_ISSUE_NUMBER} (got {issue_number})',
-                param_hint='--issue',
-            )
-        validate_github_issue(owner, repo_name, issue_number, require_verified_exists=True)
-    except click.BadParameter as e:
-        raise click.ClickException(str(e))
-
     github_url = f'https://github.com/{repo}/issues/{issue_number}'
 
     err_console.print(
@@ -160,7 +152,7 @@ def issue_register(
             f'[cyan]Repository:[/cyan] {repo}\n'
             f'[cyan]Issue Number:[/cyan] #{issue_number}\n'
             f'[cyan]GitHub URL:[/cyan] {github_url}\n'
-            f'[cyan]Target Bounty:[/cyan] {format_alpha(bounty_amount, 2)} ALPHA\n'
+            f'[cyan]Target Bounty:[/cyan] {format_alpha(bounty, 2)} ALPHA\n'
             f'[cyan]Network:[/cyan] {network_name}\n'
             f'[cyan]RPC Endpoint:[/cyan] {ws_endpoint}\n'
             f'[cyan]Contract:[/cyan] {contract_addr}',
@@ -227,7 +219,7 @@ def issue_register(
                 'github_url': github_url,
                 'repository_full_name': repo,
                 'issue_number': issue_number,
-                'target_bounty': bounty_amount,
+                'target_bounty': bounty,
             },
             gas_limit={'ref_time': 10_000_000_000, 'proof_size': 1_000_000},
         )

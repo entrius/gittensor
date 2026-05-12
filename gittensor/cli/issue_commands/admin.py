@@ -18,6 +18,8 @@ from rich.panel import Panel
 
 from .help import StyledGroup
 from .helpers import (
+    ONCHAIN_ISSUE_ID_TYPE,
+    Ss58AddressParam,
     _handle_command_error,
     _make_contract_client,
     _resolve_contract_and_network,
@@ -27,8 +29,6 @@ from .helpers import (
     print_error,
     print_network_header,
     print_success,
-    require_valid_issue_id,
-    require_valid_ss58,
     with_cli_behavior_options,
     with_network_contract_options,
     with_wallet_options,
@@ -45,7 +45,7 @@ def admin():
 
 
 @admin.command('cancel-issue')
-@click.argument('issue_id', type=int)
+@click.argument('issue_id', type=ONCHAIN_ISSUE_ID_TYPE)
 @with_wallet_options()
 @with_network_contract_options('Contract address (uses config if empty)')
 @with_cli_behavior_options(include_yes=True)
@@ -66,8 +66,6 @@ def admin_cancel(
     [/dim]
     """
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
-
-    require_valid_issue_id(issue_id)
 
     print_network_header(network_name, contract_addr)
 
@@ -106,7 +104,7 @@ def admin_cancel(
 
 
 @admin.command('payout-issue')
-@click.argument('issue_id', type=int)
+@click.argument('issue_id', type=ONCHAIN_ISSUE_ID_TYPE)
 @with_wallet_options()
 @with_network_contract_options('Contract address (uses config if empty)')
 @with_cli_behavior_options(include_yes=True)
@@ -128,8 +126,6 @@ def admin_payout(
     [/dim]
     """
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
-
-    require_valid_issue_id(issue_id)
 
     print_network_header(network_name, contract_addr)
 
@@ -168,7 +164,7 @@ def admin_payout(
 
 
 @admin.command('set-owner')
-@click.argument('new_owner', type=str)
+@click.argument('new_owner', type=Ss58AddressParam('new_owner'))
 @with_wallet_options()
 @with_network_contract_options('Contract address')
 @with_cli_behavior_options(include_yes=True)
@@ -186,8 +182,6 @@ def admin_set_owner(
     [/dim]
     """
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
-
-    require_valid_ss58(new_owner, 'new_owner')
 
     print_network_header(network_name, contract_addr)
 
@@ -218,7 +212,7 @@ def admin_set_owner(
 
 
 @admin.command('set-treasury')
-@click.argument('new_treasury', type=str)
+@click.argument('new_treasury', type=Ss58AddressParam('new_treasury'))
 @with_wallet_options()
 @with_network_contract_options('Contract address')
 @with_cli_behavior_options(include_yes=True)
@@ -239,8 +233,6 @@ def admin_set_treasury(
     [/dim]
     """
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
-
-    require_valid_ss58(new_treasury, 'new_treasury')
 
     print_network_header(network_name, contract_addr)
 
@@ -275,7 +267,7 @@ def admin_set_treasury(
 
 
 @admin.command('add-vali')
-@click.argument('hotkey', type=str)
+@click.argument('hotkey', type=Ss58AddressParam('hotkey'))
 @with_wallet_options()
 @with_network_contract_options('Contract address')
 @with_cli_behavior_options(include_yes=True)
@@ -296,8 +288,6 @@ def admin_add_validator(
     [/dim]
     """
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
-
-    require_valid_ss58(hotkey, 'hotkey')
 
     print_network_header(network_name, contract_addr)
 
@@ -330,7 +320,7 @@ def admin_add_validator(
 
 
 @admin.command('remove-vali')
-@click.argument('hotkey', type=str)
+@click.argument('hotkey', type=Ss58AddressParam('hotkey'))
 @with_wallet_options()
 @with_network_contract_options('Contract address')
 @with_cli_behavior_options(include_yes=True)
@@ -350,8 +340,6 @@ def admin_remove_validator(
     [/dim]
     """
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
-
-    require_valid_ss58(hotkey, 'hotkey')
 
     print_network_header(network_name, contract_addr)
 

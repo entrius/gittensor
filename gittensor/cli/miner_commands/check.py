@@ -9,6 +9,8 @@ import sys
 import click
 from rich.table import Table
 
+from gittensor.constants import CLI_NETWORK_NAMES
+
 from .helpers import (
     DEFAULT_MIN_VALIDATOR_STAKE,
     DEFAULT_MIN_VALIDATOR_VTRUST,
@@ -39,7 +41,12 @@ _PAT_CHECK_STATUS_MARKUP = {
 @click.option('--wallet', 'wallet_name', default=None, help='Bittensor wallet name.')
 @click.option('--hotkey', 'wallet_hotkey', default=None, help='Bittensor hotkey name.')
 @click.option('--netuid', type=int, default=NETUID_DEFAULT, help='Subnet UID.', show_default=True)
-@click.option('--network', default=None, help='Network name (local, test, finney).')
+@click.option(
+    '--network',
+    default=None,
+    type=click.Choice(CLI_NETWORK_NAMES, case_sensitive=False),
+    help='Network (finney/test/local).',
+)
 @click.option('--rpc-url', default=None, help='Subtensor RPC endpoint URL (overrides --network).')
 @click.option(
     '--min-vtrust',

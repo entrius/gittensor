@@ -9,6 +9,7 @@ validate_issue_id, validate_ss58_address, colorize_status, and CLI
 invocation with validation (no live network).
 """
 
+import importlib
 import json
 from decimal import Decimal
 from typing import Any, Dict, Optional
@@ -17,6 +18,9 @@ from unittest.mock import patch
 import click
 import pytest
 from click.testing import CliRunner
+
+_ISSUE_VOTE_MOD = importlib.import_module('gittensor.cli.issue_commands.vote')
+_ISSUE_ADMIN_MOD = importlib.import_module('gittensor.cli.issue_commands.admin')
 
 from gittensor.cli.issue_commands.helpers import (
     ALPHA_DECIMALS,
@@ -543,7 +547,8 @@ class TestCliRegisterValidation:
                 catch_exceptions=False,
             )
         assert result.exit_code != 0
-        assert 'Minimum' in result.output or '5' in result.output
+        combined = (result.stdout or '') + (result.stderr or '')
+        assert 'Minimum' in combined or '5' in combined
 
     def test_register_rejects_bad_repo_format(self, cli_root, runner):
         with patch(
@@ -577,7 +582,8 @@ class TestCliRegisterValidation:
                 catch_exceptions=False,
             )
         assert result.exit_code != 0
-        assert 'between' in result.output or '0' in result.output or 'issue' in result.output.lower()
+        combined = (result.stdout or '') + (result.stderr or '')
+        assert 'range' in combined.lower() or '0' in combined or 'issue' in combined.lower()
 
     def test_register_rejects_issue_number_over_max(self, cli_root, runner):
         over_max = str(MAX_ISSUE_NUMBER + 1)
@@ -599,7 +605,8 @@ class TestCliRegisterValidation:
                 catch_exceptions=False,
             )
         assert result.exit_code != 0
-        assert 'between' in result.output or over_max in result.output or 'issue' in result.output.lower()
+        combined = (result.stdout or '') + (result.stderr or '')
+        assert 'range' in combined.lower() or over_max in combined or 'issue' in combined.lower()
 
     def test_register_aborts_on_github_503_before_contract_call(self, cli_root, runner):
         """A 5xx from GitHub during register must abort with a non-zero exit
@@ -678,8 +685,9 @@ class TestCliVoteValidation:
     """Ensure vote solution rejects invalid issue_id / PR (validators wired)."""
 
     def test_vote_solution_rejects_issue_id_zero(self, cli_root, runner):
-        with patch(
-            'gittensor.cli.issue_commands.vote._resolve_contract_and_network',
+        with patch.object(
+            _ISSUE_VOTE_MOD,
+            '_resolve_contract_and_network',
             return_value=(
                 '0x1234567890123456789012345678901234567890',
                 'wss://entrypoint-finney.opentensor.ai:443',
@@ -699,11 +707,13 @@ class TestCliVoteValidation:
                 catch_exceptions=False,
             )
         assert result.exit_code != 0
-        assert 'between' in result.output or '1' in result.output or 'issue' in result.output.lower()
+        combined = (result.stdout or '') + (result.stderr or '')
+        assert 'range' in combined.lower() or '<=' in combined
 
     def test_vote_solution_rejects_pr_zero(self, cli_root, runner):
-        with patch(
-            'gittensor.cli.issue_commands.vote._resolve_contract_and_network',
+        with patch.object(
+            _ISSUE_VOTE_MOD,
+            '_resolve_contract_and_network',
             return_value=(
                 '0x1234567890123456789012345678901234567890',
                 'wss://entrypoint-finney.opentensor.ai:443',
@@ -723,11 +733,13 @@ class TestCliVoteValidation:
                 catch_exceptions=False,
             )
         assert result.exit_code != 0
-        assert 'PR' in result.output or 'positive' in result.output
+        combined = (result.stdout or '') + (result.stderr or '')
+        assert 'PR' in combined or 'positive' in combined or 'range' in combined.lower()
 
     def test_vote_solution_rejects_invalid_pr(self, cli_root, runner):
-        with patch(
-            'gittensor.cli.issue_commands.vote._resolve_contract_and_network',
+        with patch.object(
+            _ISSUE_VOTE_MOD,
+            '_resolve_contract_and_network',
             return_value=(
                 '0x1234567890123456789012345678901234567890',
                 'wss://entrypoint-finney.opentensor.ai:443',
@@ -747,15 +759,17 @@ class TestCliVoteValidation:
                 catch_exceptions=False,
             )
         assert result.exit_code != 0
-        assert 'Cannot parse' in result.output or 'not-a-pr' in result.output or 'pr_number' in result.output.lower()
+        combined = (result.stdout or '') + (result.stderr or '')
+        assert 'Cannot parse' in combined or 'not-a-pr' in combined or 'pr_number' in combined.lower()
 
 
 class TestCliAdminValidation:
     """Ensure admin cancel and payout reject invalid issue_id (validator wired)."""
 
     def test_admin_cancel_rejects_issue_id_zero(self, cli_root, runner):
-        with patch(
-            'gittensor.cli.issue_commands.admin._resolve_contract_and_network',
+        with patch.object(
+            _ISSUE_ADMIN_MOD,
+            '_resolve_contract_and_network',
             return_value=(
                 '0x1234567890123456789012345678901234567890',
                 'wss://entrypoint-finney.opentensor.ai:443',
@@ -768,11 +782,13 @@ class TestCliAdminValidation:
                 catch_exceptions=False,
             )
         assert result.exit_code != 0
-        assert 'between' in result.output or '1' in result.output
+        combined = (result.stdout or '') + (result.stderr or '')
+        assert 'range' in combined.lower() or '1' in combined
 
     def test_admin_payout_rejects_issue_id_zero(self, cli_root, runner):
-        with patch(
-            'gittensor.cli.issue_commands.admin._resolve_contract_and_network',
+        with patch.object(
+            _ISSUE_ADMIN_MOD,
+            '_resolve_contract_and_network',
             return_value=(
                 '0x1234567890123456789012345678901234567890',
                 'wss://entrypoint-finney.opentensor.ai:443',
@@ -785,15 +801,17 @@ class TestCliAdminValidation:
                 catch_exceptions=False,
             )
         assert result.exit_code != 0
-        assert 'between' in result.output or '1' in result.output
+        combined = (result.stdout or '') + (result.stderr or '')
+        assert 'range' in combined.lower() or '1' in combined
 
 
 class TestCliVoteCancelValidation:
     """Ensure vote cancel rejects invalid issue_id."""
 
     def test_vote_cancel_rejects_issue_id_zero(self, cli_root, runner):
-        with patch(
-            'gittensor.cli.issue_commands.vote._resolve_contract_and_network',
+        with patch.object(
+            _ISSUE_VOTE_MOD,
+            '_resolve_contract_and_network',
             return_value=(
                 '0x1234567890123456789012345678901234567890',
                 'wss://entrypoint-finney.opentensor.ai:443',
@@ -806,16 +824,21 @@ class TestCliVoteCancelValidation:
                 catch_exceptions=False,
             )
         assert result.exit_code != 0
-        assert 'between' in result.output or '1' in result.output
+        combined = (result.stdout or '') + (result.stderr or '')
+        assert 'range' in combined.lower() or '1' in combined
 
 
 class TestCliMissingContractConfig:
     """Ensure missing contract config exits non-zero."""
 
     def test_register_missing_contract_fails(self, cli_root, runner):
-        with patch(
-            'gittensor.cli.issue_commands.mutations._resolve_contract_and_network',
-            side_effect=click.ClickException('Contract address not configured.'),
+        with (
+            patch('gittensor.cli.issue_commands.mutations.validate_repository', return_value=('a', 'b')),
+            patch('gittensor.cli.issue_commands.mutations.validate_github_issue', return_value={}),
+            patch(
+                'gittensor.cli.issue_commands.mutations._resolve_contract_and_network',
+                side_effect=click.ClickException('Contract address not configured.'),
+            ),
         ):
             result = runner.invoke(
                 cli_root,
@@ -826,8 +849,9 @@ class TestCliMissingContractConfig:
         assert 'Contract address not configured' in result.output
 
     def test_vote_missing_contract_fails(self, cli_root, runner):
-        with patch(
-            'gittensor.cli.issue_commands.vote._resolve_contract_and_network',
+        with patch.object(
+            _ISSUE_VOTE_MOD,
+            '_resolve_contract_and_network',
             side_effect=click.ClickException('Contract address not configured.'),
         ):
             result = runner.invoke(
@@ -846,8 +870,9 @@ class TestCliMissingContractConfig:
         assert 'Contract address not configured' in result.output
 
     def test_admin_missing_contract_fails(self, cli_root, runner):
-        with patch(
-            'gittensor.cli.issue_commands.admin._resolve_contract_and_network',
+        with patch.object(
+            _ISSUE_ADMIN_MOD,
+            '_resolve_contract_and_network',
             side_effect=click.ClickException('Contract address not configured.'),
         ):
             result = runner.invoke(
@@ -876,6 +901,7 @@ class TestCliRegisterLogicalFailures:
     """Ensure logical failure branches in `issues register` exit non-zero."""
 
     def test_register_exits_non_zero_when_contract_metadata_missing(self, cli_root, runner):
+        pytest.importorskip('substrateinterface')
         with (
             patch(
                 'gittensor.cli.issue_commands.mutations._resolve_contract_and_network',
@@ -904,16 +930,18 @@ class TestCliRuntimeExceptions:
 
     def test_admin_cancel_runtime_exception_exits_non_zero(self, cli_root, runner):
         with (
-            patch(
-                'gittensor.cli.issue_commands.admin._resolve_contract_and_network',
+            patch.object(
+                _ISSUE_ADMIN_MOD,
+                '_resolve_contract_and_network',
                 return_value=(
                     '0x1234567890123456789012345678901234567890',
                     'wss://entrypoint-finney.opentensor.ai:443',
                     'finney',
                 ),
             ),
-            patch(
-                'gittensor.cli.issue_commands.admin._make_contract_client',
+            patch.object(
+                _ISSUE_ADMIN_MOD,
+                '_make_contract_client',
                 side_effect=RuntimeError('boom-admin'),
             ),
         ):
@@ -927,16 +955,18 @@ class TestCliRuntimeExceptions:
 
     def test_vote_solution_import_error_exits_non_zero(self, cli_root, runner):
         with (
-            patch(
-                'gittensor.cli.issue_commands.vote._resolve_contract_and_network',
+            patch.object(
+                _ISSUE_VOTE_MOD,
+                '_resolve_contract_and_network',
                 return_value=(
                     '0x1234567890123456789012345678901234567890',
                     'wss://entrypoint-finney.opentensor.ai:443',
                     'finney',
                 ),
             ),
-            patch(
-                'gittensor.cli.issue_commands.vote._make_contract_client',
+            patch.object(
+                _ISSUE_VOTE_MOD,
+                '_make_contract_client',
                 side_effect=ImportError('missing-dep'),
             ),
         ):
@@ -956,6 +986,7 @@ class TestCliRuntimeExceptions:
         assert 'Missing dependency' in result.output
 
     def test_harvest_runtime_exception_exits_non_zero(self, cli_root, runner):
+        pytest.importorskip('substrateinterface')
         with (
             patch(
                 'gittensor.cli.issue_commands.mutations._resolve_contract_and_network',

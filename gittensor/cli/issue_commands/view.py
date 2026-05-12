@@ -19,6 +19,7 @@ from rich.table import Table
 
 from .help import StyledCommand
 from .helpers import (
+    ONCHAIN_ISSUE_ID_TYPE,
     _read_contract_packed_storage,
     _read_issues_from_child_storage,
     _resolve_contract_and_network,
@@ -31,7 +32,6 @@ from .helpers import (
     loading_context,
     print_network_header,
     read_issues_from_contract,
-    validate_issue_id,
     with_cli_behavior_options,
     with_network_contract_options,
 )
@@ -54,8 +54,8 @@ def _fill_percent(bounty: int, target: int) -> float:
     '--id',
     'issue_id',
     default=None,
-    type=int,
-    help='View a specific issue by ID',
+    type=ONCHAIN_ISSUE_ID_TYPE,
+    help='View a specific on-chain issue ID (1–999999)',
 )
 @click.option(
     '--repo',
@@ -71,7 +71,7 @@ def _fill_percent(bounty: int, target: int) -> float:
 )
 @with_network_contract_options('Contract address (uses default if empty)')
 def issues_list(
-    issue_id: int, repo_filter: str, network: str, rpc_url: str, contract: str, verbose: bool, as_json: bool
+    issue_id: int | None, repo_filter: str | None, network: str, rpc_url: str, contract: str, verbose: bool, as_json: bool
 ):
     """List issues or view a specific issue.
 
@@ -82,12 +82,6 @@ def issues_list(
         $ gitt i list --json
     [/dim]
     """
-    if issue_id is not None:
-        try:
-            validate_issue_id(issue_id, 'id')
-        except click.BadParameter as e:
-            handle_exception(as_json, str(e), 'bad_parameter')
-
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(
         contract,
         network,

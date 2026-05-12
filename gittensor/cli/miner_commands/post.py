@@ -31,7 +31,12 @@ from gittensor.cli.miner_commands.helpers import (
     console,
     err_console,
 )
-from gittensor.constants import BASE_GITHUB_API_URL, GITHUB_HTTP_TIMEOUT_SECONDS, GRAPHQL_VIEWER_QUERY
+from gittensor.constants import (
+    BASE_GITHUB_API_URL,
+    CLI_NETWORK_NAMES,
+    GITHUB_HTTP_TIMEOUT_SECONDS,
+    GRAPHQL_VIEWER_QUERY,
+)
 from gittensor.utils.github_api_tools import make_graphql_headers, make_headers
 
 _PAT_POST_STATUS_MARKUP = {
@@ -45,7 +50,12 @@ _PAT_POST_STATUS_MARKUP = {
 @click.option('--wallet', 'wallet_name', default=None, help='Bittensor wallet name.')
 @click.option('--hotkey', 'wallet_hotkey', default=None, help='Bittensor hotkey name.')
 @click.option('--netuid', type=int, default=NETUID_DEFAULT, help='Subnet UID.', show_default=True)
-@click.option('--network', default=None, help='Network name (local, test, finney).')
+@click.option(
+    '--network',
+    default=None,
+    type=click.Choice(CLI_NETWORK_NAMES, case_sensitive=False),
+    help='Network (finney/test/local).',
+)
 @click.option('--rpc-url', default=None, help='Subtensor RPC endpoint URL (overrides --network).')
 @click.option(
     '--pat',

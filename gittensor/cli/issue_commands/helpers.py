@@ -20,7 +20,7 @@ import requests
 from rich.console import Console
 
 from gittensor.cli.issue_commands.tables import build_pr_table
-from gittensor.constants import BASE_GITHUB_API_URL, MAX_ISSUE_ID, NETWORK_MAP
+from gittensor.constants import BASE_GITHUB_API_URL, CLI_NETWORK_NAMES, MAX_ISSUE_ID, NETWORK_MAP
 from gittensor.validator.issue_competitions.storage_utils import (
     ISSUES_MAPPING_ROOT_KEY,
     compute_ink5_lazy_key,
@@ -56,7 +56,38 @@ console = Console()
 err_console = Console(stderr=True)
 
 CommandFunc = TypeVar('CommandFunc', bound=Callable[..., Any])
-NETWORK_CHOICE = click.Choice(['finney', 'test', 'local'], case_sensitive=False)
+NETWORK_CHOICE = click.Choice(CLI_NETWORK_NAMES, case_sensitive=False)
+
+# On-chain issue IDs accepted by the contract layer (1 .. MAX_ISSUE_ID-1).
+ONCHAIN_ISSUE_ID_TYPE = click.IntRange(1, MAX_ISSUE_ID - 1)
+# GitHub issue numbers (u32).
+GITHUB_ISSUE_NUMBER_TYPE = click.IntRange(1, MAX_ISSUE_NUMBER)
+
+
+class BountyAlphaParam(click.ParamType):
+    """Parse `--bounty` as decimal ALPHA and return raw integer units (parse-time)."""
+
+    name = 'ALPHA'
+
+    def convert(self, value: Any, param: Optional[click.Parameter], ctx: Optional[click.Context]) -> int:
+        if not isinstance(value, str):
+            raise click.BadParameter('Bounty must be passed as text', param=param, ctx=ctx)
+        return validate_bounty_amount(value)
+
+
+class Ss58AddressParam(click.ParamType):
+    """SS58 account address validated via substrate ss58_decode (parse-time)."""
+
+    name = 'SS58'
+
+    def __init__(self, field: str) -> None:
+        super().__init__()
+        self.field = field
+
+    def convert(self, value: Any, param: Optional[click.Parameter], ctx: Optional[click.Context]) -> str:
+        if not isinstance(value, str):
+            raise click.BadParameter('Expected text', param=param, ctx=ctx)
+        return validate_ss58_address(value, self.field)
 
 
 def apply_click_options(*decorators: Callable[[CommandFunc], CommandFunc]) -> Callable[[CommandFunc], CommandFunc]:
@@ -542,30 +573,6 @@ def validate_ss58_address(address: str, param_name: str = 'address') -> str:
         )
 
     return address
-
-
-def require_valid_issue_id(value: int, param_name: str = 'issue_id') -> int:
-    """Validate an issue ID, raising ClickException on failure.
-
-    Returns:
-        The validated issue ID.
-    """
-    try:
-        return validate_issue_id(value, param_name)
-    except click.BadParameter as e:
-        raise click.ClickException(str(e))
-
-
-def require_valid_ss58(address: str, param_name: str = 'address') -> str:
-    """Validate an SS58 address, raising ClickException on failure.
-
-    Returns:
-        The validated SS58 address string.
-    """
-    try:
-        return validate_ss58_address(address, param_name)
-    except click.BadParameter as e:
-        raise click.ClickException(str(e))
 
 
 def load_config() -> Dict[str, Any]:

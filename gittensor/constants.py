@@ -17,6 +17,9 @@ NETWORK_MAP = {
     'local': 'ws://127.0.0.1:9944',
 }
 
+# Keys of NETWORK_MAP; used for CLI `--network` validation and help.
+CLI_NETWORK_NAMES = tuple(NETWORK_MAP.keys())
+
 # =============================================================================
 # GitHub API
 # =============================================================================

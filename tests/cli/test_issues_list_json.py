@@ -62,7 +62,9 @@ def test_issues_list_rejects_invalid_id_human(cli_root, runner, bad_id):
         result = runner.invoke(cli_root, ['issues', 'list', '--id', bad_id], catch_exceptions=False)
 
     assert result.exit_code != 0
-    assert 'between 1 and 999999' in result.output
+    combined = (result.stdout or '') + (result.stderr or '')
+    assert '999999' in combined
+    assert 'range' in combined.lower()
     mock_read.assert_not_called()
 
 
@@ -73,8 +75,9 @@ def test_issues_list_rejects_invalid_id_json(cli_root, runner, bad_id):
         result = runner.invoke(cli_root, ['issues', 'list', '--json', '--id', bad_id], catch_exceptions=False)
 
     assert result.exit_code != 0
-    payload = json.loads(result.output)
+    payload = json.loads(result.stdout)
     assert payload['success'] is False
     assert payload['error']['type'] == 'bad_parameter'
-    assert 'between 1 and 999999' in payload['error']['message']
+    assert '999999' in payload['error']['message']
+    assert 'range' in payload['error']['message'].lower()
     mock_read.assert_not_called()

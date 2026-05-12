@@ -6,10 +6,14 @@
 Covers `issues bounty-pool`, `issues pending-harvest`, `admin info`, and `vote list`.
 """
 
+import importlib
 import json
 from unittest.mock import patch
 
 import pytest
+
+_ISSUE_VIEW_MOD = importlib.import_module('gittensor.cli.issue_commands.view')
+_ISSUE_VOTE_MOD = importlib.import_module('gittensor.cli.issue_commands.vote')
 
 FORCED_MESSAGE = 'forced test failure for json-error assertion'
 
@@ -25,12 +29,14 @@ FORCED_MESSAGE = 'forced test failure for json-error assertion'
 )
 def test_cli_commands_emit_json_on_exception(cli_root, runner, argv):
     with (
-        patch(
-            'gittensor.cli.issue_commands.view._resolve_contract_and_network',
+        patch.object(
+            _ISSUE_VIEW_MOD,
+            '_resolve_contract_and_network',
             return_value=('5Fakeaddr', 'ws://x', 'test'),
         ),
-        patch(
-            'gittensor.cli.issue_commands.vote._resolve_contract_and_network',
+        patch.object(
+            _ISSUE_VOTE_MOD,
+            '_resolve_contract_and_network',
             return_value=('5Fakeaddr', 'ws://x', 'test'),
         ),
         patch(

@@ -119,6 +119,35 @@ def _options_panel(rows: list[tuple[str, str]]) -> Panel:
 class StyledCommand(click.Command):
     """Click command with styled help output."""
 
+    def make_context(
+        self,
+        info_name: str | None,
+        args: list[str],
+        parent: click.Context | None = None,
+        **extra: object,
+    ) -> click.Context:
+        json_mode = '--json' in args
+        try:
+            return super().make_context(info_name, args, parent=parent, **extra)
+        except click.BadParameter as e:
+            if json_mode:
+                from gittensor.cli.issue_commands.helpers import emit_error_json
+
+                emit_error_json(str(e), error_type='bad_parameter')
+                raise SystemExit(1) from None
+            raise
+
+    def invoke(self, ctx: click.Context):
+        try:
+            return super().invoke(ctx)
+        except click.BadParameter as e:
+            if ctx.params.get('as_json'):
+                from gittensor.cli.issue_commands.helpers import emit_error_json
+
+                emit_error_json(str(e), error_type='bad_parameter')
+                ctx.exit(1)
+            raise
+
     def _help_options_rows(self, ctx: click.Context) -> list[tuple[str, str]]:
         return _collect_help_rows(self.get_params(ctx), ctx)
 

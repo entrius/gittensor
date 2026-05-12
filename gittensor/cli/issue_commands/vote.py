@@ -11,6 +11,7 @@ Commands:
 """
 
 import re
+from typing import Any, Optional
 
 import click
 from rich.panel import Panel
@@ -18,6 +19,8 @@ from rich.table import Table
 
 from .help import StyledGroup
 from .helpers import (
+    ONCHAIN_ISSUE_ID_TYPE,
+    Ss58AddressParam,
     _handle_command_error,
     _make_contract_client,
     _resolve_contract_and_network,
@@ -30,9 +33,6 @@ from .helpers import (
     print_error,
     print_network_header,
     print_success,
-    require_valid_issue_id,
-    validate_issue_id,
-    validate_ss58_address,
     with_cli_behavior_options,
     with_network_contract_options,
     with_wallet_options,
@@ -66,6 +66,23 @@ def parse_pr_number(pr_input: str) -> int:
     raise ValueError(f'Cannot parse PR number from: {pr_input}')
 
 
+class _PrNumberOrUrlParam(click.ParamType):
+    """GitHub PR number or repository PR URL (parse-time)."""
+
+    name = 'PR'
+
+    def convert(self, value: Any, param: Optional[click.Parameter], ctx: Optional[click.Context]) -> int:
+        if not isinstance(value, str):
+            raise click.BadParameter('Expected text', param=param, ctx=ctx)
+        try:
+            n = parse_pr_number(value)
+        except ValueError as e:
+            raise click.BadParameter(str(e), param=param, ctx=ctx) from e
+        if n < 1:
+            raise click.BadParameter(f'PR number must be positive (got {n})', param=param, ctx=ctx)
+        return n
+
+
 @click.group(name='vote', cls=StyledGroup)
 def vote():
     """Validator consensus operations.
@@ -76,10 +93,10 @@ def vote():
 
 
 @vote.command('solution')
-@click.argument('issue_id', type=int)
-@click.argument('solver_hotkey', type=str)
-@click.argument('solver_coldkey', type=str)
-@click.argument('pr_number_or_url', type=str)
+@click.argument('issue_id', type=ONCHAIN_ISSUE_ID_TYPE)
+@click.argument('solver_hotkey', type=Ss58AddressParam('solver_hotkey'))
+@click.argument('solver_coldkey', type=Ss58AddressParam('solver_coldkey'))
+@click.argument('pr_number_or_url', type=_PrNumberOrUrlParam())
 @with_wallet_options()
 @with_network_contract_options('Contract address (uses config if empty)')
 @with_cli_behavior_options(include_yes=True)
@@ -87,7 +104,7 @@ def val_vote_solution(
     issue_id: int,
     solver_hotkey: str,
     solver_coldkey: str,
-    pr_number_or_url: str,
+    pr_number_or_url: int,
     wallet_name: str,
     wallet_hotkey: str,
     network: str,
@@ -111,20 +128,7 @@ def val_vote_solution(
     """
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
 
-    try:
-        validate_issue_id(issue_id)
-        validate_ss58_address(solver_hotkey, 'solver_hotkey')
-        validate_ss58_address(solver_coldkey, 'solver_coldkey')
-        pr_number = parse_pr_number(pr_number_or_url)
-        if pr_number < 1:
-            raise click.BadParameter(
-                f'PR number must be positive (got {pr_number})',
-                param_hint='pr_number_or_url',
-            )
-    except click.BadParameter:
-        raise
-    except ValueError as e:
-        raise click.BadParameter(str(e), param_hint='pr_number_or_url')
+    pr_number = pr_number_or_url
 
     print_network_header(network_name, contract_addr)
 
@@ -157,7 +161,7 @@ def val_vote_solution(
 
 
 @vote.command('cancel')
-@click.argument('issue_id', type=int)
+@click.argument('issue_id', type=ONCHAIN_ISSUE_ID_TYPE)
 @click.argument('reason', type=str)
 @with_wallet_options()
 @with_network_contract_options('Contract address (uses config if empty)')
@@ -185,8 +189,6 @@ def val_vote_cancel_issue(
     [/dim]
     """
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
-
-    require_valid_issue_id(issue_id)
 
     print_network_header(network_name, contract_addr)
 

@@ -13,10 +13,13 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
+import importlib
 import pytest
 from click.testing import CliRunner
 
 from gittensor.cli.main import CONFIG_KEYS, config_group
+
+_MAIN = importlib.import_module('gittensor.cli.main')
 
 
 @pytest.fixture
@@ -25,8 +28,8 @@ def temp_config_dir(tmp_path: Path):
     config_dir = tmp_path / '.gittensor'
     config_file = config_dir / 'config.json'
     with (
-        patch('gittensor.cli.main.GITTENSOR_DIR', config_dir),
-        patch('gittensor.cli.main.CONFIG_FILE', config_file),
+        patch.object(_MAIN, 'GITTENSOR_DIR', config_dir),
+        patch.object(_MAIN, 'CONFIG_FILE', config_file),
     ):
         yield config_dir, config_file
 
@@ -73,10 +76,11 @@ class TestConfigSetWhitelist:
     def test_every_recognised_key_round_trips(self, temp_config_dir, key):
         _, config_file = temp_config_dir
         runner = CliRunner()
-        result = runner.invoke(config_group, ['set', key, 'value-for-' + key])
+        value = 'test' if key == 'network' else f'value-for-{key}'
+        result = runner.invoke(config_group, ['set', key, value])
 
         assert result.exit_code == 0, result.output
-        assert _read(config_file)[key] == 'value-for-' + key
+        assert _read(config_file)[key] == value
 
     def test_uppercase_key_normalised_to_lowercase(self, temp_config_dir):
         """`click.Choice(case_sensitive=False)` matches mixed case; we persist the canonical lowercase form."""

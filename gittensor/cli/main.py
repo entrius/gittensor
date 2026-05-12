@@ -40,6 +40,7 @@ from gittensor import __version__
 from gittensor.cli.issue_commands import register_commands
 from gittensor.cli.issue_commands.help import StyledAliasGroup, StyledGroup
 from gittensor.cli.issue_commands.helpers import CONFIG_FILE, GITTENSOR_DIR, console, err_console
+from gittensor.constants import NETWORK_MAP
 
 
 @click.group(cls=StyledAliasGroup)
@@ -119,6 +120,12 @@ def config_set(key: str, value: str):
     [/dim]
     """
     key = key.lower()
+    if key == 'network' and value.lower() not in NETWORK_MAP:
+        raise click.BadParameter(
+            f'Network must be one of {", ".join(NETWORK_MAP)} (got {value!r})',
+            param_hint='VALUE',
+        )
+
     # Ensure config directory exists
     GITTENSOR_DIR.mkdir(parents=True, exist_ok=True)
 

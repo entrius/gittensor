@@ -9,6 +9,7 @@ import click
 
 from .help import StyledCommand
 from .helpers import (
+    ONCHAIN_ISSUE_ID_TYPE,
     emit_json,
     fetch_issue_from_contract,
     fetch_open_issue_pull_requests,
@@ -19,7 +20,6 @@ from .helpers import (
     print_network_header,
     print_warning,
     resolve_network,
-    validate_issue_id,
     with_cli_behavior_options,
     with_network_contract_options,
 )
@@ -30,8 +30,8 @@ from .helpers import (
     '--id',
     'issue_id',
     required=True,
-    type=int,
-    help='On-chain issue ID',
+    type=ONCHAIN_ISSUE_ID_TYPE,
+    help='On-chain issue ID (1–999999)',
 )
 @with_cli_behavior_options(include_verbose=True, include_json=True)
 @with_network_contract_options('Contract address (uses default if empty)')
@@ -54,11 +54,6 @@ def issues_submissions(
         $ gitt i submissions --id 42 --json
     [/dim]
     """
-    try:
-        validate_issue_id(issue_id, 'id')
-    except click.BadParameter as e:
-        handle_exception(as_json, str(e), 'bad_parameter')
-
     contract_addr = get_contract_address(contract)
     ws_endpoint, network_name = resolve_network(network, rpc_url)
 

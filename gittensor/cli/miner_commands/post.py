@@ -220,6 +220,13 @@ def _validate_pat_locally(pat: str) -> str | None:
             )
             return None
 
+        gql_data = gql_resp.json()
+        if (gql_data.get('data') or {}).get('viewer') is None:
+            err_console.print(
+                '[red]PAT lacks GraphQL API access. Fine-grained PATs need "Public Repositories (read-only)" permission.[/red]'
+            )
+            return None
+
         return login
     except requests.RequestException:
         return None

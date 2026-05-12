@@ -221,9 +221,9 @@ class BaseValidatorNeuron(BaseNeuron):
             bt.logging.warning(
                 'Scores contain NaN values. This may be due to a lack of responses from miners, or a bug in your reward functions.'
             )
+            self.scores = np.nan_to_num(self.scores, nan=0.0)
 
         # Calculate the average reward for each uid across non-zero values.
-        # Replace any NaN values with 0.
         # Compute the norm of the scores
         norm = np.linalg.norm(self.scores, ord=1, axis=0, keepdims=True)
 

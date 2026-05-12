@@ -383,6 +383,44 @@ class TestScoringDataStoredGate:
 
 
 class TestFixedBaseScore:
+    def test_fixed_base_does_not_score_when_file_fetch_fails(self):
+        scored = ScoredMirrorPR(pr=_pr())
+        client = Mock()
+        client.get_pr_files.side_effect = scoring_module.MirrorRequestError('mirror unavailable')
+
+        asyncio.run(
+            score_mirror_pr(
+                scored,
+                mirror_eval=Mock(),
+                mirror_repos={scored.pr.repo_full_name: _config(fixed_base_score=7.5)},
+                programming_languages={},
+                token_config=Mock(),
+                client=client,
+            )
+        )
+
+        assert scored.base_score == 0.0
+        assert scored.token_score == 0.0
+
+    def test_fixed_base_does_not_score_when_empty_files_returned(self):
+        scored = ScoredMirrorPR(pr=_pr())
+        client = Mock()
+        client.get_pr_files.return_value.files = []
+
+        asyncio.run(
+            score_mirror_pr(
+                scored,
+                mirror_eval=Mock(),
+                mirror_repos={scored.pr.repo_full_name: _config(fixed_base_score=7.5)},
+                programming_languages={},
+                token_config=Mock(),
+                client=client,
+            )
+        )
+
+        assert scored.base_score == 0.0
+        assert scored.token_score == 0.0
+
     def test_fixed_base_replaces_token_base_but_keeps_token_breakdown_and_multipliers(self, monkeypatch):
         scored = ScoredMirrorPR(
             pr=_pr(labels=[{'name': 'feature', 'actor_github_id': '1', 'actor_association': 'OWNER'}])

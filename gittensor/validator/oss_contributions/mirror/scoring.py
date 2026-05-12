@@ -140,9 +140,10 @@ async def score_mirror_pr(
             files = (await asyncio.to_thread(client.get_pr_files, pr.repo_full_name, pr.pr_number)).files
         except MirrorRequestError as e:
             bt.logging.warning(f'Mirror file fetch failed for PR #{pr.pr_number}: {e}')
-            if not has_fixed_base:
-                return
-            files = []
+            # scoring_data_stored=True means file evidence should exist for this PR.
+            # If retrieval fails this round, do not award a fresh score (including
+            # fixed-base repos) from incomplete evidence.
+            return
         scored.files = files
 
         if files:
@@ -157,7 +158,7 @@ async def score_mirror_pr(
             scored.total_nodes_scored = result.total_nodes_scored
             scored.code_density = result.code_density
             scored.base_score = result.base_score
-        elif not has_fixed_base:
+        else:
             bt.logging.warning(f'No files returned for PR #{pr.pr_number}')
             return
 

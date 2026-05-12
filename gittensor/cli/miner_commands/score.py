@@ -22,7 +22,7 @@ import click
 from rich.console import Console
 from rich.table import Table
 
-from gittensor.cli.issue_commands.helpers import emit_json
+from gittensor.cli.json_output import emit_json
 from gittensor.cli.miner_commands.helpers import _error
 
 if TYPE_CHECKING:
@@ -227,7 +227,7 @@ def _drain_logs() -> None:
     show_default=True,
     help="Bittensor log verbosity. 'info' surfaces the validator pipeline's per-step progress on stderr.",
 )
-@click.option('--json-output', 'json_mode', is_flag=True, default=False, help='Emit result as JSON on stdout.')
+@click.option('--json', 'json_mode', is_flag=True, default=False, help='Emit result as JSON on stdout.')
 def score_command(pat: Optional[str], log_level: str, json_mode: bool) -> None:
     """Locally run the validator scoring pipeline end-to-end for the miner identified by --pat.
 

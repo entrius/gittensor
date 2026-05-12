@@ -39,7 +39,7 @@ from typing import Dict, List, Optional, Set, Tuple
 
 import bittensor as bt
 
-from gittensor.classes import Issue, MinerEvaluation
+from gittensor.classes import Issue, MinerEvaluation, MinerEvaluationCache
 from gittensor.constants import (
     MIN_TOKEN_SCORE_FOR_BASE_SCORE,
     PR_LOOKBACK_DAYS,
@@ -107,6 +107,7 @@ async def run_issue_discovery(
     programming_languages: Dict[str, LanguageConfig],
     token_config: TokenConfig,
     client: Optional[MirrorClient] = None,
+    evaluation_cache: Optional[MinerEvaluationCache] = None,
 ) -> None:
     """Score issue discovery. Mutates miner_evaluations.
 
@@ -142,6 +143,7 @@ async def run_issue_discovery(
     skipped_failed = 0
     fetch_errors = 0
     no_issues = 0
+    cacheable_uids: Set[int] = set()
 
     # Phase 1: fetch each miner's issues.  The one-issue-per-PR rule is round-
     # global, so scoring is deferred until every miner's batch is in hand.
@@ -158,11 +160,14 @@ async def run_issue_discovery(
             response = await asyncio.to_thread(client.get_miner_issues, evaluation.github_id, since=lookback_date)
         except MirrorRequestError as e:
             bt.logging.warning(f'├─ UID {uid}: issue fetch failed ({e}) — skipped this miner')
+            _restore_issue_discovery_from_cache(evaluation, evaluation_cache)
             fetch_errors += 1
             continue
 
         filtered = [i for i in response.issues if i.repo_full_name in enabled_names]
         if not filtered:
+            _clear_issue_discovery_fields(evaluation)
+            cacheable_uids.add(uid)
             no_issues += 1
             continue
 
@@ -174,7 +179,7 @@ async def run_issue_discovery(
 
     canonical_pr_owners = _build_canonical_pr_owners(pending)
     for evaluation, filtered, open_issue_count in pending:
-        await _score_miner_issues(
+        complete = await _score_miner_issues(
             evaluation,
             filtered,
             mirror_repos,
@@ -186,6 +191,16 @@ async def run_issue_discovery(
             open_issue_count=open_issue_count,
             canonical_pr_owners=canonical_pr_owners,
         )
+        if complete:
+            cacheable_uids.add(evaluation.uid)
+
+    if evaluation_cache is not None:
+        # Issue-discovery is not authoritative for the PR-side fields, so we
+        # write through update_issue_discovery() rather than store(). The OSS
+        # phase already stored a fresh entry for this UID (or restored from
+        # cache on OSS failure); we only refresh the issue-discovery fields.
+        for uid in cacheable_uids:
+            evaluation_cache.update_issue_discovery(miner_evaluations[uid])
 
     bt.logging.info('')
     bt.logging.info(
@@ -197,6 +212,51 @@ async def run_issue_discovery(
         f'({cache_stats.misses - cache_stats.fetch_failures} fetched OK, '
         f'{cache_stats.fetch_failures} fetch failures)'
     )
+
+
+def _clear_issue_discovery_fields(evaluation: MinerEvaluation) -> None:
+    """Reset issue-discovery aggregates after a successful fetch with no mirror issues."""
+    evaluation.issue_discovery_score = 0.0
+    evaluation.issue_token_score = 0.0
+    evaluation.issue_credibility = 0.0
+    evaluation.is_issue_eligible = False
+    evaluation.total_solved_issues = 0
+    evaluation.total_valid_solved_issues = 0
+    evaluation.total_closed_issues = 0
+    evaluation.total_open_issues = 0
+
+
+def _copy_issue_discovery_fields(target: MinerEvaluation, source: MinerEvaluation) -> None:
+    target.issue_discovery_score = source.issue_discovery_score
+    target.issue_token_score = source.issue_token_score
+    target.issue_credibility = source.issue_credibility
+    target.is_issue_eligible = source.is_issue_eligible
+    target.total_solved_issues = source.total_solved_issues
+    target.total_valid_solved_issues = source.total_valid_solved_issues
+    target.total_closed_issues = source.total_closed_issues
+    target.total_open_issues = source.total_open_issues
+
+
+def _restore_issue_discovery_from_cache(
+    evaluation: MinerEvaluation,
+    evaluation_cache: Optional[MinerEvaluationCache],
+) -> bool:
+    """Restore cached issue-discovery aggregates for a transient DAS fetch failure."""
+    if evaluation_cache is None:
+        return False
+
+    cached = evaluation_cache.get(evaluation.uid, evaluation.hotkey, evaluation.github_id or '')
+    if cached is None:
+        bt.logging.warning(f'├─ UID {evaluation.uid}: no cached issue-discovery evaluation available')
+        return False
+
+    _copy_issue_discovery_fields(evaluation, cached)
+    bt.logging.info(
+        f'├─ UID {evaluation.uid}: restored cached issue discovery '
+        f'(score={cached.issue_discovery_score:.2f}, solved={cached.total_solved_issues}, '
+        f'valid={cached.total_valid_solved_issues})'
+    )
+    return True
 
 
 def _build_canonical_pr_owners(
@@ -262,7 +322,7 @@ async def _score_miner_issues(
     token_config: TokenConfig,
     open_issue_count: int,
     canonical_pr_owners: Dict[Tuple[str, int], Tuple[datetime, int, int]],
-) -> None:
+) -> bool:
     """Classify + score one miner's mirror issues, populate MinerEvaluation fields.
 
     ``open_issue_count`` is the miner's currently-OPEN issue count across
@@ -271,11 +331,15 @@ async def _score_miner_issues(
 
     ``canonical_pr_owners`` enforces the cross-miner one-issue-per-PR rule:
     only the marker-matching issue scores, siblings count for credibility.
+
+    Returns ``True`` when all required solving-PR score data was available, so
+    the caller can safely refresh the cache with this complete issue snapshot.
     """
     solved_count = 0
     valid_solved_count = 0
     closed_count = 0
     issue_token_score = 0.0
+    score_fetch_failed = False
     scored_issues: List[Issue] = []
 
     issues_sorted = sorted(
@@ -315,6 +379,7 @@ async def _score_miner_issues(
             # Fetch failed — issue still counts for solved/credibility but not scored.
             # Can't apply the valid-solved gate without a real token_score, so be
             # conservative and don't increment valid_solved_count.
+            score_fetch_failed = True
             bt.logging.debug(
                 f'  issue #{issue.issue_number} ({issue.repo_full_name}): solver score unavailable '
                 f'(fetch failed) — credibility only'
@@ -381,7 +446,7 @@ async def _score_miner_issues(
             f'{solved_count} solved ({valid_solved_count} valid) | {closed_count} closed | '
             f'{open_issue_count} open'
         )
-        return
+        return not score_fetch_failed
 
     spam_mult = calculate_open_issue_spam_multiplier(open_issue_count, issue_token_score)
 
@@ -408,6 +473,7 @@ async def _score_miner_issues(
         f'credibility={credibility:.2f} | spam_mult={spam_mult:.1f} | '
         f'discovery_score={total_discovery_score:.2f}'
     )
+    return not score_fetch_failed
 
 
 async def _resolve_solving_pr_score(

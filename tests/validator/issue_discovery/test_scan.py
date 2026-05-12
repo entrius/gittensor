@@ -21,6 +21,7 @@ mirror_client_mod = pytest.importorskip('gittensor.utils.mirror.client')
 classes = pytest.importorskip('gittensor.classes')
 load_weights = pytest.importorskip('gittensor.validator.utils.load_weights')
 scored_pr_module = pytest.importorskip('gittensor.validator.oss_contributions.mirror.scored_pr')
+normalize_module = pytest.importorskip('gittensor.validator.issue_discovery.normalize')
 
 run_issue_discovery = scan_module.run_issue_discovery
 _classify_issue = scan_module._classify_issue
@@ -32,9 +33,11 @@ MirrorPullRequest = mirror_models.MirrorPullRequest
 MirrorPullRequestFilesResponse = mirror_models.MirrorPullRequestFilesResponse
 MirrorRequestError = mirror_client_mod.MirrorRequestError
 MinerEvaluation = classes.MinerEvaluation
+MinerEvaluationCache = classes.MinerEvaluationCache
 RepositoryConfig = load_weights.RepositoryConfig
 TokenConfig = load_weights.TokenConfig
 ScoredPR = scored_pr_module.ScoredPR
+normalize_issue_discovery_rewards = normalize_module.normalize_issue_discovery_rewards
 
 
 # Representative defaults for the plumbed-through token scoring args. The
@@ -393,6 +396,216 @@ class TestRunMirrorIssueDiscovery:
         )
         assert failing.total_solved_issues == 0
         assert working.total_solved_issues == 1
+
+    def test_mirror_request_error_restores_cached_issue_discovery_fields(self):
+        cache = MinerEvaluationCache()
+        cached = MinerEvaluation(uid=1, hotkey='hk1', github_id='fails')
+        cached.issue_discovery_score = 8.12
+        cached.issue_token_score = 700.0
+        cached.issue_credibility = 1.0
+        cached.is_issue_eligible = True
+        cached.total_solved_issues = 7
+        cached.total_valid_solved_issues = 7
+        cache.store(cached)
+
+        client = Mock()
+        working_issues = [
+            _issue_dict(issue_number=20 + i, author_github_id='B', solved_by_pr=300 + i) for i in range(7)
+        ]
+
+        def _per_miner(github_id, since=None):
+            if github_id == 'fails':
+                raise MirrorRequestError('boom')
+            return _response(working_issues)
+
+        client.get_miner_issues.side_effect = _per_miner
+
+        failing = MinerEvaluation(uid=1, hotkey='hk1', github_id='fails')
+        working = _eval(uid=2, github_id='works')
+        working.merged_prs = [_scored_mirror_pr('entrius/gittensor-ui', pr) for pr in range(300, 307)]
+
+        _run(
+            run_issue_discovery(
+                {1: failing, 2: working},
+                _mirror_repos('entrius/gittensor-ui'),
+                _EMPTY_LANGS,
+                _EMPTY_TOKEN_CONFIG,
+                client=client,
+                evaluation_cache=cache,
+            )
+        )
+
+        assert failing.issue_discovery_score == 8.12
+        assert failing.issue_token_score == 700.0
+        assert failing.issue_credibility == 1.0
+        assert failing.is_issue_eligible is True
+        assert failing.total_solved_issues == 7
+        assert failing.total_valid_solved_issues == 7
+        assert working.issue_discovery_score > 0
+
+        rewards = normalize_issue_discovery_rewards({1: failing, 2: working})
+        assert rewards[1] < 1.0
+        assert rewards[2] < 1.0
+        assert sum(rewards.values()) == pytest.approx(1.0)
+
+    def test_successful_issue_fetch_refreshes_cache_after_scoring(self):
+        cache = MinerEvaluationCache()
+        client = Mock()
+        client.get_miner_issues.return_value = _response(
+            [_issue_dict(issue_number=10 + i, author_github_id='A', solved_by_pr=200 + i) for i in range(7)]
+        )
+
+        eval_ = _eval(uid=1, github_id='999')
+        eval_.merged_prs = [_scored_mirror_pr('entrius/gittensor-ui', pr) for pr in range(200, 207)]
+        # Mimic the OSS-phase store that happens before issue discovery runs.
+        # update_issue_discovery() only refreshes existing entries.
+        cache.store(eval_)
+
+        _run(
+            run_issue_discovery(
+                {1: eval_},
+                _mirror_repos('entrius/gittensor-ui'),
+                _EMPTY_LANGS,
+                _EMPTY_TOKEN_CONFIG,
+                client=client,
+                evaluation_cache=cache,
+            )
+        )
+
+        cached = cache.get(uid=1, hotkey='hk', github_id='999')
+        assert cached is not None
+        assert cached.issue_discovery_score == eval_.issue_discovery_score
+        assert cached.issue_discovery_score > 0
+        assert cached.total_solved_issues == 7
+        assert cached.total_valid_solved_issues == 7
+
+    def test_oss_store_preserves_cached_issue_fields_across_rounds(self):
+        """Regression: prior round's issue-discovery refresh must survive the
+        next round's OSS-phase store() so a same-round mirror failure can
+        restore the prior score. Without store()'s identity-match preserve
+        logic, the fresh-eval store wipes the entry and the restore reads
+        zeros — defeating the entire fallback (issue #1065)."""
+        cache = MinerEvaluationCache()
+
+        # --- Round N-1: full success.
+        # OSS phase stores the eval. At OSS-phase time the eval has the
+        # MinerEvaluation dataclass defaults for the issue-discovery fields
+        # (all zero/False) because issue discovery has not run yet this round.
+        round_n_minus_1 = _eval(uid=1, github_id='999')
+        round_n_minus_1.merged_prs = [_scored_mirror_pr('entrius/gittensor-ui', pr) for pr in range(300, 307)]
+        cache.store(round_n_minus_1)
+
+        # Issue phase finishes and refreshes the cached issue-discovery fields.
+        round_n_minus_1.issue_discovery_score = 8.12
+        round_n_minus_1.issue_token_score = 700.0
+        round_n_minus_1.issue_credibility = 1.0
+        round_n_minus_1.is_issue_eligible = True
+        round_n_minus_1.total_solved_issues = 7
+        round_n_minus_1.total_valid_solved_issues = 7
+        cache.update_issue_discovery(round_n_minus_1)
+
+        # --- Round N: a fresh MinerEvaluation with all issue fields at
+        # dataclass defaults. The OSS phase stores it. Without merge-on-store
+        # this would clobber the round-N-1 refresh.
+        round_n = _eval(uid=1, github_id='999')
+        round_n.merged_prs = [_scored_mirror_pr('entrius/gittensor-ui', pr) for pr in range(300, 307)]
+        cache.store(round_n)
+
+        # Mirror fetch fails in round N. _restore_issue_discovery_from_cache
+        # reads the entry that store() should have preserved.
+        client = Mock()
+        client.get_miner_issues.side_effect = MirrorRequestError('boom')
+
+        _run(
+            run_issue_discovery(
+                {1: round_n},
+                _mirror_repos('entrius/gittensor-ui'),
+                _EMPTY_LANGS,
+                _EMPTY_TOKEN_CONFIG,
+                client=client,
+                evaluation_cache=cache,
+            )
+        )
+
+        assert round_n.issue_discovery_score == 8.12
+        assert round_n.issue_token_score == 700.0
+        assert round_n.issue_credibility == 1.0
+        assert round_n.is_issue_eligible is True
+        assert round_n.total_solved_issues == 7
+        assert round_n.total_valid_solved_issues == 7
+
+    def test_successful_no_issue_fetch_clears_stale_cached_issue_fields(self):
+        cache = MinerEvaluationCache()
+        stale = _eval(uid=1, github_id='999')
+        stale.issue_discovery_score = 8.12
+        stale.issue_token_score = 700.0
+        stale.issue_credibility = 1.0
+        stale.is_issue_eligible = True
+        stale.total_solved_issues = 7
+        stale.total_valid_solved_issues = 7
+        cache.store(stale)
+
+        client = Mock()
+        client.get_miner_issues.return_value = _response([_issue_dict(repo='foo/not-enabled')])
+
+        eval_ = _eval(uid=1, github_id='999')
+        _run(
+            run_issue_discovery(
+                {1: eval_},
+                _mirror_repos('entrius/gittensor-ui'),
+                _EMPTY_LANGS,
+                _EMPTY_TOKEN_CONFIG,
+                client=client,
+                evaluation_cache=cache,
+            )
+        )
+
+        assert eval_.issue_discovery_score == 0.0
+        assert eval_.issue_token_score == 0.0
+        assert eval_.issue_credibility == 0.0
+        assert eval_.is_issue_eligible is False
+        assert eval_.total_solved_issues == 0
+        assert eval_.total_valid_solved_issues == 0
+
+        cached = cache.get(uid=1, hotkey='hk', github_id='999')
+        assert cached is not None
+        assert cached.issue_discovery_score == 0.0
+        assert cached.total_solved_issues == 0
+
+    def test_solving_pr_file_fetch_failure_does_not_overwrite_cached_issue_fields(self):
+        cache = MinerEvaluationCache()
+        stale = _eval(uid=1, github_id='999')
+        stale.issue_discovery_score = 8.12
+        stale.issue_token_score = 700.0
+        stale.issue_credibility = 1.0
+        stale.is_issue_eligible = True
+        stale.total_solved_issues = 7
+        stale.total_valid_solved_issues = 7
+        cache.store(stale)
+
+        client = Mock()
+        client.get_miner_issues.return_value = _response([_issue_dict()])
+        client.get_pr_files.side_effect = MirrorRequestError('files fetch failed')
+
+        eval_ = _eval(uid=1, github_id='999')
+        _run(
+            run_issue_discovery(
+                {1: eval_},
+                _mirror_repos('entrius/gittensor-ui'),
+                _EMPTY_LANGS,
+                _EMPTY_TOKEN_CONFIG,
+                client=client,
+                evaluation_cache=cache,
+            )
+        )
+
+        assert eval_.issue_discovery_score == 0.0
+        assert eval_.total_solved_issues == 1
+
+        cached = cache.get(uid=1, hotkey='hk', github_id='999')
+        assert cached is not None
+        assert cached.issue_discovery_score == 8.12
+        assert cached.total_solved_issues == 7
 
 
 # ============================================================================

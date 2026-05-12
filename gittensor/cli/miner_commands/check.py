@@ -55,7 +55,7 @@ _PAT_CHECK_STATUS_MARKUP = {
     show_default=True,
     help='Minimum validator stake (α) to probe.',
 )
-@click.option('--json-output', 'json_mode', is_flag=True, default=False, help='Output results as JSON.')
+@click.option('--json', 'json_mode', is_flag=True, default=False, help='Output results as JSON.')
 def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, min_vtrust, min_stake, json_mode):
     """Check how many validators have your PAT stored.
 

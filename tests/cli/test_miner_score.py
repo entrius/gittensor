@@ -317,6 +317,40 @@ class TestScoreCommand:
         assert result.exit_code == 0, result.output
         assert set(captured['repos'].keys()) == {'mirror/repo'}
 
+    def test_profile_path_writes_pstats_file_and_suppresses_table(self, runner, miner_eval_factory, tmp_path):
+        """`--profile PATH` writes a binary pstats file and emits only a path notification (no table/JSON)."""
+        import pstats
+
+        evaluation = miner_eval_factory(uid=_DEV_UID, is_eligible=True)
+        prof_file = tmp_path / 'run.prof'
+        with _multi_patch(_patch_pipeline(uid=_DEV_UID, miner_evaluation=evaluation)):
+            result = runner.invoke(
+                cli,
+                ['miner', 'score', '--profile', str(prof_file)],
+                env={'GITTENSOR_MINER_PAT': 'ghp_dummy'},
+            )
+        assert result.exit_code == 0, result.output
+        assert prof_file.exists()
+        # File must be a valid pstats binary, not just a touched empty file.
+        pstats.Stats(str(prof_file))
+        assert prof_file.stat().st_size > 0
+        # No table or JSON payload on stdout; just the path notification on stderr.
+        assert f'Miner UID {_DEV_UID}' not in result.output
+        assert str(prof_file) in result.stderr
+
+    def test_profile_omitted_skips_profiler(self, runner, miner_eval_factory):
+        """Default invocation must not enable cProfile or print any profile banner."""
+        evaluation = miner_eval_factory(uid=_DEV_UID, is_eligible=True)
+        with _multi_patch(_patch_pipeline(uid=_DEV_UID, miner_evaluation=evaluation)):
+            result = runner.invoke(
+                cli,
+                ['miner', 'score'],
+                env={'GITTENSOR_MINER_PAT': 'ghp_dummy'},
+            )
+        assert result.exit_code == 0, result.output
+        assert 'wrote pstats binary' not in result.output
+        assert 'wrote pstats binary' not in result.stderr
+
     def test_pat_storage_load_all_pats_is_patched(self, runner, miner_eval_factory):
         """The injected PAT snapshot must override pat_storage.load_all_pats()."""
         evaluation = miner_eval_factory(uid=_DEV_UID)

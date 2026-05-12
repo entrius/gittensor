@@ -9,11 +9,9 @@ import numpy as np
 
 from gittensor.classes import MinerEvaluation, MinerEvaluationCache
 from gittensor.constants import (
-    ISSUE_DISCOVERY_EMISSION_SHARE,
     ISSUES_TREASURY_EMISSION_SHARE,
     ISSUES_TREASURY_UID,
     OSS_EMISSION_SHARE,
-    RECYCLE_EMISSION_SHARE,
     RECYCLE_UID,
 )
 from gittensor.utils.uids import get_all_uids
@@ -48,11 +46,10 @@ async def forward(self: 'Validator') -> None:
     4. Store all evaluations to DB
     5. Blend emission pools and update scores
 
-    Emission blending (hardcoded per-competition):
-    - OSS contributions: 30%
-    - Issue discovery:   30%
-    - Issue treasury:    15% (flat to UID 111)
-    - Recycle:           25% (flat to UID 0)
+    Emission blending:
+    - Combined OSS scoring pool: 90%
+    - Issue treasury:            10% (flat to UID 111)
+    - Recycle: unclaimed scoring-pool slack only
     """
 
     if self.step % VALIDATOR_STEPS_INTERVAL == 0:
@@ -85,7 +82,7 @@ async def forward(self: 'Validator') -> None:
         # 4. Store all evaluations to DB (includes issue discovery fields)
         await self.bulk_store_evaluation(miner_evaluations, skip_uids=cached_uids)
 
-        # 5. Blend 4 emission pools into final rewards
+        # 5. Blend emission pools into final rewards
         rewards = blend_emission_pools(oss_rewards, issue_rewards, miner_uids)
 
         self.update_scores(rewards, miner_uids, blacklisted_uids=sorted(penalized_uids))
@@ -154,32 +151,23 @@ def blend_emission_pools(
     issue_rewards: np.ndarray,
     miner_uids: set[int],
 ) -> np.ndarray:
-    """Blend 4 emission pools into a single rewards array.
+    """Blend scoring and treasury pools into a single rewards array.
 
-    - OSS contributions: 30%
-    - Issue discovery:   30%
-    - Issue treasury:    15% (flat to UID 111)
-    - Recycle:           25% (flat to UID 0)
+    The combined scoring pool receives 90% of emissions. Recycle receives
+    only unclaimed scoring-pool slack when no OSS or issue scorer is active.
     """
     sorted_uids = sorted(miner_uids)
     rewards = np.zeros(len(sorted_uids))
     recycle_extra = 0.0
 
-    # Pool 1: OSS contributions (30%)
-    oss_total = float(oss_rewards.sum())
-    if oss_total > 0:
-        rewards += oss_rewards * OSS_EMISSION_SHARE
+    scoring_rewards = oss_rewards + issue_rewards
+    scoring_total = float(scoring_rewards.sum())
+    if scoring_total > 0:
+        rewards += (scoring_rewards / scoring_total) * OSS_EMISSION_SHARE
     else:
         recycle_extra += OSS_EMISSION_SHARE
 
-    # Pool 2: Issue discovery (30%)
-    issue_total = float(issue_rewards.sum())
-    if issue_total > 0:
-        rewards += issue_rewards * ISSUE_DISCOVERY_EMISSION_SHARE
-    else:
-        recycle_extra += ISSUE_DISCOVERY_EMISSION_SHARE
-
-    # Pool 3: Issue treasury (15% flat to UID 111)
+    # Issue treasury (10% flat to UID 111)
     if ISSUES_TREASURY_UID > 0 and ISSUES_TREASURY_UID in miner_uids:
         treasury_idx = sorted_uids.index(ISSUES_TREASURY_UID)
         rewards[treasury_idx] += ISSUES_TREASURY_EMISSION_SHARE
@@ -188,11 +176,11 @@ def blend_emission_pools(
             f'{ISSUES_TREASURY_EMISSION_SHARE * 100:.0f}% of emissions'
         )
 
-    # Pool 4: Recycle (25% + unclaimed from empty pools)
+    # Recycle unclaimed scoring-pool slack. There is no fixed recycle baseline.
     if RECYCLE_UID in miner_uids:
         recycle_idx = sorted_uids.index(RECYCLE_UID)
-        rewards[recycle_idx] += RECYCLE_EMISSION_SHARE + recycle_extra
+        rewards[recycle_idx] += recycle_extra
         if recycle_extra > 0:
-            bt.logging.info(f'Recycling {recycle_extra * 100:.0f}% unclaimed emissions from empty pools')
+            bt.logging.info(f'Recycling {recycle_extra * 100:.0f}% unclaimed scoring-pool emissions')
 
     return rewards

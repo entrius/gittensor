@@ -18,6 +18,7 @@ from gittensor.cli.miner_commands.helpers import (
     _pat_post_row_category,
     _require_validator_axons,
 )
+from gittensor.cli.miner_commands.post import _validate_pat_locally
 
 
 def _fake_metagraph(rows: list[tuple[float, bool, float]]):
@@ -308,3 +309,26 @@ class TestPatPostAggregateCounts:
         counts = _pat_post_aggregate_counts(results)
         assert counts['rejected'] == 1
         assert counts['no_response'] == 1
+
+
+class TestValidatePatLocally:
+    @patch('gittensor.cli.miner_commands.post.requests.post')
+    @patch('gittensor.cli.miner_commands.post.requests.get')
+    def test_rejects_graphql_200_with_errors(self, mock_get, mock_post):
+        mock_get.return_value = SimpleNamespace(status_code=200, json=lambda: {'login': 'miner1'})
+        mock_post.return_value = SimpleNamespace(status_code=200, json=lambda: {'errors': [{'message': 'forbidden'}]})
+        assert _validate_pat_locally('ghp_test') is None
+
+    @patch('gittensor.cli.miner_commands.post.requests.post')
+    @patch('gittensor.cli.miner_commands.post.requests.get')
+    def test_rejects_graphql_200_with_null_viewer(self, mock_get, mock_post):
+        mock_get.return_value = SimpleNamespace(status_code=200, json=lambda: {'login': 'miner1'})
+        mock_post.return_value = SimpleNamespace(status_code=200, json=lambda: {'data': {'viewer': None}})
+        assert _validate_pat_locally('ghp_test') is None
+
+    @patch('gittensor.cli.miner_commands.post.requests.post')
+    @patch('gittensor.cli.miner_commands.post.requests.get')
+    def test_accepts_graphql_200_with_viewer(self, mock_get, mock_post):
+        mock_get.return_value = SimpleNamespace(status_code=200, json=lambda: {'login': 'miner1'})
+        mock_post.return_value = SimpleNamespace(status_code=200, json=lambda: {'data': {'viewer': {'login': 'miner1'}}})
+        assert _validate_pat_locally('ghp_test') == 'miner1'

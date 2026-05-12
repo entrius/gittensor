@@ -206,6 +206,8 @@ def _validate_pat_locally(pat: str) -> str | None:
         if user_resp.status_code != 200:
             return None
         login: str | None = user_resp.json().get('login') or None
+        if not login:
+            return None
 
         # Check GraphQL access (same test the validator runs during PAT broadcast)
         gql_resp = requests.post(
@@ -215,6 +217,20 @@ def _validate_pat_locally(pat: str) -> str | None:
             timeout=GITHUB_HTTP_TIMEOUT_SECONDS,
         )
         if gql_resp.status_code != 200:
+            err_console.print(
+                '[red]PAT lacks GraphQL API access. Fine-grained PATs need "Public Repositories (read-only)" permission.[/red]'
+            )
+            return None
+
+        payload = gql_resp.json()
+        if payload.get('errors'):
+            err_console.print(
+                '[red]PAT lacks GraphQL API access. Fine-grained PATs need "Public Repositories (read-only)" permission.[/red]'
+            )
+            return None
+
+        viewer = (payload.get('data') or {}).get('viewer')
+        if viewer is None:
             err_console.print(
                 '[red]PAT lacks GraphQL API access. Fine-grained PATs need "Public Repositories (read-only)" permission.[/red]'
             )

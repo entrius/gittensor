@@ -34,15 +34,15 @@ _DEV_UID = 1
 _DEV_HOTKEY = 'dev'
 
 
-def _die(msg: str, json_mode: bool) -> NoReturn:
-    _error(msg, json_mode)
+def _die(msg: str, as_json: bool) -> NoReturn:
+    _error(msg, as_json)
     sys.exit(1)
 
 
-def _resolve_pat(cli_pat: Optional[str], json_mode: bool) -> str:
+def _resolve_pat(cli_pat: Optional[str], as_json: bool) -> str:
     pat = cli_pat or os.environ.get('GITTENSOR_MINER_PAT')
     if not pat:
-        _die('--pat flag or GITTENSOR_MINER_PAT environment variable is required.', json_mode)
+        _die('--pat flag or GITTENSOR_MINER_PAT environment variable is required.', as_json)
     return pat
 
 
@@ -231,8 +231,15 @@ def _drain_logs() -> None:
     show_default=True,
     help="Bittensor log verbosity. 'info' surfaces the validator pipeline's per-step progress on stderr.",
 )
-@click.option('--json-output', 'json_mode', is_flag=True, default=False, help='Emit result as JSON on stdout.')
-def score_command(pat: Optional[str], log_level: str, json_mode: bool) -> None:
+@click.option(
+    '--json',
+    '--json-output',
+    'as_json',
+    is_flag=True,
+    default=False,
+    help='Emit result as JSON on stdout. --json-output is a deprecated alias.',
+)
+def score_command(pat: Optional[str], log_level: str, as_json: bool) -> None:
     """Locally run the validator scoring pipeline end-to-end for the miner identified by --pat.
 
     No subtensor, wallet, DB, axon, or wandb is touched.
@@ -243,7 +250,7 @@ def score_command(pat: Optional[str], log_level: str, json_mode: bool) -> None:
     """
     import asyncio
 
-    resolved_pat = _resolve_pat(pat, json_mode)
+    resolved_pat = _resolve_pat(pat, as_json)
 
     # Deferred imports: keeps --help fast (these pull bittensor + the validator graph).
     from gittensor.validator.forward import (
@@ -264,7 +271,7 @@ def score_command(pat: Optional[str], log_level: str, json_mode: bool) -> None:
     stub = cast('Validator', _StubValidator(_DEV_UID, _DEV_HOTKEY))
     miner_uids = {_DEV_UID}
 
-    if json_mode:
+    if as_json:
         master_repositories = load_master_repo_weights()
         programming_languages = load_programming_language_weights()
         token_config = load_token_config()
@@ -299,13 +306,13 @@ def score_command(pat: Optional[str], log_level: str, json_mode: bool) -> None:
             },
         }
 
-    if not json_mode:
+    if not as_json:
         console.print('[bold cyan]Running validator pipeline...[/bold cyan]')
     payload = asyncio.run(_run())
 
     _drain_logs()
 
-    if json_mode:
+    if as_json:
         emit_json(payload)
     else:
         _render_table(payload)

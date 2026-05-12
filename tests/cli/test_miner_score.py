@@ -173,7 +173,7 @@ class TestScoreCommand:
         ):
             result = runner.invoke(
                 cli,
-                ['miner', 'score', '--json-output'],
+                ['miner', 'score', '--json'],
                 env={'GITTENSOR_MINER_PAT': 'ghp_dummy'},
             )
         assert result.exit_code == 0, result.output
@@ -186,6 +186,22 @@ class TestScoreCommand:
         assert payload['rewards']['issue_discovery_normalized'] == 0.1
         assert payload['rewards']['blended_final'] == 0.3
 
+    def test_json_output_deprecated_alias_matches_primary_flag(self, runner, miner_eval_factory):
+        evaluation = miner_eval_factory(uid=_DEV_UID, is_eligible=True, credibility=0.5)
+        with _multi_patch(_patch_pipeline(uid=_DEV_UID, miner_evaluation=evaluation)):
+            primary = runner.invoke(
+                cli,
+                ['miner', 'score', '--json'],
+                env={'GITTENSOR_MINER_PAT': 'ghp_dummy'},
+            )
+            alias = runner.invoke(
+                cli,
+                ['miner', 'score', '--json-output'],
+                env={'GITTENSOR_MINER_PAT': 'ghp_dummy'},
+            )
+        assert primary.exit_code == 0 and alias.exit_code == 0
+        assert json.loads(primary.output) == json.loads(alias.output)
+
     def test_pat_never_appears_in_json(self, runner, miner_eval_factory):
         """The introspection-based serializer relies on _EVAL_SKIP to redact secrets;
         guard against it accidentally leaking github_pat into JSON output."""
@@ -193,7 +209,7 @@ class TestScoreCommand:
         with _multi_patch(_patch_pipeline(uid=_DEV_UID, miner_evaluation=evaluation)):
             result = runner.invoke(
                 cli,
-                ['miner', 'score', '--pat', 'ghp_should_not_leak', '--json-output'],
+                ['miner', 'score', '--pat', 'ghp_should_not_leak', '--json'],
                 env={},
             )
         assert result.exit_code == 0, result.output
@@ -218,7 +234,7 @@ class TestScoreCommand:
         with _multi_patch(_patch_pipeline(uid=_DEV_UID, miner_evaluation=evaluation)):
             result = runner.invoke(
                 cli,
-                ['miner', 'score', '--json-output'],
+                ['miner', 'score', '--json'],
                 env={'GITTENSOR_MINER_PAT': 'ghp_dummy'},
             )
         assert result.exit_code == 0, result.output
@@ -252,7 +268,7 @@ class TestScoreCommand:
         with _multi_patch(_patch_pipeline(uid=_DEV_UID, miner_evaluation=evaluation)):
             result = runner.invoke(
                 cli,
-                ['miner', 'score', '--json-output'],
+                ['miner', 'score', '--json'],
                 env={'GITTENSOR_MINER_PAT': 'ghp_dummy'},
             )
         assert result.exit_code == 0, result.output

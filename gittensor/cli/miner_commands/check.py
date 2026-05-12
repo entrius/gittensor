@@ -55,8 +55,15 @@ _PAT_CHECK_STATUS_MARKUP = {
     show_default=True,
     help='Minimum validator stake (α) to probe.',
 )
-@click.option('--json-output', 'json_mode', is_flag=True, default=False, help='Output results as JSON.')
-def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, min_vtrust, min_stake, json_mode):
+@click.option(
+    '--json',
+    '--json-output',
+    'as_json',
+    is_flag=True,
+    default=False,
+    help='Output results as JSON (machine-readable). --json-output is a deprecated alias.',
+)
+def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, min_vtrust, min_stake, as_json):
     """Check how many validators have your PAT stored.
 
     Sends a lightweight probe to each validator — no PAT is transmitted.
@@ -80,15 +87,15 @@ def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, min_vtrust
         try:
             wallet, subtensor, metagraph, dendrite = _connect_bittensor(wallet_name, wallet_hotkey, ws_endpoint, netuid)
         except Exception as e:
-            _error(f'Failed to initialize bittensor: {e}', json_mode)
+            _error(f'Failed to initialize bittensor: {e}', as_json)
             sys.exit(1)
 
     # Verify miner is registered
-    _require_registered(wallet, metagraph, netuid, json_mode)
+    _require_registered(wallet, metagraph, netuid, as_json)
 
     # 3. Find active validator axons (vtrust + serving + stake threshold)
     validator_axons, validator_uids, excluded = _require_validator_axons(
-        metagraph, json_mode, min_vtrust=min_vtrust, min_stake=min_stake
+        metagraph, as_json, min_vtrust=min_vtrust, min_stake=min_stake
     )
 
     # 4. Send check probes
@@ -125,7 +132,7 @@ def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, min_vtrust
     valid_count = counts['valid']
 
     # 6. Display results
-    if json_mode:
+    if as_json:
         click.echo(
             json.dumps(
                 {
@@ -152,4 +159,4 @@ def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, min_vtrust
 
         console.print(table)
         console.print(f'\n[bold]{valid_count}/{len(results)} validators have a valid PAT stored.[/bold]')
-        _render_skipped_validators(excluded, json_mode)
+        _render_skipped_validators(excluded, as_json)

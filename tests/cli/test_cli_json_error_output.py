@@ -82,3 +82,31 @@ def test_admin_info_human_mode_exits_non_zero_on_soft_read_failure(cli_root, run
 
     assert result.exit_code == 1
     assert 'Could not read contract configuration' in result.output
+
+
+def test_issues_list_json_mode_bad_id_type_emits_bad_parameter(cli_root, runner):
+    """Invalid --id value must yield JSON on stdout when --json is set (Click parse path)."""
+    result = runner.invoke(cli_root, ['issues', 'list', '--json', '--id', 'not-an-int'], catch_exceptions=False)
+    assert result.exit_code != 0
+    payload = json.loads(result.stdout)
+    assert payload['success'] is False
+    assert payload['error']['type'] == 'bad_parameter'
+    msg = payload['error']['message'].lower()
+    assert 'not-an-int' in msg or 'integer' in msg or 'valid' in msg
+
+
+def test_issues_list_json_mode_unknown_option_emits_usage_error(cli_root, runner):
+    result = runner.invoke(cli_root, ['issues', 'list', '--json', '--not-a-real-option'], catch_exceptions=False)
+    assert result.exit_code != 0
+    payload = json.loads(result.stdout)
+    assert payload['success'] is False
+    assert payload['error']['type'] == 'usage_error'
+    assert 'not-a-real-option' in payload['error']['message'] or 'no such option' in payload['error']['message'].lower()
+
+
+def test_miner_check_json_mode_unknown_option_emits_usage_error(cli_root, runner):
+    result = runner.invoke(cli_root, ['miner', 'check', '--json', '--not-a-real-option'], catch_exceptions=False)
+    assert result.exit_code != 0
+    payload = json.loads(result.stdout)
+    assert payload['success'] is False
+    assert payload['error']['type'] == 'usage_error'

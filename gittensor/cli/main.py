@@ -39,10 +39,60 @@ from rich.table import Table
 from gittensor import __version__
 from gittensor.cli.issue_commands import register_commands
 from gittensor.cli.issue_commands.help import StyledAliasGroup, StyledGroup
-from gittensor.cli.issue_commands.helpers import CONFIG_FILE, GITTENSOR_DIR, console, err_console
+from gittensor.cli.issue_commands.helpers import CONFIG_FILE, GITTENSOR_DIR, console, emit_error_json, err_console
 
 
-@click.group(cls=StyledAliasGroup)
+def _argv_requests_machine_json(argv: list[str]) -> bool:
+    """True if the user asked for JSON on stdout (matches issue/miner flags)."""
+    return '--json' in argv or '--json-output' in argv
+
+
+def _click_exception_error_type(exc: click.ClickException) -> str:
+    """Map Click exceptions to the same ``error.type`` strings issue commands use."""
+    if isinstance(exc, click.BadParameter):
+        return 'bad_parameter'
+    if isinstance(exc, click.UsageError):
+        return 'usage_error'
+    return 'click_exception'
+
+
+class GittensorRootCli(StyledAliasGroup):
+    """Root group: in machine-json mode, Click parse/usage errors emit the same JSON envelope as commands."""
+
+    def main(
+        self,
+        args=None,
+        prog_name=None,
+        complete_var=None,
+        standalone_mode=True,
+        windows_expand_args=True,
+        **extra,
+    ):
+        json_argv = list(sys.argv[1:] if args is None else args)
+        if standalone_mode and _argv_requests_machine_json(json_argv):
+            try:
+                return super().main(
+                    args=args,
+                    prog_name=prog_name,
+                    complete_var=complete_var,
+                    standalone_mode=False,
+                    windows_expand_args=windows_expand_args,
+                    **extra,
+                )
+            except click.ClickException as e:
+                emit_error_json(str(e), error_type=_click_exception_error_type(e))
+                sys.exit(e.exit_code)
+        return super().main(
+            args=args,
+            prog_name=prog_name,
+            complete_var=complete_var,
+            standalone_mode=standalone_mode,
+            windows_expand_args=windows_expand_args,
+            **extra,
+        )
+
+
+@click.group(cls=GittensorRootCli)
 @click.version_option(version=__version__, prog_name='gittensor')
 def cli():
     """Gittensor CLI - Manage issue bounties and validator operations"""
@@ -189,7 +239,7 @@ register_commands(cli)
 
 
 def main():
-    """Main entry point for the CLI"""
+    """Main entry point for the CLI."""
     cli()
 
 

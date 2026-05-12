@@ -104,28 +104,39 @@ def _status(message: str):
 
 
 def _print(message: str) -> None:
-    """Print a status/info message to stderr (safe under --json-output)."""
+    """Print a status/info message to stderr (safe under --json)."""
     err_console.print(message)
 
 
-def _error(msg: str, json_mode: bool) -> None:
-    """Print an error message in the appropriate format."""
-    if json_mode:
-        click.echo(json.dumps({'success': False, 'error': msg}))
+def _error(msg: str, as_json: bool, *, error_type: str = 'cli_error') -> None:
+    """Print an error message in the appropriate format (JSON matches issue/admin commands)."""
+    if as_json:
+        click.echo(
+            json.dumps(
+                {
+                    'success': False,
+                    'error': {'type': error_type, 'message': msg},
+                }
+            )
+        )
     else:
         err_console.print(f'[red]Error: {msg}[/red]')
 
 
-def _require_registered(wallet, metagraph, netuid: int, json_mode: bool) -> None:
+def _require_registered(wallet, metagraph, netuid: int, as_json: bool) -> None:
     """Exit with error if wallet hotkey is not registered on the subnet."""
     if wallet.hotkey.ss58_address not in metagraph.hotkeys:
-        _error(f'Hotkey {wallet.hotkey.ss58_address[:16]}... is not registered on subnet {netuid}.', json_mode)
+        _error(
+            f'Hotkey {wallet.hotkey.ss58_address[:16]}... is not registered on subnet {netuid}.',
+            as_json,
+            error_type='not_registered',
+        )
         sys.exit(1)
 
 
 def _require_validator_axons(
     metagraph,
-    json_mode: bool,
+    as_json: bool,
     *,
     min_vtrust: float = DEFAULT_MIN_VALIDATOR_VTRUST,
     min_stake: float = DEFAULT_MIN_VALIDATOR_STAKE,
@@ -140,20 +151,28 @@ def _require_validator_axons(
                 f'No validators passed --min-vtrust={min_vtrust:g} / '
                 f'--min-stake={min_stake:,.0f} α; all {len(excluded)} candidate(s) excluded.'
             )
-            if json_mode:
-                click.echo(json.dumps({'success': False, 'error': msg, 'skipped': excluded}))
+            if as_json:
+                click.echo(
+                    json.dumps(
+                        {
+                            'success': False,
+                            'error': {'type': 'no_validators', 'message': msg},
+                            'skipped': excluded,
+                        }
+                    )
+                )
             else:
-                _render_skipped_validators(excluded, json_mode)
+                _render_skipped_validators(excluded, as_json)
                 console.print(f'[red]Error: {msg}[/red]')
         else:
-            _error('No reachable validator axons found on the network.', json_mode)
+            _error('No reachable validator axons found on the network.', as_json, error_type='no_validators')
         sys.exit(1)
     return validator_axons, validator_uids, excluded
 
 
-def _render_skipped_validators(excluded: list[dict], json_mode: bool) -> None:
+def _render_skipped_validators(excluded: list[dict], as_json: bool) -> None:
     """Print a 'Skipped Validators' table when any high-vtrust UIDs were filtered."""
-    if json_mode or not excluded:
+    if as_json or not excluded:
         return
     table = Table(title='Skipped Validators')
     table.add_column('UID', style='cyan', justify='right')

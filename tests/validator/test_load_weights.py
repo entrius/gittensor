@@ -107,9 +107,9 @@ class TestLoadMasterRepositories:
         assert isinstance(repos, dict)
 
     def test_master_repositories_not_empty(self):
-        """Should load many repositories."""
+        """Should load at least the entrius core repos."""
         repos = load_master_repo_weights()
-        assert len(repos) > 100, 'Should have many repositories'
+        assert len(repos) > 0, 'Should have at least one repository'
 
     def test_repo_configs_are_repository_config_objects(self):
         """Each entry should be a RepositoryConfig object."""
@@ -122,14 +122,6 @@ class TestLoadMasterRepositories:
         repos = load_master_repo_weights()
         for repo_name in repos.keys():
             assert repo_name == repo_name.lower(), f'{repo_name} should be lowercase'
-
-    def test_mirror_enabled_field_present_on_live_configs(self):
-        """Live master_repositories.json entries load with a bool mirror_enabled."""
-        repos = load_master_repo_weights()
-        for repo_name, config in repos.items():
-            assert isinstance(config.mirror_enabled, bool), (
-                f'{repo_name} mirror_enabled should be bool, got {type(config.mirror_enabled)}'
-            )
 
     def test_trusted_label_pipeline_field_present_on_live_configs(self):
         """Live master_repositories.json entries load with a bool trusted_label_pipeline."""
@@ -149,44 +141,6 @@ class TestLoadMasterRepositories:
                 f'{repo_name} must have trusted_label_pipeline=true so the agentic-maintainer '
                 f'labeling worker is honored at scoring time'
             )
-
-
-class TestRepositoryConfigMirrorFlag:
-    """Dataclass-level tests for the mirror_enabled field + its JSON parsing."""
-
-    def test_mirror_enabled_default_false(self):
-        """RepositoryConfig constructor defaults mirror_enabled to False."""
-        config = RepositoryConfig(weight=0.5)
-        assert config.mirror_enabled is False
-
-    def test_mirror_enabled_explicit_true(self):
-        """RepositoryConfig accepts mirror_enabled=True."""
-        config = RepositoryConfig(weight=0.5, mirror_enabled=True)
-        assert config.mirror_enabled is True
-
-    def test_loader_parses_mirror_enabled_true(self, tmp_path, monkeypatch):
-        """load_master_repo_weights() parses mirror_enabled:true from JSON."""
-        import json
-
-        from gittensor.validator.utils import load_weights as lw
-
-        fake_weights_dir = tmp_path
-        (fake_weights_dir / 'master_repositories.json').write_text(
-            json.dumps(
-                {
-                    'foo/mirror-repo': {'weight': 0.5, 'mirror_enabled': True},
-                    'foo/legacy-repo': {'weight': 0.3},
-                    'foo/explicit-off': {'weight': 0.2, 'mirror_enabled': False},
-                }
-            )
-        )
-        monkeypatch.setattr(lw, '_get_weights_dir', lambda: fake_weights_dir)
-
-        repos = lw.load_master_repo_weights()
-
-        assert repos['foo/mirror-repo'].mirror_enabled is True
-        assert repos['foo/legacy-repo'].mirror_enabled is False
-        assert repos['foo/explicit-off'].mirror_enabled is False
 
 
 class TestRepositoryConfigTrustedLabelPipeline:

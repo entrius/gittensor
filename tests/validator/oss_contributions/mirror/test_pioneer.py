@@ -1,5 +1,5 @@
 """Unit tests for the unified ``calculate_pioneer_dividends`` exercising
-``mirror_merged_prs`` (ScoredMirrorPR shape).
+``merged_prs`` (ScoredPR shape).
 
 Parallels tests/validator/test_pioneer_dividend.py, which exercises the same
 function over legacy ``merged_pull_requests``.
@@ -13,7 +13,7 @@ mirror_models = pytest.importorskip('gittensor.utils.mirror.models')
 classes = pytest.importorskip('gittensor.classes')
 
 calculate_pioneer_dividends = pioneer_module.calculate_pioneer_dividends
-ScoredMirrorPR = scored_pr_module.ScoredMirrorPR
+ScoredPR = scored_pr_module.ScoredPR
 MirrorPullRequest = mirror_models.MirrorPullRequest
 MinerEvaluation = classes.MinerEvaluation
 
@@ -24,7 +24,7 @@ def _scored(
     repo: str = 'entrius/gittensor-ui',
     earned_score: float = 10.0,
     token_score: float = 100.0,
-) -> ScoredMirrorPR:
+) -> ScoredPR:
     pr = MirrorPullRequest.from_dict(
         {
             'repo_full_name': repo,
@@ -55,7 +55,7 @@ def _scored(
             'linked_issues': [],
         }
     )
-    scored = ScoredMirrorPR(pr=pr)
+    scored = ScoredPR(pr=pr)
     scored.token_score = token_score
     scored.earned_score = earned_score
     return scored
@@ -63,7 +63,7 @@ def _scored(
 
 def _eval_with(uid: int, scored_prs: list) -> MinerEvaluation:
     me = MinerEvaluation(uid=uid, hotkey=f'hk{uid}', github_id=str(uid))
-    me.mirror_merged_prs = scored_prs
+    me.merged_prs = scored_prs
     return me
 
 

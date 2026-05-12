@@ -4,7 +4,7 @@
 
 import json
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from click.testing import CliRunner
@@ -18,6 +18,7 @@ from gittensor.cli.miner_commands.helpers import (
     _pat_post_row_category,
     _require_validator_axons,
 )
+from gittensor.cli.miner_commands.post import _validate_pat_locally
 
 
 def _fake_metagraph(rows: list[tuple[float, bool, float]]):
@@ -31,9 +32,53 @@ def _fake_metagraph(rows: list[tuple[float, bool, float]]):
     )
 
 
+def _mock_http_response(status_code: int = 200, payload=None, json_error: Exception | None = None):
+    response = MagicMock()
+    response.status_code = status_code
+    if json_error is not None:
+        response.json.side_effect = json_error
+    else:
+        response.json.return_value = payload if payload is not None else {}
+    return response
+
+
 @pytest.fixture
 def runner():
     return CliRunner()
+
+
+class TestValidatePatLocally:
+    @patch('gittensor.cli.miner_commands.post.requests.post')
+    @patch('gittensor.cli.miner_commands.post.requests.get')
+    def test_valid_viewer_returns_login(self, mock_get, mock_post):
+        mock_get.return_value = _mock_http_response(200, {'login': 'octocat'})
+        mock_post.return_value = _mock_http_response(200, {'data': {'viewer': {'login': 'octocat'}}})
+
+        assert _validate_pat_locally('ghp_valid') == 'octocat'
+
+    @pytest.mark.parametrize(
+        'payload',
+        [
+            {'data': {'viewer': None}},
+            {'data': None},
+            {'errors': [{'message': 'Bad credentials'}]},
+        ],
+    )
+    @patch('gittensor.cli.miner_commands.post.requests.post')
+    @patch('gittensor.cli.miner_commands.post.requests.get')
+    def test_graphql_body_rejections_return_none(self, mock_get, mock_post, payload):
+        mock_get.return_value = _mock_http_response(200, {'login': 'octocat'})
+        mock_post.return_value = _mock_http_response(200, payload)
+
+        assert _validate_pat_locally('ghp_scopeless') is None
+
+    @patch('gittensor.cli.miner_commands.post.requests.post')
+    @patch('gittensor.cli.miner_commands.post.requests.get')
+    def test_graphql_json_decode_error_returns_none(self, mock_get, mock_post):
+        mock_get.return_value = _mock_http_response(200, {'login': 'octocat'})
+        mock_post.return_value = _mock_http_response(200, json_error=ValueError('not json'))
+
+        assert _validate_pat_locally('ghp_bad_json') is None
 
 
 class TestMinerPost:

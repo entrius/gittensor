@@ -132,6 +132,7 @@ class TestScoreCommand:
         result = runner.invoke(cli, ['miner', 'score', '--help'])
         assert result.exit_code == 0
         assert 'validator scoring pipeline' in result.output
+        assert '--profile PATH' in result.output
 
     def test_missing_pat_exits(self, runner, monkeypatch):
         monkeypatch.delenv('GITTENSOR_MINER_PAT', raising=False)
@@ -289,6 +290,45 @@ class TestScoreCommand:
         assert result.exit_code == 0, result.output
         assert 'octo/repo#42' in result.output
         assert 'Per-PR breakdown' in result.output
+
+    def test_profile_path_writes_pstats_file_and_suppresses_result_output(self, runner, miner_eval_factory, tmp_path):
+        """`--profile PATH` writes a valid cProfile pstats file without table/JSON rendering."""
+        import pstats
+
+        evaluation = miner_eval_factory(uid=_DEV_UID, is_eligible=True)
+        prof_file = tmp_path / 'run.prof'
+
+        with _multi_patch(_patch_pipeline(uid=_DEV_UID, miner_evaluation=evaluation)):
+            result = runner.invoke(
+                cli,
+                ['miner', 'score', '--profile', str(prof_file)],
+                env={'GITTENSOR_MINER_PAT': 'ghp_dummy'},
+            )
+
+        assert result.exit_code == 0, result.output
+        assert prof_file.exists()
+        assert prof_file.stat().st_size > 0
+        pstats.Stats(str(prof_file))
+        assert f'Miner UID {_DEV_UID}' not in result.output
+        assert 'Total earned score' not in result.output
+        assert 'success' not in result.output
+        assert 'wrote pstats binary' in result.stderr
+        assert str(prof_file) in result.stderr
+
+    def test_profile_omitted_skips_profiler_message(self, runner, miner_eval_factory):
+        """Default invocation must not print profile-specific output."""
+        evaluation = miner_eval_factory(uid=_DEV_UID, is_eligible=True)
+
+        with _multi_patch(_patch_pipeline(uid=_DEV_UID, miner_evaluation=evaluation)):
+            result = runner.invoke(
+                cli,
+                ['miner', 'score'],
+                env={'GITTENSOR_MINER_PAT': 'ghp_dummy'},
+            )
+
+        assert result.exit_code == 0, result.output
+        assert 'wrote pstats binary' not in result.output
+        assert 'wrote pstats binary' not in result.stderr
 
     def test_pat_storage_load_all_pats_is_patched(self, runner, miner_eval_factory):
         """The injected PAT snapshot must override pat_storage.load_all_pats()."""

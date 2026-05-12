@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from math import prod
-from typing import TYPE_CHECKING, DefaultDict, Dict, List, Optional, Set
+from typing import TYPE_CHECKING, DefaultDict, Dict, List, Optional, Set, Tuple
 
 import bittensor as bt
 
@@ -263,6 +263,14 @@ class PullRequest:
         for issue in raw_issues:
             if is_merged and not (issue.get('closedAt') and issue.get('state') == 'CLOSED'):
                 continue
+            issue_repo = ((issue.get('repository') or {}).get('nameWithOwner') or '').lower()
+            if issue_repo and issue_repo != repository_full_name:
+                bt.logging.warning(
+                    f'Skipping issue #{issue.get("number")} - cross-repo link '
+                    f'(issue in {issue_repo}, PR in {repository_full_name})'
+                )
+                continue
+            issue_repository_full_name = issue_repo or repository_full_name
             issue_author = issue.get('author') or {}
             author_db_id = issue_author.get('databaseId')
 
@@ -293,7 +301,7 @@ class PullRequest:
                 Issue(
                     number=issue['number'],
                     pr_number=pr_data['number'],
-                    repository_full_name=repository_full_name,
+                    repository_full_name=issue_repository_full_name,
                     title=issue['title'],
                     created_at=parse_github_timestamp_to_cst(issue['createdAt']) if issue.get('createdAt') else None,
                     closed_at=parse_github_timestamp_to_cst(issue['closedAt']) if issue.get('closedAt') else None,
@@ -656,6 +664,21 @@ class CachedEvaluation:
     cached_at: datetime
 
 
+# Fields owned by the issue-discovery phase. store() preserves these across
+# rounds so the OSS-phase write doesn't clobber the prior round's refresh;
+# update_issue_discovery() is the authoritative writer.
+_ISSUE_DISCOVERY_FIELDS: Tuple[str, ...] = (
+    'issue_discovery_score',
+    'issue_token_score',
+    'issue_credibility',
+    'is_issue_eligible',
+    'total_solved_issues',
+    'total_valid_solved_issues',
+    'total_closed_issues',
+    'total_open_issues',
+)
+
+
 class MinerEvaluationCache:
     """
     In-memory cache for successful miner evaluations, keyed by UID.
@@ -663,13 +686,27 @@ class MinerEvaluationCache:
     Used as fallback when GitHub API is unavailable. Validates that
     hotkey and github_id match before returning cached data to handle
     miner re-registration on the same UID.
+
+    The cache has two independent writers: store() is called by the OSS
+    phase with a freshly-fetched MinerEvaluation whose issue-discovery
+    fields are dataclass defaults, and update_issue_discovery() is called
+    by the issue-discovery phase after scoring. store() therefore preserves
+    any prior round's issue-discovery fields when identity matches, so a
+    later same-round mirror outage can fall back to a non-zero score.
     """
 
     def __init__(self):
         self._cache: Dict[int, CachedEvaluation] = {}
 
     def store(self, evaluation: 'MinerEvaluation') -> None:
-        """Store a successful evaluation in the cache."""
+        """Store a successful evaluation in the cache.
+
+        Preserves the prior entry's issue-discovery fields when the UID's
+        identity (hotkey, github_id) is unchanged — the caller (OSS phase)
+        is not authoritative for those fields and writes dataclass defaults
+        every round. Identity mismatch (re-registration) drops the prior
+        issue-discovery state along with the rest of the entry.
+        """
         if evaluation.failed_reason is not None:
             return
 
@@ -677,6 +714,11 @@ class MinerEvaluationCache:
             return
 
         cached_eval = self._build_cache_entry(evaluation)
+
+        existing = self._cache.get(evaluation.uid)
+        if existing is not None and existing.hotkey == evaluation.hotkey and existing.github_id == evaluation.github_id:
+            for name in _ISSUE_DISCOVERY_FIELDS:
+                setattr(cached_eval, name, getattr(existing.evaluation, name))
 
         self._cache[evaluation.uid] = CachedEvaluation(
             hotkey=evaluation.hotkey,
@@ -686,6 +728,33 @@ class MinerEvaluationCache:
         )
 
         bt.logging.debug(f'Cached successful evaluation for UID {evaluation.uid}')
+
+    def update_issue_discovery(self, evaluation: 'MinerEvaluation') -> None:
+        """Refresh issue-discovery fields on an existing cache entry.
+
+        No-op when no entry exists for this UID — the cache only holds
+        entries backed by an OSS-phase store(), so writing issue-discovery
+        fields alone would leave a half-populated entry that the OSS
+        fallback path could later restore.
+        """
+        existing = self._cache.get(evaluation.uid)
+        if existing is None:
+            return
+
+        if existing.hotkey != evaluation.hotkey or existing.github_id != evaluation.github_id:
+            bt.logging.debug(
+                f'Skipping issue-discovery refresh for UID {evaluation.uid}: identity mismatch '
+                f'(cached hotkey={existing.hotkey[:8]}..., github_id={existing.github_id} vs '
+                f'current hotkey={evaluation.hotkey[:8]}..., github_id={evaluation.github_id}). '
+                'Removing cached evaluation'
+            )
+            del self._cache[evaluation.uid]
+            return
+
+        for name in _ISSUE_DISCOVERY_FIELDS:
+            setattr(existing.evaluation, name, getattr(evaluation, name))
+
+        bt.logging.debug(f'Refreshed cached issue discovery for UID {evaluation.uid}')
 
     def get(self, uid: int, hotkey: str, github_id: str) -> Optional['MinerEvaluation']:
         """
@@ -712,6 +781,12 @@ class MinerEvaluationCache:
         bt.logging.debug(f'Cache hit for UID {uid} (cached at {cached.cached_at.isoformat()})')
 
         return self._isolate_for_downstream(cached.evaluation)
+
+    def evict_many(self, uids: Set[int]) -> None:
+        """Remove cached evaluations for all provided UIDs."""
+        for uid in uids:
+            if self._cache.pop(uid, None) is not None:
+                bt.logging.debug(f'Evicted cached evaluation for UID {uid}')
 
     @staticmethod
     def _build_cache_entry(evaluation: 'MinerEvaluation') -> 'MinerEvaluation':

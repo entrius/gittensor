@@ -13,8 +13,12 @@ import requests
 
 from gittensor.constants import BASE_GITHUB_API_URL, GITHUB_HTTP_TIMEOUT_SECONDS, GRAPHQL_VIEWER_QUERY
 from gittensor.synapses import PatBroadcastSynapse, PatCheckSynapse
+from gittensor.utils.github_api_tools import make_graphql_headers
 from gittensor.validator import pat_storage
-from gittensor.validator.utils.github_validation import validate_github_credentials
+from gittensor.validator.utils.github_validation import (
+    validate_github_credentials,
+    validate_github_credentials_result,
+)
 
 if TYPE_CHECKING:
     from neurons.validator import Validator
@@ -117,11 +121,16 @@ async def handle_pat_check(validator: 'Validator', synapse: PatCheckSynapse) -> 
     synapse.has_pat = True
 
     # Re-validate the stored PAT
-    _, error = validate_github_credentials(uid, entry['pat'])
-    if error:
+    validation = validate_github_credentials_result(uid, entry['pat'], stored_github_id=entry.get('github_id'))
+    if validation.transient_failure:
+        synapse.pat_valid = None
+        synapse.rejection_reason = 'GitHub API temporarily unavailable; retry the check in a few minutes.'
+        bt.logging.warning(f'PAT check result — UID: {uid}: GitHub identity lookup temporarily unavailable')
+        return synapse
+    if validation.error:
         synapse.pat_valid = False
-        synapse.rejection_reason = error
-        bt.logging.warning(f'PAT check result — UID: {uid}: validation failed: {error}')
+        synapse.rejection_reason = validation.error
+        bt.logging.warning(f'PAT check result — UID: {uid}: validation failed: {validation.error}')
         return synapse
 
     test_error = _test_pat_against_repo(entry['pat'])
@@ -164,12 +173,11 @@ def _test_pat_against_repo(pat: str) -> Optional[str]:
     Scoring uses the GraphQL API to fetch miner PRs, so this mirrors the real path.
     Returns an error string on failure, None on success.
     """
-    headers = {'Authorization': f'Bearer {pat}', 'Accept': 'application/json'}
     try:
         response = requests.post(
             f'{BASE_GITHUB_API_URL}/graphql',
             json={'query': GRAPHQL_VIEWER_QUERY},
-            headers=headers,
+            headers=make_graphql_headers(pat),
             timeout=GITHUB_HTTP_TIMEOUT_SECONDS,
         )
         if response.status_code != 200:

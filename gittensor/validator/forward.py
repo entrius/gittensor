@@ -2,12 +2,12 @@
 # Copyright © 2025 Entrius
 
 import asyncio
-from typing import TYPE_CHECKING, Dict, Set, Tuple
+from typing import TYPE_CHECKING, Dict, Optional, Set, Tuple
 
 import bittensor as bt
 import numpy as np
 
-from gittensor.classes import MinerEvaluation
+from gittensor.classes import MinerEvaluation, MinerEvaluationCache
 from gittensor.constants import (
     ISSUE_DISCOVERY_EMISSION_SHARE,
     ISSUES_TREASURY_EMISSION_SHARE,
@@ -68,8 +68,16 @@ async def forward(self: 'Validator') -> None:
 
         # 2. Score issue discovery
         issue_rewards = await issue_discovery(
-            miner_evaluations, master_repositories, programming_languages, token_config, miner_uids
+            miner_evaluations,
+            master_repositories,
+            programming_languages,
+            token_config,
+            miner_uids,
+            evaluation_cache=self.evaluation_cache,
         )
+
+        # cached UIDs now have fresh issue-discovery fields — persist them
+        cached_uids.clear()
 
         # 3. Issue bounties verification
         await issue_competitions(self, miner_evaluations)
@@ -117,6 +125,7 @@ async def issue_discovery(
     programming_languages: Dict,
     token_config,
     miner_uids: set[int],
+    evaluation_cache: Optional[MinerEvaluationCache] = None,
 ) -> np.ndarray:
     """Score issue discovery and return normalized rewards array.
 
@@ -134,7 +143,13 @@ async def issue_discovery(
     }
 
     if mirror_repos:
-        await run_mirror_issue_discovery(miner_evaluations, mirror_repos, programming_languages, token_config)
+        await run_mirror_issue_discovery(
+            miner_evaluations,
+            mirror_repos,
+            programming_languages,
+            token_config,
+            evaluation_cache=evaluation_cache,
+        )
     else:
         bt.logging.info('No mirror-enabled repos — issue discovery skipped for this round')
 

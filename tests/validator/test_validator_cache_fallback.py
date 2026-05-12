@@ -1,29 +1,36 @@
 # Entrius 2025
 
+import asyncio
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import cast
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from gittensor.classes import FileChange, Issue, MinerEvaluation, MinerEvaluationCache, PRState, PullRequest
 from gittensor.utils.github_api_tools import GraphQLPageResult, load_miners_prs
 from gittensor.utils.mirror.models import MirrorFile, MirrorPullRequest, MirrorReviewSummary
 from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredMirrorPR
+from gittensor.validator.oss_contributions.reward import get_rewards
 from neurons.validator import Validator
 
 
 class _DummyValidator:
     def __init__(self):
         self.evaluation_cache = MinerEvaluationCache()
+        self.metagraph = SimpleNamespace(hotkeys=[])
+
+    def store_or_use_cached_evaluation(self, miner_evaluations):
+        return Validator.store_or_use_cached_evaluation(cast(Validator, self), miner_evaluations)
 
 
-def _make_pr(uid: int) -> PullRequest:
+def _make_pr(uid: int, hotkey: str = 'hotkey_1', github_id: str = '12345') -> PullRequest:
     now = datetime.now(timezone.utc)
     return PullRequest(
         number=1,
         repository_full_name='owner/repo',
         uid=uid,
-        hotkey='hotkey_1',
-        github_id='12345',
+        hotkey=hotkey,
+        github_id=github_id,
         title='cached pr',
         author_login='miner',
         merged_at=now,
@@ -38,9 +45,11 @@ def _build_eval(
     merged_prs: int,
     fetch_failed: bool,
     mirror_pr_fetch_failed: bool = False,
+    hotkey: str = 'hotkey_1',
+    github_id: str = '12345',
 ) -> MinerEvaluation:
-    eval_ = MinerEvaluation(uid=uid, hotkey='hotkey_1', github_id='12345')
-    eval_.merged_pull_requests = [_make_pr(uid) for _ in range(merged_prs)]
+    eval_ = MinerEvaluation(uid=uid, hotkey=hotkey, github_id=github_id)
+    eval_.merged_pull_requests = [_make_pr(uid, hotkey=hotkey, github_id=github_id) for _ in range(merged_prs)]
     eval_.github_pr_fetch_failed = fetch_failed
     eval_.mirror_pr_fetch_failed = mirror_pr_fetch_failed
     return eval_
@@ -113,6 +122,73 @@ class TestStoreOrUseCachedEvaluation:
         assert cached_uids == set()
         assert miner_evaluations[1] is current_eval
         assert miner_evaluations[1].total_prs == 0
+
+    def test_duplicate_penalty_evicts_pre_penalty_cache_entries(self):
+        validator = _DummyValidator()
+        validator.metagraph = SimpleNamespace(hotkeys=['unused', 'hotkey_1', 'hotkey_2'])
+        shared_github_id = 'shared-gh'
+
+        evaluations = {
+            1: _build_eval(
+                uid=1,
+                merged_prs=1,
+                fetch_failed=False,
+                hotkey='hotkey_1',
+                github_id=shared_github_id,
+            ),
+            2: _build_eval(
+                uid=2,
+                merged_prs=1,
+                fetch_failed=False,
+                hotkey='hotkey_2',
+                github_id=shared_github_id,
+            ),
+        }
+
+        async def evaluate(uid, *_args, **_kwargs):
+            return evaluations[uid]
+
+        with (
+            patch(
+                'gittensor.validator.oss_contributions.reward.pat_storage.load_all_pats',
+                return_value=[
+                    {'uid': 1, 'hotkey': 'hotkey_1', 'pat': 'pat_1'},
+                    {'uid': 2, 'hotkey': 'hotkey_2', 'pat': 'pat_2'},
+                ],
+            ),
+            patch(
+                'gittensor.validator.oss_contributions.reward.evaluate_miners_pull_requests',
+                new=AsyncMock(side_effect=evaluate),
+            ),
+        ):
+            _, _, cached_uids, penalized_uids = asyncio.run(
+                get_rewards(
+                    cast(Validator, validator),
+                    {1, 2},
+                    {},
+                    {},
+                    Mock(),
+                )
+            )
+
+        assert cached_uids == set()
+        assert penalized_uids == {1, 2}
+        assert validator.evaluation_cache.get(1, 'hotkey_1', shared_github_id) is None
+        assert validator.evaluation_cache.get(2, 'hotkey_2', shared_github_id) is None
+
+        future_eval = _build_eval(
+            uid=1,
+            merged_prs=0,
+            fetch_failed=True,
+            hotkey='hotkey_1',
+            github_id=shared_github_id,
+        )
+        future_evaluations = {1: future_eval}
+
+        future_cached_uids = Validator.store_or_use_cached_evaluation(cast(Validator, validator), future_evaluations)
+
+        assert future_cached_uids == set()
+        assert future_evaluations[1] is future_eval
 
 
 class TestMirrorFailureCacheFallback:
@@ -233,6 +309,104 @@ class TestCacheIsolation:
         cached_issues = cached.merged_pull_requests[0].issues
         assert cached_issues is not None
         assert cached_issues[0].discovery_earned_score == 0.0
+
+
+class TestIssueDiscoveryFieldOwnership:
+    """The cache has two writers: store() (OSS phase, owns PR fields) and
+    update_issue_discovery() (issue phase, owns issue fields). Each must not
+    clobber the other's field group, or the issue-discovery fallback breaks."""
+
+    def _eval(self, uid: int = 1, hotkey: str = 'hotkey_1', github_id: str = '12345') -> MinerEvaluation:
+        ev = MinerEvaluation(uid=uid, hotkey=hotkey, github_id=github_id)
+        ev.merged_pull_requests = [_make_pr(uid=uid, hotkey=hotkey, github_id=github_id)]
+        return ev
+
+    def test_store_preserves_prior_issue_discovery_fields_when_identity_matches(self):
+        cache = MinerEvaluationCache()
+        first = self._eval()
+        cache.store(first)
+
+        # Issue-discovery phase refresh.
+        first.issue_discovery_score = 8.12
+        first.issue_token_score = 700.0
+        first.issue_credibility = 1.0
+        first.is_issue_eligible = True
+        first.total_solved_issues = 7
+        first.total_valid_solved_issues = 7
+        first.total_closed_issues = 2
+        first.total_open_issues = 3
+        cache.update_issue_discovery(first)
+
+        # Next round: a fresh MinerEvaluation has all issue-discovery fields
+        # back at dataclass defaults. store() must merge the prior entry's
+        # issue fields rather than overwriting with the fresh zeros.
+        next_round = self._eval()
+        assert next_round.issue_discovery_score == 0.0  # confirms the threat
+        cache.store(next_round)
+
+        cached = cache.get(uid=1, hotkey='hotkey_1', github_id='12345')
+        assert cached is not None
+        assert cached.issue_discovery_score == 8.12
+        assert cached.issue_token_score == 700.0
+        assert cached.issue_credibility == 1.0
+        assert cached.is_issue_eligible is True
+        assert cached.total_solved_issues == 7
+        assert cached.total_valid_solved_issues == 7
+        assert cached.total_closed_issues == 2
+        assert cached.total_open_issues == 3
+
+    def test_store_drops_prior_issue_discovery_on_identity_mismatch(self):
+        cache = MinerEvaluationCache()
+        first = self._eval(hotkey='hotkey_old', github_id='12345')
+        cache.store(first)
+        first.issue_discovery_score = 8.12
+        cache.update_issue_discovery(first)
+
+        # Re-registration: same UID, different hotkey. Prior issue-discovery
+        # belonged to a different miner — must not carry over.
+        rereg = self._eval(hotkey='hotkey_new', github_id='12345')
+        cache.store(rereg)
+
+        cached = cache.get(uid=1, hotkey='hotkey_new', github_id='12345')
+        assert cached is not None
+        assert cached.issue_discovery_score == 0.0
+
+    def test_update_issue_discovery_no_op_when_no_existing_entry(self):
+        """The cache only holds entries backed by an OSS-phase store; an
+        issue-only entry would have no PR data and the OSS fallback path
+        would later restore a half-populated MinerEvaluation."""
+        cache = MinerEvaluationCache()
+        ev = self._eval()
+        ev.issue_discovery_score = 8.12
+
+        cache.update_issue_discovery(ev)
+
+        assert cache.get(uid=1, hotkey='hotkey_1', github_id='12345') is None
+
+    def test_update_issue_discovery_evicts_on_identity_mismatch(self):
+        cache = MinerEvaluationCache()
+        cache.store(self._eval(hotkey='hotkey_old', github_id='12345'))
+
+        rereg = self._eval(hotkey='hotkey_new', github_id='12345')
+        rereg.issue_discovery_score = 8.12
+        cache.update_issue_discovery(rereg)
+
+        assert cache.get(uid=1, hotkey='hotkey_old', github_id='12345') is None
+        assert cache.get(uid=1, hotkey='hotkey_new', github_id='12345') is None
+
+    def test_update_issue_discovery_writes_through_when_identity_matches(self):
+        cache = MinerEvaluationCache()
+        ev = self._eval()
+        cache.store(ev)
+
+        ev.issue_discovery_score = 8.12
+        ev.total_solved_issues = 7
+        cache.update_issue_discovery(ev)
+
+        cached = cache.get(uid=1, hotkey='hotkey_1', github_id='12345')
+        assert cached is not None
+        assert cached.issue_discovery_score == 8.12
+        assert cached.total_solved_issues == 7
 
 
 def _make_mirror_pr_with_file_blob(blob: str, pr_number: int = 7) -> ScoredMirrorPR:

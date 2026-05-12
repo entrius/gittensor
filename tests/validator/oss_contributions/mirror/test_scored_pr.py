@@ -3,7 +3,7 @@
 Covers:
 - Composition: raw response data accessed via .pr.<field>; scoring fields default neutrally
 - is_pioneer_eligible respects merged + token_score gate
-- calculate_final_earned_score multiplies base by every multiplier
+- calculate_final_earned_score multiplies base by active per-PR multipliers
 """
 
 from __future__ import annotations
@@ -115,8 +115,8 @@ class TestCalculateFinalEarnedScore:
         scored.base_score = 100.0
         scored.repo_weight_multiplier = 0.5
         scored.review_quality_multiplier = 0.5
-        # 100 * 0.5 * 0.5 (others 1.0) = 25
-        assert scored.calculate_final_earned_score() == 25.0
+        # repo_weight_multiplier is a neutral legacy field; emission_share is applied at aggregation.
+        assert scored.calculate_final_earned_score() == 50.0
 
     def test_zero_multiplier_zeros_score(self):
         scored = ScoredPR(pr=_make_pr())

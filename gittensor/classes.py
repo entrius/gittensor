@@ -234,7 +234,6 @@ class PullRequest:
     def calculate_final_earned_score(self) -> float:
         """Combine base score with all multipliers. Pioneer dividend is added separately after."""
         multipliers = {
-            'repo': self.repo_weight_multiplier,
             'issue': self.issue_multiplier,
             'label': self.label_multiplier,
             'spam': self.open_pr_spam_multiplier,
@@ -289,6 +288,7 @@ class MinerEvaluation:
     total_valid_solved_issues: int = 0  # solved issues where solving PR has token_score >= 5
     total_closed_issues: int = 0
     total_open_issues: int = 0  # mirror-tracked open issues in lookback window (set by issue_discovery.scan)
+    discovered_issues: List[Issue] = field(default_factory=list)
 
     @property
     def total_prs(self) -> int:
@@ -505,6 +505,7 @@ _ISSUE_DISCOVERY_FIELDS: Tuple[str, ...] = (
     'total_valid_solved_issues',
     'total_closed_issues',
     'total_open_issues',
+    'discovered_issues',
 )
 
 
@@ -627,6 +628,7 @@ class MinerEvaluationCache:
         cached.merged_prs = [_scored_mirror_pr_for_cache(pr) for pr in evaluation.merged_prs]
         cached.open_prs = [_scored_mirror_pr_for_cache(pr) for pr in evaluation.open_prs]
         cached.closed_prs = [_scored_mirror_pr_for_cache(pr) for pr in evaluation.closed_prs]
+        cached.discovered_issues = list(evaluation.discovered_issues)
         return cached
 
     @staticmethod
@@ -636,6 +638,7 @@ class MinerEvaluationCache:
         # adapters produce fresh Issue objects per call via get_all_issues().
         copy_eval = copy.copy(cached_eval)
         copy_eval.unique_repos_contributed_to = set(cached_eval.unique_repos_contributed_to)
+        copy_eval.discovered_issues = list(cached_eval.discovered_issues)
         return copy_eval
 
 

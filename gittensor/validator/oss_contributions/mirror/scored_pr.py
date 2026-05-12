@@ -27,6 +27,8 @@ class ScoredPR:
     pr: MirrorPullRequest
 
     # Multipliers (default 1.0 — neutral if not yet computed)
+    # repo_weight_multiplier is retained as a neutral legacy field for storage
+    # compatibility; repo emission shares are applied only at round aggregation.
     repo_weight_multiplier: float = 1.0
     issue_multiplier: float = 1.0
     open_pr_spam_multiplier: float = 1.0
@@ -88,7 +90,6 @@ class ScoredPR:
     def calculate_final_earned_score(self) -> float:
         """Combine base score with all multipliers. Pioneer dividend is added separately after."""
         multipliers = {
-            'repo': self.repo_weight_multiplier,
             'issue': self.issue_multiplier,
             'label': self.label_multiplier,
             'spam': self.open_pr_spam_multiplier,

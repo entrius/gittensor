@@ -374,6 +374,7 @@ async def _score_miner_issues(
             client,
             programming_languages,
             token_config,
+            mirror_repos,
         )
         if cached is None:
             # Fetch failed — issue still counts for solved/credibility but not scored.
@@ -484,12 +485,17 @@ async def _resolve_solving_pr_score(
     client: MirrorClient,
     programming_languages: Dict[str, LanguageConfig],
     token_config: TokenConfig,
+    mirror_repos: Dict[str, RepositoryConfig],
 ) -> Optional[CachedSolvingPR]:
     """Return base_score + token_score for the solving PR.
 
     Cache hit: returns immediately (case 1 = miner's own PR, case 2 = another
     miner's PR). Cache miss: fetches ``/pulls/:o/:r/:n/files`` and tokenizes;
     writes the result back into the cache. Returns None on fetch failure.
+
+    Applies ``fixed_base_score`` repo override on cache miss (matching the
+    override in ``score_mirror_pr``) so that ``discovery_base_score`` is the
+    same regardless of solver identity.
     """
     key = (issue.repo_full_name, solving_pr.pr_number)
     if key in cache:
@@ -520,7 +526,13 @@ async def _resolve_solving_pr_score(
         issue.repo_full_name, solving_pr.pr_number, files_response.files
     )
     result = calculate_base_score_for_pr_files(file_changes, file_contents, programming_languages, token_config)
-    cached = CachedSolvingPR(base_score=result.base_score, token_score=result.token_score)
+    repo_config = mirror_repos.get(issue.repo_full_name)
+    base_score = (
+        repo_config.fixed_base_score
+        if repo_config is not None and repo_config.fixed_base_score is not None
+        else result.base_score
+    )
+    cached = CachedSolvingPR(base_score=base_score, token_score=result.token_score)
     cache[key] = cached
     return cached
 

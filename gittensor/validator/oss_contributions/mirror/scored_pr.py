@@ -40,7 +40,7 @@ class ScoredPR:
     collateral_score: float = 0.0  # OPEN PRs only
 
     # Token scoring breakdown (populated when files are tokenized)
-    code_density: float = 0.0
+    code_density: float = 1.0
     token_score: float = 0.0
     structural_count: int = 0
     structural_score: float = 0.0

@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredMirrorPR
 
 from gittensor.constants import (
+    EXTENSIONLESS_FILE_EXTENSIONS,
     MAINTAINER_ASSOCIATIONS,
     MAX_CODE_DENSITY_MULTIPLIER,
     MIN_TOKEN_SCORE_FOR_BASE_SCORE,
@@ -77,7 +78,10 @@ class FileChange:
 
     def _calculate_file_extension(self) -> str:
         basename = self.filename.split('/')[-1]
-        return basename.split('.')[-1].lower() if '.' in basename else ''
+        if '.' in basename:
+            return basename.split('.')[-1].lower()
+        basename_lower = basename.lower()
+        return basename_lower if basename_lower in EXTENSIONLESS_FILE_EXTENSIONS else ''
 
     def is_test_file(self) -> bool:
         filename_lower = self.filename.lower()
@@ -259,6 +263,14 @@ class PullRequest:
         for issue in raw_issues:
             if is_merged and not (issue.get('closedAt') and issue.get('state') == 'CLOSED'):
                 continue
+            issue_repo = ((issue.get('repository') or {}).get('nameWithOwner') or '').lower()
+            if issue_repo and issue_repo != repository_full_name:
+                bt.logging.warning(
+                    f'Skipping issue #{issue.get("number")} - cross-repo link '
+                    f'(issue in {issue_repo}, PR in {repository_full_name})'
+                )
+                continue
+            issue_repository_full_name = issue_repo or repository_full_name
             issue_author = issue.get('author') or {}
             author_db_id = issue_author.get('databaseId')
 
@@ -289,7 +301,7 @@ class PullRequest:
                 Issue(
                     number=issue['number'],
                     pr_number=pr_data['number'],
-                    repository_full_name=repository_full_name,
+                    repository_full_name=issue_repository_full_name,
                     title=issue['title'],
                     created_at=parse_github_timestamp_to_cst(issue['createdAt']) if issue.get('createdAt') else None,
                     closed_at=parse_github_timestamp_to_cst(issue['closedAt']) if issue.get('closedAt') else None,
@@ -708,6 +720,12 @@ class MinerEvaluationCache:
         bt.logging.debug(f'Cache hit for UID {uid} (cached at {cached.cached_at.isoformat()})')
 
         return self._isolate_for_downstream(cached.evaluation)
+
+    def evict_many(self, uids: Set[int]) -> None:
+        """Remove cached evaluations for all provided UIDs."""
+        for uid in uids:
+            if self._cache.pop(uid, None) is not None:
+                bt.logging.debug(f'Evicted cached evaluation for UID {uid}')
 
     @staticmethod
     def _build_cache_entry(evaluation: 'MinerEvaluation') -> 'MinerEvaluation':

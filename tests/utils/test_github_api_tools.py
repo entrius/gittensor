@@ -116,9 +116,9 @@ class TestGraphQLRetryLogic:
         result = get_github_graphql_query(**graphql_params)
 
         assert result.response.status_code == 200
-        # Initial limit=100, halved to 50 after first 502, halved to 25 after second 502
+        # Initial limit=50, halved to 25 after first 502, halved to 12 after second 502
         limits = [c.kwargs['json']['variables']['limit'] for c in mock_post.call_args_list]
-        assert limits == [100, 50, 25]
+        assert limits == [50, 25, 12]
 
     @patch('gittensor.utils.github_api_tools.requests.post')
     @patch('gittensor.utils.github_api_tools.time.sleep')
@@ -130,9 +130,9 @@ class TestGraphQLRetryLogic:
 
         get_github_graphql_query(**graphql_params)
 
-        # 100 -> 50 -> 25 -> 12 -> 10 -> 10 -> 10 -> 10
+        # 50 -> 25 -> 12 -> 10 -> 10 -> 10 -> 10 -> 10
         limits = [c.kwargs['json']['variables']['limit'] for c in mock_post.call_args_list]
-        assert limits == [100, 50, 25, 12, 10, 10, 10, 10]
+        assert limits == [50, 25, 12, 10, 10, 10, 10, 10]
 
     @patch('gittensor.utils.github_api_tools.requests.post')
     @patch('gittensor.utils.github_api_tools.time.sleep')
@@ -150,7 +150,7 @@ class TestGraphQLRetryLogic:
 
         assert result.response.status_code == 200
         limits = [c.kwargs['json']['variables']['limit'] for c in mock_post.call_args_list]
-        assert limits == [100, 100, 100], 'Page size should stay at 100 for non-5xx errors'
+        assert limits == [50, 50, 50], 'Page size should stay at the initial default for non-5xx errors'
 
     @patch('gittensor.utils.github_api_tools.requests.post')
     @patch('gittensor.utils.github_api_tools.time.sleep')
@@ -169,7 +169,7 @@ class TestGraphQLRetryLogic:
 
         assert result.response.status_code == 200
         limits = [c.kwargs['json']['variables']['limit'] for c in mock_post.call_args_list]
-        assert limits == [100, 50, 25]
+        assert limits == [50, 25, 12]
 
     @patch('gittensor.utils.github_api_tools.requests.post')
     @patch('gittensor.utils.github_api_tools.time.sleep')
@@ -193,7 +193,7 @@ class TestGraphQLRetryLogic:
         result = get_github_graphql_query(**params)
 
         assert result.response.status_code == 200
-        # Initial limit = min(100, 100-85) = 15, halved to 10, stays at 10
+        # Initial limit = min(50, 100-85) = 15, halved to 10, stays at 10
         limits = [c.kwargs['json']['variables']['limit'] for c in mock_post.call_args_list]
         assert limits == [15, 10, 10]
 
@@ -886,8 +886,21 @@ def _graphql_response(nodes):
     }
 
 
+def _closing_issue_node(number, repo='owner/repo'):
+    node = {'number': number}
+    if repo is not None:
+        node['repository'] = {'nameWithOwner': repo}
+    return node
+
+
 def _pr_node(
-    number, merged=True, merged_at='2025-06-01T00:00:00Z', user_id=42, base_repo='owner/repo', closing_issues=None
+    number,
+    merged=True,
+    merged_at='2025-06-01T00:00:00Z',
+    user_id=42,
+    base_repo='owner/repo',
+    closing_issues=None,
+    closing_repo='owner/repo',
 ):
     """Helper to build a single cross-referenced PR node."""
     return {
@@ -898,7 +911,7 @@ def _pr_node(
             'author': {'databaseId': user_id},
             'baseRepository': {'nameWithOwner': base_repo},
             'closingIssuesReferences': {
-                'nodes': [{'number': n} for n in (closing_issues or [])],
+                'nodes': [_closing_issue_node(n, closing_repo) for n in (closing_issues or [])],
             },
         },
     }
@@ -966,6 +979,36 @@ class TestFindSolverFromCrossReferences:
 
         assert solver_id is None
         assert pr_number is None
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_cross_repo_closing_issue_number_collision_is_filtered_out(self, mock_logging, mock_graphql):
+        """A PR closing another repo's same-numbered issue must not solve this bounty issue."""
+        mock_graphql.return_value = _graphql_response(
+            [
+                _pr_node(number=14, user_id=42, closing_issues=[12], closing_repo='other/repo'),
+            ]
+        )
+
+        solver_id, pr_number = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
+
+        assert solver_id is None
+        assert pr_number is None
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_closing_issue_repo_check_is_case_insensitive(self, mock_logging, mock_graphql):
+        """GitHub repository names are case-insensitive when validating closing refs."""
+        mock_graphql.return_value = _graphql_response(
+            [
+                _pr_node(number=14, user_id=42, closing_issues=[12], closing_repo='Owner/Repo'),
+            ]
+        )
+
+        solver_id, pr_number = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
+
+        assert solver_id == 42
+        assert pr_number == 14
 
     @patch('gittensor.utils.github_api_tools.execute_graphql_query')
     @patch('gittensor.utils.github_api_tools.bt.logging')
@@ -1075,7 +1118,7 @@ class TestCheckGithubIssueClosed:
     def test_graphql_failure_sets_solver_lookup_failed(self, mock_logging, mock_get, mock_graphql):
         issue_response = Mock()
         issue_response.status_code = 200
-        issue_response.json.return_value = {'state': 'closed'}
+        issue_response.json.return_value = {'state': 'closed', 'state_reason': 'completed'}
         mock_get.return_value = issue_response
         mock_graphql.return_value = None
 
@@ -1094,7 +1137,7 @@ class TestCheckGithubIssueClosed:
     def test_closed_issue_with_no_solver_keeps_lookup_failed_false(self, mock_logging, mock_get, mock_graphql):
         issue_response = Mock()
         issue_response.status_code = 200
-        issue_response.json.return_value = {'state': 'closed'}
+        issue_response.json.return_value = {'state': 'closed', 'state_reason': 'completed'}
         mock_get.return_value = issue_response
         mock_graphql.return_value = _graphql_response([])
 
@@ -1106,6 +1149,35 @@ class TestCheckGithubIssueClosed:
             'pr_number': None,
             'solver_lookup_failed': False,
         }
+
+    @pytest.mark.parametrize(
+        'issue_payload',
+        [
+            {'state': 'closed', 'state_reason': 'not_planned'},
+            {'state': 'closed', 'state_reason': 'duplicate'},
+            {'state': 'closed', 'state_reason': 'transferred'},
+            {'state': 'closed', 'state_reason': None},
+            {'state': 'closed'},
+        ],
+    )
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_non_completed_closed_issue_skips_solver_lookup(self, mock_logging, mock_get, mock_graphql, issue_payload):
+        issue_response = Mock()
+        issue_response.status_code = 200
+        issue_response.json.return_value = issue_payload
+        mock_get.return_value = issue_response
+
+        result = check_github_issue_closed('owner/repo', 12, 'fake_token')
+
+        assert result == {
+            'is_closed': True,
+            'solver_github_id': None,
+            'pr_number': None,
+            'solver_lookup_failed': False,
+        }
+        mock_graphql.assert_not_called()
 
 
 # ============================================================================

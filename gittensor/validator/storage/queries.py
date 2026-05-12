@@ -100,6 +100,16 @@ DO UPDATE SET
     updated_at = NOW()
 """
 
+# Targeted state-only refresh for stale-closed PRs (avoids overwriting scored columns)
+REFRESH_STALE_PR_STATES = """
+UPDATE pull_requests
+   SET pr_state   = 'CLOSED',
+       updated_at = NOW()
+ WHERE number               = %s
+   AND repository_full_name = %s
+   AND pr_state            != 'CLOSED'
+"""
+
 # Issue Queries
 BULK_UPSERT_ISSUES = """
 INSERT INTO issues (

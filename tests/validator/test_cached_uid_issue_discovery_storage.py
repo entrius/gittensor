@@ -1,6 +1,6 @@
 """Tests for cached UID issue-discovery DB storage fix (#1052)."""
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -10,11 +10,12 @@ async def test_cached_uid_stored_with_fresh_issue_discovery():
     """Cached UIDs should be stored with fresh issue-discovery fields."""
     from gittensor.validator.forward import forward
 
-    mock_self = AsyncMock()
+    mock_self = MagicMock()
+    mock_self.step = 0
     mock_self.bulk_store_evaluation = AsyncMock()
 
-    miner_evaluations = [
-        type(
+    miner_evaluations = {
+        1: type(
             'MockEval',
             (),
             {
@@ -25,7 +26,7 @@ async def test_cached_uid_stored_with_fresh_issue_discovery():
                 'is_issue_eligible': True,
             },
         )()
-    ]
+    }
 
     with (
         patch('gittensor.validator.forward.oss_contributions', return_value=([], miner_evaluations, {1}, set())),
@@ -34,8 +35,6 @@ async def test_cached_uid_stored_with_fresh_issue_discovery():
         patch('gittensor.validator.forward.blend_emission_pools', return_value=[]),
         patch('gittensor.validator.forward.VALIDATOR_WAIT', 0),
     ):
-        mock_self.oss_contributions = AsyncMock(return_value=([], miner_evaluations, {1}, set()))
-
         await forward(mock_self)
 
         # Verify bulk_store_evaluation was called WITHOUT skip_uids

@@ -17,6 +17,7 @@ from gittensor.validator.pat_handler import (
     handle_pat_broadcast,
     handle_pat_check,
 )
+from gittensor.validator.utils.github_validation import GitHubCredentialValidation
 
 
 def _run(coro):
@@ -188,7 +189,10 @@ class TestHandlePatBroadcast:
 
 class TestHandlePatCheck:
     @patch('gittensor.validator.pat_handler._test_pat_against_repo', return_value=None)
-    @patch('gittensor.validator.pat_handler.validate_github_credentials', return_value=('github_42', None))
+    @patch(
+        'gittensor.validator.pat_handler.validate_github_credentials_result',
+        return_value=GitHubCredentialValidation(github_id='github_42', error=None),
+    )
     def test_valid_pat(self, mock_validate, mock_test_query, mock_validator):
         pat_storage.save_pat(1, 'hotkey_1', 'ghp_test', 'github_42')
 
@@ -214,7 +218,10 @@ class TestHandlePatCheck:
         assert result.pat_valid is False
 
     @patch('gittensor.validator.pat_handler._test_pat_against_repo', return_value=None)
-    @patch('gittensor.validator.pat_handler.validate_github_credentials', return_value=(None, 'PAT expired'))
+    @patch(
+        'gittensor.validator.pat_handler.validate_github_credentials_result',
+        return_value=GitHubCredentialValidation(github_id=None, error="No Github id found for miner 1's PAT"),
+    )
     def test_stored_but_invalid_pat(self, mock_validate, mock_test_query, mock_validator):
         """PAT is stored but fails re-validation."""
         pat_storage.save_pat(1, 'hotkey_1', 'ghp_expired', 'github_42')
@@ -223,7 +230,26 @@ class TestHandlePatCheck:
         result = _run(handle_pat_check(mock_validator, synapse))
         assert result.has_pat is True
         assert result.pat_valid is False
-        assert 'PAT expired' in (result.rejection_reason or '')
+        assert 'No Github id found' in (result.rejection_reason or '')
+
+    @patch('gittensor.validator.pat_handler._test_pat_against_repo', return_value=None)
+    @patch(
+        'gittensor.validator.pat_handler.validate_github_credentials_result',
+        return_value=GitHubCredentialValidation(
+            github_id='github_42',
+            error='GitHub /user lookup failed transiently',
+            transient_failure=True,
+        ),
+    )
+    def test_transient_failure_returns_inconclusive(self, mock_validate, mock_test_query, mock_validator):
+        """Transient GitHub API failure should return pat_valid=None, not False."""
+        pat_storage.save_pat(1, 'hotkey_1', 'ghp_transient', 'github_42')
+
+        synapse = _make_check_synapse('hotkey_1')
+        result = _run(handle_pat_check(mock_validator, synapse))
+        assert result.has_pat is True
+        assert result.pat_valid is None
+        assert 'temporarily unavailable' in (result.rejection_reason or '')
 
 
 # ---------------------------------------------------------------------------

@@ -80,10 +80,12 @@ def _resolve_endpoint(network: str | None, rpc_url: str | None) -> str:
         return NETWORK_MAP.get(network.lower(), network)
     config_network = _load_config_value('network')
     config_endpoint = _load_config_value('ws_endpoint')
+    if config_network and config_network.lower() in NETWORK_MAP:
+        return NETWORK_MAP[config_network.lower()]
     if config_endpoint:
         return config_endpoint
     if config_network:
-        return NETWORK_MAP.get(config_network.lower()) or config_network
+        return config_network
     return NETWORK_MAP['finney']
 
 

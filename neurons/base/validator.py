@@ -355,12 +355,6 @@ class BaseValidatorNeuron(BaseNeuron):
             self.scores[blacklisted_uids_array] = 0.0
             bt.logging.info(f'Set scores to 0 for blacklisted UIDs: {blacklisted_uids}')
 
-            # Renormalize scores to sum to 1 after blacklisting
-            total_score = np.sum(self.scores)
-            if total_score > 0:
-                self.scores = self.scores / total_score
-                bt.logging.debug(f'Renormalized scores to sum=1 after blacklisting. New sum: {np.sum(self.scores)}')
-
     def save_state(self):
         """Saves the state of the validator to a file."""
         bt.logging.info('Saving validator state.')

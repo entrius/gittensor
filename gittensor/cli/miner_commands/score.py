@@ -232,7 +232,14 @@ def _drain_logs() -> None:
     help="Bittensor log verbosity. 'info' surfaces the validator pipeline's per-step progress on stderr.",
 )
 @click.option('--json-output', 'json_mode', is_flag=True, default=False, help='Emit result as JSON on stdout.')
-def score_command(pat: Optional[str], log_level: str, json_mode: bool) -> None:
+@click.option(
+    '--profile',
+    'profile_path',
+    default=None,
+    metavar='PATH',
+    help='Run under cProfile and write pstats binary to PATH.',
+)
+def score_command(pat: Optional[str], log_level: str, json_mode: bool, profile_path: Optional[str]) -> None:
     """Locally run the validator scoring pipeline end-to-end for the miner identified by --pat.
 
     No subtensor, wallet, DB, axon, or wandb is touched.
@@ -299,11 +306,26 @@ def score_command(pat: Optional[str], log_level: str, json_mode: bool) -> None:
             },
         }
 
-    if not json_mode:
+    if not json_mode and profile_path is None:
         console.print('[bold cyan]Running validator pipeline...[/bold cyan]')
-    payload = asyncio.run(_run())
+
+    if profile_path is not None:
+        import cProfile
+
+        profiler = cProfile.Profile()
+        profiler.enable()
+    try:
+        payload = asyncio.run(_run())
+    finally:
+        if profile_path is not None:
+            profiler.disable()
+            profiler.dump_stats(profile_path)
 
     _drain_logs()
+
+    if profile_path is not None:
+        console.print(f'[bold cyan]wrote pstats binary:[/bold cyan] {profile_path}')
+        return
 
     if json_mode:
         emit_json(payload)

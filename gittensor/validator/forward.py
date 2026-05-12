@@ -9,11 +9,9 @@ import numpy as np
 
 from gittensor.classes import MinerEvaluation, MinerEvaluationCache
 from gittensor.constants import (
-    ISSUE_DISCOVERY_EMISSION_SHARE,
     ISSUES_TREASURY_EMISSION_SHARE,
     ISSUES_TREASURY_UID,
     OSS_EMISSION_SHARE,
-    RECYCLE_EMISSION_SHARE,
     RECYCLE_UID,
 )
 from gittensor.utils.uids import get_all_uids
@@ -62,12 +60,12 @@ async def forward(self: 'Validator') -> None:
         token_config = load_token_config()
 
         # 1. Score OSS contributions
-        oss_rewards, miner_evaluations, cached_uids, penalized_uids = await oss_contributions(
+        _, miner_evaluations, cached_uids, penalized_uids = await oss_contributions(
             self, miner_uids, master_repositories, programming_languages, token_config
         )
 
         # 2. Score issue discovery
-        issue_rewards = await issue_discovery(
+        _ = await issue_discovery(
             miner_evaluations,
             master_repositories,
             programming_languages,
@@ -86,7 +84,7 @@ async def forward(self: 'Validator') -> None:
         await self.bulk_store_evaluation(miner_evaluations, skip_uids=cached_uids)
 
         # 5. Blend 4 emission pools into final rewards
-        rewards = blend_emission_pools(oss_rewards, issue_rewards, miner_uids)
+        rewards = blend_emission_pools(miner_evaluations, miner_uids, master_repositories)
 
         self.update_scores(rewards, miner_uids, blacklisted_uids=sorted(penalized_uids))
 
@@ -150,49 +148,84 @@ async def issue_discovery(
 
 
 def blend_emission_pools(
-    oss_rewards: np.ndarray,
-    issue_rewards: np.ndarray,
+    miner_evaluations: Dict[int, MinerEvaluation],
     miner_uids: set[int],
+    master_repositories: Dict[str, RepositoryConfig],
 ) -> np.ndarray:
-    """Blend 4 emission pools into a single rewards array.
+    """Blend the round emission pools using per-repo emission shares.
 
-    - OSS contributions: 30%
-    - Issue discovery:   30%
-    - Issue treasury:    15% (flat to UID 111)
-    - Recycle:           25% (flat to UID 0)
+    - OSS scoring pool: 90% distributed by repo emission_share
+    - Treasury: 10% flat to UID 111
+    - Recycle: natural slack from unallocated registry share + unclaimed repo slices
     """
     sorted_uids = sorted(miner_uids)
     rewards = np.zeros(len(sorted_uids))
+    uid_to_index = {uid: idx for idx, uid in enumerate(sorted_uids)}
     recycle_extra = 0.0
 
-    # Pool 1: OSS contributions (30%)
-    oss_total = float(oss_rewards.sum())
-    if oss_total > 0:
-        rewards += oss_rewards * OSS_EMISSION_SHARE
-    else:
-        recycle_extra += OSS_EMISSION_SHARE
+    total_registry_share = sum(repo.emission_share for repo in master_repositories.values())
+    if total_registry_share < 1.0:
+        recycle_extra += OSS_EMISSION_SHARE * (1.0 - total_registry_share)
 
-    # Pool 2: Issue discovery (30%)
-    issue_total = float(issue_rewards.sum())
-    if issue_total > 0:
-        rewards += issue_rewards * ISSUE_DISCOVERY_EMISSION_SHARE
-    else:
-        recycle_extra += ISSUE_DISCOVERY_EMISSION_SHARE
+    for repo_name, repo_config in master_repositories.items():
+        repo_slice = OSS_EMISSION_SHARE * repo_config.emission_share
+        if repo_slice <= 0.0:
+            continue
 
-    # Pool 3: Issue treasury (15% flat to UID 111)
+        pr_scores: Dict[int, float] = {}
+        issue_scores: Dict[int, float] = {}
+        for uid, evaluation in miner_evaluations.items():
+            pr_score = sum(
+                pr.earned_score
+                for pr in evaluation.merged_prs
+                if pr.repository_full_name == repo_name and pr.earned_score > 0
+            )
+            if pr_score > 0:
+                pr_scores[uid] = pr_score
+
+            issue_score = evaluation.issue_discovery_scores_by_repo.get(repo_name, 0.0)
+            if issue_score > 0:
+                issue_scores[uid] = issue_score
+
+        pr_total = sum(pr_scores.values())
+        issue_total = sum(issue_scores.values())
+
+        if pr_total <= 0.0 and issue_total <= 0.0:
+            recycle_extra += repo_slice
+            continue
+
+        issue_subslice = repo_slice * repo_config.issue_discovery_share
+        pr_subslice = repo_slice * (1.0 - repo_config.issue_discovery_share)
+
+        if pr_total <= 0.0:
+            issue_subslice += pr_subslice
+            pr_subslice = 0.0
+        elif issue_total <= 0.0:
+            pr_subslice += issue_subslice
+            issue_subslice = 0.0
+
+        if pr_subslice > 0.0 and pr_total > 0.0:
+            for uid, score in pr_scores.items():
+                idx = uid_to_index.get(uid)
+                if idx is not None:
+                    rewards[idx] += pr_subslice * (score / pr_total)
+
+        if issue_subslice > 0.0 and issue_total > 0.0:
+            for uid, score in issue_scores.items():
+                idx = uid_to_index.get(uid)
+                if idx is not None:
+                    rewards[idx] += issue_subslice * (score / issue_total)
+
+    # Treasury pool (10% flat to UID 111)
     if ISSUES_TREASURY_UID > 0 and ISSUES_TREASURY_UID in miner_uids:
         treasury_idx = sorted_uids.index(ISSUES_TREASURY_UID)
         rewards[treasury_idx] += ISSUES_TREASURY_EMISSION_SHARE
-        bt.logging.info(
-            f'Treasury allocation: UID {ISSUES_TREASURY_UID} receives '
-            f'{ISSUES_TREASURY_EMISSION_SHARE * 100:.0f}% of emissions'
-        )
+    else:
+        recycle_extra += ISSUES_TREASURY_EMISSION_SHARE
 
-    # Pool 4: Recycle (25% + unclaimed from empty pools)
+    # Recycle pool: unclaimed repo slices + registry slack (+ treasury fallback)
     if RECYCLE_UID in miner_uids:
         recycle_idx = sorted_uids.index(RECYCLE_UID)
-        rewards[recycle_idx] += RECYCLE_EMISSION_SHARE + recycle_extra
-        if recycle_extra > 0:
-            bt.logging.info(f'Recycling {recycle_extra * 100:.0f}% unclaimed emissions from empty pools')
+        rewards[recycle_idx] += recycle_extra
 
     return rewards

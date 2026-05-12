@@ -45,7 +45,7 @@ BULK_UPSERT_PULL_REQUESTS = """
 INSERT INTO pull_requests (
     number, repository_full_name, uid, hotkey, github_id, title, author_login,
     merged_at, pr_created_at, pr_state,
-    repo_weight_multiplier, base_score, issue_multiplier,
+    base_score, issue_multiplier,
     open_pr_spam_multiplier, pioneer_dividend, pioneer_rank, time_decay_multiplier,
     credibility_multiplier, review_quality_multiplier, label_multiplier, label,
     earned_score, collateral_score,
@@ -54,7 +54,7 @@ INSERT INTO pull_requests (
     code_density, token_score, structural_count, structural_score, leaf_count, leaf_score
 ) VALUES (
     %s, %s, %s, %s, %s, %s, %s,
-    %s, %s, %s,
+    %s, %s,
     %s, %s, %s,
     %s, %s, %s, %s,
     %s, %s, %s, %s,
@@ -71,7 +71,6 @@ DO UPDATE SET
     author_login = EXCLUDED.author_login,
     merged_at = EXCLUDED.merged_at,
     pr_state = EXCLUDED.pr_state,
-    repo_weight_multiplier = EXCLUDED.repo_weight_multiplier,
     base_score = EXCLUDED.base_score,
     issue_multiplier = EXCLUDED.issue_multiplier,
     open_pr_spam_multiplier = EXCLUDED.open_pr_spam_multiplier,
@@ -117,14 +116,14 @@ INSERT INTO issues (
     author_login, state, author_association,
     author_github_id, is_transferred, updated_at,
     discovery_base_score, discovery_earned_score,
-    discovery_review_quality_multiplier, discovery_repo_weight_multiplier,
+    discovery_review_quality_multiplier,
     discovery_time_decay_multiplier, discovery_credibility_multiplier,
     discovery_open_issue_spam_multiplier
 ) VALUES (
     %s, %s, %s, %s, %s, %s,
     %s, %s, %s,
     %s, %s, %s,
-    %s, %s,
+    %s,
     %s, %s,
     %s, %s,
     %s
@@ -142,7 +141,6 @@ DO UPDATE SET
     discovery_base_score = EXCLUDED.discovery_base_score,
     discovery_earned_score = EXCLUDED.discovery_earned_score,
     discovery_review_quality_multiplier = EXCLUDED.discovery_review_quality_multiplier,
-    discovery_repo_weight_multiplier = EXCLUDED.discovery_repo_weight_multiplier,
     discovery_time_decay_multiplier = EXCLUDED.discovery_time_decay_multiplier,
     discovery_credibility_multiplier = EXCLUDED.discovery_credibility_multiplier,
     discovery_open_issue_spam_multiplier = EXCLUDED.discovery_open_issue_spam_multiplier

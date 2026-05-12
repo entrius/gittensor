@@ -60,7 +60,6 @@ from gittensor.validator.utils.load_weights import (
     LanguageConfig,
     RepositoryConfig,
     TokenConfig,
-    resolve_repo_weight,
 )
 
 
@@ -224,6 +223,7 @@ def _clear_issue_discovery_fields(evaluation: MinerEvaluation) -> None:
     evaluation.total_valid_solved_issues = 0
     evaluation.total_closed_issues = 0
     evaluation.total_open_issues = 0
+    evaluation.issue_discovery_scores_by_repo = {}
 
 
 def _copy_issue_discovery_fields(target: MinerEvaluation, source: MinerEvaluation) -> None:
@@ -235,6 +235,7 @@ def _copy_issue_discovery_fields(target: MinerEvaluation, source: MinerEvaluatio
     target.total_valid_solved_issues = source.total_valid_solved_issues
     target.total_closed_issues = source.total_closed_issues
     target.total_open_issues = source.total_open_issues
+    target.issue_discovery_scores_by_repo = dict(source.issue_discovery_scores_by_repo)
 
 
 def _restore_issue_discovery_from_cache(
@@ -339,6 +340,7 @@ async def _score_miner_issues(
     valid_solved_count = 0
     closed_count = 0
     issue_token_score = 0.0
+    repo_issue_scores: Dict[str, float] = {}
     score_fetch_failed = False
     scored_issues: List[Issue] = []
 
@@ -421,7 +423,7 @@ async def _score_miner_issues(
             )
             continue
 
-        adapted = _mirror_issue_for_scoring(issue, solving_pr, repo_config, base_score=cached.base_score)
+        adapted = _mirror_issue_for_scoring(issue, solving_pr, base_score=cached.base_score)
         if adapted is None:
             continue
 
@@ -456,7 +458,6 @@ async def _score_miner_issues(
         issue.discovery_open_issue_spam_multiplier = spam_mult
         issue.discovery_earned_score = round(
             issue.discovery_base_score
-            * issue.discovery_repo_weight_multiplier
             * issue.discovery_time_decay_multiplier
             * issue.discovery_review_quality_multiplier
             * issue.discovery_credibility_multiplier
@@ -464,8 +465,13 @@ async def _score_miner_issues(
             2,
         )
         total_discovery_score += issue.discovery_earned_score
+        if issue.discovery_earned_score > 0:
+            repo_issue_scores[issue.repository_full_name] = (
+                repo_issue_scores.get(issue.repository_full_name, 0.0) + issue.discovery_earned_score
+            )
 
     evaluation.issue_discovery_score = round(total_discovery_score, 2)
+    evaluation.issue_discovery_scores_by_repo = repo_issue_scores
 
     bt.logging.info(
         f'├─ UID {evaluation.uid}: {solved_count} solved ({valid_solved_count} valid) | '
@@ -590,7 +596,6 @@ def _classify_issue(issue: MirrorIssue) -> str:
 def _mirror_issue_for_scoring(
     issue: MirrorIssue,
     solving_pr: MirrorSolvingPR,
-    repo_config: RepositoryConfig,
     base_score: float,
 ) -> Optional[Issue]:
     """Build a legacy ``Issue`` with discovery_* fields populated.
@@ -620,7 +625,6 @@ def _mirror_issue_for_scoring(
     )
 
     adapted.discovery_base_score = base_score
-    adapted.discovery_repo_weight_multiplier = resolve_repo_weight(repo_config)
     adapted.discovery_time_decay_multiplier = round(calculate_time_decay(solving_pr.merged_at), 2)
     adapted.discovery_review_quality_multiplier = round(
         calculate_issue_review_quality_multiplier(solving_pr.review_summary.maintainer_changes_requested_count),

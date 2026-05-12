@@ -7,7 +7,7 @@ from typing import Dict, List, Optional
 
 import bittensor as bt
 
-from gittensor.constants import DEFAULT_REPO_WEIGHT, NON_CODE_EXTENSIONS
+from gittensor.constants import DEFAULT_REPO_EMISSION_SHARE, NON_CODE_EXTENSIONS
 
 
 @dataclass
@@ -28,7 +28,8 @@ class RepositoryConfig:
     """Configuration for a repository in the master_repositories list.
 
     Attributes:
-        weight: Repository weight for scoring
+        emission_share: Repository share of the OSS scoring pool
+        issue_discovery_share: Share of this repo allocation routed to issue-discovery scoring
         inactive_at: ISO timestamp when repository became inactive (None if active)
         additional_acceptable_branches: List of additional branch patterns to accept (None if only default branch)
         trusted_label_pipeline: When True, scoring labels count regardless of
@@ -46,7 +47,8 @@ class RepositoryConfig:
 
     """
 
-    weight: float
+    emission_share: float
+    issue_discovery_share: float = 0.5
     inactive_at: Optional[str] = None
     additional_acceptable_branches: Optional[List[str]] = None
     trusted_label_pipeline: bool = False
@@ -56,11 +58,11 @@ class RepositoryConfig:
     eligibility_mode: bool = True
 
 
-def resolve_repo_weight(repo_config: Optional[RepositoryConfig]) -> float:
-    """Return the repo weight preserving full JSON precision, or the default for unknown repos."""
+def resolve_repo_emission_share(repo_config: Optional[RepositoryConfig]) -> float:
+    """Return the repo emission share preserving full JSON precision, or the default for unknown repos."""
     if repo_config is None:
-        return DEFAULT_REPO_WEIGHT
-    return repo_config.weight
+        return DEFAULT_REPO_EMISSION_SHARE
+    return repo_config.emission_share
 
 
 @dataclass
@@ -128,10 +130,20 @@ def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
 
         # Parse JSON data into RepositoryConfig objects
         normalized_data: Dict[str, RepositoryConfig] = {}
+        total_emission_share = 0.0
+        tolerance = 1e-9
         for repo_name, metadata in data.items():
             try:
+                emission_share = float(metadata.get('emission_share', metadata.get('weight', DEFAULT_REPO_EMISSION_SHARE)))
+                issue_discovery_share = float(metadata.get('issue_discovery_share', 0.5))
+                if emission_share < 0.0 or emission_share > 1.0:
+                    raise ValueError(f'emission_share out of bounds [0,1]: {emission_share}')
+                if issue_discovery_share < 0.0 or issue_discovery_share > 1.0:
+                    raise ValueError(f'issue_discovery_share out of bounds [0,1]: {issue_discovery_share}')
+
                 config = RepositoryConfig(
-                    weight=float(metadata.get('weight', 0.01)),
+                    emission_share=emission_share,
+                    issue_discovery_share=issue_discovery_share,
                     inactive_at=metadata.get('inactive_at'),
                     additional_acceptable_branches=metadata.get('additional_acceptable_branches'),
                     trusted_label_pipeline=bool(metadata.get('trusted_label_pipeline', False)),
@@ -145,10 +157,14 @@ def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
                     eligibility_mode=metadata.get('eligibility_mode', True),
                 )
                 normalized_data[repo_name.lower()] = config
+                total_emission_share += emission_share
             except (ValueError, TypeError) as e:
-                bt.logging.warning(f'Could not parse config for {repo_name}: {e}, using defaults')
-                # Create config with defaults if parsing fails
-                normalized_data[repo_name.lower()] = RepositoryConfig(weight=float(metadata.get('weight', 0.01)))
+                raise ValueError(f'Could not parse config for {repo_name}: {e}') from e
+
+        if total_emission_share < -tolerance or total_emission_share > 1.0 + tolerance:
+            raise ValueError(
+                f'Total emission_share across repositories must be within [0,1], got {total_emission_share:.12f}'
+            )
 
         bt.logging.debug(f'Successfully loaded {len(normalized_data)} repository entries from {weights_file}')
         return normalized_data

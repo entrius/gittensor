@@ -20,8 +20,8 @@
   "AgentOps-AI/agentops": {
     "weight": 0.0363
   },
-  "All-Hands-AI/OpenHands": {
-    "weight": 0.0532
+  "agno-agi/agno": {
+    "weight": 0.0442
   },
   "AlphaCoreBittensor/alphacore": {
     "weight": 0.0484
@@ -118,10 +118,10 @@
   "byteleapai/byteleap-Miner": {
     "weight": 0.0433
   },
-  "calcom/cal.com": {
+  "calcom/cal.diy": {
     "weight": 0.0347
   },
-  "ChutesAI/chutes": {
+  "chutesai/chutes": {
     "weight": 0.0989
   },
   "Cinnamon/kotaemon": {
@@ -133,7 +133,7 @@
   "ClickHouse/ClickHouse": {
     "weight": 0.1152
   },
-  "comfyanonymous/ComfyUI": {
+  "Comfy-Org/ComfyUI": {
     "weight": 0.0523
   },
   "commaai/openpilot": {
@@ -428,9 +428,6 @@
   "mobiusfund/etf": {
     "weight": 0.0415
   },
-  "mode-network/synth-subnet": {
-    "weight": 0.0385
-  },
   "modelcontextprotocol/inspector": {
     "weight": 0.0452
   },
@@ -481,7 +478,7 @@
     "additional_acceptable_branches": ["develop"],
     "weight": 0.0751
   },
-  "nousresearch/hermes-agent": {
+  "NousResearch/hermes-agent": {
     "weight": 0.59
   },
   "numinouslabs/numinous": {
@@ -538,9 +535,6 @@
   },
   "penpot/penpot": {
     "weight": 0.1472
-  },
-  "phidatahq/phidata": {
-    "weight": 0.0442
   },
   "pi-hole/web": {
     "additional_acceptable_branches": ["development"],
@@ -634,6 +628,9 @@
   "SWE-agent/SWE-agent": {
     "weight": 0.0682
   },
+  "synthdataco/synth-subnet": {
+    "weight": 0.0385
+  },
   "taofu-labs/tpn-subnet": {
     "additional_acceptable_branches": ["development"],
     "weight": 0.0398
@@ -641,7 +638,7 @@
   "taoshidev/vanta-network": {
     "weight": 0.0396
   },
-  "tatsuproject/chipforge_sn84": {
+  "TatsuProject/ChipForge_SN84": {
     "weight": 0.0394
   },
   "tauri-apps/tauri": {
@@ -667,7 +664,7 @@
     "additional_acceptable_branches": ["develop"],
     "weight": 0.0599
   },
-  "trishoolai/trishool-subnet": {
+  "TrishoolAI/trishool-subnet": {
     "weight": 0.0388
   },
   "twentyhq/twenty": {
@@ -688,7 +685,7 @@
   "vercel/next.js": {
     "weight": 0.0657
   },
-  "vidaio-subnet/vidaio-subnet": {
+  "vidAio-subnet/vidaio-subnet": {
     "weight": 0.0379
   },
   "virattt/dexter": {
@@ -705,9 +702,6 @@
   },
   "we-promise/sure": {
     "weight": 0.1279
-  },
-  "withastro/astro": {
-    "weight": 0.1064
   },
   "yanez-compliance/MIID-subnet": {
     "weight": 0.0375

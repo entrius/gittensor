@@ -126,34 +126,45 @@ async def score_mirror_pr(
     # mirror_eval.merged_prs contains only eligibility-passed PRs — legacy parity
     # with load_miners_prs which applies should_skip_merged_pr pre-append.
 
+    has_fixed_base = repo_config.fixed_base_score is not None
+
     # Mirror signals it has no stored files for this PR (pending backfill, in-flight
-    # file job, etc.) — skip the round trip.
-    if not pr.scoring_data_stored:
+    # file job, etc.) — skip the round trip unless the repo explicitly supplies
+    # a fixed base score.
+    if not pr.scoring_data_stored and not has_fixed_base:
         return
 
     # Fetch file contents via the mirror's lazy /pulls/.../files endpoint.
-    try:
-        files = (await asyncio.to_thread(client.get_pr_files, pr.repo_full_name, pr.pr_number)).files
-    except MirrorRequestError as e:
-        bt.logging.warning(f'Mirror file fetch failed for PR #{pr.pr_number}: {e}')
-        return
-    scored.files = files
+    if pr.scoring_data_stored:
+        try:
+            files = (await asyncio.to_thread(client.get_pr_files, pr.repo_full_name, pr.pr_number)).files
+        except MirrorRequestError as e:
+            bt.logging.warning(f'Mirror file fetch failed for PR #{pr.pr_number}: {e}')
+            if not has_fixed_base:
+                return
+            files = []
+        scored.files = files
 
-    if not files:
-        bt.logging.warning(f'No files returned for PR #{pr.pr_number}')
-        return
+        if files:
+            file_changes, file_contents = mirror_files_to_legacy(pr.repo_full_name, pr.pr_number, files)
 
-    file_changes, file_contents = mirror_files_to_legacy(pr.repo_full_name, pr.pr_number, files)
+            result = calculate_base_score_for_pr_files(file_changes, file_contents, programming_languages, token_config)
+            scored.token_score = result.token_score
+            scored.structural_count = result.structural_count
+            scored.structural_score = result.structural_score
+            scored.leaf_count = result.leaf_count
+            scored.leaf_score = result.leaf_score
+            scored.total_nodes_scored = result.total_nodes_scored
+            scored.code_density = result.code_density
+            scored.base_score = result.base_score
+        elif not has_fixed_base:
+            bt.logging.warning(f'No files returned for PR #{pr.pr_number}')
+            return
 
-    result = calculate_base_score_for_pr_files(file_changes, file_contents, programming_languages, token_config)
-    scored.token_score = result.token_score
-    scored.structural_count = result.structural_count
-    scored.structural_score = result.structural_score
-    scored.leaf_count = result.leaf_count
-    scored.leaf_score = result.leaf_score
-    scored.total_nodes_scored = result.total_nodes_scored
-    scored.code_density = result.code_density
-    scored.base_score = result.base_score
+    if repo_config.fixed_base_score is not None:
+        # Only the base score is overridden. Token fields stay token-derived so
+        # eligibility, pioneer, and reporting gates keep their evidence signal.
+        scored.base_score = repo_config.fixed_base_score
 
     _calculate_pr_multipliers(scored, repo_config)
 
@@ -191,10 +202,10 @@ def _should_skip_merged_mirror_pr(scored: ScoredMirrorPR, repo_config: Repositor
     and other multipliers still apply.
 
     When the mirror response is missing a field (older data predating the
-    schema additions), the affected check falls through rather than
-    false-positive-blocking. Concretely: missing ``head_ref`` or
-    ``head_repo_full_name`` skips the head_ref check; missing ``default_branch``
-    narrows the acceptable set to ``additional_acceptable_branches`` only.
+    schema additions), some checks fall through rather than false-positive-
+    blocking. Concretely: missing ``head_ref`` or ``head_repo_full_name`` skips
+    the head_ref check. Missing ``default_branch`` falls back to ``main``
+    (legacy parity with GraphQL path).
     """
     pr = scored.pr
 
@@ -210,17 +221,18 @@ def _should_skip_merged_mirror_pr(scored: ScoredMirrorPR, repo_config: Repositor
             return True, f'PR #{pr.pr_number} self-merged without external approval'
 
     additional = repo_config.additional_acceptable_branches or []
-    acceptable = ([pr.default_branch] if pr.default_branch else []) + additional
+    default_branch = pr.default_branch or 'main'
+    acceptable = [default_branch] + additional
 
-    # base_ref check — only enforce when we have an acceptable set to compare against.
-    if acceptable and not branch_matches_pattern(pr.base_ref or '', acceptable):
+    # base_ref check.
+    if not branch_matches_pattern(pr.base_ref or '', acceptable):
         return True, (f'PR #{pr.pr_number} merged to {pr.base_ref!r} not in acceptable branches={acceptable}')
 
     # head_ref check — block PRs whose source branch is itself an acceptable
     # branch. Only applies to same-repo PRs: fork branch names are arbitrary.
     # Falls through when head_ref or head_repo_full_name is missing (older data).
     is_same_repo = pr.head_repo_full_name is not None and pr.head_repo_full_name == pr.repo_full_name
-    if additional and pr.head_ref and is_same_repo and branch_matches_pattern(pr.head_ref, acceptable):
+    if acceptable and pr.head_ref and is_same_repo and branch_matches_pattern(pr.head_ref, acceptable):
         return True, (
             f'PR #{pr.pr_number} source branch {pr.head_ref!r} is itself in '
             f'acceptable branches — merging between acceptable branches not allowed'

@@ -135,7 +135,18 @@ def _require_validator_axons(
         metagraph, min_vtrust=min_vtrust, min_stake=min_stake
     )
     if not validator_axons:
-        _error('No reachable validator axons found on the network.', json_mode)
+        if excluded:
+            msg = (
+                f'No validators passed --min-vtrust={min_vtrust:g} / '
+                f'--min-stake={min_stake:,.0f} α; all {len(excluded)} candidate(s) excluded.'
+            )
+            if json_mode:
+                click.echo(json.dumps({'success': False, 'error': msg, 'skipped': excluded}))
+            else:
+                _render_skipped_validators(excluded, json_mode)
+                console.print(f'[red]Error: {msg}[/red]')
+        else:
+            _error('No reachable validator axons found on the network.', json_mode)
         sys.exit(1)
     return validator_axons, validator_uids, excluded
 

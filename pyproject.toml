@@ -25,6 +25,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest==9.0.0",
+    "pytest-asyncio>=0.24",
     "pyright",
     "ruff==0.14.10",
     "pre-commit>=4.0",
@@ -55,3 +56,4 @@ quote-style = "single"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+asyncio_mode = "auto"

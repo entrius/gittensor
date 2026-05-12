@@ -68,7 +68,7 @@ class MirrorClient:
         """Fetch every tracked PR authored by ``github_id`` since the given
         datetime. If ``since`` is omitted the mirror defaults to 35 days back.
         Response contains all mirror-tracked repos; caller must filter to the
-        scoring config's mirror-enabled subset if it's narrower.
+        scoring config's registered subset.
         """
         path = f'/api/v1/miners/{github_id}/pulls'
         params = {'since': since.astimezone(timezone.utc).isoformat()} if since else None

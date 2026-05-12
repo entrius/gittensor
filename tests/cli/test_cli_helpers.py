@@ -889,6 +889,9 @@ class TestCliRegisterLogicalFailures:
             patch('gittensor.cli.issue_commands.mutations.validate_github_issue', return_value={}),
             patch('substrateinterface.SubstrateInterface'),
             patch('bittensor.Wallet'),
+            # Force the contract-metadata-missing branch regardless of whether
+            # the ink! artifact has been built locally.
+            patch('pathlib.Path.exists', return_value=False),
         ):
             result = runner.invoke(
                 cli_root,

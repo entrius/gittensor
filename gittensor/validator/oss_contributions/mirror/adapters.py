@@ -1,18 +1,15 @@
-"""Adapters from mirror response types into legacy ``FileChange`` / ``Issue`` /
-``PullRequest``.
+"""Adapters from mirror response types into the storage-layer ``FileChange`` /
+``Issue`` / ``PullRequest`` shapes.
 
 Three boundaries need this:
 - Token-scoring infra in ``gittensor.validator.utils.tree_sitter_scoring`` expects
   ``List[FileChange]`` + ``Dict[str, FileContentPair]`` — see
-  ``score_mirror_miner_prs``.
-- Storage layer (``MinerEvaluation.get_all_file_changes``,
-  ``MinerEvaluation.get_all_issues``) writes per-PR rows to the analytics DB
-  using the legacy types.
-- Storage layer's ``store_pull_requests_bulk`` writes per-PR rows for analytics;
-  ScoredMirrorPR carries the same scoring fields as PullRequest but on a
-  composition wrapper, so we flatten it into a PullRequest for that bulk insert.
-
-When the legacy types are retired on flip-day this whole module goes away.
+  ``score_miner_prs``.
+- ``MinerEvaluation.get_all_file_changes`` / ``get_all_issues`` write per-PR
+  rows to the analytics DB using these types.
+- ``store_pull_requests_bulk`` writes per-PR rows for analytics; ScoredPR
+  carries the same scoring fields as PullRequest but on a composition wrapper,
+  so we flatten it into a PullRequest for that bulk insert.
 """
 
 from typing import Dict, List, Optional, Tuple
@@ -20,7 +17,7 @@ from typing import Dict, List, Optional, Tuple
 from gittensor.classes import FileChange, Issue, PRState, PullRequest
 from gittensor.utils.github_api_tools import FileContentPair
 from gittensor.utils.mirror.models import MirrorFile, MirrorLinkedIssue
-from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredMirrorPR
+from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredPR
 
 
 def mirror_files_to_legacy(
@@ -82,17 +79,17 @@ def mirror_linked_issue_to_legacy_issue(li: MirrorLinkedIssue, pr_number: int, r
 
 
 def mirror_scored_pr_to_legacy_pull_request(
-    scored: ScoredMirrorPR,
+    scored: ScoredPR,
     uid: int,
     hotkey: str,
     github_id: Optional[str],
 ) -> PullRequest:
-    """Adapt a ``ScoredMirrorPR`` into a legacy ``PullRequest`` for storage.
+    """Adapt a ``ScoredPR`` into a legacy ``PullRequest`` for storage.
 
-    ScoredMirrorPR carries identical scoring fields (multipliers, base_score,
+    ScoredPR carries identical scoring fields (multipliers, base_score,
     earned_score, token breakdown) but raw response data lives on the nested
     ``.pr`` attribute. uid / hotkey / github_id come from the parent
-    ``MinerEvaluation`` since ScoredMirrorPR doesn't carry miner identity.
+    ``MinerEvaluation`` since ScoredPR doesn't carry miner identity.
 
     Mirror has different field names for a few raw values:
     - ``pr.pr_number`` → ``PullRequest.number``

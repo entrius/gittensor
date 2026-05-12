@@ -63,16 +63,13 @@ class DatabaseStorage:
             with self.db_connection.pipeline():
                 result.stored_counts['miners'] = self.repo.set_miner(miner, commit=False)
                 result.stored_counts['merged_pull_requests'] = self.repo.store_pull_requests_bulk(
-                    miner_eval.merged_pull_requests + _adapt_mirror(miner_eval.mirror_merged_prs), commit=False
+                    _adapt_mirror(miner_eval.merged_prs), commit=False
                 )
                 result.stored_counts['open_pull_requests'] = self.repo.store_pull_requests_bulk(
-                    miner_eval.open_pull_requests + _adapt_mirror(miner_eval.mirror_open_prs), commit=False
+                    _adapt_mirror(miner_eval.open_prs), commit=False
                 )
                 result.stored_counts['closed_pull_requests'] = self.repo.store_pull_requests_bulk(
-                    miner_eval.closed_pull_requests + _adapt_mirror(miner_eval.mirror_closed_prs), commit=False
-                )
-                result.stored_counts['stale_closed_pull_requests'] = self.repo.refresh_stale_pr_states(
-                    miner_eval.stale_closed_pull_requests, commit=False
+                    _adapt_mirror(miner_eval.closed_prs), commit=False
                 )
                 result.stored_counts['issues'] = self.repo.store_issues_bulk(miner_eval.get_all_issues(), commit=False)
                 result.stored_counts['file_changes'] = self.repo.store_file_changes_bulk(

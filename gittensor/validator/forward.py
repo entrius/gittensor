@@ -50,9 +50,9 @@ async def forward(self: 'Validator') -> None:
 
     Emission blending (hardcoded per-competition):
     - OSS contributions: 30%
-    - Issue discovery:   30%
+    - Issue discovery:   10%
     - Issue treasury:    15% (flat to UID 111)
-    - Recycle:           25% (flat to UID 0)
+    - Recycle:           45% (flat to UID 0)
     """
 
     if self.step % VALIDATOR_STEPS_INTERVAL == 0:
@@ -168,9 +168,9 @@ def blend_emission_pools(
     """Blend 4 emission pools into a single rewards array.
 
     - OSS contributions: 30%
-    - Issue discovery:   30%
+    - Issue discovery:   10%
     - Issue treasury:    15% (flat to UID 111)
-    - Recycle:           25% (flat to UID 0)
+    - Recycle:           45% (flat to UID 0)
     """
     sorted_uids = sorted(miner_uids)
     rewards = np.zeros(len(sorted_uids))
@@ -183,7 +183,7 @@ def blend_emission_pools(
     else:
         recycle_extra += OSS_EMISSION_SHARE
 
-    # Pool 2: Issue discovery (30%)
+    # Pool 2: Issue discovery (10%)
     issue_total = float(issue_rewards.sum())
     if issue_total > 0:
         rewards += issue_rewards * ISSUE_DISCOVERY_EMISSION_SHARE
@@ -199,7 +199,7 @@ def blend_emission_pools(
             f'{ISSUES_TREASURY_EMISSION_SHARE * 100:.0f}% of emissions'
         )
 
-    # Pool 4: Recycle (25% + unclaimed from empty pools)
+    # Pool 4: Recycle (45% + unclaimed from empty pools)
     if RECYCLE_UID in miner_uids:
         recycle_idx = sorted_uids.index(RECYCLE_UID)
         rewards[recycle_idx] += RECYCLE_EMISSION_SHARE + recycle_extra

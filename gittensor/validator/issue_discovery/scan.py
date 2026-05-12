@@ -60,7 +60,6 @@ from gittensor.validator.utils.load_weights import (
     LanguageConfig,
     RepositoryConfig,
     TokenConfig,
-    resolve_repo_weight,
 )
 
 
@@ -224,6 +223,7 @@ def _clear_issue_discovery_fields(evaluation: MinerEvaluation) -> None:
     evaluation.total_valid_solved_issues = 0
     evaluation.total_closed_issues = 0
     evaluation.total_open_issues = 0
+    evaluation.discovered_issues = []
 
 
 def _copy_issue_discovery_fields(target: MinerEvaluation, source: MinerEvaluation) -> None:
@@ -235,6 +235,7 @@ def _copy_issue_discovery_fields(target: MinerEvaluation, source: MinerEvaluatio
     target.total_valid_solved_issues = source.total_valid_solved_issues
     target.total_closed_issues = source.total_closed_issues
     target.total_open_issues = source.total_open_issues
+    target.discovered_issues = list(source.discovered_issues)
 
 
 def _restore_issue_discovery_from_cache(
@@ -435,6 +436,7 @@ async def _score_miner_issues(
     evaluation.total_closed_issues = closed_count
     evaluation.total_open_issues = open_issue_count
     evaluation.issue_token_score = round(issue_token_score, 2)
+    evaluation.discovered_issues = []
 
     is_eligible, credibility, reason = check_issue_eligibility(solved_count, valid_solved_count, closed_count)
     evaluation.is_issue_eligible = is_eligible
@@ -456,7 +458,6 @@ async def _score_miner_issues(
         issue.discovery_open_issue_spam_multiplier = spam_mult
         issue.discovery_earned_score = round(
             issue.discovery_base_score
-            * issue.discovery_repo_weight_multiplier
             * issue.discovery_time_decay_multiplier
             * issue.discovery_review_quality_multiplier
             * issue.discovery_credibility_multiplier
@@ -465,6 +466,7 @@ async def _score_miner_issues(
         )
         total_discovery_score += issue.discovery_earned_score
 
+    evaluation.discovered_issues = scored_issues
     evaluation.issue_discovery_score = round(total_discovery_score, 2)
 
     bt.logging.info(
@@ -620,7 +622,7 @@ def _mirror_issue_for_scoring(
     )
 
     adapted.discovery_base_score = base_score
-    adapted.discovery_repo_weight_multiplier = resolve_repo_weight(repo_config)
+    adapted.discovery_repo_weight_multiplier = 1.0
     adapted.discovery_time_decay_multiplier = round(calculate_time_decay(solving_pr.merged_at), 2)
     adapted.discovery_review_quality_multiplier = round(
         calculate_issue_review_quality_multiplier(solving_pr.review_summary.maintainer_changes_requested_count),

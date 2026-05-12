@@ -2,7 +2,7 @@
 
 Mirror analogue of ``gittensor.validator.oss_contributions.scoring``. Scope:
 - Compute base_score for each PR via the existing token-scoring infra
-- Compute per-PR multipliers: repo_weight, time_decay, review_quality, label, issue
+- Compute per-PR multipliers: time_decay, review_quality, label, issue
 - The eligibility gate (``_should_skip_merged_mirror_pr``) is exported and
   used at LOAD time by ``mirror.load._maybe_add_pr`` — rejected PRs never
   enter ``mirror_merged_prs`` (matches legacy ``should_skip_merged_pr`` flow)
@@ -54,7 +54,6 @@ from gittensor.validator.utils.load_weights import (
     LanguageConfig,
     RepositoryConfig,
     TokenConfig,
-    resolve_repo_weight,
 )
 from gittensor.validator.utils.tree_sitter_scoring import calculate_token_score_from_file_changes
 
@@ -343,7 +342,10 @@ def calculate_base_score_for_pr_files(
 
 
 def _calculate_pr_multipliers(scored: ScoredMirrorPR, repo_config: RepositoryConfig) -> None:
-    """Compute repo_weight, time_decay, review_quality, label, issue multipliers.
+    """Compute time_decay, review_quality, label, issue multipliers.
+
+    Per-repo emission caps are enforced at round aggregation (``emission_allocation``),
+    not as a per-PR multiplier. ``repo_weight_multiplier`` stays at 1.0 for schema parity.
 
     Spam and credibility multipliers are deferred to ``finalize_miner_scores``
     — they depend on counts combined across both legacy and mirror paths.
@@ -351,7 +353,7 @@ def _calculate_pr_multipliers(scored: ScoredMirrorPR, repo_config: RepositoryCon
     pr = scored.pr
     is_merged = pr.state == 'MERGED'
 
-    scored.repo_weight_multiplier = resolve_repo_weight(repo_config)
+    scored.repo_weight_multiplier = 1.0
 
     chosen_label, label_multiplier = _resolve_trusted_scoring_label(pr, repo_config)
     scored.label = chosen_label

@@ -1287,8 +1287,8 @@ class TestLoadMinersPrsErrorResilience:
         mock_graphql_query.return_value = _make_graphql_response([good_pr_before, bad_pr, good_pr_after])
 
         master_repos = {
-            'goodorg/goodrepo': RepositoryConfig(weight=1.0),
-            'affinefoundation/affinetes': RepositoryConfig(weight=1.0),
+            'goodorg/goodrepo': RepositoryConfig(emission_share=1.0),
+            'affinefoundation/affinetes': RepositoryConfig(emission_share=1.0),
         }
         miner_eval = MinerEvaluation(uid=74, hotkey='test_hotkey', github_id='12345', github_pat='fake_pat')
 

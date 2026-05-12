@@ -161,7 +161,7 @@ class TestStoreOrUseCachedEvaluation:
                 new=AsyncMock(side_effect=evaluate),
             ),
         ):
-            _, _, cached_uids, penalized_uids = asyncio.run(
+            _, cached_uids, penalized_uids = asyncio.run(
                 get_rewards(
                     cast(Validator, validator),
                     {1, 2},

@@ -249,7 +249,7 @@ class TestReviewCollateralMultiplierOnOpenPRCollateral:
 
 
 def _make_repo_config() -> dict:
-    return {'test/repo': RepositoryConfig(weight=1.0, label_multipliers={'fix': 1.25})}
+    return {'test/repo': RepositoryConfig(emission_share=1.0, label_multipliers={'fix': 1.25})}
 
 
 def _make_eval() -> MinerEvaluation:
@@ -270,7 +270,6 @@ class TestReviewCollateralThroughScoringPipeline:
 
         collateral_projection = (
             pr.base_score
-            * pr.repo_weight_multiplier
             * pr.issue_multiplier
             * pr.label_multiplier
             * calculate_review_collateral_multiplier(pr.changes_requested_count)

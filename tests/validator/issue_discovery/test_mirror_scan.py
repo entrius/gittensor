@@ -164,7 +164,7 @@ def _eval(uid: int = 1, github_id: Optional[str] = '999'):
 
 
 def _mirror_repos(*names: str) -> dict:
-    return {name: RepositoryConfig(weight=0.5, mirror_enabled=True) for name in names}
+    return {name: RepositoryConfig(emission_share=0.5, mirror_enabled=True) for name in names}
 
 
 def _run(coro):

@@ -60,7 +60,6 @@ from gittensor.validator.utils.load_weights import (
     LanguageConfig,
     RepositoryConfig,
     TokenConfig,
-    resolve_repo_weight,
 )
 
 
@@ -275,6 +274,7 @@ async def _score_miner_mirror_issues(
     ``canonical_pr_owners`` enforces the cross-miner one-issue-per-PR rule:
     only the marker-matching issue scores, siblings count for credibility.
     """
+    evaluation.issue_discovery_repo_scores.clear()
     solved_count = 0
     valid_solved_count = 0
     closed_count = 0
@@ -397,12 +397,15 @@ async def _score_miner_mirror_issues(
         issue.discovery_open_issue_spam_multiplier = spam_mult
         issue.discovery_earned_score = round(
             issue.discovery_base_score
-            * issue.discovery_repo_weight_multiplier
             * issue.discovery_time_decay_multiplier
             * issue.discovery_review_quality_multiplier
             * issue.discovery_credibility_multiplier
             * issue.discovery_open_issue_spam_multiplier,
             2,
+        )
+        rk = issue.repository_full_name.lower()
+        evaluation.issue_discovery_repo_scores[rk] = (
+            evaluation.issue_discovery_repo_scores.get(rk, 0.0) + issue.discovery_earned_score
         )
         total_discovery_score += issue.discovery_earned_score
 
@@ -560,7 +563,7 @@ def _mirror_issue_for_scoring(
     )
 
     adapted.discovery_base_score = base_score
-    adapted.discovery_repo_weight_multiplier = resolve_repo_weight(repo_config)
+    adapted.discovery_repo_weight_multiplier = 1.0
     adapted.discovery_time_decay_multiplier = round(calculate_time_decay(solving_pr.merged_at), 2)
     adapted.discovery_review_quality_multiplier = round(
         calculate_issue_review_quality_multiplier(solving_pr.review_summary.maintainer_changes_requested_count),

@@ -115,8 +115,8 @@ class TestCalculateFinalEarnedScore:
         scored.base_score = 100.0
         scored.repo_weight_multiplier = 0.5
         scored.review_quality_multiplier = 0.5
-        # 100 * 0.5 * 0.5 (others 1.0) = 25
-        assert scored.calculate_final_earned_score() == 25.0
+        # 100 * 0.5 (others 1.0) = 50 — repo multiplier is not applied to earned score
+        assert scored.calculate_final_earned_score() == 50.0
 
     def test_zero_multiplier_zeros_score(self):
         scored = ScoredMirrorPR(pr=_make_pr())

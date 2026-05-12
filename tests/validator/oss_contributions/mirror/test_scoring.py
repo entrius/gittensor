@@ -103,7 +103,7 @@ def _pr(
 
 
 def _config(
-    weight: float = 0.5,
+    emission_share: float = 0.5,
     additional_branches: list | None = None,
     trusted_label_pipeline: bool = False,
     label_multipliers: dict | None = None,
@@ -112,7 +112,7 @@ def _config(
     eligibility_mode: bool = True,
 ) -> RepositoryConfig:
     return RepositoryConfig(
-        weight=weight,
+        emission_share=emission_share,
         mirror_enabled=True,
         additional_acceptable_branches=additional_branches,
         trusted_label_pipeline=trusted_label_pipeline,
@@ -379,7 +379,7 @@ class TestScoringDataStoredGate:
 
         client.get_pr_files.assert_not_called()
         assert scored.base_score == pytest.approx(7.5)
-        assert scored.repo_weight_multiplier == pytest.approx(0.5)
+        assert scored.repo_weight_multiplier == pytest.approx(1.0)
 
 
 class TestFixedBaseScore:
@@ -425,7 +425,7 @@ class TestFixedBaseScore:
                 mirror_eval=Mock(),
                 mirror_repos={
                     scored.pr.repo_full_name: _config(
-                        weight=1.0,
+                        emission_share=1.0,
                         fixed_base_score=1.0,
                         label_multipliers={'feature': 2.0},
                     )
@@ -442,7 +442,6 @@ class TestFixedBaseScore:
         assert scored.label_multiplier == pytest.approx(2.0)
         assert scored.calculate_final_earned_score() == pytest.approx(
             scored.base_score
-            * scored.repo_weight_multiplier
             * scored.issue_multiplier
             * scored.label_multiplier
             * scored.open_pr_spam_multiplier
@@ -497,14 +496,14 @@ class TestFixedBaseScore:
         )
         repos = {
             fixed.pr.repo_full_name: _config(
-                weight=1.0,
+                emission_share=1.0,
                 fixed_base_score=1.0,
                 label_multipliers={'feature': 1.5},
             )
         }
 
         asyncio.run(score_mirror_pr(fixed, Mock(), repos, {}, Mock(), client))
-        repos[plain.pr.repo_full_name] = _config(weight=1.0, label_multipliers={'feature': 1.5})
+        repos[plain.pr.repo_full_name] = _config(emission_share=1.0, label_multipliers={'feature': 1.5})
         asyncio.run(score_mirror_pr(plain, Mock(), repos, {}, Mock(), client))
 
         assert fixed.base_score == pytest.approx(1.0)
@@ -918,10 +917,10 @@ class TestPrMultipliers:
         scored.token_score = 100.0  # for completeness
         _calculate_pr_multipliers(
             scored,
-            _config(weight=0.7, additional_branches=['test'], label_multipliers={'feature': 1.5}),
+            _config(emission_share=0.7, additional_branches=['test'], label_multipliers={'feature': 1.5}),
         )
 
-        assert scored.repo_weight_multiplier == 0.7
+        assert scored.repo_weight_multiplier == 1.0
         assert scored.label == 'feature'
         assert scored.label_multiplier == pytest.approx(1.5)
         assert 0.0 <= scored.time_decay_multiplier <= 1.0
@@ -931,9 +930,9 @@ class TestPrMultipliers:
 
     def test_open_pr_only_neutral_multipliers(self):
         scored = ScoredMirrorPR(pr=_pr(state='OPEN'))
-        _calculate_pr_multipliers(scored, _config(weight=0.5))
+        _calculate_pr_multipliers(scored, _config(emission_share=0.5))
 
-        assert scored.repo_weight_multiplier == 0.5
+        assert scored.repo_weight_multiplier == 1.0
         # Time decay / review quality / credibility are merge-only — kept neutral here.
         assert scored.time_decay_multiplier == 1.0
         assert scored.credibility_multiplier == 1.0

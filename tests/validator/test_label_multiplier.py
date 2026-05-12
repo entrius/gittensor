@@ -57,7 +57,7 @@ def _score(current, timeline, repo_config):
     ],
 )
 def test_get_label_multiplier_matches_repo_patterns(pattern, label, expected):
-    config = RepositoryConfig(weight=1.0, label_multipliers={pattern: expected})
+    config = RepositoryConfig(emission_share=1.0, label_multipliers={pattern: expected})
 
     assert get_label_multiplier(label, config) == pytest.approx(expected)
 
@@ -76,15 +76,15 @@ def test_get_label_multiplier_returns_highest_matching_pattern():
 
 
 def test_get_label_multiplier_returns_none_without_repo_config_match():
-    config = RepositoryConfig(weight=1.0, label_multipliers={'kind/*': 1.5})
+    config = RepositoryConfig(emission_share=1.0, label_multipliers={'kind/*': 1.5})
 
     assert get_label_multiplier('feature', config) is None
-    assert get_label_multiplier('kind/feature', RepositoryConfig(weight=1.0)) is None
+    assert get_label_multiplier('kind/feature', RepositoryConfig(emission_share=1.0)) is None
     assert get_label_multiplier('kind/feature', None) is None
 
 
 def test_highest_label_resolution_uses_default_when_no_candidate_matches():
-    config = RepositoryConfig(weight=1.0, label_multipliers={'kind/*': 1.5}, default_label_multiplier=0.8)
+    config = RepositoryConfig(emission_share=1.0, label_multipliers={'kind/*': 1.5}, default_label_multiplier=0.8)
 
     label, multiplier = resolve_highest_label_multiplier(['feature', 'bug'], config)
 
@@ -93,7 +93,7 @@ def test_highest_label_resolution_uses_default_when_no_candidate_matches():
 
 
 def test_highest_label_resolution_tiebreaks_by_label_name():
-    config = RepositoryConfig(weight=1.0, label_multipliers={'a': 1.5, 'b': 1.5})
+    config = RepositoryConfig(emission_share=1.0, label_multipliers={'a': 1.5, 'b': 1.5})
 
     label, multiplier = resolve_highest_label_multiplier(['a', 'b'], config)
 
@@ -128,14 +128,14 @@ def test_wildcard_label_resolves_through_legacy_scoring(current, timeline, expec
 
 
 def test_repo_without_label_multipliers_ignores_old_global_label():
-    pr = _score(['feature'], ['feature'], RepositoryConfig(weight=1.0))
+    pr = _score(['feature'], ['feature'], RepositoryConfig(emission_share=1.0))
 
     assert pr.label is None
     assert pr.label_multiplier == pytest.approx(1.0)
 
 
 def test_repo_default_label_multiplier_applies_without_label_map():
-    config = RepositoryConfig(weight=1.0, default_label_multiplier=0.8)
+    config = RepositoryConfig(emission_share=1.0, default_label_multiplier=0.8)
 
     labeled = _score(['feature'], ['feature'], config)
     unlabeled = _score([], [], config)
@@ -147,7 +147,7 @@ def test_repo_default_label_multiplier_applies_without_label_map():
 
 
 def test_legacy_timeline_order_preserved_for_matching_labels():
-    config = RepositoryConfig(weight=1.0, label_multipliers={'feature': 1.5, 'bug': 1.25})
+    config = RepositoryConfig(emission_share=1.0, label_multipliers={'feature': 1.5, 'bug': 1.25})
 
     pr = _score(['feature', 'bug'], ['feature', 'bug'], config)
 
@@ -156,7 +156,7 @@ def test_legacy_timeline_order_preserved_for_matching_labels():
 
 
 def test_legacy_timeline_skips_unmatched_labels():
-    config = RepositoryConfig(weight=1.0, label_multipliers={'bug': 1.25})
+    config = RepositoryConfig(emission_share=1.0, label_multipliers={'bug': 1.25})
 
     pr = _score(['lgtm', 'bug'], ['bug', 'lgtm'], config)
 
@@ -165,7 +165,7 @@ def test_legacy_timeline_skips_unmatched_labels():
 
 
 def test_legacy_truncated_timeline_uses_highest_current_match():
-    config = RepositoryConfig(weight=1.0, label_multipliers={'feature': 1.5, 'bug': 1.25})
+    config = RepositoryConfig(emission_share=1.0, label_multipliers={'feature': 1.5, 'bug': 1.25})
 
     pr = _score(['feature', 'bug'], [], config)
 
@@ -188,7 +188,7 @@ def test_legacy_truncated_timeline_uses_highest_current_match():
     ],
 )
 def test_legacy_current_and_timeline_compatibility(current, timeline, expected_label, expected_multiplier):
-    config = RepositoryConfig(weight=1.0, label_multipliers={'feature': 1.5, 'bug': 1.25})
+    config = RepositoryConfig(emission_share=1.0, label_multipliers={'feature': 1.5, 'bug': 1.25})
 
     pr = _score(current, timeline, config)
 
@@ -202,7 +202,7 @@ def test_missing_labels_key_does_not_crash():
 
     pr = PullRequest.from_graphql_response(payload, uid=0, hotkey='hk', github_id='gh')
     label, multiplier = resolve_legacy_label_multiplier(
-        pr.label_timeline_order, pr.current_labels, RepositoryConfig(1.0)
+        pr.label_timeline_order, pr.current_labels, RepositoryConfig(emission_share=1.0)
     )
 
     assert pr.current_labels == frozenset()

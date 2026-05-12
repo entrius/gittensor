@@ -30,10 +30,10 @@ def _make_miner_eval(uid=1, hotkey='hk', github_id='218712309', failed_reason=No
 
 def _configs():
     return {
-        'entrius/gittensor-ui': RepositoryConfig(weight=0.5, mirror_enabled=True),
-        'entrius/allways': RepositoryConfig(weight=0.5, mirror_enabled=True),
-        'other/legacy-repo': RepositoryConfig(weight=0.3, mirror_enabled=False),
-        'third/legacy-repo': RepositoryConfig(weight=0.2),  # default False
+        'entrius/gittensor-ui': RepositoryConfig(emission_share=0.5, mirror_enabled=True),
+        'entrius/allways': RepositoryConfig(emission_share=0.5, mirror_enabled=True),
+        'other/legacy-repo': RepositoryConfig(emission_share=0.3, mirror_enabled=False),
+        'third/legacy-repo': RepositoryConfig(emission_share=0.2),  # default False
     }
 
 
@@ -82,8 +82,8 @@ def test_partitions_and_calls_both_paths():
 def test_all_legacy_repos_skips_mirror_path():
     """If no repos are mirror_enabled, mirror load/score/combine are never called."""
     configs = {
-        'a/legacy': RepositoryConfig(weight=0.5, mirror_enabled=False),
-        'b/legacy': RepositoryConfig(weight=0.3),
+        'a/legacy': RepositoryConfig(emission_share=0.5, mirror_enabled=False),
+        'b/legacy': RepositoryConfig(emission_share=0.3),
     }
 
     with (
@@ -116,8 +116,8 @@ def test_all_legacy_repos_skips_mirror_path():
 def test_all_mirror_repos_skips_legacy_path():
     """If every repo is mirror_enabled, legacy load/score are never called."""
     configs = {
-        'entrius/a': RepositoryConfig(weight=0.5, mirror_enabled=True),
-        'entrius/b': RepositoryConfig(weight=0.5, mirror_enabled=True),
+        'entrius/a': RepositoryConfig(emission_share=0.5, mirror_enabled=True),
+        'entrius/b': RepositoryConfig(emission_share=0.5, mirror_enabled=True),
     }
 
     with (

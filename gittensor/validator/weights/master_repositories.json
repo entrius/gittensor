@@ -1,205 +1,219 @@
 {
   "404-Repo/404-base-miner-gs": {
-    "weight": 0.0487
+    "emission_share": 0.0022412134767341805
   },
   "404-Repo/404-gen-subnet": {
-    "weight": 0.1025
+    "emission_share": 0.004717133087582207
   },
   "AffineFoundation/affine-cortex": {
-    "weight": 0.2017
+    "emission_share": 0.009282397500149572
   },
   "AffineFoundation/affinetes": {
-    "weight": 0.1957
+    "emission_share": 0.009006272636486224
   },
   "AffineFoundation/liveweb-arena": {
-    "weight": 0.1168
+    "emission_share": 0.005375230679313188
   },
   "afterpartyai/bittensor-conversation-genome-project": {
-    "weight": 0.0536
+    "emission_share": 0.0024667154487259153
   },
   "AgentOps-AI/agentops": {
-    "weight": 0.0363
+    "emission_share": 0.0016705554251632596
   },
   "agno-agi/agno": {
-    "weight": 0.0442
+    "emission_share": 0.002034119828986669
   },
   "AlphaCoreBittensor/alphacore": {
-    "weight": 0.0484
+    "emission_share": 0.002227407233551013
   },
   "ansible/ansible": {
-    "weight": 0.0372
+    "emission_share": 0.001711974154712762
   },
   "ant-design/ant-design": {
-    "additional_acceptable_branches": ["feature"],
-    "weight": 0.0715
+    "additional_acceptable_branches": [
+      "feature"
+    ],
+    "emission_share": 0.0032904879586549054
   },
   "antoniorodr/cronboard": {
-    "weight": 0.0349
+    "emission_share": 0.0016061262903084785
   },
   "appwrite/appwrite": {
-    "weight": 0.0579
+    "emission_share": 0.002664604934351315
   },
   "autoppia/autoppia_iwa": {
-    "additional_acceptable_branches": ["contribution/*"],
+    "additional_acceptable_branches": [
+      "contribution/*"
+    ],
     "inactive_at": "2026-04-06T00:00:00Z",
-    "weight": 0.1259
+    "emission_share": 0.005794020055869268
   },
   "autoppia/autoppia_web_agents_subnet": {
-    "additional_acceptable_branches": ["dev", "dev-gittensor"],
+    "additional_acceptable_branches": [
+      "dev",
+      "dev-gittensor"
+    ],
     "inactive_at": "2026-04-06T00:00:00Z",
-    "weight": 0.1321
+    "emission_share": 0.006079349081654728
   },
   "autoppia/autoppia_webs_demo": {
-    "additional_acceptable_branches": ["feature/*", "fix/*"],
+    "additional_acceptable_branches": [
+      "feature/*",
+      "fix/*"
+    ],
     "inactive_at": "2026-04-06T00:00:00Z",
-    "weight": 0.1239
+    "emission_share": 0.005701978434648151
   },
   "aws/aws-cli": {
-    "weight": 0.0978
+    "emission_share": 0.004500835277712584
   },
   "axios/axios": {
-    "weight": 0.0352
+    "emission_share": 0.001619932533491646
   },
   "backend-developers-ltd/ComputeHorde": {
-    "weight": 0.0504
+    "emission_share": 0.0023194488547721294
   },
   "backend-developers-ltd/InfiniteHash": {
-    "weight": 0.0438
+    "emission_share": 0.0020157115047424456
   },
   "Barbariandev/MANTIS": {
-    "weight": 0.0549
+    "emission_share": 0.0025265425025196406
   },
   "BerriAI/litellm": {
-    "weight": 0.0529
+    "emission_share": 0.0024345008812985246
   },
   "bevyengine/bevy": {
-    "weight": 0.0571
+    "emission_share": 0.0026277882858628684
   },
   "bitcast-network/bitcast": {
-    "weight": 0.0501
+    "emission_share": 0.002305642611588962
   },
   "bitcoin/bips": {
-    "weight": 0.3303
+    "emission_share": 0.015200673744667346
   },
   "bitcoin/bitcoin": {
-    "weight": 0.4274
+    "emission_share": 0.01966929445495254
   },
   "bitcoinj/bitcoinj": {
-    "weight": 0.3094
+    "emission_share": 0.014238838802906682
   },
   "bitcoinjs/bitcoinjs-lib": {
-    "weight": 0.2917
+    "emission_share": 0.013424270455099804
   },
   "BitMind-AI/bitmind-subnet": {
-    "additional_acceptable_branches": ["testnet"],
-    "weight": 0.1013
+    "additional_acceptable_branches": [
+      "testnet"
+    ],
+    "emission_share": 0.004661908114849537
   },
   "bitpay/bitcore": {
-    "weight": 0.0967
+    "emission_share": 0.00445021238604097
   },
   "bitrecs/bitrecs-subnet": {
-    "weight": 0.0435
+    "emission_share": 0.002001905261559278
   },
   "Bitsec-AI/subnet": {
-    "weight": 0.0481
+    "emission_share": 0.0022136009903678455
   },
   "bitwarden/server": {
-    "weight": 0.0956
+    "emission_share": 0.004399589494369357
   },
   "brave/brave-browser": {
-    "weight": 0.0946
+    "emission_share": 0.004353568683758798
   },
   "browser-use/browser-harness": {
-    "weight": 0.1
+    "emission_share": 0.004602081061055812
   },
   "browser-use/browser-use": {
-    "weight": 0.0526
+    "emission_share": 0.002420694638115357
   },
   "byteleapai/byteleap-Miner": {
-    "weight": 0.0433
+    "emission_share": 0.0019927010994371663
   },
   "calcom/cal.diy": {
-    "weight": 0.0347
+    "emission_share": 0.0015969221281863669
   },
   "chutesai/chutes": {
-    "weight": 0.0989
+    "emission_share": 0.004551458169384198
   },
   "Cinnamon/kotaemon": {
-    "weight": 0.0473
+    "emission_share": 0.002176784341879399
   },
   "cli/cli": {
-    "weight": 0.0936
+    "emission_share": 0.0043075478731482405
   },
   "ClickHouse/ClickHouse": {
-    "weight": 0.1152
+    "emission_share": 0.005301597382336295
   },
   "Comfy-Org/ComfyUI": {
-    "weight": 0.0523
+    "emission_share": 0.0024068883949321896
   },
   "commaai/openpilot": {
-    "weight": 0.0926
+    "emission_share": 0.004261527062537682
   },
   "cosmos/cosmos-sdk": {
-    "additional_acceptable_branches": ["release/v0.54.x", "release/v0.53.x"],
-    "weight": 0.0916
+    "additional_acceptable_branches": [
+      "release/v0.54.x",
+      "release/v0.53.x"
+    ],
+    "emission_share": 0.004215506251927124
   },
   "CreativeBuilds/sn77": {
-    "weight": 0.0546
+    "emission_share": 0.0025127362593364735
   },
   "crewAIInc/crewAI": {
-    "weight": 0.052
+    "emission_share": 0.002393082151749022
   },
   "curl/curl": {
-    "weight": 0.037
+    "emission_share": 0.0017027699925906503
   },
   "Datura-ai/lium-io": {
-    "weight": 0.0906
+    "emission_share": 0.0041694854413165654
   },
   "dbeaver/dbeaver": {
-    "weight": 0.2409
+    "emission_share": 0.011086413276083451
   },
   "deepset-ai/haystack": {
-    "weight": 0.0567
+    "emission_share": 0.0026093799616186456
   },
   "denoland/deno": {
-    "weight": 0.1106
+    "emission_share": 0.0050899016535277284
   },
   "Desearch-ai/linkedin-dms": {
-    "weight": 0.1221
+    "emission_share": 0.005619140975549147
   },
   "Desearch-ai/subnet-22": {
-    "weight": 0.1367
+    "emission_share": 0.0062910448104632945
   },
   "django/django": {
-    "weight": 0.0366
+    "emission_share": 0.0016843616683464271
   },
   "docker/compose": {
-    "weight": 0.0897
+    "emission_share": 0.004128066711767063
   },
   "dogecoin/dogecoin": {
-    "weight": 0.0417
+    "emission_share": 0.0019190678024602736
   },
   "dstrbtd/DistributedTraining": {
-    "weight": 0.0457
+    "emission_share": 0.002103151044902506
   },
   "EfficientFrontier-SignalPlus/EfficientFrontier": {
-    "weight": 0.0478
+    "emission_share": 0.0021997947471846784
   },
   "eigent-ai/eigent": {
-    "weight": 0.1392
+    "emission_share": 0.00640609683698969
   },
   "entrius/allways": {
-    "weight": 1.0,
     "mirror_enabled": true,
     "trusted_label_pipeline": true,
     "label_multipliers": {
       "bug": 1.25,
       "enhancement": 1.0,
       "refactor": 0.25
-    }
+    },
+    "emission_share": 0.04602081061055812
   },
   "entrius/allways-ui": {
-    "weight": 0.5,
     "mirror_enabled": true,
     "trusted_label_pipeline": true,
     "label_multipliers": {
@@ -207,10 +221,10 @@
       "bug": 1.1,
       "enhancement": 1.0,
       "refactor": 0.5
-    }
+    },
+    "emission_share": 0.02301040530527906
   },
   "entrius/das-github-mirror": {
-    "weight": 0.2,
     "mirror_enabled": true,
     "trusted_label_pipeline": true,
     "label_multipliers": {
@@ -218,10 +232,10 @@
       "bug": 1.25,
       "enhancement": 1.1,
       "refactor": 0.5
-    }
+    },
+    "emission_share": 0.009204162122111625
   },
   "entrius/gittensor": {
-    "weight": 1.0,
     "mirror_enabled": true,
     "trusted_label_pipeline": true,
     "label_multipliers": {
@@ -229,10 +243,10 @@
       "bug": 1.1,
       "enhancement": 1.25,
       "refactor": 0.25
-    }
+    },
+    "emission_share": 0.04602081061055812
   },
   "entrius/gittensor-ui": {
-    "weight": 0.5,
     "mirror_enabled": true,
     "trusted_label_pipeline": true,
     "label_multipliers": {
@@ -240,477 +254,533 @@
       "bug": 1.1,
       "enhancement": 1.0,
       "refactor": 0.5
-    }
+    },
+    "emission_share": 0.02301040530527906
   },
   "espressif/arduino-esp32": {
-    "weight": 0.1444
+    "emission_share": 0.006645405052164592
   },
   "ethereum-optimism/optimism": {
-    "weight": 0.0888
+    "emission_share": 0.004086647982217561
   },
   "ethereum/EIPs": {
-    "weight": 0.0879
+    "emission_share": 0.004045229252668059
   },
   "ethereum/go-ethereum": {
-    "weight": 0.1849
+    "emission_share": 0.008509247881892197
   },
   "ethers-io/ethers.js": {
-    "weight": 0.087
+    "emission_share": 0.004003810523118556
   },
   "excalidraw/excalidraw": {
-    "weight": 0.059
+    "emission_share": 0.002715227826022929
   },
   "flowsurface-rs/flowsurface": {
-    "weight": 0.051
+    "emission_share": 0.002347061341138464
   },
   "General-Tao-Ventures/cartha-cli": {
-    "weight": 0.0476
+    "emission_share": 0.0021905905850625666
   },
   "General-Tao-Ventures/cartha-validator": {
-    "weight": 0.047
+    "emission_share": 0.0021629780986962316
   },
   "ggml-org/llama.cpp": {
-    "weight": 0.0339
+    "emission_share": 0.0015601054796979203
   },
   "git/git": {
-    "weight": 0.0862
+    "emission_share": 0.00396699387463011
   },
   "godotengine/godot": {
-    "weight": 0.0611
+    "emission_share": 0.002811871528305101
   },
   "gopher-lab/subnet-42": {
-    "weight": 0.0428
+    "emission_share": 0.0019696906941318875
   },
   "gradients-ai/G.O.D": {
-    "weight": 0.0853
+    "emission_share": 0.003925575145080608
   },
   "grafana/grafana": {
-    "additional_acceptable_branches": ["release-13.0.2"],
-    "weight": 0.1136
+    "additional_acceptable_branches": [
+      "release-13.0.2"
+    ],
+    "emission_share": 0.005227964085359403
   },
   "GraphiteAI/Graphite-Subnet": {
-    "weight": 0.0468
+    "emission_share": 0.0021537739365741202
   },
   "Homebrew/brew": {
-    "weight": 0.0342
+    "emission_share": 0.0015739117228810878
   },
   "hoppscotch/hoppscotch": {
-    "additional_acceptable_branches": ["next"],
-    "weight": 0.1801
+    "additional_acceptable_branches": [
+      "next"
+    ],
+    "emission_share": 0.008288347990961517
   },
   "huggingface/lerobot": {
-    "weight": 0.0629
+    "emission_share": 0.0028947089874041057
   },
   "huggingface/transformers": {
-    "weight": 0.0845
+    "emission_share": 0.0038887584965921615
   },
   "immich-app/immich": {
-    "weight": 0.0587
+    "emission_share": 0.0027014215828397616
   },
   "impel-intelligence/dippy-studio-bittensor-miner": {
-    "weight": 0.0426
+    "emission_share": 0.001960486532009776
   },
   "impel-intelligence/dippy-studio-bittensor-orchestrator": {
-    "weight": 0.0424
+    "emission_share": 0.0019512823698876643
   },
   "inference-labs-inc/subnet-2": {
-    "weight": 0.0422
+    "emission_share": 0.0019420782077655527
   },
   "infiniflow/ragflow": {
-    "weight": 0.1185
+    "emission_share": 0.0054534660573511366
   },
   "It-s-AI/llm-detection": {
-    "weight": 0.0465
+    "emission_share": 0.0021399676933909527
   },
   "janhq/jan": {
-    "weight": 0.0704
+    "emission_share": 0.003239865066983292
   },
   "jellyfin/jellyfin": {
-    "additional_acceptable_branches": ["release-10.11.z"],
-    "weight": 0.0607
+    "additional_acceptable_branches": [
+      "release-10.11.z"
+    ],
+    "emission_share": 0.002793463204060878
   },
   "jesseduffield/lazygit": {
-    "weight": 0.0357
+    "emission_share": 0.001642942938796925
   },
   "JetBrains/kotlin": {
-    "weight": 0.0354
+    "emission_share": 0.0016291366956137576
   },
   "junegunn/fzf": {
-    "weight": 0.0351
+    "emission_share": 0.00161533045243059
   },
   "jupyter/jupyter": {
-    "weight": 0.0837
+    "emission_share": 0.0038519418481037146
   },
   "jupyterlab/jupyterlab": {
-    "additional_acceptable_branches": ["4.5.x"],
-    "weight": 0.1755
+    "additional_acceptable_branches": [
+      "4.5.x"
+    ],
+    "emission_share": 0.008076652262152949
   },
   "keras-team/keras": {
-    "weight": 0.1091
+    "emission_share": 0.005020870437611891
   },
   "labring/FastGPT": {
-    "additional_acceptable_branches": ["v4.14.x"],
-    "weight": 0.0633
+    "additional_acceptable_branches": [
+      "v4.14.x"
+    ],
+    "emission_share": 0.002913117311648329
   },
   "langchain-ai/langchain": {
-    "weight": 0.0615
+    "emission_share": 0.0028302798525493243
   },
   "langgenius/dify": {
-    "weight": 0.0336,
-    "inactive_at": "2026-04-14T00:00:00Z"
+    "inactive_at": "2026-04-14T00:00:00Z",
+    "emission_share": 0.0015462992365147528
   },
   "laravel/framework": {
-    "weight": 0.0346
+    "emission_share": 0.001592320047125311
   },
   "latent-to/async-substrate-interface": {
-    "additional_acceptable_branches": ["staging"],
-    "weight": 0.2764
+    "additional_acceptable_branches": [
+      "staging"
+    ],
+    "emission_share": 0.012720152052758263
   },
   "latent-to/bittensor": {
-    "additional_acceptable_branches": ["staging", "SDKv10"],
-    "weight": 0.3556
+    "additional_acceptable_branches": [
+      "staging",
+      "SDKv10"
+    ],
+    "emission_share": 0.016365000253114468
   },
   "latent-to/btcli": {
-    "additional_acceptable_branches": ["staging"],
-    "weight": 0.2514
+    "additional_acceptable_branches": [
+      "staging"
+    ],
+    "emission_share": 0.011569631787494311
   },
   "latent-to/btwallet": {
-    "weight": 0.2631
+    "emission_share": 0.012108075271637842
   },
   "latent-to/taohash": {
-    "weight": 0.0575
+    "emission_share": 0.002646196610107092
   },
   "leadpoet/leadpoet": {
-    "weight": 0.0498
+    "emission_share": 0.0022918363684057944
   },
   "letta-ai/letta": {
-    "weight": 0.0829
+    "emission_share": 0.0038151251996152683
   },
   "llmsresearch/paperbanana": {
-    "weight": 0.1077
+    "emission_share": 0.00495644130275711
   },
   "macrocosm-os/apex": {
-    "weight": 0.0419
+    "emission_share": 0.0019282719645823852
   },
   "macrocosm-os/data-universe": {
-    "additional_acceptable_branches": ["dev"],
-    "weight": 0.0495
+    "additional_acceptable_branches": [
+      "dev"
+    ],
+    "emission_share": 0.002278030125222627
   },
   "macrocosm-os/iota": {
-    "weight": 0.0387
+    "emission_share": 0.0017810053706285992
   },
   "manifold-inc/hone": {
-    "weight": 0.0821
+    "emission_share": 0.003778308551126822
   },
   "manifold-inc/targon": {
-    "weight": 0.0814
+    "emission_share": 0.003746093983699431
   },
   "mark3labs/mcp-go": {
-    "weight": 0.0359
+    "emission_share": 0.0016521471009190367
   },
   "mastodon/mastodon": {
-    "weight": 0.0564
+    "emission_share": 0.002595573718435478
   },
   "medusajs/medusa": {
-    "additional_acceptable_branches": ["develop"],
-    "weight": 0.0603
+    "additional_acceptable_branches": [
+      "develop"
+    ],
+    "emission_share": 0.0027750548798166547
   },
   "mem0ai/mem0": {
-    "weight": 0.0455
+    "emission_share": 0.0020939468827803945
   },
   "MetaMask/metamask-extension": {
-    "additional_acceptable_branches": ["release/13.28.0", "release/13.29.0"],
-    "weight": 0.0806
+    "additional_acceptable_branches": [
+      "release/13.28.0",
+      "release/13.29.0"
+    ],
+    "emission_share": 0.003709277335210985
   },
   "metanova-labs/nova": {
-    "weight": 0.0799
+    "emission_share": 0.0036770627677835937
   },
   "mobiusfund/etf": {
-    "weight": 0.0415
+    "emission_share": 0.001909863640338162
   },
   "modelcontextprotocol/inspector": {
-    "weight": 0.0452
+    "emission_share": 0.002080140639597227
   },
   "modelcontextprotocol/python-sdk": {
-    "weight": 0.045
+    "emission_share": 0.0020709364774751152
   },
   "modelcontextprotocol/registry": {
-    "weight": 0.0447
+    "emission_share": 0.0020571302342919477
   },
   "modelcontextprotocol/servers": {
-    "weight": 0.0516
+    "emission_share": 0.002374673827504799
   },
   "modelcontextprotocol/typescript-sdk": {
-    "weight": 0.0445
+    "emission_share": 0.0020479260721698363
   },
   "monero-project/monero": {
-    "additional_acceptable_branches": ["release-v0.18"],
-    "weight": 0.0792
+    "additional_acceptable_branches": [
+      "release-v0.18"
+    ],
+    "emission_share": 0.0036448482003562034
   },
   "mrdoob/three.js": {
-    "weight": 0.0733
+    "emission_share": 0.0033733254177539104
   },
   "MystenLabs/sui": {
-    "weight": 0.0542
+    "emission_share": 0.00249432793509225
   },
   "neovim/neovim": {
-    "additional_acceptable_branches": ["release-0.12"],
-    "weight": 0.0785
+    "additional_acceptable_branches": [
+      "release-0.12"
+    ],
+    "emission_share": 0.0036126336329288123
   },
   "nextcloud/android": {
-    "weight": 0.0778
+    "emission_share": 0.0035804190655014216
   },
   "nextcloud/desktop": {
-    "additional_acceptable_branches": ["stable-33.0", "stable-4.0"],
-    "weight": 0.0771
+    "additional_acceptable_branches": [
+      "stable-33.0",
+      "stable-4.0"
+    ],
+    "emission_share": 0.0035482044980740314
   },
   "nextcloud/server": {
-    "additional_acceptable_branches": ["stable33", "stable32", "stable31"],
-    "weight": 0.0764
+    "additional_acceptable_branches": [
+      "stable33",
+      "stable32",
+      "stable31"
+    ],
+    "emission_share": 0.0035159899306466402
   },
   "nginx/nginx": {
-    "weight": 0.0758
+    "emission_share": 0.0034883774442803057
   },
   "nimbusdotstorage/Nimbus": {
-    "weight": 0.0333
+    "emission_share": 0.0015324929933315855
   },
   "nocodb/nocodb": {
-    "additional_acceptable_branches": ["develop"],
-    "weight": 0.0751
+    "additional_acceptable_branches": [
+      "develop"
+    ],
+    "emission_share": 0.003456162876852915
   },
   "NousResearch/hermes-agent": {
-    "weight": 0.59
+    "emission_share": 0.027152278260229288
   },
   "numinouslabs/numinous": {
-    "weight": 0.0413
+    "emission_share": 0.0019006594782160506
   },
   "ohmyzsh/ohmyzsh": {
-    "weight": 0.0721
+    "emission_share": 0.0033181004450212404
   },
   "ollama/ollama": {
-    "weight": 0.0594
+    "emission_share": 0.0027336361502671522
   },
   "omegalabsinc/omegalabs-anytoany-bittensor": {
-    "weight": 0.0411
+    "emission_share": 0.0018914553160939386
   },
   "omegalabsinc/omegalabs-bittensor-subnet": {
-    "weight": 0.0409
+    "emission_share": 0.001882251153971827
   },
   "oneoneone-io/subnet-111": {
-    "weight": 0.0407
+    "emission_share": 0.0018730469918497156
   },
   "openclaw/openclaw": {
-    "weight": 0.8
+    "emission_share": 0.0368166484884465
   },
   "OpenGradient/BitQuant-Subnet": {
-    "weight": 0.0462
+    "emission_share": 0.0021261614502077852
   },
   "OpenHands/OpenHands": {
-    "weight": 0.1532
+    "emission_share": 0.007050388185537504
   },
   "openprose/prose": {
-    "weight": 0.0492
+    "emission_share": 0.0022642238820394594
   },
   "opentensor/subtensor": {
-    "additional_acceptable_branches": ["devnet-ready"],
-    "weight": 0.387
+    "additional_acceptable_branches": [
+      "devnet-ready"
+    ],
+    "emission_share": 0.017810053706285994
   },
   "OpenZeppelin/openzeppelin-contracts": {
-    "weight": 0.0341
+    "emission_share": 0.0015693096418200319
   },
   "Orpheus-AI/Zeus": {
-    "weight": 0.0539
+    "emission_share": 0.002480521691909083
   },
   "oven-sh/bun": {
-    "weight": 0.0624
+    "emission_share": 0.0028716985820988264
   },
   "pandas-dev/pandas": {
-    "weight": 0.1121
+    "emission_share": 0.0051589328694435655
   },
   "paperclipai/paperclip": {
-    "weight": 0.2231
+    "emission_share": 0.010267242847215516
   },
   "paritytech/polkadot-sdk": {
-    "weight": 0.0745
+    "emission_share": 0.00342855039048658
   },
   "penpot/penpot": {
-    "weight": 0.1472
+    "emission_share": 0.006774263321874155
   },
   "pi-hole/web": {
-    "additional_acceptable_branches": ["development"],
-    "weight": 0.0739
+    "additional_acceptable_branches": [
+      "development"
+    ],
+    "emission_share": 0.003400937904120245
   },
   "PlatformNetwork/platform": {
-    "weight": 0.046
+    "emission_share": 0.0021169572880856734
   },
   "postgres/postgres": {
-    "weight": 0.0556
+    "emission_share": 0.0025587570699470313
   },
   "pydantic/pydantic-ai": {
-    "weight": 0.0513
+    "emission_share": 0.0023608675843216314
   },
   "qbittensor-labs/quantum": {
-    "weight": 0.0727
+    "emission_share": 0.0033457129313875754
   },
   "qwibitai/nanoclaw": {
-    "weight": 0.2153
+    "emission_share": 0.009908280524453163
   },
   "rails/rails": {
-    "weight": 0.0356
+    "emission_share": 0.0016383408577358692
   },
   "ray-project/ray": {
-    "weight": 0.1599
+    "emission_share": 0.007358727616628243
   },
   "reboot-org/reboot-subnet": {
-    "weight": 0.0405
+    "emission_share": 0.001863842829727604
   },
   "redis/redis": {
-    "weight": 0.0364
+    "emission_share": 0.0016751575062243158
   },
   "RedTeamSubnet/RedTeam": {
-    "additional_acceptable_branches": ["dev"],
-    "weight": 0.044
+    "additional_acceptable_branches": [
+      "dev"
+    ],
+    "emission_share": 0.002024915666864557
   },
   "resi-labs-ai/resi": {
-    "weight": 0.0402
+    "emission_share": 0.0018500365865444365
   },
   "ridgesai/ridges": {
-    "weight": 0.0709
+    "emission_share": 0.003262875472288571
   },
   "run-llama/llama_index": {
-    "weight": 0.1501
+    "emission_share": 0.006907723672644774
   },
   "sbt/sbt": {
     "inactive_at": "2026-04-18T00:00:00Z",
-    "weight": 0.1001
+    "emission_share": 0.004606683142116867
   },
   "score-technologies/turbovision": {
-    "weight": 0.0698
+    "emission_share": 0.003212252580616957
   },
   "sentient-agi/ROMA": {
-    "weight": 0.0507
+    "emission_share": 0.002333255097955297
   },
   "shiftlayer-llc/brainplay-subnet": {
-    "additional_acceptable_branches": ["dev"],
-    "weight": 0.04
+    "additional_acceptable_branches": [
+      "dev"
+    ],
+    "emission_share": 0.001840832424422325
   },
   "Significant-Gravitas/AutoGPT": {
-    "additional_acceptable_branches": ["dev"],
-    "weight": 0.062
+    "additional_acceptable_branches": [
+      "dev"
+    ],
+    "emission_share": 0.0028532902578546036
   },
   "smartcontractkit/chainlink": {
-    "weight": 0.0693
+    "emission_share": 0.0031892421753116776
   },
   "sportstensor/sn41": {
-    "weight": 0.0553
+    "emission_share": 0.0025449508267638642
   },
   "Stirling-Tools/Stirling-PDF": {
-    "weight": 0.0642
+    "emission_share": 0.002954536041197831
   },
   "strapi/strapi": {
-    "weight": 0.0338
+    "emission_share": 0.0015555033986368644
   },
   "supabase/supabase": {
-    "weight": 0.0687
+    "emission_share": 0.0031616296889453426
   },
   "sveltejs/svelte": {
-    "weight": 0.0652
+    "emission_share": 0.003000556851808389
   },
   "Swap-Subnet/swap-subnet": {
-    "weight": 0.0373
+    "emission_share": 0.0017165762357738178
   },
   "swarm-subnet/Langostino": {
-    "weight": 0.0383
+    "emission_share": 0.001762597046384376
   },
   "swarm-subnet/swarm": {
-    "weight": 0.049
+    "emission_share": 0.002255019719917348
   },
   "SWE-agent/SWE-agent": {
-    "weight": 0.0682
+    "emission_share": 0.0031386192836400637
   },
   "synthdataco/synth-subnet": {
-    "weight": 0.0385
+    "emission_share": 0.0017718012085064876
   },
   "taofu-labs/tpn-subnet": {
-    "additional_acceptable_branches": ["development"],
-    "weight": 0.0398
+    "additional_acceptable_branches": [
+      "development"
+    ],
+    "emission_share": 0.0018316282623002133
   },
   "taoshidev/vanta-network": {
-    "weight": 0.0396
+    "emission_share": 0.0018224241001781017
   },
   "TatsuProject/ChipForge_SN84": {
-    "weight": 0.0394
+    "emission_share": 0.00181321993805599
   },
   "tauri-apps/tauri": {
-    "additional_acceptable_branches": ["dev"],
-    "weight": 0.0583
+    "additional_acceptable_branches": [
+      "dev"
+    ],
+    "emission_share": 0.0026830132585955384
   },
   "Team-Rizzo/talisman-ai": {
-    "weight": 0.056
+    "emission_share": 0.002577165394191255
   },
   "tensorplex-labs/dojo": {
-    "weight": 0.0392
+    "emission_share": 0.0018040157759338783
   },
   "thenervelab/thebrain": {
-    "weight": 0.039
+    "emission_share": 0.0017948116138117667
   },
   "tinygrad/tinygrad": {
-    "weight": 0.0677
+    "emission_share": 0.0031156088783347844
   },
   "tmux/tmux": {
-    "weight": 0.0672
+    "emission_share": 0.0030925984730295055
   },
   "ToolJet/ToolJet": {
-    "additional_acceptable_branches": ["develop"],
-    "weight": 0.0599
+    "additional_acceptable_branches": [
+      "develop"
+    ],
+    "emission_share": 0.0027566465555724316
   },
   "TrishoolAI/trishool-subnet": {
-    "weight": 0.0388
+    "emission_share": 0.0017856074516896551
   },
   "twentyhq/twenty": {
-    "weight": 0.0662
+    "emission_share": 0.0030465776624189474
   },
   "unarbos/agcli": {
-    "weight": 0.2083
+    "emission_share": 0.009586134850179256
   },
   "Uniswap/v4-core": {
-    "weight": 0.0667
+    "emission_share": 0.0030695880677242262
   },
   "Unstructured-IO/unstructured": {
-    "weight": 0.1344
+    "emission_share": 0.006185196946059011
   },
   "v0idai/SN106": {
-    "weight": 0.0381
+    "emission_share": 0.0017533928842622644
   },
   "vercel/next.js": {
-    "weight": 0.0657
+    "emission_share": 0.003023567257113668
   },
   "vidAio-subnet/vidaio-subnet": {
-    "weight": 0.0379
+    "emission_share": 0.0017441887221401528
   },
   "virattt/dexter": {
-    "weight": 0.13
+    "emission_share": 0.0059827053793725556
   },
   "vitejs/vite": {
-    "weight": 0.0647
+    "emission_share": 0.0029775464465031103
   },
   "vllm-project/vllm": {
-    "weight": 0.0377
+    "emission_share": 0.001734984560018041
   },
   "vuejs/core": {
-    "weight": 0.0335
+    "emission_share": 0.001541697155453697
   },
   "we-promise/sure": {
-    "weight": 0.1279
+    "emission_share": 0.005886061677090384
   },
   "yanez-compliance/MIID-subnet": {
-    "weight": 0.0375
+    "emission_share": 0.0017257803978959294
   },
   "zcash/zcash": {
-    "weight": 0.0638
+    "emission_share": 0.0029361277169536078
   },
   "zed-industries/zed": {
-    "additional_acceptable_branches": ["v0.234.x"],
-    "weight": 0.1564
+    "additional_acceptable_branches": [
+      "v0.234.x"
+    ],
+    "emission_share": 0.0071976547794912905
   }
 }

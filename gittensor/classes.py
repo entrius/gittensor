@@ -236,7 +236,6 @@ class PullRequest:
     def calculate_final_earned_score(self) -> float:
         """Combine base score with all multipliers. Pioneer dividend is added separately after."""
         multipliers = {
-            'repo': self.repo_weight_multiplier,
             'issue': self.issue_multiplier,
             'label': self.label_multiplier,
             'spam': self.open_pr_spam_multiplier,
@@ -407,6 +406,8 @@ class MinerEvaluation:
 
     # Issue discovery scoring
     issue_discovery_score: float = 0.0
+    # Per-repo sums of discovery_earned_score (repo lower-case -> total) for emission allocation
+    issue_discovery_repo_scores: Dict[str, float] = field(default_factory=dict)
     issue_token_score: float = 0.0  # sum of solving PR token_scores for scored issues
     issue_credibility: float = 0.0
     is_issue_eligible: bool = False

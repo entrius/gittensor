@@ -41,7 +41,7 @@ from gittensor.utils.github_api_tools import (
 from gittensor.validator.oss_contributions.credibility import check_eligibility
 from gittensor.validator.oss_contributions.label_resolution import resolve_legacy_label_multiplier
 from gittensor.validator.utils.datetime_utils import calculate_time_decay
-from gittensor.validator.utils.load_weights import LanguageConfig, RepositoryConfig, TokenConfig, resolve_repo_weight
+from gittensor.validator.utils.load_weights import LanguageConfig, RepositoryConfig, TokenConfig
 
 
 def score_miner_prs(
@@ -209,7 +209,7 @@ def calculate_pr_multipliers(
     is_merged = pr.pr_state == PRState.MERGED
     repo_config = master_repositories.get(pr.repository_full_name)
 
-    pr.repo_weight_multiplier = resolve_repo_weight(repo_config)
+    pr.repo_weight_multiplier = 1.0
     pr.issue_multiplier = round(calculate_issue_multiplier(pr), 2)
     pr.label, pr.label_multiplier = resolve_legacy_label_multiplier(
         pr.label_timeline_order,
@@ -577,14 +577,13 @@ def calculate_open_pr_collateral_score(
 
     Collateral = base_score * applicable_multipliers * OPEN_PR_COLLATERAL_PERCENT
 
-    Applicable multipliers: repo_weight, issue, label, review_collateral
+    Applicable multipliers: issue, label, review_collateral
     NOT applicable: time_decay (merge-based), credibility_multiplier (merge-based),
                     open_pr_spam (not for collateral)
     """
     from math import prod
 
     multipliers = {
-        'repo_weight': pr.repo_weight_multiplier,
         'issue': pr.issue_multiplier,
         'label': pr.label_multiplier,
         'review_collateral': calculate_review_collateral_multiplier(pr.changes_requested_count, pr.number),

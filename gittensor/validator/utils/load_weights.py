@@ -7,7 +7,11 @@ from typing import Dict, List, Optional
 
 import bittensor as bt
 
-from gittensor.constants import DEFAULT_REPO_WEIGHT, NON_CODE_EXTENSIONS
+from gittensor.constants import NON_CODE_EXTENSIONS
+
+# Registry-level validation tolerances for emission_share sums and bounds checks.
+_EMISSION_SUM_UPPER_TOLERANCE = 1e-9
+_EMISSION_ENTRY_TOLERANCE = 1e-12
 
 
 @dataclass
@@ -28,7 +32,12 @@ class RepositoryConfig:
     """Configuration for a repository in the master_repositories list.
 
     Attributes:
-        weight: Repository weight for scoring
+        emission_share: This repo's allocated fraction of the unified scoring pool
+            (``OSS_EMISSION_SHARE`` of the round). Must lie in ``[0, 1]``; the sum
+            across all registered repos must not exceed 1.0. Shortfall recycles.
+        issue_discovery_share: Fraction of this repo's slice allocated to issue
+            discovery before spill rules; ``1 - issue_discovery_share`` is the PR
+            slice. Defaults to 0.5 when omitted from JSON.
         inactive_at: ISO timestamp when repository became inactive (None if active)
         additional_acceptable_branches: List of additional branch patterns to accept (None if only default branch)
         mirror_enabled: When True, fetch this repo's data from the das-github-mirror
@@ -49,7 +58,8 @@ class RepositoryConfig:
 
     """
 
-    weight: float
+    emission_share: float
+    issue_discovery_share: float = 0.5
     inactive_at: Optional[str] = None
     additional_acceptable_branches: Optional[List[str]] = None
     mirror_enabled: bool = False
@@ -60,51 +70,23 @@ class RepositoryConfig:
     eligibility_mode: bool = True
 
 
-def resolve_repo_weight(repo_config: Optional[RepositoryConfig]) -> float:
-    """Return the repo weight preserving full JSON precision, or the default for unknown repos."""
-    if repo_config is None:
-        return DEFAULT_REPO_WEIGHT
-    return repo_config.weight
-
-
-@dataclass
-class TokenConfig:
-    """Configuration for token-based scoring weights.
-
-    Attributes:
-        structural_bonus: Weights for structural AST nodes (functions, classes, etc.)
-        leaf_tokens: Weights for leaf AST nodes (identifiers, literals, etc.)
-        language_configs: Language configurations from programming_languages.json
-    """
-
-    structural_bonus: Dict[str, float] = field(default_factory=dict)
-    leaf_tokens: Dict[str, float] = field(default_factory=dict)
-    language_configs: Dict[str, LanguageConfig] = field(default_factory=dict)
-
-    def get_structural_weight(self, node_type: str) -> float:
-        """Get weight for a structural node type."""
-        return self.structural_bonus.get(node_type, 0.0)
-
-    def get_leaf_weight(self, node_type: str) -> float:
-        """Get weight for a leaf token type."""
-        return self.leaf_tokens.get(node_type, 0.0)
-
-    def get_language(self, extension: str) -> Optional[str]:
-        """Get the tree-sitter language name for a file extension."""
-        ext = extension.lstrip('.').lower()
-        config = self.language_configs.get(ext)
-        return config.language if config else None
-
-    def supports_tree_sitter(self, extension: Optional[str]) -> bool:
-        """Check if a file extension is supported by tree-sitter."""
-        if not extension:
+def _validate_registry_emission_shares(configs: Dict[str, RepositoryConfig]) -> bool:
+    """Return True if every entry is in [0, 1] and the registry sum is <= 1 (within tolerance)."""
+    total = 0.0
+    for name, cfg in configs.items():
+        es = float(cfg.emission_share)
+        if es < 0.0 - _EMISSION_ENTRY_TOLERANCE or es > 1.0 + _EMISSION_ENTRY_TOLERANCE:
+            bt.logging.error(f'Invalid emission_share for {name}: {es} (must be in [0, 1])')
             return False
-        ext = extension.lstrip('.').lower()
-        # Non-code extensions use line-count scoring, not tree-sitter
-        if ext in NON_CODE_EXTENSIONS:
+        ids = float(cfg.issue_discovery_share)
+        if ids < 0.0 - _EMISSION_ENTRY_TOLERANCE or ids > 1.0 + _EMISSION_ENTRY_TOLERANCE:
+            bt.logging.error(f'Invalid issue_discovery_share for {name}: {ids} (must be in [0, 1])')
             return False
-        config = self.language_configs.get(ext)
-        return config is not None and config.language is not None
+        total += es
+    if total > 1.0 + _EMISSION_SUM_UPPER_TOLERANCE:
+        bt.logging.error(f'Registry emission_share sum {total} exceeds 1.0 (tolerance {_EMISSION_SUM_UPPER_TOLERANCE})')
+        return False
+    return True
 
 
 def _get_weights_dir() -> Path:
@@ -113,12 +95,12 @@ def _get_weights_dir() -> Path:
 
 def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
     """
-    Load repository weights from the local JSON file.
+    Load repository configuration from the local JSON file.
     Normalizes repository names to lowercase for case-insensitive matching.
 
     Returns:
         Dictionary mapping normalized (lowercase) fullName (str) to RepositoryConfig object.
-        Returns empty dict on error.
+        Returns empty dict on error or when registry emission invariants fail.
     """
     weights_file = _get_weights_dir() / 'master_repositories.json'
 
@@ -130,12 +112,23 @@ def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
             bt.logging.error(f'Expected dict from {weights_file}, got {type(data)}')
             return {}
 
-        # Parse JSON data into RepositoryConfig objects
         normalized_data: Dict[str, RepositoryConfig] = {}
         for repo_name, metadata in data.items():
+            if not isinstance(metadata, dict):
+                bt.logging.warning(f'Expected dict metadata for {repo_name}, skipping')
+                continue
+            if 'emission_share' not in metadata:
+                bt.logging.error(f'{repo_name}: missing required field emission_share')
+                return {}
             try:
+                emission_share = float(metadata['emission_share'])
+                issue_discovery_share = (
+                    float(metadata['issue_discovery_share']) if 'issue_discovery_share' in metadata else 0.5
+                )
+
                 config = RepositoryConfig(
-                    weight=float(metadata.get('weight', 0.01)),
+                    emission_share=emission_share,
+                    issue_discovery_share=issue_discovery_share,
                     inactive_at=metadata.get('inactive_at'),
                     additional_acceptable_branches=metadata.get('additional_acceptable_branches'),
                     mirror_enabled=bool(metadata.get('mirror_enabled', False)),
@@ -150,10 +143,12 @@ def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
                     eligibility_mode=metadata.get('eligibility_mode', True),
                 )
                 normalized_data[repo_name.lower()] = config
-            except (ValueError, TypeError) as e:
-                bt.logging.warning(f'Could not parse config for {repo_name}: {e}, using defaults')
-                # Create config with defaults if parsing fails
-                normalized_data[repo_name.lower()] = RepositoryConfig(weight=float(metadata.get('weight', 0.01)))
+            except (ValueError, TypeError, KeyError) as e:
+                bt.logging.warning(f'Could not parse config for {repo_name}: {e}')
+                return {}
+
+        if not _validate_registry_emission_shares(normalized_data):
+            return {}
 
         bt.logging.debug(f'Successfully loaded {len(normalized_data)} repository entries from {weights_file}')
         return normalized_data
@@ -214,6 +209,46 @@ def load_programming_language_weights() -> Dict[str, LanguageConfig]:
     except Exception as e:
         bt.logging.error(f'Unexpected error loading language weights: {e}')
         return {}
+
+
+@dataclass
+class TokenConfig:
+    """Configuration for token-based scoring weights.
+
+    Attributes:
+        structural_bonus: Weights for structural AST nodes (functions, classes, etc.)
+        leaf_tokens: Weights for leaf AST nodes (identifiers, literals, etc.)
+        language_configs: Language configurations from programming_languages.json
+    """
+
+    structural_bonus: Dict[str, float] = field(default_factory=dict)
+    leaf_tokens: Dict[str, float] = field(default_factory=dict)
+    language_configs: Dict[str, LanguageConfig] = field(default_factory=dict)
+
+    def get_structural_weight(self, node_type: str) -> float:
+        """Get weight for a structural node type."""
+        return self.structural_bonus.get(node_type, 0.0)
+
+    def get_leaf_weight(self, node_type: str) -> float:
+        """Get weight for a leaf token type."""
+        return self.leaf_tokens.get(node_type, 0.0)
+
+    def get_language(self, extension: str) -> Optional[str]:
+        """Get the tree-sitter language name for a file extension."""
+        ext = extension.lstrip('.').lower()
+        config = self.language_configs.get(ext)
+        return config.language if config else None
+
+    def supports_tree_sitter(self, extension: Optional[str]) -> bool:
+        """Check if a file extension is supported by tree-sitter."""
+        if not extension:
+            return False
+        ext = extension.lstrip('.').lower()
+        # Non-code extensions use line-count scoring, not tree-sitter
+        if ext in NON_CODE_EXTENSIONS:
+            return False
+        config = self.language_configs.get(ext)
+        return config is not None and config.language is not None
 
 
 def load_token_config() -> TokenConfig:

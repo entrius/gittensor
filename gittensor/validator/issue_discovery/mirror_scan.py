@@ -301,6 +301,9 @@ async def _score_miner_mirror_issues(
         # classification == 'solved'
         assert issue.solving_pr is not None  # _classify_issue guarantees
         solving_pr = issue.solving_pr
+        repo_config = mirror_repos.get(issue.repo_full_name)
+        if repo_config is None:
+            continue
 
         solved_count += 1
 
@@ -308,6 +311,7 @@ async def _score_miner_mirror_issues(
         cached = await _resolve_solving_pr_score(
             issue,
             solving_pr,
+            repo_config,
             solving_pr_cache,
             cache_stats,
             client,
@@ -343,10 +347,6 @@ async def _score_miner_mirror_issues(
                 f'  issue #{issue.issue_number} ({issue.repo_full_name}): one-issue-per-PR '
                 f'(PR #{solving_pr.pr_number} canonical owner is a different issue) — credibility only'
             )
-            continue
-
-        repo_config = mirror_repos.get(issue.repo_full_name)
-        if repo_config is None:
             continue
 
         # Quality gate — matches legacy issue-discovery behavior: below-threshold
@@ -419,6 +419,7 @@ async def _score_miner_mirror_issues(
 async def _resolve_solving_pr_score(
     issue: MirrorIssue,
     solving_pr: MirrorSolvingPR,
+    repo_config: Optional[RepositoryConfig],
     cache: Dict[Tuple[str, int], CachedSolvingPR],
     cache_stats: _CacheStats,
     client: MirrorClient,
@@ -428,8 +429,9 @@ async def _resolve_solving_pr_score(
     """Return base_score + token_score for the solving PR.
 
     Cache hit: returns immediately (case 1 = miner's own PR, case 2 = another
-    miner's PR). Cache miss: fetches ``/pulls/:o/:r/:n/files`` and tokenizes;
-    writes the result back into the cache. Returns None on fetch failure.
+    miner's PR). Cache miss: fetches ``/pulls/:o/:r/:n/files`` and tokenizes.
+    If the repo has ``fixed_base_score`` configured, that override is applied
+    before writing the result into cache. Returns None on fetch failure.
     """
     key = (issue.repo_full_name, solving_pr.pr_number)
     if key in cache:
@@ -460,7 +462,12 @@ async def _resolve_solving_pr_score(
         issue.repo_full_name, solving_pr.pr_number, files_response.files
     )
     result = calculate_base_score_for_pr_files(file_changes, file_contents, programming_languages, token_config)
-    cached = CachedSolvingPR(base_score=result.base_score, token_score=result.token_score)
+    base_score = (
+        repo_config.fixed_base_score
+        if repo_config is not None and repo_config.fixed_base_score is not None
+        else result.base_score
+    )
+    cached = CachedSolvingPR(base_score=base_score, token_score=result.token_score)
     cache[key] = cached
     return cached
 

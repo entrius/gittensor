@@ -575,8 +575,11 @@ class TestCacheStats:
 
         issue = MirrorIssue.from_dict(_issue_dict())
         assert issue.solving_pr is not None
+        repo_config = RepositoryConfig(weight=0.5, mirror_enabled=True)
         result = asyncio.run(
-            _resolve_solving_pr_score(issue, issue.solving_pr, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG)
+            _resolve_solving_pr_score(
+                issue, issue.solving_pr, repo_config, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG
+            )
         )
 
         assert result is not None
@@ -597,8 +600,11 @@ class TestCacheStats:
         stats = _CacheStats()
 
         issue = MirrorIssue.from_dict(_issue_dict())
+        repo_config = RepositoryConfig(weight=0.5, mirror_enabled=True)
         asyncio.run(
-            _resolve_solving_pr_score(issue, issue.solving_pr, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG)
+            _resolve_solving_pr_score(
+                issue, issue.solving_pr, repo_config, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG
+            )
         )
 
         assert stats.hits == 0
@@ -619,8 +625,11 @@ class TestCacheStats:
         stats = _CacheStats()
 
         issue = MirrorIssue.from_dict(_issue_dict())
+        repo_config = RepositoryConfig(weight=0.5, mirror_enabled=True)
         result = asyncio.run(
-            _resolve_solving_pr_score(issue, issue.solving_pr, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG)
+            _resolve_solving_pr_score(
+                issue, issue.solving_pr, repo_config, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG
+            )
         )
 
         assert result is None
@@ -656,8 +665,11 @@ class TestCacheStats:
         stats = _CacheStats()
 
         issue = MirrorIssue.from_dict(_issue_dict())
+        repo_config = RepositoryConfig(weight=0.5, mirror_enabled=True)
         result = asyncio.run(
-            _resolve_solving_pr_score(issue, issue.solving_pr, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG)
+            _resolve_solving_pr_score(
+                issue, issue.solving_pr, repo_config, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG
+            )
         )
 
         assert result is None
@@ -697,12 +709,26 @@ class TestCacheStats:
 
         result_a = asyncio.run(
             _resolve_solving_pr_score(
-                issue_a, issue_a.solving_pr, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG
+                issue_a,
+                issue_a.solving_pr,
+                RepositoryConfig(weight=0.5, mirror_enabled=True),
+                cache,
+                stats,
+                client,
+                _EMPTY_LANGS,
+                _EMPTY_TOKEN_CONFIG,
             )
         )
         result_b = asyncio.run(
             _resolve_solving_pr_score(
-                issue_b, issue_b.solving_pr, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG
+                issue_b,
+                issue_b.solving_pr,
+                RepositoryConfig(weight=0.5, mirror_enabled=True),
+                cache,
+                stats,
+                client,
+                _EMPTY_LANGS,
+                _EMPTY_TOKEN_CONFIG,
             )
         )
 
@@ -713,6 +739,65 @@ class TestCacheStats:
         assert stats.fetch_failures == 2
         assert cache == {}
         assert client.get_pr_files.call_count == 2
+
+    def test_fixed_base_score_is_applied_on_cache_miss_and_cache_hit(self, monkeypatch):
+        from gittensor.validator.issue_discovery.mirror_scan import (
+            _CacheStats,
+            _resolve_solving_pr_score,
+        )
+
+        repo_config = RepositoryConfig(weight=0.5, mirror_enabled=True, fixed_base_score=25.0)
+        client = Mock()
+        client.get_pr_files.return_value = _empty_files_response('entrius/gittensor-ui', 100)
+        cache = {}
+        stats = _CacheStats()
+        issue = MirrorIssue.from_dict(_issue_dict())
+
+        monkeypatch.setattr(
+            mirror_scan_module,
+            'calculate_base_score_for_pr_files',
+            Mock(
+                return_value=Mock(
+                    base_score=91.0,
+                    token_score=77.0,
+                )
+            ),
+        )
+
+        miss_result = asyncio.run(
+            _resolve_solving_pr_score(
+                issue,
+                issue.solving_pr,
+                repo_config,
+                cache,
+                stats,
+                client,
+                _EMPTY_LANGS,
+                _EMPTY_TOKEN_CONFIG,
+            )
+        )
+        hit_result = asyncio.run(
+            _resolve_solving_pr_score(
+                issue,
+                issue.solving_pr,
+                repo_config,
+                cache,
+                stats,
+                client,
+                _EMPTY_LANGS,
+                _EMPTY_TOKEN_CONFIG,
+            )
+        )
+
+        assert miss_result is not None
+        assert hit_result is not None
+        assert miss_result.base_score == 25.0
+        assert hit_result.base_score == 25.0
+        assert miss_result.token_score == 77.0
+        assert hit_result.token_score == 77.0
+        assert stats.misses == 1
+        assert stats.hits == 1
+        assert client.get_pr_files.call_count == 1
 
 
 class TestOpenIssueSpamSourceIsMirror:

@@ -75,7 +75,7 @@ async def forward(self: 'Validator') -> None:
         await issue_competitions(self, miner_evaluations)
 
         # 4. Store all evaluations to DB (includes issue discovery fields)
-        await self.bulk_store_evaluation(miner_evaluations, skip_uids=cached_uids)
+        await self.bulk_store_evaluation(miner_evaluations)
 
         # 5. Blend 4 emission pools into final rewards
         rewards = blend_emission_pools(oss_rewards, issue_rewards, miner_uids)

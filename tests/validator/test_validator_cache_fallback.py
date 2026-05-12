@@ -311,6 +311,104 @@ class TestCacheIsolation:
         assert cached_issues[0].discovery_earned_score == 0.0
 
 
+class TestIssueDiscoveryFieldOwnership:
+    """The cache has two writers: store() (OSS phase, owns PR fields) and
+    update_issue_discovery() (issue phase, owns issue fields). Each must not
+    clobber the other's field group, or the issue-discovery fallback breaks."""
+
+    def _eval(self, uid: int = 1, hotkey: str = 'hotkey_1', github_id: str = '12345') -> MinerEvaluation:
+        ev = MinerEvaluation(uid=uid, hotkey=hotkey, github_id=github_id)
+        ev.merged_pull_requests = [_make_pr(uid=uid, hotkey=hotkey, github_id=github_id)]
+        return ev
+
+    def test_store_preserves_prior_issue_discovery_fields_when_identity_matches(self):
+        cache = MinerEvaluationCache()
+        first = self._eval()
+        cache.store(first)
+
+        # Issue-discovery phase refresh.
+        first.issue_discovery_score = 8.12
+        first.issue_token_score = 700.0
+        first.issue_credibility = 1.0
+        first.is_issue_eligible = True
+        first.total_solved_issues = 7
+        first.total_valid_solved_issues = 7
+        first.total_closed_issues = 2
+        first.total_open_issues = 3
+        cache.update_issue_discovery(first)
+
+        # Next round: a fresh MinerEvaluation has all issue-discovery fields
+        # back at dataclass defaults. store() must merge the prior entry's
+        # issue fields rather than overwriting with the fresh zeros.
+        next_round = self._eval()
+        assert next_round.issue_discovery_score == 0.0  # confirms the threat
+        cache.store(next_round)
+
+        cached = cache.get(uid=1, hotkey='hotkey_1', github_id='12345')
+        assert cached is not None
+        assert cached.issue_discovery_score == 8.12
+        assert cached.issue_token_score == 700.0
+        assert cached.issue_credibility == 1.0
+        assert cached.is_issue_eligible is True
+        assert cached.total_solved_issues == 7
+        assert cached.total_valid_solved_issues == 7
+        assert cached.total_closed_issues == 2
+        assert cached.total_open_issues == 3
+
+    def test_store_drops_prior_issue_discovery_on_identity_mismatch(self):
+        cache = MinerEvaluationCache()
+        first = self._eval(hotkey='hotkey_old', github_id='12345')
+        cache.store(first)
+        first.issue_discovery_score = 8.12
+        cache.update_issue_discovery(first)
+
+        # Re-registration: same UID, different hotkey. Prior issue-discovery
+        # belonged to a different miner — must not carry over.
+        rereg = self._eval(hotkey='hotkey_new', github_id='12345')
+        cache.store(rereg)
+
+        cached = cache.get(uid=1, hotkey='hotkey_new', github_id='12345')
+        assert cached is not None
+        assert cached.issue_discovery_score == 0.0
+
+    def test_update_issue_discovery_no_op_when_no_existing_entry(self):
+        """The cache only holds entries backed by an OSS-phase store; an
+        issue-only entry would have no PR data and the OSS fallback path
+        would later restore a half-populated MinerEvaluation."""
+        cache = MinerEvaluationCache()
+        ev = self._eval()
+        ev.issue_discovery_score = 8.12
+
+        cache.update_issue_discovery(ev)
+
+        assert cache.get(uid=1, hotkey='hotkey_1', github_id='12345') is None
+
+    def test_update_issue_discovery_evicts_on_identity_mismatch(self):
+        cache = MinerEvaluationCache()
+        cache.store(self._eval(hotkey='hotkey_old', github_id='12345'))
+
+        rereg = self._eval(hotkey='hotkey_new', github_id='12345')
+        rereg.issue_discovery_score = 8.12
+        cache.update_issue_discovery(rereg)
+
+        assert cache.get(uid=1, hotkey='hotkey_old', github_id='12345') is None
+        assert cache.get(uid=1, hotkey='hotkey_new', github_id='12345') is None
+
+    def test_update_issue_discovery_writes_through_when_identity_matches(self):
+        cache = MinerEvaluationCache()
+        ev = self._eval()
+        cache.store(ev)
+
+        ev.issue_discovery_score = 8.12
+        ev.total_solved_issues = 7
+        cache.update_issue_discovery(ev)
+
+        cached = cache.get(uid=1, hotkey='hotkey_1', github_id='12345')
+        assert cached is not None
+        assert cached.issue_discovery_score == 8.12
+        assert cached.total_solved_issues == 7
+
+
 def _make_mirror_pr_with_file_blob(blob: str, pr_number: int = 7) -> ScoredMirrorPR:
     now = datetime.now(timezone.utc)
     pr = MirrorPullRequest(

@@ -64,7 +64,7 @@ def test_get_label_multiplier_matches_repo_patterns(pattern, label, expected):
 
 def test_get_label_multiplier_returns_highest_matching_pattern():
     config = RepositoryConfig(
-        weight=1.0,
+        emission_share=1.0,
         label_multipliers={
             'kind/*': 1.1,
             'kind/feature': 1.5,
@@ -112,7 +112,7 @@ def test_highest_label_resolution_tiebreaks_by_label_name():
 )
 def test_wildcard_label_resolves_through_legacy_scoring(current, timeline, expected_label, expected_multiplier):
     config = RepositoryConfig(
-        weight=1.0,
+        emission_share=1.0,
         label_multipliers={
             'kind/*': 1.5,
             'type:*': 1.1,

@@ -217,7 +217,7 @@ class TestInactiveRepo:
         )
         repos = {
             'entrius/gittensor-ui': RepositoryConfig(
-                weight=0.5,
+                emission_share=0.5,
                 mirror_enabled=True,
                 inactive_at='2026-04-10T00:00:00Z',
             ),

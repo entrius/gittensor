@@ -153,6 +153,30 @@ async def issue_discovery(
     else:
         bt.logging.info('No mirror-enabled repos — issue discovery skipped for this round')
 
+    # Restore cached issue-discovery scores for miners whose DAS mirror fetch
+    # failed (mirror_issue_fetch_failed is set by mirror_scan).  Without this a
+    # transient MirrorRequestError would leave the miner at zero and unfairly
+    # redistribute their issue-discovery share to other miners via normalization.
+    if evaluation_cache is not None:
+        for evaluation in miner_evaluations.values():
+            if evaluation.mirror_issue_fetch_failed:
+                cached = evaluation_cache.get(evaluation.uid, evaluation.hotkey, evaluation.github_id or '0')
+                if cached is not None and cached.issue_discovery_score > 0:
+                    evaluation.issue_discovery_score = cached.issue_discovery_score
+                    evaluation.issue_token_score = cached.issue_token_score
+                    evaluation.issue_credibility = cached.issue_credibility
+                    evaluation.is_issue_eligible = cached.is_issue_eligible
+                    evaluation.total_solved_issues = cached.total_solved_issues
+                    evaluation.total_valid_solved_issues = cached.total_valid_solved_issues
+                    evaluation.total_closed_issues = cached.total_closed_issues
+                    evaluation.total_open_issues = cached.total_open_issues
+                    bt.logging.debug(
+                        f'Restored cached issue-discovery scores for UID {evaluation.uid} '
+                        f'(score={cached.issue_discovery_score})'
+                    )
+            else:
+                evaluation_cache.update_issue_discovery(evaluation)
+
     # Normalize into independent pool
     issue_rewards_dict = normalize_issue_discovery_rewards(miner_evaluations)
 

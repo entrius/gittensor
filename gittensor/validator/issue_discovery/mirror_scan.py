@@ -163,6 +163,7 @@ async def run_mirror_issue_discovery(
             bt.logging.warning(f'├─ UID {uid}: mirror issue fetch failed ({e}) — skipped this miner')
             _restore_issue_discovery_from_cache(evaluation, evaluation_cache)
             fetch_errors += 1
+            evaluation.mirror_issue_fetch_failed = True
             continue
 
         filtered = [i for i in response.issues if i.repo_full_name in enabled_names]

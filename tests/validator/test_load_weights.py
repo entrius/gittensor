@@ -292,6 +292,61 @@ class TestRepositoryConfigMirrorScoringFields:
             assert isinstance(config.eligibility_mode, bool), (
                 f'{repo_name} eligibility_mode must be bool, got {type(config.eligibility_mode)}'
             )
+            assert isinstance(config.issue_discovery_share, (int, float)) and not isinstance(
+                config.issue_discovery_share, bool
+            ), f'{repo_name} issue_discovery_share must be numeric, got {type(config.issue_discovery_share)}'
+            assert 0.0 <= float(config.issue_discovery_share) <= 1.0, (
+                f'{repo_name} issue_discovery_share must be within [0.0, 1.0]'
+            )
+
+
+class TestRepositoryConfigIssueDiscoveryShare:
+    """Dataclass + JSON-parsing tests for per-repo issue discovery allocation."""
+
+    def test_issue_discovery_share_defaults_to_even_split(self):
+        config = RepositoryConfig(weight=0.5)
+
+        assert config.issue_discovery_share == pytest.approx(0.5)
+
+    def test_loader_parses_issue_discovery_share(self, tmp_path, monkeypatch):
+        from gittensor.validator.utils import load_weights as lw
+
+        fake_weights_dir = tmp_path
+        (fake_weights_dir / 'master_repositories.json').write_text(
+            json.dumps(
+                {
+                    'foo/pr-only': {'weight': 0.5, 'issue_discovery_share': 0.0},
+                    'foo/issue-only': {'weight': 0.3, 'issue_discovery_share': 1.0},
+                    'foo/defaults': {'weight': 0.2},
+                }
+            )
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: fake_weights_dir)
+
+        repos = lw.load_master_repo_weights()
+
+        assert repos['foo/pr-only'].issue_discovery_share == pytest.approx(0.0)
+        assert repos['foo/issue-only'].issue_discovery_share == pytest.approx(1.0)
+        assert repos['foo/defaults'].issue_discovery_share == pytest.approx(0.5)
+
+    @pytest.mark.parametrize('share', [-0.001, 1.001])
+    def test_loader_rejects_issue_discovery_share_outside_range(self, tmp_path, monkeypatch, share):
+        from gittensor.validator.utils import load_weights as lw
+
+        fake_weights_dir = tmp_path
+        (fake_weights_dir / 'master_repositories.json').write_text(
+            json.dumps({'foo/bad': {'weight': 0.5, 'issue_discovery_share': share}})
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: fake_weights_dir)
+
+        repos = lw.load_master_repo_weights()
+
+        assert repos == {}
+
+    def test_oc_1_opts_out_of_issue_discovery_rewards(self):
+        repos = load_master_repo_weights()
+
+        assert repos['entrius/oc-1'].issue_discovery_share == pytest.approx(0.0)
 
 
 class TestBannedOrganizations:

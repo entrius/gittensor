@@ -52,6 +52,7 @@
     "trusted_label_pipeline": true,
     "fixed_base_score": 1.0,
     "eligibility_mode": false,
+    "issue_discovery_share": 0.0,
     "default_label_multiplier": 0.0,
     "label_multipliers": {
       "benchmark-improvement": 1.0

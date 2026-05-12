@@ -1,6 +1,7 @@
 # The MIT License (MIT)
 # Copyright © 2025 Entrius
 import json
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -43,6 +44,8 @@ class RepositoryConfig:
             to be within [0.0, 100.0]; range is enforced by the live-config test.
         eligibility_mode: Flag controlling whether the global miner
             eligibility gate applies to PRs in this repo.
+        issue_discovery_share: Fraction of the repo emission slice allocated
+            to issue-discovery scoring before same-repo spill. Defaults to 0.5.
 
     """
 
@@ -54,6 +57,12 @@ class RepositoryConfig:
     default_label_multiplier: float = 1.0
     fixed_base_score: Optional[float] = None
     eligibility_mode: bool = True
+    issue_discovery_share: float = 0.5
+
+    def __post_init__(self) -> None:
+        self.issue_discovery_share = float(self.issue_discovery_share)
+        if not math.isfinite(self.issue_discovery_share) or not 0.0 <= self.issue_discovery_share <= 1.0:
+            raise ValueError(f'issue_discovery_share must be within [0.0, 1.0], got {self.issue_discovery_share}')
 
 
 def resolve_repo_weight(repo_config: Optional[RepositoryConfig]) -> float:
@@ -129,6 +138,11 @@ def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
         # Parse JSON data into RepositoryConfig objects
         normalized_data: Dict[str, RepositoryConfig] = {}
         for repo_name, metadata in data.items():
+            issue_discovery_share = float(metadata.get('issue_discovery_share', 0.5))
+            if not math.isfinite(issue_discovery_share) or not 0.0 <= issue_discovery_share <= 1.0:
+                raise ValueError(
+                    f'{repo_name} issue_discovery_share must be within [0.0, 1.0], got {issue_discovery_share}'
+                )
             try:
                 config = RepositoryConfig(
                     weight=float(metadata.get('weight', 0.01)),
@@ -143,6 +157,7 @@ def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
                     default_label_multiplier=float(metadata.get('default_label_multiplier', 1.0)),
                     fixed_base_score=metadata.get('fixed_base_score'),
                     eligibility_mode=metadata.get('eligibility_mode', True),
+                    issue_discovery_share=issue_discovery_share,
                 )
                 normalized_data[repo_name.lower()] = config
             except (ValueError, TypeError) as e:

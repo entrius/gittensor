@@ -135,7 +135,7 @@ async def run_issue_discovery(
     cache_stats = _CacheStats()
     bt.logging.info(
         f'Cross-miner solving-PR cache: {len(solving_pr_cache)} entries from '
-        f'{sum(len(ev.merged_prs) for ev in miner_evaluations.values())} scored mirror PRs'
+        f'{sum(len(ev.merged_prs) for ev in miner_evaluations.values())} scored PRs'
     )
 
     skipped_no_gh = 0
@@ -157,7 +157,7 @@ async def run_issue_discovery(
         try:
             response = await asyncio.to_thread(client.get_miner_issues, evaluation.github_id, since=lookback_date)
         except MirrorRequestError as e:
-            bt.logging.warning(f'├─ UID {uid}: mirror issue fetch failed ({e}) — skipped this miner')
+            bt.logging.warning(f'├─ UID {uid}: issue fetch failed ({e}) — skipped this miner')
             fetch_errors += 1
             continue
 
@@ -174,7 +174,7 @@ async def run_issue_discovery(
 
     canonical_pr_owners = _build_canonical_pr_owners(pending)
     for evaluation, filtered, open_issue_count in pending:
-        await _score_miner_mirror_issues(
+        await _score_miner_issues(
             evaluation,
             filtered,
             mirror_repos,
@@ -189,7 +189,7 @@ async def run_issue_discovery(
 
     bt.logging.info('')
     bt.logging.info(
-        f'Issue discovery complete | {len(pending)} processed | {no_issues} no mirror issues | '
+        f'Issue discovery complete | {len(pending)} processed | {no_issues} no issues | '
         f'{fetch_errors} fetch errors | {skipped_no_gh} no github_id | {skipped_failed} prior OSS failure'
     )
     bt.logging.info(
@@ -207,7 +207,7 @@ def _build_canonical_pr_owners(
     Returns ``(repo, pr_number) -> (created_at, issue_number, uid)`` for the
     earliest-created qualifying issue across all miners. Same-account issues
     (discoverer == solver) are excluded — they never claim the slot.
-    ``_score_miner_mirror_issues`` matches issue markers against this map to
+    ``_score_miner_issues`` matches issue markers against this map to
     gate scoring vs. credibility-only.
     """
     canonical: Dict[Tuple[str, int], Tuple[datetime, int, int]] = {}
@@ -251,7 +251,7 @@ def _build_solving_pr_cache(
     return cache
 
 
-async def _score_miner_mirror_issues(
+async def _score_miner_issues(
     evaluation: MinerEvaluation,
     issues: List[MirrorIssue],
     mirror_repos: Dict[str, RepositoryConfig],
@@ -406,7 +406,7 @@ async def _score_miner_mirror_issues(
         f'├─ UID {evaluation.uid}: {solved_count} solved ({valid_solved_count} valid) | '
         f'{closed_count} closed | {open_issue_count} open | {len(scored_issues)} scored | '
         f'credibility={credibility:.2f} | spam_mult={spam_mult:.1f} | '
-        f'mirror_score={total_discovery_score:.2f}'
+        f'discovery_score={total_discovery_score:.2f}'
     )
 
 

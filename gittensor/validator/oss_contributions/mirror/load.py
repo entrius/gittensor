@@ -47,14 +47,14 @@ def load_miner_prs(
     are set on the eval; the latter drives the cache-fallback path.
     """
 
-    bt.logging.info('*****Fetching PRs from mirror*****')
+    bt.logging.info('***** Fetching PRs *****')
 
     if not eval_.github_id:
-        bt.logging.warning(f'UID {eval_.uid} has no github_id, skipping mirror fetch')
+        bt.logging.warning(f'UID {eval_.uid} has no github_id, skipping PR fetch')
         return
 
     if not master_repositories:
-        bt.logging.info(f'UID {eval_.uid} has no scoring repos, skipping mirror fetch')
+        bt.logging.info(f'UID {eval_.uid} has no scoring repos, skipping PR fetch')
         return
 
     client = client or MirrorClient()
@@ -63,7 +63,7 @@ def load_miner_prs(
     try:
         response = client.get_miner_pulls(eval_.github_id, since=lookback_date)
     except MirrorRequestError as e:
-        bt.logging.error(f'Mirror fetch failed for UID {eval_.uid}: {e}')
+        bt.logging.error(f'PR fetch failed for UID {eval_.uid}: {e}')
         eval_.mirror_pr_fetch_failed = True
         eval_.github_pr_fetch_failed = True
         return
@@ -72,10 +72,10 @@ def load_miner_prs(
         try:
             _maybe_add_pr(eval_, pr, master_repositories, lookback_date)
         except Exception as e:
-            bt.logging.warning(f'Error processing mirror PR #{pr.pr_number} ({pr.repo_full_name}): {e}')
+            bt.logging.warning(f'Error processing PR #{pr.pr_number} ({pr.repo_full_name}): {e}')
 
     bt.logging.info(
-        f'Mirror fetched {len(eval_.merged_prs)} merged, {len(eval_.open_prs)} open, {len(eval_.closed_prs)} closed'
+        f'Fetched {len(eval_.merged_prs)} merged, {len(eval_.open_prs)} open, {len(eval_.closed_prs)} closed'
     )
 
 
@@ -89,7 +89,9 @@ def _maybe_add_pr(
 
     repo_config = master_repositories.get(pr.repo_full_name)
     if repo_config is None:
-        bt.logging.info(f'Skipping mirror PR #{pr.pr_number} in {pr.repo_full_name} - not in master_repositories')
+        # Mirror tracks more repos than the scoring set; skip-noise dominates the
+        # log at info level when master_repositories is small. Demoted to debug.
+        bt.logging.debug(f'Skipping PR #{pr.pr_number} in {pr.repo_full_name} - not in master_repositories')
         return
 
     # Skip PR if it was created after the repo became inactive
@@ -97,7 +99,7 @@ def _maybe_add_pr(
         inactive_dt = parse_github_iso_to_utc(repo_config.inactive_at)
         if pr.created_at >= inactive_dt:
             bt.logging.info(
-                f'Skipping mirror PR #{pr.pr_number} in {pr.repo_full_name} - '
+                f'Skipping PR #{pr.pr_number} in {pr.repo_full_name} - '
                 f'PR was created after repo became inactive '
                 f'(created: {pr.created_at.isoformat()}, inactive: {inactive_dt.isoformat()})'
             )

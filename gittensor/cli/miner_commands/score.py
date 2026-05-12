@@ -23,7 +23,7 @@ from rich.console import Console
 from rich.table import Table
 
 from gittensor.cli.issue_commands.helpers import emit_json
-from gittensor.cli.miner_commands.helpers import _error
+from gittensor.cli.miner_commands.helpers import _error, err_console
 
 if TYPE_CHECKING:
     from neurons.validator import Validator
@@ -199,6 +199,24 @@ def _apply_log_level(level: str) -> None:
     getattr(bt.logging, f'set_{level}')()
 
 
+@contextmanager
+def _profile_to(path: Optional[str]) -> Iterator[None]:
+    """Profile the wrapped block and dump cProfile pstats when path is set."""
+    if path is None:
+        yield
+        return
+
+    import cProfile
+
+    profiler = cProfile.Profile()
+    profiler.enable()
+    try:
+        yield
+    finally:
+        profiler.disable()
+        profiler.dump_stats(path)
+
+
 def _drain_logs() -> None:
     """Stop log production and wait for the async stderr writer to drain.
 
@@ -232,7 +250,14 @@ def _drain_logs() -> None:
     help="Bittensor log verbosity. 'info' surfaces the validator pipeline's per-step progress on stderr.",
 )
 @click.option('--json-output', 'json_mode', is_flag=True, default=False, help='Emit result as JSON on stdout.')
-def score_command(pat: Optional[str], log_level: str, json_mode: bool) -> None:
+@click.option(
+    '--profile',
+    'profile_path',
+    default=None,
+    metavar='PATH',
+    help='Run the scoring pipeline under cProfile and write a pstats binary to PATH.',
+)
+def score_command(pat: Optional[str], log_level: str, json_mode: bool, profile_path: Optional[str]) -> None:
     """Locally run the validator scoring pipeline end-to-end for the miner identified by --pat.
 
     No subtensor, wallet, DB, axon, or wandb is touched.
@@ -240,6 +265,7 @@ def score_command(pat: Optional[str], log_level: str, json_mode: bool) -> None:
     Example:
         gitt miner score --pat ghp_xxxxx
         gitt miner score --pat ghp_xxxxx --log-level debug
+        gitt miner score --pat ghp_xxxxx --profile run.prof
     """
     import asyncio
 
@@ -264,7 +290,9 @@ def score_command(pat: Optional[str], log_level: str, json_mode: bool) -> None:
     stub = cast('Validator', _StubValidator(_DEV_UID, _DEV_HOTKEY))
     miner_uids = {_DEV_UID}
 
-    if json_mode:
+    quiet_mode = json_mode or profile_path is not None
+
+    if quiet_mode:
         master_repositories = load_master_repo_weights()
         programming_languages = load_programming_language_weights()
         token_config = load_token_config()
@@ -279,7 +307,7 @@ def score_command(pat: Optional[str], log_level: str, json_mode: bool) -> None:
 
     pat_snapshot = [{'uid': _DEV_UID, 'hotkey': _DEV_HOTKEY, 'pat': resolved_pat}]
 
-    async def _run() -> Dict[str, Any]:
+    async def _run_pipeline() -> Tuple[Any, Any, Any, Dict[int, Any]]:
         with _override_pats_file(pat_snapshot):
             oss_rewards, miner_evaluations, _, _ = await oss_contributions(
                 stub, miner_uids, master_repositories, programming_languages, token_config
@@ -288,7 +316,9 @@ def score_command(pat: Optional[str], log_level: str, json_mode: bool) -> None:
                 miner_evaluations, master_repositories, programming_languages, token_config, miner_uids
             )
         rewards = blend_emission_pools(oss_rewards, issue_rewards, miner_uids)
+        return oss_rewards, issue_rewards, rewards, miner_evaluations
 
+    def _build_payload(oss_rewards, issue_rewards, rewards, miner_evaluations) -> Dict[str, Any]:
         return {
             'success': True,
             'miner_evaluation': _serialize_evaluation(miner_evaluations[_DEV_UID]),
@@ -299,11 +329,19 @@ def score_command(pat: Optional[str], log_level: str, json_mode: bool) -> None:
             },
         }
 
-    if not json_mode:
+    if not quiet_mode:
         console.print('[bold cyan]Running validator pipeline...[/bold cyan]')
-    payload = asyncio.run(_run())
+
+    with _profile_to(profile_path):
+        pipeline_result = asyncio.run(_run_pipeline())
 
     _drain_logs()
+
+    if profile_path is not None:
+        err_console.print(f'[bold cyan]wrote pstats binary:[/bold cyan] {profile_path}')
+        return
+
+    payload = _build_payload(*pipeline_result)
 
     if json_mode:
         emit_json(payload)

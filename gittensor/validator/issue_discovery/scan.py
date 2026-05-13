@@ -386,10 +386,6 @@ async def _score_miner_issues(
             )
             continue
 
-        # Valid-solved gate: solving PR must meet the token threshold.
-        if cached.token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE:
-            valid_solved_count += 1
-
         # Same-account: discoverer == solver gets credibility only, no score
         if issue.author_github_id == solving_pr.author_github_id:
             bt.logging.debug(
@@ -397,6 +393,10 @@ async def _score_miner_issues(
                 f'(discoverer == solver {issue.author_github_id}) — credibility only'
             )
             continue
+
+        # Valid-solved gate: solving PR must meet the token threshold.
+        if cached.token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE:
+            valid_solved_count += 1
 
         pr_key = (issue.repo_full_name, solving_pr.pr_number)
         own_marker = (issue.created_at or _FAR_FUTURE, issue.issue_number, evaluation.uid)

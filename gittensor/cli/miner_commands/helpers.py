@@ -10,10 +10,10 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-import click
 from rich.console import Console
 from rich.table import Table
 
+from gittensor.cli.json_output import emit_error_json
 from gittensor.constants import NETWORK_MAP
 
 console = Console()
@@ -106,14 +106,14 @@ def _status(message: str):
 
 
 def _print(message: str) -> None:
-    """Print a status/info message to stderr (safe under --json-output)."""
+    """Print a status/info message to stderr (safe under --json)."""
     err_console.print(message)
 
 
-def _error(msg: str, json_mode: bool) -> None:
+def _error(msg: str, json_mode: bool, error_type: str = 'cli_error') -> None:
     """Print an error message in the appropriate format."""
     if json_mode:
-        click.echo(json.dumps({'success': False, 'error': msg}))
+        emit_error_json(msg, error_type=error_type)
     else:
         err_console.print(f'[red]Error: {msg}[/red]')
 
@@ -143,7 +143,7 @@ def _require_validator_axons(
                 f'--min-stake={min_stake:,.0f} α; all {len(excluded)} candidate(s) excluded.'
             )
             if json_mode:
-                click.echo(json.dumps({'success': False, 'error': msg, 'skipped': excluded}))
+                emit_error_json(msg, error_type='no_validators_eligible', skipped=excluded)
             else:
                 _render_skipped_validators(excluded, json_mode)
                 console.print(f'[red]Error: {msg}[/red]')

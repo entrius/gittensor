@@ -9,6 +9,8 @@ import sys
 import click
 from rich.table import Table
 
+from gittensor.cli.issue_commands.helpers import NETWORK_CHOICE
+
 from .helpers import (
     DEFAULT_MIN_VALIDATOR_STAKE,
     DEFAULT_MIN_VALIDATOR_VTRUST,
@@ -39,7 +41,7 @@ _PAT_CHECK_STATUS_MARKUP = {
 @click.option('--wallet', 'wallet_name', default=None, help='Bittensor wallet name.')
 @click.option('--hotkey', 'wallet_hotkey', default=None, help='Bittensor hotkey name.')
 @click.option('--netuid', type=int, default=NETUID_DEFAULT, help='Subnet UID.', show_default=True)
-@click.option('--network', default=None, help='Network name (local, test, finney).')
+@click.option('--network', type=NETWORK_CHOICE, default=None, help='Network name (local, test, finney).')
 @click.option('--rpc-url', default=None, help='Subtensor RPC endpoint URL (overrides --network).')
 @click.option(
     '--min-vtrust',
@@ -55,7 +57,7 @@ _PAT_CHECK_STATUS_MARKUP = {
     show_default=True,
     help='Minimum validator stake (α) to probe.',
 )
-@click.option('--json-output', 'json_mode', is_flag=True, default=False, help='Output results as JSON.')
+@click.option('--json', 'json_mode', is_flag=True, default=False, help='Output results as JSON.')
 def miner_check(wallet_name, wallet_hotkey, netuid, network, rpc_url, min_vtrust, min_stake, json_mode):
     """Check how many validators have your PAT stored.
 

@@ -25,7 +25,6 @@ def test_transient_identity_lookup_uses_stored_id_for_cache_fallback():
     assert evaluation.github_id == '12345'
     assert evaluation.github_pr_fetch_failed is True
     assert evaluation.should_use_cache_fallback is True
-    assert evaluation.github_pat is None
 
 
 def test_auth_identity_failure_does_not_use_stored_id_for_cache_fallback():

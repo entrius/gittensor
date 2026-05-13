@@ -48,7 +48,7 @@ class TestMinerPost:
 
     def test_no_pat_json_mode_exits(self, runner, monkeypatch):
         monkeypatch.delenv('GITTENSOR_MINER_PAT', raising=False)
-        result = runner.invoke(cli, ['miner', 'post', '--json-output', '--wallet', 'test', '--hotkey', 'test'])
+        result = runner.invoke(cli, ['miner', 'post', '--json', '--wallet', 'test', '--hotkey', 'test'])
         assert result.exit_code != 0
         output = json.loads(result.stdout)
         assert output['success'] is False
@@ -112,7 +112,7 @@ class TestMinerPost:
                 [
                     'miner',
                     'post',
-                    '--json-output',
+                    '--json',
                     '--pat',
                     'ghp_test123',
                     '--wallet',
@@ -265,8 +265,9 @@ class TestRequireValidatorAxonsErrorPath:
         assert exc_info.value.code == 1
         payload = json.loads(capsys.readouterr().out.strip())
         assert payload['success'] is False
-        assert '--min-stake' in payload['error']
-        assert '--min-vtrust' in payload['error']
+        assert payload['error']['type'] == 'no_validators_eligible'
+        assert '--min-stake' in payload['error']['message']
+        assert '--min-vtrust' in payload['error']['message']
         assert len(payload['skipped']) == 3
         assert {entry['uid'] for entry in payload['skipped']} == {0, 1, 2}
         assert all(entry['reasons'] for entry in payload['skipped'])
@@ -294,7 +295,10 @@ class TestRequireValidatorAxonsErrorPath:
         payload = json.loads(capsys.readouterr().out.strip())
         assert payload == {
             'success': False,
-            'error': 'No reachable validator axons found on the network.',
+            'error': {
+                'type': 'cli_error',
+                'message': 'No reachable validator axons found on the network.',
+            },
         }
 
     def test_subvtrust_only_metagraph_keeps_generic_message(self, capsys):
@@ -305,7 +309,8 @@ class TestRequireValidatorAxonsErrorPath:
             _require_validator_axons(mg, True, min_vtrust=0.25, min_stake=15_000.0)
         assert exc_info.value.code == 1
         payload = json.loads(capsys.readouterr().out.strip())
-        assert payload['error'] == 'No reachable validator axons found on the network.'
+        assert payload['error']['type'] == 'cli_error'
+        assert payload['error']['message'] == 'No reachable validator axons found on the network.'
         assert 'skipped' not in payload
 
 

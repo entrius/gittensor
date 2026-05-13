@@ -14,7 +14,6 @@ from rich.console import Console
 from rich.table import Table
 
 from gittensor.cli.json_output import emit_error_json
-from gittensor.constants import NETWORK_MAP
 
 console = Console()
 err_console = Console(stderr=True)
@@ -73,18 +72,16 @@ def _load_config_value(key: str):
 
 
 def _resolve_endpoint(network: str | None, rpc_url: str | None) -> str:
-    """Resolve the subtensor endpoint from CLI args or config."""
-    if rpc_url:
-        return rpc_url
-    if network:
-        return NETWORK_MAP.get(network.lower(), network)
-    config_network = _load_config_value('network')
-    config_endpoint = _load_config_value('ws_endpoint')
-    if config_endpoint:
-        return config_endpoint
-    if config_network:
-        return NETWORK_MAP.get(config_network.lower()) or config_network
-    return NETWORK_MAP['finney']
+    """Resolve the subtensor endpoint from CLI args or config.
+
+    Delegates to ``resolve_network`` from issue_commands so the precedence
+    logic (recognised config network beats stale ws_endpoint) is consistent
+    across all CLI commands.
+    """
+    from gittensor.cli.issue_commands.helpers import resolve_network
+
+    endpoint, _ = resolve_network(network, rpc_url)
+    return endpoint
 
 
 def _connect_bittensor(wallet_name: str, wallet_hotkey: str, ws_endpoint: str, netuid: int):

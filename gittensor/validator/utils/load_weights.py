@@ -56,11 +56,16 @@ class RepositoryConfig:
     eligibility_mode: bool = True
 
 
-def resolve_repo_weight(repo_config: Optional[RepositoryConfig]) -> float:
-    """Return the repo weight preserving full JSON precision, or the default for unknown repos."""
+def resolve_repo_emission_share(repo_config: Optional[RepositoryConfig]) -> float:
+    """Return the repo emission share preserving full JSON precision, or the default for unknown repos."""
     if repo_config is None:
         return DEFAULT_REPO_WEIGHT
     return repo_config.weight
+
+
+def resolve_repo_weight(repo_config: Optional[RepositoryConfig]) -> float:
+    """Compatibility alias for callers not yet migrated to emission-share terminology."""
+    return resolve_repo_emission_share(repo_config)
 
 
 @dataclass

@@ -21,7 +21,7 @@ from gittensor.constants import (
     RECYCLE_UID,
 )
 from gittensor.utils.mirror.models import MirrorPullRequest, MirrorReviewSummary
-from gittensor.validator.forward import blend_emission_pools
+from gittensor.validator.emission_allocation import blend_emission_pools
 from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredPR
 from gittensor.validator.utils.load_weights import RepositoryConfig, load_master_repo_weights
 

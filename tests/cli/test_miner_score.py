@@ -58,7 +58,7 @@ def _patch_pipeline(
     return [
         oss_patch,
         patch('gittensor.validator.forward.issue_discovery', new=AsyncMock(return_value=None)),
-        patch('gittensor.validator.forward.blend_emission_pools', return_value=final_rewards),
+        patch('gittensor.validator.emission_allocation.blend_emission_pools', return_value=final_rewards),
         patch('gittensor.validator.utils.load_weights.load_master_repo_weights', return_value=master_repos or {}),
         patch('gittensor.validator.utils.load_weights.load_programming_language_weights', return_value={}),
         patch('gittensor.validator.utils.load_weights.load_token_config', return_value=_stub_token_config()),

@@ -245,8 +245,8 @@ def score_command(pat: Optional[str], log_level: str, json_mode: bool) -> None:
     resolved_pat = _resolve_pat(pat, json_mode)
 
     # Deferred imports: keeps --help fast (these pull bittensor + the validator graph).
+    from gittensor.validator.emission_allocation import blend_emission_pools
     from gittensor.validator.forward import (
-        blend_emission_pools,
         issue_discovery,
         oss_contributions,
     )

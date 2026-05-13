@@ -82,3 +82,34 @@ class TestPerRepoEmissionShare:
 
         assert result[uid1_idx] == pytest.approx(repo_share * 0.75, abs=1e-6)
         assert result[uid2_idx] == pytest.approx(repo_share * 0.25, abs=1e-6)
+
+
+class TestWithinRepoSpill:
+    def test_issue_side_empty_spills_to_pr_side(self):
+        """When a repo has PR scorers but no issue scorers, full slice goes to PR side."""
+        repos = {'repo/a': _config(0.3)}
+        miner_uids = {1}
+        oss = np.array([1.0])
+        issue = np.array([0.0])
+
+        evaluations = {1: _eval(1, {'repo/a': 100.0})}
+
+        result = blend_emission_pools(oss, issue, miner_uids, miner_evaluations=evaluations, master_repositories=repos)
+        idx = sorted(miner_uids).index(1)
+        expected = 0.9  # pool = 1.0, oss_pool_share = 0.9, all to UID 1
+        assert result[idx] == pytest.approx(expected, abs=1e-6)
+
+    def test_both_sides_empty_recycles(self):
+        """When a repo has no scorers on either side, its allocation recycles."""
+        repos = {'repo/a': _config(0.5)}
+        miner_uids = {1}
+        oss = np.array([1.0])
+        issue = np.array([0.0])
+
+        # Miner evaluation with no merged PRs and no issue discovery score
+        eval_ = MinerEvaluation(1, 'dev')
+        setattr(eval_, 'merged_prs', [])
+
+        result = blend_emission_pools(oss, issue, miner_uids, miner_evaluations={1: eval_}, master_repositories=repos)
+        idx = sorted(miner_uids).index(1)
+        assert result[idx] == 0.0

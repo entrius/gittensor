@@ -57,7 +57,7 @@ INSERT INTO pull_requests (
     %s, %s, %s,
     %s, %s,
     %s, %s, %s, %s,
-    %s, %s, %s, %s, %s, %s, %s, %s,
+    %s, %s, %s, %s,
     %s, %s,
     %s, %s, %s, %s,
     %s, %s, %s,

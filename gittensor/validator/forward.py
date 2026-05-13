@@ -170,6 +170,12 @@ def blend_emission_pools(
     each repo receives ``emission_share × pool`` and divides it
     proportionally among its eligible miners by their per-repo earned score.
 
+    Within each repo, ``issue_discovery_share`` (default 0.5) splits the
+    allocation between PR scoring and issue-discovery scoring.  If one side
+    has no eligible nonzero scorers, its sub-slice spills to the active side
+    within the same repo.  The repo's full slice recycles only when *both*
+    sides have no eligible nonzero scorers.
+
     Without repo data, falls back to a flat per-UID distribution.
 
     - Combined scoring pool (OSS + issue discovery): {oss_pool_share:.0%}
@@ -190,35 +196,64 @@ def blend_emission_pools(
         if total_emission > 0:
             uid_to_idx = {uid: i for i, uid in enumerate(sorted_uids)}
 
-            # Build per-repo, per-UID score map from miner evaluations
-            repo_scores: Dict[str, Dict[int, float]] = {}
+            # Build per-repo, per-UID PR and issue discovery scores
+            repo_pr_scores: Dict[str, Dict[int, float]] = {}
+            repo_issue_scores: Dict[str, Dict[int, float]] = {}
             for uid, eval_ in miner_evaluations.items():
                 if uid not in uid_to_idx:
                     continue
+                disc_score = getattr(eval_, 'issue_discovery_score', 0.0) or 0.0
                 for scored_pr in getattr(eval_, 'merged_prs', []):
                     repo = getattr(getattr(scored_pr, 'pr', None), 'repo_full_name', None) or ''
-                    if repo in master_repositories:
-                        repo_scores.setdefault(repo, {}).setdefault(uid, 0.0)
-                        repo_scores[repo][uid] += getattr(scored_pr, 'earned_score', 0.0) or 0.0
-
-            # Distribute per-repo
-            if repo_scores:
-                for repo_name, cfg in master_repositories.items():
-                    uid_scores = repo_scores.get(repo_name, {})
-                    if not uid_scores:
+                    if repo not in master_repositories:
                         continue
-                    total_score = sum(uid_scores.values())
-                    if total_score <= 0:
-                        continue
-                    repo_allocation = (cfg.emission_share / total_emission) * combined_total * oss_pool_share
-                    for uid, score in uid_scores.items():
-                        rewards[uid_to_idx[uid]] += repo_allocation * (score / total_score)
-                return rewards
+                    pr_score = getattr(scored_pr, 'earned_score', 0.0) or 0.0
+                    if pr_score > 0:
+                        repo_pr_scores.setdefault(repo, {}).setdefault(uid, 0.0)
+                        repo_pr_scores[repo][uid] += pr_score
+                    if disc_score > 0:
+                        repo_issue_scores.setdefault(repo, {}).setdefault(uid, 0.0)
+                        repo_issue_scores[repo][uid] += disc_score
 
-        # Fallback to flat distribution if repo-level data is incomplete
+            # Per-repo distribution with within-repo spill
+            for repo_name, cfg in master_repositories.items():
+                repo_allocation = (cfg.emission_share / total_emission) * combined_total * oss_pool_share
+                id_share = cfg.issue_discovery_share if cfg.issue_discovery_share is not None else 0.5
+                pr_scores = repo_pr_scores.get(repo_name, {})
+                issue_scores = repo_issue_scores.get(repo_name, {})
+
+                pr_has = bool(pr_scores)
+                issue_has = bool(issue_scores)
+
+                if pr_has and issue_has:
+                    pr_pool = repo_allocation * (1.0 - id_share)
+                    issue_pool = repo_allocation * id_share
+                    pr_total = sum(pr_scores.values())
+                    issue_total = sum(issue_scores.values())
+                    for uid, score in pr_scores.items():
+                        rewards[uid_to_idx[uid]] += pr_pool * (score / pr_total)
+                    for uid, score in issue_scores.items():
+                        rewards[uid_to_idx[uid]] += issue_pool * (score / issue_total)
+                elif pr_has:
+                    pr_total = sum(pr_scores.values())
+                    for uid, score in pr_scores.items():
+                        rewards[uid_to_idx[uid]] += repo_allocation * (score / pr_total)
+                elif issue_has:
+                    issue_total = sum(issue_scores.values())
+                    for uid, score in issue_scores.items():
+                        rewards[uid_to_idx[uid]] += repo_allocation * (score / issue_total)
+
+            # Treasury (10% flat to UID 111) — applied before return
+            if ISSUES_TREASURY_UID > 0 and ISSUES_TREASURY_UID in miner_uids:
+                treasury_idx = sorted_uids.index(ISSUES_TREASURY_UID)
+                rewards[treasury_idx] += ISSUES_TREASURY_EMISSION_SHARE
+            return rewards
+
+        # Fallback: repo data present but no emission_share configured
         combined_rewards = oss_rewards + issue_rewards
         rewards += combined_rewards * oss_pool_share
     elif combined_total > 0:
+        # Flat distribution (no repo data passed)
         combined_rewards = oss_rewards + issue_rewards
         rewards += combined_rewards * oss_pool_share
     else:

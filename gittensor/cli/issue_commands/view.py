@@ -31,10 +31,10 @@ from .helpers import (
     loading_context,
     print_network_header,
     read_issues_from_contract,
-    validate_issue_id,
     with_cli_behavior_options,
     with_network_contract_options,
 )
+from .types import CONTRACT_ISSUE, REPO
 
 
 def _fill_percent(bounty: int, target: int) -> float:
@@ -54,14 +54,14 @@ def _fill_percent(bounty: int, target: int) -> float:
     '--id',
     'issue_id',
     default=None,
-    type=int,
+    type=CONTRACT_ISSUE,
     help='View a specific issue by ID',
 )
 @click.option(
     '--repo',
     'repo_filter',
     default=None,
-    type=str,
+    type=REPO,
     help='Filter issues to a specific repository (owner/name).',
 )
 @with_cli_behavior_options(
@@ -82,12 +82,6 @@ def issues_list(
         $ gitt i list --json
     [/dim]
     """
-    if issue_id is not None:
-        try:
-            validate_issue_id(issue_id, 'id')
-        except click.BadParameter as e:
-            handle_exception(as_json, str(e), 'bad_parameter')
-
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(
         contract,
         network,

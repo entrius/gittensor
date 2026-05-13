@@ -166,13 +166,21 @@ async def run_issue_discovery(
 
         try:
             current_response = await asyncio.to_thread(client.get_miner_issues, evaluation.github_id)
+            open_issue_count = _count_open_issues(current_response.issues, enabled_names)
         except MirrorRequestError as e:
-            bt.logging.warning(f'├─ UID {uid}: open-issue count fetch failed ({e}) — skipped this miner')
-            _restore_issue_discovery_from_cache(evaluation, evaluation_cache)
             fetch_errors += 1
-            continue
+            open_issue_count = _get_cached_open_issue_count(evaluation, evaluation_cache)
+            if open_issue_count is None:
+                open_issue_count = _count_open_issues(response.issues, enabled_names)
+                bt.logging.warning(
+                    f'├─ UID {uid}: open-issue count fetch failed ({e}) — '
+                    f'using lookback open count ({open_issue_count})'
+                )
+            else:
+                bt.logging.warning(
+                    f'├─ UID {uid}: open-issue count fetch failed ({e}) — using cached open count ({open_issue_count})'
+                )
 
-        open_issue_count = _count_open_issues(current_response.issues, enabled_names)
         filtered = [i for i in response.issues if i.repo_full_name in enabled_names]
         if not filtered:
             _clear_issue_discovery_fields(evaluation)
@@ -263,6 +271,20 @@ def _restore_issue_discovery_from_cache(
         f'valid={cached.total_valid_solved_issues})'
     )
     return True
+
+
+def _get_cached_open_issue_count(
+    evaluation: MinerEvaluation,
+    evaluation_cache: Optional[MinerEvaluationCache],
+) -> Optional[int]:
+    if evaluation_cache is None:
+        return None
+
+    cached = evaluation_cache.get(evaluation.uid, evaluation.hotkey, evaluation.github_id or '')
+    if cached is None:
+        return None
+
+    return cached.total_open_issues
 
 
 def _build_canonical_pr_owners(

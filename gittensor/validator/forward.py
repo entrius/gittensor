@@ -32,6 +32,10 @@ from gittensor.validator.utils.load_weights import (
 )
 
 if TYPE_CHECKING:
+    from typing import Dict, Optional
+
+    from gittensor.classes import MinerEvaluation
+    from gittensor.validator.utils.load_weights import RepositoryConfig
     from neurons.validator import Validator
 
 
@@ -82,7 +86,13 @@ async def forward(self: 'Validator') -> None:
         await self.bulk_store_evaluation(miner_evaluations, skip_uids=cached_uids)
 
         # 5. Blend 4 emission pools into final rewards
-        rewards = blend_emission_pools(oss_rewards, issue_rewards, miner_uids)
+        rewards = blend_emission_pools(
+            oss_rewards,
+            issue_rewards,
+            miner_uids,
+            miner_evaluations=miner_evaluations,
+            master_repositories=master_repositories,
+        )
 
         self.update_scores(rewards, miner_uids, blacklisted_uids=sorted(penalized_uids))
 
@@ -150,8 +160,17 @@ def blend_emission_pools(
     issue_rewards: np.ndarray,
     miner_uids: set[int],
     oss_pool_share: float = 0.90,
+    miner_evaluations: Optional[Dict[int, 'MinerEvaluation']] = None,
+    master_repositories: Optional[Dict[str, 'RepositoryConfig']] = None,
 ) -> np.ndarray:
     """Blend emission pools into a single rewards array.
+
+    When *miner_evaluations* and *master_repositories* are provided, the
+    combined scoring pool is distributed per-repo by ``emission_share``:
+    each repo receives ``emission_share × pool`` and divides it
+    proportionally among its eligible miners by their per-repo earned score.
+
+    Without repo data, falls back to a flat per-UID distribution.
 
     - Combined scoring pool (OSS + issue discovery): {oss_pool_share:.0%}
     - Issue treasury:                        10% (flat to UID 111)
@@ -165,7 +184,41 @@ def blend_emission_pools(
     oss_total = float(oss_rewards.sum())
     issue_total = float(issue_rewards.sum())
     combined_total = oss_total + issue_total
-    if combined_total > 0:
+
+    if combined_total > 0 and miner_evaluations and master_repositories:
+        total_emission = sum(c.emission_share for c in master_repositories.values())
+        if total_emission > 0:
+            uid_to_idx = {uid: i for i, uid in enumerate(sorted_uids)}
+
+            # Build per-repo, per-UID score map from miner evaluations
+            repo_scores: Dict[str, Dict[int, float]] = {}
+            for uid, eval_ in miner_evaluations.items():
+                if uid not in uid_to_idx:
+                    continue
+                for pr in getattr(eval_, 'merged_pull_requests', []):
+                    repo = getattr(pr, 'repository_full_name', None) or ''
+                    if repo in master_repositories:
+                        repo_scores.setdefault(repo, {}).setdefault(uid, 0.0)
+                        repo_scores[repo][uid] += getattr(pr, 'earned_score', 0.0) or 0.0
+
+            # Distribute per-repo
+            if repo_scores:
+                for repo_name, cfg in master_repositories.items():
+                    uid_scores = repo_scores.get(repo_name, {})
+                    if not uid_scores:
+                        continue
+                    total_score = sum(uid_scores.values())
+                    if total_score <= 0:
+                        continue
+                    repo_allocation = (cfg.emission_share / total_emission) * combined_total * oss_pool_share
+                    for uid, score in uid_scores.items():
+                        rewards[uid_to_idx[uid]] += repo_allocation * (score / total_score)
+                return rewards
+
+        # Fallback to flat distribution if repo-level data is incomplete
+        combined_rewards = oss_rewards + issue_rewards
+        rewards += combined_rewards * oss_pool_share
+    elif combined_total > 0:
         combined_rewards = oss_rewards + issue_rewards
         rewards += combined_rewards * oss_pool_share
     else:

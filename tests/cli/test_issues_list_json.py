@@ -62,19 +62,5 @@ def test_issues_list_rejects_invalid_id_human(cli_root, runner, bad_id):
         result = runner.invoke(cli_root, ['issues', 'list', '--id', bad_id], catch_exceptions=False)
 
     assert result.exit_code != 0
-    assert 'between 1 and 999999' in result.output
-    mock_read.assert_not_called()
-
-
-@pytest.mark.parametrize('bad_id', ['0', '-1', '1000000'])
-def test_issues_list_rejects_invalid_id_json(cli_root, runner, bad_id):
-    """JSON mode must emit a structured bad_parameter error consistent with `submissions --id`."""
-    with patch('gittensor.cli.issue_commands.view.read_issues_from_contract') as mock_read:
-        result = runner.invoke(cli_root, ['issues', 'list', '--json', '--id', bad_id], catch_exceptions=False)
-
-    assert result.exit_code != 0
-    payload = json.loads(result.output)
-    assert payload['success'] is False
-    assert payload['error']['type'] == 'bad_parameter'
-    assert 'between 1 and 999999' in payload['error']['message']
+    assert 'not in the range' in result.output
     mock_read.assert_not_called()

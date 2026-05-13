@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import dataclasses
 import json
-import os
 import sys
 from contextlib import contextmanager
 from enum import Enum
@@ -40,10 +39,9 @@ def _die(msg: str, json_mode: bool) -> NoReturn:
 
 
 def _resolve_pat(cli_pat: Optional[str], json_mode: bool) -> str:
-    pat = cli_pat or os.environ.get('GITTENSOR_MINER_PAT')
-    if not pat:
+    if not cli_pat:
         _die('--pat flag or GITTENSOR_MINER_PAT environment variable is required.', json_mode)
-    return pat
+    return cli_pat
 
 
 def _round(x: float) -> float:
@@ -219,7 +217,12 @@ def _drain_logs() -> None:
 
 
 @click.command(name='score')
-@click.option('--pat', default=None, help='GitHub Personal Access Token. Uses GITTENSOR_MINER_PAT env if unset.')
+@click.option(
+    '--pat',
+    default=None,
+    envvar='GITTENSOR_MINER_PAT',
+    help='GitHub Personal Access Token. Uses GITTENSOR_MINER_PAT env if unset.',
+)
 @click.option(
     '--log-level',
     type=click.Choice(['warning', 'info', 'debug', 'trace']),

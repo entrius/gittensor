@@ -182,7 +182,6 @@ class PullRequest:
     pr_state: PRState
 
     # Score fields
-    repo_weight_multiplier: float = 1.0
     base_score: float = 0.0
     issue_multiplier: float = 1.0
     open_pr_spam_multiplier: float = 1.0
@@ -234,7 +233,6 @@ class PullRequest:
     def calculate_final_earned_score(self) -> float:
         """Combine base score with all multipliers. Pioneer dividend is added separately after."""
         multipliers = {
-            'repo': self.repo_weight_multiplier,
             'issue': self.issue_multiplier,
             'label': self.label_multiplier,
             'spam': self.open_pr_spam_multiplier,

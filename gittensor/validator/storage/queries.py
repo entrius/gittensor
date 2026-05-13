@@ -45,7 +45,7 @@ BULK_UPSERT_PULL_REQUESTS = """
 INSERT INTO pull_requests (
     number, repository_full_name, uid, hotkey, github_id, title, author_login,
     merged_at, pr_created_at, pr_state,
-    repo_weight_multiplier, base_score, issue_multiplier,
+    base_score, issue_multiplier,
     open_pr_spam_multiplier, pioneer_dividend, pioneer_rank, time_decay_multiplier,
     credibility_multiplier, review_quality_multiplier, label_multiplier, label,
     earned_score, collateral_score,
@@ -55,9 +55,9 @@ INSERT INTO pull_requests (
 ) VALUES (
     %s, %s, %s, %s, %s, %s, %s,
     %s, %s, %s,
-    %s, %s, %s,
+    %s, %s,
     %s, %s, %s, %s,
-    %s, %s, %s, %s,
+    %s, %s, %s, %s, %s, %s, %s, %s,
     %s, %s,
     %s, %s, %s, %s,
     %s, %s, %s,
@@ -71,7 +71,6 @@ DO UPDATE SET
     author_login = EXCLUDED.author_login,
     merged_at = EXCLUDED.merged_at,
     pr_state = EXCLUDED.pr_state,
-    repo_weight_multiplier = EXCLUDED.repo_weight_multiplier,
     base_score = EXCLUDED.base_score,
     issue_multiplier = EXCLUDED.issue_multiplier,
     open_pr_spam_multiplier = EXCLUDED.open_pr_spam_multiplier,

@@ -177,7 +177,6 @@ class Repository(BaseRepository):
                     pr.merged_at,
                     pr.created_at,
                     pr.pr_state.value,  # Convert PRState enum to string
-                    pr.repo_weight_multiplier,
                     pr.base_score,
                     pr.issue_multiplier,
                     pr.open_pr_spam_multiplier,

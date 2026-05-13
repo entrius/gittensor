@@ -54,7 +54,6 @@ from gittensor.validator.utils.load_weights import (
     LanguageConfig,
     RepositoryConfig,
     TokenConfig,
-    resolve_emission_share,
 )
 from gittensor.validator.utils.tree_sitter_scoring import calculate_token_score_from_file_changes
 
@@ -345,8 +344,6 @@ def _calculate_pr_multipliers(scored: ScoredPR, repo_config: RepositoryConfig) -
     """
     pr = scored.pr
     is_merged = pr.state == 'MERGED'
-
-    scored.repo_weight_multiplier = resolve_emission_share(repo_config)
 
     chosen_label, label_multiplier = _resolve_trusted_scoring_label(pr, repo_config)
     scored.label = chosen_label

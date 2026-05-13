@@ -99,17 +99,11 @@ def _collect_repo_pr_scores(
         if uid not in miner_uids:
             continue
 
-        earned = sum(
+        score = sum(
             pr.earned_score
             for pr in evaluation.merged_prs
-            if pr.repository_full_name == repo_name and pr.earned_score > 0
+            if pr.repository_full_name.lower() == repo_name and pr.earned_score > 0
         )
-        collateral = sum(
-            pr.collateral_score
-            for pr in evaluation.open_prs
-            if pr.repository_full_name == repo_name and pr.collateral_score > 0
-        )
-        score = max(0.0, earned - collateral)
         if score > 0:
             scores[uid] = score
 
@@ -129,7 +123,7 @@ def _collect_repo_issue_discovery_scores(
         score = sum(
             issue.discovery_earned_score
             for issue in evaluation.issue_discovery_issues
-            if issue.repository_full_name == repo_name and issue.discovery_earned_score > 0
+            if issue.repository_full_name.lower() == repo_name and issue.discovery_earned_score > 0
         )
         if score > 0:
             scores[uid] = score

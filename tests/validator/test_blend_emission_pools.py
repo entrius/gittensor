@@ -76,13 +76,6 @@ def _scored_pr(repo: str, number: int, earned_score: float) -> ScoredPR:
     return ScoredPR(pr=pr, earned_score=earned_score)
 
 
-def _open_pr(repo: str, number: int, collateral_score: float) -> ScoredPR:
-    scored = _scored_pr(repo, number, earned_score=0.0)
-    scored.pr.state = 'OPEN'
-    scored.collateral_score = collateral_score
-    return scored
-
-
 def _discovered_issue(repo: str, number: int, earned_score: float) -> Issue:
     return Issue(
         number=number,
@@ -320,24 +313,6 @@ class TestIssueDiscoveryShareShortCircuits:
 
 
 class TestPreservedCompatibility:
-    def test_open_pr_collateral_reduces_pr_side_score_in_same_repo(self):
-        miner_uids = _uids(1, 2)
-        repos = {'r/repo': _config(emission_share=0.5, issue_discovery_share=0.0)}
-        evaluations = {
-            1: _evaluation(
-                1,
-                prs=[_scored_pr('r/repo', 1, earned_score=10.0)],
-                open_prs=[_open_pr('r/repo', 100, collateral_score=8.0)],
-            ),
-            2: _evaluation(2, prs=[_scored_pr('r/repo', 2, earned_score=8.0)]),
-        }
-
-        rewards = blend_emission_pools(evaluations, repos, miner_uids)
-
-        repo_slice = 0.5 * OSS_EMISSION_SHARE
-        assert rewards[_idx(miner_uids, 1)] == pytest.approx(repo_slice * 0.2)
-        assert rewards[_idx(miner_uids, 2)] == pytest.approx(repo_slice * 0.8)
-
     def test_live_registry_load_then_allocate(self):
         repos = load_master_repo_weights()
         miner_uids = _uids()
@@ -345,3 +320,23 @@ class TestPreservedCompatibility:
         rewards = blend_emission_pools({}, repos, miner_uids)
 
         assert float(rewards.sum()) == pytest.approx(OSS_EMISSION_SHARE + ISSUES_TREASURY_EMISSION_SHARE)
+
+
+class TestCaseInsensitiveRepoMatching:
+    def test_pr_scores_match_lowercase_registry_key_with_mixed_case_live_repo(self):
+        repos = {'entrius/gittensor': _config(emission_share=0.2, issue_discovery_share=0.0)}
+        miner_uids = _uids(1)
+        evaluations = {1: _evaluation(1, prs=[_scored_pr('Entrius/Gittensor', 100, earned_score=10.0)])}
+
+        rewards = blend_emission_pools(evaluations, repos, miner_uids)
+
+        assert rewards[_idx(miner_uids, 1)] == pytest.approx(0.2 * OSS_EMISSION_SHARE)
+
+    def test_issue_scores_match_lowercase_registry_key_with_mixed_case_live_repo(self):
+        repos = {'entrius/gittensor': _config(emission_share=0.2, issue_discovery_share=1.0)}
+        miner_uids = _uids(1)
+        evaluations = {1: _evaluation(1, issues=[_discovered_issue('Entrius/Gittensor', 10, earned_score=5.0)])}
+
+        rewards = blend_emission_pools(evaluations, repos, miner_uids)
+
+        assert rewards[_idx(miner_uids, 1)] == pytest.approx(0.2 * OSS_EMISSION_SHARE)

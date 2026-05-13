@@ -21,7 +21,6 @@ mirror_client_mod = pytest.importorskip('gittensor.utils.mirror.client')
 classes = pytest.importorskip('gittensor.classes')
 load_weights = pytest.importorskip('gittensor.validator.utils.load_weights')
 scored_pr_module = pytest.importorskip('gittensor.validator.oss_contributions.mirror.scored_pr')
-normalize_module = pytest.importorskip('gittensor.validator.issue_discovery.normalize')
 
 run_issue_discovery = scan_module.run_issue_discovery
 _classify_issue = scan_module._classify_issue
@@ -37,7 +36,6 @@ MinerEvaluationCache = classes.MinerEvaluationCache
 RepositoryConfig = load_weights.RepositoryConfig
 TokenConfig = load_weights.TokenConfig
 ScoredPR = scored_pr_module.ScoredPR
-normalize_issue_discovery_rewards = normalize_module.normalize_issue_discovery_rewards
 
 
 # Representative defaults for the plumbed-through token scoring args. The
@@ -165,7 +163,7 @@ def _eval(uid: int = 1, github_id: Optional[str] = '999'):
 
 
 def _mirror_repos(*names: str) -> dict:
-    return {name: RepositoryConfig(weight=0.5) for name in names}
+    return {name: RepositoryConfig(emission_share=0.5) for name in names}
 
 
 def _run(coro):
@@ -442,11 +440,6 @@ class TestRunMirrorIssueDiscovery:
         assert failing.total_solved_issues == 7
         assert failing.total_valid_solved_issues == 7
         assert working.issue_discovery_score > 0
-
-        rewards = normalize_issue_discovery_rewards({1: failing, 2: working})
-        assert rewards[1] < 1.0
-        assert rewards[2] < 1.0
-        assert sum(rewards.values()) == pytest.approx(1.0)
 
     def test_successful_issue_fetch_refreshes_cache_after_scoring(self):
         cache = MinerEvaluationCache()
@@ -1319,3 +1312,30 @@ class TestCrossMinerOneIssuePerPr:
         assert e_b.issue_token_score == 700.0
         assert e_a.issue_discovery_score == e_b.issue_discovery_score
         assert e_a.issue_discovery_score > 0
+
+    def test_emission_share_does_not_scale_issue_discovery_raw_score(self):
+        """Repo emission_share is enforced by the final allocator, not by
+        issue-discovery's per-issue raw score product."""
+        issues = [_issue_dict(issue_number=10 + i, author_github_id='A', solved_by_pr=200 + i) for i in range(7)]
+
+        def _score_with_emission_share(emission_share: float) -> float:
+            client = Mock()
+            client.get_miner_issues.return_value = _response(issues)
+            evaluation = _eval(uid=1, github_id='A')
+            seed = MinerEvaluation(uid=99, hotkey='hkS', github_id='SEED')
+            seed.merged_prs = [_scored_mirror_pr('entrius/gittensor-ui', pr_number) for pr_number in range(200, 207)]
+
+            _run(
+                run_issue_discovery(
+                    {1: evaluation, 99: seed},
+                    {'entrius/gittensor-ui': RepositoryConfig(emission_share=emission_share)},
+                    _EMPTY_LANGS,
+                    _EMPTY_TOKEN_CONFIG,
+                    client=client,
+                )
+            )
+            assert len(evaluation.issue_discovery_issues) == 7
+            assert all(issue.discovery_repo_weight_multiplier == 1.0 for issue in evaluation.issue_discovery_issues)
+            return evaluation.issue_discovery_score
+
+        assert _score_with_emission_share(0.1) == pytest.approx(_score_with_emission_share(0.9))

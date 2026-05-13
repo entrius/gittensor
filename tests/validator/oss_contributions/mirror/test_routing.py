@@ -29,8 +29,8 @@ def _make_miner_eval(uid=1, hotkey='hk', github_id='218712309', failed_reason=No
 
 def _configs():
     return {
-        'entrius/gittensor-ui': RepositoryConfig(weight=0.5),
-        'entrius/allways': RepositoryConfig(weight=0.5),
+        'entrius/gittensor-ui': RepositoryConfig(emission_share=0.5),
+        'entrius/allways': RepositoryConfig(emission_share=0.5),
     }
 
 

@@ -455,6 +455,7 @@ async def _score_miner_issues(
             f'{solved_count} solved ({valid_solved_count} valid) | {closed_count} closed | '
             f'{open_issue_count} open'
         )
+        evaluation.issue_discovery_score = 0.0
         return not score_fetch_failed
 
     spam_mult = calculate_open_issue_spam_multiplier(open_issue_count, issue_token_score)

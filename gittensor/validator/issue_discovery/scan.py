@@ -366,6 +366,7 @@ async def _score_miner_issues(
         solved_count += 1
 
         # Resolve real base_score + token_score for the solving PR (cache or fetch)
+        repo_config = mirror_repos.get(issue.repo_full_name)
         cached = await _resolve_solving_pr_score(
             issue,
             solving_pr,
@@ -374,7 +375,7 @@ async def _score_miner_issues(
             client,
             programming_languages,
             token_config,
-            mirror_repos,
+            repo_config,
         )
         if cached is None:
             # Fetch failed — issue still counts for solved/credibility but not scored.
@@ -485,7 +486,7 @@ async def _resolve_solving_pr_score(
     client: MirrorClient,
     programming_languages: Dict[str, LanguageConfig],
     token_config: TokenConfig,
-    mirror_repos: Dict[str, RepositoryConfig],
+    repo_config: Optional[RepositoryConfig],
 ) -> Optional[CachedSolvingPR]:
     """Return base_score + token_score for the solving PR.
 
@@ -526,7 +527,6 @@ async def _resolve_solving_pr_score(
         issue.repo_full_name, solving_pr.pr_number, files_response.files
     )
     result = calculate_base_score_for_pr_files(file_changes, file_contents, programming_languages, token_config)
-    repo_config = mirror_repos.get(issue.repo_full_name)
     base_score = (
         repo_config.fixed_base_score
         if repo_config is not None and repo_config.fixed_base_score is not None

@@ -788,7 +788,7 @@ class TestCacheStats:
         assert issue.solving_pr is not None
         result = asyncio.run(
             _resolve_solving_pr_score(
-                issue, issue.solving_pr, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, {}
+                issue, issue.solving_pr, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, None
             )
         )
 
@@ -812,7 +812,7 @@ class TestCacheStats:
         issue = MirrorIssue.from_dict(_issue_dict())
         asyncio.run(
             _resolve_solving_pr_score(
-                issue, issue.solving_pr, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, {}
+                issue, issue.solving_pr, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, None
             )
         )
 
@@ -836,7 +836,7 @@ class TestCacheStats:
         issue = MirrorIssue.from_dict(_issue_dict())
         result = asyncio.run(
             _resolve_solving_pr_score(
-                issue, issue.solving_pr, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, {}
+                issue, issue.solving_pr, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, None
             )
         )
 
@@ -875,7 +875,7 @@ class TestCacheStats:
         issue = MirrorIssue.from_dict(_issue_dict())
         result = asyncio.run(
             _resolve_solving_pr_score(
-                issue, issue.solving_pr, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, {}
+                issue, issue.solving_pr, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, None
             )
         )
 
@@ -916,12 +916,12 @@ class TestCacheStats:
 
         result_a = asyncio.run(
             _resolve_solving_pr_score(
-                issue_a, issue_a.solving_pr, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, {}
+                issue_a, issue_a.solving_pr, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, None
             )
         )
         result_b = asyncio.run(
             _resolve_solving_pr_score(
-                issue_b, issue_b.solving_pr, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, {}
+                issue_b, issue_b.solving_pr, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, None
             )
         )
 

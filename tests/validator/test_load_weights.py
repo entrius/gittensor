@@ -142,6 +142,12 @@ class TestLoadMasterRepositories:
                 f'labeling worker is honored at scoring time'
             )
 
+    @pytest.mark.parametrize('repo_name,metadata', _live_master_repo_metadata())
+    def test_live_emission_share_matches_legacy_weight_during_migration(self, repo_name, metadata):
+        """Migration guard: emission_share preserves each current repo weight exactly."""
+        assert 'emission_share' in metadata, f'{repo_name} must declare emission_share'
+        assert float(metadata['emission_share']) == pytest.approx(float(metadata['weight']), abs=1e-12)
+
 
 class TestRepositoryConfigTrustedLabelPipeline:
     """Dataclass + JSON-parsing tests for trusted_label_pipeline (issue #911)."""

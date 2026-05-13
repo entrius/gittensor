@@ -146,6 +146,7 @@ class MirrorPullRequest:
     commits_count: int
     scoring_data_stored: bool
     review_summary: MirrorReviewSummary
+    is_draft: bool = False
     labels: List[MirrorLabel] = field(default_factory=list)
     linked_issues: List[MirrorLinkedIssue] = field(default_factory=list)
 
@@ -183,6 +184,7 @@ class MirrorPullRequest:
             deletions=int(data.get('deletions', 0)),
             commits_count=int(data.get('commits_count', 0)),
             scoring_data_stored=bool(data.get('scoring_data_stored', False)),
+            is_draft=bool(data.get('is_draft', False)),
             review_summary=MirrorReviewSummary.from_dict(data.get('review_summary') or {}),
             labels=[MirrorLabel.from_dict(label) for label in data.get('labels') or []],
             linked_issues=[MirrorLinkedIssue.from_dict(issue) for issue in data.get('linked_issues') or []],

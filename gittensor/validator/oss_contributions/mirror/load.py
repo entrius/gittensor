@@ -110,6 +110,10 @@ def _maybe_add_pr(
     if not os.environ.get('DEV_MODE') and pr.author_association in MAINTAINER_ASSOCIATIONS:
         return
 
+    # Skip draft PRs — WIP changes shouldn't affect scoring or collateral
+    if pr.is_draft:
+        return
+
     if pr.state == 'OPEN':
         eval_.open_prs.append(ScoredPR(pr=pr))
     elif pr.state == 'CLOSED':

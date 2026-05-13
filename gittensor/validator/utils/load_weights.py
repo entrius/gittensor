@@ -31,9 +31,6 @@ class RepositoryConfig:
         weight: Repository weight for scoring
         inactive_at: ISO timestamp when repository became inactive (None if active)
         additional_acceptable_branches: List of additional branch patterns to accept (None if only default branch)
-        mirror_enabled: When True, fetch this repo's data from the das-github-mirror
-            service instead of via per-miner PATs. Defaults to False so existing
-            entries keep their current PAT-based behavior.
         trusted_label_pipeline: When True, scoring labels count regardless of
             actor — including GitHub Apps that surface as ``actor_association=NULL``.
             Defaults to False; only enable on repos with an authoritative label
@@ -42,9 +39,9 @@ class RepositoryConfig:
             same fnmatch wildcard syntax as ``additional_acceptable_branches``.
         default_label_multiplier: Multiplier used when no configured label
             pattern matches. Defaults to neutral scoring.
-        fixed_base_score: Mirror-only override for the PR base score. Expected
+        fixed_base_score: Override for the PR base score. Expected
             to be within [0.0, 100.0]; range is enforced by the live-config test.
-        eligibility_mode: Mirror-only flag controlling whether the global miner
+        eligibility_mode: Flag controlling whether the global miner
             eligibility gate applies to PRs in this repo.
 
     """
@@ -52,7 +49,6 @@ class RepositoryConfig:
     weight: float
     inactive_at: Optional[str] = None
     additional_acceptable_branches: Optional[List[str]] = None
-    mirror_enabled: bool = False
     trusted_label_pipeline: bool = False
     label_multipliers: Optional[Dict[str, float]] = None
     default_label_multiplier: float = 1.0
@@ -138,7 +134,6 @@ def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
                     weight=float(metadata.get('weight', 0.01)),
                     inactive_at=metadata.get('inactive_at'),
                     additional_acceptable_branches=metadata.get('additional_acceptable_branches'),
-                    mirror_enabled=bool(metadata.get('mirror_enabled', False)),
                     trusted_label_pipeline=bool(metadata.get('trusted_label_pipeline', False)),
                     label_multipliers=(
                         {str(label): float(multiplier) for label, multiplier in metadata['label_multipliers'].items()}

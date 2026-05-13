@@ -44,7 +44,7 @@ def _patch_pipeline(
     oss_side_effect=None,
     master_repos: Optional[Dict] = None,
 ):
-    """Mock the three forward entry points; `oss_side_effect` captures call args, `master_repos` exercises the mirror_enabled filter."""
+    """Mock the three forward entry points; `oss_side_effect` captures call args."""
     miner_evaluations = {uid: miner_evaluation}
 
     oss_rewards = np.array([oss_value])
@@ -84,9 +84,9 @@ def _make_scored_mirror_pr(
     token_score: float = 33.0,
     label: str = 'feature',
 ):
-    """Build a populated ScoredMirrorPR minimally sufficient for serialization."""
+    """Build a populated ScoredPR minimally sufficient for serialization."""
     from gittensor.utils.mirror.models import MirrorPullRequest, MirrorReviewSummary
-    from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredMirrorPR
+    from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredPR
 
     now = datetime.now(timezone.utc)
     pr = MirrorPullRequest(
@@ -118,7 +118,7 @@ def _make_scored_mirror_pr(
         scoring_data_stored=True,
         review_summary=MirrorReviewSummary(),
     )
-    return ScoredMirrorPR(
+    return ScoredPR(
         pr=pr,
         base_score=base_score,
         earned_score=earned_score,
@@ -173,7 +173,7 @@ class TestScoreCommand:
         ):
             result = runner.invoke(
                 cli,
-                ['miner', 'score', '--json-output'],
+                ['miner', 'score', '--json'],
                 env={'GITTENSOR_MINER_PAT': 'ghp_dummy'},
             )
         assert result.exit_code == 0, result.output
@@ -193,7 +193,7 @@ class TestScoreCommand:
         with _multi_patch(_patch_pipeline(uid=_DEV_UID, miner_evaluation=evaluation)):
             result = runner.invoke(
                 cli,
-                ['miner', 'score', '--pat', 'ghp_should_not_leak', '--json-output'],
+                ['miner', 'score', '--pat', 'ghp_should_not_leak', '--json'],
                 env={},
             )
         assert result.exit_code == 0, result.output
@@ -218,7 +218,7 @@ class TestScoreCommand:
         with _multi_patch(_patch_pipeline(uid=_DEV_UID, miner_evaluation=evaluation)):
             result = runner.invoke(
                 cli,
-                ['miner', 'score', '--json-output'],
+                ['miner', 'score', '--json'],
                 env={'GITTENSOR_MINER_PAT': 'ghp_dummy'},
             )
         assert result.exit_code == 0, result.output
@@ -247,12 +247,12 @@ class TestScoreCommand:
             uid=_DEV_UID,
             is_eligible=True,
             credibility=0.9,
-            mirror_merged_prs=[_make_scored_mirror_pr()],
+            merged_prs=[_make_scored_mirror_pr()],
         )
         with _multi_patch(_patch_pipeline(uid=_DEV_UID, miner_evaluation=evaluation)):
             result = runner.invoke(
                 cli,
-                ['miner', 'score', '--json-output'],
+                ['miner', 'score', '--json'],
                 env={'GITTENSOR_MINER_PAT': 'ghp_dummy'},
             )
         assert result.exit_code == 0, result.output
@@ -278,7 +278,7 @@ class TestScoreCommand:
             uid=_DEV_UID,
             is_eligible=True,
             credibility=0.9,
-            mirror_merged_prs=[_make_scored_mirror_pr()],
+            merged_prs=[_make_scored_mirror_pr()],
         )
         with _multi_patch(_patch_pipeline(uid=_DEV_UID, miner_evaluation=evaluation)):
             result = runner.invoke(
@@ -289,33 +289,6 @@ class TestScoreCommand:
         assert result.exit_code == 0, result.output
         assert 'octo/repo#42' in result.output
         assert 'Per-PR breakdown' in result.output
-
-    def test_master_repos_filtered_to_mirror_enabled(self, runner, miner_eval_factory):
-        """Non-mirror repos must be filtered out before oss_contributions is called."""
-        from gittensor.validator.utils.load_weights import RepositoryConfig
-
-        evaluation = miner_eval_factory(uid=_DEV_UID)
-        captured = {}
-
-        async def _capture_oss(self, miner_uids, master_repositories, *args, **kwargs):
-            captured['repos'] = dict(master_repositories)
-            return np.array([0.0]), {_DEV_UID: evaluation}, set(), set()
-
-        unfiltered = {
-            'legacy/repo': RepositoryConfig(weight=1.0, mirror_enabled=False),
-            'mirror/repo': RepositoryConfig(weight=1.0, mirror_enabled=True),
-        }
-        with _multi_patch(
-            _patch_pipeline(
-                uid=_DEV_UID,
-                miner_evaluation=evaluation,
-                oss_side_effect=_capture_oss,
-                master_repos=unfiltered,
-            )
-        ):
-            result = runner.invoke(cli, ['miner', 'score'], env={'GITTENSOR_MINER_PAT': 'ghp_dummy'})
-        assert result.exit_code == 0, result.output
-        assert set(captured['repos'].keys()) == {'mirror/repo'}
 
     def test_pat_storage_load_all_pats_is_patched(self, runner, miner_eval_factory):
         """The injected PAT snapshot must override pat_storage.load_all_pats()."""

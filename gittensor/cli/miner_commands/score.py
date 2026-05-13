@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import dataclasses
 import json
-import os
 import sys
 from contextlib import contextmanager
 from enum import Enum
@@ -22,7 +21,7 @@ import click
 from rich.console import Console
 from rich.table import Table
 
-from gittensor.cli.issue_commands.helpers import emit_json
+from gittensor.cli.json_output import emit_json
 from gittensor.cli.miner_commands.helpers import _error
 
 if TYPE_CHECKING:
@@ -40,10 +39,9 @@ def _die(msg: str, json_mode: bool) -> NoReturn:
 
 
 def _resolve_pat(cli_pat: Optional[str], json_mode: bool) -> str:
-    pat = cli_pat or os.environ.get('GITTENSOR_MINER_PAT')
-    if not pat:
+    if not cli_pat:
         _die('--pat flag or GITTENSOR_MINER_PAT environment variable is required.', json_mode)
-    return pat
+    return cli_pat
 
 
 def _round(x: float) -> float:
@@ -62,14 +60,10 @@ class _StubValidator:
 
 _EVAL_SKIP: frozenset = frozenset(
     {
-        'github_pat',  # secret - must never appear in serialized output
         'evaluation_timestamp',
-        'merged_pull_requests',
-        'open_pull_requests',
-        'closed_pull_requests',
-        'mirror_merged_prs',
-        'mirror_open_prs',
-        'mirror_closed_prs',
+        'merged_prs',
+        'open_prs',
+        'closed_prs',
         'unique_repos_contributed_to',
     }
 )
@@ -95,7 +89,7 @@ def _project(obj: Any, skip: frozenset = frozenset(), extra_properties: Tuple[st
 
 
 def _serialize_pr(scored) -> Dict[str, Any]:
-    """Flatten a ScoredMirrorPR into a JSON-friendly dict, lifting raw fields off .pr."""
+    """Flatten a ScoredPR into a JSON-friendly dict, lifting raw fields off .pr."""
     payload = _project(scored, skip=frozenset({'pr', 'files'}))
     payload['repository_full_name'] = scored.pr.repo_full_name
     payload['number'] = scored.pr.pr_number
@@ -105,9 +99,9 @@ def _serialize_pr(scored) -> Dict[str, Any]:
 
 def _serialize_evaluation(miner_eval) -> Dict[str, Any]:
     payload = _project(miner_eval, skip=_EVAL_SKIP, extra_properties=_EVAL_PROPERTIES)
-    payload['merged_pull_requests'] = [_serialize_pr(s) for s in miner_eval.mirror_merged_prs]
-    payload['open_pull_requests'] = [_serialize_pr(s) for s in miner_eval.mirror_open_prs]
-    payload['closed_pull_requests'] = [_serialize_pr(s) for s in miner_eval.mirror_closed_prs]
+    payload['merged_pull_requests'] = [_serialize_pr(s) for s in miner_eval.merged_prs]
+    payload['open_pull_requests'] = [_serialize_pr(s) for s in miner_eval.open_prs]
+    payload['closed_pull_requests'] = [_serialize_pr(s) for s in miner_eval.closed_prs]
     return payload
 
 
@@ -223,7 +217,12 @@ def _drain_logs() -> None:
 
 
 @click.command(name='score')
-@click.option('--pat', default=None, help='GitHub Personal Access Token. Uses GITTENSOR_MINER_PAT env if unset.')
+@click.option(
+    '--pat',
+    default=None,
+    envvar='GITTENSOR_MINER_PAT',
+    help='GitHub Personal Access Token. Uses GITTENSOR_MINER_PAT env if unset.',
+)
 @click.option(
     '--log-level',
     type=click.Choice(['warning', 'info', 'debug', 'trace']),
@@ -231,7 +230,7 @@ def _drain_logs() -> None:
     show_default=True,
     help="Bittensor log verbosity. 'info' surfaces the validator pipeline's per-step progress on stderr.",
 )
-@click.option('--json-output', 'json_mode', is_flag=True, default=False, help='Emit result as JSON on stdout.')
+@click.option('--json', 'json_mode', is_flag=True, default=False, help='Emit result as JSON on stdout.')
 def score_command(pat: Optional[str], log_level: str, json_mode: bool) -> None:
     """Locally run the validator scoring pipeline end-to-end for the miner identified by --pat.
 
@@ -273,9 +272,6 @@ def score_command(pat: Optional[str], log_level: str, json_mode: bool) -> None:
             master_repositories = load_master_repo_weights()
             programming_languages = load_programming_language_weights()
             token_config = load_token_config()
-
-    # Drop non-mirror repos so reward.py never hits its legacy/PAT branch here.
-    master_repositories = {name: cfg for name, cfg in master_repositories.items() if cfg.mirror_enabled}
 
     pat_snapshot = [{'uid': _DEV_UID, 'hotkey': _DEV_HOTKEY, 'pat': resolved_pat}]
 

@@ -25,26 +25,6 @@ def get_label_multiplier(label: str, repo_config: Optional[RepositoryConfig]) ->
     return max(matches) if matches else None
 
 
-def resolve_legacy_label_multiplier(
-    label_timeline_order: Iterable[str],
-    current_labels: Iterable[str],
-    repo_config: Optional[RepositoryConfig],
-) -> tuple[Optional[str], float]:
-    """Resolve the legacy PR label and multiplier from repo-specific config.
-
-    Timeline labels are ordered newest first, preserving the legacy "last applied
-    scoring label wins" behavior. If the relevant timeline event was truncated,
-    the fallback mirrors the current-label behavior by choosing the highest
-    multiplier, then the label name for deterministic ties.
-    """
-    for label in label_timeline_order:
-        multiplier = get_label_multiplier(label, repo_config)
-        if multiplier is not None:
-            return label, multiplier
-
-    return resolve_highest_label_multiplier(current_labels, repo_config)
-
-
 def resolve_highest_label_multiplier(
     labels: Iterable[str],
     repo_config: Optional[RepositoryConfig],

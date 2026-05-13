@@ -16,7 +16,6 @@ from rich.panel import Panel
 
 from .help import StyledCommand
 from .helpers import (
-    MAX_ISSUE_NUMBER,
     NETWORK_CHOICE,
     _is_interactive,
     _resolve_contract_and_network,
@@ -31,6 +30,7 @@ from .helpers import (
     validate_github_issue,
     validate_repository,
 )
+from .types import GITHUB_ISSUE, REPO
 
 
 def _print_register_revert_hints() -> None:
@@ -41,23 +41,30 @@ def _print_register_revert_hints() -> None:
     err_console.print('  • Caller is not the contract owner')
 
 
+def _bounty_callback(ctx: click.Context, param: click.Parameter, value: str) -> int:
+    return validate_bounty_amount(value)
+
+
 @click.command('register', cls=StyledCommand)
 @click.option(
     '--repo',
     required=True,
+    type=REPO,
     help='Repository in owner/repo format (e.g., latent-to/btcli)',
 )
 @click.option(
     '--issue',
     'issue_number',
     required=True,
-    type=int,
+    type=GITHUB_ISSUE,
     help='GitHub issue number',
 )
 @click.option(
     '--bounty',
+    'bounty_amount',
     required=True,
     type=str,
+    callback=_bounty_callback,
     help='Bounty amount in ALPHA (e.g. 10 or 10.5)',
 )
 @click.option(
@@ -100,7 +107,7 @@ def _print_register_revert_hints() -> None:
 def issue_register(
     repo: str,
     issue_number: int,
-    bounty: str,
+    bounty_amount: int,
     network: str,
     rpc_url: str,
     contract: str,
@@ -143,12 +150,6 @@ def issue_register(
     # against a repository or issue we failed to verify.
     try:
         owner, repo_name = validate_repository(repo, require_verified_exists=True)
-        bounty_amount = validate_bounty_amount(bounty)
-        if issue_number < 1 or issue_number > MAX_ISSUE_NUMBER:
-            raise click.BadParameter(
-                f'Issue number must be between 1 and {MAX_ISSUE_NUMBER} (got {issue_number})',
-                param_hint='--issue',
-            )
         validate_github_issue(owner, repo_name, issue_number, require_verified_exists=True)
     except click.BadParameter as e:
         raise click.ClickException(str(e))

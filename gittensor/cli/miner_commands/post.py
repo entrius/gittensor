@@ -67,7 +67,7 @@ _PAT_POST_STATUS_MARKUP = {
     show_default=True,
     help='Minimum validator stake (α) to broadcast to.',
 )
-@click.option('--json-output', 'json_mode', is_flag=True, default=False, help='Output results as JSON.')
+@click.option('--json', 'json_mode', is_flag=True, default=False, help='Output results as JSON.')
 def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, min_vtrust, min_stake, json_mode):
     """Broadcast your GitHub PAT to all validators on the network.
 

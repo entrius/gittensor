@@ -22,7 +22,7 @@ FileChange = classes.FileChange
 Issue = classes.Issue
 PullRequest = classes.PullRequest
 PRState = classes.PRState
-ScoredMirrorPR = scored_pr_module.ScoredMirrorPR
+ScoredPR = scored_pr_module.ScoredPR
 
 
 def _mirror_file(**overrides):
@@ -159,8 +159,8 @@ def _make_mirror_pr(
 class TestMirrorScoredPrToLegacyPullRequest:
     def test_full_adapter_field_mapping(self):
         pr = _make_mirror_pr()
-        scored = ScoredMirrorPR(pr=pr)
-        # Populate scoring fields as if score_mirror_miner_prs already ran
+        scored = ScoredPR(pr=pr)
+        # Populate scoring fields as if score_miner_prs already ran
         scored.base_score = 30.5
         scored.earned_score = 25.0
         scored.token_score = 100.0
@@ -226,7 +226,7 @@ class TestMirrorScoredPrToLegacyPullRequest:
 
     def test_open_pr_state_translation(self):
         pr = _make_mirror_pr(state='OPEN')
-        scored = ScoredMirrorPR(pr=pr)
+        scored = ScoredPR(pr=pr)
         adapted = mirror_scored_pr_to_legacy_pull_request(scored, 1, 'hk', 'gid')
         assert adapted.pr_state == PRState.OPEN
         assert adapted.merged_at is None
@@ -234,22 +234,22 @@ class TestMirrorScoredPrToLegacyPullRequest:
 
     def test_closed_pr_state_translation(self):
         pr = _make_mirror_pr(state='CLOSED')
-        scored = ScoredMirrorPR(pr=pr)
+        scored = ScoredPR(pr=pr)
         adapted = mirror_scored_pr_to_legacy_pull_request(scored, 1, 'hk', 'gid')
         assert adapted.pr_state == PRState.CLOSED
 
     def test_changes_requested_count_from_review_summary(self):
         pr = _make_mirror_pr(maintainer_changes_requested=4)
-        scored = ScoredMirrorPR(pr=pr)
+        scored = ScoredPR(pr=pr)
         adapted = mirror_scored_pr_to_legacy_pull_request(scored, 1, 'hk', 'gid')
         # Mirror's maintainer-only count is what scoring uses; same field on PullRequest
         assert adapted.changes_requested_count == 4
 
     def test_default_scoring_fields_when_pr_not_yet_scored(self):
-        """ScoredMirrorPR with default (unscored) fields → adapted PR has neutral
+        """ScoredPR with default (unscored) fields → adapted PR has neutral
         multipliers and zero scores."""
         pr = _make_mirror_pr(state='OPEN')
-        scored = ScoredMirrorPR(pr=pr)
+        scored = ScoredPR(pr=pr)
         # Don't set any scoring fields
         adapted = mirror_scored_pr_to_legacy_pull_request(scored, 1, 'hk', 'gid')
         assert adapted.base_score == 0.0

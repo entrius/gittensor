@@ -2,12 +2,12 @@
 # Copyright © 2025 Entrius
 
 import asyncio
-from typing import TYPE_CHECKING, Dict, Set, Tuple
+from typing import TYPE_CHECKING, Dict, Optional, Set, Tuple
 
 import bittensor as bt
 import numpy as np
 
-from gittensor.classes import MinerEvaluation
+from gittensor.classes import MinerEvaluation, MinerEvaluationCache
 from gittensor.constants import (
     ISSUE_DISCOVERY_EMISSION_SHARE,
     ISSUES_TREASURY_EMISSION_SHARE,
@@ -18,10 +18,10 @@ from gittensor.constants import (
 )
 from gittensor.utils.uids import get_all_uids
 from gittensor.validator.issue_competitions.forward import issue_competitions
-from gittensor.validator.issue_discovery.mirror_scan import run_mirror_issue_discovery
 from gittensor.validator.issue_discovery.normalize import (
     normalize_issue_discovery_rewards,
 )
+from gittensor.validator.issue_discovery.scan import run_issue_discovery
 from gittensor.validator.oss_contributions.reward import get_rewards
 from gittensor.validator.utils.config import (
     VALIDATOR_STEPS_INTERVAL,
@@ -42,8 +42,8 @@ async def forward(self: 'Validator') -> None:
     """Execute the validator's forward pass.
 
     Performs the core validation cycle every VALIDATOR_STEPS_INTERVAL steps:
-    1. Score OSS contributions (PR scoring — mirror path + legacy PAT path)
-    2. Score issue discovery (mirror-only; non-mirror repos skip)
+    1. Score OSS contributions (mirror PR scoring)
+    2. Score issue discovery
     3. Run issue bounties verification
     4. Store all evaluations to DB
     5. Blend emission pools and update scores
@@ -68,8 +68,16 @@ async def forward(self: 'Validator') -> None:
 
         # 2. Score issue discovery
         issue_rewards = await issue_discovery(
-            miner_evaluations, master_repositories, programming_languages, token_config, miner_uids
+            miner_evaluations,
+            master_repositories,
+            programming_languages,
+            token_config,
+            miner_uids,
+            evaluation_cache=self.evaluation_cache,
         )
+
+        # cached UIDs now have fresh issue-discovery fields — persist them
+        cached_uids.clear()
 
         # 3. Issue bounties verification
         await issue_competitions(self, miner_evaluations)
@@ -117,28 +125,24 @@ async def issue_discovery(
     programming_languages: Dict,
     token_config,
     miner_uids: set[int],
+    evaluation_cache: Optional[MinerEvaluationCache] = None,
 ) -> np.ndarray:
     """Score issue discovery and return normalized rewards array.
 
-    Mirror-only path: uses ``MirrorClient.get_miner_issues`` with authoritative
-    ``solved_by_pr`` + inline ``solving_pr`` data, and a cross-miner cache of
-    already-scored solving PRs so the base_score reflects real token scoring.
-    The legacy timeline-scraping path has been removed — it produced unreliable
-    solver attribution on busy issues, and non-mirror repos are deliberately
-    left out of issue discovery entirely until their mirror_enabled flag flips.
+    Uses ``MirrorClient.get_miner_issues`` with authoritative ``solved_by_pr`` +
+    inline ``solving_pr`` data, and a cross-miner cache of already-scored
+    solving PRs so the base_score reflects real token scoring.
 
     Returns numpy array of normalized issue discovery rewards (sorted by UID).
     """
-    mirror_repos: Dict[str, RepositoryConfig] = {
-        name: cfg for name, cfg in master_repositories.items() if cfg.mirror_enabled
-    }
+    await run_issue_discovery(
+        miner_evaluations,
+        master_repositories,
+        programming_languages,
+        token_config,
+        evaluation_cache=evaluation_cache,
+    )
 
-    if mirror_repos:
-        await run_mirror_issue_discovery(miner_evaluations, mirror_repos, programming_languages, token_config)
-    else:
-        bt.logging.info('No mirror-enabled repos — issue discovery skipped for this round')
-
-    # Normalize into independent pool
     issue_rewards_dict = normalize_issue_discovery_rewards(miner_evaluations)
 
     sorted_uids = sorted(miner_uids)

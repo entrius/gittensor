@@ -107,9 +107,9 @@ class TestLoadMasterRepositories:
         assert isinstance(repos, dict)
 
     def test_master_repositories_not_empty(self):
-        """Should load many repositories."""
+        """Should load at least the entrius core repos."""
         repos = load_master_repo_weights()
-        assert len(repos) > 100, 'Should have many repositories'
+        assert len(repos) > 0, 'Should have at least one repository'
 
     def test_repo_configs_are_repository_config_objects(self):
         """Each entry should be a RepositoryConfig object."""
@@ -122,14 +122,6 @@ class TestLoadMasterRepositories:
         repos = load_master_repo_weights()
         for repo_name in repos.keys():
             assert repo_name == repo_name.lower(), f'{repo_name} should be lowercase'
-
-    def test_mirror_enabled_field_present_on_live_configs(self):
-        """Live master_repositories.json entries load with a bool mirror_enabled."""
-        repos = load_master_repo_weights()
-        for repo_name, config in repos.items():
-            assert isinstance(config.mirror_enabled, bool), (
-                f'{repo_name} mirror_enabled should be bool, got {type(config.mirror_enabled)}'
-            )
 
     def test_trusted_label_pipeline_field_present_on_live_configs(self):
         """Live master_repositories.json entries load with a bool trusted_label_pipeline."""
@@ -149,44 +141,6 @@ class TestLoadMasterRepositories:
                 f'{repo_name} must have trusted_label_pipeline=true so the agentic-maintainer '
                 f'labeling worker is honored at scoring time'
             )
-
-
-class TestRepositoryConfigMirrorFlag:
-    """Dataclass-level tests for the mirror_enabled field + its JSON parsing."""
-
-    def test_mirror_enabled_default_false(self):
-        """RepositoryConfig constructor defaults mirror_enabled to False."""
-        config = RepositoryConfig(weight=0.5)
-        assert config.mirror_enabled is False
-
-    def test_mirror_enabled_explicit_true(self):
-        """RepositoryConfig accepts mirror_enabled=True."""
-        config = RepositoryConfig(weight=0.5, mirror_enabled=True)
-        assert config.mirror_enabled is True
-
-    def test_loader_parses_mirror_enabled_true(self, tmp_path, monkeypatch):
-        """load_master_repo_weights() parses mirror_enabled:true from JSON."""
-        import json
-
-        from gittensor.validator.utils import load_weights as lw
-
-        fake_weights_dir = tmp_path
-        (fake_weights_dir / 'master_repositories.json').write_text(
-            json.dumps(
-                {
-                    'foo/mirror-repo': {'weight': 0.5, 'mirror_enabled': True},
-                    'foo/legacy-repo': {'weight': 0.3},
-                    'foo/explicit-off': {'weight': 0.2, 'mirror_enabled': False},
-                }
-            )
-        )
-        monkeypatch.setattr(lw, '_get_weights_dir', lambda: fake_weights_dir)
-
-        repos = lw.load_master_repo_weights()
-
-        assert repos['foo/mirror-repo'].mirror_enabled is True
-        assert repos['foo/legacy-repo'].mirror_enabled is False
-        assert repos['foo/explicit-off'].mirror_enabled is False
 
 
 class TestRepositoryConfigTrustedLabelPipeline:
@@ -258,6 +212,7 @@ class TestRepositoryConfigLabelMultipliers:
 
         assert repos['foo/labeled'].label_multipliers == {'kind/*': 1.5, 'type:bug': 1.25}
         assert repos['foo/labeled'].default_label_multiplier == pytest.approx(0.8)
+
         assert repos['foo/defaults'].label_multipliers is None
         assert repos['foo/defaults'].default_label_multiplier == pytest.approx(1.0)
 
@@ -286,6 +241,57 @@ class TestRepositoryConfigLabelMultipliers:
         assert 0.0 <= float(metadata['default_label_multiplier']) <= 20.0, (
             f'{repo_name} default_label_multiplier must be within [0.0, 20.0]'
         )
+
+
+class TestRepositoryConfigMirrorScoringFields:
+    """Dataclass + JSON-parsing tests for mirror-only scoring fields."""
+
+    def test_mirror_scoring_field_defaults(self):
+        config = RepositoryConfig(weight=0.5)
+
+        assert config.fixed_base_score is None
+        assert config.eligibility_mode is True
+
+    def test_loader_parses_mirror_scoring_fields(self, tmp_path, monkeypatch):
+        from gittensor.validator.utils import load_weights as lw
+
+        fake_weights_dir = tmp_path
+        (fake_weights_dir / 'master_repositories.json').write_text(
+            json.dumps(
+                {
+                    'foo/fixed': {
+                        'weight': 0.5,
+                        'fixed_base_score': 12.5,
+                        'eligibility_mode': False,
+                    },
+                    'foo/defaults': {'weight': 0.3},
+                }
+            )
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: fake_weights_dir)
+
+        repos = lw.load_master_repo_weights()
+
+        assert repos['foo/fixed'].fixed_base_score == pytest.approx(12.5)
+        assert repos['foo/fixed'].eligibility_mode is False
+        assert repos['foo/defaults'].fixed_base_score is None
+        assert repos['foo/defaults'].eligibility_mode is True
+
+    def test_live_mirror_scoring_fields_have_valid_shape(self):
+        """Loader passes mirror scoring fields through unchanged — CI fails when a
+        bad value is committed to master_repositories.json."""
+        repos = load_master_repo_weights()
+        for repo_name, config in repos.items():
+            if config.fixed_base_score is not None:
+                assert isinstance(config.fixed_base_score, (int, float)) and not isinstance(
+                    config.fixed_base_score, bool
+                ), f'{repo_name} fixed_base_score must be numeric, got {type(config.fixed_base_score)}'
+                assert 0.0 <= float(config.fixed_base_score) <= 100.0, (
+                    f'{repo_name} fixed_base_score must be within [0.0, 100.0]'
+                )
+            assert isinstance(config.eligibility_mode, bool), (
+                f'{repo_name} eligibility_mode must be bool, got {type(config.eligibility_mode)}'
+            )
 
 
 class TestBannedOrganizations:

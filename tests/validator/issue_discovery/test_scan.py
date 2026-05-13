@@ -307,7 +307,11 @@ class TestRunMirrorIssueDiscovery:
             )
         )
         assert eval_.total_solved_issues == 1  # credibility counts
-        # But no discovery_earned_score because self-solve
+        # Self-solves must NOT contribute to the valid-solved gate — otherwise
+        # a miner could self-file + self-solve to bypass MIN_VALID_SOLVED_ISSUES
+        # without performing any discovery activity.
+        assert eval_.total_valid_solved_issues == 0
+        # And no discovery_earned_score because self-solve
         assert eval_.issue_discovery_score == 0
 
     def test_not_planned_bumps_closed_count(self):

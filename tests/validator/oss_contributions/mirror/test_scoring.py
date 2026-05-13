@@ -706,8 +706,9 @@ def _linked_issue(
     closed_at: str | None = '2026-04-18T10:00:00Z',
     author_association: str | None = 'CONTRIBUTOR',
     number: int = 50,
+    repository_full_name: str | None = None,
 ):
-    return {
+    payload = {
         'number': number,
         'title': 't',
         'state': state,
@@ -721,6 +722,9 @@ def _linked_issue(
         'solved_by_pr': 100,
         'labels': [],
     }
+    if repository_full_name is not None:
+        payload['repository_full_name'] = repository_full_name
+    return payload
 
 
 class TestIssueMultiplier:
@@ -821,6 +825,62 @@ class TestLinkedIssueValidity:
         scored = ScoredPR(pr=_pr(state='OPEN'))
         li = MirrorLinkedIssue.from_dict(_linked_issue(state='OPEN', state_reason=None, closed_at=None))
         assert _is_valid_linked_issue(li, scored.pr) is True
+
+
+class TestLinkedIssueCrossRepo:
+    """Cross-repo `Closes owner/other-repo#N` references must not pay the issue
+    multiplier on a PR in a different repo (parity with #1019 / PR #1038 on the
+    legacy path, ported here after the mirror-only cutover #1202).
+
+    The mirror payload may omit ``repository_full_name`` on older snapshots; in
+    that case the guard fails open so existing data behaves as before. Once
+    das-github-mirror populates the field, the guard arms automatically.
+    """
+
+    def test_cross_repo_linked_issue_rejected(self):
+        """PR in `entrius/gittensor-ui` linked to issue in `outsider/throwaway`
+        — the guard must reject."""
+        scored = ScoredPR(pr=_pr())  # repo_full_name='entrius/gittensor-ui'
+        li = MirrorLinkedIssue.from_dict(_linked_issue(repository_full_name='outsider/throwaway'))
+        assert _is_valid_linked_issue(li, scored.pr) is False
+
+    def test_same_repo_linked_issue_passes(self):
+        """Same repo populated explicitly — guard does not fire."""
+        scored = ScoredPR(pr=_pr())
+        li = MirrorLinkedIssue.from_dict(_linked_issue(repository_full_name='entrius/gittensor-ui'))
+        assert _is_valid_linked_issue(li, scored.pr) is True
+
+    def test_repo_identity_missing_falls_open(self):
+        """Pre-schema mirror rows have no ``repository_full_name``; guard must
+        not fire (backwards-compat with current production mirror)."""
+        scored = ScoredPR(pr=_pr())
+        li = MirrorLinkedIssue.from_dict(_linked_issue())  # field absent
+        assert li.repository_full_name is None
+        assert _is_valid_linked_issue(li, scored.pr) is True
+
+    def test_cross_repo_case_insensitive(self):
+        """Mirror normalizes repo names to lowercase at parse time; the
+        guard's direct ``!=`` comparison must remain correct against
+        mixed-case payloads."""
+        scored = ScoredPR(pr=_pr())
+        li = MirrorLinkedIssue.from_dict(_linked_issue(repository_full_name='OUTSIDER/Throwaway'))
+        # Mirror lowercased the field at parse time
+        assert li.repository_full_name == 'outsider/throwaway'
+        assert _is_valid_linked_issue(li, scored.pr) is False
+
+    def test_cross_repo_multiplier_stays_neutral(self):
+        """End-to-end: a cross-repo linked issue should not produce a
+        STANDARD/MAINTAINER multiplier from ``_calculate_issue_multiplier``."""
+        scored = ScoredPR(pr=_pr(linked_issues=[_linked_issue(repository_full_name='outsider/throwaway')]))
+        assert _calculate_issue_multiplier(scored) == 1.0
+
+    def test_same_repo_multiplier_still_applies(self):
+        """End-to-end regression guard: a known same-repo linked issue still
+        earns the standard multiplier."""
+        from gittensor.constants import STANDARD_ISSUE_MULTIPLIER
+
+        scored = ScoredPR(pr=_pr(linked_issues=[_linked_issue(repository_full_name='entrius/gittensor-ui')]))
+        assert _calculate_issue_multiplier(scored) == STANDARD_ISSUE_MULTIPLIER
 
 
 class TestIssueMultiplierPreference:

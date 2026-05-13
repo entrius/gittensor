@@ -432,6 +432,12 @@ def _is_valid_linked_issue(li: MirrorLinkedIssue, pr: MirrorPullRequest) -> bool
     - Reject transferred issues.
     - Missing author / self-issue (uses github_id for immutability).
     - Issue created after the PR.
+    - Cross-repo references: when the mirror surfaces the issue's home repo
+      and it differs from the PR's repo, reject — a ``Closes other/repo#N``
+      keyword should not pay the issue-bonus multiplier in this repo. Fails
+      open when ``repository_full_name`` is ``None`` (older mirror snapshots
+      without the field); the guard arms automatically once das-github-mirror
+      populates the field.
     - Any CLOSED issue must have state_reason=COMPLETED — NOT_PLANNED / reopened
       closures never grant a multiplier. Applies regardless of PR state, so the
       gate covers OPEN-PR collateral as well.
@@ -454,6 +460,17 @@ def _is_valid_linked_issue(li: MirrorLinkedIssue, pr: MirrorPullRequest) -> bool
 
     if li.created_at and li.created_at > pr.created_at:
         bt.logging.warning(f'Skipping linked issue #{li.number} - created after PR')
+        return False
+
+    # Mirror payload may omit repository identity on older snapshots; only
+    # gate when the field is populated. Both sides are normalized to lowercase
+    # at parse time (see ``MirrorLinkedIssue.from_dict`` and
+    # ``MirrorPullRequest.from_dict``), so a direct ``!=`` is case-correct.
+    if li.repository_full_name is not None and li.repository_full_name != pr.repo_full_name:
+        bt.logging.warning(
+            f'Skipping linked issue #{li.number} - cross-repo reference '
+            f'(issue in {li.repository_full_name}, PR in {pr.repo_full_name})'
+        )
         return False
 
     # state_reason check applies regardless of PR state — OPEN-PR collateral

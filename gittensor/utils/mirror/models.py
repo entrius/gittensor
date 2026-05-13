@@ -73,7 +73,15 @@ class MirrorReviewSummary:
 
 @dataclass
 class MirrorLinkedIssue:
-    """Issue that a PR closes, as nested inside a ``MirrorPullRequest``."""
+    """Issue that a PR closes, as nested inside a ``MirrorPullRequest``.
+
+    ``repository_full_name`` is the home repo of the issue itself — distinct
+    from the home repo of the PR that closes it. GitHub's ``Closes
+    owner/other-repo#N`` syntax lets a PR reference issues in different repos;
+    without this field the validator can't reject cross-repo linked issues
+    from the issue-bonus multiplier (see ``_is_valid_linked_issue``).
+    Defaults to ``None`` for mirror snapshots predating the schema addition.
+    """
 
     number: int
     title: str
@@ -87,6 +95,7 @@ class MirrorLinkedIssue:
     is_transferred: bool
     solved_by_pr: Optional[int]
     labels: List[MirrorLabel] = field(default_factory=list)
+    repository_full_name: Optional[str] = None
 
     @classmethod
     def from_dict(cls, data: dict) -> 'MirrorLinkedIssue':
@@ -94,6 +103,9 @@ class MirrorLinkedIssue:
         # str-typed field so downstream `==` comparisons with author_github_id
         # from MirrorPullRequest don't silently mismatch on type.
         author_github_id = data.get('author_github_id')
+        # Lowercased to match MirrorPullRequest.repo_full_name normalization;
+        # the cross-repo guard compares the two case-insensitively.
+        repo_full_name = data.get('repository_full_name')
         return cls(
             number=data['number'],
             title=data.get('title', ''),
@@ -107,6 +119,7 @@ class MirrorLinkedIssue:
             is_transferred=bool(data.get('is_transferred', False)),
             solved_by_pr=data.get('solved_by_pr'),
             labels=[MirrorLabel.from_dict(label) for label in data.get('labels') or []],
+            repository_full_name=repo_full_name.lower() if repo_full_name else None,
         )
 
 

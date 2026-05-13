@@ -164,17 +164,23 @@ async def run_issue_discovery(
             fetch_errors += 1
             continue
 
+        try:
+            current_response = await asyncio.to_thread(client.get_miner_issues, evaluation.github_id)
+        except MirrorRequestError as e:
+            bt.logging.warning(f'├─ UID {uid}: open-issue count fetch failed ({e}) — skipped this miner')
+            _restore_issue_discovery_from_cache(evaluation, evaluation_cache)
+            fetch_errors += 1
+            continue
+
+        open_issue_count = _count_open_issues(current_response.issues, enabled_names)
         filtered = [i for i in response.issues if i.repo_full_name in enabled_names]
         if not filtered:
             _clear_issue_discovery_fields(evaluation)
+            evaluation.total_open_issues = open_issue_count
             cacheable_uids.add(uid)
             no_issues += 1
             continue
 
-        # Count this miner's currently-open issues across registered repos
-        # (within the lookback window). Used as the spam-multiplier signal and
-        # also written to evaluation.total_open_issues for the DB row.
-        open_issue_count = sum(1 for i in filtered if i.state == 'OPEN')
         pending.append((evaluation, filtered, open_issue_count))
 
     canonical_pr_owners = _build_canonical_pr_owners(pending)
@@ -287,6 +293,10 @@ def _build_canonical_pr_owners(
     return canonical
 
 
+def _count_open_issues(issues: List[MirrorIssue], enabled_names: Set[str]) -> int:
+    return sum(1 for issue in issues if issue.repo_full_name in enabled_names and issue.state == 'OPEN')
+
+
 def _build_solving_pr_cache(
     miner_evaluations: Dict[int, MinerEvaluation],
 ) -> Dict[Tuple[str, int], CachedSolvingPR]:
@@ -325,9 +335,8 @@ async def _score_miner_issues(
 ) -> bool:
     """Classify + score one miner's mirror issues, populate MinerEvaluation fields.
 
-    ``open_issue_count`` is the miner's currently-OPEN issue count across
-    registered repos within the lookback window — the source-of-truth for the
-    open-issue spam multiplier.
+    ``open_issue_count`` is the miner's current OPEN issue count across
+    registered repos, independent of the issue-scoring lookback window.
 
     ``canonical_pr_owners`` enforces the cross-miner one-issue-per-PR rule:
     only the marker-matching issue scores, siblings count for credibility.

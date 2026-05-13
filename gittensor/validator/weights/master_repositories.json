@@ -1,6 +1,6 @@
 {
   "entrius/allways": {
-    "weight": 0.05,
+    "emission_share": 0.05,
     "trusted_label_pipeline": true,
     "label_multipliers": {
       "bug": 1.25,
@@ -9,7 +9,7 @@
     }
   },
   "entrius/allways-ui": {
-    "weight": 0.01,
+    "emission_share": 0.01,
     "trusted_label_pipeline": true,
     "label_multipliers": {
       "feature": 1.25,
@@ -19,7 +19,7 @@
     }
   },
   "entrius/das-github-mirror": {
-    "weight": 0.02,
+    "emission_share": 0.02,
     "trusted_label_pipeline": true,
     "label_multipliers": {
       "bug": 1.25,
@@ -28,7 +28,7 @@
     }
   },
   "entrius/gittensor": {
-    "weight": 0.1,
+    "emission_share": 0.1,
     "trusted_label_pipeline": true,
     "label_multipliers": {
       "feature": 1.5,
@@ -38,7 +38,7 @@
     }
   },
   "entrius/gittensor-ui": {
-    "weight": 0.03,
+    "emission_share": 0.03,
     "trusted_label_pipeline": true,
     "label_multipliers": {
       "feature": 1.25,
@@ -48,7 +48,8 @@
     }
   },
   "entrius/oc-1": {
-    "weight": 0.5,
+    "emission_share": 0.5,
+    "issue_discovery_share": 0.0,
     "trusted_label_pipeline": true,
     "fixed_base_score": 1.0,
     "eligibility_mode": false,

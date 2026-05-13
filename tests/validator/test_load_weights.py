@@ -19,6 +19,7 @@ from gittensor.validator.utils.load_weights import (
     load_master_repo_weights,
     load_programming_language_weights,
     load_token_config,
+    resolve_repo_emission_share,
     resolve_repo_weight,
 )
 
@@ -141,6 +142,86 @@ class TestLoadMasterRepositories:
                 f'{repo_name} must have trusted_label_pipeline=true so the agentic-maintainer '
                 f'labeling worker is honored at scoring time'
             )
+
+    def test_live_master_repository_entries_use_emission_share(self):
+        """Live registry entries use bounded emission_share, not legacy weight."""
+        for repo_name, metadata in _live_master_repo_metadata():
+            assert 'emission_share' in metadata, f'{repo_name} must declare emission_share'
+            assert 'weight' not in metadata, f'{repo_name} must not use legacy weight'
+
+    def test_live_emission_shares_are_in_range_and_total_not_above_one(self):
+        repos = load_master_repo_weights()
+        total_share = sum(config.emission_share for config in repos.values())
+        assert 0.0 <= total_share <= 1.0
+        for repo_name, config in repos.items():
+            assert 0.0 <= config.emission_share <= 1.0, f'{repo_name} emission_share must be within [0, 1]'
+            assert 0.0 <= config.issue_discovery_share <= 1.0, (
+                f'{repo_name} issue_discovery_share must be within [0, 1]'
+            )
+
+    def test_oc_1_opts_out_of_issue_discovery_rewards(self):
+        repos = load_master_repo_weights()
+
+        assert repos['entrius/oc-1'].issue_discovery_share == pytest.approx(0.0)
+
+    def test_loader_accepts_sum_less_than_one(self, tmp_path, monkeypatch):
+        from gittensor.validator.utils import load_weights as lw
+
+        fake_weights_dir = tmp_path
+        (fake_weights_dir / 'master_repositories.json').write_text(
+            json.dumps(
+                {
+                    'foo/one': {'emission_share': 0.2},
+                    'foo/two': {'emission_share': 0.3},
+                }
+            )
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: fake_weights_dir)
+
+        repos = lw.load_master_repo_weights()
+
+        assert repos['foo/one'].emission_share == pytest.approx(0.2)
+        assert repos['foo/two'].emission_share == pytest.approx(0.3)
+
+    @pytest.mark.parametrize(
+        'field,value',
+        [
+            ('emission_share', -0.001),
+            ('emission_share', 1.001),
+            ('emission_share', True),
+            ('issue_discovery_share', -0.001),
+            ('issue_discovery_share', 1.001),
+            ('issue_discovery_share', False),
+        ],
+    )
+    def test_loader_rejects_share_outside_range_or_bool(self, tmp_path, monkeypatch, field, value):
+        from gittensor.validator.utils import load_weights as lw
+
+        fake_weights_dir = tmp_path
+        metadata = {'emission_share': 0.5}
+        metadata[field] = value
+        (fake_weights_dir / 'master_repositories.json').write_text(json.dumps({'foo/bad': metadata}))
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: fake_weights_dir)
+
+        with pytest.raises(ValueError, match=field):
+            lw.load_master_repo_weights()
+
+    def test_loader_rejects_total_emission_share_above_one(self, tmp_path, monkeypatch):
+        from gittensor.validator.utils import load_weights as lw
+
+        fake_weights_dir = tmp_path
+        (fake_weights_dir / 'master_repositories.json').write_text(
+            json.dumps(
+                {
+                    'foo/one': {'emission_share': 0.6},
+                    'foo/two': {'emission_share': 0.5},
+                }
+            )
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: fake_weights_dir)
+
+        with pytest.raises(ValueError, match='total repository emission_share'):
+            lw.load_master_repo_weights()
 
 
 class TestRepositoryConfigTrustedLabelPipeline:
@@ -341,10 +422,10 @@ class TestBannedOrganizations:
 
 
 class TestResolveRepoWeight:
-    """Tests for resolve_repo_weight — full-precision repo weight lookup."""
+    """Tests for repo emission-share resolution — full-precision lookup."""
 
     def test_none_returns_default(self):
-        assert resolve_repo_weight(None) == 0.01
+        assert resolve_repo_emission_share(None) == 0.01
 
     @pytest.mark.parametrize(
         'weight',
@@ -352,15 +433,20 @@ class TestResolveRepoWeight:
     )
     def test_preserves_full_precision(self, weight):
         config = RepositoryConfig(weight=weight)
-        assert resolve_repo_weight(config) == weight
+        assert resolve_repo_emission_share(config) == weight
 
     def test_live_master_repo_precision(self):
         """cronboard (0.0349) and fzf (0.0351) must not collapse to 0.03/0.04."""
         repos = load_master_repo_weights()
         if 'antoniorodr/cronboard' in repos:
-            assert resolve_repo_weight(repos['antoniorodr/cronboard']) == pytest.approx(0.0349, abs=1e-9)
+            assert resolve_repo_emission_share(repos['antoniorodr/cronboard']) == pytest.approx(0.0349, abs=1e-9)
         if 'junegunn/fzf' in repos:
-            assert resolve_repo_weight(repos['junegunn/fzf']) == pytest.approx(0.0351, abs=1e-9)
+            assert resolve_repo_emission_share(repos['junegunn/fzf']) == pytest.approx(0.0351, abs=1e-9)
+
+    def test_legacy_weight_resolver_aliases_emission_share_resolver(self):
+        config = RepositoryConfig(emission_share=0.1234)
+
+        assert resolve_repo_weight(config) == pytest.approx(resolve_repo_emission_share(config))
 
 
 if __name__ == '__main__':

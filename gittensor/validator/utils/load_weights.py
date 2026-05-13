@@ -1,13 +1,16 @@
 # The MIT License (MIT)
 # Copyright © 2025 Entrius
 import json
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
 
 import bittensor as bt
 
-from gittensor.constants import DEFAULT_REPO_WEIGHT, NON_CODE_EXTENSIONS
+from gittensor.constants import DEFAULT_REPO_EMISSION_SHARE, NON_CODE_EXTENSIONS
+
+_SHARE_TOLERANCE = 1e-9
 
 
 @dataclass
@@ -23,12 +26,13 @@ class LanguageConfig:
     language: Optional[str] = None
 
 
-@dataclass
+@dataclass(init=False)
 class RepositoryConfig:
     """Configuration for a repository in the master_repositories list.
 
     Attributes:
-        weight: Repository weight for scoring
+        emission_share: Repository share of the combined scoring emission pool
+        issue_discovery_share: Fraction of this repo slice reserved for issue discovery
         inactive_at: ISO timestamp when repository became inactive (None if active)
         additional_acceptable_branches: List of additional branch patterns to accept (None if only default branch)
         trusted_label_pipeline: When True, scoring labels count regardless of
@@ -46,7 +50,8 @@ class RepositoryConfig:
 
     """
 
-    weight: float
+    emission_share: float
+    issue_discovery_share: float
     inactive_at: Optional[str] = None
     additional_acceptable_branches: Optional[List[str]] = None
     trusted_label_pipeline: bool = False
@@ -55,12 +60,49 @@ class RepositoryConfig:
     fixed_base_score: Optional[float] = None
     eligibility_mode: bool = True
 
+    def __init__(
+        self,
+        emission_share: Optional[float] = None,
+        *,
+        weight: Optional[float] = None,
+        issue_discovery_share: float = 0.5,
+        inactive_at: Optional[str] = None,
+        additional_acceptable_branches: Optional[List[str]] = None,
+        trusted_label_pipeline: bool = False,
+        label_multipliers: Optional[Dict[str, float]] = None,
+        default_label_multiplier: float = 1.0,
+        fixed_base_score: Optional[float] = None,
+        eligibility_mode: bool = True,
+    ) -> None:
+        if emission_share is None:
+            emission_share = DEFAULT_REPO_EMISSION_SHARE if weight is None else weight
+
+        self.emission_share = float(emission_share)
+        self.issue_discovery_share = float(issue_discovery_share)
+        self.inactive_at = inactive_at
+        self.additional_acceptable_branches = additional_acceptable_branches
+        self.trusted_label_pipeline = trusted_label_pipeline
+        self.label_multipliers = label_multipliers
+        self.default_label_multiplier = default_label_multiplier
+        self.fixed_base_score = fixed_base_score
+        self.eligibility_mode = eligibility_mode
+
+    @property
+    def weight(self) -> float:
+        """Backward-compatible alias while callers migrate to emission_share."""
+        return self.emission_share
+
+
+def resolve_repo_emission_share(repo_config: Optional[RepositoryConfig]) -> float:
+    """Return the configured repo emission share, or the default for unknown repos."""
+    if repo_config is None:
+        return DEFAULT_REPO_EMISSION_SHARE
+    return repo_config.emission_share
+
 
 def resolve_repo_weight(repo_config: Optional[RepositoryConfig]) -> float:
-    """Return the repo weight preserving full JSON precision, or the default for unknown repos."""
-    if repo_config is None:
-        return DEFAULT_REPO_WEIGHT
-    return repo_config.weight
+    """Backward-compatible alias for the configured repo emission share."""
+    return resolve_repo_emission_share(repo_config)
 
 
 @dataclass
@@ -107,14 +149,31 @@ def _get_weights_dir() -> Path:
     return Path(__file__).parent.parent / 'weights'
 
 
+def _coerce_share(repo_name: str, field_name: str, value: object) -> float:
+    if isinstance(value, bool):
+        raise ValueError(f'{repo_name} {field_name} must be numeric, got bool')
+    share = float(value)
+    if not math.isfinite(share) or not 0.0 <= share <= 1.0:
+        raise ValueError(f'{repo_name} {field_name} must be within [0, 1], got {share}')
+    return share
+
+
+def _validate_repository_emission_shares(repos: Dict[str, RepositoryConfig]) -> None:
+    total_share = sum(config.emission_share for config in repos.values())
+    if total_share < -_SHARE_TOLERANCE or total_share > 1.0 + _SHARE_TOLERANCE:
+        raise ValueError(f'total repository emission_share must be <= 1.0, got {total_share}')
+
+
 def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
     """
-    Load repository weights from the local JSON file.
+    Load repository emission shares from the local JSON file.
     Normalizes repository names to lowercase for case-insensitive matching.
 
     Returns:
         Dictionary mapping normalized (lowercase) fullName (str) to RepositoryConfig object.
-        Returns empty dict on error.
+        Returns empty dict when the file is missing or malformed JSON. Raises
+        ValueError for invalid share config so validators fail closed on bad
+        monetary-policy input.
     """
     weights_file = _get_weights_dir() / 'master_repositories.json'
 
@@ -126,12 +185,25 @@ def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
             bt.logging.error(f'Expected dict from {weights_file}, got {type(data)}')
             return {}
 
-        # Parse JSON data into RepositoryConfig objects
         normalized_data: Dict[str, RepositoryConfig] = {}
         for repo_name, metadata in data.items():
+            if not isinstance(metadata, dict):
+                raise ValueError(f'Expected dict metadata for {repo_name}, got {type(metadata)}')
+
+            emission_share = _coerce_share(
+                repo_name,
+                'emission_share',
+                metadata.get('emission_share', metadata.get('weight', DEFAULT_REPO_EMISSION_SHARE)),
+            )
+            issue_discovery_share = _coerce_share(
+                repo_name,
+                'issue_discovery_share',
+                metadata.get('issue_discovery_share', 0.5),
+            )
             try:
                 config = RepositoryConfig(
-                    weight=float(metadata.get('weight', 0.01)),
+                    emission_share=emission_share,
+                    issue_discovery_share=issue_discovery_share,
                     inactive_at=metadata.get('inactive_at'),
                     additional_acceptable_branches=metadata.get('additional_acceptable_branches'),
                     trusted_label_pipeline=bool(metadata.get('trusted_label_pipeline', False)),
@@ -146,10 +218,9 @@ def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
                 )
                 normalized_data[repo_name.lower()] = config
             except (ValueError, TypeError) as e:
-                bt.logging.warning(f'Could not parse config for {repo_name}: {e}, using defaults')
-                # Create config with defaults if parsing fails
-                normalized_data[repo_name.lower()] = RepositoryConfig(weight=float(metadata.get('weight', 0.01)))
+                raise ValueError(f'Could not parse config for {repo_name}: {e}') from e
 
+        _validate_repository_emission_shares(normalized_data)
         bt.logging.debug(f'Successfully loaded {len(normalized_data)} repository entries from {weights_file}')
         return normalized_data
 
@@ -159,6 +230,8 @@ def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
     except json.JSONDecodeError as e:
         bt.logging.error(f'Failed to parse JSON from {weights_file}: {e}')
         return {}
+    except ValueError:
+        raise
     except Exception as e:
         bt.logging.error(f'Unexpected error loading repository weights: {e}')
         return {}

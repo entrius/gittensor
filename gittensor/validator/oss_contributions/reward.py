@@ -17,7 +17,6 @@ from gittensor.validator.oss_contributions.inspections import (
 )
 from gittensor.validator.oss_contributions.mirror.load import load_miner_prs
 from gittensor.validator.oss_contributions.mirror.scoring import score_miner_prs
-from gittensor.validator.oss_contributions.normalize import normalize_rewards_linear
 from gittensor.validator.oss_contributions.scoring import finalize_miner_scores
 from gittensor.validator.utils.load_weights import LanguageConfig, RepositoryConfig, TokenConfig
 
@@ -146,11 +145,11 @@ async def get_rewards(
     # Finalize scores: apply eligibility gate, credibility, pioneer dividends, collateral
     finalize_miner_scores(miner_evaluations, master_repositories)
 
-    # Normalize the rewards between [0,1] — single flat pool
-    normalized_rewards = normalize_rewards_linear(miner_evaluations)
-
+    sorted_uid_list = sorted(uids)
+    # Round-level emission allocation (``build_round_reward_vector`` in forward)
+    # runs after issue discovery; this phase only produces per-PR/issue weights.
     return (
-        np.array([normalized_rewards.get(uid, 0.0) for uid in sorted(uids)]),
+        np.zeros(len(sorted_uid_list)),
         miner_evaluations,
         cached_uids,
         penalized_uids,

@@ -3,7 +3,7 @@
 Covers:
 - Composition: raw response data accessed via .pr.<field>; scoring fields default neutrally
 - is_pioneer_eligible respects merged + token_score gate
-- calculate_final_earned_score multiplies base by every multiplier
+- calculate_final_earned_score multiplies base by per-PR multipliers (no repo-weight factor)
 """
 
 from __future__ import annotations
@@ -64,7 +64,6 @@ class TestComposition:
     def test_scoring_fields_default_neutral(self):
         scored = ScoredPR(pr=_make_pr())
         for mult in [
-            scored.repo_weight_multiplier,
             scored.issue_multiplier,
             scored.open_pr_spam_multiplier,
             scored.time_decay_multiplier,
@@ -113,7 +112,7 @@ class TestCalculateFinalEarnedScore:
     def test_multipliers_compose(self):
         scored = ScoredPR(pr=_make_pr())
         scored.base_score = 100.0
-        scored.repo_weight_multiplier = 0.5
+        scored.issue_multiplier = 0.5
         scored.review_quality_multiplier = 0.5
         # 100 * 0.5 * 0.5 (others 1.0) = 25
         assert scored.calculate_final_earned_score() == 25.0

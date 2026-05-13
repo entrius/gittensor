@@ -7,7 +7,9 @@ from typing import Dict, List, Optional
 
 import bittensor as bt
 
-from gittensor.constants import DEFAULT_REPO_WEIGHT, NON_CODE_EXTENSIONS
+from gittensor.constants import NON_CODE_EXTENSIONS
+
+REGISTRY_EMISSION_SUM_TOLERANCE = 1e-9
 
 
 @dataclass
@@ -28,7 +30,11 @@ class RepositoryConfig:
     """Configuration for a repository in the master_repositories list.
 
     Attributes:
-        weight: Repository weight for scoring
+        emission_share: This repo's share of the unified OSS scoring pool for the
+            round, in [0, 1]. Values across the registry must sum to <= 1.0.
+        issue_discovery_share: Fraction of this repo's slice allocated to issue
+            discovery scoring before same-repo spill; [0, 1]. Defaults to 0.5
+            when omitted from JSON.
         inactive_at: ISO timestamp when repository became inactive (None if active)
         additional_acceptable_branches: List of additional branch patterns to accept (None if only default branch)
         trusted_label_pipeline: When True, scoring labels count regardless of
@@ -46,7 +52,8 @@ class RepositoryConfig:
 
     """
 
-    weight: float
+    emission_share: float
+    issue_discovery_share: float = 0.5
     inactive_at: Optional[str] = None
     additional_acceptable_branches: Optional[List[str]] = None
     trusted_label_pipeline: bool = False
@@ -56,11 +63,16 @@ class RepositoryConfig:
     eligibility_mode: bool = True
 
 
-def resolve_repo_weight(repo_config: Optional[RepositoryConfig]) -> float:
-    """Return the repo weight preserving full JSON precision, or the default for unknown repos."""
-    if repo_config is None:
-        return DEFAULT_REPO_WEIGHT
-    return repo_config.weight
+def validate_registry_emission_shares(configs: Dict[str, RepositoryConfig]) -> None:
+    """Raise ``ValueError`` if any entry is out of range or shares sum above 1.0."""
+    total = sum(c.emission_share for c in configs.values())
+    if total > 1.0 + REGISTRY_EMISSION_SUM_TOLERANCE:
+        raise ValueError(f'master_repositories.json: emission_share values sum to {total}, must be <= 1.0')
+    for name, cfg in configs.items():
+        if cfg.emission_share < -1e-12 or cfg.emission_share > 1.0 + 1e-12:
+            raise ValueError(f'{name}: emission_share {cfg.emission_share} out of [0, 1]')
+        if cfg.issue_discovery_share < -1e-12 or cfg.issue_discovery_share > 1.0 + 1e-12:
+            raise ValueError(f'{name}: issue_discovery_share {cfg.issue_discovery_share} out of [0, 1]')
 
 
 @dataclass
@@ -107,9 +119,34 @@ def _get_weights_dir() -> Path:
     return Path(__file__).parent.parent / 'weights'
 
 
+def _parse_repo_metadata(repo_name: str, metadata: dict) -> RepositoryConfig:
+    share_raw = metadata.get('emission_share', metadata.get('weight'))
+    if share_raw is None:
+        emission_share = 0.01
+    else:
+        emission_share = float(share_raw)
+    ids_raw = metadata.get('issue_discovery_share')
+    issue_discovery_share = 0.5 if ids_raw is None else float(ids_raw)
+    return RepositoryConfig(
+        emission_share=emission_share,
+        issue_discovery_share=issue_discovery_share,
+        inactive_at=metadata.get('inactive_at'),
+        additional_acceptable_branches=metadata.get('additional_acceptable_branches'),
+        trusted_label_pipeline=bool(metadata.get('trusted_label_pipeline', False)),
+        label_multipliers=(
+            {str(label): float(multiplier) for label, multiplier in metadata['label_multipliers'].items()}
+            if metadata.get('label_multipliers') is not None
+            else None
+        ),
+        default_label_multiplier=float(metadata.get('default_label_multiplier', 1.0)),
+        fixed_base_score=metadata.get('fixed_base_score'),
+        eligibility_mode=metadata.get('eligibility_mode', True),
+    )
+
+
 def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
     """
-    Load repository weights from the local JSON file.
+    Load repository config from the local JSON file.
     Normalizes repository names to lowercase for case-insensitive matching.
 
     Returns:
@@ -126,29 +163,18 @@ def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
             bt.logging.error(f'Expected dict from {weights_file}, got {type(data)}')
             return {}
 
-        # Parse JSON data into RepositoryConfig objects
         normalized_data: Dict[str, RepositoryConfig] = {}
         for repo_name, metadata in data.items():
+            if not isinstance(metadata, dict):
+                bt.logging.warning(f'Could not parse config for {repo_name}: expected object')
+                continue
             try:
-                config = RepositoryConfig(
-                    weight=float(metadata.get('weight', 0.01)),
-                    inactive_at=metadata.get('inactive_at'),
-                    additional_acceptable_branches=metadata.get('additional_acceptable_branches'),
-                    trusted_label_pipeline=bool(metadata.get('trusted_label_pipeline', False)),
-                    label_multipliers=(
-                        {str(label): float(multiplier) for label, multiplier in metadata['label_multipliers'].items()}
-                        if metadata.get('label_multipliers') is not None
-                        else None
-                    ),
-                    default_label_multiplier=float(metadata.get('default_label_multiplier', 1.0)),
-                    fixed_base_score=metadata.get('fixed_base_score'),
-                    eligibility_mode=metadata.get('eligibility_mode', True),
-                )
+                config = _parse_repo_metadata(repo_name, metadata)
                 normalized_data[repo_name.lower()] = config
             except (ValueError, TypeError) as e:
-                bt.logging.warning(f'Could not parse config for {repo_name}: {e}, using defaults')
-                # Create config with defaults if parsing fails
-                normalized_data[repo_name.lower()] = RepositoryConfig(weight=float(metadata.get('weight', 0.01)))
+                raise ValueError(f'master_repositories.json: invalid entry {repo_name!r}: {e}') from e
+
+        validate_registry_emission_shares(normalized_data)
 
         bt.logging.debug(f'Successfully loaded {len(normalized_data)} repository entries from {weights_file}')
         return normalized_data
@@ -159,6 +185,9 @@ def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
     except json.JSONDecodeError as e:
         bt.logging.error(f'Failed to parse JSON from {weights_file}: {e}')
         return {}
+    except ValueError as e:
+        bt.logging.error(f'Invalid repository registry: {e}')
+        raise
     except Exception as e:
         bt.logging.error(f'Unexpected error loading repository weights: {e}')
         return {}

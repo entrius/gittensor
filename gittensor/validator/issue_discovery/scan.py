@@ -33,6 +33,7 @@ to the cache so sibling discoveries benefit.
 """
 
 import asyncio
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Set, Tuple
@@ -60,7 +61,6 @@ from gittensor.validator.utils.load_weights import (
     LanguageConfig,
     RepositoryConfig,
     TokenConfig,
-    resolve_repo_weight,
 )
 
 
@@ -224,6 +224,7 @@ def _clear_issue_discovery_fields(evaluation: MinerEvaluation) -> None:
     evaluation.total_valid_solved_issues = 0
     evaluation.total_closed_issues = 0
     evaluation.total_open_issues = 0
+    evaluation.issue_discovery_repo_scores = {}
 
 
 def _copy_issue_discovery_fields(target: MinerEvaluation, source: MinerEvaluation) -> None:
@@ -235,6 +236,7 @@ def _copy_issue_discovery_fields(target: MinerEvaluation, source: MinerEvaluatio
     target.total_valid_solved_issues = source.total_valid_solved_issues
     target.total_closed_issues = source.total_closed_issues
     target.total_open_issues = source.total_open_issues
+    target.issue_discovery_repo_scores = dict(source.issue_discovery_repo_scores)
 
 
 def _restore_issue_discovery_from_cache(
@@ -446,17 +448,18 @@ async def _score_miner_issues(
             f'{solved_count} solved ({valid_solved_count} valid) | {closed_count} closed | '
             f'{open_issue_count} open'
         )
+        evaluation.issue_discovery_repo_scores = {}
         return not score_fetch_failed
 
     spam_mult = calculate_open_issue_spam_multiplier(open_issue_count, issue_token_score)
 
+    repo_by_weights: Dict[str, float] = defaultdict(float)
     total_discovery_score = 0.0
     for issue in scored_issues:
         issue.discovery_credibility_multiplier = round(credibility, 2)
         issue.discovery_open_issue_spam_multiplier = spam_mult
         issue.discovery_earned_score = round(
             issue.discovery_base_score
-            * issue.discovery_repo_weight_multiplier
             * issue.discovery_time_decay_multiplier
             * issue.discovery_review_quality_multiplier
             * issue.discovery_credibility_multiplier
@@ -464,7 +467,9 @@ async def _score_miner_issues(
             2,
         )
         total_discovery_score += issue.discovery_earned_score
+        repo_by_weights[issue.repository_full_name.lower()] += issue.discovery_earned_score
 
+    evaluation.issue_discovery_repo_scores = dict(repo_by_weights)
     evaluation.issue_discovery_score = round(total_discovery_score, 2)
 
     bt.logging.info(
@@ -620,7 +625,6 @@ def _mirror_issue_for_scoring(
     )
 
     adapted.discovery_base_score = base_score
-    adapted.discovery_repo_weight_multiplier = resolve_repo_weight(repo_config)
     adapted.discovery_time_decay_multiplier = round(calculate_time_decay(solving_pr.merged_at), 2)
     adapted.discovery_review_quality_multiplier = round(
         calculate_issue_review_quality_multiplier(solving_pr.review_summary.maintainer_changes_requested_count),

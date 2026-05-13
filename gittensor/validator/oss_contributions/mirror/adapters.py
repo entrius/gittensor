@@ -86,8 +86,8 @@ def mirror_scored_pr_to_legacy_pull_request(
 ) -> PullRequest:
     """Adapt a ``ScoredPR`` into a legacy ``PullRequest`` for storage.
 
-    ScoredPR carries identical scoring fields (multipliers, base_score,
-    earned_score, token breakdown) but raw response data lives on the nested
+    ScoredPR carries the same per-PR scoring fields (multipliers, base_score,
+    earned_score, token breakdown) as ``PullRequest``, but raw response data lives on the nested
     ``.pr`` attribute. uid / hotkey / github_id come from the parent
     ``MinerEvaluation`` since ScoredPR doesn't carry miner identity.
 
@@ -116,7 +116,6 @@ def mirror_scored_pr_to_legacy_pull_request(
         merged_at=pr.merged_at,
         created_at=pr.created_at,
         pr_state=PRState(pr.state),
-        repo_weight_multiplier=scored.repo_weight_multiplier,
         base_score=scored.base_score,
         issue_multiplier=scored.issue_multiplier,
         open_pr_spam_multiplier=scored.open_pr_spam_multiplier,

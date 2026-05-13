@@ -44,12 +44,15 @@ def _patch_pipeline(
     oss_side_effect=None,
     master_repos: Optional[Dict] = None,
 ):
-    """Mock the three forward entry points; `oss_side_effect` captures call args."""
+    """Mock forward scoring hooks; ``blended`` is injected at this UID's index in the reward vector."""
+    from gittensor.constants import ISSUES_TREASURY_UID, RECYCLE_UID
+
     miner_evaluations = {uid: miner_evaluation}
 
     oss_rewards = np.array([oss_value])
-    issue_rewards = np.array([issue_value])
-    final_rewards = np.array([blended])
+    order = sorted({RECYCLE_UID, uid, ISSUES_TREASURY_UID})
+    final_rewards = np.zeros(len(order), dtype=np.float64)
+    final_rewards[order.index(uid)] = blended
 
     if oss_side_effect is not None:
         oss_patch = patch('gittensor.validator.forward.oss_contributions', side_effect=oss_side_effect)
@@ -61,8 +64,8 @@ def _patch_pipeline(
 
     return [
         oss_patch,
-        patch('gittensor.validator.forward.issue_discovery', new=AsyncMock(return_value=issue_rewards)),
-        patch('gittensor.validator.forward.blend_emission_pools', return_value=final_rewards),
+        patch('gittensor.validator.forward.issue_discovery', new=AsyncMock()),
+        patch('gittensor.validator.forward.build_round_reward_vector', return_value=final_rewards),
         patch('gittensor.validator.utils.load_weights.load_master_repo_weights', return_value=master_repos or {}),
         patch('gittensor.validator.utils.load_weights.load_programming_language_weights', return_value={}),
         patch('gittensor.validator.utils.load_weights.load_token_config', return_value=_stub_token_config()),
@@ -158,7 +161,7 @@ class TestScoreCommand:
         assert result.exit_code == 0, result.output
         assert f'Miner UID {_DEV_UID}' in result.output
         assert 'Total earned score' in result.output
-        assert 'Final blended reward' in result.output
+        assert 'Round emission share' in result.output
 
     def test_e2e_json_output(self, runner, miner_eval_factory):
         evaluation = miner_eval_factory(
@@ -182,8 +185,6 @@ class TestScoreCommand:
         assert payload['miner_evaluation']['uid'] == _DEV_UID
         assert payload['miner_evaluation']['is_eligible'] is True
         assert payload['miner_evaluation']['credibility'] == 0.85
-        assert payload['rewards']['oss_normalized'] == 0.4
-        assert payload['rewards']['issue_discovery_normalized'] == 0.1
         assert payload['rewards']['blended_final'] == 0.3
 
     def test_pat_never_appears_in_json(self, runner, miner_eval_factory):
@@ -239,7 +240,9 @@ class TestScoreCommand:
             result = runner.invoke(cli, ['miner', 'score'], env={'GITTENSOR_MINER_PAT': 'ghp_dummy'})
         assert result.exit_code == 0, result.output
         assert captured['hotkey_at_uid'] == _DEV_HOTKEY
-        assert captured['miner_uids'] == {_DEV_UID}
+        from gittensor.constants import ISSUES_TREASURY_UID, RECYCLE_UID
+
+        assert captured['miner_uids'] == {RECYCLE_UID, _DEV_UID, ISSUES_TREASURY_UID}
 
     def test_populated_mirror_prs_render_in_json(self, runner, miner_eval_factory):
         """Populated mirror PRs must flatten into the JSON shape via _serialize_evaluation."""
@@ -296,9 +299,9 @@ class TestScoreCommand:
         captured = {}
 
         async def _capture_oss(self, miner_uids, *args, **kwargs):
-            from gittensor.validator.oss_contributions.reward import pat_storage
+            from gittensor.validator import pat_storage as pat_storage_mod
 
-            captured['pats'] = pat_storage.load_all_pats()
+            captured['pats'] = pat_storage_mod.load_all_pats()
             return np.array([0.0]), {_DEV_UID: evaluation}, set(), set()
 
         with _multi_patch(_patch_pipeline(uid=_DEV_UID, miner_evaluation=evaluation, oss_side_effect=_capture_oss)):

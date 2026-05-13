@@ -285,7 +285,7 @@ def calculate_open_pr_collateral_score(pr: 'ScoredPR') -> float:
 
     Applicable multipliers: issue, label, review_collateral
     NOT applicable: time_decay (merge-based), credibility_multiplier (merge-based),
-                    open_pr_spam (not for collateral)
+                    open_pr_spam (not for collateral), repo_weight (removed in #1215)
     """
     from math import prod
 

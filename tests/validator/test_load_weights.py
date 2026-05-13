@@ -111,6 +111,18 @@ class TestLoadMasterRepositories:
         repos = load_master_repo_weights()
         assert len(repos) > 0, 'Should have at least one repository'
 
+    def test_emission_share_sum_does_not_exceed_one(self):
+        """Total emission_share across all loaded repos must be ≤ 1.0."""
+        repos = load_master_repo_weights()
+        total = sum(cfg.emission_share for cfg in repos.values())
+        assert total <= 1.0 + 1e-9, f'emission_share sum {total:.4f} exceeds 1.0'
+
+    def test_each_emission_share_in_zero_one_range(self):
+        """Each emission_share must be in [0, 1]."""
+        repos = load_master_repo_weights()
+        for name, cfg in repos.items():
+            assert 0.0 <= cfg.emission_share <= 1.0, f'{name}: emission_share {cfg.emission_share} outside [0,1]'
+
     def test_repo_configs_are_repository_config_objects(self):
         """Each entry should be a RepositoryConfig object."""
         repos = load_master_repo_weights()

@@ -24,6 +24,10 @@ from gittensor.validator.utils.load_weights import (
 )
 
 if TYPE_CHECKING:
+    from typing import Dict, Optional
+
+    from gittensor.classes import MinerEvaluation
+    from gittensor.validator.utils.load_weights import RepositoryConfig
     from neurons.validator import Validator
 
 

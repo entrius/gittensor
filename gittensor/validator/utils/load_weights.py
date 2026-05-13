@@ -183,6 +183,16 @@ def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
         _validate_emission_shares(normalized_data)
 
         bt.logging.debug(f'Successfully loaded {len(normalized_data)} repository entries from {weights_file}')
+
+        # Validate emission share invariant: sum must be in [0, 1]
+        if normalized_data:
+            total_share = sum(cfg.emission_share for cfg in normalized_data.values())
+            if total_share > 1.0 + 1e-9:
+                bt.logging.error(
+                    f'emission_share sum {total_share:.4f} exceeds 1.0 across {len(normalized_data)} repos'
+                )
+                return {}
+
         return normalized_data
 
     except FileNotFoundError:

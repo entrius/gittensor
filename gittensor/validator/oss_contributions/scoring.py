@@ -283,14 +283,13 @@ def calculate_open_pr_collateral_score(pr: 'ScoredPR') -> float:
 
     Collateral = base_score * applicable_multipliers * OPEN_PR_COLLATERAL_PERCENT
 
-    Applicable multipliers: repo_weight, issue, label, review_collateral
+    Applicable multipliers: issue, label, review_collateral
     NOT applicable: time_decay (merge-based), credibility_multiplier (merge-based),
                     open_pr_spam (not for collateral)
     """
     from math import prod
 
     multipliers = {
-        'repo_weight': pr.repo_weight_multiplier,
         'issue': pr.issue_multiplier,
         'label': pr.label_multiplier,
         'review_collateral': calculate_review_collateral_multiplier(pr.changes_requested_count, pr.number),

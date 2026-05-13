@@ -131,6 +131,77 @@ class TestLoadMasterRepositories:
                 f'{repo_name} trusted_label_pipeline should be bool, got {type(config.trusted_label_pipeline)}'
             )
 
+    def test_live_emission_shares_are_bounded(self):
+        repos = load_master_repo_weights()
+        total = sum(config.emission_share for config in repos.values())
+
+        assert 0.0 <= total <= 1.0
+        for repo_name, config in repos.items():
+            assert 0.0 <= config.emission_share <= 1.0, f'{repo_name} emission_share must be within [0, 1]'
+            assert 0.0 <= config.issue_discovery_share <= 1.0, (
+                f'{repo_name} issue_discovery_share must be within [0, 1]'
+            )
+
+    def test_loader_rejects_emission_share_sum_over_one(self, tmp_path, monkeypatch):
+        from gittensor.validator.utils import load_weights as lw
+
+        fake_weights_dir = tmp_path
+        (fake_weights_dir / 'master_repositories.json').write_text(
+            json.dumps(
+                {
+                    'foo/a': {'emission_share': 0.7},
+                    'foo/b': {'emission_share': 0.4},
+                }
+            )
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: fake_weights_dir)
+
+        with pytest.raises(ValueError, match='total repository emission_share'):
+            lw.load_master_repo_weights()
+
+    def test_loader_rejects_emission_share_out_of_range(self, tmp_path, monkeypatch):
+        from gittensor.validator.utils import load_weights as lw
+
+        fake_weights_dir = tmp_path
+        (fake_weights_dir / 'master_repositories.json').write_text(json.dumps({'foo/a': {'emission_share': 1.1}}))
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: fake_weights_dir)
+
+        with pytest.raises(ValueError, match='emission_share must be within'):
+            lw.load_master_repo_weights()
+
+    def test_loader_rejects_issue_discovery_share_out_of_range(self, tmp_path, monkeypatch):
+        from gittensor.validator.utils import load_weights as lw
+
+        fake_weights_dir = tmp_path
+        (fake_weights_dir / 'master_repositories.json').write_text(
+            json.dumps({'foo/a': {'emission_share': 0.5, 'issue_discovery_share': -0.1}})
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: fake_weights_dir)
+
+        with pytest.raises(ValueError, match='issue_discovery_share must be within'):
+            lw.load_master_repo_weights()
+
+    def test_loader_rejects_missing_emission_share(self, tmp_path, monkeypatch):
+        from gittensor.validator.utils import load_weights as lw
+
+        fake_weights_dir = tmp_path
+        (fake_weights_dir / 'master_repositories.json').write_text(json.dumps({'foo/a': {'weight': 0.5}}))
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: fake_weights_dir)
+
+        with pytest.raises(ValueError, match='Could not parse config'):
+            lw.load_master_repo_weights()
+
+    @pytest.mark.parametrize('raw_share', [True, float('nan'), float('inf')])
+    def test_loader_rejects_non_finite_or_bool_shares(self, tmp_path, monkeypatch, raw_share):
+        from gittensor.validator.utils import load_weights as lw
+
+        fake_weights_dir = tmp_path
+        (fake_weights_dir / 'master_repositories.json').write_text(json.dumps({'foo/a': {'emission_share': raw_share}}))
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: fake_weights_dir)
+
+        with pytest.raises(ValueError, match='emission_share must be a finite float'):
+            lw.load_master_repo_weights()
+
     def test_entrius_repos_have_trusted_label_pipeline(self):
         """All entrius/* entries opt into trusted_label_pipeline (issue #911)."""
         repos = load_master_repo_weights()
@@ -166,9 +237,9 @@ class TestRepositoryConfigTrustedLabelPipeline:
         (fake_weights_dir / 'master_repositories.json').write_text(
             json.dumps(
                 {
-                    'foo/trusted': {'weight': 0.5, 'trusted_label_pipeline': True},
-                    'foo/untrusted': {'weight': 0.3},
-                    'foo/explicit-off': {'weight': 0.2, 'trusted_label_pipeline': False},
+                    'foo/trusted': {'emission_share': 0.5, 'trusted_label_pipeline': True},
+                    'foo/untrusted': {'emission_share': 0.3},
+                    'foo/explicit-off': {'emission_share': 0.2, 'trusted_label_pipeline': False},
                 }
             )
         )
@@ -198,11 +269,11 @@ class TestRepositoryConfigLabelMultipliers:
             json.dumps(
                 {
                     'foo/labeled': {
-                        'weight': 0.5,
+                        'emission_share': 0.5,
                         'label_multipliers': {'kind/*': 1.5, 'type:bug': 1.25},
                         'default_label_multiplier': 0.8,
                     },
-                    'foo/defaults': {'weight': 0.3},
+                    'foo/defaults': {'emission_share': 0.3},
                 }
             )
         )
@@ -260,11 +331,11 @@ class TestRepositoryConfigMirrorScoringFields:
             json.dumps(
                 {
                     'foo/fixed': {
-                        'weight': 0.5,
+                        'emission_share': 0.5,
                         'fixed_base_score': 12.5,
                         'eligibility_mode': False,
                     },
-                    'foo/defaults': {'weight': 0.3},
+                    'foo/defaults': {'emission_share': 0.3},
                 }
             )
         )
@@ -341,7 +412,7 @@ class TestBannedOrganizations:
 
 
 class TestResolveRepoWeight:
-    """Tests for resolve_repo_weight — full-precision repo weight lookup."""
+    """Tests for the legacy repo-weight lookup alias."""
 
     def test_none_returns_default(self):
         assert resolve_repo_weight(None) == 0.01

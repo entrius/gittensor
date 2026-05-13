@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from math import prod
-from typing import TYPE_CHECKING, DefaultDict, Dict, List, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Any, DefaultDict, Dict, List, Optional, Set, Tuple
 
 import bittensor as bt
 
@@ -234,7 +234,6 @@ class PullRequest:
     def calculate_final_earned_score(self) -> float:
         """Combine base score with all multipliers. Pioneer dividend is added separately after."""
         multipliers = {
-            'repo': self.repo_weight_multiplier,
             'issue': self.issue_multiplier,
             'label': self.label_multiplier,
             'spam': self.open_pr_spam_multiplier,
@@ -289,6 +288,7 @@ class MinerEvaluation:
     total_valid_solved_issues: int = 0  # solved issues where solving PR has token_score >= 5
     total_closed_issues: int = 0
     total_open_issues: int = 0  # current mirror-tracked open issues (set by issue_discovery.scan)
+    discovered_issues: List[Issue] = field(default_factory=list)
 
     @property
     def total_prs(self) -> int:
@@ -505,6 +505,7 @@ _ISSUE_DISCOVERY_FIELDS: Tuple[str, ...] = (
     'total_valid_solved_issues',
     'total_closed_issues',
     'total_open_issues',
+    'discovered_issues',
 )
 
 
@@ -547,7 +548,7 @@ class MinerEvaluationCache:
         existing = self._cache.get(evaluation.uid)
         if existing is not None and existing.hotkey == evaluation.hotkey and existing.github_id == evaluation.github_id:
             for name in _ISSUE_DISCOVERY_FIELDS:
-                setattr(cached_eval, name, getattr(existing.evaluation, name))
+                setattr(cached_eval, name, _copy_issue_discovery_field(name, getattr(existing.evaluation, name)))
 
         self._cache[evaluation.uid] = CachedEvaluation(
             hotkey=evaluation.hotkey,
@@ -581,7 +582,7 @@ class MinerEvaluationCache:
             return
 
         for name in _ISSUE_DISCOVERY_FIELDS:
-            setattr(existing.evaluation, name, getattr(evaluation, name))
+            setattr(existing.evaluation, name, _copy_issue_discovery_field(name, getattr(evaluation, name)))
 
         bt.logging.debug(f'Refreshed cached issue discovery for UID {evaluation.uid}')
 
@@ -627,6 +628,7 @@ class MinerEvaluationCache:
         cached.merged_prs = [_scored_mirror_pr_for_cache(pr) for pr in evaluation.merged_prs]
         cached.open_prs = [_scored_mirror_pr_for_cache(pr) for pr in evaluation.open_prs]
         cached.closed_prs = [_scored_mirror_pr_for_cache(pr) for pr in evaluation.closed_prs]
+        cached.discovered_issues = [copy.copy(issue) for issue in evaluation.discovered_issues]
         return cached
 
     @staticmethod
@@ -636,7 +638,14 @@ class MinerEvaluationCache:
         # adapters produce fresh Issue objects per call via get_all_issues().
         copy_eval = copy.copy(cached_eval)
         copy_eval.unique_repos_contributed_to = set(cached_eval.unique_repos_contributed_to)
+        copy_eval.discovered_issues = [copy.copy(issue) for issue in cached_eval.discovered_issues]
         return copy_eval
+
+
+def _copy_issue_discovery_field(name: str, value: Any) -> Any:
+    if name == 'discovered_issues':
+        return [copy.copy(issue) for issue in value]
+    return value
 
 
 def _scored_mirror_pr_for_cache(scored: 'ScoredPR') -> 'ScoredPR':

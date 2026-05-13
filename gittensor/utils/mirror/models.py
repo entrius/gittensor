@@ -86,6 +86,7 @@ class MirrorLinkedIssue:
     updated_at: Optional[datetime]
     is_transferred: bool
     solved_by_pr: Optional[int]
+    repository_full_name: Optional[str] = None
     labels: List[MirrorLabel] = field(default_factory=list)
 
     @classmethod
@@ -106,6 +107,7 @@ class MirrorLinkedIssue:
             updated_at=parse_optional_github_iso_to_utc(data.get('updated_at')),
             is_transferred=bool(data.get('is_transferred', False)),
             solved_by_pr=data.get('solved_by_pr'),
+            repository_full_name=data.get('repository_full_name'),
             labels=[MirrorLabel.from_dict(label) for label in data.get('labels') or []],
         )
 

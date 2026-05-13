@@ -1,6 +1,7 @@
 # The MIT License (MIT)
 # Copyright © 2025 Entrius
 import json
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -107,6 +108,17 @@ def _get_weights_dir() -> Path:
     return Path(__file__).parent.parent / 'weights'
 
 
+def _validate_repository_weight(repo_name: str, weight: float) -> None:
+    if not math.isfinite(weight) or not 0.0 <= weight <= 1.0:
+        raise ValueError(f'{repo_name} weight must be within [0.0, 1.0], got {weight}')
+
+
+def _validate_total_repository_weight(repositories: Dict[str, RepositoryConfig]) -> None:
+    total_weight = sum(config.weight for config in repositories.values())
+    if total_weight < 0.0 or total_weight > 1.0:
+        raise ValueError(f'Total repository weight must be within [0.0, 1.0], got {total_weight}')
+
+
 def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
     """
     Load repository weights from the local JSON file.
@@ -129,9 +141,11 @@ def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
         # Parse JSON data into RepositoryConfig objects
         normalized_data: Dict[str, RepositoryConfig] = {}
         for repo_name, metadata in data.items():
+            weight = float(metadata.get('weight', 0.01))
+            _validate_repository_weight(repo_name, weight)
             try:
                 config = RepositoryConfig(
-                    weight=float(metadata.get('weight', 0.01)),
+                    weight=weight,
                     inactive_at=metadata.get('inactive_at'),
                     additional_acceptable_branches=metadata.get('additional_acceptable_branches'),
                     trusted_label_pipeline=bool(metadata.get('trusted_label_pipeline', False)),
@@ -148,8 +162,9 @@ def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
             except (ValueError, TypeError) as e:
                 bt.logging.warning(f'Could not parse config for {repo_name}: {e}, using defaults')
                 # Create config with defaults if parsing fails
-                normalized_data[repo_name.lower()] = RepositoryConfig(weight=float(metadata.get('weight', 0.01)))
+                normalized_data[repo_name.lower()] = RepositoryConfig(weight=weight)
 
+        _validate_total_repository_weight(normalized_data)
         bt.logging.debug(f'Successfully loaded {len(normalized_data)} repository entries from {weights_file}')
         return normalized_data
 

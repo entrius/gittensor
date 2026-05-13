@@ -142,6 +142,47 @@ class TestLoadMasterRepositories:
                 f'labeling worker is honored at scoring time'
             )
 
+    def test_live_repository_weights_are_in_range(self):
+        """CI guard: every configured repo share must be in [0, 1]."""
+        repos = load_master_repo_weights()
+        for repo_name, config in repos.items():
+            assert 0.0 <= config.weight <= 1.0, f'{repo_name} weight must be within [0.0, 1.0]'
+
+    def test_live_repository_weight_total_is_not_above_one(self):
+        """CI guard: configured repo shares cannot allocate more than the scoring pool."""
+        repos = load_master_repo_weights()
+        assert sum(config.weight for config in repos.values()) <= 1.0
+
+    @pytest.mark.parametrize('weight', [-0.001, 1.001])
+    def test_loader_rejects_repository_weight_outside_range(self, tmp_path, monkeypatch, weight):
+        from gittensor.validator.utils import load_weights as lw
+
+        fake_weights_dir = tmp_path
+        (fake_weights_dir / 'master_repositories.json').write_text(json.dumps({'foo/bad': {'weight': weight}}))
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: fake_weights_dir)
+
+        repos = lw.load_master_repo_weights()
+
+        assert repos == {}
+
+    def test_loader_rejects_total_repository_weight_above_one(self, tmp_path, monkeypatch):
+        from gittensor.validator.utils import load_weights as lw
+
+        fake_weights_dir = tmp_path
+        (fake_weights_dir / 'master_repositories.json').write_text(
+            json.dumps(
+                {
+                    'foo/one': {'weight': 0.6},
+                    'foo/two': {'weight': 0.5},
+                }
+            )
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: fake_weights_dir)
+
+        repos = lw.load_master_repo_weights()
+
+        assert repos == {}
+
 
 class TestRepositoryConfigTrustedLabelPipeline:
     """Dataclass + JSON-parsing tests for trusted_label_pipeline (issue #911)."""

@@ -204,7 +204,8 @@ def blend_emission_pools(
                     continue
                 disc_score = getattr(eval_, 'issue_discovery_score', 0.0) or 0.0
                 for scored_pr in getattr(eval_, 'merged_prs', []):
-                    repo = getattr(getattr(scored_pr, 'pr', None), 'repo_full_name', None) or ''
+                    repo_full = getattr(getattr(scored_pr, 'pr', None), 'repo_full_name', None) or ''
+                    repo = repo_full.lower()
                     if repo not in master_repositories:
                         continue
                     pr_score = getattr(scored_pr, 'earned_score', 0.0) or 0.0

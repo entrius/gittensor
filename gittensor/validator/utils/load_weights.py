@@ -1,15 +1,17 @@
 # The MIT License (MIT)
 # Copyright © 2025 Entrius
 import json
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 
 import bittensor as bt
 
 from gittensor.constants import DEFAULT_REPO_EMISSION_SHARE, NON_CODE_EXTENSIONS
 
 EMISSION_SHARE_TOLERANCE = 1e-9
+ShareValue = Union[int, float, str]
 
 
 @dataclass
@@ -61,10 +63,10 @@ class RepositoryConfig:
 
     def __init__(
         self,
-        emission_share: Optional[float] = None,
+        emission_share: Optional[ShareValue] = None,
         *,
-        weight: Optional[float] = None,
-        issue_discovery_share: float = 0.5,
+        weight: Optional[ShareValue] = None,
+        issue_discovery_share: ShareValue = 0.5,
         inactive_at: Optional[str] = None,
         additional_acceptable_branches: Optional[List[str]] = None,
         trusted_label_pipeline: bool = False,
@@ -73,13 +75,19 @@ class RepositoryConfig:
         fixed_base_score: Optional[float] = None,
         eligibility_mode: bool = True,
     ) -> None:
+        weight_share = _coerce_share('weight', weight) if weight is not None else None
         if emission_share is None:
-            emission_share = weight if weight is not None else DEFAULT_REPO_EMISSION_SHARE
-        elif weight is not None and float(weight) != float(emission_share):
-            raise ValueError('RepositoryConfig received conflicting emission_share and weight values')
+            self.emission_share = (
+                weight_share
+                if weight_share is not None
+                else _coerce_share('emission_share', DEFAULT_REPO_EMISSION_SHARE)
+            )
+        else:
+            self.emission_share = _coerce_share('emission_share', emission_share)
+            if weight_share is not None and weight_share != self.emission_share:
+                raise ValueError('RepositoryConfig received conflicting emission_share and weight values')
 
-        self.emission_share = float(emission_share)
-        self.issue_discovery_share = float(issue_discovery_share)
+        self.issue_discovery_share = _coerce_share('issue_discovery_share', issue_discovery_share)
         self.inactive_at = inactive_at
         self.additional_acceptable_branches = additional_acceptable_branches
         self.trusted_label_pipeline = trusted_label_pipeline
@@ -92,6 +100,15 @@ class RepositoryConfig:
     def weight(self) -> float:
         """Compatibility alias for callers that have not migrated constructor usage."""
         return self.emission_share
+
+
+def _coerce_share(field_name: str, value: ShareValue) -> float:
+    if isinstance(value, bool):
+        raise ValueError(f'{field_name} must be a finite float within [0, 1], got {value!r}')
+    share = float(value)
+    if not math.isfinite(share) or not 0.0 <= share <= 1.0:
+        raise ValueError(f'{field_name} must be a finite float within [0, 1], got {value!r}')
+    return share
 
 
 def resolve_repo_emission_share(repo_config: Optional[RepositoryConfig]) -> float:
@@ -154,11 +171,14 @@ def validate_repository_emission_shares(repositories: Dict[str, RepositoryConfig
     """Validate per-repo emission share bounds and the registry-wide sum cap."""
     total = 0.0
     for repo_name, config in repositories.items():
-        if not 0.0 <= config.emission_share <= 1.0:
-            raise ValueError(f'{repo_name} emission_share must be within [0, 1], got {config.emission_share}')
-        if not 0.0 <= config.issue_discovery_share <= 1.0:
+        if not math.isfinite(config.emission_share) or not 0.0 <= config.emission_share <= 1.0:
             raise ValueError(
-                f'{repo_name} issue_discovery_share must be within [0, 1], got {config.issue_discovery_share}'
+                f'{repo_name} emission_share must be a finite float within [0, 1], got {config.emission_share}'
+            )
+        if not math.isfinite(config.issue_discovery_share) or not 0.0 <= config.issue_discovery_share <= 1.0:
+            raise ValueError(
+                f'{repo_name} issue_discovery_share must be a finite float within [0, 1], '
+                f'got {config.issue_discovery_share}'
             )
         total += config.emission_share
 
@@ -190,8 +210,8 @@ def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
         for repo_name, metadata in data.items():
             try:
                 config = RepositoryConfig(
-                    emission_share=float(metadata.get('emission_share', metadata.get('weight', DEFAULT_REPO_EMISSION_SHARE))),
-                    issue_discovery_share=float(metadata.get('issue_discovery_share', 0.5)),
+                    emission_share=metadata.get('emission_share', metadata.get('weight', DEFAULT_REPO_EMISSION_SHARE)),
+                    issue_discovery_share=metadata.get('issue_discovery_share', 0.5),
                     inactive_at=metadata.get('inactive_at'),
                     additional_acceptable_branches=metadata.get('additional_acceptable_branches'),
                     trusted_label_pipeline=bool(metadata.get('trusted_label_pipeline', False)),

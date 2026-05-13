@@ -9,6 +9,7 @@ Run tests:
 """
 
 import json
+import math
 
 import pytest
 
@@ -224,13 +225,29 @@ class TestRepositoryEmissionShare:
         assert repos['foo/default'].issue_discovery_share == pytest.approx(0.5)
 
     def test_validator_rejects_individual_share_outside_range(self):
-        repos = {'foo/bad': RepositoryConfig(emission_share=1.01)}
+        config = RepositoryConfig(emission_share=0.1)
+        config.emission_share = 1.01
+        repos = {'foo/bad': config}
 
         with pytest.raises(ValueError, match='emission_share'):
             validate_repository_emission_shares(repos)
 
+    @pytest.mark.parametrize('field_name,bad_value', [('emission_share', math.nan), ('emission_share', math.inf)])
+    def test_constructor_rejects_non_finite_share_values(self, field_name, bad_value):
+        with pytest.raises(ValueError, match=field_name):
+            RepositoryConfig(**{field_name: bad_value})
+
+    @pytest.mark.parametrize('field_name', ['emission_share', 'issue_discovery_share'])
+    def test_constructor_rejects_bool_share_values(self, field_name):
+        kwargs = {'emission_share': 0.1, field_name: True}
+
+        with pytest.raises(ValueError, match=field_name):
+            RepositoryConfig(**kwargs)
+
     def test_validator_rejects_issue_discovery_share_outside_range(self):
-        repos = {'foo/bad': RepositoryConfig(emission_share=0.1, issue_discovery_share=-0.1)}
+        config = RepositoryConfig(emission_share=0.1)
+        config.issue_discovery_share = -0.1
+        repos = {'foo/bad': config}
 
         with pytest.raises(ValueError, match='issue_discovery_share'):
             validate_repository_emission_shares(repos)
@@ -256,6 +273,31 @@ class TestRepositoryEmissionShare:
                 }
             )
         )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: fake_weights_dir)
+
+        assert lw.load_master_repo_weights() == {}
+
+    @pytest.mark.parametrize(
+        'field_name,bad_value', [('emission_share', math.nan), ('issue_discovery_share', math.inf)]
+    )
+    def test_loader_rejects_non_finite_share_values(self, tmp_path, monkeypatch, field_name, bad_value):
+        from gittensor.validator.utils import load_weights as lw
+
+        fake_weights_dir = tmp_path
+        metadata = {'emission_share': 0.1}
+        metadata[field_name] = bad_value
+        (fake_weights_dir / 'master_repositories.json').write_text(json.dumps({'foo/bad': metadata}))
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: fake_weights_dir)
+
+        assert lw.load_master_repo_weights() == {}
+
+    @pytest.mark.parametrize('field_name', ['emission_share', 'issue_discovery_share'])
+    def test_loader_rejects_bool_share_values(self, tmp_path, monkeypatch, field_name):
+        from gittensor.validator.utils import load_weights as lw
+
+        fake_weights_dir = tmp_path
+        metadata = {'emission_share': 0.1, field_name: True}
+        (fake_weights_dir / 'master_repositories.json').write_text(json.dumps({'foo/bad': metadata}))
         monkeypatch.setattr(lw, '_get_weights_dir', lambda: fake_weights_dir)
 
         assert lw.load_master_repo_weights() == {}

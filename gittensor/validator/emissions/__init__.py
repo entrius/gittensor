@@ -1,0 +1,1 @@
+"""Emission allocation helpers."""

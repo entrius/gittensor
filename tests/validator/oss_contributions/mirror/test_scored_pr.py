@@ -64,7 +64,6 @@ class TestComposition:
     def test_scoring_fields_default_neutral(self):
         scored = ScoredPR(pr=_make_pr())
         for mult in [
-            scored.repo_weight_multiplier,
             scored.issue_multiplier,
             scored.open_pr_spam_multiplier,
             scored.time_decay_multiplier,
@@ -113,10 +112,9 @@ class TestCalculateFinalEarnedScore:
     def test_multipliers_compose(self):
         scored = ScoredPR(pr=_make_pr())
         scored.base_score = 100.0
-        scored.repo_weight_multiplier = 0.5
         scored.review_quality_multiplier = 0.5
-        # 100 * 0.5 * 0.5 (others 1.0) = 25
-        assert scored.calculate_final_earned_score() == 25.0
+        # 100 * 0.5 (others 1.0) = 50
+        assert scored.calculate_final_earned_score() == 50.0
 
     def test_zero_multiplier_zeros_score(self):
         scored = ScoredPR(pr=_make_pr())

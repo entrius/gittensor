@@ -138,11 +138,9 @@ def _render_table(payload: Dict[str, Any]) -> None:
         '  solved / valid / open',
         f'{miner["total_solved_issues"]} / {miner["total_valid_solved_issues"]} / {miner["total_open_issues"]}',
     )
-    table.add_row('OSS reward (normalized)', f'{rewards["oss_normalized"]:.6f}')
-    table.add_row('Issue disc. reward (normalized)', f'{rewards["issue_discovery_normalized"]:.6f}')
-    table.add_row(
-        '[bold green]Final blended reward[/bold green]', f'[bold green]{rewards["blended_final"]:.6f}[/bold green]'
-    )
+    table.add_row('OSS raw score', f'{rewards["oss_raw"]:.6f}')
+    table.add_row('Issue discovery raw score', f'{rewards["issue_discovery_raw"]:.6f}')
+    table.add_row('[bold green]Final reward[/bold green]', f'[bold green]{rewards["final"]:.6f}[/bold green]')
     console.print(table)
 
     pr_table = Table(title='Per-PR breakdown', show_lines=False)
@@ -242,8 +240,8 @@ def score_command(pat: Optional[str], log_level: str, json_mode: bool) -> None:
     resolved_pat = _resolve_pat(pat, json_mode)
 
     # Deferred imports: keeps --help fast (these pull bittensor + the validator graph).
+    from gittensor.validator.emissions.allocate import allocate_emissions
     from gittensor.validator.forward import (
-        blend_emission_pools,
         issue_discovery,
         oss_contributions,
     )
@@ -277,18 +275,18 @@ def score_command(pat: Optional[str], log_level: str, json_mode: bool) -> None:
             oss_rewards, miner_evaluations, _, _ = await oss_contributions(
                 stub, miner_uids, master_repositories, programming_languages, token_config
             )
-            issue_rewards = await issue_discovery(
+            await issue_discovery(
                 miner_evaluations, master_repositories, programming_languages, token_config, miner_uids
             )
-        rewards = blend_emission_pools(oss_rewards, issue_rewards, miner_uids)
+        rewards = allocate_emissions(miner_evaluations, master_repositories, miner_uids)
 
         return {
             'success': True,
             'miner_evaluation': _serialize_evaluation(miner_evaluations[_DEV_UID]),
             'rewards': {
-                'oss_normalized': _round(float(oss_rewards[0])),
-                'issue_discovery_normalized': _round(float(issue_rewards[0])),
-                'blended_final': _round(float(rewards[0])),
+                'oss_raw': _round(float(oss_rewards[0])),
+                'issue_discovery_raw': _round(float(miner_evaluations[_DEV_UID].issue_discovery_score)),
+                'final': _round(float(rewards[0])),
             },
         }
 

@@ -150,7 +150,6 @@ class Issue:
     discovery_base_score: float = 0.0
     discovery_earned_score: float = 0.0
     discovery_review_quality_multiplier: float = 1.0
-    discovery_repo_weight_multiplier: float = 1.0
     discovery_time_decay_multiplier: float = 1.0
     discovery_credibility_multiplier: float = 1.0
     discovery_open_issue_spam_multiplier: float = 1.0
@@ -182,7 +181,6 @@ class PullRequest:
     pr_state: PRState
 
     # Score fields
-    repo_weight_multiplier: float = 1.0
     base_score: float = 0.0
     issue_multiplier: float = 1.0
     open_pr_spam_multiplier: float = 1.0
@@ -234,7 +232,6 @@ class PullRequest:
     def calculate_final_earned_score(self) -> float:
         """Combine base score with all multipliers. Pioneer dividend is added separately after."""
         multipliers = {
-            'repo': self.repo_weight_multiplier,
             'issue': self.issue_multiplier,
             'label': self.label_multiplier,
             'spam': self.open_pr_spam_multiplier,
@@ -285,6 +282,7 @@ class MinerEvaluation:
     issue_token_score: float = 0.0  # sum of solving PR token_scores for scored issues
     issue_credibility: float = 0.0
     is_issue_eligible: bool = False
+    issue_discovery_score_by_repo: Dict[str, float] = field(default_factory=dict)
     total_solved_issues: int = 0
     total_valid_solved_issues: int = 0  # solved issues where solving PR has token_score >= 5
     total_closed_issues: int = 0
@@ -501,6 +499,7 @@ _ISSUE_DISCOVERY_FIELDS: Tuple[str, ...] = (
     'issue_token_score',
     'issue_credibility',
     'is_issue_eligible',
+    'issue_discovery_score_by_repo',
     'total_solved_issues',
     'total_valid_solved_issues',
     'total_closed_issues',

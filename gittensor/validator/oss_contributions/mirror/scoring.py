@@ -54,7 +54,6 @@ from gittensor.validator.utils.load_weights import (
     LanguageConfig,
     RepositoryConfig,
     TokenConfig,
-    resolve_repo_weight,
 )
 from gittensor.validator.utils.tree_sitter_scoring import calculate_token_score_from_file_changes
 
@@ -338,15 +337,13 @@ def calculate_base_score_for_pr_files(
 
 
 def _calculate_pr_multipliers(scored: ScoredPR, repo_config: RepositoryConfig) -> None:
-    """Compute repo_weight, time_decay, review_quality, label, issue multipliers.
+    """Compute time_decay, review_quality, label, issue multipliers.
 
     Spam and credibility multipliers are deferred to ``finalize_miner_scores``
     — they depend on per-miner aggregate counts.
     """
     pr = scored.pr
     is_merged = pr.state == 'MERGED'
-
-    scored.repo_weight_multiplier = resolve_repo_weight(repo_config)
 
     chosen_label, label_multiplier = _resolve_trusted_scoring_label(pr, repo_config)
     scored.label = chosen_label

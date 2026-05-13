@@ -21,7 +21,6 @@ mirror_client_mod = pytest.importorskip('gittensor.utils.mirror.client')
 classes = pytest.importorskip('gittensor.classes')
 load_weights = pytest.importorskip('gittensor.validator.utils.load_weights')
 scored_pr_module = pytest.importorskip('gittensor.validator.oss_contributions.mirror.scored_pr')
-normalize_module = pytest.importorskip('gittensor.validator.issue_discovery.normalize')
 
 run_issue_discovery = scan_module.run_issue_discovery
 _classify_issue = scan_module._classify_issue
@@ -37,7 +36,6 @@ MinerEvaluationCache = classes.MinerEvaluationCache
 RepositoryConfig = load_weights.RepositoryConfig
 TokenConfig = load_weights.TokenConfig
 ScoredPR = scored_pr_module.ScoredPR
-normalize_issue_discovery_rewards = normalize_module.normalize_issue_discovery_rewards
 
 
 # Representative defaults for the plumbed-through token scoring args. The
@@ -165,7 +163,7 @@ def _eval(uid: int = 1, github_id: Optional[str] = '999'):
 
 
 def _mirror_repos(*names: str) -> dict:
-    return {name: RepositoryConfig(weight=0.5) for name in names}
+    return {name: RepositoryConfig(emission_share=0.5) for name in names}
 
 
 def _run(coro):
@@ -404,6 +402,7 @@ class TestRunMirrorIssueDiscovery:
         cached.issue_token_score = 700.0
         cached.issue_credibility = 1.0
         cached.is_issue_eligible = True
+        cached.issue_discovery_score_by_repo = {'entrius/gittensor-ui': 8.12}
         cached.total_solved_issues = 7
         cached.total_valid_solved_issues = 7
         cache.store(cached)
@@ -443,10 +442,12 @@ class TestRunMirrorIssueDiscovery:
         assert failing.total_valid_solved_issues == 7
         assert working.issue_discovery_score > 0
 
-        rewards = normalize_issue_discovery_rewards({1: failing, 2: working})
-        assert rewards[1] < 1.0
-        assert rewards[2] < 1.0
-        assert sum(rewards.values()) == pytest.approx(1.0)
+        assert failing.issue_discovery_score_by_repo['entrius/gittensor-ui'] == pytest.approx(
+            failing.issue_discovery_score
+        )
+        assert working.issue_discovery_score_by_repo['entrius/gittensor-ui'] == pytest.approx(
+            working.issue_discovery_score
+        )
 
     def test_successful_issue_fetch_refreshes_cache_after_scoring(self):
         cache = MinerEvaluationCache()

@@ -62,7 +62,7 @@ def _patch_pipeline(
     return [
         oss_patch,
         patch('gittensor.validator.forward.issue_discovery', new=AsyncMock(return_value=issue_rewards)),
-        patch('gittensor.validator.forward.blend_emission_pools', return_value=final_rewards),
+        patch('gittensor.validator.emissions.allocate.allocate_emissions', return_value=final_rewards),
         patch('gittensor.validator.utils.load_weights.load_master_repo_weights', return_value=master_repos or {}),
         patch('gittensor.validator.utils.load_weights.load_programming_language_weights', return_value={}),
         patch('gittensor.validator.utils.load_weights.load_token_config', return_value=_stub_token_config()),
@@ -158,7 +158,7 @@ class TestScoreCommand:
         assert result.exit_code == 0, result.output
         assert f'Miner UID {_DEV_UID}' in result.output
         assert 'Total earned score' in result.output
-        assert 'Final blended reward' in result.output
+        assert 'Final reward' in result.output
 
     def test_e2e_json_output(self, runner, miner_eval_factory):
         evaluation = miner_eval_factory(
@@ -182,9 +182,9 @@ class TestScoreCommand:
         assert payload['miner_evaluation']['uid'] == _DEV_UID
         assert payload['miner_evaluation']['is_eligible'] is True
         assert payload['miner_evaluation']['credibility'] == 0.85
-        assert payload['rewards']['oss_normalized'] == 0.4
-        assert payload['rewards']['issue_discovery_normalized'] == 0.1
-        assert payload['rewards']['blended_final'] == 0.3
+        assert payload['rewards']['oss_raw'] == 0.4
+        assert payload['rewards']['issue_discovery_raw'] == 0.0
+        assert payload['rewards']['final'] == 0.3
 
     def test_pat_never_appears_in_json(self, runner, miner_eval_factory):
         """The introspection-based serializer relies on _EVAL_SKIP to redact secrets;

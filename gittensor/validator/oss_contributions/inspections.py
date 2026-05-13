@@ -88,6 +88,7 @@ def _zero_for_duplicate_penalty(eval_: MinerEvaluation, reason: str) -> None:
     eval_.issue_token_score = 0.0
     eval_.issue_credibility = 0.0
     eval_.is_issue_eligible = False
+    eval_.issue_discovery_score_by_repo = {}
     eval_.total_solved_issues = 0
     eval_.total_valid_solved_issues = 0
     eval_.total_closed_issues = 0

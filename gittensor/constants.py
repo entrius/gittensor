@@ -155,9 +155,13 @@ OPEN_PR_COLLATERAL_PERCENT = 0.20
 RECYCLE_UID = 0
 
 # Hardcoded emission splits per competition (replaces dynamic emissions)
-OSS_EMISSION_SHARE = 0.30  # 30% to OSS contributions (PR scoring)
-ISSUE_DISCOVERY_EMISSION_SHARE = 0.10  # 10% to issue discovery
-RECYCLE_EMISSION_SHARE = 0.45  # 45% to recycle UID 0
+# Pool assignment now handled in blend_emission_pools:
+#   - Combined scoring (OSS + issue discovery): 90%
+#   - Issue treasury:                          10%
+# Recycle is the remainder (no fixed baseline)
+OSS_EMISSION_SHARE = 0.30  # kept for backward compat; use oss_pool_share=0.90 in blend_emission_pools
+ISSUE_DISCOVERY_EMISSION_SHARE = 0.10  # kept for backward compat
+RECYCLE_EMISSION_SHARE = 0.45  # kept for backward compat; recycle is now dynamic slack
 # ISSUES_TREASURY_EMISSION_SHARE = 0.15 defined below (15% to smart contract treasury)
 
 # =============================================================================

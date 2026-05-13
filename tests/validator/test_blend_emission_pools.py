@@ -34,10 +34,9 @@ def _idx(uids: set[int], uid: int) -> int:
     return sorted(uids).index(uid)
 
 
-def _evaluation(uid: int, prs=None, open_prs=None, issues=None) -> MinerEvaluation:
+def _evaluation(uid: int, prs=None, issues=None) -> MinerEvaluation:
     evaluation = MinerEvaluation(uid=uid, hotkey=f'hk-{uid}', github_id=str(uid))
     evaluation.merged_prs = list(prs or [])
-    evaluation.open_prs = list(open_prs or [])
     evaluation.issue_discovery_issues = list(issues or [])
     return evaluation
 

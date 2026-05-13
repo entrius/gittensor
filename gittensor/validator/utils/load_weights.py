@@ -47,6 +47,7 @@ class RepositoryConfig:
     """
 
     emission_share: float
+    issue_discovery_share: Optional[float] = None
     inactive_at: Optional[str] = None
     additional_acceptable_branches: Optional[List[str]] = None
     trusted_label_pipeline: bool = False
@@ -132,6 +133,7 @@ def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
             try:
                 config = RepositoryConfig(
                     emission_share=float(metadata.get('emission_share', 0.01)),
+                    issue_discovery_share=metadata.get('issue_discovery_share'),
                     inactive_at=metadata.get('inactive_at'),
                     additional_acceptable_branches=metadata.get('additional_acceptable_branches'),
                     trusted_label_pipeline=bool(metadata.get('trusted_label_pipeline', False)),

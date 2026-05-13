@@ -576,13 +576,6 @@ class TestCliRegisterValidation:
         """
         import gittensor.cli.issue_commands.mutations as mut
 
-        exec_was_called = {'value': False}
-
-        class _Sentinel:
-            def exec(self, *_args, **_kwargs):
-                exec_was_called['value'] = True
-                raise AssertionError('register_issue must not be submitted on a GitHub skip')
-
         with (
             patch(
                 'gittensor.cli.issue_commands.mutations._resolve_contract_and_network',
@@ -605,7 +598,6 @@ class TestCliRegisterValidation:
             )
 
         assert result.exit_code != 0
-        assert exec_was_called['value'] is False
         assert 'Could not verify' in result.output
         assert '503' in result.output
 

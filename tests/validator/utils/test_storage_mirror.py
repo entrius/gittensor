@@ -135,7 +135,7 @@ def test_cleanup_stale_called_with_commit_false():
 
     with patch(
         'gittensor.validator.oss_contributions.mirror.adapters.mirror_scored_pr_to_legacy_pull_request',
-        side_effect=lambda s, *a, **kw: s,
+        side_effect=lambda s, *_args, **_kwargs: s,
     ):
         storage.store_evaluation(eval_obj)
 
@@ -154,7 +154,7 @@ def test_failure_after_cleanup_triggers_rollback():
 
     with patch(
         'gittensor.validator.oss_contributions.mirror.adapters.mirror_scored_pr_to_legacy_pull_request',
-        side_effect=lambda s, *a, **kw: s,
+        side_effect=lambda s, *_args, **_kwargs: s,
     ):
         result = storage.store_evaluation(eval_obj)
 

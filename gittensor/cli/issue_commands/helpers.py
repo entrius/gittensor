@@ -325,7 +325,7 @@ def validate_bounty_amount(bounty: str) -> int:
             param_hint='--bounty',
         )
 
-    sign, digits, exponent = d.as_tuple()
+    _sign, _digits, exponent = d.as_tuple()
     decimal_places = max(0, -int(exponent))
     if decimal_places > ALPHA_DECIMALS:
         raise click.BadParameter(

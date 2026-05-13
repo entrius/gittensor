@@ -195,11 +195,11 @@ def blend_emission_pools(
             for uid, eval_ in miner_evaluations.items():
                 if uid not in uid_to_idx:
                     continue
-                for pr in getattr(eval_, 'merged_pull_requests', []):
-                    repo = getattr(pr, 'repository_full_name', None) or ''
+                for scored_pr in getattr(eval_, 'merged_prs', []):
+                    repo = getattr(getattr(scored_pr, 'pr', None), 'repo_full_name', None) or ''
                     if repo in master_repositories:
                         repo_scores.setdefault(repo, {}).setdefault(uid, 0.0)
-                        repo_scores[repo][uid] += getattr(pr, 'earned_score', 0.0) or 0.0
+                        repo_scores[repo][uid] += getattr(scored_pr, 'earned_score', 0.0) or 0.0
 
             # Distribute per-repo
             if repo_scores:

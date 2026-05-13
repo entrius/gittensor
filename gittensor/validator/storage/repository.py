@@ -177,7 +177,6 @@ class Repository(BaseRepository):
                     pr.merged_at,
                     pr.created_at,
                     pr.pr_state.value,  # Convert PRState enum to string
-                    pr.repo_weight_multiplier,
                     pr.base_score,
                     pr.issue_multiplier,
                     pr.open_pr_spam_multiplier,
@@ -274,7 +273,6 @@ class Repository(BaseRepository):
                     issue.discovery_base_score,
                     issue.discovery_earned_score,
                     issue.discovery_review_quality_multiplier,
-                    issue.discovery_repo_weight_multiplier,
                     issue.discovery_time_decay_multiplier,
                     issue.discovery_credibility_multiplier,
                     issue.discovery_open_issue_spam_multiplier,

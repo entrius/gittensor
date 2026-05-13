@@ -7,7 +7,7 @@ from typing import Dict, List, Optional
 
 import bittensor as bt
 
-from gittensor.constants import DEFAULT_REPO_WEIGHT, NON_CODE_EXTENSIONS
+from gittensor.constants import DEFAULT_EMISSION_SHARE, NON_CODE_EXTENSIONS
 
 
 @dataclass
@@ -28,7 +28,7 @@ class RepositoryConfig:
     """Configuration for a repository in the master_repositories list.
 
     Attributes:
-        weight: Repository weight for scoring
+        emission_share: Repository emission share (fraction of total pool, value in [0,1])
         inactive_at: ISO timestamp when repository became inactive (None if active)
         additional_acceptable_branches: List of additional branch patterns to accept (None if only default branch)
         trusted_label_pipeline: When True, scoring labels count regardless of
@@ -46,7 +46,7 @@ class RepositoryConfig:
 
     """
 
-    weight: float
+    emission_share: float
     inactive_at: Optional[str] = None
     additional_acceptable_branches: Optional[List[str]] = None
     trusted_label_pipeline: bool = False
@@ -56,11 +56,11 @@ class RepositoryConfig:
     eligibility_mode: bool = True
 
 
-def resolve_repo_weight(repo_config: Optional[RepositoryConfig]) -> float:
-    """Return the repo weight preserving full JSON precision, or the default for unknown repos."""
+def resolve_emission_share(repo_config: Optional[RepositoryConfig]) -> float:
+    """Return the repo emission share preserving full JSON precision, or the default for unknown repos."""
     if repo_config is None:
-        return DEFAULT_REPO_WEIGHT
-    return repo_config.weight
+        return DEFAULT_EMISSION_SHARE
+    return repo_config.emission_share
 
 
 @dataclass
@@ -131,7 +131,7 @@ def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
         for repo_name, metadata in data.items():
             try:
                 config = RepositoryConfig(
-                    weight=float(metadata.get('weight', 0.01)),
+                    emission_share=float(metadata.get('emission_share', 0.01)),
                     inactive_at=metadata.get('inactive_at'),
                     additional_acceptable_branches=metadata.get('additional_acceptable_branches'),
                     trusted_label_pipeline=bool(metadata.get('trusted_label_pipeline', False)),
@@ -148,9 +148,21 @@ def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
             except (ValueError, TypeError) as e:
                 bt.logging.warning(f'Could not parse config for {repo_name}: {e}, using defaults')
                 # Create config with defaults if parsing fails
-                normalized_data[repo_name.lower()] = RepositoryConfig(weight=float(metadata.get('weight', 0.01)))
+                normalized_data[repo_name.lower()] = RepositoryConfig(
+                    emission_share=float(metadata.get('emission_share', 0.01))
+                )
 
         bt.logging.debug(f'Successfully loaded {len(normalized_data)} repository entries from {weights_file}')
+
+        # Validate emission share invariant: sum must be in [0, 1]
+        if normalized_data:
+            total_share = sum(cfg.emission_share for cfg in normalized_data.values())
+            if total_share > 1.0 + 1e-9:
+                bt.logging.error(
+                    f'emission_share sum {total_share:.4f} exceeds 1.0 across {len(normalized_data)} repos'
+                )
+                return {}
+
         return normalized_data
 
     except FileNotFoundError:

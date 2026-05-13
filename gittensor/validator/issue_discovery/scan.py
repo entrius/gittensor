@@ -60,7 +60,7 @@ from gittensor.validator.utils.load_weights import (
     LanguageConfig,
     RepositoryConfig,
     TokenConfig,
-    resolve_repo_weight,
+    resolve_emission_share,
 )
 
 
@@ -620,7 +620,7 @@ def _mirror_issue_for_scoring(
     )
 
     adapted.discovery_base_score = base_score
-    adapted.discovery_repo_weight_multiplier = resolve_repo_weight(repo_config)
+    adapted.discovery_repo_weight_multiplier = resolve_emission_share(repo_config)
     adapted.discovery_time_decay_multiplier = round(calculate_time_decay(solving_pr.merged_at), 2)
     adapted.discovery_review_quality_multiplier = round(
         calculate_issue_review_quality_multiplier(solving_pr.review_summary.maintainer_changes_requested_count),

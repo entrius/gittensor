@@ -19,7 +19,7 @@ from gittensor.validator.utils.load_weights import (
     load_master_repo_weights,
     load_programming_language_weights,
     load_token_config,
-    resolve_repo_weight,
+    resolve_emission_share,
 )
 
 
@@ -111,6 +111,18 @@ class TestLoadMasterRepositories:
         repos = load_master_repo_weights()
         assert len(repos) > 0, 'Should have at least one repository'
 
+    def test_emission_share_sum_does_not_exceed_one(self):
+        """Total emission_share across all loaded repos must be ≤ 1.0."""
+        repos = load_master_repo_weights()
+        total = sum(cfg.emission_share for cfg in repos.values())
+        assert total <= 1.0 + 1e-9, f'emission_share sum {total:.4f} exceeds 1.0'
+
+    def test_each_emission_share_in_zero_one_range(self):
+        """Each emission_share must be in [0, 1]."""
+        repos = load_master_repo_weights()
+        for name, cfg in repos.items():
+            assert 0.0 <= cfg.emission_share <= 1.0, f'{name}: emission_share {cfg.emission_share} outside [0,1]'
+
     def test_repo_configs_are_repository_config_objects(self):
         """Each entry should be a RepositoryConfig object."""
         repos = load_master_repo_weights()
@@ -153,7 +165,7 @@ class TestRepositoryConfigTrustedLabelPipeline:
         attacker-controlled auto-labelers (release-drafter, actions/labeler)
         keep the maintainer-association gate in place.
         """
-        config = RepositoryConfig(weight=0.5)
+        config = RepositoryConfig(emission_share=0.5)
         assert config.trusted_label_pipeline is False
 
     def test_loader_parses_trusted_label_pipeline_true(self, tmp_path, monkeypatch):
@@ -166,9 +178,9 @@ class TestRepositoryConfigTrustedLabelPipeline:
         (fake_weights_dir / 'master_repositories.json').write_text(
             json.dumps(
                 {
-                    'foo/trusted': {'weight': 0.5, 'trusted_label_pipeline': True},
-                    'foo/untrusted': {'weight': 0.3},
-                    'foo/explicit-off': {'weight': 0.2, 'trusted_label_pipeline': False},
+                    'foo/trusted': {'emission_share': 0.5, 'trusted_label_pipeline': True},
+                    'foo/untrusted': {'emission_share': 0.3},
+                    'foo/explicit-off': {'emission_share': 0.2, 'trusted_label_pipeline': False},
                 }
             )
         )
@@ -185,7 +197,7 @@ class TestRepositoryConfigLabelMultipliers:
     """Dataclass + JSON-parsing tests for per-repo label multiplier config."""
 
     def test_label_multiplier_defaults(self):
-        config = RepositoryConfig(weight=0.5)
+        config = RepositoryConfig(emission_share=0.5)
 
         assert config.label_multipliers is None
         assert config.default_label_multiplier == pytest.approx(1.0)
@@ -198,11 +210,11 @@ class TestRepositoryConfigLabelMultipliers:
             json.dumps(
                 {
                     'foo/labeled': {
-                        'weight': 0.5,
+                        'emission_share': 0.5,
                         'label_multipliers': {'kind/*': 1.5, 'type:bug': 1.25},
                         'default_label_multiplier': 0.8,
                     },
-                    'foo/defaults': {'weight': 0.3},
+                    'foo/defaults': {'emission_share': 0.3},
                 }
             )
         )
@@ -247,7 +259,7 @@ class TestRepositoryConfigMirrorScoringFields:
     """Dataclass + JSON-parsing tests for mirror-only scoring fields."""
 
     def test_mirror_scoring_field_defaults(self):
-        config = RepositoryConfig(weight=0.5)
+        config = RepositoryConfig(emission_share=0.5)
 
         assert config.fixed_base_score is None
         assert config.eligibility_mode is True
@@ -260,11 +272,11 @@ class TestRepositoryConfigMirrorScoringFields:
             json.dumps(
                 {
                     'foo/fixed': {
-                        'weight': 0.5,
+                        'emission_share': 0.5,
                         'fixed_base_score': 12.5,
                         'eligibility_mode': False,
                     },
-                    'foo/defaults': {'weight': 0.3},
+                    'foo/defaults': {'emission_share': 0.3},
                 }
             )
         )
@@ -340,27 +352,27 @@ class TestBannedOrganizations:
         assert len(active_banned) == 0, f'Found {len(active_banned)} active repos from banned orgs: {active_banned}'
 
 
-class TestResolveRepoWeight:
-    """Tests for resolve_repo_weight — full-precision repo weight lookup."""
+class TestResolveEmissionShare:
+    """Tests for resolve_emission_share — full-precision repo emission share lookup."""
 
     def test_none_returns_default(self):
-        assert resolve_repo_weight(None) == 0.01
+        assert resolve_emission_share(None) == 0.01
 
     @pytest.mark.parametrize(
-        'weight',
+        'share_value',
         [0.0349, 0.0351, 0.0487, 0.1025, 0.2017, 1.0],
     )
-    def test_preserves_full_precision(self, weight):
-        config = RepositoryConfig(weight=weight)
-        assert resolve_repo_weight(config) == weight
+    def test_preserves_full_precision(self, share_value):
+        config = RepositoryConfig(emission_share=share_value)
+        assert resolve_emission_share(config) == share_value
 
     def test_live_master_repo_precision(self):
         """cronboard (0.0349) and fzf (0.0351) must not collapse to 0.03/0.04."""
         repos = load_master_repo_weights()
         if 'antoniorodr/cronboard' in repos:
-            assert resolve_repo_weight(repos['antoniorodr/cronboard']) == pytest.approx(0.0349, abs=1e-9)
+            assert resolve_emission_share(repos['antoniorodr/cronboard']) == pytest.approx(0.0349, abs=1e-9)
         if 'junegunn/fzf' in repos:
-            assert resolve_repo_weight(repos['junegunn/fzf']) == pytest.approx(0.0351, abs=1e-9)
+            assert resolve_emission_share(repos['junegunn/fzf']) == pytest.approx(0.0351, abs=1e-9)
 
 
 if __name__ == '__main__':

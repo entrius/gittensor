@@ -28,6 +28,7 @@ dev = [
     "pyright",
     "ruff==0.14.10",
     "pre-commit>=4.0",
+    "vulture==2.16",
 ]
 debug = [
     "debugpy==1.8.11",
@@ -55,3 +56,75 @@ quote-style = "single"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.vulture]
+# Dead-code scanner. Run via pre-push hook (`uv run vulture`) or directly.
+# Production tree only - `tests/` is omitted so prod symbols whose sole
+# references live in tests (test-only API, mock-only seams) get flagged.
+paths = ["gittensor", "neurons", "scripts"]
+exclude = [
+    ".venv/",
+    "smart-contracts/",
+    "assets/",
+    # Issue-bounty contract client: enum members and dataclass fields mirror
+    # the on-chain shape, so unused-name reports here are not actionable
+    "gittensor/validator/issue_competitions/contract_client.py",
+    # das-github-mirror response schema: dataclass fields mirror the upstream
+    # wire format and are kept even when no validator code reads them today
+    "gittensor/utils/mirror/models.py",
+]
+min_confidence = 60
+sort_by_size = true
+ignore_decorators = [
+    # Click command/group registration - vulture cannot see the registry calls
+    "@click.command",
+    "@click.group",
+    "@*.command",
+    "@*.group",
+]
+ignore_names = [
+    # `__exit__(self, exc_type, exc_value, traceback)` - dunder signature
+    "exc_type",
+    "exc_value",
+    "exc",
+    "tb",
+    "traceback",
+    # Click subclass overrides invoked by the framework
+    "get_help",
+    "command_class",
+    # Click `ParamType.convert(value, param, ctx)` subclass overrides
+    "convert",
+    # `lru_cache`'s synthetic cache-buster argument used by ttl_cache()
+    "ttl_hash",
+    # psycopg Connection attributes (autocommit setter, prepared-statement
+    # threshold) - written for side effects, read inside the driver
+    "autocommit",
+    "prepare_threshold",
+    # tree-sitter Parser attribute - setter bounds C-level parse time,
+    # consumed inside the native parser and never read back from Python
+    "timeout_micros",
+    # Required-env-var capture; kept for parity with `.env.example` even when
+    # no code reads it directly (wandb consumes WANDB_API_KEY from the env)
+    "WANDB_API_KEY",
+    # PRInfo TypedDict fields populated and read via `dict.get(...)`; vulture
+    # cannot link a string-keyed dict access to a typed attribute name
+    "author_id",
+    "review_count",
+    # Consumed only by `gittensor/utils/mirror/models.py`, excluded above as
+    # wire-format schema; the helper itself is otherwise invisible to vulture
+    "parse_optional_github_iso_to_utc",
+    # PRState enum members are resolved dynamically from the mirror state
+    # string via `PRState(pr.state)`; vulture only sees the constructor call
+    "MERGED",
+    "OPEN",
+    "CLOSED",
+    # Cascade from the contract_client.py exclusion above: this helper is
+    # called only from inside the excluded file
+    "read_contract_packed_storage",
+    # `PullRequest` / `Issue` dataclass fields populated from the mirror
+    # adapter; vulture sees the kwarg writes but no attribute reads on this
+    # branch - keep as schema for downstream consumers
+    "body_or_title_edited_at",
+    "head_ref_oid",
+    "base_ref_oid",
+]

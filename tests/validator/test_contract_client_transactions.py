@@ -56,7 +56,7 @@ _IDS = [row[0] for row in METHOD_TABLE]
 
 @pytest.fixture()
 def client():
-    with patch.object(IssueCompetitionContractClient, '__init__', lambda self, *a, **kw: None):
+    with patch.object(IssueCompetitionContractClient, '__init__', lambda self, *_args, **_kwargs: None):
         c = IssueCompetitionContractClient.__new__(IssueCompetitionContractClient)
         c.contract_address = '5FakeContract'
         c.subtensor = MagicMock()

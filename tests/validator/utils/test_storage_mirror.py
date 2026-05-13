@@ -67,7 +67,6 @@ def _make_storage_with_mock_repo():
             mock_repo = MagicMock()
             mock_repo.set_miner.return_value = 1
             mock_repo.store_pull_requests_bulk.return_value = 0  # actual count irrelevant
-            mock_repo.refresh_stale_pr_states.return_value = 0
             mock_repo.store_issues_bulk.return_value = 0
             mock_repo.store_file_changes_bulk.return_value = 0
             mock_repo.set_miner_evaluation.return_value = True
@@ -135,7 +134,7 @@ def test_cleanup_stale_called_with_commit_false():
 
     with patch(
         'gittensor.validator.oss_contributions.mirror.adapters.mirror_scored_pr_to_legacy_pull_request',
-        side_effect=lambda s, *a, **kw: s,
+        side_effect=lambda s, *_args, **_kwargs: s,
     ):
         storage.store_evaluation(eval_obj, {})
 
@@ -154,7 +153,7 @@ def test_failure_after_cleanup_triggers_rollback():
 
     with patch(
         'gittensor.validator.oss_contributions.mirror.adapters.mirror_scored_pr_to_legacy_pull_request',
-        side_effect=lambda s, *a, **kw: s,
+        side_effect=lambda s, *_args, **_kwargs: s,
     ):
         result = storage.store_evaluation(eval_obj, {})
 

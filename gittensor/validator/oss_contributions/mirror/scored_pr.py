@@ -27,7 +27,6 @@ class ScoredPR:
     pr: MirrorPullRequest
 
     # Multipliers (default 1.0 — neutral if not yet computed)
-    repo_weight_multiplier: float = 1.0
     issue_multiplier: float = 1.0
     open_pr_spam_multiplier: float = 1.0
     time_decay_multiplier: float = 1.0

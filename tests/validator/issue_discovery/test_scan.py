@@ -1335,7 +1335,9 @@ class TestCrossMinerOneIssuePerPr:
                 )
             )
             assert len(evaluation.issue_discovery_issues) == 7
-            assert all(issue.discovery_repo_weight_multiplier == 1.0 for issue in evaluation.issue_discovery_issues)
+            assert all(
+                not hasattr(issue, 'discovery_repo_weight_multiplier') for issue in evaluation.issue_discovery_issues
+            )
             return evaluation.issue_discovery_score
 
         assert _score_with_emission_share(0.1) == pytest.approx(_score_with_emission_share(0.9))

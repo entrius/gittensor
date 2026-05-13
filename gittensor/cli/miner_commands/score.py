@@ -68,7 +68,7 @@ _EVAL_SKIP: frozenset = frozenset(
         'unique_repos_contributed_to',
     }
 )
-_PR_SKIP: frozenset = frozenset({'pr', 'files', 'repo_weight_multiplier'})
+_PR_SKIP: frozenset = frozenset({'pr', 'files'})
 
 # @property accessors stored as columns in BULK_UPSERT_MINER_EVALUATION; pulled
 # in alongside dataclass fields so JSON keys match DB schema.

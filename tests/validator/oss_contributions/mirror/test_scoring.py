@@ -378,7 +378,6 @@ class TestScoringDataStoredGate:
 
         client.get_pr_files.assert_not_called()
         assert scored.base_score == pytest.approx(7.5)
-        assert scored.repo_weight_multiplier == pytest.approx(1.0)
 
 
 class TestFixedBaseScore:
@@ -853,7 +852,6 @@ class TestCollateralScoreAcceptsScoredPR:
 
         scored = ScoredPR(pr=_pr(state='OPEN'))
         scored.base_score = 25.0
-        scored.repo_weight_multiplier = 0.5
         scored.issue_multiplier = 1.0
         scored.label_multiplier = 1.0
 
@@ -911,7 +909,6 @@ class TestPrMultipliers:
             _config(emission_share=0.7, additional_branches=['test'], label_multipliers={'feature': 1.5}),
         )
 
-        assert scored.repo_weight_multiplier == 1.0
         assert scored.label == 'feature'
         assert scored.label_multiplier == pytest.approx(1.5)
         assert 0.0 <= scored.time_decay_multiplier <= 1.0
@@ -923,7 +920,6 @@ class TestPrMultipliers:
         scored = ScoredPR(pr=_pr(state='OPEN'))
         _calculate_pr_multipliers(scored, _config(emission_share=0.5))
 
-        assert scored.repo_weight_multiplier == 1.0
         # Time decay / review quality / credibility are merge-only — kept neutral here.
         assert scored.time_decay_multiplier == 1.0
         assert scored.credibility_multiplier == 1.0

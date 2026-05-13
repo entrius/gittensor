@@ -285,8 +285,7 @@ class MinerEvaluation:
     total_solved_issues: int = 0
     total_valid_solved_issues: int = 0  # solved issues where solving PR has token_score >= 5
     total_closed_issues: int = 0
-    total_open_issues: int = 0  # mirror-tracked open issues in lookback window (set by issue_discovery.scan)
-    issue_discovery_repo_scores: Dict[str, float] = field(default_factory=dict)
+    total_open_issues: int = 0  # current mirror-tracked open issues (set by issue_discovery.scan)
 
     @property
     def total_prs(self) -> int:

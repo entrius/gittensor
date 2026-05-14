@@ -100,6 +100,11 @@ TIME_DECAY_SIGMOID_MIDPOINT = 10  # days until 50% score loss
 TIME_DECAY_SIGMOID_STEEPNESS_SCALAR = 0.4
 TIME_DECAY_MIN_MULTIPLIER = 0.05  # 5% of score will retain through lookback window
 
+# Per-parse CPU budget for tree-sitter. The parser polls this flag in its
+# error-recovery loops; without it, adversarial inputs can spin forever in C
+# while holding the GIL. 2s is well above the millisecond cost of real files.
+TREE_SITTER_PARSE_TIMEOUT_MICROS = 2_000_000
+
 # comment nodes for token scoring
 COMMENT_NODE_TYPES = frozenset(
     {

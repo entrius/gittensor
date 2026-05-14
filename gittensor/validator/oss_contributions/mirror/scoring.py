@@ -97,7 +97,12 @@ async def score_miner_prs(
             bt.logging.info(
                 f'\n[{i}/{len(scored_prs)}] {label} PR #{scored.pr.pr_number} in {scored.pr.repo_full_name}'
             )
-            await score_pr(scored, eval_, master_repositories, programming_languages, token_config, client)
+            try:
+                await score_pr(scored, eval_, master_repositories, programming_languages, token_config, client)
+            except Exception as e:
+                bt.logging.warning(
+                    f'UID {eval_.uid}: scoring failed for PR #{scored.pr.pr_number} in {scored.pr.repo_full_name}: {e}'
+                )
 
 
 # ============================================================================

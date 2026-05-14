@@ -140,7 +140,8 @@ async def get_rewards(
     cached_uids -= penalized_uids
     # The cache store path ran before the penalty. Drop those snapshots so a
     # future fetch failure cannot restore pre-penalty PR scores.
-    self.evaluation_cache.evict_many(penalized_uids)
+    if penalized_uids:
+        self.evaluation_cache.evict_many(penalized_uids)
 
     # Finalize scores: apply eligibility gate, credibility, pioneer dividends, collateral
     finalize_miner_scores(miner_evaluations, master_repositories)

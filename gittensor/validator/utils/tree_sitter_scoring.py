@@ -312,6 +312,17 @@ def calculate_token_score_from_file_changes(
                     is_test_file=is_test_file,
                     scoring_method='skipped-large',
                 )
+            elif ext in programming_languages and programming_languages[ext].language is None:
+                lang_config = programming_languages[ext]
+                lines_to_score = min(file.changes, MAX_LINES_SCORED_FOR_NON_CODE_EXT)
+                file_result = FileScoreResult(
+                    filename=file.short_name,
+                    score=lang_config.weight * lines_to_score * file_weight,
+                    nodes_scored=lines_to_score,
+                    total_lines=file.changes,
+                    is_test_file=is_test_file,
+                    scoring_method='line-count',
+                )
             elif not weights.supports_tree_sitter(ext):
                 bt.logging.debug(f'  │   {file.short_name}: skipped (extension .{ext} not supported)')
                 file_result = FileScoreResult(

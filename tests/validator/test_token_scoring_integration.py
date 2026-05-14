@@ -533,5 +533,70 @@ class UserRegistry {
         assert breakdown.total_score == pytest.approx(9.99, abs=1e-6)
 
 
+class TestNullLanguageLineCountScoring:
+    """Configured null-language extensions must route to line-count, not skipped-unsupported."""
+
+    @pytest.fixture
+    def weights(self) -> TokenConfig:
+        return load_token_config()
+
+    @pytest.fixture
+    def prog_langs(self):
+        return load_programming_language_weights()
+
+    def _score_file(self, filename: str, content: str, weights: TokenConfig, prog_langs):
+        fc = FileChange(
+            pr_number=1,
+            repository_full_name='test/repo',
+            filename=filename,
+            changes=max(content.count('\n'), 1),
+            additions=max(content.count('\n'), 1),
+            deletions=0,
+            status='added',
+        )
+        result = calculate_token_score_from_file_changes(
+            [fc],
+            {filename: FileContentPair(old_content=None, new_content=content)},
+            weights,
+            prog_langs,
+        )
+        return result.file_results[0]
+
+    def test_graphql_scores_line_count(self, weights, prog_langs):
+        fr = self._score_file('schema.graphql', 'type Query { hello: String }\n', weights, prog_langs)
+        assert fr.scoring_method == 'line-count'
+        assert fr.score > 0.0
+
+    def test_gitignore_scores_line_count(self, weights, prog_langs):
+        fr = self._score_file('.gitignore', 'node_modules/\n*.pyc\n', weights, prog_langs)
+        assert fr.scoring_method == 'line-count'
+        assert fr.score > 0.0
+
+    def test_unknown_extension_stays_skipped_unsupported(self, weights, prog_langs):
+        fr = self._score_file('data.xyz123', 'some content\n', weights, prog_langs)
+        assert fr.scoring_method == 'skipped-unsupported'
+        assert fr.score == 0.0
+
+    def test_configured_tree_sitter_lang_still_uses_tree_diff(self, weights, prog_langs):
+        """Python has language='python' — must NOT be routed to line-count."""
+        fr = self._score_file('test.py', 'x = 1\n', weights, prog_langs)
+        assert fr.scoring_method == 'tree-diff'
+
+    def test_line_count_applies_configured_weight(self, weights, prog_langs):
+        """graphql weight=1.0, 1 changed line → score = 1.0."""
+        fr = self._score_file('schema.graphql', 'type Query { hello: String }\n', weights, prog_langs)
+        assert fr.scoring_method == 'line-count'
+        assert fr.score == pytest.approx(1.0, abs=1e-6)
+
+    def test_all_null_language_extensions_are_line_count(self, weights, prog_langs):
+        """Every null-language config entry must route to line-count."""
+        null_exts = [ext for ext, cfg in prog_langs.items() if cfg.language is None]
+        assert null_exts, 'Expected at least one null-language extension'
+        for ext in null_exts:
+            filename = f'testfile.{ext}'
+            fr = self._score_file(filename, 'line one\nline two\n', weights, prog_langs)
+            assert fr.scoring_method == 'line-count', f'.{ext} scored as {fr.scoring_method!r} instead of line-count'
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

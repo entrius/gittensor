@@ -152,6 +152,7 @@ class Issue:
     discovery_time_decay_multiplier: float = 1.0
     discovery_credibility_multiplier: float = 1.0
     discovery_open_issue_spam_multiplier: float = 1.0
+    discovery_label_multiplier: float = 1.0
 
     @property
     def is_transferred(self) -> bool:

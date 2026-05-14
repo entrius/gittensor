@@ -93,7 +93,7 @@ def _build_response(prs: list) -> MirrorPullRequestsResponse:
 
 
 def _mirror_repos(*names: str) -> dict:
-    return {name: RepositoryConfig(weight=0.5) for name in names}
+    return {name: RepositoryConfig(emission_share=0.5) for name in names}
 
 
 def _eval(github_id: str | None = '218712309') -> MinerEvaluation:
@@ -217,7 +217,7 @@ class TestInactiveRepo:
         )
         repos = {
             'entrius/gittensor-ui': RepositoryConfig(
-                weight=0.5,
+                emission_share=0.5,
                 inactive_at='2026-04-10T00:00:00Z',
             ),
         }

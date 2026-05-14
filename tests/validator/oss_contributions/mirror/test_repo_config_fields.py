@@ -63,8 +63,8 @@ def test_ineligible_miner_earns_only_from_eligibility_disabled_repo():
     evaluation.closed_prs = closed_prs
 
     repos = {
-        'foo/open-door': RepositoryConfig(weight=1.0, eligibility_mode=False),
-        'foo/gated': RepositoryConfig(weight=1.0, eligibility_mode=True),
+        'foo/open-door': RepositoryConfig(emission_share=1.0, eligibility_mode=False),
+        'foo/gated': RepositoryConfig(emission_share=1.0, eligibility_mode=True),
     }
 
     finalize_miner_scores({1: evaluation}, repos)
@@ -91,8 +91,8 @@ def test_eligibility_disabled_prs_do_not_unlock_gated_repo_rewards():
     evaluation.merged_prs = opt_out_prs + [gated]
 
     repos = {
-        **{pr.repository_full_name: RepositoryConfig(weight=1.0, eligibility_mode=False) for pr in opt_out_prs},
-        'foo/gated': RepositoryConfig(weight=1.0, eligibility_mode=True),
+        **{pr.repository_full_name: RepositoryConfig(emission_share=1.0, eligibility_mode=False) for pr in opt_out_prs},
+        'foo/gated': RepositoryConfig(emission_share=1.0, eligibility_mode=True),
     }
 
     finalize_miner_scores({1: evaluation}, repos)
@@ -116,8 +116,8 @@ def test_eligibility_disabled_closed_prs_do_not_penalize_gated_repo_eligibility(
     evaluation.closed_prs = opt_out_closed_prs
 
     repos = {
-        'foo/gated': RepositoryConfig(weight=1.0, eligibility_mode=True),
-        'foo/open-door': RepositoryConfig(weight=1.0, eligibility_mode=False),
+        'foo/gated': RepositoryConfig(emission_share=1.0, eligibility_mode=True),
+        'foo/open-door': RepositoryConfig(emission_share=1.0, eligibility_mode=False),
     }
 
     finalize_miner_scores({1: evaluation}, repos)
@@ -140,8 +140,8 @@ def test_eligibility_disabled_open_prs_do_not_spam_penalize_gated_rewards():
     evaluation.open_prs = opt_out_open_prs
 
     repos = {
-        'foo/gated': RepositoryConfig(weight=1.0, eligibility_mode=True),
-        'foo/open-door': RepositoryConfig(weight=1.0, eligibility_mode=False),
+        'foo/gated': RepositoryConfig(emission_share=1.0, eligibility_mode=True),
+        'foo/open-door': RepositoryConfig(emission_share=1.0, eligibility_mode=False),
     }
 
     finalize_miner_scores({1: evaluation}, repos)
@@ -161,7 +161,7 @@ def test_eligible_miner_scores_all_repos_with_existing_credibility_multiplier():
     evaluation = MinerEvaluation(uid=1, hotkey='hotkey', github_id='218712309')
     evaluation.merged_prs = prs
 
-    repos = {'foo/gated': RepositoryConfig(weight=1.0, eligibility_mode=True)}
+    repos = {'foo/gated': RepositoryConfig(emission_share=1.0, eligibility_mode=True)}
 
     finalize_miner_scores({1: evaluation}, repos)
 
@@ -185,8 +185,8 @@ def test_zero_history_miner_earns_only_from_eligibility_disabled_repo():
     evaluation.merged_prs = [opt_out, gated]
 
     repos = {
-        'foo/open-door': RepositoryConfig(weight=1.0, eligibility_mode=False),
-        'foo/gated': RepositoryConfig(weight=1.0, eligibility_mode=True),
+        'foo/open-door': RepositoryConfig(emission_share=1.0, eligibility_mode=False),
+        'foo/gated': RepositoryConfig(emission_share=1.0, eligibility_mode=True),
     }
 
     finalize_miner_scores({1: evaluation}, repos)
@@ -212,8 +212,8 @@ def test_eligibility_disabled_repo_open_collateral_does_not_reduce_gated_only_ea
     evaluation.open_prs = bypass_open_prs
 
     repos = {
-        'foo/gated': RepositoryConfig(weight=1.0, eligibility_mode=True),
-        'foo/open-door': RepositoryConfig(weight=1.0, eligibility_mode=False),
+        'foo/gated': RepositoryConfig(emission_share=1.0, eligibility_mode=True),
+        'foo/open-door': RepositoryConfig(emission_share=1.0, eligibility_mode=False),
     }
 
     finalize_miner_scores({1: evaluation}, repos)

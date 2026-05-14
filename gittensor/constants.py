@@ -74,7 +74,6 @@ EXTENSIONLESS_FILE_EXTENSIONS = {'dockerfile', 'makefile'}
 # =============================================================================
 # Repository & PR Scoring
 # =============================================================================
-DEFAULT_REPO_WEIGHT = 0.01  # fallback weight for repos not in master_repositories.json
 PR_LOOKBACK_DAYS = 35  # rolling window for scoring
 MERGED_PR_BASE_SCORE = 25
 MIN_TOKEN_SCORE_FOR_BASE_SCORE = 5  # PRs below this get 0 base score
@@ -154,11 +153,10 @@ OPEN_PR_COLLATERAL_PERCENT = 0.20
 # =============================================================================
 RECYCLE_UID = 0
 
-# Hardcoded emission splits per competition (replaces dynamic emissions)
-OSS_EMISSION_SHARE = 0.30  # 30% to OSS contributions (PR scoring)
-ISSUE_DISCOVERY_EMISSION_SHARE = 0.10  # 10% to issue discovery
-RECYCLE_EMISSION_SHARE = 0.45  # 45% to recycle UID 0
-# ISSUES_TREASURY_EMISSION_SHARE = 0.15 defined below (15% to smart contract treasury)
+# Combined scoring pool distributed by repository emission_share, then by per-repo PR/issue split.
+OSS_EMISSION_SHARE = 0.90
+DEFAULT_ISSUE_DISCOVERY_SHARE = 0.5
+EMISSION_SHARE_TOLERANCE = 1e-9
 
 # =============================================================================
 # Spam & Gaming Mitigation
@@ -187,5 +185,5 @@ MAX_OPEN_PR_THRESHOLD = 30  # Maximum open PR threshold (base + bonus capped at 
 # =============================================================================
 CONTRACT_ADDRESS = '5FWNdk8YNtNcHKrAx2krqenFrFAZG7vmsd2XN2isJSew3MrD'
 ISSUES_TREASURY_UID = 111  # UID of the smart contract neuron, if set to RECYCLE_UID then it's disabled
-ISSUES_TREASURY_EMISSION_SHARE = 0.15  # % of emissions allocated to funding issues treasury
+ISSUES_TREASURY_EMISSION_SHARE = 0.10  # % of emissions allocated to funding issues treasury
 MAX_ISSUE_ID = 1_000_000  # sanity-check upper bound for any real deployment

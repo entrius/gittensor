@@ -154,7 +154,7 @@ def _pr_bypasses_eligibility(
     pr: 'ScoredPR',
     master_repositories: Dict[str, RepositoryConfig],
 ) -> bool:
-    repo_config = master_repositories.get(pr.repository_full_name)
+    repo_config = master_repositories.get(pr.repository_full_name.lower())
     return repo_config is not None and not repo_config.eligibility_mode
 
 

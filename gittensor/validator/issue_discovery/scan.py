@@ -418,7 +418,7 @@ async def _score_miner_issues(
             )
             continue
 
-        repo_config = mirror_repos.get(issue.repo_full_name)
+        repo_config = mirror_repos.get(issue.repo_full_name.lower())
         if repo_config is None:
             continue
 

@@ -87,7 +87,7 @@ def _maybe_add_pr(
 ) -> None:
     """Apply load-time filters and bucket pr by state if it passes."""
 
-    repo_config = master_repositories.get(pr.repo_full_name)
+    repo_config = master_repositories.get(pr.repo_full_name.lower())
     if repo_config is None:
         # Mirror tracks more repos than the scoring set; skip-noise dominates the
         # log at info level when master_repositories is small. Demoted to debug.

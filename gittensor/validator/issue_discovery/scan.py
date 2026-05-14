@@ -129,7 +129,9 @@ async def run_issue_discovery(
 
     client = client or MirrorClient()
     lookback_date = datetime.now(timezone.utc) - timedelta(days=PR_LOOKBACK_DAYS)
-    enabled_names: Set[str] = set(mirror_repos.keys())
+    issue_enabled_names: Set[str] = {
+        name for name, config in mirror_repos.items() if config.issue_discovery_share > 0.0
+    }
 
     solving_pr_cache: Dict[Tuple[str, int], CachedSolvingPR] = _build_solving_pr_cache(miner_evaluations)
     cache_stats = _CacheStats()
@@ -171,8 +173,8 @@ async def run_issue_discovery(
             fetch_errors += 1
             continue
 
-        open_issue_count = _count_open_issues(current_response.issues, enabled_names)
-        filtered = [i for i in response.issues if i.repo_full_name in enabled_names]
+        open_issue_count = _count_open_issues(current_response.issues, issue_enabled_names)
+        filtered = [i for i in response.issues if i.repo_full_name in issue_enabled_names]
         if not filtered:
             _clear_issue_discovery_fields(evaluation)
             evaluation.total_open_issues = open_issue_count

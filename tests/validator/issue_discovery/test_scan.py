@@ -1349,3 +1349,70 @@ class TestCrossMinerOneIssuePerPr:
             return evaluation.issue_discovery_score
 
         assert _score_with_emission_share(0.1) == pytest.approx(_score_with_emission_share(0.9))
+
+    def test_zero_issue_discovery_share_repo_does_not_unlock_eligibility(self):
+        positive_repo = 'entrius/gittensor-ui'
+        zero_share_repo = 'entrius/gittensor'
+        issues = [_issue_dict(issue_number=10, repo=positive_repo, author_github_id='A', solved_by_pr=200)]
+        issues.extend(
+            _issue_dict(issue_number=20 + i, repo=zero_share_repo, author_github_id='A', solved_by_pr=300 + i)
+            for i in range(6)
+        )
+
+        client = Mock()
+        client.get_miner_issues.return_value = _response(issues)
+
+        evaluation = _eval(uid=1, github_id='A')
+        seed = MinerEvaluation(uid=99, hotkey='hkS', github_id='SEED')
+        seed.merged_prs = [
+            _scored_mirror_pr(positive_repo, 200),
+            *[_scored_mirror_pr(zero_share_repo, pr_number) for pr_number in range(300, 306)],
+        ]
+
+        _run(
+            run_issue_discovery(
+                {1: evaluation, 99: seed},
+                {
+                    positive_repo: RepositoryConfig(emission_share=0.5, issue_discovery_share=0.5),
+                    zero_share_repo: RepositoryConfig(emission_share=0.5, issue_discovery_share=0.0),
+                },
+                _EMPTY_LANGS,
+                _EMPTY_TOKEN_CONFIG,
+                client=client,
+            )
+        )
+
+        assert evaluation.total_solved_issues == 1
+        assert evaluation.total_valid_solved_issues == 1
+        assert evaluation.is_issue_eligible is False
+        assert evaluation.issue_discovery_score == 0.0
+        assert evaluation.issue_discovery_issues == []
+
+    def test_positive_issue_discovery_share_repo_still_unlocks_eligibility(self):
+        repo = 'entrius/gittensor-ui'
+        issues = [
+            _issue_dict(issue_number=10 + i, repo=repo, author_github_id='A', solved_by_pr=200 + i) for i in range(7)
+        ]
+        client = Mock()
+        client.get_miner_issues.return_value = _response(issues)
+
+        evaluation = _eval(uid=1, github_id='A')
+        seed = MinerEvaluation(uid=99, hotkey='hkS', github_id='SEED')
+        seed.merged_prs = [_scored_mirror_pr(repo, pr_number) for pr_number in range(200, 207)]
+
+        _run(
+            run_issue_discovery(
+                {1: evaluation, 99: seed},
+                {repo: RepositoryConfig(emission_share=0.5, issue_discovery_share=0.5)},
+                _EMPTY_LANGS,
+                _EMPTY_TOKEN_CONFIG,
+                client=client,
+            )
+        )
+
+        assert evaluation.total_solved_issues == 7
+        assert evaluation.total_valid_solved_issues == 7
+        assert evaluation.is_issue_eligible is True
+        assert len(evaluation.issue_discovery_issues) == 7
+        assert {issue.repository_full_name for issue in evaluation.issue_discovery_issues} == {repo}
+        assert evaluation.issue_discovery_score > 0

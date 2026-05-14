@@ -20,6 +20,8 @@ import requests
 from rich.console import Console
 
 from gittensor.cli.issue_commands.tables import build_pr_table
+from gittensor.cli.json_output import emit_error_json
+from gittensor.cli.json_output import emit_json as emit_json
 from gittensor.constants import BASE_GITHUB_API_URL, MAX_ISSUE_ID, NETWORK_MAP
 from gittensor.validator.issue_competitions.storage_utils import (
     ISSUES_MAPPING_ROOT_KEY,
@@ -192,28 +194,6 @@ def print_error(message: str) -> None:
 def print_warning(message: str) -> None:
     """Print a warning message."""
     err_console.print(f'\n[yellow]{message}[/yellow]\n', highlight=True)
-
-
-def emit_error_json(message: str, error_type: str = 'cli_error') -> None:
-    """Emit a machine-readable error payload to stdout."""
-    payload = {
-        'success': False,
-        'error': {
-            'type': error_type,
-            'message': message,
-        },
-    }
-    # click.echo writes plain text to stdout without Rich styling.
-    click.echo(json.dumps(payload), err=False)
-
-
-def emit_json(payload: Any, pretty: bool = True, default: Optional[Callable] = str) -> None:
-    """Emit a machine-readable JSON payload to stdout."""
-    if pretty:
-        output = json.dumps(payload, indent=2, ensure_ascii=False, default=default)
-    else:
-        output = json.dumps(payload, separators=(',', ':'), ensure_ascii=False, default=default)
-    click.echo(output, err=False)
 
 
 def handle_exception(as_json: bool, message: str, error_type: str = 'cli_error') -> None:
@@ -501,16 +481,6 @@ def validate_github_issue(
     return data
 
 
-def validate_issue_id(value: int, param_name: str = 'issue_id') -> int:
-    """Validate an on-chain issue ID (1 to 999999, u32-friendly range)."""
-    if value < 1 or value >= MAX_ISSUE_ID:
-        raise click.BadParameter(
-            f'{param_name} must be between 1 and {MAX_ISSUE_ID - 1} (got {value})',
-            param_hint=param_name,
-        )
-    return value
-
-
 def validate_ss58_address(address: str, param_name: str = 'address') -> str:
     """Validate an SS58 address.
 
@@ -542,30 +512,6 @@ def validate_ss58_address(address: str, param_name: str = 'address') -> str:
         )
 
     return address
-
-
-def require_valid_issue_id(value: int, param_name: str = 'issue_id') -> int:
-    """Validate an issue ID, raising ClickException on failure.
-
-    Returns:
-        The validated issue ID.
-    """
-    try:
-        return validate_issue_id(value, param_name)
-    except click.BadParameter as e:
-        raise click.ClickException(str(e))
-
-
-def require_valid_ss58(address: str, param_name: str = 'address') -> str:
-    """Validate an SS58 address, raising ClickException on failure.
-
-    Returns:
-        The validated SS58 address string.
-    """
-    try:
-        return validate_ss58_address(address, param_name)
-    except click.BadParameter as e:
-        raise click.ClickException(str(e))
 
 
 def load_config() -> Dict[str, Any]:

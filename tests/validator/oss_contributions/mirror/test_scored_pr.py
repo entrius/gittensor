@@ -1,4 +1,4 @@
-"""Unit tests for ScoredMirrorPR.
+"""Unit tests for ScoredPR.
 
 Covers:
 - Composition: raw response data accessed via .pr.<field>; scoring fields default neutrally
@@ -16,7 +16,7 @@ scored_pr_module = pytest.importorskip(
 )
 mirror_models = pytest.importorskip('gittensor.utils.mirror.models')
 
-ScoredMirrorPR = scored_pr_module.ScoredMirrorPR
+ScoredPR = scored_pr_module.ScoredPR
 MirrorPullRequest = mirror_models.MirrorPullRequest
 MirrorReviewSummary = mirror_models.MirrorReviewSummary
 
@@ -56,15 +56,14 @@ def _make_pr(state: str = 'MERGED', merged_at_iso: str | None = '2026-04-18T10:0
 
 class TestComposition:
     def test_raw_data_accessed_through_pr(self):
-        scored = ScoredMirrorPR(pr=_make_pr())
+        scored = ScoredPR(pr=_make_pr())
         assert scored.pr.pr_number == 100
         assert scored.pr.repo_full_name == 'entrius/gittensor-ui'
         assert scored.pr.author_github_id == '1'
 
     def test_scoring_fields_default_neutral(self):
-        scored = ScoredMirrorPR(pr=_make_pr())
+        scored = ScoredPR(pr=_make_pr())
         for mult in [
-            scored.repo_weight_multiplier,
             scored.issue_multiplier,
             scored.open_pr_spam_multiplier,
             scored.time_decay_multiplier,
@@ -82,44 +81,42 @@ class TestComposition:
 
 class TestPioneerEligible:
     def test_unmerged_not_eligible(self):
-        scored = ScoredMirrorPR(pr=_make_pr(state='OPEN', merged_at_iso=None))
+        scored = ScoredPR(pr=_make_pr(state='OPEN', merged_at_iso=None))
         scored.token_score = 100.0
         assert scored.is_pioneer_eligible() is False
 
     def test_merged_below_token_threshold_not_eligible(self):
-        scored = ScoredMirrorPR(pr=_make_pr())
+        scored = ScoredPR(pr=_make_pr())
         scored.token_score = 1.0  # below MIN_TOKEN_SCORE_FOR_BASE_SCORE (5)
         assert scored.is_pioneer_eligible() is False
 
     def test_merged_at_threshold_eligible(self):
-        scored = ScoredMirrorPR(pr=_make_pr())
+        scored = ScoredPR(pr=_make_pr())
         scored.token_score = 5.0  # equals MIN_TOKEN_SCORE_FOR_BASE_SCORE
         assert scored.is_pioneer_eligible() is True
 
     def test_merged_above_threshold_eligible(self):
-        scored = ScoredMirrorPR(pr=_make_pr())
+        scored = ScoredPR(pr=_make_pr())
         scored.token_score = 50.0
         assert scored.is_pioneer_eligible() is True
 
 
 class TestCalculateFinalEarnedScore:
     def test_neutral_multipliers_returns_base(self):
-        scored = ScoredMirrorPR(pr=_make_pr())
+        scored = ScoredPR(pr=_make_pr())
         scored.base_score = 25.0
         result = scored.calculate_final_earned_score()
         assert result == 25.0
         assert scored.earned_score == 25.0
 
     def test_multipliers_compose(self):
-        scored = ScoredMirrorPR(pr=_make_pr())
+        scored = ScoredPR(pr=_make_pr())
         scored.base_score = 100.0
-        scored.repo_weight_multiplier = 0.5
         scored.review_quality_multiplier = 0.5
-        # 100 * 0.5 * 0.5 (others 1.0) = 25
-        assert scored.calculate_final_earned_score() == 25.0
+        assert scored.calculate_final_earned_score() == 50.0
 
     def test_zero_multiplier_zeros_score(self):
-        scored = ScoredMirrorPR(pr=_make_pr())
+        scored = ScoredPR(pr=_make_pr())
         scored.base_score = 100.0
         scored.review_quality_multiplier = 0.0
         assert scored.calculate_final_earned_score() == 0.0

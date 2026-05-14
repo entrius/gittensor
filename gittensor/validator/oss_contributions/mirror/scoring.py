@@ -1,23 +1,24 @@
 """Per-PR scoring for the mirror path.
 
-Mirror analogue of ``gittensor.validator.oss_contributions.scoring``. Scope:
-- Compute base_score for each PR via the existing token-scoring infra
-- Compute per-PR multipliers: repo_weight, time_decay, review_quality, label, issue
-- The eligibility gate (``_should_skip_merged_mirror_pr``) is exported and
-  used at LOAD time by ``mirror.load._maybe_add_pr`` — rejected PRs never
-  enter ``mirror_merged_prs`` (matches legacy ``should_skip_merged_pr`` flow)
+Scope:
+- Compute base_score for each PR via the existing token-scoring infra.
+- Compute per-PR multipliers: time_decay, review_quality, label, issue.
+- The merge-eligibility gate (``_should_skip_merged_mirror_pr``) is exported and
+  applied at LOAD time by ``mirror.load._maybe_add_pr`` — rejected PRs never
+  enter ``merged_prs``, so the merged_count used by ``check_eligibility``
+  is not inflated by PRs we would have rejected.
 
-Cross-path concerns handled by ``finalize_miner_scores`` in the legacy
-scoring module, which walks both ``merged_pull_requests`` and
-``mirror_merged_prs``: spam_multiplier, credibility_multiplier, pioneer
-dividends, final earned_score composition, and base/earned/nodes aggregation.
+Cross-path concerns handled by ``finalize_miner_scores`` in
+``gittensor.validator.oss_contributions.scoring`` (walks ``merged_prs``):
+spam_multiplier, credibility_multiplier, pioneer dividends, final earned_score
+composition, and base/earned/nodes aggregation.
 
 Anti-gaming notes:
 - ``edited_after_merge`` is NOT a PR-level gate — it gates only the issue
-  bonus multiplier in ``_is_valid_linked_issue``, matching legacy
-  ``is_valid_issue``.
-- Mirror's ``actor_association`` per label lets ``_resolve_trusted_scoring_label``
-  require maintainer-applied labels; legacy can't do this and accepts any-applier.
+  bonus multiplier in ``_is_valid_linked_issue``.
+- ``_resolve_trusted_scoring_label`` requires maintainer-applied labels on
+  repos with ``trusted_label_pipeline=True``; this catches GitHub-App-applied
+  labels (NULL ``actor_association``) on repos with an authoritative labeler.
 """
 
 import asyncio
@@ -27,7 +28,7 @@ from typing import Dict, List, Optional, Tuple
 
 import bittensor as bt
 
-from gittensor.classes import FileChange, PrScoringResult, ScoringCategory
+from gittensor.classes import FileChange, MinerEvaluation, PrScoringResult, ScoringCategory
 from gittensor.constants import (
     CONTRIBUTION_SCORE_FOR_FULL_BONUS,
     MAINTAINER_ASSOCIATIONS,
@@ -44,8 +45,7 @@ from gittensor.utils.mirror.client import MirrorClient, MirrorRequestError
 from gittensor.utils.mirror.models import MirrorLinkedIssue, MirrorPullRequest
 from gittensor.validator.oss_contributions.label_resolution import resolve_highest_label_multiplier
 from gittensor.validator.oss_contributions.mirror.adapters import mirror_files_to_legacy
-from gittensor.validator.oss_contributions.mirror.evaluation import MirrorMinerEvaluation
-from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredMirrorPR
+from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredPR
 from gittensor.validator.oss_contributions.scoring import (
     calculate_review_quality_multiplier,
 )
@@ -54,7 +54,6 @@ from gittensor.validator.utils.load_weights import (
     LanguageConfig,
     RepositoryConfig,
     TokenConfig,
-    resolve_repo_weight,
 )
 from gittensor.validator.utils.tree_sitter_scoring import calculate_token_score_from_file_changes
 
@@ -63,34 +62,34 @@ from gittensor.validator.utils.tree_sitter_scoring import calculate_token_score_
 # ============================================================================
 
 
-async def score_mirror_miner_prs(
-    mirror_eval: MirrorMinerEvaluation,
-    mirror_repos: Dict[str, RepositoryConfig],
+async def score_miner_prs(
+    eval_: MinerEvaluation,
+    master_repositories: Dict[str, RepositoryConfig],
     programming_languages: Dict[str, LanguageConfig],
     token_config: TokenConfig,
     client: Optional[MirrorClient] = None,
 ) -> None:
-    """Score all PRs in a MirrorMinerEvaluation.
+    """Score all PRs on a MinerEvaluation.
 
-    Mutates the eval: per-PR sets base_score + multipliers; aggregates token
-    outputs onto the eval; tracks unique repos.
+    Mutates the eval: per-PR sets base_score + multipliers; tracks unique
+    repos. Token totals are aggregated later in ``finalize_miner_scores``.
     """
     bt.logging.info('')
     bt.logging.info('-' * 50)
     bt.logging.info(
-        f'Scoring (mirror) UID {mirror_eval.uid}: '
-        f'{len(mirror_eval.merged_prs)} merged | '
-        f'{len(mirror_eval.open_prs)} open | '
-        f'{len(mirror_eval.closed_prs)} closed'
+        f'Scoring UID {eval_.uid}: '
+        f'{len(eval_.merged_prs)} merged | '
+        f'{len(eval_.open_prs)} open | '
+        f'{len(eval_.closed_prs)} closed'
     )
     bt.logging.info('-' * 50)
 
     client = client or MirrorClient()
 
     pr_groups = [
-        ('MERGED', mirror_eval.merged_prs),
-        ('OPEN', mirror_eval.open_prs),
-        ('CLOSED', mirror_eval.closed_prs),
+        ('MERGED', eval_.merged_prs),
+        ('OPEN', eval_.open_prs),
+        ('CLOSED', eval_.closed_prs),
     ]
 
     for label, scored_prs in pr_groups:
@@ -98,7 +97,7 @@ async def score_mirror_miner_prs(
             bt.logging.info(
                 f'\n[{i}/{len(scored_prs)}] {label} PR #{scored.pr.pr_number} in {scored.pr.repo_full_name}'
             )
-            await score_mirror_pr(scored, mirror_eval, mirror_repos, programming_languages, token_config, client)
+            await score_pr(scored, eval_, master_repositories, programming_languages, token_config, client)
 
 
 # ============================================================================
@@ -106,62 +105,71 @@ async def score_mirror_miner_prs(
 # ============================================================================
 
 
-async def score_mirror_pr(
-    scored: ScoredMirrorPR,
-    mirror_eval: MirrorMinerEvaluation,
-    mirror_repos: Dict[str, RepositoryConfig],
+async def score_pr(
+    scored: ScoredPR,
+    eval_: MinerEvaluation,
+    master_repositories: Dict[str, RepositoryConfig],
     programming_languages: Dict[str, LanguageConfig],
     token_config: TokenConfig,
     client: MirrorClient,
 ) -> None:
-    """Score a single mirror PR. Populates ScoredMirrorPR scoring fields in place."""
+    """Score a single PR. Populates ScoredPR scoring fields in place."""
     pr = scored.pr
-    repo_config = mirror_repos.get(pr.repo_full_name)
+    repo_config = master_repositories.get(pr.repo_full_name)
     if not repo_config:
-        bt.logging.warning(f'{pr.repo_full_name} not in mirror_repos. Skipping...')
+        bt.logging.warning(f'{pr.repo_full_name} not in master_repositories. Skipping...')
         return
 
     # Eligibility gate for MERGED PRs already ran at LOAD time (see
-    # load_mirror_miner_prs → _should_skip_merged_mirror_pr). By this point
-    # mirror_eval.merged_prs contains only eligibility-passed PRs — legacy parity
-    # with load_miners_prs which applies should_skip_merged_pr pre-append.
+    # load_miner_prs → _should_skip_merged_mirror_pr). By this point
+    # eval_.merged_prs contains only eligibility-passed PRs.
+
+    has_fixed_base = repo_config.fixed_base_score is not None
 
     # Mirror signals it has no stored files for this PR (pending backfill, in-flight
-    # file job, etc.) — skip the round trip.
-    if not pr.scoring_data_stored:
+    # file job, etc.) — skip the round trip unless the repo explicitly supplies
+    # a fixed base score.
+    if not pr.scoring_data_stored and not has_fixed_base:
         return
 
     # Fetch file contents via the mirror's lazy /pulls/.../files endpoint.
-    try:
-        files = (await asyncio.to_thread(client.get_pr_files, pr.repo_full_name, pr.pr_number)).files
-    except MirrorRequestError as e:
-        bt.logging.warning(f'Mirror file fetch failed for PR #{pr.pr_number}: {e}')
-        return
-    scored.files = files
+    if pr.scoring_data_stored:
+        try:
+            files = (await asyncio.to_thread(client.get_pr_files, pr.repo_full_name, pr.pr_number)).files
+        except MirrorRequestError as e:
+            bt.logging.warning(f'Mirror file fetch failed for PR #{pr.pr_number}: {e}')
+            if not has_fixed_base:
+                return
+            files = []
+        scored.files = files
 
-    if not files:
-        bt.logging.warning(f'No files returned for PR #{pr.pr_number}')
-        return
+        if files:
+            file_changes, file_contents = mirror_files_to_legacy(pr.repo_full_name, pr.pr_number, files)
 
-    file_changes, file_contents = mirror_files_to_legacy(pr.repo_full_name, pr.pr_number, files)
+            result = calculate_base_score_for_pr_files(file_changes, file_contents, programming_languages, token_config)
+            scored.token_score = result.token_score
+            scored.structural_count = result.structural_count
+            scored.structural_score = result.structural_score
+            scored.leaf_count = result.leaf_count
+            scored.leaf_score = result.leaf_score
+            scored.total_nodes_scored = result.total_nodes_scored
+            scored.code_density = result.code_density
+            scored.base_score = result.base_score
+        elif not has_fixed_base:
+            bt.logging.warning(f'No files returned for PR #{pr.pr_number}')
+            return
 
-    result = calculate_base_score_for_pr_files(file_changes, file_contents, programming_languages, token_config)
-    scored.token_score = result.token_score
-    scored.structural_count = result.structural_count
-    scored.structural_score = result.structural_score
-    scored.leaf_count = result.leaf_count
-    scored.leaf_score = result.leaf_score
-    scored.total_nodes_scored = result.total_nodes_scored
-    scored.code_density = result.code_density
-    scored.base_score = result.base_score
+    if repo_config.fixed_base_score is not None:
+        # Only the base score is overridden. Token fields stay token-derived so
+        # eligibility, pioneer, and reporting gates keep their evidence signal.
+        scored.base_score = repo_config.fixed_base_score
 
     _calculate_pr_multipliers(scored, repo_config)
 
     if pr.state == 'MERGED':
-        mirror_eval.unique_repos_contributed_to.add(pr.repo_full_name)
-        # Token totals are aggregated later in finalize_miner_scores (legacy parity
-        # — score sets per-PR state, finalize rolls up eval-level totals across
-        # both paths).
+        eval_.unique_repos_contributed_to.add(pr.repo_full_name)
+        # Token totals are aggregated later in finalize_miner_scores; this
+        # function only sets per-PR state.
 
 
 # ============================================================================
@@ -169,10 +177,10 @@ async def score_mirror_pr(
 # ============================================================================
 
 
-def _should_skip_merged_mirror_pr(scored: ScoredMirrorPR, repo_config: RepositoryConfig) -> Tuple[bool, Optional[str]]:
-    """Mirror-side eligibility gate for MERGED PRs.
+def _should_skip_merged_mirror_pr(scored: ScoredPR, repo_config: RepositoryConfig) -> Tuple[bool, Optional[str]]:
+    """Eligibility gate for MERGED PRs.
 
-    At parity with legacy ``should_skip_merged_pr``:
+    Checks:
     - mergedAt presence (mirror always sets this for MERGED PRs but verify defensively)
     - Author not a maintainer (already filtered at load time, but recheck for safety)
     - Self-merge: skip unless review_summary.approved_count > 0
@@ -184,17 +192,15 @@ def _should_skip_merged_mirror_pr(scored: ScoredMirrorPR, repo_config: Repositor
       set (blocks e.g. ``staging -> main`` when both acceptable). Only applies
       to same-repo PRs — fork branch names are arbitrary.
 
-    Note on ``edited_after_merge``: mirror surfaces this anti-gaming flag, but
-    legacy gates only the issue bonus on it (see ``_is_valid_linked_issue``),
-    not the whole PR. Mirror matches that surgical scope — a post-merge PR
-    body/title edit invalidates the issue multiplier but the PR's base score
-    and other multipliers still apply.
+    Note on ``edited_after_merge``: gates only the issue bonus
+    (see ``_is_valid_linked_issue``), not the whole PR — a post-merge body/title
+    edit invalidates the issue multiplier but the PR's base score and other
+    multipliers still apply.
 
     When the mirror response is missing a field (older data predating the
     schema additions), some checks fall through rather than false-positive-
     blocking. Concretely: missing ``head_ref`` or ``head_repo_full_name`` skips
-    the head_ref check. Missing ``default_branch`` falls back to ``main``
-    (legacy parity with GraphQL path).
+    the head_ref check. Missing ``default_branch`` falls back to ``main``.
     """
     pr = scored.pr
 
@@ -221,7 +227,7 @@ def _should_skip_merged_mirror_pr(scored: ScoredMirrorPR, repo_config: Repositor
     # branch. Only applies to same-repo PRs: fork branch names are arbitrary.
     # Falls through when head_ref or head_repo_full_name is missing (older data).
     is_same_repo = pr.head_repo_full_name is not None and pr.head_repo_full_name == pr.repo_full_name
-    if additional and pr.head_ref and is_same_repo and branch_matches_pattern(pr.head_ref, acceptable):
+    if acceptable and pr.head_ref and is_same_repo and branch_matches_pattern(pr.head_ref, acceptable):
         return True, (
             f'PR #{pr.pr_number} source branch {pr.head_ref!r} is itself in '
             f'acceptable branches — merging between acceptable branches not allowed'
@@ -239,7 +245,7 @@ def _should_skip_merged_mirror_pr(scored: ScoredMirrorPR, repo_config: Repositor
 class BaseScoreResult:
     """Result of computing the base score for a PR's file diff.
 
-    Used by both the OSS scoring path (to populate ``ScoredMirrorPR`` fields)
+    Used by both the OSS scoring path (to populate ``ScoredPR`` fields)
     and the issue discovery path (to produce ``discovery_base_score`` for a
     solving PR that wasn't scored by OSS, typically a non-miner solving PR).
     """
@@ -262,9 +268,8 @@ def calculate_base_score_for_pr_files(
 ) -> BaseScoreResult:
     """Density-scaled SOURCE token score plus cross-category contribution bonus.
 
-    Same formula as legacy ``calculate_base_score`` / mirror OSS scoring.
     Returns a ``BaseScoreResult`` the caller copies onto whatever container
-    they're populating (e.g. ``ScoredMirrorPR`` for OSS, ``Issue`` discovery
+    they're populating (e.g. ``ScoredPR`` for OSS, ``Issue`` discovery
     fields for issue discovery).
     """
     scoring_result: PrScoringResult = calculate_token_score_from_file_changes(
@@ -331,16 +336,14 @@ def calculate_base_score_for_pr_files(
 # ============================================================================
 
 
-def _calculate_pr_multipliers(scored: ScoredMirrorPR, repo_config: RepositoryConfig) -> None:
-    """Compute repo_weight, time_decay, review_quality, label, issue multipliers.
+def _calculate_pr_multipliers(scored: ScoredPR, repo_config: RepositoryConfig) -> None:
+    """Compute time_decay, review_quality, label, and issue multipliers.
 
     Spam and credibility multipliers are deferred to ``finalize_miner_scores``
-    — they depend on counts combined across both legacy and mirror paths.
+    — they depend on per-miner aggregate counts.
     """
     pr = scored.pr
     is_merged = pr.state == 'MERGED'
-
-    scored.repo_weight_multiplier = resolve_repo_weight(repo_config)
 
     chosen_label, label_multiplier = _resolve_trusted_scoring_label(pr, repo_config)
     scored.label = chosen_label
@@ -390,13 +393,12 @@ def _resolve_trusted_scoring_label(pr: MirrorPullRequest, repo_config: Repositor
 # ============================================================================
 
 
-def _calculate_issue_multiplier(scored: ScoredMirrorPR) -> float:
-    """Mirror analogue of ``calculate_issue_multiplier`` in legacy scoring.py.
+def _calculate_issue_multiplier(scored: ScoredPR) -> float:
+    """Return the multiplier earned from valid linked issues on a PR.
 
-    Kept separate (vs. unifying with the legacy version) because ``Issue`` and
-    ``MirrorLinkedIssue`` differ on attribute names and the underlying validators
-    apply different anti-gaming gates. See the legacy docstring for the full
-    rationale.
+    Maintainer-authored valid issues bump the multiplier higher
+    (``MAINTAINER_ISSUE_MULTIPLIER`` vs ``STANDARD_ISSUE_MULTIPLIER``).
+    Returns 1.0 if no linked issues pass the anti-gaming gates.
     """
     pr = scored.pr
     if not pr.linked_issues:
@@ -408,8 +410,8 @@ def _calculate_issue_multiplier(scored: ScoredMirrorPR) -> float:
         bt.logging.info(f'PR #{pr.pr_number} - Solved no valid linked issues')
         return 1.0
 
-    # Legacy parity (PR #673): prefer a maintainer-authored valid issue so the
-    # multiplier doesn't depend on mirror response ordering of linked_issues.
+    # Prefer a maintainer-authored valid issue so the multiplier doesn't depend
+    # on mirror response ordering of linked_issues (regression seen in PR #673).
     issue = next(
         (li for li in valid if li.author_association in MAINTAINER_ASSOCIATIONS),
         valid[0],
@@ -424,17 +426,16 @@ def _calculate_issue_multiplier(scored: ScoredMirrorPR) -> float:
 def _is_valid_linked_issue(li: MirrorLinkedIssue, pr: MirrorPullRequest) -> bool:
     """Anti-gaming gates for issue → PR multiplier credit.
 
-    Mirrors legacy ``is_valid_issue`` semantics:
-    - Reject transferred issues (mirror-only — legacy has no signal)
-    - Missing author / self-issue (uses github_id for immutability)
-    - Issue created after the PR
-    - Any CLOSED issue must have state_reason=COMPLETED (regardless of PR state;
-      matches legacy's ``_is_completed_when_closed``). NOT_PLANNED / reopened
-      closures never grant a multiplier.
+    - Reject transferred issues.
+    - Missing author / self-issue (uses github_id for immutability).
+    - Issue created after the PR.
+    - Any CLOSED issue must have state_reason=COMPLETED — NOT_PLANNED / reopened
+      closures never grant a multiplier. Applies regardless of PR state, so the
+      gate covers OPEN-PR collateral as well.
     - Additional MERGED-PR-only gates: edited_after_merge, issue must be CLOSED,
-      close-timing window vs. merge (rejects BOTH too-far-after AND too-far-before
-      semantically — negative days means the issue closed before the PR merged,
-      which means the PR wasn't the solver).
+      close-timing window vs. merge (rejects both too-far-after AND too-far-before
+      — negative days means the issue closed before the PR merged, so the PR
+      can't have been the solver).
     """
     if li.is_transferred:
         bt.logging.warning(f'Skipping linked issue #{li.number} - transferred')
@@ -452,9 +453,8 @@ def _is_valid_linked_issue(li: MirrorLinkedIssue, pr: MirrorPullRequest) -> bool
         bt.logging.warning(f'Skipping linked issue #{li.number} - created after PR')
         return False
 
-    # Legacy parity: state_reason check applies regardless of PR state. Legacy's
-    # _is_completed_when_closed returns True for OPEN issues, False for CLOSED
-    # issues with non-COMPLETED state_reason. Applies to OPEN-PR collateral too.
+    # state_reason check applies regardless of PR state — OPEN-PR collateral
+    # also requires that any CLOSED linked issue closed as COMPLETED.
     if li.state == 'CLOSED' and li.state_reason != 'COMPLETED':
         bt.logging.warning(f'Skipping linked issue #{li.number} - state_reason={li.state_reason} (need COMPLETED)')
         return False
@@ -470,9 +470,9 @@ def _is_valid_linked_issue(li: MirrorLinkedIssue, pr: MirrorPullRequest) -> bool
             return False
 
         if li.closed_at:
-            # Signed days diff (matches legacy). Negative means the issue was
-            # closed BEFORE the PR merged — in that case the PR cannot be what
-            # closed the issue, so it's not a valid solver.
+            # Signed days diff. Negative means the issue was closed BEFORE the
+            # PR merged — in that case the PR cannot be what closed the issue,
+            # so it's not a valid solver.
             days_diff = (li.closed_at - pr.merged_at).total_seconds() / SECONDS_PER_DAY
             if days_diff > MAX_ISSUE_CLOSE_WINDOW_DAYS or days_diff < 0:
                 bt.logging.warning(

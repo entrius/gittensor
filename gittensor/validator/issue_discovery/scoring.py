@@ -7,7 +7,7 @@ The legacy timeline-scraping path (``score_discovered_issues``,
 ``_collect_issues_from_prs``, ``_merge_scan_issues``, ``scan_closed_issues``)
 has been removed — unreliable solver detection was the original motivator for
 migrating issue discovery to the mirror. The functions here are the math-only
-helpers still used by the mirror path (``issue_discovery.mirror_scan``): the
+helpers still used by ``issue_discovery.scan``: the
 review-quality multiplier, open-issue spam threshold, credibility formula, and
 eligibility gate.
 """

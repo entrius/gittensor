@@ -15,11 +15,11 @@ import pytest
 from gittensor.validator.utils.load_weights import (
     LanguageConfig,
     RepositoryConfig,
+    RepositoryRegistryError,
     TokenConfig,
     load_master_repo_weights,
     load_programming_language_weights,
     load_token_config,
-    resolve_repo_weight,
 )
 
 
@@ -107,9 +107,9 @@ class TestLoadMasterRepositories:
         assert isinstance(repos, dict)
 
     def test_master_repositories_not_empty(self):
-        """Should load many repositories."""
+        """Should load at least the entrius core repos."""
         repos = load_master_repo_weights()
-        assert len(repos) > 100, 'Should have many repositories'
+        assert len(repos) > 0, 'Should have at least one repository'
 
     def test_repo_configs_are_repository_config_objects(self):
         """Each entry should be a RepositoryConfig object."""
@@ -122,14 +122,6 @@ class TestLoadMasterRepositories:
         repos = load_master_repo_weights()
         for repo_name in repos.keys():
             assert repo_name == repo_name.lower(), f'{repo_name} should be lowercase'
-
-    def test_mirror_enabled_field_present_on_live_configs(self):
-        """Live master_repositories.json entries load with a bool mirror_enabled."""
-        repos = load_master_repo_weights()
-        for repo_name, config in repos.items():
-            assert isinstance(config.mirror_enabled, bool), (
-                f'{repo_name} mirror_enabled should be bool, got {type(config.mirror_enabled)}'
-            )
 
     def test_trusted_label_pipeline_field_present_on_live_configs(self):
         """Live master_repositories.json entries load with a bool trusted_label_pipeline."""
@@ -151,44 +143,6 @@ class TestLoadMasterRepositories:
             )
 
 
-class TestRepositoryConfigMirrorFlag:
-    """Dataclass-level tests for the mirror_enabled field + its JSON parsing."""
-
-    def test_mirror_enabled_default_false(self):
-        """RepositoryConfig constructor defaults mirror_enabled to False."""
-        config = RepositoryConfig(weight=0.5)
-        assert config.mirror_enabled is False
-
-    def test_mirror_enabled_explicit_true(self):
-        """RepositoryConfig accepts mirror_enabled=True."""
-        config = RepositoryConfig(weight=0.5, mirror_enabled=True)
-        assert config.mirror_enabled is True
-
-    def test_loader_parses_mirror_enabled_true(self, tmp_path, monkeypatch):
-        """load_master_repo_weights() parses mirror_enabled:true from JSON."""
-        import json
-
-        from gittensor.validator.utils import load_weights as lw
-
-        fake_weights_dir = tmp_path
-        (fake_weights_dir / 'master_repositories.json').write_text(
-            json.dumps(
-                {
-                    'foo/mirror-repo': {'weight': 0.5, 'mirror_enabled': True},
-                    'foo/legacy-repo': {'weight': 0.3},
-                    'foo/explicit-off': {'weight': 0.2, 'mirror_enabled': False},
-                }
-            )
-        )
-        monkeypatch.setattr(lw, '_get_weights_dir', lambda: fake_weights_dir)
-
-        repos = lw.load_master_repo_weights()
-
-        assert repos['foo/mirror-repo'].mirror_enabled is True
-        assert repos['foo/legacy-repo'].mirror_enabled is False
-        assert repos['foo/explicit-off'].mirror_enabled is False
-
-
 class TestRepositoryConfigTrustedLabelPipeline:
     """Dataclass + JSON-parsing tests for trusted_label_pipeline (issue #911)."""
 
@@ -199,7 +153,7 @@ class TestRepositoryConfigTrustedLabelPipeline:
         attacker-controlled auto-labelers (release-drafter, actions/labeler)
         keep the maintainer-association gate in place.
         """
-        config = RepositoryConfig(weight=0.5)
+        config = RepositoryConfig(emission_share=0.5)
         assert config.trusted_label_pipeline is False
 
     def test_loader_parses_trusted_label_pipeline_true(self, tmp_path, monkeypatch):
@@ -212,9 +166,9 @@ class TestRepositoryConfigTrustedLabelPipeline:
         (fake_weights_dir / 'master_repositories.json').write_text(
             json.dumps(
                 {
-                    'foo/trusted': {'weight': 0.5, 'trusted_label_pipeline': True},
-                    'foo/untrusted': {'weight': 0.3},
-                    'foo/explicit-off': {'weight': 0.2, 'trusted_label_pipeline': False},
+                    'foo/trusted': {'emission_share': 0.5, 'trusted_label_pipeline': True},
+                    'foo/untrusted': {'emission_share': 0.3},
+                    'foo/explicit-off': {'emission_share': 0.2, 'trusted_label_pipeline': False},
                 }
             )
         )
@@ -231,7 +185,7 @@ class TestRepositoryConfigLabelMultipliers:
     """Dataclass + JSON-parsing tests for per-repo label multiplier config."""
 
     def test_label_multiplier_defaults(self):
-        config = RepositoryConfig(weight=0.5)
+        config = RepositoryConfig(emission_share=0.5)
 
         assert config.label_multipliers is None
         assert config.default_label_multiplier == pytest.approx(1.0)
@@ -244,11 +198,11 @@ class TestRepositoryConfigLabelMultipliers:
             json.dumps(
                 {
                     'foo/labeled': {
-                        'weight': 0.5,
+                        'emission_share': 0.5,
                         'label_multipliers': {'kind/*': 1.5, 'type:bug': 1.25},
                         'default_label_multiplier': 0.8,
                     },
-                    'foo/defaults': {'weight': 0.3},
+                    'foo/defaults': {'emission_share': 0.3},
                 }
             )
         )
@@ -258,6 +212,7 @@ class TestRepositoryConfigLabelMultipliers:
 
         assert repos['foo/labeled'].label_multipliers == {'kind/*': 1.5, 'type:bug': 1.25}
         assert repos['foo/labeled'].default_label_multiplier == pytest.approx(0.8)
+
         assert repos['foo/defaults'].label_multipliers is None
         assert repos['foo/defaults'].default_label_multiplier == pytest.approx(1.0)
 
@@ -286,6 +241,57 @@ class TestRepositoryConfigLabelMultipliers:
         assert 0.0 <= float(metadata['default_label_multiplier']) <= 20.0, (
             f'{repo_name} default_label_multiplier must be within [0.0, 20.0]'
         )
+
+
+class TestRepositoryConfigMirrorScoringFields:
+    """Dataclass + JSON-parsing tests for mirror-only scoring fields."""
+
+    def test_mirror_scoring_field_defaults(self):
+        config = RepositoryConfig(emission_share=0.5)
+
+        assert config.fixed_base_score is None
+        assert config.eligibility_mode is True
+
+    def test_loader_parses_mirror_scoring_fields(self, tmp_path, monkeypatch):
+        from gittensor.validator.utils import load_weights as lw
+
+        fake_weights_dir = tmp_path
+        (fake_weights_dir / 'master_repositories.json').write_text(
+            json.dumps(
+                {
+                    'foo/fixed': {
+                        'emission_share': 0.5,
+                        'fixed_base_score': 12.5,
+                        'eligibility_mode': False,
+                    },
+                    'foo/defaults': {'emission_share': 0.3},
+                }
+            )
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: fake_weights_dir)
+
+        repos = lw.load_master_repo_weights()
+
+        assert repos['foo/fixed'].fixed_base_score == pytest.approx(12.5)
+        assert repos['foo/fixed'].eligibility_mode is False
+        assert repos['foo/defaults'].fixed_base_score is None
+        assert repos['foo/defaults'].eligibility_mode is True
+
+    def test_live_mirror_scoring_fields_have_valid_shape(self):
+        """Loader passes mirror scoring fields through unchanged — CI fails when a
+        bad value is committed to master_repositories.json."""
+        repos = load_master_repo_weights()
+        for repo_name, config in repos.items():
+            if config.fixed_base_score is not None:
+                assert isinstance(config.fixed_base_score, (int, float)) and not isinstance(
+                    config.fixed_base_score, bool
+                ), f'{repo_name} fixed_base_score must be numeric, got {type(config.fixed_base_score)}'
+                assert 0.0 <= float(config.fixed_base_score) <= 100.0, (
+                    f'{repo_name} fixed_base_score must be within [0.0, 100.0]'
+                )
+            assert isinstance(config.eligibility_mode, bool), (
+                f'{repo_name} eligibility_mode must be bool, got {type(config.eligibility_mode)}'
+            )
 
 
 class TestBannedOrganizations:
@@ -334,27 +340,110 @@ class TestBannedOrganizations:
         assert len(active_banned) == 0, f'Found {len(active_banned)} active repos from banned orgs: {active_banned}'
 
 
-class TestResolveRepoWeight:
-    """Tests for resolve_repo_weight — full-precision repo weight lookup."""
-
-    def test_none_returns_default(self):
-        assert resolve_repo_weight(None) == 0.01
+class TestRepositoryEmissionShare:
+    """Tests for bounded repo emission_share loading."""
 
     @pytest.mark.parametrize(
-        'weight',
+        'emission_share',
         [0.0349, 0.0351, 0.0487, 0.1025, 0.2017, 1.0],
     )
-    def test_preserves_full_precision(self, weight):
-        config = RepositoryConfig(weight=weight)
-        assert resolve_repo_weight(config) == weight
+    def test_preserves_full_precision(self, emission_share):
+        config = RepositoryConfig(emission_share=emission_share)
+        assert config.emission_share == emission_share
 
-    def test_live_master_repo_precision(self):
-        """cronboard (0.0349) and fzf (0.0351) must not collapse to 0.03/0.04."""
+    def test_issue_discovery_share_defaults_even_split(self):
+        config = RepositoryConfig(emission_share=0.2)
+        assert config.issue_discovery_share == pytest.approx(0.5)
+
+    def test_loader_parses_issue_discovery_share(self, tmp_path, monkeypatch):
+        from gittensor.validator.utils import load_weights as lw
+
+        fake_weights_dir = tmp_path
+        (fake_weights_dir / 'master_repositories.json').write_text(
+            json.dumps(
+                {
+                    'foo/pr-only': {'emission_share': 0.4, 'issue_discovery_share': 0.0},
+                    'foo/issues-only': {'emission_share': 0.6, 'issue_discovery_share': 1.0},
+                }
+            )
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: fake_weights_dir)
+
+        repos = lw.load_master_repo_weights()
+
+        assert repos['foo/pr-only'].issue_discovery_share == pytest.approx(0.0)
+        assert repos['foo/issues-only'].issue_discovery_share == pytest.approx(1.0)
+
+    def test_loader_accepts_sum_less_than_one(self, tmp_path, monkeypatch):
+        from gittensor.validator.utils import load_weights as lw
+
+        fake_weights_dir = tmp_path
+        (fake_weights_dir / 'master_repositories.json').write_text(
+            json.dumps({'foo/a': {'emission_share': 0.2}, 'foo/b': {'emission_share': 0.3}})
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: fake_weights_dir)
+
+        repos = lw.load_master_repo_weights()
+
+        assert set(repos) == {'foo/a', 'foo/b'}
+        assert sum(config.emission_share for config in repos.values()) == pytest.approx(0.5)
+
+    @pytest.mark.parametrize(
+        'metadata',
+        [
+            {'emission_share': -0.01},
+            {'emission_share': 1.01},
+            {'emission_share': 0.5, 'issue_discovery_share': -0.01},
+            {'emission_share': 0.5, 'issue_discovery_share': 1.01},
+        ],
+    )
+    def test_loader_rejects_out_of_range_values(self, tmp_path, monkeypatch, metadata):
+        from gittensor.validator.utils import load_weights as lw
+
+        fake_weights_dir = tmp_path
+        (fake_weights_dir / 'master_repositories.json').write_text(json.dumps({'foo/bad': metadata}))
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: fake_weights_dir)
+
+        with pytest.raises(RepositoryRegistryError):
+            lw.load_master_repo_weights()
+
+    @pytest.mark.parametrize(
+        'metadata',
+        [
+            {'emission_share': True},
+            {'emission_share': 0.5, 'issue_discovery_share': False},
+        ],
+    )
+    def test_loader_rejects_boolean_share_values(self, tmp_path, monkeypatch, metadata):
+        from gittensor.validator.utils import load_weights as lw
+
+        fake_weights_dir = tmp_path
+        (fake_weights_dir / 'master_repositories.json').write_text(json.dumps({'foo/bad': metadata}))
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: fake_weights_dir)
+
+        with pytest.raises(RepositoryRegistryError, match='must be a float'):
+            lw.load_master_repo_weights()
+
+    def test_loader_rejects_sum_greater_than_one(self, tmp_path, monkeypatch):
+        from gittensor.validator.utils import load_weights as lw
+
+        fake_weights_dir = tmp_path
+        (fake_weights_dir / 'master_repositories.json').write_text(
+            json.dumps({'foo/a': {'emission_share': 0.6}, 'foo/b': {'emission_share': 0.5}})
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: fake_weights_dir)
+
+        with pytest.raises(RepositoryRegistryError, match='total emission_share must be <= 1.0'):
+            lw.load_master_repo_weights()
+
+    def test_live_master_repo_emission_shares_are_valid(self):
         repos = load_master_repo_weights()
-        if 'antoniorodr/cronboard' in repos:
-            assert resolve_repo_weight(repos['antoniorodr/cronboard']) == pytest.approx(0.0349, abs=1e-9)
-        if 'junegunn/fzf' in repos:
-            assert resolve_repo_weight(repos['junegunn/fzf']) == pytest.approx(0.0351, abs=1e-9)
+        total = sum(config.emission_share for config in repos.values())
+
+        assert 0.0 <= total <= 1.0
+        for repo_name, config in repos.items():
+            assert 0.0 <= config.emission_share <= 1.0, f'{repo_name} emission_share out of range'
+            assert 0.0 <= config.issue_discovery_share <= 1.0, f'{repo_name} issue_discovery_share out of range'
 
 
 if __name__ == '__main__':

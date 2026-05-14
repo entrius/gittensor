@@ -67,12 +67,9 @@ def _zero_for_duplicate_penalty(eval_: MinerEvaluation, reason: str) -> None:
     """
     eval_.failed_reason = reason
     # OSS contribution state
-    eval_.merged_pull_requests = []
-    eval_.open_pull_requests = []
-    eval_.closed_pull_requests = []
-    eval_.mirror_merged_prs = []
-    eval_.mirror_open_prs = []
-    eval_.mirror_closed_prs = []
+    eval_.merged_prs = []
+    eval_.open_prs = []
+    eval_.closed_prs = []
     eval_.unique_repos_contributed_to = set()
     eval_.unique_repos_count = 0
     eval_.is_eligible = False
@@ -147,5 +144,4 @@ def validate_response_and_initialize_miner_evaluation(
         miner_eval.github_pr_fetch_failed = True
         return miner_eval
 
-    miner_eval.github_pat = pat
     return miner_eval

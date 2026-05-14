@@ -34,9 +34,10 @@ def _idx(uids: set[int], uid: int) -> int:
     return sorted(uids).index(uid)
 
 
-def _evaluation(uid: int, prs=None, issues=None) -> MinerEvaluation:
+def _evaluation(uid: int, prs=None, issues=None, open_prs=None) -> MinerEvaluation:
     evaluation = MinerEvaluation(uid=uid, hotkey=f'hk-{uid}', github_id=str(uid))
     evaluation.merged_prs = list(prs or [])
+    evaluation.open_prs = list(open_prs or [])
     evaluation.issue_discovery_issues = list(issues or [])
     return evaluation
 
@@ -73,6 +74,12 @@ def _scored_pr(repo: str, number: int, earned_score: float) -> ScoredPR:
         review_summary=MirrorReviewSummary(),
     )
     return ScoredPR(pr=pr, earned_score=earned_score)
+
+
+def _open_pr(repo: str, number: int, collateral_score: float) -> ScoredPR:
+    pr = _scored_pr(repo, number, earned_score=0.0)
+    pr.collateral_score = collateral_score
+    return pr
 
 
 def _discovered_issue(repo: str, number: int, earned_score: float) -> Issue:
@@ -121,6 +128,57 @@ class TestAllocationInvarianceToPrVolume:
         assert rewards[_idx(miner_uids, 1)] == pytest.approx(repo_slice * 0.6)
         assert rewards[_idx(miner_uids, 2)] == pytest.approx(repo_slice * 0.4)
         assert rewards[_idx(miner_uids, 1)] + rewards[_idx(miner_uids, 2)] == pytest.approx(repo_slice)
+
+
+class TestOpenPrCollateralAllocation:
+    def test_repo_pr_allocation_uses_collateral_adjusted_scores(self):
+        repos = {'r/collateral': _config(emission_share=0.2, issue_discovery_share=0.0)}
+        miner_uids = _uids(1, 2)
+        evaluations = {
+            1: _evaluation(1, prs=[_scored_pr('r/collateral', 100, earned_score=120.0)]),
+            2: _evaluation(
+                2,
+                prs=[_scored_pr('r/collateral', 200, earned_score=80.0)],
+                open_prs=[_open_pr('r/collateral', 201, collateral_score=20.0)],
+            ),
+        }
+
+        rewards = blend_emission_pools(evaluations, repos, miner_uids)
+
+        repo_slice = 0.2 * OSS_EMISSION_SHARE
+        assert rewards[_idx(miner_uids, 1)] == pytest.approx(repo_slice * (120.0 / 180.0))
+        assert rewards[_idx(miner_uids, 2)] == pytest.approx(repo_slice * (60.0 / 180.0))
+
+    def test_repo_pr_allocation_remains_raw_ratio_without_collateral(self):
+        repos = {'r/no-collateral': _config(emission_share=0.2, issue_discovery_share=0.0)}
+        miner_uids = _uids(1, 2)
+        evaluations = {
+            1: _evaluation(1, prs=[_scored_pr('r/no-collateral', 100, earned_score=120.0)]),
+            2: _evaluation(2, prs=[_scored_pr('r/no-collateral', 200, earned_score=80.0)]),
+        }
+
+        rewards = blend_emission_pools(evaluations, repos, miner_uids)
+
+        repo_slice = 0.2 * OSS_EMISSION_SHARE
+        assert rewards[_idx(miner_uids, 1)] == pytest.approx(repo_slice * 0.6)
+        assert rewards[_idx(miner_uids, 2)] == pytest.approx(repo_slice * 0.4)
+
+    def test_repo_pr_allocation_clamps_collateral_adjusted_score_at_zero(self):
+        repos = {'r/clamp': _config(emission_share=0.2, issue_discovery_share=0.0)}
+        miner_uids = _uids(1, 2)
+        evaluations = {
+            1: _evaluation(1, prs=[_scored_pr('r/clamp', 100, earned_score=50.0)]),
+            2: _evaluation(
+                2,
+                prs=[_scored_pr('r/clamp', 200, earned_score=10.0)],
+                open_prs=[_open_pr('r/clamp', 201, collateral_score=20.0)],
+            ),
+        }
+
+        rewards = blend_emission_pools(evaluations, repos, miner_uids)
+
+        assert rewards[_idx(miner_uids, 1)] == pytest.approx(0.2 * OSS_EMISSION_SHARE)
+        assert rewards[_idx(miner_uids, 2)] == pytest.approx(0.0)
 
 
 class TestCrossRepoIsolation:

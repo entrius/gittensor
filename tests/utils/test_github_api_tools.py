@@ -25,7 +25,6 @@ github_api_tools = pytest.importorskip(
 )
 
 get_github_identity = github_api_tools.get_github_identity
-get_github_id = github_api_tools.get_github_id
 find_prs_for_issue = github_api_tools.find_prs_for_issue
 execute_graphql_query = github_api_tools.execute_graphql_query
 check_github_issue_closed = github_api_tools.check_github_issue_closed
@@ -33,26 +32,6 @@ check_github_issue_closed = github_api_tools.check_github_issue_closed
 
 class TestOtherGitHubAPIFunctions:
     """Test suite for other GitHub API functions with existing retry logic."""
-
-    @patch('gittensor.utils.github_api_tools.requests.get')
-    @patch('gittensor.utils.github_api_tools.time.sleep')
-    @patch('gittensor.utils.github_api_tools.bt.logging')
-    def test_get_github_id_retry_logic(self, mock_logging, mock_sleep, mock_get):
-        """Test that get_github_id retries on failure."""
-        mock_response_success = Mock()
-        mock_response_success.status_code = 200
-        mock_response_success.json.return_value = {'id': 12345}
-
-        mock_get.side_effect = [
-            Exception('Timeout'),
-            Exception('Timeout'),
-            mock_response_success,
-        ]
-
-        result = get_github_id('fake_token')
-
-        assert result == '12345'
-        assert mock_get.call_count == 3
 
     @patch('gittensor.utils.github_api_tools.requests.get')
     @patch('gittensor.utils.github_api_tools.time.sleep')

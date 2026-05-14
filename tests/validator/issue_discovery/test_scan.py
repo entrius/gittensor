@@ -306,6 +306,7 @@ class TestRunMirrorIssueDiscovery:
             )
         )
         assert eval_.total_solved_issues == 1  # credibility counts
+        assert eval_.total_valid_solved_issues == 0
         # But no discovery_earned_score because self-solve
         assert eval_.issue_discovery_score == 0
 
@@ -1019,12 +1020,16 @@ class TestOpenIssueSpamSourceIsMirror:
             )
             for i in range(2)
         ]
-        solved_issues = [_issue_dict(issue_number=300 + i, author_github_id=f'discoverer{i}') for i in range(8)]
+        solved_issues = [
+            _issue_dict(issue_number=300 + i, author_github_id=f'discoverer{i}', solved_by_pr=300 + i) for i in range(8)
+        ]
         client = Mock()
         client.get_miner_issues.return_value = _response(open_issues + solved_issues)
 
         eval_ = _eval()
-        eval_.merged_prs = [_scored_mirror_pr('entrius/gittensor-ui', 100, token_score=100.0)]
+        eval_.merged_prs = [
+            _scored_mirror_pr('entrius/gittensor-ui', pr_number, token_score=100.0) for pr_number in range(300, 308)
+        ]
 
         _run(
             run_issue_discovery(
@@ -1206,9 +1211,9 @@ class TestCrossMinerOneIssuePerPr:
         assert e_a.total_solved_issues == 7
         assert e_b.total_solved_issues == 7
         assert e_a.total_valid_solved_issues == 7
-        assert e_b.total_valid_solved_issues == 7
+        assert e_b.total_valid_solved_issues == 6
         assert e_a.is_issue_eligible
-        assert e_b.is_issue_eligible
+        assert not e_b.is_issue_eligible
 
         # ``issue_token_score`` accumulates only over SCORED PRs (default
         # ``_scored_mirror_pr`` token_score is 100.0), so this is the
@@ -1216,10 +1221,43 @@ class TestCrossMinerOneIssuePerPr:
         # 6 (shared PR 100 is canonical for A only and credibility-only for B).
         assert e_a.issue_token_score == 700.0
         assert e_b.issue_token_score == 600.0
-        # All solving PRs share identical scoring inputs at this issue mix, so
-        # the discovery_score ratio collapses to 7:6.
-        assert e_a.issue_discovery_score > e_b.issue_discovery_score > 0
-        assert e_a.issue_discovery_score / e_b.issue_discovery_score == pytest.approx(7 / 6, rel=1e-2)
+        assert e_a.issue_discovery_score > 0
+        assert e_b.issue_discovery_score == 0
+
+    def test_non_canonical_siblings_do_not_satisfy_valid_solved_gate(self):
+        """Seven issues closed by one qualifying PR count as one valid solved issue."""
+        client = Mock()
+        issues = [
+            _issue_dict(
+                issue_number=50 + i,
+                author_github_id='A',
+                solved_by_pr=100,
+                solving_pr_author='SOLVER',
+                created_at=f'2026-04-{i + 1:02d}T00:00:00Z',
+            )
+            for i in range(7)
+        ]
+        client.get_miner_issues.return_value = _response(issues)
+
+        eval_ = _eval(uid=1, github_id='A')
+        seed = MinerEvaluation(uid=99, hotkey='hkS', github_id='SEED')
+        seed.merged_prs = [_scored_mirror_pr('entrius/gittensor-ui', 100)]
+
+        _run(
+            run_issue_discovery(
+                {1: eval_, 99: seed},
+                _mirror_repos('entrius/gittensor-ui'),
+                _EMPTY_LANGS,
+                _EMPTY_TOKEN_CONFIG,
+                client=client,
+            )
+        )
+
+        assert eval_.total_solved_issues == 7
+        assert eval_.total_valid_solved_issues == 1
+        assert len(eval_.issue_discovery_issues) == 0
+        assert not eval_.is_issue_eligible
+        assert eval_.issue_discovery_score == 0
 
     def test_within_miner_one_issue_per_pr_still_holds(self):
         """One miner authoring two issues both closed by the same PR — the
@@ -1270,7 +1308,7 @@ class TestCrossMinerOneIssuePerPr:
 
         # 8 solved (both shared-PR issues counted for credibility), eligible.
         assert eval_.total_solved_issues == 8
-        assert eval_.total_valid_solved_issues == 8
+        assert eval_.total_valid_solved_issues == 7
         assert eval_.is_issue_eligible
         # ``issue_token_score`` only accumulates over SCORED PRs (default
         # ``_scored_mirror_pr`` token_score is 100.0). 7 distinct scoring PRs

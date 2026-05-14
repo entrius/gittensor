@@ -1,60 +1,66 @@
 {
   "entrius/allways": {
-    "weight": 0.05,
-    "trusted_label_pipeline": true,
+    "emission_share": 0.05017719,
+    "issue_discovery_share": 1.0,
     "label_multipliers": {
       "bug": 1.25,
       "enhancement": 1.0,
       "refactor": 0.25
-    }
+    },
+    "trusted_label_pipeline": true
   },
   "entrius/allways-ui": {
-    "weight": 0.01,
-    "trusted_label_pipeline": true,
+    "emission_share": 0.01106825,
+    "issue_discovery_share": 0.0,
     "label_multipliers": {
-      "feature": 1.25,
       "bug": 1.1,
       "enhancement": 1.0,
+      "feature": 1.25,
       "refactor": 0.5
-    }
+    },
+    "trusted_label_pipeline": true
   },
   "entrius/das-github-mirror": {
-    "weight": 0.02,
-    "trusted_label_pipeline": true,
+    "emission_share": 0.0200651,
+    "issue_discovery_share": 0.5,
     "label_multipliers": {
       "bug": 1.25,
       "enhancement": 1.1,
       "refactor": 0.1
-    }
+    },
+    "trusted_label_pipeline": true
   },
   "entrius/gittensor": {
-    "weight": 0.1,
-    "trusted_label_pipeline": true,
+    "emission_share": 0.101274,
+    "issue_discovery_share": 0.25,
     "label_multipliers": {
-      "feature": 1.5,
       "bug": 1.1,
       "enhancement": 1.25,
+      "feature": 1.5,
       "refactor": 0.25
-    }
+    },
+    "trusted_label_pipeline": true
   },
   "entrius/gittensor-ui": {
-    "weight": 0.03,
-    "trusted_label_pipeline": true,
+    "emission_share": 0.03017,
+    "issue_discovery_share": 0.0,
     "label_multipliers": {
-      "feature": 1.25,
       "bug": 1.1,
       "enhancement": 1.0,
+      "feature": 1.25,
       "refactor": 0.5
-    }
+    },
+    "trusted_label_pipeline": true
   },
   "entrius/oc-1": {
-    "weight": 0.5,
-    "trusted_label_pipeline": true,
-    "fixed_base_score": 1.0,
-    "eligibility_mode": false,
     "default_label_multiplier": 0.0,
+    "eligibility_mode": false,
+    "emission_share": 0.52782093,
+    "fixed_base_score": 1.0,
+    "issue_discovery_share": 0.0,
     "label_multipliers": {
       "benchmark-improvement": 1.0
-    }
+    },
+    "trusted_label_pipeline": true
   }
 }

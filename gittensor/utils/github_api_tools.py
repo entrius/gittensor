@@ -165,11 +165,6 @@ def get_github_identity(token: str) -> GitHubIdentityResult:
     return GitHubIdentityResult(None, GitHubIdentityStatus.TRANSIENT_FAILURE)
 
 
-def get_github_id(token: str) -> Optional[str]:
-    """Get GitHub numeric user id (as string) using a PAT."""
-    return get_github_identity(token).github_id
-
-
 # GraphQL fragment used by both issue submissions and solver detection.
 _PR_TIMELINE_QUERY = """
 query($owner: String!, $name: String!, $issueNumber: Int!) {

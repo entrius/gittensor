@@ -265,31 +265,38 @@ def calculate_token_score_from_file_changes(
         is_test_file = file.is_test_file()
         file_weight = TEST_FILE_CONTRIBUTION_WEIGHT if is_test_file else 1.0
 
-        if file.status == 'removed':
-            file_result = FileScoreResult(
-                filename=file.short_name,
-                score=0.0,
-                nodes_scored=0,
-                total_lines=file.deletions,
-                is_test_file=is_test_file,
-                scoring_method='skipped',
-            )
-        elif ext in NON_CODE_EXTENSIONS:
-            lines_to_score = min(file.changes, MAX_LINES_SCORED_FOR_NON_CODE_EXT)
-            lang_config = programming_languages.get(ext)
-            lang_weight = lang_config.weight if lang_config else DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT
-            file_result = FileScoreResult(
-                filename=file.short_name,
-                score=lang_weight * lines_to_score * file_weight,
-                nodes_scored=lines_to_score,
-                total_lines=file.changes,
-                is_test_file=is_test_file,
-                scoring_method='line-count',
-            )
+        if ext in NON_CODE_EXTENSIONS:
+            if file.status == 'removed':
+                file_result = FileScoreResult(
+                    filename=file.short_name,
+                    score=0.0,
+                    nodes_scored=0,
+                    total_lines=file.deletions,
+                    is_test_file=is_test_file,
+                    scoring_method='skipped',
+                )
+            else:
+                lines_to_score = min(file.changes, MAX_LINES_SCORED_FOR_NON_CODE_EXT)
+                lang_config = programming_languages.get(ext)
+                lang_weight = lang_config.weight if lang_config else DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT
+                file_result = FileScoreResult(
+                    filename=file.short_name,
+                    score=lang_weight * lines_to_score * file_weight,
+                    nodes_scored=lines_to_score,
+                    total_lines=file.changes,
+                    is_test_file=is_test_file,
+                    scoring_method='line-count',
+                )
         else:
             content_pair = file_contents.get(file.filename)
+            old_content = content_pair.old_content if content_pair is not None else None
+            new_content = content_pair.new_content if content_pair is not None else None
 
-            if content_pair is None or content_pair.new_content is None:
+            if (
+                content_pair is None
+                or (file.status == 'removed' and old_content is None)
+                or (file.status != 'removed' and new_content is None)
+            ):
                 bt.logging.debug(f'  │   {file.short_name}: skipped (binary or fetch failed)')
                 file_result = FileScoreResult(
                     filename=file.short_name,
@@ -299,9 +306,8 @@ def calculate_token_score_from_file_changes(
                     is_test_file=is_test_file,
                     scoring_method='skipped-binary',
                 )
-            elif len(content_pair.new_content.encode('utf-8')) > MAX_FILE_SIZE_BYTES or (
-                content_pair.old_content is not None
-                and len(content_pair.old_content.encode('utf-8')) > MAX_FILE_SIZE_BYTES
+            elif (new_content is not None and len(new_content.encode('utf-8')) > MAX_FILE_SIZE_BYTES) or (
+                old_content is not None and len(old_content.encode('utf-8')) > MAX_FILE_SIZE_BYTES
             ):
                 bt.logging.debug(f'  │   {file.short_name}: skipped (file too large, >{MAX_FILE_SIZE_BYTES} bytes)')
                 file_result = FileScoreResult(
@@ -324,8 +330,6 @@ def calculate_token_score_from_file_changes(
                 )
             else:
                 # Tree diff scoring - compare old and new ASTs
-                old_content = content_pair.old_content
-                new_content = content_pair.new_content
                 file_breakdown = score_tree_diff(old_content, new_content, ext, weights)
 
                 lang_config = programming_languages.get(ext)
@@ -333,7 +337,7 @@ def calculate_token_score_from_file_changes(
 
                 # For non-test files in inline-test languages, check if the current
                 # file contains inline tests and downweight the entire file if so
-                if not is_test_file and ext in INLINE_TEST_EXTENSIONS:
+                if new_content is not None and not is_test_file and ext in INLINE_TEST_EXTENSIONS:
                     if has_inline_tests(new_content, ext):
                         is_test_file = True
                         file_weight = TEST_FILE_CONTRIBUTION_WEIGHT

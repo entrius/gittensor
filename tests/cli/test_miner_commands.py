@@ -17,7 +17,9 @@ from gittensor.cli.miner_commands.helpers import (
     _pat_post_aggregate_counts,
     _pat_post_row_category,
     _require_validator_axons,
+    _resolve_endpoint,
 )
+from gittensor.constants import NETWORK_MAP
 
 
 def _fake_metagraph(rows: list[tuple[float, bool, float]]):
@@ -313,3 +315,45 @@ class TestPatPostAggregateCounts:
         counts = _pat_post_aggregate_counts(results)
         assert counts['rejected'] == 1
         assert counts['no_response'] == 1
+
+
+class TestResolveEndpoint:
+    """Unit tests for _resolve_endpoint delegation to resolve_network.
+
+    Precedence (high to low):
+      1. --rpc-url flag
+      2. --network flag
+      3. recognized config `network`  ← must beat stale `ws_endpoint`
+      4. config `ws_endpoint`
+      5. default finney
+    """
+
+    def test_rpc_url_beats_everything(self):
+        assert _resolve_endpoint(network=None, rpc_url='ws://custom:9944') == 'ws://custom:9944'
+
+    def test_network_flag_beats_config(self):
+        assert _resolve_endpoint(network='finney', rpc_url=None) == NETWORK_MAP['finney']
+
+    def test_config_recognized_network_beats_stale_ws_endpoint(self, monkeypatch):
+        fake_config = {'network': 'finney', 'ws_endpoint': 'ws://127.0.0.1:9944'}
+        monkeypatch.setattr('gittensor.cli.issue_commands.helpers.load_config', lambda: fake_config)
+        assert _resolve_endpoint(None, None) == NETWORK_MAP['finney']
+
+    def test_config_test_network_beats_stale_ws_endpoint(self, monkeypatch):
+        fake_config = {'network': 'test', 'ws_endpoint': 'ws://127.0.0.1:9944'}
+        monkeypatch.setattr('gittensor.cli.issue_commands.helpers.load_config', lambda: fake_config)
+        assert _resolve_endpoint(None, None) == NETWORK_MAP['test']
+
+    def test_unrecognized_config_network_falls_back_to_ws_endpoint(self, monkeypatch):
+        fake_config = {'network': 'my_custom_chain', 'ws_endpoint': 'ws://mynode:9944'}
+        monkeypatch.setattr('gittensor.cli.issue_commands.helpers.load_config', lambda: fake_config)
+        assert _resolve_endpoint(None, None) == 'ws://mynode:9944'
+
+    def test_ws_endpoint_used_when_no_config_network(self, monkeypatch):
+        fake_config = {'ws_endpoint': 'ws://mynode:9944'}
+        monkeypatch.setattr('gittensor.cli.issue_commands.helpers.load_config', lambda: fake_config)
+        assert _resolve_endpoint(None, None) == 'ws://mynode:9944'
+
+    def test_default_finney_when_nothing_configured(self, monkeypatch):
+        monkeypatch.setattr('gittensor.cli.issue_commands.helpers.load_config', lambda: {})
+        assert _resolve_endpoint(None, None) == NETWORK_MAP['finney']

@@ -143,7 +143,7 @@ async def get_rewards(
     if penalized_uids:
         self.evaluation_cache.evict_many(penalized_uids)
 
-    # Finalize scores: apply eligibility gate, credibility, pioneer dividends, collateral
+    # Finalize scores: apply eligibility gate, credibility, collateral
     finalize_miner_scores(miner_evaluations, master_repositories)
 
     return miner_evaluations, cached_uids, penalized_uids

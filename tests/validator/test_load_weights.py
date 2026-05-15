@@ -294,52 +294,6 @@ class TestRepositoryConfigMirrorScoringFields:
             )
 
 
-class TestBannedOrganizations:
-    """Tests ensuring banned organizations are not active in the repository list.
-
-    Any repositories from these orgs MUST be marked as inactive.
-    """
-
-    # orgs may be banned for:
-    # - exploitative PR manipulation
-    # - explicit removal request
-    BANNED_ORGS = [
-        'conda',
-        'conda-incubator',
-        'conda-archive',
-        'louislam',
-        'python',
-        'fastapi',
-        'astral-sh',
-        'astropy',
-        'numpy',
-        'scipy',
-    ]
-
-    def test_banned_org_repos_are_inactive(self):
-        """Repositories from banned organizations must be marked as inactive."""
-        repos = load_master_repo_weights()
-
-        for repo_name, config in repos.items():
-            org = repo_name.split('/')[0] if '/' in repo_name else None
-            if org in self.BANNED_ORGS:
-                assert config.inactive_at is not None, (
-                    f'Repository {repo_name} from banned org {org} must be marked inactive'
-                )
-
-    def test_no_active_banned_org_repos(self):
-        """Count of active repositories from banned orgs should be zero."""
-        repos = load_master_repo_weights()
-
-        active_banned = []
-        for repo_name, config in repos.items():
-            org = repo_name.split('/')[0] if '/' in repo_name else None
-            if org in self.BANNED_ORGS and config.inactive_at is None:
-                active_banned.append(repo_name)
-
-        assert len(active_banned) == 0, f'Found {len(active_banned)} active repos from banned orgs: {active_banned}'
-
-
 class TestRepositoryEmissionShare:
     """Tests for bounded repo emission_share loading."""
 

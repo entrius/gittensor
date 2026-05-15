@@ -2,7 +2,6 @@
 
 Covers:
 - Composition: raw response data accessed via .pr.<field>; scoring fields default neutrally
-- is_pioneer_eligible respects merged + token_score gate
 - calculate_final_earned_score multiplies base by every multiplier
 """
 
@@ -75,30 +74,7 @@ class TestComposition:
         assert scored.base_score == 0.0
         assert scored.earned_score == 0.0
         assert scored.token_score == 0.0
-        assert scored.pioneer_rank == 0
         assert scored.files is None
-
-
-class TestPioneerEligible:
-    def test_unmerged_not_eligible(self):
-        scored = ScoredPR(pr=_make_pr(state='OPEN', merged_at_iso=None))
-        scored.token_score = 100.0
-        assert scored.is_pioneer_eligible() is False
-
-    def test_merged_below_token_threshold_not_eligible(self):
-        scored = ScoredPR(pr=_make_pr())
-        scored.token_score = 1.0  # below MIN_TOKEN_SCORE_FOR_BASE_SCORE (5)
-        assert scored.is_pioneer_eligible() is False
-
-    def test_merged_at_threshold_eligible(self):
-        scored = ScoredPR(pr=_make_pr())
-        scored.token_score = 5.0  # equals MIN_TOKEN_SCORE_FOR_BASE_SCORE
-        assert scored.is_pioneer_eligible() is True
-
-    def test_merged_above_threshold_eligible(self):
-        scored = ScoredPR(pr=_make_pr())
-        scored.token_score = 50.0
-        assert scored.is_pioneer_eligible() is True
 
 
 class TestCalculateFinalEarnedScore:

@@ -1,8 +1,7 @@
 # The MIT License (MIT)
 # Copyright © 2025 Entrius
 
-from datetime import datetime
-from typing import TYPE_CHECKING, Dict, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, Optional
 
 import bittensor as bt
 
@@ -16,10 +15,6 @@ from gittensor.constants import (
     MAX_OPEN_PR_THRESHOLD,
     OPEN_PR_COLLATERAL_PERCENT,
     OPEN_PR_THRESHOLD_TOKEN_SCORE,
-    PIONEER_DIVIDEND_MAX_RATIO,
-    PIONEER_DIVIDEND_RATE_1ST,
-    PIONEER_DIVIDEND_RATE_2ND,
-    PIONEER_DIVIDEND_RATE_REST,
     REVIEW_PENALTY_RATE,
 )
 from gittensor.validator.oss_contributions.credibility import check_eligibility
@@ -80,76 +75,6 @@ def calculate_pr_spam_penalty_multiplier(total_open_prs: int, total_token_score:
     return 1.0 if total_open_prs <= threshold else 0.0
 
 
-def calculate_pioneer_dividends(
-    miner_evaluations: Dict[int, MinerEvaluation],
-) -> None:
-    """Determine pioneers and set pioneer_rank + pioneer_dividend on each PR.
-
-    For each repo, the pioneer is the miner with the earliest merged PR that
-    passes the quality gate (is_pioneer_eligible). The pioneer's earliest PR
-    on that repo earns a dividend based on ALL followers' earned_scores (post-
-    multiplier), using per-position rates (30%/20%/10%). The dividend uses the
-    follower's multipliers, not the pioneer's — so it reflects follower quality.
-
-    Must be called AFTER all earned_scores have been computed.
-    """
-    pr_index: Dict[str, Dict[int, list]] = {}
-    repo_contributions: Dict[str, Dict[int, Tuple[datetime, int, float]]] = {}
-
-    for uid, evaluation in miner_evaluations.items():
-        for pr in evaluation.merged_prs:
-            if not pr.is_pioneer_eligible():
-                continue
-            assert pr.merged_at is not None
-            repo = pr.repository_full_name
-            pr_index.setdefault(repo, {}).setdefault(uid, []).append(pr)
-
-            current = repo_contributions.setdefault(repo, {}).get(uid)
-            if current is None:
-                repo_contributions[repo][uid] = (pr.merged_at, pr.number, pr.earned_score)
-            else:
-                earliest_at, earliest_num, total_score = current
-                new_total = total_score + pr.earned_score
-                if pr.merged_at < earliest_at or (pr.merged_at == earliest_at and pr.number < earliest_num):
-                    repo_contributions[repo][uid] = (pr.merged_at, pr.number, new_total)
-                else:
-                    repo_contributions[repo][uid] = (earliest_at, earliest_num, new_total)
-
-    for repo, uid_entries in repo_contributions.items():
-        sorted_uids = sorted(uid_entries.items(), key=lambda x: (x[1][0], x[1][1]))
-
-        for rank_pos, (uid, _) in enumerate(sorted_uids):
-            for pr in pr_index[repo][uid]:
-                pr.pioneer_rank = rank_pos + 1
-
-        dividend = 0.0
-        for pos, (_, entry) in enumerate(sorted_uids[1:]):
-            follower_earned = entry[2]
-            if pos == 0:
-                dividend += follower_earned * PIONEER_DIVIDEND_RATE_1ST
-            elif pos == 1:
-                dividend += follower_earned * PIONEER_DIVIDEND_RATE_2ND
-            else:
-                dividend += follower_earned * PIONEER_DIVIDEND_RATE_REST
-
-        if dividend <= 0:
-            continue
-
-        pioneer_uid = sorted_uids[0][0]
-        pioneer_pr_number = sorted_uids[0][1][1]
-        pioneer_pr = next(pr for pr in pr_index[repo][pioneer_uid] if pr.number == pioneer_pr_number)
-        max_dividend = pioneer_pr.earned_score * PIONEER_DIVIDEND_MAX_RATIO
-        capped = min(dividend, max_dividend)
-        pioneer_pr.pioneer_dividend = round(capped, 2)
-        pioneer_pr.earned_score = round(pioneer_pr.earned_score + pioneer_pr.pioneer_dividend, 2)
-
-        cap_note = f' (capped from {dividend:.2f})' if capped < dividend else ''
-        bt.logging.info(
-            f'Pioneer dividend | repo={repo} pioneer=uid {pioneer_uid} '
-            f'followers={len(sorted_uids) - 1} dividend={capped:.2f}{cap_note}'
-        )
-
-
 def _pr_bypasses_eligibility(
     pr: 'ScoredPR',
     master_repositories: Dict[str, RepositoryConfig],
@@ -162,7 +87,7 @@ def finalize_miner_scores(
     miner_evaluations: Dict[int, MinerEvaluation],
     master_repositories: Optional[Dict[str, RepositoryConfig]] = None,
 ) -> None:
-    """Finalize all miner scores: compute earned_scores, then apply pioneer dividends, then collateral."""
+    """Finalize all miner scores: compute earned_scores, then collateral, then aggregate."""
     bt.logging.info('**Finalizing miner scores**')
     master_repositories = master_repositories or {}
 
@@ -242,10 +167,7 @@ def finalize_miner_scores(
             evaluation.total_leaf_count += pr.leaf_count
             evaluation.total_leaf_score += pr.leaf_score
 
-    # Phase 2: Calculate pioneer dividends from follower earned_scores
-    calculate_pioneer_dividends(miner_evaluations)
-
-    # Phase 3: Aggregate totals (including dividends), collateral, logging
+    # Phase 2: Aggregate totals, apply collateral, log summary
     for uid, evaluation in miner_evaluations.items():
         if not evaluation:
             continue
@@ -254,7 +176,6 @@ def finalize_miner_scores(
         if not has_contributions:
             continue
 
-        # Aggregate scores (earned_score now includes pioneer_dividend from Phase 2).
         for pr in evaluation.merged_prs:
             evaluation.base_total_score += pr.base_score
             evaluation.total_score += pr.earned_score

@@ -83,14 +83,6 @@ CONTRIBUTION_SCORE_FOR_FULL_BONUS = 1500
 # Boosts
 MAX_CODE_DENSITY_MULTIPLIER = 1.15
 
-# Pioneer dividend — rewards the first quality contributor to each repository
-# Rates applied per follower position (1st follower pays most, diminishing after)
-# Dividend capped at PIONEER_DIVIDEND_MAX_RATIO × pioneer's own earned_score
-PIONEER_DIVIDEND_RATE_1ST = 0.30  # 1st follower: 30% of their earned_score
-PIONEER_DIVIDEND_RATE_2ND = 0.20  # 2nd follower: 20% of their earned_score
-PIONEER_DIVIDEND_RATE_REST = 0.10  # 3rd+ followers: 10% of their earned_score
-PIONEER_DIVIDEND_MAX_RATIO = 1.0  # Cap dividend at 1× pioneer's own earned_score (max 2× total)
-
 # Issue boosts
 MAX_ISSUE_CLOSE_WINDOW_DAYS = 1
 

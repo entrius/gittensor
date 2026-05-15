@@ -56,6 +56,10 @@
     "emission_share": 0.02910,
     "issue_discovery_share": 0.0
   },
+  "MkDev11/gittensor-dashboard": {
+    "emission_share": 0.01573,
+    "issue_discovery_share": 0.0
+  },
   "seroperson/jvm-live-reload": {
     "emission_share": 0.01966,
     "issue_discovery_share": 0.0

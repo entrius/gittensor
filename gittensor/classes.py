@@ -17,7 +17,6 @@ if TYPE_CHECKING:
 from gittensor.constants import (
     EXTENSIONLESS_FILE_EXTENSIONS,
     MAX_CODE_DENSITY_MULTIPLIER,
-    MIN_TOKEN_SCORE_FOR_BASE_SCORE,
 )
 
 
@@ -184,8 +183,6 @@ class PullRequest:
     base_score: float = 0.0
     issue_multiplier: float = 1.0
     open_pr_spam_multiplier: float = 1.0
-    pioneer_dividend: float = 0.0  # Additive bonus for pioneering a repo
-    pioneer_rank: int = 0  # 0 = not eligible, 1 = pioneer, 2+ = follower position
     time_decay_multiplier: float = 1.0
     credibility_multiplier: float = 1.0
     review_quality_multiplier: float = 1.0  # Penalty for CHANGES_REQUESTED reviews from maintainers
@@ -222,15 +219,8 @@ class PullRequest:
         """Set the file changes for this pull request"""
         self.file_changes = file_changes
 
-    def is_pioneer_eligible(self) -> bool:
-        """Check if this PR qualifies for pioneer consideration.
-
-        A PR is eligible if it is merged and meets the minimum token score quality gate.
-        """
-        return self.merged_at is not None and self.token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE
-
     def calculate_final_earned_score(self) -> float:
-        """Combine base score with all multipliers. Pioneer dividend is added separately after."""
+        """Combine base score with all multipliers."""
         multipliers = {
             'issue': self.issue_multiplier,
             'label': self.label_multiplier,

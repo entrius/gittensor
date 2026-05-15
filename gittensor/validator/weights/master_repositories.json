@@ -1,6 +1,6 @@
 {
   "entrius/allways": {
-    "emission_share": 0.05017719,
+    "emission_share": 0.05018,
     "issue_discovery_share": 1.0,
     "label_multipliers": {
       "bug": 1.25,
@@ -10,7 +10,7 @@
     "trusted_label_pipeline": true
   },
   "entrius/allways-ui": {
-    "emission_share": 0.01106825,
+    "emission_share": 0.01107,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "bug": 1.1,
@@ -21,7 +21,7 @@
     "trusted_label_pipeline": true
   },
   "entrius/das-github-mirror": {
-    "emission_share": 0.0200651,
+    "emission_share": 0.01180,
     "issue_discovery_share": 0.5,
     "label_multipliers": {
       "bug": 1.25,
@@ -31,7 +31,7 @@
     "trusted_label_pipeline": true
   },
   "entrius/gittensor": {
-    "emission_share": 0.101274,
+    "emission_share": 0.10127,
     "issue_discovery_share": 0.25,
     "label_multipliers": {
       "bug": 1.1,
@@ -42,7 +42,7 @@
     "trusted_label_pipeline": true
   },
   "entrius/gittensor-ui": {
-    "emission_share": 0.03017,
+    "emission_share": 0.01966,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "bug": 1.1,
@@ -55,12 +55,24 @@
   "entrius/oc-1": {
     "default_label_multiplier": 0.0,
     "eligibility_mode": false,
-    "emission_share": 0.52782093,
+    "emission_share": 0.00000,
     "fixed_base_score": 1.0,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "benchmark-improvement": 1.0
     },
     "trusted_label_pipeline": true
+  },
+  "Geniepod/genie-claw": {
+    "emission_share": 0.04500,
+    "issue_discovery_share": 0.0
+  },
+  "MkDev11/gittensor-hub": {
+    "emission_share": 0.03500,
+    "issue_discovery_share": 0.0
+  },
+  "seroperson/jvm-live-reload": {
+    "emission_share": 0.03000,
+    "issue_discovery_share": 0.0
   }
 }

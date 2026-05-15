@@ -180,8 +180,6 @@ class Repository(BaseRepository):
                     pr.base_score,
                     pr.issue_multiplier,
                     pr.open_pr_spam_multiplier,
-                    pr.pioneer_dividend,
-                    pr.pioneer_rank,
                     pr.time_decay_multiplier,
                     pr.credibility_multiplier,
                     pr.review_quality_multiplier,

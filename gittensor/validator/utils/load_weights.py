@@ -30,7 +30,6 @@ class RepositoryConfig:
     Attributes:
         emission_share: Fraction of the combined scoring pool allocated to this repo
         issue_discovery_share: Fraction of the repo allocation reserved for issue discovery
-        inactive_at: ISO timestamp when repository became inactive (None if active)
         additional_acceptable_branches: List of additional branch patterns to accept (None if only default branch)
         trusted_label_pipeline: When True, scoring labels count regardless of
             actor — including GitHub Apps that surface as ``actor_association=NULL``.
@@ -49,7 +48,6 @@ class RepositoryConfig:
 
     emission_share: float
     issue_discovery_share: float = DEFAULT_ISSUE_DISCOVERY_SHARE
-    inactive_at: Optional[str] = None
     additional_acceptable_branches: Optional[List[str]] = None
     trusted_label_pipeline: bool = False
     label_multipliers: Optional[Dict[str, float]] = None
@@ -162,7 +160,6 @@ def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
                         'issue_discovery_share',
                         metadata.get('issue_discovery_share', DEFAULT_ISSUE_DISCOVERY_SHARE),
                     ),
-                    inactive_at=metadata.get('inactive_at'),
                     additional_acceptable_branches=metadata.get('additional_acceptable_branches'),
                     trusted_label_pipeline=bool(metadata.get('trusted_label_pipeline', False)),
                     label_multipliers=(

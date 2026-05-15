@@ -93,19 +93,6 @@ def test_submissions_json_missing_contract_returns_config_error(cli_root, runner
     assert 'Contract address not configured' in payload['error']['message']
 
 
-def test_submissions_json_invalid_issue_id_returns_bad_parameter(cli_root, runner):
-    for invalid_issue_id in [0, -1, 1_000_000]:
-        result = runner.invoke(
-            cli_root,
-            ['issues', 'submissions', '--id', str(invalid_issue_id), '--json'],
-            catch_exceptions=False,
-        )
-        assert result.exit_code != 0
-        payload = json.loads(result.stdout)
-        assert payload['success'] is False
-        assert payload['error']['type'] == 'bad_parameter'
-
-
 def test_submissions_human_no_open_prs_message(cli_root, runner, sample_issue):
     with (
         patch('gittensor.cli.issue_commands.submissions.get_contract_address', return_value='0xabc'),

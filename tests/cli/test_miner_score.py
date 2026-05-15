@@ -38,8 +38,6 @@ def miner_eval_factory():
 def _patch_pipeline(
     uid: int,
     miner_evaluation,
-    oss_value: float = 0.4,
-    issue_value: float = 0.1,
     blended: float = 0.3,
     oss_side_effect=None,
     master_repos: Optional[Dict] = None,
@@ -47,8 +45,6 @@ def _patch_pipeline(
     """Mock the three forward entry points; `oss_side_effect` captures call args."""
     miner_evaluations = {uid: miner_evaluation}
 
-    oss_rewards = np.array([oss_value])
-    issue_rewards = np.array([issue_value])
     final_rewards = np.array([blended])
 
     if oss_side_effect is not None:
@@ -56,13 +52,13 @@ def _patch_pipeline(
     else:
         oss_patch = patch(
             'gittensor.validator.forward.oss_contributions',
-            new=AsyncMock(return_value=(oss_rewards, miner_evaluations, set(), set())),
+            new=AsyncMock(return_value=(miner_evaluations, set(), set())),
         )
 
     return [
         oss_patch,
-        patch('gittensor.validator.forward.issue_discovery', new=AsyncMock(return_value=issue_rewards)),
-        patch('gittensor.validator.forward.blend_emission_pools', return_value=final_rewards),
+        patch('gittensor.validator.forward.issue_discovery', new=AsyncMock(return_value=None)),
+        patch('gittensor.validator.emission_allocation.blend_emission_pools', return_value=final_rewards),
         patch('gittensor.validator.utils.load_weights.load_master_repo_weights', return_value=master_repos or {}),
         patch('gittensor.validator.utils.load_weights.load_programming_language_weights', return_value={}),
         patch('gittensor.validator.utils.load_weights.load_token_config', return_value=_stub_token_config()),
@@ -168,9 +164,7 @@ class TestScoreCommand:
             base_total_score=20.0,
             total_score=18.0,
         )
-        with _multi_patch(
-            _patch_pipeline(uid=_DEV_UID, miner_evaluation=evaluation, oss_value=0.4, issue_value=0.1, blended=0.3)
-        ):
+        with _multi_patch(_patch_pipeline(uid=_DEV_UID, miner_evaluation=evaluation, blended=0.3)):
             result = runner.invoke(
                 cli,
                 ['miner', 'score', '--json'],
@@ -182,8 +176,6 @@ class TestScoreCommand:
         assert payload['miner_evaluation']['uid'] == _DEV_UID
         assert payload['miner_evaluation']['is_eligible'] is True
         assert payload['miner_evaluation']['credibility'] == 0.85
-        assert payload['rewards']['oss_normalized'] == 0.4
-        assert payload['rewards']['issue_discovery_normalized'] == 0.1
         assert payload['rewards']['blended_final'] == 0.3
 
     def test_pat_never_appears_in_json(self, runner, miner_eval_factory):
@@ -233,13 +225,36 @@ class TestScoreCommand:
         async def _capture_oss(self, miner_uids, *args, **kwargs):
             captured['hotkey_at_uid'] = self.metagraph.hotkeys[_DEV_UID]
             captured['miner_uids'] = miner_uids
-            return np.array([0.0]), {_DEV_UID: evaluation}, set(), set()
+            return {_DEV_UID: evaluation}, set(), set()
 
         with _multi_patch(_patch_pipeline(uid=_DEV_UID, miner_evaluation=evaluation, oss_side_effect=_capture_oss)):
             result = runner.invoke(cli, ['miner', 'score'], env={'GITTENSOR_MINER_PAT': 'ghp_dummy'})
         assert result.exit_code == 0, result.output
         assert captured['hotkey_at_uid'] == _DEV_HOTKEY
         assert captured['miner_uids'] == {_DEV_UID}
+
+    def test_real_oss_pipeline_accepts_minimal_stub_validator(self, runner, miner_eval_factory):
+        """Regression: single-miner get_rewards does not require evaluation_cache."""
+        evaluation = miner_eval_factory(uid=_DEV_UID, hotkey=_DEV_HOTKEY, github_id='0')
+
+        async def _evaluate(uid, hotkey, pat, *_args, **_kwargs):
+            assert uid == _DEV_UID
+            assert hotkey == _DEV_HOTKEY
+            assert pat == 'ghp_dummy'
+            return evaluation
+
+        evaluate_mock = AsyncMock(side_effect=_evaluate)
+        with patch('gittensor.validator.oss_contributions.reward.evaluate_miners_pull_requests', new=evaluate_mock):
+            result = runner.invoke(
+                cli,
+                ['miner', 'score', '--json'],
+                env={'GITTENSOR_MINER_PAT': 'ghp_dummy'},
+            )
+
+        assert result.exit_code == 0, result.output
+        assert evaluate_mock.await_count == 1
+        payload = json.loads(result.output)
+        assert payload['miner_evaluation']['uid'] == _DEV_UID
 
     def test_populated_mirror_prs_render_in_json(self, runner, miner_eval_factory):
         """Populated mirror PRs must flatten into the JSON shape via _serialize_evaluation."""
@@ -267,10 +282,11 @@ class TestScoreCommand:
         assert row['earned_score'] == 9.75
         assert row['token_score'] == 33.0
         assert row['label'] == 'feature'
-        # Raw nested payloads and the deprecated `source` tag must not leak.
+        # Raw nested payloads and legacy breakdown fields must not leak.
         assert 'pr' not in row
         assert 'files' not in row
         assert 'source' not in row
+        assert 'repo_weight_multiplier' not in row
 
     def test_populated_mirror_prs_render_in_table(self, runner, miner_eval_factory):
         """The per-PR table must surface a row for each populated mirror PR."""
@@ -299,7 +315,7 @@ class TestScoreCommand:
             from gittensor.validator.oss_contributions.reward import pat_storage
 
             captured['pats'] = pat_storage.load_all_pats()
-            return np.array([0.0]), {_DEV_UID: evaluation}, set(), set()
+            return {_DEV_UID: evaluation}, set(), set()
 
         with _multi_patch(_patch_pipeline(uid=_DEV_UID, miner_evaluation=evaluation, oss_side_effect=_capture_oss)):
             result = runner.invoke(cli, ['miner', 'score', '--pat', 'ghp_injected'], env={})

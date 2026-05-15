@@ -21,7 +21,6 @@ mirror_client_mod = pytest.importorskip('gittensor.utils.mirror.client')
 classes = pytest.importorskip('gittensor.classes')
 load_weights = pytest.importorskip('gittensor.validator.utils.load_weights')
 scored_pr_module = pytest.importorskip('gittensor.validator.oss_contributions.mirror.scored_pr')
-normalize_module = pytest.importorskip('gittensor.validator.issue_discovery.normalize')
 
 run_issue_discovery = scan_module.run_issue_discovery
 _classify_issue = scan_module._classify_issue
@@ -37,7 +36,6 @@ MinerEvaluationCache = classes.MinerEvaluationCache
 RepositoryConfig = load_weights.RepositoryConfig
 TokenConfig = load_weights.TokenConfig
 ScoredPR = scored_pr_module.ScoredPR
-normalize_issue_discovery_rewards = normalize_module.normalize_issue_discovery_rewards
 
 
 # Representative defaults for the plumbed-through token scoring args. The
@@ -165,7 +163,7 @@ def _eval(uid: int = 1, github_id: Optional[str] = '999'):
 
 
 def _mirror_repos(*names: str) -> dict:
-    return {name: RepositoryConfig(weight=0.5) for name in names}
+    return {name: RepositoryConfig(emission_share=0.5) for name in names}
 
 
 def _run(coro):
@@ -442,11 +440,6 @@ class TestRunMirrorIssueDiscovery:
         assert failing.total_solved_issues == 7
         assert failing.total_valid_solved_issues == 7
         assert working.issue_discovery_score > 0
-
-        rewards = normalize_issue_discovery_rewards({1: failing, 2: working})
-        assert rewards[1] < 1.0
-        assert rewards[2] < 1.0
-        assert sum(rewards.values()) == pytest.approx(1.0)
 
     def test_successful_issue_fetch_refreshes_cache_after_scoring(self):
         cache = MinerEvaluationCache()
@@ -787,7 +780,9 @@ class TestCacheStats:
         issue = MirrorIssue.from_dict(_issue_dict())
         assert issue.solving_pr is not None
         result = asyncio.run(
-            _resolve_solving_pr_score(issue, issue.solving_pr, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG)
+            _resolve_solving_pr_score(
+                issue, issue.solving_pr, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, None
+            )
         )
 
         assert result is not None
@@ -809,7 +804,9 @@ class TestCacheStats:
 
         issue = MirrorIssue.from_dict(_issue_dict())
         asyncio.run(
-            _resolve_solving_pr_score(issue, issue.solving_pr, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG)
+            _resolve_solving_pr_score(
+                issue, issue.solving_pr, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, None
+            )
         )
 
         assert stats.hits == 0
@@ -831,7 +828,9 @@ class TestCacheStats:
 
         issue = MirrorIssue.from_dict(_issue_dict())
         result = asyncio.run(
-            _resolve_solving_pr_score(issue, issue.solving_pr, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG)
+            _resolve_solving_pr_score(
+                issue, issue.solving_pr, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, None
+            )
         )
 
         assert result is None
@@ -868,7 +867,9 @@ class TestCacheStats:
 
         issue = MirrorIssue.from_dict(_issue_dict())
         result = asyncio.run(
-            _resolve_solving_pr_score(issue, issue.solving_pr, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG)
+            _resolve_solving_pr_score(
+                issue, issue.solving_pr, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, None
+            )
         )
 
         assert result is None
@@ -908,12 +909,12 @@ class TestCacheStats:
 
         result_a = asyncio.run(
             _resolve_solving_pr_score(
-                issue_a, issue_a.solving_pr, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG
+                issue_a, issue_a.solving_pr, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, None
             )
         )
         result_b = asyncio.run(
             _resolve_solving_pr_score(
-                issue_b, issue_b.solving_pr, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG
+                issue_b, issue_b.solving_pr, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, None
             )
         )
 
@@ -928,8 +929,48 @@ class TestCacheStats:
 
 class TestOpenIssueSpamSourceIsMirror:
     """The open-issue spam multiplier sources its count from mirror's response,
-    and mirror_scan also writes that count to evaluation.total_open_issues so
+    and scan also writes that count to evaluation.total_open_issues so
     the DB row reflects mirror-scoped state."""
+
+    def test_old_open_issues_outside_scoring_window_still_trip_spam(self):
+        """Scoring stays lookback-bounded, but open-issue load is current."""
+        solved_issues = [_issue_dict(issue_number=300 + i, author_github_id=f'discoverer{i}') for i in range(8)]
+        old_open_issues = [
+            _issue_dict(
+                issue_number=200 + i,
+                state='OPEN',
+                state_reason=None,
+                solved_by_pr=None,
+                created_at='2026-01-01T00:00:00Z',
+            )
+            for i in range(6)
+        ]
+        client = Mock()
+        client.get_miner_issues.side_effect = [
+            _response(solved_issues),  # lookback-bounded scoring response
+            _response(old_open_issues),  # current/open-count response
+        ]
+
+        eval_ = _eval()
+        eval_.merged_prs = [_scored_mirror_pr('entrius/gittensor-ui', 100, token_score=100.0)]
+
+        _run(
+            run_issue_discovery(
+                {1: eval_},
+                _mirror_repos('entrius/gittensor-ui'),
+                _EMPTY_LANGS,
+                _EMPTY_TOKEN_CONFIG,
+                client=client,
+            )
+        )
+
+        assert eval_.total_open_issues == 6
+        assert eval_.issue_discovery_score == 0
+        assert client.get_miner_issues.call_count == 2
+        scoring_since = client.get_miner_issues.call_args_list[0].kwargs['since']
+        open_count_call = client.get_miner_issues.call_args_list[1]
+        assert scoring_since is not None
+        assert open_count_call.kwargs.get('since') is None
 
     def test_all_mirror_miner_with_many_open_issues_trips_spam(self):
         """6 open issues in mirror response trips the spam multiplier."""
@@ -963,7 +1004,7 @@ class TestOpenIssueSpamSourceIsMirror:
 
         # 6 open issues > threshold (5) → spam_mult=0 → all scored issues earn 0
         assert eval_.issue_discovery_score == 0
-        # mirror_scan now records the mirror-scoped open count
+        # scan records the mirror-scoped open count
         assert eval_.total_open_issues == 6
 
     def test_all_mirror_miner_below_threshold_passes_spam(self):
@@ -1279,3 +1320,32 @@ class TestCrossMinerOneIssuePerPr:
         assert e_b.issue_token_score == 700.0
         assert e_a.issue_discovery_score == e_b.issue_discovery_score
         assert e_a.issue_discovery_score > 0
+
+    def test_emission_share_does_not_scale_issue_discovery_raw_score(self):
+        """Repo emission_share is enforced by the final allocator, not by
+        issue-discovery's per-issue raw score product."""
+        issues = [_issue_dict(issue_number=10 + i, author_github_id='A', solved_by_pr=200 + i) for i in range(7)]
+
+        def _score_with_emission_share(emission_share: float) -> float:
+            client = Mock()
+            client.get_miner_issues.return_value = _response(issues)
+            evaluation = _eval(uid=1, github_id='A')
+            seed = MinerEvaluation(uid=99, hotkey='hkS', github_id='SEED')
+            seed.merged_prs = [_scored_mirror_pr('entrius/gittensor-ui', pr_number) for pr_number in range(200, 207)]
+
+            _run(
+                run_issue_discovery(
+                    {1: evaluation, 99: seed},
+                    {'entrius/gittensor-ui': RepositoryConfig(emission_share=emission_share)},
+                    _EMPTY_LANGS,
+                    _EMPTY_TOKEN_CONFIG,
+                    client=client,
+                )
+            )
+            assert len(evaluation.issue_discovery_issues) == 7
+            assert all(
+                not hasattr(issue, 'discovery_repo_weight_multiplier') for issue in evaluation.issue_discovery_issues
+            )
+            return evaluation.issue_discovery_score
+
+        assert _score_with_emission_share(0.1) == pytest.approx(_score_with_emission_share(0.9))

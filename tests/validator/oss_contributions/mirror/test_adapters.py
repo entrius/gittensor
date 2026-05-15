@@ -164,7 +164,6 @@ class TestMirrorScoredPrToLegacyPullRequest:
         scored.base_score = 30.5
         scored.earned_score = 25.0
         scored.token_score = 100.0
-        scored.repo_weight_multiplier = 0.7
         scored.label_multiplier = 1.5
         scored.label = 'enhancement'
         scored.time_decay_multiplier = 0.95
@@ -173,8 +172,6 @@ class TestMirrorScoredPrToLegacyPullRequest:
         scored.issue_multiplier = 1.33
         scored.open_pr_spam_multiplier = 1.0
         scored.collateral_score = 0.0
-        scored.pioneer_dividend = 2.0
-        scored.pioneer_rank = 1
         scored.code_density = 0.85
         scored.structural_count = 10
         scored.structural_score = 50.0
@@ -208,7 +205,6 @@ class TestMirrorScoredPrToLegacyPullRequest:
         assert adapted.base_score == 30.5
         assert adapted.earned_score == 25.0
         assert adapted.token_score == 100.0
-        assert adapted.repo_weight_multiplier == 0.7
         assert adapted.label_multiplier == 1.5
         assert adapted.label == 'enhancement'
         assert adapted.time_decay_multiplier == 0.95
@@ -216,8 +212,6 @@ class TestMirrorScoredPrToLegacyPullRequest:
         assert adapted.credibility_multiplier == 0.9
         assert adapted.issue_multiplier == 1.33
         assert adapted.open_pr_spam_multiplier == 1.0
-        assert adapted.pioneer_dividend == 2.0
-        assert adapted.pioneer_rank == 1
         assert adapted.total_nodes_scored == 30
         assert adapted.code_density == 0.85
         # file_changes / issues left None — written separately
@@ -254,6 +248,4 @@ class TestMirrorScoredPrToLegacyPullRequest:
         adapted = mirror_scored_pr_to_legacy_pull_request(scored, 1, 'hk', 'gid')
         assert adapted.base_score == 0.0
         assert adapted.earned_score == 0.0
-        assert adapted.repo_weight_multiplier == 1.0
-        assert adapted.pioneer_rank == 0
         assert adapted.label is None

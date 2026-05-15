@@ -6,7 +6,6 @@ import asyncio
 from typing import TYPE_CHECKING, Dict, Optional, Set, Tuple
 
 import bittensor as bt
-import numpy as np
 
 from gittensor.classes import MinerEvaluation
 from gittensor.utils.mirror.client import MirrorClient
@@ -17,7 +16,6 @@ from gittensor.validator.oss_contributions.inspections import (
 )
 from gittensor.validator.oss_contributions.mirror.load import load_miner_prs
 from gittensor.validator.oss_contributions.mirror.scoring import score_miner_prs
-from gittensor.validator.oss_contributions.normalize import normalize_rewards_linear
 from gittensor.validator.oss_contributions.scoring import finalize_miner_scores
 from gittensor.validator.utils.load_weights import LanguageConfig, RepositoryConfig, TokenConfig
 
@@ -86,12 +84,13 @@ async def get_rewards(
     master_repositories: Dict[str, RepositoryConfig],
     programming_languages: Dict[str, LanguageConfig],
     token_config: TokenConfig,
-) -> Tuple[np.ndarray, Dict[int, MinerEvaluation], Set[int], Set[int]]:
+) -> Tuple[Dict[int, MinerEvaluation], Set[int], Set[int]]:
     """Score OSS contributions for all miners.
 
     Returns:
-        Tuple of (normalized_rewards_array, miner_evaluations, cached_uids, penalized_uids).
-        DB storage and emission blending are handled by the caller (forward.py).
+        Tuple of (miner_evaluations, cached_uids, penalized_uids). DB storage
+        and repo-bounded emission blending are handled by the caller
+        (forward.py).
     """
 
     bt.logging.info(f'UIDs: {uids}')
@@ -141,17 +140,10 @@ async def get_rewards(
     cached_uids -= penalized_uids
     # The cache store path ran before the penalty. Drop those snapshots so a
     # future fetch failure cannot restore pre-penalty PR scores.
-    self.evaluation_cache.evict_many(penalized_uids)
+    if penalized_uids:
+        self.evaluation_cache.evict_many(penalized_uids)
 
-    # Finalize scores: apply eligibility gate, credibility, pioneer dividends, collateral
+    # Finalize scores: apply eligibility gate, credibility, collateral
     finalize_miner_scores(miner_evaluations, master_repositories)
 
-    # Normalize the rewards between [0,1] — single flat pool
-    normalized_rewards = normalize_rewards_linear(miner_evaluations)
-
-    return (
-        np.array([normalized_rewards.get(uid, 0.0) for uid in sorted(uids)]),
-        miner_evaluations,
-        cached_uids,
-        penalized_uids,
-    )
+    return miner_evaluations, cached_uids, penalized_uids

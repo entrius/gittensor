@@ -93,7 +93,7 @@ def _build_response(prs: list) -> MirrorPullRequestsResponse:
 
 
 def _mirror_repos(*names: str) -> dict:
-    return {name: RepositoryConfig(weight=0.5) for name in names}
+    return {name: RepositoryConfig(emission_share=0.5) for name in names}
 
 
 def _eval(github_id: str | None = '218712309') -> MinerEvaluation:
@@ -200,32 +200,8 @@ class TestMaintainerSkip:
 
 
 # ============================================================================
-# Inactive repo + stale closed PR
+# Stale closed PR
 # ============================================================================
-
-
-class TestInactiveRepo:
-    def test_pr_created_after_inactive_at_dropped(self):
-        client = Mock()
-        client.get_miner_pulls.return_value = _build_response(
-            [
-                # Created on 2026-04-15, repo became inactive on 2026-04-10 → drop
-                _pr_dict(1, created_at='2026-04-15T00:00:00Z'),
-                # Created on 2026-04-05 (before inactive_at) → keep
-                _pr_dict(2, created_at='2026-04-05T00:00:00Z'),
-            ]
-        )
-        repos = {
-            'entrius/gittensor-ui': RepositoryConfig(
-                weight=0.5,
-                inactive_at='2026-04-10T00:00:00Z',
-            ),
-        }
-        eval_ = _eval()
-        load_miner_prs(eval_, repos, client=client)
-
-        assert len(eval_.merged_prs) == 1
-        assert eval_.merged_prs[0].pr.pr_number == 2
 
 
 class TestStaleClosedPR:

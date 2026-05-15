@@ -17,7 +17,6 @@ if TYPE_CHECKING:
 from gittensor.constants import (
     EXTENSIONLESS_FILE_EXTENSIONS,
     MAX_CODE_DENSITY_MULTIPLIER,
-    MIN_TOKEN_SCORE_FOR_BASE_SCORE,
 )
 
 
@@ -150,7 +149,6 @@ class Issue:
     discovery_base_score: float = 0.0
     discovery_earned_score: float = 0.0
     discovery_review_quality_multiplier: float = 1.0
-    discovery_repo_weight_multiplier: float = 1.0
     discovery_time_decay_multiplier: float = 1.0
     discovery_credibility_multiplier: float = 1.0
     discovery_open_issue_spam_multiplier: float = 1.0
@@ -182,12 +180,9 @@ class PullRequest:
     pr_state: PRState
 
     # Score fields
-    repo_weight_multiplier: float = 1.0
     base_score: float = 0.0
     issue_multiplier: float = 1.0
     open_pr_spam_multiplier: float = 1.0
-    pioneer_dividend: float = 0.0  # Additive bonus for pioneering a repo
-    pioneer_rank: int = 0  # 0 = not eligible, 1 = pioneer, 2+ = follower position
     time_decay_multiplier: float = 1.0
     credibility_multiplier: float = 1.0
     review_quality_multiplier: float = 1.0  # Penalty for CHANGES_REQUESTED reviews from maintainers
@@ -224,17 +219,9 @@ class PullRequest:
         """Set the file changes for this pull request"""
         self.file_changes = file_changes
 
-    def is_pioneer_eligible(self) -> bool:
-        """Check if this PR qualifies for pioneer consideration.
-
-        A PR is eligible if it is merged and meets the minimum token score quality gate.
-        """
-        return self.merged_at is not None and self.token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE
-
     def calculate_final_earned_score(self) -> float:
-        """Combine base score with all multipliers. Pioneer dividend is added separately after."""
+        """Combine base score with all multipliers."""
         multipliers = {
-            'repo': self.repo_weight_multiplier,
             'issue': self.issue_multiplier,
             'label': self.label_multiplier,
             'spam': self.open_pr_spam_multiplier,
@@ -288,7 +275,8 @@ class MinerEvaluation:
     total_solved_issues: int = 0
     total_valid_solved_issues: int = 0  # solved issues where solving PR has token_score >= 5
     total_closed_issues: int = 0
-    total_open_issues: int = 0  # mirror-tracked open issues in lookback window (set by issue_discovery.scan)
+    total_open_issues: int = 0  # current mirror-tracked open issues (set by issue_discovery.scan)
+    issue_discovery_issues: List[Issue] = field(default_factory=list)
 
     @property
     def total_prs(self) -> int:
@@ -505,6 +493,7 @@ _ISSUE_DISCOVERY_FIELDS: Tuple[str, ...] = (
     'total_valid_solved_issues',
     'total_closed_issues',
     'total_open_issues',
+    'issue_discovery_issues',
 )
 
 
@@ -547,7 +536,8 @@ class MinerEvaluationCache:
         existing = self._cache.get(evaluation.uid)
         if existing is not None and existing.hotkey == evaluation.hotkey and existing.github_id == evaluation.github_id:
             for name in _ISSUE_DISCOVERY_FIELDS:
-                setattr(cached_eval, name, getattr(existing.evaluation, name))
+                value = getattr(existing.evaluation, name)
+                setattr(cached_eval, name, _copy_issue_discovery_value(name, value))
 
         self._cache[evaluation.uid] = CachedEvaluation(
             hotkey=evaluation.hotkey,
@@ -581,7 +571,8 @@ class MinerEvaluationCache:
             return
 
         for name in _ISSUE_DISCOVERY_FIELDS:
-            setattr(existing.evaluation, name, getattr(evaluation, name))
+            value = getattr(evaluation, name)
+            setattr(existing.evaluation, name, _copy_issue_discovery_value(name, value))
 
         bt.logging.debug(f'Refreshed cached issue discovery for UID {evaluation.uid}')
 
@@ -624,6 +615,7 @@ class MinerEvaluationCache:
         # PR files. Drop them at store time to save memory.
         cached = copy.copy(evaluation)
         cached.unique_repos_contributed_to = set(evaluation.unique_repos_contributed_to)
+        cached.issue_discovery_issues = _copy_issue_discovery_issues(evaluation.issue_discovery_issues)
         cached.merged_prs = [_scored_mirror_pr_for_cache(pr) for pr in evaluation.merged_prs]
         cached.open_prs = [_scored_mirror_pr_for_cache(pr) for pr in evaluation.open_prs]
         cached.closed_prs = [_scored_mirror_pr_for_cache(pr) for pr in evaluation.closed_prs]
@@ -636,7 +628,16 @@ class MinerEvaluationCache:
         # adapters produce fresh Issue objects per call via get_all_issues().
         copy_eval = copy.copy(cached_eval)
         copy_eval.unique_repos_contributed_to = set(cached_eval.unique_repos_contributed_to)
+        copy_eval.issue_discovery_issues = _copy_issue_discovery_issues(cached_eval.issue_discovery_issues)
         return copy_eval
+
+
+def _copy_issue_discovery_value(name: str, value):
+    return _copy_issue_discovery_issues(value) if name == 'issue_discovery_issues' else value
+
+
+def _copy_issue_discovery_issues(issues: List[Issue]) -> List[Issue]:
+    return [copy.copy(issue) for issue in issues]
 
 
 def _scored_mirror_pr_for_cache(scored: 'ScoredPR') -> 'ScoredPR':

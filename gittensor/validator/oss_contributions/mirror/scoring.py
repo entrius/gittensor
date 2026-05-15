@@ -2,7 +2,7 @@
 
 Scope:
 - Compute base_score for each PR via the existing token-scoring infra.
-- Compute per-PR multipliers: repo_weight, time_decay, review_quality, label, issue.
+- Compute per-PR multipliers: time_decay, review_quality, label, issue.
 - The merge-eligibility gate (``_should_skip_merged_mirror_pr``) is exported and
   applied at LOAD time by ``mirror.load._maybe_add_pr`` — rejected PRs never
   enter ``merged_prs``, so the merged_count used by ``check_eligibility``
@@ -10,7 +10,7 @@ Scope:
 
 Cross-path concerns handled by ``finalize_miner_scores`` in
 ``gittensor.validator.oss_contributions.scoring`` (walks ``merged_prs``):
-spam_multiplier, credibility_multiplier, pioneer dividends, final earned_score
+spam_multiplier, credibility_multiplier, final earned_score
 composition, and base/earned/nodes aggregation.
 
 Anti-gaming notes:
@@ -54,7 +54,6 @@ from gittensor.validator.utils.load_weights import (
     LanguageConfig,
     RepositoryConfig,
     TokenConfig,
-    resolve_repo_weight,
 )
 from gittensor.validator.utils.tree_sitter_scoring import calculate_token_score_from_file_changes
 
@@ -98,7 +97,12 @@ async def score_miner_prs(
             bt.logging.info(
                 f'\n[{i}/{len(scored_prs)}] {label} PR #{scored.pr.pr_number} in {scored.pr.repo_full_name}'
             )
-            await score_pr(scored, eval_, master_repositories, programming_languages, token_config, client)
+            try:
+                await score_pr(scored, eval_, master_repositories, programming_languages, token_config, client)
+            except Exception as e:
+                bt.logging.warning(
+                    f'UID {eval_.uid}: scoring failed for PR #{scored.pr.pr_number} in {scored.pr.repo_full_name}: {e}'
+                )
 
 
 # ============================================================================
@@ -162,7 +166,7 @@ async def score_pr(
 
     if repo_config.fixed_base_score is not None:
         # Only the base score is overridden. Token fields stay token-derived so
-        # eligibility, pioneer, and reporting gates keep their evidence signal.
+        # eligibility and reporting gates keep their evidence signal.
         scored.base_score = repo_config.fixed_base_score
 
     _calculate_pr_multipliers(scored, repo_config)
@@ -338,15 +342,13 @@ def calculate_base_score_for_pr_files(
 
 
 def _calculate_pr_multipliers(scored: ScoredPR, repo_config: RepositoryConfig) -> None:
-    """Compute repo_weight, time_decay, review_quality, label, issue multipliers.
+    """Compute time_decay, review_quality, label, and issue multipliers.
 
     Spam and credibility multipliers are deferred to ``finalize_miner_scores``
     — they depend on per-miner aggregate counts.
     """
     pr = scored.pr
     is_merged = pr.state == 'MERGED'
-
-    scored.repo_weight_multiplier = resolve_repo_weight(repo_config)
 
     chosen_label, label_multiplier = _resolve_trusted_scoring_label(pr, repo_config)
     scored.label = chosen_label

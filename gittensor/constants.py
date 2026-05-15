@@ -97,6 +97,9 @@ TIME_DECAY_MIN_MULTIPLIER = 0.05  # 5% of score will retain through lookback win
 # while holding the GIL. 2s is well above the millisecond cost of real files.
 TREE_SITTER_PARSE_TIMEOUT_MICROS = 2_000_000
 
+# Wall-clock budget (s) for the isolated-subprocess scoring path.
+SCORING_SUBPROCESS_BUDGET_S = 5.0
+
 # comment nodes for token scoring
 COMMENT_NODE_TYPES = frozenset(
     {

@@ -83,14 +83,6 @@ CONTRIBUTION_SCORE_FOR_FULL_BONUS = 1500
 # Boosts
 MAX_CODE_DENSITY_MULTIPLIER = 1.15
 
-# Pioneer dividend — rewards the first quality contributor to each repository
-# Rates applied per follower position (1st follower pays most, diminishing after)
-# Dividend capped at PIONEER_DIVIDEND_MAX_RATIO × pioneer's own earned_score
-PIONEER_DIVIDEND_RATE_1ST = 0.30  # 1st follower: 30% of their earned_score
-PIONEER_DIVIDEND_RATE_2ND = 0.20  # 2nd follower: 20% of their earned_score
-PIONEER_DIVIDEND_RATE_REST = 0.10  # 3rd+ followers: 10% of their earned_score
-PIONEER_DIVIDEND_MAX_RATIO = 1.0  # Cap dividend at 1× pioneer's own earned_score (max 2× total)
-
 # Issue boosts
 MAX_ISSUE_CLOSE_WINDOW_DAYS = 1
 
@@ -99,6 +91,11 @@ TIME_DECAY_GRACE_PERIOD_HOURS = 12  # hours before time decay begins
 TIME_DECAY_SIGMOID_MIDPOINT = 10  # days until 50% score loss
 TIME_DECAY_SIGMOID_STEEPNESS_SCALAR = 0.4
 TIME_DECAY_MIN_MULTIPLIER = 0.05  # 5% of score will retain through lookback window
+
+# Per-parse CPU budget for tree-sitter. The parser polls this flag in its
+# error-recovery loops; without it, adversarial inputs can spin forever in C
+# while holding the GIL. 2s is well above the millisecond cost of real files.
+TREE_SITTER_PARSE_TIMEOUT_MICROS = 2_000_000
 
 # comment nodes for token scoring
 COMMENT_NODE_TYPES = frozenset(

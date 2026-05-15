@@ -6,7 +6,6 @@ touched.
 
 Filtering applied at load time:
 - Repo not in master_repositories: dropped (mirror returns all tracked repos).
-- PR created after repo became inactive: dropped.
 - PR author is a maintainer (OWNER/MEMBER/COLLABORATOR): silently dropped.
 - CLOSED PRs created before the lookback window: dropped — closing an old PR
   shouldn't trigger a fresh credibility penalty.
@@ -27,7 +26,6 @@ from gittensor.utils.mirror.client import MirrorClient, MirrorRequestError
 from gittensor.utils.mirror.models import MirrorPullRequest
 from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredPR
 from gittensor.validator.oss_contributions.mirror.scoring import _should_skip_merged_mirror_pr
-from gittensor.validator.utils.datetime_utils import parse_github_iso_to_utc
 from gittensor.validator.utils.load_weights import RepositoryConfig
 
 
@@ -93,17 +91,6 @@ def _maybe_add_pr(
         # log at info level when master_repositories is small. Demoted to debug.
         bt.logging.debug(f'Skipping PR #{pr.pr_number} in {pr.repo_full_name} - not in master_repositories')
         return
-
-    # Skip PR if it was created after the repo became inactive
-    if repo_config.inactive_at is not None:
-        inactive_dt = parse_github_iso_to_utc(repo_config.inactive_at)
-        if pr.created_at >= inactive_dt:
-            bt.logging.info(
-                f'Skipping PR #{pr.pr_number} in {pr.repo_full_name} - '
-                f'PR was created after repo became inactive '
-                f'(created: {pr.created_at.isoformat()}, inactive: {inactive_dt.isoformat()})'
-            )
-            return
 
     # Silent maintainer skip — logging every maintainer-merged PR would dominate
     # the skip-reason log.

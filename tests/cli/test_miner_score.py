@@ -233,6 +233,29 @@ class TestScoreCommand:
         assert captured['hotkey_at_uid'] == _DEV_HOTKEY
         assert captured['miner_uids'] == {_DEV_UID}
 
+    def test_real_oss_pipeline_accepts_minimal_stub_validator(self, runner, miner_eval_factory):
+        """Regression: single-miner get_rewards does not require evaluation_cache."""
+        evaluation = miner_eval_factory(uid=_DEV_UID, hotkey=_DEV_HOTKEY, github_id='0')
+
+        async def _evaluate(uid, hotkey, pat, *_args, **_kwargs):
+            assert uid == _DEV_UID
+            assert hotkey == _DEV_HOTKEY
+            assert pat == 'ghp_dummy'
+            return evaluation
+
+        evaluate_mock = AsyncMock(side_effect=_evaluate)
+        with patch('gittensor.validator.oss_contributions.reward.evaluate_miners_pull_requests', new=evaluate_mock):
+            result = runner.invoke(
+                cli,
+                ['miner', 'score', '--json'],
+                env={'GITTENSOR_MINER_PAT': 'ghp_dummy'},
+            )
+
+        assert result.exit_code == 0, result.output
+        assert evaluate_mock.await_count == 1
+        payload = json.loads(result.output)
+        assert payload['miner_evaluation']['uid'] == _DEV_UID
+
     def test_populated_mirror_prs_render_in_json(self, runner, miner_eval_factory):
         """Populated mirror PRs must flatten into the JSON shape via _serialize_evaluation."""
         evaluation = miner_eval_factory(

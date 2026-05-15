@@ -64,15 +64,15 @@
     "trusted_label_pipeline": true
   },
   "Geniepod/genie-claw": {
-    "emission_share": 0.02910,
+    "emission_share": 0.04500,
     "issue_discovery_share": 0.0
   },
   "MkDev11/gittensor-hub": {
-    "emission_share": 0.01966,
+    "emission_share": 0.03500,
     "issue_discovery_share": 0.0
   },
   "seroperson/jvm-live-reload": {
-    "emission_share": 0.01966,
+    "emission_share": 0.03000,
     "issue_discovery_share": 0.0
   }
 }

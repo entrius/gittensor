@@ -10,7 +10,7 @@ Scope:
 
 Cross-path concerns handled by ``finalize_miner_scores`` in
 ``gittensor.validator.oss_contributions.scoring`` (walks ``merged_prs``):
-spam_multiplier, credibility_multiplier, pioneer dividends, final earned_score
+spam_multiplier, credibility_multiplier, final earned_score
 composition, and base/earned/nodes aggregation.
 
 Anti-gaming notes:
@@ -166,7 +166,7 @@ async def score_pr(
 
     if repo_config.fixed_base_score is not None:
         # Only the base score is overridden. Token fields stay token-derived so
-        # eligibility, pioneer, and reporting gates keep their evidence signal.
+        # eligibility and reporting gates keep their evidence signal.
         scored.base_score = repo_config.fixed_base_score
 
     _calculate_pr_multipliers(scored, repo_config)

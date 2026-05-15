@@ -119,8 +119,6 @@ def mirror_scored_pr_to_legacy_pull_request(
         base_score=scored.base_score,
         issue_multiplier=scored.issue_multiplier,
         open_pr_spam_multiplier=scored.open_pr_spam_multiplier,
-        pioneer_dividend=scored.pioneer_dividend,
-        pioneer_rank=scored.pioneer_rank,
         time_decay_multiplier=scored.time_decay_multiplier,
         credibility_multiplier=scored.credibility_multiplier,
         review_quality_multiplier=scored.review_quality_multiplier,

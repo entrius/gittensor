@@ -2,8 +2,6 @@ import math
 from datetime import datetime, timezone
 from typing import Optional
 
-import pytz
-
 from gittensor.constants import (
     SECONDS_PER_HOUR,
     TIME_DECAY_GRACE_PERIOD_HOURS,
@@ -11,8 +9,6 @@ from gittensor.constants import (
     TIME_DECAY_SIGMOID_MIDPOINT,
     TIME_DECAY_SIGMOID_STEEPNESS_SCALAR,
 )
-
-CHICAGO_TZ = pytz.timezone('America/Chicago')
 
 
 def parse_github_iso_to_utc(timestamp_str: str) -> datetime:
@@ -37,14 +33,6 @@ def parse_optional_github_iso_to_utc(value: Optional[str]) -> Optional[datetime]
     callers feed ``data.get(...)`` straight through without per-site None-checks.
     """
     return parse_github_iso_to_utc(value) if value else None
-
-
-def parse_github_timestamp_to_cst(timestamp_str: str) -> datetime:
-    """
-    Parse GitHub's ISO format timestamp and convert to Chicago timezone.
-    GitHub returns timestamps like: 2024-01-15T10:30:00Z
-    """
-    return parse_github_iso_to_utc(timestamp_str).astimezone(CHICAGO_TZ)
 
 
 def calculate_time_decay(merged_at: datetime) -> float:

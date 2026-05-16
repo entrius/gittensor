@@ -21,6 +21,7 @@ from gittensor.utils.mirror.models import (
     MirrorIssuesResponse,
     MirrorPullRequestFilesResponse,
     MirrorPullRequestsResponse,
+    MirrorRepoMaintainersResponse,
 )
 from gittensor.utils.utils import backoff_seconds
 
@@ -107,6 +108,20 @@ class MirrorClient:
         data = self._get(path)
         try:
             return MirrorPullRequestFilesResponse.from_dict(data)
+        except Exception as e:
+            raise MirrorRequestError(f'Mirror GET {path} returned invalid mirror response: {e}') from e
+
+    def get_repo_maintainers(self, repo_full_name: str) -> MirrorRepoMaintainersResponse:
+        """Fetch users whose latest known GitHub association for
+        ``repo_full_name`` (``owner/repo``) is OWNER/MEMBER/COLLABORATOR.
+
+        Used to route the per-repo ``maintainer_cut`` emission carve-out. An
+        unknown repo returns an empty maintainer list rather than an error.
+        """
+        path = f'/api/v1/repos/{repo_full_name}/maintainers'
+        data = self._get(path)
+        try:
+            return MirrorRepoMaintainersResponse.from_dict(data)
         except Exception as e:
             raise MirrorRequestError(f'Mirror GET {path} returned invalid mirror response: {e}') from e
 

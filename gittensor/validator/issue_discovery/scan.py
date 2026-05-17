@@ -44,7 +44,6 @@ from gittensor.classes import Issue, MinerEvaluation, MinerEvaluationCache, Repo
 from gittensor.constants import (
     MAINTAINER_ASSOCIATIONS,
     MIN_TOKEN_SCORE_FOR_BASE_SCORE,
-    PR_LOOKBACK_DAYS,
 )
 from gittensor.utils.mirror.client import MirrorClient, MirrorRequestError
 from gittensor.utils.mirror.models import MirrorIssue, MirrorSolvingPR
@@ -126,22 +125,6 @@ def _should_include_issue(issue: MirrorIssue) -> bool:
     return True
 
 
-def _issue_within_window(issue: MirrorIssue, mirror_repos: Dict[str, RepositoryConfig], now: datetime) -> bool:
-    """True if the issue falls inside its repo's pr_lookback_days window.
-
-    The mirror fetch uses the widest configured window; this re-filters each
-    issue to its own repo. ``updated_at`` is the bound, so a repo at the widest
-    window keeps every fetched issue.
-    """
-    repo_config = mirror_repos.get(issue.repo_full_name)
-    if repo_config is None:
-        return False
-    if issue.updated_at is None:
-        return True
-    cutoff = now - timedelta(days=resolve_scoring(repo_config.scoring).pr_lookback_days)
-    return issue.updated_at >= cutoff
-
-
 async def run_issue_discovery(
     miner_evaluations: Dict[int, MinerEvaluation],
     mirror_repos: Dict[str, RepositoryConfig],
@@ -154,7 +137,7 @@ async def run_issue_discovery(
 
     For each miner, fetches their authored issues via the mirror and classifies
     each. Issues in repos not present in ``mirror_repos`` are filtered out
-    client-side (mirror returns all tracked repos; the master list may be narrower).
+    client-side.
 
     Depends on OSS scoring (``score_miner_prs``) having already run for
     this cycle — the cross-miner solving-PR cache is built by walking every
@@ -171,13 +154,11 @@ async def run_issue_discovery(
 
     client = client or MirrorClient()
     now = datetime.now(timezone.utc)
-    # One mirror query serves every repo, so it reaches back as far as the
-    # widest per-repo window; issues are re-filtered to their own repo below.
-    max_lookback = max(
-        (resolve_scoring(rc.scoring).pr_lookback_days for rc in mirror_repos.values()),
-        default=PR_LOOKBACK_DAYS,
-    )
-    lookback_date = now - timedelta(days=max_lookback)
+    # Each repo is windowed by its own pr_lookback_days; the mirror applies the
+    # per-repo cutoffs server-side for the scoring fetch.
+    since_by_repo = {
+        name: now - timedelta(days=resolve_scoring(rc.scoring).pr_lookback_days) for name, rc in mirror_repos.items()
+    }
     enabled_names: Set[str] = set(mirror_repos.keys())
 
     solving_pr_cache: Dict[Tuple[str, int], CachedSolvingPR] = _build_solving_pr_cache(miner_evaluations)
@@ -205,7 +186,9 @@ async def run_issue_discovery(
             continue
 
         try:
-            response = await asyncio.to_thread(client.get_miner_issues, evaluation.github_id, since=lookback_date)
+            response = await asyncio.to_thread(
+                client.get_miner_issues, evaluation.github_id, since_by_repo=since_by_repo
+            )
         except MirrorRequestError as e:
             bt.logging.warning(f'├─ UID {uid}: issue fetch failed ({e}) — skipped this miner')
             _restore_issue_discovery_from_cache(evaluation, evaluation_cache)
@@ -221,13 +204,7 @@ async def run_issue_discovery(
             continue
 
         open_counts = _count_open_issues(current_response.issues, enabled_names)
-        filtered = [
-            i
-            for i in response.issues
-            if i.repo_full_name in enabled_names
-            and _should_include_issue(i)
-            and _issue_within_window(i, mirror_repos, now)
-        ]
+        filtered = [i for i in response.issues if i.repo_full_name in enabled_names and _should_include_issue(i)]
         if not filtered:
             _clear_issue_discovery_fields(evaluation)
             _apply_open_issue_counts(evaluation, open_counts)

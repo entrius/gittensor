@@ -28,8 +28,7 @@ MirrorClient = mirror_client_mod.MirrorClient
 MirrorRequestError = mirror_client_mod.MirrorRequestError
 RepositoryConfig = load_weights.RepositoryConfig
 
-# Recent by construction so default PRs land inside any repo's lookback window;
-# boundary behavior is covered explicitly by TestStaleClosedPR.
+# Recent, valid timestamps for the PR fixtures.
 _RECENT_CREATED = (datetime.now(timezone.utc) - timedelta(days=10)).isoformat().replace('+00:00', 'Z')
 _RECENT_MERGED = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat().replace('+00:00', 'Z')
 
@@ -205,28 +204,30 @@ class TestMaintainerSkip:
 
 
 # ============================================================================
-# Stale closed PR
+# Lookback window (sent to the mirror; windowing happens server-side)
 # ============================================================================
 
 
-class TestStaleClosedPR:
-    def test_closed_pr_created_before_lookback_dropped(self):
-        # Default lookback is 30 days before "now"; a CLOSED PR created 50 days ago should drop
-        old = (datetime.now(timezone.utc) - timedelta(days=50)).isoformat().replace('+00:00', 'Z')
-        recent = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
-
+class TestLookbackWindow:
+    def test_since_by_repo_carries_each_repos_lookback(self):
+        """Each repo's pr_lookback_days becomes its own ``since`` cutoff in the
+        map sent to the mirror — the mirror applies the window server-side."""
+        RepoScoringConfig = load_weights.RepoScoringConfig
+        repos = {
+            'entrius/gittensor-ui': RepositoryConfig(emission_share=0.3),  # default 30d
+            'entrius/gittensor': RepositoryConfig(emission_share=0.3, scoring=RepoScoringConfig(pr_lookback_days=60)),
+        }
         client = Mock()
-        client.get_miner_pulls.return_value = _build_response(
-            [
-                _pr_dict(1, state='CLOSED', merged_at=None, created_at=old),
-                _pr_dict(2, state='CLOSED', merged_at=None, created_at=recent),
-            ]
-        )
+        client.get_miner_pulls.return_value = _build_response([])
         eval_ = _eval()
-        load_miner_prs(eval_, _mirror_repos('entrius/gittensor-ui'), client=client)
 
-        assert len(eval_.closed_prs) == 1
-        assert eval_.closed_prs[0].pr.pr_number == 2
+        before = datetime.now(timezone.utc)
+        load_miner_prs(eval_, repos, client=client)
+        after = datetime.now(timezone.utc)
+
+        since_by_repo = client.get_miner_pulls.call_args.kwargs['since_by_repo']
+        assert before - timedelta(days=30) <= since_by_repo['entrius/gittensor-ui'] <= after - timedelta(days=30)
+        assert before - timedelta(days=60) <= since_by_repo['entrius/gittensor'] <= after - timedelta(days=60)
 
 
 # ============================================================================
@@ -310,7 +311,8 @@ class TestErrorPaths:
         response = Mock(status_code=200, text='<html>bad gateway</html>')
         response.json.side_effect = ValueError('Expecting value')
         session = Mock()
-        session.get.return_value = response
+        # load_miner_prs sends a per-repo since map, so the client POSTs.
+        session.post.return_value = response
         client = MirrorClient(session=session, max_attempts=1)
 
         eval_ = _eval()
@@ -326,11 +328,11 @@ class TestErrorPaths:
         call_count = {'n': 0}
         original = load_mod._maybe_add_pr
 
-        def flaky(eval_, pr, repos, lookback):
+        def flaky(eval_, pr, repos):
             call_count['n'] += 1
             if call_count['n'] == 1:
                 raise RuntimeError('synthetic failure on first PR')
-            original(eval_, pr, repos, lookback)
+            original(eval_, pr, repos)
 
         monkeypatch.setattr(load_mod, '_maybe_add_pr', flaky)
 

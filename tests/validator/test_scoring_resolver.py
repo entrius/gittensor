@@ -8,6 +8,7 @@ from gittensor.constants import (
     STANDARD_ISSUE_MULTIPLIER,
     TIME_DECAY_GRACE_PERIOD_HOURS,
     TIME_DECAY_SIGMOID_MIDPOINT,
+    TIME_DECAY_SIGMOID_STEEPNESS_SCALAR,
 )
 from gittensor.validator.utils.load_weights import RepoScoringConfig, RepoTimeDecayConfig, resolve_scoring
 
@@ -20,6 +21,7 @@ def test_none_resolves_entirely_to_global_defaults():
     assert resolved.maintainer_issue_multiplier == MAINTAINER_ISSUE_MULTIPLIER
     assert resolved.time_decay.grace_period_hours == TIME_DECAY_GRACE_PERIOD_HOURS
     assert resolved.time_decay.sigmoid_midpoint_days == TIME_DECAY_SIGMOID_MIDPOINT
+    assert resolved.time_decay.sigmoid_steepness == TIME_DECAY_SIGMOID_STEEPNESS_SCALAR
 
 
 def test_empty_config_resolves_to_global_defaults():
@@ -49,7 +51,10 @@ def test_zero_override_is_respected_not_treated_as_unset():
 
 def test_time_decay_overrides_resolve():
     resolved = resolve_scoring(
-        RepoScoringConfig(time_decay=RepoTimeDecayConfig(grace_period_hours=24, sigmoid_midpoint_days=15.0))
+        RepoScoringConfig(
+            time_decay=RepoTimeDecayConfig(grace_period_hours=24, sigmoid_midpoint_days=15.0, sigmoid_steepness=0.3)
+        )
     )
     assert resolved.time_decay.grace_period_hours == 24
     assert resolved.time_decay.sigmoid_midpoint_days == 15.0
+    assert resolved.time_decay.sigmoid_steepness == 0.3

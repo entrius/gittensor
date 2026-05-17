@@ -29,6 +29,7 @@ from gittensor.constants import (
     STANDARD_ISSUE_MULTIPLIER,
     TIME_DECAY_GRACE_PERIOD_HOURS,
     TIME_DECAY_SIGMOID_MIDPOINT,
+    TIME_DECAY_SIGMOID_STEEPNESS_SCALAR,
 )
 
 
@@ -91,6 +92,7 @@ class RepoTimeDecayConfig:
 
     grace_period_hours: Optional[int] = None
     sigmoid_midpoint_days: Optional[float] = None
+    sigmoid_steepness: Optional[float] = None
 
 
 @dataclass(frozen=True)
@@ -99,6 +101,7 @@ class ResolvedTimeDecay:
 
     grace_period_hours: int
     sigmoid_midpoint_days: float
+    sigmoid_steepness: float
 
 
 @dataclass
@@ -207,6 +210,7 @@ def resolve_time_decay(cfg: Optional[RepoTimeDecayConfig]) -> ResolvedTimeDecay:
     return ResolvedTimeDecay(
         grace_period_hours=int(pick(cfg.grace_period_hours, TIME_DECAY_GRACE_PERIOD_HOURS)),
         sigmoid_midpoint_days=float(pick(cfg.sigmoid_midpoint_days, TIME_DECAY_SIGMOID_MIDPOINT)),
+        sigmoid_steepness=float(pick(cfg.sigmoid_steepness, TIME_DECAY_SIGMOID_STEEPNESS_SCALAR)),
     )
 
 
@@ -349,7 +353,7 @@ def _coerce_scoring_value(repo_name: str, field_name: str, raw_value: Any, caste
 
 
 _TIME_DECAY_INT_FIELDS = ('grace_period_hours',)
-_TIME_DECAY_FLOAT_FIELDS = ('sigmoid_midpoint_days',)
+_TIME_DECAY_FLOAT_FIELDS = ('sigmoid_midpoint_days', 'sigmoid_steepness')
 
 
 def _parse_time_decay(repo_name: str, raw: Any) -> RepoTimeDecayConfig:
@@ -476,6 +480,11 @@ def _validate_scoring_configs(configs: Dict[str, RepositoryConfig]) -> None:
             raise RepositoryRegistryError(
                 f'{repo_name} scoring.time_decay.sigmoid_midpoint_days must be within [1, 90], '
                 f'got {resolved.time_decay.sigmoid_midpoint_days}'
+            )
+        if not 0.01 <= resolved.time_decay.sigmoid_steepness <= 5.0:
+            raise RepositoryRegistryError(
+                f'{repo_name} scoring.time_decay.sigmoid_steepness must be within [0.01, 5], '
+                f'got {resolved.time_decay.sigmoid_steepness}'
             )
 
 

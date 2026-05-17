@@ -12,8 +12,8 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import bittensor as bt
-from substrateinterface import Keypair
-from substrateinterface.exceptions import ExtrinsicNotFound
+from async_substrate_interface.errors import ExtrinsicNotFound
+from bittensor_wallet import Keypair
 
 from gittensor.constants import MAX_ISSUE_ID
 from gittensor.validator.issue_competitions.storage_utils import (
@@ -23,12 +23,6 @@ from gittensor.validator.issue_competitions.storage_utils import (
     get_contract_child_storage_key,
     read_contract_packed_storage,
 )
-
-# Bittensor uses async_substrate_interface which has its own exception type
-try:
-    from async_substrate_interface.errors import ExtrinsicNotFound as AsyncExtrinsicNotFound
-except ImportError:
-    AsyncExtrinsicNotFound = ExtrinsicNotFound
 
 # Default gas limits for contract calls
 DEFAULT_GAS_LIMIT = {
@@ -382,6 +376,39 @@ class IssueCompetitionContractClient:
             bt.logging.error(f'{label} — {e}')
             return False
 
+    def register_issue(
+        self,
+        github_url: str,
+        repository_full_name: str,
+        issue_number: int,
+        target_bounty: int,
+        keypair,
+    ) -> Optional[str]:
+        """
+        Register a new issue with a target bounty (OWNER ONLY).
+
+        Args:
+            github_url: Full GitHub URL of the issue
+            repository_full_name: Repository in owner/repo form
+            issue_number: GitHub issue number
+            target_bounty: Target bounty in raw alpha (u128)
+            keypair: Coldkey of the contract owner
+
+        Returns:
+            Extrinsic hash on success, None on failure
+        """
+        return self._exec_contract_raw(
+            method_name='register_issue',
+            args={
+                'github_url': github_url,
+                'repository_full_name': repository_full_name,
+                'issue_number': issue_number,
+                'target_bounty': target_bounty,
+            },
+            keypair=keypair,
+            gas_limit={'ref_time': 10_000_000_000, 'proof_size': 1_000_000},
+        )
+
     def vote_solution(
         self,
         issue_id: int,
@@ -502,14 +529,13 @@ class IssueCompetitionContractClient:
                 wait_for_finalization=False,
             )
 
-            _extrinsic_not_found_types = tuple(t for t in [ExtrinsicNotFound, AsyncExtrinsicNotFound] if t is not None)
             try:
                 if result.is_success:
                     return result.extrinsic_hash
                 else:
                     bt.logging.error(f'{method_name} failed: {result.error_message}')
                     return None
-            except _extrinsic_not_found_types:
+            except ExtrinsicNotFound:
                 return result.extrinsic_hash
 
         except Exception as e:

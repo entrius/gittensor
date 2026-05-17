@@ -1,8 +1,8 @@
-"""Unit tests for load_mirror_miner_prs.
+"""Unit tests for load_miner_prs.
 
 Strategy: build a fake MirrorClient that returns a canned MirrorPullRequestsResponse,
-inject it into load_mirror_miner_prs, and assert the resulting bucketing + filtering
-on the MirrorMinerEvaluation.
+inject it into load_miner_prs, and assert the resulting bucketing + filtering
+on the MinerEvaluation.
 """
 
 from __future__ import annotations
@@ -16,13 +16,13 @@ load_module = pytest.importorskip(
     'gittensor.validator.oss_contributions.mirror.load',
     reason='Requires gittensor mirror subpackage',
 )
-mirror_eval_module = pytest.importorskip('gittensor.validator.oss_contributions.mirror.evaluation')
+classes_module = pytest.importorskip('gittensor.classes')
 mirror_models = pytest.importorskip('gittensor.utils.mirror.models')
 mirror_client_mod = pytest.importorskip('gittensor.utils.mirror.client')
 load_weights = pytest.importorskip('gittensor.validator.utils.load_weights')
 
-load_mirror_miner_prs = load_module.load_mirror_miner_prs
-MirrorMinerEvaluation = mirror_eval_module.MirrorMinerEvaluation
+load_miner_prs = load_module.load_miner_prs
+MinerEvaluation = classes_module.MinerEvaluation
 MirrorPullRequestsResponse = mirror_models.MirrorPullRequestsResponse
 MirrorClient = mirror_client_mod.MirrorClient
 MirrorRequestError = mirror_client_mod.MirrorRequestError
@@ -93,11 +93,11 @@ def _build_response(prs: list) -> MirrorPullRequestsResponse:
 
 
 def _mirror_repos(*names: str) -> dict:
-    return {name: RepositoryConfig(weight=0.5, mirror_enabled=True) for name in names}
+    return {name: RepositoryConfig(emission_share=0.5) for name in names}
 
 
-def _eval(github_id: str | None = '218712309') -> MirrorMinerEvaluation:
-    return MirrorMinerEvaluation(uid=1, hotkey='hk', github_id=github_id)
+def _eval(github_id: str | None = '218712309') -> MinerEvaluation:
+    return MinerEvaluation(uid=1, hotkey='hk', github_id=github_id)
 
 
 # ============================================================================
@@ -116,7 +116,7 @@ class TestBucketing:
             ]
         )
         eval_ = _eval()
-        load_mirror_miner_prs(eval_, _mirror_repos('entrius/gittensor-ui'), client=client)
+        load_miner_prs(eval_, _mirror_repos('entrius/gittensor-ui'), client=client)
 
         assert len(eval_.merged_prs) == 1
         assert eval_.merged_prs[0].pr.pr_number == 1
@@ -135,7 +135,7 @@ class TestBucketing:
             ]
         )
         eval_ = _eval()
-        load_mirror_miner_prs(eval_, _mirror_repos('entrius/gittensor-ui'), client=client)
+        load_miner_prs(eval_, _mirror_repos('entrius/gittensor-ui'), client=client)
 
         assert len(eval_.merged_prs) == 1
         assert len(eval_.open_prs) == 0
@@ -157,7 +157,7 @@ class TestRepoFiltering:
         )
         eval_ = _eval()
         # Only one repo enabled in config — the second PR should be dropped
-        load_mirror_miner_prs(eval_, _mirror_repos('entrius/gittensor-ui'), client=client)
+        load_miner_prs(eval_, _mirror_repos('entrius/gittensor-ui'), client=client)
 
         assert len(eval_.merged_prs) == 1
         assert eval_.merged_prs[0].pr.repo_full_name == 'entrius/gittensor-ui'
@@ -180,7 +180,7 @@ class TestMaintainerSkip:
             ]
         )
         eval_ = _eval()
-        load_mirror_miner_prs(eval_, _mirror_repos('entrius/gittensor-ui'), client=client)
+        load_miner_prs(eval_, _mirror_repos('entrius/gittensor-ui'), client=client)
 
         assert len(eval_.merged_prs) == 1
         assert eval_.merged_prs[0].pr.pr_number == 2
@@ -194,39 +194,14 @@ class TestMaintainerSkip:
             ]
         )
         eval_ = _eval()
-        load_mirror_miner_prs(eval_, _mirror_repos('entrius/gittensor-ui'), client=client)
+        load_miner_prs(eval_, _mirror_repos('entrius/gittensor-ui'), client=client)
 
         assert len(eval_.merged_prs) == 1
 
 
 # ============================================================================
-# Inactive repo + stale closed PR
+# Stale closed PR
 # ============================================================================
-
-
-class TestInactiveRepo:
-    def test_pr_created_after_inactive_at_dropped(self):
-        client = Mock()
-        client.get_miner_pulls.return_value = _build_response(
-            [
-                # Created on 2026-04-15, repo became inactive on 2026-04-10 → drop
-                _pr_dict(1, created_at='2026-04-15T00:00:00Z'),
-                # Created on 2026-04-05 (before inactive_at) → keep
-                _pr_dict(2, created_at='2026-04-05T00:00:00Z'),
-            ]
-        )
-        repos = {
-            'entrius/gittensor-ui': RepositoryConfig(
-                weight=0.5,
-                mirror_enabled=True,
-                inactive_at='2026-04-10T00:00:00Z',
-            ),
-        }
-        eval_ = _eval()
-        load_mirror_miner_prs(eval_, repos, client=client)
-
-        assert len(eval_.merged_prs) == 1
-        assert eval_.merged_prs[0].pr.pr_number == 2
 
 
 class TestStaleClosedPR:
@@ -243,7 +218,7 @@ class TestStaleClosedPR:
             ]
         )
         eval_ = _eval()
-        load_mirror_miner_prs(eval_, _mirror_repos('entrius/gittensor-ui'), client=client)
+        load_miner_prs(eval_, _mirror_repos('entrius/gittensor-ui'), client=client)
 
         assert len(eval_.closed_prs) == 1
         assert eval_.closed_prs[0].pr.pr_number == 2
@@ -269,7 +244,7 @@ class TestEligibilityGateAtLoadTime:
             ]
         )
         eval_ = _eval()
-        load_mirror_miner_prs(eval_, _mirror_repos('entrius/gittensor-ui'), client=client)
+        load_miner_prs(eval_, _mirror_repos('entrius/gittensor-ui'), client=client)
 
         # Rejected PR never enters the merged list (matches legacy behavior)
         assert len(eval_.merged_prs) == 1
@@ -284,7 +259,7 @@ class TestEligibilityGateAtLoadTime:
             ]
         )
         eval_ = _eval()
-        load_mirror_miner_prs(eval_, _mirror_repos('entrius/gittensor-ui'), client=client)
+        load_miner_prs(eval_, _mirror_repos('entrius/gittensor-ui'), client=client)
 
         assert len(eval_.merged_prs) == 1
         assert eval_.merged_prs[0].pr.pr_number == 2
@@ -298,7 +273,7 @@ class TestEligibilityGateAtLoadTime:
             ]
         )
         eval_ = _eval()
-        load_mirror_miner_prs(eval_, _mirror_repos('entrius/gittensor-ui'), client=client)
+        load_miner_prs(eval_, _mirror_repos('entrius/gittensor-ui'), client=client)
 
         assert len(eval_.merged_prs) == 1
         assert eval_.merged_prs[0].pr.pr_number == 2
@@ -308,22 +283,22 @@ class TestErrorPaths:
     def test_no_github_id_short_circuits(self):
         client = Mock()
         eval_ = _eval(github_id=None)
-        load_mirror_miner_prs(eval_, _mirror_repos('entrius/gittensor-ui'), client=client)
+        load_miner_prs(eval_, _mirror_repos('entrius/gittensor-ui'), client=client)
         client.get_miner_pulls.assert_not_called()
-        assert eval_.fetch_failed is False
+        assert eval_.mirror_pr_fetch_failed is False
 
     def test_no_mirror_repos_short_circuits(self):
         client = Mock()
         eval_ = _eval()
-        load_mirror_miner_prs(eval_, {}, client=client)
+        load_miner_prs(eval_, {}, client=client)
         client.get_miner_pulls.assert_not_called()
 
     def test_mirror_request_error_sets_fetch_failed(self):
         client = Mock()
         client.get_miner_pulls.side_effect = MirrorRequestError('boom')
         eval_ = _eval()
-        load_mirror_miner_prs(eval_, _mirror_repos('entrius/gittensor-ui'), client=client)
-        assert eval_.fetch_failed is True
+        load_miner_prs(eval_, _mirror_repos('entrius/gittensor-ui'), client=client)
+        assert eval_.mirror_pr_fetch_failed is True
         assert eval_.merged_prs == []
 
     def test_malformed_2xx_json_sets_fetch_failed(self):
@@ -334,9 +309,9 @@ class TestErrorPaths:
         client = MirrorClient(session=session, max_attempts=1)
 
         eval_ = _eval()
-        load_mirror_miner_prs(eval_, _mirror_repos('entrius/gittensor-ui'), client=client)
+        load_miner_prs(eval_, _mirror_repos('entrius/gittensor-ui'), client=client)
 
-        assert eval_.fetch_failed is True
+        assert eval_.mirror_pr_fetch_failed is True
         assert eval_.merged_prs == []
 
     def test_per_pr_exception_does_not_abort_loop(self, monkeypatch):
@@ -362,8 +337,8 @@ class TestErrorPaths:
             ]
         )
         eval_ = _eval()
-        load_mirror_miner_prs(eval_, _mirror_repos('entrius/gittensor-ui'), client=client)
+        load_miner_prs(eval_, _mirror_repos('entrius/gittensor-ui'), client=client)
         # First PR raised → skipped; second PR still added
         assert len(eval_.merged_prs) == 1
         assert eval_.merged_prs[0].pr.pr_number == 2
-        assert eval_.fetch_failed is False  # per-PR errors don't poison the whole batch
+        assert eval_.mirror_pr_fetch_failed is False  # per-PR errors don't poison the whole batch

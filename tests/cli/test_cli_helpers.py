@@ -5,8 +5,8 @@
 Unit and integration tests for issue CLI helpers and command wiring.
 
 Covers: format_alpha, validate_bounty_amount, validate_repository,
-validate_issue_id, validate_ss58_address, colorize_status, and CLI
-invocation with validation (no live network).
+validate_ss58_address, colorize_status, and CLI invocation with
+validation (no live network).
 """
 
 import json
@@ -29,7 +29,6 @@ from gittensor.cli.issue_commands.helpers import (
     format_alpha,
     validate_bounty_amount,
     validate_github_issue,
-    validate_issue_id,
     validate_repository,
     validate_ss58_address,
 )
@@ -213,36 +212,6 @@ class TestValidateRepository:
         with pytest.raises(click.BadParameter) as exc_info:
             validate_repository('no-slash', verify_exists=False)
         assert exc_info.value.param_hint == '--repo'
-
-
-# =============================================================================
-# validate_issue_id
-# =============================================================================
-
-
-class TestValidateIssueId:
-    def test_valid_range(self):
-        assert validate_issue_id(1) == 1
-        assert validate_issue_id(MAX_ISSUE_ID - 1) == MAX_ISSUE_ID - 1
-
-    def test_zero_rejected(self):
-        with pytest.raises(Exception):
-            validate_issue_id(0)
-
-    def test_negative_rejected(self):
-        with pytest.raises(Exception):
-            validate_issue_id(-1)
-
-    def test_at_max_rejected(self):
-        with pytest.raises(Exception):
-            validate_issue_id(MAX_ISSUE_ID)
-
-    def test_custom_param_name_in_message(self):
-        with pytest.raises(click.BadParameter) as exc_info:
-            validate_issue_id(0, param_name='issue_id')
-        msg = str(exc_info.value)
-        assert '999999' in msg or '1' in msg
-        assert exc_info.value.param_hint == 'issue_id'
 
 
 # =============================================================================
@@ -889,6 +858,9 @@ class TestCliRegisterLogicalFailures:
             patch('gittensor.cli.issue_commands.mutations.validate_github_issue', return_value={}),
             patch('substrateinterface.SubstrateInterface'),
             patch('bittensor.Wallet'),
+            # Force the contract-metadata-missing branch regardless of whether
+            # the ink! artifact has been built locally.
+            patch('pathlib.Path.exists', return_value=False),
         ):
             result = runner.invoke(
                 cli_root,

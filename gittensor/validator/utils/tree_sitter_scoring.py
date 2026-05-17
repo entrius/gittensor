@@ -21,6 +21,7 @@ from gittensor.constants import (
     MAX_LINES_SCORED_FOR_NON_CODE_EXT,
     NON_CODE_EXTENSIONS,
     TEST_FILE_CONTRIBUTION_WEIGHT,
+    TREE_SITTER_PARSE_TIMEOUT_MICROS,
 )
 from gittensor.utils.github_api_tools import FileContentPair
 from gittensor.utils.logging import log_scoring_results
@@ -51,6 +52,8 @@ def get_parser(language: str) -> Optional[Parser]:
         from tree_sitter_language_pack import get_parser as get_ts_parser
 
         parser = get_ts_parser(language)  # type: ignore[arg-type]
+        # Bound the C-level parse so adversarial inputs cannot hang the round.
+        parser.timeout_micros = TREE_SITTER_PARSE_TIMEOUT_MICROS
         _parser_cache[language] = parser
         return parser
     except Exception as e:
@@ -321,6 +324,16 @@ def calculate_token_score_from_file_changes(
                     total_lines=file.changes,
                     is_test_file=is_test_file,
                     scoring_method='skipped-unsupported',
+                )
+            elif file.status != 'added' and content_pair.old_content is None:
+                bt.logging.debug(f'  │   {file.short_name}: skipped (non-added file missing base content)')
+                file_result = FileScoreResult(
+                    filename=file.short_name,
+                    score=0.0,
+                    nodes_scored=0,
+                    total_lines=file.changes,
+                    is_test_file=is_test_file,
+                    scoring_method='skipped-missing-base',
                 )
             else:
                 # Tree diff scoring - compare old and new ASTs

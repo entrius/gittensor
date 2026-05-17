@@ -6,13 +6,13 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import sys
 
 import click
 import requests
 from rich.table import Table
 
+from gittensor.cli.issue_commands.helpers import NETWORK_CHOICE
 from gittensor.cli.miner_commands.helpers import (
     DEFAULT_MIN_VALIDATOR_STAKE,
     DEFAULT_MIN_VALIDATOR_VTRUST,
@@ -48,11 +48,12 @@ _PAT_GRAPHQL_ACCESS_ERROR = (
 @click.option('--wallet', 'wallet_name', default=None, help='Bittensor wallet name.')
 @click.option('--hotkey', 'wallet_hotkey', default=None, help='Bittensor hotkey name.')
 @click.option('--netuid', type=int, default=NETUID_DEFAULT, help='Subnet UID.', show_default=True)
-@click.option('--network', default=None, help='Network name (local, test, finney).')
+@click.option('--network', type=NETWORK_CHOICE, default=None, help='Network name (local, test, finney).')
 @click.option('--rpc-url', default=None, help='Subtensor RPC endpoint URL (overrides --network).')
 @click.option(
     '--pat',
     default=None,
+    envvar='GITTENSOR_MINER_PAT',
     help='GitHub Personal Access Token. If not provided, falls back to GITTENSOR_MINER_PAT env var or interactive prompt.',
 )
 @click.option(
@@ -69,7 +70,7 @@ _PAT_GRAPHQL_ACCESS_ERROR = (
     show_default=True,
     help='Minimum validator stake (α) to broadcast to.',
 )
-@click.option('--json-output', 'json_mode', is_flag=True, default=False, help='Output results as JSON.')
+@click.option('--json', 'json_mode', is_flag=True, default=False, help='Output results as JSON.')
 def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, min_vtrust, min_stake, json_mode):
     """Broadcast your GitHub PAT to all validators on the network.
 
@@ -90,8 +91,6 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, min_vt
     """
     from gittensor.synapses import PatBroadcastSynapse
 
-    # 1. Load and validate PAT locally (flag > env var > interactive prompt)
-    pat = pat or os.environ.get('GITTENSOR_MINER_PAT')
     if not pat:
         if json_mode:
             _error('--pat flag or GITTENSOR_MINER_PAT environment variable is required for JSON mode.', json_mode)

@@ -21,6 +21,7 @@ from gittensor.utils.mirror.models import (
     MirrorIssuesResponse,
     MirrorPullRequestFilesResponse,
     MirrorPullRequestsResponse,
+    MirrorRepoMaintainersResponse,
 )
 from gittensor.utils.utils import backoff_seconds
 
@@ -68,7 +69,7 @@ class MirrorClient:
         """Fetch every tracked PR authored by ``github_id`` since the given
         datetime. If ``since`` is omitted the mirror defaults to 35 days back.
         Response contains all mirror-tracked repos; caller must filter to the
-        scoring config's mirror-enabled subset if it's narrower.
+        scoring config's registered subset.
         """
         path = f'/api/v1/miners/{github_id}/pulls'
         params = {'since': since.astimezone(timezone.utc).isoformat()} if since else None
@@ -107,6 +108,20 @@ class MirrorClient:
         data = self._get(path)
         try:
             return MirrorPullRequestFilesResponse.from_dict(data)
+        except Exception as e:
+            raise MirrorRequestError(f'Mirror GET {path} returned invalid mirror response: {e}') from e
+
+    def get_repo_maintainers(self, repo_full_name: str) -> MirrorRepoMaintainersResponse:
+        """Fetch users whose latest known GitHub association for
+        ``repo_full_name`` (``owner/repo``) is OWNER/MEMBER/COLLABORATOR.
+
+        Used to route the per-repo ``maintainer_cut`` emission carve-out. An
+        unknown repo returns an empty maintainer list rather than an error.
+        """
+        path = f'/api/v1/repos/{repo_full_name}/maintainers'
+        data = self._get(path)
+        try:
+            return MirrorRepoMaintainersResponse.from_dict(data)
         except Exception as e:
             raise MirrorRequestError(f'Mirror GET {path} returned invalid mirror response: {e}') from e
 

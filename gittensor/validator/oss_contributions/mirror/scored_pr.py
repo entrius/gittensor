@@ -1,13 +1,14 @@
 """Per-PR container for the mirror scoring path.
 
-`ScoredMirrorPR` wraps a `MirrorPullRequest` (raw mirror response data) with
-the scoring fields populated by `score_mirror_miner_prs`. Composition over
+`ScoredPR` wraps a `MirrorPullRequest` (raw mirror response data) with
+the scoring fields populated by `score_miner_prs`. Composition over
 inheritance — raw response data is accessed via ``scored.pr.<field>`` so
 ``gittensor.utils.mirror.models`` stays scoring-agnostic and fully reusable.
 
-The scoring fields mirror the equivalents on the legacy ``PullRequest``
-dataclass so downstream math (``calculate_final_earned_score``,
-``is_pioneer_eligible``) translates cleanly.
+The scoring fields and the ``number`` / ``repository_full_name`` / ``merged_at``
+aliases below are shaped to match ``PullRequest`` (the storage-layer type) so
+shared scoring helpers (``calculate_final_earned_score``,
+``calculate_open_pr_collateral_score``) work on either type unchanged.
 """
 
 from dataclasses import dataclass
@@ -15,18 +16,16 @@ from datetime import datetime
 from typing import List, Optional
 
 from gittensor.classes import _apply_score_multipliers
-from gittensor.constants import MIN_TOKEN_SCORE_FOR_BASE_SCORE
 from gittensor.utils.mirror.models import MirrorFile, MirrorPullRequest
 
 
 @dataclass
-class ScoredMirrorPR:
+class ScoredPR:
     """A `MirrorPullRequest` plus the scoring state derived during evaluation."""
 
     pr: MirrorPullRequest
 
     # Multipliers (default 1.0 — neutral if not yet computed)
-    repo_weight_multiplier: float = 1.0
     issue_multiplier: float = 1.0
     open_pr_spam_multiplier: float = 1.0
     time_decay_multiplier: float = 1.0
@@ -34,10 +33,6 @@ class ScoredMirrorPR:
     review_quality_multiplier: float = 1.0
     label_multiplier: float = 1.0
     label: Optional[str] = None
-
-    # Pioneer attribution (per-repo, populated post per-PR scoring)
-    pioneer_dividend: float = 0.0
-    pioneer_rank: int = 0  # 0 = not eligible, 1 = pioneer, 2+ = follower position
 
     # Score outputs
     base_score: float = 0.0
@@ -58,41 +53,30 @@ class ScoredMirrorPR:
 
     @property
     def number(self) -> int:
-        """Alias for ``self.pr.pr_number`` — enables duck-typing with legacy
-        PullRequest so source-agnostic functions (e.g. ``calculate_open_pr_collateral_score``)
-        accept a ScoredMirrorPR without modification."""
+        """Alias for ``self.pr.pr_number`` — matches the ``PullRequest`` field
+        name so source-agnostic scoring helpers work unchanged."""
         return self.pr.pr_number
 
     @property
     def repository_full_name(self) -> str:
-        """Alias for ``self.pr.repo_full_name`` — matches legacy PullRequest
-        attribute name for duck-typing purposes."""
+        """Alias for ``self.pr.repo_full_name`` — matches the ``PullRequest``
+        field name."""
         return self.pr.repo_full_name
 
     @property
     def changes_requested_count(self) -> int:
-        """Alias for the maintainer-only CHANGES_REQUESTED count used by
-        source-agnostic scoring helpers."""
+        """Maintainer-only CHANGES_REQUESTED count, surfaced for source-agnostic
+        scoring helpers."""
         return self.pr.review_summary.maintainer_changes_requested_count
 
     @property
     def merged_at(self) -> Optional[datetime]:
-        """Alias for ``self.pr.merged_at`` — matches legacy PullRequest attribute
-        name so the unified pioneer-dividend walk treats both types identically."""
+        """Alias for ``self.pr.merged_at`` — matches the ``PullRequest`` field name."""
         return self.pr.merged_at
 
-    def is_pioneer_eligible(self) -> bool:
-        """Pioneer-eligible iff merged AND meets the minimum token-score gate.
-
-        Mirrors `PullRequest.is_pioneer_eligible` so the legacy pioneer math
-        functions can be reused unchanged.
-        """
-        return self.pr.merged_at is not None and self.token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE
-
     def calculate_final_earned_score(self) -> float:
-        """Combine base score with all multipliers. Pioneer dividend is added separately after."""
+        """Combine base score with all multipliers."""
         multipliers = {
-            'repo': self.repo_weight_multiplier,
             'issue': self.issue_multiplier,
             'label': self.label_multiplier,
             'spam': self.open_pr_spam_multiplier,

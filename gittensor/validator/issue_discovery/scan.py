@@ -1,11 +1,11 @@
 """Issue discovery via the das-github-mirror service.
 
-Replaces the timeline-scraping legacy path for mirror-enabled repos. Mirror
-returns per-miner issues with an authoritative ``solved_by_pr`` and an inline
-``solving_pr`` carrying everything needed to classify the discovery: author_id,
-merge state, hours_since_merge, edited_after_merge, review_summary, shas.
+The mirror returns per-miner issues with an authoritative ``solved_by_pr`` and
+an inline ``solving_pr`` carrying everything needed to classify the discovery:
+author_id, merge state, hours_since_merge, edited_after_merge, review_summary,
+shas.
 
-Populates the existing ``MinerEvaluation`` issue-discovery fields directly
+Populates the issue-discovery fields on ``MinerEvaluation``
 (``issue_discovery_score``, ``total_solved_issues``, etc.) so downstream
 emission blending / normalization doesn't change.
 
@@ -24,23 +24,25 @@ awards at most one discovery score across the entire validator round, even
 when it closes issues authored by different miners. The earliest-created
 qualifying issue across all miners wins; the rest are credibility only.
 
-Base-score resolution uses a per-cycle cross-miner cache. Most solving PRs on
-mirror-enabled repos will be miners' own PRs that OSS scoring already tokenized;
-the cache pre-populates from every miner's ``mirror_merged_prs`` so those hits
-require no HTTP. Non-miner-solved PRs (cache misses) trigger
-``MirrorClient.get_pr_files`` + token scoring, with the result written back to
-the cache so sibling discoveries benefit.
+Base-score resolution uses a per-cycle cross-miner cache. Most solving PRs
+will be miners' own PRs that OSS scoring already tokenized; the cache
+pre-populates from every miner's ``merged_prs`` so those hits require
+no HTTP. Non-miner-solved PRs (cache misses) trigger
+``MirrorClient.get_pr_files`` + token scoring, with the result written back
+to the cache so sibling discoveries benefit.
 """
 
 import asyncio
+import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Set, Tuple
 
 import bittensor as bt
 
-from gittensor.classes import Issue, MinerEvaluation
+from gittensor.classes import Issue, MinerEvaluation, MinerEvaluationCache
 from gittensor.constants import (
+    MAINTAINER_ASSOCIATIONS,
     MIN_TOKEN_SCORE_FOR_BASE_SCORE,
     PR_LOOKBACK_DAYS,
 )
@@ -60,7 +62,6 @@ from gittensor.validator.utils.load_weights import (
     LanguageConfig,
     RepositoryConfig,
     TokenConfig,
-    resolve_repo_weight,
 )
 
 
@@ -68,7 +69,7 @@ from gittensor.validator.utils.load_weights import (
 class CachedSolvingPR:
     """Per-cycle cached token-scoring output for a solving PR.
 
-    Populated from miners' ``mirror_merged_prs`` before the per-miner loop
+    Populated from miners' ``merged_prs`` before the per-miner loop
     runs; cache-missed entries are filled on demand from
     ``MirrorClient.get_pr_files`` and written back so other miners' discoveries
     that reference the same solving PR hit the cache.
@@ -101,31 +102,41 @@ class _CacheStats:
 _FAR_FUTURE = datetime.max.replace(tzinfo=timezone.utc)
 
 
-async def run_mirror_issue_discovery(
+def _should_include_issue(issue: MirrorIssue) -> bool:
+    """Drop maintainer-discovered issues so repo maintainers cannot earn issue-
+    discovery rewards in repos they maintain — mirrors the PR-side maintainer
+    skip in ``oss_contributions/mirror/load.py``. Bypassed under DEV_MODE.
+    """
+    if not os.environ.get('DEV_MODE') and issue.author_association in MAINTAINER_ASSOCIATIONS:
+        return False
+    return True
+
+
+async def run_issue_discovery(
     miner_evaluations: Dict[int, MinerEvaluation],
     mirror_repos: Dict[str, RepositoryConfig],
     programming_languages: Dict[str, LanguageConfig],
     token_config: TokenConfig,
     client: Optional[MirrorClient] = None,
+    evaluation_cache: Optional[MinerEvaluationCache] = None,
 ) -> None:
-    """Score issue discovery for mirror-enabled repos. Mutates miner_evaluations.
+    """Score issue discovery. Mutates miner_evaluations.
 
     For each miner, fetches their authored issues via the mirror and classifies
     each. Issues in repos not present in ``mirror_repos`` are filtered out
-    client-side (mirror returns all tracked repos; the config's mirror_enabled
-    set may be narrower).
+    client-side (mirror returns all tracked repos; the master list may be narrower).
 
-    Depends on OSS scoring (``score_mirror_miner_prs``) having already run for
+    Depends on OSS scoring (``score_miner_prs``) having already run for
     this cycle — the cross-miner solving-PR cache is built by walking every
-    miner's populated ``mirror_merged_prs``.
+    miner's populated ``merged_prs``.
     """
     bt.logging.info('')
     bt.logging.info('=' * 50)
-    bt.logging.info(f'Issue discovery (mirror) | {len(mirror_repos)} mirror-enabled repo(s)')
+    bt.logging.info(f'Issue discovery | {len(mirror_repos)} repo(s)')
     bt.logging.info('=' * 50)
 
     if not mirror_repos:
-        bt.logging.info('No mirror-enabled repos — issue discovery skipped')
+        bt.logging.info('No scoring repos — issue discovery skipped')
         return
 
     client = client or MirrorClient()
@@ -136,13 +147,14 @@ async def run_mirror_issue_discovery(
     cache_stats = _CacheStats()
     bt.logging.info(
         f'Cross-miner solving-PR cache: {len(solving_pr_cache)} entries from '
-        f'{sum(len(ev.mirror_merged_prs) for ev in miner_evaluations.values())} scored mirror PRs'
+        f'{sum(len(ev.merged_prs) for ev in miner_evaluations.values())} scored PRs'
     )
 
     skipped_no_gh = 0
     skipped_failed = 0
     fetch_errors = 0
     no_issues = 0
+    cacheable_uids: Set[int] = set()
 
     # Phase 1: fetch each miner's issues.  The one-issue-per-PR rule is round-
     # global, so scoring is deferred until every miner's batch is in hand.
@@ -158,26 +170,33 @@ async def run_mirror_issue_discovery(
         try:
             response = await asyncio.to_thread(client.get_miner_issues, evaluation.github_id, since=lookback_date)
         except MirrorRequestError as e:
-            bt.logging.warning(f'├─ UID {uid}: mirror issue fetch failed ({e}) — skipped this miner')
+            bt.logging.warning(f'├─ UID {uid}: issue fetch failed ({e}) — skipped this miner')
+            _restore_issue_discovery_from_cache(evaluation, evaluation_cache)
             fetch_errors += 1
             continue
 
-        filtered = [i for i in response.issues if i.repo_full_name in enabled_names]
+        try:
+            current_response = await asyncio.to_thread(client.get_miner_issues, evaluation.github_id)
+        except MirrorRequestError as e:
+            bt.logging.warning(f'├─ UID {uid}: open-issue count fetch failed ({e}) — skipped this miner')
+            _restore_issue_discovery_from_cache(evaluation, evaluation_cache)
+            fetch_errors += 1
+            continue
+
+        open_issue_count = _count_open_issues(current_response.issues, enabled_names)
+        filtered = [i for i in response.issues if i.repo_full_name in enabled_names and _should_include_issue(i)]
         if not filtered:
+            _clear_issue_discovery_fields(evaluation)
+            evaluation.total_open_issues = open_issue_count
+            cacheable_uids.add(uid)
             no_issues += 1
             continue
 
-        # Count this miner's currently-open issues across mirror-enabled repos
-        # (within the lookback window). Used as the spam-multiplier signal and
-        # also written to evaluation.total_open_issues so the DB row reflects
-        # mirror-scoped state (the legacy GraphQL global open-issue count was
-        # never the right signal for the gate).
-        open_issue_count = sum(1 for i in filtered if i.state == 'OPEN')
         pending.append((evaluation, filtered, open_issue_count))
 
     canonical_pr_owners = _build_canonical_pr_owners(pending)
     for evaluation, filtered, open_issue_count in pending:
-        await _score_miner_mirror_issues(
+        complete = await _score_miner_issues(
             evaluation,
             filtered,
             mirror_repos,
@@ -189,10 +208,20 @@ async def run_mirror_issue_discovery(
             open_issue_count=open_issue_count,
             canonical_pr_owners=canonical_pr_owners,
         )
+        if complete:
+            cacheable_uids.add(evaluation.uid)
+
+    if evaluation_cache is not None:
+        # Issue-discovery is not authoritative for the PR-side fields, so we
+        # write through update_issue_discovery() rather than store(). The OSS
+        # phase already stored a fresh entry for this UID (or restored from
+        # cache on OSS failure); we only refresh the issue-discovery fields.
+        for uid in cacheable_uids:
+            evaluation_cache.update_issue_discovery(miner_evaluations[uid])
 
     bt.logging.info('')
     bt.logging.info(
-        f'Issue discovery complete | {len(pending)} processed | {no_issues} no mirror issues | '
+        f'Issue discovery complete | {len(pending)} processed | {no_issues} no issues | '
         f'{fetch_errors} fetch errors | {skipped_no_gh} no github_id | {skipped_failed} prior OSS failure'
     )
     bt.logging.info(
@@ -202,16 +231,63 @@ async def run_mirror_issue_discovery(
     )
 
 
+def _clear_issue_discovery_fields(evaluation: MinerEvaluation) -> None:
+    """Reset issue-discovery aggregates after a successful fetch with no mirror issues."""
+    evaluation.issue_discovery_score = 0.0
+    evaluation.issue_token_score = 0.0
+    evaluation.issue_credibility = 0.0
+    evaluation.is_issue_eligible = False
+    evaluation.total_solved_issues = 0
+    evaluation.total_valid_solved_issues = 0
+    evaluation.total_closed_issues = 0
+    evaluation.total_open_issues = 0
+    evaluation.issue_discovery_issues = []
+
+
+def _copy_issue_discovery_fields(target: MinerEvaluation, source: MinerEvaluation) -> None:
+    target.issue_discovery_score = source.issue_discovery_score
+    target.issue_token_score = source.issue_token_score
+    target.issue_credibility = source.issue_credibility
+    target.is_issue_eligible = source.is_issue_eligible
+    target.total_solved_issues = source.total_solved_issues
+    target.total_valid_solved_issues = source.total_valid_solved_issues
+    target.total_closed_issues = source.total_closed_issues
+    target.total_open_issues = source.total_open_issues
+    target.issue_discovery_issues = list(source.issue_discovery_issues)
+
+
+def _restore_issue_discovery_from_cache(
+    evaluation: MinerEvaluation,
+    evaluation_cache: Optional[MinerEvaluationCache],
+) -> bool:
+    """Restore cached issue-discovery aggregates for a transient DAS fetch failure."""
+    if evaluation_cache is None:
+        return False
+
+    cached = evaluation_cache.get(evaluation.uid, evaluation.hotkey, evaluation.github_id or '')
+    if cached is None:
+        bt.logging.warning(f'├─ UID {evaluation.uid}: no cached issue-discovery evaluation available')
+        return False
+
+    _copy_issue_discovery_fields(evaluation, cached)
+    bt.logging.info(
+        f'├─ UID {evaluation.uid}: restored cached issue discovery '
+        f'(score={cached.issue_discovery_score:.2f}, solved={cached.total_solved_issues}, '
+        f'valid={cached.total_valid_solved_issues})'
+    )
+    return True
+
+
 def _build_canonical_pr_owners(
     pending: List[Tuple[MinerEvaluation, List[MirrorIssue], int]],
 ) -> Dict[Tuple[str, int], Tuple[datetime, int, int]]:
-    """Cross-miner one-issue-per-PR resolution (legacy parity, pre-#796).
+    """Cross-miner one-issue-per-PR resolution.
 
     Returns ``(repo, pr_number) -> (created_at, issue_number, uid)`` for the
     earliest-created qualifying issue across all miners. Same-account issues
-    (discoverer == solver) are excluded — they never claim the slot, mirroring
-    legacy ``pr_scored.add`` ordering. ``_score_miner_mirror_issues`` matches
-    issue markers against this map to gate scoring vs. credibility-only.
+    (discoverer == solver) are excluded — they never claim the slot.
+    ``_score_miner_issues`` matches issue markers against this map to
+    gate scoring vs. credibility-only.
     """
     canonical: Dict[Tuple[str, int], Tuple[datetime, int, int]] = {}
     for evaluation, issues, _ in pending:
@@ -230,18 +306,22 @@ def _build_canonical_pr_owners(
     return canonical
 
 
+def _count_open_issues(issues: List[MirrorIssue], enabled_names: Set[str]) -> int:
+    return sum(1 for issue in issues if issue.repo_full_name in enabled_names and issue.state == 'OPEN')
+
+
 def _build_solving_pr_cache(
     miner_evaluations: Dict[int, MinerEvaluation],
 ) -> Dict[Tuple[str, int], CachedSolvingPR]:
     """Pre-populate the cross-miner cache from already-scored mirror PRs.
 
-    Any PR that was scored during OSS (in any miner's mirror_merged_prs) is
+    Any PR that was scored during OSS (in any miner's merged_prs) is
     keyed by (repo, pr_number) → CachedSolvingPR. Issue-discovery lookups hit
     this cache instead of re-fetching for miners' own PRs or other miners' PRs.
     """
     cache: Dict[Tuple[str, int], CachedSolvingPR] = {}
     for evaluation in miner_evaluations.values():
-        for scored in evaluation.mirror_merged_prs:
+        for scored in evaluation.merged_prs:
             if scored.token_score < MIN_TOKEN_SCORE_FOR_BASE_SCORE:
                 continue
             key = (scored.pr.repo_full_name, scored.pr.pr_number)
@@ -254,7 +334,7 @@ def _build_solving_pr_cache(
     return cache
 
 
-async def _score_miner_mirror_issues(
+async def _score_miner_issues(
     evaluation: MinerEvaluation,
     issues: List[MirrorIssue],
     mirror_repos: Dict[str, RepositoryConfig],
@@ -265,21 +345,25 @@ async def _score_miner_mirror_issues(
     token_config: TokenConfig,
     open_issue_count: int,
     canonical_pr_owners: Dict[Tuple[str, int], Tuple[datetime, int, int]],
-) -> None:
+) -> bool:
     """Classify + score one miner's mirror issues, populate MinerEvaluation fields.
 
-    ``open_issue_count`` is the miner's currently-OPEN issue count across
-    mirror-enabled repos within the lookback window — the source-of-truth
-    for the open-issue spam multiplier on the mirror path.
+    ``open_issue_count`` is the miner's current OPEN issue count across
+    registered repos, independent of the issue-scoring lookback window.
 
     ``canonical_pr_owners`` enforces the cross-miner one-issue-per-PR rule:
     only the marker-matching issue scores, siblings count for credibility.
+
+    Returns ``True`` when all required solving-PR score data was available, so
+    the caller can safely refresh the cache with this complete issue snapshot.
     """
     solved_count = 0
     valid_solved_count = 0
     closed_count = 0
     issue_token_score = 0.0
+    score_fetch_failed = False
     scored_issues: List[Issue] = []
+    evaluation.issue_discovery_issues = []
 
     issues_sorted = sorted(
         issues,
@@ -305,6 +389,7 @@ async def _score_miner_mirror_issues(
         solved_count += 1
 
         # Resolve real base_score + token_score for the solving PR (cache or fetch)
+        repo_config = mirror_repos.get(issue.repo_full_name)
         cached = await _resolve_solving_pr_score(
             issue,
             solving_pr,
@@ -313,18 +398,20 @@ async def _score_miner_mirror_issues(
             client,
             programming_languages,
             token_config,
+            repo_config,
         )
         if cached is None:
             # Fetch failed — issue still counts for solved/credibility but not scored.
             # Can't apply the valid-solved gate without a real token_score, so be
             # conservative and don't increment valid_solved_count.
+            score_fetch_failed = True
             bt.logging.debug(
                 f'  issue #{issue.issue_number} ({issue.repo_full_name}): solver score unavailable '
                 f'(fetch failed) — credibility only'
             )
             continue
 
-        # Valid-solved gate (legacy parity): solving PR must meet the token threshold.
+        # Valid-solved gate: solving PR must meet the token threshold.
         if cached.token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE:
             valid_solved_count += 1
 
@@ -349,8 +436,8 @@ async def _score_miner_mirror_issues(
         if repo_config is None:
             continue
 
-        # Quality gate — matches legacy issue-discovery behavior: below-threshold
-        # solving PRs add credibility only, no discovery score.
+        # Quality gate: below-threshold solving PRs add credibility only, no
+        # discovery score.
         if cached.token_score < MIN_TOKEN_SCORE_FOR_BASE_SCORE:
             bt.logging.debug(
                 f'  issue #{issue.issue_number} ({issue.repo_full_name}): solving PR '
@@ -368,9 +455,6 @@ async def _score_miner_mirror_issues(
         # for the open-issue spam multiplier threshold calc.
         issue_token_score += cached.token_score
 
-    # All issue-discovery fields are now mirror-only writers (legacy issue
-    # discovery has been removed), so simple assignment — no need to merge
-    # with prior values.
     evaluation.total_solved_issues = solved_count
     evaluation.total_valid_solved_issues = valid_solved_count
     evaluation.total_closed_issues = closed_count
@@ -387,7 +471,7 @@ async def _score_miner_mirror_issues(
             f'{solved_count} solved ({valid_solved_count} valid) | {closed_count} closed | '
             f'{open_issue_count} open'
         )
-        return
+        return not score_fetch_failed
 
     spam_mult = calculate_open_issue_spam_multiplier(open_issue_count, issue_token_score)
 
@@ -397,7 +481,6 @@ async def _score_miner_mirror_issues(
         issue.discovery_open_issue_spam_multiplier = spam_mult
         issue.discovery_earned_score = round(
             issue.discovery_base_score
-            * issue.discovery_repo_weight_multiplier
             * issue.discovery_time_decay_multiplier
             * issue.discovery_review_quality_multiplier
             * issue.discovery_credibility_multiplier
@@ -407,13 +490,15 @@ async def _score_miner_mirror_issues(
         total_discovery_score += issue.discovery_earned_score
 
     evaluation.issue_discovery_score = round(total_discovery_score, 2)
+    evaluation.issue_discovery_issues = scored_issues
 
     bt.logging.info(
         f'├─ UID {evaluation.uid}: {solved_count} solved ({valid_solved_count} valid) | '
         f'{closed_count} closed | {open_issue_count} open | {len(scored_issues)} scored | '
         f'credibility={credibility:.2f} | spam_mult={spam_mult:.1f} | '
-        f'mirror_score={total_discovery_score:.2f}'
+        f'discovery_score={total_discovery_score:.2f}'
     )
+    return not score_fetch_failed
 
 
 async def _resolve_solving_pr_score(
@@ -424,12 +509,17 @@ async def _resolve_solving_pr_score(
     client: MirrorClient,
     programming_languages: Dict[str, LanguageConfig],
     token_config: TokenConfig,
+    repo_config: Optional[RepositoryConfig],
 ) -> Optional[CachedSolvingPR]:
     """Return base_score + token_score for the solving PR.
 
     Cache hit: returns immediately (case 1 = miner's own PR, case 2 = another
     miner's PR). Cache miss: fetches ``/pulls/:o/:r/:n/files`` and tokenizes;
     writes the result back into the cache. Returns None on fetch failure.
+
+    Applies ``fixed_base_score`` repo override on cache miss (matching the
+    override in ``score_mirror_pr``) so that ``discovery_base_score`` is the
+    same regardless of solver identity.
     """
     key = (issue.repo_full_name, solving_pr.pr_number)
     if key in cache:
@@ -460,7 +550,12 @@ async def _resolve_solving_pr_score(
         issue.repo_full_name, solving_pr.pr_number, files_response.files
     )
     result = calculate_base_score_for_pr_files(file_changes, file_contents, programming_languages, token_config)
-    cached = CachedSolvingPR(base_score=result.base_score, token_score=result.token_score)
+    base_score = (
+        repo_config.fixed_base_score
+        if repo_config is not None and repo_config.fixed_base_score is not None
+        else result.base_score
+    )
+    cached = CachedSolvingPR(base_score=base_score, token_score=result.token_score)
     cache[key] = cached
     return cached
 
@@ -560,7 +655,6 @@ def _mirror_issue_for_scoring(
     )
 
     adapted.discovery_base_score = base_score
-    adapted.discovery_repo_weight_multiplier = resolve_repo_weight(repo_config)
     adapted.discovery_time_decay_multiplier = round(calculate_time_decay(solving_pr.merged_at), 2)
     adapted.discovery_review_quality_multiplier = round(
         calculate_issue_review_quality_multiplier(solving_pr.review_summary.maintainer_changes_requested_count),

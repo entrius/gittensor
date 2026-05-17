@@ -396,3 +396,49 @@ class MirrorPullRequestFilesResponse:
             scoring_data_stored=bool(data.get('scoring_data_stored', False)),
             files=files,
         )
+
+
+@dataclass
+class MirrorMaintainer:
+    """One maintainer-role contributor from
+    ``GET /api/v1/repos/:owner/:repo/maintainers`` — a user whose latest known
+    association for the repo is OWNER/MEMBER/COLLABORATOR.
+    """
+
+    github_id: str
+    login: str
+    association: str
+
+    @classmethod
+    def from_dict(cls, data: dict) -> 'MirrorMaintainer':
+        # Mirror may serialize github_id as int; coerce to str so comparisons
+        # with MinerEvaluation.github_id are type-correct.
+        return cls(
+            github_id=str(data['github_id']),
+            login=data.get('login') or '',
+            association=data['association'],
+        )
+
+
+@dataclass
+class MirrorRepoMaintainersResponse:
+    """Top-level wrapper for ``GET /api/v1/repos/:owner/:repo/maintainers``."""
+
+    repo_full_name: str
+    generated_at: Optional[datetime]
+    maintainers: List[MirrorMaintainer] = field(default_factory=list)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> 'MirrorRepoMaintainersResponse':
+        maintainers: List[MirrorMaintainer] = []
+        for raw in data.get('maintainers') or []:
+            try:
+                maintainers.append(MirrorMaintainer.from_dict(raw))
+            except Exception as e:
+                identifier = raw.get('github_id', '?') if isinstance(raw, dict) else '?'
+                bt.logging.warning(f'Skipping malformed mirror maintainer {identifier}: {e}')
+        return cls(
+            repo_full_name=data['repo_full_name'].lower(),
+            generated_at=parse_optional_github_iso_to_utc(data.get('generated_at')),
+            maintainers=maintainers,
+        )

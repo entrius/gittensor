@@ -18,7 +18,7 @@ FileChange = classes.FileChange
 Issue = classes.Issue
 MirrorPullRequest = mirror_models.MirrorPullRequest
 MirrorFile = mirror_models.MirrorFile
-ScoredMirrorPR = scored_pr_module.ScoredMirrorPR
+ScoredPR = scored_pr_module.ScoredPR
 
 
 def _mirror_pr_with_files_and_issue():
@@ -67,7 +67,7 @@ def _mirror_pr_with_files_and_issue():
             ],
         }
     )
-    scored = ScoredMirrorPR(pr=pr)
+    scored = ScoredPR(pr=pr)
     scored.files = [
         MirrorFile.from_dict(
             {
@@ -90,7 +90,7 @@ def _mirror_pr_with_files_and_issue():
 class TestGetAllIssuesWalksMirror:
     def test_mirror_linked_issues_adapted_into_legacy_issue_list(self):
         eval_ = MinerEvaluation(uid=1, hotkey='hk')
-        eval_.mirror_merged_prs = [_mirror_pr_with_files_and_issue()]
+        eval_.merged_prs = [_mirror_pr_with_files_and_issue()]
 
         issues = eval_.get_all_issues()
         assert len(issues) == 1
@@ -101,26 +101,11 @@ class TestGetAllIssuesWalksMirror:
         assert issue.repository_full_name == 'entrius/gittensor-ui'
         assert issue.state_reason == 'COMPLETED'
 
-    def test_combines_legacy_and_mirror_issues(self):
-        eval_ = MinerEvaluation(uid=1, hotkey='hk')
-        eval_.mirror_merged_prs = [_mirror_pr_with_files_and_issue()]
-        # Sprinkle a legacy issue on a fake legacy PR-like object via a minimal stub
-        # — legacy path iterates pr.issues, so we just attach a list.
-        legacy_pr_stub = type(
-            'Stub', (), {'issues': [Issue(number=10, pr_number=5, repository_full_name='foo/bar', title='legacy')]}
-        )()
-        eval_.merged_pull_requests = [legacy_pr_stub]
-
-        issues = eval_.get_all_issues()
-        assert len(issues) == 2
-        numbers = {i.number for i in issues}
-        assert numbers == {10, 50}
-
 
 class TestGetAllFileChangesWalksMirror:
     def test_mirror_files_adapted_into_legacy_file_change_list(self):
         eval_ = MinerEvaluation(uid=1, hotkey='hk')
-        eval_.mirror_merged_prs = [_mirror_pr_with_files_and_issue()]
+        eval_.merged_prs = [_mirror_pr_with_files_and_issue()]
 
         file_changes = eval_.get_all_file_changes()
         assert len(file_changes) == 1
@@ -134,7 +119,7 @@ class TestGetAllFileChangesWalksMirror:
         eval_ = MinerEvaluation(uid=1, hotkey='hk')
         scored = _mirror_pr_with_files_and_issue()
         scored.files = None  # not fetched
-        eval_.mirror_merged_prs = [scored]
+        eval_.merged_prs = [scored]
 
         file_changes = eval_.get_all_file_changes()
         assert file_changes == []
@@ -152,16 +137,16 @@ class TestCacheSerdeCompat:
 
         assert restored.uid == 1
         assert restored.total_score == 42.0
-        assert restored.mirror_merged_prs == []
-        assert restored.mirror_open_prs == []
-        assert restored.mirror_closed_prs == []
+        assert restored.merged_prs == []
+        assert restored.open_prs == []
+        assert restored.closed_prs == []
 
     def test_roundtrip_preserves_populated_mirror_prs(self):
         eval_ = MinerEvaluation(uid=1, hotkey='hk', github_id='123')
-        eval_.mirror_merged_prs = [_mirror_pr_with_files_and_issue()]
+        eval_.merged_prs = [_mirror_pr_with_files_and_issue()]
 
         dumped = pickle.dumps(eval_)
         restored = pickle.loads(dumped)
 
-        assert len(restored.mirror_merged_prs) == 1
-        assert restored.mirror_merged_prs[0].pr.pr_number == 100
+        assert len(restored.merged_prs) == 1
+        assert restored.merged_prs[0].pr.pr_number == 100

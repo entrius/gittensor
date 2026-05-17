@@ -22,8 +22,8 @@ from functools import partial
 from typing import Dict, List, Set
 
 import bittensor as bt
-import wandb
 
+import wandb
 from gittensor import __version__
 from gittensor.classes import MinerEvaluation, MinerEvaluationCache
 from gittensor.validator import pat_storage
@@ -37,6 +37,7 @@ from gittensor.validator.pat_handler import (
     priority_pat_check,
 )
 from gittensor.validator.utils.config import STORE_DB_RESULTS, WANDB_PROJECT, WANDB_VALIDATOR_NAME
+from gittensor.validator.utils.load_weights import RepositoryConfig
 from gittensor.validator.utils.storage import DatabaseStorage
 from neurons.base.validator import BaseValidatorNeuron
 
@@ -98,11 +99,17 @@ class Validator(BaseValidatorNeuron):
         bt.logging.info('load_state()')
         self.load_state()
 
-    async def bulk_store_evaluation(self, miner_evals: Dict[int, MinerEvaluation], skip_uids: Set[int] = None):
+    async def bulk_store_evaluation(
+        self,
+        miner_evals: Dict[int, MinerEvaluation],
+        master_repositories: Dict[str, RepositoryConfig],
+        skip_uids: Set[int] = None,
+    ):
         """Store all miner evaluations, log summary rather than per-UID.
 
         Args:
             miner_evals: Dict of UID -> MinerEvaluation to store.
+            master_repositories: Master repo registry — one miner_evaluations row per repo.
             skip_uids: Set of UIDs to skip (e.g. cached evaluations that were already stored previously).
         """
         if self.db_storage is None:
@@ -119,7 +126,7 @@ class Validator(BaseValidatorNeuron):
                 continue
 
             try:
-                storage_result = self.db_storage.store_evaluation(evaluation)
+                storage_result = self.db_storage.store_evaluation(evaluation, master_repositories)
                 if storage_result.success:
                     successful_count += 1
                 else:

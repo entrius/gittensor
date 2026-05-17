@@ -1077,7 +1077,7 @@ class TestCrossMinerOneIssuePerPr:
             )
         )
 
-        canonical = _build_canonical_pr_owners([(e_a, [a_issue], 0), (e_b, [b_issue], 0)])
+        canonical = _build_canonical_pr_owners([(e_a, [a_issue], {}), (e_b, [b_issue], {})])
 
         # Earlier-created issue (#50, uid 1) wins canonical for PR 100
         owner = canonical[('entrius/gittensor-ui', 100)]
@@ -1109,7 +1109,7 @@ class TestCrossMinerOneIssuePerPr:
             )
         )
 
-        canonical = _build_canonical_pr_owners([(e_a, [a_issue], 0), (e_b, [b_issue], 0)])
+        canonical = _build_canonical_pr_owners([(e_a, [a_issue], {}), (e_b, [b_issue], {})])
 
         owner = canonical[('entrius/gittensor-ui', 100)]
         assert owner[1] == 50  # lower issue_number wins
@@ -1141,7 +1141,7 @@ class TestCrossMinerOneIssuePerPr:
             )
         )
 
-        canonical = _build_canonical_pr_owners([(e_a, [a_issue], 0), (e_b, [b_issue], 0)])
+        canonical = _build_canonical_pr_owners([(e_a, [a_issue], {}), (e_b, [b_issue], {})])
 
         owner = canonical[('entrius/gittensor-ui', 100)]
         assert owner[1] == 51  # B's issue claims canonical

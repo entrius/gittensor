@@ -7,6 +7,7 @@ import bittensor as bt
 from gittensor.classes import Miner, MinerEvaluation
 from gittensor.validator.storage.database import create_database_connection
 from gittensor.validator.storage.repository import Repository
+from gittensor.validator.utils.load_weights import RepositoryConfig
 
 
 @dataclass
@@ -27,12 +28,15 @@ class DatabaseStorage:
     def is_enabled(self) -> bool:
         return self.db_connection is not None
 
-    def store_evaluation(self, miner_eval: MinerEvaluation) -> StorageResult:
+    def store_evaluation(
+        self, miner_eval: MinerEvaluation, master_repositories: Dict[str, RepositoryConfig]
+    ) -> StorageResult:
         """
         Store all evaluation data in an optimized manner with proper error handling.
 
         Args:
             miner_eval: Complete miner evaluation with all related data
+            master_repositories: Master repo registry — one miner_evaluations row per repo
 
         Returns:
             StorageResult with success status, errors, and counts
@@ -77,7 +81,7 @@ class DatabaseStorage:
                 )
                 self.repo.cleanup_stale_miner_data(miner_eval, commit=False)
                 result.stored_counts['evaluations'] = (
-                    1 if self.repo.set_miner_evaluation(miner_eval, commit=False) else 0
+                    1 if self.repo.set_miner_evaluation(miner_eval, master_repositories, commit=False) else 0
                 )
 
             self.db_connection.commit()

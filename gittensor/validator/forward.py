@@ -72,7 +72,7 @@ async def forward(self: 'Validator') -> None:
         await issue_competitions(self, miner_evaluations)
 
         # 4. Store all evaluations to DB (includes issue discovery fields)
-        await self.bulk_store_evaluation(miner_evaluations, skip_uids=cached_uids)
+        await self.bulk_store_evaluation(miner_evaluations, master_repositories, skip_uids=cached_uids)
 
         # 5. Allocate repo-bounded emission shares into final rewards
         maintainer_uids_by_repo = _build_maintainer_uids_by_repo(miner_evaluations, master_repositories, miner_uids)

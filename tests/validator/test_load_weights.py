@@ -14,12 +14,14 @@ import pytest
 
 from gittensor.validator.utils.load_weights import (
     LanguageConfig,
+    RepoEligibilityConfig,
     RepositoryConfig,
     RepositoryRegistryError,
     TokenConfig,
     load_master_repo_weights,
     load_programming_language_weights,
     load_token_config,
+    resolve_eligibility,
 )
 
 
@@ -244,42 +246,81 @@ class TestRepositoryConfigLabelMultipliers:
 
 
 class TestRepositoryConfigMirrorScoringFields:
-    """Dataclass + JSON-parsing tests for mirror-only scoring fields."""
+    """Dataclass + JSON-parsing tests for mirror scoring + per-repo eligibility fields."""
 
     def test_mirror_scoring_field_defaults(self):
         config = RepositoryConfig(emission_share=0.5)
 
         assert config.fixed_base_score is None
-        assert config.eligibility_mode is True
+        assert config.eligibility == RepoEligibilityConfig()
 
-    def test_loader_parses_mirror_scoring_fields(self, tmp_path, monkeypatch):
+    def test_loader_parses_fixed_base_score(self, tmp_path, monkeypatch):
         from gittensor.validator.utils import load_weights as lw
 
-        fake_weights_dir = tmp_path
-        (fake_weights_dir / 'master_repositories.json').write_text(
+        (tmp_path / 'master_repositories.json').write_text(
             json.dumps(
                 {
-                    'foo/fixed': {
+                    'foo/fixed': {'emission_share': 0.5, 'fixed_base_score': 12.5},
+                    'foo/defaults': {'emission_share': 0.3},
+                }
+            )
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: tmp_path)
+
+        repos = lw.load_master_repo_weights()
+
+        assert repos['foo/fixed'].fixed_base_score == pytest.approx(12.5)
+        assert repos['foo/defaults'].fixed_base_score is None
+
+    def test_loader_parses_eligibility_overrides(self, tmp_path, monkeypatch):
+        from gittensor.validator.utils import load_weights as lw
+
+        (tmp_path / 'master_repositories.json').write_text(
+            json.dumps(
+                {
+                    'foo/custom': {
                         'emission_share': 0.5,
-                        'fixed_base_score': 12.5,
-                        'eligibility_mode': False,
+                        'eligibility': {'min_valid_merged_prs': 1, 'min_credibility': 0.5},
                     },
                     'foo/defaults': {'emission_share': 0.3},
                 }
             )
         )
-        monkeypatch.setattr(lw, '_get_weights_dir', lambda: fake_weights_dir)
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: tmp_path)
 
         repos = lw.load_master_repo_weights()
 
-        assert repos['foo/fixed'].fixed_base_score == pytest.approx(12.5)
-        assert repos['foo/fixed'].eligibility_mode is False
-        assert repos['foo/defaults'].fixed_base_score is None
-        assert repos['foo/defaults'].eligibility_mode is True
+        assert repos['foo/custom'].eligibility.min_valid_merged_prs == 1
+        assert repos['foo/custom'].eligibility.min_credibility == pytest.approx(0.5)
+        # unset fields stay None and resolve to the global default
+        assert repos['foo/custom'].eligibility.max_open_pr_threshold is None
+        assert repos['foo/defaults'].eligibility == RepoEligibilityConfig()
+
+    def test_loader_rejects_unknown_eligibility_key(self, tmp_path, monkeypatch):
+        from gittensor.validator.utils import load_weights as lw
+
+        (tmp_path / 'master_repositories.json').write_text(
+            json.dumps({'foo/bad': {'emission_share': 0.5, 'eligibility': {'min_valid_prs': 1}}})
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: tmp_path)
+
+        with pytest.raises(RepositoryRegistryError):
+            lw.load_master_repo_weights()
+
+    def test_loader_rejects_out_of_range_credibility(self, tmp_path, monkeypatch):
+        from gittensor.validator.utils import load_weights as lw
+
+        (tmp_path / 'master_repositories.json').write_text(
+            json.dumps({'foo/bad': {'emission_share': 0.5, 'eligibility': {'min_credibility': 1.5}}})
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: tmp_path)
+
+        with pytest.raises(RepositoryRegistryError):
+            lw.load_master_repo_weights()
 
     def test_live_mirror_scoring_fields_have_valid_shape(self):
-        """Loader passes mirror scoring fields through unchanged — CI fails when a
-        bad value is committed to master_repositories.json."""
+        """Loader passes scoring + eligibility fields through unchanged — CI fails
+        when a bad value is committed to master_repositories.json."""
         repos = load_master_repo_weights()
         for repo_name, config in repos.items():
             if config.fixed_base_score is not None:
@@ -289,9 +330,18 @@ class TestRepositoryConfigMirrorScoringFields:
                 assert 0.0 <= float(config.fixed_base_score) <= 100.0, (
                     f'{repo_name} fixed_base_score must be within [0.0, 100.0]'
                 )
-            assert isinstance(config.eligibility_mode, bool), (
-                f'{repo_name} eligibility_mode must be bool, got {type(config.eligibility_mode)}'
-            )
+            resolved = resolve_eligibility(config.eligibility)
+            assert 0.0 <= resolved.min_credibility <= 1.0, f'{repo_name} min_credibility out of range'
+            assert 0.0 <= resolved.min_issue_credibility <= 1.0, f'{repo_name} min_issue_credibility out of range'
+            assert resolved.min_valid_merged_prs >= 0, f'{repo_name} min_valid_merged_prs negative'
+
+    def test_oc_1_runs_ungated(self):
+        """The oc-1 benchmark repo opts out of the gate via zeroed thresholds."""
+        repos = load_master_repo_weights()
+        resolved = resolve_eligibility(repos['entrius/oc-1'].eligibility)
+        assert resolved.min_valid_merged_prs == 0
+        assert resolved.min_credibility == 0.0
+        assert resolved.min_valid_solved_issues == 0
 
 
 class TestRepositoryConfigMaintainerCut:

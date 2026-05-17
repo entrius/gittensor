@@ -360,7 +360,7 @@ def _calculate_pr_multipliers(scored: ScoredPR, repo_config: RepositoryConfig) -
     if is_merged:
         assert pr.merged_at is not None, f'MERGED PR #{pr.pr_number} missing merged_at'
         scored.open_pr_spam_multiplier = 1.0  # finalized later with combined open-PR count
-        scored.time_decay_multiplier = round(calculate_time_decay(pr.merged_at), 2)
+        scored.time_decay_multiplier = round(calculate_time_decay(pr.merged_at, scoring_cfg.time_decay), 2)
         scored.review_quality_multiplier = round(
             calculate_review_quality_multiplier(
                 pr.review_summary.maintainer_changes_requested_count,

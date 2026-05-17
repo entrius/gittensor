@@ -347,6 +347,9 @@ class TestRepositoryConfigMirrorScoringFields:
             assert 1.0 <= resolved_scoring.maintainer_issue_multiplier <= 5.0, (
                 f'{repo_name} maintainer_issue_multiplier out of range'
             )
+            assert 0 <= resolved_scoring.time_decay.grace_period_hours <= 168, (
+                f'{repo_name} time_decay.grace_period_hours out of range'
+            )
 
     def test_oc_1_runs_ungated(self):
         """The oc-1 benchmark repo opts out of the gate via zeroed thresholds."""
@@ -424,6 +427,29 @@ class TestRepositoryConfigScoringBlock:
 
         (tmp_path / 'master_repositories.json').write_text(
             json.dumps({'foo/bad': {'emission_share': 0.5, 'scoring': {'standard_issue_multiplier': 0.5}}})
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: tmp_path)
+
+        with pytest.raises(RepositoryRegistryError):
+            lw.load_master_repo_weights()
+
+    def test_loader_parses_time_decay_overrides(self, tmp_path, monkeypatch):
+        from gittensor.validator.utils import load_weights as lw
+
+        (tmp_path / 'master_repositories.json').write_text(
+            json.dumps({'foo/custom': {'emission_share': 0.5, 'scoring': {'time_decay': {'grace_period_hours': 24}}}})
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: tmp_path)
+
+        repos = lw.load_master_repo_weights()
+
+        assert repos['foo/custom'].scoring.time_decay.grace_period_hours == 24
+
+    def test_loader_rejects_unknown_time_decay_key(self, tmp_path, monkeypatch):
+        from gittensor.validator.utils import load_weights as lw
+
+        (tmp_path / 'master_repositories.json').write_text(
+            json.dumps({'foo/bad': {'emission_share': 0.5, 'scoring': {'time_decay': {'bogus': 1}}}})
         )
         monkeypatch.setattr(lw, '_get_weights_dir', lambda: tmp_path)
 

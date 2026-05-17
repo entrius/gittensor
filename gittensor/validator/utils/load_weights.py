@@ -27,6 +27,7 @@ from gittensor.constants import (
     OPEN_PR_THRESHOLD_TOKEN_SCORE,
     REVIEW_PENALTY_RATE,
     STANDARD_ISSUE_MULTIPLIER,
+    TIME_DECAY_GRACE_PERIOD_HOURS,
 )
 
 
@@ -84,6 +85,20 @@ class ResolvedEligibility:
 
 
 @dataclass
+class RepoTimeDecayConfig:
+    """Per-repo overrides for the time-decay curve. Every field optional."""
+
+    grace_period_hours: Optional[int] = None
+
+
+@dataclass(frozen=True)
+class ResolvedTimeDecay:
+    """A ``RepoTimeDecayConfig`` with every override resolved to a concrete value."""
+
+    grace_period_hours: int
+
+
+@dataclass
 class RepoScoringConfig:
     """Per-repo overrides for the scoring knobs.
 
@@ -95,6 +110,7 @@ class RepoScoringConfig:
     review_penalty_rate: Optional[float] = None
     standard_issue_multiplier: Optional[float] = None
     maintainer_issue_multiplier: Optional[float] = None
+    time_decay: RepoTimeDecayConfig = field(default_factory=RepoTimeDecayConfig)
 
 
 @dataclass(frozen=True)
@@ -105,6 +121,7 @@ class ResolvedScoring:
     review_penalty_rate: float
     standard_issue_multiplier: float
     maintainer_issue_multiplier: float
+    time_decay: ResolvedTimeDecay
 
 
 @dataclass
@@ -177,6 +194,18 @@ def resolve_eligibility(cfg: Optional[RepoEligibilityConfig]) -> ResolvedEligibi
     )
 
 
+def resolve_time_decay(cfg: Optional[RepoTimeDecayConfig]) -> ResolvedTimeDecay:
+    """Overlay a repo's time-decay overrides onto the global default constants."""
+    cfg = cfg or RepoTimeDecayConfig()
+
+    def pick(value: Any, default: Any) -> Any:
+        return default if value is None else value
+
+    return ResolvedTimeDecay(
+        grace_period_hours=int(pick(cfg.grace_period_hours, TIME_DECAY_GRACE_PERIOD_HOURS)),
+    )
+
+
 def resolve_scoring(cfg: Optional[RepoScoringConfig]) -> ResolvedScoring:
     """Overlay a repo's scoring overrides onto the global default constants."""
     cfg = cfg or RepoScoringConfig()
@@ -189,6 +218,7 @@ def resolve_scoring(cfg: Optional[RepoScoringConfig]) -> ResolvedScoring:
         review_penalty_rate=float(pick(cfg.review_penalty_rate, REVIEW_PENALTY_RATE)),
         standard_issue_multiplier=float(pick(cfg.standard_issue_multiplier, STANDARD_ISSUE_MULTIPLIER)),
         maintainer_issue_multiplier=float(pick(cfg.maintainer_issue_multiplier, MAINTAINER_ISSUE_MULTIPLIER)),
+        time_decay=resolve_time_decay(cfg.time_decay),
     )
 
 
@@ -314,6 +344,26 @@ def _coerce_scoring_value(repo_name: str, field_name: str, raw_value: Any, caste
         raise RepositoryRegistryError(f'{repo_name} scoring.{field_name} must be a number: {e}') from e
 
 
+_TIME_DECAY_INT_FIELDS = ('grace_period_hours',)
+
+
+def _parse_time_decay(repo_name: str, raw: Any) -> RepoTimeDecayConfig:
+    """Parse the optional nested ``scoring.time_decay`` object."""
+    if raw is None:
+        return RepoTimeDecayConfig()
+    if not isinstance(raw, dict):
+        raise RepositoryRegistryError(f'{repo_name} scoring.time_decay must be an object, got {type(raw)}')
+
+    unknown = sorted(set(raw) - set(_TIME_DECAY_INT_FIELDS))
+    if unknown:
+        raise RepositoryRegistryError(f'{repo_name} scoring.time_decay has unknown keys: {unknown}')
+
+    kwargs: Dict[str, Any] = {}
+    for field_name in _TIME_DECAY_INT_FIELDS:
+        kwargs[field_name] = _coerce_scoring_value(repo_name, f'time_decay.{field_name}', raw.get(field_name), int)
+    return RepoTimeDecayConfig(**kwargs)
+
+
 def _parse_scoring(repo_name: str, raw: Any) -> RepoScoringConfig:
     """Parse the optional ``scoring`` object from a master_repositories.json entry."""
     if raw is None:
@@ -321,13 +371,14 @@ def _parse_scoring(repo_name: str, raw: Any) -> RepoScoringConfig:
     if not isinstance(raw, dict):
         raise RepositoryRegistryError(f'{repo_name} scoring must be an object, got {type(raw)}')
 
-    unknown = sorted(set(raw) - set(_SCORING_FLOAT_FIELDS))
+    unknown = sorted(set(raw) - set(_SCORING_FLOAT_FIELDS) - {'time_decay'})
     if unknown:
         raise RepositoryRegistryError(f'{repo_name} scoring has unknown keys: {unknown}')
 
     kwargs: Dict[str, Any] = {}
     for field_name in _SCORING_FLOAT_FIELDS:
         kwargs[field_name] = _coerce_scoring_value(repo_name, field_name, raw.get(field_name), float)
+    kwargs['time_decay'] = _parse_time_decay(repo_name, raw.get('time_decay'))
     return RepoScoringConfig(**kwargs)
 
 
@@ -407,6 +458,11 @@ def _validate_scoring_configs(configs: Dict[str, RepositoryConfig]) -> None:
             raise RepositoryRegistryError(
                 f'{repo_name} scoring.maintainer_issue_multiplier must be within [1, 5], '
                 f'got {resolved.maintainer_issue_multiplier}'
+            )
+        if not 0 <= resolved.time_decay.grace_period_hours <= 168:
+            raise RepositoryRegistryError(
+                f'{repo_name} scoring.time_decay.grace_period_hours must be within [0, 168], '
+                f'got {resolved.time_decay.grace_period_hours}'
             )
 
 

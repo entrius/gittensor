@@ -6,8 +6,9 @@ from gittensor.constants import (
     OPEN_PR_COLLATERAL_PERCENT,
     REVIEW_PENALTY_RATE,
     STANDARD_ISSUE_MULTIPLIER,
+    TIME_DECAY_GRACE_PERIOD_HOURS,
 )
-from gittensor.validator.utils.load_weights import RepoScoringConfig, resolve_scoring
+from gittensor.validator.utils.load_weights import RepoScoringConfig, RepoTimeDecayConfig, resolve_scoring
 
 
 def test_none_resolves_entirely_to_global_defaults():
@@ -16,6 +17,7 @@ def test_none_resolves_entirely_to_global_defaults():
     assert resolved.review_penalty_rate == REVIEW_PENALTY_RATE
     assert resolved.standard_issue_multiplier == STANDARD_ISSUE_MULTIPLIER
     assert resolved.maintainer_issue_multiplier == MAINTAINER_ISSUE_MULTIPLIER
+    assert resolved.time_decay.grace_period_hours == TIME_DECAY_GRACE_PERIOD_HOURS
 
 
 def test_empty_config_resolves_to_global_defaults():
@@ -41,3 +43,8 @@ def test_zero_override_is_respected_not_treated_as_unset():
     """0 is a real value (a repo opting out of collateral), not 'use the default'."""
     resolved = resolve_scoring(RepoScoringConfig(open_pr_collateral_percent=0.0))
     assert resolved.open_pr_collateral_percent == 0.0
+
+
+def test_time_decay_overrides_resolve():
+    resolved = resolve_scoring(RepoScoringConfig(time_decay=RepoTimeDecayConfig(grace_period_hours=24)))
+    assert resolved.time_decay.grace_period_hours == 24

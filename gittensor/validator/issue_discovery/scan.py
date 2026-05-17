@@ -734,12 +734,15 @@ def _mirror_issue_for_scoring(
         body_or_title_edited_at=None,
     )
 
+    scoring_cfg = resolve_scoring(repo_config.scoring)
     adapted.discovery_base_score = base_score
-    adapted.discovery_time_decay_multiplier = round(calculate_time_decay(solving_pr.merged_at), 2)
+    adapted.discovery_time_decay_multiplier = round(
+        calculate_time_decay(solving_pr.merged_at, scoring_cfg.time_decay), 2
+    )
     adapted.discovery_review_quality_multiplier = round(
         calculate_issue_review_quality_multiplier(
             solving_pr.review_summary.maintainer_changes_requested_count,
-            resolve_scoring(repo_config.scoring).review_penalty_rate,
+            scoring_cfg.review_penalty_rate,
         ),
         2,
     )

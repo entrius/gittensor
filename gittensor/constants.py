@@ -132,9 +132,8 @@ MIN_VALID_SOLVED_ISSUES = 3  # minimum solved issues where solving PR has token_
 MIN_ISSUE_CREDIBILITY = 0.80  # minimum issue credibility ratio
 MIN_TOKEN_SCORE_FOR_VALID_ISSUE = 5  # solving-PR token_score for a solved issue to count as "valid"
 
-# Review quality cliff model (different from OSS: has clean bonus + steeper penalty)
-ISSUE_REVIEW_CLEAN_BONUS = 1.1  # multiplier when 0 CHANGES_REQUESTED rounds
-ISSUE_REVIEW_PENALTY_RATE = 0.15  # per CHANGES_REQUESTED round after cliff
+# Issue-discovery review penalty: per CHANGES_REQUESTED round on the solving PR
+ISSUE_REVIEW_PENALTY_RATE = 0.15
 
 # Open issue spam threshold (per-repo: counts a repo's own open issues)
 OPEN_ISSUE_SPAM_BASE_THRESHOLD = 2

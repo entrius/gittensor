@@ -15,27 +15,20 @@ from typing import TYPE_CHECKING, Tuple
 
 import bittensor as bt
 
-from gittensor.constants import (
-    ISSUE_REVIEW_CLEAN_BONUS,
-    ISSUE_REVIEW_PENALTY_RATE,
-)
+from gittensor.constants import ISSUE_REVIEW_PENALTY_RATE
 
 if TYPE_CHECKING:
     from gittensor.validator.utils.load_weights import ResolvedEligibility
 
 
 def calculate_issue_review_quality_multiplier(changes_requested_count: int) -> float:
-    """Cliff model: clean bonus when 0 changes requested, then linear penalty.
+    """Linear penalty on the solving PR's maintainer CHANGES_REQUESTED rounds.
 
-    0 rounds → 1.1 (clean bonus)
+    0 rounds → 1.0
     1 round  → 0.85
-    2 rounds → 0.70
     7+ rounds → 0.0
     """
-    if changes_requested_count == 0:
-        multiplier = ISSUE_REVIEW_CLEAN_BONUS
-    else:
-        multiplier = max(0.0, 1.0 - ISSUE_REVIEW_PENALTY_RATE * changes_requested_count)
+    multiplier = max(0.0, 1.0 - ISSUE_REVIEW_PENALTY_RATE * changes_requested_count)
     bt.logging.info(
         f'{changes_requested_count} solving-PR CHANGES_REQUESTED review(s) → '
         f'issue_review_quality_multiplier={multiplier:.2f}'

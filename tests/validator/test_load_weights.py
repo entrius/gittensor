@@ -15,6 +15,7 @@ import pytest
 from gittensor.validator.utils.load_weights import (
     LanguageConfig,
     RepoEligibilityConfig,
+    RepoScoringConfig,
     RepositoryConfig,
     RepositoryRegistryError,
     TokenConfig,
@@ -22,6 +23,7 @@ from gittensor.validator.utils.load_weights import (
     load_programming_language_weights,
     load_token_config,
     resolve_eligibility,
+    resolve_scoring,
 )
 
 
@@ -334,6 +336,10 @@ class TestRepositoryConfigMirrorScoringFields:
             assert 0.0 <= resolved.min_credibility <= 1.0, f'{repo_name} min_credibility out of range'
             assert 0.0 <= resolved.min_issue_credibility <= 1.0, f'{repo_name} min_issue_credibility out of range'
             assert resolved.min_valid_merged_prs >= 0, f'{repo_name} min_valid_merged_prs negative'
+            resolved_scoring = resolve_scoring(config.scoring)
+            assert 0.0 <= resolved_scoring.open_pr_collateral_percent <= 1.0, (
+                f'{repo_name} open_pr_collateral_percent out of range'
+            )
 
     def test_oc_1_runs_ungated(self):
         """The oc-1 benchmark repo opts out of the gate via zeroed thresholds."""
@@ -342,6 +348,54 @@ class TestRepositoryConfigMirrorScoringFields:
         assert resolved.min_valid_merged_prs == 0
         assert resolved.min_credibility == 0.0
         assert resolved.min_valid_solved_issues == 0
+
+
+class TestRepositoryConfigScoringBlock:
+    """Dataclass + JSON-parsing tests for the per-repo scoring block."""
+
+    def test_scoring_field_defaults(self):
+        config = RepositoryConfig(emission_share=0.5)
+        assert config.scoring == RepoScoringConfig()
+
+    def test_loader_parses_scoring_overrides(self, tmp_path, monkeypatch):
+        from gittensor.validator.utils import load_weights as lw
+
+        (tmp_path / 'master_repositories.json').write_text(
+            json.dumps(
+                {
+                    'foo/custom': {'emission_share': 0.5, 'scoring': {'open_pr_collateral_percent': 0.4}},
+                    'foo/defaults': {'emission_share': 0.3},
+                }
+            )
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: tmp_path)
+
+        repos = lw.load_master_repo_weights()
+
+        assert repos['foo/custom'].scoring.open_pr_collateral_percent == pytest.approx(0.4)
+        assert repos['foo/defaults'].scoring == RepoScoringConfig()
+
+    def test_loader_rejects_unknown_scoring_key(self, tmp_path, monkeypatch):
+        from gittensor.validator.utils import load_weights as lw
+
+        (tmp_path / 'master_repositories.json').write_text(
+            json.dumps({'foo/bad': {'emission_share': 0.5, 'scoring': {'bogus': 1}}})
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: tmp_path)
+
+        with pytest.raises(RepositoryRegistryError):
+            lw.load_master_repo_weights()
+
+    def test_loader_rejects_out_of_range_collateral(self, tmp_path, monkeypatch):
+        from gittensor.validator.utils import load_weights as lw
+
+        (tmp_path / 'master_repositories.json').write_text(
+            json.dumps({'foo/bad': {'emission_share': 0.5, 'scoring': {'open_pr_collateral_percent': 1.5}}})
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: tmp_path)
+
+        with pytest.raises(RepositoryRegistryError):
+            lw.load_master_repo_weights()
 
 
 class TestRepositoryConfigMaintainerCut:

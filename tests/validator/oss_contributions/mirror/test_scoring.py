@@ -847,6 +847,7 @@ class TestCollateralScoreAcceptsScoredPR:
 
     def test_collateral_computed_without_crash(self):
         from gittensor.validator.oss_contributions.scoring import calculate_open_pr_collateral_score
+        from gittensor.validator.utils.load_weights import resolve_scoring
 
         scored = ScoredPR(pr=_pr(state='OPEN'))
         scored.base_score = 25.0
@@ -854,7 +855,7 @@ class TestCollateralScoreAcceptsScoredPR:
         scored.label_multiplier = 1.0
 
         # Must not raise AttributeError on .number
-        result = calculate_open_pr_collateral_score(scored)
+        result = calculate_open_pr_collateral_score(scored, resolve_scoring(None))
         assert result >= 0.0
 
     def test_number_property_proxies_to_pr_pr_number(self):
@@ -875,6 +876,7 @@ class TestCollateralScoreAcceptsScoredPR:
 
     def test_open_mirror_pr_review_iterations_increase_collateral(self):
         from gittensor.validator.oss_contributions.scoring import calculate_open_pr_collateral_score
+        from gittensor.validator.utils.load_weights import resolve_scoring
 
         clean = ScoredPR(pr=_pr(state='OPEN', maintainer_changes_requested_count=0))
         clean.base_score = 100.0
@@ -886,8 +888,9 @@ class TestCollateralScoreAcceptsScoredPR:
         reviewed.issue_multiplier = 1.0
         reviewed.label_multiplier = 1.0
 
-        assert calculate_open_pr_collateral_score(reviewed) == pytest.approx(
-            calculate_open_pr_collateral_score(clean) * 1.45
+        default_scoring = resolve_scoring(None)
+        assert calculate_open_pr_collateral_score(reviewed, default_scoring) == pytest.approx(
+            calculate_open_pr_collateral_score(clean, default_scoring) * 1.45
         )
 
 

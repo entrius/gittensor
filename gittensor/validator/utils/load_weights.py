@@ -22,6 +22,7 @@ from gittensor.constants import (
     NON_CODE_EXTENSIONS,
     OPEN_ISSUE_SPAM_BASE_THRESHOLD,
     OPEN_ISSUE_SPAM_TOKEN_SCORE_PER_SLOT,
+    OPEN_PR_COLLATERAL_PERCENT,
     OPEN_PR_THRESHOLD_TOKEN_SCORE,
 )
 
@@ -80,6 +81,24 @@ class ResolvedEligibility:
 
 
 @dataclass
+class RepoScoringConfig:
+    """Per-repo overrides for the scoring knobs.
+
+    Every field is optional; ``None`` means "use the global default constant".
+    Resolve a config into concrete values with ``resolve_scoring``.
+    """
+
+    open_pr_collateral_percent: Optional[float] = None
+
+
+@dataclass(frozen=True)
+class ResolvedScoring:
+    """A ``RepoScoringConfig`` with every override resolved to a concrete value."""
+
+    open_pr_collateral_percent: float
+
+
+@dataclass
 class RepositoryConfig:
     """Configuration for a repository in the master_repositories list.
 
@@ -100,6 +119,8 @@ class RepositoryConfig:
         eligibility: Per-repo overrides for the eligibility / spam knobs. Unset
             fields fall back to the global default constants — see
             ``resolve_eligibility``.
+        scoring: Per-repo overrides for the scoring knobs. Unset fields fall
+            back to the global default constants — see ``resolve_scoring``.
         maintainer_cut: Fraction [0.0, 1.0] of this repo's emission slice
             routed directly to its maintainer miner neurons, split evenly,
             before normal scoring. Defaults to 0.0 (no carve-out).
@@ -114,6 +135,7 @@ class RepositoryConfig:
     default_label_multiplier: float = 1.0
     fixed_base_score: Optional[float] = None
     eligibility: RepoEligibilityConfig = field(default_factory=RepoEligibilityConfig)
+    scoring: RepoScoringConfig = field(default_factory=RepoScoringConfig)
     maintainer_cut: float = 0.0
 
 
@@ -143,6 +165,18 @@ def resolve_eligibility(cfg: Optional[RepoEligibilityConfig]) -> ResolvedEligibi
             pick(cfg.open_issue_spam_token_score_per_slot, OPEN_ISSUE_SPAM_TOKEN_SCORE_PER_SLOT)
         ),
         max_open_issue_threshold=int(pick(cfg.max_open_issue_threshold, MAX_OPEN_ISSUE_THRESHOLD)),
+    )
+
+
+def resolve_scoring(cfg: Optional[RepoScoringConfig]) -> ResolvedScoring:
+    """Overlay a repo's scoring overrides onto the global default constants."""
+    cfg = cfg or RepoScoringConfig()
+
+    def pick(value: Any, default: Any) -> Any:
+        return default if value is None else value
+
+    return ResolvedScoring(
+        open_pr_collateral_percent=float(pick(cfg.open_pr_collateral_percent, OPEN_PR_COLLATERAL_PERCENT)),
     )
 
 
@@ -249,6 +283,37 @@ def _parse_eligibility(repo_name: str, raw: Any) -> RepoEligibilityConfig:
     return RepoEligibilityConfig(**kwargs)
 
 
+_SCORING_FLOAT_FIELDS = ('open_pr_collateral_percent',)
+
+
+def _coerce_scoring_value(repo_name: str, field_name: str, raw_value: Any, caster: Any) -> Any:
+    if raw_value is None:
+        return None
+    if isinstance(raw_value, bool):
+        raise RepositoryRegistryError(f'{repo_name} scoring.{field_name} must be a number, got bool')
+    try:
+        return caster(raw_value)
+    except (TypeError, ValueError) as e:
+        raise RepositoryRegistryError(f'{repo_name} scoring.{field_name} must be a number: {e}') from e
+
+
+def _parse_scoring(repo_name: str, raw: Any) -> RepoScoringConfig:
+    """Parse the optional ``scoring`` object from a master_repositories.json entry."""
+    if raw is None:
+        return RepoScoringConfig()
+    if not isinstance(raw, dict):
+        raise RepositoryRegistryError(f'{repo_name} scoring must be an object, got {type(raw)}')
+
+    unknown = sorted(set(raw) - set(_SCORING_FLOAT_FIELDS))
+    if unknown:
+        raise RepositoryRegistryError(f'{repo_name} scoring has unknown keys: {unknown}')
+
+    kwargs: Dict[str, Any] = {}
+    for field_name in _SCORING_FLOAT_FIELDS:
+        kwargs[field_name] = _coerce_scoring_value(repo_name, field_name, raw.get(field_name), float)
+    return RepoScoringConfig(**kwargs)
+
+
 def _validate_emission_shares(configs: Dict[str, RepositoryConfig]) -> None:
     total_share = 0.0
     for repo_name, config in configs.items():
@@ -303,6 +368,17 @@ def _validate_eligibility_configs(configs: Dict[str, RepositoryConfig]) -> None:
                 )
 
 
+def _validate_scoring_configs(configs: Dict[str, RepositoryConfig]) -> None:
+    """Range-check every repo's resolved scoring config."""
+    for repo_name, config in configs.items():
+        resolved = resolve_scoring(config.scoring)
+        if not 0.0 <= resolved.open_pr_collateral_percent <= 1.0:
+            raise RepositoryRegistryError(
+                f'{repo_name} scoring.open_pr_collateral_percent must be within [0, 1], '
+                f'got {resolved.open_pr_collateral_percent}'
+            )
+
+
 def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
     """
     Load repository emission shares from the local JSON file.
@@ -346,6 +422,7 @@ def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
                     default_label_multiplier=float(metadata.get('default_label_multiplier', 1.0)),
                     fixed_base_score=metadata.get('fixed_base_score'),
                     eligibility=_parse_eligibility(repo_name, metadata.get('eligibility')),
+                    scoring=_parse_scoring(repo_name, metadata.get('scoring')),
                     maintainer_cut=_coerce_share(repo_name, 'maintainer_cut', metadata.get('maintainer_cut', 0.0)),
                 )
                 normalized_data[repo_name.lower()] = config
@@ -356,6 +433,7 @@ def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
 
         _validate_emission_shares(normalized_data)
         _validate_eligibility_configs(normalized_data)
+        _validate_scoring_configs(normalized_data)
 
         bt.logging.debug(f'Successfully loaded {len(normalized_data)} repository entries from {weights_file}')
         return normalized_data

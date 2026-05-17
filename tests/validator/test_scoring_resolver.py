@@ -4,6 +4,7 @@ global default constants."""
 from gittensor.constants import (
     MAINTAINER_ISSUE_MULTIPLIER,
     OPEN_PR_COLLATERAL_PERCENT,
+    PR_LOOKBACK_DAYS,
     REVIEW_PENALTY_RATE,
     STANDARD_ISSUE_MULTIPLIER,
     TIME_DECAY_GRACE_PERIOD_HOURS,
@@ -16,6 +17,7 @@ from gittensor.validator.utils.load_weights import RepoScoringConfig, RepoTimeDe
 
 def test_none_resolves_entirely_to_global_defaults():
     resolved = resolve_scoring(None)
+    assert resolved.pr_lookback_days == PR_LOOKBACK_DAYS
     assert resolved.open_pr_collateral_percent == OPEN_PR_COLLATERAL_PERCENT
     assert resolved.review_penalty_rate == REVIEW_PENALTY_RATE
     assert resolved.standard_issue_multiplier == STANDARD_ISSUE_MULTIPLIER
@@ -33,12 +35,14 @@ def test_empty_config_resolves_to_global_defaults():
 def test_overrides_take_precedence_over_defaults():
     resolved = resolve_scoring(
         RepoScoringConfig(
+            pr_lookback_days=60,
             open_pr_collateral_percent=0.5,
             review_penalty_rate=0.3,
             standard_issue_multiplier=2.0,
             maintainer_issue_multiplier=3.0,
         )
     )
+    assert resolved.pr_lookback_days == 60
     assert resolved.open_pr_collateral_percent == 0.5
     assert resolved.review_penalty_rate == 0.3
     assert resolved.standard_issue_multiplier == 2.0

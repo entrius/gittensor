@@ -26,7 +26,7 @@ from gittensor.utils.mirror.client import MirrorClient, MirrorRequestError
 from gittensor.utils.mirror.models import MirrorPullRequest
 from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredPR
 from gittensor.validator.oss_contributions.mirror.scoring import _should_skip_merged_mirror_pr
-from gittensor.validator.utils.load_weights import RepositoryConfig
+from gittensor.validator.utils.load_weights import RepositoryConfig, resolve_scoring
 
 
 def load_miner_prs(
@@ -56,7 +56,14 @@ def load_miner_prs(
         return
 
     client = client or MirrorClient()
-    lookback_date = datetime.now(timezone.utc) - timedelta(days=PR_LOOKBACK_DAYS)
+    now = datetime.now(timezone.utc)
+    # One mirror query serves every repo, so it must reach back as far as the
+    # widest per-repo window; _maybe_add_pr re-filters each PR to its own repo.
+    max_lookback = max(
+        (resolve_scoring(rc.scoring).pr_lookback_days for rc in master_repositories.values()),
+        default=PR_LOOKBACK_DAYS,
+    )
+    lookback_date = now - timedelta(days=max_lookback)
 
     try:
         response = client.get_miner_pulls(eval_.github_id, since=lookback_date)
@@ -68,7 +75,7 @@ def load_miner_prs(
 
     for pr in response.pull_requests:
         try:
-            _maybe_add_pr(eval_, pr, master_repositories, lookback_date)
+            _maybe_add_pr(eval_, pr, master_repositories, now)
         except Exception as e:
             bt.logging.warning(f'Error processing PR #{pr.pr_number} ({pr.repo_full_name}): {e}')
 
@@ -81,7 +88,7 @@ def _maybe_add_pr(
     eval_: MinerEvaluation,
     pr: MirrorPullRequest,
     master_repositories: Dict[str, RepositoryConfig],
-    lookback_date: datetime,
+    now: datetime,
 ) -> None:
     """Apply load-time filters and bucket pr by state if it passes."""
 
@@ -97,15 +104,22 @@ def _maybe_add_pr(
     if not os.environ.get('DEV_MODE') and pr.author_association in MAINTAINER_ASSOCIATIONS:
         return
 
+    # The mirror query uses the widest configured window; re-filter each PR to
+    # its own repo's pr_lookback_days.
+    repo_cutoff = now - timedelta(days=resolve_scoring(repo_config.scoring).pr_lookback_days)
+
     if pr.state == 'OPEN':
         eval_.open_prs.append(ScoredPR(pr=pr))
     elif pr.state == 'CLOSED':
         # Skip stale CLOSED PRs created before the lookback window — closing an
         # old PR shouldn't trigger a fresh credibility penalty.
-        if pr.created_at < lookback_date:
+        if pr.created_at < repo_cutoff:
             return
         eval_.closed_prs.append(ScoredPR(pr=pr))
     elif pr.state == 'MERGED':
+        # Drop PRs merged before this repo's scoring window.
+        if pr.merged_at is not None and pr.merged_at < repo_cutoff:
+            return
         # Apply the merge-eligibility gate at LOAD time so the merged_count used
         # by check_eligibility isn't inflated by PRs that would be rejected.
         # Deferring to scoring would let rejected PRs sit in merged_prs

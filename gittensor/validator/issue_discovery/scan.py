@@ -126,6 +126,22 @@ def _should_include_issue(issue: MirrorIssue) -> bool:
     return True
 
 
+def _issue_within_window(issue: MirrorIssue, mirror_repos: Dict[str, RepositoryConfig], now: datetime) -> bool:
+    """True if the issue falls inside its repo's pr_lookback_days window.
+
+    The mirror fetch uses the widest configured window; this re-filters each
+    issue to its own repo. ``updated_at`` is the bound, so a repo at the widest
+    window keeps every fetched issue.
+    """
+    repo_config = mirror_repos.get(issue.repo_full_name)
+    if repo_config is None:
+        return False
+    if issue.updated_at is None:
+        return True
+    cutoff = now - timedelta(days=resolve_scoring(repo_config.scoring).pr_lookback_days)
+    return issue.updated_at >= cutoff
+
+
 async def run_issue_discovery(
     miner_evaluations: Dict[int, MinerEvaluation],
     mirror_repos: Dict[str, RepositoryConfig],
@@ -154,7 +170,14 @@ async def run_issue_discovery(
         return
 
     client = client or MirrorClient()
-    lookback_date = datetime.now(timezone.utc) - timedelta(days=PR_LOOKBACK_DAYS)
+    now = datetime.now(timezone.utc)
+    # One mirror query serves every repo, so it reaches back as far as the
+    # widest per-repo window; issues are re-filtered to their own repo below.
+    max_lookback = max(
+        (resolve_scoring(rc.scoring).pr_lookback_days for rc in mirror_repos.values()),
+        default=PR_LOOKBACK_DAYS,
+    )
+    lookback_date = now - timedelta(days=max_lookback)
     enabled_names: Set[str] = set(mirror_repos.keys())
 
     solving_pr_cache: Dict[Tuple[str, int], CachedSolvingPR] = _build_solving_pr_cache(miner_evaluations)
@@ -198,7 +221,13 @@ async def run_issue_discovery(
             continue
 
         open_counts = _count_open_issues(current_response.issues, enabled_names)
-        filtered = [i for i in response.issues if i.repo_full_name in enabled_names and _should_include_issue(i)]
+        filtered = [
+            i
+            for i in response.issues
+            if i.repo_full_name in enabled_names
+            and _should_include_issue(i)
+            and _issue_within_window(i, mirror_repos, now)
+        ]
         if not filtered:
             _clear_issue_discovery_fields(evaluation)
             _apply_open_issue_counts(evaluation, open_counts)

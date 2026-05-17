@@ -28,14 +28,19 @@ MirrorClient = mirror_client_mod.MirrorClient
 MirrorRequestError = mirror_client_mod.MirrorRequestError
 RepositoryConfig = load_weights.RepositoryConfig
 
+# Recent by construction so default PRs land inside any repo's lookback window;
+# boundary behavior is covered explicitly by TestStaleClosedPR.
+_RECENT_CREATED = (datetime.now(timezone.utc) - timedelta(days=10)).isoformat().replace('+00:00', 'Z')
+_RECENT_MERGED = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat().replace('+00:00', 'Z')
+
 
 def _pr_dict(
     pr_number: int,
     repo: str = 'entrius/gittensor-ui',
     state: str = 'MERGED',
     author_association: str = 'CONTRIBUTOR',
-    created_at: str = '2026-04-15T00:00:00Z',
-    merged_at: str | None = '2026-04-18T10:00:00Z',
+    created_at: str = _RECENT_CREATED,
+    merged_at: str | None = _RECENT_MERGED,
     author_login: str = 'bittoby',
     merged_by_login: str | None = 'anderdc',
     approved_count: int = 1,
@@ -206,7 +211,7 @@ class TestMaintainerSkip:
 
 class TestStaleClosedPR:
     def test_closed_pr_created_before_lookback_dropped(self):
-        # Lookback is 35 days before "now"; a CLOSED PR created 50 days ago should drop
+        # Default lookback is 30 days before "now"; a CLOSED PR created 50 days ago should drop
         old = (datetime.now(timezone.utc) - timedelta(days=50)).isoformat().replace('+00:00', 'Z')
         recent = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
 

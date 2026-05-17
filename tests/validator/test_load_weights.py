@@ -337,6 +337,7 @@ class TestRepositoryConfigMirrorScoringFields:
             assert 0.0 <= resolved.min_issue_credibility <= 1.0, f'{repo_name} min_issue_credibility out of range'
             assert resolved.min_valid_merged_prs >= 0, f'{repo_name} min_valid_merged_prs negative'
             resolved_scoring = resolve_scoring(config.scoring)
+            assert 1 <= resolved_scoring.pr_lookback_days <= 90, f'{repo_name} pr_lookback_days out of range'
             assert 0.0 <= resolved_scoring.open_pr_collateral_percent <= 1.0, (
                 f'{repo_name} open_pr_collateral_percent out of range'
             )
@@ -384,7 +385,11 @@ class TestRepositoryConfigScoringBlock:
                 {
                     'foo/custom': {
                         'emission_share': 0.5,
-                        'scoring': {'open_pr_collateral_percent': 0.4, 'review_penalty_rate': 0.25},
+                        'scoring': {
+                            'pr_lookback_days': 45,
+                            'open_pr_collateral_percent': 0.4,
+                            'review_penalty_rate': 0.25,
+                        },
                     },
                     'foo/defaults': {'emission_share': 0.3},
                 }
@@ -394,6 +399,7 @@ class TestRepositoryConfigScoringBlock:
 
         repos = lw.load_master_repo_weights()
 
+        assert repos['foo/custom'].scoring.pr_lookback_days == 45
         assert repos['foo/custom'].scoring.open_pr_collateral_percent == pytest.approx(0.4)
         assert repos['foo/custom'].scoring.review_penalty_rate == pytest.approx(0.25)
         assert repos['foo/defaults'].scoring == RepoScoringConfig()
@@ -459,6 +465,17 @@ class TestRepositoryConfigScoringBlock:
 
         (tmp_path / 'master_repositories.json').write_text(
             json.dumps({'foo/bad': {'emission_share': 0.5, 'scoring': {'time_decay': {'bogus': 1}}}})
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: tmp_path)
+
+        with pytest.raises(RepositoryRegistryError):
+            lw.load_master_repo_weights()
+
+    def test_loader_rejects_out_of_range_lookback(self, tmp_path, monkeypatch):
+        from gittensor.validator.utils import load_weights as lw
+
+        (tmp_path / 'master_repositories.json').write_text(
+            json.dumps({'foo/bad': {'emission_share': 0.5, 'scoring': {'pr_lookback_days': 200}}})
         )
         monkeypatch.setattr(lw, '_get_weights_dir', lambda: tmp_path)
 

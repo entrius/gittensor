@@ -25,6 +25,7 @@ from gittensor.constants import (
     OPEN_ISSUE_SPAM_TOKEN_SCORE_PER_SLOT,
     OPEN_PR_COLLATERAL_PERCENT,
     OPEN_PR_THRESHOLD_TOKEN_SCORE,
+    PR_LOOKBACK_DAYS,
     REVIEW_PENALTY_RATE,
     STANDARD_ISSUE_MULTIPLIER,
     TIME_DECAY_GRACE_PERIOD_HOURS,
@@ -115,6 +116,7 @@ class RepoScoringConfig:
     Resolve a config into concrete values with ``resolve_scoring``.
     """
 
+    pr_lookback_days: Optional[int] = None
     open_pr_collateral_percent: Optional[float] = None
     review_penalty_rate: Optional[float] = None
     standard_issue_multiplier: Optional[float] = None
@@ -126,6 +128,7 @@ class RepoScoringConfig:
 class ResolvedScoring:
     """A ``RepoScoringConfig`` with every override resolved to a concrete value."""
 
+    pr_lookback_days: int
     open_pr_collateral_percent: float
     review_penalty_rate: float
     standard_issue_multiplier: float
@@ -226,6 +229,7 @@ def resolve_scoring(cfg: Optional[RepoScoringConfig]) -> ResolvedScoring:
         return default if value is None else value
 
     return ResolvedScoring(
+        pr_lookback_days=int(pick(cfg.pr_lookback_days, PR_LOOKBACK_DAYS)),
         open_pr_collateral_percent=float(pick(cfg.open_pr_collateral_percent, OPEN_PR_COLLATERAL_PERCENT)),
         review_penalty_rate=float(pick(cfg.review_penalty_rate, REVIEW_PENALTY_RATE)),
         standard_issue_multiplier=float(pick(cfg.standard_issue_multiplier, STANDARD_ISSUE_MULTIPLIER)),
@@ -337,6 +341,7 @@ def _parse_eligibility(repo_name: str, raw: Any) -> RepoEligibilityConfig:
     return RepoEligibilityConfig(**kwargs)
 
 
+_SCORING_INT_FIELDS = ('pr_lookback_days',)
 _SCORING_FLOAT_FIELDS = (
     'open_pr_collateral_percent',
     'review_penalty_rate',
@@ -387,11 +392,13 @@ def _parse_scoring(repo_name: str, raw: Any) -> RepoScoringConfig:
     if not isinstance(raw, dict):
         raise RepositoryRegistryError(f'{repo_name} scoring must be an object, got {type(raw)}')
 
-    unknown = sorted(set(raw) - set(_SCORING_FLOAT_FIELDS) - {'time_decay'})
+    unknown = sorted(set(raw) - set(_SCORING_INT_FIELDS) - set(_SCORING_FLOAT_FIELDS) - {'time_decay'})
     if unknown:
         raise RepositoryRegistryError(f'{repo_name} scoring has unknown keys: {unknown}')
 
     kwargs: Dict[str, Any] = {}
+    for field_name in _SCORING_INT_FIELDS:
+        kwargs[field_name] = _coerce_scoring_value(repo_name, field_name, raw.get(field_name), int)
     for field_name in _SCORING_FLOAT_FIELDS:
         kwargs[field_name] = _coerce_scoring_value(repo_name, field_name, raw.get(field_name), float)
     kwargs['time_decay'] = _parse_time_decay(repo_name, raw.get('time_decay'))
@@ -456,6 +463,10 @@ def _validate_scoring_configs(configs: Dict[str, RepositoryConfig]) -> None:
     """Range-check every repo's resolved scoring config."""
     for repo_name, config in configs.items():
         resolved = resolve_scoring(config.scoring)
+        if not 1 <= resolved.pr_lookback_days <= 90:
+            raise RepositoryRegistryError(
+                f'{repo_name} scoring.pr_lookback_days must be within [1, 90], got {resolved.pr_lookback_days}'
+            )
         if not 0.0 <= resolved.open_pr_collateral_percent <= 1.0:
             raise RepositoryRegistryError(
                 f'{repo_name} scoring.open_pr_collateral_percent must be within [0, 1], '

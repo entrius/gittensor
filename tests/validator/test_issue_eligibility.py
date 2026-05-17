@@ -9,7 +9,7 @@ import pytest
 from gittensor.validator.issue_discovery.scoring import check_issue_eligibility
 from gittensor.validator.utils.load_weights import RepoEligibilityConfig, resolve_eligibility
 
-_CFG = resolve_eligibility(None)  # defaults: 3 valid solved issues, 0.70 issue credibility
+_CFG = resolve_eligibility(None)  # defaults: 3 valid solved issues, 0.80 issue credibility
 
 
 @pytest.mark.parametrize(
@@ -21,7 +21,7 @@ _CFG = resolve_eligibility(None)  # defaults: 3 valid solved issues, 0.70 issue 
         (10, 2, 2, pytest.approx(10 / 12, abs=1e-3), False),
         # no solved issues -> credibility 0, ineligible
         (0, 0, 2, 0.0, False),
-        # credibility below 0.70 -> ineligible even with enough valid solves
+        # credibility below 0.80 -> ineligible even with enough valid solves
         (4, 4, 3, pytest.approx(4 / 7, abs=1e-3), False),
         # exactly at both gates
         (3, 3, 0, 1.0, True),

@@ -129,7 +129,7 @@ MIN_CREDIBILITY = 0.80  # minimum credibility ratio to receive score
 # =============================================================================
 # Eligibility gate — per-repo defaults, overridable in master_repositories.json.
 MIN_VALID_SOLVED_ISSUES = 3  # minimum solved issues where solving PR has token_score >= MIN_TOKEN_SCORE_FOR_VALID_ISSUE
-MIN_ISSUE_CREDIBILITY = 0.70  # minimum issue credibility ratio
+MIN_ISSUE_CREDIBILITY = 0.80  # minimum issue credibility ratio
 MIN_TOKEN_SCORE_FOR_VALID_ISSUE = 5  # solving-PR token_score for a solved issue to count as "valid"
 
 # Review quality cliff model (different from OSS: has clean bonus + steeper penalty)

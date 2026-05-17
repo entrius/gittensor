@@ -32,7 +32,7 @@ def _fake_metagraph(rows: list[tuple[float, bool, float]]):
     )
 
 
-def _mock_http_response(status_code: int = 200, payload=None, json_error: Exception | None = None):
+def _mock_http_response(status_code: int = 200, payload=None, json_error=None):
     response = MagicMock()
     response.status_code = status_code
     if json_error is not None:

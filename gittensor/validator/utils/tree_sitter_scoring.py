@@ -324,6 +324,16 @@ def calculate_token_score_from_file_changes(
                     is_test_file=is_test_file,
                     scoring_method='skipped-unsupported',
                 )
+            elif file.status != 'added' and content_pair.old_content is None:
+                bt.logging.debug(f'  │   {file.short_name}: skipped (non-added file missing base content)')
+                file_result = FileScoreResult(
+                    filename=file.short_name,
+                    score=0.0,
+                    nodes_scored=0,
+                    total_lines=file.changes,
+                    is_test_file=is_test_file,
+                    scoring_method='skipped-missing-base',
+                )
             else:
                 # Tree diff scoring - compare old and new ASTs
                 old_content = content_pair.old_content

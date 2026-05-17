@@ -294,6 +294,40 @@ class TestRepositoryConfigMirrorScoringFields:
             )
 
 
+class TestRepositoryConfigMaintainerCut:
+    """Dataclass + JSON-parsing tests for the maintainer_cut emission carve-out."""
+
+    def test_maintainer_cut_defaults_zero(self):
+        config = RepositoryConfig(emission_share=0.5)
+        assert config.maintainer_cut == pytest.approx(0.0)
+
+    def test_loader_parses_maintainer_cut(self, tmp_path, monkeypatch):
+        from gittensor.validator.utils import load_weights as lw
+
+        fake_weights_dir = tmp_path
+        (fake_weights_dir / 'master_repositories.json').write_text(
+            json.dumps(
+                {
+                    'foo/with-cut': {'emission_share': 0.5, 'maintainer_cut': 0.3},
+                    'foo/defaults': {'emission_share': 0.3},
+                }
+            )
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: fake_weights_dir)
+
+        repos = lw.load_master_repo_weights()
+
+        assert repos['foo/with-cut'].maintainer_cut == pytest.approx(0.3)
+        assert repos['foo/defaults'].maintainer_cut == pytest.approx(0.0)
+
+    @pytest.mark.parametrize('repo_name,metadata', _live_master_repo_metadata())
+    def test_live_maintainer_cut_is_in_range(self, repo_name, metadata):
+        if 'maintainer_cut' not in metadata:
+            return
+
+        assert 0.0 <= float(metadata['maintainer_cut']) <= 1.0, f'{repo_name} maintainer_cut must be within [0.0, 1.0]'
+
+
 class TestRepositoryEmissionShare:
     """Tests for bounded repo emission_share loading."""
 
@@ -349,6 +383,8 @@ class TestRepositoryEmissionShare:
             {'emission_share': 1.01},
             {'emission_share': 0.5, 'issue_discovery_share': -0.01},
             {'emission_share': 0.5, 'issue_discovery_share': 1.01},
+            {'emission_share': 0.5, 'maintainer_cut': -0.01},
+            {'emission_share': 0.5, 'maintainer_cut': 1.01},
         ],
     )
     def test_loader_rejects_out_of_range_values(self, tmp_path, monkeypatch, metadata):
@@ -366,6 +402,7 @@ class TestRepositoryEmissionShare:
         [
             {'emission_share': True},
             {'emission_share': 0.5, 'issue_discovery_share': False},
+            {'emission_share': 0.5, 'maintainer_cut': True},
         ],
     )
     def test_loader_rejects_boolean_share_values(self, tmp_path, monkeypatch, metadata):

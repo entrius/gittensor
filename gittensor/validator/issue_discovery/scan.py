@@ -33,6 +33,7 @@ to the cache so sibling discoveries benefit.
 """
 
 import asyncio
+import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Set, Tuple
@@ -41,6 +42,7 @@ import bittensor as bt
 
 from gittensor.classes import Issue, MinerEvaluation, MinerEvaluationCache
 from gittensor.constants import (
+    MAINTAINER_ASSOCIATIONS,
     MIN_TOKEN_SCORE_FOR_BASE_SCORE,
     PR_LOOKBACK_DAYS,
 )
@@ -98,6 +100,16 @@ class _CacheStats:
 
 
 _FAR_FUTURE = datetime.max.replace(tzinfo=timezone.utc)
+
+
+def _should_include_issue(issue: MirrorIssue) -> bool:
+    """Drop maintainer-discovered issues so repo maintainers cannot earn issue-
+    discovery rewards in repos they maintain — mirrors the PR-side maintainer
+    skip in ``oss_contributions/mirror/load.py``. Bypassed under DEV_MODE.
+    """
+    if not os.environ.get('DEV_MODE') and issue.author_association in MAINTAINER_ASSOCIATIONS:
+        return False
+    return True
 
 
 async def run_issue_discovery(
@@ -172,7 +184,7 @@ async def run_issue_discovery(
             continue
 
         open_issue_count = _count_open_issues(current_response.issues, enabled_names)
-        filtered = [i for i in response.issues if i.repo_full_name in enabled_names]
+        filtered = [i for i in response.issues if i.repo_full_name in enabled_names and _should_include_issue(i)]
         if not filtered:
             _clear_issue_discovery_fields(evaluation)
             evaluation.total_open_issues = open_issue_count

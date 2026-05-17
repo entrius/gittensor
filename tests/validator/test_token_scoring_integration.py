@@ -532,6 +532,90 @@ class UserRegistry {
         assert breakdown.leaf_score == pytest.approx(1.99, abs=1e-6)
         assert breakdown.total_score == pytest.approx(9.99, abs=1e-6)
 
+    # ------------------------------------------------------------------
+    # Missing base content guard tests
+    #
+    # A non-added file (modified / renamed) whose base blob is binary,
+    # oversized, or unavailable arrives with old_content=None from the
+    # das-github-mirror fetcher. Without a guard the scorer falls through
+    # to tree-diff and treats the entire head file as net-new additions,
+    # inflating the score. The guard must skip these files. Added files
+    # with old_content=None are legitimate new-file additions and must
+    # continue to be scored via tree-diff.
+    # ------------------------------------------------------------------
+
+    def test_modified_file_missing_base_content_is_skipped(self, weights):
+        """Modified file with old_content=None must be skipped, not scored as new."""
+        new_content = 'def fn():\n    return 1\n'
+        file_change = FileChange(
+            pr_number=1,
+            repository_full_name='owner/repo',
+            filename='src/lib.py',
+            changes=10,
+            additions=10,
+            deletions=5,
+            status='modified',
+        )
+        result = calculate_token_score_from_file_changes(
+            [file_change],
+            {'src/lib.py': FileContentPair(old_content=None, new_content=new_content)},
+            weights,
+            load_programming_language_weights(),
+        )
+        file_result = result.file_results[0]
+        assert file_result.scoring_method == 'skipped-missing-base'
+        assert file_result.score == 0.0
+        assert file_result.nodes_scored == 0
+        assert result.total_score == 0.0
+
+    def test_renamed_file_missing_base_content_is_skipped(self, weights):
+        """Renamed file with old_content=None must be skipped, not scored as new."""
+        new_content = 'def fn():\n    return 1\n'
+        file_change = FileChange(
+            pr_number=1,
+            repository_full_name='owner/repo',
+            filename='new_name.py',
+            changes=5,
+            additions=5,
+            deletions=3,
+            status='renamed',
+            previous_filename='old_name.py',
+        )
+        result = calculate_token_score_from_file_changes(
+            [file_change],
+            {'new_name.py': FileContentPair(old_content=None, new_content=new_content)},
+            weights,
+            load_programming_language_weights(),
+        )
+        file_result = result.file_results[0]
+        assert file_result.scoring_method == 'skipped-missing-base'
+        assert file_result.score == 0.0
+        assert file_result.nodes_scored == 0
+        assert result.total_score == 0.0
+
+    def test_added_file_null_old_content_scores_as_new_file(self, weights):
+        """Added file with old_content=None is correct; must still score via tree-diff."""
+        new_content = 'def fn():\n    return 1\n'
+        file_change = FileChange(
+            pr_number=1,
+            repository_full_name='owner/repo',
+            filename='new_file.py',
+            changes=2,
+            additions=2,
+            deletions=0,
+            status='added',
+        )
+        result = calculate_token_score_from_file_changes(
+            [file_change],
+            {'new_file.py': FileContentPair(old_content=None, new_content=new_content)},
+            weights,
+            load_programming_language_weights(),
+        )
+        file_result = result.file_results[0]
+        assert file_result.scoring_method == 'tree-diff'
+        assert file_result.score > 0
+        assert file_result.nodes_scored > 0
+
 
 class TestNullLanguageLineCountScoring:
     """Regression tests for configured null-language extensions.

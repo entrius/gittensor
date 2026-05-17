@@ -43,6 +43,9 @@ class RepositoryConfig:
             to be within [0.0, 100.0]; range is enforced by the live-config test.
         eligibility_mode: Flag controlling whether the global miner
             eligibility gate applies to PRs in this repo.
+        maintainer_cut: Fraction [0.0, 1.0] of this repo's emission slice
+            routed directly to its maintainer miner neurons, split evenly,
+            before normal scoring. Defaults to 0.0 (no carve-out).
 
     """
 
@@ -54,6 +57,7 @@ class RepositoryConfig:
     default_label_multiplier: float = 1.0
     fixed_base_score: Optional[float] = None
     eligibility_mode: bool = True
+    maintainer_cut: float = 0.0
 
 
 @dataclass
@@ -137,6 +141,10 @@ def _validate_emission_shares(configs: Dict[str, RepositoryConfig]) -> None:
             raise RepositoryRegistryError(
                 f'{repo_name} issue_discovery_share must be within [0, 1], got {config.issue_discovery_share}'
             )
+        if not 0.0 <= config.maintainer_cut <= 1.0:
+            raise RepositoryRegistryError(
+                f'{repo_name} maintainer_cut must be within [0, 1], got {config.maintainer_cut}'
+            )
         total_share += config.emission_share
 
     if total_share > 1.0 + EMISSION_SHARE_TOLERANCE:
@@ -186,6 +194,7 @@ def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
                     default_label_multiplier=float(metadata.get('default_label_multiplier', 1.0)),
                     fixed_base_score=metadata.get('fixed_base_score'),
                     eligibility_mode=metadata.get('eligibility_mode', True),
+                    maintainer_cut=_coerce_share(repo_name, 'maintainer_cut', metadata.get('maintainer_cut', 0.0)),
                 )
                 normalized_data[repo_name.lower()] = config
             except RepositoryRegistryError:

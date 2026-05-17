@@ -28,6 +28,7 @@ from gittensor.constants import (
     REVIEW_PENALTY_RATE,
     STANDARD_ISSUE_MULTIPLIER,
     TIME_DECAY_GRACE_PERIOD_HOURS,
+    TIME_DECAY_SIGMOID_MIDPOINT,
 )
 
 
@@ -89,6 +90,7 @@ class RepoTimeDecayConfig:
     """Per-repo overrides for the time-decay curve. Every field optional."""
 
     grace_period_hours: Optional[int] = None
+    sigmoid_midpoint_days: Optional[float] = None
 
 
 @dataclass(frozen=True)
@@ -96,6 +98,7 @@ class ResolvedTimeDecay:
     """A ``RepoTimeDecayConfig`` with every override resolved to a concrete value."""
 
     grace_period_hours: int
+    sigmoid_midpoint_days: float
 
 
 @dataclass
@@ -203,6 +206,7 @@ def resolve_time_decay(cfg: Optional[RepoTimeDecayConfig]) -> ResolvedTimeDecay:
 
     return ResolvedTimeDecay(
         grace_period_hours=int(pick(cfg.grace_period_hours, TIME_DECAY_GRACE_PERIOD_HOURS)),
+        sigmoid_midpoint_days=float(pick(cfg.sigmoid_midpoint_days, TIME_DECAY_SIGMOID_MIDPOINT)),
     )
 
 
@@ -345,6 +349,7 @@ def _coerce_scoring_value(repo_name: str, field_name: str, raw_value: Any, caste
 
 
 _TIME_DECAY_INT_FIELDS = ('grace_period_hours',)
+_TIME_DECAY_FLOAT_FIELDS = ('sigmoid_midpoint_days',)
 
 
 def _parse_time_decay(repo_name: str, raw: Any) -> RepoTimeDecayConfig:
@@ -354,13 +359,16 @@ def _parse_time_decay(repo_name: str, raw: Any) -> RepoTimeDecayConfig:
     if not isinstance(raw, dict):
         raise RepositoryRegistryError(f'{repo_name} scoring.time_decay must be an object, got {type(raw)}')
 
-    unknown = sorted(set(raw) - set(_TIME_DECAY_INT_FIELDS))
+    known = set(_TIME_DECAY_INT_FIELDS) | set(_TIME_DECAY_FLOAT_FIELDS)
+    unknown = sorted(set(raw) - known)
     if unknown:
         raise RepositoryRegistryError(f'{repo_name} scoring.time_decay has unknown keys: {unknown}')
 
     kwargs: Dict[str, Any] = {}
     for field_name in _TIME_DECAY_INT_FIELDS:
         kwargs[field_name] = _coerce_scoring_value(repo_name, f'time_decay.{field_name}', raw.get(field_name), int)
+    for field_name in _TIME_DECAY_FLOAT_FIELDS:
+        kwargs[field_name] = _coerce_scoring_value(repo_name, f'time_decay.{field_name}', raw.get(field_name), float)
     return RepoTimeDecayConfig(**kwargs)
 
 
@@ -463,6 +471,11 @@ def _validate_scoring_configs(configs: Dict[str, RepositoryConfig]) -> None:
             raise RepositoryRegistryError(
                 f'{repo_name} scoring.time_decay.grace_period_hours must be within [0, 168], '
                 f'got {resolved.time_decay.grace_period_hours}'
+            )
+        if not 1.0 <= resolved.time_decay.sigmoid_midpoint_days <= 90.0:
+            raise RepositoryRegistryError(
+                f'{repo_name} scoring.time_decay.sigmoid_midpoint_days must be within [1, 90], '
+                f'got {resolved.time_decay.sigmoid_midpoint_days}'
             )
 
 

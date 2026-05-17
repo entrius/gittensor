@@ -7,7 +7,6 @@ import pytz
 from gittensor.constants import (
     SECONDS_PER_HOUR,
     TIME_DECAY_MIN_MULTIPLIER,
-    TIME_DECAY_SIGMOID_MIDPOINT,
     TIME_DECAY_SIGMOID_STEEPNESS_SCALAR,
 )
 from gittensor.validator.utils.load_weights import ResolvedTimeDecay
@@ -56,5 +55,7 @@ def calculate_time_decay(merged_at: datetime, time_decay: ResolvedTimeDecay) -> 
         return 1.0
 
     days_since_merge = hours_since_merge / 24
-    sigmoid = 1 / (1 + math.exp(TIME_DECAY_SIGMOID_STEEPNESS_SCALAR * (days_since_merge - TIME_DECAY_SIGMOID_MIDPOINT)))
+    sigmoid = 1 / (
+        1 + math.exp(TIME_DECAY_SIGMOID_STEEPNESS_SCALAR * (days_since_merge - time_decay.sigmoid_midpoint_days))
+    )
     return max(sigmoid, TIME_DECAY_MIN_MULTIPLIER)

@@ -350,6 +350,9 @@ class TestRepositoryConfigMirrorScoringFields:
             assert 0 <= resolved_scoring.time_decay.grace_period_hours <= 168, (
                 f'{repo_name} time_decay.grace_period_hours out of range'
             )
+            assert 1.0 <= resolved_scoring.time_decay.sigmoid_midpoint_days <= 90.0, (
+                f'{repo_name} time_decay.sigmoid_midpoint_days out of range'
+            )
 
     def test_oc_1_runs_ungated(self):
         """The oc-1 benchmark repo opts out of the gate via zeroed thresholds."""

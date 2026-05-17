@@ -39,6 +39,7 @@ _resolve_trusted_scoring_label = scoring_module._resolve_trusted_scoring_label
 _calculate_issue_multiplier = scoring_module._calculate_issue_multiplier
 _is_valid_linked_issue = scoring_module._is_valid_linked_issue
 score_pr = scoring_module.score_pr
+resolve_scoring = load_weights.resolve_scoring
 
 ScoredPR = scored_pr_module.ScoredPR
 MirrorPullRequest = mirror_models.MirrorPullRequest
@@ -722,19 +723,19 @@ def _linked_issue(
 class TestIssueMultiplier:
     def test_no_linked_issues_returns_neutral(self):
         scored = ScoredPR(pr=_pr(linked_issues=[]))
-        assert _calculate_issue_multiplier(scored) == 1.0
+        assert _calculate_issue_multiplier(scored, resolve_scoring(None)) == 1.0
 
     def test_valid_standard_issue(self):
         from gittensor.constants import STANDARD_ISSUE_MULTIPLIER
 
         scored = ScoredPR(pr=_pr(linked_issues=[_linked_issue()]))
-        assert _calculate_issue_multiplier(scored) == STANDARD_ISSUE_MULTIPLIER
+        assert _calculate_issue_multiplier(scored, resolve_scoring(None)) == STANDARD_ISSUE_MULTIPLIER
 
     def test_maintainer_authored_issue_gets_maintainer_multiplier(self):
         from gittensor.constants import MAINTAINER_ISSUE_MULTIPLIER
 
         scored = ScoredPR(pr=_pr(linked_issues=[_linked_issue(author_association='OWNER')]))
-        assert _calculate_issue_multiplier(scored) == MAINTAINER_ISSUE_MULTIPLIER
+        assert _calculate_issue_multiplier(scored, resolve_scoring(None)) == MAINTAINER_ISSUE_MULTIPLIER
 
     def test_first_valid_issue_chosen(self):
         # Even if the first issue is invalid, valid second one should be chosen
@@ -743,7 +744,7 @@ class TestIssueMultiplier:
         scored = ScoredPR(pr=_pr(linked_issues=[invalid, valid]))
         from gittensor.constants import STANDARD_ISSUE_MULTIPLIER
 
-        assert _calculate_issue_multiplier(scored) == STANDARD_ISSUE_MULTIPLIER
+        assert _calculate_issue_multiplier(scored, resolve_scoring(None)) == STANDARD_ISSUE_MULTIPLIER
 
 
 class TestLinkedIssueValidity:
@@ -829,7 +830,7 @@ class TestIssueMultiplierPreference:
         non_maint = _linked_issue(number=1, author_association='CONTRIBUTOR', author_github_id='111')
         maint = _linked_issue(number=2, author_association='OWNER', author_github_id='222')
         scored = ScoredPR(pr=_pr(linked_issues=[non_maint, maint]))
-        assert _calculate_issue_multiplier(scored) == MAINTAINER_ISSUE_MULTIPLIER
+        assert _calculate_issue_multiplier(scored, resolve_scoring(None)) == MAINTAINER_ISSUE_MULTIPLIER
 
     def test_falls_back_to_first_when_no_maintainer_authored(self):
         from gittensor.constants import STANDARD_ISSUE_MULTIPLIER
@@ -837,7 +838,7 @@ class TestIssueMultiplierPreference:
         issue_a = _linked_issue(number=1, author_association='CONTRIBUTOR', author_github_id='111')
         issue_b = _linked_issue(number=2, author_association='CONTRIBUTOR', author_github_id='222')
         scored = ScoredPR(pr=_pr(linked_issues=[issue_a, issue_b]))
-        assert _calculate_issue_multiplier(scored) == STANDARD_ISSUE_MULTIPLIER
+        assert _calculate_issue_multiplier(scored, resolve_scoring(None)) == STANDARD_ISSUE_MULTIPLIER
 
 
 class TestCollateralScoreAcceptsScoredPR:

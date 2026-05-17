@@ -38,7 +38,6 @@ from gittensor.constants import (
     MERGED_PR_BASE_SCORE,
     MIN_TOKEN_SCORE_FOR_BASE_SCORE,
     SECONDS_PER_DAY,
-    STANDARD_ISSUE_MULTIPLIER,
 )
 from gittensor.utils.github_api_tools import FileContentPair, branch_matches_pattern
 from gittensor.utils.mirror.client import MirrorClient, MirrorRequestError
@@ -53,6 +52,7 @@ from gittensor.validator.utils.datetime_utils import calculate_time_decay
 from gittensor.validator.utils.load_weights import (
     LanguageConfig,
     RepositoryConfig,
+    ResolvedScoring,
     TokenConfig,
     resolve_scoring,
 )
@@ -350,16 +350,16 @@ def _calculate_pr_multipliers(scored: ScoredPR, repo_config: RepositoryConfig) -
     """
     pr = scored.pr
     is_merged = pr.state == 'MERGED'
+    scoring_cfg = resolve_scoring(repo_config.scoring)
 
     chosen_label, label_multiplier = _resolve_trusted_scoring_label(pr, repo_config)
     scored.label = chosen_label
     scored.label_multiplier = label_multiplier
 
-    scored.issue_multiplier = round(_calculate_issue_multiplier(scored), 2)
+    scored.issue_multiplier = round(_calculate_issue_multiplier(scored, scoring_cfg), 2)
 
     if is_merged:
         assert pr.merged_at is not None, f'MERGED PR #{pr.pr_number} missing merged_at'
-        scoring_cfg = resolve_scoring(repo_config.scoring)
         scored.open_pr_spam_multiplier = 1.0  # finalized later with combined open-PR count
         scored.time_decay_multiplier = round(calculate_time_decay(pr.merged_at), 2)
         scored.review_quality_multiplier = round(
@@ -404,11 +404,11 @@ def _resolve_trusted_scoring_label(pr: MirrorPullRequest, repo_config: Repositor
 # ============================================================================
 
 
-def _calculate_issue_multiplier(scored: ScoredPR) -> float:
+def _calculate_issue_multiplier(scored: ScoredPR, scoring: ResolvedScoring) -> float:
     """Return the multiplier earned from valid linked issues on a PR.
 
     Maintainer-authored valid issues bump the multiplier higher
-    (``MAINTAINER_ISSUE_MULTIPLIER`` vs ``STANDARD_ISSUE_MULTIPLIER``).
+    (``MAINTAINER_ISSUE_MULTIPLIER`` vs ``standard_issue_multiplier``).
     Returns 1.0 if no linked issues pass the anti-gaming gates.
     """
     pr = scored.pr
@@ -428,7 +428,7 @@ def _calculate_issue_multiplier(scored: ScoredPR) -> float:
         valid[0],
     )
     is_maintainer = issue.author_association in MAINTAINER_ASSOCIATIONS if issue.author_association else False
-    multiplier = MAINTAINER_ISSUE_MULTIPLIER if is_maintainer else STANDARD_ISSUE_MULTIPLIER
+    multiplier = MAINTAINER_ISSUE_MULTIPLIER if is_maintainer else scoring.standard_issue_multiplier
     label = 'maintainer' if is_maintainer else 'standard'
     bt.logging.info(f'Linked issue #{issue.number} - {label} | multiplier: {multiplier}')
     return multiplier

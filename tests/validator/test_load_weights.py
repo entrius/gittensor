@@ -341,6 +341,9 @@ class TestRepositoryConfigMirrorScoringFields:
                 f'{repo_name} open_pr_collateral_percent out of range'
             )
             assert 0.0 < resolved_scoring.review_penalty_rate <= 1.0, f'{repo_name} review_penalty_rate out of range'
+            assert 1.0 <= resolved_scoring.standard_issue_multiplier <= 5.0, (
+                f'{repo_name} standard_issue_multiplier out of range'
+            )
 
     def test_oc_1_runs_ungated(self):
         """The oc-1 benchmark repo opts out of the gate via zeroed thresholds."""
@@ -407,6 +410,17 @@ class TestRepositoryConfigScoringBlock:
 
         (tmp_path / 'master_repositories.json').write_text(
             json.dumps({'foo/bad': {'emission_share': 0.5, 'scoring': {'review_penalty_rate': 0.0}}})
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: tmp_path)
+
+        with pytest.raises(RepositoryRegistryError):
+            lw.load_master_repo_weights()
+
+    def test_loader_rejects_out_of_range_issue_multiplier(self, tmp_path, monkeypatch):
+        from gittensor.validator.utils import load_weights as lw
+
+        (tmp_path / 'master_repositories.json').write_text(
+            json.dumps({'foo/bad': {'emission_share': 0.5, 'scoring': {'standard_issue_multiplier': 0.5}}})
         )
         monkeypatch.setattr(lw, '_get_weights_dir', lambda: tmp_path)
 

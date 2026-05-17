@@ -11,6 +11,7 @@ from gittensor.constants import (
     DEFAULT_ISSUE_DISCOVERY_SHARE,
     EMISSION_SHARE_TOLERANCE,
     EXCESSIVE_PR_PENALTY_BASE_THRESHOLD,
+    MAINTAINER_ISSUE_MULTIPLIER,
     MAX_OPEN_ISSUE_THRESHOLD,
     MAX_OPEN_PR_THRESHOLD,
     MIN_CREDIBILITY,
@@ -93,6 +94,7 @@ class RepoScoringConfig:
     open_pr_collateral_percent: Optional[float] = None
     review_penalty_rate: Optional[float] = None
     standard_issue_multiplier: Optional[float] = None
+    maintainer_issue_multiplier: Optional[float] = None
 
 
 @dataclass(frozen=True)
@@ -102,6 +104,7 @@ class ResolvedScoring:
     open_pr_collateral_percent: float
     review_penalty_rate: float
     standard_issue_multiplier: float
+    maintainer_issue_multiplier: float
 
 
 @dataclass
@@ -185,6 +188,7 @@ def resolve_scoring(cfg: Optional[RepoScoringConfig]) -> ResolvedScoring:
         open_pr_collateral_percent=float(pick(cfg.open_pr_collateral_percent, OPEN_PR_COLLATERAL_PERCENT)),
         review_penalty_rate=float(pick(cfg.review_penalty_rate, REVIEW_PENALTY_RATE)),
         standard_issue_multiplier=float(pick(cfg.standard_issue_multiplier, STANDARD_ISSUE_MULTIPLIER)),
+        maintainer_issue_multiplier=float(pick(cfg.maintainer_issue_multiplier, MAINTAINER_ISSUE_MULTIPLIER)),
     )
 
 
@@ -291,7 +295,12 @@ def _parse_eligibility(repo_name: str, raw: Any) -> RepoEligibilityConfig:
     return RepoEligibilityConfig(**kwargs)
 
 
-_SCORING_FLOAT_FIELDS = ('open_pr_collateral_percent', 'review_penalty_rate', 'standard_issue_multiplier')
+_SCORING_FLOAT_FIELDS = (
+    'open_pr_collateral_percent',
+    'review_penalty_rate',
+    'standard_issue_multiplier',
+    'maintainer_issue_multiplier',
+)
 
 
 def _coerce_scoring_value(repo_name: str, field_name: str, raw_value: Any, caster: Any) -> Any:
@@ -393,6 +402,11 @@ def _validate_scoring_configs(configs: Dict[str, RepositoryConfig]) -> None:
             raise RepositoryRegistryError(
                 f'{repo_name} scoring.standard_issue_multiplier must be within [1, 5], '
                 f'got {resolved.standard_issue_multiplier}'
+            )
+        if not 1.0 <= resolved.maintainer_issue_multiplier <= 5.0:
+            raise RepositoryRegistryError(
+                f'{repo_name} scoring.maintainer_issue_multiplier must be within [1, 5], '
+                f'got {resolved.maintainer_issue_multiplier}'
             )
 
 

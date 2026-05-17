@@ -32,7 +32,6 @@ from gittensor.classes import FileChange, MinerEvaluation, PrScoringResult, Scor
 from gittensor.constants import (
     CONTRIBUTION_SCORE_FOR_FULL_BONUS,
     MAINTAINER_ASSOCIATIONS,
-    MAINTAINER_ISSUE_MULTIPLIER,
     MAX_CONTRIBUTION_BONUS,
     MAX_ISSUE_CLOSE_WINDOW_DAYS,
     MERGED_PR_BASE_SCORE,
@@ -408,7 +407,7 @@ def _calculate_issue_multiplier(scored: ScoredPR, scoring: ResolvedScoring) -> f
     """Return the multiplier earned from valid linked issues on a PR.
 
     Maintainer-authored valid issues bump the multiplier higher
-    (``MAINTAINER_ISSUE_MULTIPLIER`` vs ``standard_issue_multiplier``).
+    (``maintainer_issue_multiplier`` vs ``standard_issue_multiplier``).
     Returns 1.0 if no linked issues pass the anti-gaming gates.
     """
     pr = scored.pr
@@ -428,7 +427,7 @@ def _calculate_issue_multiplier(scored: ScoredPR, scoring: ResolvedScoring) -> f
         valid[0],
     )
     is_maintainer = issue.author_association in MAINTAINER_ASSOCIATIONS if issue.author_association else False
-    multiplier = MAINTAINER_ISSUE_MULTIPLIER if is_maintainer else scoring.standard_issue_multiplier
+    multiplier = scoring.maintainer_issue_multiplier if is_maintainer else scoring.standard_issue_multiplier
     label = 'maintainer' if is_maintainer else 'standard'
     bt.logging.info(f'Linked issue #{issue.number} - {label} | multiplier: {multiplier}')
     return multiplier

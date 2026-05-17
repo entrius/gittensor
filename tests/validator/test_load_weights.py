@@ -344,6 +344,9 @@ class TestRepositoryConfigMirrorScoringFields:
             assert 1.0 <= resolved_scoring.standard_issue_multiplier <= 5.0, (
                 f'{repo_name} standard_issue_multiplier out of range'
             )
+            assert 1.0 <= resolved_scoring.maintainer_issue_multiplier <= 5.0, (
+                f'{repo_name} maintainer_issue_multiplier out of range'
+            )
 
     def test_oc_1_runs_ungated(self):
         """The oc-1 benchmark repo opts out of the gate via zeroed thresholds."""

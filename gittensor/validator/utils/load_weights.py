@@ -28,6 +28,7 @@ from gittensor.constants import (
     REVIEW_PENALTY_RATE,
     STANDARD_ISSUE_MULTIPLIER,
     TIME_DECAY_GRACE_PERIOD_HOURS,
+    TIME_DECAY_MIN_MULTIPLIER,
     TIME_DECAY_SIGMOID_MIDPOINT,
     TIME_DECAY_SIGMOID_STEEPNESS_SCALAR,
 )
@@ -93,6 +94,7 @@ class RepoTimeDecayConfig:
     grace_period_hours: Optional[int] = None
     sigmoid_midpoint_days: Optional[float] = None
     sigmoid_steepness: Optional[float] = None
+    min_multiplier: Optional[float] = None
 
 
 @dataclass(frozen=True)
@@ -102,6 +104,7 @@ class ResolvedTimeDecay:
     grace_period_hours: int
     sigmoid_midpoint_days: float
     sigmoid_steepness: float
+    min_multiplier: float
 
 
 @dataclass
@@ -211,6 +214,7 @@ def resolve_time_decay(cfg: Optional[RepoTimeDecayConfig]) -> ResolvedTimeDecay:
         grace_period_hours=int(pick(cfg.grace_period_hours, TIME_DECAY_GRACE_PERIOD_HOURS)),
         sigmoid_midpoint_days=float(pick(cfg.sigmoid_midpoint_days, TIME_DECAY_SIGMOID_MIDPOINT)),
         sigmoid_steepness=float(pick(cfg.sigmoid_steepness, TIME_DECAY_SIGMOID_STEEPNESS_SCALAR)),
+        min_multiplier=float(pick(cfg.min_multiplier, TIME_DECAY_MIN_MULTIPLIER)),
     )
 
 
@@ -353,7 +357,7 @@ def _coerce_scoring_value(repo_name: str, field_name: str, raw_value: Any, caste
 
 
 _TIME_DECAY_INT_FIELDS = ('grace_period_hours',)
-_TIME_DECAY_FLOAT_FIELDS = ('sigmoid_midpoint_days', 'sigmoid_steepness')
+_TIME_DECAY_FLOAT_FIELDS = ('sigmoid_midpoint_days', 'sigmoid_steepness', 'min_multiplier')
 
 
 def _parse_time_decay(repo_name: str, raw: Any) -> RepoTimeDecayConfig:
@@ -485,6 +489,11 @@ def _validate_scoring_configs(configs: Dict[str, RepositoryConfig]) -> None:
             raise RepositoryRegistryError(
                 f'{repo_name} scoring.time_decay.sigmoid_steepness must be within [0.01, 5], '
                 f'got {resolved.time_decay.sigmoid_steepness}'
+            )
+        if not 0.0 <= resolved.time_decay.min_multiplier <= 1.0:
+            raise RepositoryRegistryError(
+                f'{repo_name} scoring.time_decay.min_multiplier must be within [0, 1], '
+                f'got {resolved.time_decay.min_multiplier}'
             )
 
 

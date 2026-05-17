@@ -4,10 +4,7 @@ from typing import Optional
 
 import pytz
 
-from gittensor.constants import (
-    SECONDS_PER_HOUR,
-    TIME_DECAY_MIN_MULTIPLIER,
-)
+from gittensor.constants import SECONDS_PER_HOUR
 from gittensor.validator.utils.load_weights import ResolvedTimeDecay
 
 CHICAGO_TZ = pytz.timezone('America/Chicago')
@@ -55,4 +52,4 @@ def calculate_time_decay(merged_at: datetime, time_decay: ResolvedTimeDecay) -> 
 
     days_since_merge = hours_since_merge / 24
     sigmoid = 1 / (1 + math.exp(time_decay.sigmoid_steepness * (days_since_merge - time_decay.sigmoid_midpoint_days)))
-    return max(sigmoid, TIME_DECAY_MIN_MULTIPLIER)
+    return max(sigmoid, time_decay.min_multiplier)

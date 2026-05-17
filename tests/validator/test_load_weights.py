@@ -356,6 +356,9 @@ class TestRepositoryConfigMirrorScoringFields:
             assert 0.01 <= resolved_scoring.time_decay.sigmoid_steepness <= 5.0, (
                 f'{repo_name} time_decay.sigmoid_steepness out of range'
             )
+            assert 0.0 <= resolved_scoring.time_decay.min_multiplier <= 1.0, (
+                f'{repo_name} time_decay.min_multiplier out of range'
+            )
 
     def test_oc_1_runs_ungated(self):
         """The oc-1 benchmark repo opts out of the gate via zeroed thresholds."""

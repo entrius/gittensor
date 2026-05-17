@@ -9,10 +9,7 @@ from gittensor.classes import MinerEvaluation, RepoEvaluation
 
 if TYPE_CHECKING:
     from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredPR
-from gittensor.constants import (
-    MAX_OPEN_PR_REVIEW_COLLATERAL_MULTIPLIER,
-    REVIEW_PENALTY_RATE,
-)
+from gittensor.constants import MAX_OPEN_PR_REVIEW_COLLATERAL_MULTIPLIER
 from gittensor.validator.oss_contributions.credibility import check_eligibility
 from gittensor.validator.utils.load_weights import (
     RepositoryConfig,
@@ -23,12 +20,14 @@ from gittensor.validator.utils.load_weights import (
 )
 
 
-def calculate_review_quality_multiplier(changes_requested_count: int, pr_number: Optional[int] = None) -> float:
+def calculate_review_quality_multiplier(
+    changes_requested_count: int, review_penalty_rate: float, pr_number: Optional[int] = None
+) -> float:
     """Calculate the review quality multiplier based on maintainer CHANGES_REQUESTED reviews.
 
-    Formula: max(0.0, 1.0 - REVIEW_PENALTY_RATE × N)
+    Formula: max(0.0, 1.0 - review_penalty_rate × N)
     """
-    multiplier = max(0.0, 1.0 - REVIEW_PENALTY_RATE * changes_requested_count)
+    multiplier = max(0.0, 1.0 - review_penalty_rate * changes_requested_count)
     if changes_requested_count > 0:
         ctx = f' (PR #{pr_number})' if pr_number else ''
         bt.logging.info(
@@ -38,16 +37,18 @@ def calculate_review_quality_multiplier(changes_requested_count: int, pr_number:
     return multiplier
 
 
-def calculate_review_collateral_multiplier(changes_requested_count: int, pr_number: Optional[int] = None) -> float:
+def calculate_review_collateral_multiplier(
+    changes_requested_count: int, review_penalty_rate: float, pr_number: Optional[int] = None
+) -> float:
     """Calculate the open-PR collateral multiplier from maintainer CHANGES_REQUESTED reviews.
 
     Unlike ``review_quality_multiplier`` for earned scores, this increases
     collateral so non-merge-ready open PRs reserve more score instead of less.
-    Formula: min(MAX_OPEN_PR_REVIEW_COLLATERAL_MULTIPLIER, 1.0 + REVIEW_PENALTY_RATE × N)
+    Formula: min(MAX_OPEN_PR_REVIEW_COLLATERAL_MULTIPLIER, 1.0 + review_penalty_rate × N)
     """
     multiplier = min(
         MAX_OPEN_PR_REVIEW_COLLATERAL_MULTIPLIER,
-        1.0 + REVIEW_PENALTY_RATE * changes_requested_count,
+        1.0 + review_penalty_rate * changes_requested_count,
     )
     if changes_requested_count > 0:
         ctx = f' (PR #{pr_number})' if pr_number else ''
@@ -231,7 +232,9 @@ def calculate_open_pr_collateral_score(pr: 'ScoredPR', scoring: ResolvedScoring)
     multipliers = {
         'issue': pr.issue_multiplier,
         'label': pr.label_multiplier,
-        'review_collateral': calculate_review_collateral_multiplier(pr.changes_requested_count, pr.number),
+        'review_collateral': calculate_review_collateral_multiplier(
+            pr.changes_requested_count, scoring.review_penalty_rate, pr.number
+        ),
     }
 
     potential_score = pr.base_score * prod(multipliers.values())

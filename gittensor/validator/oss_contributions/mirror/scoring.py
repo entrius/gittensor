@@ -54,6 +54,7 @@ from gittensor.validator.utils.load_weights import (
     LanguageConfig,
     RepositoryConfig,
     TokenConfig,
+    resolve_scoring,
 )
 from gittensor.validator.utils.tree_sitter_scoring import calculate_token_score_from_file_changes
 
@@ -358,10 +359,15 @@ def _calculate_pr_multipliers(scored: ScoredPR, repo_config: RepositoryConfig) -
 
     if is_merged:
         assert pr.merged_at is not None, f'MERGED PR #{pr.pr_number} missing merged_at'
+        scoring_cfg = resolve_scoring(repo_config.scoring)
         scored.open_pr_spam_multiplier = 1.0  # finalized later with combined open-PR count
         scored.time_decay_multiplier = round(calculate_time_decay(pr.merged_at), 2)
         scored.review_quality_multiplier = round(
-            calculate_review_quality_multiplier(pr.review_summary.maintainer_changes_requested_count, pr.pr_number),
+            calculate_review_quality_multiplier(
+                pr.review_summary.maintainer_changes_requested_count,
+                scoring_cfg.review_penalty_rate,
+                pr.pr_number,
+            ),
             2,
         )
     else:

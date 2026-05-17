@@ -24,6 +24,7 @@ from gittensor.constants import (
     OPEN_ISSUE_SPAM_TOKEN_SCORE_PER_SLOT,
     OPEN_PR_COLLATERAL_PERCENT,
     OPEN_PR_THRESHOLD_TOKEN_SCORE,
+    REVIEW_PENALTY_RATE,
 )
 
 
@@ -89,6 +90,7 @@ class RepoScoringConfig:
     """
 
     open_pr_collateral_percent: Optional[float] = None
+    review_penalty_rate: Optional[float] = None
 
 
 @dataclass(frozen=True)
@@ -96,6 +98,7 @@ class ResolvedScoring:
     """A ``RepoScoringConfig`` with every override resolved to a concrete value."""
 
     open_pr_collateral_percent: float
+    review_penalty_rate: float
 
 
 @dataclass
@@ -177,6 +180,7 @@ def resolve_scoring(cfg: Optional[RepoScoringConfig]) -> ResolvedScoring:
 
     return ResolvedScoring(
         open_pr_collateral_percent=float(pick(cfg.open_pr_collateral_percent, OPEN_PR_COLLATERAL_PERCENT)),
+        review_penalty_rate=float(pick(cfg.review_penalty_rate, REVIEW_PENALTY_RATE)),
     )
 
 
@@ -283,7 +287,7 @@ def _parse_eligibility(repo_name: str, raw: Any) -> RepoEligibilityConfig:
     return RepoEligibilityConfig(**kwargs)
 
 
-_SCORING_FLOAT_FIELDS = ('open_pr_collateral_percent',)
+_SCORING_FLOAT_FIELDS = ('open_pr_collateral_percent', 'review_penalty_rate')
 
 
 def _coerce_scoring_value(repo_name: str, field_name: str, raw_value: Any, caster: Any) -> Any:
@@ -376,6 +380,10 @@ def _validate_scoring_configs(configs: Dict[str, RepositoryConfig]) -> None:
             raise RepositoryRegistryError(
                 f'{repo_name} scoring.open_pr_collateral_percent must be within [0, 1], '
                 f'got {resolved.open_pr_collateral_percent}'
+            )
+        if not 0.0 < resolved.review_penalty_rate <= 1.0:
+            raise RepositoryRegistryError(
+                f'{repo_name} scoring.review_penalty_rate must be within (0, 1], got {resolved.review_penalty_rate}'
             )
 
 

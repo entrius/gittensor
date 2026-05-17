@@ -340,6 +340,7 @@ class TestRepositoryConfigMirrorScoringFields:
             assert 0.0 <= resolved_scoring.open_pr_collateral_percent <= 1.0, (
                 f'{repo_name} open_pr_collateral_percent out of range'
             )
+            assert 0.0 < resolved_scoring.review_penalty_rate <= 1.0, f'{repo_name} review_penalty_rate out of range'
 
     def test_oc_1_runs_ungated(self):
         """The oc-1 benchmark repo opts out of the gate via zeroed thresholds."""
@@ -363,7 +364,10 @@ class TestRepositoryConfigScoringBlock:
         (tmp_path / 'master_repositories.json').write_text(
             json.dumps(
                 {
-                    'foo/custom': {'emission_share': 0.5, 'scoring': {'open_pr_collateral_percent': 0.4}},
+                    'foo/custom': {
+                        'emission_share': 0.5,
+                        'scoring': {'open_pr_collateral_percent': 0.4, 'review_penalty_rate': 0.25},
+                    },
                     'foo/defaults': {'emission_share': 0.3},
                 }
             )
@@ -373,6 +377,7 @@ class TestRepositoryConfigScoringBlock:
         repos = lw.load_master_repo_weights()
 
         assert repos['foo/custom'].scoring.open_pr_collateral_percent == pytest.approx(0.4)
+        assert repos['foo/custom'].scoring.review_penalty_rate == pytest.approx(0.25)
         assert repos['foo/defaults'].scoring == RepoScoringConfig()
 
     def test_loader_rejects_unknown_scoring_key(self, tmp_path, monkeypatch):
@@ -391,6 +396,17 @@ class TestRepositoryConfigScoringBlock:
 
         (tmp_path / 'master_repositories.json').write_text(
             json.dumps({'foo/bad': {'emission_share': 0.5, 'scoring': {'open_pr_collateral_percent': 1.5}}})
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: tmp_path)
+
+        with pytest.raises(RepositoryRegistryError):
+            lw.load_master_repo_weights()
+
+    def test_loader_rejects_zero_review_penalty_rate(self, tmp_path, monkeypatch):
+        from gittensor.validator.utils import load_weights as lw
+
+        (tmp_path / 'master_repositories.json').write_text(
+            json.dumps({'foo/bad': {'emission_share': 0.5, 'scoring': {'review_penalty_rate': 0.0}}})
         )
         monkeypatch.setattr(lw, '_get_weights_dir', lambda: tmp_path)
 

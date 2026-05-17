@@ -66,6 +66,7 @@ _EVAL_SKIP: frozenset = frozenset(
         'closed_prs',
         'issue_discovery_issues',
         'unique_repos_contributed_to',
+        'repo_evaluations',
     }
 )
 _PR_SKIP: frozenset = frozenset({'pr', 'files'})
@@ -104,6 +105,9 @@ def _serialize_evaluation(miner_eval) -> Dict[str, Any]:
     payload['merged_pull_requests'] = [_serialize_pr(s) for s in miner_eval.merged_prs]
     payload['open_pull_requests'] = [_serialize_pr(s) for s in miner_eval.open_prs]
     payload['closed_pull_requests'] = [_serialize_pr(s) for s in miner_eval.closed_prs]
+    payload['repo_evaluations'] = {
+        repo: _project(re, extra_properties=('total_prs',)) for repo, re in sorted(miner_eval.repo_evaluations.items())
+    }
     return payload
 
 
@@ -120,10 +124,10 @@ def _render_table(payload: Dict[str, Any]) -> None:
         console.print(table)
         return
 
-    table.add_row('Eligible (OSS)', str(miner['is_eligible']))
-    table.add_row('Credibility (OSS)', f'{miner["credibility"]:.4f}')
-    table.add_row('Eligible (issue discovery)', str(miner['is_issue_eligible']))
-    table.add_row('Credibility (issue)', f'{miner["issue_credibility"]:.4f}')
+    table.add_row('Eligible (any repo)', str(miner['is_eligible']))
+    table.add_row('Best credibility (OSS)', f'{miner["credibility"]:.4f}')
+    table.add_row('Issue-eligible (any repo)', str(miner['is_issue_eligible']))
+    table.add_row('Best issue credibility', f'{miner["issue_credibility"]:.4f}')
     table.add_row(
         'PRs merged / open / closed',
         f'{miner["total_merged_prs"]} / {miner["total_open_prs"]} / {miner["total_closed_prs"]}',
@@ -142,6 +146,29 @@ def _render_table(payload: Dict[str, Any]) -> None:
         '[bold green]Final blended reward[/bold green]', f'[bold green]{rewards["blended_final"]:.6f}[/bold green]'
     )
     console.print(table)
+
+    repo_evals = miner.get('repo_evaluations') or {}
+    if repo_evals:
+        repo_table = Table(title='Per-repository eligibility', show_lines=False)
+        repo_table.add_column('Repository', style='cyan')
+        repo_table.add_column('Eligible', justify='center')
+        repo_table.add_column('Credibility', justify='right')
+        repo_table.add_column('Earned', justify='right')
+        repo_table.add_column('Issue elig.', justify='center')
+        repo_table.add_column('Issue cred.', justify='right')
+        repo_table.add_column('Issue score', justify='right')
+        for repo_name in sorted(repo_evals):
+            re = repo_evals[repo_name]
+            repo_table.add_row(
+                repo_name,
+                '[green]✓[/green]' if re['is_eligible'] else '[red]✗[/red]',
+                f'{re["credibility"]:.2f}',
+                f'{re["total_score"]:.2f}',
+                '[green]✓[/green]' if re['is_issue_eligible'] else '[red]✗[/red]',
+                f'{re["issue_credibility"]:.2f}',
+                f'{re["issue_discovery_score"]:.2f}',
+            )
+        console.print(repo_table)
 
     pr_table = Table(title='Per-PR breakdown', show_lines=False)
     pr_table.add_column('Repo#PR', style='cyan')

@@ -109,7 +109,6 @@ def _config(
     label_multipliers: dict | None = None,
     default_label_multiplier: float = 1.0,
     fixed_base_score: float | None = None,
-    eligibility_mode: bool = True,
 ) -> RepositoryConfig:
     return RepositoryConfig(
         emission_share=emission_share,
@@ -118,7 +117,6 @@ def _config(
         label_multipliers=label_multipliers,
         default_label_multiplier=default_label_multiplier,
         fixed_base_score=fixed_base_score,
-        eligibility_mode=eligibility_mode,
     )
 
 

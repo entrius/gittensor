@@ -7,6 +7,7 @@
       "enhancement": 1.0,
       "refactor": 0.25
     },
+    "maintainer_cut": 0.0,
     "trusted_label_pipeline": true
   },
   "entrius/allways-ui": {
@@ -18,6 +19,7 @@
       "feature": 1.25,
       "refactor": 0.5
     },
+    "maintainer_cut": 0.0,
     "trusted_label_pipeline": true
   },
   "entrius/das-github-mirror": {
@@ -28,6 +30,7 @@
       "enhancement": 1.1,
       "refactor": 0.1
     },
+    "maintainer_cut": 0.0,
     "trusted_label_pipeline": true
   },
   "entrius/gittensor": {
@@ -39,6 +42,7 @@
       "feature": 1.5,
       "refactor": 0.25
     },
+    "maintainer_cut": 0.0,
     "trusted_label_pipeline": true
   },
   "entrius/gittensor-ui": {
@@ -50,6 +54,7 @@
       "feature": 1.25,
       "refactor": 0.5
     },
+    "maintainer_cut": 0.0,
     "trusted_label_pipeline": true
   },
   "entrius/oc-1": {
@@ -61,6 +66,7 @@
     "label_multipliers": {
       "benchmark-improvement": 1.0
     },
+    "maintainer_cut": 0.0,
     "trusted_label_pipeline": true
   },
   "Geniepod/genie-claw": {

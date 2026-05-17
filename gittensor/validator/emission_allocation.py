@@ -3,7 +3,7 @@
 
 """Round-level emission allocation by repository emission shares."""
 
-from typing import Dict
+from typing import Dict, Optional
 
 import bittensor as bt
 import numpy as np
@@ -23,6 +23,7 @@ def blend_emission_pools(
     miner_evaluations: Dict[int, MinerEvaluation],
     master_repositories: Dict[str, RepositoryConfig],
     miner_uids: set[int],
+    maintainer_uids_by_repo: Optional[Dict[str, list[int]]] = None,
 ) -> np.ndarray:
     """Allocate the combined scoring pool by bounded repository emission_share.
 
@@ -31,6 +32,11 @@ def blend_emission_pools(
     repo's ``issue_discovery_share`` and spill only inside the same repo when
     exactly one side has eligible non-zero scorers. Empty repo slices and
     registry slack recycle to UID 0.
+
+    When a repo sets ``maintainer_cut`` and ``maintainer_uids_by_repo`` lists
+    registered maintainer miners for it, ``maintainer_cut`` of that repo's slice
+    is carved off the top and split evenly among those maintainers; the
+    remainder scores normally. Repos with no listed maintainers are unaffected.
     """
     sorted_uids = sorted(miner_uids)
     uid_index = {uid: idx for idx, uid in enumerate(sorted_uids)}
@@ -43,6 +49,19 @@ def blend_emission_pools(
         repo_slice = repo_config.emission_share * OSS_EMISSION_SHARE
         if repo_slice <= 0:
             continue
+
+        # Maintainer carve-out: route maintainer_cut of the repo slice evenly to
+        # the repo's registered maintainer miners, off the top before the
+        # PR/issue split. Skipped when no maintainer miner is present.
+        maintainer_uids = (maintainer_uids_by_repo or {}).get(repo_name) or []
+        if repo_config.maintainer_cut > 0.0 and maintainer_uids:
+            carve_out = repo_config.maintainer_cut * repo_slice
+            per_maintainer = carve_out / len(maintainer_uids)
+            for uid in maintainer_uids:
+                idx = uid_index.get(uid)
+                if idx is not None:
+                    rewards[idx] += per_maintainer
+            repo_slice -= carve_out
 
         issue_share = repo_config.issue_discovery_share
         pr_scores = _collect_repo_pr_scores(miner_evaluations, repo_name, miner_uids) if issue_share < 1.0 else {}

@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from math import prod
-from typing import TYPE_CHECKING, DefaultDict, Dict, List, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple
 
 import bittensor as bt
 
@@ -111,21 +111,6 @@ class FileChange:
 
         return any(re.search(pattern, basename) for pattern in test_patterns)
 
-    @classmethod
-    def from_github_response(cls, pr_number: int, repository_full_name: str, file_diff: DefaultDict) -> 'FileChange':
-        """Create FileChange from GitHub API response"""
-        return cls(
-            pr_number=pr_number,
-            repository_full_name=repository_full_name,
-            filename=file_diff['filename'],
-            changes=file_diff['changes'],
-            additions=file_diff['additions'],
-            deletions=file_diff['deletions'],
-            status=file_diff['status'],
-            patch=file_diff.get('patch'),
-            previous_filename=file_diff.get('previous_filename'),
-        )
-
 
 @dataclass
 class Issue:
@@ -214,10 +199,6 @@ class PullRequest:
     last_edited_at: Optional[datetime] = None
     head_ref_oid: Optional[str] = None
     base_ref_oid: Optional[str] = None
-
-    def set_file_changes(self, file_changes: List[FileChange]) -> None:
-        """Set the file changes for this pull request"""
-        self.file_changes = file_changes
 
     def calculate_final_earned_score(self) -> float:
         """Combine base score with all multipliers."""

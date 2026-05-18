@@ -198,8 +198,8 @@ async def run_issue_discovery(
             fetch_errors += 1
             continue
 
-        open_issue_count = _count_open_issues(current_response.issues, issue_enabled_names)
-        filtered = [i for i in response.issues if i.repo_full_name in issue_enabled_names]
+        open_counts = _count_open_issues(current_response.issues, issue_enabled_names)
+        filtered = [i for i in response.issues if i.repo_full_name in issue_enabled_names and _should_include_issue(i)]
         if not filtered:
             _clear_issue_discovery_fields(evaluation)
             _apply_open_issue_counts(evaluation, open_counts)

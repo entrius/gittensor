@@ -7,7 +7,7 @@ inheritance — raw response data is accessed via ``scored.pr.<field>`` so
 
 The scoring fields and the ``number`` / ``repository_full_name`` / ``merged_at``
 aliases below are shaped to match ``PullRequest`` (the storage-layer type) so
-shared scoring helpers (``calculate_final_earned_score``, ``is_pioneer_eligible``,
+shared scoring helpers (``calculate_final_earned_score``,
 ``calculate_open_pr_collateral_score``) work on either type unchanged.
 """
 
@@ -16,7 +16,6 @@ from datetime import datetime
 from typing import List, Optional
 
 from gittensor.classes import _apply_score_multipliers
-from gittensor.constants import MIN_TOKEN_SCORE_FOR_BASE_SCORE
 from gittensor.utils.mirror.models import MirrorFile, MirrorPullRequest
 
 
@@ -34,10 +33,6 @@ class ScoredPR:
     review_quality_multiplier: float = 1.0
     label_multiplier: float = 1.0
     label: Optional[str] = None
-
-    # Pioneer attribution (per-repo, populated post per-PR scoring)
-    pioneer_dividend: float = 0.0
-    pioneer_rank: int = 0  # 0 = not eligible, 1 = pioneer, 2+ = follower position
 
     # Score outputs
     base_score: float = 0.0
@@ -76,16 +71,11 @@ class ScoredPR:
 
     @property
     def merged_at(self) -> Optional[datetime]:
-        """Alias for ``self.pr.merged_at`` — matches the ``PullRequest`` field
-        name so the pioneer-dividend walk treats both types identically."""
+        """Alias for ``self.pr.merged_at`` — matches the ``PullRequest`` field name."""
         return self.pr.merged_at
 
-    def is_pioneer_eligible(self) -> bool:
-        """Pioneer-eligible iff merged AND meets the minimum token-score gate."""
-        return self.pr.merged_at is not None and self.token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE
-
     def calculate_final_earned_score(self) -> float:
-        """Combine base score with all multipliers. Pioneer dividend is added separately after."""
+        """Combine base score with all multipliers."""
         multipliers = {
             'issue': self.issue_multiplier,
             'label': self.label_multiplier,

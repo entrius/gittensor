@@ -247,19 +247,7 @@ def ineligible_low_credibility(pr_factory) -> MinerScenario:
         merged=pr_factory.merged_batch(count=5, unique_repos=True, token_score=10.0),
         closed=pr_factory.closed_batch(count=4, unique_repos=True),
         open=[],
-        description='Ineligible: 5/9 = 55.6% credibility (after mulligan: 5/8 = 62.5%)',
-    )
-
-
-@pytest.fixture
-def miner_with_mulligan(pr_factory) -> MinerScenario:
-    """Miner who benefits from the mulligan (1 closed PR forgiven)."""
-    pr_factory.reset()
-    return MinerScenario(
-        merged=pr_factory.merged_batch(count=5, unique_repos=True, token_score=10.0),
-        closed=pr_factory.closed_batch(count=1, unique_repos=True),
-        open=[],
-        description='Miner with mulligan: 5/5 = 100% credibility (1 closed forgiven)',
+        description='Ineligible: 5 merged / 4 closed = 55.6% credibility',
     )
 
 

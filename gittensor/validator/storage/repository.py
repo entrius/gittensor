@@ -8,11 +8,12 @@ and miner evaluations.
 
 import logging
 from contextlib import contextmanager
-from typing import List
+from typing import Dict, List
 
 import numpy as np
 
-from gittensor.classes import FileChange, Issue, Miner, MinerEvaluation, PullRequest
+from gittensor.classes import FileChange, Issue, Miner, MinerEvaluation, PullRequest, RepoEvaluation
+from gittensor.validator.utils.load_weights import RepositoryConfig
 
 from .queries import (
     BULK_UPSERT_FILE_CHANGES,
@@ -180,8 +181,6 @@ class Repository(BaseRepository):
                     pr.base_score,
                     pr.issue_multiplier,
                     pr.open_pr_spam_multiplier,
-                    pr.pioneer_dividend,
-                    pr.pioneer_rank,
                     pr.time_decay_multiplier,
                     pr.credibility_multiplier,
                     pr.review_quality_multiplier,
@@ -335,49 +334,65 @@ class Repository(BaseRepository):
             self.logger.error(f'Error in bulk file change storage: {e} | PRs: {prs}')
             return 0
 
-    def set_miner_evaluation(self, evaluation: MinerEvaluation, commit: bool = True) -> bool:
+    def set_miner_evaluation(
+        self,
+        evaluation: MinerEvaluation,
+        master_repositories: Dict[str, RepositoryConfig],
+        commit: bool = True,
+    ) -> bool:
         """
-        Insert or update a miner evaluation.
+        Insert or update a miner evaluation, one row per master-list repository.
+
+        A row is written for every repo in ``master_repositories``; repos the
+        miner never engaged get a zeroed RepoEvaluation.
 
         Args:
             evaluation: MinerEvaluation object to store
+            master_repositories: The full master repo registry (one row each)
             commit: Whether to commit after execution (default True)
 
         Returns:
             True if successful, False otherwise
         """
-        eval_values = [
-            (
-                evaluation.uid,
-                evaluation.hotkey,
-                evaluation.github_id,
-                evaluation.failed_reason,
-                evaluation.base_total_score,
-                evaluation.total_score,
-                evaluation.total_collateral_score,
-                evaluation.total_nodes_scored,
-                evaluation.total_open_prs,
-                evaluation.total_closed_prs,
-                evaluation.total_merged_prs,
-                evaluation.total_prs,
-                evaluation.unique_repos_count,
-                evaluation.is_eligible,
-                evaluation.credibility,
-                evaluation.total_token_score,
-                evaluation.total_structural_count,
-                evaluation.total_structural_score,
-                evaluation.total_leaf_count,
-                evaluation.total_leaf_score,
-                evaluation.issue_discovery_score,
-                evaluation.issue_token_score,
-                evaluation.issue_credibility,
-                evaluation.is_issue_eligible,
-                evaluation.total_solved_issues,
-                evaluation.total_valid_solved_issues,
-                evaluation.total_closed_issues,
-                evaluation.total_open_issues,
+        eval_values = []
+        for repo_name in master_repositories:
+            repo_eval = evaluation.repo_evaluations.get(repo_name) or RepoEvaluation(repository_full_name=repo_name)
+            eval_values.append(
+                (
+                    evaluation.uid,
+                    evaluation.hotkey,
+                    evaluation.github_id,
+                    repo_name,
+                    evaluation.failed_reason,
+                    repo_eval.base_total_score,
+                    repo_eval.total_score,
+                    repo_eval.total_collateral_score,
+                    repo_eval.total_nodes_scored,
+                    repo_eval.total_open_prs,
+                    repo_eval.total_closed_prs,
+                    repo_eval.total_merged_prs,
+                    repo_eval.total_prs,
+                    evaluation.unique_repos_count,
+                    repo_eval.is_eligible,
+                    repo_eval.credibility,
+                    repo_eval.total_token_score,
+                    repo_eval.total_structural_count,
+                    repo_eval.total_structural_score,
+                    repo_eval.total_leaf_count,
+                    repo_eval.total_leaf_score,
+                    repo_eval.issue_discovery_score,
+                    repo_eval.issue_token_score,
+                    repo_eval.issue_credibility,
+                    repo_eval.is_issue_eligible,
+                    repo_eval.total_solved_issues,
+                    repo_eval.total_valid_solved_issues,
+                    repo_eval.total_closed_issues,
+                    repo_eval.total_open_issues,
+                )
             )
-        ]
+
+        if not eval_values:
+            return True
 
         try:
             with self.get_cursor() as cursor:

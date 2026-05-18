@@ -83,14 +83,6 @@ CONTRIBUTION_SCORE_FOR_FULL_BONUS = 1500
 # Boosts
 MAX_CODE_DENSITY_MULTIPLIER = 1.15
 
-# Pioneer dividend — rewards the first quality contributor to each repository
-# Rates applied per follower position (1st follower pays most, diminishing after)
-# Dividend capped at PIONEER_DIVIDEND_MAX_RATIO × pioneer's own earned_score
-PIONEER_DIVIDEND_RATE_1ST = 0.30  # 1st follower: 30% of their earned_score
-PIONEER_DIVIDEND_RATE_2ND = 0.20  # 2nd follower: 20% of their earned_score
-PIONEER_DIVIDEND_RATE_REST = 0.10  # 3rd+ followers: 10% of their earned_score
-PIONEER_DIVIDEND_MAX_RATIO = 1.0  # Cap dividend at 1× pioneer's own earned_score (max 2× total)
-
 # Issue boosts
 MAX_ISSUE_CLOSE_WINDOW_DAYS = 1
 
@@ -99,6 +91,11 @@ TIME_DECAY_GRACE_PERIOD_HOURS = 12  # hours before time decay begins
 TIME_DECAY_SIGMOID_MIDPOINT = 10  # days until 50% score loss
 TIME_DECAY_SIGMOID_STEEPNESS_SCALAR = 0.4
 TIME_DECAY_MIN_MULTIPLIER = 0.05  # 5% of score will retain through lookback window
+
+# Per-parse CPU budget for tree-sitter. The parser polls this flag in its
+# error-recovery loops; without it, adversarial inputs can spin forever in C
+# while holding the GIL. 2s is well above the millisecond cost of real files.
+TREE_SITTER_PARSE_TIMEOUT_MICROS = 2_000_000
 
 # comment nodes for token scoring
 COMMENT_NODE_TYPES = frozenset(
@@ -123,23 +120,24 @@ INLINE_TEST_PATTERNS: Dict[str, re.Pattern] = {
 # =============================================================================
 # Eligibility Gate (OSS Contributions)
 # =============================================================================
-MIN_VALID_MERGED_PRS = 5  # minimum "valid" merged PRs (token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE) to receive score
+# Per-repo defaults — each repo may override these in master_repositories.json.
+MIN_VALID_MERGED_PRS = 3  # minimum "valid" merged PRs (token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE) to receive score
 MIN_CREDIBILITY = 0.80  # minimum credibility ratio to receive score
-CREDIBILITY_MULLIGAN_COUNT = 1  # number of closed PRs forgiven (erased from merged+closed counts entirely)
 
 # =============================================================================
 # Issue Discovery
 # =============================================================================
-# Eligibility gate (stricter than OSS contributions)
-MIN_VALID_SOLVED_ISSUES = 7  # minimum solved issues where solving PR has token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE
-MIN_ISSUE_CREDIBILITY = 0.80  # minimum issue credibility ratio
+# Eligibility gate — per-repo defaults, overridable in master_repositories.json.
+MIN_VALID_SOLVED_ISSUES = 3  # minimum solved issues where solving PR has token_score >= MIN_TOKEN_SCORE_FOR_VALID_ISSUE
+MIN_ISSUE_CREDIBILITY = 0.70  # minimum issue credibility ratio
+MIN_TOKEN_SCORE_FOR_VALID_ISSUE = 5  # solving-PR token_score for a solved issue to count as "valid"
 
 # Review quality cliff model (different from OSS: has clean bonus + steeper penalty)
 ISSUE_REVIEW_CLEAN_BONUS = 1.1  # multiplier when 0 CHANGES_REQUESTED rounds
 ISSUE_REVIEW_PENALTY_RATE = 0.15  # per CHANGES_REQUESTED round after cliff
 
-# Open issue spam threshold
-OPEN_ISSUE_SPAM_BASE_THRESHOLD = 5  # half the PR base of 10
+# Open issue spam threshold (per-repo: counts a repo's own open issues)
+OPEN_ISSUE_SPAM_BASE_THRESHOLD = 2
 OPEN_ISSUE_SPAM_TOKEN_SCORE_PER_SLOT = 300.0  # +1 allowed open issue per this much token score
 MAX_OPEN_ISSUE_THRESHOLD = 30
 
@@ -170,9 +168,9 @@ MAX_OPEN_PR_REVIEW_COLLATERAL_MULTIPLIER = 2.0  # Cap open PR collateral growth 
 # Issue multiplier (flat values, no age scaling)
 STANDARD_ISSUE_MULTIPLIER = 1.33  # Non-maintainer issue author
 MAINTAINER_ISSUE_MULTIPLIER = 1.66  # Issue author is OWNER/MEMBER/COLLABORATOR
-# Excessive open PRs penalty
+# Excessive open PRs penalty (per-repo: counts a repo's own open PRs)
 # Multiplier = 1.0 if open PRs <= threshold, 0.0 otherwise
-EXCESSIVE_PR_PENALTY_BASE_THRESHOLD = 10
+EXCESSIVE_PR_PENALTY_BASE_THRESHOLD = 2
 
 # Dynamic open PR threshold bonus for top contributors
 # Bonus = floor(total_token_score / 300)

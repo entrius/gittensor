@@ -85,8 +85,16 @@ def _discovered_issue(repo: str, number: int, earned_score: float) -> Issue:
     )
 
 
-def _config(emission_share: float, issue_discovery_share: float = 0.5) -> RepositoryConfig:
-    return RepositoryConfig(emission_share=emission_share, issue_discovery_share=issue_discovery_share)
+def _config(
+    emission_share: float,
+    issue_discovery_share: float = 0.5,
+    maintainer_cut: float = 0.0,
+) -> RepositoryConfig:
+    return RepositoryConfig(
+        emission_share=emission_share,
+        issue_discovery_share=issue_discovery_share,
+        maintainer_cut=maintainer_cut,
+    )
 
 
 class TestAllocationInvarianceToPrVolume:
@@ -339,3 +347,121 @@ class TestCaseInsensitiveRepoMatching:
         rewards = blend_emission_pools(evaluations, repos, miner_uids)
 
         assert rewards[_idx(miner_uids, 1)] == pytest.approx(0.2 * OSS_EMISSION_SHARE)
+
+
+class TestMaintainerCut:
+    def test_default_and_empty_map_match_no_arg(self):
+        repos = {'r/one': _config(emission_share=0.1, issue_discovery_share=0.0)}
+        miner_uids = _uids(1)
+        evaluations = {1: _evaluation(1, prs=[_scored_pr('r/one', 100, earned_score=10.0)])}
+
+        baseline = blend_emission_pools(evaluations, repos, miner_uids)
+        with_none = blend_emission_pools(evaluations, repos, miner_uids, None)
+        with_empty = blend_emission_pools(evaluations, repos, miner_uids, {})
+
+        assert list(with_none) == list(baseline)
+        assert list(with_empty) == list(baseline)
+
+    def test_zero_cut_ignores_maintainer_map(self):
+        repos = {'r/one': _config(emission_share=0.1, issue_discovery_share=0.0, maintainer_cut=0.0)}
+        miner_uids = _uids(1, 2)
+        evaluations = {
+            1: _evaluation(1),
+            2: _evaluation(2, prs=[_scored_pr('r/one', 100, earned_score=10.0)]),
+        }
+
+        rewards = blend_emission_pools(evaluations, repos, miner_uids, {'r/one': [1]})
+
+        assert rewards[_idx(miner_uids, 1)] == pytest.approx(0.0)
+        assert rewards[_idx(miner_uids, 2)] == pytest.approx(0.1 * OSS_EMISSION_SHARE)
+
+    def test_single_maintainer_gets_full_carve_out(self):
+        repos = {'r/one': _config(emission_share=0.1, issue_discovery_share=0.0, maintainer_cut=0.25)}
+        miner_uids = _uids(1, 2)
+        evaluations = {
+            1: _evaluation(1),
+            2: _evaluation(2, prs=[_scored_pr('r/one', 100, earned_score=10.0)]),
+        }
+
+        rewards = blend_emission_pools(evaluations, repos, miner_uids, {'r/one': [1]})
+
+        repo_slice = 0.1 * OSS_EMISSION_SHARE
+        assert rewards[_idx(miner_uids, 1)] == pytest.approx(repo_slice * 0.25)
+        assert rewards[_idx(miner_uids, 2)] == pytest.approx(repo_slice * 0.75)
+
+    def test_even_split_among_n_maintainers(self):
+        repos = {'r/m': _config(emission_share=0.3, issue_discovery_share=0.0, maintainer_cut=0.4)}
+        miner_uids = _uids(1, 2, 3)
+        evaluations = {1: _evaluation(1), 2: _evaluation(2), 3: _evaluation(3)}
+
+        rewards = blend_emission_pools(evaluations, repos, miner_uids, {'r/m': [1, 2, 3]})
+
+        per_maintainer = 0.3 * OSS_EMISSION_SHARE * 0.4 / 3
+        assert rewards[_idx(miner_uids, 1)] == pytest.approx(per_maintainer)
+        assert rewards[_idx(miner_uids, 2)] == pytest.approx(per_maintainer)
+        assert rewards[_idx(miner_uids, 3)] == pytest.approx(per_maintainer)
+
+    def test_maintainer_also_scores_prs_gets_both(self):
+        repos = {'r/one': _config(emission_share=0.1, issue_discovery_share=0.0, maintainer_cut=0.2)}
+        miner_uids = _uids(1, 2)
+        evaluations = {
+            1: _evaluation(1, prs=[_scored_pr('r/one', 1, earned_score=10.0)]),
+            2: _evaluation(2, prs=[_scored_pr('r/one', 2, earned_score=10.0)]),
+        }
+
+        rewards = blend_emission_pools(evaluations, repos, miner_uids, {'r/one': [1]})
+
+        repo_slice = 0.1 * OSS_EMISSION_SHARE
+        assert rewards[_idx(miner_uids, 1)] == pytest.approx(repo_slice * 0.2 + repo_slice * 0.8 * 0.5)
+        assert rewards[_idx(miner_uids, 2)] == pytest.approx(repo_slice * 0.8 * 0.5)
+
+    def test_multi_repo_maintainer_stacks(self):
+        repos = {
+            'r/a': _config(emission_share=0.2, issue_discovery_share=0.0, maintainer_cut=0.5),
+            'r/b': _config(emission_share=0.3, issue_discovery_share=0.0, maintainer_cut=0.5),
+        }
+        miner_uids = _uids(1)
+        evaluations = {1: _evaluation(1)}
+
+        rewards = blend_emission_pools(evaluations, repos, miner_uids, {'r/a': [1], 'r/b': [1]})
+
+        slice_a = 0.2 * OSS_EMISSION_SHARE
+        slice_b = 0.3 * OSS_EMISSION_SHARE
+        assert rewards[_idx(miner_uids, 1)] == pytest.approx(slice_a * 0.5 + slice_b * 0.5)
+
+    def test_no_maintainer_falls_back_to_normal_scoring(self):
+        repos = {'r/one': _config(emission_share=0.1, issue_discovery_share=0.0, maintainer_cut=0.5)}
+        miner_uids = _uids(1)
+        evaluations = {1: _evaluation(1, prs=[_scored_pr('r/one', 100, earned_score=10.0)])}
+
+        rewards = blend_emission_pools(evaluations, repos, miner_uids, {})
+
+        assert rewards[_idx(miner_uids, 1)] == pytest.approx(0.1 * OSS_EMISSION_SHARE)
+        assert rewards[_idx(miner_uids, RECYCLE_UID)] == pytest.approx(0.9 * OSS_EMISSION_SHARE)
+
+    def test_carve_out_plus_recycle_interaction(self):
+        repos = {'r/one': _config(emission_share=1.0, issue_discovery_share=0.0, maintainer_cut=0.3)}
+        miner_uids = _uids(1)
+        evaluations = {1: _evaluation(1)}
+
+        rewards = blend_emission_pools(evaluations, repos, miner_uids, {'r/one': [1]})
+
+        assert rewards[_idx(miner_uids, 1)] == pytest.approx(0.3 * OSS_EMISSION_SHARE)
+        assert rewards[_idx(miner_uids, RECYCLE_UID)] == pytest.approx(0.7 * OSS_EMISSION_SHARE)
+
+    def test_round_total_sums_to_one_with_carve_out(self):
+        repos = {
+            'r/a': _config(emission_share=0.4, issue_discovery_share=0.0, maintainer_cut=0.5),
+            'r/b': _config(emission_share=0.3, issue_discovery_share=0.5),
+            'r/c': _config(emission_share=0.1, issue_discovery_share=0.0),
+        }
+        miner_uids = _uids(1, 2, 3)
+        evaluations = {
+            1: _evaluation(1, prs=[_scored_pr('r/a', 1, earned_score=5.0)]),
+            2: _evaluation(2, issues=[_discovered_issue('r/b', 10, earned_score=7.0)]),
+            3: _evaluation(3),
+        }
+
+        rewards = blend_emission_pools(evaluations, repos, miner_uids, {'r/a': [3]})
+
+        assert float(rewards.sum()) == pytest.approx(1.0)

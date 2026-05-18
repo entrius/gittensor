@@ -111,6 +111,7 @@ def _issue_dict(
     last_edited_at: Optional[str] = None,
     repo: str = 'entrius/gittensor-ui',
     created_at: str = '2026-04-01T00:00:00Z',
+    author_association: str = 'CONTRIBUTOR',
 ) -> dict:
     sp = None
     if solved_by_pr:
@@ -135,7 +136,7 @@ def _issue_dict(
         'state_reason': state_reason,
         'author_github_id': author_github_id,
         'author_login': 'discoverer',
-        'author_association': 'CONTRIBUTOR',
+        'author_association': author_association,
         'created_at': created_at,
         'closed_at': '2026-04-18T10:00:00Z' if state == 'CLOSED' else None,
         'updated_at': '2026-04-18T10:00:00Z',
@@ -1076,7 +1077,7 @@ class TestCrossMinerOneIssuePerPr:
             )
         )
 
-        canonical = _build_canonical_pr_owners([(e_a, [a_issue], 0), (e_b, [b_issue], 0)])
+        canonical = _build_canonical_pr_owners([(e_a, [a_issue], {}), (e_b, [b_issue], {})])
 
         # Earlier-created issue (#50, uid 1) wins canonical for PR 100
         owner = canonical[('entrius/gittensor-ui', 100)]
@@ -1108,7 +1109,7 @@ class TestCrossMinerOneIssuePerPr:
             )
         )
 
-        canonical = _build_canonical_pr_owners([(e_a, [a_issue], 0), (e_b, [b_issue], 0)])
+        canonical = _build_canonical_pr_owners([(e_a, [a_issue], {}), (e_b, [b_issue], {})])
 
         owner = canonical[('entrius/gittensor-ui', 100)]
         assert owner[1] == 50  # lower issue_number wins
@@ -1140,7 +1141,7 @@ class TestCrossMinerOneIssuePerPr:
             )
         )
 
-        canonical = _build_canonical_pr_owners([(e_a, [a_issue], 0), (e_b, [b_issue], 0)])
+        canonical = _build_canonical_pr_owners([(e_a, [a_issue], {}), (e_b, [b_issue], {})])
 
         owner = canonical[('entrius/gittensor-ui', 100)]
         assert owner[1] == 51  # B's issue claims canonical

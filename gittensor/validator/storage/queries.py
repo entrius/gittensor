@@ -46,7 +46,7 @@ INSERT INTO pull_requests (
     number, repository_full_name, uid, hotkey, github_id, title, author_login,
     merged_at, pr_created_at, pr_state,
     base_score, issue_multiplier,
-    open_pr_spam_multiplier, pioneer_dividend, pioneer_rank, time_decay_multiplier,
+    open_pr_spam_multiplier, time_decay_multiplier,
     credibility_multiplier, review_quality_multiplier, label_multiplier, label,
     earned_score, collateral_score,
     additions, deletions, commits, total_nodes_scored,
@@ -56,7 +56,7 @@ INSERT INTO pull_requests (
     %s, %s, %s, %s, %s, %s, %s,
     %s, %s, %s,
     %s, %s,
-    %s, %s, %s, %s,
+    %s, %s,
     %s, %s, %s, %s,
     %s, %s,
     %s, %s, %s, %s,
@@ -74,8 +74,6 @@ DO UPDATE SET
     base_score = EXCLUDED.base_score,
     issue_multiplier = EXCLUDED.issue_multiplier,
     open_pr_spam_multiplier = EXCLUDED.open_pr_spam_multiplier,
-    pioneer_dividend = EXCLUDED.pioneer_dividend,
-    pioneer_rank = EXCLUDED.pioneer_rank,
     time_decay_multiplier = EXCLUDED.time_decay_multiplier,
     credibility_multiplier = EXCLUDED.credibility_multiplier,
     review_quality_multiplier = EXCLUDED.review_quality_multiplier,
@@ -161,24 +159,24 @@ DO UPDATE SET
     file_extension = EXCLUDED.file_extension
 """
 
-# Miner Evaluation Queries
+# Miner Evaluation Queries — one row per (uid, hotkey, github_id, repository_full_name).
 BULK_UPSERT_MINER_EVALUATION = """
 INSERT INTO miner_evaluations (
-    uid, hotkey, github_id, failed_reason, base_total_score, total_score, total_collateral_score,
-    total_nodes_scored, total_open_prs, total_closed_prs, total_merged_prs, total_prs,
+    uid, hotkey, github_id, repository_full_name, failed_reason, base_total_score, total_score,
+    total_collateral_score, total_nodes_scored, total_open_prs, total_closed_prs, total_merged_prs, total_prs,
     unique_repos_count, is_eligible, credibility,
     total_token_score, total_structural_count, total_structural_score, total_leaf_count, total_leaf_score,
     issue_discovery_score, issue_token_score, issue_credibility, is_issue_eligible,
     total_solved_issues, total_valid_solved_issues, total_closed_issues, total_open_issues
 ) VALUES (
     %s, %s, %s, %s, %s, %s, %s,
-    %s, %s, %s, %s, %s,
+    %s, %s, %s, %s, %s, %s,
     %s, %s, %s,
     %s, %s, %s, %s, %s,
     %s, %s, %s, %s,
     %s, %s, %s, %s
 )
-ON CONFLICT (uid, hotkey, github_id)
+ON CONFLICT (uid, hotkey, github_id, repository_full_name)
 DO UPDATE SET
     failed_reason = EXCLUDED.failed_reason,
     base_total_score = EXCLUDED.base_total_score,

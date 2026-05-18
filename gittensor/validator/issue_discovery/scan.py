@@ -456,10 +456,6 @@ async def _score_miner_issues(
             )
             continue
 
-        # Valid-solved gate: solving PR must meet the repo's token threshold.
-        if cached.token_score >= cfg.min_token_score_for_valid_issue:
-            acc.valid_solved += 1
-
         # Same-account: discoverer == solver gets credibility only, no score
         if issue.author_github_id == solving_pr.author_github_id:
             bt.logging.debug(
@@ -476,6 +472,12 @@ async def _score_miner_issues(
                 f'(PR #{solving_pr.pr_number} canonical owner is a different issue) — credibility only'
             )
             continue
+
+        # Valid-solved gate: solving PR must meet the repo's token threshold.
+        # Placed after exclusion guards so same-account and non-canonical issues
+        # do not inflate the counter and bypass the eligibility check.
+        if cached.token_score >= cfg.min_token_score_for_valid_issue:
+            acc.valid_solved += 1
 
         # Quality gate: below-threshold solving PRs add credibility only, no
         # discovery score.

@@ -135,3 +135,81 @@ def test_ineligible_miner_still_receives_solution_vote():
 
     contract_client.vote_solution.assert_called_once()
     contract_client.vote_cancel_issue.assert_not_called()
+
+
+def test_failed_miner_does_not_receive_solution_vote():
+    validator = _make_validator()
+    contract_client = MagicMock()
+    contract_client.harvest_emissions.return_value = None
+    contract_client.get_issues_by_status.return_value = [_make_issue()]
+    contract_client.vote_cancel_issue.return_value = True
+
+    miner_eval = MinerEvaluation(uid=5, hotkey='hk5', github_id='999')
+    miner_eval.failed_reason = 'Penalized: duplicate GitHub account'
+
+    with (
+        patch('gittensor.validator.issue_competitions.forward.GITTENSOR_VALIDATOR_PAT', 'ghp_validator'),
+        patch('gittensor.validator.issue_competitions.forward.get_contract_address', return_value='5Contract'),
+        patch(
+            'gittensor.validator.issue_competitions.forward.check_github_issue_closed',
+            return_value={
+                'is_closed': True,
+                'solver_github_id': '999',
+                'pr_number': 42,
+                'solver_lookup_failed': False,
+            },
+        ),
+        patch('gittensor.validator.issue_competitions.forward.get_miner_coldkey') as mock_get_coldkey,
+        patch(
+            'gittensor.validator.issue_competitions.forward.IssueCompetitionContractClient',
+            return_value=contract_client,
+        ),
+    ):
+        _run(issue_competitions(cast(Any, validator), {5: miner_eval}))
+
+    mock_get_coldkey.assert_not_called()
+    contract_client.vote_solution.assert_not_called()
+    contract_client.vote_cancel_issue.assert_called_once_with(
+        issue_id=7,
+        reason='Issue closed externally (not by a registered miner, solver: 999)',
+        wallet=validator.wallet,
+    )
+
+
+def test_ambiguous_github_id_votes_cancel_instead_of_picking_hotkey():
+    validator = _make_validator()
+    contract_client = MagicMock()
+    contract_client.harvest_emissions.return_value = None
+    contract_client.get_issues_by_status.return_value = [_make_issue()]
+    contract_client.vote_cancel_issue.return_value = True
+
+    miner_one = MinerEvaluation(uid=1, hotkey='hk1', github_id='999')
+    miner_two = MinerEvaluation(uid=2, hotkey='hk2', github_id='999')
+
+    with (
+        patch('gittensor.validator.issue_competitions.forward.GITTENSOR_VALIDATOR_PAT', 'ghp_validator'),
+        patch('gittensor.validator.issue_competitions.forward.get_contract_address', return_value='5Contract'),
+        patch(
+            'gittensor.validator.issue_competitions.forward.check_github_issue_closed',
+            return_value={
+                'is_closed': True,
+                'solver_github_id': '999',
+                'pr_number': 42,
+                'solver_lookup_failed': False,
+            },
+        ),
+        patch('gittensor.validator.issue_competitions.forward.get_miner_coldkey') as mock_get_coldkey,
+        patch(
+            'gittensor.validator.issue_competitions.forward.IssueCompetitionContractClient',
+            return_value=contract_client,
+        ),
+    ):
+        _run(issue_competitions(cast(Any, validator), {1: miner_one, 2: miner_two}))
+
+    mock_get_coldkey.assert_not_called()
+    contract_client.vote_solution.assert_not_called()
+    contract_client.vote_cancel_issue.assert_called_once_with(
+        issue_id=7,
+        reason='Issue closed by ambiguous registered miner identity (solver: 999)',
+        wallet=validator.wallet,
+    )

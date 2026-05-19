@@ -165,7 +165,7 @@ def get_github_identity(token: str) -> GitHubIdentityResult:
     return GitHubIdentityResult(None, GitHubIdentityStatus.TRANSIENT_FAILURE)
 
 
-# GraphQL fragment used by both issue submissions and solver detection.
+# GraphQL fragment used by issue submissions / PR discovery.
 _PR_TIMELINE_QUERY = """
 query($owner: String!, $name: String!, $issueNumber: Int!) {
   repository(owner: $owner, name: $name) {
@@ -191,6 +191,36 @@ query($owner: String!, $name: String!, $issueNumber: Int!) {
                   }
                 }
                 reviews(first: 1, states: APPROVED) { totalCount }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
+
+_ISSUE_CLOSURE_QUERY = """
+query($owner: String!, $name: String!, $issueNumber: Int!) {
+  repository(owner: $owner, name: $name) {
+    issue(number: $issueNumber) {
+      closedAt
+      timelineItems(itemTypes: [CLOSED_EVENT], last: 20) {
+        nodes {
+          ... on ClosedEvent {
+            createdAt
+            stateReason
+            closer {
+              __typename
+              ... on PullRequest {
+                number
+                state
+                merged
+                mergedAt
+                author { ... on User { databaseId login } }
+                baseRepository { nameWithOwner }
               }
             }
           }
@@ -379,51 +409,117 @@ def execute_graphql_query(
     return None
 
 
-def find_solver_from_cross_references(
+def _is_completed_close_event(node: Dict[str, Any]) -> bool:
+    state_reason = node.get('stateReason')
+    return state_reason is None or str(state_reason).strip().upper() == 'COMPLETED'
+
+
+def _select_current_close_event(issue_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Return the ClosedEvent that represents the issue's current closure."""
+    timeline_nodes = issue_data.get('timelineItems', {}).get('nodes', []) or []
+    closed_at = issue_data.get('closedAt')
+    if not closed_at:
+        return None
+
+    completed_events = [node for node in timeline_nodes if node and _is_completed_close_event(node)]
+    if not completed_events:
+        return None
+
+    for node in reversed(completed_events):
+        if node.get('createdAt') == closed_at:
+            return node
+    return None
+
+
+def _solver_from_closed_event(repo: str, event: Dict[str, Any]) -> tuple[Optional[int], Optional[int]]:
+    target_repo = repo.lower()
+    closer = event.get('closer') or {}
+    if closer.get('__typename') != 'PullRequest':
+        return None, None
+
+    base_repo = ((closer.get('baseRepository') or {}).get('nameWithOwner') or '').lower()
+    if base_repo != target_repo:
+        bt.logging.warning(
+            f'ClosedEvent closer PR#{closer.get("number")} targets {base_repo or "unknown repo"}, not {target_repo}'
+        )
+        return None, None
+
+    state = _resolve_pr_state(closer.get('state', ''), merged=bool(closer.get('merged', False)))
+    if state != 'MERGED':
+        bt.logging.warning(f'ClosedEvent closer PR#{closer.get("number")} is not merged (state={state})')
+        return None, None
+
+    author = closer.get('author') or {}
+    return author.get('databaseId'), closer.get('number')
+
+
+def find_solver_from_closure_event(
     repo: str, issue_number: int, token: str
 ) -> Optional[tuple[Optional[int], Optional[int]]]:
-    """Resolve solver from cross-referenced PRs on the issue timeline.
+    """Resolve the issue solver from GitHub's authoritative current close event.
 
-    This uses ``_search_issue_referencing_prs_graphql`` and then narrows to PRs
-    that are:
-    - merged, and
-    - explicitly closing ``issue_number``.
-
-    If multiple candidates exist, the earliest ``merged_at`` is selected, since
-    GitHub closes an issue on the first merged PR that triggers the close; later
-    PRs declaring "Closes #X" in their body still appear in the timeline with
-    ``closingIssuesReferences`` populated even though they did not actually
-    close the issue. PR ``number`` is used as a deterministic tiebreaker.
+    Cross-reference and ``closingIssuesReferences`` entries are declarations made
+    by PR text, not proof that a PR caused the issue's current closure. Bounty
+    attribution must therefore read the ``ClosedEvent.closer`` for the issue's
+    current ``closedAt`` value and only accept a merged PR targeting the same repo.
 
     Returns:
         ``None`` when lookup fails and should be retried later. Otherwise a
         tuple ``(solver_github_id, pr_number)`` where either value may be
         ``None`` when no valid closing PR is found.
     """
-    prs = _search_issue_referencing_prs_graphql(repo, issue_number, token, open_only=False)
-    if prs is None:
-        return None
-
-    merged = [p for p in prs if p.get('state') == 'MERGED' and issue_number in p.get('closing_numbers', [])]
-    bt.logging.debug(f'Found {len(merged)} verified closing PRs via GraphQL for {repo}#{issue_number}')
-    if not merged:
+    if not token:
+        return None, None
+    if issue_number < 1 or '/' not in repo:
+        return None, None
+    owner, name = repo.split('/', 1)
+    owner = owner.strip()
+    name = name.strip()
+    if not owner or not name:
         return None, None
 
-    if len(merged) > 1:
-        bt.logging.warning(f'Multiple closing PRs found for {repo}#{issue_number}, selecting earliest-merged.')
-        for candidate in merged:
-            bt.logging.debug(
-                f'  PR#{candidate.get("number")}, solver_id={candidate.get("author_id")}, '
-                f'merged_at={candidate.get("merged_at")}'
-            )
-
-    merged.sort(key=lambda p: (p.get('merged_at') or '', p.get('number') or 0))
-    best = merged[0]
-    bt.logging.debug(
-        f'Solver via GraphQL cross-reference: PR#{best.get("number")}, '
-        f'solver_id={best.get("author_id")}, merged_at={best.get("merged_at")}'
+    result = execute_graphql_query(
+        query=_ISSUE_CLOSURE_QUERY,
+        variables={'owner': owner, 'name': name, 'issueNumber': issue_number},
+        token=token,
+        max_attempts=3,
     )
-    return best.get('author_id'), best.get('number')
+    if result is None:
+        bt.logging.warning(f'GraphQL closure query failed for {repo}#{issue_number}')
+        return None
+
+    errors = result.get('errors')
+    if errors:
+        bt.logging.warning(f'GraphQL closure query returned errors for {repo}#{issue_number}: {errors}')
+        return None
+
+    issue_data = result.get('data', {}).get('repository', {}).get('issue')
+    if issue_data is None:
+        bt.logging.warning(f'GraphQL closure response missing issue data for {repo}#{issue_number}')
+        return None
+
+    close_event = _select_current_close_event(issue_data)
+    if close_event is None:
+        return None, None
+
+    solver_github_id, pr_number = _solver_from_closed_event(f'{owner}/{name}', close_event)
+    bt.logging.debug(
+        f'Solver via GraphQL close event: PR#{pr_number}, '
+        f'solver_id={solver_github_id}, closed_at={close_event.get("createdAt")}'
+    )
+    return solver_github_id, pr_number
+
+
+def find_solver_from_cross_references(
+    repo: str, issue_number: int, token: str
+) -> Optional[tuple[Optional[int], Optional[int]]]:
+    """Compatibility wrapper for bounty solver lookup.
+
+    Solver attribution used to infer the closer from cross-referenced PRs. The
+    implementation now uses ``ClosedEvent.closer`` to avoid rewarding stale or
+    attacker-influenceable cross-reference candidates.
+    """
+    return find_solver_from_closure_event(repo, issue_number, token)
 
 
 def check_github_issue_closed(repo: str, issue_number: int, token: str) -> Optional[Dict[str, Any]]:
@@ -467,7 +563,7 @@ def check_github_issue_closed(repo: str, issue_number: int, token: str) -> Optio
             }
 
         bt.logging.debug(f'Finding solver for {repo}#{issue_number}')
-        solver_lookup = find_solver_from_cross_references(repo, issue_number, token)
+        solver_lookup = find_solver_from_closure_event(repo, issue_number, token)
         if solver_lookup is None:
             bt.logging.warning(f'Solver lookup failed for {repo}#{issue_number}')
             solver_lookup_failed = True

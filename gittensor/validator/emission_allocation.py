@@ -97,6 +97,12 @@ def blend_emission_pools(
             f'Treasury allocation: UID {ISSUES_TREASURY_UID} receives '
             f'{ISSUES_TREASURY_EMISSION_SHARE * 100:.0f}% of emissions'
         )
+    elif ISSUES_TREASURY_UID > 0:
+        recycle_share += ISSUES_TREASURY_EMISSION_SHARE
+        bt.logging.warning(
+            f'Treasury UID {ISSUES_TREASURY_UID} not in miner set — '
+            f'recycling {ISSUES_TREASURY_EMISSION_SHARE * 100:.0f}% to UID {RECYCLE_UID}'
+        )
 
     # Recycle receives registry slack and empty repo slices.
     if RECYCLE_UID in miner_uids:

@@ -33,16 +33,17 @@ to the cache so sibling discoveries benefit.
 """
 
 import asyncio
-from dataclasses import dataclass
+import os
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Set, Tuple
 
 import bittensor as bt
 
-from gittensor.classes import Issue, MinerEvaluation, MinerEvaluationCache
+from gittensor.classes import Issue, MinerEvaluation, MinerEvaluationCache, RepoEvaluation
 from gittensor.constants import (
+    MAINTAINER_ASSOCIATIONS,
     MIN_TOKEN_SCORE_FOR_BASE_SCORE,
-    PR_LOOKBACK_DAYS,
 )
 from gittensor.utils.mirror.client import MirrorClient, MirrorRequestError
 from gittensor.utils.mirror.models import MirrorIssue, MirrorSolvingPR
@@ -60,6 +61,8 @@ from gittensor.validator.utils.load_weights import (
     LanguageConfig,
     RepositoryConfig,
     TokenConfig,
+    resolve_eligibility,
+    resolve_scoring,
 )
 
 
@@ -97,7 +100,29 @@ class _CacheStats:
     fetch_failures: int = 0
 
 
+@dataclass
+class _RepoIssueAcc:
+    """Per-repository issue-discovery accumulator for one miner."""
+
+    solved: int = 0
+    valid_solved: int = 0
+    closed: int = 0
+    issue_token_score: float = 0.0
+    fetch_failed: bool = False
+    scored_issues: List[Issue] = field(default_factory=list)
+
+
 _FAR_FUTURE = datetime.max.replace(tzinfo=timezone.utc)
+
+
+def _should_include_issue(issue: MirrorIssue) -> bool:
+    """Drop maintainer-discovered issues so repo maintainers cannot earn issue-
+    discovery rewards in repos they maintain — mirrors the PR-side maintainer
+    skip in ``oss_contributions/mirror/load.py``. Bypassed under DEV_MODE.
+    """
+    if not os.environ.get('DEV_MODE') and issue.author_association in MAINTAINER_ASSOCIATIONS:
+        return False
+    return True
 
 
 async def run_issue_discovery(
@@ -112,7 +137,7 @@ async def run_issue_discovery(
 
     For each miner, fetches their authored issues via the mirror and classifies
     each. Issues in repos not present in ``mirror_repos`` are filtered out
-    client-side (mirror returns all tracked repos; the master list may be narrower).
+    client-side.
 
     Depends on OSS scoring (``score_miner_prs``) having already run for
     this cycle — the cross-miner solving-PR cache is built by walking every
@@ -128,7 +153,12 @@ async def run_issue_discovery(
         return
 
     client = client or MirrorClient()
-    lookback_date = datetime.now(timezone.utc) - timedelta(days=PR_LOOKBACK_DAYS)
+    now = datetime.now(timezone.utc)
+    # Each repo is windowed by its own pr_lookback_days; the mirror applies the
+    # per-repo cutoffs server-side for the scoring fetch.
+    since_by_repo = {
+        name: now - timedelta(days=resolve_scoring(rc.scoring).pr_lookback_days) for name, rc in mirror_repos.items()
+    }
     enabled_names: Set[str] = set(mirror_repos.keys())
 
     solving_pr_cache: Dict[Tuple[str, int], CachedSolvingPR] = _build_solving_pr_cache(miner_evaluations)
@@ -146,7 +176,7 @@ async def run_issue_discovery(
 
     # Phase 1: fetch each miner's issues.  The one-issue-per-PR rule is round-
     # global, so scoring is deferred until every miner's batch is in hand.
-    pending: List[Tuple[MinerEvaluation, List[MirrorIssue], int]] = []
+    pending: List[Tuple[MinerEvaluation, List[MirrorIssue], Dict[str, int]]] = []
     for uid, evaluation in miner_evaluations.items():
         if not evaluation.github_id or evaluation.github_id == '0':
             skipped_no_gh += 1
@@ -156,7 +186,9 @@ async def run_issue_discovery(
             continue
 
         try:
-            response = await asyncio.to_thread(client.get_miner_issues, evaluation.github_id, since=lookback_date)
+            response = await asyncio.to_thread(
+                client.get_miner_issues, evaluation.github_id, since_by_repo=since_by_repo
+            )
         except MirrorRequestError as e:
             bt.logging.warning(f'├─ UID {uid}: issue fetch failed ({e}) — skipped this miner')
             _restore_issue_discovery_from_cache(evaluation, evaluation_cache)
@@ -171,19 +203,19 @@ async def run_issue_discovery(
             fetch_errors += 1
             continue
 
-        open_issue_count = _count_open_issues(current_response.issues, enabled_names)
-        filtered = [i for i in response.issues if i.repo_full_name in enabled_names]
+        open_counts = _count_open_issues(current_response.issues, enabled_names)
+        filtered = [i for i in response.issues if i.repo_full_name in enabled_names and _should_include_issue(i)]
         if not filtered:
             _clear_issue_discovery_fields(evaluation)
-            evaluation.total_open_issues = open_issue_count
+            _apply_open_issue_counts(evaluation, open_counts)
             cacheable_uids.add(uid)
             no_issues += 1
             continue
 
-        pending.append((evaluation, filtered, open_issue_count))
+        pending.append((evaluation, filtered, open_counts))
 
     canonical_pr_owners = _build_canonical_pr_owners(pending)
-    for evaluation, filtered, open_issue_count in pending:
+    for evaluation, filtered, open_counts in pending:
         complete = await _score_miner_issues(
             evaluation,
             filtered,
@@ -193,7 +225,7 @@ async def run_issue_discovery(
             client,
             programming_languages,
             token_config,
-            open_issue_count=open_issue_count,
+            open_counts=open_counts,
             canonical_pr_owners=canonical_pr_owners,
         )
         if complete:
@@ -230,6 +262,27 @@ def _clear_issue_discovery_fields(evaluation: MinerEvaluation) -> None:
     evaluation.total_closed_issues = 0
     evaluation.total_open_issues = 0
     evaluation.issue_discovery_issues = []
+    for repo_eval in evaluation.repo_evaluations.values():
+        repo_eval.is_issue_eligible = False
+        repo_eval.issue_credibility = 0.0
+        repo_eval.issue_discovery_score = 0.0
+        repo_eval.issue_token_score = 0.0
+        repo_eval.total_solved_issues = 0
+        repo_eval.total_valid_solved_issues = 0
+        repo_eval.total_closed_issues = 0
+        repo_eval.total_open_issues = 0
+
+
+def _apply_open_issue_counts(evaluation: MinerEvaluation, open_counts: Dict[str, int]) -> None:
+    """Record per-repo open-issue counts (and the round-level total) for a miner
+    with no in-window issues to score."""
+    for repo_name, count in open_counts.items():
+        repo_eval = evaluation.repo_evaluations.get(repo_name)
+        if repo_eval is None:
+            repo_eval = RepoEvaluation(repository_full_name=repo_name)
+            evaluation.repo_evaluations[repo_name] = repo_eval
+        repo_eval.total_open_issues = count
+    evaluation.total_open_issues = sum(open_counts.values())
 
 
 def _copy_issue_discovery_fields(target: MinerEvaluation, source: MinerEvaluation) -> None:
@@ -242,6 +295,12 @@ def _copy_issue_discovery_fields(target: MinerEvaluation, source: MinerEvaluatio
     target.total_closed_issues = source.total_closed_issues
     target.total_open_issues = source.total_open_issues
     target.issue_discovery_issues = list(source.issue_discovery_issues)
+    for repo_name, source_repo in source.repo_evaluations.items():
+        target_repo = target.repo_evaluations.get(repo_name)
+        if target_repo is None:
+            target_repo = RepoEvaluation(repository_full_name=source_repo.repository_full_name)
+            target.repo_evaluations[repo_name] = target_repo
+        target_repo.copy_issue_discovery_from(source_repo)
 
 
 def _restore_issue_discovery_from_cache(
@@ -267,7 +326,7 @@ def _restore_issue_discovery_from_cache(
 
 
 def _build_canonical_pr_owners(
-    pending: List[Tuple[MinerEvaluation, List[MirrorIssue], int]],
+    pending: List[Tuple[MinerEvaluation, List[MirrorIssue], Dict[str, int]]],
 ) -> Dict[Tuple[str, int], Tuple[datetime, int, int]]:
     """Cross-miner one-issue-per-PR resolution.
 
@@ -294,8 +353,13 @@ def _build_canonical_pr_owners(
     return canonical
 
 
-def _count_open_issues(issues: List[MirrorIssue], enabled_names: Set[str]) -> int:
-    return sum(1 for issue in issues if issue.repo_full_name in enabled_names and issue.state == 'OPEN')
+def _count_open_issues(issues: List[MirrorIssue], enabled_names: Set[str]) -> Dict[str, int]:
+    """Count current OPEN issues per repository (enabled repos only)."""
+    counts: Dict[str, int] = {}
+    for issue in issues:
+        if issue.repo_full_name in enabled_names and issue.state == 'OPEN':
+            counts[issue.repo_full_name] = counts.get(issue.repo_full_name, 0) + 1
+    return counts
 
 
 def _build_solving_pr_cache(
@@ -331,13 +395,14 @@ async def _score_miner_issues(
     client: MirrorClient,
     programming_languages: Dict[str, LanguageConfig],
     token_config: TokenConfig,
-    open_issue_count: int,
+    open_counts: Dict[str, int],
     canonical_pr_owners: Dict[Tuple[str, int], Tuple[datetime, int, int]],
 ) -> bool:
-    """Classify + score one miner's mirror issues, populate MinerEvaluation fields.
+    """Classify + score one miner's mirror issues, per repository.
 
-    ``open_issue_count`` is the miner's current OPEN issue count across
-    registered repos, independent of the issue-scoring lookback window.
+    Each repository gates issue discovery independently from only its own
+    issues. ``open_counts`` maps repo -> the miner's current OPEN issue count
+    there, independent of the issue-scoring lookback window.
 
     ``canonical_pr_owners`` enforces the cross-miner one-issue-per-PR rule:
     only the marker-matching issue scores, siblings count for credibility.
@@ -345,13 +410,7 @@ async def _score_miner_issues(
     Returns ``True`` when all required solving-PR score data was available, so
     the caller can safely refresh the cache with this complete issue snapshot.
     """
-    solved_count = 0
-    valid_solved_count = 0
-    closed_count = 0
-    issue_token_score = 0.0
-    score_fetch_failed = False
-    scored_issues: List[Issue] = []
-    evaluation.issue_discovery_issues = []
+    repo_acc: Dict[str, _RepoIssueAcc] = {}
 
     issues_sorted = sorted(
         issues,
@@ -363,9 +422,15 @@ async def _score_miner_issues(
     )
 
     for issue in issues_sorted:
+        repo_config = mirror_repos.get(issue.repo_full_name)
+        if repo_config is None:
+            continue
+        cfg = resolve_eligibility(repo_config.eligibility)
+        acc = repo_acc.setdefault(issue.repo_full_name, _RepoIssueAcc())
+
         classification = _classify_issue(issue)
         if classification == 'not-solved-closed':
-            closed_count += 1
+            acc.closed += 1
             continue
         if classification == 'ignore':
             continue
@@ -374,10 +439,9 @@ async def _score_miner_issues(
         assert issue.solving_pr is not None  # _classify_issue guarantees
         solving_pr = issue.solving_pr
 
-        solved_count += 1
+        acc.solved += 1
 
         # Resolve real base_score + token_score for the solving PR (cache or fetch)
-        repo_config = mirror_repos.get(issue.repo_full_name)
         cached = await _resolve_solving_pr_score(
             issue,
             solving_pr,
@@ -391,17 +455,17 @@ async def _score_miner_issues(
         if cached is None:
             # Fetch failed — issue still counts for solved/credibility but not scored.
             # Can't apply the valid-solved gate without a real token_score, so be
-            # conservative and don't increment valid_solved_count.
-            score_fetch_failed = True
+            # conservative and don't increment valid_solved.
+            acc.fetch_failed = True
             bt.logging.debug(
                 f'  issue #{issue.issue_number} ({issue.repo_full_name}): solver score unavailable '
                 f'(fetch failed) — credibility only'
             )
             continue
 
-        # Valid-solved gate: solving PR must meet the token threshold.
-        if cached.token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE:
-            valid_solved_count += 1
+        # Valid-solved gate: solving PR must meet the repo's token threshold.
+        if cached.token_score >= cfg.min_token_score_for_valid_issue:
+            acc.valid_solved += 1
 
         # Same-account: discoverer == solver gets credibility only, no score
         if issue.author_github_id == solving_pr.author_github_id:
@@ -420,17 +484,13 @@ async def _score_miner_issues(
             )
             continue
 
-        repo_config = mirror_repos.get(issue.repo_full_name)
-        if repo_config is None:
-            continue
-
         # Quality gate: below-threshold solving PRs add credibility only, no
         # discovery score.
-        if cached.token_score < MIN_TOKEN_SCORE_FOR_BASE_SCORE:
+        if cached.token_score < cfg.min_token_score_for_valid_issue:
             bt.logging.debug(
                 f'  issue #{issue.issue_number} ({issue.repo_full_name}): solving PR '
                 f'#{solving_pr.pr_number} token_score {cached.token_score:.2f} < '
-                f'{MIN_TOKEN_SCORE_FOR_BASE_SCORE} — credibility only'
+                f'{cfg.min_token_score_for_valid_issue} — credibility only'
             )
             continue
 
@@ -438,55 +498,93 @@ async def _score_miner_issues(
         if adapted is None:
             continue
 
-        scored_issues.append(adapted)
-        # Legacy parity: issue_token_score accumulates per-solving-PR token scores
-        # for the open-issue spam multiplier threshold calc.
-        issue_token_score += cached.token_score
+        acc.scored_issues.append(adapted)
+        # issue_token_score accumulates per-solving-PR token scores for the
+        # open-issue spam multiplier threshold calc.
+        acc.issue_token_score += cached.token_score
 
-    evaluation.total_solved_issues = solved_count
-    evaluation.total_valid_solved_issues = valid_solved_count
-    evaluation.total_closed_issues = closed_count
-    evaluation.total_open_issues = open_issue_count
-    evaluation.issue_token_score = round(issue_token_score, 2)
+    _finalize_repo_issue_scores(evaluation, repo_acc, open_counts, mirror_repos)
+    return not any(acc.fetch_failed for acc in repo_acc.values())
 
-    is_eligible, credibility, reason = check_issue_eligibility(solved_count, valid_solved_count, closed_count)
-    evaluation.is_issue_eligible = is_eligible
-    evaluation.issue_credibility = credibility
 
-    if not is_eligible:
+def _finalize_repo_issue_scores(
+    evaluation: MinerEvaluation,
+    repo_acc: Dict[str, _RepoIssueAcc],
+    open_counts: Dict[str, int],
+    mirror_repos: Dict[str, RepositoryConfig],
+) -> None:
+    """Gate + score issue discovery per repository, then roll up the totals."""
+    evaluation.issue_discovery_issues = []
+
+    for repo_name in sorted(set(repo_acc) | set(open_counts)):
+        repo_config = mirror_repos.get(repo_name)
+        if repo_config is None:
+            continue
+        cfg = resolve_eligibility(repo_config.eligibility)
+        acc = repo_acc.get(repo_name) or _RepoIssueAcc()
+        open_count = open_counts.get(repo_name, 0)
+
+        repo_eval = evaluation.repo_evaluations.get(repo_name)
+        if repo_eval is None:
+            repo_eval = RepoEvaluation(repository_full_name=repo_name)
+            evaluation.repo_evaluations[repo_name] = repo_eval
+
+        repo_eval.total_solved_issues = acc.solved
+        repo_eval.total_valid_solved_issues = acc.valid_solved
+        repo_eval.total_closed_issues = acc.closed
+        repo_eval.total_open_issues = open_count
+        repo_eval.issue_token_score = round(acc.issue_token_score, 2)
+
+        is_eligible, credibility, reason = check_issue_eligibility(cfg, acc.solved, acc.valid_solved, acc.closed)
+        repo_eval.is_issue_eligible = is_eligible
+        repo_eval.issue_credibility = credibility
+
+        if not is_eligible:
+            repo_eval.issue_discovery_score = 0.0
+            if acc.solved or acc.closed:
+                bt.logging.info(
+                    f'├─ {repo_name}: issue-ineligible ({reason}) | {acc.solved} solved '
+                    f'({acc.valid_solved} valid) | {acc.closed} closed | {open_count} open'
+                )
+            continue
+
+        spam_mult = calculate_open_issue_spam_multiplier(cfg, open_count, acc.issue_token_score)
+        repo_score = 0.0
+        for issue in acc.scored_issues:
+            issue.discovery_credibility_multiplier = round(credibility, 2)
+            issue.discovery_open_issue_spam_multiplier = spam_mult
+            issue.discovery_earned_score = round(
+                issue.discovery_base_score
+                * issue.discovery_time_decay_multiplier
+                * issue.discovery_review_quality_multiplier
+                * issue.discovery_credibility_multiplier
+                * issue.discovery_open_issue_spam_multiplier,
+                2,
+            )
+            repo_score += issue.discovery_earned_score
+
+        repo_eval.issue_discovery_score = round(repo_score, 2)
+        evaluation.issue_discovery_issues.extend(acc.scored_issues)
         bt.logging.info(
-            f'├─ UID {evaluation.uid}: ineligible ({reason}) | '
-            f'{solved_count} solved ({valid_solved_count} valid) | {closed_count} closed | '
-            f'{open_issue_count} open'
+            f'├─ {repo_name}: {acc.solved} solved ({acc.valid_solved} valid) | {acc.closed} closed | '
+            f'{open_count} open | {len(acc.scored_issues)} scored | credibility={credibility:.2f} | '
+            f'spam_mult={spam_mult:.1f} | discovery_score={repo_eval.issue_discovery_score:.2f}'
         )
-        return not score_fetch_failed
 
-    spam_mult = calculate_open_issue_spam_multiplier(open_issue_count, issue_token_score)
+    _roll_up_issue_totals(evaluation)
 
-    total_discovery_score = 0.0
-    for issue in scored_issues:
-        issue.discovery_credibility_multiplier = round(credibility, 2)
-        issue.discovery_open_issue_spam_multiplier = spam_mult
-        issue.discovery_earned_score = round(
-            issue.discovery_base_score
-            * issue.discovery_time_decay_multiplier
-            * issue.discovery_review_quality_multiplier
-            * issue.discovery_credibility_multiplier
-            * issue.discovery_open_issue_spam_multiplier,
-            2,
-        )
-        total_discovery_score += issue.discovery_earned_score
 
-    evaluation.issue_discovery_score = round(total_discovery_score, 2)
-    evaluation.issue_discovery_issues = scored_issues
-
-    bt.logging.info(
-        f'├─ UID {evaluation.uid}: {solved_count} solved ({valid_solved_count} valid) | '
-        f'{closed_count} closed | {open_issue_count} open | {len(scored_issues)} scored | '
-        f'credibility={credibility:.2f} | spam_mult={spam_mult:.1f} | '
-        f'discovery_score={total_discovery_score:.2f}'
-    )
-    return not score_fetch_failed
+def _roll_up_issue_totals(evaluation: MinerEvaluation) -> None:
+    """Roll per-repo issue-discovery results up into the round-level scalars."""
+    repo_evals = list(evaluation.repo_evaluations.values())
+    evaluation.total_solved_issues = sum(re.total_solved_issues for re in repo_evals)
+    evaluation.total_valid_solved_issues = sum(re.total_valid_solved_issues for re in repo_evals)
+    evaluation.total_closed_issues = sum(re.total_closed_issues for re in repo_evals)
+    evaluation.total_open_issues = sum(re.total_open_issues for re in repo_evals)
+    evaluation.issue_token_score = round(sum(re.issue_token_score for re in repo_evals), 2)
+    evaluation.issue_discovery_score = round(sum(re.issue_discovery_score for re in repo_evals), 2)
+    evaluation.is_issue_eligible = any(re.is_issue_eligible for re in repo_evals)
+    evaluation.issue_credibility = max((re.issue_credibility for re in repo_evals), default=0.0)
 
 
 async def _resolve_solving_pr_score(
@@ -642,10 +740,16 @@ def _mirror_issue_for_scoring(
         body_or_title_edited_at=None,
     )
 
+    scoring_cfg = resolve_scoring(repo_config.scoring)
     adapted.discovery_base_score = base_score
-    adapted.discovery_time_decay_multiplier = round(calculate_time_decay(solving_pr.merged_at), 2)
+    adapted.discovery_time_decay_multiplier = round(
+        calculate_time_decay(solving_pr.merged_at, scoring_cfg.time_decay), 2
+    )
     adapted.discovery_review_quality_multiplier = round(
-        calculate_issue_review_quality_multiplier(solving_pr.review_summary.maintainer_changes_requested_count),
+        calculate_issue_review_quality_multiplier(
+            solving_pr.review_summary.maintainer_changes_requested_count,
+            scoring_cfg.review_penalty_rate,
+        ),
         2,
     )
 

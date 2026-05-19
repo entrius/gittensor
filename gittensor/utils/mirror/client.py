@@ -7,7 +7,7 @@ client only covers the scoring-hot-path read endpoints.
 
 import time
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Dict, Optional
 
 import bittensor as bt
 import requests
@@ -21,6 +21,7 @@ from gittensor.utils.mirror.models import (
     MirrorIssuesResponse,
     MirrorPullRequestFilesResponse,
     MirrorPullRequestsResponse,
+    MirrorRepoMaintainersResponse,
 )
 from gittensor.utils.utils import backoff_seconds
 
@@ -63,35 +64,40 @@ class MirrorClient:
     def get_miner_pulls(
         self,
         github_id: str,
-        since: Optional[datetime] = None,
+        since_by_repo: Optional[Dict[str, datetime]] = None,
     ) -> MirrorPullRequestsResponse:
-        """Fetch every tracked PR authored by ``github_id`` since the given
-        datetime. If ``since`` is omitted the mirror defaults to 35 days back.
-        Response contains all mirror-tracked repos; caller must filter to the
-        scoring config's registered subset.
+        """Fetch tracked PRs authored by ``github_id``.
+
+        With ``since_by_repo`` (repo full name -> cutoff datetime), POSTs the
+        per-repo window map; the response is restricted to those repos, each
+        windowed to its own cutoff. Without it, GETs the mirror's default
+        window across all tracked repos.
         """
         path = f'/api/v1/miners/{github_id}/pulls'
-        params = {'since': since.astimezone(timezone.utc).isoformat()} if since else None
-        data = self._get(path, params=params)
+        data = self._fetch_windowed(path, since_by_repo)
         try:
             return MirrorPullRequestsResponse.from_dict(data)
         except Exception as e:
-            raise MirrorRequestError(f'Mirror GET {path} returned invalid mirror response: {e}') from e
+            raise MirrorRequestError(f'Mirror response from {path} was invalid: {e}') from e
 
     def get_miner_issues(
         self,
         github_id: str,
-        since: Optional[datetime] = None,
+        since_by_repo: Optional[Dict[str, datetime]] = None,
     ) -> MirrorIssuesResponse:
-        """Fetch issues authored by ``github_id`` since the given datetime,
-        each with an inline ``solving_pr`` when ``solved_by_pr`` is populated."""
+        """Fetch issues authored by ``github_id``, each with an inline
+        ``solving_pr`` when ``solved_by_pr`` is populated.
+
+        With ``since_by_repo``, POSTs the per-repo window map (the scoring
+        window). Without it, GETs all currently-open issues unbounded — the
+        open-issue-count path.
+        """
         path = f'/api/v1/miners/{github_id}/issues'
-        params = {'since': since.astimezone(timezone.utc).isoformat()} if since else None
-        data = self._get(path, params=params)
+        data = self._fetch_windowed(path, since_by_repo)
         try:
             return MirrorIssuesResponse.from_dict(data)
         except Exception as e:
-            raise MirrorRequestError(f'Mirror GET {path} returned invalid mirror response: {e}') from e
+            raise MirrorRequestError(f'Mirror response from {path} was invalid: {e}') from e
 
     def get_pr_files(
         self,
@@ -108,21 +114,60 @@ class MirrorClient:
         try:
             return MirrorPullRequestFilesResponse.from_dict(data)
         except Exception as e:
-            raise MirrorRequestError(f'Mirror GET {path} returned invalid mirror response: {e}') from e
+            raise MirrorRequestError(f'Mirror response from {path} was invalid: {e}') from e
+
+    def get_repo_maintainers(self, repo_full_name: str) -> MirrorRepoMaintainersResponse:
+        """Fetch users whose latest known GitHub association for
+        ``repo_full_name`` (``owner/repo``) is OWNER/MEMBER/COLLABORATOR.
+
+        Used to route the per-repo ``maintainer_cut`` emission carve-out. An
+        unknown repo returns an empty maintainer list rather than an error.
+        """
+        path = f'/api/v1/repos/{repo_full_name}/maintainers'
+        data = self._get(path)
+        try:
+            return MirrorRepoMaintainersResponse.from_dict(data)
+        except Exception as e:
+            raise MirrorRequestError(f'Mirror response from {path} was invalid: {e}') from e
+
+    def _fetch_windowed(self, path: str, since_by_repo: Optional[Dict[str, datetime]]) -> dict:
+        """POST a per-repo ``since`` map when one is given, else GET the
+        mirror's default window."""
+        if since_by_repo:
+            body = {
+                'since_by_repo': {repo: dt.astimezone(timezone.utc).isoformat() for repo, dt in since_by_repo.items()}
+            }
+            return self._post(path, body)
+        return self._get(path)
 
     def _get(self, path: str, params: Optional[dict] = None) -> dict:
+        return self._request('GET', path, params=params)
+
+    def _post(self, path: str, json_body: dict) -> dict:
+        return self._request('POST', path, json_body=json_body)
+
+    def _request(
+        self,
+        method: str,
+        path: str,
+        params: Optional[dict] = None,
+        json_body: Optional[dict] = None,
+    ) -> dict:
         url = f'{self.base_url}{path}'
         last_error: Optional[str] = None
 
         for attempt in range(self.max_attempts):
             try:
-                response = self.session.get(url, params=params, timeout=self.timeout)
+                if method == 'POST':
+                    response = self.session.post(url, json=json_body, timeout=self.timeout)
+                else:
+                    response = self.session.get(url, params=params, timeout=self.timeout)
             except requests.RequestException as e:
                 last_error = f'request exception: {e}'
                 if attempt < self.max_attempts - 1:
                     backoff = backoff_seconds(attempt)
                     bt.logging.warning(
-                        f'Mirror GET {path} raised {e} '
+                        f'Mirror {method} {path} raised {e} '
                         f'(attempt {attempt + 1}/{self.max_attempts}), retrying in {backoff}s...'
                     )
                     time.sleep(backoff)
@@ -136,7 +181,7 @@ class MirrorClient:
                     if attempt < self.max_attempts - 1:
                         backoff = backoff_seconds(attempt)
                         bt.logging.warning(
-                            f'Mirror GET {path} failed ({last_error}) '
+                            f'Mirror {method} {path} failed ({last_error}) '
                             f'(attempt {attempt + 1}/{self.max_attempts}), retrying in {backoff}s...'
                         )
                         time.sleep(backoff)
@@ -145,16 +190,16 @@ class MirrorClient:
             # 4xx except 429 are not retryable — fail fast so callers see the real error.
             if 400 <= response.status_code < 500 and response.status_code != 429:
                 raise MirrorRequestError(
-                    f'Mirror GET {path} returned {response.status_code}: {_body_preview(response)}'
+                    f'Mirror {method} {path} returned {response.status_code}: {_body_preview(response)}'
                 )
 
             last_error = f'status {response.status_code}: {_body_preview(response)}'
             if attempt < self.max_attempts - 1:
                 backoff = backoff_seconds(attempt)
                 bt.logging.warning(
-                    f'Mirror GET {path} failed ({last_error}) '
+                    f'Mirror {method} {path} failed ({last_error}) '
                     f'(attempt {attempt + 1}/{self.max_attempts}), retrying in {backoff}s...'
                 )
                 time.sleep(backoff)
 
-        raise MirrorRequestError(f'Mirror GET {path} failed after {self.max_attempts} attempts: {last_error}')
+        raise MirrorRequestError(f'Mirror {method} {path} failed after {self.max_attempts} attempts: {last_error}')

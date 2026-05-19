@@ -111,6 +111,7 @@ def _issue_dict(
     last_edited_at: Optional[str] = None,
     repo: str = 'entrius/gittensor-ui',
     created_at: str = '2026-04-01T00:00:00Z',
+    author_association: str = 'CONTRIBUTOR',
 ) -> dict:
     sp = None
     if solved_by_pr:
@@ -135,7 +136,7 @@ def _issue_dict(
         'state_reason': state_reason,
         'author_github_id': author_github_id,
         'author_login': 'discoverer',
-        'author_association': 'CONTRIBUTOR',
+        'author_association': author_association,
         'created_at': created_at,
         'closed_at': '2026-04-18T10:00:00Z' if state == 'CLOSED' else None,
         'updated_at': '2026-04-18T10:00:00Z',
@@ -371,7 +372,7 @@ class TestRunMirrorIssueDiscovery:
     def test_mirror_request_error_does_not_abort_other_miners(self):
         client = Mock()
 
-        def _per_miner(github_id, since=None):
+        def _per_miner(github_id, since_by_repo=None):
             if github_id == 'fails':
                 raise MirrorRequestError('boom')
             return _response([_issue_dict()])
@@ -411,7 +412,7 @@ class TestRunMirrorIssueDiscovery:
             _issue_dict(issue_number=20 + i, author_github_id='B', solved_by_pr=300 + i) for i in range(7)
         ]
 
-        def _per_miner(github_id, since=None):
+        def _per_miner(github_id, since_by_repo=None):
             if github_id == 'fails':
                 raise MirrorRequestError('boom')
             return _response(working_issues)
@@ -967,10 +968,10 @@ class TestOpenIssueSpamSourceIsMirror:
         assert eval_.total_open_issues == 6
         assert eval_.issue_discovery_score == 0
         assert client.get_miner_issues.call_count == 2
-        scoring_since = client.get_miner_issues.call_args_list[0].kwargs['since']
+        scoring_call = client.get_miner_issues.call_args_list[0]
         open_count_call = client.get_miner_issues.call_args_list[1]
-        assert scoring_since is not None
-        assert open_count_call.kwargs.get('since') is None
+        assert scoring_call.kwargs.get('since_by_repo')  # windowed scoring fetch
+        assert open_count_call.kwargs.get('since_by_repo') is None  # unbounded open-issue count
 
     def test_all_mirror_miner_with_many_open_issues_trips_spam(self):
         """6 open issues in mirror response trips the spam multiplier."""
@@ -1076,7 +1077,7 @@ class TestCrossMinerOneIssuePerPr:
             )
         )
 
-        canonical = _build_canonical_pr_owners([(e_a, [a_issue], 0), (e_b, [b_issue], 0)])
+        canonical = _build_canonical_pr_owners([(e_a, [a_issue], {}), (e_b, [b_issue], {})])
 
         # Earlier-created issue (#50, uid 1) wins canonical for PR 100
         owner = canonical[('entrius/gittensor-ui', 100)]
@@ -1108,7 +1109,7 @@ class TestCrossMinerOneIssuePerPr:
             )
         )
 
-        canonical = _build_canonical_pr_owners([(e_a, [a_issue], 0), (e_b, [b_issue], 0)])
+        canonical = _build_canonical_pr_owners([(e_a, [a_issue], {}), (e_b, [b_issue], {})])
 
         owner = canonical[('entrius/gittensor-ui', 100)]
         assert owner[1] == 50  # lower issue_number wins
@@ -1140,7 +1141,7 @@ class TestCrossMinerOneIssuePerPr:
             )
         )
 
-        canonical = _build_canonical_pr_owners([(e_a, [a_issue], 0), (e_b, [b_issue], 0)])
+        canonical = _build_canonical_pr_owners([(e_a, [a_issue], {}), (e_b, [b_issue], {})])
 
         owner = canonical[('entrius/gittensor-ui', 100)]
         assert owner[1] == 51  # B's issue claims canonical
@@ -1177,7 +1178,7 @@ class TestCrossMinerOneIssuePerPr:
             )
         )
 
-        def _per_miner(github_id, since=None):
+        def _per_miner(github_id, since_by_repo=None):
             return _response(a_issues if github_id == 'A' else b_issues)
 
         client.get_miner_issues.side_effect = _per_miner
@@ -1288,7 +1289,7 @@ class TestCrossMinerOneIssuePerPr:
         a_issues = [_issue_dict(issue_number=10 + i, author_github_id='A', solved_by_pr=200 + i) for i in range(7)]
         b_issues = [_issue_dict(issue_number=20 + i, author_github_id='B', solved_by_pr=300 + i) for i in range(7)]
 
-        def _per_miner(github_id, since=None):
+        def _per_miner(github_id, since_by_repo=None):
             return _response(a_issues if github_id == 'A' else b_issues)
 
         client.get_miner_issues.side_effect = _per_miner
@@ -1349,3 +1350,88 @@ class TestCrossMinerOneIssuePerPr:
             return evaluation.issue_discovery_score
 
         assert _score_with_emission_share(0.1) == pytest.approx(_score_with_emission_share(0.9))
+
+
+def _issues_by_github_id(mapping: dict):
+    """Mock get_miner_issues side effect: each miner's github_id maps to its own
+    issue list, others get none. Keeps a seed miner from re-discovering the
+    target miner's issues and competing for the same solving PR."""
+
+    def _side_effect(github_id, since_by_repo=None):
+        return _response(mapping.get(github_id, []))
+
+    return _side_effect
+
+
+class TestMaintainerIssueDiscoverySkip:
+    """Maintainer-discovered issues earn nothing — the issue-discovery analogue
+    of the PR-side maintainer skip in oss_contributions/mirror/load.py."""
+
+    @pytest.mark.parametrize('association', ['OWNER', 'MEMBER', 'COLLABORATOR'])
+    def test_maintainer_discoverer_dropped_at_load(self, association, monkeypatch):
+        monkeypatch.delenv('DEV_MODE', raising=False)
+        client = Mock()
+        client.get_miner_issues.return_value = _response([_issue_dict(author_association=association)])
+        eval_ = _eval()
+
+        _run(
+            run_issue_discovery(
+                {1: eval_},
+                _mirror_repos('entrius/gittensor-ui'),
+                _EMPTY_LANGS,
+                _EMPTY_TOKEN_CONFIG,
+                client=client,
+            )
+        )
+
+        assert eval_.total_solved_issues == 0
+        assert eval_.issue_discovery_issues == []
+
+    def test_contributor_issues_kept_maintainer_issue_dropped(self, monkeypatch):
+        # Seven CONTRIBUTOR issues clear the issue-eligibility gate and score; an
+        # OWNER issue (whose solving PR is equally cached) is dropped at load.
+        monkeypatch.delenv('DEV_MODE', raising=False)
+        contributor_issues = [
+            _issue_dict(issue_number=10 + i, solved_by_pr=200 + i, author_association='CONTRIBUTOR') for i in range(7)
+        ]
+        maintainer_issue = _issue_dict(issue_number=99, solved_by_pr=299, author_association='OWNER')
+        client = Mock()
+        client.get_miner_issues.side_effect = _issues_by_github_id({'999': contributor_issues + [maintainer_issue]})
+        eval_ = _eval()
+        seed_eval = MinerEvaluation(uid=2, hotkey='hk2', github_id='seed')
+        seed_eval.merged_prs = [
+            _scored_mirror_pr('entrius/gittensor-ui', pr_number) for pr_number in [*range(200, 207), 299]
+        ]
+
+        _run(
+            run_issue_discovery(
+                {1: eval_, 2: seed_eval},
+                _mirror_repos('entrius/gittensor-ui'),
+                _EMPTY_LANGS,
+                _EMPTY_TOKEN_CONFIG,
+                client=client,
+            )
+        )
+
+        assert eval_.total_solved_issues == 7
+        assert {issue.number for issue in eval_.issue_discovery_issues} == set(range(10, 17))
+
+    def test_dev_mode_bypasses_maintainer_skip(self, monkeypatch):
+        monkeypatch.setenv('DEV_MODE', '1')
+        client = Mock()
+        client.get_miner_issues.side_effect = _issues_by_github_id({'999': [_issue_dict(author_association='OWNER')]})
+        eval_ = _eval()
+        seed_eval = MinerEvaluation(uid=2, hotkey='hk2', github_id='seed')
+        seed_eval.merged_prs = [_scored_mirror_pr('entrius/gittensor-ui', 100)]
+
+        _run(
+            run_issue_discovery(
+                {1: eval_, 2: seed_eval},
+                _mirror_repos('entrius/gittensor-ui'),
+                _EMPTY_LANGS,
+                _EMPTY_TOKEN_CONFIG,
+                client=client,
+            )
+        )
+
+        assert eval_.total_solved_issues == 1

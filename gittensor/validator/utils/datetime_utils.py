@@ -2,13 +2,8 @@ import math
 from datetime import datetime, timezone
 from typing import Optional
 
-from gittensor.constants import (
-    SECONDS_PER_HOUR,
-    TIME_DECAY_GRACE_PERIOD_HOURS,
-    TIME_DECAY_MIN_MULTIPLIER,
-    TIME_DECAY_SIGMOID_MIDPOINT,
-    TIME_DECAY_SIGMOID_STEEPNESS_SCALAR,
-)
+from gittensor.constants import SECONDS_PER_HOUR
+from gittensor.validator.utils.load_weights import ResolvedTimeDecay
 
 
 def parse_github_iso_to_utc(timestamp_str: str) -> datetime:
@@ -35,14 +30,14 @@ def parse_optional_github_iso_to_utc(value: Optional[str]) -> Optional[datetime]
     return parse_github_iso_to_utc(value) if value else None
 
 
-def calculate_time_decay(merged_at: datetime) -> float:
+def calculate_time_decay(merged_at: datetime, time_decay: ResolvedTimeDecay) -> float:
     """Calculate sigmoid-based time decay multiplier from a merge timestamp."""
     now = datetime.now(timezone.utc)
     hours_since_merge = (now - merged_at).total_seconds() / SECONDS_PER_HOUR
 
-    if hours_since_merge < TIME_DECAY_GRACE_PERIOD_HOURS:
+    if hours_since_merge < time_decay.grace_period_hours:
         return 1.0
 
     days_since_merge = hours_since_merge / 24
-    sigmoid = 1 / (1 + math.exp(TIME_DECAY_SIGMOID_STEEPNESS_SCALAR * (days_since_merge - TIME_DECAY_SIGMOID_MIDPOINT)))
-    return max(sigmoid, TIME_DECAY_MIN_MULTIPLIER)
+    sigmoid = 1 / (1 + math.exp(time_decay.sigmoid_steepness * (days_since_merge - time_decay.sigmoid_midpoint_days)))
+    return max(sigmoid, time_decay.min_multiplier)

@@ -14,12 +14,16 @@ import pytest
 
 from gittensor.validator.utils.load_weights import (
     LanguageConfig,
+    RepoEligibilityConfig,
+    RepoScoringConfig,
     RepositoryConfig,
     RepositoryRegistryError,
     TokenConfig,
     load_master_repo_weights,
     load_programming_language_weights,
     load_token_config,
+    resolve_eligibility,
+    resolve_scoring,
 )
 
 
@@ -244,42 +248,81 @@ class TestRepositoryConfigLabelMultipliers:
 
 
 class TestRepositoryConfigMirrorScoringFields:
-    """Dataclass + JSON-parsing tests for mirror-only scoring fields."""
+    """Dataclass + JSON-parsing tests for mirror scoring + per-repo eligibility fields."""
 
     def test_mirror_scoring_field_defaults(self):
         config = RepositoryConfig(emission_share=0.5)
 
         assert config.fixed_base_score is None
-        assert config.eligibility_mode is True
+        assert config.eligibility == RepoEligibilityConfig()
 
-    def test_loader_parses_mirror_scoring_fields(self, tmp_path, monkeypatch):
+    def test_loader_parses_fixed_base_score(self, tmp_path, monkeypatch):
         from gittensor.validator.utils import load_weights as lw
 
-        fake_weights_dir = tmp_path
-        (fake_weights_dir / 'master_repositories.json').write_text(
+        (tmp_path / 'master_repositories.json').write_text(
             json.dumps(
                 {
-                    'foo/fixed': {
+                    'foo/fixed': {'emission_share': 0.5, 'fixed_base_score': 12.5},
+                    'foo/defaults': {'emission_share': 0.3},
+                }
+            )
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: tmp_path)
+
+        repos = lw.load_master_repo_weights()
+
+        assert repos['foo/fixed'].fixed_base_score == pytest.approx(12.5)
+        assert repos['foo/defaults'].fixed_base_score is None
+
+    def test_loader_parses_eligibility_overrides(self, tmp_path, monkeypatch):
+        from gittensor.validator.utils import load_weights as lw
+
+        (tmp_path / 'master_repositories.json').write_text(
+            json.dumps(
+                {
+                    'foo/custom': {
                         'emission_share': 0.5,
-                        'fixed_base_score': 12.5,
-                        'eligibility_mode': False,
+                        'eligibility': {'min_valid_merged_prs': 1, 'min_credibility': 0.5},
                     },
                     'foo/defaults': {'emission_share': 0.3},
                 }
             )
         )
-        monkeypatch.setattr(lw, '_get_weights_dir', lambda: fake_weights_dir)
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: tmp_path)
 
         repos = lw.load_master_repo_weights()
 
-        assert repos['foo/fixed'].fixed_base_score == pytest.approx(12.5)
-        assert repos['foo/fixed'].eligibility_mode is False
-        assert repos['foo/defaults'].fixed_base_score is None
-        assert repos['foo/defaults'].eligibility_mode is True
+        assert repos['foo/custom'].eligibility.min_valid_merged_prs == 1
+        assert repos['foo/custom'].eligibility.min_credibility == pytest.approx(0.5)
+        # unset fields stay None and resolve to the global default
+        assert repos['foo/custom'].eligibility.max_open_pr_threshold is None
+        assert repos['foo/defaults'].eligibility == RepoEligibilityConfig()
+
+    def test_loader_rejects_unknown_eligibility_key(self, tmp_path, monkeypatch):
+        from gittensor.validator.utils import load_weights as lw
+
+        (tmp_path / 'master_repositories.json').write_text(
+            json.dumps({'foo/bad': {'emission_share': 0.5, 'eligibility': {'min_valid_prs': 1}}})
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: tmp_path)
+
+        with pytest.raises(RepositoryRegistryError):
+            lw.load_master_repo_weights()
+
+    def test_loader_rejects_out_of_range_credibility(self, tmp_path, monkeypatch):
+        from gittensor.validator.utils import load_weights as lw
+
+        (tmp_path / 'master_repositories.json').write_text(
+            json.dumps({'foo/bad': {'emission_share': 0.5, 'eligibility': {'min_credibility': 1.5}}})
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: tmp_path)
+
+        with pytest.raises(RepositoryRegistryError):
+            lw.load_master_repo_weights()
 
     def test_live_mirror_scoring_fields_have_valid_shape(self):
-        """Loader passes mirror scoring fields through unchanged — CI fails when a
-        bad value is committed to master_repositories.json."""
+        """Loader passes scoring + eligibility fields through unchanged — CI fails
+        when a bad value is committed to master_repositories.json."""
         repos = load_master_repo_weights()
         for repo_name, config in repos.items():
             if config.fixed_base_score is not None:
@@ -289,9 +332,189 @@ class TestRepositoryConfigMirrorScoringFields:
                 assert 0.0 <= float(config.fixed_base_score) <= 100.0, (
                     f'{repo_name} fixed_base_score must be within [0.0, 100.0]'
                 )
-            assert isinstance(config.eligibility_mode, bool), (
-                f'{repo_name} eligibility_mode must be bool, got {type(config.eligibility_mode)}'
+            resolved = resolve_eligibility(config.eligibility)
+            assert 0.0 <= resolved.min_credibility <= 1.0, f'{repo_name} min_credibility out of range'
+            assert 0.0 <= resolved.min_issue_credibility <= 1.0, f'{repo_name} min_issue_credibility out of range'
+            assert resolved.min_valid_merged_prs >= 0, f'{repo_name} min_valid_merged_prs negative'
+            resolved_scoring = resolve_scoring(config.scoring)
+            assert 1 <= resolved_scoring.pr_lookback_days <= 90, f'{repo_name} pr_lookback_days out of range'
+            assert 0.0 <= resolved_scoring.open_pr_collateral_percent <= 1.0, (
+                f'{repo_name} open_pr_collateral_percent out of range'
             )
+            assert 0.0 < resolved_scoring.review_penalty_rate <= 1.0, f'{repo_name} review_penalty_rate out of range'
+            assert 1.0 <= resolved_scoring.standard_issue_multiplier <= 5.0, (
+                f'{repo_name} standard_issue_multiplier out of range'
+            )
+            assert 1.0 <= resolved_scoring.maintainer_issue_multiplier <= 5.0, (
+                f'{repo_name} maintainer_issue_multiplier out of range'
+            )
+            assert 0 <= resolved_scoring.time_decay.grace_period_hours <= 168, (
+                f'{repo_name} time_decay.grace_period_hours out of range'
+            )
+            assert 1.0 <= resolved_scoring.time_decay.sigmoid_midpoint_days <= 90.0, (
+                f'{repo_name} time_decay.sigmoid_midpoint_days out of range'
+            )
+            assert 0.01 <= resolved_scoring.time_decay.sigmoid_steepness <= 5.0, (
+                f'{repo_name} time_decay.sigmoid_steepness out of range'
+            )
+            assert 0.0 <= resolved_scoring.time_decay.min_multiplier <= 1.0, (
+                f'{repo_name} time_decay.min_multiplier out of range'
+            )
+
+    def test_oc_1_runs_ungated(self):
+        """The oc-1 benchmark repo opts out of the gate via zeroed thresholds."""
+        repos = load_master_repo_weights()
+        resolved = resolve_eligibility(repos['entrius/oc-1'].eligibility)
+        assert resolved.min_valid_merged_prs == 0
+        assert resolved.min_credibility == 0.0
+        assert resolved.min_valid_solved_issues == 0
+
+
+class TestRepositoryConfigScoringBlock:
+    """Dataclass + JSON-parsing tests for the per-repo scoring block."""
+
+    def test_scoring_field_defaults(self):
+        config = RepositoryConfig(emission_share=0.5)
+        assert config.scoring == RepoScoringConfig()
+
+    def test_loader_parses_scoring_overrides(self, tmp_path, monkeypatch):
+        from gittensor.validator.utils import load_weights as lw
+
+        (tmp_path / 'master_repositories.json').write_text(
+            json.dumps(
+                {
+                    'foo/custom': {
+                        'emission_share': 0.5,
+                        'scoring': {
+                            'pr_lookback_days': 45,
+                            'open_pr_collateral_percent': 0.4,
+                            'review_penalty_rate': 0.25,
+                        },
+                    },
+                    'foo/defaults': {'emission_share': 0.3},
+                }
+            )
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: tmp_path)
+
+        repos = lw.load_master_repo_weights()
+
+        assert repos['foo/custom'].scoring.pr_lookback_days == 45
+        assert repos['foo/custom'].scoring.open_pr_collateral_percent == pytest.approx(0.4)
+        assert repos['foo/custom'].scoring.review_penalty_rate == pytest.approx(0.25)
+        assert repos['foo/defaults'].scoring == RepoScoringConfig()
+
+    def test_loader_rejects_unknown_scoring_key(self, tmp_path, monkeypatch):
+        from gittensor.validator.utils import load_weights as lw
+
+        (tmp_path / 'master_repositories.json').write_text(
+            json.dumps({'foo/bad': {'emission_share': 0.5, 'scoring': {'bogus': 1}}})
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: tmp_path)
+
+        with pytest.raises(RepositoryRegistryError):
+            lw.load_master_repo_weights()
+
+    def test_loader_rejects_out_of_range_collateral(self, tmp_path, monkeypatch):
+        from gittensor.validator.utils import load_weights as lw
+
+        (tmp_path / 'master_repositories.json').write_text(
+            json.dumps({'foo/bad': {'emission_share': 0.5, 'scoring': {'open_pr_collateral_percent': 1.5}}})
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: tmp_path)
+
+        with pytest.raises(RepositoryRegistryError):
+            lw.load_master_repo_weights()
+
+    def test_loader_rejects_zero_review_penalty_rate(self, tmp_path, monkeypatch):
+        from gittensor.validator.utils import load_weights as lw
+
+        (tmp_path / 'master_repositories.json').write_text(
+            json.dumps({'foo/bad': {'emission_share': 0.5, 'scoring': {'review_penalty_rate': 0.0}}})
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: tmp_path)
+
+        with pytest.raises(RepositoryRegistryError):
+            lw.load_master_repo_weights()
+
+    def test_loader_rejects_out_of_range_issue_multiplier(self, tmp_path, monkeypatch):
+        from gittensor.validator.utils import load_weights as lw
+
+        (tmp_path / 'master_repositories.json').write_text(
+            json.dumps({'foo/bad': {'emission_share': 0.5, 'scoring': {'standard_issue_multiplier': 0.5}}})
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: tmp_path)
+
+        with pytest.raises(RepositoryRegistryError):
+            lw.load_master_repo_weights()
+
+    def test_loader_parses_time_decay_overrides(self, tmp_path, monkeypatch):
+        from gittensor.validator.utils import load_weights as lw
+
+        (tmp_path / 'master_repositories.json').write_text(
+            json.dumps({'foo/custom': {'emission_share': 0.5, 'scoring': {'time_decay': {'grace_period_hours': 24}}}})
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: tmp_path)
+
+        repos = lw.load_master_repo_weights()
+
+        assert repos['foo/custom'].scoring.time_decay.grace_period_hours == 24
+
+    def test_loader_rejects_unknown_time_decay_key(self, tmp_path, monkeypatch):
+        from gittensor.validator.utils import load_weights as lw
+
+        (tmp_path / 'master_repositories.json').write_text(
+            json.dumps({'foo/bad': {'emission_share': 0.5, 'scoring': {'time_decay': {'bogus': 1}}}})
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: tmp_path)
+
+        with pytest.raises(RepositoryRegistryError):
+            lw.load_master_repo_weights()
+
+    def test_loader_rejects_out_of_range_lookback(self, tmp_path, monkeypatch):
+        from gittensor.validator.utils import load_weights as lw
+
+        (tmp_path / 'master_repositories.json').write_text(
+            json.dumps({'foo/bad': {'emission_share': 0.5, 'scoring': {'pr_lookback_days': 200}}})
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: tmp_path)
+
+        with pytest.raises(RepositoryRegistryError):
+            lw.load_master_repo_weights()
+
+
+class TestRepositoryConfigMaintainerCut:
+    """Dataclass + JSON-parsing tests for the maintainer_cut emission carve-out."""
+
+    def test_maintainer_cut_defaults_zero(self):
+        config = RepositoryConfig(emission_share=0.5)
+        assert config.maintainer_cut == pytest.approx(0.0)
+
+    def test_loader_parses_maintainer_cut(self, tmp_path, monkeypatch):
+        from gittensor.validator.utils import load_weights as lw
+
+        fake_weights_dir = tmp_path
+        (fake_weights_dir / 'master_repositories.json').write_text(
+            json.dumps(
+                {
+                    'foo/with-cut': {'emission_share': 0.5, 'maintainer_cut': 0.3},
+                    'foo/defaults': {'emission_share': 0.3},
+                }
+            )
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: fake_weights_dir)
+
+        repos = lw.load_master_repo_weights()
+
+        assert repos['foo/with-cut'].maintainer_cut == pytest.approx(0.3)
+        assert repos['foo/defaults'].maintainer_cut == pytest.approx(0.0)
+
+    @pytest.mark.parametrize('repo_name,metadata', _live_master_repo_metadata())
+    def test_live_maintainer_cut_is_in_range(self, repo_name, metadata):
+        if 'maintainer_cut' not in metadata:
+            return
+
+        assert 0.0 <= float(metadata['maintainer_cut']) <= 1.0, f'{repo_name} maintainer_cut must be within [0.0, 1.0]'
 
 
 class TestRepositoryEmissionShare:
@@ -349,6 +572,8 @@ class TestRepositoryEmissionShare:
             {'emission_share': 1.01},
             {'emission_share': 0.5, 'issue_discovery_share': -0.01},
             {'emission_share': 0.5, 'issue_discovery_share': 1.01},
+            {'emission_share': 0.5, 'maintainer_cut': -0.01},
+            {'emission_share': 0.5, 'maintainer_cut': 1.01},
         ],
     )
     def test_loader_rejects_out_of_range_values(self, tmp_path, monkeypatch, metadata):
@@ -366,6 +591,7 @@ class TestRepositoryEmissionShare:
         [
             {'emission_share': True},
             {'emission_share': 0.5, 'issue_discovery_share': False},
+            {'emission_share': 0.5, 'maintainer_cut': True},
         ],
     )
     def test_loader_rejects_boolean_share_values(self, tmp_path, monkeypatch, metadata):

@@ -51,6 +51,7 @@ from gittensor.validator.issue_discovery.scoring import (
     calculate_open_issue_spam_multiplier,
     check_issue_eligibility,
 )
+from gittensor.validator.oss_contributions.label_resolution import resolve_highest_label_multiplier
 from gittensor.validator.oss_contributions.mirror.adapters import mirror_files_to_legacy
 from gittensor.validator.oss_contributions.mirror.scoring import (
     calculate_base_score_for_pr_files,
@@ -468,6 +469,7 @@ async def _score_miner_issues(
             * issue.discovery_repo_weight_multiplier
             * issue.discovery_time_decay_multiplier
             * issue.discovery_review_quality_multiplier
+            * issue.discovery_label_multiplier
             * issue.discovery_credibility_multiplier
             * issue.discovery_open_issue_spam_multiplier,
             2,
@@ -635,5 +637,9 @@ def _mirror_issue_for_scoring(
         calculate_issue_review_quality_multiplier(solving_pr.review_summary.maintainer_changes_requested_count),
         2,
     )
+    _, label_multiplier = resolve_highest_label_multiplier(
+        [label.name for label in solving_pr.labels], repo_config
+    )
+    adapted.discovery_label_multiplier = round(label_multiplier, 2)
 
     return adapted

@@ -162,6 +162,33 @@ class TestRepoFiltering:
         assert len(eval_.merged_prs) == 1
         assert eval_.merged_prs[0].pr.repo_full_name == 'entrius/gittensor-ui'
 
+    def test_pr_created_at_or_after_inactive_cutoff_dropped(self):
+        client = Mock()
+        client.get_miner_pulls.return_value = _build_response(
+            [
+                _pr_dict(1, state='MERGED', created_at='2026-04-09T23:59:59Z'),
+                _pr_dict(2, state='MERGED', created_at='2026-04-10T00:00:00Z'),
+                _pr_dict(3, state='OPEN', merged_at=None, created_at='2026-04-11T00:00:00Z'),
+                _pr_dict(4, state='CLOSED', merged_at=None, created_at='2026-04-12T00:00:00Z'),
+            ]
+        )
+        eval_ = _eval()
+
+        load_miner_prs(
+            eval_,
+            {
+                'entrius/gittensor-ui': RepositoryConfig(
+                    emission_share=0.5,
+                    inactive_at=datetime(2026, 4, 10, tzinfo=timezone.utc),
+                )
+            },
+            client=client,
+        )
+
+        assert [pr.pr.pr_number for pr in eval_.merged_prs] == [1]
+        assert eval_.open_prs == []
+        assert eval_.closed_prs == []
+
 
 # ============================================================================
 # Maintainer skip (legacy parity)

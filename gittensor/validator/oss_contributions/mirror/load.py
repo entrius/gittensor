@@ -6,6 +6,7 @@ touched.
 
 Filtering applied at load time:
 - Repo not in master_repositories: dropped (mirror returns all tracked repos).
+- PRs created at or after the repository's inactive_at cutoff: dropped.
 - PR author is a maintainer (OWNER/MEMBER/COLLABORATOR): silently dropped.
 - CLOSED PRs created before the lookback window: dropped — closing an old PR
   shouldn't trigger a fresh credibility penalty.
@@ -90,6 +91,13 @@ def _maybe_add_pr(
         # Mirror tracks more repos than the scoring set; skip-noise dominates the
         # log at info level when master_repositories is small. Demoted to debug.
         bt.logging.debug(f'Skipping PR #{pr.pr_number} in {pr.repo_full_name} - not in master_repositories')
+        return
+
+    if repo_config.inactive_at is not None and pr.created_at >= repo_config.inactive_at:
+        bt.logging.debug(
+            f'Skipping PR #{pr.pr_number} in {pr.repo_full_name} - created at '
+            f'{pr.created_at.isoformat()} after inactive_at {repo_config.inactive_at.isoformat()}'
+        )
         return
 
     # Silent maintainer skip — logging every maintainer-merged PR would dominate

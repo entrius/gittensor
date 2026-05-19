@@ -2,6 +2,7 @@
 # Copyright © 2025 Entrius
 import json
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -24,6 +25,7 @@ from gittensor.constants import (
     OPEN_ISSUE_SPAM_TOKEN_SCORE_PER_SLOT,
     OPEN_PR_THRESHOLD_TOKEN_SCORE,
 )
+from gittensor.validator.utils.datetime_utils import parse_optional_github_iso_to_utc
 
 
 @dataclass
@@ -87,6 +89,7 @@ class RepositoryConfig:
         emission_share: Fraction of the combined scoring pool allocated to this repo
         issue_discovery_share: Fraction of the repo allocation reserved for issue discovery
         additional_acceptable_branches: List of additional branch patterns to accept (None if only default branch)
+        inactive_at: UTC timestamp after which newly-created PRs are no longer scored for this repo
         trusted_label_pipeline: When True, scoring labels count regardless of
             actor — including GitHub Apps that surface as ``actor_association=NULL``.
             Defaults to False; only enable on repos with an authoritative label
@@ -109,6 +112,7 @@ class RepositoryConfig:
     emission_share: float
     issue_discovery_share: float = DEFAULT_ISSUE_DISCOVERY_SHARE
     additional_acceptable_branches: Optional[List[str]] = None
+    inactive_at: Optional[datetime] = None
     trusted_label_pipeline: bool = False
     label_multipliers: Optional[Dict[str, float]] = None
     default_label_multiplier: float = 1.0
@@ -337,6 +341,7 @@ def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
                         metadata.get('issue_discovery_share', DEFAULT_ISSUE_DISCOVERY_SHARE),
                     ),
                     additional_acceptable_branches=metadata.get('additional_acceptable_branches'),
+                    inactive_at=parse_optional_github_iso_to_utc(metadata.get('inactive_at')),
                     trusted_label_pipeline=bool(metadata.get('trusted_label_pipeline', False)),
                     label_multipliers=(
                         {str(label): float(multiplier) for label, multiplier in metadata['label_multipliers'].items()}

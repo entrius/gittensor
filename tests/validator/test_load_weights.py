@@ -9,6 +9,7 @@ Run tests:
 """
 
 import json
+from datetime import datetime, timezone
 
 import pytest
 
@@ -253,6 +254,25 @@ class TestRepositoryConfigMirrorScoringFields:
 
         assert config.fixed_base_score is None
         assert config.eligibility == RepoEligibilityConfig()
+        assert config.inactive_at is None
+
+    def test_loader_parses_inactive_at(self, tmp_path, monkeypatch):
+        from gittensor.validator.utils import load_weights as lw
+
+        (tmp_path / 'master_repositories.json').write_text(
+            json.dumps(
+                {
+                    'foo/inactive': {'emission_share': 0.5, 'inactive_at': '2026-04-10T00:00:00Z'},
+                    'foo/defaults': {'emission_share': 0.3},
+                }
+            )
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: tmp_path)
+
+        repos = lw.load_master_repo_weights()
+
+        assert repos['foo/inactive'].inactive_at == datetime(2026, 4, 10, tzinfo=timezone.utc)
+        assert repos['foo/defaults'].inactive_at is None
 
     def test_loader_parses_fixed_base_score(self, tmp_path, monkeypatch):
         from gittensor.validator.utils import load_weights as lw

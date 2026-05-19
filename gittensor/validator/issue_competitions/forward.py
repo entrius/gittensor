@@ -11,6 +11,7 @@ from gittensor.classes import MinerEvaluation
 from gittensor.utils.github_api_tools import check_github_issue_closed
 from gittensor.utils.utils import get_contract_address
 from gittensor.validator.issue_competitions.contract_client import IssueCompetitionContractClient, IssueStatus
+from gittensor.validator.issue_competitions.vote_decision import explain_bounty_vote
 from gittensor.validator.utils.config import GITTENSOR_VALIDATOR_PAT
 from gittensor.validator.utils.issue_competitions import get_miner_coldkey
 
@@ -95,59 +96,42 @@ async def issue_competitions(
                     issue.repository_full_name, issue.issue_number, GITTENSOR_VALIDATOR_PAT
                 )
 
-                if github_state is None:
-                    bt.logging.warning(f'Could not check GitHub state for {issue_label}')
-                    continue
-
-                if not github_state.get('is_closed'):
-                    bt.logging.info(f'Issue still open on GitHub: {issue_label}')
-                    continue
-
-                solver_github_id = github_state.get('solver_github_id')
-                pr_number = github_state.get('pr_number')
-                solver_lookup_failed = bool(github_state.get('solver_lookup_failed'))
+                decision = explain_bounty_vote(
+                    issue=issue,
+                    github_state=github_state,
+                    registered_miners=registered_miners,
+                    coldkey_lookup=lambda hotkey: get_miner_coldkey(hotkey, self.subtensor),
+                )
+                solver_github_id = decision.solver_github_id
+                pr_number = decision.pr_number
                 bt.logging.info(
-                    f'Issue closed on GitHub: {issue_label} | solver_github_id={solver_github_id}, '
-                    f'pr_number={pr_number}, solver_lookup_failed={solver_lookup_failed}'
+                    f'Issue bounty decision: {issue_label} | action={decision.action}, '
+                    f'reason={decision.reason}, solver_github_id={solver_github_id}, pr_number={pr_number}, '
+                    f'solver_lookup_failed={decision.solver_lookup_failed}'
                 )
 
-                if solver_lookup_failed:
-                    bt.logging.warning(f'Skipping issue due to solver lookup failure: {issue_label}')
+                if decision.action == 'skip':
                     continue
 
-                if not solver_github_id:
-                    bt.logging.info(f'No identifiable solver, voting cancel: {issue_label}')
+                if decision.action == 'vote_cancel':
                     success = contract_client.vote_cancel_issue(
                         issue_id=issue.id,
-                        reason='Issue closed without identifiable solver',
+                        reason=decision.cancel_reason or decision.reason,
                         wallet=self.wallet,
                     )
                     if success:
                         cancels_cast += 1
-                        bt.logging.info(f'Voted cancel (no solver): {issue_label}')
+                        bt.logging.info(f'Voted cancel: {issue_label} ({decision.reason})')
                     continue
 
-                miner_hotkey = registered_miners.get(str(solver_github_id))
-                if not miner_hotkey:
-                    bt.logging.info(f'Solver {solver_github_id} not a registered miner, voting cancel: {issue_label}')
-                    success = contract_client.vote_cancel_issue(
-                        issue_id=issue.id,
-                        reason=f'Issue closed externally (not by a registered miner, solver: {solver_github_id})',
-                        wallet=self.wallet,
-                    )
-                    if success:
-                        cancels_cast += 1
-                        bt.logging.info(
-                            f'Voted cancel (solver {solver_github_id} not a registered miner): {issue_label}'
-                        )
+                if decision.action != 'vote_solution':
+                    bt.logging.warning(f'Unknown issue bounty decision action {decision.action!r}: {issue_label}')
                     continue
 
-                miner_coldkey = get_miner_coldkey(miner_hotkey, self.subtensor)
-                if not miner_coldkey:
-                    bt.logging.warning(
-                        f'Could not get coldkey for hotkey {miner_hotkey} (solver {solver_github_id}): {issue_label}'
-                    )
-                    continue
+                miner_hotkey = decision.solver_hotkey
+                miner_coldkey = decision.solver_coldkey
+                assert miner_hotkey is not None
+                assert miner_coldkey is not None
 
                 bt.logging.info(
                     f'Voting solution: {issue_label} | PR#{pr_number}, solver={solver_github_id}, hotkey={miner_hotkey[:12]}...'

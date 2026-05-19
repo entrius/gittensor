@@ -316,15 +316,27 @@ def calculate_token_score_from_file_changes(
                     scoring_method='skipped-large',
                 )
             elif not weights.supports_tree_sitter(ext):
-                bt.logging.debug(f'  │   {file.short_name}: skipped (extension .{ext} not supported)')
-                file_result = FileScoreResult(
-                    filename=file.short_name,
-                    score=0.0,
-                    nodes_scored=0,
-                    total_lines=file.changes,
-                    is_test_file=is_test_file,
-                    scoring_method='skipped-unsupported',
-                )
+                lang_config = programming_languages.get(ext)
+                if lang_config is not None:
+                    lines_to_score = min(file.changes, MAX_LINES_SCORED_FOR_NON_CODE_EXT)
+                    file_result = FileScoreResult(
+                        filename=file.short_name,
+                        score=lang_config.weight * lines_to_score * file_weight,
+                        nodes_scored=lines_to_score,
+                        total_lines=file.changes,
+                        is_test_file=is_test_file,
+                        scoring_method='line-count',
+                    )
+                else:
+                    bt.logging.debug(f'  │   {file.short_name}: skipped (extension .{ext} not supported)')
+                    file_result = FileScoreResult(
+                        filename=file.short_name,
+                        score=0.0,
+                        nodes_scored=0,
+                        total_lines=file.changes,
+                        is_test_file=is_test_file,
+                        scoring_method='skipped-unsupported',
+                    )
             elif file.status != 'added' and content_pair.old_content is None:
                 bt.logging.debug(f'  │   {file.short_name}: skipped (non-added file missing base content)')
                 file_result = FileScoreResult(

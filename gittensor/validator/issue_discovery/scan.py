@@ -198,12 +198,19 @@ async def run_issue_discovery(
         try:
             current_response = await asyncio.to_thread(client.get_miner_issues, evaluation.github_id)
         except MirrorRequestError as e:
-            bt.logging.warning(f'├─ UID {uid}: open-issue count fetch failed ({e}) — skipped this miner')
-            _restore_issue_discovery_from_cache(evaluation, evaluation_cache)
-            fetch_errors += 1
-            continue
-
-        open_counts = _count_open_issues(current_response.issues, enabled_names)
+            # Soft-fail: the open-count call is supplementary to the scoring
+            # payload already fetched above. Discarding fresh solved-issue
+            # evidence because of a transient open-count failure penalises
+            # miners for mirror flakiness. Fall back to last cycle's per-repo
+            # open counts when available; otherwise zero. Scoring proceeds.
+            open_counts = _open_counts_from_cache(evaluation, evaluation_cache, enabled_names)
+            bt.logging.warning(
+                f'├─ UID {uid}: open-issue count fetch failed ({e}) — '
+                f'using cached open counts ({sum(open_counts.values())} total); '
+                f'scoring proceeds with fresh lookback data'
+            )
+        else:
+            open_counts = _count_open_issues(current_response.issues, enabled_names)
         filtered = [i for i in response.issues if i.repo_full_name in enabled_names and _should_include_issue(i)]
         if not filtered:
             _clear_issue_discovery_fields(evaluation)
@@ -359,6 +366,28 @@ def _count_open_issues(issues: List[MirrorIssue], enabled_names: Set[str]) -> Di
     for issue in issues:
         if issue.repo_full_name in enabled_names and issue.state == 'OPEN':
             counts[issue.repo_full_name] = counts.get(issue.repo_full_name, 0) + 1
+    return counts
+
+
+def _open_counts_from_cache(
+    evaluation: MinerEvaluation,
+    evaluation_cache: Optional[MinerEvaluationCache],
+    enabled_names: Set[str],
+) -> Dict[str, int]:
+    """Recover per-repo open-issue counts from the prior cycle's cached
+    evaluation. Used as the soft-fail fallback when the open-count fetch
+    fails but the scoring fetch succeeded, so fresh solved-issue evidence
+    isn't discarded. Returns {} when no cache row is available — scoring
+    then runs with zero open counts rather than dropping the miner."""
+    if evaluation_cache is None:
+        return {}
+    cached = evaluation_cache.get(evaluation.uid, evaluation.hotkey, evaluation.github_id or '')
+    if cached is None:
+        return {}
+    counts: Dict[str, int] = {}
+    for repo_name, repo_eval in cached.repo_evaluations.items():
+        if repo_name in enabled_names and repo_eval.total_open_issues:
+            counts[repo_name] = repo_eval.total_open_issues
     return counts
 
 

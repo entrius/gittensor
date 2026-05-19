@@ -74,7 +74,7 @@ EXTENSIONLESS_FILE_EXTENSIONS = {'dockerfile', 'makefile'}
 # =============================================================================
 # Repository & PR Scoring
 # =============================================================================
-PR_LOOKBACK_DAYS = 35  # rolling window for scoring
+PR_LOOKBACK_DAYS = 30  # rolling window for scoring (per-repo default, overridable in the scoring config)
 MERGED_PR_BASE_SCORE = 25
 MIN_TOKEN_SCORE_FOR_BASE_SCORE = 5  # PRs below this get 0 base score
 MAX_CONTRIBUTION_BONUS = 25
@@ -129,12 +129,8 @@ MIN_CREDIBILITY = 0.80  # minimum credibility ratio to receive score
 # =============================================================================
 # Eligibility gate — per-repo defaults, overridable in master_repositories.json.
 MIN_VALID_SOLVED_ISSUES = 3  # minimum solved issues where solving PR has token_score >= MIN_TOKEN_SCORE_FOR_VALID_ISSUE
-MIN_ISSUE_CREDIBILITY = 0.70  # minimum issue credibility ratio
+MIN_ISSUE_CREDIBILITY = 0.80  # minimum issue credibility ratio
 MIN_TOKEN_SCORE_FOR_VALID_ISSUE = 5  # solving-PR token_score for a solved issue to count as "valid"
-
-# Review quality cliff model (different from OSS: has clean bonus + steeper penalty)
-ISSUE_REVIEW_CLEAN_BONUS = 1.1  # multiplier when 0 CHANGES_REQUESTED rounds
-ISSUE_REVIEW_PENALTY_RATE = 0.15  # per CHANGES_REQUESTED round after cliff
 
 # Open issue spam threshold (per-repo: counts a repo's own open issues)
 OPEN_ISSUE_SPAM_BASE_THRESHOLD = 2

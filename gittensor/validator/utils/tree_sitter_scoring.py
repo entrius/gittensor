@@ -266,14 +266,32 @@ def calculate_token_score_from_file_changes(
         file_weight = TEST_FILE_CONTRIBUTION_WEIGHT if is_test_file else 1.0
 
         if file.status == 'removed':
-            file_result = FileScoreResult(
-                filename=file.short_name,
-                score=0.0,
-                nodes_scored=0,
-                total_lines=file.deletions,
-                is_test_file=is_test_file,
-                scoring_method='skipped',
-            )
+            content_pair = file_contents.get(file.filename)
+            if content_pair is not None and content_pair.old_content is not None and weights.supports_tree_sitter(ext):
+                file_breakdown = score_tree_diff(content_pair.old_content, None, ext, weights)
+                lang_config = programming_languages.get(ext)
+                lang_weight = lang_config.weight if lang_config else 1.0
+                combined_weight = lang_weight * file_weight
+                file_breakdown = file_breakdown.with_weight(combined_weight)
+                nodes_scored = file_breakdown.deleted_count
+                file_result = FileScoreResult(
+                    filename=file.short_name,
+                    score=file_breakdown.total_score,
+                    nodes_scored=nodes_scored,
+                    total_lines=file.deletions,
+                    is_test_file=is_test_file,
+                    scoring_method='tree-diff',
+                    breakdown=file_breakdown,
+                )
+            else:
+                file_result = FileScoreResult(
+                    filename=file.short_name,
+                    score=0.0,
+                    nodes_scored=0,
+                    total_lines=file.deletions,
+                    is_test_file=is_test_file,
+                    scoring_method='skipped',
+                )
         elif ext in NON_CODE_EXTENSIONS:
             lines_to_score = min(file.changes, MAX_LINES_SCORED_FOR_NON_CODE_EXT)
             lang_config = programming_languages.get(ext)

@@ -304,7 +304,7 @@ def _restore_issue_discovery_from_cache(
     if evaluation_cache is None:
         return False
 
-    cached = evaluation_cache.get(evaluation.uid, evaluation.hotkey, evaluation.github_id or '')
+    cached = evaluation_cache.get_issue_discovery(evaluation.uid, evaluation.hotkey, evaluation.github_id or '')
     if cached is None:
         bt.logging.warning(f'├─ UID {evaluation.uid}: no cached issue-discovery evaluation available')
         return False

@@ -1,7 +1,7 @@
 import copy
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from math import prod
 from typing import TYPE_CHECKING, DefaultDict, Dict, List, Optional, Set, Tuple
@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredPR
 
 from gittensor.constants import (
+    EVALUATION_CACHE_MAX_AGE_SECONDS,
     EXTENSIONLESS_FILE_EXTENSIONS,
     MAX_CODE_DENSITY_MULTIPLIER,
 )
@@ -529,6 +530,7 @@ class CachedEvaluation:
     github_id: str
     evaluation: 'MinerEvaluation'
     cached_at: datetime
+    issue_discovery_cached_at: Optional[datetime] = None
 
 
 # Fields owned by the issue-discovery phase. store() preserves these across
@@ -576,8 +578,9 @@ class MinerEvaluationCache:
     later same-round mirror outage can fall back to a non-zero score.
     """
 
-    def __init__(self):
+    def __init__(self, max_age_seconds: int = EVALUATION_CACHE_MAX_AGE_SECONDS):
         self._cache: Dict[int, CachedEvaluation] = {}
+        self._max_age = timedelta(seconds=max_age_seconds)
 
     def store(self, evaluation: 'MinerEvaluation') -> None:
         """Store a successful evaluation in the cache.
@@ -594,25 +597,35 @@ class MinerEvaluationCache:
         if not evaluation.hotkey or not evaluation.github_id or evaluation.github_id == '0':
             return
 
+        now = datetime.now(timezone.utc)
         cached_eval = self._build_cache_entry(evaluation)
+        issue_discovery_cached_at: Optional[datetime] = None
 
         existing = self._cache.get(evaluation.uid)
         if existing is not None and existing.hotkey == evaluation.hotkey and existing.github_id == evaluation.github_id:
-            for name in _ISSUE_DISCOVERY_FIELDS:
-                value = getattr(existing.evaluation, name)
-                setattr(cached_eval, name, _copy_issue_discovery_value(name, value))
-            for repo_name, prior_repo in existing.evaluation.repo_evaluations.items():
-                target = cached_eval.repo_evaluations.get(repo_name)
-                if target is None:
-                    target = RepoEvaluation(repository_full_name=prior_repo.repository_full_name)
-                    cached_eval.repo_evaluations[repo_name] = target
-                target.copy_issue_discovery_from(prior_repo)
+            if self._is_fresh(existing.issue_discovery_cached_at, now):
+                issue_discovery_cached_at = existing.issue_discovery_cached_at
+                for name in _ISSUE_DISCOVERY_FIELDS:
+                    value = getattr(existing.evaluation, name)
+                    setattr(cached_eval, name, _copy_issue_discovery_value(name, value))
+                for repo_name, prior_repo in existing.evaluation.repo_evaluations.items():
+                    target = cached_eval.repo_evaluations.get(repo_name)
+                    if target is None:
+                        target = RepoEvaluation(repository_full_name=prior_repo.repository_full_name)
+                        cached_eval.repo_evaluations[repo_name] = target
+                    target.copy_issue_discovery_from(prior_repo)
+            elif existing.issue_discovery_cached_at is not None:
+                bt.logging.debug(
+                    f'Not preserving expired cached issue discovery for UID {evaluation.uid} '
+                    f'(cached at {existing.issue_discovery_cached_at.isoformat()})'
+                )
 
         self._cache[evaluation.uid] = CachedEvaluation(
             hotkey=evaluation.hotkey,
             github_id=evaluation.github_id,
             evaluation=cached_eval,
-            cached_at=datetime.now(timezone.utc),
+            cached_at=now,
+            issue_discovery_cached_at=issue_discovery_cached_at,
         )
 
         bt.logging.debug(f'Cached successful evaluation for UID {evaluation.uid}')
@@ -650,6 +663,7 @@ class MinerEvaluationCache:
                 existing.evaluation.repo_evaluations[repo_name] = target
             target.copy_issue_discovery_from(repo_eval)
 
+        existing.issue_discovery_cached_at = datetime.now(timezone.utc)
         bt.logging.debug(f'Refreshed cached issue discovery for UID {evaluation.uid}')
 
     def get(self, uid: int, hotkey: str, github_id: str) -> Optional['MinerEvaluation']:
@@ -659,8 +673,59 @@ class MinerEvaluationCache:
         Returns:
             Cached MinerEvaluation if found and identity matches, None otherwise
         """
-        cached = self._cache.get(uid)
+        cached = self._get_identity_matched(uid, hotkey, github_id)
+        if cached is None:
+            return None
 
+        now = datetime.now(timezone.utc)
+        if not self._is_fresh(cached.cached_at, now):
+            bt.logging.warning(
+                f'Cache miss for UID {uid}: cached evaluation expired '
+                f'(cached at {cached.cached_at.isoformat()}, max_age={self._max_age})'
+            )
+            self._cache.pop(uid, None)
+            return None
+
+        include_issue_discovery = self._is_fresh(cached.issue_discovery_cached_at, now)
+        bt.logging.debug(f'Cache hit for UID {uid} (cached at {cached.cached_at.isoformat()})')
+
+        return self._isolate_for_downstream(cached.evaluation, include_issue_discovery=include_issue_discovery)
+
+    def get_issue_discovery(self, uid: int, hotkey: str, github_id: str) -> Optional['MinerEvaluation']:
+        """Retrieve cached issue-discovery fields when both cache layers are fresh."""
+        cached = self._get_identity_matched(uid, hotkey, github_id)
+        if cached is None:
+            return None
+
+        now = datetime.now(timezone.utc)
+        if not self._is_fresh(cached.cached_at, now):
+            bt.logging.warning(
+                f'Issue-discovery cache miss for UID {uid}: cached evaluation expired '
+                f'(cached at {cached.cached_at.isoformat()}, max_age={self._max_age})'
+            )
+            self._cache.pop(uid, None)
+            return None
+
+        issue_discovery_cached_at = cached.issue_discovery_cached_at
+        if issue_discovery_cached_at is None or not self._is_fresh(issue_discovery_cached_at, now):
+            cached_at = issue_discovery_cached_at.isoformat() if issue_discovery_cached_at else 'never'
+            bt.logging.warning(
+                f'Issue-discovery cache miss for UID {uid}: issue-discovery fields expired '
+                f'(cached at {cached_at}, max_age={self._max_age})'
+            )
+            return None
+
+        bt.logging.debug(f'Issue-discovery cache hit for UID {uid} (cached at {issue_discovery_cached_at.isoformat()})')
+        return self._isolate_for_downstream(cached.evaluation, include_issue_discovery=True)
+
+    def evict_many(self, uids: Set[int]) -> None:
+        """Remove cached evaluations for all provided UIDs."""
+        for uid in uids:
+            if self._cache.pop(uid, None) is not None:
+                bt.logging.debug(f'Evicted cached evaluation for UID {uid}')
+
+    def _get_identity_matched(self, uid: int, hotkey: str, github_id: str) -> Optional[CachedEvaluation]:
+        cached = self._cache.get(uid)
         if cached is None:
             return None
 
@@ -674,15 +739,14 @@ class MinerEvaluationCache:
             del self._cache[uid]
             return None
 
-        bt.logging.debug(f'Cache hit for UID {uid} (cached at {cached.cached_at.isoformat()})')
+        return cached
 
-        return self._isolate_for_downstream(cached.evaluation)
-
-    def evict_many(self, uids: Set[int]) -> None:
-        """Remove cached evaluations for all provided UIDs."""
-        for uid in uids:
-            if self._cache.pop(uid, None) is not None:
-                bt.logging.debug(f'Evicted cached evaluation for UID {uid}')
+    def _is_fresh(self, cached_at: Optional[datetime], now: datetime) -> bool:
+        if cached_at is None:
+            return False
+        if cached_at.tzinfo is None:
+            cached_at = cached_at.replace(tzinfo=timezone.utc)
+        return now - cached_at <= self._max_age
 
     @staticmethod
     def _build_cache_entry(evaluation: 'MinerEvaluation') -> 'MinerEvaluation':
@@ -699,7 +763,11 @@ class MinerEvaluationCache:
         return cached
 
     @staticmethod
-    def _isolate_for_downstream(cached_eval: 'MinerEvaluation') -> 'MinerEvaluation':
+    def _isolate_for_downstream(
+        cached_eval: 'MinerEvaluation',
+        *,
+        include_issue_discovery: bool,
+    ) -> 'MinerEvaluation':
         # Downstream scoring mutates top-level scalar fields on MinerEvaluation
         # and discovery_* fields on Issue. Mirror PRs are shared — the issue
         # adapters produce fresh Issue objects per call via get_all_issues().
@@ -707,6 +775,8 @@ class MinerEvaluationCache:
         copy_eval.unique_repos_contributed_to = set(cached_eval.unique_repos_contributed_to)
         copy_eval.issue_discovery_issues = _copy_issue_discovery_issues(cached_eval.issue_discovery_issues)
         copy_eval.repo_evaluations = {name: copy.copy(re) for name, re in cached_eval.repo_evaluations.items()}
+        if not include_issue_discovery:
+            _clear_cached_issue_discovery(copy_eval)
         return copy_eval
 
 
@@ -722,3 +792,24 @@ def _scored_mirror_pr_for_cache(scored: 'ScoredPR') -> 'ScoredPR':
     scored_copy = copy.copy(scored)
     scored_copy.files = None
     return scored_copy
+
+
+def _clear_cached_issue_discovery(evaluation: MinerEvaluation) -> None:
+    evaluation.issue_discovery_score = 0.0
+    evaluation.issue_token_score = 0.0
+    evaluation.issue_credibility = 0.0
+    evaluation.is_issue_eligible = False
+    evaluation.total_solved_issues = 0
+    evaluation.total_valid_solved_issues = 0
+    evaluation.total_closed_issues = 0
+    evaluation.total_open_issues = 0
+    evaluation.issue_discovery_issues = []
+    for repo_eval in evaluation.repo_evaluations.values():
+        repo_eval.is_issue_eligible = False
+        repo_eval.issue_credibility = 0.0
+        repo_eval.issue_discovery_score = 0.0
+        repo_eval.issue_token_score = 0.0
+        repo_eval.total_solved_issues = 0
+        repo_eval.total_valid_solved_issues = 0
+        repo_eval.total_closed_issues = 0
+        repo_eval.total_open_issues = 0

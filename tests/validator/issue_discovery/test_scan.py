@@ -7,6 +7,7 @@ ignored, and the per-miner MinerEvaluation issue fields get populated.
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from unittest.mock import Mock
 
@@ -169,6 +170,15 @@ def _mirror_repos(*names: str) -> dict:
 
 def _run(coro):
     return asyncio.run(coro)
+
+
+def _seed_issue_discovery_cache(cache: MinerEvaluationCache, evaluation: MinerEvaluation) -> None:
+    cache.store(evaluation)
+    cache.update_issue_discovery(evaluation)
+
+
+def _expire_issue_discovery_cache(cache: MinerEvaluationCache, uid: int) -> None:
+    cache._cache[uid].issue_discovery_cached_at = datetime.now(timezone.utc) - cache._max_age - timedelta(seconds=1)
 
 
 # ============================================================================
@@ -405,7 +415,7 @@ class TestRunMirrorIssueDiscovery:
         cached.is_issue_eligible = True
         cached.total_solved_issues = 7
         cached.total_valid_solved_issues = 7
-        cache.store(cached)
+        _seed_issue_discovery_cache(cache, cached)
 
         client = Mock()
         working_issues = [
@@ -528,6 +538,45 @@ class TestRunMirrorIssueDiscovery:
         assert round_n.total_solved_issues == 7
         assert round_n.total_valid_solved_issues == 7
 
+    def test_expired_issue_discovery_cache_is_not_restored_after_oss_store_refresh(self):
+        cache = MinerEvaluationCache()
+
+        prior_round = _eval(uid=1, github_id='999')
+        prior_round.issue_discovery_score = 8.12
+        prior_round.issue_token_score = 700.0
+        prior_round.issue_credibility = 1.0
+        prior_round.is_issue_eligible = True
+        prior_round.total_solved_issues = 7
+        prior_round.total_valid_solved_issues = 7
+        _seed_issue_discovery_cache(cache, prior_round)
+        _expire_issue_discovery_cache(cache, uid=1)
+
+        # A fresh OSS store should refresh the PR-side cache without making
+        # stale issue-discovery fields eligible for another failure fallback.
+        current_round = _eval(uid=1, github_id='999')
+        cache.store(current_round)
+
+        client = Mock()
+        client.get_miner_issues.side_effect = MirrorRequestError('boom')
+
+        _run(
+            run_issue_discovery(
+                {1: current_round},
+                _mirror_repos('entrius/gittensor-ui'),
+                _EMPTY_LANGS,
+                _EMPTY_TOKEN_CONFIG,
+                client=client,
+                evaluation_cache=cache,
+            )
+        )
+
+        assert current_round.issue_discovery_score == 0.0
+        assert current_round.issue_token_score == 0.0
+        assert current_round.issue_credibility == 0.0
+        assert current_round.is_issue_eligible is False
+        assert current_round.total_solved_issues == 0
+        assert current_round.total_valid_solved_issues == 0
+
     def test_successful_no_issue_fetch_clears_stale_cached_issue_fields(self):
         cache = MinerEvaluationCache()
         stale = _eval(uid=1, github_id='999')
@@ -537,7 +586,7 @@ class TestRunMirrorIssueDiscovery:
         stale.is_issue_eligible = True
         stale.total_solved_issues = 7
         stale.total_valid_solved_issues = 7
-        cache.store(stale)
+        _seed_issue_discovery_cache(cache, stale)
 
         client = Mock()
         client.get_miner_issues.return_value = _response([_issue_dict(repo='foo/not-enabled')])
@@ -575,7 +624,7 @@ class TestRunMirrorIssueDiscovery:
         stale.is_issue_eligible = True
         stale.total_solved_issues = 7
         stale.total_valid_solved_issues = 7
-        cache.store(stale)
+        _seed_issue_discovery_cache(cache, stale)
 
         client = Mock()
         client.get_miner_issues.return_value = _response([_issue_dict()])

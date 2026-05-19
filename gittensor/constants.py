@@ -8,6 +8,10 @@ from typing import Dict
 SECONDS_PER_DAY = 86400
 SECONDS_PER_HOUR = 3600
 
+# Cache fallback is for short-lived upstream outages, not indefinite reward
+# preservation. Six hours covers three normal validator scoring intervals.
+EVALUATION_CACHE_MAX_AGE_SECONDS = 6 * SECONDS_PER_HOUR
+
 # =============================================================================
 # Network
 # =============================================================================

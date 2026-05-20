@@ -39,6 +39,9 @@ _PAT_POST_STATUS_MARKUP = {
     'rejected': '[red]✗[/red]',
     'no_response': '[yellow]—[/yellow]',
 }
+_PAT_GRAPHQL_ACCESS_ERROR = (
+    '[red]PAT lacks GraphQL API access. Fine-grained PATs need "Public Repositories (read-only)" permission.[/red]'
+)
 
 
 @click.command()
@@ -214,9 +217,26 @@ def _validate_pat_locally(pat: str) -> str | None:
             timeout=GITHUB_HTTP_TIMEOUT_SECONDS,
         )
         if gql_resp.status_code != 200:
-            err_console.print(
-                '[red]PAT lacks GraphQL API access. Fine-grained PATs need "Public Repositories (read-only)" permission.[/red]'
-            )
+            err_console.print(_PAT_GRAPHQL_ACCESS_ERROR)
+            return None
+
+        try:
+            gql_data = gql_resp.json()
+        except ValueError:
+            return None
+
+        if not isinstance(gql_data, dict):
+            err_console.print(_PAT_GRAPHQL_ACCESS_ERROR)
+            return None
+
+        if gql_data.get('errors'):
+            err_console.print(_PAT_GRAPHQL_ACCESS_ERROR)
+            return None
+
+        response_data = gql_data.get('data')
+        viewer = response_data.get('viewer') if isinstance(response_data, dict) else None
+        if viewer is None:
+            err_console.print(_PAT_GRAPHQL_ACCESS_ERROR)
             return None
 
         return login

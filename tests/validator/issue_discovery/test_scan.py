@@ -529,6 +529,50 @@ class TestRunMirrorIssueDiscovery:
         assert eval_.total_open_issues == 2
         assert eval_.issue_discovery_score > 0
 
+    def test_open_count_fetch_error_uses_cached_single_repo_zero_open_count(self):
+        cache = MinerEvaluationCache()
+        stale = _eval(uid=1, github_id='999')
+        stale.total_open_issues = 0
+        cache.store(stale)
+
+        open_issues = [
+            _issue_dict(
+                issue_number=100 + i,
+                state='OPEN',
+                state_reason=None,
+                solved_by_pr=None,
+            )
+            for i in range(2)
+        ]
+        fresh_issues = [
+            _issue_dict(issue_number=10 + i, author_github_id=f'A{i}', solved_by_pr=200 + i) for i in range(7)
+        ]
+        client = Mock()
+        client.get_miner_issues.side_effect = [
+            _response(open_issues + fresh_issues),
+            MirrorRequestError('open count fetch failed'),
+        ]
+
+        eval_ = _eval(uid=1, github_id='999')
+        eval_.merged_prs = [_scored_mirror_pr('entrius/gittensor-ui', pr) for pr in range(200, 207)]
+
+        _run(
+            run_issue_discovery(
+                {1: eval_},
+                _mirror_repos('entrius/gittensor-ui'),
+                _EMPTY_LANGS,
+                _EMPTY_TOKEN_CONFIG,
+                client=client,
+                evaluation_cache=cache,
+            )
+        )
+
+        assert eval_.total_solved_issues == 7
+        assert eval_.total_valid_solved_issues == 7
+        assert eval_.total_open_issues == 0
+        assert eval_.repo_evaluations['entrius/gittensor-ui'].total_open_issues == 0
+        assert eval_.issue_discovery_score > 0
+
     def test_successful_issue_fetch_refreshes_cache_after_scoring(self):
         cache = MinerEvaluationCache()
         client = Mock()

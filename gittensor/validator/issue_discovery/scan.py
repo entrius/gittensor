@@ -387,7 +387,7 @@ def _fallback_open_issue_counts(
         }
         if counts:
             return counts
-        if cached.total_open_issues and len(enabled_names) == 1:
+        if cached.total_open_issues is not None and len(enabled_names) == 1:
             return {next(iter(enabled_names)): cached.total_open_issues}
 
     return _count_open_issues(lookback_issues, enabled_names)

@@ -152,6 +152,7 @@ async def run_issue_discovery(
         bt.logging.info('No scoring repos — issue discovery skipped')
         return
 
+    mirror_client: MirrorClient = client or MirrorClient()
     now = datetime.now(timezone.utc)
     # Each repo is windowed by its own pr_lookback_days; the mirror applies the
     # per-repo cutoffs server-side for the scoring fetch.
@@ -188,7 +189,7 @@ async def run_issue_discovery(
 
         try:
             response = await asyncio.to_thread(
-                client.get_miner_issues, evaluation.github_id, since_by_repo=since_by_repo
+                mirror_client.get_miner_issues, evaluation.github_id, since_by_repo=since_by_repo
             )
         except MirrorRequestError as e:
             bt.logging.warning(f'├─ UID {uid}: issue fetch failed ({e}) — skipped this miner')
@@ -197,7 +198,7 @@ async def run_issue_discovery(
             continue
 
         try:
-            current_response = await asyncio.to_thread(client.get_miner_issues, evaluation.github_id)
+            current_response = await asyncio.to_thread(mirror_client.get_miner_issues, evaluation.github_id)
         except MirrorRequestError as e:
             bt.logging.warning(f'├─ UID {uid}: open-issue count fetch failed ({e}) — skipped this miner')
             _restore_issue_discovery_from_cache(evaluation, evaluation_cache)
@@ -223,7 +224,7 @@ async def run_issue_discovery(
             mirror_repos,
             solving_pr_cache,
             cache_stats,
-            client,
+            mirror_client,
             programming_languages,
             token_config,
             open_counts=open_counts,

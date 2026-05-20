@@ -5,8 +5,8 @@
 """Unit tests for gittensor.utils.mirror.client.
 
 Covers the MirrorClient HTTP wrapper:
-- URL + query-param construction for each endpoint
-- since datetime → ISO UTC formatting; aware-input requirement
+- URL construction for each endpoint
+- since_by_repo map → POST body (per-repo windows); omitted map → GET
 - Response parsing into the right dataclass
 - Retry behavior: 5xx / 429 / connection errors retry with exponential backoff
 - Fail-fast on non-429 4xx
@@ -125,44 +125,77 @@ class TestUrlConstruction:
         url = session.get.call_args.args[0]
         assert url == 'https://mirror.gittensor.io/api/v1/pulls/entrius/gittensor-ui/518/files'
 
-    def test_since_param_formatted_as_iso_utc(self):
+
+class TestSinceByRepoPost:
+    """A since_by_repo map switches the miner endpoints from GET to a POST
+    carrying the per-repo window map; an empty/omitted map stays a GET."""
+
+    def test_get_miner_pulls_posts_since_by_repo(self):
         session = Mock()
-        session.get.return_value = _ok(_minimal_pulls_payload())
+        session.post.return_value = _ok(_minimal_pulls_payload())
         client = _make_client(session)
 
         since = datetime(2026, 3, 15, 12, 30, 45, tzinfo=timezone.utc)
-        client.get_miner_pulls('218712309', since=since)
+        client.get_miner_pulls('218712309', since_by_repo={'entrius/gittensor': since})
 
-        params = session.get.call_args.kwargs['params']
-        # ISO string with explicit UTC offset
-        assert params['since'].startswith('2026-03-15T12:30:45')
-        assert '+00:00' in params['since'] or params['since'].endswith('Z')
+        session.post.assert_called_once()
+        session.get.assert_not_called()
+        url = session.post.call_args.args[0]
+        assert url == 'https://mirror.gittensor.io/api/v1/miners/218712309/pulls'
+        body = session.post.call_args.kwargs['json']
+        assert set(body) == {'since_by_repo'}
+        iso = body['since_by_repo']['entrius/gittensor']
+        assert iso.startswith('2026-03-15T12:30:45')
+        assert iso.endswith('+00:00') or iso.endswith('Z')
 
-    def test_since_param_omitted_when_none(self):
+    def test_get_miner_issues_posts_since_by_repo(self):
         session = Mock()
-        session.get.return_value = _ok(_minimal_pulls_payload())
+        session.post.return_value = _ok(_minimal_issues_payload())
         client = _make_client(session)
 
-        client.get_miner_pulls('218712309')
+        client.get_miner_issues(
+            '218712309', since_by_repo={'entrius/gittensor': datetime(2026, 3, 1, tzinfo=timezone.utc)}
+        )
 
-        # params should be None or not contain 'since'
-        params = session.get.call_args.kwargs.get('params')
-        assert params is None or 'since' not in params
+        session.post.assert_called_once()
+        url = session.post.call_args.args[0]
+        assert url == 'https://mirror.gittensor.io/api/v1/miners/218712309/issues'
+        assert 'entrius/gittensor' in session.post.call_args.kwargs['json']['since_by_repo']
 
-    def test_non_utc_aware_since_converted_to_utc(self):
-        """A datetime in another tz should serialize as UTC equivalent."""
+    def test_non_utc_since_converted_to_utc_in_body(self):
+        """A datetime in another tz serializes as its UTC equivalent."""
         from datetime import timedelta
 
         session = Mock()
-        session.get.return_value = _ok(_minimal_pulls_payload())
+        session.post.return_value = _ok(_minimal_pulls_payload())
         client = _make_client(session)
 
         # 2026-03-15 06:30 in UTC-6 == 2026-03-15 12:30 UTC
         non_utc = datetime(2026, 3, 15, 6, 30, 0, tzinfo=timezone(timedelta(hours=-6)))
-        client.get_miner_pulls('218712309', since=non_utc)
+        client.get_miner_pulls('218712309', since_by_repo={'o/r': non_utc})
 
-        params = session.get.call_args.kwargs['params']
-        assert params['since'].startswith('2026-03-15T12:30:00')
+        iso = session.post.call_args.kwargs['json']['since_by_repo']['o/r']
+        assert iso.startswith('2026-03-15T12:30:00')
+
+    def test_empty_since_by_repo_falls_back_to_get(self):
+        session = Mock()
+        session.get.return_value = _ok(_minimal_pulls_payload())
+        client = _make_client(session)
+
+        client.get_miner_pulls('218712309', since_by_repo={})
+
+        session.get.assert_called_once()
+        session.post.assert_not_called()
+
+    def test_omitted_since_by_repo_uses_get(self):
+        session = Mock()
+        session.get.return_value = _ok(_minimal_issues_payload())
+        client = _make_client(session)
+
+        client.get_miner_issues('218712309')
+
+        session.get.assert_called_once()
+        session.post.assert_not_called()
 
 
 # ============================================================================
@@ -213,7 +246,7 @@ class TestResponseParsing:
         session.get.return_value = _ok({'error': 'upstream unavailable'})
         client = _make_client(session)
 
-        with pytest.raises(MirrorRequestError, match='invalid mirror response'):
+        with pytest.raises(MirrorRequestError, match='was invalid'):
             getattr(client, method_name)(*args)
 
 
@@ -330,6 +363,20 @@ class TestRetryBehavior:
         assert session.get.call_count == 3
         assert mock_sleep.call_count == 2
 
+    def test_post_path_retries_on_500(self, _log, mock_sleep):
+        """The POST path shares the retry loop — a 5xx retries like GET."""
+        session = Mock()
+        session.post.side_effect = [
+            _err(500, 'oops'),
+            _ok(_minimal_pulls_payload()),
+        ]
+        client = _make_client(session)
+
+        client.get_miner_pulls('218712309', since_by_repo={'o/r': datetime(2026, 3, 1, tzinfo=timezone.utc)})
+
+        assert session.post.call_count == 2
+        mock_sleep.assert_called_once_with(5)
+
 
 @patch('gittensor.utils.mirror.client.time.sleep')
 @patch('gittensor.utils.mirror.client.bt.logging')
@@ -367,6 +414,18 @@ class TestFailFast4xx:
             client.get_pr_files('entrius/gittensor-ui', 518)
 
         assert session.get.call_count == 1
+
+    def test_post_404_fails_fast_no_retry(self, _log, mock_sleep):
+        """A 404 on the POST path (e.g. an un-upgraded mirror) fails fast."""
+        session = Mock()
+        session.post.return_value = _err(404, 'not found')
+        client = _make_client(session, max_attempts=3)
+
+        with pytest.raises(MirrorRequestError, match='404'):
+            client.get_miner_pulls('218712309', since_by_repo={'o/r': datetime(2026, 3, 1, tzinfo=timezone.utc)})
+
+        assert session.post.call_count == 1
+        mock_sleep.assert_not_called()
 
 
 # ============================================================================

@@ -44,7 +44,6 @@ from gittensor.classes import Issue, MinerEvaluation, MinerEvaluationCache, Repo
 from gittensor.constants import (
     MAINTAINER_ASSOCIATIONS,
     MIN_TOKEN_SCORE_FOR_BASE_SCORE,
-    PR_LOOKBACK_DAYS,
 )
 from gittensor.utils.mirror.client import MirrorClient, MirrorRequestError
 from gittensor.utils.mirror.models import MirrorIssue, MirrorSolvingPR
@@ -63,6 +62,7 @@ from gittensor.validator.utils.load_weights import (
     RepositoryConfig,
     TokenConfig,
     resolve_eligibility,
+    resolve_scoring,
 )
 
 
@@ -137,7 +137,7 @@ async def run_issue_discovery(
 
     For each miner, fetches their authored issues via the mirror and classifies
     each. Issues in repos not present in ``mirror_repos`` are filtered out
-    client-side (mirror returns all tracked repos; the master list may be narrower).
+    client-side.
 
     Depends on OSS scoring (``score_miner_prs``) having already run for
     this cycle — the cross-miner solving-PR cache is built by walking every
@@ -152,8 +152,12 @@ async def run_issue_discovery(
         bt.logging.info('No scoring repos — issue discovery skipped')
         return
 
-    client = client or MirrorClient()
-    lookback_date = datetime.now(timezone.utc) - timedelta(days=PR_LOOKBACK_DAYS)
+    now = datetime.now(timezone.utc)
+    # Each repo is windowed by its own pr_lookback_days; the mirror applies the
+    # per-repo cutoffs server-side for the scoring fetch.
+    since_by_repo = {
+        name: now - timedelta(days=resolve_scoring(rc.scoring).pr_lookback_days) for name, rc in mirror_repos.items()
+    }
     issue_enabled_names: Set[str] = {
         name for name, config in mirror_repos.items() if config.issue_discovery_share > 0.0
     }
@@ -183,7 +187,9 @@ async def run_issue_discovery(
             continue
 
         try:
-            response = await asyncio.to_thread(client.get_miner_issues, evaluation.github_id, since=lookback_date)
+            response = await asyncio.to_thread(
+                client.get_miner_issues, evaluation.github_id, since_by_repo=since_by_repo
+            )
         except MirrorRequestError as e:
             bt.logging.warning(f'├─ UID {uid}: issue fetch failed ({e}) — skipped this miner')
             _restore_issue_discovery_from_cache(evaluation, evaluation_cache)
@@ -735,10 +741,16 @@ def _mirror_issue_for_scoring(
         body_or_title_edited_at=None,
     )
 
+    scoring_cfg = resolve_scoring(repo_config.scoring)
     adapted.discovery_base_score = base_score
-    adapted.discovery_time_decay_multiplier = round(calculate_time_decay(solving_pr.merged_at), 2)
+    adapted.discovery_time_decay_multiplier = round(
+        calculate_time_decay(solving_pr.merged_at, scoring_cfg.time_decay), 2
+    )
     adapted.discovery_review_quality_multiplier = round(
-        calculate_issue_review_quality_multiplier(solving_pr.review_summary.maintainer_changes_requested_count),
+        calculate_issue_review_quality_multiplier(
+            solving_pr.review_summary.maintainer_changes_requested_count,
+            scoring_cfg.review_penalty_rate,
+        ),
         2,
     )
 

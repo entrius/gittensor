@@ -635,7 +635,17 @@ async def _resolve_solving_pr_score(
     file_changes, file_contents = mirror_files_to_legacy(
         issue.repo_full_name, solving_pr.pr_number, files_response.files
     )
-    result = calculate_base_score_for_pr_files(file_changes, file_contents, programming_languages, token_config)
+    result = calculate_base_score_for_pr_files(
+        file_changes,
+        file_contents,
+        programming_languages,
+        token_config,
+        min_token_score_for_base_score=(
+            resolve_eligibility(repo_config.eligibility).min_token_score_for_base_score
+            if repo_config is not None
+            else None
+        ),
+    )
     base_score = (
         repo_config.fixed_base_score
         if repo_config is not None and repo_config.fixed_base_score is not None

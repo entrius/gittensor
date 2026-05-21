@@ -6,6 +6,7 @@ Miners push their GitHub PAT to validators via PatBroadcastSynapse.
 Miners check if a validator has their PAT via PatCheckSynapse.
 """
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional, Tuple
 
 import bittensor as bt
@@ -22,6 +23,22 @@ from gittensor.validator.utils.github_validation import (
 
 if TYPE_CHECKING:
     from neurons.validator import Validator
+
+
+_TRANSIENT_PAT_TEST_MESSAGE = 'GitHub API temporarily unavailable; retry the check in a few minutes.'
+
+
+@dataclass(frozen=True)
+class PatTestResult:
+    """Outcome of the GraphQL test query against a PAT.
+
+    Mirrors the shape of ``GitHubCredentialValidation`` so callers can
+    distinguish transient transport failures (worth retrying) from permanent
+    rejections (the PAT really is bad).
+    """
+
+    error: Optional[str] = None
+    transient_failure: bool = False
 
 
 def _get_hotkey(synapse: bt.Synapse) -> str:
@@ -66,9 +83,14 @@ async def handle_pat_broadcast(validator: 'Validator', synapse: PatBroadcastSyna
             )
 
     # 4. Test query against a known repo to catch org-restricted PATs
-    test_error = _test_pat_against_repo(synapse.github_access_token)
-    if test_error:
-        return _reject(f'PAT test query failed: {test_error}')
+    test_result = _test_pat_against_repo(synapse.github_access_token)
+    if test_result.transient_failure:
+        return _reject(
+            f'GitHub API temporarily unavailable during PAT test query; retry the broadcast in a few minutes. '
+            f'({test_result.error})'
+        )
+    if test_result.error:
+        return _reject(f'PAT test query failed: {test_result.error}')
 
     # 5. Store PAT (github_id guaranteed non-None after validate_github_credentials success)
     pat_storage.save_pat(uid=uid, hotkey=hotkey, pat=synapse.github_access_token, github_id=github_id or '0')
@@ -124,7 +146,7 @@ async def handle_pat_check(validator: 'Validator', synapse: PatCheckSynapse) -> 
     validation = validate_github_credentials_result(uid, entry['pat'], stored_github_id=entry.get('github_id'))
     if validation.transient_failure:
         synapse.pat_valid = None
-        synapse.rejection_reason = 'GitHub API temporarily unavailable; retry the check in a few minutes.'
+        synapse.rejection_reason = _TRANSIENT_PAT_TEST_MESSAGE
         bt.logging.warning(f'PAT check result — UID: {uid}: GitHub identity lookup temporarily unavailable')
         return synapse
     if validation.error:
@@ -133,11 +155,16 @@ async def handle_pat_check(validator: 'Validator', synapse: PatCheckSynapse) -> 
         bt.logging.warning(f'PAT check result — UID: {uid}: validation failed: {validation.error}')
         return synapse
 
-    test_error = _test_pat_against_repo(entry['pat'])
-    if test_error:
+    test_result = _test_pat_against_repo(entry['pat'])
+    if test_result.transient_failure:
+        synapse.pat_valid = None
+        synapse.rejection_reason = _TRANSIENT_PAT_TEST_MESSAGE
+        bt.logging.warning(f'PAT check result — UID: {uid}: test query temporarily unavailable: {test_result.error}')
+        return synapse
+    if test_result.error:
         synapse.pat_valid = False
-        synapse.rejection_reason = f'PAT test query failed: {test_error}'
-        bt.logging.warning(f'PAT check result — UID: {uid}: test query failed: {test_error}')
+        synapse.rejection_reason = f'PAT test query failed: {test_result.error}'
+        bt.logging.warning(f'PAT check result — UID: {uid}: test query failed: {test_result.error}')
         return synapse
 
     synapse.pat_valid = True
@@ -167,11 +194,16 @@ async def priority_pat_check(validator: 'Validator', synapse: PatCheckSynapse) -
 # ---------------------------------------------------------------------------
 
 
-def _test_pat_against_repo(pat: str) -> Optional[str]:
+def _test_pat_against_repo(pat: str) -> PatTestResult:
     """Run a test GraphQL call to verify the PAT has the access scoring requires.
 
     Scoring uses the GraphQL API to fetch miner PRs, so this mirrors the real path.
-    Returns an error string on failure, None on success.
+
+    Returns a ``PatTestResult``. Transient transport failures (HTTP 5xx, network
+    errors, timeouts) set ``transient_failure=True`` so callers can surface them
+    as inconclusive — mirroring the identity-check path established in #1107.
+    Permanent rejections (4xx, GraphQL errors, missing viewer scope) set
+    ``error`` only and leave ``transient_failure=False``.
     """
     try:
         response = requests.post(
@@ -180,14 +212,19 @@ def _test_pat_against_repo(pat: str) -> Optional[str]:
             headers=make_graphql_headers(pat),
             timeout=GITHUB_HTTP_TIMEOUT_SECONDS,
         )
+        if response.status_code >= 500:
+            return PatTestResult(
+                error=f'GitHub GraphQL API returned {response.status_code}',
+                transient_failure=True,
+            )
         if response.status_code != 200:
-            return f'GitHub GraphQL API returned {response.status_code}'
+            return PatTestResult(error=f'GitHub GraphQL API returned {response.status_code}')
         data = response.json()
         errors = data.get('errors')
         if errors:
-            return f'GraphQL error: {errors[0].get("message", "unknown")}'
+            return PatTestResult(error=f'GraphQL error: {errors[0].get("message", "unknown")}')
         if (data.get('data') or {}).get('viewer') is None:
-            return "Fine-grained PATs need 'Public Repositories (read-only)' permission"
-        return None
+            return PatTestResult(error="Fine-grained PATs need 'Public Repositories (read-only)' permission")
+        return PatTestResult()
     except requests.RequestException as e:
-        return str(e)
+        return PatTestResult(error=str(e), transient_failure=True)

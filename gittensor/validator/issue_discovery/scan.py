@@ -463,10 +463,6 @@ async def _score_miner_issues(
             )
             continue
 
-        # Valid-solved gate: solving PR must meet the repo's token threshold.
-        if cached.token_score >= cfg.min_token_score_for_valid_issue:
-            acc.valid_solved += 1
-
         # Same-account: discoverer == solver gets credibility only, no score
         if issue.author_github_id == solving_pr.author_github_id:
             bt.logging.debug(
@@ -493,6 +489,12 @@ async def _score_miner_issues(
                 f'{cfg.min_token_score_for_valid_issue} — credibility only'
             )
             continue
+
+        # Past every credibility-only gate (same-account, canonical one-issue-
+        # per-PR, token threshold). Non-canonical siblings would have continued
+        # above; counting them here would let one qualifying PR satisfy the
+        # valid-solved eligibility gate through duplicate issue rows.
+        acc.valid_solved += 1
 
         adapted = _mirror_issue_for_scoring(issue, solving_pr, repo_config, base_score=cached.base_score)
         if adapted is None:

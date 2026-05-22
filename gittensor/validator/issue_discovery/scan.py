@@ -93,11 +93,18 @@ class _CacheStats:
     metrics: cache hits (free), misses (triggered a fetch), and fetch failures
     (issue not scored). Helps tune cache effectiveness and surface mirror
     flakiness without scraping logs for individual fetch warnings.
+
+    ``gate_rejections`` counts solving PRs blocked because they were rejected
+    by the OSS-side merge-eligibility gate (recorded in
+    ``MinerEvaluation.rejected_solving_pr_keys``). Surfacing this separately
+    from ``fetch_failures`` makes it obvious when discovery credit is being
+    denied for anti-gaming reasons vs. transient mirror issues.
     """
 
     hits: int = 0
     misses: int = 0
     fetch_failures: int = 0
+    gate_rejections: int = 0
 
 
 @dataclass
@@ -162,10 +169,12 @@ async def run_issue_discovery(
     enabled_names: Set[str] = set(mirror_repos.keys())
 
     solving_pr_cache: Dict[Tuple[str, int], CachedSolvingPR] = _build_solving_pr_cache(miner_evaluations)
+    rejected_solving_pr_keys: Set[Tuple[str, int]] = _build_rejected_solving_pr_keys(miner_evaluations)
     cache_stats = _CacheStats()
     bt.logging.info(
         f'Cross-miner solving-PR cache: {len(solving_pr_cache)} entries from '
-        f'{sum(len(ev.merged_prs) for ev in miner_evaluations.values())} scored PRs'
+        f'{sum(len(ev.merged_prs) for ev in miner_evaluations.values())} scored PRs '
+        f'({len(rejected_solving_pr_keys)} merge-gate-rejected PR(s) blocked from discovery scoring)'
     )
 
     skipped_no_gh = 0
@@ -221,6 +230,7 @@ async def run_issue_discovery(
             filtered,
             mirror_repos,
             solving_pr_cache,
+            rejected_solving_pr_keys,
             cache_stats,
             client,
             programming_languages,
@@ -246,8 +256,9 @@ async def run_issue_discovery(
     )
     bt.logging.info(
         f'Solving-PR cache: {cache_stats.hits} hits | {cache_stats.misses} misses '
-        f'({cache_stats.misses - cache_stats.fetch_failures} fetched OK, '
-        f'{cache_stats.fetch_failures} fetch failures)'
+        f'({cache_stats.misses - cache_stats.fetch_failures - cache_stats.gate_rejections} fetched OK, '
+        f'{cache_stats.fetch_failures} fetch failures, '
+        f'{cache_stats.gate_rejections} blocked by OSS merge gate)'
     )
 
 
@@ -362,6 +373,30 @@ def _count_open_issues(issues: List[MirrorIssue], enabled_names: Set[str]) -> Di
     return counts
 
 
+def _build_rejected_solving_pr_keys(
+    miner_evaluations: Dict[int, MinerEvaluation],
+) -> Set[Tuple[str, int]]:
+    """Union the load-time merge-gate rejections across all miners.
+
+    A MERGED PR that fails ``_should_skip_merged_mirror_pr`` (self-merge w/o
+    approval, wrong base ref, head_ref on an acceptable branch, etc.) is
+    dropped from the miner's ``merged_prs`` and never enters the cross-miner
+    cache. Without this set, issue discovery would cache-miss the same PR and
+    pay a fresh token score to the issue's discoverer — bypassing the
+    anti-gaming gate on the 30% issue-discovery emission pool.
+
+    Coverage limit: only catches solving PRs authored by registered miners
+    (their evaluations are what we observe here). Solving PRs by non-miner
+    GitHub accounts still bypass the gate because the mirror's
+    ``MirrorSolvingPR`` schema doesn't carry the fields the gate needs;
+    closing that gap requires a mirror schema change.
+    """
+    rejected: Set[Tuple[str, int]] = set()
+    for evaluation in miner_evaluations.values():
+        rejected.update(evaluation.rejected_solving_pr_keys)
+    return rejected
+
+
 def _build_solving_pr_cache(
     miner_evaluations: Dict[int, MinerEvaluation],
 ) -> Dict[Tuple[str, int], CachedSolvingPR]:
@@ -391,6 +426,7 @@ async def _score_miner_issues(
     issues: List[MirrorIssue],
     mirror_repos: Dict[str, RepositoryConfig],
     solving_pr_cache: Dict[Tuple[str, int], CachedSolvingPR],
+    rejected_solving_pr_keys: Set[Tuple[str, int]],
     cache_stats: _CacheStats,
     client: MirrorClient,
     programming_languages: Dict[str, LanguageConfig],
@@ -446,6 +482,7 @@ async def _score_miner_issues(
             issue,
             solving_pr,
             solving_pr_cache,
+            rejected_solving_pr_keys,
             cache_stats,
             client,
             programming_languages,
@@ -453,13 +490,15 @@ async def _score_miner_issues(
             repo_config,
         )
         if cached is None:
-            # Fetch failed — issue still counts for solved/credibility but not scored.
-            # Can't apply the valid-solved gate without a real token_score, so be
-            # conservative and don't increment valid_solved.
-            acc.fetch_failed = True
+            # Resolution failed — issue counts for solved/credibility but not scored.
+            # Distinguish the two reasons: a deterministic merge-gate rejection is
+            # NOT a fetch failure (we know the answer this round and the result is
+            # safe to cache), only a transient mirror failure should poison the
+            # round-completeness signal that gates cache writes.
+            if (issue.repo_full_name, solving_pr.pr_number) not in rejected_solving_pr_keys:
+                acc.fetch_failed = True
             bt.logging.debug(
-                f'  issue #{issue.issue_number} ({issue.repo_full_name}): solver score unavailable '
-                f'(fetch failed) — credibility only'
+                f'  issue #{issue.issue_number} ({issue.repo_full_name}): solver score unavailable — credibility only'
             )
             continue
 
@@ -591,6 +630,7 @@ async def _resolve_solving_pr_score(
     issue: MirrorIssue,
     solving_pr: MirrorSolvingPR,
     cache: Dict[Tuple[str, int], CachedSolvingPR],
+    rejected_solving_pr_keys: Set[Tuple[str, int]],
     cache_stats: _CacheStats,
     client: MirrorClient,
     programming_languages: Dict[str, LanguageConfig],
@@ -606,8 +646,23 @@ async def _resolve_solving_pr_score(
     Applies ``fixed_base_score`` repo override on cache miss (matching the
     override in ``score_mirror_pr``) so that ``discovery_base_score`` is the
     same regardless of solver identity.
+
+    Returns None when the solving PR was rejected by the OSS-side merge gate
+    (e.g. self-merged without external approval). The discoverer's issue still
+    counts toward solved/credibility, but no discovery score is awarded — the
+    merge gate intentionally denies scoring credit to the solver, and the
+    parallel issue-discovery pool must honor that decision.
     """
     key = (issue.repo_full_name, solving_pr.pr_number)
+    if key in rejected_solving_pr_keys:
+        cache_stats.gate_rejections += 1
+        bt.logging.debug(
+            f'Mirror solving PR #{solving_pr.pr_number} ({issue.repo_full_name}) was rejected '
+            f'by the OSS merge-eligibility gate — issue #{issue.issue_number} not scored '
+            f'(credibility only)'
+        )
+        return None
+
     if key in cache:
         cache_stats.hits += 1
         return cache[key]

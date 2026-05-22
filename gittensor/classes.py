@@ -307,6 +307,13 @@ class MinerEvaluation:
     open_prs: List['ScoredPR'] = field(default_factory=list)
     closed_prs: List['ScoredPR'] = field(default_factory=list)
 
+    # (repo_full_name, pr_number) tuples for MERGED PRs that failed the load-time
+    # merge-eligibility gate (self-merge w/o approval, wrong base/head ref, etc.).
+    # Issue discovery unions these across all miner evaluations so a solving PR
+    # that lost OSS scoring for being non-canonically merged cannot then earn
+    # the discoverer issue-discovery credit on the parallel emission path.
+    rejected_solving_pr_keys: Set[Tuple[str, int]] = field(default_factory=set)
+
     unique_repos_contributed_to: Set[str] = field(default_factory=set)
 
     # Eligibility and credibility

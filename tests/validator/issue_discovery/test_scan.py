@@ -782,7 +782,7 @@ class TestCacheStats:
         assert issue.solving_pr is not None
         result = asyncio.run(
             _resolve_solving_pr_score(
-                issue, issue.solving_pr, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, None
+                issue, issue.solving_pr, cache, set(), stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, None
             )
         )
 
@@ -806,7 +806,7 @@ class TestCacheStats:
         issue = MirrorIssue.from_dict(_issue_dict())
         asyncio.run(
             _resolve_solving_pr_score(
-                issue, issue.solving_pr, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, None
+                issue, issue.solving_pr, cache, set(), stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, None
             )
         )
 
@@ -830,7 +830,7 @@ class TestCacheStats:
         issue = MirrorIssue.from_dict(_issue_dict())
         result = asyncio.run(
             _resolve_solving_pr_score(
-                issue, issue.solving_pr, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, None
+                issue, issue.solving_pr, cache, set(), stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, None
             )
         )
 
@@ -869,7 +869,7 @@ class TestCacheStats:
         issue = MirrorIssue.from_dict(_issue_dict())
         result = asyncio.run(
             _resolve_solving_pr_score(
-                issue, issue.solving_pr, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, None
+                issue, issue.solving_pr, cache, set(), stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, None
             )
         )
 
@@ -910,12 +910,12 @@ class TestCacheStats:
 
         result_a = asyncio.run(
             _resolve_solving_pr_score(
-                issue_a, issue_a.solving_pr, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, None
+                issue_a, issue_a.solving_pr, cache, set(), stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, None
             )
         )
         result_b = asyncio.run(
             _resolve_solving_pr_score(
-                issue_b, issue_b.solving_pr, cache, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, None
+                issue_b, issue_b.solving_pr, cache, set(), stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, None
             )
         )
 
@@ -926,6 +926,123 @@ class TestCacheStats:
         assert stats.fetch_failures == 2
         assert cache == {}
         assert client.get_pr_files.call_count == 2
+
+
+class TestRejectedSolvingPrGate:
+    """The OSS-side merge gate (``_should_skip_merged_mirror_pr``) rejects
+    MERGED PRs that self-merged without external approval, merged to a non-
+    acceptable base ref, etc. Those rejections are recorded on each
+    ``MinerEvaluation.rejected_solving_pr_keys`` at load time. Issue discovery
+    unions those across miners and refuses to score any solving PR that sits
+    in that set — so the parallel 30%-of-emissions issue-discovery pool can't
+    be used to pay the discoverer for a merge that the OSS pool already
+    rejected as illegitimate."""
+
+    def test_union_helper_aggregates_across_miners(self):
+        from gittensor.validator.issue_discovery.scan import _build_rejected_solving_pr_keys
+
+        e1 = MinerEvaluation(uid=1, hotkey='hk1', github_id='g1')
+        e1.rejected_solving_pr_keys = {('foo/a', 1)}
+        e2 = MinerEvaluation(uid=2, hotkey='hk2', github_id='g2')
+        e2.rejected_solving_pr_keys = {('foo/b', 2), ('foo/c', 3)}
+        e3 = MinerEvaluation(uid=3, hotkey='hk3', github_id='g3')  # empty
+
+        assert _build_rejected_solving_pr_keys({1: e1, 2: e2, 3: e3}) == {
+            ('foo/a', 1),
+            ('foo/b', 2),
+            ('foo/c', 3),
+        }
+
+    def test_rejected_key_blocks_resolve_before_cache_lookup(self):
+        """Even if the same key somehow lands in the cache (shouldn't in
+        practice — disjoint sources — but defensively), the rejection wins."""
+        from gittensor.validator.issue_discovery.scan import (
+            CachedSolvingPR,
+            _CacheStats,
+            _resolve_solving_pr_score,
+        )
+
+        client = Mock()
+        cache = {('entrius/gittensor-ui', 100): CachedSolvingPR(base_score=42.0, token_score=50.0)}
+        rejected = {('entrius/gittensor-ui', 100)}
+        stats = _CacheStats()
+
+        issue = MirrorIssue.from_dict(_issue_dict())
+        result = asyncio.run(
+            _resolve_solving_pr_score(
+                issue, issue.solving_pr, cache, rejected, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, None
+            )
+        )
+
+        assert result is None
+        assert stats.gate_rejections == 1
+        assert stats.hits == 0
+        assert stats.misses == 0
+        client.get_pr_files.assert_not_called()
+
+    def test_rejected_key_short_circuits_fetch_on_cache_miss(self):
+        from gittensor.validator.issue_discovery.scan import (
+            _CacheStats,
+            _resolve_solving_pr_score,
+        )
+
+        client = Mock()
+        # Would succeed if reached, but the gate fires first.
+        client.get_pr_files.return_value = _empty_files_response('entrius/gittensor-ui', 100)
+        cache = {}
+        rejected = {('entrius/gittensor-ui', 100)}
+        stats = _CacheStats()
+
+        issue = MirrorIssue.from_dict(_issue_dict())
+        result = asyncio.run(
+            _resolve_solving_pr_score(
+                issue, issue.solving_pr, cache, rejected, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, None
+            )
+        )
+
+        assert result is None
+        assert stats.gate_rejections == 1
+        assert stats.fetch_failures == 0
+        assert cache == {}
+        client.get_pr_files.assert_not_called()
+
+    def test_cross_miner_rejection_blocks_discoverer_scoring(self):
+        """Sybil scenario: miner A's PR was rejected by the OSS merge gate
+        (self-merge without external approval). A's evaluation records the
+        (repo, pr_number) in rejected_solving_pr_keys. Miner B opens an issue
+        that closes A's PR. Issue discovery must refuse to score B's issue
+        even on a fresh fetch path — B's issue counts toward credibility
+        only, no discovery_earned_score is produced."""
+        client = Mock()
+        # Discoverer (miner B) — opens an issue closed by miner A's PR.
+        client.get_miner_issues.return_value = _response([_issue_dict(author_github_id='999')])
+        # Fetch would otherwise succeed, but the gate must short-circuit.
+        client.get_pr_files.return_value = _empty_files_response('entrius/gittensor-ui', 100)
+
+        # Miner A — author of the solving PR, whose merge was rejected by
+        # the OSS gate (e.g. self-merged without external approval).
+        miner_a = MinerEvaluation(uid=2, hotkey='hk2', github_id='solver-a')
+        miner_a.rejected_solving_pr_keys = {('entrius/gittensor-ui', 100)}
+
+        miner_b = _eval(uid=1, github_id='999')
+
+        _run(
+            run_issue_discovery(
+                {1: miner_b, 2: miner_a},
+                _mirror_repos('entrius/gittensor-ui'),
+                _EMPTY_LANGS,
+                _EMPTY_TOKEN_CONFIG,
+                client=client,
+            )
+        )
+
+        # Issue still counts toward credibility (was successfully classified
+        # 'solved') but earns no discovery score.
+        assert miner_b.total_solved_issues == 1
+        assert miner_b.total_valid_solved_issues == 0
+        assert miner_b.issue_discovery_score == 0
+        # No file fetch went out — the gate fired before any HTTP call.
+        client.get_pr_files.assert_not_called()
 
 
 class TestOpenIssueSpamSourceIsMirror:

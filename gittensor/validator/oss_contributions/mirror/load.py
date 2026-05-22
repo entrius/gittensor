@@ -119,6 +119,11 @@ def _maybe_add_pr(
         should_skip, reason = _should_skip_merged_mirror_pr(candidate, repo_config)
         if should_skip:
             bt.logging.debug(reason or '')
+            # Record the rejection so issue discovery refuses to award discovery
+            # score when this same PR shows up as a solving PR. Without this, a
+            # self-merge-without-approval PR loses OSS credit but the issue's
+            # discoverer still pockets discovery rewards on the 30% emission pool.
+            eval_.rejected_solving_pr_keys.add((pr.repo_full_name, pr.pr_number))
             return
         eval_.merged_prs.append(candidate)
     else:

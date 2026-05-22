@@ -99,8 +99,11 @@ def test_zeroed_thresholds_repo_has_no_gate():
     assert pr.earned_score == 10.0  # single PR, credibility 1.0
 
 
-def test_per_repo_credibility_multiplier():
-    """An eligible repo applies its own credibility ratio as the PR multiplier."""
+def test_credibility_is_gate_only_not_per_pr_multiplier():
+    """Once a repo clears the credibility gate, the ratio is NOT re-applied as a
+    per-PR multiplier. PRs stand on their own — otherwise the same signal is
+    charged twice, taxing a miner's busiest repo on every merged PR.
+    """
     merged = [_merged('foo/a', n) for n in range(1, 5)]
     closed = [_mirror_pr('foo/a', 99, state='CLOSED')]
 
@@ -110,11 +113,13 @@ def test_per_repo_credibility_multiplier():
 
     finalize_miner_scores({1: evaluation}, {'foo/a': _gate_repo()})
 
-    # credibility = 4 / (4 + 1) = 0.80, exactly at the gate
+    # credibility = 4 / (4 + 1) = 0.80, exactly at the gate — eligible
     assert evaluation.repo_evaluations['foo/a'].is_eligible is True
     assert evaluation.repo_evaluations['foo/a'].credibility == 0.8
-    assert all(pr.credibility_multiplier == 0.8 for pr in merged)
-    assert all(pr.earned_score == 8.0 for pr in merged)
+    # Credibility multiplier stays neutral on every PR — the 0.80 ratio
+    # already did its job at the gate.
+    assert all(pr.credibility_multiplier == 1.0 for pr in merged)
+    assert all(pr.earned_score == 10.0 for pr in merged)
 
 
 def test_open_pr_spam_is_scoped_per_repo():

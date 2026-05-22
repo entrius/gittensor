@@ -173,13 +173,16 @@ def _score_eligible_repo_prs(
     open_prs: List['ScoredPR'],
     cfg: ResolvedEligibility,
 ) -> None:
-    """Compute earned scores for an eligible repository's merged PRs."""
+    """Compute earned scores for an eligible repository's merged PRs.
+
+    Credibility is the eligibility gate only; once a repo clears the gate, PRs
+    earn on their own merits (review quality, label, time decay). It is not
+    re-applied as a per-PR multiplier.
+    """
     spam_multiplier = calculate_pr_spam_penalty_multiplier(cfg, len(open_prs), repo_eval.total_token_score)
-    credibility_multiplier = round(repo_eval.credibility, 2)
 
     for pr in merged:
         pr.open_pr_spam_multiplier = spam_multiplier
-        pr.credibility_multiplier = credibility_multiplier
         pr.calculate_final_earned_score()
         repo_eval.total_score += pr.earned_score
 

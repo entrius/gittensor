@@ -482,6 +482,48 @@ class TestRepositoryConfigScoringBlock:
         with pytest.raises(RepositoryRegistryError):
             lw.load_master_repo_weights()
 
+    def test_loader_rejects_zero_divisor_eligibility(self, tmp_path, monkeypatch):
+        """A divisor knob set to 0 is rejected with the divisor note in the message."""
+        from gittensor.validator.utils import load_weights as lw
+
+        (tmp_path / 'master_repositories.json').write_text(
+            json.dumps({'foo/bad': {'emission_share': 0.5, 'eligibility': {'open_pr_threshold_token_score': 0}}})
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: tmp_path)
+
+        with pytest.raises(RepositoryRegistryError, match=r'must be > 0 \(used as a divisor\)'):
+            lw.load_master_repo_weights()
+
+    def test_loader_rejects_out_of_range_time_decay(self, tmp_path, monkeypatch):
+        """A nested scoring.time_decay knob is range-checked like a top-level one."""
+        from gittensor.validator.utils import load_weights as lw
+
+        (tmp_path / 'master_repositories.json').write_text(
+            json.dumps({'foo/bad': {'emission_share': 0.5, 'scoring': {'time_decay': {'sigmoid_steepness': 10.0}}}})
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: tmp_path)
+
+        with pytest.raises(RepositoryRegistryError, match=r'scoring\.time_decay\.sigmoid_steepness must be within'):
+            lw.load_master_repo_weights()
+
+    def test_range_error_messages_reflect_bound_kind(self, tmp_path, monkeypatch):
+        """Inclusive vs exclusive bounds render the right bracket in the message."""
+        from gittensor.validator.utils import load_weights as lw
+
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: tmp_path)
+
+        (tmp_path / 'master_repositories.json').write_text(
+            json.dumps({'foo/bad': {'emission_share': 0.5, 'eligibility': {'min_credibility': 1.5}}})
+        )
+        with pytest.raises(RepositoryRegistryError, match=r'min_credibility must be within \[0, 1\]'):
+            lw.load_master_repo_weights()
+
+        (tmp_path / 'master_repositories.json').write_text(
+            json.dumps({'foo/bad': {'emission_share': 0.5, 'scoring': {'review_penalty_rate': 0.0}}})
+        )
+        with pytest.raises(RepositoryRegistryError, match=r'review_penalty_rate must be within \(0, 1\]'):
+            lw.load_master_repo_weights()
+
 
 class TestRepositoryConfigMaintainerCut:
     """Dataclass + JSON-parsing tests for the maintainer_cut emission carve-out."""

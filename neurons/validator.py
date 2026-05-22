@@ -53,7 +53,13 @@ class Validator(BaseValidatorNeuron):
     evaluation_cache: MinerEvaluationCache = None
 
     def __init__(self, config=None):
+        self._suppress_startup_state_save = True
         super(Validator, self).__init__(config=config)
+
+        bt.logging.info('load_state()')
+        self.load_state()
+        self._suppress_startup_state_save = False
+        self.save_state()
 
         if os.environ.get('DEV_MODE'):
             bt.logging.warning('⚠ DEV_MODE is active — maintainer PR filtering is bypassed')
@@ -96,8 +102,12 @@ class Validator(BaseValidatorNeuron):
             except Exception as e:
                 bt.logging.error(f'Failed to initialize wandb run: {e}')
 
-        bt.logging.info('load_state()')
-        self.load_state()
+    def save_state(self):
+        if getattr(self, '_suppress_startup_state_save', False):
+            bt.logging.info('Skipping validator state save before persisted state is loaded.')
+            return
+
+        super().save_state()
 
     async def bulk_store_evaluation(
         self,

@@ -17,7 +17,9 @@ from gittensor.cli.miner_commands.helpers import (
     _pat_post_aggregate_counts,
     _pat_post_row_category,
     _require_validator_axons,
+    _resolve_endpoint,
 )
+from gittensor.constants import NETWORK_MAP
 
 
 def _fake_metagraph(rows: list[tuple[float, bool, float]]):
@@ -141,6 +143,64 @@ class TestMinerCheck:
         result = runner.invoke(cli, ['m', 'check', '--help'])
         assert result.exit_code == 0
         assert 'Check how many validators' in result.output
+
+
+class TestResolveEndpoint:
+    """Unit tests for miner _resolve_endpoint config-fallback precedence.
+
+    Precedence (high to low):
+      1. --rpc-url flag
+      2. --network flag
+      3. recognized config `network`  ← must beat stale `ws_endpoint`
+      4. config `ws_endpoint`
+      5. default finney
+    """
+
+    def test_rpc_url_beats_everything(self):
+        assert _resolve_endpoint(network=None, rpc_url='ws://custom:9944') == 'ws://custom:9944'
+
+    def test_network_flag_beats_config(self):
+        assert _resolve_endpoint(network='finney', rpc_url=None) == NETWORK_MAP['finney']
+
+    def test_config_recognized_network_beats_stale_ws_endpoint(self, monkeypatch):
+        """Regression: config network=finney must win over a stale ws_endpoint."""
+
+        def fake_config(key):
+            return {'network': 'finney', 'ws_endpoint': 'ws://127.0.0.1:9944'}.get(key)
+
+        monkeypatch.setattr('gittensor.cli.miner_commands.helpers._load_config_value', fake_config)
+        assert _resolve_endpoint(None, None) == NETWORK_MAP['finney']
+
+    def test_config_test_network_beats_stale_ws_endpoint(self, monkeypatch):
+        """Regression: config network=test must win over a stale ws_endpoint."""
+
+        def fake_config(key):
+            return {'network': 'test', 'ws_endpoint': 'ws://127.0.0.1:9944'}.get(key)
+
+        monkeypatch.setattr('gittensor.cli.miner_commands.helpers._load_config_value', fake_config)
+        assert _resolve_endpoint(None, None) == NETWORK_MAP['test']
+
+    def test_unrecognized_config_network_falls_back_to_ws_endpoint(self, monkeypatch):
+        """Unrecognized config network must not block ws_endpoint from being used."""
+
+        def fake_config(key):
+            return {'network': 'my_custom_chain', 'ws_endpoint': 'ws://mynode:9944'}.get(key)
+
+        monkeypatch.setattr('gittensor.cli.miner_commands.helpers._load_config_value', fake_config)
+        assert _resolve_endpoint(None, None) == 'ws://mynode:9944'
+
+    def test_ws_endpoint_used_when_no_config_network(self, monkeypatch):
+        """ws_endpoint alone is still honoured when no network is configured."""
+
+        def fake_config(key):
+            return {'ws_endpoint': 'ws://mynode:9944'}.get(key)
+
+        monkeypatch.setattr('gittensor.cli.miner_commands.helpers._load_config_value', fake_config)
+        assert _resolve_endpoint(None, None) == 'ws://mynode:9944'
+
+    def test_default_finney_when_nothing_configured(self, monkeypatch):
+        monkeypatch.setattr('gittensor.cli.miner_commands.helpers._load_config_value', lambda _: None)
+        assert _resolve_endpoint(None, None) == NETWORK_MAP['finney']
 
 
 class TestCliVersion:

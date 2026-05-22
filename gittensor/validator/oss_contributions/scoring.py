@@ -1,37 +1,33 @@
 # The MIT License (MIT)
 # Copyright © 2025 Entrius
 
-from datetime import datetime
-from typing import TYPE_CHECKING, Dict, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional
 
 import bittensor as bt
 
-from gittensor.classes import MinerEvaluation
+from gittensor.classes import MinerEvaluation, RepoEvaluation
 
 if TYPE_CHECKING:
     from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredPR
-from gittensor.constants import (
-    EXCESSIVE_PR_PENALTY_BASE_THRESHOLD,
-    MAX_OPEN_PR_REVIEW_COLLATERAL_MULTIPLIER,
-    MAX_OPEN_PR_THRESHOLD,
-    OPEN_PR_COLLATERAL_PERCENT,
-    OPEN_PR_THRESHOLD_TOKEN_SCORE,
-    PIONEER_DIVIDEND_MAX_RATIO,
-    PIONEER_DIVIDEND_RATE_1ST,
-    PIONEER_DIVIDEND_RATE_2ND,
-    PIONEER_DIVIDEND_RATE_REST,
-    REVIEW_PENALTY_RATE,
-)
+from gittensor.constants import MAX_OPEN_PR_REVIEW_COLLATERAL_MULTIPLIER
 from gittensor.validator.oss_contributions.credibility import check_eligibility
-from gittensor.validator.utils.load_weights import RepositoryConfig
+from gittensor.validator.utils.load_weights import (
+    RepositoryConfig,
+    ResolvedEligibility,
+    ResolvedScoring,
+    resolve_eligibility,
+    resolve_scoring,
+)
 
 
-def calculate_review_quality_multiplier(changes_requested_count: int, pr_number: Optional[int] = None) -> float:
+def calculate_review_quality_multiplier(
+    changes_requested_count: int, review_penalty_rate: float, pr_number: Optional[int] = None
+) -> float:
     """Calculate the review quality multiplier based on maintainer CHANGES_REQUESTED reviews.
 
-    Formula: max(0.0, 1.0 - REVIEW_PENALTY_RATE × N)
+    Formula: max(0.0, 1.0 - review_penalty_rate × N)
     """
-    multiplier = max(0.0, 1.0 - REVIEW_PENALTY_RATE * changes_requested_count)
+    multiplier = max(0.0, 1.0 - review_penalty_rate * changes_requested_count)
     if changes_requested_count > 0:
         ctx = f' (PR #{pr_number})' if pr_number else ''
         bt.logging.info(
@@ -41,16 +37,18 @@ def calculate_review_quality_multiplier(changes_requested_count: int, pr_number:
     return multiplier
 
 
-def calculate_review_collateral_multiplier(changes_requested_count: int, pr_number: Optional[int] = None) -> float:
+def calculate_review_collateral_multiplier(
+    changes_requested_count: int, review_penalty_rate: float, pr_number: Optional[int] = None
+) -> float:
     """Calculate the open-PR collateral multiplier from maintainer CHANGES_REQUESTED reviews.
 
     Unlike ``review_quality_multiplier`` for earned scores, this increases
     collateral so non-merge-ready open PRs reserve more score instead of less.
-    Formula: min(MAX_OPEN_PR_REVIEW_COLLATERAL_MULTIPLIER, 1.0 + REVIEW_PENALTY_RATE × N)
+    Formula: min(MAX_OPEN_PR_REVIEW_COLLATERAL_MULTIPLIER, 1.0 + review_penalty_rate × N)
     """
     multiplier = min(
         MAX_OPEN_PR_REVIEW_COLLATERAL_MULTIPLIER,
-        1.0 + REVIEW_PENALTY_RATE * changes_requested_count,
+        1.0 + review_penalty_rate * changes_requested_count,
     )
     if changes_requested_count > 0:
         ctx = f' (PR #{pr_number})' if pr_number else ''
@@ -61,112 +59,40 @@ def calculate_review_collateral_multiplier(changes_requested_count: int, pr_numb
     return multiplier
 
 
-def calculate_open_pr_threshold(total_token_score: float = 0.0) -> int:
-    """Calculate dynamic open PR threshold based on total token score.
+def calculate_open_pr_threshold(cfg: ResolvedEligibility, total_token_score: float = 0.0) -> int:
+    """Calculate the dynamic open-PR threshold for one repository.
 
-    Bonus = floor(total_token_score / OPEN_PR_THRESHOLD_TOKEN_SCORE)
-    Threshold = min(BASE_THRESHOLD + bonus, MAX_OPEN_PR_THRESHOLD)
+    Bonus = floor(total_token_score / cfg.open_pr_threshold_token_score)
+    Threshold = min(cfg.excessive_pr_penalty_base_threshold + bonus, cfg.max_open_pr_threshold)
     """
-    bonus = int(total_token_score // OPEN_PR_THRESHOLD_TOKEN_SCORE)
-    return min(EXCESSIVE_PR_PENALTY_BASE_THRESHOLD + bonus, MAX_OPEN_PR_THRESHOLD)
+    bonus = int(total_token_score // cfg.open_pr_threshold_token_score)
+    return min(cfg.excessive_pr_penalty_base_threshold + bonus, cfg.max_open_pr_threshold)
 
 
-def calculate_pr_spam_penalty_multiplier(total_open_prs: int, total_token_score: float = 0.0) -> float:
-    """Apply penalty for excessive open PRs.
+def calculate_pr_spam_penalty_multiplier(
+    cfg: ResolvedEligibility, total_open_prs: int, total_token_score: float = 0.0
+) -> float:
+    """Apply the penalty for excessive open PRs within one repository.
 
-    Binary multiplier: 1.0 if open PRs <= threshold, 0.0 otherwise.
+    Binary multiplier: 1.0 if the repo's open PRs <= threshold, 0.0 otherwise.
     """
-    threshold = calculate_open_pr_threshold(total_token_score)
+    threshold = calculate_open_pr_threshold(cfg, total_token_score)
     return 1.0 if total_open_prs <= threshold else 0.0
-
-
-def calculate_pioneer_dividends(
-    miner_evaluations: Dict[int, MinerEvaluation],
-) -> None:
-    """Determine pioneers and set pioneer_rank + pioneer_dividend on each PR.
-
-    For each repo, the pioneer is the miner with the earliest merged PR that
-    passes the quality gate (is_pioneer_eligible). The pioneer's earliest PR
-    on that repo earns a dividend based on ALL followers' earned_scores (post-
-    multiplier), using per-position rates (30%/20%/10%). The dividend uses the
-    follower's multipliers, not the pioneer's — so it reflects follower quality.
-
-    Must be called AFTER all earned_scores have been computed.
-    """
-    pr_index: Dict[str, Dict[int, list]] = {}
-    repo_contributions: Dict[str, Dict[int, Tuple[datetime, int, float]]] = {}
-
-    for uid, evaluation in miner_evaluations.items():
-        for pr in evaluation.merged_prs:
-            if not pr.is_pioneer_eligible():
-                continue
-            assert pr.merged_at is not None
-            repo = pr.repository_full_name
-            pr_index.setdefault(repo, {}).setdefault(uid, []).append(pr)
-
-            current = repo_contributions.setdefault(repo, {}).get(uid)
-            if current is None:
-                repo_contributions[repo][uid] = (pr.merged_at, pr.number, pr.earned_score)
-            else:
-                earliest_at, earliest_num, total_score = current
-                new_total = total_score + pr.earned_score
-                if pr.merged_at < earliest_at or (pr.merged_at == earliest_at and pr.number < earliest_num):
-                    repo_contributions[repo][uid] = (pr.merged_at, pr.number, new_total)
-                else:
-                    repo_contributions[repo][uid] = (earliest_at, earliest_num, new_total)
-
-    for repo, uid_entries in repo_contributions.items():
-        sorted_uids = sorted(uid_entries.items(), key=lambda x: (x[1][0], x[1][1]))
-
-        for rank_pos, (uid, _) in enumerate(sorted_uids):
-            for pr in pr_index[repo][uid]:
-                pr.pioneer_rank = rank_pos + 1
-
-        dividend = 0.0
-        for pos, (_, entry) in enumerate(sorted_uids[1:]):
-            follower_earned = entry[2]
-            if pos == 0:
-                dividend += follower_earned * PIONEER_DIVIDEND_RATE_1ST
-            elif pos == 1:
-                dividend += follower_earned * PIONEER_DIVIDEND_RATE_2ND
-            else:
-                dividend += follower_earned * PIONEER_DIVIDEND_RATE_REST
-
-        if dividend <= 0:
-            continue
-
-        pioneer_uid = sorted_uids[0][0]
-        pioneer_pr_number = sorted_uids[0][1][1]
-        pioneer_pr = next(pr for pr in pr_index[repo][pioneer_uid] if pr.number == pioneer_pr_number)
-        max_dividend = pioneer_pr.earned_score * PIONEER_DIVIDEND_MAX_RATIO
-        capped = min(dividend, max_dividend)
-        pioneer_pr.pioneer_dividend = round(capped, 2)
-        pioneer_pr.earned_score = round(pioneer_pr.earned_score + pioneer_pr.pioneer_dividend, 2)
-
-        cap_note = f' (capped from {dividend:.2f})' if capped < dividend else ''
-        bt.logging.info(
-            f'Pioneer dividend | repo={repo} pioneer=uid {pioneer_uid} '
-            f'followers={len(sorted_uids) - 1} dividend={capped:.2f}{cap_note}'
-        )
-
-
-def _pr_bypasses_eligibility(
-    pr: 'ScoredPR',
-    master_repositories: Dict[str, RepositoryConfig],
-) -> bool:
-    repo_config = master_repositories.get(pr.repository_full_name)
-    return repo_config is not None and not repo_config.eligibility_mode
 
 
 def finalize_miner_scores(
     miner_evaluations: Dict[int, MinerEvaluation],
     master_repositories: Optional[Dict[str, RepositoryConfig]] = None,
 ) -> None:
-    """Finalize all miner scores: compute earned_scores, then apply pioneer dividends, then collateral."""
+    """Finalize miner scores per repository.
+
+    Each repository gates and scores independently, from only its own PRs,
+    against its own resolved eligibility config. Per-repo results land on
+    ``evaluation.repo_evaluations`` and roll up into the round-level scalars.
+    """
     bt.logging.info('**Finalizing miner scores**')
     master_repositories = master_repositories or {}
 
-    # Phase 1: Compute all earned_scores (base × multipliers) for every miner
     for uid, evaluation in miner_evaluations.items():
         if not evaluation:
             continue
@@ -176,112 +102,126 @@ def finalize_miner_scores(
         bt.logging.info(f'UID {uid}')
         bt.logging.info('=' * 50)
 
-        # Compute collateral on each open PR; defer accumulation so eligibility-disabled
-        # repos don't reduce gated repo rewards (and vice versa).
         for pr in evaluation.open_prs:
-            pr.collateral_score = calculate_open_pr_collateral_score(pr)
+            repo_config = master_repositories.get(pr.repository_full_name.lower())
+            scoring_cfg = resolve_scoring(repo_config.scoring if repo_config else None)
+            pr.collateral_score = calculate_open_pr_collateral_score(pr, scoring_cfg)
 
-        has_contributions = evaluation.total_merged_prs > 0 or evaluation.total_closed_prs > 0
-
-        if not has_contributions:
-            evaluation.total_collateral_score += sum(pr.collateral_score for pr in evaluation.open_prs)
-            bt.logging.info('No merged or closed PRs - skipping evaluation')
-            continue
-
-        gated_open_prs = [pr for pr in evaluation.open_prs if not _pr_bypasses_eligibility(pr, master_repositories)]
-        bypass_open_prs = [pr for pr in evaluation.open_prs if _pr_bypasses_eligibility(pr, master_repositories)]
-        gated_merged_prs = [pr for pr in evaluation.merged_prs if not _pr_bypasses_eligibility(pr, master_repositories)]
-        gated_closed_prs = [pr for pr in evaluation.closed_prs if not _pr_bypasses_eligibility(pr, master_repositories)]
-        bypass_merged_prs = [pr for pr in evaluation.merged_prs if _pr_bypasses_eligibility(pr, master_repositories)]
-
-        # Check eligibility for the gated portfolio only. eligibility_mode=false
-        # PRs must neither unlock nor penalize repos where the gate still applies.
-        is_eligible, credibility, reason = check_eligibility(gated_merged_prs, gated_closed_prs)
-        evaluation.is_eligible = is_eligible
-        evaluation.credibility = credibility
-
-        scorable_prs: list['ScoredPR'] = []
-        if is_eligible:
-            scorable_prs.extend(gated_merged_prs)
-        elif bypass_merged_prs:
-            bt.logging.info(
-                f'UID {uid} ineligible: {reason} — scoring '
-                f'{len(bypass_merged_prs)} PR(s) from eligibility_mode=false repos'
-            )
-        else:
-            bt.logging.info(f'UID {uid} ineligible: {reason} — score set to 0')
-            evaluation.total_collateral_score += sum(pr.collateral_score for pr in gated_open_prs)
-            continue
-        scorable_prs.extend(bypass_merged_prs)
-
-        gated_token_score = sum(pr.token_score for pr in gated_merged_prs)
-        gated_spam_multiplier = calculate_pr_spam_penalty_multiplier(len(gated_open_prs), gated_token_score)
-
-        # Bypass spam math intentionally uses total_open_prs (one-way isolation): gated
-        # open PRs penalize bypass earnings so eligibility-disabled repos can't be used
-        # as a spam-vector escape hatch.
-        bypass_token_score = sum(pr.token_score for pr in bypass_merged_prs)
-        bypass_spam_multiplier = calculate_pr_spam_penalty_multiplier(evaluation.total_open_prs, bypass_token_score)
-
-        if is_eligible:
-            evaluation.total_collateral_score += sum(pr.collateral_score for pr in gated_open_prs)
-        if bypass_merged_prs:
-            evaluation.total_collateral_score += sum(pr.collateral_score for pr in bypass_open_prs)
-
-        credibility_multiplier = round(credibility, 2)
-
-        for pr in scorable_prs:
-            bypasses_gate = _pr_bypasses_eligibility(pr, master_repositories)
-            pr.open_pr_spam_multiplier = bypass_spam_multiplier if bypasses_gate else gated_spam_multiplier
-            pr.credibility_multiplier = 1.0 if bypasses_gate else credibility_multiplier
-            pr.calculate_final_earned_score()
-
-            evaluation.total_token_score += pr.token_score
-            evaluation.total_structural_count += pr.structural_count
-            evaluation.total_structural_score += pr.structural_score
-            evaluation.total_leaf_count += pr.leaf_count
-            evaluation.total_leaf_score += pr.leaf_score
-
-    # Phase 2: Calculate pioneer dividends from follower earned_scores
-    calculate_pioneer_dividends(miner_evaluations)
-
-    # Phase 3: Aggregate totals (including dividends), collateral, logging
-    for uid, evaluation in miner_evaluations.items():
-        if not evaluation:
-            continue
-
-        has_contributions = evaluation.total_merged_prs > 0 or evaluation.total_closed_prs > 0
-        if not has_contributions:
-            continue
-
-        # Aggregate scores (earned_score now includes pioneer_dividend from Phase 2).
-        for pr in evaluation.merged_prs:
-            evaluation.base_total_score += pr.base_score
-            evaluation.total_score += pr.earned_score
-            evaluation.total_nodes_scored += pr.total_nodes_scored
-
-        earned_score = evaluation.total_score
-        evaluation.total_score = max(0.0, earned_score - evaluation.total_collateral_score)
-        evaluation.unique_repos_count = len(evaluation.unique_repos_contributed_to)
-
-        bt.logging.info('')
-        bt.logging.info('Summary:')
-        bt.logging.info(
-            f'├─ Score: {earned_score:.2f} - {evaluation.total_collateral_score:.2f} collateral = {evaluation.total_score:.2f}'
-        )
-        bt.logging.info(
-            f'├─ PRs: {evaluation.total_merged_prs} merged | {evaluation.total_open_prs} open | {evaluation.total_closed_prs} closed'
-        )
-        bt.logging.info(f'└─ Eligible: {evaluation.is_eligible} | Credibility: {evaluation.credibility:.2f}')
+        _score_miner_repos(evaluation, master_repositories)
+        _roll_up_miner_totals(evaluation)
 
     bt.logging.info('Finalization complete.')
 
 
-def calculate_open_pr_collateral_score(pr: 'ScoredPR') -> float:
+def _group_prs_by_repo(prs: List['ScoredPR']) -> Dict[str, List['ScoredPR']]:
+    grouped: Dict[str, List['ScoredPR']] = {}
+    for pr in prs:
+        grouped.setdefault(pr.repository_full_name.lower(), []).append(pr)
+    return grouped
+
+
+def _score_miner_repos(
+    evaluation: MinerEvaluation,
+    master_repositories: Dict[str, RepositoryConfig],
+) -> None:
+    """Gate and score each repository the miner contributed to, independently."""
+    merged_by_repo = _group_prs_by_repo(evaluation.merged_prs)
+    open_by_repo = _group_prs_by_repo(evaluation.open_prs)
+    closed_by_repo = _group_prs_by_repo(evaluation.closed_prs)
+
+    for repo_name in sorted(set(merged_by_repo) | set(open_by_repo) | set(closed_by_repo)):
+        repo_config = master_repositories.get(repo_name)
+        if repo_config is None:
+            # PRs from untracked repos are dropped upstream; skip defensively.
+            continue
+        cfg = resolve_eligibility(repo_config.eligibility)
+        merged = merged_by_repo.get(repo_name, [])
+        open_prs = open_by_repo.get(repo_name, [])
+        closed = closed_by_repo.get(repo_name, [])
+
+        repo_eval = RepoEvaluation(
+            repository_full_name=repo_name,
+            total_merged_prs=len(merged),
+            total_open_prs=len(open_prs),
+            total_closed_prs=len(closed),
+        )
+        repo_eval.total_collateral_score = sum(pr.collateral_score for pr in open_prs)
+        repo_eval.base_total_score = sum(pr.base_score for pr in merged)
+        repo_eval.total_token_score = sum(pr.token_score for pr in merged)
+        repo_eval.total_structural_count = sum(pr.structural_count for pr in merged)
+        repo_eval.total_structural_score = sum(pr.structural_score for pr in merged)
+        repo_eval.total_leaf_count = sum(pr.leaf_count for pr in merged)
+        repo_eval.total_leaf_score = sum(pr.leaf_score for pr in merged)
+        repo_eval.total_nodes_scored = sum(pr.total_nodes_scored for pr in merged)
+
+        is_eligible, credibility, reason = check_eligibility(merged, closed, cfg)
+        repo_eval.is_eligible = is_eligible
+        repo_eval.credibility = credibility
+
+        if is_eligible:
+            _score_eligible_repo_prs(repo_eval, merged, open_prs, cfg)
+        else:
+            bt.logging.info(f'├─ {repo_name}: ineligible — {reason}')
+
+        repo_eval.total_score = max(0.0, repo_eval.total_score - repo_eval.total_collateral_score)
+        evaluation.repo_evaluations[repo_name] = repo_eval
+
+
+def _score_eligible_repo_prs(
+    repo_eval: RepoEvaluation,
+    merged: List['ScoredPR'],
+    open_prs: List['ScoredPR'],
+    cfg: ResolvedEligibility,
+) -> None:
+    """Compute earned scores for an eligible repository's merged PRs."""
+    spam_multiplier = calculate_pr_spam_penalty_multiplier(cfg, len(open_prs), repo_eval.total_token_score)
+    credibility_multiplier = round(repo_eval.credibility, 2)
+
+    for pr in merged:
+        pr.open_pr_spam_multiplier = spam_multiplier
+        pr.credibility_multiplier = credibility_multiplier
+        pr.calculate_final_earned_score()
+        repo_eval.total_score += pr.earned_score
+
+    bt.logging.info(
+        f'├─ {repo_eval.repository_full_name}: eligible — '
+        f'credibility {repo_eval.credibility:.2f}, earned {repo_eval.total_score:.2f}'
+    )
+
+
+def _roll_up_miner_totals(evaluation: MinerEvaluation) -> None:
+    """Roll the per-repo evaluations up into the miner's round-level scalars."""
+    repo_evals = list(evaluation.repo_evaluations.values())
+
+    evaluation.base_total_score = sum(re.base_total_score for re in repo_evals)
+    evaluation.total_score = sum(re.total_score for re in repo_evals)
+    evaluation.total_collateral_score = sum(re.total_collateral_score for re in repo_evals)
+    evaluation.total_token_score = sum(re.total_token_score for re in repo_evals)
+    evaluation.total_structural_count = sum(re.total_structural_count for re in repo_evals)
+    evaluation.total_structural_score = sum(re.total_structural_score for re in repo_evals)
+    evaluation.total_leaf_count = sum(re.total_leaf_count for re in repo_evals)
+    evaluation.total_leaf_score = sum(re.total_leaf_score for re in repo_evals)
+    evaluation.total_nodes_scored = sum(re.total_nodes_scored for re in repo_evals)
+    evaluation.is_eligible = any(re.is_eligible for re in repo_evals)
+    evaluation.credibility = max((re.credibility for re in repo_evals), default=0.0)
+    evaluation.unique_repos_count = len(evaluation.unique_repos_contributed_to)
+
+    eligible_repos = sum(1 for re in repo_evals if re.is_eligible)
+    bt.logging.info('')
+    bt.logging.info('Summary:')
+    bt.logging.info(f'├─ Score: {evaluation.total_score:.2f} | collateral {evaluation.total_collateral_score:.2f}')
+    bt.logging.info(
+        f'├─ PRs: {evaluation.total_merged_prs} merged | {evaluation.total_open_prs} open '
+        f'| {evaluation.total_closed_prs} closed'
+    )
+    bt.logging.info(f'└─ Eligible in {eligible_repos}/{len(repo_evals)} repo(s)')
+
+
+def calculate_open_pr_collateral_score(pr: 'ScoredPR', scoring: ResolvedScoring) -> float:
     """
     Calculate collateral score for an open PR.
 
-    Collateral = base_score * applicable_multipliers * OPEN_PR_COLLATERAL_PERCENT
+    Collateral = base_score * applicable_multipliers * open_pr_collateral_percent
 
     Applicable multipliers: issue, label, review_collateral
     NOT applicable: time_decay (merge-based), credibility_multiplier (merge-based),
@@ -292,16 +232,19 @@ def calculate_open_pr_collateral_score(pr: 'ScoredPR') -> float:
     multipliers = {
         'issue': pr.issue_multiplier,
         'label': pr.label_multiplier,
-        'review_collateral': calculate_review_collateral_multiplier(pr.changes_requested_count, pr.number),
+        'review_collateral': calculate_review_collateral_multiplier(
+            pr.changes_requested_count, scoring.review_penalty_rate, pr.number
+        ),
     }
 
     potential_score = pr.base_score * prod(multipliers.values())
-    collateral_score = potential_score * OPEN_PR_COLLATERAL_PERCENT
+    collateral_score = potential_score * scoring.open_pr_collateral_percent
 
     mult_str = ' | '.join([f'{k}: {v:.2f}' for k, v in multipliers.items()])
     bt.logging.info(
         f'OPEN PR #{pr.number} | base: {pr.base_score:.2f} | {mult_str} | '
-        f'potential: {potential_score:.2f} | collateral ({OPEN_PR_COLLATERAL_PERCENT * 100:.0f}%): {collateral_score:.2f}'
+        f'potential: {potential_score:.2f} '
+        f'| collateral ({scoring.open_pr_collateral_percent * 100:.0f}%): {collateral_score:.2f}'
     )
 
     return collateral_score

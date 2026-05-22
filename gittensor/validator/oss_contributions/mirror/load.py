@@ -2,14 +2,13 @@
 
 The mirror returns one bundle per PR (with all scoring inputs inlined), so
 loading is a single HTTP call regardless of how many repos the miner has
-touched.
+touched. The call sends each repo's ``pr_lookback_days`` window, so the mirror
+applies the per-repo time cutoffs server-side and returns only in-window PRs.
 
 Filtering applied at load time:
-- Repo not in master_repositories: dropped (mirror returns all tracked repos).
-- PR created after repo became inactive: dropped.
+- Repo not in master_repositories: dropped (defensive — the per-repo request
+  already scopes the response to the registered repos).
 - PR author is a maintainer (OWNER/MEMBER/COLLABORATOR): silently dropped.
-- CLOSED PRs created before the lookback window: dropped — closing an old PR
-  shouldn't trigger a fresh credibility penalty.
 - MERGED PRs that fail ``_should_skip_merged_mirror_pr`` (base_ref, head_ref,
   self-merge w/o approval, etc.): dropped. Applied at LOAD time so the
   merged_count used by ``check_eligibility`` isn't inflated by ineligible PRs.
@@ -22,13 +21,12 @@ from typing import Dict, Optional
 import bittensor as bt
 
 from gittensor.classes import MinerEvaluation
-from gittensor.constants import MAINTAINER_ASSOCIATIONS, PR_LOOKBACK_DAYS
+from gittensor.constants import MAINTAINER_ASSOCIATIONS
 from gittensor.utils.mirror.client import MirrorClient, MirrorRequestError
 from gittensor.utils.mirror.models import MirrorPullRequest
 from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredPR
 from gittensor.validator.oss_contributions.mirror.scoring import _should_skip_merged_mirror_pr
-from gittensor.validator.utils.datetime_utils import parse_github_iso_to_utc
-from gittensor.validator.utils.load_weights import RepositoryConfig
+from gittensor.validator.utils.load_weights import RepositoryConfig, resolve_scoring
 
 
 def load_miner_prs(
@@ -58,10 +56,16 @@ def load_miner_prs(
         return
 
     client = client or MirrorClient()
-    lookback_date = datetime.now(timezone.utc) - timedelta(days=PR_LOOKBACK_DAYS)
+    now = datetime.now(timezone.utc)
+    # Each repo is windowed by its own pr_lookback_days; the mirror applies the
+    # per-repo cutoffs server-side and returns only in-window PRs.
+    since_by_repo = {
+        name: now - timedelta(days=resolve_scoring(rc.scoring).pr_lookback_days)
+        for name, rc in master_repositories.items()
+    }
 
     try:
-        response = client.get_miner_pulls(eval_.github_id, since=lookback_date)
+        response = client.get_miner_pulls(eval_.github_id, since_by_repo=since_by_repo)
     except MirrorRequestError as e:
         bt.logging.error(f'PR fetch failed for UID {eval_.uid}: {e}')
         eval_.mirror_pr_fetch_failed = True
@@ -70,7 +74,7 @@ def load_miner_prs(
 
     for pr in response.pull_requests:
         try:
-            _maybe_add_pr(eval_, pr, master_repositories, lookback_date)
+            _maybe_add_pr(eval_, pr, master_repositories)
         except Exception as e:
             bt.logging.warning(f'Error processing PR #{pr.pr_number} ({pr.repo_full_name}): {e}')
 
@@ -83,27 +87,19 @@ def _maybe_add_pr(
     eval_: MinerEvaluation,
     pr: MirrorPullRequest,
     master_repositories: Dict[str, RepositoryConfig],
-    lookback_date: datetime,
 ) -> None:
-    """Apply load-time filters and bucket pr by state if it passes."""
+    """Apply load-time filters and bucket pr by state if it passes.
+
+    Time-windowing (each repo's ``pr_lookback_days``) is applied by the mirror,
+    so every PR here is already inside its repo's window.
+    """
 
     repo_config = master_repositories.get(pr.repo_full_name)
     if repo_config is None:
-        # Mirror tracks more repos than the scoring set; skip-noise dominates the
-        # log at info level when master_repositories is small. Demoted to debug.
+        # Defensive: the per-repo request already scopes the response, but a
+        # stray repo would otherwise have no config to score against.
         bt.logging.debug(f'Skipping PR #{pr.pr_number} in {pr.repo_full_name} - not in master_repositories')
         return
-
-    # Skip PR if it was created after the repo became inactive
-    if repo_config.inactive_at is not None:
-        inactive_dt = parse_github_iso_to_utc(repo_config.inactive_at)
-        if pr.created_at >= inactive_dt:
-            bt.logging.info(
-                f'Skipping PR #{pr.pr_number} in {pr.repo_full_name} - '
-                f'PR was created after repo became inactive '
-                f'(created: {pr.created_at.isoformat()}, inactive: {inactive_dt.isoformat()})'
-            )
-            return
 
     # Silent maintainer skip — logging every maintainer-merged PR would dominate
     # the skip-reason log.
@@ -113,10 +109,6 @@ def _maybe_add_pr(
     if pr.state == 'OPEN':
         eval_.open_prs.append(ScoredPR(pr=pr))
     elif pr.state == 'CLOSED':
-        # Skip stale CLOSED PRs created before the lookback window — closing an
-        # old PR shouldn't trigger a fresh credibility penalty.
-        if pr.created_at < lookback_date:
-            return
         eval_.closed_prs.append(ScoredPR(pr=pr))
     elif pr.state == 'MERGED':
         # Apply the merge-eligibility gate at LOAD time so the merged_count used

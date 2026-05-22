@@ -115,7 +115,7 @@ def _collect_repo_pr_scores(
 ) -> Dict[int, float]:
     scores: Dict[int, float] = {}
     for uid, evaluation in miner_evaluations.items():
-        if uid not in miner_uids:
+        if not _is_scoring_evaluation(uid, evaluation, miner_uids):
             continue
 
         score = sum(
@@ -136,7 +136,7 @@ def _collect_repo_issue_discovery_scores(
 ) -> Dict[int, float]:
     scores: Dict[int, float] = {}
     for uid, evaluation in miner_evaluations.items():
-        if uid not in miner_uids:
+        if not _is_scoring_evaluation(uid, evaluation, miner_uids):
             continue
 
         score = sum(
@@ -148,6 +148,10 @@ def _collect_repo_issue_discovery_scores(
             scores[uid] = score
 
     return scores
+
+
+def _is_scoring_evaluation(uid: int, evaluation: MinerEvaluation, miner_uids: set[int]) -> bool:
+    return uid in miner_uids and evaluation.failed_reason is None
 
 
 def _allocate_scores_to_rewards(

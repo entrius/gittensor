@@ -3,7 +3,6 @@ import fnmatch
 import time
 from dataclasses import dataclass
 from enum import Enum
-from math import ceil
 from typing import Any, Dict, List, Optional
 
 import bittensor as bt
@@ -12,13 +11,9 @@ import requests
 from gittensor.constants import (
     BASE_GITHUB_API_URL,
     GITHUB_HTTP_TIMEOUT_SECONDS,
-    REVIEW_PENALTY_RATE,
 )
 from gittensor.utils.models import PRInfo
 from gittensor.utils.utils import backoff_seconds
-
-# Beyond this many CHANGES_REQUESTED reviews the quality multiplier is already 0
-_MAX_CHANGES_REQUESTED_REVIEWS = ceil(1 / REVIEW_PENALTY_RATE)
 
 
 class GitHubIdentityStatus(Enum):

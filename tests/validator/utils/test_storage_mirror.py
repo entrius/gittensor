@@ -67,7 +67,6 @@ def _make_storage_with_mock_repo():
             mock_repo = MagicMock()
             mock_repo.set_miner.return_value = 1
             mock_repo.store_pull_requests_bulk.return_value = 0  # actual count irrelevant
-            mock_repo.refresh_stale_pr_states.return_value = 0
             mock_repo.store_issues_bulk.return_value = 0
             mock_repo.store_file_changes_bulk.return_value = 0
             mock_repo.set_miner_evaluation.return_value = True
@@ -83,7 +82,7 @@ class TestStoreEvaluationAdaptsMirrorPRs:
         eval_ = MinerEvaluation(uid=1, hotkey='hk', github_id='123')
         eval_.merged_prs = [_mirror_scored(100), _mirror_scored(101)]
 
-        storage.store_evaluation(eval_)
+        storage.store_evaluation(eval_, {})
 
         merged_call = mock_repo.store_pull_requests_bulk.call_args_list[0]
         merged_arg = merged_call.args[0]
@@ -102,7 +101,7 @@ class TestStoreEvaluationAdaptsMirrorPRs:
         eval_ = MinerEvaluation(uid=1, hotkey='hk', github_id='123')
         eval_.open_prs = [_mirror_scored(105, state='OPEN')]
 
-        storage.store_evaluation(eval_)
+        storage.store_evaluation(eval_, {})
 
         open_call = mock_repo.store_pull_requests_bulk.call_args_list[1]
         open_arg = open_call.args[0]
@@ -114,7 +113,7 @@ class TestStoreEvaluationAdaptsMirrorPRs:
 
         eval_ = MinerEvaluation(uid=1, hotkey='hk', github_id='123')
 
-        storage.store_evaluation(eval_)
+        storage.store_evaluation(eval_, {})
 
         merged_arg = mock_repo.store_pull_requests_bulk.call_args_list[0].args[0]
         assert merged_arg == []
@@ -135,9 +134,9 @@ def test_cleanup_stale_called_with_commit_false():
 
     with patch(
         'gittensor.validator.oss_contributions.mirror.adapters.mirror_scored_pr_to_legacy_pull_request',
-        side_effect=lambda s, *a, **kw: s,
+        side_effect=lambda s, *_args, **_kwargs: s,
     ):
-        storage.store_evaluation(eval_obj)
+        storage.store_evaluation(eval_obj, {})
 
     mock_repo.cleanup_stale_miner_data.assert_called_once_with(eval_obj, commit=False)
 
@@ -154,9 +153,9 @@ def test_failure_after_cleanup_triggers_rollback():
 
     with patch(
         'gittensor.validator.oss_contributions.mirror.adapters.mirror_scored_pr_to_legacy_pull_request',
-        side_effect=lambda s, *a, **kw: s,
+        side_effect=lambda s, *_args, **_kwargs: s,
     ):
-        result = storage.store_evaluation(eval_obj)
+        result = storage.store_evaluation(eval_obj, {})
 
     assert result.success is False
     storage.db_connection.rollback.assert_called_once()

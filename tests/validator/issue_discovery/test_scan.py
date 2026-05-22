@@ -1022,12 +1022,21 @@ class TestOpenIssueSpamSourceIsMirror:
             )
             for i in range(2)
         ]
-        solved_issues = [_issue_dict(issue_number=300 + i, author_github_id=f'discoverer{i}') for i in range(8)]
+        # Give each solved issue its own solving PR so each is canonical and
+        # contributes to valid_solved. Sharing one PR across all eight would
+        # leave seven non-canonical siblings credibility-only post-#1269 and
+        # the miner would fall below MIN_VALID_SOLVED_ISSUES, defeating the
+        # spam-mult assertion this test exists to make.
+        solved_issues = [
+            _issue_dict(issue_number=300 + i, author_github_id=f'discoverer{i}', solved_by_pr=300 + i) for i in range(8)
+        ]
         client = Mock()
         client.get_miner_issues.return_value = _response(open_issues + solved_issues)
 
         eval_ = _eval()
-        eval_.merged_prs = [_scored_mirror_pr('entrius/gittensor-ui', 100, token_score=100.0)]
+        eval_.merged_prs = [
+            _scored_mirror_pr('entrius/gittensor-ui', pr_number, token_score=100.0) for pr_number in range(300, 308)
+        ]
 
         _run(
             run_issue_discovery(
@@ -1208,14 +1217,17 @@ class TestCrossMinerOneIssuePerPr:
         # Both miners count the shared-PR issue toward credibility, but only
         # the canonical owner (A) counts it toward the valid-solved gate.
         # B's shared-PR issue is one-issue-per-PR credibility-only, so it must
-        # not satisfy the eligibility threshold — preventing one qualifying PR
-        # from unlocking MIN_VALID_SOLVED_ISSUES through duplicate issue rows.
+        # not increment valid_solved — preventing one qualifying PR from
+        # padding the gate via duplicate issue rows (#1269).
         assert e_a.total_solved_issues == 7
         assert e_b.total_solved_issues == 7
         assert e_a.total_valid_solved_issues == 7
         assert e_b.total_valid_solved_issues == 6
+        # Both stay above MIN_VALID_SOLVED_ISSUES (currently 3) and remain
+        # eligible. The orthogonal eligibility-gate assertion lives in
+        # ``test_non_canonical_siblings_do_not_satisfy_valid_solved_gate``.
         assert e_a.is_issue_eligible
-        assert not e_b.is_issue_eligible
+        assert e_b.is_issue_eligible
 
         # ``issue_token_score`` accumulates only over SCORED PRs (default
         # ``_scored_mirror_pr`` token_score is 100.0), so this is the
@@ -1223,10 +1235,10 @@ class TestCrossMinerOneIssuePerPr:
         # 6 (shared PR 100 is canonical for A only and credibility-only for B).
         assert e_a.issue_token_score == 700.0
         assert e_b.issue_token_score == 600.0
-        # B's ineligibility zeroes its issue_discovery_score regardless of the
-        # six canonical issues that would otherwise have scored.
-        assert e_a.issue_discovery_score > 0
-        assert e_b.issue_discovery_score == 0
+        # All solving PRs share identical scoring inputs at this issue mix, so
+        # the discovery_score ratio collapses to 7:6.
+        assert e_a.issue_discovery_score > e_b.issue_discovery_score > 0
+        assert e_a.issue_discovery_score / e_b.issue_discovery_score == pytest.approx(7 / 6, rel=1e-2)
 
     def test_non_canonical_siblings_do_not_satisfy_valid_solved_gate(self):
         """Regression for #1269: seven sibling issues all closed by one

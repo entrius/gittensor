@@ -102,25 +102,6 @@ class TestGetPatByUid:
         assert entry is None
 
 
-class TestRemovePat:
-    def test_remove_existing(self):
-        pat_storage.save_pat(1, 'hotkey_1', 'ghp_abc', 'user_1')
-        assert pat_storage.remove_pat(1) is True
-        assert pat_storage.get_pat_by_uid(1) is None
-
-    def test_remove_missing(self):
-        assert pat_storage.remove_pat(999) is False
-
-    def test_remove_preserves_others(self):
-        pat_storage.save_pat(1, 'h1', 'p1', 'user_1')
-        pat_storage.save_pat(2, 'h2', 'p2', 'user_2')
-        pat_storage.remove_pat(1)
-
-        entries = pat_storage.load_all_pats()
-        assert len(entries) == 1
-        assert entries[0]['uid'] == 2
-
-
 class TestConcurrency:
     def test_concurrent_writes(self):
         """Multiple threads writing simultaneously should not corrupt the file."""

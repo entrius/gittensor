@@ -94,6 +94,7 @@ def _zero_for_duplicate_penalty(eval_: MinerEvaluation, reason: str) -> None:
     eval_.total_valid_solved_issues = 0
     eval_.total_closed_issues = 0
     eval_.total_open_issues = 0
+    eval_.issue_discovery_issues = []
 
 
 def validate_response_and_initialize_miner_evaluation(

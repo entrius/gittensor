@@ -8,31 +8,25 @@ requires-python = ">=3.12"
 dependencies = [
     "bittensor==10.0.1",
     "bittensor-cli==9.17.0",
-    "bittensor-commit-reveal==0.4.0",
-    "bittensor-wallet==4.0.0",
-    "click",
-    "levenshtein==0.27.3",
-    "psycopg[binary]==3.3.3",
-    "python-dotenv==1.2.1",
-    "pytz==2025.2",
-    "rich",
-    "substrate-interface",
+    "click==8.3.2",
+    "psycopg[binary]==3.3.4",
+    "rich==14.3.3",
+    "substrate-interface==1.8.1",
     "tree-sitter==0.24.0",
     "tree-sitter-language-pack==0.7.2",
-    "wandb==0.21.3",
+    "wandb==0.26.1",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest==9.0.0",
-    "pyright",
-    "ruff==0.14.10",
-    "pre-commit>=4.0",
+    "pre-commit==4.6.0",
+    "pyright==1.1.408",
+    "pytest==9.0.3",
+    "ruff==0.15.12",
+    "vulture==2.16",
 ]
 debug = [
-    "debugpy==1.8.11",
-    "fastapi==0.110.1",
-    "uvicorn==0.32.0",
+    "debugpy==1.8.20",
 ]
 
 [project.scripts]
@@ -55,3 +49,28 @@ quote-style = "single"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.vulture]
+# Dead-code scanner
+# Surviving suppressions live in `vulture_whitelist.py`
+paths = ["gittensor", "neurons", "scripts", "vulture_whitelist.py"]
+ignore_decorators = [
+    # Click command/group registration - vulture cannot see the registry calls
+    "@click.command",
+    "@click.group",
+    "@*.command",
+    "@*.group",
+]
+exclude = [
+    ".venv/",
+    "smart-contracts/",
+    "assets/",
+    # Upstream bittensor-template scaffolding
+    "neurons/base/",
+    # On-chain shape mirror - dataclass/enum members not actionable
+    "gittensor/validator/issue_competitions/contract_client.py",
+    # das-github-mirror wire-format schema
+    "gittensor/utils/mirror/models.py",
+]
+min_confidence = 60
+sort_by_size = true

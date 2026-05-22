@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from gittensor.classes import Issue, MinerEvaluation
+from gittensor.classes import Issue, MinerEvaluation, RepoEvaluation
 from gittensor.constants import (
     ISSUES_TREASURY_EMISSION_SHARE,
     ISSUES_TREASURY_UID,
@@ -39,7 +39,23 @@ def _evaluation(uid: int, prs=None, issues=None, open_prs=None) -> MinerEvaluati
     evaluation.merged_prs = list(prs or [])
     evaluation.open_prs = list(open_prs or [])
     evaluation.issue_discovery_issues = list(issues or [])
+    _populate_repo_evaluations(evaluation)
     return evaluation
+
+
+def _populate_repo_evaluations(evaluation: MinerEvaluation) -> None:
+    repos = {pr.repository_full_name.lower() for pr in evaluation.merged_prs + evaluation.open_prs}
+    for repo_name in repos:
+        merged = [pr for pr in evaluation.merged_prs if pr.repository_full_name.lower() == repo_name]
+
+            total_score=max(
+                0.0,
+                sum(pr.earned_score for pr in merged) - sum(pr.collateral_score for pr in open_prs),
+            ),
+            total_collateral_score=sum(pr.collateral_score for pr in open_prs),
+            total_merged_prs=len(merged),
+            total_open_prs=len(open_prs),
+        )
 
 
 def _scored_pr(repo: str, number: int, earned_score: float) -> ScoredPR:
@@ -131,6 +147,11 @@ class TestAllocationInvarianceToPrVolume:
 
 
 class TestOpenPrCollateralAllocation:
+    def test_repo_pr_allocation_reads_finalized_repo_score(self):
+
+        assert rewards[_idx(miner_uids, 1)] == pytest.approx(repo_slice * 0.3)
+        assert rewards[_idx(miner_uids, 2)] == pytest.approx(repo_slice * 0.7)
+
     def test_repo_pr_allocation_uses_collateral_adjusted_scores(self):
         repos = {'r/collateral': _config(emission_share=0.2, issue_discovery_share=0.0)}
         miner_uids = _uids(1, 2)

@@ -118,17 +118,11 @@ def _collect_repo_pr_scores(
         if not _is_scoring_evaluation(uid, evaluation, miner_uids):
             continue
 
-        earned_score = sum(
-            pr.earned_score
-            for pr in evaluation.merged_prs
-            if pr.repository_full_name.lower() == repo_name and pr.earned_score > 0
-        )
-        collateral_score = sum(
-            pr.collateral_score
-            for pr in evaluation.open_prs
-            if pr.repository_full_name.lower() == repo_name and pr.collateral_score > 0
-        )
-        score = max(0.0, earned_score - collateral_score)
+        repo_eval = evaluation.repo_evaluations.get(repo_name)
+        if repo_eval is None:
+            continue
+
+        score = repo_eval.total_score
         if score > 0:
             scores[uid] = score
 

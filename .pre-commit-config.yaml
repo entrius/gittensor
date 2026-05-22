@@ -37,6 +37,14 @@ repos:
         pass_filenames: false
         stages: [pre-push]
 
+      - id: vulture
+        name: vulture
+        entry: uv run vulture
+        language: system
+        types: [python]
+        pass_filenames: false
+        stages: [pre-push]
+
       - id: pytest
         name: pytest
         entry: uv run pytest tests/ -x -q

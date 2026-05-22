@@ -28,6 +28,7 @@ dev = [
     "pyright",
     "ruff==0.14.10",
     "pre-commit>=4.0",
+    "vulture==2.16",
 ]
 debug = [
     "debugpy==1.8.11",
@@ -55,3 +56,28 @@ quote-style = "single"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.vulture]
+# Dead-code scanner
+# Surviving suppressions live in `vulture_whitelist.py`
+paths = ["gittensor", "neurons", "scripts", "vulture_whitelist.py"]
+ignore_decorators = [
+    # Click command/group registration - vulture cannot see the registry calls
+    "@click.command",
+    "@click.group",
+    "@*.command",
+    "@*.group",
+]
+exclude = [
+    ".venv/",
+    "smart-contracts/",
+    "assets/",
+    # Upstream bittensor-template scaffolding
+    "neurons/base/",
+    # On-chain shape mirror - dataclass/enum members not actionable
+    "gittensor/validator/issue_competitions/contract_client.py",
+    # das-github-mirror wire-format schema
+    "gittensor/utils/mirror/models.py",
+]
+min_confidence = 60
+sort_by_size = true

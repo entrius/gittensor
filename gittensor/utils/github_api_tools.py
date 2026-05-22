@@ -197,13 +197,6 @@ query($owner: String!, $name: String!, $issueNumber: Int!) {
 """
 
 
-def _resolve_pr_state(raw_state: str, merged: bool = False) -> str:
-    """Normalize PR state to uppercase GraphQL-style values."""
-    if merged:
-        return 'MERGED'
-    return (raw_state or '').upper() or 'OPEN'
-
-
 def _closing_issue_numbers_for_repo(closing_ref: Optional[Dict[str, Any]], repo: str) -> List[int]:
     """Return only closing issue numbers whose GraphQL repository matches ``repo``."""
     target_repo = repo.lower()
@@ -269,7 +262,7 @@ def _search_issue_referencing_prs_graphql(
         if not pr_number:
             continue
 
-        state = _resolve_pr_state(pr.get('state', ''), merged=bool(pr.get('merged', False)))
+        state = 'MERGED' if pr.get('merged') else (pr.get('state') or '').upper() or 'OPEN'
         if open_only and state != 'OPEN':
             continue
 

@@ -46,14 +46,16 @@ from gittensor.constants import (
     MIN_TOKEN_SCORE_FOR_BASE_SCORE,
 )
 from gittensor.utils.mirror.client import MirrorClient, MirrorRequestError
-from gittensor.utils.mirror.models import MirrorIssue, MirrorSolvingPR
+from gittensor.utils.mirror.models import MirrorIssue, MirrorPullRequest, MirrorSolvingPR
 from gittensor.validator.issue_discovery.scoring import (
     calculate_issue_review_quality_multiplier,
     calculate_open_issue_spam_multiplier,
     check_issue_eligibility,
 )
 from gittensor.validator.oss_contributions.mirror.adapters import mirror_files_to_legacy
+from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredPR
 from gittensor.validator.oss_contributions.mirror.scoring import (
+    _should_skip_merged_mirror_pr,
     calculate_base_score_for_pr_files,
 )
 from gittensor.validator.utils.datetime_utils import calculate_time_decay
@@ -94,17 +96,31 @@ class _CacheStats:
     (issue not scored). Helps tune cache effectiveness and surface mirror
     flakiness without scraping logs for individual fetch warnings.
 
-    ``gate_rejections`` counts solving PRs blocked because they were rejected
-    by the OSS-side merge-eligibility gate (recorded in
-    ``MinerEvaluation.rejected_solving_pr_keys``). Surfacing this separately
-    from ``fetch_failures`` makes it obvious when discovery credit is being
-    denied for anti-gaming reasons vs. transient mirror issues.
+    ``gate_rejections`` counts solving PRs blocked because they failed the
+    OSS-side merge-eligibility gate (either recorded in
+    ``MinerEvaluation.rejected_solving_pr_keys`` for registered-miner
+    solvers, or detected via ``_fetch_solving_pr_bundle`` for non-miner
+    solvers). Surfacing this separately from ``fetch_failures`` makes it
+    obvious when discovery credit is being denied for anti-gaming reasons
+    vs. transient mirror issues.
+
+    ``bundle_fetches`` counts how many ``get_miner_pulls`` round-trips were
+    issued to gate non-miner solving PRs (amortized across all issues
+    referencing the same author/repo pair via the bundle cache).
     """
 
     hits: int = 0
     misses: int = 0
     fetch_failures: int = 0
     gate_rejections: int = 0
+    bundle_fetches: int = 0
+
+
+# (author_github_id, repo_full_name) -> { pr_number -> MirrorPullRequest } |
+# a sentinel empty dict means "we already tried, the mirror returned nothing"
+# (no need to refetch within the round). Used by ``_fetch_solving_pr_bundle``
+# to gate non-miner solving PRs without one HTTP call per discovered issue.
+_SolvingPrBundleCache = Dict[Tuple[str, str], Dict[int, MirrorPullRequest]]
 
 
 @dataclass
@@ -170,6 +186,7 @@ async def run_issue_discovery(
 
     solving_pr_cache: Dict[Tuple[str, int], CachedSolvingPR] = _build_solving_pr_cache(miner_evaluations)
     rejected_solving_pr_keys: Set[Tuple[str, int]] = _build_rejected_solving_pr_keys(miner_evaluations)
+    bundle_cache: _SolvingPrBundleCache = {}
     cache_stats = _CacheStats()
     bt.logging.info(
         f'Cross-miner solving-PR cache: {len(solving_pr_cache)} entries from '
@@ -231,6 +248,8 @@ async def run_issue_discovery(
             mirror_repos,
             solving_pr_cache,
             rejected_solving_pr_keys,
+            bundle_cache,
+            since_by_repo,
             cache_stats,
             client,
             programming_languages,
@@ -258,7 +277,8 @@ async def run_issue_discovery(
         f'Solving-PR cache: {cache_stats.hits} hits | {cache_stats.misses} misses '
         f'({cache_stats.misses - cache_stats.fetch_failures - cache_stats.gate_rejections} fetched OK, '
         f'{cache_stats.fetch_failures} fetch failures, '
-        f'{cache_stats.gate_rejections} blocked by OSS merge gate)'
+        f'{cache_stats.gate_rejections} blocked by OSS merge gate) | '
+        f'{cache_stats.bundle_fetches} non-miner-author bundle fetch(es)'
     )
 
 
@@ -397,6 +417,57 @@ def _build_rejected_solving_pr_keys(
     return rejected
 
 
+async def _fetch_solving_pr_bundle(
+    client: MirrorClient,
+    author_github_id: str,
+    repo_full_name: str,
+    pr_number: int,
+    bundle_cache: _SolvingPrBundleCache,
+    since_by_repo: Dict[str, datetime],
+    cache_stats: _CacheStats,
+) -> Optional[MirrorPullRequest]:
+    """Fetch the full ``MirrorPullRequest`` bundle for a solving PR so the
+    OSS merge-eligibility gate can run against it.
+
+    ``MirrorSolvingPR`` is a minimal inline shape that omits the fields
+    ``_should_skip_merged_mirror_pr`` needs (base_ref, head_ref,
+    merged_by_login, default_branch, approved_count, ...). To gate non-miner
+    solving PRs we have to round-trip ``get_miner_pulls`` for the author and
+    pick the matching PR out of the response.
+
+    Caching: keyed by ``(author_github_id, repo_full_name)``. A single
+    fetch per author/repo per round is shared across every issue closed by
+    that author in that repo. An empty dict is cached on fetch failure /
+    mirror miss so we don't retry within the round.
+
+    Returns the ``MirrorPullRequest`` if found, or ``None`` if the bundle
+    fetch failed or the PR wasn't in the response. ``None`` means "we
+    couldn't determine eligibility" — callers should fall through rather
+    than treat it as a rejection.
+    """
+    cache_key = (author_github_id, repo_full_name)
+    bundle = bundle_cache.get(cache_key)
+    if bundle is None:
+        cache_stats.bundle_fetches += 1
+        since = since_by_repo.get(repo_full_name)
+        try:
+            response = await asyncio.to_thread(
+                client.get_miner_pulls,
+                author_github_id,
+                since_by_repo={repo_full_name: since} if since is not None else None,
+            )
+        except MirrorRequestError as e:
+            bt.logging.debug(
+                f'Bundle fetch failed for solving-PR author {author_github_id} in {repo_full_name}: {e} — '
+                f'cannot gate this round, falling through'
+            )
+            bundle_cache[cache_key] = {}
+            return None
+        bundle = {pr.pr_number: pr for pr in response.pull_requests if pr.repo_full_name == repo_full_name}
+        bundle_cache[cache_key] = bundle
+    return bundle.get(pr_number)
+
+
 def _build_solving_pr_cache(
     miner_evaluations: Dict[int, MinerEvaluation],
 ) -> Dict[Tuple[str, int], CachedSolvingPR]:
@@ -427,6 +498,8 @@ async def _score_miner_issues(
     mirror_repos: Dict[str, RepositoryConfig],
     solving_pr_cache: Dict[Tuple[str, int], CachedSolvingPR],
     rejected_solving_pr_keys: Set[Tuple[str, int]],
+    bundle_cache: _SolvingPrBundleCache,
+    since_by_repo: Dict[str, datetime],
     cache_stats: _CacheStats,
     client: MirrorClient,
     programming_languages: Dict[str, LanguageConfig],
@@ -483,6 +556,8 @@ async def _score_miner_issues(
             solving_pr,
             solving_pr_cache,
             rejected_solving_pr_keys,
+            bundle_cache,
+            since_by_repo,
             cache_stats,
             client,
             programming_languages,
@@ -631,6 +706,8 @@ async def _resolve_solving_pr_score(
     solving_pr: MirrorSolvingPR,
     cache: Dict[Tuple[str, int], CachedSolvingPR],
     rejected_solving_pr_keys: Set[Tuple[str, int]],
+    bundle_cache: _SolvingPrBundleCache,
+    since_by_repo: Dict[str, datetime],
     cache_stats: _CacheStats,
     client: MirrorClient,
     programming_languages: Dict[str, LanguageConfig],
@@ -640,18 +717,28 @@ async def _resolve_solving_pr_score(
     """Return base_score + token_score for the solving PR.
 
     Cache hit: returns immediately (case 1 = miner's own PR, case 2 = another
-    miner's PR). Cache miss: fetches ``/pulls/:o/:r/:n/files`` and tokenizes;
-    writes the result back into the cache. Returns None on fetch failure.
+    miner's PR). Cache miss: gates the solving PR through the OSS merge-
+    eligibility check (via ``_fetch_solving_pr_bundle``), then fetches
+    ``/pulls/:o/:r/:n/files`` and tokenizes; writes the result back into the
+    cache. Returns None on fetch failure.
 
     Applies ``fixed_base_score`` repo override on cache miss (matching the
     override in ``score_mirror_pr``) so that ``discovery_base_score`` is the
     same regardless of solver identity.
 
     Returns None when the solving PR was rejected by the OSS-side merge gate
-    (e.g. self-merged without external approval). The discoverer's issue still
-    counts toward solved/credibility, but no discovery score is awarded — the
-    merge gate intentionally denies scoring credit to the solver, and the
-    parallel issue-discovery pool must honor that decision.
+    (e.g. self-merged without external approval) — either via the pre-known
+    ``rejected_solving_pr_keys`` set (registered-miner author) or via a fresh
+    bundle fetch (non-miner author). The discoverer's issue still counts
+    toward solved/credibility, but no discovery score is awarded — the merge
+    gate intentionally denies scoring credit to the solver, and the parallel
+    issue-discovery pool must honor that decision.
+
+    When the bundle fetch can't determine eligibility (mirror has no record
+    of the author, or the per-repo window doesn't include the PR), the
+    resolver falls through to the existing fetch-and-tokenize path rather
+    than denying scoring — this preserves the legitimate-non-miner-solver
+    case the design supports.
     """
     key = (issue.repo_full_name, solving_pr.pr_number)
     if key in rejected_solving_pr_keys:
@@ -666,6 +753,34 @@ async def _resolve_solving_pr_score(
     if key in cache:
         cache_stats.hits += 1
         return cache[key]
+
+    # Gate non-miner solving PRs by fetching the author's full PR bundle. A
+    # successful fetch lets us run ``_should_skip_merged_mirror_pr`` against
+    # fields ``MirrorSolvingPR`` does not inline (base_ref, head_ref,
+    # merged_by_login, approved_count, default_branch). When the bundle gives
+    # us a verdict, we honor it; when it can't (mirror has no row for this
+    # author, or the PR is outside the per-repo window), we fall through.
+    if repo_config is not None:
+        bundle_pr = await _fetch_solving_pr_bundle(
+            client,
+            solving_pr.author_github_id,
+            issue.repo_full_name,
+            solving_pr.pr_number,
+            bundle_cache,
+            since_by_repo,
+            cache_stats,
+        )
+        if bundle_pr is not None:
+            should_skip, reason = _should_skip_merged_mirror_pr(ScoredPR(pr=bundle_pr), repo_config)
+            if should_skip:
+                cache_stats.gate_rejections += 1
+                rejected_solving_pr_keys.add(key)
+                bt.logging.debug(
+                    f'Mirror solving PR #{solving_pr.pr_number} ({issue.repo_full_name}) '
+                    f'rejected by merge-eligibility gate ({reason}) — issue '
+                    f'#{issue.issue_number} not scored (credibility only)'
+                )
+                return None
 
     cache_stats.misses += 1
     try:

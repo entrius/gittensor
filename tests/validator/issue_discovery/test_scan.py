@@ -30,6 +30,7 @@ MirrorIssue = mirror_models.MirrorIssue
 MirrorIssuesResponse = mirror_models.MirrorIssuesResponse
 MirrorPullRequest = mirror_models.MirrorPullRequest
 MirrorPullRequestFilesResponse = mirror_models.MirrorPullRequestFilesResponse
+MirrorPullRequestsResponse = mirror_models.MirrorPullRequestsResponse
 MirrorRequestError = mirror_client_mod.MirrorRequestError
 MinerEvaluation = classes.MinerEvaluation
 MinerEvaluationCache = classes.MinerEvaluationCache
@@ -782,7 +783,7 @@ class TestCacheStats:
         assert issue.solving_pr is not None
         result = asyncio.run(
             _resolve_solving_pr_score(
-                issue, issue.solving_pr, cache, set(), stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, None
+                issue, issue.solving_pr, cache, set(), {}, {}, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, None
             )
         )
 
@@ -806,7 +807,7 @@ class TestCacheStats:
         issue = MirrorIssue.from_dict(_issue_dict())
         asyncio.run(
             _resolve_solving_pr_score(
-                issue, issue.solving_pr, cache, set(), stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, None
+                issue, issue.solving_pr, cache, set(), {}, {}, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, None
             )
         )
 
@@ -830,7 +831,7 @@ class TestCacheStats:
         issue = MirrorIssue.from_dict(_issue_dict())
         result = asyncio.run(
             _resolve_solving_pr_score(
-                issue, issue.solving_pr, cache, set(), stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, None
+                issue, issue.solving_pr, cache, set(), {}, {}, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, None
             )
         )
 
@@ -869,7 +870,7 @@ class TestCacheStats:
         issue = MirrorIssue.from_dict(_issue_dict())
         result = asyncio.run(
             _resolve_solving_pr_score(
-                issue, issue.solving_pr, cache, set(), stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, None
+                issue, issue.solving_pr, cache, set(), {}, {}, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, None
             )
         )
 
@@ -910,12 +911,32 @@ class TestCacheStats:
 
         result_a = asyncio.run(
             _resolve_solving_pr_score(
-                issue_a, issue_a.solving_pr, cache, set(), stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, None
+                issue_a,
+                issue_a.solving_pr,
+                cache,
+                set(),
+                {},
+                {},
+                stats,
+                client,
+                _EMPTY_LANGS,
+                _EMPTY_TOKEN_CONFIG,
+                None,
             )
         )
         result_b = asyncio.run(
             _resolve_solving_pr_score(
-                issue_b, issue_b.solving_pr, cache, set(), stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, None
+                issue_b,
+                issue_b.solving_pr,
+                cache,
+                set(),
+                {},
+                {},
+                stats,
+                client,
+                _EMPTY_LANGS,
+                _EMPTY_TOKEN_CONFIG,
+                None,
             )
         )
 
@@ -970,7 +991,7 @@ class TestRejectedSolvingPrGate:
         issue = MirrorIssue.from_dict(_issue_dict())
         result = asyncio.run(
             _resolve_solving_pr_score(
-                issue, issue.solving_pr, cache, rejected, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, None
+                issue, issue.solving_pr, cache, rejected, {}, {}, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, None
             )
         )
 
@@ -996,7 +1017,7 @@ class TestRejectedSolvingPrGate:
         issue = MirrorIssue.from_dict(_issue_dict())
         result = asyncio.run(
             _resolve_solving_pr_score(
-                issue, issue.solving_pr, cache, rejected, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, None
+                issue, issue.solving_pr, cache, rejected, {}, {}, stats, client, _EMPTY_LANGS, _EMPTY_TOKEN_CONFIG, None
             )
         )
 
@@ -1043,6 +1064,283 @@ class TestRejectedSolvingPrGate:
         assert miner_b.issue_discovery_score == 0
         # No file fetch went out — the gate fired before any HTTP call.
         client.get_pr_files.assert_not_called()
+
+    @staticmethod
+    def _mirror_pr_dict(
+        pr_number: int = 100,
+        repo: str = 'entrius/gittensor-ui',
+        author_login: str = 'sybil',
+        merged_by_login: str = 'sybil',
+        approved_count: int = 0,
+        base_ref: str = 'test',
+        author_association: str = 'CONTRIBUTOR',
+    ) -> dict:
+        """Compose a full MirrorPullRequest payload for bundle-fetch responses.
+
+        Defaults render a self-merge-without-approval PR that the gate rejects
+        — flip ``merged_by_login`` / ``approved_count`` / ``base_ref`` to get
+        the legitimate-pass variant.
+        """
+        return {
+            'repo_full_name': repo,
+            'pr_number': pr_number,
+            'title': 't',
+            'body': 'b',
+            'state': 'MERGED',
+            'author_github_id': '218712309',
+            'author_login': author_login,
+            'author_association': author_association,
+            'created_at': '2026-04-10T00:00:00Z',
+            'closed_at': '2026-04-18T10:00:00Z',
+            'merged_at': '2026-04-18T10:00:00Z',
+            'last_edited_at': None,
+            'edited_after_merge': False,
+            'hours_since_merge': 1.0,
+            'merged_by_login': merged_by_login,
+            'base_ref': base_ref,
+            'head_ref': 'feature',
+            'head_repo_full_name': repo,
+            'default_branch': 'test',
+            'head_sha': 'h',
+            'base_sha': 'b',
+            'merge_base_sha': 'mb',
+            'additions': 1,
+            'deletions': 0,
+            'commits_count': 1,
+            'scoring_data_stored': True,
+            'review_summary': {
+                'maintainer_changes_requested_count': 0,
+                'approved_count': approved_count,
+            },
+            'labels': [],
+            'linked_issues': [],
+        }
+
+    @staticmethod
+    def _bundle_response(*pr_dicts) -> object:
+        return MirrorPullRequestsResponse.from_dict(
+            {
+                'github_id': '218712309',
+                'since': '2026-03-15T00:00:00Z',
+                'generated_at': '2026-04-21T00:00:00Z',
+                'pull_requests': list(pr_dicts),
+            }
+        )
+
+    def test_bundle_gate_rejects_non_miner_self_merge_without_approval(self):
+        """Solving PR is by a non-miner, so it's not in any miner's
+        rejected_solving_pr_keys. Bundle fetch returns the PR; the gate
+        catches the self-merge-without-approval and blocks scoring."""
+        from gittensor.validator.issue_discovery.scan import (
+            _CacheStats,
+            _resolve_solving_pr_score,
+        )
+
+        client = Mock()
+        client.get_miner_pulls.return_value = self._bundle_response(self._mirror_pr_dict())
+        cache = {}
+        rejected = set()  # non-miner author — nothing pre-recorded
+        bundle_cache = {}
+        stats = _CacheStats()
+        repo_config = RepositoryConfig(emission_share=0.5)
+
+        issue = MirrorIssue.from_dict(_issue_dict())
+        result = asyncio.run(
+            _resolve_solving_pr_score(
+                issue,
+                issue.solving_pr,
+                cache,
+                rejected,
+                bundle_cache,
+                {},
+                stats,
+                client,
+                _EMPTY_LANGS,
+                _EMPTY_TOKEN_CONFIG,
+                repo_config,
+            )
+        )
+
+        assert result is None
+        assert stats.gate_rejections == 1
+        assert stats.bundle_fetches == 1
+        assert stats.misses == 0  # gate fired before the file-fetch path was even reached
+        client.get_pr_files.assert_not_called()
+        # Subsequent lookups for the same (author, repo) reuse the cached bundle.
+        assert rejected == {('entrius/gittensor-ui', 100)}
+
+    def test_bundle_gate_passes_legitimate_non_miner_merge(self):
+        """Solving PR is by a non-miner but the merge is legitimate (someone
+        else approved). Bundle gate passes and the existing fetch-and-tokenize
+        path runs as before."""
+        from gittensor.validator.issue_discovery.scan import (
+            _CacheStats,
+            _resolve_solving_pr_score,
+        )
+
+        client = Mock()
+        # Different merger + at least one approval → passes the self-merge gate.
+        client.get_miner_pulls.return_value = self._bundle_response(
+            self._mirror_pr_dict(merged_by_login='maintainer', approved_count=1)
+        )
+        client.get_pr_files.return_value = _empty_files_response('entrius/gittensor-ui', 100)
+        cache = {}
+        rejected = set()
+        bundle_cache = {}
+        stats = _CacheStats()
+        repo_config = RepositoryConfig(emission_share=0.5)
+
+        issue = MirrorIssue.from_dict(_issue_dict())
+        result = asyncio.run(
+            _resolve_solving_pr_score(
+                issue,
+                issue.solving_pr,
+                cache,
+                rejected,
+                bundle_cache,
+                {},
+                stats,
+                client,
+                _EMPTY_LANGS,
+                _EMPTY_TOKEN_CONFIG,
+                repo_config,
+            )
+        )
+
+        assert result is not None
+        assert stats.gate_rejections == 0
+        assert stats.bundle_fetches == 1
+        assert stats.misses == 1  # gate passed, file fetch ran
+        client.get_pr_files.assert_called_once()
+
+    def test_bundle_fetch_failure_falls_through_no_regression(self):
+        """``get_miner_pulls`` raises (mirror is having a moment). Without
+        the bundle verdict we can't gate, so the resolver falls through to
+        the existing fetch-and-tokenize path. Legitimate non-miner solvers
+        in this state still score — denying would be a regression."""
+        from gittensor.validator.issue_discovery.scan import (
+            _CacheStats,
+            _resolve_solving_pr_score,
+        )
+
+        client = Mock()
+        client.get_miner_pulls.side_effect = MirrorRequestError('bundle endpoint down')
+        client.get_pr_files.return_value = _empty_files_response('entrius/gittensor-ui', 100)
+        cache = {}
+        rejected = set()
+        bundle_cache = {}
+        stats = _CacheStats()
+        repo_config = RepositoryConfig(emission_share=0.5)
+
+        issue = MirrorIssue.from_dict(_issue_dict())
+        asyncio.run(
+            _resolve_solving_pr_score(
+                issue,
+                issue.solving_pr,
+                cache,
+                rejected,
+                bundle_cache,
+                {},
+                stats,
+                client,
+                _EMPTY_LANGS,
+                _EMPTY_TOKEN_CONFIG,
+                repo_config,
+            )
+        )
+
+        assert stats.bundle_fetches == 1
+        assert stats.gate_rejections == 0
+        client.get_pr_files.assert_called_once()
+        # Empty bundle stored so a sibling lookup within the same round doesn't refetch.
+        assert bundle_cache[('218712309', 'entrius/gittensor-ui')] == {}
+
+    def test_bundle_cache_amortizes_same_author_repo(self):
+        """Two issues solved by the same non-miner author in the same repo
+        → one ``get_miner_pulls`` call shared via the bundle cache."""
+        from gittensor.validator.issue_discovery.scan import (
+            _CacheStats,
+            _resolve_solving_pr_score,
+        )
+
+        client = Mock()
+        # Two PRs in the bundle, both legit merges
+        client.get_miner_pulls.return_value = self._bundle_response(
+            self._mirror_pr_dict(pr_number=100, merged_by_login='maintainer', approved_count=1),
+            self._mirror_pr_dict(pr_number=101, merged_by_login='maintainer', approved_count=1),
+        )
+        client.get_pr_files.return_value = _empty_files_response('entrius/gittensor-ui', 100)
+        cache = {}
+        rejected = set()
+        bundle_cache = {}
+        stats = _CacheStats()
+        repo_config = RepositoryConfig(emission_share=0.5)
+
+        # Two issues, same author, same repo, different PR numbers
+        issue_a = MirrorIssue.from_dict(_issue_dict(issue_number=50, solved_by_pr=100))
+        issue_b = MirrorIssue.from_dict(_issue_dict(issue_number=51, solved_by_pr=101))
+
+        for issue in (issue_a, issue_b):
+            asyncio.run(
+                _resolve_solving_pr_score(
+                    issue,
+                    issue.solving_pr,
+                    cache,
+                    rejected,
+                    bundle_cache,
+                    {},
+                    stats,
+                    client,
+                    _EMPTY_LANGS,
+                    _EMPTY_TOKEN_CONFIG,
+                    repo_config,
+                )
+            )
+
+        # Bundle endpoint hit exactly once — the second lookup hit the cache.
+        assert client.get_miner_pulls.call_count == 1
+        assert stats.bundle_fetches == 1
+
+    def test_bundle_pr_not_in_response_falls_through(self):
+        """Bundle fetched OK but the specific solving PR wasn't in the
+        response (e.g. outside the per-repo lookback window). Resolver
+        falls through to the existing fetch-and-tokenize path rather than
+        denying."""
+        from gittensor.validator.issue_discovery.scan import (
+            _CacheStats,
+            _resolve_solving_pr_score,
+        )
+
+        client = Mock()
+        # Returns a different PR — pr_number=100 (what the issue references) is NOT here
+        client.get_miner_pulls.return_value = self._bundle_response(self._mirror_pr_dict(pr_number=999))
+        client.get_pr_files.return_value = _empty_files_response('entrius/gittensor-ui', 100)
+        cache = {}
+        rejected = set()
+        bundle_cache = {}
+        stats = _CacheStats()
+        repo_config = RepositoryConfig(emission_share=0.5)
+
+        issue = MirrorIssue.from_dict(_issue_dict())
+        asyncio.run(
+            _resolve_solving_pr_score(
+                issue,
+                issue.solving_pr,
+                cache,
+                rejected,
+                bundle_cache,
+                {},
+                stats,
+                client,
+                _EMPTY_LANGS,
+                _EMPTY_TOKEN_CONFIG,
+                repo_config,
+            )
+        )
+
+        assert stats.bundle_fetches == 1
+        assert stats.gate_rejections == 0
+        client.get_pr_files.assert_called_once()
 
 
 class TestOpenIssueSpamSourceIsMirror:

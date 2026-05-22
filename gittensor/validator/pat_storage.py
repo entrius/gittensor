@@ -65,17 +65,6 @@ def get_pat_by_uid(uid: int) -> Optional[dict]:
         return None
 
 
-def remove_pat(uid: int) -> bool:
-    """Remove a PAT entry by UID. Returns True if an entry was removed."""
-    with _lock:
-        entries = _read_file()
-        filtered = [e for e in entries if e.get('uid') != uid]
-        if len(filtered) == len(entries):
-            return False
-        _write_file(filtered)
-        return True
-
-
 def _read_file() -> list[dict]:
     """Read and parse the JSON file. Must be called while holding _lock."""
     if not PATS_FILE.exists():

@@ -8,11 +8,12 @@ and miner evaluations.
 
 import logging
 from contextlib import contextmanager
-from typing import List
+from typing import Dict, List
 
 import numpy as np
 
-from gittensor.classes import FileChange, Issue, Miner, MinerEvaluation, PullRequest
+from gittensor.classes import FileChange, Issue, Miner, MinerEvaluation, PullRequest, RepoEvaluation
+from gittensor.validator.utils.load_weights import RepositoryConfig
 
 from .queries import (
     BULK_UPSERT_FILE_CHANGES,
@@ -23,7 +24,6 @@ from .queries import (
     CLEANUP_STALE_MINER_EVALUATIONS_BY_HOTKEY,
     CLEANUP_STALE_MINERS,
     CLEANUP_STALE_MINERS_BY_HOTKEY,
-    REFRESH_STALE_PR_STATES,
     SET_MINER,
 )
 
@@ -215,28 +215,6 @@ class Repository(BaseRepository):
             self.logger.error(f'Error in bulk pull request storage: {e}')
             return 0
 
-    def refresh_stale_pr_states(self, pull_requests: List[PullRequest], commit: bool = True) -> int:
-        """Update pr_state to CLOSED for stale PRs without touching scoring columns.
-
-        Uses a targeted UPDATE so previously-computed scores (earned_score, base_score,
-        credibility_multiplier, etc.) are preserved on rows that were already scored.
-        Only rows currently stored as non-CLOSED are affected.
-        """
-        if not pull_requests:
-            return 0
-        values = [(pr.number, pr.repository_full_name) for pr in pull_requests]
-        try:
-            with self.get_cursor() as cursor:
-                cursor.executemany(REFRESH_STALE_PR_STATES, values)
-                if commit:
-                    self.db.commit()
-                return len(values)
-        except Exception as e:
-            if commit:
-                self.db.rollback()
-            self.logger.error(f'Error refreshing stale PR states: {e}')
-            return 0
-
     def store_issues_bulk(self, issues: List[Issue], commit: bool = True) -> int:
         """
         Bulk insert/update issues with efficient SQL conflict resolution
@@ -333,49 +311,65 @@ class Repository(BaseRepository):
             self.logger.error(f'Error in bulk file change storage: {e} | PRs: {prs}')
             return 0
 
-    def set_miner_evaluation(self, evaluation: MinerEvaluation, commit: bool = True) -> bool:
+    def set_miner_evaluation(
+        self,
+        evaluation: MinerEvaluation,
+        master_repositories: Dict[str, RepositoryConfig],
+        commit: bool = True,
+    ) -> bool:
         """
-        Insert or update a miner evaluation.
+        Insert or update a miner evaluation, one row per master-list repository.
+
+        A row is written for every repo in ``master_repositories``; repos the
+        miner never engaged get a zeroed RepoEvaluation.
 
         Args:
             evaluation: MinerEvaluation object to store
+            master_repositories: The full master repo registry (one row each)
             commit: Whether to commit after execution (default True)
 
         Returns:
             True if successful, False otherwise
         """
-        eval_values = [
-            (
-                evaluation.uid,
-                evaluation.hotkey,
-                evaluation.github_id,
-                evaluation.failed_reason,
-                evaluation.base_total_score,
-                evaluation.total_score,
-                evaluation.total_collateral_score,
-                evaluation.total_nodes_scored,
-                evaluation.total_open_prs,
-                evaluation.total_closed_prs,
-                evaluation.total_merged_prs,
-                evaluation.total_prs,
-                evaluation.unique_repos_count,
-                evaluation.is_eligible,
-                evaluation.credibility,
-                evaluation.total_token_score,
-                evaluation.total_structural_count,
-                evaluation.total_structural_score,
-                evaluation.total_leaf_count,
-                evaluation.total_leaf_score,
-                evaluation.issue_discovery_score,
-                evaluation.issue_token_score,
-                evaluation.issue_credibility,
-                evaluation.is_issue_eligible,
-                evaluation.total_solved_issues,
-                evaluation.total_valid_solved_issues,
-                evaluation.total_closed_issues,
-                evaluation.total_open_issues,
+        eval_values = []
+        for repo_name in master_repositories:
+            repo_eval = evaluation.repo_evaluations.get(repo_name) or RepoEvaluation(repository_full_name=repo_name)
+            eval_values.append(
+                (
+                    evaluation.uid,
+                    evaluation.hotkey,
+                    evaluation.github_id,
+                    repo_name,
+                    evaluation.failed_reason,
+                    repo_eval.base_total_score,
+                    repo_eval.total_score,
+                    repo_eval.total_collateral_score,
+                    repo_eval.total_nodes_scored,
+                    repo_eval.total_open_prs,
+                    repo_eval.total_closed_prs,
+                    repo_eval.total_merged_prs,
+                    repo_eval.total_prs,
+                    evaluation.unique_repos_count,
+                    repo_eval.is_eligible,
+                    repo_eval.credibility,
+                    repo_eval.total_token_score,
+                    repo_eval.total_structural_count,
+                    repo_eval.total_structural_score,
+                    repo_eval.total_leaf_count,
+                    repo_eval.total_leaf_score,
+                    repo_eval.issue_discovery_score,
+                    repo_eval.issue_token_score,
+                    repo_eval.issue_credibility,
+                    repo_eval.is_issue_eligible,
+                    repo_eval.total_solved_issues,
+                    repo_eval.total_valid_solved_issues,
+                    repo_eval.total_closed_issues,
+                    repo_eval.total_open_issues,
+                )
             )
-        ]
+
+        if not eval_values:
+            return True
 
         try:
             with self.get_cursor() as cursor:

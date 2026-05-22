@@ -25,8 +25,6 @@ GITHUB_HTTP_TIMEOUT_SECONDS = 15
 GRAPHQL_VIEWER_QUERY = '{ viewer { login } }'
 # 1MB max file size for github api file fetches. Files exceeding this get no score.
 MAX_FILE_SIZE_BYTES = 1_000_000
-# Too many object lookups in one GraphQL query can trigger 502 errors and lose all results.
-MAX_FILES_PER_GRAPHQL_BATCH = 50
 
 # =============================================================================
 # das-github-mirror (https://mirror.gittensor.io)
@@ -74,7 +72,7 @@ EXTENSIONLESS_FILE_EXTENSIONS = {'dockerfile', 'makefile'}
 # =============================================================================
 # Repository & PR Scoring
 # =============================================================================
-PR_LOOKBACK_DAYS = 35  # rolling window for scoring
+PR_LOOKBACK_DAYS = 30  # rolling window for scoring (per-repo default, overridable in the scoring config)
 MERGED_PR_BASE_SCORE = 25
 MIN_TOKEN_SCORE_FOR_BASE_SCORE = 5  # PRs below this get 0 base score
 MAX_CONTRIBUTION_BONUS = 25
@@ -120,23 +118,20 @@ INLINE_TEST_PATTERNS: Dict[str, re.Pattern] = {
 # =============================================================================
 # Eligibility Gate (OSS Contributions)
 # =============================================================================
-MIN_VALID_MERGED_PRS = 5  # minimum "valid" merged PRs (token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE) to receive score
+# Per-repo defaults — each repo may override these in master_repositories.json.
+MIN_VALID_MERGED_PRS = 3  # minimum "valid" merged PRs (token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE) to receive score
 MIN_CREDIBILITY = 0.80  # minimum credibility ratio to receive score
-CREDIBILITY_MULLIGAN_COUNT = 1  # number of closed PRs forgiven (erased from merged+closed counts entirely)
 
 # =============================================================================
 # Issue Discovery
 # =============================================================================
-# Eligibility gate (stricter than OSS contributions)
-MIN_VALID_SOLVED_ISSUES = 7  # minimum solved issues where solving PR has token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE
+# Eligibility gate — per-repo defaults, overridable in master_repositories.json.
+MIN_VALID_SOLVED_ISSUES = 3  # minimum solved issues where solving PR has token_score >= MIN_TOKEN_SCORE_FOR_VALID_ISSUE
 MIN_ISSUE_CREDIBILITY = 0.80  # minimum issue credibility ratio
+MIN_TOKEN_SCORE_FOR_VALID_ISSUE = 5  # solving-PR token_score for a solved issue to count as "valid"
 
-# Review quality cliff model (different from OSS: has clean bonus + steeper penalty)
-ISSUE_REVIEW_CLEAN_BONUS = 1.1  # multiplier when 0 CHANGES_REQUESTED rounds
-ISSUE_REVIEW_PENALTY_RATE = 0.15  # per CHANGES_REQUESTED round after cliff
-
-# Open issue spam threshold
-OPEN_ISSUE_SPAM_BASE_THRESHOLD = 5  # half the PR base of 10
+# Open issue spam threshold (per-repo: counts a repo's own open issues)
+OPEN_ISSUE_SPAM_BASE_THRESHOLD = 2
 OPEN_ISSUE_SPAM_TOKEN_SCORE_PER_SLOT = 300.0  # +1 allowed open issue per this much token score
 MAX_OPEN_ISSUE_THRESHOLD = 30
 
@@ -167,9 +162,9 @@ MAX_OPEN_PR_REVIEW_COLLATERAL_MULTIPLIER = 2.0  # Cap open PR collateral growth 
 # Issue multiplier (flat values, no age scaling)
 STANDARD_ISSUE_MULTIPLIER = 1.33  # Non-maintainer issue author
 MAINTAINER_ISSUE_MULTIPLIER = 1.66  # Issue author is OWNER/MEMBER/COLLABORATOR
-# Excessive open PRs penalty
+# Excessive open PRs penalty (per-repo: counts a repo's own open PRs)
 # Multiplier = 1.0 if open PRs <= threshold, 0.0 otherwise
-EXCESSIVE_PR_PENALTY_BASE_THRESHOLD = 10
+EXCESSIVE_PR_PENALTY_BASE_THRESHOLD = 2
 
 # Dynamic open PR threshold bonus for top contributors
 # Bonus = floor(total_token_score / 300)

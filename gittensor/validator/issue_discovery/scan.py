@@ -17,6 +17,10 @@ Anti-gaming gates (all applied):
 - issue.state_reason == 'COMPLETED' (not NOT_PLANNED, not null)
 - not issue.is_transferred
 - issue.author_github_id != solving_pr.author_github_id (anti-self-issue)
+- solving_pr passes ``_should_skip_merged_mirror_pr`` (self-merge w/o
+  approval, non-acceptable base/head ref) — applied via
+  ``rejected_solving_pr_keys`` for registered-miner solvers and via
+  ``_fetch_solving_pr_bundle`` for non-miner solvers
 
 Same-account ("solver is also discoverer") gives credibility only — no
 discovery score. One-issue-per-PR rule is round-global: a single solving PR

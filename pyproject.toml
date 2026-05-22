@@ -59,8 +59,15 @@ testpaths = ["tests"]
 
 [tool.vulture]
 # Dead-code scanner
-# Surviving 80%+ suppressions live in `vulture_whitelist.py`
+# Surviving suppressions live in `vulture_whitelist.py`
 paths = ["gittensor", "neurons", "scripts", "vulture_whitelist.py"]
+ignore_decorators = [
+    # Click command/group registration - vulture cannot see the registry calls
+    "@click.command",
+    "@click.group",
+    "@*.command",
+    "@*.group",
+]
 exclude = [
     ".venv/",
     "smart-contracts/",
@@ -72,5 +79,5 @@ exclude = [
     # das-github-mirror wire-format schema
     "gittensor/utils/mirror/models.py",
 ]
-min_confidence = 80
+min_confidence = 60
 sort_by_size = true

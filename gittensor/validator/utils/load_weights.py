@@ -99,23 +99,6 @@ class TokenConfig:
         config = self.language_configs.get(ext)
         return config is not None and config.language is not None
 
-    def is_line_count_extension(self, extension: Optional[str]) -> bool:
-        """Check if a file extension uses line-count scoring.
-
-        Returns True when the extension is either in NON_CODE_EXTENSIONS or is
-        configured in programming_languages.json with no tree-sitter language
-        (language=None).  Unknown extensions that are absent from the config
-        entirely remain skipped-unsupported and return False.
-        """
-        if not extension:
-            return False
-        ext = extension.lstrip('.').lower()
-        if ext in NON_CODE_EXTENSIONS:
-            return True
-        config = self.language_configs.get(ext)
-        return config is not None and config.language is None
-
-
 def _get_weights_dir() -> Path:
     return Path(__file__).parent.parent / 'weights'
 

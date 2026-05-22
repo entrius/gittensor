@@ -19,6 +19,7 @@ from gittensor.constants import (
     INLINE_TEST_PATTERNS,
     MAX_FILE_SIZE_BYTES,
     MAX_LINES_SCORED_FOR_NON_CODE_EXT,
+    NON_CODE_EXTENSIONS,
     TEST_FILE_CONTRIBUTION_WEIGHT,
     TREE_SITTER_PARSE_TIMEOUT_MICROS,
 )
@@ -276,7 +277,7 @@ def calculate_token_score_from_file_changes(
                 is_test_file=is_test_file,
                 scoring_method='skipped',
             )
-        elif weights.is_line_count_extension(ext):
+        elif ext in NON_CODE_EXTENSIONS:
             lines_to_score = min(file.changes, MAX_LINES_SCORED_FOR_NON_CODE_EXT)
             lang_config = programming_languages.get(ext)
             lang_weight = lang_config.weight if lang_config else DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT

@@ -99,6 +99,7 @@ class TokenConfig:
         config = self.language_configs.get(ext)
         return config is not None and config.language is not None
 
+
 def _get_weights_dir() -> Path:
     return Path(__file__).parent.parent / 'weights'
 

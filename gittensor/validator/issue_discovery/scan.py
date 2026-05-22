@@ -52,7 +52,7 @@ from gittensor.validator.issue_discovery.scoring import (
     calculate_open_issue_spam_multiplier,
     check_issue_eligibility,
 )
-from gittensor.validator.oss_contributions.label_resolution import resolve_highest_label_multiplier
+from gittensor.validator.oss_contributions.label_resolution import resolve_trusted_label_multiplier
 from gittensor.validator.oss_contributions.mirror.adapters import mirror_files_to_legacy
 from gittensor.validator.oss_contributions.mirror.scoring import (
     calculate_base_score_for_pr_files,
@@ -755,13 +755,7 @@ def _mirror_issue_for_scoring(
         2,
     )
 
-    trusted = repo_config.trusted_label_pipeline
-    candidate_names = [
-        (label.name or '').lower()
-        for label in solving_pr.labels
-        if label.name and (trusted or label.actor_association in MAINTAINER_ASSOCIATIONS)
-    ]
-    _, label_multiplier = resolve_highest_label_multiplier(candidate_names, repo_config)
+    _, label_multiplier = resolve_trusted_label_multiplier(solving_pr.labels, repo_config)
     adapted.discovery_label_multiplier = label_multiplier
 
     return adapted

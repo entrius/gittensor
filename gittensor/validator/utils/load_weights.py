@@ -147,7 +147,7 @@ class RepositoryConfig:
         trusted_label_pipeline: When True, scoring labels count regardless of
             actor — including GitHub Apps that surface as ``actor_association=NULL``.
             Defaults to False; only enable on repos with an authoritative label
-            pipeline. See ``_resolve_trusted_scoring_label`` for the threat model.
+            pipeline. See ``resolve_trusted_label_multiplier`` for the threat model.
         label_multipliers: Per-repo label pattern multipliers. Keys support the
             same fnmatch wildcard syntax as ``additional_acceptable_branches``.
         default_label_multiplier: Multiplier used when no configured label

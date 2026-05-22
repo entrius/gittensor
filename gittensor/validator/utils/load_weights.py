@@ -16,6 +16,7 @@ from gittensor.constants import (
     MAX_OPEN_PR_THRESHOLD,
     MIN_CREDIBILITY,
     MIN_ISSUE_CREDIBILITY,
+    MIN_ISSUE_SOLVE_GAP_HOURS,
     MIN_TOKEN_SCORE_FOR_BASE_SCORE,
     MIN_TOKEN_SCORE_FOR_VALID_ISSUE,
     MIN_VALID_MERGED_PRS,
@@ -121,6 +122,7 @@ class RepoScoringConfig:
     review_penalty_rate: Optional[float] = None
     standard_issue_multiplier: Optional[float] = None
     maintainer_issue_multiplier: Optional[float] = None
+    min_issue_solve_gap_hours: Optional[float] = None
     time_decay: RepoTimeDecayConfig = field(default_factory=RepoTimeDecayConfig)
 
 
@@ -133,6 +135,7 @@ class ResolvedScoring:
     review_penalty_rate: float
     standard_issue_multiplier: float
     maintainer_issue_multiplier: float
+    min_issue_solve_gap_hours: float
     time_decay: ResolvedTimeDecay
 
 
@@ -234,6 +237,7 @@ def resolve_scoring(cfg: Optional[RepoScoringConfig]) -> ResolvedScoring:
         review_penalty_rate=float(pick(cfg.review_penalty_rate, REVIEW_PENALTY_RATE)),
         standard_issue_multiplier=float(pick(cfg.standard_issue_multiplier, STANDARD_ISSUE_MULTIPLIER)),
         maintainer_issue_multiplier=float(pick(cfg.maintainer_issue_multiplier, MAINTAINER_ISSUE_MULTIPLIER)),
+        min_issue_solve_gap_hours=float(pick(cfg.min_issue_solve_gap_hours, MIN_ISSUE_SOLVE_GAP_HOURS)),
         time_decay=resolve_time_decay(cfg.time_decay),
     )
 
@@ -347,6 +351,7 @@ _SCORING_FLOAT_FIELDS = (
     'review_penalty_rate',
     'standard_issue_multiplier',
     'maintainer_issue_multiplier',
+    'min_issue_solve_gap_hours',
 )
 
 
@@ -485,6 +490,11 @@ def _validate_scoring_configs(configs: Dict[str, RepositoryConfig]) -> None:
             raise RepositoryRegistryError(
                 f'{repo_name} scoring.maintainer_issue_multiplier must be within [1, 5], '
                 f'got {resolved.maintainer_issue_multiplier}'
+            )
+        if not 0.0 <= resolved.min_issue_solve_gap_hours <= 720.0:
+            raise RepositoryRegistryError(
+                f'{repo_name} scoring.min_issue_solve_gap_hours must be within [0, 720], '
+                f'got {resolved.min_issue_solve_gap_hours}'
             )
         if not 0 <= resolved.time_decay.grace_period_hours <= 168:
             raise RepositoryRegistryError(

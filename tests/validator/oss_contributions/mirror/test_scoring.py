@@ -820,6 +820,58 @@ class TestLinkedIssueValidity:
         assert _is_valid_linked_issue(li, scored.pr) is True
 
 
+class TestMinIssueSolveGap:
+    """Issue #462 — minimum issue-to-PR age gate for the issue bonus multiplier.
+
+    The PR's created_at is fixed at 2026-04-15T00:00:00Z by ``_pr``; the gap is
+    controlled by varying the linked issue's ``created_at``.
+    """
+
+    def test_gate_disabled_by_default(self):
+        # Default min_solve_gap_hours=0.0 → gate off, issue created 5d before PR.
+        scored = ScoredPR(pr=_pr())
+        li = MirrorLinkedIssue.from_dict(_linked_issue())
+        assert _is_valid_linked_issue(li, scored.pr) is True
+        assert _is_valid_linked_issue(li, scored.pr, 0.0) is True
+
+    def test_too_fast_solve_blocked(self):
+        # Issue created 1h before the PR; a 24h floor rejects it.
+        scored = ScoredPR(pr=_pr())
+        li = MirrorLinkedIssue.from_dict(_linked_issue(created_at='2026-04-14T23:00:00Z'))
+        assert _is_valid_linked_issue(li, scored.pr, 24.0) is False
+
+    def test_sufficient_gap_allowed(self):
+        # Issue created 5 days (120h) before the PR clears a 24h floor.
+        scored = ScoredPR(pr=_pr())
+        li = MirrorLinkedIssue.from_dict(_linked_issue(created_at='2026-04-10T00:00:00Z'))
+        assert _is_valid_linked_issue(li, scored.pr, 24.0) is True
+
+    def test_gap_exactly_at_floor_allowed(self):
+        # Exactly 24h before the PR — boundary is inclusive (gap < floor rejects).
+        scored = ScoredPR(pr=_pr())
+        li = MirrorLinkedIssue.from_dict(_linked_issue(created_at='2026-04-14T00:00:00Z'))
+        assert _is_valid_linked_issue(li, scored.pr, 24.0) is True
+
+    def test_multiplier_neutralized_for_fast_solve(self):
+        """End-to-end through ``_calculate_issue_multiplier`` with a per-repo override:
+        a too-fast self-filed-then-solved issue earns no bonus."""
+        from gittensor.validator.utils.load_weights import RepoScoringConfig
+
+        scoring = resolve_scoring(RepoScoringConfig(min_issue_solve_gap_hours=24.0))
+        fast = _linked_issue(created_at='2026-04-14T23:00:00Z', author_github_id='888')
+        scored = ScoredPR(pr=_pr(linked_issues=[fast]))
+        assert _calculate_issue_multiplier(scored, scoring) == 1.0
+
+    def test_multiplier_applies_when_gap_met(self):
+        from gittensor.constants import STANDARD_ISSUE_MULTIPLIER
+        from gittensor.validator.utils.load_weights import RepoScoringConfig
+
+        scoring = resolve_scoring(RepoScoringConfig(min_issue_solve_gap_hours=24.0))
+        slow = _linked_issue(created_at='2026-04-10T00:00:00Z', author_github_id='888')
+        scored = ScoredPR(pr=_pr(linked_issues=[slow]))
+        assert _calculate_issue_multiplier(scored, scoring) == STANDARD_ISSUE_MULTIPLIER
+
+
 class TestIssueMultiplierPreference:
     def test_prefer_maintainer_authored_when_multiple_valid(self):
         """Legacy parity (PR #673): the issue multiplier should pick a

@@ -164,6 +164,12 @@ MAX_OPEN_PR_REVIEW_COLLATERAL_MULTIPLIER = 2.0  # Cap open PR collateral growth 
 # Issue multiplier (flat values, no age scaling)
 STANDARD_ISSUE_MULTIPLIER = 1.33  # Non-maintainer issue author
 MAINTAINER_ISSUE_MULTIPLIER = 1.66  # Issue author is OWNER/MEMBER/COLLABORATOR
+# Anti-gaming: minimum hours that must elapse between an issue's creation and the
+# solving PR's creation for the issue to grant its bonus multiplier. Blocks the
+# "file an issue and immediately solve it (often via a coordinated alt account)
+# for a free multiplier" pattern (see issue #462). 0.0 disables the gate; the
+# value is an opt-in per-repo override via scoring.min_issue_solve_gap_hours.
+MIN_ISSUE_SOLVE_GAP_HOURS = 0.0
 # Excessive open PRs penalty (per-repo: counts a repo's own open PRs)
 # Multiplier = 1.0 if open PRs <= threshold, 0.0 otherwise
 EXCESSIVE_PR_PENALTY_BASE_THRESHOLD = 2

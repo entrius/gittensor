@@ -37,6 +37,7 @@ from gittensor.constants import (
     MERGED_PR_BASE_SCORE,
     MIN_TOKEN_SCORE_FOR_BASE_SCORE,
     SECONDS_PER_DAY,
+    SECONDS_PER_HOUR,
 )
 from gittensor.utils.github_api_tools import FileContentPair, branch_matches_pattern
 from gittensor.utils.mirror.client import MirrorClient, MirrorRequestError
@@ -415,7 +416,7 @@ def _calculate_issue_multiplier(scored: ScoredPR, scoring: ResolvedScoring) -> f
         bt.logging.info(f'PR #{pr.pr_number} - Contains no linked issues')
         return 1.0
 
-    valid = [li for li in pr.linked_issues if _is_valid_linked_issue(li, pr)]
+    valid = [li for li in pr.linked_issues if _is_valid_linked_issue(li, pr, scoring.min_issue_solve_gap_hours)]
     if not valid:
         bt.logging.info(f'PR #{pr.pr_number} - Solved no valid linked issues')
         return 1.0
@@ -433,12 +434,16 @@ def _calculate_issue_multiplier(scored: ScoredPR, scoring: ResolvedScoring) -> f
     return multiplier
 
 
-def _is_valid_linked_issue(li: MirrorLinkedIssue, pr: MirrorPullRequest) -> bool:
+def _is_valid_linked_issue(li: MirrorLinkedIssue, pr: MirrorPullRequest, min_solve_gap_hours: float = 0.0) -> bool:
     """Anti-gaming gates for issue → PR multiplier credit.
 
     - Reject transferred issues.
     - Missing author / self-issue (uses github_id for immutability).
     - Issue created after the PR.
+    - Solve-gap floor: the PR must be created at least ``min_solve_gap_hours``
+      after the issue. Blocks the "file an issue and immediately solve it (often
+      via a coordinated alt account, which slips the self-issue github_id check)
+      for a free multiplier" pattern — see issue #462. ``0.0`` disables the gate.
     - Any CLOSED issue must have state_reason=COMPLETED — NOT_PLANNED / reopened
       closures never grant a multiplier. Applies regardless of PR state, so the
       gate covers OPEN-PR collateral as well.
@@ -462,6 +467,15 @@ def _is_valid_linked_issue(li: MirrorLinkedIssue, pr: MirrorPullRequest) -> bool
     if li.created_at and li.created_at > pr.created_at:
         bt.logging.warning(f'Skipping linked issue #{li.number} - created after PR')
         return False
+
+    if min_solve_gap_hours > 0 and li.created_at:
+        gap_hours = (pr.created_at - li.created_at).total_seconds() / SECONDS_PER_HOUR
+        if gap_hours < min_solve_gap_hours:
+            bt.logging.warning(
+                f'Skipping linked issue #{li.number} - PR created {gap_hours:.2f}h after issue '
+                f'(min {min_solve_gap_hours}h) — too fast, no issue bonus'
+            )
+            return False
 
     # state_reason check applies regardless of PR state — OPEN-PR collateral
     # also requires that any CLOSED linked issue closed as COMPLETED.

@@ -448,6 +448,38 @@ class TestRepositoryConfigScoringBlock:
         with pytest.raises(RepositoryRegistryError):
             lw.load_master_repo_weights()
 
+    def test_loader_parses_min_issue_solve_gap_hours(self, tmp_path, monkeypatch):
+        from gittensor.validator.utils import load_weights as lw
+
+        (tmp_path / 'master_repositories.json').write_text(
+            json.dumps(
+                {
+                    'foo/gated': {'emission_share': 0.5, 'scoring': {'min_issue_solve_gap_hours': 24}},
+                    'foo/defaults': {'emission_share': 0.3},
+                }
+            )
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: tmp_path)
+
+        repos = lw.load_master_repo_weights()
+
+        assert repos['foo/gated'].scoring.min_issue_solve_gap_hours == pytest.approx(24.0)
+        # Unset → resolves to the global default (0.0, gate disabled).
+        assert repos['foo/defaults'].scoring.min_issue_solve_gap_hours is None
+        assert resolve_scoring(repos['foo/defaults'].scoring).min_issue_solve_gap_hours == pytest.approx(0.0)
+
+    @pytest.mark.parametrize('bad_value', [-1.0, 720.1, 10000.0])
+    def test_loader_rejects_out_of_range_min_issue_solve_gap_hours(self, tmp_path, monkeypatch, bad_value):
+        from gittensor.validator.utils import load_weights as lw
+
+        (tmp_path / 'master_repositories.json').write_text(
+            json.dumps({'foo/bad': {'emission_share': 0.5, 'scoring': {'min_issue_solve_gap_hours': bad_value}}})
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: tmp_path)
+
+        with pytest.raises(RepositoryRegistryError, match='min_issue_solve_gap_hours must be within'):
+            lw.load_master_repo_weights()
+
     def test_loader_parses_time_decay_overrides(self, tmp_path, monkeypatch):
         from gittensor.validator.utils import load_weights as lw
 

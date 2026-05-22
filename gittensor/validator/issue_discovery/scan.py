@@ -21,8 +21,11 @@ Anti-gaming gates (all applied):
 Same-account ("solver is also discoverer") gives credibility only — no
 discovery score. One-issue-per-PR rule is round-global: a single solving PR
 awards at most one discovery score across the entire validator round, even
-when it closes issues authored by different miners. The earliest-created
-qualifying issue across all miners wins; the rest are credibility only.
+when it closes issues authored by different miners. Issues are processed in
+canonical order (earliest ``created_at``, then smaller ``issue_number``,
+then smaller ``uid``); the first one whose solving PR actually resolves to
+a score claims the slot. Later-canonical siblings — and the canonical
+winner itself, if its solving-PR fetch fails — are credibility only.
 
 Base-score resolution uses a per-cycle cross-miner cache. Most solving PRs
 will be miners' own PRs that OSS scoring already tokenized; the cache
@@ -214,21 +217,47 @@ async def run_issue_discovery(
 
         pending.append((evaluation, filtered, open_counts))
 
-    canonical_pr_owners = _build_canonical_pr_owners(pending)
-    for evaluation, filtered, open_counts in pending:
-        complete = await _score_miner_issues(
+    # Cross-miner round state. ``claimed_pr_keys`` replaces the legacy
+    # pre-built ``canonical_pr_owners`` map: a (repo, pr_number) slot is now
+    # claimed lazily by the first issue (in canonical order) whose solving PR
+    # actually resolves to a score. This stops a transient-fetch-failed
+    # canonical winner from wasting the slot — the next-canonical sibling
+    # gets a turn instead of being silently blocked.
+    per_miner_repo_acc: Dict[int, Dict[str, _RepoIssueAcc]] = {}
+    claimed_pr_keys: Set[Tuple[str, int]] = set()
+
+    # Global iteration in canonical order. Within a single sort, the first
+    # qualifying issue per (repo, pr_number) tries to score; on success it
+    # adds the slot to ``claimed_pr_keys`` and downstream siblings see the
+    # slot as taken (credibility only). On failure the slot stays unclaimed
+    # and the next sibling's iteration gets a fresh chance.
+    all_issues_sorted = sorted(
+        ((evaluation, issue) for evaluation, filtered, _ in pending for issue in filtered),
+        key=lambda t: _canonical_iteration_key(t[0], t[1]),
+    )
+    for evaluation, issue in all_issues_sorted:
+        repo_acc = per_miner_repo_acc.setdefault(evaluation.uid, {})
+        await _process_issue(
             evaluation,
-            filtered,
+            issue,
             mirror_repos,
             solving_pr_cache,
             cache_stats,
             client,
             programming_languages,
             token_config,
-            open_counts=open_counts,
-            canonical_pr_owners=canonical_pr_owners,
+            repo_acc,
+            claimed_pr_keys,
         )
-        if complete:
+
+    # Per-miner finalize: roll the (possibly-empty) accumulators into the
+    # evaluation's repo and round-level fields. Miners with no qualifying
+    # issues fall through to finalize against an empty repo_acc, which still
+    # writes the open-issue counts and resets the issue-discovery scalars.
+    for evaluation, _, open_counts in pending:
+        repo_acc = per_miner_repo_acc.get(evaluation.uid, {})
+        _finalize_repo_issue_scores(evaluation, repo_acc, open_counts, mirror_repos)
+        if not any(acc.fetch_failed for acc in repo_acc.values()):
             cacheable_uids.add(evaluation.uid)
 
     if evaluation_cache is not None:
@@ -325,32 +354,18 @@ def _restore_issue_discovery_from_cache(
     return True
 
 
-def _build_canonical_pr_owners(
-    pending: List[Tuple[MinerEvaluation, List[MirrorIssue], Dict[str, int]]],
-) -> Dict[Tuple[str, int], Tuple[datetime, int, int]]:
-    """Cross-miner one-issue-per-PR resolution.
+def _canonical_iteration_key(evaluation: MinerEvaluation, issue: MirrorIssue) -> Tuple[datetime, int, int]:
+    """Sort key for canonical-order iteration of issues across miners.
 
-    Returns ``(repo, pr_number) -> (created_at, issue_number, uid)`` for the
-    earliest-created qualifying issue across all miners. Same-account issues
-    (discoverer == solver) are excluded — they never claim the slot.
-    ``_score_miner_issues`` matches issue markers against this map to
-    gate scoring vs. credibility-only.
+    Earliest ``created_at`` wins, ties broken by smaller ``issue_number``,
+    final tiebreaker is smaller ``uid``. A round-global sort by this key
+    drives the cross-miner one-issue-per-PR rule: whichever qualifying issue
+    is iterated first per (repo, pr_number) gets to try to score, and only
+    claims the slot if its solving PR actually resolves. Failed-to-score
+    canonical winners do NOT block later-canonical siblings — the next one
+    in the global order gets its turn.
     """
-    canonical: Dict[Tuple[str, int], Tuple[datetime, int, int]] = {}
-    for evaluation, issues, _ in pending:
-        for issue in issues:
-            if _classify_issue(issue) != 'solved':
-                continue
-            sp = issue.solving_pr
-            assert sp is not None  # _classify_issue guarantees a solving_pr
-            if issue.author_github_id == sp.author_github_id:
-                continue
-            key = (issue.repo_full_name, sp.pr_number)
-            marker = (issue.created_at or _FAR_FUTURE, issue.issue_number, evaluation.uid)
-            existing = canonical.get(key)
-            if existing is None or marker < existing:
-                canonical[key] = marker
-    return canonical
+    return (issue.created_at or _FAR_FUTURE, issue.issue_number, evaluation.uid)
 
 
 def _count_open_issues(issues: List[MirrorIssue], enabled_names: Set[str]) -> Dict[str, int]:
@@ -386,125 +401,118 @@ def _build_solving_pr_cache(
     return cache
 
 
-async def _score_miner_issues(
+async def _process_issue(
     evaluation: MinerEvaluation,
-    issues: List[MirrorIssue],
+    issue: MirrorIssue,
     mirror_repos: Dict[str, RepositoryConfig],
     solving_pr_cache: Dict[Tuple[str, int], CachedSolvingPR],
     cache_stats: _CacheStats,
     client: MirrorClient,
     programming_languages: Dict[str, LanguageConfig],
     token_config: TokenConfig,
-    open_counts: Dict[str, int],
-    canonical_pr_owners: Dict[Tuple[str, int], Tuple[datetime, int, int]],
-) -> bool:
-    """Classify + score one miner's mirror issues, per repository.
+    repo_acc_map: Dict[str, _RepoIssueAcc],
+    claimed_pr_keys: Set[Tuple[str, int]],
+) -> None:
+    """Classify and (when applicable) score a single mirror issue.
 
-    Each repository gates issue discovery independently from only its own
-    issues. ``open_counts`` maps repo -> the miner's current OPEN issue count
-    there, independent of the issue-scoring lookback window.
-
-    ``canonical_pr_owners`` enforces the cross-miner one-issue-per-PR rule:
-    only the marker-matching issue scores, siblings count for credibility.
-
-    Returns ``True`` when all required solving-PR score data was available, so
-    the caller can safely refresh the cache with this complete issue snapshot.
+    Mutates the miner's ``repo_acc_map`` for credibility/score accumulation
+    and the shared ``claimed_pr_keys`` set on a successful claim. Iteration
+    order at the call site is canonical: the first qualifying issue per
+    (repo, pr_number) reaches the claim check first, and only succeeds when
+    its solving PR actually resolves. If it fails, the slot stays unclaimed
+    and the next-canonical sibling iteration will get a chance.
     """
-    repo_acc: Dict[str, _RepoIssueAcc] = {}
+    repo_config = mirror_repos.get(issue.repo_full_name)
+    if repo_config is None:
+        return
+    cfg = resolve_eligibility(repo_config.eligibility)
+    acc = repo_acc_map.setdefault(issue.repo_full_name, _RepoIssueAcc())
 
-    issues_sorted = sorted(
-        issues,
-        key=lambda i: (
-            i.repo_full_name,
-            i.solved_by_pr or 0,
-            i.created_at or _FAR_FUTURE,
-        ),
+    classification = _classify_issue(issue)
+    if classification == 'not-solved-closed':
+        acc.closed += 1
+        return
+    if classification == 'ignore':
+        return
+
+    # classification == 'solved'
+    assert issue.solving_pr is not None  # _classify_issue guarantees
+    solving_pr = issue.solving_pr
+
+    acc.solved += 1
+
+    # Resolve real base_score + token_score for the solving PR (cache or fetch)
+    cached = await _resolve_solving_pr_score(
+        issue,
+        solving_pr,
+        solving_pr_cache,
+        cache_stats,
+        client,
+        programming_languages,
+        token_config,
+        repo_config,
     )
-
-    for issue in issues_sorted:
-        repo_config = mirror_repos.get(issue.repo_full_name)
-        if repo_config is None:
-            continue
-        cfg = resolve_eligibility(repo_config.eligibility)
-        acc = repo_acc.setdefault(issue.repo_full_name, _RepoIssueAcc())
-
-        classification = _classify_issue(issue)
-        if classification == 'not-solved-closed':
-            acc.closed += 1
-            continue
-        if classification == 'ignore':
-            continue
-
-        # classification == 'solved'
-        assert issue.solving_pr is not None  # _classify_issue guarantees
-        solving_pr = issue.solving_pr
-
-        acc.solved += 1
-
-        # Resolve real base_score + token_score for the solving PR (cache or fetch)
-        cached = await _resolve_solving_pr_score(
-            issue,
-            solving_pr,
-            solving_pr_cache,
-            cache_stats,
-            client,
-            programming_languages,
-            token_config,
-            repo_config,
+    if cached is None:
+        # Fetch failed — issue still counts for solved/credibility but not scored.
+        # Can't apply the valid-solved gate without a real token_score, so be
+        # conservative and don't increment valid_solved. Importantly, the slot
+        # is NOT claimed: a later-canonical sibling whose own fetch succeeds
+        # can still claim it.
+        acc.fetch_failed = True
+        bt.logging.debug(
+            f'  issue #{issue.issue_number} ({issue.repo_full_name}): solver score unavailable '
+            f'(fetch failed) — credibility only, slot left unclaimed'
         )
-        if cached is None:
-            # Fetch failed — issue still counts for solved/credibility but not scored.
-            # Can't apply the valid-solved gate without a real token_score, so be
-            # conservative and don't increment valid_solved.
-            acc.fetch_failed = True
-            bt.logging.debug(
-                f'  issue #{issue.issue_number} ({issue.repo_full_name}): solver score unavailable '
-                f'(fetch failed) — credibility only'
-            )
-            continue
+        return
 
-        # Valid-solved gate: solving PR must meet the repo's token threshold.
-        if cached.token_score >= cfg.min_token_score_for_valid_issue:
-            acc.valid_solved += 1
+    # Valid-solved gate: solving PR must meet the repo's token threshold.
+    if cached.token_score >= cfg.min_token_score_for_valid_issue:
+        acc.valid_solved += 1
 
-        # Same-account: discoverer == solver gets credibility only, no score
-        if issue.author_github_id == solving_pr.author_github_id:
-            bt.logging.debug(
-                f'  issue #{issue.issue_number} ({issue.repo_full_name}): same-account '
-                f'(discoverer == solver {issue.author_github_id}) — credibility only'
-            )
-            continue
+    # Same-account: discoverer == solver gets credibility only, no score.
+    # Same-account issues never claim a slot regardless of canonical order.
+    if issue.author_github_id == solving_pr.author_github_id:
+        bt.logging.debug(
+            f'  issue #{issue.issue_number} ({issue.repo_full_name}): same-account '
+            f'(discoverer == solver {issue.author_github_id}) — credibility only'
+        )
+        return
 
-        pr_key = (issue.repo_full_name, solving_pr.pr_number)
-        own_marker = (issue.created_at or _FAR_FUTURE, issue.issue_number, evaluation.uid)
-        if canonical_pr_owners.get(pr_key) != own_marker:
-            bt.logging.debug(
-                f'  issue #{issue.issue_number} ({issue.repo_full_name}): one-issue-per-PR '
-                f'(PR #{solving_pr.pr_number} canonical owner is a different issue) — credibility only'
-            )
-            continue
+    pr_key = (issue.repo_full_name, solving_pr.pr_number)
+    if pr_key in claimed_pr_keys:
+        # A previously-iterated canonical-earlier issue already claimed this
+        # solving-PR slot. One-issue-per-PR: later siblings are credibility only.
+        bt.logging.debug(
+            f'  issue #{issue.issue_number} ({issue.repo_full_name}): one-issue-per-PR '
+            f'(PR #{solving_pr.pr_number} slot already claimed by an earlier-canonical '
+            f'scoring sibling) — credibility only'
+        )
+        return
 
-        # Quality gate: below-threshold solving PRs add credibility only, no
-        # discovery score.
-        if cached.token_score < cfg.min_token_score_for_valid_issue:
-            bt.logging.debug(
-                f'  issue #{issue.issue_number} ({issue.repo_full_name}): solving PR '
-                f'#{solving_pr.pr_number} token_score {cached.token_score:.2f} < '
-                f'{cfg.min_token_score_for_valid_issue} — credibility only'
-            )
-            continue
+    # Quality gate: below-threshold solving PRs add credibility only, no
+    # discovery score. Don't claim the slot — siblings would see the same
+    # solving PR (same token_score) and also fail, but leaving the slot
+    # unclaimed keeps the invariant "only scoring issues claim".
+    if cached.token_score < cfg.min_token_score_for_valid_issue:
+        bt.logging.debug(
+            f'  issue #{issue.issue_number} ({issue.repo_full_name}): solving PR '
+            f'#{solving_pr.pr_number} token_score {cached.token_score:.2f} < '
+            f'{cfg.min_token_score_for_valid_issue} — credibility only'
+        )
+        return
 
-        adapted = _mirror_issue_for_scoring(issue, solving_pr, repo_config, base_score=cached.base_score)
-        if adapted is None:
-            continue
+    adapted = _mirror_issue_for_scoring(issue, solving_pr, repo_config, base_score=cached.base_score)
+    if adapted is None:
+        # Defensive: solving_pr.merged_at missing on a MERGED PR. Don't claim;
+        # any sibling iteration would hit the same missing field and skip too,
+        # but the invariant holds.
+        return
 
-        acc.scored_issues.append(adapted)
-        # issue_token_score accumulates per-solving-PR token scores for the
-        # open-issue spam multiplier threshold calc.
-        acc.issue_token_score += cached.token_score
-
-    _finalize_repo_issue_scores(evaluation, repo_acc, open_counts, mirror_repos)
-    return not any(acc.fetch_failed for acc in repo_acc.values())
+    acc.scored_issues.append(adapted)
+    # issue_token_score accumulates per-solving-PR token scores for the
+    # open-issue spam multiplier threshold calc.
+    acc.issue_token_score += cached.token_score
+    claimed_pr_keys.add(pr_key)
 
 
 def _finalize_repo_issue_scores(

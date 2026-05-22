@@ -1052,10 +1052,12 @@ class TestCrossMinerOneIssuePerPr:
     pre-#796 behavior in ``_collect_issues_from_prs``.
     """
 
-    def test_canonical_picks_earliest_created_across_miners(self):
-        """``_build_canonical_pr_owners`` keys (repo, pr_number) to the
-        earliest-created qualifying issue across all miners' fetches."""
-        from gittensor.validator.issue_discovery.scan import _build_canonical_pr_owners
+    def test_canonical_iteration_key_orders_by_created_at(self):
+        """``_canonical_iteration_key`` produces the round-global sort order
+        used to interleave issues across miners. Earlier ``created_at`` sorts
+        before a later one — that's what gives the earliest-created issue
+        first dibs on its solving-PR slot."""
+        from gittensor.validator.issue_discovery.scan import _canonical_iteration_key
 
         e_a = _eval(uid=1, github_id='A')
         e_b = _eval(uid=2, github_id='B')
@@ -1077,75 +1079,31 @@ class TestCrossMinerOneIssuePerPr:
             )
         )
 
-        canonical = _build_canonical_pr_owners([(e_a, [a_issue], {}), (e_b, [b_issue], {})])
+        # A's earlier-created issue (#50, uid 1) sorts before B's (#51, uid 2).
+        assert _canonical_iteration_key(e_a, a_issue) < _canonical_iteration_key(e_b, b_issue)
 
-        # Earlier-created issue (#50, uid 1) wins canonical for PR 100
-        owner = canonical[('entrius/gittensor-ui', 100)]
-        assert owner[1] == 50
-        assert owner[2] == 1
+    def test_canonical_iteration_key_tie_breaks_on_issue_number_then_uid(self):
+        """Identical ``created_at`` → lower issue_number wins. Identical
+        ``created_at`` AND identical ``issue_number`` (very unlikely in
+        practice but possible across repos sharing numbers via the sort) →
+        lower uid wins."""
+        from gittensor.validator.issue_discovery.scan import _canonical_iteration_key
 
-    def test_canonical_tie_break_lower_issue_number(self):
-        """Identical ``created_at`` across miners → lower issue_number wins."""
-        from gittensor.validator.issue_discovery.scan import _build_canonical_pr_owners
+        e_low_uid = _eval(uid=1, github_id='A')
+        e_high_uid = _eval(uid=2, github_id='B')
 
-        # uid 2 first in iteration order, but uid 1's lower issue_number must win.
-        e_a = _eval(uid=2, github_id='A')
-        e_b = _eval(uid=1, github_id='B')
+        same_time = '2026-04-01T00:00:00Z'
 
-        a_issue = MirrorIssue.from_dict(
-            _issue_dict(
-                issue_number=51,
-                author_github_id='A',
-                solving_pr_author='SOLVER',
-                created_at='2026-04-01T00:00:00Z',
-            )
-        )
-        b_issue = MirrorIssue.from_dict(
-            _issue_dict(
-                issue_number=50,
-                author_github_id='B',
-                solving_pr_author='SOLVER',
-                created_at='2026-04-01T00:00:00Z',
-            )
-        )
+        i_low_number = MirrorIssue.from_dict(_issue_dict(issue_number=50, author_github_id='A', created_at=same_time))
+        i_high_number = MirrorIssue.from_dict(_issue_dict(issue_number=51, author_github_id='B', created_at=same_time))
 
-        canonical = _build_canonical_pr_owners([(e_a, [a_issue], {}), (e_b, [b_issue], {})])
+        # issue_number tiebreak: lower wins regardless of which uid holds it
+        assert _canonical_iteration_key(e_high_uid, i_low_number) < _canonical_iteration_key(e_low_uid, i_high_number)
 
-        owner = canonical[('entrius/gittensor-ui', 100)]
-        assert owner[1] == 50  # lower issue_number wins
-        assert owner[2] == 1  # ... which is uid 1 (e_b)
-
-    def test_canonical_excludes_same_account(self):
-        """Same-account issues never claim canonical ownership of a PR slot,
-        leaving non-same-account siblings on the same PR free to score."""
-        from gittensor.validator.issue_discovery.scan import _build_canonical_pr_owners
-
-        e_a = _eval(uid=1, github_id='A')
-        e_b = _eval(uid=2, github_id='B')
-
-        # A's issue is same-account (author == solver) and earlier — must be excluded.
-        a_issue = MirrorIssue.from_dict(
-            _issue_dict(
-                issue_number=50,
-                author_github_id='A',
-                solving_pr_author='A',
-                created_at='2026-04-01T00:00:00Z',
-            )
-        )
-        b_issue = MirrorIssue.from_dict(
-            _issue_dict(
-                issue_number=51,
-                author_github_id='B',
-                solving_pr_author='SOLVER',
-                created_at='2026-04-05T00:00:00Z',
-            )
-        )
-
-        canonical = _build_canonical_pr_owners([(e_a, [a_issue], {}), (e_b, [b_issue], {})])
-
-        owner = canonical[('entrius/gittensor-ui', 100)]
-        assert owner[1] == 51  # B's issue claims canonical
-        assert owner[2] == 2
+        # uid final tiebreak: same created_at, same issue_number, lower uid wins
+        i_same_a = MirrorIssue.from_dict(_issue_dict(issue_number=50, author_github_id='A', created_at=same_time))
+        i_same_b = MirrorIssue.from_dict(_issue_dict(issue_number=50, author_github_id='B', created_at=same_time))
+        assert _canonical_iteration_key(e_low_uid, i_same_a) < _canonical_iteration_key(e_high_uid, i_same_b)
 
     def test_two_miners_shared_pr_only_earliest_scores(self):
         """End-to-end: two miners each with 7 valid solved issues clearing
@@ -1350,6 +1308,183 @@ class TestCrossMinerOneIssuePerPr:
             return evaluation.issue_discovery_score
 
         assert _score_with_emission_share(0.1) == pytest.approx(_score_with_emission_share(0.9))
+
+    def test_canonical_winner_unscoreable_lets_sibling_claim(self):
+        """Core bug fix. The earlier-canonical miner A's solving-PR can't
+        actually produce a scored row (here: ``solving_pr.merged_at=None``,
+        a mirror anomaly that lands at ``_mirror_issue_for_scoring`` returning
+        ``None``). Under the old pre-built canonical map, B was credibility-
+        only — the slot was wasted. With lazy claiming, B claims the slot.
+
+        The same dynamics apply to transient ``get_pr_files`` failures
+        (``cached is None``): the canonical winner's iteration doesn't claim,
+        and the next-canonical sibling's iteration gets a turn. The
+        ``merged_at=None`` case is the deterministic variant — easier to
+        exercise in a unit test without monkeypatching the token-scoring math.
+        """
+        client = Mock()
+        seed = MinerEvaluation(uid=99, hotkey='hkS', github_id='SEED')
+        seed.merged_prs = [_scored_mirror_pr('entrius/gittensor-ui', 100)]
+        # Padding seeds so each miner clears MIN_VALID_SOLVED_ISSUES=3.
+        seed.merged_prs.extend(
+            _scored_mirror_pr('entrius/gittensor-ui', pr_number)
+            for pr_number in list(range(200, 203)) + list(range(300, 303))
+        )
+
+        # A's #50: solving_pr.merged_at forced to None -> _mirror_issue_for_scoring returns None.
+        a_shared = _issue_dict(
+            issue_number=50,
+            author_github_id='A',
+            solved_by_pr=100,
+            solving_pr_author='SOLVER',
+            created_at='2026-04-01T00:00:00Z',
+        )
+        a_shared['solving_pr']['merged_at'] = None
+
+        # B's #51: solving_pr.merged_at populated -> scoreable.
+        b_shared = _issue_dict(
+            issue_number=51,
+            author_github_id='B',
+            solved_by_pr=100,
+            solving_pr_author='SOLVER',
+            created_at='2026-04-05T00:00:00Z',
+        )
+
+        a_issues = [_issue_dict(issue_number=10 + i, author_github_id='A', solved_by_pr=200 + i) for i in range(3)]
+        a_issues.append(a_shared)
+        b_issues = [_issue_dict(issue_number=20 + i, author_github_id='B', solved_by_pr=300 + i) for i in range(3)]
+        b_issues.append(b_shared)
+
+        client.get_miner_issues.side_effect = _issues_by_github_id({'A': a_issues, 'B': b_issues})
+
+        e_a = _eval(uid=1, github_id='A')
+        e_b = _eval(uid=2, github_id='B')
+
+        _run(
+            run_issue_discovery(
+                {1: e_a, 2: e_b, 99: seed},
+                _mirror_repos('entrius/gittensor-ui'),
+                _EMPTY_LANGS,
+                _EMPTY_TOKEN_CONFIG,
+                client=client,
+            )
+        )
+
+        # Both miners are eligible (4 valid_solved each, well over MIN=3).
+        assert e_a.is_issue_eligible
+        assert e_b.is_issue_eligible
+
+        # A's #50 was canonical-earlier but couldn't be scored — NOT in
+        # scored issues. Under the old behavior B's #51 would also be blocked
+        # (canonical_pr_owners pinned A as the winner regardless of outcome).
+        assert not any(issue.number == 50 for issue in e_a.issue_discovery_issues)
+        # B's #51 took the slot.
+        assert any(issue.number == 51 for issue in e_b.issue_discovery_issues)
+
+    def test_canonical_winner_success_blocks_sibling_as_before(self):
+        """Regression coverage: when the canonical winner DOES score, siblings
+        on the same PR are still blocked. Legacy behavior preserved under
+        the lazy-claim semantics."""
+        client = Mock()
+        seed = MinerEvaluation(uid=99, hotkey='hkS', github_id='SEED')
+        seed.merged_prs = [_scored_mirror_pr('entrius/gittensor-ui', 100)]
+        seed.merged_prs.extend(
+            _scored_mirror_pr('entrius/gittensor-ui', pr_number)
+            for pr_number in list(range(200, 203)) + list(range(300, 303))
+        )
+
+        a_issues = [_issue_dict(issue_number=10 + i, author_github_id='A', solved_by_pr=200 + i) for i in range(3)]
+        a_issues.append(
+            _issue_dict(
+                issue_number=50,
+                author_github_id='A',
+                solved_by_pr=100,
+                solving_pr_author='SOLVER',
+                created_at='2026-04-01T00:00:00Z',
+            )
+        )
+        b_issues = [_issue_dict(issue_number=20 + i, author_github_id='B', solved_by_pr=300 + i) for i in range(3)]
+        b_issues.append(
+            _issue_dict(
+                issue_number=51,
+                author_github_id='B',
+                solved_by_pr=100,
+                solving_pr_author='SOLVER',
+                created_at='2026-04-05T00:00:00Z',
+            )
+        )
+        client.get_miner_issues.side_effect = _issues_by_github_id({'A': a_issues, 'B': b_issues})
+
+        e_a = _eval(uid=1, github_id='A')
+        e_b = _eval(uid=2, github_id='B')
+
+        _run(
+            run_issue_discovery(
+                {1: e_a, 2: e_b, 99: seed},
+                _mirror_repos('entrius/gittensor-ui'),
+                _EMPTY_LANGS,
+                _EMPTY_TOKEN_CONFIG,
+                client=client,
+            )
+        )
+
+        # Canonical winner (A's #50) scored; sibling (B's #51) is credibility only.
+        assert any(issue.number == 50 for issue in e_a.issue_discovery_issues)
+        assert not any(issue.number == 51 for issue in e_b.issue_discovery_issues)
+        assert e_b.total_solved_issues == 4  # 3 padding + #51 (credibility-only)
+
+    def test_same_account_canonical_does_not_block_sibling(self):
+        """Preserves the legacy semantic that same-account issues never claim
+        a slot — even when they're the canonical-earlier issue by created_at.
+        The non-same-account sibling claims the PR."""
+        client = Mock()
+        seed = MinerEvaluation(uid=99, hotkey='hkS', github_id='SEED')
+        seed.merged_prs = [_scored_mirror_pr('entrius/gittensor-ui', 100)]
+        seed.merged_prs.extend(
+            _scored_mirror_pr('entrius/gittensor-ui', pr_number)
+            for pr_number in list(range(200, 203)) + list(range(300, 303))
+        )
+
+        # A's earlier-created #50 is same-account (author == solver).
+        a_issues = [_issue_dict(issue_number=10 + i, author_github_id='A', solved_by_pr=200 + i) for i in range(3)]
+        a_issues.append(
+            _issue_dict(
+                issue_number=50,
+                author_github_id='A',
+                solved_by_pr=100,
+                solving_pr_author='A',  # same-account
+                created_at='2026-04-01T00:00:00Z',
+            )
+        )
+        b_issues = [_issue_dict(issue_number=20 + i, author_github_id='B', solved_by_pr=300 + i) for i in range(3)]
+        b_issues.append(
+            _issue_dict(
+                issue_number=51,
+                author_github_id='B',
+                solved_by_pr=100,
+                solving_pr_author='SOLVER',
+                created_at='2026-04-05T00:00:00Z',
+            )
+        )
+        client.get_miner_issues.side_effect = _issues_by_github_id({'A': a_issues, 'B': b_issues})
+
+        e_a = _eval(uid=1, github_id='A')
+        e_b = _eval(uid=2, github_id='B')
+
+        _run(
+            run_issue_discovery(
+                {1: e_a, 2: e_b, 99: seed},
+                _mirror_repos('entrius/gittensor-ui'),
+                _EMPTY_LANGS,
+                _EMPTY_TOKEN_CONFIG,
+                client=client,
+            )
+        )
+
+        # A's same-account #50 didn't claim — not in scored issues.
+        assert not any(issue.number == 50 for issue in e_a.issue_discovery_issues)
+        # B's #51 takes the slot.
+        assert any(issue.number == 51 for issue in e_b.issue_discovery_issues)
 
 
 def _issues_by_github_id(mapping: dict):

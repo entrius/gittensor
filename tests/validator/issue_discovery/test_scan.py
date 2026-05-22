@@ -99,6 +99,25 @@ def _empty_files_response(repo: str, pr_number: int) -> MirrorPullRequestFilesRe
     )
 
 
+def _empty_pulls_response(author_github_id: str = '218712309') -> MirrorPullRequestsResponse:
+    """Bundle response with no PRs.
+
+    Used by tests that exercise the cache-miss fetch path but don't care
+    about the merge-eligibility gate added in the issue-discovery merge-gate
+    fix — an empty bundle means "mirror has no row for this author's PR in
+    this repo", which causes `_resolve_solving_pr_score` to fall through
+    to the existing `get_pr_files` path. Preserves the original test intent.
+    """
+    return MirrorPullRequestsResponse.from_dict(
+        {
+            'github_id': author_github_id,
+            'since': '2026-03-15T00:00:00Z',
+            'generated_at': '2026-04-21T00:00:00Z',
+            'pull_requests': [],
+        }
+    )
+
+
 def _issue_dict(
     issue_number: int = 50,
     state: str = 'CLOSED',
@@ -580,6 +599,7 @@ class TestRunMirrorIssueDiscovery:
 
         client = Mock()
         client.get_miner_issues.return_value = _response([_issue_dict()])
+        client.get_miner_pulls.return_value = _empty_pulls_response()
         client.get_pr_files.side_effect = MirrorRequestError('files fetch failed')
 
         eval_ = _eval(uid=1, github_id='999')
@@ -671,6 +691,7 @@ class TestSolvingPrCache:
         """A solving PR NOT in cache triggers one get_pr_files call."""
         client = Mock()
         client.get_miner_issues.return_value = _response([_issue_dict()])
+        client.get_miner_pulls.return_value = _empty_pulls_response()
         client.get_pr_files.return_value = _empty_files_response('entrius/gittensor-ui', 100)
 
         eval_ = _eval()
@@ -692,6 +713,7 @@ class TestSolvingPrCache:
         """Same non-miner solving PR closes issues for two miners → one fetch total."""
         client = Mock()
         client.get_miner_issues.return_value = _response([_issue_dict()])
+        client.get_miner_pulls.return_value = _empty_pulls_response()
         client.get_pr_files.return_value = _empty_files_response('entrius/gittensor-ui', 100)
 
         e1 = _eval(uid=1, github_id='g1')
@@ -714,6 +736,7 @@ class TestSolvingPrCache:
         but no discovery_earned_score is produced."""
         client = Mock()
         client.get_miner_issues.return_value = _response([_issue_dict()])
+        client.get_miner_pulls.return_value = _empty_pulls_response()
         client.get_pr_files.side_effect = MirrorRequestError('files fetch failed')
 
         eval_ = _eval()
@@ -740,6 +763,7 @@ class TestSolvingPrCache:
         that re-tokenizes to 0 with empty files + empty token config."""
         client = Mock()
         client.get_miner_issues.return_value = _response([_issue_dict()])
+        client.get_miner_pulls.return_value = _empty_pulls_response()
         client.get_pr_files.return_value = _empty_files_response('entrius/gittensor-ui', 100)
         eval_ = _eval()
 

@@ -138,6 +138,40 @@ class TestCrossRepoIsolation:
         assert rewards[_idx(miner_uids, RECYCLE_UID)] == pytest.approx(0.6 * OSS_EMISSION_SHARE)
 
 
+class TestFailedEvaluationFiltering:
+    def test_failed_pr_rows_do_not_consume_repo_slice(self):
+        repos = {'r/pr': _config(emission_share=1.0, issue_discovery_share=0.0)}
+        miner_uids = _uids(1, 2)
+        failed = _evaluation(1, prs=[_scored_pr('r/pr', 100, earned_score=30.0)])
+        failed.failed_reason = 'penalized'
+        evaluations = {
+            1: failed,
+            2: _evaluation(2, prs=[_scored_pr('r/pr', 200, earned_score=10.0)]),
+        }
+
+        rewards = blend_emission_pools(evaluations, repos, miner_uids)
+
+        assert rewards[_idx(miner_uids, 1)] == pytest.approx(0.0)
+        assert rewards[_idx(miner_uids, 2)] == pytest.approx(OSS_EMISSION_SHARE)
+        assert rewards[_idx(miner_uids, RECYCLE_UID)] == pytest.approx(0.0)
+
+    def test_failed_issue_rows_do_not_consume_repo_slice(self):
+        repos = {'r/issue': _config(emission_share=1.0, issue_discovery_share=1.0)}
+        miner_uids = _uids(1, 2)
+        failed = _evaluation(1, issues=[_discovered_issue('r/issue', 10, earned_score=30.0)])
+        failed.failed_reason = 'penalized'
+        evaluations = {
+            1: failed,
+            2: _evaluation(2, issues=[_discovered_issue('r/issue', 20, earned_score=10.0)]),
+        }
+
+        rewards = blend_emission_pools(evaluations, repos, miner_uids)
+
+        assert rewards[_idx(miner_uids, 1)] == pytest.approx(0.0)
+        assert rewards[_idx(miner_uids, 2)] == pytest.approx(OSS_EMISSION_SHARE)
+        assert rewards[_idx(miner_uids, RECYCLE_UID)] == pytest.approx(0.0)
+
+
 class TestWithinRepoSpill:
     def test_issue_side_empty_spills_to_pr_side(self):
         repos = {'r/spill-pr': _config(emission_share=0.1, issue_discovery_share=0.6)}

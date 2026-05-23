@@ -28,8 +28,8 @@ async def issue_competitions(
     1. Harvest emissions into the bounty pool
     2. Get active issues from the smart contract
     3. For each active issue, check GitHub:
-       - If solved by eligible miner -> vote_solution
-       - If closed but not by eligible miner -> vote_cancel_issue
+       - If solved by a registered miner with a non-failed identity -> vote_solution
+       - If closed without a registered solver identity -> vote_cancel_issue
 
     Args:
         self: The validator instance
@@ -61,13 +61,15 @@ async def issue_competitions(
         if harvest_result and harvest_result.get('status') == 'success':
             bt.logging.success(f'Harvested emissions! Extrinsic: {harvest_result.get("tx_hash", "")}')
 
-        # Build mapping of github_id->hotkey for every registered miner. Bounty
-        # payouts are not eligibility-gated — any miner who solves a bounty
-        # issue can receive the reward.
+        # Build mapping of github_id->hotkey for every non-failed registered
+        # miner. Bounty payouts are not normal eligibility-gated, but failed
+        # evaluations are not valid payout targets. Duplicate GitHub IDs are
+        # penalized in oss_contributions() before this pass and arrive here as
+        # failed evaluations.
         registered_miners = {
             eval.github_id: eval.hotkey
             for eval in miner_evaluations.values()
-            if eval.github_id and eval.github_id != '0'
+            if eval.github_id and eval.github_id != '0' and eval.failed_reason is None
         }
         bt.logging.info(
             f'Issue bounties: {len(registered_miners)} registered miners out of {len(miner_evaluations)} total'

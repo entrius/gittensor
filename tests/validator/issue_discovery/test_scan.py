@@ -25,11 +25,13 @@ scored_pr_module = pytest.importorskip('gittensor.validator.oss_contributions.mi
 run_issue_discovery = scan_module.run_issue_discovery
 _classify_issue = scan_module._classify_issue
 _build_solving_pr_cache = scan_module._build_solving_pr_cache
+_mirror_issue_for_scoring = scan_module._mirror_issue_for_scoring
 CachedSolvingPR = scan_module.CachedSolvingPR
 MirrorIssue = mirror_models.MirrorIssue
 MirrorIssuesResponse = mirror_models.MirrorIssuesResponse
 MirrorPullRequest = mirror_models.MirrorPullRequest
 MirrorPullRequestFilesResponse = mirror_models.MirrorPullRequestFilesResponse
+MirrorSolvingPR = mirror_models.MirrorSolvingPR
 MirrorRequestError = mirror_client_mod.MirrorRequestError
 MinerEvaluation = classes.MinerEvaluation
 MinerEvaluationCache = classes.MinerEvaluationCache
@@ -112,6 +114,7 @@ def _issue_dict(
     repo: str = 'entrius/gittensor-ui',
     created_at: str = '2026-04-01T00:00:00Z',
     author_association: str = 'CONTRIBUTOR',
+    solving_pr_labels: Optional[list] = None,
 ) -> dict:
     sp = None
     if solved_by_pr:
@@ -125,7 +128,7 @@ def _issue_dict(
             'head_sha': 'h',
             'base_sha': 'b',
             'merge_base_sha': 'mb',
-            'labels': [],
+            'labels': solving_pr_labels or [],
             'review_summary': {'maintainer_changes_requested_count': 0},
         }
     return {
@@ -372,7 +375,7 @@ class TestRunMirrorIssueDiscovery:
     def test_mirror_request_error_does_not_abort_other_miners(self):
         client = Mock()
 
-        def _per_miner(github_id, since=None):
+        def _per_miner(github_id, since_by_repo=None):
             if github_id == 'fails':
                 raise MirrorRequestError('boom')
             return _response([_issue_dict()])
@@ -412,7 +415,7 @@ class TestRunMirrorIssueDiscovery:
             _issue_dict(issue_number=20 + i, author_github_id='B', solved_by_pr=300 + i) for i in range(7)
         ]
 
-        def _per_miner(github_id, since=None):
+        def _per_miner(github_id, since_by_repo=None):
             if github_id == 'fails':
                 raise MirrorRequestError('boom')
             return _response(working_issues)
@@ -968,10 +971,10 @@ class TestOpenIssueSpamSourceIsMirror:
         assert eval_.total_open_issues == 6
         assert eval_.issue_discovery_score == 0
         assert client.get_miner_issues.call_count == 2
-        scoring_since = client.get_miner_issues.call_args_list[0].kwargs['since']
+        scoring_call = client.get_miner_issues.call_args_list[0]
         open_count_call = client.get_miner_issues.call_args_list[1]
-        assert scoring_since is not None
-        assert open_count_call.kwargs.get('since') is None
+        assert scoring_call.kwargs.get('since_by_repo')  # windowed scoring fetch
+        assert open_count_call.kwargs.get('since_by_repo') is None  # unbounded open-issue count
 
     def test_all_mirror_miner_with_many_open_issues_trips_spam(self):
         """6 open issues in mirror response trips the spam multiplier."""
@@ -1178,7 +1181,7 @@ class TestCrossMinerOneIssuePerPr:
             )
         )
 
-        def _per_miner(github_id, since=None):
+        def _per_miner(github_id, since_by_repo=None):
             return _response(a_issues if github_id == 'A' else b_issues)
 
         client.get_miner_issues.side_effect = _per_miner
@@ -1289,7 +1292,7 @@ class TestCrossMinerOneIssuePerPr:
         a_issues = [_issue_dict(issue_number=10 + i, author_github_id='A', solved_by_pr=200 + i) for i in range(7)]
         b_issues = [_issue_dict(issue_number=20 + i, author_github_id='B', solved_by_pr=300 + i) for i in range(7)]
 
-        def _per_miner(github_id, since=None):
+        def _per_miner(github_id, since_by_repo=None):
             return _response(a_issues if github_id == 'A' else b_issues)
 
         client.get_miner_issues.side_effect = _per_miner
@@ -1357,7 +1360,7 @@ def _issues_by_github_id(mapping: dict):
     issue list, others get none. Keeps a seed miner from re-discovering the
     target miner's issues and competing for the same solving PR."""
 
-    def _side_effect(github_id, since=None):
+    def _side_effect(github_id, since_by_repo=None):
         return _response(mapping.get(github_id, []))
 
     return _side_effect
@@ -1435,3 +1438,162 @@ class TestMaintainerIssueDiscoverySkip:
         )
 
         assert eval_.total_solved_issues == 1
+
+
+# ============================================================================
+# Repository label policy applied to solving-PR discovery scoring
+# ============================================================================
+
+
+class TestMirrorIssueForScoringLabelMultiplier:
+    """Unit tests: _mirror_issue_for_scoring resolves discovery_label_multiplier
+    from solving_pr.labels using the same trust-gate logic as OSS PR scoring."""
+
+    def test_zero_default_multiplier_applied_when_no_labels(self):
+        issue = MirrorIssue.from_dict(_issue_dict())
+        repo_config = RepositoryConfig(
+            emission_share=0.5,
+            trusted_label_pipeline=True,
+            default_label_multiplier=0.0,
+            label_multipliers={'benchmark-improvement': 1.0},
+        )
+        result = _mirror_issue_for_scoring(issue, issue.solving_pr, repo_config, base_score=1.0)
+        assert result is not None
+        assert result.discovery_label_multiplier == pytest.approx(0.0)
+
+    def test_matching_label_overrides_zero_default_multiplier(self):
+        label = {'name': 'benchmark-improvement', 'actor_association': 'OWNER'}
+        issue = MirrorIssue.from_dict(_issue_dict(solving_pr_labels=[label]))
+        repo_config = RepositoryConfig(
+            emission_share=0.5,
+            trusted_label_pipeline=True,
+            default_label_multiplier=0.0,
+            label_multipliers={'benchmark-improvement': 1.0},
+        )
+        result = _mirror_issue_for_scoring(issue, issue.solving_pr, repo_config, base_score=1.0)
+        assert result is not None
+        assert result.discovery_label_multiplier == pytest.approx(1.0)
+
+    def test_downweight_label_sets_multiplier(self):
+        label = {'name': 'refactor', 'actor_association': 'OWNER'}
+        issue = MirrorIssue.from_dict(_issue_dict(solving_pr_labels=[label]))
+        repo_config = RepositoryConfig(
+            emission_share=0.5,
+            trusted_label_pipeline=True,
+            label_multipliers={'refactor': 0.25},
+        )
+        result = _mirror_issue_for_scoring(issue, issue.solving_pr, repo_config, base_score=1.0)
+        assert result is not None
+        assert result.discovery_label_multiplier == pytest.approx(0.25)
+
+    def test_untrusted_actor_label_falls_back_to_default_multiplier(self):
+        label = {'name': 'benchmark-improvement', 'actor_association': 'CONTRIBUTOR'}
+        issue = MirrorIssue.from_dict(_issue_dict(solving_pr_labels=[label]))
+        repo_config = RepositoryConfig(
+            emission_share=0.5,
+            trusted_label_pipeline=False,
+            default_label_multiplier=0.0,
+            label_multipliers={'benchmark-improvement': 1.0},
+        )
+        result = _mirror_issue_for_scoring(issue, issue.solving_pr, repo_config, base_score=1.0)
+        assert result is not None
+        assert result.discovery_label_multiplier == pytest.approx(0.0)
+
+
+class TestLabelPolicyIssueDiscovery:
+    """Integration tests: repository label policy flows through run_issue_discovery
+    to issue_discovery_score via solving_pr.labels."""
+
+    def _seven_issues(self, solving_pr_labels=None):
+        return [
+            _issue_dict(issue_number=50 + i, solved_by_pr=100 + i, solving_pr_labels=solving_pr_labels)
+            for i in range(7)
+        ]
+
+    def _seed(self, uid=2, base_score=42.0):
+        seed = MinerEvaluation(uid=uid, hotkey='hk2', github_id='seed')
+        seed.merged_prs = [_scored_mirror_pr('entrius/gittensor-ui', 100 + i, base_score=base_score) for i in range(7)]
+        return seed
+
+    def test_zero_default_multiplier_unlabeled_solving_prs_earn_zero_score(self):
+        client = Mock()
+        client.get_miner_issues.return_value = _response(self._seven_issues())
+        eval_ = _eval()
+        seed = self._seed()
+        repo_config = RepositoryConfig(
+            emission_share=0.5,
+            trusted_label_pipeline=True,
+            default_label_multiplier=0.0,
+            label_multipliers={'benchmark-improvement': 1.0},
+        )
+        _run(
+            run_issue_discovery(
+                {1: eval_, 2: seed},
+                {'entrius/gittensor-ui': repo_config},
+                _EMPTY_LANGS,
+                _EMPTY_TOKEN_CONFIG,
+                client=client,
+            )
+        )
+        assert eval_.is_issue_eligible is True
+        assert eval_.issue_discovery_score == pytest.approx(0.0)
+        assert all(i.discovery_label_multiplier == pytest.approx(0.0) for i in eval_.issue_discovery_issues)
+
+    def test_matching_label_earns_nonzero_score_with_zero_default_multiplier(self):
+        label = [{'name': 'benchmark-improvement', 'actor_association': 'OWNER'}]
+        client = Mock()
+        client.get_miner_issues.return_value = _response(self._seven_issues(solving_pr_labels=label))
+        eval_ = _eval()
+        seed = self._seed()
+        repo_config = RepositoryConfig(
+            emission_share=0.5,
+            trusted_label_pipeline=True,
+            default_label_multiplier=0.0,
+            label_multipliers={'benchmark-improvement': 1.0},
+        )
+        _run(
+            run_issue_discovery(
+                {1: eval_, 2: seed},
+                {'entrius/gittensor-ui': repo_config},
+                _EMPTY_LANGS,
+                _EMPTY_TOKEN_CONFIG,
+                client=client,
+            )
+        )
+        assert eval_.is_issue_eligible is True
+        assert eval_.issue_discovery_score > 0.0
+        assert all(i.discovery_label_multiplier == pytest.approx(1.0) for i in eval_.issue_discovery_issues)
+
+    def test_downweight_label_reduces_discovery_score(self):
+        """A refactor=0.25 label on the solving PR sets discovery_label_multiplier=0.25
+        on each scored issue and reduces the aggregate discovery score vs unlabeled."""
+        label = [{'name': 'refactor', 'actor_association': 'OWNER'}]
+        repo_config = RepositoryConfig(
+            emission_share=0.5,
+            trusted_label_pipeline=True,
+            label_multipliers={'refactor': 0.25},
+        )
+
+        def _run_discovery(issues):
+            client = Mock()
+            client.get_miner_issues.return_value = _response(issues)
+            ev = _eval(uid=1, github_id='999')
+            seed = MinerEvaluation(uid=2, hotkey='hk2', github_id='seed')
+            seed.merged_prs = [_scored_mirror_pr('entrius/gittensor-ui', 100 + i) for i in range(7)]
+            _run(
+                run_issue_discovery(
+                    {1: ev, 2: seed},
+                    {'entrius/gittensor-ui': repo_config},
+                    _EMPTY_LANGS,
+                    _EMPTY_TOKEN_CONFIG,
+                    client=client,
+                )
+            )
+            return ev
+
+        ev_unlabeled = _run_discovery(self._seven_issues())
+        ev_labeled = _run_discovery(self._seven_issues(solving_pr_labels=label))
+
+        assert ev_unlabeled.issue_discovery_score > 0.0
+        assert ev_labeled.issue_discovery_score < ev_unlabeled.issue_discovery_score
+        assert all(i.discovery_label_multiplier == pytest.approx(0.25) for i in ev_labeled.issue_discovery_issues)

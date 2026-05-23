@@ -122,6 +122,33 @@ def test_duplicate_github_ids_dedup(monkeypatch):
     assert result == {'r/one': [1]}
 
 
+def test_penalized_miner_excluded_from_maintainer_uids(monkeypatch):
+    # A miner with failed_reason set (e.g. duplicate-github penalty) must not
+    # collect the maintainer carve-out — github_id is preserved on the eval for
+    # attribution, but downstream score-skipping paths must honor failed_reason.
+    _install_stub(monkeypatch, {'r/one': _response('r/one', 100, 200)})
+    penalized = _evaluation(1, '100')
+    penalized.failed_reason = 'duplicate_github_account'
+    evaluations = {1: penalized, 2: _evaluation(2, '200')}
+
+    result = _build_maintainer_uids_by_repo(evaluations, {'r/one': _cut_repo()}, {1, 2})
+
+    assert result == {'r/one': [2]}
+
+
+def test_all_maintainers_penalized_omits_repo(monkeypatch):
+    # If every registered maintainer-miner is penalized, the repo drops out entirely
+    # so blend_emission_pools skips the carve-out and scores the slice normally.
+    _install_stub(monkeypatch, {'r/one': _response('r/one', 100)})
+    penalized = _evaluation(1, '100')
+    penalized.failed_reason = 'duplicate_github_account'
+    evaluations = {1: penalized}
+
+    result = _build_maintainer_uids_by_repo(evaluations, {'r/one': _cut_repo()}, {1})
+
+    assert result == {}
+
+
 def test_no_cut_repos_returns_empty_without_client(monkeypatch):
     def _boom() -> None:
         raise AssertionError('MirrorClient should not be constructed when no repo has a cut')

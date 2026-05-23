@@ -16,9 +16,9 @@ composition, and base/earned/nodes aggregation.
 Anti-gaming notes:
 - ``edited_after_merge`` is NOT a PR-level gate — it gates only the issue
   bonus multiplier in ``_is_valid_linked_issue``.
-- ``_resolve_trusted_scoring_label`` requires maintainer-applied labels on
-  repos with ``trusted_label_pipeline=True``; this catches GitHub-App-applied
-  labels (NULL ``actor_association``) on repos with an authoritative labeler.
+- ``resolve_trusted_label_multiplier`` applies the shared maintainer/trusted
+  label gate, including GitHub-App-applied labels (NULL ``actor_association``)
+  for repos with an authoritative labeler.
 """
 
 import asyncio
@@ -41,7 +41,7 @@ from gittensor.constants import (
 from gittensor.utils.github_api_tools import FileContentPair, branch_matches_pattern
 from gittensor.utils.mirror.client import MirrorClient, MirrorRequestError
 from gittensor.utils.mirror.models import MirrorLinkedIssue, MirrorPullRequest
-from gittensor.validator.oss_contributions.label_resolution import resolve_highest_label_multiplier
+from gittensor.validator.oss_contributions.label_resolution import resolve_trusted_label_multiplier
 from gittensor.validator.oss_contributions.mirror.adapters import mirror_files_to_legacy
 from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredPR
 from gittensor.validator.oss_contributions.scoring import (
@@ -391,25 +391,7 @@ def _calculate_pr_multipliers(scored: ScoredPR, repo_config: RepositoryConfig) -
 
 
 def _resolve_trusted_scoring_label(pr: MirrorPullRequest, repo_config: RepositoryConfig) -> tuple[Optional[str], float]:
-    """Pick the highest-multiplier currently-applied scoring label whose actor is trusted.
-
-    Returns ``(label_name, multiplier)``. Returns ``(None, default_multiplier)``
-    when no trusted label matches this repository's label config.
-
-    By default the actor must be in ``MAINTAINER_ASSOCIATIONS``. Repos opted into
-    ``trusted_label_pipeline`` accept any actor — including GitHub-App actors that
-    surface as ``actor_association=NULL`` because they lack a row in
-    ``contributor_repo_roles`` (issue #911). Only flip the flag on for repos whose
-    label pipeline is authoritative; community repos run attacker-controllable
-    auto-labelers (release-drafter, actions/labeler) and must keep the gate.
-    """
-    trusted = repo_config.trusted_label_pipeline
-    candidate_names = [
-        (label.name or '').lower()
-        for label in pr.labels
-        if label.name and (trusted or label.actor_association in MAINTAINER_ASSOCIATIONS)
-    ]
-    return resolve_highest_label_multiplier(candidate_names, repo_config)
+    return resolve_trusted_label_multiplier(pr.labels, repo_config)
 
 
 # ============================================================================

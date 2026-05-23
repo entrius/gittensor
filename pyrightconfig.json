@@ -5,10 +5,10 @@
     "tests"
   ],
   "exclude": [
-    "gittensor-venv",
+    ".venv",
     "neurons"
   ],
-  "pythonVersion": "3.9",
+  "pythonVersion": "3.12",
   "reportMissingImports": true,
   "reportMissingTypeStubs": false
 }

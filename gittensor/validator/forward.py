@@ -153,6 +153,8 @@ def _build_maintainer_uids_by_repo(
     for uid, evaluation in miner_evaluations.items():
         if uid not in miner_uids:
             continue
+        if evaluation.failed_reason is not None:
+            continue
         github_id = evaluation.github_id
         if github_id and github_id != '0':
             github_id_to_uid[str(github_id)] = uid

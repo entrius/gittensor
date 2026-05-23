@@ -47,7 +47,9 @@ def _populate_repo_evaluations(evaluation: MinerEvaluation) -> None:
     repos = {pr.repository_full_name.lower() for pr in evaluation.merged_prs + evaluation.open_prs}
     for repo_name in repos:
         merged = [pr for pr in evaluation.merged_prs if pr.repository_full_name.lower() == repo_name]
-
+        open_prs = [pr for pr in evaluation.open_prs if pr.repository_full_name.lower() == repo_name]
+        evaluation.repo_evaluations[repo_name] = RepoEvaluation(
+            repository_full_name=repo_name,
             total_score=max(
                 0.0,
                 sum(pr.earned_score for pr in merged) - sum(pr.collateral_score for pr in open_prs),
@@ -148,7 +150,18 @@ class TestAllocationInvarianceToPrVolume:
 
 class TestOpenPrCollateralAllocation:
     def test_repo_pr_allocation_reads_finalized_repo_score(self):
+        repos = {'r/finalized': _config(emission_share=0.2, issue_discovery_share=0.0)}
+        miner_uids = _uids(1, 2)
+        evaluations = {
+            1: _evaluation(1, prs=[_scored_pr('r/finalized', 100, earned_score=1_000.0)]),
+            2: _evaluation(2, prs=[_scored_pr('r/finalized', 200, earned_score=1_000.0)]),
+        }
+        evaluations[1].repo_evaluations['r/finalized'].total_score = 30.0
+        evaluations[2].repo_evaluations['r/finalized'].total_score = 70.0
 
+        rewards = blend_emission_pools(evaluations, repos, miner_uids)
+
+        repo_slice = 0.2 * OSS_EMISSION_SHARE
         assert rewards[_idx(miner_uids, 1)] == pytest.approx(repo_slice * 0.3)
         assert rewards[_idx(miner_uids, 2)] == pytest.approx(repo_slice * 0.7)
 

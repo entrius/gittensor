@@ -36,6 +36,26 @@ class TestOtherGitHubAPIFunctions:
     @patch('gittensor.utils.github_api_tools.requests.get')
     @patch('gittensor.utils.github_api_tools.time.sleep')
     @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_get_github_identity_retry_logic(self, mock_logging, mock_sleep, mock_get):
+        """get_github_identity retries on transient failure then returns the id on success."""
+        mock_response_success = Mock()
+        mock_response_success.status_code = 200
+        mock_response_success.json.return_value = {'id': 12345}
+
+        mock_get.side_effect = [
+            Exception('Timeout'),
+            Exception('Timeout'),
+            mock_response_success,
+        ]
+
+        result = get_github_identity('fake_token').github_id
+
+        assert result == '12345'
+        assert mock_get.call_count == 3
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
     def test_get_github_identity_marks_5xx_as_transient(self, mock_logging, mock_sleep, mock_get):
         mock_response = Mock(status_code=500)
         mock_get.return_value = mock_response

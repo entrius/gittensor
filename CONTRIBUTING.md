@@ -92,6 +92,14 @@ PRs missing this evidence may be closed without review, or returned for updates 
 
 - Assign `anderdc` and `landyndev` to your PR for review
 
+## Automatic Closures
+
+The maintainer bot enforces these rules without manual review. Contributions that violate them are closed automatically.
+
+### Open item limits
+
+Each contributor may have at most **3 open PRs** and **3 open issues** in this repository at any time. Submitting a 4th of either type while at the cap closes the new one on submission. The limits apply independently — you can have 3 open PRs and 3 open issues at the same time.
+
 ## PR Labels
 
 Apply appropriate labels to help categorize and track your contribution:

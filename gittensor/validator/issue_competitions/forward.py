@@ -3,7 +3,7 @@
 
 """Issue bounties forward pass — harvest, verify, and vote on active issues."""
 
-from typing import TYPE_CHECKING, Dict, Set, Tuple
+from typing import TYPE_CHECKING, Dict
 
 import bittensor as bt
 
@@ -18,48 +18,6 @@ if TYPE_CHECKING:
     from neurons.base.validator import BaseValidatorNeuron
 
 
-def _build_registered_miner_lookup(miner_evaluations: Dict[int, MinerEvaluation]) -> Tuple[Dict[str, str], Set[str]]:
-    """Build a GitHub-id lookup for miners that can safely receive bounty votes.
-
-    Bounties are intentionally not gated on OSS contribution eligibility, but
-    failed evaluations and ambiguous same-GitHub-ID mappings are not reliable
-    identities for payout attribution.
-    """
-    candidates: Dict[str, list[str]] = {}
-    skipped_failed = 0
-
-    for evaluation in miner_evaluations.values():
-        github_id = evaluation.github_id
-        if not github_id or github_id == '0':
-            continue
-        if evaluation.failed_reason is not None:
-            skipped_failed += 1
-            bt.logging.info(
-                f'Issue bounties: skipping failed miner github_id={github_id}, hotkey={evaluation.hotkey[:12]}...'
-            )
-            continue
-        candidates.setdefault(str(github_id), []).append(evaluation.hotkey)
-
-    registered: Dict[str, str] = {}
-    ambiguous: Set[str] = set()
-    for github_id, hotkeys in candidates.items():
-        unique_hotkeys = sorted(set(hotkeys))
-        if len(unique_hotkeys) == 1:
-            registered[github_id] = unique_hotkeys[0]
-            continue
-
-        ambiguous.add(github_id)
-        bt.logging.warning(
-            f'Issue bounties: GitHub id {github_id} maps to multiple miner hotkeys; '
-            'will cancel matching solved bounty issues instead of choosing one'
-        )
-
-    if skipped_failed:
-        bt.logging.info(f'Issue bounties: skipped {skipped_failed} failed miner evaluation(s)')
-
-    return registered, ambiguous
-
-
 async def issue_competitions(
     self: 'BaseValidatorNeuron',
     miner_evaluations: Dict[int, MinerEvaluation],
@@ -70,8 +28,8 @@ async def issue_competitions(
     1. Harvest emissions into the bounty pool
     2. Get active issues from the smart contract
     3. For each active issue, check GitHub:
-       - If solved by a registered miner with one non-failed identity -> vote_solution
-       - If closed without a safe registered solver identity -> vote_cancel_issue
+       - If solved by a registered miner with a non-failed identity -> vote_solution
+       - If closed without a registered solver identity -> vote_cancel_issue
 
     Args:
         self: The validator instance
@@ -104,9 +62,15 @@ async def issue_competitions(
             bt.logging.success(f'Harvested emissions! Extrinsic: {harvest_result.get("tx_hash", "")}')
 
         # Build mapping of github_id->hotkey for every non-failed registered
-        # miner. Bounty payouts are not normal eligibility-gated, but failed or
-        # ambiguous identity mappings are not safe payout targets.
-        registered_miners, ambiguous_github_ids = _build_registered_miner_lookup(miner_evaluations)
+        # miner. Bounty payouts are not normal eligibility-gated, but failed
+        # evaluations are not valid payout targets. Duplicate GitHub IDs are
+        # penalized in oss_contributions() before this pass and arrive here as
+        # failed evaluations.
+        registered_miners = {
+            eval.github_id: eval.hotkey
+            for eval in miner_evaluations.values()
+            if eval.github_id and eval.github_id != '0' and eval.failed_reason is None
+        }
         bt.logging.info(
             f'Issue bounties: {len(registered_miners)} registered miners out of {len(miner_evaluations)} total'
         )
@@ -165,22 +129,7 @@ async def issue_competitions(
                         bt.logging.info(f'Voted cancel (no solver): {issue_label}')
                     continue
 
-                solver_github_id_str = str(solver_github_id)
-                if solver_github_id_str in ambiguous_github_ids:
-                    bt.logging.info(
-                        f'Solver {solver_github_id} has ambiguous miner mapping, voting cancel: {issue_label}'
-                    )
-                    success = contract_client.vote_cancel_issue(
-                        issue_id=issue.id,
-                        reason=f'Issue closed by ambiguous registered miner identity (solver: {solver_github_id})',
-                        wallet=self.wallet,
-                    )
-                    if success:
-                        cancels_cast += 1
-                        bt.logging.info(f'Voted cancel (ambiguous solver {solver_github_id}): {issue_label}')
-                    continue
-
-                miner_hotkey = registered_miners.get(solver_github_id_str)
+                miner_hotkey = registered_miners.get(str(solver_github_id))
                 if not miner_hotkey:
                     bt.logging.info(f'Solver {solver_github_id} not a registered miner, voting cancel: {issue_label}')
                     success = contract_client.vote_cancel_issue(

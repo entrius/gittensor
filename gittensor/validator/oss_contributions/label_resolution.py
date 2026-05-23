@@ -1,9 +1,15 @@
 """Repository-scoped PR label multiplier resolution."""
 
 from fnmatch import fnmatch
-from typing import Iterable, Optional
+from typing import Iterable, Optional, Protocol
 
+from gittensor.constants import MAINTAINER_ASSOCIATIONS
 from gittensor.validator.utils.load_weights import RepositoryConfig
+
+
+class LabelWithActor(Protocol):
+    name: str
+    actor_association: Optional[str]
 
 
 def get_default_label_multiplier(repo_config: Optional[RepositoryConfig]) -> float:
@@ -42,3 +48,23 @@ def resolve_highest_label_multiplier(
 
     label, multiplier = max(candidates, key=lambda candidate: (candidate[1], candidate[0]))
     return label, multiplier
+
+
+def resolve_trusted_label_multiplier(
+    labels: Iterable[LabelWithActor],
+    repo_config: RepositoryConfig,
+) -> tuple[Optional[str], float]:
+    """Resolve the highest-multiplier trusted label for repository scoring.
+
+    By default the actor must be in ``MAINTAINER_ASSOCIATIONS``. Repos opted into
+    ``trusted_label_pipeline`` accept any actor, including GitHub-App actors that
+    surface as ``actor_association=NULL`` because they lack a row in
+    ``contributor_repo_roles`` (issue #911).
+    """
+    trusted = repo_config.trusted_label_pipeline
+    candidate_names = [
+        (label.name or '').lower()
+        for label in labels
+        if label.name and (trusted or label.actor_association in MAINTAINER_ASSOCIATIONS)
+    ]
+    return resolve_highest_label_multiplier(candidate_names, repo_config)

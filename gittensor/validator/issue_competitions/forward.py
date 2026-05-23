@@ -61,15 +61,19 @@ async def issue_competitions(
         if harvest_result and harvest_result.get('status') == 'success':
             bt.logging.success(f'Harvested emissions! Extrinsic: {harvest_result.get("tx_hash", "")}')
 
-        # Build mapping of github_id->hotkey for eligible miners only
-        eligible_miners = {
+        # Build mapping of github_id->hotkey for every registered miner. Bounty
+        # payouts are not eligibility-gated — any miner who solves a bounty
+        # issue can receive the reward.
+        registered_miners = {
             eval.github_id: eval.hotkey
             for eval in miner_evaluations.values()
-            if eval.github_id and eval.github_id != '0' and eval.is_eligible
+            if eval.github_id and eval.github_id != '0'
         }
-        bt.logging.info(f'Issue bounties: {len(eligible_miners)} eligible miners out of {len(miner_evaluations)} total')
-        for github_id, hotkey in eligible_miners.items():
-            bt.logging.info(f'  Eligible miner: github_id={github_id}, hotkey={hotkey[:12]}...')
+        bt.logging.info(
+            f'Issue bounties: {len(registered_miners)} registered miners out of {len(miner_evaluations)} total'
+        )
+        for github_id, hotkey in registered_miners.items():
+            bt.logging.info(f'  Registered miner: github_id={github_id}, hotkey={hotkey[:12]}...')
 
         # Get active issues from contract
         active_issues = contract_client.get_issues_by_status(IssueStatus.ACTIVE)
@@ -123,17 +127,19 @@ async def issue_competitions(
                         bt.logging.info(f'Voted cancel (no solver): {issue_label}')
                     continue
 
-                miner_hotkey = eligible_miners.get(str(solver_github_id))
+                miner_hotkey = registered_miners.get(str(solver_github_id))
                 if not miner_hotkey:
-                    bt.logging.info(f'Solver {solver_github_id} not in eligible miners, voting cancel: {issue_label}')
+                    bt.logging.info(f'Solver {solver_github_id} not a registered miner, voting cancel: {issue_label}')
                     success = contract_client.vote_cancel_issue(
                         issue_id=issue.id,
-                        reason=f'Issue closed externally (not by eligible miner, solver: {solver_github_id})',
+                        reason=f'Issue closed externally (not by a registered miner, solver: {solver_github_id})',
                         wallet=self.wallet,
                     )
                     if success:
                         cancels_cast += 1
-                        bt.logging.info(f'Voted cancel (solver {solver_github_id} not eligible): {issue_label}')
+                        bt.logging.info(
+                            f'Voted cancel (solver {solver_github_id} not a registered miner): {issue_label}'
+                        )
                     continue
 
                 miner_coldkey = get_miner_coldkey(miner_hotkey, self.subtensor)

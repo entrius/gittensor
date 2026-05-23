@@ -72,7 +72,7 @@ async def forward(self: 'Validator') -> None:
         await issue_competitions(self, miner_evaluations)
 
         # 4. Store all evaluations to DB (includes issue discovery fields)
-        await self.bulk_store_evaluation(miner_evaluations, skip_uids=cached_uids)
+        await self.bulk_store_evaluation(miner_evaluations, master_repositories, skip_uids=cached_uids)
 
         # 5. Allocate repo-bounded emission shares into final rewards
         maintainer_uids_by_repo = _build_maintainer_uids_by_repo(miner_evaluations, master_repositories, miner_uids)
@@ -152,6 +152,8 @@ def _build_maintainer_uids_by_repo(
     github_id_to_uid: Dict[str, int] = {}
     for uid, evaluation in miner_evaluations.items():
         if uid not in miner_uids:
+            continue
+        if evaluation.failed_reason is not None:
             continue
         github_id = evaluation.github_id
         if github_id and github_id != '0':

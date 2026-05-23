@@ -3,16 +3,10 @@ GitTensor Utilities
 """
 
 import os
-from typing import Dict
 
 
 def backoff_seconds(attempt: int, base: int = 5, cap: int = 30) -> int:
     return min(base * (2**attempt), cap)
-
-
-def parse_repo_name(repo_data: Dict):
-    """Normalizes and converts repository name from dict"""
-    return f'{repo_data["owner"]["login"]}/{repo_data["name"]}'.lower()
 
 
 def get_contract_address() -> str:

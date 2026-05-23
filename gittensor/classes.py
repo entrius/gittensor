@@ -137,6 +137,7 @@ class Issue:
     discovery_time_decay_multiplier: float = 1.0
     discovery_credibility_multiplier: float = 1.0
     discovery_open_issue_spam_multiplier: float = 1.0
+    discovery_label_multiplier: float = 1.0
 
     @property
     def is_transferred(self) -> bool:
@@ -173,8 +174,6 @@ class PullRequest:
     review_quality_multiplier: float = 1.0  # Penalty for CHANGES_REQUESTED reviews from maintainers
     label_multiplier: float = 1.0  # Multiplier resolved from repository label config
     label: Optional[str] = None  # Resolved scoring label, set during scoring
-    current_labels: frozenset[str] = field(default_factory=frozenset)
-    label_timeline_order: tuple[str, ...] = field(default_factory=tuple)  # Newest current labels first
     changes_requested_count: int = 0  # Number of maintainer CHANGES_REQUESTED reviews
     earned_score: float = 0.0
     collateral_score: float = 0.0  # For OPEN PRs: potential_score * collateral_percent
@@ -213,6 +212,52 @@ class PullRequest:
         label = f'{self.pr_state.value} PR #{self.number} ({self.repository_full_name})'
         self.earned_score = _apply_score_multipliers(self.base_score, multipliers, label)
         return self.earned_score
+
+
+@dataclass
+class RepoEvaluation:
+    """Per-repository scoring + eligibility result for one miner.
+
+    Eligibility is computed per repo from only that repo's PRs/issues; one
+    row per (miner, repo) is persisted to the miner_evaluations table.
+    """
+
+    repository_full_name: str
+
+    # PR-side eligibility / scoring
+    is_eligible: bool = False
+    credibility: float = 0.0
+    base_total_score: float = 0.0
+    total_score: float = 0.0
+    total_collateral_score: float = 0.0
+    total_nodes_scored: int = 0
+    total_token_score: float = 0.0
+    total_structural_count: int = 0
+    total_structural_score: float = 0.0
+    total_leaf_count: int = 0
+    total_leaf_score: float = 0.0
+    total_merged_prs: int = 0
+    total_open_prs: int = 0
+    total_closed_prs: int = 0
+
+    # Issue-discovery eligibility / scoring
+    is_issue_eligible: bool = False
+    issue_credibility: float = 0.0
+    issue_discovery_score: float = 0.0
+    issue_token_score: float = 0.0
+    total_solved_issues: int = 0
+    total_valid_solved_issues: int = 0
+    total_closed_issues: int = 0
+    total_open_issues: int = 0
+
+    @property
+    def total_prs(self) -> int:
+        return self.total_merged_prs + self.total_open_prs + self.total_closed_prs
+
+    def copy_issue_discovery_from(self, other: 'RepoEvaluation') -> None:
+        """Copy the issue-discovery-owned fields from another RepoEvaluation."""
+        for name in _ISSUE_DISCOVERY_REPO_FIELDS:
+            setattr(self, name, getattr(other, name))
 
 
 @dataclass
@@ -258,6 +303,10 @@ class MinerEvaluation:
     total_closed_issues: int = 0
     total_open_issues: int = 0  # current mirror-tracked open issues (set by issue_discovery.scan)
     issue_discovery_issues: List[Issue] = field(default_factory=list)
+
+    # Per-repository eligibility + scoring, keyed by lowercased repository_full_name.
+    # The top-level scalars above are round-level rollups of this map.
+    repo_evaluations: Dict[str, RepoEvaluation] = field(default_factory=dict)
 
     @property
     def total_prs(self) -> int:
@@ -477,6 +526,19 @@ _ISSUE_DISCOVERY_FIELDS: Tuple[str, ...] = (
     'issue_discovery_issues',
 )
 
+# Per-repo RepoEvaluation fields owned by the issue-discovery phase — preserved
+# across rounds by store() exactly like the top-level _ISSUE_DISCOVERY_FIELDS.
+_ISSUE_DISCOVERY_REPO_FIELDS: Tuple[str, ...] = (
+    'is_issue_eligible',
+    'issue_credibility',
+    'issue_discovery_score',
+    'issue_token_score',
+    'total_solved_issues',
+    'total_valid_solved_issues',
+    'total_closed_issues',
+    'total_open_issues',
+)
+
 
 class MinerEvaluationCache:
     """
@@ -519,6 +581,12 @@ class MinerEvaluationCache:
             for name in _ISSUE_DISCOVERY_FIELDS:
                 value = getattr(existing.evaluation, name)
                 setattr(cached_eval, name, _copy_issue_discovery_value(name, value))
+            for repo_name, prior_repo in existing.evaluation.repo_evaluations.items():
+                target = cached_eval.repo_evaluations.get(repo_name)
+                if target is None:
+                    target = RepoEvaluation(repository_full_name=prior_repo.repository_full_name)
+                    cached_eval.repo_evaluations[repo_name] = target
+                target.copy_issue_discovery_from(prior_repo)
 
         self._cache[evaluation.uid] = CachedEvaluation(
             hotkey=evaluation.hotkey,
@@ -554,6 +622,13 @@ class MinerEvaluationCache:
         for name in _ISSUE_DISCOVERY_FIELDS:
             value = getattr(evaluation, name)
             setattr(existing.evaluation, name, _copy_issue_discovery_value(name, value))
+
+        for repo_name, repo_eval in evaluation.repo_evaluations.items():
+            target = existing.evaluation.repo_evaluations.get(repo_name)
+            if target is None:
+                target = RepoEvaluation(repository_full_name=repo_eval.repository_full_name)
+                existing.evaluation.repo_evaluations[repo_name] = target
+            target.copy_issue_discovery_from(repo_eval)
 
         bt.logging.debug(f'Refreshed cached issue discovery for UID {evaluation.uid}')
 
@@ -597,6 +672,7 @@ class MinerEvaluationCache:
         cached = copy.copy(evaluation)
         cached.unique_repos_contributed_to = set(evaluation.unique_repos_contributed_to)
         cached.issue_discovery_issues = _copy_issue_discovery_issues(evaluation.issue_discovery_issues)
+        cached.repo_evaluations = {name: copy.copy(re) for name, re in evaluation.repo_evaluations.items()}
         cached.merged_prs = [_scored_mirror_pr_for_cache(pr) for pr in evaluation.merged_prs]
         cached.open_prs = [_scored_mirror_pr_for_cache(pr) for pr in evaluation.open_prs]
         cached.closed_prs = [_scored_mirror_pr_for_cache(pr) for pr in evaluation.closed_prs]
@@ -610,6 +686,7 @@ class MinerEvaluationCache:
         copy_eval = copy.copy(cached_eval)
         copy_eval.unique_repos_contributed_to = set(cached_eval.unique_repos_contributed_to)
         copy_eval.issue_discovery_issues = _copy_issue_discovery_issues(cached_eval.issue_discovery_issues)
+        copy_eval.repo_evaluations = {name: copy.copy(re) for name, re in cached_eval.repo_evaluations.items()}
         return copy_eval
 
 

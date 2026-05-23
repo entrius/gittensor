@@ -97,16 +97,6 @@ DO UPDATE SET
     updated_at = NOW()
 """
 
-# Targeted state-only refresh for stale-closed PRs (avoids overwriting scored columns)
-REFRESH_STALE_PR_STATES = """
-UPDATE pull_requests
-   SET pr_state   = 'CLOSED',
-       updated_at = NOW()
- WHERE number               = %s
-   AND repository_full_name = %s
-   AND pr_state            != 'CLOSED'
-"""
-
 # Issue Queries
 BULK_UPSERT_ISSUES = """
 INSERT INTO issues (
@@ -159,24 +149,24 @@ DO UPDATE SET
     file_extension = EXCLUDED.file_extension
 """
 
-# Miner Evaluation Queries
+# Miner Evaluation Queries — one row per (uid, hotkey, github_id, repository_full_name).
 BULK_UPSERT_MINER_EVALUATION = """
 INSERT INTO miner_evaluations (
-    uid, hotkey, github_id, failed_reason, base_total_score, total_score, total_collateral_score,
-    total_nodes_scored, total_open_prs, total_closed_prs, total_merged_prs, total_prs,
+    uid, hotkey, github_id, repository_full_name, failed_reason, base_total_score, total_score,
+    total_collateral_score, total_nodes_scored, total_open_prs, total_closed_prs, total_merged_prs, total_prs,
     unique_repos_count, is_eligible, credibility,
     total_token_score, total_structural_count, total_structural_score, total_leaf_count, total_leaf_score,
     issue_discovery_score, issue_token_score, issue_credibility, is_issue_eligible,
     total_solved_issues, total_valid_solved_issues, total_closed_issues, total_open_issues
 ) VALUES (
     %s, %s, %s, %s, %s, %s, %s,
-    %s, %s, %s, %s, %s,
+    %s, %s, %s, %s, %s, %s,
     %s, %s, %s,
     %s, %s, %s, %s, %s,
     %s, %s, %s, %s,
     %s, %s, %s, %s
 )
-ON CONFLICT (uid, hotkey, github_id)
+ON CONFLICT (uid, hotkey, github_id, repository_full_name)
 DO UPDATE SET
     failed_reason = EXCLUDED.failed_reason,
     base_total_score = EXCLUDED.base_total_score,

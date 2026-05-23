@@ -505,18 +505,6 @@ def find_solver_from_closure_event(
     return solver_github_id, pr_number
 
 
-def find_solver_from_cross_references(
-    repo: str, issue_number: int, token: str
-) -> Optional[tuple[Optional[int], Optional[int]]]:
-    """Compatibility wrapper for bounty solver lookup.
-
-    Solver attribution used to infer the closer from cross-referenced PRs. The
-    implementation now uses ``ClosedEvent.closer`` to avoid rewarding stale or
-    attacker-influenceable cross-reference candidates.
-    """
-    return find_solver_from_closure_event(repo, issue_number, token)
-
-
 def check_github_issue_closed(repo: str, issue_number: int, token: str) -> Optional[Dict[str, Any]]:
     """Check if a GitHub issue is closed and get the solving PR info.
 

@@ -199,7 +199,7 @@ def test_find_prs_without_token_returns_empty(mock_graphql):
     mock_graphql.assert_not_called()
 
 
-find_solver_from_cross_references = github_api_tools.find_solver_from_cross_references
+find_solver_from_closure_event = github_api_tools.find_solver_from_closure_event
 
 
 def _graphql_response(nodes):
@@ -301,7 +301,7 @@ def _closed_event_non_pr_node(typename='Commit', state_reason='COMPLETED', creat
     }
 
 
-class TestFindSolverFromCrossReferences:
+class TestFindSolverFromClosureEvent:
     """Test suite for solver detection through GitHub's authoritative close event."""
 
     @patch('gittensor.utils.github_api_tools.execute_graphql_query')
@@ -314,7 +314,7 @@ class TestFindSolverFromCrossReferences:
             ]
         )
 
-        solver_id, pr_number = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
+        solver_id, pr_number = find_solver_from_closure_event('owner/repo', 12, 'fake_token')
 
         assert solver_id == 42
         assert pr_number == 14
@@ -332,7 +332,7 @@ class TestFindSolverFromCrossReferences:
             ]
         )
 
-        solver_id, pr_number = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
+        solver_id, pr_number = find_solver_from_closure_event('owner/repo', 12, 'fake_token')
 
         assert solver_id is None
         assert pr_number is None
@@ -347,7 +347,7 @@ class TestFindSolverFromCrossReferences:
             ]
         )
 
-        solver_id, pr_number = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
+        solver_id, pr_number = find_solver_from_closure_event('owner/repo', 12, 'fake_token')
 
         assert solver_id is None
         assert pr_number is None
@@ -362,7 +362,7 @@ class TestFindSolverFromCrossReferences:
             ]
         )
 
-        solver_id, pr_number = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
+        solver_id, pr_number = find_solver_from_closure_event('owner/repo', 12, 'fake_token')
 
         assert solver_id is None
         assert pr_number is None
@@ -377,7 +377,7 @@ class TestFindSolverFromCrossReferences:
             ]
         )
 
-        solver_id, pr_number = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
+        solver_id, pr_number = find_solver_from_closure_event('owner/repo', 12, 'fake_token')
 
         assert solver_id is None
         assert pr_number is None
@@ -392,7 +392,7 @@ class TestFindSolverFromCrossReferences:
             ]
         )
 
-        solver_id, pr_number = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
+        solver_id, pr_number = find_solver_from_closure_event('owner/repo', 12, 'fake_token')
 
         assert solver_id == 42
         assert pr_number == 14
@@ -419,7 +419,7 @@ class TestFindSolverFromCrossReferences:
             closed_at='2025-06-15T00:00:01Z',
         )
 
-        solver_id, pr_number = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
+        solver_id, pr_number = find_solver_from_closure_event('owner/repo', 12, 'fake_token')
 
         assert solver_id == 200
         assert pr_number == 20
@@ -441,7 +441,7 @@ class TestFindSolverFromCrossReferences:
             closed_at='2025-06-01T00:00:01Z',
         )
 
-        solver_id, pr_number = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
+        solver_id, pr_number = find_solver_from_closure_event('owner/repo', 12, 'fake_token')
 
         assert solver_id is None
         assert pr_number is None
@@ -460,7 +460,7 @@ class TestFindSolverFromCrossReferences:
             ]
         )
 
-        solver_id, pr_number = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
+        solver_id, pr_number = find_solver_from_closure_event('owner/repo', 12, 'fake_token')
 
         assert solver_id == 42
         assert pr_number == 14
@@ -475,7 +475,7 @@ class TestFindSolverFromCrossReferences:
             ]
         )
 
-        solver_id, pr_number = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
+        solver_id, pr_number = find_solver_from_closure_event('owner/repo', 12, 'fake_token')
 
         assert solver_id == 42
         assert pr_number == 14
@@ -486,7 +486,7 @@ class TestFindSolverFromCrossReferences:
         """Empty timeline nodes returns (None, None)."""
         mock_graphql.return_value = _closure_graphql_response([])
 
-        solver_id, pr_number = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
+        solver_id, pr_number = find_solver_from_closure_event('owner/repo', 12, 'fake_token')
 
         assert solver_id is None
         assert pr_number is None
@@ -502,7 +502,7 @@ class TestFindSolverFromCrossReferences:
             closed_at='',
         )
 
-        solver_id, pr_number = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
+        solver_id, pr_number = find_solver_from_closure_event('owner/repo', 12, 'fake_token')
 
         assert solver_id is None
         assert pr_number is None
@@ -517,7 +517,7 @@ class TestFindSolverFromCrossReferences:
             ]
         )
 
-        solver_id, pr_number = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
+        solver_id, pr_number = find_solver_from_closure_event('owner/repo', 12, 'fake_token')
 
         assert solver_id is None
         assert pr_number is None
@@ -528,7 +528,7 @@ class TestFindSolverFromCrossReferences:
         """GraphQL query failures return the lookup-failure sentinel."""
         for graphql_response in (None, {'errors': [{'message': 'rate limited'}]}):
             mock_graphql.return_value = graphql_response
-            result = find_solver_from_cross_references('owner/repo', 12, 'fake_token')
+            result = find_solver_from_closure_event('owner/repo', 12, 'fake_token')
             assert result is None
 
 

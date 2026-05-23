@@ -26,15 +26,11 @@ class TestCalculateCredibility:
 
     def test_all_merged(self):
         merged = [_scored_pr() for _ in range(5)]
-        assert calculate_credibility(merged, []) == pytest.approx(
-            (5 + PRIOR_K) / (5 + 2 * PRIOR_K), abs=1e-3
-        )
+        assert calculate_credibility(merged, []) == pytest.approx((5 + PRIOR_K) / (5 + 2 * PRIOR_K), abs=1e-3)
 
     def test_all_closed(self):
         closed = [_scored_pr(merged=False) for _ in range(3)]
-        assert calculate_credibility([], closed) == pytest.approx(
-            PRIOR_K / (3 + 2 * PRIOR_K), abs=1e-3
-        )
+        assert calculate_credibility([], closed) == pytest.approx(PRIOR_K / (3 + 2 * PRIOR_K), abs=1e-3)
 
     @pytest.mark.parametrize(
         'merged_count,closed_count,expected',

@@ -47,6 +47,7 @@ NON_CODE_EXTENSIONS = [
     'markdown',
     'txt',
     'text',
+    'tex',
     'rst',
     'adoc',
     'asciidoc',

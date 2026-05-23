@@ -200,13 +200,16 @@ class PullRequest:
     base_ref_oid: Optional[str] = None
 
     def calculate_final_earned_score(self) -> float:
-        """Combine base score with all multipliers."""
+        """Combine base score with all multipliers.
+
+        Credibility is NOT included here — it only gates eligibility
+        (see issue #1340).
+        """
         multipliers = {
             'issue': self.issue_multiplier,
             'label': self.label_multiplier,
             'spam': self.open_pr_spam_multiplier,
             'decay': self.time_decay_multiplier,
-            'cred': self.credibility_multiplier,
             'review': self.review_quality_multiplier,
         }
         label = f'{self.pr_state.value} PR #{self.number} ({self.repository_full_name})'

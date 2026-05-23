@@ -7,6 +7,8 @@ penalizes another.
 
 from __future__ import annotations
 
+import pytest
+
 from gittensor.classes import MinerEvaluation
 from gittensor.utils.mirror.models import MirrorPullRequest
 from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredPR
@@ -61,8 +63,15 @@ def _merged(repo: str, number: int, base: float = 10.0, token: float = 10.0) -> 
 
 
 def _gate_repo() -> RepositoryConfig:
-    """A repo on the default eligibility gate (3 valid merged PRs, 0.80 credibility)."""
-    return RepositoryConfig(emission_share=1.0)
+    """A repo on a relaxed eligibility gate for the volume-aware credibility formula.
+
+    ``min_credibility`` is relaxed from the default 0.80 to account for the
+    Beta prior (PRIOR_K=2) in the new volume-aware formula (issue #1340).
+    """
+    return RepositoryConfig(
+        emission_share=1.0,
+        eligibility=RepoEligibilityConfig(min_valid_merged_prs=3, min_credibility=0.65),
+    )
 
 
 def test_eligibility_does_not_pool_across_repos():
@@ -100,7 +109,7 @@ def test_zeroed_thresholds_repo_has_no_gate():
 
 
 def test_per_repo_credibility_multiplier():
-    """An eligible repo applies its own credibility ratio as the PR multiplier."""
+    """Credibility gates eligibility but no longer applies as a per-PR multiplier."""
     merged = [_merged('foo/a', n) for n in range(1, 5)]
     closed = [_mirror_pr('foo/a', 99, state='CLOSED')]
 
@@ -110,11 +119,11 @@ def test_per_repo_credibility_multiplier():
 
     finalize_miner_scores({1: evaluation}, {'foo/a': _gate_repo()})
 
-    # credibility = 4 / (4 + 1) = 0.80, exactly at the gate
+    # credibility = (4 + 2) / (4 + 1 + 4) = 6/9 = 0.67 (volume-aware, issue #1340)
     assert evaluation.repo_evaluations['foo/a'].is_eligible is True
-    assert evaluation.repo_evaluations['foo/a'].credibility == 0.8
-    assert all(pr.credibility_multiplier == 0.8 for pr in merged)
-    assert all(pr.earned_score == 8.0 for pr in merged)
+    assert evaluation.repo_evaluations['foo/a'].credibility == pytest.approx(0.6667, abs=1e-3)
+    # credibility is gate-only — no longer a per-PR multiplier
+    assert all(pr.earned_score == 10.0 for pr in merged)
 
 
 def test_open_pr_spam_is_scoped_per_repo():

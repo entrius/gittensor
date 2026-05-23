@@ -173,13 +173,15 @@ def _score_eligible_repo_prs(
     open_prs: List['ScoredPR'],
     cfg: ResolvedEligibility,
 ) -> None:
-    """Compute earned scores for an eligible repository's merged PRs."""
+    """Compute earned scores for an eligible repository's merged PRs.
+
+    Credibility acts as the eligibility gate only (not a per-PR multiplier).
+    See issue #1340.
+    """
     spam_multiplier = calculate_pr_spam_penalty_multiplier(cfg, len(open_prs), repo_eval.total_token_score)
-    credibility_multiplier = round(repo_eval.credibility, 2)
 
     for pr in merged:
         pr.open_pr_spam_multiplier = spam_multiplier
-        pr.credibility_multiplier = credibility_multiplier
         pr.calculate_final_earned_score()
         repo_eval.total_score += pr.earned_score
 
@@ -224,7 +226,7 @@ def calculate_open_pr_collateral_score(pr: 'ScoredPR', scoring: ResolvedScoring)
     Collateral = base_score * applicable_multipliers * open_pr_collateral_percent
 
     Applicable multipliers: issue, label, review_collateral
-    NOT applicable: time_decay (merge-based), credibility_multiplier (merge-based),
+    NOT applicable: time_decay (merge-based), credibility (merge-based, gate-only),
                     open_pr_spam (not for collateral)
     """
     from math import prod

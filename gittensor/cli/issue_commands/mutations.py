@@ -207,7 +207,7 @@ def issue_register(
 
         err_console.print('[dim]Submitting transaction...[/dim]')
 
-        tx_hash = client.register_issue(
+        tx_hash, error_msg = client.register_issue(
             github_url=github_url,
             repository_full_name=repo,
             issue_number=issue_number,
@@ -215,24 +215,26 @@ def issue_register(
             keypair=keypair,
         )
 
-        if tx_hash is None:
-            _print_register_revert_hints()
-            raise SystemExit(1)
+        if error_msg is None:
+            print_success('Issue registered successfully!')
+            console.print(f'[cyan]Transaction Hash:[/cyan] {tx_hash}')
+            err_console.print('[dim]Issue will be visible once bounty is funded via harvest_emissions()[/dim]')
+            return
 
-        print_success('Issue registered successfully!')
-        console.print(f'[cyan]Transaction Hash:[/cyan] {tx_hash}')
-        err_console.print('[dim]Issue will be visible once bounty is funded via harvest_emissions()[/dim]')
+        # Hash set => extrinsic submitted then reverted; absent => pre-submission failure
+        if tx_hash is not None:
+            _print_register_revert_hints()
+            console.print(f'[cyan]Extrinsic Hash:[/cyan] {tx_hash}')
+        else:
+            print_error(f'Error registering issue: {error_msg}')
+        raise SystemExit(1)
 
     except ImportError as e:
         print_error(f'Missing dependency - {e}')
         err_console.print('[dim]Install with: uv sync[/dim]')
         raise SystemExit(1)
     except Exception as e:
-        error_msg = str(e)
-        if 'ContractReverted' in error_msg:
-            _print_register_revert_hints()
-        else:
-            print_error(f'Error registering issue: {e}')
+        print_error(f'Error registering issue: {e}')
         raise SystemExit(1)
 
 

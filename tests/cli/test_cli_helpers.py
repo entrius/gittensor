@@ -396,7 +396,6 @@ class TestValidateSs58Address:
             validate_ss58_address('')
 
     def test_whitespace_stripped(self):
-        # Use regex fallback if scalecodec fails; a 47-char base58 string may pass
         addr = '5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY'
         result = validate_ss58_address(f'  {addr}  ')
         assert result == addr

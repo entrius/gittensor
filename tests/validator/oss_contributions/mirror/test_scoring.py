@@ -820,6 +820,64 @@ class TestLinkedIssueValidity:
         assert _is_valid_linked_issue(li, scored.pr) is True
 
 
+class TestLinkedIssueSolvedByPr:
+    """Mirror ``solved_by_pr`` must match the scored PR for the issue multiplier
+    to apply. Issue-discovery already treats ``solved_by_pr`` as authoritative;
+    the PR-multiplier path now does the same. ``None`` fails open so older mirror
+    snapshots without solver attribution preserve current behavior.
+
+    Default fixtures align ``_linked_issue(solved_by_pr=100)`` with ``_pr(pr_number=100)``;
+    explicit mismatches/None below exercise the new gate.
+    """
+
+    def test_mismatched_solved_by_pr_blocks_merged_pr(self):
+        # _pr default pr_number=100; mismatched solver triggers the new gate
+        # within the otherwise-valid close-window (+1 day).
+        scored = ScoredPR(pr=_pr())
+        li = MirrorLinkedIssue.from_dict(_linked_issue())
+        li.solved_by_pr = 999
+        assert _is_valid_linked_issue(li, scored.pr) is False
+
+    def test_mismatched_solved_by_pr_blocks_open_pr_collateral(self):
+        # OPEN PRs skip the close-window gate entirely; ``solved_by_pr`` is the
+        # only attribution check available for the collateral path.
+        scored = ScoredPR(pr=_pr(state='OPEN'))
+        li = MirrorLinkedIssue.from_dict(_linked_issue(state='OPEN', state_reason=None, closed_at=None))
+        li.solved_by_pr = 999
+        assert _is_valid_linked_issue(li, scored.pr) is False
+
+    def test_matching_solved_by_pr_preserves_validity(self):
+        # solved_by_pr == pr_number is the existing-behavior path; must not regress.
+        scored = ScoredPR(pr=_pr())
+        li = MirrorLinkedIssue.from_dict(_linked_issue())
+        assert li.solved_by_pr == scored.pr.pr_number == 100
+        assert _is_valid_linked_issue(li, scored.pr) is True
+
+    def test_null_solved_by_pr_fails_open(self):
+        # Older mirror snapshots may omit solver attribution; gate must not fire.
+        scored = ScoredPR(pr=_pr())
+        li = MirrorLinkedIssue.from_dict(_linked_issue())
+        li.solved_by_pr = None
+        assert _is_valid_linked_issue(li, scored.pr) is True
+
+    def test_mismatched_solved_by_pr_collapses_multiplier_to_neutral(self):
+        # End-to-end: ``_calculate_issue_multiplier`` must return 1.0 (no bonus)
+        # when the single linked issue is rejected by the solver-attribution gate.
+        li_data = _linked_issue()
+        li_data['solved_by_pr'] = 999
+        scored = ScoredPR(pr=_pr(linked_issues=[li_data]))
+        assert _calculate_issue_multiplier(scored, resolve_scoring(None)) == 1.0
+
+    def test_maintainer_authored_mismatch_still_blocked(self):
+        # The maintainer-preference path runs after _is_valid_linked_issue;
+        # a maintainer-authored linked issue with the wrong solver must still
+        # be rejected (no MAINTAINER_ISSUE_MULTIPLIER shortcut).
+        li_data = _linked_issue(author_association='OWNER')
+        li_data['solved_by_pr'] = 999
+        scored = ScoredPR(pr=_pr(linked_issues=[li_data]))
+        assert _calculate_issue_multiplier(scored, resolve_scoring(None)) == 1.0
+
+
 class TestIssueMultiplierPreference:
     def test_prefer_maintainer_authored_when_multiple_valid(self):
         """Legacy parity (PR #673): the issue multiplier should pick a

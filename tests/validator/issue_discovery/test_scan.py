@@ -36,6 +36,7 @@ MirrorRequestError = mirror_client_mod.MirrorRequestError
 MinerEvaluation = classes.MinerEvaluation
 MinerEvaluationCache = classes.MinerEvaluationCache
 RepoEvaluation = classes.RepoEvaluation
+RepoEligibilityConfig = load_weights.RepoEligibilityConfig
 RepositoryConfig = load_weights.RepositoryConfig
 TokenConfig = load_weights.TokenConfig
 ScoredPR = scored_pr_module.ScoredPR
@@ -748,7 +749,7 @@ class TestSolvingPrCache:
         e2 = MinerEvaluation(uid=2, hotkey='hk2', github_id='g2')
         e2.merged_prs = [_scored_mirror_pr('foo/b', 2, token_score=80, base_score=20)]
 
-        cache = _build_solving_pr_cache({1: e1, 2: e2})
+        cache = _build_solving_pr_cache({1: e1, 2: e2}, _mirror_repos('foo/a', 'foo/b'))
         assert cache[('foo/a', 1)].token_score == 50
         assert cache[('foo/a', 1)].base_score == 10
         assert cache[('foo/b', 2)].token_score == 80
@@ -762,7 +763,7 @@ class TestSolvingPrCache:
         e2 = MinerEvaluation(uid=2, hotkey='hk2', github_id='g2')
         e2.merged_prs = [_scored_mirror_pr('foo/a', 1, token_score=99)]
 
-        cache = _build_solving_pr_cache({1: e1, 2: e2})
+        cache = _build_solving_pr_cache({1: e1, 2: e2}, _mirror_repos('foo/a'))
         assert cache[('foo/a', 1)].token_score == 50  # first wins
 
     def test_below_threshold_prs_excluded_from_cache(self):
@@ -771,9 +772,48 @@ class TestSolvingPrCache:
             _scored_mirror_pr('foo/poisoned', 1, token_score=0.0, base_score=0.0),
             _scored_mirror_pr('foo/healthy', 2, token_score=50, base_score=10),
         ]
-        cache = _build_solving_pr_cache({1: e1})
+        cache = _build_solving_pr_cache({1: e1}, _mirror_repos('foo/poisoned', 'foo/healthy'))
         assert ('foo/poisoned', 1) not in cache
         assert ('foo/healthy', 2) in cache
+
+    def test_per_repo_override_keeps_pr_above_repo_threshold(self):
+        """A repo with min_token_score_for_base_score below the global default
+        keeps PRs whose token_score clears the override but not the default.
+
+        Mirrors the per-repo gating already applied on the cache-MISS path
+        (``_resolve_solving_pr_score``) and on the OSS scoring path
+        (``calculate_base_score_for_pr_files``) — see PR #1330.
+        """
+        repos = {
+            'foo/lenient': RepositoryConfig(
+                emission_share=0.5,
+                eligibility=RepoEligibilityConfig(min_token_score_for_base_score=2.0),
+            ),
+            'foo/strict': RepositoryConfig(emission_share=0.5),  # global default (5)
+        }
+        e1 = MinerEvaluation(uid=1, hotkey='hk1', github_id='g1')
+        e1.merged_prs = [
+            _scored_mirror_pr('foo/lenient', 1, token_score=3.0, base_score=4.0),
+            _scored_mirror_pr('foo/strict', 2, token_score=3.0, base_score=0.0),
+        ]
+        cache = _build_solving_pr_cache({1: e1}, repos)
+        assert ('foo/lenient', 1) in cache  # clears per-repo threshold of 2
+        assert cache[('foo/lenient', 1)].token_score == 3.0
+        assert cache[('foo/lenient', 1)].base_score == 4.0
+        assert ('foo/strict', 2) not in cache  # below global default of 5
+
+    def test_untracked_repo_falls_back_to_global_threshold(self):
+        """Defensive: a merged PR whose repo isn't in mirror_repos still gates
+        on the global default rather than crashing.
+        """
+        e1 = MinerEvaluation(uid=1, hotkey='hk1', github_id='g1')
+        e1.merged_prs = [
+            _scored_mirror_pr('foo/untracked', 1, token_score=3.0, base_score=0.0),
+            _scored_mirror_pr('foo/untracked', 2, token_score=50.0, base_score=10.0),
+        ]
+        cache = _build_solving_pr_cache({1: e1}, {})  # no mirror_repos entries
+        assert ('foo/untracked', 1) not in cache
+        assert ('foo/untracked', 2) in cache
 
     def test_cache_hit_reuses_base_score_no_fetch(self):
         """A solving PR already in cache must not trigger a get_pr_files call."""

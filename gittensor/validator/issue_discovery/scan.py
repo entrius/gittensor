@@ -162,7 +162,7 @@ async def run_issue_discovery(
     }
     enabled_names: Set[str] = set(mirror_repos.keys())
 
-    solving_pr_cache: Dict[Tuple[str, int], CachedSolvingPR] = _build_solving_pr_cache(miner_evaluations)
+    solving_pr_cache: Dict[Tuple[str, int], CachedSolvingPR] = _build_solving_pr_cache(miner_evaluations, mirror_repos)
     cache_stats = _CacheStats()
     bt.logging.info(
         f'Cross-miner solving-PR cache: {len(solving_pr_cache)} entries from '
@@ -396,17 +396,31 @@ def _fallback_open_issue_counts(
 
 def _build_solving_pr_cache(
     miner_evaluations: Dict[int, MinerEvaluation],
+    mirror_repos: Dict[str, RepositoryConfig],
 ) -> Dict[Tuple[str, int], CachedSolvingPR]:
     """Pre-populate the cross-miner cache from already-scored mirror PRs.
 
     Any PR that was scored during OSS (in any miner's merged_prs) is
     keyed by (repo, pr_number) → CachedSolvingPR. Issue-discovery lookups hit
     this cache instead of re-fetching for miners' own PRs or other miners' PRs.
+
+    Filters out PRs whose ``token_score`` is below the repo's
+    ``min_token_score_for_base_score`` threshold so the cache-HIT path applies
+    the same gate as the cache-MISS path (``_resolve_solving_pr_score``) and
+    the OSS scoring path (``calculate_base_score_for_pr_files``). Falls back to
+    the global default for repos missing from ``mirror_repos`` (defensive —
+    in practice every ``merged_prs`` entry is from a tracked repo).
     """
     cache: Dict[Tuple[str, int], CachedSolvingPR] = {}
     for evaluation in miner_evaluations.values():
         for scored in evaluation.merged_prs:
-            if scored.token_score < MIN_TOKEN_SCORE_FOR_BASE_SCORE:
+            repo_config = mirror_repos.get(scored.pr.repo_full_name)
+            threshold = (
+                resolve_eligibility(repo_config.eligibility).min_token_score_for_base_score
+                if repo_config is not None
+                else MIN_TOKEN_SCORE_FOR_BASE_SCORE
+            )
+            if scored.token_score < threshold:
                 continue
             key = (scored.pr.repo_full_name, scored.pr.pr_number)
             if key in cache:

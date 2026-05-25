@@ -167,11 +167,7 @@ class Validator(BaseValidatorNeuron):
                 continue
 
             if not miner_eval.github_pr_fetch_failed:
-                # Always cache successful OSS fetches, even when total_prs == 0,
-                # so issue-discovery-only miners get a cache anchor that
-                # update_issue_discovery() can later refresh. The OSS fallback
-                # branch below guards against restoring an issue-only entry as
-                # authoritative PR state.
+                # Cache every successful OSS fetch, incl. zero-PR miners; the fallback below won't restore a PR-less entry.
                 self.evaluation_cache.store(miner_eval)
                 continue
 

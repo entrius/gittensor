@@ -100,8 +100,8 @@ class TestOssFallbackGuard:
     def test_oss_failure_still_restores_entry_with_pr_data(self):
         """Sanity: the existing fallback for PR-bearing miners must keep
         working — the new guard only filters out zero-PR entries."""
-        from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredPR
         from gittensor.utils.mirror.models import MirrorPullRequest
+        from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredPR
 
         cache = MinerEvaluationCache()
         with_prs = MinerEvaluation(uid=2, hotkey='hk2', github_id='gh2')

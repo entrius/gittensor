@@ -229,6 +229,46 @@ class TestLookbackWindow:
         assert before - timedelta(days=30) <= since_by_repo['entrius/gittensor-ui'] <= after - timedelta(days=30)
         assert before - timedelta(days=60) <= since_by_repo['entrius/gittensor'] <= after - timedelta(days=60)
 
+    def test_stale_closed_pr_before_repo_lookback_is_dropped_defensively(self):
+        """A stale CLOSED PR returned by the mirror must not count against
+        current credibility if its creation time is outside the repo window."""
+        RepoScoringConfig = load_weights.RepoScoringConfig
+        repo = 'entrius/gittensor-ui'
+        repos = {
+            repo: RepositoryConfig(emission_share=0.3, scoring=RepoScoringConfig(pr_lookback_days=30)),
+        }
+        stale_created = datetime.now(timezone.utc) - timedelta(days=120)
+        fresh_created = datetime.now(timezone.utc) - timedelta(days=5)
+        recent_closed = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat().replace('+00:00', 'Z')
+
+        client = Mock()
+        client.get_miner_pulls.return_value = _build_response(
+            [
+                _pr_dict(
+                    1,
+                    repo=repo,
+                    state='CLOSED',
+                    created_at=stale_created.isoformat().replace('+00:00', 'Z'),
+                    merged_at=recent_closed,
+                ),
+                _pr_dict(
+                    2,
+                    repo=repo,
+                    state='CLOSED',
+                    created_at=fresh_created.isoformat().replace('+00:00', 'Z'),
+                    merged_at=recent_closed,
+                ),
+            ]
+        )
+        eval_ = _eval()
+
+        load_miner_prs(eval_, repos, client=client)
+
+        since_by_repo = client.get_miner_pulls.call_args.kwargs['since_by_repo']
+        assert stale_created < since_by_repo[repo]
+        assert fresh_created > since_by_repo[repo]
+        assert [pr.pr.pr_number for pr in eval_.closed_prs] == [2]
+
 
 # ============================================================================
 # Error paths
@@ -328,11 +368,11 @@ class TestErrorPaths:
         call_count = {'n': 0}
         original = load_mod._maybe_add_pr
 
-        def flaky(eval_, pr, repos):
+        def flaky(eval_, pr, repos, since_by_repo):
             call_count['n'] += 1
             if call_count['n'] == 1:
                 raise RuntimeError('synthetic failure on first PR')
-            original(eval_, pr, repos)
+            original(eval_, pr, repos, since_by_repo)
 
         monkeypatch.setattr(load_mod, '_maybe_add_pr', flaky)
 

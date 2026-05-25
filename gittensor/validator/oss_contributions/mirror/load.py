@@ -74,7 +74,7 @@ def load_miner_prs(
 
     for pr in response.pull_requests:
         try:
-            _maybe_add_pr(eval_, pr, master_repositories)
+            _maybe_add_pr(eval_, pr, master_repositories, since_by_repo)
         except Exception as e:
             bt.logging.warning(f'Error processing PR #{pr.pr_number} ({pr.repo_full_name}): {e}')
 
@@ -87,11 +87,13 @@ def _maybe_add_pr(
     eval_: MinerEvaluation,
     pr: MirrorPullRequest,
     master_repositories: Dict[str, RepositoryConfig],
+    since_by_repo: Dict[str, datetime],
 ) -> None:
     """Apply load-time filters and bucket pr by state if it passes.
 
     Time-windowing (each repo's ``pr_lookback_days``) is applied by the mirror,
-    so every PR here is already inside its repo's window.
+    but CLOSED PRs are also checked locally before credibility accounting so a
+    stale mirror response cannot count old failed attempts as current.
     """
 
     repo_config = master_repositories.get(pr.repo_full_name)
@@ -109,6 +111,13 @@ def _maybe_add_pr(
     if pr.state == 'OPEN':
         eval_.open_prs.append(ScoredPR(pr=pr))
     elif pr.state == 'CLOSED':
+        cutoff = since_by_repo.get(pr.repo_full_name)
+        if cutoff is not None and pr.created_at < cutoff:
+            bt.logging.debug(
+                f'Skipping CLOSED PR #{pr.pr_number} in {pr.repo_full_name} - '
+                f'created_at {pr.created_at.isoformat()} is before cutoff {cutoff.isoformat()}'
+            )
+            return
         eval_.closed_prs.append(ScoredPR(pr=pr))
     elif pr.state == 'MERGED':
         # Apply the merge-eligibility gate at LOAD time so the merged_count used

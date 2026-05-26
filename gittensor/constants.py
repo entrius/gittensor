@@ -98,7 +98,7 @@ TIME_DECAY_MIN_MULTIPLIER = 0.05  # 5% of score will retain through lookback win
 TREE_SITTER_PARSE_TIMEOUT_MICROS = 2_000_000
 
 # Wall-clock budget (s) for the isolated-subprocess scoring path.
-SCORING_SUBPROCESS_BUDGET_S = 5.0
+SCORING_SUBPROCESS_BUDGET_S = 10.0
 
 # comment nodes for token scoring
 COMMENT_NODE_TYPES = frozenset(

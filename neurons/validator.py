@@ -166,12 +166,12 @@ class Validator(BaseValidatorNeuron):
                 continue
 
             if not miner_eval.github_pr_fetch_failed:
-                if miner_eval.total_prs > 0:
-                    self.evaluation_cache.store(miner_eval)
+                # Cache every successful OSS fetch, incl. zero-PR miners; the fallback below won't restore a PR-less entry.
+                self.evaluation_cache.store(miner_eval)
                 continue
 
             cached_eval = self.evaluation_cache.get(uid, miner_eval.hotkey, miner_eval.github_id)
-            if cached_eval is not None:
+            if cached_eval is not None and cached_eval.total_prs > 0:
                 bt.logging.info(
                     f'UID {uid}: GitHub fetch failed, using cached evaluation '
                     f'(merged={cached_eval.total_merged_prs}, open={cached_eval.total_open_prs}, '

@@ -620,10 +620,11 @@ class MinerEvaluationCache:
     def update_issue_discovery(self, evaluation: 'MinerEvaluation') -> None:
         """Refresh issue-discovery fields on an existing cache entry.
 
-        No-op when no entry exists for this UID — the cache only holds
-        entries backed by an OSS-phase store(), so writing issue-discovery
-        fields alone would leave a half-populated entry that the OSS
-        fallback path could later restore.
+        No-op when no entry exists for this UID. Missing entries occur on
+        identity-mismatch evictions or OSS-phase failures; in both cases we
+        let the next round's store() re-anchor the entry rather than write
+        a half-populated one here. The OSS fallback path additionally
+        guards against restoring an entry with no PR data.
         """
         existing = self._cache.get(evaluation.uid)
         if existing is None:

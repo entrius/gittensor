@@ -6,12 +6,11 @@ readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12"
 dependencies = [
-    "bittensor==10.0.1",
-    "bittensor-cli==9.17.0",
+    "bittensor==10.3.1",
+    "bittensor-cli==9.21.1",
     "click==8.3.2",
     "psycopg[binary]==3.3.4",
     "rich==14.3.3",
-    "substrate-interface==1.8.1",
     "tree-sitter==0.24.0",
     "tree-sitter-language-pack==0.7.2",
     "wandb==0.26.1",

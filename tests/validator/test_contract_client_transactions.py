@@ -75,7 +75,7 @@ def wallet():
     'method, kwargs_fn, contract_method, expected_args, uses_hotkey, has_gas', METHOD_TABLE, ids=_IDS
 )
 def test_success_returns_true(client, wallet, method, kwargs_fn, contract_method, expected_args, uses_hotkey, has_gas):
-    with patch.object(client, '_exec_contract_raw', return_value='0xdeadbeef') as mock:
+    with patch.object(client, '_exec_contract_raw', return_value=('0xdeadbeef', None)) as mock:
         assert getattr(client, method)(**kwargs_fn(wallet)) is True
     mock.assert_called_once()
     kw = mock.call_args.kwargs
@@ -87,7 +87,14 @@ def test_success_returns_true(client, wallet, method, kwargs_fn, contract_method
 
 @pytest.mark.parametrize('method, kwargs_fn, _cm, _ea, _hk, _gas', METHOD_TABLE, ids=_IDS)
 def test_failure_returns_false(client, wallet, method, kwargs_fn, _cm, _ea, _hk, _gas):
-    with patch.object(client, '_exec_contract_raw', return_value=None):
+    with patch.object(client, '_exec_contract_raw', return_value=(None, 'submission failed')):
+        assert getattr(client, method)(**kwargs_fn(wallet)) is False
+
+
+@pytest.mark.parametrize('method, kwargs_fn, _cm, _ea, _hk, _gas', METHOD_TABLE, ids=_IDS)
+def test_revert_returns_false(client, wallet, method, kwargs_fn, _cm, _ea, _hk, _gas):
+    """Revert (hash + error) must be treated as failure"""
+    with patch.object(client, '_exec_contract_raw', return_value=('0xdeadbeef', 'ContractReverted')):
         assert getattr(client, method)(**kwargs_fn(wallet)) is False
 
 

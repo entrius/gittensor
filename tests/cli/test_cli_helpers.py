@@ -396,7 +396,6 @@ class TestValidateSs58Address:
             validate_ss58_address('')
 
     def test_whitespace_stripped(self):
-        # Use regex fallback if scalecodec fails; a 47-char base58 string may pass
         addr = '5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY'
         result = validate_ss58_address(f'  {addr}  ')
         assert result == addr
@@ -574,7 +573,6 @@ class TestCliRegisterValidation:
         """A 5xx from GitHub during register must abort with a non-zero exit
         and must NOT reach the contract ``register_issue`` exec path.
         """
-        import gittensor.cli.issue_commands.mutations as mut
 
         with (
             patch(
@@ -589,7 +587,6 @@ class TestCliRegisterValidation:
                 'gittensor.cli.issue_commands.helpers.requests.get',
                 return_value=_fake_response(503),
             ),
-            patch.object(mut, 'Path'),
         ):
             result = runner.invoke(
                 cli_root,
@@ -607,8 +604,6 @@ class TestCliRegisterValidation:
         """
         import requests as _requests
 
-        import gittensor.cli.issue_commands.mutations as mut
-
         with (
             patch(
                 'gittensor.cli.issue_commands.mutations._resolve_contract_and_network',
@@ -622,7 +617,6 @@ class TestCliRegisterValidation:
                 'gittensor.cli.issue_commands.helpers.requests.get',
                 side_effect=_requests.ConnectionError('no route to host'),
             ),
-            patch.object(mut, 'Path'),
         ):
             result = runner.invoke(
                 cli_root,
@@ -831,36 +825,6 @@ class TestCliMissingContractConfig:
             )
         assert result.exit_code != 0
         assert 'Contract address not configured' in result.output
-
-
-class TestCliRegisterLogicalFailures:
-    """Ensure logical failure branches in `issues register` exit non-zero."""
-
-    def test_register_exits_non_zero_when_contract_metadata_missing(self, cli_root, runner):
-        with (
-            patch(
-                'gittensor.cli.issue_commands.mutations._resolve_contract_and_network',
-                return_value=(
-                    '0x1234567890123456789012345678901234567890',
-                    'wss://entrypoint-finney.opentensor.ai:443',
-                    'finney',
-                ),
-            ),
-            patch('gittensor.cli.issue_commands.mutations.validate_repository', return_value=('owner', 'repo')),
-            patch('gittensor.cli.issue_commands.mutations.validate_github_issue', return_value={}),
-            patch('substrateinterface.SubstrateInterface'),
-            patch('bittensor.Wallet'),
-            # Force the contract-metadata-missing branch regardless of whether
-            # the ink! artifact has been built locally.
-            patch('pathlib.Path.exists', return_value=False),
-        ):
-            result = runner.invoke(
-                cli_root,
-                ['issues', 'register', '--repo', 'owner/repo', '--issue', '1', '--bounty', '10', '-y'],
-                catch_exceptions=False,
-            )
-        assert result.exit_code != 0
-        assert 'Contract metadata not found' in result.output
 
 
 class TestCliRuntimeExceptions:

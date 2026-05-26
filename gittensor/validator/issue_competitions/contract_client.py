@@ -12,8 +12,8 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import bittensor as bt
-from substrateinterface import Keypair
-from substrateinterface.exceptions import ExtrinsicNotFound
+from async_substrate_interface.errors import ExtrinsicNotFound
+from bittensor_wallet import Keypair
 
 from gittensor.constants import MAX_ISSUE_ID
 from gittensor.validator.issue_competitions.storage_utils import (
@@ -23,12 +23,6 @@ from gittensor.validator.issue_competitions.storage_utils import (
     get_contract_child_storage_key,
     read_contract_packed_storage,
 )
-
-# Bittensor uses async_substrate_interface which has its own exception type
-try:
-    from async_substrate_interface.errors import ExtrinsicNotFound as AsyncExtrinsicNotFound
-except ImportError:
-    AsyncExtrinsicNotFound = ExtrinsicNotFound
 
 # Default gas limits for contract calls
 DEFAULT_GAS_LIMIT = {
@@ -366,21 +360,53 @@ class IssueCompetitionContractClient:
         """Execute a contract transaction and return True on success."""
         try:
             bt.logging.info(label)
-            tx_hash = self._exec_contract_raw(
+            tx_hash, error = self._exec_contract_raw(
                 method_name=method_name,
                 args=args,
                 keypair=keypair,
                 gas_limit=gas_limit,
             )
-            if tx_hash:
+            if tx_hash and not error:
                 bt.logging.info(f'{label} — ok ({tx_hash})')
                 return True
-            else:
-                bt.logging.error(f'{label} — failed')
-                return False
+            bt.logging.error(f'{label} — failed')
+            return False
         except Exception as e:
             bt.logging.error(f'{label} — {e}')
             return False
+
+    def register_issue(
+        self,
+        github_url: str,
+        repository_full_name: str,
+        issue_number: int,
+        target_bounty: int,
+        keypair,
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """
+        Register a new issue with a target bounty (OWNER ONLY).
+
+        Args:
+            github_url: Full GitHub URL of the issue
+            repository_full_name: Repository in owner/repo form
+            issue_number: GitHub issue number
+            target_bounty: Target bounty in raw alpha (u128)
+            keypair: Coldkey of the contract owner
+
+        Returns:
+            (hash, error). Revert: both set. Pre-submission failure: hash is None.
+        """
+        return self._exec_contract_raw(
+            method_name='register_issue',
+            args={
+                'github_url': github_url,
+                'repository_full_name': repository_full_name,
+                'issue_number': issue_number,
+                'target_bounty': target_bounty,
+            },
+            keypair=keypair,
+            gas_limit={'ref_time': 10_000_000_000, 'proof_size': 1_000_000},
+        )
 
     def vote_solution(
         self,
@@ -455,15 +481,19 @@ class IssueCompetitionContractClient:
         keypair,
         gas_limit: dict = None,  # type: ignore[assignment]
         value: int = 0,
-    ) -> Optional[str]:
-        """Execute a contract method using raw extrinsic submission."""
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """Execute a contract method via raw extrinsic. Returns (hash, error).
+
+        Revert: both set. Pre-submission failure: hash is None.
+        """
         gas_limit = gas_limit or DEFAULT_GAS_LIMIT
 
         try:
             selector = CONTRACT_SELECTORS.get(method_name)
             if not selector:
-                bt.logging.error(f'Method {method_name} not found in CONTRACT_SELECTORS')
-                return None
+                err = f'Method {method_name} not found in CONTRACT_SELECTORS'
+                bt.logging.error(err)
+                return None, err
 
             encoded_args = self._encode_args(method_name, args)
             call_data = selector + encoded_args
@@ -488,8 +518,9 @@ class IssueCompetitionContractClient:
                 account_data = account_info
             free_balance = account_data.get('data', {}).get('free', 0)  # type: ignore[union-attr]
             if free_balance < 100_000_000:
-                bt.logging.error(f'{method_name}: insufficient balance for fees')
-                return None
+                err = f'{method_name}: insufficient balance for fees'
+                bt.logging.error(err)
+                return None, err
 
             extrinsic = self.subtensor.substrate.create_signed_extrinsic(
                 call=call,
@@ -502,19 +533,19 @@ class IssueCompetitionContractClient:
                 wait_for_finalization=False,
             )
 
-            _extrinsic_not_found_types = tuple(t for t in [ExtrinsicNotFound, AsyncExtrinsicNotFound] if t is not None)
             try:
                 if result.is_success:
-                    return result.extrinsic_hash
-                else:
-                    bt.logging.error(f'{method_name} failed: {result.error_message}')
-                    return None
-            except _extrinsic_not_found_types:
-                return result.extrinsic_hash
+                    return result.extrinsic_hash, None
+                err = f'{method_name} failed: {result.error_message}'
+                bt.logging.error(err)
+                return result.extrinsic_hash, err
+            except ExtrinsicNotFound:
+                return result.extrinsic_hash, None
 
         except Exception as e:
-            bt.logging.error(f'{method_name} error: {e}')
-            return None
+            err = f'{method_name} error: {e}'
+            bt.logging.error(err)
+            return None, err
 
     def _encode_args(self, method_name: str, args: dict) -> bytes:
         """SCALE-encode method arguments using hardcoded type definitions."""
@@ -623,17 +654,16 @@ class IssueCompetitionContractClient:
         """Harvest emissions from the treasury hotkey and distribute to bounties."""
         try:
             keypair = wallet.hotkey
-            tx_hash = self._exec_contract_raw(
+            tx_hash, error = self._exec_contract_raw(
                 method_name='harvest_emissions',
                 args={},
                 keypair=keypair,
                 gas_limit=DEFAULT_GAS_LIMIT,
             )
 
-            if tx_hash:
+            if tx_hash and not error:
                 return {'status': 'success', 'tx_hash': tx_hash}
-            else:
-                return {'status': 'failed', 'error': 'Transaction failed'}
+            return {'status': 'failed', 'error': error or 'Transaction failed'}
 
         except Exception as e:
             bt.logging.error(f'Harvest error: {e}')
@@ -663,7 +693,7 @@ class IssueCompetitionContractClient:
             bt.logging.info(f'Paying out bounty for issue {issue_id}')
 
             keypair = wallet.coldkey
-            tx_hash = self._exec_contract_raw(
+            tx_hash, error = self._exec_contract_raw(
                 method_name='payout_bounty',
                 args={
                     'issue_id': issue_id,
@@ -672,10 +702,9 @@ class IssueCompetitionContractClient:
                 gas_limit=DEFAULT_GAS_LIMIT,
             )
 
-            if tx_hash:
+            if tx_hash and not error:
                 return int(expected_payout) if expected_payout else 0
-            else:
-                return None
+            return None
 
         except Exception as e:
             bt.logging.error(f'Error paying out bounty: {e}')

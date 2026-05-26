@@ -294,6 +294,13 @@ def _drain_logs() -> None:
 
     import bittensor as bt
 
+    # bittensor's LoggingMachine defines disable_logging transitions from
+    # Trace/Debug/Default/Disabled/Info but NOT from Warning (only
+    # `disable_warning = Warning.to(Default)` exists), so a bare `off()` raises
+    # TransitionNotAllowed when --log-level is warning. Step Warning down to
+    # Default first; from Default the disable_logging transition is defined.
+    if bt.logging.current_state_value == 'Warning':
+        bt.logging.set_warning(on=False)
     bt.logging.off()
     queue = bt.logging.get_queue()
     if not queue.empty():

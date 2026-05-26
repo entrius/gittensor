@@ -149,34 +149,27 @@ def has_inline_tests(content: str, extension: str) -> bool:
     return pattern.search(content) is not None
 
 
-def score_tree_diff(
+def diff_signatures(
     old_content: Optional[str],
     new_content: Optional[str],
     extension: str,
     weights: TokenConfig,
-) -> ScoreBreakdown:
+) -> Tuple[Counter[NodeSignature], Counter[NodeSignature]]:
+    """Symmetric difference of a file's old vs new AST node signatures.
+
+    Returns ``(added, deleted)`` signature multisets:
+    - ``added``   = signatures in new but not old (in/out of scope by type/content)
+    - ``deleted`` = signatures in old but not new
+
+    Structural nodes are identified by type only (moving code *within a file* is no
+    change); leaf nodes by type + content. ``added`` and ``deleted`` are always
+    disjoint for a single file, so cross-file move reconciliation must happen at the
+    caller (see ``calculate_token_score_from_file_changes``).
     """
-    Calculate score by comparing old and new file ASTs using symmetric difference.
-    - Structural nodes are identified by type only (moving code around = no change)
-    - Leaf nodes are identified by type + content (actual token changes)
-    - Both additions (in new but not old) and deletions (in old but not new) are scored
-
-    Args:
-        old_content: Content of the file before changes (None for new files)
-        new_content: Content of the file after changes (None for deleted files)
-        extension: File extension for language detection
-        weights: TokenConfig instance with scoring configuration
-
-    Returns:
-        ScoreBreakdown with added/deleted counts and scores for structural/leaf nodes
-    """
-    breakdown = ScoreBreakdown()
-
     language = weights.get_language(extension)
     if not language:
-        return breakdown
+        return Counter(), Counter()
 
-    # Parse both versions
     old_signatures: Counter[NodeSignature] = Counter()
     new_signatures: Counter[NodeSignature] = Counter()
 
@@ -190,37 +183,48 @@ def score_tree_diff(
         if new_tree:
             new_signatures = collect_node_signatures(new_tree, weights)
 
-    # Compute symmetric difference using Counter subtraction
-    added = new_signatures - old_signatures
-    deleted = old_signatures - new_signatures
+    return new_signatures - old_signatures, old_signatures - new_signatures
 
-    # Score added nodes
+
+def score_signatures(
+    added: Counter[NodeSignature],
+    deleted: Counter[NodeSignature],
+    weights: TokenConfig,
+) -> ScoreBreakdown:
+    """Score added + deleted signature multisets into a ``ScoreBreakdown``."""
+    breakdown = ScoreBreakdown()
+
     for signature, count in added.items():
         if signature[0] == 'structural':
-            node_type = signature[1]
-            weight = weights.get_structural_weight(node_type)
             breakdown.structural_added_count += count
-            breakdown.structural_added_score += weight * count
+            breakdown.structural_added_score += weights.get_structural_weight(signature[1]) * count
         else:  # leaf
-            node_type = signature[1]
-            weight = weights.get_leaf_weight(node_type)
             breakdown.leaf_added_count += count
-            breakdown.leaf_added_score += weight * count
+            breakdown.leaf_added_score += weights.get_leaf_weight(signature[1]) * count
 
-    # Score deleted nodes
     for signature, count in deleted.items():
         if signature[0] == 'structural':
-            node_type = signature[1]
-            weight = weights.get_structural_weight(node_type)
             breakdown.structural_deleted_count += count
-            breakdown.structural_deleted_score += weight * count
+            breakdown.structural_deleted_score += weights.get_structural_weight(signature[1]) * count
         else:  # leaf
-            node_type = signature[1]
-            weight = weights.get_leaf_weight(node_type)
             breakdown.leaf_deleted_count += count
-            breakdown.leaf_deleted_score += weight * count
+            breakdown.leaf_deleted_score += weights.get_leaf_weight(signature[1]) * count
 
     return breakdown
+
+
+def score_tree_diff(
+    old_content: Optional[str],
+    new_content: Optional[str],
+    extension: str,
+    weights: TokenConfig,
+) -> ScoreBreakdown:
+    """Score one file's AST diff (added + deleted nodes), no cross-file reconciliation.
+
+    Both additions (in new but not old) and deletions (in old but not new) are scored.
+    """
+    added, deleted = diff_signatures(old_content, new_content, extension, weights)
+    return score_signatures(added, deleted, weights)
 
 
 def calculate_token_score_from_file_changes(
@@ -263,107 +267,120 @@ def calculate_token_score_from_file_changes(
     total_lines = 0
     all_breakdowns: List[ScoreBreakdown] = []
 
+    # Pass 1 — classify each file. Non-tree-diff files are scored immediately;
+    # tree-diff files defer scoring (parse once here) so that code relocated
+    # between files (deleted in one, added in another) can be reconciled against a
+    # PR-global "move budget" in pass 2 and not be scored twice. Within a single
+    # file ``added``/``deleted`` are disjoint, so single-file diffs are unaffected.
+    PendingTreeDiff = Tuple['FileChange', bool, float, Counter[NodeSignature], Counter[NodeSignature]]
+    plans: List[Union[FileScoreResult, PendingTreeDiff]] = []
+    move_budget: Counter[NodeSignature] = Counter()
+
     for file in file_changes:
         ext = file.file_extension or ''
         is_test_file = file.is_test_file()
         file_weight = TEST_FILE_CONTRIBUTION_WEIGHT if is_test_file else 1.0
 
         if file.status == 'removed':
-            file_result = FileScoreResult(
-                filename=file.short_name,
-                score=0.0,
-                nodes_scored=0,
-                total_lines=file.deletions,
-                is_test_file=is_test_file,
-                scoring_method='skipped',
+            plans.append(
+                FileScoreResult(
+                    filename=file.short_name,
+                    score=0.0,
+                    nodes_scored=0,
+                    total_lines=file.deletions,
+                    is_test_file=is_test_file,
+                    scoring_method='skipped',
+                )
             )
-        elif ext in NON_CODE_EXTENSIONS:
+            continue
+
+        if ext in NON_CODE_EXTENSIONS:
             lines_to_score = min(file.changes, MAX_LINES_SCORED_FOR_NON_CODE_EXT)
             lang_config = programming_languages.get(ext)
             lang_weight = lang_config.weight if lang_config else DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT
+            plans.append(
+                FileScoreResult(
+                    filename=file.short_name,
+                    score=lang_weight * lines_to_score * file_weight,
+                    nodes_scored=lines_to_score,
+                    total_lines=file.changes,
+                    is_test_file=is_test_file,
+                    scoring_method='line-count',
+                )
+            )
+            continue
+
+        content_pair = file_contents.get(file.filename)
+        skip_reason = None
+        if content_pair is None or content_pair.new_content is None:
+            skip_reason = ('skipped-binary', 'binary or fetch failed')
+        elif len(content_pair.new_content.encode('utf-8')) > MAX_FILE_SIZE_BYTES or (
+            content_pair.old_content is not None and len(content_pair.old_content.encode('utf-8')) > MAX_FILE_SIZE_BYTES
+        ):
+            skip_reason = ('skipped-large', f'file too large, >{MAX_FILE_SIZE_BYTES} bytes')
+        elif not weights.supports_tree_sitter(ext):
+            skip_reason = ('skipped-unsupported', f'extension .{ext} not supported')
+        elif file.status != 'added' and content_pair.old_content is None:
+            skip_reason = ('skipped-missing-base', 'non-added file missing base content')
+
+        if skip_reason is not None:
+            bt.logging.debug(f'  │   {file.short_name}: skipped ({skip_reason[1]})')
+            plans.append(
+                FileScoreResult(
+                    filename=file.short_name,
+                    score=0.0,
+                    nodes_scored=0,
+                    total_lines=file.changes,
+                    is_test_file=is_test_file,
+                    scoring_method=skip_reason[0],
+                )
+            )
+            continue
+
+        # Tree diff: collect signatures now (single parse), score in pass 2.
+        assert content_pair is not None and content_pair.new_content is not None
+        new_content = content_pair.new_content
+
+        # For non-test files in inline-test languages, downweight if it has inline tests.
+        if not is_test_file and ext in INLINE_TEST_EXTENSIONS and has_inline_tests(new_content, ext):
+            is_test_file = True
+            file_weight = TEST_FILE_CONTRIBUTION_WEIGHT
+
+        lang_config = programming_languages.get(ext)
+        lang_weight = lang_config.weight if lang_config else 1.0
+        combined_weight = lang_weight * file_weight
+
+        added, deleted = diff_signatures(content_pair.old_content, new_content, ext, weights)
+        move_budget += added
+        plans.append((file, is_test_file, combined_weight, added, deleted))
+
+    # Pass 2 — resolve tree-diff files (suppressing relocated deletions), then accumulate.
+    for plan in plans:
+        if isinstance(plan, FileScoreResult):
+            file_result = plan
+        else:
+            file, is_test_file, combined_weight, added, deleted = plan
+            # A deleted signature that was added elsewhere in this PR is a relocation,
+            # not real work — suppress it (capped by the actual added count). Genuine
+            # deletions (no matching add) still score.
+            kept_deleted: Counter[NodeSignature] = Counter()
+            for sig, count in deleted.items():
+                moved = min(count, move_budget.get(sig, 0))
+                if moved:
+                    move_budget[sig] -= moved
+                if count - moved > 0:
+                    kept_deleted[sig] = count - moved
+
+            file_breakdown = score_signatures(added, kept_deleted, weights).with_weight(combined_weight)
             file_result = FileScoreResult(
                 filename=file.short_name,
-                score=lang_weight * lines_to_score * file_weight,
-                nodes_scored=lines_to_score,
+                score=file_breakdown.total_score,
+                nodes_scored=file_breakdown.added_count + file_breakdown.deleted_count,
                 total_lines=file.changes,
                 is_test_file=is_test_file,
-                scoring_method='line-count',
+                scoring_method='tree-diff',
+                breakdown=file_breakdown,
             )
-        else:
-            content_pair = file_contents.get(file.filename)
-
-            if content_pair is None or content_pair.new_content is None:
-                bt.logging.debug(f'  │   {file.short_name}: skipped (binary or fetch failed)')
-                file_result = FileScoreResult(
-                    filename=file.short_name,
-                    score=0.0,
-                    nodes_scored=0,
-                    total_lines=file.changes,
-                    is_test_file=is_test_file,
-                    scoring_method='skipped-binary',
-                )
-            elif len(content_pair.new_content.encode('utf-8')) > MAX_FILE_SIZE_BYTES or (
-                content_pair.old_content is not None
-                and len(content_pair.old_content.encode('utf-8')) > MAX_FILE_SIZE_BYTES
-            ):
-                bt.logging.debug(f'  │   {file.short_name}: skipped (file too large, >{MAX_FILE_SIZE_BYTES} bytes)')
-                file_result = FileScoreResult(
-                    filename=file.short_name,
-                    score=0.0,
-                    nodes_scored=0,
-                    total_lines=file.changes,
-                    is_test_file=is_test_file,
-                    scoring_method='skipped-large',
-                )
-            elif not weights.supports_tree_sitter(ext):
-                bt.logging.debug(f'  │   {file.short_name}: skipped (extension .{ext} not supported)')
-                file_result = FileScoreResult(
-                    filename=file.short_name,
-                    score=0.0,
-                    nodes_scored=0,
-                    total_lines=file.changes,
-                    is_test_file=is_test_file,
-                    scoring_method='skipped-unsupported',
-                )
-            elif file.status != 'added' and content_pair.old_content is None:
-                bt.logging.debug(f'  │   {file.short_name}: skipped (non-added file missing base content)')
-                file_result = FileScoreResult(
-                    filename=file.short_name,
-                    score=0.0,
-                    nodes_scored=0,
-                    total_lines=file.changes,
-                    is_test_file=is_test_file,
-                    scoring_method='skipped-missing-base',
-                )
-            else:
-                # Tree diff scoring - compare old and new ASTs
-                old_content = content_pair.old_content
-                new_content = content_pair.new_content
-                file_breakdown = score_tree_diff(old_content, new_content, ext, weights)
-
-                lang_config = programming_languages.get(ext)
-                lang_weight = lang_config.weight if lang_config else 1.0
-
-                # For non-test files in inline-test languages, check if the current
-                # file contains inline tests and downweight the entire file if so
-                if not is_test_file and ext in INLINE_TEST_EXTENSIONS:
-                    if has_inline_tests(new_content, ext):
-                        is_test_file = True
-                        file_weight = TEST_FILE_CONTRIBUTION_WEIGHT
-
-                combined_weight = lang_weight * file_weight
-                file_breakdown = file_breakdown.with_weight(combined_weight)
-                nodes_scored = file_breakdown.added_count + file_breakdown.deleted_count
-
-                file_result = FileScoreResult(
-                    filename=file.short_name,
-                    score=file_breakdown.total_score,
-                    nodes_scored=nodes_scored,
-                    total_lines=file.changes,
-                    is_test_file=is_test_file,
-                    scoring_method='tree-diff',
-                    breakdown=file_breakdown,
-                )
 
         # Accumulate into results and per-category totals
         file_results.append(file_result)

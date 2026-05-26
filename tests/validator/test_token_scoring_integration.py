@@ -617,5 +617,108 @@ class UserRegistry {
         assert file_result.nodes_scored > 0
 
 
+class TestCrossFileMoveReconciliation:
+    """Code relocated between files in one PR must not be scored twice.
+
+    Token scoring is a per-file AST diff that scores both added and deleted nodes.
+    Without PR-global reconciliation, a function moved A->B is scored once as a
+    deletion (in A) and once as an addition (in B) — 2x for zero net new code.
+    """
+
+    FUNC = (
+        'def compute_widget_total(widget_alpha, widget_beta):\n'
+        '    interim_alpha = widget_alpha * 3 + 7\n'
+        '    interim_beta = widget_beta - 2\n'
+        '    return interim_alpha + interim_beta * 5\n'
+    )
+    OTHER = 'def unrelated_helper(z):\n    return z + 100\n'
+    KEEPER = 'def keeper():\n    return 1\n'
+
+    @pytest.fixture
+    def weights(self) -> TokenConfig:
+        return load_token_config()
+
+    @staticmethod
+    def _fc(name: str, status: str, additions: int, deletions: int) -> FileChange:
+        return FileChange(
+            pr_number=1,
+            repository_full_name='test/repo',
+            filename=name,
+            changes=additions + deletions,
+            additions=additions,
+            deletions=deletions,
+            status=status,
+        )
+
+    def _score(self, weights, file_changes, contents) -> float:
+        return calculate_token_score_from_file_changes(
+            file_changes, contents, weights, load_programming_language_weights()
+        ).total_score
+
+    def test_moved_function_scored_once_not_twice(self, weights):
+        n = self.FUNC.count('\n')
+        add_only = self._score(
+            weights,
+            [self._fc('b.py', 'added', n, 0)],
+            {'b.py': FileContentPair(None, self.FUNC)},
+        )
+        # Same function relocated A->B: A loses it (modified), B gains it (added).
+        move = self._score(
+            weights,
+            [self._fc('a.py', 'modified', 0, n), self._fc('b.py', 'added', n, 0)],
+            {
+                'a.py': FileContentPair(self.KEEPER + '\n' + self.FUNC, self.KEEPER),
+                'b.py': FileContentPair(None, self.FUNC),
+            },
+        )
+        # A pure relocation = zero net new code => scores the same as writing it once,
+        # NOT double. (Regression: this was 2x before move reconciliation.)
+        assert move == pytest.approx(add_only)
+
+    def test_genuine_deletion_still_scored(self, weights):
+        """A real deletion (not re-added anywhere) is unaffected by reconciliation."""
+        n = self.FUNC.count('\n')
+        del_only = self._score(
+            weights,
+            [self._fc('a.py', 'modified', 0, n)],
+            {'a.py': FileContentPair(self.KEEPER + '\n' + self.FUNC, self.KEEPER)},
+        )
+        assert del_only > 0
+
+    def test_delete_plus_unrelated_add_both_count(self, weights):
+        """Deleting one function and adding a DIFFERENT one is not a move — both score."""
+        n = self.FUNC.count('\n')
+        del_only = self._score(
+            weights,
+            [self._fc('a.py', 'modified', 0, n)],
+            {'a.py': FileContentPair(self.KEEPER + '\n' + self.FUNC, self.KEEPER)},
+        )
+        del_and_add = self._score(
+            weights,
+            [self._fc('a.py', 'modified', 0, n), self._fc('b.py', 'added', 2, 0)],
+            {
+                'a.py': FileContentPair(self.KEEPER + '\n' + self.FUNC, self.KEEPER),
+                'b.py': FileContentPair(None, self.OTHER),
+            },
+        )
+        # The unrelated added function contributes its own (content-specific) tokens
+        # on top of the genuine deletion.
+        assert del_and_add > del_only
+
+    def test_single_file_in_place_change_unaffected(self, weights):
+        """Reconciliation must not change single-file scoring (added/deleted disjoint)."""
+        old = self.KEEPER + '\n' + self.FUNC
+        new = self.KEEPER + '\n' + self.OTHER  # replace FUNC with OTHER, same file
+        n = self.FUNC.count('\n')
+        direct = score_tree_diff(old, new, 'py', weights)
+        full = self._score(
+            weights,
+            [self._fc('a.py', 'modified', 2, n)],
+            {'a.py': FileContentPair(old, new)},
+        )
+        # py lang_weight is applied on top of the raw breakdown; both sides scored.
+        assert full == pytest.approx(direct.total_score * load_programming_language_weights()['py'].weight)
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

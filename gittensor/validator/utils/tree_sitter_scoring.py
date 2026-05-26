@@ -182,13 +182,15 @@ def score_tree_diff(
 
     if old_content:
         old_tree = parse_code(old_content, language)
-        if old_tree:
-            old_signatures = collect_node_signatures(old_tree, weights)
+        if old_tree is None:
+            return breakdown
+        old_signatures = collect_node_signatures(old_tree, weights)
 
     if new_content:
         new_tree = parse_code(new_content, language)
-        if new_tree:
-            new_signatures = collect_node_signatures(new_tree, weights)
+        if new_tree is None:
+            return breakdown
+        new_signatures = collect_node_signatures(new_tree, weights)
 
     # Compute symmetric difference using Counter subtraction
     added = new_signatures - old_signatures

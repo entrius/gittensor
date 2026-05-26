@@ -12,8 +12,11 @@ Run tests:
     pytest tests/validator/test_token_scoring_integration.py -v
 """
 
+from unittest.mock import patch
+
 import pytest
 
+import gittensor.validator.utils.tree_sitter_scoring as tree_sitter_scoring
 from gittensor.classes import FileChange
 from gittensor.utils.github_api_tools import FileContentPair
 from gittensor.validator.utils.load_weights import TokenConfig, load_programming_language_weights, load_token_config
@@ -134,6 +137,29 @@ def farewell(name):
         )
         print(f'  Leaf: +{breakdown.leaf_added_count}/-{breakdown.leaf_deleted_count} = {breakdown.leaf_score:.2f}')
         print(f'  Total score: {breakdown.total_score:.2f}')
+
+    @pytest.mark.parametrize('failed_side', ['old', 'new'])
+    def test_modified_file_one_sided_parse_failure_scores_zero(self, weights, failed_side):
+        """A present side that fails parsing must not be treated as an empty AST."""
+        old_content = 'def foo():\n    return 1\n'
+        new_content = 'def foo():\n    return 2\n'
+        real_parse = tree_sitter_scoring.parse_code
+
+        def fake_parse(content, language):
+            if failed_side == 'old' and content == old_content:
+                return None
+            if failed_side == 'new' and content == new_content:
+                return None
+            return real_parse(content, language)
+
+        with patch.object(tree_sitter_scoring, 'parse_code', side_effect=fake_parse):
+            breakdown = score_tree_diff(old_content, new_content, 'py', weights)
+
+        assert breakdown.structural_added_count == 0
+        assert breakdown.leaf_added_count == 0
+        assert breakdown.structural_deleted_count == 0
+        assert breakdown.leaf_deleted_count == 0
+        assert breakdown.total_score == 0.0
 
     def test_identical_files_score_zero(self, weights):
         """
@@ -615,6 +641,42 @@ class UserRegistry {
         assert file_result.scoring_method == 'tree-diff'
         assert file_result.score > 0
         assert file_result.nodes_scored > 0
+
+    def test_modified_file_new_side_parse_failure_scores_zero_in_pipeline(self, weights):
+        """Pipeline must not award deletion score when modified head content fails parsing."""
+        old_content = 'def foo():\n    return 1\n'
+        new_content = 'def foo():\n    return 2\n'
+        file_change = FileChange(
+            pr_number=1,
+            repository_full_name='owner/repo',
+            filename='src/lib.py',
+            changes=2,
+            additions=1,
+            deletions=1,
+            status='modified',
+        )
+        real_parse = tree_sitter_scoring.parse_code
+
+        def fake_parse(content, language):
+            if content == new_content:
+                return None
+            return real_parse(content, language)
+
+        with patch.object(tree_sitter_scoring, 'parse_code', side_effect=fake_parse):
+            result = calculate_token_score_from_file_changes(
+                [file_change],
+                {'src/lib.py': FileContentPair(old_content=old_content, new_content=new_content)},
+                weights,
+                load_programming_language_weights(),
+            )
+
+        file_result = result.file_results[0]
+        assert file_result.score == 0.0
+        assert file_result.nodes_scored == 0
+        assert result.total_score == 0.0
+        assert file_result.breakdown is not None
+        assert file_result.breakdown.added_count == 0
+        assert file_result.breakdown.deleted_count == 0
 
 
 if __name__ == '__main__':

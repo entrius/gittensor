@@ -41,7 +41,9 @@ def _run_with_tracking(uids, cap):
         patch.object(reward_module, 'finalize_miner_scores'),
     ):
         evaluations, _cached, _penalized = asyncio.run(
-            get_rewards(_fake_validator(uids), uids, master_repositories={}, programming_languages={}, token_config=None)
+            get_rewards(
+                _fake_validator(uids), uids, master_repositories={}, programming_languages={}, token_config=None
+            )
         )
     return evaluations, state['max']
 

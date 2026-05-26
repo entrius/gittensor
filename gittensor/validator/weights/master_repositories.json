@@ -143,6 +143,7 @@
         "min_multiplier": 0.1
       }
     }
+    "additional_acceptable_branches": ["test"]
   },
   "seroperson/jvm-live-reload": {
     "emission_share": 0.01,

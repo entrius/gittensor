@@ -54,7 +54,11 @@ async def evaluate_miners_pull_requests(
 
     bt.logging.info(f'******* Reward function called for UID: {uid} *******')
 
-    miner_eval = validate_response_and_initialize_miner_evaluation(
+    # Off-thread: this does a blocking GitHub /user lookup. Keeping it on the
+    # event loop would serialize identity checks across concurrently-scored
+    # miners (the semaphore can't yield through a blocking call).
+    miner_eval = await asyncio.to_thread(
+        validate_response_and_initialize_miner_evaluation,
         uid,
         hotkey,
         pat,

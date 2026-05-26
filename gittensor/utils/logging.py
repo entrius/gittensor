@@ -1,9 +1,55 @@
-from typing import TYPE_CHECKING, List, Optional
+import contextvars
+import logging
+from contextlib import contextmanager
+from typing import TYPE_CHECKING, Iterator, List, Optional
 
 import bittensor as bt
 
 if TYPE_CHECKING:
     from gittensor.classes import FileScoreResult, ScoreBreakdown
+
+
+# Set per-task while a miner is being scored so concurrent evaluations stay
+# attributable in the log (see ``scoring_uid``). ``None`` means "not in a
+# per-miner scope" — the filter then leaves the line untouched.
+_scoring_uid: contextvars.ContextVar[Optional[int]] = contextvars.ContextVar('scoring_uid', default=None)
+
+
+class _UidLogFilter(logging.Filter):
+    """Prefix each log line with the UID of the miner currently being scored.
+
+    Attached to the ``bittensor`` logger, this runs synchronously in the thread
+    that emitted the record — including ``asyncio.to_thread`` workers, which
+    inherit the contextvar — so both on-loop and threaded lines get tagged.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        uid = _scoring_uid.get()
+        if uid is not None and not getattr(record, '_uid_tagged', False):
+            record.msg = f'[UID {uid}] {record.msg}'
+            record._uid_tagged = True
+        return True
+
+
+_uid_filter_installed = False
+
+
+def install_uid_log_filter() -> None:
+    """Idempotently attach the per-miner UID tag filter to the bittensor logger."""
+    global _uid_filter_installed
+    if not _uid_filter_installed:
+        logging.getLogger('bittensor').addFilter(_UidLogFilter())
+        _uid_filter_installed = True
+
+
+@contextmanager
+def scoring_uid(uid: int) -> Iterator[None]:
+    """Tag every log line emitted within this scope (and its threads) with ``uid``."""
+    token = _scoring_uid.set(uid)
+    try:
+        yield
+    finally:
+        _scoring_uid.reset(token)
 
 
 def log_scoring_results(

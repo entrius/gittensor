@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Dict, Optional, Set, Tuple
 import bittensor as bt
 
 from gittensor.classes import MinerEvaluation
+from gittensor.utils.logging import install_uid_log_filter, scoring_uid
 from gittensor.utils.mirror.client import MirrorClient
 from gittensor.validator import pat_storage
 from gittensor.validator.oss_contributions.inspections import (
@@ -107,32 +108,36 @@ async def get_rewards(
 
     bt.logging.info(f'PAT storage snapshot: {len(pat_by_uid)} miners have stored PATs')
 
+    # Tag every log line with its UID so the concurrently-scored miners below
+    # stay attributable in the interleaved log.
+    install_uid_log_filter()
     semaphore = asyncio.Semaphore(MINER_EVALUATION_CONCURRENCY)
 
     async def evaluate_one(uid: int) -> Tuple[int, MinerEvaluation]:
-        hotkey = self.metagraph.hotkeys[uid]
-        pat_entry = pat_by_uid.get(uid)
-        pat = None
-        stale_hotkey = None
-        stored_github_id = None
-        if pat_entry:
-            if pat_entry.get('hotkey') == hotkey:
-                pat = pat_entry['pat']
-                stored_github_id = pat_entry.get('github_id')
-            else:
-                stale_hotkey = pat_entry.get('hotkey')
+        with scoring_uid(uid):
+            hotkey = self.metagraph.hotkeys[uid]
+            pat_entry = pat_by_uid.get(uid)
+            pat = None
+            stale_hotkey = None
+            stored_github_id = None
+            if pat_entry:
+                if pat_entry.get('hotkey') == hotkey:
+                    pat = pat_entry['pat']
+                    stored_github_id = pat_entry.get('github_id')
+                else:
+                    stale_hotkey = pat_entry.get('hotkey')
 
-        async with semaphore:
-            evaluation = await evaluate_miners_pull_requests(
-                uid,
-                hotkey,
-                pat,
-                master_repositories,
-                programming_languages,
-                token_config,
-                stale_hotkey=stale_hotkey,
-                stored_github_id=stored_github_id,
-            )
+            async with semaphore:
+                evaluation = await evaluate_miners_pull_requests(
+                    uid,
+                    hotkey,
+                    pat,
+                    master_repositories,
+                    programming_languages,
+                    token_config,
+                    stale_hotkey=stale_hotkey,
+                    stored_github_id=stored_github_id,
+                )
         return uid, evaluation
 
     # Score miners concurrently (bounded by the semaphore) so the mirror's

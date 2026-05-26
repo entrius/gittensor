@@ -41,6 +41,7 @@ def _patch_pipeline(
     blended: float = 0.3,
     oss_side_effect=None,
     master_repos: Optional[Dict] = None,
+    maintainer_uids_by_repo: Optional[Dict] = None,
 ):
     """Mock the three forward entry points; `oss_side_effect` captures call args."""
     miner_evaluations = {uid: miner_evaluation}
@@ -59,6 +60,10 @@ def _patch_pipeline(
         oss_patch,
         patch('gittensor.validator.forward.issue_discovery', new=AsyncMock(return_value=None)),
         patch('gittensor.validator.emission_allocation.blend_emission_pools', return_value=final_rewards),
+        patch(
+            'gittensor.validator.forward.build_maintainer_uids_by_repo',
+            return_value=maintainer_uids_by_repo or {},
+        ),
         patch('gittensor.validator.utils.load_weights.load_master_repo_weights', return_value=master_repos or {}),
         patch('gittensor.validator.utils.load_weights.load_programming_language_weights', return_value={}),
         patch('gittensor.validator.utils.load_weights.load_token_config', return_value=_stub_token_config()),
@@ -123,6 +128,26 @@ def _make_scored_mirror_pr(
     )
 
 
+def _make_discovered_issue(repo_full_name: str = 'octo/repo', number: int = 7, earned_score: float = 8.0):
+    from gittensor.classes import Issue
+
+    return Issue(
+        number=number,
+        pr_number=number + 1000,
+        repository_full_name=repo_full_name,
+        title='discovered',
+        discovery_earned_score=earned_score,
+    )
+
+
+def _repo_evaluations(repo_full_name: str, total_score: float) -> Dict:
+    """Per-repo rollup the real pipeline writes into MinerEvaluation.repo_evaluations;
+    _collect_repo_pr_scores reads total_score from here."""
+    from gittensor.classes import RepoEvaluation
+
+    return {repo_full_name: RepoEvaluation(repository_full_name=repo_full_name, total_score=total_score)}
+
+
 class TestScoreCommand:
     def test_help_text(self, runner):
         result = runner.invoke(cli, ['miner', 'score', '--help'])
@@ -177,6 +202,49 @@ class TestScoreCommand:
         assert payload['miner_evaluation']['is_eligible'] is True
         assert payload['miner_evaluation']['credibility'] == 0.85
         assert payload['rewards']['blended_final'] == 0.3
+        assert payload['allocation_breakdown'] == []
+
+    def test_json_output_includes_repo_allocation_breakdown(self, runner, miner_eval_factory):
+        from gittensor.validator.utils.load_weights import RepositoryConfig
+
+        evaluation = miner_eval_factory(
+            uid=_DEV_UID,
+            merged_prs=[_make_scored_mirror_pr(repo_full_name='octo/repo', earned_score=42.5)],
+            issue_discovery_issues=[_make_discovered_issue(repo_full_name='octo/repo', earned_score=8.0)],
+            repo_evaluations=_repo_evaluations('octo/repo', total_score=42.5),
+        )
+        master_repos = {'octo/repo': RepositoryConfig(emission_share=0.2, issue_discovery_share=0.25)}
+        with _multi_patch(
+            _patch_pipeline(
+                uid=_DEV_UID,
+                miner_evaluation=evaluation,
+                blended=0.3,
+                master_repos=master_repos,
+            )
+        ):
+            result = runner.invoke(
+                cli,
+                ['miner', 'score', '--json'],
+                env={'GITTENSOR_MINER_PAT': 'ghp_dummy'},
+            )
+
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.output)
+        rows = payload['allocation_breakdown']
+        assert len(rows) == 1
+        row = rows[0]
+        assert row['repository_full_name'] == 'octo/repo'
+        assert row['emission_share'] == 0.2
+        assert row['issue_discovery_share'] == 0.25
+        assert row['repo_slice'] == 0.18
+        assert row['pr_slice'] == 0.135
+        assert row['issue_discovery_slice'] == 0.045
+        assert row['pr_score'] == 42.5
+        assert row['issue_discovery_score'] == 8.0
+        assert row['pr_reward'] == 0.135
+        assert row['issue_discovery_reward'] == 0.045
+        assert row['total_reward'] == 0.18
+        assert row['recycled'] is False
 
     def test_pat_never_appears_in_json(self, runner, miner_eval_factory):
         """The introspection-based serializer relies on _EVAL_SKIP to redact secrets;
@@ -305,6 +373,83 @@ class TestScoreCommand:
         assert result.exit_code == 0, result.output
         assert 'octo/repo#42' in result.output
         assert 'Per-PR breakdown' in result.output
+
+    def test_allocation_breakdown_renders_in_table(self, runner, miner_eval_factory):
+        from gittensor.validator.utils.load_weights import RepositoryConfig
+
+        evaluation = miner_eval_factory(
+            uid=_DEV_UID,
+            merged_prs=[_make_scored_mirror_pr(repo_full_name='octo/repo', earned_score=42.5)],
+            issue_discovery_issues=[_make_discovered_issue(repo_full_name='octo/repo', earned_score=8.0)],
+            repo_evaluations=_repo_evaluations('octo/repo', total_score=42.5),
+        )
+        master_repos = {'octo/repo': RepositoryConfig(emission_share=0.2, issue_discovery_share=0.25)}
+        with _multi_patch(
+            _patch_pipeline(
+                uid=_DEV_UID,
+                miner_evaluation=evaluation,
+                master_repos=master_repos,
+            )
+        ):
+            result = runner.invoke(
+                cli,
+                ['miner', 'score'],
+                env={'GITTENSOR_MINER_PAT': 'ghp_dummy'},
+            )
+
+        assert result.exit_code == 0, result.output
+        assert 'Repo allocation breakdown' in result.output
+        assert 'octo/repo' in result.output
+        assert '0.135000' in result.output
+        assert '0.045000' in result.output
+
+    def test_allocation_breakdown_includes_maintainer_carve_out(self, runner, miner_eval_factory):
+        """When the dev UID is a registered maintainer of a maintainer_cut repo,
+        the breakdown must surface the carve-out and roll it into total_reward."""
+        from gittensor.validator.utils.load_weights import RepositoryConfig
+
+        evaluation = miner_eval_factory(
+            uid=_DEV_UID,
+            merged_prs=[_make_scored_mirror_pr(repo_full_name='octo/repo', earned_score=42.5)],
+            repo_evaluations=_repo_evaluations('octo/repo', total_score=42.5),
+        )
+        master_repos = {
+            'octo/repo': RepositoryConfig(
+                emission_share=0.2,
+                issue_discovery_share=0.0,
+                maintainer_cut=0.5,
+            )
+        }
+        with _multi_patch(
+            _patch_pipeline(
+                uid=_DEV_UID,
+                miner_evaluation=evaluation,
+                master_repos=master_repos,
+                maintainer_uids_by_repo={'octo/repo': [_DEV_UID]},
+            )
+        ):
+            result = runner.invoke(
+                cli,
+                ['miner', 'score', '--json'],
+                env={'GITTENSOR_MINER_PAT': 'ghp_dummy'},
+            )
+
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.output)
+        rows = payload['allocation_breakdown']
+        assert len(rows) == 1
+        row = rows[0]
+        assert row['repository_full_name'] == 'octo/repo'
+        assert row['maintainer_cut'] == 0.5
+        assert row['repo_slice'] == 0.18
+        assert row['maintainer_carve_out'] == 0.09
+        assert row['maintainer_reward'] == 0.09
+        # PR scoring receives the remaining 0.09 after the carve-out
+        assert row['pr_slice'] == 0.09
+        assert row['pr_reward'] == 0.09
+        assert row['issue_discovery_reward'] == 0
+        assert row['total_reward'] == 0.18
+        assert row['recycled'] is False
 
     def test_pat_storage_load_all_pats_is_patched(self, runner, miner_eval_factory):
         """The injected PAT snapshot must override pat_storage.load_all_pats()."""

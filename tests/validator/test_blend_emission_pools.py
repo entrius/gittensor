@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from gittensor.classes import Issue, MinerEvaluation
+from gittensor.classes import Issue, MinerEvaluation, RepoEvaluation
 from gittensor.constants import (
     ISSUES_TREASURY_EMISSION_SHARE,
     ISSUES_TREASURY_UID,
@@ -21,7 +21,7 @@ from gittensor.constants import (
     RECYCLE_UID,
 )
 from gittensor.utils.mirror.models import MirrorPullRequest, MirrorReviewSummary
-from gittensor.validator.emission_allocation import blend_emission_pools
+from gittensor.validator.emission_allocation import blend_emission_pools, calculate_repo_emission_breakdown
 from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredPR
 from gittensor.validator.utils.load_weights import RepositoryConfig, load_master_repo_weights
 
@@ -34,11 +34,30 @@ def _idx(uids: set[int], uid: int) -> int:
     return sorted(uids).index(uid)
 
 
-def _evaluation(uid: int, prs=None, issues=None) -> MinerEvaluation:
+def _evaluation(uid: int, prs=None, issues=None, open_prs=None) -> MinerEvaluation:
     evaluation = MinerEvaluation(uid=uid, hotkey=f'hk-{uid}', github_id=str(uid))
     evaluation.merged_prs = list(prs or [])
+    evaluation.open_prs = list(open_prs or [])
     evaluation.issue_discovery_issues = list(issues or [])
+    _populate_repo_evaluations(evaluation)
     return evaluation
+
+
+def _populate_repo_evaluations(evaluation: MinerEvaluation) -> None:
+    repos = {pr.repository_full_name.lower() for pr in evaluation.merged_prs + evaluation.open_prs}
+    for repo_name in repos:
+        merged = [pr for pr in evaluation.merged_prs if pr.repository_full_name.lower() == repo_name]
+        open_prs = [pr for pr in evaluation.open_prs if pr.repository_full_name.lower() == repo_name]
+        evaluation.repo_evaluations[repo_name] = RepoEvaluation(
+            repository_full_name=repo_name,
+            total_score=max(
+                0.0,
+                sum(pr.earned_score for pr in merged) - sum(pr.collateral_score for pr in open_prs),
+            ),
+            total_collateral_score=sum(pr.collateral_score for pr in open_prs),
+            total_merged_prs=len(merged),
+            total_open_prs=len(open_prs),
+        )
 
 
 def _scored_pr(repo: str, number: int, earned_score: float) -> ScoredPR:
@@ -73,6 +92,12 @@ def _scored_pr(repo: str, number: int, earned_score: float) -> ScoredPR:
         review_summary=MirrorReviewSummary(),
     )
     return ScoredPR(pr=pr, earned_score=earned_score)
+
+
+def _open_pr(repo: str, number: int, collateral_score: float) -> ScoredPR:
+    pr = _scored_pr(repo, number, earned_score=0.0)
+    pr.collateral_score = collateral_score
+    return pr
 
 
 def _discovered_issue(repo: str, number: int, earned_score: float) -> Issue:
@@ -121,6 +146,73 @@ class TestAllocationInvarianceToPrVolume:
         assert rewards[_idx(miner_uids, 1)] == pytest.approx(repo_slice * 0.6)
         assert rewards[_idx(miner_uids, 2)] == pytest.approx(repo_slice * 0.4)
         assert rewards[_idx(miner_uids, 1)] + rewards[_idx(miner_uids, 2)] == pytest.approx(repo_slice)
+
+
+class TestOpenPrCollateralAllocation:
+    def test_repo_pr_allocation_reads_finalized_repo_score(self):
+        repos = {'r/finalized': _config(emission_share=0.2, issue_discovery_share=0.0)}
+        miner_uids = _uids(1, 2)
+        evaluations = {
+            1: _evaluation(1, prs=[_scored_pr('r/finalized', 100, earned_score=1_000.0)]),
+            2: _evaluation(2, prs=[_scored_pr('r/finalized', 200, earned_score=1_000.0)]),
+        }
+        evaluations[1].repo_evaluations['r/finalized'].total_score = 30.0
+        evaluations[2].repo_evaluations['r/finalized'].total_score = 70.0
+
+        rewards = blend_emission_pools(evaluations, repos, miner_uids)
+
+        repo_slice = 0.2 * OSS_EMISSION_SHARE
+        assert rewards[_idx(miner_uids, 1)] == pytest.approx(repo_slice * 0.3)
+        assert rewards[_idx(miner_uids, 2)] == pytest.approx(repo_slice * 0.7)
+
+    def test_repo_pr_allocation_uses_collateral_adjusted_scores(self):
+        repos = {'r/collateral': _config(emission_share=0.2, issue_discovery_share=0.0)}
+        miner_uids = _uids(1, 2)
+        evaluations = {
+            1: _evaluation(1, prs=[_scored_pr('r/collateral', 100, earned_score=120.0)]),
+            2: _evaluation(
+                2,
+                prs=[_scored_pr('r/collateral', 200, earned_score=80.0)],
+                open_prs=[_open_pr('r/collateral', 201, collateral_score=20.0)],
+            ),
+        }
+
+        rewards = blend_emission_pools(evaluations, repos, miner_uids)
+
+        repo_slice = 0.2 * OSS_EMISSION_SHARE
+        assert rewards[_idx(miner_uids, 1)] == pytest.approx(repo_slice * (120.0 / 180.0))
+        assert rewards[_idx(miner_uids, 2)] == pytest.approx(repo_slice * (60.0 / 180.0))
+
+    def test_repo_pr_allocation_remains_raw_ratio_without_collateral(self):
+        repos = {'r/no-collateral': _config(emission_share=0.2, issue_discovery_share=0.0)}
+        miner_uids = _uids(1, 2)
+        evaluations = {
+            1: _evaluation(1, prs=[_scored_pr('r/no-collateral', 100, earned_score=120.0)]),
+            2: _evaluation(2, prs=[_scored_pr('r/no-collateral', 200, earned_score=80.0)]),
+        }
+
+        rewards = blend_emission_pools(evaluations, repos, miner_uids)
+
+        repo_slice = 0.2 * OSS_EMISSION_SHARE
+        assert rewards[_idx(miner_uids, 1)] == pytest.approx(repo_slice * 0.6)
+        assert rewards[_idx(miner_uids, 2)] == pytest.approx(repo_slice * 0.4)
+
+    def test_repo_pr_allocation_clamps_collateral_adjusted_score_at_zero(self):
+        repos = {'r/clamp': _config(emission_share=0.2, issue_discovery_share=0.0)}
+        miner_uids = _uids(1, 2)
+        evaluations = {
+            1: _evaluation(1, prs=[_scored_pr('r/clamp', 100, earned_score=50.0)]),
+            2: _evaluation(
+                2,
+                prs=[_scored_pr('r/clamp', 200, earned_score=10.0)],
+                open_prs=[_open_pr('r/clamp', 201, collateral_score=20.0)],
+            ),
+        }
+
+        rewards = blend_emission_pools(evaluations, repos, miner_uids)
+
+        assert rewards[_idx(miner_uids, 1)] == pytest.approx(0.2 * OSS_EMISSION_SHARE)
+        assert rewards[_idx(miner_uids, 2)] == pytest.approx(0.0)
 
 
 class TestCrossRepoIsolation:
@@ -351,6 +443,48 @@ class TestIssueDiscoveryShareShortCircuits:
 
         assert rewards[_idx(miner_uids, 1)] == pytest.approx(0.0)
         assert rewards[_idx(miner_uids, RECYCLE_UID)] == pytest.approx(OSS_EMISSION_SHARE)
+
+
+class TestAllocationBreakdown:
+    def test_breakdown_exposes_repo_pr_and_issue_rewards(self):
+        repos = {'r/both': _config(emission_share=0.1, issue_discovery_share=0.4)}
+        miner_uids = _uids(1, 2)
+        evaluations = {
+            1: _evaluation(1, prs=[_scored_pr('r/both', 100, earned_score=10.0)]),
+            2: _evaluation(2, issues=[_discovered_issue('r/both', 10, earned_score=20.0)]),
+        }
+
+        rows = list(calculate_repo_emission_breakdown(evaluations, repos, miner_uids))
+
+        assert len(rows) == 1
+        row = rows[0]
+        repo_slice = 0.1 * OSS_EMISSION_SHARE
+        assert row.repository_full_name == 'r/both'
+        assert row.emission_share == pytest.approx(0.1)
+        assert row.issue_discovery_share == pytest.approx(0.4)
+        assert row.repo_slice == pytest.approx(repo_slice)
+        assert row.pr_slice == pytest.approx(repo_slice * 0.6)
+        assert row.issue_discovery_slice == pytest.approx(repo_slice * 0.4)
+        assert row.pr_scores[1] == pytest.approx(10.0)
+        assert row.issue_discovery_scores[2] == pytest.approx(20.0)
+        assert row.pr_rewards[1] == pytest.approx(repo_slice * 0.6)
+        assert row.issue_discovery_rewards[2] == pytest.approx(repo_slice * 0.4)
+        assert row.recycled_amount == pytest.approx(0.0)
+
+    def test_breakdown_keeps_raw_score_when_configured_side_recycles(self):
+        repos = {'r/issue-only': _config(emission_share=0.2, issue_discovery_share=1.0)}
+        miner_uids = _uids(1)
+        evaluations = {1: _evaluation(1, prs=[_scored_pr('r/issue-only', 100, earned_score=50.0)])}
+
+        rows = list(calculate_repo_emission_breakdown(evaluations, repos, miner_uids))
+
+        assert len(rows) == 1
+        row = rows[0]
+        assert row.pr_scores[1] == pytest.approx(50.0)
+        assert row.issue_discovery_scores == {}
+        assert row.pr_rewards == {}
+        assert row.issue_discovery_rewards == {}
+        assert row.recycled_amount == pytest.approx(0.2 * OSS_EMISSION_SHARE)
 
 
 class TestPreservedCompatibility:

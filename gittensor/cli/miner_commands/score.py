@@ -111,6 +111,40 @@ def _serialize_evaluation(miner_eval) -> Dict[str, Any]:
     return payload
 
 
+def _serialize_allocation_breakdown(allocations, uid: int) -> list[Dict[str, Any]]:
+    rows = []
+    for allocation in allocations:
+        pr_score = allocation.pr_scores.get(uid, 0.0)
+        issue_score = allocation.issue_discovery_scores.get(uid, 0.0)
+        pr_reward = allocation.pr_rewards.get(uid, 0.0)
+        issue_reward = allocation.issue_discovery_rewards.get(uid, 0.0)
+        maintainer_reward = allocation.maintainer_rewards.get(uid, 0.0)
+        if pr_score <= 0 and issue_score <= 0 and pr_reward <= 0 and issue_reward <= 0 and maintainer_reward <= 0:
+            continue
+
+        rows.append(
+            {
+                'repository_full_name': allocation.repository_full_name,
+                'emission_share': round(allocation.emission_share, 6),
+                'issue_discovery_share': round(allocation.issue_discovery_share, 6),
+                'maintainer_cut': round(allocation.maintainer_cut, 6),
+                'repo_slice': round(allocation.repo_slice, 6),
+                'maintainer_carve_out': round(allocation.maintainer_carve_out, 6),
+                'pr_slice': round(allocation.pr_slice, 6),
+                'issue_discovery_slice': round(allocation.issue_discovery_slice, 6),
+                'pr_score': _round(pr_score),
+                'issue_discovery_score': _round(issue_score),
+                'pr_reward': round(pr_reward, 6),
+                'issue_discovery_reward': round(issue_reward, 6),
+                'maintainer_reward': round(maintainer_reward, 6),
+                'total_reward': round(pr_reward + issue_reward + maintainer_reward, 6),
+                'recycled_amount': round(allocation.recycled_amount, 6),
+                'recycled': allocation.recycled_amount > 0,
+            }
+        )
+    return rows
+
+
 def _render_table(payload: Dict[str, Any]) -> None:
     miner = payload['miner_evaluation']
     rewards = payload['rewards']
@@ -169,6 +203,34 @@ def _render_table(payload: Dict[str, Any]) -> None:
                 f'{re["issue_discovery_score"]:.2f}',
             )
         console.print(repo_table)
+
+    allocation_rows = payload.get('allocation_breakdown', [])
+    if allocation_rows:
+        show_maintainer = any(row.get('maintainer_reward', 0) > 0 for row in allocation_rows)
+        allocation_table = Table(title='Repo allocation breakdown', show_lines=False)
+        allocation_table.add_column('Repo', style='cyan')
+        allocation_table.add_column('Slice', justify='right')
+        allocation_table.add_column('PR score', justify='right')
+        allocation_table.add_column('Issue score', justify='right')
+        allocation_table.add_column('PR reward', justify='right')
+        allocation_table.add_column('Issue reward', justify='right')
+        if show_maintainer:
+            allocation_table.add_column('Maintainer reward', justify='right')
+        allocation_table.add_column('Recycled', justify='right')
+        for row in allocation_rows:
+            values = [
+                row['repository_full_name'],
+                f'{row["repo_slice"]:.6f}',
+                f'{row["pr_score"]:.2f}',
+                f'{row["issue_discovery_score"]:.2f}',
+                f'{row["pr_reward"]:.6f}',
+                f'{row["issue_discovery_reward"]:.6f}',
+            ]
+            if show_maintainer:
+                values.append(f'{row.get("maintainer_reward", 0):.6f}')
+            values.append(f'{row["recycled_amount"]:.6f}' if row['recycled'] else '-')
+            allocation_table.add_row(*values)
+        console.print(allocation_table)
 
     pr_table = Table(title='Per-PR breakdown', show_lines=False)
     pr_table.add_column('Repo#PR', style='cyan')
@@ -272,8 +334,9 @@ def score_command(pat: Optional[str], log_level: str, json_mode: bool) -> None:
     resolved_pat = _resolve_pat(pat, json_mode)
 
     # Deferred imports: keeps --help fast (these pull bittensor + the validator graph).
-    from gittensor.validator.emission_allocation import blend_emission_pools
+    from gittensor.validator.emission_allocation import blend_emission_pools, calculate_repo_emission_breakdown
     from gittensor.validator.forward import (
+        build_maintainer_uids_by_repo,
         issue_discovery,
         oss_contributions,
     )
@@ -308,7 +371,13 @@ def score_command(pat: Optional[str], log_level: str, json_mode: bool) -> None:
                 stub, miner_uids, master_repositories, programming_languages, token_config
             )
             await issue_discovery(miner_evaluations, master_repositories, programming_languages, token_config)
-        rewards = blend_emission_pools(miner_evaluations, master_repositories, miner_uids)
+        maintainer_uids_by_repo = build_maintainer_uids_by_repo(miner_evaluations, master_repositories, miner_uids)
+        allocation_breakdown = list(
+            calculate_repo_emission_breakdown(
+                miner_evaluations, master_repositories, miner_uids, maintainer_uids_by_repo
+            )
+        )
+        rewards = blend_emission_pools(miner_evaluations, master_repositories, miner_uids, maintainer_uids_by_repo)
 
         return {
             'success': True,
@@ -316,6 +385,7 @@ def score_command(pat: Optional[str], log_level: str, json_mode: bool) -> None:
             'rewards': {
                 'blended_final': _round(float(rewards[0])),
             },
+            'allocation_breakdown': _serialize_allocation_breakdown(allocation_breakdown, _DEV_UID),
         }
 
     if not json_mode:

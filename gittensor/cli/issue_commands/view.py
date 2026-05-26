@@ -224,7 +224,7 @@ def issues_bounty_pool(network: str, rpc_url: str, contract: str, verbose: bool,
     print_network_header(network_name, contract_addr)
 
     try:
-        from substrateinterface import SubstrateInterface
+        from async_substrate_interface import SubstrateInterface
 
         with loading_context('Reading contract storage...', as_json):
             substrate = SubstrateInterface(url=ws_endpoint)
@@ -268,7 +268,7 @@ def issues_pending_harvest(network: str, rpc_url: str, contract: str, verbose: b
 
     try:
         import bittensor as bt
-        from substrateinterface import SubstrateInterface
+        from async_substrate_interface import SubstrateInterface
 
         from gittensor.validator.issue_competitions.contract_client import (
             IssueCompetitionContractClient,
@@ -325,7 +325,7 @@ def admin_info(network: str, rpc_url: str, contract: str, verbose: bool, as_json
     print_network_header(network_name, contract_addr)
 
     try:
-        from substrateinterface import SubstrateInterface
+        from async_substrate_interface import SubstrateInterface
 
         with loading_context('Reading contract configuration...', as_json):
             substrate = SubstrateInterface(url=ws_endpoint)

@@ -525,6 +525,25 @@ class TestRepositoryConfigScoringBlock:
             lw.load_master_repo_weights()
 
 
+class TestFieldSpecTables:
+    """The spec tables must stay in sync with the override dataclasses.
+
+    Resolution, parsing, and range-checking are all spec-driven, so a dataclass
+    field with no matching _FieldSpec would silently drop out of the mechanism.
+    This locks the invariant at CI time instead of surfacing it at config-load.
+    """
+
+    def test_specs_cover_every_overridable_field(self):
+        from dataclasses import fields
+
+        from gittensor.validator.utils import load_weights as lw
+
+        assert {f.name for f in fields(lw.RepoEligibilityConfig)} == {s.name for s in lw._ELIGIBILITY_SPECS}
+        assert {f.name for f in fields(lw.RepoTimeDecayConfig)} == {s.name for s in lw._TIME_DECAY_SPECS}
+        # scoring's nested time_decay is resolved separately, not via _SCORING_SPECS
+        assert {f.name for f in fields(lw.RepoScoringConfig)} - {'time_decay'} == {s.name for s in lw._SCORING_SPECS}
+
+
 class TestRepositoryConfigMaintainerCut:
     """Dataclass + JSON-parsing tests for the maintainer_cut emission carve-out."""
 

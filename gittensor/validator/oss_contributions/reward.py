@@ -17,6 +17,7 @@ from gittensor.validator.oss_contributions.inspections import (
 from gittensor.validator.oss_contributions.mirror.load import load_miner_prs
 from gittensor.validator.oss_contributions.mirror.scoring import score_miner_prs
 from gittensor.validator.oss_contributions.scoring import finalize_miner_scores
+from gittensor.validator.utils.config import MINER_EVALUATION_CONCURRENCY
 from gittensor.validator.utils.load_weights import LanguageConfig, RepositoryConfig, TokenConfig
 
 # NOTE: there was a circular import error, needed this if to resolve it
@@ -102,10 +103,9 @@ async def get_rewards(
 
     bt.logging.info(f'PAT storage snapshot: {len(pat_by_uid)} miners have stored PATs')
 
-    miner_evaluations: Dict[int, MinerEvaluation] = {}
+    semaphore = asyncio.Semaphore(MINER_EVALUATION_CONCURRENCY)
 
-    # Look up PATs and calculate score.
-    for uid in uids:
+    async def evaluate_one(uid: int) -> Tuple[int, MinerEvaluation]:
         hotkey = self.metagraph.hotkeys[uid]
         pat_entry = pat_by_uid.get(uid)
         pat = None
@@ -118,18 +118,24 @@ async def get_rewards(
             else:
                 stale_hotkey = pat_entry.get('hotkey')
 
-        # Calculate score
-        miner_evaluation = await evaluate_miners_pull_requests(
-            uid,
-            hotkey,
-            pat,
-            master_repositories,
-            programming_languages,
-            token_config,
-            stale_hotkey=stale_hotkey,
-            stored_github_id=stored_github_id,
-        )
-        miner_evaluations[uid] = miner_evaluation
+        async with semaphore:
+            evaluation = await evaluate_miners_pull_requests(
+                uid,
+                hotkey,
+                pat,
+                master_repositories,
+                programming_languages,
+                token_config,
+                stale_hotkey=stale_hotkey,
+                stored_github_id=stored_github_id,
+            )
+        return uid, evaluation
+
+    # Score miners concurrently (bounded by the semaphore) so the mirror's
+    # per-request latency overlaps across miners instead of summing. Each miner
+    # uses its own MirrorClient, so the tasks share no mutable state.
+    results = await asyncio.gather(*(evaluate_one(uid) for uid in uids))
+    miner_evaluations: Dict[int, MinerEvaluation] = dict(results)
 
     # If evaluation of miner was successful, store to cache, if api failure, fallback to previous successful evaluation if any
     cached_uids = self.store_or_use_cached_evaluation(miner_evaluations)

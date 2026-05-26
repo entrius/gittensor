@@ -16,9 +16,9 @@ composition, and base/earned/nodes aggregation.
 Anti-gaming notes:
 - ``edited_after_merge`` is NOT a PR-level gate — it gates only the issue
   bonus multiplier in ``_is_valid_linked_issue``.
-- ``_resolve_trusted_scoring_label`` requires maintainer-applied labels on
-  repos with ``trusted_label_pipeline=True``; this catches GitHub-App-applied
-  labels (NULL ``actor_association``) on repos with an authoritative labeler.
+- ``resolve_trusted_label_multiplier`` applies the shared maintainer/trusted
+  label gate, including GitHub-App-applied labels (NULL ``actor_association``)
+  for repos with an authoritative labeler.
 """
 
 import asyncio
@@ -41,7 +41,7 @@ from gittensor.constants import (
 from gittensor.utils.github_api_tools import FileContentPair, branch_matches_pattern
 from gittensor.utils.mirror.client import MirrorClient, MirrorRequestError
 from gittensor.utils.mirror.models import MirrorLinkedIssue, MirrorPullRequest
-from gittensor.validator.oss_contributions.label_resolution import resolve_highest_label_multiplier
+from gittensor.validator.oss_contributions.label_resolution import resolve_trusted_label_multiplier
 from gittensor.validator.oss_contributions.mirror.adapters import mirror_files_to_legacy
 from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredPR
 from gittensor.validator.oss_contributions.scoring import (
@@ -53,6 +53,7 @@ from gittensor.validator.utils.load_weights import (
     RepositoryConfig,
     ResolvedScoring,
     TokenConfig,
+    resolve_eligibility,
     resolve_scoring,
 )
 from gittensor.validator.utils.tree_sitter_scoring import calculate_token_score_from_file_changes
@@ -151,7 +152,15 @@ async def score_pr(
         if files:
             file_changes, file_contents = mirror_files_to_legacy(pr.repo_full_name, pr.pr_number, files)
 
-            result = calculate_base_score_for_pr_files(file_changes, file_contents, programming_languages, token_config)
+            result = calculate_base_score_for_pr_files(
+                file_changes,
+                file_contents,
+                programming_languages,
+                token_config,
+                min_token_score_for_base_score=resolve_eligibility(
+                    repo_config.eligibility
+                ).min_token_score_for_base_score,
+            )
             scored.token_score = result.token_score
             scored.structural_count = result.structural_count
             scored.structural_score = result.structural_score
@@ -270,13 +279,22 @@ def calculate_base_score_for_pr_files(
     file_contents: Dict[str, FileContentPair],
     programming_languages: Dict[str, LanguageConfig],
     token_config: TokenConfig,
+    min_token_score_for_base_score: Optional[float] = None,
 ) -> BaseScoreResult:
     """Density-scaled SOURCE token score plus cross-category contribution bonus.
 
     Returns a ``BaseScoreResult`` the caller copies onto whatever container
     they're populating (e.g. ``ScoredPR`` for OSS, ``Issue`` discovery
     fields for issue discovery).
+
+    ``min_token_score_for_base_score`` is the per-repo token-score floor; PRs
+    below it get ``base_score = 0``. Callers should pass the resolved per-repo
+    value from ``resolve_eligibility(repo_config.eligibility)``. If None, falls
+    back to the global ``MIN_TOKEN_SCORE_FOR_BASE_SCORE`` default.
     """
+    threshold = (
+        min_token_score_for_base_score if min_token_score_for_base_score is not None else MIN_TOKEN_SCORE_FOR_BASE_SCORE
+    )
     scoring_result: PrScoringResult = calculate_token_score_from_file_changes(
         file_changes,
         file_contents,
@@ -304,7 +322,7 @@ def calculate_base_score_for_pr_files(
     source_density = source.density if source else 0.0
     code_density = round(source_density, 2)
 
-    if source_token_score < MIN_TOKEN_SCORE_FOR_BASE_SCORE:
+    if source_token_score < threshold:
         initial_base_score = 0.0
     else:
         initial_base_score = MERGED_PR_BASE_SCORE * source_density
@@ -313,11 +331,7 @@ def calculate_base_score_for_pr_files(
     contribution_bonus = round(bonus_percent * MAX_CONTRIBUTION_BONUS, 2)
     base_score = round(initial_base_score + contribution_bonus, 2)
 
-    threshold_note = (
-        f' [below {MIN_TOKEN_SCORE_FOR_BASE_SCORE} token threshold]'
-        if source_token_score < MIN_TOKEN_SCORE_FOR_BASE_SCORE
-        else ''
-    )
+    threshold_note = f' [below {threshold} token threshold]' if source_token_score < threshold else ''
     bt.logging.info(
         f'Base score: {initial_base_score:.2f} (density {source_density:.2f}){threshold_note}'
         f' + {contribution_bonus} bonus ({bonus_percent * 100:.0f}% of max {MAX_CONTRIBUTION_BONUS})'
@@ -377,25 +391,7 @@ def _calculate_pr_multipliers(scored: ScoredPR, repo_config: RepositoryConfig) -
 
 
 def _resolve_trusted_scoring_label(pr: MirrorPullRequest, repo_config: RepositoryConfig) -> tuple[Optional[str], float]:
-    """Pick the highest-multiplier currently-applied scoring label whose actor is trusted.
-
-    Returns ``(label_name, multiplier)``. Returns ``(None, default_multiplier)``
-    when no trusted label matches this repository's label config.
-
-    By default the actor must be in ``MAINTAINER_ASSOCIATIONS``. Repos opted into
-    ``trusted_label_pipeline`` accept any actor — including GitHub-App actors that
-    surface as ``actor_association=NULL`` because they lack a row in
-    ``contributor_repo_roles`` (issue #911). Only flip the flag on for repos whose
-    label pipeline is authoritative; community repos run attacker-controllable
-    auto-labelers (release-drafter, actions/labeler) and must keep the gate.
-    """
-    trusted = repo_config.trusted_label_pipeline
-    candidate_names = [
-        (label.name or '').lower()
-        for label in pr.labels
-        if label.name and (trusted or label.actor_association in MAINTAINER_ASSOCIATIONS)
-    ]
-    return resolve_highest_label_multiplier(candidate_names, repo_config)
+    return resolve_trusted_label_multiplier(pr.labels, repo_config)
 
 
 # ============================================================================

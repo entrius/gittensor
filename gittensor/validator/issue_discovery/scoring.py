@@ -27,10 +27,11 @@ def calculate_issue_review_quality_multiplier(changes_requested_count: int, revi
     7+ rounds → 0.0
     """
     multiplier = max(0.0, 1.0 - review_penalty_rate * changes_requested_count)
-    bt.logging.info(
-        f'{changes_requested_count} solving-PR CHANGES_REQUESTED review(s) → '
-        f'issue_review_quality_multiplier={multiplier:.2f}'
-    )
+    if changes_requested_count > 0:
+        bt.logging.info(
+            f'{changes_requested_count} solving-PR CHANGES_REQUESTED review(s) → '
+            f'issue_review_quality_multiplier={multiplier:.2f}'
+        )
     return multiplier
 
 

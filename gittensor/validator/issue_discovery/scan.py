@@ -52,6 +52,7 @@ from gittensor.validator.issue_discovery.scoring import (
     calculate_open_issue_spam_multiplier,
     check_issue_eligibility,
 )
+from gittensor.validator.oss_contributions.label_resolution import resolve_trusted_label_multiplier
 from gittensor.validator.oss_contributions.mirror.adapters import mirror_files_to_legacy
 from gittensor.validator.oss_contributions.mirror.scoring import (
     calculate_base_score_for_pr_files,
@@ -198,12 +199,12 @@ async def run_issue_discovery(
         try:
             current_response = await asyncio.to_thread(client.get_miner_issues, evaluation.github_id)
         except MirrorRequestError as e:
-            bt.logging.warning(f'├─ UID {uid}: open-issue count fetch failed ({e}) — skipped this miner')
-            _restore_issue_discovery_from_cache(evaluation, evaluation_cache)
+            open_counts = _fallback_open_issue_counts(evaluation, evaluation_cache, response.issues, enabled_names)
+            bt.logging.warning(f'├─ UID {uid}: open-issue count fetch failed ({e}) — using fallback open counts')
             fetch_errors += 1
-            continue
+        else:
+            open_counts = _count_open_issues(current_response.issues, enabled_names)
 
-        open_counts = _count_open_issues(current_response.issues, enabled_names)
         filtered = [i for i in response.issues if i.repo_full_name in enabled_names and _should_include_issue(i)]
         if not filtered:
             _clear_issue_discovery_fields(evaluation)
@@ -360,6 +361,37 @@ def _count_open_issues(issues: List[MirrorIssue], enabled_names: Set[str]) -> Di
         if issue.repo_full_name in enabled_names and issue.state == 'OPEN':
             counts[issue.repo_full_name] = counts.get(issue.repo_full_name, 0) + 1
     return counts
+
+
+def _fallback_open_issue_counts(
+    evaluation: MinerEvaluation,
+    evaluation_cache: Optional[MinerEvaluationCache],
+    lookback_issues: List[MirrorIssue],
+    enabled_names: Set[str],
+) -> Dict[str, int]:
+    """Best-effort open issue counts when the current unbounded fetch fails.
+
+    The lookback fetch is the authoritative scoring payload. If the secondary
+    current/open-count fetch flakes, preserve the fresh solved-issue data and
+    use the most recent cached per-repo open counts when available. Without a
+    cache entry, count open issues visible in the successful lookback payload.
+    """
+    cached = None
+    if evaluation_cache is not None:
+        cached = evaluation_cache.get(evaluation.uid, evaluation.hotkey, evaluation.github_id or '')
+
+    if cached is not None:
+        counts = {
+            repo_name: repo_eval.total_open_issues
+            for repo_name, repo_eval in cached.repo_evaluations.items()
+            if repo_name in enabled_names
+        }
+        if counts:
+            return counts
+        if cached.total_open_issues is not None and len(enabled_names) == 1:
+            return {next(iter(enabled_names)): cached.total_open_issues}
+
+    return _count_open_issues(lookback_issues, enabled_names)
 
 
 def _build_solving_pr_cache(
@@ -555,6 +587,7 @@ def _finalize_repo_issue_scores(
             issue.discovery_open_issue_spam_multiplier = spam_mult
             issue.discovery_earned_score = round(
                 issue.discovery_base_score
+                * issue.discovery_label_multiplier
                 * issue.discovery_time_decay_multiplier
                 * issue.discovery_review_quality_multiplier
                 * issue.discovery_credibility_multiplier
@@ -635,7 +668,17 @@ async def _resolve_solving_pr_score(
     file_changes, file_contents = mirror_files_to_legacy(
         issue.repo_full_name, solving_pr.pr_number, files_response.files
     )
-    result = calculate_base_score_for_pr_files(file_changes, file_contents, programming_languages, token_config)
+    result = calculate_base_score_for_pr_files(
+        file_changes,
+        file_contents,
+        programming_languages,
+        token_config,
+        min_token_score_for_base_score=(
+            resolve_eligibility(repo_config.eligibility).min_token_score_for_base_score
+            if repo_config is not None
+            else None
+        ),
+    )
     base_score = (
         repo_config.fixed_base_score
         if repo_config is not None and repo_config.fixed_base_score is not None
@@ -752,5 +795,8 @@ def _mirror_issue_for_scoring(
         ),
         2,
     )
+
+    _, label_multiplier = resolve_trusted_label_multiplier(solving_pr.labels, repo_config)
+    adapted.discovery_label_multiplier = label_multiplier
 
     return adapted

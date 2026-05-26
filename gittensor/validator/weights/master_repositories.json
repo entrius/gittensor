@@ -127,7 +127,22 @@
   },
   "vouchdev/vouch": {
     "emission_share": 0.0075,
-    "issue_discovery_share": 0.0
+    "issue_discovery_share": 0.0,
+    "label_multipliers": {
+      "feature": 1.5,
+      "bug": 1.1
+    },
+    "scoring": {
+      "pr_lookback_days": 30,
+      "open_pr_collateral_percent": 0.1,
+      "review_penalty_rate": 0.2,
+      "maintainer_issue_multiplier": 1.5,
+      "time_decay": {
+        "grace_period_hours": 24,
+        "sigmoid_midpoint_days": 14,
+        "min_multiplier": 0.1
+      }
+    }
   },
   "seroperson/jvm-live-reload": {
     "emission_share": 0.01,

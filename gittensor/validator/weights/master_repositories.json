@@ -1,6 +1,6 @@
 {
   "aglover1221/product-data-extractor": {
-    "emission_share": 0.00250,
+    "emission_share": 0.0025,
     "issue_discovery_share": 0.0
   },
   "entrius/allways": {
@@ -27,7 +27,7 @@
     "trusted_label_pipeline": true
   },
   "entrius/das-github-mirror": {
-    "emission_share": 0.01180,
+    "emission_share": 0.0118,
     "issue_discovery_share": 0.5,
     "label_multipliers": {
       "bug": 1.25,
@@ -69,7 +69,7 @@
       "min_valid_merged_prs": 0,
       "min_valid_solved_issues": 0
     },
-    "emission_share": 0.00000,
+    "emission_share": 0.0,
     "fixed_base_score": 1.0,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
@@ -79,15 +79,15 @@
     "trusted_label_pipeline": true
   },
   "Geniepod/genie-claw": {
-    "emission_share": 0.04000,
+    "emission_share": 0.02,
     "issue_discovery_share": 0.0
   },
   "infiniflow/ragflow": {
-    "emission_share": 0.04000,
+    "emission_share": 0.05,
     "issue_discovery_share": 0.0
   },
   "JSONbored/awesome-claude": {
-    "emission_share": 0.01000,
+    "emission_share": 0.01,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "feature": 1.5,
@@ -106,23 +106,40 @@
     }
   },
   "MkDev11/gittensor-hub": {
-    "emission_share": 0.03500,
-    "issue_discovery_share": 0.0
+    "emission_share": 0.015,
+    "issue_discovery_share": 0.0,
+    "label_multipliers": {
+      "feature": 2,
+      "bug": 1.2,
+      "refactor": 0.3
+    },
+    "scoring": {
+      "open_pr_collateral_percent": 0.2,
+      "review_penalty_rate": 0.2,
+      "maintainer_issue_multiplier": 2,
+      "time_decay": {
+        "grace_period_hours": 24,
+        "sigmoid_midpoint_days": 14,
+        "min_multiplier": 0.1
+      }
+    },
+    "maintainer_cut": 0.3
   },
   "vouchdev/vouch": {
-    "emission_share": 0.00500,
-    "issue_discovery_share": 0.0
+    "emission_share": 0.0075,
+    "issue_discovery_share": 0.0,
+    "additional_acceptable_branches": ["test"]
   },
   "seroperson/jvm-live-reload": {
-    "emission_share": 0.01000,
+    "emission_share": 0.01,
     "issue_discovery_share": 0.0
   },
   "touchpilot/touchpilot": {
-    "emission_share": 0.03000,
+    "emission_share": 0.02,
     "issue_discovery_share": 0.0
   },
   "we-promise/sure": {
-    "emission_share": 0.03000,
+    "emission_share": 0.04,
     "issue_discovery_share": 0.0
   }
 }

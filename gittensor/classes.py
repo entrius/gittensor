@@ -359,6 +359,26 @@ class MinerEvaluation:
 
 
 @dataclass
+class RepoEmissionAllocation:
+    """Per-repository allocation details for one scoring round."""
+
+    repository_full_name: str
+    emission_share: float
+    issue_discovery_share: float
+    repo_slice: float
+    maintainer_cut: float = 0.0
+    maintainer_carve_out: float = 0.0
+    maintainer_rewards: Dict[int, float] = field(default_factory=dict)
+    pr_slice: float = 0.0
+    issue_discovery_slice: float = 0.0
+    pr_scores: Dict[int, float] = field(default_factory=dict)
+    issue_discovery_scores: Dict[int, float] = field(default_factory=dict)
+    pr_rewards: Dict[int, float] = field(default_factory=dict)
+    issue_discovery_rewards: Dict[int, float] = field(default_factory=dict)
+    recycled_amount: float = 0.0
+
+
+@dataclass
 class ScoreBreakdown:
     """Breakdown of scores by type (structural vs leaf) and change type (added vs deleted).
 

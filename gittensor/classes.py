@@ -184,7 +184,6 @@ class PullRequest:
     total_nodes_scored: int = 0  # Total AST nodes scored for this PR
 
     # Token scoring breakdown (after test weight applied)
-    code_density: float = 1.0
     token_score: float = 0.0
     structural_count: int = 0
     structural_score: float = 0.0

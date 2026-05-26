@@ -127,7 +127,8 @@
   },
   "vouchdev/vouch": {
     "emission_share": 0.0075,
-    "issue_discovery_share": 0.0
+    "issue_discovery_share": 0.0,
+    "additional_acceptable_branches": ["test"]
   },
   "seroperson/jvm-live-reload": {
     "emission_share": 0.01,

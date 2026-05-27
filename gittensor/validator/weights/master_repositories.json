@@ -83,7 +83,7 @@
     "issue_discovery_share": 0.0
   },
   "infiniflow/ragflow": {
-    "emission_share": 0.05,
+    "emission_share": 0.055,
     "issue_discovery_share": 0.0
   },
   "JSONbored/awesome-claude": {
@@ -154,7 +154,7 @@
     "issue_discovery_share": 0.0
   },
   "we-promise/sure": {
-    "emission_share": 0.04,
+    "emission_share": 0.001,
     "issue_discovery_share": 0.0
   }
 }

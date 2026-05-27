@@ -75,7 +75,7 @@ async def forward(self: 'Validator') -> None:
         await self.bulk_store_evaluation(miner_evaluations, master_repositories, skip_uids=cached_uids)
 
         # 5. Allocate repo-bounded emission shares into final rewards
-        maintainer_uids_by_repo = _build_maintainer_uids_by_repo(miner_evaluations, master_repositories, miner_uids)
+        maintainer_uids_by_repo = build_maintainer_uids_by_repo(miner_evaluations, master_repositories, miner_uids)
         rewards = blend_emission_pools(miner_evaluations, master_repositories, miner_uids, maintainer_uids_by_repo)
 
         self.update_scores(rewards, miner_uids, blacklisted_uids=sorted(penalized_uids))
@@ -131,7 +131,7 @@ async def issue_discovery(
     )
 
 
-def _build_maintainer_uids_by_repo(
+def build_maintainer_uids_by_repo(
     miner_evaluations: Dict[int, MinerEvaluation],
     master_repositories: Dict[str, RepositoryConfig],
     miner_uids: set[int],

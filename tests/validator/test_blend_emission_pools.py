@@ -21,7 +21,7 @@ from gittensor.constants import (
     RECYCLE_UID,
 )
 from gittensor.utils.mirror.models import MirrorPullRequest, MirrorReviewSummary
-from gittensor.validator.emission_allocation import blend_emission_pools
+from gittensor.validator.emission_allocation import blend_emission_pools, calculate_repo_emission_breakdown
 from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredPR
 from gittensor.validator.utils.load_weights import RepositoryConfig, load_master_repo_weights
 
@@ -443,6 +443,48 @@ class TestIssueDiscoveryShareShortCircuits:
 
         assert rewards[_idx(miner_uids, 1)] == pytest.approx(0.0)
         assert rewards[_idx(miner_uids, RECYCLE_UID)] == pytest.approx(OSS_EMISSION_SHARE)
+
+
+class TestAllocationBreakdown:
+    def test_breakdown_exposes_repo_pr_and_issue_rewards(self):
+        repos = {'r/both': _config(emission_share=0.1, issue_discovery_share=0.4)}
+        miner_uids = _uids(1, 2)
+        evaluations = {
+            1: _evaluation(1, prs=[_scored_pr('r/both', 100, earned_score=10.0)]),
+            2: _evaluation(2, issues=[_discovered_issue('r/both', 10, earned_score=20.0)]),
+        }
+
+        rows = list(calculate_repo_emission_breakdown(evaluations, repos, miner_uids))
+
+        assert len(rows) == 1
+        row = rows[0]
+        repo_slice = 0.1 * OSS_EMISSION_SHARE
+        assert row.repository_full_name == 'r/both'
+        assert row.emission_share == pytest.approx(0.1)
+        assert row.issue_discovery_share == pytest.approx(0.4)
+        assert row.repo_slice == pytest.approx(repo_slice)
+        assert row.pr_slice == pytest.approx(repo_slice * 0.6)
+        assert row.issue_discovery_slice == pytest.approx(repo_slice * 0.4)
+        assert row.pr_scores[1] == pytest.approx(10.0)
+        assert row.issue_discovery_scores[2] == pytest.approx(20.0)
+        assert row.pr_rewards[1] == pytest.approx(repo_slice * 0.6)
+        assert row.issue_discovery_rewards[2] == pytest.approx(repo_slice * 0.4)
+        assert row.recycled_amount == pytest.approx(0.0)
+
+    def test_breakdown_keeps_raw_score_when_configured_side_recycles(self):
+        repos = {'r/issue-only': _config(emission_share=0.2, issue_discovery_share=1.0)}
+        miner_uids = _uids(1)
+        evaluations = {1: _evaluation(1, prs=[_scored_pr('r/issue-only', 100, earned_score=50.0)])}
+
+        rows = list(calculate_repo_emission_breakdown(evaluations, repos, miner_uids))
+
+        assert len(rows) == 1
+        row = rows[0]
+        assert row.pr_scores[1] == pytest.approx(50.0)
+        assert row.issue_discovery_scores == {}
+        assert row.pr_rewards == {}
+        assert row.issue_discovery_rewards == {}
+        assert row.recycled_amount == pytest.approx(0.2 * OSS_EMISSION_SHARE)
 
 
 class TestPreservedCompatibility:

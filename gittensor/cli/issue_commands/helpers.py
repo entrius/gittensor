@@ -17,6 +17,7 @@ from typing import Any, Callable, ContextManager, Dict, List, Optional, Tuple, T
 
 import click
 import requests
+from bittensor_wallet.utils import is_valid_ss58_address
 from rich.console import Console
 
 from gittensor.cli.issue_commands.tables import build_pr_table
@@ -481,35 +482,15 @@ def validate_github_issue(
 
 
 def validate_ss58_address(address: str, param_name: str = 'address') -> str:
-    """Validate an SS58 address.
-
-    Uses substrate-interface's ss58_decode (existing stack) for base58+checksum
-    validation. Falls back to a length/prefix regex if not available.
-    """
+    """Validate an SS58 address via bittensor-wallet's base58+checksum check."""
     address = address.strip()
     if not address:
         raise click.BadParameter(f'Empty {param_name}', param_hint=param_name)
-
-    try:
-        from substrateinterface.utils.ss58 import ss58_decode
-
-        ss58_decode(address)
-        return address
-    except ImportError:
-        pass
-    except Exception:
+    if not is_valid_ss58_address(address):
         raise click.BadParameter(
             f'Invalid SS58 address for {param_name}: {address}',
             param_hint=param_name,
         )
-
-    # Fallback: basic structure check (starts with 1-9/A-H/J-N/P-Z, 46-48 chars)
-    if not re.match(r'^[1-9A-HJ-NP-Za-km-z]{46,48}$', address):
-        raise click.BadParameter(
-            f'Invalid SS58 address for {param_name}: {address}',
-            param_hint=param_name,
-        )
-
     return address
 
 
@@ -831,7 +812,7 @@ def read_issues_from_contract(ws_endpoint: str, contract_addr: str, verbose: boo
         List of issue dictionaries
     """
     try:
-        from substrateinterface import SubstrateInterface
+        from async_substrate_interface import SubstrateInterface
 
         if verbose:
             err_console.print(f'[dim]Debug: Connecting to {ws_endpoint}...[/dim]')

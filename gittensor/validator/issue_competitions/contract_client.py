@@ -15,7 +15,7 @@ import bittensor as bt
 from substrateinterface import Keypair
 from substrateinterface.exceptions import ExtrinsicNotFound
 
-from gittensor.constants import MAX_ISSUE_ID
+from gittensor.constants import ALPHA_RAW_UNIT, MAX_ISSUE_ID
 from gittensor.validator.issue_competitions.storage_utils import (
     ISSUES_MAPPING_ROOT_KEY,
     compute_ink5_lazy_key,
@@ -603,7 +603,7 @@ class IssueCompetitionContractClient:
             # Extract integer part (upper 64 bits of U64F64)
             stake_raw = bits >> 64 if bits else 0
 
-            bt.logging.debug(f'Treasury stake (direct query): {stake_raw} ({stake_raw / 1e9:.4f} α)')
+            bt.logging.debug(f'Treasury stake (direct query): {stake_raw} ({stake_raw / ALPHA_RAW_UNIT:.4f} α)')
             return stake_raw
 
         except Exception as e:

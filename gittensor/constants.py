@@ -181,3 +181,7 @@ CONTRACT_ADDRESS = '5FWNdk8YNtNcHKrAx2krqenFrFAZG7vmsd2XN2isJSew3MrD'
 ISSUES_TREASURY_UID = 111  # UID of the smart contract neuron, if set to RECYCLE_UID then it's disabled
 ISSUES_TREASURY_EMISSION_SHARE = 0.10  # % of emissions allocated to funding issues treasury
 MAX_ISSUE_ID = 1_000_000  # sanity-check upper bound for any real deployment
+
+# Alpha token denomination (raw u64 → display): 1 α = 10^ALPHA_DECIMALS raw units.
+ALPHA_DECIMALS = 9
+ALPHA_RAW_UNIT = 10**ALPHA_DECIMALS

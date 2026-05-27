@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Dict
 import bittensor as bt
 
 from gittensor.classes import MinerEvaluation
+from gittensor.constants import ALPHA_RAW_UNIT
 from gittensor.utils.github_api_tools import check_github_issue_closed
 from gittensor.utils.utils import get_contract_address
 from gittensor.validator.issue_competitions.contract_client import IssueCompetitionContractClient, IssueStatus
@@ -84,7 +85,7 @@ async def issue_competitions(
         errors = []
 
         for issue in active_issues:
-            bounty_display = issue.bounty_amount / 1e9
+            bounty_display = issue.bounty_amount / ALPHA_RAW_UNIT
             issue_label = (
                 f'{issue.repository_full_name}#{issue.issue_number} (id={issue.id}, bounty={bounty_display:.2f} ALPHA)'
             )

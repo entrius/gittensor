@@ -373,25 +373,30 @@ def _fallback_open_issue_counts(
 
     The lookback fetch is the authoritative scoring payload. If the secondary
     current/open-count fetch flakes, preserve the fresh solved-issue data and
-    use the most recent cached per-repo open counts when available. Without a
-    cache entry, count open issues visible in the successful lookback payload.
+    count open issues visible in the successful lookback payload. Overlay the
+    most recent cached per-repo counts where available.
     """
+    counts = _count_open_issues(lookback_issues, enabled_names)
     cached = None
     if evaluation_cache is not None:
         cached = evaluation_cache.get(evaluation.uid, evaluation.hotkey, evaluation.github_id or '')
 
     if cached is not None:
-        counts = {
+        cached_counts = {
             repo_name: repo_eval.total_open_issues
             for repo_name, repo_eval in cached.repo_evaluations.items()
             if repo_name in enabled_names
         }
-        if counts:
+        if cached_counts:
+            for repo_name, cached_count in cached_counts.items():
+                counts[repo_name] = max(counts.get(repo_name, 0), cached_count)
             return counts
         if cached.total_open_issues is not None and len(enabled_names) == 1:
-            return {next(iter(enabled_names)): cached.total_open_issues}
+            repo_name = next(iter(enabled_names))
+            counts[repo_name] = max(counts.get(repo_name, 0), cached.total_open_issues)
+            return counts
 
-    return _count_open_issues(lookback_issues, enabled_names)
+    return counts
 
 
 def _build_solving_pr_cache(

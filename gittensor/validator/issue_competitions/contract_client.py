@@ -564,6 +564,21 @@ class IssueCompetitionContractClient:
                 encoded += struct.pack('<Q', value)
             elif type_def == 'u128':
                 encoded += struct.pack('<QQ', value & 0xFFFFFFFFFFFFFFFF, value >> 64)
+            elif type_def == 'str':
+                if not isinstance(value, str):
+                    raise ValueError(f'Expected string for {arg_name}, got {type(value)}')
+                str_bytes = value.encode('utf-8')
+                length = len(str_bytes)
+                # Basic SCALE compact encoding for lengths
+                if length < 64:
+                    encoded += struct.pack('<B', length << 2)
+                elif length < 16384:
+                    encoded += struct.pack('<H', (length << 2) | 1)
+                elif length < 1073741824:
+                    encoded += struct.pack('<I', (length << 2) | 2)
+                else:
+                    raise ValueError(f'String too long: {length}')
+                encoded += str_bytes
             elif type_def == 'AccountId':
                 if isinstance(value, str):
                     encoded += bytes.fromhex(self.subtensor.substrate.ss58_decode(value))

@@ -289,6 +289,38 @@ class TestRunMirrorIssueDiscovery:
         # No fetch needed — everything came from the cache
         client.get_pr_files.assert_not_called()
 
+    def test_credibility_is_gate_only_not_a_per_issue_tax(self):
+        """#1340 applied to the issue path: past the gate, credibility no longer
+        taxes earned score. 4 valid-solved + 1 closed -> credibility 0.80
+        (eligible, < 1.0); each scored issue keeps a neutral 1.0 multiplier
+        instead of being taxed by 0.80."""
+        client = Mock()
+        solved = [_issue_dict(issue_number=50 + i, solved_by_pr=100 + i) for i in range(4)]
+        closed = [_issue_dict(issue_number=99, state_reason='NOT_PLANNED', solved_by_pr=None)]
+        client.get_miner_issues.return_value = _response(solved + closed)
+
+        eval_ = _eval()
+        seed = MinerEvaluation(uid=2, hotkey='hk2', github_id='seed')
+        seed.merged_prs = [_scored_mirror_pr('entrius/gittensor-ui', 100 + i) for i in range(4)]
+
+        _run(
+            run_issue_discovery(
+                {1: eval_, 2: seed},
+                _mirror_repos('entrius/gittensor-ui'),
+                _EMPTY_LANGS,
+                _EMPTY_TOKEN_CONFIG,
+                client=client,
+            )
+        )
+
+        repo_eval = eval_.repo_evaluations['entrius/gittensor-ui']
+        assert repo_eval.is_issue_eligible is True
+        assert repo_eval.issue_credibility == pytest.approx(0.80, abs=0.01)
+        scored = eval_.issue_discovery_issues
+        assert scored, 'expected scored issues'
+        assert all(issue.discovery_credibility_multiplier == 1.0 for issue in scored)
+        assert all(issue.discovery_earned_score > 0 for issue in scored)
+
     def test_self_issue_counts_credibility_but_no_score(self):
         # author_github_id == solving_pr.author_github_id
         client = Mock()

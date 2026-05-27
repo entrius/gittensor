@@ -583,7 +583,10 @@ def _finalize_repo_issue_scores(
         spam_mult = calculate_open_issue_spam_multiplier(cfg, open_count, acc.issue_token_score)
         repo_score = 0.0
         for issue in acc.scored_issues:
-            issue.discovery_credibility_multiplier = round(credibility, 2)
+            # Credibility is a gate only: the repo already cleared
+            # min_issue_credibility above, so we don't also tax every issue by
+            # the same ratio. Mirrors the OSS gate-only treatment (#1340).
+            issue.discovery_credibility_multiplier = 1.0
             issue.discovery_open_issue_spam_multiplier = spam_mult
             issue.discovery_earned_score = round(
                 issue.discovery_base_score

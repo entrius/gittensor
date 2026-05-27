@@ -142,7 +142,7 @@
         "sigmoid_midpoint_days": 14,
         "min_multiplier": 0.1
       }
-    }
+    },
     "additional_acceptable_branches": ["test"]
   },
   "seroperson/jvm-live-reload": {

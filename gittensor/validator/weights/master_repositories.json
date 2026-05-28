@@ -138,7 +138,7 @@
     "additional_acceptable_branches": ["test"]
   },
   "phase-rs/phase": {
-    "emission_share": 0.018,
+    "emission_share": 0.015,
     "issue_discovery_share": 0.0
   },
   "seroperson/jvm-live-reload": {

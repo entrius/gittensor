@@ -87,6 +87,7 @@ class MirrorLinkedIssue:
     is_transferred: bool
     solved_by_pr: Optional[int]
     labels: List[MirrorLabel] = field(default_factory=list)
+    repository_full_name: Optional[str] = None
 
     @classmethod
     def from_dict(cls, data: dict) -> 'MirrorLinkedIssue':
@@ -107,6 +108,7 @@ class MirrorLinkedIssue:
             is_transferred=bool(data.get('is_transferred', False)),
             solved_by_pr=data.get('solved_by_pr'),
             labels=[MirrorLabel.from_dict(label) for label in data.get('labels') or []],
+            repository_full_name=data.get('repository_full_name'),
         )
 
 

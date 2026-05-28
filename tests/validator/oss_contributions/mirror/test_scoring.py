@@ -703,6 +703,7 @@ def _linked_issue(
     closed_at: str | None = '2026-04-18T10:00:00Z',
     author_association: str | None = 'CONTRIBUTOR',
     number: int = 50,
+    repository_full_name: str | None = None,
 ):
     return {
         'number': number,
@@ -717,6 +718,7 @@ def _linked_issue(
         'is_transferred': is_transferred,
         'solved_by_pr': 100,
         'labels': [],
+        'repository_full_name': repository_full_name,
     }
 
 
@@ -817,6 +819,24 @@ class TestLinkedIssueValidity:
         gates CLOSED issues)."""
         scored = ScoredPR(pr=_pr(state='OPEN'))
         li = MirrorLinkedIssue.from_dict(_linked_issue(state='OPEN', state_reason=None, closed_at=None))
+        assert _is_valid_linked_issue(li, scored.pr) is True
+
+    def test_cross_repo_known_mismatch_blocks(self):
+        """Issue from a different repo than the PR is rejected when repository_full_name is known."""
+        scored = ScoredPR(pr=_pr())  # repo_full_name = 'entrius/gittensor-ui'
+        li = MirrorLinkedIssue.from_dict(_linked_issue(repository_full_name='attacker/throwaway'))
+        assert _is_valid_linked_issue(li, scored.pr) is False
+
+    def test_same_repo_known_match_passes(self):
+        """Issue from the same repo as the PR passes the cross-repo check."""
+        scored = ScoredPR(pr=_pr())  # repo_full_name = 'entrius/gittensor-ui'
+        li = MirrorLinkedIssue.from_dict(_linked_issue(repository_full_name='entrius/gittensor-ui'))
+        assert _is_valid_linked_issue(li, scored.pr) is True
+
+    def test_unknown_repo_none_passes(self):
+        """Older mirror snapshots without repository_full_name preserve existing behaviour."""
+        scored = ScoredPR(pr=_pr())
+        li = MirrorLinkedIssue.from_dict(_linked_issue(repository_full_name=None))
         assert _is_valid_linked_issue(li, scored.pr) is True
 
 

@@ -447,6 +447,13 @@ def _is_valid_linked_issue(li: MirrorLinkedIssue, pr: MirrorPullRequest) -> bool
         bt.logging.warning(f'Skipping linked issue #{li.number} - transferred')
         return False
 
+    if li.repository_full_name is not None and li.repository_full_name.lower() != pr.repo_full_name.lower():
+        bt.logging.warning(
+            f'Skipping linked issue #{li.number} - cross-repo reference '
+            f'(issue in {li.repository_full_name}, PR in {pr.repo_full_name})'
+        )
+        return False
+
     if li.author_github_id is None:
         bt.logging.warning(f'Skipping linked issue #{li.number} - missing author_github_id')
         return False

@@ -11,6 +11,7 @@ import pytest
 from gittensor.validator.issue_competitions.contract_client import (
     DEFAULT_GAS_LIMIT,
     IssueCompetitionContractClient,
+    IssueStatus,
 )
 
 # (method, call_kwargs, expected_contract_method, expected_args, uses_hotkey, explicit_gas)
@@ -102,3 +103,21 @@ def test_revert_returns_false(client, wallet, method, kwargs_fn, _cm, _ea, _hk, 
 def test_exception_returns_false(client, wallet, method, kwargs_fn, _cm, _ea, _hk, _gas):
     with patch.object(client, '_exec_contract_raw', side_effect=RuntimeError('node down')):
         assert getattr(client, method)(**kwargs_fn(wallet)) is False
+
+
+def test_get_issues_by_status_caches_child_key_across_scan(client):
+    """The child-trie key is invariant, so scanning N issues must look it up once, not per issue."""
+    client._child_storage_key = None
+    client.subtensor.substrate.rpc_request.return_value = {'result': None}
+    with (
+        patch.object(client, '_read_packed_storage', return_value={'next_issue_id': 6}),
+        patch(
+            'gittensor.validator.issue_competitions.contract_client.get_contract_child_storage_key',
+            return_value='0xchildkey',
+        ) as mock_key,
+    ):
+        assert client.get_issues_by_status(IssueStatus.ACTIVE) == []
+    # Issue ids 1..5 each attempted a storage read...
+    assert client.subtensor.substrate.rpc_request.call_count == 5
+    # ...but the invariant child-trie key was fetched only once.
+    mock_key.assert_called_once()

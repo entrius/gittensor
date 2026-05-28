@@ -100,6 +100,7 @@ class IssueCompetitionContractClient:
 
         self.contract_address = contract_address
         self.subtensor = subtensor
+        self._child_storage_key: Optional[str] = None
 
         # Validate the contract exists on-chain
         try:
@@ -121,9 +122,16 @@ class IssueCompetitionContractClient:
     # =========================================================================
 
     def _get_child_storage_key(self) -> Optional[str]:
-        """Get the child storage key for the contract's trie."""
+        """Get the child storage key for the contract's trie.
+
+        Cached after first success: the trie id is fixed for a deployed contract,
+        so scanning many issues no longer costs a ContractInfoOf query per read.
+        """
+        if self._child_storage_key is not None:
+            return self._child_storage_key
         try:
-            return get_contract_child_storage_key(self.subtensor.substrate, self.contract_address)
+            self._child_storage_key = get_contract_child_storage_key(self.subtensor.substrate, self.contract_address)
+            return self._child_storage_key
         except Exception as e:
             bt.logging.debug(f'Error getting child storage key: {e}')
             return None

@@ -74,10 +74,16 @@ def calculate_pr_spam_penalty_multiplier(
 ) -> float:
     """Apply the penalty for excessive open PRs within one repository.
 
-    Binary multiplier: 1.0 if the repo's open PRs <= threshold, 0.0 otherwise.
+    Ramps linearly from 1.0 at threshold down to 0.0 at threshold +
+    SPAM_PENALTY_ZERO_AT_OVERAGE, then stays at 0.0 beyond that.
     """
+    from gittensor.constants import SPAM_PENALTY_ZERO_AT_OVERAGE
+
     threshold = calculate_open_pr_threshold(cfg, total_token_score)
-    return 1.0 if total_open_prs <= threshold else 0.0
+    if total_open_prs <= threshold:
+        return 1.0
+    overage = total_open_prs - threshold
+    return max(0.0, 1.0 - overage / SPAM_PENALTY_ZERO_AT_OVERAGE)
 
 
 def finalize_miner_scores(

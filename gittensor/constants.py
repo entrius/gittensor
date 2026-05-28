@@ -164,8 +164,9 @@ MAX_OPEN_PR_REVIEW_COLLATERAL_MULTIPLIER = 2.0  # Cap open PR collateral growth 
 STANDARD_ISSUE_MULTIPLIER = 1.33  # Non-maintainer issue author
 MAINTAINER_ISSUE_MULTIPLIER = 1.66  # Issue author is OWNER/MEMBER/COLLABORATOR
 # Excessive open PRs penalty (per-repo: counts a repo's own open PRs)
-# Multiplier = 1.0 if open PRs <= threshold, 0.0 otherwise
+# Multiplier ramps from 1.0 at threshold down to 0.0 at threshold + SPAM_PENALTY_ZERO_AT_OVERAGE
 EXCESSIVE_PR_PENALTY_BASE_THRESHOLD = 2
+SPAM_PENALTY_ZERO_AT_OVERAGE = 3  # PRs over threshold at which multiplier reaches 0.0
 
 # Dynamic open PR threshold bonus for top contributors
 # Bonus = floor(total_token_score / 300)

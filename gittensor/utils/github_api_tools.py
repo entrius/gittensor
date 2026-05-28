@@ -72,6 +72,14 @@ def make_anonymous_headers() -> Dict[str, str]:
     return {'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'gittensor-cli'}
 
 
+def normalize_github_pat(pat: Optional[str]) -> Optional[str]:
+    """Strip whitespace from a PAT so Authorization headers are not corrupted."""
+    if pat is None:
+        return None
+    stripped = pat.strip()
+    return stripped if stripped else None
+
+
 def get_session(token: str) -> requests.Session:
     """Return a fresh requests.Session preconfigured with the appropriate headers."""
     session = requests.Session()
@@ -104,6 +112,7 @@ def get_github_identity(token: str) -> GitHubIdentityResult:
             permanent auth failures, or transient failure when GitHub/user JSON
             could not be reached after retries.
     """
+    token = normalize_github_pat(token)
     if not token:
         return GitHubIdentityResult(None, GitHubIdentityStatus.INVALID_AUTH)
 

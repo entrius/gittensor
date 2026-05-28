@@ -122,6 +122,17 @@ class TestHandlePatBroadcast:
         assert entry['uid'] == 1
         assert entry['github_id'] == 'github_42'
 
+    @patch('gittensor.validator.pat_handler._test_pat_against_repo', return_value=None)
+    @patch('gittensor.validator.pat_handler.validate_github_credentials', return_value=('github_42', None))
+    def test_whitespace_padded_pat_is_normalized(self, mock_validate, mock_test_query, mock_validator):
+        synapse = _make_broadcast_synapse('hotkey_1', pat='  ghp_valid  \n')
+        result = _run(handle_pat_broadcast(mock_validator, synapse))
+
+        assert result.accepted is True
+        mock_validate.assert_called_once_with(1, 'ghp_valid')
+        entry = pat_storage.get_pat_by_uid(1)
+        assert entry['pat'] == 'ghp_valid'
+
     def test_unregistered_hotkey_rejected(self, mock_validator):
         synapse = _make_broadcast_synapse('unknown_hotkey')
         result = _run(handle_pat_broadcast(mock_validator, synapse))

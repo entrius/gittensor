@@ -32,7 +32,7 @@ from gittensor.cli.miner_commands.helpers import (
     err_console,
 )
 from gittensor.constants import BASE_GITHUB_API_URL, GITHUB_HTTP_TIMEOUT_SECONDS, GRAPHQL_VIEWER_QUERY
-from gittensor.utils.github_api_tools import make_graphql_headers, make_headers
+from gittensor.utils.github_api_tools import make_graphql_headers, make_headers, normalize_github_pat
 
 _PAT_POST_STATUS_MARKUP = {
     'accepted': '[green]✓[/green]',
@@ -93,6 +93,11 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, min_vt
             _error('--pat flag or GITTENSOR_MINER_PAT environment variable is required for JSON mode.', json_mode)
             sys.exit(1)
         pat = click.prompt('Enter your GitHub Personal Access Token', hide_input=True)
+
+    pat = normalize_github_pat(pat)
+    if not pat:
+        _error('GitHub PAT is empty after trimming whitespace.', json_mode)
+        sys.exit(1)
 
     # 1b. Validate PAT locally
     with _status('[bold]Validating PAT...'):

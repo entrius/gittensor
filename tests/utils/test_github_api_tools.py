@@ -25,9 +25,19 @@ github_api_tools = pytest.importorskip(
 )
 
 get_github_identity = github_api_tools.get_github_identity
+normalize_github_pat = github_api_tools.normalize_github_pat
 find_prs_for_issue = github_api_tools.find_prs_for_issue
 execute_graphql_query = github_api_tools.execute_graphql_query
 check_github_issue_closed = github_api_tools.check_github_issue_closed
+
+
+class TestNormalizeGithubPat:
+    def test_strips_surrounding_whitespace(self):
+        assert normalize_github_pat('  ghp_abc  ') == 'ghp_abc'
+
+    def test_blank_after_strip_returns_none(self):
+        assert normalize_github_pat('   ') is None
+        assert normalize_github_pat(None) is None
 
 
 class TestOtherGitHubAPIFunctions:
@@ -48,10 +58,11 @@ class TestOtherGitHubAPIFunctions:
             mock_response_success,
         ]
 
-        result = get_github_identity('fake_token').github_id
+        result = get_github_identity('  fake_token  ').github_id
 
         assert result == '12345'
         assert mock_get.call_count == 3
+        assert mock_get.call_args.kwargs['headers']['Authorization'] == 'token fake_token'
 
     @patch('gittensor.utils.github_api_tools.requests.get')
     @patch('gittensor.utils.github_api_tools.time.sleep')

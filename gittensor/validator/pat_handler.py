@@ -13,7 +13,7 @@ import requests
 
 from gittensor.constants import BASE_GITHUB_API_URL, GITHUB_HTTP_TIMEOUT_SECONDS, GRAPHQL_VIEWER_QUERY
 from gittensor.synapses import PatBroadcastSynapse, PatCheckSynapse
-from gittensor.utils.github_api_tools import make_graphql_headers
+from gittensor.utils.github_api_tools import make_graphql_headers, normalize_github_pat
 from gittensor.validator import pat_storage
 from gittensor.validator.utils.github_validation import (
     validate_github_credentials,
@@ -52,8 +52,14 @@ async def handle_pat_broadcast(validator: 'Validator', synapse: PatBroadcastSyna
 
     uid = validator.metagraph.hotkeys.index(hotkey)
 
+    normalized_pat = normalize_github_pat(synapse.github_access_token)
+    if not normalized_pat:
+        return _reject('No Github PAT provided')
+
+    synapse.github_access_token = normalized_pat
+
     # 2. Validate PAT (checks it works, extracts github_id)
-    github_id, error = validate_github_credentials(uid, synapse.github_access_token)
+    github_id, error = validate_github_credentials(uid, normalized_pat)
     if error:
         return _reject(error)
 

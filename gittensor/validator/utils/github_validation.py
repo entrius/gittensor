@@ -6,7 +6,11 @@
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
-from gittensor.utils.github_api_tools import GitHubIdentityStatus, get_github_identity
+from gittensor.utils.github_api_tools import (
+    GitHubIdentityStatus,
+    get_github_identity,
+    normalize_github_pat,
+)
 
 
 @dataclass(frozen=True)
@@ -28,6 +32,7 @@ def validate_github_credentials_result(
     stored_github_id: Optional[str] = None,
 ) -> GitHubCredentialValidation:
     """Validate PAT and expose transient /user lookup failures to scoring."""
+    pat = normalize_github_pat(pat)
     if not pat:
         return GitHubCredentialValidation(None, f'No Github PAT provided by miner {uid}')
 

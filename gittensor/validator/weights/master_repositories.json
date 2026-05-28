@@ -1,6 +1,6 @@
 {
   "aglover1221/product-data-extractor": {
-    "emission_share": 0.0025,
+    "emission_share": 0.0,
     "issue_discovery_share": 0.0
   },
   "entrius/allways": {
@@ -14,20 +14,8 @@
     "maintainer_cut": 0.0,
     "trusted_label_pipeline": true
   },
-  "entrius/allways-ui": {
-    "emission_share": 0.01107,
-    "issue_discovery_share": 0.0,
-    "label_multipliers": {
-      "bug": 1.1,
-      "enhancement": 1.0,
-      "feature": 1.25,
-      "refactor": 0.5
-    },
-    "maintainer_cut": 0.0,
-    "trusted_label_pipeline": true
-  },
   "entrius/das-github-mirror": {
-    "emission_share": 0.0118,
+    "emission_share": 0.006,
     "issue_discovery_share": 0.5,
     "label_multipliers": {
       "bug": 1.25,
@@ -50,7 +38,7 @@
     "trusted_label_pipeline": true
   },
   "entrius/gittensor-ui": {
-    "emission_share": 0.01966,
+    "emission_share": 0.01,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "bug": 1.1,
@@ -79,7 +67,7 @@
     "trusted_label_pipeline": true
   },
   "Geniepod/genie-claw": {
-    "emission_share": 0.02,
+    "emission_share": 0.033,
     "issue_discovery_share": 0.0
   },
   "infiniflow/ragflow": {
@@ -87,7 +75,7 @@
     "issue_discovery_share": 0.0
   },
   "JSONbored/awesome-claude": {
-    "emission_share": 0.01,
+    "emission_share": 0.005,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "feature": 1.5,
@@ -105,8 +93,12 @@
       }
     }
   },
+  "JSONbored/gittensory": {
+    "emission_share": 0.01,
+    "issue_discovery_share": 0.0
+  },
   "MkDev11/gittensor-hub": {
-    "emission_share": 0.015,
+    "emission_share": 0.02,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "feature": 2,
@@ -126,7 +118,7 @@
     "maintainer_cut": 0.3
   },
   "vouchdev/vouch": {
-    "emission_share": 0.0075,
+    "emission_share": 0.01,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "feature": 1.5,
@@ -145,16 +137,20 @@
     },
     "additional_acceptable_branches": ["test"]
   },
+  "phase-rs/phase": {
+    "emission_share": 0.015,
+    "issue_discovery_share": 0.0
+  },
   "seroperson/jvm-live-reload": {
-    "emission_share": 0.01,
+    "emission_share": 0.011,
     "issue_discovery_share": 0.0
   },
   "touchpilot/touchpilot": {
-    "emission_share": 0.02,
+    "emission_share": 0.025,
     "issue_discovery_share": 0.0
   },
   "we-promise/sure": {
-    "emission_share": 0.001,
+    "emission_share": 0.03,
     "issue_discovery_share": 0.0
   }
 }

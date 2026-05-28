@@ -12,7 +12,7 @@ import pytest
 from click.testing import CliRunner
 
 from gittensor.cli.main import cli
-from gittensor.cli.miner_commands.score import _DEV_HOTKEY, _DEV_UID
+from gittensor.cli.miner_commands.score import _DEV_HOTKEY, _DEV_UID, _apply_log_level, _drain_logs
 
 
 @pytest.fixture
@@ -466,6 +466,14 @@ class TestScoreCommand:
             result = runner.invoke(cli, ['miner', 'score', '--pat', 'ghp_injected'], env={})
         assert result.exit_code == 0, result.output
         assert captured['pats'] == [{'uid': _DEV_UID, 'hotkey': _DEV_HOTKEY, 'pat': 'ghp_injected'}]
+
+
+@pytest.mark.parametrize('level', ['warning', 'info', 'debug', 'trace'])
+def test_drain_logs_tolerates_every_advertised_level(level):
+    """_drain_logs must not raise for any --log-level Click accepts (#1373)."""
+    _apply_log_level(level)
+    _drain_logs()
+    _drain_logs()
 
 
 def _multi_patch(patches):

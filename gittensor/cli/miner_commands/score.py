@@ -294,7 +294,11 @@ def _drain_logs() -> None:
 
     import bittensor as bt
 
-    bt.logging.off()
+    # bittensor's LoggingMachine has no `disable_logging` transition from the
+    # Warning state (only `disable_warning = Warning.to(Default)` exists).
+    # info/debug/trace all permit the transition, so guard only Warning.
+    if bt.logging.current_state_value != 'Warning':
+        bt.logging.off()
     queue = bt.logging.get_queue()
     if not queue.empty():
         deadline = time.monotonic() + 2.0

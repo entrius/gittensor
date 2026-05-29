@@ -7,6 +7,8 @@ penalizes another.
 
 from __future__ import annotations
 
+from typing import Optional
+
 from gittensor.classes import MinerEvaluation
 from gittensor.utils.mirror.models import MirrorPullRequest
 from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredPR
@@ -53,10 +55,18 @@ def _mirror_pr(repo: str, number: int, state: str = 'MERGED') -> ScoredPR:
     return ScoredPR(pr=pr)
 
 
-def _merged(repo: str, number: int, base: float = 10.0, token: float = 10.0) -> ScoredPR:
+def _merged(
+    repo: str,
+    number: int,
+    base: float = 10.0,
+    token: float = 10.0,
+    source_token: Optional[float] = None,
+) -> ScoredPR:
     pr = _mirror_pr(repo, number)
     pr.base_score = base
     pr.token_score = token
+    # Eligibility gates on source_token_score; default it to the aggregate.
+    pr.source_token_score = token if source_token is None else source_token
     return pr
 
 
@@ -81,6 +91,22 @@ def test_eligibility_does_not_pool_across_repos():
     assert all(pr.earned_score == 0.0 for pr in repo_b)
     assert evaluation.total_score == 30.0
     assert evaluation.is_eligible is True  # eligible in at least one repo
+
+
+def test_validity_gate_keys_off_source_not_aggregate_token_score():
+    """A merged PR is "valid" only if its SOURCE score clears the threshold, not
+    the SOURCE+TEST aggregate — so the validity gate matches the base-score gate.
+    """
+    # Aggregate (10) clears the default threshold (5), but SOURCE (4) does not.
+    over_aggregate_under_source = [_merged('foo/a', n, token=10.0, source_token=4.0) for n in range(1, 4)]
+
+    evaluation = MinerEvaluation(uid=1, hotkey='hotkey', github_id='218712309')
+    evaluation.merged_prs = over_aggregate_under_source
+
+    finalize_miner_scores({1: evaluation}, {'foo/a': _gate_repo()})
+
+    # None of the three are "valid" → below min_valid_merged_prs → ineligible.
+    assert evaluation.repo_evaluations['foo/a'].is_eligible is False
 
 
 def test_zeroed_thresholds_repo_has_no_gate():

@@ -120,7 +120,7 @@ INLINE_TEST_PATTERNS: Dict[str, re.Pattern] = {
 # Eligibility Gate (OSS Contributions)
 # =============================================================================
 # Per-repo defaults — each repo may override these in master_repositories.json.
-MIN_VALID_MERGED_PRS = 3  # minimum "valid" merged PRs (token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE) to receive score
+MIN_VALID_MERGED_PRS = 3  # minimum "valid" merged PRs (source_token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE) to receive score
 MIN_CREDIBILITY = 0.80  # minimum credibility ratio to receive score
 
 # =============================================================================

@@ -72,6 +72,7 @@ class TestResultShape:
         for field_name in [
             'base_score',
             'token_score',
+            'source_token_score',
             'structural_count',
             'structural_score',
             'leaf_count',
@@ -120,6 +121,7 @@ class TestPerRepoMinTokenScoreOverride:
             min_token_score_for_base_score=3.0,
         )
         assert result.base_score > 0.0
+        assert result.source_token_score == pytest.approx(4.0)
 
     def test_higher_per_repo_threshold_zeroes_pr(self, monkeypatch):
         # token_score = 7 would pass default (5), but stricter per-repo override (10) zeroes it.

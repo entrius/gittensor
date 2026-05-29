@@ -41,7 +41,8 @@ class ScoredPR:
 
     # Token scoring breakdown (populated when files are tokenized)
     code_density: float = 0.0
-    token_score: float = 0.0
+    token_score: float = 0.0  # all-category aggregate (SOURCE + TEST)
+    source_token_score: float = 0.0  # SOURCE-only; what the eligibility gate uses
     structural_count: int = 0
     structural_score: float = 0.0
     leaf_count: int = 0

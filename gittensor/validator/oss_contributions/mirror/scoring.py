@@ -162,6 +162,7 @@ async def score_pr(
                 ).min_token_score_for_base_score,
             )
             scored.token_score = result.token_score
+            scored.source_token_score = result.source_token_score
             scored.structural_count = result.structural_count
             scored.structural_score = result.structural_score
             scored.leaf_count = result.leaf_count
@@ -265,7 +266,8 @@ class BaseScoreResult:
     """
 
     base_score: float
-    token_score: float
+    token_score: float  # all-category aggregate (SOURCE + TEST)
+    source_token_score: float  # SOURCE-only; gates base score and eligibility
     structural_count: int
     structural_score: float
     leaf_count: int
@@ -341,6 +343,7 @@ def calculate_base_score_for_pr_files(
     return BaseScoreResult(
         base_score=base_score,
         token_score=token_score,
+        source_token_score=source_token_score,
         structural_count=structural_count,
         structural_score=structural_score,
         leaf_count=leaf_count,

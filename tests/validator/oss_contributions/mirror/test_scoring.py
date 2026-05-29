@@ -405,6 +405,7 @@ class TestFixedBaseScore:
             lambda *args, **kwargs: scoring_module.BaseScoreResult(
                 base_score=99.0,
                 token_score=42.0,
+                source_token_score=42.0,
                 structural_count=2,
                 structural_score=20.0,
                 leaf_count=3,
@@ -477,6 +478,7 @@ class TestFixedBaseScore:
             lambda *args, **kwargs: scoring_module.BaseScoreResult(
                 base_score=0.25,
                 token_score=100.0,
+                source_token_score=100.0,
                 structural_count=1,
                 structural_score=100.0,
                 leaf_count=0,

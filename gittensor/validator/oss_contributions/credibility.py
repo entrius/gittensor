@@ -29,8 +29,12 @@ def check_eligibility(
 
     Gate requires:
     1. At least ``cfg.min_valid_merged_prs`` merged PRs with
-       ``token_score >= cfg.min_token_score_for_base_score``
+       ``source_token_score >= cfg.min_token_score_for_base_score``
     2. At least ``cfg.min_credibility`` credibility
+
+    Validity keys off ``source_token_score`` (SOURCE-only) so it matches the
+    base-score gate; the aggregate ``token_score`` (SOURCE + TEST) must not let
+    test content flip a PR to "valid" without earning a source base score.
 
     Returns:
         (is_eligible, credibility, reason)
@@ -38,7 +42,7 @@ def check_eligibility(
     """
     credibility = calculate_credibility(merged_prs, closed_prs)
 
-    valid_merged_count = sum(1 for pr in merged_prs if pr.token_score >= cfg.min_token_score_for_base_score)
+    valid_merged_count = sum(1 for pr in merged_prs if pr.source_token_score >= cfg.min_token_score_for_base_score)
 
     if valid_merged_count < cfg.min_valid_merged_prs:
         return False, credibility, f'{valid_merged_count}/{cfg.min_valid_merged_prs} valid merged PRs'

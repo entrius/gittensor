@@ -528,7 +528,16 @@ def load_config() -> Dict[str, Any]:
 
 def get_contract_address(cli_value: str = '') -> str:
     """
-    Get contract address. CLI arg > env var > constants.py default.
+    Get contract address.
+
+    Priority:
+        1. --contract CLI option
+        2. ~/.gittensor/config.json `contract_address`
+        3. CONTRACT_ADDRESS env var
+        4. constants.py default
+
+    Mirrors the resolution order documented on ``load_config`` and already
+    honored by ``resolve_network`` in this module.
 
     Args:
         cli_value: Value passed via --contract CLI option
@@ -540,6 +549,9 @@ def get_contract_address(cli_value: str = '') -> str:
 
     if cli_value:
         return cli_value
+    config_value = load_config().get('contract_address')
+    if config_value:
+        return config_value
     return _get_contract_address()
 
 

@@ -116,6 +116,10 @@ def _issue_dict(
     created_at: str = '2026-04-01T00:00:00Z',
     author_association: str = 'CONTRIBUTOR',
     solving_pr_labels: Optional[list] = None,
+    solving_pr_base_ref: Optional[str] = None,
+    solving_pr_head_ref: Optional[str] = None,
+    solving_pr_head_repo_full_name: Optional[str] = None,
+    solving_pr_default_branch: Optional[str] = None,
 ) -> dict:
     sp = None
     if solved_by_pr:
@@ -129,6 +133,10 @@ def _issue_dict(
             'head_sha': 'h',
             'base_sha': 'b',
             'merge_base_sha': 'mb',
+            'base_ref': solving_pr_base_ref,
+            'head_ref': solving_pr_head_ref,
+            'head_repo_full_name': solving_pr_head_repo_full_name,
+            'default_branch': solving_pr_default_branch,
             'labels': solving_pr_labels or [],
             'review_summary': {'maintainer_changes_requested_count': 0},
         }
@@ -181,58 +189,88 @@ def _run(coro):
 
 
 class TestClassifyIssue:
+    _RC = RepositoryConfig(emission_share=0.5)
+
     def test_clean_completed_merged_is_solved(self):
         issue = MirrorIssue.from_dict(_issue_dict())
-        assert _classify_issue(issue) == 'solved'
+        assert _classify_issue(issue, self._RC) == 'solved'
 
     def test_transferred_ignored(self):
         issue = MirrorIssue.from_dict(_issue_dict(is_transferred=True))
-        assert _classify_issue(issue) == 'ignore'
+        assert _classify_issue(issue, self._RC) == 'ignore'
 
     def test_open_issue_ignored(self):
         issue = MirrorIssue.from_dict(_issue_dict(state='OPEN', state_reason=None, solved_by_pr=None))
-        assert _classify_issue(issue) == 'ignore'
+        assert _classify_issue(issue, self._RC) == 'ignore'
 
     def test_not_planned_counts_as_closed(self):
         issue = MirrorIssue.from_dict(_issue_dict(state_reason='NOT_PLANNED'))
-        assert _classify_issue(issue) == 'not-solved-closed'
+        assert _classify_issue(issue, self._RC) == 'not-solved-closed'
 
     def test_null_state_reason_counts_as_closed(self):
         issue = MirrorIssue.from_dict(_issue_dict(state_reason=None, solved_by_pr=None))
-        assert _classify_issue(issue) == 'not-solved-closed'
+        assert _classify_issue(issue, self._RC) == 'not-solved-closed'
 
     def test_no_solving_pr_counts_as_closed(self):
         issue = MirrorIssue.from_dict(_issue_dict(solved_by_pr=None))
-        assert _classify_issue(issue) == 'not-solved-closed'
+        assert _classify_issue(issue, self._RC) == 'not-solved-closed'
 
     def test_solving_pr_not_merged_counts_as_closed(self):
         issue = MirrorIssue.from_dict(_issue_dict(solving_pr_state='OPEN'))
-        assert _classify_issue(issue) == 'not-solved-closed'
+        assert _classify_issue(issue, self._RC) == 'not-solved-closed'
 
     def test_solving_pr_edited_after_merge_counts_as_closed(self):
         issue = MirrorIssue.from_dict(_issue_dict(solving_pr_edited_after_merge=True))
-        assert _classify_issue(issue) == 'not-solved-closed'
+        assert _classify_issue(issue, self._RC) == 'not-solved-closed'
 
     def test_issue_edited_after_solving_pr_merge_counts_as_closed(self):
         # Anti-spec-rewrite: miner can't author a vague issue, then rewrite the
         # body after a third party's PR merges to retroactively claim discovery
         # credit for a fix they didn't anticipate.
         issue = MirrorIssue.from_dict(_issue_dict(last_edited_at='2026-04-18T10:00:01Z'))
-        assert _classify_issue(issue) == 'not-solved-closed'
+        assert _classify_issue(issue, self._RC) == 'not-solved-closed'
 
     def test_issue_edited_before_solving_pr_merge_is_solved(self):
         # Pre-merge edits are legitimate (sharpening the spec while the PR is
         # being written) and must NOT trip the gate.
         issue = MirrorIssue.from_dict(_issue_dict(last_edited_at='2026-04-17T10:00:00Z'))
-        assert _classify_issue(issue) == 'solved'
+        assert _classify_issue(issue, self._RC) == 'solved'
 
     def test_issue_never_edited_is_solved(self):
         issue = MirrorIssue.from_dict(_issue_dict(last_edited_at=None))
-        assert _classify_issue(issue) == 'solved'
+        assert _classify_issue(issue, self._RC) == 'solved'
 
     def test_missing_author_ignored(self):
         issue = MirrorIssue.from_dict(_issue_dict(author_github_id=None))
-        assert _classify_issue(issue) == 'ignore'
+        assert _classify_issue(issue, self._RC) == 'ignore'
+
+    def test_solving_pr_merged_to_default_branch_is_solved(self):
+        issue = MirrorIssue.from_dict(_issue_dict(solving_pr_base_ref='main', solving_pr_default_branch='main'))
+        assert _classify_issue(issue, self._RC) == 'solved'
+
+    def test_solving_pr_merged_to_nonscoring_branch_counts_as_closed(self):
+        # Parity with OSS PR scoring: a PR merged into a branch outside the
+        # acceptable set must not earn discovery credit.
+        issue = MirrorIssue.from_dict(
+            _issue_dict(solving_pr_base_ref='scratch-do-not-score', solving_pr_default_branch='main')
+        )
+        assert _classify_issue(issue, self._RC) == 'not-solved-closed'
+
+    def test_solving_pr_merged_to_additional_acceptable_branch_is_solved(self):
+        rc = RepositoryConfig(emission_share=0.5, additional_acceptable_branches=['develop'])
+        issue = MirrorIssue.from_dict(_issue_dict(solving_pr_base_ref='develop', solving_pr_default_branch='main'))
+        assert _classify_issue(issue, rc) == 'solved'
+
+    def test_missing_base_ref_falls_through_to_solved(self):
+        # Pre-backfill mirror data has no base_ref; the gate must not block it.
+        issue = MirrorIssue.from_dict(_issue_dict(solving_pr_base_ref=None))
+        assert _classify_issue(issue, self._RC) == 'solved'
+
+    def test_none_repo_config_skips_branch_gate(self):
+        issue = MirrorIssue.from_dict(
+            _issue_dict(solving_pr_base_ref='scratch-do-not-score', solving_pr_default_branch='main')
+        )
+        assert _classify_issue(issue, None) == 'solved'
 
 
 # ============================================================================
@@ -913,14 +951,15 @@ class TestSolvingPrCache:
         cache = _build_solving_pr_cache({1: e1, 2: e2})
         assert cache[('foo/a', 1)].token_score == 50  # first wins
 
-    def test_below_threshold_prs_excluded_from_cache(self):
+    def test_all_merged_prs_cached_regardless_of_token_score(self):
+        # Saturation curve handles low-token suppression; cache no longer pre-filters.
         e1 = MinerEvaluation(uid=1, hotkey='hk1', github_id='g1')
         e1.merged_prs = [
-            _scored_mirror_pr('foo/poisoned', 1, token_score=0.0, base_score=0.0),
+            _scored_mirror_pr('foo/tiny', 1, token_score=0.0, base_score=0.0),
             _scored_mirror_pr('foo/healthy', 2, token_score=50, base_score=10),
         ]
         cache = _build_solving_pr_cache({1: e1})
-        assert ('foo/poisoned', 1) not in cache
+        assert ('foo/tiny', 1) in cache
         assert ('foo/healthy', 2) in cache
 
     def test_cache_hit_reuses_base_score_no_fetch(self):
@@ -1014,11 +1053,9 @@ class TestSolvingPrCache:
         assert eval_.issue_discovery_score == 0
 
     def test_token_score_below_threshold_counts_credibility_only(self):
-        """Solving PR tokenizes to below MIN_TOKEN_SCORE_FOR_BASE_SCORE.
-        total_solved_issues increments (credibility), but total_valid_solved_issues
-        does not, and no discovery_earned_score is produced. Below-threshold PRs
-        are excluded from the pre-cache, so this exercises the fresh-fetch path
-        that re-tokenizes to 0 with empty files + empty token config."""
+        """Zero-token solving PR: counts toward solved/credibility but not toward
+        total_valid_solved_issues (gated by ``min_token_score_for_valid_issue``),
+        and produces no discovery_earned_score."""
         client = Mock()
         client.get_miner_issues.return_value = _response([_issue_dict()])
         client.get_pr_files.return_value = _empty_files_response('entrius/gittensor-ui', 100)
@@ -1359,7 +1396,9 @@ class TestCrossMinerOneIssuePerPr:
             )
         )
 
-        canonical = _build_canonical_pr_owners([(e_a, [a_issue], {}), (e_b, [b_issue], {})])
+        canonical = _build_canonical_pr_owners(
+            [(e_a, [a_issue], {}), (e_b, [b_issue], {})], _mirror_repos('entrius/gittensor-ui')
+        )
 
         # Earlier-created issue (#50, uid 1) wins canonical for PR 100
         owner = canonical[('entrius/gittensor-ui', 100)]
@@ -1391,7 +1430,9 @@ class TestCrossMinerOneIssuePerPr:
             )
         )
 
-        canonical = _build_canonical_pr_owners([(e_a, [a_issue], {}), (e_b, [b_issue], {})])
+        canonical = _build_canonical_pr_owners(
+            [(e_a, [a_issue], {}), (e_b, [b_issue], {})], _mirror_repos('entrius/gittensor-ui')
+        )
 
         owner = canonical[('entrius/gittensor-ui', 100)]
         assert owner[1] == 50  # lower issue_number wins
@@ -1423,7 +1464,9 @@ class TestCrossMinerOneIssuePerPr:
             )
         )
 
-        canonical = _build_canonical_pr_owners([(e_a, [a_issue], {}), (e_b, [b_issue], {})])
+        canonical = _build_canonical_pr_owners(
+            [(e_a, [a_issue], {}), (e_b, [b_issue], {})], _mirror_repos('entrius/gittensor-ui')
+        )
 
         owner = canonical[('entrius/gittensor-ui', 100)]
         assert owner[1] == 51  # B's issue claims canonical

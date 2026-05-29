@@ -9,8 +9,6 @@ Commands:
     gitt harvest
 """
 
-from pathlib import Path
-
 import click
 from rich.panel import Panel
 
@@ -177,11 +175,14 @@ def issue_register(
 
     try:
         import bittensor as bt
-        from substrateinterface import Keypair, SubstrateInterface
-        from substrateinterface.contracts import ContractInstance
+        from bittensor_wallet import Keypair
+
+        from gittensor.validator.issue_competitions.contract_client import (
+            IssueCompetitionContractClient,
+        )
 
         with err_console.status('[bold cyan]Connecting to network...', spinner='dots'):
-            substrate = SubstrateInterface(url=ws_endpoint)
+            subtensor = bt.Subtensor(network=ws_endpoint)
 
         # CLI flags override config; fall back to config if not explicitly supplied
         effective_wallet = wallet_name if wallet_name != 'default' else config.get('wallet', wallet_name)
@@ -199,67 +200,41 @@ def issue_register(
             # Contract owner is set to deployer's coldkey during contract instantiation
             keypair = wallet.coldkey
 
-        # Load contract
-        # Go up 4 levels: mutations.py -> issue_commands -> cli -> gittensor -> REPO_ROOT
-        contract_metadata = (
-            Path(__file__).parent.parent.parent.parent
-            / 'smart-contracts'
-            / 'issues-v0'
-            / 'target'
-            / 'ink'
-            / 'issue_bounty_manager.contract'
-        )
-        if not contract_metadata.exists():
-            print_error(f'Contract metadata not found at {contract_metadata}')
-            raise SystemExit(1)
-
-        contract_instance = ContractInstance.create_from_address(
+        client = IssueCompetitionContractClient(
             contract_address=contract_addr,
-            metadata_file=str(contract_metadata),
-            substrate=substrate,
+            subtensor=subtensor,
         )
 
         err_console.print('[dim]Submitting transaction...[/dim]')
 
-        result = contract_instance.exec(
-            keypair,  # type: ignore[arg-type]
-            'register_issue',
-            args={
-                'github_url': github_url,
-                'repository_full_name': repo,
-                'issue_number': issue_number,
-                'target_bounty': bounty_amount,
-            },
-            gas_limit={'ref_time': 10_000_000_000, 'proof_size': 1_000_000},
+        tx_hash, error_msg = client.register_issue(
+            github_url=github_url,
+            repository_full_name=repo,
+            issue_number=issue_number,
+            target_bounty=bounty_amount,
+            keypair=keypair,
         )
 
-        # Check if transaction was successful
-        if hasattr(result, 'is_success') and not result.is_success:
-            error_info = getattr(result, 'error_message', None)
-            is_revert = error_info and isinstance(error_info, dict) and error_info.get('name') == 'ContractReverted'
+        if error_msg is None:
+            print_success('Issue registered successfully!')
+            console.print(f'[cyan]Transaction Hash:[/cyan] {tx_hash}')
+            err_console.print('[dim]Issue will be visible once bounty is funded via harvest_emissions()[/dim]')
+            return
 
-            if is_revert:
-                _print_register_revert_hints()
-            elif error_info:
-                print_error(str(error_info))
-
-            console.print(f'[cyan]Transaction Hash:[/cyan] {result.extrinsic_hash}')
-            raise SystemExit(1)
-
-        print_success('Issue registered successfully!')
-        console.print(f'[cyan]Transaction Hash:[/cyan] {result.extrinsic_hash}')
-        err_console.print('[dim]Issue will be visible once bounty is funded via harvest_emissions()[/dim]')
+        # Hash set => extrinsic submitted then reverted; absent => pre-submission failure
+        if tx_hash is not None:
+            _print_register_revert_hints()
+            console.print(f'[cyan]Extrinsic Hash:[/cyan] {tx_hash}')
+        else:
+            print_error(f'Error registering issue: {error_msg}')
+        raise SystemExit(1)
 
     except ImportError as e:
         print_error(f'Missing dependency - {e}')
         err_console.print('[dim]Install with: uv sync[/dim]')
         raise SystemExit(1)
     except Exception as e:
-        error_msg = str(e)
-        if 'ContractReverted' in error_msg:
-            _print_register_revert_hints()
-        else:
-            print_error(f'Error registering issue: {e}')
+        print_error(f'Error registering issue: {e}')
         raise SystemExit(1)
 
 

@@ -23,7 +23,7 @@ def _stub_scoring_result(source_token_score: float, total_lines: int = 10) -> Pr
     """Build a PrScoringResult whose SOURCE category has a known total_score.
 
     The outer total_score is zeroed so the contribution_bonus channel contributes
-    nothing — leaving the SOURCE threshold gate as the only source of base_score.
+    nothing - leaving the saturation curve as the only source of base_score.
     """
     source_breakdown = ScoreBreakdown(structural_added_score=source_token_score, structural_added_count=1)
     source = PrScoringResult(
@@ -57,7 +57,6 @@ class TestEmptyInput:
         assert result.total_nodes_scored == 0
         assert result.structural_count == 0
         assert result.leaf_count == 0
-        assert result.code_density == 0.0
 
 
 class TestResultShape:
@@ -77,19 +76,13 @@ class TestResultShape:
             'leaf_count',
             'leaf_score',
             'total_nodes_scored',
-            'code_density',
         ]:
             assert hasattr(result, field_name), f'missing {field_name}'
 
 
-class TestPerRepoMinTokenScoreOverride:
-    """Per-repo ``min_token_score_for_base_score`` must gate the PR base score.
-
-    Regression guard: previously the helper hardcoded the global
-    ``MIN_TOKEN_SCORE_FOR_BASE_SCORE`` constant, so per-repo eligibility overrides
-    introduced by #1293 were silently ignored on the PR-scoring path while
-    issue-discovery honored them — a state asymmetry between paths.
-    """
+class TestPerRepoSaturationScaleOverride:
+    """Per-repo ``src_tok_saturation_scale`` reshapes the quality curve:
+    smaller scale = faster rise, larger scale = slower rise."""
 
     def _patch_scorer(self, monkeypatch, source_token_score: float):
         monkeypatch.setattr(
@@ -98,37 +91,28 @@ class TestPerRepoMinTokenScoreOverride:
             lambda *args, **kwargs: _stub_scoring_result(source_token_score),
         )
 
-    def test_default_threshold_applies_when_none_passed(self, monkeypatch):
-        # source_token_score = 4 is below the global default (5) → base_score == 0
-        self._patch_scorer(monkeypatch, source_token_score=4.0)
-        result = calculate_base_score_for_pr_files(
+    def _score(self, **overrides) -> BaseScoreResult:
+        return calculate_base_score_for_pr_files(
             file_changes=[],
             file_contents={},
             programming_languages={},
             token_config=TokenConfig(),
+            **overrides,
         )
-        assert result.base_score == 0.0
 
-    def test_lower_per_repo_threshold_lets_pr_score(self, monkeypatch):
-        # Same token_score = 4, but a permissive per-repo override (3) should let it score.
-        self._patch_scorer(monkeypatch, source_token_score=4.0)
-        result = calculate_base_score_for_pr_files(
-            file_changes=[],
-            file_contents={},
-            programming_languages={},
-            token_config=TokenConfig(),
-            min_token_score_for_base_score=3.0,
-        )
-        assert result.base_score > 0.0
+    def test_default_scale_applies_when_none_passed(self, monkeypatch):
+        self._patch_scorer(monkeypatch, source_token_score=50.0)
+        assert self._score().base_score > 0.0
 
-    def test_higher_per_repo_threshold_zeroes_pr(self, monkeypatch):
-        # token_score = 7 would pass default (5), but stricter per-repo override (10) zeroes it.
-        self._patch_scorer(monkeypatch, source_token_score=7.0)
-        result = calculate_base_score_for_pr_files(
-            file_changes=[],
-            file_contents={},
-            programming_languages={},
-            token_config=TokenConfig(),
-            min_token_score_for_base_score=10.0,
-        )
-        assert result.base_score == 0.0
+    def test_smaller_scale_raises_score_for_same_tokens(self, monkeypatch):
+        self._patch_scorer(monkeypatch, source_token_score=50.0)
+        baseline = self._score()
+        permissive = self._score(src_tok_saturation_scale=20.0)
+        assert permissive.base_score > baseline.base_score
+
+    def test_larger_scale_lowers_score_for_same_tokens(self, monkeypatch):
+        self._patch_scorer(monkeypatch, source_token_score=50.0)
+        baseline = self._score()
+        strict = self._score(src_tok_saturation_scale=200.0)
+        assert strict.base_score < baseline.base_score
+        assert strict.base_score > 0.0  # curve is monotonic, never zeroes a real PR

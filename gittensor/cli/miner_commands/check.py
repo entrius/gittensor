@@ -33,6 +33,7 @@ _PAT_CHECK_STATUS_MARKUP = {
     'valid': '[green]✓ valid[/green]',
     'no_pat': '[red]✗ no PAT[/red]',
     'invalid_pat': '[red]✗ invalid[/red]',
+    'inconclusive': '[yellow]? inconclusive[/yellow]',
     'no_response': '[yellow]— no response[/yellow]',
 }
 

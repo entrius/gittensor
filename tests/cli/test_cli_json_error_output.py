@@ -34,7 +34,7 @@ def test_cli_commands_emit_json_on_exception(cli_root, runner, argv):
             return_value=('5Fakeaddr', 'ws://x', 'test'),
         ),
         patch(
-            'substrateinterface.SubstrateInterface',
+            'async_substrate_interface.SubstrateInterface',
             side_effect=RuntimeError(FORCED_MESSAGE),
         ),
         patch(
@@ -57,7 +57,7 @@ def test_admin_info_emits_json_on_soft_read_failure(cli_root, runner):
             'gittensor.cli.issue_commands.view._resolve_contract_and_network',
             return_value=('5Fakeaddr', 'ws://x', 'test'),
         ),
-        patch('substrateinterface.SubstrateInterface', return_value=object()),
+        patch('async_substrate_interface.SubstrateInterface', return_value=object()),
         patch('gittensor.cli.issue_commands.view._read_contract_packed_storage', return_value=None),
     ):
         result = runner.invoke(cli_root, ['admin', 'info', '--json'], catch_exceptions=False)
@@ -75,7 +75,7 @@ def test_admin_info_human_mode_exits_non_zero_on_soft_read_failure(cli_root, run
             'gittensor.cli.issue_commands.view._resolve_contract_and_network',
             return_value=('5Fakeaddr', 'ws://x', 'test'),
         ),
-        patch('substrateinterface.SubstrateInterface', return_value=object()),
+        patch('async_substrate_interface.SubstrateInterface', return_value=object()),
         patch('gittensor.cli.issue_commands.view._read_contract_packed_storage', return_value=None),
     ):
         result = runner.invoke(cli_root, ['admin', 'info'], catch_exceptions=False)

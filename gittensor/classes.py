@@ -16,7 +16,6 @@ if TYPE_CHECKING:
 
 from gittensor.constants import (
     EXTENSIONLESS_FILE_EXTENSIONS,
-    MAX_CODE_DENSITY_MULTIPLIER,
 )
 
 
@@ -185,7 +184,6 @@ class PullRequest:
     total_nodes_scored: int = 0  # Total AST nodes scored for this PR
 
     # Token scoring breakdown (after test weight applied)
-    code_density: float = 0.0
     token_score: float = 0.0
     structural_count: int = 0
     structural_score: float = 0.0
@@ -514,13 +512,6 @@ class PrScoringResult:
     file_results: List[FileScoreResult]
     score_breakdown: Optional[ScoreBreakdown] = None  # Aggregated breakdown across all files
     by_category: Dict[ScoringCategory, 'PrScoringResult'] = field(default_factory=dict)
-
-    @property
-    def density(self) -> float:
-        """Code density (total_score / total_lines), capped at MAX_CODE_DENSITY_MULTIPLIER"""
-        if self.total_lines <= 0:
-            return 0.0
-        return min(self.total_score / self.total_lines, MAX_CODE_DENSITY_MULTIPLIER)
 
 
 @dataclass

@@ -16,7 +16,6 @@ from gittensor.constants import (
     MAX_OPEN_PR_THRESHOLD,
     MIN_CREDIBILITY,
     MIN_ISSUE_CREDIBILITY,
-    MIN_TOKEN_SCORE_FOR_BASE_SCORE,
     MIN_TOKEN_SCORE_FOR_VALID_ISSUE,
     MIN_VALID_MERGED_PRS,
     MIN_VALID_SOLVED_ISSUES,
@@ -27,6 +26,7 @@ from gittensor.constants import (
     OPEN_PR_THRESHOLD_TOKEN_SCORE,
     PR_LOOKBACK_DAYS,
     REVIEW_PENALTY_RATE,
+    SRC_TOK_SATURATION_SCALE,
     STANDARD_ISSUE_MULTIPLIER,
     TIME_DECAY_GRACE_PERIOD_HOURS,
     TIME_DECAY_MIN_MULTIPLIER,
@@ -58,7 +58,6 @@ class RepoEligibilityConfig:
 
     min_valid_merged_prs: Optional[int] = None
     min_credibility: Optional[float] = None
-    min_token_score_for_base_score: Optional[float] = None
     excessive_pr_penalty_base_threshold: Optional[int] = None
     open_pr_threshold_token_score: Optional[float] = None
     max_open_pr_threshold: Optional[int] = None
@@ -76,7 +75,6 @@ class ResolvedEligibility:
 
     min_valid_merged_prs: int
     min_credibility: float
-    min_token_score_for_base_score: float
     excessive_pr_penalty_base_threshold: int
     open_pr_threshold_token_score: float
     max_open_pr_threshold: int
@@ -121,6 +119,7 @@ class RepoScoringConfig:
     review_penalty_rate: Optional[float] = None
     standard_issue_multiplier: Optional[float] = None
     maintainer_issue_multiplier: Optional[float] = None
+    src_tok_saturation_scale: Optional[float] = None
     time_decay: RepoTimeDecayConfig = field(default_factory=RepoTimeDecayConfig)
 
 
@@ -133,6 +132,7 @@ class ResolvedScoring:
     review_penalty_rate: float
     standard_issue_multiplier: float
     maintainer_issue_multiplier: float
+    src_tok_saturation_scale: float
     time_decay: ResolvedTimeDecay
 
 
@@ -187,7 +187,6 @@ def resolve_eligibility(cfg: Optional[RepoEligibilityConfig]) -> ResolvedEligibi
     return ResolvedEligibility(
         min_valid_merged_prs=int(pick(cfg.min_valid_merged_prs, MIN_VALID_MERGED_PRS)),
         min_credibility=float(pick(cfg.min_credibility, MIN_CREDIBILITY)),
-        min_token_score_for_base_score=float(pick(cfg.min_token_score_for_base_score, MIN_TOKEN_SCORE_FOR_BASE_SCORE)),
         excessive_pr_penalty_base_threshold=int(
             pick(cfg.excessive_pr_penalty_base_threshold, EXCESSIVE_PR_PENALTY_BASE_THRESHOLD)
         ),
@@ -234,6 +233,7 @@ def resolve_scoring(cfg: Optional[RepoScoringConfig]) -> ResolvedScoring:
         review_penalty_rate=float(pick(cfg.review_penalty_rate, REVIEW_PENALTY_RATE)),
         standard_issue_multiplier=float(pick(cfg.standard_issue_multiplier, STANDARD_ISSUE_MULTIPLIER)),
         maintainer_issue_multiplier=float(pick(cfg.maintainer_issue_multiplier, MAINTAINER_ISSUE_MULTIPLIER)),
+        src_tok_saturation_scale=float(pick(cfg.src_tok_saturation_scale, SRC_TOK_SATURATION_SCALE)),
         time_decay=resolve_time_decay(cfg.time_decay),
     )
 
@@ -302,7 +302,6 @@ _ELIGIBILITY_INT_FIELDS = (
 )
 _ELIGIBILITY_FLOAT_FIELDS = (
     'min_credibility',
-    'min_token_score_for_base_score',
     'open_pr_threshold_token_score',
     'min_issue_credibility',
     'min_token_score_for_valid_issue',
@@ -347,6 +346,7 @@ _SCORING_FLOAT_FIELDS = (
     'review_penalty_rate',
     'standard_issue_multiplier',
     'maintainer_issue_multiplier',
+    'src_tok_saturation_scale',
 )
 
 
@@ -438,7 +438,6 @@ def _validate_eligibility_configs(configs: Dict[str, RepositoryConfig]) -> None:
                 )
         non_negative = (
             'min_valid_merged_prs',
-            'min_token_score_for_base_score',
             'excessive_pr_penalty_base_threshold',
             'max_open_pr_threshold',
             'min_valid_solved_issues',
@@ -485,6 +484,11 @@ def _validate_scoring_configs(configs: Dict[str, RepositoryConfig]) -> None:
             raise RepositoryRegistryError(
                 f'{repo_name} scoring.maintainer_issue_multiplier must be within [1, 5], '
                 f'got {resolved.maintainer_issue_multiplier}'
+            )
+        if not 10.0 <= resolved.src_tok_saturation_scale <= 500.0:
+            raise RepositoryRegistryError(
+                f'{repo_name} scoring.src_tok_saturation_scale must be within [10, 500], '
+                f'got {resolved.src_tok_saturation_scale}'
             )
         if not 0 <= resolved.time_decay.grace_period_hours <= 168:
             raise RepositoryRegistryError(

@@ -74,13 +74,14 @@ EXTENSIONLESS_FILE_EXTENSIONS = {'dockerfile', 'makefile'}
 # Repository & PR Scoring
 # =============================================================================
 PR_LOOKBACK_DAYS = 30  # rolling window for scoring (per-repo default, overridable in the scoring config)
-MERGED_PR_BASE_SCORE = 25
-MIN_TOKEN_SCORE_FOR_BASE_SCORE = 5  # PRs below this get 0 base score
-MAX_CONTRIBUTION_BONUS = 25
+MERGED_PR_BASE_SCORE = 25  # cap on the quality term of base_score
+MAX_CONTRIBUTION_BONUS = 5  # cap on the cross-category contribution bonus
 CONTRIBUTION_SCORE_FOR_FULL_BONUS = 1500
 
-# Boosts
-MAX_CODE_DENSITY_MULTIPLIER = 1.15
+# base_score = MERGED_PR_BASE_SCORE * (1 - exp(-src_tok / SRC_TOK_SATURATION_SCALE))
+#            + min(total_score / CONTRIBUTION_SCORE_FOR_FULL_BONUS, 1) * MAX_CONTRIBUTION_BONUS
+# SRC_TOK_SATURATION_SCALE: src_tok at ~63% of the cap; per-repo overridable
+SRC_TOK_SATURATION_SCALE = 58.0
 
 # Issue boosts
 MAX_ISSUE_CLOSE_WINDOW_DAYS = 1
@@ -120,7 +121,7 @@ INLINE_TEST_PATTERNS: Dict[str, re.Pattern] = {
 # Eligibility Gate (OSS Contributions)
 # =============================================================================
 # Per-repo defaults — each repo may override these in master_repositories.json.
-MIN_VALID_MERGED_PRS = 3  # minimum "valid" merged PRs (token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE) to receive score
+MIN_VALID_MERGED_PRS = 3  # minimum merged PRs (per repo) to receive score
 MIN_CREDIBILITY = 0.80  # minimum credibility ratio to receive score
 
 # =============================================================================

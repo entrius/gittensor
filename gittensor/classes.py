@@ -16,7 +16,6 @@ if TYPE_CHECKING:
 
 from gittensor.constants import (
     EXTENSIONLESS_FILE_EXTENSIONS,
-    MAX_CODE_DENSITY_MULTIPLIER,
 )
 
 
@@ -185,7 +184,6 @@ class PullRequest:
     total_nodes_scored: int = 0  # Total AST nodes scored for this PR
 
     # Token scoring breakdown (after test weight applied)
-    code_density: float = 0.0
     token_score: float = 0.0
     structural_count: int = 0
     structural_score: float = 0.0
@@ -359,6 +357,26 @@ class MinerEvaluation:
 
 
 @dataclass
+class RepoEmissionAllocation:
+    """Per-repository allocation details for one scoring round."""
+
+    repository_full_name: str
+    emission_share: float
+    issue_discovery_share: float
+    repo_slice: float
+    maintainer_cut: float = 0.0
+    maintainer_carve_out: float = 0.0
+    maintainer_rewards: Dict[int, float] = field(default_factory=dict)
+    pr_slice: float = 0.0
+    issue_discovery_slice: float = 0.0
+    pr_scores: Dict[int, float] = field(default_factory=dict)
+    issue_discovery_scores: Dict[int, float] = field(default_factory=dict)
+    pr_rewards: Dict[int, float] = field(default_factory=dict)
+    issue_discovery_rewards: Dict[int, float] = field(default_factory=dict)
+    recycled_amount: float = 0.0
+
+
+@dataclass
 class ScoreBreakdown:
     """Breakdown of scores by type (structural vs leaf) and change type (added vs deleted).
 
@@ -495,13 +513,6 @@ class PrScoringResult:
     score_breakdown: Optional[ScoreBreakdown] = None  # Aggregated breakdown across all files
     by_category: Dict[ScoringCategory, 'PrScoringResult'] = field(default_factory=dict)
 
-    @property
-    def density(self) -> float:
-        """Code density (total_score / total_lines), capped at MAX_CODE_DENSITY_MULTIPLIER"""
-        if self.total_lines <= 0:
-            return 0.0
-        return min(self.total_score / self.total_lines, MAX_CODE_DENSITY_MULTIPLIER)
-
 
 @dataclass
 class CachedEvaluation:
@@ -600,10 +611,11 @@ class MinerEvaluationCache:
     def update_issue_discovery(self, evaluation: 'MinerEvaluation') -> None:
         """Refresh issue-discovery fields on an existing cache entry.
 
-        No-op when no entry exists for this UID — the cache only holds
-        entries backed by an OSS-phase store(), so writing issue-discovery
-        fields alone would leave a half-populated entry that the OSS
-        fallback path could later restore.
+        No-op when no entry exists for this UID. Missing entries occur on
+        identity-mismatch evictions or OSS-phase failures; in both cases we
+        let the next round's store() re-anchor the entry rather than write
+        a half-populated one here. The OSS fallback path additionally
+        guards against restoring an entry with no PR data.
         """
         existing = self._cache.get(evaluation.uid)
         if existing is None:

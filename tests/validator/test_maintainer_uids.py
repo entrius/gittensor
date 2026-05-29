@@ -1,7 +1,7 @@
 # The MIT License (MIT)
 # Copyright © 2025 Entrius
 
-"""Unit tests for _build_maintainer_uids_by_repo — the forward-pass helper that
+"""Unit tests for build_maintainer_uids_by_repo — the forward-pass helper that
 resolves a repo's mirror maintainer roster to registered miner UIDs for the
 maintainer_cut carve-out."""
 
@@ -9,7 +9,7 @@ from gittensor.classes import MinerEvaluation
 from gittensor.utils.mirror.client import MirrorRequestError
 from gittensor.utils.mirror.models import MirrorMaintainer, MirrorRepoMaintainersResponse
 from gittensor.validator import forward
-from gittensor.validator.forward import _build_maintainer_uids_by_repo
+from gittensor.validator.forward import build_maintainer_uids_by_repo
 from gittensor.validator.utils.load_weights import RepositoryConfig
 
 
@@ -60,7 +60,7 @@ def test_resolves_github_ids_to_registered_uids(monkeypatch):
     _install_stub(monkeypatch, {'r/one': _response('r/one', 100, 200)})
     evaluations = {1: _evaluation(1, '100'), 2: _evaluation(2, '200'), 3: _evaluation(3, '300')}
 
-    result = _build_maintainer_uids_by_repo(evaluations, {'r/one': _cut_repo()}, {1, 2, 3})
+    result = build_maintainer_uids_by_repo(evaluations, {'r/one': _cut_repo()}, {1, 2, 3})
 
     assert result == {'r/one': [1, 2]}
 
@@ -70,7 +70,7 @@ def test_unregistered_and_zero_github_id_maintainers_excluded(monkeypatch):
     _install_stub(monkeypatch, {'r/one': _response('r/one', 100, 999)})
     evaluations = {1: _evaluation(1, '100'), 2: _evaluation(2, '0')}
 
-    result = _build_maintainer_uids_by_repo(evaluations, {'r/one': _cut_repo()}, {1, 2})
+    result = build_maintainer_uids_by_repo(evaluations, {'r/one': _cut_repo()}, {1, 2})
 
     assert result == {'r/one': [1]}
 
@@ -79,7 +79,7 @@ def test_maintainer_uid_not_in_miner_uids_excluded(monkeypatch):
     _install_stub(monkeypatch, {'r/one': _response('r/one', 100, 200)})
     evaluations = {1: _evaluation(1, '100'), 2: _evaluation(2, '200')}
 
-    result = _build_maintainer_uids_by_repo(evaluations, {'r/one': _cut_repo()}, {1})
+    result = build_maintainer_uids_by_repo(evaluations, {'r/one': _cut_repo()}, {1})
 
     assert result == {'r/one': [1]}
 
@@ -89,7 +89,7 @@ def test_only_queries_repos_with_positive_cut(monkeypatch):
     evaluations = {1: _evaluation(1, '100')}
     repos = {'r/cut': _cut_repo(0.5), 'r/no-cut': _cut_repo(0.0)}
 
-    result = _build_maintainer_uids_by_repo(evaluations, repos, {1})
+    result = build_maintainer_uids_by_repo(evaluations, repos, {1})
 
     assert stub.calls == ['r/cut']
     assert result == {'r/cut': [1]}
@@ -99,7 +99,7 @@ def test_mirror_failure_omits_repo(monkeypatch):
     _install_stub(monkeypatch, {'r/one': MirrorRequestError('mirror down')})
     evaluations = {1: _evaluation(1, '100')}
 
-    result = _build_maintainer_uids_by_repo(evaluations, {'r/one': _cut_repo()}, {1})
+    result = build_maintainer_uids_by_repo(evaluations, {'r/one': _cut_repo()}, {1})
 
     assert result == {}
 
@@ -108,7 +108,7 @@ def test_empty_maintainers_omits_repo(monkeypatch):
     _install_stub(monkeypatch, {'r/one': _response('r/one')})
     evaluations = {1: _evaluation(1, '100')}
 
-    result = _build_maintainer_uids_by_repo(evaluations, {'r/one': _cut_repo()}, {1})
+    result = build_maintainer_uids_by_repo(evaluations, {'r/one': _cut_repo()}, {1})
 
     assert result == {}
 
@@ -117,7 +117,7 @@ def test_duplicate_github_ids_dedup(monkeypatch):
     _install_stub(monkeypatch, {'r/one': _response('r/one', 100, 100)})
     evaluations = {1: _evaluation(1, '100')}
 
-    result = _build_maintainer_uids_by_repo(evaluations, {'r/one': _cut_repo()}, {1})
+    result = build_maintainer_uids_by_repo(evaluations, {'r/one': _cut_repo()}, {1})
 
     assert result == {'r/one': [1]}
 
@@ -131,7 +131,7 @@ def test_penalized_miner_excluded_from_maintainer_uids(monkeypatch):
     penalized.failed_reason = 'duplicate_github_account'
     evaluations = {1: penalized, 2: _evaluation(2, '200')}
 
-    result = _build_maintainer_uids_by_repo(evaluations, {'r/one': _cut_repo()}, {1, 2})
+    result = build_maintainer_uids_by_repo(evaluations, {'r/one': _cut_repo()}, {1, 2})
 
     assert result == {'r/one': [2]}
 
@@ -144,7 +144,7 @@ def test_all_maintainers_penalized_omits_repo(monkeypatch):
     penalized.failed_reason = 'duplicate_github_account'
     evaluations = {1: penalized}
 
-    result = _build_maintainer_uids_by_repo(evaluations, {'r/one': _cut_repo()}, {1})
+    result = build_maintainer_uids_by_repo(evaluations, {'r/one': _cut_repo()}, {1})
 
     assert result == {}
 
@@ -156,6 +156,6 @@ def test_no_cut_repos_returns_empty_without_client(monkeypatch):
     monkeypatch.setattr(forward, 'MirrorClient', _boom)
     evaluations = {1: _evaluation(1, '100')}
 
-    result = _build_maintainer_uids_by_repo(evaluations, {'r/one': _cut_repo(0.0)}, {1})
+    result = build_maintainer_uids_by_repo(evaluations, {'r/one': _cut_repo(0.0)}, {1})
 
     assert result == {}

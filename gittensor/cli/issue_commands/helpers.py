@@ -17,6 +17,7 @@ from typing import Any, Callable, ContextManager, Dict, List, Optional, Tuple, T
 
 import click
 import requests
+from bittensor_wallet.utils import is_valid_ss58_address
 from rich.console import Console
 
 from gittensor.cli.issue_commands.tables import build_pr_table
@@ -481,35 +482,15 @@ def validate_github_issue(
 
 
 def validate_ss58_address(address: str, param_name: str = 'address') -> str:
-    """Validate an SS58 address.
-
-    Uses substrate-interface's ss58_decode (existing stack) for base58+checksum
-    validation. Falls back to a length/prefix regex if not available.
-    """
+    """Validate an SS58 address via bittensor-wallet's base58+checksum check."""
     address = address.strip()
     if not address:
         raise click.BadParameter(f'Empty {param_name}', param_hint=param_name)
-
-    try:
-        from substrateinterface.utils.ss58 import ss58_decode
-
-        ss58_decode(address)
-        return address
-    except ImportError:
-        pass
-    except Exception:
+    if not is_valid_ss58_address(address):
         raise click.BadParameter(
             f'Invalid SS58 address for {param_name}: {address}',
             param_hint=param_name,
         )
-
-    # Fallback: basic structure check (starts with 1-9/A-H/J-N/P-Z, 46-48 chars)
-    if not re.match(r'^[1-9A-HJ-NP-Za-km-z]{46,48}$', address):
-        raise click.BadParameter(
-            f'Invalid SS58 address for {param_name}: {address}',
-            param_hint=param_name,
-        )
-
     return address
 
 
@@ -643,10 +624,15 @@ def _resolve_contract_and_network(
 
 def _read_contract_packed_storage(substrate, contract_addr: str, verbose: bool = False) -> Optional[Dict[str, Any]]:
     """
-    Read the packed root storage from a contract using childstate RPC
+    Read the packed root storage from a contract using childstate RPC.
 
     This bypasses the broken state_call/ContractsApi_call method and reads
     storage directly. Works around substrate-interface Ink! 5 compatibility issues.
+
+    Returns ``None`` only when the contract genuinely has no readable packed
+    storage at this address (no child key, no bytes, undersized payload).
+    RPC / decode failures propagate so callers can distinguish a failed read
+    from a clean "no storage yet" state.
 
     Args:
         substrate: SubstrateInterface instance
@@ -654,41 +640,37 @@ def _read_contract_packed_storage(substrate, contract_addr: str, verbose: bool =
         verbose: If True, print debug output
 
     Returns:
-        Dict with owner, netuid, next_issue_id, etc. or None on error
+        Dict with owner, netuid, next_issue_id, etc., or ``None`` when the
+        contract has no packed storage at this address.
     """
-    try:
-        child_key = get_contract_child_storage_key(substrate, contract_addr)
-        if not child_key:
-            if verbose:
-                err_console.print('[dim]Debug: Failed to get contract child storage key[/dim]')
-            return None
-
-        packed_bytes = read_contract_packed_storage_bytes(substrate, child_key)
-        if not packed_bytes:
-            if verbose:
-                err_console.print('[dim]Debug: No packed storage bytes returned[/dim]')
-            return None
-
+    child_key = get_contract_child_storage_key(substrate, contract_addr)
+    if not child_key:
         if verbose:
-            err_console.print(f'[dim]Debug: Packed storage data length = {len(packed_bytes)} bytes[/dim]')
-
-        packed = decode_packed_contract_storage(packed_bytes)
-        if not packed:
-            if verbose:
-                err_console.print(f'[dim]Debug: Packed storage too small ({len(packed_bytes)} < 74 bytes)[/dim]')
-            return None
-
-        return {
-            'owner': substrate.ss58_encode(packed.owner.hex()),
-            'treasury_hotkey': substrate.ss58_encode(packed.treasury_hotkey.hex()),
-            'netuid': packed.netuid,
-            'next_issue_id': packed.next_issue_id,
-            'alpha_pool': packed.alpha_pool,
-        }
-    except Exception as e:
-        if verbose:
-            err_console.print(f'[dim]Debug: Failed to read packed storage: {e}[/dim]')
+            err_console.print('[dim]Debug: Contract has no child storage key[/dim]')
         return None
+
+    packed_bytes = read_contract_packed_storage_bytes(substrate, child_key)
+    if not packed_bytes:
+        if verbose:
+            err_console.print('[dim]Debug: No packed storage bytes returned[/dim]')
+        return None
+
+    if verbose:
+        err_console.print(f'[dim]Debug: Packed storage data length = {len(packed_bytes)} bytes[/dim]')
+
+    packed = decode_packed_contract_storage(packed_bytes)
+    if not packed:
+        if verbose:
+            err_console.print(f'[dim]Debug: Packed storage too small ({len(packed_bytes)} < 74 bytes)[/dim]')
+        return None
+
+    return {
+        'owner': substrate.ss58_encode(packed.owner.hex()),
+        'treasury_hotkey': substrate.ss58_encode(packed.treasury_hotkey.hex()),
+        'netuid': packed.netuid,
+        'next_issue_id': packed.next_issue_id,
+        'alpha_pool': packed.alpha_pool,
+    }
 
 
 def _read_issues_from_child_storage(substrate, contract_addr: str, verbose: bool = False) -> List[Dict[str, Any]]:
@@ -697,21 +679,20 @@ def _read_issues_from_child_storage(substrate, contract_addr: str, verbose: bool
 
     Uses Ink! 5 lazy mapping key computation to directly read issue storage.
 
+    Returns ``[]`` only when the contract genuinely has no issues yet
+    (no child storage key, missing packed storage, ``next_issue_id <= 1``).
+    RPC / decode failures propagate so callers can distinguish a failed read
+    from a real empty contract.
+
     Args:
         substrate: SubstrateInterface instance
         contract_addr: Contract address
         verbose: If True, print debug output
 
     Returns:
-        List of issue dictionaries
+        List of issue dictionaries (empty for a real empty contract).
     """
-    try:
-        child_key = get_contract_child_storage_key(substrate, contract_addr)
-    except Exception as e:
-        if verbose:
-            err_console.print(f'[dim]Debug: Contract info query failed: {e}[/dim]')
-        child_key = None
-
+    child_key = get_contract_child_storage_key(substrate, contract_addr)
     if not child_key:
         if verbose:
             err_console.print(f'[dim]Debug: Cannot read issues - no child storage key for {contract_addr}[/dim]')
@@ -822,6 +803,10 @@ def read_issues_from_contract(ws_endpoint: str, contract_addr: str, verbose: boo
     Uses childstate_getStorage RPC to read contract storage directly,
     bypassing the broken ContractsApi_call method in substrate-interface.
 
+    Raises on connection / RPC / decode failures so callers can distinguish a
+    failed read from an empty contract. ``ImportError`` is also propagated;
+    callers are expected to route both through their CLI error handler.
+
     Args:
         ws_endpoint: WebSocket endpoint for Subtensor
         contract_addr: Contract address
@@ -830,30 +815,17 @@ def read_issues_from_contract(ws_endpoint: str, contract_addr: str, verbose: boo
     Returns:
         List of issue dictionaries
     """
-    try:
-        from substrateinterface import SubstrateInterface
+    from async_substrate_interface import SubstrateInterface
 
-        if verbose:
-            err_console.print(f'[dim]Debug: Connecting to {ws_endpoint}...[/dim]')
+    if verbose:
+        err_console.print(f'[dim]Debug: Connecting to {ws_endpoint}...[/dim]')
 
-        # Connect to subtensor
-        substrate = SubstrateInterface(url=ws_endpoint)
+    substrate = SubstrateInterface(url=ws_endpoint)
 
-        if verbose:
-            err_console.print('[dim]Debug: Connected successfully[/dim]')
+    if verbose:
+        err_console.print('[dim]Debug: Connected successfully[/dim]')
 
-        # Read issues directly from child storage
-        return _read_issues_from_child_storage(substrate, contract_addr, verbose)
-
-    except ImportError as e:
-        err_console.print(f'[yellow]Cannot read from contract: {e}[/yellow]')
-        err_console.print('[dim]Install with: uv sync[/dim]')
-        return []
-    except Exception as e:
-        if verbose:
-            err_console.print(f'[dim]Debug: Connection/read error: {e}[/dim]')
-        err_console.print(f'[yellow]Error reading from contract: {e}[/yellow]')
-        return []
+    return _read_issues_from_child_storage(substrate, contract_addr, verbose)
 
 
 def fetch_issue_from_contract(
@@ -863,7 +835,13 @@ def fetch_issue_from_contract(
     verbose: bool = False,
 ) -> Dict[str, Any]:
     """Resolve an on-chain issue and validate bountied status."""
-    issues = read_issues_from_contract(ws_endpoint, contract_addr, verbose)
+    try:
+        issues = read_issues_from_contract(ws_endpoint, contract_addr, verbose)
+    except click.ClickException:
+        raise
+    except Exception as e:
+        raise click.ClickException(f'Error reading from contract: {e}')
+
     issue = next((i for i in issues if i.get('id') == issue_id), None)
     if not issue:
         raise click.ClickException(f'Issue ID {issue_id} not found on-chain.')

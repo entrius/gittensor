@@ -28,8 +28,7 @@ def check_eligibility(
     """Check whether a miner passes one repository's eligibility gate.
 
     Gate requires:
-    1. At least ``cfg.min_valid_merged_prs`` merged PRs with
-       ``token_score >= cfg.min_token_score_for_base_score``
+    1. At least ``cfg.min_valid_merged_prs`` merged PRs
     2. At least ``cfg.min_credibility`` credibility
 
     Returns:
@@ -38,10 +37,9 @@ def check_eligibility(
     """
     credibility = calculate_credibility(merged_prs, closed_prs)
 
-    valid_merged_count = sum(1 for pr in merged_prs if pr.token_score >= cfg.min_token_score_for_base_score)
-
-    if valid_merged_count < cfg.min_valid_merged_prs:
-        return False, credibility, f'{valid_merged_count}/{cfg.min_valid_merged_prs} valid merged PRs'
+    merged_count = len(merged_prs)
+    if merged_count < cfg.min_valid_merged_prs:
+        return False, credibility, f'{merged_count}/{cfg.min_valid_merged_prs} merged PRs'
 
     if credibility < cfg.min_credibility:
         return False, credibility, f'credibility {credibility:.2f} < {cfg.min_credibility} minimum'

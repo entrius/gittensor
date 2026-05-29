@@ -51,7 +51,7 @@ INSERT INTO pull_requests (
     earned_score, collateral_score,
     additions, deletions, commits, total_nodes_scored,
     merged_by_login, description, last_edited_at,
-    code_density, token_score, structural_count, structural_score, leaf_count, leaf_score
+    token_score, structural_count, structural_score, leaf_count, leaf_score
 ) VALUES (
     %s, %s, %s, %s, %s, %s, %s,
     %s, %s, %s,
@@ -61,7 +61,7 @@ INSERT INTO pull_requests (
     %s, %s,
     %s, %s, %s, %s,
     %s, %s, %s,
-    %s, %s, %s, %s, %s, %s
+    %s, %s, %s, %s, %s
 )
 ON CONFLICT (number, repository_full_name)
 DO UPDATE SET
@@ -88,7 +88,6 @@ DO UPDATE SET
     merged_by_login = EXCLUDED.merged_by_login,
     description = EXCLUDED.description,
     last_edited_at = EXCLUDED.last_edited_at,
-    code_density = EXCLUDED.code_density,
     token_score = EXCLUDED.token_score,
     structural_count = EXCLUDED.structural_count,
     structural_score = EXCLUDED.structural_score,

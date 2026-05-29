@@ -348,6 +348,9 @@ class TestRepositoryConfigMirrorScoringFields:
             assert 1.0 <= resolved_scoring.maintainer_issue_multiplier <= 5.0, (
                 f'{repo_name} maintainer_issue_multiplier out of range'
             )
+            assert 10.0 <= resolved_scoring.src_tok_saturation_scale <= 500.0, (
+                f'{repo_name} src_tok_saturation_scale out of range'
+            )
             assert 0 <= resolved_scoring.time_decay.grace_period_hours <= 168, (
                 f'{repo_name} time_decay.grace_period_hours out of range'
             )
@@ -481,6 +484,35 @@ class TestRepositoryConfigScoringBlock:
 
         with pytest.raises(RepositoryRegistryError):
             lw.load_master_repo_weights()
+
+    @pytest.mark.parametrize('scale', [5.0, 501.0])
+    def test_loader_rejects_out_of_range_saturation_scale(self, tmp_path, monkeypatch, scale):
+        from gittensor.validator.utils import load_weights as lw
+
+        (tmp_path / 'master_repositories.json').write_text(
+            json.dumps({'foo/bad': {'emission_share': 0.5, 'scoring': {'src_tok_saturation_scale': scale}}})
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: tmp_path)
+
+        with pytest.raises(RepositoryRegistryError):
+            lw.load_master_repo_weights()
+
+    def test_loader_accepts_saturation_scale_at_bounds(self, tmp_path, monkeypatch):
+        from gittensor.validator.utils import load_weights as lw
+
+        (tmp_path / 'master_repositories.json').write_text(
+            json.dumps(
+                {
+                    'foo/low': {'emission_share': 0.4, 'scoring': {'src_tok_saturation_scale': 10.0}},
+                    'foo/high': {'emission_share': 0.4, 'scoring': {'src_tok_saturation_scale': 500.0}},
+                }
+            )
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: tmp_path)
+
+        repos = lw.load_master_repo_weights()
+        assert resolve_scoring(repos['foo/low'].scoring).src_tok_saturation_scale == pytest.approx(10.0)
+        assert resolve_scoring(repos['foo/high'].scoring).src_tok_saturation_scale == pytest.approx(500.0)
 
 
 class TestRepositoryConfigMaintainerCut:

@@ -121,6 +121,10 @@ def _config(
     )
 
 
+def _apply_multipliers(scored: ScoredPR, cfg: RepositoryConfig) -> None:
+    _calculate_pr_multipliers(scored, cfg, resolve_scoring(cfg.scoring))
+
+
 # ============================================================================
 # Eligibility gate
 # ============================================================================
@@ -410,7 +414,6 @@ class TestFixedBaseScore:
                 leaf_count=3,
                 leaf_score=22.0,
                 total_nodes_scored=5,
-                code_density=0.9,
             ),
         )
 
@@ -482,7 +485,6 @@ class TestFixedBaseScore:
                 leaf_count=0,
                 leaf_score=0.0,
                 total_nodes_scored=1,
-                code_density=0.01,
             ),
         )
         repos = {
@@ -664,7 +666,7 @@ class TestLabelResolution:
     def test_old_global_label_ignored_without_repo_label_config(self):
         labels = [{'name': 'feature', 'actor_github_id': '1', 'actor_association': 'OWNER'}]
         scored = ScoredPR(pr=_pr(labels=labels))
-        _calculate_pr_multipliers(scored, _config(default_label_multiplier=0.8))
+        _apply_multipliers(scored, _config(default_label_multiplier=0.8))
         assert scored.label is None
         assert scored.label_multiplier == pytest.approx(0.8)
 
@@ -673,18 +675,12 @@ class TestLabelResolution:
         labels = [{'name': 'feature', 'actor_github_id': '99', 'actor_association': None}]
 
         scored_trusted = ScoredPR(pr=_pr(labels=labels))
-        _calculate_pr_multipliers(
-            scored_trusted,
-            _config(trusted_label_pipeline=True, label_multipliers={'feature': 1.5}),
-        )
+        _apply_multipliers(scored_trusted, _config(trusted_label_pipeline=True, label_multipliers={'feature': 1.5}))
         assert scored_trusted.label == 'feature'
         assert scored_trusted.label_multiplier == pytest.approx(1.5)
 
         scored_untrusted = ScoredPR(pr=_pr(labels=labels))
-        _calculate_pr_multipliers(
-            scored_untrusted,
-            _config(trusted_label_pipeline=False, label_multipliers={'feature': 1.5}),
-        )
+        _apply_multipliers(scored_untrusted, _config(trusted_label_pipeline=False, label_multipliers={'feature': 1.5}))
         assert scored_untrusted.label is None
         assert scored_untrusted.label_multiplier == pytest.approx(1.0)
 
@@ -906,7 +902,7 @@ class TestPrMultipliers:
 
         scored = ScoredPR(pr=_pr(labels=labels))
         scored.token_score = 100.0  # for completeness
-        _calculate_pr_multipliers(
+        _apply_multipliers(
             scored,
             _config(emission_share=0.7, additional_branches=['test'], label_multipliers={'feature': 1.5}),
         )
@@ -920,7 +916,7 @@ class TestPrMultipliers:
 
     def test_open_pr_only_neutral_multipliers(self):
         scored = ScoredPR(pr=_pr(state='OPEN'))
-        _calculate_pr_multipliers(scored, _config(emission_share=0.5))
+        _apply_multipliers(scored, _config(emission_share=0.5))
 
         # Time decay / review quality / credibility are merge-only — kept neutral here.
         assert scored.time_decay_multiplier == 1.0

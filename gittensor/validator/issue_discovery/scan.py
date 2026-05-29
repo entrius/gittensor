@@ -43,7 +43,6 @@ import bittensor as bt
 from gittensor.classes import Issue, MinerEvaluation, MinerEvaluationCache, RepoEvaluation
 from gittensor.constants import (
     MAINTAINER_ASSOCIATIONS,
-    MIN_TOKEN_SCORE_FOR_BASE_SCORE,
 )
 from gittensor.utils.mirror.client import MirrorClient, MirrorRequestError
 from gittensor.utils.mirror.models import MirrorIssue, MirrorSolvingPR
@@ -406,8 +405,6 @@ def _build_solving_pr_cache(
     cache: Dict[Tuple[str, int], CachedSolvingPR] = {}
     for evaluation in miner_evaluations.values():
         for scored in evaluation.merged_prs:
-            if scored.token_score < MIN_TOKEN_SCORE_FOR_BASE_SCORE:
-                continue
             key = (scored.pr.repo_full_name, scored.pr.pr_number)
             if key in cache:
                 continue  # first miner wins — values are the same PR's fields
@@ -673,10 +670,8 @@ async def _resolve_solving_pr_score(
         file_contents,
         programming_languages,
         token_config,
-        min_token_score_for_base_score=(
-            resolve_eligibility(repo_config.eligibility).min_token_score_for_base_score
-            if repo_config is not None
-            else None
+        src_tok_saturation_scale=(
+            resolve_scoring(repo_config.scoring).src_tok_saturation_scale if repo_config is not None else None
         ),
     )
     base_score = (

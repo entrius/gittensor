@@ -3,6 +3,10 @@
     "emission_share": 0.0,
     "issue_discovery_share": 0.0
   },
+  "cogniax/tao-pulse-app": {
+    "emission_share": 0.01,
+    "issue_discovery_share": 0.0
+  },
   "entrius/allways": {
     "emission_share": 0.05018,
     "issue_discovery_share": 1.0,
@@ -67,8 +71,12 @@
     "trusted_label_pipeline": true
   },
   "Geniepod/genie-claw": {
+    "eligibility": {
+      "max_open_pr_threshold": 2
+    },
     "emission_share": 0.033,
-    "issue_discovery_share": 0.0
+    "issue_discovery_share": 0.0,
+    "maintainer_cut": 0.3
   },
   "infiniflow/ragflow": {
     "emission_share": 0.055,

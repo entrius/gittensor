@@ -152,8 +152,8 @@ class RepositoryConfig:
             same fnmatch wildcard syntax as ``additional_acceptable_branches``.
         default_label_multiplier: Multiplier used when no configured label
             pattern matches. Defaults to neutral scoring.
-        fixed_base_score: Override for the PR base score. Expected
-            to be within [0.0, 100.0]; range is enforced by the live-config test.
+        fixed_base_score: Override for the PR base score. Must be within
+            [0.0, 100.0]; range is enforced at load time by ``_validate_label_configs``.
         eligibility: Per-repo overrides for the eligibility / spam knobs. Unset
             fields fall back to the global default constants — see
             ``resolve_eligibility``.
@@ -508,6 +508,47 @@ def _validate_scoring_configs(configs: Dict[str, RepositoryConfig]) -> None:
             )
 
 
+def _validate_label_configs(configs: Dict[str, RepositoryConfig]) -> None:
+    """Range-check every repo's label-multiplier and fixed-base-score config.
+
+    These feed straight into PR scoring (``label_multipliers`` →
+    ``resolve_highest_label_multiplier`` → ``_apply_score_multipliers``;
+    ``fixed_base_score`` → ``ScoredPR.base_score``) exactly like the issue-bonus
+    multipliers that ``_validate_scoring_configs`` already bounds. Without this,
+    a typo in a high-churn ``chore(weights)`` PR (e.g. ``5.0`` → ``50.0`` or a
+    stray ``-``) would silently distort live scoring instead of failing fast at
+    startup. Bounds mirror the live-config tests in ``test_load_weights.py``.
+    """
+    for repo_name, config in configs.items():
+        if config.fixed_base_score is not None:
+            value = config.fixed_base_score
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise RepositoryRegistryError(
+                    f'{repo_name} fixed_base_score must be a number, got {type(value).__name__}'
+                )
+            if not 0.0 <= float(value) <= 100.0:
+                raise RepositoryRegistryError(
+                    f'{repo_name} fixed_base_score must be within [0, 100], got {value}'
+                )
+        if not 0.0 <= config.default_label_multiplier <= 20.0:
+            raise RepositoryRegistryError(
+                f'{repo_name} default_label_multiplier must be within [0, 20], '
+                f'got {config.default_label_multiplier}'
+            )
+        if config.label_multipliers is not None:
+            if len(config.label_multipliers) > 10:
+                raise RepositoryRegistryError(
+                    f'{repo_name} label_multipliers must have <= 10 entries, '
+                    f'got {len(config.label_multipliers)}'
+                )
+            for pattern, multiplier in config.label_multipliers.items():
+                if not 0.0 <= multiplier <= 20.0:
+                    raise RepositoryRegistryError(
+                        f'{repo_name} label_multipliers[{pattern!r}] must be within [0, 20], '
+                        f'got {multiplier}'
+                    )
+
+
 def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
     """
     Load repository emission shares from the local JSON file.
@@ -563,6 +604,7 @@ def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
         _validate_emission_shares(normalized_data)
         _validate_eligibility_configs(normalized_data)
         _validate_scoring_configs(normalized_data)
+        _validate_label_configs(normalized_data)
 
         bt.logging.debug(f'Successfully loaded {len(normalized_data)} repository entries from {weights_file}')
         return normalized_data

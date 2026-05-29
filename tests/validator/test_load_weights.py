@@ -320,6 +320,28 @@ class TestRepositoryConfigMirrorScoringFields:
         with pytest.raises(RepositoryRegistryError):
             lw.load_master_repo_weights()
 
+    @pytest.mark.parametrize(
+        'metadata',
+        [
+            {'emission_share': 0.5, 'fixed_base_score': -1.0},
+            {'emission_share': 0.5, 'fixed_base_score': 101.0},
+            {'emission_share': 0.5, 'fixed_base_score': 'oops'},
+            {'emission_share': 0.5, 'default_label_multiplier': -0.1},
+            {'emission_share': 0.5, 'default_label_multiplier': 25.0},
+            {'emission_share': 0.5, 'label_multipliers': {'kind/*': -1.0}},
+            {'emission_share': 0.5, 'label_multipliers': {'kind/*': 50.0}},
+            {'emission_share': 0.5, 'label_multipliers': {f'kind/{i}': 1.0 for i in range(11)}},
+        ],
+    )
+    def test_loader_rejects_out_of_range_label_configs(self, tmp_path, monkeypatch, metadata):
+        from gittensor.validator.utils import load_weights as lw
+
+        (tmp_path / 'master_repositories.json').write_text(json.dumps({'foo/bad': metadata}))
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: tmp_path)
+
+        with pytest.raises(RepositoryRegistryError):
+            lw.load_master_repo_weights()
+
     def test_live_mirror_scoring_fields_have_valid_shape(self):
         """Loader passes scoring + eligibility fields through unchanged — CI fails
         when a bad value is committed to master_repositories.json."""

@@ -103,7 +103,20 @@
   },
   "JSONbored/gittensory": {
     "emission_share": 0.01,
-    "issue_discovery_share": 0.0
+    "issue_discovery_share": 0.0,
+    "label_multipliers": {
+      "feature": 1.5
+    },
+    "maintainer_cut": 0.3,
+    "scoring": {
+      "pr_lookback_days": 45,
+      "maintainer_issue_multiplier": 1.75,
+      "time_decay": {
+        "grace_period_hours": 24,
+        "sigmoid_midpoint_days": 14,
+        "min_multiplier": 0.1
+      }
+    }
   },
   "MkDev11/gittensor-hub": {
     "emission_share": 0.02,
@@ -166,6 +179,11 @@
   },
   "we-promise/sure": {
     "emission_share": 0.03,
-    "issue_discovery_share": 0.0
+    "issue_discovery_share": 0.0,
+    "label_multipliers": {
+      "performance": 1.5,
+      "mobile/Flutter": 1.2
+    },
+    "maintainer_cut": 0.3
   }
 }

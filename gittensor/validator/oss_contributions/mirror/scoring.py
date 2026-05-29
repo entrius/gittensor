@@ -446,6 +446,10 @@ def _is_valid_linked_issue(li: MirrorLinkedIssue, pr: MirrorPullRequest) -> bool
     - Any CLOSED issue must have state_reason=COMPLETED — NOT_PLANNED / reopened
       closures never grant a multiplier. Applies regardless of PR state, so the
       gate covers OPEN-PR collateral as well.
+    - Mirror solver attribution: when ``li.solved_by_pr`` is populated, the
+      scored PR must be that solver. Mirrors the issue-discovery path, which
+      already treats ``solved_by_pr`` as authoritative. Fails open on ``None``
+      to preserve behavior on older snapshots that don't set the field.
     - Additional MERGED-PR-only gates: edited_after_merge, issue must be CLOSED,
       close-timing window vs. merge (rejects both too-far-after AND too-far-before
       — negative days means the issue closed before the PR merged, so the PR
@@ -471,6 +475,13 @@ def _is_valid_linked_issue(li: MirrorLinkedIssue, pr: MirrorPullRequest) -> bool
     # also requires that any CLOSED linked issue closed as COMPLETED.
     if li.state == 'CLOSED' and li.state_reason != 'COMPLETED':
         bt.logging.warning(f'Skipping linked issue #{li.number} - state_reason={li.state_reason} (need COMPLETED)')
+        return False
+
+    if li.solved_by_pr is not None and li.solved_by_pr != pr.pr_number:
+        bt.logging.warning(
+            f'Skipping linked issue #{li.number} - solved_by_pr={li.solved_by_pr} '
+            f'!= PR #{pr.pr_number} (different PR was the actual solver)'
+        )
         return False
 
     is_merged = pr.state == 'MERGED'

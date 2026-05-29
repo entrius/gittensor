@@ -55,6 +55,7 @@ from gittensor.validator.oss_contributions.label_resolution import resolve_trust
 from gittensor.validator.oss_contributions.mirror.adapters import mirror_files_to_legacy
 from gittensor.validator.oss_contributions.mirror.scoring import (
     calculate_base_score_for_pr_files,
+    check_merged_branch_eligibility,
 )
 from gittensor.validator.utils.datetime_utils import calculate_time_decay
 from gittensor.validator.utils.load_weights import (
@@ -214,7 +215,7 @@ async def run_issue_discovery(
 
         pending.append((evaluation, filtered, open_counts))
 
-    canonical_pr_owners = _build_canonical_pr_owners(pending)
+    canonical_pr_owners = _build_canonical_pr_owners(pending, mirror_repos)
     for evaluation, filtered, open_counts in pending:
         complete = await _score_miner_issues(
             evaluation,
@@ -327,6 +328,7 @@ def _restore_issue_discovery_from_cache(
 
 def _build_canonical_pr_owners(
     pending: List[Tuple[MinerEvaluation, List[MirrorIssue], Dict[str, int]]],
+    mirror_repos: Dict[str, RepositoryConfig],
 ) -> Dict[Tuple[str, int], Tuple[datetime, int, int]]:
     """Cross-miner one-issue-per-PR resolution.
 
@@ -339,7 +341,7 @@ def _build_canonical_pr_owners(
     canonical: Dict[Tuple[str, int], Tuple[datetime, int, int]] = {}
     for evaluation, issues, _ in pending:
         for issue in issues:
-            if _classify_issue(issue) != 'solved':
+            if _classify_issue(issue, mirror_repos.get(issue.repo_full_name)) != 'solved':
                 continue
             sp = issue.solving_pr
             assert sp is not None  # _classify_issue guarantees a solving_pr
@@ -457,7 +459,7 @@ async def _score_miner_issues(
         cfg = resolve_eligibility(repo_config.eligibility)
         acc = repo_acc.setdefault(issue.repo_full_name, _RepoIssueAcc())
 
-        classification = _classify_issue(issue)
+        classification = _classify_issue(issue, repo_config)
         if classification == 'not-solved-closed':
             acc.closed += 1
             continue
@@ -684,12 +686,15 @@ async def _resolve_solving_pr_score(
     return cached
 
 
-def _classify_issue(issue: MirrorIssue) -> str:
+def _classify_issue(issue: MirrorIssue, repo_config: Optional[RepositoryConfig]) -> str:
     """Return 'solved', 'not-solved-closed', or 'ignore' per anti-gaming gates.
 
     'ignore' = issue is open / transferred / has no scorable meaning at all.
     'not-solved-closed' = counts against credibility (closed but not solved).
     'solved' = counts toward solved metrics.
+
+    ``repo_config`` enables the branch-eligibility gate; when None (repo not in
+    the active mirror set) the branch check is skipped.
 
     Per-issue debug logs explain each classification so operators can debug
     "why didn't UID X get credit for issue Y?" without guessing.
@@ -724,6 +729,26 @@ def _classify_issue(issue: MirrorIssue) -> str:
             f'(solving PR #{sp.pr_number} state={sp.state}, not MERGED)'
         )
         return 'not-solved-closed'
+
+    # Branch-eligibility parity with OSS PR scoring: a solving PR merged into a
+    # non-acceptable branch must not earn discovery credit (the same PR would be
+    # rejected by _should_skip_merged_mirror_pr on the contribution path).
+    # Gate only when base_ref is present: the mirror began exposing branch
+    # metadata on the inline solving_pr after this field existed, so a null
+    # base_ref means pre-backfill data and falls through rather than blocking.
+    if repo_config is not None and sp.base_ref is not None:
+        skip, reason = check_merged_branch_eligibility(
+            pr_number=sp.pr_number,
+            repo_full_name=issue.repo_full_name,
+            base_ref=sp.base_ref,
+            head_ref=sp.head_ref,
+            head_repo_full_name=sp.head_repo_full_name,
+            default_branch=sp.default_branch,
+            repo_config=repo_config,
+        )
+        if skip:
+            bt.logging.debug(f'  issue #{issue.issue_number} ({issue.repo_full_name}): closed-not-solved ({reason})')
+            return 'not-solved-closed'
 
     if sp.edited_after_merge:
         bt.logging.debug(

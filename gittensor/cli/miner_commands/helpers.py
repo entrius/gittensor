@@ -180,6 +180,8 @@ def _pat_check_row_category(row: dict[str, Any]) -> str:
         return 'no_pat'
     if row.get('has_pat') is True and row.get('pat_valid') is False:
         return 'invalid_pat'
+    if row.get('has_pat') is True and row.get('pat_valid') is None:
+        return 'inconclusive'
     return 'no_response'
 
 
@@ -190,6 +192,7 @@ def _pat_check_aggregate_counts(results: list[dict[str, Any]]) -> dict[str, int]
         'valid': counts['valid'],
         'no_pat': counts['no_pat'],
         'invalid_pat': counts['invalid_pat'],
+        'inconclusive': counts['inconclusive'],
         'no_response': counts['no_response'],
     }
 

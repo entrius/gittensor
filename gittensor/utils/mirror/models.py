@@ -206,11 +206,16 @@ class MirrorSolvingPR:
     head_sha: Optional[str]
     base_sha: Optional[str]
     merge_base_sha: Optional[str]
+    base_ref: Optional[str]
+    head_ref: Optional[str]
+    head_repo_full_name: Optional[str]
+    default_branch: Optional[str]
     review_summary: MirrorReviewSummary
     labels: List[MirrorLabel] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data: dict) -> 'MirrorSolvingPR':
+        head_repo = data.get('head_repo_full_name')
         return cls(
             pr_number=data['pr_number'],
             author_github_id=str(data['author_github_id']),
@@ -221,6 +226,10 @@ class MirrorSolvingPR:
             head_sha=data.get('head_sha'),
             base_sha=data.get('base_sha'),
             merge_base_sha=data.get('merge_base_sha'),
+            base_ref=data.get('base_ref'),
+            head_ref=data.get('head_ref'),
+            head_repo_full_name=head_repo.lower() if head_repo else None,
+            default_branch=data.get('default_branch'),
             review_summary=MirrorReviewSummary.from_dict(data.get('review_summary') or {}),
             labels=[MirrorLabel.from_dict(label) for label in data.get('labels') or []],
         )

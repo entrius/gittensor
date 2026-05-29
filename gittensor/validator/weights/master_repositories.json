@@ -3,6 +3,10 @@
     "emission_share": 0.0,
     "issue_discovery_share": 0.0
   },
+  "cogniax/tao-pulse-app": {
+    "emission_share": 0.01,
+    "issue_discovery_share": 0.0
+  },
   "entrius/allways": {
     "emission_share": 0.05018,
     "issue_discovery_share": 1.0,

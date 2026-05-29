@@ -133,7 +133,6 @@ def mirror_scored_pr_to_legacy_pull_request(
         deletions=pr.deletions,
         commits=pr.commits_count,
         total_nodes_scored=scored.total_nodes_scored,
-        code_density=scored.code_density,
         token_score=scored.token_score,
         structural_count=scored.structural_count,
         structural_score=scored.structural_score,

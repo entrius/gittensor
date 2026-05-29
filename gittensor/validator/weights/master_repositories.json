@@ -166,6 +166,11 @@
   },
   "we-promise/sure": {
     "emission_share": 0.03,
-    "issue_discovery_share": 0.0
+    "issue_discovery_share": 0.0,
+    "label_multipliers": {
+      "performance": 1.5,
+      "mobile/Flutter": 1.2
+    },
+    "maintainer_cut": 0.3
   }
 }

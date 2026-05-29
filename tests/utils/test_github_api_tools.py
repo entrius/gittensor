@@ -306,6 +306,26 @@ class TestFindSolverFromClosureEvent:
 
     @patch('gittensor.utils.github_api_tools.execute_graphql_query')
     @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_close_event_matches_closed_at_with_normalized_timestamps(self, mock_logging, mock_graphql):
+        """Equivalent ISO timestamps must match (Z vs +00:00)."""
+        mock_graphql.return_value = _closure_graphql_response(
+            [
+                _closed_event_pr_node(
+                    number=20,
+                    user_id=42,
+                    created_at='2025-06-15T12:00:00.000+00:00',
+                ),
+            ],
+            closed_at='2025-06-15T12:00:00Z',
+        )
+
+        solver_id, pr_number = find_solver_from_closure_event('owner/repo', 12, 'fake_token')
+
+        assert solver_id == 42
+        assert pr_number == 20
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
     def test_single_merged_pr_closing_issue(self, mock_logging, mock_graphql):
         """Single merged PR closer returns correct solver."""
         mock_graphql.return_value = _closure_graphql_response(
@@ -575,6 +595,37 @@ class TestCheckGithubIssueClosed:
             'solver_github_id': 999,
             'pr_number': 900,
             'solver_lookup_failed': False,
+        }
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_truncated_closure_timeline_sets_solver_lookup_failed(self, mock_logging, mock_get, mock_graphql):
+        """When closed events exist but the current close is outside the window, do not vote cancel."""
+        issue_response = Mock()
+        issue_response.status_code = 200
+        issue_response.json.return_value = {'state': 'closed', 'state_reason': 'completed'}
+        mock_get.return_value = issue_response
+        stale_events = [
+            _closed_event_pr_node(
+                number=i,
+                user_id=100 + i,
+                created_at=f'2024-01-{i:02d}T00:00:00Z',
+            )
+            for i in range(1, 21)
+        ]
+        mock_graphql.return_value = _closure_graphql_response(
+            stale_events,
+            closed_at='2025-12-01T00:00:00Z',
+        )
+
+        result = check_github_issue_closed('owner/repo', 12, 'fake_token')
+
+        assert result == {
+            'is_closed': True,
+            'solver_github_id': None,
+            'pr_number': None,
+            'solver_lookup_failed': True,
         }
 
     @patch('gittensor.utils.github_api_tools.execute_graphql_query')

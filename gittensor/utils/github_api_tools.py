@@ -14,6 +14,7 @@ from gittensor.constants import (
 )
 from gittensor.utils.models import PRInfo
 from gittensor.utils.utils import backoff_seconds
+from gittensor.validator.utils.datetime_utils import parse_github_iso_to_utc
 
 
 class GitHubIdentityStatus(Enum):
@@ -202,7 +203,7 @@ query($owner: String!, $name: String!, $issueNumber: Int!) {
   repository(owner: $owner, name: $name) {
     issue(number: $issueNumber) {
       closedAt
-      timelineItems(itemTypes: [CLOSED_EVENT], last: 20) {
+      timelineItems(itemTypes: [CLOSED_EVENT], last: 100) {
         nodes {
           ... on ClosedEvent {
             createdAt
@@ -420,8 +421,23 @@ def _select_current_close_event(issue_data: Dict[str, Any]) -> Optional[Dict[str
     if not completed_events:
         return None
 
+    closed_dt = None
+    try:
+        closed_dt = parse_github_iso_to_utc(closed_at)
+    except (TypeError, ValueError):
+        closed_dt = None
+
     for node in reversed(completed_events):
-        if node.get('createdAt') == closed_at:
+        created_at = node.get('createdAt')
+        if not created_at:
+            continue
+        if closed_dt is not None:
+            try:
+                if parse_github_iso_to_utc(created_at) == closed_dt:
+                    return node
+            except (TypeError, ValueError):
+                pass
+        if created_at == closed_at:
             return node
     return None
 
@@ -495,6 +511,16 @@ def find_solver_from_closure_event(
 
     close_event = _select_current_close_event(issue_data)
     if close_event is None:
+        closed_at = issue_data.get('closedAt')
+        if closed_at:
+            timeline_nodes = issue_data.get('timelineItems', {}).get('nodes', []) or []
+            completed_events = [node for node in timeline_nodes if node and _is_completed_close_event(node)]
+            if completed_events:
+                bt.logging.warning(
+                    f'Could not resolve current close event for {repo}#{issue_number} '
+                    f'within timeline window (closed_at={closed_at})'
+                )
+                return None
         return None, None
 
     solver_github_id, pr_number = _solver_from_closed_event(f'{owner}/{name}', close_event)

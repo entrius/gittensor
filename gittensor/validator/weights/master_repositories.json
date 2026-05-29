@@ -3,8 +3,22 @@
     "emission_share": 0.0,
     "issue_discovery_share": 0.0
   },
+  "cogniax/tao-pulse-app": {
+    "emission_share": 0.01,
+    "issue_discovery_share": 0.0
+  },
+  "e35ventura/taopedia": {
+    "emission_share": 0.025,
+    "issue_discovery_share": 0.0,
+    "maintainer_cut": 0.0
+  },
+  "e35ventura/taopedia-articles": {
+    "emission_share": 0.025,
+    "issue_discovery_share": 0.0,
+    "maintainer_cut": 0.0
+  },
   "entrius/allways": {
-    "emission_share": 0.05018,
+    "emission_share": 0.05,
     "issue_discovery_share": 1.0,
     "label_multipliers": {
       "bug": 1.25,
@@ -15,7 +29,7 @@
     "trusted_label_pipeline": true
   },
   "entrius/das-github-mirror": {
-    "emission_share": 0.006,
+    "emission_share": 0.005,
     "issue_discovery_share": 0.5,
     "label_multipliers": {
       "bug": 1.25,
@@ -26,7 +40,7 @@
     "trusted_label_pipeline": true
   },
   "entrius/gittensor": {
-    "emission_share": 0.10127,
+    "emission_share": 0.1,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "bug": 1.1,
@@ -67,8 +81,12 @@
     "trusted_label_pipeline": true
   },
   "Geniepod/genie-claw": {
+    "eligibility": {
+      "max_open_pr_threshold": 2
+    },
     "emission_share": 0.033,
-    "issue_discovery_share": 0.0
+    "issue_discovery_share": 0.0,
+    "maintainer_cut": 0.3
   },
   "infiniflow/ragflow": {
     "emission_share": 0.055,
@@ -95,7 +113,20 @@
   },
   "JSONbored/gittensory": {
     "emission_share": 0.01,
-    "issue_discovery_share": 0.0
+    "issue_discovery_share": 0.0,
+    "label_multipliers": {
+      "feature": 1.5
+    },
+    "maintainer_cut": 0.3,
+    "scoring": {
+      "pr_lookback_days": 45,
+      "maintainer_issue_multiplier": 1.75,
+      "time_decay": {
+        "grace_period_hours": 24,
+        "sigmoid_midpoint_days": 14,
+        "min_multiplier": 0.1
+      }
+    }
   },
   "MkDev11/gittensor-hub": {
     "emission_share": 0.02,
@@ -139,7 +170,14 @@
   },
   "phase-rs/phase": {
     "emission_share": 0.015,
-    "issue_discovery_share": 0.0
+    "issue_discovery_share": 0.0,
+    "label_multipliers": {
+      "bug": 1.1,
+      "ai-contribution": 0,
+      "enhancement": 1.25,
+      "feature": 1.5,
+      "refactor": 0.25
+    }
   },
   "seroperson/jvm-live-reload": {
     "emission_share": 0.011,
@@ -151,6 +189,11 @@
   },
   "we-promise/sure": {
     "emission_share": 0.03,
-    "issue_discovery_share": 0.0
+    "issue_discovery_share": 0.0,
+    "label_multipliers": {
+      "performance": 1.5,
+      "mobile/Flutter": 1.2
+    },
+    "maintainer_cut": 0.3
   }
 }

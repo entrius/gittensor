@@ -92,8 +92,17 @@ def issues_list(
 
     print_network_header(network_name, contract_addr)
 
-    with loading_context('Reading issues from contract...', as_json):
-        issues = read_issues_from_contract(ws_endpoint, contract_addr, verbose)
+    try:
+        with loading_context('Reading issues from contract...', as_json):
+            issues = read_issues_from_contract(ws_endpoint, contract_addr, verbose)
+    except ImportError as e:
+        handle_exception(
+            as_json=as_json,
+            message=f'Missing dependency: {e}. Install with: uv sync',
+            error_type='missing_dependency',
+        )
+    except Exception as e:
+        handle_exception(as_json=as_json, message=f'Error reading from contract: {e}', error_type='read_failed')
 
     if as_json:
         # Enrich with human-readable ALPHA amounts for JSON consumers

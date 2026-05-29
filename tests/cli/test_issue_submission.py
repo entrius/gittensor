@@ -6,6 +6,8 @@
 import json
 from unittest.mock import patch
 
+import click
+
 
 def test_submissions_json_schema_is_stable(cli_root, runner, sample_issue, sample_prs):
     with (
@@ -108,6 +110,32 @@ def test_submissions_human_no_open_prs_message(cli_root, runner, sample_issue):
 
     assert result.exit_code == 0
     assert 'No open submissions available' in result.output
+
+
+def test_submissions_json_contract_read_failure_returns_structured_error(cli_root, runner):
+    """`fetch_issue_from_contract` now converts contract-read failures to a
+    `ClickException`, which `submissions` routes through `handle_exception` —
+    a contract outage must surface as `success: false` instead of the old
+    misleading `Issue ID <N> not found on-chain.` message."""
+    with (
+        patch('gittensor.cli.issue_commands.submissions.get_contract_address', return_value='0xabc'),
+        patch('gittensor.cli.issue_commands.submissions.resolve_network', return_value=('ws://x', 'test')),
+        patch(
+            'gittensor.cli.issue_commands.submissions.fetch_issue_from_contract',
+            side_effect=click.ClickException('Error reading from contract: [Errno 111] Connection refused'),
+        ),
+    ):
+        result = runner.invoke(
+            cli_root,
+            ['issues', 'submissions', '--id', '42', '--json'],
+            catch_exceptions=False,
+        )
+
+    assert result.exit_code != 0
+    payload = json.loads(result.stdout)
+    assert payload['success'] is False
+    assert 'Error reading from contract' in payload['error']['message']
+    assert 'not found on-chain' not in payload['error']['message']
 
 
 def test_submissions_help_via_issue_alias_routes_to_command_help(cli_root, runner):

@@ -22,6 +22,7 @@ Anti-gaming notes:
 """
 
 import asyncio
+import math
 import os
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
@@ -35,8 +36,8 @@ from gittensor.constants import (
     MAX_CONTRIBUTION_BONUS,
     MAX_ISSUE_CLOSE_WINDOW_DAYS,
     MERGED_PR_BASE_SCORE,
-    MIN_TOKEN_SCORE_FOR_BASE_SCORE,
     SECONDS_PER_DAY,
+    SRC_TOK_SATURATION_SCALE,
 )
 from gittensor.utils.github_api_tools import FileContentPair, branch_matches_pattern
 from gittensor.utils.mirror.client import MirrorClient, MirrorRequestError
@@ -53,7 +54,6 @@ from gittensor.validator.utils.load_weights import (
     RepositoryConfig,
     ResolvedScoring,
     TokenConfig,
-    resolve_eligibility,
     resolve_scoring,
 )
 from gittensor.validator.utils.tree_sitter_scoring import calculate_token_score_from_file_changes
@@ -131,6 +131,7 @@ async def score_pr(
     # eval_.merged_prs contains only eligibility-passed PRs.
 
     has_fixed_base = repo_config.fixed_base_score is not None
+    scoring_cfg = resolve_scoring(repo_config.scoring)
 
     # Mirror signals it has no stored files for this PR (pending backfill, in-flight
     # file job, etc.) — skip the round trip unless the repo explicitly supplies
@@ -157,9 +158,7 @@ async def score_pr(
                 file_contents,
                 programming_languages,
                 token_config,
-                min_token_score_for_base_score=resolve_eligibility(
-                    repo_config.eligibility
-                ).min_token_score_for_base_score,
+                src_tok_saturation_scale=scoring_cfg.src_tok_saturation_scale,
             )
             scored.token_score = result.token_score
             scored.structural_count = result.structural_count
@@ -167,7 +166,6 @@ async def score_pr(
             scored.leaf_count = result.leaf_count
             scored.leaf_score = result.leaf_score
             scored.total_nodes_scored = result.total_nodes_scored
-            scored.code_density = result.code_density
             scored.base_score = result.base_score
         elif not has_fixed_base:
             bt.logging.warning(f'No files returned for PR #{pr.pr_number}')
@@ -178,7 +176,7 @@ async def score_pr(
         # eligibility and reporting gates keep their evidence signal.
         scored.base_score = repo_config.fixed_base_score
 
-    _calculate_pr_multipliers(scored, repo_config)
+    _calculate_pr_multipliers(scored, repo_config, scoring_cfg)
 
     if pr.state == 'MERGED':
         eval_.unique_repos_contributed_to.add(pr.repo_full_name)
@@ -271,7 +269,6 @@ class BaseScoreResult:
     leaf_count: int
     leaf_score: float
     total_nodes_scored: int
-    code_density: float
 
 
 def calculate_base_score_for_pr_files(
@@ -279,22 +276,14 @@ def calculate_base_score_for_pr_files(
     file_contents: Dict[str, FileContentPair],
     programming_languages: Dict[str, LanguageConfig],
     token_config: TokenConfig,
-    min_token_score_for_base_score: Optional[float] = None,
+    src_tok_saturation_scale: Optional[float] = None,
 ) -> BaseScoreResult:
-    """Density-scaled SOURCE token score plus cross-category contribution bonus.
+    """Saturation-curve base score on source token score, plus contribution bonus.
 
-    Returns a ``BaseScoreResult`` the caller copies onto whatever container
-    they're populating (e.g. ``ScoredPR`` for OSS, ``Issue`` discovery
-    fields for issue discovery).
-
-    ``min_token_score_for_base_score`` is the per-repo token-score floor; PRs
-    below it get ``base_score = 0``. Callers should pass the resolved per-repo
-    value from ``resolve_eligibility(repo_config.eligibility)``. If None, falls
-    back to the global ``MIN_TOKEN_SCORE_FOR_BASE_SCORE`` default.
+    ``src_tok_saturation_scale`` defaults to the global ``SRC_TOK_SATURATION_SCALE``;
+    callers should pass the resolved per-repo value from ``resolve_scoring(...)``.
     """
-    threshold = (
-        min_token_score_for_base_score if min_token_score_for_base_score is not None else MIN_TOKEN_SCORE_FOR_BASE_SCORE
-    )
+    scale = src_tok_saturation_scale if src_tok_saturation_scale is not None else SRC_TOK_SATURATION_SCALE
     scoring_result: PrScoringResult = calculate_token_score_from_file_changes(
         file_changes,
         file_contents,
@@ -319,21 +308,16 @@ def calculate_base_score_for_pr_files(
 
     source = scoring_result.by_category.get(ScoringCategory.SOURCE)
     source_token_score = source.score_breakdown.total_score if source and source.score_breakdown else 0.0
-    source_density = source.density if source else 0.0
-    code_density = round(source_density, 2)
 
-    if source_token_score < threshold:
-        initial_base_score = 0.0
-    else:
-        initial_base_score = MERGED_PR_BASE_SCORE * source_density
+    initial_base_score = MERGED_PR_BASE_SCORE * (1.0 - math.exp(-source_token_score / scale))
 
     bonus_percent = min(1.0, scoring_result.total_score / CONTRIBUTION_SCORE_FOR_FULL_BONUS)
     contribution_bonus = round(bonus_percent * MAX_CONTRIBUTION_BONUS, 2)
     base_score = round(initial_base_score + contribution_bonus, 2)
 
-    threshold_note = f' [below {threshold} token threshold]' if source_token_score < threshold else ''
     bt.logging.info(
-        f'Base score: {initial_base_score:.2f} (density {source_density:.2f}){threshold_note}'
+        f'Base score: {initial_base_score:.2f} '
+        f'(src_tok {source_token_score:.1f}, scale {scale:.1f})'
         f' + {contribution_bonus} bonus ({bonus_percent * 100:.0f}% of max {MAX_CONTRIBUTION_BONUS})'
         f' = {base_score:.2f}'
     )
@@ -346,7 +330,6 @@ def calculate_base_score_for_pr_files(
         leaf_count=leaf_count,
         leaf_score=leaf_score,
         total_nodes_scored=total_nodes_scored,
-        code_density=code_density,
     )
 
 
@@ -355,7 +338,7 @@ def calculate_base_score_for_pr_files(
 # ============================================================================
 
 
-def _calculate_pr_multipliers(scored: ScoredPR, repo_config: RepositoryConfig) -> None:
+def _calculate_pr_multipliers(scored: ScoredPR, repo_config: RepositoryConfig, scoring_cfg: ResolvedScoring) -> None:
     """Compute time_decay, review_quality, label, and issue multipliers.
 
     Spam and credibility multipliers are deferred to ``finalize_miner_scores``
@@ -363,7 +346,6 @@ def _calculate_pr_multipliers(scored: ScoredPR, repo_config: RepositoryConfig) -
     """
     pr = scored.pr
     is_merged = pr.state == 'MERGED'
-    scoring_cfg = resolve_scoring(repo_config.scoring)
 
     chosen_label, label_multiplier = _resolve_trusted_scoring_label(pr, repo_config)
     scored.label = chosen_label
@@ -438,6 +420,10 @@ def _is_valid_linked_issue(li: MirrorLinkedIssue, pr: MirrorPullRequest) -> bool
     - Any CLOSED issue must have state_reason=COMPLETED — NOT_PLANNED / reopened
       closures never grant a multiplier. Applies regardless of PR state, so the
       gate covers OPEN-PR collateral as well.
+    - Mirror solver attribution: when ``li.solved_by_pr`` is populated, the
+      scored PR must be that solver. Mirrors the issue-discovery path, which
+      already treats ``solved_by_pr`` as authoritative. Fails open on ``None``
+      to preserve behavior on older snapshots that don't set the field.
     - Additional MERGED-PR-only gates: edited_after_merge, issue must be CLOSED,
       close-timing window vs. merge (rejects both too-far-after AND too-far-before
       — negative days means the issue closed before the PR merged, so the PR
@@ -463,6 +449,13 @@ def _is_valid_linked_issue(li: MirrorLinkedIssue, pr: MirrorPullRequest) -> bool
     # also requires that any CLOSED linked issue closed as COMPLETED.
     if li.state == 'CLOSED' and li.state_reason != 'COMPLETED':
         bt.logging.warning(f'Skipping linked issue #{li.number} - state_reason={li.state_reason} (need COMPLETED)')
+        return False
+
+    if li.solved_by_pr is not None and li.solved_by_pr != pr.pr_number:
+        bt.logging.warning(
+            f'Skipping linked issue #{li.number} - solved_by_pr={li.solved_by_pr} '
+            f'!= PR #{pr.pr_number} (different PR was the actual solver)'
+        )
         return False
 
     is_merged = pr.state == 'MERGED'

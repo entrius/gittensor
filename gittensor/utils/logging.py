@@ -64,7 +64,6 @@ def log_scoring_results(
 
     # Calculate token score (total minus line-count score)
     token_score = total_score - line_count_score
-    density = total_score / total_raw_lines if total_raw_lines > 0 else 0
 
     # Build score display: show token and line scores separately if both exist
     if line_count_score > 0 and token_score > 0:
@@ -74,7 +73,7 @@ def log_scoring_results(
     else:
         score_str = f'Token Score: {token_score:.2f}'
 
-    bt.logging.info(f'  ├─ {score_str} | Total Lines: {total_raw_lines} | Density: {density:.2f}')
+    bt.logging.info(f'  ├─ {score_str} | Total Lines: {total_raw_lines}')
 
     if breakdown_str:
         bt.logging.info(f'  │ └─ Breakdown: {breakdown_str}')

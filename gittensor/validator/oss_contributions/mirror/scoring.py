@@ -189,6 +189,42 @@ async def score_pr(
 # ============================================================================
 
 
+def check_merged_branch_eligibility(
+    *,
+    pr_number: int,
+    repo_full_name: str,
+    base_ref: Optional[str],
+    head_ref: Optional[str],
+    head_repo_full_name: Optional[str],
+    default_branch: Optional[str],
+    repo_config: RepositoryConfig,
+) -> Tuple[bool, Optional[str]]:
+    """Branch-eligibility gate for a MERGED PR, shared by OSS PR scoring and
+    issue discovery so both reject the same non-acceptable-branch merges.
+
+    Returns ``(skip, reason)``. Missing ``default_branch`` falls back to
+    ``main``; missing ``head_ref``/``head_repo_full_name`` skips the head_ref
+    check rather than false-positive-blocking on older data.
+    """
+    additional = repo_config.additional_acceptable_branches or []
+    acceptable = [default_branch or 'main'] + additional
+
+    # base_ref check.
+    if not branch_matches_pattern(base_ref or '', acceptable):
+        return True, (f'PR #{pr_number} merged to {base_ref!r} not in acceptable branches={acceptable}')
+
+    # head_ref check — block PRs whose source branch is itself an acceptable
+    # branch. Only applies to same-repo PRs: fork branch names are arbitrary.
+    is_same_repo = head_repo_full_name is not None and head_repo_full_name == repo_full_name
+    if acceptable and head_ref and is_same_repo and branch_matches_pattern(head_ref, acceptable):
+        return True, (
+            f'PR #{pr_number} source branch {head_ref!r} is itself in '
+            f'acceptable branches — merging between acceptable branches not allowed'
+        )
+
+    return False, None
+
+
 def _should_skip_merged_mirror_pr(scored: ScoredPR, repo_config: RepositoryConfig) -> Tuple[bool, Optional[str]]:
     """Eligibility gate for MERGED PRs.
 
@@ -227,25 +263,15 @@ def _should_skip_merged_mirror_pr(scored: ScoredPR, repo_config: RepositoryConfi
         if pr.review_summary.approved_count == 0:
             return True, f'PR #{pr.pr_number} self-merged without external approval'
 
-    additional = repo_config.additional_acceptable_branches or []
-    default_branch = pr.default_branch or 'main'
-    acceptable = [default_branch] + additional
-
-    # base_ref check.
-    if not branch_matches_pattern(pr.base_ref or '', acceptable):
-        return True, (f'PR #{pr.pr_number} merged to {pr.base_ref!r} not in acceptable branches={acceptable}')
-
-    # head_ref check — block PRs whose source branch is itself an acceptable
-    # branch. Only applies to same-repo PRs: fork branch names are arbitrary.
-    # Falls through when head_ref or head_repo_full_name is missing (older data).
-    is_same_repo = pr.head_repo_full_name is not None and pr.head_repo_full_name == pr.repo_full_name
-    if acceptable and pr.head_ref and is_same_repo and branch_matches_pattern(pr.head_ref, acceptable):
-        return True, (
-            f'PR #{pr.pr_number} source branch {pr.head_ref!r} is itself in '
-            f'acceptable branches — merging between acceptable branches not allowed'
-        )
-
-    return False, None
+    return check_merged_branch_eligibility(
+        pr_number=pr.pr_number,
+        repo_full_name=pr.repo_full_name,
+        base_ref=pr.base_ref,
+        head_ref=pr.head_ref,
+        head_repo_full_name=pr.head_repo_full_name,
+        default_branch=pr.default_branch,
+        repo_config=repo_config,
+    )
 
 
 # ============================================================================
@@ -420,6 +446,10 @@ def _is_valid_linked_issue(li: MirrorLinkedIssue, pr: MirrorPullRequest) -> bool
     - Any CLOSED issue must have state_reason=COMPLETED — NOT_PLANNED / reopened
       closures never grant a multiplier. Applies regardless of PR state, so the
       gate covers OPEN-PR collateral as well.
+    - Mirror solver attribution: when ``li.solved_by_pr`` is populated, the
+      scored PR must be that solver. Mirrors the issue-discovery path, which
+      already treats ``solved_by_pr`` as authoritative. Fails open on ``None``
+      to preserve behavior on older snapshots that don't set the field.
     - Additional MERGED-PR-only gates: edited_after_merge, issue must be CLOSED,
       close-timing window vs. merge (rejects both too-far-after AND too-far-before
       — negative days means the issue closed before the PR merged, so the PR
@@ -445,6 +475,13 @@ def _is_valid_linked_issue(li: MirrorLinkedIssue, pr: MirrorPullRequest) -> bool
     # also requires that any CLOSED linked issue closed as COMPLETED.
     if li.state == 'CLOSED' and li.state_reason != 'COMPLETED':
         bt.logging.warning(f'Skipping linked issue #{li.number} - state_reason={li.state_reason} (need COMPLETED)')
+        return False
+
+    if li.solved_by_pr is not None and li.solved_by_pr != pr.pr_number:
+        bt.logging.warning(
+            f'Skipping linked issue #{li.number} - solved_by_pr={li.solved_by_pr} '
+            f'!= PR #{pr.pr_number} (different PR was the actual solver)'
+        )
         return False
 
     is_merged = pr.state == 'MERGED'

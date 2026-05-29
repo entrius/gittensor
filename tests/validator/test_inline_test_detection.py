@@ -1,6 +1,6 @@
 """Tests for inline test detection in Rust, Zig, and D source files."""
 
-from gittensor.constants import INLINE_TEST_EXTENSIONS
+from gittensor.constants import INLINE_TEST_EXTENSIONS, INLINE_TEST_PATTERNS
 from gittensor.validator.utils.tree_sitter_scoring import has_inline_tests
 
 # -- Rust ------------------------------------------------------------------
@@ -107,3 +107,20 @@ def test_inline_test_extensions_constant():
     assert 'zig' in INLINE_TEST_EXTENSIONS
     assert 'd' in INLINE_TEST_EXTENSIONS
     assert 'py' not in INLINE_TEST_EXTENSIONS
+
+
+def test_inline_test_patterns_only_skip_horizontal_indent():
+    for pattern in INLINE_TEST_PATTERNS.values():
+        assert r'^\s*' not in pattern.pattern
+
+
+def test_inline_test_patterns_do_not_match_across_newlines():
+    samples = {
+        'rs': '\n#[test]\nfn test_it() {}\n',
+        'zig': '\ntest "add" { }\n',
+        'd': '\nunittest { assert(true); }\n',
+    }
+
+    for extension, content in samples.items():
+        assert INLINE_TEST_PATTERNS[extension].match(content) is None
+        assert has_inline_tests(content, extension) is True

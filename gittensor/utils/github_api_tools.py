@@ -14,6 +14,7 @@ from gittensor.constants import (
 )
 from gittensor.utils.models import PRInfo
 from gittensor.utils.utils import backoff_seconds
+from gittensor.validator.utils.datetime_utils import parse_github_iso_to_utc
 
 
 class GitHubIdentityStatus(Enum):
@@ -420,8 +421,23 @@ def _select_current_close_event(issue_data: Dict[str, Any]) -> Optional[Dict[str
     if not completed_events:
         return None
 
+    closed_dt = None
+    try:
+        closed_dt = parse_github_iso_to_utc(closed_at)
+    except (TypeError, ValueError):
+        closed_dt = None
+
     for node in reversed(completed_events):
-        if node.get('createdAt') == closed_at:
+        created_at = node.get('createdAt')
+        if not created_at:
+            continue
+        if closed_dt is not None:
+            try:
+                if parse_github_iso_to_utc(created_at) == closed_dt:
+                    return node
+            except (TypeError, ValueError):
+                pass
+        if created_at == closed_at:
             return node
     return None
 

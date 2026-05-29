@@ -139,7 +139,14 @@
   },
   "phase-rs/phase": {
     "emission_share": 0.015,
-    "issue_discovery_share": 0.0
+    "issue_discovery_share": 0.0,
+    "label_multipliers": {
+      "bug": 1.1,
+      "ai-contribution": 0,
+      "enhancement": 1.25,
+      "feature": 1.5,
+      "refactor": 0.25
+    }
   },
   "seroperson/jvm-live-reload": {
     "emission_share": 0.011,

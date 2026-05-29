@@ -137,6 +137,39 @@ def test_ineligible_miner_still_receives_solution_vote():
     contract_client.vote_cancel_issue.assert_not_called()
 
 
+def test_registered_miner_with_int_github_id_receives_solution_vote():
+    validator = _make_validator()
+    contract_client = MagicMock()
+    contract_client.harvest_emissions.return_value = None
+    contract_client.get_issues_by_status.return_value = [_make_issue()]
+    contract_client.vote_solution.return_value = True
+
+    miner_eval = MinerEvaluation(uid=5, hotkey='hk5', github_id=999)
+
+    with (
+        patch('gittensor.validator.issue_competitions.forward.GITTENSOR_VALIDATOR_PAT', 'ghp_validator'),
+        patch('gittensor.validator.issue_competitions.forward.get_contract_address', return_value='5Contract'),
+        patch(
+            'gittensor.validator.issue_competitions.forward.check_github_issue_closed',
+            return_value={
+                'is_closed': True,
+                'solver_github_id': 999,
+                'pr_number': 42,
+                'solver_lookup_failed': False,
+            },
+        ),
+        patch('gittensor.validator.issue_competitions.forward.get_miner_coldkey', return_value='ck5'),
+        patch(
+            'gittensor.validator.issue_competitions.forward.IssueCompetitionContractClient',
+            return_value=contract_client,
+        ),
+    ):
+        _run(issue_competitions(cast(Any, validator), {5: miner_eval}))
+
+    contract_client.vote_solution.assert_called_once()
+    contract_client.vote_cancel_issue.assert_not_called()
+
+
 def test_failed_miner_does_not_receive_solution_vote():
     validator = _make_validator()
     contract_client = MagicMock()

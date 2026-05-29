@@ -33,11 +33,11 @@ def validate_github_credentials_result(
 
     identity = get_github_identity(pat)
     if identity.status is GitHubIdentityStatus.VALID:
-        return GitHubCredentialValidation(identity.github_id, None)
+        return GitHubCredentialValidation(str(identity.github_id), None)
 
     if identity.status is GitHubIdentityStatus.TRANSIENT_FAILURE:
-        if stored_github_id and stored_github_id != '0':
-            return GitHubCredentialValidation(stored_github_id, None, transient_failure=True)
+        if stored_github_id and str(stored_github_id) != '0':
+            return GitHubCredentialValidation(str(stored_github_id), None, transient_failure=True)
         return GitHubCredentialValidation(
             None,
             f'Could not validate Github id for miner {uid}: GitHub /user lookup failed transiently',

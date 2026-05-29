@@ -33,8 +33,8 @@ def detect_and_penalize_miners_sharing_github(miner_evaluations: Dict[int, Miner
         # collation is idempotent and doesn't double-penalize.
         if evaluation.failed_reason is not None:
             continue
-        if evaluation.github_id and evaluation.github_id != '0':
-            github_id_to_uids[evaluation.github_id].append(uid)
+        if evaluation.github_id and str(evaluation.github_id) != '0':
+            github_id_to_uids[str(evaluation.github_id)].append(uid)
 
     penalized_uids: Set[int] = set()
     for github_id, uids in github_id_to_uids.items():

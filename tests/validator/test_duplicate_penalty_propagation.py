@@ -38,6 +38,19 @@ def _discovered_issue(uid: int) -> Issue:
     return issue
 
 
+def test_duplicate_detection_penalizes_int_and_str_github_id():
+    evaluations = {
+        1: MinerEvaluation(uid=1, hotkey='hotkey_1', github_id='12345'),
+        2: MinerEvaluation(uid=2, hotkey='hotkey_2', github_id=12345),
+    }
+
+    penalized = detect_and_penalize_miners_sharing_github(evaluations)
+
+    assert penalized == {1, 2}
+    assert evaluations[1].failed_reason is not None
+    assert evaluations[2].failed_reason is not None
+
+
 def test_detected_duplicates_wipe_prior_ema_via_update_scores():
     # Prior round: UID 1 and UID 2 posted PRs under the same GitHub account
     # and accumulated EMA weight. UID 0 is honest. On the unfixed call

@@ -426,7 +426,7 @@ def _select_current_close_event(issue_data: Dict[str, Any]) -> Optional[Dict[str
     return None
 
 
-def _solver_from_closed_event(repo: str, event: Dict[str, Any]) -> tuple[Optional[int], Optional[int]]:
+def _solver_from_closed_event(repo: str, event: Dict[str, Any]) -> tuple[Optional[str], Optional[int]]:
     target_repo = repo.lower()
     closer = event.get('closer') or {}
     if closer.get('__typename') != 'PullRequest':
@@ -445,12 +445,17 @@ def _solver_from_closed_event(repo: str, event: Dict[str, Any]) -> tuple[Optiona
         return None, None
 
     author = closer.get('author') or {}
-    return author.get('databaseId'), closer.get('number')
+    raw_id = author.get('databaseId')
+    # Normalize to str so dict lookups against registered_miners (whose keys
+    # come from get_github_identity -> str) always match regardless of the
+    # JSON int/str ambiguity.  See entrius/gittensor#1413.
+    github_id = str(raw_id) if raw_id is not None else None
+    return github_id, closer.get('number')
 
 
 def find_solver_from_closure_event(
     repo: str, issue_number: int, token: str
-) -> Optional[tuple[Optional[int], Optional[int]]]:
+) -> Optional[tuple[Optional[str], Optional[int]]]:
     """Resolve the issue solver from GitHub's authoritative current close event.
 
     Cross-reference and ``closingIssuesReferences`` entries are declarations made
@@ -495,6 +500,24 @@ def find_solver_from_closure_event(
 
     close_event = _select_current_close_event(issue_data)
     if close_event is None:
+        # When the issue is closed (has closedAt) but we couldn't find the
+        # matching close event, the lookup may be indeterminate due to
+        # timeline truncation.  Return None (lookup failure) when there are
+        # completed close events in the timeline but none match closedAt
+        # (suggesting the authoritative event fell outside the window),
+        # so callers skip cancel votes on legitimately solved issues.
+        # See entrius/gittensor#1411.
+        closed_at = issue_data.get('closedAt')
+        if closed_at:
+            timeline_nodes = issue_data.get('timelineItems', {}).get('nodes', []) or []
+            has_completed = any(n and _is_completed_close_event(n) for n in timeline_nodes)
+            if has_completed:
+                # Completed events exist but none match closedAt — likely truncated
+                bt.logging.warning(
+                    f'Issue {repo}#{issue_number} has closedAt={closed_at} with '
+                    f'completed close events but none match (timeline possibly truncated)'
+                )
+                return None
         return None, None
 
     solver_github_id, pr_number = _solver_from_closed_event(f'{owner}/{name}', close_event)

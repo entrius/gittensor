@@ -316,7 +316,7 @@ class TestFindSolverFromClosureEvent:
 
         solver_id, pr_number = find_solver_from_closure_event('owner/repo', 12, 'fake_token')
 
-        assert solver_id == 42
+        assert solver_id == "42"
         assert pr_number == 14
         query = mock_graphql.call_args.kwargs['query']
         assert 'CLOSED_EVENT' in query
@@ -394,7 +394,7 @@ class TestFindSolverFromClosureEvent:
 
         solver_id, pr_number = find_solver_from_closure_event('owner/repo', 12, 'fake_token')
 
-        assert solver_id == 42
+        assert solver_id == "42"
         assert pr_number == 14
 
     @patch('gittensor.utils.github_api_tools.execute_graphql_query')
@@ -421,7 +421,7 @@ class TestFindSolverFromClosureEvent:
 
         solver_id, pr_number = find_solver_from_closure_event('owner/repo', 12, 'fake_token')
 
-        assert solver_id == 200
+        assert solver_id == "200"
         assert pr_number == 20
 
     @patch('gittensor.utils.github_api_tools.execute_graphql_query')
@@ -462,7 +462,7 @@ class TestFindSolverFromClosureEvent:
 
         solver_id, pr_number = find_solver_from_closure_event('owner/repo', 12, 'fake_token')
 
-        assert solver_id == 42
+        assert solver_id == "42"
         assert pr_number == 14
 
     @patch('gittensor.utils.github_api_tools.execute_graphql_query')
@@ -477,7 +477,7 @@ class TestFindSolverFromClosureEvent:
 
         solver_id, pr_number = find_solver_from_closure_event('owner/repo', 12, 'fake_token')
 
-        assert solver_id == 42
+        assert solver_id == "42"
         assert pr_number == 14
 
     @patch('gittensor.utils.github_api_tools.execute_graphql_query')
@@ -572,7 +572,7 @@ class TestCheckGithubIssueClosed:
 
         assert result == {
             'is_closed': True,
-            'solver_github_id': 999,
+            'solver_github_id': '999',
             'pr_number': 900,
             'solver_lookup_failed': False,
         }

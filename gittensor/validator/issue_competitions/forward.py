@@ -66,8 +66,11 @@ async def issue_competitions(
         # evaluations are not valid payout targets. Duplicate GitHub IDs are
         # penalized in oss_contributions() before this pass and arrive here as
         # failed evaluations.
+        #
+        # Keys are normalized to str so lookups against solver_github_id
+        # (which may arrive as int from GraphQL) always match.  See #1413.
         registered_miners = {
-            eval.github_id: eval.hotkey
+            str(eval.github_id): eval.hotkey
             for eval in miner_evaluations.values()
             if eval.github_id and eval.github_id != '0' and eval.failed_reason is None
         }

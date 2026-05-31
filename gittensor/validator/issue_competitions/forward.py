@@ -1,7 +1,14 @@
 # The MIT License (MIT)
 # Copyright © 2025 Entrius
 
-"""Issue bounties forward pass — harvest, verify, and vote on active issues."""
+"""Issue bounties forward pass — harvest, verify, and vote on active issues.
+
+Uses authoritative GitHub closure data from ``check_github_issue_closed`` (see
+``gittensor.utils.github_api_tools``). Do not infer bounty outcomes from partial
+GraphQL windows or by mixing unrelated totals — the same class of bug as
+under-counting open issues in Gittensory when PR totals are subtracted from
+``repository.issues`` (see ``supplementUnderCountIfNeeded`` / ``expectedForRequiredSegment``).
+"""
 
 from typing import TYPE_CHECKING, Dict
 

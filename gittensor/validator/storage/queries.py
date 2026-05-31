@@ -1,5 +1,15 @@
 # Storage Queries - Only SET/INSERT operations for writing data
 
+from typing import Any, Optional
+
+
+def normalize_github_id(github_id: Any) -> Optional[str]:
+    """Cast github_id to str for SQL parameters, dict keys, and comparisons."""
+    if github_id is None:
+        return None
+    return str(github_id)
+
+
 # Cleanup Queries - Remove stale data when a miner re-registers on a new uid/hotkey
 CLEANUP_STALE_MINER_EVALUATIONS = """
 DELETE FROM miner_evaluations

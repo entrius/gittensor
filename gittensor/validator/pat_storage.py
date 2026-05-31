@@ -20,6 +20,17 @@ PATS_FILE = Path(__file__).resolve().parents[2] / 'data' / 'miner_pats.json'
 _lock = threading.Lock()
 
 
+def _normalize_github_id(github_id) -> str:
+    return str(github_id)
+
+
+def _normalize_entry(entry: dict) -> dict:
+    github_id = entry.get('github_id')
+    if github_id is not None:
+        entry = {**entry, 'github_id': _normalize_github_id(github_id)}
+    return entry
+
+
 def ensure_pats_file() -> None:
     """Create the PATs file with an empty list if it doesn't exist. Called on validator boot."""
     with _lock:
@@ -42,7 +53,7 @@ def save_pat(uid: int, hotkey: str, pat: str, github_id: str) -> None:
             'uid': uid,
             'hotkey': hotkey,
             'pat': pat,
-            'github_id': github_id,
+            'github_id': _normalize_github_id(github_id),
             'stored_at': datetime.now(timezone.utc).isoformat(),
         }
 
@@ -61,7 +72,7 @@ def get_pat_by_uid(uid: int) -> Optional[dict]:
     with _lock:
         for entry in _read_file():
             if entry.get('uid') == uid:
-                return entry
+                return _normalize_entry(entry)
         return None
 
 
@@ -70,7 +81,7 @@ def _read_file() -> list[dict]:
     if not PATS_FILE.exists():
         return []
     try:
-        return json.loads(PATS_FILE.read_text())
+        return [_normalize_entry(e) for e in json.loads(PATS_FILE.read_text())]
     except (json.JSONDecodeError, OSError):
         return []
 

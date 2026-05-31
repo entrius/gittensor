@@ -67,9 +67,9 @@ async def issue_competitions(
         # penalized in oss_contributions() before this pass and arrive here as
         # failed evaluations.
         registered_miners = {
-            eval.github_id: eval.hotkey
+            str(eval.github_id): eval.hotkey
             for eval in miner_evaluations.values()
-            if eval.github_id and eval.github_id != '0' and eval.failed_reason is None
+            if eval.github_id and str(eval.github_id) != '0' and eval.failed_reason is None
         }
         bt.logging.info(
             f'Issue bounties: {len(registered_miners)} registered miners out of {len(miner_evaluations)} total'

@@ -171,7 +171,7 @@ def build_maintainer_uids_by_repo(
                 )
                 continue
             uids = sorted(
-                {github_id_to_uid[m.github_id] for m in response.maintainers if m.github_id in github_id_to_uid}
+                {github_id_to_uid[str(m.github_id)] for m in response.maintainers if str(m.github_id) in github_id_to_uid}
             )
             if uids:
                 result[repo_name] = uids

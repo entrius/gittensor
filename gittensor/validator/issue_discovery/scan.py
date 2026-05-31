@@ -188,7 +188,7 @@ async def run_issue_discovery(
 
         try:
             response = await asyncio.to_thread(
-                client.get_miner_issues, evaluation.github_id, since_by_repo=since_by_repo
+                client.get_miner_issues, str(evaluation.github_id), since_by_repo=since_by_repo
             )
         except MirrorRequestError as e:
             bt.logging.warning(f'├─ UID {uid}: issue fetch failed ({e}) — skipped this miner')
@@ -197,7 +197,7 @@ async def run_issue_discovery(
             continue
 
         try:
-            current_response = await asyncio.to_thread(client.get_miner_issues, evaluation.github_id)
+            current_response = await asyncio.to_thread(client.get_miner_issues, str(evaluation.github_id))
         except MirrorRequestError as e:
             open_counts = _fallback_open_issue_counts(evaluation, evaluation_cache, response.issues, enabled_names)
             bt.logging.warning(f'├─ UID {uid}: open-issue count fetch failed ({e}) — using fallback open counts')
@@ -312,7 +312,7 @@ def _restore_issue_discovery_from_cache(
     if evaluation_cache is None:
         return False
 
-    cached = evaluation_cache.get(evaluation.uid, evaluation.hotkey, evaluation.github_id or '')
+    cached = evaluation_cache.get(evaluation.uid, evaluation.hotkey, str(evaluation.github_id) or '')
     if cached is None:
         bt.logging.warning(f'├─ UID {evaluation.uid}: no cached issue-discovery evaluation available')
         return False
@@ -345,7 +345,7 @@ def _build_canonical_pr_owners(
                 continue
             sp = issue.solving_pr
             assert sp is not None  # _classify_issue guarantees a solving_pr
-            if issue.author_github_id == sp.author_github_id:
+            if str(issue.author_github_id) == str(sp.author_github_id):
                 continue
             key = (issue.repo_full_name, sp.pr_number)
             marker = (issue.created_at or _FAR_FUTURE, issue.issue_number, evaluation.uid)
@@ -379,7 +379,7 @@ def _fallback_open_issue_counts(
     """
     cached = None
     if evaluation_cache is not None:
-        cached = evaluation_cache.get(evaluation.uid, evaluation.hotkey, evaluation.github_id or '')
+        cached = evaluation_cache.get(evaluation.uid, evaluation.hotkey, str(evaluation.github_id) or '')
 
     if cached is not None:
         counts = {

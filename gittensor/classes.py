@@ -282,6 +282,10 @@ class MinerEvaluation:
     mirror_pr_fetch_failed: bool = False
     evaluation_timestamp: Optional[datetime] = None
 
+    def __post_init__(self):
+        if self.github_id is not None:
+            self.github_id = str(self.github_id)
+
     # Populated by gittensor.validator.oss_contributions.mirror.combine.combine.
     merged_prs: List['ScoredPR'] = field(default_factory=list)
     open_prs: List['ScoredPR'] = field(default_factory=list)

@@ -534,16 +534,18 @@ def check_github_issue_closed(repo: str, issue_number: int, token: str) -> Optio
             return {'is_closed': False}
 
         state_reason = data.get('state_reason')
-        if not isinstance(state_reason, str) or state_reason.strip().lower() != 'completed':
-            bt.logging.info(
-                f'Issue closed on GitHub but not completed: {repo}#{issue_number} state_reason={state_reason}'
-            )
-            return {
-                'is_closed': True,
-                'solver_github_id': None,
-                'pr_number': None,
-                'solver_lookup_failed': False,
-            }
+        if isinstance(state_reason, str):
+            normalized_reason = state_reason.strip().lower()
+            if normalized_reason in ('not_planned', 'duplicate', 'transferred'):
+                bt.logging.info(
+                    f'Issue closed on GitHub but not completed: {repo}#{issue_number} state_reason={state_reason}'
+                )
+                return {
+                    'is_closed': True,
+                    'solver_github_id': None,
+                    'pr_number': None,
+                    'solver_lookup_failed': False,
+                }
 
         bt.logging.debug(f'Finding solver for {repo}#{issue_number}')
         solver_lookup = find_solver_from_closure_event(repo, issue_number, token)

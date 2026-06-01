@@ -602,8 +602,6 @@ class TestCheckGithubIssueClosed:
             {'state': 'closed', 'state_reason': 'not_planned'},
             {'state': 'closed', 'state_reason': 'duplicate'},
             {'state': 'closed', 'state_reason': 'transferred'},
-            {'state': 'closed', 'state_reason': None},
-            {'state': 'closed'},
         ],
     )
     @patch('gittensor.utils.github_api_tools.execute_graphql_query')
@@ -624,3 +622,27 @@ class TestCheckGithubIssueClosed:
             'solver_lookup_failed': False,
         }
         mock_graphql.assert_not_called()
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_closed_without_state_reason_attributions_solver(self, mock_logging, mock_get, mock_graphql):
+        issue_response = Mock()
+        issue_response.status_code = 200
+        issue_response.json.return_value = {'state': 'closed'}
+        mock_get.return_value = issue_response
+        mock_graphql.return_value = _closure_graphql_response(
+            [
+                _closed_event_pr_node(number=900, user_id=999),
+            ]
+        )
+
+        result = check_github_issue_closed('owner/repo', 12, 'fake_token')
+
+        assert result == {
+            'is_closed': True,
+            'solver_github_id': 999,
+            'pr_number': 900,
+            'solver_lookup_failed': False,
+        }
+        mock_graphql.assert_called_once()

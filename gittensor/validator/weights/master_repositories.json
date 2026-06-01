@@ -199,7 +199,8 @@
   },
   "touchpilot/touchpilot": {
     "emission_share": 0.025,
-    "issue_discovery_share": 0.0
+    "issue_discovery_share": 0.0,
+    "maintainer_cut": 0.3
   },
   "we-promise/sure": {
     "emission_share": 0.03,

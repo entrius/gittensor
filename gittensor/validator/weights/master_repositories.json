@@ -5,7 +5,8 @@
   },
   "cogniax/tao-pulse-app": {
     "emission_share": 0.01,
-    "issue_discovery_share": 0.0
+    "issue_discovery_share": 0.7,
+    "maintainer_cut": 0.4
   },
   "e35ventura/taopedia": {
     "emission_share": 0.025,

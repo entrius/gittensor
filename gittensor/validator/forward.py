@@ -2,6 +2,7 @@
 # Copyright © 2025 Entrius
 
 import asyncio
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Dict, Optional, Set, Tuple
 
 import bittensor as bt
@@ -17,6 +18,7 @@ from gittensor.validator.utils.config import (
     VALIDATOR_STEPS_INTERVAL,
     VALIDATOR_WAIT,
 )
+from gittensor.validator.utils.datetime_utils import set_scoring_reference_time
 from gittensor.validator.utils.load_weights import (
     RepositoryConfig,
     load_master_repo_weights,
@@ -46,6 +48,7 @@ async def forward(self: 'Validator') -> None:
     """
 
     if self.step % VALIDATOR_STEPS_INTERVAL == 0:
+        set_scoring_reference_time(datetime.now(timezone.utc))
         miner_uids = get_all_uids(self)
         master_repositories = load_master_repo_weights()
         programming_languages = load_programming_language_weights()

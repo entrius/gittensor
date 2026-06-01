@@ -30,9 +30,22 @@ def parse_optional_github_iso_to_utc(value: Optional[str]) -> Optional[datetime]
     return parse_github_iso_to_utc(value) if value else None
 
 
-def calculate_time_decay(merged_at: datetime, time_decay: ResolvedTimeDecay) -> float:
+_scoring_reference_time: Optional[datetime] = None
+
+
+def set_scoring_reference_time(now: Optional[datetime]) -> None:
+    """Pin the reference instant for one validator forward step."""
+    global _scoring_reference_time
+    _scoring_reference_time = now
+
+
+def calculate_time_decay(
+    merged_at: datetime,
+    time_decay: ResolvedTimeDecay,
+    reference_time: Optional[datetime] = None,
+) -> float:
     """Calculate sigmoid-based time decay multiplier from a merge timestamp."""
-    now = datetime.now(timezone.utc)
+    now = reference_time or _scoring_reference_time or datetime.now(timezone.utc)
     hours_since_merge = (now - merged_at).total_seconds() / SECONDS_PER_HOUR
 
     if hours_since_merge < time_decay.grace_period_hours:

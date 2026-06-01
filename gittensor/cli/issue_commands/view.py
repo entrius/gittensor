@@ -5,7 +5,7 @@
 Read-only issue commands
 
 Commands:
-    gitt issues list [--id <ID>]
+    gitt issues list [--id <ID>] [--repo <owner/name>]
     gitt issues bounty-pool
     gitt issues pending-harvest
     gitt admin info
@@ -50,6 +50,14 @@ def _fill_percent(bounty: int, target: int) -> float:
     return float(Decimal(bounty) / Decimal(target) * 100)
 
 
+def _filter_issues_by_repo(issues: list[dict], repo_filter: str | None) -> list[dict]:
+    if not repo_filter:
+        return issues
+
+    normalized_repo = repo_filter.lower()
+    return [issue for issue in issues if issue.get('repository_full_name', '').lower() == normalized_repo]
+
+
 @click.command('list', cls=StyledCommand)
 @click.option(
     '--id',
@@ -80,6 +88,7 @@ def issues_list(
         $ gitt issues list
         $ gitt i list --network test
         $ gitt i list --id 1
+        $ gitt i list --repo owner/repo
         $ gitt i list --json
     [/dim]
     """
@@ -112,7 +121,7 @@ def issues_list(
 
         # Apply --repo filter before rendering (--id takes precedence)
         if repo_filter and issue_id is None:
-            issues = [i for i in issues if i.get('repository_full_name', '').lower() == repo_filter.lower()]
+            issues = _filter_issues_by_repo(issues, repo_filter)
 
         if issue_id is not None:
             issue = next((i for i in issues if i['id'] == issue_id), None)
@@ -150,7 +159,7 @@ def issues_list(
 
     # Apply --repo filter before table render (--id takes precedence)
     if repo_filter and issue_id is None:
-        issues = [i for i in issues if i.get('repository_full_name', '').lower() == repo_filter.lower()]
+        issues = _filter_issues_by_repo(issues, repo_filter)
 
     # Table view of all issues
     err_console.print('[bold cyan]Available Issues[/bold cyan]\n')

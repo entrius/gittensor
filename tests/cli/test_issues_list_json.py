@@ -17,6 +17,14 @@ FAKE_ISSUES = [
         'target_bounty': 100_000_000_000,
         'status': 'Active',
     },
+    {
+        'id': 2,
+        'repository_full_name': 'Other/Repo',
+        'issue_number': 20,
+        'bounty_amount': 25_000_000_000,
+        'target_bounty': 50_000_000_000,
+        'status': 'Active',
+    },
 ]
 
 
@@ -126,6 +134,43 @@ def test_issues_list_json_empty_contract_still_succeeds(cli_root, runner):
     assert payload['success'] is True
     assert payload['issue_count'] == 0
     assert payload['issues'] == []
+
+
+def test_issues_list_json_filters_by_repo(cli_root, runner):
+    """--repo limits list output to the requested owner/repo."""
+    with (
+        patch(
+            'gittensor.cli.issue_commands.view._resolve_contract_and_network',
+            return_value=('5Fakeaddr', 'ws://x', 'test'),
+        ),
+        patch('gittensor.cli.issue_commands.view.read_issues_from_contract', return_value=FAKE_ISSUES),
+    ):
+        result = runner.invoke(cli_root, ['issues', 'list', '--json', '--repo', 'other/repo'], catch_exceptions=False)
+
+    assert result.exit_code == 0
+
+    payload = json.loads(result.stdout)
+    assert payload['success'] is True
+    assert payload['issue_count'] == 1
+    assert payload['issues'][0]['id'] == 2
+    assert payload['issues'][0]['repository_full_name'] == 'Other/Repo'
+
+
+def test_issues_list_human_filters_by_repo(cli_root, runner):
+    """Human table output should not include issues from other repos."""
+    with (
+        patch(
+            'gittensor.cli.issue_commands.view._resolve_contract_and_network',
+            return_value=('5Fakeaddr', 'ws://x', 'test'),
+        ),
+        patch('gittensor.cli.issue_commands.view.read_issues_from_contract', return_value=FAKE_ISSUES),
+    ):
+        result = runner.invoke(cli_root, ['issues', 'list', '--repo', 'owner/repo'], catch_exceptions=False)
+
+    assert result.exit_code == 0
+    assert 'owner/repo' in result.output
+    assert 'Other/Repo' not in result.output
+    assert 'Showing 1 issue(s)' in result.output
 
 
 def test_issues_list_json_deeper_storage_read_failure_returns_structured_error(cli_root, runner):

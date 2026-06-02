@@ -5,6 +5,19 @@ from typing import Optional
 from gittensor.constants import SECONDS_PER_HOUR
 from gittensor.validator.utils.load_weights import ResolvedTimeDecay
 
+# Pinned reference time for the current scoring round.  Set once at the start
+# of each forward step so every call to calculate_time_decay within that round
+# uses the same instant, preventing validator drift when runs span multiple
+# wall-clock seconds.  None outside a round; calculate_time_decay falls back
+# to datetime.now() in that case (tests, CLI, etc.).
+_scoring_reference_time: Optional[datetime] = None
+
+
+def set_scoring_reference_time(dt: Optional[datetime]) -> None:
+    """Pin (or clear) the round-scoped reference time used by calculate_time_decay."""
+    global _scoring_reference_time
+    _scoring_reference_time = dt
+
 
 def parse_github_iso_to_utc(timestamp_str: str) -> datetime:
     """Parse a GitHub-style ISO 8601 string to a timezone-aware UTC datetime.
@@ -32,7 +45,7 @@ def parse_optional_github_iso_to_utc(value: Optional[str]) -> Optional[datetime]
 
 def calculate_time_decay(merged_at: datetime, time_decay: ResolvedTimeDecay) -> float:
     """Calculate sigmoid-based time decay multiplier from a merge timestamp."""
-    now = datetime.now(timezone.utc)
+    now = _scoring_reference_time if _scoring_reference_time is not None else datetime.now(timezone.utc)
     hours_since_merge = (now - merged_at).total_seconds() / SECONDS_PER_HOUR
 
     if hours_since_merge < time_decay.grace_period_hours:

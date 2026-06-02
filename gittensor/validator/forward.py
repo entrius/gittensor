@@ -2,6 +2,7 @@
 # Copyright © 2025 Entrius
 
 import asyncio
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Dict, Optional, Set, Tuple
 
 import bittensor as bt
@@ -17,6 +18,7 @@ from gittensor.validator.utils.config import (
     VALIDATOR_STEPS_INTERVAL,
     VALIDATOR_WAIT,
 )
+from gittensor.validator.utils.datetime_utils import set_scoring_reference_time
 from gittensor.validator.utils.load_weights import (
     RepositoryConfig,
     load_master_repo_weights,
@@ -51,36 +53,53 @@ async def forward(self: 'Validator') -> None:
         programming_languages = load_programming_language_weights()
         token_config = load_token_config()
 
-        # 1. Score OSS contributions
-        miner_evaluations, cached_uids, penalized_uids = await oss_contributions(
-            self, miner_uids, master_repositories, programming_languages, token_config
-        )
-
-        # 2. Score issue discovery
-        await issue_discovery(
-            miner_evaluations,
-            master_repositories,
-            programming_languages,
-            token_config,
-            evaluation_cache=self.evaluation_cache,
-        )
-
-        # cached UIDs now have fresh issue-discovery fields — persist them
-        cached_uids.clear()
-
-        # 3. Issue bounties verification
-        await issue_competitions(self, miner_evaluations)
-
-        # 4. Store all evaluations to DB (includes issue discovery fields)
-        await self.bulk_store_evaluation(miner_evaluations, master_repositories, skip_uids=cached_uids)
-
-        # 5. Allocate repo-bounded emission shares into final rewards
-        maintainer_uids_by_repo = build_maintainer_uids_by_repo(miner_evaluations, master_repositories, miner_uids)
-        rewards = blend_emission_pools(miner_evaluations, master_repositories, miner_uids, maintainer_uids_by_repo)
-
-        self.update_scores(rewards, miner_uids, blacklisted_uids=sorted(penalized_uids))
+        set_scoring_reference_time(datetime.now(timezone.utc))
+        try:
+            await _run_scoring_round(
+                self, miner_uids, master_repositories, programming_languages, token_config
+            )
+        finally:
+            set_scoring_reference_time(None)
 
     await asyncio.sleep(VALIDATOR_WAIT)
+
+
+async def _run_scoring_round(
+    self: 'Validator',
+    miner_uids: set[int],
+    master_repositories: Dict[str, RepositoryConfig],
+    programming_languages: Dict,
+    token_config,
+) -> None:
+    """Inner body of the scoring step, executed under a pinned reference time."""
+    # 1. Score OSS contributions
+    miner_evaluations, cached_uids, penalized_uids = await oss_contributions(
+        self, miner_uids, master_repositories, programming_languages, token_config
+    )
+
+    # 2. Score issue discovery
+    await issue_discovery(
+        miner_evaluations,
+        master_repositories,
+        programming_languages,
+        token_config,
+        evaluation_cache=self.evaluation_cache,
+    )
+
+    # cached UIDs now have fresh issue-discovery fields — persist them
+    cached_uids.clear()
+
+    # 3. Issue bounties verification
+    await issue_competitions(self, miner_evaluations)
+
+    # 4. Store all evaluations to DB (includes issue discovery fields)
+    await self.bulk_store_evaluation(miner_evaluations, master_repositories, skip_uids=cached_uids)
+
+    # 5. Allocate repo-bounded emission shares into final rewards
+    maintainer_uids_by_repo = build_maintainer_uids_by_repo(miner_evaluations, master_repositories, miner_uids)
+    rewards = blend_emission_pools(miner_evaluations, master_repositories, miner_uids, maintainer_uids_by_repo)
+
+    self.update_scores(rewards, miner_uids, blacklisted_uids=sorted(penalized_uids))
 
 
 async def oss_contributions(

@@ -28,6 +28,28 @@ if TYPE_CHECKING:
     from neurons.validator import Validator
 
 
+async def _claim_scoring_round(self: 'Validator', step: int) -> bool:
+    """Claim the round-level scoring work for a validator step."""
+    if step % VALIDATOR_STEPS_INTERVAL != 0:
+        return False
+
+    async with self.lock:
+        if step == self._last_completed_scoring_round_step or step in self._active_scoring_round_steps:
+            bt.logging.debug(f'Scoring round for step {step} already claimed; skipping duplicate forward')
+            return False
+
+        self._active_scoring_round_steps.add(step)
+        return True
+
+
+async def _finish_scoring_round(self: 'Validator', step: int, completed: bool) -> None:
+    """Release a claimed scoring round and remember successful completion."""
+    async with self.lock:
+        self._active_scoring_round_steps.discard(step)
+        if completed:
+            self._last_completed_scoring_round_step = step
+
+
 async def forward(self: 'Validator') -> None:
     """Execute the validator's forward pass.
 
@@ -45,40 +67,46 @@ async def forward(self: 'Validator') -> None:
     - Recycle:              registry slack and inactive repo slices to UID 0
     """
 
-    if self.step % VALIDATOR_STEPS_INTERVAL == 0:
-        miner_uids = get_all_uids(self)
-        master_repositories = load_master_repo_weights()
-        programming_languages = load_programming_language_weights()
-        token_config = load_token_config()
+    step = self.step
+    if await _claim_scoring_round(self, step):
+        completed = False
+        try:
+            miner_uids = get_all_uids(self)
+            master_repositories = load_master_repo_weights()
+            programming_languages = load_programming_language_weights()
+            token_config = load_token_config()
 
-        # 1. Score OSS contributions
-        miner_evaluations, cached_uids, penalized_uids = await oss_contributions(
-            self, miner_uids, master_repositories, programming_languages, token_config
-        )
+            # 1. Score OSS contributions
+            miner_evaluations, cached_uids, penalized_uids = await oss_contributions(
+                self, miner_uids, master_repositories, programming_languages, token_config
+            )
 
-        # 2. Score issue discovery
-        await issue_discovery(
-            miner_evaluations,
-            master_repositories,
-            programming_languages,
-            token_config,
-            evaluation_cache=self.evaluation_cache,
-        )
+            # 2. Score issue discovery
+            await issue_discovery(
+                miner_evaluations,
+                master_repositories,
+                programming_languages,
+                token_config,
+                evaluation_cache=self.evaluation_cache,
+            )
 
-        # cached UIDs now have fresh issue-discovery fields — persist them
-        cached_uids.clear()
+            # cached UIDs now have fresh issue-discovery fields — persist them
+            cached_uids.clear()
 
-        # 3. Issue bounties verification
-        await issue_competitions(self, miner_evaluations)
+            # 3. Issue bounties verification
+            await issue_competitions(self, miner_evaluations)
 
-        # 4. Store all evaluations to DB (includes issue discovery fields)
-        await self.bulk_store_evaluation(miner_evaluations, master_repositories, skip_uids=cached_uids)
+            # 4. Store all evaluations to DB (includes issue discovery fields)
+            await self.bulk_store_evaluation(miner_evaluations, master_repositories, skip_uids=cached_uids)
 
-        # 5. Allocate repo-bounded emission shares into final rewards
-        maintainer_uids_by_repo = build_maintainer_uids_by_repo(miner_evaluations, master_repositories, miner_uids)
-        rewards = blend_emission_pools(miner_evaluations, master_repositories, miner_uids, maintainer_uids_by_repo)
+            # 5. Allocate repo-bounded emission shares into final rewards
+            maintainer_uids_by_repo = build_maintainer_uids_by_repo(miner_evaluations, master_repositories, miner_uids)
+            rewards = blend_emission_pools(miner_evaluations, master_repositories, miner_uids, maintainer_uids_by_repo)
 
-        self.update_scores(rewards, miner_uids, blacklisted_uids=sorted(penalized_uids))
+            self.update_scores(rewards, miner_uids, blacklisted_uids=sorted(penalized_uids))
+            completed = True
+        finally:
+            await _finish_scoring_round(self, step, completed=completed)
 
     await asyncio.sleep(VALIDATOR_WAIT)
 

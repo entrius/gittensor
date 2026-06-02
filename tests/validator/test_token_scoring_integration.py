@@ -14,7 +14,7 @@ Run tests:
 
 import pytest
 
-from gittensor.classes import FileChange
+from gittensor.classes import FileChange, ScoringCategory
 from gittensor.utils.github_api_tools import FileContentPair
 from gittensor.validator.utils.load_weights import TokenConfig, load_programming_language_weights, load_token_config
 from gittensor.validator.utils.tree_sitter_scoring import calculate_token_score_from_file_changes, score_tree_diff
@@ -206,6 +206,51 @@ def process(data):
         print(f'  Structural: {breakdown.structural_count} = {breakdown.structural_score:.2f}')
         print(f'  Leaf: {breakdown.leaf_count} = {breakdown.leaf_score:.2f}')
         print(f'  Total: {breakdown.total_score:.2f}')
+
+    def test_rust_inline_test_marker_in_block_comment_scores_as_source(self, weights):
+        """
+        Test that docs/examples mentioning #[test] do not demote production edits.
+        """
+        old_content = 'fn prod() -> i32 { 1 }\n'
+        with_marker = 'fn prod() -> i32 { 2 }\n/*\n#[test]\nfn example() {}\n*/\n'
+        without_marker = 'fn prod() -> i32 { 2 }\n/*\nExample test function goes here.\n*/\n'
+        programming_languages = load_programming_language_weights()
+
+        marker_change = FileChange(
+            pr_number=1,
+            repository_full_name='owner/repo',
+            filename='src/lib.rs',
+            changes=2,
+            additions=1,
+            deletions=1,
+            status='modified',
+        )
+        marker_result = calculate_token_score_from_file_changes(
+            [marker_change],
+            {'src/lib.rs': FileContentPair(old_content=old_content, new_content=with_marker)},
+            weights,
+            programming_languages,
+        ).file_results[0]
+
+        control_change = FileChange(
+            pr_number=1,
+            repository_full_name='owner/repo',
+            filename='src/lib.rs',
+            changes=2,
+            additions=1,
+            deletions=1,
+            status='modified',
+        )
+        control_result = calculate_token_score_from_file_changes(
+            [control_change],
+            {'src/lib.rs': FileContentPair(old_content=old_content, new_content=without_marker)},
+            weights,
+            programming_languages,
+        ).file_results[0]
+
+        assert marker_result.category == ScoringCategory.SOURCE
+        assert marker_result.is_test_file is False
+        assert marker_result.score == pytest.approx(control_result.score)
 
     def test_typescript_file_scoring(self, weights):
         """

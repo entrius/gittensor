@@ -57,9 +57,21 @@ def test_rust_test_in_doc_comment_not_detected():
     assert has_inline_tests(code, 'rs') is False
 
 
+def test_rust_test_in_block_comment_not_detected():
+    """#[test] inside a block comment must not trigger detection."""
+    code = 'fn prod() {}\n/*\n#[test]\nfn example() {}\n*/\n'
+    assert has_inline_tests(code, 'rs') is False
+
+
 def test_rust_test_in_string_not_detected():
     """#[test] inside a string literal must not trigger detection."""
     code = 'fn f() { let s = "#[test]"; }\n'
+    assert has_inline_tests(code, 'rs') is False
+
+
+def test_rust_test_in_raw_multiline_string_not_detected():
+    """#[test] inside a raw multiline string must not trigger detection."""
+    code = 'fn prod() {}\nlet s = r#"\n#[test]\nfn example() {}\n"#;\n'
     assert has_inline_tests(code, 'rs') is False
 
 
@@ -88,6 +100,12 @@ def test_zig_production_only_not_detected():
 def test_d_unittest_detected():
     code = 'int add(int a, int b) { return a + b; }\nunittest { assert(add(1,2) == 3); }\n'
     assert has_inline_tests(code, 'd') is True
+
+
+def test_d_unittest_in_block_comment_not_detected():
+    """unittest inside a block comment must not trigger detection."""
+    code = 'int prod() { return 1; }\n/*\nunittest { assert(true); }\n*/\n'
+    assert has_inline_tests(code, 'd') is False
 
 
 def test_d_production_only_not_detected():

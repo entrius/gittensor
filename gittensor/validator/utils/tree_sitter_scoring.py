@@ -1,7 +1,7 @@
 # The MIT License (MIT)
 # Copyright © 2025 Entrius
 from collections import Counter
-from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Dict, Iterator, List, Optional, Tuple, Union
 
 import bittensor as bt
 from tree_sitter import Node, Parser, Tree
@@ -88,6 +88,58 @@ def parse_code(content: str, language: str) -> Optional[Tree]:
 # Leaf: ("leaf", node_type, text_bytes)
 NodeSignature = Union[Tuple[str, str], Tuple[str, str, bytes]]
 
+INLINE_TEST_LANGUAGES: Dict[str, str] = {
+    'rs': 'rust',
+    'zig': 'zig',
+    'd': 'd',
+}
+
+
+def _iter_nodes(root: Node) -> Iterator[Node]:
+    stack = [root]
+    while stack:
+        node = stack.pop()
+        yield node
+        stack.extend(reversed(node.children))
+
+
+def _node_text(node: Node) -> str:
+    return (node.text or b'').decode('utf-8', errors='ignore')
+
+
+def _rust_attribute_text(node: Node) -> Optional[str]:
+    for child in node.children:
+        if child.type == 'attribute':
+            return _node_text(child).strip()
+    return None
+
+
+def _is_rust_inline_test_attribute(attribute_text: str) -> bool:
+    compact = ''.join(attribute_text.split())
+    attribute_head = compact.split('(', 1)[0]
+
+    return attribute_head == 'test' or attribute_head.endswith('::test') or compact == 'cfg(test)'
+
+
+def _has_rust_inline_tests(root: Node) -> bool:
+    for node in _iter_nodes(root):
+        if node.type not in {'attribute_item', 'inner_attribute_item'}:
+            continue
+
+        attribute_text = _rust_attribute_text(node)
+        if attribute_text and _is_rust_inline_test_attribute(attribute_text):
+            return True
+
+    return False
+
+
+def _has_zig_inline_tests(root: Node) -> bool:
+    return any(node.type == 'TestDecl' for node in _iter_nodes(root))
+
+
+def _has_d_inline_tests(root: Node) -> bool:
+    return any(node.type == 'unittest_declaration' for node in _iter_nodes(root))
+
 
 def collect_node_signatures(
     tree: Tree,
@@ -137,8 +189,9 @@ def collect_node_signatures(
 def has_inline_tests(content: str, extension: str) -> bool:
     """Check whether source code contains inline test markers.
 
-    Uses simple pattern matching to detect language-specific test constructs
-    that live inside production source files.  Currently supports:
+    Uses a regex prefilter followed by tree-sitter AST inspection so markers
+    inside comments or string literals are not treated as executable tests.
+    Currently supports:
     - Rust: ``#[cfg(test)]``, ``#![cfg(test)]``, ``#[test]``, ``#[tokio::test]``
     - Zig:  ``test "name" { ... }``, ``test { ... }``
     - D:    ``unittest { ... }``
@@ -146,7 +199,26 @@ def has_inline_tests(content: str, extension: str) -> bool:
     pattern = INLINE_TEST_PATTERNS.get(extension)
     if pattern is None:
         return False
-    return pattern.search(content) is not None
+    if pattern.search(content) is None:
+        return False
+
+    language = INLINE_TEST_LANGUAGES.get(extension)
+    if language is None:
+        return False
+
+    tree = parse_code(content, language)
+    if tree is None:
+        return False
+
+    root = tree.root_node
+    if extension == 'rs':
+        return _has_rust_inline_tests(root)
+    if extension == 'zig':
+        return _has_zig_inline_tests(root)
+    if extension == 'd':
+        return _has_d_inline_tests(root)
+
+    return False
 
 
 def score_tree_diff(

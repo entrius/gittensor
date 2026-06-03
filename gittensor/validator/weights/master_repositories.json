@@ -135,7 +135,8 @@
         "min_multiplier": 0.1
       }
     },
-    "additional_acceptable_branches": ["test"]
+    "additional_acceptable_branches": ["test"],
+    "maintainer_cut": 0.5
   },
   "phase-rs/phase": {
     "emission_share": 0.015,

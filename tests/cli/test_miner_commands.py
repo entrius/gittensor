@@ -326,6 +326,7 @@ class TestPatCheckAggregateCounts:
             'valid': 1,
             'no_pat': 1,
             'invalid_pat': 1,
+            'inconclusive': 0,
             'no_response': 1,
         }
 

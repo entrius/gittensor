@@ -194,7 +194,6 @@ class Repository(BaseRepository):
                     pr.merged_by_login,
                     pr.description,
                     pr.last_edited_at,
-                    pr.code_density,
                     pr.token_score,
                     pr.structural_count,
                     pr.structural_score,

@@ -5,7 +5,8 @@
   },
   "cogniax/tao-pulse-app": {
     "emission_share": 0.01,
-    "issue_discovery_share": 0.0
+    "issue_discovery_share": 0.7,
+    "maintainer_cut": 0.4
   },
   "e35ventura/taopedia": {
     "emission_share": 0.025,
@@ -15,7 +16,21 @@
   "e35ventura/taopedia-articles": {
     "emission_share": 0.025,
     "issue_discovery_share": 0.0,
-    "maintainer_cut": 0.0
+    "maintainer_cut": 0.0,
+    "additional_acceptable_branches": ["test"],
+    "trusted_label_pipeline": true,
+    "default_label_multiplier": 0.0,
+    "label_multipliers": {
+      "article": 1.0,
+      "correction": 1.25,
+      "image": 0.75,
+      "category": 0.5,
+      "other": 0.1
+    },
+    "eligibility": {
+      "min_credibility": 0.5,
+      "min_token_score_for_valid_issue": 0.0
+    }
   },
   "entrius/allways": {
     "emission_share": 0.05,
@@ -185,7 +200,8 @@
   },
   "touchpilot/touchpilot": {
     "emission_share": 0.025,
-    "issue_discovery_share": 0.0
+    "issue_discovery_share": 0.0,
+    "maintainer_cut": 0.3
   },
   "we-promise/sure": {
     "emission_share": 0.03,

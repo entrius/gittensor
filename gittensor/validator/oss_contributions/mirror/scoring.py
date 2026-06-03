@@ -49,6 +49,7 @@ from gittensor.validator.oss_contributions.scoring import (
     calculate_review_quality_multiplier,
 )
 from gittensor.validator.utils.datetime_utils import calculate_time_decay
+from gittensor.validator.utils.isolated_scoring import isolated_calculate_token_score
 from gittensor.validator.utils.load_weights import (
     LanguageConfig,
     RepositoryConfig,
@@ -56,7 +57,6 @@ from gittensor.validator.utils.load_weights import (
     TokenConfig,
     resolve_scoring,
 )
-from gittensor.validator.utils.tree_sitter_scoring import calculate_token_score_from_file_changes
 
 # ============================================================================
 # Entry point
@@ -310,7 +310,7 @@ def calculate_base_score_for_pr_files(
     callers should pass the resolved per-repo value from ``resolve_scoring(...)``.
     """
     scale = src_tok_saturation_scale if src_tok_saturation_scale is not None else SRC_TOK_SATURATION_SCALE
-    scoring_result: PrScoringResult = calculate_token_score_from_file_changes(
+    scoring_result: PrScoringResult = isolated_calculate_token_score(
         file_changes,
         file_contents,
         token_config,

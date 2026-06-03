@@ -87,7 +87,7 @@ class TestPerRepoSaturationScaleOverride:
     def _patch_scorer(self, monkeypatch, source_token_score: float):
         monkeypatch.setattr(
             scoring_module,
-            'calculate_token_score_from_file_changes',
+            'isolated_calculate_token_score',
             lambda *args, **kwargs: _stub_scoring_result(source_token_score),
         )
 

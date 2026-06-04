@@ -277,7 +277,6 @@ def issues_pending_harvest(network: str, rpc_url: str, contract: str, verbose: b
 
     try:
         import bittensor as bt
-        from async_substrate_interface import SubstrateInterface
 
         from gittensor.validator.issue_competitions.contract_client import (
             IssueCompetitionContractClient,
@@ -291,8 +290,7 @@ def issues_pending_harvest(network: str, rpc_url: str, contract: str, verbose: b
             )
             treasury_stake = client.get_treasury_stake()
 
-            substrate = SubstrateInterface(url=ws_endpoint)
-            issues = _read_issues_from_child_storage(substrate, contract_addr, verbose)
+            issues = _read_issues_from_child_storage(subtensor.substrate, contract_addr, verbose)
             total_bounty_pool = sum(issue.get('bounty_amount', 0) for issue in issues)
 
         pending_harvest = max(0, treasury_stake - total_bounty_pool)

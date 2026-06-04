@@ -5,7 +5,8 @@
   },
   "cogniax/tao-pulse-app": {
     "emission_share": 0.01,
-    "issue_discovery_share": 0.0
+    "issue_discovery_share": 0.7,
+    "maintainer_cut": 0.4
   },
   "e35ventura/taopedia": {
     "emission_share": 0.025,
@@ -107,12 +108,14 @@
     "issue_discovery_share": 0.0
   },
   "JSONbored/awesome-claude": {
+    "default_label_multiplier": 0.0,
     "emission_share": 0.005,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
-      "feature": 1.5,
-      "bug": 1.1
+      "gittensor:feature": 1.0,
+      "gittensor:priority": 1.5
     },
+    "maintainer_cut": 0.3,
     "scoring": {
       "pr_lookback_days": 45,
       "open_pr_collateral_percent": 0.15,

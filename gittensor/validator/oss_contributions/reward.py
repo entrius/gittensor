@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 from typing import TYPE_CHECKING, Dict, Optional, Set, Tuple
 
 import bittensor as bt
@@ -33,6 +34,7 @@ async def evaluate_miners_pull_requests(
     token_config: TokenConfig,
     stale_hotkey: Optional[str] = None,
     stored_github_id: Optional[str] = None,
+    scoring_reference_time: Optional[datetime] = None,
 ) -> MinerEvaluation:
     """
     Entry point from taking a miners response -> Get PRs -> Score PRs
@@ -46,6 +48,7 @@ async def evaluate_miners_pull_requests(
         token_config: Token-based scoring weights configuration
         stale_hotkey: If set, the UID has a stored PAT from this old hotkey (re-registration detected)
         stored_github_id: GitHub id recorded when the stored PAT was accepted
+        scoring_reference_time: UTC anchor for lookback windows and time decay
 
     Returns:
         MinerEvaluation: The object containing scores, valid_prs, etc.
@@ -69,9 +72,20 @@ async def evaluate_miners_pull_requests(
         return miner_eval
 
     with MirrorClient() as mirror_client:
-        await asyncio.to_thread(load_miner_prs, miner_eval, master_repositories, client=mirror_client)
+        await asyncio.to_thread(
+            load_miner_prs,
+            miner_eval,
+            master_repositories,
+            client=mirror_client,
+            scoring_reference_time=scoring_reference_time,
+        )
         await score_miner_prs(
-            miner_eval, master_repositories, programming_languages, token_config, client=mirror_client
+            miner_eval,
+            master_repositories,
+            programming_languages,
+            token_config,
+            client=mirror_client,
+            scoring_reference_time=scoring_reference_time,
         )
 
     bt.logging.info('*' * 50 + '\n')
@@ -84,6 +98,7 @@ async def get_rewards(
     master_repositories: Dict[str, RepositoryConfig],
     programming_languages: Dict[str, LanguageConfig],
     token_config: TokenConfig,
+    scoring_reference_time: Optional[datetime] = None,
 ) -> Tuple[Dict[int, MinerEvaluation], Set[int], Set[int]]:
     """Score OSS contributions for all miners.
 
@@ -128,6 +143,7 @@ async def get_rewards(
             token_config,
             stale_hotkey=stale_hotkey,
             stored_github_id=stored_github_id,
+            scoring_reference_time=scoring_reference_time,
         )
         miner_evaluations[uid] = miner_evaluation
 

@@ -2,6 +2,7 @@
 # Copyright © 2025 Entrius
 
 import asyncio
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Dict, Optional, Set, Tuple
 
 import bittensor as bt
@@ -50,10 +51,16 @@ async def forward(self: 'Validator') -> None:
         master_repositories = load_master_repo_weights()
         programming_languages = load_programming_language_weights()
         token_config = load_token_config()
+        scoring_reference_time = datetime.now(timezone.utc)
 
         # 1. Score OSS contributions
         miner_evaluations, cached_uids, penalized_uids = await oss_contributions(
-            self, miner_uids, master_repositories, programming_languages, token_config
+            self,
+            miner_uids,
+            master_repositories,
+            programming_languages,
+            token_config,
+            scoring_reference_time=scoring_reference_time,
         )
 
         # 2. Score issue discovery
@@ -63,6 +70,7 @@ async def forward(self: 'Validator') -> None:
             programming_languages,
             token_config,
             evaluation_cache=self.evaluation_cache,
+            scoring_reference_time=scoring_reference_time,
         )
 
         # cached UIDs now have fresh issue-discovery fields — persist them
@@ -89,6 +97,7 @@ async def oss_contributions(
     master_repositories: Dict[str, RepositoryConfig],
     programming_languages: Dict,
     token_config,
+    scoring_reference_time: Optional[datetime] = None,
 ) -> Tuple[Dict[int, MinerEvaluation], Set[int], Set[int]]:
     """Score OSS contributions and return miner evaluations + cached UIDs + penalized UIDs.
 
@@ -103,7 +112,12 @@ async def oss_contributions(
     bt.logging.info(f'Neurons to evaluate: {len(miner_uids)}')
 
     miner_evaluations, cached_uids, penalized_uids = await get_rewards(
-        self, miner_uids, master_repositories, programming_languages, token_config
+        self,
+        miner_uids,
+        master_repositories,
+        programming_languages,
+        token_config,
+        scoring_reference_time=scoring_reference_time,
     )
 
     return miner_evaluations, cached_uids, penalized_uids
@@ -115,6 +129,7 @@ async def issue_discovery(
     programming_languages: Dict,
     token_config,
     evaluation_cache: Optional[MinerEvaluationCache] = None,
+    scoring_reference_time: Optional[datetime] = None,
 ) -> None:
     """Score issue discovery fields on miner evaluations.
 
@@ -128,6 +143,7 @@ async def issue_discovery(
         programming_languages,
         token_config,
         evaluation_cache=evaluation_cache,
+        scoring_reference_time=scoring_reference_time,
     )
 
 

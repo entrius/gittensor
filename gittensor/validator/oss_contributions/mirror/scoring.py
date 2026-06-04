@@ -25,6 +25,7 @@ import asyncio
 import math
 import os
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
 import bittensor as bt
@@ -69,6 +70,7 @@ async def score_miner_prs(
     programming_languages: Dict[str, LanguageConfig],
     token_config: TokenConfig,
     client: Optional[MirrorClient] = None,
+    scoring_reference_time: Optional[datetime] = None,
 ) -> None:
     """Score all PRs on a MinerEvaluation.
 
@@ -99,7 +101,15 @@ async def score_miner_prs(
                 f'\n[{i}/{len(scored_prs)}] {label} PR #{scored.pr.pr_number} in {scored.pr.repo_full_name}'
             )
             try:
-                await score_pr(scored, eval_, master_repositories, programming_languages, token_config, client)
+                await score_pr(
+                    scored,
+                    eval_,
+                    master_repositories,
+                    programming_languages,
+                    token_config,
+                    client,
+                    scoring_reference_time=scoring_reference_time,
+                )
             except Exception as e:
                 bt.logging.warning(
                     f'UID {eval_.uid}: scoring failed for PR #{scored.pr.pr_number} in {scored.pr.repo_full_name}: {e}'
@@ -118,6 +128,7 @@ async def score_pr(
     programming_languages: Dict[str, LanguageConfig],
     token_config: TokenConfig,
     client: MirrorClient,
+    scoring_reference_time: Optional[datetime] = None,
 ) -> None:
     """Score a single PR. Populates ScoredPR scoring fields in place."""
     pr = scored.pr
@@ -176,7 +187,7 @@ async def score_pr(
         # eligibility and reporting gates keep their evidence signal.
         scored.base_score = repo_config.fixed_base_score
 
-    _calculate_pr_multipliers(scored, repo_config, scoring_cfg)
+    _calculate_pr_multipliers(scored, repo_config, scoring_cfg, scoring_reference_time=scoring_reference_time)
 
     if pr.state == 'MERGED':
         eval_.unique_repos_contributed_to.add(pr.repo_full_name)
@@ -364,7 +375,12 @@ def calculate_base_score_for_pr_files(
 # ============================================================================
 
 
-def _calculate_pr_multipliers(scored: ScoredPR, repo_config: RepositoryConfig, scoring_cfg: ResolvedScoring) -> None:
+def _calculate_pr_multipliers(
+    scored: ScoredPR,
+    repo_config: RepositoryConfig,
+    scoring_cfg: ResolvedScoring,
+    scoring_reference_time: Optional[datetime] = None,
+) -> None:
     """Compute time_decay, review_quality, label, and issue multipliers.
 
     Spam and credibility multipliers are deferred to ``finalize_miner_scores``
@@ -382,7 +398,10 @@ def _calculate_pr_multipliers(scored: ScoredPR, repo_config: RepositoryConfig, s
     if is_merged:
         assert pr.merged_at is not None, f'MERGED PR #{pr.pr_number} missing merged_at'
         scored.open_pr_spam_multiplier = 1.0  # finalized later with combined open-PR count
-        scored.time_decay_multiplier = round(calculate_time_decay(pr.merged_at, scoring_cfg.time_decay), 2)
+        scored.time_decay_multiplier = round(
+            calculate_time_decay(pr.merged_at, scoring_cfg.time_decay, reference_time=scoring_reference_time),
+            2,
+        )
         scored.review_quality_multiplier = round(
             calculate_review_quality_multiplier(
                 pr.review_summary.maintainer_changes_requested_count,

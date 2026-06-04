@@ -133,6 +133,7 @@ async def run_issue_discovery(
     token_config: TokenConfig,
     client: Optional[MirrorClient] = None,
     evaluation_cache: Optional[MinerEvaluationCache] = None,
+    scoring_reference_time: Optional[datetime] = None,
 ) -> None:
     """Score issue discovery. Mutates miner_evaluations.
 
@@ -154,7 +155,11 @@ async def run_issue_discovery(
         return
 
     client = client or MirrorClient()
-    now = datetime.now(timezone.utc)
+    now = scoring_reference_time if scoring_reference_time is not None else datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    else:
+        now = now.astimezone(timezone.utc)
     # Each repo is windowed by its own pr_lookback_days; the mirror applies the
     # per-repo cutoffs server-side for the scoring fetch.
     since_by_repo = {
@@ -228,6 +233,7 @@ async def run_issue_discovery(
             token_config,
             open_counts=open_counts,
             canonical_pr_owners=canonical_pr_owners,
+            scoring_reference_time=now,
         )
         if complete:
             cacheable_uids.add(evaluation.uid)
@@ -433,6 +439,7 @@ async def _score_miner_issues(
     token_config: TokenConfig,
     open_counts: Dict[str, int],
     canonical_pr_owners: Dict[Tuple[str, int], Tuple[datetime, int, int]],
+    scoring_reference_time: Optional[datetime] = None,
 ) -> bool:
     """Classify + score one miner's mirror issues, per repository.
 
@@ -530,7 +537,13 @@ async def _score_miner_issues(
             )
             continue
 
-        adapted = _mirror_issue_for_scoring(issue, solving_pr, repo_config, base_score=cached.base_score)
+        adapted = _mirror_issue_for_scoring(
+            issue,
+            solving_pr,
+            repo_config,
+            base_score=cached.base_score,
+            scoring_reference_time=scoring_reference_time,
+        )
         if adapted is None:
             continue
 
@@ -781,6 +794,7 @@ def _mirror_issue_for_scoring(
     solving_pr: MirrorSolvingPR,
     repo_config: RepositoryConfig,
     base_score: float,
+    scoring_reference_time: Optional[datetime] = None,
 ) -> Optional[Issue]:
     """Build a legacy ``Issue`` with discovery_* fields populated.
 
@@ -811,7 +825,12 @@ def _mirror_issue_for_scoring(
     scoring_cfg = resolve_scoring(repo_config.scoring)
     adapted.discovery_base_score = base_score
     adapted.discovery_time_decay_multiplier = round(
-        calculate_time_decay(solving_pr.merged_at, scoring_cfg.time_decay), 2
+        calculate_time_decay(
+            solving_pr.merged_at,
+            scoring_cfg.time_decay,
+            reference_time=scoring_reference_time,
+        ),
+        2,
     )
     adapted.discovery_review_quality_multiplier = round(
         calculate_issue_review_quality_multiplier(

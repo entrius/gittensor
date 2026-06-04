@@ -30,9 +30,23 @@ def parse_optional_github_iso_to_utc(value: Optional[str]) -> Optional[datetime]
     return parse_github_iso_to_utc(value) if value else None
 
 
-def calculate_time_decay(merged_at: datetime, time_decay: ResolvedTimeDecay) -> float:
-    """Calculate sigmoid-based time decay multiplier from a merge timestamp."""
-    now = datetime.now(timezone.utc)
+def calculate_time_decay(
+    merged_at: datetime,
+    time_decay: ResolvedTimeDecay,
+    *,
+    reference_time: Optional[datetime] = None,
+) -> float:
+    """Calculate sigmoid-based time decay multiplier from a merge timestamp.
+
+    When ``reference_time`` is set (validator round anchor), every PR in the
+    round uses the same clock so decay and lookback windows stay consistent
+    across miners and scoring phases.
+    """
+    now = reference_time if reference_time is not None else datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    else:
+        now = now.astimezone(timezone.utc)
     hours_since_merge = (now - merged_at).total_seconds() / SECONDS_PER_HOUR
 
     if hours_since_merge < time_decay.grace_period_hours:

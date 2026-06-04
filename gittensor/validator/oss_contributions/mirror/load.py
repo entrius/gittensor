@@ -33,6 +33,7 @@ def load_miner_prs(
     eval_: MinerEvaluation,
     master_repositories: Dict[str, RepositoryConfig],
     client: Optional[MirrorClient] = None,
+    scoring_reference_time: Optional[datetime] = None,
 ) -> None:
     """Populate eval_ with PRs fetched from the mirror service.
 
@@ -40,6 +41,8 @@ def load_miner_prs(
         eval_: MinerEvaluation to populate; must already have github_id set.
         master_repositories: repo configs to filter against.
         client: optional MirrorClient for dependency injection in tests.
+        scoring_reference_time: UTC anchor for per-repo lookback cutoffs; defaults
+            to wall clock when omitted (CLI / tests).
 
     On fetch failure both ``mirror_pr_fetch_failed`` and ``github_pr_fetch_failed``
     are set on the eval; the latter drives the cache-fallback path.
@@ -56,7 +59,11 @@ def load_miner_prs(
         return
 
     client = client or MirrorClient()
-    now = datetime.now(timezone.utc)
+    now = scoring_reference_time if scoring_reference_time is not None else datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    else:
+        now = now.astimezone(timezone.utc)
     # Each repo is windowed by its own pr_lookback_days; the mirror applies the
     # per-repo cutoffs server-side and returns only in-window PRs.
     since_by_repo = {

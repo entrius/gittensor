@@ -229,6 +229,24 @@ class TestLookbackWindow:
         assert before - timedelta(days=30) <= since_by_repo['entrius/gittensor-ui'] <= after - timedelta(days=30)
         assert before - timedelta(days=60) <= since_by_repo['entrius/gittensor'] <= after - timedelta(days=60)
 
+    def test_scoring_reference_time_pins_since_by_repo(self):
+        """Two miners scored with the same anchor must send identical cutoffs."""
+        repos = _mirror_repos('entrius/gittensor-ui')
+        anchor = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+        expected_since = anchor - timedelta(days=30)
+
+        client_a = Mock()
+        client_a.get_miner_pulls.return_value = _build_response([])
+        load_miner_prs(_eval(), repos, client=client_a, scoring_reference_time=anchor)
+        since_a = client_a.get_miner_pulls.call_args.kwargs['since_by_repo']['entrius/gittensor-ui']
+
+        client_b = Mock()
+        client_b.get_miner_pulls.return_value = _build_response([])
+        load_miner_prs(_eval(), repos, client=client_b, scoring_reference_time=anchor)
+        since_b = client_b.get_miner_pulls.call_args.kwargs['since_by_repo']['entrius/gittensor-ui']
+
+        assert since_a == since_b == expected_since
+
 
 # ============================================================================
 # Error paths

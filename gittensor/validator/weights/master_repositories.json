@@ -1,8 +1,4 @@
 {
-  "aglover1221/product-data-extractor": {
-    "emission_share": 0.0,
-    "issue_discovery_share": 0.0
-  },
   "cogniax/tao-pulse-app": {
     "emission_share": 0.01,
     "issue_discovery_share": 0.7,
@@ -55,7 +51,7 @@
     "trusted_label_pipeline": true
   },
   "entrius/gittensor": {
-    "emission_share": 0.1,
+    "emission_share": 0.09,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "bug": 1.1,
@@ -149,11 +145,13 @@
     }
   },
   "MkDev11/gittensor-hub": {
-    "emission_share": 0.02,
+    "emission_share": 0.012,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "feature": 2,
-      "bug": 1.2,
+      "whale": 20,
+      "shark": 5,
+      "bug": 0.3,
       "refactor": 0.3
     },
     "scoring": {
@@ -186,25 +184,27 @@
         "min_multiplier": 0.1
       }
     },
-    "additional_acceptable_branches": ["test"]
+    "additional_acceptable_branches": ["test"],
+    "maintainer_cut": 0.5
   },
   "phase-rs/phase": {
-    "emission_share": 0.015,
+    "emission_share": 0.018,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "bug": 1.1,
-      "ai-contribution": 0,
       "enhancement": 1.25,
       "feature": 1.5,
-      "refactor": 0.25
-    }
+      "refactor": 0.25,
+      "test": 1.2
+    },
+    "maintainer_cut": 0.5
   },
   "seroperson/jvm-live-reload": {
     "emission_share": 0.011,
     "issue_discovery_share": 0.0
   },
   "touchpilot/touchpilot": {
-    "emission_share": 0.025,
+    "emission_share": 0.005,
     "issue_discovery_share": 0.0,
     "maintainer_cut": 0.3
   },

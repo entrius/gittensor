@@ -111,6 +111,9 @@
       "gittensor:feature": 1.0,
       "gittensor:priority": 1.5
     },
+    "eligibility": {
+      "min_credibility": 0.6
+    },
     "maintainer_cut": 0.3,
     "scoring": {
       "pr_lookback_days": 45,

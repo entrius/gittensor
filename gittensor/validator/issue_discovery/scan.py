@@ -621,7 +621,8 @@ def _roll_up_issue_totals(evaluation: MinerEvaluation) -> None:
     evaluation.issue_token_score = round(sum(re.issue_token_score for re in repo_evals), 2)
     evaluation.issue_discovery_score = round(sum(re.issue_discovery_score for re in repo_evals), 2)
     evaluation.is_issue_eligible = any(re.is_issue_eligible for re in repo_evals)
-    evaluation.issue_credibility = max((re.issue_credibility for re in repo_evals), default=0.0)
+    _attempts = evaluation.total_solved_issues + evaluation.total_closed_issues
+    evaluation.issue_credibility = evaluation.total_solved_issues / _attempts if _attempts > 0 else 0.0
 
 
 async def _resolve_solving_pr_score(

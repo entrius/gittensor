@@ -1919,3 +1919,56 @@ class TestLabelPolicyIssueDiscovery:
         assert ev_unlabeled.issue_discovery_score > 0.0
         assert ev_labeled.issue_discovery_score < ev_unlabeled.issue_discovery_score
         assert all(i.discovery_label_multiplier == pytest.approx(0.25) for i in ev_labeled.issue_discovery_issues)
+
+
+# ===========================================================================
+# Credibility rollup
+# ===========================================================================
+
+
+_roll_up_issue_totals = scan_module._roll_up_issue_totals
+
+
+def _repo_eval_issues(repo: str, solved: int, closed: int) -> RepoEvaluation:
+    re = RepoEvaluation(repository_full_name=repo)
+    re.total_solved_issues = solved
+    re.total_closed_issues = closed
+    return re
+
+
+class TestRollUpIssueTotals:
+    """_roll_up_issue_totals: issue_credibility uses weighted ratio, not max()."""
+
+    def test_multi_repo_weighted_ratio(self):
+        """One perfect micro-repo must not inflate credibility to 1.0."""
+        ev = MinerEvaluation(uid=1, hotkey='hk')
+        ev.repo_evaluations = {
+            'a/a': _repo_eval_issues('a/a', solved=1, closed=0),   # per-repo 1.0
+            'b/b': _repo_eval_issues('b/b', solved=2, closed=8),   # per-repo 0.20
+            'c/c': _repo_eval_issues('c/c', solved=3, closed=12),  # per-repo 0.20
+        }
+        _roll_up_issue_totals(ev)
+        # true weighted = 6 / (6+20) ≈ 0.23  (old max() would give 1.0)
+        assert ev.issue_credibility == pytest.approx(6 / 26)
+        assert ev.issue_credibility < 0.5
+
+    def test_zero_attempts_yields_zero(self):
+        ev = MinerEvaluation(uid=1, hotkey='hk')
+        ev.repo_evaluations = {'a/a': _repo_eval_issues('a/a', solved=0, closed=0)}
+        _roll_up_issue_totals(ev)
+        assert ev.issue_credibility == 0.0
+
+    def test_single_repo_matches_ratio(self):
+        ev = MinerEvaluation(uid=1, hotkey='hk')
+        ev.repo_evaluations = {'a/a': _repo_eval_issues('a/a', solved=8, closed=2)}
+        _roll_up_issue_totals(ev)
+        assert ev.issue_credibility == pytest.approx(0.8)
+
+    def test_all_solved_yields_one(self):
+        ev = MinerEvaluation(uid=1, hotkey='hk')
+        ev.repo_evaluations = {
+            'a/a': _repo_eval_issues('a/a', solved=5, closed=0),
+            'b/b': _repo_eval_issues('b/b', solved=3, closed=0),
+        }
+        _roll_up_issue_totals(ev)
+        assert ev.issue_credibility == pytest.approx(1.0)

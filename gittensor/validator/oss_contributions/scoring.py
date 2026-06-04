@@ -203,7 +203,10 @@ def _roll_up_miner_totals(evaluation: MinerEvaluation) -> None:
     evaluation.total_leaf_score = sum(re.total_leaf_score for re in repo_evals)
     evaluation.total_nodes_scored = sum(re.total_nodes_scored for re in repo_evals)
     evaluation.is_eligible = any(re.is_eligible for re in repo_evals)
-    evaluation.credibility = max((re.credibility for re in repo_evals), default=0.0)
+    _total_merged = sum(re.total_merged_prs for re in repo_evals)
+    _total_closed = sum(re.total_closed_prs for re in repo_evals)
+    _attempts = _total_merged + _total_closed
+    evaluation.credibility = _total_merged / _attempts if _attempts > 0 else 0.0
     evaluation.unique_repos_count = len(evaluation.unique_repos_contributed_to)
 
     eligible_repos = sum(1 for re in repo_evals if re.is_eligible)

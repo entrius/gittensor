@@ -150,7 +150,9 @@
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "feature": 2,
-      "bug": 1.2,
+      "whale": 20,
+      "shark": 5,
+      "bug": 0.3,
       "refactor": 0.3
     },
     "scoring": {

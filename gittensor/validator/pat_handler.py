@@ -6,12 +6,17 @@ Miners push their GitHub PAT to validators via PatBroadcastSynapse.
 Miners check if a validator has their PAT via PatCheckSynapse.
 """
 
+import asyncio
 from typing import TYPE_CHECKING, Optional, Tuple
 
 import bittensor as bt
 import requests
 
-from gittensor.constants import BASE_GITHUB_API_URL, GITHUB_HTTP_TIMEOUT_SECONDS, GRAPHQL_VIEWER_QUERY
+from gittensor.constants import (
+    BASE_GITHUB_API_URL,
+    GITHUB_HTTP_TIMEOUT_SECONDS,
+    GRAPHQL_VIEWER_QUERY,
+)
 from gittensor.synapses import PatBroadcastSynapse, PatCheckSynapse
 from gittensor.utils.github_api_tools import make_graphql_headers
 from gittensor.validator import pat_storage
@@ -28,6 +33,14 @@ def _get_hotkey(synapse: bt.Synapse) -> str:
     """Extract the caller's hotkey from a synapse, raising if missing."""
     assert synapse.dendrite is not None and synapse.dendrite.hotkey is not None
     return synapse.dendrite.hotkey
+
+
+def _github_identity_pin_error(uid: int, hotkey: str, github_id: Optional[str]) -> Optional[str]:
+    existing = pat_storage.get_pat_by_uid(uid)
+    if existing and existing.get('hotkey') == hotkey and existing.get('github_id'):
+        if existing['github_id'] != github_id:
+            return 'GitHub identity is locked for this hotkey. Deregister and re-register to change GitHub accounts.'
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -53,22 +66,23 @@ async def handle_pat_broadcast(validator: 'Validator', synapse: PatBroadcastSyna
     uid = validator.metagraph.hotkeys.index(hotkey)
 
     # 2. Validate PAT (checks it works, extracts github_id)
-    github_id, error = validate_github_credentials(uid, synapse.github_access_token)
+    github_id, error = await asyncio.to_thread(validate_github_credentials, uid, synapse.github_access_token)
     if error:
         return _reject(error)
 
     # 3. Enforce GitHub identity pinning — same hotkey cannot switch GitHub accounts
-    existing = pat_storage.get_pat_by_uid(uid)
-    if existing and existing.get('hotkey') == hotkey and existing.get('github_id'):
-        if existing['github_id'] != github_id:
-            return _reject(
-                'GitHub identity is locked for this hotkey. Deregister and re-register to change GitHub accounts.'
-            )
+    identity_error = _github_identity_pin_error(uid, hotkey, github_id)
+    if identity_error:
+        return _reject(identity_error)
 
     # 4. Test query against a known repo to catch org-restricted PATs
-    test_error = _test_pat_against_repo(synapse.github_access_token)
+    test_error = await asyncio.to_thread(_test_pat_against_repo, synapse.github_access_token)
     if test_error:
         return _reject(f'PAT test query failed: {test_error}')
+
+    identity_error = _github_identity_pin_error(uid, hotkey, github_id)
+    if identity_error:
+        return _reject(identity_error)
 
     # 5. Store PAT (github_id guaranteed non-None after validate_github_credentials success)
     pat_storage.save_pat(uid=uid, hotkey=hotkey, pat=synapse.github_access_token, github_id=github_id or '0')
@@ -121,7 +135,12 @@ async def handle_pat_check(validator: 'Validator', synapse: PatCheckSynapse) -> 
     synapse.has_pat = True
 
     # Re-validate the stored PAT
-    validation = validate_github_credentials_result(uid, entry['pat'], stored_github_id=entry.get('github_id'))
+    validation = await asyncio.to_thread(
+        validate_github_credentials_result,
+        uid,
+        entry['pat'],
+        stored_github_id=entry.get('github_id'),
+    )
     if validation.transient_failure:
         synapse.pat_valid = None
         synapse.rejection_reason = 'GitHub API temporarily unavailable; retry the check in a few minutes.'
@@ -133,7 +152,7 @@ async def handle_pat_check(validator: 'Validator', synapse: PatCheckSynapse) -> 
         bt.logging.warning(f'PAT check result — UID: {uid}: validation failed: {validation.error}')
         return synapse
 
-    test_error = _test_pat_against_repo(entry['pat'])
+    test_error = await asyncio.to_thread(_test_pat_against_repo, entry['pat'])
     if test_error:
         synapse.pat_valid = False
         synapse.rejection_reason = f'PAT test query failed: {test_error}'

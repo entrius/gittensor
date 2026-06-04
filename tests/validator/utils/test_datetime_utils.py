@@ -27,11 +27,13 @@ def test_calculate_time_decay_differs_when_reference_advances():
         min_multiplier=0.05,
     )
     merged_at = datetime(2026, 5, 20, 0, 0, tzinfo=timezone.utc)
-    early_ref = merged_at + timedelta(hours=13)
-    late_ref = merged_at + timedelta(hours=25)
+    # Inside the 12h grace window → full multiplier.
+    inside_grace_ref = merged_at + timedelta(hours=6)
+    # Well past grace → sigmoid decay applies.
+    past_grace_ref = merged_at + timedelta(days=15)
 
-    early = calculate_time_decay(merged_at, cfg, reference_time=early_ref)
-    late = calculate_time_decay(merged_at, cfg, reference_time=late_ref)
+    inside_grace = calculate_time_decay(merged_at, cfg, reference_time=inside_grace_ref)
+    past_grace = calculate_time_decay(merged_at, cfg, reference_time=past_grace_ref)
 
-    assert early == 1.0
-    assert late < early
+    assert inside_grace == 1.0
+    assert past_grace < inside_grace

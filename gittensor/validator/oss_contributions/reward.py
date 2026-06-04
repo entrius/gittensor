@@ -16,7 +16,7 @@ from gittensor.validator.oss_contributions.inspections import (
 )
 from gittensor.validator.oss_contributions.mirror.load import load_miner_prs
 from gittensor.validator.oss_contributions.mirror.scoring import score_miner_prs
-from gittensor.validator.oss_contributions.scoring import finalize_miner_scores
+from gittensor.validator.oss_contributions.scoring import finalize_miner_scores, log_oss_scoring_summary
 from gittensor.validator.utils.load_weights import LanguageConfig, RepositoryConfig, TokenConfig
 
 # NOTE: there was a circular import error, needed this if to resolve it
@@ -145,5 +145,7 @@ async def get_rewards(
 
     # Finalize scores: apply eligibility gate, credibility, collateral
     finalize_miner_scores(miner_evaluations, master_repositories)
+
+    log_oss_scoring_summary(miner_evaluations, cached_uids, penalized_uids)
 
     return miner_evaluations, cached_uids, penalized_uids

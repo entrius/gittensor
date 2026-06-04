@@ -258,6 +258,33 @@ class TestHandlePatBroadcast:
         assert entry['github_id'] == 'github_99'
         assert entry['hotkey'] == 'hotkey_1'
 
+    @patch('gittensor.validator.pat_handler._test_pat_against_repo', return_value=None)
+    @patch('gittensor.validator.pat_handler.validate_github_credentials', return_value=('github_99', None))
+    def test_identity_pin_survives_uid_slot_reuse_and_reregistration(self, mock_validate, mock_test_query, mock_validator):
+        """A hotkey stays locked to its original GitHub id even after its old UID
+        slot is taken over by another hotkey and it re-registers on a new UID.
+
+        Regression for the UID-keyed identity-pin bypass: previously the pin was
+        looked up by UID slot, so reusing the slot erased the pin and let the
+        same hotkey switch GitHub accounts on re-registration.
+        """
+        # hotkey_1 originally pinned to github_42 at UID 1.
+        pat_storage.save_pat(1, 'hotkey_1', 'ghp_old', 'github_42')
+        # UID 1 is taken over by a throwaway hotkey (slot reused).
+        pat_storage.save_pat(1, 'throwaway', 'ghp_t', 'github_77')
+
+        # hotkey_1 re-registers and now occupies a different UID (index 2).
+        mock_validator.metagraph.hotkeys = ['hotkey_0', 'throwaway', 'hotkey_1']
+        mock_validator.metagraph.S = [100.0, 200.0, 300.0]
+
+        synapse = _make_broadcast_synapse('hotkey_1', pat='ghp_new_account')
+        result = _run(handle_pat_broadcast(mock_validator, synapse))
+
+        assert result.accepted is False
+        assert 'locked' in (result.rejection_reason or '').lower()
+        # The throwaway occupant of UID 1 is untouched.
+        assert pat_storage.get_pat_by_uid(1)['github_id'] == 'github_77'
+
 
 class TestHandlePatCheck:
     def test_test_query_call_does_not_block_event_loop(self, mock_validator):

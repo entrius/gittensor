@@ -35,11 +35,14 @@ def _get_hotkey(synapse: bt.Synapse) -> str:
     return synapse.dendrite.hotkey
 
 
-def _github_identity_pin_error(uid: int, hotkey: str, github_id: Optional[str]) -> Optional[str]:
-    existing = pat_storage.get_pat_by_uid(uid)
-    if existing and existing.get('hotkey') == hotkey and existing.get('github_id'):
-        if existing['github_id'] != github_id:
-            return 'GitHub identity is locked for this hotkey. Deregister and re-register to change GitHub accounts.'
+def _github_identity_pin_error(hotkey: str, github_id: Optional[str]) -> Optional[str]:
+    # Pin is keyed on the stable hotkey, not the reusable UID slot, so a hotkey
+    # stays locked to its original GitHub account even after its old UID is
+    # taken over and it re-registers onto a different UID.
+    existing = pat_storage.get_pat_by_hotkey(hotkey)
+    pinned_github_id = existing.get('github_id') if existing else None
+    if pinned_github_id and pinned_github_id != '0' and pinned_github_id != github_id:
+        return 'GitHub identity is locked for this hotkey. Deregister and re-register to change GitHub accounts.'
     return None
 
 
@@ -71,7 +74,7 @@ async def handle_pat_broadcast(validator: 'Validator', synapse: PatBroadcastSyna
         return _reject(error)
 
     # 3. Enforce GitHub identity pinning — same hotkey cannot switch GitHub accounts
-    identity_error = _github_identity_pin_error(uid, hotkey, github_id)
+    identity_error = _github_identity_pin_error(hotkey, github_id)
     if identity_error:
         return _reject(identity_error)
 
@@ -80,7 +83,7 @@ async def handle_pat_broadcast(validator: 'Validator', synapse: PatBroadcastSyna
     if test_error:
         return _reject(f'PAT test query failed: {test_error}')
 
-    identity_error = _github_identity_pin_error(uid, hotkey, github_id)
+    identity_error = _github_identity_pin_error(hotkey, github_id)
     if identity_error:
         return _reject(identity_error)
 

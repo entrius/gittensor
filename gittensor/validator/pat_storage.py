@@ -34,7 +34,14 @@ def load_all_pats() -> list[dict]:
 
 
 def save_pat(uid: int, hotkey: str, pat: str, github_id: str) -> None:
-    """Upsert a PAT entry by UID. Creates the file if needed."""
+    """Upsert a PAT entry, keyed by HOTKEY (one record per hotkey).
+
+    The record is keyed by the stable hotkey rather than the reusable UID slot
+    so a hotkey's GitHub identity pin survives UID churn. When this hotkey takes
+    over a UID that another hotkey used to occupy, the previous occupant's UID is
+    released (set to None) but its record — and therefore its identity pin — is
+    retained, so a displaced hotkey stays locked to its original GitHub account.
+    """
     with _lock:
         entries = _read_file()
 
@@ -46,8 +53,14 @@ def save_pat(uid: int, hotkey: str, pat: str, github_id: str) -> None:
             'stored_at': datetime.now(timezone.utc).isoformat(),
         }
 
+        # The UID slot now belongs to `hotkey`; release it from any other hotkey
+        # that previously occupied it, but keep that hotkey's identity pin.
+        for existing in entries:
+            if existing.get('uid') == uid and existing.get('hotkey') != hotkey:
+                existing['uid'] = None
+
         for i, existing in enumerate(entries):
-            if existing.get('uid') == uid:
+            if existing.get('hotkey') == hotkey:
                 entries[i] = entry
                 break
         else:
@@ -57,12 +70,33 @@ def save_pat(uid: int, hotkey: str, pat: str, github_id: str) -> None:
 
 
 def get_pat_by_uid(uid: int) -> Optional[dict]:
-    """Look up a single PAT entry by UID. Returns None if not found."""
+    """Look up the current occupant of a UID slot. Returns None if not found.
+
+    Released (detached) records carry uid=None, so they are never returned here.
+    """
     with _lock:
         for entry in _read_file():
             if entry.get('uid') == uid:
                 return entry
         return None
+
+
+def get_pat_by_hotkey(hotkey: str) -> Optional[dict]:
+    """Look up a hotkey's stored record, regardless of which UID slot it holds.
+
+    This is the source of truth for GitHub identity pinning: the binding follows
+    the stable hotkey, not the UID slot, so a hotkey cannot shed its pin by
+    cycling through deregistration and re-registration onto a fresh UID.
+    """
+    with _lock:
+        latest: Optional[dict] = None
+        for entry in _read_file():
+            if entry.get('hotkey') == hotkey and entry.get('github_id'):
+                # Defensive against legacy files with multiple records per hotkey:
+                # prefer the most recent one.
+                if latest is None or entry.get('stored_at', '') >= latest.get('stored_at', ''):
+                    latest = entry
+        return latest
 
 
 def _read_file() -> list[dict]:

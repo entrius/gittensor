@@ -53,15 +53,24 @@ class TestSavePat:
         assert len(entries) == 1
         assert entries[0]['pat'] == 'ghp_new'
 
-    def test_save_upsert_replaces_hotkey_on_uid(self):
-        """When a new miner takes over a UID, save_pat overwrites the old entry."""
+    def test_save_releases_uid_but_retains_displaced_pin(self):
+        """When a new hotkey takes over a UID, the new hotkey becomes the slot's
+        occupant, but the displaced hotkey's record (and its identity pin) is
+        retained with its UID released to None."""
         pat_storage.save_pat(1, 'old_hotkey', 'ghp_old', 'user_old')
         pat_storage.save_pat(1, 'new_hotkey', 'ghp_new', 'user_new')
 
-        entries = pat_storage.load_all_pats()
-        assert len(entries) == 1
-        assert entries[0]['hotkey'] == 'new_hotkey'
-        assert entries[0]['pat'] == 'ghp_new'
+        # The UID slot now belongs to new_hotkey.
+        occupant = pat_storage.get_pat_by_uid(1)
+        assert occupant is not None
+        assert occupant['hotkey'] == 'new_hotkey'
+        assert occupant['pat'] == 'ghp_new'
+
+        # The displaced hotkey's identity pin survives (UID released to None).
+        displaced = pat_storage.get_pat_by_hotkey('old_hotkey')
+        assert displaced is not None
+        assert displaced['github_id'] == 'user_old'
+        assert displaced['uid'] is None
 
     def test_save_multiple_miners(self):
         pat_storage.save_pat(1, 'hotkey_1', 'ghp_a', 'user_a')
@@ -100,6 +109,32 @@ class TestGetPatByUid:
     def test_get_missing(self):
         entry = pat_storage.get_pat_by_uid(999)
         assert entry is None
+
+
+class TestGetPatByHotkey:
+    def test_get_existing(self):
+        pat_storage.save_pat(1, 'hotkey_1', 'ghp_abc', 'user_1')
+        entry = pat_storage.get_pat_by_hotkey('hotkey_1')
+        assert entry is not None
+        assert entry['github_id'] == 'user_1'
+
+    def test_get_missing(self):
+        assert pat_storage.get_pat_by_hotkey('never_seen') is None
+
+    def test_pin_follows_hotkey_across_uid_reuse_and_reregistration(self):
+        """A hotkey's pin must be findable even after its old UID slot is taken
+        over and it later re-registers on a different UID."""
+        pat_storage.save_pat(1, 'victim', 'ghp_v', 'github_42')
+        # UID 1 reused by a throwaway hotkey.
+        pat_storage.save_pat(1, 'throwaway', 'ghp_t', 'github_77')
+        # victim re-registers on a fresh UID.
+        pat_storage.save_pat(5, 'victim', 'ghp_v2', 'github_42')
+
+        assert pat_storage.get_pat_by_uid(1)['hotkey'] == 'throwaway'
+        pin = pat_storage.get_pat_by_hotkey('victim')
+        assert pin is not None
+        assert pin['github_id'] == 'github_42'
+        assert pin['uid'] == 5
 
 
 class TestConcurrency:

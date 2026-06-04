@@ -299,6 +299,28 @@ def _closed_event_non_pr_node(typename='Commit', state_reason='COMPLETED', creat
             '__typename': typename,
         },
     }
+class TestSearchIssueReferencingPRsGraphQL:
+    """Test suite for _search_issue_referencing_prs_graphql function."""
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_search_deduplicates_duplicate_prs(self, mock_logging, mock_graphql):
+        """Verify that duplicate referencing PRs in timeline nodes are deduplicated."""
+        mock_graphql.return_value = _graphql_response(
+            [
+                _pr_node(number=101, user_id=42),
+                _pr_node(number=101, user_id=42),  # Duplicate
+                _pr_node(number=102, user_id=43),
+            ]
+        )
+
+        result = github_api_tools._search_issue_referencing_prs_graphql(
+            'owner/repo', 12, 'fake_token'
+        )
+
+        assert len(result) == 2
+        assert result[0]['number'] == 101
+        assert result[1]['number'] == 102
 
 
 class TestFindSolverFromClosureEvent:

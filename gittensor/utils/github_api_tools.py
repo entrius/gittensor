@@ -286,6 +286,7 @@ def _search_issue_referencing_prs_graphql(
     timeline_nodes = issue_data.get('timelineItems', {}).get('nodes', [])
 
     out: List[PRInfo] = []
+    seen_pr_numbers: set[int] = set()
     for node in timeline_nodes:
         pr = node.get('source') or {}
         if not pr:
@@ -297,6 +298,9 @@ def _search_issue_referencing_prs_graphql(
 
         pr_number = pr.get('number')
         if not pr_number:
+            continue
+
+        if pr_number in seen_pr_numbers:
             continue
 
         state = _resolve_pr_state(pr.get('state', ''), merged=bool(pr.get('merged', False)))
@@ -319,6 +323,7 @@ def _search_issue_referencing_prs_graphql(
             'review_count': int(reviews.get('totalCount', 0) or 0),
             'closing_numbers': closing_numbers,
         }
+        seen_pr_numbers.add(pr_number)
         out.append(pr_info)
 
     return out

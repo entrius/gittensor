@@ -5,6 +5,15 @@
 Root pytest configuration shared across all test directories.
 """
 
+import sys
+from unittest.mock import MagicMock
+try:
+    import bittensor
+except ImportError:
+    mock_bittensor = MagicMock()
+    mock_bittensor.logging = MagicMock()
+    sys.modules['bittensor'] = mock_bittensor
+
 import pytest
 import requests
 

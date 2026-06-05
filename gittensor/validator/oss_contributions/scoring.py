@@ -175,11 +175,11 @@ def _score_eligible_repo_prs(
 ) -> None:
     """Compute earned scores for an eligible repository's merged PRs."""
     spam_multiplier = calculate_pr_spam_penalty_multiplier(cfg, len(open_prs), repo_eval.total_token_score)
-    credibility_multiplier = round(repo_eval.credibility, 2)
 
     for pr in merged:
         pr.open_pr_spam_multiplier = spam_multiplier
-        pr.credibility_multiplier = credibility_multiplier
+        # Credibility is a gate only (#1340), not a per-PR tax.
+        pr.credibility_multiplier = 1.0
         pr.calculate_final_earned_score()
         repo_eval.total_score += pr.earned_score
 

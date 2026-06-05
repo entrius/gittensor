@@ -117,12 +117,20 @@ class Validator(BaseValidatorNeuron):
 
         skip_uids = skip_uids or set()
         successful_count = 0
-        skipped_count = 0
+        cached_skipped_count = 0
+        transient_skipped_count = 0
         failed_uids: List[int] = []
 
         for uid, evaluation in miner_evals.items():
             if uid in skip_uids:
-                skipped_count += 1
+                cached_skipped_count += 1
+                continue
+
+            if evaluation.should_use_cache_fallback:
+                transient_skipped_count += 1
+                bt.logging.warning(
+                    f'Skipping DB storage for UID {uid}: transient PR fetch failure with no cached evaluation available'
+                )
                 continue
 
             try:
@@ -141,8 +149,10 @@ class Validator(BaseValidatorNeuron):
         # Summary logging
         if successful_count > 0:
             bt.logging.success(f'Stored validation results for {successful_count} UIDs to DB')
-        if skipped_count > 0:
-            bt.logging.info(f'Skipped {skipped_count} UIDs (cached evaluations)')
+        if cached_skipped_count > 0:
+            bt.logging.info(f'Skipped {cached_skipped_count} UIDs (cached evaluations)')
+        if transient_skipped_count > 0:
+            bt.logging.info(f'Skipped {transient_skipped_count} UIDs (transient PR fetch failures without cache)')
         if failed_uids:
             bt.logging.warning(f'Failed to store {len(failed_uids)} UIDs: {failed_uids}')
 

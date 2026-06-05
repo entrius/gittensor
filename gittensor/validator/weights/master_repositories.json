@@ -200,7 +200,7 @@
       "refactor": 0.25,
       "test": 1.2
     },
-    "maintainer_cut": 0.5,
+    "maintainer_cut": 0.6,
     "eligibility": {
       "excessive_pr_penalty_base_threshold": 10
     }

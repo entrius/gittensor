@@ -3,6 +3,8 @@
 """Tests for PAT broadcast and check handlers."""
 
 import asyncio
+import threading
+import time
 from typing import Optional
 from unittest.mock import MagicMock, patch
 
@@ -25,6 +27,12 @@ from gittensor.validator.utils.github_validation import GitHubCredentialValidati
 def _run(coro):
     """Run an async function synchronously."""
     return asyncio.run(coro)
+
+
+async def _short_sleep_delay() -> float:
+    start = time.perf_counter()
+    await asyncio.sleep(0.01)
+    return time.perf_counter() - start
 
 
 @pytest.fixture(autouse=True)
@@ -103,6 +111,60 @@ class TestBlacklistPatCheck:
 
 
 class TestHandlePatBroadcast:
+    def test_validation_call_does_not_block_event_loop(self, mock_validator):
+        synapse = _make_broadcast_synapse('hotkey_1', pat='ghp_valid')
+
+        def slow_validate(uid, pat):
+            time.sleep(0.3)
+            return 'github_42', None
+
+        async def exercise():
+            with (
+                patch('gittensor.validator.pat_handler.validate_github_credentials', side_effect=slow_validate),
+                patch('gittensor.validator.pat_handler._test_pat_against_repo', return_value=None),
+            ):
+                sleep_task = asyncio.create_task(_short_sleep_delay())
+                handler_task = asyncio.create_task(handle_pat_broadcast(mock_validator, synapse))
+                sleep_delay = await sleep_task
+                result = await handler_task
+                return sleep_delay, result
+
+        sleep_delay, result = _run(exercise())
+
+        assert sleep_delay < 0.25
+        assert result.accepted is True
+
+    def test_concurrent_broadcast_rechecks_identity_pin_before_save(self, mock_validator):
+        synapse_a = _make_broadcast_synapse('hotkey_1', pat='ghp_account_a')
+        synapse_b = _make_broadcast_synapse('hotkey_1', pat='ghp_account_b')
+        test_query_barrier = threading.Barrier(2)
+
+        def validate(uid, pat):
+            github_id = 'github_a' if pat == 'ghp_account_a' else 'github_b'
+            return github_id, None
+
+        def wait_for_other_test_query(pat):
+            test_query_barrier.wait(timeout=1)
+            return None
+
+        async def exercise():
+            with (
+                patch('gittensor.validator.pat_handler.validate_github_credentials', side_effect=validate),
+                patch('gittensor.validator.pat_handler._test_pat_against_repo', side_effect=wait_for_other_test_query),
+            ):
+                return await asyncio.gather(
+                    handle_pat_broadcast(mock_validator, synapse_a),
+                    handle_pat_broadcast(mock_validator, synapse_b),
+                )
+
+        results = _run(exercise())
+
+        accepted = [result for result in results if result.accepted is True]
+        rejected = [result for result in results if result.accepted is False]
+        assert len(accepted) == 1
+        assert len(rejected) == 1
+        assert 'locked' in (rejected[0].rejection_reason or '').lower()
+
     @patch('gittensor.validator.pat_handler._test_pat_against_repo', return_value=None)
     @patch('gittensor.validator.pat_handler.validate_github_credentials', return_value=('github_42', None))
     def test_valid_pat_accepted(self, mock_validate, mock_test_query, mock_validator):
@@ -198,6 +260,31 @@ class TestHandlePatBroadcast:
 
 
 class TestHandlePatCheck:
+    def test_test_query_call_does_not_block_event_loop(self, mock_validator):
+        pat_storage.save_pat(1, 'hotkey_1', 'ghp_test', 'github_42')
+        synapse = _make_check_synapse('hotkey_1')
+
+        def slow_test_query(pat):
+            time.sleep(0.3)
+            return None
+
+        async def exercise():
+            with (
+                patch('gittensor.validator.pat_handler.validate_github_credentials_result', return_value=_validation()),
+                patch('gittensor.validator.pat_handler._test_pat_against_repo', side_effect=slow_test_query),
+            ):
+                sleep_task = asyncio.create_task(_short_sleep_delay())
+                handler_task = asyncio.create_task(handle_pat_check(mock_validator, synapse))
+                sleep_delay = await sleep_task
+                result = await handler_task
+                return sleep_delay, result
+
+        sleep_delay, result = _run(exercise())
+
+        assert sleep_delay < 0.25
+        assert result.has_pat is True
+        assert result.pat_valid is True
+
     @patch('gittensor.validator.pat_handler._test_pat_against_repo', return_value=None)
     @patch('gittensor.validator.pat_handler.validate_github_credentials_result', return_value=_validation())
     def test_valid_pat(self, mock_validate, mock_test_query, mock_validator):

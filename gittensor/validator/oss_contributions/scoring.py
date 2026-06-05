@@ -1,6 +1,7 @@
 # The MIT License (MIT)
 # Copyright © 2025 Entrius
 
+from math import prod
 from typing import TYPE_CHECKING, Dict, List, Optional, Set
 
 import bittensor as bt
@@ -247,8 +248,6 @@ def calculate_open_pr_collateral_score(pr: 'ScoredPR', scoring: ResolvedScoring)
     NOT applicable: time_decay (merge-based), credibility_multiplier (merge-based),
                     open_pr_spam (not for collateral)
     """
-    from math import prod
-
     multipliers = {
         'issue': pr.issue_multiplier,
         'label': pr.label_multiplier,

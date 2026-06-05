@@ -229,6 +229,8 @@ class TestMirrorScoredPrToLegacyPullRequest:
         scored = ScoredPR(pr=pr)
         adapted = mirror_scored_pr_to_legacy_pull_request(scored, 1, 'hk', 'gid')
         assert adapted.pr_state == PRState.CLOSED
+        assert adapted.closed_at == pr.closed_at
+        assert adapted.merged_at is None
 
     def test_changes_requested_count_from_review_summary(self):
         pr = _make_mirror_pr(maintainer_changes_requested=4)

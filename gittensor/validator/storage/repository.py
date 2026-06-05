@@ -175,6 +175,7 @@ class Repository(BaseRepository):
                     pr.title,
                     pr.author_login,
                     pr.merged_at,
+                    pr.closed_at,
                     pr.created_at,
                     pr.pr_state.value,  # Convert PRState enum to string
                     pr.base_score,

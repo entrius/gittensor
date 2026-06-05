@@ -98,6 +98,7 @@ def mirror_scored_pr_to_legacy_pull_request(
     - ``pr.body`` → ``PullRequest.description``
     - ``pr.head_sha`` → ``PullRequest.head_ref_oid``
     - ``pr.base_sha`` → ``PullRequest.base_ref_oid``
+    - ``pr.closed_at`` → ``PullRequest.closed_at``
     - state string ``MERGED|OPEN|CLOSED`` → ``PRState`` enum
 
     ``file_changes`` and ``issues`` are left as None on the resulting PullRequest
@@ -114,6 +115,7 @@ def mirror_scored_pr_to_legacy_pull_request(
         title=pr.title,
         author_login=pr.author_login,
         merged_at=pr.merged_at,
+        closed_at=pr.closed_at,
         created_at=pr.created_at,
         pr_state=PRState(pr.state),
         base_score=scored.base_score,

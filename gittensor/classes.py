@@ -159,6 +159,7 @@ class PullRequest:
     title: str
     author_login: str
     merged_at: Optional[datetime]  # None for OPEN PRs
+    closed_at: Optional[datetime] = None  # Set when PR is CLOSED without merge
     created_at: datetime
 
     # PR state based fields

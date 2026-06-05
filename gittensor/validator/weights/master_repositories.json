@@ -184,6 +184,9 @@
         "min_multiplier": 0.1
       }
     },
+    "eligibility": {
+      "excessive_pr_penalty_base_threshold": 3
+    },
     "additional_acceptable_branches": ["test"],
     "maintainer_cut": 0.5
   },

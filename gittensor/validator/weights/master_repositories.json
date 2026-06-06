@@ -206,6 +206,13 @@
   "touchpilot/touchpilot": {
     "emission_share": 0.005,
     "issue_discovery_share": 0.0,
+    "label_multipliers": {
+      "type: bug": 1.1,
+      "type: enhancement": 1.25,
+      "type: feature": 1.5,
+      "type: refactor": 0.25,
+      "type: test": 1.2
+    },
     "maintainer_cut": 0.3
   },
   "we-promise/sure": {

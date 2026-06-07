@@ -699,8 +699,9 @@ def _linked_issue(
     closed_at: str | None = '2026-04-18T10:00:00Z',
     author_association: str | None = 'CONTRIBUTOR',
     number: int = 50,
+    repository_full_name: str | None = None,
 ):
-    return {
+    data = {
         'number': number,
         'title': 't',
         'state': state,
@@ -714,6 +715,9 @@ def _linked_issue(
         'solved_by_pr': 100,
         'labels': [],
     }
+    if repository_full_name is not None:
+        data['repository_full_name'] = repository_full_name
+    return data
 
 
 class TestIssueMultiplier:
@@ -754,6 +758,22 @@ class TestLinkedIssueValidity:
         scored = ScoredPR(pr=_pr())
         li = MirrorLinkedIssue.from_dict(_linked_issue(is_transferred=True))
         assert _is_valid_linked_issue(li, scored.pr) is False
+
+    def test_cross_repo_linked_issue_blocks_when_repo_known(self):
+        scored = ScoredPR(pr=_pr())
+        li = MirrorLinkedIssue.from_dict(_linked_issue(repository_full_name='other-owner/other-repo'))
+        assert _is_valid_linked_issue(li, scored.pr) is False
+
+    def test_same_repo_linked_issue_passes_when_repo_known(self):
+        scored = ScoredPR(pr=_pr())
+        li = MirrorLinkedIssue.from_dict(_linked_issue(repository_full_name='Entrius/Gittensor-UI'))
+        assert _is_valid_linked_issue(li, scored.pr) is True
+
+    def test_missing_repo_identity_preserves_current_behavior(self):
+        scored = ScoredPR(pr=_pr())
+        li = MirrorLinkedIssue.from_dict(_linked_issue(repository_full_name=None))
+        assert li.repository_full_name is None
+        assert _is_valid_linked_issue(li, scored.pr) is True
 
     def test_missing_author_blocks(self):
         scored = ScoredPR(pr=_pr())

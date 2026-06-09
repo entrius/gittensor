@@ -49,6 +49,22 @@ def load_contract_metadata() -> Tuple[Dict[str, bytes], Dict[str, List]]:
 CONTRACT_SELECTORS, CONTRACT_ARG_TYPES = load_contract_metadata()
 
 
+def _scale_compact_length(n: int) -> bytes:
+    """SCALE-encode a non-negative integer as a compact length prefix.
+
+    Used to prefix variable-length SCALE payloads (Vec<u8>, String).
+    """
+    if n < 0:
+        raise ValueError(f'Length must be non-negative: {n}')
+    if n < 1 << 6:
+        return bytes([n << 2])
+    if n < 1 << 14:
+        return ((n << 2) | 1).to_bytes(2, 'little')
+    if n < 1 << 30:
+        return ((n << 2) | 2).to_bytes(4, 'little')
+    raise ValueError(f'Length too large for compact encoding: {n}')
+
+
 class IssueStatus(Enum):
     """Status of an issue in its lifecycle"""
 
@@ -564,6 +580,11 @@ class IssueCompetitionContractClient:
                 encoded += struct.pack('<Q', value)
             elif type_def == 'u128':
                 encoded += struct.pack('<QQ', value & 0xFFFFFFFFFFFFFFFF, value >> 64)
+            elif type_def == 'str':
+                if not isinstance(value, str):
+                    raise ValueError(f'Expected str for {arg_name}, got {type(value).__name__}')
+                data = value.encode('utf-8')
+                encoded += _scale_compact_length(len(data)) + data
             elif type_def == 'AccountId':
                 if isinstance(value, str):
                     encoded += bytes.fromhex(self.subtensor.substrate.ss58_decode(value))

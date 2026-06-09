@@ -3,6 +3,7 @@
 """Tests for IssueCompetitionContractClient transaction methods."""
 
 import hashlib
+import struct
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -11,6 +12,7 @@ import pytest
 from gittensor.validator.issue_competitions.contract_client import (
     DEFAULT_GAS_LIMIT,
     IssueCompetitionContractClient,
+    _scale_compact_length,
 )
 
 # (method, call_kwargs, expected_contract_method, expected_args, uses_hotkey, explicit_gas)
@@ -102,3 +104,127 @@ def test_revert_returns_false(client, wallet, method, kwargs_fn, _cm, _ea, _hk, 
 def test_exception_returns_false(client, wallet, method, kwargs_fn, _cm, _ea, _hk, _gas):
     with patch.object(client, '_exec_contract_raw', side_effect=RuntimeError('node down')):
         assert getattr(client, method)(**kwargs_fn(wallet)) is False
+
+
+class TestScaleCompactLength:
+    """Boundary coverage for the SCALE compact-length encoder."""
+
+    @pytest.mark.parametrize(
+        'n, expected',
+        [
+            (0, b'\x00'),
+            (1, b'\x04'),
+            (63, bytes([63 << 2])),
+        ],
+    )
+    def test_mode_0_single_byte(self, n, expected):
+        assert _scale_compact_length(n) == expected
+
+    @pytest.mark.parametrize('n', [64, 100, 16383])
+    def test_mode_1_two_bytes(self, n):
+        encoded = _scale_compact_length(n)
+        assert len(encoded) == 2
+        assert encoded == ((n << 2) | 1).to_bytes(2, 'little')
+
+    @pytest.mark.parametrize('n', [16384, 100_000, (1 << 30) - 1])
+    def test_mode_2_four_bytes(self, n):
+        encoded = _scale_compact_length(n)
+        assert len(encoded) == 4
+        assert encoded == ((n << 2) | 2).to_bytes(4, 'little')
+
+    def test_rejects_negative(self):
+        with pytest.raises(ValueError, match='non-negative'):
+            _scale_compact_length(-1)
+
+    def test_rejects_oversize(self):
+        with pytest.raises(ValueError, match='too large'):
+            _scale_compact_length(1 << 30)
+
+
+class TestEncodeArgsStr:
+    """SCALE encoding of `str` arguments via _encode_args (regression for #1374)."""
+
+    def test_register_issue_short_url_encodes(self, client):
+        url = 'https://github.com/owner/repo/issues/1'
+        repo = 'owner/repo'
+        url_bytes = url.encode('utf-8')
+        repo_bytes = repo.encode('utf-8')
+        assert len(url_bytes) < 64
+
+        encoded = client._encode_args(
+            'register_issue',
+            {
+                'github_url': url,
+                'repository_full_name': repo,
+                'issue_number': 1,
+                'target_bounty': 10_000_000_000,
+            },
+        )
+
+        offset = 0
+        assert encoded[offset] == len(url_bytes) << 2
+        offset += 1
+        assert encoded[offset : offset + len(url_bytes)] == url_bytes
+        offset += len(url_bytes)
+
+        assert encoded[offset] == len(repo_bytes) << 2
+        offset += 1
+        assert encoded[offset : offset + len(repo_bytes)] == repo_bytes
+        offset += len(repo_bytes)
+
+        assert struct.unpack_from('<I', encoded, offset)[0] == 1
+        offset += 4
+
+        low = struct.unpack_from('<Q', encoded, offset)[0]
+        high = struct.unpack_from('<Q', encoded, offset + 8)[0]
+        assert low + (high << 64) == 10_000_000_000
+        assert len(encoded) == offset + 16
+
+    def test_register_issue_long_url_uses_mode_1(self, client):
+        long_repo = 'a' * 30 + '/' + 'b' * 30
+        url = f'https://github.com/{long_repo}/issues/12345'
+        url_bytes = url.encode('utf-8')
+        assert 64 <= len(url_bytes) < 16384
+
+        encoded = client._encode_args(
+            'register_issue',
+            {
+                'github_url': url,
+                'repository_full_name': long_repo,
+                'issue_number': 12345,
+                'target_bounty': 1,
+            },
+        )
+
+        expected_prefix = ((len(url_bytes) << 2) | 1).to_bytes(2, 'little')
+        assert encoded[:2] == expected_prefix
+        assert encoded[2 : 2 + len(url_bytes)] == url_bytes
+
+    def test_register_issue_rejects_non_string_github_url(self, client):
+        with pytest.raises(ValueError, match='Expected str for github_url'):
+            client._encode_args(
+                'register_issue',
+                {
+                    'github_url': 12345,
+                    'repository_full_name': 'owner/repo',
+                    'issue_number': 1,
+                    'target_bounty': 1,
+                },
+            )
+
+    def test_register_issue_unicode_url_roundtrips(self, client):
+        url = 'https://github.com/Δοκιμή/π/issues/1'
+        url_bytes = url.encode('utf-8')
+
+        encoded = client._encode_args(
+            'register_issue',
+            {
+                'github_url': url,
+                'repository_full_name': 'owner/repo',
+                'issue_number': 1,
+                'target_bounty': 1,
+            },
+        )
+
+        assert encoded[0] == len(url_bytes) << 2
+        assert encoded[1 : 1 + len(url_bytes)] == url_bytes

@@ -10,27 +10,30 @@ from __future__ import annotations
 import dataclasses
 import json
 import sys
-from contextlib import contextmanager
 from enum import Enum
-from pathlib import Path
-from tempfile import TemporaryDirectory
-from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any, Dict, Iterator, NoReturn, Optional, Set, Tuple, cast
+from typing import TYPE_CHECKING, Any, Dict, NoReturn, Optional, Set, Tuple, cast
 
 import click
 from rich.console import Console
 from rich.table import Table
 
 from gittensor.cli.json_output import emit_json
-from gittensor.cli.miner_commands.helpers import _error
+from gittensor.cli.miner_commands.helpers import (
+    PIPELINE_DEV_HOTKEY,
+    PIPELINE_DEV_UID,
+    LocalValidatorStub,
+    drain_logs,
+    override_pats_file,
+    _error,
+)
 
 if TYPE_CHECKING:
     from neurons.validator import Validator
 
 console = Console()
 
-_DEV_UID = 1
-_DEV_HOTKEY = 'dev'
+_DEV_UID = PIPELINE_DEV_UID
+_DEV_HOTKEY = PIPELINE_DEV_HOTKEY
 
 
 def _die(msg: str, json_mode: bool) -> NoReturn:
@@ -47,15 +50,6 @@ def _resolve_pat(cli_pat: Optional[str], json_mode: bool) -> str:
 def _round(x: float) -> float:
     return round(x, 4)
 
-
-class _StubValidator:
-    """Stub `self` with no tensor, wallet, axon, wandb, and DB connection."""
-
-    def __init__(self, uid: int, hotkey: str):
-        self.metagraph = SimpleNamespace(hotkeys={uid: hotkey})
-
-    def store_or_use_cached_evaluation(self, miner_evaluations: Dict) -> Set[int]:
-        return set()
 
 
 _EVAL_SKIP: frozenset = frozenset(
@@ -256,60 +250,11 @@ def _render_table(payload: Dict[str, Any]) -> None:
         console.print(pr_table)
 
 
-@contextmanager
-def _override_pats_file(snapshot: list) -> Iterator[None]:
-    """Point pat_storage at a tempfile holding our injected PAT snapshot."""
-    from gittensor.validator import pat_storage
-
-    original = pat_storage.PATS_FILE
-    with TemporaryDirectory() as tmp:
-        fake = Path(tmp) / 'miner_pats.json'
-        fake.write_text(json.dumps(snapshot))
-        pat_storage.PATS_FILE = fake
-        try:
-            yield
-        finally:
-            pat_storage.PATS_FILE = original
-
-
 def _apply_log_level(level: str) -> None:
-    """Configure bittensor's logger. The dev tool bypasses BaseNeuron, which is
-    where production normally calls `bt.logging.set_config`, so the level stays
-    at the default (warning) unless we set it ourselves.
-    """
+    """Configure bittensor's logger for a local pipeline run."""
     import bittensor as bt
 
     getattr(bt.logging, f'set_{level}')()
-
-
-def _drain_logs() -> None:
-    """Stop log production and wait for the async stderr writer to drain.
-
-    bittensor logs through a queue consumed by a background worker thread.
-    `queue.empty()` only tells us nothing more is *enqueued*; the worker may
-    still be inside `write()` for the last record. The grace tick covers that
-    race so the final lines aren't truncated by a fast process exit.
-    """
-    import time
-
-    import bittensor as bt
-
-    # bittensor's LoggingMachine defines disable_logging transitions from
-    # Trace/Debug/Default/Disabled/Info but NOT from Warning (only
-    # `disable_warning = Warning.to(Default)` exists), so a bare `off()` raises
-    # TransitionNotAllowed when --log-level is warning. Step Warning down to
-    # Default first; from Default the disable_logging transition is defined.
-    if bt.logging.current_state_value == 'Warning':
-        bt.logging.set_warning(on=False)
-    bt.logging.off()
-    queue = bt.logging.get_queue()
-    if not queue.empty():
-        deadline = time.monotonic() + 2.0
-        while not queue.empty() and time.monotonic() < deadline:
-            time.sleep(0.05)
-        time.sleep(0.1)
-    sys.stderr.flush()
-    sys.stdout.flush()
 
 
 @click.command(name='score')
@@ -357,7 +302,7 @@ def score_command(pat: Optional[str], log_level: str, json_mode: bool) -> None:
 
     # `oss_contributions` is typed as taking a real `Validator`; the stub fulfils
     # the surface that function actually uses (metagraph.hotkeys, the cache hook).
-    stub = cast('Validator', _StubValidator(_DEV_UID, _DEV_HOTKEY))
+    stub = cast('Validator', LocalValidatorStub(_DEV_UID, _DEV_HOTKEY))
     miner_uids = {_DEV_UID}
 
     if json_mode:
@@ -373,7 +318,7 @@ def score_command(pat: Optional[str], log_level: str, json_mode: bool) -> None:
     pat_snapshot = [{'uid': _DEV_UID, 'hotkey': _DEV_HOTKEY, 'pat': resolved_pat}]
 
     async def _run() -> Dict[str, Any]:
-        with _override_pats_file(pat_snapshot):
+        with override_pats_file(pat_snapshot):
             miner_evaluations, _, _ = await oss_contributions(
                 stub, miner_uids, master_repositories, programming_languages, token_config
             )
@@ -399,7 +344,7 @@ def score_command(pat: Optional[str], log_level: str, json_mode: bool) -> None:
         console.print('[bold cyan]Running validator pipeline...[/bold cyan]')
     payload = asyncio.run(_run())
 
-    _drain_logs()
+    drain_logs()
 
     if json_mode:
         emit_json(payload)

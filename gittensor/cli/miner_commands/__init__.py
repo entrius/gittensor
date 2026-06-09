@@ -8,12 +8,16 @@ Command structure:
         post                     Broadcast GitHub PAT to validators
         check                    Check how many validators have your PAT
         score                    Score GitHub entities through the production pipeline
+        advisor                  Analyse scoring results and surface actionable recommendations
+        scan                     Discover high-value open issues across incentivised repos
 """
 
 import click
 
+from .advisor import advisor_command
 from .check import miner_check
 from .post import miner_post
+from .scan import scan_command
 from .score import score_command
 
 
@@ -26,6 +30,8 @@ def miner_group():
         post     Broadcast your GitHub PAT to validators
         check    Check how many validators have your PAT stored
         score    Run the validator scoring pipeline end-to-end for a single miner
+        advisor  Analyse scoring results and surface actionable recommendations
+        scan     Discover high-value open issues across incentivised repos
     """
     pass
 
@@ -33,6 +39,8 @@ def miner_group():
 miner_group.add_command(miner_post, name='post')
 miner_group.add_command(miner_check, name='check')
 miner_group.add_command(score_command, name='score')
+miner_group.add_command(advisor_command, name='advisor')
+miner_group.add_command(scan_command, name='scan')
 
 
 def register_miner_commands(cli):

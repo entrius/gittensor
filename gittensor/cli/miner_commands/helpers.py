@@ -6,9 +6,13 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from collections import Counter
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from tempfile import TemporaryDirectory
+from types import SimpleNamespace
+from typing import Any, Dict, Iterator, Set
 
 from rich.console import Console
 from rich.table import Table
@@ -214,3 +218,71 @@ def _pat_post_aggregate_counts(results: list[dict[str, Any]]) -> dict[str, int]:
         'rejected': counts['rejected'],
         'no_response': counts['no_response'],
     }
+
+
+# ---------------------------------------------------------------------------
+# Shared pipeline utilities (used by score, advisor, scan)
+# ---------------------------------------------------------------------------
+
+#: UID used when running the validator pipeline locally without a real metagraph.
+PIPELINE_DEV_UID: int = 1
+#: Hotkey placeholder for local pipeline runs.
+PIPELINE_DEV_HOTKEY: str = 'dev'
+
+
+class LocalValidatorStub:
+    """Minimal validator stub for running the scoring pipeline locally.
+
+    Satisfies the duck-type surface used by ``oss_contributions`` and
+    ``issue_discovery``: a ``metagraph`` with a ``hotkeys`` dict, and a
+    no-op ``store_or_use_cached_evaluation``.
+    """
+
+    def __init__(self, uid: int = PIPELINE_DEV_UID, hotkey: str = PIPELINE_DEV_HOTKEY) -> None:
+        self.metagraph = SimpleNamespace(hotkeys={uid: hotkey})
+
+    def store_or_use_cached_evaluation(self, miner_evaluations: Dict) -> Set[int]:
+        return set()
+
+
+@contextmanager
+def override_pats_file(snapshot: list) -> Iterator[None]:
+    """Temporarily redirect ``pat_storage.PATS_FILE`` to an in-memory fixture.
+
+    Allows running the scoring pipeline against an injected PAT without
+    touching the real PAT storage file on disk.
+    """
+    from gittensor.validator import pat_storage
+
+    original = pat_storage.PATS_FILE
+    with TemporaryDirectory() as tmp:
+        fake = Path(tmp) / 'miner_pats.json'
+        fake.write_text(json.dumps(snapshot))
+        pat_storage.PATS_FILE = fake
+        try:
+            yield
+        finally:
+            pat_storage.PATS_FILE = original
+
+
+def drain_logs() -> None:
+    """Stop bittensor log production and wait for the async writer to drain.
+
+    bittensor logs through a queue consumed by a background worker thread.
+    ``queue.empty()`` only tells us nothing more is *enqueued*; the worker may
+    still be inside ``write()`` for the last record.  The grace tick covers
+    that race so the final lines are not truncated by a fast process exit.
+    """
+    import bittensor as bt
+
+    if bt.logging.current_state_value == 'Warning':
+        bt.logging.set_warning(on=False)
+    bt.logging.off()
+    queue = bt.logging.get_queue()
+    if not queue.empty():
+        deadline = time.monotonic() + 2.0
+        while not queue.empty() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        time.sleep(0.1)
+    sys.stderr.flush()
+    sys.stdout.flush()

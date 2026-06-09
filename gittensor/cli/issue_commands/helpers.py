@@ -792,6 +792,11 @@ def _make_contract_client(contract_addr: str, ws_endpoint: str, wallet_name: str
 
     Returns (wallet, client). Lazy-imports bittensor and the contract client so
     that the top-level CLI remains importable without those heavy dependencies.
+
+    Wallet resolution order (mirrors ``issues register``):
+    1. Explicit CLI flags win (any value other than the Click default ``'default'``).
+    2. ``~/.gittensor/config.json`` ``wallet`` / ``hotkey`` keys.
+    3. Click defaults (``'default'`` / ``'default'``).
     """
     import bittensor as bt
 
@@ -799,7 +804,11 @@ def _make_contract_client(contract_addr: str, ws_endpoint: str, wallet_name: str
         IssueCompetitionContractClient,
     )
 
-    wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
+    config = load_config()
+    effective_wallet = wallet_name if wallet_name != 'default' else config.get('wallet', wallet_name)
+    effective_hotkey = wallet_hotkey if wallet_hotkey != 'default' else config.get('hotkey', wallet_hotkey)
+
+    wallet = bt.Wallet(name=effective_wallet, hotkey=effective_hotkey)
     subtensor = bt.Subtensor(network=ws_endpoint)
     client = IssueCompetitionContractClient(
         contract_address=contract_addr,

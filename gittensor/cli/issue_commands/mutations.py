@@ -243,15 +243,15 @@ def issue_register(
     '--wallet-name',
     '--wallet.name',
     '--wallet',
-    default='validator',
-    help='Wallet name',
+    default=None,
+    help='Wallet name (default: config wallet, then "validator")',
 )
 @click.option(
     '--wallet-hotkey',
     '--wallet.hotkey',
     '--hotkey',
-    default='default',
-    help='Hotkey name',
+    default=None,
+    help='Hotkey name (default: config hotkey, then "default")',
 )
 @click.option(
     '--network',
@@ -293,8 +293,13 @@ def issue_harvest(wallet_name: str, wallet_hotkey: str, network: str, rpc_url: s
         missing_contract_message='Contract address not configured. Set CONTRACT_ADDRESS env var or run ./up.sh --issues.',
     )
 
+    # CLI flags override config; fall back to config, then to command defaults.
+    config = load_config()
+    effective_wallet = wallet_name or config.get('wallet', 'validator')
+    effective_hotkey = wallet_hotkey or config.get('hotkey', 'default')
+
     print_network_header(network_name, contract_addr)
-    err_console.print(f'[dim]Wallet: {wallet_name}/{wallet_hotkey}[/dim]\n')
+    err_console.print(f'[dim]Wallet: {effective_wallet}/{effective_hotkey}[/dim]\n')
 
     try:
         import bittensor as bt
@@ -304,7 +309,7 @@ def issue_harvest(wallet_name: str, wallet_hotkey: str, network: str, rpc_url: s
         )
 
         with err_console.status('[bold cyan]Loading wallet...', spinner='dots'):
-            wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
+            wallet = bt.Wallet(name=effective_wallet, hotkey=effective_hotkey)
             hotkey_addr = wallet.hotkey.ss58_address
         err_console.print(f'[green]Hotkey address:[/green] {hotkey_addr}')
 

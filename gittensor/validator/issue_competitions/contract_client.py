@@ -16,6 +16,7 @@ from async_substrate_interface.errors import ExtrinsicNotFound
 from bittensor_wallet import Keypair
 
 from gittensor.constants import MAX_ISSUE_ID
+from gittensor.validator.issue_competitions.errors import TreasuryReadError
 from gittensor.validator.issue_competitions.storage_utils import (
     ISSUES_MAPPING_ROOT_KEY,
     compute_ink5_lazy_key,
@@ -639,7 +640,7 @@ class IssueCompetitionContractClient:
 
         except Exception as e:
             bt.logging.error(f'Error fetching treasury stake: {e}')
-            return 0
+            raise TreasuryReadError(f'Treasury stake read failed: {e}') from e
 
     def get_last_harvest_block(self) -> int:
         """Query the block number of the last harvest."""

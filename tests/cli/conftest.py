@@ -67,6 +67,33 @@ def _ensure_fake_bittensor():
 _ensure_fake_bittensor()
 
 
+def _ensure_fake_async_substrate_interface():
+    """Provide a minimal async_substrate_interface stub when dependency is unavailable."""
+    if 'async_substrate_interface' in sys.modules:
+        return
+    try:
+        __import__('async_substrate_interface')
+        return
+    except ImportError:
+        pass
+
+    class _ExtrinsicNotFound(Exception):
+        pass
+
+    errors_mod = types.ModuleType('async_substrate_interface.errors')
+    errors_mod.ExtrinsicNotFound = _ExtrinsicNotFound  # type: ignore[attr-defined]
+
+    top_mod = types.ModuleType('async_substrate_interface')
+    top_mod.errors = errors_mod  # type: ignore[attr-defined]
+    top_mod.SubstrateInterface = object  # type: ignore[attr-defined]
+
+    sys.modules['async_substrate_interface'] = top_mod
+    sys.modules['async_substrate_interface.errors'] = errors_mod
+
+
+_ensure_fake_async_substrate_interface()
+
+
 def pytest_unconfigure(config):
     """Restore original bittensor module state after CLI test session."""
     del config

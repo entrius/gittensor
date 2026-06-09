@@ -281,6 +281,7 @@ def issues_pending_harvest(network: str, rpc_url: str, contract: str, verbose: b
         from gittensor.validator.issue_competitions.contract_client import (
             IssueCompetitionContractClient,
         )
+        from gittensor.validator.issue_competitions.errors import TreasuryReadError
 
         with loading_context('Reading treasury and contract data...', as_json):
             subtensor = bt.Subtensor(network=ws_endpoint)
@@ -312,6 +313,8 @@ def issues_pending_harvest(network: str, rpc_url: str, contract: str, verbose: b
         console.print(f'[green]Treasury Stake:[/green] {format_alpha(treasury_stake, 4)} ALPHA')
         console.print(f'[green]Allocated to Bounties:[/green] {format_alpha(total_bounty_pool, 4)} ALPHA')
         console.print(f'[green]Pending Harvest:[/green] {format_alpha(pending_harvest, 4)} ALPHA')
+    except TreasuryReadError as e:
+        handle_exception(as_json=as_json, message=str(e), error_type='read_failed')
     except Exception as e:
         handle_exception(as_json=as_json, message=str(e))
 

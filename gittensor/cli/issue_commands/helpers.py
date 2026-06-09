@@ -18,6 +18,7 @@ from typing import Any, Callable, ContextManager, Dict, List, Optional, Tuple, T
 import click
 import requests
 from bittensor_wallet.utils import is_valid_ss58_address
+from click.core import ParameterSource
 from rich.console import Console
 
 from gittensor.cli.issue_commands.tables import build_pr_table
@@ -526,6 +527,29 @@ def load_config() -> Dict[str, Any]:
     return {}
 
 
+def resolve_wallet_config(
+    wallet_name: str,
+    wallet_hotkey: str,
+    *,
+    wallet_default: str = 'default',
+    hotkey_default: str = 'default',
+) -> Tuple[str, str]:
+    """Resolve wallet values against the CLI config file."""
+    ctx = click.get_current_context(silent=True)
+    config = load_config()
+
+    if ctx is None:
+        wallet_explicit = wallet_name != wallet_default
+        hotkey_explicit = wallet_hotkey != hotkey_default
+    else:
+        wallet_explicit = ctx.get_parameter_source('wallet_name') == ParameterSource.COMMANDLINE
+        hotkey_explicit = ctx.get_parameter_source('wallet_hotkey') == ParameterSource.COMMANDLINE
+
+    effective_wallet = wallet_name if wallet_explicit else config.get('wallet', wallet_default)
+    effective_hotkey = wallet_hotkey if hotkey_explicit else config.get('hotkey', hotkey_default)
+    return effective_wallet, effective_hotkey
+
+
 def get_contract_address(cli_value: str = '') -> str:
     """
     Get contract address.
@@ -810,7 +834,13 @@ def _make_contract_client(contract_addr: str, ws_endpoint: str, wallet_name: str
         IssueCompetitionContractClient,
     )
 
-    wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
+    effective_wallet, effective_hotkey = resolve_wallet_config(
+        wallet_name,
+        wallet_hotkey,
+        wallet_default='default',
+        hotkey_default='default',
+    )
+    wallet = bt.Wallet(name=effective_wallet, hotkey=effective_hotkey)
     subtensor = bt.Subtensor(network=ws_endpoint)
     client = IssueCompetitionContractClient(
         contract_address=contract_addr,

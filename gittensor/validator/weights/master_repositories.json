@@ -7,7 +7,20 @@
   "e35ventura/taopedia": {
     "emission_share": 0.025,
     "issue_discovery_share": 0.0,
-    "maintainer_cut": 0.0
+    "maintainer_cut": 0.0,
+    "additional_acceptable_branches": ["test"],
+    "trusted_label_pipeline": true,
+    "default_label_multiplier": 0.0,
+    "label_multipliers": {
+      "feature": 3.0,
+      "ui-ux": 2.0,
+      "bug": 1.25,
+      "security": 1.25,
+      "other": 0.1
+    },
+    "eligibility": {
+      "min_credibility": 0.6
+    }
   },
   "e35ventura/taopedia-articles": {
     "emission_share": 0.025,

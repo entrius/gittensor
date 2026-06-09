@@ -30,3 +30,8 @@ target/
 !uv.lock
 
 **/.venv/
+
+# Internal-only design/scratch docs — never commit (REPO_REGISTRY_DESIGN.md etc).
+# Already-tracked .md (READMEs, CONTRIBUTING, ...) stay tracked; this only blocks
+# NEW markdown. To commit a genuinely new .md, add it with `git add -f`.
+*.md

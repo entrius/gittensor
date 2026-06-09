@@ -1,4 +1,21 @@
 {
+  "anderdc/social-media-manager": {
+    "default_label_multiplier": 0.0,
+    "eligibility": {
+      "min_credibility": 0.0,
+      "min_issue_credibility": 0.0,
+      "min_valid_merged_prs": 0,
+      "min_valid_solved_issues": 0
+    },
+    "emission_share": 0.004,
+    "fixed_base_score": 1.0,
+    "issue_discovery_share": 0.0,
+    "label_multipliers": {
+      "crown": 1.0
+    },
+    "maintainer_cut": 0.0,
+    "trusted_label_pipeline": true
+  },
   "cogniax/tao-pulse-app": {
     "emission_share": 0.01,
     "issue_discovery_share": 0.7,
@@ -64,7 +81,7 @@
     "trusted_label_pipeline": true
   },
   "entrius/gittensor": {
-    "emission_share": 0.09,
+    "emission_share": 0.08,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "bug": 1.1,

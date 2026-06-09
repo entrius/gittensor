@@ -167,6 +167,10 @@ async def score_pr(
             scored.leaf_score = result.leaf_score
             scored.total_nodes_scored = result.total_nodes_scored
             scored.base_score = result.base_score
+
+            for scored_file in files:
+                scored_file.head_content = None
+                scored_file.base_content = None
         elif not has_fixed_base:
             bt.logging.warning(f'No files returned for PR #{pr.pr_number}')
             return

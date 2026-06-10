@@ -6,9 +6,6 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Set
 import bittensor as bt
 
 from gittensor.classes import MinerEvaluation, RepoEvaluation
-
-if TYPE_CHECKING:
-    from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredPR
 from gittensor.constants import MAX_OPEN_PR_REVIEW_COLLATERAL_MULTIPLIER
 from gittensor.validator.oss_contributions.credibility import check_eligibility
 from gittensor.validator.utils.load_weights import (
@@ -18,6 +15,9 @@ from gittensor.validator.utils.load_weights import (
     resolve_eligibility,
     resolve_scoring,
 )
+
+if TYPE_CHECKING:
+    from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredPR
 
 
 def calculate_review_quality_multiplier(

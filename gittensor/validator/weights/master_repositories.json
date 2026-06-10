@@ -14,6 +14,9 @@
       "crown": 1.0
     },
     "maintainer_cut": 0.0,
+    "scoring": {
+      "pr_lookback_days": 7
+    },
     "trusted_label_pipeline": true
   },
   "cogniax/tao-pulse-app": {

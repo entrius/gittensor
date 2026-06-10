@@ -34,8 +34,8 @@
     "label_multipliers": {
       "feature": 3.0,
       "ui-ux": 2.0,
-      "bug": 1.25,
-      "security": 1.25,
+      "bug": 0.625,
+      "security": 0.625,
       "other": 0.1
     },
     "eligibility": {

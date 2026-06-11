@@ -115,7 +115,6 @@ def test_credibility_is_gate_only_not_a_multiplier():
     # used only for eligibility, not as a per-PR multiplier.
     assert repo_eval.credibility == 0.8
     assert repo_eval.is_eligible is True
-    assert all(pr.credibility_multiplier == 1.0 for pr in merged)
     assert all(pr.earned_score == 10.0 for pr in merged)
 
 

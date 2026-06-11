@@ -25,11 +25,11 @@ class ScoredPR:
 
     pr: MirrorPullRequest
 
-    # Multipliers (default 1.0 — neutral if not yet computed)
+    # Multipliers (default 1.0 — neutral if not yet computed).
+    # Credibility is a gate only (#1340); no per-PR credibility multiplier.
     issue_multiplier: float = 1.0
     open_pr_spam_multiplier: float = 1.0
     time_decay_multiplier: float = 1.0
-    credibility_multiplier: float = 1.0
     review_quality_multiplier: float = 1.0
     label_multiplier: float = 1.0
     label: Optional[str] = None
@@ -80,7 +80,6 @@ class ScoredPR:
             'label': self.label_multiplier,
             'spam': self.open_pr_spam_multiplier,
             'decay': self.time_decay_multiplier,
-            'cred': self.credibility_multiplier,
             'review': self.review_quality_multiplier,
         }
         label = f'{self.pr.state} PR #{self.pr.pr_number} ({self.pr.repo_full_name})'

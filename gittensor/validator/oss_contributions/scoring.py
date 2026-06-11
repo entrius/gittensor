@@ -198,8 +198,6 @@ def _score_eligible_repo_prs(
 
     for pr in merged:
         pr.open_pr_spam_multiplier = spam_multiplier
-        # Credibility is a gate only (#1340), not a per-PR tax.
-        pr.credibility_multiplier = 1.0
         pr.calculate_final_earned_score()
         repo_eval.total_score += pr.earned_score
 
@@ -244,8 +242,7 @@ def calculate_open_pr_collateral_score(pr: 'ScoredPR', scoring: ResolvedScoring)
     Collateral = base_score * applicable_multipliers * open_pr_collateral_percent
 
     Applicable multipliers: issue, label, review_collateral
-    NOT applicable: time_decay (merge-based), credibility_multiplier (merge-based),
-                    open_pr_spam (not for collateral)
+    NOT applicable: time_decay (merge-based), open_pr_spam (not for collateral)
     """
     from math import prod
 

@@ -24,6 +24,7 @@ from .helpers import (
     print_error,
     print_network_header,
     print_success,
+    resolve_wallet_config,
     validate_bounty_amount,
     validate_github_issue,
     validate_repository,
@@ -294,7 +295,14 @@ def issue_harvest(wallet_name: str, wallet_hotkey: str, network: str, rpc_url: s
     )
 
     print_network_header(network_name, contract_addr)
-    err_console.print(f'[dim]Wallet: {wallet_name}/{wallet_hotkey}[/dim]\n')
+
+    effective_wallet, effective_hotkey = resolve_wallet_config(
+        wallet_name,
+        wallet_hotkey,
+        wallet_default='validator',
+        hotkey_default='default',
+    )
+    err_console.print(f'[dim]Wallet: {effective_wallet}/{effective_hotkey}[/dim]\n')
 
     try:
         import bittensor as bt
@@ -304,7 +312,7 @@ def issue_harvest(wallet_name: str, wallet_hotkey: str, network: str, rpc_url: s
         )
 
         with err_console.status('[bold cyan]Loading wallet...', spinner='dots'):
-            wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
+            wallet = bt.Wallet(name=effective_wallet, hotkey=effective_hotkey)
             hotkey_addr = wallet.hotkey.ss58_address
         err_console.print(f'[green]Hotkey address:[/green] {hotkey_addr}')
 

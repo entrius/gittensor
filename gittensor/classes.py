@@ -164,12 +164,11 @@ class PullRequest:
     # PR state based fields
     pr_state: PRState
 
-    # Score fields
+    # Score fields. Credibility is a gate only (#1340); no per-PR credibility multiplier.
     base_score: float = 0.0
     issue_multiplier: float = 1.0
     open_pr_spam_multiplier: float = 1.0
     time_decay_multiplier: float = 1.0
-    credibility_multiplier: float = 1.0
     review_quality_multiplier: float = 1.0  # Penalty for CHANGES_REQUESTED reviews from maintainers
     label_multiplier: float = 1.0  # Multiplier resolved from repository label config
     label: Optional[str] = None  # Resolved scoring label, set during scoring
@@ -196,20 +195,6 @@ class PullRequest:
     last_edited_at: Optional[datetime] = None
     head_ref_oid: Optional[str] = None
     base_ref_oid: Optional[str] = None
-
-    def calculate_final_earned_score(self) -> float:
-        """Combine base score with all multipliers."""
-        multipliers = {
-            'issue': self.issue_multiplier,
-            'label': self.label_multiplier,
-            'spam': self.open_pr_spam_multiplier,
-            'decay': self.time_decay_multiplier,
-            'cred': self.credibility_multiplier,
-            'review': self.review_quality_multiplier,
-        }
-        label = f'{self.pr_state.value} PR #{self.number} ({self.repository_full_name})'
-        self.earned_score = _apply_score_multipliers(self.base_score, multipliers, label)
-        return self.earned_score
 
 
 @dataclass

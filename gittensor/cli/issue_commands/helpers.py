@@ -60,6 +60,7 @@ err_console = Console(stderr=True)
 
 CommandFunc = TypeVar('CommandFunc', bound=Callable[..., Any])
 NETWORK_CHOICE = click.Choice(['finney', 'test', 'local'], case_sensitive=False)
+STATUS_CHOICE = click.Choice(['registered', 'active', 'completed', 'cancelled'], case_sensitive=False)
 
 
 def apply_click_options(*decorators: Callable[[CommandFunc], CommandFunc]) -> Callable[[CommandFunc], CommandFunc]:

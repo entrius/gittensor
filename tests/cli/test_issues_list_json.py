@@ -17,6 +17,14 @@ FAKE_ISSUES = [
         'target_bounty': 100_000_000_000,
         'status': 'Active',
     },
+    {
+        'id': 2,
+        'repository_full_name': 'owner/repo',
+        'issue_number': 11,
+        'bounty_amount': 0,
+        'target_bounty': 100_000_000_000,
+        'status': 'Completed',
+    },
 ]
 
 
@@ -63,6 +71,35 @@ def test_issues_list_rejects_invalid_id_human(cli_root, runner, bad_id):
 
     assert result.exit_code != 0
     assert 'not in the range' in result.output
+    mock_read.assert_not_called()
+
+
+def test_issues_list_json_status_filter_is_case_insensitive(cli_root, runner):
+    """`--status` must filter JSON output by lifecycle state regardless of input casing."""
+    with (
+        patch(
+            'gittensor.cli.issue_commands.view._resolve_contract_and_network',
+            return_value=('5Fakeaddr', 'ws://x', 'test'),
+        ),
+        patch('gittensor.cli.issue_commands.view.read_issues_from_contract', return_value=FAKE_ISSUES),
+    ):
+        result = runner.invoke(cli_root, ['issues', 'list', '--json', '--status', 'ACTIVE'], catch_exceptions=False)
+
+    assert result.exit_code == 0
+
+    payload = json.loads(result.stdout)
+    assert payload['success'] is True
+    assert payload['issue_count'] == 1
+    assert [i['id'] for i in payload['issues']] == [1]
+
+
+def test_issues_list_rejects_invalid_status(cli_root, runner):
+    """An unknown --status value must be rejected at parse time without any contract read."""
+    with patch('gittensor.cli.issue_commands.view.read_issues_from_contract') as mock_read:
+        result = runner.invoke(cli_root, ['issues', 'list', '--status', 'bogus'], catch_exceptions=False)
+
+    assert result.exit_code != 0
+    assert 'bogus' in result.output
     mock_read.assert_not_called()
 
 

@@ -21,6 +21,7 @@ from gittensor.cli.json_output import emit_json
 
 from .help import StyledCommand
 from .helpers import (
+    STATUS_CHOICE,
     _read_contract_packed_storage,
     _read_issues_from_child_storage,
     _resolve_contract_and_network,
@@ -65,6 +66,13 @@ def _fill_percent(bounty: int, target: int) -> float:
     type=REPO,
     help='Filter issues to a specific repository (owner/name).',
 )
+@click.option(
+    '--status',
+    'status_filter',
+    default=None,
+    type=STATUS_CHOICE,
+    help='Filter issues by lifecycle status (registered/active/completed/cancelled).',
+)
 @with_cli_behavior_options(
     include_verbose=True,
     include_json=True,
@@ -72,7 +80,14 @@ def _fill_percent(bounty: int, target: int) -> float:
 )
 @with_network_contract_options('Contract address (uses default if empty)')
 def issues_list(
-    issue_id: int, repo_filter: str, network: str, rpc_url: str, contract: str, verbose: bool, as_json: bool
+    issue_id: int,
+    repo_filter: str,
+    status_filter: str,
+    network: str,
+    rpc_url: str,
+    contract: str,
+    verbose: bool,
+    as_json: bool,
 ):
     """List issues or view a specific issue.
 
@@ -80,6 +95,7 @@ def issues_list(
         $ gitt issues list
         $ gitt i list --network test
         $ gitt i list --id 1
+        $ gitt i list --status active
         $ gitt i list --json
     [/dim]
     """
@@ -113,6 +129,10 @@ def issues_list(
         # Apply --repo filter before rendering (--id takes precedence)
         if repo_filter and issue_id is None:
             issues = [i for i in issues if i.get('repository_full_name', '').lower() == repo_filter.lower()]
+
+        # Apply --status filter before rendering (--id takes precedence)
+        if status_filter and issue_id is None:
+            issues = [i for i in issues if str(i.get('status', '')).lower() == status_filter.lower()]
 
         if issue_id is not None:
             issue = next((i for i in issues if i['id'] == issue_id), None)
@@ -151,6 +171,10 @@ def issues_list(
     # Apply --repo filter before table render (--id takes precedence)
     if repo_filter and issue_id is None:
         issues = [i for i in issues if i.get('repository_full_name', '').lower() == repo_filter.lower()]
+
+    # Apply --status filter before table render (--id takes precedence)
+    if status_filter and issue_id is None:
+        issues = [i for i in issues if str(i.get('status', '')).lower() == status_filter.lower()]
 
     # Table view of all issues
     err_console.print('[bold cyan]Available Issues[/bold cyan]\n')

@@ -122,13 +122,15 @@ async def issue_discovery(
     inline ``solving_pr`` data, and a cross-miner cache of already-scored
     solving PRs so the base_score reflects real token scoring.
     """
-    await run_issue_discovery(
-        miner_evaluations,
-        master_repositories,
-        programming_languages,
-        token_config,
-        evaluation_cache=evaluation_cache,
-    )
+    with MirrorClient() as client:
+        await run_issue_discovery(
+            miner_evaluations,
+            master_repositories,
+            programming_languages,
+            token_config,
+            client=client,
+            evaluation_cache=evaluation_cache,
+        )
 
 
 def build_maintainer_uids_by_repo(

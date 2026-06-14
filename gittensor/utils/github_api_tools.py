@@ -108,56 +108,58 @@ def get_github_identity(token: str) -> GitHubIdentityResult:
         return GitHubIdentityResult(None, GitHubIdentityStatus.INVALID_AUTH)
 
     session = get_session(token)
+    try:
+        # Retry logic for timeout issues
+        for attempt in range(6):
+            try:
+                response = session.get(f'{BASE_GITHUB_API_URL}/user', timeout=GITHUB_HTTP_TIMEOUT_SECONDS)
+                if response.status_code == 200:
+                    try:
+                        user_data: Dict[str, Any] = response.json()
+                    except Exception as e:
+                        bt.logging.warning(f'Failed to parse GitHub /user JSON response: {e}')
+                        if attempt < 5:
+                            time.sleep(2)
+                            continue
+                        return GitHubIdentityResult(None, GitHubIdentityStatus.TRANSIENT_FAILURE)
 
-    # Retry logic for timeout issues
-    for attempt in range(6):
-        try:
-            response = session.get(f'{BASE_GITHUB_API_URL}/user', timeout=GITHUB_HTTP_TIMEOUT_SECONDS)
-            if response.status_code == 200:
-                try:
-                    user_data: Dict[str, Any] = response.json()
-                except Exception as e:
-                    bt.logging.warning(f'Failed to parse GitHub /user JSON response: {e}')
+                    user_id = user_data.get('id')
+                    if user_id is not None:
+                        return GitHubIdentityResult(str(user_id), GitHubIdentityStatus.VALID)
+
+                    bt.logging.warning(f'GitHub /user response missing id (attempt {attempt + 1}/6)')
                     if attempt < 5:
                         time.sleep(2)
                         continue
                     return GitHubIdentityResult(None, GitHubIdentityStatus.TRANSIENT_FAILURE)
 
-                user_id = user_data.get('id')
-                if user_id is not None:
-                    return GitHubIdentityResult(str(user_id), GitHubIdentityStatus.VALID)
+                if response.status_code == 408 or _is_rate_limited_response(response):
+                    bt.logging.warning(
+                        f'GitHub /user request failed with status {response.status_code} (attempt {attempt + 1}/6)'
+                    )
+                    if attempt < 5:
+                        time.sleep(2)
+                        continue
+                    return GitHubIdentityResult(None, GitHubIdentityStatus.TRANSIENT_FAILURE)
 
-                bt.logging.warning(f'GitHub /user response missing id (attempt {attempt + 1}/6)')
-                if attempt < 5:
-                    time.sleep(2)
-                    continue
-                return GitHubIdentityResult(None, GitHubIdentityStatus.TRANSIENT_FAILURE)
+                if 400 <= response.status_code < 500:
+                    bt.logging.warning(f'GitHub /user auth failed with status {response.status_code}')
+                    return GitHubIdentityResult(None, GitHubIdentityStatus.INVALID_AUTH)
 
-            if response.status_code == 408 or _is_rate_limited_response(response):
                 bt.logging.warning(
                     f'GitHub /user request failed with status {response.status_code} (attempt {attempt + 1}/6)'
                 )
                 if attempt < 5:
                     time.sleep(2)
-                    continue
-                return GitHubIdentityResult(None, GitHubIdentityStatus.TRANSIENT_FAILURE)
 
-            if 400 <= response.status_code < 500:
-                bt.logging.warning(f'GitHub /user auth failed with status {response.status_code}')
-                return GitHubIdentityResult(None, GitHubIdentityStatus.INVALID_AUTH)
+            except Exception as e:
+                bt.logging.warning(f'Could not fetch GitHub user (attempt {attempt + 1}/6): {e}')
+                if attempt < 5:  # Don't sleep on last attempt
+                    time.sleep(2)
 
-            bt.logging.warning(
-                f'GitHub /user request failed with status {response.status_code} (attempt {attempt + 1}/6)'
-            )
-            if attempt < 5:
-                time.sleep(2)
-
-        except Exception as e:
-            bt.logging.warning(f'Could not fetch GitHub user (attempt {attempt + 1}/6): {e}')
-            if attempt < 5:  # Don't sleep on last attempt
-                time.sleep(2)
-
-    return GitHubIdentityResult(None, GitHubIdentityStatus.TRANSIENT_FAILURE)
+        return GitHubIdentityResult(None, GitHubIdentityStatus.TRANSIENT_FAILURE)
+    finally:
+        session.close()
 
 
 # GraphQL fragment used by issue submissions / PR discovery.
@@ -361,45 +363,48 @@ def execute_graphql_query(
     Returns:
         Parsed JSON response data, or None if all attempts failed
     """
-    session = get_session(token)
     headers = make_graphql_headers(token)
 
-    for attempt in range(max_attempts):
-        try:
-            response = session.post(
-                f'{BASE_GITHUB_API_URL}/graphql',
-                headers=headers,
-                json={'query': query, 'variables': variables},
-                timeout=timeout,
-            )
-
-            if response.status_code == 200:
-                return response.json()
-
-            # Retry on failure
-            if attempt < (max_attempts - 1):
-                backoff_delay = backoff_seconds(attempt)
-                bt.logging.warning(
-                    f'GraphQL request failed with status {response.status_code} '
-                    f'(attempt {attempt + 1}/{max_attempts}), retrying in {backoff_delay}s...'
-                )
-                time.sleep(backoff_delay)
-            else:
-                bt.logging.error(
-                    f'GraphQL request failed with status {response.status_code} '
-                    f'after {max_attempts} attempts: {response.text}'
+    session = get_session(token)
+    try:
+        for attempt in range(max_attempts):
+            try:
+                response = session.post(
+                    f'{BASE_GITHUB_API_URL}/graphql',
+                    headers=headers,
+                    json={'query': query, 'variables': variables},
+                    timeout=timeout,
                 )
 
-        except requests.exceptions.RequestException as e:
-            if attempt < (max_attempts - 1):
-                backoff_delay = backoff_seconds(attempt)
-                bt.logging.warning(
-                    f'GraphQL request exception (attempt {attempt + 1}/{max_attempts}), '
-                    f'retrying in {backoff_delay}s: {e}'
-                )
-                time.sleep(backoff_delay)
-            else:
-                bt.logging.error(f'GraphQL request failed after {max_attempts} attempts: {e}')
+                if response.status_code == 200:
+                    return response.json()
+
+                # Retry on failure
+                if attempt < (max_attempts - 1):
+                    backoff_delay = backoff_seconds(attempt)
+                    bt.logging.warning(
+                        f'GraphQL request failed with status {response.status_code} '
+                        f'(attempt {attempt + 1}/{max_attempts}), retrying in {backoff_delay}s...'
+                    )
+                    time.sleep(backoff_delay)
+                else:
+                    bt.logging.error(
+                        f'GraphQL request failed with status {response.status_code} '
+                        f'after {max_attempts} attempts: {response.text}'
+                    )
+
+            except requests.exceptions.RequestException as e:
+                if attempt < (max_attempts - 1):
+                    backoff_delay = backoff_seconds(attempt)
+                    bt.logging.warning(
+                        f'GraphQL request exception (attempt {attempt + 1}/{max_attempts}), '
+                        f'retrying in {backoff_delay}s: {e}'
+                    )
+                    time.sleep(backoff_delay)
+                else:
+                    bt.logging.error(f'GraphQL request failed after {max_attempts} attempts: {e}')
+    finally:
+        session.close()
 
     return None
 
@@ -566,6 +571,8 @@ def check_github_issue_closed(repo: str, issue_number: int, token: str) -> Optio
     except Exception as e:
         bt.logging.error(f'Error checking GitHub issue {repo}#{issue_number}: {e}')
         return None
+    finally:
+        session.close()
 
 
 @dataclass

@@ -28,6 +28,9 @@ class _ForwardingSession:
             kwargs['headers'] = dict(self.headers)
         return requests.post(*args, **kwargs)
 
+    def close(self):
+        """Mirror requests.Session.close so callers can release the session."""
+
 
 @pytest.fixture(autouse=True)
 def _forward_github_sessions(monkeypatch):

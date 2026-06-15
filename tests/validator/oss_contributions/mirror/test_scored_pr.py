@@ -66,7 +66,6 @@ class TestComposition:
             scored.issue_multiplier,
             scored.open_pr_spam_multiplier,
             scored.time_decay_multiplier,
-            scored.credibility_multiplier,
             scored.review_quality_multiplier,
             scored.label_multiplier,
         ]:

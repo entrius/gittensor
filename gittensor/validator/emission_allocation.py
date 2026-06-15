@@ -45,10 +45,21 @@ def blend_emission_pools(
     total_configured_share = sum(config.emission_share for config in master_repositories.values())
     recycle_share = max(0.0, 1.0 - total_configured_share) * OSS_EMISSION_SHARE
 
+    repos_allocated = 0
+    repos_fully_recycled = 0
+    maintainer_carve_out_total = 0.0
+    rewarded_uids: set[int] = set()
+
     for allocation in calculate_repo_emission_breakdown(
         miner_evaluations, master_repositories, miner_uids, maintainer_uids_by_repo
     ):
         recycle_share += allocation.recycled_amount
+        if allocation.maintainer_rewards or allocation.pr_rewards or allocation.issue_discovery_rewards:
+            repos_allocated += 1
+        else:
+            repos_fully_recycled += 1
+        maintainer_carve_out_total += sum(allocation.maintainer_rewards.values())
+        rewarded_uids.update(allocation.maintainer_rewards, allocation.pr_rewards, allocation.issue_discovery_rewards)
         for uid, reward in allocation.maintainer_rewards.items():
             rewards[uid_index[uid]] += reward
         for uid, reward in allocation.pr_rewards.items():
@@ -71,6 +82,13 @@ def blend_emission_pools(
         rewards[recycle_idx] += recycle_share
         if recycle_share > EMISSION_SHARE_TOLERANCE:
             bt.logging.info(f'Recycling {recycle_share * 100:.0f}% unclaimed emissions from repo allocation')
+
+    bt.logging.info('')
+    bt.logging.info(
+        f'Emission blend complete | {repos_allocated} repos allocated | {repos_fully_recycled} fully recycled | '
+        f'{len(rewarded_uids)} miners rewarded | maintainer carve-out {maintainer_carve_out_total * 100:.1f}% | '
+        f'recycled {recycle_share * 100:.1f}%'
+    )
 
     return rewards
 

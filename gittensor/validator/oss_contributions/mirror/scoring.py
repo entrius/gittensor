@@ -10,8 +10,8 @@ Scope:
 
 Cross-path concerns handled by ``finalize_miner_scores`` in
 ``gittensor.validator.oss_contributions.scoring`` (walks ``merged_prs``):
-spam_multiplier, credibility_multiplier, final earned_score
-composition, and base/earned/nodes aggregation.
+spam_multiplier, final earned_score composition, and base/earned/nodes
+aggregation. Credibility is a gate only (#1340), not a per-PR multiplier.
 
 Anti-gaming notes:
 - ``edited_after_merge`` is NOT a PR-level gate — it gates only the issue
@@ -398,7 +398,6 @@ def _calculate_pr_multipliers(scored: ScoredPR, repo_config: RepositoryConfig, s
     else:
         scored.open_pr_spam_multiplier = 1.0
         scored.time_decay_multiplier = 1.0
-        scored.credibility_multiplier = 1.0
         scored.review_quality_multiplier = 1.0
 
 

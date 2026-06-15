@@ -1,4 +1,24 @@
 {
+  "anderdc/social-media-manager": {
+    "default_label_multiplier": 0.0,
+    "eligibility": {
+      "min_credibility": 0.0,
+      "min_issue_credibility": 0.0,
+      "min_valid_merged_prs": 0,
+      "min_valid_solved_issues": 0
+    },
+    "emission_share": 0.005,
+    "fixed_base_score": 1.0,
+    "issue_discovery_share": 0.0,
+    "label_multipliers": {
+      "crown": 1.0
+    },
+    "maintainer_cut": 0.0,
+    "scoring": {
+      "pr_lookback_days": 7
+    },
+    "trusted_label_pipeline": true
+  },
   "cogniax/tao-pulse-app": {
     "emission_share": 0.01,
     "issue_discovery_share": 0.7,
@@ -7,7 +27,20 @@
   "e35ventura/taopedia": {
     "emission_share": 0.025,
     "issue_discovery_share": 0.0,
-    "maintainer_cut": 0.0
+    "maintainer_cut": 0.0,
+    "additional_acceptable_branches": ["test"],
+    "trusted_label_pipeline": true,
+    "default_label_multiplier": 0.0,
+    "label_multipliers": {
+      "feature": 3.0,
+      "ui-ux": 2.0,
+      "bug": 0.625,
+      "security": 0.625,
+      "other": 0.1
+    },
+    "eligibility": {
+      "min_credibility": 0.6
+    }
   },
   "e35ventura/taopedia-articles": {
     "emission_share": 0.025,
@@ -29,7 +62,7 @@
     }
   },
   "entrius/allways": {
-    "emission_share": 0.05,
+    "emission_share": 0.04,
     "issue_discovery_share": 1.0,
     "label_multipliers": {
       "bug": 1.25,
@@ -51,7 +84,7 @@
     "trusted_label_pipeline": true
   },
   "entrius/gittensor": {
-    "emission_share": 0.09,
+    "emission_share": 0.08,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "bug": 1.1,
@@ -63,7 +96,7 @@
     "trusted_label_pipeline": true
   },
   "entrius/gittensor-ui": {
-    "emission_share": 0.01,
+    "emission_share": 0.005,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "bug": 1.1,
@@ -95,7 +128,7 @@
     "eligibility": {
       "max_open_pr_threshold": 2
     },
-    "emission_share": 0.033,
+    "emission_share": 0.03,
     "issue_discovery_share": 0.0,
     "maintainer_cut": 0.3
   },
@@ -129,7 +162,7 @@
   },
   "JSONbored/gittensory": {
     "default_label_multiplier": 0.0,
-    "emission_share": 0.01,
+    "emission_share": 0.015,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "gittensor:bug": 1.0,
@@ -146,6 +179,10 @@
         "min_multiplier": 0.05
       }
     }
+  },
+  "JSONbored/metagraphed": {
+    "emission_share": 0.0075,
+    "issue_discovery_share": 0.0
   },
   "MkDev11/gittensor-hub": {
     "emission_share": 0.012,
@@ -209,7 +246,7 @@
     }
   },
   "seroperson/jvm-live-reload": {
-    "emission_share": 0.011,
+    "emission_share": 0.008,
     "issue_discovery_share": 0.0
   },
   "touchpilot/touchpilot": {

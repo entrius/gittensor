@@ -181,7 +181,6 @@ class Repository(BaseRepository):
                     pr.issue_multiplier,
                     pr.open_pr_spam_multiplier,
                     pr.time_decay_multiplier,
-                    pr.credibility_multiplier,
                     pr.review_quality_multiplier,
                     pr.label_multiplier,
                     pr.label,

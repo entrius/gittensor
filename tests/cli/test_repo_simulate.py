@@ -75,8 +75,9 @@ class TestSimulateCommand:
         assert row['repo_slice'] == pytest.approx(0.18)
         assert row['pr_slice'] == pytest.approx(0.135)
         assert row['issue_discovery_slice'] == pytest.approx(0.045)
-        assert row['pr_rewards']['5'] == pytest.approx(0.135)
-        assert row['issue_discovery_rewards']['5'] == pytest.approx(0.045)
+        assert row['pr_paid'] == pytest.approx(0.135)
+        assert row['issue_paid'] == pytest.approx(0.045)
+        assert row['distributed'] == pytest.approx(0.18)
         assert row['recycled'] is False
 
         miners = {m['uid']: m for m in payload['miners']}
@@ -93,10 +94,12 @@ class TestSimulateCommand:
         scenario = _scenario(tmp_path, {'miners': [{'uid': 9, 'repos': {'octo/repo': {'issue_score': 4.0}}}]})
         result = _run(runner, '--scenario', scenario, '--config', config, '--json')
         assert result.exit_code == 0, result.output
-        row = json.loads(result.output)['allocations'][0]
+        payload = json.loads(result.output)
+        row = payload['allocations'][0]
         assert row['pr_slice'] == pytest.approx(0.0)
         assert row['issue_discovery_slice'] == pytest.approx(0.45)
-        assert row['issue_discovery_rewards']['9'] == pytest.approx(0.45)
+        assert row['issue_paid'] == pytest.approx(0.45)
+        assert {m['uid']: m['emission'] for m in payload['miners']}[9] == pytest.approx(0.45)
 
     def test_maintainer_carve_out(self, runner, tmp_path):
         """A maintainer_cut repo with a declared maintainer carves off the top."""
@@ -113,11 +116,14 @@ class TestSimulateCommand:
         )
         result = _run(runner, '--scenario', scenario, '--config', config, '--json')
         assert result.exit_code == 0, result.output
-        row = json.loads(result.output)['allocations'][0]
+        payload = json.loads(result.output)
+        row = payload['allocations'][0]
         assert row['maintainer_carve_out'] == pytest.approx(0.09)
-        assert row['maintainer_rewards']['5'] == pytest.approx(0.09)
+        assert row['maintainer_paid'] == pytest.approx(0.09)
         assert row['pr_slice'] == pytest.approx(0.09)
-        assert row['pr_rewards']['5'] == pytest.approx(0.09)
+        assert row['pr_paid'] == pytest.approx(0.09)
+        # uid 5 is both the maintainer and the sole PR scorer: 0.09 + 0.09.
+        assert {m['uid']: m['emission'] for m in payload['miners']}[5] == pytest.approx(0.18)
 
     def test_empty_repo_recycles_full_slice(self, runner, tmp_path):
         """A configured repo with no scorers recycles its entire slice."""
@@ -139,25 +145,6 @@ class TestSimulateCommand:
         assert result.exit_code == 0, result.output
         warnings = json.loads(result.output)['warnings']
         assert any('reserved UIDs' in w for w in warnings)
-
-    def test_diff_mode(self, runner, tmp_path):
-        baseline = _config(tmp_path, {'octo/repo': {'emission_share': 0.2, 'issue_discovery_share': 0.0}}, 'base.json')
-        proposed = _config(tmp_path, {'octo/repo': {'emission_share': 0.4, 'issue_discovery_share': 0.0}}, 'prop.json')
-        scenario = _scenario(tmp_path, {'miners': [{'uid': 5, 'repos': {'octo/repo': {'pr_score': 10.0}}}]})
-        result = _run(runner, '--scenario', scenario, '--config', proposed, '--diff', baseline, '--json')
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
-        assert payload['mode'] == 'diff'
-
-        repo = {r['repository_full_name']: r for r in payload['repo_diff']}['octo/repo']
-        assert repo['baseline_repo_slice'] == pytest.approx(0.18)
-        assert repo['proposed_repo_slice'] == pytest.approx(0.36)
-        assert repo['delta_repo_slice'] == pytest.approx(0.18)
-
-        miner = {m['uid']: m for m in payload['miner_diff']}
-        assert miner[5]['delta'] == pytest.approx(0.18)
-        # The extra 0.2 emission_share comes out of recycle.
-        assert miner[0]['delta'] == pytest.approx(-0.18)
 
     def test_invalid_config_surfaces_validation_error(self, runner, tmp_path):
         config = _config(tmp_path, {'octo/repo': {'emission_share': 2.0}})

@@ -218,6 +218,12 @@ from gittensor.cli.miner_commands import register_miner_commands  # noqa: E402
 register_miner_commands(cli)
 
 
+# Register repo commands
+from gittensor.cli.repo_commands import register_repo_commands  # noqa: E402
+
+register_repo_commands(cli)
+
+
 # Register issue commands with new flat structure
 register_commands(cli)
 

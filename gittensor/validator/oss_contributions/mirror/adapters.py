@@ -120,7 +120,6 @@ def mirror_scored_pr_to_legacy_pull_request(
         issue_multiplier=scored.issue_multiplier,
         open_pr_spam_multiplier=scored.open_pr_spam_multiplier,
         time_decay_multiplier=scored.time_decay_multiplier,
-        credibility_multiplier=scored.credibility_multiplier,
         review_quality_multiplier=scored.review_quality_multiplier,
         label_multiplier=scored.label_multiplier,
         label=scored.label,

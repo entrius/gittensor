@@ -24,6 +24,10 @@
     "issue_discovery_share": 0.5,
     "maintainer_cut": 0.4
   },
+  "DPBG/Engram.AI": {
+    "emission_share": 0.005,
+    "issue_discovery_share": 0.0
+  },
   "e35ventura/taopedia": {
     "emission_share": 0.025,
     "issue_discovery_share": 0.0,

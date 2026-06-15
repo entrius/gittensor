@@ -444,7 +444,6 @@ class TestFixedBaseScore:
             * scored.label_multiplier
             * scored.open_pr_spam_multiplier
             * scored.time_decay_multiplier
-            * scored.credibility_multiplier
             * scored.review_quality_multiplier
         )
 
@@ -976,7 +975,6 @@ class TestPrMultipliers:
         scored = ScoredPR(pr=_pr(state='OPEN'))
         _apply_multipliers(scored, _config(emission_share=0.5))
 
-        # Time decay / review quality / credibility are merge-only — kept neutral here.
+        # Time decay / review quality are merge-only — kept neutral here.
         assert scored.time_decay_multiplier == 1.0
-        assert scored.credibility_multiplier == 1.0
         assert scored.review_quality_multiplier == 1.0

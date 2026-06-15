@@ -7,7 +7,7 @@
       "min_valid_merged_prs": 0,
       "min_valid_solved_issues": 0
     },
-    "emission_share": 0.004,
+    "emission_share": 0.005,
     "fixed_base_score": 1.0,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
@@ -21,8 +21,12 @@
   },
   "cogniax/tao-pulse-app": {
     "emission_share": 0.01,
-    "issue_discovery_share": 0.7,
+    "issue_discovery_share": 0.5,
     "maintainer_cut": 0.4
+  },
+  "DPBG/Engram.AI": {
+    "emission_share": 0.005,
+    "issue_discovery_share": 0.0
   },
   "e35ventura/taopedia": {
     "emission_share": 0.025,
@@ -34,8 +38,8 @@
     "label_multipliers": {
       "feature": 3.0,
       "ui-ux": 2.0,
-      "bug": 1.25,
-      "security": 1.25,
+      "bug": 0.625,
+      "security": 0.625,
       "other": 0.1
     },
     "eligibility": {
@@ -62,7 +66,7 @@
     }
   },
   "entrius/allways": {
-    "emission_share": 0.05,
+    "emission_share": 0.04,
     "issue_discovery_share": 1.0,
     "label_multipliers": {
       "bug": 1.25,
@@ -96,7 +100,7 @@
     "trusted_label_pipeline": true
   },
   "entrius/gittensor-ui": {
-    "emission_share": 0.01,
+    "emission_share": 0.005,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "bug": 1.1,
@@ -125,11 +129,16 @@
     "trusted_label_pipeline": true
   },
   "Geniepod/genie-claw": {
+    "default_label_multiplier": 0.2,
     "eligibility": {
       "max_open_pr_threshold": 2
     },
-    "emission_share": 0.033,
+    "emission_share": 0.03,
     "issue_discovery_share": 0.0,
+    "label_multipliers": {
+      "community-contribution": 0.2,
+      "optimization": 0.8
+    },
     "maintainer_cut": 0.3
   },
   "infiniflow/ragflow": {
@@ -162,7 +171,7 @@
   },
   "JSONbored/gittensory": {
     "default_label_multiplier": 0.0,
-    "emission_share": 0.01,
+    "emission_share": 0.015,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "gittensor:bug": 1.0,
@@ -179,6 +188,10 @@
         "min_multiplier": 0.05
       }
     }
+  },
+  "JSONbored/metagraphed": {
+    "emission_share": 0.0075,
+    "issue_discovery_share": 0.0
   },
   "MkDev11/gittensor-hub": {
     "emission_share": 0.012,
@@ -242,7 +255,7 @@
     }
   },
   "seroperson/jvm-live-reload": {
-    "emission_share": 0.011,
+    "emission_share": 0.008,
     "issue_discovery_share": 0.0
   },
   "touchpilot/touchpilot": {

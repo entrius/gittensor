@@ -21,8 +21,12 @@
   },
   "cogniax/tao-pulse-app": {
     "emission_share": 0.01,
-    "issue_discovery_share": 0.7,
+    "issue_discovery_share": 0.5,
     "maintainer_cut": 0.4
+  },
+  "DPBG/Engram.AI": {
+    "emission_share": 0.005,
+    "issue_discovery_share": 0.0
   },
   "e35ventura/taopedia": {
     "emission_share": 0.025,
@@ -125,11 +129,16 @@
     "trusted_label_pipeline": true
   },
   "Geniepod/genie-claw": {
+    "default_label_multiplier": 0.2,
     "eligibility": {
       "max_open_pr_threshold": 2
     },
     "emission_share": 0.03,
     "issue_discovery_share": 0.0,
+    "label_multipliers": {
+      "community-contribution": 0.2,
+      "optimization": 0.8
+    },
     "maintainer_cut": 0.3
   },
   "infiniflow/ragflow": {

@@ -102,3 +102,41 @@ def test_revert_returns_false(client, wallet, method, kwargs_fn, _cm, _ea, _hk, 
 def test_exception_returns_false(client, wallet, method, kwargs_fn, _cm, _ea, _hk, _gas):
     with patch.object(client, '_exec_contract_raw', side_effect=RuntimeError('node down')):
         assert getattr(client, method)(**kwargs_fn(wallet)) is False
+
+
+def _packed_treasury_storage():
+    return SimpleNamespace(owner=b'\x01' * 32, treasury_hotkey=b'\x02' * 32, netuid=42)
+
+
+def test_get_treasury_stake_raises_when_packed_storage_unavailable(client):
+    with patch(
+        'gittensor.validator.issue_competitions.contract_client.read_contract_packed_storage',
+        return_value=None,
+    ):
+        with pytest.raises(RuntimeError, match='packed storage unavailable'):
+            client.get_treasury_stake()
+
+
+def test_get_treasury_stake_raises_when_alpha_query_fails(client):
+    substrate = client.subtensor.substrate
+    substrate.ss58_encode.side_effect = lambda value: f'ss58-{value}'
+    substrate.query.side_effect = ConnectionResetError('alpha query reset')
+
+    with patch(
+        'gittensor.validator.issue_competitions.contract_client.read_contract_packed_storage',
+        return_value=_packed_treasury_storage(),
+    ):
+        with pytest.raises(ConnectionResetError, match='alpha query reset'):
+            client.get_treasury_stake()
+
+
+def test_get_treasury_stake_returns_zero_for_empty_alpha_result(client):
+    substrate = client.subtensor.substrate
+    substrate.ss58_encode.side_effect = lambda value: f'ss58-{value}'
+    substrate.query.return_value = None
+
+    with patch(
+        'gittensor.validator.issue_competitions.contract_client.read_contract_packed_storage',
+        return_value=_packed_treasury_storage(),
+    ):
+        assert client.get_treasury_stake() == 0

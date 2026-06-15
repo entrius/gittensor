@@ -18,6 +18,7 @@ from typing import Any, Callable, ContextManager, Dict, List, Optional, Tuple, T
 import click
 import requests
 from bittensor_wallet.utils import is_valid_ss58_address
+from click.core import ParameterSource
 from rich.console import Console
 
 from gittensor.cli.issue_commands.tables import build_pr_table
@@ -526,6 +527,29 @@ def load_config() -> Dict[str, Any]:
     return {}
 
 
+def resolve_wallet_config(
+    wallet_name: str,
+    wallet_hotkey: str,
+    *,
+    wallet_default: str = 'default',
+    hotkey_default: str = 'default',
+) -> Tuple[str, str]:
+    """Resolve wallet values against the CLI config file."""
+    ctx = click.get_current_context(silent=True)
+    config = load_config()
+
+    if ctx is None:
+        wallet_explicit = wallet_name != wallet_default
+        hotkey_explicit = wallet_hotkey != hotkey_default
+    else:
+        wallet_explicit = ctx.get_parameter_source('wallet_name') == ParameterSource.COMMANDLINE
+        hotkey_explicit = ctx.get_parameter_source('wallet_hotkey') == ParameterSource.COMMANDLINE
+
+    effective_wallet = wallet_name if wallet_explicit else config.get('wallet', wallet_default)
+    effective_hotkey = wallet_hotkey if hotkey_explicit else config.get('hotkey', hotkey_default)
+    return effective_wallet, effective_hotkey
+
+
 def get_contract_address(cli_value: str = '') -> str:
     """
     Get contract address.
@@ -685,6 +709,55 @@ def _read_contract_packed_storage(substrate, contract_addr: str, verbose: bool =
     }
 
 
+_ISSUE_STATUS_NAMES = ['Registered', 'Active', 'Completed', 'Cancelled']
+
+
+def _read_one_issue_from_child_storage(
+    substrate, child_key: str, issue_id: int, verbose: bool = False
+) -> Optional[Dict[str, Any]]:
+    """Read and decode a single issue from contract child storage by ID (one RPC).
+
+    RPC failures propagate. Decode failures and a genuinely-absent storage entry
+    return ``None``, matching the existing per-issue contract in the full scan.
+    """
+    encoded_id = struct.pack('<Q', issue_id)
+    lazy_key = compute_ink5_lazy_key(ISSUES_MAPPING_ROOT_KEY, encoded_id)
+
+    val_result = substrate.rpc_request('childstate_getStorage', [child_key, lazy_key, None])
+    if not val_result.get('result'):
+        if verbose:
+            err_console.print(f'[dim]Debug: No storage found for issue_id={issue_id} (key={lazy_key[:20]}...)[/dim]')
+        return None
+
+    data = bytes.fromhex(val_result['result'].replace('0x', ''))
+    try:
+        decoded = decode_issue_from_storage(data)
+        if decoded is None:
+            raise ValueError('Issue decode returned no data')
+
+        status = (
+            _ISSUE_STATUS_NAMES[decoded.status_byte] if decoded.status_byte < len(_ISSUE_STATUS_NAMES) else 'Unknown'
+        )
+        issue = {
+            'id': decoded.id,
+            'repository_full_name': decoded.repository_full_name,
+            'issue_number': decoded.issue_number,
+            'bounty_amount': decoded.bounty_amount,
+            'target_bounty': decoded.target_bounty,
+            'status': status,
+        }
+        if verbose:
+            err_console.print(
+                f'[dim]Debug: Decoded issue {issue["id"]}: '
+                f'{issue["repository_full_name"]}#{issue["issue_number"]}[/dim]'
+            )
+        return issue
+    except Exception as e:
+        if verbose:
+            err_console.print(f'[dim]Debug: Failed to decode issue {issue_id}: {e}[/dim]')
+        return None
+
+
 def _read_issues_from_child_storage(substrate, contract_addr: str, verbose: bool = False) -> List[Dict[str, Any]]:
     """
     Read all issues from contract child storage.
@@ -733,54 +806,16 @@ def _read_issues_from_child_storage(substrate, contract_addr: str, verbose: bool
             err_console.print('[dim]Debug: No issues registered (next_issue_id <= 1)[/dim]')
         return []
 
-    issues = []
-    status_names = ['Registered', 'Active', 'Completed', 'Cancelled']
-
     # Iterate through all issue IDs (1 to next_issue_id - 1)
     # Issues mapping root key is '52789899'
     if verbose:
         err_console.print(f'[dim]Debug: Reading issues 1 to {next_issue_id - 1} using mapping key 52789899[/dim]')
 
+    issues = []
     for issue_id in range(1, next_issue_id):
-        # SCALE encode u64 as little-endian 8 bytes
-        encoded_id = struct.pack('<Q', issue_id)
-        lazy_key = compute_ink5_lazy_key(ISSUES_MAPPING_ROOT_KEY, encoded_id)
-
-        val_result = substrate.rpc_request('childstate_getStorage', [child_key, lazy_key, None])
-        if not val_result.get('result'):
-            if verbose:
-                err_console.print(
-                    f'[dim]Debug: No storage found for issue_id={issue_id} (key={lazy_key[:20]}...)[/dim]'
-                )
-            continue
-
-        data = bytes.fromhex(val_result['result'].replace('0x', ''))
-        try:
-            decoded = decode_issue_from_storage(data)
-            if decoded is None:
-                raise ValueError('Issue decode returned no data')
-
-            status = status_names[decoded.status_byte] if decoded.status_byte < len(status_names) else 'Unknown'
-
-            issues.append(
-                {
-                    'id': decoded.id,
-                    'repository_full_name': decoded.repository_full_name,
-                    'issue_number': decoded.issue_number,
-                    'bounty_amount': decoded.bounty_amount,
-                    'target_bounty': decoded.target_bounty,
-                    'status': status,
-                }
-            )
-            if verbose:
-                err_console.print(
-                    f'[dim]Debug: Decoded issue {decoded.id}: '
-                    f'{decoded.repository_full_name}#{decoded.issue_number}[/dim]'
-                )
-        except Exception as e:
-            if verbose:
-                err_console.print(f'[dim]Debug: Failed to decode issue {issue_id}: {e}[/dim]')
-            continue
+        issue = _read_one_issue_from_child_storage(substrate, child_key, issue_id, verbose)
+        if issue is not None:
+            issues.append(issue)
 
     # Sort by ID
     issues.sort(key=lambda x: x['id'])
@@ -799,7 +834,13 @@ def _make_contract_client(contract_addr: str, ws_endpoint: str, wallet_name: str
         IssueCompetitionContractClient,
     )
 
-    wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
+    effective_wallet, effective_hotkey = resolve_wallet_config(
+        wallet_name,
+        wallet_hotkey,
+        wallet_default='default',
+        hotkey_default='default',
+    )
+    wallet = bt.Wallet(name=effective_wallet, hotkey=effective_hotkey)
     subtensor = bt.Subtensor(network=ws_endpoint)
     client = IssueCompetitionContractClient(
         contract_address=contract_addr,
@@ -840,6 +881,37 @@ def read_issues_from_contract(ws_endpoint: str, contract_addr: str, verbose: boo
     return _read_issues_from_child_storage(substrate, contract_addr, verbose)
 
 
+def read_issue_from_contract(
+    ws_endpoint: str,
+    contract_addr: str,
+    issue_id: int,
+    verbose: bool = False,
+) -> Optional[Dict[str, Any]]:
+    """Read one issue from the contract by ID with a single childstate RPC (no full scan).
+
+    Raises on connection / RPC failures so callers can distinguish a failed read
+    from a missing issue — mirrors the ``read_issues_from_contract`` contract.
+    Returns ``None`` only when the issue is genuinely absent from contract
+    storage (or the contract has no child storage key yet).
+    """
+    from async_substrate_interface import SubstrateInterface
+
+    if verbose:
+        err_console.print(f'[dim]Debug: Connecting to {ws_endpoint}...[/dim]')
+
+    substrate = SubstrateInterface(url=ws_endpoint)
+
+    if verbose:
+        err_console.print('[dim]Debug: Connected successfully[/dim]')
+
+    child_key = get_contract_child_storage_key(substrate, contract_addr)
+    if not child_key:
+        if verbose:
+            err_console.print(f'[dim]Debug: Cannot read issue - no child storage key for {contract_addr}[/dim]')
+        return None
+    return _read_one_issue_from_child_storage(substrate, child_key, issue_id, verbose)
+
+
 def fetch_issue_from_contract(
     ws_endpoint: str,
     contract_addr: str,
@@ -848,13 +920,12 @@ def fetch_issue_from_contract(
 ) -> Dict[str, Any]:
     """Resolve an on-chain issue and validate bountied status."""
     try:
-        issues = read_issues_from_contract(ws_endpoint, contract_addr, verbose)
+        issue = read_issue_from_contract(ws_endpoint, contract_addr, issue_id, verbose)
     except click.ClickException:
         raise
     except Exception as e:
         raise click.ClickException(f'Error reading from contract: {e}')
 
-    issue = next((i for i in issues if i.get('id') == issue_id), None)
     if not issue:
         raise click.ClickException(f'Issue ID {issue_id} not found on-chain.')
 

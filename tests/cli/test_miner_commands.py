@@ -12,6 +12,7 @@ from click.testing import CliRunner
 from gittensor import __version__
 from gittensor.cli.main import cli
 from gittensor.cli.miner_commands.helpers import (
+    _broadcast_pat_with_retry,
     _get_validator_axons,
     _pat_check_aggregate_counts,
     _pat_post_aggregate_counts,
@@ -90,15 +91,18 @@ class TestMinerPost:
         )
         metagraph.hotkeys = ['5MinerHotkey']
         wallet = SimpleNamespace(hotkey=SimpleNamespace(ss58_address='5MinerHotkey'))
-        responses = [
-            SimpleNamespace(accepted=True, rejection_reason=None, dendrite=SimpleNamespace(status_code=200)),
-            SimpleNamespace(accepted=False, rejection_reason='denied', dendrite=SimpleNamespace(status_code=403)),
-            SimpleNamespace(accepted=None, rejection_reason=None, dendrite=SimpleNamespace(status_code=None)),
-        ]
+        resp_by_hotkey = {
+            '5Hk00': SimpleNamespace(accepted=True, rejection_reason=None, dendrite=SimpleNamespace(status_code=200)),
+            '5Hk01': SimpleNamespace(
+                accepted=False, rejection_reason='denied', dendrite=SimpleNamespace(status_code=403)
+            ),
+            '5Hk02': SimpleNamespace(accepted=None, rejection_reason=None, dendrite=SimpleNamespace(status_code=None)),
+        }
 
         class FakeDendrite:
-            async def __call__(self, **kwargs):
-                return responses
+            # Axon-aware so a no-response validator stays no-response across retries.
+            async def __call__(self, *, axons, **kwargs):
+                return [resp_by_hotkey[a.hotkey] for a in axons]
 
         with (
             patch('gittensor.cli.miner_commands.post._validate_pat_locally', return_value='testuser'),
@@ -374,3 +378,192 @@ class TestPatPostAggregateCounts:
         counts = _pat_post_aggregate_counts(results)
         assert counts['rejected'] == 1
         assert counts['no_response'] == 1
+
+
+def _post_resp(accepted, reason=None, status=None):
+    return SimpleNamespace(accepted=accepted, rejection_reason=reason, dendrite=SimpleNamespace(status_code=status))
+
+
+class TestBroadcastWithRetry:
+    """`_broadcast_pat_with_retry` retries ONLY no-response validators, so a transient
+    blip during one broadcast is not a silent, permanent coverage gap."""
+
+    def test_retries_only_the_no_response_validator(self):
+        axons = [SimpleNamespace(hotkey='5Hk00accepts'), SimpleNamespace(hotkey='5Hk01flaky')]
+        uids = [10, 20]
+        calls = []
+
+        class FakeDendrite:
+            def __init__(self):
+                self.n = 0
+
+            async def __call__(self, *, axons, **kw):
+                calls.append([a.hotkey for a in axons])
+                self.n += 1
+                if self.n == 1:
+                    return [_post_resp(True, status=200), _post_resp(None)]  # uid20: no response
+                return [_post_resp(True, status=200)]  # uid20 accepts on retry
+
+        results = _broadcast_pat_with_retry(FakeDendrite(), axons, uids, 'ghp_x', retries=2, delay=0)
+        assert len(calls) == 2  # the no-response validator was retried
+        assert calls[1] == ['5Hk01flaky']  # ONLY the no-response one was retried
+        by_uid = {r['uid']: r for r in results}
+        assert by_uid[10]['accepted'] is True
+        assert by_uid[20]['accepted'] is True  # eventually delivered
+
+    def test_explicit_rejection_is_final(self):
+        axons = [SimpleNamespace(hotkey='5Hk00rejects')]
+        calls = []
+
+        class FakeDendrite:
+            async def __call__(self, *, axons, **kw):
+                calls.append(1)
+                return [_post_resp(False, reason='denied', status=403)]
+
+        results = _broadcast_pat_with_retry(FakeDendrite(), axons, [10], 'ghp_x', retries=3, delay=0)
+        assert len(calls) == 1  # a rejection is not retried
+        assert results[0]['accepted'] is False
+
+    def test_persistent_no_response_is_surfaced_not_hidden(self):
+        axons = [SimpleNamespace(hotkey='5Hk00down')]
+        calls = []
+
+        class FakeDendrite:
+            async def __call__(self, *, axons, **kw):
+                calls.append(1)
+                return [_post_resp(None)]
+
+        results = _broadcast_pat_with_retry(FakeDendrite(), axons, [10], 'ghp_x', retries=2, delay=0)
+        assert len(calls) == 3  # initial attempt + 2 retries
+        assert results[0]['accepted'] is None  # still uncovered — reported, not silently dropped
+
+
+class TestMinerEnsure:
+    def test_help_text(self, runner):
+        result = runner.invoke(cli, ['miner', 'ensure', '--help'])
+        assert result.exit_code == 0
+        assert 'missing' in result.output.lower()
+
+    def test_ensure_alias(self, runner):
+        result = runner.invoke(cli, ['m', 'ensure', '--help'])
+        assert result.exit_code == 0
+
+    def test_reposts_only_to_validators_missing_pat(self, runner, monkeypatch):
+        monkeypatch.delenv('GITTENSOR_MINER_PAT', raising=False)
+        # 3 validators: uid0 valid, uid1 missing (no_pat), uid2 valid.
+        metagraph = _fake_metagraph([(0.9, True, 50_000.0), (0.8, True, 40_000.0), (0.7, True, 30_000.0)])
+        metagraph.hotkeys = ['5MinerHotkey']
+        wallet = SimpleNamespace(hotkey=SimpleNamespace(ss58_address='5MinerHotkey'))
+        broadcast_targets = []
+
+        def check_resp(has_pat, pat_valid):
+            return SimpleNamespace(has_pat=has_pat, pat_valid=pat_valid, rejection_reason=None)
+
+        class FakeDendrite:
+            async def __call__(self, *, axons, synapse, **kw):
+                if type(synapse).__name__ == 'PatCheckSynapse':
+                    by = {
+                        '5Hk00': check_resp(True, True),
+                        '5Hk01': check_resp(False, False),
+                        '5Hk02': check_resp(True, True),
+                    }
+                    return [by[a.hotkey] for a in axons]
+                broadcast_targets.append([a.hotkey for a in axons])
+                return [_post_resp(True, status=200) for _ in axons]
+
+        with (
+            patch('gittensor.cli.miner_commands.ensure._validate_pat_locally', return_value='testuser'),
+            patch(
+                'gittensor.cli.miner_commands.ensure._connect_bittensor',
+                return_value=(wallet, object(), metagraph, FakeDendrite()),
+            ),
+        ):
+            result = runner.invoke(
+                cli, ['miner', 'ensure', '--json', '--pat', 'ghp_x', '--wallet', 't', '--hotkey', 't']
+            )
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.stdout)
+        assert payload['success'] is True
+        assert payload['total_validators'] == 3
+        assert payload['already_valid'] == 2
+        assert payload['reposted'] == 1
+        assert payload['now_valid'] == 3
+        assert payload['still_missing'] == []
+        # Re-broadcast went ONLY to the missing validator, never to the two that had it.
+        assert broadcast_targets == [['5Hk01']]
+
+    def test_exits_nonzero_when_a_validator_stays_uncovered(self, runner, monkeypatch):
+        monkeypatch.delenv('GITTENSOR_MINER_PAT', raising=False)
+        metagraph = _fake_metagraph([(0.9, True, 50_000.0)])
+        metagraph.hotkeys = ['5MinerHotkey']
+        wallet = SimpleNamespace(hotkey=SimpleNamespace(ss58_address='5MinerHotkey'))
+
+        class FakeDendrite:
+            async def __call__(self, *, axons, synapse, **kw):
+                if type(synapse).__name__ == 'PatCheckSynapse':
+                    return [SimpleNamespace(has_pat=False, pat_valid=False, rejection_reason=None) for _ in axons]
+                return [_post_resp(None) for _ in axons]  # unreachable for the re-broadcast too
+
+        with (
+            patch('gittensor.cli.miner_commands.ensure._validate_pat_locally', return_value='testuser'),
+            patch(
+                'gittensor.cli.miner_commands.ensure._connect_bittensor',
+                return_value=(wallet, object(), metagraph, FakeDendrite()),
+            ),
+        ):
+            result = runner.invoke(
+                cli,
+                ['miner', 'ensure', '--json', '--pat', 'ghp_x', '--wallet', 't', '--hotkey', 't', '--retries', '1'],
+            )
+        assert result.exit_code != 0
+        payload = json.loads(result.stdout)
+        assert payload['success'] is False
+        assert payload['still_missing'] == [0]
+
+    def test_watch_loops_and_resyncs_metagraph(self, runner, monkeypatch):
+        monkeypatch.delenv('GITTENSOR_MINER_PAT', raising=False)
+        metagraph = _fake_metagraph([(0.9, True, 50_000.0)])
+        metagraph.hotkeys = ['5MinerHotkey']
+        wallet = SimpleNamespace(hotkey=SimpleNamespace(ss58_address='5MinerHotkey'))
+        probes = []
+
+        class FakeSubtensor:
+            def __init__(self):
+                self.metagraph_calls = 0
+
+            def metagraph(self, netuid=None):
+                self.metagraph_calls += 1
+                return metagraph
+
+        subtensor = FakeSubtensor()
+
+        class FakeDendrite:
+            async def __call__(self, *, axons, synapse, **kw):
+                if type(synapse).__name__ == 'PatCheckSynapse':
+                    probes.append(1)
+                    return [SimpleNamespace(has_pat=True, pat_valid=True, rejection_reason=None) for _ in axons]
+                return [_post_resp(True, status=200) for _ in axons]
+
+        class FakeSleep:
+            def __init__(self):
+                self.n = 0
+
+            def __call__(self, _seconds):
+                self.n += 1
+                if self.n >= 2:  # let two cycles run, then stop like Ctrl-C
+                    raise KeyboardInterrupt
+
+        with (
+            patch('gittensor.cli.miner_commands.ensure._validate_pat_locally', return_value='testuser'),
+            patch(
+                'gittensor.cli.miner_commands.ensure._connect_bittensor',
+                return_value=(wallet, subtensor, metagraph, FakeDendrite()),
+            ),
+            patch('gittensor.cli.miner_commands.ensure.time.sleep', FakeSleep()),
+        ):
+            result = runner.invoke(
+                cli, ['miner', 'ensure', '--json', '--watch', '30', '--pat', 'ghp_x', '--wallet', 't', '--hotkey', 't']
+            )
+        assert result.exit_code == 0  # Ctrl-C / KeyboardInterrupt exits cleanly
+        assert len(probes) == 2  # ran two coverage cycles
+        assert subtensor.metagraph_calls == 1  # re-synced the metagraph between cycles

@@ -4,7 +4,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import sys
 
@@ -17,6 +16,7 @@ from gittensor.cli.miner_commands.helpers import (
     DEFAULT_MIN_VALIDATOR_STAKE,
     DEFAULT_MIN_VALIDATOR_VTRUST,
     NETUID_DEFAULT,
+    _broadcast_pat_with_retry,
     _connect_bittensor,
     _error,
     _load_config_value,
@@ -67,8 +67,15 @@ _PAT_POST_STATUS_MARKUP = {
     show_default=True,
     help='Minimum validator stake (α) to broadcast to.',
 )
+@click.option(
+    '--retries',
+    type=int,
+    default=2,
+    show_default=True,
+    help='Retries for validators that do not respond on the first broadcast.',
+)
 @click.option('--json', 'json_mode', is_flag=True, default=False, help='Output results as JSON.')
-def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, min_vtrust, min_stake, json_mode):
+def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, min_vtrust, min_stake, retries, json_mode):
     """Broadcast your GitHub PAT to all validators on the network.
 
     Validators will validate your PAT (test GitHub API access),
@@ -86,8 +93,6 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, min_vt
         gitt miner post --wallet alice --hotkey default
         gitt miner post --wallet alice --hotkey default --network test
     """
-    from gittensor.synapses import PatBroadcastSynapse
-
     if not pat:
         if json_mode:
             _error('--pat flag or GITTENSOR_MINER_PAT environment variable is required for JSON mode.', json_mode)
@@ -127,35 +132,10 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, min_vt
         metagraph, json_mode, min_vtrust=min_vtrust, min_stake=min_stake
     )
 
-    # 5. Broadcast
-    synapse = PatBroadcastSynapse(github_access_token=pat)
-
-    async def _broadcast():
-        return await dendrite(
-            axons=validator_axons,
-            synapse=synapse,
-            deserialize=False,
-            timeout=30.0,
-        )
-
+    # 5. Broadcast — retry validators that don't respond so a transient blip isn't
+    #    a silent, permanent coverage gap.
     with _status(f'[bold]Broadcasting to {len(validator_axons)} validators...'):
-        responses = asyncio.run(_broadcast())
-
-    # 6. Collect results
-    results = []
-    for uid, axon, resp in zip(validator_uids, validator_axons, responses):
-        accepted = getattr(resp, 'accepted', None)
-        reason = getattr(resp, 'rejection_reason', None)
-        status_code = getattr(resp.dendrite, 'status_code', None) if hasattr(resp, 'dendrite') else None
-        results.append(
-            {
-                'uid': uid,
-                'hotkey': axon.hotkey[:16] + '...',
-                'accepted': accepted,
-                'rejection_reason': reason,
-                'status_code': status_code,
-            }
-        )
+        results = _broadcast_pat_with_retry(dendrite, validator_axons, validator_uids, pat, retries=retries)
 
     counts = _pat_post_aggregate_counts(results)
     accepted_count = counts['accepted']

@@ -214,3 +214,93 @@ def _pat_post_aggregate_counts(results: list[dict[str, Any]]) -> dict[str, int]:
         'rejected': counts['rejected'],
         'no_response': counts['no_response'],
     }
+
+
+def _probe_pat(dendrite, axons: list, uids: list[int]) -> list[dict[str, Any]]:
+    """Send a PatCheckSynapse probe to each axon and return check-result rows.
+
+    No PAT is transmitted. Row shape matches `miner check`:
+    {uid, hotkey, has_pat, pat_valid, rejection_reason}.
+    """
+    import asyncio
+
+    from gittensor.synapses import PatCheckSynapse
+
+    synapse = PatCheckSynapse()
+
+    async def _check():
+        return await dendrite(axons=axons, synapse=synapse, deserialize=False, timeout=15.0)
+
+    responses = asyncio.run(_check())
+    results: list[dict[str, Any]] = []
+    for uid, axon, resp in zip(uids, axons, responses):
+        results.append(
+            {
+                'uid': uid,
+                'hotkey': axon.hotkey[:16] + '...',
+                'has_pat': getattr(resp, 'has_pat', None),
+                'pat_valid': getattr(resp, 'pat_valid', None),
+                'rejection_reason': getattr(resp, 'rejection_reason', None),
+            }
+        )
+    return results
+
+
+def _broadcast_pat_with_retry(
+    dendrite,
+    axons: list,
+    uids: list[int],
+    pat: str,
+    *,
+    retries: int = 2,
+    delay: float = 2.0,
+) -> list[dict[str, Any]]:
+    """Broadcast a PAT to validator axons, retrying ONLY those that did not respond.
+
+    A single broadcast is best-effort: a validator that is briefly unreachable
+    (mid-restart, transient network blip) returns no response and, without a
+    retry, is silently and permanently dropped until the next manual post. This
+    retries no-response validators up to ``retries`` times (an explicit
+    accept/reject is final), so transient unreachability does not become a silent
+    coverage gap.
+
+    Returns one row per uid (input order), shaped like `miner post`:
+    {uid, hotkey, accepted, rejection_reason, status_code}.
+    """
+    import asyncio
+    import time
+
+    from gittensor.synapses import PatBroadcastSynapse
+
+    final: dict[int, dict[str, Any]] = {}
+    pending: list[tuple[int, Any]] = list(zip(uids, axons))
+    for attempt in range(retries + 1):
+        if not pending:
+            break
+        cur_uids = [u for u, _ in pending]
+        cur_axons = [a for _, a in pending]
+        synapse = PatBroadcastSynapse(github_access_token=pat)
+
+        async def _broadcast(_axons=cur_axons, _synapse=synapse):
+            return await dendrite(axons=_axons, synapse=_synapse, deserialize=False, timeout=30.0)
+
+        responses = asyncio.run(_broadcast())
+        retry_next: list[tuple[int, Any]] = []
+        for (uid, axon), resp in zip(zip(cur_uids, cur_axons), responses):
+            accepted = getattr(resp, 'accepted', None)
+            reason = getattr(resp, 'rejection_reason', None)
+            status_code = getattr(resp.dendrite, 'status_code', None) if hasattr(resp, 'dendrite') else None
+            final[uid] = {
+                'uid': uid,
+                'hotkey': axon.hotkey[:16] + '...',
+                'accepted': accepted,
+                'rejection_reason': reason,
+                'status_code': status_code,
+            }
+            # Only a no-response (neither accepted nor explicitly rejected) is retried.
+            if accepted is None and reason is None:
+                retry_next.append((uid, axon))
+        pending = retry_next
+        if pending and attempt < retries:
+            time.sleep(delay)
+    return [final[u] for u in uids]

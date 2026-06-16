@@ -227,6 +227,7 @@
       "open_pr_collateral_percent": 0.1,
       "review_penalty_rate": 0.2,
       "maintainer_issue_multiplier": 1.5,
+      "standard_issue_multiplier": 1,
       "time_decay": {
         "grace_period_hours": 24,
         "sigmoid_midpoint_days": 14,
@@ -248,6 +249,11 @@
       "feature": 1.5,
       "refactor": 0.25,
       "test": 1.2
+    },
+    "scoring": {
+      "standard_issue_multiplier": 1,
+      "review_penalty_rate": 0.01,
+      "pr_lookback_days": 15
     },
     "maintainer_cut": 0.6,
     "eligibility": {

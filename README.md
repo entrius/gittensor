@@ -95,7 +95,7 @@ Weights assigned to AST (Abstract Syntax Tree) node types for token-based scorin
 
 ### Scoring
 
-See full guide **[here](https://docs.gittensor.io/scoring.html)**
+See full guide **[here](https://docs.gittensor.io/oss-contributions.html)**
 
 ## License
 

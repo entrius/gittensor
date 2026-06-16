@@ -605,12 +605,15 @@ class IssueCompetitionContractClient:
 
         Returns:
             Total stake amount (0 if no stake found)
+
+        Raises:
+            RuntimeError: If required contract storage is unavailable.
+            Exception: If the direct Alpha storage query fails.
         """
         try:
             packed = read_contract_packed_storage(self.subtensor.substrate, self.contract_address)
             if not packed:
-                bt.logging.debug('Cannot get treasury stake: packed storage unavailable')
-                return 0
+                raise RuntimeError('Cannot get treasury stake: packed storage unavailable')
 
             # Convert to SS58 addresses
             owner_ss58 = self.subtensor.substrate.ss58_encode(packed.owner.hex())
@@ -643,7 +646,7 @@ class IssueCompetitionContractClient:
 
         except Exception as e:
             bt.logging.error(f'Error fetching treasury stake: {e}')
-            return 0
+            raise
 
     def get_last_harvest_block(self) -> int:
         """Query the block number of the last harvest."""

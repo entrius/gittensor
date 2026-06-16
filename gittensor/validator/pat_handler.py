@@ -7,6 +7,7 @@ Miners check if a validator has their PAT via PatCheckSynapse.
 """
 
 import asyncio
+import json
 from typing import TYPE_CHECKING, Optional, Tuple
 
 import bittensor as bt
@@ -70,22 +71,28 @@ async def handle_pat_broadcast(validator: 'Validator', synapse: PatBroadcastSyna
     if error:
         return _reject(error)
 
-    # 3. Enforce GitHub identity pinning — same hotkey cannot switch GitHub accounts
-    identity_error = _github_identity_pin_error(uid, hotkey, github_id)
-    if identity_error:
-        return _reject(identity_error)
+    # Steps 3-5 read/write the PAT store. If it is momentarily unreadable, fail
+    # closed: reject so the miner retries, rather than letting save_pat overwrite
+    # (and wipe) the store or surfacing a raw axon error.
+    try:
+        # 3. Enforce GitHub identity pinning — same hotkey cannot switch GitHub accounts
+        identity_error = _github_identity_pin_error(uid, hotkey, github_id)
+        if identity_error:
+            return _reject(identity_error)
 
-    # 4. Test query against a known repo to catch org-restricted PATs
-    test_error = await asyncio.to_thread(_test_pat_against_repo, synapse.github_access_token)
-    if test_error:
-        return _reject(f'PAT test query failed: {test_error}')
+        # 4. Test query against a known repo to catch org-restricted PATs
+        test_error = await asyncio.to_thread(_test_pat_against_repo, synapse.github_access_token)
+        if test_error:
+            return _reject(f'PAT test query failed: {test_error}')
 
-    identity_error = _github_identity_pin_error(uid, hotkey, github_id)
-    if identity_error:
-        return _reject(identity_error)
+        identity_error = _github_identity_pin_error(uid, hotkey, github_id)
+        if identity_error:
+            return _reject(identity_error)
 
-    # 5. Store PAT (github_id guaranteed non-None after validate_github_credentials success)
-    pat_storage.save_pat(uid=uid, hotkey=hotkey, pat=synapse.github_access_token, github_id=github_id or '0')
+        # 5. Store PAT (github_id guaranteed non-None after validate_github_credentials success)
+        pat_storage.save_pat(uid=uid, hotkey=hotkey, pat=synapse.github_access_token, github_id=github_id or '0')
+    except (json.JSONDecodeError, OSError) as e:
+        return _reject(f'Validator PAT store temporarily unavailable; please retry. ({e})')
 
     # Clear PAT from response so it isn't echoed back
     synapse.github_access_token = ''

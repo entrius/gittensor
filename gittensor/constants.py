@@ -33,6 +33,12 @@ GITTENSOR_MIRROR_DEFAULT_URL = 'https://mirror.gittensor.io'
 # File endpoint returns head/base blob contents; allow more time than plain GitHub calls.
 MIRROR_HTTP_TIMEOUT_SECONDS = 30
 MIRROR_MAX_ATTEMPTS = 3
+# Miner pulls/issues list endpoints are cursor-paginated; page through next_cursor
+# at this size. 100 keeps each page's server-side subquery cost well under
+# MIRROR_HTTP_TIMEOUT_SECONDS even for the highest-volume miners.
+MIRROR_PAGE_LIMIT = 100
+# Defensive cap on pages followed per miner list fetch (100 * 100 = 10k rows).
+MIRROR_MAX_PAGES = 100
 
 # =============================================================================
 # Language & File Scoring

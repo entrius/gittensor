@@ -27,6 +27,7 @@ MirrorRequestError = mirror_client_module.MirrorRequestError
 MirrorPullRequestsResponse = mirror_models.MirrorPullRequestsResponse
 MirrorIssuesResponse = mirror_models.MirrorIssuesResponse
 MirrorPullRequestFilesResponse = mirror_models.MirrorPullRequestFilesResponse
+MIRROR_PAGE_LIMIT = pytest.importorskip('gittensor.constants').MIRROR_PAGE_LIMIT
 
 
 # ============================================================================
@@ -85,6 +86,47 @@ def _minimal_files_payload() -> dict:
         'merge_base_sha': 'mb',
         'scoring_data_stored': True,
         'files': [],
+    }
+
+
+def _pr(number: int) -> dict:
+    """Minimal PR dict that MirrorPullRequest.from_dict parses without warnings."""
+    return {
+        'repo_full_name': 'o/r',
+        'pr_number': number,
+        'state': 'OPEN',
+        'author_github_id': '218712309',
+        'created_at': '2026-03-15T00:00:00Z',
+        'review_summary': {'maintainer_changes_requested_count': 0},
+    }
+
+
+def _issue(number: int) -> dict:
+    """Minimal issue dict that MirrorIssue.from_dict parses cleanly."""
+    return {
+        'repo_full_name': 'o/r',
+        'issue_number': number,
+        'state': 'OPEN',
+    }
+
+
+def _pulls_page(prs: list, next_cursor) -> dict:
+    return {
+        'github_id': '218712309',
+        'since': None,
+        'generated_at': '2026-04-21T00:00:00Z',
+        'pull_requests': prs,
+        'next_cursor': next_cursor,
+    }
+
+
+def _issues_page(issues: list, next_cursor) -> dict:
+    return {
+        'github_id': '218712309',
+        'since': None,
+        'generated_at': '2026-04-21T00:00:00Z',
+        'issues': issues,
+        'next_cursor': next_cursor,
     }
 
 
@@ -426,6 +468,99 @@ class TestFailFast4xx:
 
         assert session.post.call_count == 1
         mock_sleep.assert_not_called()
+
+
+# ============================================================================
+# Pagination (cursor following)
+# ============================================================================
+
+
+class TestPagination:
+    """The miner list endpoints page through ``next_cursor`` and concatenate
+    each page's rows; ``limit`` rides every request, ``cursor`` every request
+    after the first."""
+
+    def test_get_pulls_follows_next_cursor_across_pages(self):
+        session = Mock()
+        session.get.side_effect = [
+            _ok(_pulls_page([_pr(1), _pr(2)], 'CURSOR2')),
+            _ok(_pulls_page([_pr(3)], None)),
+        ]
+        client = _make_client(session)
+
+        result = client.get_miner_pulls('218712309')
+
+        assert session.get.call_count == 2
+        assert session.get.call_args_list[0].kwargs['params'] == {'limit': MIRROR_PAGE_LIMIT}
+        assert session.get.call_args_list[1].kwargs['params'] == {'limit': MIRROR_PAGE_LIMIT, 'cursor': 'CURSOR2'}
+        assert [pr.pr_number for pr in result.pull_requests] == [1, 2, 3]
+
+    def test_windowed_post_follows_next_cursor_and_keeps_body(self):
+        session = Mock()
+        session.post.side_effect = [
+            _ok(_pulls_page([_pr(1)], 'CURSOR2')),
+            _ok(_pulls_page([_pr(2)], None)),
+        ]
+        client = _make_client(session)
+
+        result = client.get_miner_pulls('218712309', since_by_repo={'o/r': datetime(2026, 3, 1, tzinfo=timezone.utc)})
+
+        assert session.post.call_count == 2
+        session.get.assert_not_called()
+        assert session.post.call_args_list[0].kwargs['params'] == {'limit': MIRROR_PAGE_LIMIT}
+        assert session.post.call_args_list[1].kwargs['params'] == {'limit': MIRROR_PAGE_LIMIT, 'cursor': 'CURSOR2'}
+        # The per-repo window body rides along on every page.
+        assert 'since_by_repo' in session.post.call_args_list[1].kwargs['json']
+        assert [pr.pr_number for pr in result.pull_requests] == [1, 2]
+
+    def test_get_issues_follows_next_cursor_across_pages(self):
+        session = Mock()
+        session.get.side_effect = [
+            _ok(_issues_page([_issue(1)], 'C')),
+            _ok(_issues_page([_issue(2)], None)),
+        ]
+        client = _make_client(session)
+
+        result = client.get_miner_issues('218712309')
+
+        assert session.get.call_count == 2
+        assert [i.issue_number for i in result.issues] == [1, 2]
+
+    def test_missing_next_cursor_stops_after_one_page(self):
+        """An un-upgraded mirror returns the full list with no next_cursor — the
+        loop must complete in a single request (clean degradation)."""
+        session = Mock()
+        session.get.return_value = _ok(_minimal_pulls_payload())
+        client = _make_client(session)
+
+        result = client.get_miner_pulls('218712309')
+
+        assert session.get.call_count == 1
+        assert result.pull_requests == []
+
+    def test_null_next_cursor_stops_paging(self):
+        session = Mock()
+        session.get.return_value = _ok(_pulls_page([_pr(1)], None))
+        client = _make_client(session)
+
+        result = client.get_miner_pulls('218712309')
+
+        assert session.get.call_count == 1
+        assert [pr.pr_number for pr in result.pull_requests] == [1]
+
+    @patch('gittensor.utils.mirror.client.bt.logging')
+    @patch('gittensor.utils.mirror.client.MIRROR_MAX_PAGES', 3)
+    def test_page_cap_halts_runaway_pagination_and_warns(self, mock_log):
+        session = Mock()
+        # Every page hands back a cursor — without the cap this never terminates.
+        session.get.return_value = _ok(_pulls_page([_pr(1)], 'NEVER_ENDS'))
+        client = _make_client(session)
+
+        result = client.get_miner_pulls('218712309')
+
+        assert session.get.call_count == 3
+        assert len(result.pull_requests) == 3
+        mock_log.warning.assert_called_once()
 
 
 # ============================================================================

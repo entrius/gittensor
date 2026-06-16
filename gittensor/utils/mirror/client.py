@@ -16,6 +16,8 @@ from gittensor.constants import (
     GITTENSOR_MIRROR_DEFAULT_URL,
     MIRROR_HTTP_TIMEOUT_SECONDS,
     MIRROR_MAX_ATTEMPTS,
+    MIRROR_MAX_PAGES,
+    MIRROR_PAGE_LIMIT,
 )
 from gittensor.utils.mirror.models import (
     MirrorIssuesResponse,
@@ -74,7 +76,7 @@ class MirrorClient:
         window across all tracked repos.
         """
         path = f'/api/v1/miners/{github_id}/pulls'
-        data = self._fetch_windowed(path, since_by_repo)
+        data = self._fetch_windowed(path, 'pull_requests', since_by_repo)
         try:
             return MirrorPullRequestsResponse.from_dict(data)
         except Exception as e:
@@ -93,7 +95,7 @@ class MirrorClient:
         open-issue-count path.
         """
         path = f'/api/v1/miners/{github_id}/issues'
-        data = self._fetch_windowed(path, since_by_repo)
+        data = self._fetch_windowed(path, 'issues', since_by_repo)
         try:
             return MirrorIssuesResponse.from_dict(data)
         except Exception as e:
@@ -130,21 +132,68 @@ class MirrorClient:
         except Exception as e:
             raise MirrorRequestError(f'Mirror response from {path} was invalid: {e}') from e
 
-    def _fetch_windowed(self, path: str, since_by_repo: Optional[Dict[str, datetime]]) -> dict:
-        """POST a per-repo ``since`` map when one is given, else GET the
-        mirror's default window."""
+    def _fetch_windowed(
+        self,
+        path: str,
+        list_key: str,
+        since_by_repo: Optional[Dict[str, datetime]],
+    ) -> dict:
+        """Fetch a miner list endpoint, following pagination to completion.
+
+        POSTs a per-repo ``since`` map when one is given, else GETs the mirror's
+        default window. Either way the response is paged via ``next_cursor`` and
+        the per-page ``list_key`` arrays are concatenated into one response dict.
+        """
         if since_by_repo:
             body = {
                 'since_by_repo': {repo: dt.astimezone(timezone.utc).isoformat() for repo, dt in since_by_repo.items()}
             }
-            return self._post(path, body)
-        return self._get(path)
+            return self._fetch_paginated('POST', path, list_key, json_body=body)
+        return self._fetch_paginated('GET', path, list_key)
+
+    def _fetch_paginated(
+        self,
+        method: str,
+        path: str,
+        list_key: str,
+        json_body: Optional[dict] = None,
+    ) -> dict:
+        """Page through ``path``, concatenating each page's ``list_key`` rows.
+
+        Sends ``limit`` on every request and ``cursor`` once the mirror returns
+        a ``next_cursor``, stopping when no cursor comes back. A mirror that
+        predates windowed pagination ignores the params and returns the full
+        list with no ``next_cursor`` — the loop then completes in one page, so
+        this degrades cleanly to a single unbounded request.
+        """
+        merged: Optional[dict] = None
+        items: list = []
+        cursor: Optional[str] = None
+        for _ in range(MIRROR_MAX_PAGES):
+            params: dict = {'limit': MIRROR_PAGE_LIMIT}
+            if cursor:
+                params['cursor'] = cursor
+            data = self._request(method, path, params=params, json_body=json_body)
+            if merged is None:
+                merged = data
+            page_items = data.get(list_key)
+            if page_items:
+                items.extend(page_items)
+            cursor = data.get('next_cursor')
+            if not cursor:
+                break
+        else:
+            bt.logging.warning(
+                f'Mirror {method} {path} stopped at the {MIRROR_MAX_PAGES}-page cap with a '
+                f'cursor still set; the {len(items)} {list_key} loaded may be incomplete.'
+            )
+        if merged is None:
+            merged = {}
+        merged[list_key] = items
+        return merged
 
     def _get(self, path: str, params: Optional[dict] = None) -> dict:
         return self._request('GET', path, params=params)
-
-    def _post(self, path: str, json_body: dict) -> dict:
-        return self._request('POST', path, json_body=json_body)
 
     def _request(
         self,
@@ -159,7 +208,7 @@ class MirrorClient:
         for attempt in range(self.max_attempts):
             try:
                 if method == 'POST':
-                    response = self.session.post(url, json=json_body, timeout=self.timeout)
+                    response = self.session.post(url, json=json_body, params=params, timeout=self.timeout)
                 else:
                     response = self.session.get(url, params=params, timeout=self.timeout)
             except requests.RequestException as e:

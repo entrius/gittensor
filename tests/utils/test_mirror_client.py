@@ -445,3 +445,99 @@ class TestConstructorDefaults:
 
         client = MirrorClient()
         assert client.max_attempts == MIRROR_MAX_ATTEMPTS
+
+
+def _maintainers_payload(*entries: tuple[str, str, str]) -> dict:
+    """entries: tuples of (github_id, login, association)"""
+    return {
+        'repo_full_name': 'phase-rs/phase',
+        'generated_at': '2026-06-16T00:00:00Z',
+        'maintainers': [{'github_id': gid, 'login': login, 'association': assoc} for gid, login, assoc in entries],
+    }
+
+
+class TestGetMaintainerGithubIds:
+    """``get_maintainer_github_ids`` wraps ``get_repo_maintainers`` with a
+    per-instance cache, returns a ``frozenset`` of github_ids, and falls back
+    to an empty set on transport failure (conservative — caller treats the
+    repo as having no identifiable maintainers).
+    """
+
+    def test_returns_frozenset_of_ids(self):
+        session = Mock()
+        session.get.return_value = _ok(_maintainers_payload(('1388610', 'matthewevans', 'MEMBER')))
+        client = _make_client(session)
+
+        ids = client.get_maintainer_github_ids('phase-rs/phase')
+
+        assert ids == frozenset({'1388610'})
+        assert isinstance(ids, frozenset)
+
+    def test_second_call_uses_cache_no_second_http(self):
+        session = Mock()
+        session.get.return_value = _ok(_maintainers_payload(('1388610', 'matthewevans', 'MEMBER')))
+        client = _make_client(session)
+
+        client.get_maintainer_github_ids('phase-rs/phase')
+        client.get_maintainer_github_ids('phase-rs/phase')
+
+        # Only one HTTP call across two lookups for the same repo.
+        assert session.get.call_count == 1
+
+    def test_different_repos_each_fetch_once(self):
+        session = Mock()
+        session.get.side_effect = [
+            _ok(_maintainers_payload(('1388610', 'matthewevans', 'MEMBER'))),
+            _ok(_maintainers_payload(('60993791', 'landyndev', 'COLLABORATOR'))),
+        ]
+        client = _make_client(session)
+
+        a = client.get_maintainer_github_ids('phase-rs/phase')
+        b = client.get_maintainer_github_ids('entrius/gittensor')
+
+        assert a == frozenset({'1388610'})
+        assert b == frozenset({'60993791'})
+        assert session.get.call_count == 2
+
+    @patch('gittensor.utils.mirror.client.time.sleep')
+    @patch('gittensor.utils.mirror.client.bt.logging.warning')
+    def test_mirror_failure_returns_empty_frozenset_not_raised(self, _log, _sleep):
+        session = Mock()
+        session.get.return_value = _err(500, 'mirror down')
+        client = _make_client(session, max_attempts=1)
+
+        ids = client.get_maintainer_github_ids('phase-rs/phase')
+
+        # Conservative fallback: empty set, NOT an exception.
+        assert ids == frozenset()
+
+    @patch('gittensor.utils.mirror.client.time.sleep')
+    @patch('gittensor.utils.mirror.client.bt.logging.warning')
+    def test_failure_is_cached_too(self, _log, _sleep):
+        session = Mock()
+        session.get.return_value = _err(500, 'mirror down')
+        client = _make_client(session, max_attempts=1)
+
+        client.get_maintainer_github_ids('phase-rs/phase')
+        client.get_maintainer_github_ids('phase-rs/phase')
+
+        # Subsequent lookups in the same round don't retry the mirror.
+        assert session.get.call_count == 1
+
+    def test_drops_entries_with_missing_github_id(self):
+        session = Mock()
+        session.get.return_value = _ok(
+            {
+                'repo_full_name': 'phase-rs/phase',
+                'generated_at': '2026-06-16T00:00:00Z',
+                'maintainers': [
+                    {'github_id': '1388610', 'login': 'matthewevans', 'association': 'MEMBER'},
+                    {'github_id': '', 'login': 'anon', 'association': 'COLLABORATOR'},
+                ],
+            }
+        )
+        client = _make_client(session)
+
+        ids = client.get_maintainer_github_ids('phase-rs/phase')
+
+        assert ids == frozenset({'1388610'})

@@ -51,6 +51,11 @@ class MirrorClient:
         self.timeout = timeout
         self.max_attempts = max_attempts
         self.session = session or requests.Session()
+        # Per-client cache of repo → maintainer GitHub IDs. A new MirrorClient is
+        # created per scoring round, so cache lifetime == round. Used by the
+        # issue-multiplier tier and the maintainer_cut carve-out so a repo's
+        # maintainer set is fetched once per round, not once per PR.
+        self._maintainer_github_ids_cache: Dict[str, frozenset[str]] = {}
 
     def close(self) -> None:
         self.session.close()
@@ -129,6 +134,35 @@ class MirrorClient:
             return MirrorRepoMaintainersResponse.from_dict(data)
         except Exception as e:
             raise MirrorRequestError(f'Mirror response from {path} was invalid: {e}') from e
+
+    def get_maintainer_github_ids(self, repo_full_name: str) -> frozenset[str]:
+        """Return the current maintainer GitHub IDs for ``repo_full_name``.
+
+        Wraps ``get_repo_maintainers`` with a per-instance cache so the same
+        mirror call is not re-issued across PRs being scored for the same repo
+        in a single round. On mirror request failure, returns an empty
+        ``frozenset`` so callers treat the repo as having no identifiable
+        maintainers — conservative for the issue-bonus tier determination.
+
+        Used by ``_calculate_issue_multiplier`` instead of consulting each
+        linked issue's stored ``author_association`` field, which the mirror
+        snapshots at ingest time and never refreshes (so a role change after
+        an issue was filed would otherwise be invisible).
+        """
+        cached = self._maintainer_github_ids_cache.get(repo_full_name)
+        if cached is not None:
+            return cached
+        try:
+            response = self.get_repo_maintainers(repo_full_name)
+            ids = frozenset(m.github_id for m in response.maintainers if m.github_id)
+        except MirrorRequestError as e:
+            bt.logging.warning(
+                f'Mirror maintainer lookup failed for {repo_full_name} ({e}); '
+                f'issue-bonus tier will default to standard for this repo this round'
+            )
+            ids = frozenset()
+        self._maintainer_github_ids_cache[repo_full_name] = ids
+        return ids
 
     def _fetch_windowed(self, path: str, since_by_repo: Optional[Dict[str, datetime]]) -> dict:
         """POST a per-repo ``since`` map when one is given, else GET the

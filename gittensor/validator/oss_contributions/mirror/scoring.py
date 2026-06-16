@@ -180,7 +180,14 @@ async def score_pr(
         # eligibility and reporting gates keep their evidence signal.
         scored.base_score = repo_config.fixed_base_score
 
-    _calculate_pr_multipliers(scored, repo_config, scoring_cfg)
+    # Resolve the repo's current maintainer set so the issue-bonus tier reflects
+    # live role state, not the issue's stored author_association (cached at
+    # mirror-ingest time, never refreshed). Same source the maintainer_cut
+    # carve-out trusts. Cached per-client; first call per repo hits the mirror,
+    # subsequent PRs in the same repo are free.
+    maintainer_github_ids = await asyncio.to_thread(client.get_maintainer_github_ids, pr.repo_full_name)
+
+    _calculate_pr_multipliers(scored, repo_config, scoring_cfg, maintainer_github_ids)
 
     if pr.state == 'MERGED':
         eval_.unique_repos_contributed_to.add(pr.repo_full_name)
@@ -368,7 +375,12 @@ def calculate_base_score_for_pr_files(
 # ============================================================================
 
 
-def _calculate_pr_multipliers(scored: ScoredPR, repo_config: RepositoryConfig, scoring_cfg: ResolvedScoring) -> None:
+def _calculate_pr_multipliers(
+    scored: ScoredPR,
+    repo_config: RepositoryConfig,
+    scoring_cfg: ResolvedScoring,
+    maintainer_github_ids: frozenset[str],
+) -> None:
     """Compute time_decay, review_quality, label, and issue multipliers.
 
     Spam and credibility multipliers are deferred to ``finalize_miner_scores``
@@ -381,7 +393,7 @@ def _calculate_pr_multipliers(scored: ScoredPR, repo_config: RepositoryConfig, s
     scored.label = chosen_label
     scored.label_multiplier = label_multiplier
 
-    scored.issue_multiplier = round(_calculate_issue_multiplier(scored, scoring_cfg), 2)
+    scored.issue_multiplier = round(_calculate_issue_multiplier(scored, scoring_cfg, maintainer_github_ids), 2)
 
     if is_merged:
         assert pr.merged_at is not None, f'MERGED PR #{pr.pr_number} missing merged_at'
@@ -410,11 +422,26 @@ def _resolve_trusted_scoring_label(pr: MirrorPullRequest, repo_config: Repositor
 # ============================================================================
 
 
-def _calculate_issue_multiplier(scored: ScoredPR, scoring: ResolvedScoring) -> float:
+def _calculate_issue_multiplier(
+    scored: ScoredPR,
+    scoring: ResolvedScoring,
+    maintainer_github_ids: frozenset[str],
+) -> float:
     """Return the multiplier earned from valid linked issues on a PR.
 
-    Maintainer-authored valid issues bump the multiplier higher
-    (``maintainer_issue_multiplier`` vs ``standard_issue_multiplier``).
+    A linked issue's author is treated as a maintainer iff their GitHub ID is
+    currently in the repo's maintainer set, sourced from the mirror's
+    ``/repos/:repo/maintainers`` endpoint — the same source the
+    ``maintainer_cut`` carve-out trusts.
+
+    The issue's stored ``author_association`` is intentionally NOT consulted:
+    the mirror snapshots that field at ingest time and never refreshes it, so
+    a role change after the issue was filed would otherwise be invisible (the
+    bug surfaced via matthewevans / plind-junior on phase-rs/phase where their
+    issues stayed classified as CONTRIBUTOR even after they became MEMBER /
+    COLLABORATOR). Consulting the live maintainer set unifies identity
+    treatment with the carve-out.
+
     Returns 1.0 if no linked issues pass the anti-gaming gates.
     """
     pr = scored.pr
@@ -427,13 +454,14 @@ def _calculate_issue_multiplier(scored: ScoredPR, scoring: ResolvedScoring) -> f
         bt.logging.info(f'PR #{pr.pr_number} - Solved no valid linked issues')
         return 1.0
 
-    # Prefer a maintainer-authored valid issue so the multiplier doesn't depend
-    # on mirror response ordering of linked_issues (regression seen in PR #673).
+    # Prefer an issue whose author is currently in the maintainer set so the
+    # multiplier doesn't depend on mirror response ordering of linked_issues
+    # (regression seen in PR #673).
     issue = next(
-        (li for li in valid if li.author_association in MAINTAINER_ASSOCIATIONS),
+        (li for li in valid if li.author_github_id and li.author_github_id in maintainer_github_ids),
         valid[0],
     )
-    is_maintainer = issue.author_association in MAINTAINER_ASSOCIATIONS if issue.author_association else False
+    is_maintainer = bool(issue.author_github_id and issue.author_github_id in maintainer_github_ids)
     multiplier = scoring.maintainer_issue_multiplier if is_maintainer else scoring.standard_issue_multiplier
     label = 'maintainer' if is_maintainer else 'standard'
     bt.logging.info(f'Linked issue #{issue.number} - {label} | multiplier: {multiplier}')

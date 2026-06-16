@@ -121,8 +121,10 @@ def _config(
     )
 
 
-def _apply_multipliers(scored: ScoredPR, cfg: RepositoryConfig) -> None:
-    _calculate_pr_multipliers(scored, cfg, resolve_scoring(cfg.scoring))
+def _apply_multipliers(
+    scored: ScoredPR, cfg: RepositoryConfig, maintainer_github_ids: frozenset[str] = frozenset()
+) -> None:
+    _calculate_pr_multipliers(scored, cfg, resolve_scoring(cfg.scoring), maintainer_github_ids)
 
 
 # ============================================================================
@@ -718,19 +720,23 @@ def _linked_issue(
 class TestIssueMultiplier:
     def test_no_linked_issues_returns_neutral(self):
         scored = ScoredPR(pr=_pr(linked_issues=[]))
-        assert _calculate_issue_multiplier(scored, resolve_scoring(None)) == 1.0
+        assert _calculate_issue_multiplier(scored, resolve_scoring(None), frozenset()) == 1.0
 
     def test_valid_standard_issue(self):
         from gittensor.constants import STANDARD_ISSUE_MULTIPLIER
 
         scored = ScoredPR(pr=_pr(linked_issues=[_linked_issue()]))
-        assert _calculate_issue_multiplier(scored, resolve_scoring(None)) == STANDARD_ISSUE_MULTIPLIER
+        assert _calculate_issue_multiplier(scored, resolve_scoring(None), frozenset()) == STANDARD_ISSUE_MULTIPLIER
 
     def test_maintainer_authored_issue_gets_maintainer_multiplier(self):
         from gittensor.constants import MAINTAINER_ISSUE_MULTIPLIER
 
-        scored = ScoredPR(pr=_pr(linked_issues=[_linked_issue(author_association='OWNER')]))
-        assert _calculate_issue_multiplier(scored, resolve_scoring(None)) == MAINTAINER_ISSUE_MULTIPLIER
+        # Default _linked_issue has author_github_id='999'. Put it in the maintainer set.
+        scored = ScoredPR(pr=_pr(linked_issues=[_linked_issue()]))
+        assert (
+            _calculate_issue_multiplier(scored, resolve_scoring(None), frozenset({'999'}))
+            == MAINTAINER_ISSUE_MULTIPLIER
+        )
 
     def test_first_valid_issue_chosen(self):
         # Even if the first issue is invalid, valid second one should be chosen
@@ -739,7 +745,7 @@ class TestIssueMultiplier:
         scored = ScoredPR(pr=_pr(linked_issues=[invalid, valid]))
         from gittensor.constants import STANDARD_ISSUE_MULTIPLIER
 
-        assert _calculate_issue_multiplier(scored, resolve_scoring(None)) == STANDARD_ISSUE_MULTIPLIER
+        assert _calculate_issue_multiplier(scored, resolve_scoring(None), frozenset()) == STANDARD_ISSUE_MULTIPLIER
 
 
 class TestLinkedIssueValidity:
@@ -861,16 +867,17 @@ class TestLinkedIssueSolvedByPr:
         li_data = _linked_issue()
         li_data['solved_by_pr'] = 999
         scored = ScoredPR(pr=_pr(linked_issues=[li_data]))
-        assert _calculate_issue_multiplier(scored, resolve_scoring(None)) == 1.0
+        assert _calculate_issue_multiplier(scored, resolve_scoring(None), frozenset()) == 1.0
 
     def test_maintainer_authored_mismatch_still_blocked(self):
         # The maintainer-preference path runs after _is_valid_linked_issue;
         # a maintainer-authored linked issue with the wrong solver must still
-        # be rejected (no MAINTAINER_ISSUE_MULTIPLIER shortcut).
-        li_data = _linked_issue(author_association='OWNER')
+        # be rejected (no MAINTAINER_ISSUE_MULTIPLIER shortcut). Even with the
+        # author in the maintainer set, the solver gate rejects the issue.
+        li_data = _linked_issue()
         li_data['solved_by_pr'] = 999
         scored = ScoredPR(pr=_pr(linked_issues=[li_data]))
-        assert _calculate_issue_multiplier(scored, resolve_scoring(None)) == 1.0
+        assert _calculate_issue_multiplier(scored, resolve_scoring(None), frozenset({'999'})) == 1.0
 
 
 class TestIssueMultiplierPreference:
@@ -879,19 +886,54 @@ class TestIssueMultiplierPreference:
         maintainer-authored valid issue regardless of response ordering."""
         from gittensor.constants import MAINTAINER_ISSUE_MULTIPLIER
 
-        # Non-maintainer issue listed first, maintainer-authored issue second
-        non_maint = _linked_issue(number=1, author_association='CONTRIBUTOR', author_github_id='111')
-        maint = _linked_issue(number=2, author_association='OWNER', author_github_id='222')
+        # Non-maintainer issue listed first, maintainer issue (by current mirror
+        # maintainer set) second. Author 222 is in the maintainer set.
+        non_maint = _linked_issue(number=1, author_github_id='111')
+        maint = _linked_issue(number=2, author_github_id='222')
         scored = ScoredPR(pr=_pr(linked_issues=[non_maint, maint]))
-        assert _calculate_issue_multiplier(scored, resolve_scoring(None)) == MAINTAINER_ISSUE_MULTIPLIER
+        assert (
+            _calculate_issue_multiplier(scored, resolve_scoring(None), frozenset({'222'}))
+            == MAINTAINER_ISSUE_MULTIPLIER
+        )
 
     def test_falls_back_to_first_when_no_maintainer_authored(self):
         from gittensor.constants import STANDARD_ISSUE_MULTIPLIER
 
-        issue_a = _linked_issue(number=1, author_association='CONTRIBUTOR', author_github_id='111')
-        issue_b = _linked_issue(number=2, author_association='CONTRIBUTOR', author_github_id='222')
+        issue_a = _linked_issue(number=1, author_github_id='111')
+        issue_b = _linked_issue(number=2, author_github_id='222')
         scored = ScoredPR(pr=_pr(linked_issues=[issue_a, issue_b]))
-        assert _calculate_issue_multiplier(scored, resolve_scoring(None)) == STANDARD_ISSUE_MULTIPLIER
+        assert _calculate_issue_multiplier(scored, resolve_scoring(None), frozenset()) == STANDARD_ISSUE_MULTIPLIER
+
+    def test_stale_contributor_association_still_gets_maintainer_tier(self):
+        """#1340-adjacent fix: the mirror snapshots ``author_association`` at
+        ingest and never refreshes. A linked issue whose author was a CONTRIBUTOR
+        at ingest but is now a MEMBER/COLLABORATOR/OWNER should still get the
+        maintainer-tier multiplier — sourced from the live maintainer set, not
+        from the stale stored field on the issue.
+        """
+        from gittensor.constants import MAINTAINER_ISSUE_MULTIPLIER
+
+        # Stored author_association is CONTRIBUTOR (the stale value), but the
+        # author is currently in the maintainer set.
+        stale = _linked_issue(author_association='CONTRIBUTOR', author_github_id='777')
+        scored = ScoredPR(pr=_pr(linked_issues=[stale]))
+        assert (
+            _calculate_issue_multiplier(scored, resolve_scoring(None), frozenset({'777'}))
+            == MAINTAINER_ISSUE_MULTIPLIER
+        )
+
+    def test_stale_owner_association_drops_to_standard_when_not_currently_maintainer(self):
+        """Inverse of the above: a stored OWNER/MEMBER snapshot is ignored when
+        the author has since left the maintainer set. The live mirror endpoint
+        is the source of truth — not the issue's stored field.
+        """
+        from gittensor.constants import STANDARD_ISSUE_MULTIPLIER
+
+        # Stored author_association is OWNER (stale), but author has since
+        # departed and is not in the current maintainer set.
+        stale = _linked_issue(author_association='OWNER', author_github_id='ghost')
+        scored = ScoredPR(pr=_pr(linked_issues=[stale]))
+        assert _calculate_issue_multiplier(scored, resolve_scoring(None), frozenset()) == STANDARD_ISSUE_MULTIPLIER
 
 
 class TestCollateralScoreAcceptsScoredPR:

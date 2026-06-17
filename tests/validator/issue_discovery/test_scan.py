@@ -199,6 +199,10 @@ class TestClassifyIssue:
         issue = MirrorIssue.from_dict(_issue_dict(is_transferred=True))
         assert _classify_issue(issue, self._RC) == 'ignore'
 
+    def test_state_reason_transferred_ignored_when_flag_false(self):
+        issue = MirrorIssue.from_dict(_issue_dict(is_transferred=False, state_reason='TRANSFERRED'))
+        assert _classify_issue(issue, self._RC) == 'ignore'
+
     def test_open_issue_ignored(self):
         issue = MirrorIssue.from_dict(_issue_dict(state='OPEN', state_reason=None, solved_by_pr=None))
         assert _classify_issue(issue, self._RC) == 'ignore'

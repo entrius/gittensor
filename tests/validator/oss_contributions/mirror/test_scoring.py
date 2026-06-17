@@ -754,6 +754,11 @@ class TestLinkedIssueValidity:
         li = MirrorLinkedIssue.from_dict(_linked_issue(is_transferred=True))
         assert _is_valid_linked_issue(li, scored.pr) is False
 
+    def test_state_reason_transferred_blocks_when_flag_false(self):
+        scored = ScoredPR(pr=_pr())
+        li = MirrorLinkedIssue.from_dict(_linked_issue(is_transferred=False, state_reason='TRANSFERRED'))
+        assert _is_valid_linked_issue(li, scored.pr) is False
+
     def test_missing_author_blocks(self):
         scored = ScoredPR(pr=_pr())
         li = MirrorLinkedIssue.from_dict(_linked_issue(author_github_id=None))

@@ -21,6 +21,21 @@ from gittensor.validator.utils.datetime_utils import (
 )
 
 
+def _parse_mirror_state_reason(value: Optional[str]) -> Optional[str]:
+    """Normalize mirror/GitHub state_reason to uppercase for gate comparisons."""
+    if value is None:
+        return None
+    normalized = str(value).strip().upper()
+    return normalized or None
+
+
+def _mirror_is_transferred(data: dict, state_reason: Optional[str]) -> bool:
+    """True when mirror marks transfer explicitly or GitHub state_reason says TRANSFERRED."""
+    if bool(data.get('is_transferred', False)):
+        return True
+    return state_reason == 'TRANSFERRED'
+
+
 @dataclass
 class MirrorLabel:
     """A label applied to a PR or issue, with the actor who applied it.
@@ -94,17 +109,18 @@ class MirrorLinkedIssue:
         # str-typed field so downstream `==` comparisons with author_github_id
         # from MirrorPullRequest don't silently mismatch on type.
         author_github_id = data.get('author_github_id')
+        state_reason = _parse_mirror_state_reason(data.get('state_reason'))
         return cls(
             number=data['number'],
             title=data.get('title', ''),
             state=data['state'],
-            state_reason=data.get('state_reason'),
+            state_reason=state_reason,
             author_github_id=str(author_github_id) if author_github_id is not None else None,
             author_association=data.get('author_association'),
             created_at=parse_optional_github_iso_to_utc(data.get('created_at')),
             closed_at=parse_optional_github_iso_to_utc(data.get('closed_at')),
             updated_at=parse_optional_github_iso_to_utc(data.get('updated_at')),
-            is_transferred=bool(data.get('is_transferred', False)),
+            is_transferred=_mirror_is_transferred(data, state_reason),
             solved_by_pr=data.get('solved_by_pr'),
             labels=[MirrorLabel.from_dict(label) for label in data.get('labels') or []],
         )
@@ -265,12 +281,13 @@ class MirrorIssue:
     def from_dict(cls, data: dict) -> 'MirrorIssue':
         solving_pr_raw = data.get('solving_pr')
         author_github_id = data.get('author_github_id')
+        state_reason = _parse_mirror_state_reason(data.get('state_reason'))
         return cls(
             repo_full_name=data['repo_full_name'].lower(),
             issue_number=data['issue_number'],
             title=data.get('title', ''),
             state=data['state'],
-            state_reason=data.get('state_reason'),
+            state_reason=state_reason,
             author_github_id=str(author_github_id) if author_github_id is not None else None,
             author_login=data.get('author_login'),
             author_association=data.get('author_association'),
@@ -278,7 +295,7 @@ class MirrorIssue:
             closed_at=parse_optional_github_iso_to_utc(data.get('closed_at')),
             updated_at=parse_optional_github_iso_to_utc(data.get('updated_at')),
             last_edited_at=parse_optional_github_iso_to_utc(data.get('last_edited_at')),
-            is_transferred=bool(data.get('is_transferred', False)),
+            is_transferred=_mirror_is_transferred(data, state_reason),
             solved_by_pr=data.get('solved_by_pr'),
             labels=[MirrorLabel.from_dict(label) for label in data.get('labels') or []],
             solving_pr=MirrorSolvingPR.from_dict(solving_pr_raw) if solving_pr_raw else None,

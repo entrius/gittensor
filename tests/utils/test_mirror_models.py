@@ -272,6 +272,17 @@ class TestMirrorLinkedIssue:
         li = MirrorLinkedIssue.from_dict(linked_issue_dict)
         assert li.labels == []
 
+    def test_state_reason_transferred_sets_is_transferred_when_flag_false(self, linked_issue_dict):
+        linked_issue_dict['is_transferred'] = False
+        linked_issue_dict['state_reason'] = 'TRANSFERRED'
+        li = MirrorLinkedIssue.from_dict(linked_issue_dict)
+        assert li.is_transferred is True
+
+    def test_lowercase_state_reason_normalized(self, linked_issue_dict):
+        linked_issue_dict['state_reason'] = 'completed'
+        li = MirrorLinkedIssue.from_dict(linked_issue_dict)
+        assert li.state_reason == 'COMPLETED'
+
 
 # ============================================================================
 # MirrorPullRequest
@@ -390,6 +401,13 @@ class TestMirrorIssue:
         issue = MirrorIssue.from_dict(issue_dict)
         assert issue.solving_pr is None
         assert issue.solved_by_pr is None
+
+    def test_state_reason_transferred_sets_is_transferred_when_flag_false(self, issue_dict):
+        issue_dict['is_transferred'] = False
+        issue_dict['state_reason'] = 'transferred'
+        issue = MirrorIssue.from_dict(issue_dict)
+        assert issue.state_reason == 'TRANSFERRED'
+        assert issue.is_transferred is True
 
     def test_missing_solving_pr_key_treated_as_none(self, issue_dict):
         del issue_dict['solving_pr']

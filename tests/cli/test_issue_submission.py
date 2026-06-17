@@ -138,6 +138,27 @@ def test_submissions_json_contract_read_failure_returns_structured_error(cli_roo
     assert 'not found on-chain' not in payload['error']['message']
 
 
+def test_submissions_json_github_lookup_failure_returns_read_failed(cli_root, runner, sample_issue):
+    with (
+        patch('gittensor.cli.issue_commands.submissions.get_contract_address', return_value='0xabc'),
+        patch('gittensor.cli.issue_commands.submissions.resolve_network', return_value=('ws://x', 'test')),
+        patch('gittensor.cli.issue_commands.submissions.fetch_issue_from_contract', return_value=sample_issue),
+        patch('gittensor.cli.issue_commands.submissions.fetch_open_issue_pull_requests', return_value=None),
+    ):
+        result = runner.invoke(
+            cli_root,
+            ['issues', 'submissions', '--id', '42', '--json'],
+            catch_exceptions=False,
+        )
+
+    assert result.exit_code != 0
+    payload = json.loads(result.stdout)
+    assert payload['success'] is False
+    assert payload['error']['type'] == 'read_failed'
+    assert 'GraphQL lookup failed' in payload['error']['message']
+    assert 'submission_count' not in payload
+
+
 def test_submissions_help_via_issue_alias_routes_to_command_help(cli_root, runner):
     result = runner.invoke(
         cli_root,

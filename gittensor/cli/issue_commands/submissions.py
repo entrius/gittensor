@@ -81,6 +81,13 @@ def issues_submissions(
     except click.ClickException as e:
         handle_exception(as_json, str(e), click_error_type(e))
 
+    if pull_requests is None:
+        handle_exception(
+            as_json,
+            f'Failed to fetch PR submissions from GitHub for {repo_name}#{issue_number} (GraphQL lookup failed).',
+            'read_failed',
+        )
+
     if as_json:
         submissions = [
             {

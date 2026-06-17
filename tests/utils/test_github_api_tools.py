@@ -531,6 +531,65 @@ class TestFindSolverFromClosureEvent:
             result = find_solver_from_closure_event('owner/repo', 12, 'fake_token')
             assert result is None
 
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_null_timeline_items_returns_no_solver(self, mock_logging, mock_graphql):
+        mock_graphql.return_value = {
+            'data': {
+                'repository': {
+                    'issue': {
+                        'closedAt': '2025-06-01T00:00:00Z',
+                        'timelineItems': None,
+                    },
+                },
+            },
+        }
+
+        solver_id, pr_number = find_solver_from_closure_event('owner/repo', 12, 'fake_token')
+
+        assert solver_id is None
+        assert pr_number is None
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_null_data_returns_no_solver(self, mock_logging, mock_graphql):
+        mock_graphql.return_value = {'data': None}
+
+        result = find_solver_from_closure_event('owner/repo', 12, 'fake_token')
+
+        assert result is None
+
+
+_search_issue_referencing_prs_graphql = github_api_tools._search_issue_referencing_prs_graphql
+
+
+class TestSearchIssueReferencingPrsGraphqlNullFields:
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_null_timeline_items_returns_empty_list(self, mock_logging, mock_graphql):
+        mock_graphql.return_value = {
+            'data': {
+                'repository': {
+                    'issue': {
+                        'timelineItems': None,
+                    },
+                },
+            },
+        }
+
+        result = _search_issue_referencing_prs_graphql('owner/repo', 12, 'fake_token')
+
+        assert result == []
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_null_repository_returns_none(self, mock_logging, mock_graphql):
+        mock_graphql.return_value = {'data': {'repository': None}}
+
+        result = _search_issue_referencing_prs_graphql('owner/repo', 12, 'fake_token')
+
+        assert result is None
+
 
 class TestCheckGithubIssueClosed:
     """Test issue state checks keep API failures distinct from no-solver cases."""

@@ -278,12 +278,12 @@ def _search_issue_referencing_prs_graphql(
         bt.logging.warning(f'GraphQL cross-reference query returned errors for {repo}#{issue_number}: {errors}')
         return None
 
-    issue_data = result.get('data', {}).get('repository', {}).get('issue')
+    issue_data = ((result.get('data') or {}).get('repository') or {}).get('issue')
     if issue_data is None:
         bt.logging.warning(f'GraphQL cross-reference response missing issue data for {repo}#{issue_number}')
         return None
 
-    timeline_nodes = issue_data.get('timelineItems', {}).get('nodes', [])
+    timeline_nodes = (issue_data.get('timelineItems') or {}).get('nodes', [])
 
     out: List[PRInfo] = []
     for node in timeline_nodes:
@@ -411,7 +411,7 @@ def _is_completed_close_event(node: Dict[str, Any]) -> bool:
 
 def _select_current_close_event(issue_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Return the ClosedEvent that represents the issue's current closure."""
-    timeline_nodes = issue_data.get('timelineItems', {}).get('nodes', []) or []
+    timeline_nodes = (issue_data.get('timelineItems') or {}).get('nodes', []) or []
     closed_at = issue_data.get('closedAt')
     if not closed_at:
         return None
@@ -488,7 +488,7 @@ def find_solver_from_closure_event(
         bt.logging.warning(f'GraphQL closure query returned errors for {repo}#{issue_number}: {errors}')
         return None
 
-    issue_data = result.get('data', {}).get('repository', {}).get('issue')
+    issue_data = ((result.get('data') or {}).get('repository') or {}).get('issue')
     if issue_data is None:
         bt.logging.warning(f'GraphQL closure response missing issue data for {repo}#{issue_number}')
         return None

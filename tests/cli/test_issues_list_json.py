@@ -153,6 +153,61 @@ def test_issues_list_json_deeper_storage_read_failure_returns_structured_error(c
     assert 'issue_count' not in payload
 
 
+def test_issues_list_json_packed_storage_decode_failure_returns_structured_error(cli_root, runner):
+    """When child storage returns bytes that fail to decode, `issues list --json` must not
+    emit `success: true, issue_count: 0` as if the contract were genuinely empty."""
+    fake_substrate = object()
+    with (
+        patch(
+            'gittensor.cli.issue_commands.view._resolve_contract_and_network',
+            return_value=('5Fakeaddr', 'ws://x', 'test'),
+        ),
+        patch('async_substrate_interface.SubstrateInterface', return_value=fake_substrate),
+        patch(
+            'gittensor.cli.issue_commands.helpers.get_contract_child_storage_key',
+            return_value='0xchild',
+        ),
+        patch(
+            'gittensor.cli.issue_commands.helpers.read_contract_packed_storage_bytes',
+            return_value=b'\x00' * 73,
+        ),
+    ):
+        result = runner.invoke(cli_root, ['issues', 'list', '--json'], catch_exceptions=False)
+
+    assert result.exit_code != 0
+
+    payload = json.loads(result.stdout)
+    assert payload['success'] is False
+    assert payload['error']['type'] == 'read_failed'
+    assert 'Failed to decode packed contract storage' in payload['error']['message']
+    assert 'issue_count' not in payload
+
+
+def test_issues_list_human_packed_storage_decode_failure_exits_non_zero(cli_root, runner):
+    """Human mode must exit non-zero and not print `No issues found.` when decode fails."""
+    fake_substrate = object()
+    with (
+        patch(
+            'gittensor.cli.issue_commands.view._resolve_contract_and_network',
+            return_value=('5Fakeaddr', 'ws://x', 'test'),
+        ),
+        patch('async_substrate_interface.SubstrateInterface', return_value=fake_substrate),
+        patch(
+            'gittensor.cli.issue_commands.helpers.get_contract_child_storage_key',
+            return_value='0xchild',
+        ),
+        patch(
+            'gittensor.cli.issue_commands.helpers.read_contract_packed_storage_bytes',
+            return_value=b'\x00' * 73,
+        ),
+    ):
+        result = runner.invoke(cli_root, ['issues', 'list'], catch_exceptions=False)
+
+    assert result.exit_code != 0
+    assert 'No issues found' not in result.output
+    assert 'Failed to decode packed contract storage' in result.output
+
+
 def test_issues_list_json_missing_dependency_emits_install_hint(cli_root, runner):
     """A missing-dependency ImportError must surface a structured error with the install hint,
     distinct from a generic read failure."""

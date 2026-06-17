@@ -666,9 +666,9 @@ def _read_contract_packed_storage(substrate, contract_addr: str, verbose: bool =
     storage directly. Works around substrate-interface Ink! 5 compatibility issues.
 
     Returns ``None`` only when the contract genuinely has no readable packed
-    storage at this address (no child key, no bytes, undersized payload).
-    RPC / decode failures propagate so callers can distinguish a failed read
-    from a clean "no storage yet" state.
+    storage at this address (no child key, no bytes).
+    RPC failures and non-empty payloads that fail to decode propagate so
+    callers can distinguish a failed read from a clean "no storage yet" state.
 
     Args:
         substrate: SubstrateInterface instance
@@ -697,8 +697,12 @@ def _read_contract_packed_storage(substrate, contract_addr: str, verbose: bool =
     packed = decode_packed_contract_storage(packed_bytes)
     if not packed:
         if verbose:
-            err_console.print(f'[dim]Debug: Packed storage too small ({len(packed_bytes)} < 74 bytes)[/dim]')
-        return None
+            err_console.print(
+                f'[dim]Debug: Failed to decode packed storage ({len(packed_bytes)} bytes returned)[/dim]'
+            )
+        raise RuntimeError(
+            f'Failed to decode packed contract storage ({len(packed_bytes)} bytes returned from chain)'
+        )
 
     return {
         'owner': substrate.ss58_encode(packed.owner.hex()),

@@ -257,7 +257,7 @@ def issues_bounty_pool(network: str, rpc_url: str, contract: str, verbose: bool,
         )
         err_console.print(f'[dim]Sum of bounty amounts from {len(issues)} issue(s)[/dim]')
     except Exception as e:
-        handle_exception(as_json=as_json, message=str(e))
+        handle_exception(as_json=as_json, message=str(e), error_type='read_failed')
 
 
 @click.command('pending-harvest', cls=StyledCommand)

@@ -294,7 +294,7 @@
       "feature": 1.0,
       "refactor": 0.25,
       "test": 1.0,
-      "support": 3
+      "quality": 3
     },
     "scoring": {
       "standard_issue_multiplier": 1,
@@ -303,7 +303,7 @@
     },
     "maintainer_cut": 0.4,
     "eligibility": {
-      "excessive_pr_penalty_base_threshold": 5
+      "excessive_pr_penalty_base_threshold": 10
     }
   },
   "seroperson/jvm-live-reload": {

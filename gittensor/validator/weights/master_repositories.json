@@ -20,7 +20,7 @@
     "trusted_label_pipeline": true
   },
   "cogniax/tao-pulse-app": {
-    "emission_share": 0.01,
+    "emission_share": 0.008,
     "issue_discovery_share": 0.5,
     "maintainer_cut": 0.4
   },
@@ -106,7 +106,7 @@
     "trusted_label_pipeline": true
   },
   "entrius/gittensor": {
-    "emission_share": 0.08,
+    "emission_share": 0.07,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "bug": 1.1,
@@ -118,7 +118,7 @@
     "trusted_label_pipeline": true
   },
   "entrius/gittensor-ui": {
-    "emission_share": 0.005,
+    "emission_share": 0.0,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "bug": 1.1,
@@ -151,7 +151,7 @@
     "eligibility": {
       "max_open_pr_threshold": 2
     },
-    "emission_share": 0.03,
+    "emission_share": 0.025,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "community-contribution": 0.2,
@@ -165,6 +165,7 @@
   },
   "JSONbored/awesome-claude": {
     "default_label_multiplier": 0.0,
+    "trusted_label_pipeline": true,
     "emission_share": 0.005,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
@@ -173,24 +174,27 @@
       "gittensor:priority": 1.75
     },
     "eligibility": {
-      "min_credibility": 0.6
+      "min_credibility": 0.5
     },
     "maintainer_cut": 0.5,
     "scoring": {
-      "pr_lookback_days": 35,
+      "pr_lookback_days": 7,
       "open_pr_collateral_percent": 0.2,
       "review_penalty_rate": 0.2,
-      "maintainer_issue_multiplier": 1.66,
+      "standard_issue_multiplier": 1.1,
+      "maintainer_issue_multiplier": 1.5,
       "time_decay": {
         "grace_period_hours": 24,
-        "sigmoid_midpoint_days": 14,
-        "min_multiplier": 0.1
+        "sigmoid_midpoint_days": 3,
+        "sigmoid_steepness": 1.0,
+        "min_multiplier": 0.05
       }
     }
   },
   "JSONbored/gittensory": {
     "default_label_multiplier": 0.0,
-    "emission_share": 0.015,
+    "trusted_label_pipeline": true,
+    "emission_share": 0.013,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "gittensor:bug": 0.5,
@@ -198,23 +202,26 @@
       "gittensor:priority": 1.75
     },
     "eligibility": {
-      "min_credibility": 0.8
+      "min_credibility": 0.6
     },
     "maintainer_cut": 0.5,
     "scoring": {
-      "pr_lookback_days": 35,
+      "pr_lookback_days": 7,
       "open_pr_collateral_percent": 0.2,
       "review_penalty_rate": 0.2,
-      "maintainer_issue_multiplier": 1.66,
+      "standard_issue_multiplier": 1.1,
+      "maintainer_issue_multiplier": 1.5,
       "time_decay": {
         "grace_period_hours": 24,
-        "sigmoid_midpoint_days": 14,
-        "min_multiplier": 0.1
+        "sigmoid_midpoint_days": 3,
+        "sigmoid_steepness": 1.0,
+        "min_multiplier": 0.05
       }
     }
   },
   "JSONbored/metagraphed": {
     "default_label_multiplier": 0.0,
+    "trusted_label_pipeline": true,
     "emission_share": 0.0075,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
@@ -223,23 +230,25 @@
       "gittensor:priority": 2.5
     },
     "eligibility": {
-      "min_credibility": 0.6
+      "min_credibility": 0.5
     },
     "maintainer_cut": 0.25,
     "scoring": {
-      "pr_lookback_days": 35,
+      "pr_lookback_days": 7,
       "open_pr_collateral_percent": 0.2,
       "review_penalty_rate": 0.2,
-      "maintainer_issue_multiplier": 1.66,
+      "standard_issue_multiplier": 1.1,
+      "maintainer_issue_multiplier": 1.5,
       "time_decay": {
         "grace_period_hours": 24,
-        "sigmoid_midpoint_days": 14,
-        "min_multiplier": 0.1
+        "sigmoid_midpoint_days": 3,
+        "sigmoid_steepness": 1.0,
+        "min_multiplier": 0.05
       }
     }
   },
   "MkDev11/gittensor-hub": {
-    "emission_share": 0.012,
+    "emission_share": 0.008,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "feature": 2,
@@ -307,11 +316,11 @@
     }
   },
   "seroperson/jvm-live-reload": {
-    "emission_share": 0.008,
+    "emission_share": 0.005,
     "issue_discovery_share": 0.0
   },
   "touchpilot/touchpilot": {
-    "emission_share": 0.005,
+    "emission_share": 0.01,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "type: bug": 1.1,

@@ -695,10 +695,11 @@ def _read_contract_packed_storage(substrate, contract_addr: str, verbose: bool =
         err_console.print(f'[dim]Debug: Packed storage data length = {len(packed_bytes)} bytes[/dim]')
 
     packed = decode_packed_contract_storage(packed_bytes)
-    if not packed:
-        if verbose:
-            err_console.print(f'[dim]Debug: Packed storage too small ({len(packed_bytes)} < 74 bytes)[/dim]')
-        return None
+    if packed is None:
+        raise RuntimeError(
+            f'Contract packed storage decode failed for {contract_addr}: '
+            f'{len(packed_bytes)} bytes is below the minimum layout size'
+        )
 
     return {
         'owner': substrate.ss58_encode(packed.owner.hex()),

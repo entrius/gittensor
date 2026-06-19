@@ -332,11 +332,12 @@ def find_prs_for_issue(
 ) -> List[PRInfo]:
     """Find PRs that reference an issue via GraphQL cross-reference data."""
     if token:
-        try:
-            prs = _search_issue_referencing_prs_graphql(repo, issue_number, token, open_only=open_only)
-            return prs or []
-        except Exception as exc:
-            bt.logging.debug(f'GraphQL PR fetch failed for {repo}#{issue_number}: {exc}')
+        prs = _search_issue_referencing_prs_graphql(repo, issue_number, token, open_only=open_only)
+        if prs is None:
+            raise RuntimeError(
+                f'GraphQL cross-reference lookup failed for {repo}#{issue_number}; check logs'
+            )
+        return prs
 
     return []
 

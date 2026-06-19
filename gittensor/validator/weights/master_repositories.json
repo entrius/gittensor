@@ -36,17 +36,19 @@
     "trusted_label_pipeline": true,
     "default_label_multiplier": 0.0,
     "label_multipliers": {
-      "feature": 3.0,
-      "ui-ux": 2.0,
-      "bug": 0.625,
-      "security": 0.625,
-      "other": 0.1
+      "ui-ux": 5.0,
+      "feature": 2.0,
+      "bug": 0.35,
+      "security": 0.35,
+      "other": 0.05
     },
     "eligibility": {
-      "min_credibility": 0.6
+      "min_credibility": 0.6,
+      "max_open_pr_threshold": 4
     },
     "scoring": {
       "pr_lookback_days": 7,
+      "maintainer_issue_multiplier": 5.0,
       "time_decay": {
         "grace_period_hours": 6,
         "sigmoid_midpoint_days": 2,

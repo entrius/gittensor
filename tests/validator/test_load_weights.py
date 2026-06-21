@@ -658,5 +658,64 @@ class TestRepositoryEmissionShare:
             assert 0.0 <= config.issue_discovery_share <= 1.0, f'{repo_name} issue_discovery_share out of range'
 
 
+class TestRegistryApiLoading:
+    """Tests for the API-first loader with bundled-seed fallback."""
+
+    def test_loads_from_api_when_available(self, monkeypatch):
+        from gittensor.validator.utils import load_weights as lw
+
+        payload = {'Owner/Repo': {'emission_share': 0.1, 'label_multipliers': {'feature': 2.0}}}
+        monkeypatch.setattr(lw, '_fetch_registry_from_api', lambda: payload)
+
+        repos = lw.load_master_repo_weights()
+
+        assert 'owner/repo' in repos  # normalized to lowercase
+        assert repos['owner/repo'].emission_share == 0.1
+        assert repos['owner/repo'].label_multipliers == {'feature': 2.0}
+
+    def test_falls_back_to_file_when_api_unavailable(self, tmp_path, monkeypatch):
+        # autouse fixture already makes the API fetch fail; supply a seed file.
+        from gittensor.validator.utils import load_weights as lw
+
+        (tmp_path / 'master_repositories.json').write_text(json.dumps({'a/b': {'emission_share': 0.2}}))
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: tmp_path)
+
+        repos = lw.load_master_repo_weights()
+
+        assert repos['a/b'].emission_share == 0.2
+
+    def test_api_invalid_content_falls_back_to_seed(self, tmp_path, monkeypatch):
+        from gittensor.validator.utils import load_weights as lw
+
+        # API serves data violating the emission contract -> fall back to seed.
+        monkeypatch.setattr(lw, '_fetch_registry_from_api', lambda: {'a/b': {'emission_share': 5.0}})
+        (tmp_path / 'master_repositories.json').write_text(json.dumps({'a/b': {'emission_share': 0.3}}))
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: tmp_path)
+
+        repos = lw.load_master_repo_weights()
+
+        assert repos['a/b'].emission_share == 0.3
+
+    def test_returns_empty_when_api_down_and_no_seed(self, tmp_path, monkeypatch):
+        # autouse fixture disables the API; point the seed lookup at an empty dir.
+        from gittensor.validator.utils import load_weights as lw
+
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: tmp_path)
+
+        assert lw.load_master_repo_weights() == {}
+
+    def test_invalid_seed_still_raises(self, tmp_path, monkeypatch):
+        # A broken bundled seed is a real bug and must surface, not be swallowed.
+        from gittensor.validator.utils import load_weights as lw
+
+        (tmp_path / 'master_repositories.json').write_text(
+            json.dumps({'foo/a': {'emission_share': 0.6}, 'foo/b': {'emission_share': 0.5}})
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: tmp_path)
+
+        with pytest.raises(RepositoryRegistryError, match='total emission_share must be <= 1.0'):
+            lw.load_master_repo_weights()
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

@@ -35,6 +35,16 @@ MIRROR_HTTP_TIMEOUT_SECONDS = 30
 MIRROR_MAX_ATTEMPTS = 3
 
 # =============================================================================
+# das-gittensor API (https://api.gittensor.io) — repository hyperparameter registry
+# =============================================================================
+# GET /repos returns the full master-repository registry (full_name -> raw config),
+# the authoritative source for repository hyperparameters. The bundled
+# master_repositories.json is only a fallback seed when this endpoint is unreachable.
+GITTENSOR_API_DEFAULT_URL = 'https://api.gittensor.io'
+REPOS_API_TIMEOUT_SECONDS = 15
+REPOS_API_MAX_ATTEMPTS = 3
+
+# =============================================================================
 # Language & File Scoring
 # =============================================================================
 DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT = 0.12

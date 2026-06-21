@@ -332,5 +332,33 @@
       "mobile/Flutter": 1.2
     },
     "maintainer_cut": 0.3
+  },
+  "e35dev/live-bittensor-emissions-leaderboard": {
+    "emission_share": 0.005,
+    "issue_discovery_share": 0,
+    "additional_acceptable_branches": [
+      "test"
+    ],
+    "trusted_label_pipeline": true,
+    "default_label_multiplier": 0,
+    "label_multipliers": {
+      "feature": 3,
+      "ui-ux": 2,
+      "bug": 0.625,
+      "security": 0.625,
+      "other": 0.1
+    },
+    "eligibility": {
+      "min_credibility": 0.6
+    },
+    "scoring": {
+      "pr_lookback_days": 7,
+      "time_decay": {
+        "grace_period_hours": 6,
+        "sigmoid_midpoint_days": 2,
+        "sigmoid_steepness": 1,
+        "min_multiplier": 0.02
+      }
+    }
   }
 }

@@ -50,6 +50,38 @@ def test_cli_commands_emit_json_on_exception(cli_root, runner, argv):
     assert FORCED_MESSAGE in payload['error']['message']
 
 
+@pytest.mark.parametrize(
+    'argv,message_fragment',
+    [
+        (['issues', 'bounty-pool', '--json'], 'Error reading bounty pool from contract'),
+        (['admin', 'info', '--json'], 'Error reading contract configuration'),
+    ],
+)
+def test_read_only_commands_tag_contract_read_failures_as_read_failed(cli_root, runner, argv, message_fragment):
+    """Contract read failures from `bounty-pool` and `admin info` must surface as
+    `error.type == "read_failed"` so JSON consumers can distinguish a contract
+    read failure from a generic CLI error, matching `pending-harvest` and `vote list`.
+    """
+    with (
+        patch(
+            'gittensor.cli.issue_commands.view._resolve_contract_and_network',
+            return_value=('5Fakeaddr', 'ws://x', 'test'),
+        ),
+        patch(
+            'async_substrate_interface.SubstrateInterface',
+            side_effect=RuntimeError(FORCED_MESSAGE),
+        ),
+    ):
+        result = runner.invoke(cli_root, argv, catch_exceptions=False)
+
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload['success'] is False
+    assert payload['error']['type'] == 'read_failed'
+    assert message_fragment in payload['error']['message']
+    assert FORCED_MESSAGE in payload['error']['message']
+
+
 def test_admin_info_emits_json_on_soft_read_failure(cli_root, runner):
     """`admin info --json` must emit structured JSON when packed storage read returns None."""
     with (

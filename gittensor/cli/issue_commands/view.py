@@ -257,7 +257,9 @@ def issues_bounty_pool(network: str, rpc_url: str, contract: str, verbose: bool,
         )
         err_console.print(f'[dim]Sum of bounty amounts from {len(issues)} issue(s)[/dim]')
     except Exception as e:
-        handle_exception(as_json=as_json, message=str(e))
+        handle_exception(
+            as_json=as_json, message=f'Error reading bounty pool from contract: {e}', error_type='read_failed'
+        )
 
 
 @click.command('pending-harvest', cls=StyledCommand)
@@ -363,4 +365,6 @@ def admin_info(network: str, rpc_url: str, contract: str, verbose: bool, as_json
             err_console.print('[dim]Try running with --verbose to see debug details.[/dim]')
             raise SystemExit(1)
     except Exception as e:
-        handle_exception(as_json=as_json, message=str(e))
+        handle_exception(
+            as_json=as_json, message=f'Error reading contract configuration: {e}', error_type='read_failed'
+        )

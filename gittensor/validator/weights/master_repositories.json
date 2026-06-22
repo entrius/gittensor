@@ -157,7 +157,9 @@
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "community-contribution": 0.2,
-      "optimization": 0.8
+      "enhancement": 0.25,
+      "optimization": 0.8,
+      "performance": 0.3
     },
     "maintainer_cut": 0.3
   },

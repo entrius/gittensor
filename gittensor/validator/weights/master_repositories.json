@@ -7,7 +7,7 @@
       "min_valid_merged_prs": 0,
       "min_valid_solved_issues": 0
     },
-    "emission_share": 0.005,
+    "emission_share": 0.004,
     "fixed_base_score": 1.0,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
@@ -20,16 +20,16 @@
     "trusted_label_pipeline": true
   },
   "cogniax/tao-pulse-app": {
-    "emission_share": 0.008,
+    "emission_share": 0.0,
     "issue_discovery_share": 0.5,
     "maintainer_cut": 0.4
   },
   "DPBG/Engram.AI": {
-    "emission_share": 0.005,
+    "emission_share": 0.0,
     "issue_discovery_share": 0.0
   },
   "e35ventura/taopedia": {
-    "emission_share": 0.025,
+    "emission_share": 0.05,
     "issue_discovery_share": 0.0,
     "maintainer_cut": 0.0,
     "additional_acceptable_branches": ["test"],
@@ -161,9 +161,22 @@
     },
     "maintainer_cut": 0.3
   },
-  "infiniflow/ragflow": {
-    "emission_share": 0.055,
-    "issue_discovery_share": 0.0
+  "gittensor-ai-lab/sparkinfer": {
+    "default_label_multiplier": 0.0,
+    "eligibility": {
+      "min_credibility": 0.0,
+      "min_issue_credibility": 0.0,
+      "min_valid_merged_prs": 0,
+      "min_valid_solved_issues": 0
+    },
+    "emission_share": 0.1,
+    "fixed_base_score": 1.0,
+    "issue_discovery_share": 0.0,
+    "label_multipliers": {
+      "benchmark-improvement": 1.0
+    },
+    "maintainer_cut": 0.0,
+    "trusted_label_pipeline": true
   },
   "JSONbored/awesome-claude": {
     "default_label_multiplier": 0.0,
@@ -196,7 +209,7 @@
   "JSONbored/gittensory": {
     "default_label_multiplier": 0.0,
     "trusted_label_pipeline": true,
-    "emission_share": 0.013,
+    "emission_share": 0.1,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "gittensor:bug": 0.5,
@@ -224,7 +237,7 @@
   "JSONbored/metagraphed": {
     "default_label_multiplier": 0.0,
     "trusted_label_pipeline": true,
-    "emission_share": 0.0075,
+    "emission_share": 0.25,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "gittensor:bug": 0.5,
@@ -250,7 +263,7 @@
     }
   },
   "MkDev11/gittensor-hub": {
-    "emission_share": 0.008,
+    "emission_share": 0.005,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "feature": 2,
@@ -272,7 +285,7 @@
     "maintainer_cut": 0.3
   },
   "vouchdev/vouch": {
-    "emission_share": 0.01,
+    "emission_share": 0.0,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "feature": 1.5,
@@ -297,7 +310,7 @@
     "maintainer_cut": 0.5
   },
   "phase-rs/phase": {
-    "emission_share": 0.018,
+    "emission_share": 0.02,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "bug": 1.2,
@@ -317,12 +330,8 @@
       "excessive_pr_penalty_base_threshold": 10
     }
   },
-  "seroperson/jvm-live-reload": {
-    "emission_share": 0.005,
-    "issue_discovery_share": 0.0
-  },
   "touchpilot/touchpilot": {
-    "emission_share": 0.01,
+    "emission_share": 0.0,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "type: bug": 1.1,
@@ -332,42 +341,5 @@
       "type: test": 1.2
     },
     "maintainer_cut": 0.3
-  },
-  "we-promise/sure": {
-    "emission_share": 0.03,
-    "issue_discovery_share": 0.0,
-    "label_multipliers": {
-      "performance": 1.5,
-      "mobile/Flutter": 1.2
-    },
-    "maintainer_cut": 0.3
-  },
-  "e35dev/live-bittensor-emissions-leaderboard": {
-    "emission_share": 0.005,
-    "issue_discovery_share": 0,
-    "additional_acceptable_branches": [
-      "test"
-    ],
-    "trusted_label_pipeline": true,
-    "default_label_multiplier": 0,
-    "label_multipliers": {
-      "feature": 3,
-      "ui-ux": 2,
-      "bug": 0.625,
-      "security": 0.625,
-      "other": 0.1
-    },
-    "eligibility": {
-      "min_credibility": 0.6
-    },
-    "scoring": {
-      "pr_lookback_days": 7,
-      "time_decay": {
-        "grace_period_hours": 6,
-        "sigmoid_midpoint_days": 2,
-        "sigmoid_steepness": 1,
-        "min_multiplier": 0.02
-      }
-    }
   }
 }

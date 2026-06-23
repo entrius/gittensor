@@ -329,14 +329,24 @@ def find_prs_for_issue(
     issue_number: int,
     open_only: bool = True,
     token: Optional[str] = None,
-) -> List[PRInfo]:
-    """Find PRs that reference an issue via GraphQL cross-reference data."""
+) -> Optional[List[PRInfo]]:
+    """Find PRs that reference an issue via GraphQL cross-reference data.
+
+    Returns:
+        A list of PRs (possibly empty) on success, or ``None`` if the GraphQL
+        lookup failed (rate-limit, network error, missing payload, etc.).
+        Callers must distinguish ``None`` (lookup failed) from ``[]`` (no PRs).
+    """
     if token:
         try:
             prs = _search_issue_referencing_prs_graphql(repo, issue_number, token, open_only=open_only)
-            return prs or []
+            if prs is None:
+                bt.logging.debug(f'GraphQL PR lookup returned None for {repo}#{issue_number}')
+                return None
+            return prs
         except Exception as exc:
             bt.logging.debug(f'GraphQL PR fetch failed for {repo}#{issue_number}: {exc}')
+            return None
 
     return []
 

@@ -82,6 +82,18 @@ def issues_submissions(
         handle_exception(as_json, str(e), click_error_type(e))
 
     if as_json:
+        if pull_requests is None:
+            # GraphQL lookup failed — surface as an explicit error rather than
+            # a false-success empty list (fixes #1492).
+            emit_json({
+                'success': False,
+                'error': 'github_lookup_failed',
+                'message': 'GitHub GraphQL lookup failed; submission count unavailable. Retry or check GITTENSOR_MINER_PAT.',
+                'issue_id': issue_id,
+                'repository': repo_name,
+                'issue_number': issue_number,
+            })
+            return
         submissions = [
             {
                 'number': pr.get('number'),

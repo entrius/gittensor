@@ -254,8 +254,14 @@ def fetch_open_issue_pull_requests(
     repository_full_name: str,
     issue_number: int,
     as_json: bool,
-) -> list:
-    """Fetch open PR submissions for a GitHub issue."""
+) -> Optional[list]:
+    """Fetch open PR submissions for a GitHub issue.
+
+    Returns:
+        A list of PRs (possibly empty) on success, or ``None`` if the GitHub
+        GraphQL lookup failed.  Callers must treat ``None`` as a lookup failure
+        rather than an empty submission list.
+    """
     token = os.environ.get('GITTENSOR_MINER_PAT') or ''
     if not token and not as_json:
         print_warning('No GitHub token found; set GITTENSOR_MINER_PAT to fetch GitHub issue submissions')
@@ -270,7 +276,7 @@ def fetch_open_issue_pull_requests(
                 token=token or None,
                 open_only=True,
             )
-            # Intentionally return GitHub tool output as-is (no CLI schema mapping yet).
+            # Propagate None (lookup failure) to caller rather than masking it.
             return prs
     except Exception as e:
         raise click.ClickException(f'Failed to fetch PR submissions from GitHub: {e}')

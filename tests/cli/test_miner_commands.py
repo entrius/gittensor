@@ -122,13 +122,15 @@ class TestMinerPost:
                 ],
             )
 
-        assert result.exit_code == 0, result.output
+        # exit code 2 = partial coverage (some accepted, some no_response) — #1481
+        assert result.exit_code == 2, result.output
         output = json.loads(result.stdout)
         assert output['github_login'] == 'testuser'
         assert output['total_validators'] == 3
         assert output['accepted'] == 1
         assert output['rejected'] == 1
         assert output['no_response'] == 1
+        assert output['coverage_complete'] is False
         assert output['accepted'] + output['rejected'] + output['no_response'] == output['total_validators']
 
 

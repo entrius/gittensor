@@ -159,13 +159,18 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, min_vt
 
     counts = _pat_post_aggregate_counts(results)
     accepted_count = counts['accepted']
+    no_response_count = counts['no_response']
 
     # 7. Display results
     if json_mode:
+        # coverage_complete=False signals partial coverage so callers / scripts
+        # can detect the silent-miss case without parsing free-form text (#1481).
+        coverage_complete = accepted_count > 0 and no_response_count == 0
         click.echo(
             json.dumps(
                 {
                     'success': accepted_count > 0,
+                    'coverage_complete': coverage_complete,
                     'github_login': github_login,
                     'total_validators': len(results),
                     **counts,
@@ -189,7 +194,25 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, min_vt
 
         console.print(table)
         console.print(f'\n[bold]{accepted_count}/{len(results)} validators accepted your PAT.[/bold]')
+
+        # Warn explicitly when validators did not respond — a silent miss means
+        # those validators will score the miner 0 until a manual re-post (#1481).
+        if no_response_count > 0:
+            console.print(
+                f'\n[yellow]⚠ {no_response_count} validator(s) did not respond.[/yellow]\n'
+                '[yellow]  Your PAT was not stored by those validators — they will score you 0[/yellow]\n'
+                '[yellow]  until you re-run `gitt miner post`. Consider re-running after a few[/yellow]\n'
+                '[yellow]  minutes when those validators may be available.[/yellow]'
+            )
+
         _render_skipped_validators(excluded, json_mode)
+
+    # Exit non-zero when coverage is incomplete so CI / automation can detect
+    # partial coverage without parsing output (#1481 surgical first step).
+    if no_response_count > 0 and accepted_count > 0:
+        raise SystemExit(2)  # partial coverage — some validators missed
+    elif accepted_count == 0:
+        raise SystemExit(1)  # total failure — no validators accepted
 
 
 def _validate_pat_locally(pat: str) -> str | None:

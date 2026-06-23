@@ -18,6 +18,7 @@ Run with: python run_tests.py tests/utils/
 from unittest.mock import Mock, call, patch
 
 import pytest
+from requests.structures import CaseInsensitiveDict
 
 # Use importorskip to gracefully handle import issues
 github_api_tools = pytest.importorskip(
@@ -28,6 +29,67 @@ get_github_identity = github_api_tools.get_github_identity
 find_prs_for_issue = github_api_tools.find_prs_for_issue
 execute_graphql_query = github_api_tools.execute_graphql_query
 check_github_issue_closed = github_api_tools.check_github_issue_closed
+github_retry_delay = github_api_tools.github_retry_delay
+MAX_RATE_LIMIT_WAIT_SECONDS = github_api_tools.MAX_RATE_LIMIT_WAIT_SECONDS
+
+
+def _rate_limited_response(status=429, headers=None):
+    """Build a rate-limited response carrying the given headers.
+
+    Headers are wrapped in a CaseInsensitiveDict to mirror requests.Response so
+    tests exercise the same case-insensitive lookups GitHub's lowercase headers
+    hit in production.
+    """
+    return Mock(status_code=status, headers=CaseInsensitiveDict(headers or {}))
+
+
+def _identity_success(user_id=777):
+    """Build a successful GitHub /user response."""
+    response = Mock(status_code=200, headers={})
+    response.json.return_value = {'id': user_id}
+    return response
+
+
+def _graphql_ok(payload):
+    """Build a successful GraphQL response returning ``payload`` from .json()."""
+    response = Mock(status_code=200, headers={})
+    response.json.return_value = payload
+    return response
+
+
+class TestGithubRetryDelay:
+    """The shared backoff helper honors GitHub's rate-limit reset headers."""
+
+    def test_retry_after_takes_priority(self):
+        # GitHub sends headers lowercase; the lookup must be case-insensitive.
+        response = _rate_limited_response(
+            headers={'retry-after': '12', 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': '9999999999'}
+        )
+        assert github_retry_delay(response, fallback=2) == 12.0
+
+    def test_falls_back_to_generic_backoff_without_headers(self):
+        assert github_retry_delay(_rate_limited_response(headers={}), fallback=2) == 2
+
+    def test_reset_ignored_until_quota_exhausted(self):
+        response = _rate_limited_response(headers={'x-ratelimit-remaining': '4', 'x-ratelimit-reset': '9999999999'})
+        assert github_retry_delay(response, fallback=2) == 2
+
+    @patch('gittensor.utils.github_api_tools.time.time', return_value=1000.0)
+    def test_honors_reset_epoch_when_quota_exhausted(self, _mock_time):
+        response = _rate_limited_response(headers={'x-ratelimit-remaining': '0', 'x-ratelimit-reset': '1030'})
+        assert github_retry_delay(response, fallback=2) == 30.0
+
+    @patch('gittensor.utils.github_api_tools.time.time', return_value=2000.0)
+    def test_already_elapsed_reset_clamps_to_zero(self, _mock_time):
+        response = _rate_limited_response(headers={'x-ratelimit-remaining': '0', 'x-ratelimit-reset': '1000'})
+        assert github_retry_delay(response, fallback=2) == 0.0
+
+    def test_window_beyond_cap_signals_give_up(self):
+        response = _rate_limited_response(headers={'retry-after': str(MAX_RATE_LIMIT_WAIT_SECONDS + 1)})
+        assert github_retry_delay(response, fallback=2) is None
+
+    def test_non_numeric_retry_after_falls_back(self):
+        assert github_retry_delay(_rate_limited_response(headers={'retry-after': 'soon'}), fallback=2) == 2
 
 
 class TestOtherGitHubAPIFunctions:
@@ -112,6 +174,50 @@ class TestOtherGitHubAPIFunctions:
     @patch('gittensor.utils.github_api_tools.requests.get')
     @patch('gittensor.utils.github_api_tools.time.sleep')
     @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_get_github_identity_honors_retry_after_header(self, mock_logging, mock_sleep, mock_get):
+        """A rate-limited /user retry waits the advertised Retry-After window, then succeeds."""
+        mock_get.side_effect = [
+            _rate_limited_response(429, {'retry-after': '7'}),
+            _identity_success(777),
+        ]
+
+        result = get_github_identity('fake_token')
+
+        assert result.github_id == '777'
+        mock_sleep.assert_called_once_with(7.0)
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    @patch('gittensor.utils.github_api_tools.time.time', return_value=1000.0)
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_get_github_identity_honors_ratelimit_reset_header(self, mock_logging, mock_time, mock_sleep, mock_get):
+        """When the quota is exhausted, the retry waits until x-ratelimit-reset."""
+        mock_get.side_effect = [
+            _rate_limited_response(403, {'x-ratelimit-remaining': '0', 'x-ratelimit-reset': '1045'}),
+            _identity_success(777),
+        ]
+
+        result = get_github_identity('fake_token')
+
+        assert result.github_id == '777'
+        mock_sleep.assert_called_once_with(45.0)
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_get_github_identity_gives_up_when_reset_window_too_long(self, mock_logging, mock_sleep, mock_get):
+        """A reset window longer than the cap fails fast instead of sleeping and retrying."""
+        mock_get.return_value = _rate_limited_response(429, {'retry-after': str(MAX_RATE_LIMIT_WAIT_SECONDS + 100)})
+
+        result = get_github_identity('fake_token')
+
+        assert result.status is github_api_tools.GitHubIdentityStatus.TRANSIENT_FAILURE
+        assert mock_get.call_count == 1
+        mock_sleep.assert_not_called()
+
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
     def test_get_github_identity_marks_bad_json_as_transient(self, mock_logging, mock_sleep, mock_get):
         mock_response = Mock(status_code=200)
         mock_response.json.side_effect = ValueError('bad json')
@@ -143,6 +249,46 @@ class TestExecuteGraphQLQueryRetryLogic:
         expected_delays = [call(5), call(10), call(20), call(30), call(30), call(30), call(30)]
         mock_sleep.assert_has_calls(expected_delays)
         assert mock_sleep.call_count == 7
+
+    @patch('gittensor.utils.github_api_tools.requests.post')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_honors_retry_after_header(self, mock_logging, mock_sleep, mock_post):
+        """A rate-limited GraphQL retry waits the advertised window, then succeeds."""
+        mock_post.side_effect = [
+            _rate_limited_response(429, {'retry-after': '9'}),
+            _graphql_ok({'data': {'ok': True}}),
+        ]
+
+        result = execute_graphql_query('query {}', {}, 'fake_token', max_attempts=3)
+
+        assert result == {'data': {'ok': True}}
+        mock_sleep.assert_called_once_with(9.0)
+
+    @patch('gittensor.utils.github_api_tools.requests.post')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_aborts_when_reset_window_too_long(self, mock_logging, mock_sleep, mock_post):
+        """A reset window beyond the cap aborts immediately instead of hammering the API."""
+        mock_post.return_value = _rate_limited_response(429, {'retry-after': str(MAX_RATE_LIMIT_WAIT_SECONDS + 100)})
+
+        result = execute_graphql_query('query {}', {}, 'fake_token', max_attempts=5)
+
+        assert result is None
+        assert mock_post.call_count == 1
+        mock_sleep.assert_not_called()
+
+    @patch('gittensor.utils.github_api_tools.requests.post')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_non_rate_limit_failure_uses_generic_backoff(self, mock_logging, mock_sleep, mock_post):
+        """Non-rate-limit failures keep using exponential backoff, not header timing."""
+        mock_post.return_value = Mock(status_code=502, headers={}, text='bad gateway')
+
+        result = execute_graphql_query('query {}', {}, 'fake_token', max_attempts=3)
+
+        assert result is None
+        assert mock_sleep.mock_calls == [call(5), call(10)]
 
 
 # ============================================================================

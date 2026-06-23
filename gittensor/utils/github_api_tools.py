@@ -11,6 +11,7 @@ import requests
 from gittensor.constants import (
     BASE_GITHUB_API_URL,
     GITHUB_HTTP_TIMEOUT_SECONDS,
+    MAX_RATE_LIMIT_WAIT_SECONDS,
 )
 from gittensor.utils.models import PRInfo
 from gittensor.utils.utils import backoff_seconds
@@ -93,6 +94,49 @@ def _is_rate_limited_response(response: requests.Response) -> bool:
     return 'rate limit' in message
 
 
+def _rate_limit_reset_wait(response: requests.Response) -> Optional[float]:
+    """Seconds GitHub asks us to wait, from its rate-limit headers, or None.
+
+    Prefers ``retry-after`` (delta seconds, secondary limits); falls back to
+    ``x-ratelimit-reset`` (epoch seconds) once the quota is exhausted.
+    """
+    headers = response.headers
+
+    retry_after = headers.get('retry-after')
+    if retry_after is not None:
+        try:
+            return max(0.0, float(str(retry_after).strip()))
+        except (TypeError, ValueError):
+            pass
+
+    if headers.get('x-ratelimit-remaining') == '0':
+        try:
+            return max(0.0, float(headers.get('x-ratelimit-reset')) - time.time())
+        except (TypeError, ValueError):
+            pass
+
+    return None
+
+
+def github_retry_delay(
+    response: requests.Response,
+    fallback: float,
+    max_wait: float = MAX_RATE_LIMIT_WAIT_SECONDS,
+) -> Optional[float]:
+    """Seconds to sleep before retrying, or None to give up.
+
+    Honors GitHub's advertised reset window when within ``max_wait``; a longer
+    window returns None so the caller stops instead of hammering the API. Uses
+    ``fallback`` when no rate-limit header is present.
+    """
+    wait = _rate_limit_reset_wait(response)
+    if wait is None:
+        return fallback
+    if wait > max_wait:
+        return None
+    return wait
+
+
 def get_github_identity(token: str) -> GitHubIdentityResult:
     """Get GitHub numeric user id and whether lookup failure is cacheable.
 
@@ -138,8 +182,10 @@ def get_github_identity(token: str) -> GitHubIdentityResult:
                     f'GitHub /user request failed with status {response.status_code} (attempt {attempt + 1}/6)'
                 )
                 if attempt < 5:
-                    time.sleep(2)
-                    continue
+                    delay = github_retry_delay(response, fallback=2)
+                    if delay is not None:
+                        time.sleep(delay)
+                        continue
                 return GitHubIdentityResult(None, GitHubIdentityStatus.TRANSIENT_FAILURE)
 
             if 400 <= response.status_code < 500:
@@ -378,12 +424,18 @@ def execute_graphql_query(
 
             # Retry on failure
             if attempt < (max_attempts - 1):
-                backoff_delay = backoff_seconds(attempt)
+                delay = github_retry_delay(response, fallback=backoff_seconds(attempt))
+                if delay is None:
+                    bt.logging.warning(
+                        f'GraphQL request rate-limited with a reset window beyond '
+                        f'{MAX_RATE_LIMIT_WAIT_SECONDS}s; aborting after attempt {attempt + 1}/{max_attempts}'
+                    )
+                    return None
                 bt.logging.warning(
                     f'GraphQL request failed with status {response.status_code} '
-                    f'(attempt {attempt + 1}/{max_attempts}), retrying in {backoff_delay}s...'
+                    f'(attempt {attempt + 1}/{max_attempts}), retrying in {delay}s...'
                 )
-                time.sleep(backoff_delay)
+                time.sleep(delay)
             else:
                 bt.logging.error(
                     f'GraphQL request failed with status {response.status_code} '

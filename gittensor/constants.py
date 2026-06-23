@@ -23,6 +23,9 @@ NETWORK_MAP = {
 BASE_GITHUB_API_URL = 'https://api.github.com'
 GITHUB_HTTP_TIMEOUT_SECONDS = 15
 GRAPHQL_VIEWER_QUERY = '{ viewer { login } }'
+# Cap (seconds) on one retry's wait when honoring GitHub's rate-limit reset.
+# Secondary limits clear within this window; a longer primary reset is deferred.
+MAX_RATE_LIMIT_WAIT_SECONDS = 300
 # 1MB max file size for github api file fetches. Files exceeding this get no score.
 MAX_FILE_SIZE_BYTES = 1_000_000
 

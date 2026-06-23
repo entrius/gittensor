@@ -84,13 +84,27 @@ def _is_rate_limited_response(response: requests.Response) -> bool:
         return True
     if response.status_code != 403:
         return False
-    if response.headers.get('x-ratelimit-remaining') == '0':
+    # Rate limits and abuse detection are transient: signalled by a Retry-After
+    # header, an exhausted budget, or a rate-limit/abuse message.
+    if response.headers.get('retry-after') or response.headers.get('x-ratelimit-remaining') == '0':
         return True
     try:
         message = str(response.json().get('message', '')).lower()
     except Exception:
         message = getattr(response, 'text', '').lower()
-    return 'rate limit' in message
+    return 'rate limit' in message or 'abuse' in message
+
+
+def _is_retryable_response(response: requests.Response) -> bool:
+    """Whether a non-200 response is transient and worth retrying.
+
+    Timeouts and rate limiting are transient; every other client error is
+    permanent, so the caller can fail fast instead of looping on backoff.
+    """
+    status = response.status_code
+    if status == 408 or _is_rate_limited_response(response):
+        return True
+    return not (400 <= status < 500)
 
 
 def get_github_identity(token: str) -> GitHubIdentityResult:
@@ -133,16 +147,7 @@ def get_github_identity(token: str) -> GitHubIdentityResult:
                     continue
                 return GitHubIdentityResult(None, GitHubIdentityStatus.TRANSIENT_FAILURE)
 
-            if response.status_code == 408 or _is_rate_limited_response(response):
-                bt.logging.warning(
-                    f'GitHub /user request failed with status {response.status_code} (attempt {attempt + 1}/6)'
-                )
-                if attempt < 5:
-                    time.sleep(2)
-                    continue
-                return GitHubIdentityResult(None, GitHubIdentityStatus.TRANSIENT_FAILURE)
-
-            if 400 <= response.status_code < 500:
+            if not _is_retryable_response(response):
                 bt.logging.warning(f'GitHub /user auth failed with status {response.status_code}')
                 return GitHubIdentityResult(None, GitHubIdentityStatus.INVALID_AUTH)
 
@@ -151,6 +156,8 @@ def get_github_identity(token: str) -> GitHubIdentityResult:
             )
             if attempt < 5:
                 time.sleep(2)
+                continue
+            return GitHubIdentityResult(None, GitHubIdentityStatus.TRANSIENT_FAILURE)
 
         except Exception as e:
             bt.logging.warning(f'Could not fetch GitHub user (attempt {attempt + 1}/6): {e}')
@@ -355,7 +362,7 @@ def execute_graphql_query(
         query: The GraphQL query string
         variables: Query variables
         token: GitHub PAT for authentication
-        max_attempts: Maximum retry attempts (default 6)
+        max_attempts: Maximum retry attempts (default 8)
         timeout: Request timeout in seconds (default 30)
 
     Returns:
@@ -376,7 +383,14 @@ def execute_graphql_query(
             if response.status_code == 200:
                 return response.json()
 
-            # Retry on failure
+            # Permanent client errors can't be fixed by retrying — fail fast.
+            if not _is_retryable_response(response):
+                bt.logging.warning(
+                    f'GraphQL request failed with non-retryable status {response.status_code}: {response.text}'
+                )
+                return None
+
+            # Transient failure — retry with backoff.
             if attempt < (max_attempts - 1):
                 backoff_delay = backoff_seconds(attempt)
                 bt.logging.warning(

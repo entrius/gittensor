@@ -144,6 +144,110 @@ class TestExecuteGraphQLQueryRetryLogic:
         mock_sleep.assert_has_calls(expected_delays)
         assert mock_sleep.call_count == 7
 
+    @patch('gittensor.utils.github_api_tools.get_session')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_auth_failure_fails_fast_without_retry(self, mock_logging, mock_sleep, mock_get_session):
+        """A 401 (bad/revoked token) returns None immediately without burning the retry budget."""
+        mock_response = Mock(status_code=401, text='Bad credentials')
+        mock_session = Mock()
+        mock_session.post.return_value = mock_response
+        mock_get_session.return_value = mock_session
+
+        result = execute_graphql_query('query {}', {}, 'bad_token', max_attempts=8)
+
+        assert result is None
+        mock_sleep.assert_not_called()
+        assert mock_session.post.call_count == 1
+
+    @patch('gittensor.utils.github_api_tools.get_session')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_forbidden_without_rate_limit_fails_fast(self, mock_logging, mock_sleep, mock_get_session):
+        """A 403 that is not a rate-limit signal is permanent and not retried."""
+        mock_response = Mock(status_code=403, text='Forbidden', headers={})
+        mock_response.json.return_value = {'message': 'Resource not accessible by personal access token'}
+        mock_session = Mock()
+        mock_session.post.return_value = mock_response
+        mock_get_session.return_value = mock_session
+
+        result = execute_graphql_query('query {}', {}, 'token', max_attempts=8)
+
+        assert result is None
+        mock_sleep.assert_not_called()
+        assert mock_session.post.call_count == 1
+
+    @patch('gittensor.utils.github_api_tools.get_session')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_rate_limited_403_is_retried(self, mock_logging, mock_sleep, mock_get_session):
+        """A 403 rate-limit response is transient and retried to exhaustion."""
+        mock_response = Mock(status_code=403, text='rate limit exceeded', headers={'x-ratelimit-remaining': '0'})
+        mock_session = Mock()
+        mock_session.post.return_value = mock_response
+        mock_get_session.return_value = mock_session
+
+        result = execute_graphql_query('query {}', {}, 'token', max_attempts=3)
+
+        assert result is None
+        assert mock_session.post.call_count == 3
+        assert mock_sleep.call_count == 2
+
+    @patch('gittensor.utils.github_api_tools.get_session')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_secondary_rate_limit_403_is_retried(self, mock_logging, mock_sleep, mock_get_session):
+        """A secondary rate limit / abuse-detection 403 (Retry-After header, no rate-limit
+        text) is transient and must keep being retried, not dropped by the fast-fail path."""
+        mock_response = Mock(
+            status_code=403,
+            text='You have triggered an abuse detection mechanism',
+            headers={'retry-after': '60'},
+        )
+        mock_response.json.return_value = {'message': 'You have triggered an abuse detection mechanism'}
+        mock_session = Mock()
+        mock_session.post.return_value = mock_response
+        mock_get_session.return_value = mock_session
+
+        result = execute_graphql_query('query {}', {}, 'token', max_attempts=3)
+
+        assert result is None
+        assert mock_session.post.call_count == 3
+        assert mock_sleep.call_count == 2
+
+    @patch('gittensor.utils.github_api_tools.get_session')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_server_error_is_retried(self, mock_logging, mock_sleep, mock_get_session):
+        """A 5xx server error is transient and retried to exhaustion."""
+        mock_response = Mock(status_code=502, text='Bad Gateway')
+        mock_session = Mock()
+        mock_session.post.return_value = mock_response
+        mock_get_session.return_value = mock_session
+
+        result = execute_graphql_query('query {}', {}, 'token', max_attempts=3)
+
+        assert result is None
+        assert mock_session.post.call_count == 3
+        assert mock_sleep.call_count == 2
+
+    @patch('gittensor.utils.github_api_tools.get_session')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_success_returns_parsed_json(self, mock_logging, mock_sleep, mock_get_session):
+        """A 200 returns the parsed body on the first attempt."""
+        mock_response = Mock(status_code=200)
+        mock_response.json.return_value = {'data': {'ok': True}}
+        mock_session = Mock()
+        mock_session.post.return_value = mock_response
+        mock_get_session.return_value = mock_session
+
+        result = execute_graphql_query('query {}', {}, 'token', max_attempts=3)
+
+        assert result == {'data': {'ok': True}}
+        mock_sleep.assert_not_called()
+        assert mock_session.post.call_count == 1
+
 
 # ============================================================================
 # PR Discovery Fallback Tests

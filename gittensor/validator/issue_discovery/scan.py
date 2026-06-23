@@ -736,12 +736,9 @@ def _classify_issue(issue: MirrorIssue, repo_config: Optional[RepositoryConfig])
         return 'not-solved-closed'
 
     # Branch-eligibility parity with OSS PR scoring: a solving PR merged into a
-    # non-acceptable branch must not earn discovery credit (the same PR would be
-    # rejected by _should_skip_merged_mirror_pr on the contribution path).
-    # Gate only when base_ref is present: the mirror began exposing branch
-    # metadata on the inline solving_pr after this field existed, so a null
-    # base_ref means pre-backfill data and falls through rather than blocking.
-    if repo_config is not None and sp.base_ref is not None:
+    # non-acceptable branch must not earn discovery credit. The gate itself
+    # falls through on missing metadata (e.g. a null base_ref), so no guard here.
+    if repo_config is not None:
         skip, reason = check_merged_branch_eligibility(
             pr_number=sp.pr_number,
             repo_full_name=issue.repo_full_name,

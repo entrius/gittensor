@@ -369,5 +369,37 @@
         "min_multiplier": 0.02
       }
     }
+  },
+  "e35dev/podcast-design-canvas": {
+    "emission_share": 0.05,
+    "issue_discovery_share": 0,
+    "maintainer_cut": 0,
+    "trusted_label_pipeline": true,
+    "default_label_multiplier": 0,
+    "label_multipliers": {
+      "episode-ingest": 3,
+      "preset-styles": 2.5,
+      "canvas-editor": 2.5,
+      "audio-captions": 2,
+      "contextual-visuals": 2,
+      "template-system": 1.75,
+      "export-publish": 1.75,
+      "product-polish": 1.5,
+      "bugfix": 1,
+      "infrastructure": 0.5
+    },
+    "eligibility": {
+      "min_credibility": 0.6,
+      "max_open_pr_threshold": 4
+    },
+    "scoring": {
+      "pr_lookback_days": 7,
+      "time_decay": {
+        "grace_period_hours": 6,
+        "sigmoid_midpoint_days": 2,
+        "sigmoid_steepness": 1,
+        "min_multiplier": 0.02
+      }
+    }
   }
 }

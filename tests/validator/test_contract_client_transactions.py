@@ -140,3 +140,84 @@ def test_get_treasury_stake_returns_zero_for_empty_alpha_result(client):
         return_value=_packed_treasury_storage(),
     ):
         assert client.get_treasury_stake() == 0
+
+
+# ---------------------------------------------------------------------------
+# Regression tests for _encode_args str support (issue #1375)
+# ---------------------------------------------------------------------------
+
+class TestEncodeArgsStrType:
+    """_encode_args must SCALE-encode str arguments as compact-length + UTF-8."""
+
+    @pytest.fixture()
+    def client(self):
+        with patch.object(IssueCompetitionContractClient, '__init__', lambda self, *_args, **_kwargs: None):
+            c = IssueCompetitionContractClient.__new__(IssueCompetitionContractClient)
+            c.subtensor = MagicMock()
+            return c
+
+    def test_register_issue_does_not_raise(self, client):
+        """register_issue with valid str args should encode without raising."""
+        result = client._encode_args(
+            'register_issue',
+            {
+                'github_url': 'https://github.com/owner/repo/issues/1',
+                'repository_full_name': 'owner/repo',
+                'issue_number': 1,
+                'target_bounty': 10_000_000_000,
+            },
+        )
+        assert isinstance(result, bytes)
+        assert len(result) > 0
+
+    def test_short_str_compact_prefix(self, client):
+        """Strings < 64 bytes use single-byte compact prefix (n << 2)."""
+        url = 'https://github.com/a/b/issues/1'
+        utf8 = url.encode('utf-8')
+        n = len(utf8)
+        assert n < 64
+        result = client._encode_args(
+            'register_issue',
+            {
+                'github_url': url,
+                'repository_full_name': 'a/b',
+                'issue_number': 1,
+                'target_bounty': 0,
+            },
+        )
+        # First byte of result is compact-length for github_url
+        assert result[0] == (n << 2)
+        assert result[1 : 1 + n] == utf8
+
+    def test_long_str_two_byte_compact_prefix(self, client):
+        """Strings >= 64 bytes use two-byte compact prefix."""
+        url = 'https://github.com/' + 'a' * 60 + '/issues/99999'
+        utf8 = url.encode('utf-8')
+        n = len(utf8)
+        assert n >= 64
+        result = client._encode_args(
+            'register_issue',
+            {
+                'github_url': url,
+                'repository_full_name': 'owner/repo',
+                'issue_number': 1,
+                'target_bounty': 0,
+            },
+        )
+        # Two-byte compact: first byte has mode bits 0b01
+        assert (result[0] & 0x03) == 1
+        decoded_len = (result[0] >> 2) | (result[1] << 6)
+        assert decoded_len == n
+
+    def test_non_str_value_raises(self, client):
+        """Passing a non-str value for a str arg should raise ValueError."""
+        with pytest.raises(ValueError, match='Expected str'):
+            client._encode_args(
+                'register_issue',
+                {
+                    'github_url': 12345,  # wrong type
+                    'repository_full_name': 'owner/repo',
+                    'issue_number': 1,
+                    'target_bounty': 0,
+                },
+            )

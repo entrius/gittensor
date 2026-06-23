@@ -586,6 +586,21 @@ class IssueCompetitionContractClient:
                     encoded += bytes(value)
                 else:
                     raise ValueError(f'Unknown array format: {type(value)}')
+            elif type_def == 'str':
+                if not isinstance(value, str):
+                    raise ValueError(f'Expected str for arg {arg_name}, got {type(value)}')
+                utf8_bytes = value.encode('utf-8')
+                n = len(utf8_bytes)
+                # SCALE compact-length encoding (Vec<u8> / String)
+                if n < 64:
+                    compact_len = bytes([n << 2])
+                elif n < 16384:
+                    compact_len = bytes([(n << 2) | 1, n >> 6])
+                elif n < 1073741824:
+                    compact_len = bytes([(n << 2) | 2, (n >> 6) & 0xFF, (n >> 14) & 0xFF, (n >> 22) & 0xFF])
+                else:
+                    raise ValueError(f'String too long to SCALE-encode: {n} bytes')
+                encoded += compact_len + utf8_bytes
             else:
                 raise ValueError(f'Unsupported type: {type_def} for arg {arg_name}')
 

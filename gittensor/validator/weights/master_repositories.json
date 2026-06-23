@@ -173,9 +173,16 @@
     "fixed_base_score": 1.0,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
-      "benchmark-improvement": 1.0
+      "eval:XL": 4.0,
+      "eval:L": 2.5,
+      "eval:M": 1.5,
+      "eval:S": 1.0,
+      "eval:XS": 0.5,
+      "eval:BASELINE": 1.0,
+      "eval:none": 0.0,
+      "eval:REJECT": 0.0
     },
-    "maintainer_cut": 0.0,
+    "maintainer_cut": 0.3,
     "trusted_label_pipeline": true
   },
   "JSONbored/awesome-claude": {

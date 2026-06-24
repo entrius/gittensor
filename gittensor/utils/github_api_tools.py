@@ -459,6 +459,12 @@ def execute_graphql_query(
                 bt.logging.error(f'GraphQL rate limited after {max_attempts} attempts')
                 return None
 
+            if 400 <= response.status_code < 500:
+                bt.logging.error(
+                    f'GraphQL request failed with permanent status {response.status_code}: {response.text}'
+                )
+                return None
+
             # Retry on failure
             if attempt < (max_attempts - 1):
                 backoff_delay = backoff_seconds(attempt)

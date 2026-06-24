@@ -207,14 +207,17 @@ def check_merged_branch_eligibility(
     issue discovery so both reject the same non-acceptable-branch merges.
 
     Returns ``(skip, reason)``. Missing ``default_branch`` falls back to
-    ``main``; missing ``head_ref``/``head_repo_full_name`` skips the head_ref
-    check rather than false-positive-blocking on older data.
+    ``main``; a missing ``base_ref``, or missing ``head_ref``/``head_repo_full_name``,
+    skips that check rather than false-positive-blocking on older data.
     """
     additional = repo_config.additional_acceptable_branches or []
     acceptable = [default_branch or 'main'] + additional
 
-    # base_ref check.
-    if not branch_matches_pattern(base_ref or '', acceptable):
+    # base_ref check. A null base_ref is pre-backfill mirror data (the field was
+    # added later), so fall through rather than coercing to '' and
+    # false-positive-blocking, matching the head_ref/default_branch fall-through
+    # behavior and the issue-discovery path.
+    if base_ref is not None and not branch_matches_pattern(base_ref, acceptable):
         return True, (f'PR #{pr_number} merged to {base_ref!r} not in acceptable branches={acceptable}')
 
     # head_ref check — block PRs whose source branch is itself an acceptable
@@ -251,8 +254,9 @@ def _should_skip_merged_mirror_pr(scored: ScoredPR, repo_config: RepositoryConfi
 
     When the mirror response is missing a field (older data predating the
     schema additions), some checks fall through rather than false-positive-
-    blocking. Concretely: missing ``head_ref`` or ``head_repo_full_name`` skips
-    the head_ref check. Missing ``default_branch`` falls back to ``main``.
+    blocking. Concretely: missing ``base_ref`` skips the base_ref check; missing
+    ``head_ref`` or ``head_repo_full_name`` skips the head_ref check; missing
+    ``default_branch`` falls back to ``main``.
     """
     pr = scored.pr
 

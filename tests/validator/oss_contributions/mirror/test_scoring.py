@@ -54,7 +54,7 @@ def _pr(
     author_login: str = 'bittoby',
     merged_by_login: str | None = 'anderdc',
     author_association: str = 'CONTRIBUTOR',
-    base_ref: str = 'main',
+    base_ref: str | None = 'main',
     head_ref: str | None = 'feature/foo',
     head_repo_full_name: str | None = 'entrius/gittensor-ui',
     default_branch: str | None = 'main',
@@ -210,6 +210,13 @@ class TestEligibilityGate:
         # Fallback default branch is 'main' when mirror omits default_branch.
         scored = ScoredPR(pr=_pr(base_ref='main', default_branch=None))
         skip, reason = _should_skip_merged_mirror_pr(scored, _config(additional_branches=None))
+        assert skip is False
+
+    def test_null_base_ref_falls_through_not_blocked(self):
+        # A null base_ref is pre-backfill mirror data; it must fall through rather
+        # than be coerced to '' and false-positive-blocked, dropping a merged PR (#1525).
+        scored = ScoredPR(pr=_pr(base_ref=None))
+        skip, reason = _should_skip_merged_mirror_pr(scored, _config())
         assert skip is False
 
     def test_head_ref_in_additional_blocks_same_repo(self):

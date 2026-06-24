@@ -47,21 +47,21 @@ INSERT INTO pull_requests (
     merged_at, pr_created_at, pr_state,
     base_score, issue_multiplier,
     open_pr_spam_multiplier, time_decay_multiplier,
-    credibility_multiplier, review_quality_multiplier, label_multiplier, label,
+    review_quality_multiplier, label_multiplier, label,
     earned_score, collateral_score,
     additions, deletions, commits, total_nodes_scored,
     merged_by_login, description, last_edited_at,
-    code_density, token_score, structural_count, structural_score, leaf_count, leaf_score
+    token_score, structural_count, structural_score, leaf_count, leaf_score
 ) VALUES (
     %s, %s, %s, %s, %s, %s, %s,
     %s, %s, %s,
     %s, %s,
     %s, %s,
-    %s, %s, %s, %s,
+    %s, %s, %s,
     %s, %s,
     %s, %s, %s, %s,
     %s, %s, %s,
-    %s, %s, %s, %s, %s, %s
+    %s, %s, %s, %s, %s
 )
 ON CONFLICT (number, repository_full_name)
 DO UPDATE SET
@@ -75,7 +75,6 @@ DO UPDATE SET
     issue_multiplier = EXCLUDED.issue_multiplier,
     open_pr_spam_multiplier = EXCLUDED.open_pr_spam_multiplier,
     time_decay_multiplier = EXCLUDED.time_decay_multiplier,
-    credibility_multiplier = EXCLUDED.credibility_multiplier,
     review_quality_multiplier = EXCLUDED.review_quality_multiplier,
     label_multiplier = EXCLUDED.label_multiplier,
     label = EXCLUDED.label,
@@ -88,7 +87,6 @@ DO UPDATE SET
     merged_by_login = EXCLUDED.merged_by_login,
     description = EXCLUDED.description,
     last_edited_at = EXCLUDED.last_edited_at,
-    code_density = EXCLUDED.code_density,
     token_score = EXCLUDED.token_score,
     structural_count = EXCLUDED.structural_count,
     structural_score = EXCLUDED.structural_score,

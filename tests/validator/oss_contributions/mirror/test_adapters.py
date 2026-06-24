@@ -168,11 +168,9 @@ class TestMirrorScoredPrToLegacyPullRequest:
         scored.label = 'enhancement'
         scored.time_decay_multiplier = 0.95
         scored.review_quality_multiplier = 0.8
-        scored.credibility_multiplier = 0.9
         scored.issue_multiplier = 1.33
         scored.open_pr_spam_multiplier = 1.0
         scored.collateral_score = 0.0
-        scored.code_density = 0.85
         scored.structural_count = 10
         scored.structural_score = 50.0
         scored.leaf_count = 20
@@ -209,11 +207,9 @@ class TestMirrorScoredPrToLegacyPullRequest:
         assert adapted.label == 'enhancement'
         assert adapted.time_decay_multiplier == 0.95
         assert adapted.review_quality_multiplier == 0.8
-        assert adapted.credibility_multiplier == 0.9
         assert adapted.issue_multiplier == 1.33
         assert adapted.open_pr_spam_multiplier == 1.0
         assert adapted.total_nodes_scored == 30
-        assert adapted.code_density == 0.85
         # file_changes / issues left None — written separately
         assert adapted.file_changes is None
         assert adapted.issues is None

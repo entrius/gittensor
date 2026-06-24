@@ -92,8 +92,17 @@ def issues_list(
 
     print_network_header(network_name, contract_addr)
 
-    with loading_context('Reading issues from contract...', as_json):
-        issues = read_issues_from_contract(ws_endpoint, contract_addr, verbose)
+    try:
+        with loading_context('Reading issues from contract...', as_json):
+            issues = read_issues_from_contract(ws_endpoint, contract_addr, verbose)
+    except ImportError as e:
+        handle_exception(
+            as_json=as_json,
+            message=f'Missing dependency: {e}. Install with: uv sync',
+            error_type='missing_dependency',
+        )
+    except Exception as e:
+        handle_exception(as_json=as_json, message=f'Error reading from contract: {e}', error_type='read_failed')
 
     if as_json:
         # Enrich with human-readable ALPHA amounts for JSON consumers
@@ -268,7 +277,6 @@ def issues_pending_harvest(network: str, rpc_url: str, contract: str, verbose: b
 
     try:
         import bittensor as bt
-        from async_substrate_interface import SubstrateInterface
 
         from gittensor.validator.issue_competitions.contract_client import (
             IssueCompetitionContractClient,
@@ -282,8 +290,7 @@ def issues_pending_harvest(network: str, rpc_url: str, contract: str, verbose: b
             )
             treasury_stake = client.get_treasury_stake()
 
-            substrate = SubstrateInterface(url=ws_endpoint)
-            issues = _read_issues_from_child_storage(substrate, contract_addr, verbose)
+            issues = _read_issues_from_child_storage(subtensor.substrate, contract_addr, verbose)
             total_bounty_pool = sum(issue.get('bounty_amount', 0) for issue in issues)
 
         pending_harvest = max(0, treasury_stake - total_bounty_pool)
@@ -306,7 +313,9 @@ def issues_pending_harvest(network: str, rpc_url: str, contract: str, verbose: b
         console.print(f'[green]Allocated to Bounties:[/green] {format_alpha(total_bounty_pool, 4)} ALPHA')
         console.print(f'[green]Pending Harvest:[/green] {format_alpha(pending_harvest, 4)} ALPHA')
     except Exception as e:
-        handle_exception(as_json=as_json, message=str(e))
+        handle_exception(
+            as_json=as_json, message=f'Error reading treasury and contract data: {e}', error_type='read_failed'
+        )
 
 
 @click.command('info', cls=StyledCommand)

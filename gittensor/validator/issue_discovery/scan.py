@@ -43,7 +43,6 @@ import bittensor as bt
 from gittensor.classes import Issue, MinerEvaluation, MinerEvaluationCache, RepoEvaluation
 from gittensor.constants import (
     MAINTAINER_ASSOCIATIONS,
-    MIN_TOKEN_SCORE_FOR_BASE_SCORE,
 )
 from gittensor.utils.mirror.client import MirrorClient, MirrorRequestError
 from gittensor.utils.mirror.models import MirrorIssue, MirrorSolvingPR
@@ -56,6 +55,7 @@ from gittensor.validator.oss_contributions.label_resolution import resolve_trust
 from gittensor.validator.oss_contributions.mirror.adapters import mirror_files_to_legacy
 from gittensor.validator.oss_contributions.mirror.scoring import (
     calculate_base_score_for_pr_files,
+    check_merged_branch_eligibility,
 )
 from gittensor.validator.utils.datetime_utils import calculate_time_decay
 from gittensor.validator.utils.load_weights import (
@@ -215,7 +215,7 @@ async def run_issue_discovery(
 
         pending.append((evaluation, filtered, open_counts))
 
-    canonical_pr_owners = _build_canonical_pr_owners(pending)
+    canonical_pr_owners = _build_canonical_pr_owners(pending, mirror_repos)
     for evaluation, filtered, open_counts in pending:
         complete = await _score_miner_issues(
             evaluation,
@@ -328,6 +328,7 @@ def _restore_issue_discovery_from_cache(
 
 def _build_canonical_pr_owners(
     pending: List[Tuple[MinerEvaluation, List[MirrorIssue], Dict[str, int]]],
+    mirror_repos: Dict[str, RepositoryConfig],
 ) -> Dict[Tuple[str, int], Tuple[datetime, int, int]]:
     """Cross-miner one-issue-per-PR resolution.
 
@@ -340,7 +341,7 @@ def _build_canonical_pr_owners(
     canonical: Dict[Tuple[str, int], Tuple[datetime, int, int]] = {}
     for evaluation, issues, _ in pending:
         for issue in issues:
-            if _classify_issue(issue) != 'solved':
+            if _classify_issue(issue, mirror_repos.get(issue.repo_full_name)) != 'solved':
                 continue
             sp = issue.solving_pr
             assert sp is not None  # _classify_issue guarantees a solving_pr
@@ -373,25 +374,30 @@ def _fallback_open_issue_counts(
 
     The lookback fetch is the authoritative scoring payload. If the secondary
     current/open-count fetch flakes, preserve the fresh solved-issue data and
-    use the most recent cached per-repo open counts when available. Without a
-    cache entry, count open issues visible in the successful lookback payload.
+    count open issues visible in the successful lookback payload. Overlay the
+    most recent cached per-repo counts where available.
     """
+    counts = _count_open_issues(lookback_issues, enabled_names)
     cached = None
     if evaluation_cache is not None:
         cached = evaluation_cache.get(evaluation.uid, evaluation.hotkey, evaluation.github_id or '')
 
     if cached is not None:
-        counts = {
+        cached_counts = {
             repo_name: repo_eval.total_open_issues
             for repo_name, repo_eval in cached.repo_evaluations.items()
             if repo_name in enabled_names
         }
-        if counts:
+        if cached_counts:
+            for repo_name, cached_count in cached_counts.items():
+                counts[repo_name] = max(counts.get(repo_name, 0), cached_count)
             return counts
         if cached.total_open_issues is not None and len(enabled_names) == 1:
-            return {next(iter(enabled_names)): cached.total_open_issues}
+            repo_name = next(iter(enabled_names))
+            counts[repo_name] = max(counts.get(repo_name, 0), cached.total_open_issues)
+            return counts
 
-    return _count_open_issues(lookback_issues, enabled_names)
+    return counts
 
 
 def _build_solving_pr_cache(
@@ -406,8 +412,6 @@ def _build_solving_pr_cache(
     cache: Dict[Tuple[str, int], CachedSolvingPR] = {}
     for evaluation in miner_evaluations.values():
         for scored in evaluation.merged_prs:
-            if scored.token_score < MIN_TOKEN_SCORE_FOR_BASE_SCORE:
-                continue
             key = (scored.pr.repo_full_name, scored.pr.pr_number)
             if key in cache:
                 continue  # first miner wins — values are the same PR's fields
@@ -460,7 +464,7 @@ async def _score_miner_issues(
         cfg = resolve_eligibility(repo_config.eligibility)
         acc = repo_acc.setdefault(issue.repo_full_name, _RepoIssueAcc())
 
-        classification = _classify_issue(issue)
+        classification = _classify_issue(issue, repo_config)
         if classification == 'not-solved-closed':
             acc.closed += 1
             continue
@@ -673,10 +677,8 @@ async def _resolve_solving_pr_score(
         file_contents,
         programming_languages,
         token_config,
-        min_token_score_for_base_score=(
-            resolve_eligibility(repo_config.eligibility).min_token_score_for_base_score
-            if repo_config is not None
-            else None
+        src_tok_saturation_scale=(
+            resolve_scoring(repo_config.scoring).src_tok_saturation_scale if repo_config is not None else None
         ),
     )
     base_score = (
@@ -689,12 +691,15 @@ async def _resolve_solving_pr_score(
     return cached
 
 
-def _classify_issue(issue: MirrorIssue) -> str:
+def _classify_issue(issue: MirrorIssue, repo_config: Optional[RepositoryConfig]) -> str:
     """Return 'solved', 'not-solved-closed', or 'ignore' per anti-gaming gates.
 
     'ignore' = issue is open / transferred / has no scorable meaning at all.
     'not-solved-closed' = counts against credibility (closed but not solved).
     'solved' = counts toward solved metrics.
+
+    ``repo_config`` enables the branch-eligibility gate; when None (repo not in
+    the active mirror set) the branch check is skipped.
 
     Per-issue debug logs explain each classification so operators can debug
     "why didn't UID X get credit for issue Y?" without guessing.
@@ -729,6 +734,26 @@ def _classify_issue(issue: MirrorIssue) -> str:
             f'(solving PR #{sp.pr_number} state={sp.state}, not MERGED)'
         )
         return 'not-solved-closed'
+
+    # Branch-eligibility parity with OSS PR scoring: a solving PR merged into a
+    # non-acceptable branch must not earn discovery credit (the same PR would be
+    # rejected by _should_skip_merged_mirror_pr on the contribution path).
+    # Gate only when base_ref is present: the mirror began exposing branch
+    # metadata on the inline solving_pr after this field existed, so a null
+    # base_ref means pre-backfill data and falls through rather than blocking.
+    if repo_config is not None and sp.base_ref is not None:
+        skip, reason = check_merged_branch_eligibility(
+            pr_number=sp.pr_number,
+            repo_full_name=issue.repo_full_name,
+            base_ref=sp.base_ref,
+            head_ref=sp.head_ref,
+            head_repo_full_name=sp.head_repo_full_name,
+            default_branch=sp.default_branch,
+            repo_config=repo_config,
+        )
+        if skip:
+            bt.logging.debug(f'  issue #{issue.issue_number} ({issue.repo_full_name}): closed-not-solved ({reason})')
+            return 'not-solved-closed'
 
     if sp.edited_after_merge:
         bt.logging.debug(

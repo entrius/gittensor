@@ -1,7 +1,7 @@
 # The MIT License (MIT)
 # Copyright © 2025 Entrius
 
-from typing import TYPE_CHECKING, Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional, Set
 
 import bittensor as bt
 
@@ -113,6 +113,26 @@ def finalize_miner_scores(
     bt.logging.info('Finalization complete.')
 
 
+def log_oss_scoring_summary(
+    miner_evaluations: Dict[int, MinerEvaluation],
+    cached_uids: Set[int],
+    penalized_uids: Set[int],
+) -> None:
+    """Emit a round-level OSS-scoring rollup, mirroring the issue-discovery summary.
+
+    Counts are derived after finalization so eligibility reflects the gated
+    result. Logging only — no scoring state is read back or mutated.
+    """
+    eligible = sum(1 for e in miner_evaluations.values() if e and e.is_eligible)
+    failed = sum(1 for e in miner_evaluations.values() if e and e.failed_reason is not None)
+    bt.logging.info('')
+    bt.logging.info(
+        f'OSS scoring complete | {len(miner_evaluations)} evaluated | {eligible} eligible | '
+        f'{len(penalized_uids)} penalized (duplicate github) | {len(cached_uids)} cache-fallback | '
+        f'{failed} failed validation'
+    )
+
+
 def _group_prs_by_repo(prs: List['ScoredPR']) -> Dict[str, List['ScoredPR']]:
     grouped: Dict[str, List['ScoredPR']] = {}
     for pr in prs:
@@ -175,11 +195,9 @@ def _score_eligible_repo_prs(
 ) -> None:
     """Compute earned scores for an eligible repository's merged PRs."""
     spam_multiplier = calculate_pr_spam_penalty_multiplier(cfg, len(open_prs), repo_eval.total_token_score)
-    credibility_multiplier = round(repo_eval.credibility, 2)
 
     for pr in merged:
         pr.open_pr_spam_multiplier = spam_multiplier
-        pr.credibility_multiplier = credibility_multiplier
         pr.calculate_final_earned_score()
         repo_eval.total_score += pr.earned_score
 
@@ -224,8 +242,7 @@ def calculate_open_pr_collateral_score(pr: 'ScoredPR', scoring: ResolvedScoring)
     Collateral = base_score * applicable_multipliers * open_pr_collateral_percent
 
     Applicable multipliers: issue, label, review_collateral
-    NOT applicable: time_decay (merge-based), credibility_multiplier (merge-based),
-                    open_pr_spam (not for collateral)
+    NOT applicable: time_decay (merge-based), open_pr_spam (not for collateral)
     """
     from math import prod
 

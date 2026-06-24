@@ -16,7 +16,6 @@ if TYPE_CHECKING:
 
 from gittensor.constants import (
     EXTENSIONLESS_FILE_EXTENSIONS,
-    MAX_CODE_DENSITY_MULTIPLIER,
 )
 
 
@@ -165,12 +164,11 @@ class PullRequest:
     # PR state based fields
     pr_state: PRState
 
-    # Score fields
+    # Score fields. Credibility is a gate only (#1340); no per-PR credibility multiplier.
     base_score: float = 0.0
     issue_multiplier: float = 1.0
     open_pr_spam_multiplier: float = 1.0
     time_decay_multiplier: float = 1.0
-    credibility_multiplier: float = 1.0
     review_quality_multiplier: float = 1.0  # Penalty for CHANGES_REQUESTED reviews from maintainers
     label_multiplier: float = 1.0  # Multiplier resolved from repository label config
     label: Optional[str] = None  # Resolved scoring label, set during scoring
@@ -185,7 +183,6 @@ class PullRequest:
     total_nodes_scored: int = 0  # Total AST nodes scored for this PR
 
     # Token scoring breakdown (after test weight applied)
-    code_density: float = 0.0
     token_score: float = 0.0
     structural_count: int = 0
     structural_score: float = 0.0
@@ -198,20 +195,6 @@ class PullRequest:
     last_edited_at: Optional[datetime] = None
     head_ref_oid: Optional[str] = None
     base_ref_oid: Optional[str] = None
-
-    def calculate_final_earned_score(self) -> float:
-        """Combine base score with all multipliers."""
-        multipliers = {
-            'issue': self.issue_multiplier,
-            'label': self.label_multiplier,
-            'spam': self.open_pr_spam_multiplier,
-            'decay': self.time_decay_multiplier,
-            'cred': self.credibility_multiplier,
-            'review': self.review_quality_multiplier,
-        }
-        label = f'{self.pr_state.value} PR #{self.number} ({self.repository_full_name})'
-        self.earned_score = _apply_score_multipliers(self.base_score, multipliers, label)
-        return self.earned_score
 
 
 @dataclass
@@ -514,13 +497,6 @@ class PrScoringResult:
     file_results: List[FileScoreResult]
     score_breakdown: Optional[ScoreBreakdown] = None  # Aggregated breakdown across all files
     by_category: Dict[ScoringCategory, 'PrScoringResult'] = field(default_factory=dict)
-
-    @property
-    def density(self) -> float:
-        """Code density (total_score / total_lines), capped at MAX_CODE_DENSITY_MULTIPLIER"""
-        if self.total_lines <= 0:
-            return 0.0
-        return min(self.total_score / self.total_lines, MAX_CODE_DENSITY_MULTIPLIER)
 
 
 @dataclass

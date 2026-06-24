@@ -89,6 +89,10 @@ class ContractIssue:
     is_fully_funded: bool
 
 
+class ContractReadError(RuntimeError):
+    """Raised when a contract read cannot produce a trustworthy value."""
+
+
 class IssueCompetitionContractClient:
     """
     Client for interacting with the Issue Bounty smart contract
@@ -622,12 +626,15 @@ class IssueCompetitionContractClient:
 
         Returns:
             Total stake amount (0 if no stake found)
+
+        Raises:
+            RuntimeError: If required contract storage is unavailable.
+            Exception: If the direct Alpha storage query fails.
         """
         try:
             packed = read_contract_packed_storage(self.subtensor.substrate, self.contract_address)
             if not packed:
-                bt.logging.debug('Cannot get treasury stake: packed storage unavailable')
-                return 0
+                raise RuntimeError('Cannot get treasury stake: packed storage unavailable')
 
             # Convert to SS58 addresses
             owner_ss58 = self.subtensor.substrate.ss58_encode(packed.owner.hex())
@@ -660,7 +667,7 @@ class IssueCompetitionContractClient:
 
         except Exception as e:
             bt.logging.error(f'Error fetching treasury stake: {e}')
-            return 0
+            raise
 
     def get_last_harvest_block(self) -> int:
         """Query the block number of the last harvest."""
@@ -826,17 +833,21 @@ class IssueCompetitionContractClient:
         """Query the list of whitelisted validator hotkeys.
 
         Returns:
-            List of SS58 addresses, or empty list on error.
+            List of SS58 addresses.
+
+        Raises:
+            ContractReadError: If the contract read or response decoding fails.
         """
         try:
             response = self._raw_contract_read('get_validators')
             if response is None:
-                return []
+                raise ContractReadError('Failed to read validator whitelist from contract')
 
             return self._decode_validator_list(response)
+        except ContractReadError:
+            raise
         except Exception as e:
-            bt.logging.error(f'Error fetching validators: {e}')
-            return []
+            raise ContractReadError(f'Failed to read validator whitelist from contract: {e}') from e
 
     def _decode_validator_list(self, response_bytes: bytes) -> List[str]:
         """Decode a SCALE-encoded Vec<AccountId> from clean return bytes.
@@ -845,39 +856,38 @@ class IssueCompetitionContractClient:
         N * 32-byte AccountIds.
         """
         if not response_bytes:
-            return []
+            raise ContractReadError('Validator whitelist response was empty')
 
-        try:
-            offset = 0
+        offset = 0
 
-            # Read SCALE compact length
-            first_byte = response_bytes[offset]
-            mode = first_byte & 0x03
-            if mode == 0:
-                count = first_byte >> 2
-                offset += 1
-            elif mode == 1:
-                if offset + 2 > len(response_bytes):
-                    return []
-                count = (response_bytes[offset] | (response_bytes[offset + 1] << 8)) >> 2
-                offset += 2
-            else:
-                return []
+        # Read SCALE compact length. `0x00` is a valid empty Vec<AccountId>.
+        first_byte = response_bytes[offset]
+        mode = first_byte & 0x03
+        if mode == 0:
+            count = first_byte >> 2
+            offset += 1
+        elif mode == 1:
+            if offset + 2 > len(response_bytes):
+                raise ContractReadError('Validator whitelist response length was truncated')
+            count = (response_bytes[offset] | (response_bytes[offset + 1] << 8)) >> 2
+            offset += 2
+        else:
+            raise ContractReadError('Validator whitelist response used an unsupported length encoding')
 
-            validators = []
-            for _ in range(count):
-                if offset + 32 > len(response_bytes):
-                    break
-                account_bytes = response_bytes[offset : offset + 32]
-                ss58 = self.subtensor.substrate.ss58_encode(account_bytes.hex())
-                validators.append(ss58)
-                offset += 32
+        expected_len = offset + (count * 32)
+        if len(response_bytes) != expected_len:
+            raise ContractReadError(
+                f'Validator whitelist response length mismatch: expected {expected_len} bytes, got {len(response_bytes)}'
+            )
 
-            return validators
+        validators = []
+        for _ in range(count):
+            account_bytes = response_bytes[offset : offset + 32]
+            ss58 = self.subtensor.substrate.ss58_encode(account_bytes.hex())
+            validators.append(ss58)
+            offset += 32
 
-        except Exception as e:
-            bt.logging.error(f'Error decoding validator list: {e}')
-            return []
+        return validators
 
     def set_treasury_hotkey(
         self,

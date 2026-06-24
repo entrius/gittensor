@@ -270,10 +270,15 @@ def fetch_open_issue_pull_requests(
                 token=token or None,
                 open_only=True,
             )
-            # Intentionally return GitHub tool output as-is (no CLI schema mapping yet).
-            return prs
     except Exception as e:
         raise click.ClickException(f'Failed to fetch PR submissions from GitHub: {e}')
+
+    if prs is None:
+        raise click.ClickException(
+            'GitHub PR submission lookup failed (rate limit or transient error). Try again shortly.'
+        )
+    # Intentionally return GitHub tool output as-is (no CLI schema mapping yet).
+    return prs
 
 
 def print_issue_submission_table(

@@ -149,16 +149,16 @@
     "trusted_label_pipeline": true
   },
   "Geniepod/genie-claw": {
-    "default_label_multiplier": 0.2,
+    "default_label_multiplier": 1.0,
     "eligibility": {
       "max_open_pr_threshold": 2
     },
     "emission_share": 0.025,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
-      "enhancement": 0.25,
-      "optimization": 0.8,
-      "performance": 0.3
+      "enhancement": 1.25,
+      "optimization": 2.5,
+      "performance": 1.5
     },
     "maintainer_cut": 0.3,
     "trusted_label_pipeline": true

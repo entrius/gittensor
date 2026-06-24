@@ -7,7 +7,7 @@
       "min_valid_merged_prs": 0,
       "min_valid_solved_issues": 0
     },
-    "emission_share": 0.005,
+    "emission_share": 0.004,
     "fixed_base_score": 1.0,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
@@ -20,30 +20,41 @@
     "trusted_label_pipeline": true
   },
   "cogniax/tao-pulse-app": {
-    "emission_share": 0.01,
+    "emission_share": 0.0,
     "issue_discovery_share": 0.5,
     "maintainer_cut": 0.4
   },
   "DPBG/Engram.AI": {
-    "emission_share": 0.005,
+    "emission_share": 0.0,
     "issue_discovery_share": 0.0
   },
   "e35ventura/taopedia": {
-    "emission_share": 0.025,
+    "emission_share": 0.05,
     "issue_discovery_share": 0.0,
     "maintainer_cut": 0.0,
     "additional_acceptable_branches": ["test"],
     "trusted_label_pipeline": true,
     "default_label_multiplier": 0.0,
     "label_multipliers": {
-      "feature": 3.0,
-      "ui-ux": 2.0,
-      "bug": 0.625,
-      "security": 0.625,
-      "other": 0.1
+      "ui-ux": 5.0,
+      "feature": 2.0,
+      "bug": 0.35,
+      "security": 0.35,
+      "other": 0.05
     },
     "eligibility": {
-      "min_credibility": 0.6
+      "min_credibility": 0.6,
+      "max_open_pr_threshold": 4
+    },
+    "scoring": {
+      "pr_lookback_days": 7,
+      "maintainer_issue_multiplier": 5.0,
+      "time_decay": {
+        "grace_period_hours": 6,
+        "sigmoid_midpoint_days": 2,
+        "sigmoid_steepness": 1.0,
+        "min_multiplier": 0.02
+      }
     }
   },
   "e35ventura/taopedia-articles": {
@@ -63,6 +74,15 @@
     "eligibility": {
       "min_credibility": 0.5,
       "min_token_score_for_valid_issue": 0.0
+    },
+    "scoring": {
+      "pr_lookback_days": 7,
+      "time_decay": {
+        "grace_period_hours": 3,
+        "sigmoid_midpoint_days": 1,
+        "sigmoid_steepness": 1.25,
+        "min_multiplier": 0.01
+      }
     }
   },
   "entrius/allways": {
@@ -88,7 +108,7 @@
     "trusted_label_pipeline": true
   },
   "entrius/gittensor": {
-    "emission_share": 0.08,
+    "emission_share": 0.07,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "bug": 1.1,
@@ -100,7 +120,7 @@
     "trusted_label_pipeline": true
   },
   "entrius/gittensor-ui": {
-    "emission_share": 0.005,
+    "emission_share": 0.0,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "bug": 1.1,
@@ -129,72 +149,133 @@
     "trusted_label_pipeline": true
   },
   "Geniepod/genie-claw": {
-    "default_label_multiplier": 0.2,
+    "default_label_multiplier": 1.0,
     "eligibility": {
       "max_open_pr_threshold": 2
     },
-    "emission_share": 0.03,
+    "emission_share": 0.025,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
-      "community-contribution": 0.2,
-      "optimization": 0.8
+      "enhancement": 1.25,
+      "optimization": 2.5,
+      "performance": 1.5
     },
-    "maintainer_cut": 0.3
+    "maintainer_cut": 0.3,
+    "trusted_label_pipeline": true
   },
-  "infiniflow/ragflow": {
-    "emission_share": 0.055,
-    "issue_discovery_share": 0.0
+  "gittensor-ai-lab/sparkinfer": {
+    "default_label_multiplier": 0.0,
+    "eligibility": {
+      "min_credibility": 0.0,
+      "min_issue_credibility": 0.0,
+      "min_valid_merged_prs": 0,
+      "min_valid_solved_issues": 0
+    },
+    "emission_share": 0.1,
+    "fixed_base_score": 1.0,
+    "issue_discovery_share": 0.0,
+    "label_multipliers": {
+      "eval:XL": 4.0,
+      "eval:L": 2.5,
+      "eval:M": 1.5,
+      "eval:S": 1.0,
+      "eval:XS": 0.5,
+      "eval:BASELINE": 1.0,
+      "eval:none": 0.0,
+      "eval:REJECT": 0.0
+    },
+    "maintainer_cut": 0.3,
+    "trusted_label_pipeline": true
   },
   "JSONbored/awesome-claude": {
     "default_label_multiplier": 0.0,
+    "trusted_label_pipeline": true,
     "emission_share": 0.005,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
-      "gittensor:feature": 1.0,
-      "gittensor:priority": 1.5
+      "gittensor:bug": 0.5,
+      "gittensor:feature": 1.25,
+      "gittensor:priority": 1.75,
+      "slop": 0.0
     },
     "eligibility": {
-      "min_credibility": 0.6
+      "min_credibility": 0.5
     },
-    "maintainer_cut": 0.3,
+    "maintainer_cut": 0.5,
     "scoring": {
-      "pr_lookback_days": 45,
-      "open_pr_collateral_percent": 0.15,
+      "pr_lookback_days": 7,
+      "open_pr_collateral_percent": 0.2,
       "review_penalty_rate": 0.2,
-      "maintainer_issue_multiplier": 1.75,
+      "standard_issue_multiplier": 1.1,
+      "maintainer_issue_multiplier": 1.5,
       "time_decay": {
         "grace_period_hours": 24,
-        "sigmoid_midpoint_days": 14,
-        "min_multiplier": 0.1
+        "sigmoid_midpoint_days": 3,
+        "sigmoid_steepness": 1.0,
+        "min_multiplier": 0.05
       }
     }
   },
   "JSONbored/gittensory": {
     "default_label_multiplier": 0.0,
-    "emission_share": 0.015,
+    "trusted_label_pipeline": true,
+    "emission_share": 0.1,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
-      "gittensor:bug": 1.0,
+      "gittensor:bug": 0.5,
       "gittensor:feature": 1.25,
-      "gittensor:priority": 1.75
+      "gittensor:priority": 1.75,
+      "slop": 0.0
     },
-    "maintainer_cut": 0.35,
+    "eligibility": {
+      "min_credibility": 0.6
+    },
+    "maintainer_cut": 0.5,
     "scoring": {
-      "pr_lookback_days": 45,
-      "maintainer_issue_multiplier": 2.0,
+      "pr_lookback_days": 7,
+      "open_pr_collateral_percent": 0.2,
+      "review_penalty_rate": 0.2,
+      "standard_issue_multiplier": 1.1,
+      "maintainer_issue_multiplier": 1.5,
       "time_decay": {
         "grace_period_hours": 24,
-        "sigmoid_midpoint_days": 10,
+        "sigmoid_midpoint_days": 3,
+        "sigmoid_steepness": 1.0,
         "min_multiplier": 0.05
       }
     }
   },
   "JSONbored/metagraphed": {
-    "emission_share": 0.0075,
-    "issue_discovery_share": 0.0
+    "default_label_multiplier": 0.0,
+    "trusted_label_pipeline": true,
+    "emission_share": 0.25,
+    "issue_discovery_share": 0.0,
+    "label_multipliers": {
+      "gittensor:bug": 0.5,
+      "gittensor:feature": 1.5,
+      "gittensor:priority": 2.5,
+      "slop": 0.0
+    },
+    "eligibility": {
+      "min_credibility": 0.6
+    },
+    "maintainer_cut": 0.5,
+    "scoring": {
+      "pr_lookback_days": 7,
+      "open_pr_collateral_percent": 0.2,
+      "review_penalty_rate": 0.2,
+      "standard_issue_multiplier": 1.1,
+      "maintainer_issue_multiplier": 1.5,
+      "time_decay": {
+        "grace_period_hours": 24,
+        "sigmoid_midpoint_days": 3,
+        "sigmoid_steepness": 1.0,
+        "min_multiplier": 0.05
+      }
+    }
   },
   "MkDev11/gittensor-hub": {
-    "emission_share": 0.012,
+    "emission_share": 0.005,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "feature": 2,
@@ -216,7 +297,7 @@
     "maintainer_cut": 0.3
   },
   "vouchdev/vouch": {
-    "emission_share": 0.01,
+    "emission_share": 0.0,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "feature": 1.5,
@@ -227,6 +308,7 @@
       "open_pr_collateral_percent": 0.1,
       "review_penalty_rate": 0.2,
       "maintainer_issue_multiplier": 1.5,
+      "standard_issue_multiplier": 1,
       "time_decay": {
         "grace_period_hours": 24,
         "sigmoid_midpoint_days": 14,
@@ -240,26 +322,28 @@
     "maintainer_cut": 0.5
   },
   "phase-rs/phase": {
-    "emission_share": 0.018,
+    "emission_share": 0.02,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
-      "bug": 1.1,
-      "enhancement": 1.25,
-      "feature": 1.5,
+      "bug": 1.2,
+      "enhancement": 1.3,
+      "feature": 1.0,
       "refactor": 0.25,
-      "test": 1.2
+      "test": 1.0,
+      "quality": 3
     },
-    "maintainer_cut": 0.6,
+    "scoring": {
+      "standard_issue_multiplier": 1,
+      "review_penalty_rate": 0.01,
+      "pr_lookback_days": 15
+    },
+    "maintainer_cut": 0.4,
     "eligibility": {
       "excessive_pr_penalty_base_threshold": 10
     }
   },
-  "seroperson/jvm-live-reload": {
-    "emission_share": 0.008,
-    "issue_discovery_share": 0.0
-  },
   "touchpilot/touchpilot": {
-    "emission_share": 0.005,
+    "emission_share": 0.0,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "type: bug": 1.1,
@@ -270,13 +354,36 @@
     },
     "maintainer_cut": 0.3
   },
-  "we-promise/sure": {
-    "emission_share": 0.03,
-    "issue_discovery_share": 0.0,
+  "e35dev/podcast-design-canvas": {
+    "emission_share": 0.301,
+    "issue_discovery_share": 0,
+    "maintainer_cut": 0,
+    "trusted_label_pipeline": true,
+    "default_label_multiplier": 0,
     "label_multipliers": {
-      "performance": 1.5,
-      "mobile/Flutter": 1.2
+      "episode-ingest": 3,
+      "preset-styles": 2.5,
+      "canvas-editor": 2.5,
+      "audio-captions": 2,
+      "contextual-visuals": 2,
+      "template-system": 1.75,
+      "export-publish": 1.75,
+      "product-polish": 1.5,
+      "bugfix": 1,
+      "infrastructure": 0.5
     },
-    "maintainer_cut": 0.3
+    "eligibility": {
+      "min_credibility": 0.6,
+      "max_open_pr_threshold": 4
+    },
+    "scoring": {
+      "pr_lookback_days": 7,
+      "time_decay": {
+        "grace_period_hours": 6,
+        "sigmoid_midpoint_days": 2,
+        "sigmoid_steepness": 1,
+        "min_multiplier": 0.02
+      }
+    }
   }
 }

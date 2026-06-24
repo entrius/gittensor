@@ -229,6 +229,7 @@ def vote_list_validators(network: str, rpc_url: str, contract: str, as_json: boo
         import bittensor as bt
 
         from gittensor.validator.issue_competitions.contract_client import (
+            ContractReadError,
             IssueCompetitionContractClient,
         )
 
@@ -269,5 +270,7 @@ def vote_list_validators(network: str, rpc_url: str, contract: str, as_json: boo
             err_console.print('[yellow]No validators whitelisted.[/yellow]')
             err_console.print('[dim]Add validators with: gitt admin add-vali <HOTKEY>[/dim]')
 
+    except ContractReadError as e:
+        handle_exception(as_json=as_json, message=str(e), error_type='read_failed')
     except Exception as e:
         handle_exception(as_json=as_json, message=str(e))

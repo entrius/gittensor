@@ -291,6 +291,21 @@ class MinerEvaluation:
     # The top-level scalars above are round-level rollups of this map.
     repo_evaluations: Dict[str, RepoEvaluation] = field(default_factory=dict)
 
+    def get_or_create_repo_evaluation(
+        self, repo_name: str, repository_full_name: Optional[str] = None
+    ) -> RepoEvaluation:
+        """Return the repo evaluation stored under ``repo_name``, creating one if absent.
+
+        ``repo_name`` is the map key (a lowercased repository_full_name). When a
+        new entry is created, ``repository_full_name`` seeds it, defaulting to
+        ``repo_name`` when not supplied.
+        """
+        repo_eval = self.repo_evaluations.get(repo_name)
+        if repo_eval is None:
+            repo_eval = RepoEvaluation(repository_full_name=repository_full_name or repo_name)
+            self.repo_evaluations[repo_name] = repo_eval
+        return repo_eval
+
     @property
     def total_prs(self) -> int:
         return self.total_merged_prs + self.total_closed_prs + self.total_open_prs
@@ -578,10 +593,7 @@ class MinerEvaluationCache:
                 value = getattr(existing.evaluation, name)
                 setattr(cached_eval, name, _copy_issue_discovery_value(name, value))
             for repo_name, prior_repo in existing.evaluation.repo_evaluations.items():
-                target = cached_eval.repo_evaluations.get(repo_name)
-                if target is None:
-                    target = RepoEvaluation(repository_full_name=prior_repo.repository_full_name)
-                    cached_eval.repo_evaluations[repo_name] = target
+                target = cached_eval.get_or_create_repo_evaluation(repo_name, prior_repo.repository_full_name)
                 target.copy_issue_discovery_from(prior_repo)
 
         self._cache[evaluation.uid] = CachedEvaluation(
@@ -621,10 +633,7 @@ class MinerEvaluationCache:
             setattr(existing.evaluation, name, _copy_issue_discovery_value(name, value))
 
         for repo_name, repo_eval in evaluation.repo_evaluations.items():
-            target = existing.evaluation.repo_evaluations.get(repo_name)
-            if target is None:
-                target = RepoEvaluation(repository_full_name=repo_eval.repository_full_name)
-                existing.evaluation.repo_evaluations[repo_name] = target
+            target = existing.evaluation.get_or_create_repo_evaluation(repo_name, repo_eval.repository_full_name)
             target.copy_issue_discovery_from(repo_eval)
 
         bt.logging.debug(f'Refreshed cached issue discovery for UID {evaluation.uid}')

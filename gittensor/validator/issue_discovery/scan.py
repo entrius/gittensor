@@ -40,7 +40,7 @@ from typing import Dict, List, Optional, Set, Tuple
 
 import bittensor as bt
 
-from gittensor.classes import Issue, MinerEvaluation, MinerEvaluationCache, RepoEvaluation
+from gittensor.classes import Issue, MinerEvaluation, MinerEvaluationCache
 from gittensor.constants import (
     MAINTAINER_ASSOCIATIONS,
 )
@@ -278,10 +278,7 @@ def _apply_open_issue_counts(evaluation: MinerEvaluation, open_counts: Dict[str,
     """Record per-repo open-issue counts (and the round-level total) for a miner
     with no in-window issues to score."""
     for repo_name, count in open_counts.items():
-        repo_eval = evaluation.repo_evaluations.get(repo_name)
-        if repo_eval is None:
-            repo_eval = RepoEvaluation(repository_full_name=repo_name)
-            evaluation.repo_evaluations[repo_name] = repo_eval
+        repo_eval = evaluation.get_or_create_repo_evaluation(repo_name)
         repo_eval.total_open_issues = count
     evaluation.total_open_issues = sum(open_counts.values())
 
@@ -297,10 +294,7 @@ def _copy_issue_discovery_fields(target: MinerEvaluation, source: MinerEvaluatio
     target.total_open_issues = source.total_open_issues
     target.issue_discovery_issues = list(source.issue_discovery_issues)
     for repo_name, source_repo in source.repo_evaluations.items():
-        target_repo = target.repo_evaluations.get(repo_name)
-        if target_repo is None:
-            target_repo = RepoEvaluation(repository_full_name=source_repo.repository_full_name)
-            target.repo_evaluations[repo_name] = target_repo
+        target_repo = target.get_or_create_repo_evaluation(repo_name, source_repo.repository_full_name)
         target_repo.copy_issue_discovery_from(source_repo)
 
 
@@ -560,10 +554,7 @@ def _finalize_repo_issue_scores(
         acc = repo_acc.get(repo_name) or _RepoIssueAcc()
         open_count = open_counts.get(repo_name, 0)
 
-        repo_eval = evaluation.repo_evaluations.get(repo_name)
-        if repo_eval is None:
-            repo_eval = RepoEvaluation(repository_full_name=repo_name)
-            evaluation.repo_evaluations[repo_name] = repo_eval
+        repo_eval = evaluation.get_or_create_repo_evaluation(repo_name)
 
         repo_eval.total_solved_issues = acc.solved
         repo_eval.total_valid_solved_issues = acc.valid_solved

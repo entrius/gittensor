@@ -58,7 +58,7 @@ def blend_emission_pools(
 
     # Issue treasury (10% flat to UID 111)
     if ISSUES_TREASURY_UID > 0 and ISSUES_TREASURY_UID in miner_uids:
-        treasury_idx = sorted_uids.index(ISSUES_TREASURY_UID)
+        treasury_idx = uid_index[ISSUES_TREASURY_UID]
         rewards[treasury_idx] += ISSUES_TREASURY_EMISSION_SHARE
         bt.logging.info(
             f'Treasury allocation: UID {ISSUES_TREASURY_UID} receives '
@@ -67,7 +67,7 @@ def blend_emission_pools(
 
     # Recycle receives registry slack and empty repo slices.
     if RECYCLE_UID in miner_uids:
-        recycle_idx = sorted_uids.index(RECYCLE_UID)
+        recycle_idx = uid_index[RECYCLE_UID]
         rewards[recycle_idx] += recycle_share
         if recycle_share > EMISSION_SHARE_TOLERANCE:
             bt.logging.info(f'Recycling {recycle_share * 100:.0f}% unclaimed emissions from repo allocation')

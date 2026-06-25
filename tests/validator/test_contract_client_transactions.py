@@ -3,6 +3,7 @@
 """Tests for IssueCompetitionContractClient transaction methods."""
 
 import hashlib
+import struct
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -102,6 +103,53 @@ def test_revert_returns_false(client, wallet, method, kwargs_fn, _cm, _ea, _hk, 
 def test_exception_returns_false(client, wallet, method, kwargs_fn, _cm, _ea, _hk, _gas):
     with patch.object(client, '_exec_contract_raw', side_effect=RuntimeError('node down')):
         assert getattr(client, method)(**kwargs_fn(wallet)) is False
+
+
+def test_register_issue_encodes_str_args(client):
+    """register_issue declares github_url/repository_full_name as `str`; encoding
+    must SCALE-encode them (compact length prefix + UTF-8) rather than raising.
+
+    Regression test for the `Unsupported type: str` bug (#1375).
+    """
+    github_url = 'https://github.com/owner/repo/issues/1'
+    repo = 'owner/repo'
+
+    encoded = client._encode_args(
+        'register_issue',
+        {
+            'github_url': github_url,
+            'repository_full_name': repo,
+            'issue_number': 1,
+            'target_bounty': 10_000_000_000,
+        },
+    )
+
+    url_bytes = github_url.encode('utf-8')
+    repo_bytes = repo.encode('utf-8')
+    expected = (
+        IssueCompetitionContractClient._encode_compact_len(len(url_bytes))
+        + url_bytes
+        + IssueCompetitionContractClient._encode_compact_len(len(repo_bytes))
+        + repo_bytes
+        + struct.pack('<I', 1)  # issue_number: u32
+        + struct.pack('<QQ', 10_000_000_000, 0)  # target_bounty: u128
+    )
+    assert encoded == expected
+
+
+@pytest.mark.parametrize(
+    'length, expected',
+    [
+        (0, b'\x00'),
+        (1, b'\x04'),
+        (63, b'\xfc'),  # single-byte mode upper bound
+        (64, b'\x01\x01'),  # two-byte mode lower bound
+        (16383, b'\xfd\xff'),  # two-byte mode upper bound
+        (16384, b'\x02\x00\x01\x00'),  # four-byte mode lower bound
+    ],
+)
+def test_encode_compact_len_modes(length, expected):
+    assert IssueCompetitionContractClient._encode_compact_len(length) == expected
 
 
 def _packed_treasury_storage():

@@ -551,6 +551,19 @@ class IssueCompetitionContractClient:
             bt.logging.error(err)
             return None, err
 
+    @staticmethod
+    def _encode_compact_len(length: int) -> bytes:
+        """SCALE compact-encode a non-negative length (used as the Vec<u8>/str prefix)."""
+        if length < 0:
+            raise ValueError(f'Length must be non-negative, got {length}')
+        if length <= 0b0011_1111:  # single-byte mode
+            return bytes([length << 2])
+        if length <= 0b0011_1111_1111_1111:  # two-byte mode
+            return struct.pack('<H', (length << 2) | 0b01)
+        if length <= 0x3FFF_FFFF:  # four-byte mode
+            return struct.pack('<I', (length << 2) | 0b10)
+        raise ValueError(f'Length too large to SCALE compact-encode: {length}')
+
     def _encode_args(self, method_name: str, args: dict) -> bytes:
         """SCALE-encode method arguments using hardcoded type definitions."""
         arg_types = CONTRACT_ARG_TYPES.get(method_name, [])
@@ -568,6 +581,12 @@ class IssueCompetitionContractClient:
                 encoded += struct.pack('<Q', value)
             elif type_def == 'u128':
                 encoded += struct.pack('<QQ', value & 0xFFFFFFFFFFFFFFFF, value >> 64)
+            elif type_def == 'str':
+                # SCALE encodes str as a Vec<u8>: compact length prefix + UTF-8 bytes.
+                if not isinstance(value, str):
+                    raise ValueError(f'Expected str for arg {arg_name}, got {type(value)}')
+                utf8 = value.encode('utf-8')
+                encoded += self._encode_compact_len(len(utf8)) + utf8
             elif type_def == 'AccountId':
                 if isinstance(value, str):
                     encoded += bytes.fromhex(self.subtensor.substrate.ss58_decode(value))

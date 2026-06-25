@@ -74,9 +74,11 @@ class FileChange:
 
     def _calculate_file_extension(self) -> str:
         basename = self.filename.split('/')[-1]
+        basename_lower = basename.lower()
+        if basename_lower.startswith('dockerfile.'):
+            return 'dockerfile'
         if '.' in basename:
             return basename.split('.')[-1].lower()
-        basename_lower = basename.lower()
         return basename_lower if basename_lower in EXTENSIONLESS_FILE_EXTENSIONS else ''
 
     def is_test_file(self) -> bool:

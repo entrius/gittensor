@@ -78,6 +78,8 @@ def test_is_test_file_preserves_existing_test_conventions():
         ('Dockerfile', 'dockerfile'),
         ('dockerfile', 'dockerfile'),
         ('ops/Dockerfile', 'dockerfile'),
+        ('Dockerfile.dev', 'dockerfile'),
+        ('ops/Dockerfile.prod', 'dockerfile'),
         ('Makefile', 'makefile'),
         ('makefile', 'makefile'),
         ('build.mk', 'mk'),

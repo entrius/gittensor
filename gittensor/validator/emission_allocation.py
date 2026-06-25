@@ -82,8 +82,18 @@ def calculate_repo_emission_breakdown(
     maintainer_uids_by_repo: Optional[Dict[str, list[int]]] = None,
 ) -> Iterator[RepoEmissionAllocation]:
     """Return per-repository reward allocation details without adding treasury/slack."""
+    eligible_shares = _eligible_repo_shares(miner_evaluations, master_repositories, miner_uids, maintainer_uids_by_repo)
+    configured = sum(c.emission_share for c in master_repositories.values() if c.emission_share > 0)
+    eligible_total = sum(eligible_shares.values())
+    # Redistribute whole ineligible repo slices across eligible repos by weight so the
+    # configured pool is always released. Registry slack (configured < 1.0) is untouched.
+    redistribute = 0 < eligible_total < configured
+    multiplier = configured / eligible_total if redistribute else 1.0
+
     for repo_name, repo_config in master_repositories.items():
-        repo_slice = repo_config.emission_share * OSS_EMISSION_SHARE
+        if redistribute and repo_name not in eligible_shares:
+            continue
+        repo_slice = repo_config.emission_share * OSS_EMISSION_SHARE * multiplier
         if repo_slice <= 0:
             continue
 
@@ -148,6 +158,40 @@ def calculate_repo_emission_breakdown(
         )
         allocation.recycled_amount += pr_unallocated + issue_unallocated
         yield allocation
+
+
+def _eligible_repo_shares(
+    miner_evaluations: Dict[int, MinerEvaluation],
+    master_repositories: Dict[str, RepositoryConfig],
+    miner_uids: set[int],
+    maintainer_uids_by_repo: Optional[Dict[str, list[int]]] = None,
+) -> Dict[str, float]:
+    """Map of repo -> emission_share for repos that pay at least one miner this round.
+
+    Mirrors the distribution gates below: PR scorers count only when ``issue_discovery_share
+    < 1.0``, issue scorers only when it is ``> 0.0``, and a maintainer carve-out counts only
+    when ``maintainer_cut > 0`` and a listed maintainer is registered.
+    """
+    maintainer_map = maintainer_uids_by_repo or {}
+    eligible: Dict[str, float] = {}
+    for repo_name, repo_config in master_repositories.items():
+        if repo_config.emission_share <= 0:
+            continue
+        issue_share = repo_config.issue_discovery_share
+        pays = (
+            (issue_share < 1.0 and bool(_collect_repo_pr_scores(miner_evaluations, repo_name, miner_uids)))
+            or (
+                issue_share > 0.0
+                and bool(_collect_repo_issue_discovery_scores(miner_evaluations, repo_name, miner_uids))
+            )
+            or (
+                repo_config.maintainer_cut > 0.0
+                and any(uid in miner_uids for uid in (maintainer_map.get(repo_name) or []))
+            )
+        )
+        if pays:
+            eligible[repo_name] = repo_config.emission_share
+    return eligible
 
 
 def _calculate_score_rewards(

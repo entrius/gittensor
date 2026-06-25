@@ -362,8 +362,9 @@
       "infrastructure": 0.5
     },
     "eligibility": {
+      "min_valid_merged_prs": 1,
       "min_credibility": 0.6,
-      "max_open_pr_threshold": 4
+      "max_open_pr_threshold": 1
     },
     "scoring": {
       "pr_lookback_days": 7,

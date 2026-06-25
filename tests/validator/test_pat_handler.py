@@ -331,6 +331,19 @@ class TestHandlePatCheck:
         assert result.has_pat is False
         assert result.pat_valid is False
 
+    def test_unreadable_store_reports_inconclusive(self, mock_validator, use_tmp_pats_file):
+        """A momentarily unreadable store fails closed gracefully: report unknown +
+        retry rather than throwing a raw axon error or claiming 'no PAT stored'."""
+        pat_storage.save_pat(1, 'hotkey_1', 'ghp_stored', 'github_42')
+        use_tmp_pats_file.write_text('not json{{{')
+
+        synapse = _make_check_synapse('hotkey_1')
+        result = _run(handle_pat_check(mock_validator, synapse))
+
+        assert result.has_pat is False
+        assert result.pat_valid is None
+        assert 'temporarily unavailable' in (result.rejection_reason or '')
+
     @patch('gittensor.validator.pat_handler._test_pat_against_repo')
     @patch(
         'gittensor.validator.utils.github_validation.get_github_identity',

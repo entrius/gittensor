@@ -127,9 +127,21 @@ async def handle_pat_check(validator: 'Validator', synapse: PatCheckSynapse) -> 
     """Check if the validator has the miner's PAT stored and re-validate it."""
     hotkey = _get_hotkey(synapse)
     uid = validator.metagraph.hotkeys.index(hotkey)
-    entry = pat_storage.get_pat_by_uid(uid)
 
     bt.logging.info(f'PAT check request — UID: {uid}, hotkey: {hotkey[:16]}...')
+
+    # Reading the store can raise if it is momentarily unreadable. Mirror the
+    # broadcast handler and fail closed gracefully: report unknown + retry rather
+    # than throwing a raw axon error, and never claim "no PAT stored" (which would
+    # mislead the miner into re-broadcasting against an unreadable store).
+    try:
+        entry = pat_storage.get_pat_by_uid(uid)
+    except (json.JSONDecodeError, OSError) as e:
+        synapse.has_pat = False
+        synapse.pat_valid = None
+        synapse.rejection_reason = 'Validator PAT store temporarily unavailable; please retry.'
+        bt.logging.warning(f'PAT check result — UID: {uid}: store temporarily unreadable: {e}')
+        return synapse
 
     # Check if PAT exists and hotkey matches (not a stale entry from a previous miner)
     if entry is None or entry.get('hotkey') != hotkey:

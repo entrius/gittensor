@@ -175,9 +175,16 @@
     "fixed_base_score": 1.0,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
-      "benchmark-improvement": 1.0
+      "eval:XL": 4.0,
+      "eval:L": 2.5,
+      "eval:M": 1.5,
+      "eval:S": 1.0,
+      "eval:XS": 0.5,
+      "eval:BASELINE": 1.0,
+      "eval:none": 0.0,
+      "eval:REJECT": 0.0
     },
-    "maintainer_cut": 0.0,
+    "maintainer_cut": 0.3,
     "trusted_label_pipeline": true
   },
   "JSONbored/awesome-claude": {
@@ -188,7 +195,8 @@
     "label_multipliers": {
       "gittensor:bug": 0.5,
       "gittensor:feature": 1.25,
-      "gittensor:priority": 1.75
+      "gittensor:priority": 1.75,
+      "slop": 0.0
     },
     "eligibility": {
       "min_credibility": 0.5
@@ -216,7 +224,8 @@
     "label_multipliers": {
       "gittensor:bug": 0.5,
       "gittensor:feature": 1.25,
-      "gittensor:priority": 1.75
+      "gittensor:priority": 1.75,
+      "slop": 0.0
     },
     "eligibility": {
       "min_credibility": 0.6
@@ -244,12 +253,13 @@
     "label_multipliers": {
       "gittensor:bug": 0.5,
       "gittensor:feature": 1.5,
-      "gittensor:priority": 2.5
+      "gittensor:priority": 2.5,
+      "slop": 0.0
     },
     "eligibility": {
-      "min_credibility": 0.5
+      "min_credibility": 0.6
     },
-    "maintainer_cut": 0.25,
+    "maintainer_cut": 0.5,
     "scoring": {
       "pr_lookback_days": 7,
       "open_pr_collateral_percent": 0.2,
@@ -344,7 +354,7 @@
     },
     "maintainer_cut": 0.3
   },
-  "e35dev/podcast-design-canvas": {
+  "e35dev/podcast-design-canvas-2": {
     "emission_share": 0.301,
     "issue_discovery_share": 0,
     "maintainer_cut": 0,

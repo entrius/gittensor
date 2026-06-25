@@ -4,6 +4,7 @@
 
 import json
 import threading
+from pathlib import Path
 
 import pytest
 
@@ -88,6 +89,50 @@ class TestLoadAllPats:
         use_tmp_pats_file.write_text('not json{{{')
         entries = pat_storage.load_all_pats()
         assert entries == []
+
+
+class TestSavePatFailsClosed:
+    """The read-then-overwrite wipe (issue #1481, Proof 2): a single failed read of
+    miner_pats.json must never erase every other miner's stored PAT on the next save."""
+
+    def test_transient_read_error_does_not_wipe(self, use_tmp_pats_file, monkeypatch):
+        """A momentary I/O error on read leaves the on-disk store fully intact."""
+        pat_storage.save_pat(10, 'h10', 'p10', 'u10')
+        pat_storage.save_pat(20, 'h20', 'p20', 'u20')
+        pat_storage.save_pat(30, 'h30', 'p30', 'u30')
+        good_bytes = use_tmp_pats_file.read_text()
+
+        real_read_text = Path.read_text
+        failing = {'on': False}
+
+        def flaky_read_text(self, *args, **kwargs):
+            if failing['on'] and self == use_tmp_pats_file:
+                raise OSError('transient I/O error')
+            return real_read_text(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, 'read_text', flaky_read_text)
+
+        # The save must fail closed (raise) instead of overwriting the store.
+        failing['on'] = True
+        with pytest.raises(OSError):
+            pat_storage.save_pat(99, 'h99', 'p99', 'u99')
+        failing['on'] = False
+
+        # Read recovers: every original entry survives; UID 99 was never written.
+        assert use_tmp_pats_file.read_text() == good_bytes
+        assert {e['uid'] for e in pat_storage.load_all_pats()} == {10, 20, 30}
+
+    def test_corrupt_store_save_does_not_shrink(self, use_tmp_pats_file):
+        """A corrupt store is left as-is, not silently overwritten down to one entry."""
+        pat_storage.save_pat(10, 'h10', 'p10', 'u10')
+        pat_storage.save_pat(20, 'h20', 'p20', 'u20')
+
+        use_tmp_pats_file.write_text('not json{{{')
+
+        with pytest.raises(json.JSONDecodeError):
+            pat_storage.save_pat(99, 'h99', 'p99', 'u99')
+
+        assert use_tmp_pats_file.read_text() == 'not json{{{'
 
 
 class TestGetPatByUid:

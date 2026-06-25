@@ -191,6 +191,24 @@ class TestHandlePatBroadcast:
         assert result.accepted is False
         assert 'not registered' in (result.rejection_reason or '')
 
+    @patch('gittensor.validator.pat_handler._test_pat_against_repo', return_value=None)
+    @patch('gittensor.validator.pat_handler.validate_github_credentials', return_value=('github_42', None))
+    def test_unreadable_store_rejected_not_wiped(
+        self, mock_validate, mock_test_query, mock_validator, use_tmp_pats_file
+    ):
+        """A momentarily unreadable store fails closed: the broadcast is rejected (so
+        the miner retries) instead of overwriting the store or raising a raw error."""
+        pat_storage.save_pat(0, 'hotkey_0', 'ghp_existing', 'github_7')
+        use_tmp_pats_file.write_text('not json{{{')
+
+        synapse = _make_broadcast_synapse('hotkey_1', pat='ghp_valid')
+        result = _run(handle_pat_broadcast(mock_validator, synapse))
+
+        assert result.accepted is False
+        assert 'temporarily unavailable' in (result.rejection_reason or '')
+        # The store was not overwritten down to the single incoming entry.
+        assert use_tmp_pats_file.read_text() == 'not json{{{'
+
     @patch('gittensor.validator.pat_handler.validate_github_credentials', return_value=(None, 'PAT invalid'))
     def test_invalid_pat_rejected(self, mock_validate, mock_validator):
         synapse = _make_broadcast_synapse('hotkey_1', pat='ghp_bad')
@@ -312,6 +330,19 @@ class TestHandlePatCheck:
         result = _run(handle_pat_check(mock_validator, synapse))
         assert result.has_pat is False
         assert result.pat_valid is False
+
+    def test_unreadable_store_reports_inconclusive(self, mock_validator, use_tmp_pats_file):
+        """A momentarily unreadable store fails closed gracefully: report unknown +
+        retry rather than throwing a raw axon error or claiming 'no PAT stored'."""
+        pat_storage.save_pat(1, 'hotkey_1', 'ghp_stored', 'github_42')
+        use_tmp_pats_file.write_text('not json{{{')
+
+        synapse = _make_check_synapse('hotkey_1')
+        result = _run(handle_pat_check(mock_validator, synapse))
+
+        assert result.has_pat is False
+        assert result.pat_valid is None
+        assert 'temporarily unavailable' in (result.rejection_reason or '')
 
     @patch('gittensor.validator.pat_handler._test_pat_against_repo')
     @patch(

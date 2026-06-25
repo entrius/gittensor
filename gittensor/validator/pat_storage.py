@@ -15,6 +15,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+import bittensor as bt
+
 PATS_FILE = Path(__file__).resolve().parents[2] / 'data' / 'miner_pats.json'
 
 _lock = threading.Lock()
@@ -28,15 +30,33 @@ def ensure_pats_file() -> None:
 
 
 def load_all_pats() -> list[dict]:
-    """Read all stored PAT entries. Returns empty list if file is missing or corrupt."""
+    """Snapshot all stored PAT entries for a scoring round.
+
+    Read-only and deliberately tolerant: an unreadable store here must not crash
+    the round (an unhandled error would stop the validator) nor wipe anything. It
+    logs loudly and returns [] so the round recovers on the next successful read.
+    The *write* path (save_pat) is the one that fails closed.
+    """
     with _lock:
-        return _read_file()
+        try:
+            return _read_file()
+        except (json.JSONDecodeError, OSError) as e:
+            bt.logging.error(
+                f'miner_pats.json unreadable this round; scoring with no stored PATs until it recovers: {e}'
+            )
+            return []
 
 
 def save_pat(uid: int, hotkey: str, pat: str, github_id: str) -> None:
-    """Upsert a PAT entry by UID. Creates the file if needed."""
+    """Upsert a PAT entry by UID, failing closed on an unreadable store.
+
+    If the existing store cannot be read (corrupt file or a transient I/O error),
+    this raises *without writing*, so a single failed read can never erase every
+    other miner's stored PAT (the read-then-overwrite wipe). The broadcast handler
+    catches this and rejects the broadcast, so the miner retries and nothing is lost.
+    """
     with _lock:
-        entries = _read_file()
+        entries = _read_file()  # fail closed: a failed read raises here, before any write
 
         entry = {
             'uid': uid,
@@ -57,7 +77,11 @@ def save_pat(uid: int, hotkey: str, pat: str, github_id: str) -> None:
 
 
 def get_pat_by_uid(uid: int) -> Optional[dict]:
-    """Look up a single PAT entry by UID. Returns None if not found."""
+    """Look up a single PAT entry by UID. Returns None if not found.
+
+    Propagates (does not swallow) a read error, so callers never mistake an
+    unreadable store for 'no PAT stored for this miner'.
+    """
     with _lock:
         for entry in _read_file():
             if entry.get('uid') == uid:
@@ -66,13 +90,16 @@ def get_pat_by_uid(uid: int) -> Optional[dict]:
 
 
 def _read_file() -> list[dict]:
-    """Read and parse the JSON file. Must be called while holding _lock."""
+    """Read and parse the JSON store. Must be called while holding _lock.
+
+    Returns [] only when the file genuinely does not exist. Raises
+    (json.JSONDecodeError / OSError) on a corrupt or unreadable file so the write
+    path never mistakes a failed read for an empty store and overwrites it. The
+    read paths that must tolerate a transient failure (load_all_pats) catch it.
+    """
     if not PATS_FILE.exists():
         return []
-    try:
-        return json.loads(PATS_FILE.read_text())
-    except (json.JSONDecodeError, OSError):
-        return []
+    return json.loads(PATS_FILE.read_text())
 
 
 def _write_file(entries: list[dict]) -> None:

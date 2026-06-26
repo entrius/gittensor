@@ -10,23 +10,27 @@ import os
 import re
 import struct
 import sys
-import urllib.error
-import urllib.request
 from contextlib import nullcontext
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Callable, ContextManager, Dict, List, Optional, Tuple, TypeVar
 
 import click
+import requests
+from bittensor_wallet.utils import is_valid_ss58_address
+from click.core import ParameterSource
 from rich.console import Console
 
 from gittensor.cli.issue_commands.tables import build_pr_table
-from gittensor.constants import NETWORK_MAP
+from gittensor.cli.json_output import emit_error_json
+from gittensor.constants import BASE_GITHUB_API_URL, MAX_ISSUE_ID, NETWORK_MAP
 from gittensor.validator.issue_competitions.storage_utils import (
+    ISSUES_MAPPING_ROOT_KEY,
     compute_ink5_lazy_key,
     decode_issue_from_storage,
     decode_packed_contract_storage,
     get_contract_child_storage_key,
+    read_contract_packed_storage_bytes,
 )
 
 # Default CLI config paths
@@ -38,7 +42,6 @@ ALPHA_DECIMALS = 9
 ALPHA_RAW_UNIT = 10**ALPHA_DECIMALS
 MIN_BOUNTY_ALPHA = 10
 MAX_BOUNTY_ALPHA = 100_000_000
-MAX_ISSUE_ID = 1_000_000
 MAX_ISSUE_NUMBER = 2**32 - 1
 REPO_PATTERN = re.compile(r'^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$')
 GITHUB_API_TIMEOUT = 10
@@ -53,6 +56,7 @@ STATUS_COLORS: Dict[str, str] = {
 
 
 console = Console()
+err_console = Console(stderr=True)
 
 CommandFunc = TypeVar('CommandFunc', bound=Callable[..., Any])
 NETWORK_CHOICE = click.Choice(['finney', 'test', 'local'], case_sensitive=False)
@@ -123,7 +127,7 @@ def with_cli_behavior_options(
     include_yes: bool = False,
     verbose_help: str = 'Show debug output',
     json_help: str = 'Output as JSON for scripting',
-    yes_help: str = 'Skip confirmation prompt (non-interactive/CI)',
+    yes_help: str = 'Skip confirmation prompt (non-interactive/CI). Alias: --no-prompt (btcli-compatible).',
 ) -> Callable[[CommandFunc], CommandFunc]:
     """Add common CLI behavior options such as verbose, JSON, and confirmation controls."""
     decorators: list[Callable[[CommandFunc], CommandFunc]] = []
@@ -150,7 +154,9 @@ def with_cli_behavior_options(
         decorators.append(
             click.option(
                 '--yes',
+                '--no-prompt',
                 '-y',
+                'yes',
                 is_flag=True,
                 help=yes_help,
             )
@@ -177,40 +183,18 @@ def colorize_status(status: str) -> str:
 
 
 def print_success(message: str) -> None:
-    """Print a standardized success message."""
-    console.print(f'\n[green]\u2713 {message}[/green]\n', highlight=True)
+    """Print a success status message to stderr."""
+    err_console.print(f'\n[green]\u2713 {message}[/green]\n', highlight=True)
 
 
 def print_error(message: str) -> None:
     """Print a standardized error message."""
-    console.print(f'\n[red]\u2717 {message}[/red]\n', highlight=True)
+    err_console.print(f'\n[red]\u2717 {message}[/red]\n', highlight=True)
 
 
 def print_warning(message: str) -> None:
     """Print a warning message."""
-    console.print(f'\n[yellow]{message}[/yellow]\n', highlight=True)
-
-
-def emit_error_json(message: str, error_type: str = 'cli_error') -> None:
-    """Emit a machine-readable error payload to stdout."""
-    payload = {
-        'success': False,
-        'error': {
-            'type': error_type,
-            'message': message,
-        },
-    }
-    # click.echo writes plain text to stdout without Rich styling.
-    click.echo(json.dumps(payload), err=False)
-
-
-def emit_json(payload: Any, pretty: bool = True) -> None:
-    """Emit a machine-readable JSON payload to stdout."""
-    if pretty:
-        output = json.dumps(payload, indent=2, ensure_ascii=False)
-    else:
-        output = json.dumps(payload, separators=(',', ':'), ensure_ascii=False)
-    click.echo(output, err=False)
+    err_console.print(f'\n[yellow]{message}[/yellow]\n', highlight=True)
 
 
 def handle_exception(as_json: bool, message: str, error_type: str = 'cli_error') -> None:
@@ -222,19 +206,28 @@ def handle_exception(as_json: bool, message: str, error_type: str = 'cli_error')
     raise SystemExit(1)
 
 
+def _handle_command_error(e: Exception) -> None:
+    """Print a terminal error message and exit. Gives a tailored message for missing dependencies."""
+    if isinstance(e, ImportError):
+        print_error(f'Missing dependency — {e}')
+    else:
+        print_error(str(e))
+    raise SystemExit(1)
+
+
 def loading_context(message: str, as_json: bool, spinner: str = 'dots', color='cyan') -> ContextManager[Any]:
     """Return a spinner context in human mode, or a no-op context in JSON mode."""
     return (
         nullcontext()
         if as_json
-        else console.status(f'[{color}]{message}[/{color}]', spinner=spinner, spinner_style=color)
+        else err_console.status(f'[{color}]{message}[/{color}]', spinner=spinner, spinner_style=color)
     )
 
 
 def print_network_header(network_name: str, contract_addr: str) -> None:
-    """Print a one-line network and contract context header."""
+    """Print a one-line network and contract context header to stderr."""
     short = f'{contract_addr[:12]}...{contract_addr[-6:]}' if len(contract_addr) > 20 else contract_addr
-    console.print(f'Network: {network_name} \u2022 Contract: {short}')
+    err_console.print(f'Network: {network_name} \u2022 Contract: {short}')
 
 
 def _is_interactive() -> bool:
@@ -242,9 +235,19 @@ def _is_interactive() -> bool:
     return getattr(sys.stdin, 'isatty', lambda: False)()
 
 
-def get_github_pat() -> Optional[str]:
-    """Return GITTENSOR_MINER_PAT from environment, or None."""
-    return os.environ.get('GITTENSOR_MINER_PAT') or None
+def confirm_or_abort(prompt: str, yes: bool, default: bool = False) -> bool:
+    """Prompt for confirmation before a destructive operation.
+
+    Returns True if the caller should proceed. Returns False (and prints a
+    cancellation message) if the user declines. `yes` and non-TTY input both
+    skip the prompt and proceed.
+    """
+    if yes or not _is_interactive():
+        return True
+    if click.confirm(f'\n{prompt}', default=default):
+        return True
+    err_console.print('[yellow]Cancelled.[/yellow]')
+    return False
 
 
 def fetch_open_issue_pull_requests(
@@ -253,9 +256,9 @@ def fetch_open_issue_pull_requests(
     as_json: bool,
 ) -> list:
     """Fetch open PR submissions for a GitHub issue."""
-    token = get_github_pat() or ''
+    token = os.environ.get('GITTENSOR_MINER_PAT') or ''
     if not token and not as_json:
-        print_warning('No GitHub token (GITTENSOR_MINER_PAT) found; using unauthenticated requests (lower rate limits)')
+        print_warning('No GitHub token found; set GITTENSOR_MINER_PAT to fetch GitHub issue submissions')
 
     try:
         from gittensor.utils.github_api_tools import find_prs_for_issue
@@ -285,34 +288,6 @@ def print_issue_submission_table(
     console.print(build_pr_table(pull_requests))
     suffix = '\n' if trailing_newline else ''
     console.print(f'Showing {len(pull_requests)} submissions{suffix}')
-
-
-def resolve_netuid_from_contract(ws_endpoint: str, contract_addr: str) -> Optional[int]:
-    """Read the subnet netuid stored in the on-chain contract."""
-    # Keep this import local so CLI help can render without optional chain deps installed.
-    from substrateinterface import SubstrateInterface
-
-    substrate = SubstrateInterface(url=ws_endpoint)
-    packed = _read_contract_packed_storage(substrate, contract_addr)
-    if packed and packed.get('netuid') is not None:
-        return int(packed['netuid'])
-    return None
-
-
-def verify_miner_registration(ws_endpoint: str, contract_addr: str, hotkey_ss58: str) -> bool:
-    """Return whether the hotkey is registered on the subnet configured by the contract netuid."""
-    import bittensor as bt
-
-    netuid = resolve_netuid_from_contract(ws_endpoint, contract_addr)
-    if netuid is None:
-        return False
-
-    subtensor = bt.Subtensor(network=ws_endpoint)
-    try:
-        return bool(subtensor.is_hotkey_registered(netuid=netuid, hotkey_ss58=hotkey_ss58))
-    except TypeError:
-        # API compatibility fallback across bittensor versions.
-        return bool(subtensor.is_hotkey_registered(hotkey_ss58, netuid))
 
 
 # ---------------------------------------------------------------------------
@@ -351,7 +326,7 @@ def validate_bounty_amount(bounty: str) -> int:
             param_hint='--bounty',
         )
 
-    sign, digits, exponent = d.as_tuple()
+    _sign, _digits, exponent = d.as_tuple()
     decimal_places = max(0, -int(exponent))
     if decimal_places > ALPHA_DECIMALS:
         raise click.BadParameter(
@@ -366,12 +341,37 @@ def validate_bounty_amount(bounty: str) -> int:
     return raw
 
 
-def validate_repository(repo: str, verify_exists: bool = True) -> Tuple[str, str]:
+def _raise_github_verification_required(
+    check: str,
+    detail: str,
+    *,
+    param_hint: str,
+) -> None:
+    """Raise BadParameter when a GitHub existence probe could not complete.
+
+    Used by the strict variants of validate_repository and validate_github_issue
+    so mutation commands never fall through to on-chain writes on transient failures.
+    """
+    raise click.BadParameter(
+        f'Could not verify {check} on GitHub ({detail}). Try again when GitHub is reachable.',
+        param_hint=param_hint,
+    )
+
+
+def validate_repository(
+    repo: str,
+    verify_exists: bool = True,
+    *,
+    require_verified_exists: bool = False,
+) -> Tuple[str, str]:
     """Validate owner/repo format and optionally verify it exists on GitHub.
 
-    Returns (owner, repo_name) on success.
-    Raises click.BadParameter on failure.
+    Returns (owner, repo_name) on success. Raises click.BadParameter on failure.
+    Pass require_verified_exists=True to abort on transient GitHub errors instead
+    of warning and continuing; requires verify_exists=True.
     """
+    if require_verified_exists and not verify_exists:
+        raise ValueError('require_verified_exists requires verify_exists=True')
     repo = repo.strip()
 
     if not REPO_PATTERN.match(repo):
@@ -384,46 +384,87 @@ def validate_repository(repo: str, verify_exists: bool = True) -> Tuple[str, str
     owner, repo_name = repo.split('/', 1)
 
     if verify_exists:
-        url = f'https://api.github.com/repos/{owner}/{repo_name}'
         try:
-            req = urllib.request.Request(url, headers={'User-Agent': 'gittensor-cli'})
-            urllib.request.urlopen(req, timeout=GITHUB_API_TIMEOUT)
-        except urllib.error.HTTPError as e:
-            if e.code == 404:
+            resp = requests.get(
+                f'{BASE_GITHUB_API_URL}/repos/{owner}/{repo_name}',
+                headers={'User-Agent': 'gittensor-cli'},
+                timeout=GITHUB_API_TIMEOUT,
+            )
+            if resp.status_code == 404:
                 raise click.BadParameter(
                     f"Repository '{owner}/{repo_name}' not found on GitHub",
                     param_hint='--repo',
                 )
-            # Non-404 HTTP errors: warn but don't block
-            console.print(f'[yellow]Warning: GitHub API returned {e.code} — skipping existence check[/yellow]')
-        except (urllib.error.URLError, OSError):
-            console.print('[yellow]Warning: Could not reach GitHub API — skipping existence check[/yellow]')
+            if not resp.ok:
+                if require_verified_exists:
+                    _raise_github_verification_required(
+                        f"repository '{owner}/{repo_name}'",
+                        f'status {resp.status_code}',
+                        param_hint='--repo',
+                    )
+                err_console.print(
+                    f'[yellow]Warning: GitHub API returned {resp.status_code} — skipping existence check[/yellow]'
+                )
+        except requests.RequestException as exc:
+            if require_verified_exists:
+                detail = type(exc).__name__
+                _raise_github_verification_required(
+                    f"repository '{owner}/{repo_name}'",
+                    detail,
+                    param_hint='--repo',
+                )
+            err_console.print('[yellow]Warning: Could not reach GitHub API — skipping existence check[/yellow]')
 
     return owner, repo_name
 
 
-def validate_github_issue(owner: str, repo: str, issue_number: int) -> Optional[Dict[str, Any]]:
+def validate_github_issue(
+    owner: str,
+    repo: str,
+    issue_number: int,
+    *,
+    require_verified_exists: bool = False,
+) -> Optional[Dict[str, Any]]:
     """Verify a GitHub issue exists, is open, and is not a pull request.
 
     Returns the issue JSON data on success, or None if verification was skipped
-    due to network issues.  Raises click.BadParameter on validation failure.
+    due to network issues. Raises click.BadParameter on validation failure.
+    Pass require_verified_exists=True to abort on transient errors instead of
+    warning and continuing.
     """
-    url = f'https://api.github.com/repos/{owner}/{repo}/issues/{issue_number}'
     try:
-        req = urllib.request.Request(url, headers={'User-Agent': 'gittensor-cli'})
-        resp = urllib.request.urlopen(req, timeout=GITHUB_API_TIMEOUT)
-        data = json.loads(resp.read().decode())
-    except urllib.error.HTTPError as e:
-        if e.code == 404:
-            raise click.BadParameter(
-                f'Issue #{issue_number} not found in {owner}/{repo}',
+        resp = requests.get(
+            f'{BASE_GITHUB_API_URL}/repos/{owner}/{repo}/issues/{issue_number}',
+            headers={'User-Agent': 'gittensor-cli'},
+            timeout=GITHUB_API_TIMEOUT,
+        )
+    except requests.RequestException as exc:
+        if require_verified_exists:
+            detail = type(exc).__name__
+            _raise_github_verification_required(
+                f'issue #{issue_number} in {owner}/{repo}',
+                detail,
                 param_hint='--issue',
             )
-        console.print(f'[yellow]Warning: GitHub API returned {e.code} — skipping issue check[/yellow]')
+        err_console.print('[yellow]Warning: Could not reach GitHub API — skipping issue check[/yellow]')
         return None
-    except (urllib.error.URLError, OSError):
-        console.print('[yellow]Warning: Could not reach GitHub API — skipping issue check[/yellow]')
+
+    if resp.status_code == 404:
+        raise click.BadParameter(
+            f'Issue #{issue_number} not found in {owner}/{repo}',
+            param_hint='--issue',
+        )
+    if not resp.ok:
+        if require_verified_exists:
+            _raise_github_verification_required(
+                f'issue #{issue_number} in {owner}/{repo}',
+                f'status {resp.status_code}',
+                param_hint='--issue',
+            )
+        err_console.print(f'[yellow]Warning: GitHub API returned {resp.status_code} — skipping issue check[/yellow]')
         return None
+
+    data = resp.json()
 
     if 'pull_request' in data:
         raise click.BadParameter(
@@ -434,53 +475,23 @@ def validate_github_issue(owner: str, repo: str, issue_number: int) -> Optional[
     state = data.get('state', 'unknown')
     if state != 'open':
         if state == 'closed':
-            console.print(f'[yellow]Warning: Issue #{issue_number} is already closed.[/yellow]')
+            err_console.print(f'[yellow]Warning: Issue #{issue_number} is already closed.[/yellow]')
         else:
-            console.print(f'[yellow]Warning: Issue #{issue_number} is {state}.[/yellow]')
+            err_console.print(f'[yellow]Warning: Issue #{issue_number} is {state}.[/yellow]')
 
     return data
 
 
-def validate_issue_id(value: int, param_name: str = 'issue_id') -> int:
-    """Validate an on-chain issue ID (1 to 999999, u32-friendly range)."""
-    if value < 1 or value >= MAX_ISSUE_ID:
-        raise click.BadParameter(
-            f'{param_name} must be between 1 and {MAX_ISSUE_ID - 1} (got {value})',
-            param_hint=param_name,
-        )
-    return value
-
-
 def validate_ss58_address(address: str, param_name: str = 'address') -> str:
-    """Validate an SS58 address.
-
-    Uses substrate-interface's ss58_decode (existing stack) for base58+checksum
-    validation. Falls back to a length/prefix regex if not available.
-    """
+    """Validate an SS58 address via bittensor-wallet's base58+checksum check."""
     address = address.strip()
     if not address:
         raise click.BadParameter(f'Empty {param_name}', param_hint=param_name)
-
-    try:
-        from substrateinterface.utils.ss58 import ss58_decode
-
-        ss58_decode(address)
-        return address
-    except ImportError:
-        pass
-    except Exception:
+    if not is_valid_ss58_address(address):
         raise click.BadParameter(
             f'Invalid SS58 address for {param_name}: {address}',
             param_hint=param_name,
         )
-
-    # Fallback: basic structure check (starts with 1-9/A-H/J-N/P-Z, 46-48 chars)
-    if not re.match(r'^[1-9A-HJ-NP-Za-km-z]{46,48}$', address):
-        raise click.BadParameter(
-            f'Invalid SS58 address for {param_name}: {address}',
-            param_hint=param_name,
-        )
-
     return address
 
 
@@ -516,9 +527,41 @@ def load_config() -> Dict[str, Any]:
     return {}
 
 
+def resolve_wallet_config(
+    wallet_name: str,
+    wallet_hotkey: str,
+    *,
+    wallet_default: str = 'default',
+    hotkey_default: str = 'default',
+) -> Tuple[str, str]:
+    """Resolve wallet values against the CLI config file."""
+    ctx = click.get_current_context(silent=True)
+    config = load_config()
+
+    if ctx is None:
+        wallet_explicit = wallet_name != wallet_default
+        hotkey_explicit = wallet_hotkey != hotkey_default
+    else:
+        wallet_explicit = ctx.get_parameter_source('wallet_name') == ParameterSource.COMMANDLINE
+        hotkey_explicit = ctx.get_parameter_source('wallet_hotkey') == ParameterSource.COMMANDLINE
+
+    effective_wallet = wallet_name if wallet_explicit else config.get('wallet', wallet_default)
+    effective_hotkey = wallet_hotkey if hotkey_explicit else config.get('hotkey', hotkey_default)
+    return effective_wallet, effective_hotkey
+
+
 def get_contract_address(cli_value: str = '') -> str:
     """
-    Get contract address. CLI arg > env var > constants.py default.
+    Get contract address.
+
+    Priority:
+        1. --contract CLI option
+        2. ~/.gittensor/config.json `contract_address`
+        3. CONTRACT_ADDRESS env var
+        4. constants.py default
+
+    Mirrors the resolution order documented on ``load_config`` and already
+    honored by ``resolve_network`` in this module.
 
     Args:
         cli_value: Value passed via --contract CLI option
@@ -530,6 +573,9 @@ def get_contract_address(cli_value: str = '') -> str:
 
     if cli_value:
         return cli_value
+    config_value = load_config().get('contract_address')
+    if config_value:
+        return config_value
     return _get_contract_address()
 
 
@@ -544,8 +590,9 @@ def resolve_network(network: Optional[str] = None, rpc_url: Optional[str] = None
     Priority:
         1. --rpc-url (explicit URL always wins)
         2. --network (mapped to known endpoint)
-        3. Config file ws_endpoint / network
-        4. Default: finney (mainnet)
+        3. Config file `network` (when set to a known network)
+        4. Config file `ws_endpoint` (custom URL fallback)
+        5. Default: finney (mainnet)
 
     Args:
         network: Network name from --network option (test/finney/local)
@@ -567,16 +614,19 @@ def resolve_network(network: Optional[str] = None, rpc_url: Optional[str] = None
         # Treat unknown network value as a custom URL
         return network, 'custom'
 
-    # Fall back to config file
+    # Fall back to config file. Prefer an explicit, recognized `network` over
+    # `ws_endpoint`: a stale dev `ws_endpoint` (e.g. localhost) shouldn't silently
+    # override a user who set `network: finney` to point at mainnet.
     config = load_config()
-    if config.get('ws_endpoint'):
-        endpoint = config['ws_endpoint']
-        name = _URL_TO_NETWORK.get(endpoint, config.get('network', 'custom'))
-        return endpoint, name
 
     config_network = config.get('network', '').lower()
     if config_network and config_network in NETWORK_MAP:
         return NETWORK_MAP[config_network], config_network
+
+    if config.get('ws_endpoint'):
+        endpoint = config['ws_endpoint']
+        name = _URL_TO_NETWORK.get(endpoint, config.get('network', 'custom'))
+        return endpoint, name
 
     # Default: finney (mainnet)
     return NETWORK_MAP['finney'], 'finney'
@@ -608,91 +658,103 @@ def _resolve_contract_and_network(
 # ============================================================================
 
 
-def _get_contract_child_storage_key(substrate, contract_addr: str, verbose: bool = False) -> Optional[str]:
-    """
-    Get the child storage key for a contract's trie.
-
-    Args:
-        substrate: SubstrateInterface instance
-        contract_addr: Contract address
-        verbose: If True, print debug output
-
-    Returns:
-        Hex-encoded child storage key or None if contract doesn't exist
-    """
-    try:
-        child_key = get_contract_child_storage_key(substrate, contract_addr)
-        if not child_key:
-            if verbose:
-                console.print(f'[dim]Debug: Contract not found at {contract_addr}[/dim]')
-            return None
-        return child_key
-    except Exception as e:
-        if verbose:
-            console.print(f'[dim]Debug: Contract info query failed: {e}[/dim]')
-        return None
-
-
 def _read_contract_packed_storage(substrate, contract_addr: str, verbose: bool = False) -> Optional[Dict[str, Any]]:
     """
-    Read the packed root storage from a contract using childstate RPC
+    Read the packed root storage from a contract using childstate RPC.
 
     This bypasses the broken state_call/ContractsApi_call method and reads
     storage directly. Works around substrate-interface Ink! 5 compatibility issues.
 
+    Returns ``None`` only when the contract genuinely has no readable packed
+    storage at this address (no child key, no bytes, undersized payload).
+    RPC / decode failures propagate so callers can distinguish a failed read
+    from a clean "no storage yet" state.
+
     Args:
         substrate: SubstrateInterface instance
         contract_addr: Contract address
         verbose: If True, print debug output
 
     Returns:
-        Dict with owner, netuid, next_issue_id, etc. or None on error
+        Dict with owner, netuid, next_issue_id, etc., or ``None`` when the
+        contract has no packed storage at this address.
     """
+    child_key = get_contract_child_storage_key(substrate, contract_addr)
+    if not child_key:
+        if verbose:
+            err_console.print('[dim]Debug: Contract has no child storage key[/dim]')
+        return None
+
+    packed_bytes = read_contract_packed_storage_bytes(substrate, child_key)
+    if not packed_bytes:
+        if verbose:
+            err_console.print('[dim]Debug: No packed storage bytes returned[/dim]')
+        return None
+
+    if verbose:
+        err_console.print(f'[dim]Debug: Packed storage data length = {len(packed_bytes)} bytes[/dim]')
+
+    packed = decode_packed_contract_storage(packed_bytes)
+    if not packed:
+        if verbose:
+            err_console.print(f'[dim]Debug: Packed storage too small ({len(packed_bytes)} < 74 bytes)[/dim]')
+        return None
+
+    return {
+        'owner': substrate.ss58_encode(packed.owner.hex()),
+        'treasury_hotkey': substrate.ss58_encode(packed.treasury_hotkey.hex()),
+        'netuid': packed.netuid,
+        'next_issue_id': packed.next_issue_id,
+        'alpha_pool': packed.alpha_pool,
+    }
+
+
+_ISSUE_STATUS_NAMES = ['Registered', 'Active', 'Completed', 'Cancelled']
+
+
+def _read_one_issue_from_child_storage(
+    substrate, child_key: str, issue_id: int, verbose: bool = False
+) -> Optional[Dict[str, Any]]:
+    """Read and decode a single issue from contract child storage by ID (one RPC).
+
+    RPC failures propagate. Decode failures and a genuinely-absent storage entry
+    return ``None``, matching the existing per-issue contract in the full scan.
+    """
+    encoded_id = struct.pack('<Q', issue_id)
+    lazy_key = compute_ink5_lazy_key(ISSUES_MAPPING_ROOT_KEY, encoded_id)
+
+    val_result = substrate.rpc_request('childstate_getStorage', [child_key, lazy_key, None])
+    if not val_result.get('result'):
+        if verbose:
+            err_console.print(f'[dim]Debug: No storage found for issue_id={issue_id} (key={lazy_key[:20]}...)[/dim]')
+        return None
+
+    data = bytes.fromhex(val_result['result'].replace('0x', ''))
     try:
-        child_key = _get_contract_child_storage_key(substrate, contract_addr, verbose)
-        if not child_key:
-            if verbose:
-                console.print('[dim]Debug: Failed to get contract child storage key[/dim]')
-            return None
+        decoded = decode_issue_from_storage(data)
+        if decoded is None:
+            raise ValueError('Issue decode returned no data')
 
-        keys_result = substrate.rpc_request('childstate_getKeysPaged', [child_key, '0x', 100, None, None])
-        keys = keys_result.get('result', [])
-        if verbose:
-            console.print(f'[dim]Debug: Found {len(keys)} storage keys in contract[/dim]')
-
-        packed_key = next((key for key in keys if key.endswith('00000000')), None)
-        if not packed_key:
-            if verbose:
-                console.print('[dim]Debug: No packed storage key (ending in 00000000) found[/dim]')
-            return None
-
-        val_result = substrate.rpc_request('childstate_getStorage', [child_key, packed_key, None])
-        raw_hex = val_result.get('result')
-        if not raw_hex:
-            if verbose:
-                console.print('[dim]Debug: Failed to read packed storage value[/dim]')
-            return None
-
-        data = bytes.fromhex(raw_hex.replace('0x', ''))
-        if verbose:
-            console.print(f'[dim]Debug: Packed storage data length = {len(data)} bytes[/dim]')
-
-        packed = decode_packed_contract_storage(data)
-        if not packed:
-            if verbose:
-                console.print(f'[dim]Debug: Packed storage too small ({len(data)} < 74 bytes)[/dim]')
-            return None
-
-        return {
-            'owner': substrate.ss58_encode(packed.owner.hex()),
-            'treasury_hotkey': substrate.ss58_encode(packed.treasury_hotkey.hex()),
-            'netuid': packed.netuid,
-            'next_issue_id': packed.next_issue_id,
-            'alpha_pool': packed.alpha_pool,
+        status = (
+            _ISSUE_STATUS_NAMES[decoded.status_byte] if decoded.status_byte < len(_ISSUE_STATUS_NAMES) else 'Unknown'
+        )
+        issue = {
+            'id': decoded.id,
+            'repository_full_name': decoded.repository_full_name,
+            'issue_number': decoded.issue_number,
+            'bounty_amount': decoded.bounty_amount,
+            'target_bounty': decoded.target_bounty,
+            'status': status,
         }
+        if verbose:
+            err_console.print(
+                f'[dim]Debug: Decoded issue {issue["id"]}: '
+                f'{issue["repository_full_name"]}#{issue["issue_number"]}[/dim]'
+            )
+        return issue
     except Exception as e:
         if verbose:
-            console.print(f'[dim]Debug: Failed to read packed storage: {e}[/dim]')
+            err_console.print(f'[dim]Debug: Failed to decode issue {issue_id}: {e}[/dim]')
         return None
 
 
@@ -702,90 +764,58 @@ def _read_issues_from_child_storage(substrate, contract_addr: str, verbose: bool
 
     Uses Ink! 5 lazy mapping key computation to directly read issue storage.
 
+    Returns ``[]`` only when the contract genuinely has no issues yet
+    (no child storage key, missing packed storage, ``next_issue_id <= 1``).
+    RPC / decode failures propagate so callers can distinguish a failed read
+    from a real empty contract.
+
     Args:
         substrate: SubstrateInterface instance
         contract_addr: Contract address
         verbose: If True, print debug output
 
     Returns:
-        List of issue dictionaries
+        List of issue dictionaries (empty for a real empty contract).
     """
-    child_key = _get_contract_child_storage_key(substrate, contract_addr, verbose)
+    child_key = get_contract_child_storage_key(substrate, contract_addr)
     if not child_key:
         if verbose:
-            console.print('[dim]Debug: Cannot read issues - no child storage key[/dim]')
+            err_console.print(f'[dim]Debug: Cannot read issues - no child storage key for {contract_addr}[/dim]')
         return []
 
     # First, read packed storage to get next_issue_id
     packed_storage = _read_contract_packed_storage(substrate, contract_addr, verbose)
     if not packed_storage:
         if verbose:
-            console.print('[dim]Debug: Cannot read issues - packed storage read failed[/dim]')
+            err_console.print('[dim]Debug: Cannot read issues - packed storage read failed[/dim]')
         return []
 
     next_issue_id = packed_storage.get('next_issue_id', 1)
     if verbose:
-        console.print(f'[dim]Debug: next_issue_id from contract = {next_issue_id}[/dim]')
+        err_console.print(f'[dim]Debug: next_issue_id from contract = {next_issue_id}[/dim]')
 
     # Sanity check: next_issue_id should be reasonable (< 1 million for any real deployment)
-    MAX_REASONABLE_ISSUE_ID = 1_000_000
-    if next_issue_id > MAX_REASONABLE_ISSUE_ID:
-        console.print(f'[yellow]Warning: next_issue_id ({next_issue_id}) is unreasonably large.[/yellow]')
-        console.print('[yellow]This may indicate a storage format mismatch. Check contract version.[/yellow]')
+    if next_issue_id > MAX_ISSUE_ID:
+        err_console.print(f'[yellow]Warning: next_issue_id ({next_issue_id}) is unreasonably large.[/yellow]')
+        err_console.print('[yellow]This may indicate a storage format mismatch. Check contract version.[/yellow]')
         return []
 
     # If next_issue_id is 1, no issues have been registered yet
     if next_issue_id <= 1:
         if verbose:
-            console.print('[dim]Debug: No issues registered (next_issue_id <= 1)[/dim]')
+            err_console.print('[dim]Debug: No issues registered (next_issue_id <= 1)[/dim]')
         return []
-
-    issues = []
-    status_names = ['Registered', 'Active', 'Completed', 'Cancelled']
 
     # Iterate through all issue IDs (1 to next_issue_id - 1)
     # Issues mapping root key is '52789899'
     if verbose:
-        console.print(f'[dim]Debug: Reading issues 1 to {next_issue_id - 1} using mapping key 52789899[/dim]')
+        err_console.print(f'[dim]Debug: Reading issues 1 to {next_issue_id - 1} using mapping key 52789899[/dim]')
 
+    issues = []
     for issue_id in range(1, next_issue_id):
-        # SCALE encode u64 as little-endian 8 bytes
-        encoded_id = struct.pack('<Q', issue_id)
-        lazy_key = compute_ink5_lazy_key('52789899', encoded_id)
-
-        val_result = substrate.rpc_request('childstate_getStorage', [child_key, lazy_key, None])
-        if not val_result.get('result'):
-            if verbose:
-                console.print(f'[dim]Debug: No storage found for issue_id={issue_id} (key={lazy_key[:20]}...)[/dim]')
-            continue
-
-        data = bytes.fromhex(val_result['result'].replace('0x', ''))
-        try:
-            decoded = decode_issue_from_storage(data)
-            if decoded is None:
-                raise ValueError('Issue decode returned no data')
-
-            status = status_names[decoded.status_byte] if decoded.status_byte < len(status_names) else 'Unknown'
-
-            issues.append(
-                {
-                    'id': decoded.id,
-                    'repository_full_name': decoded.repository_full_name,
-                    'issue_number': decoded.issue_number,
-                    'bounty_amount': decoded.bounty_amount,
-                    'target_bounty': decoded.target_bounty,
-                    'status': status,
-                }
-            )
-            if verbose:
-                console.print(
-                    f'[dim]Debug: Decoded issue {decoded.id}: '
-                    f'{decoded.repository_full_name}#{decoded.issue_number}[/dim]'
-                )
-        except Exception as e:
-            if verbose:
-                console.print(f'[dim]Debug: Failed to decode issue {issue_id}: {e}[/dim]')
-            continue
+        issue = _read_one_issue_from_child_storage(substrate, child_key, issue_id, verbose)
+        if issue is not None:
+            issues.append(issue)
 
     # Sort by ID
     issues.sort(key=lambda x: x['id'])
@@ -804,7 +834,13 @@ def _make_contract_client(contract_addr: str, ws_endpoint: str, wallet_name: str
         IssueCompetitionContractClient,
     )
 
-    wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
+    effective_wallet, effective_hotkey = resolve_wallet_config(
+        wallet_name,
+        wallet_hotkey,
+        wallet_default='default',
+        hotkey_default='default',
+    )
+    wallet = bt.Wallet(name=effective_wallet, hotkey=effective_hotkey)
     subtensor = bt.Subtensor(network=ws_endpoint)
     client = IssueCompetitionContractClient(
         contract_address=contract_addr,
@@ -820,6 +856,10 @@ def read_issues_from_contract(ws_endpoint: str, contract_addr: str, verbose: boo
     Uses childstate_getStorage RPC to read contract storage directly,
     bypassing the broken ContractsApi_call method in substrate-interface.
 
+    Raises on connection / RPC / decode failures so callers can distinguish a
+    failed read from an empty contract. ``ImportError`` is also propagated;
+    callers are expected to route both through their CLI error handler.
+
     Args:
         ws_endpoint: WebSocket endpoint for Subtensor
         contract_addr: Contract address
@@ -828,30 +868,48 @@ def read_issues_from_contract(ws_endpoint: str, contract_addr: str, verbose: boo
     Returns:
         List of issue dictionaries
     """
-    try:
-        from substrateinterface import SubstrateInterface
+    from async_substrate_interface import SubstrateInterface
 
+    if verbose:
+        err_console.print(f'[dim]Debug: Connecting to {ws_endpoint}...[/dim]')
+
+    substrate = SubstrateInterface(url=ws_endpoint)
+
+    if verbose:
+        err_console.print('[dim]Debug: Connected successfully[/dim]')
+
+    return _read_issues_from_child_storage(substrate, contract_addr, verbose)
+
+
+def read_issue_from_contract(
+    ws_endpoint: str,
+    contract_addr: str,
+    issue_id: int,
+    verbose: bool = False,
+) -> Optional[Dict[str, Any]]:
+    """Read one issue from the contract by ID with a single childstate RPC (no full scan).
+
+    Raises on connection / RPC failures so callers can distinguish a failed read
+    from a missing issue — mirrors the ``read_issues_from_contract`` contract.
+    Returns ``None`` only when the issue is genuinely absent from contract
+    storage (or the contract has no child storage key yet).
+    """
+    from async_substrate_interface import SubstrateInterface
+
+    if verbose:
+        err_console.print(f'[dim]Debug: Connecting to {ws_endpoint}...[/dim]')
+
+    substrate = SubstrateInterface(url=ws_endpoint)
+
+    if verbose:
+        err_console.print('[dim]Debug: Connected successfully[/dim]')
+
+    child_key = get_contract_child_storage_key(substrate, contract_addr)
+    if not child_key:
         if verbose:
-            console.print(f'[dim]Debug: Connecting to {ws_endpoint}...[/dim]')
-
-        # Connect to subtensor
-        substrate = SubstrateInterface(url=ws_endpoint)
-
-        if verbose:
-            console.print('[dim]Debug: Connected successfully[/dim]')
-
-        # Read issues directly from child storage
-        return _read_issues_from_child_storage(substrate, contract_addr, verbose)
-
-    except ImportError as e:
-        console.print(f'[yellow]Cannot read from contract: {e}[/yellow]')
-        console.print('[dim]Install with: uv sync[/dim]')
-        return []
-    except Exception as e:
-        if verbose:
-            console.print(f'[dim]Debug: Connection/read error: {e}[/dim]')
-        console.print(f'[yellow]Error reading from contract: {e}[/yellow]')
-        return []
+            err_console.print(f'[dim]Debug: Cannot read issue - no child storage key for {contract_addr}[/dim]')
+        return None
+    return _read_one_issue_from_child_storage(substrate, child_key, issue_id, verbose)
 
 
 def fetch_issue_from_contract(
@@ -861,8 +919,13 @@ def fetch_issue_from_contract(
     verbose: bool = False,
 ) -> Dict[str, Any]:
     """Resolve an on-chain issue and validate bountied status."""
-    issues = read_issues_from_contract(ws_endpoint, contract_addr, verbose)
-    issue = next((i for i in issues if i.get('id') == issue_id), None)
+    try:
+        issue = read_issue_from_contract(ws_endpoint, contract_addr, issue_id, verbose)
+    except click.ClickException:
+        raise
+    except Exception as e:
+        raise click.ClickException(f'Error reading from contract: {e}')
+
     if not issue:
         raise click.ClickException(f'Issue ID {issue_id} not found on-chain.')
 

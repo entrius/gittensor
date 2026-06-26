@@ -10,27 +10,32 @@ Commands:
     gitt vote list
 """
 
-import json as json_mod
 import re
 
 import click
 from rich.panel import Panel
 from rich.table import Table
 
+from gittensor.cli.json_output import emit_json
+
 from .help import StyledGroup
 from .helpers import (
+    _handle_command_error,
     _make_contract_client,
     _resolve_contract_and_network,
+    confirm_or_abort,
     console,
+    err_console,
+    handle_exception,
+    loading_context,
     print_error,
     print_network_header,
     print_success,
-    validate_issue_id,
-    validate_ss58_address,
     with_cli_behavior_options,
     with_network_contract_options,
     with_wallet_options,
 )
+from .types import CONTRACT_ISSUE, SS58
 
 
 def parse_pr_number(pr_input: str) -> int:
@@ -70,12 +75,13 @@ def vote():
 
 
 @vote.command('solution')
-@click.argument('issue_id', type=int)
-@click.argument('solver_hotkey', type=str)
-@click.argument('solver_coldkey', type=str)
+@click.argument('issue_id', type=CONTRACT_ISSUE)
+@click.argument('solver_hotkey', type=SS58)
+@click.argument('solver_coldkey', type=SS58)
 @click.argument('pr_number_or_url', type=str)
 @with_wallet_options()
 @with_network_contract_options('Contract address (uses config if empty)')
+@with_cli_behavior_options(include_yes=True)
 def val_vote_solution(
     issue_id: int,
     solver_hotkey: str,
@@ -86,6 +92,7 @@ def val_vote_solution(
     network: str,
     rpc_url: str,
     contract: str,
+    yes: bool,
 ):
     """Vote for a solution on an active issue (triggers auto-payout on consensus).
 
@@ -104,9 +111,6 @@ def val_vote_solution(
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
 
     try:
-        validate_issue_id(issue_id)
-        validate_ss58_address(solver_hotkey, 'solver_hotkey')
-        validate_ss58_address(solver_coldkey, 'solver_coldkey')
         pr_number = parse_pr_number(pr_number_or_url)
         if pr_number < 1:
             raise click.BadParameter(
@@ -120,7 +124,7 @@ def val_vote_solution(
 
     print_network_header(network_name, contract_addr)
 
-    console.print(
+    err_console.print(
         Panel(
             f'[cyan]Issue ID:[/cyan] {issue_id}\n'
             f'[cyan]Solver Hotkey:[/cyan] {solver_hotkey}\n'
@@ -131,8 +135,11 @@ def val_vote_solution(
         )
     )
 
+    if not confirm_or_abort(f'Vote that {solver_hotkey} solved issue {issue_id} via PR #{pr_number}?', yes):
+        return
+
     try:
-        with console.status('[bold cyan]Submitting vote...', spinner='dots'):
+        with err_console.status('[bold cyan]Submitting vote...', spinner='dots'):
             wallet, client = _make_contract_client(contract_addr, ws_endpoint, wallet_name, wallet_hotkey)
             result = client.vote_solution(issue_id, solver_hotkey, solver_coldkey, pr_number, wallet)
 
@@ -140,19 +147,17 @@ def val_vote_solution(
             print_success('Solution vote submitted!')
         else:
             print_error('Vote failed.')
-    except ImportError as e:
-        print_error(f'Missing dependency \u2014 {e}')
-        raise SystemExit(1)
+            raise SystemExit(1)
     except Exception as e:
-        print_error(str(e))
-        raise SystemExit(1)
+        _handle_command_error(e)
 
 
 @vote.command('cancel')
-@click.argument('issue_id', type=int)
+@click.argument('issue_id', type=CONTRACT_ISSUE)
 @click.argument('reason', type=str)
 @with_wallet_options()
 @with_network_contract_options('Contract address (uses config if empty)')
+@with_cli_behavior_options(include_yes=True)
 def val_vote_cancel_issue(
     issue_id: int,
     reason: str,
@@ -161,6 +166,7 @@ def val_vote_cancel_issue(
     network: str,
     rpc_url: str,
     contract: str,
+    yes: bool,
 ):
     """Vote to cancel an issue (works on Registered or Active).
 
@@ -176,14 +182,9 @@ def val_vote_cancel_issue(
     """
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
 
-    try:
-        validate_issue_id(issue_id)
-    except click.BadParameter as e:
-        raise click.ClickException(str(e))
-
     print_network_header(network_name, contract_addr)
 
-    console.print(
+    err_console.print(
         Panel(
             f'[cyan]Issue ID:[/cyan] {issue_id}\n[cyan]Reason:[/cyan] {reason}',
             title='Vote Cancel Issue',
@@ -191,8 +192,11 @@ def val_vote_cancel_issue(
         )
     )
 
+    if not confirm_or_abort(f'Vote to cancel issue {issue_id}?', yes):
+        return
+
     try:
-        with console.status('[bold cyan]Submitting cancel vote...', spinner='dots'):
+        with err_console.status('[bold cyan]Submitting cancel vote...', spinner='dots'):
             wallet, client = _make_contract_client(contract_addr, ws_endpoint, wallet_name, wallet_hotkey)
             result = client.vote_cancel_issue(issue_id, reason, wallet)
 
@@ -200,12 +204,9 @@ def val_vote_cancel_issue(
             print_success('Cancel vote submitted!')
         else:
             print_error('Cancel vote failed.')
-    except ImportError as e:
-        print_error(f'Missing dependency \u2014 {e}')
-        raise SystemExit(1)
+            raise SystemExit(1)
     except Exception as e:
-        print_error(str(e))
-        raise SystemExit(1)
+        _handle_command_error(e)
 
 
 @vote.command('list')
@@ -222,17 +223,17 @@ def vote_list_validators(network: str, rpc_url: str, contract: str, as_json: boo
     """
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
 
-    if not as_json:
-        print_network_header(network_name, contract_addr)
+    print_network_header(network_name, contract_addr)
 
     try:
         import bittensor as bt
 
         from gittensor.validator.issue_competitions.contract_client import (
+            ContractReadError,
             IssueCompetitionContractClient,
         )
 
-        with console.status('[bold cyan]Reading validator whitelist...', spinner='dots'):
+        with loading_context('Reading validator whitelist...', as_json):
             subtensor = bt.Subtensor(network=ws_endpoint)
             client = IssueCompetitionContractClient(
                 contract_address=contract_addr,
@@ -241,18 +242,16 @@ def vote_list_validators(network: str, rpc_url: str, contract: str, as_json: boo
             validators = client.get_validators()
 
         n = len(validators)
-        required = (n // 2) + 1
+        required = (n // 2) + 1 if n > 0 else 0
 
         if as_json:
-            console.print(
-                json_mod.dumps(
-                    {
-                        'validators': validators,
-                        'count': n,
-                        'consensus_threshold': required,
-                    },
-                    indent=2,
-                )
+            emit_json(
+                {
+                    'success': True,
+                    'validators': validators,
+                    'count': n,
+                    'consensus_threshold': required,
+                }
             )
             return
 
@@ -268,12 +267,10 @@ def vote_list_validators(network: str, rpc_url: str, contract: str, as_json: boo
             console.print(f'\n[green]Validators:[/green] {n}')
             console.print(f'[green]Consensus threshold:[/green] {required} of {n} votes required')
         else:
-            console.print('[yellow]No validators whitelisted.[/yellow]')
-            console.print('[dim]Add validators with: gitt admin add-vali <HOTKEY>[/dim]')
+            err_console.print('[yellow]No validators whitelisted.[/yellow]')
+            err_console.print('[dim]Add validators with: gitt admin add-vali <HOTKEY>[/dim]')
 
-    except ImportError as e:
-        print_error(f'Missing dependency \u2014 {e}')
-        raise SystemExit(1)
+    except ContractReadError as e:
+        handle_exception(as_json=as_json, message=str(e), error_type='read_failed')
     except Exception as e:
-        print_error(str(e))
-        raise SystemExit(1)
+        handle_exception(as_json=as_json, message=str(e))

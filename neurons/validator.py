@@ -24,7 +24,7 @@ from typing import Dict, List, Set
 import bittensor as bt
 import wandb
 
-from gittensor.__init__ import __version__
+from gittensor import __version__
 from gittensor.classes import MinerEvaluation, MinerEvaluationCache
 from gittensor.validator import pat_storage
 from gittensor.validator.forward import forward
@@ -37,6 +37,7 @@ from gittensor.validator.pat_handler import (
     priority_pat_check,
 )
 from gittensor.validator.utils.config import STORE_DB_RESULTS, WANDB_PROJECT, WANDB_VALIDATOR_NAME
+from gittensor.validator.utils.load_weights import RepositoryConfig
 from gittensor.validator.utils.storage import DatabaseStorage
 from neurons.base.validator import BaseValidatorNeuron
 
@@ -98,11 +99,17 @@ class Validator(BaseValidatorNeuron):
         bt.logging.info('load_state()')
         self.load_state()
 
-    async def bulk_store_evaluation(self, miner_evals: Dict[int, MinerEvaluation], skip_uids: Set[int] = None):
+    async def bulk_store_evaluation(
+        self,
+        miner_evals: Dict[int, MinerEvaluation],
+        master_repositories: Dict[str, RepositoryConfig],
+        skip_uids: Set[int] = None,
+    ):
         """Store all miner evaluations, log summary rather than per-UID.
 
         Args:
             miner_evals: Dict of UID -> MinerEvaluation to store.
+            master_repositories: Master repo registry — one miner_evaluations row per repo.
             skip_uids: Set of UIDs to skip (e.g. cached evaluations that were already stored previously).
         """
         if self.db_storage is None:
@@ -119,7 +126,7 @@ class Validator(BaseValidatorNeuron):
                 continue
 
             try:
-                storage_result = self.db_storage.store_evaluation(evaluation)
+                storage_result = self.db_storage.store_evaluation(evaluation, master_repositories)
                 if storage_result.success:
                     successful_count += 1
                 else:
@@ -139,30 +146,13 @@ class Validator(BaseValidatorNeuron):
         if failed_uids:
             bt.logging.warning(f'Failed to store {len(failed_uids)} UIDs: {failed_uids}')
 
-    async def store_evaluation(self, uid: int, miner_eval: MinerEvaluation):
-        """
-        Stores the miner eval if DB storage is enabled via STORE_DB_RESULTS=true in .env.
-        """
-
-        if self.db_storage is not None:
-            try:
-                storage_result = self.db_storage.store_evaluation(miner_eval)
-
-                if storage_result.success:
-                    bt.logging.success(f'Successfully stored validation results for UID {uid} to DB.')
-                else:
-                    bt.logging.warning(f'Storage partially failed for UID {uid}:')
-                    for error in storage_result.errors:
-                        bt.logging.warning(f'  - {error}')
-
-            except Exception as e:
-                bt.logging.error(f'Error when attempting to store miners evaluation for uid {uid}: {e}')
-
     def store_or_use_cached_evaluation(self, miner_evaluations: Dict[int, MinerEvaluation]) -> Set[int]:
         """
         Handle evaluation cache: store successful evals, fallback to cache for GitHub failures.
 
         Mutates the passed dict, replacing failed evaluations with cached ones if available.
+        A mirror/identity fetch failure routes through the cache-fallback path so the miner
+        is evaluated against a coherent one-round-stale snapshot when no PRs could be loaded.
 
         Returns:
             Set of UIDs that were restored from cache (should be skipped during DB storage
@@ -175,16 +165,15 @@ class Validator(BaseValidatorNeuron):
             if miner_eval.failed_reason is not None:
                 continue
 
-            # Successful evaluation with PRs - store to cache
-            if miner_eval.total_prs > 0:
+            if not miner_eval.github_pr_fetch_failed:
+                # Cache every successful OSS fetch, incl. zero-PR miners; the fallback below won't restore a PR-less entry.
                 self.evaluation_cache.store(miner_eval)
                 continue
 
-            # if failure, try cache fallback
             cached_eval = self.evaluation_cache.get(uid, miner_eval.hotkey, miner_eval.github_id)
-            if cached_eval is not None:
+            if cached_eval is not None and cached_eval.total_prs > 0:
                 bt.logging.info(
-                    f'UID {uid}: GitHub returned no PRs, using cached evaluation '
+                    f'UID {uid}: GitHub fetch failed, using cached evaluation '
                     f'(merged={cached_eval.total_merged_prs}, open={cached_eval.total_open_prs}, '
                     f'closed={cached_eval.total_closed_prs})'
                 )

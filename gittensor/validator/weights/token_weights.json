@@ -1,16 +1,16 @@
 {
   "structural_bonus": {
     "function_definition": 2.0,
-    "function_declaration": 2.5,
+    "function_declaration": 2.0,
     "method_definition": 2.0,
     "method_declaration": 2.0,
     "class_definition": 2.5,
     "class_declaration": 2.5,
     "interface_declaration": 1.75,
     "struct_definition": 1.75,
-    "enum_definition": 1.0,
+    "enum_definition": 1.5,
     "trait_definition": 1.5,
-    "impl_item": 1.0,
+    "impl_item": 1.75,
 
     "if_statement": 0.35,
     "else_clause": 0.2,
@@ -33,7 +33,7 @@
     "raise_statement": 0.1,
     "throw_statement": 0.1,
 
-    "with_statement": 0.6,
+    "with_statement": 0.3,
     "async_function_definition": 1.5,
     "await_expression": 0.3,
 

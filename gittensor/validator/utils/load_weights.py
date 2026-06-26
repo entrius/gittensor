@@ -3,11 +3,36 @@
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import bittensor as bt
 
-from gittensor.constants import NON_CODE_EXTENSIONS
+from gittensor.constants import (
+    DEFAULT_ISSUE_DISCOVERY_SHARE,
+    EMISSION_SHARE_TOLERANCE,
+    EXCESSIVE_PR_PENALTY_BASE_THRESHOLD,
+    MAINTAINER_ISSUE_MULTIPLIER,
+    MAX_OPEN_ISSUE_THRESHOLD,
+    MAX_OPEN_PR_THRESHOLD,
+    MIN_CREDIBILITY,
+    MIN_ISSUE_CREDIBILITY,
+    MIN_TOKEN_SCORE_FOR_VALID_ISSUE,
+    MIN_VALID_MERGED_PRS,
+    MIN_VALID_SOLVED_ISSUES,
+    NON_CODE_EXTENSIONS,
+    OPEN_ISSUE_SPAM_BASE_THRESHOLD,
+    OPEN_ISSUE_SPAM_TOKEN_SCORE_PER_SLOT,
+    OPEN_PR_COLLATERAL_PERCENT,
+    OPEN_PR_THRESHOLD_TOKEN_SCORE,
+    PR_LOOKBACK_DAYS,
+    REVIEW_PENALTY_RATE,
+    SRC_TOK_SATURATION_SCALE,
+    STANDARD_ISSUE_MULTIPLIER,
+    TIME_DECAY_GRACE_PERIOD_HOURS,
+    TIME_DECAY_MIN_MULTIPLIER,
+    TIME_DECAY_SIGMOID_MIDPOINT,
+    TIME_DECAY_SIGMOID_STEEPNESS_SCALAR,
+)
 
 
 @dataclass
@@ -24,19 +49,193 @@ class LanguageConfig:
 
 
 @dataclass
+class RepoEligibilityConfig:
+    """Per-repo overrides for the eligibility / spam knobs.
+
+    Every field is optional; ``None`` means "use the global default constant".
+    Resolve a config into concrete values with ``resolve_eligibility``.
+    """
+
+    min_valid_merged_prs: Optional[int] = None
+    min_credibility: Optional[float] = None
+    excessive_pr_penalty_base_threshold: Optional[int] = None
+    open_pr_threshold_token_score: Optional[float] = None
+    max_open_pr_threshold: Optional[int] = None
+    min_valid_solved_issues: Optional[int] = None
+    min_issue_credibility: Optional[float] = None
+    min_token_score_for_valid_issue: Optional[float] = None
+    open_issue_spam_base_threshold: Optional[int] = None
+    open_issue_spam_token_score_per_slot: Optional[float] = None
+    max_open_issue_threshold: Optional[int] = None
+
+
+@dataclass(frozen=True)
+class ResolvedEligibility:
+    """A ``RepoEligibilityConfig`` with every override resolved to a concrete value."""
+
+    min_valid_merged_prs: int
+    min_credibility: float
+    excessive_pr_penalty_base_threshold: int
+    open_pr_threshold_token_score: float
+    max_open_pr_threshold: int
+    min_valid_solved_issues: int
+    min_issue_credibility: float
+    min_token_score_for_valid_issue: float
+    open_issue_spam_base_threshold: int
+    open_issue_spam_token_score_per_slot: float
+    max_open_issue_threshold: int
+
+
+@dataclass
+class RepoTimeDecayConfig:
+    """Per-repo overrides for the time-decay curve. Every field optional."""
+
+    grace_period_hours: Optional[int] = None
+    sigmoid_midpoint_days: Optional[float] = None
+    sigmoid_steepness: Optional[float] = None
+    min_multiplier: Optional[float] = None
+
+
+@dataclass(frozen=True)
+class ResolvedTimeDecay:
+    """A ``RepoTimeDecayConfig`` with every override resolved to a concrete value."""
+
+    grace_period_hours: int
+    sigmoid_midpoint_days: float
+    sigmoid_steepness: float
+    min_multiplier: float
+
+
+@dataclass
+class RepoScoringConfig:
+    """Per-repo overrides for the scoring knobs.
+
+    Every field is optional; ``None`` means "use the global default constant".
+    Resolve a config into concrete values with ``resolve_scoring``.
+    """
+
+    pr_lookback_days: Optional[int] = None
+    open_pr_collateral_percent: Optional[float] = None
+    review_penalty_rate: Optional[float] = None
+    standard_issue_multiplier: Optional[float] = None
+    maintainer_issue_multiplier: Optional[float] = None
+    src_tok_saturation_scale: Optional[float] = None
+    time_decay: RepoTimeDecayConfig = field(default_factory=RepoTimeDecayConfig)
+
+
+@dataclass(frozen=True)
+class ResolvedScoring:
+    """A ``RepoScoringConfig`` with every override resolved to a concrete value."""
+
+    pr_lookback_days: int
+    open_pr_collateral_percent: float
+    review_penalty_rate: float
+    standard_issue_multiplier: float
+    maintainer_issue_multiplier: float
+    src_tok_saturation_scale: float
+    time_decay: ResolvedTimeDecay
+
+
+@dataclass
 class RepositoryConfig:
     """Configuration for a repository in the master_repositories list.
 
     Attributes:
-        weight: Repository weight for scoring
-        inactive_at: ISO timestamp when repository became inactive (None if active)
+        emission_share: Fraction of the combined scoring pool allocated to this repo
+        issue_discovery_share: Fraction of the repo allocation reserved for issue discovery
         additional_acceptable_branches: List of additional branch patterns to accept (None if only default branch)
+        trusted_label_pipeline: When True, scoring labels count regardless of
+            actor — including GitHub Apps that surface as ``actor_association=NULL``.
+            Defaults to False; only enable on repos with an authoritative label
+            pipeline. See ``resolve_trusted_label_multiplier`` for the threat model.
+        label_multipliers: Per-repo label pattern multipliers. Keys support the
+            same fnmatch wildcard syntax as ``additional_acceptable_branches``.
+        default_label_multiplier: Multiplier used when no configured label
+            pattern matches. Defaults to neutral scoring.
+        fixed_base_score: Override for the PR base score. Expected
+            to be within [0.0, 100.0]; range is enforced by the live-config test.
+        eligibility: Per-repo overrides for the eligibility / spam knobs. Unset
+            fields fall back to the global default constants — see
+            ``resolve_eligibility``.
+        scoring: Per-repo overrides for the scoring knobs. Unset fields fall
+            back to the global default constants — see ``resolve_scoring``.
+        maintainer_cut: Fraction [0.0, 1.0] of this repo's emission slice
+            routed directly to its maintainer miner neurons, split evenly,
+            before normal scoring. Defaults to 0.0 (no carve-out).
 
     """
 
-    weight: float
-    inactive_at: Optional[str] = None
+    emission_share: float
+    issue_discovery_share: float = DEFAULT_ISSUE_DISCOVERY_SHARE
     additional_acceptable_branches: Optional[List[str]] = None
+    trusted_label_pipeline: bool = False
+    label_multipliers: Optional[Dict[str, float]] = None
+    default_label_multiplier: float = 1.0
+    fixed_base_score: Optional[float] = None
+    eligibility: RepoEligibilityConfig = field(default_factory=RepoEligibilityConfig)
+    scoring: RepoScoringConfig = field(default_factory=RepoScoringConfig)
+    maintainer_cut: float = 0.0
+
+
+def resolve_eligibility(cfg: Optional[RepoEligibilityConfig]) -> ResolvedEligibility:
+    """Overlay a repo's eligibility overrides onto the global default constants."""
+    cfg = cfg or RepoEligibilityConfig()
+
+    def pick(value: Any, default: Any) -> Any:
+        return default if value is None else value
+
+    return ResolvedEligibility(
+        min_valid_merged_prs=int(pick(cfg.min_valid_merged_prs, MIN_VALID_MERGED_PRS)),
+        min_credibility=float(pick(cfg.min_credibility, MIN_CREDIBILITY)),
+        excessive_pr_penalty_base_threshold=int(
+            pick(cfg.excessive_pr_penalty_base_threshold, EXCESSIVE_PR_PENALTY_BASE_THRESHOLD)
+        ),
+        open_pr_threshold_token_score=float(pick(cfg.open_pr_threshold_token_score, OPEN_PR_THRESHOLD_TOKEN_SCORE)),
+        max_open_pr_threshold=int(pick(cfg.max_open_pr_threshold, MAX_OPEN_PR_THRESHOLD)),
+        min_valid_solved_issues=int(pick(cfg.min_valid_solved_issues, MIN_VALID_SOLVED_ISSUES)),
+        min_issue_credibility=float(pick(cfg.min_issue_credibility, MIN_ISSUE_CREDIBILITY)),
+        min_token_score_for_valid_issue=float(
+            pick(cfg.min_token_score_for_valid_issue, MIN_TOKEN_SCORE_FOR_VALID_ISSUE)
+        ),
+        open_issue_spam_base_threshold=int(pick(cfg.open_issue_spam_base_threshold, OPEN_ISSUE_SPAM_BASE_THRESHOLD)),
+        open_issue_spam_token_score_per_slot=float(
+            pick(cfg.open_issue_spam_token_score_per_slot, OPEN_ISSUE_SPAM_TOKEN_SCORE_PER_SLOT)
+        ),
+        max_open_issue_threshold=int(pick(cfg.max_open_issue_threshold, MAX_OPEN_ISSUE_THRESHOLD)),
+    )
+
+
+def resolve_time_decay(cfg: Optional[RepoTimeDecayConfig]) -> ResolvedTimeDecay:
+    """Overlay a repo's time-decay overrides onto the global default constants."""
+    cfg = cfg or RepoTimeDecayConfig()
+
+    def pick(value: Any, default: Any) -> Any:
+        return default if value is None else value
+
+    return ResolvedTimeDecay(
+        grace_period_hours=int(pick(cfg.grace_period_hours, TIME_DECAY_GRACE_PERIOD_HOURS)),
+        sigmoid_midpoint_days=float(pick(cfg.sigmoid_midpoint_days, TIME_DECAY_SIGMOID_MIDPOINT)),
+        sigmoid_steepness=float(pick(cfg.sigmoid_steepness, TIME_DECAY_SIGMOID_STEEPNESS_SCALAR)),
+        min_multiplier=float(pick(cfg.min_multiplier, TIME_DECAY_MIN_MULTIPLIER)),
+    )
+
+
+def resolve_scoring(cfg: Optional[RepoScoringConfig]) -> ResolvedScoring:
+    """Overlay a repo's scoring overrides onto the global default constants."""
+    cfg = cfg or RepoScoringConfig()
+
+    def pick(value: Any, default: Any) -> Any:
+        return default if value is None else value
+
+    return ResolvedScoring(
+        pr_lookback_days=int(pick(cfg.pr_lookback_days, PR_LOOKBACK_DAYS)),
+        open_pr_collateral_percent=float(pick(cfg.open_pr_collateral_percent, OPEN_PR_COLLATERAL_PERCENT)),
+        review_penalty_rate=float(pick(cfg.review_penalty_rate, REVIEW_PENALTY_RATE)),
+        standard_issue_multiplier=float(pick(cfg.standard_issue_multiplier, STANDARD_ISSUE_MULTIPLIER)),
+        maintainer_issue_multiplier=float(pick(cfg.maintainer_issue_multiplier, MAINTAINER_ISSUE_MULTIPLIER)),
+        src_tok_saturation_scale=float(pick(cfg.src_tok_saturation_scale, SRC_TOK_SATURATION_SCALE)),
+        time_decay=resolve_time_decay(cfg.time_decay),
+    )
 
 
 @dataclass
@@ -83,14 +282,246 @@ def _get_weights_dir() -> Path:
     return Path(__file__).parent.parent / 'weights'
 
 
+class RepositoryRegistryError(ValueError):
+    """Raised when master_repositories.json violates the emission_share invariants."""
+
+
+def _coerce_share(repo_name: str, field_name: str, raw_value: Any) -> float:
+    if isinstance(raw_value, bool):
+        raise RepositoryRegistryError(f'{repo_name} {field_name} must be a float, got bool')
+    return float(raw_value)
+
+
+_ELIGIBILITY_INT_FIELDS = (
+    'min_valid_merged_prs',
+    'excessive_pr_penalty_base_threshold',
+    'max_open_pr_threshold',
+    'min_valid_solved_issues',
+    'open_issue_spam_base_threshold',
+    'max_open_issue_threshold',
+)
+_ELIGIBILITY_FLOAT_FIELDS = (
+    'min_credibility',
+    'open_pr_threshold_token_score',
+    'min_issue_credibility',
+    'min_token_score_for_valid_issue',
+    'open_issue_spam_token_score_per_slot',
+)
+
+
+def _coerce_eligibility_value(repo_name: str, field_name: str, raw_value: Any, caster: Any) -> Any:
+    if raw_value is None:
+        return None
+    if isinstance(raw_value, bool):
+        raise RepositoryRegistryError(f'{repo_name} eligibility.{field_name} must be a number, got bool')
+    try:
+        return caster(raw_value)
+    except (TypeError, ValueError) as e:
+        raise RepositoryRegistryError(f'{repo_name} eligibility.{field_name} must be a number: {e}') from e
+
+
+def _parse_eligibility(repo_name: str, raw: Any) -> RepoEligibilityConfig:
+    """Parse the optional ``eligibility`` object from a master_repositories.json entry."""
+    if raw is None:
+        return RepoEligibilityConfig()
+    if not isinstance(raw, dict):
+        raise RepositoryRegistryError(f'{repo_name} eligibility must be an object, got {type(raw)}')
+
+    known = set(_ELIGIBILITY_INT_FIELDS) | set(_ELIGIBILITY_FLOAT_FIELDS)
+    unknown = sorted(set(raw) - known)
+    if unknown:
+        raise RepositoryRegistryError(f'{repo_name} eligibility has unknown keys: {unknown}')
+
+    kwargs: Dict[str, Any] = {}
+    for field_name in _ELIGIBILITY_INT_FIELDS:
+        kwargs[field_name] = _coerce_eligibility_value(repo_name, field_name, raw.get(field_name), int)
+    for field_name in _ELIGIBILITY_FLOAT_FIELDS:
+        kwargs[field_name] = _coerce_eligibility_value(repo_name, field_name, raw.get(field_name), float)
+    return RepoEligibilityConfig(**kwargs)
+
+
+_SCORING_INT_FIELDS = ('pr_lookback_days',)
+_SCORING_FLOAT_FIELDS = (
+    'open_pr_collateral_percent',
+    'review_penalty_rate',
+    'standard_issue_multiplier',
+    'maintainer_issue_multiplier',
+    'src_tok_saturation_scale',
+)
+
+
+def _coerce_scoring_value(repo_name: str, field_name: str, raw_value: Any, caster: Any) -> Any:
+    if raw_value is None:
+        return None
+    if isinstance(raw_value, bool):
+        raise RepositoryRegistryError(f'{repo_name} scoring.{field_name} must be a number, got bool')
+    try:
+        return caster(raw_value)
+    except (TypeError, ValueError) as e:
+        raise RepositoryRegistryError(f'{repo_name} scoring.{field_name} must be a number: {e}') from e
+
+
+_TIME_DECAY_INT_FIELDS = ('grace_period_hours',)
+_TIME_DECAY_FLOAT_FIELDS = ('sigmoid_midpoint_days', 'sigmoid_steepness', 'min_multiplier')
+
+
+def _parse_time_decay(repo_name: str, raw: Any) -> RepoTimeDecayConfig:
+    """Parse the optional nested ``scoring.time_decay`` object."""
+    if raw is None:
+        return RepoTimeDecayConfig()
+    if not isinstance(raw, dict):
+        raise RepositoryRegistryError(f'{repo_name} scoring.time_decay must be an object, got {type(raw)}')
+
+    known = set(_TIME_DECAY_INT_FIELDS) | set(_TIME_DECAY_FLOAT_FIELDS)
+    unknown = sorted(set(raw) - known)
+    if unknown:
+        raise RepositoryRegistryError(f'{repo_name} scoring.time_decay has unknown keys: {unknown}')
+
+    kwargs: Dict[str, Any] = {}
+    for field_name in _TIME_DECAY_INT_FIELDS:
+        kwargs[field_name] = _coerce_scoring_value(repo_name, f'time_decay.{field_name}', raw.get(field_name), int)
+    for field_name in _TIME_DECAY_FLOAT_FIELDS:
+        kwargs[field_name] = _coerce_scoring_value(repo_name, f'time_decay.{field_name}', raw.get(field_name), float)
+    return RepoTimeDecayConfig(**kwargs)
+
+
+def _parse_scoring(repo_name: str, raw: Any) -> RepoScoringConfig:
+    """Parse the optional ``scoring`` object from a master_repositories.json entry."""
+    if raw is None:
+        return RepoScoringConfig()
+    if not isinstance(raw, dict):
+        raise RepositoryRegistryError(f'{repo_name} scoring must be an object, got {type(raw)}')
+
+    unknown = sorted(set(raw) - set(_SCORING_INT_FIELDS) - set(_SCORING_FLOAT_FIELDS) - {'time_decay'})
+    if unknown:
+        raise RepositoryRegistryError(f'{repo_name} scoring has unknown keys: {unknown}')
+
+    kwargs: Dict[str, Any] = {}
+    for field_name in _SCORING_INT_FIELDS:
+        kwargs[field_name] = _coerce_scoring_value(repo_name, field_name, raw.get(field_name), int)
+    for field_name in _SCORING_FLOAT_FIELDS:
+        kwargs[field_name] = _coerce_scoring_value(repo_name, field_name, raw.get(field_name), float)
+    kwargs['time_decay'] = _parse_time_decay(repo_name, raw.get('time_decay'))
+    return RepoScoringConfig(**kwargs)
+
+
+def _validate_emission_shares(configs: Dict[str, RepositoryConfig]) -> None:
+    total_share = 0.0
+    for repo_name, config in configs.items():
+        if not 0.0 <= config.emission_share <= 1.0:
+            raise RepositoryRegistryError(
+                f'{repo_name} emission_share must be within [0, 1], got {config.emission_share}'
+            )
+        if not 0.0 <= config.issue_discovery_share <= 1.0:
+            raise RepositoryRegistryError(
+                f'{repo_name} issue_discovery_share must be within [0, 1], got {config.issue_discovery_share}'
+            )
+        if not 0.0 <= config.maintainer_cut <= 1.0:
+            raise RepositoryRegistryError(
+                f'{repo_name} maintainer_cut must be within [0, 1], got {config.maintainer_cut}'
+            )
+        total_share += config.emission_share
+
+    if total_share > 1.0 + EMISSION_SHARE_TOLERANCE:
+        raise RepositoryRegistryError(f'total emission_share must be <= 1.0, got {total_share}')
+
+
+def _validate_eligibility_configs(configs: Dict[str, RepositoryConfig]) -> None:
+    """Range-check every repo's resolved eligibility config."""
+    for repo_name, config in configs.items():
+        resolved = resolve_eligibility(config.eligibility)
+        for field_name in ('min_credibility', 'min_issue_credibility'):
+            value = getattr(resolved, field_name)
+            if not 0.0 <= value <= 1.0:
+                raise RepositoryRegistryError(
+                    f'{repo_name} eligibility.{field_name} must be within [0, 1], got {value}'
+                )
+        non_negative = (
+            'min_valid_merged_prs',
+            'excessive_pr_penalty_base_threshold',
+            'max_open_pr_threshold',
+            'min_valid_solved_issues',
+            'min_token_score_for_valid_issue',
+            'open_issue_spam_base_threshold',
+            'max_open_issue_threshold',
+        )
+        for field_name in non_negative:
+            value = getattr(resolved, field_name)
+            if value < 0:
+                raise RepositoryRegistryError(f'{repo_name} eligibility.{field_name} must be >= 0, got {value}')
+        # Used as divisors in the open-PR / open-issue slot math.
+        for field_name in ('open_pr_threshold_token_score', 'open_issue_spam_token_score_per_slot'):
+            value = getattr(resolved, field_name)
+            if value <= 0:
+                raise RepositoryRegistryError(
+                    f'{repo_name} eligibility.{field_name} must be > 0 (used as a divisor), got {value}'
+                )
+
+
+def _validate_scoring_configs(configs: Dict[str, RepositoryConfig]) -> None:
+    """Range-check every repo's resolved scoring config."""
+    for repo_name, config in configs.items():
+        resolved = resolve_scoring(config.scoring)
+        if not 1 <= resolved.pr_lookback_days <= 90:
+            raise RepositoryRegistryError(
+                f'{repo_name} scoring.pr_lookback_days must be within [1, 90], got {resolved.pr_lookback_days}'
+            )
+        if not 0.0 <= resolved.open_pr_collateral_percent <= 1.0:
+            raise RepositoryRegistryError(
+                f'{repo_name} scoring.open_pr_collateral_percent must be within [0, 1], '
+                f'got {resolved.open_pr_collateral_percent}'
+            )
+        if not 0.0 < resolved.review_penalty_rate <= 1.0:
+            raise RepositoryRegistryError(
+                f'{repo_name} scoring.review_penalty_rate must be within (0, 1], got {resolved.review_penalty_rate}'
+            )
+        if not 1.0 <= resolved.standard_issue_multiplier <= 5.0:
+            raise RepositoryRegistryError(
+                f'{repo_name} scoring.standard_issue_multiplier must be within [1, 5], '
+                f'got {resolved.standard_issue_multiplier}'
+            )
+        if not 1.0 <= resolved.maintainer_issue_multiplier <= 5.0:
+            raise RepositoryRegistryError(
+                f'{repo_name} scoring.maintainer_issue_multiplier must be within [1, 5], '
+                f'got {resolved.maintainer_issue_multiplier}'
+            )
+        if not 10.0 <= resolved.src_tok_saturation_scale <= 500.0:
+            raise RepositoryRegistryError(
+                f'{repo_name} scoring.src_tok_saturation_scale must be within [10, 500], '
+                f'got {resolved.src_tok_saturation_scale}'
+            )
+        if not 0 <= resolved.time_decay.grace_period_hours <= 168:
+            raise RepositoryRegistryError(
+                f'{repo_name} scoring.time_decay.grace_period_hours must be within [0, 168], '
+                f'got {resolved.time_decay.grace_period_hours}'
+            )
+        if not 1.0 <= resolved.time_decay.sigmoid_midpoint_days <= 90.0:
+            raise RepositoryRegistryError(
+                f'{repo_name} scoring.time_decay.sigmoid_midpoint_days must be within [1, 90], '
+                f'got {resolved.time_decay.sigmoid_midpoint_days}'
+            )
+        if not 0.01 <= resolved.time_decay.sigmoid_steepness <= 5.0:
+            raise RepositoryRegistryError(
+                f'{repo_name} scoring.time_decay.sigmoid_steepness must be within [0.01, 5], '
+                f'got {resolved.time_decay.sigmoid_steepness}'
+            )
+        if not 0.0 <= resolved.time_decay.min_multiplier <= 1.0:
+            raise RepositoryRegistryError(
+                f'{repo_name} scoring.time_decay.min_multiplier must be within [0, 1], '
+                f'got {resolved.time_decay.min_multiplier}'
+            )
+
+
 def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
     """
-    Load repository weights from the local JSON file.
+    Load repository emission shares from the local JSON file.
     Normalizes repository names to lowercase for case-insensitive matching.
 
     Returns:
         Dictionary mapping normalized (lowercase) fullName (str) to RepositoryConfig object.
-        Returns empty dict on error.
+        Returns empty dict when the file is missing or invalid JSON. Raises
+        RepositoryRegistryError or ValueError when registry entries violate the
+        emission-share contract.
     """
     weights_file = _get_weights_dir() / 'master_repositories.json'
 
@@ -99,23 +530,43 @@ def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
             data = json.load(f)
 
         if not isinstance(data, dict):
-            bt.logging.error(f'Expected dict from {weights_file}, got {type(data)}')
-            return {}
+            raise RepositoryRegistryError(f'Expected dict from {weights_file}, got {type(data)}')
 
         # Parse JSON data into RepositoryConfig objects
         normalized_data: Dict[str, RepositoryConfig] = {}
         for repo_name, metadata in data.items():
             try:
+                if not isinstance(metadata, dict):
+                    raise TypeError(f'expected object metadata, got {type(metadata)}')
                 config = RepositoryConfig(
-                    weight=float(metadata.get('weight', 0.01)),
-                    inactive_at=metadata.get('inactive_at'),
+                    emission_share=_coerce_share(repo_name, 'emission_share', metadata['emission_share']),
+                    issue_discovery_share=_coerce_share(
+                        repo_name,
+                        'issue_discovery_share',
+                        metadata.get('issue_discovery_share', DEFAULT_ISSUE_DISCOVERY_SHARE),
+                    ),
                     additional_acceptable_branches=metadata.get('additional_acceptable_branches'),
+                    trusted_label_pipeline=bool(metadata.get('trusted_label_pipeline', False)),
+                    label_multipliers=(
+                        {str(label): float(multiplier) for label, multiplier in metadata['label_multipliers'].items()}
+                        if metadata.get('label_multipliers') is not None
+                        else None
+                    ),
+                    default_label_multiplier=float(metadata.get('default_label_multiplier', 1.0)),
+                    fixed_base_score=metadata.get('fixed_base_score'),
+                    eligibility=_parse_eligibility(repo_name, metadata.get('eligibility')),
+                    scoring=_parse_scoring(repo_name, metadata.get('scoring')),
+                    maintainer_cut=_coerce_share(repo_name, 'maintainer_cut', metadata.get('maintainer_cut', 0.0)),
                 )
                 normalized_data[repo_name.lower()] = config
-            except (ValueError, TypeError) as e:
-                bt.logging.warning(f'Could not parse config for {repo_name}: {e}, using defaults')
-                # Create config with defaults if parsing fails
-                normalized_data[repo_name.lower()] = RepositoryConfig(weight=float(metadata.get('weight', 0.01)))
+            except RepositoryRegistryError:
+                raise
+            except (KeyError, ValueError, TypeError) as e:
+                raise ValueError(f'Could not parse config for {repo_name}: {e}') from e
+
+        _validate_emission_shares(normalized_data)
+        _validate_eligibility_configs(normalized_data)
+        _validate_scoring_configs(normalized_data)
 
         bt.logging.debug(f'Successfully loaded {len(normalized_data)} repository entries from {weights_file}')
         return normalized_data
@@ -125,9 +576,6 @@ def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
         return {}
     except json.JSONDecodeError as e:
         bt.logging.error(f'Failed to parse JSON from {weights_file}: {e}')
-        return {}
-    except Exception as e:
-        bt.logging.error(f'Unexpected error loading repository weights: {e}')
         return {}
 
 

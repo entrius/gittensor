@@ -3,56 +3,10 @@
 
 """Reusable Rich table presets."""
 
-from dataclasses import dataclass
 from typing import Any, Dict, List
 
 from rich import box
 from rich.table import Table
-
-
-@dataclass(frozen=True)
-class TableTheme:
-    box_style: box.Box
-    header_style: str
-    border_style: str
-    show_lines: bool
-    pad_edge: bool
-
-
-TABLE_THEMES = {
-    # Full wrapped grid
-    'square': TableTheme(
-        box_style=box.SQUARE,
-        header_style='bold white',  #'bold magenta',
-        border_style='grey35',
-        show_lines=True,
-        pad_edge=True,
-    ),
-    # Minimal separators with a heavier header rule
-    'minimal': TableTheme(
-        box_style=box.MINIMAL_HEAVY_HEAD,
-        header_style='bold white',
-        border_style='grey50',
-        show_lines=False,
-        pad_edge=False,
-    ),
-}
-
-DEFAULT_TABLE_THEME = 'minimal'
-
-
-def build_table(theme: str = DEFAULT_TABLE_THEME, **kwargs) -> Table:
-    """Create a Rich table using a named visual theme."""
-    preset = TABLE_THEMES.get(theme, TABLE_THEMES[DEFAULT_TABLE_THEME])
-    params = {
-        'box': preset.box_style,
-        'header_style': preset.header_style,
-        'border_style': preset.border_style,
-        'show_lines': preset.show_lines,
-        'pad_edge': preset.pad_edge,
-    }
-    params.update(kwargs)
-    return Table(**params)
 
 
 def build_pr_table(prs: List[Dict[str, Any]]) -> Table:
@@ -61,7 +15,14 @@ def build_pr_table(prs: List[Dict[str, Any]]) -> Table:
     Note: ``review_count`` counts APPROVED reviews only. "Approved" means at
     least one approval review exists; it does not mean the PR is merge-ready.
     """
-    table = build_table(theme='square', show_header=True)
+    table = Table(
+        box=box.SQUARE,
+        header_style='bold white',
+        border_style='grey35',
+        show_lines=True,
+        pad_edge=True,
+        show_header=True,
+    )
     table.add_column('PR #', style='white', justify='right')
     table.add_column('Title', style='white', max_width=50)
     table.add_column('Author', style='white')

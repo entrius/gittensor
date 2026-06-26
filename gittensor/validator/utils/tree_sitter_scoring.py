@@ -21,6 +21,7 @@ from gittensor.constants import (
     MAX_LINES_SCORED_FOR_NON_CODE_EXT,
     NON_CODE_EXTENSIONS,
     TEST_FILE_CONTRIBUTION_WEIGHT,
+    TREE_SITTER_PARSE_TIMEOUT_MICROS,
 )
 from gittensor.utils.github_api_tools import FileContentPair
 from gittensor.utils.logging import log_scoring_results
@@ -51,6 +52,8 @@ def get_parser(language: str) -> Optional[Parser]:
         from tree_sitter_language_pack import get_parser as get_ts_parser
 
         parser = get_ts_parser(language)  # type: ignore[arg-type]
+        # Bound the C-level parse so adversarial inputs cannot hang the round.
+        parser.timeout_micros = TREE_SITTER_PARSE_TIMEOUT_MICROS
         _parser_cache[language] = parser
         return parser
     except Exception as e:
@@ -82,13 +85,8 @@ def parse_code(content: str, language: str) -> Optional[Tree]:
 
 # Type alias for node signatures
 # Structural: ("structural", node_type)
-# Leaf: ("leaf", node_type, text)
-NodeSignature = Union[Tuple[str, str], Tuple[str, str, str]]
-
-
-def is_comment_node(node: Node) -> bool:
-    """Check if a node is a comment."""
-    return node.type in COMMENT_NODE_TYPES
+# Leaf: ("leaf", node_type, text_bytes)
+NodeSignature = Union[Tuple[str, str], Tuple[str, str, bytes]]
 
 
 def collect_node_signatures(
@@ -100,7 +98,7 @@ def collect_node_signatures(
 
     Walks the tree and collects signatures for:
     - Structural nodes: ("structural", node_type) - captures structure without content
-    - Leaf nodes: ("leaf", node_type, text) - captures content for meaningful tokens
+    - Leaf nodes: ("leaf", node_type, text_bytes) - captures content for meaningful tokens
 
     Comments are skipped entirely (score 0).
 
@@ -112,33 +110,28 @@ def collect_node_signatures(
         Counter of node signatures (multiset for handling duplicates)
     """
     signatures: Counter[NodeSignature] = Counter()
+    cursor = tree.walk()
 
-    def walk_node(node: Node) -> None:
-        # Skip comments entirely
-        if is_comment_node(node):
-            return
-
+    while True:
+        node: Node = cursor.node  # type: ignore[assignment]
         node_type = node.type
 
-        # Check if this is a structural node (has structural bonus)
-        if weights.get_structural_weight(node_type) > 0:
-            # Structural signature: only type matters (not content)
-            signatures[('structural', node_type)] += 1
+        if node_type not in COMMENT_NODE_TYPES:
+            if weights.get_structural_weight(node_type) > 0:
+                signatures[('structural', node_type)] += 1
+            if node.child_count == 0:
+                signatures[('leaf', node_type, node.text or b'')] += 1
+            if cursor.goto_first_child():
+                continue
 
-        # Check if this is a leaf node
-        if node.child_count == 0:
-            # Skip comment types at leaf level too
-            if node_type not in COMMENT_NODE_TYPES:
-                # Leaf signature: type + text content
-                text = node.text.decode('utf-8') if node.text else ''
-                signatures[('leaf', node_type, text)] += 1
+        if cursor.goto_next_sibling():
+            continue
 
-        # Recurse into children
-        for child in node.children:
-            walk_node(child)
-
-    walk_node(tree.root_node)
-    return signatures
+        while cursor.goto_parent():
+            if cursor.goto_next_sibling():
+                break
+        else:
+            return signatures
 
 
 def has_inline_tests(content: str, extension: str) -> bool:
@@ -309,7 +302,10 @@ def calculate_token_score_from_file_changes(
                     is_test_file=is_test_file,
                     scoring_method='skipped-binary',
                 )
-            elif len(content_pair.new_content.encode('utf-8')) > MAX_FILE_SIZE_BYTES:
+            elif len(content_pair.new_content.encode('utf-8')) > MAX_FILE_SIZE_BYTES or (
+                content_pair.old_content is not None
+                and len(content_pair.old_content.encode('utf-8')) > MAX_FILE_SIZE_BYTES
+            ):
                 bt.logging.debug(f'  │   {file.short_name}: skipped (file too large, >{MAX_FILE_SIZE_BYTES} bytes)')
                 file_result = FileScoreResult(
                     filename=file.short_name,
@@ -328,6 +324,16 @@ def calculate_token_score_from_file_changes(
                     total_lines=file.changes,
                     is_test_file=is_test_file,
                     scoring_method='skipped-unsupported',
+                )
+            elif file.status != 'added' and content_pair.old_content is None:
+                bt.logging.debug(f'  │   {file.short_name}: skipped (non-added file missing base content)')
+                file_result = FileScoreResult(
+                    filename=file.short_name,
+                    score=0.0,
+                    nodes_scored=0,
+                    total_lines=file.changes,
+                    is_test_file=is_test_file,
+                    scoring_method='skipped-missing-base',
                 )
             else:
                 # Tree diff scoring - compare old and new ASTs

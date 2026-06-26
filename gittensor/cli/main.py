@@ -14,21 +14,70 @@ Usage:
 
 import json
 import os
+import sys
+
+# Stub heavy imports during shell completion and --help so tab-completion stays
+# fast and bittensor's argparse doesn't hijack click's help output.
+if os.environ.get('_GITT_COMPLETE') or any(arg in ('-h', '--help') for arg in sys.argv[1:]):
+    import types as _types
+
+    class _Stub(_types.ModuleType):
+        def __getattr__(self, _name):
+            return self
+
+        def __call__(self, *_a, **_kw):
+            return self
+
+    _stub = _Stub('_gitt_cli_stub')
+    for _pkg in ('bittensor', 'requests'):
+        sys.modules[_pkg] = _stub
 
 import click
 from click.shell_completion import get_completion_class
-from rich.console import Console
 from rich.table import Table
 
+from gittensor import __version__
 from gittensor.cli.issue_commands import register_commands
 from gittensor.cli.issue_commands.help import StyledAliasGroup, StyledGroup
-from gittensor.cli.issue_commands.helpers import CONFIG_FILE, GITTENSOR_DIR
+from gittensor.cli.issue_commands.helpers import CONFIG_FILE, GITTENSOR_DIR, console, err_console
+from gittensor.cli.json_output import click_error_type, emit_error_json, wants_json_output
 
-console = Console()
+
+class JsonAwareAliasGroup(StyledAliasGroup):
+    """Root group that rewrites Click parse errors into the canonical JSON
+    envelope when `--json` is in argv; otherwise Click's default rendering."""
+
+    def main(self, args=None, prog_name=None, complete_var=None, standalone_mode=True, **extra):
+        json_mode = wants_json_output(args if args is not None else sys.argv[1:])
+        try:
+            return super().main(
+                args=args,
+                prog_name=prog_name,
+                complete_var=complete_var,
+                standalone_mode=False,
+                **extra,
+            )
+        except click.ClickException as exc:
+            if not standalone_mode:
+                raise
+            if json_mode:
+                emit_error_json(exc.format_message(), error_type=click_error_type(exc))
+            else:
+                exc.show()
+            sys.exit(exc.exit_code)
+        except click.exceptions.Abort:
+            if not standalone_mode:
+                raise
+            click.echo('Aborted!', err=True)
+            sys.exit(1)
+        except click.exceptions.Exit as exc:
+            if not standalone_mode:
+                raise
+            sys.exit(exc.exit_code)
 
 
-@click.group(cls=StyledAliasGroup)
-@click.version_option(version='3.2.0', prog_name='gittensor')
+@click.group(cls=JsonAwareAliasGroup)
+@click.version_option(version=__version__, prog_name='gittensor')
 def cli():
     """Gittensor CLI - Manage issue bounties and validator operations"""
     pass
@@ -45,11 +94,11 @@ def config_group(ctx):
 
 def show_config():
     """Show current CLI configuration"""
-    console.print('\n[bold]Gittensor CLI Configuration[/bold]\n')
+    err_console.print('\n[bold]Gittensor CLI Configuration[/bold]\n')
 
     if not CONFIG_FILE.exists():
-        console.print('[yellow]No config file found at ~/.gittensor/config.json[/yellow]')
-        console.print('[dim]Run ./up.sh --issues to create config[/dim]')
+        err_console.print('[yellow]No config file found at ~/.gittensor/config.json[/yellow]')
+        err_console.print('[dim]Run ./up.sh --issues to create config[/dim]')
         return
 
     try:
@@ -67,23 +116,29 @@ def show_config():
             table.add_row(key, str_val)
 
         console.print(table)
-        console.print(f'\n[dim]Config file: {CONFIG_FILE}[/dim]\n')
+        err_console.print(f'\n[dim]Config file: {CONFIG_FILE}[/dim]\n')
 
     except json.JSONDecodeError:
-        console.print('[red]Error: Invalid JSON in config file[/red]')
+        err_console.print('[red]Error: Invalid JSON in config file[/red]')
     except Exception as e:
-        console.print(f'[red]Error reading config: {e}[/red]')
+        err_console.print(f'[red]Error reading config: {e}[/red]')
+
+
+CONFIG_KEYS = ('wallet', 'hotkey', 'network', 'contract_address', 'ws_endpoint')
 
 
 @config_group.command('set')
-@click.argument('key', type=str)
+@click.argument('key', type=click.Choice(CONFIG_KEYS, case_sensitive=False))
 @click.argument('value', type=str)
 def config_set(key: str, value: str):
     """Set a configuration value.
 
-    [dim]Use this command to override values stored in `~/.gittensor/config.json`.[/dim]
+    [dim]Use this command to override values stored in `~/.gittensor/config.json`.
+    KEY must be one of the recognised settings — unknown keys are rejected so a
+    typo (for example `wallet_name`) cannot silently write a dead entry that
+    downstream commands will ignore.[/dim]
 
-    [dim]Common keys:
+    [dim]Recognised keys:
         wallet              Wallet name
         hotkey              Hotkey name
         contract_address    Contract address
@@ -97,6 +152,7 @@ def config_set(key: str, value: str):
         $ gitt config set network local
     [/dim]
     """
+    key = key.lower()
     # Ensure config directory exists
     GITTENSOR_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -106,7 +162,7 @@ def config_set(key: str, value: str):
         try:
             config = json.loads(CONFIG_FILE.read_text())
         except json.JSONDecodeError:
-            console.print('[yellow]Warning: Existing config was invalid, starting fresh[/yellow]')
+            err_console.print('[yellow]Warning: Existing config was invalid, starting fresh[/yellow]')
 
     # Set the value
     old_value = config.get(key)
@@ -116,9 +172,9 @@ def config_set(key: str, value: str):
     CONFIG_FILE.write_text(json.dumps(config, indent=2))
 
     if old_value is not None:
-        console.print(f'[green]Updated {key}:[/green] {old_value} → {value}')
+        err_console.print(f'[green]Updated {key}:[/green] {old_value} → {value}')
     else:
-        console.print(f'[green]Set {key}:[/green] {value}')
+        err_console.print(f'[green]Set {key}:[/green] {value}')
 
 
 def _detect_shell():

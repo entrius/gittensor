@@ -45,14 +45,24 @@ BULK_UPSERT_PULL_REQUESTS = """
 INSERT INTO pull_requests (
     number, repository_full_name, uid, hotkey, github_id, title, author_login,
     merged_at, pr_created_at, pr_state,
-    repo_weight_multiplier, base_score, issue_multiplier,
-    open_pr_spam_multiplier, pioneer_dividend, pioneer_rank, time_decay_multiplier,
-    credibility_multiplier, review_quality_multiplier, label_multiplier, label,
+    base_score, issue_multiplier,
+    open_pr_spam_multiplier, time_decay_multiplier,
+    review_quality_multiplier, label_multiplier, label,
     earned_score, collateral_score,
     additions, deletions, commits, total_nodes_scored,
     merged_by_login, description, last_edited_at,
-    code_density, token_score, structural_count, structural_score, leaf_count, leaf_score
-) VALUES %s
+    token_score, structural_count, structural_score, leaf_count, leaf_score
+) VALUES (
+    %s, %s, %s, %s, %s, %s, %s,
+    %s, %s, %s,
+    %s, %s,
+    %s, %s,
+    %s, %s, %s,
+    %s, %s,
+    %s, %s, %s, %s,
+    %s, %s, %s,
+    %s, %s, %s, %s, %s
+)
 ON CONFLICT (number, repository_full_name)
 DO UPDATE SET
     uid = EXCLUDED.uid,
@@ -61,14 +71,10 @@ DO UPDATE SET
     author_login = EXCLUDED.author_login,
     merged_at = EXCLUDED.merged_at,
     pr_state = EXCLUDED.pr_state,
-    repo_weight_multiplier = EXCLUDED.repo_weight_multiplier,
     base_score = EXCLUDED.base_score,
     issue_multiplier = EXCLUDED.issue_multiplier,
     open_pr_spam_multiplier = EXCLUDED.open_pr_spam_multiplier,
-    pioneer_dividend = EXCLUDED.pioneer_dividend,
-    pioneer_rank = EXCLUDED.pioneer_rank,
     time_decay_multiplier = EXCLUDED.time_decay_multiplier,
-    credibility_multiplier = EXCLUDED.credibility_multiplier,
     review_quality_multiplier = EXCLUDED.review_quality_multiplier,
     label_multiplier = EXCLUDED.label_multiplier,
     label = EXCLUDED.label,
@@ -81,7 +87,6 @@ DO UPDATE SET
     merged_by_login = EXCLUDED.merged_by_login,
     description = EXCLUDED.description,
     last_edited_at = EXCLUDED.last_edited_at,
-    code_density = EXCLUDED.code_density,
     token_score = EXCLUDED.token_score,
     structural_count = EXCLUDED.structural_count,
     structural_score = EXCLUDED.structural_score,
@@ -97,10 +102,18 @@ INSERT INTO issues (
     author_login, state, author_association,
     author_github_id, is_transferred, updated_at,
     discovery_base_score, discovery_earned_score,
-    discovery_review_quality_multiplier, discovery_repo_weight_multiplier,
+    discovery_review_quality_multiplier,
     discovery_time_decay_multiplier, discovery_credibility_multiplier,
     discovery_open_issue_spam_multiplier
-) VALUES %s
+) VALUES (
+    %s, %s, %s, %s, %s, %s,
+    %s, %s, %s,
+    %s, %s, %s,
+    %s, %s,
+    %s,
+    %s, %s,
+    %s
+)
 ON CONFLICT (number, pr_number, repository_full_name)
 DO UPDATE SET
     title = EXCLUDED.title,
@@ -114,7 +127,6 @@ DO UPDATE SET
     discovery_base_score = EXCLUDED.discovery_base_score,
     discovery_earned_score = EXCLUDED.discovery_earned_score,
     discovery_review_quality_multiplier = EXCLUDED.discovery_review_quality_multiplier,
-    discovery_repo_weight_multiplier = EXCLUDED.discovery_repo_weight_multiplier,
     discovery_time_decay_multiplier = EXCLUDED.discovery_time_decay_multiplier,
     discovery_credibility_multiplier = EXCLUDED.discovery_credibility_multiplier,
     discovery_open_issue_spam_multiplier = EXCLUDED.discovery_open_issue_spam_multiplier
@@ -124,7 +136,7 @@ DO UPDATE SET
 BULK_UPSERT_FILE_CHANGES = """
 INSERT INTO file_changes (
     pr_number, repository_full_name, filename, changes, additions, deletions, status, patch, file_extension
-) VALUES %s
+) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
 ON CONFLICT (pr_number, repository_full_name, filename)
 DO UPDATE SET
     changes = EXCLUDED.changes,
@@ -135,17 +147,24 @@ DO UPDATE SET
     file_extension = EXCLUDED.file_extension
 """
 
-# Miner Evaluation Queries
+# Miner Evaluation Queries — one row per (uid, hotkey, github_id, repository_full_name).
 BULK_UPSERT_MINER_EVALUATION = """
 INSERT INTO miner_evaluations (
-    uid, hotkey, github_id, failed_reason, base_total_score, total_score, total_collateral_score,
-    total_nodes_scored, total_open_prs, total_closed_prs, total_merged_prs, total_prs,
+    uid, hotkey, github_id, repository_full_name, failed_reason, base_total_score, total_score,
+    total_collateral_score, total_nodes_scored, total_open_prs, total_closed_prs, total_merged_prs, total_prs,
     unique_repos_count, is_eligible, credibility,
     total_token_score, total_structural_count, total_structural_score, total_leaf_count, total_leaf_score,
     issue_discovery_score, issue_token_score, issue_credibility, is_issue_eligible,
     total_solved_issues, total_valid_solved_issues, total_closed_issues, total_open_issues
-) VALUES %s
-ON CONFLICT (uid, hotkey, github_id)
+) VALUES (
+    %s, %s, %s, %s, %s, %s, %s,
+    %s, %s, %s, %s, %s, %s,
+    %s, %s, %s,
+    %s, %s, %s, %s, %s,
+    %s, %s, %s, %s,
+    %s, %s, %s, %s
+)
+ON CONFLICT (uid, hotkey, github_id, repository_full_name)
 DO UPDATE SET
     failed_reason = EXCLUDED.failed_reason,
     base_total_score = EXCLUDED.base_total_score,

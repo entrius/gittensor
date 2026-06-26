@@ -6,6 +6,8 @@
 import json
 from unittest.mock import patch
 
+import click
+
 
 def test_submissions_json_schema_is_stable(cli_root, runner, sample_issue, sample_prs):
     with (
@@ -21,10 +23,18 @@ def test_submissions_json_schema_is_stable(cli_root, runner, sample_issue, sampl
         )
 
     assert result.exit_code == 0
-    assert '\x1b[' not in result.output
+    assert '\x1b[' not in result.stdout
 
-    payload = json.loads(result.output)
-    assert set(payload.keys()) == {'issue_id', 'repository', 'issue_number', 'submission_count', 'submissions'}
+    payload = json.loads(result.stdout)
+    assert set(payload.keys()) == {
+        'success',
+        'issue_id',
+        'repository',
+        'issue_number',
+        'submission_count',
+        'submissions',
+    }
+    assert payload['success'] is True
     assert payload['issue_id'] == 42
     assert payload['repository'] == 'entrius/gittensor'
     assert payload['issue_number'] == 223
@@ -65,7 +75,7 @@ def test_submissions_json_handles_missing_closing_numbers(cli_root, runner, samp
         )
 
     assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json.loads(result.stdout)
     assert payload['submission_count'] == 1
     assert payload['submissions'][0]['closes_issue'] is False
 
@@ -79,23 +89,10 @@ def test_submissions_json_missing_contract_returns_config_error(cli_root, runner
         )
 
     assert result.exit_code != 0
-    payload = json.loads(result.output)
+    payload = json.loads(result.stdout)
     assert payload['success'] is False
     assert payload['error']['type'] == 'config_error'
     assert 'Contract address not configured' in payload['error']['message']
-
-
-def test_submissions_json_invalid_issue_id_returns_bad_parameter(cli_root, runner):
-    for invalid_issue_id in [0, -1, 1_000_000]:
-        result = runner.invoke(
-            cli_root,
-            ['issues', 'submissions', '--id', str(invalid_issue_id), '--json'],
-            catch_exceptions=False,
-        )
-        assert result.exit_code != 0
-        payload = json.loads(result.output)
-        assert payload['success'] is False
-        assert payload['error']['type'] == 'bad_parameter'
 
 
 def test_submissions_human_no_open_prs_message(cli_root, runner, sample_issue):
@@ -113,6 +110,32 @@ def test_submissions_human_no_open_prs_message(cli_root, runner, sample_issue):
 
     assert result.exit_code == 0
     assert 'No open submissions available' in result.output
+
+
+def test_submissions_json_contract_read_failure_returns_structured_error(cli_root, runner):
+    """`fetch_issue_from_contract` now converts contract-read failures to a
+    `ClickException`, which `submissions` routes through `handle_exception` —
+    a contract outage must surface as `success: false` instead of the old
+    misleading `Issue ID <N> not found on-chain.` message."""
+    with (
+        patch('gittensor.cli.issue_commands.submissions.get_contract_address', return_value='0xabc'),
+        patch('gittensor.cli.issue_commands.submissions.resolve_network', return_value=('ws://x', 'test')),
+        patch(
+            'gittensor.cli.issue_commands.submissions.fetch_issue_from_contract',
+            side_effect=click.ClickException('Error reading from contract: [Errno 111] Connection refused'),
+        ),
+    ):
+        result = runner.invoke(
+            cli_root,
+            ['issues', 'submissions', '--id', '42', '--json'],
+            catch_exceptions=False,
+        )
+
+    assert result.exit_code != 0
+    payload = json.loads(result.stdout)
+    assert payload['success'] is False
+    assert 'Error reading from contract' in payload['error']['message']
+    assert 'not found on-chain' not in payload['error']['message']
 
 
 def test_submissions_help_via_issue_alias_routes_to_command_help(cli_root, runner):

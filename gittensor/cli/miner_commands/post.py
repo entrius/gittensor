@@ -6,44 +6,72 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import sys
 
 import click
 import requests
-from rich.console import Console
 from rich.table import Table
 
+from gittensor.cli.issue_commands.helpers import NETWORK_CHOICE
 from gittensor.cli.miner_commands.helpers import (
+    DEFAULT_MIN_VALIDATOR_STAKE,
+    DEFAULT_MIN_VALIDATOR_VTRUST,
     NETUID_DEFAULT,
     _connect_bittensor,
     _error,
-    _get_validator_axons,
     _load_config_value,
+    _pat_post_aggregate_counts,
+    _pat_post_row_category,
+    _print,
+    _render_skipped_validators,
+    _require_registered,
+    _require_validator_axons,
     _resolve_endpoint,
     _status,
+    console,
+    err_console,
 )
 from gittensor.constants import BASE_GITHUB_API_URL, GITHUB_HTTP_TIMEOUT_SECONDS, GRAPHQL_VIEWER_QUERY
+from gittensor.utils.github_api_tools import make_graphql_headers, make_headers
 
-console = Console()
+_PAT_POST_STATUS_MARKUP = {
+    'accepted': '[green]✓[/green]',
+    'rejected': '[red]✗[/red]',
+    'no_response': '[yellow]—[/yellow]',
+}
 
 
 @click.command()
 @click.option('--wallet', 'wallet_name', default=None, help='Bittensor wallet name.')
 @click.option('--hotkey', 'wallet_hotkey', default=None, help='Bittensor hotkey name.')
 @click.option('--netuid', type=int, default=NETUID_DEFAULT, help='Subnet UID.', show_default=True)
-@click.option('--network', default=None, help='Network name (local, test, finney).')
+@click.option('--network', type=NETWORK_CHOICE, default=None, help='Network name (local, test, finney).')
 @click.option('--rpc-url', default=None, help='Subtensor RPC endpoint URL (overrides --network).')
 @click.option(
     '--pat',
     default=None,
+    envvar='GITTENSOR_MINER_PAT',
     help='GitHub Personal Access Token. If not provided, falls back to GITTENSOR_MINER_PAT env var or interactive prompt.',
 )
-@click.option('--json-output', 'json_mode', is_flag=True, default=False, help='Output results as JSON.')
-def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_mode):
+@click.option(
+    '--min-vtrust',
+    type=float,
+    default=DEFAULT_MIN_VALIDATOR_VTRUST,
+    show_default=True,
+    help='Minimum validator_trust to broadcast to.',
+)
+@click.option(
+    '--min-stake',
+    type=float,
+    default=DEFAULT_MIN_VALIDATOR_STAKE,
+    show_default=True,
+    help='Minimum validator stake (α) to broadcast to.',
+)
+@click.option('--json', 'json_mode', is_flag=True, default=False, help='Output results as JSON.')
+def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, min_vtrust, min_stake, json_mode):
     """Broadcast your GitHub PAT to all validators on the network.
 
-    Validators will validate your PAT (test GitHub API access, check account age),
+    Validators will validate your PAT (test GitHub API access),
     then store it locally for use during scoring rounds.
 
     \b
@@ -60,8 +88,6 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_m
     """
     from gittensor.synapses import PatBroadcastSynapse
 
-    # 1. Load and validate PAT locally (flag > env var > interactive prompt)
-    pat = pat or os.environ.get('GITTENSOR_MINER_PAT')
     if not pat:
         if json_mode:
             _error('--pat flag or GITTENSOR_MINER_PAT environment variable is required for JSON mode.', json_mode)
@@ -69,26 +95,24 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_m
         pat = click.prompt('Enter your GitHub Personal Access Token', hide_input=True)
 
     # 1b. Validate PAT locally
-    with _status('[bold]Validating PAT...', json_mode):
-        pat_valid = _validate_pat_locally(pat)
+    with _status('[bold]Validating PAT...'):
+        github_login = _validate_pat_locally(pat)
 
-    if not pat_valid:
+    if github_login is None:
         _error('GitHub PAT is invalid or expired. Check your GITTENSOR_MINER_PAT.', json_mode)
         sys.exit(1)
 
-    if not json_mode:
-        console.print('[green]PAT is valid.[/green]')
+    _print(f'[green]PAT is valid.[/green] GitHub account: [bold]@{github_login}[/bold]')
 
     # 2. Resolve wallet and network
     wallet_name = wallet_name or _load_config_value('wallet') or 'default'
     wallet_hotkey = wallet_hotkey or _load_config_value('hotkey') or 'default'
     ws_endpoint = _resolve_endpoint(network, rpc_url)
 
-    if not json_mode:
-        console.print(f'[dim]Wallet: {wallet_name}/{wallet_hotkey} | Network: {ws_endpoint} | Netuid: {netuid}[/dim]')
+    _print(f'[dim]Wallet: {wallet_name}/{wallet_hotkey} | Network: {ws_endpoint} | Netuid: {netuid}[/dim]')
 
     # 3. Set up bittensor objects
-    with _status('[bold]Connecting to network...', json_mode):
+    with _status('[bold]Connecting to network...'):
         try:
             wallet, subtensor, metagraph, dendrite = _connect_bittensor(wallet_name, wallet_hotkey, ws_endpoint, netuid)
         except Exception as e:
@@ -96,16 +120,12 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_m
             sys.exit(1)
 
     # Verify miner is registered
-    if wallet.hotkey.ss58_address not in metagraph.hotkeys:
-        _error(f'Hotkey {wallet.hotkey.ss58_address[:16]}... is not registered on subnet {netuid}.', json_mode)
-        sys.exit(1)
+    _require_registered(wallet, metagraph, netuid, json_mode)
 
-    # 4. Find active validator axons (vtrust > 0.1 = actively participating in consensus)
-    validator_axons, validator_uids = _get_validator_axons(metagraph)
-
-    if not validator_axons:
-        _error('No reachable validator axons found on the network.', json_mode)
-        sys.exit(1)
+    # 4. Find active validator axons (vtrust + serving + stake threshold)
+    validator_axons, validator_uids, excluded = _require_validator_axons(
+        metagraph, json_mode, min_vtrust=min_vtrust, min_stake=min_stake
+    )
 
     # 5. Broadcast
     synapse = PatBroadcastSynapse(github_access_token=pat)
@@ -118,7 +138,7 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_m
             timeout=30.0,
         )
 
-    with _status(f'[bold]Broadcasting to {len(validator_axons)} validators...', json_mode):
+    with _status(f'[bold]Broadcasting to {len(validator_axons)} validators...'):
         responses = asyncio.run(_broadcast())
 
     # 6. Collect results
@@ -137,7 +157,8 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_m
             }
         )
 
-    accepted_count = sum(1 for r in results if r['accepted'] is True)
+    counts = _pat_post_aggregate_counts(results)
+    accepted_count = counts['accepted']
 
     # 7. Display results
     if json_mode:
@@ -145,9 +166,10 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_m
             json.dumps(
                 {
                     'success': accepted_count > 0,
+                    'github_login': github_login,
                     'total_validators': len(results),
-                    'accepted': accepted_count,
-                    'rejected': len(results) - accepted_count,
+                    **counts,
+                    'skipped': excluded,
                     'results': results,
                 },
                 indent=2,
@@ -161,41 +183,42 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, json_m
         table.add_column('Reason', style='dim')
 
         for r in results:
-            if r['accepted'] is True:
-                status = '[green]✓[/green]'
-            elif r['accepted'] is False:
-                status = '[red]✗[/red]'
-            else:
-                status = '[yellow]—[/yellow]'
+            category = _pat_post_row_category(r)
+            status = _PAT_POST_STATUS_MARKUP[category]
             table.add_row(str(r['uid']), r['hotkey'], status, r.get('rejection_reason') or '')
 
         console.print(table)
         console.print(f'\n[bold]{accepted_count}/{len(results)} validators accepted your PAT.[/bold]')
+        _render_skipped_validators(excluded, json_mode)
 
 
-def _validate_pat_locally(pat: str) -> bool:
-    """Validate PAT mirrors the validator-side checks: user identity + GraphQL access."""
-    headers = {'Authorization': f'token {pat}', 'Accept': 'application/vnd.github.v3+json'}
+def _validate_pat_locally(pat: str) -> str | None:
+    """Validate PAT mirrors the validator-side checks: user identity + GraphQL access.
+
+    Returns the GitHub login on success, or None if the PAT is invalid.
+    """
     try:
-        # Check basic auth
-        user_resp = requests.get(f'{BASE_GITHUB_API_URL}/user', headers=headers, timeout=GITHUB_HTTP_TIMEOUT_SECONDS)
+        # Check basic auth and extract login
+        user_resp = requests.get(
+            f'{BASE_GITHUB_API_URL}/user', headers=make_headers(pat), timeout=GITHUB_HTTP_TIMEOUT_SECONDS
+        )
         if user_resp.status_code != 200:
-            return False
+            return None
+        login: str | None = user_resp.json().get('login') or None
 
         # Check GraphQL access (same test the validator runs during PAT broadcast)
-        gql_headers = {'Authorization': f'Bearer {pat}', 'Accept': 'application/json'}
         gql_resp = requests.post(
             f'{BASE_GITHUB_API_URL}/graphql',
             json={'query': GRAPHQL_VIEWER_QUERY},
-            headers=gql_headers,
+            headers=make_graphql_headers(pat),
             timeout=GITHUB_HTTP_TIMEOUT_SECONDS,
         )
         if gql_resp.status_code != 200:
-            console.print(
+            err_console.print(
                 '[red]PAT lacks GraphQL API access. Fine-grained PATs need "Public Repositories (read-only)" permission.[/red]'
             )
-            return False
+            return None
 
-        return True
+        return login
     except requests.RequestException:
-        return False
+        return None

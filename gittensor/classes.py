@@ -1,17 +1,31 @@
+import copy
 import re
-from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from math import prod
-from typing import DefaultDict, Dict, List, Optional, Set
+from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple
 
 import bittensor as bt
 
-from gittensor.constants import MAX_CODE_DENSITY_MULTIPLIER, MIN_TOKEN_SCORE_FOR_BASE_SCORE
-from gittensor.utils.utils import parse_repo_name
+if TYPE_CHECKING:
+    # Forward-reference only — avoids importing the mirror subpackage at runtime
+    # and prevents accidental coupling. The mirror_* lists below are typed as
+    # strings to defer resolution.
+    from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredPR
 
-GITHUB_DOMAIN = 'https://github.com/'
+from gittensor.constants import (
+    EXTENSIONLESS_FILE_EXTENSIONS,
+)
+
+
+def _apply_score_multipliers(base_score: float, multipliers: Dict[str, float], pr_label: str) -> float:
+    """Compute earned score and emit the standard scoring log lines."""
+    earned = base_score * prod(multipliers.values())
+    mult_str = ' × '.join(f'{k}={v:.2f}' for k, v in multipliers.items())
+    bt.logging.info(f'├─ {pr_label} → {earned:.2f}')
+    bt.logging.info(f'│  └─ {base_score:.2f} × {mult_str}')
+    return earned
 
 
 class PRState(Enum):
@@ -32,19 +46,6 @@ class Miner:
 
     def __str__(self) -> str:
         return f'Miner(uid={self.uid}, hotkey={self.hotkey[:8]}..., github_id={self.github_id})'
-
-
-@dataclass
-class Repository:
-    """Repository information"""
-
-    name: str
-    owner: str
-    weight: float
-
-    @property
-    def full_name(self) -> str:
-        return f'{self.owner}/{self.name}'
 
 
 @dataclass
@@ -73,7 +74,10 @@ class FileChange:
 
     def _calculate_file_extension(self) -> str:
         basename = self.filename.split('/')[-1]
-        return basename.split('.')[-1].lower() if '.' in basename else ''
+        if '.' in basename:
+            return basename.split('.')[-1].lower()
+        basename_lower = basename.lower()
+        return basename_lower if basename_lower in EXTENSIONLESS_FILE_EXTENSIONS else ''
 
     def is_test_file(self) -> bool:
         filename_lower = self.filename.lower()
@@ -82,6 +86,10 @@ class FileChange:
         test_dir_patterns = [
             r'(^|/)tests?/',
             r'(^|/)__tests?__/',
+            r'(^|/)androidtest[a-z]*/',
+            r'(^|/)integrationtest/',
+            r'(^|/)spec/',
+            r'\.tests?/',  # .NET MyProject.Tests/FooTests.cs
         ]
         if any(re.search(pattern, filename_lower) for pattern in test_dir_patterns):
             return True
@@ -91,29 +99,16 @@ class FileChange:
             r'^spec_',
             r'_test\.[^.]+$',
             r'_tests\.[^.]+$',
+            r'_spec\.[^.]+$',
             r'\.test\.[^.]+$',
             r'\.tests\.[^.]+$',
             r'\.spec\.[^.]+$',
             r'^test\.[^.]+$',
             r'^tests\.[^.]+$',
+            r'^conftest\.py$',
         ]
 
         return any(re.search(pattern, basename) for pattern in test_patterns)
-
-    @classmethod
-    def from_github_response(cls, pr_number: int, repository_full_name: str, file_diff: DefaultDict) -> 'FileChange':
-        """Create FileChange from GitHub API response"""
-        return cls(
-            pr_number=pr_number,
-            repository_full_name=repository_full_name,
-            filename=file_diff['filename'],
-            changes=file_diff['changes'],
-            additions=file_diff['additions'],
-            deletions=file_diff['deletions'],
-            status=file_diff['status'],
-            patch=file_diff.get('patch'),
-            previous_filename=file_diff.get('previous_filename'),
-        )
 
 
 @dataclass
@@ -132,16 +127,21 @@ class Issue:
 
     # Issue discovery fields
     author_github_id: Optional[str] = None  # Issue author's GitHub user ID (for miner matching)
-    is_transferred: bool = False
+    state_reason: Optional[str] = None  # "COMPLETED", "NOT_PLANNED", "TRANSFERRED", or None (legacy)
     updated_at: Optional[datetime] = None
     body_or_title_edited_at: Optional[datetime] = None
     discovery_base_score: float = 0.0
     discovery_earned_score: float = 0.0
     discovery_review_quality_multiplier: float = 1.0
-    discovery_repo_weight_multiplier: float = 1.0
     discovery_time_decay_multiplier: float = 1.0
     discovery_credibility_multiplier: float = 1.0
     discovery_open_issue_spam_multiplier: float = 1.0
+    discovery_label_multiplier: float = 1.0
+
+    @property
+    def is_transferred(self) -> bool:
+        """Convenience accessor. Prefer gating on `state_reason` directly in new code."""
+        return self.state_reason == 'TRANSFERRED'
 
 
 @dataclass
@@ -164,18 +164,14 @@ class PullRequest:
     # PR state based fields
     pr_state: PRState
 
-    # Score fields
-    repo_weight_multiplier: float = 1.0
+    # Score fields. Credibility is a gate only (#1340); no per-PR credibility multiplier.
     base_score: float = 0.0
     issue_multiplier: float = 1.0
     open_pr_spam_multiplier: float = 1.0
-    pioneer_dividend: float = 0.0  # Additive bonus for pioneering a repo
-    pioneer_rank: int = 0  # 0 = not eligible, 1 = pioneer, 2+ = follower position
     time_decay_multiplier: float = 1.0
-    credibility_multiplier: float = 1.0
     review_quality_multiplier: float = 1.0  # Penalty for CHANGES_REQUESTED reviews from maintainers
-    label_multiplier: float = 1.0  # Multiplier based on PR label (feature, bug, enhancement, refactor)
-    label: Optional[str] = None  # Last label set on the PR
+    label_multiplier: float = 1.0  # Multiplier resolved from repository label config
+    label: Optional[str] = None  # Resolved scoring label, set during scoring
     changes_requested_count: int = 0  # Number of maintainer CHANGES_REQUESTED reviews
     earned_score: float = 0.0
     collateral_score: float = 0.0  # For OPEN PRs: potential_score * collateral_percent
@@ -187,7 +183,6 @@ class PullRequest:
     total_nodes_scored: int = 0  # Total AST nodes scored for this PR
 
     # Token scoring breakdown (after test weight applied)
-    code_density: float = 0.0
     token_score: float = 0.0
     structural_count: int = 0
     structural_score: float = 0.0
@@ -201,128 +196,51 @@ class PullRequest:
     head_ref_oid: Optional[str] = None
     base_ref_oid: Optional[str] = None
 
-    def set_file_changes(self, file_changes: List[FileChange]) -> None:
-        """Set the file changes for this pull request"""
-        self.file_changes = file_changes
 
-    def is_pioneer_eligible(self) -> bool:
-        """Check if this PR qualifies for pioneer consideration.
+@dataclass
+class RepoEvaluation:
+    """Per-repository scoring + eligibility result for one miner.
 
-        A PR is eligible if it is merged and meets the minimum token score quality gate.
-        """
-        return self.merged_at is not None and self.token_score >= MIN_TOKEN_SCORE_FOR_BASE_SCORE
+    Eligibility is computed per repo from only that repo's PRs/issues; one
+    row per (miner, repo) is persisted to the miner_evaluations table.
+    """
 
-    def calculate_final_earned_score(self) -> float:
-        """Combine base score with all multipliers. Pioneer dividend is added separately after."""
-        multipliers = {
-            'repo': self.repo_weight_multiplier,
-            'issue': self.issue_multiplier,
-            'label': self.label_multiplier,
-            'spam': self.open_pr_spam_multiplier,
-            'decay': self.time_decay_multiplier,
-            'cred': self.credibility_multiplier,
-            'review': self.review_quality_multiplier,
-        }
+    repository_full_name: str
 
-        self.earned_score = self.base_score * prod(multipliers.values())
+    # PR-side eligibility / scoring
+    is_eligible: bool = False
+    credibility: float = 0.0
+    base_total_score: float = 0.0
+    total_score: float = 0.0
+    total_collateral_score: float = 0.0
+    total_nodes_scored: int = 0
+    total_token_score: float = 0.0
+    total_structural_count: int = 0
+    total_structural_score: float = 0.0
+    total_leaf_count: int = 0
+    total_leaf_score: float = 0.0
+    total_merged_prs: int = 0
+    total_open_prs: int = 0
+    total_closed_prs: int = 0
 
-        mult_str = ' × '.join(f'{k}={v:.2f}' for k, v in multipliers.items())
-        bt.logging.info(
-            f'├─ {self.pr_state.value} PR #{self.number} ({self.repository_full_name}) → {self.earned_score:.2f}'
-        )
-        bt.logging.info(f'│  └─ {self.base_score:.2f} × {mult_str}')
+    # Issue-discovery eligibility / scoring
+    is_issue_eligible: bool = False
+    issue_credibility: float = 0.0
+    issue_discovery_score: float = 0.0
+    issue_token_score: float = 0.0
+    total_solved_issues: int = 0
+    total_valid_solved_issues: int = 0
+    total_closed_issues: int = 0
+    total_open_issues: int = 0
 
-        return self.earned_score
+    @property
+    def total_prs(self) -> int:
+        return self.total_merged_prs + self.total_open_prs + self.total_closed_prs
 
-    @classmethod
-    def from_graphql_response(cls, pr_data: dict, uid: int, hotkey: str, github_id: Optional[str]) -> 'PullRequest':
-        """Create PullRequest from GraphQL API response for any PR state."""
-        from gittensor.validator.utils.datetime_utils import parse_github_timestamp_to_cst
-
-        repository_full_name = parse_repo_name(pr_data['repository'])
-        pr_state = PRState(pr_data['state'])
-        is_merged = pr_state == PRState.MERGED
-
-        # Issue extraction - merged PRs only count closed issues
-        raw_issues: List[Dict] = pr_data.get('closingIssuesReferences', {}).get('nodes', [])
-        issues = []
-        for issue in raw_issues:
-            if is_merged and not (issue.get('closedAt') and issue.get('state') == 'CLOSED'):
-                continue
-            issue_author = issue.get('author') or {}
-            author_db_id = issue_author.get('databaseId')
-
-            body_edit_history = (issue.get('userContentEdits') or {}).get('nodes') or []
-            latest_body_edit_timestamp = next(
-                (edit.get('editedAt') for edit in body_edit_history if edit and edit.get('editedAt')),
-                None,
-            )
-            latest_body_edit_at = (
-                parse_github_timestamp_to_cst(latest_body_edit_timestamp) if latest_body_edit_timestamp else None
-            )
-
-            title_rename_events = (issue.get('timelineItems') or {}).get('nodes') or []
-            latest_title_rename_timestamp = next(
-                (rename.get('createdAt') for rename in title_rename_events if rename and rename.get('createdAt')),
-                None,
-            )
-            latest_title_rename_at = (
-                parse_github_timestamp_to_cst(latest_title_rename_timestamp) if latest_title_rename_timestamp else None
-            )
-
-            if latest_body_edit_at and latest_title_rename_at:
-                body_or_title_edited_at = max(latest_body_edit_at, latest_title_rename_at)
-            else:
-                body_or_title_edited_at = latest_body_edit_at or latest_title_rename_at
-
-            issues.append(
-                Issue(
-                    number=issue['number'],
-                    pr_number=pr_data['number'],
-                    repository_full_name=repository_full_name,
-                    title=issue['title'],
-                    created_at=parse_github_timestamp_to_cst(issue['createdAt']) if issue.get('createdAt') else None,
-                    closed_at=parse_github_timestamp_to_cst(issue['closedAt']) if issue.get('closedAt') else None,
-                    author_login=issue_author.get('login'),
-                    state=issue.get('state'),
-                    author_association=issue.get('authorAssociation'),
-                    author_github_id=str(author_db_id) if author_db_id else None,
-                    updated_at=parse_github_timestamp_to_cst(issue['updatedAt']) if issue.get('updatedAt') else None,
-                    body_or_title_edited_at=body_or_title_edited_at,
-                )
-            )
-
-        description: str = pr_data.get('bodyText', '')
-        raw_edited_at = pr_data.get('lastEditedAt')
-        last_edited_at = parse_github_timestamp_to_cst(raw_edited_at) if isinstance(raw_edited_at, str) else None
-        merged_at = parse_github_timestamp_to_cst(pr_data['mergedAt']) if is_merged else None
-
-        # Extract last label from timeline events
-        timeline_nodes = pr_data.get('timelineItems', {}).get('nodes', [])
-        label = timeline_nodes[0]['label']['name'].lower() if timeline_nodes else None
-
-        return cls(
-            number=pr_data['number'],
-            repository_full_name=repository_full_name,
-            uid=uid,
-            hotkey=hotkey,
-            github_id=github_id,
-            title=pr_data['title'],
-            author_login=pr_data['author']['login'],
-            merged_at=merged_at,
-            created_at=parse_github_timestamp_to_cst(pr_data['createdAt']),
-            pr_state=pr_state,
-            additions=pr_data['additions'],
-            deletions=pr_data['deletions'],
-            commits=pr_data.get('commits', {}).get('totalCount', 0),
-            merged_by_login=pr_data.get('mergedBy', {}).get('login') if is_merged else None,
-            issues=issues if issues else None,
-            description=description,
-            last_edited_at=last_edited_at,
-            head_ref_oid=pr_data.get('headRefOid'),
-            base_ref_oid=pr_data.get('baseRefOid'),
-            label=label,
-        )
+    def copy_issue_discovery_from(self, other: 'RepoEvaluation') -> None:
+        """Copy the issue-discovery-owned fields from another RepoEvaluation."""
+        for name in _ISSUE_DISCOVERY_REPO_FIELDS:
+            setattr(self, name, getattr(other, name))
 
 
 @dataclass
@@ -330,7 +248,6 @@ class MinerEvaluation:
     uid: int
     hotkey: str
     github_id: Optional[str] = '0'  # will be 0 if miner failed
-    github_pat: Optional[str] = None
     base_total_score: float = 0.0
     total_score: float = 0.0
     total_collateral_score: float = 0.0  # Collateral from open PRs
@@ -344,10 +261,15 @@ class MinerEvaluation:
     total_leaf_count: int = 0
     total_leaf_score: float = 0.0
     failed_reason: Optional[str] = None
+    github_pr_fetch_failed: bool = False
+    mirror_pr_fetch_failed: bool = False
     evaluation_timestamp: Optional[datetime] = None
-    merged_pull_requests: List[PullRequest] = field(default_factory=list)
-    open_pull_requests: List[PullRequest] = field(default_factory=list)
-    closed_pull_requests: List[PullRequest] = field(default_factory=list)
+
+    # Populated by gittensor.validator.oss_contributions.mirror.combine.combine.
+    merged_prs: List['ScoredPR'] = field(default_factory=list)
+    open_prs: List['ScoredPR'] = field(default_factory=list)
+    closed_prs: List['ScoredPR'] = field(default_factory=list)
+
     unique_repos_contributed_to: Set[str] = field(default_factory=set)
 
     # Eligibility and credibility
@@ -362,7 +284,27 @@ class MinerEvaluation:
     total_solved_issues: int = 0
     total_valid_solved_issues: int = 0  # solved issues where solving PR has token_score >= 5
     total_closed_issues: int = 0
-    total_open_issues: int = 0
+    total_open_issues: int = 0  # current mirror-tracked open issues (set by issue_discovery.scan)
+    issue_discovery_issues: List[Issue] = field(default_factory=list)
+
+    # Per-repository eligibility + scoring, keyed by lowercased repository_full_name.
+    # The top-level scalars above are round-level rollups of this map.
+    repo_evaluations: Dict[str, RepoEvaluation] = field(default_factory=dict)
+
+    def get_or_create_repo_evaluation(
+        self, repo_name: str, repository_full_name: Optional[str] = None
+    ) -> RepoEvaluation:
+        """Return the repo evaluation stored under ``repo_name``, creating one if absent.
+
+        ``repo_name`` is the map key (a lowercased repository_full_name). When a
+        new entry is created, ``repository_full_name`` seeds it, defaulting to
+        ``repo_name`` when not supplied.
+        """
+        repo_eval = self.repo_evaluations.get(repo_name)
+        if repo_eval is None:
+            repo_eval = RepoEvaluation(repository_full_name=repository_full_name or repo_name)
+            self.repo_evaluations[repo_name] = repo_eval
+        return repo_eval
 
     @property
     def total_prs(self) -> int:
@@ -370,54 +312,68 @@ class MinerEvaluation:
 
     @property
     def total_merged_prs(self) -> int:
-        return len(self.merged_pull_requests)
+        return len(self.merged_prs)
 
     @property
     def total_open_prs(self) -> int:
-        return len(self.open_pull_requests)
+        return len(self.open_prs)
 
     @property
     def total_closed_prs(self) -> int:
-        return len(self.closed_pull_requests)
+        return len(self.closed_prs)
+
+    @property
+    def should_use_cache_fallback(self) -> bool:
+        return self.github_pr_fetch_failed and self.total_prs == 0
 
     def get_all_issues(self) -> List[Issue]:
-        """Aggregate all issues from all pull requests (merged, open, closed)."""
+        """Aggregate all linked issues from mirror PRs, adapted to the ``Issue`` shape used by storage."""
+        # Lazy import — mirror.adapters imports from classes.py (for Issue /
+        # FileChange), so importing it at module load would loop back here.
+        from gittensor.validator.oss_contributions.mirror.adapters import (
+            mirror_linked_issue_to_legacy_issue,
+        )
+
         all_issues = []
-        for pr in self.merged_pull_requests + self.open_pull_requests + self.closed_pull_requests:
-            if pr.issues:
-                all_issues.extend(pr.issues)
+        for scored in self.merged_prs + self.open_prs + self.closed_prs:
+            for li in scored.pr.linked_issues:
+                all_issues.append(
+                    mirror_linked_issue_to_legacy_issue(li, scored.pr.pr_number, scored.pr.repo_full_name)
+                )
         return all_issues
 
     def get_all_file_changes(self) -> List[FileChange]:
-        """Aggregate all file changes from all PR diffs (merged, open, closed)."""
+        """Aggregate all file changes from mirror PR diffs."""
+        from gittensor.validator.oss_contributions.mirror.adapters import (
+            mirror_files_to_legacy,
+        )
+
         all_file_changes = []
-        for pr in self.merged_pull_requests + self.open_pull_requests + self.closed_pull_requests:
-            if pr.file_changes:
-                all_file_changes.extend(pr.file_changes)
+        for scored in self.merged_prs + self.open_prs + self.closed_prs:
+            if scored.files:
+                file_changes, _ = mirror_files_to_legacy(scored.pr.repo_full_name, scored.pr.pr_number, scored.files)
+                all_file_changes.extend(file_changes)
         return all_file_changes
 
-    def add_merged_pull_request(self, raw_pr: Dict):
-        """Add a merged pull request that will be factored into scoring."""
-        bt.logging.info(
-            f"Accepting MERGED PR #{raw_pr['number']} in {parse_repo_name(raw_pr['repository'])} -> '{raw_pr['baseRefName']}'"
-        )
-        self.merged_pull_requests.append(
-            PullRequest.from_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id)
-        )
 
-    def add_open_pull_request(self, raw_pr: Dict):
-        """Add an open pull request that will be factored into scoring."""
-        bt.logging.info(f'Counting OPEN PR #{raw_pr["number"]} in {parse_repo_name(raw_pr["repository"])}')
-        self.open_pull_requests.append(PullRequest.from_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id))
+@dataclass
+class RepoEmissionAllocation:
+    """Per-repository allocation details for one scoring round."""
 
-    def add_closed_pull_request(self, raw_pr: Dict):
-        """Add a closed pull request that will be factored into scoring."""
-        bt.logging.info(
-            f'CLOSED PR #{raw_pr["number"]} in {parse_repo_name(raw_pr["repository"])} counting towards credibility'
-        )
-        self.closed_pull_requests.append(
-            PullRequest.from_graphql_response(raw_pr, self.uid, self.hotkey, self.github_id)
-        )
+    repository_full_name: str
+    emission_share: float
+    issue_discovery_share: float
+    repo_slice: float
+    maintainer_cut: float = 0.0
+    maintainer_carve_out: float = 0.0
+    maintainer_rewards: Dict[int, float] = field(default_factory=dict)
+    pr_slice: float = 0.0
+    issue_discovery_slice: float = 0.0
+    pr_scores: Dict[int, float] = field(default_factory=dict)
+    issue_discovery_scores: Dict[int, float] = field(default_factory=dict)
+    pr_rewards: Dict[int, float] = field(default_factory=dict)
+    issue_discovery_rewards: Dict[int, float] = field(default_factory=dict)
+    recycled_amount: float = 0.0
 
 
 @dataclass
@@ -479,19 +435,9 @@ class ScoreBreakdown:
         return self.structural_added_count + self.leaf_added_count
 
     @property
-    def added_score(self) -> float:
-        """Total score from additions."""
-        return self.structural_added_score + self.leaf_added_score
-
-    @property
     def deleted_count(self) -> int:
         """Total deleted nodes (structural + leaf)."""
         return self.structural_deleted_count + self.leaf_deleted_count
-
-    @property
-    def deleted_score(self) -> float:
-        """Total score from deletions."""
-        return self.structural_deleted_score + self.leaf_deleted_score
 
     def with_weight(self, weight: float) -> 'ScoreBreakdown':
         """Return new ScoreBreakdown with scores multiplied by weight (counts unchanged)."""
@@ -567,13 +513,6 @@ class PrScoringResult:
     score_breakdown: Optional[ScoreBreakdown] = None  # Aggregated breakdown across all files
     by_category: Dict[ScoringCategory, 'PrScoringResult'] = field(default_factory=dict)
 
-    @property
-    def density(self) -> float:
-        """Code density (total_score / total_lines), capped at MAX_CODE_DENSITY_MULTIPLIER"""
-        if self.total_lines <= 0:
-            return 0.0
-        return min(self.total_score / self.total_lines, MAX_CODE_DENSITY_MULTIPLIER)
-
 
 @dataclass
 class CachedEvaluation:
@@ -583,6 +522,35 @@ class CachedEvaluation:
     cached_at: datetime
 
 
+# Fields owned by the issue-discovery phase. store() preserves these across
+# rounds so the OSS-phase write doesn't clobber the prior round's refresh;
+# update_issue_discovery() is the authoritative writer.
+_ISSUE_DISCOVERY_FIELDS: Tuple[str, ...] = (
+    'issue_discovery_score',
+    'issue_token_score',
+    'issue_credibility',
+    'is_issue_eligible',
+    'total_solved_issues',
+    'total_valid_solved_issues',
+    'total_closed_issues',
+    'total_open_issues',
+    'issue_discovery_issues',
+)
+
+# Per-repo RepoEvaluation fields owned by the issue-discovery phase — preserved
+# across rounds by store() exactly like the top-level _ISSUE_DISCOVERY_FIELDS.
+_ISSUE_DISCOVERY_REPO_FIELDS: Tuple[str, ...] = (
+    'is_issue_eligible',
+    'issue_credibility',
+    'issue_discovery_score',
+    'issue_token_score',
+    'total_solved_issues',
+    'total_valid_solved_issues',
+    'total_closed_issues',
+    'total_open_issues',
+)
+
+
 class MinerEvaluationCache:
     """
     In-memory cache for successful miner evaluations, keyed by UID.
@@ -590,20 +558,43 @@ class MinerEvaluationCache:
     Used as fallback when GitHub API is unavailable. Validates that
     hotkey and github_id match before returning cached data to handle
     miner re-registration on the same UID.
+
+    The cache has two independent writers: store() is called by the OSS
+    phase with a freshly-fetched MinerEvaluation whose issue-discovery
+    fields are dataclass defaults, and update_issue_discovery() is called
+    by the issue-discovery phase after scoring. store() therefore preserves
+    any prior round's issue-discovery fields when identity matches, so a
+    later same-round mirror outage can fall back to a non-zero score.
     """
 
     def __init__(self):
         self._cache: Dict[int, CachedEvaluation] = {}
 
     def store(self, evaluation: 'MinerEvaluation') -> None:
-        """Store a successful evaluation in the cache."""
+        """Store a successful evaluation in the cache.
+
+        Preserves the prior entry's issue-discovery fields when the UID's
+        identity (hotkey, github_id) is unchanged — the caller (OSS phase)
+        is not authoritative for those fields and writes dataclass defaults
+        every round. Identity mismatch (re-registration) drops the prior
+        issue-discovery state along with the rest of the entry.
+        """
         if evaluation.failed_reason is not None:
             return
 
         if not evaluation.hotkey or not evaluation.github_id or evaluation.github_id == '0':
             return
 
-        cached_eval = self.create_lightweight_copy(evaluation)
+        cached_eval = self._build_cache_entry(evaluation)
+
+        existing = self._cache.get(evaluation.uid)
+        if existing is not None and existing.hotkey == evaluation.hotkey and existing.github_id == evaluation.github_id:
+            for name in _ISSUE_DISCOVERY_FIELDS:
+                value = getattr(existing.evaluation, name)
+                setattr(cached_eval, name, _copy_issue_discovery_value(name, value))
+            for repo_name, prior_repo in existing.evaluation.repo_evaluations.items():
+                target = cached_eval.get_or_create_repo_evaluation(repo_name, prior_repo.repository_full_name)
+                target.copy_issue_discovery_from(prior_repo)
 
         self._cache[evaluation.uid] = CachedEvaluation(
             hotkey=evaluation.hotkey,
@@ -613,6 +604,39 @@ class MinerEvaluationCache:
         )
 
         bt.logging.debug(f'Cached successful evaluation for UID {evaluation.uid}')
+
+    def update_issue_discovery(self, evaluation: 'MinerEvaluation') -> None:
+        """Refresh issue-discovery fields on an existing cache entry.
+
+        No-op when no entry exists for this UID. Missing entries occur on
+        identity-mismatch evictions or OSS-phase failures; in both cases we
+        let the next round's store() re-anchor the entry rather than write
+        a half-populated one here. The OSS fallback path additionally
+        guards against restoring an entry with no PR data.
+        """
+        existing = self._cache.get(evaluation.uid)
+        if existing is None:
+            return
+
+        if existing.hotkey != evaluation.hotkey or existing.github_id != evaluation.github_id:
+            bt.logging.debug(
+                f'Skipping issue-discovery refresh for UID {evaluation.uid}: identity mismatch '
+                f'(cached hotkey={existing.hotkey[:8]}..., github_id={existing.github_id} vs '
+                f'current hotkey={evaluation.hotkey[:8]}..., github_id={evaluation.github_id}). '
+                'Removing cached evaluation'
+            )
+            del self._cache[evaluation.uid]
+            return
+
+        for name in _ISSUE_DISCOVERY_FIELDS:
+            value = getattr(evaluation, name)
+            setattr(existing.evaluation, name, _copy_issue_discovery_value(name, value))
+
+        for repo_name, repo_eval in evaluation.repo_evaluations.items():
+            target = existing.evaluation.get_or_create_repo_evaluation(repo_name, repo_eval.repository_full_name)
+            target.copy_issue_discovery_from(repo_eval)
+
+        bt.logging.debug(f'Refreshed cached issue discovery for UID {evaluation.uid}')
 
     def get(self, uid: int, hotkey: str, github_id: str) -> Optional['MinerEvaluation']:
         """
@@ -638,28 +662,49 @@ class MinerEvaluationCache:
 
         bt.logging.debug(f'Cache hit for UID {uid} (cached at {cached.cached_at.isoformat()})')
 
-        return deepcopy(cached.evaluation)
+        return self._isolate_for_downstream(cached.evaluation)
 
-    def invalidate(self, uid: int) -> None:
-        """Remove a cached evaluation for a specific UID."""
-        if uid in self._cache:
-            del self._cache[uid]
-            bt.logging.debug(f'Invalidated cache for UID {uid}')
+    def evict_many(self, uids: Set[int]) -> None:
+        """Remove cached evaluations for all provided UIDs."""
+        for uid in uids:
+            if self._cache.pop(uid, None) is not None:
+                bt.logging.debug(f'Evicted cached evaluation for UID {uid}')
 
-    def clear(self) -> None:
-        """Clear all cached evaluations."""
-        self._cache.clear()
-        bt.logging.info('Cleared evaluation cache')
+    @staticmethod
+    def _build_cache_entry(evaluation: 'MinerEvaluation') -> 'MinerEvaluation':
+        # Cached evaluations feed only the GitHub-fetch-failure fallback path
+        # (issue_competitions + issue discovery scoring), which never reads
+        # PR files. Drop them at store time to save memory.
+        cached = copy.copy(evaluation)
+        cached.unique_repos_contributed_to = set(evaluation.unique_repos_contributed_to)
+        cached.issue_discovery_issues = _copy_issue_discovery_issues(evaluation.issue_discovery_issues)
+        cached.repo_evaluations = {name: copy.copy(re) for name, re in evaluation.repo_evaluations.items()}
+        cached.merged_prs = [_scored_mirror_pr_for_cache(pr) for pr in evaluation.merged_prs]
+        cached.open_prs = [_scored_mirror_pr_for_cache(pr) for pr in evaluation.open_prs]
+        cached.closed_prs = [_scored_mirror_pr_for_cache(pr) for pr in evaluation.closed_prs]
+        return cached
 
-    def create_lightweight_copy(self, evaluation: 'MinerEvaluation') -> 'MinerEvaluation':
-        """Create a memory-efficient copy, stripping file patches."""
-        light_eval = deepcopy(evaluation)
+    @staticmethod
+    def _isolate_for_downstream(cached_eval: 'MinerEvaluation') -> 'MinerEvaluation':
+        # Downstream scoring mutates top-level scalar fields on MinerEvaluation
+        # and discovery_* fields on Issue. Mirror PRs are shared — the issue
+        # adapters produce fresh Issue objects per call via get_all_issues().
+        copy_eval = copy.copy(cached_eval)
+        copy_eval.unique_repos_contributed_to = set(cached_eval.unique_repos_contributed_to)
+        copy_eval.issue_discovery_issues = _copy_issue_discovery_issues(cached_eval.issue_discovery_issues)
+        copy_eval.repo_evaluations = {name: copy.copy(re) for name, re in cached_eval.repo_evaluations.items()}
+        return copy_eval
 
-        for pr in light_eval.merged_pull_requests + light_eval.open_pull_requests + light_eval.closed_pull_requests:
-            if pr.file_changes:
-                for fc in pr.file_changes:
-                    fc.patch = None
 
-        light_eval.github_pat = None
+def _copy_issue_discovery_value(name: str, value):
+    return _copy_issue_discovery_issues(value) if name == 'issue_discovery_issues' else value
 
-        return light_eval
+
+def _copy_issue_discovery_issues(issues: List[Issue]) -> List[Issue]:
+    return [copy.copy(issue) for issue in issues]
+
+
+def _scored_mirror_pr_for_cache(scored: 'ScoredPR') -> 'ScoredPR':
+    scored_copy = copy.copy(scored)
+    scored_copy.files = None
+    return scored_copy

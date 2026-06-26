@@ -7,9 +7,10 @@ from __future__ import annotations
 
 import click
 
+from gittensor.cli.json_output import click_error_type, emit_json
+
 from .help import StyledCommand
 from .helpers import (
-    emit_json,
     fetch_issue_from_contract,
     fetch_open_issue_pull_requests,
     get_contract_address,
@@ -19,10 +20,10 @@ from .helpers import (
     print_network_header,
     print_warning,
     resolve_network,
-    validate_issue_id,
     with_cli_behavior_options,
     with_network_contract_options,
 )
+from .types import CONTRACT_ISSUE
 
 
 @click.command('submissions', cls=StyledCommand)
@@ -30,7 +31,7 @@ from .helpers import (
     '--id',
     'issue_id',
     required=True,
-    type=int,
+    type=CONTRACT_ISSUE,
     help='On-chain issue ID',
 )
 @with_cli_behavior_options(include_verbose=True, include_json=True)
@@ -54,19 +55,13 @@ def issues_submissions(
         $ gitt i submissions --id 42 --json
     [/dim]
     """
-    try:
-        validate_issue_id(issue_id, 'id')
-    except click.BadParameter as e:
-        handle_exception(as_json, str(e), 'bad_parameter')
-
     contract_addr = get_contract_address(contract)
     ws_endpoint, network_name = resolve_network(network, rpc_url)
 
     if not contract_addr:
         handle_exception(as_json, 'Contract address not configured.', 'config_error')
 
-    if not as_json:
-        print_network_header(network_name, contract_addr)
+    print_network_header(network_name, contract_addr)
 
     try:
         with loading_context('Fetching issue from contract...', as_json):
@@ -84,7 +79,7 @@ def issues_submissions(
             as_json=as_json,
         )
     except click.ClickException as e:
-        handle_exception(as_json, str(e), 'click_exception')
+        handle_exception(as_json, str(e), click_error_type(e))
 
     if as_json:
         submissions = [
@@ -102,6 +97,7 @@ def issues_submissions(
             for pr in pull_requests
         ]
         payload = {
+            'success': True,
             'issue_id': issue_id,
             'repository': repo_name,
             'issue_number': issue_number,

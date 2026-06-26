@@ -15,6 +15,7 @@ import click
 from .check import miner_check
 from .languages import miner_languages
 from .post import miner_post
+from .score import score_command
 
 
 @click.group(name='miner')

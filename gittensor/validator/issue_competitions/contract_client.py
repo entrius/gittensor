@@ -12,21 +12,17 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import bittensor as bt
-from substrateinterface import Keypair
-from substrateinterface.exceptions import ExtrinsicNotFound
+from async_substrate_interface.errors import ExtrinsicNotFound
+from bittensor_wallet import Keypair
 
+from gittensor.constants import MAX_ISSUE_ID
 from gittensor.validator.issue_competitions.storage_utils import (
+    ISSUES_MAPPING_ROOT_KEY,
     compute_ink5_lazy_key,
     decode_issue_from_storage,
     get_contract_child_storage_key,
     read_contract_packed_storage,
 )
-
-# Bittensor uses async_substrate_interface which has its own exception type
-try:
-    from async_substrate_interface.errors import ExtrinsicNotFound as AsyncExtrinsicNotFound
-except ImportError:
-    AsyncExtrinsicNotFound = ExtrinsicNotFound
 
 # Default gas limits for contract calls
 DEFAULT_GAS_LIMIT = {
@@ -53,6 +49,22 @@ def load_contract_metadata() -> Tuple[Dict[str, bytes], Dict[str, List]]:
 CONTRACT_SELECTORS, CONTRACT_ARG_TYPES = load_contract_metadata()
 
 
+def _scale_compact_length(n: int) -> bytes:
+    """SCALE-encode a non-negative integer as a compact length prefix.
+
+    Used to prefix variable-length SCALE payloads (Vec<u8>, String).
+    """
+    if n < 0:
+        raise ValueError(f'Length must be non-negative: {n}')
+    if n < 1 << 6:
+        return bytes([n << 2])
+    if n < 1 << 14:
+        return ((n << 2) | 1).to_bytes(2, 'little')
+    if n < 1 << 30:
+        return ((n << 2) | 2).to_bytes(4, 'little')
+    raise ValueError(f'Length too large for compact encoding: {n}')
+
+
 class IssueStatus(Enum):
     """Status of an issue in its lifecycle"""
 
@@ -75,6 +87,10 @@ class ContractIssue:
     status: IssueStatus
     registered_at_block: int
     is_fully_funded: bool
+
+
+class ContractReadError(RuntimeError):
+    """Raised when a contract read cannot produce a trustworthy value."""
 
 
 class IssueCompetitionContractClient:
@@ -135,7 +151,7 @@ class IssueCompetitionContractClient:
     def _read_packed_storage(self) -> Optional[dict]:
         """Read the packed root storage from the contract"""
         try:
-            packed = read_contract_packed_storage(self.subtensor.substrate, self.contract_address, page_size=10)
+            packed = read_contract_packed_storage(self.subtensor.substrate, self.contract_address)
             if not packed:
                 return None
             return {
@@ -154,7 +170,7 @@ class IssueCompetitionContractClient:
 
         try:
             encoded_id = struct.pack('<Q', issue_id)
-            lazy_key = compute_ink5_lazy_key('52789899', encoded_id)
+            lazy_key = compute_ink5_lazy_key(ISSUES_MAPPING_ROOT_KEY, encoded_id)
 
             val_result = self.subtensor.substrate.rpc_request('childstate_getStorage', [child_key, lazy_key, None])
             if not val_result.get('result'):
@@ -191,8 +207,7 @@ class IssueCompetitionContractClient:
             if next_issue_id <= 1:
                 return []
 
-            MAX_REASONABLE_ISSUE_ID = 1_000_000
-            if next_issue_id > MAX_REASONABLE_ISSUE_ID:
+            if next_issue_id > MAX_ISSUE_ID:
                 bt.logging.warning(f'next_issue_id ({next_issue_id}) unreasonably large')
                 return []
 
@@ -354,6 +369,65 @@ class IssueCompetitionContractClient:
     # Transaction Functions (Write)
     # =========================================================================
 
+    def _exec_tx_bool(
+        self,
+        method_name: str,
+        args: dict,
+        keypair,
+        label: str,
+        gas_limit: dict = None,  # type: ignore[assignment]
+    ) -> bool:
+        """Execute a contract transaction and return True on success."""
+        try:
+            bt.logging.info(label)
+            tx_hash, error = self._exec_contract_raw(
+                method_name=method_name,
+                args=args,
+                keypair=keypair,
+                gas_limit=gas_limit,
+            )
+            if tx_hash and not error:
+                bt.logging.info(f'{label} — ok ({tx_hash})')
+                return True
+            bt.logging.error(f'{label} — failed')
+            return False
+        except Exception as e:
+            bt.logging.error(f'{label} — {e}')
+            return False
+
+    def register_issue(
+        self,
+        github_url: str,
+        repository_full_name: str,
+        issue_number: int,
+        target_bounty: int,
+        keypair,
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """
+        Register a new issue with a target bounty (OWNER ONLY).
+
+        Args:
+            github_url: Full GitHub URL of the issue
+            repository_full_name: Repository in owner/repo form
+            issue_number: GitHub issue number
+            target_bounty: Target bounty in raw alpha (u128)
+            keypair: Coldkey of the contract owner
+
+        Returns:
+            (hash, error). Revert: both set. Pre-submission failure: hash is None.
+        """
+        return self._exec_contract_raw(
+            method_name='register_issue',
+            args={
+                'github_url': github_url,
+                'repository_full_name': repository_full_name,
+                'issue_number': issue_number,
+                'target_bounty': target_bounty,
+            },
+            keypair=keypair,
+            gas_limit={'ref_time': 10_000_000_000, 'proof_size': 1_000_000},
+        )
+
     def vote_solution(
         self,
         issue_id: int,
@@ -379,31 +453,17 @@ class IssueCompetitionContractClient:
         Returns:
             True if vote succeeded
         """
-        try:
-            bt.logging.info(f'Voting solution for issue {issue_id}: solver={solver_hotkey[:8]}... PR#{pr_number}')
-
-            keypair = wallet.hotkey
-            tx_hash = self._exec_contract_raw(
-                method_name='vote_solution',
-                args={
-                    'issue_id': issue_id,
-                    'solver_hotkey': solver_hotkey,
-                    'solver_coldkey': solver_coldkey,
-                    'pr_number': pr_number,
-                },
-                keypair=keypair,
-            )
-
-            if tx_hash:
-                bt.logging.info(f'Vote solution succeeded: {tx_hash}')
-                return True
-            else:
-                bt.logging.error('Vote solution failed')
-                return False
-
-        except Exception as e:
-            bt.logging.error(f'Error voting solution: {e}')
-            return False
+        return self._exec_tx_bool(
+            method_name='vote_solution',
+            args={
+                'issue_id': issue_id,
+                'solver_hotkey': solver_hotkey,
+                'solver_coldkey': solver_coldkey,
+                'pr_number': pr_number,
+            },
+            keypair=wallet.hotkey,
+            label=f'Voting solution for issue {issue_id}: solver={solver_hotkey[:8]}... PR#{pr_number}',
+        )
 
     def vote_cancel_issue(
         self,
@@ -422,30 +482,13 @@ class IssueCompetitionContractClient:
         Returns:
             True if vote succeeded
         """
-        try:
-            reason_hash = hashlib.sha256(reason.encode()).digest()
-            bt.logging.info(f'Voting cancel for issue {issue_id}: {reason}')
-
-            keypair = wallet.hotkey
-            tx_hash = self._exec_contract_raw(
-                method_name='vote_cancel_issue',
-                args={
-                    'issue_id': issue_id,
-                    'reason_hash': reason_hash,
-                },
-                keypair=keypair,
-            )
-
-            if tx_hash:
-                bt.logging.info(f'Vote cancel issue succeeded: {tx_hash}')
-                return True
-            else:
-                bt.logging.error('Vote cancel issue failed')
-                return False
-
-        except Exception as e:
-            bt.logging.error(f'Error voting cancel issue: {e}')
-            return False
+        reason_hash = hashlib.sha256(reason.encode()).digest()
+        return self._exec_tx_bool(
+            method_name='vote_cancel_issue',
+            args={'issue_id': issue_id, 'reason_hash': reason_hash},
+            keypair=wallet.hotkey,
+            label=f'Voting cancel for issue {issue_id}: {reason}',
+        )
 
     # =========================================================================
     # Raw Extrinsic Execution (Ink! 5 Workaround)
@@ -458,15 +501,19 @@ class IssueCompetitionContractClient:
         keypair,
         gas_limit: dict = None,  # type: ignore[assignment]
         value: int = 0,
-    ) -> Optional[str]:
-        """Execute a contract method using raw extrinsic submission."""
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """Execute a contract method via raw extrinsic. Returns (hash, error).
+
+        Revert: both set. Pre-submission failure: hash is None.
+        """
         gas_limit = gas_limit or DEFAULT_GAS_LIMIT
 
         try:
             selector = CONTRACT_SELECTORS.get(method_name)
             if not selector:
-                bt.logging.error(f'Method {method_name} not found in CONTRACT_SELECTORS')
-                return None
+                err = f'Method {method_name} not found in CONTRACT_SELECTORS'
+                bt.logging.error(err)
+                return None, err
 
             encoded_args = self._encode_args(method_name, args)
             call_data = selector + encoded_args
@@ -491,8 +538,9 @@ class IssueCompetitionContractClient:
                 account_data = account_info
             free_balance = account_data.get('data', {}).get('free', 0)  # type: ignore[union-attr]
             if free_balance < 100_000_000:
-                bt.logging.error(f'{method_name}: insufficient balance for fees')
-                return None
+                err = f'{method_name}: insufficient balance for fees'
+                bt.logging.error(err)
+                return None, err
 
             extrinsic = self.subtensor.substrate.create_signed_extrinsic(
                 call=call,
@@ -505,19 +553,19 @@ class IssueCompetitionContractClient:
                 wait_for_finalization=False,
             )
 
-            _extrinsic_not_found_types = tuple(t for t in [ExtrinsicNotFound, AsyncExtrinsicNotFound] if t is not None)
             try:
                 if result.is_success:
-                    return result.extrinsic_hash
-                else:
-                    bt.logging.error(f'{method_name} failed: {result.error_message}')
-                    return None
-            except _extrinsic_not_found_types:
-                return result.extrinsic_hash
+                    return result.extrinsic_hash, None
+                err = f'{method_name} failed: {result.error_message}'
+                bt.logging.error(err)
+                return result.extrinsic_hash, err
+            except ExtrinsicNotFound:
+                return result.extrinsic_hash, None
 
         except Exception as e:
-            bt.logging.error(f'{method_name} error: {e}')
-            return None
+            err = f'{method_name} error: {e}'
+            bt.logging.error(err)
+            return None, err
 
     def _encode_args(self, method_name: str, args: dict) -> bytes:
         """SCALE-encode method arguments using hardcoded type definitions."""
@@ -536,6 +584,11 @@ class IssueCompetitionContractClient:
                 encoded += struct.pack('<Q', value)
             elif type_def == 'u128':
                 encoded += struct.pack('<QQ', value & 0xFFFFFFFFFFFFFFFF, value >> 64)
+            elif type_def == 'str':
+                if not isinstance(value, str):
+                    raise ValueError(f'Expected str for {arg_name}, got {type(value).__name__}')
+                data = value.encode('utf-8')
+                encoded += _scale_compact_length(len(data)) + data
             elif type_def == 'AccountId':
                 if isinstance(value, str):
                     encoded += bytes.fromhex(self.subtensor.substrate.ss58_decode(value))
@@ -573,12 +626,15 @@ class IssueCompetitionContractClient:
 
         Returns:
             Total stake amount (0 if no stake found)
+
+        Raises:
+            RuntimeError: If required contract storage is unavailable.
+            Exception: If the direct Alpha storage query fails.
         """
         try:
-            packed = read_contract_packed_storage(self.subtensor.substrate, self.contract_address, page_size=10)
+            packed = read_contract_packed_storage(self.subtensor.substrate, self.contract_address)
             if not packed:
-                bt.logging.debug('Cannot get treasury stake: packed storage unavailable')
-                return 0
+                raise RuntimeError('Cannot get treasury stake: packed storage unavailable')
 
             # Convert to SS58 addresses
             owner_ss58 = self.subtensor.substrate.ss58_encode(packed.owner.hex())
@@ -611,7 +667,7 @@ class IssueCompetitionContractClient:
 
         except Exception as e:
             bt.logging.error(f'Error fetching treasury stake: {e}')
-            return 0
+            raise
 
     def get_last_harvest_block(self) -> int:
         """Query the block number of the last harvest."""
@@ -626,17 +682,16 @@ class IssueCompetitionContractClient:
         """Harvest emissions from the treasury hotkey and distribute to bounties."""
         try:
             keypair = wallet.hotkey
-            tx_hash = self._exec_contract_raw(
+            tx_hash, error = self._exec_contract_raw(
                 method_name='harvest_emissions',
                 args={},
                 keypair=keypair,
                 gas_limit=DEFAULT_GAS_LIMIT,
             )
 
-            if tx_hash:
+            if tx_hash and not error:
                 return {'status': 'success', 'tx_hash': tx_hash}
-            else:
-                return {'status': 'failed', 'error': 'Transaction failed'}
+            return {'status': 'failed', 'error': error or 'Transaction failed'}
 
         except Exception as e:
             bt.logging.error(f'Harvest error: {e}')
@@ -666,7 +721,7 @@ class IssueCompetitionContractClient:
             bt.logging.info(f'Paying out bounty for issue {issue_id}')
 
             keypair = wallet.coldkey
-            tx_hash = self._exec_contract_raw(
+            tx_hash, error = self._exec_contract_raw(
                 method_name='payout_bounty',
                 args={
                     'issue_id': issue_id,
@@ -675,10 +730,9 @@ class IssueCompetitionContractClient:
                 gas_limit=DEFAULT_GAS_LIMIT,
             )
 
-            if tx_hash:
+            if tx_hash and not error:
                 return int(expected_payout) if expected_payout else 0
-            else:
-                return None
+            return None
 
         except Exception as e:
             bt.logging.error(f'Error paying out bounty: {e}')
@@ -698,29 +752,13 @@ class IssueCompetitionContractClient:
         Returns:
             True if cancellation succeeded
         """
-        try:
-            bt.logging.info(f'Cancelling issue {issue_id}')
-
-            keypair = wallet.coldkey
-            tx_hash = self._exec_contract_raw(
-                method_name='cancel_issue',
-                args={
-                    'issue_id': issue_id,
-                },
-                keypair=keypair,
-                gas_limit=DEFAULT_GAS_LIMIT,
-            )
-
-            if tx_hash:
-                bt.logging.info(f'Issue {issue_id} cancelled: {tx_hash}')
-                return True
-            else:
-                bt.logging.error(f'Failed to cancel issue {issue_id}')
-                return False
-
-        except Exception as e:
-            bt.logging.error(f'Error cancelling issue: {e}')
-            return False
+        return self._exec_tx_bool(
+            method_name='cancel_issue',
+            args={'issue_id': issue_id},
+            keypair=wallet.coldkey,
+            label=f'Cancelling issue {issue_id}',
+            gas_limit=DEFAULT_GAS_LIMIT,
+        )
 
     def set_owner(
         self,
@@ -739,29 +777,13 @@ class IssueCompetitionContractClient:
         Returns:
             True if ownership transfer succeeded
         """
-        try:
-            bt.logging.info(f'Transferring ownership to {new_owner}')
-
-            keypair = wallet.coldkey
-            tx_hash = self._exec_contract_raw(
-                method_name='set_owner',
-                args={
-                    'new_owner': new_owner,
-                },
-                keypair=keypair,
-                gas_limit=DEFAULT_GAS_LIMIT,
-            )
-
-            if tx_hash:
-                bt.logging.info(f'Ownership transferred: {tx_hash}')
-                return True
-            else:
-                bt.logging.error('Failed to transfer ownership')
-                return False
-
-        except Exception as e:
-            bt.logging.error(f'Error transferring ownership: {e}')
-            return False
+        return self._exec_tx_bool(
+            method_name='set_owner',
+            args={'new_owner': new_owner},
+            keypair=wallet.coldkey,
+            label=f'Transferring ownership to {new_owner}',
+            gas_limit=DEFAULT_GAS_LIMIT,
+        )
 
     def add_validator(
         self,
@@ -777,29 +799,13 @@ class IssueCompetitionContractClient:
         Returns:
             True if addition succeeded
         """
-        try:
-            bt.logging.info(f'Adding validator {hotkey}')
-
-            keypair = wallet.coldkey
-            tx_hash = self._exec_contract_raw(
-                method_name='add_validator',
-                args={
-                    'hotkey': hotkey,
-                },
-                keypair=keypair,
-                gas_limit=DEFAULT_GAS_LIMIT,
-            )
-
-            if tx_hash:
-                bt.logging.info(f'Validator added: {tx_hash}')
-                return True
-            else:
-                bt.logging.error('Failed to add validator')
-                return False
-
-        except Exception as e:
-            bt.logging.error(f'Error adding validator: {e}')
-            return False
+        return self._exec_tx_bool(
+            method_name='add_validator',
+            args={'hotkey': hotkey},
+            keypair=wallet.coldkey,
+            label=f'Adding validator {hotkey}',
+            gas_limit=DEFAULT_GAS_LIMIT,
+        )
 
     def remove_validator(
         self,
@@ -815,45 +821,33 @@ class IssueCompetitionContractClient:
         Returns:
             True if removal succeeded
         """
-        try:
-            bt.logging.info(f'Removing validator {hotkey}')
-
-            keypair = wallet.coldkey
-            tx_hash = self._exec_contract_raw(
-                method_name='remove_validator',
-                args={
-                    'hotkey': hotkey,
-                },
-                keypair=keypair,
-                gas_limit=DEFAULT_GAS_LIMIT,
-            )
-
-            if tx_hash:
-                bt.logging.info(f'Validator removed: {tx_hash}')
-                return True
-            else:
-                bt.logging.error('Failed to remove validator')
-                return False
-
-        except Exception as e:
-            bt.logging.error(f'Error removing validator: {e}')
-            return False
+        return self._exec_tx_bool(
+            method_name='remove_validator',
+            args={'hotkey': hotkey},
+            keypair=wallet.coldkey,
+            label=f'Removing validator {hotkey}',
+            gas_limit=DEFAULT_GAS_LIMIT,
+        )
 
     def get_validators(self) -> List[str]:
         """Query the list of whitelisted validator hotkeys.
 
         Returns:
-            List of SS58 addresses, or empty list on error.
+            List of SS58 addresses.
+
+        Raises:
+            ContractReadError: If the contract read or response decoding fails.
         """
         try:
             response = self._raw_contract_read('get_validators')
             if response is None:
-                return []
+                raise ContractReadError('Failed to read validator whitelist from contract')
 
             return self._decode_validator_list(response)
+        except ContractReadError:
+            raise
         except Exception as e:
-            bt.logging.error(f'Error fetching validators: {e}')
-            return []
+            raise ContractReadError(f'Failed to read validator whitelist from contract: {e}') from e
 
     def _decode_validator_list(self, response_bytes: bytes) -> List[str]:
         """Decode a SCALE-encoded Vec<AccountId> from clean return bytes.
@@ -862,39 +856,38 @@ class IssueCompetitionContractClient:
         N * 32-byte AccountIds.
         """
         if not response_bytes:
-            return []
+            raise ContractReadError('Validator whitelist response was empty')
 
-        try:
-            offset = 0
+        offset = 0
 
-            # Read SCALE compact length
-            first_byte = response_bytes[offset]
-            mode = first_byte & 0x03
-            if mode == 0:
-                count = first_byte >> 2
-                offset += 1
-            elif mode == 1:
-                if offset + 2 > len(response_bytes):
-                    return []
-                count = (response_bytes[offset] | (response_bytes[offset + 1] << 8)) >> 2
-                offset += 2
-            else:
-                return []
+        # Read SCALE compact length. `0x00` is a valid empty Vec<AccountId>.
+        first_byte = response_bytes[offset]
+        mode = first_byte & 0x03
+        if mode == 0:
+            count = first_byte >> 2
+            offset += 1
+        elif mode == 1:
+            if offset + 2 > len(response_bytes):
+                raise ContractReadError('Validator whitelist response length was truncated')
+            count = (response_bytes[offset] | (response_bytes[offset + 1] << 8)) >> 2
+            offset += 2
+        else:
+            raise ContractReadError('Validator whitelist response used an unsupported length encoding')
 
-            validators = []
-            for _ in range(count):
-                if offset + 32 > len(response_bytes):
-                    break
-                account_bytes = response_bytes[offset : offset + 32]
-                ss58 = self.subtensor.substrate.ss58_encode(account_bytes.hex())
-                validators.append(ss58)
-                offset += 32
+        expected_len = offset + (count * 32)
+        if len(response_bytes) != expected_len:
+            raise ContractReadError(
+                f'Validator whitelist response length mismatch: expected {expected_len} bytes, got {len(response_bytes)}'
+            )
 
-            return validators
+        validators = []
+        for _ in range(count):
+            account_bytes = response_bytes[offset : offset + 32]
+            ss58 = self.subtensor.substrate.ss58_encode(account_bytes.hex())
+            validators.append(ss58)
+            offset += 32
 
-        except Exception as e:
-            bt.logging.error(f'Error decoding validator list: {e}')
-            return []
+        return validators
 
     def set_treasury_hotkey(
         self,
@@ -910,26 +903,10 @@ class IssueCompetitionContractClient:
         Returns:
             True if treasury hotkey change succeeded
         """
-        try:
-            bt.logging.info(f'Setting treasury hotkey to {new_hotkey}')
-
-            keypair = wallet.coldkey
-            tx_hash = self._exec_contract_raw(
-                method_name='set_treasury_hotkey',
-                args={
-                    'new_hotkey': new_hotkey,
-                },
-                keypair=keypair,
-                gas_limit=DEFAULT_GAS_LIMIT,
-            )
-
-            if tx_hash:
-                bt.logging.info(f'Treasury hotkey updated: {tx_hash}')
-                return True
-            else:
-                bt.logging.error('Failed to set treasury hotkey')
-                return False
-
-        except Exception as e:
-            bt.logging.error(f'Error setting treasury hotkey: {e}')
-            return False
+        return self._exec_tx_bool(
+            method_name='set_treasury_hotkey',
+            args={'new_hotkey': new_hotkey},
+            keypair=wallet.coldkey,
+            label=f'Setting treasury hotkey to {new_hotkey}',
+            gas_limit=DEFAULT_GAS_LIMIT,
+        )

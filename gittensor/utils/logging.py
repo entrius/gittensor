@@ -1,44 +1,9 @@
-import logging
-import os
-from logging.handlers import RotatingFileHandler
 from typing import TYPE_CHECKING, List, Optional
 
 import bittensor as bt
 
 if TYPE_CHECKING:
     from gittensor.classes import FileScoreResult, ScoreBreakdown
-
-EVENTS_LEVEL_NUM = 38
-DEFAULT_LOG_BACKUP_COUNT = 10
-
-
-def setup_events_logger(full_path, events_retention_size):
-    logging.addLevelName(EVENTS_LEVEL_NUM, 'EVENT')
-
-    logger = logging.getLogger('event')
-    logger.setLevel(EVENTS_LEVEL_NUM)
-
-    def event(self, message, *args, **kws):
-        if self.isEnabledFor(EVENTS_LEVEL_NUM):
-            self._log(EVENTS_LEVEL_NUM, message, args, **kws)
-
-    logging.Logger.event = event  # type: ignore[attr-defined]
-
-    formatter = logging.Formatter(
-        '%(asctime)s | %(levelname)s | %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S',
-    )
-
-    file_handler = RotatingFileHandler(
-        os.path.join(full_path, 'events.log'),
-        maxBytes=events_retention_size,
-        backupCount=DEFAULT_LOG_BACKUP_COUNT,
-    )
-    file_handler.setFormatter(formatter)
-    file_handler.setLevel(EVENTS_LEVEL_NUM)
-    logger.addHandler(file_handler)
-
-    return logger
 
 
 def log_scoring_results(
@@ -99,7 +64,6 @@ def log_scoring_results(
 
     # Calculate token score (total minus line-count score)
     token_score = total_score - line_count_score
-    density = total_score / total_raw_lines if total_raw_lines > 0 else 0
 
     # Build score display: show token and line scores separately if both exist
     if line_count_score > 0 and token_score > 0:
@@ -109,7 +73,7 @@ def log_scoring_results(
     else:
         score_str = f'Token Score: {token_score:.2f}'
 
-    bt.logging.info(f'  ├─ {score_str} | Total Lines: {total_raw_lines} | Density: {density:.2f}')
+    bt.logging.info(f'  ├─ {score_str} | Total Lines: {total_raw_lines}')
 
     if breakdown_str:
         bt.logging.info(f'  │ └─ Breakdown: {breakdown_str}')

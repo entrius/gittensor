@@ -660,8 +660,7 @@ def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
         return normalized
     except Exception as api_error:
         bt.logging.warning(
-            f'Repository registry API unavailable or invalid ({api_error}); '
-            f'falling back to the on-disk last-good cache'
+            f'Repository registry API unavailable or invalid ({api_error}); falling back to the on-disk last-good cache'
         )
 
     try:

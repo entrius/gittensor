@@ -22,7 +22,6 @@ from gittensor.validator.utils.load_weights import (
     load_master_repo_weights,
     load_programming_language_weights,
     load_token_config,
-    resolve_eligibility,
     resolve_scoring,
 )
 
@@ -250,6 +249,7 @@ class TestRepositoryConfigMirrorScoringFields:
         )
         with pytest.raises(RepositoryRegistryError):
             lw.load_master_repo_weights()
+
 
 class TestRepositoryConfigScoringBlock:
     """Dataclass + JSON-parsing tests for the per-repo scoring block."""

@@ -347,20 +347,7 @@
     "emission_share": 0.351,
     "issue_discovery_share": 0,
     "maintainer_cut": 0,
-    "trusted_label_pipeline": true,
-    "default_label_multiplier": 0,
-    "label_multipliers": {
-      "episode-ingest": 3,
-      "preset-styles": 2.5,
-      "canvas-editor": 2.5,
-      "audio-captions": 2,
-      "contextual-visuals": 2,
-      "template-system": 1.75,
-      "export-publish": 1.75,
-      "product-polish": 1.5,
-      "bugfix": 1,
-      "infrastructure": 0.5
-    },
+    "default_label_multiplier": 1,
     "eligibility": {
       "min_valid_merged_prs": 1,
       "min_credibility": 0.6,

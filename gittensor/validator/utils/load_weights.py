@@ -1,16 +1,19 @@
 # The MIT License (MIT)
 # Copyright © 2025 Entrius
 import json
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import bittensor as bt
+import requests
 
 from gittensor.constants import (
     DEFAULT_ISSUE_DISCOVERY_SHARE,
     EMISSION_SHARE_TOLERANCE,
     EXCESSIVE_PR_PENALTY_BASE_THRESHOLD,
+    GITTENSOR_API_DEFAULT_URL,
     MAINTAINER_ISSUE_MULTIPLIER,
     MAX_OPEN_ISSUE_THRESHOLD,
     MAX_OPEN_PR_THRESHOLD,
@@ -25,6 +28,9 @@ from gittensor.constants import (
     OPEN_PR_COLLATERAL_PERCENT,
     OPEN_PR_THRESHOLD_TOKEN_SCORE,
     PR_LOOKBACK_DAYS,
+    REPOS_API_MAX_ATTEMPTS,
+    REPOS_API_TIMEOUT_SECONDS,
+    REPOS_CACHE_PATH,
     REVIEW_PENALTY_RATE,
     SRC_TOK_SATURATION_SCALE,
     STANDARD_ISSUE_MULTIPLIER,
@@ -512,71 +518,166 @@ def _validate_scoring_configs(configs: Dict[str, RepositoryConfig]) -> None:
             )
 
 
+def _parse_registry(data: Any) -> Dict[str, RepositoryConfig]:
+    """Parse + validate a raw registry map (full_name -> metadata) into
+    RepositoryConfig objects, keyed by lowercased full_name.
+
+    Raises RepositoryRegistryError / ValueError on malformed entries or
+    emission-share / eligibility / scoring contract violations.
+    """
+    if not isinstance(data, dict):
+        raise RepositoryRegistryError(f'Expected dict registry, got {type(data)}')
+
+    normalized_data: Dict[str, RepositoryConfig] = {}
+    for repo_name, metadata in data.items():
+        try:
+            if not isinstance(metadata, dict):
+                raise TypeError(f'expected object metadata, got {type(metadata)}')
+            config = RepositoryConfig(
+                emission_share=_coerce_share(repo_name, 'emission_share', metadata['emission_share']),
+                issue_discovery_share=_coerce_share(
+                    repo_name,
+                    'issue_discovery_share',
+                    metadata.get('issue_discovery_share', DEFAULT_ISSUE_DISCOVERY_SHARE),
+                ),
+                additional_acceptable_branches=metadata.get('additional_acceptable_branches'),
+                trusted_label_pipeline=bool(metadata.get('trusted_label_pipeline', False)),
+                label_multipliers=(
+                    {str(label): float(multiplier) for label, multiplier in metadata['label_multipliers'].items()}
+                    if metadata.get('label_multipliers') is not None
+                    else None
+                ),
+                default_label_multiplier=float(metadata.get('default_label_multiplier', 1.0)),
+                fixed_base_score=metadata.get('fixed_base_score'),
+                eligibility=_parse_eligibility(repo_name, metadata.get('eligibility')),
+                scoring=_parse_scoring(repo_name, metadata.get('scoring')),
+                maintainer_cut=_coerce_share(repo_name, 'maintainer_cut', metadata.get('maintainer_cut', 0.0)),
+            )
+            normalized_data[repo_name.lower()] = config
+        except RepositoryRegistryError:
+            raise
+        except (KeyError, ValueError, TypeError) as e:
+            raise ValueError(f'Could not parse config for {repo_name}: {e}') from e
+
+    _validate_emission_shares(normalized_data)
+    _validate_eligibility_configs(normalized_data)
+    _validate_scoring_configs(normalized_data)
+    return normalized_data
+
+
+def _fetch_registry_from_api() -> Any:
+    """GET the repository registry from the das-gittensor API, with retries.
+
+    Returns the decoded JSON (full_name -> raw config map). Raises
+    RepositoryRegistryError if the endpoint is unreachable or never returns
+    valid JSON within the retry budget.
+    """
+    from gittensor.utils.utils import backoff_seconds
+
+    url = f'{GITTENSOR_API_DEFAULT_URL.rstrip("/")}/repos'
+    last_error: Optional[str] = None
+
+    for attempt in range(REPOS_API_MAX_ATTEMPTS):
+        try:
+            response = requests.get(url, timeout=REPOS_API_TIMEOUT_SECONDS)
+        except requests.RequestException as e:
+            last_error = f'request exception: {e}'
+        else:
+            if 200 <= response.status_code < 300:
+                try:
+                    return response.json()
+                except ValueError as e:
+                    last_error = f'invalid JSON: {e}'
+            else:
+                last_error = f'status {response.status_code}'
+
+        if attempt < REPOS_API_MAX_ATTEMPTS - 1:
+            backoff = backoff_seconds(attempt)
+            bt.logging.warning(
+                f'repos API GET {url} failed ({last_error}) '
+                f'(attempt {attempt + 1}/{REPOS_API_MAX_ATTEMPTS}), retrying in {backoff}s...'
+            )
+            time.sleep(backoff)
+
+    raise RepositoryRegistryError(f'repos API GET {url} failed after {REPOS_API_MAX_ATTEMPTS} attempts: {last_error}')
+
+
+def _get_repos_cache_path() -> Path:
+    """Filesystem path of the on-disk last-good registry cache (env-configurable)."""
+    return Path(REPOS_CACHE_PATH).expanduser()
+
+
+def _write_registry_to_cache(data: Any) -> None:
+    """Atomically persist the last-good registry response to the disk cache.
+
+    Best-effort: a cache-write failure must never break the scoring cycle, so any
+    error is logged and swallowed. Written only after the data has parsed cleanly,
+    so the cache always holds a valid registry.
+    """
+    cache_path = _get_repos_cache_path()
+    try:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = cache_path.with_suffix(cache_path.suffix + '.tmp')
+        with open(tmp_path, 'w') as f:
+            json.dump(data, f)
+        tmp_path.replace(cache_path)
+    except OSError as e:
+        bt.logging.warning(f'Failed to write repos registry cache to {cache_path}: {e}')
+
+
+def _load_registry_from_cache() -> Any:
+    """Read the on-disk last-good registry cache.
+
+    Raises FileNotFoundError when no cache exists yet, json.JSONDecodeError when
+    the cache file is corrupt.
+    """
+    with open(_get_repos_cache_path(), 'r') as f:
+        return json.load(f)
+
+
 def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
     """
-    Load repository emission shares from the local JSON file.
-    Normalizes repository names to lowercase for case-insensitive matching.
+    Load the repository hyperparameter registry, normalizing repo names to
+    lowercase for case-insensitive matching.
+
+    Source of truth is the das-gittensor API (GET /repos). On a successful fetch
+    the registry is written to an on-disk last-good cache. If the endpoint is
+    unreachable or serves data that fails the registry contract, falls back to
+    that cache so a transient API outage or a bad push can't brick scoring.
 
     Returns:
-        Dictionary mapping normalized (lowercase) fullName (str) to RepositoryConfig object.
-        Returns empty dict when the file is missing or invalid JSON. Raises
-        RepositoryRegistryError or ValueError when registry entries violate the
-        emission-share contract.
+        Dictionary mapping normalized (lowercase) fullName -> RepositoryConfig.
+        Returns an empty dict when the API is down and no cache exists (the
+        registry is empty that cycle; per-field knob defaults still apply once
+        repos are known). Raises RepositoryRegistryError / ValueError when the
+        cached registry itself violates the registry contract.
     """
-    weights_file = _get_weights_dir() / 'master_repositories.json'
+    try:
+        data = _fetch_registry_from_api()
+        normalized = _parse_registry(data)
+        _write_registry_to_cache(data)
+        bt.logging.debug(f'Loaded {len(normalized)} repository entries from the repos API')
+        return normalized
+    except Exception as api_error:
+        bt.logging.warning(
+            f'Repository registry API unavailable or invalid ({api_error}); falling back to the on-disk last-good cache'
+        )
 
     try:
-        with open(weights_file, 'r') as f:
-            data = json.load(f)
-
-        if not isinstance(data, dict):
-            raise RepositoryRegistryError(f'Expected dict from {weights_file}, got {type(data)}')
-
-        # Parse JSON data into RepositoryConfig objects
-        normalized_data: Dict[str, RepositoryConfig] = {}
-        for repo_name, metadata in data.items():
-            try:
-                if not isinstance(metadata, dict):
-                    raise TypeError(f'expected object metadata, got {type(metadata)}')
-                config = RepositoryConfig(
-                    emission_share=_coerce_share(repo_name, 'emission_share', metadata['emission_share']),
-                    issue_discovery_share=_coerce_share(
-                        repo_name,
-                        'issue_discovery_share',
-                        metadata.get('issue_discovery_share', DEFAULT_ISSUE_DISCOVERY_SHARE),
-                    ),
-                    additional_acceptable_branches=metadata.get('additional_acceptable_branches'),
-                    trusted_label_pipeline=bool(metadata.get('trusted_label_pipeline', False)),
-                    label_multipliers=(
-                        {str(label): float(multiplier) for label, multiplier in metadata['label_multipliers'].items()}
-                        if metadata.get('label_multipliers') is not None
-                        else None
-                    ),
-                    default_label_multiplier=float(metadata.get('default_label_multiplier', 1.0)),
-                    fixed_base_score=metadata.get('fixed_base_score'),
-                    eligibility=_parse_eligibility(repo_name, metadata.get('eligibility')),
-                    scoring=_parse_scoring(repo_name, metadata.get('scoring')),
-                    maintainer_cut=_coerce_share(repo_name, 'maintainer_cut', metadata.get('maintainer_cut', 0.0)),
-                )
-                normalized_data[repo_name.lower()] = config
-            except RepositoryRegistryError:
-                raise
-            except (KeyError, ValueError, TypeError) as e:
-                raise ValueError(f'Could not parse config for {repo_name}: {e}') from e
-
-        _validate_emission_shares(normalized_data)
-        _validate_eligibility_configs(normalized_data)
-        _validate_scoring_configs(normalized_data)
-
-        bt.logging.debug(f'Successfully loaded {len(normalized_data)} repository entries from {weights_file}')
-        return normalized_data
-
+        data = _load_registry_from_cache()
     except FileNotFoundError:
-        bt.logging.error(f'Weights file not found: {weights_file}')
+        bt.logging.error(
+            'Repos API unavailable and no on-disk registry cache present; '
+            'returning empty registry (no repos scored this cycle)'
+        )
         return {}
     except json.JSONDecodeError as e:
-        bt.logging.error(f'Failed to parse JSON from {weights_file}: {e}')
+        bt.logging.error(f'On-disk registry cache is invalid JSON: {e}; returning empty registry')
         return {}
+
+    normalized = _parse_registry(data)
+    bt.logging.debug(f'Loaded {len(normalized)} repository entries from the on-disk cache (fallback)')
+    return normalized
 
 
 def load_programming_language_weights() -> Dict[str, LanguageConfig]:

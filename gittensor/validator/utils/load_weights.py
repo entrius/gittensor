@@ -30,6 +30,7 @@ from gittensor.constants import (
     PR_LOOKBACK_DAYS,
     REPOS_API_MAX_ATTEMPTS,
     REPOS_API_TIMEOUT_SECONDS,
+    REPOS_CACHE_PATH,
     REVIEW_PENALTY_RATE,
     SRC_TOK_SATURATION_SCALE,
     STANDARD_ISSUE_MULTIPLIER,
@@ -601,10 +602,36 @@ def _fetch_registry_from_api() -> Any:
     raise RepositoryRegistryError(f'repos API GET {url} failed after {REPOS_API_MAX_ATTEMPTS} attempts: {last_error}')
 
 
-def _load_registry_from_file() -> Any:
-    """Read the bundled master_repositories.json fallback seed."""
-    weights_file = _get_weights_dir() / 'master_repositories.json'
-    with open(weights_file, 'r') as f:
+def _get_repos_cache_path() -> Path:
+    """Filesystem path of the on-disk last-good registry cache (env-configurable)."""
+    return Path(REPOS_CACHE_PATH).expanduser()
+
+
+def _write_registry_to_cache(data: Any) -> None:
+    """Atomically persist the last-good registry response to the disk cache.
+
+    Best-effort: a cache-write failure must never break the scoring cycle, so any
+    error is logged and swallowed. Written only after the data has parsed cleanly,
+    so the cache always holds a valid registry.
+    """
+    cache_path = _get_repos_cache_path()
+    try:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = cache_path.with_suffix(cache_path.suffix + '.tmp')
+        with open(tmp_path, 'w') as f:
+            json.dump(data, f)
+        tmp_path.replace(cache_path)
+    except OSError as e:
+        bt.logging.warning(f'Failed to write repos registry cache to {cache_path}: {e}')
+
+
+def _load_registry_from_cache() -> Any:
+    """Read the on-disk last-good registry cache.
+
+    Raises FileNotFoundError when no cache exists yet, json.JSONDecodeError when
+    the cache file is corrupt.
+    """
+    with open(_get_repos_cache_path(), 'r') as f:
         return json.load(f)
 
 
@@ -613,39 +640,44 @@ def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
     Load the repository hyperparameter registry, normalizing repo names to
     lowercase for case-insensitive matching.
 
-    Source of truth is the das-gittensor API (GET /repos). If the endpoint is
+    Source of truth is the das-gittensor API (GET /repos). On a successful fetch
+    the registry is written to an on-disk last-good cache. If the endpoint is
     unreachable or serves data that fails the registry contract, falls back to
-    the bundled master_repositories.json seed so a transient API outage or a
-    bad push can't brick scoring.
+    that cache so a transient API outage or a bad push can't brick scoring.
 
     Returns:
         Dictionary mapping normalized (lowercase) fullName -> RepositoryConfig.
-        Returns empty dict when both the API and the bundled seed are
-        unavailable. Raises RepositoryRegistryError / ValueError when the
-        bundled seed itself violates the registry contract.
+        Returns an empty dict when the API is down and no cache exists (the
+        registry is empty that cycle; per-field knob defaults still apply once
+        repos are known). Raises RepositoryRegistryError / ValueError when the
+        cached registry itself violates the registry contract.
     """
     try:
         data = _fetch_registry_from_api()
         normalized = _parse_registry(data)
+        _write_registry_to_cache(data)
         bt.logging.debug(f'Loaded {len(normalized)} repository entries from the repos API')
         return normalized
     except Exception as api_error:
         bt.logging.warning(
             f'Repository registry API unavailable or invalid ({api_error}); '
-            f'falling back to bundled master_repositories.json'
+            f'falling back to the on-disk last-good cache'
         )
 
     try:
-        data = _load_registry_from_file()
+        data = _load_registry_from_cache()
     except FileNotFoundError:
-        bt.logging.error('Repos API unavailable and no bundled master_repositories.json fallback found')
+        bt.logging.error(
+            'Repos API unavailable and no on-disk registry cache present; '
+            'returning empty registry (no repos scored this cycle)'
+        )
         return {}
     except json.JSONDecodeError as e:
-        bt.logging.error(f'Bundled master_repositories.json is invalid JSON: {e}')
+        bt.logging.error(f'On-disk registry cache is invalid JSON: {e}; returning empty registry')
         return {}
 
     normalized = _parse_registry(data)
-    bt.logging.debug(f'Loaded {len(normalized)} repository entries from the bundled seed (fallback)')
+    bt.logging.debug(f'Loaded {len(normalized)} repository entries from the on-disk cache (fallback)')
     return normalized
 
 

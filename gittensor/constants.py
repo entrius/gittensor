@@ -1,4 +1,5 @@
 # Entrius 2025
+import os
 import re
 from typing import Dict
 
@@ -38,11 +39,16 @@ MIRROR_MAX_ATTEMPTS = 3
 # das-gittensor API (https://api.gittensor.io) — repository hyperparameter registry
 # =============================================================================
 # GET /repos returns the full master-repository registry (full_name -> raw config),
-# the authoritative source for repository hyperparameters. The bundled
-# master_repositories.json is only a fallback seed when this endpoint is unreachable.
+# the sole source of truth for repository hyperparameters. On every successful
+# fetch the validator writes the registry to an on-disk last-good cache; when the
+# API is unreachable it falls back to that cache (and to built-in knob defaults if
+# no cache exists). There is no bundled master_repositories.json.
 GITTENSOR_API_DEFAULT_URL = 'https://api.gittensor.io'
 REPOS_API_TIMEOUT_SECONDS = 15
 REPOS_API_MAX_ATTEMPTS = 3
+# On-disk last-good cache for the repos registry. Env-configurable; defaults under
+# the user's home so it survives validator restarts. '~' is expanded at use.
+REPOS_CACHE_PATH = os.getenv('GITTENSOR_REPOS_CACHE_PATH', '~/.gittensor/cache/repos_registry.json')
 
 # =============================================================================
 # Language & File Scoring
@@ -133,14 +139,14 @@ INLINE_TEST_PATTERNS: Dict[str, re.Pattern] = {
 # =============================================================================
 # Eligibility Gate (OSS Contributions)
 # =============================================================================
-# Per-repo defaults — each repo may override these in master_repositories.json.
+# Per-repo defaults — each repo may override these via its registry config (GET /repos).
 MIN_VALID_MERGED_PRS = 3  # minimum merged PRs (per repo) to receive score
 MIN_CREDIBILITY = 0.80  # minimum credibility ratio to receive score
 
 # =============================================================================
 # Issue Discovery
 # =============================================================================
-# Eligibility gate — per-repo defaults, overridable in master_repositories.json.
+# Eligibility gate — per-repo defaults, overridable via the registry config (GET /repos).
 MIN_VALID_SOLVED_ISSUES = 3  # minimum solved issues where solving PR has token_score >= MIN_TOKEN_SCORE_FOR_VALID_ISSUE
 MIN_ISSUE_CREDIBILITY = 0.80  # minimum issue credibility ratio
 MIN_TOKEN_SCORE_FOR_VALID_ISSUE = 5  # solving-PR token_score for a solved issue to count as "valid"

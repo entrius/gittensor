@@ -15,11 +15,15 @@ from gittensor.classes import PRState, PullRequest
 
 
 @pytest.fixture(autouse=True)
-def _force_registry_file_fallback(monkeypatch):
-    """Default validator tests to the bundled master_repositories.json by making
-    the repos API fetch fail, so tests stay offline and deterministic. Tests that
-    exercise the API path re-patch ``_fetch_registry_from_api`` themselves; their
-    setattr runs after this fixture and wins.
+def _isolate_repo_registry(monkeypatch, tmp_path):
+    """Keep validator tests offline and deterministic:
+
+    - the repos API fetch always fails, so loads exercise the fallback path
+      (tests covering the API re-patch ``_fetch_registry_from_api`` themselves;
+      their setattr runs after this fixture and wins);
+    - the on-disk last-good cache points at an empty per-test tmp path, so the
+      default load yields an empty registry. Tests that want a warm-cache
+      fallback write their registry JSON to ``lw._get_repos_cache_path()``.
     """
     from gittensor.validator.utils import load_weights as lw
 
@@ -27,6 +31,7 @@ def _force_registry_file_fallback(monkeypatch):
         raise lw.RepositoryRegistryError('repos API disabled in tests')
 
     monkeypatch.setattr(lw, '_fetch_registry_from_api', _api_disabled)
+    monkeypatch.setattr(lw, '_get_repos_cache_path', lambda: tmp_path / 'repos_cache.json')
 
 
 @dataclass

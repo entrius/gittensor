@@ -8,7 +8,7 @@ and miner evaluations.
 
 import logging
 from contextlib import contextmanager
-from typing import Dict, List
+from typing import Callable, Dict, List, Optional
 
 import numpy as np
 
@@ -73,6 +73,41 @@ class BaseRepository:
                 self.db.rollback()
             self.logger.error(f'Error executing command: {e}')
             return False
+
+    def execute_bulk(
+        self,
+        query: str,
+        values: List[tuple],
+        entity_label: str,
+        commit: bool = True,
+        error_detail_fn: Optional[Callable[[], str]] = None,
+    ) -> int:
+        """
+        Execute a bulk INSERT/UPDATE via executemany.
+
+        Args:
+            query: SQL command string
+            values: List of parameter tuples passed to executemany
+            entity_label: Name used in the error log (e.g. 'pull request')
+            commit: Whether to commit after execution (default True)
+            error_detail_fn: Optional callable producing extra context appended to
+                the error log; only invoked on failure
+
+        Returns:
+            Number of rows passed to executemany on success, 0 on failure
+        """
+        try:
+            with self.get_cursor() as cursor:
+                cursor.executemany(query, values)
+                if commit:
+                    self.db.commit()
+                return len(values)
+        except Exception as e:
+            if commit:
+                self.db.rollback()
+            detail = error_detail_fn() if error_detail_fn else ''
+            self.logger.error(f'Error in bulk {entity_label} storage: {e}{detail}')
+            return 0
 
     def set_entity(self, query: str, params: tuple, commit: bool = True) -> bool:
         """
@@ -201,17 +236,7 @@ class Repository(BaseRepository):
                 )
             )
 
-        try:
-            with self.get_cursor() as cursor:
-                cursor.executemany(BULK_UPSERT_PULL_REQUESTS, values)
-                if commit:
-                    self.db.commit()
-                return len(values)
-        except Exception as e:
-            if commit:
-                self.db.rollback()
-            self.logger.error(f'Error in bulk pull request storage: {e}')
-            return 0
+        return self.execute_bulk(BULK_UPSERT_PULL_REQUESTS, values, 'pull request', commit=commit)
 
     def store_issues_bulk(self, issues: List[Issue], commit: bool = True) -> int:
         """
@@ -253,17 +278,7 @@ class Repository(BaseRepository):
                 )
             )
 
-        try:
-            with self.get_cursor() as cursor:
-                cursor.executemany(BULK_UPSERT_ISSUES, values)
-                if commit:
-                    self.db.commit()
-                return len(values)
-        except Exception as e:
-            if commit:
-                self.db.rollback()
-            self.logger.error(f'Error in bulk issue storage: {e}')
-            return 0
+        return self.execute_bulk(BULK_UPSERT_ISSUES, values, 'issue', commit=commit)
 
     def store_file_changes_bulk(self, file_changes: List[FileChange], commit: bool = True) -> int:
         """
@@ -296,18 +311,13 @@ class Repository(BaseRepository):
                 )
             )
 
-        try:
-            with self.get_cursor() as cursor:
-                cursor.executemany(BULK_UPSERT_FILE_CHANGES, values)
-                if commit:
-                    self.db.commit()
-                return len(values)
-        except Exception as e:
-            if commit:
-                self.db.rollback()
-            prs = {(fc.pr_number, fc.repository_full_name) for fc in file_changes}
-            self.logger.error(f'Error in bulk file change storage: {e} | PRs: {prs}')
-            return 0
+        return self.execute_bulk(
+            BULK_UPSERT_FILE_CHANGES,
+            values,
+            'file change',
+            commit=commit,
+            error_detail_fn=lambda: f' | PRs: {set((fc.pr_number, fc.repository_full_name) for fc in file_changes)}',
+        )
 
     def set_miner_evaluation(
         self,

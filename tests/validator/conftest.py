@@ -9,7 +9,24 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
 
+import pytest
+
 from gittensor.classes import PRState, PullRequest
+
+
+@pytest.fixture(autouse=True)
+def _force_registry_file_fallback(monkeypatch):
+    """Default validator tests to the bundled master_repositories.json by making
+    the repos API fetch fail, so tests stay offline and deterministic. Tests that
+    exercise the API path re-patch ``_fetch_registry_from_api`` themselves; their
+    setattr runs after this fixture and wins.
+    """
+    from gittensor.validator.utils import load_weights as lw
+
+    def _api_disabled():
+        raise lw.RepositoryRegistryError('repos API disabled in tests')
+
+    monkeypatch.setattr(lw, '_fetch_registry_from_api', _api_disabled)
 
 
 @dataclass

@@ -81,6 +81,17 @@ def issues_submissions(
     except click.ClickException as e:
         handle_exception(as_json, str(e), click_error_type(e))
 
+    # None is the GitHub lookup-failure sentinel (rate limit, network/GraphQL
+    # error). Surface it as an explicit error instead of reporting an empty
+    # submission list, which would be a false negative for monitoring/automation.
+    if pull_requests is None:
+        handle_exception(
+            as_json,
+            f'GitHub lookup failed for {repo_name}#{issue_number}; '
+            'submissions could not be determined. Please retry.',
+            'github_lookup_failed',
+        )
+
     if as_json:
         submissions = [
             {

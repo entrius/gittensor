@@ -13,7 +13,7 @@ import sys
 from contextlib import nullcontext
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any, Callable, ContextManager, Dict, List, Optional, Tuple, TypeVar
+from typing import Any, Callable, ContextManager, Dict, List, NoReturn, Optional, Tuple, TypeVar
 
 import click
 import requests
@@ -197,7 +197,7 @@ def print_warning(message: str) -> None:
     err_console.print(f'\n[yellow]{message}[/yellow]\n', highlight=True)
 
 
-def handle_exception(as_json: bool, message: str, error_type: str = 'cli_error') -> None:
+def handle_exception(as_json: bool, message: str, error_type: str = 'cli_error') -> NoReturn:
     """Emit a CLI error in JSON or human format and exit non-zero."""
     if as_json:
         emit_error_json(message, error_type=error_type)
@@ -254,8 +254,13 @@ def fetch_open_issue_pull_requests(
     repository_full_name: str,
     issue_number: int,
     as_json: bool,
-) -> list:
-    """Fetch open PR submissions for a GitHub issue."""
+) -> Optional[list]:
+    """Fetch open PR submissions for a GitHub issue.
+
+    Returns a (possibly empty) list of PRs, or ``None`` when the GitHub lookup
+    fails. Callers must treat ``None`` as a failure (not "no submissions"); see
+    ``find_prs_for_issue``.
+    """
     token = os.environ.get('GITTENSOR_MINER_PAT') or ''
     if not token and not as_json:
         print_warning('No GitHub token found; set GITTENSOR_MINER_PAT to fetch GitHub issue submissions')
@@ -270,7 +275,8 @@ def fetch_open_issue_pull_requests(
                 token=token or None,
                 open_only=True,
             )
-            # Intentionally return GitHub tool output as-is (no CLI schema mapping yet).
+            # Intentionally return GitHub tool output as-is (no CLI schema mapping yet);
+            # this includes the None failure sentinel, which the caller must handle.
             return prs
     except Exception as e:
         raise click.ClickException(f'Failed to fetch PR submissions from GitHub: {e}')

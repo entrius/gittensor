@@ -374,7 +374,25 @@ def execute_graphql_query(
             )
 
             if response.status_code == 200:
-                return response.json()
+                try:
+                    return response.json()
+                except ValueError as e:
+                    # A 200 with a malformed body (truncated response, proxy/HTML
+                    # interstitial, empty body) is a transient failure. json.JSONDecodeError
+                    # subclasses ValueError and is NOT a RequestException, so without this
+                    # guard it would escape the retry loop and the documented None contract.
+                    # Mirrors the response.json() guards in get_github_identity and
+                    # MirrorClient._request.
+                    if attempt < (max_attempts - 1):
+                        backoff_delay = backoff_seconds(attempt)
+                        bt.logging.warning(
+                            f'GraphQL request returned invalid JSON '
+                            f'(attempt {attempt + 1}/{max_attempts}), retrying in {backoff_delay}s: {e}'
+                        )
+                        time.sleep(backoff_delay)
+                        continue
+                    bt.logging.error(f'GraphQL request returned invalid JSON after {max_attempts} attempts: {e}')
+                    return None
 
             # Retry on failure
             if attempt < (max_attempts - 1):

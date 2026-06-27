@@ -144,6 +144,26 @@ class TestExecuteGraphQLQueryRetryLogic:
         mock_sleep.assert_has_calls(expected_delays)
         assert mock_sleep.call_count == 7
 
+    @patch('gittensor.utils.github_api_tools.get_session')
+    @patch('gittensor.utils.github_api_tools.time.sleep')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_invalid_json_on_200_is_retried_then_returns_none(self, mock_logging, mock_sleep, mock_get_session):
+        """A 200 response with a malformed body must be treated as a transient
+        failure: retried with backoff and ultimately returning None (not raising
+        JSONDecodeError out of the retry loop)."""
+        response = Mock(status_code=200)
+        response.json.side_effect = ValueError('Expecting value: line 1 column 1 (char 0)')
+        mock_session = Mock()
+        mock_session.post.return_value = response
+        mock_get_session.return_value = mock_session
+
+        result = execute_graphql_query('query {}', {}, 'fake_token', max_attempts=3)
+
+        assert result is None
+        assert mock_session.post.call_count == 3
+        # One backoff sleep per retry (no sleep after the final attempt).
+        assert mock_sleep.call_count == 2
+
 
 # ============================================================================
 # PR Discovery Fallback Tests

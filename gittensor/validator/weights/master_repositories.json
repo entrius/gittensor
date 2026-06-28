@@ -173,7 +173,7 @@
       "eval:none": 0.0,
       "eval:REJECT": 0.0
     },
-    "maintainer_cut": 0.3,
+    "maintainer_cut": 0.5,
     "trusted_label_pipeline": true
   },
   "JSONbored/awesome-claude": {

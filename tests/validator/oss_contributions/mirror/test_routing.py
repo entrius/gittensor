@@ -7,7 +7,7 @@ Verifies that:
 """
 
 import asyncio
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -62,6 +62,64 @@ def test_load_and_score_run_with_all_repos():
         passed = mock_load.call_args.args[1]
         assert set(passed.keys()) == {'entrius/gittensor-ui', 'entrius/allways'}
         mock_score.assert_called_once()
+
+
+def test_injected_client_is_reused_not_reconstructed():
+    """A caller-supplied mirror client is threaded into load/score and no new
+    MirrorClient is constructed (the per-round connection pool is reused)."""
+    shared_client = MagicMock(name='shared_mirror_client')
+
+    with (
+        patch.object(reward_module, 'validate_response_and_initialize_miner_evaluation') as mock_init,
+        patch.object(reward_module, 'load_miner_prs') as mock_load,
+        patch.object(reward_module, 'score_miner_prs') as mock_score,
+        patch.object(reward_module, 'MirrorClient') as mock_client_cls,
+    ):
+        mock_init.return_value = _make_miner_eval()
+
+        _run(
+            evaluate_miners_pull_requests(
+                uid=1,
+                hotkey='hk',
+                pat='fake-pat',
+                master_repositories=_configs(),
+                programming_languages={},
+                token_config=TokenConfig(),
+                mirror_client=shared_client,
+            )
+        )
+
+        mock_client_cls.assert_not_called()
+        assert mock_load.call_args.kwargs['client'] is shared_client
+        assert mock_score.call_args.kwargs['client'] is shared_client
+        shared_client.close.assert_not_called()
+
+
+def test_standalone_call_owns_and_closes_its_client():
+    """Without an injected client, a short-lived one is created and closed so
+    the standalone/test path does not leak a session."""
+    with (
+        patch.object(reward_module, 'validate_response_and_initialize_miner_evaluation') as mock_init,
+        patch.object(reward_module, 'load_miner_prs'),
+        patch.object(reward_module, 'score_miner_prs'),
+        patch.object(reward_module, 'MirrorClient') as mock_client_cls,
+    ):
+        mock_init.return_value = _make_miner_eval()
+        owned_client = mock_client_cls.return_value
+
+        _run(
+            evaluate_miners_pull_requests(
+                uid=1,
+                hotkey='hk',
+                pat='fake-pat',
+                master_repositories=_configs(),
+                programming_languages={},
+                token_config=TokenConfig(),
+            )
+        )
+
+        mock_client_cls.assert_called_once_with()
+        owned_client.close.assert_called_once_with()
 
 
 def test_failed_init_short_circuits():

@@ -31,6 +31,7 @@ async def evaluate_miners_pull_requests(
     master_repositories: Dict[str, RepositoryConfig],
     programming_languages: Dict[str, LanguageConfig],
     token_config: TokenConfig,
+    mirror_client: Optional[MirrorClient] = None,
     stale_hotkey: Optional[str] = None,
     stored_github_id: Optional[str] = None,
 ) -> MinerEvaluation:
@@ -44,6 +45,9 @@ async def evaluate_miners_pull_requests(
         master_repositories: The incentivized repositories and their RepositoryConfig objects
         programming_languages: The programming languages and their weights
         token_config: Token-based scoring weights configuration
+        mirror_client: A shared MirrorClient to reuse across the scoring round. When
+            omitted (e.g. standalone/test calls), a short-lived client is created and
+            closed for this single evaluation.
         stale_hotkey: If set, the UID has a stored PAT from this old hotkey (re-registration detected)
         stored_github_id: GitHub id recorded when the stored PAT was accepted
 
@@ -68,11 +72,17 @@ async def evaluate_miners_pull_requests(
         bt.logging.warning(f'UID {uid}: GitHub identity lookup failed transiently; deferring to cache fallback')
         return miner_eval
 
-    with MirrorClient() as mirror_client:
-        await asyncio.to_thread(load_miner_prs, miner_eval, master_repositories, client=mirror_client)
-        await score_miner_prs(
-            miner_eval, master_repositories, programming_languages, token_config, client=mirror_client
-        )
+    # Reuse the caller's client so the mirror connection pool is shared across the
+    # whole scoring round instead of reopened per miner. Only close a client we
+    # created ourselves; a caller-supplied one stays open for the next miner.
+    owns_client = mirror_client is None
+    client = mirror_client or MirrorClient()
+    try:
+        await asyncio.to_thread(load_miner_prs, miner_eval, master_repositories, client=client)
+        await score_miner_prs(miner_eval, master_repositories, programming_languages, token_config, client=client)
+    finally:
+        if owns_client:
+            client.close()
 
     bt.logging.info('*' * 50 + '\n')
     return miner_eval
@@ -104,32 +114,37 @@ async def get_rewards(
 
     miner_evaluations: Dict[int, MinerEvaluation] = {}
 
-    # Look up PATs and calculate score.
-    for uid in uids:
-        hotkey = self.metagraph.hotkeys[uid]
-        pat_entry = pat_by_uid.get(uid)
-        pat = None
-        stale_hotkey = None
-        stored_github_id = None
-        if pat_entry:
-            if pat_entry.get('hotkey') == hotkey:
-                pat = pat_entry['pat']
-                stored_github_id = pat_entry.get('github_id')
-            else:
-                stale_hotkey = pat_entry.get('hotkey')
+    # One mirror client for the whole round so the per-miner loop reuses a single
+    # pooled connection instead of opening a fresh session per UID. Mirrors how
+    # issue discovery threads one client through every miner.
+    with MirrorClient() as mirror_client:
+        # Look up PATs and calculate score.
+        for uid in uids:
+            hotkey = self.metagraph.hotkeys[uid]
+            pat_entry = pat_by_uid.get(uid)
+            pat = None
+            stale_hotkey = None
+            stored_github_id = None
+            if pat_entry:
+                if pat_entry.get('hotkey') == hotkey:
+                    pat = pat_entry['pat']
+                    stored_github_id = pat_entry.get('github_id')
+                else:
+                    stale_hotkey = pat_entry.get('hotkey')
 
-        # Calculate score
-        miner_evaluation = await evaluate_miners_pull_requests(
-            uid,
-            hotkey,
-            pat,
-            master_repositories,
-            programming_languages,
-            token_config,
-            stale_hotkey=stale_hotkey,
-            stored_github_id=stored_github_id,
-        )
-        miner_evaluations[uid] = miner_evaluation
+            # Calculate score
+            miner_evaluation = await evaluate_miners_pull_requests(
+                uid,
+                hotkey,
+                pat,
+                master_repositories,
+                programming_languages,
+                token_config,
+                mirror_client=mirror_client,
+                stale_hotkey=stale_hotkey,
+                stored_github_id=stored_github_id,
+            )
+            miner_evaluations[uid] = miner_evaluation
 
     # If evaluation of miner was successful, store to cache, if api failure, fallback to previous successful evaluation if any
     cached_uids = self.store_or_use_cached_evaluation(miner_evaluations)

@@ -349,6 +349,7 @@
     "maintainer_cut": 0,
     "default_label_multiplier": 1,
     "eligibility": {
+      "min_valid_merged_prs": 1,
       "min_credibility": 0.6,
       "max_open_pr_threshold": 1
     },

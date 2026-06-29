@@ -149,3 +149,23 @@ def test_submissions_help_via_issue_alias_routes_to_command_help(cli_root, runne
     assert 'On-chain issue ID' in result.output
     assert '--id' in result.output
     assert '--logging.debug' not in result.output
+
+
+def test_submissions_json_reports_lookup_failure(cli_root, runner, sample_issue):
+    """A failed GitHub lookup is reported as an error, not a successful empty result (#1492)."""
+    with (
+        patch('gittensor.cli.issue_commands.submissions.get_contract_address', return_value='0xabc'),
+        patch('gittensor.cli.issue_commands.submissions.resolve_network', return_value=('ws://x', 'test')),
+        patch('gittensor.cli.issue_commands.submissions.fetch_issue_from_contract', return_value=sample_issue),
+        patch('gittensor.utils.github_api_tools.find_prs_for_issue', return_value=None),
+    ):
+        result = runner.invoke(
+            cli_root,
+            ['issues', 'submissions', '--id', '42', '--json'],
+            catch_exceptions=False,
+        )
+
+    assert result.exit_code != 0
+    payload = json.loads(result.stdout)
+    assert payload['success'] is False
+    assert 'error' in payload

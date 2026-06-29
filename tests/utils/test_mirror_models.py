@@ -238,6 +238,24 @@ class TestMirrorReviewSummary:
         MirrorReviewSummary.from_dict({'maintainer_changes_requested_count': 0})
         mock_logging.warning.assert_not_called()
 
+    def test_counts_coerced_to_int(self):
+        """Counts are returned as ints even if the mirror serializes them as
+        strings, matching the int() coercion every other numeric model field uses.
+        """
+        rs = MirrorReviewSummary.from_dict(
+            {
+                'maintainer_changes_requested_count': '2',
+                'changes_requested_count': '3',
+                'approved_count': '1',
+                'commented_count': '4',
+            }
+        )
+        assert rs.maintainer_changes_requested_count == 2
+        assert isinstance(rs.maintainer_changes_requested_count, int)
+        assert rs.changes_requested_count == 3
+        assert rs.approved_count == 1
+        assert rs.commented_count == 4
+
 
 # ============================================================================
 # MirrorLinkedIssue

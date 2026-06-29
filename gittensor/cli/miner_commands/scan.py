@@ -35,6 +35,7 @@ console = Console()
 FRESHNESS_HALF_LIFE_DAYS = 30.0
 DEFAULT_ISSUES_PER_REPO = 10
 DEFAULT_TOP = 20
+GITHUB_MAX_PER_PAGE = 100  # GitHub REST caps per_page at 100
 
 
 @dataclass
@@ -96,27 +97,49 @@ def _age_days(created_at: str, now: Optional[datetime] = None) -> float:
         created = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
     except (ValueError, AttributeError):
         return 0.0
+    # A parseable but timezone-naive value (no 'Z'/offset) would raise TypeError
+    # when subtracted from the aware `now`; treat such timestamps as UTC.
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=timezone.utc)
     return max(0.0, (now - created).total_seconds() / 86400.0)
 
 
 def fetch_open_issues(repo: str, token: str, limit: int) -> List[Dict[str, Any]]:
     """Fetch up to ``limit`` open issues for a repo via REST, excluding PRs.
 
-    GitHub's issues endpoint returns pull requests too; items carrying a
-    ``pull_request`` key are filtered out.
+    GitHub caps ``per_page`` at 100, so a ``limit`` above that is paginated
+    rather than silently truncated. GitHub's issues endpoint also returns pull
+    requests; items carrying a ``pull_request`` key are filtered out.
     """
     from gittensor.constants import BASE_GITHUB_API_URL, GITHUB_HTTP_TIMEOUT_SECONDS
     from gittensor.utils.github_api_tools import get_session
 
     session = get_session(token)
-    resp = session.get(
-        f'{BASE_GITHUB_API_URL}/repos/{repo}/issues',
-        params={'state': 'open', 'sort': 'created', 'direction': 'desc', 'per_page': limit},
-        timeout=GITHUB_HTTP_TIMEOUT_SECONDS,
-    )
-    if resp.status_code != 200:
-        return []
-    return [item for item in resp.json() if 'pull_request' not in item]
+    per_page = min(limit, GITHUB_MAX_PER_PAGE)
+    issues: List[Dict[str, Any]] = []
+    page = 1
+    while len(issues) < limit:
+        resp = session.get(
+            f'{BASE_GITHUB_API_URL}/repos/{repo}/issues',
+            params={
+                'state': 'open',
+                'sort': 'created',
+                'direction': 'desc',
+                'per_page': per_page,
+                'page': page,
+            },
+            timeout=GITHUB_HTTP_TIMEOUT_SECONDS,
+        )
+        if resp.status_code != 200:
+            break
+        batch = resp.json()
+        if not batch:
+            break
+        issues.extend(item for item in batch if 'pull_request' not in item)
+        if len(batch) < per_page:  # final page reached
+            break
+        page += 1
+    return issues[:limit]
 
 
 def _competition_count(repo: str, issue_number: int, token: str) -> int:

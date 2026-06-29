@@ -8,9 +8,12 @@ tests run without any network access.
 
 from datetime import datetime, timezone
 from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 from gittensor.cli.miner_commands.scan import (
     Opportunity,
+    _age_days,
+    fetch_open_issues,
     freshness_factor,
     gather_opportunities,
     opportunity_score,
@@ -90,3 +93,37 @@ def test_competition_only_queried_when_enabled():
     )
     assert calls['n'] == 1
     assert opps[0].competition == 2
+
+
+def test_age_days_handles_naive_timestamp_without_crashing():
+    # A parseable but timezone-naive timestamp must not raise (was a TypeError).
+    assert _age_days('2026-06-01T00:00:00', now=_NOW) == 28.0  # treated as UTC
+    assert _age_days('not-a-date', now=_NOW) == 0.0  # malformed -> 0.0
+
+
+@patch('gittensor.utils.github_api_tools.get_session')
+def test_fetch_open_issues_paginates_and_excludes_prs(mock_get_session):
+    def resp(items):
+        r = MagicMock()
+        r.status_code = 200
+        r.json.return_value = items
+        return r
+
+    page1 = [
+        {'number': n, 'title': 't', 'html_url': 'u', 'created_at': '2026-06-01T00:00:00Z'}
+        for n in range(100)
+    ]
+    page1[0]['pull_request'] = {'url': 'x'}  # one PR that must be filtered out
+    page2 = [
+        {'number': n, 'title': 't', 'html_url': 'u', 'created_at': '2026-06-01T00:00:00Z'}
+        for n in range(100, 130)
+    ]
+    session = MagicMock()
+    session.get.side_effect = [resp(page1), resp(page2)]
+    mock_get_session.return_value = session
+
+    out = fetch_open_issues('owner/repo', 'tok', 150)
+
+    assert session.get.call_count == 2  # paginated past the 100-per-page cap
+    assert all('pull_request' not in i for i in out)  # PRs excluded
+    assert len(out) == 129  # 99 issues (page1) + 30 (page2)

@@ -343,15 +343,14 @@
     },
     "maintainer_cut": 0.3
   },
-  "e35dev/podcast-design-canvas-2": {
+  "e35dev/podcast-design-canvas-3": {
     "emission_share": 0.351,
     "issue_discovery_share": 0,
     "maintainer_cut": 0,
     "default_label_multiplier": 1,
     "eligibility": {
-      "min_valid_merged_prs": 1,
       "min_credibility": 0.6,
-      "max_open_pr_threshold": 1
+      "max_open_pr_threshold": 4
     },
     "scoring": {
       "pr_lookback_days": 7,

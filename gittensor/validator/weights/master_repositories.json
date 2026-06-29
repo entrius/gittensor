@@ -38,9 +38,7 @@
     "label_multipliers": {
       "ui-ux": 5.0,
       "feature": 2.0,
-      "bug": 0.35,
-      "security": 0.35,
-      "other": 0.05
+      "other": 0.01
     },
     "eligibility": {
       "min_credibility": 0.6,
@@ -72,7 +70,7 @@
       "other": 0.1
     },
     "eligibility": {
-      "min_credibility": 0.5,
+      "min_credibility": 0.7,
       "min_token_score_for_valid_issue": 0.0
     },
     "scoring": {
@@ -352,7 +350,7 @@
     },
     "maintainer_cut": 0.3
   },
-  "e35dev/podcast-design-canvas-2": {
+  "e35dev/podcast-design-canvas-3": {
     "emission_share": 0.105,
     "issue_discovery_share": 0,
     "maintainer_cut": 0,

@@ -18,7 +18,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, cast
 
 import click
 from rich.console import Console
@@ -35,6 +35,9 @@ from gittensor.cli.miner_commands.score import (
     _resolve_pat,
     _serialize_evaluation,
 )
+
+if TYPE_CHECKING:
+    from neurons.validator import Validator
 
 console = Console()
 
@@ -252,7 +255,7 @@ def advisor_command(pat: Optional[str], log_level: str, json_mode: bool) -> None
     )
 
     _apply_log_level(log_level)
-    stub = _StubValidator(_DEV_UID, _DEV_HOTKEY)
+    stub = cast('Validator', _StubValidator(_DEV_UID, _DEV_HOTKEY))
     miner_uids = {_DEV_UID}
     master_repositories = load_master_repo_weights()
     programming_languages = load_programming_language_weights()

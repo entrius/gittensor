@@ -12,6 +12,7 @@ Command structure:
 
 import click
 
+from .advisor import advisor_command
 from .check import miner_check
 from .post import miner_post
 from .score import score_command
@@ -26,6 +27,7 @@ def miner_group():
         post     Broadcast your GitHub PAT to validators
         check    Check how many validators have your PAT stored
         score    Run the validator scoring pipeline end-to-end for a single miner
+        advisor  Turn a local pipeline run into prioritized recommendations
     """
     pass
 
@@ -33,6 +35,7 @@ def miner_group():
 miner_group.add_command(miner_post, name='post')
 miner_group.add_command(miner_check, name='check')
 miner_group.add_command(score_command, name='score')
+miner_group.add_command(advisor_command, name='advisor')
 
 
 def register_miner_commands(cli):

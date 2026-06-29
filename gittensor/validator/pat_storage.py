@@ -24,7 +24,9 @@ import bittensor as bt
 # validators who keep subnet data elsewhere can override the exact file path via
 # the GITTENSOR_MINER_PATS_FILE env var.
 _DEFAULT_PATS_FILE = Path(__file__).resolve().parents[2] / 'data' / 'miner_pats.json'
-PATS_FILE = Path(os.environ['GITTENSOR_MINER_PATS_FILE']) if os.environ.get('GITTENSOR_MINER_PATS_FILE') else _DEFAULT_PATS_FILE
+PATS_FILE = (
+    Path(os.environ['GITTENSOR_MINER_PATS_FILE']) if os.environ.get('GITTENSOR_MINER_PATS_FILE') else _DEFAULT_PATS_FILE
+)
 
 _lock = threading.Lock()
 

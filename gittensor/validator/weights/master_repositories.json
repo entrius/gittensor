@@ -350,7 +350,7 @@
     "default_label_multiplier": 1,
     "eligibility": {
       "min_credibility": 0.6,
-      "max_open_pr_threshold": 4
+      "max_open_pr_threshold": 1
     },
     "scoring": {
       "pr_lookback_days": 7,

@@ -64,10 +64,10 @@ class MirrorReviewSummary:
                 'defaulting to 0 (review penalty/clean-bonus may be miscalculated)'
             )
         return cls(
-            maintainer_changes_requested_count=data.get('maintainer_changes_requested_count', 0),
-            changes_requested_count=data.get('changes_requested_count', 0),
-            approved_count=data.get('approved_count', 0),
-            commented_count=data.get('commented_count', 0),
+            maintainer_changes_requested_count=int(data.get('maintainer_changes_requested_count', 0)),
+            changes_requested_count=int(data.get('changes_requested_count', 0)),
+            approved_count=int(data.get('approved_count', 0)),
+            commented_count=int(data.get('commented_count', 0)),
         )
 
 

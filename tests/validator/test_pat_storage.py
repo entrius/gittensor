@@ -2,6 +2,7 @@
 
 """Tests for validator PAT storage."""
 
+import importlib
 import json
 import threading
 from pathlib import Path
@@ -145,6 +146,36 @@ class TestGetPatByUid:
     def test_get_missing(self):
         entry = pat_storage.get_pat_by_uid(999)
         assert entry is None
+
+
+class TestPatsFileLocation:
+    """The store path defaults to data/miner_pats.json but honors GITTENSOR_MINER_PATS_FILE."""
+
+    def test_defaults_to_project_data_dir(self, monkeypatch):
+        monkeypatch.delenv('GITTENSOR_MINER_PATS_FILE', raising=False)
+        reloaded = importlib.reload(pat_storage)
+        try:
+            assert reloaded.PATS_FILE == reloaded._DEFAULT_PATS_FILE
+            assert reloaded.PATS_FILE.name == 'miner_pats.json'
+        finally:
+            importlib.reload(pat_storage)
+
+    def test_env_var_overrides_with_exact_path(self, monkeypatch, tmp_path):
+        custom = tmp_path / 'subnet-data' / 'pats.json'
+        monkeypatch.setenv('GITTENSOR_MINER_PATS_FILE', str(custom))
+        reloaded = importlib.reload(pat_storage)
+        try:
+            assert reloaded.PATS_FILE == custom
+        finally:
+            importlib.reload(pat_storage)
+
+    def test_empty_env_var_falls_back_to_default(self, monkeypatch):
+        monkeypatch.setenv('GITTENSOR_MINER_PATS_FILE', '')
+        reloaded = importlib.reload(pat_storage)
+        try:
+            assert reloaded.PATS_FILE == reloaded._DEFAULT_PATS_FILE
+        finally:
+            importlib.reload(pat_storage)
 
 
 class TestConcurrency:

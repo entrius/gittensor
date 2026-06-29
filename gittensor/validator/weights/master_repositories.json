@@ -38,9 +38,7 @@
     "label_multipliers": {
       "ui-ux": 5.0,
       "feature": 2.0,
-      "bug": 0.35,
-      "security": 0.35,
-      "other": 0.05
+      "other": 0.01
     },
     "eligibility": {
       "min_credibility": 0.6,

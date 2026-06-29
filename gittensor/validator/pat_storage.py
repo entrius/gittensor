@@ -5,6 +5,9 @@
 Validators store PATs received via PatBroadcastSynapse in miner_pats.json at the project root.
 The scoring loop snapshots the full file once per round via load_all_pats(); mid-round
 broadcasts update the file but do not affect the current scoring round.
+
+The store location defaults to data/miner_pats.json at the project root and can be
+relocated by setting the GITTENSOR_MINER_PATS_FILE env var to an exact file path.
 """
 
 import json
@@ -17,7 +20,13 @@ from typing import Optional
 
 import bittensor as bt
 
-PATS_FILE = Path(__file__).resolve().parents[2] / 'data' / 'miner_pats.json'
+# Where the PAT store lives. Defaults to data/miner_pats.json at the project root;
+# validators who keep subnet data elsewhere can override the exact file path via
+# the GITTENSOR_MINER_PATS_FILE env var.
+_DEFAULT_PATS_FILE = Path(__file__).resolve().parents[2] / 'data' / 'miner_pats.json'
+PATS_FILE = (
+    Path(os.environ['GITTENSOR_MINER_PATS_FILE']) if os.environ.get('GITTENSOR_MINER_PATS_FILE') else _DEFAULT_PATS_FILE
+)
 
 _lock = threading.Lock()
 

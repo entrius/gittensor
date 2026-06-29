@@ -112,6 +112,49 @@ def test_submissions_human_no_open_prs_message(cli_root, runner, sample_issue):
     assert 'No open submissions available' in result.output
 
 
+def test_submissions_json_lookup_failure_returns_structured_error(cli_root, runner, sample_issue):
+    """A GitHub lookup failure (find_prs_for_issue -> None, propagated as None by
+    fetch_open_issue_pull_requests) must surface as `success: false` with a
+    `github_lookup_failed` type — not a false-negative `submission_count: 0`."""
+    with (
+        patch('gittensor.cli.issue_commands.submissions.get_contract_address', return_value='0xabc'),
+        patch('gittensor.cli.issue_commands.submissions.resolve_network', return_value=('ws://x', 'test')),
+        patch('gittensor.cli.issue_commands.submissions.fetch_issue_from_contract', return_value=sample_issue),
+        patch('gittensor.cli.issue_commands.submissions.fetch_open_issue_pull_requests', return_value=None),
+    ):
+        result = runner.invoke(
+            cli_root,
+            ['issues', 'submissions', '--id', '42', '--json'],
+            catch_exceptions=False,
+        )
+
+    assert result.exit_code != 0
+    payload = json.loads(result.stdout)
+    assert payload['success'] is False
+    assert payload['error']['type'] == 'github_lookup_failed'
+    assert 'submission_count' not in payload
+
+
+def test_submissions_human_lookup_failure_errors_instead_of_no_submissions(cli_root, runner, sample_issue):
+    """In human mode a lookup failure must error out, not print the misleading
+    'No open submissions available' message used for a genuinely empty list."""
+    with (
+        patch('gittensor.cli.issue_commands.submissions.get_contract_address', return_value='0xabc'),
+        patch('gittensor.cli.issue_commands.submissions.resolve_network', return_value=('ws://x', 'test')),
+        patch('gittensor.cli.issue_commands.submissions.fetch_issue_from_contract', return_value=sample_issue),
+        patch('gittensor.cli.issue_commands.submissions.fetch_open_issue_pull_requests', return_value=None),
+    ):
+        result = runner.invoke(
+            cli_root,
+            ['issues', 'submissions', '--id', '42'],
+            catch_exceptions=False,
+        )
+
+    assert result.exit_code != 0
+    assert 'No open submissions available' not in result.output
+    assert 'GitHub lookup failed' in result.output
+
+
 def test_submissions_json_contract_read_failure_returns_structured_error(cli_root, runner):
     """`fetch_issue_from_contract` now converts contract-read failures to a
     `ClickException`, which `submissions` routes through `handle_exception` —

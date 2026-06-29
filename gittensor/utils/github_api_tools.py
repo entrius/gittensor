@@ -329,14 +329,26 @@ def find_prs_for_issue(
     issue_number: int,
     open_only: bool = True,
     token: Optional[str] = None,
-) -> List[PRInfo]:
-    """Find PRs that reference an issue via GraphQL cross-reference data."""
+) -> Optional[List[PRInfo]]:
+    """Find PRs that reference an issue via GraphQL cross-reference data.
+
+    Returns a (possibly empty) list on success, or ``None`` when the GraphQL
+    lookup fails (rate limit, network error, GraphQL errors, missing issue
+    payload, or an exception). ``None`` is a failure sentinel that callers must
+    distinguish from ``[]`` ("no referencing PRs exist") — mirroring the
+    ``solver_lookup_failed`` signaling in ``find_solver_from_closure_event`` /
+    ``check_github_issue_closed``. The empty-list return for a falsy token is a
+    precondition-not-met case, not a transient failure.
+    """
     if token:
         try:
-            prs = _search_issue_referencing_prs_graphql(repo, issue_number, token, open_only=open_only)
-            return prs or []
+            # Propagate the None failure sentinel from the GraphQL helper as-is;
+            # collapsing it to [] would make a lookup failure indistinguishable
+            # from a genuinely empty submission list.
+            return _search_issue_referencing_prs_graphql(repo, issue_number, token, open_only=open_only)
         except Exception as exc:
             bt.logging.debug(f'GraphQL PR fetch failed for {repo}#{issue_number}: {exc}')
+            return None
 
     return []
 

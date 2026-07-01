@@ -153,7 +153,7 @@
   "gittensor-ai-lab/sparkinfer": {
     "default_label_multiplier": 0.0,
     "eligibility": {
-      "min_credibility": 0.0,
+      "min_credibility": 0.4,
       "min_issue_credibility": 0.0,
       "min_valid_merged_prs": 0,
       "min_valid_solved_issues": 0

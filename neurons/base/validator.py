@@ -103,6 +103,15 @@ class BaseValidatorNeuron(BaseNeuron):
             pass
 
     async def concurrent_forward(self):
+        # Validator forward() runs a whole scoring round with DB + chain side effects.
+        # Keep it single-flight even if an operator passes a higher template value.
+        if self.config.neuron.num_concurrent_forwards != 1:
+            bt.logging.warning(
+                'Validator forward concurrency is unsupported for scoring rounds; '
+                f'clamping neuron.num_concurrent_forwards={self.config.neuron.num_concurrent_forwards} to 1'
+            )
+            self.config.neuron.num_concurrent_forwards = 1
+
         coroutines = [self.forward() for _ in range(self.config.neuron.num_concurrent_forwards)]
         await asyncio.gather(*coroutines)
 

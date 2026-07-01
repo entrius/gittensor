@@ -98,7 +98,7 @@ def add_validator_args(cls, parser):
     parser.add_argument(
         '--neuron.num_concurrent_forwards',
         type=int,
-        help='The number of concurrent forwards running at any time.',
+        help='The number of concurrent forwards running at any time. Validator scoring rounds are single-flight.',
         default=1,
     )
 

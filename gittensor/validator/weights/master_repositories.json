@@ -332,6 +332,10 @@
   "touchpilot/touchpilot": {
     "emission_share": 0.0035,
     "issue_discovery_share": 0.0,
+    "eligibility": {
+      "min_valid_merged_prs": 1,
+      "min_credibility": 0.5
+    },
     "label_multipliers": {
       "type: bug": 1.1,
       "type: enhancement": 1.25,

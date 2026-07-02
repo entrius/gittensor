@@ -172,12 +172,26 @@ def test_find_prs_returns_empty_when_graphql_empty(mock_graphql):
 
 
 @patch('gittensor.utils.github_api_tools._search_issue_referencing_prs_graphql')
-def test_find_prs_returns_empty_when_graphql_errors(mock_graphql):
+def test_find_prs_returns_none_when_graphql_errors(mock_graphql):
+    # An exception during the GraphQL lookup is a failure, not "no PRs" — it must
+    # surface as the None sentinel so callers can distinguish it from [].
     mock_graphql.side_effect = RuntimeError('boom')
 
     result = find_prs_for_issue('owner/repo', 12, open_only=True, token='fake_token')
 
-    assert result == []
+    assert result is None
+    mock_graphql.assert_called_once_with('owner/repo', 12, 'fake_token', open_only=True)
+
+
+@patch('gittensor.utils.github_api_tools._search_issue_referencing_prs_graphql')
+def test_find_prs_returns_none_when_graphql_lookup_fails(mock_graphql):
+    # The GraphQL helper returns None on rate limit / network / GraphQL errors;
+    # find_prs_for_issue must propagate it rather than collapsing to [].
+    mock_graphql.return_value = None
+
+    result = find_prs_for_issue('owner/repo', 12, open_only=True, token='fake_token')
+
+    assert result is None
     mock_graphql.assert_called_once_with('owner/repo', 12, 'fake_token', open_only=True)
 
 

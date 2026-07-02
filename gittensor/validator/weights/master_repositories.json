@@ -1,23 +1,7 @@
 {
-  "anderdc/social-media-manager": {
-    "default_label_multiplier": 0.0,
-    "eligibility": {
-      "min_credibility": 0.0,
-      "min_issue_credibility": 0.0,
-      "min_valid_merged_prs": 0,
-      "min_valid_solved_issues": 0
-    },
-    "emission_share": 0.004,
-    "fixed_base_score": 1.0,
-    "issue_discovery_share": 0.0,
-    "label_multipliers": {
-      "crown": 1.0
-    },
-    "maintainer_cut": 0.0,
-    "scoring": {
-      "pr_lookback_days": 7
-    },
-    "trusted_label_pipeline": true
+  "Autovara/kata": {
+    "emission_share": 0.01,
+    "issue_discovery_share": 0.0
   },
   "cogniax/tao-pulse-app": {
     "emission_share": 0.0,
@@ -29,7 +13,7 @@
     "issue_discovery_share": 0.0
   },
   "e35ventura/taopedia": {
-    "emission_share": 0.05,
+    "emission_share": 0.049,
     "issue_discovery_share": 0.0,
     "maintainer_cut": 0.0,
     "additional_acceptable_branches": ["test"],
@@ -82,17 +66,6 @@
         "min_multiplier": 0.01
       }
     }
-  },
-  "entrius/allways": {
-    "emission_share": 0.0,
-    "issue_discovery_share": 1.0,
-    "label_multipliers": {
-      "bug": 1.25,
-      "enhancement": 1.0,
-      "refactor": 0.25
-    },
-    "maintainer_cut": 0.0,
-    "trusted_label_pipeline": true
   },
   "entrius/das-github-mirror": {
     "emission_share": 0.005,
@@ -174,6 +147,10 @@
     "maintainer_cut": 0.3,
     "trusted_label_pipeline": true
   },
+  "gittensor-vanguard/vanguarstew": {
+    "emission_share": 0.01,
+    "issue_discovery_share": 0.0
+  },
   "JSONbored/awesome-claude": {
     "default_label_multiplier": 0.0,
     "trusted_label_pipeline": true,
@@ -235,7 +212,7 @@
   "JSONbored/metagraphed": {
     "default_label_multiplier": 0.0,
     "trusted_label_pipeline": true,
-    "emission_share": 0.25,
+    "emission_share": 0.23,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "gittensor:bug": 0.5,
@@ -330,7 +307,7 @@
     }
   },
   "touchpilot/touchpilot": {
-    "emission_share": 0.0035,
+    "emission_share": 0.003,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "type: bug": 1.1,
@@ -342,7 +319,7 @@
     "maintainer_cut": 0.3
   },
   "we-promise/sure": {
-    "emission_share": 0.01,
+    "emission_share": 0.005,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "performance": 1.5,
@@ -351,7 +328,7 @@
     "maintainer_cut": 0.3
   },
   "e35dev/podcast-design-canvas-3": {
-    "emission_share": 0.105,
+    "emission_share": 0.1055,
     "issue_discovery_share": 0,
     "maintainer_cut": 0,
     "default_label_multiplier": 1,
@@ -369,5 +346,9 @@
         "min_multiplier": 0.02
       }
     }
+  },
+  "zeokin/Cuda-Compute-OSS": {
+    "emission_share": 0.01,
+    "issue_discovery_share": 0.0
   }
 }

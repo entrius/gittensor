@@ -172,6 +172,15 @@ class TestEligibilityGate:
         skip, reason = _should_skip_merged_mirror_pr(scored, _config())
         assert skip is False
 
+    def test_null_author_login_does_not_crash_self_merge_check(self):
+        # author_login can be null in cached mirror data (e.g. a deleted/ghost
+        # account); the self-merge comparison must not raise on it and drop an
+        # otherwise-eligible merged PR (the REST path coerces logins the same way).
+        scored = ScoredPR(pr=_pr(author_login=None, merged_by_login='anderdc'))
+        skip, reason = _should_skip_merged_mirror_pr(scored, _config())
+        assert skip is False
+        assert reason is None
+
     def test_base_ref_in_additional_passes(self):
         scored = ScoredPR(pr=_pr(base_ref='test'))
         skip, reason = _should_skip_merged_mirror_pr(scored, _config(additional_branches=['test', 'staging']))

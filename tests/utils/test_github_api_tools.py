@@ -637,4 +637,61 @@ class TestCheckGithubIssueClosed:
             'pr_number': None,
             'solver_lookup_failed': False,
         }
+
+
+class TestSearchIssueReferencingPRsGraphQL:
+    """Null-field hardening for the cross-reference timeline parser.
+
+    GitHub's GraphQL API returns keys present with an explicit ``null`` value
+    (e.g. ``baseRepository`` when a referencing PR's base repo was deleted or is
+    inaccessible). Those nulls must be skipped per-node, not raise an
+    ``AttributeError`` that the ``find_prs_for_issue`` handler would turn into a
+    whole-issue lookup-failure sentinel.
+    """
+
+    _search = staticmethod(github_api_tools._search_issue_referencing_prs_graphql)
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_null_base_repository_pr_is_skipped_not_fatal(self, mock_logging, mock_graphql):
+        """A PR node with ``baseRepository: null`` is skipped; valid PRs still return."""
+        null_base = _pr_node(number=14)
+        null_base['source']['baseRepository'] = None
+        mock_graphql.return_value = _graphql_response(
+            [
+                null_base,
+                _pr_node(number=15, base_repo='owner/repo'),
+            ]
+        )
+
+        result = self._search('owner/repo', 12, 'fake_token')
+
+        assert result is not None
+        assert [pr['number'] for pr in result] == [15]
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_null_timeline_node_is_skipped(self, mock_logging, mock_graphql):
+        """A ``null`` timeline node is skipped rather than raising."""
+        mock_graphql.return_value = _graphql_response(
+            [
+                None,
+                _pr_node(number=15, base_repo='owner/repo'),
+            ]
+        )
+
+        result = self._search('owner/repo', 12, 'fake_token')
+
+        assert result is not None
+        assert [pr['number'] for pr in result] == [15]
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_null_timeline_items_returns_empty(self, mock_logging, mock_graphql):
+        """A ``timelineItems: null`` payload yields an empty list, not a crash."""
+        mock_graphql.return_value = {'data': {'repository': {'issue': {'timelineItems': None}}}}
+
+        result = self._search('owner/repo', 12, 'fake_token')
+
+        assert result == []
         mock_graphql.assert_not_called()

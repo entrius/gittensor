@@ -1,7 +1,27 @@
 {
   "Autovara/kata": {
     "emission_share": 0.08,
-    "issue_discovery_share": 0.0
+    "issue_discovery_share": 0.0,
+    "trusted_label_pipeline": true,
+    "fixed_base_score": 1.0,
+    "default_label_multiplier": 0.0,
+    "maintainer_cut": 0.4,
+    "label_multipliers": {
+      "kata:winner:*": 1.0,
+      "kata:invalid": 0.0,
+      "kata:losing": 0.0,
+      "kata:stale": 0.0,
+      "kata:hold": 0.0,
+      "kata:evaluating": 0.0
+    },
+    "eligibility": {
+      "min_valid_merged_prs": 1,
+      "min_credibility": 0.0,
+      "max_open_pr_threshold": 2
+    },
+    "scoring": {
+      "pr_lookback_days": 14
+    }
   },
   "DPBG/Engram.AI": {
     "emission_share": 0.0025,

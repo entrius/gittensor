@@ -266,3 +266,55 @@ class TestEncodeArgsStr:
 
         assert encoded[0] == len(url_bytes) << 2
         assert encoded[1 : 1 + len(url_bytes)] == url_bytes
+
+
+class TestPayoutBounty:
+    """`payout_bounty` must report a successful on-chain payout as success.
+
+    The amount is read before the payout tx. When that pre-payout read fails
+    transiently (get_issue swallows errors and returns None), a successful
+    payout must not be reported to callers as a falsy failure — that would
+    prompt a duplicate payout on an already-paid issue.
+    """
+
+    def test_success_returns_amount(self, client, wallet):
+        with (
+            patch.object(client, 'get_issue', return_value=SimpleNamespace(bounty_amount=7000)) as get_issue,
+            patch.object(client, '_exec_contract_raw', return_value=('0xdeadbeef', None)),
+        ):
+            assert client.payout_bounty(3, wallet) == 7000
+        get_issue.assert_called_once_with(3)
+
+    def test_success_with_failed_preread_rereads_amount(self, client, wallet):
+        # Pre-payout read fails (None), payout succeeds on-chain, re-read recovers
+        # the amount — the result must be the truthy amount, not a falsy 0.
+        with (
+            patch.object(client, 'get_issue', side_effect=[None, SimpleNamespace(bounty_amount=5000)]) as get_issue,
+            patch.object(client, '_exec_contract_raw', return_value=('0xdeadbeef', None)),
+        ):
+            result = client.payout_bounty(3, wallet)
+        assert result == 5000
+        assert bool(result) is True
+        assert get_issue.call_count == 2
+
+    def test_success_with_unreadable_amount_returns_zero(self, client, wallet):
+        # Both reads fail but the tx succeeded — still not treated as a failure.
+        with (
+            patch.object(client, 'get_issue', return_value=None),
+            patch.object(client, '_exec_contract_raw', return_value=('0xdeadbeef', None)),
+        ):
+            assert client.payout_bounty(3, wallet) == 0
+
+    def test_submission_failure_returns_none(self, client, wallet):
+        with (
+            patch.object(client, 'get_issue', return_value=SimpleNamespace(bounty_amount=7000)),
+            patch.object(client, '_exec_contract_raw', return_value=(None, 'submission failed')),
+        ):
+            assert client.payout_bounty(3, wallet) is None
+
+    def test_revert_returns_none(self, client, wallet):
+        with (
+            patch.object(client, 'get_issue', return_value=SimpleNamespace(bounty_amount=7000)),
+            patch.object(client, '_exec_contract_raw', return_value=('0xdeadbeef', 'ContractReverted')),
+        ):
+            assert client.payout_bounty(3, wallet) is None

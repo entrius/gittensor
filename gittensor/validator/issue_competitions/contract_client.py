@@ -731,7 +731,14 @@ class IssueCompetitionContractClient:
             )
 
             if tx_hash and not error:
-                return int(expected_payout) if expected_payout else 0
+                # Payout succeeded on-chain. ``expected_payout`` is None only when
+                # the pre-payout read failed transiently; re-read best-effort so a
+                # successful payout is never reported to callers as a falsy failure
+                # (which would otherwise prompt a duplicate payout attempt).
+                if expected_payout is None:
+                    reread = self.get_issue(issue_id)
+                    expected_payout = reread.bounty_amount if reread else 0
+                return int(expected_payout)
             return None
 
         except Exception as e:

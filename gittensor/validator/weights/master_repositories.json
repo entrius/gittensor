@@ -56,9 +56,9 @@
     "emission_share": 0.025,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
-      "enhancement": 1.25,
-      "optimization": 2.5,
-      "performance": 1.5
+      "maintainer-issue": 3.0,
+      "optimization": 5.0,
+      "verify-jetson": 4.0
     },
     "maintainer_cut": 0.3,
     "trusted_label_pipeline": true

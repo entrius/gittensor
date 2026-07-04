@@ -132,7 +132,7 @@
       "slop": 0.0
     },
     "eligibility": {
-      "min_credibility": 0.6
+      "min_credibility": 0.65
     },
     "maintainer_cut": 0.55,
     "scoring": {
@@ -161,7 +161,7 @@
       "slop": 0.0
     },
     "eligibility": {
-      "min_credibility": 0.6
+      "min_credibility": 0.65
     },
     "maintainer_cut": 0.55,
     "scoring": {

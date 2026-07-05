@@ -11,7 +11,7 @@ from https://mirror.gittensor.io/api/v1/*.
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import List, Optional
+from typing import Callable, List, Optional, TypeVar
 
 import bittensor as bt
 
@@ -19,6 +19,28 @@ from gittensor.validator.utils.datetime_utils import (
     parse_github_iso_to_utc,
     parse_optional_github_iso_to_utc,
 )
+
+_T = TypeVar('_T')
+
+
+def _parse_mirror_items(
+    raw_list: Optional[list],
+    parse: Callable[[dict], _T],
+    label: str,
+    describe: Callable[[dict], object],
+) -> List[_T]:
+    """Parse mirror-response items, skipping (and warning on) any malformed one.
+
+    ``describe`` builds the identifier shown in the skip warning.
+    """
+    items: List[_T] = []
+    for raw in raw_list or []:
+        try:
+            items.append(parse(raw))
+        except Exception as e:
+            identifier = describe(raw) if isinstance(raw, dict) else '?'
+            bt.logging.warning(f'Skipping malformed mirror {label} {identifier}: {e}')
+    return items
 
 
 @dataclass
@@ -330,15 +352,12 @@ class MirrorPullRequestsResponse:
 
     @classmethod
     def from_dict(cls, data: dict) -> 'MirrorPullRequestsResponse':
-        pull_requests: List[MirrorPullRequest] = []
-        for raw in data.get('pull_requests') or []:
-            try:
-                pull_requests.append(MirrorPullRequest.from_dict(raw))
-            except Exception as e:
-                identifier = (
-                    f'{raw.get("repo_full_name", "?")}#{raw.get("pr_number", "?")}' if isinstance(raw, dict) else '?'
-                )
-                bt.logging.warning(f'Skipping malformed mirror PR {identifier}: {e}')
+        pull_requests = _parse_mirror_items(
+            data.get('pull_requests'),
+            MirrorPullRequest.from_dict,
+            'PR',
+            lambda raw: f'{raw.get("repo_full_name", "?")}#{raw.get("pr_number", "?")}',
+        )
         return cls(
             github_id=str(data['github_id']),
             since=parse_optional_github_iso_to_utc(data.get('since')),
@@ -358,15 +377,12 @@ class MirrorIssuesResponse:
 
     @classmethod
     def from_dict(cls, data: dict) -> 'MirrorIssuesResponse':
-        issues: List[MirrorIssue] = []
-        for raw in data.get('issues') or []:
-            try:
-                issues.append(MirrorIssue.from_dict(raw))
-            except Exception as e:
-                identifier = (
-                    f'{raw.get("repo_full_name", "?")}#{raw.get("issue_number", "?")}' if isinstance(raw, dict) else '?'
-                )
-                bt.logging.warning(f'Skipping malformed mirror issue {identifier}: {e}')
+        issues = _parse_mirror_items(
+            data.get('issues'),
+            MirrorIssue.from_dict,
+            'issue',
+            lambda raw: f'{raw.get("repo_full_name", "?")}#{raw.get("issue_number", "?")}',
+        )
         return cls(
             github_id=str(data['github_id']),
             since=parse_optional_github_iso_to_utc(data.get('since')),
@@ -389,13 +405,12 @@ class MirrorPullRequestFilesResponse:
 
     @classmethod
     def from_dict(cls, data: dict) -> 'MirrorPullRequestFilesResponse':
-        files: List[MirrorFile] = []
-        for raw in data.get('files') or []:
-            try:
-                files.append(MirrorFile.from_dict(raw))
-            except Exception as e:
-                filename = raw.get('filename', '?') if isinstance(raw, dict) else '?'
-                bt.logging.warning(f'Skipping malformed mirror file {filename}: {e}')
+        files = _parse_mirror_items(
+            data.get('files'),
+            MirrorFile.from_dict,
+            'file',
+            lambda raw: raw.get('filename', '?'),
+        )
         return cls(
             repo_full_name=data['repo_full_name'].lower(),
             pr_number=int(data['pr_number']),
@@ -439,13 +454,12 @@ class MirrorRepoMaintainersResponse:
 
     @classmethod
     def from_dict(cls, data: dict) -> 'MirrorRepoMaintainersResponse':
-        maintainers: List[MirrorMaintainer] = []
-        for raw in data.get('maintainers') or []:
-            try:
-                maintainers.append(MirrorMaintainer.from_dict(raw))
-            except Exception as e:
-                identifier = raw.get('github_id', '?') if isinstance(raw, dict) else '?'
-                bt.logging.warning(f'Skipping malformed mirror maintainer {identifier}: {e}')
+        maintainers = _parse_mirror_items(
+            data.get('maintainers'),
+            MirrorMaintainer.from_dict,
+            'maintainer',
+            lambda raw: raw.get('github_id', '?'),
+        )
         return cls(
             repo_full_name=data['repo_full_name'].lower(),
             generated_at=parse_optional_github_iso_to_utc(data.get('generated_at')),

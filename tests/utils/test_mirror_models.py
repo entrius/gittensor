@@ -24,9 +24,11 @@ MirrorIssue = models.MirrorIssue
 MirrorIssuesResponse = models.MirrorIssuesResponse
 MirrorLabel = models.MirrorLabel
 MirrorLinkedIssue = models.MirrorLinkedIssue
+MirrorMaintainer = models.MirrorMaintainer
 MirrorPullRequest = models.MirrorPullRequest
 MirrorPullRequestFilesResponse = models.MirrorPullRequestFilesResponse
 MirrorPullRequestsResponse = models.MirrorPullRequestsResponse
+MirrorRepoMaintainersResponse = models.MirrorRepoMaintainersResponse
 MirrorReviewSummary = models.MirrorReviewSummary
 MirrorSolvingPR = models.MirrorSolvingPR
 
@@ -569,4 +571,34 @@ class TestMirrorPullRequestFilesResponse:
         resp = MirrorPullRequestFilesResponse.from_dict(payload)
         assert len(resp.files) == 1
         assert resp.files[0].filename == 'src/components/MinerCard.tsx'
+        mock_logging.warning.assert_called()
+
+
+class TestMirrorRepoMaintainersResponse:
+    """The maintainers response wrapper had no direct coverage; these also lock
+    the shared malformed-skip parsing for the maintainer call site."""
+
+    def test_parses_maintainers_and_lowercases_repo(self):
+        payload = {
+            'repo_full_name': 'Entrius/Gittensor',
+            'generated_at': '2026-03-20T00:00:00Z',
+            'maintainers': [{'github_id': 42, 'login': 'alice', 'association': 'MEMBER'}],
+        }
+        resp = MirrorRepoMaintainersResponse.from_dict(payload)
+        assert resp.repo_full_name == 'entrius/gittensor'
+        assert len(resp.maintainers) == 1
+        assert resp.maintainers[0].github_id == '42'  # coerced to str
+        assert resp.maintainers[0].association == 'MEMBER'
+
+    @patch('gittensor.utils.mirror.models.bt.logging')
+    def test_malformed_maintainer_skipped_others_parsed(self, mock_logging):
+        bad = {'login': 'no-id'}  # missing required github_id / association
+        payload = {
+            'repo_full_name': 'entrius/gittensor',
+            'generated_at': None,
+            'maintainers': [bad, {'github_id': 7, 'login': 'bob', 'association': 'COLLABORATOR'}],
+        }
+        resp = MirrorRepoMaintainersResponse.from_dict(payload)
+        assert len(resp.maintainers) == 1
+        assert resp.maintainers[0].github_id == '7'
         mock_logging.warning.assert_called()

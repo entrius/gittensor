@@ -5,7 +5,14 @@
   },
   "DPBG/Engram.AI": {
     "emission_share": 0.0025,
-    "issue_discovery_share": 0.0
+    "issue_discovery_share": 0.0,
+    "label_multipliers": {
+      "feature": 1,
+      "bug": 0.5,
+      "refactor": 0.2,
+      "chore": 0.1,
+      "enhancement": 0.7
+    }
   },
   "entrius/das-github-mirror": {
     "emission_share": 0.005,

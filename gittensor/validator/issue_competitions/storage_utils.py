@@ -12,6 +12,12 @@ logger = logging.getLogger(__name__)
 ISSUES_MAPPING_ROOT_KEY = '52789899'
 
 
+def _decode_u128le(data: bytes, offset: int) -> int:
+    """Decode a little-endian u128 (two u64 limbs) from ``data`` at ``offset``."""
+    lo, hi = struct.unpack_from('<QQ', data, offset)
+    return lo + (hi << 64)
+
+
 @dataclass
 class PackedContractStorage:
     """Decoded root packed storage layout for the issue competition contract."""
@@ -107,8 +113,7 @@ def decode_packed_contract_storage(data: bytes) -> Optional[PackedContractStorag
         offset += 2
         next_issue_id = struct.unpack_from('<Q', data, offset)[0]
         offset += 8
-        alpha_pool_lo, alpha_pool_hi = struct.unpack_from('<QQ', data, offset)
-        alpha_pool = alpha_pool_lo + (alpha_pool_hi << 64)
+        alpha_pool = _decode_u128le(data, offset)
     except (struct.error, IndexError) as e:
         logger.debug('Failed to decode packed contract storage: %s', e)
         return None
@@ -162,12 +167,10 @@ def decode_issue_from_storage(data: bytes) -> Optional[DecodedIssueStorage]:
         issue_number = struct.unpack_from('<I', data, offset)[0]
         offset += 4
 
-        bounty_lo, bounty_hi = struct.unpack_from('<QQ', data, offset)
-        bounty_amount = bounty_lo + (bounty_hi << 64)
+        bounty_amount = _decode_u128le(data, offset)
         offset += 16
 
-        target_lo, target_hi = struct.unpack_from('<QQ', data, offset)
-        target_bounty = target_lo + (target_hi << 64)
+        target_bounty = _decode_u128le(data, offset)
         offset += 16
 
         status_byte = data[offset]

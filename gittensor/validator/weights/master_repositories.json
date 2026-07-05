@@ -97,13 +97,13 @@
     "emission_share": 0.005,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
-      "gittensor:bug": 1.1,
-      "gittensor:feature": 1.5,
-      "gittensor:priority": 2.5,
+      "gittensor:bug": 0.05,
+      "gittensor:feature": 0.25,
+      "gittensor:priority": 1.5,
       "slop": 0.0
     },
     "eligibility": {
-      "min_credibility": 0.5
+      "min_credibility": 0.7
     },
     "maintainer_cut": 0.55,
     "scoring": {
@@ -126,13 +126,13 @@
     "emission_share": 0.1,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
-      "gittensor:bug": 0.1,
-      "gittensor:feature": 1.5,
-      "gittensor:priority": 2.5,
+      "gittensor:bug": 0.05,
+      "gittensor:feature": 0.25,
+      "gittensor:priority": 1.5,
       "slop": 0.0
     },
     "eligibility": {
-      "min_credibility": 0.65
+      "min_credibility": 0.7
     },
     "maintainer_cut": 0.55,
     "scoring": {
@@ -155,13 +155,13 @@
     "emission_share": 0.23,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
-      "gittensor:bug": 0.1,
-      "gittensor:feature": 1.5,
-      "gittensor:priority": 2.5,
+      "gittensor:bug": 0.05,
+      "gittensor:feature": 0.25,
+      "gittensor:priority": 1.5,
       "slop": 0.0
     },
     "eligibility": {
-      "min_credibility": 0.65
+      "min_credibility": 0.7
     },
     "maintainer_cut": 0.55,
     "scoring": {

@@ -46,6 +46,15 @@ def test_read_one_issue_returns_none_when_absent():
     assert helpers._read_one_issue_from_child_storage(substrate, '0xchild', 7) is None
 
 
+def test_read_one_issue_returns_none_on_malformed_hex():
+    """A malformed (odd-length / non-hex) storage payload is a decode failure and
+    must return ``None`` per the docstring, not raise ``ValueError`` out of the
+    scan loop and abort ``gitt issues list`` for every remaining issue."""
+    substrate = MagicMock()
+    substrate.rpc_request.return_value = {'result': '0xabc'}  # odd-length -> not decodable
+    assert helpers._read_one_issue_from_child_storage(substrate, '0xchild', 9) is None
+
+
 def test_fetch_issue_uses_single_read_not_full_scan():
     sample = {
         'id': 42,

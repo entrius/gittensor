@@ -625,13 +625,13 @@ def resolve_network(network: Optional[str] = None, rpc_url: Optional[str] = None
     # override a user who set `network: finney` to point at mainnet.
     config = load_config()
 
-    config_network = config.get('network', '').lower()
+    config_network = (config.get('network') or '').lower()
     if config_network and config_network in NETWORK_MAP:
         return NETWORK_MAP[config_network], config_network
 
     if config.get('ws_endpoint'):
         endpoint = config['ws_endpoint']
-        name = _URL_TO_NETWORK.get(endpoint, config.get('network', 'custom'))
+        name = _URL_TO_NETWORK.get(endpoint, config.get('network') or 'custom')
         return endpoint, name
 
     # Default: finney (mainnet)
@@ -735,8 +735,8 @@ def _read_one_issue_from_child_storage(
             err_console.print(f'[dim]Debug: No storage found for issue_id={issue_id} (key={lazy_key[:20]}...)[/dim]')
         return None
 
-    data = bytes.fromhex(val_result['result'].replace('0x', ''))
     try:
+        data = bytes.fromhex(val_result['result'].replace('0x', ''))
         decoded = decode_issue_from_storage(data)
         if decoded is None:
             raise ValueError('Issue decode returned no data')

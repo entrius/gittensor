@@ -24,9 +24,11 @@ from gittensor.cli.issue_commands.helpers import (
     MAX_BOUNTY_ALPHA,
     MAX_ISSUE_ID,
     MAX_ISSUE_NUMBER,
+    NETWORK_MAP,
     STATUS_COLORS,
     colorize_status,
     format_alpha,
+    resolve_network,
     validate_bounty_amount,
     validate_github_issue,
     validate_repository,
@@ -919,3 +921,18 @@ class TestEmitJson:
         captured = capsys.readouterr()
         parsed = json.loads(captured.out)
         assert parsed['field'] == str(value)
+
+
+class TestResolveNetworkNullConfig:
+    """resolve_network must tolerate a null ``network`` in the config file the
+    same way the miner-command resolver already does, instead of crashing on
+    ``None.lower()`` and taking down every ``gitt issues`` command."""
+
+    def test_null_network_falls_back_to_default(self):
+        with patch('gittensor.cli.issue_commands.helpers.load_config', return_value={'network': None}):
+            assert resolve_network() == (NETWORK_MAP['finney'], 'finney')
+
+    def test_null_network_with_ws_endpoint_uses_endpoint(self):
+        cfg = {'network': None, 'ws_endpoint': 'ws://mynode:9944'}
+        with patch('gittensor.cli.issue_commands.helpers.load_config', return_value=cfg):
+            assert resolve_network() == ('ws://mynode:9944', 'custom')

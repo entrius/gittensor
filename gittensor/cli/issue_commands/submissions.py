@@ -87,8 +87,7 @@ def issues_submissions(
     if pull_requests is None:
         handle_exception(
             as_json,
-            f'GitHub lookup failed for {repo_name}#{issue_number}; '
-            'submissions could not be determined. Please retry.',
+            f'GitHub lookup failed for {repo_name}#{issue_number}; submissions could not be determined. Please retry.',
             'github_lookup_failed',
         )
 

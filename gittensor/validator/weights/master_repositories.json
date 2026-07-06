@@ -1,7 +1,27 @@
 {
   "Autovara/kata": {
     "emission_share": 0.08,
-    "issue_discovery_share": 0.0
+    "issue_discovery_share": 0.0,
+    "trusted_label_pipeline": true,
+    "fixed_base_score": 1.0,
+    "default_label_multiplier": 0.0,
+    "maintainer_cut": 0.4,
+    "label_multipliers": {
+      "kata:winner:*": 1.0,
+      "kata:invalid": 0.0,
+      "kata:losing": 0.0,
+      "kata:stale": 0.0,
+      "kata:hold": 0.0,
+      "kata:evaluating": 0.0
+    },
+    "eligibility": {
+      "min_valid_merged_prs": 1,
+      "min_credibility": 0.0,
+      "max_open_pr_threshold": 2
+    },
+    "scoring": {
+      "pr_lookback_days": 14
+    }
   },
   "DPBG/Engram.AI": {
     "emission_share": 0.0025,
@@ -73,7 +93,7 @@
   "gittensor-ai-lab/sparkinfer": {
     "default_label_multiplier": 0.0,
     "eligibility": {
-      "min_credibility": 0.35,
+      "min_credibility": 0.2,
       "min_issue_credibility": 0.0,
       "min_valid_merged_prs": 0,
       "min_valid_solved_issues": 0
@@ -91,12 +111,30 @@
       "eval:none": 0.0,
       "eval:REJECT": 0.0
     },
-    "maintainer_cut": 0.3,
+    "maintainer_cut": 0.5,
     "trusted_label_pipeline": true
   },
   "gittensor-vanguard/vanguarstew": {
     "emission_share": 0.1,
-    "issue_discovery_share": 0.0
+    "issue_discovery_share": 0.0,
+    "maintainer_cut": 0.5,
+    "additional_acceptable_branches": ["test"],
+    "trusted_label_pipeline": true,
+    "default_label_multiplier": 0.0,
+    "label_multipliers": {
+      "mult:core-correctness": 2.0,
+      "mult:leakage-integrity": 1.8,
+      "mult:capability": 1.5,
+      "mult:enhancement": 1.2,
+      "mult:maintenance": 1.0,
+      "mult:docs": 0.8
+    },
+    "eligibility": {
+      "max_open_pr_threshold": 2
+    },
+    "scoring": {
+      "pr_lookback_days": 30
+    }
   },
   "JSONbored/awesome-claude": {
     "default_label_multiplier": 0.0,
@@ -104,21 +142,21 @@
     "emission_share": 0.005,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
-      "gittensor:bug": 0.5,
-      "gittensor:feature": 1.25,
-      "gittensor:priority": 1.75,
+      "gittensor:bug": 0.05,
+      "gittensor:feature": 0.25,
+      "gittensor:priority": 1.5,
       "slop": 0.0
     },
     "eligibility": {
-      "min_credibility": 0.5
+      "min_credibility": 0.7
     },
-    "maintainer_cut": 0.5,
+    "maintainer_cut": 0.55,
     "scoring": {
       "pr_lookback_days": 7,
       "open_pr_collateral_percent": 0.2,
       "review_penalty_rate": 0.2,
-      "standard_issue_multiplier": 1.1,
-      "maintainer_issue_multiplier": 1.5,
+      "standard_issue_multiplier": 1.0,
+      "maintainer_issue_multiplier": 1.25,
       "time_decay": {
         "grace_period_hours": 24,
         "sigmoid_midpoint_days": 3,
@@ -133,21 +171,21 @@
     "emission_share": 0.1,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
-      "gittensor:bug": 0.5,
-      "gittensor:feature": 1.25,
-      "gittensor:priority": 1.75,
+      "gittensor:bug": 0.05,
+      "gittensor:feature": 0.25,
+      "gittensor:priority": 1.5,
       "slop": 0.0
     },
     "eligibility": {
-      "min_credibility": 0.6
+      "min_credibility": 0.7
     },
-    "maintainer_cut": 0.5,
+    "maintainer_cut": 0.55,
     "scoring": {
       "pr_lookback_days": 7,
       "open_pr_collateral_percent": 0.2,
       "review_penalty_rate": 0.2,
-      "standard_issue_multiplier": 1.1,
-      "maintainer_issue_multiplier": 1.5,
+      "standard_issue_multiplier": 1.0,
+      "maintainer_issue_multiplier": 1.25,
       "time_decay": {
         "grace_period_hours": 24,
         "sigmoid_midpoint_days": 3,
@@ -162,21 +200,21 @@
     "emission_share": 0.23,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
-      "gittensor:bug": 0.5,
-      "gittensor:feature": 1.5,
-      "gittensor:priority": 2.5,
+      "gittensor:bug": 0.05,
+      "gittensor:feature": 0.25,
+      "gittensor:priority": 1.5,
       "slop": 0.0
     },
     "eligibility": {
-      "min_credibility": 0.6
+      "min_credibility": 0.7
     },
-    "maintainer_cut": 0.5,
+    "maintainer_cut": 0.55,
     "scoring": {
       "pr_lookback_days": 7,
       "open_pr_collateral_percent": 0.2,
       "review_penalty_rate": 0.2,
-      "standard_issue_multiplier": 1.1,
-      "maintainer_issue_multiplier": 1.5,
+      "standard_issue_multiplier": 1.0,
+      "maintainer_issue_multiplier": 1.25,
       "time_decay": {
         "grace_period_hours": 24,
         "sigmoid_midpoint_days": 3,

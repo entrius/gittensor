@@ -260,10 +260,18 @@ def fetch_open_issue_pull_requests(
     Returns a (possibly empty) list of PRs, or ``None`` when the GitHub lookup
     fails. Callers must treat ``None`` as a failure (not "no submissions"); see
     ``find_prs_for_issue``.
+
+    Raises ``click.ClickException`` when no ``GITTENSOR_MINER_PAT`` is set: the
+    GraphQL lookup cannot run without a token, so continuing would report an
+    empty submission list that is a false negative rather than a real result.
     """
     token = os.environ.get('GITTENSOR_MINER_PAT') or ''
-    if not token and not as_json:
-        print_warning('No GitHub token found; set GITTENSOR_MINER_PAT to fetch GitHub issue submissions')
+    if not token:
+        # Without a PAT, find_prs_for_issue returns [] for the falsy token — the
+        # caller would then report "0 submissions" indistinguishably from a
+        # genuine empty result. Fail loudly (in both human and JSON modes) so the
+        # missing precondition surfaces instead of a silent false negative.
+        raise click.ClickException('A GitHub token is required to list submissions. Set GITTENSOR_MINER_PAT and retry.')
 
     try:
         from gittensor.utils.github_api_tools import find_prs_for_issue
@@ -272,7 +280,7 @@ def fetch_open_issue_pull_requests(
             prs = find_prs_for_issue(
                 repository_full_name,
                 issue_number,
-                token=token or None,
+                token=token,
                 open_only=True,
             )
             # Intentionally return GitHub tool output as-is (no CLI schema mapping yet);

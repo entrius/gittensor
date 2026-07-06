@@ -155,6 +155,49 @@ def test_submissions_human_lookup_failure_errors_instead_of_no_submissions(cli_r
     assert 'GitHub lookup failed' in result.output
 
 
+def test_submissions_json_missing_token_returns_structured_error(cli_root, runner, sample_issue, monkeypatch):
+    """With no GITTENSOR_MINER_PAT the GraphQL lookup cannot run, so the command
+    must surface a `success: false` error instead of a false-negative
+    `submission_count: 0`. Exercises the real `fetch_open_issue_pull_requests`."""
+    monkeypatch.delenv('GITTENSOR_MINER_PAT', raising=False)
+    with (
+        patch('gittensor.cli.issue_commands.submissions.get_contract_address', return_value='0xabc'),
+        patch('gittensor.cli.issue_commands.submissions.resolve_network', return_value=('ws://x', 'test')),
+        patch('gittensor.cli.issue_commands.submissions.fetch_issue_from_contract', return_value=sample_issue),
+    ):
+        result = runner.invoke(
+            cli_root,
+            ['issues', 'submissions', '--id', '42', '--json'],
+            catch_exceptions=False,
+        )
+
+    assert result.exit_code != 0
+    payload = json.loads(result.stdout)
+    assert payload['success'] is False
+    assert 'GITTENSOR_MINER_PAT' in payload['error']['message']
+    assert 'submission_count' not in payload
+
+
+def test_submissions_human_missing_token_errors_instead_of_no_submissions(cli_root, runner, sample_issue, monkeypatch):
+    """In human mode a missing token must error out, not print the misleading
+    'No open submissions available' message used for a genuinely empty list."""
+    monkeypatch.delenv('GITTENSOR_MINER_PAT', raising=False)
+    with (
+        patch('gittensor.cli.issue_commands.submissions.get_contract_address', return_value='0xabc'),
+        patch('gittensor.cli.issue_commands.submissions.resolve_network', return_value=('ws://x', 'test')),
+        patch('gittensor.cli.issue_commands.submissions.fetch_issue_from_contract', return_value=sample_issue),
+    ):
+        result = runner.invoke(
+            cli_root,
+            ['issues', 'submissions', '--id', '42'],
+            catch_exceptions=False,
+        )
+
+    assert result.exit_code != 0
+    assert 'No open submissions available' not in result.output
+    assert 'GITTENSOR_MINER_PAT' in result.output
+
+
 def test_submissions_json_contract_read_failure_returns_structured_error(cli_root, runner):
     """`fetch_issue_from_contract` now converts contract-read failures to a
     `ClickException`, which `submissions` routes through `handle_exception` —

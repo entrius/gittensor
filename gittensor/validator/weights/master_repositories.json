@@ -32,7 +32,8 @@
       "refactor": 0.2,
       "chore": 0.1,
       "enhancement": 0.7
-    }
+    },
+    "maintainer_cut": 0.2
   },
   "entrius/das-github-mirror": {
     "emission_share": 0.005,

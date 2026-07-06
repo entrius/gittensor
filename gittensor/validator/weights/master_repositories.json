@@ -109,7 +109,25 @@
   },
   "gittensor-vanguard/vanguarstew": {
     "emission_share": 0.1,
-    "issue_discovery_share": 0.0
+    "issue_discovery_share": 0.0,
+    "maintainer_cut": 0.5,
+    "additional_acceptable_branches": ["test"],
+    "trusted_label_pipeline": true,
+    "default_label_multiplier": 0.0,
+    "label_multipliers": {
+      "mult:core-correctness": 2.0,
+      "mult:leakage-integrity": 1.8,
+      "mult:capability": 1.5,
+      "mult:enhancement": 1.2,
+      "mult:maintenance": 1.0,
+      "mult:docs": 0.8
+    },
+    "eligibility": {
+      "max_open_pr_threshold": 2
+    },
+    "scoring": {
+      "pr_lookback_days": 30
+    }
   },
   "JSONbored/awesome-claude": {
     "default_label_multiplier": 0.0,

@@ -106,7 +106,7 @@ class _RepoIssueAcc:
     """Per-repository issue-discovery accumulator for one miner."""
 
     solved: int = 0
-    valid_solved: int = 0
+    valid_solving_prs: Set[int] = field(default_factory=set)
     closed: int = 0
     issue_token_score: float = 0.0
     fetch_failed: bool = False
@@ -494,8 +494,11 @@ async def _score_miner_issues(
             continue
 
         # Valid-solved gate: solving PR must meet the repo's token threshold.
+        # Counted per distinct solving PR (matching the one-issue-per-PR
+        # doctrine used for scoring) so a single PR that closes many issues
+        # can't inflate the miner past the min_valid_solved_issues gate.
         if cached.token_score >= cfg.min_token_score_for_valid_issue:
-            acc.valid_solved += 1
+            acc.valid_solving_prs.add(solving_pr.pr_number)
 
         # Same-account: discoverer == solver gets credibility only, no score
         if issue.author_github_id == solving_pr.author_github_id:
@@ -556,13 +559,14 @@ def _finalize_repo_issue_scores(
 
         repo_eval = evaluation.get_or_create_repo_evaluation(repo_name)
 
+        valid_solved = len(acc.valid_solving_prs)
         repo_eval.total_solved_issues = acc.solved
-        repo_eval.total_valid_solved_issues = acc.valid_solved
+        repo_eval.total_valid_solved_issues = valid_solved
         repo_eval.total_closed_issues = acc.closed
         repo_eval.total_open_issues = open_count
         repo_eval.issue_token_score = round(acc.issue_token_score, 2)
 
-        is_eligible, credibility, reason = check_issue_eligibility(cfg, acc.solved, acc.valid_solved, acc.closed)
+        is_eligible, credibility, reason = check_issue_eligibility(cfg, acc.solved, valid_solved, acc.closed)
         repo_eval.is_issue_eligible = is_eligible
         repo_eval.issue_credibility = credibility
 
@@ -571,7 +575,7 @@ def _finalize_repo_issue_scores(
             if acc.solved or acc.closed:
                 bt.logging.info(
                     f'├─ {repo_name}: issue-ineligible ({reason}) | {acc.solved} solved '
-                    f'({acc.valid_solved} valid) | {acc.closed} closed | {open_count} open'
+                    f'({valid_solved} valid) | {acc.closed} closed | {open_count} open'
                 )
             continue
 
@@ -594,7 +598,7 @@ def _finalize_repo_issue_scores(
         repo_eval.issue_discovery_score = round(repo_score, 2)
         evaluation.issue_discovery_issues.extend(acc.scored_issues)
         bt.logging.info(
-            f'├─ {repo_name}: {acc.solved} solved ({acc.valid_solved} valid) | {acc.closed} closed | '
+            f'├─ {repo_name}: {acc.solved} solved ({valid_solved} valid) | {acc.closed} closed | '
             f'{open_count} open | {len(acc.scored_issues)} scored | credibility={credibility:.2f} | '
             f'spam_mult={spam_mult:.1f} | discovery_score={repo_eval.issue_discovery_score:.2f}'
         )

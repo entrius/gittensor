@@ -1075,6 +1075,38 @@ class TestSolvingPrCache:
         assert eval_.total_valid_solved_issues == 0  # below gate
         assert eval_.issue_discovery_score == 0
 
+    def test_one_pr_closing_many_issues_counts_as_one_valid_solved(self):
+        """Anti-gaming: a single solving PR that closes several of a miner's
+        issues must count once toward the min_valid_solved_issues gate, not once
+        per issue. Otherwise a colluding discoverer/solver pair clears the gate
+        with a single multi-close PR. All issues still count toward
+        solved/credibility."""
+        client = Mock()
+        client.get_miner_issues.return_value = _response(
+            [_issue_dict(issue_number=10 + i, author_github_id='B', solved_by_pr=100) for i in range(3)]
+        )
+        eval_ = _eval()
+        # Seed the shared solving PR (#100) so no file fetch is needed and its
+        # token_score (100) clears the valid-issue threshold.
+        eval_.merged_prs = [_scored_mirror_pr('entrius/gittensor-ui', 100)]
+
+        _run(
+            run_issue_discovery(
+                {1: eval_},
+                _mirror_repos('entrius/gittensor-ui'),
+                _EMPTY_LANGS,
+                _EMPTY_TOKEN_CONFIG,
+                client=client,
+            )
+        )
+
+        assert eval_.total_solved_issues == 3  # all three still count for credibility
+        assert eval_.total_valid_solved_issues == 1  # one distinct solving PR, not three
+        # Gate (min_valid_solved_issues=3) is not cleared by the single PR.
+        assert eval_.is_issue_eligible is False
+        assert eval_.issue_discovery_score == 0
+        client.get_pr_files.assert_not_called()
+
 
 class TestCacheStats:
     """Verify the _CacheStats counter accurately tracks hits / misses /

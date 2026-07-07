@@ -5,9 +5,13 @@
     "trusted_label_pipeline": true,
     "fixed_base_score": 1.0,
     "default_label_multiplier": 0.0,
-    "maintainer_cut": 0.4,
+    "maintainer_cut": 0.5,
     "label_multipliers": {
       "kata:winner:*": 1.0,
+      "kata:reward:xl": 10.0,
+      "kata:reward:l": 5.0,
+      "kata:reward:m": 3.0,
+      "kata:reward:s": 1.5,
       "kata:invalid": 0.0,
       "kata:losing": 0.0,
       "kata:stale": 0.0,
@@ -17,10 +21,16 @@
     "eligibility": {
       "min_valid_merged_prs": 1,
       "min_credibility": 0.0,
-      "max_open_pr_threshold": 2
+      "max_open_pr_threshold": 1
     },
     "scoring": {
-      "pr_lookback_days": 14
+      "pr_lookback_days": 14,
+      "time_decay": {
+        "grace_period_hours": 0,
+        "sigmoid_midpoint_days": 2,
+        "sigmoid_steepness": 1.0,
+        "min_multiplier": 0.05
+      }
     }
   },
   "DPBG/Engram.AI": {

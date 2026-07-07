@@ -36,6 +36,23 @@ def _get_hotkey(synapse: bt.Synapse) -> str:
     return synapse.dendrite.hotkey
 
 
+def _blacklist_if_unregistered(validator: 'Validator', synapse: bt.Synapse) -> Tuple[bool, str]:
+    """Blacklist a request whose hotkey is not registered on the subnet."""
+    hotkey = _get_hotkey(synapse)
+    if hotkey not in validator.metagraph.hotkeys:
+        return True, f'Hotkey {hotkey[:16]}... not registered'
+    return False, 'Hotkey recognized'
+
+
+def _stake_priority(validator: 'Validator', synapse: bt.Synapse) -> float:
+    """Priority for a request, keyed on the caller's stake (0 if unregistered)."""
+    hotkey = _get_hotkey(synapse)
+    if hotkey not in validator.metagraph.hotkeys:
+        return 0.0
+    uid = validator.metagraph.hotkeys.index(hotkey)
+    return float(validator.metagraph.S[uid])
+
+
 def _github_identity_pin_error(uid: int, hotkey: str, github_id: Optional[str]) -> Optional[str]:
     existing = pat_storage.get_pat_by_uid(uid)
     if existing and existing.get('hotkey') == hotkey and existing.get('github_id'):
@@ -103,19 +120,12 @@ async def handle_pat_broadcast(validator: 'Validator', synapse: PatBroadcastSyna
 
 async def blacklist_pat_broadcast(validator: 'Validator', synapse: PatBroadcastSynapse) -> Tuple[bool, str]:
     """Reject PAT broadcasts from unregistered hotkeys."""
-    hotkey = _get_hotkey(synapse)
-    if hotkey not in validator.metagraph.hotkeys:
-        return True, f'Hotkey {hotkey[:16]}... not registered'
-    return False, 'Hotkey recognized'
+    return _blacklist_if_unregistered(validator, synapse)
 
 
 async def priority_pat_broadcast(validator: 'Validator', synapse: PatBroadcastSynapse) -> float:
     """Prioritize PAT broadcasts by stake."""
-    hotkey = _get_hotkey(synapse)
-    if hotkey not in validator.metagraph.hotkeys:
-        return 0.0
-    uid = validator.metagraph.hotkeys.index(hotkey)
-    return float(validator.metagraph.S[uid])
+    return _stake_priority(validator, synapse)
 
 
 # ---------------------------------------------------------------------------
@@ -185,19 +195,12 @@ async def handle_pat_check(validator: 'Validator', synapse: PatCheckSynapse) -> 
 
 async def blacklist_pat_check(validator: 'Validator', synapse: PatCheckSynapse) -> Tuple[bool, str]:
     """Reject PAT checks from unregistered hotkeys."""
-    hotkey = _get_hotkey(synapse)
-    if hotkey not in validator.metagraph.hotkeys:
-        return True, f'Hotkey {hotkey[:16]}... not registered'
-    return False, 'Hotkey recognized'
+    return _blacklist_if_unregistered(validator, synapse)
 
 
 async def priority_pat_check(validator: 'Validator', synapse: PatCheckSynapse) -> float:
     """Prioritize PAT checks by stake."""
-    hotkey = _get_hotkey(synapse)
-    if hotkey not in validator.metagraph.hotkeys:
-        return 0.0
-    uid = validator.metagraph.hotkeys.index(hotkey)
-    return float(validator.metagraph.S[uid])
+    return _stake_priority(validator, synapse)
 
 
 # ---------------------------------------------------------------------------

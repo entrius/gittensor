@@ -17,6 +17,7 @@ def use_tmp_pats_file(tmp_path, monkeypatch):
     """Redirect PAT storage to a temporary file for each test."""
     tmp_file = tmp_path / 'miner_pats.json'
     monkeypatch.setattr(pat_storage, 'PATS_FILE', tmp_file)
+    monkeypatch.setattr(pat_storage, '_last_known_good_pats', None)
     return tmp_file
 
 
@@ -86,10 +87,22 @@ class TestLoadAllPats:
         entries = pat_storage.load_all_pats()
         assert len(entries) == 2
 
-    def test_load_handles_corrupt_file(self, use_tmp_pats_file):
+    def test_load_handles_corrupt_file_without_prior_snapshot(self, use_tmp_pats_file):
         use_tmp_pats_file.write_text('not json{{{')
         entries = pat_storage.load_all_pats()
         assert entries == []
+
+    def test_load_corrupt_file_falls_back_to_last_snapshot(self, use_tmp_pats_file):
+        pat_storage.save_pat(1, 'h1', 'p1', 'user_1')
+        pat_storage.save_pat(2, 'h2', 'p2', 'user_2')
+        assert {e['uid'] for e in pat_storage.load_all_pats()} == {1, 2}
+
+        use_tmp_pats_file.write_text('not json{{{')
+        entries = pat_storage.load_all_pats()
+        assert len(entries) == 2
+        assert {e['uid'] for e in entries} == {1, 2}
+        assert entries[0]['pat'] == 'p1'
+        assert entries[1]['pat'] == 'p2'
 
 
 class TestSavePatFailsClosed:

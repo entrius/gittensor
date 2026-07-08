@@ -1,13 +1,17 @@
 {
   "Autovara/kata": {
-    "emission_share": 0.08,
+    "emission_share": 0.077769,
     "issue_discovery_share": 0.0,
     "trusted_label_pipeline": true,
     "fixed_base_score": 1.0,
     "default_label_multiplier": 0.0,
-    "maintainer_cut": 0.4,
+    "maintainer_cut": 0.5,
     "label_multipliers": {
       "kata:winner:*": 1.0,
+      "kata:reward:xl": 10.0,
+      "kata:reward:l": 5.0,
+      "kata:reward:m": 3.0,
+      "kata:reward:s": 1.5,
       "kata:invalid": 0.0,
       "kata:losing": 0.0,
       "kata:stale": 0.0,
@@ -17,14 +21,20 @@
     "eligibility": {
       "min_valid_merged_prs": 1,
       "min_credibility": 0.0,
-      "max_open_pr_threshold": 2
+      "max_open_pr_threshold": 1
     },
     "scoring": {
-      "pr_lookback_days": 14
+      "pr_lookback_days": 14,
+      "time_decay": {
+        "grace_period_hours": 0,
+        "sigmoid_midpoint_days": 2,
+        "sigmoid_steepness": 1.0,
+        "min_multiplier": 0.05
+      }
     }
   },
   "DPBG/Engram.AI": {
-    "emission_share": 0.0025,
+    "emission_share": 0.00243,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "feature": 1,
@@ -32,10 +42,11 @@
       "refactor": 0.2,
       "chore": 0.1,
       "enhancement": 0.7
-    }
+    },
+    "maintainer_cut": 0.2
   },
   "entrius/das-github-mirror": {
-    "emission_share": 0.005,
+    "emission_share": 0.004861,
     "issue_discovery_share": 0.5,
     "label_multipliers": {
       "bug": 1.25,
@@ -46,7 +57,7 @@
     "trusted_label_pipeline": true
   },
   "entrius/gittensor": {
-    "emission_share": 0.05,
+    "emission_share": 0.048606,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "bug": 1.2,
@@ -63,7 +74,7 @@
     "eligibility": {
       "max_open_pr_threshold": 2
     },
-    "emission_share": 0.02,
+    "emission_share": 0.019442,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "enhancement": 1.25,
@@ -81,7 +92,7 @@
       "min_valid_merged_prs": 0,
       "min_valid_solved_issues": 0
     },
-    "emission_share": 0.3425,
+    "emission_share": 0.35,
     "fixed_base_score": 1.0,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
@@ -98,7 +109,7 @@
     "trusted_label_pipeline": true
   },
   "gittensor-vanguard/vanguarstew": {
-    "emission_share": 0.1,
+    "emission_share": 0.097211,
     "issue_discovery_share": 0.0,
     "maintainer_cut": 0.5,
     "additional_acceptable_branches": ["test"],
@@ -123,10 +134,14 @@
     "emission_share": 0.01,
     "issue_discovery_share": 0.0
   },
+  "James-CUDA/Gittensor-TinyRouter": {
+    "emission_share": 0.01,
+    "issue_discovery_share": 0.0
+  },
   "JSONbored/awesome-claude": {
     "default_label_multiplier": 0.0,
     "trusted_label_pipeline": true,
-    "emission_share": 0.005,
+    "emission_share": 0.004861,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "gittensor:bug": 0.05,
@@ -155,7 +170,7 @@
   "JSONbored/gittensory": {
     "default_label_multiplier": 0.0,
     "trusted_label_pipeline": true,
-    "emission_share": 0.1,
+    "emission_share": 0.097211,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "gittensor:bug": 0.05,
@@ -184,7 +199,7 @@
   "JSONbored/metagraphed": {
     "default_label_multiplier": 0.0,
     "trusted_label_pipeline": true,
-    "emission_share": 0.23,
+    "emission_share": 0.223585,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "gittensor:bug": 0.05,
@@ -212,10 +227,28 @@
   },
   "mini-router/minirouter": {
     "emission_share": 0.01,
-    "issue_discovery_share": 0.0
+    "issue_discovery_share": 0.0,
+    "additional_acceptable_branches": ["sn74*"],
+    "label_multipliers": {
+      "bug": 0.1,
+      "feature": 0.15,
+      "refactor": 0.02,
+      "king": 10.0
+    },
+    "eligibility": {
+      "min_valid_merged_prs": 0,
+      "min_credibility": 0.0
+    },
+    "scoring": {
+      "pr_lookback_days": 7,
+      "time_decay": {
+        "sigmoid_midpoint_days": 3
+      }
+    },
+    "maintainer_cut": 0.3
   },
   "vouchdev/vouch": {
-    "emission_share": 0.02,
+    "emission_share": 0.019442,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "feature": 1.5,
@@ -240,7 +273,7 @@
     "maintainer_cut": 0.5
   },
   "phase-rs/phase": {
-    "emission_share": 0.015,
+    "emission_share": 0.014582,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "bug": 1.2,

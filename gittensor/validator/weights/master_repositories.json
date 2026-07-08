@@ -151,18 +151,18 @@
       "slop": 0.0
     },
     "eligibility": {
-      "min_credibility": 0.7
+      "min_credibility": 0.5
     },
     "maintainer_cut": 0.55,
     "scoring": {
-      "pr_lookback_days": 7,
+      "pr_lookback_days": 5,
       "open_pr_collateral_percent": 0.2,
       "review_penalty_rate": 0.2,
       "standard_issue_multiplier": 1.0,
       "maintainer_issue_multiplier": 1.25,
       "time_decay": {
         "grace_period_hours": 24,
-        "sigmoid_midpoint_days": 3,
+        "sigmoid_midpoint_days": 2,
         "sigmoid_steepness": 1.0,
         "min_multiplier": 0.05
       }
@@ -180,18 +180,18 @@
       "slop": 0.0
     },
     "eligibility": {
-      "min_credibility": 0.7
+      "min_credibility": 0.5
     },
     "maintainer_cut": 0.55,
     "scoring": {
-      "pr_lookback_days": 7,
+      "pr_lookback_days": 5,
       "open_pr_collateral_percent": 0.2,
       "review_penalty_rate": 0.2,
       "standard_issue_multiplier": 1.0,
       "maintainer_issue_multiplier": 1.25,
       "time_decay": {
         "grace_period_hours": 24,
-        "sigmoid_midpoint_days": 3,
+        "sigmoid_midpoint_days": 2,
         "sigmoid_steepness": 1.0,
         "min_multiplier": 0.05
       }
@@ -209,18 +209,18 @@
       "slop": 0.0
     },
     "eligibility": {
-      "min_credibility": 0.7
+      "min_credibility": 0.5
     },
     "maintainer_cut": 0.55,
     "scoring": {
-      "pr_lookback_days": 7,
+      "pr_lookback_days": 5,
       "open_pr_collateral_percent": 0.2,
       "review_penalty_rate": 0.2,
       "standard_issue_multiplier": 1.0,
       "maintainer_issue_multiplier": 1.25,
       "time_decay": {
         "grace_period_hours": 24,
-        "sigmoid_midpoint_days": 3,
+        "sigmoid_midpoint_days": 2,
         "sigmoid_steepness": 1.0,
         "min_multiplier": 0.05
       }

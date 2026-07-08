@@ -230,7 +230,6 @@
     "issue_discovery_share": 0.0,
     "additional_acceptable_branches": ["sn74*"],
     "label_multipliers": {
-      "maintainer": 0.5,
       "bug": 0.1,
       "feature": 0.15,
       "refactor": 0.02,

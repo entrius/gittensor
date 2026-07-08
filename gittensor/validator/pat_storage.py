@@ -29,6 +29,15 @@ PATS_FILE = (
 )
 
 _lock = threading.Lock()
+_last_known_good_pats: Optional[list[dict]] = None
+
+
+def _snapshot_entries(entries: list[dict]) -> list[dict]:
+    """Return a defensive copy and remember it as the last successful read."""
+    global _last_known_good_pats
+    copied = [entry.copy() for entry in entries]
+    _last_known_good_pats = copied
+    return copied
 
 
 def ensure_pats_file() -> None:
@@ -36,22 +45,31 @@ def ensure_pats_file() -> None:
     with _lock:
         if not PATS_FILE.exists():
             _write_file([])
+            _snapshot_entries([])
 
 
 def load_all_pats() -> list[dict]:
     """Snapshot all stored PAT entries for a scoring round.
 
     Read-only and deliberately tolerant: an unreadable store here must not crash
-    the round (an unhandled error would stop the validator) nor wipe anything. It
-    logs loudly and returns [] so the round recovers on the next successful read.
-    The *write* path (save_pat) is the one that fails closed.
+    the round (an unhandled error would stop the validator) nor wipe anything.
+    On a transient read failure, returns the last successful snapshot so miners
+    are not all treated as PAT-less for the round. The *write* path (save_pat)
+    is the one that fails closed.
     """
     with _lock:
         try:
-            return _read_file()
+            return _snapshot_entries(_read_file())
         except (json.JSONDecodeError, OSError) as e:
+            if _last_known_good_pats is not None:
+                bt.logging.warning(
+                    f'miner_pats.json unreadable this round; using last known good PAT snapshot '
+                    f'({len(_last_known_good_pats)} miners) until the store recovers: {e}'
+                )
+                return [entry.copy() for entry in _last_known_good_pats]
             bt.logging.error(
-                f'miner_pats.json unreadable this round; scoring with no stored PATs until it recovers: {e}'
+                f'miner_pats.json unreadable and no prior PAT snapshot exists; '
+                f'scoring with no stored PATs until it recovers: {e}'
             )
             return []
 
@@ -83,6 +101,7 @@ def save_pat(uid: int, hotkey: str, pat: str, github_id: str) -> None:
             entries.append(entry)
 
         _write_file(entries)
+        _snapshot_entries(entries)
 
 
 def get_pat_by_uid(uid: int) -> Optional[dict]:

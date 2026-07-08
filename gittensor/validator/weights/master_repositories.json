@@ -124,6 +124,7 @@
       "mult:docs": 0.8
     },
     "eligibility": {
+      "min_credibility": 0.7,
       "max_open_pr_threshold": 2
     },
     "scoring": {

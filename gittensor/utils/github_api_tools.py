@@ -283,15 +283,17 @@ def _search_issue_referencing_prs_graphql(
         bt.logging.warning(f'GraphQL cross-reference response missing issue data for {repo}#{issue_number}')
         return None
 
-    timeline_nodes = issue_data.get('timelineItems', {}).get('nodes', [])
+    timeline_nodes = issue_data.get('timelineItems', {}).get('nodes', []) or []
 
     out: List[PRInfo] = []
     for node in timeline_nodes:
+        if not node:
+            continue
         pr = node.get('source') or {}
         if not pr:
             continue
 
-        base_repo = pr.get('baseRepository', {}).get('nameWithOwner', '')
+        base_repo = (pr.get('baseRepository') or {}).get('nameWithOwner') or ''
         if base_repo.lower() != target_repo:
             continue
 

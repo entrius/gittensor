@@ -262,6 +262,82 @@ def _pr_node(
     }
 
 
+class TestSearchIssueReferencingPrsGraphql:
+    """Regression tests for parsing cross-referencing PR nodes.
+
+    GitHub's GraphQL schema makes both the timeline ``nodes`` elements and
+    ``PullRequest.baseRepository`` nullable: a ``node`` is ``null`` when the
+    cross-reference lives in a repo the token can't see (redacted item), and
+    ``baseRepository`` is ``null`` when the PR's base repo has been deleted.
+    The sibling functions ``_select_current_close_event`` /
+    ``_closing_issue_numbers_for_repo`` already skip null nodes and
+    ``_solver_from_closed_event`` already guards a null ``baseRepository``;
+    these tests pin the equivalent handling on the referencing path so a single
+    null node or null-base PR cannot abort the whole submission lookup.
+    """
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_null_timeline_node_is_skipped_not_crash(self, mock_logging, mock_graphql):
+        mock_graphql.return_value = _graphql_response(
+            [
+                None,  # redacted cross-reference -> null node element
+                _pr_node(number=101, base_repo='owner/repo'),
+            ]
+        )
+
+        result = find_prs_for_issue('owner/repo', 12, open_only=False, token='fake_token')
+
+        assert result is not None
+        assert [pr['number'] for pr in result] == [101]
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_null_nodes_list_returns_empty(self, mock_logging, mock_graphql):
+        mock_graphql.return_value = {'data': {'repository': {'issue': {'timelineItems': {'nodes': None}}}}}
+
+        result = find_prs_for_issue('owner/repo', 12, open_only=False, token='fake_token')
+
+        assert result == []
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_null_base_repository_node_is_skipped_not_crash(self, mock_logging, mock_graphql):
+        null_base_node = {
+            'source': {
+                'number': 77,
+                'merged': False,
+                'author': {'databaseId': 7},
+                'baseRepository': None,
+                'closingIssuesReferences': {'nodes': []},
+            },
+        }
+        mock_graphql.return_value = _graphql_response(
+            [
+                null_base_node,
+                _pr_node(number=101, base_repo='owner/repo'),
+            ]
+        )
+
+        result = find_prs_for_issue('owner/repo', 12, open_only=False, token='fake_token')
+
+        assert result is not None
+        assert [pr['number'] for pr in result] == [101]
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_only_null_base_repository_node_returns_empty(self, mock_logging, mock_graphql):
+        mock_graphql.return_value = _graphql_response(
+            [
+                {'source': {'number': 77, 'baseRepository': None}},
+            ]
+        )
+
+        result = find_prs_for_issue('owner/repo', 12, open_only=False, token='fake_token')
+
+        assert result == []
+
+
 def _closure_graphql_response(nodes, closed_at=None):
     """Helper to build a GraphQL closed-event response."""
     if closed_at is None and nodes:

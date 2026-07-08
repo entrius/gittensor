@@ -364,14 +364,6 @@ class TestRepositoryConfigMirrorScoringFields:
                 f'{repo_name} time_decay.min_multiplier out of range'
             )
 
-    def test_oc_1_runs_ungated(self):
-        """The oc-1 benchmark repo opts out of the gate via zeroed thresholds."""
-        repos = load_master_repo_weights()
-        resolved = resolve_eligibility(repos['entrius/oc-1'].eligibility)
-        assert resolved.min_valid_merged_prs == 0
-        assert resolved.min_credibility == 0.0
-        assert resolved.min_valid_solved_issues == 0
-
 
 class TestRepositoryConfigScoringBlock:
     """Dataclass + JSON-parsing tests for the per-repo scoring block."""

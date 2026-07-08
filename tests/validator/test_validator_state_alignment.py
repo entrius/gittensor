@@ -10,7 +10,10 @@ import numpy as np
 from neurons.base.validator import BaseValidatorNeuron
 
 
-class _ValidatorStub(BaseValidatorNeuron):
+class _ValidatorStub:
+    _align_scores_to_metagraph = BaseValidatorNeuron._align_scores_to_metagraph
+    load_state = BaseValidatorNeuron.load_state
+
     def __init__(self, n: int, hotkeys: list[str]):
         self.metagraph = MagicMock()
         self.metagraph.n = n

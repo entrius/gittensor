@@ -288,22 +288,22 @@ class BaseValidatorNeuron(BaseNeuron):
             return
 
         bt.logging.info('Metagraph updated, re-syncing hotkeys, dendrite pool and moving averages')
-        # Zero out all hotkeys that have been replaced.
-        for uid, hotkey in enumerate(self.hotkeys):
-            if hotkey != self.metagraph.hotkeys[uid]:
-                self.scores[uid] = 0  # hotkey has been replaced
-
-        # Check to see if the metagraph has changed size.
-        # If so, we need to add new hotkeys and moving averages.
-        if len(self.hotkeys) < len(self.metagraph.hotkeys):
-            # Update the size of the moving average scores.
-            new_moving_average = np.zeros((self.metagraph.n))
-            min_len = min(len(self.hotkeys), len(self.scores))
-            new_moving_average[:min_len] = self.scores[:min_len]
-            self.scores = new_moving_average
-
-        # Update the hotkeys.
+        self.scores = self._align_scores_to_metagraph(self.scores, self.hotkeys)
         self.hotkeys = copy.deepcopy(self.metagraph.hotkeys)
+
+    def _align_scores_to_metagraph(self, scores: np.ndarray, hotkeys: list) -> np.ndarray:
+        """Resize scores to the live metagraph and zero slots whose hotkey was replaced."""
+        n = int(self.metagraph.n)
+        scores_arr = np.asarray(scores, dtype=np.float32)
+        aligned = np.zeros(n, dtype=np.float32)
+        min_len = min(len(scores_arr), n)
+        aligned[:min_len] = scores_arr[:min_len]
+
+        for uid in range(min(len(hotkeys), n)):
+            if hotkeys[uid] != self.metagraph.hotkeys[uid]:
+                aligned[uid] = 0.0
+
+        return aligned
 
     def update_scores(self, rewards: np.ndarray, uids: set[int], blacklisted_uids: List[int] = None):
         """Performs exponential moving average on the scores based on the rewards received from the miners."""
@@ -380,9 +380,10 @@ class BaseValidatorNeuron(BaseNeuron):
         state_path = self.config.neuron.full_path + '/state.npz'
         try:
             state = np.load(state_path)
+            loaded_hotkeys = list(state['hotkeys'])
             self.step = int(state['step'])
-            self.scores = state['scores']
-            self.hotkeys = list(state['hotkeys'])
+            self.scores = self._align_scores_to_metagraph(state['scores'], loaded_hotkeys)
+            self.hotkeys = copy.deepcopy(self.metagraph.hotkeys)
             bt.logging.success(f'Successfully loaded validator state from {state_path}')
         except FileNotFoundError:
             bt.logging.warning(f'No state file found at {state_path}, starting with fresh state')

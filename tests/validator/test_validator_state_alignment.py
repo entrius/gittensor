@@ -14,6 +14,12 @@ class _ValidatorStub:
     _align_scores_to_metagraph = BaseValidatorNeuron._align_scores_to_metagraph
     load_state = BaseValidatorNeuron.load_state
 
+    metagraph: MagicMock
+    config: MagicMock
+    step: int
+    scores: np.ndarray
+    hotkeys: list[str]
+
     def __init__(self, n: int, hotkeys: list[str]):
         self.metagraph = MagicMock()
         self.metagraph.n = n

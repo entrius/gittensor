@@ -212,6 +212,12 @@ class TestEligibilityGate:
         skip, reason = _should_skip_merged_mirror_pr(scored, _config(additional_branches=None))
         assert skip is False
 
+    def test_null_base_ref_skips_check(self):
+        # Pre-backfill mirror rows omit base_ref; must not false-positive-block.
+        scored = ScoredPR(pr=_pr(base_ref=None, default_branch='main'))
+        skip, reason = _should_skip_merged_mirror_pr(scored, _config(additional_branches=None))
+        assert skip is False
+
     def test_head_ref_in_additional_blocks_same_repo(self):
         scored = ScoredPR(
             pr=_pr(

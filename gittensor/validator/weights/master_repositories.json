@@ -167,7 +167,24 @@
   },
   "James-CUDA/Gittensor-TinyRouter": {
     "emission_share": 0.01,
-    "issue_discovery_share": 0.0
+    "issue_discovery_share": 0.0,
+    "label_multipliers": {
+      "bug": 0.1,
+      "feature": 0.15,
+      "refactor": 0.02,
+      "king": 10.0
+    },
+    "eligibility": {
+      "min_valid_merged_prs": 0,
+      "min_credibility": 0.0
+    },
+    "scoring": {
+      "pr_lookback_days": 7,
+      "time_decay": {
+        "sigmoid_midpoint_days": 3
+      }
+    },
+    "maintainer_cut": 0.3
   },
   "JSONbored/awesome-claude": {
     "default_label_multiplier": 0.0,

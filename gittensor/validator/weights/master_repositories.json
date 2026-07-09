@@ -321,6 +321,30 @@
   },
   "zeokin/Cuda-Compute-OSS": {
     "emission_share": 0.01,
-    "issue_discovery_share": 0.0
+    "issue_discovery_share": 0.0,
+    "trusted_label_pipeline": true,
+    "default_label_multiplier": 0.0,
+    "label_multipliers": {
+      "eval:L": 4.0,
+      "eval:M": 2.0,
+      "eval:S": 1.0,
+      "eval:BASELINE": 1.5,
+      "eval:none": 0.0,
+      "eval:REJECT": 0.0,
+      "type:bug": 0.3,
+      "type:docs": 0.1
+    },
+    "eligibility": {
+      "min_valid_merged_prs": 2,
+      "min_credibility": 0.6,
+      "excessive_pr_penalty_base_threshold": 2,
+      "max_open_pr_threshold": 3
+    },
+    "scoring": {
+      "pr_lookback_days": 15,
+      "open_pr_collateral_percent": 0.2,
+      "review_penalty_rate": 0.15
+    },
+    "maintainer_cut": 0.0
   }
 }

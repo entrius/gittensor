@@ -40,7 +40,7 @@ from typing import Dict, List, Optional, Set, Tuple
 
 import bittensor as bt
 
-from gittensor.classes import Issue, MinerEvaluation, MinerEvaluationCache
+from gittensor.classes import Issue, MinerEvaluation, MinerEvaluationCache, RepoEvaluation
 from gittensor.constants import (
     MAINTAINER_ASSOCIATIONS,
 )
@@ -252,6 +252,25 @@ async def run_issue_discovery(
     )
 
 
+def _reset_repo_issue_fields(repo_eval: RepoEvaluation) -> None:
+    """Zero every per-repo issue-discovery field.
+
+    Both issue-discovery reset paths — the no-issues path
+    (``_clear_issue_discovery_fields``) and the scoring path
+    (``_finalize_repo_issue_scores``) — must clear these identically. Otherwise a
+    repo scored in a prior round but absent this round keeps stale values that
+    ``_roll_up_issue_totals`` then sums into the round-level totals.
+    """
+    repo_eval.is_issue_eligible = False
+    repo_eval.issue_credibility = 0.0
+    repo_eval.issue_discovery_score = 0.0
+    repo_eval.issue_token_score = 0.0
+    repo_eval.total_solved_issues = 0
+    repo_eval.total_valid_solved_issues = 0
+    repo_eval.total_closed_issues = 0
+    repo_eval.total_open_issues = 0
+
+
 def _clear_issue_discovery_fields(evaluation: MinerEvaluation) -> None:
     """Reset issue-discovery aggregates after a successful fetch with no mirror issues."""
     evaluation.issue_discovery_score = 0.0
@@ -264,14 +283,7 @@ def _clear_issue_discovery_fields(evaluation: MinerEvaluation) -> None:
     evaluation.total_open_issues = 0
     evaluation.issue_discovery_issues = []
     for repo_eval in evaluation.repo_evaluations.values():
-        repo_eval.is_issue_eligible = False
-        repo_eval.issue_credibility = 0.0
-        repo_eval.issue_discovery_score = 0.0
-        repo_eval.issue_token_score = 0.0
-        repo_eval.total_solved_issues = 0
-        repo_eval.total_valid_solved_issues = 0
-        repo_eval.total_closed_issues = 0
-        repo_eval.total_open_issues = 0
+        _reset_repo_issue_fields(repo_eval)
 
 
 def _apply_open_issue_counts(evaluation: MinerEvaluation, open_counts: Dict[str, int]) -> None:
@@ -545,6 +557,13 @@ def _finalize_repo_issue_scores(
 ) -> None:
     """Gate + score issue discovery per repository, then roll up the totals."""
     evaluation.issue_discovery_issues = []
+
+    # Clear stale per-repo issue fields carried over from a prior round (e.g. an
+    # OSS cache-restored evaluation) before rewriting only the repos seen this
+    # round. Without this, a repo scored previously but absent now keeps its old
+    # values and _roll_up_issue_totals sums them into the round-level totals.
+    for repo_eval in evaluation.repo_evaluations.values():
+        _reset_repo_issue_fields(repo_eval)
 
     for repo_name in sorted(set(repo_acc) | set(open_counts)):
         repo_config = mirror_repos.get(repo_name)

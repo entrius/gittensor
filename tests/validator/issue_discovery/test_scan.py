@@ -921,6 +921,51 @@ class TestRunMirrorIssueDiscovery:
         assert cached.issue_discovery_score == 8.12
         assert cached.total_solved_issues == 7
 
+    def test_successful_scoring_clears_stale_issue_fields_for_repos_absent_this_round(self):
+        # An OSS cache-restored evaluation carries a repo scored in a prior round.
+        # This round the miner only has issues in a DIFFERENT enabled repo, so the
+        # scoring path must zero the now-absent repo's issue fields (parity with the
+        # no-issues path) rather than leak them into _roll_up_issue_totals.
+        eval_ = _eval(uid=1, github_id='999')
+        stale = eval_.get_or_create_repo_evaluation('entrius/gittensor')
+        stale.total_solved_issues = 7
+        stale.total_valid_solved_issues = 7
+        stale.total_closed_issues = 2
+        stale.issue_discovery_score = 8.12
+        stale.issue_token_score = 700.0
+        stale.issue_credibility = 1.0
+        stale.is_issue_eligible = True
+
+        client = Mock()
+        # Both the scoring fetch and the open-count fetch return issues only for the
+        # other enabled repo; 'entrius/gittensor' is absent from repo_acc/open_counts.
+        client.get_miner_issues.return_value = _response(
+            [_issue_dict(repo='entrius/gittensor-ui', state='CLOSED', state_reason='NOT_PLANNED', solved_by_pr=None)]
+        )
+
+        _run(
+            run_issue_discovery(
+                {1: eval_},
+                _mirror_repos('entrius/gittensor', 'entrius/gittensor-ui'),
+                _EMPTY_LANGS,
+                _EMPTY_TOKEN_CONFIG,
+                client=client,
+            )
+        )
+
+        stale_after = eval_.repo_evaluations['entrius/gittensor']
+        assert stale_after.total_solved_issues == 0
+        assert stale_after.total_valid_solved_issues == 0
+        assert stale_after.total_closed_issues == 0
+        assert stale_after.issue_discovery_score == 0.0
+        assert stale_after.issue_token_score == 0.0
+        assert stale_after.is_issue_eligible is False
+
+        # Round-level roll-up must not inherit the stale repo's solved count / score.
+        assert eval_.total_solved_issues == 0
+        assert eval_.issue_discovery_score == 0.0
+        assert eval_.is_issue_eligible is False
+
 
 # ============================================================================
 # Cache behavior

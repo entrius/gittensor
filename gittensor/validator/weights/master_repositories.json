@@ -110,25 +110,29 @@
   },
   "gittensor-vanguard/vanguarstew": {
     "emission_share": 0.097211,
+    "fixed_base_score": 1.0,
     "issue_discovery_share": 0.0,
     "maintainer_cut": 0.5,
     "additional_acceptable_branches": ["test"],
     "trusted_label_pipeline": true,
     "default_label_multiplier": 0.0,
     "label_multipliers": {
-      "mult:core-correctness": 2.0,
-      "mult:leakage-integrity": 1.8,
-      "mult:capability": 1.5,
-      "mult:enhancement": 1.2,
-      "mult:maintenance": 1.0,
-      "mult:docs": 0.8
+      "mult:contribution": 0.05,
+      "perf:xl": 4.0,
+      "perf:l": 2.5,
+      "perf:m": 1.5,
+      "perf:s": 1.0,
+      "perf:xs": 0.5
     },
     "eligibility": {
-      "min_credibility": 0.7,
+      "min_credibility": 0.4,
       "max_open_pr_threshold": 2
     },
     "scoring": {
-      "pr_lookback_days": 30
+      "pr_lookback_days": 7,
+      "time_decay": {
+        "sigmoid_midpoint_days": 3
+      }
     }
   },
   "imagent-ai/imagent": {

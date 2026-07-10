@@ -12,11 +12,11 @@
       "kata:reward:l": 5.0,
       "kata:reward:m": 3.0,
       "kata:reward:s": 1.5,
+      "kata:defeat": 0.25,
       "kata:invalid": 0.0,
       "kata:losing": 0.0,
       "kata:stale": 0.0,
-      "kata:hold": 0.0,
-      "kata:evaluating": 0.0
+      "kata:hold": 0.0
     },
     "eligibility": {
       "min_valid_merged_prs": 1,
@@ -24,11 +24,11 @@
       "max_open_pr_threshold": 1
     },
     "scoring": {
-      "pr_lookback_days": 14,
+      "pr_lookback_days": 7,
       "time_decay": {
         "grace_period_hours": 0,
-        "sigmoid_midpoint_days": 2,
-        "sigmoid_steepness": 1.0,
+        "sigmoid_midpoint_days": 3,
+        "sigmoid_steepness": 0.75,
         "min_multiplier": 0.05
       }
     }

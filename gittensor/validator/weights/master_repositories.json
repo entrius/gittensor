@@ -125,7 +125,7 @@
       "perf:xs": 0.5
     },
     "eligibility": {
-      "min_credibility": 0.4,
+      "min_credibility": 0.5,
       "max_open_pr_threshold": 2
     },
     "scoring": {

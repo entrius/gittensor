@@ -54,7 +54,7 @@ def _pr(
     author_login: str = 'bittoby',
     merged_by_login: str | None = 'anderdc',
     author_association: str = 'CONTRIBUTOR',
-    base_ref: str = 'main',
+    base_ref: str | None = 'main',
     head_ref: str | None = 'feature/foo',
     head_repo_full_name: str | None = 'entrius/gittensor-ui',
     default_branch: str | None = 'main',
@@ -189,6 +189,12 @@ class TestEligibilityGate:
         scored = ScoredPR(pr=_pr(base_ref='main', default_branch='main'))
         skip, reason = _should_skip_merged_mirror_pr(scored, _config(additional_branches=None))
         assert skip is False
+
+    def test_missing_base_ref_falls_through(self):
+        scored = ScoredPR(pr=_pr(base_ref=None, default_branch='test'))
+        skip, reason = _should_skip_merged_mirror_pr(scored, _config())
+        assert skip is False
+        assert reason is None
 
     def test_base_ref_mismatches_default_branch_blocks(self):
         # Closes the prior gap: with default_branch known and no additional,

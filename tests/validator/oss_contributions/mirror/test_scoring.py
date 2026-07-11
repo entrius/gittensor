@@ -212,6 +212,17 @@ class TestEligibilityGate:
         skip, reason = _should_skip_merged_mirror_pr(scored, _config(additional_branches=None))
         assert skip is False
 
+    def test_missing_base_ref_falls_through_not_blocked(self):
+        # Pre-backfill mirror rows can omit base_ref (Optional[str] -> None). A
+        # missing base_ref must fall through rather than false-positive-block the
+        # merged PR — matching the head_ref check in the same gate and issue
+        # discovery, which gates only when ``base_ref is not None``
+        # (issue_discovery/scan.py). See #1599.
+        scored = ScoredPR(pr=_pr(base_ref=None, default_branch='main'))
+        skip, reason = _should_skip_merged_mirror_pr(scored, _config(additional_branches=None))
+        assert skip is False
+        assert reason is None
+
     def test_head_ref_in_additional_blocks_same_repo(self):
         scored = ScoredPR(
             pr=_pr(

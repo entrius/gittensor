@@ -213,8 +213,11 @@ def check_merged_branch_eligibility(
     additional = repo_config.additional_acceptable_branches or []
     acceptable = [default_branch or 'main'] + additional
 
-    # base_ref check.
-    if not branch_matches_pattern(base_ref or '', acceptable):
+    # base_ref check — gate only when base_ref is present. A missing base_ref
+    # means pre-backfill mirror data; fall through rather than false-positive-
+    # blocking, matching the head_ref check below and issue discovery
+    # (issue_discovery/scan.py only gates when ``base_ref is not None``).
+    if base_ref and not branch_matches_pattern(base_ref, acceptable):
         return True, (f'PR #{pr_number} merged to {base_ref!r} not in acceptable branches={acceptable}')
 
     # head_ref check — block PRs whose source branch is itself an acceptable

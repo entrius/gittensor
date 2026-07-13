@@ -109,26 +109,7 @@
     "trusted_label_pipeline": true
   },
   "gittensor-model-hub/SparkDistill": {
-    "default_label_multiplier": 0.0,
-    "eligibility": {
-      "min_credibility": 0.2,
-      "min_issue_credibility": 0.0,
-      "min_valid_merged_prs": 0,
-      "min_valid_solved_issues": 0
-    },
-    "emission_share": 0.1,
-    "fixed_base_score": 1.0,
-    "issue_discovery_share": 0.0,
-    "label_multipliers": {
-      "*:XL": 4.0,
-      "*:L": 2.5,
-      "*:M": 1.5,
-      "*:S": 1.0,
-      "*:XS": 0.5,
-      "eval:BASELINE": 1.0
-    },
-    "maintainer_cut": 0.5,
-    "trusted_label_pipeline": true
+    "emission_share": 0.1
   },
   "gittensor-vanguard/vanguarstew": {
     "emission_share": 0.099211,

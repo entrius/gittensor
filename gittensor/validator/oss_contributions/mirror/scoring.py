@@ -207,14 +207,17 @@ def check_merged_branch_eligibility(
     issue discovery so both reject the same non-acceptable-branch merges.
 
     Returns ``(skip, reason)``. Missing ``default_branch`` falls back to
-    ``main``; missing ``head_ref``/``head_repo_full_name`` skips the head_ref
-    check rather than false-positive-blocking on older data.
+    ``main``; missing ``base_ref``/``head_ref``/``head_repo_full_name`` skips
+    the respective check rather than false-positive-blocking on older
+    (pre-backfill) mirror data.
     """
     additional = repo_config.additional_acceptable_branches or []
     acceptable = [default_branch or 'main'] + additional
 
-    # base_ref check.
-    if not branch_matches_pattern(base_ref or '', acceptable):
+    # base_ref check. A null base_ref means pre-backfill mirror data — fall
+    # through rather than block, matching the head_ref/head_repo_full_name
+    # handling below (see #1599).
+    if base_ref is not None and not branch_matches_pattern(base_ref, acceptable):
         return True, (f'PR #{pr_number} merged to {base_ref!r} not in acceptable branches={acceptable}')
 
     # head_ref check — block PRs whose source branch is itself an acceptable

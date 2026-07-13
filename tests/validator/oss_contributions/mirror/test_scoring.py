@@ -198,6 +198,15 @@ class TestEligibilityGate:
         assert skip is True
         assert "merged to 'whatever'" in reason
 
+    def test_null_base_ref_falls_through_rather_than_blocks(self):
+        # Parity with issue discovery's handling of pre-backfill mirror rows
+        # (test_missing_base_ref_falls_through_to_solved): a null base_ref
+        # must not be coerced to '' and false-positive-blocked (#1599).
+        scored = ScoredPR(pr=_pr(base_ref=None, default_branch='main'))
+        skip, reason = _should_skip_merged_mirror_pr(scored, _config(additional_branches=None))
+        assert skip is False
+        assert reason is None
+
     def test_no_default_branch_no_additional_blocks_non_main_base_ref(self):
         # Legacy parity: if default_branch is missing, fallback to 'main' so
         # non-main base refs are still rejected.

@@ -921,6 +921,45 @@ class TestRunMirrorIssueDiscovery:
         assert cached.issue_discovery_score == 8.12
         assert cached.total_solved_issues == 7
 
+    def test_scoring_path_zeroes_stale_repo_not_seen_this_round(self):
+        """A repo issue-scored in a prior round (restored from cache) but absent
+        this round must have its per-repo issue fields zeroed by the scoring
+        path, so the round-level roll-up reflects only this round's issues."""
+        stale_repo = 'entrius/gittensor'
+        fresh_repo = 'entrius/gittensor-ui'
+
+        eval_ = _eval(uid=1, github_id='999')
+        stale = eval_.get_or_create_repo_evaluation(stale_repo)
+        stale.total_solved_issues = 7
+        stale.total_valid_solved_issues = 7
+        stale.issue_discovery_score = 8.12
+        stale.issue_credibility = 1.0
+        stale.is_issue_eligible = True
+
+        client = Mock()
+        client.get_miner_issues.return_value = _response([_issue_dict(repo=fresh_repo)])
+        client.get_pr_files.return_value = _empty_files_response(fresh_repo, 100)
+
+        _run(
+            run_issue_discovery(
+                {1: eval_},
+                _mirror_repos(stale_repo, fresh_repo),
+                _EMPTY_LANGS,
+                _EMPTY_TOKEN_CONFIG,
+                client=client,
+            )
+        )
+
+        stale_after = eval_.repo_evaluations[stale_repo]
+        assert stale_after.total_solved_issues == 0
+        assert stale_after.total_valid_solved_issues == 0
+        assert stale_after.issue_discovery_score == 0.0
+        assert stale_after.issue_credibility == 0.0
+        assert stale_after.is_issue_eligible is False
+
+        assert eval_.total_solved_issues == 1
+        assert eval_.total_valid_solved_issues == 0
+
 
 # ============================================================================
 # Cache behavior

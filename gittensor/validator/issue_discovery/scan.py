@@ -40,7 +40,7 @@ from typing import Dict, List, Optional, Set, Tuple
 
 import bittensor as bt
 
-from gittensor.classes import Issue, MinerEvaluation, MinerEvaluationCache
+from gittensor.classes import Issue, MinerEvaluation, MinerEvaluationCache, RepoEvaluation
 from gittensor.constants import (
     MAINTAINER_ASSOCIATIONS,
 )
@@ -264,14 +264,19 @@ def _clear_issue_discovery_fields(evaluation: MinerEvaluation) -> None:
     evaluation.total_open_issues = 0
     evaluation.issue_discovery_issues = []
     for repo_eval in evaluation.repo_evaluations.values():
-        repo_eval.is_issue_eligible = False
-        repo_eval.issue_credibility = 0.0
-        repo_eval.issue_discovery_score = 0.0
-        repo_eval.issue_token_score = 0.0
-        repo_eval.total_solved_issues = 0
-        repo_eval.total_valid_solved_issues = 0
-        repo_eval.total_closed_issues = 0
-        repo_eval.total_open_issues = 0
+        _clear_repo_issue_discovery_fields(repo_eval)
+
+
+def _clear_repo_issue_discovery_fields(repo_eval: RepoEvaluation) -> None:
+    """Zero a single repo's issue-discovery fields for a round it was not scored in."""
+    repo_eval.is_issue_eligible = False
+    repo_eval.issue_credibility = 0.0
+    repo_eval.issue_discovery_score = 0.0
+    repo_eval.issue_token_score = 0.0
+    repo_eval.total_solved_issues = 0
+    repo_eval.total_valid_solved_issues = 0
+    repo_eval.total_closed_issues = 0
+    repo_eval.total_open_issues = 0
 
 
 def _apply_open_issue_counts(evaluation: MinerEvaluation, open_counts: Dict[str, int]) -> None:
@@ -546,7 +551,12 @@ def _finalize_repo_issue_scores(
     """Gate + score issue discovery per repository, then roll up the totals."""
     evaluation.issue_discovery_issues = []
 
-    for repo_name in sorted(set(repo_acc) | set(open_counts)):
+    seen_repos = set(repo_acc) | set(open_counts)
+    for repo_name, repo_eval in evaluation.repo_evaluations.items():
+        if repo_name not in seen_repos:
+            _clear_repo_issue_discovery_fields(repo_eval)
+
+    for repo_name in sorted(seen_repos):
         repo_config = mirror_repos.get(repo_name)
         if repo_config is None:
             continue

@@ -273,6 +273,30 @@ class BaseValidatorNeuron(BaseNeuron):
         else:
             bt.logging.error('set_weights failed', msg)
 
+    def _realign_state_to_metagraph(self):
+        """Realign ``self.scores``/``self.hotkeys`` to the live ``self.metagraph``.
+
+        Preserves overlapping UID scores, zeroes scores for UIDs whose hotkey
+        has been replaced, and pads/truncates to ``self.metagraph.n`` —
+        handling both growth and shrink (see #1606). Shared by
+        ``resync_metagraph`` and ``load_state`` so a validator restart after a
+        subnet resize can't leave ``self.scores`` out of sync with the
+        metagraph either.
+        """
+        target_n = self.metagraph.n
+        min_len = min(len(self.hotkeys), len(self.scores), target_n)
+
+        aligned_scores = np.zeros(target_n, dtype=np.float32)
+        aligned_scores[:min_len] = self.scores[:min_len]
+
+        # Zero out overlapping UIDs whose hotkey has been replaced.
+        for uid in range(min_len):
+            if self.hotkeys[uid] != self.metagraph.hotkeys[uid]:
+                aligned_scores[uid] = 0
+
+        self.scores = aligned_scores
+        self.hotkeys = copy.deepcopy(self.metagraph.hotkeys)
+
     def resync_metagraph(self):
         """Resyncs the metagraph and updates the hotkeys and moving averages based on the new metagraph."""
         bt.logging.info('resync_metagraph()')
@@ -288,22 +312,7 @@ class BaseValidatorNeuron(BaseNeuron):
             return
 
         bt.logging.info('Metagraph updated, re-syncing hotkeys, dendrite pool and moving averages')
-        # Zero out all hotkeys that have been replaced.
-        for uid, hotkey in enumerate(self.hotkeys):
-            if hotkey != self.metagraph.hotkeys[uid]:
-                self.scores[uid] = 0  # hotkey has been replaced
-
-        # Check to see if the metagraph has changed size.
-        # If so, we need to add new hotkeys and moving averages.
-        if len(self.hotkeys) < len(self.metagraph.hotkeys):
-            # Update the size of the moving average scores.
-            new_moving_average = np.zeros((self.metagraph.n))
-            min_len = min(len(self.hotkeys), len(self.scores))
-            new_moving_average[:min_len] = self.scores[:min_len]
-            self.scores = new_moving_average
-
-        # Update the hotkeys.
-        self.hotkeys = copy.deepcopy(self.metagraph.hotkeys)
+        self._realign_state_to_metagraph()
 
     def update_scores(self, rewards: np.ndarray, uids: set[int], blacklisted_uids: List[int] = None):
         """Performs exponential moving average on the scores based on the rewards received from the miners."""
@@ -383,6 +392,10 @@ class BaseValidatorNeuron(BaseNeuron):
             self.step = int(state['step'])
             self.scores = state['scores']
             self.hotkeys = list(state['hotkeys'])
+            # Persisted state reflects the metagraph size at save time, which may
+            # no longer match the live metagraph after a subnet resize — realign
+            # before anything indexes self.scores by current UID (#1606).
+            self._realign_state_to_metagraph()
             bt.logging.success(f'Successfully loaded validator state from {state_path}')
         except FileNotFoundError:
             bt.logging.warning(f'No state file found at {state_path}, starting with fresh state')

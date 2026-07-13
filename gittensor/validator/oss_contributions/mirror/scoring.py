@@ -130,6 +130,13 @@ async def score_pr(
     # load_miner_prs → _should_skip_merged_mirror_pr). By this point
     # eval_.merged_prs contains only eligibility-passed PRs.
 
+    # Attribute the repo for a MERGED PR up front: the PR already counts toward
+    # eligibility (merged_prs / total_merged_prs), so unique-repo attribution must
+    # not depend on this round's mirror file-fetch outcome (transient early
+    # returns below). Regression of #65/#71 when scoring moved to the mirror path.
+    if pr.state == 'MERGED':
+        eval_.unique_repos_contributed_to.add(pr.repo_full_name)
+
     has_fixed_base = repo_config.fixed_base_score is not None
     scoring_cfg = resolve_scoring(repo_config.scoring)
 
@@ -181,11 +188,8 @@ async def score_pr(
         scored.base_score = repo_config.fixed_base_score
 
     _calculate_pr_multipliers(scored, repo_config, scoring_cfg)
-
-    if pr.state == 'MERGED':
-        eval_.unique_repos_contributed_to.add(pr.repo_full_name)
-        # Token totals are aggregated later in finalize_miner_scores; this
-        # function only sets per-PR state.
+    # Token totals are aggregated later in finalize_miner_scores; this
+    # function only sets per-PR state.
 
 
 # ============================================================================

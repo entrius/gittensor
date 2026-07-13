@@ -506,6 +506,94 @@ class TestFixedBaseScore:
 
 
 # ============================================================================
+# Unique-repo attribution (#1616)
+# ============================================================================
+
+
+class TestUniqueRepoAttribution:
+    def _eval(self):
+        eval_ = Mock()
+        eval_.unique_repos_contributed_to = set()
+        return eval_
+
+    def test_merged_pr_attributes_repo_when_files_pending(self):
+        scored = ScoredPR(pr=_pr())
+        scored.pr.scoring_data_stored = False
+        eval_ = self._eval()
+        client = Mock()
+
+        asyncio.run(
+            score_pr(
+                scored,
+                eval_=eval_,
+                master_repositories={scored.pr.repo_full_name: _config()},
+                programming_languages={},
+                token_config=Mock(),
+                client=client,
+            )
+        )
+
+        client.get_pr_files.assert_not_called()
+        assert scored.pr.repo_full_name in eval_.unique_repos_contributed_to
+
+    def test_merged_pr_attributes_repo_when_fetch_raises(self):
+        scored = ScoredPR(pr=_pr())
+        eval_ = self._eval()
+        client = Mock()
+        client.get_pr_files.side_effect = scoring_module.MirrorRequestError('boom')
+
+        asyncio.run(
+            score_pr(
+                scored,
+                eval_=eval_,
+                master_repositories={scored.pr.repo_full_name: _config()},
+                programming_languages={},
+                token_config=Mock(),
+                client=client,
+            )
+        )
+
+        assert scored.pr.repo_full_name in eval_.unique_repos_contributed_to
+
+    def test_merged_pr_attributes_repo_when_no_files_returned(self):
+        scored = ScoredPR(pr=_pr())
+        eval_ = self._eval()
+        client = Mock()
+        client.get_pr_files.return_value.files = []
+
+        asyncio.run(
+            score_pr(
+                scored,
+                eval_=eval_,
+                master_repositories={scored.pr.repo_full_name: _config()},
+                programming_languages={},
+                token_config=Mock(),
+                client=client,
+            )
+        )
+
+        assert scored.pr.repo_full_name in eval_.unique_repos_contributed_to
+
+    def test_open_pr_does_not_attribute_repo(self):
+        scored = ScoredPR(pr=_pr(state='OPEN'))
+        scored.pr.scoring_data_stored = False
+        eval_ = self._eval()
+
+        asyncio.run(
+            score_pr(
+                scored,
+                eval_=eval_,
+                master_repositories={scored.pr.repo_full_name: _config()},
+                programming_languages={},
+                token_config=Mock(),
+                client=Mock(),
+            )
+        )
+
+        assert scored.pr.repo_full_name not in eval_.unique_repos_contributed_to
+
+
+# ============================================================================
 # File adapter
 # ============================================================================
 

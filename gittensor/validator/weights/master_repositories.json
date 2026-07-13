@@ -1,6 +1,6 @@
 {
   "Autovara/kata": {
-    "emission_share": 0.077769,
+    "emission_share": 0.062157,
     "issue_discovery_share": 0.0,
     "trusted_label_pipeline": true,
     "fixed_base_score": 1.0,
@@ -34,7 +34,7 @@
     }
   },
   "DPBG/Engram.AI": {
-    "emission_share": 0.00243,
+    "emission_share": 0.002214,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "feature": 1,
@@ -46,7 +46,7 @@
     "maintainer_cut": 0.2
   },
   "entrius/das-github-mirror": {
-    "emission_share": 0.004861,
+    "emission_share": 0.004322,
     "issue_discovery_share": 0.5,
     "label_multipliers": {
       "bug": 1.25,
@@ -57,7 +57,7 @@
     "trusted_label_pipeline": true
   },
   "entrius/gittensor": {
-    "emission_share": 0.048606,
+    "emission_share": 0.0125,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "bug": 1.2,
@@ -74,7 +74,7 @@
     "eligibility": {
       "max_open_pr_threshold": 2
     },
-    "emission_share": 0.019442,
+    "emission_share": 0.017708,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "maintainer-issue": 3.0,
@@ -92,7 +92,7 @@
       "min_valid_merged_prs": 0,
       "min_valid_solved_issues": 0
     },
-    "emission_share": 0.35,
+    "emission_share": 0.319339,
     "fixed_base_score": 1.0,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
@@ -108,8 +108,11 @@
     "maintainer_cut": 0.5,
     "trusted_label_pipeline": true
   },
+  "gittensor-model-hub/SparkDistill": {
+    "emission_share": 0.1
+  },
   "gittensor-vanguard/vanguarstew": {
-    "emission_share": 0.097211,
+    "emission_share": 0.099211,
     "fixed_base_score": 1.0,
     "issue_discovery_share": 0.0,
     "maintainer_cut": 0.5,
@@ -136,7 +139,7 @@
     }
   },
   "imagent-ai/imagent": {
-    "emission_share": 0.01,
+    "emission_share": 0.008891,
     "issue_discovery_share": 0.0,
     "trusted_label_pipeline": true,
     "fixed_base_score": 1.0,
@@ -193,7 +196,7 @@
   "JSONbored/awesome-claude": {
     "default_label_multiplier": 0.0,
     "trusted_label_pipeline": true,
-    "emission_share": 0.004861,
+    "emission_share": 0.004428,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "gittensor:bug": 0.05,
@@ -222,7 +225,7 @@
   "JSONbored/gittensory": {
     "default_label_multiplier": 0.0,
     "trusted_label_pipeline": true,
-    "emission_share": 0.097211,
+    "emission_share": 0.106932,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "gittensor:bug": 0.05,
@@ -251,7 +254,7 @@
   "JSONbored/metagraphed": {
     "default_label_multiplier": 0.0,
     "trusted_label_pipeline": true,
-    "emission_share": 0.223585,
+    "emission_share": 0.198785,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "gittensor:bug": 0.05,
@@ -278,7 +281,7 @@
     }
   },
   "mini-router/minirouter": {
-    "emission_share": 0.01,
+    "emission_share": 0.009107,
     "issue_discovery_share": 0.0,
     "additional_acceptable_branches": ["sn74*"],
     "label_multipliers": {
@@ -325,7 +328,7 @@
     "maintainer_cut": 0.5
   },
   "phase-rs/phase": {
-    "emission_share": 0.014582,
+    "emission_share": 0.012964,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "bug": 1.2,
@@ -371,7 +374,7 @@
     "maintainer_cut": 0.3
   },
   "zeokin/Cuda-Compute-OSS": {
-    "emission_share": 0.01,
+    "emission_share": 0.012,
     "issue_discovery_share": 0.0,
     "trusted_label_pipeline": true,
     "default_label_multiplier": 0.0,

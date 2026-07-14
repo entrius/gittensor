@@ -138,7 +138,7 @@
       }
     }
   },
-  "imagent-ai/imagent": {
+  "gittensor-agent-forge/gt-imagent": {
     "emission_share": 0.008891,
     "issue_discovery_share": 0.0,
     "trusted_label_pipeline": true,

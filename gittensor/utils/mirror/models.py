@@ -163,7 +163,12 @@ class MirrorPullRequest:
             body=data.get('body'),
             state=data['state'],
             author_github_id=str(data['author_github_id']),
-            author_login=data.get('author_login', ''),
+            # Coerce an explicit null (ghost/deleted author) to '' like the
+            # sibling `or {}`/`or []` fields below — `.get(key, '')` only
+            # defaults on an absent key, so a JSON null would otherwise slip a
+            # None into this `str` field and crash `author_login.lower()` in the
+            # merged self-merge gate.
+            author_login=data.get('author_login') or '',
             author_association=data.get('author_association'),
             created_at=parse_github_iso_to_utc(data['created_at']),
             closed_at=parse_optional_github_iso_to_utc(data.get('closed_at')),

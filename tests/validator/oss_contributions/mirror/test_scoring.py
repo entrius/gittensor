@@ -51,7 +51,7 @@ RepositoryConfig = load_weights.RepositoryConfig
 def _pr(
     state: str = 'MERGED',
     edited_after_merge: bool = False,
-    author_login: str = 'bittoby',
+    author_login: str | None = 'bittoby',
     merged_by_login: str | None = 'anderdc',
     author_association: str = 'CONTRIBUTOR',
     base_ref: str = 'main',
@@ -171,6 +171,15 @@ class TestEligibilityGate:
         scored = ScoredPR(pr=_pr(author_login='alice', merged_by_login='alice', approved_count=1))
         skip, reason = _should_skip_merged_mirror_pr(scored, _config())
         assert skip is False
+
+    def test_null_author_login_does_not_crash_self_merge_check(self):
+        # A ghost/deleted author arrives as ``author_login=None`` from the mirror.
+        # The self-merge gate must not raise on ``author_login.lower()`` — before
+        # the coercion this dropped a legitimately merged PR from scoring.
+        scored = ScoredPR(pr=_pr(author_login=None, merged_by_login='anderdc', approved_count=0))
+        skip, reason = _should_skip_merged_mirror_pr(scored, _config())
+        assert skip is False
+        assert reason is None
 
     def test_base_ref_in_additional_passes(self):
         scored = ScoredPR(pr=_pr(base_ref='test'))

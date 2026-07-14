@@ -320,6 +320,21 @@ class TestMirrorPullRequest:
         pr = MirrorPullRequest.from_dict(pull_request_dict)
         assert pr.author_github_id == '218712309'
 
+    def test_null_author_login_coerced_to_empty_string(self, pull_request_dict):
+        # A ghost/deleted GitHub author serializes as an explicit ``null``.
+        # ``author_login`` is typed ``str``; a null must not slip through as
+        # ``None`` (which would later crash ``author_login.lower()`` in the
+        # merged self-merge eligibility gate).
+        pull_request_dict['author_login'] = None
+        pr = MirrorPullRequest.from_dict(pull_request_dict)
+        assert pr.author_login == ''
+
+    def test_missing_author_login_coerced_to_empty_string(self, pull_request_dict):
+        # Absent key (older pre-schema responses) must also yield '' not raise.
+        pull_request_dict.pop('author_login', None)
+        pr = MirrorPullRequest.from_dict(pull_request_dict)
+        assert pr.author_login == ''
+
     def test_parity_fields_parsed(self, pull_request_dict):
         pr = MirrorPullRequest.from_dict(pull_request_dict)
         assert pr.head_ref == 'feature-branch'

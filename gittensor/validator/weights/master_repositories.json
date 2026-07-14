@@ -173,10 +173,9 @@
     "default_label_multiplier": 0.0,
     "label_multipliers": {
       "round-winner": 10.0,
-      "leaderboard-ui-pass": 1.0,
+      "past-round-winner": 0.0,
       "invalid-pr": 0.0,
-      "duplicate-pr": 0.0,
-      "needs-evidence": 0.0
+      "duplicate-pr": 0.0
     },
     "eligibility": {
       "min_valid_merged_prs": 1,

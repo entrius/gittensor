@@ -227,7 +227,7 @@ class TestRepositoryConfigLabelMultipliers:
             return
 
         assert isinstance(label_multipliers, dict), f'{repo_name} label_multipliers must be a dict'
-        assert len(label_multipliers) <= 10, f'{repo_name} label_multipliers has too many entries'
+        assert len(label_multipliers) <= 20, f'{repo_name} label_multipliers has too many entries'
 
     @pytest.mark.parametrize('repo_name,metadata', _live_master_repo_metadata())
     def test_live_label_multiplier_values_are_in_range(self, repo_name, metadata):

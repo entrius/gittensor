@@ -109,7 +109,34 @@
     "trusted_label_pipeline": true
   },
   "gittensor-model-hub/SparkDistill": {
-    "emission_share": 0.1
+    "default_label_multiplier": 0.0,
+    "eligibility": {
+      "min_credibility": 0.2,
+      "min_issue_credibility": 0.0,
+      "min_valid_merged_prs": 0,
+      "min_valid_solved_issues": 0
+    },
+    "emission_share": 0.1,
+    "fixed_base_score": 1.0,
+    "issue_discovery_share": 0.0,
+    "label_multipliers": {
+      "eval:XL": 4.0,
+      "eval:L": 2.5,
+      "eval:M": 1.5,
+      "eval:S": 1.0,
+      "eval:XS": 0.5,
+      "eval:none": 0.0,
+      "eval:REJECT": 0.0,
+      "dataset:xl": 4.0,
+      "dataset:l": 2.5,
+      "dataset:m": 1.5,
+      "dataset:s": 1.0,
+      "dataset:xs": 0.5,
+      "dataset:none": 0.0,
+      "dataset:REJECT": 0.0
+    },
+    "maintainer_cut": 0.3,
+    "trusted_label_pipeline": true
   },
   "gittensor-vanguard/vanguarstew": {
     "emission_share": 0.099211,

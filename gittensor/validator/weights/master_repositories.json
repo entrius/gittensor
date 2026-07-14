@@ -165,7 +165,7 @@
       }
     }
   },
-  "imagent-ai/imagent": {
+  "gittensor-agent-forge/gt-imagent": {
     "emission_share": 0.008891,
     "issue_discovery_share": 0.0,
     "trusted_label_pipeline": true,
@@ -234,7 +234,7 @@
     "eligibility": {
       "min_credibility": 0.5
     },
-    "maintainer_cut": 0.55,
+    "maintainer_cut": 0.5,
     "scoring": {
       "pr_lookback_days": 5,
       "open_pr_collateral_percent": 0.2,
@@ -263,7 +263,7 @@
     "eligibility": {
       "min_credibility": 0.5
     },
-    "maintainer_cut": 0.55,
+    "maintainer_cut": 0.5,
     "scoring": {
       "pr_lookback_days": 5,
       "open_pr_collateral_percent": 0.2,
@@ -292,7 +292,7 @@
     "eligibility": {
       "min_credibility": 0.5
     },
-    "maintainer_cut": 0.55,
+    "maintainer_cut": 0.66,
     "scoring": {
       "pr_lookback_days": 5,
       "open_pr_collateral_percent": 0.2,

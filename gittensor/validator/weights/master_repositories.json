@@ -173,13 +173,9 @@
     "default_label_multiplier": 0.0,
     "label_multipliers": {
       "round-winner": 10.0,
-      "generation-ui-pass": 1.0,
-      "benchmark-fail": 0.0,
-      "below-threshold": 0.0,
+      "past-round-winner": 0.0,
       "invalid-pr": 0.0,
-      "duplicate-pr": 0.0,
-      "needs-rebase": 0.0,
-      "needs-evidence": 0.0
+      "duplicate-pr": 0.0
     },
     "eligibility": {
       "min_valid_merged_prs": 1,
@@ -187,7 +183,7 @@
       "max_open_pr_threshold": 2
     },
     "scoring": {
-      "pr_lookback_days": 7,
+      "pr_lookback_days": 90,
       "open_pr_collateral_percent": 0.1,
       "standard_issue_multiplier": 1.0,
       "maintainer_issue_multiplier": 1.0,
@@ -195,7 +191,7 @@
         "grace_period_hours": 0,
         "sigmoid_midpoint_days": 3,
         "sigmoid_steepness": 1.0,
-        "min_multiplier": 0.05
+        "min_multiplier": 1.0
       }
     }
   },

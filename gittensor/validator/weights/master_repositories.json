@@ -125,6 +125,7 @@
       "eval:M": 1.5,
       "eval:S": 1.0,
       "eval:XS": 0.5,
+      "eval:BASELINE": 1.0,
       "eval:none": 0.0,
       "eval:REJECT": 0.0,
       "dataset:xl": 4.0,
@@ -135,8 +136,17 @@
       "dataset:none": 0.0,
       "dataset:REJECT": 0.0
     },
-    "maintainer_cut": 0.3,
-    "trusted_label_pipeline": true
+    "maintainer_cut": 0.5,
+    "trusted_label_pipeline": true,
+    "scoring": {
+      "pr_lookback_days": 14,
+      "time_decay": {
+        "grace_period_hours": 4,
+        "sigmoid_midpoint_days": 2,
+        "sigmoid_steepness": 1.2,
+        "min_multiplier": 0.02
+      }
+    }
   },
   "gittensor-vanguard/vanguarstew": {
     "emission_share": 0.099211,

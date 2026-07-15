@@ -54,7 +54,7 @@ def _pr(
     author_login: str = 'bittoby',
     merged_by_login: str | None = 'anderdc',
     author_association: str = 'CONTRIBUTOR',
-    base_ref: str = 'main',
+    base_ref: str | None = 'main',
     head_ref: str | None = 'feature/foo',
     head_repo_full_name: str | None = 'entrius/gittensor-ui',
     default_branch: str | None = 'main',
@@ -275,6 +275,23 @@ class TestEligibilityGate:
             _config(additional_branches=['main']),
         )
         assert skip is False
+
+    def test_null_base_ref_skips_check(self):
+        # Pre-backfill mirror rows omit base_ref; parity with issue discovery.
+        scored = ScoredPR(
+            pr=_pr(
+                base_ref=None,
+                default_branch='main',
+                head_ref='feature/foo',
+                head_repo_full_name='entrius/gittensor-ui',
+            )
+        )
+        skip, reason = _should_skip_merged_mirror_pr(
+            scored,
+            _config(additional_branches=['test', 'staging']),
+        )
+        assert skip is False
+        assert reason is None
 
     def test_null_head_repo_full_name_skips_check(self):
         # Pre-schema mirror rows may have NULL head_repo_full_name — we can't

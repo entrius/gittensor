@@ -245,7 +245,7 @@
       }
     }
   },
-  "JSONbored/gittensory": {
+  "JSONbored/loopover": {
     "default_label_multiplier": 0.0,
     "trusted_label_pipeline": true,
     "emission_share": 0.106932,

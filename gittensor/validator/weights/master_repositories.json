@@ -125,6 +125,7 @@
       "eval:M": 1.5,
       "eval:S": 1.0,
       "eval:XS": 0.5,
+      "eval:BASELINE": 1.0,
       "eval:none": 0.0,
       "eval:REJECT": 0.0,
       "dataset:xl": 4.0,

@@ -126,6 +126,7 @@
       "eval:M": 1.5,
       "eval:S": 1.0,
       "eval:XS": 0.5,
+      "eval:BASELINE": 1.0,
       "eval:none": 0.0,
       "eval:REJECT": 0.0,
       "dataset:xl": 4.0,
@@ -136,7 +137,7 @@
       "dataset:none": 0.0,
       "dataset:REJECT": 0.0
     },
-    "maintainer_cut": 0.3,
+    "maintainer_cut": 0.5,
     "trusted_label_pipeline": true
   },
   "gittensor-vanguard/vanguarstew": {

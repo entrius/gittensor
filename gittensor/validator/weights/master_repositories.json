@@ -8,15 +8,16 @@
     "maintainer_cut": 0.5,
     "label_multipliers": {
       "kata:winner:*": 1.0,
-      "kata:reward:xl": 10.0,
-      "kata:reward:l": 5.0,
-      "kata:reward:m": 3.0,
-      "kata:reward:s": 1.5,
-      "kata:defeat": 0.25,
+      "kata:winner:sn60__bitsec": 2.0,
+      "kata:winner:sn22__desearch": 3.0,
+      "kata:defeat:*": 0.2,
+      "kata:pending": 0.0,
+      "kata:review": 0.0,
+      "kata:executing": 0.0,
       "kata:invalid": 0.0,
       "kata:losing": 0.0,
-      "kata:stale": 0.0,
-      "kata:hold": 0.0
+      "kata:hold": 0.0,
+      "kata:stale": 0.0
     },
     "eligibility": {
       "min_valid_merged_prs": 1,

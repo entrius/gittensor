@@ -16,7 +16,6 @@
 # DEALINGS IN THE SOFTWARE.
 
 
-import os
 import time
 from functools import partial
 from typing import Dict, List, Set
@@ -36,7 +35,12 @@ from gittensor.validator.pat_handler import (
     priority_pat_broadcast,
     priority_pat_check,
 )
-from gittensor.validator.utils.config import STORE_DB_RESULTS, WANDB_PROJECT, WANDB_VALIDATOR_NAME
+from gittensor.validator.utils.config import (
+    STORE_DB_RESULTS,
+    WANDB_PROJECT,
+    WANDB_VALIDATOR_NAME,
+    dev_mode_enabled,
+)
 from gittensor.validator.utils.load_weights import RepositoryConfig
 from gittensor.validator.utils.storage import DatabaseStorage
 from neurons.base.validator import BaseValidatorNeuron
@@ -55,7 +59,7 @@ class Validator(BaseValidatorNeuron):
     def __init__(self, config=None):
         super(Validator, self).__init__(config=config)
 
-        if os.environ.get('DEV_MODE'):
+        if dev_mode_enabled():
             bt.logging.warning('⚠ DEV_MODE is active — maintainer PR filtering is bypassed')
 
         # Ensure PAT storage file exists on boot

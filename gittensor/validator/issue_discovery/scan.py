@@ -33,7 +33,6 @@ to the cache so sibling discoveries benefit.
 """
 
 import asyncio
-import os
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Set, Tuple
@@ -57,6 +56,7 @@ from gittensor.validator.oss_contributions.mirror.scoring import (
     calculate_base_score_for_pr_files,
     check_merged_branch_eligibility,
 )
+from gittensor.validator.utils.config import dev_mode_enabled
 from gittensor.validator.utils.datetime_utils import calculate_time_decay
 from gittensor.validator.utils.load_weights import (
     LanguageConfig,
@@ -121,7 +121,7 @@ def _should_include_issue(issue: MirrorIssue) -> bool:
     discovery rewards in repos they maintain — mirrors the PR-side maintainer
     skip in ``oss_contributions/mirror/load.py``. Bypassed under DEV_MODE.
     """
-    if not os.environ.get('DEV_MODE') and issue.author_association in MAINTAINER_ASSOCIATIONS:
+    if not dev_mode_enabled() and issue.author_association in MAINTAINER_ASSOCIATIONS:
         return False
     return True
 

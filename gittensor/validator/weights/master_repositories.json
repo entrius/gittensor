@@ -76,7 +76,7 @@
     "eligibility": {
       "max_open_pr_threshold": 2
     },
-    "emission_share": 0.017708,
+    "emission_share": 0.015937,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "maintainer-issue": 3.0,
@@ -94,7 +94,7 @@
       "min_valid_merged_prs": 0,
       "min_valid_solved_issues": 0
     },
-    "emission_share": 0.319339,
+    "emission_share": 0.210555,
     "fixed_base_score": 1.0,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
@@ -118,7 +118,7 @@
       "min_valid_merged_prs": 0,
       "min_valid_solved_issues": 0
     },
-    "emission_share": 0.1,
+    "emission_share": 0.210555,
     "fixed_base_score": 1.0,
     "issue_discovery_share": 0.0,
     "label_multipliers": {

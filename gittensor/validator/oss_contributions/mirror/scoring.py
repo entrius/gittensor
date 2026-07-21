@@ -23,7 +23,6 @@ Anti-gaming notes:
 
 import asyncio
 import math
-import os
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
@@ -48,6 +47,7 @@ from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredPR
 from gittensor.validator.oss_contributions.scoring import (
     calculate_review_quality_multiplier,
 )
+from gittensor.validator.utils.config import dev_mode_enabled
 from gittensor.validator.utils.datetime_utils import calculate_time_decay
 from gittensor.validator.utils.isolated_scoring import isolated_calculate_token_score
 from gittensor.validator.utils.load_weights import (
@@ -260,7 +260,7 @@ def _should_skip_merged_mirror_pr(scored: ScoredPR, repo_config: RepositoryConfi
         return True, f'PR #{pr.pr_number} is MERGED but missing merged_at'
 
     # Defensive recheck — load already drops these (with DEV_MODE bypass)
-    if not os.environ.get('DEV_MODE') and pr.author_association in MAINTAINER_ASSOCIATIONS:
+    if not dev_mode_enabled() and pr.author_association in MAINTAINER_ASSOCIATIONS:
         return True, f'PR #{pr.pr_number} author is {pr.author_association}'
 
     if pr.merged_by_login and pr.merged_by_login.lower() == pr.author_login.lower():

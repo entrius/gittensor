@@ -14,6 +14,19 @@ WANDB_VALIDATOR_NAME = os.getenv('WANDB_VALIDATOR_NAME', 'vali')
 # optional env vars
 STORE_DB_RESULTS = os.getenv('STORE_DB_RESULTS', 'false').lower() == 'true'
 
+_TRUTHY_ENV_VALUES = frozenset({'1', 'true', 'yes', 'on'})
+
+
+def dev_mode_enabled() -> bool:
+    """Whether DEV_MODE bypasses the maintainer filters.
+
+    Read at call time rather than import time so tests and operators can toggle it
+    per process. Matched by value, not presence: DEV_MODE=false must disable the
+    bypass on a production validator.
+    """
+    return os.getenv('DEV_MODE', '').strip().lower() in _TRUTHY_ENV_VALUES
+
+
 # log values
 bt.logging.info(f'VALIDATOR_WAIT: {VALIDATOR_WAIT}')
 bt.logging.info(f'VALIDATOR_STEPS_INTERVAL: {VALIDATOR_STEPS_INTERVAL}')

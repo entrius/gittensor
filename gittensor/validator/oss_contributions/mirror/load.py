@@ -14,7 +14,6 @@ Filtering applied at load time:
   merged_count used by ``check_eligibility`` isn't inflated by ineligible PRs.
 """
 
-import os
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional
 
@@ -26,6 +25,7 @@ from gittensor.utils.mirror.client import MirrorClient, MirrorRequestError
 from gittensor.utils.mirror.models import MirrorPullRequest
 from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredPR
 from gittensor.validator.oss_contributions.mirror.scoring import _should_skip_merged_mirror_pr
+from gittensor.validator.utils.config import dev_mode_enabled
 from gittensor.validator.utils.load_weights import RepositoryConfig, resolve_scoring
 
 
@@ -103,7 +103,7 @@ def _maybe_add_pr(
 
     # Silent maintainer skip — logging every maintainer-merged PR would dominate
     # the skip-reason log.
-    if not os.environ.get('DEV_MODE') and pr.author_association in MAINTAINER_ASSOCIATIONS:
+    if not dev_mode_enabled() and pr.author_association in MAINTAINER_ASSOCIATIONS:
         return
 
     if pr.state == 'OPEN':

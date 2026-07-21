@@ -310,11 +310,9 @@
     "emission_share": 0.012892,
     "issue_discovery_share": 0.0,
     "additional_acceptable_branches": ["sn74*"],
+    "default_label_multiplier": 0.0,
     "label_multipliers": {
-      "bug": 0.1,
-      "feature": 0.15,
-      "refactor": 0.02,
-      "king": 10.0
+      "king": 1.0
     },
     "eligibility": {
       "min_valid_merged_prs": 0,

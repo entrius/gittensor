@@ -26,6 +26,8 @@ run_issue_discovery = scan_module.run_issue_discovery
 _classify_issue = scan_module._classify_issue
 _build_solving_pr_cache = scan_module._build_solving_pr_cache
 _mirror_issue_for_scoring = scan_module._mirror_issue_for_scoring
+_finalize_repo_issue_scores = scan_module._finalize_repo_issue_scores
+_RepoIssueAcc = scan_module._RepoIssueAcc
 CachedSolvingPR = scan_module.CachedSolvingPR
 MirrorIssue = mirror_models.MirrorIssue
 MirrorIssuesResponse = mirror_models.MirrorIssuesResponse
@@ -181,6 +183,92 @@ def _mirror_repos(*names: str) -> dict:
 
 def _run(coro):
     return asyncio.run(coro)
+
+
+# ============================================================================
+# _finalize_repo_issue_scores (stale per-repo field clearing, #1610)
+# ============================================================================
+
+
+class TestFinalizeRepoIssueScoresClearsStaleRepos:
+    """A repo issue-scored in a prior round but absent this round (repo_acc and
+    open_counts both empty for it) must have its per-repo issue-discovery
+    fields reset — otherwise _roll_up_issue_totals keeps summing its stale
+    values into the round-level totals every round after."""
+
+    def test_stale_repo_cleared_from_repo_eval_and_roll_up(self):
+        evaluation = _eval()
+
+        # Simulate a repo issue-scored in a prior round (e.g. restored from
+        # the evaluation cache after a transient DAS fetch failure).
+        stale = evaluation.get_or_create_repo_evaluation('entrius/gittensor-ui')
+        stale.is_issue_eligible = True
+        stale.issue_credibility = 0.9
+        stale.issue_discovery_score = 8.12
+        stale.issue_token_score = 40.0
+        stale.total_solved_issues = 7
+        stale.total_valid_solved_issues = 7
+        stale.total_closed_issues = 1
+        stale.total_open_issues = 2
+
+        # This round: no accumulated issues and no open-issue counts for that
+        # repo at all — it's simply absent from both.
+        _finalize_repo_issue_scores(
+            evaluation,
+            repo_acc={},
+            open_counts={},
+            mirror_repos=_mirror_repos('entrius/gittensor-ui'),
+        )
+
+        cleared = evaluation.repo_evaluations['entrius/gittensor-ui']
+        assert cleared.is_issue_eligible is False
+        assert cleared.issue_credibility == 0.0
+        assert cleared.issue_discovery_score == 0.0
+        assert cleared.issue_token_score == 0.0
+        assert cleared.total_solved_issues == 0
+        assert cleared.total_valid_solved_issues == 0
+        assert cleared.total_closed_issues == 0
+        assert cleared.total_open_issues == 0
+
+        # The round-level roll-up must reflect the cleared state, not the
+        # stale prior-round values.
+        assert evaluation.total_solved_issues == 0
+        assert evaluation.total_valid_solved_issues == 0
+        assert evaluation.total_closed_issues == 0
+        assert evaluation.total_open_issues == 0
+        assert evaluation.issue_discovery_score == 0.0
+        assert evaluation.is_issue_eligible is False
+
+    def test_repo_seen_this_round_is_not_cleared_by_the_stale_pass(self):
+        evaluation = _eval()
+        acc = _RepoIssueAcc(closed=1)  # closed-only, ineligible by default thresholds
+
+        _finalize_repo_issue_scores(
+            evaluation,
+            repo_acc={'entrius/gittensor-ui': acc},
+            open_counts={'entrius/gittensor-ui': 3},
+            mirror_repos=_mirror_repos('entrius/gittensor-ui'),
+        )
+
+        repo_eval = evaluation.repo_evaluations['entrius/gittensor-ui']
+        assert repo_eval.total_closed_issues == 1
+        assert repo_eval.total_open_issues == 3
+
+    def test_other_miners_repo_evaluations_are_independent(self):
+        """Guard against a shared-default-dict regression: clearing one
+        MinerEvaluation's stale repo must not touch another miner's."""
+        stale_eval = _eval(uid=1)
+        stale_eval.get_or_create_repo_evaluation('entrius/gittensor-ui').total_solved_issues = 5
+
+        other_eval = _eval(uid=2)
+        other_eval.get_or_create_repo_evaluation('entrius/gittensor-ui').total_solved_issues = 9
+
+        _finalize_repo_issue_scores(
+            stale_eval, repo_acc={}, open_counts={}, mirror_repos=_mirror_repos('entrius/gittensor-ui')
+        )
+
+        assert stale_eval.repo_evaluations['entrius/gittensor-ui'].total_solved_issues == 0
+        assert other_eval.repo_evaluations['entrius/gittensor-ui'].total_solved_issues == 9
 
 
 # ============================================================================

@@ -242,6 +242,17 @@ class RepoEvaluation:
         for name in _ISSUE_DISCOVERY_REPO_FIELDS:
             setattr(self, name, getattr(other, name))
 
+    def clear_issue_discovery(self) -> None:
+        """Reset the issue-discovery-owned fields to their round-start defaults."""
+        self.is_issue_eligible = False
+        self.issue_credibility = 0.0
+        self.issue_discovery_score = 0.0
+        self.issue_token_score = 0.0
+        self.total_solved_issues = 0
+        self.total_valid_solved_issues = 0
+        self.total_closed_issues = 0
+        self.total_open_issues = 0
+
 
 @dataclass
 class MinerEvaluation:

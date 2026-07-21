@@ -264,14 +264,7 @@ def _clear_issue_discovery_fields(evaluation: MinerEvaluation) -> None:
     evaluation.total_open_issues = 0
     evaluation.issue_discovery_issues = []
     for repo_eval in evaluation.repo_evaluations.values():
-        repo_eval.is_issue_eligible = False
-        repo_eval.issue_credibility = 0.0
-        repo_eval.issue_discovery_score = 0.0
-        repo_eval.issue_token_score = 0.0
-        repo_eval.total_solved_issues = 0
-        repo_eval.total_valid_solved_issues = 0
-        repo_eval.total_closed_issues = 0
-        repo_eval.total_open_issues = 0
+        repo_eval.clear_issue_discovery()
 
 
 def _apply_open_issue_counts(evaluation: MinerEvaluation, open_counts: Dict[str, int]) -> None:
@@ -545,8 +538,18 @@ def _finalize_repo_issue_scores(
 ) -> None:
     """Gate + score issue discovery per repository, then roll up the totals."""
     evaluation.issue_discovery_issues = []
+    seen_repos = set(repo_acc) | set(open_counts)
 
-    for repo_name in sorted(set(repo_acc) | set(open_counts)):
+    # A repo issue-scored in a prior round but absent this round (e.g. the
+    # miner's evaluation was restored from cache after a transient DAS fetch
+    # failure, then this round's mirror fetch succeeded with issues only in
+    # other repos) must not keep contributing its stale per-repo values to
+    # the round-level roll-up below (#1610).
+    for repo_name, repo_eval in evaluation.repo_evaluations.items():
+        if repo_name not in seen_repos:
+            repo_eval.clear_issue_discovery()
+
+    for repo_name in sorted(seen_repos):
         repo_config = mirror_repos.get(repo_name)
         if repo_config is None:
             continue

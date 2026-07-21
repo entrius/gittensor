@@ -169,7 +169,7 @@
     }
   },
   "gittensor-agent-forge/gt-imagent": {
-    "emission_share": 0.008891,
+    "emission_share": 0.0,
     "issue_discovery_share": 0.0,
     "trusted_label_pipeline": true,
     "fixed_base_score": 1.0,
@@ -199,7 +199,7 @@
     }
   },
   "James-CUDA/Gittensor-TinyRouter": {
-    "emission_share": 0.01,
+    "emission_share": 0.012892,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "bug": 0.1,
@@ -307,7 +307,7 @@
     }
   },
   "mini-router/minirouter": {
-    "emission_share": 0.009107,
+    "emission_share": 0.012892,
     "issue_discovery_share": 0.0,
     "additional_acceptable_branches": ["sn74*"],
     "label_multipliers": {
@@ -374,24 +374,8 @@
       "excessive_pr_penalty_base_threshold": 10
     }
   },
-  "touchpilot/touchpilot": {
-    "emission_share": 0.0,
-    "issue_discovery_share": 0.0,
-    "eligibility": {
-      "min_valid_merged_prs": 1,
-      "min_credibility": 0.5
-    },
-    "label_multipliers": {
-      "type: bug": 1.1,
-      "type: enhancement": 1.25,
-      "type: feature": 1.5,
-      "type: refactor": 0.25,
-      "type: test": 1.2
-    },
-    "maintainer_cut": 0.3
-  },
   "we-promise/sure": {
-    "emission_share": 0.0,
+    "emission_share": 0.002214,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "performance": 1.5,

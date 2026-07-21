@@ -21,6 +21,8 @@ from unittest.mock import Mock
 
 import pytest
 
+from gittensor.classes import MinerEvaluation
+
 scoring_module = pytest.importorskip(
     'gittensor.validator.oss_contributions.mirror.scoring',
     reason='Requires gittensor mirror subpackage',
@@ -381,6 +383,103 @@ class TestScoringDataStoredGate:
 
         client.get_pr_files.assert_not_called()
         assert scored.base_score == pytest.approx(7.5)
+
+
+class TestUniqueReposContributedTo:
+    """A MERGED PR for a recognized repo must count toward
+    unique_repos_contributed_to regardless of this round's file-fetch outcome
+    (#1616) — mirroring the pre-mirror scoring path's #65/#71 fix."""
+
+    def test_counted_when_scoring_data_not_yet_stored(self):
+        scored = ScoredPR(pr=_pr(state='MERGED'))
+        scored.pr.scoring_data_stored = False
+        eval_ = MinerEvaluation(uid=1, hotkey='hk')
+
+        asyncio.run(
+            score_pr(
+                scored,
+                eval_=eval_,
+                master_repositories={scored.pr.repo_full_name: _config()},
+                programming_languages={},
+                token_config=Mock(),
+                client=Mock(),
+            )
+        )
+
+        assert eval_.unique_repos_contributed_to == {scored.pr.repo_full_name}
+
+    def test_counted_when_mirror_file_fetch_errors(self):
+        scored = ScoredPR(pr=_pr(state='MERGED'))
+        eval_ = MinerEvaluation(uid=1, hotkey='hk')
+        client = Mock()
+        client.get_pr_files.side_effect = scoring_module.MirrorRequestError('boom')
+
+        asyncio.run(
+            score_pr(
+                scored,
+                eval_=eval_,
+                master_repositories={scored.pr.repo_full_name: _config()},
+                programming_languages={},
+                token_config=Mock(),
+                client=client,
+            )
+        )
+
+        assert eval_.unique_repos_contributed_to == {scored.pr.repo_full_name}
+
+    def test_counted_when_mirror_returns_no_files(self):
+        scored = ScoredPR(pr=_pr(state='MERGED'))
+        eval_ = MinerEvaluation(uid=1, hotkey='hk')
+        client = Mock()
+        client.get_pr_files.return_value.files = []
+
+        asyncio.run(
+            score_pr(
+                scored,
+                eval_=eval_,
+                master_repositories={scored.pr.repo_full_name: _config()},
+                programming_languages={},
+                token_config=Mock(),
+                client=client,
+            )
+        )
+
+        assert eval_.unique_repos_contributed_to == {scored.pr.repo_full_name}
+
+    def test_not_counted_for_unrecognized_repo(self):
+        scored = ScoredPR(pr=_pr(state='MERGED'))
+        eval_ = MinerEvaluation(uid=1, hotkey='hk')
+
+        asyncio.run(
+            score_pr(
+                scored,
+                eval_=eval_,
+                master_repositories={},
+                programming_languages={},
+                token_config=Mock(),
+                client=Mock(),
+            )
+        )
+
+        assert eval_.unique_repos_contributed_to == set()
+
+    def test_not_counted_for_non_merged_pr(self):
+        scored = ScoredPR(pr=_pr(state='CLOSED'))
+        scored.pr.scoring_data_stored = False
+        eval_ = MinerEvaluation(uid=1, hotkey='hk')
+
+        asyncio.run(
+            score_pr(
+                scored,
+                eval_=eval_,
+                master_repositories={scored.pr.repo_full_name: _config()},
+                programming_languages={},
+                token_config=Mock(),
+                client=Mock(),
+            )
+        )
+
+        assert eval_.unique_repos_contributed_to == set()
 
 
 class TestFixedBaseScore:

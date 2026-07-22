@@ -192,3 +192,41 @@ def test_submissions_help_via_issue_alias_routes_to_command_help(cli_root, runne
     assert 'On-chain issue ID' in result.output
     assert '--id' in result.output
     assert '--logging.debug' not in result.output
+
+
+def test_submissions_json_missing_token_is_an_error_not_empty_success(cli_root, runner, sample_issue, monkeypatch):
+    monkeypatch.delenv('GITTENSOR_MINER_PAT', raising=False)
+    with (
+        patch('gittensor.cli.issue_commands.submissions.get_contract_address', return_value='0xabc'),
+        patch('gittensor.cli.issue_commands.submissions.resolve_network', return_value=('ws://x', 'test')),
+        patch('gittensor.cli.issue_commands.submissions.fetch_issue_from_contract', return_value=sample_issue),
+    ):
+        result = runner.invoke(
+            cli_root,
+            ['issues', 'submissions', '--id', '42', '--json'],
+            catch_exceptions=False,
+        )
+
+    assert result.exit_code != 0
+    payload = json.loads(result.stdout)
+    assert payload['success'] is False
+    assert payload['error']['type'] == 'usage_error'
+    assert 'GITTENSOR_MINER_PAT' in payload['error']['message']
+
+
+def test_submissions_human_missing_token_keeps_warning_and_continues(cli_root, runner, sample_issue, monkeypatch):
+    monkeypatch.delenv('GITTENSOR_MINER_PAT', raising=False)
+    with (
+        patch('gittensor.cli.issue_commands.submissions.get_contract_address', return_value='0xabc'),
+        patch('gittensor.cli.issue_commands.submissions.resolve_network', return_value=('ws://x', 'test')),
+        patch('gittensor.cli.issue_commands.submissions.fetch_issue_from_contract', return_value=sample_issue),
+    ):
+        result = runner.invoke(
+            cli_root,
+            ['issues', 'submissions', '--id', '42'],
+            catch_exceptions=False,
+        )
+
+    assert result.exit_code == 0
+    assert 'No GitHub token found' in result.output
+    assert 'No open submissions available' in result.output

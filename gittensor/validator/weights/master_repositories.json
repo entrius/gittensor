@@ -7,10 +7,11 @@
     "default_label_multiplier": 0.0,
     "maintainer_cut": 0.5,
     "label_multipliers": {
-      "kata:winner:*": 1.0,
-      "kata:winner:sn60__bitsec": 2.0,
-      "kata:winner:sn22__desearch": 3.0,
-      "kata:defeat:*": 0.2,
+      "kata:winner:*": 0.70,
+      "kata:king2:*": 0.10,
+      "kata:king3:*": 0.10,
+      "kata:king4:*": 0.10,
+      "kata:defeat:*": 0.0,
       "kata:pending": 0.0,
       "kata:review": 0.0,
       "kata:executing": 0.0,
@@ -75,7 +76,7 @@
     "eligibility": {
       "max_open_pr_threshold": 2
     },
-    "emission_share": 0.017708,
+    "emission_share": 0.015937,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "maintainer-issue": 3.0,
@@ -93,7 +94,7 @@
       "min_valid_merged_prs": 0,
       "min_valid_solved_issues": 0
     },
-    "emission_share": 0.319339,
+    "emission_share": 0.210555,
     "fixed_base_score": 1.0,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
@@ -117,7 +118,7 @@
       "min_valid_merged_prs": 0,
       "min_valid_solved_issues": 0
     },
-    "emission_share": 0.1,
+    "emission_share": 0.210555,
     "fixed_base_score": 1.0,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
@@ -168,7 +169,7 @@
     }
   },
   "gittensor-agent-forge/gt-imagent": {
-    "emission_share": 0.008891,
+    "emission_share": 0.0,
     "issue_discovery_share": 0.0,
     "trusted_label_pipeline": true,
     "fixed_base_score": 1.0,
@@ -198,7 +199,7 @@
     }
   },
   "James-CUDA/Gittensor-TinyRouter": {
-    "emission_share": 0.01,
+    "emission_share": 0.012892,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "bug": 0.1,
@@ -306,14 +307,12 @@
     }
   },
   "mini-router/minirouter": {
-    "emission_share": 0.009107,
+    "emission_share": 0.012892,
     "issue_discovery_share": 0.0,
     "additional_acceptable_branches": ["sn74*"],
+    "default_label_multiplier": 0.0,
     "label_multipliers": {
-      "bug": 0.1,
-      "feature": 0.15,
-      "refactor": 0.02,
-      "king": 10.0
+      "king": 1.0
     },
     "eligibility": {
       "min_valid_merged_prs": 0,
@@ -373,24 +372,8 @@
       "excessive_pr_penalty_base_threshold": 10
     }
   },
-  "touchpilot/touchpilot": {
-    "emission_share": 0.0,
-    "issue_discovery_share": 0.0,
-    "eligibility": {
-      "min_valid_merged_prs": 1,
-      "min_credibility": 0.5
-    },
-    "label_multipliers": {
-      "type: bug": 1.1,
-      "type: enhancement": 1.25,
-      "type: feature": 1.5,
-      "type: refactor": 0.25,
-      "type: test": 1.2
-    },
-    "maintainer_cut": 0.3
-  },
   "we-promise/sure": {
-    "emission_share": 0.0,
+    "emission_share": 0.002214,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
       "performance": 1.5,

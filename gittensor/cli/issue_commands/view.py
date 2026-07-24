@@ -189,7 +189,7 @@ def issues_list(
                 if fill_pct >= 100:
                     bounty_display = f'{bounty_str} (100%)'
                 elif bounty_val > 0:
-                    bounty_display = f'{bounty_str}/{target_str} ({fill_pct:.0f}%)'
+                    bounty_display = f'{bounty_str}/{target_str} ({fill_pct:.1f}%)'
                 else:
                     bounty_display = f'0/{target_str} (0%)'
             else:

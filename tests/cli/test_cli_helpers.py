@@ -877,6 +877,10 @@ class TestCliRuntimeExceptions:
                     '5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY',
                     '5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY',
                     '1',
+                    # CliRunner stdin is not a TTY, so the confirmation gate would
+                    # abort before the client is built. --yes is the supported
+                    # non-interactive opt-in and keeps this test on the import path.
+                    '--yes',
                 ],
                 catch_exceptions=False,
             )

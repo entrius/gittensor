@@ -625,13 +625,17 @@ def resolve_network(network: Optional[str] = None, rpc_url: Optional[str] = None
     # override a user who set `network: finney` to point at mainnet.
     config = load_config()
 
-    config_network = config.get('network', '').lower()
+    # `or ''` guards a null/absent `network` value (e.g. `"network": null` in a
+    # hand-edited config) — `config.get('network', '')` returns None when the
+    # key is present but null, and None.lower() would crash every issue
+    # command. Mirrors the guard in miner_commands.helpers._resolve_endpoint.
+    config_network = (config.get('network') or '').lower()
     if config_network and config_network in NETWORK_MAP:
         return NETWORK_MAP[config_network], config_network
 
     if config.get('ws_endpoint'):
         endpoint = config['ws_endpoint']
-        name = _URL_TO_NETWORK.get(endpoint, config.get('network', 'custom'))
+        name = _URL_TO_NETWORK.get(endpoint, config.get('network') or 'custom')
         return endpoint, name
 
     # Default: finney (mainnet)

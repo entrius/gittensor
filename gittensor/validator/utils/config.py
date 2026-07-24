@@ -24,6 +24,12 @@ WANDB_VALIDATOR_NAME = os.getenv('WANDB_VALIDATOR_NAME', 'vali')
 # optional env vars
 STORE_DB_RESULTS = os.getenv('STORE_DB_RESULTS', 'false').lower() == 'true'
 
+# Mirror reconciliation (team validator only; disabled without the API key)
+MIRROR_ADMIN_API_KEY = os.getenv('MIRROR_ADMIN_API_KEY', '')
+MIRROR_DEREG_SNAPSHOTS = 4  # consecutive absent snapshots (~2 days) before deregistration
+MIRROR_MAX_TRACKED_REPOS = 300  # hard cap on repos synced to the mirror
+MIRROR_BACKFILL_DAYS = 40  # deep backfill window for newly registered repos
+
 # log values
 bt.logging.info(f'VALIDATOR_WAIT: {VALIDATOR_WAIT}')
 bt.logging.info(f'VALIDATOR_STEPS_INTERVAL: {VALIDATOR_STEPS_INTERVAL}')

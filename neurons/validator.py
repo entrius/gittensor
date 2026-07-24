@@ -47,6 +47,7 @@ from gittensor.validator.utils.load_weights import RepositoryConfig
 from gittensor.validator.utils.storage import DatabaseStorage
 from gittensor.validator.weight_consensus import ConsensusManager
 from gittensor.validator.weight_consensus.codec import decode_prefs
+from gittensor.validator.weight_consensus.mirror_sync import sync_mirror_repos
 from neurons.base.validator import BaseValidatorNeuron
 
 
@@ -114,7 +115,8 @@ class Validator(BaseValidatorNeuron):
         self.load_state()
 
     def _store_weight_consensus(self, snapshot_block, commitments, stakes_rao, permits, result) -> None:
-        """Persist eligible voters' baskets and the aggregate for the dashboards."""
+        """Persist eligible voters' baskets and the aggregate for the dashboards,
+        then reconcile the mirror's tracked repos (team validator only)."""
         baskets = [
             (hotkey, stakes_rao[hotkey], prefs)
             for hotkey, payload in sorted(commitments.items())
@@ -123,6 +125,9 @@ class Validator(BaseValidatorNeuron):
             and (prefs := decode_prefs(payload)) is not None
         ]
         self.db_storage.store_weight_consensus(snapshot_block, baskets, result)
+
+        voted_repos = {repo for _, _, prefs in baskets for repo in prefs}
+        sync_mirror_repos(self.db_storage.db_connection, snapshot_block, voted_repos, result.shares)
 
     async def bulk_store_evaluation(
         self,

@@ -71,6 +71,10 @@ docker-compose -f docker-compose.vali.yml up -d
 
 See full guide **[here](https://docs.gittensor.io/validator.html)**
 
+### Repository Weight Consensus
+
+Repository emission shares are voted by validators, not hardcoded: each validator publishes a basket of up to 10 repos to the chain (commitments pallet), and every validator applies the stake-weighted mean of all eligible baskets (vpermit + 30k alpha), aggregated at a fixed snapshot block twice a day, so all validators derive identical weights. Validators without a basket run on the aggregate with a warning. Recommended: connect to an archive endpoint (`wss://archive.chain.opentensor.ai:443`) so snapshot state is always queryable; lite nodes gracefully fall back to the last-good aggregate.
+
 ## Reward Algorithm
 
 ### Important Structures

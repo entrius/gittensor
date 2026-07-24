@@ -19,11 +19,12 @@
 import os
 import time
 from functools import partial
+from pathlib import Path
 from typing import Dict, List, Set
 
 import bittensor as bt
-import wandb
 
+import wandb
 from gittensor import __version__
 from gittensor.classes import MinerEvaluation, MinerEvaluationCache
 from gittensor.validator import pat_storage
@@ -36,9 +37,16 @@ from gittensor.validator.pat_handler import (
     priority_pat_broadcast,
     priority_pat_check,
 )
-from gittensor.validator.utils.config import STORE_DB_RESULTS, WANDB_PROJECT, WANDB_VALIDATOR_NAME
+from gittensor.validator.utils.config import (
+    CONSENSUS_MIN_VALIDATOR_STAKE_RAO,
+    STORE_DB_RESULTS,
+    WANDB_PROJECT,
+    WANDB_VALIDATOR_NAME,
+)
 from gittensor.validator.utils.load_weights import RepositoryConfig
 from gittensor.validator.utils.storage import DatabaseStorage
+from gittensor.validator.weight_consensus import ConsensusManager
+from gittensor.validator.weight_consensus.codec import decode_prefs
 from neurons.base.validator import BaseValidatorNeuron
 
 
@@ -83,6 +91,12 @@ class Validator(BaseValidatorNeuron):
             bt.logging.warning('Validation result storage enabled.')
             self.db_storage = DatabaseStorage()
 
+        self.consensus_manager = ConsensusManager(
+            netuid=self.config.netuid,
+            cache_dir=Path(self.config.neuron.full_path),
+            store_hook=self._store_weight_consensus if self.db_storage else None,
+        )
+
         # Initialize wandb only if disable_set_weights is False
         if not self.config.neuron.disable_set_weights:
             try:
@@ -98,6 +112,17 @@ class Validator(BaseValidatorNeuron):
 
         bt.logging.info('load_state()')
         self.load_state()
+
+    def _store_weight_consensus(self, snapshot_block, commitments, stakes_rao, permits, result) -> None:
+        """Persist eligible voters' baskets and the aggregate for the dashboards."""
+        baskets = [
+            (hotkey, stakes_rao[hotkey], prefs)
+            for hotkey, payload in sorted(commitments.items())
+            if permits.get(hotkey)
+            and stakes_rao.get(hotkey, 0) >= CONSENSUS_MIN_VALIDATOR_STAKE_RAO
+            and (prefs := decode_prefs(payload)) is not None
+        ]
+        self.db_storage.store_weight_consensus(snapshot_block, baskets, result)
 
     async def bulk_store_evaluation(
         self,

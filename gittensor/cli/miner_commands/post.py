@@ -29,7 +29,6 @@ from gittensor.cli.miner_commands.helpers import (
     _resolve_endpoint,
     _status,
     console,
-    err_console,
 )
 from gittensor.constants import BASE_GITHUB_API_URL, GITHUB_HTTP_TIMEOUT_SECONDS, GRAPHQL_VIEWER_QUERY
 from gittensor.utils.github_api_tools import make_graphql_headers, make_headers
@@ -96,10 +95,10 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, min_vt
 
     # 1b. Validate PAT locally
     with _status('[bold]Validating PAT...'):
-        github_login = _validate_pat_locally(pat)
+        github_login, pat_error = _validate_pat_locally(pat)
 
     if github_login is None:
-        _error('GitHub PAT is invalid or expired. Check your GITTENSOR_MINER_PAT.', json_mode)
+        _error(pat_error or 'GitHub PAT is invalid or expired. Check your GITTENSOR_MINER_PAT.', json_mode)
         sys.exit(1)
 
     _print(f'[green]PAT is valid.[/green] GitHub account: [bold]@{github_login}[/bold]')
@@ -192,10 +191,14 @@ def miner_post(wallet_name, wallet_hotkey, netuid, network, rpc_url, pat, min_vt
         _render_skipped_validators(excluded, json_mode)
 
 
-def _validate_pat_locally(pat: str) -> str | None:
+def _validate_pat_locally(pat: str) -> tuple[str | None, str | None]:
     """Validate PAT mirrors the validator-side checks: user identity + GraphQL access.
 
-    Returns the GitHub login on success, or None if the PAT is invalid.
+    Returns ``(login, None)`` on success, or ``(None, reason)`` where ``reason``
+    states why validation failed. The three failure causes need distinct
+    messages: an invalid/expired token, a token that authenticates but lacks
+    GraphQL access (typical for fine-grained PATs), and a network failure
+    reaching GitHub (the PAT itself may be fine — retry, don't rotate).
     """
     try:
         # Check basic auth and extract login
@@ -203,8 +206,10 @@ def _validate_pat_locally(pat: str) -> str | None:
             f'{BASE_GITHUB_API_URL}/user', headers=make_headers(pat), timeout=GITHUB_HTTP_TIMEOUT_SECONDS
         )
         if user_resp.status_code != 200:
-            return None
+            return None, 'GitHub PAT is invalid or expired. Check your GITTENSOR_MINER_PAT.'
         login: str | None = user_resp.json().get('login') or None
+        if login is None:
+            return None, 'GitHub PAT is invalid or expired. Check your GITTENSOR_MINER_PAT.'
 
         # Check GraphQL access (same test the validator runs during PAT broadcast)
         gql_resp = requests.post(
@@ -214,11 +219,10 @@ def _validate_pat_locally(pat: str) -> str | None:
             timeout=GITHUB_HTTP_TIMEOUT_SECONDS,
         )
         if gql_resp.status_code != 200:
-            err_console.print(
-                '[red]PAT lacks GraphQL API access. Fine-grained PATs need "Public Repositories (read-only)" permission.[/red]'
+            return None, (
+                'PAT lacks GraphQL API access. Fine-grained PATs need "Public Repositories (read-only)" permission.'
             )
-            return None
 
-        return login
-    except requests.RequestException:
-        return None
+        return login, None
+    except requests.RequestException as e:
+        return None, f'Could not reach GitHub to validate the PAT ({e}). Check your connection and retry.'

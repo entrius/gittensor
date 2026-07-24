@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
+import requests
 from click.testing import CliRunner
 
 from gittensor import __version__
@@ -19,6 +20,7 @@ from gittensor.cli.miner_commands.helpers import (
     _require_validator_axons,
     _resolve_endpoint,
 )
+from gittensor.cli.miner_commands.post import _validate_pat_locally
 from gittensor.constants import NETWORK_MAP
 
 
@@ -40,7 +42,10 @@ def runner():
 
 class TestMinerPost:
     @patch('gittensor.cli.miner_commands.post.click.prompt', return_value='ghp_fake')
-    @patch('gittensor.cli.miner_commands.post._validate_pat_locally', return_value=None)
+    @patch(
+        'gittensor.cli.miner_commands.post._validate_pat_locally',
+        return_value=(None, 'GitHub PAT is invalid or expired. Check your GITTENSOR_MINER_PAT.'),
+    )
     def test_no_pat_prompts_interactively(self, mock_validate, mock_prompt, runner, monkeypatch):
         monkeypatch.delenv('GITTENSOR_MINER_PAT', raising=False)
         runner.invoke(cli, ['miner', 'post', '--wallet', 'test', '--hotkey', 'test'])
@@ -53,7 +58,10 @@ class TestMinerPost:
         output = json.loads(result.stdout)
         assert output['success'] is False
 
-    @patch('gittensor.cli.miner_commands.post._validate_pat_locally', return_value=None)
+    @patch(
+        'gittensor.cli.miner_commands.post._validate_pat_locally',
+        return_value=(None, 'GitHub PAT is invalid or expired. Check your GITTENSOR_MINER_PAT.'),
+    )
     def test_pat_flag_used(self, mock_validate, runner, monkeypatch):
         monkeypatch.delenv('GITTENSOR_MINER_PAT', raising=False)
         result = runner.invoke(cli, ['miner', 'post', '--pat', 'ghp_test123', '--wallet', 'test', '--hotkey', 'test'])
@@ -61,7 +69,10 @@ class TestMinerPost:
         assert 'invalid' in result.stderr.lower() or 'expired' in result.stderr.lower()
         mock_validate.assert_called_once_with('ghp_test123')
 
-    @patch('gittensor.cli.miner_commands.post._validate_pat_locally', return_value=None)
+    @patch(
+        'gittensor.cli.miner_commands.post._validate_pat_locally',
+        return_value=(None, 'GitHub PAT is invalid or expired. Check your GITTENSOR_MINER_PAT.'),
+    )
     def test_invalid_pat_exits(self, mock_validate, runner, monkeypatch):
         monkeypatch.setenv('GITTENSOR_MINER_PAT', 'ghp_invalid')
         result = runner.invoke(cli, ['miner', 'post', '--wallet', 'test', '--hotkey', 'test'])
@@ -101,7 +112,7 @@ class TestMinerPost:
                 return responses
 
         with (
-            patch('gittensor.cli.miner_commands.post._validate_pat_locally', return_value='testuser'),
+            patch('gittensor.cli.miner_commands.post._validate_pat_locally', return_value=('testuser', None)),
             patch(
                 'gittensor.cli.miner_commands.post._connect_bittensor',
                 return_value=(wallet, object(), metagraph, FakeDendrite()),
@@ -374,3 +385,64 @@ class TestPatPostAggregateCounts:
         counts = _pat_post_aggregate_counts(results)
         assert counts['rejected'] == 1
         assert counts['no_response'] == 1
+
+
+class TestValidatePatLocally:
+    """_validate_pat_locally must report WHY validation failed, not just fail.
+
+    The three failure causes need distinct messages: an invalid/expired token,
+    a token that authenticates but lacks GraphQL access (typical for
+    fine-grained PATs), and a network failure reaching GitHub (retryable —
+    rotating the PAT won't help).
+    """
+
+    def test_invalid_token_reports_invalid(self):
+        with patch('gittensor.cli.miner_commands.post.requests') as mock:
+            mock.RequestException = requests.RequestException
+            mock.get.return_value = SimpleNamespace(status_code=401)
+            login, error = _validate_pat_locally('ghp_bad')
+        assert login is None
+        assert error is not None and 'invalid or expired' in error
+
+    def test_missing_graphql_access_reports_graphql_cause(self):
+        with patch('gittensor.cli.miner_commands.post.requests') as mock:
+            mock.RequestException = requests.RequestException
+            mock.get.return_value = SimpleNamespace(status_code=200, json=lambda: {'login': 'someuser'})
+            mock.post.return_value = SimpleNamespace(status_code=403)
+            login, error = _validate_pat_locally('github_pat_finegrained')
+        assert login is None
+        assert error is not None and 'GraphQL' in error
+        assert 'invalid or expired' not in error
+
+    def test_network_failure_reports_connectivity_not_invalid(self):
+        with patch('gittensor.cli.miner_commands.post.requests') as mock:
+            mock.RequestException = requests.RequestException
+            mock.get.side_effect = requests.RequestException('connection refused')
+            login, error = _validate_pat_locally('ghp_fine')
+        assert login is None
+        assert error is not None and 'reach GitHub' in error
+        assert 'invalid or expired' not in error
+
+    def test_valid_token_returns_login_and_no_error(self):
+        with patch('gittensor.cli.miner_commands.post.requests') as mock:
+            mock.RequestException = requests.RequestException
+            mock.get.return_value = SimpleNamespace(status_code=200, json=lambda: {'login': 'someuser'})
+            mock.post.return_value = SimpleNamespace(status_code=200)
+            login, error = _validate_pat_locally('ghp_good')
+        assert login == 'someuser'
+        assert error is None
+
+    def test_post_json_mode_surfaces_specific_reason(self, monkeypatch):
+        """The machine-readable --json error must carry the real cause, not a
+        generic 'invalid or expired' verdict for a PAT that authenticated fine."""
+        monkeypatch.delenv('GITTENSOR_MINER_PAT', raising=False)
+        runner = CliRunner()
+        reason = 'PAT lacks GraphQL API access. Fine-grained PATs need "Public Repositories (read-only)" permission.'
+        with patch('gittensor.cli.miner_commands.post._validate_pat_locally', return_value=(None, reason)):
+            result = runner.invoke(
+                cli, ['miner', 'post', '--json', '--pat', 'github_pat_x', '--wallet', 'test', '--hotkey', 'test']
+            )
+        assert result.exit_code != 0
+        output = json.loads(result.stdout)
+        assert output['success'] is False
+        assert 'GraphQL' in output['error']['message']

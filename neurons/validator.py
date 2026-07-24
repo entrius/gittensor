@@ -23,8 +23,8 @@ from pathlib import Path
 from typing import Dict, List, Set
 
 import bittensor as bt
-
 import wandb
+
 from gittensor import __version__
 from gittensor.classes import MinerEvaluation, MinerEvaluationCache
 from gittensor.validator import pat_storage

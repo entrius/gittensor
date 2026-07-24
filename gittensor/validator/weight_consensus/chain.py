@@ -12,7 +12,6 @@ extracted here. Writes use the low-level pallet builder because the high-level
 from typing import Any, Dict, List, Optional, cast
 
 import bittensor as bt
-from bittensor.core.extrinsics.pallets.commitments import Commitments
 
 from gittensor.validator.weight_consensus.codec import decode_prefs
 
@@ -79,6 +78,10 @@ def fetch_own_prefs(subtensor: 'bt.Subtensor', netuid: int, hotkey_ss58: str) ->
 
 def publish_payload(subtensor: 'bt.Subtensor', wallet: 'bt.Wallet', netuid: int, payload: bytes) -> bool:
     """Publish one BigRaw commitment field signed by the validator hotkey."""
+    # Imported lazily so the CLI's --help/completion stub of `bittensor` never
+    # has to resolve SDK submodules.
+    from bittensor.core.extrinsics.pallets.commitments import Commitments
+
     # The pallet builder is typed for sync and async subtensors; sync returns the call directly.
     call = cast(Any, Commitments(subtensor).set_commitment(netuid=netuid, info={'fields': [[{'BigRaw': payload}]]}))
     response = subtensor.sign_and_send_extrinsic(

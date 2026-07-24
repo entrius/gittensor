@@ -73,7 +73,38 @@ See full guide **[here](https://docs.gittensor.io/validator.html)**
 
 ### Repository Weight Consensus
 
-Repository emission shares are voted by validators, not hardcoded: each validator publishes a basket of up to 10 repos to the chain (commitments pallet), and every validator applies the stake-weighted mean of all eligible baskets (vpermit + 30k alpha), aggregated at a fixed snapshot block twice a day, so all validators derive identical weights. Validators without a basket run on the aggregate with a warning. Recommended: connect to an archive endpoint (`wss://archive.chain.opentensor.ai:443`) so snapshot state is always queryable; lite nodes gracefully fall back to the last-good aggregate.
+Repository emission shares are voted by validators, not hardcoded. Each validator publishes a basket of up to **10 repos** to the chain; the **stake-weighted mean** of all eligible baskets becomes the emission shares every validator scores with — computed at a fixed snapshot block so all validators derive byte-identical weights and vtrust is unaffected.
+
+```
+1. VOTE      gitt validator weights set            (any GitHub repo, ≤10, weights relative)
+                │ set_commitment — hotkey-signed, free, fully on-chain (≤512 B)
+                ▼
+2. CHAIN     Commitments pallet: netuid → hotkey → basket payload
+                │ read at snapshot B = block − (block % 3600)   ~2×/day
+                ▼
+3. AGGREGATE every validator, deterministically:
+             filter vpermit ∧ stake ≥ 30k α → normalize each basket → stake-weighted mean
+             gates: <50% eligible stake voted → baked JSON; errors → last-good → baked JSON
+                │ same block ⇒ same bytes ⇒ same aggregate
+                ▼
+4. SCORING   emission_share ⟵ aggregate (known repo → tuned params, novel → defaults)
+             → identical weight vectors across validators → full vtrust
+```
+
+Rules and mechanics:
+- Any GitHub repository is votable — no whitelist. A repo only *scores* once the GT mirror tracks it (owner installs the Gittensor GitHub App + registration); until then its share redistributes to active repos.
+- Weights are relative within your basket; the aggregator normalizes every basket to 1.0, so influence is exactly proportional to stake.
+- Votes take effect at the next snapshot (~12h cadence). No basket published → loud warning, the validator still scores using the aggregate.
+- Per-repo scoring hyperparameters (label multipliers, maintainer cut, eligibility) come from `master_repositories.json` when present, code defaults otherwise.
+- Recommended: connect to an archive endpoint (`wss://archive.chain.opentensor.ai:443`) so snapshot state is always queryable; lite nodes gracefully fall back to the last-good aggregate.
+
+CLI:
+
+```bash
+gitt validator weights show               # aggregated shares, voter turnout, gate status
+gitt validator weights set                # interactively build + publish your basket
+gitt validator weights basket <hotkey>    # inspect any validator's basket
+```
 
 ## Reward Algorithm
 

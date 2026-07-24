@@ -221,6 +221,11 @@ register_miner_commands(cli)
 # Register issue commands with new flat structure
 register_commands(cli)
 
+# Register validator commands
+from gittensor.cli.validator_commands import register_validator_commands  # noqa: E402
+
+register_validator_commands(cli)
+
 
 def main():
     """Main entry point for the CLI"""

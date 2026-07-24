@@ -28,7 +28,7 @@ from gittensor.validator.weight_consensus.consensus import (
     compute_snapshot_block,
     shares_from_numerators,
 )
-from gittensor.validator.weight_consensus.publisher import maybe_publish_prefs, resolve_local_prefs
+from gittensor.validator.weight_consensus.publisher import ensure_vote
 
 StoreHook = Callable[[int, Dict[str, bytes], Dict[str, int], Dict[str, bool], AggregateResult], None]
 
@@ -141,8 +141,7 @@ def run_weight_consensus(validator, master: Dict[str, RepositoryConfig]) -> Dict
             validator.config.neuron.consensus_prefs_path
             or Path(validator.config.neuron.full_path) / 'repo_weight_prefs.json'
         )
-        prefs = resolve_local_prefs(prefs_path, master)
-        if not maybe_publish_prefs(validator.subtensor, validator.wallet, validator.config.netuid, prefs):
+        if not ensure_vote(validator.subtensor, validator.wallet, validator.config.netuid, prefs_path, master):
             bt.logging.warning(
                 'weight_consensus: no preference vector on chain — running as bystander on the '
                 'aggregate. Future releases may require participation.'

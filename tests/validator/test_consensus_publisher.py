@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 from gittensor.validator.utils.load_weights import RepositoryConfig
 from gittensor.validator.weight_consensus.chain import extract_payload_candidates, extract_prefs
 from gittensor.validator.weight_consensus.codec import encode_prefs
-from gittensor.validator.weight_consensus.publisher import maybe_publish_prefs, resolve_local_prefs
+from gittensor.validator.weight_consensus.publisher import ensure_vote, maybe_publish_prefs, resolve_local_prefs
 
 MASTER = {
     'a/big': RepositoryConfig(emission_share=0.6),
@@ -66,6 +66,31 @@ class TestExtractPayload:
     def test_no_fields_returns_none(self):
         assert extract_prefs({'info': {'fields': []}}) is None
         assert extract_prefs(None) is None
+
+
+class TestEnsureVote:
+    def test_prefs_file_overrides_chain(self, tmp_path):
+        path = tmp_path / 'prefs.json'
+        path.write_text(json.dumps({'version': 1, 'repos': {'x/y': 1}}))
+        subtensor = _subtensor_with_own_commitment(encode_prefs({'a/b': 65535}))
+        assert ensure_vote(subtensor, _wallet(), 74, path, MASTER) is True
+        subtensor.sign_and_send_extrinsic.assert_called_once()
+
+    def test_existing_onchain_vote_kept_without_prefs_file(self, tmp_path):
+        subtensor = _subtensor_with_own_commitment(encode_prefs({'a/b': 65535}))
+        assert ensure_vote(subtensor, _wallet(), 74, tmp_path / 'missing.json', MASTER) is True
+        subtensor.sign_and_send_extrinsic.assert_not_called()
+
+    def test_no_file_no_vote_publishes_baked_default(self, tmp_path):
+        subtensor = _subtensor_with_own_commitment(None)
+        assert ensure_vote(subtensor, _wallet(), 74, tmp_path / 'missing.json', MASTER) is True
+        subtensor.sign_and_send_extrinsic.assert_called_once()
+
+    def test_chain_read_failure_returns_false(self, tmp_path):
+        subtensor = _subtensor_with_own_commitment(None)
+        subtensor.substrate.query.side_effect = RuntimeError('chain down')
+        assert ensure_vote(subtensor, _wallet(), 74, tmp_path / 'missing.json', MASTER) is False
+        subtensor.sign_and_send_extrinsic.assert_not_called()
 
 
 class TestMaybePublish:

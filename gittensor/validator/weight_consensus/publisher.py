@@ -29,6 +29,32 @@ def resolve_local_prefs(prefs_path: Optional[Path], master: Dict[str, Repository
     return canonicalize_prefs({name: cfg.emission_share for name, cfg in master.items() if cfg.emission_share > 0})
 
 
+def ensure_vote(
+    subtensor: 'bt.Subtensor',
+    wallet: 'bt.Wallet',
+    netuid: int,
+    prefs_path: Optional[Path],
+    master: Dict[str, RepositoryConfig],
+) -> bool:
+    """Make sure the validator has a vote on chain.
+
+    Precedence: a local prefs file always wins; otherwise an existing on-chain
+    vote is kept untouched (e.g. set via the CLI from another machine); only a
+    validator with neither votes the baked-in registry shares.
+    """
+    if prefs_path is not None and prefs_path.exists():
+        return maybe_publish_prefs(subtensor, wallet, netuid, resolve_local_prefs(prefs_path, master))
+
+    try:
+        if fetch_own_prefs(subtensor, netuid, wallet.hotkey.ss58_address) is not None:
+            return True
+    except Exception as e:
+        bt.logging.warning(f'weight_consensus: could not read own commitment ({e}); will retry next round')
+        return False
+
+    return maybe_publish_prefs(subtensor, wallet, netuid, resolve_local_prefs(None, master))
+
+
 def maybe_publish_prefs(subtensor: 'bt.Subtensor', wallet: 'bt.Wallet', netuid: int, prefs: Dict[str, int]) -> bool:
     """Publish prefs unless the identical vector is already on chain.
 

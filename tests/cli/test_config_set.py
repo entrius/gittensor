@@ -72,11 +72,14 @@ class TestConfigSetWhitelist:
     @pytest.mark.parametrize('key', list(CONFIG_KEYS))
     def test_every_recognised_key_round_trips(self, temp_config_dir, key):
         _, config_file = temp_config_dir
+        # `network` values are themselves validated, so use a real network name
+        # for that key and a free-form value for the rest.
+        value = 'test' if key == 'network' else 'value-for-' + key
         runner = CliRunner()
-        result = runner.invoke(config_group, ['set', key, 'value-for-' + key])
+        result = runner.invoke(config_group, ['set', key, value])
 
         assert result.exit_code == 0, result.output
-        assert _read(config_file)[key] == 'value-for-' + key
+        assert _read(config_file)[key] == value
 
     def test_uppercase_key_normalised_to_lowercase(self, temp_config_dir):
         """`click.Choice(case_sensitive=False)` matches mixed case; we persist the canonical lowercase form."""
@@ -99,3 +102,61 @@ class TestConfigSetWhitelist:
         assert result.exit_code == 0, result.output
         assert 'alice' in result.output and 'bob' in result.output
         assert _read(config_file) == {'wallet': 'bob'}
+
+
+class TestConfigSetNetworkValue:
+    """Reject unresolvable `network` values so they can't silently flip the
+    issue commands back to finney (mainnet) while the miner commands treat the
+    same stored string as a raw endpoint URL."""
+
+    def test_typo_network_value_is_rejected(self, temp_config_dir):
+        """`tesnet` is the hazardous case: the user meant testnet, but the
+        issue-command resolver would silently fall back to mainnet."""
+        _, config_file = temp_config_dir
+        runner = CliRunner()
+        result = runner.invoke(config_group, ['set', 'network', 'tesnet'])
+
+        assert result.exit_code != 0
+        assert 'tesnet' in result.output
+        assert not config_file.exists()
+
+    def test_rejected_network_does_not_clobber_existing_config(self, temp_config_dir):
+        config_dir, config_file = temp_config_dir
+        config_dir.mkdir(parents=True)
+        config_file.write_text(json.dumps({'network': 'test'}, indent=2))
+
+        runner = CliRunner()
+        result = runner.invoke(config_group, ['set', 'network', 'finy'])
+
+        assert result.exit_code != 0
+        assert _read(config_file) == {'network': 'test'}
+
+    def test_custom_url_is_rejected_with_ws_endpoint_hint(self, temp_config_dir):
+        """Custom endpoints belong in `ws_endpoint`; storing a URL under
+        `network` resolves inconsistently across the CLI."""
+        _, config_file = temp_config_dir
+        runner = CliRunner()
+        result = runner.invoke(config_group, ['set', 'network', 'wss://my-node:9944'])
+
+        assert result.exit_code != 0
+        assert 'ws_endpoint' in result.output
+        assert not config_file.exists()
+
+    @pytest.mark.parametrize('name', ['finney', 'test', 'local'])
+    def test_known_networks_are_accepted(self, temp_config_dir, name):
+        _, config_file = temp_config_dir
+        runner = CliRunner()
+        result = runner.invoke(config_group, ['set', 'network', name])
+
+        assert result.exit_code == 0, result.output
+        assert _read(config_file) == {'network': name}
+
+    def test_value_case_and_whitespace_are_normalised(self, temp_config_dir):
+        """` TEST ` previously round-tripped verbatim and then failed the
+        exact-match lookup in both resolvers; store the canonical form."""
+        _, config_file = temp_config_dir
+        runner = CliRunner()
+        result = runner.invoke(config_group, ['set', 'network', ' TEST '])
+
+        assert result.exit_code == 0, result.output
+        assert _read(config_file) == {'network': 'test'}

@@ -41,6 +41,7 @@ from gittensor.cli.issue_commands import register_commands
 from gittensor.cli.issue_commands.help import StyledAliasGroup, StyledGroup
 from gittensor.cli.issue_commands.helpers import CONFIG_FILE, GITTENSOR_DIR, console, err_console
 from gittensor.cli.json_output import click_error_type, emit_error_json, wants_json_output
+from gittensor.constants import NETWORK_MAP
 
 
 class JsonAwareAliasGroup(StyledAliasGroup):
@@ -153,6 +154,24 @@ def config_set(key: str, value: str):
     [/dim]
     """
     key = key.lower()
+
+    # `network` is resolver-sensitive: the resolvers only honor the known
+    # names, so an unvalidated typo like `tesnet` silently falls back to
+    # finney (mainnet) in the issue commands, while the miner commands treat
+    # the same stored value as a raw endpoint URL. Mirror the `--network`
+    # flag's choice validation at write time so the file can never hold a
+    # value the resolvers disagree on.
+    if key == 'network':
+        normalized = value.strip().lower()
+        if normalized not in NETWORK_MAP:
+            known = ', '.join(NETWORK_MAP)
+            raise click.BadParameter(
+                f"'{value}' is not a known network (choose from: {known}). "
+                'To point at a custom endpoint, set ws_endpoint instead.',
+                param_hint='VALUE',
+            )
+        value = normalized
+
     # Ensure config directory exists
     GITTENSOR_DIR.mkdir(parents=True, exist_ok=True)
 

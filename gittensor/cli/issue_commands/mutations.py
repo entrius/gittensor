@@ -20,7 +20,6 @@ from .helpers import (
     console,
     err_console,
     format_alpha,
-    load_config,
     print_error,
     print_network_header,
     print_success,
@@ -140,7 +139,6 @@ def issue_register(
         rpc_url,
         missing_contract_message='Contract address not configured. Run ./up.sh --issues to deploy the contract first.',
     )
-    config = load_config()
 
     # Validate inputs before showing summary. The register path is owner-only
     # and spends real ALPHA, so both GitHub probes run in strict mode: any
@@ -185,9 +183,17 @@ def issue_register(
         with err_console.status('[bold cyan]Connecting to network...', spinner='dots'):
             subtensor = bt.Subtensor(network=ws_endpoint)
 
-        # CLI flags override config; fall back to config if not explicitly supplied
-        effective_wallet = wallet_name if wallet_name != 'default' else config.get('wallet', wallet_name)
-        effective_hotkey = wallet_hotkey if wallet_hotkey != 'default' else config.get('hotkey', wallet_hotkey)
+        # CLI flags override config; fall back to config if not explicitly
+        # supplied. resolve_wallet_config is ParameterSource-aware, so an
+        # explicit `--wallet-name default` selects the wallet actually named
+        # "default" instead of being silently replaced by the config file's
+        # wallet — the same resolution `gitt harvest` already uses.
+        effective_wallet, effective_hotkey = resolve_wallet_config(
+            wallet_name,
+            wallet_hotkey,
+            wallet_default='default',
+            hotkey_default='default',
+        )
 
         # For local development, check config first, then fall back to //Alice
         if network_name.lower() == 'local' and effective_wallet == 'default' and effective_hotkey == 'default':

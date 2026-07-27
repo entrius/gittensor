@@ -227,8 +227,7 @@
     "label_multipliers": {
       "gittensor:bug": 0.05,
       "gittensor:feature": 0.25,
-      "gittensor:priority": 1.5,
-      "slop": 0.0
+      "gittensor:priority": 1.5
     },
     "eligibility": {
       "min_credibility": 0.5
@@ -256,13 +255,12 @@
     "label_multipliers": {
       "gittensor:bug": 0.05,
       "gittensor:feature": 0.25,
-      "gittensor:priority": 1.5,
-      "slop": 0.0
+      "gittensor:priority": 1.5
     },
     "eligibility": {
       "min_credibility": 0.5
     },
-    "maintainer_cut": 0.5,
+    "maintainer_cut": 0.66,
     "scoring": {
       "pr_lookback_days": 5,
       "open_pr_collateral_percent": 0.2,
@@ -285,8 +283,7 @@
     "label_multipliers": {
       "gittensor:bug": 0.05,
       "gittensor:feature": 0.25,
-      "gittensor:priority": 1.5,
-      "slop": 0.0
+      "gittensor:priority": 1.5
     },
     "eligibility": {
       "min_credibility": 0.5

@@ -91,6 +91,22 @@ class TestLoadAllPats:
         entries = pat_storage.load_all_pats()
         assert entries == []
 
+    @pytest.mark.parametrize(
+        'payload',
+        [
+            'null',
+            '{}',
+            '"not a list"',
+            '[1]',
+            '["not an entry"]',
+            '[{"uid": 1}, null]',
+        ],
+    )
+    def test_load_handles_invalid_store_schema(self, use_tmp_pats_file, payload):
+        use_tmp_pats_file.write_text(payload)
+
+        assert pat_storage.load_all_pats() == []
+
 
 class TestSavePatFailsClosed:
     """The read-then-overwrite wipe (issue #1481, Proof 2): a single failed read of
@@ -134,6 +150,16 @@ class TestSavePatFailsClosed:
             pat_storage.save_pat(99, 'h99', 'p99', 'u99')
 
         assert use_tmp_pats_file.read_text() == 'not json{{{'
+
+    @pytest.mark.parametrize('payload', ['null', '{}', '["not an entry"]'])
+    def test_invalid_store_schema_save_does_not_overwrite(self, use_tmp_pats_file, payload):
+        """Structurally invalid JSON must fail closed just like malformed JSON."""
+        use_tmp_pats_file.write_text(payload)
+
+        with pytest.raises(pat_storage.PatStoreFormatError, match='list of objects'):
+            pat_storage.save_pat(99, 'h99', 'p99', 'u99')
+
+        assert use_tmp_pats_file.read_text() == payload
 
 
 class TestGetPatByUid:

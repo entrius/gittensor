@@ -31,6 +31,10 @@ PATS_FILE = (
 _lock = threading.Lock()
 
 
+class PatStoreFormatError(ValueError):
+    """Raised when the PAT store JSON does not match its list-of-objects contract."""
+
+
 def ensure_pats_file() -> None:
     """Create the PATs file with an empty list if it doesn't exist. Called on validator boot."""
     with _lock:
@@ -49,7 +53,7 @@ def load_all_pats() -> list[dict]:
     with _lock:
         try:
             return _read_file()
-        except (json.JSONDecodeError, OSError) as e:
+        except (json.JSONDecodeError, OSError, PatStoreFormatError) as e:
             bt.logging.error(
                 f'miner_pats.json unreadable this round; scoring with no stored PATs until it recovers: {e}'
             )
@@ -102,13 +106,16 @@ def _read_file() -> list[dict]:
     """Read and parse the JSON store. Must be called while holding _lock.
 
     Returns [] only when the file genuinely does not exist. Raises
-    (json.JSONDecodeError / OSError) on a corrupt or unreadable file so the write
+    (ValueError / OSError) on a corrupt, structurally invalid, or unreadable file so the write
     path never mistakes a failed read for an empty store and overwrites it. The
     read paths that must tolerate a transient failure (load_all_pats) catch it.
     """
     if not PATS_FILE.exists():
         return []
-    return json.loads(PATS_FILE.read_text())
+    entries = json.loads(PATS_FILE.read_text())
+    if not isinstance(entries, list) or not all(isinstance(entry, dict) for entry in entries):
+        raise PatStoreFormatError('miner_pats.json must contain a list of objects')
+    return entries
 
 
 def _write_file(entries: list[dict]) -> None:

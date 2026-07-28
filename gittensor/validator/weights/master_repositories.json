@@ -83,7 +83,7 @@
       "optimization": 5.0,
       "verify-jetson": 4.0
     },
-    "maintainer_cut": 0.3,
+    "maintainer_cut": 0.5,
     "trusted_label_pipeline": true
   },
   "gittensor-ai-lab/sparkinfer": {
@@ -145,12 +145,11 @@
     "emission_share": 0.099211,
     "fixed_base_score": 1.0,
     "issue_discovery_share": 0.0,
-    "maintainer_cut": 0.5,
+    "maintainer_cut": 0.6,
     "additional_acceptable_branches": ["test"],
     "trusted_label_pipeline": true,
-    "default_label_multiplier": 0.0,
+    "default_label_multiplier": 0.02,
     "label_multipliers": {
-      "mult:contribution": 0.05,
       "perf:xl": 4.0,
       "perf:l": 2.5,
       "perf:m": 1.5,

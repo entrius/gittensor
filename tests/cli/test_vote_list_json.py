@@ -27,7 +27,7 @@ def test_vote_list_json_raw_read_none_returns_read_failed(cli_root, runner):
             return_value=None,
         ),
     ):
-        result = runner.invoke(cli_root, ['vote', 'list', '--json'], catch_exceptions=False)
+        result = runner.invoke(cli_root, ['issues', 'vote', 'list', '--json'], catch_exceptions=False)
 
     assert result.exit_code != 0
 
@@ -51,7 +51,7 @@ def test_vote_list_json_raw_read_exception_returns_read_failed(cli_root, runner)
             side_effect=ConnectionRefusedError('[Errno 111] Connection refused'),
         ),
     ):
-        result = runner.invoke(cli_root, ['vote', 'list', '--json'], catch_exceptions=False)
+        result = runner.invoke(cli_root, ['issues', 'vote', 'list', '--json'], catch_exceptions=False)
 
     assert result.exit_code != 0
 
@@ -75,7 +75,7 @@ def test_vote_list_json_malformed_validator_payload_returns_read_failed(cli_root
             return_value=b'\x04',
         ),
     ):
-        result = runner.invoke(cli_root, ['vote', 'list', '--json'], catch_exceptions=False)
+        result = runner.invoke(cli_root, ['issues', 'vote', 'list', '--json'], catch_exceptions=False)
 
     assert result.exit_code != 0
 
@@ -99,7 +99,7 @@ def test_vote_list_json_empty_validator_vec_still_succeeds(cli_root, runner):
             return_value=b'\x00',
         ),
     ):
-        result = runner.invoke(cli_root, ['vote', 'list', '--json'], catch_exceptions=False)
+        result = runner.invoke(cli_root, ['issues', 'vote', 'list', '--json'], catch_exceptions=False)
 
     assert result.exit_code == 0
 

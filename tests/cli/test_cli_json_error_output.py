@@ -19,8 +19,8 @@ FORCED_MESSAGE = 'forced test failure for json-error assertion'
     [
         ['issues', 'bounty-pool', '--json'],
         ['issues', 'pending-harvest', '--json'],
-        ['admin', 'info', '--json'],
-        ['vote', 'list', '--json'],
+        ['issues', 'admin', 'info', '--json'],
+        ['issues', 'vote', 'list', '--json'],
     ],
 )
 def test_cli_commands_emit_json_on_exception(cli_root, runner, argv):
@@ -60,7 +60,7 @@ def test_admin_info_emits_json_on_soft_read_failure(cli_root, runner):
         patch('async_substrate_interface.SubstrateInterface', return_value=object()),
         patch('gittensor.cli.issue_commands.view._read_contract_packed_storage', return_value=None),
     ):
-        result = runner.invoke(cli_root, ['admin', 'info', '--json'], catch_exceptions=False)
+        result = runner.invoke(cli_root, ['issues', 'admin', 'info', '--json'], catch_exceptions=False)
 
     assert result.exit_code == 1
     payload = json.loads(result.stdout)
@@ -78,7 +78,7 @@ def test_admin_info_human_mode_exits_non_zero_on_soft_read_failure(cli_root, run
         patch('async_substrate_interface.SubstrateInterface', return_value=object()),
         patch('gittensor.cli.issue_commands.view._read_contract_packed_storage', return_value=None),
     ):
-        result = runner.invoke(cli_root, ['admin', 'info'], catch_exceptions=False)
+        result = runner.invoke(cli_root, ['issues', 'admin', 'info'], catch_exceptions=False)
 
     assert result.exit_code == 1
     assert 'Could not read contract configuration' in result.output

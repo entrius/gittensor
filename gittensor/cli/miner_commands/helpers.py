@@ -13,7 +13,7 @@ from typing import Any
 from rich.console import Console
 from rich.table import Table
 
-from gittensor.cli.json_output import emit_error_json
+from gittensor.cli.core.json_output import emit_error_json
 from gittensor.constants import NETWORK_MAP
 
 console = Console()

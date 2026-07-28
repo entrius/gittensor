@@ -7,21 +7,23 @@ from __future__ import annotations
 
 import click
 
-from gittensor.cli.json_output import click_error_type, emit_json
-
-from .help import StyledCommand
-from .helpers import (
-    fetch_issue_from_contract,
-    fetch_open_issue_pull_requests,
+from gittensor.cli.core.help import StyledCommand
+from gittensor.cli.core.helpers import (
     get_contract_address,
     handle_exception,
     loading_context,
-    print_issue_submission_table,
     print_network_header,
     print_warning,
     resolve_network,
     with_cli_behavior_options,
     with_network_contract_options,
+)
+from gittensor.cli.core.json_output import click_error_type, emit_json
+
+from .helpers import (
+    fetch_issue_from_contract,
+    fetch_open_issue_pull_requests,
+    print_issue_submission_table,
 )
 from .types import CONTRACT_ISSUE
 

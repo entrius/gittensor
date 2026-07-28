@@ -11,6 +11,9 @@ Usage:
         vote ...                 - Validator vote commands
         admin ...                - Owner commands (alias: a)
     gitt miner ...           - Miner management (alias: m)
+    gitt repo ...            - Repository registry (alias: r)
+    gitt validator ...       - Validator operations (alias: v)
+        weights ...              - Repo weight basket voting (alias: w)
 """
 
 import json
@@ -125,7 +128,7 @@ def show_config():
         err_console.print(f'[red]Error reading config: {e}[/red]')
 
 
-CONFIG_KEYS = ('wallet', 'hotkey', 'network', 'contract_address', 'ws_endpoint')
+CONFIG_KEYS = ('wallet', 'hotkey', 'network', 'contract_address', 'repos_contract_address', 'ws_endpoint')
 
 
 @config_group.command('set')
@@ -140,11 +143,12 @@ def config_set(key: str, value: str):
     downstream commands will ignore.[/dim]
 
     [dim]Recognised keys:
-        wallet              Wallet name
-        hotkey              Hotkey name
-        contract_address    Contract address
-        ws_endpoint         WebSocket endpoint
-        network             Network (local, test, finney)
+        wallet                   Wallet name
+        hotkey                   Hotkey name
+        contract_address         Issues contract address
+        repos_contract_address   Repos registry contract address
+        ws_endpoint              WebSocket endpoint
+        network                  Network (local, test, finney)
     [/dim]
 
     [dim]Examples:
@@ -221,6 +225,13 @@ register_miner_commands(cli)
 
 # Register issue commands with new flat structure
 register_commands(cli)
+
+# Register repo registry and validator commands
+from gittensor.cli.repo_commands import register_repo_commands  # noqa: E402
+from gittensor.cli.validator_commands import register_validator_commands  # noqa: E402
+
+register_repo_commands(cli)
+register_validator_commands(cli)
 
 
 def main():

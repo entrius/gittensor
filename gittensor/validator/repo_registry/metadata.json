@@ -1,6 +1,13 @@
 {
   "selectors": {
     "register": "229b553f",
+    "set_param": "adb9df18",
+    "set_label_multiplier": "c8649564",
+    "remove_label_multiplier": "d5699863",
+    "set_branch_patterns": "19956158",
+    "update_full_name": "1a9337a3",
+    "transfer_ownership": "107e33ea",
+    "deregister": "4e9a61be",
     "set_basket": "2f6d1155",
     "clear_basket": "11cfd99c"
   },
@@ -17,6 +24,80 @@
       [
         "fee_hotkey",
         "AccountId"
+      ]
+    ],
+    "set_param": [
+      [
+        "github_id",
+        "u64"
+      ],
+      [
+        "key",
+        "u8"
+      ],
+      [
+        "value",
+        "u64"
+      ]
+    ],
+    "set_label_multiplier": [
+      [
+        "github_id",
+        "u64"
+      ],
+      [
+        "label",
+        "str"
+      ],
+      [
+        "value",
+        "u64"
+      ]
+    ],
+    "remove_label_multiplier": [
+      [
+        "github_id",
+        "u64"
+      ],
+      [
+        "label",
+        "str"
+      ]
+    ],
+    "set_branch_patterns": [
+      [
+        "github_id",
+        "u64"
+      ],
+      [
+        "patterns",
+        "vec_str"
+      ]
+    ],
+    "update_full_name": [
+      [
+        "github_id",
+        "u64"
+      ],
+      [
+        "full_name",
+        "str"
+      ]
+    ],
+    "transfer_ownership": [
+      [
+        "github_id",
+        "u64"
+      ],
+      [
+        "new_owner",
+        "AccountId"
+      ]
+    ],
+    "deregister": [
+      [
+        "github_id",
+        "u64"
       ]
     ],
     "set_basket": [

@@ -312,6 +312,53 @@ class RepoRegistryContractClient:
             gas_limit=REGISTER_GAS_LIMIT,
         )
 
+    def _owner_tx(self, method_name: str, args: dict, wallet: bt.Wallet) -> Tuple[Optional[str], Optional[str]]:
+        """Execute a repo-owner message signed by the coldkey. Returns (hash, error)."""
+        return self._exec_contract_raw(
+            method_name=method_name,
+            args=args,
+            keypair=wallet.coldkey,
+            gas_limit=DEFAULT_GAS_LIMIT,
+        )
+
+    def set_param(self, github_id: int, key: int, value: int, wallet: bt.Wallet) -> Tuple[Optional[str], Optional[str]]:
+        """Set one hyperparam (repo owner coldkey signs)."""
+        return self._owner_tx('set_param', {'github_id': github_id, 'key': key, 'value': value}, wallet)
+
+    def set_label_multiplier(
+        self, github_id: int, label: str, value: int, wallet: bt.Wallet
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """Set or update a label multiplier (repo owner coldkey signs)."""
+        return self._owner_tx('set_label_multiplier', {'github_id': github_id, 'label': label, 'value': value}, wallet)
+
+    def remove_label_multiplier(
+        self, github_id: int, label: str, wallet: bt.Wallet
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """Remove a label multiplier (repo owner coldkey signs)."""
+        return self._owner_tx('remove_label_multiplier', {'github_id': github_id, 'label': label}, wallet)
+
+    def set_branch_patterns(
+        self, github_id: int, patterns: List[str], wallet: bt.Wallet
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """Replace the branch pattern list; empty clears (repo owner coldkey signs)."""
+        return self._owner_tx('set_branch_patterns', {'github_id': github_id, 'patterns': patterns}, wallet)
+
+    def update_full_name(
+        self, github_id: int, full_name: str, wallet: bt.Wallet
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """Follow a GitHub rename (repo owner coldkey signs, rate-limited)."""
+        return self._owner_tx('update_full_name', {'github_id': github_id, 'full_name': full_name}, wallet)
+
+    def transfer_ownership(
+        self, github_id: int, new_owner: str, wallet: bt.Wallet
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """Transfer repo ownership (repo owner coldkey signs)."""
+        return self._owner_tx('transfer_ownership', {'github_id': github_id, 'new_owner': new_owner}, wallet)
+
+    def deregister(self, github_id: int, wallet: bt.Wallet) -> Tuple[Optional[str], Optional[str]]:
+        """Deregister a repo, freeing its slot with no refund (repo owner coldkey signs)."""
+        return self._owner_tx('deregister', {'github_id': github_id}, wallet)
+
     def set_basket(self, entries: List[Tuple[int, int]], wallet: bt.Wallet) -> bool:
         """Publish a validator basket (whitelisted hotkey signs).
 
@@ -451,7 +498,9 @@ class RepoRegistryContractClient:
 
             value = args[arg_name]
 
-            if type_def == 'u16':
+            if type_def == 'u8':
+                encoded += struct.pack('<B', value)
+            elif type_def == 'u16':
                 encoded += struct.pack('<H', value)
             elif type_def == 'u32':
                 encoded += struct.pack('<I', value)
@@ -475,6 +524,11 @@ class RepoRegistryContractClient:
                 encoded += encode_compact_length(len(value))
                 for item_u64, item_u16 in value:
                     encoded += struct.pack('<QH', item_u64, item_u16)
+            elif type_def == 'vec_str':
+                encoded += encode_compact_length(len(value))
+                for item in value:
+                    data = item.encode('utf-8')
+                    encoded += encode_compact_length(len(data)) + data
             else:
                 raise ValueError(f'Unsupported type: {type_def} for arg {arg_name}')
 

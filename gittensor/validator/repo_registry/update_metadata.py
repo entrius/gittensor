@@ -26,6 +26,13 @@ METADATA_FILE = SCRIPT_DIR / 'metadata.json'
 # Methods we use in the validator/CLI, with declared arg types (lib.rs signatures)
 METHOD_ARG_TYPES = {
     'register': [['github_id', 'u64'], ['full_name', 'str'], ['fee_hotkey', 'AccountId']],
+    'set_param': [['github_id', 'u64'], ['key', 'u8'], ['value', 'u64']],
+    'set_label_multiplier': [['github_id', 'u64'], ['label', 'str'], ['value', 'u64']],
+    'remove_label_multiplier': [['github_id', 'u64'], ['label', 'str']],
+    'set_branch_patterns': [['github_id', 'u64'], ['patterns', 'vec_str']],
+    'update_full_name': [['github_id', 'u64'], ['full_name', 'str']],
+    'transfer_ownership': [['github_id', 'u64'], ['new_owner', 'AccountId']],
+    'deregister': [['github_id', 'u64']],
     'set_basket': [['entries', 'vec_u64_u16']],
     'clear_basket': [],
 }

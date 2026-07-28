@@ -1,13 +1,17 @@
+import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import bittensor as bt
 
 from gittensor.classes import Miner, MinerEvaluation
 from gittensor.validator.storage.database import create_database_connection
 from gittensor.validator.storage.repository import Repository
+from gittensor.validator.utils.config import CONSENSUS_SNAPSHOT_INTERVAL_BLOCKS
 from gittensor.validator.utils.load_weights import RepositoryConfig
+
+WEIGHT_CONSENSUS_SNAPSHOT_RETENTION = 30  # snapshots kept for dashboard history
 
 
 @dataclass
@@ -27,6 +31,51 @@ class DatabaseStorage:
 
     def is_enabled(self) -> bool:
         return self.db_connection is not None
+
+    def store_weight_consensus(
+        self, snapshot_block: int, baskets: List[Tuple[str, int, Dict[str, int]]], result
+    ) -> None:
+        """Persist one snapshot's validator baskets + aggregate shares.
+
+        baskets: (hotkey, stake_rao, validated prefs) per eligible voter. Rows
+        are replaced per snapshot and pruned past the retention window.
+        Failures are the caller's to swallow — consensus never depends on this.
+        """
+        if not self.is_enabled():
+            return
+        assert self.db_connection is not None
+
+        cutoff = snapshot_block - WEIGHT_CONSENSUS_SNAPSHOT_RETENTION * CONSENSUS_SNAPSHOT_INTERVAL_BLOCKS
+        try:
+            with self.db_connection.cursor() as cur:
+                cur.execute(
+                    'DELETE FROM validator_weight_baskets WHERE snapshot_block = %s OR snapshot_block < %s',
+                    (snapshot_block, cutoff),
+                )
+                cur.executemany(
+                    'INSERT INTO validator_weight_baskets (snapshot_block, hotkey, stake_rao, basket) VALUES (%s, %s, %s, %s)',
+                    [(snapshot_block, hotkey, stake_rao, json.dumps(prefs)) for hotkey, stake_rao, prefs in baskets],
+                )
+                cur.execute(
+                    'DELETE FROM repo_weight_consensus WHERE snapshot_block = %s OR snapshot_block < %s',
+                    (snapshot_block, cutoff),
+                )
+                cur.execute(
+                    'INSERT INTO repo_weight_consensus (snapshot_block, gate_passed, shares, eligible_stake_rao, valid_stake_rao, voter_count) '
+                    'VALUES (%s, %s, %s, %s, %s, %s)',
+                    (
+                        snapshot_block,
+                        result.shares is not None,
+                        json.dumps(result.shares or {}),
+                        result.eligible_stake_rao,
+                        result.valid_stake_rao,
+                        result.voter_count,
+                    ),
+                )
+            self.db_connection.commit()
+        except Exception:
+            self.db_connection.rollback()
+            raise
 
     def store_evaluation(
         self, miner_eval: MinerEvaluation, master_repositories: Dict[str, RepositoryConfig]

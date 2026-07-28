@@ -19,11 +19,12 @@
 import os
 import time
 from functools import partial
-from typing import Dict, List, Set
+from pathlib import Path
+from typing import Dict, List, Optional, Set
 
 import bittensor as bt
-import wandb
 
+import wandb
 from gittensor import __version__
 from gittensor.classes import MinerEvaluation, MinerEvaluationCache
 from gittensor.validator import pat_storage
@@ -36,9 +37,18 @@ from gittensor.validator.pat_handler import (
     priority_pat_broadcast,
     priority_pat_check,
 )
-from gittensor.validator.utils.config import STORE_DB_RESULTS, WANDB_PROJECT, WANDB_VALIDATOR_NAME
+from gittensor.validator.repo_registry.contract_client import RepoRegistryContractClient
+from gittensor.validator.utils.config import (
+    CONSENSUS_MIN_VALIDATOR_STAKE_RAO,
+    REPO_REGISTRY_CONTRACT_ADDRESS,
+    STORE_DB_RESULTS,
+    WANDB_PROJECT,
+    WANDB_VALIDATOR_NAME,
+)
 from gittensor.validator.utils.load_weights import RepositoryConfig
 from gittensor.validator.utils.storage import DatabaseStorage
+from gittensor.validator.weight_consensus import ConsensusManager, ContractBackend
+from gittensor.validator.weight_consensus.codec import validate_prefs
 from neurons.base.validator import BaseValidatorNeuron
 
 
@@ -83,6 +93,8 @@ class Validator(BaseValidatorNeuron):
             bt.logging.warning('Validation result storage enabled.')
             self.db_storage = DatabaseStorage()
 
+        self.consensus_manager = self._init_consensus_manager()
+
         # Initialize wandb only if disable_set_weights is False
         if not self.config.neuron.disable_set_weights:
             try:
@@ -98,6 +110,36 @@ class Validator(BaseValidatorNeuron):
 
         bt.logging.info('load_state()')
         self.load_state()
+
+    def _init_consensus_manager(self) -> Optional[ConsensusManager]:
+        """Wire the contract-backed weight consensus; None disables it (baked weights)."""
+        if self.config.neuron.disable_weight_consensus:
+            return None
+        if not REPO_REGISTRY_CONTRACT_ADDRESS:
+            bt.logging.warning('weight_consensus: REPO_REGISTRY_CONTRACT_ADDRESS not set; using baked-in weights')
+            return None
+        try:
+            client = RepoRegistryContractClient(REPO_REGISTRY_CONTRACT_ADDRESS, self.subtensor)
+            backend = ContractBackend(client, self.subtensor, self.wallet, self.config.netuid)
+            return ConsensusManager(
+                backend=backend,
+                cache_dir=Path(self.config.neuron.full_path),
+                store_hook=self._store_weight_consensus if self.db_storage else None,
+            )
+        except Exception as e:
+            bt.logging.warning(f'weight_consensus: backend init failed ({e}); using baked-in weights')
+            return None
+
+    def _store_weight_consensus(self, snapshot_block, baskets, stakes_rao, permits, result) -> None:
+        """Persist eligible voters' baskets and the aggregate for the dashboards."""
+        rows = [
+            (hotkey, stakes_rao[hotkey], prefs)
+            for hotkey, basket in sorted(baskets.items())
+            if permits.get(hotkey)
+            and stakes_rao.get(hotkey, 0) >= CONSENSUS_MIN_VALIDATOR_STAKE_RAO
+            and (prefs := validate_prefs(basket)) is not None
+        ]
+        self.db_storage.store_weight_consensus(snapshot_block, rows, result)
 
     async def bulk_store_evaluation(
         self,

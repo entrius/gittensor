@@ -71,6 +71,10 @@ docker-compose -f docker-compose.vali.yml up -d
 
 See full guide **[here](https://docs.gittensor.io/validator.html)**
 
+### Repository Weight Consensus
+
+Repository emission shares are voted by validators, not hardcoded: each whitelisted validator publishes a basket of up to 10 registered repos to the repos-v0 registry contract (`set_basket`, signed by the hotkey), and every validator applies the stake-weighted mean of all eligible baskets (vpermit + 30k alpha), aggregated at a fixed snapshot block twice a day and pinned to that block's hash, so all validators derive identical weights. Validators without a basket run on the aggregate with a warning. If the contract is paused or unreachable, scoring falls back to the last-good aggregate, then the baked-in repository weights.
+
 ## Reward Algorithm
 
 ### Important Structures

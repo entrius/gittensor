@@ -141,6 +141,20 @@ def add_validator_args(cls, parser):
     )
 
     parser.add_argument(
+        '--neuron.consensus_prefs_path',
+        type=str,
+        help='Path to the repo weight preferences JSON voted on chain. Defaults to <neuron.full_path>/repo_weight_prefs.json.',
+        default=None,
+    )
+
+    parser.add_argument(
+        '--neuron.disable_weight_consensus',
+        action='store_true',
+        help='Disables validator-voted repo weight consensus; scoring uses the baked-in repository weights.',
+        default=False,
+    )
+
+    parser.add_argument(
         '--wandb.project_name',
         type=str,
         help='The name of the project where you are sending the new run.',

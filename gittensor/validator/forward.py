@@ -23,6 +23,7 @@ from gittensor.validator.utils.load_weights import (
     load_programming_language_weights,
     load_token_config,
 )
+from gittensor.validator.weight_consensus import run_weight_consensus
 
 if TYPE_CHECKING:
     from neurons.validator import Validator
@@ -40,14 +41,18 @@ async def forward(self: 'Validator') -> None:
 
     Emission blending:
     - Combined scoring pool: 90%, allocated by repository emission_share
+      (validator-voted consensus aggregate when active, baked-in weights otherwise)
     - Maintainer cut:        per-repo carve-out routed to maintainer miner neurons
     - Issue treasury:       10%, flat to UID 111
     - Recycle:              registry slack and inactive repo slices to UID 0
     """
 
+    if self.consensus_manager is not None:
+        self.consensus_manager.maybe_refresh(self.block)
+
     if self.step % VALIDATOR_STEPS_INTERVAL == 0:
         miner_uids = get_all_uids(self)
-        master_repositories = load_master_repo_weights()
+        master_repositories = run_weight_consensus(self, load_master_repo_weights())
         programming_languages = load_programming_language_weights()
         token_config = load_token_config()
 

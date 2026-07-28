@@ -6,14 +6,14 @@ Top-level mutation commands for issue CLI
 
 Commands:
     gitt register
-    gitt harvest
+    gitt issues harvest
 """
 
 import click
 from rich.panel import Panel
 
-from .help import StyledCommand
-from .helpers import (
+from gittensor.cli.core.help import StyledCommand
+from gittensor.cli.core.helpers import (
     NETWORK_CHOICE,
     _is_interactive,
     _resolve_contract_and_network,
@@ -25,11 +25,13 @@ from .helpers import (
     print_network_header,
     print_success,
     resolve_wallet_config,
-    validate_bounty_amount,
     validate_github_issue,
     validate_repository,
 )
-from .types import GITHUB_ISSUE, REPO
+from gittensor.cli.core.types import REPO
+
+from .helpers import validate_bounty_amount
+from .types import GITHUB_ISSUE
 
 
 def _print_register_revert_hints() -> None:
@@ -280,9 +282,9 @@ def issue_harvest(wallet_name: str, wallet_hotkey: str, network: str, rpc_url: s
     The contract handles emission collection and distribution internally.[/dim]
 
     [dim]Examples:
-        $ gitt harvest
-        $ gitt harvest --verbose
-        $ gitt harvest --wallet-name mywallet --wallet-hotkey mykey
+        $ gitt issues harvest
+        $ gitt issues harvest --verbose
+        $ gitt issues harvest --wallet-name mywallet --wallet-hotkey mykey
     [/dim]
     """
     err_console.print('\n[bold cyan]Manual Emission Harvest[/bold cyan]\n')

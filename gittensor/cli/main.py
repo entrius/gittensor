@@ -7,9 +7,10 @@ Gittensor CLI - Main entry point
 Usage:
     gitt config              - Show/set CLI configuration
     gitt issues ...          - Issue management (alias: i)
-    gitt harvest             - Harvest emissions
-    gitt vote ...            - Validator vote commands
-    gitt admin ...           - Owner commands (alias: a)
+        harvest                  - Harvest emissions
+        vote ...                 - Validator vote commands
+        admin ...                - Owner commands (alias: a)
+    gitt miner ...           - Miner management (alias: m)
 """
 
 import json
@@ -37,10 +38,10 @@ from click.shell_completion import get_completion_class
 from rich.table import Table
 
 from gittensor import __version__
+from gittensor.cli.core.help import StyledAliasGroup, StyledGroup
+from gittensor.cli.core.helpers import CONFIG_FILE, GITTENSOR_DIR, console, err_console
+from gittensor.cli.core.json_output import click_error_type, emit_error_json, wants_json_output
 from gittensor.cli.issue_commands import register_commands
-from gittensor.cli.issue_commands.help import StyledAliasGroup, StyledGroup
-from gittensor.cli.issue_commands.helpers import CONFIG_FILE, GITTENSOR_DIR, console, err_console
-from gittensor.cli.json_output import click_error_type, emit_error_json, wants_json_output
 
 
 class JsonAwareAliasGroup(StyledAliasGroup):

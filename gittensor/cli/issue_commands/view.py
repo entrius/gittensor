@@ -8,7 +8,7 @@ Commands:
     gitt issues list [--id <ID>]
     gitt issues bounty-pool
     gitt issues pending-harvest
-    gitt admin info
+    gitt issues admin info
 """
 
 from decimal import Decimal
@@ -17,25 +17,28 @@ import click
 from rich.panel import Panel
 from rich.table import Table
 
-from gittensor.cli.json_output import emit_json
-
-from .help import StyledCommand
-from .helpers import (
-    _read_contract_packed_storage,
-    _read_issues_from_child_storage,
+from gittensor.cli.core.help import StyledCommand
+from gittensor.cli.core.helpers import (
     _resolve_contract_and_network,
-    colorize_status,
     console,
     err_console,
     format_alpha,
     handle_exception,
     loading_context,
     print_network_header,
-    read_issues_from_contract,
     with_cli_behavior_options,
     with_network_contract_options,
 )
-from .types import CONTRACT_ISSUE, REPO
+from gittensor.cli.core.json_output import emit_json
+from gittensor.cli.core.types import REPO
+
+from .helpers import (
+    _read_contract_packed_storage,
+    _read_issues_from_child_storage,
+    colorize_status,
+    read_issues_from_contract,
+)
+from .types import CONTRACT_ISSUE
 
 
 def _fill_percent(bounty: int, target: int) -> float:
@@ -325,8 +328,8 @@ def admin_info(network: str, rpc_url: str, contract: str, verbose: bool, as_json
     """View contract configuration.
 
     [dim]Examples:
-        $ gitt admin info
-        $ gitt a info --json
+        $ gitt issues admin info
+        $ gitt i a info --json
     [/dim]
     """
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)

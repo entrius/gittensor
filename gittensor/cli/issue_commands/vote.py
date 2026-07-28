@@ -5,9 +5,9 @@
 Validator vote commands for issue CLI
 
 Commands:
-    gitt vote solution
-    gitt vote cancel
-    gitt vote list
+    gitt issues vote solution
+    gitt issues vote cancel
+    gitt issues vote list
 """
 
 import re
@@ -16,12 +16,9 @@ import click
 from rich.panel import Panel
 from rich.table import Table
 
-from gittensor.cli.json_output import emit_json
-
-from .help import StyledGroup
-from .helpers import (
+from gittensor.cli.core.help import StyledGroup
+from gittensor.cli.core.helpers import (
     _handle_command_error,
-    _make_contract_client,
     _resolve_contract_and_network,
     confirm_or_abort,
     console,
@@ -35,7 +32,11 @@ from .helpers import (
     with_network_contract_options,
     with_wallet_options,
 )
-from .types import CONTRACT_ISSUE, SS58
+from gittensor.cli.core.json_output import emit_json
+from gittensor.cli.core.types import SS58
+
+from .helpers import _make_contract_client
+from .types import CONTRACT_ISSUE
 
 
 def parse_pr_number(pr_input: str) -> int:
@@ -104,8 +105,8 @@ def val_vote_solution(
     [/dim]
 
     [dim]Examples:
-        $ gitt vote solution 1 5Hxxx... 5Hyyy... 123
-        $ gitt vote solution 1 5Hxxx... 5Hyyy... https://github.com/.../pull/123
+        $ gitt issues vote solution 1 5Hxxx... 5Hyyy... 123
+        $ gitt issues vote solution 1 5Hxxx... 5Hyyy... https://github.com/.../pull/123
     [/dim]
     """
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
@@ -176,8 +177,8 @@ def val_vote_cancel_issue(
     [/dim]
 
     [dim]Examples:
-        $ gitt vote cancel 1 "External solution found"
-        $ gitt vote cancel 42 "Issue invalid"
+        $ gitt issues vote cancel 1 "External solution found"
+        $ gitt issues vote cancel 42 "Issue invalid"
     [/dim]
     """
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
@@ -216,9 +217,9 @@ def vote_list_validators(network: str, rpc_url: str, contract: str, as_json: boo
     """List whitelisted validators and consensus threshold.
 
     [dim]Examples:
-        $ gitt vote list
-        $ gitt vote list --network test
-        $ gitt vote list --json
+        $ gitt issues vote list
+        $ gitt issues vote list --network test
+        $ gitt issues vote list --json
     [/dim]
     """
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
@@ -268,7 +269,7 @@ def vote_list_validators(network: str, rpc_url: str, contract: str, as_json: boo
             console.print(f'[green]Consensus threshold:[/green] {required} of {n} votes required')
         else:
             err_console.print('[yellow]No validators whitelisted.[/yellow]')
-            err_console.print('[dim]Add validators with: gitt admin add-vali <HOTKEY>[/dim]')
+            err_console.print('[dim]Add validators with: gitt issues admin add-vali <HOTKEY>[/dim]')
 
     except ContractReadError as e:
         handle_exception(as_json=as_json, message=str(e), error_type='read_failed')

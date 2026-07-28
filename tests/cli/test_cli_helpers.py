@@ -18,22 +18,24 @@ import click
 import pytest
 from click.testing import CliRunner
 
-from gittensor.cli.issue_commands.helpers import (
+from gittensor.cli.core.helpers import (
     ALPHA_DECIMALS,
     ALPHA_RAW_UNIT,
+    format_alpha,
+    validate_github_issue,
+    validate_repository,
+    validate_ss58_address,
+)
+from gittensor.cli.core.json_output import emit_json
+from gittensor.cli.issue_commands.helpers import (
     MAX_BOUNTY_ALPHA,
     MAX_ISSUE_ID,
     MAX_ISSUE_NUMBER,
     STATUS_COLORS,
     colorize_status,
-    format_alpha,
     validate_bounty_amount,
-    validate_github_issue,
-    validate_repository,
-    validate_ss58_address,
 )
 from gittensor.cli.issue_commands.vote import parse_pr_number
-from gittensor.cli.json_output import emit_json
 
 # =============================================================================
 # format_alpha
@@ -232,8 +234,8 @@ class TestValidateGitHubIssue:
                 'json': lambda self: issue_data,
             },
         )()
-        with patch('gittensor.cli.issue_commands.helpers.requests.get', return_value=mock_resp):
-            with patch('gittensor.cli.issue_commands.helpers.err_console.print') as mock_print:
+        with patch('gittensor.cli.core.helpers.requests.get', return_value=mock_resp):
+            with patch('gittensor.cli.core.helpers.err_console.print') as mock_print:
                 result = validate_github_issue('owner', 'repo', 42)
         assert result == issue_data
         mock_print.assert_called_once()
@@ -267,7 +269,7 @@ class TestRequireVerifiedExistsGitHubIssue:
 
     def test_503_raises_bad_parameter(self):
         with patch(
-            'gittensor.cli.issue_commands.helpers.requests.get',
+            'gittensor.cli.core.helpers.requests.get',
             return_value=_fake_response(503),
         ):
             with pytest.raises(click.BadParameter) as exc_info:
@@ -281,7 +283,7 @@ class TestRequireVerifiedExistsGitHubIssue:
 
     def test_403_raises_bad_parameter(self):
         with patch(
-            'gittensor.cli.issue_commands.helpers.requests.get',
+            'gittensor.cli.core.helpers.requests.get',
             return_value=_fake_response(403),
         ):
             with pytest.raises(click.BadParameter) as exc_info:
@@ -293,7 +295,7 @@ class TestRequireVerifiedExistsGitHubIssue:
         import requests as _requests
 
         with patch(
-            'gittensor.cli.issue_commands.helpers.requests.get',
+            'gittensor.cli.core.helpers.requests.get',
             side_effect=_requests.ConnectionError('boom'),
         ):
             with pytest.raises(click.BadParameter) as exc_info:
@@ -306,10 +308,10 @@ class TestRequireVerifiedExistsGitHubIssue:
     def test_503_without_flag_still_returns_none(self):
         """Back-compat: read-only callers that do not opt in keep warn-and-skip."""
         with patch(
-            'gittensor.cli.issue_commands.helpers.requests.get',
+            'gittensor.cli.core.helpers.requests.get',
             return_value=_fake_response(503),
         ):
-            with patch('gittensor.cli.issue_commands.helpers.err_console.print'):
+            with patch('gittensor.cli.core.helpers.err_console.print'):
                 result = validate_github_issue('owner', 'repo', 42)
         assert result is None
 
@@ -317,7 +319,7 @@ class TestRequireVerifiedExistsGitHubIssue:
         """A definitive 404 keeps its dedicated message; the flag only widens
         the warn-and-skip branches, it does not suppress real rejections."""
         with patch(
-            'gittensor.cli.issue_commands.helpers.requests.get',
+            'gittensor.cli.core.helpers.requests.get',
             return_value=_fake_response(404),
         ):
             with pytest.raises(click.BadParameter) as exc_info:
@@ -328,7 +330,7 @@ class TestRequireVerifiedExistsGitHubIssue:
         """The flag must not affect the success path."""
         payload = {'state': 'open', 'number': 42, 'title': 'Real issue'}
         with patch(
-            'gittensor.cli.issue_commands.helpers.requests.get',
+            'gittensor.cli.core.helpers.requests.get',
             return_value=_fake_response(200, payload),
         ):
             data = validate_github_issue('owner', 'repo', 42, require_verified_exists=True)
@@ -340,7 +342,7 @@ class TestRequireVerifiedExistsRepository:
 
     def test_503_raises_bad_parameter(self):
         with patch(
-            'gittensor.cli.issue_commands.helpers.requests.get',
+            'gittensor.cli.core.helpers.requests.get',
             return_value=_fake_response(503),
         ):
             with pytest.raises(click.BadParameter) as exc_info:
@@ -355,7 +357,7 @@ class TestRequireVerifiedExistsRepository:
         import requests as _requests
 
         with patch(
-            'gittensor.cli.issue_commands.helpers.requests.get',
+            'gittensor.cli.core.helpers.requests.get',
             side_effect=_requests.Timeout('timed out'),
         ):
             with pytest.raises(click.BadParameter) as exc_info:
@@ -366,10 +368,10 @@ class TestRequireVerifiedExistsRepository:
 
     def test_503_without_flag_just_warns(self):
         with patch(
-            'gittensor.cli.issue_commands.helpers.requests.get',
+            'gittensor.cli.core.helpers.requests.get',
             return_value=_fake_response(503),
         ):
-            with patch('gittensor.cli.issue_commands.helpers.err_console.print') as mock_print:
+            with patch('gittensor.cli.core.helpers.err_console.print') as mock_print:
                 owner, name = validate_repository('owner/repo')
         assert owner == 'owner'
         assert name == 'repo'
@@ -377,7 +379,7 @@ class TestRequireVerifiedExistsRepository:
 
     def test_404_still_raises_not_found_even_with_flag(self):
         with patch(
-            'gittensor.cli.issue_commands.helpers.requests.get',
+            'gittensor.cli.core.helpers.requests.get',
             return_value=_fake_response(404),
         ):
             with pytest.raises(click.BadParameter) as exc_info:
@@ -584,7 +586,7 @@ class TestCliRegisterValidation:
                 ),
             ),
             patch(
-                'gittensor.cli.issue_commands.helpers.requests.get',
+                'gittensor.cli.core.helpers.requests.get',
                 return_value=_fake_response(503),
             ),
         ):
@@ -614,7 +616,7 @@ class TestCliRegisterValidation:
                 ),
             ),
             patch(
-                'gittensor.cli.issue_commands.helpers.requests.get',
+                'gittensor.cli.core.helpers.requests.get',
                 side_effect=_requests.ConnectionError('no route to host'),
             ),
         ):
@@ -644,6 +646,7 @@ class TestCliVoteValidation:
             result = runner.invoke(
                 cli_root,
                 [
+                    'issues',
                     'vote',
                     'solution',
                     '0',
@@ -668,6 +671,7 @@ class TestCliVoteValidation:
             result = runner.invoke(
                 cli_root,
                 [
+                    'issues',
                     'vote',
                     'solution',
                     '1',
@@ -692,6 +696,7 @@ class TestCliVoteValidation:
             result = runner.invoke(
                 cli_root,
                 [
+                    'issues',
                     'vote',
                     'solution',
                     '1',
@@ -719,7 +724,7 @@ class TestCliAdminValidation:
         ):
             result = runner.invoke(
                 cli_root,
-                ['admin', 'cancel-issue', '0'],
+                ['issues', 'admin', 'cancel-issue', '0'],
                 catch_exceptions=False,
             )
         assert result.exit_code != 0
@@ -736,7 +741,7 @@ class TestCliAdminValidation:
         ):
             result = runner.invoke(
                 cli_root,
-                ['admin', 'payout-issue', '0'],
+                ['issues', 'admin', 'payout-issue', '0'],
                 catch_exceptions=False,
             )
         assert result.exit_code != 0
@@ -757,7 +762,7 @@ class TestCliVoteCancelValidation:
         ):
             result = runner.invoke(
                 cli_root,
-                ['vote', 'cancel', '0', 'reason text'],
+                ['issues', 'vote', 'cancel', '0', 'reason text'],
                 catch_exceptions=False,
             )
         assert result.exit_code != 0
@@ -788,6 +793,7 @@ class TestCliMissingContractConfig:
             result = runner.invoke(
                 cli_root,
                 [
+                    'issues',
                     'vote',
                     'solution',
                     '1',
@@ -807,7 +813,7 @@ class TestCliMissingContractConfig:
         ):
             result = runner.invoke(
                 cli_root,
-                ['admin', 'cancel-issue', '1'],
+                ['issues', 'admin', 'cancel-issue', '1'],
                 catch_exceptions=False,
             )
         assert result.exit_code != 0
@@ -820,7 +826,7 @@ class TestCliMissingContractConfig:
         ):
             result = runner.invoke(
                 cli_root,
-                ['harvest'],
+                ['issues', 'harvest'],
                 catch_exceptions=False,
             )
         assert result.exit_code != 0
@@ -847,7 +853,7 @@ class TestCliRuntimeExceptions:
         ):
             result = runner.invoke(
                 cli_root,
-                ['admin', 'cancel-issue', '1'],
+                ['issues', 'admin', 'cancel-issue', '1'],
                 catch_exceptions=False,
             )
         assert result.exit_code != 0
@@ -871,6 +877,7 @@ class TestCliRuntimeExceptions:
             result = runner.invoke(
                 cli_root,
                 [
+                    'issues',
                     'vote',
                     'solution',
                     '1',
@@ -897,7 +904,7 @@ class TestCliRuntimeExceptions:
         ):
             result = runner.invoke(
                 cli_root,
-                ['harvest'],
+                ['issues', 'harvest'],
                 catch_exceptions=False,
             )
         assert result.exit_code != 0

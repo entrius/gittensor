@@ -5,21 +5,20 @@
 Admin subgroup commands for issue CLI
 
 Commands:
-    gitt admin cancel-issue (alias: a cancel-issue)
-    gitt admin payout-issue (alias: a payout-issue)
-    gitt admin set-owner (alias: a set-owner)
-    gitt admin set-treasury (alias: a set-treasury)
-    gitt admin add-vali (alias: a add-vali)
-    gitt admin remove-vali (alias: a remove-vali)
+    gitt issues admin cancel-issue (alias: i a cancel-issue)
+    gitt issues admin payout-issue (alias: i a payout-issue)
+    gitt issues admin set-owner (alias: i a set-owner)
+    gitt issues admin set-treasury (alias: i a set-treasury)
+    gitt issues admin add-vali (alias: i a add-vali)
+    gitt issues admin remove-vali (alias: i a remove-vali)
 """
 
 import click
 from rich.panel import Panel
 
-from .help import StyledGroup
-from .helpers import (
+from gittensor.cli.core.help import StyledGroup
+from gittensor.cli.core.helpers import (
     _handle_command_error,
-    _make_contract_client,
     _resolve_contract_and_network,
     confirm_or_abort,
     err_console,
@@ -31,7 +30,10 @@ from .helpers import (
     with_network_contract_options,
     with_wallet_options,
 )
-from .types import CONTRACT_ISSUE, SS58
+from gittensor.cli.core.types import SS58
+
+from .helpers import _make_contract_client
+from .types import CONTRACT_ISSUE
 
 
 @click.group(name='admin', cls=StyledGroup)
@@ -60,8 +62,8 @@ def admin_cancel(
     [/dim]
 
     [dim]Examples:
-        $ gitt admin cancel-issue 1
-        $ gitt a cancel-issue 5 --network test
+        $ gitt issues admin cancel-issue 1
+        $ gitt i a cancel-issue 5 --network test
     [/dim]
     """
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
@@ -120,8 +122,8 @@ def admin_payout(
     [/dim]
 
     [dim]Examples:
-        $ gitt admin payout-issue 1
-        $ gitt a payout-issue 3 --network test
+        $ gitt issues admin payout-issue 1
+        $ gitt i a payout-issue 3 --network test
     [/dim]
     """
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
@@ -177,7 +179,7 @@ def admin_set_owner(
     [/dim]
 
     [dim]Examples:
-        $ gitt admin set-owner 5Hxxx...
+        $ gitt issues admin set-owner 5Hxxx...
     [/dim]
     """
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
@@ -228,7 +230,7 @@ def admin_set_treasury(
     [/dim]
 
     [dim]Examples:
-        $ gitt admin set-treasury 5Hxxx...
+        $ gitt issues admin set-treasury 5Hxxx...
     [/dim]
     """
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
@@ -283,7 +285,7 @@ def admin_add_validator(
     [/dim]
 
     [dim]Examples:
-        $ gitt admin add-vali 5Hxxx...
+        $ gitt issues admin add-vali 5Hxxx...
     [/dim]
     """
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)
@@ -335,7 +337,7 @@ def admin_remove_validator(
     [/dim]
 
     [dim]Examples:
-        $ gitt admin remove-vali 5Hxxx...
+        $ gitt issues admin remove-vali 5Hxxx...
     [/dim]
     """
     contract_addr, ws_endpoint, network_name = _resolve_contract_and_network(contract, network, rpc_url)

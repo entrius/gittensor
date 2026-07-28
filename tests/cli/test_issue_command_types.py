@@ -6,8 +6,9 @@
 import click
 import pytest
 
+from gittensor.cli.core.types import REPO, SS58
 from gittensor.cli.issue_commands.helpers import MAX_ISSUE_ID, MAX_ISSUE_NUMBER
-from gittensor.cli.issue_commands.types import CONTRACT_ISSUE, GITHUB_ISSUE, REPO, SS58
+from gittensor.cli.issue_commands.types import CONTRACT_ISSUE, GITHUB_ISSUE
 
 # A representative valid SS58 address (Alice's well-known dev address).
 VALID_SS58 = '5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY'

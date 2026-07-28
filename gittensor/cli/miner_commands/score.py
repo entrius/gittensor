@@ -21,7 +21,7 @@ import click
 from rich.console import Console
 from rich.table import Table
 
-from gittensor.cli.json_output import emit_json
+from gittensor.cli.core.json_output import emit_json
 from gittensor.cli.miner_commands.helpers import _error
 
 if TYPE_CHECKING:

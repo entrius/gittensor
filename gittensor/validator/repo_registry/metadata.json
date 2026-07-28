@@ -1,0 +1,30 @@
+{
+  "selectors": {
+    "register": "229b553f",
+    "set_basket": "2f6d1155",
+    "clear_basket": "11cfd99c"
+  },
+  "arg_types": {
+    "register": [
+      [
+        "github_id",
+        "u64"
+      ],
+      [
+        "full_name",
+        "str"
+      ],
+      [
+        "fee_hotkey",
+        "AccountId"
+      ]
+    ],
+    "set_basket": [
+      [
+        "entries",
+        "vec_u64_u16"
+      ]
+    ],
+    "clear_basket": []
+  }
+}

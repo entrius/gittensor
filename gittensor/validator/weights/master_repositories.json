@@ -145,7 +145,7 @@
     "emission_share": 0.099211,
     "fixed_base_score": 1.0,
     "issue_discovery_share": 0.0,
-    "maintainer_cut": 0.6,
+    "maintainer_cut": 0.5,
     "additional_acceptable_branches": ["test"],
     "trusted_label_pipeline": true,
     "default_label_multiplier": 0.02,

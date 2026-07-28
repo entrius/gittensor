@@ -30,6 +30,7 @@ class TestApplyConsensus:
         assert novel.emission_share == 0.5
         assert novel.maintainer_cut == 0.0
         assert novel.default_label_multiplier == 1.0
+        assert novel.issue_discovery_share == 0.0  # regression: default was 0.5
 
     def test_none_shares_returns_master_unchanged(self):
         master = _master()

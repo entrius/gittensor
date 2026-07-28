@@ -512,6 +512,47 @@ def _validate_scoring_configs(configs: Dict[str, RepositoryConfig]) -> None:
             )
 
 
+def parse_master_repositories(data: Dict[str, Any]) -> Dict[str, RepositoryConfig]:
+    """Parse and validate master_repositories-shaped data into RepositoryConfig
+    objects keyed by lowercase full name. Raises RepositoryRegistryError or
+    ValueError when entries violate the registry contract."""
+    normalized_data: Dict[str, RepositoryConfig] = {}
+    for repo_name, metadata in data.items():
+        try:
+            if not isinstance(metadata, dict):
+                raise TypeError(f'expected object metadata, got {type(metadata)}')
+            config = RepositoryConfig(
+                emission_share=_coerce_share(repo_name, 'emission_share', metadata['emission_share']),
+                issue_discovery_share=_coerce_share(
+                    repo_name,
+                    'issue_discovery_share',
+                    metadata.get('issue_discovery_share', DEFAULT_ISSUE_DISCOVERY_SHARE),
+                ),
+                additional_acceptable_branches=metadata.get('additional_acceptable_branches'),
+                trusted_label_pipeline=bool(metadata.get('trusted_label_pipeline', False)),
+                label_multipliers=(
+                    {str(label): float(multiplier) for label, multiplier in metadata['label_multipliers'].items()}
+                    if metadata.get('label_multipliers') is not None
+                    else None
+                ),
+                default_label_multiplier=float(metadata.get('default_label_multiplier', 1.0)),
+                fixed_base_score=metadata.get('fixed_base_score'),
+                eligibility=_parse_eligibility(repo_name, metadata.get('eligibility')),
+                scoring=_parse_scoring(repo_name, metadata.get('scoring')),
+                maintainer_cut=_coerce_share(repo_name, 'maintainer_cut', metadata.get('maintainer_cut', 0.0)),
+            )
+            normalized_data[repo_name.lower()] = config
+        except RepositoryRegistryError:
+            raise
+        except (KeyError, ValueError, TypeError) as e:
+            raise ValueError(f'Could not parse config for {repo_name}: {e}') from e
+
+    _validate_emission_shares(normalized_data)
+    _validate_eligibility_configs(normalized_data)
+    _validate_scoring_configs(normalized_data)
+    return normalized_data
+
+
 def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
     """
     Load repository emission shares from the local JSON file.
@@ -532,42 +573,7 @@ def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
         if not isinstance(data, dict):
             raise RepositoryRegistryError(f'Expected dict from {weights_file}, got {type(data)}')
 
-        # Parse JSON data into RepositoryConfig objects
-        normalized_data: Dict[str, RepositoryConfig] = {}
-        for repo_name, metadata in data.items():
-            try:
-                if not isinstance(metadata, dict):
-                    raise TypeError(f'expected object metadata, got {type(metadata)}')
-                config = RepositoryConfig(
-                    emission_share=_coerce_share(repo_name, 'emission_share', metadata['emission_share']),
-                    issue_discovery_share=_coerce_share(
-                        repo_name,
-                        'issue_discovery_share',
-                        metadata.get('issue_discovery_share', DEFAULT_ISSUE_DISCOVERY_SHARE),
-                    ),
-                    additional_acceptable_branches=metadata.get('additional_acceptable_branches'),
-                    trusted_label_pipeline=bool(metadata.get('trusted_label_pipeline', False)),
-                    label_multipliers=(
-                        {str(label): float(multiplier) for label, multiplier in metadata['label_multipliers'].items()}
-                        if metadata.get('label_multipliers') is not None
-                        else None
-                    ),
-                    default_label_multiplier=float(metadata.get('default_label_multiplier', 1.0)),
-                    fixed_base_score=metadata.get('fixed_base_score'),
-                    eligibility=_parse_eligibility(repo_name, metadata.get('eligibility')),
-                    scoring=_parse_scoring(repo_name, metadata.get('scoring')),
-                    maintainer_cut=_coerce_share(repo_name, 'maintainer_cut', metadata.get('maintainer_cut', 0.0)),
-                )
-                normalized_data[repo_name.lower()] = config
-            except RepositoryRegistryError:
-                raise
-            except (KeyError, ValueError, TypeError) as e:
-                raise ValueError(f'Could not parse config for {repo_name}: {e}') from e
-
-        _validate_emission_shares(normalized_data)
-        _validate_eligibility_configs(normalized_data)
-        _validate_scoring_configs(normalized_data)
-
+        normalized_data = parse_master_repositories(data)
         bt.logging.debug(f'Successfully loaded {len(normalized_data)} repository entries from {weights_file}')
         return normalized_data
 

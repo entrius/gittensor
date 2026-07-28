@@ -41,7 +41,8 @@ async def forward(self: 'Validator') -> None:
 
     Emission blending:
     - Combined scoring pool: 90%, allocated by repository emission_share
-      (validator-voted consensus aggregate when active, baked-in weights otherwise)
+      (on-chain registry + validator-voted consensus aggregate when active,
+      baked-in weights otherwise)
     - Maintainer cut:        per-repo carve-out routed to maintainer miner neurons
     - Issue treasury:       10%, flat to UID 111
     - Recycle:              registry slack and inactive repo slices to UID 0

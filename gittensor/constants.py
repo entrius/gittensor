@@ -152,7 +152,7 @@ RECYCLE_UID = 0
 
 # Combined scoring pool distributed by repository emission_share, then by per-repo PR/issue split.
 OSS_EMISSION_SHARE = 0.90
-DEFAULT_ISSUE_DISCOVERY_SHARE = 0.5
+DEFAULT_ISSUE_DISCOVERY_SHARE = 0.0
 EMISSION_SHARE_TOLERANCE = 1e-9
 
 # =============================================================================

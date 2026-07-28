@@ -552,9 +552,10 @@ class TestRepositoryEmissionShare:
         config = RepositoryConfig(emission_share=emission_share)
         assert config.emission_share == emission_share
 
-    def test_issue_discovery_share_defaults_even_split(self):
+    def test_issue_discovery_share_defaults_zero(self):
+        # Novel/unset repos score PRs only — 17/18 live repos use 0.0.
         config = RepositoryConfig(emission_share=0.2)
-        assert config.issue_discovery_share == pytest.approx(0.5)
+        assert config.issue_discovery_share == pytest.approx(0.0)
 
     def test_loader_parses_issue_discovery_share(self, tmp_path, monkeypatch):
         from gittensor.validator.utils import load_weights as lw

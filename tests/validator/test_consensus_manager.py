@@ -140,9 +140,21 @@ class TestConsensusManager:
         assert seen['result'].voter_count == 2
 
 
+class FakeRegistryLoader:
+    """Serves a canned contract registry; records load calls."""
+
+    def __init__(self, registry):
+        self.registry = registry
+        self.calls = []
+
+    def load(self, snapshot):
+        self.calls.append(snapshot)
+        return self.registry
+
+
 class TestRunWeightConsensus:
-    def _validator(self, tmp_path, backend):
-        manager = ConsensusManager(backend=backend, cache_dir=tmp_path)
+    def _validator(self, tmp_path, backend, registry_loader=None):
+        manager = ConsensusManager(backend=backend, cache_dir=tmp_path, registry_loader=registry_loader)
         return SimpleNamespace(
             config=SimpleNamespace(
                 netuid=74,
@@ -179,3 +191,34 @@ class TestRunWeightConsensus:
         validator = self._validator(tmp_path, FakeBackend(_voters()))
         validator.consensus_manager = None
         assert run_weight_consensus(validator, master) is master
+
+    def test_contract_registry_replaces_baked_when_aggregate_active(self, tmp_path):
+        loader = FakeRegistryLoader(
+            {
+                'a/b': RepositoryConfig(emission_share=0.0, maintainer_cut=0.2),
+                'c/d': RepositoryConfig(emission_share=0.0),
+            }
+        )
+        baked = {'a/b': RepositoryConfig(emission_share=0.9), 'x/y': RepositoryConfig(emission_share=0.1)}
+        result = run_weight_consensus(self._validator(tmp_path, FakeBackend(_voters()), loader), baked)
+        assert loader.calls == [INTERVAL]  # single registry load, at the snapshot block
+        assert result['a/b'].emission_share == 0.75
+        assert result['a/b'].maintainer_cut == 0.2  # contract config kept
+        assert result['c/d'].emission_share == 0.25
+        assert 'x/y' not in result  # baked-only repo dropped with the baked registry
+
+    def test_no_aggregate_returns_baked_without_registry_load(self, tmp_path):
+        gate_fails = [('hk1', 3 * STAKE, True, None), ('hk2', STAKE, True, {'a/b': 65535})]
+        loader = FakeRegistryLoader({'a/b': RepositoryConfig(emission_share=0.0)})
+        baked = {'a/b': RepositoryConfig(emission_share=1.0)}
+        validator = self._validator(tmp_path, FakeBackend(gate_fails), loader)
+        assert run_weight_consensus(validator, baked) is baked
+        assert loader.calls == []
+
+    def test_registry_unavailable_overlays_aggregate_on_baked(self, tmp_path):
+        loader = FakeRegistryLoader(None)
+        baked = {'a/b': RepositoryConfig(emission_share=0.9), 'x/y': RepositoryConfig(emission_share=0.1)}
+        result = run_weight_consensus(self._validator(tmp_path, FakeBackend(_voters()), loader), baked)
+        assert loader.calls == [INTERVAL]
+        assert result['a/b'].emission_share == 0.75
+        assert result['x/y'].emission_share == 0.0  # baked repos kept, share zeroed

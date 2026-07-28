@@ -38,6 +38,7 @@ from gittensor.validator.pat_handler import (
     priority_pat_check,
 )
 from gittensor.validator.repo_registry.contract_client import RepoRegistryContractClient
+from gittensor.validator.repo_registry.loader import RegistryLoader
 from gittensor.validator.utils.config import (
     CONSENSUS_MIN_VALIDATOR_STAKE_RAO,
     REPO_REGISTRY_CONTRACT_ADDRESS,
@@ -121,10 +122,12 @@ class Validator(BaseValidatorNeuron):
         try:
             client = RepoRegistryContractClient(REPO_REGISTRY_CONTRACT_ADDRESS, self.subtensor)
             backend = ContractBackend(client, self.subtensor, self.wallet, self.config.netuid)
+            cache_dir = Path(self.config.neuron.full_path)
             return ConsensusManager(
                 backend=backend,
-                cache_dir=Path(self.config.neuron.full_path),
+                cache_dir=cache_dir,
                 store_hook=self._store_weight_consensus if self.db_storage else None,
+                registry_loader=RegistryLoader(client, cache_dir),
             )
         except Exception as e:
             bt.logging.warning(f'weight_consensus: backend init failed ({e}); using baked-in weights')

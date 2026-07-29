@@ -291,7 +291,7 @@
     "eligibility": {
       "min_credibility": 0.5
     },
-    "maintainer_cut": 0.66,
+    "maintainer_cut": 0.5,
     "scoring": {
       "pr_lookback_days": 5,
       "open_pr_collateral_percent": 0.2,

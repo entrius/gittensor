@@ -12,6 +12,7 @@ from gittensor.constants import (
     EMISSION_SHARE_TOLERANCE,
     EXCESSIVE_PR_PENALTY_BASE_THRESHOLD,
     MAINTAINER_ISSUE_MULTIPLIER,
+    MAX_MAINTAINER_CUT,
     MAX_OPEN_ISSUE_THRESHOLD,
     MAX_OPEN_PR_THRESHOLD,
     MIN_CREDIBILITY,
@@ -159,9 +160,10 @@ class RepositoryConfig:
             ``resolve_eligibility``.
         scoring: Per-repo overrides for the scoring knobs. Unset fields fall
             back to the global default constants — see ``resolve_scoring``.
-        maintainer_cut: Fraction [0.0, 1.0] of this repo's emission slice
-            routed directly to its maintainer miner neurons, split evenly,
-            before normal scoring. Defaults to 0.0 (no carve-out).
+        maintainer_cut: Fraction [0.0, MAX_MAINTAINER_CUT] of this repo's
+            emission slice routed directly to its maintainer miner neurons,
+            split evenly, before normal scoring. Clamped to the ceiling at
+            load time. Defaults to 0.0 (no carve-out).
 
     """
 
@@ -556,7 +558,10 @@ def load_master_repo_weights() -> Dict[str, RepositoryConfig]:
                     fixed_base_score=metadata.get('fixed_base_score'),
                     eligibility=_parse_eligibility(repo_name, metadata.get('eligibility')),
                     scoring=_parse_scoring(repo_name, metadata.get('scoring')),
-                    maintainer_cut=_coerce_share(repo_name, 'maintainer_cut', metadata.get('maintainer_cut', 0.0)),
+                    maintainer_cut=min(
+                        MAX_MAINTAINER_CUT,
+                        _coerce_share(repo_name, 'maintainer_cut', metadata.get('maintainer_cut', 0.0)),
+                    ),
                 )
                 normalized_data[repo_name.lower()] = config
             except RepositoryRegistryError:

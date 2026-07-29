@@ -12,6 +12,7 @@ import json
 
 import pytest
 
+from gittensor.constants import MAX_MAINTAINER_CUT
 from gittensor.validator.utils.load_weights import (
     LanguageConfig,
     RepoEligibilityConfig,
@@ -533,12 +534,26 @@ class TestRepositoryConfigMaintainerCut:
         assert repos['foo/with-cut'].maintainer_cut == pytest.approx(0.3)
         assert repos['foo/defaults'].maintainer_cut == pytest.approx(0.0)
 
+    def test_loader_clamps_maintainer_cut_to_ceiling(self, tmp_path, monkeypatch):
+        from gittensor.validator.utils import load_weights as lw
+
+        (tmp_path / 'master_repositories.json').write_text(
+            json.dumps({'foo/greedy': {'emission_share': 0.5, 'maintainer_cut': 0.66}})
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: tmp_path)
+
+        repos = lw.load_master_repo_weights()
+
+        assert repos['foo/greedy'].maintainer_cut == pytest.approx(MAX_MAINTAINER_CUT)
+
     @pytest.mark.parametrize('repo_name,metadata', _live_master_repo_metadata())
     def test_live_maintainer_cut_is_in_range(self, repo_name, metadata):
         if 'maintainer_cut' not in metadata:
             return
 
-        assert 0.0 <= float(metadata['maintainer_cut']) <= 1.0, f'{repo_name} maintainer_cut must be within [0.0, 1.0]'
+        assert 0.0 <= float(metadata['maintainer_cut']) <= MAX_MAINTAINER_CUT, (
+            f'{repo_name} maintainer_cut must be within [0.0, {MAX_MAINTAINER_CUT}]'
+        )
 
 
 class TestRepositoryEmissionShare:
@@ -597,7 +612,6 @@ class TestRepositoryEmissionShare:
             {'emission_share': 0.5, 'issue_discovery_share': -0.01},
             {'emission_share': 0.5, 'issue_discovery_share': 1.01},
             {'emission_share': 0.5, 'maintainer_cut': -0.01},
-            {'emission_share': 0.5, 'maintainer_cut': 1.01},
         ],
     )
     def test_loader_rejects_out_of_range_values(self, tmp_path, monkeypatch, metadata):

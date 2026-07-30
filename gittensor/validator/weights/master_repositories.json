@@ -139,7 +139,15 @@
       "dataset:REJECT": 0.0
     },
     "maintainer_cut": 0.5,
-    "trusted_label_pipeline": true
+    "trusted_label_pipeline": true,
+    "scoring": {
+      "time_decay": {
+        "grace_period_hours": 4,
+        "sigmoid_midpoint_days": 3.33,
+        "sigmoid_steepness": 1.2,
+        "min_multiplier": 0.05
+      }
+    }
   },
   "gittensor-vanguard/vanguarstew": {
     "emission_share": 0.058588,

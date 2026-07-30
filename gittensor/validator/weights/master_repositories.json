@@ -327,7 +327,7 @@
   },
   "vouchdev/vouch": {
     "emission_share": 0.011481,
-    "issue_discovery_share": 0.0,
+    "issue_discovery_share": 0.3,
     "label_multipliers": {
       "feature": 1.5,
       "bug": 1.1

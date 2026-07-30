@@ -333,6 +333,11 @@
       "feature": 1.5,
       "bug": 1.1
     },
+    "eligibility": {
+      "min_valid_merged_prs": 1,
+      "min_credibility": 0.0,
+      "max_open_pr_threshold": 5
+    },
     "scoring": {
       "pr_lookback_days": 30,
       "open_pr_collateral_percent": 0.1,
@@ -344,9 +349,6 @@
         "sigmoid_midpoint_days": 14,
         "min_multiplier": 0.1
       }
-    },
-    "eligibility": {
-      "excessive_pr_penalty_base_threshold": 3
     },
     "additional_acceptable_branches": ["test"],
     "maintainer_cut": 0.5

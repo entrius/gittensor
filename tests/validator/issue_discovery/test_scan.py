@@ -1919,3 +1919,43 @@ class TestLabelPolicyIssueDiscovery:
         assert ev_unlabeled.issue_discovery_score > 0.0
         assert ev_labeled.issue_discovery_score < ev_unlabeled.issue_discovery_score
         assert all(i.discovery_label_multiplier == pytest.approx(0.25) for i in ev_labeled.issue_discovery_issues)
+
+
+class TestFinalizeStaleRepoReset:
+    """A repo issue-scored in a prior round but absent this round must be zeroed by
+    the scoring path, not summed into the round totals — parity with the full reset
+    in _clear_issue_discovery_fields. See #1610."""
+
+    def test_repo_absent_this_round_is_zeroed_not_summed(self):
+        ev = _eval(uid=1, github_id='999')
+        # stale per-repo issue values carried over from a prior round (e.g. a
+        # cache-restored evaluation after an OSS fetch failure).
+        ev.repo_evaluations['owner/repo-a'] = RepoEvaluation(
+            repository_full_name='owner/repo-a',
+            total_solved_issues=7,
+            total_valid_solved_issues=7,
+            total_closed_issues=1,
+            total_open_issues=4,
+            issue_discovery_score=8.12,
+            issue_token_score=700.0,
+            is_issue_eligible=True,
+            issue_credibility=1.0,
+        )
+        # this round scored no repos: repo-a is absent from repo_acc / open_counts.
+        scan_module._finalize_repo_issue_scores(ev, {}, {}, _mirror_repos('owner/repo-a'))
+
+        a = ev.repo_evaluations['owner/repo-a']
+        assert a.total_solved_issues == 0
+        assert a.total_valid_solved_issues == 0
+        assert a.total_closed_issues == 0
+        assert a.total_open_issues == 0
+        assert a.issue_discovery_score == 0.0
+        assert a.issue_token_score == 0.0
+        assert a.is_issue_eligible is False
+        assert a.issue_credibility == 0.0
+        # round-level roll-up reflects only this round (nothing), not the stale 7 / 8.12.
+        assert ev.total_solved_issues == 0
+        assert ev.total_valid_solved_issues == 0
+        assert ev.issue_discovery_score == 0.0
+        assert ev.issue_token_score == 0.0
+        assert ev.is_issue_eligible is False

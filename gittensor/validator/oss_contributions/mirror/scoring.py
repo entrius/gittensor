@@ -133,6 +133,13 @@ async def score_pr(
     has_fixed_base = repo_config.fixed_base_score is not None
     scoring_cfg = resolve_scoring(repo_config.scoring)
 
+    # Repo attribution for a merged PR must not depend on this round's mirror
+    # file-fetch outcome (pending backfill, transient fetch error, empty diff) —
+    # those are normal transient states, not a property of the PR itself. Set
+    # this before any early return below. See #1616.
+    if pr.state == 'MERGED':
+        eval_.unique_repos_contributed_to.add(pr.repo_full_name)
+
     # Mirror signals it has no stored files for this PR (pending backfill, in-flight
     # file job, etc.) — skip the round trip unless the repo explicitly supplies
     # a fixed base score.
@@ -182,10 +189,8 @@ async def score_pr(
 
     _calculate_pr_multipliers(scored, repo_config, scoring_cfg)
 
-    if pr.state == 'MERGED':
-        eval_.unique_repos_contributed_to.add(pr.repo_full_name)
-        # Token totals are aggregated later in finalize_miner_scores; this
-        # function only sets per-PR state.
+    # Token totals are aggregated later in finalize_miner_scores; this
+    # function only sets per-PR state.
 
 
 # ============================================================================

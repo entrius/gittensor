@@ -137,10 +137,14 @@ class TestLoadMasterRepositories:
             )
 
     def test_entrius_repos_have_trusted_label_pipeline(self):
-        """All entrius/* entries opt into trusted_label_pipeline (issue #911)."""
+        """Any entrius/* entry opts into trusted_label_pipeline (issue #911).
+
+        The registry can hold no entrius/* entries at all, as it does while
+        emissions point at a single competition repo, so this checks the
+        property of those entries rather than their presence.
+        """
         repos = load_master_repo_weights()
         entrius_repos = {name: cfg for name, cfg in repos.items() if name.startswith('entrius/')}
-        assert entrius_repos, 'expected entrius/* entries in master_repositories.json'
         for repo_name, config in entrius_repos.items():
             assert config.trusted_label_pipeline is True, (
                 f'{repo_name} must have trusted_label_pipeline=true so the agentic-maintainer '

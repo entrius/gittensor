@@ -12,6 +12,7 @@ import json
 
 import pytest
 
+from gittensor.constants import MAX_MAINTAINER_CUT
 from gittensor.validator.utils.load_weights import (
     LanguageConfig,
     RepoEligibilityConfig,
@@ -136,10 +137,14 @@ class TestLoadMasterRepositories:
             )
 
     def test_entrius_repos_have_trusted_label_pipeline(self):
-        """All entrius/* entries opt into trusted_label_pipeline (issue #911)."""
+        """Any entrius/* entry opts into trusted_label_pipeline (issue #911).
+
+        The registry can hold no entrius/* entries at all, as it does while
+        emissions point at a single competition repo, so this checks the
+        property of those entries rather than their presence.
+        """
         repos = load_master_repo_weights()
         entrius_repos = {name: cfg for name, cfg in repos.items() if name.startswith('entrius/')}
-        assert entrius_repos, 'expected entrius/* entries in master_repositories.json'
         for repo_name, config in entrius_repos.items():
             assert config.trusted_label_pipeline is True, (
                 f'{repo_name} must have trusted_label_pipeline=true so the agentic-maintainer '
@@ -533,12 +538,26 @@ class TestRepositoryConfigMaintainerCut:
         assert repos['foo/with-cut'].maintainer_cut == pytest.approx(0.3)
         assert repos['foo/defaults'].maintainer_cut == pytest.approx(0.0)
 
+    def test_loader_clamps_maintainer_cut_to_ceiling(self, tmp_path, monkeypatch):
+        from gittensor.validator.utils import load_weights as lw
+
+        (tmp_path / 'master_repositories.json').write_text(
+            json.dumps({'foo/greedy': {'emission_share': 0.5, 'maintainer_cut': 0.66}})
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: tmp_path)
+
+        repos = lw.load_master_repo_weights()
+
+        assert repos['foo/greedy'].maintainer_cut == pytest.approx(MAX_MAINTAINER_CUT)
+
     @pytest.mark.parametrize('repo_name,metadata', _live_master_repo_metadata())
     def test_live_maintainer_cut_is_in_range(self, repo_name, metadata):
         if 'maintainer_cut' not in metadata:
             return
 
-        assert 0.0 <= float(metadata['maintainer_cut']) <= 1.0, f'{repo_name} maintainer_cut must be within [0.0, 1.0]'
+        assert 0.0 <= float(metadata['maintainer_cut']) <= MAX_MAINTAINER_CUT, (
+            f'{repo_name} maintainer_cut must be within [0.0, {MAX_MAINTAINER_CUT}]'
+        )
 
 
 class TestRepositoryEmissionShare:
@@ -597,7 +616,6 @@ class TestRepositoryEmissionShare:
             {'emission_share': 0.5, 'issue_discovery_share': -0.01},
             {'emission_share': 0.5, 'issue_discovery_share': 1.01},
             {'emission_share': 0.5, 'maintainer_cut': -0.01},
-            {'emission_share': 0.5, 'maintainer_cut': 1.01},
         ],
     )
     def test_loader_rejects_out_of_range_values(self, tmp_path, monkeypatch, metadata):

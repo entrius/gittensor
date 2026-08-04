@@ -13,8 +13,10 @@ WANDB_VALIDATOR_NAME = os.getenv('WANDB_VALIDATOR_NAME', 'vali')
 
 # optional env vars
 STORE_DB_RESULTS = os.getenv('STORE_DB_RESULTS', 'false').lower() == 'true'
+SERVING_ENABLED = os.getenv('SERVING_ENABLED', 'false').lower() == 'true'
 
 # log values
 bt.logging.info(f'VALIDATOR_WAIT: {VALIDATOR_WAIT}')
 bt.logging.info(f'VALIDATOR_STEPS_INTERVAL: {VALIDATOR_STEPS_INTERVAL}')
 bt.logging.info(f'WANDB_PROJECT: {WANDB_PROJECT}')
+bt.logging.info(f'SERVING_ENABLED: {SERVING_ENABLED}')

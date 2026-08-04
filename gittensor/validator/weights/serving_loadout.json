@@ -1,0 +1,7 @@
+{
+  "model_id": "echo-v0",
+  "backend": "echo",
+  "max_tokens": 64,
+  "base_url": null,
+  "runtime_pin": "sparkinfer@unpinned-beta"
+}

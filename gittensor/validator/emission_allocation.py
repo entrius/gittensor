@@ -15,6 +15,7 @@ from gittensor.constants import (
     ISSUES_TREASURY_UID,
     OSS_EMISSION_SHARE,
     RECYCLE_UID,
+    SERVING_EMISSION_SHARE,
 )
 from gittensor.validator.utils.load_weights import RepositoryConfig
 
@@ -24,6 +25,7 @@ def blend_emission_pools(
     master_repositories: Dict[str, RepositoryConfig],
     miner_uids: set[int],
     maintainer_uids_by_repo: Optional[Dict[str, list[int]]] = None,
+    serving_scores: Optional[Dict[int, float]] = None,
 ) -> np.ndarray:
     """Allocate the combined scoring pool by bounded repository emission_share.
 
@@ -37,6 +39,10 @@ def blend_emission_pools(
     registered maintainer miners for it, ``maintainer_cut`` of that repo's slice
     is carved off the top and split evenly among those maintainers; the
     remainder scores normally. Repos with no listed maintainers are unaffected.
+
+    ``serving_scores`` distributes the ``SERVING_EMISSION_SHARE`` pool pro-rata
+    to serving miners; the pool recycles when no miner scored. At the current
+    share of 0.0 this is shadow mode and pays nothing.
     """
     sorted_uids = sorted(miner_uids)
     uid_index = {uid: idx for idx, uid in enumerate(sorted_uids)}
@@ -55,6 +61,18 @@ def blend_emission_pools(
             rewards[uid_index[uid]] += reward
         for uid, reward in allocation.issue_discovery_rewards.items():
             rewards[uid_index[uid]] += reward
+
+    # Serving pool (sub-subnet B beta): pro-rata by serving score; unclaimed recycles.
+    if SERVING_EMISSION_SHARE > 0:
+        serving_rewards, serving_unallocated = _calculate_score_rewards(
+            serving_scores or {}, SERVING_EMISSION_SHARE, miner_uids
+        )
+        for uid, reward in serving_rewards.items():
+            rewards[uid_index[uid]] += reward
+        recycle_share += serving_unallocated
+        bt.logging.info(
+            f'Serving pool: {SERVING_EMISSION_SHARE * 100:.0f}% across {len(serving_rewards)} serving miners'
+        )
 
     # Issue treasury (10% flat to UID 111)
     if ISSUES_TREASURY_UID > 0 and ISSUES_TREASURY_UID in miner_uids:

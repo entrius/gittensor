@@ -33,6 +33,26 @@ class PatBroadcastSynapse(bt.Synapse):
     __str__ = __repr__
 
 
+class InferenceSynapse(bt.Synapse):
+    """Validator-initiated inference challenge for serving miners (sub-subnet B beta).
+
+    The validator sets the request fields; the serving miner runs its pinned
+    backend and fills the response fields. With a deterministic backend the
+    validator knows the exact expected completion, so correctness is a string
+    match and latency comes from dendrite process time.
+    """
+
+    # Validator request
+    prompt: str
+    model_id: str
+    max_tokens: int = 64
+
+    # Miner response
+    completion: Optional[str] = None
+    served_model_id: Optional[str] = None
+    generation_ms: Optional[float] = None
+
+
 class PatCheckSynapse(bt.Synapse):
     """Probe for miners to check if a validator has their PAT stored and valid.
 

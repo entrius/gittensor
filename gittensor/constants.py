@@ -158,6 +158,18 @@ EMISSION_SHARE_TOLERANCE = 1e-9
 MAX_MAINTAINER_CUT = 0.5  # maintaining is only half of the problem to software, at maximum
 
 # =============================================================================
+# Serving (sub-subnet B beta)
+# =============================================================================
+# Share of emissions paid to inference-serving miners, pro-rata by serving score.
+# 0.0 = shadow mode: scores are computed and logged but nothing is paid. When
+# raising above 0, shrink OSS_EMISSION_SHARE so all pools still sum to 1.0.
+SERVING_EMISSION_SHARE = 0.0
+SERVING_CHALLENGES_PER_ROUND = 4  # golden-output challenges sent to each serving miner per scoring round
+SERVING_CHALLENGE_TIMEOUT = 12.0  # seconds before a challenge counts as failed
+SERVING_LATENCY_FULL_CREDIT_MS = 1_500.0  # responses at or under this latency earn full latency credit
+SERVING_LATENCY_ZERO_CREDIT_MS = 8_000.0  # credit falls linearly to zero at this latency
+
+# =============================================================================
 # Spam & Gaming Mitigation
 # =============================================================================
 MAINTAINER_ASSOCIATIONS = ['OWNER', 'MEMBER', 'COLLABORATOR']

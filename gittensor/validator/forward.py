@@ -12,7 +12,9 @@ from gittensor.utils.uids import get_all_uids
 from gittensor.validator.emission_allocation import blend_emission_pools
 from gittensor.validator.issue_discovery.scan import run_issue_discovery
 from gittensor.validator.oss_contributions.reward import get_rewards
+from gittensor.validator.serving.forward import serving_challenges
 from gittensor.validator.utils.config import (
+    SERVING_ENABLED,
     VALIDATOR_STEPS_INTERVAL,
     VALIDATOR_WAIT,
 )
@@ -34,13 +36,15 @@ async def forward(self: 'Validator') -> None:
     1. Score OSS contributions (mirror PR scoring)
     2. Score issue discovery
     3. Run issue bounties verification
-    4. Store all evaluations to DB
-    5. Blend emission pools and update scores
+    4. Run serving challenges (SERVING_ENABLED only; shadow mode at 0% share)
+    5. Store all evaluations to DB
+    6. Blend emission pools and update scores
 
     Emission blending:
     - Combined scoring pool: 90%, allocated by repository emission_share
     - Maintainer cut:        per-repo carve-out routed to maintainer miner neurons
     - Issue treasury:       10%, flat to UID 111
+    - Serving pool:          SERVING_EMISSION_SHARE (0% shadow-mode beta) by serving score
     - Recycle:              registry slack and inactive repo slices to UID 0
     """
 
@@ -67,12 +71,19 @@ async def forward(self: 'Validator') -> None:
         # cached UIDs now have fresh issue-discovery fields — persist them
         cached_uids.clear()
 
+        # 3. Serving challenges (sub-subnet B beta; scores are telemetry until SERVING_EMISSION_SHARE > 0)
+        serving_scores: Dict[int, float] = {}
+        if SERVING_ENABLED:
+            serving_scores = await serving_challenges(self, miner_uids)
+
         # 4. Store all evaluations to DB (includes issue discovery fields)
         await self.bulk_store_evaluation(miner_evaluations, master_repositories, skip_uids=cached_uids)
 
-        # 5. Allocate repo-bounded emission shares into final rewards
+        # 6. Allocate repo-bounded emission shares into final rewards
         maintainer_uids_by_repo = build_maintainer_uids_by_repo(miner_evaluations, master_repositories, miner_uids)
-        rewards = blend_emission_pools(miner_evaluations, master_repositories, miner_uids, maintainer_uids_by_repo)
+        rewards = blend_emission_pools(
+            miner_evaluations, master_repositories, miner_uids, maintainer_uids_by_repo, serving_scores
+        )
 
         self.update_scores(rewards, miner_uids, blacklisted_uids=sorted(penalized_uids))
 

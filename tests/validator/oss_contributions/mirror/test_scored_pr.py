@@ -74,6 +74,7 @@ class TestComposition:
         assert scored.earned_score == 0.0
         assert scored.token_score == 0.0
         assert scored.files is None
+        assert scored.oss_scored is False
 
 
 class TestCalculateFinalEarnedScore:

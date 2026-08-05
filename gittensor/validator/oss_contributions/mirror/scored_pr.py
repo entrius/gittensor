@@ -50,6 +50,10 @@ class ScoredPR:
     # Files fetched lazily via MirrorClient.get_pr_files for eligible PRs
     files: Optional[List[MirrorFile]] = None
 
+    # True only after ``score_pr`` finishes multipliers (not early-return).
+    # Distinguishes genuine token_score=0 from unscored defaults still in merged_prs.
+    oss_scored: bool = False
+
     @property
     def number(self) -> int:
         """Alias for ``self.pr.pr_number`` — matches the ``PullRequest`` field

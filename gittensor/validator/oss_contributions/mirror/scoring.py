@@ -181,6 +181,7 @@ async def score_pr(
         scored.base_score = repo_config.fixed_base_score
 
     _calculate_pr_multipliers(scored, repo_config, scoring_cfg)
+    scored.oss_scored = True
 
     if pr.state == 'MERGED':
         eval_.unique_repos_contributed_to.add(pr.repo_full_name)

@@ -362,6 +362,7 @@ class TestScoringDataStoredGate:
         client.get_pr_files.assert_not_called()
         assert scored.files is None
         assert scored.base_score == 0.0
+        assert scored.oss_scored is False
 
     def test_fixed_base_score_scores_without_stored_files(self):
         scored = ScoredPR(pr=_pr())
@@ -381,6 +382,7 @@ class TestScoringDataStoredGate:
 
         client.get_pr_files.assert_not_called()
         assert scored.base_score == pytest.approx(7.5)
+        assert scored.oss_scored is True
 
 
 class TestFixedBaseScore:

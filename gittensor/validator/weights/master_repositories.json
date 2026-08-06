@@ -1,5 +1,5 @@
 {
-  "gittensor-ai-lab/sparkinfer-k3": {
+  "gittensor-ai-lab/sparkinfer": {
     "default_label_multiplier": 0.0,
     "eligibility": {
       "min_credibility": 0.2,
@@ -7,7 +7,7 @@
       "min_valid_merged_prs": 0,
       "min_valid_solved_issues": 0
     },
-    "emission_share": 1.0,
+    "emission_share": 0.3,
     "fixed_base_score": 1.0,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
@@ -21,14 +21,6 @@
       "eval:REJECT": 0.0
     },
     "maintainer_cut": 0.4,
-    "trusted_label_pipeline": true,
-    "scoring": {
-      "time_decay": {
-        "grace_period_hours": 4,
-        "sigmoid_midpoint_days": 3.33,
-        "sigmoid_steepness": 1.2,
-        "min_multiplier": 0.05
-      }
-    }
+    "trusted_label_pipeline": true
   }
 }

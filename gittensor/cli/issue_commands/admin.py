@@ -153,7 +153,7 @@ def admin_payout(
         with err_console.status('[bold cyan]Submitting payout...', spinner='dots'):
             result = client.payout_bounty(issue_id, wallet)
 
-        if result:
+        if result is not None:
             print_success(f'Payout successful! Amount: {format_alpha(result, 4)} ALPHA')
         else:
             print_error('Payout failed.')

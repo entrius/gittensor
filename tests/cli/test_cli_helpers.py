@@ -12,7 +12,7 @@ validation (no live network).
 import json
 from decimal import Decimal
 from typing import Any, Dict, Optional
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import click
 import pytest
@@ -741,6 +741,69 @@ class TestCliAdminValidation:
             )
         assert result.exit_code != 0
         assert 'between' in result.output or '1' in result.output
+
+
+class TestCliAdminPayoutResult:
+    """Ensure admin payout-issue maps payout_bounty's return to the right outcome.
+
+    payout_bounty returns Optional[int]: a non-None int on success (0 when the
+    pre-submit get_issue read was unavailable, so the amount is unknown) and
+    None only on failure. Only None may take the failure branch.
+    """
+
+    @staticmethod
+    def _invoke_payout(cli_root, runner, payout_return):
+        from gittensor.validator.issue_competitions.contract_client import ContractIssue, IssueStatus
+
+        issue = ContractIssue(
+            id=3,
+            github_url_hash=b'\x00' * 32,
+            repository_full_name='entrius/gittensor',
+            issue_number=42,
+            bounty_amount=0,
+            target_bounty=100 * ALPHA_RAW_UNIT,
+            status=IssueStatus.COMPLETED,
+            registered_at_block=1,
+            is_fully_funded=True,
+        )
+        client = MagicMock()
+        client.get_issue.return_value = issue
+        client.payout_bounty.return_value = payout_return
+        with (
+            patch(
+                'gittensor.cli.issue_commands.admin._resolve_contract_and_network',
+                return_value=(
+                    '0x1234567890123456789012345678901234567890',
+                    'wss://entrypoint-finney.opentensor.ai:443',
+                    'finney',
+                ),
+            ),
+            patch(
+                'gittensor.cli.issue_commands.admin._make_contract_client',
+                return_value=(MagicMock(), client),
+            ),
+        ):
+            return runner.invoke(
+                cli_root,
+                ['admin', 'payout-issue', '3', '--yes'],
+                catch_exceptions=False,
+            )
+
+    def test_positive_amount_reports_success(self, cli_root, runner):
+        result = self._invoke_payout(cli_root, runner, 5 * ALPHA_RAW_UNIT)
+        assert result.exit_code == 0
+        assert 'Payout successful' in result.output
+
+    def test_zero_amount_is_success_not_failure(self, cli_root, runner):
+        result = self._invoke_payout(cli_root, runner, 0)
+        assert result.exit_code == 0
+        assert 'Payout successful' in result.output
+        assert 'Payout failed' not in result.output
+
+    def test_none_reports_failure(self, cli_root, runner):
+        result = self._invoke_payout(cli_root, runner, None)
+        assert result.exit_code != 0
+        assert 'Payout failed' in result.output
 
 
 class TestCliVoteCancelValidation:

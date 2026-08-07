@@ -260,9 +260,16 @@ def fetch_open_issue_pull_requests(
     Returns a (possibly empty) list of PRs, or ``None`` when the GitHub lookup
     fails. Callers must treat ``None`` as a failure (not "no submissions"); see
     ``find_prs_for_issue``.
+
+    A missing ``GITTENSOR_MINER_PAT`` skips the lookup entirely
+    (``find_prs_for_issue`` returns ``[]`` for a falsy token), so in JSON mode
+    it raises ``click.UsageError`` instead of letting the caller report success
+    with zero submissions. Human mode keeps the warn-and-continue behavior.
     """
     token = os.environ.get('GITTENSOR_MINER_PAT') or ''
-    if not token and not as_json:
+    if not token:
+        if as_json:
+            raise click.UsageError('No GitHub token found; set GITTENSOR_MINER_PAT to fetch GitHub issue submissions')
         print_warning('No GitHub token found; set GITTENSOR_MINER_PAT to fetch GitHub issue submissions')
 
     try:

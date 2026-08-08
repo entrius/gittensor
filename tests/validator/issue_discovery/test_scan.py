@@ -84,6 +84,8 @@ def _scored_mirror_pr(repo: str, pr_number: int, token_score: float = 100.0, bas
     scored = ScoredPR(pr=pr)
     scored.token_score = token_score
     scored.base_score = base_score
+    # Cache helpers represent PRs that finished OSS scoring (even at token_score=0).
+    scored.oss_scored = True
     return scored
 
 
@@ -961,6 +963,46 @@ class TestSolvingPrCache:
         cache = _build_solving_pr_cache({1: e1})
         assert ('foo/tiny', 1) in cache
         assert ('foo/healthy', 2) in cache
+
+    def test_unscored_oss_prs_excluded_from_cache(self):
+        # Regression for #1677: incomplete OSS early-returns leave defaults
+        # (token_score=0, oss_scored=False) and must not poison the cache.
+        incomplete = _scored_mirror_pr('foo/pending', 1, token_score=0.0, base_score=0.0)
+        incomplete.oss_scored = False
+        scored_zero = _scored_mirror_pr('foo/tiny', 2, token_score=0.0, base_score=0.0)
+        healthy = _scored_mirror_pr('foo/healthy', 3, token_score=50, base_score=10)
+
+        e1 = MinerEvaluation(uid=1, hotkey='hk1', github_id='g1')
+        e1.merged_prs = [incomplete, scored_zero, healthy]
+        cache = _build_solving_pr_cache({1: e1})
+
+        assert ('foo/pending', 1) not in cache
+        assert ('foo/tiny', 2) in cache
+        assert cache[('foo/tiny', 2)].token_score == 0.0
+        assert ('foo/healthy', 3) in cache
+
+    def test_unscored_oss_pr_remains_cache_miss_for_discovery(self):
+        # Incomplete merged_prs entry must not suppress get_pr_files on discovery.
+        client = Mock()
+        client.get_miner_issues.return_value = _response([_issue_dict()])
+        client.get_pr_files.return_value = _empty_files_response('entrius/gittensor-ui', 100)
+
+        eval_ = _eval()
+        incomplete = _scored_mirror_pr('entrius/gittensor-ui', 100, token_score=0.0, base_score=0.0)
+        incomplete.oss_scored = False
+        eval_.merged_prs = [incomplete]
+
+        _run(
+            run_issue_discovery(
+                {1: eval_},
+                _mirror_repos('entrius/gittensor-ui'),
+                _EMPTY_LANGS,
+                _EMPTY_TOKEN_CONFIG,
+                client=client,
+            )
+        )
+
+        client.get_pr_files.assert_called_once_with('entrius/gittensor-ui', 100)
 
     def test_cache_hit_reuses_base_score_no_fetch(self):
         """A solving PR already in cache must not trigger a get_pr_files call."""

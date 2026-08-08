@@ -399,13 +399,20 @@ def _build_solving_pr_cache(
 ) -> Dict[Tuple[str, int], CachedSolvingPR]:
     """Pre-populate the cross-miner cache from already-scored mirror PRs.
 
-    Any PR that was scored during OSS (in any miner's merged_prs) is
-    keyed by (repo, pr_number) → CachedSolvingPR. Issue-discovery lookups hit
-    this cache instead of re-fetching for miners' own PRs or other miners' PRs.
+    Any PR that completed OSS scoring (``ScoredPR.oss_scored``) in any miner's
+    ``merged_prs`` is keyed by (repo, pr_number) → CachedSolvingPR.
+    Issue-discovery lookups hit this cache instead of re-fetching for miners'
+    own PRs or other miners' PRs.
+
+    Incomplete OSS early-returns (mirror file data pending/failed) keep the
+    default ``oss_scored=False`` and must stay cache misses so
+    ``_resolve_solving_pr_score`` can still fetch files (#1677).
     """
     cache: Dict[Tuple[str, int], CachedSolvingPR] = {}
     for evaluation in miner_evaluations.values():
         for scored in evaluation.merged_prs:
+            if not scored.oss_scored:
+                continue
             key = (scored.pr.repo_full_name, scored.pr.pr_number)
             if key in cache:
                 continue  # first miner wins — values are the same PR's fields

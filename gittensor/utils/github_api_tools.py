@@ -509,6 +509,14 @@ def find_solver_from_closure_event(
 
     close_event = _select_current_close_event(issue_data)
     if close_event is None:
+        # Selection failure is unresolved attribution, not a proven "no solver".
+        # Returning (None, None) here would make bounty forward vote cancel (#1684).
+        if issue_data.get('closedAt'):
+            bt.logging.warning(
+                f'Could not select current close event for {repo}#{issue_number} '
+                f'(closedAt={issue_data.get("closedAt")}) — deferring solver lookup'
+            )
+            return None
         return None, None
 
     solver_github_id, pr_number = _solver_from_closed_event(f'{owner}/{name}', close_event)

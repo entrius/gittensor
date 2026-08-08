@@ -572,8 +572,8 @@ class TestFindSolverFromClosureEvent:
 
     @patch('gittensor.utils.github_api_tools.execute_graphql_query')
     @patch('gittensor.utils.github_api_tools.bt.logging')
-    def test_no_close_events_returns_none(self, mock_logging, mock_graphql):
-        """Empty timeline nodes returns (None, None)."""
+    def test_no_close_events_without_closed_at_returns_no_solver(self, mock_logging, mock_graphql):
+        """Empty timeline with no closedAt is treated as no attributable solver."""
         mock_graphql.return_value = _closure_graphql_response([])
 
         solver_id, pr_number = find_solver_from_closure_event('owner/repo', 12, 'fake_token')
@@ -599,18 +599,30 @@ class TestFindSolverFromClosureEvent:
 
     @patch('gittensor.utils.github_api_tools.execute_graphql_query')
     @patch('gittensor.utils.github_api_tools.bt.logging')
-    def test_non_completed_close_event_does_not_attribute_solver(self, mock_logging, mock_graphql):
-        """Non-completed close events never produce a bounty solver."""
+    def test_non_completed_close_event_defers_lookup(self, mock_logging, mock_graphql):
+        """Non-completed-only timelines with closedAt defer (lookup failed), not cancel."""
         mock_graphql.return_value = _closure_graphql_response(
             [
                 _closed_event_pr_node(number=14, user_id=42, state_reason='NOT_PLANNED'),
             ]
         )
 
-        solver_id, pr_number = find_solver_from_closure_event('owner/repo', 12, 'fake_token')
+        result = find_solver_from_closure_event('owner/repo', 12, 'fake_token')
 
-        assert solver_id is None
-        assert pr_number is None
+        assert result is None
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_unresolved_close_event_selection_returns_lookup_failure(self, mock_logging, mock_graphql):
+        """closedAt set but no selectable close event → bare None (retry), not (None, None)."""
+        mock_graphql.return_value = _closure_graphql_response(
+            [],
+            closed_at='2025-06-01T00:00:01Z',
+        )
+
+        result = find_solver_from_closure_event('owner/repo', 12, 'fake_token')
+
+        assert result is None
 
     @patch('gittensor.utils.github_api_tools.execute_graphql_query')
     @patch('gittensor.utils.github_api_tools.bt.logging')
@@ -671,11 +683,16 @@ class TestCheckGithubIssueClosed:
     @patch('gittensor.utils.github_api_tools.requests.get')
     @patch('gittensor.utils.github_api_tools.bt.logging')
     def test_closed_issue_with_no_solver_keeps_lookup_failed_false(self, mock_logging, mock_get, mock_graphql):
+        """Selected close event with non-PR closer is a definitive no-solver (cancel path)."""
         issue_response = Mock()
         issue_response.status_code = 200
         issue_response.json.return_value = {'state': 'closed', 'state_reason': 'completed'}
         mock_get.return_value = issue_response
-        mock_graphql.return_value = _graphql_response([])
+        mock_graphql.return_value = _closure_graphql_response(
+            [
+                _closed_event_non_pr_node('Commit'),
+            ]
+        )
 
         result = check_github_issue_closed('owner/repo', 12, 'fake_token')
 
@@ -684,6 +701,29 @@ class TestCheckGithubIssueClosed:
             'solver_github_id': None,
             'pr_number': None,
             'solver_lookup_failed': False,
+        }
+
+    @patch('gittensor.utils.github_api_tools.execute_graphql_query')
+    @patch('gittensor.utils.github_api_tools.requests.get')
+    @patch('gittensor.utils.github_api_tools.bt.logging')
+    def test_unresolved_close_event_selection_sets_solver_lookup_failed(self, mock_logging, mock_get, mock_graphql):
+        """closedAt present but no selectable close event must defer, not cancel (#1684)."""
+        issue_response = Mock()
+        issue_response.status_code = 200
+        issue_response.json.return_value = {'state': 'closed', 'state_reason': 'completed'}
+        mock_get.return_value = issue_response
+        mock_graphql.return_value = _closure_graphql_response(
+            [],
+            closed_at='2025-06-01T00:00:01Z',
+        )
+
+        result = check_github_issue_closed('owner/repo', 12, 'fake_token')
+
+        assert result == {
+            'is_closed': True,
+            'solver_github_id': None,
+            'pr_number': None,
+            'solver_lookup_failed': True,
         }
 
     @pytest.mark.parametrize(

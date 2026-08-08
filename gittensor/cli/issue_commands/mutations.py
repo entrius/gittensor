@@ -15,8 +15,8 @@ from rich.panel import Panel
 from .help import StyledCommand
 from .helpers import (
     NETWORK_CHOICE,
-    _is_interactive,
     _resolve_contract_and_network,
+    confirm_or_abort,
     console,
     err_console,
     format_alpha,
@@ -169,9 +169,7 @@ def issue_register(
         )
     )
 
-    skip_confirm = yes or not _is_interactive()
-    if not skip_confirm and not click.confirm('\nProceed with registration?', default=True):
-        err_console.print('[yellow]Registration cancelled.[/yellow]')
+    if not confirm_or_abort('Proceed with registration?', yes, default=True):
         return
 
     try:

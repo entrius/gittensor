@@ -239,11 +239,20 @@ def confirm_or_abort(prompt: str, yes: bool, default: bool = False) -> bool:
     """Prompt for confirmation before a destructive operation.
 
     Returns True if the caller should proceed. Returns False (and prints a
-    cancellation message) if the user declines. `yes` and non-TTY input both
-    skip the prompt and proceed.
+    cancellation message) if the user declines.
+
+    ``yes`` is the only way to skip the prompt. A non-interactive stdin exits
+    non-zero instead of self-confirming: these operations transfer ownership,
+    move bounty funds, and edit the validator whitelist irreversibly, so an
+    unattended run must fail closed. Scripts and CI opt in explicitly with
+    ``--yes``.
     """
-    if yes or not _is_interactive():
+    if yes:
         return True
+    if not _is_interactive():
+        print_error(f'Confirmation required: {prompt}')
+        err_console.print('[yellow]stdin is not interactive — re-run with --yes to confirm.[/yellow]')
+        raise SystemExit(1)
     if click.confirm(f'\n{prompt}', default=default):
         return True
     err_console.print('[yellow]Cancelled.[/yellow]')

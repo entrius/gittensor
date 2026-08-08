@@ -18,7 +18,15 @@ def get_default_label_multiplier(repo_config: Optional[RepositoryConfig]) -> flo
 
 
 def get_label_multiplier(label: str, repo_config: Optional[RepositoryConfig]) -> Optional[float]:
-    """Return the highest configured multiplier matching a label, or None."""
+    """Return the configured multiplier matching a label, or None if unmatched.
+
+    A configured multiplier of ``0.0`` is a veto: repos use it to mark rejection
+    / void labels (``eval:REJECT``, ``invalid-pr``, ``duplicate-pr``, ``slop``,
+    ``kata:invalid``, ...). So a label matching any ``0.0`` pattern resolves to
+    ``0.0`` even when it also matches a higher-valued pattern — the veto is not
+    overridden by a co-matching reward pattern. Among purely positive matches the
+    highest wins, preserving the "best classification" behavior.
+    """
     if repo_config is None or not repo_config.label_multipliers:
         return None
 
@@ -28,14 +36,25 @@ def get_label_multiplier(label: str, repo_config: Optional[RepositoryConfig]) ->
         for pattern, multiplier in repo_config.label_multipliers.items()
         if fnmatch(label_lower, pattern.lower())
     ]
-    return max(matches) if matches else None
+    if not matches:
+        return None
+    if any(multiplier == 0.0 for multiplier in matches):
+        return 0.0
+    return max(matches)
 
 
 def resolve_highest_label_multiplier(
     labels: Iterable[str],
     repo_config: Optional[RepositoryConfig],
 ) -> tuple[Optional[str], float]:
-    """Resolve the highest-multiplier label from unordered candidate labels."""
+    """Resolve the scoring multiplier from unordered candidate labels.
+
+    A label configured to ``0.0`` is a veto (rejection / void marker) and must
+    not be overridden by a co-applied higher-value label: if any candidate
+    resolves to ``0.0`` the result is ``0.0``. Otherwise the highest positive
+    multiplier wins. Ties (including ties among vetoes) break deterministically
+    by label name so the result is independent of mirror response ordering.
+    """
     default_multiplier = get_default_label_multiplier(repo_config)
     candidates = []
     for label in labels:
@@ -45,6 +64,10 @@ def resolve_highest_label_multiplier(
 
     if not candidates:
         return None, default_multiplier
+
+    vetoes = [candidate for candidate in candidates if candidate[1] == 0.0]
+    if vetoes:
+        return min(vetoes, key=lambda candidate: candidate[0])
 
     label, multiplier = max(candidates, key=lambda candidate: (candidate[1], candidate[0]))
     return label, multiplier

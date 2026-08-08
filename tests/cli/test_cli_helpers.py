@@ -27,6 +27,7 @@ from gittensor.cli.issue_commands.helpers import (
     STATUS_COLORS,
     colorize_status,
     format_alpha,
+    resolve_network,
     validate_bounty_amount,
     validate_github_issue,
     validate_repository,
@@ -34,6 +35,7 @@ from gittensor.cli.issue_commands.helpers import (
 )
 from gittensor.cli.issue_commands.vote import parse_pr_number
 from gittensor.cli.json_output import emit_json
+from gittensor.constants import NETWORK_MAP
 
 # =============================================================================
 # format_alpha
@@ -919,3 +921,37 @@ class TestEmitJson:
         captured = capsys.readouterr()
         parsed = json.loads(captured.out)
         assert parsed['field'] == str(value)
+
+
+class TestResolveNetwork:
+    """resolve_network config-file fallback, including a null `network` value.
+
+    A hand-edited or externally-written ~/.gittensor/config.json can carry
+    `"network": null`; `config.get('network', '')` returns None for that (the
+    key exists, so the default is unused) and must not crash every issue
+    command with `AttributeError: 'NoneType' object has no attribute 'lower'`.
+    """
+
+    def _resolve_with_config(self, config):
+        with patch('gittensor.cli.issue_commands.helpers.load_config', return_value=config):
+            return resolve_network()
+
+    def test_null_network_falls_back_to_default(self):
+        endpoint, name = self._resolve_with_config({'network': None})
+        assert endpoint == NETWORK_MAP['finney']
+        assert name == 'finney'
+
+    def test_null_network_with_ws_endpoint_uses_endpoint(self):
+        endpoint, name = self._resolve_with_config({'network': None, 'ws_endpoint': 'ws://localhost:9944'})
+        assert endpoint == 'ws://localhost:9944'
+        assert name == 'custom'
+
+    def test_recognized_config_network(self):
+        endpoint, name = self._resolve_with_config({'network': 'test'})
+        assert endpoint == NETWORK_MAP['test']
+        assert name == 'test'
+
+    def test_empty_config_falls_back_to_default(self):
+        endpoint, name = self._resolve_with_config({})
+        assert endpoint == NETWORK_MAP['finney']
+        assert name == 'finney'

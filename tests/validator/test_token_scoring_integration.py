@@ -259,6 +259,62 @@ const createUser = (id: number, name: string): User => ({
         print(f'  Leaf: -{breakdown.leaf_deleted_count} = {breakdown.leaf_score:.2f}')
         print(f'  Total: {breakdown.total_score:.2f}')
 
+    def test_removed_source_file_pipeline_scores_deletions(self, weights):
+        """Removed source files with old content should reach tree-diff deletion scoring."""
+        filename = 'src/deleted.py'
+        old_content = 'def foo():\n    return 1\n'
+        file_change = FileChange(
+            pr_number=1,
+            repository_full_name='test/repo',
+            filename=filename,
+            changes=2,
+            additions=0,
+            deletions=2,
+            status='removed',
+        )
+
+        result = calculate_token_score_from_file_changes(
+            [file_change],
+            {filename: FileContentPair(old_content=old_content, new_content=None)},
+            weights,
+            load_programming_language_weights(),
+        )
+
+        file_result = result.file_results[0]
+        assert file_result.scoring_method == 'tree-diff'
+        assert file_result.score > 0
+        assert file_result.nodes_scored > 0
+        assert file_result.breakdown is not None
+        assert file_result.breakdown.deleted_count > 0
+        assert file_result.breakdown.added_count == 0
+        assert result.total_score == pytest.approx(file_result.score)
+
+    def test_removed_source_file_pipeline_skips_missing_old_content(self, weights):
+        """Removed source files still skip when base content was unavailable."""
+        filename = 'src/deleted.py'
+        file_change = FileChange(
+            pr_number=1,
+            repository_full_name='test/repo',
+            filename=filename,
+            changes=2,
+            additions=0,
+            deletions=2,
+            status='removed',
+        )
+
+        result = calculate_token_score_from_file_changes(
+            [file_change],
+            {filename: FileContentPair(old_content=None, new_content=None)},
+            weights,
+            load_programming_language_weights(),
+        )
+
+        file_result = result.file_results[0]
+        assert file_result.scoring_method == 'skipped-binary'
+        assert file_result.score == 0.0
+        assert file_result.nodes_scored == 0
+        assert file_result.breakdown is None
+
     def test_unsupported_language_returns_empty(self, weights):
         """
         Test that unsupported file extensions return empty breakdown.

@@ -91,7 +91,7 @@ async def handle_pat_broadcast(validator: 'Validator', synapse: PatBroadcastSyna
 
         # 5. Store PAT (github_id guaranteed non-None after validate_github_credentials success)
         pat_storage.save_pat(uid=uid, hotkey=hotkey, pat=synapse.github_access_token, github_id=github_id or '0')
-    except (json.JSONDecodeError, OSError) as e:
+    except (json.JSONDecodeError, OSError, pat_storage.PatStoreFormatError) as e:
         return _reject(f'Validator PAT store temporarily unavailable; please retry. ({e})')
 
     # Clear PAT from response so it isn't echoed back
@@ -136,7 +136,7 @@ async def handle_pat_check(validator: 'Validator', synapse: PatCheckSynapse) -> 
     # mislead the miner into re-broadcasting against an unreadable store).
     try:
         entry = pat_storage.get_pat_by_uid(uid)
-    except (json.JSONDecodeError, OSError) as e:
+    except (json.JSONDecodeError, OSError, pat_storage.PatStoreFormatError) as e:
         synapse.has_pat = False
         synapse.pat_valid = None
         synapse.rejection_reason = 'Validator PAT store temporarily unavailable; please retry.'

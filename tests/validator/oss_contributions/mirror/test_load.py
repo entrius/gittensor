@@ -202,6 +202,24 @@ class TestMaintainerSkip:
 
         assert len(eval_.merged_prs) == 1
 
+    @pytest.mark.parametrize('dev_mode', ['0', 'false', 'off', 'no', '', ' '])
+    def test_dev_mode_disabled_values_keep_maintainer_skip(self, dev_mode, monkeypatch):
+        # An explicitly-disabled DEV_MODE must not bypass the filter on a
+        # production validator.
+        monkeypatch.setenv('DEV_MODE', dev_mode)
+        client = Mock()
+        client.get_miner_pulls.return_value = _build_response(
+            [
+                _pr_dict(1, author_association='OWNER'),
+                _pr_dict(2, author_association='CONTRIBUTOR'),
+            ]
+        )
+        eval_ = _eval()
+        load_miner_prs(eval_, _mirror_repos('entrius/gittensor-ui'), client=client)
+
+        assert len(eval_.merged_prs) == 1
+        assert eval_.merged_prs[0].pr.pr_number == 2
+
 
 # ============================================================================
 # Lookback window (sent to the mirror; windowing happens server-side)

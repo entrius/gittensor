@@ -509,7 +509,7 @@ def find_solver_from_closure_event(
 
     close_event = _select_current_close_event(issue_data)
     if close_event is None:
-        return None, None
+        return None  # lookup unresolved — retry later
 
     solver_github_id, pr_number = _solver_from_closed_event(f'{owner}/{name}', close_event)
     bt.logging.debug(

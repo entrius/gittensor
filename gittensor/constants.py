@@ -154,6 +154,7 @@ RECYCLE_UID = 0
 OSS_EMISSION_SHARE = 0.90
 DEFAULT_ISSUE_DISCOVERY_SHARE = 0.5
 EMISSION_SHARE_TOLERANCE = 1e-9
+MAX_MAINTAINER_CUT = 0.5  # maintaining is only half of the problem to software, at maximum
 
 # =============================================================================
 # Spam & Gaming Mitigation

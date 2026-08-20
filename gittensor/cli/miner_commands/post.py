@@ -12,7 +12,7 @@ import click
 import requests
 from rich.table import Table
 
-from gittensor.cli.issue_commands.helpers import NETWORK_CHOICE
+from gittensor.cli.helpers import NETWORK_CHOICE
 from gittensor.cli.miner_commands.helpers import (
     DEFAULT_MIN_VALIDATOR_STAKE,
     DEFAULT_MIN_VALIDATOR_VTRUST,

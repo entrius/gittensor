@@ -11,8 +11,6 @@ import numpy as np
 from gittensor.classes import MinerEvaluation, RepoEmissionAllocation
 from gittensor.constants import (
     EMISSION_SHARE_TOLERANCE,
-    ISSUES_TREASURY_EMISSION_SHARE,
-    ISSUES_TREASURY_UID,
     OSS_EMISSION_SHARE,
     RECYCLE_UID,
 )
@@ -55,15 +53,6 @@ def blend_emission_pools(
             rewards[uid_index[uid]] += reward
         for uid, reward in allocation.issue_discovery_rewards.items():
             rewards[uid_index[uid]] += reward
-
-    # Issue treasury (10% flat to UID 111)
-    if ISSUES_TREASURY_UID > 0 and ISSUES_TREASURY_UID in miner_uids:
-        treasury_idx = uid_index[ISSUES_TREASURY_UID]
-        rewards[treasury_idx] += ISSUES_TREASURY_EMISSION_SHARE
-        bt.logging.info(
-            f'Treasury allocation: UID {ISSUES_TREASURY_UID} receives '
-            f'{ISSUES_TREASURY_EMISSION_SHARE * 100:.0f}% of emissions'
-        )
 
     # Recycle receives registry slack and empty repo slices.
     if RECYCLE_UID in miner_uids:

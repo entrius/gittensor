@@ -6,7 +6,6 @@
 import sys
 import types
 
-import click
 import pytest
 from click.testing import CliRunner
 
@@ -79,17 +78,10 @@ def pytest_unconfigure(config):
 
 
 def _get_cli_root():
-    """Return root Click group with issue commands registered."""
-    try:
-        from gittensor.cli.main import cli
+    """Return the root Click group."""
+    from gittensor.cli.main import cli
 
-        return cli
-    except ImportError:
-        from gittensor.cli.issue_commands import register_commands
-
-        root = click.Group()
-        register_commands(root)
-        return root
+    return cli
 
 
 @pytest.fixture
@@ -100,57 +92,3 @@ def cli_root():
 @pytest.fixture
 def runner():
     return CliRunner()
-
-
-@pytest.fixture
-def sample_issue():
-    return {
-        'id': 42,
-        'repository_full_name': 'entrius/gittensor',
-        'issue_number': 223,
-        'status': 'Active',
-    }
-
-
-@pytest.fixture
-def sample_prs():
-    return [
-        {
-            'number': 101,
-            'title': 'Fix issue #223',
-            'author_login': 'alice',
-            'state': 'OPEN',
-            'created_at': '2026-02-01T10:00:00Z',
-            'merged_at': None,
-            'url': 'https://github.com/entrius/gittensor/pull/101',
-            'review_count': 1,
-            'closing_numbers': [223],
-        },
-        {
-            'number': 103,
-            'title': 'Alternative approach',
-            'author_login': 'bob',
-            'state': 'OPEN',
-            'created_at': '2026-02-02T11:00:00Z',
-            'merged_at': None,
-            'url': 'https://github.com/entrius/gittensor/pull/103',
-            'review_count': 0,
-            'closing_numbers': [],
-        },
-    ]
-
-
-@pytest.fixture
-def sample_prs_missing_closing():
-    return [
-        {
-            'number': 200,
-            'title': 'No closing refs',
-            'author_login': 'charlie',
-            'state': 'OPEN',
-            'created_at': '2026-02-03T12:00:00Z',
-            'merged_at': None,
-            'url': 'https://github.com/entrius/gittensor/pull/200',
-            'review_count': 0,
-        }
-    ]

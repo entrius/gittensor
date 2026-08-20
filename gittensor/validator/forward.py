@@ -10,7 +10,6 @@ from gittensor.classes import MinerEvaluation, MinerEvaluationCache
 from gittensor.utils.mirror.client import MirrorClient, MirrorRequestError
 from gittensor.utils.uids import get_all_uids
 from gittensor.validator.emission_allocation import blend_emission_pools
-from gittensor.validator.issue_competitions.forward import issue_competitions
 from gittensor.validator.issue_discovery.scan import run_issue_discovery
 from gittensor.validator.oss_contributions.reward import get_rewards
 from gittensor.validator.utils.config import (
@@ -67,9 +66,6 @@ async def forward(self: 'Validator') -> None:
 
         # cached UIDs now have fresh issue-discovery fields — persist them
         cached_uids.clear()
-
-        # 3. Issue bounties verification
-        await issue_competitions(self, miner_evaluations)
 
         # 4. Store all evaluations to DB (includes issue discovery fields)
         await self.bulk_store_evaluation(miner_evaluations, master_repositories, skip_uids=cached_uids)

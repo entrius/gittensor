@@ -15,8 +15,6 @@ import pytest
 
 from gittensor.classes import Issue, MinerEvaluation, RepoEvaluation
 from gittensor.constants import (
-    ISSUES_TREASURY_EMISSION_SHARE,
-    ISSUES_TREASURY_UID,
     OSS_EMISSION_SHARE,
     RECYCLE_UID,
 )
@@ -27,7 +25,7 @@ from gittensor.validator.utils.load_weights import RepositoryConfig, load_master
 
 
 def _uids(*extra: int) -> set[int]:
-    return set(extra) | {RECYCLE_UID, ISSUES_TREASURY_UID}
+    return set(extra) | {RECYCLE_UID}
 
 
 def _idx(uids: set[int], uid: int) -> int:
@@ -336,7 +334,6 @@ class TestRecyclePolicyShift:
 
         assert rewards[_idx(miner_uids, 1)] == pytest.approx(0.5 * OSS_EMISSION_SHARE)
         assert rewards[_idx(miner_uids, 2)] == pytest.approx(0.5 * OSS_EMISSION_SHARE)
-        assert rewards[_idx(miner_uids, ISSUES_TREASURY_UID)] == pytest.approx(ISSUES_TREASURY_EMISSION_SHARE)
         assert rewards[_idx(miner_uids, RECYCLE_UID)] == pytest.approx(0.0)
 
     def test_no_activity_anywhere_routes_oss_pool_to_recycle(self):
@@ -350,7 +347,6 @@ class TestRecyclePolicyShift:
         rewards = blend_emission_pools(evaluations, repos, miner_uids)
 
         assert rewards[_idx(miner_uids, RECYCLE_UID)] == pytest.approx(OSS_EMISSION_SHARE)
-        assert rewards[_idx(miner_uids, ISSUES_TREASURY_UID)] == pytest.approx(ISSUES_TREASURY_EMISSION_SHARE)
         assert rewards[_idx(miner_uids, 1)] == pytest.approx(0.0)
         assert rewards[_idx(miner_uids, 2)] == pytest.approx(0.0)
 
@@ -389,7 +385,6 @@ class TestRegistrySlack:
         assert rewards[_idx(miner_uids, 1)] == pytest.approx(0.4 * OSS_EMISSION_SHARE)
         assert rewards[_idx(miner_uids, 2)] == pytest.approx(0.4 * OSS_EMISSION_SHARE)
         assert rewards[_idx(miner_uids, RECYCLE_UID)] == pytest.approx(0.2 * OSS_EMISSION_SHARE)
-        assert rewards[_idx(miner_uids, ISSUES_TREASURY_UID)] == pytest.approx(ISSUES_TREASURY_EMISSION_SHARE)
         assert float(rewards.sum()) == pytest.approx(1.0)
 
     def test_registry_sum_one_no_shortfall_recycle(self):
@@ -514,7 +509,7 @@ class TestPreservedCompatibility:
 
         rewards = blend_emission_pools({}, repos, miner_uids)
 
-        assert float(rewards.sum()) == pytest.approx(OSS_EMISSION_SHARE + ISSUES_TREASURY_EMISSION_SHARE)
+        assert float(rewards.sum()) == pytest.approx(OSS_EMISSION_SHARE)
 
 
 class TestCaseInsensitiveRepoMatching:

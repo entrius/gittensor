@@ -22,10 +22,13 @@ from functools import partial
 from typing import Dict, List, Set
 
 import bittensor as bt
-import wandb
 
+import wandb
 from gittensor import __version__
 from gittensor.classes import MinerEvaluation, MinerEvaluationCache
+from gittensor.serving.api import parse_api_keys, start_serving_api
+from gittensor.serving.loadout import load_serving_loadout
+from gittensor.serving.state import ServingState
 from gittensor.validator import pat_storage
 from gittensor.validator.forward import forward
 from gittensor.validator.pat_handler import (
@@ -36,7 +39,15 @@ from gittensor.validator.pat_handler import (
     priority_pat_broadcast,
     priority_pat_check,
 )
-from gittensor.validator.utils.config import STORE_DB_RESULTS, WANDB_PROJECT, WANDB_VALIDATOR_NAME
+from gittensor.validator.utils.config import (
+    SERVING_API_HOST,
+    SERVING_API_KEYS,
+    SERVING_API_PORT,
+    SERVING_ENABLED,
+    STORE_DB_RESULTS,
+    WANDB_PROJECT,
+    WANDB_VALIDATOR_NAME,
+)
 from gittensor.validator.utils.load_weights import RepositoryConfig
 from gittensor.validator.utils.storage import DatabaseStorage
 from neurons.base.validator import BaseValidatorNeuron
@@ -76,6 +87,26 @@ class Validator(BaseValidatorNeuron):
 
         # Init in-memory cache for miner evaluations (fallback when GitHub API fails)
         self.evaluation_cache = MinerEvaluationCache()
+
+        # Serving sub-mechanism (beta): audit loop publishes READY miners here; the inference API dispatches to them.
+        # The API starts only when SERVING_API_KEYS is set.
+        self.serving_state = ServingState()
+        self.serving_api = None
+        if SERVING_ENABLED:
+            api_keys = parse_api_keys(SERVING_API_KEYS)
+            if api_keys:
+                loadout = load_serving_loadout()
+                self.serving_api = start_serving_api(
+                    state=self.serving_state,
+                    loadout=loadout,
+                    wallet=self.wallet,
+                    api_keys=api_keys,
+                    host=SERVING_API_HOST,
+                    port=SERVING_API_PORT,
+                    request_timeout=loadout.request_timeout,
+                )
+            else:
+                bt.logging.info('Serving: SERVING_API_KEYS unset — audits only, no API')
 
         # DB connection for validation result storage.
         # Requires STORE_DB_RESULTS=true in .env

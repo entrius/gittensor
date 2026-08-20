@@ -164,10 +164,16 @@ MAX_MAINTAINER_CUT = 0.5  # maintaining is only half of the problem to software,
 # 0.0 = shadow mode: scores are computed and logged but nothing is paid. When
 # raising above 0, shrink OSS_EMISSION_SHARE so all pools still sum to 1.0.
 SERVING_EMISSION_SHARE = 0.0
-SERVING_CHALLENGES_PER_ROUND = 4  # golden-output challenges sent to each serving miner per scoring round
-SERVING_CHALLENGE_TIMEOUT = 12.0  # seconds before a challenge counts as failed
+SERVING_CHALLENGES_PER_ROUND = 4  # audit prompts sent to each serving miner per scoring round
+SERVING_CHALLENGE_TIMEOUT = 30.0  # seconds before an audit counts as failed
 SERVING_LATENCY_FULL_CREDIT_MS = 1_500.0  # responses at or under this latency earn full latency credit
 SERVING_LATENCY_ZERO_CREDIT_MS = 8_000.0  # credit falls linearly to zero at this latency
+# PROVISIONAL audit tolerance bands — calibrate on a real 5090 (honest vs planted quant vs proxy) before paying.
+SERVING_AUDIT_MIN_PREFIX_AGREEMENT = 0.80  # fraction of reference greedy tokens reproduced before first divergence
+SERVING_AUDIT_MAX_MEAN_ABS_LOGPROB_DIFF = 0.50  # mean |logprob delta| over the agreed prefix
+SERVING_API_DEFAULT_PORT = 8790
+SERVING_MAX_TOKENS = 1024  # hard cap per request (API and miner both enforce)
+SERVING_REQUEST_LOG_SIZE = 5_000  # in-memory ring of recent API/audit requests (telemetry)
 
 # =============================================================================
 # Spam & Gaming Mitigation

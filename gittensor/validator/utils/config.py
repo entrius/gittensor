@@ -2,6 +2,8 @@ import os
 
 import bittensor as bt
 
+from gittensor.constants import SERVING_API_DEFAULT_PORT
+
 VALIDATOR_WAIT = 60  # 60 seconds
 VALIDATOR_STEPS_INTERVAL = 120  # 2 hours, every time a scoring round happens
 
@@ -13,6 +15,10 @@ WANDB_VALIDATOR_NAME = os.getenv('WANDB_VALIDATOR_NAME', 'vali')
 # optional env vars
 STORE_DB_RESULTS = os.getenv('STORE_DB_RESULTS', 'false').lower() == 'true'
 SERVING_ENABLED = os.getenv('SERVING_ENABLED', 'false').lower() == 'true'
+# Serving inference API: off unless keys are set; loopback by default (0.0.0.0 inside docker), front it with the host proxy.
+SERVING_API_KEYS = os.getenv('SERVING_API_KEYS', '')
+SERVING_API_HOST = os.getenv('SERVING_API_HOST', '127.0.0.1')
+SERVING_API_PORT = int(os.getenv('SERVING_API_PORT', str(SERVING_API_DEFAULT_PORT)))
 
 # log values
 bt.logging.info(f'VALIDATOR_WAIT: {VALIDATOR_WAIT}')

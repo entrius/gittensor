@@ -1,7 +1,9 @@
 {
-  "model_id": "echo-v0",
-  "backend": "echo",
+  "model_id": "qwen3.6-35b-a3b",
+  "backend": "openai-compat",
+  "base_url": "http://127.0.0.1:8080",
   "max_tokens": 64,
-  "base_url": null,
-  "runtime_pin": "sparkinfer@unpinned-beta"
+  "request_timeout": 60,
+  "runtime_pin": "gittensor-ai-lab/sparkinfer@unpinned-beta",
+  "audit_bank": "serving_audit_bank.json"
 }

@@ -23,8 +23,9 @@ validator challenges, get scored. Run it like the validator entrypoint:
     python neurons/serving_miner.py --netuid 74 --wallet.name miner --wallet.hotkey default \\
         --subtensor.network local --axon.port 8091
 
-The backend comes from the shared serving loadout (echo = deterministic
-GPU-free mock for localnet; openai-compat = a local sparkinfer/vLLM server).
+The backend comes from the shared serving loadout (openai-compat = a local
+sparkinfer_server; echo = deterministic GPU-free mock for localnet via
+SERVING_LOADOUT_PATH=.../serving_loadout.echo.json).
 Miners run this blessed neuron unmodified — serving reward is availability
 and correctness based, so there is nothing to gain by editing it.
 """
@@ -35,6 +36,7 @@ from typing import Tuple
 
 import bittensor as bt
 
+from gittensor.constants import SERVING_MAX_TOKENS
 from gittensor.serving.backends import InferenceBackend, load_backend
 from gittensor.serving.loadout import load_serving_loadout
 from gittensor.synapses import InferenceSynapse
@@ -85,10 +87,21 @@ class ServingMiner(BaseNeuron):
 
 async def handle_inference(miner: ServingMiner, synapse: InferenceSynapse) -> InferenceSynapse:
     """Generate a completion for a challenge (or, later, real traffic)."""
-    result = miner.backend.generate(synapse.prompt, synapse.max_tokens)
+    max_tokens = max(1, min(int(synapse.max_tokens), SERVING_MAX_TOKENS))
+    try:
+        result = miner.backend.generate(synapse.messages, max_tokens, logprobs=synapse.logprobs)
+    except Exception as e:  # backend down/overloaded: answer empty, validator scores it 0
+        bt.logging.warning(f'ServingMiner backend error: {e}')
+        return synapse
     synapse.completion = result.completion
     synapse.served_model_id = result.model_id
     synapse.generation_ms = result.generation_ms
+    synapse.ttft_ms = result.ttft_ms
+    synapse.decode_tps = result.decode_tps
+    synapse.tokens = result.tokens
+    synapse.token_logprobs = result.token_logprobs
+    synapse.finish_reason = result.finish_reason
+    synapse.usage = result.usage or None
     return synapse
 
 

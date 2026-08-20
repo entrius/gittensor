@@ -6,6 +6,21 @@
 
 # ruff: noqa: F821
 
+# Serving beta: FastAPI route handlers are registered via decorator, not called directly;
+# telemetry fields/helpers are read by operators via /v1/serving/status and tests.
+health
+models
+chat_completions
+_close_dendrite
+serving_api
+completion_tokens
+inflight
+as_dict
+reference_completion
+should_exit
+ts
+ECHO_LOADOUT_PATH
+
 # `__exit__(self, exc_type, exc, tb)` - PEP 343 signature, body unused args
 exc_type
 tb

@@ -8,7 +8,10 @@ services:
     env_file:
       - .env
     ports:
-      - "${PORT}:${PORT}"
+      # Set AXON_PUBLISH=127.0.0.1:<port> to bind loopback-only behind a reverse proxy (unset = raw internet publish).
+      - "${AXON_PUBLISH:-0.0.0.0:${PORT}}:${PORT}"
+      # Serving inference API (opt-in, see .env.example): loopback on the host by default; front it with your reverse proxy.
+      - "${SERVING_API_PUBLISH:-127.0.0.1:${SERVING_API_PORT:-8790}}:${SERVING_API_PORT:-8790}"
     volumes:
       # 'ro' = readonly
       - ${WALLET_PATH}:/root/.bittensor/wallets:ro

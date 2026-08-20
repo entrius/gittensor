@@ -1,12 +1,20 @@
-"""Tests for the serving beta: deterministic backend, challenge scoring, emission pool blending."""
+"""Tests for the serving beta: deterministic backend, audit verification, gateway dispatch, emission pool blending."""
+
+import json
 
 import numpy as np
+from fastapi.testclient import TestClient
 
-from gittensor.serving.backends import EchoBackend, expected_completion
-from gittensor.serving.loadout import ServingLoadout, load_serving_loadout
+from gittensor.serving.api import build_app, parse_api_keys
+from gittensor.serving.audit import AuditBank, AuditCase, EchoAuditBank, load_audit_bank, verify_response
+from gittensor.serving.backends import EchoBackend, GenerationResult, expected_completion
+from gittensor.serving.loadout import ECHO_LOADOUT_PATH, ServingLoadout, load_serving_loadout
+from gittensor.serving.state import ReadyMiner, RequestRecord, ServingState
 from gittensor.validator import emission_allocation
 from gittensor.validator.emission_allocation import blend_emission_pools
 from gittensor.validator.serving.scoring import challenge_score, latency_credit
+
+MSGS = [{'role': 'user', 'content': 'prompt'}]
 
 
 def _echo_loadout() -> ServingLoadout:
@@ -14,30 +22,200 @@ def _echo_loadout() -> ServingLoadout:
 
 
 def test_expected_completion_is_deterministic():
-    a = expected_completion('prompt', 8, 'echo-v0')
-    b = expected_completion('prompt', 8, 'echo-v0')
-    assert a == b
-    assert len(a.split(' ')) == 8
+    a = expected_completion(MSGS, 8, 'echo-v0')
+    b = expected_completion(MSGS, 8, 'echo-v0')
+    assert a.completion == b.completion
+    assert a.tokens == b.tokens and a.token_logprobs == b.token_logprobs
+    assert a.tokens is not None and len(a.tokens) == 8
 
 
 def test_expected_completion_varies_by_inputs():
-    base = expected_completion('prompt', 8, 'echo-v0')
-    assert expected_completion('other', 8, 'echo-v0') != base
-    assert expected_completion('prompt', 8, 'other-model') != base
+    base = expected_completion(MSGS, 8, 'echo-v0').completion
+    assert expected_completion([{'role': 'user', 'content': 'other'}], 8, 'echo-v0').completion != base
+    assert expected_completion(MSGS, 8, 'other-model').completion != base
 
 
 def test_echo_backend_matches_expected_completion():
     backend = EchoBackend(_echo_loadout())
-    result = backend.generate('prompt', 8)
-    assert result.completion == expected_completion('prompt', 8, 'echo-v0')
+    result = backend.generate(MSGS, 8, logprobs=True)
+    ref = expected_completion(MSGS, 8, 'echo-v0')
+    assert result.completion == ref.completion
+    assert result.tokens == ref.tokens
     assert result.model_id == 'echo-v0'
+    assert backend.generate(MSGS, 8).tokens is None
 
 
-def test_default_loadout_file_loads():
+def test_default_loadout_targets_sparkinfer():
+    loadout = load_serving_loadout()
+    assert loadout.backend == 'openai-compat'
+    assert loadout.base_url and loadout.audit_bank
+    assert loadout.max_tokens > 0
+
+
+def test_echo_loadout_loads_via_env(monkeypatch):
+    monkeypatch.setenv('SERVING_LOADOUT_PATH', str(ECHO_LOADOUT_PATH))
     loadout = load_serving_loadout()
     assert loadout.backend == 'echo'
-    assert loadout.model_id
-    assert loadout.max_tokens > 0
+    assert isinstance(load_audit_bank(loadout), EchoAuditBank)
+
+
+# --- audit verification -----------------------------------------------------
+
+
+def _case(n: int = 10) -> AuditCase:
+    ref = expected_completion(MSGS, n, 'echo-v0')
+    assert ref.tokens is not None and ref.token_logprobs is not None
+    return AuditCase(messages=MSGS, max_tokens=n, reference_tokens=ref.tokens, reference_logprobs=ref.token_logprobs)
+
+
+def test_verify_exact_match_passes():
+    case = _case()
+    v = verify_response(case, case.reference_tokens, case.reference_logprobs)
+    assert v.passed and v.prefix_agreement == 1.0 and v.mean_abs_logprob_diff == 0.0
+
+
+def test_verify_missing_logprobs_fails():
+    case = _case()
+    assert not verify_response(case, case.reference_tokens, None).passed
+    assert not verify_response(case, None, None).passed
+    assert not verify_response(case, case.reference_tokens, case.reference_logprobs[:-1]).passed
+
+
+def test_verify_late_divergence_within_band_passes():
+    case = _case(10)
+    tokens = case.reference_tokens[:9] + ['xxx']
+    v = verify_response(case, tokens, case.reference_logprobs, min_prefix_agreement=0.8)
+    assert v.passed and v.prefix_agreement == 0.9
+
+
+def test_verify_early_divergence_fails():
+    case = _case(10)
+    tokens = case.reference_tokens[:3] + ['x'] * 7
+    v = verify_response(case, tokens, case.reference_logprobs, min_prefix_agreement=0.8)
+    assert not v.passed and 'prefix agreement' in v.reason
+    assert not verify_response(case, ['x'] * 10, case.reference_logprobs).passed
+
+
+def test_verify_logprob_drift_fails():
+    case = _case(10)
+    drifted = [lp - 2.0 for lp in case.reference_logprobs]
+    v = verify_response(case, case.reference_tokens, drifted, max_mean_abs_logprob_diff=0.5)
+    assert not v.passed and 'drift' in v.reason
+    assert v.prefix_agreement == 1.0
+
+
+def test_audit_bank_roundtrip(tmp_path):
+    case = _case(4)
+    path = tmp_path / 'bank.json'
+    path.write_text(
+        json.dumps(
+            {
+                'model_id': 'echo-v0',
+                'runtime_pin': 'x',
+                'cases': [
+                    {
+                        'messages': case.messages,
+                        'max_tokens': case.max_tokens,
+                        'reference_tokens': case.reference_tokens,
+                        'reference_logprobs': case.reference_logprobs,
+                    }
+                ],
+            }
+        )
+    )
+    bank = AuditBank.load(path)
+    assert len(bank) == 1 and bank.sample().reference_tokens == case.reference_tokens
+
+
+# --- state / dispatch -------------------------------------------------------
+
+
+def _ready(uid: int, score: float = 1.0) -> ReadyMiner:
+    return ReadyMiner(uid=uid, hotkey=f'hk{uid}', axon=None, score=score)  # type: ignore[arg-type]
+
+
+def test_state_least_inflight_dispatch():
+    state = ServingState()
+    assert state.acquire() is None
+    state.publish_ready([_ready(1, 0.5), _ready(2, 1.0)])
+    first = state.acquire()
+    assert first is not None and first.uid == 2  # tie on inflight -> higher score
+    second = state.acquire()
+    assert second is not None and second.uid == 1
+    third = state.acquire()
+    assert third is not None and third.uid == 2  # both at 1 inflight -> higher score again
+    state.release(2)
+    state.release(2)
+    again = state.acquire()
+    assert again is not None and again.uid == 2
+    state.publish_ready([_ready(1)])
+    only = state.acquire()
+    assert only is not None and only.uid == 1
+    state.record(RequestRecord(ts=0, kind='gateway', uid=1, ok=True, latency_ms=10))
+    assert state.snapshot()['gateway_ok'] == 1
+
+
+# --- gateway ----------------------------------------------------------------
+
+
+class _FakeResponse:
+    def __init__(self, result: GenerationResult, model_id: str):
+        self.completion = result.completion
+        self.served_model_id = model_id
+        self.tokens = result.tokens
+        self.token_logprobs = result.token_logprobs
+        self.ttft_ms = 12.0
+        self.decode_tps = 99.0
+        self.finish_reason = 'stop'
+        self.usage = result.usage
+
+
+def _gateway_client(state: ServingState, monkeypatch):
+    loadout = _echo_loadout()
+
+    async def fake_dispatch(dendrite, miner, messages, max_tokens, lo, timeout):
+        return _FakeResponse(expected_completion(messages, max_tokens, lo.model_id), lo.model_id)
+
+    monkeypatch.setattr('gittensor.serving.api._dispatch', fake_dispatch)
+    app = build_app(state, loadout, parse_api_keys('k1, k2'), lambda: None, request_timeout=5)
+    return TestClient(app)
+
+
+def test_gateway_requires_key(monkeypatch):
+    client = _gateway_client(ServingState(), monkeypatch)
+    assert client.get('/v1/models').status_code == 401
+    assert client.get('/v1/models', headers={'Authorization': 'Bearer nope'}).status_code == 401
+    assert client.get('/v1/models', headers={'Authorization': 'Bearer k2'}).status_code == 200
+    assert client.get('/health').status_code == 200
+
+
+def test_gateway_429_without_ready_miners(monkeypatch):
+    client = _gateway_client(ServingState(), monkeypatch)
+    r = client.post('/v1/chat/completions', json={'messages': MSGS}, headers={'Authorization': 'Bearer k1'})
+    assert r.status_code == 429
+
+
+def test_gateway_chat_completion_roundtrip(monkeypatch):
+    state = ServingState()
+    state.publish_ready([_ready(7)])
+    client = _gateway_client(state, monkeypatch)
+    r = client.post(
+        '/v1/chat/completions',
+        json={'messages': MSGS, 'max_tokens': 4, 'logprobs': True},
+        headers={'Authorization': 'Bearer k1'},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body['object'] == 'chat.completion'
+    assert body['choices'][0]['message']['content'] == expected_completion(MSGS, 4, 'echo-v0').completion
+    assert len(body['choices'][0]['logprobs']['content']) == 4
+    assert body['gittensor']['served_uid'] == 7
+    assert state.inflight() == {7: 0}
+    assert state.snapshot()['gateway_ok'] == 1
+    bad = client.post(
+        '/v1/chat/completions', json={'messages': MSGS, 'stream': True}, headers={'Authorization': 'Bearer k1'}
+    )
+    assert bad.status_code == 400
 
 
 def test_latency_credit_bands(monkeypatch):
@@ -59,19 +237,21 @@ def test_blend_pays_serving_pool_pro_rata(monkeypatch):
     monkeypatch.setattr(emission_allocation, 'SERVING_EMISSION_SHARE', 0.05)
     miner_uids = {0, 1, 2}
     rewards = blend_emission_pools({}, {}, miner_uids, serving_scores={1: 1.0, 2: 3.0})
-    # Empty registry: the full OSS pool (0.90) recycles to UID 0; serving pool splits 1:3.
+    # Empty registry: the full OSS pool recycles to UID 0; serving pool splits 1:3.
+    oss = emission_allocation.OSS_EMISSION_SHARE
     assert np.isclose(rewards[1], 0.05 * 0.25)
     assert np.isclose(rewards[2], 0.05 * 0.75)
-    assert np.isclose(rewards[0], 0.90)
-    assert np.isclose(rewards.sum(), 0.95)
+    assert np.isclose(rewards[0], oss)
+    assert np.isclose(rewards.sum(), oss + 0.05)
 
 
 def test_blend_recycles_serving_pool_without_scorers(monkeypatch):
     monkeypatch.setattr(emission_allocation, 'SERVING_EMISSION_SHARE', 0.05)
     miner_uids = {0, 1, 2}
     rewards = blend_emission_pools({}, {}, miner_uids, serving_scores={})
-    assert np.isclose(rewards[0], 0.95)
-    assert np.isclose(rewards.sum(), 0.95)
+    oss = emission_allocation.OSS_EMISSION_SHARE
+    assert np.isclose(rewards[0], oss + 0.05)
+    assert np.isclose(rewards.sum(), oss + 0.05)
 
 
 def test_blend_default_share_is_shadow_mode():

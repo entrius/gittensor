@@ -62,12 +62,10 @@ ignore_decorators = [
 ]
 exclude = [
     ".venv/",
-    "smart-contracts/",
     "assets/",
     # Upstream bittensor-template scaffolding
     "neurons/base/",
     # On-chain shape mirror - dataclass/enum members not actionable
-    "gittensor/validator/issue_competitions/contract_client.py",
     # das-github-mirror wire-format schema
     "gittensor/utils/mirror/models.py",
 ]

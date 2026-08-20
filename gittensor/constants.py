@@ -151,7 +151,8 @@ OPEN_PR_COLLATERAL_PERCENT = 0.20
 RECYCLE_UID = 0
 
 # Combined scoring pool distributed by repository emission_share, then by per-repo PR/issue split.
-OSS_EMISSION_SHARE = 0.90
+# Pools (OSS + SERVING) must sum to 1.0; anything unallocated within them recycles to RECYCLE_UID.
+OSS_EMISSION_SHARE = 1.00
 DEFAULT_ISSUE_DISCOVERY_SHARE = 0.5
 EMISSION_SHARE_TOLERANCE = 1e-9
 MAX_MAINTAINER_CUT = 0.5  # maintaining is only half of the problem to software, at maximum
@@ -177,11 +178,3 @@ EXCESSIVE_PR_PENALTY_BASE_THRESHOLD = 2
 # Example: 900 total token score / 300 = +3 bonus
 OPEN_PR_THRESHOLD_TOKEN_SCORE = 300.0  # Token score per +1 bonus
 MAX_OPEN_PR_THRESHOLD = 30  # Maximum open PR threshold (base + bonus capped at this value)
-
-# =============================================================================
-# Issues Competition
-# =============================================================================
-CONTRACT_ADDRESS = '5FWNdk8YNtNcHKrAx2krqenFrFAZG7vmsd2XN2isJSew3MrD'
-ISSUES_TREASURY_UID = 111  # UID of the smart contract neuron, if set to RECYCLE_UID then it's disabled
-ISSUES_TREASURY_EMISSION_SHARE = 0.10  # % of emissions allocated to funding issues treasury
-MAX_ISSUE_ID = 1_000_000  # sanity-check upper bound for any real deployment

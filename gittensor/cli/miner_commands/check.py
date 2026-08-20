@@ -9,7 +9,7 @@ import sys
 import click
 from rich.table import Table
 
-from gittensor.cli.issue_commands.helpers import NETWORK_CHOICE
+from gittensor.cli.helpers import NETWORK_CHOICE
 
 from .helpers import (
     DEFAULT_MIN_VALIDATOR_STAKE,

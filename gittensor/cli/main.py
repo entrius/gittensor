@@ -6,10 +6,7 @@ Gittensor CLI - Main entry point
 
 Usage:
     gitt config              - Show/set CLI configuration
-    gitt issues ...          - Issue management (alias: i)
-    gitt harvest             - Harvest emissions
-    gitt vote ...            - Validator vote commands
-    gitt admin ...           - Owner commands (alias: a)
+    gitt miner ...           - Miner commands (check, post, score)
 """
 
 import json
@@ -37,9 +34,8 @@ from click.shell_completion import get_completion_class
 from rich.table import Table
 
 from gittensor import __version__
-from gittensor.cli.issue_commands import register_commands
-from gittensor.cli.issue_commands.help import StyledAliasGroup, StyledGroup
-from gittensor.cli.issue_commands.helpers import CONFIG_FILE, GITTENSOR_DIR, console, err_console
+from gittensor.cli.help import StyledAliasGroup, StyledGroup
+from gittensor.cli.helpers import CONFIG_FILE, GITTENSOR_DIR, console, err_console
 from gittensor.cli.json_output import click_error_type, emit_error_json, wants_json_output
 
 
@@ -79,7 +75,7 @@ class JsonAwareAliasGroup(StyledAliasGroup):
 @click.group(cls=JsonAwareAliasGroup)
 @click.version_option(version=__version__, prog_name='gittensor')
 def cli():
-    """Gittensor CLI - Manage issue bounties and validator operations"""
+    """Gittensor CLI - miner and validator operations"""
     pass
 
 
@@ -98,7 +94,6 @@ def show_config():
 
     if not CONFIG_FILE.exists():
         err_console.print('[yellow]No config file found at ~/.gittensor/config.json[/yellow]')
-        err_console.print('[dim]Run ./up.sh --issues to create config[/dim]')
         return
 
     try:
@@ -216,10 +211,6 @@ cli.add_command(config_group)
 from gittensor.cli.miner_commands import register_miner_commands  # noqa: E402
 
 register_miner_commands(cli)
-
-
-# Register issue commands with new flat structure
-register_commands(cli)
 
 
 def main():

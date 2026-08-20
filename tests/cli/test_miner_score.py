@@ -13,6 +13,7 @@ from click.testing import CliRunner
 
 from gittensor.cli.main import cli
 from gittensor.cli.miner_commands.score import _DEV_HOTKEY, _DEV_UID
+from gittensor.constants import OSS_EMISSION_SHARE
 
 
 @pytest.fixture
@@ -236,14 +237,15 @@ class TestScoreCommand:
         assert row['repository_full_name'] == 'octo/repo'
         assert row['emission_share'] == 0.2
         assert row['issue_discovery_share'] == 0.25
-        assert row['repo_slice'] == 0.18
-        assert row['pr_slice'] == 0.135
-        assert row['issue_discovery_slice'] == 0.045
+        repo_slice = 0.2 * OSS_EMISSION_SHARE
+        assert row['repo_slice'] == pytest.approx(repo_slice)
+        assert row['pr_slice'] == pytest.approx(repo_slice * 0.75)
+        assert row['issue_discovery_slice'] == pytest.approx(repo_slice * 0.25)
         assert row['pr_score'] == 42.5
         assert row['issue_discovery_score'] == 8.0
-        assert row['pr_reward'] == 0.135
-        assert row['issue_discovery_reward'] == 0.045
-        assert row['total_reward'] == 0.18
+        assert row['pr_reward'] == pytest.approx(repo_slice * 0.75)
+        assert row['issue_discovery_reward'] == pytest.approx(repo_slice * 0.25)
+        assert row['total_reward'] == pytest.approx(repo_slice)
         assert row['recycled'] is False
 
     def test_pat_never_appears_in_json(self, runner, miner_eval_factory):
@@ -400,8 +402,8 @@ class TestScoreCommand:
         assert result.exit_code == 0, result.output
         assert 'Repo allocation breakdown' in result.output
         assert 'octo/repo' in result.output
-        assert '0.135000' in result.output
-        assert '0.045000' in result.output
+        assert f'{0.2 * OSS_EMISSION_SHARE * 0.75:.6f}' in result.output
+        assert f'{0.2 * OSS_EMISSION_SHARE * 0.25:.6f}' in result.output
 
     def test_allocation_breakdown_includes_maintainer_carve_out(self, runner, miner_eval_factory):
         """When the dev UID is a registered maintainer of a maintainer_cut repo,
@@ -441,14 +443,15 @@ class TestScoreCommand:
         row = rows[0]
         assert row['repository_full_name'] == 'octo/repo'
         assert row['maintainer_cut'] == 0.5
-        assert row['repo_slice'] == 0.18
-        assert row['maintainer_carve_out'] == 0.09
-        assert row['maintainer_reward'] == 0.09
-        # PR scoring receives the remaining 0.09 after the carve-out
-        assert row['pr_slice'] == 0.09
-        assert row['pr_reward'] == 0.09
+        repo_slice = 0.2 * OSS_EMISSION_SHARE
+        assert row['repo_slice'] == pytest.approx(repo_slice)
+        assert row['maintainer_carve_out'] == pytest.approx(repo_slice / 2)
+        assert row['maintainer_reward'] == pytest.approx(repo_slice / 2)
+        # PR scoring receives the remaining half after the carve-out
+        assert row['pr_slice'] == pytest.approx(repo_slice / 2)
+        assert row['pr_reward'] == pytest.approx(repo_slice / 2)
         assert row['issue_discovery_reward'] == 0
-        assert row['total_reward'] == 0.18
+        assert row['total_reward'] == pytest.approx(repo_slice)
         assert row['recycled'] is False
 
     def test_pat_storage_load_all_pats_is_patched(self, runner, miner_eval_factory):

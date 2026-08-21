@@ -80,10 +80,10 @@ Requirements:
   top-level `model`.
 - **R4 `max_tokens` honoured exactly.** Generation MUST stop at `max_tokens` with
   `finish_reason: "length"`.
-- **R5 Timing fields (SHOULD, additive, top level).** `ttft_ms` (first-token latency),
-  `generation_ms` (wall time for the whole generation), `decode_tps` (tokens/s after first token).
-  Floats. If absent the validator falls back to its own round-trip measurement, which is strictly
-  worse for the miner's latency credit.
+- **R5 Timing fields (SHOULD, additive).** `ttft_ms` (first-token latency), `generation_ms`
+  (wall time for the whole generation), `decode_tps` (tokens/s after first token). Floats, either
+  top level or inside `usage` (sparkinfer `1b8b962` nests them in `usage`). If absent the validator
+  falls back to its own round-trip measurement, which is strictly worse for the miner's latency credit.
 - **R6 Overload = 429, never queue.** When the runtime has no free slot (concurrency or KV
   budget), it MUST return HTTP 429 immediately. It MUST NOT hold the request in an internal queue.
   The subnet's gateway promise is "reserve or 429", so a queueing runtime poisons the latency
@@ -134,6 +134,16 @@ Acceptance in v0: over a 200-prompt sample, p05 of prefix agreement across 3 rep
 p95 of mean |Δlogprob| ≤ 0.25 (provisional; the checker prints the observed values so maintainers
 can see where they land).
 
+**Measured, sparkinfer `1b8b962` on an RTX 5090 (2026-08-21, 30 prompts × 4 runs, sequential,
+batch of 1, DFlash off):** prefix agreement min 0.00 / p05 0.06 / median 0.71; logprob drift on the
+agreed prefix max 0.08 / p95 0.04. Direct probe: the logprob of the *same token at the same
+position* moves by ~0.25–0.4 nats between identical runs, so greedy flips whenever the top-2 are
+within that band (observed at token 2 and token 5 of ordinary prompts). The sampler is argmax with
+no RNG, as upstream says; the *logits* are not reproducible. This fails D1 as written and is the
+top open item with the maintainer (see §9). Until the runtime is reproducible, validators must use
+a divergence-tolerant comparison (teacher-forced scoring, R8 — which upstream already has as the
+`qwen3_gguf_score` binary but does not expose over HTTP).
+
 ### 4.1 How validators use the contract: the reference
 
 A validator verifies a release against **a conformant copy it controls** — the same image miners
@@ -183,7 +193,22 @@ runtime to the subnet is "run a conformant copy + add a release entry", nothing 
 
 | Runtime | Contract version | Status | Notes |
 |---|---|---|---|
-| `gittensor-ai-lab/sparkinfer` `sparkinfer_server` | v0 | conformant (verified by inspection 2026-08-20; checker run pending 5090 session) | default release: Qwen3.6-35B-A3B UD-Q4_K_M; image `entrius/sparkinfer:<commit>` built by us |
+| `gittensor-ai-lab/sparkinfer` `sparkinfer_server` `1b8b962` | v0 | **checker run on RTX 5090 2026-08-21:** all HTTP MUSTs pass (after tolerating the first-token logprob gap); **D1 fails** — see §4 and §9 | default release: Qwen3.6-35B-A3B UD-Q4_K_M sha256 `ac0e2c11…`; image `entrius/sparkinfer:1b8b962` built by us |
+
+## 9. Open items with sparkinfer (as of `1b8b962`)
+
+1. **Logit reproducibility (D1).** Same prompt, batch of 1, sequential: per-token logprobs vary
+   by ~0.3 nats; greedy forks early. Need a deterministic decode path (or a flag) for the
+   blessed release.
+2. **Expose teacher-forced scoring over HTTP (R8).** `/v1/completions` with `echo`+`logprobs`, or a
+   `/v1/score` wrapping `qwen3_gguf_score`. This is what makes verification robust to (1).
+3. **First-token logprob missing.** `logprobs.content` has `completion_tokens − 1` entries
+   (`inference_engine.cpp` argmax seed pick). Emit it.
+4. **Stale model pin.** `bench/scripts/reference.lock` sha256 no longer matches the HF upload; a
+   fresh `run.sh --download` re-fetches forever. Update the lock and fail fast instead of looping.
+5. **Timing fields location.** Currently under `usage`; either is fine per R5, just document it.
+6. **Container image / Dockerfile.** We build `entrius/sparkinfer:<commit>` ourselves
+   (`docker/sparkinfer.Dockerfile`); an upstream Dockerfile would keep the two from drifting.
 
 ## Changelog
 

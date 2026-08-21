@@ -9,7 +9,7 @@ validator never calls a runtime directly, it only verifies miner responses again
 """
 
 import random
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import requests
 
@@ -66,9 +66,21 @@ def make_prompts(count: int, seed: int) -> List[List[Dict[str, str]]]:
     return prompts
 
 
-def greedy(base_url: str, model_id: str, messages: List[Dict[str, str]], max_tokens: int, timeout: float) -> dict:
+def auth_headers(api_key: Optional[str]) -> Dict[str, str]:
+    return {'Authorization': f'Bearer {api_key}'} if api_key else {}
+
+
+def greedy(
+    base_url: str,
+    model_id: str,
+    messages: List[Dict[str, str]],
+    max_tokens: int,
+    timeout: float,
+    api_key: Optional[str] = None,
+) -> dict:
     r = requests.post(
         f'{base_url.rstrip("/")}/v1/chat/completions',
+        headers=auth_headers(api_key),
         json={
             'model': model_id,
             'messages': messages,

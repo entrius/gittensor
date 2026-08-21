@@ -14,8 +14,9 @@ The loadout is a repo-pinned JSON file (same distribution rail as
 master_repositories.json) that miner and validator both load, so both sides
 agree on the releases by construction. ``SERVING_LOADOUT_PATH`` overrides the
 file (``serving_loadout.echo.json`` for a GPU-free localnet);
-``SERVING_REFERENCE_URL`` points the primary release at a validator-local
-reference runtime. Replacing this loader with a validator-signed,
+``SERVING_REFERENCE_URL`` (+ ``SERVING_REFERENCE_API_KEY``) points the
+primary release at a reference runtime — on the validator's own GPU or any
+reachable conformant copy, e.g. a rented 5090. Replacing this loader with a validator-signed,
 traffic-driven schedule (Gepetto-lite) is the planned upgrade path.
 """
 
@@ -40,7 +41,10 @@ class ServingRelease:
     base_url: Optional[str] = None  # miner side: the runtime this miner serves from
     runtime_pin: Optional[str] = None
     audit_bank: Optional[str] = None  # validator side: snapshot reference, filename under weights/
-    reference_url: Optional[str] = None  # validator side: live reference runtime (own GPU); wins over audit_bank
+    reference_url: Optional[str] = (
+        None  # validator side: live reference runtime (own GPU or a rented one); wins over audit_bank
+    )
+    reference_api_key: Optional[str] = None  # bearer for a remote reference (sparkinfer --api-key)
     request_timeout: float = 60.0
 
     @classmethod
@@ -53,6 +57,7 @@ class ServingRelease:
             runtime_pin=raw.get('runtime_pin'),
             audit_bank=raw.get('audit_bank'),
             reference_url=raw.get('reference_url'),
+            reference_api_key=raw.get('reference_api_key'),
             request_timeout=float(raw.get('request_timeout', 60.0)),
         )
 
@@ -97,6 +102,9 @@ def load_serving_loadout(path: Optional[Path] = None) -> ServingLoadout:
     reference_override = os.getenv('SERVING_REFERENCE_URL')
     if reference_override:
         loadout.primary.reference_url = reference_override
+    key_override = os.getenv('SERVING_REFERENCE_API_KEY')
+    if key_override:
+        loadout.primary.reference_api_key = key_override
 
     for release in loadout.releases:
         bt.logging.info(

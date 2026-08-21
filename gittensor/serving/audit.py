@@ -10,10 +10,11 @@ verifier is release-agnostic; only the reference knows which model it is.
 
 Three references, picked per release by ``reference_for``:
 
-- ``LiveReference`` — a conformant runtime the validator runs itself (its own
-  5090, ``reference_url``). Fresh prompt every audit; nothing to memorise; can
-  also produce a reference for *any* prompt (mirrored traffic, disputes).
-  This is the intended production reference.
+- ``LiveReference`` — a conformant copy of the release reachable over HTTP
+  (``reference_url``): the validator's own 5090, or a rented one kept warm
+  (``reference_api_key`` for the bearer). Fresh prompt every audit; nothing to
+  memorise; can also produce a reference for *any* prompt (mirrored traffic,
+  disputes). This is the intended production reference.
 - ``BankReference`` — a snapshot of a live reference (``audit_bank`` JSON built
   by ``scripts/build_serving_audit_bank.py``). Fallback for validators without
   a GPU or while the live runtime is down. Finite, so rotate it.
@@ -150,10 +151,11 @@ class LiveReference:
         self.base_url = release.reference_url
         self.max_tokens = release.max_tokens
         self.timeout = release.request_timeout
+        self.api_key = release.reference_api_key
 
     def case_for(self, messages: List[Message], max_tokens: Optional[int] = None) -> AuditCase:
         """Reference for an arbitrary prompt (audit, mirrored traffic, dispute)."""
-        ref = greedy(self.base_url, self.model_id, messages, max_tokens or self.max_tokens, self.timeout)
+        ref = greedy(self.base_url, self.model_id, messages, max_tokens or self.max_tokens, self.timeout, self.api_key)
         return AuditCase(
             messages=messages,
             max_tokens=ref['max_tokens'],

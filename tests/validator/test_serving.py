@@ -82,14 +82,20 @@ def test_live_reference_wins_over_bank(monkeypatch):
     from gittensor.serving import audit
 
     release = ServingRelease(
-        model_id='m', backend='openai-compat', base_url='http://x', reference_url='http://ref', audit_bank='nope.json'
+        model_id='m',
+        backend='openai-compat',
+        base_url='http://x',
+        reference_url='http://ref',
+        reference_api_key='sekrit',
+        audit_bank='nope.json',
     )
     ref = reference_for(release)
     assert isinstance(ref, audit.LiveReference)
     captured = {}
 
-    def fake_greedy(base_url, model_id, messages, max_tokens, timeout):
+    def fake_greedy(base_url, model_id, messages, max_tokens, timeout, api_key=None):
         captured['base_url'] = base_url
+        captured['api_key'] = api_key
         return {
             'messages': messages,
             'max_tokens': max_tokens,
@@ -101,6 +107,7 @@ def test_live_reference_wins_over_bank(monkeypatch):
     monkeypatch.setattr(audit, 'greedy', fake_greedy)
     case = ref.sample()
     assert captured['base_url'] == 'http://ref' and case.reference_tokens == ['a', 'b']
+    assert captured['api_key'] == 'sekrit'
     assert ref.case_for(MSGS, 4).max_tokens == 4
 
 

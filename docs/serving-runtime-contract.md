@@ -131,9 +131,10 @@ can see where they land).
 
 ### 4.1 How validators use the contract: the reference
 
-A validator verifies a release by running **its own conformant copy** of it — the same binary
-miners run, on the validator's own GPU (`reference_url` in the loadout, compose profile
-`reference`). Every audit draws a fresh prompt, asks the reference for the honest answer, and
+A validator verifies a release against **a conformant copy it controls** — the same image miners
+run, either on the validator's own GPU (compose profile `reference`) or on a rented 5090 kept warm
+behind `--api-key` (`reference_url` + `reference_api_key`, or `SERVING_REFERENCE_URL` /
+`SERVING_REFERENCE_API_KEY`). The validator itself needs no GPU. Every audit draws a fresh prompt, asks the reference for the honest answer, and
 compares the miner's tokens/logprobs to it. Because the reference is live, any prompt can be
 audited (including mirrored organic traffic and, via R8, any text), so a miner cannot learn a
 fixed answer set. A validator without a GPU falls back to a *bank snapshot* of a reference
@@ -156,9 +157,12 @@ runtime to the subnet is "run a conformant copy + add a release entry", nothing 
 - **O2.** Startup MUST be unattended: a single command that downloads/verifies the pinned model
   and serves (sparkinfer: `server/run.sh --download --port 8080`). The miner entrypoint
   (`scripts/serving-miner-entrypoint.sh`) assumes the server is already listening.
-- **O2b.** Runtimes SHOULD publish a container image (or a Dockerfile) for the pinned release so
-  validators can run the reference copy via the compose `reference` profile and miners via the
-  miner entrypoint without a local toolchain. sparkinfer: open ask as of v0.
+- **O2b.** The subnet builds and publishes the image for every blessed release itself
+  (`docker/sparkinfer.Dockerfile`, workflow `sparkinfer-image.yml` → `entrius/sparkinfer:<commit>`),
+  from the upstream repo at the pinned commit — no fork, no dependence on upstream publishing images.
+  Validators run that image as the reference (compose profile `reference`), miners run it to serve.
+  Runtimes SHOULD keep an unattended source build working (`cmake … -DBUILD_SERVER=ON`) so this
+  pipeline stays a thin wrapper; an upstream Dockerfile is welcome but not required.
 - **O3.** Requests are bounded: the subnet caps `max_tokens` at `SERVING_MAX_TOKENS` (1024) and
   prompts at whatever the release's certified context is. The runtime SHOULD reject
   over-context prompts with 400, not truncate silently.
@@ -174,7 +178,7 @@ runtime to the subnet is "run a conformant copy + add a release entry", nothing 
 
 | Runtime | Contract version | Status | Notes |
 |---|---|---|---|
-| `gittensor-ai-lab/sparkinfer` `sparkinfer_server` | v0 | conformant (verified by inspection 2026-08-20; checker run pending 5090 session) | default release: Qwen3.6-35B-A3B UD-Q4_K_M |
+| `gittensor-ai-lab/sparkinfer` `sparkinfer_server` | v0 | conformant (verified by inspection 2026-08-20; checker run pending 5090 session) | default release: Qwen3.6-35B-A3B UD-Q4_K_M; image `entrius/sparkinfer:<commit>` built by us |
 
 ## Changelog
 

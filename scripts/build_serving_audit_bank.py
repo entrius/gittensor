@@ -43,6 +43,7 @@ def main() -> int:
     ap.add_argument('--max-tokens', type=int, default=64)
     ap.add_argument('--seed', type=int, default=1)
     ap.add_argument('--timeout', type=float, default=120.0)
+    ap.add_argument('--api-key', default=None, help='bearer for a remote runtime (sparkinfer --api-key)')
     ap.add_argument(
         '--repeat', type=int, default=0, help='re-run each prompt N extra times and report greedy stability'
     )
@@ -55,9 +56,9 @@ def main() -> int:
     drifts: List[float] = []
     t0 = time.time()
     for i, messages in enumerate(prompts, 1):
-        case = greedy(args.base_url, args.model_id, messages, args.max_tokens, args.timeout)
+        case = greedy(args.base_url, args.model_id, messages, args.max_tokens, args.timeout, args.api_key)
         for _ in range(args.repeat):
-            again = greedy(args.base_url, args.model_id, messages, args.max_tokens, args.timeout)
+            again = greedy(args.base_url, args.model_id, messages, args.max_tokens, args.timeout, args.api_key)
             agreement, drift = stability(case, again)
             agreements.append(agreement)
             drifts.append(drift)

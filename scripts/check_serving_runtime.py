@@ -22,7 +22,7 @@ from typing import Dict, List, Optional, Tuple
 
 import requests
 
-from gittensor.serving.probe import greedy, make_prompts, percentile, stability
+from gittensor.serving.probe import auth_headers, greedy, make_prompts, percentile, stability
 
 MUST, SHOULD = 'MUST', 'SHOULD'
 
@@ -41,9 +41,9 @@ class Report:
         return sum(1 for _, level, ok, _ in self.rows if level == MUST and not ok)
 
 
-def get_json(url: str, timeout: float) -> Tuple[Optional[int], Optional[dict]]:
+def get_json(url: str, timeout: float, api_key: Optional[str] = None) -> Tuple[Optional[int], Optional[dict]]:
     try:
-        r = requests.get(url, timeout=timeout)
+        r = requests.get(url, timeout=timeout, headers=auth_headers(api_key))
         return r.status_code, (r.json() if r.content else {})
     except requests.RequestException:
         return None, None
@@ -51,12 +51,17 @@ def get_json(url: str, timeout: float) -> Tuple[Optional[int], Optional[dict]]:
         return r.status_code, None
 
 
+API_KEY: Optional[str] = None
+
+
 def chat(base_url: str, body: Dict, timeout: float) -> requests.Response:
-    return requests.post(f'{base_url.rstrip("/")}/v1/chat/completions', json=body, timeout=timeout)
+    return requests.post(
+        f'{base_url.rstrip("/")}/v1/chat/completions', json=body, timeout=timeout, headers=auth_headers(API_KEY)
+    )
 
 
 def check_models(rep: Report, base_url: str, model_id: str, timeout: float) -> None:
-    status, payload = get_json(f'{base_url}/v1/models', timeout)
+    status, payload = get_json(f'{base_url}/v1/models', timeout, API_KEY)
     ids = [m.get('id') for m in (payload or {}).get('data', [])] if payload else []
     rep.add('3.2 GET /v1/models', MUST, status == 200 and bool(ids), f'status={status} ids={ids}')
     rep.add('3.2 model_id advertised', MUST, model_id in ids, f'want {model_id!r}')
@@ -64,12 +69,12 @@ def check_models(rep: Report, base_url: str, model_id: str, timeout: float) -> N
 
 
 def check_optional_endpoints(rep: Report, base_url: str, timeout: float) -> None:
-    status, payload = get_json(f'{base_url}/v1/capacity', timeout)
+    status, payload = get_json(f'{base_url}/v1/capacity', timeout, API_KEY)
     rep.add('3.3 GET /v1/capacity', SHOULD, status == 200 and isinstance(payload, dict), f'status={status} {payload}')
-    status, _ = get_json(f'{base_url}/health', timeout)
+    status, _ = get_json(f'{base_url}/health', timeout, API_KEY)
     rep.add('3 GET /health', SHOULD, status == 200, f'status={status}')
     try:
-        status = requests.get(f'{base_url}/metrics', timeout=timeout).status_code
+        status = requests.get(f'{base_url}/metrics', timeout=timeout, headers=auth_headers(API_KEY)).status_code
     except requests.RequestException:
         status = None
     rep.add('3 GET /metrics', SHOULD, status == 200, f'status={status}')
@@ -139,9 +144,9 @@ def check_determinism(
     drifts: List[float] = []
     t0 = time.time()
     for i, messages in enumerate(make_prompts(count, seed=7), 1):
-        first = greedy(base_url, model_id, messages, max_tokens, timeout)
+        first = greedy(base_url, model_id, messages, max_tokens, timeout, API_KEY)
         for _ in range(repeat):
-            agreement, drift = stability(first, greedy(base_url, model_id, messages, max_tokens, timeout))
+            agreement, drift = stability(first, greedy(base_url, model_id, messages, max_tokens, timeout, API_KEY))
             agreements.append(agreement)
             drifts.append(drift)
         if i % 10 == 0 or i == count:
@@ -216,7 +221,10 @@ def main() -> int:
         '--parallel', type=int, default=16, help='concurrent requests for the R6 overload probe (0 to skip)'
     )
     ap.add_argument('--overload-max-tokens', type=int, default=512)
+    ap.add_argument('--api-key', default=None, help='bearer for a remote runtime (sparkinfer --api-key)')
     args = ap.parse_args()
+    global API_KEY
+    API_KEY = args.api_key
     base_url = args.base_url.rstrip('/')
 
     rep = Report()

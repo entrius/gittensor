@@ -22,8 +22,8 @@ from functools import partial
 from typing import Dict, List, Set
 
 import bittensor as bt
-
 import wandb
+
 from gittensor import __version__
 from gittensor.classes import MinerEvaluation, MinerEvaluationCache
 from gittensor.serving.api import parse_api_keys, start_serving_api

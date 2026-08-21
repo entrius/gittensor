@@ -22,7 +22,7 @@ ARG CUDA_ARCHS=120
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        git ca-certificates curl build-essential cmake ninja-build pkg-config \
+        git ca-certificates curl build-essential cmake ninja-build pkg-config python3 \
     && rm -rf /var/lib/apt/lists/*
 # Rust is build-time only: tokenizers-cpp wraps HF `tokenizers` (server/README.md).
 RUN curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal

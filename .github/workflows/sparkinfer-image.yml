@@ -16,6 +16,15 @@ on:
         description: "CMAKE_CUDA_ARCHITECTURES"
         required: false
         default: "120"
+  # Build-only check (never pushes) whenever the Dockerfile or this workflow changes.
+  push:
+    paths:
+      - docker/sparkinfer.Dockerfile
+      - .github/workflows/sparkinfer-image.yml
+
+env:
+  # Ref used by the build-only check; dispatch runs use the input instead.
+  DEFAULT_SPARKINFER_REF: "1b8b962"
 
 jobs:
   build-and-push:
@@ -30,6 +39,7 @@ jobs:
           docker system prune -af
 
       - name: Log in to Docker Hub
+        if: github.event_name == 'workflow_dispatch'
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
@@ -43,11 +53,11 @@ jobs:
         with:
           context: .
           file: docker/sparkinfer.Dockerfile
-          push: true
+          push: ${{ github.event_name == 'workflow_dispatch' }}
           build-args: |
-            SPARKINFER_REF=${{ inputs.sparkinfer_ref }}
-            CUDA_ARCHS=${{ inputs.cuda_archs }}
+            SPARKINFER_REF=${{ inputs.sparkinfer_ref || env.DEFAULT_SPARKINFER_REF }}
+            CUDA_ARCHS=${{ inputs.cuda_archs || '120' }}
           tags: |
-            entrius/sparkinfer:${{ inputs.sparkinfer_ref }}
+            entrius/sparkinfer:${{ inputs.sparkinfer_ref || env.DEFAULT_SPARKINFER_REF }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

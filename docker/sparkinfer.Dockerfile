@@ -32,9 +32,12 @@ WORKDIR /src
 RUN git clone ${SPARKINFER_REPO} sparkinfer \
     && git -C sparkinfer checkout ${SPARKINFER_REF} \
     && git -C sparkinfer rev-parse HEAD > /src/SPARKINFER_COMMIT
+# Build everything, not just the server target: sparkinfer_server links the shared
+# libsparkinfer_runtime.so, and run.sh's ensure_sparkinfer() refuses to start unless the
+# runtime bench binaries (qwen3_gguf_bench/score/prefill_check) exist under build/runtime.
 RUN cmake -S sparkinfer -B sparkinfer/build -G Ninja \
         -DCMAKE_BUILD_TYPE=Release -DBUILD_SERVER=ON -DCMAKE_CUDA_ARCHITECTURES=${CUDA_ARCHS} \
-    && cmake --build sparkinfer/build --target sparkinfer_server
+    && cmake --build sparkinfer/build
 
 # ---------- runtime ----------
 FROM nvidia/cuda:${CUDA_VERSION}-runtime-ubuntu${UBUNTU_VERSION}
@@ -48,8 +51,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /opt/sparkinfer
 COPY --from=build /src/sparkinfer/server/run.sh      server/run.sh
 COPY --from=build /src/sparkinfer/bench/scripts       bench/scripts
-COPY --from=build /src/sparkinfer/build/server/sparkinfer_server build/server/sparkinfer_server
+COPY --from=build /src/sparkinfer/build/runtime       build/runtime
+COPY --from=build /src/sparkinfer/build/moe           build/moe
+COPY --from=build /src/sparkinfer/build/server        build/server
 COPY --from=build /src/SPARKINFER_COMMIT              SPARKINFER_COMMIT
+# sparkinfer_server links libsparkinfer_runtime.so + libsparkinfer_moe.so (ldd-verified on 1b8b962).
+ENV LD_LIBRARY_PATH=/opt/sparkinfer/build/runtime:/opt/sparkinfer/build/moe:${LD_LIBRARY_PATH}
 
 # Bake the pin into the image so a running container can report what it is (contract P2).
 # MODEL_SHA256: the blessed model file digest. Upstream's bench/scripts/reference.lock pins one too, but

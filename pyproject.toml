@@ -44,6 +44,10 @@ target-version = "py312"
 select = ["E", "F", "I"]
 ignore = ["E501"]
 
+[tool.ruff.lint.isort]
+# A local gitignored `wandb/` run-log dir would otherwise make ruff sort `wandb` as first-party.
+known-third-party = ["wandb"]
+
 [tool.ruff.format]
 quote-style = "single"
 

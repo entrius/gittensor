@@ -52,6 +52,10 @@ COPY --from=build /src/sparkinfer/build/server/sparkinfer_server build/server/sp
 COPY --from=build /src/SPARKINFER_COMMIT              SPARKINFER_COMMIT
 
 # Bake the pin into the image so a running container can report what it is (contract P2).
+# MODEL_SHA256: the blessed model file digest. Upstream's bench/scripts/reference.lock pins one too, but
+# HF repos get re-uploaded (unsloth's Qwen3.6 GGUF changed under sparkinfer 1b8b962's lock, 2026-08-21) and
+# run.sh then re-downloads forever. The release in serving_loadout.json carries model_sha256; pass it as
+# -e MODEL_SHA256=... (compose does) so the container verifies against OUR pin.
 ARG SPARKINFER_REF=main
 ENV SPARKINFER_REF=${SPARKINFER_REF} \
     MODELS_DIR=/opt/sparkinfer/models \

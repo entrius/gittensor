@@ -31,7 +31,12 @@ A **release** is the pair `(runtime_pin, model_id)`:
   top-level `model`. It MUST identify weights + quantisation unambiguously
   (e.g. `qwen3.6-35b-a3b` ↔ Qwen3.6-35B-A3B UD-Q4_K_M as shipped by sparkinfer).
 
-Changing either side is a new release and requires a new audit bank.
+- `model_sha256` — digest of the exact model file. Upstream lockfiles are not enough: HF repos get
+  re-uploaded under the same path (unsloth's Qwen3.6 GGUF changed under sparkinfer `1b8b962`'s
+  `reference.lock` on 2026-08-21, and its default start then re-downloads forever). The subnet pins
+  the digest itself and passes it to the runtime (`MODEL_SHA256` for sparkinfer's `run.sh`).
+
+Changing any of the three is a new release and requires recalibration.
 
 ## 3. HTTP surface
 

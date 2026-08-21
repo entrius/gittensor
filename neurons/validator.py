@@ -95,15 +95,15 @@ class Validator(BaseValidatorNeuron):
         if SERVING_ENABLED:
             api_keys = parse_api_keys(SERVING_API_KEYS)
             if api_keys:
-                loadout = load_serving_loadout()
+                release = load_serving_loadout().primary
                 self.serving_api = start_serving_api(
                     state=self.serving_state,
-                    loadout=loadout,
+                    release=release,
                     wallet=self.wallet,
                     api_keys=api_keys,
                     host=SERVING_API_HOST,
                     port=SERVING_API_PORT,
-                    request_timeout=loadout.request_timeout,
+                    request_timeout=release.request_timeout,
                 )
             else:
                 bt.logging.info('Serving: SERVING_API_KEYS unset — audits only, no API')

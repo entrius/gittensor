@@ -23,7 +23,7 @@ from typing import Dict, List, Optional, Protocol
 
 import requests
 
-from gittensor.serving.loadout import ServingLoadout
+from gittensor.serving.loadout import ServingRelease
 
 ECHO_BACKEND = 'echo'
 OPENAI_COMPAT_BACKEND = 'openai-compat'
@@ -85,8 +85,8 @@ def expected_completion(messages: List[Message], max_tokens: int, model_id: str)
 class EchoBackend:
     """GPU-free deterministic backend for localnet/testnet bring-up."""
 
-    def __init__(self, loadout: ServingLoadout):
-        self.model_id = loadout.model_id
+    def __init__(self, release: ServingRelease):
+        self.model_id = release.model_id
 
     def generate(self, messages: List[Message], max_tokens: int, logprobs: bool = False) -> GenerationResult:
         start = time.monotonic()
@@ -106,12 +106,12 @@ class OpenAICompatBackend:
     when present; other servers simply omit them.
     """
 
-    def __init__(self, loadout: ServingLoadout):
-        if not loadout.base_url:
-            raise ValueError('openai-compat backend requires base_url in the serving loadout')
-        self.model_id = loadout.model_id
-        self.base_url = loadout.base_url.rstrip('/')
-        self.timeout = loadout.request_timeout
+    def __init__(self, release: ServingRelease):
+        if not release.base_url:
+            raise ValueError('openai-compat backend requires base_url on the serving release')
+        self.model_id = release.model_id
+        self.base_url = release.base_url.rstrip('/')
+        self.timeout = release.request_timeout
 
     def generate(self, messages: List[Message], max_tokens: int, logprobs: bool = False) -> GenerationResult:
         body: Dict = {
@@ -151,9 +151,9 @@ class OpenAICompatBackend:
         )
 
 
-def load_backend(loadout: ServingLoadout) -> InferenceBackend:
-    if loadout.backend == ECHO_BACKEND:
-        return EchoBackend(loadout)
-    if loadout.backend == OPENAI_COMPAT_BACKEND:
-        return OpenAICompatBackend(loadout)
-    raise ValueError(f'Unknown serving backend: {loadout.backend}')
+def load_backend(release: ServingRelease) -> InferenceBackend:
+    if release.backend == ECHO_BACKEND:
+        return EchoBackend(release)
+    if release.backend == OPENAI_COMPAT_BACKEND:
+        return OpenAICompatBackend(release)
+    raise ValueError(f'Unknown serving backend: {release.backend}')

@@ -27,6 +27,7 @@ class ReadyMiner:
     hotkey: str
     axon: bt.AxonInfo
     score: float
+    model_id: str = ''  # release this miner passed audits for
 
 
 @dataclass
@@ -60,12 +61,13 @@ class ServingState:
         with self._lock:
             return list(self._ready.values())
 
-    def acquire(self) -> Optional[ReadyMiner]:
-        """Pick the READY miner with the fewest in-flight requests (ties -> higher score)."""
+    def acquire(self, model_id: Optional[str] = None) -> Optional[ReadyMiner]:
+        """Pick the READY miner (for ``model_id`` if given) with the fewest in-flight requests (ties -> higher score)."""
         with self._lock:
-            if not self._ready:
+            candidates = [u for u, m in self._ready.items() if model_id is None or m.model_id == model_id]
+            if not candidates:
                 return None
-            uid = min(self._ready, key=lambda u: (self._inflight.get(u, 0), -self._ready[u].score))
+            uid = min(candidates, key=lambda u: (self._inflight.get(u, 0), -self._ready[u].score))
             self._inflight[uid] = self._inflight.get(uid, 0) + 1
             return self._ready[uid]
 

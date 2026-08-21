@@ -1,8 +1,13 @@
 {
-  "model_id": "echo-v0",
-  "backend": "echo",
-  "base_url": null,
-  "max_tokens": 64,
-  "runtime_pin": "echo",
-  "audit_bank": null
+  "releases": [
+    {
+      "model_id": "echo-v0",
+      "backend": "echo",
+      "base_url": null,
+      "max_tokens": 64,
+      "runtime_pin": "echo",
+      "reference_url": null,
+      "audit_bank": null
+    }
+  ]
 }

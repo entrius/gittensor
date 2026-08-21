@@ -17,19 +17,21 @@
 
 """Serving miner neuron (sub-subnet B beta).
 
-Compute-miner archetype: serve inference for the current loadout, answer
+Compute-miner archetype: serve inference for one blessed release, answer
 validator challenges, get scored. Run it like the validator entrypoint:
 
     python neurons/serving_miner.py --netuid 74 --wallet.name miner --wallet.hotkey default \\
         --subtensor.network local --axon.port 8091
 
-The backend comes from the shared serving loadout (openai-compat = a local
+The release comes from the shared serving loadout (SERVING_RELEASE picks a
+model_id, default = primary; openai-compat = a local
 sparkinfer_server; echo = deterministic GPU-free mock for localnet via
 SERVING_LOADOUT_PATH=.../serving_loadout.echo.json).
 Miners run this blessed neuron unmodified — serving reward is availability
 and correctness based, so there is nothing to gain by editing it.
 """
 
+import os
 import time
 from functools import partial
 from typing import Tuple
@@ -44,15 +46,17 @@ from neurons.base.neuron import BaseNeuron
 
 
 class ServingMiner(BaseNeuron):
-    """Serves the loadout model over an axon and answers inference challenges."""
+    """Serves one release over an axon and answers inference challenges."""
 
     neuron_type: str = 'MinerNeuron'
 
     def __init__(self, config=None):
         super(ServingMiner, self).__init__(config=config)
 
-        self.loadout = load_serving_loadout()
-        self.backend: InferenceBackend = load_backend(self.loadout)
+        loadout = load_serving_loadout()
+        wanted = os.getenv('SERVING_RELEASE')
+        self.release = loadout.get(wanted) if wanted else loadout.primary
+        self.backend: InferenceBackend = load_backend(self.release)
 
         self.axon = bt.Axon(wallet=self.wallet, config=self.config)
         self.axon.attach(
@@ -69,7 +73,7 @@ class ServingMiner(BaseNeuron):
     def run(self):
         self.subtensor.serve_axon(netuid=self.config.netuid, axon=self.axon)
         self.axon.start()
-        bt.logging.info(f'ServingMiner serving | uid {self.uid} | model {self.loadout.model_id}')
+        bt.logging.info(f'ServingMiner serving | uid {self.uid} | model {self.release.model_id}')
 
         try:
             while True:

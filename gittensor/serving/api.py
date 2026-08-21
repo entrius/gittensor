@@ -31,7 +31,7 @@ from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from gittensor.constants import SERVING_MAX_TOKENS
-from gittensor.serving.loadout import ServingLoadout
+from gittensor.serving.loadout import ServingRelease
 from gittensor.serving.state import ReadyMiner, RequestRecord, ServingState
 from gittensor.synapses import InferenceSynapse
 
@@ -45,7 +45,7 @@ def parse_api_keys(raw: Optional[str]) -> Set[str]:
 
 def build_app(
     state: ServingState,
-    loadout: ServingLoadout,
+    release: ServingRelease,
     api_keys: Set[str],
     dendrite_factory,
     request_timeout: float,
@@ -79,14 +79,14 @@ def build_app(
         return {
             'object': 'list',
             'data': [
-                {'id': loadout.model_id, 'object': 'model', 'owned_by': 'gittensor', 'runtime_pin': loadout.runtime_pin}
+                {'id': release.model_id, 'object': 'model', 'owned_by': 'gittensor', 'runtime_pin': release.runtime_pin}
             ],
         }
 
     @app.get('/v1/serving/status')
     async def status(_: str = Depends(require_key)):
         snap = state.snapshot()
-        snap['model_id'] = loadout.model_id
+        snap['model_id'] = release.model_id
         snap['recent'] = [r.__dict__ for r in state.recent(50)]
         return snap
 
@@ -100,18 +100,18 @@ def build_app(
             raise HTTPException(status_code=400, detail='streaming is not supported yet')
         if body.get('n', 1) != 1:
             raise HTTPException(status_code=400, detail='n must be 1')
-        max_tokens = int(body.get('max_tokens') or body.get('max_completion_tokens') or loadout.max_tokens)
+        max_tokens = int(body.get('max_tokens') or body.get('max_completion_tokens') or release.max_tokens)
         max_tokens = max(1, min(max_tokens, SERVING_MAX_TOKENS))
         want_logprobs = bool(body.get('logprobs', False))
 
-        miner = state.acquire()
+        miner = state.acquire(release.model_id)
         if miner is None:
             raise HTTPException(status_code=429, detail='no READY serving capacity')
 
         request_id = f'chatcmpl-{uuid.uuid4().hex[:24]}'
         start = time.monotonic()
         try:
-            result = await _dispatch(get_dendrite(), miner, messages, max_tokens, loadout, request_timeout)
+            result = await _dispatch(get_dendrite(), miner, messages, max_tokens, release, request_timeout)
         finally:
             state.release(miner.uid)
         latency_ms = (time.monotonic() - start) * 1000.0
@@ -148,7 +148,7 @@ def build_app(
             'id': request_id,
             'object': 'chat.completion',
             'created': int(time.time()),
-            'model': result.served_model_id or loadout.model_id,
+            'model': result.served_model_id or release.model_id,
             'choices': [choice],
             'usage': result.usage or {},
             'gittensor': {
@@ -167,11 +167,11 @@ async def _dispatch(
     miner: ReadyMiner,
     messages: List[Dict[str, str]],
     max_tokens: int,
-    loadout: ServingLoadout,
+    release: ServingRelease,
     timeout: float,
 ) -> Optional[InferenceSynapse]:
     # logprobs always requested so organic traffic is indistinguishable from audits on the wire.
-    synapse = InferenceSynapse(messages=messages, model_id=loadout.model_id, max_tokens=max_tokens, logprobs=True)
+    synapse = InferenceSynapse(messages=messages, model_id=release.model_id, max_tokens=max_tokens, logprobs=True)
     responses = await dendrite(axons=[miner.axon], synapse=synapse, deserialize=False, timeout=timeout)
     return responses[0] if responses else None
 
@@ -202,7 +202,7 @@ class ServingApiThread:
 
 def start_serving_api(
     state: ServingState,
-    loadout: ServingLoadout,
+    release: ServingRelease,
     wallet: bt.Wallet,
     api_keys: Set[str],
     host: str,
@@ -211,7 +211,7 @@ def start_serving_api(
 ) -> ServingApiThread:
     if not api_keys:
         raise ValueError('SERVING_API_KEYS is empty; refusing to start without API keys')
-    app = build_app(state, loadout, api_keys, lambda: bt.Dendrite(wallet=wallet), request_timeout)
+    app = build_app(state, release, api_keys, lambda: bt.Dendrite(wallet=wallet), request_timeout)
     api = ServingApiThread(app, host, port)
     api.start()
     return api

@@ -6,9 +6,9 @@ import numpy as np
 from fastapi.testclient import TestClient
 
 from gittensor.serving.api import build_app, parse_api_keys
-from gittensor.serving.audit import AuditBank, AuditCase, EchoAuditBank, load_audit_bank, verify_response
+from gittensor.serving.audit import AuditCase, BankReference, EchoReference, reference_for, verify_response
 from gittensor.serving.backends import EchoBackend, GenerationResult, expected_completion
-from gittensor.serving.loadout import ECHO_LOADOUT_PATH, ServingLoadout, load_serving_loadout
+from gittensor.serving.loadout import ECHO_LOADOUT_PATH, ServingLoadout, ServingRelease, load_serving_loadout
 from gittensor.serving.state import ReadyMiner, RequestRecord, ServingState
 from gittensor.validator import emission_allocation
 from gittensor.validator.emission_allocation import blend_emission_pools
@@ -17,8 +17,8 @@ from gittensor.validator.serving.scoring import challenge_score, latency_credit
 MSGS = [{'role': 'user', 'content': 'prompt'}]
 
 
-def _echo_loadout() -> ServingLoadout:
-    return ServingLoadout(model_id='echo-v0', backend='echo', max_tokens=8)
+def _echo_release() -> ServingRelease:
+    return ServingRelease(model_id='echo-v0', backend='echo', max_tokens=8)
 
 
 def test_expected_completion_is_deterministic():
@@ -36,7 +36,7 @@ def test_expected_completion_varies_by_inputs():
 
 
 def test_echo_backend_matches_expected_completion():
-    backend = EchoBackend(_echo_loadout())
+    backend = EchoBackend(_echo_release())
     result = backend.generate(MSGS, 8, logprobs=True)
     ref = expected_completion(MSGS, 8, 'echo-v0')
     assert result.completion == ref.completion
@@ -46,17 +46,62 @@ def test_echo_backend_matches_expected_completion():
 
 
 def test_default_loadout_targets_sparkinfer():
-    loadout = load_serving_loadout()
-    assert loadout.backend == 'openai-compat'
-    assert loadout.base_url and loadout.audit_bank
-    assert loadout.max_tokens > 0
+    release = load_serving_loadout().primary
+    assert release.backend == 'openai-compat'
+    assert release.base_url and release.audit_bank and release.reference_url
+    assert release.max_tokens > 0
 
 
 def test_echo_loadout_loads_via_env(monkeypatch):
     monkeypatch.setenv('SERVING_LOADOUT_PATH', str(ECHO_LOADOUT_PATH))
     loadout = load_serving_loadout()
-    assert loadout.backend == 'echo'
-    assert isinstance(load_audit_bank(loadout), EchoAuditBank)
+    assert loadout.primary.backend == 'echo'
+    assert isinstance(reference_for(loadout.primary), EchoReference)
+
+
+def test_loadout_rejects_empty_and_duplicate_releases():
+    import pytest
+
+    with pytest.raises(ValueError):
+        ServingLoadout(releases=[])
+    with pytest.raises(ValueError):
+        ServingLoadout(releases=[_echo_release(), _echo_release()])
+
+
+def test_reference_url_env_override_and_release_lookup(monkeypatch):
+    monkeypatch.setenv('SERVING_LOADOUT_PATH', str(ECHO_LOADOUT_PATH))
+    monkeypatch.setenv('SERVING_REFERENCE_URL', 'http://127.0.0.1:9999')
+    loadout = load_serving_loadout()
+    assert loadout.primary.reference_url == 'http://127.0.0.1:9999'
+    assert loadout.get('echo-v0') is loadout.primary
+    # echo backend never uses a live reference even if a URL is set
+    assert isinstance(reference_for(loadout.primary), EchoReference)
+
+
+def test_live_reference_wins_over_bank(monkeypatch):
+    from gittensor.serving import audit
+
+    release = ServingRelease(
+        model_id='m', backend='openai-compat', base_url='http://x', reference_url='http://ref', audit_bank='nope.json'
+    )
+    ref = reference_for(release)
+    assert isinstance(ref, audit.LiveReference)
+    captured = {}
+
+    def fake_greedy(base_url, model_id, messages, max_tokens, timeout):
+        captured['base_url'] = base_url
+        return {
+            'messages': messages,
+            'max_tokens': max_tokens,
+            'reference_tokens': ['a', 'b'],
+            'reference_logprobs': [-0.1, -0.2],
+            'reference_completion': 'ab',
+        }
+
+    monkeypatch.setattr(audit, 'greedy', fake_greedy)
+    case = ref.sample()
+    assert captured['base_url'] == 'http://ref' and case.reference_tokens == ['a', 'b']
+    assert ref.case_for(MSGS, 4).max_tokens == 4
 
 
 # --- audit verification -----------------------------------------------------
@@ -123,7 +168,7 @@ def test_audit_bank_roundtrip(tmp_path):
             }
         )
     )
-    bank = AuditBank.load(path)
+    bank = BankReference.load(path)
     assert len(bank) == 1 and bank.sample().reference_tokens == case.reference_tokens
 
 
@@ -131,7 +176,7 @@ def test_audit_bank_roundtrip(tmp_path):
 
 
 def _ready(uid: int, score: float = 1.0) -> ReadyMiner:
-    return ReadyMiner(uid=uid, hotkey=f'hk{uid}', axon=None, score=score)  # type: ignore[arg-type]
+    return ReadyMiner(uid=uid, hotkey=f'hk{uid}', axon=None, score=score, model_id='echo-v0')  # type: ignore[arg-type]
 
 
 def test_state_least_inflight_dispatch():
@@ -155,6 +200,16 @@ def test_state_least_inflight_dispatch():
     assert state.snapshot()['gateway_ok'] == 1
 
 
+def test_acquire_filters_by_release():
+    state = ServingState()
+    other = ReadyMiner(uid=9, hotkey='hk9', axon=None, score=1.0, model_id='other-model')  # type: ignore[arg-type]
+    state.publish_ready([_ready(1), other])
+    assert state.acquire('other-model') is other
+    assert state.acquire('missing') is None
+    picked = state.acquire('echo-v0')
+    assert picked is not None and picked.uid == 1
+
+
 # --- gateway ----------------------------------------------------------------
 
 
@@ -171,7 +226,7 @@ class _FakeResponse:
 
 
 def _gateway_client(state: ServingState, monkeypatch):
-    loadout = _echo_loadout()
+    loadout = _echo_release()
 
     async def fake_dispatch(dendrite, miner, messages, max_tokens, lo, timeout):
         return _FakeResponse(expected_completion(messages, max_tokens, lo.model_id), lo.model_id)

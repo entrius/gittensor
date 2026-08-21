@@ -85,6 +85,12 @@ Requirements:
   signal for everyone behind it.
 - **R7 Streaming (MAY).** `stream: true` is not sent in v0. Runtimes SHOULD support it for the
   later streaming transport.
+- **R8 Teacher-forced scoring (SHOULD in v0, MUST in v1).** Given a prompt and a *supplied*
+  continuation, return the per-token logprob of each continuation token under the model without
+  generating (OpenAI legacy `POST /v1/completions` with `echo: true, logprobs: 1, max_tokens: 0`,
+  or an equivalent documented endpoint). This lets a validator audit *any* text — another miner's
+  answer, a perturbed reference, organic traffic — so there is nothing finite to memorise. It is
+  the audit primitive the subnet moves to after step 0.
 
 ### 3.2 `GET /v1/models`
 
@@ -123,6 +129,18 @@ Acceptance in v0: over a 200-prompt sample, p05 of prefix agreement across 3 rep
 p95 of mean |Δlogprob| ≤ 0.25 (provisional; the checker prints the observed values so maintainers
 can see where they land).
 
+### 4.1 How validators use the contract: the reference
+
+A validator verifies a release by running **its own conformant copy** of it — the same binary
+miners run, on the validator's own GPU (`reference_url` in the loadout, compose profile
+`reference`). Every audit draws a fresh prompt, asks the reference for the honest answer, and
+compares the miner's tokens/logprobs to it. Because the reference is live, any prompt can be
+audited (including mirrored organic traffic and, via R8, any text), so a miner cannot learn a
+fixed answer set. A validator without a GPU falls back to a *bank snapshot* of a reference
+(`audit_bank`, built by `scripts/build_serving_audit_bank.py`), which is finite and must be
+rotated. Either way the verifier code is identical and release-agnostic: adding a model or
+runtime to the subnet is "run a conformant copy + add a release entry", nothing more.
+
 ## 5. Identity & provenance
 
 - **P1.** Release binaries SHOULD be attestable (e.g. GitHub Artifact Attestations,
@@ -138,6 +156,9 @@ can see where they land).
 - **O2.** Startup MUST be unattended: a single command that downloads/verifies the pinned model
   and serves (sparkinfer: `server/run.sh --download --port 8080`). The miner entrypoint
   (`scripts/serving-miner-entrypoint.sh`) assumes the server is already listening.
+- **O2b.** Runtimes SHOULD publish a container image (or a Dockerfile) for the pinned release so
+  validators can run the reference copy via the compose `reference` profile and miners via the
+  miner entrypoint without a local toolchain. sparkinfer: open ask as of v0.
 - **O3.** Requests are bounded: the subnet caps `max_tokens` at `SERVING_MAX_TOKENS` (1024) and
   prompts at whatever the release's certified context is. The runtime SHOULD reject
   over-context prompts with 400, not truncate silently.
@@ -157,4 +178,5 @@ can see where they land).
 
 ## Changelog
 
-- **v0 (2026-08-21)** — initial contract extracted from `feat/serving-scaffold` step 0.
+- **v0 (2026-08-21)** — initial contract extracted from `feat/serving-scaffold` step 0. Same day: added R8
+  (teacher-forced scoring) and §4.1 (validator-owned live reference; bank demoted to fallback).

@@ -22,6 +22,30 @@ services:
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
 
+  # Optional reference runtime for the serving audit loop (profile "reference"). Runs the same blessed
+  # sparkinfer_server miners run, on the validator's own GPU, so audits compare against a live honest copy
+  # instead of a bank snapshot. sparkinfer publishes no container image yet (asked upstream), so this builds
+  # from a local checkout: SPARKINFER_SRC=/path/to/sparkinfer (must contain a Dockerfile building
+  # sparkinfer_server with -DBUILD_SERVER=ON; see docs/serving-runtime-contract.md §6).
+  #   docker compose -f docker-compose.vali.yml --profile reference up -d
+  # then set SERVING_REFERENCE_URL=http://reference:8080 in .env.
+  reference:
+    build:
+      context: ${SPARKINFER_SRC:-../sparkinfer}
+    container_name: gt-vali-reference
+    restart: unless-stopped
+    profiles: ["reference"]
+    command: ["./server/run.sh", "--download", "--port", "8080"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    volumes:
+      - ./data/models:/models
+
   watchtower:
     image: nickfedor/watchtower
     container_name: gittensor-watchtower

@@ -15,3 +15,12 @@ compute_spec:
   validator:
     cpu: 2 # Minimum number of CPU cores
     ram: 8 # Minimum RAM (GB)
+    # Serving sub-mechanism (SERVING_ENABLED=true) is opt-in. For best results the validator runs a live
+    # reference copy of each blessed release on its own GPU: 1x RTX 5090 (32 GB) per concurrently loaded
+    # release. Without a GPU it audits against bank snapshots published by GPU-owning validators (weaker).
+    serving_reference_gpu: "RTX 5090 (32 GB) per loaded release, optional"
+
+  serving_miner:
+    cpu: 4
+    ram: 32 # Minimum RAM (GB)
+    gpu: "RTX 5090 (32 GB)" # one blessed release per GPU; see docs/serving-runtime-contract.md

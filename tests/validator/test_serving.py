@@ -1,18 +1,30 @@
 """Tests for the serving beta: deterministic backend, audit verification, gateway dispatch, emission pool blending."""
 
 import json
+import random
+from pathlib import Path
 
 import numpy as np
+import pytest
 from fastapi.testclient import TestClient
 
+from gittensor.constants import SERVING_AUDIT_WINDOW
 from gittensor.serving.api import build_app, parse_api_keys
-from gittensor.serving.audit import AuditCase, BankReference, EchoReference, reference_for, verify_response
+from gittensor.serving.audit import (
+    AuditCase,
+    AuditWindow,
+    BankReference,
+    EchoReference,
+    overlap_threshold,
+    reference_for,
+    verify_response,
+)
 from gittensor.serving.backends import EchoBackend, GenerationResult, expected_completion
 from gittensor.serving.loadout import ECHO_LOADOUT_PATH, ServingLoadout, ServingRelease, load_serving_loadout
 from gittensor.serving.state import ReadyMiner, RequestRecord, ServingState
 from gittensor.validator import emission_allocation
 from gittensor.validator.emission_allocation import blend_emission_pools
-from gittensor.validator.serving.scoring import challenge_score, latency_credit
+from gittensor.validator.serving.scoring import latency_credit
 
 MSGS = [{'role': 'user', 'content': 'prompt'}]
 
@@ -290,9 +302,57 @@ def test_latency_credit_bands(monkeypatch):
     assert latency_credit(10_000.0) == 0.0
 
 
-def test_challenge_score_requires_correctness():
-    assert challenge_score(False, 10.0) == 0.0
-    assert challenge_score(True, 0.0) == 1.0
+def test_overlap_threshold_interpolates_calibrated_table():
+    table = ((1, 0.1), (5, 0.3), (20, 0.5))
+    assert overlap_threshold(0, table) == float('inf')
+    assert overlap_threshold(1, table) == 0.1
+    assert overlap_threshold(3, table) == pytest.approx(0.2)
+    assert overlap_threshold(20, table) == 0.5
+    assert overlap_threshold(50, table) == 0.5  # saturates at the largest window
+
+
+def test_audit_window_rolls_per_hotkey_and_release():
+    w = AuditWindow(size=3, thresholds=((1, 0.5),))
+    assert not w.verdict('hk', 'm').passed and w.verdict('hk', 'm').n_audits == 0
+    for x in (1.0, 1.0, 1.0, 0.0):  # oldest 1.0 rolls out -> mean 2/3
+        w.record('hk', 'm', x)
+    v = w.verdict('hk', 'm')
+    assert v.n_audits == 3 and v.mean_overlap == pytest.approx(2 / 3) and v.passed
+    w.record('hk', 'm', 0.0)  # mean 1/3 < 0.5
+    assert not w.verdict('hk', 'm').passed
+    w.record('hk', 'other', 1.0)  # releases are tracked separately
+    assert w.verdict('hk', 'other').passed
+    assert w.verdict('hk2', 'm').n_audits == 0  # a new hotkey on the same UID starts clean
+
+
+EXPERIMENT = Path(__file__).resolve().parents[2] / 'docs' / 'serving-experiments' / '2026-08-22-planted-cheater'
+
+
+def _replay(rows: list, window: int, trials: int, seed: int) -> float:
+    """Fraction of trials in which a miner drawing `window` audits from `rows` passes the default thresholds."""
+    rng = random.Random(seed)
+    passed = 0
+    for t in range(trials):
+        w = AuditWindow()
+        for _ in range(window):
+            w.record('hk', 'qwen3.6-35b-a3b', rng.choice(rows)['positional_overlap'])
+        passed += w.verdict('hk', 'qwen3.6-35b-a3b').passed
+    return passed / trials
+
+
+@pytest.mark.skipif(not EXPERIMENT.exists(), reason='experiment data not checked out')
+def test_audit_window_calibrated_on_experiment_data():
+    """The shipped thresholds must keep honest miners in and the planted cheaters out (docs/serving-experiments)."""
+    load = lambda name: json.load(open(EXPERIMENT / name))['rows']  # noqa: E731
+    honest = load('honest-rerun.json') + load('honest-under-load.json')
+    q2 = load('cheat-q2kxl-llamacpp.json')
+    llama_q4 = load('honestweights-llamacpp.json')
+    full = SERVING_AUDIT_WINDOW
+    assert _replay(honest, full, 2000, 1) >= 0.97  # ~1% FP by construction, slack for sampling
+    assert _replay(honest, 4, 2000, 2) >= 0.95  # first round (4 audits) is not a trap for honest miners
+    assert _replay(q2, full, 2000, 3) <= 0.01
+    assert _replay(q2, 10, 2000, 4) <= 0.02
+    assert _replay(llama_q4, full, 2000, 5) <= 0.12
 
 
 def test_blend_pays_serving_pool_pro_rata(monkeypatch):
@@ -322,3 +382,30 @@ def test_blend_default_share_is_shadow_mode():
     with_scores = blend_emission_pools({}, {}, miner_uids, serving_scores={1: 1.0})
     without_scores = blend_emission_pools({}, {}, miner_uids)
     assert np.allclose(with_scores, without_scores)
+
+
+def test_score_response_feeds_window_metrics():
+    from gittensor.synapses import InferenceSynapse
+    from gittensor.validator.serving.forward import score_response
+
+    release = _echo_release()
+    case = EchoReference(release).sample()
+    miss = InferenceSynapse(messages=case.messages, model_id=release.model_id, max_tokens=case.max_tokens)
+    verdict, ms, rec = score_response(3, miss, case, release)
+    assert verdict.positional_overlap == 0.0 and ms == float('inf') and not rec.ok
+
+    honest = InferenceSynapse(
+        messages=case.messages,
+        model_id=release.model_id,
+        max_tokens=case.max_tokens,
+        completion=case.reference_completion,
+        served_model_id=release.model_id,
+        tokens=list(case.reference_tokens),
+        token_logprobs=list(case.reference_logprobs),
+    )
+    verdict, _, rec = score_response(3, honest, case, release)
+    assert verdict.positional_overlap == 1.0 and verdict.passed and rec.ok
+
+    wrong = honest.model_copy(update={'served_model_id': 'other'})
+    verdict, _, rec = score_response(3, wrong, case, release)
+    assert verdict.positional_overlap == 0.0 and rec.detail.startswith('wrong model')

@@ -168,9 +168,18 @@ SERVING_CHALLENGES_PER_ROUND = 4  # audit prompts sent to each serving miner per
 SERVING_CHALLENGE_TIMEOUT = 30.0  # seconds before an audit counts as failed
 SERVING_LATENCY_FULL_CREDIT_MS = 1_500.0  # responses at or under this latency earn full latency credit
 SERVING_LATENCY_ZERO_CREDIT_MS = 8_000.0  # credit falls linearly to zero at this latency
-# PROVISIONAL audit tolerance bands — calibrate on a real 5090 (honest vs planted quant vs proxy) before paying.
+# Per-audit tolerance bands. TELEMETRY ONLY: against sparkinfer 1b8b962 an honest miner meets them on just
+# ~37% of audits (docs/serving-experiments/2026-08-22-planted-cheater), so they never decide pay or READY.
 SERVING_AUDIT_MIN_PREFIX_AGREEMENT = 0.80  # fraction of reference greedy tokens reproduced before first divergence
 SERVING_AUDIT_MAX_MEAN_ABS_LOGPROB_DIFF = 0.50  # mean |logprob delta| over the agreed prefix
+# What decides: the mean positional overlap (fraction of positions whose token matches the reference) over the
+# last SERVING_AUDIT_WINDOW audits of a (miner, release). A miner passes when that mean is >= the threshold for
+# the number of audits it has so far (linear interpolation between rows). Thresholds are the 1% false-positive
+# quantile of an honest miner's k-audit mean, bootstrapped from the experiment above; the window fills over
+# SERVING_AUDIT_WINDOW / SERVING_CHALLENGES_PER_ROUND rounds and the bar rises with it. Recalibrate per pin:
+#   python scripts/serving_cheat_experiment.py analyze --honest <honest rows> --cheaters <cheater rows>
+SERVING_AUDIT_WINDOW = 20
+SERVING_AUDIT_OVERLAP_THRESHOLDS = ((1, 0.016), (3, 0.143), (5, 0.232), (10, 0.339), (20, 0.415))
 SERVING_API_DEFAULT_PORT = 8790
 SERVING_MAX_TOKENS = 1024  # hard cap per request (API and miner both enforce)
 SERVING_REQUEST_LOG_SIZE = 5_000  # in-memory ring of recent API/audit requests (telemetry)

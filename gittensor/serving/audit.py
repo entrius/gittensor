@@ -21,32 +21,39 @@ Three references, picked per release by ``reference_for``:
 - ``EchoReference`` — derived on the fly for the deterministic echo backend so
   localnet needs neither a GPU nor a bank.
 
-Verification is a tolerance band, not an exact match, because greedy decode
-on a GPU is not bitwise deterministic across batches/kernels:
+Verification is statistical, not an exact match, because greedy decode on a
+GPU is not reproducible run to run (sparkinfer 1b8b962 forks the greedy path
+on most prompts; contract §4). ``verify_response`` measures one audit:
 
 - ``prefix_agreement``: fraction of the reference token sequence the miner
-  reproduced before first divergence. Substituted/quantized models fork the
-  greedy path early on a meaningful share of prompts; honest nondeterminism
-  forks rarely and late.
+  reproduced before first divergence.
 - ``mean_abs_logprob_diff``: mean |logprob_miner - logprob_reference| over the
-  agreed prefix. A different model assigns visibly different probabilities to
-  the same tokens even when it picks the same ones.
+  agreed prefix.
+- ``positional_overlap``: fraction of positions whose token matches the
+  reference, ignoring divergence. Same ranking as prefix agreement, less noisy.
 
-Both thresholds are PROVISIONAL and must be calibrated per release against
-the runtime's own measured stability (``scripts/check_serving_runtime.py``)
-before any emissions ride on them. Every audit requests ``logprobs=True``;
-the gateway does the same for organic traffic so the flag is not a tell.
+No single audit decides anything — an honest miner's distribution overlaps a
+cheater's. ``AuditWindow`` keeps the last ``SERVING_AUDIT_WINDOW`` overlaps per
+(hotkey, release) and passes the miner when their mean clears a threshold
+calibrated at a 1% honest false-positive rate for that many audits
+(``SERVING_AUDIT_OVERLAP_THRESHOLDS``; derivation and raw data in
+``docs/serving-experiments/2026-08-22-planted-cheater``). Missed or malformed
+audits enter the window as 0. Every audit requests ``logprobs=True``; the
+gateway does the same for organic traffic so the flag is not a tell.
 """
 
 import json
 import secrets
-from dataclasses import dataclass
+from collections import deque
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional, Protocol, Sequence
+from typing import Deque, Dict, List, Optional, Protocol, Sequence, Tuple
 
 from gittensor.constants import (
     SERVING_AUDIT_MAX_MEAN_ABS_LOGPROB_DIFF,
     SERVING_AUDIT_MIN_PREFIX_AGREEMENT,
+    SERVING_AUDIT_OVERLAP_THRESHOLDS,
+    SERVING_AUDIT_WINDOW,
 )
 from gittensor.serving.backends import Message, expected_completion
 from gittensor.serving.loadout import WEIGHTS_DIR, ServingRelease
@@ -64,18 +71,77 @@ class AuditCase:
 
 @dataclass
 class AuditVerdict:
+    """One audit's measurements. ``passed`` is the per-audit telemetry band; ``AuditWindow`` decides."""
+
     passed: bool
     prefix_agreement: float
     mean_abs_logprob_diff: float
     reason: str
+    positional_overlap: float = 0.0
 
     def as_dict(self) -> dict:
         return {
             'passed': self.passed,
             'prefix_agreement': round(self.prefix_agreement, 4),
             'mean_abs_logprob_diff': round(self.mean_abs_logprob_diff, 4),
+            'positional_overlap': round(self.positional_overlap, 4),
             'reason': self.reason,
         }
+
+
+def overlap_threshold(n_audits: int, table: Sequence[Tuple[int, float]] = SERVING_AUDIT_OVERLAP_THRESHOLDS) -> float:
+    """Pass bar for the mean overlap of ``n_audits`` audits: linear interpolation of the calibrated table."""
+    if n_audits <= 0:
+        return float('inf')
+    rows = sorted(table)
+    if n_audits <= rows[0][0]:
+        return rows[0][1]
+    for (k0, t0), (k1, t1) in zip(rows, rows[1:]):
+        if n_audits <= k1:
+            return t0 + (t1 - t0) * (n_audits - k0) / (k1 - k0)
+    return rows[-1][1]
+
+
+@dataclass
+class WindowVerdict:
+    passed: bool
+    n_audits: int
+    mean_overlap: float
+    threshold: float
+
+    def as_dict(self) -> dict:
+        return {
+            'passed': self.passed,
+            'n_audits': self.n_audits,
+            'mean_overlap': round(self.mean_overlap, 4),
+            'threshold': round(self.threshold, 4),
+        }
+
+
+@dataclass
+class AuditWindow:
+    """Rolling per-(hotkey, release) record of positional overlaps; the thing that actually passes a miner.
+
+    Keyed by hotkey so a UID that changes hands starts from an empty window.
+    """
+
+    size: int = SERVING_AUDIT_WINDOW
+    thresholds: Sequence[Tuple[int, float]] = SERVING_AUDIT_OVERLAP_THRESHOLDS
+    _overlaps: Dict[Tuple[str, str], Deque[float]] = field(default_factory=dict)
+
+    def record(self, hotkey: str, model_id: str, overlap: float) -> None:
+        key = (hotkey, model_id)
+        if key not in self._overlaps:
+            self._overlaps[key] = deque(maxlen=self.size)
+        self._overlaps[key].append(max(0.0, min(1.0, float(overlap))))
+
+    def verdict(self, hotkey: str, model_id: str) -> WindowVerdict:
+        xs = self._overlaps.get((hotkey, model_id))
+        if not xs:
+            return WindowVerdict(False, 0, 0.0, float('inf'))
+        mean = sum(xs) / len(xs)
+        threshold = overlap_threshold(len(xs), self.thresholds)
+        return WindowVerdict(mean >= threshold, len(xs), mean, threshold)
 
 
 class Reference(Protocol):
@@ -191,27 +257,31 @@ def verify_response(
     min_prefix_agreement: float = SERVING_AUDIT_MIN_PREFIX_AGREEMENT,
     max_mean_abs_logprob_diff: float = SERVING_AUDIT_MAX_MEAN_ABS_LOGPROB_DIFF,
 ) -> AuditVerdict:
-    """Compare a miner's greedy completion against the audit reference."""
+    """Measure one audit against the reference. ``passed`` is telemetry; feed ``positional_overlap`` to ``AuditWindow``."""
     if not tokens or token_logprobs is None or len(tokens) != len(token_logprobs):
         return AuditVerdict(False, 0.0, float('inf'), 'missing or malformed logprobs')
     if not case.reference_tokens:
         return AuditVerdict(False, 0.0, float('inf'), 'empty reference')
 
+    n_ref = len(case.reference_tokens)
     prefix = 0
     for mine, ref in zip(tokens, case.reference_tokens):
         if mine != ref:
             break
         prefix += 1
-    agreement = prefix / len(case.reference_tokens)
+    agreement = prefix / n_ref
+    overlap = sum(1 for mine, ref in zip(tokens, case.reference_tokens) if mine == ref) / n_ref
 
     if prefix == 0:
-        return AuditVerdict(False, 0.0, float('inf'), 'diverged at first token')
+        return AuditVerdict(False, 0.0, float('inf'), 'diverged at first token', overlap)
 
     diffs = [abs(float(a) - float(b)) for a, b in zip(token_logprobs[:prefix], case.reference_logprobs[:prefix])]
     mean_diff = sum(diffs) / len(diffs)
 
     if agreement < min_prefix_agreement:
-        return AuditVerdict(False, agreement, mean_diff, f'prefix agreement {agreement:.2f} < {min_prefix_agreement}')
+        reason = f'prefix agreement {agreement:.2f} < {min_prefix_agreement}'
+        return AuditVerdict(False, agreement, mean_diff, reason, overlap)
     if mean_diff > max_mean_abs_logprob_diff:
-        return AuditVerdict(False, agreement, mean_diff, f'logprob drift {mean_diff:.3f} > {max_mean_abs_logprob_diff}')
-    return AuditVerdict(True, agreement, mean_diff, 'ok')
+        reason = f'logprob drift {mean_diff:.3f} > {max_mean_abs_logprob_diff}'
+        return AuditVerdict(False, agreement, mean_diff, reason, overlap)
+    return AuditVerdict(True, agreement, mean_diff, 'ok', overlap)

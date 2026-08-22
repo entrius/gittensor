@@ -1,0 +1,273 @@
+{
+ "label": "honest-rerun",
+ "rows": [
+  {
+   "prefix_agreement": 1.0,
+   "mean_abs_logprob_diff": 0.01569517831953745,
+   "positional_overlap": 1.0,
+   "ms": 166
+  },
+  {
+   "prefix_agreement": 0.5396825396825397,
+   "mean_abs_logprob_diff": 0.03779007406795726,
+   "positional_overlap": 0.5555555555555556,
+   "ms": 165
+  },
+  {
+   "prefix_agreement": 0.15873015873015872,
+   "mean_abs_logprob_diff": 0.06781940460205078,
+   "positional_overlap": 0.2222222222222222,
+   "ms": 166
+  },
+  {
+   "prefix_agreement": 0.25396825396825395,
+   "mean_abs_logprob_diff": 0.006456732749938965,
+   "positional_overlap": 0.25396825396825395,
+   "ms": 141
+  },
+  {
+   "prefix_agreement": 1.0,
+   "mean_abs_logprob_diff": 0.0206099616156684,
+   "positional_overlap": 1.0,
+   "ms": 166
+  },
+  {
+   "prefix_agreement": 1.0,
+   "mean_abs_logprob_diff": 6.055075024801587e-08,
+   "positional_overlap": 1.0,
+   "ms": 165
+  },
+  {
+   "prefix_agreement": 0.3333333333333333,
+   "mean_abs_logprob_diff": 0.024458748953683034,
+   "positional_overlap": 0.4603174603174603,
+   "ms": 165
+  },
+  {
+   "prefix_agreement": 1.0,
+   "mean_abs_logprob_diff": 0.0073126838320777526,
+   "positional_overlap": 1.0,
+   "ms": 164
+  },
+  {
+   "prefix_agreement": 1.0,
+   "mean_abs_logprob_diff": 6.055075024801587e-08,
+   "positional_overlap": 1.0,
+   "ms": 163
+  },
+  {
+   "prefix_agreement": 0.49206349206349204,
+   "mean_abs_logprob_diff": 0.0397963370046308,
+   "positional_overlap": 0.5079365079365079,
+   "ms": 164
+  },
+  {
+   "prefix_agreement": 0.23809523809523808,
+   "mean_abs_logprob_diff": 0.016466649373372395,
+   "positional_overlap": 0.25396825396825395,
+   "ms": 163
+  },
+  {
+   "prefix_agreement": 0.3333333333333333,
+   "mean_abs_logprob_diff": 0.028975168863932293,
+   "positional_overlap": 0.3333333333333333,
+   "ms": 164
+  },
+  {
+   "prefix_agreement": 0.20634920634920634,
+   "mean_abs_logprob_diff": 0.012452492347130409,
+   "positional_overlap": 0.25396825396825395,
+   "ms": 163
+  },
+  {
+   "prefix_agreement": 0.07936507936507936,
+   "mean_abs_logprob_diff": 0.03374290466308594,
+   "positional_overlap": 0.1111111111111111,
+   "ms": 163
+  },
+  {
+   "prefix_agreement": 0.06349206349206349,
+   "mean_abs_logprob_diff": 0.008082389831542969,
+   "positional_overlap": 0.06349206349206349,
+   "ms": 163
+  },
+  {
+   "prefix_agreement": 0.07317073170731707,
+   "mean_abs_logprob_diff": 0.05119641621907552,
+   "positional_overlap": 0.07317073170731707,
+   "ms": 127
+  },
+  {
+   "prefix_agreement": 0.4126984126984127,
+   "mean_abs_logprob_diff": 0.029929527869591348,
+   "positional_overlap": 0.4126984126984127,
+   "ms": 165
+  },
+  {
+   "prefix_agreement": 0.6031746031746031,
+   "mean_abs_logprob_diff": 0.020104408264160156,
+   "positional_overlap": 0.6031746031746031,
+   "ms": 162
+  },
+  {
+   "prefix_agreement": 1.0,
+   "mean_abs_logprob_diff": 0.008481168746948242,
+   "positional_overlap": 1.0,
+   "ms": 115
+  },
+  {
+   "prefix_agreement": 0.8,
+   "mean_abs_logprob_diff": 0.06101745367050171,
+   "positional_overlap": 0.8,
+   "ms": 117
+  },
+  {
+   "prefix_agreement": 0.35294117647058826,
+   "mean_abs_logprob_diff": 0.006136258443196614,
+   "positional_overlap": 0.35294117647058826,
+   "ms": 101
+  },
+  {
+   "prefix_agreement": 1.0,
+   "mean_abs_logprob_diff": 0.008632538810608879,
+   "positional_overlap": 1.0,
+   "ms": 164
+  },
+  {
+   "prefix_agreement": 1.0,
+   "mean_abs_logprob_diff": 0.019315537952241443,
+   "positional_overlap": 1.0,
+   "ms": 166
+  },
+  {
+   "prefix_agreement": 0.4444444444444444,
+   "mean_abs_logprob_diff": 0.009863853454589844,
+   "positional_overlap": 0.4444444444444444,
+   "ms": 132
+  },
+  {
+   "prefix_agreement": 0.0,
+   "mean_abs_logprob_diff": Infinity,
+   "positional_overlap": 0.015873015873015872,
+   "ms": 163
+  },
+  {
+   "prefix_agreement": 0.3235294117647059,
+   "mean_abs_logprob_diff": 0.010794206099076704,
+   "positional_overlap": 0.7058823529411765,
+   "ms": 104
+  },
+  {
+   "prefix_agreement": 1.0,
+   "mean_abs_logprob_diff": 0.00843826172843812,
+   "positional_overlap": 1.0,
+   "ms": 162
+  },
+  {
+   "prefix_agreement": 1.0,
+   "mean_abs_logprob_diff": 0.009690178765190972,
+   "positional_overlap": 1.0,
+   "ms": 164
+  },
+  {
+   "prefix_agreement": 0.6666666666666666,
+   "mean_abs_logprob_diff": 0.03972598484584263,
+   "positional_overlap": 0.746031746031746,
+   "ms": 165
+  },
+  {
+   "prefix_agreement": 1.0,
+   "mean_abs_logprob_diff": 0.046605253219604494,
+   "positional_overlap": 1.0,
+   "ms": 115
+  },
+  {
+   "prefix_agreement": 0.3492063492063492,
+   "mean_abs_logprob_diff": 0.021781747991388493,
+   "positional_overlap": 0.3492063492063492,
+   "ms": 164
+  },
+  {
+   "prefix_agreement": 0.5555555555555556,
+   "mean_abs_logprob_diff": 0.008637292044503348,
+   "positional_overlap": 0.5714285714285714,
+   "ms": 162
+  },
+  {
+   "prefix_agreement": 1.0,
+   "mean_abs_logprob_diff": 6.055075024801587e-08,
+   "positional_overlap": 1.0,
+   "ms": 162
+  },
+  {
+   "prefix_agreement": 0.022222222222222223,
+   "mean_abs_logprob_diff": 0.04458808898925781,
+   "positional_overlap": 0.1111111111111111,
+   "ms": 119
+  },
+  {
+   "prefix_agreement": 0.0,
+   "mean_abs_logprob_diff": Infinity,
+   "positional_overlap": 0.3902439024390244,
+   "ms": 113
+  },
+  {
+   "prefix_agreement": 1.0,
+   "mean_abs_logprob_diff": 0.013615744454520089,
+   "positional_overlap": 1.0,
+   "ms": 163
+  },
+  {
+   "prefix_agreement": 0.058823529411764705,
+   "mean_abs_logprob_diff": 0.19526290893554688,
+   "positional_overlap": 0.09803921568627451,
+   "ms": 135
+  },
+  {
+   "prefix_agreement": 0.17777777777777778,
+   "mean_abs_logprob_diff": 0.007764577865600586,
+   "positional_overlap": 0.2,
+   "ms": 141
+  },
+  {
+   "prefix_agreement": 1.0,
+   "mean_abs_logprob_diff": 6.055075024801587e-08,
+   "positional_overlap": 1.0,
+   "ms": 164
+  },
+  {
+   "prefix_agreement": 0.7936507936507936,
+   "mean_abs_logprob_diff": 0.025022125244140624,
+   "positional_overlap": 0.8253968253968254,
+   "ms": 164
+  }
+ ],
+ "summary": {
+  "prefix_agreement": {
+   "min": 0.0,
+   "p05": 0.022222222222222223,
+   "median": 0.5158730158730158,
+   "p95": 1.0,
+   "max": 1.0,
+   "n_inf": 0
+  },
+  "mean_abs_logprob_diff": {
+   "min": 6.055075024801587e-08,
+   "p05": 6.055075024801587e-08,
+   "median": 0.016080913846454922,
+   "p95": 0.06101745367050171,
+   "max": 0.19526290893554688,
+   "n_inf": 2
+  },
+  "positional_overlap": {
+   "min": 0.015873015873015872,
+   "p05": 0.07317073170731707,
+   "median": 0.5634920634920635,
+   "p95": 1.0,
+   "max": 1.0,
+   "n_inf": 0
+  },
+  "pass_rate_0.80_0.50": 0.375,
+  "diverged_first_token": 0.05
+ }
+}

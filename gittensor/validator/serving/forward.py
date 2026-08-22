@@ -6,12 +6,15 @@
 Each round, for every blessed release, the validator sends audit prompts from
 that release's reference (live runtime on its own GPU, or a bank snapshot) to
 every serving axon over the same ``InferenceSynapse`` the gateway uses for
-user traffic, verifies the returned greedy tokens/logprobs within a tolerance
-band, and produces a per-UID serving score. A miner serves one release, so its
-score is the best it achieved across releases; miners that pass are published
-as READY (tagged with their release) to the gateway for the next round.
+user traffic, records each response's positional overlap with the reference
+into the miner's rolling ``AuditWindow``, and produces a per-UID serving score.
+A miner serves one release, so its score is the best it achieved across
+releases; miners whose window passes are published as READY (tagged with
+their release) to the gateway for the next round.
 
-    score = mean over audits of (audit passed) x latency_credit
+    score = window passes (0/1) x mean over this round's audits of latency_credit
+
+Misses count as overlap 0 in the window and latency credit 0 in the round.
 """
 
 from typing import TYPE_CHECKING, Dict, List, Tuple
@@ -22,11 +25,11 @@ from gittensor.constants import (
     SERVING_CHALLENGE_TIMEOUT,
     SERVING_CHALLENGES_PER_ROUND,
 )
-from gittensor.serving.audit import AuditCase, reference_for, verify_response
+from gittensor.serving.audit import AuditCase, AuditVerdict, reference_for, verify_response
 from gittensor.serving.loadout import ServingRelease, load_serving_loadout
 from gittensor.serving.state import ReadyMiner, RequestRecord, ServingState
 from gittensor.synapses import InferenceSynapse
-from gittensor.validator.serving.scoring import challenge_score
+from gittensor.validator.serving.scoring import latency_credit
 
 if TYPE_CHECKING:
     from neurons.validator import Validator
@@ -43,12 +46,13 @@ async def serving_challenges(self: 'Validator', miner_uids: set[int]) -> Dict[in
         return {}
 
     uids = [uid for uid, _ in serving]
+    hotkeys = {uid: self.metagraph.hotkeys[uid] for uid in uids}
     axons = [axon for _, axon in serving]
     best: Dict[int, Tuple[float, str]] = {uid: (0.0, '') for uid in uids}
 
     for release in loadout.releases:
         reference = reference_for(release)
-        totals: Dict[int, float] = {uid: 0.0 for uid in uids}
+        credit: Dict[int, float] = {uid: 0.0 for uid in uids}
         for _ in range(SERVING_CHALLENGES_PER_ROUND):
             case = reference.sample()
             synapse = InferenceSynapse(
@@ -58,11 +62,14 @@ async def serving_challenges(self: 'Validator', miner_uids: set[int]) -> Dict[in
                 axons=axons, synapse=synapse, deserialize=False, timeout=SERVING_CHALLENGE_TIMEOUT
             )
             for uid, response in zip(uids, responses):
-                score, record = score_response(uid, response, case, release)
-                totals[uid] += score
+                verdict, elapsed_ms, record = score_response(uid, response, case, release)
+                state.audits.record(hotkeys[uid], release.model_id, verdict.positional_overlap)
+                credit[uid] += latency_credit(elapsed_ms)
                 state.record(record)
-        for uid, total in totals.items():
-            score = total / SERVING_CHALLENGES_PER_ROUND
+        for uid in uids:
+            window = state.audits.verdict(hotkeys[uid], release.model_id)
+            score = (credit[uid] / SERVING_CHALLENGES_PER_ROUND) if window.passed else 0.0
+            bt.logging.debug(f'Serving: UID {uid} {release.model_id} window {window.as_dict()} score {score:.3f}')
             if score > best[uid][0]:
                 best[uid] = (score, release.model_id)
 
@@ -75,9 +82,7 @@ async def serving_challenges(self: 'Validator', miner_uids: set[int]) -> Dict[in
             + (f' ({model_id})' if model_id else '')
         )
         if score > 0.0:
-            ready.append(
-                ReadyMiner(uid=uid, hotkey=self.metagraph.hotkeys[uid], axon=axon, score=score, model_id=model_id)
-            )
+            ready.append(ReadyMiner(uid=uid, hotkey=hotkeys[uid], axon=axon, score=score, model_id=model_id))
     state.publish_ready(ready)
     bt.logging.info(f'Serving: {len(ready)} READY miner(s) published to gateway: {[m.uid for m in ready]}')
     return scores
@@ -102,7 +107,11 @@ def get_serving_axons(self: 'Validator', miner_uids: set[int]) -> List[Tuple[int
 
 def score_response(
     uid: int, response: InferenceSynapse, case: AuditCase, release: ServingRelease
-) -> Tuple[float, RequestRecord]:
+) -> Tuple[AuditVerdict, float, RequestRecord]:
+    """Measure one audit response: (verdict with positional_overlap, elapsed ms, telemetry record).
+
+    A missing response or a wrong model counts as overlap 0 and infinite latency.
+    """
     import time
 
     process_time = getattr(getattr(response, 'dendrite', None), 'process_time', None)
@@ -122,10 +131,11 @@ def score_response(
         )
 
     if getattr(response, 'completion', None) is None:
-        return 0.0, rec(False, 'no response')
-    if getattr(response, 'served_model_id', None) != release.model_id:
-        return 0.0, rec(False, f'wrong model {getattr(response, "served_model_id", None)!r}')
+        return AuditVerdict(False, 0.0, float('inf'), 'no response'), float('inf'), rec(False, 'no response')
+    served = getattr(response, 'served_model_id', None)
+    if served != release.model_id:
+        reason = f'wrong model {served!r}'
+        return AuditVerdict(False, 0.0, float('inf'), reason), float('inf'), rec(False, reason)
 
     verdict = verify_response(case, getattr(response, 'tokens', None), getattr(response, 'token_logprobs', None))
-    score = challenge_score(verdict.passed, elapsed_ms)
-    return score, rec(verdict.passed, verdict.reason)
+    return verdict, elapsed_ms, rec(verdict.passed, f'{verdict.reason} overlap={verdict.positional_overlap:.2f}')

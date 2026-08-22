@@ -19,6 +19,7 @@ from typing import Deque, Dict, List, Optional
 import bittensor as bt
 
 from gittensor.constants import SERVING_REQUEST_LOG_SIZE
+from gittensor.serving.audit import AuditWindow
 
 
 @dataclass
@@ -49,6 +50,7 @@ class ServingState:
     _ready: Dict[int, ReadyMiner] = field(default_factory=dict)
     _inflight: Dict[int, int] = field(default_factory=dict)
     _log: Deque[RequestRecord] = field(default_factory=lambda: deque(maxlen=SERVING_REQUEST_LOG_SIZE))
+    audits: AuditWindow = field(default_factory=AuditWindow)  # audit-loop thread only; in-memory, resets on restart
     last_round_ts: float = 0.0
 
     def publish_ready(self, miners: List[ReadyMiner]) -> None:

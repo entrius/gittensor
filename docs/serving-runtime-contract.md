@@ -195,9 +195,13 @@ Findings:
 - sparkinfer's missing first-token logprob (§9 #3) shifts cross-runtime comparisons by one token;
   the experiment aligns for it (`--drop-first`). Verifier code must not assume position 0 is present.
 
-Consequence for the verifier (step 0): score = rolling mean of positional overlap over the last
-N ≈ 20 audits per (miner, release), thresholded at a level calibrated from the reference's own
-re-run distribution; emit per-audit verdicts only as telemetry. Revisit once R8 lands.
+Consequence for the verifier (step 0, implemented): `AuditWindow` in `gittensor/serving/audit.py`
+keeps the last `SERVING_AUDIT_WINDOW = 20` positional overlaps per (hotkey, release) and passes the
+miner when their mean clears `SERVING_AUDIT_OVERLAP_THRESHOLDS` for that many audits (the 1 % FP
+column above, interpolated). Per-audit verdicts are telemetry only. Raw data, reproduction steps
+and the offline `analyze` command live in `docs/serving-experiments/2026-08-22-planted-cheater/`;
+`tests/validator/test_serving.py` replays that data so the constants cannot drift from it. Revisit
+once R8 lands.
 
 ## 5. Identity & provenance
 

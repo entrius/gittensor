@@ -157,6 +157,48 @@ fixed answer set. A validator without a GPU falls back to a *bank snapshot* of a
 rotated. Either way the verifier code is identical and release-agnostic: adding a model or
 runtime to the subnet is "run a conformant copy + add a release entry", nothing more.
 
+### 4.2 Planted-cheater experiment (2026-08-22, rented RTX 5090)
+
+Question: given the D1 jitter above, can the verifier still tell an honest miner from a cheaper
+one? Method: `scripts/serving_cheat_experiment.py` — 40 fresh prompts × 64 tokens recorded from the
+honest reference (sparkinfer `1b8b962`, UD-Q4_K_M), then the same prompts scored against each
+candidate. Metrics per prompt: prefix agreement (what `verify_response` uses), mean |Δlogprob| over
+the agreed prefix, and *positional overlap* (fraction of positions where the token matches,
+ignoring the first divergence).
+
+| candidate | runtime | prefix agreement med (p05–p95) | positional overlap med | drift med / max | ms med |
+|---|---|---|---|---|---|
+| honest, re-run | sparkinfer | 0.52 (0.02–1.00) | 0.56 | 0.016 / 0.195 | 163 |
+| honest, under 8 concurrent background requests | sparkinfer | 0.47 (0.06–1.00) | 0.65 | 0.016 / 0.179 | 163 |
+| UD-Q4_K_S (≈5 % smaller) | sparkinfer | 0.33 (0.08–1.00) | 0.40 | 0.033 / 0.108 | 161 |
+| UD-Q4_K_M (honest weights) | llama.cpp | 0.20 (0.00–1.00) | 0.24 | 0.045 / 0.154 | 607 |
+| UD-Q2_K_XL | llama.cpp | 0.09 (0.00–0.33) | 0.11 | 0.061 / 0.233 | 567 |
+
+Findings:
+
+- **Single-audit pass/fail cannot work against this pin.** With the current constants (prefix
+  ≥ 0.80, drift ≤ 0.50) the *honest* miner passes only 37 % of audits; the Q2 cheater passes 0 %.
+  Their per-audit distributions overlap (honest p05 0.02 vs cheater p95 0.33).
+- **Aggregating over a window does work.** Bootstrapping the per-prompt samples, with the
+  threshold set at a 1 % false-positive rate on honest miners (metric = mean positional overlap
+  over the last *k* audits): Q2_K_XL/llama.cpp is caught 83 % at k = 5, 99.8 % at k = 10, 100 % at
+  k = 20; honest-weights/llama.cpp (runtime substitution) 27 % at k = 5, 61 % at k = 10, 93 % at
+  k = 20. Q4_K_S under sparkinfer is the hardest case and needs a longer window still (summary only —
+  the per-prompt rows for that run were lost at teardown).
+- **Batching does not widen the drift** (row 2 ≈ row 1), so miners can be audited while serving.
+- **Logprob drift over the agreed prefix is a weak separator on its own** (0.016 honest vs 0.061
+  Q2) because the prefix is short whenever the models disagree; it becomes the primary signal only
+  with teacher-forced scoring (R8), where every position is compared.
+- **sparkinfer loads only F32/F16/Q8_0/Q4_K/Q5_K/Q6_K tensors** (`ggml_dequant_supported`), so a
+  cheaper quant *under sparkinfer* is limited to Q4_K_S; a cheap cheater necessarily uses another
+  runtime, which is both slower (~3.7×) and numerically farther away.
+- sparkinfer's missing first-token logprob (§9 #3) shifts cross-runtime comparisons by one token;
+  the experiment aligns for it (`--drop-first`). Verifier code must not assume position 0 is present.
+
+Consequence for the verifier (step 0): score = rolling mean of positional overlap over the last
+N ≈ 20 audits per (miner, release), thresholded at a level calibrated from the reference's own
+re-run distribution; emit per-audit verdicts only as telemetry. Revisit once R8 lands.
+
 ## 5. Identity & provenance
 
 - **P1.** Release binaries SHOULD be attestable (e.g. GitHub Artifact Attestations,
@@ -212,5 +254,6 @@ runtime to the subnet is "run a conformant copy + add a release entry", nothing 
 
 ## Changelog
 
+- **2026-08-22** — §4.2 planted-cheater experiment; verifier moves to a rolling-window aggregate.
 - **v0 (2026-08-21)** — initial contract extracted from `feat/serving-scaffold` step 0. Same day: added R8
   (teacher-forced scoring) and §4.1 (validator-owned live reference; bank demoted to fallback).

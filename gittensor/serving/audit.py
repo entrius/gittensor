@@ -38,7 +38,8 @@ cheater's. ``AuditWindow`` keeps the last ``SERVING_AUDIT_WINDOW`` overlaps per
 calibrated at a 1% honest false-positive rate for that many audits
 (``SERVING_AUDIT_OVERLAP_THRESHOLDS``; derivation and raw data in
 ``docs/serving-experiments/2026-08-22-planted-cheater``). Missed or malformed
-audits enter the window as 0. Every audit requests ``logprobs=True``; the
+audits enter the window as 0. The window is persisted by the validator
+(``serving_audits.json`` next to ``state.npz``) so a restart is not a reset. Every audit requests ``logprobs=True``; the
 gateway does the same for organic traffic so the flag is not a tell.
 """
 
@@ -134,6 +135,31 @@ class AuditWindow:
         if key not in self._overlaps:
             self._overlaps[key] = deque(maxlen=self.size)
         self._overlaps[key].append(max(0.0, min(1.0, float(overlap))))
+
+    def to_dict(self) -> dict:
+        return {'size': self.size, 'overlaps': [[hk, mid, list(xs)] for (hk, mid), xs in self._overlaps.items()]}
+
+    @classmethod
+    def from_dict(cls, raw: dict, **kwargs) -> 'AuditWindow':
+        window = cls(**kwargs)
+        for hk, mid, xs in raw.get('overlaps', []):
+            for x in xs[-window.size :]:
+                window.record(str(hk), str(mid), float(x))
+        return window
+
+    def save(self, path: Path) -> None:
+        """Persist so a validator restart does not reset every miner to an empty (lenient) window."""
+        tmp = path.with_suffix(path.suffix + '.tmp')
+        tmp.write_text(json.dumps(self.to_dict()))
+        tmp.replace(path)
+
+    @classmethod
+    def load(cls, path: Path, **kwargs) -> 'AuditWindow':
+        """Load a saved window; a missing or unreadable file yields an empty one."""
+        try:
+            return cls.from_dict(json.loads(path.read_text()), **kwargs)
+        except (OSError, ValueError, TypeError):
+            return cls(**kwargs)
 
     def verdict(self, hotkey: str, model_id: str) -> WindowVerdict:
         xs = self._overlaps.get((hotkey, model_id))

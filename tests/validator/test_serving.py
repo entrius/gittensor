@@ -2,6 +2,7 @@
 
 import json
 import random
+import statistics
 from pathlib import Path
 
 import numpy as np
@@ -409,3 +410,43 @@ def test_score_response_feeds_window_metrics():
     wrong = honest.model_copy(update={'served_model_id': 'other'})
     verdict, _, rec = score_response(3, wrong, case, release)
     assert verdict.positional_overlap == 0.0 and rec.detail.startswith('wrong model')
+
+
+@pytest.mark.skipif(not EXPERIMENT.exists(), reason='experiment data not checked out')
+def test_latency_credit_calibrated_on_experiment_data():
+    """Honest on-box latency plus a long-haul RTT keeps full credit; a cross-region proxy does not."""
+    load = lambda name: [r['ms'] for r in json.load(open(EXPERIMENT / name))['rows']]  # noqa: E731
+    honest = load('honest-rerun.json') + load('honest-under-load.json')
+    intercontinental_rtt = 250.0
+    assert all(latency_credit(ms + intercontinental_rtt) == 1.0 for ms in honest)
+    # proxy: validator -> miner -> remote GPU in another region, each hop an RTT, plus the remote's own compute
+    proxied = [ms + intercontinental_rtt + 2 * 150.0 for ms in honest]
+    assert max(latency_credit(ms) for ms in proxied) < 1.0
+    # a slower runtime behind the proxy (llama.cpp, measured) loses most of its credit
+    slow_proxy = [ms + intercontinental_rtt + 2 * 150.0 for ms in load('honestweights-llamacpp.json')]
+    assert statistics.median(latency_credit(ms) for ms in slow_proxy) < 0.4
+
+
+def test_audit_window_persists_across_restart(tmp_path):
+    path = tmp_path / 'serving_audits.json'
+    assert AuditWindow.load(path).verdict('hk', 'm').n_audits == 0  # missing file -> empty window
+    w = AuditWindow(size=3)
+    for x in (0.2, 0.9, 0.8, 0.7):  # 0.2 rolls out
+        w.record('hk', 'm', x)
+    w.record('hk2', 'm', 1.0)
+    w.save(path)
+    loaded = AuditWindow.load(path, size=3)
+    assert loaded.verdict('hk', 'm').as_dict() == w.verdict('hk', 'm').as_dict()
+    assert loaded.verdict('hk2', 'm').n_audits == 1
+    path.write_text('not json')
+    assert AuditWindow.load(path).verdict('hk', 'm').n_audits == 0  # corrupt file -> empty window, no crash
+
+
+def test_audit_window_path_follows_neuron_state_dir(tmp_path):
+    from types import SimpleNamespace
+
+    from gittensor.validator.serving.forward import audit_window_path
+
+    vali = SimpleNamespace(config=SimpleNamespace(neuron=SimpleNamespace(full_path=str(tmp_path))))
+    assert audit_window_path(vali) == tmp_path / 'serving_audits.json'  # type: ignore[arg-type]
+    assert audit_window_path(SimpleNamespace()) is None  # type: ignore[arg-type]

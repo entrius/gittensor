@@ -17,7 +17,8 @@ their release) to the gateway for the next round.
 Misses count as overlap 0 in the window and latency credit 0 in the round.
 """
 
-from typing import TYPE_CHECKING, Dict, List, Tuple
+from pathlib import Path
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 import bittensor as bt
 
@@ -73,6 +74,13 @@ async def serving_challenges(self: 'Validator', miner_uids: set[int]) -> Dict[in
             if score > best[uid][0]:
                 best[uid] = (score, release.model_id)
 
+    path = audit_window_path(self)
+    if path is not None:
+        try:
+            state.audits.save(path)
+        except OSError as e:
+            bt.logging.warning(f'Serving: could not persist audit window to {path}: {e}')
+
     scores = {uid: score for uid, (score, _) in best.items()}
     ready: List[ReadyMiner] = []
     for uid, axon in serving:
@@ -86,6 +94,12 @@ async def serving_challenges(self: 'Validator', miner_uids: set[int]) -> Dict[in
     state.publish_ready(ready)
     bt.logging.info(f'Serving: {len(ready)} READY miner(s) published to gateway: {[m.uid for m in ready]}')
     return scores
+
+
+def audit_window_path(self: 'Validator') -> Optional[Path]:
+    """Where the rolling audit window is persisted: next to state.npz, or None when the neuron has no state dir."""
+    full_path = getattr(getattr(getattr(self, 'config', None), 'neuron', None), 'full_path', None)
+    return Path(full_path) / 'serving_audits.json' if full_path else None
 
 
 def get_serving_axons(self: 'Validator', miner_uids: set[int]) -> List[Tuple[int, bt.AxonInfo]]:

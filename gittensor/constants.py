@@ -166,8 +166,14 @@ MAX_MAINTAINER_CUT = 0.5  # maintaining is only half of the problem to software,
 SERVING_EMISSION_SHARE = 0.0
 SERVING_CHALLENGES_PER_ROUND = 4  # audit prompts sent to each serving miner per scoring round
 SERVING_CHALLENGE_TIMEOUT = 30.0  # seconds before an audit counts as failed
-SERVING_LATENCY_FULL_CREDIT_MS = 1_500.0  # responses at or under this latency earn full latency credit
-SERVING_LATENCY_ZERO_CREDIT_MS = 8_000.0  # credit falls linearly to zero at this latency
+# Latency credit for a 64-token audit (release.max_tokens). An honest 5090 answers in ~165 ms on-box
+# (docs/serving-experiments/2026-08-22-planted-cheater: p95 166 ms); add validator<->miner RTT and an
+# honest miner anywhere on earth lands under ~450 ms. Credit is flat to FULL and falls linearly to 0 at
+# ZERO, so a miner proxying audits to a GPU in another region (extra RTT + a slower runtime: llama.cpp
+# measured ~600 ms) loses credit in proportion. Same-region proxying is NOT visible here; that is the
+# one-GPU-many-hotkeys case, caught by concurrent burst audits (launch plan, gap 0).
+SERVING_LATENCY_FULL_CREDIT_MS = 500.0
+SERVING_LATENCY_ZERO_CREDIT_MS = 1_500.0
 # Per-audit tolerance bands. TELEMETRY ONLY: against sparkinfer 1b8b962 an honest miner meets them on just
 # ~37% of audits (docs/serving-experiments/2026-08-22-planted-cheater), so they never decide pay or READY.
 SERVING_AUDIT_MIN_PREFIX_AGREEMENT = 0.80  # fraction of reference greedy tokens reproduced before first divergence

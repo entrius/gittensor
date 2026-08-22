@@ -70,6 +70,15 @@ Observations:
 4. Runtime substitution alone is visible (0.24 vs 0.56) and ~3.7× slower.
 5. Q4_K_S under sparkinfer is the hardest case (0.40 vs 0.56); with the per-prompt rows lost we can't bootstrap it, but by eye it needs k ≳ 40. A 5 % smaller file is also the least rewarding cheat.
 
+## What else the data calibrates
+
+- **Latency credit** (`SERVING_LATENCY_FULL_CREDIT_MS = 500`, `ZERO = 1500`, `gittensor/constants.py`):
+  honest on-box p95 is 166 ms, so honest + any earthly RTT stays under the full-credit line, while a
+  miner proxying audits to a GPU in another region (one more RTT each way) or to a slower runtime
+  (llama.cpp ≈ 600 ms) loses credit in proportion. Latency cannot see a proxy in the *same* region
+  — that is the one-GPU-many-hotkeys case, which concurrent burst audits address.
+  `test_latency_credit_calibrated_on_experiment_data` replays the `ms` column.
+
 ## Files
 
 | file | what |

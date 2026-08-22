@@ -27,6 +27,7 @@ import wandb
 from gittensor import __version__
 from gittensor.classes import MinerEvaluation, MinerEvaluationCache
 from gittensor.serving.api import parse_api_keys, start_serving_api
+from gittensor.serving.audit import AuditWindow
 from gittensor.serving.loadout import load_serving_loadout
 from gittensor.serving.state import ServingState
 from gittensor.validator import pat_storage
@@ -39,6 +40,7 @@ from gittensor.validator.pat_handler import (
     priority_pat_broadcast,
     priority_pat_check,
 )
+from gittensor.validator.serving.forward import audit_window_path
 from gittensor.validator.utils.config import (
     SERVING_API_HOST,
     SERVING_API_KEYS,
@@ -91,6 +93,9 @@ class Validator(BaseValidatorNeuron):
         # Serving sub-mechanism (beta): audit loop publishes READY miners here; the inference API dispatches to them.
         # The API starts only when SERVING_API_KEYS is set.
         self.serving_state = ServingState()
+        audits_path = audit_window_path(self)
+        if audits_path is not None:
+            self.serving_state.audits = AuditWindow.load(audits_path)
         self.serving_api = None
         if SERVING_ENABLED:
             api_keys = parse_api_keys(SERVING_API_KEYS)

@@ -10,8 +10,9 @@ on:
   workflow_dispatch:
     inputs:
       sparkinfer_ref:
-        description: "sparkinfer commit/tag to build (becomes the image tag and runtime_pin)"
+        description: "sparkinfer commit to build (becomes the image tag and runtime_pin). Keep in sync with DEFAULT_SPARKINFER_REF below."
         required: true
+        default: "9e43bfa"
       cuda_archs:
         description: "CMAKE_CUDA_ARCHITECTURES"
         required: false

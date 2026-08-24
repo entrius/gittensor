@@ -174,18 +174,22 @@ SERVING_CHALLENGE_TIMEOUT = 30.0  # seconds before an audit counts as failed
 # one-GPU-many-hotkeys case, caught by concurrent burst audits (launch plan, gap 0).
 SERVING_LATENCY_FULL_CREDIT_MS = 500.0
 SERVING_LATENCY_ZERO_CREDIT_MS = 1_500.0
-# Per-audit tolerance bands. TELEMETRY ONLY: against sparkinfer 1b8b962 an honest miner meets them on just
-# ~37% of audits (docs/serving-experiments/2026-08-22-planted-cheater), so they never decide pay or READY.
-SERVING_AUDIT_MIN_PREFIX_AGREEMENT = 0.80  # fraction of reference greedy tokens reproduced before first divergence
-SERVING_AUDIT_MAX_MEAN_ABS_LOGPROB_DIFF = 0.50  # mean |logprob delta| over the agreed prefix
-# What decides: the mean positional overlap (fraction of positions whose token matches the reference) over the
-# last SERVING_AUDIT_WINDOW audits of a (miner, release). A miner passes when that mean is >= the threshold for
-# the number of audits it has so far (linear interpolation between rows). Thresholds are the 1% false-positive
-# quantile of an honest miner's k-audit mean, bootstrapped from the experiment above; the window fills over
-# SERVING_AUDIT_WINDOW / SERVING_CHALLENGES_PER_ROUND rounds and the bar rises with it. Recalibrate per pin:
+# Per-audit verdict. The blessed runtime is bit-reproducible (sparkinfer 9e43bfa, SPARKINFER_DETERMINISTIC=1), so an
+# honest miner reproduces the reference's greedy tokens exactly and its logprobs to float noise; every planted
+# cheater differs on every prompt (docs/serving-experiments/2026-08-24-deterministic-pin: honest max |delta| 0.0000,
+# cheapest cheater min mean |delta| 0.0057 / min max |delta| 0.129). Both bands must hold for an audit to pass.
+SERVING_AUDIT_MIN_PREFIX_AGREEMENT = 1.0  # fraction of reference greedy tokens reproduced before first divergence
+SERVING_AUDIT_MAX_MEAN_ABS_LOGPROB_DIFF = 0.005  # mean |logprob delta| over the agreed prefix
+SERVING_AUDIT_MAX_ABS_LOGPROB_DIFF = 0.10  # largest single-position |logprob delta|
+# Rolling window: the mean of per-audit outcomes (1 pass / 0 fail; misses and wrong model are 0) over the last
+# SERVING_AUDIT_WINDOW audits of a (hotkey, release) must reach the threshold for the number of audits seen so
+# far (rows are (k, threshold), linearly interpolated, flat beyond the last row). With a deterministic runtime the
+# honest mean is 1.0, so the bar only leaves room for transient misses: one miss costs a round at 4 audits/round.
+# History: the 1b8b962 pin needed a positional-overlap window with a calibrated ramp (0.016 at k=1 .. 0.415 at
+# k=20) — see docs/serving-experiments/2026-08-22-planted-cheater. Recalibrate with
 #   python scripts/serving_cheat_experiment.py analyze --honest <honest rows> --cheaters <cheater rows>
 SERVING_AUDIT_WINDOW = 20
-SERVING_AUDIT_OVERLAP_THRESHOLDS = ((1, 0.016), (3, 0.143), (5, 0.232), (10, 0.339), (20, 0.415))
+SERVING_AUDIT_WINDOW_THRESHOLDS = ((1, 0.85),)
 SERVING_API_DEFAULT_PORT = 8790
 SERVING_MAX_TOKENS = 1024  # hard cap per request (API and miner both enforce)
 SERVING_REQUEST_LOG_SIZE = 5_000  # in-memory ring of recent API/audit requests (telemetry)

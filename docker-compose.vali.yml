@@ -33,8 +33,10 @@ services:
     restart: unless-stopped
     profiles: ["reference"]
     environment:
-      # model_sha256 from the release in serving_loadout.json (overrides upstream's stale reference.lock pin)
+      # model_sha256 from the release in serving_loadout.json (overrides upstream's reference.lock pin)
       MODEL_SHA256: ${SPARKINFER_MODEL_SHA256:-}
+      # already baked into the image; repeated here so nobody turns it off by accident (contract D1)
+      SPARKINFER_DETERMINISTIC: "1"
     deploy:
       resources:
         reservations:

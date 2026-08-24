@@ -109,6 +109,38 @@ def greedy(
     }
 
 
+def score(
+    base_url: str,
+    model_id: str,
+    messages: List[Dict[str, str]],
+    completion: str,
+    timeout: float,
+    api_key: Optional[str] = None,
+    top_logprobs: int = 1,
+) -> dict:
+    """Teacher-forced scoring (contract R8): per-token logprobs of ``completion`` under the model.
+
+    Returns ``tokens``, ``logprobs`` and, when ``top_logprobs`` > 0, ``argmax`` (the model's own
+    top token at each position) so a verifier can compare any miner output position by position.
+    """
+    r = requests.post(
+        f'{base_url.rstrip("/")}/v1/score',
+        headers=auth_headers(api_key),
+        json={'model': model_id, 'messages': messages, 'completion': completion, 'top_logprobs': top_logprobs},
+        timeout=timeout,
+    )
+    r.raise_for_status()
+    payload = r.json()
+    out = {
+        'tokens': list(payload['tokens']),
+        'logprobs': [float(x) for x in payload['logprobs']],
+        'usage': payload.get('usage') or {},
+    }
+    if top_logprobs > 0 and payload.get('top_logprobs'):
+        out['argmax'] = [(alts[0]['token'] if alts else None) for alts in payload['top_logprobs']]
+    return out
+
+
 def stability(a: dict, b: dict) -> tuple[float, float]:
     prefix = 0
     for x, y in zip(a['reference_tokens'], b['reference_tokens']):

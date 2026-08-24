@@ -1,13 +1,18 @@
 # Planted-cheater experiment — 2026-08-22
 
+> **Superseded 2026-08-24.** Pin `9e43bfa` made the runtime deterministic; the verifier is back to
+> a decisive per-audit verdict and the window/threshold ramp described here is history. See
+> [`../2026-08-24-deterministic-pin`](../2026-08-24-deterministic-pin/README.md). Kept because
+> it is the calibration method for any future non-deterministic runtime.
+
 **Question.** sparkinfer `1b8b962` is not logit-reproducible run to run (contract §4, D1). Can the
 validator still tell an honest miner from a cheaper one, and how many audits does it take?
 
 **Answer.** Not per audit — an honest miner passes the original per-audit bands only 37 % of the
 time. Yes over a window: the mean *positional overlap* of the last 10–20 audits separates every
 cheater we planted at a 1 % honest false-positive rate. This is why `gittensor/serving/audit.py`
-scores with `AuditWindow` rather than a per-audit verdict, and where
-`SERVING_AUDIT_OVERLAP_THRESHOLDS` in `gittensor/constants.py` comes from.
+grew `AuditWindow`; the threshold ramp it used against this pin was `((1, 0.016), (3, 0.143),
+(5, 0.232), (10, 0.339), (20, 0.415))`.
 
 ## Setup
 
@@ -57,7 +62,7 @@ metric = mean positional_overlap over the last k audits; threshold at 1% honest 
  40     0.470                  1.000                  0.999
 ```
 
-The threshold column is the `(k, threshold)` table in `SERVING_AUDIT_OVERLAP_THRESHOLDS`. The
+The threshold column was the `(k, threshold)` table shipped as `SERVING_AUDIT_OVERLAP_THRESHOLDS` until 08-24. The
 power columns are the probability a cheater's k-audit mean falls below that threshold (bootstrap,
 20 000 draws, per-prompt rows resampled with replacement — so this treats audits as independent
 draws from the 40-prompt distribution).
@@ -100,8 +105,7 @@ python scripts/serving_cheat_experiment.py score  --model-id qwen3.6-35b-a3b --r
 python scripts/serving_cheat_experiment.py analyze --honest honest-rerun.json honest-under-load.json --cheaters cheat-q2kxl-llamacpp.json honestweights-llamacpp.json
 ```
 
-`tests/validator/test_serving.py::test_audit_window_calibrated_on_experiment_data` replays these
-rows through `AuditWindow` so the thresholds can't silently drift from the data.
+The latency-credit test still replays the `ms` column of these rows.
 
 ## When to redo this
 

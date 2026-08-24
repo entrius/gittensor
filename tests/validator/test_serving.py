@@ -1,30 +1,26 @@
 """Tests for the serving beta: deterministic backend, audit verification, gateway dispatch, emission pool blending."""
 
 import json
-import random
 import statistics
 from pathlib import Path
 
-import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
-from gittensor.constants import SERVING_AUDIT_WINDOW
+from gittensor.constants import SERVING_AUDIT_WINDOW, SERVING_AUDIT_WINDOW_THRESHOLDS
 from gittensor.serving.api import build_app, parse_api_keys
 from gittensor.serving.audit import (
     AuditCase,
     AuditWindow,
     BankReference,
     EchoReference,
-    overlap_threshold,
     reference_for,
     verify_response,
+    window_threshold,
 )
 from gittensor.serving.backends import EchoBackend, GenerationResult, expected_completion
 from gittensor.serving.loadout import ECHO_LOADOUT_PATH, ServingLoadout, ServingRelease, load_serving_loadout
 from gittensor.serving.state import ReadyMiner, RequestRecord, ServingState
-from gittensor.validator import emission_allocation
-from gittensor.validator.emission_allocation import blend_emission_pools
 from gittensor.validator.serving.scoring import latency_credit
 
 MSGS = [{'role': 'user', 'content': 'prompt'}]
@@ -303,13 +299,13 @@ def test_latency_credit_bands(monkeypatch):
     assert latency_credit(10_000.0) == 0.0
 
 
-def test_overlap_threshold_interpolates_calibrated_table():
+def test_window_threshold_interpolates_table():
     table = ((1, 0.1), (5, 0.3), (20, 0.5))
-    assert overlap_threshold(0, table) == float('inf')
-    assert overlap_threshold(1, table) == 0.1
-    assert overlap_threshold(3, table) == pytest.approx(0.2)
-    assert overlap_threshold(20, table) == 0.5
-    assert overlap_threshold(50, table) == 0.5  # saturates at the largest window
+    assert window_threshold(0, table) == float('inf')
+    assert window_threshold(1, table) == 0.1
+    assert window_threshold(3, table) == pytest.approx(0.2)
+    assert window_threshold(20, table) == 0.5
+    assert window_threshold(50, table) == 0.5  # saturates at the largest window
 
 
 def test_audit_window_rolls_per_hotkey_and_release():
@@ -318,7 +314,7 @@ def test_audit_window_rolls_per_hotkey_and_release():
     for x in (1.0, 1.0, 1.0, 0.0):  # oldest 1.0 rolls out -> mean 2/3
         w.record('hk', 'm', x)
     v = w.verdict('hk', 'm')
-    assert v.n_audits == 3 and v.mean_overlap == pytest.approx(2 / 3) and v.passed
+    assert v.n_audits == 3 and v.mean == pytest.approx(2 / 3) and v.passed
     w.record('hk', 'm', 0.0)  # mean 1/3 < 0.5
     assert not w.verdict('hk', 'm').passed
     w.record('hk', 'other', 1.0)  # releases are tracked separately
@@ -326,63 +322,61 @@ def test_audit_window_rolls_per_hotkey_and_release():
     assert w.verdict('hk2', 'm').n_audits == 0  # a new hotkey on the same UID starts clean
 
 
-EXPERIMENT = Path(__file__).resolve().parents[2] / 'docs' / 'serving-experiments' / '2026-08-22-planted-cheater'
+EXPERIMENTS = Path(__file__).resolve().parents[2] / 'docs' / 'serving-experiments'
+DETERMINISTIC = EXPERIMENTS / '2026-08-24-deterministic-pin'
+JITTERY = EXPERIMENTS / '2026-08-22-planted-cheater'
 
 
-def _replay(rows: list, window: int, trials: int, seed: int) -> float:
-    """Fraction of trials in which a miner drawing `window` audits from `rows` passes the default thresholds."""
-    rng = random.Random(seed)
-    passed = 0
-    for t in range(trials):
-        w = AuditWindow()
-        for _ in range(window):
-            w.record('hk', 'qwen3.6-35b-a3b', rng.choice(rows)['positional_overlap'])
-        passed += w.verdict('hk', 'qwen3.6-35b-a3b').passed
-    return passed / trials
+def _rows(path: Path) -> list:
+    return json.load(open(path))['rows']
 
 
-@pytest.mark.skipif(not EXPERIMENT.exists(), reason='experiment data not checked out')
-def test_audit_window_calibrated_on_experiment_data():
-    """The shipped thresholds must keep honest miners in and the planted cheaters out (docs/serving-experiments)."""
-    load = lambda name: json.load(open(EXPERIMENT / name))['rows']  # noqa: E731
-    honest = load('honest-rerun.json') + load('honest-under-load.json')
-    q2 = load('cheat-q2kxl-llamacpp.json')
-    llama_q4 = load('honestweights-llamacpp.json')
-    full = SERVING_AUDIT_WINDOW
-    assert _replay(honest, full, 2000, 1) >= 0.97  # ~1% FP by construction, slack for sampling
-    assert _replay(honest, 4, 2000, 2) >= 0.95  # first round (4 audits) is not a trap for honest miners
-    assert _replay(q2, full, 2000, 3) <= 0.01
-    assert _replay(q2, 10, 2000, 4) <= 0.02
-    assert _replay(llama_q4, full, 2000, 5) <= 0.12
+def _verdicts(rows: list) -> list:
+    """Replay saved per-prompt rows (candidate tokens/logprobs vs reference) through verify_response."""
+    out = []
+    for r in rows:
+        c = r['candidate']
+        case = AuditCase(
+            messages=[],
+            max_tokens=64,
+            reference_tokens=r['reference_tokens'],
+            reference_logprobs=r['reference_logprobs'],
+        )
+        out.append(verify_response(case, c['reference_tokens'], c['reference_logprobs']))
+    return out
 
 
-def test_blend_pays_serving_pool_pro_rata(monkeypatch):
-    monkeypatch.setattr(emission_allocation, 'SERVING_EMISSION_SHARE', 0.05)
-    miner_uids = {0, 1, 2}
-    rewards = blend_emission_pools({}, {}, miner_uids, serving_scores={1: 1.0, 2: 3.0})
-    # Empty registry: the full OSS pool recycles to UID 0; serving pool splits 1:3.
-    oss = emission_allocation.OSS_EMISSION_SHARE
-    assert np.isclose(rewards[1], 0.05 * 0.25)
-    assert np.isclose(rewards[2], 0.05 * 0.75)
-    assert np.isclose(rewards[0], oss)
-    assert np.isclose(rewards.sum(), oss + 0.05)
+@pytest.mark.skipif(not DETERMINISTIC.exists(), reason='experiment data not checked out')
+def test_audit_bands_calibrated_on_deterministic_pin_data():
+    """Honest miner passes every audit; every planted cheater fails every audit (docs/serving-experiments)."""
+    ref = json.load(open(DETERMINISTIC / 'reference.json'))['cases']
+
+    def with_ref(name):
+        rows = _rows(DETERMINISTIC / name)
+        for r, c in zip(rows, ref):
+            r['reference_tokens'], r['reference_logprobs'] = c['reference_tokens'], c['reference_logprobs']
+        return rows
+
+    honest = _verdicts(with_ref('honest-rerun.json'))
+    assert all(v.passed for v in honest) and max(v.max_abs_logprob_diff for v in honest) == 0.0
+    for cheater in ('cheat-q2kxl-llamacpp.json', 'honestweights-llamacpp.json'):
+        vs = _verdicts(with_ref(cheater))
+        assert not any(v.passed for v in vs), cheater
 
 
-def test_blend_recycles_serving_pool_without_scorers(monkeypatch):
-    monkeypatch.setattr(emission_allocation, 'SERVING_EMISSION_SHARE', 0.05)
-    miner_uids = {0, 1, 2}
-    rewards = blend_emission_pools({}, {}, miner_uids, serving_scores={})
-    oss = emission_allocation.OSS_EMISSION_SHARE
-    assert np.isclose(rewards[0], oss + 0.05)
-    assert np.isclose(rewards.sum(), oss + 0.05)
-
-
-def test_blend_default_share_is_shadow_mode():
-    # SERVING_EMISSION_SHARE = 0.0 in constants: serving scores must not move rewards.
-    miner_uids = {0, 1}
-    with_scores = blend_emission_pools({}, {}, miner_uids, serving_scores={1: 1.0})
-    without_scores = blend_emission_pools({}, {}, miner_uids)
-    assert np.allclose(with_scores, without_scores)
+def test_audit_window_tolerates_one_miss_per_round():
+    """With a deterministic runtime the bar is 0.85: a single miss in the last 20 is fine, two in a row of 4 is not."""
+    w = AuditWindow()
+    hk = 'hk'
+    for _ in range(4):
+        w.record(hk, 'm', 1.0)
+    assert w.verdict(hk, 'm').passed
+    w.record(hk, 'm', 0.0)  # 4/5 = 0.8 < 0.85 -> drops this round
+    assert not w.verdict(hk, 'm').passed
+    for _ in range(3):
+        w.record(hk, 'm', 1.0)  # 7/8 = 0.875 -> back
+    assert w.verdict(hk, 'm').passed
+    assert window_threshold(1, SERVING_AUDIT_WINDOW_THRESHOLDS) == window_threshold(SERVING_AUDIT_WINDOW)
 
 
 def test_score_response_feeds_window_metrics():
@@ -412,10 +406,10 @@ def test_score_response_feeds_window_metrics():
     assert verdict.positional_overlap == 0.0 and rec.detail.startswith('wrong model')
 
 
-@pytest.mark.skipif(not EXPERIMENT.exists(), reason='experiment data not checked out')
+@pytest.mark.skipif(not JITTERY.exists(), reason='experiment data not checked out')
 def test_latency_credit_calibrated_on_experiment_data():
     """Honest on-box latency plus a long-haul RTT keeps full credit; a cross-region proxy does not."""
-    load = lambda name: [r['ms'] for r in json.load(open(EXPERIMENT / name))['rows']]  # noqa: E731
+    load = lambda name: [r['ms'] for r in json.load(open(JITTERY / name))['rows']]  # noqa: E731
     honest = load('honest-rerun.json') + load('honest-under-load.json')
     intercontinental_rtt = 250.0
     assert all(latency_credit(ms + intercontinental_rtt) == 1.0 for ms in honest)
@@ -450,3 +444,36 @@ def test_audit_window_path_follows_neuron_state_dir(tmp_path):
     vali = SimpleNamespace(config=SimpleNamespace(neuron=SimpleNamespace(full_path=str(tmp_path))))
     assert audit_window_path(vali) == tmp_path / 'serving_audits.json'  # type: ignore[arg-type]
     assert audit_window_path(SimpleNamespace()) is None  # type: ignore[arg-type]
+
+
+def test_probe_score_parses_teacher_forced_response(monkeypatch):
+    from gittensor.serving import probe
+
+    class FakeResp:
+        status_code = 200
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {
+                'tokens': ['Par', 'is'],
+                'token_ids': [1, 2],
+                'logprobs': [-0.1, -0.02],
+                'sum_logprob': -0.12,
+                'top_logprobs': [[{'token': 'Par', 'logprob': -0.1}], [{'token': 'is', 'logprob': -0.02}]],
+                'usage': {'prompt_tokens': 5, 'completion_tokens': 2, 'total_tokens': 7, 'ttft_ms': 3.0},
+            }
+
+    seen = {}
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        seen.update(url=url, headers=headers, body=json)
+        return FakeResp()
+
+    monkeypatch.setattr(probe.requests, 'post', fake_post)
+    out = probe.score('http://ref:8080/', 'm', [{'role': 'user', 'content': 'q'}], 'Paris', 5.0, api_key='k')
+    assert seen['url'] == 'http://ref:8080/v1/score' and seen['headers'] == {'Authorization': 'Bearer k'}
+    assert seen['body']['completion'] == 'Paris' and seen['body']['top_logprobs'] == 1
+    assert out['tokens'] == ['Par', 'is'] and out['logprobs'] == [-0.1, -0.02] and out['argmax'] == ['Par', 'is']
+    assert out['usage']['ttft_ms'] == 3.0

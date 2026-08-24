@@ -21,26 +21,30 @@ Three references, picked per release by ``reference_for``:
 - ``EchoReference`` — derived on the fly for the deterministic echo backend so
   localnet needs neither a GPU nor a bank.
 
-Verification is statistical, not an exact match, because greedy decode on a
-GPU is not reproducible run to run (sparkinfer 1b8b962 forks the greedy path
-on most prompts; contract §4). ``verify_response`` measures one audit:
+``verify_response`` measures one audit against the reference's greedy output:
 
 - ``prefix_agreement``: fraction of the reference token sequence the miner
   reproduced before first divergence.
-- ``mean_abs_logprob_diff``: mean |logprob_miner - logprob_reference| over the
-  agreed prefix.
+- ``mean_abs_logprob_diff`` / ``max_abs_logprob_diff``: |logprob_miner -
+  logprob_reference| over the agreed prefix.
 - ``positional_overlap``: fraction of positions whose token matches the
-  reference, ignoring divergence. Same ranking as prefix agreement, less noisy.
+  reference, ignoring divergence (telemetry).
 
-No single audit decides anything — an honest miner's distribution overlaps a
-cheater's. ``AuditWindow`` keeps the last ``SERVING_AUDIT_WINDOW`` overlaps per
-(hotkey, release) and passes the miner when their mean clears a threshold
-calibrated at a 1% honest false-positive rate for that many audits
-(``SERVING_AUDIT_OVERLAP_THRESHOLDS``; derivation and raw data in
-``docs/serving-experiments/2026-08-22-planted-cheater``). Missed or malformed
-audits enter the window as 0. The window is persisted by the validator
-(``serving_audits.json`` next to ``state.npz``) so a restart is not a reset. Every audit requests ``logprobs=True``; the
-gateway does the same for organic traffic so the flag is not a tell.
+The blessed runtime is bit-reproducible (sparkinfer 9e43bfa with
+``SPARKINFER_DETERMINISTIC=1``), so an honest miner reproduces the reference
+exactly and ``passed`` is decisive per audit: all tokens match and logprobs
+agree to float noise (``SERVING_AUDIT_*`` bands in constants.py, calibrated in
+``docs/serving-experiments/2026-08-24-deterministic-pin``). ``AuditWindow``
+keeps the last ``SERVING_AUDIT_WINDOW`` outcomes per (hotkey, release) and
+publishes the miner while their mean clears ``SERVING_AUDIT_WINDOW_THRESHOLDS``
+— it absorbs transient misses; it is not there to average out model noise (that
+was the 1b8b962 design, ``docs/serving-experiments/2026-08-22-planted-cheater``).
+Missed or malformed audits enter the window as 0. The validator persists the
+window (``serving_audits.json`` next to ``state.npz``) so a restart is not a
+reset. ``LiveReference.score`` exposes teacher-forced scoring (R8) for text the
+reference did not generate — the primitive for auditing organic, non-greedy
+traffic later. Every audit requests ``logprobs=True``; the gateway does the same
+for organic traffic so the flag is not a tell.
 """
 
 import json
@@ -51,14 +55,15 @@ from pathlib import Path
 from typing import Deque, Dict, List, Optional, Protocol, Sequence, Tuple
 
 from gittensor.constants import (
+    SERVING_AUDIT_MAX_ABS_LOGPROB_DIFF,
     SERVING_AUDIT_MAX_MEAN_ABS_LOGPROB_DIFF,
     SERVING_AUDIT_MIN_PREFIX_AGREEMENT,
-    SERVING_AUDIT_OVERLAP_THRESHOLDS,
     SERVING_AUDIT_WINDOW,
+    SERVING_AUDIT_WINDOW_THRESHOLDS,
 )
 from gittensor.serving.backends import Message, expected_completion
 from gittensor.serving.loadout import WEIGHTS_DIR, ServingRelease
-from gittensor.serving.probe import greedy, make_prompts
+from gittensor.serving.probe import greedy, make_prompts, score
 
 
 @dataclass
@@ -72,13 +77,19 @@ class AuditCase:
 
 @dataclass
 class AuditVerdict:
-    """One audit's measurements. ``passed`` is the per-audit telemetry band; ``AuditWindow`` decides."""
+    """One audit's measurements; ``passed`` is the verdict that enters the window."""
 
     passed: bool
     prefix_agreement: float
     mean_abs_logprob_diff: float
     reason: str
     positional_overlap: float = 0.0
+    max_abs_logprob_diff: float = float('inf')
+
+    @property
+    def value(self) -> float:
+        """What the window records: 1 for a pass, 0 otherwise."""
+        return 1.0 if self.passed else 0.0
 
     def as_dict(self) -> dict:
         return {
@@ -86,12 +97,13 @@ class AuditVerdict:
             'prefix_agreement': round(self.prefix_agreement, 4),
             'mean_abs_logprob_diff': round(self.mean_abs_logprob_diff, 4),
             'positional_overlap': round(self.positional_overlap, 4),
+            'max_abs_logprob_diff': round(self.max_abs_logprob_diff, 4),
             'reason': self.reason,
         }
 
 
-def overlap_threshold(n_audits: int, table: Sequence[Tuple[int, float]] = SERVING_AUDIT_OVERLAP_THRESHOLDS) -> float:
-    """Pass bar for the mean overlap of ``n_audits`` audits: linear interpolation of the calibrated table."""
+def window_threshold(n_audits: int, table: Sequence[Tuple[int, float]] = SERVING_AUDIT_WINDOW_THRESHOLDS) -> float:
+    """Pass bar for the window mean after ``n_audits`` audits: linear interpolation of the table, flat beyond it."""
     if n_audits <= 0:
         return float('inf')
     rows = sorted(table)
@@ -107,42 +119,42 @@ def overlap_threshold(n_audits: int, table: Sequence[Tuple[int, float]] = SERVIN
 class WindowVerdict:
     passed: bool
     n_audits: int
-    mean_overlap: float
+    mean: float
     threshold: float
 
     def as_dict(self) -> dict:
         return {
             'passed': self.passed,
             'n_audits': self.n_audits,
-            'mean_overlap': round(self.mean_overlap, 4),
+            'mean': round(self.mean, 4),
             'threshold': round(self.threshold, 4),
         }
 
 
 @dataclass
 class AuditWindow:
-    """Rolling per-(hotkey, release) record of positional overlaps; the thing that actually passes a miner.
+    """Rolling per-(hotkey, release) record of audit outcomes in [0, 1]; publishes a miner while the mean holds.
 
     Keyed by hotkey so a UID that changes hands starts from an empty window.
     """
 
     size: int = SERVING_AUDIT_WINDOW
-    thresholds: Sequence[Tuple[int, float]] = SERVING_AUDIT_OVERLAP_THRESHOLDS
-    _overlaps: Dict[Tuple[str, str], Deque[float]] = field(default_factory=dict)
+    thresholds: Sequence[Tuple[int, float]] = SERVING_AUDIT_WINDOW_THRESHOLDS
+    _values: Dict[Tuple[str, str], Deque[float]] = field(default_factory=dict)
 
-    def record(self, hotkey: str, model_id: str, overlap: float) -> None:
+    def record(self, hotkey: str, model_id: str, value: float) -> None:
         key = (hotkey, model_id)
-        if key not in self._overlaps:
-            self._overlaps[key] = deque(maxlen=self.size)
-        self._overlaps[key].append(max(0.0, min(1.0, float(overlap))))
+        if key not in self._values:
+            self._values[key] = deque(maxlen=self.size)
+        self._values[key].append(max(0.0, min(1.0, float(value))))
 
     def to_dict(self) -> dict:
-        return {'size': self.size, 'overlaps': [[hk, mid, list(xs)] for (hk, mid), xs in self._overlaps.items()]}
+        return {'size': self.size, 'values': [[hk, mid, list(xs)] for (hk, mid), xs in self._values.items()]}
 
     @classmethod
     def from_dict(cls, raw: dict, **kwargs) -> 'AuditWindow':
         window = cls(**kwargs)
-        for hk, mid, xs in raw.get('overlaps', []):
+        for hk, mid, xs in raw.get('values', raw.get('overlaps', [])):
             for x in xs[-window.size :]:
                 window.record(str(hk), str(mid), float(x))
         return window
@@ -162,11 +174,11 @@ class AuditWindow:
             return cls(**kwargs)
 
     def verdict(self, hotkey: str, model_id: str) -> WindowVerdict:
-        xs = self._overlaps.get((hotkey, model_id))
+        xs = self._values.get((hotkey, model_id))
         if not xs:
             return WindowVerdict(False, 0, 0.0, float('inf'))
         mean = sum(xs) / len(xs)
-        threshold = overlap_threshold(len(xs), self.thresholds)
+        threshold = window_threshold(len(xs), self.thresholds)
         return WindowVerdict(mean >= threshold, len(xs), mean, threshold)
 
 
@@ -260,6 +272,12 @@ class LiveReference:
         messages = make_prompts(1, seed=secrets.randbits(64))[0]
         return self.case_for(messages)
 
+    def score(self, messages: List[Message], completion: str) -> dict:
+        """Teacher-forced logprobs of ``completion`` under the reference (R8): verifies text the reference
+        did not generate, e.g. a miner's sampled answer to an organic request. A trailing end-of-turn token
+        in the miner's token list is not part of the text; strip it before comparing lengths."""
+        return score(self.base_url, self.model_id, messages, completion, self.timeout, self.api_key)
+
     def __len__(self) -> int:
         return 1
 
@@ -282,8 +300,9 @@ def verify_response(
     token_logprobs: Optional[Sequence[float]],
     min_prefix_agreement: float = SERVING_AUDIT_MIN_PREFIX_AGREEMENT,
     max_mean_abs_logprob_diff: float = SERVING_AUDIT_MAX_MEAN_ABS_LOGPROB_DIFF,
+    max_abs_logprob_diff: float = SERVING_AUDIT_MAX_ABS_LOGPROB_DIFF,
 ) -> AuditVerdict:
-    """Measure one audit against the reference. ``passed`` is telemetry; feed ``positional_overlap`` to ``AuditWindow``."""
+    """Measure one audit against the reference; ``passed`` requires every band to hold."""
     if not tokens or token_logprobs is None or len(tokens) != len(token_logprobs):
         return AuditVerdict(False, 0.0, float('inf'), 'missing or malformed logprobs')
     if not case.reference_tokens:
@@ -303,11 +322,15 @@ def verify_response(
 
     diffs = [abs(float(a) - float(b)) for a, b in zip(token_logprobs[:prefix], case.reference_logprobs[:prefix])]
     mean_diff = sum(diffs) / len(diffs)
+    max_diff = max(diffs)
 
     if agreement < min_prefix_agreement:
         reason = f'prefix agreement {agreement:.2f} < {min_prefix_agreement}'
-        return AuditVerdict(False, agreement, mean_diff, reason, overlap)
+        return AuditVerdict(False, agreement, mean_diff, reason, overlap, max_diff)
     if mean_diff > max_mean_abs_logprob_diff:
-        reason = f'logprob drift {mean_diff:.3f} > {max_mean_abs_logprob_diff}'
-        return AuditVerdict(False, agreement, mean_diff, reason, overlap)
-    return AuditVerdict(True, agreement, mean_diff, 'ok', overlap)
+        reason = f'logprob drift {mean_diff:.4f} > {max_mean_abs_logprob_diff}'
+        return AuditVerdict(False, agreement, mean_diff, reason, overlap, max_diff)
+    if max_diff > max_abs_logprob_diff:
+        reason = f'logprob outlier {max_diff:.4f} > {max_abs_logprob_diff}'
+        return AuditVerdict(False, agreement, mean_diff, reason, overlap, max_diff)
+    return AuditVerdict(True, agreement, mean_diff, 'ok', overlap, max_diff)

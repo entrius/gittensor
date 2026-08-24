@@ -6,15 +6,16 @@
 Each round, for every blessed release, the validator sends audit prompts from
 that release's reference (live runtime on its own GPU, or a bank snapshot) to
 every serving axon over the same ``InferenceSynapse`` the gateway uses for
-user traffic, records each response's positional overlap with the reference
-into the miner's rolling ``AuditWindow``, and produces a per-UID serving score.
+user traffic, verifies each response against the reference (exact tokens,
+logprobs to float noise — the runtime is deterministic) and records the
+outcome into the miner's rolling ``AuditWindow``, and produces a per-UID serving score.
 A miner serves one release, so its score is the best it achieved across
 releases; miners whose window passes are published as READY (tagged with
 their release) to the gateway for the next round.
 
     score = window passes (0/1) x mean over this round's audits of latency_credit
 
-Misses count as overlap 0 in the window and latency credit 0 in the round.
+Misses count as 0 in the window and latency credit 0 in the round.
 """
 
 from pathlib import Path
@@ -64,7 +65,7 @@ async def serving_challenges(self: 'Validator', miner_uids: set[int]) -> Dict[in
             )
             for uid, response in zip(uids, responses):
                 verdict, elapsed_ms, record = score_response(uid, response, case, release)
-                state.audits.record(hotkeys[uid], release.model_id, verdict.positional_overlap)
+                state.audits.record(hotkeys[uid], release.model_id, verdict.value)
                 credit[uid] += latency_credit(elapsed_ms)
                 state.record(record)
         for uid in uids:
@@ -124,7 +125,7 @@ def score_response(
 ) -> Tuple[AuditVerdict, float, RequestRecord]:
     """Measure one audit response: (verdict with positional_overlap, elapsed ms, telemetry record).
 
-    A missing response or a wrong model counts as overlap 0 and infinite latency.
+    A missing response or a wrong model is a failed audit with infinite latency.
     """
     import time
 
@@ -152,4 +153,4 @@ def score_response(
         return AuditVerdict(False, 0.0, float('inf'), reason), float('inf'), rec(False, reason)
 
     verdict = verify_response(case, getattr(response, 'tokens', None), getattr(response, 'token_logprobs', None))
-    return verdict, elapsed_ms, rec(verdict.passed, f'{verdict.reason} overlap={verdict.positional_overlap:.2f}')
+    return verdict, elapsed_ms, rec(verdict.passed, verdict.reason)

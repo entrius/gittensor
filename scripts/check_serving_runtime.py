@@ -22,7 +22,7 @@ from typing import Dict, List, Optional, Tuple
 
 import requests
 
-from gittensor.serving.probe import auth_headers, greedy, make_prompts, percentile, stability
+from gittensor.serving.probe import auth_headers, greedy, make_prompts, percentile, score, stability
 
 MUST, SHOULD = 'MUST', 'SHOULD'
 
@@ -120,15 +120,13 @@ def check_completion_shape(rep: Report, base_url: str, model_id: str, max_tokens
     if ok_lp:
         assert lp is not None
         rep.add('R2 logprob values <= 0', MUST, all(float(e['logprob']) <= 1e-6 for e in lp))
-        # sparkinfer 1b8b962 omits the logprob of the first emitted token (argmax seed pick in
-        # inference_engine.cpp), so it reports completion_tokens-1 entries. Tolerated; reported upstream.
         n_ct = usage.get('completion_tokens') or 0
         rep.add(
             'R2 entries == completion_tokens',
-            MUST if len(lp) < n_ct - 1 or len(lp) > n_ct else SHOULD,
+            MUST,
             len(lp) == n_ct,
             f'{len(lp)} vs {n_ct}'
-            + (' (first-token logprob missing — known sparkinfer gap)' if len(lp) == n_ct - 1 else ''),
+            + (' (first-token logprob missing — fixed upstream in 9e43bfa)' if len(lp) == n_ct - 1 else ''),
         )
     rep.add(
         'R4 max_tokens honoured',
@@ -159,19 +157,40 @@ def check_determinism(
     p05 = percentile(agreements, 5)
     p95 = percentile(drifts, 95)
     rep.add(
-        'D1 prefix agreement p05 >= 0.90',
-        SHOULD,
-        p05 >= 0.90,
+        'D1 prefix agreement p05 >= 0.99',
+        MUST,
+        p05 >= 0.99,
         f'min {min(agreements):.3f} p05 {p05:.3f} median {statistics.median(agreements):.3f}',
     )
     rep.add(
-        'D1 logprob drift p95 <= 0.25',
-        SHOULD,
-        p95 <= 0.25,
+        'D1 logprob drift p95 <= 0.01',
+        MUST,
+        p95 <= 0.01,
         f'max {max(drifts):.4f} p95 {p95:.4f} median {statistics.median(drifts):.4f}',
     )
-    print('      -> set SERVING_AUDIT_MIN_PREFIX_AGREEMENT below the p05 and')
-    print('         SERVING_AUDIT_MAX_MEAN_ABS_LOGPROB_DIFF above the p95, with margin.')
+    print('      -> a deterministic runtime reports p05 1.000 / p95 0.0000 (sparkinfer SPARKINFER_DETERMINISTIC=1).')
+
+
+def check_score(rep: Report, base_url: str, model_id: str, max_tokens: int, timeout: float) -> None:
+    """R8: /v1/score must exist and reproduce, for the model's own greedy output, the logprobs generation reported."""
+    messages = make_prompts(1, seed=11)[0]
+    gen = greedy(base_url, model_id, messages, max_tokens, timeout, API_KEY)
+    try:
+        sc = score(base_url, model_id, messages, gen['reference_completion'], timeout, API_KEY)
+    except requests.HTTPError as e:
+        rep.add('R8 POST /v1/score', MUST, False, f'HTTP {e.response.status_code if e.response else "?"}')
+        return
+    rep.add('R8 POST /v1/score', MUST, True, f'{len(sc["tokens"])} tokens')
+    same_tok = sc['tokens'] == gen['reference_tokens']
+    rep.add(
+        'R8 scored tokens == generated tokens', MUST, same_tok, f'{len(sc["tokens"])} vs {len(gen["reference_tokens"])}'
+    )
+    if same_tok:
+        diff = max(abs(a - b) for a, b in zip(sc['logprobs'], gen['reference_logprobs']))
+        rep.add('R8 scored logprobs == generated logprobs', MUST, diff <= 1e-4, f'max |delta| {diff:.6f}')
+    if sc.get('argmax'):
+        agree = sum(1 for a, b in zip(sc['argmax'], gen['reference_tokens']) if a == b) / len(gen['reference_tokens'])
+        rep.add('R8 top_logprobs argmax == greedy token', SHOULD, agree >= 0.99, f'{agree:.3f}')
 
 
 def check_overload(rep: Report, base_url: str, model_id: str, parallel: int, max_tokens: int, timeout: float) -> None:
@@ -237,6 +256,7 @@ def main() -> int:
     check_models(rep, base_url, args.model_id, args.timeout)
     check_optional_endpoints(rep, base_url, args.timeout)
     check_completion_shape(rep, base_url, args.model_id, args.max_tokens, args.timeout)
+    check_score(rep, base_url, args.model_id, args.max_tokens, args.timeout)
     if args.determinism_count > 0:
         check_determinism(
             rep, base_url, args.model_id, args.determinism_count, args.repeat, args.max_tokens, args.timeout

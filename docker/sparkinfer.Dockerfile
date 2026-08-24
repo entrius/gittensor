@@ -55,7 +55,7 @@ COPY --from=build /src/sparkinfer/build/runtime       build/runtime
 COPY --from=build /src/sparkinfer/build/moe           build/moe
 COPY --from=build /src/sparkinfer/build/server        build/server
 COPY --from=build /src/SPARKINFER_COMMIT              SPARKINFER_COMMIT
-# sparkinfer_server links libsparkinfer_runtime.so + libsparkinfer_moe.so (ldd-verified on 1b8b962).
+# sparkinfer_server links libsparkinfer_runtime.so + libsparkinfer_moe.so (ldd-verified on 1b8b962, 9e43bfa).
 ENV LD_LIBRARY_PATH=/opt/sparkinfer/build/runtime:/opt/sparkinfer/build/moe:${LD_LIBRARY_PATH}
 
 # Bake the pin into the image so a running container can report what it is (contract P2).
@@ -63,8 +63,12 @@ ENV LD_LIBRARY_PATH=/opt/sparkinfer/build/runtime:/opt/sparkinfer/build/moe:${LD
 # HF repos get re-uploaded (unsloth's Qwen3.6 GGUF changed under sparkinfer 1b8b962's lock, 2026-08-21) and
 # run.sh then re-downloads forever. The release in serving_loadout.json carries model_sha256; pass it as
 # -e MODEL_SHA256=... (compose does) so the container verifies against OUR pin.
+# SPARKINFER_DETERMINISTIC=1: bit-reproducible greedy decode (contract D1). Upstream ships it opt-in
+# (sparkinfer#910, 9e43bfa); the blessed release REQUIRES it — the validator's reference and every
+# miner must produce identical logprobs for identical requests. Decode speed unchanged, TTFT +2-8%.
 ARG SPARKINFER_REF=main
 ENV SPARKINFER_REF=${SPARKINFER_REF} \
+    SPARKINFER_DETERMINISTIC=1 \
     MODELS_DIR=/opt/sparkinfer/models \
     HOST=0.0.0.0 \
     PORT=8080

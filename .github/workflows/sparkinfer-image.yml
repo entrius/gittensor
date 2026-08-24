@@ -24,7 +24,7 @@ on:
 
 env:
   # Ref used by the build-only check; dispatch runs use the input instead.
-  DEFAULT_SPARKINFER_REF: "1b8b962"
+  DEFAULT_SPARKINFER_REF: "9e43bfa"
 
 jobs:
   build-and-push:

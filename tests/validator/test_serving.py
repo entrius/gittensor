@@ -257,7 +257,8 @@ def test_gateway_requires_key(monkeypatch):
     client = _gateway_client(ServingState(), monkeypatch)
     assert client.get('/v1/models').status_code == 401
     assert client.get('/v1/models', headers={'Authorization': 'Bearer nope'}).status_code == 401
-    assert client.get('/v1/models', headers={'Authorization': 'Bearer k2'}).status_code == 200
+    r = client.get('/v1/models', headers={'Authorization': 'Bearer k2'})
+    assert r.status_code == 200 and set(r.json()['data'][0]) >= {'id', 'runtime_pin', 'model_sha256'}
     assert client.get('/health').status_code == 200
 
 

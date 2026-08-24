@@ -79,7 +79,14 @@ def build_app(
         return {
             'object': 'list',
             'data': [
-                {'id': release.model_id, 'object': 'model', 'owned_by': 'gittensor', 'runtime_pin': release.runtime_pin}
+                {
+                    'id': release.model_id,
+                    'object': 'model',
+                    'owned_by': 'gittensor',
+                    # release identity (contract P2): what every READY miner behind this endpoint is verified against
+                    'runtime_pin': release.runtime_pin,
+                    'model_sha256': release.model_sha256,
+                }
             ],
         }
 

@@ -7,7 +7,7 @@ A *release* is one ``(model_id, runtime_pin)`` pair plus how to talk to it
 (backend / base_url) and how a validator verifies it (``reference_url`` for a
 live reference runtime on the validator's own GPU, ``audit_bank`` for a
 snapshot fallback). Adding a model or runtime to the subnet = running a
-conformant copy (see ``docs/serving-runtime-contract.md``) and appending a
+conformant copy (see the Serving Runtime Contract in the miner docs) and appending a
 release here. The verifier never knows which model it is looking at.
 
 The loadout is a repo-pinned JSON file (same distribution rail as

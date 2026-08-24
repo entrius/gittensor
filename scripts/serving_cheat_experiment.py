@@ -2,7 +2,7 @@
 
 Measures how well the audit metrics separate an honest miner (same release as the reference) from
 planted cheaters (cheaper quant, different runtime). Run `record` against the reference server, then
-`score` against each candidate. Results are in docs/serving-runtime-contract.md §4.2 (2026-08-22, the
+`score` against each candidate. Results (2026-08-22 and 2026-08-24 runs) are in the team's serving-experiments notes.
 non-deterministic pin) and §4.3 (2026-08-24, the deterministic pin that set the shipped bands).
 
 record : run N audit prompts against an (honest) server, save reference tokens+logprobs.

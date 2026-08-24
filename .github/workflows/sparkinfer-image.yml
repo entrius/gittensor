@@ -1,6 +1,6 @@
 name: sparkinfer image
 
-# Builds the blessed serving runtime (docs/serving-runtime-contract.md) from a pinned upstream commit and
+# Builds the blessed serving runtime (see the Serving Runtime Contract in the miner docs) from a pinned upstream commit and
 # publishes it as entrius/sparkinfer:<ref>. Run manually with the commit you intend to bless; the
 # resulting tag is what goes into `runtime_pin` in gittensor/validator/weights/serving_loadout.json.
 # No GPU in CI: this only proves the release builds. Conformance (scripts/check_serving_runtime.py) runs

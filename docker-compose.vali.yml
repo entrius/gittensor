@@ -26,7 +26,7 @@ services:
   # sparkinfer_server image miners run (built by us from a pinned upstream commit, docker/sparkinfer.Dockerfile),
   # on the validator's own GPU, so audits compare against a live honest copy instead of a bank snapshot.
   #   SPARKINFER_TAG=<runtime_pin commit> docker compose -f docker-compose.vali.yml --profile reference up -d
-  # then set SERVING_REFERENCE_URL=http://reference:8080 in .env. See docs/serving-runtime-contract.md.
+  # then set SERVING_REFERENCE_URL=http://reference:8080 in .env. See the Serving Runtime Contract in the miner docs.
   reference:
     image: entrius/sparkinfer:${SPARKINFER_TAG:-latest}
     container_name: gt-vali-reference

@@ -2,7 +2,7 @@
 # The MIT License (MIT)
 # Copyright © 2025 Entrius
 
-"""Conformance checker for the Gittensor Serving Runtime Contract (docs/serving-runtime-contract.md).
+"""Conformance checker for the Gittensor Serving Runtime Contract (published with the miner docs).
 
 Point it at a running runtime and it exercises every MUST/SHOULD in the contract:
 

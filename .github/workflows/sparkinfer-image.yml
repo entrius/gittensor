@@ -1,0 +1,66 @@
+name: sparkinfer image
+
+# Builds the blessed serving runtime (docs/serving-runtime-contract.md) from a pinned upstream commit and
+# publishes it as entrius/sparkinfer:<ref>. Run manually with the commit you intend to bless; the
+# resulting tag is what goes into `runtime_pin` in gittensor/validator/weights/serving_loadout.json.
+# No GPU in CI: this only proves the release builds. Conformance (scripts/check_serving_runtime.py) runs
+# on the validator reference GPU before the pin is updated.
+
+on:
+  workflow_dispatch:
+    inputs:
+      sparkinfer_ref:
+        description: "sparkinfer commit/tag to build (becomes the image tag and runtime_pin)"
+        required: true
+      cuda_archs:
+        description: "CMAKE_CUDA_ARCHITECTURES"
+        required: false
+        default: "120"
+  # Build-only check (never pushes) whenever the Dockerfile or this workflow changes.
+  push:
+    paths:
+      - docker/sparkinfer.Dockerfile
+      - .github/workflows/sparkinfer-image.yml
+
+env:
+  # Ref used by the build-only check; dispatch runs use the input instead.
+  DEFAULT_SPARKINFER_REF: "9e43bfa"
+
+jobs:
+  image:
+    # push-triggered runs (Dockerfile/workflow changed) only BUILD, to catch Dockerfile breakage in CI;
+    # the image is pushed to Docker Hub only from the Run workflow button (workflow_dispatch).
+    name: ${{ github.event_name == 'workflow_dispatch' && 'build and push' || 'build only (dry run)' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Free disk space (CUDA devel image is large)
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          docker system prune -af
+
+      - name: Log in to Docker Hub
+        if: github.event_name == 'workflow_dispatch'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/sparkinfer.Dockerfile
+          push: ${{ github.event_name == 'workflow_dispatch' }}
+          build-args: |
+            SPARKINFER_REF=${{ inputs.sparkinfer_ref || env.DEFAULT_SPARKINFER_REF }}
+            CUDA_ARCHS=${{ inputs.cuda_archs || '120' }}
+          tags: |
+            entrius/sparkinfer:${{ inputs.sparkinfer_ref || env.DEFAULT_SPARKINFER_REF }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

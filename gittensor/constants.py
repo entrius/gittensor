@@ -152,7 +152,7 @@ RECYCLE_UID = 0
 
 # Combined scoring pool distributed by repository emission_share, then by per-repo PR/issue split.
 # Pools (OSS + SERVING) must sum to 1.0; anything unallocated within them recycles to RECYCLE_UID.
-OSS_EMISSION_SHARE = 1.00
+OSS_EMISSION_SHARE = 0.80  # repo emission_share values are fractions of THIS pool (sparkinfer 0.4 -> 32% of total)
 DEFAULT_ISSUE_DISCOVERY_SHARE = 0.5
 EMISSION_SHARE_TOLERANCE = 1e-9
 MAX_MAINTAINER_CUT = 0.5  # maintaining is only half of the problem to software, at maximum
@@ -160,10 +160,11 @@ MAX_MAINTAINER_CUT = 0.5  # maintaining is only half of the problem to software,
 # =============================================================================
 # Serving (sub-subnet B beta)
 # =============================================================================
-# Share of emissions paid to inference-serving miners, pro-rata by serving score.
-# 0.0 = shadow mode: scores are computed and logged but nothing is paid. When
-# raising above 0, shrink OSS_EMISSION_SHARE so all pools still sum to 1.0.
-SERVING_EMISSION_SHARE = 0.0
+# Share of emissions paid to inference-serving miners, pro-rata by serving score. With no miner
+# passing audits the whole pool recycles to RECYCLE_UID, so this is safe to hold above 0 before
+# miners exist. 0.0 would be shadow mode (scores computed and logged, nothing paid). Move
+# OSS_EMISSION_SHARE in the same commit so the pools still sum to 1.0.
+SERVING_EMISSION_SHARE = 0.20
 assert abs(OSS_EMISSION_SHARE + SERVING_EMISSION_SHARE - 1.0) < EMISSION_SHARE_TOLERANCE, (
     'emission pools must sum to 1.0'
 )

@@ -9,6 +9,7 @@ weight to fill the configured pool, PR/issue sub-slices spill only within a repo
 registry slack recycles, and the fixed recycle baseline is gone.
 """
 
+import sys
 from datetime import datetime, timezone
 
 import pytest
@@ -19,9 +20,20 @@ from gittensor.constants import (
     RECYCLE_UID,
 )
 from gittensor.utils.mirror.models import MirrorPullRequest, MirrorReviewSummary
+from gittensor.validator import emission_allocation
 from gittensor.validator.emission_allocation import blend_emission_pools, calculate_repo_emission_breakdown
 from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredPR
 from gittensor.validator.utils.load_weights import RepositoryConfig, load_master_repo_weights
+
+
+@pytest.fixture(autouse=True)
+def _oss_pool_only(monkeypatch):
+    """These tests cover the OSS pool's own allocation; the serving pool (which recycles whenever no
+    serving miner passes audits) is pinned to 0 so recycle expectations stay about OSS slack only.
+    (and OSS to the full round, so round totals stay 1.0). The serving pool is covered in test_serving.py."""
+    monkeypatch.setattr(emission_allocation, 'SERVING_EMISSION_SHARE', 0.0)
+    monkeypatch.setattr(emission_allocation, 'OSS_EMISSION_SHARE', 1.0)
+    monkeypatch.setattr(sys.modules[__name__], 'OSS_EMISSION_SHARE', 1.0)
 
 
 def _uids(*extra: int) -> set[int]:

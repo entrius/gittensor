@@ -18,6 +18,7 @@ their release) to the gateway for the next round.
 Misses count as 0 in the window and latency credit 0 in the round.
 """
 
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
@@ -53,10 +54,17 @@ async def serving_challenges(self: 'Validator', miner_uids: set[int]) -> Dict[in
     best: Dict[int, Tuple[float, str]] = {uid: (0.0, '') for uid in uids}
 
     for release in loadout.releases:
-        reference = reference_for(release)
+        try:
+            reference = reference_for(release)
+            cases = [reference.sample() for _ in range(SERVING_CHALLENGES_PER_ROUND)]
+        except Exception as e:  # reference down / bank missing: skip this release, keep auditing the others
+            bt.logging.error(
+                f'Serving: no reference for {release.model_id} this round ({e!r}); '
+                'set SERVING_REFERENCE_URL to a conformant runtime or build its audit bank'
+            )
+            continue
         credit: Dict[int, float] = {uid: 0.0 for uid in uids}
-        for _ in range(SERVING_CHALLENGES_PER_ROUND):
-            case = reference.sample()
+        for case in cases:
             synapse = InferenceSynapse(
                 messages=case.messages, model_id=release.model_id, max_tokens=case.max_tokens, logprobs=True
             )
@@ -123,12 +131,10 @@ def get_serving_axons(self: 'Validator', miner_uids: set[int]) -> List[Tuple[int
 def score_response(
     uid: int, response: InferenceSynapse, case: AuditCase, release: ServingRelease
 ) -> Tuple[AuditVerdict, float, RequestRecord]:
-    """Measure one audit response: (verdict with positional_overlap, elapsed ms, telemetry record).
+    """Measure one audit response: (verdict, elapsed ms, telemetry record).
 
     A missing response or a wrong model is a failed audit with infinite latency.
     """
-    import time
-
     process_time = getattr(getattr(response, 'dendrite', None), 'process_time', None)
     elapsed_ms = float(process_time) * 1000.0 if process_time is not None else float('inf')
 

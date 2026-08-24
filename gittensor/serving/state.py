@@ -3,8 +3,8 @@
 
 """Shared serving state between the validator audit loop and the gateway.
 
-The audit loop (validator thread) publishes which miners are READY — passed
-audits in the latest round — and the gateway thread dispatches user traffic
+The audit loop (validator thread) publishes which miners are READY — their
+rolling ``AuditWindow`` passes — and the gateway thread dispatches user traffic
 to them, least-in-flight first. Both threads also append to one request log,
 which is the seed of every later phase: miner speed scoring on organic
 traffic, the router competition's replay dataset, and usage telemetry.
@@ -50,7 +50,7 @@ class ServingState:
     _ready: Dict[int, ReadyMiner] = field(default_factory=dict)
     _inflight: Dict[int, int] = field(default_factory=dict)
     _log: Deque[RequestRecord] = field(default_factory=lambda: deque(maxlen=SERVING_REQUEST_LOG_SIZE))
-    audits: AuditWindow = field(default_factory=AuditWindow)  # audit-loop thread only; in-memory, resets on restart
+    audits: AuditWindow = field(default_factory=AuditWindow)  # audit-loop thread only; persisted by the validator
     last_round_ts: float = 0.0
 
     def publish_ready(self, miners: List[ReadyMiner]) -> None:

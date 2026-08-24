@@ -164,6 +164,9 @@ MAX_MAINTAINER_CUT = 0.5  # maintaining is only half of the problem to software,
 # 0.0 = shadow mode: scores are computed and logged but nothing is paid. When
 # raising above 0, shrink OSS_EMISSION_SHARE so all pools still sum to 1.0.
 SERVING_EMISSION_SHARE = 0.0
+assert abs(OSS_EMISSION_SHARE + SERVING_EMISSION_SHARE - 1.0) < EMISSION_SHARE_TOLERANCE, (
+    'emission pools must sum to 1.0'
+)
 SERVING_CHALLENGES_PER_ROUND = 4  # audit prompts sent to each serving miner per scoring round
 SERVING_CHALLENGE_TIMEOUT = 30.0  # seconds before an audit counts as failed
 # Latency credit for a 64-token audit (release.max_tokens). An honest 5090 answers in ~165 ms on-box

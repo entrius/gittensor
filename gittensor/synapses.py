@@ -40,7 +40,7 @@ class InferenceSynapse(bt.Synapse):
     synapse is used for validator audit prompts and for gateway (user) traffic,
     so a miner cannot tell them apart. When ``logprobs`` is set the miner
     returns per-token logprobs of the greedy completion, which the validator
-    checks against its audit bank within a tolerance band.
+    checks against its reference (``gittensor/serving/audit.py``).
     """
 
     # Request

@@ -71,12 +71,16 @@ async def forward(self: 'Validator') -> None:
         # cached UIDs now have fresh issue-discovery fields — persist them
         cached_uids.clear()
 
-        # 3. Serving challenges (sub-subnet B beta; scores are telemetry until SERVING_EMISSION_SHARE > 0)
+        # 4. Serving challenges (sub-subnet B beta; scores are telemetry until SERVING_EMISSION_SHARE > 0)
         serving_scores: Dict[int, float] = {}
         if SERVING_ENABLED:
-            serving_scores = await serving_challenges(self, miner_uids)
+            try:
+                serving_scores = await serving_challenges(self, miner_uids)
+            except Exception as e:  # a serving fault must never take the OSS round (or the validator) down
+                bt.logging.error(f'Serving round failed, no serving scores this round: {e!r}')
+                self.serving_state.publish_ready([])
 
-        # 4. Store all evaluations to DB (includes issue discovery fields)
+        # 5. Store all evaluations to DB (includes issue discovery fields)
         await self.bulk_store_evaluation(miner_evaluations, master_repositories, skip_uids=cached_uids)
 
         # 6. Allocate repo-bounded emission shares into final rewards

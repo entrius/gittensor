@@ -3,13 +3,14 @@
 
 """Shared probing helpers for talking to a serving runtime over HTTP.
 
-Used by ``scripts/build_serving_audit_bank.py`` (build the validator's audit bank) and
-``scripts/check_serving_runtime.py`` (contract conformance). Kept out of the validator path: the
-validator never calls a runtime directly, it only verifies miner responses against the bank.
+Used by ``LiveReference`` (gittensor/serving/audit.py) to draw prompts and query the validator's
+reference runtime, and by the scripts: ``build_serving_audit_bank.py`` (bank snapshot),
+``check_serving_runtime.py`` (contract conformance) and ``serving_cheat_experiment.py``.
+``compare`` is the one token/logprob comparison every verifier path shares.
 """
 
 import random
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import requests
 
@@ -141,14 +142,35 @@ def score(
     return out
 
 
-def stability(a: dict, b: dict) -> tuple[float, float]:
+def compare(
+    tokens: Sequence[str],
+    logprobs: Sequence[float],
+    reference_tokens: Sequence[str],
+    reference_logprobs: Sequence[float],
+) -> Tuple[int, float, float, List[float]]:
+    """Compare a candidate greedy output to a reference, position by position.
+
+    Returns ``(prefix, agreement, overlap, diffs)``: tokens matched before the first divergence, that
+    as a fraction of the reference length, the fraction of positions whose token matches ignoring
+    divergence, and |logprob delta| per position over the agreed prefix.
+    """
     prefix = 0
-    for x, y in zip(a['reference_tokens'], b['reference_tokens']):
-        if x != y:
+    for mine, ref in zip(tokens, reference_tokens):
+        if mine != ref:
             break
         prefix += 1
-    agreement = prefix / max(1, len(a['reference_tokens']))
-    diffs = [abs(x - y) for x, y in zip(a['reference_logprobs'][:prefix], b['reference_logprobs'][:prefix])]
+    n_ref = max(1, len(reference_tokens))
+    agreement = prefix / n_ref
+    overlap = sum(1 for mine, ref in zip(tokens, reference_tokens) if mine == ref) / n_ref
+    diffs = [abs(float(a) - float(b)) for a, b in zip(logprobs[:prefix], reference_logprobs[:prefix])]
+    return prefix, agreement, overlap, diffs
+
+
+def stability(a: dict, b: dict) -> Tuple[float, float]:
+    """(prefix agreement, mean |logprob delta|) between two greedy runs of the same prompt."""
+    _, agreement, _, diffs = compare(
+        b['reference_tokens'], b['reference_logprobs'], a['reference_tokens'], a['reference_logprobs']
+    )
     return agreement, (sum(diffs) / len(diffs) if diffs else 0.0)
 
 

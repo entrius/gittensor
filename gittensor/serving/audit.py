@@ -63,7 +63,7 @@ from gittensor.constants import (
 )
 from gittensor.serving.backends import Message, expected_completion
 from gittensor.serving.loadout import WEIGHTS_DIR, ServingRelease
-from gittensor.serving.probe import greedy, make_prompts, score
+from gittensor.serving.probe import compare, greedy, make_prompts, score
 
 
 @dataclass
@@ -154,7 +154,7 @@ class AuditWindow:
     @classmethod
     def from_dict(cls, raw: dict, **kwargs) -> 'AuditWindow':
         window = cls(**kwargs)
-        for hk, mid, xs in raw.get('values', raw.get('overlaps', [])):
+        for hk, mid, xs in raw.get('values', []):
             for x in xs[-window.size :]:
                 window.record(str(hk), str(mid), float(x))
         return window
@@ -305,22 +305,13 @@ def verify_response(
     """Measure one audit against the reference; ``passed`` requires every band to hold."""
     if not tokens or token_logprobs is None or len(tokens) != len(token_logprobs):
         return AuditVerdict(False, 0.0, float('inf'), 'missing or malformed logprobs')
-    if not case.reference_tokens:
-        return AuditVerdict(False, 0.0, float('inf'), 'empty reference')
+    if not case.reference_tokens or len(case.reference_logprobs) != len(case.reference_tokens):
+        return AuditVerdict(False, 0.0, float('inf'), 'empty or malformed reference')
 
-    n_ref = len(case.reference_tokens)
-    prefix = 0
-    for mine, ref in zip(tokens, case.reference_tokens):
-        if mine != ref:
-            break
-        prefix += 1
-    agreement = prefix / n_ref
-    overlap = sum(1 for mine, ref in zip(tokens, case.reference_tokens) if mine == ref) / n_ref
-
+    prefix, agreement, overlap, diffs = compare(tokens, token_logprobs, case.reference_tokens, case.reference_logprobs)
     if prefix == 0:
         return AuditVerdict(False, 0.0, float('inf'), 'diverged at first token', overlap)
 
-    diffs = [abs(float(a) - float(b)) for a, b in zip(token_logprobs[:prefix], case.reference_logprobs[:prefix])]
     mean_diff = sum(diffs) / len(diffs)
     max_diff = max(diffs)
 

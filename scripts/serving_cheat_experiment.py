@@ -2,13 +2,16 @@
 
 Measures how well the audit metrics separate an honest miner (same release as the reference) from
 planted cheaters (cheaper quant, different runtime). Run `record` against the reference server, then
-`score` against each candidate. Results from 2026-08-22 are in docs/serving-runtime-contract.md §4.2.
+`score` against each candidate. Results are in docs/serving-runtime-contract.md §4.2 (2026-08-22, the
+non-deterministic pin) and §4.3 (2026-08-24, the deterministic pin that set the shipped bands).
 
 record : run N audit prompts against an (honest) server, save reference tokens+logprobs.
 score  : run the same prompts against a candidate server, report the metrics verify_response uses
-         (prefix agreement, mean |dlogprob| over agreed prefix) plus positional token overlap.
+         (prefix agreement, mean |dlogprob| over agreed prefix), positional token overlap, and whether
+         each output passes an audit under the shipped bands.
 analyze: from saved score files, print the comparison table, the honest-calibrated threshold per
-         window size, and bootstrap detection power for each cheater.
+         window size, and bootstrap detection power for each cheater (the 08-22 windowed design;
+         kept for recalibrating if a future pin is not deterministic).
 
 Re-scoring a new candidate against the saved 2026-08-22 reference does not need a new reference:
     python scripts/serving_cheat_experiment.py score --ref docs/serving-experiments/2026-08-22-planted-cheater/reference.json ...
@@ -21,22 +24,27 @@ import statistics
 import sys
 import time
 
-from gittensor.serving.probe import greedy, make_prompts, percentile, score
+from gittensor.serving.audit import AuditCase, verify_response
+from gittensor.serving.probe import compare, greedy, make_prompts, percentile, score
 
 
 def metrics(ref, cand):
-    rt, rl = ref['reference_tokens'], ref['reference_logprobs']
-    ct, cl = cand['reference_tokens'], cand['reference_logprobs']
-    prefix = 0
-    for a, b in zip(ct, rt):
-        if a != b:
-            break
-        prefix += 1
-    agreement = prefix / max(1, len(rt))
-    diffs = [abs(a - b) for a, b in zip(cl[:prefix], rl[:prefix])]
+    _, agreement, overlap, diffs = compare(
+        cand['reference_tokens'], cand['reference_logprobs'], ref['reference_tokens'], ref['reference_logprobs']
+    )
     mean_diff = sum(diffs) / len(diffs) if diffs else float('inf')
-    overlap = sum(1 for a, b in zip(ct, rt) if a == b) / max(1, len(rt))
     return {'prefix_agreement': agreement, 'mean_abs_logprob_diff': mean_diff, 'positional_overlap': overlap}
+
+
+def passes_audit(ref, cand) -> bool:
+    """Would this candidate output pass one audit under the shipped SERVING_AUDIT_* bands?"""
+    case = AuditCase(
+        messages=ref['messages'],
+        max_tokens=ref['max_tokens'],
+        reference_tokens=ref['reference_tokens'],
+        reference_logprobs=ref['reference_logprobs'],
+    )
+    return verify_response(case, cand['reference_tokens'], cand['reference_logprobs']).passed
 
 
 def tfscore(inp, ref_path, base_url, model_id, out):
@@ -137,7 +145,7 @@ def main():
     ap.add_argument(
         '--drop-first',
         action='store_true',
-        help='candidate runtime emits the first-token logprob; sparkinfer reference does not',
+        help='candidate emits a first-token logprob the reference omits (pre-9e43bfa sparkinfer references)',
     )
     a = ap.parse_args()
 
@@ -167,6 +175,7 @@ def main():
             cand['reference_tokens'] = cand['reference_tokens'][1:]
             cand['reference_logprobs'] = cand['reference_logprobs'][1:]
         m: dict = metrics(case, cand)
+        m['passed'] = passes_audit(case, cand)
         m['ms'] = round((time.time() - t0) * 1000)
         m['candidate'] = {k: cand[k] for k in ('reference_tokens', 'reference_logprobs', 'reference_completion')}
         rows.append(m)
@@ -187,10 +196,7 @@ def main():
         }
 
     summary: dict = {k: summ(k) for k in ('prefix_agreement', 'mean_abs_logprob_diff', 'positional_overlap')}
-    # pass rate under current constants
-    summary['pass_rate_0.80_0.50'] = sum(
-        1 for r in rows if r['prefix_agreement'] >= 0.80 and r['mean_abs_logprob_diff'] <= 0.50
-    ) / len(rows)
+    summary['pass_rate'] = sum(1 for r in rows if r['passed']) / len(rows)  # under the shipped SERVING_AUDIT_* bands
     summary['diverged_first_token'] = sum(1 for r in rows if r['prefix_agreement'] == 0) / len(rows)
     json.dump({'label': a.label, 'rows': rows, 'summary': summary}, open(a.out, 'w'), indent=1)
     print(json.dumps({'label': a.label, 'summary': summary}, indent=1))

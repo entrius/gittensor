@@ -57,7 +57,8 @@ def test_echo_backend_matches_expected_completion():
 def test_default_loadout_targets_sparkinfer():
     release = load_serving_loadout().primary
     assert release.backend == 'openai-compat'
-    assert release.base_url and release.audit_bank and release.reference_url
+    assert release.base_url and release.audit_bank
+    assert release.reference_url is None  # validators point SERVING_REFERENCE_URL at their own/rented runtime
     assert release.max_tokens > 0
 
 
@@ -477,3 +478,73 @@ def test_probe_score_parses_teacher_forced_response(monkeypatch):
     assert seen['body']['completion'] == 'Paris' and seen['body']['top_logprobs'] == 1
     assert out['tokens'] == ['Par', 'is'] and out['logprobs'] == [-0.1, -0.02] and out['argmax'] == ['Par', 'is']
     assert out['usage']['ttft_ms'] == 3.0
+
+
+def test_emission_pools_sum_to_one():
+    from gittensor.constants import EMISSION_SHARE_TOLERANCE, OSS_EMISSION_SHARE, SERVING_EMISSION_SHARE
+
+    assert abs(OSS_EMISSION_SHARE + SERVING_EMISSION_SHARE - 1.0) < EMISSION_SHARE_TOLERANCE
+
+
+def test_verify_rejects_malformed_reference():
+    case = AuditCase(messages=[], max_tokens=4, reference_tokens=['a', 'b'], reference_logprobs=[-0.1])
+    v = verify_response(case, ['a', 'b'], [-0.1, -0.2])
+    assert not v.passed and v.reason == 'empty or malformed reference'
+
+
+def test_gateway_400_on_user_shaped_bad_input(monkeypatch):
+    state = ServingState()
+    state.publish_ready([_ready(7)])
+    client = _gateway_client(state, monkeypatch)
+    h = {'Authorization': 'Bearer k1'}
+    assert (
+        client.post('/v1/chat/completions', json={'messages': MSGS, 'max_tokens': 'lots'}, headers=h).status_code == 400
+    )
+    array_content = [{'role': 'user', 'content': [{'type': 'text', 'text': 'hi'}]}]
+    assert client.post('/v1/chat/completions', json={'messages': array_content}, headers=h).status_code == 400
+    assert client.post('/v1/chat/completions', json={'messages': [{'role': 'user'}]}, headers=h).status_code == 400
+    assert state.inflight() == {7: 0}
+
+
+def test_serving_round_skips_release_without_reference(monkeypatch, tmp_path):
+    """A release whose reference is unreachable is skipped and logged; the round still completes."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from gittensor.validator.serving import forward as fwd
+
+    good = _echo_release()
+    bad = ServingRelease(
+        model_id='ghost', backend='openai-compat', base_url='http://x', reference_url='http://127.0.0.1:1'
+    )
+    monkeypatch.setattr(fwd, 'load_serving_loadout', lambda: ServingLoadout(releases=[bad, good]))
+    monkeypatch.setattr(fwd, 'SERVING_CHALLENGES_PER_ROUND', 2)
+
+    async def dendrite(axons, synapse, deserialize, timeout):
+        out = []
+        for _ in axons:
+            ref = expected_completion(synapse.messages, synapse.max_tokens, good.model_id)
+            resp = synapse.model_copy(
+                update={
+                    'completion': ref.completion,
+                    'served_model_id': good.model_id,
+                    'tokens': ref.tokens,
+                    'token_logprobs': ref.token_logprobs,
+                }
+            )
+            resp.dendrite.process_time = 0.05  # 50 ms -> full latency credit
+            out.append(resp)
+        return out
+
+    axon = SimpleNamespace(is_serving=True)
+    vali = SimpleNamespace(
+        uid=0,
+        metagraph=SimpleNamespace(hotkeys=['v', 'hk1'], axons=[axon, axon]),
+        dendrite=dendrite,
+        serving_state=ServingState(),
+        config=SimpleNamespace(neuron=SimpleNamespace(full_path=str(tmp_path))),
+    )
+    scores = asyncio.run(fwd.serving_challenges(vali, {0, 1}))  # type: ignore[arg-type]
+    assert scores == {1: 1.0}
+    assert [m.uid for m in vali.serving_state.ready_miners()] == [1]
+    assert (tmp_path / 'serving_audits.json').exists()

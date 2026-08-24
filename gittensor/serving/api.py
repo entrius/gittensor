@@ -96,11 +96,21 @@ def build_app(
         messages = body.get('messages')
         if not isinstance(messages, list) or not messages:
             raise HTTPException(status_code=400, detail='messages must be a non-empty list')
+        if not all(
+            isinstance(m, dict) and isinstance(m.get('role'), str) and isinstance(m.get('content'), str)
+            for m in messages
+        ):
+            raise HTTPException(
+                status_code=400, detail='each message needs string role and content (no array content yet)'
+            )
         if body.get('stream'):
             raise HTTPException(status_code=400, detail='streaming is not supported yet')
         if body.get('n', 1) != 1:
             raise HTTPException(status_code=400, detail='n must be 1')
-        max_tokens = int(body.get('max_tokens') or body.get('max_completion_tokens') or release.max_tokens)
+        try:
+            max_tokens = int(body.get('max_tokens') or body.get('max_completion_tokens') or release.max_tokens)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail='max_tokens must be an integer')
         max_tokens = max(1, min(max_tokens, SERVING_MAX_TOKENS))
         want_logprobs = bool(body.get('logprobs', False))
 
@@ -130,7 +140,7 @@ def build_app(
                 detail='' if ok else 'miner returned no completion',
             )
         )
-        if result is None or result.completion is None:
+        if result is None or not ok:
             return JSONResponse(
                 status_code=502, content={'error': {'message': 'serving miner failed', 'uid': miner.uid}}
             )

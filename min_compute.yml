@@ -25,3 +25,4 @@ compute_spec:
     cpu: 4
     ram: 32 # Minimum RAM (GB)
     gpu: "RTX 5090 (32 GB)" # one blessed release per GPU; see docs/serving-runtime-contract.md
+    runtime: "docker pull entrius/sparkinfer:<runtime_pin commit from gittensor/validator/weights/serving_loadout.json>; run with MODEL_SHA256 from the same file (scripts/serving-miner-entrypoint.sh)"

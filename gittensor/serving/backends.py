@@ -138,7 +138,7 @@ class OpenAICompatBackend:
             tokens = [entry['token'] for entry in content_lp]
             token_logprobs = [float(entry['logprob']) for entry in content_lp]
 
-        # sparkinfer 1b8b962 puts its timing fields inside `usage`; accept top level too.
+        # sparkinfer puts its timing fields inside `usage` (contract R5); accept top level too.
         usage = payload.get('usage') or {}
         timing = {k: payload.get(k, usage.get(k)) for k in ('generation_ms', 'ttft_ms', 'decode_tps')}
         return GenerationResult(

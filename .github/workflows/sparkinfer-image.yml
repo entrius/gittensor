@@ -1,4 +1,4 @@
-name: Build and Push sparkinfer runtime image
+name: sparkinfer image
 
 # Builds the blessed serving runtime (docs/serving-runtime-contract.md) from a pinned upstream commit and
 # publishes it as entrius/sparkinfer:<ref>. Run manually with the commit you intend to bless; the
@@ -27,7 +27,10 @@ env:
   DEFAULT_SPARKINFER_REF: "9e43bfa"
 
 jobs:
-  build-and-push:
+  image:
+    # push-triggered runs (Dockerfile/workflow changed) only BUILD, to catch Dockerfile breakage in CI;
+    # the image is pushed to Docker Hub only from the Run workflow button (workflow_dispatch).
+    name: ${{ github.event_name == 'workflow_dispatch' && 'build and push' || 'build only (dry run)' }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out the repo

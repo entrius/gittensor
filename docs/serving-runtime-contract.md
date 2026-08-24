@@ -214,7 +214,8 @@ re-run on this pin (40 prompts, reference re-recorded): honest re-run matches on
 logprob deviation; llama.cpp with the honest weights and llama.cpp with Q2_K_XL each deviate on 40/40
 (nearest cheater prompt: mean |Δlogprob| 0.0057, max 0.129). Teacher-forced scoring via `/v1/score`
 of each candidate's own output shows the same separation. Full data and method:
-`docs/serving-experiments/2026-08-24-deterministic-pin/`.
+the team's internal serving-experiments notes (raw per-prompt data, reproduce commands); the
+measured bands live in `gittensor/constants.py` and are pinned by `tests/validator/test_serving.py`.
 
 Consequence for the verifier (implemented): per-audit verdict = all tokens match ∧ mean |Δlogprob|
 ≤ 0.005 ∧ max |Δlogprob| ≤ 0.10 (`SERVING_AUDIT_*`); `AuditWindow` keeps the last 20 outcomes per
@@ -274,7 +275,7 @@ accuracy improvement. Still open:
    crash the server (`[kv] copy block table: operation would make the legacy stream depend on a
    capturing blocking stream` → `std::length_error` / heap corruption, exit 139). Seen in both
    determinism modes, never at ≤ 12 concurrent. A hostile client can take a miner down; R6 says
-   *reject*, not die. Details in `docs/serving-experiments/2026-08-24-deterministic-pin/README.md`.
+   *reject*, not die. Details in the internal serving-experiments notes (2026-08-24).
 2. **EOS in `logprobs.content` (hygiene).** The trailing `<|im_end|>` is listed as a logprob entry;
    OpenAI omits EOS. Consumers zipping entries with the text are off by one at the end.
 3. **Fused int8-KV prefill attention is wrong above ~2048 prompt tokens** on the default path with

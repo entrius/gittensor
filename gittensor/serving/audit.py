@@ -34,11 +34,11 @@ The blessed runtime is bit-reproducible (sparkinfer 9e43bfa with
 ``SPARKINFER_DETERMINISTIC=1``), so an honest miner reproduces the reference
 exactly and ``passed`` is decisive per audit: all tokens match and logprobs
 agree to float noise (``SERVING_AUDIT_*`` bands in constants.py, calibrated in
-``docs/serving-experiments/2026-08-24-deterministic-pin``). ``AuditWindow``
+the 2026-08-24 measurements, kept in internal notes). ``AuditWindow``
 keeps the last ``SERVING_AUDIT_WINDOW`` outcomes per (hotkey, release) and
 publishes the miner while their mean clears ``SERVING_AUDIT_WINDOW_THRESHOLDS``
 — it absorbs transient misses; it is not there to average out model noise (that
-was the 1b8b962 design, ``docs/serving-experiments/2026-08-22-planted-cheater``).
+was the 1b8b962 design, 2026-08-22 notes).
 Missed or malformed audits enter the window as 0. The validator persists the
 window (``serving_audits.json`` next to ``state.npz``) so a restart is not a
 reset. ``LiveReference.score`` exposes teacher-forced scoring (R8) for text the

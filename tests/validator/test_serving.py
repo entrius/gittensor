@@ -1,8 +1,6 @@
 """Tests for the serving beta: deterministic backend, audit verification, gateway dispatch, emission pool blending."""
 
 import json
-import statistics
-from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -324,46 +322,21 @@ def test_audit_window_rolls_per_hotkey_and_release():
     assert w.verdict('hk2', 'm').n_audits == 0  # a new hotkey on the same UID starts clean
 
 
-EXPERIMENTS = Path(__file__).resolve().parents[2] / 'docs' / 'serving-experiments'
-DETERMINISTIC = EXPERIMENTS / '2026-08-24-deterministic-pin'
-JITTERY = EXPERIMENTS / '2026-08-22-planted-cheater'
-
-
-def _rows(path: Path) -> list:
-    return json.load(open(path))['rows']
-
-
-def _verdicts(rows: list) -> list:
-    """Replay saved per-prompt rows (candidate tokens/logprobs vs reference) through verify_response."""
-    out = []
-    for r in rows:
-        c = r['candidate']
-        case = AuditCase(
-            messages=[],
-            max_tokens=64,
-            reference_tokens=r['reference_tokens'],
-            reference_logprobs=r['reference_logprobs'],
-        )
-        out.append(verify_response(case, c['reference_tokens'], c['reference_logprobs']))
-    return out
-
-
-@pytest.mark.skipif(not DETERMINISTIC.exists(), reason='experiment data not checked out')
-def test_audit_bands_calibrated_on_deterministic_pin_data():
-    """Honest miner passes every audit; every planted cheater fails every audit (docs/serving-experiments)."""
-    ref = json.load(open(DETERMINISTIC / 'reference.json'))['cases']
-
-    def with_ref(name):
-        rows = _rows(DETERMINISTIC / name)
-        for r, c in zip(rows, ref):
-            r['reference_tokens'], r['reference_logprobs'] = c['reference_tokens'], c['reference_logprobs']
-        return rows
-
-    honest = _verdicts(with_ref('honest-rerun.json'))
-    assert all(v.passed for v in honest) and max(v.max_abs_logprob_diff for v in honest) == 0.0
-    for cheater in ('cheat-q2kxl-llamacpp.json', 'honestweights-llamacpp.json'):
-        vs = _verdicts(with_ref(cheater))
-        assert not any(v.passed for v in vs), cheater
+def test_audit_bands_match_measured_calibration():
+    """Bands vs the 2026-08-24 measurements on the deterministic pin (internal notes, serving-experiments):
+    honest max |delta| 0.0000 on 40/40 prompts; nearest cheater prompt mean 0.0057 / max 0.129."""
+    n = 40
+    ref = AuditCase(messages=[], max_tokens=n, reference_tokens=['t'] * n, reference_logprobs=[-0.5] * n)
+    assert verify_response(ref, ref.reference_tokens, ref.reference_logprobs).passed  # honest: exact
+    assert verify_response(ref, ref.reference_tokens, [-0.5 - 0.004] * n).passed  # within float-noise budget
+    nearest = [-0.5 - 0.0057] * (n - 1) + [-0.5 - 0.129]
+    v = verify_response(ref, ref.reference_tokens, nearest)
+    assert not v.passed and v.reason.startswith('logprob drift')  # mean band
+    outlier = [-0.5] * (n - 1) + [-0.5 - 0.129]  # mean 0.003 passes, max 0.129 must not
+    v = verify_response(ref, ref.reference_tokens, outlier)
+    assert not v.passed and v.reason.startswith('logprob outlier')
+    fork = ref.reference_tokens[:-1] + ['x']  # any token divergence fails on a deterministic runtime
+    assert not verify_response(ref, fork, ref.reference_logprobs).passed
 
 
 def test_audit_window_tolerates_one_miss_per_round():
@@ -408,19 +381,13 @@ def test_score_response_feeds_window_metrics():
     assert verdict.positional_overlap == 0.0 and rec.detail.startswith('wrong model')
 
 
-@pytest.mark.skipif(not JITTERY.exists(), reason='experiment data not checked out')
-def test_latency_credit_calibrated_on_experiment_data():
-    """Honest on-box latency plus a long-haul RTT keeps full credit; a cross-region proxy does not."""
-    load = lambda name: [r['ms'] for r in json.load(open(JITTERY / name))['rows']]  # noqa: E731
-    honest = load('honest-rerun.json') + load('honest-under-load.json')
-    intercontinental_rtt = 250.0
-    assert all(latency_credit(ms + intercontinental_rtt) == 1.0 for ms in honest)
-    # proxy: validator -> miner -> remote GPU in another region, each hop an RTT, plus the remote's own compute
-    proxied = [ms + intercontinental_rtt + 2 * 150.0 for ms in honest]
-    assert max(latency_credit(ms) for ms in proxied) < 1.0
-    # a slower runtime behind the proxy (llama.cpp, measured) loses most of its credit
-    slow_proxy = [ms + intercontinental_rtt + 2 * 150.0 for ms in load('honestweights-llamacpp.json')]
-    assert statistics.median(latency_credit(ms) for ms in slow_proxy) < 0.4
+def test_latency_credit_matches_measured_latencies():
+    """Honest on-box 64-token audit p95 was 166 ms (2026-08-22/24 measurements); llama.cpp ~600 ms."""
+    honest_p95, intercontinental_rtt = 166.0, 250.0
+    assert latency_credit(honest_p95 + intercontinental_rtt) == 1.0
+    proxied = honest_p95 + intercontinental_rtt + 2 * 150.0  # validator -> miner -> remote GPU in another region
+    assert latency_credit(proxied) < 1.0
+    assert latency_credit(600.0 + intercontinental_rtt + 2 * 150.0) < 0.4  # slow runtime behind the proxy
 
 
 def test_audit_window_persists_across_restart(tmp_path):

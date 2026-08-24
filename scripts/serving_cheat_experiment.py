@@ -14,7 +14,7 @@ analyze: from saved score files, print the comparison table, the honest-calibrat
          kept for recalibrating if a future pin is not deterministic).
 
 Re-scoring a new candidate against the saved 2026-08-22 reference does not need a new reference:
-    python scripts/serving_cheat_experiment.py score --ref docs/serving-experiments/2026-08-22-planted-cheater/reference.json ...
+    python scripts/serving_cheat_experiment.py score --ref <saved reference.json> ...
 """
 
 import argparse

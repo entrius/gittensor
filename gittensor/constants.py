@@ -158,6 +158,46 @@ EMISSION_SHARE_TOLERANCE = 1e-9
 MAX_MAINTAINER_CUT = 0.5  # maintaining is only half of the problem to software, at maximum
 
 # =============================================================================
+# Serving (sub-subnet B beta)
+# =============================================================================
+# Share of emissions paid to inference-serving miners, pro-rata by serving score.
+# 0.0 = shadow mode: scores are computed and logged but nothing is paid. When
+# raising above 0, shrink OSS_EMISSION_SHARE so all pools still sum to 1.0.
+SERVING_EMISSION_SHARE = 0.0
+assert abs(OSS_EMISSION_SHARE + SERVING_EMISSION_SHARE - 1.0) < EMISSION_SHARE_TOLERANCE, (
+    'emission pools must sum to 1.0'
+)
+SERVING_CHALLENGES_PER_ROUND = 4  # audit prompts sent to each serving miner per scoring round
+SERVING_CHALLENGE_TIMEOUT = 30.0  # seconds before an audit counts as failed
+# Latency credit for a 64-token audit (release.max_tokens). An honest 5090 answers in ~165 ms on-box
+# (measured 2026-08-22/24: p95 166 ms); add validator<->miner RTT and an
+# honest miner anywhere on earth lands under ~450 ms. Credit is flat to FULL and falls linearly to 0 at
+# ZERO, so a miner proxying audits to a GPU in another region (extra RTT + a slower runtime: llama.cpp
+# measured ~600 ms) loses credit in proportion. Same-region proxying is NOT visible here; that is the
+# one-GPU-many-hotkeys case, caught by concurrent burst audits (launch plan, gap 0).
+SERVING_LATENCY_FULL_CREDIT_MS = 500.0
+SERVING_LATENCY_ZERO_CREDIT_MS = 1_500.0
+# Per-audit verdict. The blessed runtime is bit-reproducible (sparkinfer 9e43bfa, SPARKINFER_DETERMINISTIC=1), so an
+# honest miner reproduces the reference's greedy tokens exactly and its logprobs to float noise; every planted
+# cheater differs on every prompt (measured 2026-08-24, internal serving-experiments notes: honest max |delta| 0.0000,
+# cheapest cheater min mean |delta| 0.0057 / min max |delta| 0.129). Both bands must hold for an audit to pass.
+SERVING_AUDIT_MIN_PREFIX_AGREEMENT = 1.0  # fraction of reference greedy tokens reproduced before first divergence
+SERVING_AUDIT_MAX_MEAN_ABS_LOGPROB_DIFF = 0.005  # mean |logprob delta| over the agreed prefix
+SERVING_AUDIT_MAX_ABS_LOGPROB_DIFF = 0.10  # largest single-position |logprob delta|
+# Rolling window: the mean of per-audit outcomes (1 pass / 0 fail; misses and wrong model are 0) over the last
+# SERVING_AUDIT_WINDOW audits of a (hotkey, release) must reach the threshold for the number of audits seen so
+# far (rows are (k, threshold), linearly interpolated, flat beyond the last row). With a deterministic runtime the
+# honest mean is 1.0, so the bar only leaves room for transient misses: one miss costs a round at 4 audits/round.
+# History: the 1b8b962 pin needed a positional-overlap window with a calibrated ramp (0.016 at k=1 .. 0.415 at
+# k=20; 2026-08-22 notes). Recalibrate with
+#   python scripts/serving_cheat_experiment.py analyze --honest <honest rows> --cheaters <cheater rows>
+SERVING_AUDIT_WINDOW = 20
+SERVING_AUDIT_WINDOW_THRESHOLDS = ((1, 0.85),)
+SERVING_API_DEFAULT_PORT = 8790
+SERVING_MAX_TOKENS = 1024  # hard cap per request (API and miner both enforce)
+SERVING_REQUEST_LOG_SIZE = 5_000  # in-memory ring of recent API/audit requests (telemetry)
+
+# =============================================================================
 # Spam & Gaming Mitigation
 # =============================================================================
 MAINTAINER_ASSOCIATIONS = ['OWNER', 'MEMBER', 'COLLABORATOR']

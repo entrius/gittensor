@@ -8,7 +8,10 @@ services:
     env_file:
       - .env
     ports:
-      - "${PORT}:${PORT}"
+      # Set AXON_PUBLISH=127.0.0.1:<port> to bind loopback-only behind a reverse proxy (unset = raw internet publish).
+      - "${AXON_PUBLISH:-0.0.0.0:${PORT}}:${PORT}"
+      # Serving inference API (opt-in, see .env.example): loopback on the host by default; front it with your reverse proxy.
+      - "${SERVING_API_PUBLISH:-127.0.0.1:${SERVING_API_PORT:-8790}}:${SERVING_API_PORT:-8790}"
     volumes:
       # 'ro' = readonly
       - ${WALLET_PATH}:/root/.bittensor/wallets:ro
@@ -18,6 +21,31 @@ services:
     #   - gittensor_network
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
+
+  # Optional reference runtime for the serving audit loop (profile "reference"). Runs the same blessed
+  # sparkinfer_server image miners run (built by us from a pinned upstream commit, docker/sparkinfer.Dockerfile),
+  # on the validator's own GPU, so audits compare against a live honest copy instead of a bank snapshot.
+  #   SPARKINFER_TAG=<runtime_pin commit> docker compose -f docker-compose.vali.yml --profile reference up -d
+  # then set SERVING_REFERENCE_URL=http://reference:8080 in .env. See the Serving Runtime Contract in the miner docs.
+  reference:
+    image: entrius/sparkinfer:${SPARKINFER_TAG:-latest}
+    container_name: gt-vali-reference
+    restart: unless-stopped
+    profiles: ["reference"]
+    environment:
+      # model_sha256 from the release in serving_loadout.json (overrides upstream's reference.lock pin)
+      MODEL_SHA256: ${SPARKINFER_MODEL_SHA256:-}
+      # already baked into the image; repeated here so nobody turns it off by accident (contract D1)
+      SPARKINFER_DETERMINISTIC: "1"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    volumes:
+      - ./data/models:/opt/sparkinfer/models
 
   watchtower:
     image: nickfedor/watchtower

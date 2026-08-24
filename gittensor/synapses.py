@@ -1,5 +1,5 @@
 # Entrius 2025
-from typing import Optional
+from typing import Dict, List, Optional
 
 import bittensor as bt
 from pydantic import Field
@@ -31,6 +31,34 @@ class PatBroadcastSynapse(bt.Synapse):
         )
 
     __str__ = __repr__
+
+
+class InferenceSynapse(bt.Synapse):
+    """Inference request for serving miners (sub-subnet B beta).
+
+    Carries one OpenAI-style chat request from validator to miner. The same
+    synapse is used for validator audit prompts and for gateway (user) traffic,
+    so a miner cannot tell them apart. When ``logprobs`` is set the miner
+    returns per-token logprobs of the greedy completion, which the validator
+    checks against its reference (``gittensor/serving/audit.py``).
+    """
+
+    # Request
+    messages: List[Dict[str, str]]
+    model_id: str
+    max_tokens: int = 64
+    logprobs: bool = False
+
+    # Response
+    completion: Optional[str] = None
+    served_model_id: Optional[str] = None
+    generation_ms: Optional[float] = None
+    ttft_ms: Optional[float] = None
+    decode_tps: Optional[float] = None
+    tokens: Optional[List[str]] = None
+    token_logprobs: Optional[List[float]] = None
+    finish_reason: Optional[str] = None
+    usage: Optional[Dict[str, int]] = None
 
 
 class PatCheckSynapse(bt.Synapse):

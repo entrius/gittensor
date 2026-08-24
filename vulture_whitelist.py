@@ -6,6 +6,21 @@
 
 # ruff: noqa: F821
 
+# Serving beta: FastAPI route handlers are registered via decorator, not called directly;
+# telemetry fields/helpers are read by operators via /v1/serving/status and tests.
+health
+models
+chat_completions
+_close_dendrite
+serving_api
+completion_tokens
+inflight
+as_dict
+reference_completion
+should_exit
+ts
+ECHO_LOADOUT_PATH
+
 # `__exit__(self, exc_type, exc, tb)` - PEP 343 signature, body unused args
 exc_type
 tb
@@ -40,3 +55,4 @@ _.get_help  # unused method (gittensor/cli/issue_commands/help.py:125)
 _.ttl_get_block  # unused method (gittensor/utils/misc.py:91)
 _.get_help  # unused method (gittensor/cli/issue_commands/help.py:180)
 add_validator_args  # unused function (gittensor/utils/config.py:81)
+neuron_type  # class attr read by BaseNeuron.should_set_weights (neurons/serving_miner.py:47)

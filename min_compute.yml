@@ -15,3 +15,14 @@ compute_spec:
   validator:
     cpu: 2 # Minimum number of CPU cores
     ram: 8 # Minimum RAM (GB)
+    # Serving sub-mechanism (SERVING_ENABLED=true) is opt-in and needs NO local GPU: the validator audits
+    # against a live reference copy of each blessed release reachable over HTTP — its own RTX 5090, or a
+    # rented one (e.g. Lium, ~$0.65/h) running the same image behind an API key. Fallback with neither:
+    # bank snapshots (weaker, finite).
+    serving_reference: "reachable RTX 5090 running the blessed image (local or rented), optional"
+
+  serving_miner:
+    cpu: 4
+    ram: 32 # Minimum RAM (GB)
+    gpu: "RTX 5090 (32 GB)" # one blessed release per GPU; see the Serving Runtime Contract in the miner docs
+    runtime: "docker pull entrius/sparkinfer:<runtime_pin commit from gittensor/validator/weights/serving_loadout.json>; run with MODEL_SHA256 from the same file (scripts/serving-miner-entrypoint.sh)"

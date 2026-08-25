@@ -3,29 +3,38 @@
 
 """Serving verification loop (sub-subnet B beta).
 
+``ServingAuditThread`` runs ``audit_round`` on its own wall clock (every
+``SERVING_AUDIT_INTERVAL_S``), independent of the validator's step loop, so
+the gateway's READY set stays fresh while an OSS round takes hours.
+
 Each round, for every blessed release, the validator sends audit prompts from
 that release's reference (live runtime on its own GPU, or a bank snapshot) to
 every serving axon over the same ``InferenceSynapse`` the gateway uses for
 user traffic, verifies each response against the reference (exact tokens,
 logprobs to float noise — the runtime is deterministic) and records the
-outcome into the miner's rolling ``AuditWindow``, and produces a per-UID serving score.
-A miner serves one release, so its score is the best it achieved across
-releases; miners whose window passes are published as READY (tagged with
-their release) to the gateway for the next round.
+outcome into the miner's rolling ``AuditWindow``, and produces a per-hotkey
+serving score. Axons are audited concurrently; an axon that does not answer
+the first prompt is not sent the rest (the misses still count). A miner
+serves one release, so its score is the best it achieved across releases;
+miners whose window passes are published as READY (tagged with their release)
+to the gateway, and the scores are picked up by the next OSS round.
 
     score = window passes (0/1) x mean over this round's audits of latency_credit
 
 Misses count as 0 in the window and latency credit 0 in the round.
 """
 
+import asyncio
 import math
+import threading
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Sequence, Tuple
 
 import bittensor as bt
 
 from gittensor.constants import (
+    SERVING_AUDIT_CONCURRENCY,
     SERVING_CHALLENGE_TIMEOUT,
     SERVING_CHALLENGES_PER_ROUND,
 )
@@ -39,20 +48,51 @@ if TYPE_CHECKING:
     from neurons.validator import Validator
 
 
-async def serving_challenges(self: 'Validator', miner_uids: set[int]) -> Dict[int, float]:
-    """Audit each serving axon against every release and return UID -> serving score in [0, 1]."""
-    loadout = load_serving_loadout()
-    state: ServingState = getattr(self, 'serving_state', None) or ServingState()
-    serving = get_serving_axons(self, miner_uids)
+async def audit_axon(
+    dendrite: bt.Dendrite, uid: int, axon: bt.AxonInfo, release: ServingRelease, cases: Sequence[AuditCase]
+) -> List[Tuple[AuditVerdict, float, RequestRecord]]:
+    """Audit one axon with every case in order; stop after the first case that gets no response at all."""
+    results: List[Tuple[AuditVerdict, float, RequestRecord]] = []
+    for i, case in enumerate(cases):
+        synapse = InferenceSynapse(
+            messages=case.messages, model_id=release.model_id, max_tokens=case.max_tokens, logprobs=True
+        )
+        responses = await dendrite(axons=[axon], synapse=synapse, deserialize=False, timeout=SERVING_CHALLENGE_TIMEOUT)
+        response = responses[0] if responses else synapse
+        scored = score_response(uid, response, case, release)
+        results.append(scored)
+        if i == 0 and getattr(response, 'completion', None) is None:
+            for later in cases[1:]:
+                results.append(score_response(uid, synapse.model_copy(), later, release))
+            break
+    return results
+
+
+async def audit_round(
+    state: ServingState,
+    dendrite: bt.Dendrite,
+    serving: Sequence[Tuple[int, str, bt.AxonInfo]],
+    loadout=None,
+) -> Dict[str, float]:
+    """Audit every serving axon against every release; publish READY + scores; return hotkey -> score."""
+    loadout = loadout or load_serving_loadout()
     if not serving:
         bt.logging.info('Serving: no serving axons found this round')
-        state.publish_ready([])
+        state.publish_round([], {})
         return {}
 
-    uids = [uid for uid, _ in serving]
-    hotkeys = {uid: self.metagraph.hotkeys[uid] for uid in uids}
-    axons = [axon for _, axon in serving]
-    best: Dict[int, Tuple[float, str]] = {uid: (0.0, '') for uid in uids}
+    best: Dict[str, Tuple[float, str]] = {hotkey: (0.0, '') for _, hotkey, _ in serving}
+    slots = asyncio.Semaphore(SERVING_AUDIT_CONCURRENCY)
+
+    async def audit_one(uid: int, hotkey: str, axon: bt.AxonInfo, release: ServingRelease, cases) -> float:
+        async with slots:
+            results = await audit_axon(dendrite, uid, axon, release, cases)
+        credit = 0.0
+        for verdict, elapsed_ms, record in results:
+            state.audits.record(hotkey, release.model_id, verdict.value)
+            credit += latency_credit(elapsed_ms)
+            state.record(record)
+        return credit / len(cases)
 
     for release in loadout.releases:
         try:
@@ -64,46 +104,66 @@ async def serving_challenges(self: 'Validator', miner_uids: set[int]) -> Dict[in
                 'set SERVING_REFERENCE_URL to a conformant runtime or build its audit bank'
             )
             continue
-        credit: Dict[int, float] = {uid: 0.0 for uid in uids}
-        for case in cases:
-            synapse = InferenceSynapse(
-                messages=case.messages, model_id=release.model_id, max_tokens=case.max_tokens, logprobs=True
-            )
-            responses = await self.dendrite(
-                axons=axons, synapse=synapse, deserialize=False, timeout=SERVING_CHALLENGE_TIMEOUT
-            )
-            for uid, response in zip(uids, responses):
-                verdict, elapsed_ms, record = score_response(uid, response, case, release)
-                state.audits.record(hotkeys[uid], release.model_id, verdict.value)
-                credit[uid] += latency_credit(elapsed_ms)
-                state.record(record)
-        for uid in uids:
-            window = state.audits.verdict(hotkeys[uid], release.model_id)
-            score = (credit[uid] / SERVING_CHALLENGES_PER_ROUND) if window.passed else 0.0
+        credits = await asyncio.gather(*(audit_one(uid, hotkey, axon, release, cases) for uid, hotkey, axon in serving))
+        for (uid, hotkey, _), credit in zip(serving, credits):
+            window = state.audits.verdict(hotkey, release.model_id)
+            score = credit if window.passed else 0.0
             bt.logging.debug(f'Serving: UID {uid} {release.model_id} window {window.as_dict()} score {score:.3f}')
-            if score > best[uid][0]:
-                best[uid] = (score, release.model_id)
+            if score > best[hotkey][0]:
+                best[hotkey] = (score, release.model_id)
 
-    path = audit_window_path(self)
-    if path is not None:
-        try:
-            state.audits.save(path)
-        except OSError as e:
-            bt.logging.warning(f'Serving: could not persist audit window to {path}: {e}')
-
-    scores = {uid: score for uid, (score, _) in best.items()}
+    scores = {hotkey: score for hotkey, (score, _) in best.items()}
     ready: List[ReadyMiner] = []
-    for uid, axon in serving:
-        score, model_id = best[uid]
+    for uid, hotkey, axon in serving:
+        score, model_id = best[hotkey]
         bt.logging.info(
             f'Serving: UID {uid} score {score:.3f} over {SERVING_CHALLENGES_PER_ROUND} audits'
             + (f' ({model_id})' if model_id else '')
         )
         if score > 0.0:
-            ready.append(ReadyMiner(uid=uid, hotkey=hotkeys[uid], axon=axon, score=score, model_id=model_id))
-    state.publish_ready(ready)
+            ready.append(ReadyMiner(uid=uid, hotkey=hotkey, axon=axon, score=score, model_id=model_id))
+    state.publish_round(ready, scores)
     bt.logging.info(f'Serving: {len(ready)} READY miner(s) published to gateway: {[m.uid for m in ready]}')
     return scores
+
+
+class ServingAuditThread:
+    """Runs ``audit_round`` every ``interval_s`` seconds on a private event loop in a daemon thread."""
+
+    def __init__(self, validator: 'Validator', state: ServingState, interval_s: float):
+        self.validator = validator
+        self.state = state
+        self.interval_s = interval_s
+        self._stop = threading.Event()
+        self.thread = threading.Thread(target=self._run, name='serving-audits', daemon=True)
+
+    def start(self) -> None:
+        self.thread.start()
+        bt.logging.success(f'Serving audit loop started (every {self.interval_s:.0f}s)')
+
+    def stop(self) -> None:
+        self._stop.set()
+        self.thread.join(5)
+
+    def _run(self) -> None:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        dendrite = bt.Dendrite(wallet=self.validator.wallet)
+        while not self._stop.is_set():
+            started = time.monotonic()
+            try:
+                serving = get_serving_axons(self.validator)
+                loop.run_until_complete(audit_round(self.state, dendrite, serving))
+            except Exception as e:  # a serving fault must never take the validator down
+                bt.logging.error(f'Serving round failed, no serving scores this round: {e!r}')
+                self.state.publish_round([], {})
+            path = audit_window_path(self.validator)
+            if path is not None:
+                try:
+                    self.state.audits.save(path)
+                except OSError as e:
+                    bt.logging.warning(f'Serving: could not persist audit window to {path}: {e}')
+            self._stop.wait(max(0.0, self.interval_s - (time.monotonic() - started)))
 
 
 def audit_window_path(self: 'Validator') -> Optional[Path]:
@@ -112,20 +172,21 @@ def audit_window_path(self: 'Validator') -> Optional[Path]:
     return Path(full_path) / 'serving_audits.json' if full_path else None
 
 
-def get_serving_axons(self: 'Validator', miner_uids: set[int]) -> List[Tuple[int, bt.AxonInfo]]:
-    """UIDs (excluding self) whose axon is serving — the candidate serving miners.
+def get_serving_axons(self: 'Validator') -> List[Tuple[int, str, bt.AxonInfo]]:
+    """(uid, hotkey, axon) for every UID (excluding self) whose axon is serving — the candidate serving miners.
 
-    Beta heuristic: axon.is_serving is the only signal. Validators also serve
-    axons (for PAT handling), so they will appear here and simply score zero on
-    audits; a serving-miner registry replaces this later.
+    Snapshot of the metagraph taken on the audit thread. Beta heuristic: axon.is_serving is the only signal.
+    Validators also serve axons (for PAT handling), so they appear here and score zero on the first prompt;
+    a serving-miner registry replaces this later.
     """
-    serving: List[Tuple[int, bt.AxonInfo]] = []
-    for uid in sorted(miner_uids):
+    hotkeys = list(self.metagraph.hotkeys)
+    axons = list(self.metagraph.axons)
+    serving: List[Tuple[int, str, bt.AxonInfo]] = []
+    for uid, (hotkey, axon) in enumerate(zip(hotkeys, axons)):
         if uid == self.uid:
             continue
-        axon = self.metagraph.axons[uid]
         if axon is not None and axon.is_serving:
-            serving.append((uid, axon))
+            serving.append((uid, hotkey, axon))
     return serving
 
 

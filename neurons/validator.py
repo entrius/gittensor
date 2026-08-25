@@ -40,11 +40,12 @@ from gittensor.validator.pat_handler import (
     priority_pat_broadcast,
     priority_pat_check,
 )
-from gittensor.validator.serving.forward import audit_window_path
+from gittensor.validator.serving.forward import ServingAuditThread, audit_window_path
 from gittensor.validator.utils.config import (
     SERVING_API_HOST,
     SERVING_API_KEYS,
     SERVING_API_PORT,
+    SERVING_AUDIT_INTERVAL_S,
     SERVING_ENABLED,
     STORE_DB_RESULTS,
     WANDB_PROJECT,
@@ -93,7 +94,6 @@ class Validator(BaseValidatorNeuron):
         # Serving sub-mechanism (beta): audit loop publishes READY miners here; the inference API dispatches to them.
         # The API starts only when SERVING_API_KEYS is set.
         self.serving_state = ServingState()
-        self.serving_scores: Dict[int, float] = {}
         audits_path = audit_window_path(self)
         if audits_path is not None:
             self.serving_state.audits = AuditWindow.load(audits_path)
@@ -113,6 +113,8 @@ class Validator(BaseValidatorNeuron):
                 )
             else:
                 bt.logging.info('Serving: SERVING_API_KEYS unset — audits only, no API')
+            self.serving_audits = ServingAuditThread(self, self.serving_state, SERVING_AUDIT_INTERVAL_S)
+            self.serving_audits.start()
 
         # DB connection for validation result storage.
         # Requires STORE_DB_RESULTS=true in .env

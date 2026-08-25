@@ -15,11 +15,11 @@ import threading
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Deque, Dict, List, Optional
+from typing import Deque, Dict, List, Optional, Sequence
 
 import bittensor as bt
 
-from gittensor.constants import SERVING_REQUEST_LOG_SIZE
+from gittensor.constants import SERVING_READY_TTL_S, SERVING_REQUEST_LOG_SIZE
 from gittensor.serving.audit import AuditWindow
 
 
@@ -61,21 +61,38 @@ class ServingState:
     _inflight: Dict[int, int] = field(default_factory=dict)
     _log: Deque[RequestRecord] = field(default_factory=lambda: deque(maxlen=SERVING_REQUEST_LOG_SIZE))
     audits: AuditWindow = field(default_factory=AuditWindow)  # audit-loop thread only; persisted by the validator
+    _scores: Dict[str, float] = field(default_factory=dict)  # hotkey -> serving score from the last round
     last_round_ts: float = 0.0
+    ready_ttl_s: float = SERVING_READY_TTL_S
 
-    def publish_ready(self, miners: List[ReadyMiner]) -> None:
+    def publish_round(self, miners: List[ReadyMiner], scores: Dict[str, float]) -> None:
+        """Audit thread: publish the READY set for the gateway and the per-hotkey scores for the next OSS round."""
         with self._lock:
             self._ready = {m.uid: m for m in miners}
             self._inflight = {uid: self._inflight.get(uid, 0) for uid in self._ready}
+            self._scores = dict(scores)
             self.last_round_ts = time.time()
+
+    def scores_for(self, hotkeys: Sequence[str]) -> Dict[int, float]:
+        """Scores keyed by current UID; a UID whose hotkey changed since the round carries nothing over."""
+        with self._lock:
+            return {uid: self._scores[hk] for uid, hk in enumerate(hotkeys) if hk in self._scores}
+
+    def _fresh(self) -> bool:
+        return time.time() - self.last_round_ts <= self.ready_ttl_s
 
     def ready_miners(self) -> List[ReadyMiner]:
         with self._lock:
-            return list(self._ready.values())
+            return list(self._ready.values()) if self._fresh() else []
 
     def acquire(self, model_id: Optional[str] = None) -> Optional[ReadyMiner]:
-        """Pick the READY miner (for ``model_id`` if given) with the fewest in-flight requests (ties -> higher score)."""
+        """Pick the READY miner (for ``model_id`` if given) with the fewest in-flight requests (ties -> higher score).
+
+        Returns None when there is no capacity or the last audit round is older than the READY TTL.
+        """
         with self._lock:
+            if not self._fresh():
+                return None
             candidates = [u for u, m in self._ready.items() if model_id is None or m.model_id == model_id]
             if not candidates:
                 return None

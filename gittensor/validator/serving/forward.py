@@ -19,9 +19,13 @@ serves one release, so its score is the best it achieved across releases;
 miners whose window passes are published as READY (tagged with their release)
 to the gateway, and the scores are picked up by the next OSS round.
 
-    score = window passes (0/1) x mean over this round's audits of latency_credit
+    score = window passes (0/1) x mean over this round's audits of latency_credit x capacity
 
-Misses count as 0 in the window and latency credit 0 in the round.
+Misses count as 0 in the window and latency credit 0 in the round. ``capacity``
+comes from the round's load probe: every miner whose window passed gets
+``SERVING_PROBE_REQUESTS`` prompts at the same instant as every other miner,
+and verified tokens per wall-clock second over ``SERVING_PROBE_TARGET_TPS``
+(capped at 1) is its capacity — so hotkeys sharing one GPU share one GPU's pay.
 """
 
 import asyncio
@@ -37,6 +41,8 @@ from gittensor.constants import (
     SERVING_AUDIT_CONCURRENCY,
     SERVING_CHALLENGE_TIMEOUT,
     SERVING_CHALLENGES_PER_ROUND,
+    SERVING_PROBE_REQUESTS,
+    SERVING_PROBE_TARGET_TPS,
 )
 from gittensor.serving.audit import AuditCase, AuditVerdict, reference_for, verify_response
 from gittensor.serving.loadout import ServingRelease, load_serving_loadout
@@ -66,6 +72,37 @@ async def audit_axon(
                 results.append(score_response(uid, synapse.model_copy(), later, release))
             break
     return results
+
+
+async def probe_axon(
+    state: ServingState,
+    dendrite: bt.Dendrite,
+    uid: int,
+    hotkey: str,
+    axon: bt.AxonInfo,
+    release: ServingRelease,
+    cases: Sequence[AuditCase],
+) -> float:
+    """Fire all ``cases`` at once; return verified tokens per wall-clock second (0 when nothing verified)."""
+
+    async def one(case: AuditCase) -> Tuple[AuditVerdict, float, RequestRecord, int]:
+        synapse = InferenceSynapse(
+            messages=case.messages, model_id=release.model_id, max_tokens=case.max_tokens, logprobs=True
+        )
+        response = await consume_stream(dendrite, axon, synapse, SERVING_CHALLENGE_TIMEOUT)
+        verdict, elapsed_ms, record = score_response(uid, response, case, release)
+        return verdict, elapsed_ms, record, len(getattr(response, 'tokens', None) or [])
+
+    started = time.monotonic()
+    results = await asyncio.gather(*(one(case) for case in cases))
+    wall_s = max(time.monotonic() - started, 1e-3)
+    tokens = 0
+    for verdict, _, record, n_tokens in results:
+        state.audits.record(hotkey, release.model_id, verdict.value)
+        state.record(RequestRecord(**{**record.__dict__, 'kind': 'probe'}))
+        if verdict.passed:
+            tokens += n_tokens
+    return tokens / wall_s
 
 
 async def audit_round(
@@ -105,10 +142,33 @@ async def audit_round(
             )
             continue
         credits = await asyncio.gather(*(audit_one(uid, hotkey, axon, release, cases) for uid, hotkey, axon in serving))
+        passing = [
+            (uid, hotkey, axon, credit)
+            for (uid, hotkey, axon), credit in zip(serving, credits)
+            if credit > 0.0 and state.audits.verdict(hotkey, release.model_id).passed
+        ]
         for (uid, hotkey, _), credit in zip(serving, credits):
             window = state.audits.verdict(hotkey, release.model_id)
-            score = credit if window.passed else 0.0
-            bt.logging.debug(f'Serving: UID {uid} {release.model_id} window {window.as_dict()} score {score:.3f}')
+            bt.logging.debug(f'Serving: UID {uid} {release.model_id} window {window.as_dict()} credit {credit:.3f}')
+        if not passing:
+            continue
+        probe_cases = [reference.sample() for _ in range(SERVING_PROBE_REQUESTS)]
+        if probe_cases:
+            rates = await asyncio.gather(
+                *(
+                    probe_axon(state, dendrite, uid, hotkey, axon, release, probe_cases)
+                    for uid, hotkey, axon, _ in passing
+                )
+            )
+        else:  # probe disabled: capacity is not measured
+            rates = [SERVING_PROBE_TARGET_TPS] * len(passing)
+        for (uid, hotkey, _, credit), tps in zip(passing, rates):
+            capacity = min(1.0, tps / SERVING_PROBE_TARGET_TPS)
+            score = credit * capacity if state.audits.verdict(hotkey, release.model_id).passed else 0.0
+            bt.logging.info(
+                f'Serving: UID {uid} {release.model_id} probe {tps:.0f} tok/s capacity {capacity:.2f} '
+                f'latency credit {credit:.2f} score {score:.3f}'
+            )
             if score > best[hotkey][0]:
                 best[hotkey] = (score, release.model_id)
 

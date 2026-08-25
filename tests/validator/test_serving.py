@@ -714,6 +714,7 @@ def test_serving_miner_blacklists_non_validators(monkeypatch):
 
     def call(hotkey):
         syn = InferenceSynapse(messages=MSGS, model_id='m')
+        assert syn.dendrite is not None
         syn.dendrite.hotkey = hotkey
         return asyncio.run(blacklist_inference(miner, syn))  # type: ignore[arg-type]
 

@@ -36,9 +36,10 @@ import os
 import time
 from collections import OrderedDict
 from functools import partial
-from typing import Tuple
+from typing import Optional, Tuple
 
 import bittensor as bt
+from bittensor.core.stream import StreamingSynapse
 from bittensor.utils.axon_utils import allowed_nonce_window_ns, calculate_diff_seconds
 from bittensor_wallet import Keypair
 
@@ -47,6 +48,8 @@ from gittensor.serving.backends import InferenceBackend, load_backend
 from gittensor.serving.loadout import load_serving_loadout
 from gittensor.synapses import InferenceSynapse
 from neurons.base.neuron import BaseNeuron
+
+BTStreamingResponse = StreamingSynapse.BTStreamingResponse
 
 
 class ServingMiner(BaseNeuron):
@@ -99,25 +102,34 @@ class ServingMiner(BaseNeuron):
             raise
 
 
-async def handle_inference(miner: ServingMiner, synapse: InferenceSynapse) -> InferenceSynapse:
-    """Generate a completion for a challenge (or, later, real traffic)."""
+async def handle_inference(miner: ServingMiner, synapse: InferenceSynapse) -> BTStreamingResponse:
+    """Stream the backend's completion for an audit or user request through the axon.
+
+    Backend errors end the stream without ``[DONE]``; the validator scores that as a miss.
+    """
     max_tokens = max(1, min(int(synapse.max_tokens), SERVING_MAX_TOKENS))
-    try:
+    messages, logprobs = synapse.messages, synapse.logprobs
+
+    async def token_streamer(send) -> None:
+        loop = asyncio.get_running_loop()
+        queue: 'asyncio.Queue[Optional[bytes]]' = asyncio.Queue()
+
+        def produce() -> None:
+            try:
+                for chunk in miner.backend.stream(messages, max_tokens, logprobs):
+                    loop.call_soon_threadsafe(queue.put_nowait, chunk)
+            except Exception as e:  # backend down/overloaded: the stream ends unfinished
+                bt.logging.warning(f'ServingMiner backend error: {e}')
+            finally:
+                loop.call_soon_threadsafe(queue.put_nowait, None)
+
         async with miner.backend_slots:
-            result = await asyncio.to_thread(miner.backend.generate, synapse.messages, max_tokens, synapse.logprobs)
-    except Exception as e:  # backend down/overloaded: answer empty, validator scores it 0
-        bt.logging.warning(f'ServingMiner backend error: {e}')
-        return synapse
-    synapse.completion = result.completion
-    synapse.served_model_id = result.model_id
-    synapse.generation_ms = result.generation_ms
-    synapse.ttft_ms = result.ttft_ms
-    synapse.decode_tps = result.decode_tps
-    synapse.tokens = result.tokens
-    synapse.token_logprobs = result.token_logprobs
-    synapse.finish_reason = result.finish_reason
-    synapse.usage = result.usage or None
-    return synapse
+            producer = loop.run_in_executor(None, produce)
+            while (chunk := await queue.get()) is not None:
+                await send({'type': 'http.response.body', 'body': chunk, 'more_body': True})
+            await producer
+
+    return synapse.create_streaming_response(token_streamer)
 
 
 async def verify_inference(miner: ServingMiner, synapse: InferenceSynapse) -> None:

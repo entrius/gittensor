@@ -5,7 +5,9 @@ import bittensor as bt
 from gittensor.constants import SERVING_API_DEFAULT_PORT
 
 VALIDATOR_WAIT = 60  # 60 seconds
-VALIDATOR_STEPS_INTERVAL = 120  # 2 hours, every time a scoring round happens
+VALIDATOR_STEPS_INTERVAL = int(
+    os.getenv('VALIDATOR_STEPS_INTERVAL', '120')
+)  # steps (~minutes) between scoring rounds; 120 = 2 hours
 
 # required env vars
 WANDB_API_KEY = os.getenv('WANDB_API_KEY')

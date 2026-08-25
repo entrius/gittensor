@@ -700,3 +700,28 @@ def test_inference_synapse_hashes_request_fields():
     b = InferenceSynapse(messages=[{'role': 'user', 'content': 'y'}], model_id='m', max_tokens=8)
     assert a.body_hash != b.body_hash
     assert a.body_hash == InferenceSynapse(messages=a.messages, model_id='m', max_tokens=8).body_hash
+
+
+def test_serving_miner_blacklists_non_validators(monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+
+    from gittensor.synapses import InferenceSynapse
+    from neurons.serving_miner import blacklist_inference
+
+    monkeypatch.setenv('SERVING_MIN_CALLER_STAKE', '100')
+    miner = SimpleNamespace(
+        metagraph=SimpleNamespace(
+            hotkeys=['vali', 'rich-miner', 'small-vali'], validator_permit=[True, False, True], S=[5000.0, 9000.0, 10.0]
+        )
+    )
+
+    def call(hotkey):
+        syn = InferenceSynapse(messages=MSGS, model_id='m')
+        syn.dendrite.hotkey = hotkey
+        return asyncio.run(blacklist_inference(miner, syn))  # type: ignore[arg-type]
+
+    assert call('vali') == (False, 'Validator')
+    assert call('rich-miner')[0] and 'permit' in call('rich-miner')[1]
+    assert call('small-vali')[0] and 'Stake' in call('small-vali')[1]
+    assert call('stranger') == (True, 'Unrecognized hotkey')

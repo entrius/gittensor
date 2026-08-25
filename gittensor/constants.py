@@ -205,6 +205,9 @@ SERVING_AUDIT_MAX_ABS_LOGPROB_DIFF = 0.10  # largest single-position |logprob de
 SERVING_AUDIT_WINDOW = 20
 SERVING_AUDIT_WINDOW_THRESHOLDS = ((1, 0.85),)
 SERVING_API_DEFAULT_PORT = 8790
+SERVING_MIN_CALLER_STAKE = (
+    1_000.0  # miner: callers need a validator permit AND at least this stake (TAO); env SERVING_MIN_CALLER_STAKE
+)
 SERVING_BACKEND_CONCURRENCY = 16  # miner: concurrent backend generations (sparkinfer >= 12954e6 handles 24)
 SERVING_SEEN_NONCES = 10_000  # miner: replay guard size; covers many minutes of validator traffic
 SERVING_MAX_TOKENS = 1024  # hard cap per request (API and miner both enforce)

@@ -43,7 +43,12 @@ from bittensor.core.stream import StreamingSynapse
 from bittensor.utils.axon_utils import allowed_nonce_window_ns, calculate_diff_seconds
 from bittensor_wallet import Keypair
 
-from gittensor.constants import SERVING_BACKEND_CONCURRENCY, SERVING_MAX_TOKENS, SERVING_SEEN_NONCES
+from gittensor.constants import (
+    SERVING_BACKEND_CONCURRENCY,
+    SERVING_MAX_TOKENS,
+    SERVING_MIN_CALLER_STAKE,
+    SERVING_SEEN_NONCES,
+)
 from gittensor.serving.backends import InferenceBackend, load_backend
 from gittensor.serving.loadout import load_serving_loadout
 from gittensor.synapses import InferenceSynapse
@@ -159,12 +164,29 @@ async def verify_inference(miner: ServingMiner, synapse: InferenceSynapse) -> No
         miner.seen_nonces.popitem(last=False)
 
 
+def min_caller_stake() -> float:
+    return float(os.getenv('SERVING_MIN_CALLER_STAKE', SERVING_MIN_CALLER_STAKE))
+
+
 async def blacklist_inference(miner: ServingMiner, synapse: InferenceSynapse) -> Tuple[bool, str]:
-    """Only registered hotkeys may query; validators are the expected callers."""
+    """Only validators may query: a registered hotkey with a validator permit and at least the stake floor.
+
+    Otherwise any registered hotkey could use the miner's GPU for free inference.
+    """
     hotkey = synapse.dendrite.hotkey if synapse.dendrite else None
     if not hotkey or hotkey not in miner.metagraph.hotkeys:
         return True, 'Unrecognized hotkey'
-    return False, 'Registered hotkey'
+    uid = miner.metagraph.hotkeys.index(hotkey)
+    try:
+        permitted = bool(miner.metagraph.validator_permit[uid])
+        stake = float(miner.metagraph.S[uid])
+    except IndexError:  # metagraph mid-sync; refuse rather than guess
+        return True, 'Metagraph out of date'
+    if not permitted:
+        return True, 'No validator permit'
+    if stake < min_caller_stake():
+        return True, f'Stake {stake:.0f} below {min_caller_stake():.0f}'
+    return False, 'Validator'
 
 
 async def priority_inference(miner: ServingMiner, synapse: InferenceSynapse) -> float:

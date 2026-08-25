@@ -31,12 +31,15 @@ Miners run this blessed neuron unmodified — serving reward is availability
 and correctness based, so there is nothing to gain by editing it.
 """
 
+import asyncio
 import os
 import time
 from functools import partial
 from typing import Tuple
 
 import bittensor as bt
+from bittensor.utils.axon_utils import allowed_nonce_window_ns, calculate_diff_seconds
+from bittensor_wallet import Keypair
 
 from gittensor.constants import SERVING_MAX_TOKENS
 from gittensor.serving.backends import InferenceBackend, load_backend
@@ -63,6 +66,7 @@ class ServingMiner(BaseNeuron):
             forward_fn=partial(handle_inference, self),
             blacklist_fn=partial(blacklist_inference, self),
             priority_fn=partial(priority_inference, self),
+            verify_fn=partial(verify_inference, self),
         )
         bt.logging.info(f'ServingMiner axon: {self.axon}')
 
@@ -96,7 +100,7 @@ async def handle_inference(miner: ServingMiner, synapse: InferenceSynapse) -> In
     """Generate a completion for a challenge (or, later, real traffic)."""
     max_tokens = max(1, min(int(synapse.max_tokens), SERVING_MAX_TOKENS))
     try:
-        result = miner.backend.generate(synapse.messages, max_tokens, logprobs=synapse.logprobs)
+        result = await asyncio.to_thread(miner.backend.generate, synapse.messages, max_tokens, synapse.logprobs)
     except Exception as e:  # backend down/overloaded: answer empty, validator scores it 0
         bt.logging.warning(f'ServingMiner backend error: {e}')
         return synapse
@@ -110,6 +114,26 @@ async def handle_inference(miner: ServingMiner, synapse: InferenceSynapse) -> In
     synapse.finish_reason = result.finish_reason
     synapse.usage = result.usage or None
     return synapse
+
+
+async def verify_inference(miner: ServingMiner, synapse: InferenceSynapse) -> None:
+    """Signature + freshness check without the strictly increasing nonce the default verify enforces.
+
+    A validator gateway dispatches concurrent requests from one dendrite; they arrive out of order and the
+    default verify rejects every request whose nonce is older than the newest one processed.
+    """
+    d = synapse.dendrite
+    if d is None or d.nonce is None or d.hotkey is None:
+        raise Exception('Missing dendrite headers')
+    now_ns = time.time_ns()
+    if d.nonce <= allowed_nonce_window_ns(now_ns, synapse.timeout):
+        diff, allowed = calculate_diff_seconds(now_ns, synapse.timeout, d.nonce)
+        raise Exception(
+            f'Nonce is too old: acceptable delta is {allowed:.2f} seconds but request was {diff:.2f} seconds old'
+        )
+    message = f'{d.nonce}.{d.hotkey}.{miner.wallet.hotkey.ss58_address}.{d.uuid}.{synapse.computed_body_hash}'
+    if not d.signature or not Keypair(ss58_address=d.hotkey).verify(message, d.signature):
+        raise Exception('Signature mismatch')
 
 
 async def blacklist_inference(miner: ServingMiner, synapse: InferenceSynapse) -> Tuple[bool, str]:

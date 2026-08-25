@@ -37,7 +37,7 @@ class RequestRecord:
     kind: str  # 'audit' | 'gateway'
     uid: Optional[int]
     ok: bool
-    latency_ms: float
+    latency_ms: Optional[float]  # None when the request produced no response
     completion_tokens: int = 0
     ttft_ms: Optional[float] = None
     decode_tps: Optional[float] = None

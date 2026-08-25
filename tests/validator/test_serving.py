@@ -363,6 +363,7 @@ def test_score_response_feeds_window_metrics():
     miss = InferenceSynapse(messages=case.messages, model_id=release.model_id, max_tokens=case.max_tokens)
     verdict, ms, rec = score_response(3, miss, case, release)
     assert verdict.positional_overlap == 0.0 and ms == float('inf') and not rec.ok
+    assert rec.latency_ms is None  # inf is not JSON; /v1/serving/status must serialize the record
 
     honest = InferenceSynapse(
         messages=case.messages,

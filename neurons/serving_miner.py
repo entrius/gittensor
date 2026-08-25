@@ -70,6 +70,9 @@ class ServingMiner(BaseNeuron):
         # Satisfies the BaseNeuron ABC; axon requests route through handle_inference.
         return synapse
 
+    def resync_metagraph(self):
+        self.metagraph.sync(subtensor=self.subtensor)
+
     def run(self):
         self.subtensor.serve_axon(netuid=self.config.netuid, axon=self.axon)
         self.axon.start()

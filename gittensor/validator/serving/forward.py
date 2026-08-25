@@ -18,6 +18,7 @@ their release) to the gateway for the next round.
 Misses count as 0 in the window and latency credit 0 in the round.
 """
 
+import math
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
@@ -144,7 +145,7 @@ def score_response(
             kind='audit',
             uid=uid,
             ok=ok,
-            latency_ms=elapsed_ms,
+            latency_ms=elapsed_ms if math.isfinite(elapsed_ms) else None,
             completion_tokens=len(getattr(response, 'tokens', None) or []),
             ttft_ms=getattr(response, 'ttft_ms', None),
             decode_tps=getattr(response, 'decode_tps', None),

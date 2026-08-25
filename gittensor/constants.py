@@ -170,6 +170,8 @@ assert abs(OSS_EMISSION_SHARE + SERVING_EMISSION_SHARE - 1.0) < EMISSION_SHARE_T
 )
 SERVING_CHALLENGES_PER_ROUND = 4  # audit prompts sent to each serving miner per scoring round
 SERVING_CHALLENGE_TIMEOUT = 30.0  # seconds before an audit counts as failed
+SERVING_AUDIT_CONCURRENCY = 32  # serving axons audited in parallel per round
+SERVING_READY_TTL_S = 900.0  # gateway stops routing when the last audit round is older than this
 # Latency credit for a 64-token audit (release.max_tokens). An honest 5090 answers in ~165 ms on-box
 # (measured 2026-08-22/24: p95 166 ms); add validator<->miner RTT and an
 # honest miner anywhere on earth lands under ~450 ms. Credit is flat to FULL and falls linearly to 0 at

@@ -10,9 +10,9 @@ on:
   workflow_dispatch:
     inputs:
       sparkinfer_ref:
-        description: "sparkinfer commit to build (becomes the image tag and runtime_pin). Keep in sync with DEFAULT_SPARKINFER_REF below."
-        required: true
-        default: "12954e6"
+        description: "sparkinfer commit to build (becomes the image tag). Empty = the runtime_pin in serving_loadout.json."
+        required: false
+        default: ""
       cuda_archs:
         description: "CMAKE_CUDA_ARCHITECTURES"
         required: false
@@ -23,10 +23,6 @@ on:
       - docker/sparkinfer.Dockerfile
       - .github/workflows/sparkinfer-image.yml
 
-env:
-  # Ref used by the build-only check; dispatch runs use the input instead.
-  DEFAULT_SPARKINFER_REF: "12954e6"
-
 jobs:
   image:
     # push-triggered runs (Dockerfile/workflow changed) only BUILD, to catch Dockerfile breakage in CI;
@@ -36,6 +32,16 @@ jobs:
     steps:
       - name: Check out the repo
         uses: actions/checkout@v4
+
+      - name: Resolve the sparkinfer ref (input, else runtime_pin in serving_loadout.json)
+        id: ref
+        run: |
+          REF="${{ inputs.sparkinfer_ref }}"
+          if [ -z "$REF" ]; then
+            REF=$(jq -r '.releases[0].runtime_pin' gittensor/validator/weights/serving_loadout.json | sed 's/.*@//')
+          fi
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+          echo "building sparkinfer@$REF"
 
       - name: Free disk space (CUDA devel image is large)
         run: |
@@ -59,9 +65,9 @@ jobs:
           file: docker/sparkinfer.Dockerfile
           push: ${{ github.event_name == 'workflow_dispatch' }}
           build-args: |
-            SPARKINFER_REF=${{ inputs.sparkinfer_ref || env.DEFAULT_SPARKINFER_REF }}
+            SPARKINFER_REF=${{ steps.ref.outputs.ref }}
             CUDA_ARCHS=${{ inputs.cuda_archs || '120' }}
           tags: |
-            entrius/sparkinfer:${{ inputs.sparkinfer_ref || env.DEFAULT_SPARKINFER_REF }}
+            entrius/sparkinfer:${{ steps.ref.outputs.ref }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

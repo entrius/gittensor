@@ -1,6 +1,7 @@
 """Tests for the serving beta: deterministic backend, audit verification, gateway dispatch, emission pool blending."""
 
 import json
+from typing import Dict
 
 import pytest
 from fastapi.testclient import TestClient
@@ -197,7 +198,7 @@ def _ready(uid: int, score: float = 1.0) -> ReadyMiner:
 def test_state_least_inflight_dispatch():
     state = ServingState()
     assert state.acquire() is None
-    state.publish_ready([_ready(1, 0.5), _ready(2, 1.0)])
+    state.publish_round([_ready(1, 0.5), _ready(2, 1.0)], {})
     first = state.acquire()
     assert first is not None and first.uid == 2  # tie on inflight -> higher score
     second = state.acquire()
@@ -208,7 +209,7 @@ def test_state_least_inflight_dispatch():
     state.release(2)
     again = state.acquire()
     assert again is not None and again.uid == 2
-    state.publish_ready([_ready(1)])
+    state.publish_round([_ready(1)], {})
     only = state.acquire()
     assert only is not None and only.uid == 1
     state.record(RequestRecord(ts=0, kind='gateway', uid=1, ok=True, latency_ms=10))
@@ -218,7 +219,7 @@ def test_state_least_inflight_dispatch():
 def test_acquire_filters_by_release():
     state = ServingState()
     other = ReadyMiner(uid=9, hotkey='hk9', axon=None, score=1.0, model_id='other-model')  # type: ignore[arg-type]
-    state.publish_ready([_ready(1), other])
+    state.publish_round([_ready(1), other], {})
     assert state.acquire('other-model') is other
     assert state.acquire('missing') is None
     picked = state.acquire('echo-v0')
@@ -268,7 +269,7 @@ def test_gateway_429_without_ready_miners(monkeypatch):
 
 def test_gateway_chat_completion_roundtrip(monkeypatch):
     state = ServingState()
-    state.publish_ready([_ready(7)])
+    state.publish_round([_ready(7)], {})
     client = _gateway_client(state, monkeypatch)
     r = client.post(
         '/v1/chat/completions',
@@ -463,7 +464,7 @@ def test_verify_rejects_malformed_reference():
 
 def test_gateway_400_on_user_shaped_bad_input(monkeypatch):
     state = ServingState()
-    state.publish_ready([_ready(7)])
+    state.publish_round([_ready(7)], {})
     client = _gateway_client(state, monkeypatch)
     h = {'Authorization': 'Bearer k1'}
     assert (
@@ -475,23 +476,17 @@ def test_gateway_400_on_user_shaped_bad_input(monkeypatch):
     assert state.inflight() == {7: 0}
 
 
-def test_serving_round_skips_release_without_reference(monkeypatch, tmp_path):
-    """A release whose reference is unreachable is skipped and logged; the round still completes."""
-    import asyncio
-    from types import SimpleNamespace
-
-    from gittensor.validator.serving import forward as fwd
-
-    good = _echo_release()
-    bad = ServingRelease(
-        model_id='ghost', backend='openai-compat', base_url='http://x', reference_url='http://127.0.0.1:1'
-    )
-    monkeypatch.setattr(fwd, 'load_serving_loadout', lambda: ServingLoadout(releases=[bad, good]))
-    monkeypatch.setattr(fwd, 'SERVING_CHALLENGES_PER_ROUND', 2)
+def _dendrite_echoing(good: ServingRelease, dead_axons=()):
+    """Fake dendrite: honest echo answers for every axon, no response for `dead_axons`; counts calls per axon."""
+    calls: Dict[int, int] = {}  # id(axon) -> requests sent
 
     async def dendrite(axons, synapse, deserialize, timeout):
         out = []
-        for _ in axons:
+        for axon in axons:
+            calls[id(axon)] = calls.get(id(axon), 0) + 1
+            if any(axon is d for d in dead_axons):
+                out.append(synapse.model_copy())
+                continue
             ref = expected_completion(synapse.messages, synapse.max_tokens, good.model_id)
             resp = synapse.model_copy(
                 update={
@@ -505,53 +500,113 @@ def test_serving_round_skips_release_without_reference(monkeypatch, tmp_path):
             out.append(resp)
         return out
 
-    axon = SimpleNamespace(is_serving=True)
-    vali = SimpleNamespace(
-        uid=0,
-        metagraph=SimpleNamespace(hotkeys=['v', 'hk1'], axons=[axon, axon]),
-        dendrite=dendrite,
-        serving_state=ServingState(),
-        config=SimpleNamespace(neuron=SimpleNamespace(full_path=str(tmp_path))),
+    return dendrite, calls
+
+
+def test_audit_round_skips_release_without_reference(monkeypatch):
+    """A release whose reference is unreachable is skipped and logged; the round still completes."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from gittensor.validator.serving import forward as fwd
+
+    good = _echo_release()
+    bad = ServingRelease(
+        model_id='ghost', backend='openai-compat', base_url='http://x', reference_url='http://127.0.0.1:1'
     )
-    scores = asyncio.run(fwd.serving_challenges(vali, {0, 1}))  # type: ignore[arg-type]
-    assert scores == {1: 1.0}
-    assert [m.uid for m in vali.serving_state.ready_miners()] == [1]
-    assert (tmp_path / 'serving_audits.json').exists()
+    monkeypatch.setattr(fwd, 'SERVING_CHALLENGES_PER_ROUND', 2)
+    dendrite, _ = _dendrite_echoing(good)
+    axon = SimpleNamespace(is_serving=True)
+    state = ServingState()
+    scores = asyncio.run(
+        fwd.audit_round(state, dendrite, [(1, 'hk1', axon)], ServingLoadout(releases=[bad, good]))  # type: ignore[arg-type]
+    )
+    assert scores == {'hk1': 1.0}
+    assert [m.uid for m in state.ready_miners()] == [1]
+    assert state.scores_for(['v', 'hk1']) == {1: 1.0}
+    assert state.scores_for(['v', 'other']) == {}  # UID 1's hotkey changed since the round: nothing carries over
 
 
-def test_serving_audits_run_between_oss_rounds(monkeypatch):
-    """A serving step audits and caches scores without running the OSS round; the OSS round blends the cache."""
+def test_audit_round_stops_after_first_unanswered_prompt(monkeypatch):
+    """A dead axon costs one timeout, not one per case; the unsent cases still count as misses."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from gittensor.validator.serving import forward as fwd
+
+    good = _echo_release()
+    monkeypatch.setattr(fwd, 'SERVING_CHALLENGES_PER_ROUND', 4)
+    live, dead = SimpleNamespace(is_serving=True), SimpleNamespace(is_serving=True)
+    dendrite, calls = _dendrite_echoing(good, dead_axons=(dead,))
+    state = ServingState()
+    scores = asyncio.run(
+        fwd.audit_round(state, dendrite, [(1, 'hk1', live), (2, 'hk2', dead)], ServingLoadout(releases=[good]))  # type: ignore[arg-type]
+    )
+    assert calls == {id(live): 4, id(dead): 1}
+    assert scores == {'hk1': 1.0, 'hk2': 0.0}
+    assert state.audits.verdict('hk2', good.model_id).n_audits == 4
+    assert [m.uid for m in state.ready_miners()] == [1]
+
+
+def test_ready_set_expires_after_ttl():
+    from types import SimpleNamespace
+
+    state = ServingState(ready_ttl_s=10.0)
+    miner = ReadyMiner(uid=1, hotkey='hk1', axon=SimpleNamespace(), score=1.0, model_id='m')  # type: ignore[arg-type]
+    state.publish_round([miner], {'hk1': 1.0})
+    assert state.acquire('m') is miner
+    state.last_round_ts -= 11.0  # the audit thread stopped publishing
+    assert state.ready_miners() == [] and state.acquire('m') is None
+    assert state.scores_for(['hk1']) == {0: 1.0}  # scores still blend; only routing stops
+
+
+def test_oss_round_blends_latest_serving_scores(monkeypatch):
+    """The OSS round reads the audit thread's scores by current hotkey instead of running audits itself."""
     import asyncio
     from types import SimpleNamespace
 
     from gittensor.validator import forward as top
 
-    calls = []
     monkeypatch.setattr(top, 'SERVING_ENABLED', True)
-    monkeypatch.setattr(top, 'SERVING_STEPS_INTERVAL', 5)
-    monkeypatch.setattr(top, 'VALIDATOR_STEPS_INTERVAL', 120)
+    monkeypatch.setattr(top, 'VALIDATOR_STEPS_INTERVAL', 1)
     monkeypatch.setattr(top, 'VALIDATOR_WAIT', 0)
     monkeypatch.setattr(top, 'get_all_uids', lambda self: {1})
+    monkeypatch.setattr(top, 'load_master_repo_weights', lambda: {})
+    monkeypatch.setattr(top, 'load_programming_language_weights', lambda: {})
+    monkeypatch.setattr(top, 'load_token_config', lambda: {})
 
-    async def audits(self, uids):
-        calls.append(('serving', uids))
-        return {1: 0.5}
+    async def oss(self, *a):
+        return {}, set(), set()
 
-    def oss(*a, **k):
-        raise AssertionError('OSS round must not run on a serving-only step')
+    async def issues(*a, **k):
+        return None
 
-    monkeypatch.setattr(top, 'serving_challenges', audits)
-    monkeypatch.setattr(top, 'load_master_repo_weights', oss)
+    async def store(*a, **k):
+        return None
 
-    vali = SimpleNamespace(step=5, serving_state=ServingState(), serving_scores={})
+    seen = {}
+
+    def blend(evals, repos, uids, maintainers, serving_scores):
+        seen['serving'] = serving_scores
+        return [0.0]
+
+    monkeypatch.setattr(top, 'oss_contributions', oss)
+    monkeypatch.setattr(top, 'issue_discovery', issues)
+    monkeypatch.setattr(top, 'build_maintainer_uids_by_repo', lambda *a: {})
+    monkeypatch.setattr(top, 'blend_emission_pools', blend)
+
+    state = ServingState()
+    state.publish_round([], {'hk1': 0.5, 'gone': 0.9})
+    vali = SimpleNamespace(
+        step=0,
+        serving_state=state,
+        metagraph=SimpleNamespace(hotkeys=['v', 'hk1']),
+        evaluation_cache=None,
+        bulk_store_evaluation=store,
+        update_scores=lambda *a, **k: None,
+    )
     asyncio.run(top.forward(vali))  # type: ignore[arg-type]
-    assert calls == [('serving', {1})]
-    assert vali.serving_scores == {1: 0.5}
-
-    vali.step = 7
-    asyncio.run(top.forward(vali))  # type: ignore[arg-type]
-    assert calls == [('serving', {1})]  # off-cadence step: no audit, cache untouched
-    assert vali.serving_scores == {1: 0.5}
+    assert seen['serving'] == {1: 0.5}
 
 
 def test_request_record_drops_non_finite_telemetry():

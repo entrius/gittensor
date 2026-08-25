@@ -12,10 +12,8 @@ from gittensor.utils.uids import get_all_uids
 from gittensor.validator.emission_allocation import blend_emission_pools
 from gittensor.validator.issue_discovery.scan import run_issue_discovery
 from gittensor.validator.oss_contributions.reward import get_rewards
-from gittensor.validator.serving.forward import serving_challenges
 from gittensor.validator.utils.config import (
     SERVING_ENABLED,
-    SERVING_STEPS_INTERVAL,
     VALIDATOR_STEPS_INTERVAL,
     VALIDATOR_WAIT,
 )
@@ -33,8 +31,8 @@ if TYPE_CHECKING:
 async def forward(self: 'Validator') -> None:
     """Execute the validator's forward pass.
 
-    Serving audits run every SERVING_STEPS_INTERVAL steps (SERVING_ENABLED only) so the gateway's READY set
-    stays fresh; the latest serving scores are kept on the validator and blended at the next OSS round.
+    Serving audits run on their own wall-clock thread (``ServingAuditThread``, SERVING_ENABLED only); the OSS
+    round blends the scores from the latest audit round.
 
     Performs the core validation cycle every VALIDATOR_STEPS_INTERVAL steps:
     1. Score OSS contributions (mirror PR scoring)
@@ -49,14 +47,6 @@ async def forward(self: 'Validator') -> None:
     - Serving pool:          SERVING_EMISSION_SHARE (0% shadow-mode beta) by serving score
     - Recycle:              registry slack and inactive repo slices to UID 0
     """
-
-    if SERVING_ENABLED and self.step % SERVING_STEPS_INTERVAL == 0:
-        try:
-            self.serving_scores = await serving_challenges(self, get_all_uids(self))
-        except Exception as e:  # a serving fault must never take the OSS round (or the validator) down
-            bt.logging.error(f'Serving round failed, no serving scores this round: {e!r}')
-            self.serving_state.publish_ready([])
-            self.serving_scores = {}
 
     if self.step % VALIDATOR_STEPS_INTERVAL == 0:
         miner_uids = get_all_uids(self)
@@ -86,8 +76,9 @@ async def forward(self: 'Validator') -> None:
 
         # 5. Allocate repo-bounded emission shares into final rewards
         maintainer_uids_by_repo = build_maintainer_uids_by_repo(miner_evaluations, master_repositories, miner_uids)
+        serving_scores = self.serving_state.scores_for(self.metagraph.hotkeys) if SERVING_ENABLED else {}
         rewards = blend_emission_pools(
-            miner_evaluations, master_repositories, miner_uids, maintainer_uids_by_repo, self.serving_scores
+            miner_evaluations, master_repositories, miner_uids, maintainer_uids_by_repo, serving_scores
         )
 
         self.update_scores(rewards, miner_uids, blacklisted_uids=sorted(penalized_uids))

@@ -69,7 +69,8 @@ def blend_emission_pools(
             rewards[uid_index[uid]] += reward
         recycle_share += serving_unallocated
         bt.logging.info(
-            f'Serving pool: {SERVING_EMISSION_SHARE * 100:.0f}% across {len(serving_rewards)} serving miners'
+            f'Serving pool: {SERVING_EMISSION_SHARE * 100:.0f}% across '
+            f'{sum(1 for r in serving_rewards.values() if r > 0)} serving miners'
         )
 
     # Recycle receives registry slack and empty repo slices.

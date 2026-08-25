@@ -153,7 +153,9 @@ def score_response(
         )
 
     if getattr(response, 'completion', None) is None:
-        return AuditVerdict(False, 0.0, float('inf'), 'no response'), float('inf'), rec(False, 'no response')
+        dendrite = getattr(response, 'dendrite', None)
+        reason = f'no response ({getattr(dendrite, "status_code", None)} {getattr(dendrite, "status_message", None)})'
+        return AuditVerdict(False, 0.0, float('inf'), reason), float('inf'), rec(False, reason)
     served = getattr(response, 'served_model_id', None)
     if served != release.model_id:
         reason = f'wrong model {served!r}'

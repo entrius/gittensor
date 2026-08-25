@@ -710,18 +710,14 @@ def test_serving_miner_blacklists_non_validators(monkeypatch):
     from neurons.serving_miner import blacklist_inference
 
     monkeypatch.setenv('SERVING_MIN_CALLER_STAKE', '100')
-    miner = SimpleNamespace(
-        metagraph=SimpleNamespace(
-            hotkeys=['vali', 'rich-miner', 'small-vali'], validator_permit=[True, False, True], S=[5000.0, 9000.0, 10.0]
-        )
-    )
+    miner = SimpleNamespace(metagraph=SimpleNamespace(hotkeys=['vali', 'builder', 'small'], S=[5000.0, 100.0, 99.0]))
 
     def call(hotkey):
         syn = InferenceSynapse(messages=MSGS, model_id='m')
         syn.dendrite.hotkey = hotkey
         return asyncio.run(blacklist_inference(miner, syn))  # type: ignore[arg-type]
 
-    assert call('vali') == (False, 'Validator')
-    assert call('rich-miner')[0] and 'permit' in call('rich-miner')[1]
-    assert call('small-vali')[0] and 'Stake' in call('small-vali')[1]
+    assert call('vali') == (False, 'Staked caller')
+    assert call('builder') == (False, 'Staked caller')
+    assert call('small')[0] and 'Stake 99 below 100' in call('small')[1]
     assert call('stranger') == (True, 'Unrecognized hotkey')

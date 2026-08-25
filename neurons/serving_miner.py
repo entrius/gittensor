@@ -169,24 +169,21 @@ def min_caller_stake() -> float:
 
 
 async def blacklist_inference(miner: ServingMiner, synapse: InferenceSynapse) -> Tuple[bool, str]:
-    """Only validators may query: a registered hotkey with a validator permit and at least the stake floor.
+    """Only hotkeys staked at least SERVING_MIN_CALLER_STAKE alpha on the subnet may query.
 
-    Otherwise any registered hotkey could use the miner's GPU for free inference.
+    Otherwise any registered hotkey could use the miner's GPU for free inference; the stake floor means validators
+    and builders with skin in the game get to use the product.
     """
     hotkey = synapse.dendrite.hotkey if synapse.dendrite else None
     if not hotkey or hotkey not in miner.metagraph.hotkeys:
         return True, 'Unrecognized hotkey'
-    uid = miner.metagraph.hotkeys.index(hotkey)
     try:
-        permitted = bool(miner.metagraph.validator_permit[uid])
-        stake = float(miner.metagraph.S[uid])
-    except IndexError:  # metagraph mid-sync; refuse rather than guess
+        stake = float(miner.metagraph.S[miner.metagraph.hotkeys.index(hotkey)])
+    except (ValueError, IndexError):  # metagraph mid-sync; refuse rather than guess
         return True, 'Metagraph out of date'
-    if not permitted:
-        return True, 'No validator permit'
     if stake < min_caller_stake():
         return True, f'Stake {stake:.0f} below {min_caller_stake():.0f}'
-    return False, 'Validator'
+    return False, 'Staked caller'
 
 
 async def priority_inference(miner: ServingMiner, synapse: InferenceSynapse) -> float:

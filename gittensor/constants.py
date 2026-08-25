@@ -152,7 +152,7 @@ RECYCLE_UID = 0
 
 # Combined scoring pool distributed by repository emission_share, then by per-repo PR/issue split.
 # Pools (OSS + SERVING) must sum to 1.0; anything unallocated within them recycles to RECYCLE_UID.
-OSS_EMISSION_SHARE = 0.80  # repo emission_share values are fractions of THIS pool (sparkinfer 0.4 -> 32% of total)
+OSS_EMISSION_SHARE = 0.50  # repo emission_share values are fractions of THIS pool (sparkinfer 0.4 -> 20% of total)
 DEFAULT_ISSUE_DISCOVERY_SHARE = 0.5
 EMISSION_SHARE_TOLERANCE = 1e-9
 MAX_MAINTAINER_CUT = 0.5  # maintaining is only half of the problem to software, at maximum
@@ -164,7 +164,7 @@ MAX_MAINTAINER_CUT = 0.5  # maintaining is only half of the problem to software,
 # passing audits the whole pool recycles to RECYCLE_UID, so this is safe to hold above 0 before
 # miners exist. 0.0 would be shadow mode (scores computed and logged, nothing paid). Move
 # OSS_EMISSION_SHARE in the same commit so the pools still sum to 1.0.
-SERVING_EMISSION_SHARE = 0.20
+SERVING_EMISSION_SHARE = 0.50
 assert abs(OSS_EMISSION_SHARE + SERVING_EMISSION_SHARE - 1.0) < EMISSION_SHARE_TOLERANCE, (
     'emission pools must sum to 1.0'
 )
@@ -198,12 +198,13 @@ SERVING_AUDIT_MAX_ABS_LOGPROB_DIFF = 0.10  # largest single-position |logprob de
 # Rolling window: the mean of per-audit outcomes (1 pass / 0 fail; misses and wrong model are 0) over the last
 # SERVING_AUDIT_WINDOW audits of a (hotkey, release) must reach the threshold for the number of audits seen so
 # far (rows are (k, threshold), linearly interpolated, flat beyond the last row). With a deterministic runtime the
-# honest mean is 1.0, so the bar only leaves room for transient misses: one miss costs a round at 4 audits/round.
+# honest mean is 1.0, so the bar only leaves room for transient misses. At 4 audits per 5-minute round, one missed
+# round (4/10 = 0.6 < 0.8) costs ~10 minutes out of the READY set; a single missed audit does not.
 # History: the 1b8b962 pin needed a positional-overlap window with a calibrated ramp (0.016 at k=1 .. 0.415 at
 # k=20; 2026-08-22 notes). Recalibrate with
 #   python scripts/serving_cheat_experiment.py analyze --honest <honest rows> --cheaters <cheater rows>
-SERVING_AUDIT_WINDOW = 20
-SERVING_AUDIT_WINDOW_THRESHOLDS = ((1, 0.85),)
+SERVING_AUDIT_WINDOW = 10
+SERVING_AUDIT_WINDOW_THRESHOLDS = ((1, 0.8),)
 SERVING_API_DEFAULT_PORT = 8790
 # Miner: a hotkey may query for inference only with at least this much stake on the subnet (alpha, metagraph.S). Same
 # rule as allways: validators and builders with skin in the game get to use the product. Env SERVING_MIN_CALLER_STAKE.

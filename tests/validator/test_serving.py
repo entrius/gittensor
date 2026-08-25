@@ -371,16 +371,19 @@ def test_audit_bands_match_measured_calibration():
 
 
 def test_audit_window_tolerates_one_miss_per_round():
-    """With a deterministic runtime the bar is 0.85: a single miss in the last 20 is fine, two in a row of 4 is not."""
+    """Bar is 0.8 over the last 10: one miss in a round of 4 is fine, a whole missed round is not, and it clears
+    once a clean round pushes the misses below 20% of the window."""
     w = AuditWindow()
     hk = 'hk'
     for _ in range(4):
         w.record(hk, 'm', 1.0)
     assert w.verdict(hk, 'm').passed
-    w.record(hk, 'm', 0.0)  # 4/5 = 0.8 < 0.85 -> drops this round
+    w.record(hk, 'm', 0.0)  # 4/5 = 0.8 -> still READY
+    assert w.verdict(hk, 'm').passed
+    w.record(hk, 'm', 0.0)  # 4/6 < 0.8 -> drops
     assert not w.verdict(hk, 'm').passed
-    for _ in range(3):
-        w.record(hk, 'm', 1.0)  # 7/8 = 0.875 -> back
+    for _ in range(4):
+        w.record(hk, 'm', 1.0)  # 8/10 = 0.8 -> back after one clean round
     assert w.verdict(hk, 'm').passed
     assert window_threshold(1, SERVING_AUDIT_WINDOW_THRESHOLDS) == window_threshold(SERVING_AUDIT_WINDOW)
 

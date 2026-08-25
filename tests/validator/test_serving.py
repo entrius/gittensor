@@ -363,6 +363,7 @@ def test_score_response_feeds_window_metrics():
     miss = InferenceSynapse(messages=case.messages, model_id=release.model_id, max_tokens=case.max_tokens)
     verdict, ms, rec = score_response(3, miss, case, release)
     assert verdict.positional_overlap == 0.0 and ms == float('inf') and not rec.ok
+    assert rec.latency_ms is None  # inf is not JSON; /v1/serving/status must serialize the record
 
     honest = InferenceSynapse(
         messages=case.messages,
@@ -516,3 +517,53 @@ def test_serving_round_skips_release_without_reference(monkeypatch, tmp_path):
     assert scores == {1: 1.0}
     assert [m.uid for m in vali.serving_state.ready_miners()] == [1]
     assert (tmp_path / 'serving_audits.json').exists()
+
+
+def test_serving_audits_run_between_oss_rounds(monkeypatch):
+    """A serving step audits and caches scores without running the OSS round; the OSS round blends the cache."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from gittensor.validator import forward as top
+
+    calls = []
+    monkeypatch.setattr(top, 'SERVING_ENABLED', True)
+    monkeypatch.setattr(top, 'SERVING_STEPS_INTERVAL', 5)
+    monkeypatch.setattr(top, 'VALIDATOR_STEPS_INTERVAL', 120)
+    monkeypatch.setattr(top, 'VALIDATOR_WAIT', 0)
+    monkeypatch.setattr(top, 'get_all_uids', lambda self: {1})
+
+    async def audits(self, uids):
+        calls.append(('serving', uids))
+        return {1: 0.5}
+
+    def oss(*a, **k):
+        raise AssertionError('OSS round must not run on a serving-only step')
+
+    monkeypatch.setattr(top, 'serving_challenges', audits)
+    monkeypatch.setattr(top, 'load_master_repo_weights', oss)
+
+    vali = SimpleNamespace(step=5, serving_state=ServingState(), serving_scores={})
+    asyncio.run(top.forward(vali))  # type: ignore[arg-type]
+    assert calls == [('serving', {1})]
+    assert vali.serving_scores == {1: 0.5}
+
+    vali.step = 7
+    asyncio.run(top.forward(vali))  # type: ignore[arg-type]
+    assert calls == [('serving', {1})]  # off-cadence step: no audit, cache untouched
+    assert vali.serving_scores == {1: 0.5}
+
+
+def test_request_record_drops_non_finite_telemetry():
+    rec = RequestRecord(ts=0.0, kind='gateway', uid=1, ok=True, latency_ms=float('inf'), ttft_ms=float('nan'))
+    assert rec.latency_ms is None and rec.ttft_ms is None and rec.decode_tps is None
+    assert RequestRecord(ts=0.0, kind='gateway', uid=1, ok=True, latency_ms=12.5).latency_ms == 12.5
+
+
+def test_inference_synapse_hashes_request_fields():
+    from gittensor.synapses import InferenceSynapse
+
+    a = InferenceSynapse(messages=[{'role': 'user', 'content': 'x'}], model_id='m', max_tokens=8)
+    b = InferenceSynapse(messages=[{'role': 'user', 'content': 'y'}], model_id='m', max_tokens=8)
+    assert a.body_hash != b.body_hash
+    assert a.body_hash == InferenceSynapse(messages=a.messages, model_id='m', max_tokens=8).body_hash

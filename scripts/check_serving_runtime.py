@@ -121,12 +121,13 @@ def check_completion_shape(rep: Report, base_url: str, model_id: str, max_tokens
         assert lp is not None
         rep.add('R2 logprob values <= 0', MUST, all(float(e['logprob']) <= 1e-6 for e in lp))
         n_ct = usage.get('completion_tokens') or 0
+        # OpenAI counts the stop token in completion_tokens but omits it from logprobs.content (sparkinfer >= 12954e6).
+        eos_omitted = choice.get('finish_reason') == 'stop' and len(lp) == n_ct - 1
         rep.add(
-            'R2 entries == completion_tokens',
+            'R2 entries == completion_tokens (or one fewer on stop: EOS omitted)',
             MUST,
-            len(lp) == n_ct,
-            f'{len(lp)} vs {n_ct}'
-            + (' (first-token logprob missing — fixed upstream in 9e43bfa)' if len(lp) == n_ct - 1 else ''),
+            len(lp) == n_ct or eos_omitted,
+            f'{len(lp)} vs {n_ct}' + (' (EOS omitted)' if eos_omitted else ''),
         )
     rep.add(
         'R4 max_tokens honoured',

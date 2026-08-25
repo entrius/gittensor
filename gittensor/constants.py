@@ -178,7 +178,7 @@ SERVING_CHALLENGE_TIMEOUT = 30.0  # seconds before an audit counts as failed
 # one-GPU-many-hotkeys case, caught by concurrent burst audits (launch plan, gap 0).
 SERVING_LATENCY_FULL_CREDIT_MS = 500.0
 SERVING_LATENCY_ZERO_CREDIT_MS = 1_500.0
-# Per-audit verdict. The blessed runtime is bit-reproducible (sparkinfer 9e43bfa, SPARKINFER_DETERMINISTIC=1), so an
+# Per-audit verdict. The blessed runtime is bit-reproducible (sparkinfer 12954e6, SPARKINFER_DETERMINISTIC=1), so an
 # honest miner reproduces the reference's greedy tokens exactly and its logprobs to float noise; every planted
 # cheater differs on every prompt (measured 2026-08-24, internal serving-experiments notes: honest max |delta| 0.0000,
 # cheapest cheater min mean |delta| 0.0057 / min max |delta| 0.129). Both bands must hold for an audit to pass.
@@ -195,6 +195,8 @@ SERVING_AUDIT_MAX_ABS_LOGPROB_DIFF = 0.10  # largest single-position |logprob de
 SERVING_AUDIT_WINDOW = 20
 SERVING_AUDIT_WINDOW_THRESHOLDS = ((1, 0.85),)
 SERVING_API_DEFAULT_PORT = 8790
+SERVING_BACKEND_CONCURRENCY = 16  # miner: concurrent backend generations (sparkinfer >= 12954e6 handles 24)
+SERVING_SEEN_NONCES = 10_000  # miner: replay guard size; covers many minutes of validator traffic
 SERVING_MAX_TOKENS = 1024  # hard cap per request (API and miner both enforce)
 SERVING_REQUEST_LOG_SIZE = 5_000  # in-memory ring of recent API/audit requests (telemetry)
 

@@ -18,6 +18,7 @@ their release) to the gateway for the next round.
 Misses count as 0 in the window and latency credit 0 in the round.
 """
 
+import math
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
@@ -144,7 +145,7 @@ def score_response(
             kind='audit',
             uid=uid,
             ok=ok,
-            latency_ms=elapsed_ms,
+            latency_ms=elapsed_ms if math.isfinite(elapsed_ms) else None,
             completion_tokens=len(getattr(response, 'tokens', None) or []),
             ttft_ms=getattr(response, 'ttft_ms', None),
             decode_tps=getattr(response, 'decode_tps', None),
@@ -152,7 +153,9 @@ def score_response(
         )
 
     if getattr(response, 'completion', None) is None:
-        return AuditVerdict(False, 0.0, float('inf'), 'no response'), float('inf'), rec(False, 'no response')
+        dendrite = getattr(response, 'dendrite', None)
+        reason = f'no response ({getattr(dendrite, "status_code", None)} {getattr(dendrite, "status_message", None)})'
+        return AuditVerdict(False, 0.0, float('inf'), reason), float('inf'), rec(False, reason)
     served = getattr(response, 'served_model_id', None)
     if served != release.model_id:
         reason = f'wrong model {served!r}'

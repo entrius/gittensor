@@ -1,5 +1,5 @@
 # Entrius 2025
-from typing import Dict, List, Optional
+from typing import ClassVar, Dict, List, Optional
 
 import bittensor as bt
 from pydantic import Field
@@ -42,6 +42,8 @@ class InferenceSynapse(bt.Synapse):
     returns per-token logprobs of the greedy completion, which the validator
     checks against its reference (``gittensor/serving/audit.py``).
     """
+
+    required_hash_fields: ClassVar[tuple[str, ...]] = ('messages', 'model_id', 'max_tokens', 'logprobs')
 
     # Request
     messages: List[Dict[str, str]]

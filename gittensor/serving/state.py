@@ -10,6 +10,7 @@ which is the seed of every later phase: miner speed scoring on organic
 traffic, the router competition's replay dataset, and usage telemetry.
 """
 
+import math
 import threading
 import time
 from collections import deque
@@ -42,6 +43,15 @@ class RequestRecord:
     ttft_ms: Optional[float] = None
     decode_tps: Optional[float] = None
     detail: str = ''
+
+    def __post_init__(self) -> None:
+        for name in ('latency_ms', 'ttft_ms', 'decode_tps'):
+            self.__dict__[name] = finite_or_none(getattr(self, name))
+
+
+def finite_or_none(value: Optional[float]) -> Optional[float]:
+    """Miner-reported floats go into JSON responses, which reject NaN/inf."""
+    return float(value) if value is not None and math.isfinite(value) else None
 
 
 @dataclass

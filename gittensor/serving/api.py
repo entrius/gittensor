@@ -32,7 +32,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from gittensor.constants import SERVING_MAX_TOKENS
 from gittensor.serving.loadout import ServingRelease
-from gittensor.serving.state import ReadyMiner, RequestRecord, ServingState
+from gittensor.serving.state import ReadyMiner, RequestRecord, ServingState, finite_or_none
 from gittensor.synapses import InferenceSynapse
 
 _bearer = HTTPBearer(auto_error=False)
@@ -171,8 +171,8 @@ def build_app(
             'gittensor': {
                 'served_uid': miner.uid,
                 'latency_ms': round(latency_ms, 1),
-                'ttft_ms': result.ttft_ms,
-                'decode_tps': result.decode_tps,
+                'ttft_ms': finite_or_none(result.ttft_ms),
+                'decode_tps': finite_or_none(result.decode_tps),
             },
         }
 

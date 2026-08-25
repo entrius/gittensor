@@ -552,3 +552,18 @@ def test_serving_audits_run_between_oss_rounds(monkeypatch):
     asyncio.run(top.forward(vali))  # type: ignore[arg-type]
     assert calls == [('serving', {1})]  # off-cadence step: no audit, cache untouched
     assert vali.serving_scores == {1: 0.5}
+
+
+def test_request_record_drops_non_finite_telemetry():
+    rec = RequestRecord(ts=0.0, kind='gateway', uid=1, ok=True, latency_ms=float('inf'), ttft_ms=float('nan'))
+    assert rec.latency_ms is None and rec.ttft_ms is None and rec.decode_tps is None
+    assert RequestRecord(ts=0.0, kind='gateway', uid=1, ok=True, latency_ms=12.5).latency_ms == 12.5
+
+
+def test_inference_synapse_hashes_request_fields():
+    from gittensor.synapses import InferenceSynapse
+
+    a = InferenceSynapse(messages=[{'role': 'user', 'content': 'x'}], model_id='m', max_tokens=8)
+    b = InferenceSynapse(messages=[{'role': 'user', 'content': 'y'}], model_id='m', max_tokens=8)
+    assert a.body_hash != b.body_hash
+    assert a.body_hash == InferenceSynapse(messages=a.messages, model_id='m', max_tokens=8).body_hash

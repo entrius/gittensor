@@ -18,6 +18,8 @@ WANDB_VALIDATOR_NAME = os.getenv('WANDB_VALIDATOR_NAME', 'vali')
 STORE_DB_RESULTS = os.getenv('STORE_DB_RESULTS', 'false').lower() == 'true'
 SERVING_ENABLED = os.getenv('SERVING_ENABLED', 'false').lower() == 'true'
 SERVING_STEPS_INTERVAL = int(os.getenv('SERVING_STEPS_INTERVAL', '5'))  # steps (~minutes) between serving audit rounds
+if VALIDATOR_STEPS_INTERVAL < 1 or SERVING_STEPS_INTERVAL < 1:
+    raise ValueError('VALIDATOR_STEPS_INTERVAL and SERVING_STEPS_INTERVAL must be >= 1')
 # Serving inference API: off unless keys are set; loopback by default (0.0.0.0 inside docker), front it with the host proxy.
 SERVING_API_KEYS = os.getenv('SERVING_API_KEYS', '')
 SERVING_API_HOST = os.getenv('SERVING_API_HOST', '127.0.0.1')

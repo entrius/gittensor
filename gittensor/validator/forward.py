@@ -15,6 +15,7 @@ from gittensor.validator.oss_contributions.reward import get_rewards
 from gittensor.validator.serving.forward import serving_challenges
 from gittensor.validator.utils.config import (
     SERVING_ENABLED,
+    SERVING_STEPS_INTERVAL,
     VALIDATOR_STEPS_INTERVAL,
     VALIDATOR_WAIT,
 )
@@ -32,13 +33,14 @@ if TYPE_CHECKING:
 async def forward(self: 'Validator') -> None:
     """Execute the validator's forward pass.
 
+    Serving audits run every SERVING_STEPS_INTERVAL steps (SERVING_ENABLED only) so the gateway's READY set
+    stays fresh; the latest serving scores are kept on the validator and blended at the next OSS round.
+
     Performs the core validation cycle every VALIDATOR_STEPS_INTERVAL steps:
     1. Score OSS contributions (mirror PR scoring)
     2. Score issue discovery
-    3. Run issue bounties verification
-    4. Run serving challenges (SERVING_ENABLED only; shadow mode at 0% share)
-    5. Store all evaluations to DB
-    6. Blend emission pools and update scores
+    3. Store all evaluations to DB
+    4. Blend emission pools (with the latest serving scores) and update scores
 
     Emission blending:
     - Combined scoring pool: 90%, allocated by repository emission_share
@@ -47,6 +49,14 @@ async def forward(self: 'Validator') -> None:
     - Serving pool:          SERVING_EMISSION_SHARE (0% shadow-mode beta) by serving score
     - Recycle:              registry slack and inactive repo slices to UID 0
     """
+
+    if SERVING_ENABLED and self.step % SERVING_STEPS_INTERVAL == 0:
+        try:
+            self.serving_scores = await serving_challenges(self, get_all_uids(self))
+        except Exception as e:  # a serving fault must never take the OSS round (or the validator) down
+            bt.logging.error(f'Serving round failed, no serving scores this round: {e!r}')
+            self.serving_state.publish_ready([])
+            self.serving_scores = {}
 
     if self.step % VALIDATOR_STEPS_INTERVAL == 0:
         miner_uids = get_all_uids(self)
@@ -71,22 +81,13 @@ async def forward(self: 'Validator') -> None:
         # cached UIDs now have fresh issue-discovery fields — persist them
         cached_uids.clear()
 
-        # 4. Serving challenges (sub-subnet B beta; scores are telemetry until SERVING_EMISSION_SHARE > 0)
-        serving_scores: Dict[int, float] = {}
-        if SERVING_ENABLED:
-            try:
-                serving_scores = await serving_challenges(self, miner_uids)
-            except Exception as e:  # a serving fault must never take the OSS round (or the validator) down
-                bt.logging.error(f'Serving round failed, no serving scores this round: {e!r}')
-                self.serving_state.publish_ready([])
-
-        # 5. Store all evaluations to DB (includes issue discovery fields)
+        # 4. Store all evaluations to DB (includes issue discovery fields)
         await self.bulk_store_evaluation(miner_evaluations, master_repositories, skip_uids=cached_uids)
 
-        # 6. Allocate repo-bounded emission shares into final rewards
+        # 5. Allocate repo-bounded emission shares into final rewards
         maintainer_uids_by_repo = build_maintainer_uids_by_repo(miner_evaluations, master_repositories, miner_uids)
         rewards = blend_emission_pools(
-            miner_evaluations, master_repositories, miner_uids, maintainer_uids_by_repo, serving_scores
+            miner_evaluations, master_repositories, miner_uids, maintainer_uids_by_repo, self.serving_scores
         )
 
         self.update_scores(rewards, miner_uids, blacklisted_uids=sorted(penalized_uids))

@@ -517,3 +517,38 @@ def test_serving_round_skips_release_without_reference(monkeypatch, tmp_path):
     assert scores == {1: 1.0}
     assert [m.uid for m in vali.serving_state.ready_miners()] == [1]
     assert (tmp_path / 'serving_audits.json').exists()
+
+
+def test_serving_audits_run_between_oss_rounds(monkeypatch):
+    """A serving step audits and caches scores without running the OSS round; the OSS round blends the cache."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from gittensor.validator import forward as top
+
+    calls = []
+    monkeypatch.setattr(top, 'SERVING_ENABLED', True)
+    monkeypatch.setattr(top, 'SERVING_STEPS_INTERVAL', 5)
+    monkeypatch.setattr(top, 'VALIDATOR_STEPS_INTERVAL', 120)
+    monkeypatch.setattr(top, 'VALIDATOR_WAIT', 0)
+    monkeypatch.setattr(top, 'get_all_uids', lambda self: {1})
+
+    async def audits(self, uids):
+        calls.append(('serving', uids))
+        return {1: 0.5}
+
+    def oss(*a, **k):
+        raise AssertionError('OSS round must not run on a serving-only step')
+
+    monkeypatch.setattr(top, 'serving_challenges', audits)
+    monkeypatch.setattr(top, 'load_master_repo_weights', oss)
+
+    vali = SimpleNamespace(step=5, serving_state=ServingState(), serving_scores={})
+    asyncio.run(top.forward(vali))  # type: ignore[arg-type]
+    assert calls == [('serving', {1})]
+    assert vali.serving_scores == {1: 0.5}
+
+    vali.step = 7
+    asyncio.run(top.forward(vali))  # type: ignore[arg-type]
+    assert calls == [('serving', {1})]  # off-cadence step: no audit, cache untouched
+    assert vali.serving_scores == {1: 0.5}

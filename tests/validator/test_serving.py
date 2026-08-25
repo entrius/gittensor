@@ -244,8 +244,16 @@ class _FakeResponse:
 def _gateway_client(state: ServingState, monkeypatch):
     loadout = _echo_release()
 
-    async def fake_dispatch(dendrite, miner, messages, max_tokens, lo, timeout):
-        return _FakeResponse(expected_completion(messages, max_tokens, lo.model_id), lo.model_id)
+    async def fake_dispatch(dendrite, miner, messages, max_tokens, lo, timeout, on_event=None):
+        result = expected_completion(messages, max_tokens, lo.model_id)
+        if on_event is not None:  # replay the chunk sequence a miner would stream
+            from gittensor.serving.stream import SSEParser, result_to_sse
+
+            parser = SSEParser()
+            for chunk in result_to_sse(result, 'chatcmpl-miner', 0, logprobs=True):
+                for event in parser.feed(chunk):
+                    await on_event(event)
+        return _FakeResponse(result, lo.model_id)
 
     monkeypatch.setattr('gittensor.serving.api._dispatch', fake_dispatch)
     app = build_app(state, loadout, parse_api_keys('k1, k2'), lambda: None, request_timeout=5)
@@ -284,10 +292,32 @@ def test_gateway_chat_completion_roundtrip(monkeypatch):
     assert body['gittensor']['served_uid'] == 7
     assert state.inflight() == {7: 0}
     assert state.snapshot()['gateway_ok'] == 1
-    bad = client.post(
-        '/v1/chat/completions', json={'messages': MSGS, 'stream': True}, headers={'Authorization': 'Bearer k1'}
-    )
-    assert bad.status_code == 400
+
+
+def test_gateway_streams_sse(monkeypatch):
+    state = ServingState()
+    state.publish_round([_ready(7)], {})
+    client = _gateway_client(state, monkeypatch)
+    with client.stream(
+        'POST',
+        '/v1/chat/completions',
+        json={'messages': MSGS, 'max_tokens': 4, 'stream': True},
+        headers={'Authorization': 'Bearer k1'},
+    ) as r:
+        assert r.status_code == 200
+        assert r.headers['content-type'].startswith('text/event-stream')
+        raw = b''.join(r.iter_bytes())
+    from gittensor.serving.stream import SSEParser
+
+    events = SSEParser().feed(raw)
+    assert events[-1] is None  # [DONE]
+    chunks = [e for e in events if e is not None]
+    assert {e['id'] for e in chunks} == {chunks[0]['id']} and chunks[0]['id'].startswith('chatcmpl-')
+    content = ''.join(c['delta'].get('content', '') for e in chunks for c in e['choices'])
+    assert content == expected_completion(MSGS, 4, 'echo-v0').completion
+    assert all('logprobs' not in c for e in chunks for c in e['choices'])  # not requested
+    assert chunks[-1]['usage']['completion_tokens'] == 4 and chunks[-1]['gittensor']['served_uid'] == 7
+    assert state.inflight() == {7: 0} and state.snapshot()['gateway_ok'] == 1
 
 
 def test_latency_credit_bands(monkeypatch):
@@ -477,30 +507,25 @@ def test_gateway_400_on_user_shaped_bad_input(monkeypatch):
 
 
 def _dendrite_echoing(good: ServingRelease, dead_axons=()):
-    """Fake dendrite: honest echo answers for every axon, no response for `dead_axons`; counts calls per axon."""
+    """Fake streaming dendrite: honest echo chunks for every axon, nothing for `dead_axons`; counts calls per axon."""
+    from types import SimpleNamespace
+
+    from gittensor.serving.stream import result_to_sse
+
     calls: Dict[int, int] = {}  # id(axon) -> requests sent
 
-    async def dendrite(axons, synapse, deserialize, timeout):
-        out = []
-        for axon in axons:
-            calls[id(axon)] = calls.get(id(axon), 0) + 1
-            if any(axon is d for d in dead_axons):
-                out.append(synapse.model_copy())
-                continue
+    async def call_stream(target_axon, synapse, timeout, deserialize):
+        calls[id(target_axon)] = calls.get(id(target_axon), 0) + 1
+        final = synapse.model_copy()
+        if not any(target_axon is d for d in dead_axons):
             ref = expected_completion(synapse.messages, synapse.max_tokens, good.model_id)
-            resp = synapse.model_copy(
-                update={
-                    'completion': ref.completion,
-                    'served_model_id': good.model_id,
-                    'tokens': ref.tokens,
-                    'token_logprobs': ref.token_logprobs,
-                }
-            )
-            resp.dendrite.process_time = 0.05  # 50 ms -> full latency credit
-            out.append(resp)
-        return out
+            ref.model_id = good.model_id
+            for chunk in result_to_sse(ref, 'chatcmpl-miner', 0, logprobs=True):
+                yield chunk
+            final.dendrite.process_time = 0.05  # 50 ms -> full latency credit
+        yield final
 
-    return dendrite, calls
+    return SimpleNamespace(call_stream=call_stream), calls
 
 
 def test_audit_round_skips_release_without_reference(monkeypatch):

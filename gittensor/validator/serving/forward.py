@@ -41,6 +41,7 @@ from gittensor.constants import (
 from gittensor.serving.audit import AuditCase, AuditVerdict, reference_for, verify_response
 from gittensor.serving.loadout import ServingRelease, load_serving_loadout
 from gittensor.serving.state import ReadyMiner, RequestRecord, ServingState
+from gittensor.serving.stream import consume_stream
 from gittensor.synapses import InferenceSynapse
 from gittensor.validator.serving.scoring import latency_credit
 
@@ -57,8 +58,7 @@ async def audit_axon(
         synapse = InferenceSynapse(
             messages=case.messages, model_id=release.model_id, max_tokens=case.max_tokens, logprobs=True
         )
-        responses = await dendrite(axons=[axon], synapse=synapse, deserialize=False, timeout=SERVING_CHALLENGE_TIMEOUT)
-        response = responses[0] if responses else synapse
+        response = await consume_stream(dendrite, axon, synapse, SERVING_CHALLENGE_TIMEOUT)
         scored = score_response(uid, response, case, release)
         results.append(scored)
         if i == 0 and getattr(response, 'completion', None) is None:

@@ -19,7 +19,7 @@ interchangeable:
 import hashlib
 import time
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Protocol
+from typing import Dict, Iterator, List, Optional, Protocol
 
 import requests
 
@@ -48,6 +48,10 @@ class InferenceBackend(Protocol):
     model_id: str
 
     def generate(self, messages: List[Message], max_tokens: int, logprobs: bool = False) -> GenerationResult: ...
+
+    def stream(self, messages: List[Message], max_tokens: int, logprobs: bool = False) -> Iterator[bytes]:
+        """The same generation as OpenAI ``chat.completion.chunk`` SSE bytes, ending with ``data: [DONE]``."""
+        ...
 
 
 def flatten_messages(messages: List[Message]) -> str:
@@ -97,6 +101,11 @@ class EchoBackend:
             result.token_logprobs = None
         return result
 
+    def stream(self, messages: List[Message], max_tokens: int, logprobs: bool = False) -> Iterator[bytes]:
+        from gittensor.serving.stream import result_to_sse
+
+        return result_to_sse(self.generate(messages, max_tokens, logprobs), 'chatcmpl-echo', int(time.time()), logprobs)
+
 
 class OpenAICompatBackend:
     """Backend for a local OpenAI-compatible chat server (sparkinfer_server).
@@ -113,17 +122,31 @@ class OpenAICompatBackend:
         self.base_url = release.base_url.rstrip('/')
         self.timeout = release.request_timeout
 
-    def generate(self, messages: List[Message], max_tokens: int, logprobs: bool = False) -> GenerationResult:
+    def _body(self, messages: List[Message], max_tokens: int, logprobs: bool, stream: bool) -> Dict:
         body: Dict = {
             'model': self.model_id,
             'messages': messages,
             'max_tokens': max_tokens,
             'temperature': 0,
-            'stream': False,
+            'stream': stream,
         }
+        if stream:
+            body['stream_options'] = {'include_usage': True}
         if logprobs:
             body['logprobs'] = True
             body['top_logprobs'] = 1
+        return body
+
+    def stream(self, messages: List[Message], max_tokens: int, logprobs: bool = False) -> Iterator[bytes]:
+        body = self._body(messages, max_tokens, logprobs, stream=True)
+        with requests.post(
+            f'{self.base_url}/v1/chat/completions', json=body, timeout=self.timeout, stream=True
+        ) as response:
+            response.raise_for_status()
+            yield from response.iter_content(chunk_size=None)
+
+    def generate(self, messages: List[Message], max_tokens: int, logprobs: bool = False) -> GenerationResult:
+        body = self._body(messages, max_tokens, logprobs, stream=False)
         start = time.monotonic()
         response = requests.post(f'{self.base_url}/v1/chat/completions', json=body, timeout=self.timeout)
         response.raise_for_status()

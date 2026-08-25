@@ -22,18 +22,21 @@ import asyncio
 import threading
 import time
 import uuid
-from typing import Dict, List, Optional, Set
+from typing import Awaitable, Callable, Dict, List, Optional, Set
 
 import bittensor as bt
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from gittensor.constants import SERVING_MAX_TOKENS
 from gittensor.serving.loadout import ServingRelease
 from gittensor.serving.state import ReadyMiner, RequestRecord, ServingState, finite_or_none
+from gittensor.serving.stream import SSE_DONE, Event, consume_stream, sse_event
 from gittensor.synapses import InferenceSynapse
+
+_END = object()  # end-of-stream marker on the relay queue
 
 _bearer = HTTPBearer(auto_error=False)
 
@@ -110,8 +113,6 @@ def build_app(
             raise HTTPException(
                 status_code=400, detail='each message needs string role and content (no array content yet)'
             )
-        if body.get('stream'):
-            raise HTTPException(status_code=400, detail='streaming is not supported yet')
         if body.get('n', 1) != 1:
             raise HTTPException(status_code=400, detail='n must be 1')
         try:
@@ -120,37 +121,84 @@ def build_app(
             raise HTTPException(status_code=400, detail='max_tokens must be an integer')
         max_tokens = max(1, min(max_tokens, SERVING_MAX_TOKENS))
         want_logprobs = bool(body.get('logprobs', False))
+        want_stream = bool(body.get('stream', False))
 
         miner = state.acquire(release.model_id)
         if miner is None:
             raise HTTPException(status_code=429, detail='no READY serving capacity')
 
         request_id = f'chatcmpl-{uuid.uuid4().hex[:24]}'
+        created = int(time.time())
         start = time.monotonic()
-        try:
-            result = await _dispatch(get_dendrite(), miner, messages, max_tokens, release, request_timeout)
-        finally:
-            state.release(miner.uid)
-        latency_ms = (time.monotonic() - start) * 1000.0
 
-        ok = result is not None and result.completion is not None
-        state.record(
-            RequestRecord(
-                ts=time.time(),
-                kind='gateway',
-                uid=miner.uid,
-                ok=ok,
-                latency_ms=latency_ms,
-                completion_tokens=(result.usage or {}).get('completion_tokens', 0) if result else 0,
-                ttft_ms=result.ttft_ms if result else None,
-                decode_tps=result.decode_tps if result else None,
-                detail='' if ok else 'miner returned no completion',
+        def finish(result: Optional[InferenceSynapse]) -> bool:
+            state.release(miner.uid)
+            ok = result is not None and result.completion is not None
+            state.record(
+                RequestRecord(
+                    ts=time.time(),
+                    kind='gateway',
+                    uid=miner.uid,
+                    ok=ok,
+                    latency_ms=(time.monotonic() - start) * 1000.0,
+                    completion_tokens=(result.usage or {}).get('completion_tokens', 0) if result else 0,
+                    ttft_ms=result.ttft_ms if result else None,
+                    decode_tps=result.decode_tps if result else None,
+                    detail='' if ok else 'miner returned no completion',
+                )
             )
-        )
-        if result is None or not ok:
+            return ok
+
+        def failed() -> JSONResponse:
             return JSONResponse(
                 status_code=502, content={'error': {'message': 'serving miner failed', 'uid': miner.uid}}
             )
+
+        def reshape(event: dict) -> dict:
+            """Relay a miner chunk to the client under our request id, without logprobs unless asked for."""
+            out = dict(event)
+            out['id'] = request_id
+            if not want_logprobs:
+                out['choices'] = [{k: v for k, v in c.items() if k != 'logprobs'} for c in event.get('choices') or []]
+            if 'usage' in event:
+                out['gittensor'] = {'served_uid': miner.uid, 'latency_ms': round((time.monotonic() - start) * 1000, 1)}
+            return out
+
+        if want_stream:
+            queue: 'asyncio.Queue[object]' = asyncio.Queue()
+
+            async def relay(event: Event) -> None:
+                await queue.put(event)
+
+            async def run() -> Optional[InferenceSynapse]:
+                try:
+                    return await _dispatch(get_dendrite(), miner, messages, max_tokens, release, request_timeout, relay)
+                finally:
+                    await queue.put(_END)
+
+            task = asyncio.create_task(run())
+            first = await queue.get()
+            if first is _END or first is None:  # nothing streamed before the miner gave up
+                finish(await task)
+                return failed()
+
+            async def body_iter():
+                event = first
+                try:
+                    while event is not _END:
+                        yield SSE_DONE if event is None else sse_event(reshape(event))  # type: ignore[arg-type]
+                        event = await queue.get()
+                finally:
+                    finish(await task)
+
+            return StreamingResponse(body_iter(), media_type='text/event-stream')
+
+        try:
+            result = await _dispatch(get_dendrite(), miner, messages, max_tokens, release, request_timeout)
+        except Exception:
+            result = None
+        if not finish(result) or result is None:
+            return failed()
 
         choice: Dict = {
             'index': 0,
@@ -164,13 +212,13 @@ def build_app(
         return {
             'id': request_id,
             'object': 'chat.completion',
-            'created': int(time.time()),
+            'created': created,
             'model': result.served_model_id or release.model_id,
             'choices': [choice],
             'usage': result.usage or {},
             'gittensor': {
                 'served_uid': miner.uid,
-                'latency_ms': round(latency_ms, 1),
+                'latency_ms': round((time.monotonic() - start) * 1000.0, 1),
                 'ttft_ms': finite_or_none(result.ttft_ms),
                 'decode_tps': finite_or_none(result.decode_tps),
             },
@@ -186,11 +234,11 @@ async def _dispatch(
     max_tokens: int,
     release: ServingRelease,
     timeout: float,
-) -> Optional[InferenceSynapse]:
+    on_event: Optional[Callable[[Event], Awaitable[None]]] = None,
+) -> InferenceSynapse:
     # logprobs always requested so organic traffic is indistinguishable from audits on the wire.
     synapse = InferenceSynapse(messages=messages, model_id=release.model_id, max_tokens=max_tokens, logprobs=True)
-    responses = await dendrite(axons=[miner.axon], synapse=synapse, deserialize=False, timeout=timeout)
-    return responses[0] if responses else None
+    return await consume_stream(dendrite, miner.axon, synapse, timeout, on_event)
 
 
 class ServingApiThread:

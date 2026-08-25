@@ -33,14 +33,16 @@ class PatBroadcastSynapse(bt.Synapse):
     __str__ = __repr__
 
 
-class InferenceSynapse(bt.Synapse):
+class InferenceSynapse(bt.StreamingSynapse):
     """Inference request for serving miners (sub-subnet B beta).
 
     Carries one OpenAI-style chat request from validator to miner. The same
     synapse is used for validator audit prompts and for gateway (user) traffic,
-    so a miner cannot tell them apart. When ``logprobs`` is set the miner
-    returns per-token logprobs of the greedy completion, which the validator
-    checks against its reference (``gittensor/serving/audit.py``).
+    so a miner cannot tell them apart. The miner answers with a stream of
+    OpenAI ``chat.completion.chunk`` events (``gittensor/serving/stream.py``);
+    the validator folds them into the response fields below. When ``logprobs``
+    is set the chunks carry per-token logprobs of the greedy completion, which
+    the validator checks against its reference (``gittensor/serving/audit.py``).
     """
 
     required_hash_fields: ClassVar[tuple[str, ...]] = ('messages', 'model_id', 'max_tokens', 'logprobs')
@@ -61,6 +63,29 @@ class InferenceSynapse(bt.Synapse):
     token_logprobs: Optional[List[float]] = None
     finish_reason: Optional[str] = None
     usage: Optional[Dict[str, int]] = None
+
+    async def process_streaming_response(self, response):  # aiohttp ClientResponse
+        async for chunk in response.content.iter_any():
+            yield chunk
+
+    def extract_response_json(self, response) -> dict:
+        headers = {k.decode('utf-8'): v.decode('utf-8') for k, v in response.__dict__['_raw_headers']}
+
+        def section(prefix: str) -> Dict[str, str]:
+            return {k[len(prefix) :]: v for k, v in headers.items() if k.startswith(prefix)}
+
+        return {
+            'name': headers.get('name', ''),
+            'timeout': float(headers.get('timeout', 0)),
+            'total_size': int(headers.get('total_size', 0)),
+            'header_size': int(headers.get('header_size', 0)),
+            'dendrite': section('bt_header_dendrite_'),
+            'axon': section('bt_header_axon_'),
+            'messages': self.messages,
+            'model_id': self.model_id,
+            'max_tokens': self.max_tokens,
+            'logprobs': self.logprobs,
+        }
 
 
 class PatCheckSynapse(bt.Synapse):

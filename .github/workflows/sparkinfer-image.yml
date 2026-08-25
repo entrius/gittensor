@@ -12,7 +12,7 @@ on:
       sparkinfer_ref:
         description: "sparkinfer commit to build (becomes the image tag and runtime_pin). Keep in sync with DEFAULT_SPARKINFER_REF below."
         required: true
-        default: "9e43bfa"
+        default: "12954e6"
       cuda_archs:
         description: "CMAKE_CUDA_ARCHITECTURES"
         required: false
@@ -25,7 +25,7 @@ on:
 
 env:
   # Ref used by the build-only check; dispatch runs use the input instead.
-  DEFAULT_SPARKINFER_REF: "9e43bfa"
+  DEFAULT_SPARKINFER_REF: "12954e6"
 
 jobs:
   image:

@@ -35,6 +35,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Sequence, Tuple
 
+import aiohttp
 import bittensor as bt
 
 from gittensor.constants import (
@@ -187,6 +188,10 @@ async def audit_round(
     return scores
 
 
+async def _unlimited_session() -> aiohttp.ClientSession:
+    return aiohttp.ClientSession(connector=aiohttp.TCPConnector(limit=0))
+
+
 class ServingAuditThread:
     """Runs ``audit_round`` every ``interval_s`` seconds on a private event loop in a daemon thread."""
 
@@ -209,6 +214,10 @@ class ServingAuditThread:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         dendrite = bt.Dendrite(wallet=self.validator.wallet)
+        # The probe streams from every READY miner at once (fleet x SERVING_PROBE_REQUESTS); aiohttp's default
+        # connector caps a session at 100 connections, which would queue late miners on the validator and skew
+        # their measured throughput. Uncapped connector for the audit dendrite only.
+        dendrite._session = loop.run_until_complete(_unlimited_session())
         while not self._stop.is_set():
             started = time.monotonic()
             try:

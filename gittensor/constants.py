@@ -170,7 +170,9 @@ assert abs(OSS_EMISSION_SHARE + SERVING_EMISSION_SHARE - 1.0) < EMISSION_SHARE_T
 )
 SERVING_CHALLENGES_PER_ROUND = 4  # audit prompts sent to each serving miner per scoring round
 SERVING_CHALLENGE_TIMEOUT = 30.0  # seconds before an audit counts as failed
-SERVING_AUDIT_CONCURRENCY = 32  # serving axons audited in parallel per round
+SERVING_AUDIT_CONCURRENCY = (
+    256  # serving axons audited in parallel per round (sockets are cheap; dead axons hold a slot 30 s)
+)
 SERVING_READY_TTL_S = 900.0  # gateway stops routing when the last audit round is older than this
 # Capacity probe: after the correctness audits, every miner whose window passed is sent SERVING_PROBE_REQUESTS audit
 # prompts at the same instant as every other miner. Verified tokens delivered per wall-clock second, over

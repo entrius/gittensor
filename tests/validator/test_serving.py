@@ -509,18 +509,30 @@ def test_gateway_400_on_user_shaped_bad_input(monkeypatch):
     assert state.inflight() == {7: 0}
 
 
-def _dendrite_echoing(good: ServingRelease, dead_axons=()):
-    """Fake streaming dendrite: honest echo chunks for every axon, nothing for `dead_axons`; counts calls per axon."""
+def _dendrite_echoing(good: ServingRelease, dead_axons=(), gpu_of=None, token_s: float = 0.0):
+    """Fake streaming dendrite: honest echo chunks for every axon, nothing for `dead_axons`; counts calls per axon.
+
+    ``gpu_of`` maps id(axon) -> a GPU key; when set, a request takes ``token_s`` per token times the number of
+    requests in flight on that GPU, so hotkeys sharing a card slow each other down the way one real card does.
+    """
+    import asyncio
     from types import SimpleNamespace
 
     from gittensor.serving.stream import result_to_sse
 
     calls: Dict[int, int] = {}  # id(axon) -> requests sent
+    inflight: Dict[object, int] = {}
 
     async def call_stream(target_axon, synapse, timeout, deserialize):
         calls[id(target_axon)] = calls.get(id(target_axon), 0) + 1
         final = synapse.model_copy()
         if not any(target_axon is d for d in dead_axons):
+            gpu = (gpu_of or {}).get(id(target_axon))
+            if gpu is not None:
+                inflight[gpu] = inflight.get(gpu, 0) + 1
+                await asyncio.sleep(0)  # let the other concurrent requests register before we measure load
+                await asyncio.sleep(token_s * synapse.max_tokens * inflight[gpu])
+                inflight[gpu] -= 1
             ref = expected_completion(synapse.messages, synapse.max_tokens, good.model_id)
             ref.model_id = good.model_id
             for chunk in result_to_sse(ref, 'chatcmpl-miner', 0, logprobs=True):
@@ -564,6 +576,7 @@ def test_audit_round_stops_after_first_unanswered_prompt(monkeypatch):
 
     good = _echo_release()
     monkeypatch.setattr(fwd, 'SERVING_CHALLENGES_PER_ROUND', 4)
+    monkeypatch.setattr(fwd, 'SERVING_PROBE_REQUESTS', 0)
     live, dead = SimpleNamespace(is_serving=True), SimpleNamespace(is_serving=True)
     dendrite, calls = _dendrite_echoing(good, dead_axons=(dead,))
     state = ServingState()
@@ -574,6 +587,46 @@ def test_audit_round_stops_after_first_unanswered_prompt(monkeypatch):
     assert scores == {'hk1': 1.0, 'hk2': 0.0}
     assert state.audits.verdict('hk2', good.model_id).n_audits == 4
     assert [m.uid for m in state.ready_miners()] == [1]
+
+
+def test_capacity_probe_splits_a_shared_gpu(monkeypatch):
+    """Two hotkeys on one card each get about half the capacity a lone card gets; a lone card gets ~1."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from gittensor.validator.serving import forward as fwd
+
+    good = _echo_release()
+    monkeypatch.setattr(fwd, 'SERVING_CHALLENGES_PER_ROUND', 2)
+    monkeypatch.setattr(fwd, 'SERVING_PROBE_REQUESTS', 4)
+    lone, a, b = (SimpleNamespace(is_serving=True) for _ in range(3))
+    gpu_of = {id(lone): 'gpu-1', id(a): 'gpu-2', id(b): 'gpu-2'}
+    dendrite, _ = _dendrite_echoing(good, gpu_of=gpu_of, token_s=0.0005)
+    # calibrate the target from what the lone card delivers under this fake's timing
+    rates = []
+    real_probe = fwd.probe_axon
+
+    async def spy(*args, **kwargs):
+        rate = await real_probe(*args, **kwargs)
+        rates.append(rate)
+        return rate
+
+    monkeypatch.setattr(fwd, 'probe_axon', spy)
+    state = ServingState()
+    monkeypatch.setattr(fwd, 'SERVING_PROBE_TARGET_TPS', 1e-9)
+    asyncio.run(fwd.audit_round(state, dendrite, [(1, 'lone', lone)], ServingLoadout(releases=[good])))  # type: ignore[arg-type]
+    probe = [r for r in state.recent(50) if r.kind == 'probe']
+    assert len(probe) == 4 and all(r.ok for r in probe)
+    lone_tps = rates[0]
+
+    monkeypatch.setattr(fwd, 'SERVING_PROBE_TARGET_TPS', lone_tps)
+    state = ServingState()
+    scores = asyncio.run(
+        fwd.audit_round(state, dendrite, [(1, 'lone', lone), (2, 'a', a), (3, 'b', b)], ServingLoadout(releases=[good]))  # type: ignore[arg-type]
+    )
+    assert scores['lone'] == pytest.approx(1.0, abs=0.15)
+    assert scores['a'] == pytest.approx(0.5, abs=0.15) and scores['b'] == pytest.approx(0.5, abs=0.15)
+    assert scores['a'] + scores['b'] == pytest.approx(scores['lone'], abs=0.2)
 
 
 def test_ready_set_expires_after_ttl():
@@ -650,3 +703,25 @@ def test_inference_synapse_hashes_request_fields():
     b = InferenceSynapse(messages=[{'role': 'user', 'content': 'y'}], model_id='m', max_tokens=8)
     assert a.body_hash != b.body_hash
     assert a.body_hash == InferenceSynapse(messages=a.messages, model_id='m', max_tokens=8).body_hash
+
+
+def test_serving_miner_blacklists_non_validators(monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+
+    from gittensor.synapses import InferenceSynapse
+    from neurons.serving_miner import blacklist_inference
+
+    monkeypatch.setenv('SERVING_MIN_CALLER_STAKE', '100')
+    miner = SimpleNamespace(metagraph=SimpleNamespace(hotkeys=['vali', 'builder', 'small'], S=[5000.0, 100.0, 99.0]))
+
+    def call(hotkey):
+        syn = InferenceSynapse(messages=MSGS, model_id='m')
+        assert syn.dendrite is not None
+        syn.dendrite.hotkey = hotkey
+        return asyncio.run(blacklist_inference(miner, syn))  # type: ignore[arg-type]
+
+    assert call('vali') == (False, 'Staked caller')
+    assert call('builder') == (False, 'Staked caller')
+    assert call('small')[0] and 'Stake 99 below 100' in call('small')[1]
+    assert call('stranger') == (True, 'Unrecognized hotkey')

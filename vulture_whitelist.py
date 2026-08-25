@@ -24,6 +24,8 @@ ECHO_LOADOUT_PATH
 # ServingMiner.resync_metagraph is dispatched by BaseNeuron.sync(); required_hash_fields is read by bt.Synapse
 resync_metagraph
 required_hash_fields
+# bt.Dendrite's lazily-created aiohttp session, preset by the audit thread with an uncapped connector
+_session
 # bt.StreamingSynapse hooks called by the dendrite
 process_streaming_response
 extract_response_json

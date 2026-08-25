@@ -170,8 +170,19 @@ assert abs(OSS_EMISSION_SHARE + SERVING_EMISSION_SHARE - 1.0) < EMISSION_SHARE_T
 )
 SERVING_CHALLENGES_PER_ROUND = 4  # audit prompts sent to each serving miner per scoring round
 SERVING_CHALLENGE_TIMEOUT = 30.0  # seconds before an audit counts as failed
-SERVING_AUDIT_CONCURRENCY = 32  # serving axons audited in parallel per round
+SERVING_AUDIT_CONCURRENCY = (
+    256  # serving axons audited in parallel per round (sockets are cheap; dead axons hold a slot 30 s)
+)
 SERVING_READY_TTL_S = 900.0  # gateway stops routing when the last audit round is older than this
+# Capacity probe: after the correctness audits, every miner whose window passed is sent SERVING_PROBE_REQUESTS audit
+# prompts at the same instant as every other miner. Verified tokens delivered per wall-clock second, over
+# SERVING_PROBE_TARGET_TPS, capped at 1, is the miner's capacity. One RTX 5090 delivers a fixed throughput however many
+# hotkeys front it, so N hotkeys on one card share one card's pay; a hotkey with more than one card is capped at one
+# card's worth (register one hotkey per GPU). Target = what one honest 5090 delivers under this probe as measured by the
+# validator (RTT included). Calibrated on testnet 2026-08-25 (validator on a DO droplet, card in Romania): one miner alone
+# 183-186 tok/s; two hotkeys on the same card 104-115 tok/s each (sum 210-227) -> capacities ~1.0 vs ~0.6.
+SERVING_PROBE_REQUESTS = 6
+SERVING_PROBE_TARGET_TPS = 180.0
 # Latency credit for a 64-token audit (release.max_tokens). An honest 5090 answers in ~165 ms on-box
 # (measured 2026-08-22/24: p95 166 ms); add validator<->miner RTT and an
 # honest miner anywhere on earth lands under ~450 ms. Credit is flat to FULL and falls linearly to 0 at
@@ -198,6 +209,9 @@ SERVING_AUDIT_MAX_ABS_LOGPROB_DIFF = 0.10  # largest single-position |logprob de
 SERVING_AUDIT_WINDOW = 10
 SERVING_AUDIT_WINDOW_THRESHOLDS = ((1, 0.8),)
 SERVING_API_DEFAULT_PORT = 8790
+# Miner: a hotkey may query for inference only with at least this much stake on the subnet (alpha, metagraph.S). Same
+# rule as allways: validators and builders with skin in the game get to use the product. Env SERVING_MIN_CALLER_STAKE.
+SERVING_MIN_CALLER_STAKE = 250_000.0
 SERVING_BACKEND_CONCURRENCY = 16  # miner: concurrent backend generations (sparkinfer >= 12954e6 handles 24)
 SERVING_SEEN_NONCES = 10_000  # miner: replay guard size; covers many minutes of validator traffic
 SERVING_MAX_TOKENS = 1024  # hard cap per request (API and miner both enforce)

@@ -43,7 +43,12 @@ from bittensor.core.stream import StreamingSynapse
 from bittensor.utils.axon_utils import allowed_nonce_window_ns, calculate_diff_seconds
 from bittensor_wallet import Keypair
 
-from gittensor.constants import SERVING_BACKEND_CONCURRENCY, SERVING_MAX_TOKENS, SERVING_SEEN_NONCES
+from gittensor.constants import (
+    SERVING_BACKEND_CONCURRENCY,
+    SERVING_MAX_TOKENS,
+    SERVING_MIN_CALLER_STAKE,
+    SERVING_SEEN_NONCES,
+)
 from gittensor.serving.backends import InferenceBackend, load_backend
 from gittensor.serving.loadout import load_serving_loadout
 from gittensor.synapses import InferenceSynapse
@@ -159,12 +164,26 @@ async def verify_inference(miner: ServingMiner, synapse: InferenceSynapse) -> No
         miner.seen_nonces.popitem(last=False)
 
 
+def min_caller_stake() -> float:
+    return float(os.getenv('SERVING_MIN_CALLER_STAKE', SERVING_MIN_CALLER_STAKE))
+
+
 async def blacklist_inference(miner: ServingMiner, synapse: InferenceSynapse) -> Tuple[bool, str]:
-    """Only registered hotkeys may query; validators are the expected callers."""
+    """Only hotkeys staked at least SERVING_MIN_CALLER_STAKE alpha on the subnet may query.
+
+    Otherwise any registered hotkey could use the miner's GPU for free inference; the stake floor means validators
+    and builders with skin in the game get to use the product.
+    """
     hotkey = synapse.dendrite.hotkey if synapse.dendrite else None
     if not hotkey or hotkey not in miner.metagraph.hotkeys:
         return True, 'Unrecognized hotkey'
-    return False, 'Registered hotkey'
+    try:
+        stake = float(miner.metagraph.S[miner.metagraph.hotkeys.index(hotkey)])
+    except (ValueError, IndexError):  # metagraph mid-sync; refuse rather than guess
+        return True, 'Metagraph out of date'
+    if stake < min_caller_stake():
+        return True, f'Stake {stake:.0f} below {min_caller_stake():.0f}'
+    return False, 'Staked caller'
 
 
 async def priority_inference(miner: ServingMiner, synapse: InferenceSynapse) -> float:

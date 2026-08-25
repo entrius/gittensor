@@ -20,6 +20,8 @@ reference_completion
 should_exit
 ts
 ECHO_LOADOUT_PATH
+# ServingMiner.resync_metagraph is dispatched by BaseNeuron.sync()
+resync_metagraph
 
 # `__exit__(self, exc_type, exc, tb)` - PEP 343 signature, body unused args
 exc_type

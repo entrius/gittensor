@@ -181,6 +181,7 @@ SERVING_READY_TTL_S = 900.0  # gateway stops routing when the last audit round i
 # card's worth (register one hotkey per GPU). Target = what one honest 5090 delivers under this probe as measured by the
 # validator (RTT included). Calibrated on testnet 2026-08-25 (validator on a DO droplet, card in Romania): one miner alone
 # 183-186 tok/s; two hotkeys on the same card 104-115 tok/s each (sum 210-227) -> capacities ~1.0 vs ~0.6.
+# Probe outcomes affect capacity only, never the audit window (a slow host halves its pay; it does not flap out of READY).
 SERVING_PROBE_REQUESTS = 6
 SERVING_PROBE_TARGET_TPS = 180.0
 # Latency credit for a 64-token audit (release.max_tokens). An honest 5090 answers in ~165 ms on-box

@@ -629,6 +629,39 @@ def test_capacity_probe_splits_a_shared_gpu(monkeypatch):
     assert scores['a'] + scores['b'] == pytest.approx(scores['lone'], abs=0.2)
 
 
+def test_probe_misses_cost_capacity_not_the_window(monkeypatch):
+    """A miner that answers every audit but chokes on the burst keeps a clean window and is probed again next round."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from gittensor.validator.serving import forward as fwd
+
+    good = _echo_release()
+    monkeypatch.setattr(fwd, 'SERVING_CHALLENGES_PER_ROUND', 4)
+    monkeypatch.setattr(fwd, 'SERVING_PROBE_REQUESTS', 6)
+    axon = SimpleNamespace(is_serving=True)
+    dendrite, calls = _dendrite_echoing(good)
+    real_stream = dendrite.call_stream
+
+    async def call_stream(target_axon, synapse, timeout, deserialize):
+        if calls.get(id(target_axon), 0) % 10 >= 4:  # per round: 4 audits answered, 6 probe requests dropped
+            calls[id(target_axon)] += 1
+            yield synapse.model_copy()
+            return
+        async for chunk in real_stream(target_axon, synapse, timeout, deserialize):
+            yield chunk
+
+    dendrite.call_stream = call_stream
+    state = ServingState()
+    for _ in range(2):
+        scores = asyncio.run(fwd.audit_round(state, dendrite, [(1, 'hk1', axon)], ServingLoadout(releases=[good])))  # type: ignore[arg-type]
+        assert scores == {'hk1': 0.0}
+    assert calls == {id(axon): 20}
+    window = state.audits.verdict('hk1', good.model_id)
+    assert window.passed and window.n_audits == 8 and window.mean == 1.0
+    assert sum(1 for r in state.recent(50) if r.kind == 'probe' and not r.ok) == 12
+
+
 def test_ready_set_expires_after_ttl():
     from types import SimpleNamespace
 

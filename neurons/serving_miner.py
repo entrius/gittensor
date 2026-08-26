@@ -36,7 +36,7 @@ import os
 import time
 from collections import OrderedDict
 from functools import partial
-from typing import Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 import bittensor as bt
 from bittensor.core.stream import StreamingSynapse
@@ -44,10 +44,12 @@ from bittensor.utils.axon_utils import allowed_nonce_window_ns, calculate_diff_s
 from bittensor_wallet import Keypair
 
 from gittensor.constants import (
+    BLOCKS_PER_TEMPO,
     SERVING_BACKEND_CONCURRENCY,
     SERVING_MAX_TOKENS,
     SERVING_MIN_CALLER_STAKE,
     SERVING_SEEN_NONCES,
+    SERVING_VALIDATOR_TOKENS_PER_TEMPO,
 )
 from gittensor.serving.backends import InferenceBackend, load_backend
 from gittensor.serving.loadout import load_serving_loadout
@@ -79,6 +81,7 @@ class ServingMiner(BaseNeuron):
         )
         self.backend_slots = asyncio.Semaphore(SERVING_BACKEND_CONCURRENCY)
         self.seen_nonces: 'OrderedDict[str, None]' = OrderedDict()
+        self.audit_budget: Dict[str, Tuple[int, int]] = {}  # validator hotkey -> (tempo, completion tokens used)
         bt.logging.info(f'ServingMiner axon: {self.axon}')
 
     async def forward(self, synapse: bt.Synapse) -> bt.Synapse:
@@ -168,22 +171,50 @@ def min_caller_stake() -> float:
     return float(os.getenv('SERVING_MIN_CALLER_STAKE', SERVING_MIN_CALLER_STAKE))
 
 
-async def blacklist_inference(miner: ServingMiner, synapse: InferenceSynapse) -> Tuple[bool, str]:
-    """Only hotkeys staked at least SERVING_MIN_CALLER_STAKE alpha on the subnet may query.
+def validator_tokens_per_tempo() -> int:
+    return int(os.getenv('SERVING_VALIDATOR_TOKENS_PER_TEMPO', SERVING_VALIDATOR_TOKENS_PER_TEMPO))
 
-    Otherwise any registered hotkey could use the miner's GPU for free inference; the floor is set so only the
-    reference-running validator clears it and everyone else goes through its gateway.
+
+def reserve_audit_budget(miner: ServingMiner, hotkey: str, tokens: int) -> bool:
+    """Charge ``tokens`` to a permitted validator's per-tempo budget; False when it would overrun."""
+    tempo = int(getattr(miner.metagraph, 'block', 0) or 0) // BLOCKS_PER_TEMPO
+    spent_tempo, used = miner.audit_budget.get(hotkey, (tempo, 0))
+    if spent_tempo != tempo:
+        used = 0
+    if used + tokens > validator_tokens_per_tempo():
+        return False
+    miner.audit_budget[hotkey] = (tempo, used + tokens)
+    return True
+
+
+async def blacklist_inference(miner: ServingMiner, synapse: InferenceSynapse) -> Tuple[bool, str]:
+    """Who may query: hotkeys staked at least SERVING_MIN_CALLER_STAKE alpha without limit (the gateway validator),
+    and any validator-permit holder inside a per-tempo completion-token budget (an independent auditor).
+
+    Otherwise any registered hotkey could use the miner's GPU for free inference. The floor is set so only the
+    reference-running validator clears it and everyone else goes through its gateway; the permit budget keeps the
+    subnet's other validators able to verify without the fleet becoming their free API.
     """
     hotkey = synapse.dendrite.hotkey if synapse.dendrite else None
     if not hotkey or hotkey not in miner.metagraph.hotkeys:
         return True, 'Unrecognized hotkey'
     try:
-        stake = float(miner.metagraph.S[miner.metagraph.hotkeys.index(hotkey)])
+        uid = miner.metagraph.hotkeys.index(hotkey)
+        stake = float(miner.metagraph.S[uid])
     except (ValueError, IndexError):  # metagraph mid-sync; refuse rather than guess
         return True, 'Metagraph out of date'
-    if stake < min_caller_stake():
+    if stake >= min_caller_stake():
+        return False, 'Staked caller'
+    permits = getattr(miner.metagraph, 'validator_permit', None)
+    try:
+        permitted = bool(permits[uid]) if permits is not None else False
+    except (IndexError, TypeError):
+        permitted = False
+    if not permitted:
         return True, f'Stake {stake:.0f} below {min_caller_stake():.0f}'
-    return False, 'Staked caller'
+    if not reserve_audit_budget(miner, hotkey, int(synapse.max_tokens)):
+        return True, f'Validator audit budget spent ({validator_tokens_per_tempo()} tokens per tempo)'
+    return False, 'Permitted validator'
 
 
 async def priority_inference(miner: ServingMiner, synapse: InferenceSynapse) -> float:

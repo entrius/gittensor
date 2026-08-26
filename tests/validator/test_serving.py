@@ -916,10 +916,19 @@ def test_serving_miner_blacklists_non_validators(monkeypatch):
     from neurons.serving_miner import blacklist_inference
 
     monkeypatch.setenv('SERVING_MIN_CALLER_STAKE', '100')
-    miner = SimpleNamespace(metagraph=SimpleNamespace(hotkeys=['vali', 'builder', 'small'], S=[5000.0, 100.0, 99.0]))
+    monkeypatch.setenv('SERVING_VALIDATOR_TOKENS_PER_TEMPO', '150')
+    miner = SimpleNamespace(
+        metagraph=SimpleNamespace(
+            hotkeys=['vali', 'builder', 'small', 'permitted'],
+            S=[5000.0, 100.0, 99.0, 50.0],
+            validator_permit=[True, False, False, True],
+            block=720,
+        ),
+        audit_budget={},
+    )
 
-    def call(hotkey):
-        syn = InferenceSynapse(messages=MSGS, model_id='m')
+    def call(hotkey, max_tokens=64):
+        syn = InferenceSynapse(messages=MSGS, model_id='m', max_tokens=max_tokens)
         assert syn.dendrite is not None
         syn.dendrite.hotkey = hotkey
         return asyncio.run(blacklist_inference(miner, syn))  # type: ignore[arg-type]
@@ -928,3 +937,18 @@ def test_serving_miner_blacklists_non_validators(monkeypatch):
     assert call('builder') == (False, 'Staked caller')
     assert call('small')[0] and 'Stake 99 below 100' in call('small')[1]
     assert call('stranger') == (True, 'Unrecognized hotkey')
+    # a permit holder below the floor gets a per-tempo token budget, any request shape
+    assert call('permitted', 100) == (False, 'Permitted validator')
+    assert call('permitted', 50) == (False, 'Permitted validator')
+    refused = call('permitted', 1)
+    assert refused[0] and 'budget spent' in refused[1]
+    miner.metagraph.block = 1080  # next tempo: budget resets
+    assert call('permitted', 150) == (False, 'Permitted validator')
+    assert call('permitted', 1)[0]
+
+
+def test_probe_phase_offset_is_deterministic_and_spread():
+    from gittensor.validator.serving.forward import probe_phase_offset
+
+    a, b = probe_phase_offset('5Gjr7VuY', 300.0), probe_phase_offset('5E2LP6En', 300.0)
+    assert a == probe_phase_offset('5Gjr7VuY', 300.0) and 0.0 <= a < 300.0 and 0.0 <= b < 300.0 and a != b

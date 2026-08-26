@@ -15,6 +15,7 @@ maintainers run this before claiming conformance; miners run it before registeri
 
 import argparse
 import concurrent.futures
+import random
 import statistics
 import sys
 import time
@@ -22,6 +23,9 @@ from typing import Dict, List, Optional, Tuple
 
 import requests
 
+from gittensor.serving.audit import LiveReference, verify_served
+from gittensor.serving.baseline import make_baseline_prompt
+from gittensor.serving.loadout import ServingRelease
 from gittensor.serving.probe import auth_headers, greedy, make_prompts, percentile, score, stability
 
 MUST, SHOULD = 'MUST', 'SHOULD'
@@ -189,9 +193,34 @@ def check_score(rep: Report, base_url: str, model_id: str, max_tokens: int, time
     if same_tok:
         diff = max(abs(a - b) for a, b in zip(sc['logprobs'], gen['reference_logprobs']))
         rep.add('R8 scored logprobs == generated logprobs', MUST, diff <= 1e-4, f'max |delta| {diff:.6f}')
-    if sc.get('argmax'):
-        agree = sum(1 for a, b in zip(sc['argmax'], gen['reference_tokens']) if a == b) / len(gen['reference_tokens'])
-        rep.add('R8 top_logprobs argmax == greedy token', SHOULD, agree >= 0.99, f'{agree:.3f}')
+    argmax = sc.get('argmax') or []
+    rep.add(
+        'R8 /v1/score returns top_logprobs argmax', MUST, len(argmax) == len(sc['tokens']), f'{len(argmax)} entries'
+    )
+    if argmax:
+        agree = sum(1 for a, b in zip(argmax, gen['reference_tokens']) if a == b) / len(gen['reference_tokens'])
+        rep.add('R8 top_logprobs argmax == greedy token', MUST, agree >= 0.99, f'{agree:.3f}')
+    # What the validator actually runs on served traffic: teacher-force the greedy output and demand a pass.
+    release = ServingRelease(
+        model_id=model_id,
+        backend='openai-compat',
+        max_tokens=max_tokens,
+        reference_url=base_url,
+        reference_api_key=API_KEY,
+        request_timeout=timeout,
+    )
+    ref = LiveReference(release)
+    verdict = verify_served(
+        ref, messages, gen['reference_completion'], gen['reference_tokens'], gen['reference_logprobs']
+    )
+    rep.add("R8 verify_served passes the model's own greedy output", MUST, verdict.passed, verdict.reason)
+    for i in range(3):  # and on longer, traffic-shaped prompts
+        msgs = make_baseline_prompt(random.Random(100 + i))
+        g = greedy(base_url, model_id, msgs, 256, timeout, API_KEY)
+        v = verify_served(ref, msgs, g['reference_completion'], g['reference_tokens'], g['reference_logprobs'])
+        rep.add(
+            f'R8 verify_served on baseline prompt #{i + 1} ({len(g["reference_tokens"])} tok)', MUST, v.passed, v.reason
+        )
 
 
 def check_overload(rep: Report, base_url: str, model_id: str, parallel: int, max_tokens: int, timeout: float) -> None:

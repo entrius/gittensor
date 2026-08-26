@@ -186,6 +186,13 @@ SERVING_READY_TTL_S = 900.0  # gateway stops routing when the last audit round i
 # Probe outcomes affect capacity only, never the audit window (a slow host halves its pay; it does not flap out of READY).
 SERVING_PROBE_REQUESTS = 6
 SERVING_PROBE_TARGET_TPS = 180.0
+# A probe reading can only be too low (another validator's burst, a user spike, a blip), never too high: the miner
+# had to deliver those verified tokens. A reading under SERVING_PROBE_DIP_RATIO x the miner's median of its last
+# three is re-measured once after a random SERVING_PROBE_RETRY_DELAY_S and the better reading kept; a real slowdown
+# dips twice and sticks.
+SERVING_PROBE_DIP_RATIO = 0.7
+SERVING_PROBE_RETRY_DELAY_S = (15.0, 45.0)
+SERVING_VERIFY_WORKERS = 8  # concurrent /v1/score calls to the reference per round
 # Latency credit for a 64-token audit (release.max_tokens). An honest 5090 answers in ~165 ms on-box
 # (measured 2026-08-22/24: p95 166 ms); add validator<->miner RTT and an
 # honest miner anywhere on earth lands under ~450 ms. Credit is flat to FULL and falls linearly to 0 at

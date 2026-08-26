@@ -30,8 +30,11 @@ import asyncio
 import hashlib
 import math
 import random
+import statistics
 import threading
 import time
+from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Sequence, Tuple
 
@@ -42,8 +45,11 @@ from gittensor.constants import (
     SERVING_BASELINE_PER_ROUND,
     SERVING_CHALLENGE_TIMEOUT,
     SERVING_MAX_TOKENS,
+    SERVING_PROBE_DIP_RATIO,
     SERVING_PROBE_REQUESTS,
+    SERVING_PROBE_RETRY_DELAY_S,
     SERVING_PROBE_TARGET_TPS,
+    SERVING_VERIFY_WORKERS,
 )
 from gittensor.serving.audit import AuditCase, AuditVerdict, Reference, reference_for, verify_response, verify_served
 from gittensor.serving.baseline import baseline_max_tokens, make_baseline_prompt
@@ -88,31 +94,53 @@ async def probe_axon(
 
 
 def verify_served_round(
-    state: ServingState, reference: Reference, release: ServingRelease, served: Sequence[ServedRequest]
+    state: ServingState,
+    reference: Reference,
+    release: ServingRelease,
+    served: Sequence[ServedRequest],
+    summary: Optional[Dict[str, int]] = None,
 ) -> Dict[str, List[float]]:
-    """Verify every served request for ``release`` into the window; return latency credits per hotkey."""
-    credits: Dict[str, List[float]] = {}
-    for req in served:
-        if req.model_id != release.model_id:
-            continue
+    """Verify every served request for ``release`` into the window; return latency credits per hotkey.
+
+    Reference calls run on a small thread pool; window updates stay on this thread.
+    """
+    summary = summary if summary is not None else {}
+    mine = [req for req in served if req.model_id == release.model_id]
+
+    def judge(req: ServedRequest) -> Optional[AuditVerdict]:
         if not req.ok and 'budget' in req.detail.lower():  # this validator over-sent; not the miner's fault
-            continue
+            return None
         if not req.ok:
-            verdict = AuditVerdict(False, 0.0, float('inf'), req.detail or 'no completion')
-        else:
-            try:
-                verdict = verify_served(reference, req.messages, req.completion, req.tokens, req.token_logprobs)
-            except Exception as e:  # reference hiccup: neither credit nor blame
-                bt.logging.warning(f'Serving: could not verify a request served by UID {req.uid}: {e!r}')
-                continue
+            return AuditVerdict(False, 0.0, float('inf'), req.detail or 'no completion')
+        try:
+            return verify_served(reference, req.messages, req.completion, req.tokens, req.token_logprobs)
+        except Exception as e:  # reference hiccup: neither credit nor blame
+            bt.logging.warning(f'Serving: could not verify a request served by UID {req.uid}: {e!r}')
+            return None
+
+    with ThreadPoolExecutor(max_workers=SERVING_VERIFY_WORKERS) as pool:
+        verdicts = list(pool.map(judge, mine))
+
+    def bump(key: str) -> None:
+        summary[key] = summary.get(key, 0) + 1
+
+    credits: Dict[str, List[float]] = {}
+    for req, verdict in zip(mine, verdicts):
+        bump('served')
+        bump(req.source)
+        if verdict is None:
+            bump('neutral')
+            continue
         if verdict.hard:
             until = state.audits.strike(req.hotkey, release.model_id)
+            bump('strike')
             bt.logging.warning(
                 f'Serving: UID {req.uid} served a WRONG answer ({verdict.reason}); window wiped, '
                 f'quarantined until {time.strftime("%H:%M:%S", time.gmtime(until))} UTC'
             )
         else:
             state.audits.record(req.hotkey, release.model_id, verdict.value)
+            bump('pass' if verdict.passed else 'miss')
         credits.setdefault(req.hotkey, []).append(
             latency_credit(req.latency_ms) if verdict.passed and req.latency_ms is not None else 0.0
         )
@@ -180,6 +208,7 @@ async def baseline_round(
                 if response is not None and response.token_logprobs
                 else None,
                 detail='' if ok else str(status or err or 'no response'),
+                source='baseline',
             )
         )
 
@@ -192,11 +221,43 @@ async def baseline_round(
     return len(jobs)
 
 
+def probe_dipped(state: ServingState, hotkey: str, tps: float, ratio: float = SERVING_PROBE_DIP_RATIO) -> bool:
+    """True when ``tps`` is well under this miner's recent form (median of its last three readings)."""
+    recent = state.probe_history.get(hotkey)
+    return bool(recent) and len(recent) >= 2 and tps < ratio * statistics.median(recent)
+
+
+async def probe_with_retry(
+    state: ServingState,
+    dendrite: bt.Dendrite,
+    uid: int,
+    hotkey: str,
+    axon: bt.AxonInfo,
+    release: ServingRelease,
+    reference: Reference,
+    cases: Sequence[AuditCase],
+    retry_delay_s: Optional[float] = None,
+) -> float:
+    """Probe once; if the reading dipped against the miner's recent form, re-measure once later and keep the better."""
+    tps = await probe_axon(state, dendrite, uid, hotkey, axon, release, cases)
+    if probe_dipped(state, hotkey, tps):
+        delay = random.uniform(*SERVING_PROBE_RETRY_DELAY_S) if retry_delay_s is None else retry_delay_s
+        bt.logging.info(
+            f'Serving: UID {uid} probe {tps:.0f} tok/s is a dip against recent form; re-measuring in {delay:.0f}s'
+        )
+        await asyncio.sleep(delay)
+        again = await probe_axon(state, dendrite, uid, hotkey, axon, release, [reference.sample() for _ in cases])
+        tps = max(tps, again)
+    state.probe_history.setdefault(hotkey, deque(maxlen=3)).append(tps)
+    return tps
+
+
 async def audit_round(
     state: ServingState,
     dendrite: bt.Dendrite,
     serving: Sequence[Tuple[int, str, bt.AxonInfo]],
     loadout=None,
+    probe_retry_delay_s: Optional[float] = None,
 ) -> Dict[str, float]:
     """Verify served traffic, settle windows, probe READY miners; publish READY/probation; return hotkey -> score."""
     loadout = loadout or load_serving_loadout()
@@ -208,6 +269,8 @@ async def audit_round(
 
     best: Dict[str, Tuple[float, str]] = {hotkey: (0.0, '') for _, hotkey, _ in serving}
     probation: Dict[int, ReadyMiner] = {}
+    summary: Dict[str, int] = {}
+    windows: Dict[int, dict] = {}
 
     for release in loadout.releases:
         try:
@@ -218,12 +281,13 @@ async def audit_round(
                 'set SERVING_REFERENCE_URL to a conformant runtime'
             )
             continue
-        credits = verify_served_round(state, reference, release, served)
+        credits = verify_served_round(state, reference, release, served, summary)
         passing: List[Tuple[int, str, bt.AxonInfo, float]] = []
         for uid, hotkey, axon in serving:
             window = state.audits.verdict(hotkey, release.model_id)
             round_credits = credits.get(hotkey)
             credit = sum(round_credits) / len(round_credits) if round_credits else 1.0
+            windows[uid] = {**window.as_dict(), 'model_id': release.model_id, 'served': len(round_credits or [])}
             bt.logging.debug(
                 f'Serving: UID {uid} {release.model_id} window {window.as_dict()} '
                 f'served {len(round_credits or [])} credit {credit:.3f}'
@@ -238,7 +302,9 @@ async def audit_round(
         if probe_cases:
             rates = await asyncio.gather(
                 *(
-                    probe_axon(state, dendrite, uid, hotkey, axon, release, probe_cases)
+                    probe_with_retry(
+                        state, dendrite, uid, hotkey, axon, release, reference, probe_cases, probe_retry_delay_s
+                    )
                     for uid, hotkey, axon, _ in passing
                 )
             )
@@ -261,10 +327,14 @@ async def audit_round(
         if score > 0.0:
             ready.append(ReadyMiner(uid=uid, hotkey=hotkey, axon=axon, score=score, model_id=model_id))
             probation.pop(uid, None)
-    state.publish_round(ready, scores, list(probation.values()))
+    quarantined = sum(1 for w in windows.values() if w.get('quarantined_until', 0.0) > 0.0)
+    summary.update(ready=len(ready), probation=len(probation), quarantined=quarantined)
+    state.publish_round(ready, scores, list(probation.values()), {**summary, 'windows': windows})
     bt.logging.info(
-        f'Serving: verified {len(served)} served request(s); {len(ready)} READY miner(s) published to gateway: '
-        f'{[m.uid for m in ready]}; {len(probation)} on probation'
+        f'Serving round: served {summary.get("served", 0)} (gateway {summary.get("gateway", 0)} / baseline '
+        f'{summary.get("baseline", 0)}) · pass {summary.get("pass", 0)} · miss {summary.get("miss", 0)} · '
+        f'strike {summary.get("strike", 0)} · neutral {summary.get("neutral", 0)} · READY {len(ready)} '
+        f'{[m.uid for m in ready]} · probation {len(probation)} · quarantined {quarantined}'
     )
     return scores
 
@@ -355,15 +425,21 @@ def get_serving_axons(self: 'Validator') -> List[Tuple[int, str, bt.AxonInfo]]:
     """(uid, hotkey, axon) for every UID (excluding self) whose axon is serving — the candidate serving miners.
 
     Snapshot of the metagraph taken on the audit thread. Beta heuristic: axon.is_serving is the only signal.
-    Validators also serve axons (for PAT handling), so they appear here and score zero on the first prompt;
-    a serving-miner registry replaces this later.
+    Validator-permit holders are skipped (they serve axons for PAT handling, never inference); a serving-miner
+    registry replaces this later.
     """
     hotkeys = list(self.metagraph.hotkeys)
     axons = list(self.metagraph.axons)
+    permits = getattr(self.metagraph, 'validator_permit', None)
     serving: List[Tuple[int, str, bt.AxonInfo]] = []
     for uid, (hotkey, axon) in enumerate(zip(hotkeys, axons)):
         if uid == self.uid:
             continue
+        try:
+            if permits is not None and bool(permits[uid]):
+                continue
+        except (IndexError, TypeError):
+            pass
         if axon is not None and axon.is_serving:
             serving.append((uid, hotkey, axon))
     return serving

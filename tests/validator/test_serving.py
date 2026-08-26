@@ -19,7 +19,7 @@ from gittensor.serving.audit import (
 )
 from gittensor.serving.backends import EchoBackend, GenerationResult, expected_completion
 from gittensor.serving.loadout import ECHO_LOADOUT_PATH, ServingLoadout, ServingRelease, load_serving_loadout
-from gittensor.serving.state import ReadyMiner, RequestRecord, ServingState
+from gittensor.serving.state import ReadyMiner, RequestRecord, ServedRequest, ServingState
 from gittensor.validator.serving.scoring import latency_credit
 
 MSGS = [{'role': 'user', 'content': 'prompt'}]
@@ -484,9 +484,9 @@ def test_probe_score_parses_teacher_forced_response(monkeypatch):
 
 
 def test_emission_pools_sum_to_one():
-    from gittensor.constants import EMISSION_SHARE_TOLERANCE, OSS_EMISSION_SHARE, SERVING_EMISSION_SHARE
+    from gittensor.constants import EMISSION_SHARE_TOLERANCE, OSS_EMISSION_SHARE, SERVING_EMISSION_SHARE_CAP
 
-    assert abs(OSS_EMISSION_SHARE + SERVING_EMISSION_SHARE - 1.0) < EMISSION_SHARE_TOLERANCE
+    assert abs(OSS_EMISSION_SHARE + SERVING_EMISSION_SHARE_CAP - 1.0) < EMISSION_SHARE_TOLERANCE
 
 
 def test_verify_rejects_malformed_reference():
@@ -543,21 +543,179 @@ def _dendrite_echoing(good: ServingRelease, dead_axons=(), gpu_of=None, token_s:
     return SimpleNamespace(call_stream=call_stream), calls
 
 
-def test_audit_round_skips_release_without_reference(monkeypatch):
-    """A release whose reference is unreachable is skipped and logged; the round still completes."""
+def _served(uid: int, release: ServingRelease, ok: bool = True, wrong: bool = False, latency_ms: float = 50.0):
+    """A gateway request as served by an honest echo miner (or a dead / wrong-model one)."""
+    import secrets
+
+    messages = [{'role': 'user', 'content': secrets.token_hex(8)}]
+    ref = expected_completion(messages, release.max_tokens, release.model_id)
+    tokens = list(ref.tokens or [])
+    logprobs = list(ref.token_logprobs or [])
+    if wrong:
+        tokens[len(tokens) // 2] = 'xxxxxxxx'
+    return ServedRequest(
+        ts=0.0,
+        uid=uid,
+        hotkey=f'hk{uid}',
+        model_id=release.model_id,
+        messages=messages,
+        ok=ok,
+        latency_ms=latency_ms if ok else None,
+        completion=' '.join(tokens) if ok else None,
+        tokens=tokens if ok else None,
+        token_logprobs=logprobs if ok else None,
+    )
+
+
+def _round(state, dendrite, serving, release, monkeypatch, probes: int = 0):
     import asyncio
-    from types import SimpleNamespace
 
     from gittensor.validator.serving import forward as fwd
+
+    monkeypatch.setattr(fwd, 'SERVING_PROBE_REQUESTS', probes)
+    return asyncio.run(fwd.audit_round(state, dendrite, serving, ServingLoadout(releases=[release])))  # type: ignore[arg-type]
+
+
+def test_verify_served_teacher_forces_the_completion():
+    """An honest served answer passes; a changed token is a hard failure; a bad re-tokenization is a soft miss."""
+    from gittensor.serving.audit import verify_served
+
+    release = _echo_release()
+    ref = EchoReference(release)
+    good = _served(1, release)
+    tokens, logprobs = list(good.tokens or []), list(good.token_logprobs or [])
+    v = verify_served(ref, good.messages, good.completion, tokens, logprobs)
+    assert v.passed and not v.hard
+    eos = verify_served(ref, good.messages, good.completion, tokens + ['<|im_end|>'], logprobs + [0.0])
+    assert eos.passed  # trailing end-of-turn token is stripped before comparing
+    bad = _served(1, release, wrong=True)
+    v = verify_served(ref, bad.messages, bad.completion, bad.tokens, bad.token_logprobs)
+    assert not v.passed and v.hard and 'prefix agreement' in v.reason
+    short = verify_served(ref, good.messages, good.completion, tokens[:-1], logprobs[:-1])
+    assert not short.passed and not short.hard and 'tokenization mismatch' in short.reason
+    assert not verify_served(ref, good.messages, None, None, None).passed
+
+
+def test_audit_window_strike_wipes_and_quarantines(tmp_path):
+    w = AuditWindow(quarantine_s=100.0)
+    for _ in range(5):
+        w.record('hk', 'm', 1.0)
+    assert w.verdict('hk', 'm').passed
+    until = w.strike('hk', 'm', now=1000.0)
+    assert until == 1100.0
+    v = w.verdict('hk', 'm', now=1050.0)
+    assert not v.passed and v.n_audits == 0 and v.quarantined_until == 1100.0
+    w.record('hk', 'm', 1.0)
+    assert not w.verdict('hk', 'm', now=1050.0).passed  # still quarantined even with a clean record
+    assert w.verdict('hk', 'm', now=1101.0).passed and w.verdict('hk', 'm', now=1101.0).quarantined_until == 0.0
+    path = tmp_path / 'audits.json'
+    w.save(path)
+    again = AuditWindow.load(path, quarantine_s=100.0)
+    assert again.verdict('hk', 'm', now=1050.0).quarantined_until == 1100.0
+
+
+def test_state_settles_over_trailing_rounds_and_serves_probation():
+    from types import SimpleNamespace
+
+    state = ServingState(settlement_rounds=4)
+    axon = SimpleNamespace()
+    new = ReadyMiner(uid=5, hotkey='hk5', axon=axon, score=0.0, model_id='echo-v0')  # type: ignore[arg-type]
+    state.publish_round([_ready(1)], {'hk1': 1.0}, probation=[new])
+    assert state.scores_for(['v', 'hk1', 'hk5']) == {1: 0.25}  # one clean round out of four
+    user = state.acquire('echo-v0')
+    assert user is not None and user.uid == 1  # users: READY only
+    assert state.acquire('echo-v0', probation=True) is new  # baseline: the idle probation miner first
+    busy = state.acquire('echo-v0', probation=True)
+    assert busy is not None and busy.uid == 1  # one in flight on probation -> back to READY
+    state.release(5)
+    for _ in range(3):
+        state.publish_round([_ready(1)], {'hk1': 1.0})
+    assert state.scores_for(['v', 'hk1']) == {1: 1.0}
+    state.publish_round([], {})  # miner vanished: the missing round counts 0
+    assert state.scores_for(['v', 'hk1']) == {1: 0.75}
+    for _ in range(3):
+        state.publish_round([], {})
+    assert state.scores_for(['v', 'hk1']) == {}  # fully settled out; no stale hotkeys kept
+    state.enqueue_served(_served(1, _echo_release()))
+    assert state.snapshot()['pending_verification'] == 1
+    assert len(state.drain_served()) == 1 and state.drain_served() == []
+
+
+def test_gateway_enqueues_served_requests_and_routes_baseline_to_probation(monkeypatch):
+    from types import SimpleNamespace
+
+    from gittensor.serving.api import build_app
+
+    loadout = _echo_release()
+    state = ServingState()
+    probation = ReadyMiner(uid=9, hotkey='hk9', axon=SimpleNamespace(), score=0.0, model_id='echo-v0')  # type: ignore[arg-type]
+    state.publish_round([_ready(7)], {}, probation=[probation])
+
+    async def fake_dispatch(dendrite, miner, messages, max_tokens, lo, timeout, on_event=None):
+        return _FakeResponse(expected_completion(messages, max_tokens, lo.model_id), lo.model_id)
+
+    monkeypatch.setattr('gittensor.serving.api._dispatch', fake_dispatch)
+    app = build_app(
+        state, loadout, parse_api_keys('user,base'), lambda: None, request_timeout=5, baseline_keys={'base'}
+    )
+    client = TestClient(app)
+    for key, uid in (('user', 7), ('base', 9), ('base', 9), ('user', 7)):
+        r = client.post(
+            '/v1/chat/completions', json={'messages': MSGS, 'max_tokens': 4}, headers={'Authorization': f'Bearer {key}'}
+        )
+        assert r.status_code == 200 and r.json()['gittensor']['served_uid'] == uid, (key, r.text)
+    served = state.drain_served()
+    assert [q.uid for q in served] == [7, 9, 9, 7]
+    assert all(q.ok and q.tokens and q.token_logprobs and q.completion for q in served)
+    assert served[0].messages == MSGS and served[0].hotkey == 'hk7'
+
+
+def test_audit_round_verifies_served_traffic(monkeypatch):
+    """Served requests build the window; misses count 0; a wrong answer strikes; unverified axons go to probation."""
+    from types import SimpleNamespace
+
+    good = _echo_release()
+    honest, cheater, fresh = (SimpleNamespace(is_serving=True) for _ in range(3))
+    dendrite, _ = _dendrite_echoing(good)
+    state = ServingState(settlement_rounds=1)
+    serving = [(1, 'hk1', honest), (2, 'hk2', cheater), (3, 'hk3', fresh)]
+    for _ in range(4):
+        state.enqueue_served(_served(1, good))
+    state.enqueue_served(_served(1, good, ok=False))
+    state.enqueue_served(_served(2, good))
+    state.enqueue_served(_served(2, good, wrong=True))
+
+    scores = _round(state, dendrite, serving, good, monkeypatch)
+    assert scores['hk1'] == pytest.approx(0.8)  # 4 of 5 served requests earned full latency credit
+    assert scores['hk2'] == 0.0 and scores['hk3'] == 0.0
+    w1, w2 = state.audits.verdict('hk1', good.model_id), state.audits.verdict('hk2', good.model_id)
+    assert w1.passed and w1.n_audits == 5 and w1.mean == 0.8
+    assert not w2.passed and w2.n_audits == 0 and w2.quarantined_until > 0  # struck
+    assert [m.uid for m in state.ready_miners()] == [1]
+    assert [m.uid for m in state.probation_miners()] == [3]  # the cheater is quarantined, not on probation
+    assert sum(1 for r in state.recent(50) if r.kind == 'verify') == 7
+
+    scores = _round(state, dendrite, serving, good, monkeypatch)  # quiet round: READY on the window, credit 1.0
+    assert scores['hk1'] == 1.0 and [m.uid for m in state.ready_miners()] == [1]
+
+
+def test_audit_round_skips_release_without_reference(monkeypatch):
+    """A release whose reference is unreachable is skipped and logged; the round still completes."""
+    from types import SimpleNamespace
 
     good = _echo_release()
     bad = ServingRelease(
         model_id='ghost', backend='openai-compat', base_url='http://x', reference_url='http://127.0.0.1:1'
     )
-    monkeypatch.setattr(fwd, 'SERVING_CHALLENGES_PER_ROUND', 2)
     dendrite, _ = _dendrite_echoing(good)
     axon = SimpleNamespace(is_serving=True)
-    state = ServingState()
+    state = ServingState(settlement_rounds=1)
+    state.enqueue_served(_served(1, good))
+    monkeypatch.setattr('gittensor.validator.serving.forward.SERVING_PROBE_REQUESTS', 0)
+    import asyncio
+
+    from gittensor.validator.serving import forward as fwd
+
     scores = asyncio.run(
         fwd.audit_round(state, dendrite, [(1, 'hk1', axon)], ServingLoadout(releases=[bad, good]))  # type: ignore[arg-type]
     )
@@ -567,42 +725,16 @@ def test_audit_round_skips_release_without_reference(monkeypatch):
     assert state.scores_for(['v', 'other']) == {}  # UID 1's hotkey changed since the round: nothing carries over
 
 
-def test_audit_round_stops_after_first_unanswered_prompt(monkeypatch):
-    """A dead axon costs one timeout, not one per case; the unsent cases still count as misses."""
-    import asyncio
-    from types import SimpleNamespace
-
-    from gittensor.validator.serving import forward as fwd
-
-    good = _echo_release()
-    monkeypatch.setattr(fwd, 'SERVING_CHALLENGES_PER_ROUND', 4)
-    monkeypatch.setattr(fwd, 'SERVING_PROBE_REQUESTS', 0)
-    live, dead = SimpleNamespace(is_serving=True), SimpleNamespace(is_serving=True)
-    dendrite, calls = _dendrite_echoing(good, dead_axons=(dead,))
-    state = ServingState()
-    scores = asyncio.run(
-        fwd.audit_round(state, dendrite, [(1, 'hk1', live), (2, 'hk2', dead)], ServingLoadout(releases=[good]))  # type: ignore[arg-type]
-    )
-    assert calls == {id(live): 4, id(dead): 1}
-    assert scores == {'hk1': 1.0, 'hk2': 0.0}
-    assert state.audits.verdict('hk2', good.model_id).n_audits == 4
-    assert [m.uid for m in state.ready_miners()] == [1]
-
-
 def test_capacity_probe_splits_a_shared_gpu(monkeypatch):
     """Two hotkeys on one card each get about half the capacity a lone card gets; a lone card gets ~1."""
-    import asyncio
     from types import SimpleNamespace
 
     from gittensor.validator.serving import forward as fwd
 
     good = _echo_release()
-    monkeypatch.setattr(fwd, 'SERVING_CHALLENGES_PER_ROUND', 2)
-    monkeypatch.setattr(fwd, 'SERVING_PROBE_REQUESTS', 4)
     lone, a, b = (SimpleNamespace(is_serving=True) for _ in range(3))
     gpu_of = {id(lone): 'gpu-1', id(a): 'gpu-2', id(b): 'gpu-2'}
     dendrite, _ = _dendrite_echoing(good, gpu_of=gpu_of, token_s=0.0005)
-    # calibrate the target from what the lone card delivers under this fake's timing
     rates = []
     real_probe = fwd.probe_axon
 
@@ -612,60 +744,96 @@ def test_capacity_probe_splits_a_shared_gpu(monkeypatch):
         return rate
 
     monkeypatch.setattr(fwd, 'probe_axon', spy)
-    state = ServingState()
     monkeypatch.setattr(fwd, 'SERVING_PROBE_TARGET_TPS', 1e-9)
-    asyncio.run(fwd.audit_round(state, dendrite, [(1, 'lone', lone)], ServingLoadout(releases=[good])))  # type: ignore[arg-type]
+    state = ServingState(settlement_rounds=1)
+    state.enqueue_served(_served(1, good))
+    _round(state, dendrite, [(1, 'hk1', lone)], good, monkeypatch, probes=4)
     probe = [r for r in state.recent(50) if r.kind == 'probe']
     assert len(probe) == 4 and all(r.ok for r in probe)
     lone_tps = rates[0]
 
     monkeypatch.setattr(fwd, 'SERVING_PROBE_TARGET_TPS', lone_tps)
-    state = ServingState()
-    scores = asyncio.run(
-        fwd.audit_round(state, dendrite, [(1, 'lone', lone), (2, 'a', a), (3, 'b', b)], ServingLoadout(releases=[good]))  # type: ignore[arg-type]
-    )
-    assert scores['lone'] == pytest.approx(1.0, abs=0.15)
-    assert scores['a'] == pytest.approx(0.5, abs=0.15) and scores['b'] == pytest.approx(0.5, abs=0.15)
-    assert scores['a'] + scores['b'] == pytest.approx(scores['lone'], abs=0.2)
+    state = ServingState(settlement_rounds=1)
+    for uid in (1, 2, 3):
+        state.enqueue_served(_served(uid, good))
+    serving = [(1, 'hk1', lone), (2, 'hk2', a), (3, 'hk3', b)]
+    scores = _round(state, dendrite, serving, good, monkeypatch, probes=4)
+    assert scores['hk1'] == pytest.approx(1.0, abs=0.15)
+    assert scores['hk2'] == pytest.approx(0.5, abs=0.15) and scores['hk3'] == pytest.approx(0.5, abs=0.15)
+    assert scores['hk2'] + scores['hk3'] == pytest.approx(scores['hk1'], abs=0.2)
 
 
 def test_probe_misses_cost_capacity_not_the_window(monkeypatch):
-    """A miner that answers every audit but chokes on the burst keeps a clean window and is probed again next round."""
-    import asyncio
+    """A miner that serves traffic honestly but chokes on the burst keeps its window and is probed again."""
     from types import SimpleNamespace
 
-    from gittensor.validator.serving import forward as fwd
-
     good = _echo_release()
-    monkeypatch.setattr(fwd, 'SERVING_CHALLENGES_PER_ROUND', 4)
-    monkeypatch.setattr(fwd, 'SERVING_PROBE_REQUESTS', 6)
     axon = SimpleNamespace(is_serving=True)
-    dendrite, calls = _dendrite_echoing(good)
-    real_stream = dendrite.call_stream
-
-    async def call_stream(target_axon, synapse, timeout, deserialize):
-        if calls.get(id(target_axon), 0) % 10 >= 4:  # per round: 4 audits answered, 6 probe requests dropped
-            calls[id(target_axon)] += 1
-            yield synapse.model_copy()
-            return
-        async for chunk in real_stream(target_axon, synapse, timeout, deserialize):
-            yield chunk
-
-    dendrite.call_stream = call_stream
-    state = ServingState()
+    dendrite, calls = _dendrite_echoing(good, dead_axons=(axon,))  # every probe request dropped
+    state = ServingState(settlement_rounds=1)
     for _ in range(2):
-        scores = asyncio.run(fwd.audit_round(state, dendrite, [(1, 'hk1', axon)], ServingLoadout(releases=[good])))  # type: ignore[arg-type]
+        state.enqueue_served(_served(1, good))
+        scores = _round(state, dendrite, [(1, 'hk1', axon)], good, monkeypatch, probes=6)
         assert scores == {'hk1': 0.0}
-    assert calls == {id(axon): 20}
+    assert calls == {id(axon): 12}
     window = state.audits.verdict('hk1', good.model_id)
-    assert window.passed and window.n_audits == 8 and window.mean == 1.0
+    assert window.passed and window.n_audits == 2 and window.mean == 1.0
     assert sum(1 for r in state.recent(50) if r.kind == 'probe' and not r.ok) == 12
+
+
+def test_serving_share_prices_gpu_hours_inside_the_cap(monkeypatch):
+    from gittensor.classes import ServingPricing
+    from gittensor.validator import emission_allocation as ea
+
+    monkeypatch.setattr(ea, 'SERVING_GPU_HOUR_USD', 0.70)
+    monkeypatch.setattr(ea, 'SERVING_EMISSION_SHARE_CAP', 0.17)
+    # 2026-08-26: ~123 alpha/h to miners at $0.847/alpha -> one card is 0.70 / 104.2 = 0.67% of emissions
+    pricing = ServingPricing(alpha_per_hour_to_miners=123.0, alpha_usd=0.847)
+    assert ea.serving_share(0.0, pricing) == 0.0
+    assert ea.serving_share(1.0, pricing) == pytest.approx(0.70 / (123.0 * 0.847))
+    assert ea.serving_share(25.0, pricing) == pytest.approx(0.168, abs=0.001)
+    assert ea.serving_share(100.0, pricing) == 0.17  # capped: 100 cards dilute
+    assert ea.serving_share(1.0, None) == 0.17  # no pricing (testnet): pay the cap pro-rata
+    assert ea.serving_share(1.0, ServingPricing(0.0, 0.847)) == 0.17
+
+
+def test_blend_pays_serving_by_price_and_recycles_the_rest(monkeypatch):
+    from gittensor.classes import ServingPricing
+    from gittensor.validator import emission_allocation as ea
+
+    monkeypatch.setattr(ea, 'SERVING_GPU_HOUR_USD', 0.70)
+    monkeypatch.setattr(ea, 'SERVING_EMISSION_SHARE_CAP', 0.17)
+    monkeypatch.setattr(ea, 'OSS_EMISSION_SHARE', 0.83)
+    pricing = ServingPricing(alpha_per_hour_to_miners=100.0, alpha_usd=0.7)  # one card = exactly 1% of emissions
+    uids = {0, 1, 2}
+    rewards = ea.blend_emission_pools({}, {}, uids, None, {1: 1.0, 2: 0.5}, pricing)
+    assert rewards[1] == pytest.approx(0.010) and rewards[2] == pytest.approx(0.005)
+    assert rewards[0] == pytest.approx(1.0 - 0.015)  # OSS slack (no repos) + the unfunded serving cap recycle
+    assert sum(rewards) == pytest.approx(1.0)
+
+
+def test_serving_pricing_reads_chain_and_loadout(monkeypatch):
+    from types import SimpleNamespace
+
+    from gittensor.validator.serving import pricing as pr
+
+    vali = SimpleNamespace(
+        metagraph=SimpleNamespace(E=[100.0, 200.0], netuid=74),
+        subtensor=SimpleNamespace(subnet=lambda netuid: SimpleNamespace(price=0.004)),
+    )
+    monkeypatch.setattr(pr, 'load_serving_loadout', lambda: SimpleNamespace(tao_usd=250.0))
+    p = pr.serving_pricing(vali)  # type: ignore[arg-type]
+    assert p is not None and p.alpha_per_hour_to_miners == pytest.approx(150.0 * 60 / 72) and p.alpha_usd == 1.0
+    monkeypatch.setattr(pr, 'load_serving_loadout', lambda: SimpleNamespace(tao_usd=None))
+    assert pr.serving_pricing(vali) is None  # type: ignore[arg-type]
+    vali.subtensor = SimpleNamespace(subnet=lambda netuid: (_ for _ in ()).throw(RuntimeError('rpc')))
+    assert pr.serving_pricing(vali) is None  # type: ignore[arg-type]
 
 
 def test_ready_set_expires_after_ttl():
     from types import SimpleNamespace
 
-    state = ServingState(ready_ttl_s=10.0)
+    state = ServingState(ready_ttl_s=10.0, settlement_rounds=1)
     miner = ReadyMiner(uid=1, hotkey='hk1', axon=SimpleNamespace(), score=1.0, model_id='m')  # type: ignore[arg-type]
     state.publish_round([miner], {'hk1': 1.0})
     assert state.acquire('m') is miner
@@ -700,16 +868,18 @@ def test_oss_round_blends_latest_serving_scores(monkeypatch):
 
     seen = {}
 
-    def blend(evals, repos, uids, maintainers, serving_scores):
+    def blend(evals, repos, uids, maintainers, serving_scores, pricing=None):
         seen['serving'] = serving_scores
+        seen['pricing'] = pricing
         return [0.0]
 
     monkeypatch.setattr(top, 'oss_contributions', oss)
     monkeypatch.setattr(top, 'issue_discovery', issues)
     monkeypatch.setattr(top, 'build_maintainer_uids_by_repo', lambda *a: {})
     monkeypatch.setattr(top, 'blend_emission_pools', blend)
+    monkeypatch.setattr(top, 'serving_pricing', lambda self: 'priced')
 
-    state = ServingState()
+    state = ServingState(settlement_rounds=1)
     state.publish_round([], {'hk1': 0.5, 'gone': 0.9})
     vali = SimpleNamespace(
         step=0,
@@ -720,7 +890,7 @@ def test_oss_round_blends_latest_serving_scores(monkeypatch):
         update_scores=lambda *a, **k: None,
     )
     asyncio.run(top.forward(vali))  # type: ignore[arg-type]
-    assert seen['serving'] == {1: 0.5}
+    assert seen['serving'] == {1: 0.5} and seen['pricing'] == 'priced'
 
 
 def test_request_record_drops_non_finite_telemetry():

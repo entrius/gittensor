@@ -8,12 +8,13 @@ from typing import Dict, Iterator, Optional
 import bittensor as bt
 import numpy as np
 
-from gittensor.classes import MinerEvaluation, RepoEmissionAllocation
+from gittensor.classes import MinerEvaluation, RepoEmissionAllocation, ServingPricing
 from gittensor.constants import (
     EMISSION_SHARE_TOLERANCE,
     OSS_EMISSION_SHARE,
     RECYCLE_UID,
-    SERVING_EMISSION_SHARE,
+    SERVING_EMISSION_SHARE_CAP,
+    SERVING_GPU_HOUR_USD,
 )
 from gittensor.validator.utils.load_weights import RepositoryConfig
 
@@ -24,6 +25,7 @@ def blend_emission_pools(
     miner_uids: set[int],
     maintainer_uids_by_repo: Optional[Dict[str, list[int]]] = None,
     serving_scores: Optional[Dict[int, float]] = None,
+    serving_pricing: Optional[ServingPricing] = None,
 ) -> np.ndarray:
     """Allocate the combined scoring pool by bounded repository emission_share.
 
@@ -38,9 +40,9 @@ def blend_emission_pools(
     is carved off the top and split evenly among those maintainers; the
     remainder scores normally. Repos with no listed maintainers are unaffected.
 
-    ``serving_scores`` distributes the ``SERVING_EMISSION_SHARE`` pool pro-rata
-    to serving miners; the pool recycles when no miner scored. At the current
-    share of 0.0 this is shadow mode and pays nothing.
+    ``serving_scores`` are settled card-equivalents per UID; ``serving_share``
+    prices them at ``SERVING_GPU_HOUR_USD`` inside ``SERVING_EMISSION_SHARE_CAP``
+    and the pool is split pro-rata. Whatever the fleet does not earn recycles.
     """
     sorted_uids = sorted(miner_uids)
     uid_index = {uid: idx for idx, uid in enumerate(sorted_uids)}
@@ -60,16 +62,17 @@ def blend_emission_pools(
         for uid, reward in allocation.issue_discovery_rewards.items():
             rewards[uid_index[uid]] += reward
 
-    # Serving pool (sub-subnet B beta): pro-rata by serving score; unclaimed recycles.
-    if SERVING_EMISSION_SHARE > 0:
-        serving_rewards, serving_unallocated = _calculate_score_rewards(
-            serving_scores or {}, SERVING_EMISSION_SHARE, miner_uids
-        )
+    # Serving pool: priced per verified GPU-hour inside the cap; unclaimed recycles.
+    if SERVING_EMISSION_SHARE_CAP > 0:
+        card_equiv = sum(serving_scores.values()) if serving_scores else 0.0
+        share = serving_share(card_equiv, serving_pricing)
+        serving_rewards, serving_unallocated = _calculate_score_rewards(serving_scores or {}, share, miner_uids)
         for uid, reward in serving_rewards.items():
             rewards[uid_index[uid]] += reward
-        recycle_share += serving_unallocated
+        recycle_share += serving_unallocated + (SERVING_EMISSION_SHARE_CAP - share)
         bt.logging.info(
-            f'Serving pool: {SERVING_EMISSION_SHARE * 100:.0f}% across '
+            f'Serving pool: {card_equiv:.2f} card-equivalents x ${SERVING_GPU_HOUR_USD:.2f}/h = '
+            f'{share * 100:.2f}% of emissions (cap {SERVING_EMISSION_SHARE_CAP * 100:.0f}%) across '
             f'{sum(1 for r in serving_rewards.values() if r > 0)} serving miners'
         )
 
@@ -196,6 +199,19 @@ def _repo_has_scorers(
     if issue_share > 0.0 and _collect_repo_issue_discovery_scores(miner_evaluations, repo_name, miner_uids):
         return True
     return False
+
+
+def serving_share(card_equiv: float, pricing: Optional[ServingPricing]) -> float:
+    """Emission share that pays ``card_equiv`` verified cards ``SERVING_GPU_HOUR_USD`` each, capped.
+
+    Without usable pricing (no chain price, no published TAO/USD — testnet) the whole cap is paid pro-rata.
+    """
+    if card_equiv <= 0:
+        return 0.0
+    if pricing is None or not pricing.usable:
+        return SERVING_EMISSION_SHARE_CAP
+    want = card_equiv * SERVING_GPU_HOUR_USD / (pricing.alpha_per_hour_to_miners * pricing.alpha_usd)
+    return min(SERVING_EMISSION_SHARE_CAP, want)
 
 
 def _calculate_score_rewards(

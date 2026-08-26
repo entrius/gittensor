@@ -39,16 +39,23 @@ keeps the last ``SERVING_AUDIT_WINDOW`` outcomes per (hotkey, release) and
 publishes the miner while their mean clears ``SERVING_AUDIT_WINDOW_THRESHOLDS``
 — it absorbs transient misses; it is not there to average out model noise (that
 was the 1b8b962 design, 2026-08-22 notes).
-Missed or malformed audits enter the window as 0. The validator persists the
+Missed or malformed responses enter the window as 0. The validator persists the
 window (``serving_audits.json`` next to ``state.npz``) so a restart is not a
-reset. ``LiveReference.score`` exposes teacher-forced scoring (R8) for text the
-reference did not generate — the primitive for auditing organic, non-greedy
-traffic later. Every audit requests ``logprobs=True``; the gateway does the same
-for organic traffic so the flag is not a tell.
+reset.
+
+There are no synthetic audit prompts: every request served through the gateway
+*is* the audit. ``verify_served`` teacher-forces the miner's completion under
+the reference (``Reference.score_served``, contract R8) and compares the miner's
+tokens/logprobs to the reference's argmax/logprobs position by position — one
+prefill pass, no generation, and nothing on the wire that a miner could tell
+apart from unaudited traffic. A verdict with ``hard`` set (tokens or logprobs
+outside the bands with aligned lengths) is a wrong answer, not a miss:
+``AuditWindow.strike`` wipes the window and quarantines the hotkey.
 """
 
 import json
 import secrets
+import time
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -60,6 +67,7 @@ from gittensor.constants import (
     SERVING_AUDIT_MIN_PREFIX_AGREEMENT,
     SERVING_AUDIT_WINDOW,
     SERVING_AUDIT_WINDOW_THRESHOLDS,
+    SERVING_QUARANTINE_S,
 )
 from gittensor.serving.backends import Message, expected_completion
 from gittensor.serving.loadout import WEIGHTS_DIR, ServingRelease
@@ -85,6 +93,7 @@ class AuditVerdict:
     reason: str
     positional_overlap: float = 0.0
     max_abs_logprob_diff: float = float('inf')
+    hard: bool = False  # a wrong answer (bands failed with aligned lengths), not a miss
 
     @property
     def value(self) -> float:
@@ -99,6 +108,7 @@ class AuditVerdict:
             'positional_overlap': round(self.positional_overlap, 4),
             'max_abs_logprob_diff': round(self.max_abs_logprob_diff, 4),
             'reason': self.reason,
+            'hard': self.hard,
         }
 
 
@@ -121,6 +131,7 @@ class WindowVerdict:
     n_audits: int
     mean: float
     threshold: float
+    quarantined_until: float = 0.0
 
     def as_dict(self) -> dict:
         return {
@@ -128,6 +139,7 @@ class WindowVerdict:
             'n_audits': self.n_audits,
             'mean': round(self.mean, 4),
             'threshold': round(self.threshold, 4),
+            'quarantined_until': round(self.quarantined_until, 1),
         }
 
 
@@ -140,7 +152,9 @@ class AuditWindow:
 
     size: int = SERVING_AUDIT_WINDOW
     thresholds: Sequence[Tuple[int, float]] = SERVING_AUDIT_WINDOW_THRESHOLDS
+    quarantine_s: float = SERVING_QUARANTINE_S
     _values: Dict[Tuple[str, str], Deque[float]] = field(default_factory=dict)
+    _quarantine: Dict[Tuple[str, str], float] = field(default_factory=dict)  # (hotkey, model) -> until ts
 
     def record(self, hotkey: str, model_id: str, value: float) -> None:
         key = (hotkey, model_id)
@@ -148,8 +162,24 @@ class AuditWindow:
             self._values[key] = deque(maxlen=self.size)
         self._values[key].append(max(0.0, min(1.0, float(value))))
 
+    def strike(self, hotkey: str, model_id: str, now: Optional[float] = None) -> float:
+        """A wrong answer: wipe the window and quarantine the (hotkey, release) until the returned timestamp."""
+        key = (hotkey, model_id)
+        self._values.pop(key, None)
+        until = (now if now is not None else time.time()) + self.quarantine_s
+        self._quarantine[key] = until
+        return until
+
+    def quarantined_until(self, hotkey: str, model_id: str, now: Optional[float] = None) -> float:
+        until = self._quarantine.get((hotkey, model_id), 0.0)
+        return until if until > (now if now is not None else time.time()) else 0.0
+
     def to_dict(self) -> dict:
-        return {'size': self.size, 'values': [[hk, mid, list(xs)] for (hk, mid), xs in self._values.items()]}
+        return {
+            'size': self.size,
+            'values': [[hk, mid, list(xs)] for (hk, mid), xs in self._values.items()],
+            'quarantine': [[hk, mid, until] for (hk, mid), until in self._quarantine.items()],
+        }
 
     @classmethod
     def from_dict(cls, raw: dict, **kwargs) -> 'AuditWindow':
@@ -157,6 +187,8 @@ class AuditWindow:
         for hk, mid, xs in raw.get('values', []):
             for x in xs[-window.size :]:
                 window.record(str(hk), str(mid), float(x))
+        for hk, mid, until in raw.get('quarantine', []):
+            window._quarantine[(str(hk), str(mid))] = float(until)
         return window
 
     def save(self, path: Path) -> None:
@@ -173,16 +205,19 @@ class AuditWindow:
         except (OSError, ValueError, TypeError):
             return cls(**kwargs)
 
-    def verdict(self, hotkey: str, model_id: str) -> WindowVerdict:
+    def verdict(self, hotkey: str, model_id: str, now: Optional[float] = None) -> WindowVerdict:
+        until = self.quarantined_until(hotkey, model_id, now)
         xs = self._values.get((hotkey, model_id))
         if not xs:
-            return WindowVerdict(False, 0, 0.0, float('inf'))
+            return WindowVerdict(False, 0, 0.0, float('inf'), until)
         mean = sum(xs) / len(xs)
         threshold = window_threshold(len(xs), self.thresholds)
-        return WindowVerdict(mean >= threshold, len(xs), mean, threshold)
+        return WindowVerdict(mean >= threshold and until == 0.0, len(xs), mean, threshold, until)
 
 
 class Reference(Protocol):
+    def score_served(self, messages: List[Message], completion: str) -> dict: ...
+
     model_id: str
 
     def sample(self) -> AuditCase: ...
@@ -219,6 +254,9 @@ class BankReference:
     def sample(self) -> AuditCase:
         return secrets.choice(self.cases)
 
+    def score_served(self, messages: List[Message], completion: str) -> dict:
+        raise NotImplementedError('a bank reference cannot verify served traffic; run a live reference')
+
     def __len__(self) -> int:
         return len(self.cases)
 
@@ -240,6 +278,15 @@ class EchoReference:
             reference_logprobs=ref.token_logprobs or [],
             reference_completion=ref.completion,
         )
+
+    def score_served(self, messages: List[Message], completion: str) -> dict:
+        """Teacher-forced scoring for the echo backend: the argmax is the expected token at every position."""
+        tokens = completion.split(' ') if completion else []
+        ref = expected_completion(messages, max(1, len(tokens)), self.model_id)
+        argmax = list(ref.tokens or [])[: len(tokens)]
+        ref_lp = list(ref.token_logprobs or [])
+        logprobs = [ref_lp[i] if i < len(ref_lp) and tokens[i] == argmax[i] else -20.0 for i in range(len(tokens))]
+        return {'tokens': tokens, 'logprobs': logprobs, 'argmax': argmax, 'usage': {}}
 
     def __len__(self) -> int:
         return 1
@@ -274,9 +321,12 @@ class LiveReference:
 
     def score(self, messages: List[Message], completion: str) -> dict:
         """Teacher-forced logprobs of ``completion`` under the reference (R8): verifies text the reference
-        did not generate, e.g. a miner's sampled answer to an organic request. A trailing end-of-turn token
-        in the miner's token list is not part of the text; strip it before comparing lengths."""
+        did not generate. A trailing end-of-turn token in the miner's token list is not part of the text;
+        ``verify_served`` strips it before comparing lengths."""
         return score(self.base_url, self.model_id, messages, completion, self.timeout, self.api_key)
+
+    def score_served(self, messages: List[Message], completion: str) -> dict:
+        return self.score(messages, completion)
 
     def __len__(self) -> int:
         return 1
@@ -317,11 +367,41 @@ def verify_response(
 
     if agreement < min_prefix_agreement:
         reason = f'prefix agreement {agreement:.2f} < {min_prefix_agreement}'
-        return AuditVerdict(False, agreement, mean_diff, reason, overlap, max_diff)
+        return AuditVerdict(False, agreement, mean_diff, reason, overlap, max_diff, hard=True)
     if mean_diff > max_mean_abs_logprob_diff:
         reason = f'logprob drift {mean_diff:.4f} > {max_mean_abs_logprob_diff}'
-        return AuditVerdict(False, agreement, mean_diff, reason, overlap, max_diff)
+        return AuditVerdict(False, agreement, mean_diff, reason, overlap, max_diff, hard=True)
     if max_diff > max_abs_logprob_diff:
         reason = f'logprob outlier {max_diff:.4f} > {max_abs_logprob_diff}'
-        return AuditVerdict(False, agreement, mean_diff, reason, overlap, max_diff)
+        return AuditVerdict(False, agreement, mean_diff, reason, overlap, max_diff, hard=True)
     return AuditVerdict(True, agreement, mean_diff, 'ok', overlap, max_diff)
+
+
+def verify_served(
+    reference: Reference,
+    messages: List[Message],
+    completion: Optional[str],
+    tokens: Optional[Sequence[str]],
+    token_logprobs: Optional[Sequence[float]],
+    end_of_turn: Sequence[str] = ('<|im_end|>', '<|endoftext|>', '</s>'),
+) -> AuditVerdict:
+    """Verify a served (greedy) completion by teacher forcing it under the reference.
+
+    The reference's argmax at each position is what an honest copy would have generated, so the miner's tokens
+    must match it and the miner's logprobs must match the reference's logprob of that same token. A completion
+    that re-tokenizes to a different length is not comparable position by position and counts as a soft miss;
+    the bands failing on aligned lengths is a wrong answer (``hard``).
+    """
+    if completion is None or not tokens or token_logprobs is None or len(tokens) != len(token_logprobs):
+        return AuditVerdict(False, 0.0, float('inf'), 'missing or malformed logprobs')
+    mine, mine_lp = list(tokens), list(token_logprobs)
+    if mine and mine[-1] in end_of_turn:
+        mine, mine_lp = mine[:-1], mine_lp[:-1]
+    if not mine:
+        return AuditVerdict(False, 0.0, float('inf'), 'empty completion')
+    ref = reference.score_served(messages, completion)
+    argmax, ref_lp = ref.get('argmax') or [], ref.get('logprobs') or []
+    if len(argmax) != len(mine) or len(ref_lp) != len(mine):
+        return AuditVerdict(False, 0.0, float('inf'), f'tokenization mismatch ({len(mine)} vs {len(argmax)})')
+    case = AuditCase(messages=list(messages), max_tokens=len(mine), reference_tokens=argmax, reference_logprobs=ref_lp)
+    return verify_response(case, mine, mine_lp)

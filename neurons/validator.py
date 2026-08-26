@@ -46,6 +46,7 @@ from gittensor.validator.utils.config import (
     SERVING_API_KEYS,
     SERVING_API_PORT,
     SERVING_AUDIT_INTERVAL_S,
+    SERVING_BASELINE_API_KEYS,
     SERVING_ENABLED,
     STORE_DB_RESULTS,
     WANDB_PROJECT,
@@ -110,6 +111,7 @@ class Validator(BaseValidatorNeuron):
                     host=SERVING_API_HOST,
                     port=SERVING_API_PORT,
                     request_timeout=release.request_timeout,
+                    baseline_keys=parse_api_keys(SERVING_BASELINE_API_KEYS),
                 )
             else:
                 bt.logging.info('Serving: SERVING_API_KEYS unset — audits only, no API')

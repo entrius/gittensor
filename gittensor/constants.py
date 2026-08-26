@@ -214,6 +214,12 @@ SERVING_API_DEFAULT_PORT = 8790
 # that only the reference-running validator clears it (2026-08-26: one hotkey holds >1M alpha, the next 0.27M); every
 # other caller goes through that validator's gateway. Env SERVING_MIN_CALLER_STAKE.
 SERVING_MIN_CALLER_STAKE = 1_000_000.0
+# Any hotkey holding a validator permit may also query, any request shape, up to this many completion tokens per
+# tempo (metagraph.block // BLOCKS_PER_TEMPO): enough to run an independent reference and audit a fleet of ~100
+# miners several times over, worthless as free inference (~$0.05 of tokens). No shape limit, so a smaller
+# validator's audits look like any other request.
+SERVING_VALIDATOR_TOKENS_PER_TEMPO = 50_000
+BLOCKS_PER_TEMPO = 360
 SERVING_BACKEND_CONCURRENCY = 16  # miner: concurrent backend generations (sparkinfer >= 12954e6 handles 24)
 SERVING_SEEN_NONCES = 10_000  # miner: replay guard size; covers many minutes of validator traffic
 SERVING_MAX_TOKENS = 1024  # hard cap per request (API and miner both enforce)

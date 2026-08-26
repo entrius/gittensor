@@ -32,6 +32,7 @@ probe tokens simply count 0).
 """
 
 import asyncio
+import hashlib
 import math
 import threading
 import time
@@ -220,6 +221,9 @@ class ServingAuditThread:
         # connector caps a session at 100 connections, which would queue late miners on the validator and skew
         # their measured throughput. Uncapped connector for the audit dendrite only.
         dendrite._session = loop.run_until_complete(_unlimited_session())
+        # Validators probe on the same interval; a per-hotkey phase offset keeps their bursts from landing on a
+        # miner at the same instant and each reading half a card.
+        self._stop.wait(probe_phase_offset(self.validator.wallet.hotkey.ss58_address, self.interval_s))
         while not self._stop.is_set():
             started = time.monotonic()
             try:
@@ -235,6 +239,11 @@ class ServingAuditThread:
                 except OSError as e:
                     bt.logging.warning(f'Serving: could not persist audit window to {path}: {e}')
             self._stop.wait(max(0.0, self.interval_s - (time.monotonic() - started)))
+
+
+def probe_phase_offset(hotkey: str, interval_s: float) -> float:
+    """Deterministic start offset in [0, interval) for this validator's audit clock."""
+    return (int(hashlib.sha256(hotkey.encode()).hexdigest()[:8], 16) % 1_000_000) / 1_000_000 * interval_s
 
 
 def audit_window_path(self: 'Validator') -> Optional[Path]:

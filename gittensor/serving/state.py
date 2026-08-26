@@ -130,10 +130,6 @@ class ServingState:
             self._served.clear()
             return items
 
-    def probation_miners(self) -> List[ReadyMiner]:
-        with self._lock:
-            return list(self._probation.values()) if self._fresh() else []
-
     def _fresh(self) -> bool:
         return time.time() - self.last_round_ts <= self.ready_ttl_s
 

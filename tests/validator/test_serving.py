@@ -692,7 +692,7 @@ def test_audit_round_verifies_served_traffic(monkeypatch):
     assert w1.passed and w1.n_audits == 5 and w1.mean == 0.8
     assert not w2.passed and w2.n_audits == 0 and w2.quarantined_until > 0  # struck
     assert [m.uid for m in state.ready_miners()] == [1]
-    assert [m.uid for m in state.probation_miners()] == [3]  # the cheater is quarantined, not on probation
+    assert state.snapshot()['probation_uids'] == [3]  # the cheater is quarantined, not on probation
     assert sum(1 for r in state.recent(50) if r.kind == 'verify') == 7
 
     scores = _round(state, dendrite, serving, good, monkeypatch)  # quiet round: READY on the window, credit 1.0

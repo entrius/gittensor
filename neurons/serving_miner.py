@@ -171,8 +171,8 @@ def min_caller_stake() -> float:
 async def blacklist_inference(miner: ServingMiner, synapse: InferenceSynapse) -> Tuple[bool, str]:
     """Only hotkeys staked at least SERVING_MIN_CALLER_STAKE alpha on the subnet may query.
 
-    Otherwise any registered hotkey could use the miner's GPU for free inference; the stake floor means validators
-    and builders with skin in the game get to use the product.
+    Otherwise any registered hotkey could use the miner's GPU for free inference; the floor is set so only the
+    reference-running validator clears it and everyone else goes through its gateway.
     """
     hotkey = synapse.dendrite.hotkey if synapse.dendrite else None
     if not hotkey or hotkey not in miner.metagraph.hotkeys:

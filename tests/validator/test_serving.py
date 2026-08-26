@@ -699,6 +699,70 @@ def test_audit_round_verifies_served_traffic(monkeypatch):
     assert scores['hk1'] == 1.0 and [m.uid for m in state.ready_miners()] == [1]
 
 
+def test_baseline_round_spreads_prompts_and_queues_them_for_verification(monkeypatch):
+    """Each live axon gets per_miner baseline prompts at random times; dead axons queue misses; quarantined skip."""
+    import asyncio
+    import random
+    from types import SimpleNamespace
+
+    from gittensor.validator.serving import forward as fwd
+
+    good = _echo_release()
+    live, dead, struck = (SimpleNamespace(is_serving=True) for _ in range(3))
+    dendrite, calls = _dendrite_echoing(good, dead_axons=(dead,))
+    state = ServingState(settlement_rounds=1)
+    state.audits.strike('hk3', good.model_id)
+    serving = [(1, 'hk1', live), (2, 'hk2', dead), (3, 'hk3', struck)]
+    sent = asyncio.run(
+        fwd.baseline_round(state, dendrite, serving, good, window_s=0.05, per_miner=2, rng=random.Random(7))  # type: ignore[arg-type]
+    )
+    assert sent == 4 and calls == {id(live): 2, id(dead): 2}
+    queued = state.drain_served()
+    assert sorted(q.uid for q in queued) == [1, 1, 2, 2]
+    assert all(q.ok and q.tokens and q.messages[0]['role'] == 'user' for q in queued if q.uid == 1)
+    assert all(not q.ok and q.detail for q in queued if q.uid == 2)
+    assert len({q.messages[0]['content'] for q in queued}) == 4  # every prompt distinct
+    for q in queued:
+        state.enqueue_served(q)
+    scores = _round(state, dendrite, serving, good, monkeypatch)
+    assert scores['hk1'] == 1.0 and scores['hk2'] == 0.0 and scores['hk3'] == 0.0
+    assert state.audits.verdict('hk1', good.model_id).n_audits == 2
+    assert (
+        state.audits.verdict('hk2', good.model_id).n_audits == 2
+        and not state.audits.verdict('hk2', good.model_id).passed
+    )
+
+
+def test_budget_refusal_is_neutral_not_a_miss(monkeypatch):
+    from types import SimpleNamespace
+
+    good = _echo_release()
+    axon = SimpleNamespace(is_serving=True)
+    dendrite, _ = _dendrite_echoing(good)
+    state = ServingState(settlement_rounds=1)
+    state.enqueue_served(_served(1, good))
+    refused = _served(1, good, ok=False)
+    refused.detail = 'Validator audit budget spent (50000 tokens per tempo)'
+    state.enqueue_served(refused)
+    state.enqueue_served(_served(1, good, ok=False))
+    _round(state, dendrite, [(1, 'hk1', axon)], good, monkeypatch)
+    w = state.audits.verdict('hk1', good.model_id)
+    assert w.n_audits == 2 and w.mean == 0.5  # one pass, one real miss, the refusal ignored
+
+
+def test_baseline_prompts_vary_in_shape_and_length():
+    import random
+
+    from gittensor.serving.baseline import baseline_max_tokens, make_baseline_prompt
+
+    rng = random.Random(1)
+    prompts = [make_baseline_prompt(rng)[0]['content'] for _ in range(200)]
+    lengths = sorted(len(p) for p in prompts)
+    assert len(set(prompts)) > 190 and lengths[0] < 120 and lengths[-1] > 2000
+    assert {baseline_max_tokens(rng, 1024) for _ in range(200)} >= {64, 128, 256, 512}
+    assert baseline_max_tokens(rng, 100) <= 100
+
+
 def test_audit_round_skips_release_without_reference(monkeypatch):
     """A release whose reference is unreachable is skipped and logged; the round still completes."""
     from types import SimpleNamespace

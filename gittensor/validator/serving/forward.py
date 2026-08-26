@@ -29,6 +29,7 @@ over the trailing ``SERVING_SETTLEMENT_ROUNDS`` rounds by ``ServingState``.
 import asyncio
 import hashlib
 import math
+import random
 import threading
 import time
 from pathlib import Path
@@ -38,11 +39,14 @@ import aiohttp
 import bittensor as bt
 
 from gittensor.constants import (
+    SERVING_BASELINE_PER_ROUND,
     SERVING_CHALLENGE_TIMEOUT,
+    SERVING_MAX_TOKENS,
     SERVING_PROBE_REQUESTS,
     SERVING_PROBE_TARGET_TPS,
 )
 from gittensor.serving.audit import AuditCase, AuditVerdict, Reference, reference_for, verify_response, verify_served
+from gittensor.serving.baseline import baseline_max_tokens, make_baseline_prompt
 from gittensor.serving.loadout import ServingRelease, load_serving_loadout
 from gittensor.serving.state import ReadyMiner, RequestRecord, ServedRequest, ServingState
 from gittensor.serving.stream import consume_stream
@@ -91,8 +95,10 @@ def verify_served_round(
     for req in served:
         if req.model_id != release.model_id:
             continue
+        if not req.ok and 'budget' in req.detail.lower():  # this validator over-sent; not the miner's fault
+            continue
         if not req.ok:
-            verdict = AuditVerdict(False, 0.0, float('inf'), 'no completion')
+            verdict = AuditVerdict(False, 0.0, float('inf'), req.detail or 'no completion')
         else:
             try:
                 verdict = verify_served(reference, req.messages, req.completion, req.tokens, req.token_logprobs)
@@ -122,6 +128,68 @@ def verify_served_round(
             )
         )
     return credits
+
+
+async def baseline_round(
+    state: ServingState,
+    dendrite: bt.Dendrite,
+    serving: Sequence[Tuple[int, str, bt.AxonInfo]],
+    release: ServingRelease,
+    window_s: float,
+    per_miner: int = SERVING_BASELINE_PER_ROUND,
+    rng: Optional[random.Random] = None,
+) -> int:
+    """Send every serving axon ``per_miner`` baseline prompts at random moments within ``window_s``.
+
+    The requests take the same path as user traffic and are queued as served requests, so the next round verifies
+    them like anything else. Quarantined hotkeys are skipped. Returns the number of requests sent.
+    """
+    rng = rng or random.Random()
+    targets = [
+        (uid, hotkey, axon)
+        for uid, hotkey, axon in serving
+        if state.audits.quarantined_until(hotkey, release.model_id) == 0.0
+    ]
+
+    async def one(uid: int, hotkey: str, axon: bt.AxonInfo, delay_s: float) -> None:
+        await asyncio.sleep(delay_s)
+        messages = make_baseline_prompt(rng)
+        max_tokens = baseline_max_tokens(rng, min(SERVING_MAX_TOKENS, max(release.max_tokens, 512)))
+        synapse = InferenceSynapse(messages=messages, model_id=release.model_id, max_tokens=max_tokens, logprobs=True)
+        started = time.monotonic()
+        try:
+            response = await consume_stream(dendrite, axon, synapse, release.request_timeout)
+        except Exception as e:
+            response, err = None, repr(e)
+        else:
+            err = ''
+        ok = response is not None and response.completion is not None and response.served_model_id == release.model_id
+        status = getattr(getattr(response, 'dendrite', None), 'status_message', None) if response is not None else None
+        state.enqueue_served(
+            ServedRequest(
+                ts=time.time(),
+                uid=uid,
+                hotkey=hotkey,
+                model_id=release.model_id,
+                messages=messages,
+                ok=ok,
+                latency_ms=(time.monotonic() - started) * 1000.0 if ok else None,
+                completion=response.completion if response is not None else None,
+                tokens=list(response.tokens) if response is not None and response.tokens else None,
+                token_logprobs=list(response.token_logprobs)
+                if response is not None and response.token_logprobs
+                else None,
+                detail='' if ok else str(status or err or 'no response'),
+            )
+        )
+
+    jobs = [
+        one(uid, hotkey, axon, rng.uniform(0.0, max(0.0, window_s)))
+        for uid, hotkey, axon in targets
+        for _ in range(per_miner)
+    ]
+    await asyncio.gather(*jobs)
+    return len(jobs)
 
 
 async def audit_round(
@@ -208,10 +276,17 @@ async def _unlimited_session() -> aiohttp.ClientSession:
 class ServingAuditThread:
     """Runs ``audit_round`` every ``interval_s`` seconds on a private event loop in a daemon thread."""
 
-    def __init__(self, validator: 'Validator', state: ServingState, interval_s: float):
+    def __init__(
+        self,
+        validator: 'Validator',
+        state: ServingState,
+        interval_s: float,
+        baseline_per_round: int = SERVING_BASELINE_PER_ROUND,
+    ):
         self.validator = validator
         self.state = state
         self.interval_s = interval_s
+        self.baseline_per_round = baseline_per_round
         self._stop = threading.Event()
         self.thread = threading.Thread(target=self._run, name='serving-audits', daemon=True)
 
@@ -236,6 +311,7 @@ class ServingAuditThread:
         self._stop.wait(probe_phase_offset(self.validator.wallet.hotkey.ss58_address, self.interval_s))
         while not self._stop.is_set():
             started = time.monotonic()
+            serving: List[Tuple[int, str, bt.AxonInfo]] = []
             try:
                 serving = get_serving_axons(self.validator)
                 loop.run_until_complete(audit_round(self.state, dendrite, serving))
@@ -248,6 +324,19 @@ class ServingAuditThread:
                     self.state.audits.save(path)
                 except OSError as e:
                     bt.logging.warning(f'Serving: could not persist audit window to {path}: {e}')
+            # The rest of the interval carries this validator's own baseline prompts, spread at random so nothing
+            # marks the round boundary; they are verified next round alongside any user traffic.
+            remaining = max(0.0, self.interval_s - (time.monotonic() - started))
+            try:
+                release = load_serving_loadout().primary
+                sent = loop.run_until_complete(
+                    baseline_round(
+                        self.state, dendrite, serving, release, max(0.0, remaining - 5.0), self.baseline_per_round
+                    )
+                )
+                bt.logging.debug(f'Serving: sent {sent} baseline request(s)')
+            except Exception as e:
+                bt.logging.error(f'Serving: baseline traffic failed this round: {e!r}')
             self._stop.wait(max(0.0, self.interval_s - (time.monotonic() - started)))
 
 

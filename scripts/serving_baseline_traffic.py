@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Baseline traffic for the serving gateway: keeps every miner audited when real traffic is quiet.
+"""External baseline traffic for the serving gateway (optional; the validator sends its own baseline in-process).
 
-Served traffic is the only audit the validator runs, so with no users a miner would coast on a stale window and a
-new miner could never earn one. This client sends realistic, varied prompts through the gateway at a steady rate
-using a key from SERVING_BASELINE_API_KEYS, which lets the gateway route to probation (not yet READY) miners too.
+Useful for load tests and for exercising the gateway path end to end from another host. Uses the same prompt corpus
+as the validator (gittensor/serving/baseline.py); a key from SERVING_BASELINE_API_KEYS lets the gateway route to
+probation (not yet READY) miners too.
 
     export KEY=<baseline key>
     python3 scripts/serving_baseline_traffic.py --base-url http://127.0.0.1:8790 --rate 12 --duration 300
@@ -20,50 +20,13 @@ import time
 import urllib.error
 import urllib.request
 
-TOPICS = [
-    'a rate limiter for an HTTP API',
-    'retry with exponential backoff',
-    'a LRU cache',
-    'parsing a CSV with quotes',
-    'a binary search over a sorted list',
-    'merging two sorted iterators',
-    'a token bucket',
-    'validating an email',
-    'a background job queue',
-    'reading a large file in chunks',
-    'a simple state machine',
-    'a debounce helper',
-]
-LANGS = ['Python', 'TypeScript', 'Go', 'Rust']
-SNIPPET = (
-    'def handle(req):\n    if not req.ok:\n        return None\n    items = [x for x in req.items if x.active]\n'
-    '    return sorted(items, key=lambda x: x.ts)\n'
-)
-
-
-def make_prompt(rng: random.Random) -> list:
-    kind = rng.random()
-    topic, lang = rng.choice(TOPICS), rng.choice(LANGS)
-    if kind < 0.35:
-        content = f'Write {topic} in {lang}. Include a short docstring and one example call.'
-    elif kind < 0.7:
-        filler = ' '.join(f'line {i}: {SNIPPET.strip()}' for i in range(rng.randint(5, 60)))
-        content = f'Here is a file:\n{filler}\n\nExplain what handle() does and list two bugs.'
-    else:
-        content = (
-            f'You are reviewing a pull request that adds {topic} in {lang}. The diff touches '
-            f'{rng.randint(2, 9)} files. Summarize the risks in three bullet points.'
-        )
-    return [{'role': 'user', 'content': content}]
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+from gittensor.serving.baseline import baseline_max_tokens, make_baseline_prompt  # noqa: E402
 
 
 def one(base: str, key: str, rng: random.Random, timeout: float) -> dict:
     body = json.dumps(
-        {
-            'messages': make_prompt(rng),
-            'max_tokens': rng.choice([64, 128, 256, 512]),
-            'stream': True,
-        }
+        {'messages': make_baseline_prompt(rng), 'max_tokens': baseline_max_tokens(rng, 1024), 'stream': True}
     ).encode()
     req = urllib.request.Request(
         base.rstrip('/') + '/v1/chat/completions',

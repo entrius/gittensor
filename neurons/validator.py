@@ -47,6 +47,7 @@ from gittensor.validator.utils.config import (
     SERVING_API_PORT,
     SERVING_AUDIT_INTERVAL_S,
     SERVING_BASELINE_API_KEYS,
+    SERVING_BASELINE_PER_ROUND,
     SERVING_ENABLED,
     STORE_DB_RESULTS,
     WANDB_PROJECT,
@@ -115,7 +116,9 @@ class Validator(BaseValidatorNeuron):
                 )
             else:
                 bt.logging.info('Serving: SERVING_API_KEYS unset — audits only, no API')
-            self.serving_audits = ServingAuditThread(self, self.serving_state, SERVING_AUDIT_INTERVAL_S)
+            self.serving_audits = ServingAuditThread(
+                self, self.serving_state, SERVING_AUDIT_INTERVAL_S, SERVING_BASELINE_PER_ROUND
+            )
             self.serving_audits.start()
 
         # DB connection for validation result storage.

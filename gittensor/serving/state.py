@@ -50,6 +50,7 @@ class ServedRequest:
     completion: Optional[str] = None
     tokens: Optional[List[str]] = None
     token_logprobs: Optional[List[float]] = None
+    detail: str = ''  # axon status message when not ok
 
 
 @dataclass

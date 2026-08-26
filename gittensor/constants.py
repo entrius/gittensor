@@ -215,6 +215,12 @@ SERVING_AUDIT_MAX_ABS_LOGPROB_DIFF = 0.10  # largest single-position |logprob de
 SERVING_AUDIT_WINDOW = 10
 SERVING_AUDIT_WINDOW_THRESHOLDS = ((1, 0.8),)
 SERVING_QUARANTINE_S = 3600.0
+# Baseline traffic: every round the validator sends each serving axon this many baseline prompts of its own, at
+# random moments spread over the round (so they do not mark the round boundary), over the same path as user
+# traffic. Real traffic does not displace them — 2 x ~256 tokens per miner per round is noise for a card and well
+# inside the permitted-validator budget — it just adds to the evidence. This is what lets a validator with no users
+# verify miners at all, and keeps quiet hours from being a free period.
+SERVING_BASELINE_PER_ROUND = 2
 SERVING_API_DEFAULT_PORT = 8790
 # Miner: a hotkey may query for inference only with at least this much stake on the subnet (alpha, metagraph.S). Set so
 # that only the reference-running validator clears it (2026-08-26: one hotkey holds >1M alpha, the next 0.27M); every

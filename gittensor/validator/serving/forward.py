@@ -26,6 +26,9 @@ comes from the round's load probe: every miner whose window passed gets
 ``SERVING_PROBE_REQUESTS`` prompts at the same instant as every other miner,
 and verified tokens per wall-clock second over ``SERVING_PROBE_TARGET_TPS``
 (capped at 1) is its capacity — so hotkeys sharing one GPU share one GPU's pay.
+Probe outcomes never enter the audit window: a host that cannot take the
+burst loses capacity this round, not its READY status (unverified or missing
+probe tokens simply count 0).
 """
 
 import asyncio
@@ -99,7 +102,6 @@ async def probe_axon(
     wall_s = max(time.monotonic() - started, 1e-3)
     tokens = 0
     for verdict, _, record, n_tokens in results:
-        state.audits.record(hotkey, release.model_id, verdict.value)
         state.record(RequestRecord(**{**record.__dict__, 'kind': 'probe'}))
         if verdict.passed:
             tokens += n_tokens
@@ -165,7 +167,7 @@ async def audit_round(
             rates = [SERVING_PROBE_TARGET_TPS] * len(passing)
         for (uid, hotkey, _, credit), tps in zip(passing, rates):
             capacity = min(1.0, tps / SERVING_PROBE_TARGET_TPS)
-            score = credit * capacity if state.audits.verdict(hotkey, release.model_id).passed else 0.0
+            score = credit * capacity
             bt.logging.info(
                 f'Serving: UID {uid} {release.model_id} probe {tps:.0f} tok/s capacity {capacity:.2f} '
                 f'latency credit {credit:.2f} score {score:.3f}'

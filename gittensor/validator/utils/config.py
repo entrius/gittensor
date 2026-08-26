@@ -24,6 +24,9 @@ if VALIDATOR_STEPS_INTERVAL < 1 or SERVING_AUDIT_INTERVAL_S <= 0:
     raise ValueError('VALIDATOR_STEPS_INTERVAL must be >= 1 and SERVING_AUDIT_INTERVAL_S > 0')
 # Serving inference API: off unless keys are set; loopback by default (0.0.0.0 inside docker), front it with the host proxy.
 SERVING_API_KEYS = os.getenv('SERVING_API_KEYS', '')
+# Keys whose traffic may be routed to not-yet-READY miners (probation). The baseline-traffic client uses one of
+# these; user keys only ever reach READY miners.
+SERVING_BASELINE_API_KEYS = os.getenv('SERVING_BASELINE_API_KEYS', '')
 SERVING_API_HOST = os.getenv('SERVING_API_HOST', '127.0.0.1')
 SERVING_API_PORT = int(os.getenv('SERVING_API_PORT', str(SERVING_API_DEFAULT_PORT)))
 

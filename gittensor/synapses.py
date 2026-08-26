@@ -37,7 +37,7 @@ class InferenceSynapse(bt.StreamingSynapse):
     """Inference request for serving miners (sub-subnet B beta).
 
     Carries one OpenAI-style chat request from validator to miner. The same
-    synapse is used for validator audit prompts and for gateway (user) traffic,
+    synapse is used for validator capacity probes and for gateway (user) traffic,
     so a miner cannot tell them apart. The miner answers with a stream of
     OpenAI ``chat.completion.chunk`` events (``gittensor/serving/stream.py``);
     the validator folds them into the response fields below. When ``logprobs``

@@ -67,6 +67,7 @@ class ServingRelease:
 @dataclass
 class ServingLoadout:
     releases: List[ServingRelease]
+    tao_usd: Optional[float] = None  # published TAO/USD rate (`pricing.tao_usd`); sizes the serving emission share
 
     def __post_init__(self) -> None:
         if not self.releases:
@@ -99,7 +100,10 @@ def load_serving_loadout(path: Optional[Path] = None) -> ServingLoadout:
     with open(loadout_path) as f:
         raw = json.load(f)
     entries = raw['releases'] if isinstance(raw, dict) and 'releases' in raw else [raw]
-    loadout = ServingLoadout(releases=[ServingRelease.from_dict(entry) for entry in entries])
+    pricing = raw.get('pricing') or {} if isinstance(raw, dict) else {}
+    tao_usd_env = os.getenv('SERVING_TAO_USD')
+    tao_usd = float(tao_usd_env) if tao_usd_env else (float(pricing['tao_usd']) if pricing.get('tao_usd') else None)
+    loadout = ServingLoadout(releases=[ServingRelease.from_dict(entry) for entry in entries], tao_usd=tao_usd)
 
     reference_override = os.getenv('SERVING_REFERENCE_URL')
     if reference_override:

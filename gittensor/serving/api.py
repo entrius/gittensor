@@ -6,14 +6,16 @@
     POST /v1/chat/completions   Authorization: Bearer <key>
 
 The validator serves this; each request is forwarded to the READY miner with
-the fewest in-flight requests as the same ``InferenceSynapse`` the audit loop
-uses, so miners cannot tell audits from real traffic. Keys are a static list
-in ``SERVING_API_KEYS`` for now (a DB table once keys need minting/credits).
-Off unless keys are set. Binds loopback by default; put it behind the host
-reverse proxy / TLS like any other service (see docker-compose.vali.yml).
+the fewest in-flight requests and, once served, handed to the audit loop to be
+verified against the reference — served traffic is the only audit there is.
+Keys are a static list in ``SERVING_API_KEYS`` for now (the product front door
+owns users/credits). Requests from ``SERVING_BASELINE_API_KEYS`` may be routed
+to probation (not yet READY) miners so new miners can earn a window; user keys
+only ever reach READY miners. Off unless keys are set. Binds loopback by
+default; put it behind the host reverse proxy / TLS like any other service.
 
 No queue: with no READY capacity it returns 429 so rejected demand stays
-visible. Streaming is a later phase.
+visible.
 
     OPENAI_BASE_URL=http://<host>:8790/v1 OPENAI_API_KEY=<key> ...
 """
@@ -32,7 +34,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from gittensor.constants import SERVING_MAX_TOKENS
 from gittensor.serving.loadout import ServingRelease
-from gittensor.serving.state import ReadyMiner, RequestRecord, ServingState, finite_or_none
+from gittensor.serving.state import ReadyMiner, RequestRecord, ServedRequest, ServingState, finite_or_none
 from gittensor.serving.stream import SSE_DONE, Event, consume_stream, sse_event
 from gittensor.synapses import InferenceSynapse
 
@@ -52,7 +54,9 @@ def build_app(
     api_keys: Set[str],
     dendrite_factory,
     request_timeout: float,
+    baseline_keys: Optional[Set[str]] = None,
 ) -> FastAPI:
+    baseline = set(baseline_keys or ())
     app = FastAPI(title='Gittensor Serving API', version='0.1.0-beta')
     dendrite_holder: Dict[str, bt.Dendrite] = {}
 
@@ -101,7 +105,7 @@ def build_app(
         return snap
 
     @app.post('/v1/chat/completions')
-    async def chat_completions(request: Request, _: str = Depends(require_key)):
+    async def chat_completions(request: Request, key: str = Depends(require_key)):
         body = await request.json()
         messages = body.get('messages')
         if not isinstance(messages, list) or not messages:
@@ -123,7 +127,7 @@ def build_app(
         want_logprobs = bool(body.get('logprobs', False))
         want_stream = bool(body.get('stream', False))
 
-        miner = state.acquire(release.model_id)
+        miner = state.acquire(release.model_id, probation=key in baseline)
         if miner is None:
             raise HTTPException(status_code=429, detail='no READY serving capacity')
 
@@ -134,13 +138,28 @@ def build_app(
         def finish(result: Optional[InferenceSynapse]) -> bool:
             state.release(miner.uid)
             ok = result is not None and result.completion is not None
+            latency_ms = (time.monotonic() - start) * 1000.0
+            state.enqueue_served(
+                ServedRequest(
+                    ts=time.time(),
+                    uid=miner.uid,
+                    hotkey=miner.hotkey,
+                    model_id=release.model_id,
+                    messages=messages,
+                    ok=ok and (result.served_model_id == release.model_id if result else False),
+                    latency_ms=latency_ms,
+                    completion=result.completion if result else None,
+                    tokens=list(result.tokens) if result and result.tokens else None,
+                    token_logprobs=list(result.token_logprobs) if result and result.token_logprobs else None,
+                )
+            )
             state.record(
                 RequestRecord(
                     ts=time.time(),
                     kind='gateway',
                     uid=miner.uid,
                     ok=ok,
-                    latency_ms=(time.monotonic() - start) * 1000.0,
+                    latency_ms=latency_ms,
                     completion_tokens=(result.usage or {}).get('completion_tokens', 0) if result else 0,
                     ttft_ms=result.ttft_ms if result else None,
                     decode_tps=result.decode_tps if result else None,
@@ -273,10 +292,18 @@ def start_serving_api(
     host: str,
     port: int,
     request_timeout: float,
+    baseline_keys: Optional[Set[str]] = None,
 ) -> ServingApiThread:
     if not api_keys:
         raise ValueError('SERVING_API_KEYS is empty; refusing to start without API keys')
-    app = build_app(state, release, api_keys, lambda: bt.Dendrite(wallet=wallet), request_timeout)
+    app = build_app(
+        state,
+        release,
+        api_keys | set(baseline_keys or ()),
+        lambda: bt.Dendrite(wallet=wallet),
+        request_timeout,
+        baseline_keys=baseline_keys,
+    )
     api = ServingApiThread(app, host, port)
     api.start()
     return api

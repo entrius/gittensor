@@ -210,9 +210,10 @@ SERVING_AUDIT_MAX_ABS_LOGPROB_DIFF = 0.10  # largest single-position |logprob de
 SERVING_AUDIT_WINDOW = 10
 SERVING_AUDIT_WINDOW_THRESHOLDS = ((1, 0.8),)
 SERVING_API_DEFAULT_PORT = 8790
-# Miner: a hotkey may query for inference only with at least this much stake on the subnet (alpha, metagraph.S). Same
-# rule as allways: validators and builders with skin in the game get to use the product. Env SERVING_MIN_CALLER_STAKE.
-SERVING_MIN_CALLER_STAKE = 250_000.0
+# Miner: a hotkey may query for inference only with at least this much stake on the subnet (alpha, metagraph.S). Set so
+# that only the reference-running validator clears it (2026-08-26: one hotkey holds >1M alpha, the next 0.27M); every
+# other caller goes through that validator's gateway. Env SERVING_MIN_CALLER_STAKE.
+SERVING_MIN_CALLER_STAKE = 1_000_000.0
 SERVING_BACKEND_CONCURRENCY = 16  # miner: concurrent backend generations (sparkinfer >= 12954e6 handles 24)
 SERVING_SEEN_NONCES = 10_000  # miner: replay guard size; covers many minutes of validator traffic
 SERVING_MAX_TOKENS = 1024  # hard cap per request (API and miner both enforce)

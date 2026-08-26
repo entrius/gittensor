@@ -106,8 +106,10 @@ def make_baseline_prompt(rng: random.Random) -> List[Message]:
             f'{rng.randint(2, 12)} files and {rng.randint(20, 900)} lines. Summarize the risks in three bullet points.'
         )
     else:
-        content = rng.choice(PROSE) + (
-            f' Keep it under {rng.choice([80, 150, 300])} words.' if rng.random() < 0.5 else ''
+        content = (
+            f'Context: the {project} service, {rng.randint(2, 40)} engineers. '
+            + rng.choice(PROSE)
+            + (f' Keep it under {rng.choice([80, 150, 300])} words.' if rng.random() < 0.5 else '')
         )
     return [{'role': 'user', 'content': content}]
 

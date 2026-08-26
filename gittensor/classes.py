@@ -708,3 +708,15 @@ def _scored_mirror_pr_for_cache(scored: 'ScoredPR') -> 'ScoredPR':
     scored_copy = copy.copy(scored)
     scored_copy.files = None
     return scored_copy
+
+
+@dataclass
+class ServingPricing:
+    """What one alpha is worth and how much alpha miners receive per hour; sizes the serving emission share."""
+
+    alpha_per_hour_to_miners: float
+    alpha_usd: float
+
+    @property
+    def usable(self) -> bool:
+        return self.alpha_per_hour_to_miners > 0 and self.alpha_usd > 0

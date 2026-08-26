@@ -152,7 +152,7 @@ RECYCLE_UID = 0
 
 # Combined scoring pool distributed by repository emission_share, then by per-repo PR/issue split.
 # Pools (OSS + SERVING) must sum to 1.0; anything unallocated within them recycles to RECYCLE_UID.
-OSS_EMISSION_SHARE = 0.50  # repo emission_share values are fractions of THIS pool (sparkinfer 0.4 -> 20% of total)
+OSS_EMISSION_SHARE = 0.93  # repo emission_share values are fractions of THIS pool (sparkinfer 0.4 -> 37% of total)
 DEFAULT_ISSUE_DISCOVERY_SHARE = 0.5
 EMISSION_SHARE_TOLERANCE = 1e-9
 MAX_MAINTAINER_CUT = 0.5  # maintaining is only half of the problem to software, at maximum
@@ -160,22 +160,24 @@ MAX_MAINTAINER_CUT = 0.5  # maintaining is only half of the problem to software,
 # =============================================================================
 # Serving (sub-subnet B beta)
 # =============================================================================
-# Share of emissions paid to inference-serving miners, pro-rata by serving score. With no miner
-# passing audits the whole pool recycles to RECYCLE_UID, so this is safe to hold above 0 before
-# miners exist. 0.0 would be shadow mode (scores computed and logged, nothing paid). Move
-# OSS_EMISSION_SHARE in the same commit so the pools still sum to 1.0.
-SERVING_EMISSION_SHARE = 0.50
-assert abs(OSS_EMISSION_SHARE + SERVING_EMISSION_SHARE - 1.0) < EMISSION_SHARE_TOLERANCE, (
+# Serving miners are paid an accounting price per verified GPU-hour, not a fixed slice: each READY card-equivalent
+# (capacity-weighted, so N hotkeys on one card sum to one card) earns SERVING_GPU_HOUR_USD, converted to an emission
+# share through the on-chain alpha/TAO price and the TAO/USD rate published in serving_loadout.json (`pricing`).
+# The share is capped at SERVING_EMISSION_SHARE_CAP; what the fleet does not earn recycles to RECYCLE_UID, never to
+# OSS. 2026-08-26 (2,950 alpha/day to miners, $0.85/alpha): $0.70/h funds ~10 cards inside the 7% cap. With no
+# price data (testnet) the cap is paid pro-rata. Move OSS_EMISSION_SHARE in the same commit so the pools sum to 1.0.
+SERVING_GPU_HOUR_USD = 0.70
+SERVING_EMISSION_SHARE_CAP = 0.07
+assert abs(OSS_EMISSION_SHARE + SERVING_EMISSION_SHARE_CAP - 1.0) < EMISSION_SHARE_TOLERANCE, (
     'emission pools must sum to 1.0'
 )
-SERVING_CHALLENGES_PER_ROUND = 4  # audit prompts sent to each serving miner per scoring round
-SERVING_CHALLENGE_TIMEOUT = 30.0  # seconds before an audit counts as failed
-SERVING_AUDIT_CONCURRENCY = (
-    256  # serving axons audited in parallel per round (sockets are cheap; dead axons hold a slot 30 s)
-)
+# Settlement is over the trailing hour: a miner's serving score is the mean of its last SERVING_SETTLEMENT_ROUNDS
+# round scores (missing rounds count 0), so a card verified for 45 of the last 60 minutes earns 75% of the price.
+SERVING_SETTLEMENT_ROUNDS = 12  # 12 x 5-minute audit rounds
+SERVING_CHALLENGE_TIMEOUT = 30.0  # seconds before a probe request counts as failed
 SERVING_READY_TTL_S = 900.0  # gateway stops routing when the last audit round is older than this
-# Capacity probe: after the correctness audits, every miner whose window passed is sent SERVING_PROBE_REQUESTS audit
-# prompts at the same instant as every other miner. Verified tokens delivered per wall-clock second, over
+# Capacity probe: after settling the window, every READY miner is sent SERVING_PROBE_REQUESTS reference prompts at the
+# same instant as every other miner. Verified tokens delivered per wall-clock second, over
 # SERVING_PROBE_TARGET_TPS, capped at 1, is the miner's capacity. One RTX 5090 delivers a fixed throughput however many
 # hotkeys front it, so N hotkeys on one card share one card's pay; a hotkey with more than one card is capped at one
 # card's worth (register one hotkey per GPU). Target = what one honest 5090 delivers under this probe as measured by the
@@ -199,16 +201,20 @@ SERVING_LATENCY_ZERO_CREDIT_MS = 1_500.0
 SERVING_AUDIT_MIN_PREFIX_AGREEMENT = 1.0  # fraction of reference greedy tokens reproduced before first divergence
 SERVING_AUDIT_MAX_MEAN_ABS_LOGPROB_DIFF = 0.005  # mean |logprob delta| over the agreed prefix
 SERVING_AUDIT_MAX_ABS_LOGPROB_DIFF = 0.10  # largest single-position |logprob delta|
-# Rolling window: the mean of per-audit outcomes (1 pass / 0 fail; misses and wrong model are 0) over the last
-# SERVING_AUDIT_WINDOW audits of a (hotkey, release) must reach the threshold for the number of audits seen so
-# far (rows are (k, threshold), linearly interpolated, flat beyond the last row). With a deterministic runtime the
-# honest mean is 1.0, so the bar only leaves room for transient misses. At 4 audits per 5-minute round, one missed
-# round (4/10 = 0.6 < 0.8) costs ~10 minutes out of the READY set; a single missed audit does not.
+# Every request served through the gateway is the audit: the validator teacher-forces the miner's completion under
+# its reference and checks the tokens/logprobs (no synthetic audit prompts, nothing for a miner to fingerprint).
+# Rolling window: the mean of per-request outcomes (1 pass / 0 fail; misses, timeouts and wrong model are 0) over
+# the last SERVING_AUDIT_WINDOW verified requests of a (hotkey, release) must reach the threshold for the number
+# seen so far (rows are (k, threshold), linearly interpolated, flat beyond the last row). With a deterministic
+# runtime the honest mean is 1.0, so the bar only leaves room for transient misses. A *wrong answer* (tokens or
+# logprobs outside the bands with aligned lengths) is not a miss: it wipes the window and quarantines the hotkey for
+# SERVING_QUARANTINE_S — there is no honest way to produce one on the blessed pin.
 # History: the 1b8b962 pin needed a positional-overlap window with a calibrated ramp (0.016 at k=1 .. 0.415 at
 # k=20; 2026-08-22 notes). Recalibrate with
 #   python scripts/serving_cheat_experiment.py analyze --honest <honest rows> --cheaters <cheater rows>
 SERVING_AUDIT_WINDOW = 10
 SERVING_AUDIT_WINDOW_THRESHOLDS = ((1, 0.8),)
+SERVING_QUARANTINE_S = 3600.0
 SERVING_API_DEFAULT_PORT = 8790
 # Miner: a hotkey may query for inference only with at least this much stake on the subnet (alpha, metagraph.S). Set so
 # that only the reference-running validator clears it (2026-08-26: one hotkey holds >1M alpha, the next 0.27M); every

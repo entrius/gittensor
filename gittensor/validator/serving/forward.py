@@ -7,28 +7,23 @@
 ``SERVING_AUDIT_INTERVAL_S``), independent of the validator's step loop, so
 the gateway's READY set stays fresh while an OSS round takes hours.
 
-Each round, for every blessed release, the validator sends audit prompts from
-that release's reference (live runtime on its own GPU, or a bank snapshot) to
-every serving axon over the same ``InferenceSynapse`` the gateway uses for
-user traffic, verifies each response against the reference (exact tokens,
-logprobs to float noise — the runtime is deterministic) and records the
-outcome into the miner's rolling ``AuditWindow``, and produces a per-hotkey
-serving score. Axons are audited concurrently; an axon that does not answer
-the first prompt is not sent the rest (the misses still count). A miner
-serves one release, so its score is the best it achieved across releases;
-miners whose window passes are published as READY (tagged with their release)
-to the gateway, and the scores are picked up by the next OSS round.
+There are no audit prompts. Every request the gateway served since the last
+round is verified against the release's reference by teacher forcing the
+miner's completion (``verify_served``): tokens must match the reference's
+argmax and logprobs must agree to float noise. Each verdict enters the miner's
+rolling ``AuditWindow``: misses/timeouts as 0, a wrong answer as a strike that
+wipes the window and quarantines the hotkey. Miners whose window passes are
+published READY; serving axons that are not READY (and not quarantined) are
+published as *probation* so baseline traffic can give them a window.
 
-    score = window passes (0/1) x mean over this round's audits of latency_credit x capacity
+    round score = window passes (0/1) x mean latency credit over this round's served requests x capacity
 
-Misses count as 0 in the window and latency credit 0 in the round. ``capacity``
-comes from the round's load probe: every miner whose window passed gets
-``SERVING_PROBE_REQUESTS`` prompts at the same instant as every other miner,
-and verified tokens per wall-clock second over ``SERVING_PROBE_TARGET_TPS``
+``capacity`` comes from the round's load probe: every READY miner gets
+``SERVING_PROBE_REQUESTS`` reference prompts at the same instant as every other
+miner, and verified tokens per wall-clock second over ``SERVING_PROBE_TARGET_TPS``
 (capped at 1) is its capacity — so hotkeys sharing one GPU share one GPU's pay.
-Probe outcomes never enter the audit window: a host that cannot take the
-burst loses capacity this round, not its READY status (unverified or missing
-probe tokens simply count 0).
+Probe outcomes affect capacity only, never the window. Round scores are settled
+over the trailing ``SERVING_SETTLEMENT_ROUNDS`` rounds by ``ServingState``.
 """
 
 import asyncio
@@ -43,40 +38,19 @@ import aiohttp
 import bittensor as bt
 
 from gittensor.constants import (
-    SERVING_AUDIT_CONCURRENCY,
     SERVING_CHALLENGE_TIMEOUT,
-    SERVING_CHALLENGES_PER_ROUND,
     SERVING_PROBE_REQUESTS,
     SERVING_PROBE_TARGET_TPS,
 )
-from gittensor.serving.audit import AuditCase, AuditVerdict, reference_for, verify_response
+from gittensor.serving.audit import AuditCase, AuditVerdict, Reference, reference_for, verify_response, verify_served
 from gittensor.serving.loadout import ServingRelease, load_serving_loadout
-from gittensor.serving.state import ReadyMiner, RequestRecord, ServingState
+from gittensor.serving.state import ReadyMiner, RequestRecord, ServedRequest, ServingState
 from gittensor.serving.stream import consume_stream
 from gittensor.synapses import InferenceSynapse
 from gittensor.validator.serving.scoring import latency_credit
 
 if TYPE_CHECKING:
     from neurons.validator import Validator
-
-
-async def audit_axon(
-    dendrite: bt.Dendrite, uid: int, axon: bt.AxonInfo, release: ServingRelease, cases: Sequence[AuditCase]
-) -> List[Tuple[AuditVerdict, float, RequestRecord]]:
-    """Audit one axon with every case in order; stop after the first case that gets no response at all."""
-    results: List[Tuple[AuditVerdict, float, RequestRecord]] = []
-    for i, case in enumerate(cases):
-        synapse = InferenceSynapse(
-            messages=case.messages, model_id=release.model_id, max_tokens=case.max_tokens, logprobs=True
-        )
-        response = await consume_stream(dendrite, axon, synapse, SERVING_CHALLENGE_TIMEOUT)
-        scored = score_response(uid, response, case, release)
-        results.append(scored)
-        if i == 0 and getattr(response, 'completion', None) is None:
-            for later in cases[1:]:
-                results.append(score_response(uid, synapse.model_copy(), later, release))
-            break
-    return results
 
 
 async def probe_axon(
@@ -103,10 +77,51 @@ async def probe_axon(
     wall_s = max(time.monotonic() - started, 1e-3)
     tokens = 0
     for verdict, _, record, n_tokens in results:
-        state.record(RequestRecord(**{**record.__dict__, 'kind': 'probe'}))
+        state.record(record)
         if verdict.passed:
             tokens += n_tokens
     return tokens / wall_s
+
+
+def verify_served_round(
+    state: ServingState, reference: Reference, release: ServingRelease, served: Sequence[ServedRequest]
+) -> Dict[str, List[float]]:
+    """Verify every served request for ``release`` into the window; return latency credits per hotkey."""
+    credits: Dict[str, List[float]] = {}
+    for req in served:
+        if req.model_id != release.model_id:
+            continue
+        if not req.ok:
+            verdict = AuditVerdict(False, 0.0, float('inf'), 'no completion')
+        else:
+            try:
+                verdict = verify_served(reference, req.messages, req.completion, req.tokens, req.token_logprobs)
+            except Exception as e:  # reference hiccup: neither credit nor blame
+                bt.logging.warning(f'Serving: could not verify a request served by UID {req.uid}: {e!r}')
+                continue
+        if verdict.hard:
+            until = state.audits.strike(req.hotkey, release.model_id)
+            bt.logging.warning(
+                f'Serving: UID {req.uid} served a WRONG answer ({verdict.reason}); window wiped, '
+                f'quarantined until {time.strftime("%H:%M:%S", time.gmtime(until))} UTC'
+            )
+        else:
+            state.audits.record(req.hotkey, release.model_id, verdict.value)
+        credits.setdefault(req.hotkey, []).append(
+            latency_credit(req.latency_ms) if verdict.passed and req.latency_ms is not None else 0.0
+        )
+        state.record(
+            RequestRecord(
+                ts=time.time(),
+                kind='verify',
+                uid=req.uid,
+                ok=verdict.passed,
+                latency_ms=req.latency_ms,
+                completion_tokens=len(req.tokens or []),
+                detail=verdict.reason,
+            )
+        )
+    return credits
 
 
 async def audit_round(
@@ -115,45 +130,40 @@ async def audit_round(
     serving: Sequence[Tuple[int, str, bt.AxonInfo]],
     loadout=None,
 ) -> Dict[str, float]:
-    """Audit every serving axon against every release; publish READY + scores; return hotkey -> score."""
+    """Verify served traffic, settle windows, probe READY miners; publish READY/probation; return hotkey -> score."""
     loadout = loadout or load_serving_loadout()
+    served = state.drain_served()
     if not serving:
         bt.logging.info('Serving: no serving axons found this round')
         state.publish_round([], {})
         return {}
 
     best: Dict[str, Tuple[float, str]] = {hotkey: (0.0, '') for _, hotkey, _ in serving}
-    slots = asyncio.Semaphore(SERVING_AUDIT_CONCURRENCY)
-
-    async def audit_one(uid: int, hotkey: str, axon: bt.AxonInfo, release: ServingRelease, cases) -> float:
-        async with slots:
-            results = await audit_axon(dendrite, uid, axon, release, cases)
-        credit = 0.0
-        for verdict, elapsed_ms, record in results:
-            state.audits.record(hotkey, release.model_id, verdict.value)
-            credit += latency_credit(elapsed_ms)
-            state.record(record)
-        return credit / len(cases)
+    probation: Dict[int, ReadyMiner] = {}
 
     for release in loadout.releases:
         try:
             reference = reference_for(release)
-            cases = [reference.sample() for _ in range(SERVING_CHALLENGES_PER_ROUND)]
-        except Exception as e:  # reference down / bank missing: skip this release, keep auditing the others
+        except Exception as e:  # reference down / bank missing: skip this release, keep the others
             bt.logging.error(
                 f'Serving: no reference for {release.model_id} this round ({e!r}); '
-                'set SERVING_REFERENCE_URL to a conformant runtime or build its audit bank'
+                'set SERVING_REFERENCE_URL to a conformant runtime'
             )
             continue
-        credits = await asyncio.gather(*(audit_one(uid, hotkey, axon, release, cases) for uid, hotkey, axon in serving))
-        passing = [
-            (uid, hotkey, axon, credit)
-            for (uid, hotkey, axon), credit in zip(serving, credits)
-            if credit > 0.0 and state.audits.verdict(hotkey, release.model_id).passed
-        ]
-        for (uid, hotkey, _), credit in zip(serving, credits):
+        credits = verify_served_round(state, reference, release, served)
+        passing: List[Tuple[int, str, bt.AxonInfo, float]] = []
+        for uid, hotkey, axon in serving:
             window = state.audits.verdict(hotkey, release.model_id)
-            bt.logging.debug(f'Serving: UID {uid} {release.model_id} window {window.as_dict()} credit {credit:.3f}')
+            round_credits = credits.get(hotkey)
+            credit = sum(round_credits) / len(round_credits) if round_credits else 1.0
+            bt.logging.debug(
+                f'Serving: UID {uid} {release.model_id} window {window.as_dict()} '
+                f'served {len(round_credits or [])} credit {credit:.3f}'
+            )
+            if window.passed and credit > 0.0:
+                passing.append((uid, hotkey, axon, credit))
+            elif window.quarantined_until == 0.0 and uid not in probation:
+                probation[uid] = ReadyMiner(uid=uid, hotkey=hotkey, axon=axon, score=0.0, model_id=release.model_id)
         if not passing:
             continue
         probe_cases = [reference.sample() for _ in range(SERVING_PROBE_REQUESTS)]
@@ -180,14 +190,14 @@ async def audit_round(
     ready: List[ReadyMiner] = []
     for uid, hotkey, axon in serving:
         score, model_id = best[hotkey]
-        bt.logging.info(
-            f'Serving: UID {uid} score {score:.3f} over {SERVING_CHALLENGES_PER_ROUND} audits'
-            + (f' ({model_id})' if model_id else '')
-        )
         if score > 0.0:
             ready.append(ReadyMiner(uid=uid, hotkey=hotkey, axon=axon, score=score, model_id=model_id))
-    state.publish_round(ready, scores)
-    bt.logging.info(f'Serving: {len(ready)} READY miner(s) published to gateway: {[m.uid for m in ready]}')
+            probation.pop(uid, None)
+    state.publish_round(ready, scores, list(probation.values()))
+    bt.logging.info(
+        f'Serving: verified {len(served)} served request(s); {len(ready)} READY miner(s) published to gateway: '
+        f'{[m.uid for m in ready]}; {len(probation)} on probation'
+    )
     return scores
 
 
@@ -273,9 +283,9 @@ def get_serving_axons(self: 'Validator') -> List[Tuple[int, str, bt.AxonInfo]]:
 def score_response(
     uid: int, response: InferenceSynapse, case: AuditCase, release: ServingRelease
 ) -> Tuple[AuditVerdict, float, RequestRecord]:
-    """Measure one audit response: (verdict, elapsed ms, telemetry record).
+    """Measure one probe response: (verdict, elapsed ms, telemetry record).
 
-    A missing response or a wrong model is a failed audit with infinite latency.
+    A missing response or a wrong model is a failed probe request with infinite latency.
     """
     process_time = getattr(getattr(response, 'dendrite', None), 'process_time', None)
     elapsed_ms = float(process_time) * 1000.0 if process_time is not None else float('inf')
@@ -283,7 +293,7 @@ def score_response(
     def rec(ok: bool, detail: str) -> RequestRecord:
         return RequestRecord(
             ts=time.time(),
-            kind='audit',
+            kind='probe',
             uid=uid,
             ok=ok,
             latency_ms=elapsed_ms if math.isfinite(elapsed_ms) else None,

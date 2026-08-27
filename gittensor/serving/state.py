@@ -130,6 +130,11 @@ class ServingState:
                 if hk in self._history
             }
 
+    def settled_scores(self) -> Dict[str, float]:
+        """Trailing-window settled score per hotkey (missing rounds count 0)."""
+        with self._lock:
+            return {hk: sum(xs) / self.settlement_rounds for hk, xs in self._history.items()}
+
     def enqueue_served(self, served: ServedRequest) -> None:
         with self._lock:
             self._served.append(served)

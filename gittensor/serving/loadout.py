@@ -128,9 +128,16 @@ def load_serving_loadout(path: Optional[Path] = None) -> ServingLoadout:
     if key_override:
         loadout.primary.reference_api_key = key_override
 
-    for release in loadout.releases:
-        bt.logging.info(
-            f'Serving release: model={release.model_id} backend={release.backend} pin={release.runtime_pin} '
-            f'reference={"live " + release.reference_url if release.reference_url else (release.audit_bank or "echo")}'
-        )
+    lines = [
+        f'Serving release: model={release.model_id} backend={release.backend} pin={release.runtime_pin} '
+        f'reference={"live " + release.reference_url if release.reference_url else (release.audit_bank or "echo")}'
+        for release in loadout.releases
+    ]
+    if lines != _last_logged:  # the loadout is re-read several times a round; announce it when it changes
+        _last_logged[:] = lines
+        for line in lines:
+            bt.logging.info(line)
     return loadout
+
+
+_last_logged: List[str] = []

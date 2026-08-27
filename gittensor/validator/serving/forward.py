@@ -124,6 +124,7 @@ def verify_served_round(
     def bump(key: str) -> None:
         summary[key] = summary.get(key, 0) + 1
 
+    ready_uids = {m.uid for m in state.ready_miners()}
     credits: Dict[str, List[float]] = {}
     for req, verdict in zip(mine, verdicts):
         bump('served')
@@ -131,6 +132,11 @@ def verify_served_round(
         if verdict is None:
             bump('neutral')
             continue
+        if not verdict.passed and not verdict.hard and req.uid in ready_uids:
+            bt.logging.info(
+                f'Serving: READY UID {req.uid} missed a {req.source} request ({verdict.reason}; '
+                f'{len(req.tokens or [])} tokens, {req.latency_ms or 0:.0f} ms)'
+            )
         if verdict.hard:
             until = state.audits.strike(req.hotkey, release.model_id)
             bump('strike')

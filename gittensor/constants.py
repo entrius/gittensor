@@ -152,7 +152,7 @@ RECYCLE_UID = 0
 
 # Combined scoring pool distributed by repository emission_share, then by per-repo PR/issue split.
 # Pools (OSS + SERVING) must sum to 1.0; anything unallocated within them recycles to RECYCLE_UID.
-OSS_EMISSION_SHARE = 0.93  # repo emission_share values are fractions of THIS pool (sparkinfer 0.4 -> 37% of total)
+OSS_EMISSION_SHARE = 0.965  # repo emission_share values are fractions of THIS pool (sparkinfer 0.4 -> 37% of total)
 DEFAULT_ISSUE_DISCOVERY_SHARE = 0.5
 EMISSION_SHARE_TOLERANCE = 1e-9
 MAX_MAINTAINER_CUT = 0.5  # maintaining is only half of the problem to software, at maximum
@@ -164,10 +164,10 @@ MAX_MAINTAINER_CUT = 0.5  # maintaining is only half of the problem to software,
 # (capacity-weighted, so N hotkeys on one card sum to one card) earns SERVING_GPU_HOUR_USD, converted to an emission
 # share through the on-chain alpha/TAO price and the TAO/USD rate published in serving_loadout.json (`pricing`).
 # The share is capped at SERVING_EMISSION_SHARE_CAP; what the fleet does not earn recycles to RECYCLE_UID, never to
-# OSS. 2026-08-26 (2,950 alpha/day to miners, $0.85/alpha): $0.70/h funds ~10 cards inside the 7% cap. With no
+# OSS. 2026-08-26 (2,950 alpha/day to miners, $0.85/alpha): $0.70/h funds ~5 cards inside the 3.5% cap. With no
 # price data (testnet) the cap is paid pro-rata. Move OSS_EMISSION_SHARE in the same commit so the pools sum to 1.0.
 SERVING_GPU_HOUR_USD = 0.70
-SERVING_EMISSION_SHARE_CAP = 0.07
+SERVING_EMISSION_SHARE_CAP = 0.035
 assert abs(OSS_EMISSION_SHARE + SERVING_EMISSION_SHARE_CAP - 1.0) < EMISSION_SHARE_TOLERANCE, (
     'emission pools must sum to 1.0'
 )

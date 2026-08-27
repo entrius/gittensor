@@ -234,6 +234,7 @@ class _FakeResponse:
         self.completion = result.completion
         self.served_model_id = model_id
         self.tokens = result.tokens
+        self.token_ids = result.token_ids
         self.token_logprobs = result.token_logprobs
         self.ttft_ms = 12.0
         self.decode_tps = 99.0
@@ -480,7 +481,79 @@ def test_probe_score_parses_teacher_forced_response(monkeypatch):
     assert seen['url'] == 'http://ref:8080/v1/score' and seen['headers'] == {'Authorization': 'Bearer k'}
     assert seen['body']['completion'] == 'Paris' and seen['body']['top_logprobs'] == 1
     assert out['tokens'] == ['Par', 'is'] and out['logprobs'] == [-0.1, -0.02] and out['argmax'] == ['Par', 'is']
-    assert out['usage']['ttft_ms'] == 3.0
+    assert out['usage']['ttft_ms'] == 3.0 and out['token_ids'] == [1, 2]
+    forced = probe.score(
+        'http://ref:8080/', 'm', [{'role': 'user', 'content': 'q'}], 'Paris', 5.0, completion_token_ids=[1, 2]
+    )
+    assert seen['body']['completion_token_ids'] == [1, 2] and 'completion' not in seen['body']
+    assert forced['token_ids'] == [1, 2]
+
+
+def test_verify_served_forces_miner_token_ids():
+    """With miner token ids the reference scores that exact sequence: no re-tokenization, no length mismatch."""
+    from gittensor.serving.audit import verify_served
+
+    release = _echo_release()
+    good = _served(1, release)
+    tokens, logprobs = list(good.tokens or []), list(good.token_logprobs or [])
+    ids = list(range(100, 100 + len(tokens)))
+    calls = []
+
+    class ForcingReference:
+        model_id = release.model_id
+
+        def score_served(self, messages, completion, token_ids=None):
+            calls.append(list(token_ids) if token_ids else None)
+            if token_ids:
+                return {'tokens': tokens, 'logprobs': logprobs, 'argmax': tokens, 'usage': {}}
+            retok = tokens + ['x']  # a fresh tokenization of the text disagrees on length
+            return {'tokens': retok, 'logprobs': logprobs + [0.0], 'argmax': retok, 'usage': {}}
+
+        def sample(self):
+            raise NotImplementedError
+
+        def __len__(self):
+            return 1
+
+    ref = ForcingReference()
+    assert verify_served(ref, good.messages, good.completion, tokens, logprobs, token_ids=ids).passed
+    assert calls[-1] == ids
+    eos = verify_served(
+        ref, good.messages, good.completion, tokens + ['<|im_end|>'], logprobs + [0.0], token_ids=ids + [7]
+    )
+    assert eos.passed and calls[-1] == ids
+    fallback = verify_served(ref, good.messages, good.completion, tokens, logprobs)
+    assert calls[-1] is None and 'tokenization mismatch' in fallback.reason
+    short = verify_served(ref, good.messages, good.completion, tokens, logprobs, token_ids=ids[:-1])
+    assert calls[-1] is None and not short.passed  # a malformed id list falls back to the text path
+
+    class BindingReference(ForcingReference):
+        def score_served(self, messages, completion, token_ids=None):
+            out = super().score_served(messages, completion, token_ids)
+            out['bytes'] = [b'not the completion'] + [b''] * (len(out['tokens']) - 1)
+            return out
+
+    lie = verify_served(BindingReference(), good.messages, good.completion, tokens, logprobs, token_ids=ids)
+    assert not lie.passed and not lie.hard and 'do not spell' in lie.reason
+
+
+def test_stream_assembler_collects_token_ids():
+    from gittensor.serving.stream import SSEParser, StreamAssembler, result_to_sse
+    from gittensor.synapses import InferenceSynapse
+
+    release = _echo_release()
+    result = expected_completion(MSGS, 3, release.model_id)
+    result.token_ids = [11, 12, 13]
+    a = StreamAssembler()
+    for event in SSEParser().feed(b''.join(result_to_sse(result, 'id', 0, True))):
+        a.feed(event)
+    syn = a.apply(InferenceSynapse(messages=MSGS, model_id=release.model_id))
+    assert syn.token_ids == [11, 12, 13] and syn.tokens == result.tokens
+    plain = StreamAssembler()
+    result.token_ids = None
+    for event in SSEParser().feed(b''.join(result_to_sse(result, 'id', 0, True))):
+        plain.feed(event)
+    assert plain.apply(InferenceSynapse(messages=MSGS, model_id=release.model_id)).token_ids is None
 
 
 def test_emission_pools_sum_to_one():

@@ -64,6 +64,7 @@ class StreamAssembler:
 
     content: str = ''
     tokens: List[str] = field(default_factory=list)
+    token_ids: List[int] = field(default_factory=list)
     token_logprobs: List[float] = field(default_factory=list)
     model_id: Optional[str] = None
     finish_reason: Optional[str] = None
@@ -86,6 +87,8 @@ class StreamAssembler:
             for entry in (choice.get('logprobs') or {}).get('content') or []:
                 self.tokens.append(entry['token'])
                 self.token_logprobs.append(float(entry['logprob']))
+                if entry.get('token_id') is not None:
+                    self.token_ids.append(int(entry['token_id']))
             if choice.get('finish_reason'):
                 self.finish_reason = choice['finish_reason']
         usage = event.get('usage')
@@ -102,6 +105,7 @@ class StreamAssembler:
         synapse.completion = self.content
         synapse.served_model_id = self.model_id
         synapse.tokens = self.tokens or None
+        synapse.token_ids = self.token_ids if self.token_ids and len(self.token_ids) == len(self.tokens) else None
         synapse.token_logprobs = self.token_logprobs or None
         synapse.finish_reason = self.finish_reason
         synapse.usage = self.usage
@@ -116,8 +120,12 @@ def result_to_sse(result: GenerationResult, request_id: str, created: int, logpr
     base = {'id': request_id, 'object': 'chat.completion.chunk', 'created': created, 'model': result.model_id}
     delta: dict = {'index': 0, 'delta': {'role': 'assistant', 'content': result.completion}, 'finish_reason': None}
     if logprobs and result.tokens and result.token_logprobs:
+        ids = result.token_ids if result.token_ids and len(result.token_ids) == len(result.tokens) else None
         delta['logprobs'] = {
-            'content': [{'token': t, 'logprob': lp} for t, lp in zip(result.tokens, result.token_logprobs)]
+            'content': [
+                {'token': t, 'logprob': lp, **({'token_id': ids[i]} if ids else {})}
+                for i, (t, lp) in enumerate(zip(result.tokens, result.token_logprobs))
+            ]
         }
     yield sse_event({**base, 'choices': [delta]})
     yield sse_event({**base, 'choices': [{'index': 0, 'delta': {}, 'finish_reason': result.finish_reason or 'stop'}]})

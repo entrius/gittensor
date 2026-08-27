@@ -113,7 +113,9 @@ def verify_served_round(
         if not req.ok:
             return AuditVerdict(False, 0.0, float('inf'), req.detail or 'no completion')
         try:
-            return verify_served(reference, req.messages, req.completion, req.tokens, req.token_logprobs)
+            return verify_served(
+                reference, req.messages, req.completion, req.tokens, req.token_logprobs, token_ids=req.token_ids
+            )
         except Exception as e:  # reference hiccup: neither credit nor blame
             bt.logging.warning(f'Serving: could not verify a request served by UID {req.uid}: {e!r}')
             return None
@@ -213,6 +215,7 @@ async def baseline_round(
                 latency_ms=(time.monotonic() - started) * 1000.0 if ok else None,
                 completion=response.completion if response is not None else None,
                 tokens=list(response.tokens) if response is not None and response.tokens else None,
+                token_ids=list(response.token_ids) if response is not None and response.token_ids else None,
                 token_logprobs=list(response.token_logprobs)
                 if response is not None and response.token_logprobs
                 else None,

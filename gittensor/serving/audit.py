@@ -216,7 +216,9 @@ class AuditWindow:
 
 
 class Reference(Protocol):
-    def score_served(self, messages: List[Message], completion: str) -> dict: ...
+    def score_served(
+        self, messages: List[Message], completion: str, token_ids: Optional[Sequence[int]] = None
+    ) -> dict: ...
 
     model_id: str
 
@@ -254,7 +256,7 @@ class BankReference:
     def sample(self) -> AuditCase:
         return secrets.choice(self.cases)
 
-    def score_served(self, messages: List[Message], completion: str) -> dict:
+    def score_served(self, messages: List[Message], completion: str, token_ids: Optional[Sequence[int]] = None) -> dict:
         raise NotImplementedError('a bank reference cannot verify served traffic; run a live reference')
 
     def __len__(self) -> int:
@@ -279,7 +281,7 @@ class EchoReference:
             reference_completion=ref.completion,
         )
 
-    def score_served(self, messages: List[Message], completion: str) -> dict:
+    def score_served(self, messages: List[Message], completion: str, token_ids: Optional[Sequence[int]] = None) -> dict:
         """Teacher-forced scoring for the echo backend: the argmax is the expected token at every position."""
         tokens = completion.split(' ') if completion else []
         ref = expected_completion(messages, max(1, len(tokens)), self.model_id)
@@ -319,14 +321,23 @@ class LiveReference:
         messages = make_prompts(1, seed=secrets.randbits(64))[0]
         return self.case_for(messages)
 
-    def score(self, messages: List[Message], completion: str) -> dict:
+    def score(self, messages: List[Message], completion: str, token_ids: Optional[Sequence[int]] = None) -> dict:
         """Teacher-forced logprobs of ``completion`` under the reference (R8): verifies text the reference
-        did not generate. A trailing end-of-turn token in the miner's token list is not part of the text;
-        ``verify_served`` strips it before comparing lengths."""
-        return score(self.base_url, self.model_id, messages, completion, self.timeout, self.api_key)
+        did not generate. With ``token_ids`` the reference forces the miner's own tokens rather than
+        re-tokenizing the text. A trailing end-of-turn token in the miner's token list is not part of the
+        text; ``verify_served`` strips it before comparing lengths."""
+        return score(
+            self.base_url,
+            self.model_id,
+            messages,
+            completion,
+            self.timeout,
+            self.api_key,
+            completion_token_ids=token_ids,
+        )
 
-    def score_served(self, messages: List[Message], completion: str) -> dict:
-        return self.score(messages, completion)
+    def score_served(self, messages: List[Message], completion: str, token_ids: Optional[Sequence[int]] = None) -> dict:
+        return self.score(messages, completion, token_ids)
 
     def __len__(self) -> int:
         return 1
@@ -383,25 +394,33 @@ def verify_served(
     completion: Optional[str],
     tokens: Optional[Sequence[str]],
     token_logprobs: Optional[Sequence[float]],
+    token_ids: Optional[Sequence[int]] = None,
     end_of_turn: Sequence[str] = ('<|im_end|>', '<|endoftext|>', '</s>'),
 ) -> AuditVerdict:
     """Verify a served (greedy) completion by teacher forcing it under the reference.
 
     The reference's argmax at each position is what an honest copy would have generated, so the miner's tokens
-    must match it and the miner's logprobs must match the reference's logprob of that same token. A completion
-    that re-tokenizes to a different length is not comparable position by position and counts as a soft miss;
-    the bands failing on aligned lengths is a wrong answer (``hard``).
+    must match it and the miner's logprobs must match the reference's logprob of that same token. When the miner
+    reported ``token_ids`` the reference forces exactly that sequence; otherwise it re-tokenizes the text, and a
+    text that re-tokenizes to a different length (a greedy decode is not always the canonical tokenization of
+    its own output) is not comparable position by position and counts as a soft miss. The bands failing on
+    aligned lengths is a wrong answer (``hard``). A reference that echoes the forced tokens' bytes lets the ids
+    be bound to the text the user actually received.
     """
     if completion is None or not tokens or token_logprobs is None or len(tokens) != len(token_logprobs):
         return AuditVerdict(False, 0.0, float('inf'), 'missing or malformed logprobs')
     mine, mine_lp = list(tokens), list(token_logprobs)
+    mine_ids = list(token_ids) if token_ids and len(token_ids) == len(mine) else None
     if mine and mine[-1] in end_of_turn:
         mine, mine_lp = mine[:-1], mine_lp[:-1]
+        mine_ids = mine_ids[:-1] if mine_ids else None
     if not mine:
         return AuditVerdict(False, 0.0, float('inf'), 'empty completion')
-    ref = reference.score_served(messages, completion)
+    ref = reference.score_served(messages, completion, mine_ids)
     argmax, ref_lp = ref.get('argmax') or [], ref.get('logprobs') or []
     if len(argmax) != len(mine) or len(ref_lp) != len(mine):
         return AuditVerdict(False, 0.0, float('inf'), f'tokenization mismatch ({len(mine)} vs {len(argmax)})')
+    if mine_ids and ref.get('bytes') and b''.join(ref['bytes']).decode('utf-8', 'replace') != completion:
+        return AuditVerdict(False, 0.0, float('inf'), 'token ids do not spell the completion')
     case = AuditCase(messages=list(messages), max_tokens=len(mine), reference_tokens=argmax, reference_logprobs=ref_lp)
     return verify_response(case, mine, mine_lp)

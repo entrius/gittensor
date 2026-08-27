@@ -17,7 +17,8 @@ from typing import Any, Dict, Optional
 import bittensor as bt
 
 from gittensor.classes import ServingPricing
-from gittensor.constants import SERVING_DB_RETENTION_DAYS
+from gittensor.constants import SERVING_DB_RETENTION_DAYS, SERVING_EMISSION_SHARE_CAP, SERVING_GPU_HOUR_USD
+from gittensor.serving.loadout import ServingRelease
 from gittensor.serving.state import ServingState
 from gittensor.validator.emission_allocation import serving_share
 from gittensor.validator.storage.database import create_database_connection
@@ -35,11 +36,13 @@ def round_rows(
     last_round: Dict[str, Any],
     settled: Dict[str, float],
     pricing: Optional[ServingPricing],
+    release: Optional[ServingRelease] = None,
 ) -> tuple[tuple, list[tuple]]:
     """(serving_rounds row, serving_miner_rounds rows) for one audit round.
 
     ``card_equivalents`` and ``pool_share`` are what the next OSS round will pay on: settled scores summed, priced
-    through ``serving_share`` exactly as ``blend_emission_pools`` does.
+    through ``serving_share`` exactly as ``blend_emission_pools`` does. The economics ($/GPU-hour, cap) and the
+    enforced release (pin, digest) ride along so readers never hard-code them.
     """
     windows: Dict[int, dict] = last_round.get('windows', {})
     card_equiv = sum(settled.values())
@@ -61,6 +64,12 @@ def round_rows(
         share,
         pricing.alpha_per_hour_to_miners if pricing and pricing.usable else None,
         pricing.alpha_usd if pricing and pricing.usable else None,
+        SERVING_GPU_HOUR_USD,
+        SERVING_EMISSION_SHARE_CAP,
+        release.model_id if release else None,
+        release.runtime_pin if release else None,
+        release.model_sha256 if release else None,
+        release.model_file if release else None,
     )
     miners = []
     for uid, w in windows.items():
@@ -106,13 +115,14 @@ class ServingRoundStorage:
         validator_hotkey: str,
         state: ServingState,
         pricing: Optional[ServingPricing],
+        release: Optional[ServingRelease] = None,
         now: Optional[dt.datetime] = None,
     ) -> bool:
         last_round = dict(state.last_round)
         if not last_round or not state.last_round_ts:
             return False
         round_ts = now or dt.datetime.fromtimestamp(state.last_round_ts, dt.timezone.utc)
-        summary, miners = round_rows(validator_hotkey, round_ts, last_round, state.settled_scores(), pricing)
+        summary, miners = round_rows(validator_hotkey, round_ts, last_round, state.settled_scores(), pricing, release)
         conn = self._connection()
         if conn is None:
             return False

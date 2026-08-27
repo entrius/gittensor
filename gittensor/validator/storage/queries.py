@@ -200,8 +200,9 @@ DO UPDATE SET
 INSERT_SERVING_ROUND = """
 INSERT INTO serving_rounds (
     validator_hotkey, round_ts, served, gateway, baseline, passes, misses, strikes, neutral,
-    ready, probation, quarantined, card_equivalents, pool_share, alpha_per_hour, alpha_usd
-) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+    ready, probation, quarantined, card_equivalents, pool_share, alpha_per_hour, alpha_usd,
+    gpu_hour_usd, pool_cap, model_id, runtime_pin, model_sha256, model_file
+) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 ON CONFLICT (validator_hotkey, round_ts) DO NOTHING
 """
 

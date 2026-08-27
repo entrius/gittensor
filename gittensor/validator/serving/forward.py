@@ -440,10 +440,15 @@ class ServingAuditThread:
                 except OSError as e:
                     bt.logging.warning(f'Serving: could not persist audit window to {path}: {e}')
             if self.storage is not None:
+                try:
+                    release = load_serving_loadout().primary
+                except Exception:
+                    release = None
                 self.storage.store_round(
                     validator_hotkey=self.validator.wallet.hotkey.ss58_address,
                     state=self.state,
                     pricing=getattr(self.validator, 'last_serving_pricing', None),
+                    release=release,
                 )
             # The rest of the interval carries this validator's own baseline prompts, spread at random so nothing
             # marks the round boundary; they are verified next round alongside any user traffic.

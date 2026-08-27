@@ -54,6 +54,30 @@ gitt miner check --wallet <name> --hotkey <hotkey>
 
 See full guide **[here](https://docs.gittensor.io/miner.html)**
 
+### Compute miners (serving)
+
+Gittensor also pays verified GPU time: an RTX 5090 running the blessed inference release earns **$0.70 per
+verified GPU-hour** (paid in alpha, inside a 3.5% emission cap). Validators verify the traffic they route to you
+against their own reference GPU — there is no separate audit prompt set — so a new miner sits in *probation*
+until its rolling window passes, then goes READY. One card = one payout; extra hotkeys on the same card share it.
+
+```bash
+# 1. Runtime: the pinned sparkinfer build + SHA-pinned model. Current tag + sha: gittensor.io/compute ("Current
+#    release", copy-paste command) or gittensor/validator/weights/serving_loadout.json
+docker run -d --name sparkinfer --gpus all -p 8080:8080 -v sparkmodels:/opt/sparkinfer/models \
+  -e MODEL_SHA256=<model_sha256 from the loadout> -e SPARKINFER_DETERMINISTIC=1 entrius/sparkinfer:<runtime_pin>
+
+# 2. Prove it is conformant before you serve
+uv run python scripts/check_serving_runtime.py --base-url http://127.0.0.1:8080 --model-id qwen3.6-35b-a3b
+
+# 3. Miner neuron (env from .env.example: NETUID, WALLET_NAME, HOTKEY_NAME, SUBTENSOR_NETWORK, PORT, ...)
+docker run -d --env-file .env --network host -v ~/.bittensor/wallets:/root/.bittensor/wallets:ro \
+  --entrypoint /app/scripts/serving-miner-entrypoint.sh gittensor-miner
+```
+
+Your status (READY / probation / quarantined, window, throughput, estimated payout, last miss reason) is on
+[gittensor.io/compute](https://gittensor.io/compute). See full guide **[here](https://docs.gittensor.io/compute-miner.html)**
+
 ## Validators
 
 **Recommended: Deploy with Docker and Docker Watchtower for automatic updates**
@@ -70,6 +94,18 @@ docker-compose -f docker-compose.vali.yml up -d
 ```
 
 See full guide **[here](https://docs.gittensor.io/validator.html)**
+
+**Serving (compute):** to pay compute miners a validator needs its own RTX 5090 running the reference runtime —
+`SERVING_ENABLED=true` plus the `reference` compose profile:
+
+```bash
+SPARKINFER_TAG=<runtime_pin> SPARKINFER_MODEL_SHA256=<model_sha256> \
+  docker compose -f docker-compose.vali.yml --profile reference up -d
+```
+
+Without a reference the validator still validates OSS and sends the serving cap to UID 0. All `SERVING_*`
+variables are documented in `.env.example`; set `STORE_DB_RESULTS=true` to also publish serving rounds for
+[gittensor.io/compute](https://gittensor.io/compute).
 
 ## Reward Algorithm
 

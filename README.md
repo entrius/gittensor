@@ -62,7 +62,8 @@ against their own reference GPU — there is no separate audit prompt set — so
 until its rolling window passes, then goes READY. One card = one payout; extra hotkeys on the same card share it.
 
 ```bash
-# 1. Runtime: the pinned sparkinfer build + SHA-pinned model (see gittensor/validator/weights/serving_loadout.json)
+# 1. Runtime: the pinned sparkinfer build + SHA-pinned model. Current tag + sha: gittensor.io/compute ("Current
+#    release", copy-paste command) or gittensor/validator/weights/serving_loadout.json
 docker run -d --name sparkinfer --gpus all -p 8080:8080 -v sparkmodels:/opt/sparkinfer/models \
   -e MODEL_SHA256=<model_sha256 from the loadout> -e SPARKINFER_DETERMINISTIC=1 entrius/sparkinfer:<runtime_pin>
 

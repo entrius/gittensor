@@ -26,6 +26,8 @@ resync_metagraph
 required_hash_fields
 # bt.Dendrite's lazily-created aiohttp session, preset by the audit thread with an uncapped connector
 _session
+# Reference.sample: reference-case generator kept on the protocol for the conformance checker, bank tooling and tests
+sample
 # bt.StreamingSynapse hooks called by the dendrite
 process_streaming_response
 extract_response_json

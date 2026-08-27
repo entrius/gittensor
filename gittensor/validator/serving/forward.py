@@ -19,10 +19,14 @@ published as *probation* so baseline traffic can give them a window.
     round score = window passes (0/1) x mean latency credit over this round's served requests x capacity
 
 ``capacity`` comes from the round's load probe: every READY miner gets
-``SERVING_PROBE_REQUESTS`` reference prompts at the same instant as every other
-miner, and verified tokens per wall-clock second over ``SERVING_PROBE_TARGET_TPS``
-(capped at 1) is its capacity — so hotkeys sharing one GPU share one GPU's pay.
-Probe outcomes affect capacity only, never the window. Round scores are settled
+``SERVING_PROBE_REQUESTS`` prompts at the same instant as every other miner —
+each prompt unique to that hotkey and round (salted), verified afterwards by
+teacher forcing under the reference like any served request, so an answer can
+neither be shared between hotkeys on one card nor precomputed. Verified tokens
+per second of *decode* time (batch wall-clock minus the first observed TTFT, so
+network distance prices latency, not throughput) over the release's blessed
+``decode_tps_target`` (capped at 1) is its capacity — so hotkeys sharing one
+GPU share one GPU's pay. Probe outcomes affect capacity only, never the window. Round scores are settled
 over the trailing ``SERVING_SETTLEMENT_ROUNDS`` rounds by ``ServingState``.
 """
 
@@ -30,6 +34,7 @@ import asyncio
 import hashlib
 import math
 import random
+import secrets
 import statistics
 import threading
 import time
@@ -51,9 +56,10 @@ from gittensor.constants import (
     SERVING_PROBE_TARGET_TPS,
     SERVING_VERIFY_WORKERS,
 )
-from gittensor.serving.audit import AuditCase, AuditVerdict, Reference, reference_for, verify_response, verify_served
+from gittensor.serving.audit import AuditVerdict, Reference, reference_for, verify_served
 from gittensor.serving.baseline import baseline_max_tokens, make_baseline_prompt
 from gittensor.serving.loadout import ServingRelease, load_serving_loadout
+from gittensor.serving.probe import make_prompts
 from gittensor.serving.state import ReadyMiner, RequestRecord, ServedRequest, ServingState
 from gittensor.serving.stream import consume_stream
 from gittensor.synapses import InferenceSynapse
@@ -72,27 +78,82 @@ async def probe_axon(
     hotkey: str,
     axon: bt.AxonInfo,
     release: ServingRelease,
-    cases: Sequence[AuditCase],
+    reference: Reference,
+    prompts: Sequence[List[Dict[str, str]]],
 ) -> float:
-    """Fire all ``cases`` at once; return verified tokens per wall-clock second (0 when nothing verified)."""
+    """Fire all ``prompts`` at once; return verified tokens per second of decode time (0 when nothing verified)."""
 
-    async def one(case: AuditCase) -> Tuple[AuditVerdict, float, RequestRecord, int]:
+    async def one(messages: List[Dict[str, str]]) -> Tuple[AuditVerdict, RequestRecord, int, Optional[float]]:
         synapse = InferenceSynapse(
-            messages=case.messages, model_id=release.model_id, max_tokens=case.max_tokens, logprobs=True
+            messages=messages, model_id=release.model_id, max_tokens=release.max_tokens, logprobs=True
         )
         response = await consume_stream(dendrite, axon, synapse, SERVING_CHALLENGE_TIMEOUT)
-        verdict, elapsed_ms, record = score_response(uid, response, case, release)
-        return verdict, elapsed_ms, record, len(getattr(response, 'tokens', None) or [])
+        verdict, record = probe_verdict(uid, response, release, reference)
+        return verdict, record, len(getattr(response, 'tokens', None) or []), response.observed_ttft_ms
 
     started = time.monotonic()
-    results = await asyncio.gather(*(one(case) for case in cases))
-    wall_s = max(time.monotonic() - started, 1e-3)
+    results = await asyncio.gather(*(one(messages) for messages in prompts))
+    wall_s = time.monotonic() - started
     tokens = 0
-    for verdict, _, record, n_tokens in results:
+    ttfts: List[float] = []
+    for verdict, record, n_tokens, ttft_ms in results:
         state.record(record)
         if verdict.passed:
             tokens += n_tokens
-    return tokens / wall_s
+            if ttft_ms is not None and math.isfinite(ttft_ms):
+                ttfts.append(ttft_ms)
+    decode_s = max(wall_s - (min(ttfts) / 1000.0 if ttfts else 0.0), 1e-3)
+    return tokens / decode_s
+
+
+def probe_prompts(count: int) -> List[List[Dict[str, str]]]:
+    """``count`` prompts no other hotkey or round has seen: template + subject + a random salt each."""
+    return [make_prompts(1, seed=secrets.randbits(64), salt=secrets.token_hex(8))[0] for _ in range(count)]
+
+
+def probe_verdict(
+    uid: int, response: InferenceSynapse, release: ServingRelease, reference: Reference
+) -> Tuple[AuditVerdict, RequestRecord]:
+    """Judge one probe response by teacher forcing it under the reference: (verdict, telemetry record).
+
+    A missing response or a wrong model is a failed probe request.
+    """
+    process_time = getattr(getattr(response, 'dendrite', None), 'process_time', None)
+    elapsed_ms = float(process_time) * 1000.0 if process_time is not None else None
+
+    def rec(ok: bool, detail: str) -> RequestRecord:
+        return RequestRecord(
+            ts=time.time(),
+            kind='probe',
+            uid=uid,
+            ok=ok,
+            latency_ms=elapsed_ms,
+            completion_tokens=len(getattr(response, 'tokens', None) or []),
+            ttft_ms=getattr(response, 'ttft_ms', None),
+            decode_tps=getattr(response, 'decode_tps', None),
+            detail=detail,
+        )
+
+    if getattr(response, 'completion', None) is None:
+        dendrite = getattr(response, 'dendrite', None)
+        reason = f'no response ({getattr(dendrite, "status_code", None)} {getattr(dendrite, "status_message", None)})'
+        return AuditVerdict(False, 0.0, float('inf'), reason), rec(False, reason)
+    served = getattr(response, 'served_model_id', None)
+    if served != release.model_id:
+        reason = f'wrong model {served!r}'
+        return AuditVerdict(False, 0.0, float('inf'), reason), rec(False, reason)
+    try:
+        verdict = verify_served(
+            reference,
+            list(response.messages),
+            response.completion,
+            response.tokens,
+            response.token_logprobs,
+            token_ids=response.token_ids,
+        )
+    except Exception as e:  # reference hiccup: an unverified probe request earns no tokens, costs no window
+        verdict = AuditVerdict(False, 0.0, float('inf'), f'could not verify: {e!r}')
+    return verdict, rec(verdict.passed, verdict.reason)
 
 
 def verify_served_round(
@@ -160,7 +221,9 @@ def verify_served_round(
         # choice and throughput is priced by the capacity probe. Fall back to total latency for legacy records.
         speed_ms = req.ttft_ms if req.ttft_ms is not None else req.latency_ms
         credits.setdefault(req.hotkey, []).append(
-            latency_credit(speed_ms) if verdict.passed and speed_ms is not None else 0.0
+            latency_credit(speed_ms, release.ttft_full_ms, release.ttft_zero_ms)
+            if verdict.passed and speed_ms is not None
+            else 0.0
         )
         state.record(
             RequestRecord(
@@ -255,18 +318,18 @@ async def probe_with_retry(
     axon: bt.AxonInfo,
     release: ServingRelease,
     reference: Reference,
-    cases: Sequence[AuditCase],
+    prompts: Sequence[List[Dict[str, str]]],
     retry_delay_s: Optional[float] = None,
 ) -> float:
     """Probe once; if the reading dipped against the miner's recent form, re-measure once later and keep the better."""
-    tps = await probe_axon(state, dendrite, uid, hotkey, axon, release, cases)
+    tps = await probe_axon(state, dendrite, uid, hotkey, axon, release, reference, prompts)
     if probe_dipped(state, hotkey, tps):
         delay = random.uniform(*SERVING_PROBE_RETRY_DELAY_S) if retry_delay_s is None else retry_delay_s
         bt.logging.info(
             f'Serving: UID {uid} probe {tps:.0f} tok/s is a dip against recent form; re-measuring in {delay:.0f}s'
         )
         await asyncio.sleep(delay)
-        again = await probe_axon(state, dendrite, uid, hotkey, axon, release, [reference.sample() for _ in cases])
+        again = await probe_axon(state, dendrite, uid, hotkey, axon, release, reference, probe_prompts(len(prompts)))
         tps = max(tps, again)
     state.probe_history.setdefault(hotkey, deque(maxlen=3)).append(tps)
     return tps
@@ -329,20 +392,28 @@ async def audit_round(
                 probation[uid] = ReadyMiner(uid=uid, hotkey=hotkey, axon=axon, score=0.0, model_id=release.model_id)
         if not passing:
             continue
-        probe_cases = [reference.sample() for _ in range(SERVING_PROBE_REQUESTS)]
-        if probe_cases:
+        target_tps = release.decode_tps_target or SERVING_PROBE_TARGET_TPS
+        if SERVING_PROBE_REQUESTS > 0:
             rates = await asyncio.gather(
                 *(
                     probe_with_retry(
-                        state, dendrite, uid, hotkey, axon, release, reference, probe_cases, probe_retry_delay_s
+                        state,
+                        dendrite,
+                        uid,
+                        hotkey,
+                        axon,
+                        release,
+                        reference,
+                        probe_prompts(SERVING_PROBE_REQUESTS),
+                        probe_retry_delay_s,
                     )
                     for uid, hotkey, axon, _ in passing
                 )
             )
         else:  # probe disabled: capacity is not measured
-            rates = [SERVING_PROBE_TARGET_TPS] * len(passing)
+            rates = [target_tps] * len(passing)
         for (uid, hotkey, _, credit), tps in zip(passing, rates):
-            capacity = min(1.0, tps / SERVING_PROBE_TARGET_TPS)
+            capacity = min(1.0, tps / target_tps)
             score = credit * capacity
             bt.logging.info(
                 f'Serving: UID {uid} {release.model_id} probe {tps:.0f} tok/s capacity {capacity:.2f} '
@@ -500,39 +571,3 @@ def get_serving_axons(self: 'Validator') -> List[Tuple[int, str, bt.AxonInfo]]:
         if axon is not None and axon.is_serving:
             serving.append((uid, hotkey, axon))
     return serving
-
-
-def score_response(
-    uid: int, response: InferenceSynapse, case: AuditCase, release: ServingRelease
-) -> Tuple[AuditVerdict, float, RequestRecord]:
-    """Measure one probe response: (verdict, elapsed ms, telemetry record).
-
-    A missing response or a wrong model is a failed probe request with infinite latency.
-    """
-    process_time = getattr(getattr(response, 'dendrite', None), 'process_time', None)
-    elapsed_ms = float(process_time) * 1000.0 if process_time is not None else float('inf')
-
-    def rec(ok: bool, detail: str) -> RequestRecord:
-        return RequestRecord(
-            ts=time.time(),
-            kind='probe',
-            uid=uid,
-            ok=ok,
-            latency_ms=elapsed_ms if math.isfinite(elapsed_ms) else None,
-            completion_tokens=len(getattr(response, 'tokens', None) or []),
-            ttft_ms=getattr(response, 'ttft_ms', None),
-            decode_tps=getattr(response, 'decode_tps', None),
-            detail=detail,
-        )
-
-    if getattr(response, 'completion', None) is None:
-        dendrite = getattr(response, 'dendrite', None)
-        reason = f'no response ({getattr(dendrite, "status_code", None)} {getattr(dendrite, "status_message", None)})'
-        return AuditVerdict(False, 0.0, float('inf'), reason), float('inf'), rec(False, reason)
-    served = getattr(response, 'served_model_id', None)
-    if served != release.model_id:
-        reason = f'wrong model {served!r}'
-        return AuditVerdict(False, 0.0, float('inf'), reason), float('inf'), rec(False, reason)
-
-    verdict = verify_response(case, getattr(response, 'tokens', None), getattr(response, 'token_logprobs', None))
-    return verdict, elapsed_ms, rec(verdict.passed, verdict.reason)

@@ -185,6 +185,8 @@ SERVING_READY_TTL_S = 900.0  # gateway stops routing when the last audit round i
 # 183-186 tok/s; two hotkeys on the same card 104-115 tok/s each (sum 210-227) -> capacities ~1.0 vs ~0.6.
 # Probe outcomes affect capacity only, never the audit window (a slow host halves its pay; it does not flap out of READY).
 SERVING_PROBE_REQUESTS = 6
+# Fallback only: a release carries its own blessing-time `speed.decode_tps_target` (serving_loadout.json), measured on
+# that runtime by the conformance job as decode tok/s (TTFT excluded), so the bar moves with the runtime.
 SERVING_PROBE_TARGET_TPS = 180.0
 # A probe reading can only be too low (another validator's burst, a user spike, a blip), never too high: the miner
 # had to deliver those verified tokens. A reading under SERVING_PROBE_DIP_RATIO x the miner's median of its last

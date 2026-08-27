@@ -116,9 +116,18 @@ jobs:
           path: conformance-${{ env.REF }}/
           if-no-files-found: warn
 
-      - name: Bump runtime_pin
+      - name: Bump runtime_pin and the release's speed facts
         run: |
-          jq --arg pin "gittensor-ai-lab/sparkinfer@$REF" '.releases[0].runtime_pin = $pin' \
+          jq --arg pin "gittensor-ai-lab/sparkinfer@$REF" --arg run "$GITHUB_RUN_ID" \
+            --slurpfile speed "conformance-$REF/speed.json" \
+            '.releases[0].runtime_pin = $pin
+             | .releases[0].speed = ((.releases[0].speed // {}) + {
+                 decode_tps_target: $speed[0].decode_tps_target,
+                 single_stream_decode_tps: $speed[0].single_stream_decode_tps,
+                 probe_shaped_decode_tps: $speed[0].probe_shaped_decode_tps,
+                 probe_burst: $speed[0].probe_burst,
+                 measured_on: ($pin + " on a rented RTX 5090, actions run " + $run)
+               })' \
             gittensor/validator/weights/serving_loadout.json > /tmp/loadout.json
           mv /tmp/loadout.json gittensor/validator/weights/serving_loadout.json
           git diff --stat
@@ -134,6 +143,8 @@ jobs:
           body: |
             `entrius/sparkinfer:${{ env.REF }}` passed `scripts/check_serving_runtime.py` on a rented RTX 5090
             (run ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }} — report in the
-            `serving-conformance-${{ env.REF }}` artifact). This bumps `runtime_pin`; update the sha named in the
-            comments at `gittensor/constants.py` and `gittensor/serving/audit.py` if the blessing rules changed.
+            `serving-conformance-${{ env.REF }}` artifact). This bumps `runtime_pin` and writes the release's
+            blessing-time speed facts (`speed.decode_tps_target` = 0.9 x the probe-shaped decode tok/s of one honest
+            card on this runtime — what earns capacity 1.0). Update the sha named in the comments at
+            `gittensor/constants.py` and `gittensor/serving/audit.py` if the blessing rules changed.
           add-paths: gittensor/validator/weights/serving_loadout.json

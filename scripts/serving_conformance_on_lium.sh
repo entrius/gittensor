@@ -5,7 +5,7 @@
 #
 # Rents one 1x5090 executor, boots entrius/sparkinfer:<ref> with the loadout's MODEL_SHA256, waits for the
 # model download, runs scripts/check_serving_runtime.py against the pod's public 8080 and writes the report
-# to <out dir>/conformance.txt. Exit code is the checker's (1 = a MUST failed). The pod is removed on every
+# to <out dir>/conformance.txt and the blessing-time speed profile to <out dir>/speed.json. Exit code is the checker's (1 = a MUST failed). The pod is removed on every
 # exit path; --ttl is the backstop if this process dies.
 set -euo pipefail
 
@@ -59,7 +59,7 @@ curl -s "$BASE/v1/models" | tee "$OUT/models.json"; echo
 
 set +e
 uv run python scripts/check_serving_runtime.py --base-url "$BASE" --model-id "$MODEL_ID" \
-  --determinism-count 30 --repeat 3 --parallel 16 2>&1 | tee "$OUT/conformance.txt"
+  --determinism-count 30 --repeat 3 --parallel 16 --speed-json "$OUT/speed.json" 2>&1 | tee "$OUT/conformance.txt"
 RC=${PIPESTATUS[0]}
 set -e
 echo "checker exit $RC (report: $OUT/conformance.txt)"

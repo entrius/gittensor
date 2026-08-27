@@ -48,9 +48,16 @@ class ServingRelease:
     )
     reference_api_key: Optional[str] = None  # bearer for a remote reference (sparkinfer --api-key)
     request_timeout: float = 60.0
+    # Speed of one honest card on this exact runtime, measured at blessing time (scripts/check_serving_runtime.py
+    # --speed-json on the conformance GPU) and written by the pin-bump PR. The validator prices capacity and latency
+    # against these, so the "one card" bar tracks the runtime as it gets faster. None -> the constants' defaults.
+    decode_tps_target: Optional[float] = None  # probe-shaped aggregate decode tok/s that earns capacity 1.0
+    ttft_full_ms: Optional[float] = None  # validator-observed TTFT up to which latency credit is 1.0
+    ttft_zero_ms: Optional[float] = None  # ... and at which it reaches 0.0
 
     @classmethod
     def from_dict(cls, raw: dict) -> 'ServingRelease':
+        speed = raw.get('speed') or {}
         return cls(
             model_id=raw['model_id'],
             backend=raw['backend'],
@@ -63,7 +70,14 @@ class ServingRelease:
             reference_url=raw.get('reference_url'),
             reference_api_key=raw.get('reference_api_key'),
             request_timeout=float(raw.get('request_timeout', 60.0)),
+            decode_tps_target=_optional_float(speed.get('decode_tps_target')),
+            ttft_full_ms=_optional_float(speed.get('ttft_full_ms')),
+            ttft_zero_ms=_optional_float(speed.get('ttft_zero_ms')),
         )
+
+
+def _optional_float(value) -> Optional[float]:
+    return float(value) if value is not None else None
 
 
 @dataclass

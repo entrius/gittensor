@@ -60,7 +60,7 @@ ROUND = {
 }
 
 
-def _state() -> 'state_module.ServingState':
+def _state():
     st = state_module.ServingState()
     st.last_round = dict(ROUND)
     st.last_round_ts = 1_700_000_000.0

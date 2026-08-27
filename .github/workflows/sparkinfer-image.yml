@@ -104,6 +104,8 @@ jobs:
           sudo apt-get install -y -qq jq
 
       - name: Rent, boot, check, tear down
+        env:
+          CONFORMANCE_RENT_WAIT_MIN: "20"
         run: scripts/serving_conformance_on_lium.sh "$REF" "conformance-$REF"
 
       - name: Upload the report

@@ -245,6 +245,7 @@ BLOCKS_PER_TEMPO = 360
 SERVING_BACKEND_CONCURRENCY = 16  # miner: concurrent backend generations (sparkinfer >= 12954e6 handles 24)
 SERVING_SEEN_NONCES = 10_000  # miner: replay guard size; covers many minutes of validator traffic
 SERVING_MAX_TOKENS = 1024  # hard cap per request (API and miner both enforce)
+SERVING_DB_RETENTION_DAYS = 7  # validator: per-round serving rows older than this are pruned on each write
 SERVING_REQUEST_LOG_SIZE = 5_000  # in-memory ring of recent API/audit requests (telemetry)
 
 # =============================================================================

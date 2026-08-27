@@ -41,6 +41,7 @@ class ServingRelease:
     base_url: Optional[str] = None  # miner side: the runtime this miner serves from
     runtime_pin: Optional[str] = None
     model_sha256: Optional[str] = None  # digest of the model file; runtime_pin + model_sha256 = the release
+    model_file: Optional[str] = None  # HF path of the model file, informational (the digest is what is enforced)
     audit_bank: Optional[str] = None  # validator side: snapshot reference, filename under weights/
     reference_url: Optional[str] = (
         None  # validator side: live reference runtime (own GPU or a rented one); wins over audit_bank
@@ -63,6 +64,7 @@ class ServingRelease:
             max_tokens=int(raw.get('max_tokens', 64)),
             base_url=raw.get('base_url'),
             runtime_pin=raw.get('runtime_pin'),
+            model_file=raw.get('model_file'),
             model_sha256=raw.get('model_sha256'),
             audit_bank=raw.get('audit_bank'),
             reference_url=raw.get('reference_url'),

@@ -19,13 +19,13 @@
 import os
 import time
 from functools import partial
-from typing import Dict, List, Set
+from typing import Dict, List, Optional, Set
 
 import bittensor as bt
 import wandb
 
 from gittensor import __version__
-from gittensor.classes import MinerEvaluation, MinerEvaluationCache
+from gittensor.classes import MinerEvaluation, MinerEvaluationCache, ServingPricing
 from gittensor.serving.api import parse_api_keys, start_serving_api
 from gittensor.serving.audit import AuditWindow
 from gittensor.serving.loadout import load_serving_loadout
@@ -66,6 +66,7 @@ class Validator(BaseValidatorNeuron):
     """
 
     db_storage: DatabaseStorage = None
+    last_serving_pricing: Optional[ServingPricing] = None  # set each OSS round; read by the serving audit thread
     evaluation_cache: MinerEvaluationCache = None
 
     def __init__(self, config=None):

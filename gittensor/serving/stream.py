@@ -16,6 +16,7 @@ so the miner can't tell the two apart and users get tokens as they decode.
 """
 
 import json
+import time
 from dataclasses import dataclass, field
 from typing import Awaitable, Callable, Dict, Iterator, List, Optional
 
@@ -139,12 +140,18 @@ async def consume_stream(
     """Stream one inference from ``axon`` and return the filled synapse; relay each event to ``on_event`` if given."""
     parser, assembler = SSEParser(), StreamAssembler()
     final: Optional[InferenceSynapse] = None
+    started = time.monotonic()
+    observed_ttft_ms: Optional[float] = None
     async for chunk in dendrite.call_stream(target_axon=axon, synapse=synapse, timeout=timeout, deserialize=False):
         if isinstance(chunk, (bytes, bytearray)):
             for event in parser.feed(bytes(chunk)):
+                if observed_ttft_ms is None:
+                    observed_ttft_ms = (time.monotonic() - started) * 1000.0
                 assembler.feed(event)
                 if on_event is not None:
                     await on_event(event)
         else:
             final = chunk  # the dendrite yields the header-filled synapse last
-    return assembler.apply(final if final is not None else synapse)
+    result = assembler.apply(final if final is not None else synapse)
+    result.observed_ttft_ms = observed_ttft_ms
+    return result

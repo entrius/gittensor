@@ -141,8 +141,11 @@ def verify_served_round(
         else:
             state.audits.record(req.hotkey, release.model_id, verdict.value)
             bump('pass' if verdict.passed else 'miss')
+        # Speed is priced on time to first token (network + queue + prefill); generation length is the user's
+        # choice and throughput is priced by the capacity probe. Fall back to total latency for legacy records.
+        speed_ms = req.ttft_ms if req.ttft_ms is not None else req.latency_ms
         credits.setdefault(req.hotkey, []).append(
-            latency_credit(req.latency_ms) if verdict.passed and req.latency_ms is not None else 0.0
+            latency_credit(speed_ms) if verdict.passed and speed_ms is not None else 0.0
         )
         state.record(
             RequestRecord(
@@ -209,6 +212,7 @@ async def baseline_round(
                 else None,
                 detail='' if ok else str(status or err or 'no response'),
                 source='baseline',
+                ttft_ms=getattr(response, 'observed_ttft_ms', None) if ok else None,
             )
         )
 

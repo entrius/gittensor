@@ -155,6 +155,7 @@ def build_app(
                     if not ok
                     else '',
                     source='gateway',
+                    ttft_ms=finite_or_none(getattr(result, 'observed_ttft_ms', None)) if result else None,
                 )
             )
             state.record(

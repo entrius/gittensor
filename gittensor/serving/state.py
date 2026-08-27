@@ -52,6 +52,7 @@ class ServedRequest:
     token_logprobs: Optional[List[float]] = None
     detail: str = ''  # axon status message when not ok
     source: str = 'gateway'  # 'gateway' | 'baseline'
+    ttft_ms: Optional[float] = None  # validator-observed time to first streamed event
 
 
 @dataclass

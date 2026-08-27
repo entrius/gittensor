@@ -51,6 +51,7 @@ class ServedRequest:
     tokens: Optional[List[str]] = None
     token_logprobs: Optional[List[float]] = None
     detail: str = ''  # axon status message when not ok
+    source: str = 'gateway'  # 'gateway' | 'baseline'
 
 
 @dataclass
@@ -85,12 +86,18 @@ class ServingState:
     _served: Deque[ServedRequest] = field(default_factory=lambda: deque(maxlen=SERVING_REQUEST_LOG_SIZE))
     audits: AuditWindow = field(default_factory=AuditWindow)  # audit-loop thread only; persisted by the validator
     _history: Dict[str, Deque[float]] = field(default_factory=dict)  # hotkey -> last N round scores
+    probe_history: Dict[str, Deque[float]] = field(default_factory=dict)  # audit thread only: hotkey -> last tps
+    last_round: dict = field(default_factory=dict)  # audit thread's summary of the last round, for /v1/serving/status
     settlement_rounds: int = SERVING_SETTLEMENT_ROUNDS
     last_round_ts: float = 0.0
     ready_ttl_s: float = SERVING_READY_TTL_S
 
     def publish_round(
-        self, miners: List[ReadyMiner], scores: Dict[str, float], probation: Optional[List[ReadyMiner]] = None
+        self,
+        miners: List[ReadyMiner],
+        scores: Dict[str, float],
+        probation: Optional[List[ReadyMiner]] = None,
+        summary: Optional[dict] = None,
     ) -> None:
         """Audit thread: publish the READY and probation sets for the gateway and settle this round's scores.
 
@@ -108,6 +115,7 @@ class ServingState:
                 self._history[hotkey].append(float(scores.get(hotkey, 0.0)))
             for hotkey in [hk for hk, xs in self._history.items() if not any(xs)]:
                 del self._history[hotkey]
+            self.last_round = dict(summary or {})
             self.last_round_ts = time.time()
 
     def scores_for(self, hotkeys: Sequence[str]) -> Dict[int, float]:
@@ -191,6 +199,7 @@ class ServingState:
                 'pending_verification': len(self._served),
                 'inflight': dict(self._inflight),
                 'last_round_ts': self.last_round_ts,
+                'last_round': dict(self.last_round),
                 'requests_logged': len(log),
                 'gateway_requests': sum(1 for r in log if r.kind == 'gateway'),
                 'gateway_ok': sum(1 for r in log if r.kind == 'gateway' and r.ok),

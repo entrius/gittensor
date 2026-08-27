@@ -763,6 +763,82 @@ def test_baseline_prompts_vary_in_shape_and_length():
     assert baseline_max_tokens(rng, 100) <= 100
 
 
+def test_probe_retries_once_on_a_dip_and_keeps_the_better_reading(monkeypatch):
+    """A reading well under the miner's recent form is re-measured; a persistent dip sticks; no history, no retry."""
+    import asyncio
+    from collections import deque
+    from types import SimpleNamespace
+
+    from gittensor.validator.serving import forward as fwd
+
+    good = _echo_release()
+    readings: list = []
+    calls = {'n': 0}
+
+    async def fake_probe(state, dendrite, uid, hotkey, axon, release, cases):
+        calls['n'] += 1
+        return readings.pop(0)
+
+    monkeypatch.setattr(fwd, 'probe_axon', fake_probe)
+    ref = EchoReference(good)
+    args = (None, 1, 'hk1', SimpleNamespace(), good, ref, [ref.sample()] * 2)
+
+    state = ServingState()
+    readings[:] = [50.0]  # no history yet: accepted as is, no retry
+    assert asyncio.run(fwd.probe_with_retry(state, *args, retry_delay_s=0.0)) == 50.0 and calls['n'] == 1  # type: ignore[arg-type]
+
+    state.probe_history['hk1'] = deque([180.0, 178.0], maxlen=3)
+    readings[:] = [50.0, 181.0]  # collision on the first burst, clean on the second
+    assert asyncio.run(fwd.probe_with_retry(state, *args, retry_delay_s=0.0)) == 181.0 and calls['n'] == 3  # type: ignore[arg-type]
+    assert list(state.probe_history['hk1']) == [180.0, 178.0, 181.0]
+
+    readings[:] = [50.0, 48.0]  # a real slowdown dips twice
+    assert asyncio.run(fwd.probe_with_retry(state, *args, retry_delay_s=0.0)) == 50.0 and calls['n'] == 5  # type: ignore[arg-type]
+    readings[:] = [170.0]  # within form: single probe
+    assert asyncio.run(fwd.probe_with_retry(state, *args, retry_delay_s=0.0)) == 170.0 and calls['n'] == 6  # type: ignore[arg-type]
+
+
+def test_get_serving_axons_skips_validator_permits():
+    from types import SimpleNamespace
+
+    from gittensor.validator.serving.forward import get_serving_axons
+
+    axon = SimpleNamespace(is_serving=True)
+    vali = SimpleNamespace(
+        uid=0,
+        metagraph=SimpleNamespace(
+            hotkeys=['me', 'other-vali', 'miner', 'off'],
+            axons=[axon, axon, axon, SimpleNamespace(is_serving=False)],
+            validator_permit=[True, True, False, False],
+        ),
+    )
+    assert [(u, h) for u, h, _ in get_serving_axons(vali)] == [(2, 'miner')]  # type: ignore[arg-type]
+
+
+def test_round_summary_is_published_for_status(monkeypatch):
+    from types import SimpleNamespace
+
+    good = _echo_release()
+    axon = SimpleNamespace(is_serving=True)
+    dendrite, _ = _dendrite_echoing(good)
+    state = ServingState(settlement_rounds=1)
+    for _ in range(2):
+        state.enqueue_served(_served(1, good))
+        base = _served(1, good)
+        base.source = 'baseline'
+        state.enqueue_served(base)
+    state.enqueue_served(_served(1, good, ok=False))
+    _round(state, dendrite, [(1, 'hk1', axon), (2, 'hk2', axon)], good, monkeypatch)
+    last = state.snapshot()['last_round']
+    assert last['served'] == 5 and last['gateway'] == 3 and last['baseline'] == 2
+    assert last['pass'] == 4 and last['miss'] == 1 and last['ready'] == 1 and last['probation'] == 1
+    assert (
+        last['windows'][1]['n_audits'] == 5
+        and last['windows'][1]['served'] == 5
+        and last['windows'][2]['n_audits'] == 0
+    )
+
+
 def test_audit_round_skips_release_without_reference(monkeypatch):
     """A release whose reference is unreachable is skipped and logged; the round still completes."""
     from types import SimpleNamespace

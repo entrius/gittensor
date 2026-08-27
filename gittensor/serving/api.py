@@ -154,6 +154,7 @@ def build_app(
                     detail=str(getattr(getattr(result, 'dendrite', None), 'status_message', None) or '')
                     if not ok
                     else '',
+                    source='gateway',
                 )
             )
             state.record(

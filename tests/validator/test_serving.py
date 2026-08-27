@@ -842,6 +842,42 @@ def test_round_summary_is_published_for_status(monkeypatch):
     )
 
 
+def test_consume_stream_observes_time_to_first_token():
+    import asyncio
+    from types import SimpleNamespace
+
+    from gittensor.serving.stream import consume_stream
+    from gittensor.synapses import InferenceSynapse
+
+    good = _echo_release()
+    dendrite, _ = _dendrite_echoing(good)
+    axon = SimpleNamespace(is_serving=True)
+    syn = InferenceSynapse(messages=MSGS, model_id=good.model_id, max_tokens=4, logprobs=True)
+    out = asyncio.run(consume_stream(dendrite, axon, syn, 5.0))  # type: ignore[arg-type]
+    assert out.completion and out.observed_ttft_ms is not None and 0.0 <= out.observed_ttft_ms < 5000.0
+    dead_dendrite, _ = _dendrite_echoing(good, dead_axons=(axon,))
+    miss = asyncio.run(consume_stream(dead_dendrite, axon, syn.model_copy(), 5.0))  # type: ignore[arg-type]
+    assert miss.completion is None and miss.observed_ttft_ms is None
+
+
+def test_latency_credit_uses_time_to_first_token_not_total_latency(monkeypatch):
+    """A long answer that streamed promptly earns full credit; a slow first token does not."""
+    from types import SimpleNamespace
+
+    good = _echo_release()
+    axon = SimpleNamespace(is_serving=True)
+    dendrite, _ = _dendrite_echoing(good)
+    state = ServingState(settlement_rounds=1)
+    prompt = _served(1, good, latency_ms=4800.0)  # 512 tokens took ~5 s ...
+    prompt.ttft_ms = 120.0  # ... but the first token came fast
+    slow = _served(2, good, latency_ms=900.0)
+    slow.ttft_ms = 1000.0  # queued for a second before answering
+    state.enqueue_served(prompt)
+    state.enqueue_served(slow)
+    scores = _round(state, dendrite, [(1, 'hk1', axon), (2, 'hk2', axon)], good, monkeypatch)
+    assert scores['hk1'] == 1.0 and scores['hk2'] == pytest.approx(0.5)
+
+
 def test_audit_round_skips_release_without_reference(monkeypatch):
     """A release whose reference is unreachable is skipped and logged; the round still completes."""
     from types import SimpleNamespace

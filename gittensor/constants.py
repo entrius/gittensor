@@ -193,12 +193,13 @@ SERVING_PROBE_TARGET_TPS = 180.0
 SERVING_PROBE_DIP_RATIO = 0.7
 SERVING_PROBE_RETRY_DELAY_S = (15.0, 45.0)
 SERVING_VERIFY_WORKERS = 8  # concurrent /v1/score calls to the reference per round
-# Latency credit for a 64-token audit (release.max_tokens). An honest 5090 answers in ~165 ms on-box
-# (measured 2026-08-22/24: p95 166 ms); add validator<->miner RTT and an
-# honest miner anywhere on earth lands under ~450 ms. Credit is flat to FULL and falls linearly to 0 at
-# ZERO, so a miner proxying audits to a GPU in another region (extra RTT + a slower runtime: llama.cpp
-# measured ~600 ms) loses credit in proportion. Same-region proxying is NOT visible here; that is the
-# one-GPU-many-hotkeys case, caught by concurrent burst audits (launch plan, gap 0).
+# Latency credit on the validator-observed time to first streamed token (network + queue + prefill). An honest
+# 5090 reports TTFT ~26 ms on-box (2026-08-27 conformance) and a 64-token answer in ~165 ms (2026-08-22/24); add
+# validator<->miner RTT and an honest miner anywhere on earth lands well under FULL. Credit is flat to FULL and
+# falls linearly to 0 at ZERO, so a miner proxying to a GPU in another region or queueing requests loses credit
+# in proportion. Generation length does not enter (mini-soak 2026-08-27: total latency of 64-512-token answers
+# scored a perfect miner at 0.24). Same-region proxying is NOT visible here; that is the one-GPU-many-hotkeys
+# case, caught by the concurrent capacity probe.
 SERVING_LATENCY_FULL_CREDIT_MS = 500.0
 SERVING_LATENCY_ZERO_CREDIT_MS = 1_500.0
 # Per-audit verdict. The blessed runtime is bit-reproducible (sparkinfer 12954e6, SPARKINFER_DETERMINISTIC=1), so an

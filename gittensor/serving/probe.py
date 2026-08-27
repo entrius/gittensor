@@ -118,8 +118,13 @@ def score(
     timeout: float,
     api_key: Optional[str] = None,
     top_logprobs: int = 1,
+    completion_token_ids: Optional[Sequence[int]] = None,
 ) -> dict:
     """Teacher-forced scoring (contract R8): per-token logprobs of ``completion`` under the model.
+
+    With ``completion_token_ids`` the runtime forces exactly those tokens instead of re-tokenizing the text, so a
+    miner's own greedy token sequence is scored position by position even where a fresh tokenization of the same
+    text would pick different boundaries.
 
     Returns ``tokens``, ``logprobs`` and, when ``top_logprobs`` > 0, ``argmax`` (the model's own
     top token at each position) so a verifier can compare any miner output position by position.
@@ -127,7 +132,16 @@ def score(
     r = requests.post(
         f'{base_url.rstrip("/")}/v1/score',
         headers=auth_headers(api_key),
-        json={'model': model_id, 'messages': messages, 'completion': completion, 'top_logprobs': top_logprobs},
+        json={
+            'model': model_id,
+            'messages': messages,
+            'top_logprobs': top_logprobs,
+            **(
+                {'completion_token_ids': list(completion_token_ids)}
+                if completion_token_ids
+                else {'completion': completion}
+            ),
+        },
         timeout=timeout,
     )
     r.raise_for_status()
@@ -137,6 +151,10 @@ def score(
         'logprobs': [float(x) for x in payload['logprobs']],
         'usage': payload.get('usage') or {},
     }
+    if payload.get('token_ids'):
+        out['token_ids'] = [int(x) for x in payload['token_ids']]
+    if payload.get('bytes'):
+        out['bytes'] = [bytes(b) for b in payload['bytes']]
     if top_logprobs > 0 and payload.get('top_logprobs'):
         out['argmax'] = [(alts[0]['token'] if alts else None) for alts in payload['top_logprobs']]
     return out

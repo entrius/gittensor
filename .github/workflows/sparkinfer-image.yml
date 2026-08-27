@@ -3,8 +3,9 @@ name: sparkinfer image
 # Builds the blessed serving runtime (see the Serving Runtime Contract in the miner docs) from a pinned upstream commit and
 # publishes it as entrius/sparkinfer:<ref>. Run manually with the commit you intend to bless; the
 # resulting tag is what goes into `runtime_pin` in gittensor/validator/weights/serving_loadout.json.
-# No GPU in CI: this only proves the release builds. Conformance (scripts/check_serving_runtime.py) runs
-# on the validator reference GPU before the pin is updated.
+# No GPU in CI: the build job only proves the release builds. The `conformance` job then rents one RTX 5090
+# on Lium (scripts/serving_conformance_on_lium.sh), runs scripts/check_serving_runtime.py against the pushed
+# image, uploads the report, and on a clean pass opens the pin-bump PR. Needs the LIUM_API_KEY secret.
 
 on:
   workflow_dispatch:
@@ -17,6 +18,11 @@ on:
         description: "CMAKE_CUDA_ARCHITECTURES"
         required: false
         default: "120"
+      conformance:
+        description: "After the push, rent a 5090 on Lium, run the conformance checker and open the pin-bump PR on a pass"
+        type: boolean
+        required: false
+        default: true
   # Build-only check (never pushes) whenever the Dockerfile or this workflow changes.
   push:
     paths:
@@ -25,6 +31,8 @@ on:
 
 jobs:
   image:
+    outputs:
+      ref: ${{ steps.ref.outputs.ref }}
     # push-triggered runs (Dockerfile/workflow changed) only BUILD, to catch Dockerfile breakage in CI;
     # the image is pushed to Docker Hub only from the Run workflow button (workflow_dispatch).
     name: ${{ github.event_name == 'workflow_dispatch' && 'build and push' || 'build only (dry run)' }}
@@ -71,3 +79,61 @@ jobs:
             entrius/sparkinfer:${{ steps.ref.outputs.ref }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  conformance:
+    name: conformance on a rented 5090
+    needs: image
+    if: github.event_name == 'workflow_dispatch' && inputs.conformance
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    env:
+      LIUM_API_KEY: ${{ secrets.LIUM_API_KEY }}
+      REF: ${{ needs.image.outputs.ref }}
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install Python + deps + lium
+        run: |
+          uv python install 3.12
+          uv sync --extra dev
+          uv tool install lium.io
+          sudo apt-get install -y -qq jq
+
+      - name: Rent, boot, check, tear down
+        env:
+          CONFORMANCE_RENT_WAIT_MIN: "20"
+        run: scripts/serving_conformance_on_lium.sh "$REF" "conformance-$REF"
+
+      - name: Upload the report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: serving-conformance-${{ env.REF }}
+          path: conformance-${{ env.REF }}/
+          if-no-files-found: warn
+
+      - name: Bump runtime_pin
+        run: |
+          jq --arg pin "gittensor-ai-lab/sparkinfer@$REF" '.releases[0].runtime_pin = $pin' \
+            gittensor/validator/weights/serving_loadout.json > /tmp/loadout.json
+          mv /tmp/loadout.json gittensor/validator/weights/serving_loadout.json
+          git diff --stat
+
+      - name: Open the pin-bump PR
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.RELEASE_TOKEN }}
+          base: test
+          branch: serving/pin-${{ env.REF }}
+          commit-message: "serving: bless sparkinfer ${{ env.REF }}"
+          title: "serving: bless sparkinfer ${{ env.REF }}"
+          body: |
+            `entrius/sparkinfer:${{ env.REF }}` passed `scripts/check_serving_runtime.py` on a rented RTX 5090
+            (run ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }} — report in the
+            `serving-conformance-${{ env.REF }}` artifact). This bumps `runtime_pin`; update the sha named in the
+            comments at `gittensor/constants.py` and `gittensor/serving/audit.py` if the blessing rules changed.
+          add-paths: gittensor/validator/weights/serving_loadout.json

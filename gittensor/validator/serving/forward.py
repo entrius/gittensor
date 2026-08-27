@@ -57,7 +57,9 @@ from gittensor.serving.loadout import ServingRelease, load_serving_loadout
 from gittensor.serving.state import ReadyMiner, RequestRecord, ServedRequest, ServingState
 from gittensor.serving.stream import consume_stream
 from gittensor.synapses import InferenceSynapse
+from gittensor.validator.serving.persist import ServingRoundStorage
 from gittensor.validator.serving.scoring import latency_credit
+from gittensor.validator.utils.config import STORE_DB_RESULTS
 
 if TYPE_CHECKING:
     from neurons.validator import Validator
@@ -99,12 +101,15 @@ def verify_served_round(
     release: ServingRelease,
     served: Sequence[ServedRequest],
     summary: Optional[Dict[str, int]] = None,
+    last_miss: Optional[Dict[str, str]] = None,
 ) -> Dict[str, List[float]]:
     """Verify every served request for ``release`` into the window; return latency credits per hotkey.
 
-    Reference calls run on a small thread pool; window updates stay on this thread.
+    Reference calls run on a small thread pool; window updates stay on this thread. ``last_miss`` (hotkey ->
+    reason) is filled with the most recent miss or strike reason so the round report can show a miner why.
     """
     summary = summary if summary is not None else {}
+    last_miss = last_miss if last_miss is not None else {}
     mine = [req for req in served if req.model_id == release.model_id]
 
     def judge(req: ServedRequest) -> Optional[AuditVerdict]:
@@ -139,6 +144,8 @@ def verify_served_round(
                 f'Serving: READY UID {req.uid} missed a {req.source} request ({verdict.reason}; '
                 f'{len(req.tokens or [])} tokens, {req.latency_ms or 0:.0f} ms)'
             )
+        if not verdict.passed:
+            last_miss[req.hotkey] = verdict.reason
         if verdict.hard:
             until = state.audits.strike(req.hotkey, release.model_id)
             bump('strike')
@@ -283,7 +290,8 @@ async def audit_round(
     best: Dict[str, Tuple[float, str]] = {hotkey: (0.0, '') for _, hotkey, _ in serving}
     probation: Dict[int, ReadyMiner] = {}
     summary: Dict[str, int] = {}
-    windows: Dict[int, dict] = {}
+    windows: Dict[int, dict] = {}  # per-UID round report; published in state.last_round and persisted to the DB
+    last_miss: Dict[str, str] = {}
 
     for release in loadout.releases:
         try:
@@ -294,13 +302,23 @@ async def audit_round(
                 'set SERVING_REFERENCE_URL to a conformant runtime'
             )
             continue
-        credits = verify_served_round(state, reference, release, served, summary)
+        credits = verify_served_round(state, reference, release, served, summary, last_miss)
         passing: List[Tuple[int, str, bt.AxonInfo, float]] = []
         for uid, hotkey, axon in serving:
             window = state.audits.verdict(hotkey, release.model_id)
             round_credits = credits.get(hotkey)
             credit = sum(round_credits) / len(round_credits) if round_credits else 1.0
-            windows[uid] = {**window.as_dict(), 'model_id': release.model_id, 'served': len(round_credits or [])}
+            windows[uid] = {
+                **window.as_dict(),
+                'hotkey': hotkey,
+                'model_id': release.model_id,
+                'served': len(round_credits or []),
+                'credit': round(credit, 4),
+                'probe_tps': None,
+                'capacity': 0.0,
+                'score': 0.0,
+                'last_miss': last_miss.get(hotkey, ''),
+            }
             bt.logging.debug(
                 f'Serving: UID {uid} {release.model_id} window {window.as_dict()} '
                 f'served {len(round_credits or [])} credit {credit:.3f}'
@@ -332,6 +350,7 @@ async def audit_round(
             )
             if score > best[hotkey][0]:
                 best[hotkey] = (score, release.model_id)
+                windows[uid].update(probe_tps=round(tps, 1), capacity=round(capacity, 4), score=round(score, 4))
 
     scores = {hotkey: score for hotkey, (score, _) in best.items()}
     ready: List[ReadyMiner] = []
@@ -340,7 +359,9 @@ async def audit_round(
         if score > 0.0:
             ready.append(ReadyMiner(uid=uid, hotkey=hotkey, axon=axon, score=score, model_id=model_id))
             probation.pop(uid, None)
-    quarantined = sum(1 for w in windows.values() if w.get('quarantined_until', 0.0) > 0.0)
+    for uid, report in windows.items():
+        report['status'] = miner_status(report)
+    quarantined = sum(1 for w in windows.values() if w['status'] == 'quarantined')
     summary.update(ready=len(ready), probation=len(probation), quarantined=quarantined)
     state.publish_round(ready, scores, list(probation.values()), {**summary, 'windows': windows})
     bt.logging.info(
@@ -350,6 +371,15 @@ async def audit_round(
         f'{[m.uid for m in ready]} · probation {len(probation)} · quarantined {quarantined}'
     )
     return scores
+
+
+def miner_status(report: dict) -> str:
+    """'ready' | 'quarantined' | 'probation' for one UID's round report."""
+    if report.get('score', 0.0) > 0.0:
+        return 'ready'
+    if report.get('quarantined_until', 0.0) > 0.0:
+        return 'quarantined'
+    return 'probation'
 
 
 async def _unlimited_session() -> aiohttp.ClientSession:
@@ -372,6 +402,8 @@ class ServingAuditThread:
         self.baseline_per_round = baseline_per_round
         self._stop = threading.Event()
         self.thread = threading.Thread(target=self._run, name='serving-audits', daemon=True)
+        # Own connection: psycopg connections are not shared across threads, and the OSS round holds the other one.
+        self.storage: Optional[ServingRoundStorage] = ServingRoundStorage() if STORE_DB_RESULTS else None
 
     def start(self) -> None:
         self.thread.start()
@@ -407,6 +439,17 @@ class ServingAuditThread:
                     self.state.audits.save(path)
                 except OSError as e:
                     bt.logging.warning(f'Serving: could not persist audit window to {path}: {e}')
+            if self.storage is not None:
+                try:
+                    release = load_serving_loadout().primary
+                except Exception:
+                    release = None
+                self.storage.store_round(
+                    validator_hotkey=self.validator.wallet.hotkey.ss58_address,
+                    state=self.state,
+                    pricing=getattr(self.validator, 'last_serving_pricing', None),
+                    release=release,
+                )
             # The rest of the interval carries this validator's own baseline prompts, spread at random so nothing
             # marks the round boundary; they are verified next round alongside any user traffic.
             remaining = max(0.0, self.interval_s - (time.monotonic() - started))

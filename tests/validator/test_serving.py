@@ -878,6 +878,30 @@ def test_latency_credit_uses_time_to_first_token_not_total_latency(monkeypatch):
     assert scores['hk1'] == 1.0 and scores['hk2'] == pytest.approx(0.5)
 
 
+def test_ready_miner_misses_are_logged_with_a_reason(monkeypatch):
+    from types import SimpleNamespace
+
+    import bittensor as bt
+
+    good = _echo_release()
+    axon = SimpleNamespace(is_serving=True)
+    dendrite, _ = _dendrite_echoing(good)
+    state = ServingState(settlement_rounds=1)
+    state.publish_round([_ready(1)], {'hk1': 1.0})
+    seen: list = []
+    monkeypatch.setattr(bt.logging, 'info', lambda msg, *a, **k: seen.append(str(msg)))
+    for _ in range(4):
+        state.enqueue_served(_served(1, good))
+    miss = _served(1, good, ok=False)
+    miss.detail = 'Request timeout after 60.0 seconds'
+    state.enqueue_served(miss)
+    state.enqueue_served(_served(2, good, ok=False))  # not READY: stays quiet
+    _round(state, dendrite, [(1, 'hk1', axon), (2, 'hk2', axon)], good, monkeypatch)
+    hits = [m for m in seen if 'READY UID 1 missed' in m]
+    assert len(hits) == 1 and 'Request timeout after 60.0 seconds' in hits[0] and 'gateway request' in hits[0]
+    assert not any('READY UID 2' in m for m in seen)
+
+
 def test_audit_round_skips_release_without_reference(monkeypatch):
     """A release whose reference is unreachable is skipped and logged; the round still completes."""
     from types import SimpleNamespace

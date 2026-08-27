@@ -798,7 +798,9 @@ def test_probe_retries_once_on_a_dip_and_keeps_the_better_reading(monkeypatch):
     assert asyncio.run(fwd.probe_with_retry(state, *args, retry_delay_s=0.0)) == 170.0 and calls['n'] == 6  # type: ignore[arg-type]
 
 
-def test_get_serving_axons_skips_validator_permits():
+def test_get_serving_axons_skips_active_validators_not_permit_holders():
+    """On a small subnet nearly every UID holds a permit (testnet 422: 10 of 46, incl. the test miner); only UIDs
+    with validator_trust > 0 are actually validating."""
     from types import SimpleNamespace
 
     from gittensor.validator.serving.forward import get_serving_axons
@@ -807,12 +809,13 @@ def test_get_serving_axons_skips_validator_permits():
     vali = SimpleNamespace(
         uid=0,
         metagraph=SimpleNamespace(
-            hotkeys=['me', 'other-vali', 'miner', 'off'],
-            axons=[axon, axon, axon, SimpleNamespace(is_serving=False)],
-            validator_permit=[True, True, False, False],
+            hotkeys=['me', 'other-vali', 'miner-with-permit', 'miner', 'off'],
+            axons=[axon, axon, axon, axon, SimpleNamespace(is_serving=False)],
+            validator_permit=[True, True, True, False, False],
+            validator_trust=[1.0, 0.99, 0.0, 0.0, 0.0],
         ),
     )
-    assert [(u, h) for u, h, _ in get_serving_axons(vali)] == [(2, 'miner')]  # type: ignore[arg-type]
+    assert [(u, h) for u, h, _ in get_serving_axons(vali)] == [(2, 'miner-with-permit'), (3, 'miner')]  # type: ignore[arg-type]
 
 
 def test_round_summary_is_published_for_status(monkeypatch):

@@ -49,6 +49,8 @@ import bittensor as bt
 from gittensor.constants import (
     SERVING_BASELINE_PER_ROUND,
     SERVING_CHALLENGE_TIMEOUT,
+    SERVING_DORMANT_AFTER_ROUNDS,
+    SERVING_DORMANT_RETRY_ROUNDS,
     SERVING_MAX_TOKENS,
     SERVING_PROBE_DIP_RATIO,
     SERVING_PROBE_REQUESTS,
@@ -251,13 +253,13 @@ async def baseline_round(
     """Send every serving axon ``per_miner`` baseline prompts at random moments within ``window_s``.
 
     The requests take the same path as user traffic and are queued as served requests, so the next round verifies
-    them like anything else. Quarantined hotkeys are skipped. Returns the number of requests sent.
+    them like anything else. Quarantined and dormant hotkeys are skipped. Returns the number of requests sent.
     """
     rng = rng or random.Random()
     targets = [
         (uid, hotkey, axon)
         for uid, hotkey, axon in serving
-        if state.audits.quarantined_until(hotkey, release.model_id) == 0.0
+        if state.audits.quarantined_until(hotkey, release.model_id) == 0.0 and not skip_baseline(state, hotkey)
     ]
 
     async def one(uid: int, hotkey: str, axon: bt.AxonInfo, delay_s: float) -> None:
@@ -274,6 +276,11 @@ async def baseline_round(
             err = ''
         ok = response is not None and response.completion is not None and response.served_model_id == release.model_id
         status = getattr(getattr(response, 'dendrite', None), 'status_message', None) if response is not None else None
+        if (
+            response is not None and not ok
+        ):  # the axon answered but served nothing: not a compute miner (or a broken one)
+            served_as = getattr(response, 'served_model_id', None) or 'nothing'
+            status = f'no completion: axon answered "{status or "OK"}" serving {served_as}, not {release.model_id}'
         state.enqueue_served(
             ServedRequest(
                 ts=time.time(),
@@ -350,7 +357,11 @@ async def audit_round(
         state.publish_round([], {})
         return {}
 
-    best: Dict[str, Tuple[float, str]] = {hotkey: (0.0, '') for _, hotkey, _ in serving}
+    update_dormancy(state, serving, served)
+    active = [(uid, hotkey, axon) for uid, hotkey, axon in serving if not is_dormant(state, hotkey)]
+    dormant = len(serving) - len(active)
+
+    best: Dict[str, Tuple[float, str]] = {hotkey: (0.0, '') for _, hotkey, _ in active}
     probation: Dict[int, ReadyMiner] = {}
     summary: Dict[str, int] = {}
     windows: Dict[int, dict] = {}  # per-UID round report; published in state.last_round and persisted to the DB
@@ -367,7 +378,7 @@ async def audit_round(
             continue
         credits = verify_served_round(state, reference, release, served, summary, last_miss)
         passing: List[Tuple[int, str, bt.AxonInfo, float]] = []
-        for uid, hotkey, axon in serving:
+        for uid, hotkey, axon in active:
             window = state.audits.verdict(hotkey, release.model_id)
             round_credits = credits.get(hotkey)
             credit = sum(round_credits) / len(round_credits) if round_credits else 1.0
@@ -425,7 +436,7 @@ async def audit_round(
 
     scores = {hotkey: score for hotkey, (score, _) in best.items()}
     ready: List[ReadyMiner] = []
-    for uid, hotkey, axon in serving:
+    for uid, hotkey, axon in active:
         score, model_id = best[hotkey]
         if score > 0.0:
             ready.append(ReadyMiner(uid=uid, hotkey=hotkey, axon=axon, score=score, model_id=model_id))
@@ -433,15 +444,42 @@ async def audit_round(
     for uid, report in windows.items():
         report['status'] = miner_status(report)
     quarantined = sum(1 for w in windows.values() if w['status'] == 'quarantined')
-    summary.update(ready=len(ready), probation=len(probation), quarantined=quarantined)
+    summary.update(ready=len(ready), probation=len(probation), quarantined=quarantined, dormant=dormant)
     state.publish_round(ready, scores, list(probation.values()), {**summary, 'windows': windows})
     bt.logging.info(
         f'Serving round: served {summary.get("served", 0)} (gateway {summary.get("gateway", 0)} / baseline '
         f'{summary.get("baseline", 0)}) · pass {summary.get("pass", 0)} · miss {summary.get("miss", 0)} · '
         f'strike {summary.get("strike", 0)} · neutral {summary.get("neutral", 0)} · READY {len(ready)} '
-        f'{[m.uid for m in ready]} · probation {len(probation)} · quarantined {quarantined}'
+        f'{[m.uid for m in ready]} · probation {len(probation)} · quarantined {quarantined} · dormant {dormant}'
     )
     return scores
+
+
+def update_dormancy(
+    state: ServingState, serving: Sequence[Tuple[int, str, bt.AxonInfo]], served: Sequence[ServedRequest]
+) -> None:
+    """A completion resets a hotkey's dormancy count; a round of requests with none bumps it. Unasked = unchanged."""
+    asked = {req.hotkey for req in served}
+    answered = {req.hotkey for req in served if req.completion}
+    for _, hotkey, _ in serving:
+        if hotkey in answered:
+            state.dormant_rounds[hotkey] = 0
+        elif hotkey in asked:
+            state.dormant_rounds[hotkey] = state.dormant_rounds.get(hotkey, 0) + 1
+
+
+def is_dormant(state: ServingState, hotkey: str) -> bool:
+    return state.dormant_rounds.get(hotkey, 0) >= SERVING_DORMANT_AFTER_ROUNDS
+
+
+def skip_baseline(state: ServingState, hotkey: str) -> bool:
+    """Dormant hotkeys get no baseline prompts except one retry every SERVING_DORMANT_RETRY_ROUNDS; a skipped
+    round still counts so the retry clock keeps moving."""
+    n = state.dormant_rounds.get(hotkey, 0)
+    if n < SERVING_DORMANT_AFTER_ROUNDS or n % SERVING_DORMANT_RETRY_ROUNDS == 0:
+        return False
+    state.dormant_rounds[hotkey] = n + 1
+    return True
 
 
 def miner_status(report: dict) -> str:

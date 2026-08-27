@@ -231,6 +231,14 @@ SERVING_QUARANTINE_S = 3600.0
 # inside the permitted-validator budget — it just adds to the evidence. This is what lets a validator with no users
 # verify miners at all, and keeps quiet hours from being a free period.
 SERVING_BASELINE_PER_ROUND = 2
+# Most UIDs are not compute miners: OSS miners run no neuron, and validators' axons exist for PAT traffic. axon.is_serving
+# alone still nominates them, and every baseline prompt to one costs a request_timeout. A hotkey that answers no
+# request with a completion for SERVING_DORMANT_AFTER_ROUNDS consecutive rounds (timeouts, refusals, or an axon that
+# says "Success" and serves nothing) is *dormant*: it leaves the round report, is not persisted, and receives no
+# baseline prompts — except one retry every SERVING_DORMANT_RETRY_ROUNDS so a miner that comes online later is picked
+# up within the hour. A completion resets it. A serving-miner registry replaces this heuristic later.
+SERVING_DORMANT_AFTER_ROUNDS = 3
+SERVING_DORMANT_RETRY_ROUNDS = 12
 SERVING_API_DEFAULT_PORT = 8790
 # Miner: a hotkey may query for inference only with at least this much stake on the subnet (alpha, metagraph.S). Set so
 # that only the reference-running validator clears it (2026-08-26: one hotkey holds >1M alpha, the next 0.27M); every

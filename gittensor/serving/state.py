@@ -89,6 +89,7 @@ class ServingState:
     audits: AuditWindow = field(default_factory=AuditWindow)  # audit-loop thread only; persisted by the validator
     _history: Dict[str, Deque[float]] = field(default_factory=dict)  # hotkey -> last N round scores
     probe_history: Dict[str, Deque[float]] = field(default_factory=dict)  # audit thread only: hotkey -> last tps
+    dormant_rounds: Dict[str, int] = field(default_factory=dict)  # audit thread only: hotkey -> rounds w/o completion
     last_round: dict = field(default_factory=dict)  # audit thread's summary of the last round, for /v1/serving/status
     settlement_rounds: int = SERVING_SETTLEMENT_ROUNDS
     last_round_ts: float = 0.0

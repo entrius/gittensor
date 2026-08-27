@@ -79,6 +79,7 @@ async def forward(self: 'Validator') -> None:
         maintainer_uids_by_repo = build_maintainer_uids_by_repo(miner_evaluations, master_repositories, miner_uids)
         serving_scores = self.serving_state.scores_for(self.metagraph.hotkeys) if SERVING_ENABLED else {}
         pricing = serving_pricing(self) if SERVING_ENABLED and serving_scores else None
+        self.last_serving_pricing = pricing  # the serving audit thread stamps it on the rounds it persists
         rewards = blend_emission_pools(
             miner_evaluations, master_repositories, miner_uids, maintainer_uids_by_repo, serving_scores, pricing
         )

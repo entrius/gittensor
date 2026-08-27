@@ -193,3 +193,30 @@ DO UPDATE SET
     total_open_issues = EXCLUDED.total_open_issues,
     updated_at = NOW()
 """
+
+# Serving (compute) rounds — one summary row per validator per audit round, one row per serving UID per round.
+# Rows carry the writing validator's hotkey: every validator sees its own traffic, so the UI shows one
+# validator's snapshot, never a consensus.
+INSERT_SERVING_ROUND = """
+INSERT INTO serving_rounds (
+    validator_hotkey, round_ts, served, gateway, baseline, passes, misses, strikes, neutral,
+    ready, probation, quarantined, card_equivalents, pool_share, alpha_per_hour, alpha_usd
+) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+ON CONFLICT (validator_hotkey, round_ts) DO NOTHING
+"""
+
+BULK_INSERT_SERVING_MINER_ROUNDS = """
+INSERT INTO serving_miner_rounds (
+    validator_hotkey, round_ts, uid, hotkey, model_id, status, window_mean, window_n, window_passed,
+    quarantined_until, served, credit, probe_tps, capacity, round_score, settled_score, last_miss_reason
+) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+ON CONFLICT (validator_hotkey, round_ts, uid, hotkey) DO NOTHING
+"""
+
+PRUNE_SERVING_ROUNDS = """
+DELETE FROM serving_rounds WHERE validator_hotkey = %s AND round_ts < NOW() - (%s * INTERVAL '1 day')
+"""
+
+PRUNE_SERVING_MINER_ROUNDS = """
+DELETE FROM serving_miner_rounds WHERE validator_hotkey = %s AND round_ts < NOW() - (%s * INTERVAL '1 day')
+"""

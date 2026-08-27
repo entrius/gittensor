@@ -15,6 +15,7 @@ maintainers run this before claiming conformance; miners run it before registeri
 
 import argparse
 import concurrent.futures
+import json
 import random
 import statistics
 import sys
@@ -263,6 +264,72 @@ def check_overload(rep: Report, base_url: str, model_id: str, parallel: int, max
         )
 
 
+def _stream_once(base_url: str, model_id: str, messages, max_tokens: int, timeout: float) -> Tuple[int, float, float]:
+    """One streamed greedy request: (completion tokens, client-observed TTFT s, total wall s)."""
+    from gittensor.serving.stream import SSEParser
+
+    body = {
+        'model': model_id,
+        'messages': messages,
+        'max_tokens': max_tokens,
+        'temperature': 0,
+        'stream': True,
+        'stream_options': {'include_usage': True},
+    }
+    parser = SSEParser()
+    started = time.monotonic()
+    ttft = None
+    tokens = 0
+    with requests.post(
+        f'{base_url}/v1/chat/completions', headers=auth_headers(API_KEY), json=body, stream=True, timeout=timeout
+    ) as r:
+        r.raise_for_status()
+        for chunk in r.iter_content(chunk_size=None):
+            if ttft is None:
+                ttft = time.monotonic() - started
+            for event in parser.feed(chunk):
+                if event and isinstance(event.get('usage'), dict):
+                    tokens = int(event['usage'].get('completion_tokens') or tokens)
+    return tokens, ttft if ttft is not None else float('inf'), time.monotonic() - started
+
+
+def speed_profile(base_url: str, model_id: str, max_tokens: int, timeout: float, burst: int, reps: int = 3) -> Dict:
+    """Blessing-time speed facts for one honest card on this runtime, measured the way the validator measures.
+
+    ``single_stream``: one request at a time. ``probe_shaped``: ``burst`` concurrent requests, aggregate verified
+    tokens per second of decode time (batch wall-clock minus the first TTFT) — the number the capacity probe
+    compares a miner against. Client TTFT includes this client's RTT, so decode rates are RTT-free; the TTFT rows
+    are informational unless the client is on-box.
+    """
+    prompts = make_prompts(burst * reps, seed=23)
+    single = []
+    for messages in prompts[:reps]:
+        _stream_once(base_url, model_id, messages, 8, timeout)  # warm
+        tokens, ttft, wall = _stream_once(base_url, model_id, messages, max_tokens, timeout)
+        single.append((tokens / max(wall - ttft, 1e-3), ttft * 1000.0))
+    aggregate = []
+    for i in range(reps):
+        batch = prompts[i * burst : (i + 1) * burst]
+        started = time.monotonic()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=burst) as pool:
+            results = list(pool.map(lambda m: _stream_once(base_url, model_id, m, max_tokens, timeout), batch))
+        wall = time.monotonic() - started
+        tokens = sum(t for t, _, _ in results)
+        first = min(ttft for _, ttft, _ in results)
+        aggregate.append(tokens / max(wall - first, 1e-3))
+    single_tps = statistics.median(t for t, _ in single)
+    probe_tps = statistics.median(aggregate)
+    return {
+        'single_stream_decode_tps': round(single_tps, 1),
+        'probe_shaped_decode_tps': round(probe_tps, 1),
+        'probe_burst': burst,
+        'client_ttft_ms_median': round(statistics.median(t for _, t in single), 1),
+        'max_tokens': max_tokens,
+        # what the release carries: 90% of one honest card leaves room for normal variance, none for a shared card
+        'decode_tps_target': round(0.9 * probe_tps, 1),
+    }
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--base-url', default='http://127.0.0.1:8080')
@@ -276,6 +343,12 @@ def main() -> int:
     )
     ap.add_argument('--overload-max-tokens', type=int, default=512)
     ap.add_argument('--api-key', default=None, help='bearer for a remote runtime (sparkinfer --api-key)')
+    ap.add_argument(
+        '--speed-json',
+        default=None,
+        help='also measure the speed profile (single-stream and probe-shaped decode tok/s) and write it here',
+    )
+    ap.add_argument('--speed-burst', type=int, default=6, help='concurrent requests in the probe-shaped measurement')
     args = ap.parse_args()
     global API_KEY
     API_KEY = args.api_key
@@ -293,6 +366,12 @@ def main() -> int:
         )
     if args.parallel > 0:
         check_overload(rep, base_url, args.model_id, args.parallel, args.overload_max_tokens, args.timeout)
+
+    if args.speed_json:
+        profile = speed_profile(base_url, args.model_id, args.max_tokens, args.timeout, args.speed_burst)
+        with open(args.speed_json, 'w') as f:
+            json.dump(profile, f, indent=2)
+        print(f'\nSpeed profile ({args.speed_json}): {profile}')
 
     failures = rep.must_failures
     print(

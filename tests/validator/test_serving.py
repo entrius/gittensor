@@ -389,15 +389,16 @@ def test_audit_window_tolerates_one_miss_per_round():
     assert window_threshold(1, SERVING_AUDIT_WINDOW_THRESHOLDS) == window_threshold(SERVING_AUDIT_WINDOW)
 
 
-def test_score_response_feeds_window_metrics():
+def test_probe_verdict_teacher_forces_the_response():
     from gittensor.synapses import InferenceSynapse
-    from gittensor.validator.serving.forward import score_response
+    from gittensor.validator.serving.forward import probe_verdict
 
     release = _echo_release()
-    case = EchoReference(release).sample()
+    ref = EchoReference(release)
+    case = ref.sample()
     miss = InferenceSynapse(messages=case.messages, model_id=release.model_id, max_tokens=case.max_tokens)
-    verdict, ms, rec = score_response(3, miss, case, release)
-    assert verdict.positional_overlap == 0.0 and ms == float('inf') and not rec.ok
+    verdict, rec = probe_verdict(3, miss, release, ref)
+    assert not verdict.passed and not rec.ok
     assert rec.latency_ms is None  # inf is not JSON; /v1/serving/status must serialize the record
 
     honest = InferenceSynapse(
@@ -409,12 +410,72 @@ def test_score_response_feeds_window_metrics():
         tokens=list(case.reference_tokens),
         token_logprobs=list(case.reference_logprobs),
     )
-    verdict, _, rec = score_response(3, honest, case, release)
-    assert verdict.positional_overlap == 1.0 and verdict.passed and rec.ok
+    verdict, rec = probe_verdict(3, honest, release, ref)
+    assert verdict.passed and rec.ok
 
     wrong = honest.model_copy(update={'served_model_id': 'other'})
-    verdict, _, rec = score_response(3, wrong, case, release)
-    assert verdict.positional_overlap == 0.0 and rec.detail.startswith('wrong model')
+    verdict, rec = probe_verdict(3, wrong, release, ref)
+    assert not verdict.passed and rec.detail.startswith('wrong model')
+
+    tokens = list(case.reference_tokens)
+    tokens[len(tokens) // 2] = 'xxxxxxxx'
+    lie = honest.model_copy(update={'tokens': tokens, 'completion': ' '.join(tokens)})
+    verdict, rec = probe_verdict(3, lie, release, ref)
+    assert not verdict.passed and verdict.hard
+
+
+def test_probe_prompts_are_unique_per_hotkey_and_salted(monkeypatch):
+    """Two hotkeys probed in one round never see the same prompt, so one card cannot answer for both."""
+    from types import SimpleNamespace
+
+    from gittensor.serving.probe import make_prompts
+
+    good = _echo_release()
+    seen: Dict[int, list] = {}
+    dendrite, _ = _dendrite_echoing(good)
+    inner = dendrite.call_stream
+
+    async def call_stream(target_axon, synapse, timeout, deserialize):
+        seen.setdefault(id(target_axon), []).append(synapse.messages[-1]['content'])
+        async for chunk in inner(target_axon, synapse, timeout, deserialize):
+            yield chunk
+
+    dendrite.call_stream = call_stream
+    a, b = SimpleNamespace(is_serving=True), SimpleNamespace(is_serving=True)
+    state = ServingState(settlement_rounds=1)
+    for uid in (1, 2):
+        state.enqueue_served(_served(uid, good))
+    scores = _round(state, dendrite, [(1, 'hk1', a), (2, 'hk2', b)], good, monkeypatch, probes=3)
+    assert scores['hk1'] > 0 and scores['hk2'] > 0
+    probes_a = [c for c in seen[id(a)] if '(ref ' in c]
+    probes_b = [c for c in seen[id(b)] if '(ref ' in c]
+    assert len(probes_a) == 3 and len(probes_b) == 3
+    assert not set(probes_a) & set(probes_b) and len(set(probes_a)) == 3
+    plain = make_prompts(1, seed=1)[0][-1]['content']
+    assert make_prompts(1, seed=1, salt='abcd')[0][-1]['content'] == f'{plain} (ref abcd)'
+
+
+def test_release_speed_facts_price_capacity_and_latency(tmp_path):
+    from gittensor.serving.loadout import load_serving_loadout
+
+    raw = {
+        'releases': [
+            {
+                'model_id': 'm',
+                'backend': 'echo',
+                'speed': {'decode_tps_target': 900.0, 'ttft_full_ms': 300.0, 'ttft_zero_ms': 900.0},
+            }
+        ]
+    }
+    path = tmp_path / 'loadout.json'
+    path.write_text(json.dumps(raw))
+    release = load_serving_loadout(path).primary
+    assert (release.decode_tps_target, release.ttft_full_ms, release.ttft_zero_ms) == (900.0, 300.0, 900.0)
+    assert latency_credit(300.0, release.ttft_full_ms, release.ttft_zero_ms) == 1.0
+    assert latency_credit(600.0, release.ttft_full_ms, release.ttft_zero_ms) == pytest.approx(0.5)
+    assert latency_credit(400.0) == 1.0 and latency_credit(600.0) == pytest.approx(0.9)  # constants' defaults
+    bare = load_serving_loadout(ECHO_LOADOUT_PATH).primary
+    assert bare.decode_tps_target is None and bare.ttft_full_ms is None
 
 
 def test_latency_credit_matches_measured_latencies():
@@ -591,7 +652,7 @@ def _dendrite_echoing(good: ServingRelease, dead_axons=(), gpu_of=None, token_s:
     import asyncio
     from types import SimpleNamespace
 
-    from gittensor.serving.stream import result_to_sse
+    from gittensor.serving.stream import result_to_sse, sse_event
 
     calls: Dict[int, int] = {}  # id(axon) -> requests sent
     inflight: Dict[object, int] = {}
@@ -602,6 +663,7 @@ def _dendrite_echoing(good: ServingRelease, dead_axons=(), gpu_of=None, token_s:
         if not any(target_axon is d for d in dead_axons):
             gpu = (gpu_of or {}).get(id(target_axon))
             if gpu is not None:
+                yield sse_event({'choices': [{'index': 0, 'delta': {'role': 'assistant'}, 'finish_reason': None}]})
                 inflight[gpu] = inflight.get(gpu, 0) + 1
                 await asyncio.sleep(0)  # let the other concurrent requests register before we measure load
                 await asyncio.sleep(token_s * synapse.max_tokens * inflight[gpu])
@@ -848,7 +910,7 @@ def test_probe_retries_once_on_a_dip_and_keeps_the_better_reading(monkeypatch):
     readings: list = []
     calls = {'n': 0}
 
-    async def fake_probe(state, dendrite, uid, hotkey, axon, release, cases):
+    async def fake_probe(state, dendrite, uid, hotkey, axon, release, reference, prompts):
         calls['n'] += 1
         return readings.pop(0)
 

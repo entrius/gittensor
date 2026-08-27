@@ -55,11 +55,15 @@ TEMPLATES = [
 SYSTEMS = [None, 'You are a concise assistant.', 'Answer in plain English.', 'Be precise and brief.']
 
 
-def make_prompts(count: int, seed: int) -> List[List[Dict[str, str]]]:
+def make_prompts(count: int, seed: int, salt: Optional[str] = None) -> List[List[Dict[str, str]]]:
+    """Probe prompts. ``salt`` is appended to every user message so two prompts are never identical across
+    hotkeys or rounds: an answer cannot be shared between hotkeys on one card or precomputed from the templates."""
     rng = random.Random(seed)
     prompts = []
     for _ in range(count):
         content = rng.choice(TEMPLATES).format(s=rng.choice(SUBJECTS))
+        if salt:
+            content = f'{content} (ref {salt})'
         system = rng.choice(SYSTEMS)
         msgs = [{'role': 'system', 'content': system}] if system else []
         msgs.append({'role': 'user', 'content': content})

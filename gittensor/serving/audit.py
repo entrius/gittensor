@@ -30,7 +30,7 @@ Three references, picked per release by ``reference_for``:
 - ``positional_overlap``: fraction of positions whose token matches the
   reference, ignoring divergence (telemetry).
 
-The blessed runtime is bit-reproducible (sparkinfer 12954e6 with
+The blessed runtime is bit-reproducible (sparkinfer 7498736 with
 ``SPARKINFER_DETERMINISTIC=1``), so an honest miner reproduces the reference
 exactly and ``passed`` is decisive per audit: all tokens match and logprobs
 agree to float noise (``SERVING_AUDIT_*`` bands in constants.py, calibrated in

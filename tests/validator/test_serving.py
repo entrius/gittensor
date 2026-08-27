@@ -1338,6 +1338,7 @@ def test_axon_that_answers_without_a_completion_gets_a_real_reason(monkeypatch):
     import asyncio
     import random
     from types import SimpleNamespace
+    from typing import Any
 
     from gittensor.validator.serving import forward as fwd
 
@@ -1350,8 +1351,8 @@ def test_axon_that_answers_without_a_completion_gets_a_real_reason(monkeypatch):
 
     monkeypatch.setattr(fwd, 'consume_stream', consume)
     state = ServingState(settlement_rounds=1)
-    asyncio.run(
-        fwd.baseline_round(state, object(), [(1, 'hk1', axon)], good, window_s=0.01, per_miner=1, rng=random.Random(1))
-    )  # type: ignore[arg-type]
+    serving: list = [(1, 'hk1', axon)]
+    dendrite: Any = object()
+    asyncio.run(fwd.baseline_round(state, dendrite, serving, good, window_s=0.01, per_miner=1, rng=random.Random(1)))
     (q,) = state.drain_served()
     assert not q.ok and q.detail.startswith('no completion: axon answered "Success"') and good.model_id in q.detail

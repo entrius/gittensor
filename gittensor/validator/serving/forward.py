@@ -40,7 +40,6 @@ import threading
 import time
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Sequence, Tuple
 
 import aiohttp
@@ -63,6 +62,7 @@ from gittensor.serving.baseline import baseline_max_tokens, make_baseline_prompt
 from gittensor.serving.loadout import ServingRelease, load_serving_loadout
 from gittensor.serving.probe import make_prompts
 from gittensor.serving.state import ReadyMiner, RequestRecord, ServedRequest, ServingState
+from gittensor.serving.store import ServingStore
 from gittensor.serving.stream import consume_stream
 from gittensor.synapses import InferenceSynapse
 from gittensor.validator.serving.persist import ServingRoundStorage
@@ -510,9 +510,11 @@ class ServingAuditThread:
         state: ServingState,
         interval_s: float,
         baseline_per_round: int = SERVING_BASELINE_PER_ROUND,
+        store: Optional[ServingStore] = None,
     ):
         self.validator = validator
         self.state = state
+        self.store = store
         self.interval_s = interval_s
         self.baseline_per_round = baseline_per_round
         self._stop = threading.Event()
@@ -548,12 +550,11 @@ class ServingAuditThread:
             except Exception as e:  # a serving fault must never take the validator down
                 bt.logging.error(f'Serving round failed, no serving scores this round: {e!r}')
                 self.state.publish_round([], {})
-            path = audit_window_path(self.validator)
-            if path is not None:
+            if self.store is not None:
                 try:
-                    self.state.audits.save(path)
-                except OSError as e:
-                    bt.logging.warning(f'Serving: could not persist audit window to {path}: {e}')
+                    self.store.save(self.state)
+                except Exception as e:
+                    bt.logging.warning(f'Serving: could not persist serving state to {self.store.path}: {e!r}')
             if self.storage is not None:
                 try:
                     release = load_serving_loadout().primary
@@ -584,12 +585,6 @@ class ServingAuditThread:
 def probe_phase_offset(hotkey: str, interval_s: float) -> float:
     """Deterministic start offset in [0, interval) for this validator's audit clock."""
     return (int(hashlib.sha256(hotkey.encode()).hexdigest()[:8], 16) % 1_000_000) / 1_000_000 * interval_s
-
-
-def audit_window_path(self: 'Validator') -> Optional[Path]:
-    """Where the rolling audit window is persisted: next to state.npz, or None when the neuron has no state dir."""
-    full_path = getattr(getattr(getattr(self, 'config', None), 'neuron', None), 'full_path', None)
-    return Path(full_path) / 'serving_audits.json' if full_path else None
 
 
 def get_serving_axons(self: 'Validator') -> List[Tuple[int, str, bt.AxonInfo]]:

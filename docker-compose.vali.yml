@@ -15,7 +15,16 @@ services:
     volumes:
       # 'ro' = readonly
       - ${WALLET_PATH}:/root/.bittensor/wallets:ro
+      # state.npz, serving.db and the rotating bittensor.log live under ./data/<wallet>/<hotkey>/netuid<N>/validator
+      # (the entrypoint passes --logging.logging_dir /app/data), so they outlive the container.
       - ./data:/app/data
+    # `docker logs` buffer: 3 x 10 MB, oldest dropped. Dies with the container — the durable copy is the
+    # rotating bittensor.log under ./data (LOG_FILE_MAX_MB / LOG_FILE_BACKUPS).
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     # optional: uncomment this if you are running validator database
     # networks:
     #   - gittensor_network

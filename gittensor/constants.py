@@ -204,7 +204,7 @@ SERVING_VERIFY_WORKERS = 8  # concurrent /v1/score calls to the reference per ro
 # case, caught by the concurrent capacity probe.
 SERVING_LATENCY_FULL_CREDIT_MS = 500.0
 SERVING_LATENCY_ZERO_CREDIT_MS = 1_500.0
-# Per-audit verdict. The blessed runtime is bit-reproducible (sparkinfer 12954e6, SPARKINFER_DETERMINISTIC=1), so an
+# Per-audit verdict. The blessed runtime is bit-reproducible (sparkinfer 7498736, SPARKINFER_DETERMINISTIC=1), so an
 # honest miner reproduces the reference's greedy tokens exactly and its logprobs to float noise; every planted
 # cheater differs on every prompt (measured 2026-08-24, internal serving-experiments notes: honest max |delta| 0.0000,
 # cheapest cheater min mean |delta| 0.0057 / min max |delta| 0.129). Both bands must hold for an audit to pass.

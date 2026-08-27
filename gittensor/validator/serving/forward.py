@@ -83,25 +83,31 @@ async def probe_axon(
     reference: Reference,
     prompts: Sequence[List[Dict[str, str]]],
 ) -> float:
-    """Fire all ``prompts`` at once; return verified tokens per second of decode time (0 when nothing verified)."""
+    """Fire all ``prompts`` at once; return verified tokens per second of decode time (0 when nothing verified).
 
-    async def one(messages: List[Dict[str, str]]) -> Tuple[AuditVerdict, RequestRecord, int, Optional[float]]:
+    The clock covers the streams only. Verification (teacher forcing on the reference, a blocking HTTP call) runs
+    afterwards on a worker thread so it neither stalls the event loop mid-burst nor counts against the miner.
+    """
+
+    async def one(messages: List[Dict[str, str]]) -> InferenceSynapse:
         synapse = InferenceSynapse(
             messages=messages, model_id=release.model_id, max_tokens=release.max_tokens, logprobs=True
         )
-        response = await consume_stream(dendrite, axon, synapse, SERVING_CHALLENGE_TIMEOUT)
-        verdict, record = probe_verdict(uid, response, release, reference)
-        return verdict, record, len(getattr(response, 'tokens', None) or []), response.observed_ttft_ms
+        return await consume_stream(dendrite, axon, synapse, SERVING_CHALLENGE_TIMEOUT)
 
     started = time.monotonic()
-    results = await asyncio.gather(*(one(messages) for messages in prompts))
+    responses = await asyncio.gather(*(one(messages) for messages in prompts))
     wall_s = time.monotonic() - started
+    verdicts = await asyncio.gather(
+        *(asyncio.to_thread(probe_verdict, uid, response, release, reference) for response in responses)
+    )
     tokens = 0
     ttfts: List[float] = []
-    for verdict, record, n_tokens, ttft_ms in results:
+    for response, (verdict, record) in zip(responses, verdicts):
         state.record(record)
         if verdict.passed:
-            tokens += n_tokens
+            tokens += len(getattr(response, 'tokens', None) or [])
+            ttft_ms = response.observed_ttft_ms
             if ttft_ms is not None and math.isfinite(ttft_ms):
                 ttfts.append(ttft_ms)
     decode_s = max(wall_s - (min(ttfts) / 1000.0 if ttfts else 0.0), 1e-3)

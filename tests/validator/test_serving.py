@@ -3,6 +3,7 @@
 import json
 from typing import Dict
 
+import bittensor as bt
 import pytest
 from fastapi.testclient import TestClient
 
@@ -1290,3 +1291,67 @@ def test_probe_phase_offset_is_deterministic_and_spread():
 
     a, b = probe_phase_offset('5Gjr7VuY', 300.0), probe_phase_offset('5E2LP6En', 300.0)
     assert a == probe_phase_offset('5Gjr7VuY', 300.0) and 0.0 <= a < 300.0 and 0.0 <= b < 300.0 and a != b
+
+
+def test_dead_axons_go_dormant_and_stop_receiving_baseline_prompts(monkeypatch):
+    """A hotkey that never returns a completion drops out of the report after N rounds and is only retried hourly."""
+    import asyncio
+    import random
+    from types import SimpleNamespace
+
+    from gittensor.constants import SERVING_DORMANT_AFTER_ROUNDS, SERVING_DORMANT_RETRY_ROUNDS
+    from gittensor.validator.serving import forward as fwd
+
+    good = _echo_release()
+    live, dead = (SimpleNamespace(is_serving=True) for _ in range(2))
+    dendrite, calls = _dendrite_echoing(good, dead_axons=(dead,))
+    state = ServingState(settlement_rounds=1)
+    serving = [(1, 'hk1', live), (2, 'hk2', dead)]
+
+    def cycle() -> int:
+        sent = asyncio.run(
+            fwd.baseline_round(state, dendrite, serving, good, window_s=0.01, per_miner=1, rng=random.Random(1))  # type: ignore[arg-type]
+        )
+        for q in state.drain_served():
+            state.enqueue_served(q)
+        _round(state, dendrite, serving, good, monkeypatch)
+        return sent
+
+    for _ in range(SERVING_DORMANT_AFTER_ROUNDS - 1):
+        assert cycle() == 2  # still asked while it earns its dormancy
+        assert 2 in state.last_round['windows'] and state.snapshot()['probation_uids'] == [2]
+    assert cycle() == 2  # asked once more; the audit that follows tips it over
+    assert state.last_round['dormant'] == 1 and 2 not in state.last_round['windows']
+    assert state.snapshot()['probation_uids'] == []
+    dead_calls = calls[id(dead)]
+    quiet = 0
+    while cycle() == 1:  # dormant: only the live axon is asked...
+        quiet += 1
+        assert quiet < 3 * SERVING_DORMANT_RETRY_ROUNDS
+    assert quiet == SERVING_DORMANT_RETRY_ROUNDS - SERVING_DORMANT_AFTER_ROUNDS  # ...until the hourly retry
+    assert calls[id(dead)] == dead_calls + 1
+    assert state.last_round['dormant'] == 1  # still dormant after an unanswered retry
+
+
+def test_axon_that_answers_without_a_completion_gets_a_real_reason(monkeypatch):
+    """An OSS/validator axon says "Success" and serves nothing; the miss reason must say so, not "Success"."""
+    import asyncio
+    import random
+    from types import SimpleNamespace
+
+    from gittensor.validator.serving import forward as fwd
+
+    good = _echo_release()
+    axon = SimpleNamespace(is_serving=True)
+
+    async def consume(_dendrite, _axon, synapse, _timeout):
+        synapse.dendrite = bt.TerminalInfo(status_message='Success')
+        return synapse  # unfilled: no completion, no served_model_id
+
+    monkeypatch.setattr(fwd, 'consume_stream', consume)
+    state = ServingState(settlement_rounds=1)
+    asyncio.run(
+        fwd.baseline_round(state, object(), [(1, 'hk1', axon)], good, window_s=0.01, per_miner=1, rng=random.Random(1))
+    )  # type: ignore[arg-type]
+    (q,) = state.drain_served()
+    assert not q.ok and q.detail.startswith('no completion: axon answered "Success"') and good.model_id in q.detail

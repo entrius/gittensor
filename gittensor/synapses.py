@@ -60,6 +60,7 @@ class InferenceSynapse(bt.StreamingSynapse):
     ttft_ms: Optional[float] = None
     decode_tps: Optional[float] = None
     tokens: Optional[List[str]] = None
+    token_ids: Optional[List[int]] = None
     token_logprobs: Optional[List[float]] = None
     finish_reason: Optional[str] = None
     usage: Optional[Dict[str, int]] = None

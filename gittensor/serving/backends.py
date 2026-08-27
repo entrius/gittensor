@@ -37,6 +37,7 @@ class GenerationResult:
     model_id: str
     generation_ms: float
     tokens: Optional[List[str]] = None
+    token_ids: Optional[List[int]] = None
     token_logprobs: Optional[List[float]] = None
     ttft_ms: Optional[float] = None
     decode_tps: Optional[float] = None
@@ -155,11 +156,14 @@ class OpenAICompatBackend:
 
         choice = payload['choices'][0]
         tokens: Optional[List[str]] = None
+        token_ids: Optional[List[int]] = None
         token_logprobs: Optional[List[float]] = None
         content_lp = (choice.get('logprobs') or {}).get('content')
         if content_lp:
             tokens = [entry['token'] for entry in content_lp]
             token_logprobs = [float(entry['logprob']) for entry in content_lp]
+            if all(entry.get('token_id') is not None for entry in content_lp):
+                token_ids = [int(entry['token_id']) for entry in content_lp]
 
         # sparkinfer puts its timing fields inside `usage` (contract R5); accept top level too.
         usage = payload.get('usage') or {}
@@ -169,6 +173,7 @@ class OpenAICompatBackend:
             model_id=payload.get('model', self.model_id),
             generation_ms=float(timing['generation_ms'] if timing['generation_ms'] is not None else elapsed_ms),
             tokens=tokens,
+            token_ids=token_ids,
             token_logprobs=token_logprobs,
             ttft_ms=timing['ttft_ms'],
             decode_tps=timing['decode_tps'],

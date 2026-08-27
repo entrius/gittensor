@@ -49,6 +49,7 @@ class ServedRequest:
     latency_ms: Optional[float]
     completion: Optional[str] = None
     tokens: Optional[List[str]] = None
+    token_ids: Optional[List[int]] = None
     token_logprobs: Optional[List[float]] = None
     detail: str = ''  # axon status message when not ok
     source: str = 'gateway'  # 'gateway' | 'baseline'

@@ -16,10 +16,12 @@
 # DEALINGS IN THE SOFTWARE.
 
 import copy
+import os
 import time
 from abc import ABC, abstractmethod
 
 import bittensor as bt
+from bittensor.utils.btlogging import loggingmachine as bt_loggingmachine
 from websockets.exceptions import ConnectionClosedError
 
 from gittensor import __spec_version__ as spec_version
@@ -65,7 +67,10 @@ class BaseNeuron(ABC):
         self.config.merge(base_config)
         self.check_config(self.config)
 
-        # Set up logging with the provided configuration.
+        # --logging.record_log keeps a rotating copy of the log next to state.npz (the compose mounts that dir), so
+        # both outlive the container; bittensor hard-codes 25 MB x 10, so size it first.
+        bt_loggingmachine.DEFAULT_MAX_ROTATING_LOG_FILE_SIZE = int(os.getenv('LOG_FILE_MAX_MB', '10')) * 1024 * 1024
+        bt_loggingmachine.DEFAULT_LOG_BACKUP_COUNT = int(os.getenv('LOG_FILE_BACKUPS', '4'))
         bt.logging.set_config(config=self.config.logging)
 
         # If a gpu is required, set the device to cuda:N (e.g. cuda:0)

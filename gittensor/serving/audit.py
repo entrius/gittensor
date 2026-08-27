@@ -191,20 +191,6 @@ class AuditWindow:
             window._quarantine[(str(hk), str(mid))] = float(until)
         return window
 
-    def save(self, path: Path) -> None:
-        """Persist so a validator restart does not reset every miner to an empty (lenient) window."""
-        tmp = path.with_suffix(path.suffix + '.tmp')
-        tmp.write_text(json.dumps(self.to_dict()))
-        tmp.replace(path)
-
-    @classmethod
-    def load(cls, path: Path, **kwargs) -> 'AuditWindow':
-        """Load a saved window; a missing or unreadable file yields an empty one."""
-        try:
-            return cls.from_dict(json.loads(path.read_text()), **kwargs)
-        except (OSError, ValueError, TypeError):
-            return cls(**kwargs)
-
     def verdict(self, hotkey: str, model_id: str, now: Optional[float] = None) -> WindowVerdict:
         until = self.quarantined_until(hotkey, model_id, now)
         xs = self._values.get((hotkey, model_id))

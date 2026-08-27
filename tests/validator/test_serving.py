@@ -1,6 +1,7 @@
 """Tests for the serving beta: deterministic backend, audit verification, gateway dispatch, emission pool blending."""
 
 import json
+from collections import deque
 from typing import Dict
 
 import bittensor as bt
@@ -488,29 +489,53 @@ def test_latency_credit_matches_measured_latencies():
     assert latency_credit(600.0 + intercontinental_rtt + 2 * 150.0) < 0.4  # slow runtime behind the proxy
 
 
-def test_audit_window_persists_across_restart(tmp_path):
-    path = tmp_path / 'serving_audits.json'
-    assert AuditWindow.load(path).verdict('hk', 'm').n_audits == 0  # missing file -> empty window
-    w = AuditWindow(size=3)
+def test_serving_store_round_trips_audit_thread_state(tmp_path):
+    from gittensor.serving.store import ServingStore, serving_store_path
+
+    path = serving_store_path(str(tmp_path))
+    assert path == tmp_path / 'serving.db' and serving_store_path(None) is None
+    store = ServingStore(path)  # type: ignore[arg-type]
+    assert store.load(ServingState()).audits.verdict('hk', 'm').n_audits == 0  # empty store -> untouched state
+
+    state = ServingState(settlement_rounds=3)
+    state.audits = AuditWindow(size=3)
     for x in (0.2, 0.9, 0.8, 0.7):  # 0.2 rolls out
-        w.record('hk', 'm', x)
-    w.record('hk2', 'm', 1.0)
-    w.save(path)
-    loaded = AuditWindow.load(path, size=3)
-    assert loaded.verdict('hk', 'm').as_dict() == w.verdict('hk', 'm').as_dict()
-    assert loaded.verdict('hk2', 'm').n_audits == 1
-    path.write_text('not json')
-    assert AuditWindow.load(path).verdict('hk', 'm').n_audits == 0  # corrupt file -> empty window, no crash
+        state.audits.record('hk', 'm', x)
+    state.audits.record('hk2', 'm', 1.0)
+    state.audits.strike('hk3', 'm', now=1000.0)
+    state.probe_history['hk'] = deque([180.0, 178.0], maxlen=3)
+    state.publish_round([], {'hk': 0.9})
+    state.publish_round([], {'hk': 1.0})
+    state.dormant_rounds['dead'] = 2
+    store.save(state)
+
+    loaded = store.load(ServingState(settlement_rounds=3, audits=AuditWindow(size=3)))
+    assert loaded.audits.verdict('hk', 'm').as_dict() == state.audits.verdict('hk', 'm').as_dict()
+    assert loaded.audits.verdict('hk2', 'm').n_audits == 1
+    assert loaded.audits.quarantined_until('hk3', 'm', now=1500.0) == state.audits.quarantined_until(
+        'hk3', 'm', now=1500.0
+    )
+    assert list(loaded.probe_history['hk']) == [180.0, 178.0]
+    assert loaded.settled_scores() == state.settled_scores()
+    assert loaded.dormant_rounds == {'dead': 2}
+
+    state.audits.record('hk', 'm', 0.1)
+    store.save(state)  # a second save replaces, never appends
+    assert store.load(ServingState(audits=AuditWindow(size=3))).audits.verdict('hk', 'm').n_audits == 3
 
 
-def test_audit_window_path_follows_neuron_state_dir(tmp_path):
-    from types import SimpleNamespace
+def test_serving_store_migrates_the_legacy_json_window(tmp_path):
+    from gittensor.serving.store import ServingStore
 
-    from gittensor.validator.serving.forward import audit_window_path
-
-    vali = SimpleNamespace(config=SimpleNamespace(neuron=SimpleNamespace(full_path=str(tmp_path))))
-    assert audit_window_path(vali) == tmp_path / 'serving_audits.json'  # type: ignore[arg-type]
-    assert audit_window_path(SimpleNamespace()) is None  # type: ignore[arg-type]
+    legacy = tmp_path / 'serving_audits.json'
+    legacy.write_text(json.dumps({'values': [['hk', 'm', [1.0, 0.0, 1.0]]], 'quarantine': [['hk2', 'm', 9e12]]}))
+    store = ServingStore(tmp_path / 'serving.db')
+    assert store.migrate_json(legacy) and not legacy.exists() and (tmp_path / 'serving_audits.json.migrated').exists()
+    loaded = store.load(ServingState())
+    assert loaded.audits.verdict('hk', 'm').n_audits == 3 and loaded.audits.quarantined_until('hk2', 'm') > 0
+    assert not store.migrate_json(legacy)  # already migrated
+    (tmp_path / 'broken.json').write_text('nope')
+    assert not store.migrate_json(tmp_path / 'broken.json')
 
 
 def test_probe_score_parses_teacher_forced_response(monkeypatch):
@@ -744,9 +769,11 @@ def test_audit_window_strike_wipes_and_quarantines(tmp_path):
     w.record('hk', 'm', 1.0)
     assert not w.verdict('hk', 'm', now=1050.0).passed  # still quarantined even with a clean record
     assert w.verdict('hk', 'm', now=1101.0).passed and w.verdict('hk', 'm', now=1101.0).quarantined_until == 0.0
-    path = tmp_path / 'audits.json'
-    w.save(path)
-    again = AuditWindow.load(path, quarantine_s=100.0)
+    from gittensor.serving.store import ServingStore
+
+    store = ServingStore(tmp_path / 'serving.db')
+    store.save(ServingState(audits=w))
+    again = store.load(ServingState(audits=AuditWindow(quarantine_s=100.0))).audits
     assert again.verdict('hk', 'm', now=1050.0).quarantined_until == 1100.0
 
 

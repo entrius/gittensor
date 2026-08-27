@@ -14,4 +14,5 @@ exec python neurons/validator.py \
   --subtensor.network ${SUBTENSOR_NETWORK} \
   --axon.port ${PORT} \
   --logging.${LOG_LEVEL} \
+  --logging.record_log --logging.logging_dir /app/data \
   "$@"

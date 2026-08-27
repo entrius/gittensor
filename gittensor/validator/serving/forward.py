@@ -429,20 +429,21 @@ def get_serving_axons(self: 'Validator') -> List[Tuple[int, str, bt.AxonInfo]]:
     """(uid, hotkey, axon) for every UID (excluding self) whose axon is serving — the candidate serving miners.
 
     Snapshot of the metagraph taken on the audit thread. Beta heuristic: axon.is_serving is the only signal.
-    Validator-permit holders are skipped (they serve axons for PAT handling, never inference); a serving-miner
+    UIDs that are actively validating (validator_trust > 0) are skipped — they serve axons for PAT handling, never
+    inference. A permit alone is not the signal: on a small subnet nearly every UID holds one. A serving-miner
     registry replaces this later.
     """
     hotkeys = list(self.metagraph.hotkeys)
     axons = list(self.metagraph.axons)
-    permits = getattr(self.metagraph, 'validator_permit', None)
+    vtrust = getattr(self.metagraph, 'validator_trust', None)
     serving: List[Tuple[int, str, bt.AxonInfo]] = []
     for uid, (hotkey, axon) in enumerate(zip(hotkeys, axons)):
         if uid == self.uid:
             continue
         try:
-            if permits is not None and bool(permits[uid]):
+            if vtrust is not None and float(vtrust[uid]) > 0.0:
                 continue
-        except (IndexError, TypeError):
+        except (IndexError, TypeError, ValueError):
             pass
         if axon is not None and axon.is_serving:
             serving.append((uid, hotkey, axon))
